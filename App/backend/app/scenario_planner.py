@@ -1006,12 +1006,17 @@ def build_verified_facts(
                         + "; ".join(row_strs)
                     )
                 if isinstance(comp, dict):
-                    nil_ceil = tbl["paye_bands_resident"][0][1] or 0
-                    nonres_first_pct = tbl["paye_bands_non_resident"][0][2] * 100
+                    res_b = tbl["paye_bands_resident"]
+                    nonres_b = tbl["paye_bands_non_resident"]
+                    nil_ceil = res_b[0][1] or 0
+                    nonres_first_pct = nonres_b[0][2] * 100
+                    comp_threshold = Decimal(str(res_b[-2][0]))
+                    res_at, _ = apply_bands(comp_threshold, res_b)
+                    nonres_at, _ = apply_bands(comp_threshold, nonres_b)
                     bullet_lines.append(
                         f"  * Statutory PAYE Table Difference ({tbl.fiscal_year}): Residents receive a 0% tax-free threshold up to UGX {nil_ceil:,.0f}/month, "
                         f"whereas Non-residents have NO tax-free threshold and pay {nonres_first_pct:.0f}% on the first UGX {nil_ceil:,.0f}/month, "
-                        f"so above UGX 410,000/month a non-resident pays exactly UGX {float(comp.get('monthly_difference', 37250)):,.0f}/month more than a resident."
+                        f"so above UGX {float(comp_threshold):,.0f}/month a non-resident pays exactly UGX {float(nonres_at - res_at):,.0f}/month more than a resident."
                     )
             except Exception:
                 paye_breakdown = format_calc_reply("calculate_paye", res, ["gross monthly salary"])

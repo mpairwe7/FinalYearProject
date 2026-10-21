@@ -31,6 +31,7 @@ from .tax.tables import DATA_DIR
 logger = logging.getLogger(__name__)
 
 FX_CACHE_TTL_SECONDS = int(os.getenv("FX_CACHE_TTL_SECONDS", "1800"))
+FX_NEGATIVE_CACHE_TTL_SECONDS = int(os.getenv("FX_NEGATIVE_CACHE_TTL_SECONDS", "90"))
 FX_HTTP_TIMEOUT_SECONDS = float(os.getenv("FX_HTTP_TIMEOUT_SECONDS", "4.0"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 FX_REDIS_PREFIX = "ura:fx:live:"
@@ -101,7 +102,7 @@ class LiveFXQuote:
 
 
 _CACHE_LOCK = threading.Lock()
-_L1_FX_CACHE: dict[str, tuple[float, LiveFXQuote]] = {}
+_L1_FX_CACHE: dict[str, tuple[float, LiveFXQuote | None]] = {}
 _redis_client: Any = None
 _redis_init_attempted = False
 
@@ -204,16 +205,22 @@ def _parse_xe_rate(html: str, currency: str, target: str = "UGX") -> float | Non
         except ValueError:
             pass
 
-    # 2. Direct midMarketRate JSON field: "midMarketRate":"3,688.42"
+    # 2. Direct midMarketRate JSON field bound to requested pair context
     mid_pat = re.compile(r'"midMarketRate"\s*:\s*"([0-9,]+(?:\.[0-9]+)?)"')
-    m = mid_pat.search(html)
-    if m:
+    for m in mid_pat.finditer(html):
+        window = html[max(0, m.start() - 250) : min(len(html), m.end() + 250)]
+        from_m = re.search(r'"fromCurrency"\s*:\s*"([A-Z]{3})"', window)
+        to_m = re.search(r'"toCurrency"\s*:\s*"([A-Z]{3})"', window)
+        if from_m and from_m.group(1).upper() != cur:
+            continue
+        if to_m and to_m.group(1).upper() != tgt:
+            continue
         try:
             val = float(m.group(1).replace(",", ""))
             if _is_plausible_ugx_rate(cur, val):
                 return round(val, 4)
         except ValueError:
-            pass
+            continue
 
     # 3. Embedded initialRatesData JSON table (USD-based rates map)
     init_pat = re.compile(r'"initialRatesData"\s*:\s*\{\s*"timestamp"\s*:\s*\d+\s*,\s*"rates"\s*:\s*(\{[^}]+\})')
@@ -231,8 +238,9 @@ def _parse_xe_rate(html: str, currency: str, target: str = "UGX") -> float | Non
             pass
 
     # 4. Human-readable converter text: "1 USD = 3,688.42 UGX" or "1.00 USD = 3,688.42 UGX" or "1 USD equals 3,688.42 UGX"
+    cur_alt = rf"{re.escape(cur)}|US\s*Dollars?" if cur == "USD" else re.escape(cur)
     txt_pat = re.compile(
-        rf"\b1(?:\.00)?\s*(?:{re.escape(cur)}|US\s*Dollars?)\s*(?:=|equals)\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:<[^>]+>\s*)*{re.escape(tgt)}\b",
+        rf"\b1(?:\.00)?\s*(?:{cur_alt})\s*(?:=|equals)\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:<[^>]+>\s*)*{re.escape(tgt)}\b",
         re.IGNORECASE,
     )
     m = txt_pat.search(html)
@@ -254,8 +262,15 @@ def _parse_google_finance_rate(html: str, currency: str, target: str = "UGX") ->
     cur = currency.strip().upper()
     tgt = target.strip().upper()
 
-    # 1. Explicit data-last-price attribute on quote container
-    for m in re.finditer(r'data-last-price="([0-9,]+(?:\.[0-9]+)?)"', html):
+    # 1. Explicit data-last-price attribute on quote container (verifying source/target if present)
+    for m in re.finditer(r"<[^>]*\bdata-last-price=\"([0-9,]+(?:\.[0-9]+)?)\"[^>]*>", html):
+        tag = m.group(0)
+        src_m = re.search(r'\bdata-source="([A-Z]{3})"', tag, re.IGNORECASE)
+        tgt_m = re.search(r'\bdata-(?:target|currency)="([A-Z]{3})"', tag, re.IGNORECASE)
+        if src_m and src_m.group(1).upper() != cur:
+            continue
+        if tgt_m and tgt_m.group(1).upper() != tgt:
+            continue
         try:
             val = float(m.group(1).replace(",", ""))
             if _is_plausible_ugx_rate(cur, val):
@@ -325,15 +340,15 @@ def _default_http_fetcher(url: str) -> str:
         return resp.text
 
 
-def _get_cached_quote(cache_key: str) -> LiveFXQuote | None:
-    """Read a cached LiveFXQuote from L1 memory or L2 Redis."""
+def _check_cached_quote(cache_key: str) -> tuple[bool, LiveFXQuote | None]:
+    """Read a cached LiveFXQuote (or negative-cache sentinel) from L1 memory or L2 Redis."""
     now = time.time()
     with _CACHE_LOCK:
         entry = _L1_FX_CACHE.get(cache_key)
         if entry is not None:
             expires_at, quote = entry
             if expires_at > now:
-                return quote
+                return True, quote
             _L1_FX_CACHE.pop(cache_key, None)
 
     r_client = _get_redis()
@@ -342,6 +357,10 @@ def _get_cached_quote(cache_key: str) -> LiveFXQuote | None:
             raw = r_client.get(f"{FX_REDIS_PREFIX}{cache_key}")
             if raw:
                 obj = json.loads(raw)
+                if obj.get("negative"):
+                    with _CACHE_LOCK:
+                        _L1_FX_CACHE[cache_key] = (now + FX_NEGATIVE_CACHE_TTL_SECONDS, None)
+                    return True, None
                 quote = LiveFXQuote(
                     currency=str(obj["currency"]),
                     rate_ugx=float(obj["rate_ugx"]),
@@ -351,24 +370,32 @@ def _get_cached_quote(cache_key: str) -> LiveFXQuote | None:
                 )
                 with _CACHE_LOCK:
                     _L1_FX_CACHE[cache_key] = (now + FX_CACHE_TTL_SECONDS, quote)
-                return quote
+                return True, quote
         except Exception:
             logger.debug("Redis FX cache read failed", exc_info=True)
-    return None
+    return False, None
 
 
-def _set_cached_quote(cache_key: str, quote: LiveFXQuote) -> None:
-    """Store a validated LiveFXQuote in L1 memory and L2 Redis."""
+def _get_cached_quote(cache_key: str) -> LiveFXQuote | None:
+    """Read a cached LiveFXQuote from L1 memory or L2 Redis."""
+    _, quote = _check_cached_quote(cache_key)
+    return quote
+
+
+def _set_cached_quote(cache_key: str, quote: LiveFXQuote | None) -> None:
+    """Store a validated LiveFXQuote (or short-lived negative cache entry) in L1 memory and L2 Redis."""
     now = time.time()
+    ttl = FX_CACHE_TTL_SECONDS if quote is not None else FX_NEGATIVE_CACHE_TTL_SECONDS
     with _CACHE_LOCK:
-        _L1_FX_CACHE[cache_key] = (now + FX_CACHE_TTL_SECONDS, quote)
+        _L1_FX_CACHE[cache_key] = (now + ttl, quote)
     r_client = _get_redis()
     if r_client is not None:
         try:
+            payload = asdict(quote) if quote is not None else {"negative": True}
             r_client.setex(
                 f"{FX_REDIS_PREFIX}{cache_key}",
-                FX_CACHE_TTL_SECONDS,
-                json.dumps(asdict(quote)),
+                ttl,
+                json.dumps(payload),
             )
         except Exception:
             logger.debug("Redis FX cache write failed", exc_info=True)
@@ -397,10 +424,13 @@ def lookup_live_exchange_rate(
         )
 
     cache_key = f"{cur}:{tgt}"
+    skip_network = False
     if http_fetcher is None:
-        cached = _get_cached_quote(cache_key)
-        if cached is not None:
-            return cached
+        hit, cached = _check_cached_quote(cache_key)
+        if hit:
+            if cached is not None:
+                return cached
+            skip_network = True
 
     fetch = http_fetcher or _default_http_fetcher
     xe_url = f"https://www.xe.com/currencyconverter/convert/?Amount=1&From={cur}&To={tgt}"
@@ -410,17 +440,18 @@ def lookup_live_exchange_rate(
     xe_rate: float | None = None
     google_rate: float | None = None
 
-    try:
-        xe_html = fetch(xe_url)
-        xe_rate = _parse_xe_rate(xe_html, cur, tgt)
-    except Exception:
-        logger.debug("XE.com rate fetch failed for %s", cur, exc_info=True)
+    if not skip_network:
+        try:
+            xe_html = fetch(xe_url)
+            xe_rate = _parse_xe_rate(xe_html, cur, tgt)
+        except Exception:
+            logger.debug("XE.com rate fetch failed for %s", cur, exc_info=True)
 
-    try:
-        google_html = fetch(google_url)
-        google_rate = _parse_google_finance_rate(google_html, cur, tgt)
-    except Exception:
-        logger.debug("Google Finance rate fetch failed for %s", cur, exc_info=True)
+        try:
+            google_html = fetch(google_url)
+            google_rate = _parse_google_finance_rate(google_html, cur, tgt)
+        except Exception:
+            logger.debug("Google Finance rate fetch failed for %s", cur, exc_info=True)
 
     now_iso = _utc_now_iso()
     quote: LiveFXQuote | None = None
@@ -459,7 +490,7 @@ def lookup_live_exchange_rate(
             fetched_at_utc=now_iso,
             is_live=True,
         )
-    else:
+    elif not skip_network:
         try:
             er_body = fetch(er_url)
             er_rate = _parse_open_er_api_rate(er_body, cur, tgt)
@@ -478,6 +509,9 @@ def lookup_live_exchange_rate(
         if http_fetcher is None:
             _set_cached_quote(cache_key, quote)
         return quote
+
+    if http_fetcher is None and not skip_network:
+        _set_cached_quote(cache_key, None)
 
     if not allow_offline_fallback:
         return None

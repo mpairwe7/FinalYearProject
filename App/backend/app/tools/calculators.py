@@ -1882,9 +1882,12 @@ class CurrencyConversionTool(CalculatorTool):
                 rate_keys=("fx_conversion_rule",),
             )
 
+        from datetime import datetime, timezone
         from ..flags import flags
 
-        if use_live_fx or flags.is_enabled("live_web_research"):
+        today_month = datetime.now(timezone.utc).strftime("%Y-%m")
+        date_is_current = not date or str(date).strip()[:7] == today_month
+        if date_is_current and (use_live_fx or flags.is_enabled("live_web_research")):
             from ..web_fx import lookup_live_exchange_rate
 
             quote = lookup_live_exchange_rate(
@@ -1908,7 +1911,7 @@ class CurrencyConversionTool(CalculatorTool):
                         "fetched_at_utc": quote.fetched_at_utc,
                         "is_live_rate": quote.is_live,
                         "needs_exchange_rate": False,
-                        "verified": True,
+                        "verified": False,
                         "explanation": (
                             f"Converted {curr} {float(amt):,.2f} to {_ugx(ugx_val)} using live exchange rate "
                             f"1 {curr} = UGX {float(rate_dec):,.2f} (Source: {quote.source}, fetched {fetched_disp} UTC). "

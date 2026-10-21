@@ -40,6 +40,17 @@ def test_parse_xe_rate_variants() -> None:
 
     html_text = "<p>1 USD equals 3,712.80 UGX using the current mid-market exchange rate.</p>"
     assert web_fx._parse_xe_rate(html_text, "USD", "UGX") == pytest.approx(3712.80)
+    # EUR request must not match a US Dollar text line
+    assert web_fx._parse_xe_rate("<p>1 US Dollar equals 3,712.80 UGX</p>", "EUR", "UGX") is None
+    # Mismatched fromCurrency in midMarketRate context is skipped
+    assert (
+        web_fx._parse_xe_rate(
+            '{"fromCurrency":"USD","toCurrency":"UGX","midMarketRate":"3,712.80"}',
+            "EUR",
+            "UGX",
+        )
+        is None
+    )
 
 
 def test_parse_google_finance_rate_variants() -> None:
@@ -213,5 +224,34 @@ def test_scenario1_expat_salary_computes_full_paye_on_turn1_with_live_fx(
         assert "7,925,500" in block
         assert "37,250" in block
         assert "exchange rate" not in block.split("Still needed for an exact figure:")[-1]
+
+        # Past-month date skips live FX lookup so today's spot rate is not used for a historical payment date
+        past_res = ToolRegistry.call(
+            "convert_currency",
+            {"amount": 6000, "currency": "USD", "date": "2025-03-15"},
+        )
+        assert past_res["ok"] is False
+        assert past_res["needs"] == "exchange_rate"
     finally:
         flags_mod.flags.clear("live_web_research")
+
+
+def test_negative_cache_skips_repeat_network_fetches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When all live FX sources fail, a short-lived negative cache entry prevents repeated HTTP calls."""
+    calls: list[str] = []
+
+    def _failing_default_fetch(url: str) -> str:
+        """Record URL and fail."""
+        calls.append(url)
+        raise RuntimeError("network unreachable")
+
+    monkeypatch.setattr(web_fx, "_default_http_fetcher", _failing_default_fetch)
+    monkeypatch.setattr(web_fx, "_get_redis", lambda: None)
+
+    assert web_fx.lookup_live_exchange_rate("USD", allow_offline_fallback=False) is None
+    assert len(calls) == 3
+
+    # Second call hits negative cache and makes 0 additional HTTP requests
+    assert web_fx.lookup_live_exchange_rate("USD", allow_offline_fallback=False) is None
+    assert len(calls) == 3
+
