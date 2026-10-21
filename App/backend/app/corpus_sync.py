@@ -69,6 +69,7 @@ _NON_REPLACING_FAMILIES: frozenset[str] = frozenset(
     {
         "",
         "general_tax",
+        "ura_general_publication",
         "public_notice",
     }
 )
@@ -253,33 +254,64 @@ def find_existing_qdrant_counterpart(
     collection_name = getattr(retriever, "collection_name", None) or QDRANT_COLLECTION
     if client is not None and not candidates:
         try:
-            scrolled = client.scroll(
-                collection_name=collection_name,
-                limit=250,
-                with_payload=True,
-                with_vectors=False,
-            )
-            points = scrolled[0] if isinstance(scrolled, tuple) else getattr(scrolled, "points", [])
-            by_source: dict[str, dict[str, Any]] = {}
-            for pt in points or []:
-                payload = getattr(pt, "payload", None) or (pt if isinstance(pt, dict) else {})
-                if not isinstance(payload, dict) or payload.get("_meta"):
-                    continue
-                src = str(payload.get("source") or "").strip()
-                if not src:
-                    continue
-                rec = by_source.setdefault(
-                    src,
-                    {
-                        "source": src,
-                        "stem": Path(src).stem,
-                        "sha256": str(payload.get("source_sha256") or ""),
-                        "fiscal_year": str(payload.get("fiscal_year") or extract_fiscal_year(src)),
-                        "doc_family": str(payload.get("doc_family") or infer_doc_family(src)),
-                        "count": 0,
-                    },
+            from qdrant_client import models
+
+            should_conditions: list[Any] = []
+            if sha_clean:
+                should_conditions.append(
+                    models.FieldCondition(
+                        key="source_sha256",
+                        match=models.MatchValue(value=sha_clean),
+                    )
                 )
-                rec["count"] += 1
+            if family_clean and family_clean not in _NON_REPLACING_FAMILIES:
+                should_conditions.append(
+                    models.FieldCondition(
+                        key="doc_family",
+                        match=models.MatchValue(value=family_clean),
+                    )
+                )
+
+            by_source: dict[str, dict[str, Any]] = {}
+            offset: Any = None
+            while should_conditions:
+                scrolled = client.scroll(
+                    collection_name=collection_name,
+                    scroll_filter=models.Filter(should=should_conditions),
+                    limit=256,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                if isinstance(scrolled, tuple):
+                    points, offset = scrolled[0], scrolled[1]
+                else:
+                    points = getattr(scrolled, "points", [])
+                    offset = getattr(scrolled, "next_page_offset", None)
+
+                for pt in points or []:
+                    payload = getattr(pt, "payload", None) or (pt if isinstance(pt, dict) else {})
+                    if not isinstance(payload, dict) or payload.get("_meta"):
+                        continue
+                    src = str(payload.get("source") or "").strip()
+                    if not src:
+                        continue
+                    rec = by_source.setdefault(
+                        src,
+                        {
+                            "source": src,
+                            "stem": Path(src).stem,
+                            "sha256": str(payload.get("source_sha256") or ""),
+                            "fiscal_year": str(payload.get("fiscal_year") or extract_fiscal_year(src)),
+                            "doc_family": str(payload.get("doc_family") or infer_doc_family(src)),
+                            "count": 0,
+                        },
+                    )
+                    rec["count"] += 1
+
+                if offset is None or not points:
+                    break
+
             for meta in by_source.values():
                 if sha_clean and meta["sha256"].lower() == sha_clean:
                     return ExistingCorpusDocument(
@@ -324,8 +356,13 @@ def find_existing_qdrant_counterpart(
     return candidates[0]
 
 
-def _delete_source_from_qdrant(retriever: Any, source_name: str) -> bool:
-    """Delete all Qdrant points whose ``source`` matches *source_name*."""
+def _delete_source_from_qdrant(
+    retriever: Any,
+    source_name: str,
+    *,
+    keep_sha256: str = "",
+) -> bool:
+    """Delete Qdrant points whose ``source`` matches *source_name* (excluding *keep_sha256* when set)."""
     client = getattr(retriever, "_client", None) if retriever is not None else None
     if client is None or not source_name:
         return False
@@ -333,6 +370,16 @@ def _delete_source_from_qdrant(retriever: Any, source_name: str) -> bool:
     try:
         from qdrant_client import models
 
+        must_not = (
+            [
+                models.FieldCondition(
+                    key="source_sha256",
+                    match=models.MatchValue(value=keep_sha256),
+                )
+            ]
+            if keep_sha256
+            else None
+        )
         selector = models.FilterSelector(
             filter=models.Filter(
                 must=[
@@ -340,7 +387,8 @@ def _delete_source_from_qdrant(retriever: Any, source_name: str) -> bool:
                         key="source",
                         match=models.MatchValue(value=source_name),
                     )
-                ]
+                ],
+                must_not=must_not,
             )
         )
         client.delete(collection_name=collection_name, points_selector=selector)
@@ -350,42 +398,56 @@ def _delete_source_from_qdrant(retriever: Any, source_name: str) -> bool:
         return False
 
 
-def _embed_and_upsert_chunks(sandbox_doc: SandboxDocument, retriever: Any) -> int:
-    """Embed *sandbox_doc.chunks* and upsert deterministic points into Qdrant."""
-    client = getattr(retriever, "_client", None) if retriever is not None else None
-    if client is None or not sandbox_doc.chunks:
-        return 0
-    collection_name = getattr(retriever, "collection_name", None) or QDRANT_COLLECTION
-    dense_model = getattr(retriever, "_dense_model", None)
-    sparse_encoder = getattr(retriever, "_sparse_encoder", None) or getattr(retriever, "_bm25", None)
-
-    docs_to_index: list[dict[str, Any]] = []
-    for idx, raw_chunk in enumerate(sandbox_doc.chunks):
+def _build_canonical_chunks(sandbox_doc: SandboxDocument) -> list[dict[str, Any]]:
+    """Build canonical chunk dictionaries with dense post-filter indices for both Qdrant and JSONL."""
+    canonical: list[dict[str, Any]] = []
+    for raw_idx, raw_chunk in enumerate(sandbox_doc.chunks):
         text = str(raw_chunk.get("text") or "").strip()
         if not text:
             continue
-        section = str(raw_chunk.get("section") or f"Page {raw_chunk.get('page', idx + 1)}")
-        chunk_id = _stable_id(sandbox_doc.filename, idx, text)
-        prefix = f"[Document: {sandbox_doc.stem} | Scope: {sandbox_doc.fiscal_year}]" if sandbox_doc.fiscal_year else f"[Document: {sandbox_doc.stem}]"
-        docs_to_index.append(
+        dense_idx = len(canonical)
+        raw_page = raw_chunk.get("page", raw_idx + 1)
+        section = str(raw_chunk.get("section") or f"Page {raw_page}").strip()
+        heading_trail = [section] if section else []
+        chunk_id = _stable_id(sandbox_doc.filename, dense_idx, text)
+        prefix = f"[Document: {sandbox_doc.stem}]"
+        canonical.append(
             {
                 "text": text,
                 "embed_text": f"{prefix}\n\n{text}",
+                "contextual_prefix": prefix,
+                "heading_trail": heading_trail,
                 "source": sandbox_doc.filename,
                 "source_url": sandbox_doc.url,
                 "source_sha256": sandbox_doc.sha256,
                 "fiscal_year": sandbox_doc.fiscal_year,
                 "doc_family": sandbox_doc.doc_family,
-                "doc_type": str(raw_chunk.get("doc_type") or "pdf"),
-                "section": section,
-                "page": raw_chunk.get("page", idx + 1),
+                "doc_type": "pdf_chunk",
+                "section": " > ".join(heading_trail),
+                "page": "",
                 "chunk_id": chunk_id,
+                "chunk_index": dense_idx,
+                "char_count": len(text),
                 "ingested_via": "ura_web_auto_sync",
             }
         )
+    return canonical
 
-    if not docs_to_index:
+
+def _embed_and_upsert_chunks(
+    sandbox_doc: SandboxDocument,
+    retriever: Any,
+    *,
+    canonical_chunks: list[dict[str, Any]] | None = None,
+) -> int:
+    """Embed canonical chunks for *sandbox_doc* and upsert deterministic points into Qdrant."""
+    client = getattr(retriever, "_client", None) if retriever is not None else None
+    docs_to_index = canonical_chunks if canonical_chunks is not None else _build_canonical_chunks(sandbox_doc)
+    if client is None or not docs_to_index:
         return 0
+    collection_name = getattr(retriever, "collection_name", None) or QDRANT_COLLECTION
+    dense_model = getattr(retriever, "_dense_model", None)
+    sparse_encoder = getattr(retriever, "_sparse_encoder", None) or getattr(retriever, "_bm25", None)
 
     embed_texts = [_embedding_text(d) for d in docs_to_index]
     dense_vecs: list[list[float]] | None = None
@@ -398,7 +460,7 @@ def _embed_and_upsert_chunks(sandbox_doc: SandboxDocument, retriever: Any) -> in
             ]
         except Exception:
             logger.warning("Dense encoding failed during corpus_sync upsert", exc_info=True)
-            dense_vecs = None
+            raise
 
     from qdrant_client import models
 
@@ -415,7 +477,11 @@ def _embed_and_upsert_chunks(sandbox_doc: SandboxDocument, retriever: Any) -> in
             except Exception:
                 logger.debug("Sparse encoding failed for chunk %d", i, exc_info=True)
 
-        payload = {k: v for k, v in doc.items() if k != "embed_text"}
+        payload = {
+            k: v
+            for k, v in doc.items()
+            if k not in {"embed_text", "chunk_index", "char_count"}
+        }
         points.append(
             models.PointStruct(
                 id=deterministic_point_id(doc),
@@ -432,35 +498,32 @@ def _write_canonical_pdf_jsonl(
     sandbox_doc: SandboxDocument,
     pdf_jsonl_dir: Path,
     *,
+    canonical_chunks: list[dict[str, Any]] | None = None,
     removed_source: str = "",
 ) -> Path:
     """Write ``{sandbox_doc.stem}.jsonl`` in canonical :mod:`app.pdf_corpus` schema."""
     pdf_jsonl_dir.mkdir(parents=True, exist_ok=True)
     target = pdf_jsonl_dir / f"{sandbox_doc.stem}.jsonl"
     tmp = target.with_suffix(".jsonl.tmp")
-    records: list[dict[str, Any]] = []
-    for chunk in sandbox_doc.chunks:
-        text = str(chunk.get("text") or "").strip()
-        if not text:
-            continue
-        section = str(chunk.get("section") or "").strip()
-        records.append(
-            {
-                "schema_version": PDF_JSONL_SCHEMA_VERSION,
-                "record_type": "pdf_chunk",
-                "chunk_id": _stable_id(sandbox_doc.filename, len(records), text),
-                "text": text,
-                "contextual_prefix": f"[Document: {sandbox_doc.stem}]",
-                "heading_trail": [section] if section else [],
-                "source": sandbox_doc.filename,
-                "source_url": sandbox_doc.url,
-                "source_sha256": sandbox_doc.sha256,
-                "fiscal_year": sandbox_doc.fiscal_year,
-                "doc_family": sandbox_doc.doc_family,
-                "chunk_index": len(records),
-                "char_count": len(text),
-            }
-        )
+    built = canonical_chunks if canonical_chunks is not None else _build_canonical_chunks(sandbox_doc)
+    records: list[dict[str, Any]] = [
+        {
+            "schema_version": PDF_JSONL_SCHEMA_VERSION,
+            "record_type": "pdf_chunk",
+            "chunk_id": item["chunk_id"],
+            "text": item["text"],
+            "contextual_prefix": item["contextual_prefix"],
+            "heading_trail": item["heading_trail"],
+            "source": item["source"],
+            "source_url": item["source_url"],
+            "source_sha256": item["source_sha256"],
+            "fiscal_year": item["fiscal_year"],
+            "doc_family": item["doc_family"],
+            "chunk_index": item["chunk_index"],
+            "char_count": item["char_count"],
+        }
+        for item in built
+    ]
 
     with tmp.open("w", encoding="utf-8", newline="\n") as fh:
         for rec in records:
@@ -570,14 +633,19 @@ def should_skip_web_search_for_family(
     topic_key: str = "",
 ) -> tuple[bool, dict[str, Any] | None]:
     """Return ``(True, ledger_entry)`` when ``web_sync_ledger`` has a fresh verification for *doc_family* or *topic_key*."""
-    if not doc_family and not topic_key:
+    fam = (doc_family or "").strip()
+    top = (topic_key or "").strip()
+    if not fam and not top:
+        return False, None
+    if fam in _NON_REPLACING_FAMILIES and not top:
         return False, None
     try:
         from . import database as db
 
+        query_family = fam if (fam and fam not in _NON_REPLACING_FAMILIES) else None
         entry = db.get_active_web_sync_entry(
-            doc_family=doc_family or None,
-            topic_key=topic_key or None,
+            doc_family=query_family,
+            topic_key=top or None,
         )
         if entry is not None:
             return True, entry
@@ -672,6 +740,8 @@ def compare_and_sync_ura_document(
                 ledger_entry=ledger,
             )
 
+        canonical_chunks = _build_canonical_chunks(sandbox_doc)
+
         # Outcome 3: Newer full guide replaces outdated counterpart
         min_pages = max(1, int(0.5 * existing.page_count)) if existing is not None else 1
         if (
@@ -687,17 +757,34 @@ def compare_and_sync_ura_document(
 
             # Upsert the new chunks into Qdrant first so an embedding/Qdrant failure
             # never leaves the collection without a guide for this family.
-            upserted = _embed_and_upsert_chunks(sandbox_doc, retriever)
-            tomb = db.add_corpus_tombstone(
-                source_uri=existing.source,
-                reason=(
-                    f"Auto-superseded by {sandbox_doc.filename} ({sandbox_doc.fiscal_year}) "
-                    f"from {sandbox_doc.url}"
-                ),
-                superseded_by=sandbox_doc.filename,
-                created_by="corpus_sync",
+            upserted = _embed_and_upsert_chunks(
+                sandbox_doc,
+                retriever,
+                canonical_chunks=canonical_chunks,
             )
-            deleted = _delete_source_from_qdrant(retriever, existing.source)
+            if upserted <= 0:
+                raise RuntimeError(
+                    f"Refusing to supersede {existing.source}: no chunks of {sandbox_doc.filename} were indexed."
+                )
+
+            same_source = existing.source.strip().lower() == sandbox_doc.filename.strip().lower()
+            tomb_id = ""
+            if not same_source:
+                tomb = db.add_corpus_tombstone(
+                    source_uri=existing.source,
+                    reason=(
+                        f"Auto-superseded by {sandbox_doc.filename} ({sandbox_doc.fiscal_year}) "
+                        f"from {sandbox_doc.url}"
+                    ),
+                    superseded_by=sandbox_doc.filename,
+                    created_by="corpus_sync",
+                )
+                tomb_id = str(tomb.get("id") or "")
+            deleted = _delete_source_from_qdrant(
+                retriever,
+                existing.source,
+                keep_sha256=sandbox_doc.sha256 if same_source else "",
+            )
 
             written_jsonl = ""
             archived_jsonl = ""
@@ -708,6 +795,7 @@ def compare_and_sync_ura_document(
                 new_path = _write_canonical_pdf_jsonl(
                     sandbox_doc,
                     target_jsonl_dir,
+                    canonical_chunks=canonical_chunks,
                     removed_source=existing.source,
                 )
                 written_jsonl = str(new_path)
@@ -736,17 +824,38 @@ def compare_and_sync_ura_document(
                 superseded_source=existing.source,
                 upserted_points=upserted,
                 deleted_old_source=deleted,
-                tombstone_id=str(tomb.get("id") or ""),
+                tombstone_id=tomb_id,
                 jsonl_path=written_jsonl,
                 archived_jsonl_path=archived_jsonl,
                 ledger_entry=ledger,
             )
 
+        # Guard: if a single-edition counterpart exists but replacement preconditions were
+        # not met (e.g. missing fiscal year, same fiscal year with different hash, or truncated
+        # page count), do not add a conflicting second edition of the same handbook.
+        if existing is not None and family not in _NON_REPLACING_FAMILIES and sandbox_doc.doc_kind != "public_notice":
+            return SyncOutcome(
+                action_taken="needs_review",
+                doc_family=family,
+                source_uri=sandbox_doc.filename,
+                ura_url=sandbox_doc.url,
+                fiscal_year=sandbox_doc.fiscal_year,
+                superseded_source=existing.source,
+            )
+
         # Outcome 4: Additive upsert (public notice or net-new document family)
-        upserted = _embed_and_upsert_chunks(sandbox_doc, retriever)
+        upserted = _embed_and_upsert_chunks(
+            sandbox_doc,
+            retriever,
+            canonical_chunks=canonical_chunks,
+        )
         written_jsonl = ""
         if persist_files:
-            new_path = _write_canonical_pdf_jsonl(sandbox_doc, target_jsonl_dir)
+            new_path = _write_canonical_pdf_jsonl(
+                sandbox_doc,
+                target_jsonl_dir,
+                canonical_chunks=canonical_chunks,
+            )
             written_jsonl = str(new_path)
             snap_target = freshness_snapshot_path or SNAPSHOT_PATH
             roots = freshness_roots if freshness_roots is not None else [target_jsonl_dir]

@@ -730,12 +730,22 @@ def build_search_queries(query: str, triggers: list[ResearchTrigger]) -> list[Se
     return specs
 
 
+_NON_REPLACING_TRIGGER_FAMILIES: frozenset[str] = frozenset(
+    {
+        "",
+        "general_tax",
+        "ura_general_publication",
+        "public_notice",
+    }
+)
+
+
 def should_skip_web_search(trigger: ResearchTrigger) -> bool:
     """Return True if ``web_sync_ledger`` already verified or updated this topic/family within TTL."""
     if trigger.category == TRIGGER_FX_RATE:
         return False
     try:
-        if trigger.doc_family:
+        if trigger.doc_family and trigger.doc_family not in _NON_REPLACING_TRIGGER_FAMILIES:
             active = db.get_active_web_sync_entry(doc_family=trigger.doc_family)
             if active is not None:
                 return True

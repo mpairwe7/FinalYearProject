@@ -346,3 +346,87 @@ def test_added_new_public_notice_does_not_delete_existing_guides(
     assert retriever._client.deleted_selectors == []
     assert existing_jsonl.is_file()
     assert (jsonl_dir / "Public_Notice_EFRIS_Waiver.jsonl").is_file()
+
+    # Additive family (public_notice) must NOT skip based on doc_family alone
+    skip_fam_only, _ = cs.should_skip_web_search_for_family(doc_family="public_notice")
+    assert skip_fam_only is False
+    skip_with_topic, row = cs.should_skip_web_search_for_family(
+        doc_family="public_notice",
+        topic_key="efris_penalty_waiver_aug_2026",
+    )
+    assert skip_with_topic is True
+    assert row is not None
+
+
+def test_same_filename_replacement_and_needs_review_guard(
+    isolated_db_and_dirs: dict[str, Path],
+) -> None:
+    """Verify same-filename replacements avoid self-tombstoning and conflicting same-year guides return needs_review."""
+    jsonl_dir = isolated_db_and_dirs["jsonl_dir"]
+    archive_dir = isolated_db_and_dirs["archive_dir"]
+
+    # Seed an existing guide whose filename has no FY suffix, but whose content is FY2024-25
+    shared_stem = "A-GUIDE-TO-TAXATION-OF-AGRICULTURAL-SECTOR"
+    shared_source = f"{shared_stem}.pdf"
+    _seed_existing_jsonl(
+        jsonl_dir,
+        stem=shared_stem,
+        source=shared_source,
+        sha256="1" * 64,
+        fiscal_year="FY2024-25",
+        doc_family="sector_guide_agriculture",
+        texts=["Agri guide p1", "Agri guide p2", "Agri guide p3", "Agri guide p4"],
+    )
+    retriever = _FakeRetriever()
+
+    # 1. Truncated guide (only 1 page vs 4 existing pages -> < 0.5 * 4) returns needs_review without upserting
+    truncated_doc = SandboxDocument(
+        url=f"https://ura.go.ug/en/wp-content/uploads/2026/07/{shared_source}",
+        filename=shared_source,
+        stem=shared_stem,
+        sha256="2" * 64,
+        page_count=1,
+        fiscal_year="FY2026-27",
+        doc_family="sector_guide_agriculture",
+        doc_kind="full_guide",
+        chunks=[{"text": "Truncated 1-page guide", "page": 1, "section": "Section 1"}],
+    )
+    out_review = cs.compare_and_sync_ura_document(
+        truncated_doc,
+        retriever,
+        pdf_jsonl_dir=jsonl_dir,
+        archive_dir=archive_dir,
+    )
+    assert out_review.action_taken == "needs_review"
+    assert retriever._client.upserted_batches == []
+
+    # 2. Full same-filename replacement (FY2026-27 > FY2024-25) replaces without self-tombstoning
+    new_sha = "3" * 64
+    updated_same_name_doc = SandboxDocument(
+        url=f"https://ura.go.ug/en/wp-content/uploads/2026/07/{shared_source}",
+        filename=shared_source,
+        stem=shared_stem,
+        sha256=new_sha,
+        page_count=4,
+        fiscal_year="FY2026-27",
+        doc_family="sector_guide_agriculture",
+        doc_kind="full_guide",
+        chunks=[
+            {"text": "FY2026-27 Agri Guide p1", "page": 1, "section": "Section 1"},
+            {"text": "FY2026-27 Agri Guide p2", "page": 2, "section": "Section 2"},
+        ],
+    )
+    out_same = cs.compare_and_sync_ura_document(
+        updated_same_name_doc,
+        retriever,
+        pdf_jsonl_dir=jsonl_dir,
+        archive_dir=archive_dir,
+    )
+    assert out_same.action_taken == "replaced_outdated"
+    assert out_same.tombstone_id == ""
+    assert not any(t["source_uri"] == shared_source for t in db.get_active_corpus_tombstones())
+    assert len(retriever._client.deleted_selectors) == 1
+    _, selector = retriever._client.deleted_selectors[0]
+    assert selector.filter.must_not is not None
+    assert (jsonl_dir / f"{shared_stem}.jsonl").is_file()
+
