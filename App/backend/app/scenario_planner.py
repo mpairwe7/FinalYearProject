@@ -201,17 +201,19 @@ def _rule_paye_and_bik(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
                 rent_mon is not None
                 and rent_mon.currency == "UGX"
                 and sal is not None
-                and sal.currency == "UGX"
+                and (sal.currency == "UGX" or facts.exchange_rate_ugx is not None or live_fx_enabled)
             ):
+                h_params: dict[str, Any] = {
+                    "kind": "housing",
+                    "market_rent": float(rent_mon.amount),
+                    "employee_payment": float(bf.employee_payment.amount) if bf.employee_payment else 0.0,
+                }
+                if sal.currency == "UGX":
+                    h_params["monthly_gross"] = float(sal.amount)
                 specs.append(
                     ToolCallSpec(
                         "value_benefit_in_kind",
-                        params={
-                            "kind": "housing",
-                            "market_rent": float(rent_mon.amount),
-                            "monthly_gross": float(sal.amount),
-                            "employee_payment": float(bf.employee_payment.amount) if bf.employee_payment else 0.0,
-                        },
+                        params=h_params,
                         label="housing",
                     )
                 )
@@ -843,6 +845,22 @@ def build_verified_facts(
     for spec in specs:
         for m_in in spec.missing_inputs:
             _add_needed(m_in)
+
+        if spec.tool == "value_benefit_in_kind" and not spec.missing_inputs:
+            if spec.params.get("kind") == "housing" and "monthly_gross" not in spec.params:
+                fx_out_h = tool_results.get("convert_currency")
+                if isinstance(fx_out_h, dict) and fx_out_h.get("ok") and fx_out_h.get("ugx_amount"):
+                    h_p = dict(spec.params)
+                    h_p["monthly_gross"] = fx_out_h["ugx_amount"]
+                    spec = ToolCallSpec(spec.tool, params=h_p, label=spec.label)
+                else:
+                    spec = ToolCallSpec(
+                        spec.tool,
+                        params=spec.params,
+                        missing_inputs=["gross monthly salary in UGX"],
+                        label=spec.label,
+                    )
+                    _add_needed("gross monthly salary in UGX")
 
         # Skip calling tools whose required inputs are already known to be missing
         if spec.tool == "value_benefit_in_kind" and spec.missing_inputs:

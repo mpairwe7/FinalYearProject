@@ -542,7 +542,12 @@ def _extract_benefits(text: str, money_spans: list[tuple[Money, int, int]]) -> l
         window_end = min(len(text), m.end() + 140)
         window_text = lowered[window_start:window_end]
         nearby_money = [
-            mon for mon, ms, me in money_spans if window_start <= ms <= window_end
+            mon
+            for mon, ms, me in sorted(
+                money_spans,
+                key=lambda item: min(abs(item[1] - m.start()), abs(item[2] - m.start())),
+            )
+            if window_start <= ms <= window_end
         ]
         if kind == "car":
             for mon in nearby_money:
@@ -581,7 +586,11 @@ def _extract_benefits(text: str, money_spans: list[tuple[Money, int, int]]) -> l
 # Main extraction & cross-turn merge
 # ---------------------------------------------------------------------------
 _SALARY_KW_RE = re.compile(
-    r"\b(salar(?:y|ies)|earn(?:s|ing)?|paid|pay|gross\s+pay|monthly\s+gross|remuneration|stipend|retainer|wage|compensation|omusaala|mshahara)\b",
+    r"\b(salar(?:y|ies)|earn(?:s|ing)?|paid|pay(?:ing)?|gross\s+pay|monthly\s+gross|remuneration|stipend|retainer|wage|compensation|omusaala|mshahara)\b",
+    re.IGNORECASE,
+)
+_STRONG_SALARY_KW_RE = re.compile(
+    r"\b(salar(?:y|ies)|earn(?:s|ing)?|gross\s+pay|monthly\s+gross|remuneration|stipend|retainer|wage|compensation|omusaala|mshahara)\b",
     re.IGNORECASE,
 )
 _TURNOVER_KW_RE = re.compile(
@@ -741,12 +750,22 @@ def extract_case_facts(
     money_spans = extract_all_money(text)
     if money_spans:
         new_amounts: list[Money] = []
+        saw_salary_in_turn = False
         for mon, ms, me in money_spans:
             ctx_window = text[max(0, ms - 50) : min(len(text), me + 50)]
+            pre_clause = re.split(r"(?:[,;]|\b(?:plus|and|with)\b)", text[max(0, ms - 35) : ms], flags=re.I)[-1]
+            post_clause = re.split(r"(?:[,;]|\b(?:plus|and|with)\b)", text[me : min(len(text), me + 35)], flags=re.I)[0]
+            same_clause_window = f"{pre_clause} {text[ms:me]} {post_clause}"
+            is_benefit_span = any(pat.search(same_clause_window) for _, pat in _BENEFIT_PATTERNS)
+            has_explicit_salary_kw = bool(_STRONG_SALARY_KW_RE.search(same_clause_window))
             if _TURNOVER_KW_RE.search(ctx_window):
                 mon.label = "annual_turnover"
                 _set("annual_turnover", mon)
-            elif _SALARY_KW_RE.search(ctx_window) or _MONTHLY_CADENCE_RE.search(ctx_window):
+            elif (
+                (has_explicit_salary_kw or (not saw_salary_in_turn and (_SALARY_KW_RE.search(ctx_window) or _MONTHLY_CADENCE_RE.search(ctx_window))))
+                and (not is_benefit_span or has_explicit_salary_kw)
+            ):
+                saw_salary_in_turn = True
                 if _ANNUAL_CADENCE_RE.search(ctx_window) and not _MONTHLY_CADENCE_RE.search(ctx_window):
                     mon.label = "annual_salary"
                     _set("annual_salary", mon)

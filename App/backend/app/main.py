@@ -3848,7 +3848,10 @@ def list_tombstones_endpoint(
     limit: int = 100,
     _ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
-    return {"tombstones": db.list_corpus_tombstones(limit=limit)}
+    return {
+        "tombstones": db.list_corpus_tombstones(limit=limit),
+        "web_sync_ledger": db.list_web_sync_entries(limit=limit),
+    }
 
 
 @app.post("/v1/admin/tombstones", tags=["admin"])
