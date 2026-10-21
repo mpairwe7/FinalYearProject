@@ -389,7 +389,7 @@ def validate_outbound_research_url(url: str) -> str:
     if parts.username or parts.password:
         return "credentials in URL are forbidden"
     host = parts.hostname.strip().lower().rstrip(".")
-    if host in {"localhost", "0.0.0.0"} or host.endswith(".local") or host.endswith(".internal"):
+    if host == "localhost" or host.endswith(".local") or host.endswith(".internal"):
         return "loopback or internal host is forbidden"
     try:
         ip = ipaddress.ip_address(host)
@@ -754,7 +754,8 @@ def _unwrap_ddg_url(raw_href: str) -> str:
     if href.startswith("//"):
         href = "https:" + href
     parsed = urlparse(href)
-    if (parsed.hostname or "").lower().endswith("duckduckgo.com"):
+    host = (parsed.hostname or "").strip().lower().rstrip(".")
+    if host in _ALLOWED_SEARCH_ENGINE_HOSTS:
         qs = parse_qs(parsed.query)
         uddg = qs.get("uddg")
         if uddg and uddg[0]:
