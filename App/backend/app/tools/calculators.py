@@ -1811,6 +1811,11 @@ class CurrencyConversionTool(CalculatorTool):
                         "minimum": 0,
                         "description": "Optional user-supplied exchange rate (UGX per 1 unit of foreign currency). Always takes precedence.",
                     },
+                    "use_live_fx": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "When true (or when FLAG_LIVE_WEB_RESEARCH is enabled), fetch live mid-market rate from XE.com / Google Currency.",
+                    },
                 },
                 ["amount", "currency"],
             ),
@@ -1826,8 +1831,10 @@ class CurrencyConversionTool(CalculatorTool):
         currency: str,
         date: str | None = None,
         exchange_rate: Any = None,
+        use_live_fx: bool = False,
         **_: Any,
     ) -> CalcResult:
+        """Convert foreign currency into UGX using user rate, live XE/Google FX, or BoU snapshot."""
         amt = to_decimal(amount, field="amount")
         curr = (currency or "UGX").strip().upper()
         _require_rule(table, "fx_conversion_rule")
@@ -1839,8 +1846,11 @@ class CurrencyConversionTool(CalculatorTool):
                     "currency": "UGX",
                     "ugx_amount": to_float(amt),
                     "amount_ugx": to_float(amt),
+                    "exchange_rate": 1.0,
                     "rate_used": 1.0,
                     "rate_source": "identity",
+                    "is_live_rate": False,
+                    "needs_exchange_rate": False,
                     "verified": True,
                     "explanation": f"{_ugx(amt)} is already denominated in UGX.",
                 },
@@ -1858,8 +1868,11 @@ class CurrencyConversionTool(CalculatorTool):
                     "currency": curr,
                     "ugx_amount": to_float(ugx_val),
                     "amount_ugx": to_float(ugx_val),
+                    "exchange_rate": to_float(rate_dec),
                     "rate_used": to_float(rate_dec),
                     "rate_source": "user_supplied",
+                    "is_live_rate": False,
+                    "needs_exchange_rate": False,
                     "verified": True,
                     "explanation": (
                         f"Converted {curr} {float(amt):,.2f} at user-supplied exchange rate "
@@ -1868,6 +1881,42 @@ class CurrencyConversionTool(CalculatorTool):
                 },
                 rate_keys=("fx_conversion_rule",),
             )
+
+        from ..flags import flags
+
+        if use_live_fx or flags.is_enabled("live_web_research"):
+            from ..web_fx import lookup_live_exchange_rate
+
+            quote = lookup_live_exchange_rate(
+                curr,
+                date=date,
+                allow_offline_fallback=False,
+            )
+            if quote is not None and quote.rate_ugx > 0:
+                rate_dec = Decimal(str(quote.rate_ugx))
+                ugx_val = amt * rate_dec
+                fetched_disp = (quote.fetched_at_utc or "")[:16].replace("T", " ")
+                return CalcResult(
+                    {
+                        "amount": to_float(amt),
+                        "currency": curr,
+                        "ugx_amount": to_float(ugx_val),
+                        "amount_ugx": to_float(ugx_val),
+                        "exchange_rate": to_float(rate_dec),
+                        "rate_used": to_float(rate_dec),
+                        "rate_source": quote.source,
+                        "fetched_at_utc": quote.fetched_at_utc,
+                        "is_live_rate": quote.is_live,
+                        "needs_exchange_rate": False,
+                        "verified": True,
+                        "explanation": (
+                            f"Converted {curr} {float(amt):,.2f} to {_ugx(ugx_val)} using live exchange rate "
+                            f"1 {curr} = UGX {float(rate_dec):,.2f} (Source: {quote.source}, fetched {fetched_disp} UTC). "
+                            "Note: for official URA return filing, apply the prevailing rate on the payment date."
+                        ),
+                    },
+                    rate_keys=("fx_conversion_rule",),
+                )
 
         # Check BOU_mid_rates_2026.json snapshot
         import json as _json

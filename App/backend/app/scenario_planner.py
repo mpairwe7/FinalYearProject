@@ -147,6 +147,9 @@ def _rule_paye_and_bik(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
         return []
 
     # 1. Foreign currency conversion for salary if not UGX
+    from .flags import flags
+
+    live_fx_enabled = flags.is_enabled("live_web_research")
     sal = facts.monthly_salary
     if sal is not None and sal.currency != "UGX":
         fx_params: dict[str, Any] = {
@@ -156,7 +159,7 @@ def _rule_paye_and_bik(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
         fx_missing: list[str] = []
         if facts.exchange_rate_ugx is not None:
             fx_params["exchange_rate"] = float(facts.exchange_rate_ugx)
-        else:
+        elif not live_fx_enabled:
             fx_missing.append(f"exchange rate ({sal.currency} to UGX) on payment date")
         specs.append(ToolCallSpec("convert_currency", params=fx_params, missing_inputs=fx_missing))
 
@@ -336,7 +339,7 @@ def _rule_paye_and_bik(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
                 },
                 missing_inputs=(
                     [f"exchange rate ({sal.currency} to UGX) on payment date"]
-                    if facts.exchange_rate_ugx is None
+                    if (facts.exchange_rate_ugx is None and not live_fx_enabled)
                     else []
                 ),
             )
@@ -1002,6 +1005,14 @@ def build_verified_facts(
                         f"  * {b_label} PAYE band-by-band breakdown (use these exact band figures verbatim, total = UGX {float(tot_b):,.0f}): "
                         + "; ".join(row_strs)
                     )
+                if isinstance(comp, dict):
+                    nil_ceil = tbl["paye_bands_resident"][0][1] or 0
+                    nonres_first_pct = tbl["paye_bands_non_resident"][0][2] * 100
+                    bullet_lines.append(
+                        f"  * Statutory PAYE Table Difference ({tbl.fiscal_year}): Residents receive a 0% tax-free threshold up to UGX {nil_ceil:,.0f}/month, "
+                        f"whereas Non-residents have NO tax-free threshold and pay {nonres_first_pct:.0f}% on the first UGX {nil_ceil:,.0f}/month, "
+                        f"so above UGX 410,000/month a non-resident pays exactly UGX {float(comp.get('monthly_difference', 37250)):,.0f}/month more than a resident."
+                    )
             except Exception:
                 paye_breakdown = format_calc_reply("calculate_paye", res, ["gross monthly salary"])
                 if paye_breakdown:
@@ -1022,6 +1033,19 @@ def build_verified_facts(
                     "gross rent; the UGX 2,820,000 threshold applies once, and individual landlords are entitled to "
                     "ZERO expense deductions (they CANNOT deduct repair, maintenance, or interest expenses)."
                 )
+
+        elif spec.tool == "convert_currency":
+            expl = res.get("explanation") or format_calc_reply(spec.tool, res, [])
+            rate_val = res.get("exchange_rate") or res.get("rate_used")
+            src_val = res.get("rate_source", "")
+            fetched_val = str(res.get("fetched_at_utc") or "")[:16].replace("T", " ")
+            if res.get("is_live_rate") and rate_val:
+                bullet_lines.append(
+                    f"- Currency Conversion: {expl} "
+                    f"[Live FX: 1 {res.get('currency')} = UGX {float(rate_val):,.2f} via {src_val}, fetched {fetched_val} UTC]"
+                )
+            else:
+                bullet_lines.append(f"- convert_currency: {expl}")
 
         else:
             expl = res.get("explanation") or format_calc_reply(spec.tool, res, [])
