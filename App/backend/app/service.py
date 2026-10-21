@@ -2298,6 +2298,9 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             if result.get("workflow"):
                 result["workflow"] = ChatModel._localize_workflow(result["workflow"], locale)
 
+        for evt_name, evt_payload in result.get("_web_research_events") or []:
+            yield (evt_name, evt_payload)
+
         yield (
             "retrieval.completed",
             {
@@ -2456,6 +2459,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     tenant_id=tenant_id or "default",
                     locale=locale,
                     tool_grounded=bool(connector_forced and agentic_used_tools),
+                    verified_facts=str(result.get("_web_verified_facts") or ""),
                     calculation_message=str(result.get("_english_message") or message),
                 )
                 full_reply = guard["reply"]
@@ -2735,6 +2739,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 user_id=user_id or "",
                 tenant_id=tenant_id or "default",
                 locale=locale,
+                verified_facts=str(result.get("_web_verified_facts") or ""),
                 calculation_message=str(result.get("_english_message") or message),
             )
             full_reply = guard["reply"]
@@ -11062,6 +11067,35 @@ class ChatModel:
                             f"{active_retrieval_mode(self._retriever, ready=True)}_corrected"
                         )
 
+            # 3b1. Live Web Research + Ephemeral PDF Sandbox + Self-Updating Qdrant (Phase 41)
+            web_verified_facts = ""
+            if flags.is_enabled("live_web_research", subject=user_id or None):
+                with trace_stage("live_web_research", timings=timings):
+                    try:
+                        from .web_research import run_web_research
+
+                        web_outcome = run_web_research(
+                            retrieval_query,
+                            case_facts=_ACTIVE_CASE_FACTS.get(),
+                            hits=hits,
+                            retriever=self._retriever if self._retriever_ready else None,
+                            turn_id=request_id or thread_id,
+                        )
+                        if web_outcome.superseded_sources:
+                            sup_set = {s.strip().lower() for s in web_outcome.superseded_sources if s}
+                            hits = [
+                                h
+                                for h in hits
+                                if str(h.get("source") or "").strip().lower() not in sup_set
+                            ]
+                        if web_outcome.web_hits:
+                            hits = list(web_outcome.web_hits) + hits
+                            retrieval_mode = "live_web_verified"
+                        if web_outcome.verified_facts_addition:
+                            web_verified_facts = web_outcome.verified_facts_addition
+                    except Exception:
+                        logger.warning("Live web research step failed in _generate_en", exc_info=True)
+
             # 3b2. G131 fix: removed buggy substring-matching language boost that
             #      matched 'sw' inside 'Answer' and corrupted reranker ordering with
             #      score_rrf re-sorting. Clean reranker ranking is preserved.
@@ -11302,6 +11336,11 @@ class ChatModel:
                                 for t in ToolRegistry.all()
                                 if getattr(t.schema, "namespace", "") in ("tax_calculator", "rates")
                             ]
+                    base_pers_ctx = self._build_effective_personalization_context(
+                        personalization, conv_ctx, router_rewritten or router_message
+                    )
+                    if web_verified_facts:
+                        base_pers_ctx = f"{base_pers_ctx}\n\n{web_verified_facts}".strip()
                     agentic_call_kwargs: dict[str, Any] = {
                         "query": agentic_query,
                         # A lookup is answered from the service, not from
@@ -11310,9 +11349,7 @@ class ChatModel:
                         "conversation_history": conversation_history or None,
                         "locale": locale,
                         "tool_names": eff_tool_whitelist,
-                        "personalization_context": self._build_effective_personalization_context(
-                            personalization, conv_ctx, router_rewritten or router_message
-                        ),
+                        "personalization_context": base_pers_ctx,
                         "tone_hint": tone_hint,
                         "tenant_id": tenant_id or "default",
                         "user_id": user_id or "",
@@ -11450,14 +11487,17 @@ class ChatModel:
                         else rewritten
                     )
                     with trace_stage("llm_generate", timings=timings):
+                        gen_pers_ctx = self._build_effective_personalization_context(
+                            personalization, conv_ctx, router_rewritten or router_message
+                        )
+                        if web_verified_facts:
+                            gen_pers_ctx = f"{gen_pers_ctx}\n\n{web_verified_facts}".strip()
                         gen_call_kwargs: dict[str, Any] = {
                             "query": llm_query,
                             "passages": hits,
                             "conversation_history": conversation_history or None,
                             "locale": locale,
-                            "personalization_context": self._build_effective_personalization_context(
-                                personalization, conv_ctx, router_rewritten or router_message
-                            ),
+                            "personalization_context": gen_pers_ctx,
                             "tone_hint": tone_hint,
                             "context_summary": context_summary,
                         }
@@ -11520,9 +11560,18 @@ class ChatModel:
                     trace_ctx["prompt_leakage"] = True
 
             # 7. Grounding verification (OWASP LLM09)
-            verified_facts_block = _evaluate_calculation_context(
+            calc_facts_block = _evaluate_calculation_context(
                 router_rewritten or router_message or message
             )
+            if extractive_fallback and calc_facts_block:
+                from .calculator_router import _SCENARIO_PLANNER_BYPASS_RE
+
+                if _SCENARIO_PLANNER_BYPASS_RE.search(router_rewritten or router_message or message):
+                    reply = f"{calc_facts_block}\n\n{reply}".strip() if reply != NO_HITS_REPLY else calc_facts_block
+            if calc_facts_block and web_verified_facts:
+                verified_facts_block = f"{calc_facts_block}\n\n{web_verified_facts}".strip()
+            else:
+                verified_facts_block = calc_facts_block or web_verified_facts
             grounding_contexts = (
                 [*contexts, verified_facts_block]
                 if (contexts and verified_facts_block)
@@ -12812,6 +12861,36 @@ class ChatModel:
                     f"{active_retrieval_mode(self._retriever, ready=True)}_corrected"
                 )
 
+        # Live Web Research + Ephemeral PDF Sandbox + Self-Updating Qdrant (Phase 41)
+        web_verified_facts = ""
+        web_research_events: list[tuple[str, dict[str, Any]]] = []
+        if flags.is_enabled("live_web_research", subject=user_id or None):
+            try:
+                from .web_research import run_web_research
+
+                web_outcome = run_web_research(
+                    retrieval_query,
+                    case_facts=_ACTIVE_CASE_FACTS.get(),
+                    hits=hits,
+                    retriever=self._retriever if self._retriever_ready else None,
+                    turn_id=request_id or thread_id,
+                )
+                web_research_events = list(web_outcome.events)
+                if web_outcome.superseded_sources:
+                    sup_set = {s.strip().lower() for s in web_outcome.superseded_sources if s}
+                    hits = [
+                        h
+                        for h in hits
+                        if str(h.get("source") or "").strip().lower() not in sup_set
+                    ]
+                if web_outcome.web_hits:
+                    hits = list(web_outcome.web_hits) + hits
+                    retrieval_mode = "live_web_verified"
+                if web_outcome.verified_facts_addition:
+                    web_verified_facts = web_outcome.verified_facts_addition
+            except Exception:
+                logger.warning("Live web research step failed in generate_retrieval_only", exc_info=True)
+
         # G131 fix: removed buggy substring-matching language boost that
         # matched 'sw' inside 'Answer' and corrupted reranker ordering with
         # score_rrf re-sorting. Clean reranker ranking is preserved.
@@ -13036,6 +13115,19 @@ class ChatModel:
             if citations and not re.search(r"\[\d{1,3}\]", reply):
                 reply = f"{reply.rstrip()} [1]"
 
+        calc_facts_block = _evaluate_calculation_context(
+            router_rewritten or router_message or message
+        )
+        if calc_facts_block and not attachments:
+            from .calculator_router import _SCENARIO_PLANNER_BYPASS_RE
+
+            if _SCENARIO_PLANNER_BYPASS_RE.search(router_rewritten or router_message or message):
+                reply = f"{calc_facts_block}\n\n{reply}".strip() if reply != NO_HITS_REPLY else calc_facts_block
+        if calc_facts_block and web_verified_facts:
+            verified_facts_block = f"{calc_facts_block}\n\n{web_verified_facts}".strip()
+        else:
+            verified_facts_block = calc_facts_block or web_verified_facts
+
         # Escalation check (same as sync path)
         escalate, esc_reason = self._output_guard.should_escalate(None, hits)
         response_judge = self._evaluate_response_judge(
@@ -13046,6 +13138,7 @@ class ChatModel:
             faithfulness_score=None,
             escalation_required=escalate,
             escalation_reason=esc_reason,
+            verified_facts=verified_facts_block,
         )
         if response_judge["decision"] == "revise" and response_judge.get("revised_reply"):
             reply = response_judge["revised_reply"]
@@ -13077,6 +13170,12 @@ class ChatModel:
             response_judge=response_judge,
             user_id=user_id or "",
         )
+
+        eff_pers_ctx = self._build_effective_personalization_context(
+            personalization, conv_ctx, router_rewritten or rewritten or message
+        )
+        if web_verified_facts:
+            eff_pers_ctx = f"{eff_pers_ctx}\n\n{web_verified_facts}".strip()
 
         return {
             "reply": reply,
@@ -13111,9 +13210,9 @@ class ChatModel:
                 )
                 else rewritten
             ),
-            "_personalization_context": self._build_effective_personalization_context(
-                personalization, conv_ctx, router_rewritten or rewritten or message
-            ),
+            "_personalization_context": eff_pers_ctx,
+            "_web_verified_facts": web_verified_facts,
+            "_web_research_events": web_research_events,
             "_tone_hint": tone_hint,
             "_distress": distress,
             "_force_agentic": force_agentic,

@@ -25,7 +25,9 @@ import re
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -890,3 +892,247 @@ def execute_web_search(
 def serialize_search_results(results: list[WebSearchResult]) -> list[dict[str, Any]]:
     """Convert a list of :class:`WebSearchResult` items into JSON-serializable dicts."""
     return [asdict(r) for r in results]
+
+
+@dataclass
+class WebResearchTurnOutcome:
+    """Bundled outcome of a live web research + PDF sandbox + Qdrant sync turn."""
+
+    triggered: bool = False
+    skipped_by_ledger: bool = False
+    triggers: list[ResearchTrigger] = field(default_factory=list)
+    search_results: list[WebSearchResult] = field(default_factory=list)
+    web_hits: list[dict[str, Any]] = field(default_factory=list)
+    superseded_sources: list[str] = field(default_factory=list)
+    verified_facts_addition: str = ""
+    sync_outcomes: list[dict[str, Any]] = field(default_factory=list)
+    events: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+
+
+def run_web_research(
+    query: str,
+    *,
+    case_facts: Any = None,
+    hits: list[dict[str, Any]] | None = None,
+    faithfulness: float | None = None,
+    retriever: Any = None,
+    turn_id: str = "",
+    auto_sync_qdrant: bool | None = None,
+    search_http_fetcher: Callable[[str], str] | None = None,
+    pdf_byte_fetcher: Callable[[str, int], bytes] | None = None,
+    sandbox_base_dir: Path | None = None,
+    pdf_jsonl_dir: Path | None = None,
+    archive_dir: Path | None = None,
+    freshness_snapshot_path: Path | None = None,
+    persist_files: bool = True,
+) -> WebResearchTurnOutcome:
+    """Execute end-to-end live web research, ephemeral PDF sandbox extraction, and Qdrant sync."""
+    from .flags import flags
+
+    triggers = detect_research_triggers(
+        query,
+        facts=case_facts,
+        hits=hits,
+        faithfulness=faithfulness,
+    )
+    if not triggers:
+        return WebResearchTurnOutcome(triggered=False)
+
+    events: list[tuple[str, dict[str, Any]]] = []
+    fx_triggers = [t for t in triggers if t.category == TRIGGER_FX_RATE]
+    non_fx_triggers = [t for t in triggers if t.category != TRIGGER_FX_RATE]
+
+    if fx_triggers:
+        events.append(
+            (
+                "web_research.started",
+                {
+                    "triggers": [t.category for t in triggers],
+                    "fx_currencies": [t.currency for t in fx_triggers if t.currency],
+                },
+            )
+        )
+
+    active_portal_triggers: list[ResearchTrigger] = []
+    for t in non_fx_triggers:
+        if should_skip_web_search(t):
+            continue
+        active_portal_triggers.append(t)
+
+    if non_fx_triggers and not active_portal_triggers:
+        return WebResearchTurnOutcome(
+            triggered=True,
+            skipped_by_ledger=True,
+            triggers=triggers,
+            events=events,
+        )
+
+    if not active_portal_triggers:
+        return WebResearchTurnOutcome(
+            triggered=True,
+            triggers=triggers,
+            events=events,
+        )
+
+    if not fx_triggers:
+        events.append(
+            (
+                "web_research.started",
+                {
+                    "triggers": [t.category for t in active_portal_triggers],
+                    "doc_families": [t.doc_family for t in active_portal_triggers if t.doc_family],
+                },
+            )
+        )
+
+    specs = build_search_queries(query, active_portal_triggers)[:2]
+    all_results: list[WebSearchResult] = []
+    seen_urls: set[str] = set()
+    for spec in specs:
+        for res in execute_web_search(spec, http_fetcher=search_http_fetcher):
+            if res.url not in seen_urls:
+                seen_urls.add(res.url)
+                all_results.append(res)
+
+    if not all_results:
+        return WebResearchTurnOutcome(
+            triggered=True,
+            triggers=triggers,
+            events=events,
+        )
+
+    web_hits: list[dict[str, Any]] = []
+    superseded_sources: list[str] = []
+    sync_outcomes: list[dict[str, Any]] = []
+
+    # 1. Process top Tier-1 PDF or XLSX in the ephemeral RAM sandbox
+    doc_candidates = [
+        r for r in all_results if r.tier == 1 and (r.is_pdf or r.is_spreadsheet)
+    ]
+    if doc_candidates:
+        top_doc = doc_candidates[0]
+        events.append(
+            (
+                "pdf_sandbox.extracting",
+                {
+                    "url": top_doc.url,
+                    "doc_family": top_doc.doc_family,
+                    "fiscal_year": top_doc.fiscal_year,
+                },
+            )
+        )
+        try:
+            from .ephemeral_pdf_sandbox import fetch_and_extract_sandbox_document
+
+            sandbox_doc = fetch_and_extract_sandbox_document(
+                top_doc.url,
+                query,
+                turn_id=turn_id or "web_turn",
+                retriever=retriever,
+                top_k=4,
+                byte_fetcher=pdf_byte_fetcher,
+                base_dir=sandbox_base_dir,
+                doc_family_hint=top_doc.doc_family,
+            )
+            for idx, ch in enumerate(sandbox_doc.top_chunks):
+                txt = str(ch.get("text") or "").strip()
+                if not txt:
+                    continue
+                web_hits.append(
+                    {
+                        "text": txt,
+                        "answer": txt,
+                        "question": query,
+                        "source": sandbox_doc.filename,
+                        "source_url": sandbox_doc.url,
+                        "url": sandbox_doc.url,
+                        "title": sandbox_doc.stem.replace("-", " "),
+                        "effective_date": sandbox_doc.fiscal_year,
+                        "fiscal_year": sandbox_doc.fiscal_year,
+                        "section": str(ch.get("section") or f"Page {ch.get('page', idx + 1)}"),
+                        "page": str(ch.get("page") or ""),
+                        "chunk_id": f"web_sbx_{sandbox_doc.sha256[:10]}_{idx}",
+                        "doc_type": "pdf_chunk",
+                        "score_norm": float(ch.get("score") or 0.88),
+                        "score_rrf": 0.88,
+                    }
+                )
+
+            do_sync = (
+                flags.is_enabled("auto_qdrant_web_sync")
+                if auto_sync_qdrant is None
+                else bool(auto_sync_qdrant)
+            )
+            if do_sync and can_persist_to_qdrant(sandbox_doc.url):
+                from .corpus_sync import compare_and_sync_ura_document, serialize_sync_outcome
+
+                sync_out = compare_and_sync_ura_document(
+                    sandbox_doc,
+                    retriever,
+                    topic_key=active_portal_triggers[0].topic_key,
+                    pdf_jsonl_dir=pdf_jsonl_dir,
+                    archive_dir=archive_dir,
+                    freshness_snapshot_path=freshness_snapshot_path,
+                    persist_files=persist_files,
+                )
+                serialized_sync = serialize_sync_outcome(sync_out)
+                sync_outcomes.append(serialized_sync)
+                events.append(("qdrant_sync.updated", serialized_sync))
+                if sync_out.action_taken == "replaced_outdated" and sync_out.superseded_source:
+                    superseded_sources.append(sync_out.superseded_source)
+        except Exception:
+            logger.warning("Ephemeral sandbox extraction or Qdrant sync failed for %s", top_doc.url, exc_info=True)
+
+    # 2. Fall back to top Tier-1/Tier-2 HTML snippets when no PDF chunks were extracted
+    if not web_hits:
+        for idx, res in enumerate(all_results[:2]):
+            snippet_txt = f"{res.title}: {res.snippet}".strip(": ")
+            if not snippet_txt:
+                continue
+            host = (urlparse(res.url).hostname or "ura.go.ug").lower().rstrip(".")
+            web_hits.append(
+                {
+                    "text": snippet_txt,
+                    "answer": snippet_txt,
+                    "question": query,
+                    "source": host,
+                    "source_url": res.url,
+                    "url": res.url,
+                    "title": res.title,
+                    "effective_date": res.fiscal_year,
+                    "fiscal_year": res.fiscal_year,
+                    "section": "Official Portal Verification",
+                    "page": "",
+                    "chunk_id": f"web_snip_{idx}",
+                    "doc_type": "web_verified",
+                    "score_norm": 0.82 if res.tier == 1 else 0.76,
+                    "score_rrf": 0.82 if res.tier == 1 else 0.76,
+                }
+            )
+
+    verified_facts_addition = ""
+    if web_hits:
+        fetched_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        bullet_lines = [
+            "## Live Web & Official Portal Verification",
+            f"- Verified from official Ugandan portals at {fetched_iso}:",
+        ]
+        for h in web_hits[:3]:
+            src_label = str(h.get("source") or "ura.go.ug")
+            src_url = str(h.get("source_url") or h.get("url") or "")
+            fy_label = f" ({h['fiscal_year']})" if h.get("fiscal_year") else ""
+            snippet = str(h.get("text") or "").replace("\n", " ").strip()[:360]
+            bullet_lines.append(f"  - [{src_label}{fy_label}]({src_url}): {snippet}")
+        verified_facts_addition = "\n".join(bullet_lines)
+
+    return WebResearchTurnOutcome(
+        triggered=True,
+        skipped_by_ledger=False,
+        triggers=triggers,
+        search_results=all_results,
+        web_hits=web_hits,
+        superseded_sources=superseded_sources,
+        verified_facts_addition=verified_facts_addition,
+        sync_outcomes=sync_outcomes,
+        events=events,
+    )
