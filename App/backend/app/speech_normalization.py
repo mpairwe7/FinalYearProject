@@ -40,12 +40,21 @@ _URL_WITH_PREPOSITION_RE = re.compile(
     r"\s(?:at|via)\s+(?:https?://|www\.)[^\s<>\"]*[^\s<>\".,;:!?)\]]", re.IGNORECASE
 )
 
-# URA official emails and web domain: spoken naturally as "U R A dot go dot u g"
+# URA and Ugandan government/MDA official emails and web domains:
+# spoken naturally as "<agency> dot go dot u g" / "<agency> dot co dot u g" / "<agency> dot or dot u g"
 _URA_EMAIL_RE = re.compile(
     r"\b([A-Za-z0-9._%+-]+)@(?:www\.)?ura\.go\.ug\b", re.IGNORECASE
 )
 _URA_DOMAIN_RE = re.compile(
     r"\b(?:https?://)?(?:www\.)?ura\.go\.ug(?:/[^\s.,;:!?)\]]*)?\b", re.IGNORECASE
+)
+_GOV_EMAIL_RE = re.compile(
+    r"\b([A-Za-z0-9._%+-]+)@(?:www\.)?([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*)\.(go|co|or)\.ug\b",
+    re.IGNORECASE,
+)
+_GOV_DOMAIN_RE = re.compile(
+    r"\b([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*)\.(go|co|or)\.ug(?:/[^\s.,;:!?)\]]*)?\b",
+    re.IGNORECASE,
 )
 
 # Code blocks and inline code
@@ -147,44 +156,109 @@ _ACH_PCT_RE = re.compile(r"\b(dul[ \t]+)?([0-9]+(?:\.[0-9]+)?)[ \t]?%(?:[ \t]+i[
 # and in the figure patterns: `\d` also matches other scripts' digits.
 _BARE_NUMBER_RE = re.compile(r"(?<![\w.])(?<![0-9][,/:-])([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(\.[0-9]+)?(?!\w)(?![,/:.-][0-9])")
 
-# Acronyms and institutional terms in Ugandan tax context
+# Acronyms and institutional terms in Ugandan tax and cross-MDA government context
 _ACRONYMS = [
-    # EFRIS is an acronym pronounced as a natural, fluent word (/ˈɛfrɪs/ "Eh-fris")
-    # in Ugandan tax administration, rather than spelled letter-by-letter.
+    # Pronounceable acronyms spoken as natural, fluent words in Ugandan administration
+    # rather than spelled out letter-by-letter:
     (re.compile(r"\bE-?F-?R-?I-?S\b", re.IGNORECASE), "Efris"),
-    # URA is an institutional initialism pronounced letter-by-letter as "U R A" (/juː ɑːr eɪ/), never as word "ura".
-    (re.compile(r"(?:\bU\.R\.A\.?|\bU-R-A\b|\bURA\b|\bura\b)", re.IGNORECASE), "U R A"),
+    (re.compile(r"(?:\bN\.E\.M\.A\b\.?|\bN-E-M-A\b|\bNEMA\b)", re.IGNORECASE), "Nema"),
+    (re.compile(r"(?:\bN\.I\.R\.A\b\.?|\bN-I-R-A\b|\bNIRA\b)", re.IGNORECASE), "Nira"),
+    (re.compile(r"(?:\bI\.R\.A\.S\b\.?|\bI-R-A-S\b|\bIRAS\b)", re.IGNORECASE), "Iras"),
+    (re.compile(r"(?:\bB\.W\.I\.M\.S\b\.?|\bB-W-I-M-S\b|\bBWIMS\b)", re.IGNORECASE), "Bwims"),
+    (re.compile(r"(?:\bC\.O\.M\.E\.S\.A\b\.?|\bC-O-M-E-S-A\b|\bCOMESA\b)", re.IGNORECASE), "Comesa"),
+    (re.compile(r"(?:\bU\.L\.I\.I\b\.?|\bU-L-I-I\b|\bULII\b)", re.IGNORECASE), "Ulii"),
+    (re.compile(r"(?:\bI\.R\.I\.M\.S\b\.?|\bI-R-I-M-S\b|\bIRIMS\b)", re.IGNORECASE), "Irims"),
+    (re.compile(r"(?:\bN\.I\.T\.A-U\b|\bNITA-U\b)", re.IGNORECASE), "Nita U"),
+    (re.compile(r"(?:\bN\.I\.T\.A\b\.?|\bN-I-T-A\b|\bNITA\b)", re.IGNORECASE), "Nita"),
+    (re.compile(r"\bASYCUDA(?:\+\+)?\b", re.IGNORECASE), "Asycuda"),
+    (re.compile(r"\bTREP\b", re.IGNORECASE), "Trep"),
+    # PAYE is universally spoken in Uganda as "payee" (/peɪˈiː/), rather than spelled letter-by-letter.
+    (re.compile(r"(?:\bP\.A\.Y\.E\b\.?|\bP-A-Y-E\b|\bPAYE\b|\bpaye\b)", re.IGNORECASE), "Payee"),
     # TIN, NIN, VAT are acronyms naturally pronounced as words ("tin"/"teen", "nin", "vat")
     # in everyday Ugandan tax speech, rather than reading each as a separate letter.
-    (re.compile(r"(?:\bT\.I\.N\.?|\bT-I-N\b)"), "TIN"),
-    (re.compile(r"(?:\bN\.I\.N\.?|\bN-I-N\b)"), "NIN"),
-    (re.compile(r"(?:\bV\.A\.T\.?|\bV-A-T\b)"), "VAT"),
+    # Keep TIN/tin as TIN/tin and NIN/nin as NIN/nin (convert dotted/hyphenated T-I-N / N-I-N to TIN / NIN).
+    (re.compile(r"(?:\bT\.I\.N\b\.?|\bT-I-N\b)", re.IGNORECASE), "TIN"),
+    (re.compile(r"(?:\bN\.I\.N\b\.?|\bN-I-N\b)", re.IGNORECASE), "NIN"),
+    (re.compile(r"(?:\bV\.A\.T\b\.?|\bV-A-T\b)", re.IGNORECASE), "VAT"),
     (re.compile(r"\bV-?A-?T-?A\b"), "VAT Act"),
-    # PAYE is universally spoken in Uganda as "payee" (/peɪˈiː/), rather than spelled letter-by-letter.
-    (re.compile(r"(?:\bP\.A\.Y\.E\.?|\bP-A-Y-E\b|\bPAYE\b|\bpaye\b)", re.IGNORECASE), "Payee"),
-    (re.compile(r"\bWHT\b|\bW\.H\.T\.?\b"), "Withholding Tax"),
-    (re.compile(r"(?:\bC\.I\.T\.?|\bC-I-T\b|\bCIT\b)"), "C-I-T"),
-    (re.compile(r"(?:\bP\.I\.T\.?|\bP-I-T\b|\bPIT\b)"), "P-I-T"),
-    (re.compile(r"\bLED\b|\bL\.E\.D\.?\b"), "Local Excise Duty"),
-    (re.compile(r"\bDTS\b|\bD\.T\.S\.?\b"), "Digital Tax Stamps"),
-    (re.compile(r"(?:\bN\.S\.S\.F\.?|\bN-S-S-F\b|\bNSSF\b)"), "N-S-S-F"),
-    (re.compile(r"\bLST\b|\bL\.S\.T\.?\b"), "Local Service Tax"),
-    (re.compile(r"(?:\bU\.R\.S\.B\.?|\bU-R-S-B\b|\bURSB\b)"), "U-R-S-B"),
-    (re.compile(r"\bBOU\b|\bB\.O\.U\.?\b"), "Bank of Uganda"),
-    (re.compile(r"\bTAT\b|\bT\.A\.T\.?\b"), "Tax Appeals Tribunal"),
-    (re.compile(r"\bTPCA\b"), "Tax Procedures Code Act"),
+    # URA and Ugandan government/MDA initialisms pronounced letter-by-letter with spaces:
+    (re.compile(r"(?:\bU\.R\.A\b\.?|\bU-R-A\b|\bURA\b|\bura\b)", re.IGNORECASE), "U R A"),
+    (re.compile(r"(?:\bK\.C\.C\.A\b\.?|\bK-C-C-A\b|\bKCCA\b)", re.IGNORECASE), "K C C A"),
+    (re.compile(r"(?:\bU\.R\.S\.B\b\.?|\bU-R-S-B\b|\bURSB\b)", re.IGNORECASE), "U R S B"),
+    (re.compile(r"(?:\bU\.N\.B\.S\b\.?|\bU-N-B-S\b|\bUNBS\b)", re.IGNORECASE), "U N B S"),
+    (re.compile(r"(?:\bD\.C\.I\.C\b\.?|\bD-C-I-C\b|\bDCIC\b)", re.IGNORECASE), "D C I C"),
+    (re.compile(r"(?:\bU\.D\.L\.S\b\.?|\bU-D-L-S\b|\bUDLS\b)", re.IGNORECASE), "U D L S"),
+    (re.compile(r"(?:\bM\.L\.H\.U\.D\b\.?|\bM-L-H-U-D\b|\bMLHUD\b)", re.IGNORECASE), "M L H U D"),
+    (re.compile(r"(?:\bU\.G\.N\.L\.I\.S\b\.?|\bU-G-N-L-I-S\b|\bUgNLIS\b)", re.IGNORECASE), "U G N L I S"),
+    (re.compile(r"(?:\bU\.P\.F\b\.?|\bU-P-F\b|\bUPF\b)", re.IGNORECASE), "U P F"),
+    (re.compile(r"(?:\bE\.P\.S\b\.?|\bE-P-S\b|\bEPS\b)", re.IGNORECASE), "E P S"),
+    (re.compile(r"(?:\bN\.D\.A\.M\.I\.S\b\.?|\bN-D-A-M-I-S\b|\bNDAMIS\b)", re.IGNORECASE), "N D A M I S"),
+    (re.compile(r"(?:\bN\.D\.A\b\.?|\bN-D-A\b|\bNDA\b)", re.IGNORECASE), "N D A"),
+    (re.compile(r"(?:\bP\.P\.D\.A\b\.?|\bP-P-D-A\b|\bPPDA\b)", re.IGNORECASE), "P P D A"),
+    (re.compile(r"(?:\bI\.F\.M\.S\b\.?|\bI-F-M-S\b|\bIFMS\b)", re.IGNORECASE), "I F M S"),
+    (re.compile(r"(?:\bO\.B\.R\.S\b\.?|\bO-B-R-S\b|\bOBRS\b)", re.IGNORECASE), "O B R S"),
+    (re.compile(r"(?:\bU\.E\.S\.W\b\.?|\bU-E-S-W\b|\bUESW\b)", re.IGNORECASE), "U E S W"),
+    (re.compile(r"(?:\bO\.N\.T\.R\b\.?|\bO-N-T-R\b|\bONTR\b)", re.IGNORECASE), "O N T R"),
+    (re.compile(r"(?:\bN\.T\.R\b\.?|\bN-T-R\b|\bNTR\b)", re.IGNORECASE), "N T R"),
+    (re.compile(r"(?:\bM\.O\.W\.T\b\.?|\bM-O-W-T\b|\bMoWT\b)", re.IGNORECASE), "M O W T"),
+    (re.compile(r"(?:\bM\.O\.F\.P\.E\.D\b\.?|\bM-O-F-P-E-D\b|\bMoFPED\b)", re.IGNORECASE), "M O F P E D"),
+    (re.compile(r"(?:\bM\.O\.L\.G\b\.?|\bM-O-L-G\b|\bMoLG\b)", re.IGNORECASE), "M O L G"),
+    (re.compile(r"(?:\bM\.O\.I\.A\b\.?|\bM-O-I-A\b|\bMoIA\b)", re.IGNORECASE), "M O I A"),
+    (re.compile(r"(?:\bM\.A\.A\.I\.F\b\.?|\bM-A-A-I-F\b|\bMAAIF\b)", re.IGNORECASE), "M A A I F"),
+    (re.compile(r"(?:\bU\.C\.D\.A\b\.?|\bU-C-D-A\b|\bUCDA\b)", re.IGNORECASE), "U C D A"),
+    (re.compile(r"(?:\bU\.I\.A\b\.?|\bU-I-A\b|\bUIA\b)", re.IGNORECASE), "U I A"),
+    (re.compile(r"(?:\bU\.F\.Z\.A\b\.?|\bU-F-Z-A\b|\bUFZA\b)", re.IGNORECASE), "U F Z A"),
+    (re.compile(r"(?:\bU\.C\.C\b\.?|\bU-C-C\b|\bUCC\b)", re.IGNORECASE), "U C C"),
+    (re.compile(r"(?:\bN\.P\.A\b\.?|\bN-P-A\b|\bNPA\b)", re.IGNORECASE), "N P A"),
+    (re.compile(r"(?:\bN\.W\.S\.C\b\.?|\bN-W-S-C\b|\bNWSC\b)", re.IGNORECASE), "N W S C"),
+    (re.compile(r"(?:\bU\.N\.R\.A\b\.?|\bU-N-R-A\b|\bUNRA\b)", re.IGNORECASE), "U N R A"),
+    (re.compile(r"(?:\bP\.V\.O\.C\b\.?|\bP-V-O-C\b|\bPVoC\b)", re.IGNORECASE), "P V O C"),
+    (re.compile(r"(?:\bC\.O\.C\b\.?|\bC-O-C\b|\bCoC\b)", re.IGNORECASE), "C O C"),
+    (re.compile(r"(?:\bC\.G\.V\b\.?|\bC-G-V\b|\bCGV\b)", re.IGNORECASE), "C G V"),
+    (re.compile(r"(?:\bM\.Z\.O\b\.?|\bM-Z-O\b|\bMZO\b)", re.IGNORECASE), "M Z O"),
+    (re.compile(r"(?:\bE\.I\.A\b\.?|\bE-I-A\b|\bEIA\b)", re.IGNORECASE), "E I A"),
+    (re.compile(r"(?:\bF\.D\.N\b\.?|\bF-D-N\b|\bFDN\b)", re.IGNORECASE), "F D N"),
+    (re.compile(r"(?:\bE\.F\.D\b\.?|\bE-F-D\b|\bEFD\b)", re.IGNORECASE), "E F D"),
+    (re.compile(r"(?:\bE\.D\.C\b\.?|\bE-D-C\b|\bEDC\b)", re.IGNORECASE), "E D C"),
+    (re.compile(r"(?:\bO\.T\.P\b\.?|\bO-T-P\b|\bOTP\b)", re.IGNORECASE), "O T P"),
+    (re.compile(r"(?:\bE\.A\.C\b\.?|\bE-A-C\b|\bEAC\b)", re.IGNORECASE), "E A C"),
+    (re.compile(r"(?:\bC\.G\.T\b\.?|\bC-G-T\b|\bCGT\b)", re.IGNORECASE), "C G T"),
+    (re.compile(r"(?:\bD\.S\.T\b\.?|\bD-S-T\b|\bDST\b)", re.IGNORECASE), "D S T"),
+    (re.compile(r"(?:\bF\.O\.B\b\.?|\bF-O-B\b|\bFOB\b)", re.IGNORECASE), "F O B"),
+    (re.compile(r"(?:\bC\.I\.F\b\.?|\bC-I-F\b|\bCIF\b)", re.IGNORECASE), "C I F"),
+    (re.compile(r"(?:\bC\.X\.P\b\.?|\bC-X-P\b|\bCXP\b)", re.IGNORECASE), "C X P"),
+    (re.compile(r"(?:\bM\.D\.A\.?s\b|\bM-D-As\b|\bMDAs\b)", re.IGNORECASE), "M D As"),
+    (re.compile(r"(?:\bM\.D\.A\b\.?|\bM-D-A\b|\bMDA\b)", re.IGNORECASE), "M D A"),
+    (re.compile(r"\bB2G\b", re.IGNORECASE), "B 2 G"),
+    (re.compile(r"\bB2B\b", re.IGNORECASE), "B 2 B"),
+    (re.compile(r"\bB2C\b", re.IGNORECASE), "B 2 C"),
+    (re.compile(r"\be-?GP\b", re.IGNORECASE), "E G P"),
+    (re.compile(r"\be-?Citie\b", re.IGNORECASE), "E-City"),
+    # Tax heads & statutory abbreviations
+    (re.compile(r"\bWHT\b|\bW\.H\.T\b\.?", re.IGNORECASE), "Withholding Tax"),
+    (re.compile(r"(?:\bC\.I\.T\b\.?|\bC-I-T\b|\bCIT\b)", re.IGNORECASE), "C-I-T"),
+    (re.compile(r"(?:\bP\.I\.T\b\.?|\bP-I-T\b|\bPIT\b)"), "P-I-T"),
+    (re.compile(r"\bLED\b|\bL\.E\.D\b\.?"), "Local Excise Duty"),
+    (re.compile(r"\bDTS\b|\bD\.T\.S\b\.?", re.IGNORECASE), "Digital Tax Stamps"),
+    (re.compile(r"(?:\bN\.S\.S\.F\b\.?|\bN-S-S-F\b|\bNSSF\b)", re.IGNORECASE), "N-S-S-F"),
+    (re.compile(r"\bLST\b|\bL\.S\.T\b\.?", re.IGNORECASE), "Local Service Tax"),
+    (re.compile(r"\bBOU\b|\bB\.O\.U\b\.?"), "Bank of Uganda"),
+    (re.compile(r"\bTAT\b|\bT\.A\.T\b\.?"), "Tax Appeals Tribunal"),
+    (re.compile(r"\bTPCA\b", re.IGNORECASE), "Tax Procedures Code Act"),
     (re.compile(r"\bITA\b"), "Income Tax Act"),
-    (re.compile(r"(?:\bP\.R\.N\.?|\bP-R-N\b|\bPRN\b)"), "P-R-N"),
-    (re.compile(r"(?:\bB\.R\.N\.?|\bB-R-N\b|\bBRN\b)"), "B-R-N"),
-    (re.compile(r"(?:\bT\.C\.C\.?|\bT-C-C\b|\bTCC\b)"), "T-C-C"),
-    (re.compile(r"(?:\bA\.E\.O\.?|\bA-E-O\b|\bAEO\b)"), "A-E-O"),
-    (re.compile(r"(?:\bC\.E\.T\.?|\bC-E-T\b|\bCET\b)"), "C-E-T"),
-    (re.compile(r"\bASYCUDA(?:\+\+)?\b", re.IGNORECASE), "Asycuda"),
-    (re.compile(r"\bTREP\b"), "Trep"),
+    (re.compile(r"(?:\bP\.R\.N\b\.?|\bP-R-N\b|\bPRN\b)", re.IGNORECASE), "P-R-N"),
+    (re.compile(r"(?:\bB\.R\.N\b\.?|\bB-R-N\b|\bBRN\b)", re.IGNORECASE), "B-R-N"),
+    (re.compile(r"(?:\bT\.C\.C\b\.?|\bT-C-C\b|\bTCC\b)", re.IGNORECASE), "T-C-C"),
+    (re.compile(r"(?:\bA\.E\.O\b\.?|\bA-E-O\b|\bAEO\b)", re.IGNORECASE), "A-E-O"),
+    (re.compile(r"(?:\bC\.E\.T\b\.?|\bC-E-T\b|\bCET\b)", re.IGNORECASE), "C-E-T"),
     (re.compile(r"\be-?Receipt\b", re.IGNORECASE), "E-Receipt"),
     (re.compile(r"\be-?Invoice\b", re.IGNORECASE), "E-Invoice"),
     (re.compile(r"\be-?Tax\b", re.IGNORECASE), "E-Tax"),
-    (re.compile(r"\bDT-(\d{3,4})\b"), r"D-T \1"),
+    (re.compile(r"\be-?Passport\b", re.IGNORECASE), "E-Passport"),
+    (re.compile(r"\be-?Portal\b", re.IGNORECASE), "E-Portal"),
+    (re.compile(r"\be-?Filing\b", re.IGNORECASE), "E-Filing"),
+    (re.compile(r"\be-?Immigration\b", re.IGNORECASE), "E-Immigration"),
+    (re.compile(r"\bDT-([0-9]{3,5})\b", re.IGNORECASE), r"D-T \1"),
 ]
 
 
@@ -354,7 +428,15 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
     t = _URL_WITH_PREPOSITION_RE.sub("", t)
     t = _URA_EMAIL_RE.sub(r"\1 at U R A dot go dot u g", t)
     t = _URA_DOMAIN_RE.sub("U R A dot go dot u g", t)
+    t = _GOV_EMAIL_RE.sub(
+        lambda m: f"{m.group(1)} at {m.group(2).replace('.', ' dot ')} dot {m.group(3).lower()} dot u g",
+        t,
+    )
     t = _BARE_URL_RE.sub("", t)
+    t = _GOV_DOMAIN_RE.sub(
+        lambda m: f"{m.group(1).replace('.', ' dot ')} dot {m.group(2).lower()} dot u g",
+        t,
+    )
 
     # 2. Strip inline citation markers: [1], [1, 2]
     t = _CITATION_RE.sub("", t)
@@ -467,18 +549,14 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
 
 
 _BANTU_ACRONYM_PHONETICS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"\bTIN\b"), "T-I-N"),
-    (re.compile(r"\bNIN\b"), "N-I-N"),
-    (re.compile(r"\bPRN\b"), "P-R-N"),
+    (re.compile(r"(?:\bT\.I\.N\b\.?|\bT-I-N\b)", re.IGNORECASE), "TIN"),
+    (re.compile(r"(?:\bN\.I\.N\b\.?|\bN-I-N\b)", re.IGNORECASE), "NIN"),
+    (re.compile(r"\bPRN\b", re.IGNORECASE), "P-R-N"),
 )
 
 
 def phoneticize_bantu_acronyms(text: str, locale: str = "lg") -> str:
-    """Spell out bare English acronyms (TIN -> T-I-N) for Orpheus Ugandan/East African voices.
-
-    Prevents Orpheus-3B from reading 'TIN' as the English word 'team' or 'tin'
-    inside Luganda, Swahili, Runyankole, and Acholi sentences (see voice-receptionist-demo.md §6).
-    """
+    """Normalize acronyms (TIN/tin kept as natural word, PRN -> P-R-N) for Orpheus Ugandan/East African voices."""
     if not text or (locale or "").lower() not in ("lg", "sw", "nyn", "ach"):
         return text or ""
     out = text

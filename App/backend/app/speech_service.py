@@ -496,27 +496,27 @@ def resolve_salt_language_token_id(language: str | None) -> int | None:
 # Luganda or Kiswahili clip posted to /v1/asr without ?language= was biased
 # toward English tax prose. No detected language gets the neutral line.
 _SALT_PROMPT_EN = (
-    "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, customs duty, "
+    "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, KCCA, NEMA, UNBS, NIRA, NTR, customs duty, "
     "withholding tax, presumptive tax, taxpayer, Uganda Revenue Authority."
 )
 _SALT_PROMPT_LG = (
-    "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, omusolo, "
+    "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, KCCA, NEMA, UNBS, NIRA, NTR, omusolo, "
     "omusaala, ebyamaguzi, forodha, okwewandiisa, Uganda Revenue Authority."
 )
 _SALT_PROMPT_SW = (
-    "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, kodi, ushuru, "
+    "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, KCCA, NEMA, UNBS, NIRA, NTR, kodi, ushuru, "
     "forodha, ankara, risiti, usajili, Mamlaka ya Mapato ya Uganda."
 )
 _SALT_PROMPT_NYN = (
-    "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, omushoro, "
+    "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, KCCA, NEMA, UNBS, NIRA, NTR, omushoro, "
     "omushaara, ebicweka, okwehandiikisa, okushashura, Uganda Revenue Authority."
 )
 _SALT_PROMPT_ACH = (
-    "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, mucoro, "
+    "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, KCCA, NEMA, UNBS, NIRA, NTR, mucoro, "
     "mucara, coyo nying, culu mucoro, Uganda Revenue Authority."
 )
 _SALT_PROMPT_NEUTRAL = (
-    "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, "
+    "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, KCCA, NEMA, UNBS, NIRA, NTR, "
     "Uganda Revenue Authority."
 )
 
@@ -889,8 +889,8 @@ class SpeechModel:
         if whisper_paths:
             try:
                 import torch
-                from transformers import WhisperForConditionalGeneration, WhisperProcessor
                 from peft import PeftModel
+                from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
                 for lang, adapter_path in whisper_paths.items():
                     try:
@@ -1193,9 +1193,9 @@ class SpeechModel:
         try:
             from . import sunbird
             if sunbird.is_available():
-                import io as _io, wave as _wave
+                import io as _io
+                import wave as _wave
                 samples = self._decode_audio_bytes(audio_bytes, target_sr=sample_rate)
-                import numpy as np
                 pcm16 = (samples * 32768).clip(-32768, 32767).astype("int16")
                 wav_buf = _io.BytesIO()
                 with _wave.open(wav_buf, "wb") as w:
@@ -1280,7 +1280,6 @@ class SpeechModel:
             import io as _io
             import wave as _wave
 
-            import numpy as np
 
             samples = self._decode_audio_bytes(audio_bytes, target_sr=sample_rate)
             pcm16 = (samples * 32768).clip(-32768, 32767).astype("int16")
@@ -1300,7 +1299,7 @@ class SpeechModel:
 
     def _cf_workers_ai_tts(
         self, text: str, voice: str | None, language: str
-    ) -> "SynthesizeResult | None":
+    ) -> SynthesizeResult | None:
         """Cloud TTS via Cloudflare Workers AI (flag/backend/config/breaker/budget
         gated). Tries TTS_FALLBACK_MODEL then TTS_FALLBACK_MODEL_2 for resilience.
         Returns None when disabled/unavailable so the caller falls through."""
@@ -1354,7 +1353,6 @@ class SpeechModel:
         whisper_pair: tuple | None = None,
     ) -> TranscribeResult | None:
         """Offline STT via Whisper + LoRA adapter (language-specific)."""
-        import numpy as np
         import torch
 
         pair = whisper_pair or self._whisper_peft
@@ -1453,9 +1451,8 @@ class SpeechModel:
         token_ids: dict[str, int],
     ) -> tuple[dict[str, float], float]:
         """Worker for :meth:`identify_language`: ``({lang: prob}, speech_s)``."""
-        import torch
-
         import numpy as np
+        import torch
 
         model, processor = self._whisper_salt
         if audio_bytes[:4] == b"RIFF":
@@ -1487,7 +1484,7 @@ class SpeechModel:
         langs = list(token_ids)
         picked = logits[0, -1, [token_ids[lang] for lang in langs]].float()
         probs = torch.softmax(picked, dim=-1).tolist()
-        return {lang: round(float(p), 4) for lang, p in zip(langs, probs)}, speech_s
+        return {lang: round(float(p), 4) for lang, p in zip(langs, probs, strict=False)}, speech_s
 
     def _transcribe_whisper_salt(
         self,
@@ -1602,7 +1599,7 @@ class SpeechModel:
                 special_ids = set(processor.tokenizer.all_special_ids) if hasattr(processor.tokenizer, "all_special_ids") else set()
                 cur_tokens: list[int] = []
                 cur_probs: list[float] = []
-                for tid, lp in zip(gen_tokens, log_probs):
+                for tid, lp in zip(gen_tokens, log_probs, strict=False):
                     if tid in special_ids:
                         continue
                     piece = processor.tokenizer.decode([tid])
@@ -1699,8 +1696,9 @@ class SpeechModel:
         except ImportError:
             return None
 
-        import numpy as np
-        import tempfile, io, wave
+        import io
+        import tempfile
+        import wave
 
         t0 = time.perf_counter()
         samples = self._decode_audio_bytes(audio_bytes, target_sr=sample_rate)
@@ -2076,7 +2074,8 @@ class SpeechModel:
                 return None
             t_spark = time.perf_counter()
             try:
-                import io as _io, wave as _wave
+                import io as _io
+                import wave as _wave
 
                 import numpy as np
 
@@ -2243,7 +2242,7 @@ class SpeechModel:
         audio_bytes: bytes,
         sample_rate: int = 16000,
         language: str | None = None,
-    ) -> "TranscribeResult":
+    ) -> TranscribeResult:
         """Async wrapper around ``transcribe()`` — runs in executor.
 
         Intended for use from async WebSocket handlers.  Uses the
@@ -2270,8 +2269,9 @@ class SpeechModel:
         called from a ThreadPoolExecutor worker, not the main async loop).
         """
         try:
-            import edge_tts
             import io
+
+            import edge_tts
         except ImportError:
             return None
 
@@ -2470,6 +2470,7 @@ class SpeechModel:
         # 1. Try soundfile (libsndfile — native in Python, supports MP3, OGG, WAV, FLAC without external binaries)
         try:
             import io
+
             import soundfile as sf
             data, sr = sf.read(io.BytesIO(audio_bytes), dtype="float32")
             if data.ndim > 1:
@@ -2515,8 +2516,9 @@ class SpeechModel:
 
         # Try pydub as fallback
         try:
-            from pydub import AudioSegment
             import io
+
+            from pydub import AudioSegment
 
             seg = AudioSegment.from_file(io.BytesIO(audio_bytes))
             seg = seg.set_channels(1).set_frame_rate(target_sr).set_sample_width(2)
@@ -2846,10 +2848,9 @@ class SpeechModel:
         if os.getenv("TRANSLATE_FALLBACK_BACKEND", "").strip().lower() not in ("gemini", "workers_ai"):
             return ""
         try:
-            from .providers import breakers, budget
+            from .providers import breakers, budget, routing
             from .providers import config as cfg
             from .providers import gateway as gw
-            from .providers import routing
         except Exception:
             return ""
         if not (

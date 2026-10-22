@@ -26,7 +26,11 @@ from app.receptionist.lexicon import (
     normalize_swahili_tax_query,
     repair_asr_entities,
 )
-from app.receptionist.metrics import compute_call_metrics, get_aggregate_metrics, record_call_end_metrics
+from app.receptionist.metrics import (
+    compute_call_metrics,
+    get_aggregate_metrics,
+    record_call_end_metrics,
+)
 from app.receptionist.phrases import phrase
 from app.receptionist.state import CallRoom, CallState
 from app.receptionist.store import create_call, create_turn, init_receptionist_schema, list_turns
@@ -101,6 +105,11 @@ class TestLugandaLexiconNormalization(unittest.TestCase):
         self.assertEqual(repair_asr_entities("peera ya URA"), "PRN ya URA")
         self.assertEqual(repair_asr_entities("e-fris invoice"), "EFRIS invoice")
         self.assertEqual(repair_asr_entities("w-h-t tax"), "WHT tax")
+        self.assertEqual(repair_asr_entities("k c c a trading license"), "KCCA trading license")
+        self.assertEqual(repair_asr_entities("u r s b company registration"), "URSB company registration")
+        self.assertEqual(repair_asr_entities("u n b s import clearance"), "UNBS import clearance")
+        self.assertEqual(repair_asr_entities("n e m a environmental fee"), "NEMA environmental fee")
+        self.assertEqual(repair_asr_entities("n i r a national id"), "NIRA national id")
 
 
 class TestLugandaCrossLingualKnowledgeReceptionist(unittest.IsolatedAsyncioTestCase):

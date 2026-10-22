@@ -63,11 +63,92 @@ def test_tin_digit_expansion():
 
 
 def test_standalone_tin_and_prn_and_nin():
-    raw = "You must obtain a valid TIN and PRN before paying, or show your NIN."
+    raw = "You must obtain a valid TIN (or tin / T-I-N) and PRN before paying, or show your NIN (or nin / N-I-N)."
     res = clean_text_for_speech(raw, locale="en")
     assert "TIN" in res
+    assert "T-I-N" not in res
     assert "P-R-N" in res
     assert "NIN" in res
+    assert "N-I-N" not in res
+
+
+def test_government_mda_terms_and_pronunciations():
+    raw_upper = (
+        "Coordinate with KCCA, URSB, NEMA, UNBS, NIRA, DCIC, UDLS, MLHUD, UgNLIS, "
+        "UPF, EPS, NDA, NDAMIS, PPDA, IFMS, OBRS, UESW, IRAS, BWIMS, NTR, ONTR, "
+        "MoWT, MoFPED, MoLG, MAAIF, UCDA, PVoC, CoC, CGV, MZO, EIA, FDN, EFD, OTP, "
+        "COMESA, ULII, e-GP, and e-Citie."
+    )
+    res_upper = clean_text_for_speech(raw_upper, locale="en")
+    assert "K C C A" in res_upper
+    assert "U R S B" in res_upper
+    assert "Nema" in res_upper
+    assert "U N B S" in res_upper
+    assert "Nira" in res_upper
+    assert "D C I C" in res_upper
+    assert "U D L S" in res_upper
+    assert "M L H U D" in res_upper
+    assert "U G N L I S" in res_upper
+    assert "U P F" in res_upper
+    assert "E P S" in res_upper
+    assert "N D A" in res_upper
+    assert "N D A M I S" in res_upper
+    assert "P P D A" in res_upper
+    assert "I F M S" in res_upper
+    assert "O B R S" in res_upper
+    assert "U E S W" in res_upper
+    assert "Iras" in res_upper
+    assert "Bwims" in res_upper
+    assert "N T R" in res_upper
+    assert "O N T R" in res_upper
+    assert "M O W T" in res_upper
+    assert "M O F P E D" in res_upper
+    assert "M O L G" in res_upper
+    assert "M A A I F" in res_upper
+    assert "U C D A" in res_upper
+    assert "P V O C" in res_upper
+    assert "C O C" in res_upper
+    assert "C G V" in res_upper
+    assert "M Z O" in res_upper
+    assert "E I A" in res_upper
+    assert "F D N" in res_upper
+    assert "E F D" in res_upper
+    assert "O T P" in res_upper
+    assert "Comesa" in res_upper
+    assert "Ulii" in res_upper
+    assert "E G P" in res_upper
+    assert "E-City" in res_upper
+
+    raw_lower = "Check kcca, ursb, nema, unbs, nira, dcic, udls, mlhud, upf, nda, ppda, ifms, obrs, uesw, iras, bwims, ntr, and ontr."
+    res_lower = clean_text_for_speech(raw_lower, locale="en")
+    assert "K C C A" in res_lower
+    assert "U R S B" in res_lower
+    assert "Nema" in res_lower
+    assert "U N B S" in res_lower
+    assert "Nira" in res_lower
+    assert "D C I C" in res_lower
+    assert "U D L S" in res_lower
+    assert "M L H U D" in res_lower
+    assert "U P F" in res_lower
+    assert "N D A" in res_lower
+    assert "P P D A" in res_lower
+    assert "I F M S" in res_lower
+    assert "O B R S" in res_lower
+    assert "U E S W" in res_lower
+    assert "Iras" in res_lower
+    assert "Bwims" in res_lower
+    assert "N T R" in res_lower
+    assert "O N T R" in res_lower
+
+    raw_domains = "Check kcca.go.ug, obrs.ursb.go.ug, unbs.go.ug, nema.go.ug, nira.go.ug, udls.co.ug, or nda.or.ug."
+    res_domains = clean_text_for_speech(raw_domains, locale="en")
+    assert "K C C A dot go dot u g" in res_domains
+    assert "O B R S dot U R S B dot go dot u g" in res_domains
+    assert "U N B S dot go dot u g" in res_domains
+    assert "Nema dot go dot u g" in res_domains
+    assert "Nira dot go dot u g" in res_domains
+    assert "U D L S dot co dot u g" in res_domains
+    assert "N D A dot or dot u g" in res_domains
 
 
 def test_prn_digit_expansion():

@@ -548,8 +548,11 @@ def test_phase33_dynamic_turn_stop_and_bantu_acronym_phonetics():
     assert apply_dynamic_turn_timeout(dummy_strategy, room) == 1.1
     assert dummy_strategy._user_speech_timeout == 1.1
 
-    phon = phoneticize_bantu_acronyms("Nsaba okumanya ku TIN ne PRN yange.", locale="lg")
-    assert "T-I-N" in phon
+    phon = phoneticize_bantu_acronyms("Nsaba okumanya ku TIN ne NIN ne PRN yange.", locale="lg")
+    assert "TIN" in phon
+    assert "T-I-N" not in phon
+    assert "NIN" in phon
+    assert "N-I-N" not in phon
     assert "P-R-N" in phon
 
 
@@ -1193,6 +1196,7 @@ def test_phase35_multi_case_resolution_ledger_anon_promotion_and_officer_prefere
         # 5. export_preferences.py includes officer_copilot_edit pairs
         import tempfile
         from pathlib import Path
+
         from evals.export_preferences import export_pairs
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1423,7 +1427,12 @@ def test_phase38_nyn_and_ach_full_2026_ttt_tts_stt_parity(monkeypatch):
         classify_hybrid_speech_mode,
         compute_semantic_endpoint_silence_ms,
     )
-    from app.receptionist.language import LanguagePolicy, LanguageVote, detect_explicit_request, lexical_hits
+    from app.receptionist.language import (
+        LanguagePolicy,
+        LanguageVote,
+        detect_explicit_request,
+        lexical_hits,
+    )
     from app.receptionist.lexicon import (
         normalize_acholi_tax_query,
         normalize_call_query,
@@ -1547,8 +1556,8 @@ def test_phase38_nyn_and_ach_full_2026_ttt_tts_stt_parity(monkeypatch):
     finally:
         flags.clear("spoken_figure_guard")
 
-    assert phoneticize_bantu_acronyms("TIN na PRN", locale="nyn") == "T-I-N na P-R-N"
-    assert phoneticize_bantu_acronyms("TIN ki PRN", locale="ach") == "T-I-N ki P-R-N"
+    assert phoneticize_bantu_acronyms("TIN na NIN na PRN", locale="nyn") == "TIN na NIN na P-R-N"
+    assert phoneticize_bantu_acronyms("TIN ki NIN ki PRN", locale="ach") == "TIN ki NIN ki P-R-N"
 
     monkeypatch.setenv("ORPHEUS_TTS_URL", "http://orpheus-tts:8100")
     assert orpheus_tts.speaker_for("nyn") == "salt_nyn_0001"
@@ -1769,7 +1778,7 @@ def test_phase40_qa_audit_gaps_prometheus_slots_calculators_and_resumption():
     from app.workflows.slots import validate_slot
 
     # 1. Prometheus _DECISION_LOCALES covers all 5 locales
-    assert _DECISION_LOCALES == frozenset({"en", "lg", "sw", "nyn", "ach"})
+    assert frozenset({"en", "lg", "sw", "nyn", "ach"}) == _DECISION_LOCALES
 
     # 2. ResolutionCase resumption prompt in nyn and ach
     case = ResolutionCase(
@@ -1934,6 +1943,7 @@ def test_phase42_claim_verifier_disclaimers_and_langgraph_reasoning_miss(monkeyp
 
     # 5. Multi-intent Luganda query decomposition in HybridRetriever.search_planned
     from unittest.mock import patch
+
     from app.retriever import HybridRetriever
 
     ret = HybridRetriever.__new__(HybridRetriever)
