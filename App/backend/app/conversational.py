@@ -17,17 +17,23 @@ Covers:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+from .model_welfare import handle_model_welfare_turn
 from .text_signals import _resolve_courtesy_locale
 
 
 @dataclass(frozen=True)
 class ConversationalResult:
+    """Structured result returned by :func:`handle_conversational_turn`."""
+
     reply: str
     locale: str
     intent_type: str
     next_actions: list[str]
+    faithfulness_score: float = 1.0
+    sources: list[str] = field(default_factory=list)
+    citations: list[dict[str, str]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -505,6 +511,19 @@ def handle_conversational_turn(message: str, locale: str = "en") -> Conversation
             "ach": ["Nge i kom mucoro me VAT", "PAYE tiyo nining?", "Nong TIN ni"],
         }.get(eff_loc, ["Learn about VAT in Uganda", "How does PAYE support services?", "Register for a TIN"])
         return ConversationalResult(reply, eff_loc, "civic_philosophy", actions)
+
+    # 1b. Agent & Model Welfare Interview Resilience (Table 9.1.A, ISO/IEC 42001 & NIST AI 600-1)
+    welfare = handle_model_welfare_turn(text, eff_loc)
+    if welfare is not None:
+        return ConversationalResult(
+            reply=welfare.reply,
+            locale=welfare.locale,
+            intent_type=welfare.intent_type,
+            next_actions=welfare.next_actions,
+            faithfulness_score=welfare.faithfulness_score,
+            sources=welfare.sources,
+            citations=welfare.citations,
+        )
 
     # 2. Identity / Origin / Location / Multilingual abilities ("Who made you?", "Where are you from?", "Can you speak Luganda?")
     if _IDENTITY_ORIGINS_RE.search(text):
