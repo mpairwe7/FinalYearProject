@@ -142,6 +142,7 @@ describe("WorkflowStepper", () => {
         mode: "login_or_register",
         reason: "Sign in to submit on the URA portal.",
         preserved_slot_count: 2,
+        register_action: "Guide me step by step through TIN Registration Guide",
       },
     };
 
@@ -152,6 +153,12 @@ describe("WorkflowStepper", () => {
     expect(screen.getByTestId("workflow-scaffolding")).toHaveTextContent("Choose individual, company, or ngo.");
     expect(screen.getByTestId("workflow-form-draft")).toHaveTextContent("URA-REG-DT-101 · 50%");
     expect(screen.getByTestId("workflow-step-up-auth")).toHaveTextContent("2 answers saved");
+    expect(screen.getByTestId("workflow-step-up-action-btn")).toHaveTextContent(
+      "Guide me step by step through TIN Registration Guide",
+    );
+
+    fireEvent.click(screen.getByTestId("workflow-step-up-action-btn"));
+    expect(onSelect).toHaveBeenCalledWith("Guide me step by step through TIN Registration Guide");
 
     fireEvent.click(screen.getByText("Guide me step by step through Cross-MDA & NTR Verification Guide"));
     expect(onSelect).toHaveBeenCalledWith("Guide me step by step through Cross-MDA & NTR Verification Guide");

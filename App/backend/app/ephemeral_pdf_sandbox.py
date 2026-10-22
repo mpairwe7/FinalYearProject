@@ -123,7 +123,7 @@ def _default_sandbox_root() -> Path:
     configured = os.getenv("URA_WEB_SANDBOX_DIR", "").strip()
     if configured:
         return Path(configured)
-    shm_root = Path("/dev/shm")
+    shm_root = Path("/dev/shm")  # nosec B108 # noqa: S108 — intentional RAM-backed tmpfs root; per-turn subdir uses uuid4 + 0o700 (ADR-0008)
     if shm_root.is_dir() and os.access(shm_root, os.W_OK):
         return shm_root / "ura-web-sandbox"
     return Path(tempfile.gettempdir()) / "ura-web-sandbox"

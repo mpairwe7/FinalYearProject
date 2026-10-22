@@ -51,10 +51,12 @@
   },
   "overrides": {
     "ip-address": "^10.7.3",
-    "fast-uri": "^4.2.1"
+    "fast-uri": "^4.2.1",
+    "katex": "^0.18.2"
   },
   "resolutions": {
     "ip-address": "^10.7.3",
-    "fast-uri": "^4.2.1"
+    "fast-uri": "^4.2.1",
+    "katex": "^0.18.2"
   }
 }

@@ -56,7 +56,7 @@ jsonschema>=4.23
 # /v1/documents/{id}/report) + image-attachment decoding. Previously
 # undeclared — PDF export only worked where fpdf2 happened to be installed.
 fpdf2>=2.8.8
-Pillow>=10.4
+Pillow>=13.0.0
 
 # LLM generation (Qwen/Qwen3-8B local inference or vLLM dispatch). Also
 # covers the ASR half of the Sunbird SALT speech stack

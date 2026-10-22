@@ -737,7 +737,7 @@ def remote_url_problem(url: str) -> str:
         return "production requires https"
     host = (parts.hostname or "").strip().lower()
     if is_prod and host:
-        if host in {"localhost", "0.0.0.0"}:
+        if host in {"localhost", "0.0.0.0"}:  # nosec B104 # noqa: S104 — rejecting 0.0.0.0 as a remote MCP host, not binding to it
             return "production forbids loopback or unspecified MCP server hosts"
         try:
             ip = ipaddress.ip_address(host)

@@ -100,6 +100,7 @@ export interface WorkflowJourneyGps {
   parked_step_prompt?: string;
   resume_action?: string;
   resume_code?: string;
+  parent_goals?: { workflow_id: string; step_idx: number }[];
 }
 
 export interface WorkflowScaffolding {

@@ -45,7 +45,7 @@ pdfplumber>=0.11.0
 # endpoint 500'd on this image — live-verified on the HF Space 2026-07-18.
 # Pillow enables image-attachment decode (OCR engines stay optional).
 fpdf2>=2.8.8
-Pillow>=10.4
+Pillow>=13.0.0
 
 # SSE streaming
 sse-starlette>=2.0.0

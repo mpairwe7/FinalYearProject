@@ -39,10 +39,13 @@ COPY App/backend/requirements.txt ./requirements.txt
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match
 
-# Voice receptionist (Pipecat + jellyfish phonetic keys)
+# Voice receptionist (Pipecat + jellyfish phonetic keys). Re-assert Pillow>=13.0.0
+# afterward because pipecat-ai's wheel metadata caps Pillow<13 for its optional
+# vision helper, which otherwise downgrades Pillow to 12.3.0 (CVE-2026-112393 et al.).
 COPY App/backend/requirements-receptionist.txt ./requirements-receptionist.txt
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install -r requirements-receptionist.txt
+    uv pip install -r requirements-receptionist.txt && \
+    uv pip install "Pillow>=13.0.0"
 
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime - Production image

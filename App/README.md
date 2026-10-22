@@ -1260,8 +1260,8 @@ changed and why.
   in the `lint` script — Next.js 16 no longer ships lint.
 - New `frontend/eslint.config.mjs` — flat-config ESLint extending
   `next/core-web-vitals` and `next/typescript` via `FlatCompat`.
-- `frontend/Dockerfile` runtime image pinned to `node:20.18-slim`
-  (Next.js 16 requires Node.js ≥ 20.9).
+- `frontend/Dockerfile` runtime image pinned to `node:26-bookworm-slim`
+  (October 2026 baseline requires Node.js ≥ 24.0.0; see ADR-0011).
 - Gap #16 fix — `backend/app/service.py::stream_llm_tokens` routes
   the SSE streaming path through the shared `_LLM_CIRCUIT` breaker
   with the same success/failure accounting as the sync path.
