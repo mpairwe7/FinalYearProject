@@ -9,7 +9,8 @@ invariants here are structural, so they hold for pins nobody has seen yet:
 * every checkout makes an explicit ``persist-credentials`` decision, and
   only the jobs that push a commit keep the token;
 * no workflow input or event text is spliced into a shell or JS body;
-* container images are version + digest pinned, never ``:latest``;
+* container images are version + digest pinned, never ``:latest`` — in
+  workflows and in every Dockerfile, whose directories Dependabot watches;
 * Node and Bun come from one version file each, and the Dockerfiles that
   ship the frontend use the same majors, digest-pinned;
 * every Dependabot ecosystem waits out a cooldown, and the frontend is
@@ -58,6 +59,19 @@ _PINNED = re.compile(r"^(?P<action>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)(?:/[^@]+)?@(
 _VERSION_COMMENT = re.compile(r"#\s*v?\d+(\.\d+)*\b")
 _UNTRUSTED_EXPR = re.compile(r"\$\{\{\s*(inputs\.|github\.event\.|github\.head_ref|github\.base_ref)")
 _DIGEST_IMAGE = re.compile(r"^[^\s:@]+(:[A-Za-z0-9_.-]+)?@sha256:[0-9a-f]{64}$")
+#: Our own image, rolled to an immutable ``sha-`` tag by ura-chatbot-roll-hf-space.yml.
+SELF_ROLLED = {"App/deploy/hf-space/Dockerfile": "landwind/ura-chatbot:sha-"}
+_SKIP_DIRS = {"node_modules"}
+
+
+def _dockerfiles() -> list[Path]:
+    return sorted(
+        p
+        for p in ROOT.rglob("Dockerfile*")
+        if p.is_file()
+        and p.suffix != ".dockerignore"
+        and not any(part.startswith(".") or part in _SKIP_DIRS for part in p.relative_to(ROOT).parts[:-1])
+    )
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -161,6 +175,25 @@ def test_container_images_are_digest_pinned(path: Path):
             assert _DIGEST_IMAGE.match(image), f"{path.name}:{job_name}: {image} must be pinned by digest"
 
 
+
+@pytest.mark.parametrize("path", _dockerfiles(), ids=lambda p: str(p.relative_to(ROOT)))
+def test_dockerfile_images_are_digest_pinned(path: Path):
+    """A tag alone is mutable: ``python:3.11-slim-bookworm`` and ``uv:0.7``
+    were rebuilt underneath this repo between two identical builds."""
+    name = str(path.relative_to(ROOT))
+    text = path.read_text(encoding="utf-8")
+    stages = {s.lower() for s in re.findall(r"^FROM\s+\S+\s+AS\s+(\S+)", text, re.M | re.I)}
+    images = re.findall(r"^FROM\s+(?:--platform=\S+\s+)?(\S+)", text, re.M | re.I)
+    images += re.findall(r"^COPY\s+(?:--\S+\s+)*--from=(\S+)", text, re.M | re.I)
+    assert images, f"{name}: no base image found"
+    for image in images:
+        if image.lower() in stages or image.isdigit():
+            continue
+        if name in SELF_ROLLED and image.startswith(SELF_ROLLED[name]):
+            continue
+        assert "$" not in image, f"{name}: {image} — Dependabot cannot see an ARG-built image reference"
+        assert _DIGEST_IMAGE.match(image), f"{name}: {image} must be pinned by tag and digest"
+
 def test_node_and_bun_come_from_one_version_file_each():
     for path in WORKFLOWS:
         text = path.read_text(encoding="utf-8")
@@ -224,6 +257,14 @@ def test_dependabot_cooldown_and_coverage():
     assert "/App/frontend" in ecosystems.get("bun", [])
     for needed in ("/", "/App", "/App/frontend"):
         assert needed in ecosystems.get("docker", []), f"Dependabot docker does not cover {needed}"
+    # A digest pin nobody bumps goes stale, so every Dockerfile's directory is watched.
+    for path in _dockerfiles():
+        name = str(path.relative_to(ROOT))
+        if name in SELF_ROLLED:
+            continue
+        rel = path.parent.relative_to(ROOT).as_posix()
+        directory = "/" if rel == "." else f"/{rel}"
+        assert directory in ecosystems.get("docker", []), f"Dependabot docker does not watch {directory} ({name})"
 
 
 def test_signatures_are_verified_against_this_repository_only():

@@ -8,14 +8,18 @@
 # -----------------------------------------------------------------------------
 # Stage 1: Builder - Install dependencies
 # -----------------------------------------------------------------------------
+# uv comes from its own named stage, pinned by tag and digest, so the pin is a
+# FROM line Dependabot can see rather than a COPY --from=<image> it cannot.
+FROM ghcr.io/astral-sh/uv:0.7.22@sha256:629240833dd25d03949509fc01ceff56ae74f5e5f0fd264da634dd2f70e9cc70 AS uv-binary
+
 # Literal, patch-pinned base image: Dependabot's docker updater bumps FROM
 # lines but cannot see an ARG default, which is how this sat on 3.11.11
 # (Debian 12.10, OpenSSL 3.0.15) with 4 critical and 42 high fixable OS
 # findings in the Trivy image scan.
-FROM python:3.14.8-slim-bookworm AS builder
+FROM python:3.14.8-slim-bookworm@sha256:44e000a07b48bef1517a2b14adc93c17af728ca98858b5e24c6e1b18de1b2ef2 AS builder
 
 # Install uv for fast dependency resolution
-COPY --from=ghcr.io/astral-sh/uv:0.7 /uv /usr/local/bin/uv
+COPY --from=uv-binary /uv /usr/local/bin/uv
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -51,7 +55,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime - Production image
 # -----------------------------------------------------------------------------
-FROM python:3.14.8-slim-bookworm AS runtime
+FROM python:3.14.8-slim-bookworm@sha256:44e000a07b48bef1517a2b14adc93c17af728ca98858b5e24c6e1b18de1b2ef2 AS runtime
 
 # Keep OS packages current with bookworm-security errata (fixes perl-base,
 # libpcre2, openssl/libssl3 CVEs).
