@@ -194,6 +194,16 @@ _LEGITIMATE_TAX_MODIFIERS = frozenset({
     "ntr",
     "ontr",
     "express penalty",
+    "corporate capital gains",
+    "eac common external",
+    "common external",
+    "pool betting",
+    "gaming and pool betting",
+    "withdrawal",
+    "mobile money withdrawal",
+    "principal",
+    "principal tax",
+    "disclosed principal",
 })
 
 # Words that indicate actions, grammar, prepositions, and conversational intent
@@ -238,6 +248,10 @@ _STOP_AND_ACTION_WORDS = frozenset({
     "provisional", "final", "delayed", "overdue", "excess", "refund", "balance", "claim",
     "credits", "input", "output", "payroll", "escape", "threshold", "thresholds", "avoid", "evade", "contract", "contracts", "limit", "limits", "attract",
     "legal", "status", "voluntary", "disclose", "undisclosed", "carrier", "importing", "manufacturing",
+    "valid", "invalid", "omitted", "retain", "retaining", "retained", "keep", "keeping", "kept",
+    "separate", "separately", "much", "many", "pays", "files", "lower", "higher", "reduced",
+    "deposit", "depositing", "deposited", "withdraw", "withdrawing", "withdrawn", "withdrawal",
+    "principal", "disclosed", "disclosing", "undeclared", "unfiled",
     # Luganda & Swahili question/functional particles
     "omuwendo", "gwa", "eri", "ku", "bimeka", "biki", "ani", "diba", "okusasula",
     "okumenya", "okusaba", "kya", "bya", "kiwango", "cha", "kodi", "ushuru",
@@ -266,7 +280,10 @@ _INTERROGATIVE_PREFIX = re.compile(
 _NON_TAX_NOUN_FOLLOWERS = re.compile(
     r"^(table|tables|bracket|brackets|rate|rates|band|bands|return|returns|"
     r"law|laws|act|acts|code|codes|assessment|assessments|credit|credits|"
-    r"invoice|invoices|receipt|receipts|officer|officers|portal|head|heads|stamp|stamps)\b",
+    r"invoice|invoices|receipt|receipts|officer|officers|portal|head|heads|stamp|stamps|"
+    r"objection|objections|liability|liabilities|dispute|disputes|exemption|exemptions|"
+    r"waiver|waivers|clearance|certificate|certificates|appeal|appeals|audit|audits|"
+    r"payable|due|arrears|obligation|obligations|refund|refunds)\b",
     re.IGNORECASE,
 )
 
@@ -299,10 +316,10 @@ def _extract_candidate_tax_concepts(query: str) -> list[tuple[str, str]]:
 
                 words = [w.lower() for w in re.split(r"[\s\-]+", raw_mod) if w]
                 # Scan backwards from the noun to isolate the contiguous modifier words
-                # that qualify the tax name (stopping at action verbs, modals, or pronouns)
+                # that qualify the tax name (stopping at action verbs, modals, pronouns, or numeric amounts)
                 modifier_words = []
                 for w in reversed(words):
-                    if w in _STOP_AND_ACTION_WORDS:
+                    if w in _STOP_AND_ACTION_WORDS or any(ch.isdigit() for ch in w):
                         break
                     modifier_words.insert(0, w)
 
@@ -366,6 +383,11 @@ def check_false_premise(
                 "excise",
                 "customs",
                 "stamp duty",
+                "capital gains",
+                "corporation",
+                "common external",
+                "pool betting",
+                "betting",
             )
         ):
             continue

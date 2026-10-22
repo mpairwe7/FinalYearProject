@@ -1029,7 +1029,7 @@ def _rule_mda_interdependence(facts: CaseFacts, question: str) -> list[ToolCallS
 
     # 6. Pillar 6: Zero-Cost EFRIS Channel Matcher, 5% E-Receipt Consumer Refund & Lost SIM/Email TIN Recovery
     if re.search(
-        r"\b(e[-\s]?receipt\s+refund|5%\s+(?:vat\s+)?refund|efris\s+refund|without\s+buying\s+an?\s+efd|"
+        r"\b(e[-\s]?receipts?\s+refund|5%\s+(?:vat\s+|tax\s+)?refund|efris\s+(?:e[-\s]?receipts?|refund)|without\s+buying\s+an?\s+efd|"
         r"free\s+efris|lost\s+(?:my\s+)?(?:sim|phone\s+number|email)|change\s+(?:my\s+)?tin\s+(?:phone|email)|"
         r"otp\s+(?:phone|number|email))\b",
         q,
@@ -1125,6 +1125,48 @@ def plan_tools(question: str, facts: CaseFacts | None = None) -> list[ToolCallSp
             specs.append(ToolCallSpec(calc_plan.tool, params=dict(calc_plan.params)))
 
     return specs
+
+
+_SCENARIO_EXCLUSIVE_TOOLS: frozenset[str] = frozenset(
+    {
+        "resolve_mda_ntr_payment",
+        "assess_life_event_tax_onboarding",
+        "evaluate_b2g_and_uesw_clearance",
+        "build_new_taxpayer_compliance_shield",
+        "simulate_tax_relief_and_instalments",
+        "resolve_efris_and_account_recovery",
+        "calculate_rental_pooled",
+        "value_benefit_in_kind",
+        "determine_residency",
+        "calculate_stamp_duty",
+        "calculate_digital_services_tax",
+        "calculate_gaming_betting_tax",
+        "calculate_advance_vehicle_tax",
+        "calculate_presumptive_tax",
+        "check_startup_exemption",
+        "calculate_penalties_and_interest",
+        "check_objection_validity",
+    }
+)
+
+
+def should_defer_to_scenario_planner(question: str, facts: CaseFacts | None = None) -> bool:
+    """Return True if *question* triggers multi-tool or specialized statutory/MDA planner rules (`MOD-GAP-02`).
+
+    Used by ``calculator_router.py`` so single-calculator / single-rate fast paths
+    never hijack multi-tool, Cross-MDA, Voluntary Disclosure, or EFRIS 5% refund queries.
+    """
+    text = (question or "").strip()
+    if not text:
+        return False
+    eff_facts = facts if facts is not None else extract_case_facts(text)
+    rule_specs: list[ToolCallSpec] = []
+    for rule_fn in _PLANNER_RULES:
+        for spec in rule_fn(eff_facts, text):
+            rule_specs.append(spec)
+    if len(rule_specs) >= 2:
+        return True
+    return any(s.tool in _SCENARIO_EXCLUSIVE_TOOLS for s in rule_specs)
 
 
 def build_verified_facts(

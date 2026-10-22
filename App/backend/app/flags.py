@@ -113,6 +113,32 @@ def _bucket_of(flag_name: str, subject: str) -> int:
     return int.from_bytes(digest[:8], "big") % _BUCKETS
 
 
+_EXPERIMENTAL_RAG_FLAGS = frozenset(
+    {
+        "hyde",
+        "graph_fusion",
+        "tool_rag",
+        "tool_use",
+        "langgraph",
+        "self_reflect",
+        "supervisor_llm_tiebreak",
+    }
+)
+
+
+def _default_flag_category(name: str, default: bool, rollout: Rollout | None) -> str:
+    """Classify each flag into a 4-tier October 2026 lifecycle taxonomy (MAINT-GAP-03)."""
+    if name in _PRODUCTION_ON_FLAGS:
+        return "compliance_invariant"
+    if name in _EXPERIMENTAL_RAG_FLAGS:
+        return "experimental_rag"
+    if rollout is not None and rollout.is_addressed():
+        return "release_rollout"
+    if default:
+        return "kill_switch"
+    return "release_rollout"
+
+
 @dataclass(frozen=True)
 class Flag:
     name: str
@@ -121,6 +147,14 @@ class Flag:
     #: Optional targeting.  ``None`` means the flag is global — its
     #: value comes from the env var or the default, exactly as before.
     rollout: Rollout | None = None
+    #: Lifecycle taxonomy class ("compliance_invariant" | "kill_switch" | "release_rollout" | "experimental_rag").
+    category: str = ""
+    #: Owning subsystem ("security_governance" | "rag_retrieval" | "agentic_runtime" | "voice_speech" | "platform").
+    owner: str = "platform"
+
+    @property
+    def effective_category(self) -> str:
+        return self.category or _default_flag_category(self.name, self.default, self.rollout)
 
 
 # Canonical registry.  Add a new entry here (do not read env directly in
@@ -857,6 +891,8 @@ class FeatureFlags:
             "name": flag.name,
             "default": flag.default,
             "description": flag.description,
+            "category": flag.effective_category,
+            "owner": flag.owner,
             "overridden": name in self._overrides,
             "rollout": (
                 {
@@ -868,6 +904,25 @@ class FeatureFlags:
                 else None
             ),
         }
+
+    def by_category(self, category: str) -> list[str]:
+        """Return sorted flag names belonging to *category*."""
+        return sorted(
+            name for name, f in _REGISTRY.items() if f.effective_category == category
+        )
+
+    def lifecycle_summary(self) -> dict[str, list[str]]:
+        """Group all registered flags by their 4-tier lifecycle classification."""
+        summary: dict[str, list[str]] = {
+            "compliance_invariant": [],
+            "kill_switch": [],
+            "release_rollout": [],
+            "experimental_rag": [],
+        }
+        for name in sorted(_REGISTRY):
+            cat = _REGISTRY[name].effective_category
+            summary.setdefault(cat, []).append(name)
+        return summary
 
 
 def is_protected(name: str) -> bool:

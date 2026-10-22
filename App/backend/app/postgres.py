@@ -3256,3 +3256,220 @@ def list_agent_checkpoints(thread_id: str) -> list[dict[str, Any]]:
             )
             rows = cur.fetchall()
             return [{"step": r[0], "node_name": r[1], "created_at": r[2]} for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Backend-Agnostic Public API Parity Surface (ISO/IEC 25010:2023 Modifiability)
+# ---------------------------------------------------------------------------
+# The helpers below in ``database.py`` already route through ``query_all`` /
+# ``execute`` / ``execute_script`` onto the active Postgres connection pool
+# when ``DATABASE_BACKEND=postgres``. Exposing thin wrappers here guarantees
+# ``app.postgres`` and ``app.database`` satisfy the exact same 103-function
+# ``StorageBackendProtocol`` contract.
+def close_db() -> None:
+    """Close active Postgres connection pool (drop-in alias for :func:`close_pool`)."""
+    close_pool()
+
+
+def query_all(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+    from . import database as _db
+
+    return _db.query_all(sql, params)
+
+
+def query_one(sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
+    from . import database as _db
+
+    return _db.query_one(sql, params)
+
+
+def execute(sql: str, params: tuple[Any, ...] = ()) -> int:
+    from . import database as _db
+
+    return _db.execute(sql, params)
+
+
+def execute_script(sql: str) -> None:
+    from . import database as _db
+
+    _db.execute_script(sql)
+
+
+def init_module_schemas() -> None:
+    from . import database as _db
+
+    _db.init_module_schemas()
+
+
+def module_retention(now: float | None = None) -> dict[str, int]:
+    from . import database as _db
+
+    return _db.module_retention(now=now)
+
+
+def consent_purposes() -> tuple[str, ...]:
+    from . import database as _db
+
+    return _db.consent_purposes()
+
+
+def conversation_ttl_seconds() -> float:
+    from . import database as _db
+
+    return _db.conversation_ttl_seconds()
+
+
+def workflow_session_ttl_days() -> int:
+    from . import database as _db
+
+    return _db.workflow_session_ttl_days()
+
+
+def conversation_state_key(
+    conversation_id: str | None,
+    *,
+    session_id: str | None = None,
+    user_id: str | None = None,
+    tenant_id: str = "default",
+) -> str:
+    from . import database as _db
+
+    return _db.conversation_state_key(
+        conversation_id,
+        session_id=session_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
+
+
+def migrate_legacy_conversation_state_keys() -> dict[str, int]:
+    from . import database as _db
+
+    return _db.migrate_legacy_conversation_state_keys()
+
+
+def compose_sla_stats(
+    *,
+    period_rows: list[Any],
+    open_rows: list[Any],
+    days: int,
+    now: float | None = None,
+) -> dict[str, Any]:
+    from . import database as _db
+
+    return _db.compose_sla_stats(
+        period_rows=period_rows,
+        open_rows=open_rows,
+        days=days,
+        now=now,
+    )
+
+
+def create_task(
+    kind: str,
+    args: dict[str, Any] | None = None,
+    *,
+    tenant_id: str = "default",
+    user_id: str = "",
+    idempotency_key: str = "",
+) -> dict[str, Any]:
+    from . import database as _db
+
+    return _db.create_task(
+        kind,
+        args,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        idempotency_key=idempotency_key,
+    )
+
+
+def get_task(task_id: str, *, tenant_id: str = "default") -> dict[str, Any] | None:
+    from . import database as _db
+
+    return _db.get_task(task_id, tenant_id=tenant_id)
+
+
+def update_task(
+    task_id: str,
+    *,
+    tenant_id: str = "default",
+    status: str | None = None,
+    progress: float | None = None,
+    result: dict[str, Any] | None = None,
+    error: str | None = None,
+) -> dict[str, Any] | None:
+    from . import database as _db
+
+    return _db.update_task(
+        task_id,
+        tenant_id=tenant_id,
+        status=status,
+        progress=progress,
+        result=result,
+        error=error,
+    )
+
+
+def cancel_task(task_id: str, *, tenant_id: str = "default") -> dict[str, Any] | None:
+    from . import database as _db
+
+    return _db.cancel_task(task_id, tenant_id=tenant_id)
+
+
+def list_tasks(
+    *, tenant_id: str = "default", status: str = "", limit: int = 50
+) -> list[dict[str, Any]]:
+    from . import database as _db
+
+    return _db.list_tasks(tenant_id=tenant_id, status=status, limit=limit)
+
+
+def get_working_memory(user_id: str, tenant_id: str = "default") -> dict[str, Any] | None:
+    from . import database as _db
+
+    return _db.get_working_memory(user_id, tenant_id=tenant_id)
+
+
+def clear_working_memory(user_id: str, tenant_id: str = "default") -> int:
+    from . import database as _db
+
+    return _db.clear_working_memory(user_id, tenant_id=tenant_id)
+
+
+def cleanup_expired_working_memory() -> int:
+    from . import database as _db
+
+    return _db.cleanup_expired_working_memory()
+
+
+def export_eval_samples(days: int = 30, limit: int = 200) -> list[dict[str, Any]]:
+    from . import database as _db
+
+    return _db.export_eval_samples(days=days, limit=limit)
+
+
+def delete_user_analytics(user_id: str) -> dict[str, int]:
+    from . import database as _db
+
+    return _db.delete_user_analytics(user_id)
+
+
+def delete_user_cascade(
+    user_id: str,
+    external_id: str = "",
+    tenant_id: str = "default",
+) -> dict[str, int]:
+    from . import database as _db
+
+    return _db.delete_user_cascade(user_id, external_id=external_id, tenant_id=tenant_id)
+
+
+def export_user_data(
+    user_id: str,
+    external_id: str = "",
+    tenant_id: str = "default",
+) -> dict[str, Any]:
+    from . import database as _db
+
+    return _db.export_user_data(user_id, external_id=external_id, tenant_id=tenant_id)
