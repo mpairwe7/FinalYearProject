@@ -219,6 +219,9 @@ export const en = {
   'workflow.journeyGpsPaused': 'Paused for side question — your step is saved',
   'workflow.scaffoldingHint': 'Field help: {hint}',
   'workflow.stepUpAuth': 'Account & Portal Access ({count} answers saved)',
+  'objective.cardTitle': 'Identified URA Goal',
+  'objective.prerequisites': 'Have ready:',
+  'objective.confirmBtn': 'Start guided steps',
 
   // Official resources shown alongside workflow guidance ------------------
   'resource.title': 'Official URA Forms, Templates & Sources',

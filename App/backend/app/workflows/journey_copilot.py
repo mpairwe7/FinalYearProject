@@ -157,6 +157,33 @@ WORKFLOW_PREREQUISITE_DAG: dict[str, tuple[PrerequisiteSpec, ...]] = {
             slot="dispute_stage",
         ),
     ),
+    "motor_vehicle_registration": (
+        PrerequisiteSpec(
+            id="buyer_and_seller_tin",
+            label="Buyer & Seller URA TINs and Original Logbook",
+            slot="vehicle_task",
+            remediation_workflow="tin_registration",
+            remediation_workflow_name="TIN Registration Guide",
+        ),
+    ),
+    "audit_invoice_compliance": (
+        PrerequisiteSpec(
+            id="supplier_tin_on_invoice",
+            label="Supplier TIN & 18-digit EFRIS Fiscal Document Number (FDN)",
+            slot="supplier_tin_present",
+            remediation_workflow="tin_registration",
+            remediation_workflow_name="TIN Registration Guide",
+        ),
+    ),
+    "mda_ntr_resolution": (
+        PrerequisiteSpec(
+            id="mda_agency_selected",
+            label="Target MDA agency & Non-Tax Revenue (NTR) PRN receipt",
+            slot="mda_agency",
+            remediation_workflow="payment_assistance",
+            remediation_workflow_name="Payment Assistance",
+        ),
+    ),
 }
 
 #: Declarative A2UI form box mappings for guided co-completion (Pillar 2).
@@ -189,6 +216,30 @@ WORKFLOW_FORM_SCHEMAS: dict[str, tuple[str, str, tuple[FormFieldSpec, ...]]] = {
             FormFieldSpec("Line 3", "Liability Amount Confirmed", "amount_known"),
             FormFieldSpec("Line 4", "Expected Payment Amount (UGX)", "payment_amount"),
             FormFieldSpec("Line 5", "Selected Payment Channel", "payment_channel"),
+        ),
+    ),
+    "tax_clearance": (
+        "URA-TCC-APP-01",
+        "URA Tax Clearance Certificate (TCC) Readiness Schedule",
+        (
+            FormFieldSpec("Sec A", "TCC Application Purpose", "tcc_purpose"),
+            FormFieldSpec("Sec B", "Return & Arrears Compliance Status", "compliance_status"),
+        ),
+    ),
+    "customs_clearance": (
+        "URA-ASY-CUS-01",
+        "URA ASYCUDA Customs Clearance Schedule",
+        (
+            FormFieldSpec("Box 1", "Import / Export Clearance Stage", "clearance_stage"),
+            FormFieldSpec("Box 2", "Goods & HS Classification", "goods_category"),
+        ),
+    ),
+    "objection_or_dispute": (
+        "URA-OBJ-TAT-01",
+        "URA Statutory Objection Preparation Schedule",
+        (
+            FormFieldSpec("Sec 1", "Dispute / Assessment Stage", "dispute_stage"),
+            FormFieldSpec("Sec 2", "Tax Head Under Objection", "tax_type"),
         ),
     ),
 }
@@ -349,6 +400,23 @@ _OBJECTIVE_PATTERNS: tuple[tuple[re.Pattern[str], dict[str, str]], ...] = (
 )
 
 
+_RESUME_CODE_RE = re.compile(r"\bURA-([A-Z0-9]{2,4})-S(\d{1,2})-([A-F0-9]{4})\b", re.IGNORECASE)
+
+_RESUME_PREFIX_TO_WORKFLOW: dict[str, str] = {
+    "RET": "return_filing",
+    "TIN": "tin_registration",
+    "PAY": "payment_assistance",
+    "TAX": "tax_clearance",
+    "CUS": "customs_clearance",
+    "OBJ": "objection_or_dispute",
+    "MOT": "motor_vehicle_registration",
+    "AUD": "audit_invoice_compliance",
+    "MDA": "mda_ntr_resolution",
+    "BWI": "bwims_warehouse_guidance",
+    "NEW": "new_taxpayer_and_relief",
+}
+
+
 def generate_resume_code(workflow_id: str, step_idx: int, slots: Mapping[str, Any]) -> str:
     """Return a deterministic, PII-free short token to resume a workflow across channels (Pillar 7).
 
@@ -359,6 +427,35 @@ def generate_resume_code(workflow_id: str, step_idx: int, slots: Mapping[str, An
     filled_keys = ",".join(sorted(k for k in slots if not k.startswith("_") and slots.get(k) not in ("", None)))
     digest = hashlib.sha256(f"{workflow_id}:{step_idx}:{filled_keys}".encode()).hexdigest()[:4].upper()
     return f"URA-{prefix}-S{step_idx + 1}-{digest}"
+
+
+def parse_resume_code(text: str) -> dict[str, Any] | None:
+    """Parse a cross-channel resume token (e.g. ``URA-RET-S2-8A4F``) from *text* (Pillar 7)."""
+    if not text:
+        return None
+    m = _RESUME_CODE_RE.search(text)
+    if not m:
+        return None
+    prefix = m.group(1).upper()
+    step_num = max(1, int(m.group(2)))
+    digest = m.group(3).upper()
+    workflow_id = _RESUME_PREFIX_TO_WORKFLOW.get(prefix, "")
+    return {
+        "code": f"URA-{prefix}-S{step_num}-{digest}",
+        "prefix": prefix,
+        "workflow_id": workflow_id,
+        "step_number": step_num,
+        "step_idx": step_num - 1,
+        "digest": digest,
+    }
+
+
+def is_prerequisite_remediation(parent_workflow_id: str, target_workflow_id: str) -> bool:
+    """Return True if *target_workflow_id* is a declared prerequisite remediation for *parent_workflow_id*."""
+    if not parent_workflow_id or not target_workflow_id or parent_workflow_id == target_workflow_id:
+        return False
+    specs = WORKFLOW_PREREQUISITE_DAG.get(parent_workflow_id, ())
+    return any(s.remediation_workflow == target_workflow_id for s in specs)
 
 
 def evaluate_prerequisites(

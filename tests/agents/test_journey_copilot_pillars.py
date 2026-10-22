@@ -26,6 +26,8 @@ from app.workflows.journey_copilot import (
     evaluate_step_up_auth,
     generate_resume_code,
     infer_taxpayer_objective,
+    is_prerequisite_remediation,
+    parse_resume_code,
 )
 from app.workflows.loader import load_workflow
 from app.workflows.registry import WorkflowRegistry
@@ -230,3 +232,104 @@ def test_pillar7_resume_code_and_chat_model_workflow_view_integration():
     assert isinstance(view["prerequisites"], list)
     assert view["form_draft"]["form_code"] == "URA-ETAX-RET-01"
     assert view["journey_gps"]["active_goal"] == "Return Filing"
+
+
+def test_e2e_goal_stack_persistence_prerequisite_push_and_auto_pop_in_chat_model():
+    """Verify goal_stack survives DB serialization, pushes prerequisite sub-flows, and pops on completion."""
+    import uuid
+
+    from app import database
+
+    database.init_db()
+    model = ChatModel()
+    thread_id = f"conv-stack-{uuid.uuid4().hex[:10]}"
+
+    # 1. Start Return Filing
+    t1 = model._maybe_handle_workflow(
+        message="Help me file my return",
+        rewritten="Help me file my return",
+        thread_id=thread_id,
+        locale="en",
+    )
+    assert t1 is not None
+    assert t1["workflow"]["id"] == "return_filing"
+
+    # 2. Answer step 1 (taxpayer_type = individual) -> advances to step 2 (tax_type)
+    t2 = model._maybe_handle_workflow(
+        message="individual",
+        rewritten="individual",
+        thread_id=thread_id,
+        locale="en",
+    )
+    assert t2 is not None
+    assert t2["workflow"]["step_index"] == 2
+
+    # 3. Taxpayer realizes they need a TIN first (a declared prerequisite of return_filing)
+    assert is_prerequisite_remediation("return_filing", "tin_registration") is True
+    t3 = model._maybe_handle_workflow(
+        message="Guide me step by step through TIN Registration Guide",
+        rewritten="Guide me step by step through TIN Registration Guide",
+        thread_id=thread_id,
+        locale="en",
+    )
+    assert t3 is not None
+    assert t3["workflow"]["id"] == "tin_registration"
+    # Because taxpayer_type='individual' was already collected in parent return_filing,
+    # tin_registration skips step 1 (collect_type) and lands on step 2 (documents_ready)!
+    assert t3["workflow"]["step_id"] == "collect_documents_ready"
+    assert t3["workflow"]["journey_gps"]["parent_goals"][0]["workflow_id"] == "return_filing"
+
+    # 4. Complete tin_registration by answering 'yes' to documents_ready -> auto-pops back to return_filing!
+    t4 = model._maybe_handle_workflow(
+        message="yes",
+        rewritten="yes",
+        thread_id=thread_id,
+        locale="en",
+    )
+    assert t4 is not None
+    assert "TIN Registration Guide completed" in t4["reply"]
+    assert "Returning to **Return Filing**" in t4["reply"]
+    assert t4["workflow"]["id"] == "return_filing"
+    assert t4["workflow"]["status"] == "active"
+    assert t4["workflow"]["step_id"] == "collect_tax_type"
+
+
+def test_e2e_resume_code_parsing_and_localization_parity():
+    """Verify cross-channel resume codes parse cleanly and _localize_workflow translates journey_gps."""
+    import uuid
+
+    from app import database
+
+    database.init_db()
+    model = ChatModel()
+    thread_id = f"conv-resume-{uuid.uuid4().hex[:10]}"
+
+    parsed = parse_resume_code("Please resume URA-RET-S2-8A4F")
+    assert parsed is not None
+    assert parsed["workflow_id"] == "return_filing"
+    assert parsed["step_number"] == 2
+
+    # Starting via resume code on a fresh thread launches the corresponding workflow
+    started = model._maybe_handle_workflow(
+        message="URA-TIN-S1-9F2A",
+        rewritten="URA-TIN-S1-9F2A",
+        thread_id=thread_id,
+        locale="en",
+        user_id="usr-elevated-42",
+    )
+    assert started is not None
+    assert started["workflow"]["id"] == "tin_registration"
+    # Authenticated user_id suppresses unauthenticated login_or_register step_up_auth prompt
+    assert started["workflow"]["step_up_auth"] is None
+
+    # Localization of journey_gps.active_goal across Luganda and Kiswahili
+    loc_lg = ChatModel._localize_workflow(
+        {
+            "name": "Return Filing",
+            "journey_gps": {"workflow_id": "return_filing", "active_goal": "Return Filing"},
+        },
+        "lg",
+    )
+    assert loc_lg is not None
+    assert loc_lg["journey_gps"]["active_goal"] == loc_lg["name"]
+

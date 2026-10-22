@@ -111,6 +111,23 @@ function WorkflowStepperInner({ workflow, onSelectOption }: WorkflowStepperProps
       {isActive && workflow.scaffolding?.hint && (
         <div className="workflow-scaffolding-banner" data-testid="workflow-scaffolding">
           <span>{t('workflow.scaffoldingHint', { hint: workflow.scaffolding.hint })}</span>
+          {(!workflow.options || workflow.options.length === 0) &&
+            workflow.scaffolding.helper_actions &&
+            workflow.scaffolding.helper_actions.length > 0 &&
+            onSelectOption && (
+              <div className="workflow-scaffolding-actions">
+                {workflow.scaffolding.helper_actions.map((act) => (
+                  <button
+                    key={act}
+                    type="button"
+                    className="workflow-option-btn"
+                    onClick={() => onSelectOption(act)}
+                  >
+                    {act}
+                  </button>
+                ))}
+              </div>
+            )}
         </div>
       )}
 

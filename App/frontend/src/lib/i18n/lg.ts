@@ -205,6 +205,9 @@ export const lg: Partial<Dictionary> = {
   'workflow.journeyGpsPaused': ' Eyimiriziddwamu olw’ekibuuzo — omutendera gwo guterekeddwa',
   'workflow.scaffoldingHint': 'Obuyambi ku kifo kino: {hint}',
   'workflow.stepUpAuth': 'Okuyingira mu Akawunti ya URA (eby’okuddamu {count} biterekeddwa)',
+  'objective.cardTitle': 'Ekigendererwa kya URA Ekizuuliddwa',
+  'objective.prerequisites': 'Teekateeka bino:',
+  'objective.confirmBtn': 'Tandika emitendera egy’obulagirizi',
 
   'resource.title': 'Foomu, bipande n’ensibuko ebitongole ebya URA',
   'resource.verified': 'Ensibuko entongole ezakakasibwa',

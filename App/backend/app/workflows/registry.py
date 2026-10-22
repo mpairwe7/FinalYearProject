@@ -162,6 +162,8 @@ def _make_turn(
     failed_attempts: int = 0,
 ) -> WorkflowTurn:
     """A :class:`WorkflowTurn` carrying *step*'s stepper metadata and the progress track."""
+    if not session.goal_stack and isinstance(session.slots.get("_goal_stack"), list):
+        session.goal_stack = list(session.slots["_goal_stack"])
     step_index, total_steps, all_steps = compute_workflow_progress(wf, session, step.id if step else "")
     effective_slot = slot_name or (step.slot if step else "")
     options_list = list(step.options) if step else []
@@ -471,6 +473,8 @@ class WorkflowRegistry:
         """Push the current workflow onto ``goal_stack`` and switch to *sub_workflow_id* (Pillar 3)."""
         if sub_workflow_id not in cls._workflows or sub_workflow_id == session.workflow_id:
             return False
+        if not session.goal_stack and isinstance(session.slots.get("_goal_stack"), list):
+            session.goal_stack = list(session.slots["_goal_stack"])
         session.goal_stack.append(
             {
                 "workflow_id": session.workflow_id,
@@ -478,6 +482,7 @@ class WorkflowRegistry:
                 "reason": reason,
             }
         )
+        session.slots["_goal_stack"] = list(session.goal_stack)
         session.workflow_id = sub_workflow_id
         session.current_step_idx = 0
         session.completed = False
@@ -486,12 +491,18 @@ class WorkflowRegistry:
     @classmethod
     def pop_subworkflow(cls, session: WorkflowSession) -> bool:
         """Pop the parent workflow from ``goal_stack`` and restore its step position (Pillar 3)."""
+        if not session.goal_stack and isinstance(session.slots.get("_goal_stack"), list):
+            session.goal_stack = list(session.slots["_goal_stack"])
         if not session.goal_stack:
             return False
         parent = session.goal_stack.pop()
         parent_wf_id = str(parent.get("workflow_id") or "")
         if parent_wf_id not in cls._workflows:
             return False
+        if session.goal_stack:
+            session.slots["_goal_stack"] = list(session.goal_stack)
+        else:
+            session.slots.pop("_goal_stack", None)
         session.workflow_id = parent_wf_id
         session.current_step_idx = int(parent.get("step_idx") or 0)
         session.completed = False
