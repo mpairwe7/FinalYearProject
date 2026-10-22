@@ -455,6 +455,7 @@ def test_qa_audit_subworkflow_cancel_returns_to_parent_and_anon_to_auth_migratio
             assert old_pin not in content, f"{wf_file.name} still references Node 20 action {old_pin}"
         assert "NODE_VERSION: '20'" not in content
         assert 'NODE_VERSION: "20"' not in content
+        assert "NODE_VERSION: 20" not in content
 
 
 def test_post_619_phased_audit_remediations_session_binding_goal_stack_snap_to_fill_and_sha_pins():
@@ -649,10 +650,12 @@ def test_post_619_phased_audit_remediations_session_binding_goal_stack_snap_to_f
 
     crane_df = (repo_root / "App" / "Dockerfile.cranecloud").read_text(encoding="utf-8")
     assert "FROM node:24-bookworm-slim AS frontend-builder" in crane_df
-    assert "setup_24.x" in crane_df
+    assert "COPY --from=oven/bun:1.4.3-slim /usr/local/bin/bun /usr/local/bin/bun" in crane_df
+    assert "COPY --from=frontend-builder /usr/local/bin/node /usr/local/bin/node" in crane_df
     assert "App/frontend/bun.lock*" in crane_df
     assert "node:20" not in crane_df
     assert "setup_20.x" not in crane_df
+    assert "setup_24.x" not in crane_df
 
 
 

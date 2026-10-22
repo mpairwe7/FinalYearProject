@@ -43,7 +43,7 @@ We upgraded the entire CI/CD supply chain and frontend runtime baseline from Nod
    - `GitGuardian/ggshield-action@7059aef1ffb7d2374ce27201144f5613beecefe0` (`v1.54.0`)
 2. **Frontend, Crane Cloud & Lighthouse CI Runtime:**
    - Updated `NODE_VERSION` from `20` to `24` in `.github/workflows/frontend-deploy.yml` and `.github/workflows/lighthouse-live.yml`.
-   - Upgraded `App/Dockerfile.cranecloud` from `node:20-bookworm-slim` / `setup_20.x` to `node:24-bookworm-slim` / `setup_24.x` with `bun.lock` support.
+   - Upgraded `App/Dockerfile.cranecloud` Stage 2 to `node:24-bookworm-slim` (copying pinned `oven/bun:1.4.3-slim` binary and `App/frontend/bun.lock*`) and Stage 3 to copy `/usr/local/bin/node` from Stage 2, eliminating mutable `curl | bash` installers (`bun.sh/install` and `deb.nodesource.com`).
    - Added `"engines": { "node": ">=24.0.0" }` to `App/frontend/package.json` and aligned `App/frontend/Dockerfile` documentation (`node:26-bookworm-slim` production runner).
 3. **Container & Dependency Vulnerability Remediation:**
    - Enforced `Pillow>=13.0.0` across `App/backend/requirements*.txt`, `Dockerfile`, and `Dockerfile.gpu` (eliminating 28 `Pillow 12.3.0` CVEs) and `"katex": "^0.18.2"` override in `App/frontend/package.json` (`CVE-2026-103923`).

@@ -2297,12 +2297,17 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             not in ("crisis_support", "wellbeing_checkin", "escalated")
             and hasattr(model, "_get_suspended_workflow_name")
         ):
-            suspended_wf = model._get_suspended_workflow_name(
-                str(result.get("conversation_id") or conversation_id or ""),
-                session_id=session_id,
-                user_id=user_id,
-                tenant_id=tenant_id,
-            )
+            try:
+                suspended_wf = await asyncio.to_thread(
+                    model._get_suspended_workflow_name,
+                    str(result.get("conversation_id") or conversation_id or ""),
+                    session_id=session_id,
+                    user_id=user_id,
+                    tenant_id=tenant_id,
+                )
+            except Exception:
+                logger.debug("suspended workflow lookup skipped", exc_info=True)
+                suspended_wf = None
             if suspended_wf:
                 cont_act = _continue_flow_action(suspended_wf)
                 cur_actions = list(result.get("next_actions") or [])
@@ -5152,6 +5157,12 @@ class ChatModel:
         *,
         user_id: str | None = None,
     ) -> None:
+        active_cf = _ACTIVE_CASE_FACTS.get()
+        if active_cf is not None:
+            if hasattr(active_cf, "to_dict") and callable(active_cf.to_dict):
+                session.slots["_case_facts"] = active_cf.to_dict()
+            elif isinstance(active_cf, dict):
+                session.slots["_case_facts"] = dict(active_cf)
         if user_id:
             from .workflows.journey_copilot import elevate_anonymous_workflow_session
 

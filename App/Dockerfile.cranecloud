@@ -69,12 +69,8 @@ FROM node:24-bookworm-slim AS frontend-builder
 
 WORKDIR /build/frontend
 
-# Install bun (matches local dev tooling per CLAUDE.md).
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl unzip ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSL https://bun.sh/install | bash \
-    && ln -sf /root/.bun/bin/bun /usr/local/bin/bun
+# Copy pinned Bun 1.4.3 binary from official image (avoids unpinned curl | bash installer).
+COPY --from=oven/bun:1.4.3-slim /usr/local/bin/bun /usr/local/bin/bun
 
 COPY App/frontend/package.json App/frontend/bun.lock* App/frontend/bun.lockb* App/frontend/package-lock.json* ./
 RUN if [ -f bun.lock ] || [ -f bun.lockb ]; then bun install --frozen-lockfile; \
@@ -146,10 +142,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         # per-worker without it).
         redis-server \
         tini \
-    && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/* /var/log/dpkg.log
+
+# Bring in the Node.js 24 LTS runtime binary from Stage 2 (avoids mutable deb.nodesource.com curl | bash).
+COPY --from=frontend-builder /usr/local/bin/node /usr/local/bin/node
 
 # Bring in the slim Python venv from stage 1.
 COPY --from=backend-builder /opt/venv /opt/venv

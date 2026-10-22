@@ -571,7 +571,10 @@ def evaluate_prerequisites(
     for spec in specs:
         raw_val = slots.get(spec.slot) if spec.slot else None
         if raw_val in ("", None) and case_facts is not None and spec.slot:
-            raw_val = getattr(case_facts, spec.slot, None)
+            if isinstance(case_facts, Mapping):
+                raw_val = case_facts.get(spec.slot)
+            else:
+                raw_val = getattr(case_facts, spec.slot, None)
 
         if raw_val is False or str(raw_val).strip().lower() in ("false", "no", "unknown"):
             status = "missing"
@@ -809,27 +812,31 @@ def bind_document_facts_to_workflow(
     if not doc_type and not raw_map and not ocr_fields:
         return []
 
+    doc_tokens = {t for t in re.split(r"[^a-z0-9]+", doc_type) if t}
     candidate_map: dict[str, Any] = {}
-    if any(k in doc_type for k in ("invoice", "efris", "receipt", "payroll", "ledger", "filing_form", "assessment")):
+    if doc_tokens & {"invoice", "efris", "receipt", "payroll", "ledger", "filing", "form", "assessment"}:
         candidate_map["supporting_records_ready"] = True
-    if any(k in doc_type for k in ("id", "nin", "passport", "ursb", "certificate", "tin_card", "customs")):
+    if doc_tokens & {"id", "nin", "passport", "ursb", "certificate", "tin", "customs"}:
         candidate_map["documents_ready"] = True
 
+    ocr_suggestions: dict[str, Any] = dict(session.slots.get("_ocr_suggestions") or {})
     if ocr_fields.get("efris_invoice_numbers"):
-        candidate_map["has_efris_code"] = True
+        ocr_suggestions["has_efris_code"] = True
     if ocr_fields.get("tins"):
-        candidate_map["supplier_tin_present"] = True
-        candidate_map["has_tin"] = True
+        ocr_suggestions["supplier_tin_present"] = True
+        ocr_suggestions["has_tin"] = True
     if ocr_fields.get("prns"):
-        candidate_map["has_prn"] = True
-        candidate_map.setdefault("reference_kind", "prn")
+        ocr_suggestions["has_prn"] = True
+        ocr_suggestions["reference_kind"] = "prn"
     if ocr_fields.get("ugx_amounts"):
-        candidate_map["amount_known"] = True
+        ocr_suggestions["amount_known"] = True
+    if ocr_suggestions:
+        session.slots["_ocr_suggestions"] = ocr_suggestions
 
     tax_heads = ocr_fields.get("tax_heads")
     if isinstance(tax_heads, list) and tax_heads:
         first_head = str(tax_heads[0] or "").strip().lower()
-        if first_head in ("vat", "paye", "corporation tax", "withholding tax", "stamp duty", "income tax", "customs", "excise duty"):
+        if first_head:
             candidate_map.setdefault("tax_type", first_head)
 
     for slot_key in ("taxpayer_type", "tax_type", "filing_period", "reference_kind", "payment_channel"):
@@ -837,11 +844,29 @@ def bind_document_facts_to_workflow(
         if isinstance(raw, str) and raw.strip():
             candidate_map[slot_key] = raw.strip().lower()
 
+    # Validate candidate slot values against the workflow's step validators when registered
+    from .registry import WorkflowRegistry
+    from .slots import validate_slot
+
+    wf_def = WorkflowRegistry.get(session.workflow_id)
+    step_validators: dict[str, str] = {}
+    if wf_def is not None:
+        for st in wf_def.steps:
+            if st.slot and st.validator:
+                step_validators[st.slot] = st.validator
+
     bound: list[str] = []
     for slot_name, val in candidate_map.items():
-        if session.slots.get(slot_name) in ("", None):
-            session.slots[slot_name] = val
-            bound.append(slot_name)
+        if session.slots.get(slot_name) not in ("", None):
+            continue
+        validator = step_validators.get(slot_name, "")
+        if validator and isinstance(val, str):
+            ok, norm_val, _ = validate_slot(val, validator)
+            if not ok:
+                continue
+            val = norm_val
+        session.slots[slot_name] = val
+        bound.append(slot_name)
 
     if bound:
         existing = list(session.slots.get("_snap_to_fill_fields") or [])
