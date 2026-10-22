@@ -263,6 +263,13 @@ def _state_tenant_id() -> str:
     return _ACTIVE_TENANT_ID.get() or "default"
 
 
+def _workflow_past_retention(row: dict[str, Any] | None) -> bool:
+    """Past the conversation's retention a session keeps only its outcome (the
+    answers are blanked), so it is history, not something to resume or offer."""
+    updated_at = (row or {}).get("updated_at")
+    return updated_at is not None and float(updated_at) < time.time() - db.conversation_ttl_seconds()
+
+
 def _scoped_conversation_state(method: Callable[..., Any]) -> Callable[..., Any]:
     """Bind durable topic/workflow state to this request's verified owner."""
     signature = inspect.signature(method)
@@ -4863,22 +4870,19 @@ class ChatModel:
             return None
         try:
             eff_tenant = tenant_id or _state_tenant_id()
-            candidate_keys: list[str] = [_state_conversation_id(thread_id)]
-            scoped_key = db.conversation_state_key(
+            # Offer only what the resume will accept: the row under the
+            # caller's own owner-scoped key (the verified one inside a chat
+            # turn, else the one this owner derives), never one reached through
+            # the bare conversation id, and nothing past retention.
+            key = _ACTIVE_CONVERSATION_STATE.get() or db.conversation_state_key(
                 thread_id,
                 session_id=session_id,
                 user_id=user_id,
                 tenant_id=eff_tenant,
             )
-            if scoped_key not in candidate_keys:
-                candidate_keys.append(scoped_key)
-            if thread_id not in candidate_keys:
-                candidate_keys.append(thread_id)
-            persisted = None
-            for key in candidate_keys:
-                persisted = db.get_workflow_session(key, tenant_id=eff_tenant)
-                if persisted:
-                    break
+            persisted = db.get_workflow_session(key, tenant_id=eff_tenant)
+            if _workflow_past_retention(persisted):
+                return None
             if persisted and persisted.get("status") == "active":
                 wf = WorkflowRegistry.get(persisted.get("workflow_id", ""))
                 if wf:
@@ -8071,7 +8075,7 @@ class ChatModel:
                 logger.exception("workflow tool execution failed")
                 result = {"ok": False, "error": "workflow tool execution failed"}
             if result.get("ok") and conversation_id:
-                remember_calculation(conversation_id, tool_name, tool_args)
+                remember_calculation(_state_conversation_id(conversation_id), tool_name, tool_args)
             explanation = result.get("explanation") or result.get("message") or ""
             if explanation:
                 tool_messages.append(str(explanation))
@@ -9142,8 +9146,11 @@ class ChatModel:
         try:
             from .case_facts import extract_case_facts, recall_case_facts, remember_case_facts
 
+            # Keyed like workflow state, so another session holding this
+            # conversation id is never handed the salary or turnover stated here.
+            facts_key = _state_conversation_id(thread_id)
             prior = recall_case_facts(
-                thread_id, user_id=user_id or "", tenant_id=tenant_id or "default"
+                facts_key, user_id=user_id or "", tenant_id=tenant_id or "default"
             )
             if prior is None and conversation_history:
                 for hist_turn in conversation_history:
@@ -9157,7 +9164,7 @@ class ChatModel:
             )
             updated = extract_case_facts(combined_msg, prior)
             remember_case_facts(
-                thread_id,
+                facts_key,
                 updated,
                 user_id=user_id or "",
                 tenant_id=tenant_id or "default",
@@ -9198,7 +9205,7 @@ class ChatModel:
             return None
 
         facts = _ACTIVE_CASE_FACTS.get() or recall_case_facts(
-            thread_id, user_id=user_id or "", tenant_id=_state_tenant_id()
+            _state_conversation_id(thread_id), user_id=user_id or "", tenant_id=_state_tenant_id()
         )
         if facts is not None:
             plan = prefill_plan_from_case_facts(plan, facts)
@@ -9217,7 +9224,7 @@ class ChatModel:
                 logger.info("calculator rejected extracted args: %s", safe_err)
                 return None
             remember_calculation(
-                thread_id,
+                _state_conversation_id(thread_id),
                 plan.tool,
                 dict(plan.params),
                 assumptions=list(plan.assumptions),
@@ -9236,7 +9243,7 @@ class ChatModel:
         # letting retrieval invent the figure.
         if not flags.is_enabled("workflows") or self._workflow_count <= 0:
             remember_calculation(
-                thread_id,
+                _state_conversation_id(thread_id),
                 plan.tool,
                 dict(plan.params),
                 pending=list(plan.missing),
@@ -9320,7 +9327,7 @@ class ChatModel:
         "What about 2 million?" after a VAT answer stays on VAT. It does not
         open the PAYE, VAT, and withholding menu.
         """
-        saved = recall_calculation(thread_id)
+        saved = recall_calculation(_state_conversation_id(thread_id))
         if not saved:
             return None
         nxt = continue_calculation(saved, message) or continue_calculation(saved, rewritten)
@@ -9328,7 +9335,7 @@ class ChatModel:
             return None
         if not nxt["ready"]:
             remember_calculation(
-                thread_id,
+                _state_conversation_id(thread_id),
                 nxt["tool"],
                 nxt["params"],
                 pending=list(nxt["pending"]),
@@ -9348,12 +9355,12 @@ class ChatModel:
         except Exception:
             logger.exception("calculator follow-up failed")
             return None
-            if not result.get("ok"):
-                safe_err = str(result.get("error", "")).replace("\r", " ").replace("\n", " ")
-                logger.info("calculator follow-up rejected: %s", safe_err)
-                return None
+        if not result.get("ok"):
+            safe_err = str(result.get("error", "")).replace("\r", " ").replace("\n", " ")
+            logger.info("calculator follow-up rejected: %s", safe_err)
+            return None
         remember_calculation(
-            thread_id,
+            _state_conversation_id(thread_id),
             nxt["tool"],
             dict(nxt["params"]),
             assumptions=list(nxt["assumptions"]),
@@ -9619,9 +9626,11 @@ class ChatModel:
 
         state_thread_id = _state_conversation_id(thread_id)
         state_tenant_id = _state_tenant_id()
+        # Only the owner-scoped key is ever read: a row still under the bare
+        # conversation id predates owner-scoped keys, and the startup migration
+        # left it there because it could not tell whose it is, so holding that
+        # id proves nothing (ADR-0013).
         persisted = db.get_workflow_session(state_thread_id, tenant_id=state_tenant_id)
-        if not persisted and state_thread_id != thread_id:
-            persisted = db.get_workflow_session(thread_id, tenant_id=state_tenant_id)
         # A taxpayer who signs in mid-flow gets a user-scoped state key, while
         # their answers so far sit under the anonymous key. Only the anonymous
         # key this request can itself prove — the same session id (or, with
@@ -9637,7 +9646,7 @@ class ChatModel:
                 user_id=None,
                 tenant_id=state_tenant_id,
             )
-            if anon_key not in (state_thread_id, thread_id) and db.adopt_workflow_session(
+            if anon_key != state_thread_id and db.adopt_workflow_session(
                 anon_key,
                 state_thread_id,
                 user_id=user_id,
@@ -9645,10 +9654,7 @@ class ChatModel:
                 min_updated_at=time.time() - db.conversation_ttl_seconds(),
             ):
                 persisted = db.get_workflow_session(state_thread_id, tenant_id=state_tenant_id)
-        # Past the conversation's retention the session keeps only its outcome
-        # (the answers are blanked), so it is history, not something to resume.
-        updated_at = (persisted or {}).get("updated_at")
-        if updated_at is not None and float(updated_at) < time.time() - db.conversation_ttl_seconds():
+        if _workflow_past_retention(persisted):
             persisted = None
         # A flow the taxpayer asks to leave for another stays active until the
         # new one has started; if the start is refused below, they keep it.

@@ -947,15 +947,20 @@ class ResolutionLedger:
                     tenant_id=tenant,
                 )
                 wf_row = db.get_workflow_session(anon_key, tenant_id=tenant)
-                if isinstance(wf_row, dict) and wf_row.get("workflow_id"):
-                    db.upsert_workflow_session(
+                # The same guarded, in-place move as a mid-flow sign-in in chat
+                # (ADR-0013): it takes only an unowned active row within
+                # retention, once, and leaves no copy under the anonymous key.
+                if (
+                    isinstance(wf_row, dict)
+                    and wf_row.get("workflow_id")
+                    and db.adopt_workflow_session(
+                        anon_key,
                         auth_key,
-                        workflow_id=str(wf_row["workflow_id"]),
-                        current_step_idx=int(wf_row.get("current_step_idx") or 0),
-                        slots=dict(wf_row.get("slots") or {}),
-                        status=str(wf_row.get("status") or "active"),
+                        user_id=user_id,
                         tenant_id=tenant,
+                        min_updated_at=time.time() - db.conversation_ttl_seconds(),
                     )
+                ):
                     workflow_migrated = True
                     wf_slots = wf_row.get("slots")
                     if isinstance(wf_slots, dict) and wf_slots:

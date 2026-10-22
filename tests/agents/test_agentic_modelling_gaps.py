@@ -467,9 +467,10 @@ class TestWorkflowResumptionNextActions:
         from app import database as db
 
         thread_id = "test-thread-resume"
-        # Seed an active workflow session
+        # Seed an active workflow session where the engine writes one for a
+        # header-less caller: the owner-scoped key, never the bare id (ADR-0013).
         db.upsert_workflow_session(
-            conversation_id=thread_id,
+            conversation_id=db.conversation_state_key(thread_id),
             workflow_id="tin_procedure_help",
             current_step_idx=0,
             slots={},
@@ -497,7 +498,7 @@ class TestWorkflowResumptionNextActions:
 
         thread_id = "test-thread-resume-keyword"
         db.upsert_workflow_session(
-            conversation_id=thread_id,
+            conversation_id=db.conversation_state_key(thread_id),
             workflow_id="tin_procedure_help",
             current_step_idx=0,
             slots={},
