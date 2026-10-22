@@ -13,6 +13,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .journey_copilot import (
+    build_journey_gps,
+    build_stall_scaffolding,
+    evaluate_prerequisites,
+    evaluate_step_up_auth,
+    generate_resume_code,
+)
 from .loader import WorkflowDefinition, WorkflowStep, default_step_title, load_workflow
 from .slots import SlotResolver, validate_slot
 
@@ -43,6 +50,12 @@ class WorkflowTurn:
     parked_step_prompt: str = ""
     #: Consecutive answers to this step that failed validation (0 when accepted).
     failed_attempts: int = 0
+    #: October 2026 Journey Copilot enrichments (Pillars 1, 3, 5, 6, 7).
+    prerequisites: list[dict[str, Any]] = field(default_factory=list)
+    journey_gps: dict[str, Any] | None = None
+    scaffolding: dict[str, Any] | None = None
+    step_up_auth: dict[str, Any] | None = None
+    resume_code: str = ""
 
 
 @dataclass
@@ -53,6 +66,8 @@ class WorkflowSession:
     current_step_idx: int = 0
     slots: dict[str, Any] = field(default_factory=dict)
     completed: bool = False
+    #: Pushdown goal stack for nested prerequisite sub-workflows (Pillar 3).
+    goal_stack: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _eval_condition(when: str, slots: dict[str, Any]) -> bool:
@@ -148,18 +163,32 @@ def _make_turn(
 ) -> WorkflowTurn:
     """A :class:`WorkflowTurn` carrying *step*'s stepper metadata and the progress track."""
     step_index, total_steps, all_steps = compute_workflow_progress(wf, session, step.id if step else "")
-    return WorkflowTurn(
+    effective_slot = slot_name or (step.slot if step else "")
+    options_list = list(step.options) if step else []
+    prereqs = evaluate_prerequisites(wf.id, session.slots)
+    scaffolding = build_stall_scaffolding(
+        wf.id,
+        step.id if step else "",
+        effective_slot,
+        step.validator if step else "text",
+        failed_attempts,
+        options=options_list,
+    )
+    is_auth = bool(session.slots.get("_authenticated_user_id"))
+    step_up = evaluate_step_up_auth(wf, step, session.slots, is_authenticated=is_auth)
+    resume_code = generate_resume_code(wf.id, session.current_step_idx, session.slots)
+    turn = WorkflowTurn(
         question=question,
         is_complete=is_complete,
         validation_error=validation_error,
         tool_call=tool_call,
-        slot_name=slot_name or (step.slot if step else ""),
+        slot_name=effective_slot,
         step_id=step.id if step else "",
         step_title=(step.title or default_step_title(step.id)) if step else "",
         step_index=step_index,
         total_steps=total_steps,
         ui_widget=step.ui_widget if step else "text",
-        options=list(step.options) if step else [],
+        options=options_list,
         portal_action=dict(step.portal_action) if step and step.portal_action else None,
         all_steps=all_steps,
         resources=list(step.resources) if step else [],
@@ -167,7 +196,19 @@ def _make_turn(
         tangent_query=tangent_query,
         parked_step_prompt=parked_step_prompt,
         failed_attempts=failed_attempts,
+        prerequisites=prereqs,
+        scaffolding=scaffolding,
+        step_up_auth=step_up,
+        resume_code=resume_code,
     )
+    turn.journey_gps = build_journey_gps(
+        wf,
+        session,
+        turn,
+        step_index=step_index,
+        total_steps=total_steps,
+    )
+    return turn
 
 
 def _record_invalid_answer(session: WorkflowSession, step_id: str) -> int:
@@ -418,6 +459,43 @@ class WorkflowRegistry:
         if workflow_id not in cls._workflows:
             return None
         return WorkflowSession(workflow_id=workflow_id)
+
+    @classmethod
+    def push_subworkflow(
+        cls,
+        session: WorkflowSession,
+        sub_workflow_id: str,
+        *,
+        reason: str = "",
+    ) -> bool:
+        """Push the current workflow onto ``goal_stack`` and switch to *sub_workflow_id* (Pillar 3)."""
+        if sub_workflow_id not in cls._workflows or sub_workflow_id == session.workflow_id:
+            return False
+        session.goal_stack.append(
+            {
+                "workflow_id": session.workflow_id,
+                "step_idx": session.current_step_idx,
+                "reason": reason,
+            }
+        )
+        session.workflow_id = sub_workflow_id
+        session.current_step_idx = 0
+        session.completed = False
+        return True
+
+    @classmethod
+    def pop_subworkflow(cls, session: WorkflowSession) -> bool:
+        """Pop the parent workflow from ``goal_stack`` and restore its step position (Pillar 3)."""
+        if not session.goal_stack:
+            return False
+        parent = session.goal_stack.pop()
+        parent_wf_id = str(parent.get("workflow_id") or "")
+        if parent_wf_id not in cls._workflows:
+            return False
+        session.workflow_id = parent_wf_id
+        session.current_step_idx = int(parent.get("step_idx") or 0)
+        session.completed = False
+        return True
 
     @classmethod
     def pending_step(cls, session: WorkflowSession) -> WorkflowStep | None:

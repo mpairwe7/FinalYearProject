@@ -199,6 +199,12 @@ export const lg: Partial<Dictionary> = {
   'workflow.openPortal': 'Bikkula omukutu omutongole: {label}',
   'workflow.openPortalDefault': 'Bikkula omukutu gwa URA ↗',
   'workflow.cancel': 'Sazaamu enkola',
+  'workflow.prerequisites': 'Ebyetaagisa nga tonnatandika',
+  'workflow.formDraft': 'Enteekateeka ya Foomu ({code} · {pct}%)',
+  'workflow.resumeCode': 'Ennamba ey’okuddamu: {code}',
+  'workflow.journeyGpsPaused': ' Eyimiriziddwamu olw’ekibuuzo — omutendera gwo guterekeddwa',
+  'workflow.scaffoldingHint': 'Obuyambi ku kifo kino: {hint}',
+  'workflow.stepUpAuth': 'Okuyingira mu Akawunti ya URA (eby’okuddamu {count} biterekeddwa)',
 
   'resource.title': 'Foomu, bipande n’ensibuko ebitongole ebya URA',
   'resource.verified': 'Ensibuko entongole ezakakasibwa',

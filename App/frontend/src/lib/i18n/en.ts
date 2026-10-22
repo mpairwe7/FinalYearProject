@@ -213,6 +213,12 @@ export const en = {
   'workflow.openPortal': 'Open official portal: {label}',
   'workflow.openPortalDefault': 'Open URA Portal ↗',
   'workflow.cancel': 'Cancel workflow',
+  'workflow.prerequisites': 'Prerequisites & Readiness Checklist',
+  'workflow.formDraft': 'Form Preparation Schedule ({code} · {pct}%)',
+  'workflow.resumeCode': 'Resume code: {code}',
+  'workflow.journeyGpsPaused': 'Paused for side question — your step is saved',
+  'workflow.scaffoldingHint': 'Field help: {hint}',
+  'workflow.stepUpAuth': 'Account & Portal Access ({count} answers saved)',
 
   // Official resources shown alongside workflow guidance ------------------
   'resource.title': 'Official URA Forms, Templates & Sources',

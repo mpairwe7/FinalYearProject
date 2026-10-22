@@ -137,6 +137,10 @@ class ChatResponse(BaseModel):
         None,
         description="Workflow metadata for guided multi-step tasks, if active",
     )
+    objective_hypothesis: dict[str, Any] | None = Field(
+        None,
+        description="Proactive objective confirmation card metadata inferred from situational taxpayer challenges",
+    )
     handoff: dict[str, Any] | None = Field(
         None,
         description="Structured human handoff packet, when escalation or review is recommended",

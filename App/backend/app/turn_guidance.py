@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 from .escalation_policy import TIER_PRIORITY, assess_escalation
 from .flags import flags
 from .text_signals import detect_user_distress, distress_trajectory, strip_repeated_ack
+from .workflows.journey_copilot import infer_taxpayer_objective
 from .workflows.registry import WorkflowRegistry
 
 if TYPE_CHECKING:
@@ -208,6 +209,20 @@ def apply_turn_guidance(
     offer = guided_mode_action(message, result, rewritten)
     if offer and offer not in actions:
         actions.insert(0, offer)
+
+    # Pillar 4 (Oct 2026): Proactive Objective Inference & Confirmation Card
+    if (
+        flags.is_enabled("workflows")
+        and not result.get("workflow")
+        and not result.get("escalation_required")
+        and str(result.get("retrieval_mode") or "") in _OFFER_MODES
+    ):
+        hypothesis = infer_taxpayer_objective(message, rewritten)
+        if hypothesis is not None:
+            result["objective_hypothesis"] = hypothesis
+            confirm_act = str(hypothesis.get("confirm_action") or "")
+            if confirm_act and confirm_act not in actions:
+                actions.insert(0, confirm_act)
 
     if str(result.get("retrieval_mode") or "") not in ("escalated", "crisis_support"):
         if flags.is_enabled("eq_stakes_escalation", subject=subject):

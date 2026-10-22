@@ -102,4 +102,58 @@ describe("WorkflowStepper", () => {
     expect(screen.getByText("Completed")).toBeInTheDocument();
     expect(screen.queryByText("Cancel workflow")).not.toBeInTheDocument();
   });
+
+  it("renders October 2026 Journey Copilot surfaces (prerequisites, form draft, GPS, scaffolding, step-up auth, resume code)", () => {
+    const onSelect = vi.fn();
+    const enrichedWorkflow: WorkflowState = {
+      ...activeWorkflow,
+      resume_code: "URA-TIN-S1-9F2A",
+      journey_gps: {
+        workflow_id: "tin_registration",
+        active_goal: "TIN Registration",
+        step_index: 1,
+        total_steps: 4,
+        completion_pct: 25,
+        is_paused_for_tangent: true,
+      },
+      prerequisites: [
+        { id: "applicant_category", label: "Applicant classification", status: "satisfied" },
+        {
+          id: "identity_or_ursb_docs",
+          label: "Original NIRA ID or URSB Certificate",
+          status: "missing",
+          remediation_action: "Guide me step by step through Cross-MDA & NTR Verification Guide",
+        },
+      ],
+      scaffolding: {
+        failed_attempts: 1,
+        hint: "Choose individual, company, or ngo.",
+      },
+      form_draft: {
+        form_code: "URA-REG-DT-101",
+        title: "TIN Checklist",
+        completion_pct: 50,
+        fields: [
+          { box: "Sec 1", label: "Applicant Classification", slot: "taxpayer_type", status: "filled", display_value: "Recorded" },
+        ],
+      },
+      step_up_auth: {
+        required: true,
+        mode: "login_or_register",
+        reason: "Sign in to submit on the URA portal.",
+        preserved_slot_count: 2,
+      },
+    };
+
+    render(<WorkflowStepper workflow={enrichedWorkflow} onSelectOption={onSelect} />);
+    expect(screen.getByTestId("workflow-resume-code")).toHaveTextContent("URA-TIN-S1-9F2A");
+    expect(screen.getByTestId("workflow-journey-gps")).toBeInTheDocument();
+    expect(screen.getByTestId("workflow-prerequisites")).toBeInTheDocument();
+    expect(screen.getByTestId("workflow-scaffolding")).toHaveTextContent("Choose individual, company, or ngo.");
+    expect(screen.getByTestId("workflow-form-draft")).toHaveTextContent("URA-REG-DT-101 · 50%");
+    expect(screen.getByTestId("workflow-step-up-auth")).toHaveTextContent("2 answers saved");
+
+    fireEvent.click(screen.getByText("Guide me step by step through Cross-MDA & NTR Verification Guide"));
+    expect(onSelect).toHaveBeenCalledWith("Guide me step by step through Cross-MDA & NTR Verification Guide");
+  });
 });

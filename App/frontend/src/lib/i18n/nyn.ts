@@ -194,6 +194,12 @@ export const nyn: Partial<Dictionary> = {
   'workflow.openPortal': 'Iguraho omukura ogw’obutongore: {label}',
   'workflow.openPortalDefault': 'Iguraho omukura gwa URA ↗',
   'workflow.cancel': 'Shazamu entebeekanisa',
+  'workflow.prerequisites': 'Ebirikwetengyesa otakatandikire',
+  'workflow.formDraft': 'Entebeekanisa ya Foomu ({code} · {pct}%)',
+  'workflow.resumeCode': 'Enamba y’okugarukamu: {code}',
+  'workflow.journeyGpsPaused': 'ihuriireho ahabw’ekibuuzo — idaara ryawe ryabiikwa',
+  'workflow.scaffoldingHint': 'Obuyambi aha mwanya ogu: {hint}',
+  'workflow.stepUpAuth': 'Okutaaha omu Akawunti ya URA (eby’okugarukamu {count} byabiikwa)',
 
   'resource.title': 'Foomu, ebipande n’obukomooko obutongore obwa URA',
   'resource.verified': 'Obukomooko obutongore obuhamiibwe',
