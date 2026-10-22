@@ -367,9 +367,6 @@ const MAX_TURNS = 200;
 const MAX_SESSIONS = 50;
 const CHAT_STORAGE_KEY = 'ura-chat-store';
 const CHAT_STORAGE_VERSION = 2;
-// Mirrors GUIDE_PREFIX in App/backend/app/workflows/journey_copilot.py.
-const OBJECTIVE_CONFIRM_PREFIX = 'Guide me step by step through ';
-const MAX_OBJECTIVE_ACTION_CHARS = 200;
 
 /** Derive a short title from the first user message. */
 function deriveTitle(turns: ChatTurn[]): string {
@@ -458,16 +455,14 @@ function sanitizeTurn(value: unknown): ChatTurn | null {
   }
   const objHyp = value.objectiveHypothesis ?? (value as Record<string, unknown>).objective_hypothesis;
   // The card's button sends confirm_action as the taxpayer's next message in
-  // one tap, so restored state may only offer the guided-start action the
-  // server issues — never arbitrary text planted in storage.
+  // one tap. Storage cannot prove which workflow a stored action names, so a
+  // restored card is shown without its button; the same action comes back as
+  // a next-action chip (turn_guidance puts it there), so nothing is lost.
   if (
     isRecord(objHyp) &&
     typeof objHyp.objective_id === 'string' &&
     typeof objHyp.title === 'string' &&
-    typeof objHyp.workflow_id === 'string' &&
-    typeof objHyp.confirm_action === 'string' &&
-    objHyp.confirm_action.startsWith(OBJECTIVE_CONFIRM_PREFIX) &&
-    objHyp.confirm_action.length <= MAX_OBJECTIVE_ACTION_CHARS
+    typeof objHyp.workflow_id === 'string'
   ) {
     turn.objectiveHypothesis = {
       objective_id: objHyp.objective_id,
@@ -482,7 +477,7 @@ function sanitizeTurn(value: unknown): ChatTurn | null {
           : undefined,
       workflow_id: objHyp.workflow_id,
       workflow_name: typeof objHyp.workflow_name === 'string' ? objHyp.workflow_name : undefined,
-      confirm_action: objHyp.confirm_action,
+      confirm_action: '',
       prerequisites_summary:
         typeof objHyp.prerequisites_summary === 'string' ? objHyp.prerequisites_summary : undefined,
     };

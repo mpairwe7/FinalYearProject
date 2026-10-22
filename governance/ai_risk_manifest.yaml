@@ -373,7 +373,7 @@ devsecops_threat_modelling:
     - tool: "SLSA v1.2 provenance + Sigstore keyless signing"
       status: "implemented"
       evidence: ".github/workflows/container-sign-provenance.yml, .github/workflows/ura-chatbot-build-push.yml (sign job)"
-      description: "Every pushed landwind/ura-chatbot digest is signed and attested; cosign verify is pinned to this repository's signing workflow (ADR-0011 A2)"
+      description: "Signing and SLSA attestation run after each landwind/ura-chatbot image push (sign job); not yet a deployment gate, so a failed signing does not block rollout (G233a). cosign verify is pinned to this repository's signing workflow (ADR-0011 A2)"
     - tool: "zizmor + actionlint"
       type: "GitHub Actions static audit (template injection, credential persistence, dangerous triggers, unpinned images, Dependabot cooldown, impostor commits)"
       status: "implemented"

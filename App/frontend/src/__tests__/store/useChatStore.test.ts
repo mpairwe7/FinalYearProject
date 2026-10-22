@@ -139,7 +139,7 @@ describe("useChatStore", () => {
     expect(store().chat.find((t) => t.notice)).toMatchObject({ notice: "officer_joined", officerName: "Officer Nakato" });
   });
 
-  it("a restored objective card only offers the guided-start action the server issues", () => {
+  it("a restored objective card never carries a one-tap action from storage", () => {
     store().ensureActiveConversationId();
     const hypothesis = {
       objective_id: "file_return",
@@ -175,10 +175,14 @@ describe("useChatStore", () => {
     useChatStore.setState({ chat: [] });
     store().hydratePersisted();
 
+    // The card comes back without its one-tap button: storage cannot prove which
+    // workflow a stored action names, tampered or not.
     const kept = store().chat.find((t) => t.content === "kept");
-    expect(kept?.objectiveHypothesis?.confirm_action).toBe("Guide me step by step through Return Filing");
+    expect(kept?.objectiveHypothesis?.title).toBe("File a URA tax return");
+    expect(kept?.objectiveHypothesis?.confirm_action).toBe("");
     expect(kept?.objectiveHypothesis?.confidence).toBeUndefined();
-    expect(store().chat.find((t) => t.content === "tampered")?.objectiveHypothesis).toBeUndefined();
+    const tampered = store().chat.find((t) => t.content === "tampered");
+    expect(tampered?.objectiveHypothesis?.confirm_action).toBe("");
   });
 
   it("the services chosen for a conversation come back with it — after a switch and after a reload", () => {

@@ -52,7 +52,7 @@ The policy is enforced by tests and a CI gate rather than a pin table here (Depe
 | Container images version + digest pinned (never `:latest`); no `pull_request_target`; `workflow_run` only where reviewed (`lighthouse-live.yml`) | policy test + zizmor |
 | Node from `App/frontend/.nvmrc`, Bun from `App/frontend/.bun-version` (`node-version-file` / `bun-version-file`); both Dockerfiles use the same majors, digest-pinned | policy test |
 | Dependabot `cooldown.default-days >= 7` on every ecosystem (30 for pip/bun majors; security updates are never delayed); frontend on the `bun` ecosystem; docker covers `/`, `/App`, `/App/frontend` | policy test + zizmor `dependabot-cooldown` |
-| `cosign verify` pinned to this repo's `container-sign-provenance.yml`; every `landwind/ura-chatbot` digest is signed + gets SLSA provenance (`sign` job in `ura-chatbot-build-push.yml`) | policy test |
+| `cosign verify` pinned to this repo's `container-sign-provenance.yml`; signing + SLSA provenance run after every `landwind/ura-chatbot` push (`sign` job in `ura-chatbot-build-push.yml`) — not yet a deploy gate, so an image can roll out unsigned if that job fails | policy test |
 
 ```bash
 # Offline policy (also runs in the root pytest suite)
