@@ -74,17 +74,49 @@ TIER1_DOMAINS: frozenset[str] = frozenset(
         "www.ura.go.ug",
         "ulii.org",
         "www.ulii.org",
+        "media.ulii.org",
         "parliament.go.ug",
         "www.parliament.go.ug",
         "bills.parliament.ug",
         "finance.go.ug",
         "www.finance.go.ug",
+        "budget.finance.go.ug",
         "bou.or.ug",
         "www.bou.or.ug",
         "ursb.go.ug",
         "www.ursb.go.ug",
         "unbs.go.ug",
         "www.unbs.go.ug",
+        "works.go.ug",
+        "www.works.go.ug",
+        "immigration.go.ug",
+        "www.immigration.go.ug",
+        "mia.go.ug",
+        "www.mia.go.ug",
+        "nira.go.ug",
+        "www.nira.go.ug",
+        "ppda.go.ug",
+        "www.ppda.go.ug",
+        "mlhud.go.ug",
+        "www.mlhud.go.ug",
+        "kcca.go.ug",
+        "www.kcca.go.ug",
+        "iras.go.ug",
+        "www.iras.go.ug",
+        "molg.go.ug",
+        "www.molg.go.ug",
+        "upf.go.ug",
+        "www.upf.go.ug",
+        "nda.or.ug",
+        "www.nda.or.ug",
+        "nema.go.ug",
+        "www.nema.go.ug",
+        "agriculture.go.ug",
+        "www.agriculture.go.ug",
+        "ugandacoffee.go.ug",
+        "www.ugandacoffee.go.ug",
+        "singlewindow.go.ug",
+        "www.singlewindow.go.ug",
         "eac.int",
         "www.eac.int",
         "xe.com",
@@ -94,16 +126,41 @@ TIER1_DOMAINS: frozenset[str] = frozenset(
     }
 )
 
-# Only ura.go.ug, ulii.org, and parliament.go.ug (for enacted Ugandan Acts & Tax Bills) may ever persist/replace in Qdrant
+# Official Ugandan statutory, parliamentary, and MDA primary sources permitted to persist/replace in Qdrant
 QDRANT_SYNC_ALLOWED_HOSTS: frozenset[str] = frozenset(
     {
         "ura.go.ug",
         "www.ura.go.ug",
         "ulii.org",
         "www.ulii.org",
+        "media.ulii.org",
         "parliament.go.ug",
         "www.parliament.go.ug",
         "bills.parliament.ug",
+        "works.go.ug",
+        "www.works.go.ug",
+        "immigration.go.ug",
+        "www.immigration.go.ug",
+        "nira.go.ug",
+        "www.nira.go.ug",
+        "ppda.go.ug",
+        "www.ppda.go.ug",
+        "finance.go.ug",
+        "www.finance.go.ug",
+        "unbs.go.ug",
+        "www.unbs.go.ug",
+        "mlhud.go.ug",
+        "www.mlhud.go.ug",
+        "kcca.go.ug",
+        "www.kcca.go.ug",
+        "upf.go.ug",
+        "www.upf.go.ug",
+        "ursb.go.ug",
+        "www.ursb.go.ug",
+        "nda.or.ug",
+        "www.nda.or.ug",
+        "nema.go.ug",
+        "www.nema.go.ug",
     }
 )
 
@@ -199,6 +256,9 @@ _DOC_FAMILY_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("statutory_act_gazette", re.compile(r"\b(amendment\s+(?:bill|act)|finance\s+bill|assented|gazetted)\b", re.I)),
     ("public_notice", re.compile(r"\b(public\s+notice|practice\s+note|circular|penalty\s+waiver|tax\s+amnesty|filing\s+extension)\b", re.I)),
     ("taxation_handbook", re.compile(r"\b(taxation\s+handbook|tax\s+handbook)\b", re.I)),
+    ("mda_ntr_schedule", re.compile(r"\b(driving\s+permit|udls\b|e[-\s]?passport|dcic\b|nira\b|registration\s+of\s+persons|express\s+penalty|\beps\b|nema\s+eia)\b", re.I)),
+    ("b2g_ppda_ifms_compliance", re.compile(r"\b(ppda\b|e[-\s]?gp\b|ifms\b|deemed\s+vat|public\s+procurement)\b", re.I)),
+    ("unbs_nda_uesw_clearance", re.compile(r"\b(unbs\b|pvoc\b|ndamis\b|irims\b|single\s+window|uesw\b)\b", re.I)),
 )
 
 _VEHICLE_MAKE_MODEL_RE = re.compile(
@@ -378,7 +438,7 @@ def classify_source_authority(
 
 
 def can_persist_to_qdrant(url: str) -> bool:
-    """Return True if *url* is an HTTPS document from ``ura.go.ug`` or ``ulii.org``."""
+    """Return True if *url* is an HTTPS document from ``QDRANT_SYNC_ALLOWED_HOSTS``."""
     auth = classify_source_authority(url)
     return auth.tier == 1 and auth.can_write_qdrant
 

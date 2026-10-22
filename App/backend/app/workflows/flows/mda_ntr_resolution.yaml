@@ -1,0 +1,61 @@
+id: mda_ntr_resolution
+name: Cross-MDA NTR & PRN Resolution
+version: "1"
+description: >
+  Guide a taxpayer through resolving a Non-Tax Revenue (NTR/ONTR) PRN payment
+  or TIN clearance dependency across MoWT (UDLS driving permits & vehicle transfers),
+  DCIC (passports & work permits), NIRA (National IDs), MLHUD (land transfers),
+  KCCA/IRAS (trading licenses), UPF (EPS traffic tickets), URSB, UNBS, NDA, or NEMA.
+requires_auth: false
+
+trigger_phrases:
+  - "ntr prn not reflecting"
+  - "driving permit prn"
+  - "passport prn problem"
+  - "resolve mda payment"
+  - "wrong ntr tax head"
+
+steps:
+  - id: select_mda_service
+    title: "Government agency / service"
+    question: >
+      Which government service are you trying to complete: **driving permit** (MoWT/UDLS),
+      **passport or work permit** (DCIC), **national id** (NIRA), **land transfer** (MLHUD),
+      **trading license** (KCCA/IRAS), **traffic ticket** (UPF EPS), **business registration** (URSB),
+      or **other**?
+    slot: mda_service
+    validator: "enum[driving permit,passport or work permit,national id,land transfer,trading license,traffic ticket,business registration,other]"
+
+  - id: select_issue_kind
+    title: "What is happening?"
+    question: >
+      What issue are you facing right now: **paid but not reflecting**, **expired prn**,
+      **paid wrong head**, or **need a tin**?
+    slot: mda_issue_kind
+    validator: "enum[paid but not reflecting,expired prn,paid wrong head,need a tin]"
+
+  - id: collect_prn_present
+    title: "PRN available"
+    question: >
+      Do you already have the 13-digit URA Payment Registration Number (PRN)? (yes/no)
+    slot: has_prn
+    validator: boolean
+
+  - id: summary
+    title: "Resolution steps"
+    question: >
+      1) If you **paid but the MDA portal shows unpaid**, check the 13-digit PRN on
+      https://ura.go.ug ('Make a Payment' -> 'View Payment Status'): once URA status is
+      **T** (Transacted) or **R** (Reconciled), click 'Check/Verify Payment Status' on the
+      MDA portal (UDLS, passports.go.ug, UgNLIS, IRAS, or OBRS) to pull the receipt.
+      2) If you **paid under the wrong tax/NTR head**, generate a new PRN under the correct
+      MDA head and submit manual NTR Refund **Form DT-3008** with your bank slip and an
+      MDA non-utilization letter to your nearest URA office.
+      3) If you **need a TIN for a Trading License (KCCA/IRAS)**, apply for an Instant TIN
+      matching your NIRA National ID Surname, Given Name, and DOB (annual turnover below
+      UGX 10,000,000 pays **0% / UGX 0** Presumptive Tax).
+    slot: ""
+    validator: text
+    portal_action: make_payment
+    resources:
+      - payment_status

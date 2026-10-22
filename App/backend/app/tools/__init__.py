@@ -502,5 +502,6 @@ from . import ura_account as _ura_account  # noqa: E402, F401
 from . import ura_actions as _ura_actions  # noqa: E402, F401
 from . import plugins as _plugins  # noqa: E402, F401
 from . import memory_tools as _memory_tools  # noqa: E402, F401
+from . import mda_interdependence as _mda_interdependence  # noqa: E402, F401
 
 __all__ = ["Tool", "ToolSchema", "ToolRegistry"]

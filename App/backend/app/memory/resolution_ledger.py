@@ -154,6 +154,8 @@ _WORKFLOW_DOMAINS: dict[str, str] = {
     "motor_vehicle_registration": "motor_vehicle",
     "return_filing": "returns",
     "tax_clearance": "tax_clearance",
+    "mda_ntr_resolution": "payment",
+    "new_taxpayer_and_relief": "general",
 }
 _CONNECTOR_DOMAINS: dict[str, str] = {
     "efris": "efris",

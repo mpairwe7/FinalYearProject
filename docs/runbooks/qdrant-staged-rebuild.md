@@ -30,6 +30,8 @@ documents changed:
 
 ```bash
 cd App/backend
+PYTHONPATH=. python -m app.indexer --download-pdfs --export-pdf-jsonl \
+  --pdf-source-urls "https://www.parliament.go.ug/page/tax-bills-2026,https://ura.go.ug/download-category/laws-and-acts/"
 PYTHONPATH=. python -m app.indexer --export-faq-jsonl
 PYTHONPATH=. python -m app.indexer --export-pdf-jsonl
 PYTHONPATH=. python -m app.indexer --export-crawl-jsonl

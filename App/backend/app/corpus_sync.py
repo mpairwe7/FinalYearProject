@@ -54,16 +54,41 @@ WEB_SYNC_TTL_SECONDS = int(os.getenv("WEB_SYNC_TTL_SECONDS", str(7 * 86400)))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 _SYNC_LOCK_PREFIX = "ura:web_sync_lock:"
 
-#: Only official Ugandan statutory/tax authority hosts may ever persist to Qdrant.
+#: Only official Ugandan statutory/tax/MDA authority hosts may ever persist to Qdrant.
 _QDRANT_SYNC_ALLOWED_HOSTS: frozenset[str] = frozenset(
     {
         "ura.go.ug",
         "www.ura.go.ug",
         "ulii.org",
         "www.ulii.org",
+        "media.ulii.org",
         "parliament.go.ug",
         "www.parliament.go.ug",
         "bills.parliament.ug",
+        "works.go.ug",
+        "www.works.go.ug",
+        "immigration.go.ug",
+        "www.immigration.go.ug",
+        "nira.go.ug",
+        "www.nira.go.ug",
+        "ppda.go.ug",
+        "www.ppda.go.ug",
+        "finance.go.ug",
+        "www.finance.go.ug",
+        "unbs.go.ug",
+        "www.unbs.go.ug",
+        "mlhud.go.ug",
+        "www.mlhud.go.ug",
+        "kcca.go.ug",
+        "www.kcca.go.ug",
+        "upf.go.ug",
+        "www.upf.go.ug",
+        "ursb.go.ug",
+        "www.ursb.go.ug",
+        "nda.or.ug",
+        "www.nda.or.ug",
+        "nema.go.ug",
+        "www.nema.go.ug",
     }
 )
 
@@ -74,6 +99,9 @@ _NON_REPLACING_FAMILIES: frozenset[str] = frozenset(
         "general_tax",
         "ura_general_publication",
         "public_notice",
+        "mda_ntr_schedule",
+        "b2g_ppda_ifms_compliance",
+        "unbs_nda_uesw_clearance",
     }
 )
 
@@ -176,7 +204,7 @@ def _family_sync_lock(doc_family: str) -> Iterator[bool]:
 
 
 def validate_qdrant_sync_origin(url: str) -> None:
-    """Enforce that *url* uses HTTPS and originates from ``ura.go.ug`` or ``ulii.org``."""
+    """Enforce HTTPS and membership in ``_QDRANT_SYNC_ALLOWED_HOSTS``."""
     raw = str(url or "").strip()
     if not raw:
         raise CorpusSyncOriginRejected("Empty document URL cannot be synced to Qdrant.")

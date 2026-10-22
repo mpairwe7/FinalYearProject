@@ -159,7 +159,7 @@ on them without understanding our tool names.
 
 | Namespace | Tools | Risk | Deployment |
 |---|---|---|---|
-| `tax_calculator` | 9 calculators (incl. customs, excise) | low | 🟢 standalone server available |
+| `tax_calculator` | 28 calculators & statutory/MDA/relief tools (incl. PAYE, VAT, customs, excise, BIK, residency, FX, stamp duty, DST, gaming, advance vehicle, presumptive/startup, plus 6 Cross-MDA, New-Taxpayer Shield, Voluntary Disclosure/Instalment & EFRIS/Account-Recovery tools: `resolve_mda_ntr_payment`, `assess_life_event_tax_onboarding`, `evaluate_b2g_and_uesw_clearance`, `build_new_taxpayer_compliance_shield`, `simulate_tax_relief_and_instalments`, `resolve_efris_and_account_recovery`) | low | 🟢 standalone server available |
 | `education` | `explain_tax_concept` | low | in-process |
 | `rates` | `lookup_rate`, `list_available_rates`, `compare_tax_years` | low | in-process |
 | `rag` | `search_ura_knowledge_base` | low | in-process |
@@ -228,7 +228,7 @@ demo data and are not offered in production. See
 - **Distributed Sliding-Window Velocity Limiter**: Mutating critical tool actions are capped at 10 actions/hour per user (`MCP_MAX_CRITICAL_ACTIONS_PER_HOUR`). Enforced via Redis sorted sets (`mcp:velocity:{user_id}`) with resilient fallback to thread-safe in-process sliding windows. Tool discovery probes (`discovery-probe`) are exempt to prevent discovery from consuming runtime quotas.
 - **Token Vaulting (`TokenVault`)**: All sensitive API keys, bearer tokens, and connector credentials stored in state or databases are encrypted using AES-256-GCM envelope encryption with HKDF key derivation.
 - **Saga Distributed Compensation**: Connectors implement `SystemConnector.compensate()`, allowing coordinated rollback of multi-action transactional sagas when downstream steps fail.
-- **Strict Output Schemas**: All 54 registered tools across 18 namespaces declare explicit `output_schema` contracts guaranteeing the `ok: bool` property and strongly-typed return keys. Client-side and wire-server validation verifies responses and logs drift before passing results to the LLM.
+- **Strict Output Schemas**: All 72 registered tools across 18 namespaces declare explicit `output_schema` contracts guaranteeing the `ok: bool` property and strongly-typed return keys. Client-side and wire-server validation verifies responses and logs drift before passing results to the LLM.
 - **Canonical Tool Descriptor SHA-256 Pinning & Rug-Pull Guard (`OWASP MCP03/MCP08`, `ADR-0003`)**: Every MCP tool descriptor carries `ug.go.ura.chatbot/descriptorSha256` computed over `(name, description, inputSchema, outputSchema, annotations, securityMeta)`. `MCPClient` verifies descriptor hashes, scans descriptions for prompt-injection poisoning, and pins hashes per tool to block mid-session remote rug-pull mutations.
 - **Indirect Prompt Injection & Credential Screening on Tool Outputs (`OWASP MCP06 / AISVS 10.4.2`)**: `screen_tool_result` inspects all tool return strings before they enter the model context, quarantining outputs that contain prompt-override directives, chat-template control tokens, or leaked bearer/API credentials.
 - **Verified Caller Identity & Tenant Injection (`OWASP MCP04/MCP07`)**: `InProcessTransport` and `StatelessMCPServer` propagate verified `_meta` identity (`userId`, `tenantId`) into `ToolRegistry.call`, which binds them into `tool.execute` without allowing untrusted LLM arguments to spoof another taxpayer or tenant.

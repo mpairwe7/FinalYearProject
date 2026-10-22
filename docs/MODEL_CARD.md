@@ -34,12 +34,12 @@
 | **ASR (mobile)** | Whisper Small INT8 | 244M (quantised) | On-device speech recognition |
 | **TTS (mobile)** | MMS-TTS VITS | ~40M per locale | On-device speech synthesis |
 | **Supervisor** | Rule-based + LLM fallback | N/A | Query routing (7 routes) |
-| **Tool Registry** | 66 tools across 18 namespaces | N/A | Tax calculators, rates, deadlines, KB search, memory operations, DMZ system connectors |
+| **Tool Registry** | 72 tools across 18 namespaces | N/A | Tax calculators (28 tools incl. Cross-MDA NTR/PRN, life-event onboarding, B2G/UESW clearance, Nil-Return Shield, Voluntary Disclosure/Instalment simulator & EFRIS 5% refund/account recovery), rates, deadlines, KB search, memory operations, DMZ system connectors |
 | **Memory** | 4-Tier Cognitive Hierarchy | N/A | Working (entities/session), Episodic, Semantic (fact triplets), Procedural (statutory SOP exemplars) |
 | **VAD** | Energy-based (numpy) | N/A | Voice Activity Detection with hysteresis |
 | **Accent Detector** | Prosodic features + SVM | ~1M | Ugandan accent classification (5 profiles) |
 | **Offline Retriever** | FAISS + ONNX bge-m3 | ~80M bundle | Offline RAG when Qdrant is unavailable |
-| **Live Web Research & Self-Updating Qdrant** | `web_fx.py` + `web_research.py` + `ephemeral_pdf_sandbox.py` + `corpus_sync.py` | N/A | Live `XE.com` / Google FX lookup, 8-trigger Tier-1/2/3 portal verification, ephemeral `tmpfs` PDF/XLSX sandbox (`pdf_guards` + GPU 2 micro-reranking), and self-updating Qdrant hot-swap with `web_sync_ledger` 7-day memory (`ADR-0008`) |
+| **Live Web Research & Self-Updating Qdrant** | `web_fx.py` + `web_research.py` + `ephemeral_pdf_sandbox.py` + `corpus_sync.py` + `pdf_corpus.py` | N/A | Live `XE.com` / Google FX lookup, 8-trigger Tier-1/2/3 portal verification, ephemeral `tmpfs` PDF/XLSX sandbox (`pdf_guards` + GPU 2 micro-reranking), self-updating Qdrant hot-swap with `web_sync_ledger` 7-day memory (`ADR-0008`), and Statutory/10-MDA PDF Harvester (`186` PDFs → `5,639` chunks, `7,251` Qdrant hybrid vectors; `ADR-0009`) |
 
 ---
 

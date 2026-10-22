@@ -84,7 +84,7 @@ def extract_amounts(text: str) -> list[tuple[float, int, int]]:
     section_spans = [
         (m.start(), m.end())
         for m in re.finditer(
-            r"\b(?:s\.|section|sec\.|sch\.|schedule|block|part|form)\s*\d+[a-zA-Z]?\b",
+            r"\b(?:s\.|section|sec\.|sch\.|schedule|block|part|form|dt|hs|code|cap\.?)(?:[ \t]+dt)?(?:[ \t]*[-:]|[ \t]+)\d+[a-zA-Z]?\b",
             text or "",
             re.IGNORECASE,
         )
@@ -663,7 +663,11 @@ _SCENARIO_PLANNER_BYPASS_RE = re.compile(
     r"|\b(?:manual invoice|manual handwritten paper invoice|paper invoice|paper receipt|without an? efris)\b"
     r"|\b(?:can (?:i|we) (?:deduct|claim|also import)|from both|apply to both|"
     r"is (?:he|she|that) right|do we only pay|citizen start[-\s]?up)\b"
-    r"|\b(?:stamp duty|digital services tax|\bdst\b|advance income tax|\d{1,3}[-\s]?seater|sports betting|total stakes|presumptive tax)\b",
+    r"|\b(?:stamp duty|digital services tax|\bdst\b|advance income tax|\d{1,3}[-\s]?seater|sports betting|total stakes|presumptive tax)\b"
+    r"|\b(?:ppda|e[-\s]?gp|\bifms\b|deemed vat|aid[-\s]?funded|unbs|pvoc|udls|driving (?:permit|licen[cs]e)|"
+    r"e[-\s]?passport|work permit|nira|ugnlis|mlhud|kcca|e[-\s]?citie|\biras\b|trading licen[cs]e|"
+    r"express penalty|\beps\b ticket|ursb|obrs|nema|eia fee|ndamis|irims|single window|\buesw\b|dt[-\s]?3008|"
+    r"voluntary disclosure|dt[-\s]?10307|instalments?|e[-\s]?receipt refund|nil return|zero sales|deregister|lost sim)\b",
     re.IGNORECASE,
 )
 
