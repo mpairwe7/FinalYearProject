@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import re
+import uuid
 from pathlib import Path
 
 import pytest
@@ -40,6 +41,9 @@ _COMPLIANCE_SURFACE = [
     "get_workflow_session",
     "upsert_workflow_session",
     "complete_workflow_session",
+    # Sign-in hand-over of an anonymous workflow (ADR-0013): a compare-and-swap
+    # re-key that must hold on every replica, not just the pod that served it.
+    "adopt_workflow_session",
 ]
 
 
@@ -120,6 +124,13 @@ class TestBackendsAgree:
         after = backend.has_active_consent(f"sub-{suffix}", "personalization")
         backend.upsert_workflow_session(f"c-{suffix}", "tin_registration", 2, {"nin": "X"})
         session = backend.get_workflow_session(f"c-{suffix}")
+        # Fresh keys per run: a real Postgres keeps rows between runs.
+        nonce = uuid.uuid4().hex
+        anon, owned = f"anon-{suffix}-{nonce}", f"auth-{suffix}-{nonce}"
+        backend.upsert_workflow_session(anon, "return_filing", 1, {"taxpayer_type": "company"})
+        adopted = backend.adopt_workflow_session(anon, owned, user_id=f"u-{suffix}")
+        adopted_again = backend.adopt_workflow_session(owned, f"{owned}-x", user_id="intruder")
+        moved = backend.get_workflow_session(owned)
         return {
             "user_keys": sorted(user),
             "profile_keys": sorted(profile or {}),
@@ -131,6 +142,11 @@ class TestBackendsAgree:
             "workflow_step": session["current_step_idx"],
             "workflow_slots": session["slots"],
             "workflow_keys": sorted(session),
+            "adopted": adopted,
+            "adopted_again": adopted_again,
+            "adopted_owner": moved["user_id"],
+            "adopted_slots": moved["slots"],
+            "anon_row_left": backend.get_workflow_session(anon) is not None,
         }
 
     def test_the_two_backends_produce_the_same_result(self):
