@@ -635,7 +635,7 @@ def build_200_complex_scenarios() -> list[ComplexScenario]:
         ("Calculate Individual Rental Income Tax on UGX 24,000,000 annual rent", [
             TurnAssertion("Calculate individual rental tax on annual gross rent of UGX 24,000,000", expect_reply_contains=["2,541,600"]),
         ]),
-        ("Calculate CorporateCapital Gains Tax on sale of commercial building", [
+        ("Calculate Corporation Tax on chargeable income of UGX 50,000,000", [
             TurnAssertion("Calculate corporation tax on chargeable income of UGX 50,000,000", expect_reply_contains=["15,000,000"]),
         ]),
         ("Calculate 30% Corporation Tax on chargeable income of UGX 80,000,000", [
@@ -681,7 +681,9 @@ def evaluate_scenario(session: requests.Session, base_url: str, scenario: Comple
                     timeout=90,
                 )
                 status_code = resp.status_code
-                if status_code in (502, 503, 504, 429) and attempt < 2:
+                # Only retry HTTP 429 (rejected at rate-limiter before turn execution);
+                # never retry 502/503/504 or client exceptions that may have already mutated workflow state.
+                if status_code == 429 and attempt < 2:
                     time.sleep(0.8 * (attempt + 1))
                     continue
                 if status_code != 200:
@@ -690,10 +692,8 @@ def evaluate_scenario(session: requests.Session, base_url: str, scenario: Comple
                     body = resp.json()
                 break
             except Exception as exc:
-                if attempt < 2:
-                    time.sleep(0.8 * (attempt + 1))
-                    continue
                 failures.append(f"Request error: {exc}")
+                break
 
         turn_latency_ms = round((time.perf_counter() - turn_start) * 1000.0, 2)
 

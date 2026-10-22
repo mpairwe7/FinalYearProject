@@ -37,7 +37,7 @@ FLOWS_DIR = Path(__file__).resolve().parents[2] / "App" / "backend" / "app" / "w
 
 @pytest.fixture(autouse=True)
 def _ensure_workflows_loaded():
-    if not WorkflowRegistry.list_all():
+    if WorkflowRegistry.get("return_filing") is None or WorkflowRegistry.get("tin_registration") is None:
         for path in sorted(FLOWS_DIR.glob("*.yaml")):
             WorkflowRegistry.register(load_workflow(path))
 
