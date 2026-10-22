@@ -81,6 +81,8 @@ jobs:
       runner_labels: ${{ steps.config.outputs.runner_labels }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Set Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -89,23 +91,40 @@ jobs:
 
       - name: Resolve configuration
         id: config
+        # Dispatch inputs reach the shell only through env, and are checked
+        # against a strict shape here because later steps and jobs splice
+        # these outputs into command lines and runs-on.
+        env:
+          MODEL: ${{ inputs.model_id || env.DEFAULT_MODEL }}
+          FORMATS: ${{ inputs.formats || 'gguf awq' }}
+          GGUF_TYPES: ${{ inputs.gguf_types || 'Q4_K_M Q5_K_M Q8_0' }}
+          MODE: ${{ inputs.mode || 'validate' }}
+          RUNNER_LABELS: ${{ inputs.runner_labels || '["self-hosted","linux","gpu"]' }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          MODEL="${{ inputs.model_id || env.DEFAULT_MODEL }}"
-          FORMATS="${{ inputs.formats || 'gguf awq' }}"
-          GGUF_TYPES="${{ inputs.gguf_types || 'Q4_K_M Q5_K_M Q8_0' }}"
-          MODE="${{ inputs.mode || 'validate' }}"
-          RUNNER_LABELS='${{ inputs.runner_labels || '["self-hosted","linux","gpu"]' }}'
+          set -euo pipefail
           RUN_QUANTIZATION="false"
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$MODE" = "production" ]; then
+          [[ "$MODEL" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$ ]] \
+            || { echo "::error::model_id must be a Hugging Face repo id (owner/name)"; exit 1; }
+          [[ "$FORMATS" =~ ^[a-z0-9]+( [a-z0-9]+)*$ ]] \
+            || { echo "::error::formats must be space-separated words"; exit 1; }
+          [[ "$GGUF_TYPES" =~ ^[A-Za-z0-9_]+( [A-Za-z0-9_]+)*$ ]] \
+            || { echo "::error::gguf_types must be space-separated quant types"; exit 1; }
+          [[ "$MODE" =~ ^(validate|production)$ ]] \
+            || { echo "::error::mode must be validate or production"; exit 1; }
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$MODE" = "production" ]; then
             RUN_QUANTIZATION="true"
           fi
 
-          python3 - <<PY
-          import json
-          labels = json.loads('''${RUNNER_LABELS}''')
-          if not isinstance(labels, list) or not labels or not all(isinstance(x, str) and x for x in labels):
-              raise SystemExit("runner_labels must be a non-empty JSON string array")
+          python3 - <<'PY'
+          import json, os, re
+          labels = json.loads(os.environ["RUNNER_LABELS"])
+          if not isinstance(labels, list) or not labels or not all(
+              isinstance(x, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", x) for x in labels
+          ):
+              raise SystemExit("runner_labels must be a non-empty JSON array of plain runner labels")
           PY
 
           echo "model_id=${MODEL}" >> "$GITHUB_OUTPUT"
@@ -136,15 +155,22 @@ jobs:
           python -m py_compile scripts/quantize_models.py scripts/quantization_quality_gate.py
 
       - name: Dry-run quantization validation
+        env:
+          MODEL: ${{ steps.config.outputs.model_id }}
+          FORMATS: ${{ steps.config.outputs.formats }}
         run: |
+          # FORMATS is intentionally word-split into separate --formats values.
+          # shellcheck disable=SC2086
           python scripts/quantize_models.py \
-            --model "${{ steps.config.outputs.model_id }}" \
-            --formats ${{ steps.config.outputs.formats }} \
+            --model "$MODEL" \
+            --formats $FORMATS \
             --dry-run
 
       - name: Smoke-test quality gate parser
+        env:
+          MODEL_ID: ${{ steps.config.outputs.model_id }}
         run: |
-          MODEL_NAME=$(echo "${{ steps.config.outputs.model_id }}" | sed 's|.*/||')
+          MODEL_NAME="${MODEL_ID##*/}"
           mkdir -p "artifacts/quantized/${MODEL_NAME}"
           export MODEL_NAME
           python3 - <<'PY'
@@ -195,8 +221,6 @@ jobs:
           python scripts/quantization_quality_gate.py \
             --manifest "artifacts/quantized/${MODEL_NAME}/manifest.json" \
             --json-output "artifacts/quantized/${MODEL_NAME}/quality_gate_results.json"
-        env:
-          MODEL_ID: ${{ steps.config.outputs.model_id }}
 
   # ---------------------------------------------------------------------------
   # Job 2: GGUF Quantization (requires llama.cpp)
@@ -209,6 +233,8 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Set Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -237,12 +263,15 @@ jobs:
       - name: Run GGUF quantization
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          IMATRIX_FLAG: ${{ inputs.use_imatrix && '--imatrix' || '' }}
         run: |
+          # IMATRIX_FLAG is either empty or one flag, so it is left unquoted.
+          # shellcheck disable=SC2086
           python scripts/quantize_models.py \
             --model "${{ needs.validate.outputs.model_id }}" \
             --formats gguf \
             --gguf-types ${{ needs.validate.outputs.gguf_types }} \
-            ${{ inputs.use_imatrix && '--imatrix' || '' }}
+            $IMATRIX_FLAG
 
       - name: Upload GGUF artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -264,6 +293,8 @@ jobs:
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Set Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -312,6 +343,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Set Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -375,6 +408,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Download all artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2

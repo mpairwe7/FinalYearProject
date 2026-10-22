@@ -40,6 +40,9 @@ Do not move `App/backend` or `App/frontend`. Docker, HF Space, and CI import `ap
 - Always push changes via dedicated feature/fix branches and open a PR; never push directly to `dev` or `main`.
 - New FastAPI routes must land in `tests/test_all_endpoints_e2e.py` (`EXPECTED_ENDPOINTS` + `COVERAGE`).
 - A new flag lands in `flags.py`, `docs/RAG_ARCHITECTURE.md`, and `.env.example`.
+- On sign-in, a guided workflow is adopted only from the anonymous session the request itself proves (`db.adopt_workflow_session`, ADR-0013). Never add candidate keys a caller could derive from a conversation id alone; "signed in" is decided per request, never read back from stored slots.
+- A new workflow YAML needs its own prefix in `RESUME_CODE_PREFIXES` (`journey_copilot.py`).
+- GitHub Actions (ADR-0011): pin every action by commit SHA with a `# vX.Y.Z` comment, pass `inputs.*`/`github.event.*` through `env:` (never `${{ }}` inside `run:`), set `persist-credentials: false` unless the job pushes, and take Node/Bun versions from `App/frontend/.nvmrc` / `.bun-version`. Enforced by `tests/test_ci_supply_chain_policy.py` and `.github/workflows/actions-security.yml` (zizmor + actionlint).
 
 ## Commands
 

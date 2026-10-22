@@ -5,7 +5,7 @@
 
 ## Status
 
-Accepted
+Accepted — Pillars 1, 5 and 7 amended by [ADR-0013](0013-session-bound-workflow-adoption-and-verified-resume-codes.md) (session-bound adoption, request-bound sign-in state, data-minimised case facts, unique verified resume codes).
 
 ## Context and Problem Statement
 
@@ -34,7 +34,7 @@ We implemented the **October 2026 Agentic Journey Copilot (`App/backend/app/work
 6. **Pillar 6 — Multimodal "Snap-to-Fill" Slot Grounding & Stall Scaffolding (`bind_document_facts_to_workflow`, `build_stall_scaffolding`):**
    Binds analysed OCR/document facts into unfilled workflow slots and provides progressive field examples and 1-tap helper/officer escalation chips in `WorkflowStepper.tsx` when `failed_attempts >= 1`.
 7. **Pillar 7 — Cross-Channel Resume Token (`generate_resume_code`, `parse_resume_code`):**
-   Emits a deterministic, PII-free token (`URA-<FLOW>-S<N>-<HASH>`) rendered in `WorkflowStepper.tsx` across all 5 locales (`en`, `lg`, `sw`, `nyn`, `ach`) and parsed directly in `ChatModel._maybe_handle_workflow()` so pasting a resume token resumes or launches the target workflow without triggering slot validation errors.
+   Emits a deterministic, PII-free token (`URA-<PREFIX>-S<N>-<CHECK>`, one registered prefix per workflow and a verified check — see ADR-0013) rendered in `WorkflowStepper.tsx` across all 5 locales (`en`, `lg`, `sw`, `nyn`, `ach`) and parsed directly in `ChatModel._maybe_handle_workflow()` so pasting a resume token resumes or launches the target workflow without triggering slot validation errors.
 
 ## Consequences
 

@@ -17,7 +17,10 @@ jobs:
       contents: write        # merge the PR
       pull-requests: write   # approve it first
     runs-on: ubuntu-latest
-    if: github.actor == 'dependabot[bot]'
+    # The PR's author, not github.actor: the actor is whoever triggered this
+    # run (a re-run or a push to the branch), so it can read as dependabot on
+    # a PR that someone else changed.
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
     steps:
       - name: Fetch Dependabot metadata
         id: metadata

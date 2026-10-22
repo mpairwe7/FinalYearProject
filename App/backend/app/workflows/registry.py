@@ -182,7 +182,7 @@ def _make_turn(
     )
     is_auth = bool(session.slots.get("_authenticated_user_id"))
     step_up = evaluate_step_up_auth(wf, step, session.slots, is_authenticated=is_auth)
-    resume_code = generate_resume_code(wf.id, session.current_step_idx, session.slots)
+    resume_code = generate_resume_code(wf.id, session.current_step_idx)
     turn = WorkflowTurn(
         question=question,
         is_complete=is_complete,

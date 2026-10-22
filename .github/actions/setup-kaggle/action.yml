@@ -40,4 +40,4 @@ runs:
             json.dump(creds, f)
         "
         chmod 600 ~/.kaggle/kaggle.json
-        echo "::notice::Kaggle CLI configured for ${{ inputs.kaggle-username }}"
+        echo "::notice::Kaggle CLI configured for ${KAGGLE_USERNAME}"

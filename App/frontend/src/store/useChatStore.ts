@@ -454,21 +454,30 @@ function sanitizeTurn(value: unknown): ChatTurn | null {
     turn.workflow = value.workflow as unknown as WorkflowState;
   }
   const objHyp = value.objectiveHypothesis ?? (value as Record<string, unknown>).objective_hypothesis;
+  // The card's button sends confirm_action as the taxpayer's next message in
+  // one tap. Storage cannot prove which workflow a stored action names, so a
+  // restored card is shown without its button; the same action comes back as
+  // a next-action chip (turn_guidance puts it there), so nothing is lost.
   if (
     isRecord(objHyp) &&
     typeof objHyp.objective_id === 'string' &&
     typeof objHyp.title === 'string' &&
-    typeof objHyp.workflow_id === 'string' &&
-    typeof objHyp.confirm_action === 'string'
+    typeof objHyp.workflow_id === 'string'
   ) {
     turn.objectiveHypothesis = {
       objective_id: objHyp.objective_id,
       title: objHyp.title,
       domain: typeof objHyp.domain === 'string' ? objHyp.domain : 'general',
-      confidence: typeof objHyp.confidence === 'number' ? objHyp.confidence : undefined,
+      confidence:
+        typeof objHyp.confidence === 'number' &&
+        Number.isFinite(objHyp.confidence) &&
+        objHyp.confidence >= 0 &&
+        objHyp.confidence <= 1
+          ? objHyp.confidence
+          : undefined,
       workflow_id: objHyp.workflow_id,
       workflow_name: typeof objHyp.workflow_name === 'string' ? objHyp.workflow_name : undefined,
-      confirm_action: objHyp.confirm_action,
+      confirm_action: '',
       prerequisites_summary:
         typeof objHyp.prerequisites_summary === 'string' ? objHyp.prerequisites_summary : undefined,
     };
