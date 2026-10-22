@@ -64,13 +64,14 @@ _UNTRUSTED_EXPR = re.compile(r"\$\{\{\s*(inputs\.|github\.event\.|github\.head_r
 #: The refs build-push signs from; verification accepts no other.
 _SIGNER_REFS = "@refs/(heads/(dev|main)|tags/v[^/]+)$"
 _SIGN_IF = "github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')"
-_DIGEST_IMAGE = re.compile(r"^[^\s:@]+(:[A-Za-z0-9_.-]+)?@sha256:[0-9a-f]{64}$")
+_DIGEST_IMAGE = re.compile(r"^[^\s:@]+:[A-Za-z0-9_.-]+@sha256:[0-9a-f]{64}$")
 #: Our own image, rolled to an immutable ``sha-`` tag by ura-chatbot-roll-hf-space.yml.
 SELF_ROLLED = {"App/deploy/hf-space/Dockerfile": "landwind/ura-chatbot:sha-"}
 _SKIP_DIRS = {"node_modules"}
 
 
 def _dockerfiles() -> list[Path]:
+    """Return all tracked Dockerfiles in the repository."""
     return sorted(
         p
         for p in ROOT.rglob("Dockerfile*")
@@ -81,10 +82,12 @@ def _dockerfiles() -> list[Path]:
 
 
 def _load(path: Path) -> dict[str, Any]:
+    """Parse a YAML file into a dictionary."""
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
 def _steps(doc: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """Yield ``(job_name, step)`` pairs for a workflow or composite action."""
     if "runs" in doc:  # composite action
         return [("composite", s) for s in doc["runs"].get("steps", []) or []]
     out = []
@@ -94,6 +97,7 @@ def _steps(doc: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
 
 
 def _triggers(doc: dict[str, Any]) -> set[str]:
+    """Return the set of event trigger names for a workflow document."""
     # PyYAML reads the bare key `on` as boolean True.
     on = doc.get("on", doc.get(True))
     if isinstance(on, str):
@@ -105,6 +109,7 @@ def _triggers(doc: dict[str, Any]) -> set[str]:
 
 @pytest.mark.parametrize("path", WORKFLOWS + COMPOSITES, ids=lambda p: p.parent.name + "/" + p.name)
 def test_every_action_is_sha_pinned_with_a_version_comment(path: Path):
+    """Every external GitHub Action uses a 40-char commit SHA and version comment."""
     for m in _USES_LINE.finditer(path.read_text(encoding="utf-8")):
         ref = m.group("ref").strip("'\"")
         if ref.startswith("./"):
@@ -119,6 +124,7 @@ def test_every_action_is_sha_pinned_with_a_version_comment(path: Path):
 
 
 def test_one_action_resolves_to_one_sha_across_the_repo():
+    """Each external action is pinned to the same commit SHA in every workflow."""
     seen: dict[str, dict[str, str]] = {}
     for path in WORKFLOWS + COMPOSITES:
         for m in _USES_LINE.finditer(path.read_text(encoding="utf-8")):
@@ -131,6 +137,7 @@ def test_one_action_resolves_to_one_sha_across_the_repo():
 
 @pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
 def test_checkouts_decide_persist_credentials_explicitly(path: Path):
+    """Every actions/checkout step sets persist-credentials explicitly."""
     for job, step in _steps(_load(path)):
         if "actions/checkout@" not in str(step.get("uses", "")):
             continue
@@ -146,6 +153,7 @@ def test_checkouts_decide_persist_credentials_explicitly(path: Path):
 
 @pytest.mark.parametrize("path", WORKFLOWS + COMPOSITES, ids=lambda p: p.parent.name + "/" + p.name)
 def test_no_untrusted_expression_is_spliced_into_a_script(path: Path):
+    """Untrusted workflow inputs and event fields are passed via env: instead of inline."""
     for job, step in _steps(_load(path)):
         bodies = [str(step.get("run") or ""), str((step.get("with") or {}).get("script") or "")]
         for body in bodies:
@@ -158,6 +166,7 @@ def test_no_untrusted_expression_is_spliced_into_a_script(path: Path):
 
 @pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
 def test_triggers_that_run_with_repo_trust_are_reviewed(path: Path):
+    """Forbid pull_request_target and restrict workflow_run to reviewed workflows."""
     triggers = _triggers(_load(path))
     assert "pull_request_target" not in triggers, f"{path.name}: pull_request_target is not allowed"
     if "workflow_run" in triggers:
@@ -166,6 +175,7 @@ def test_triggers_that_run_with_repo_trust_are_reviewed(path: Path):
 
 @pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
 def test_container_images_are_digest_pinned(path: Path):
+    """Workflow container and service images are pinned by tag and sha256 digest."""
     for job_name, job in (_load(path).get("jobs") or {}).items():
         images = []
         container = job.get("container")
@@ -186,6 +196,7 @@ def test_container_images_are_digest_pinned(path: Path):
 def test_dockerfile_images_are_digest_pinned(path: Path):
     """A tag alone is mutable: ``python:3.11-slim-bookworm`` and ``uv:0.7``
     were rebuilt underneath this repo between two identical builds."""
+    assert not _DIGEST_IMAGE.match("python@sha256:" + "a" * 64), "tagless digest references must be rejected"
     name = str(path.relative_to(ROOT))
     text = path.read_text(encoding="utf-8")
     stages = {s.lower() for s in re.findall(r"^FROM\s+\S+\s+AS\s+(\S+)", text, re.M | re.I)}
@@ -201,6 +212,7 @@ def test_dockerfile_images_are_digest_pinned(path: Path):
         assert _DIGEST_IMAGE.match(image), f"{name}: {image} must be pinned by tag and digest"
 
 def test_node_and_bun_come_from_one_version_file_each():
+    """Workflows read Node and Bun versions from .nvmrc and .bun-version."""
     for path in WORKFLOWS:
         text = path.read_text(encoding="utf-8")
         assert not re.search(r"^\s*NODE_VERSION:", text, re.M), f"{path.name}: use App/frontend/.nvmrc"
@@ -216,6 +228,7 @@ def test_node_and_bun_come_from_one_version_file_each():
 
 
 def test_shipped_frontend_runtimes_match_ci_and_are_digest_pinned():
+    """Frontend Dockerfiles use the same Node/Bun versions as CI, pinned by digest."""
     node_major = (FRONTEND / ".nvmrc").read_text(encoding="utf-8").strip()
     bun_version = (FRONTEND / ".bun-version").read_text(encoding="utf-8").strip()
     assert re.fullmatch(r"\d+", node_major), ".nvmrc holds a bare Node major"
@@ -251,6 +264,7 @@ def test_shipped_frontend_runtimes_match_ci_and_are_digest_pinned():
 
 
 def test_dependabot_cooldown_and_coverage():
+    """Dependabot enforces a >=7-day cooldown and covers every Dockerfile directory."""
     config = _load(ROOT / ".github" / "dependabot.yml")
     ecosystems: dict[str, list[str]] = {}
     for update in config["updates"]:
@@ -274,6 +288,7 @@ def test_dependabot_cooldown_and_coverage():
 
 
 def test_signatures_are_verified_against_this_repository_only():
+    """Cosign verification and signing are restricted to protected refs of this repository."""
     for path in WORKFLOWS:
         text = path.read_text(encoding="utf-8")
         assert not re.search(r"certificate-identity-regexp=[\"']?\.\*[\"']?(\s|\\|$)", text), (
@@ -300,6 +315,7 @@ def test_signatures_are_verified_against_this_repository_only():
 
 
 def _requirement_lines(path: Path) -> list[str]:
+    """Return non-empty, non-comment requirement lines from a requirements file."""
     return [
         line.split("#", 1)[0].strip()
         for line in path.read_text(encoding="utf-8").splitlines()

@@ -53,6 +53,7 @@ STRANGERS = pytest.mark.parametrize(
 
 @pytest.fixture
 def model(tmp_db) -> ChatModel:
+    """Return a ChatModel backed by the temporary test database and registered workflows."""
     if WorkflowRegistry.get("return_filing") is None:
         for path in sorted(FLOWS_DIR.glob("*.yaml")):
             WorkflowRegistry.register(load_workflow(path))
@@ -60,6 +61,7 @@ def model(tmp_db) -> ChatModel:
 
 
 def _conv(prefix: str) -> str:
+    """Generate a unique conversation ID with ``prefix``."""
     return f"conv-{prefix}-{uuid.uuid4().hex[:10]}"
 
 
@@ -71,12 +73,14 @@ def _ask(
     session_id: str | None = None,
     user_id: str | None = None,
 ) -> dict[str, Any]:
+    """Run one ChatModel turn for the given conversation and caller identity."""
     return model.generate(  # nosemgrep: ura-llm01-raw-user-input-to-llm -- ChatModel.generate applies InputGuard before inference.
         message, conversation_id=conv, session_id=session_id, user_id=user_id, locale="en"
     )
 
 
 def _says(result: dict[str, Any], figure: str) -> bool:
+    """Return True when ``figure`` appears in ``result['reply']`` ignoring commas."""
     return figure.replace(",", "") in str(result.get("reply") or "").replace(",", "")
 
 
@@ -97,6 +101,7 @@ def _as_caller(conv: str, *, session_id: str | None, user_id: str | None) -> Ite
 
 @STRANGERS
 def test_a_stated_salary_stays_with_the_session_that_stated_it(model, stranger):
+    """A stated salary is recalled for the owner's session and hidden from other callers."""
     conv = _conv("facts")
     stated = _ask(
         model,
@@ -119,6 +124,7 @@ def test_a_stated_salary_stays_with_the_session_that_stated_it(model, stranger):
 
 @STRANGERS
 def test_a_calculator_follow_up_replays_only_the_callers_own_calculator(model, stranger):
+    """Calculator follow-up memory is scoped to the caller's own state key."""
     conv = _conv("calc")
     _ask(model, "What is the VAT on UGX 10,000,000?", conv=conv, session_id="sess-owner")
     mine = _ask(model, "what about 2 million?", conv=conv, session_id="sess-owner")
@@ -152,6 +158,7 @@ def test_a_rejected_calculator_follow_up_is_not_rendered_as_a_figure(model, monk
 
 @STRANGERS
 def test_a_workflow_row_under_the_bare_conversation_id_is_never_resumed(model, stranger):
+    """Legacy workflow rows stored under the bare conversation ID are never resumed."""
     conv = _conv("legacy")
     database.upsert_workflow_session(
         conv, "return_filing", 1, {"taxpayer_type": "company"}, tenant_id=TENANT
@@ -176,6 +183,7 @@ def test_a_workflow_row_under_the_bare_conversation_id_is_never_resumed(model, s
 
 
 def test_continue_action_is_offered_only_for_a_flow_the_caller_can_resume(model):
+    """The 'Continue <flow>' action matches the owner-scoped key and retention check."""
     name = WorkflowRegistry.get("return_filing").name
 
     # The caller's own active flow: offered inside a chat turn, and outside one
@@ -220,6 +228,7 @@ def test_continue_action_is_offered_only_for_a_flow_the_caller_can_resume(model)
 
 
 def test_promoting_an_anonymous_session_moves_its_workflow_once(tmp_db):
+    """Promoting an anonymous session adopts its active workflow in place once."""
     owner = tmp_db.upsert_user(external_id="1000555111", tenant_id=TENANT)["id"]
     other = tmp_db.upsert_user(external_id="1000555222", tenant_id=TENANT)["id"]
     for uid in (owner, other):

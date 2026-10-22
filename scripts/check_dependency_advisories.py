@@ -79,10 +79,19 @@ def unusable_reports(paths: list[Path]) -> list[str]:
             continue
         if not isinstance(report, dict) or not report.get("dependencies"):
             problems.append(f"{path}: scanned no dependencies")
+            continue
+        skipped = [
+            f"{dep.get('name') or '?'} ({dep.get('skip_reason')})"
+            for dep in report.get("dependencies") or []
+            if isinstance(dep, dict) and dep.get("skip_reason")
+        ]
+        if skipped:
+            problems.append(f"{path}: skipped dependencies: {', '.join(skipped)}")
     return problems
 
 
 def load_baseline(path: Path) -> dict[str, dict[str, str]]:
+    """Load the accepted advisory IDs from the committed baseline file."""
     if not path.is_file():
         return {}
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -90,6 +99,7 @@ def load_baseline(path: Path) -> dict[str, dict[str, str]]:
 
 
 def write_baseline(path: Path, advisories: dict[str, dict[str, str]]) -> None:
+    """Write the current advisory map to the baseline file in sorted order."""
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "_comment": (
@@ -103,6 +113,7 @@ def write_baseline(path: Path, advisories: dict[str, dict[str, str]]) -> None:
 
 
 def main() -> int:
+    """CLI entry point for the dependency-advisory gate."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--audit", nargs="+", required=True, help="pip-audit JSON report(s)")
     parser.add_argument("--baseline", default=str(DEFAULT_BASELINE))
