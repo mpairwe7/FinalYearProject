@@ -2344,9 +2344,9 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
         )
 
         # Short-circuit branches: blocked / abstained / clarification /
-        # workflow / escalated — plus deterministic procedural replies
-        # (``_short_circuit``) — skip the LLM stream and return a single
-        # bundled payload.
+        # workflow / escalated / greeting / conversational — plus deterministic
+        # procedural replies (``_short_circuit``) — skip the LLM stream and
+        # return a single bundled payload.
         if result.get("retrieval_mode") in (
             "blocked",
             "abstained",
@@ -2354,6 +2354,8 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             "workflow",
             "escalated",
             "false_premise_rejected",
+            "greeting",
+            "conversational",
         ) or result.get("_short_circuit"):
             yield ("metadata", _metadata_payload(result, include_short_circuit=True))
             # These branches emit the whole reply as one frame, so it can be
@@ -10877,15 +10879,24 @@ class ChatModel:
                 return _with_discrepancy(closing)
 
             # 1a3b. Multilingual Natural Conversational & Civic Intelligence Fast-Path
-            # Handles civic philosophy ("why do we pay taxes?"), identity, business empathy,
-            # and natural small-talk across EN, LG, and SW without deviating from URA role.
+            # Handles civic philosophy ("why do we pay taxes?"), model-welfare interviews,
+            # identity, business empathy, and natural small-talk without deviating from URA role.
             conv_res = handle_conversational_turn(core_msg, locale)
+            if conv_res is None and router_message and router_message != core_msg:
+                conv_res = handle_conversational_turn(router_message, locale)
             if conv_res is not None:
+                conv_sources = list(conv_res.sources)
+                conv_citations = list(conv_res.citations)
+                conv_faithfulness = (
+                    conv_res.faithfulness_score
+                    if conv_sources or conv_citations
+                    else None
+                )
                 conv_payload = {
                     "reply": conv_res.reply,
-                    "sources": [],
-                    "citations": [],
-                    "faithfulness_score": None,
+                    "sources": conv_sources,
+                    "citations": conv_citations,
+                    "faithfulness_score": conv_faithfulness,
                     "retrieval_mode": "conversational",
                     "model": self.name,
                     "conversation_id": thread_id,
@@ -10894,7 +10905,16 @@ class ChatModel:
                     "escalation_reason": "",
                     "agent_role": "conversational_agent",
                     "next_actions": conv_res.next_actions,
+                    "response_judge": {
+                        "decision": "approve",
+                        "final_decision": "approve",
+                        "applied_revision": False,
+                        "reasons": ["curated conversational and governance charter"],
+                        "confidence_band": "high",
+                    },
                 }
+                trace_ctx["agent_role"] = "conversational_agent"
+                set_turn_attribute("gen_ai.conversation.intent", conv_res.intent_type)
                 self._audit_turn(
                     message=message,
                     result=conv_payload,
@@ -12782,12 +12802,21 @@ class ChatModel:
 
         # Multilingual Natural Conversational & Civic Intelligence Fast-Path (streaming)
         conv_res_s = handle_conversational_turn(core_msg_s, locale)
+        if conv_res_s is None and router_message and router_message != core_msg_s:
+            conv_res_s = handle_conversational_turn(router_message, locale)
         if conv_res_s is not None:
+            conv_sources_s = list(conv_res_s.sources)
+            conv_citations_s = list(conv_res_s.citations)
+            conv_faithfulness_s = (
+                conv_res_s.faithfulness_score
+                if conv_sources_s or conv_citations_s
+                else None
+            )
             return {
                 "reply": conv_res_s.reply,
-                "sources": [],
-                "citations": [],
-                "faithfulness_score": None,
+                "sources": conv_sources_s,
+                "citations": conv_citations_s,
+                "faithfulness_score": conv_faithfulness_s,
                 "retrieval_mode": "conversational",
                 "model": self.name,
                 "conversation_id": thread_id,
@@ -12796,8 +12825,16 @@ class ChatModel:
                 "escalation_reason": "",
                 "agent_role": "conversational_agent",
                 "next_actions": conv_res_s.next_actions,
+                "response_judge": {
+                    "decision": "approve",
+                    "final_decision": "approve",
+                    "applied_revision": False,
+                    "reasons": ["curated conversational and governance charter"],
+                    "confidence_band": "high",
+                },
                 "_hits": [],
                 "_history": [],
+                "_short_circuit": True,
             }
 
         # General Contact & Helpdesk Fast-Path — parity with REST path

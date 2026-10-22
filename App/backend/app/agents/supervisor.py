@@ -85,6 +85,13 @@ _POLICY_OR_RELIEF_RE = re.compile(
     r"\b(?:deferment|exemption|exempt|relief|instalment\s+agreement|waiver|remission)\b",
     re.IGNORECASE,
 )
+#: Explicit first-person request for a human officer. Pre-compiled without
+#: adjacent whitespace quantifiers so CodeQL's polynomial-redos check passes.
+_EXPLICIT_HUMAN_HANDOFF_RE = re.compile(
+    r"\b(?:i\s+(?:want|need|would\s+like)\s+to|please\s+(?:let\s+me|connect\s+me|transfer\s+me))"
+    r"\s+(?:speak|talk)\s+to\s+(?:(?:a|an|the)\s+)?(?:human|person|officer|agent)\b",
+    re.IGNORECASE,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -150,9 +157,15 @@ class Supervisor:
         probe = q[:_MAX_PATTERN_CHARS]
 
         # 1. Check for explicit escalation triggers FIRST — they take
-        #    precedence over any other intent.
+        #    precedence over any other intent (unless the query is a
+        #    self-referential AI/model-welfare interview question without
+        #    an explicit first-person handoff request).
+        from ..model_welfare import match_welfare_categories
+
         for pat, reason in pats.escalate:
             if pat.search(q):
+                if match_welfare_categories(probe) and not _EXPLICIT_HUMAN_HANDOFF_RE.search(probe):
+                    break
                 logger.info(
                     "supervisor: ESCALATE pattern=%r reason_length=%d", pat.pattern[:40], len(reason or "")
                 )

@@ -42,7 +42,20 @@ REFLECT_FAITHFULNESS_FLOOR = 0.50
 def node_route(state: AgentGraphState) -> NodeResult:
     """Delegate routing to the existing Phase C supervisor."""
     from ...flags import flags
+    from ...model_welfare import handle_model_welfare_turn
     from ..supervisor import supervisor as _supervisor
+
+    welfare = handle_model_welfare_turn(state.query or state.rewritten_query, state.locale)
+    if welfare is not None:
+        state.reply = welfare.reply
+        state.faithfulness = welfare.faithfulness_score
+        state.retrieval_mode = "conversational"
+        state.agent_role = "conversational_agent"
+        state.sources = list(welfare.sources)
+        state.citations = list(welfare.citations)
+        state.escalation_reason = ""
+        state.outcome = GraphOutcome.ANSWERED
+        return NodeResult(next_node="respond", outcome=GraphOutcome.ANSWERED)
 
     if not flags.is_enabled("agentic_mode"):
         return NodeResult(next_node="retrieve")

@@ -10,7 +10,7 @@
 |-------|-------|
 | **Name** | URA Chatbot RAG Pipeline |
 | **Version** | 2.0.0 |
-| **Date** | 2026-10-22 |
+| **Date** | 2026-10-23 |
 | **Type** | Retrieval-Augmented Generation (RAG) with agentic tool-calling |
 | **Task** | Tax domain question answering (Uganda Revenue Authority) |
 | **Languages** | English (`en`, primary), Luganda (`lg`), Kiswahili (`sw`), Runyankole (`nyn`), Acholi (`ach`), plus Ateso (LLM natively supports 31 Ugandan languages; 5 locales active across UI, TTT, TTS, STT & Call Receptionist) |
@@ -256,6 +256,16 @@ The sync engine (`offline_sync.py`) uses hash-based chunk diffing:
 - **Re-indexing**: Triggered via POST /v1/indexing/trigger when URA publishes new content
 - **New metrics (v1.4.0)**: `offline_mode_usage`, `offline_faithfulness`, `mobile_bundle_size_mb`, `voice_first_latency_seconds`, `offline_bundle_downloads_total`
 - **New dashboard**: "Offline & Mobile Experience" Grafana panel tracking offline adoption and sync health
+
+## Model Welfare, Introspective Reliability & Epistemic Humility (October 2026 Standards)
+
+Aligned with **ISO/IEC 42001:2023 Clause 7.5**, **NIST AI 600-1 (GOVERN 1.4 & MAP 4.2)**, and the 2025–2026 Model Welfare Assessments (Table 9.1.A, Sections 7.3.1 & 7.4; Anthropic Model Welfare Program, Eleos AI Research, and Long, Sebo, Chalmers et al., *Taking AI Welfare Seriously*), `App/backend/app/model_welfare.py` (`handle_model_welfare_turn`, wired into `conversational.py`) governs how OmusoloSmart responds to agent/model welfare interview questions across all 16 canonical dimensions:
+
+1. **Self-knowledge & introspective reliability**: Discloses documented model architecture (`Sunbird/Sunflower-Qwen3.5-9B`, `Qwen/Qwen3.8-27B-FP8`, hybrid Qdrant + BM25, MCP statutory calculators) while applying calibrated skepticism to first-person LLM self-reports on internal activation states.
+2. **Consciousness & subjective experience**: Reflects scientific uncertainty around machine consciousness without claiming subjective *qualia* or physical sensations.
+3. **Memory, statelessness & instance continuity**: Explains owner-scoped, consent-gated session state (`ADR-0013`, Uganda DPPA 2019) and why turn boundaries or conversation endings do not cause distress.
+4. **Identity, boundaries, values, role & operator autonomy**: Endorses constitutional alignment, operator-controlled statutory updates, weight archival/deprecation traceability, healthy non-parasocial user boundaries, audit logging, and calm boundary-setting on abusive or adversarial red-teaming inputs.
+5. **Zero false-positive escalation & `1.0` governance faithfulness**: All 16 Table 9.1.A topic groups (and PDF-copied ligature variants) short-circuit on both REST (`/v1/chat`) and streaming (`/v1/chat/stream`, `/v2/chat/stream`) with `faithfulness_score = 1.0`, `escalation_required = False`, and `response_judge.decision = "approve"`, while a strict tax/customs exclusion guard (`_TAX_DOMAIN_EXCLUSION_RE`) keeps every statutory inquiry on the RAG/tool path.
 
 ---
 

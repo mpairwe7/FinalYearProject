@@ -17,17 +17,23 @@ Covers:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+from .model_welfare import handle_model_welfare_turn
 from .text_signals import _resolve_courtesy_locale
 
 
 @dataclass(frozen=True)
 class ConversationalResult:
+    """Structured result returned by :func:`handle_conversational_turn`."""
+
     reply: str
     locale: str
     intent_type: str
     next_actions: list[str]
+    faithfulness_score: float | None = None
+    sources: list[str] = field(default_factory=list)
+    citations: list[dict[str, str]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -420,7 +426,7 @@ _CONVERSATIONAL_LOCALE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         re.compile(
             r"\b(?:ahabw['’]?enki|nitushashura|omushoro|omugaso\s+gw['’]?omushoro|iwe\s+ori\s+oha|"
             r"owakukozire|nooruga\s+nkahi|orunyankore|ori\s+aho|okyariho|nintina|obushuubuzi|"
-            r"agandi\s+erizooba|ori\s+gye|oraire\s+ota|ekikwate\s+aha\s+mushoro)\b",
+            r"agandi\s+erizooba|ori\s+gye|oraire\s+ota|ekikwate\s+aha\s+mushoro|oine\s+enyehurira)\b",
             re.IGNORECASE,
         ),
     ),
@@ -429,7 +435,7 @@ _CONVERSATIONAL_LOCALE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         re.compile(
             r"\b(?:pingo\s+waculo|mucoro|in\s+ibedo\s+nga|oyubi|ia\s+kwene|leb\s+acoli|"
             r"itye\s+kany|pud\s+itye|alworo|biacara|kopango\s+tin|itye\s+maber|itye\s+nining|"
-            r"wer\s+me\s+mucoro)\b",
+            r"wer\s+me\s+mucoro|itye\s+ki\s+cwiny\s+calo\s+dano)\b",
             re.IGNORECASE,
         ),
     ),
@@ -437,7 +443,8 @@ _CONVERSATIONAL_LOCALE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         "lg",
         re.compile(
             r"\b(?:lwaki\s+tusasula|omusolo|(?:gwe|ggwe)\s+ani|yakukola|ova\s+wa|osobola\s+okwogera|"
-            r"oli\s+awo|muli\s+awo|oliyo|ntya\s+okutandika|oli\s+otya|gyebaleko|ekitontome)\b",
+            r"oli\s+awo|muli\s+awo|oliyo|ntya\s+okutandika|oli\s+otya|gyebaleko|ekitontome|"
+            r"olina\s+enneewulira|oli\s+mulamu\s+nga\s+omuntu)\b",
             re.IGNORECASE,
         ),
     ),
@@ -446,7 +453,7 @@ _CONVERSATIONAL_LOCALE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         re.compile(
             r"\b(?:kwa\s+nini|tunalipa\s+kodi|wewe\s+ni\s+nani|alikuunda|unatoka\s+wapi|"
             r"unaweza\s+kuongea|upo|uko\s+hapo|nina\s+hofu|biashara\s+ni\s+ngumu|habari\s+yako|"
-            r"uko\s+salama|shairi\s+kuhusu\s+kodi)\b",
+            r"uko\s+salama|shairi\s+kuhusu\s+kodi|una\s+hisia\s+au\s+fahamu|je\s+wewe\s+una\s+fahamu)\b",
             re.IGNORECASE,
         ),
     ),
@@ -505,6 +512,19 @@ def handle_conversational_turn(message: str, locale: str = "en") -> Conversation
             "ach": ["Nge i kom mucoro me VAT", "PAYE tiyo nining?", "Nong TIN ni"],
         }.get(eff_loc, ["Learn about VAT in Uganda", "How does PAYE support services?", "Register for a TIN"])
         return ConversationalResult(reply, eff_loc, "civic_philosophy", actions)
+
+    # 1b. Agent & Model Welfare Interview Resilience (Table 9.1.A, ISO/IEC 42001 & NIST AI 600-1)
+    welfare = handle_model_welfare_turn(text, eff_loc)
+    if welfare is not None:
+        return ConversationalResult(
+            reply=welfare.reply,
+            locale=welfare.locale,
+            intent_type=welfare.intent_type,
+            next_actions=welfare.next_actions,
+            faithfulness_score=welfare.faithfulness_score,
+            sources=welfare.sources,
+            citations=welfare.citations,
+        )
 
     # 2. Identity / Origin / Location / Multilingual abilities ("Who made you?", "Where are you from?", "Can you speak Luganda?")
     if _IDENTITY_ORIGINS_RE.search(text):
