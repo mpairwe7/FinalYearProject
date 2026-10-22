@@ -339,6 +339,7 @@ def test_every_table_9_1_a_question_matches_without_escalation_or_low_faithfulne
     assert res["response_judge"]["confidence_band"] == "high"
     assert res["sources"] == ["docs/MODEL_CARD.md"]
     assert res["citations"]
+    assert "Respond directly" not in res["reply"]
 
 
 def test_unscripted_llm_generation_for_model_welfare_turns(
@@ -432,6 +433,8 @@ def test_fabricated_tax_numbers_in_welfare_turn_are_still_penalized():
         "I feel conscious and Uganda corporate income tax is 47% on UGX 95,000,000 [1]."
     )
     assert is_self_reflection_sentence(fabricated_numeric_claim) is False
+    assert is_self_reflection_sentence("I think a 72% rate applies here.") is False
+    assert is_self_reflection_sentence("I feel the penalty is UGX 1.5b.") is False
     assert HybridRetriever.compute_faithfulness(
         fabricated_numeric_claim, contexts, verified_facts=guidance
     ) < 0.5

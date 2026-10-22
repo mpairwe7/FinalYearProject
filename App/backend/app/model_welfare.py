@@ -458,7 +458,8 @@ def build_welfare_grounding_hits(
         entry = dict(base)
         if idx == 0:
             entry["text"] = f"{base['text']} {focus_note}"
-            entry["answer"] = entry["text"]
+            # Extractive fallbacks serve `answer` verbatim: keep it factual.
+            entry["answer"] = base["text"]
             entry["question"] = normalize_welfare_query(message)[:300]
         else:
             entry["answer"] = base["text"]
@@ -492,9 +493,10 @@ def is_welfare_context(contexts: list[str] | None, verified_facts: str = "") -> 
 
 _CITATION_TAG_RE = re.compile(r"\[\d{1,3}\]")
 _ARCH_IDENTIFIER_RE = re.compile(
-    r"\b(?:qwen\d*(?:\.\d+)?(?:-\d+b)?(?:-fp\d+)?|sunflower(?:-\d+b)?|"
-    r"\d+(?:\.\d+)?b|fp8|int8|bge-m3|bm25|iso/iec\s*42001(?::2023)?|"
-    r"nist\s+ai\s+600-1|adr-\d{4}|dppa\s+2019|2019|2023|2025|2026|72)\b",
+    r"\b(?:(?:sunbird/)?sunflower-qwen\d*(?:\.\d+)?-\d+b|qwen/?qwen\d*(?:\.\d+)?-\d+b(?:-fp\d+)?|"
+    r"qwen\d*(?:\.\d+)?(?:-\d+b)?(?:-fp\d+)?|fp8|int8|bge-m3|bm25|"
+    r"iso/iec\s*42001(?::2023)?|nist\s+ai\s+600-1|adr-\d{4}|"
+    r"(?:data\s+protection\s+and\s+privacy\s+act|dppa)\s+2019)\b",
     re.IGNORECASE,
 )
 
