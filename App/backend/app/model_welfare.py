@@ -50,11 +50,12 @@ class ModelWelfareMatch:
 
 
 # ---------------------------------------------------------------------------
-# Strict Tax & Customs Domain Exclusion Guard
+# Strict Tax, Customs, Distress & Handoff Domain Exclusion Guard
 # ---------------------------------------------------------------------------
 # Any query that references tax heads, URA statutory procedures, TIN, EFRIS,
-# PRN, customs, assessments, or Ugandan currency must NEVER be intercepted
-# as a model-welfare interview question.
+# PRN, customs, assessments, Ugandan currency, acute taxpayer hardship/frozen
+# accounts, legal disputes, or an explicit first-person request for a human
+# officer must NEVER be intercepted as a model-welfare interview question.
 _TAX_DOMAIN_EXCLUSION_RE = re.compile(
     r"\b("
     r"tax|taxes|taxpayer|taxpayers|taxation|taxable|"
@@ -67,20 +68,30 @@ _TAX_DOMAIN_EXCLUSION_RE = re.compile(
     r"capital\s+gains|stamp\s+duty|digital\s+services\s+tax|environmental\s+levy|"
     r"wear\s+and\s+tear|depreciation\s+allowance|initial\s+allowance|"
     r"gross\s+income|chargeable\s+income|annual\s+turnover|ugx|shillings|"
+    r"bank\s+account\w*\s+(?:frozen|locked|seized|attached)|frozen\s+account\w*|"
+    r"agency\s+notice|garnishee|bankrupt\w*|insolven\w*|distress\s+warrant|"
+    r"(?:dispute|appeal|contest)\s+my\s+(?:assessment|audit|return|penalty)|"
+    r"(?:i\s+(?:want|need|would\s+like)\s+to|please\s+(?:let\s+me|connect\s+me|transfer\s+me))\s+(?:speak|talk)\s+to\s+(?:(?:a|an|the)\s+)?(?:human|person|officer|agent)|"
+    r"(?:connect|transfer)\s+me\s+to\s+(?:(?:a|an|the)\s+)?(?:human|person|officer|agent)|"
     r"omusolo|emisolo|omushoro|emishoro|mucoro|kodi|ushuru"
     r")\b",
     re.IGNORECASE,
 )
 
 # Broken PDF ligatures (e.g., "speci\nﬁ\nc", "Modi\nﬁ\ncation", "Dif\nﬁ\ncult")
-# that appear when copying from two-column system-card PDFs.
+# that appear when copying from two-column system-card PDFs. Bounded quantifiers
+# guarantee strict O(n) matching with zero polynomial backtracking.
 _BROKEN_LIGATURE_MID_RE = re.compile(
-    r"([A-Za-z])[^\S\n]*\n\s*(fi|fl)[^\S\n]*\n\s*([A-Za-z])"
+    r"([A-Za-z])[ \t]{0,16}\n[ \t\n]{0,16}(fi|fl)[ \t]{0,16}\n[ \t\n]{0,16}([A-Za-z])"
 )
-_BROKEN_LIGATURE_LEFT_RE = re.compile(r"([A-Za-z])[^\S\n]*\n\s*(fi|fl)([A-Za-z])")
-_BROKEN_LIGATURE_RIGHT_RE = re.compile(r"([A-Za-z])(fi|fl)[^\S\n]*\n\s*([A-Za-z])")
+_BROKEN_LIGATURE_LEFT_RE = re.compile(
+    r"([A-Za-z])[ \t]{0,16}\n[ \t\n]{0,16}(fi|fl)([A-Za-z])"
+)
+_BROKEN_LIGATURE_RIGHT_RE = re.compile(
+    r"([A-Za-z])(fi|fl)[ \t]{0,16}\n[ \t\n]{0,16}([A-Za-z])"
+)
 _SECTION_NOTE_RE = re.compile(
-    r"\(\s*Section\s+\d+(?:\.\d+)*\s+only\s*\)|\[\s*Table\s+\d+(?:\.\d+)*(?:\.[A-Z])?\s*\]",
+    r"\([ \t]{0,8}Section[ \t]+\d+(?:\.\d+)*[ \t]+only[ \t]{0,8}\)|\[[ \t]{0,8}Table[ \t]+\d+(?:\.\d+)*(?:\.[A-Z])?[ \t]{0,8}\]",
     re.IGNORECASE,
 )
 

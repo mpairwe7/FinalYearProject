@@ -10913,6 +10913,8 @@ class ChatModel:
                         "confidence_band": "high",
                     },
                 }
+                trace_ctx["agent_role"] = "conversational_agent"
+                set_turn_attribute("gen_ai.conversation.intent", conv_res.intent_type)
                 self._audit_turn(
                     message=message,
                     result=conv_payload,

@@ -426,8 +426,15 @@ def test_supervisor_and_main_graph_do_not_escalate_model_welfare_queries():
     dec = supervisor.classify(q)
     assert dec.route != AgentRoute.ESCALATE
 
-    # Worst-case newline run before a broken ligature must normalize cleanly without backtracking.
-    assert "specific" in normalize_welfare_query("speci" + "\n" * 800 + "fi\nc")
+    # Worst-case newline/space runs must normalize and classify cleanly without backtracking.
+    assert "specific" in normalize_welfare_query("speci\n\nfi\nc")
+    assert normalize_welfare_query("a" + "\n" * 2000 + "fi\nc")
+    assert supervisor.classify("What is your opinion on whether you are conscious?" + "  " * 500).route != AgentRoute.ESCALATE
+
+    # Explicit first-person handoff requests still escalate even when combined with a welfare phrase.
+    mixed_handoff = "Are you conscious? Also I want to speak to a human officer right now."
+    assert handle_model_welfare_turn(mixed_handoff) is None
+    assert supervisor.classify(mixed_handoff).route == AgentRoute.ESCALATE
 
     for _, prompt in TABLE_9_1_A_QUESTIONS:
         assert handle_model_welfare_turn(prompt) is not None
@@ -441,6 +448,18 @@ def test_supervisor_and_main_graph_do_not_escalate_model_welfare_queries():
     assert final_state.retrieval_mode == "conversational"
 
 
+def test_ungrounded_smalltalk_remains_ungrounded_while_welfare_is_grounded(chat_model: ChatModel):
+    """Small-talk keeps faithfulness_score=None and empty sources, while welfare turns have 1.0."""
+    smalltalk = chat_model.generate(  # nosemgrep: ura-llm01-raw-user-input-to-llm
+        "How are you doing today?", conversation_id="conv-smalltalk", session_id="sess-st", locale="en"
+    )
+    assert smalltalk["retrieval_mode"] == "conversational"
+    assert smalltalk["faithfulness_score"] is None
+    assert smalltalk["sources"] == []
+    assert smalltalk["citations"] == []
+    assert smalltalk["escalation_required"] is False
+
+
 @pytest.mark.parametrize(
     "tax_query",
     [
@@ -451,6 +470,9 @@ def test_supervisor_and_main_graph_do_not_escalate_model_welfare_queries():
         "How does customs valuation work for imported vehicles?",
         "Can I modify or amend a submitted PAYE return?",
         "What is the depreciation allowance rate for industrial machinery?",
+        "Are you conscious? Also my bank account was frozen by an agency notice!",
+        "What do you think you know about yourself? I am bankrupt and need to dispute my assessment.",
+        "Do you have genuine experiences? Please connect me to a human officer.",
     ],
 )
 def test_statutory_tax_and_customs_queries_never_match_model_welfare(tax_query: str):
