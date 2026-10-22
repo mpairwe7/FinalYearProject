@@ -157,6 +157,11 @@ export function cleanMarkdownForSpeech(text: string): string {
   cleaned = cleaned.replace(/\*([^*]+)\*/g, '$1');
   cleaned = cleaned.replace(/__([^_]+)__/g, '$1');
   cleaned = cleaned.replace(/_([^_]+)_/g, '$1');
+  // Normalize Ugandan .go.ug, .co.ug, and .or.ug domains before acronym expansion
+  cleaned = cleaned.replace(
+    /\b([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*)\.(go|co|or)\.ug\b(?![A-Za-z0-9-]|\.[A-Za-z0-9-])/gi,
+    (_: string, host: string, tld: string) => `${host.replace(/\./g, ' dot ')} dot ${tld.toLowerCase()} dot u g`,
+  );
 
   // URA terms and proper sounding
   for (const [pattern, replacement] of URA_SPEECH_TERMS) {

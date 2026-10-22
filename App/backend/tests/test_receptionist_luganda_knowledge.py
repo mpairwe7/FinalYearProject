@@ -107,6 +107,7 @@ class TestLugandaLexiconNormalization(unittest.TestCase):
         self.assertEqual(repair_asr_entities("w-h-t tax"), "WHT tax")
         self.assertEqual(repair_asr_entities("k c c a trading license"), "KCCA trading license")
         self.assertEqual(repair_asr_entities("u r s b company registration"), "URSB company registration")
+        self.assertEqual(repair_asr_entities("I got a certificate from u r s b"), "I got a certificate from URSB")
         self.assertEqual(repair_asr_entities("u n b s import clearance"), "UNBS import clearance")
         self.assertEqual(repair_asr_entities("n e m a environmental fee"), "NEMA environmental fee")
         self.assertEqual(repair_asr_entities("n i r a national id"), "NIRA national id")

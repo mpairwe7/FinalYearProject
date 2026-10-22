@@ -62,4 +62,18 @@ describe("answerText", () => {
     expect(speech).toContain("Step 1: Call toll-free 0 800, 117, 0 0 0");
     expect(speech).toContain("Step 2: Provide TIN 1 0 0 1 2 3 4 5 6 7");
   });
+
+  it("normalizes Ugandan .go.ug, .co.ug, and .or.ug government domains for speech", () => {
+    const raw =
+      "Visit kcca.go.ug, obrs.ursb.go.ug, unbs.go.ug, nema.go.ug, udls.co.ug, or nda.or.ug. Ignore example.go.ug.com.";
+    const speech = cleanMarkdownForSpeech(raw);
+    expect(speech).toContain("K C C A dot go dot u g");
+    expect(speech).toContain("O B R S dot U R S B dot go dot u g");
+    expect(speech).toContain("U N B S dot go dot u g");
+    expect(speech).toContain("Nema dot go dot u g");
+    expect(speech).toContain("U D L S dot co dot u g");
+    expect(speech).toContain("N D A dot or dot u g.");
+    expect(speech).toContain("example.go.ug.com");
+    expect(speech).not.toContain("example dot go dot u g.com");
+  });
 });

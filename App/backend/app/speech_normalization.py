@@ -53,7 +53,7 @@ _GOV_EMAIL_RE = re.compile(
     re.IGNORECASE,
 )
 _GOV_DOMAIN_RE = re.compile(
-    r"\b([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*)\.(go|co|or)\.ug(?:/[^\s.,;:!?)\]]*)?\b",
+    r"\b([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*)\.(go|co|or)\.ug(?:/[^\s.,;:!?)\]]*)?\b(?![A-Za-z0-9-]|\.[A-Za-z0-9-])",
     re.IGNORECASE,
 )
 

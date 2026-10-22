@@ -547,7 +547,17 @@ def test_government_mda_pronunciation_normalization_and_asr_repair() -> None:
         assert "NIN" in bantu_out
         assert "P R N" in bantu_out
 
-    # ASR entity repair reconstructs canonical MDA acronyms from letter-spelled speech
+    # Vernacular "ekitongore" / "dul" maps to "ngo", whereas generic English "organisation"
+    # remains ambiguous when both "company" and "ngo" are offered.
+    from app.workflows.slots import _match_enum
+
+    assert _match_enum("ekitongore", ["individual", "company", "ngo"]) == (True, "ngo", "")
+    assert _match_enum("organisation", ["individual", "company", "ngo"])[0] is False
+    assert _match_enum("organisation", ["individual", "organisation"]) == (True, "organisation", "")
+
+    assert "from URSB" in repair_asr_entities("I got a certificate from u r s b")
+    assert "from URA s b" not in repair_asr_entities("I got a certificate from u r s b")
+
     repaired = repair_asr_entities(
         "I paid k c c a and u r s b and u n b s and n e m a and n i r a and d c i c and u d l s"
     )

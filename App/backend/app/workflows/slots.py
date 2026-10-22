@@ -131,6 +131,9 @@ def _contains_sequence(haystack: list[str], needle: list[str]) -> bool:
     )
 
 
+_VERNACULAR_ORG_WORDS: frozenset[str] = frozenset({"ekitongole", "ekitongore", "shirika", "dul"})
+
+
 def _match_enum(value: str, options: list[str]) -> tuple[bool, str, str]:
     """Match a reply to one option, reading intent rather than demanding a token.
 
@@ -155,12 +158,18 @@ def _match_enum(value: str, options: list[str]) -> tuple[bool, str, str]:
     option re-asks naming just those, because guessing here writes a taxpayer
     classification into the rest of the flow.
     """
+    raw_words = set(_words(value))
     reply = _canonical(value)
     if not reply:
         return False, value, f"Please choose one of: {', '.join(options)}"
 
     opt_words = {opt: _canonical(opt) for opt in options}
-    if "organisation" in reply and "organisation" not in options and "ngo" in options:
+    if (
+        "organisation" in reply
+        and "organisation" not in options
+        and "ngo" in options
+        and bool(raw_words & _VERNACULAR_ORG_WORDS)
+    ):
         reply = ["ngo" if w == "organisation" else w for w in reply]
 
     # 1. The reply is exactly an option.
