@@ -26,7 +26,7 @@ that is actually an assumption.
 
 **Currency (SWEBOK §15.9.2, multiple-currency analysis).** The analysis currency is USD, with
 UGX shown at an assumed **UGX 3,650 / USD 1 [P]**. This rate is not fixed and should be set at
-contract date. A 10% depreciation moves the recommended local Tier-3 license fee by roughly UGX 175 million.
+contract date. A 10% depreciation moves the recommended local Tier-3 licence fee by roughly UGX 175 million.
 Cloake Tech Limited recommends the contract be denominated in **one** currency, with the other shown for
 reference only, so exchange movement does not become a dispute.
 
@@ -524,7 +524,7 @@ All figures USD **[E]**, with **[P]** corporate rate assumptions as stated (Loca
 
 | Cost line | Y1 | Y2 | Y3 | Y4 | Y5 | Total |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Sovereign license & IP grant (milestoned, §F3) | 336,000 | 144,000 | — | — | — | **480,000** |
+| Sovereign licence & IP grant (milestoned, §F3) | 336,000 | 144,000 | — | — | — | **480,000** |
 | Embedded corporate engagement, 4 specialists (§F4) | 216,000 | 216,000 | — | — | — | **432,000** |
 | Infrastructure capex — 4-GPU production + 2-GPU staging; Y5 partial refresh | 82,000 | — | — | — | 20,000 | **102,000** |
 | Infrastructure operating — power, cooling, hosting, network, ops share | 14,000 | 14,000 | 14,000 | 14,000 | 14,000 | **70,000** |
@@ -545,7 +545,7 @@ The annual-equivalent figure of **UGX 1,085 m/yr** is used for every benefit com
 because SWEBOK §15.1.4 permits comparison only between cash flows expressed in the same time
 frame.
 
-**The SPLC warning, quantified.** Post-license lines total USD 427,800 in direct operations plus
+**The SPLC warning, quantified.** Post-licence lines total USD 427,800 in direct operations plus
 USD 432,000 in embedded engineering — **64.2% of the five-year TCO**, and a rising share every year
 thereafter. This is exactly what §15.10.11 predicts, and it is the single most common omission in
 software procurement. URA should budget for it explicitly. Per Chapter 7 §1.4, the great majority
@@ -570,7 +570,7 @@ demands.
 | **A1** | **Add human capacity** — scale officers and contact-centre seats | 850,000 – 1,400,000 | 12–18 months to recruit and train | Retained | Limited by who is hired | n/a |
 | **A2** | **License a foreign SaaS assistant** | 700,000 – 1,900,000 | 4–8 months | **Taxpayer data leaves Uganda** | Vendor's roadmap, not URA's | **None owned; exit cost total** |
 | **A3** | **Procure a greenfield custom build** | 1,500,000 – 3,200,000 | 24–36 months | Retained if specified | As specified, at full cost | Owned on delivery |
-| **A4** | **Acquire sovereign license + embed Cloake Tech team** *(proposed)* | **1,339,800** | **Prototype live today; national scale inside 24 months** | **Retained — self-hosted, no external AI provider** | **en/lg/sw measured at 100% accuracy; voice in both directions** | **Sovereign perpetual rights on signing; exit cost zero** |
+| **A4** | **Acquire sovereign licence + embed Cloake Tech team** *(proposed)* | **1,339,800** | **Prototype live today; national scale inside 24 months** | **Retained — self-hosted, no external AI provider** | **en/lg/sw measured at 100% accuracy; voice in both directions** | **Sovereign perpetual rights on signing; exit cost zero** |
 
 **A0 is not free.** Its cost is the status quo: 2.73 m registered non-contributors, 76% of
 taxpayers unable to establish what they owe, and — increasingly — taxpayers already asking
@@ -699,17 +699,17 @@ condition and product quality."* Each is addressed, and each moves the price:
 
 §15.10.2 also notes that *"the target cost can be below the actual estimated cost."* Because
 Cloake Tech Limited retains core platform IP for regional and international licensing across non-competing
-jurisdictions, the local sovereign license fee for URA is set below full standalone replacement cost (§D2).
+jurisdictions, the local sovereign licence fee for URA is set below full standalone replacement cost (§D2).
 
 ### F2. Recommended local sovereign price (Uganda)
 
-> ### Sovereign enterprise license and mandate IP grant (Local — Uganda)
+> ### Sovereign enterprise licence and mandate IP grant (Local — Uganda)
 > ## USD 480,000 · UGX 1,752,000,000
 > Negotiation envelope **USD 395,000 – 550,000** (UGX 1.44 bn – 2.01 bn)
 
 **What the fee covers**
 
-- Perpetual, irrevocable sovereign license and mandate IP grant in the delivered system for URA:
+- Perpetual, irrevocable sovereign licence and mandate IP grant in the delivered system for URA:
   source code, trained and fine-tuned model weights, fine-tuning datasets, pipeline architecture,
   the 5,071-passage indexed corpus and its ingestion pipelines, 58 documents, 21 CI/CD pipelines,
   SBOM and provenance attestations, and the complete evaluation and benchmark artefact set.
@@ -740,7 +740,7 @@ making the estimates in this document falsifiable at each stage.
 
 | | Milestone | Gate URA verifies | Share | USD |
 | :--- | :--- | :--- | ---: | ---: |
-| **M0** | Signing and sovereign license grant | Agreement executed; full artefact set (code, weights, corpus, docs, pipelines) delivered into URA custody and independently buildable | 30% | 144,000 |
+| **M0** | Signing and sovereign licence grant | Agreement executed; full artefact set (code, weights, corpus, docs, pipelines) delivered into URA custody and independently buildable | 30% | 144,000 |
 | **M1** | URA-corpus optimisation and SME validation | Faithfulness ≥ 0.90 on a URA-authored golden set; URA subject-matter experts sign off on a sampled answer set | 20% | 96,000 |
 | **M2** | Production hardening and scale acceptance | Measured p50 < 500 ms at the sized concurrency; p95 < 6 s at ceiling; 100% guardrail defence retained; **on-device p95 < 180 ms field-measured on mid-range Android** (closes the package-14 gate, §B3) | 20% | 96,000 |
 | **M3** | Channel integration live | Serving on ≥ 3 channels (portal, URA app, WhatsApp) with the staff workbench in daily use by contact-centre officers | 15% | 72,000 |
@@ -752,7 +752,7 @@ signing; the remaining 70% is at risk against gates that only URA can certify.
 ### F4. Two-year embedded corporate engagement — rate card
 
 Per §5.3 of the Proposal Summary, four Cloake Tech Limited specialists embedded within URA's IT and
-customer-service departments for 24 months, agreed separately from the license fee. Corporate rate card **[P]**:
+customer-service departments for 24 months, agreed separately from the licence fee. Corporate rate card **[P]**:
 
 | Tier | USD / person / month | 4 people × 24 months | UGX |
 | :--- | ---: | ---: | ---: |
@@ -840,13 +840,13 @@ Perpetual Licensing** (public revenue authorities, central banks, ministries) an
 
 | Commercial line item | Local (Uganda) | East Africa (EAC) | International |
 | :--- | ---: | ---: | ---: |
-| **Sovereign License — Tier 1 (Core)** | USD 285,000 | USD 480,000 | USD 900,000 |
-| **Sovereign License — Tier 2 (Standard)** | USD 395,000 | USD 680,000 | USD 1,350,000 |
-| **Sovereign License — Tier 3 (Full Suite)** | **USD 480,000** | **USD 850,000** | **USD 1,750,000** |
+| **Sovereign Licence — Tier 1 (Core)** | USD 285,000 | USD 480,000 | USD 900,000 |
+| **Sovereign Licence — Tier 2 (Standard)** | USD 395,000 | USD 680,000 | USD 1,350,000 |
+| **Sovereign Licence — Tier 3 (Full Suite)** | **USD 480,000** | **USD 850,000** | **USD 1,750,000** |
 | **Turnkey Localization & System Integration** | USD 140k – 220k | USD 250k – 420k | USD 550k – 950k |
 | **Embedded Engineering Team (4 FTE × 24 mos)** | USD 432,000 | USD 672,000 | USD 1,152,000 |
 | **Annual Enterprise Support & SLA (20–22% AMC)** | USD 96,000 / yr | USD 170,000 / yr | USD 385,000 / yr |
-| **5-Year Sovereign Turnkey TCV** | **USD 1.34m – 1.55m** | **USD 1.95m – 2.45m** | **USD 3.80m – 4.85m** |
+| **5-Year Sovereign Turnkey TCV** | **USD 1.532m – 1.612m** | **USD 2.622m – 2.792m** | **USD 5.377m – 5.777m** |
 | **Enterprise SaaS — Onboarding & Integration** | USD 35k – 75k | USD 75k – 150k | USD 150k – 300k |
 | **Enterprise SaaS — Commercial Plan (Text/Web)** | USD 66,000 / yr | USD 120,000 / yr | USD 240,000 / yr |
 | **Enterprise SaaS — Omnichannel Voice + Text** | USD 150,000 / yr | USD 264,000 / yr | USD 540,000 / yr |
@@ -895,9 +895,9 @@ Expected-value analysis across three adoption scenarios, probabilities **[E]**:
 | High | 0.25 | 2,000/day | 0.20% | 5.29 bn |
 | **Expected value** | | | | **2.68 bn** |
 
-**Expected BCR = 2.68 / 1.085 = 2.47.** The low scenario alone clears BCR = 0.98 — at the
-5th-percentile outcome the programme roughly breaks even, and every scenario above it returns a
-multiple.
+**Expected BCR = 2.68 / 1.085 = 2.47.** The low scenario returns BCR ≈ 0.98, just below
+break-even. At the 5th-percentile outcome, the programme is slightly below break-even, and every
+scenario above it returns a multiple.
 
 ### G3. Monitoring the selected alternative (SWEBOK §15.2.7)
 
@@ -949,7 +949,7 @@ margin on §F5); or extension to languages beyond en/lg/sw, which is priced per 
 
 | Line | Basis | USD | UGX |
 | :--- | :--- | ---: | ---: |
-| Sovereign enterprise license and mandate IP grant | §F2, milestoned §F3 | **480,000** | **1,752,000,000** |
+| Sovereign enterprise licence and mandate IP grant | §F2, milestoned §F3 | **480,000** | **1,752,000,000** |
 | Two-year embedded corporate engagement, 4 specialists | §F4, recommended tier | 432,000 | 1,576,800,000 |
 | Infrastructure, URA-provided | §F5 | 102,000 capex + 14,000/yr | 372 m + 51 m/yr |
 | **Five-year total cost of ownership** | §D4 | **1,339,800** | **4.89 bn** |
