@@ -460,6 +460,7 @@ def test_novel_queue_reduction_and_new_taxpayer_onboarding_tools() -> None:
     s2 = WorkflowRegistry.advance(session, "voluntary disclosure or instalments")
     assert "audit notice" in s2.question.lower()
     s3 = WorkflowRegistry.advance(session, "no")
+    assert s3.is_complete is True
     # 8. Form numbers (Form DT-10307, Form DT-3008, HS code 8703) must NOT be misparsed as UGX amounts,
     #    and custom instalment_months ("10 monthly instalments") must be respected.
     from app.calculator_router import extract_amounts
@@ -493,6 +494,74 @@ def test_novel_queue_reduction_and_new_taxpayer_onboarding_tools() -> None:
     WorkflowRegistry.advance(session_sim, "")
     done_turn = WorkflowRegistry.advance(session_sim, "lost sim or email recovery")
     assert done_turn.is_complete is True
+
+
+def test_government_mda_pronunciation_normalization_and_asr_repair() -> None:
+    """Verify speech pronunciation rules for all 10-MDA/government terms and TIN/NIN natural word preservation."""
+    from app.query import expand_abbreviations
+    from app.receptionist.lexicon import repair_asr_entities
+    from app.speech_normalization import clean_text_for_speech, phoneticize_bantu_acronyms
+
+    raw = (
+        "Apply via kcca/KCCA, ursb/URSB, nema/NEMA, unbs/UNBS, nira/NIRA, dcic/DCIC, "
+        "udls/UDLS, mlhud/MLHUD, upf/UPF, nda/NDA, ppda/PPDA, ifms/IFMS, obrs/OBRS, "
+        "uesw/UESW, iras/IRAS, bwims/BWIMS, ntr/NTR, ontr/ONTR, mowt/MoWT, mofped/MoFPED, "
+        "pvoc/PVoC, e-GP, and e-Citie using your TIN/tin and NIN/nin (or T-I-N and N-I-N)."
+    )
+    spoken = clean_text_for_speech(raw, locale="en")
+    assert "K C C A/K C C A" in spoken
+    assert "U R S B/U R S B" in spoken
+    assert "Nema/Nema" in spoken
+    assert "U N B S/U N B S" in spoken
+    assert "Nira/Nira" in spoken
+    assert "D C I C/D C I C" in spoken
+    assert "U D L S/U D L S" in spoken
+    assert "M L H U D/M L H U D" in spoken
+    assert "U P F/U P F" in spoken
+    assert "N D A/N D A" in spoken
+    assert "P P D A/P P D A" in spoken
+    assert "I F M S/I F M S" in spoken
+    assert "O B R S/O B R S" in spoken
+    assert "U E S W/U E S W" in spoken
+    assert "Iras/Iras" in spoken
+    assert "Bwims/Bwims" in spoken
+    assert "N T R/N T R" in spoken
+    assert "O N T R/O N T R" in spoken
+    assert "M O W T/M O W T" in spoken
+    assert "M O F P E D/M O F P E D" in spoken
+    assert "P V O C/P V O C" in spoken
+    assert "E G P" in spoken
+    assert "E-City" in spoken
+    assert "TIN/tin" in spoken
+    assert "NIN/nin" in spoken
+    assert "T-I-N" not in spoken
+    assert "N-I-N" not in spoken
+
+    # Bantu acronym phonetics keeps TIN and NIN as natural words (never T-I-N or N-I-N) and spells PRN as P R N
+    for loc in ("lg", "sw", "nyn", "ach"):
+        bantu_out = phoneticize_bantu_acronyms("TIN ne NIN ne T-I-N ne N-I-N ne PRN", locale=loc)
+        assert "T-I-N" not in bantu_out
+        assert "N-I-N" not in bantu_out
+        assert "P-R-N" not in bantu_out
+        assert "TIN" in bantu_out
+        assert "NIN" in bantu_out
+        assert "P R N" in bantu_out
+
+    # ASR entity repair reconstructs canonical MDA acronyms from letter-spelled speech
+    repaired = repair_asr_entities(
+        "I paid k c c a and u r s b and u n b s and n e m a and n i r a and d c i c and u d l s"
+    )
+    for canonical in ("KCCA", "URSB", "UNBS", "NEMA", "NIRA", "DCIC", "UDLS"):
+        assert canonical in repaired
+
+    # Query abbreviation expansion includes the government bodies while keeping the acronym token
+    expanded = expand_abbreviations("kcca ursb nema unbs nira")
+    assert "Kampala Capital City Authority (KCCA)" in expanded
+    assert "Uganda Registration Services Bureau (URSB)" in expanded
+    assert "National Environment Management Authority (NEMA)" in expanded
+    assert "Uganda National Bureau of Standards (UNBS)" in expanded
+    assert "National Identification and Registration Authority (NIRA)" in expanded
+
 
 
 
