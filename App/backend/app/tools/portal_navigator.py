@@ -13,6 +13,7 @@ from ..verified_resources import get_resource
 from . import Tool, ToolRegistry, ToolSchema
 from .portal_navigator_data import (
     EXTERNAL_URA_PORTALS,
+    PORTAL_NAVIGATION_WORKFLOWS,
     _diagnose_portal_state,
     build_portal_deep_link,
     export_companion_manifest,
@@ -239,8 +240,15 @@ class NavigateExternalPortalTool(Tool):
                 "tax_heads": extract_tax_heads(text)[:5],
             }
 
-        # 3. Diagnose issue & detect screen state
-        state, issue, severity, steps = self._diagnose_portal_state(portal_key, text_lower, err_msg)
+        # 3. Diagnose issue & detect screen state (with declarative workflow override check)
+        decl_wf = PORTAL_NAVIGATION_WORKFLOWS.get(str(workflow_intent or "").strip())
+        if decl_wf is not None:
+            state = str(workflow_intent).strip()
+            issue = str(decl_wf.get("title") or "Declarative Portal Workflow")
+            severity = "info"
+            steps = list(decl_wf.get("steps") or [])
+        else:
+            state, issue, severity, steps = self._diagnose_portal_state(portal_key, text_lower, err_msg)
 
         # 4. The official page for this task and its place in the ura.go.ug menu
         #    (no user data in the URL — see build_portal_deep_link)

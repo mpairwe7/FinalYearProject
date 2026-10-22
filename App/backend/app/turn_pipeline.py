@@ -168,15 +168,48 @@ class TurnPipelineOrchestrator:
         initial_state: dict[str, Any],
         *,
         transport: str = "rest",
+        raise_on_error: bool = False,
     ) -> tuple[dict[str, Any], TurnPipelineTrace]:
         state = dict(initial_state)
         trace = TurnPipelineTrace(transport=transport, manifest=self.manifest)
+        caught_exc: Exception | None = None
         for stage in self.manifest.ordered_stages:
             handler = self._handlers.get(stage)
             if handler is None:
                 continue
             t0 = time.perf_counter()
-            out = handler(state)
+            try:
+                out = handler(state)
+            except Exception as exc:
+                elapsed_ms = (time.perf_counter() - t0) * 1000.0
+                state["_stage_error"] = f"{stage.value}: {type(exc).__name__}: {exc}"
+                trace.record_stage(
+                    stage,
+                    elapsed_ms,
+                    short_circuited=True,
+                    metadata={
+                        "route": state.get("route", ""),
+                        "failed": True,
+                        "error_type": type(exc).__name__,
+                    },
+                )
+                caught_exc = exc
+                if stage != TurnStage.STAGE_6_OUTPUT_GUARD_AND_AUDIT:
+                    audit_handler = self._handlers.get(TurnStage.STAGE_6_OUTPUT_GUARD_AND_AUDIT)
+                    if audit_handler is not None:
+                        t_audit = time.perf_counter()
+                        try:
+                            audit_out = audit_handler(state)
+                            if isinstance(audit_out, dict):
+                                state.update(audit_out)
+                        finally:
+                            trace.record_stage(
+                                TurnStage.STAGE_6_OUTPUT_GUARD_AND_AUDIT,
+                                (time.perf_counter() - t_audit) * 1000.0,
+                                metadata={"route": state.get("route", ""), "after_error": True},
+                            )
+                break
+
             elapsed_ms = (time.perf_counter() - t0) * 1000.0
             if isinstance(out, dict):
                 state.update(out)
@@ -201,4 +234,6 @@ class TurnPipelineOrchestrator:
                         metadata={"route": state.get("route", ""), "after_short_circuit": True},
                     )
                 break
+        if caught_exc is not None and raise_on_error:
+            raise caught_exc
         return state, trace

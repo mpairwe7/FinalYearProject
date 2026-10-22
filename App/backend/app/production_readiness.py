@@ -414,6 +414,28 @@ def evaluate_gate(gap: str) -> dict[str, Any]:
     }
 
 
+def architecture_integrity_status() -> dict[str, Any]:
+    """Verify October 2026 architectural invariants (ADR-0012): storage parity, ASI10 manifest, portal pack, and ExpRAG."""
+    from .flags import flags
+    from .memory.procedural import ProceduralMemory
+    from .storage_protocol import verify_storage_backend_parity
+    from .tools.portal_navigator_data import get_portal_knowledge_provenance
+    from .turn_pipeline import CANONICAL_BEHAVIORAL_MANIFEST
+
+    parity = verify_storage_backend_parity()
+    portal_prov = get_portal_knowledge_provenance()
+    lifecycle = flags.lifecycle_summary()
+    pm = ProceduralMemory()
+    return {
+        "ok": bool(parity["ok"] and portal_prov.get("loaded")),
+        "storage_backend_parity": parity,
+        "behavioral_manifest_sha256": CANONICAL_BEHAVIORAL_MANIFEST.digest_sha256(),
+        "portal_knowledge_sha256": portal_prov.get("sha256", ""),
+        "procedural_exemplar_count": len(pm.list_exemplars()),
+        "flag_lifecycle_counts": {k: len(v) for k, v in lifecycle.items()},
+    }
+
+
 def readiness_report(*, as_production: bool = False) -> dict[str, Any]:
     """Per-gap report. ``as_production`` evaluates gates even in development."""
     saved = os.environ.get("APP_ENV")
@@ -423,11 +445,15 @@ def readiness_report(*, as_production: bool = False) -> dict[str, Any]:
         gaps = ["G12", "G13", "G14", "G15", "G29", "G30", "G31", "G33", "G34", "G35", "G36"]
         items = [evaluate_gate(gap) for gap in gaps]
         errors = gap_gate_errors()
+        arch = architecture_integrity_status()
+        if not arch["ok"]:
+            errors.append("ADR-0012: architecture_integrity_status failed parity or provenance check.")
         return {
             "app_env": os.getenv("APP_ENV") or "development",
             "ok": not errors,
             "errors": errors,
             "gaps": items,
+            "architecture_integrity": arch,
         }
     finally:
         if as_production:

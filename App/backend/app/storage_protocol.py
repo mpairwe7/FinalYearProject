@@ -9,6 +9,7 @@ call signatures.
 from __future__ import annotations
 
 import ast
+import functools
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -61,32 +62,64 @@ class StorageBackendProtocol(Protocol):
     def cleanup_expired_working_memory(self) -> int: ...
 
 
-def verify_storage_backend_parity(app_dir: Path | None = None) -> dict[str, Any]:
-    """Compare public top-level functions in ``database.py`` and ``postgres.py`` via AST."""
-    base = app_dir if app_dir is not None else Path(__file__).resolve().parent
-    db_path = base / "database.py"
-    pg_path = base / "postgres.py"
+def _extract_fn_signatures(tree: ast.Module) -> dict[str, tuple[tuple[str, ...], tuple[str, ...]]]:
+    """Return mapping of public function name -> (pos_arg_names, kwonly_arg_names)."""
+    out: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {}
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and not node.name.startswith("_"):
+            pos = tuple(a.arg for a in node.args.args)
+            kwonly = tuple(sorted(a.arg for a in node.args.kwonlyargs))
+            out[node.name] = (pos, kwonly)
+    return out
 
-    db_tree = ast.parse(db_path.read_text(encoding="utf-8"))
-    pg_tree = ast.parse(pg_path.read_text(encoding="utf-8"))
 
-    db_funcs = {
-        n.name
-        for n in db_tree.body
-        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and not n.name.startswith("_")
-    }
-    pg_funcs = {
-        n.name
-        for n in pg_tree.body
-        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and not n.name.startswith("_")
-    }
+@functools.lru_cache(maxsize=8)
+def _cached_parity_check(
+    db_path_str: str,
+    db_mtime_ns: int,
+    pg_path_str: str,
+    pg_mtime_ns: int,
+) -> dict[str, Any]:
+    db_tree = ast.parse(Path(db_path_str).read_text(encoding="utf-8"))
+    pg_tree = ast.parse(Path(pg_path_str).read_text(encoding="utf-8"))
+
+    db_sigs = _extract_fn_signatures(db_tree)
+    pg_sigs = _extract_fn_signatures(pg_tree)
+
+    db_funcs = set(db_sigs)
+    pg_funcs = set(pg_sigs)
 
     missing_in_postgres = sorted(db_funcs - pg_funcs)
     missing_in_sqlite = sorted(pg_funcs - db_funcs)
+    signature_mismatches: list[str] = []
+    for fn_name in sorted(db_funcs & pg_funcs):
+        db_pos, db_kw = db_sigs[fn_name]
+        pg_pos, pg_kw = pg_sigs[fn_name]
+        if len(db_pos) != len(pg_pos) or db_kw != pg_kw:
+            signature_mismatches.append(
+                f"{fn_name}: sqlite=({db_pos}, kw={db_kw}) vs postgres=({pg_pos}, kw={pg_kw})"
+            )
+
     return {
-        "ok": not missing_in_postgres and not missing_in_sqlite,
+        "ok": not missing_in_postgres and not missing_in_sqlite and not signature_mismatches,
         "sqlite_function_count": len(db_funcs),
         "postgres_function_count": len(pg_funcs),
         "missing_in_postgres": missing_in_postgres,
         "missing_in_sqlite": missing_in_sqlite,
+        "signature_mismatches": signature_mismatches,
     }
+
+
+def verify_storage_backend_parity(app_dir: Path | None = None) -> dict[str, Any]:
+    """Compare public top-level functions and call signatures in ``database.py`` and ``postgres.py`` via cached AST."""
+    base = app_dir if app_dir is not None else Path(__file__).resolve().parent
+    db_path = (base / "database.py").resolve()
+    pg_path = (base / "postgres.py").resolve()
+    return dict(
+        _cached_parity_check(
+            str(db_path),
+            db_path.stat().st_mtime_ns,
+            str(pg_path),
+            pg_path.stat().st_mtime_ns,
+        )
+    )
