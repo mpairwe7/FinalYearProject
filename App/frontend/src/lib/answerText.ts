@@ -126,7 +126,7 @@ const URA_SPEECH_TERMS: Array<[RegExp, string | ((match: string, ...args: string
   [/\bBOU\b/g, 'Bank of Uganda'],
   [/\bTAT\b/g, 'Tax Appeals Tribunal'],
   [/\bTCC\b|\bT\.C\.C\.?|\bT-C-C\b/gi, 'T-C-C'],
-  [/\bPRN\b|\bP\.R\.N\.?|\bP-R-N\b/gi, 'P-R-N'],
+  [/\bPRN\b|\bP\.R\.N\.?|\bP-R-N\b/gi, 'P R N'],
   [/\bBRN\b|\bB\.R\.N\.?|\bB-R-N\b/gi, 'B-R-N'],
   [/\bDT-(\d{3,5})\b/gi, 'D-T $1'],
 ];

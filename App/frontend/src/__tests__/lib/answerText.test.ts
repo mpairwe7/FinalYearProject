@@ -45,12 +45,13 @@ describe("answerText", () => {
     expect(speech).not.toContain("N-I-N");
   });
 
-  it("keeps standalone TIN/tin and NIN/nin as natural words (never T-I-N or N-I-N) and spells PRN as P-R-N", () => {
+  it("keeps standalone TIN/tin and NIN/nin as natural words (never T-I-N or N-I-N) and spells PRN as P R N", () => {
     const raw = "Ensure you have a TIN (or T.I.N. / T-I-N) and PRN, or present your NIN (or N.I.N. / N-I-N).";
     const speech = cleanMarkdownForSpeech(raw);
     expect(speech).toContain("TIN");
     expect(speech).not.toContain("T-I-N");
-    expect(speech).toContain("P-R-N");
+    expect(speech).toContain("P R N");
+    expect(speech).not.toContain("P-R-N");
     expect(speech).toContain("NIN");
     expect(speech).not.toContain("N-I-N");
   });

@@ -537,14 +537,15 @@ def test_government_mda_pronunciation_normalization_and_asr_repair() -> None:
     assert "T-I-N" not in spoken
     assert "N-I-N" not in spoken
 
-    # Bantu acronym phonetics keeps TIN and NIN as natural words (never T-I-N or N-I-N)
+    # Bantu acronym phonetics keeps TIN and NIN as natural words (never T-I-N or N-I-N) and spells PRN as P R N
     for loc in ("lg", "sw", "nyn", "ach"):
         bantu_out = phoneticize_bantu_acronyms("TIN ne NIN ne T-I-N ne N-I-N ne PRN", locale=loc)
         assert "T-I-N" not in bantu_out
         assert "N-I-N" not in bantu_out
+        assert "P-R-N" not in bantu_out
         assert "TIN" in bantu_out
         assert "NIN" in bantu_out
-        assert "P-R-N" in bantu_out
+        assert "P R N" in bantu_out
 
     # ASR entity repair reconstructs canonical MDA acronyms from letter-spelled speech
     repaired = repair_asr_entities(

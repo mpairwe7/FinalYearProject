@@ -110,6 +110,7 @@ _SW_MARKERS = re.compile(
 # ['withholding', 'tax', 'wht'] and both forms hit.
 _ABBREVIATIONS: dict[str, str] = {
     "tin": "Taxpayer Identification Number (TIN)",
+    "prn": "Payment Reference Number / Payment Registration Number (PRN)",
     "vat": "Value Added Tax (VAT)",
     "paye": "Pay As You Earn (PAYE)",
     "efris": "Electronic Fiscal Receipting and Invoicing System (EFRIS)",

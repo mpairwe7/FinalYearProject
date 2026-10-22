@@ -553,7 +553,8 @@ def test_phase33_dynamic_turn_stop_and_bantu_acronym_phonetics():
     assert "T-I-N" not in phon
     assert "NIN" in phon
     assert "N-I-N" not in phon
-    assert "P-R-N" in phon
+    assert "P R N" in phon
+    assert "P-R-N" not in phon
 
 
 def test_phase33_low_bandwidth_mulaw_codec_and_call_drop_resume(monkeypatch):
@@ -1556,8 +1557,8 @@ def test_phase38_nyn_and_ach_full_2026_ttt_tts_stt_parity(monkeypatch):
     finally:
         flags.clear("spoken_figure_guard")
 
-    assert phoneticize_bantu_acronyms("TIN na NIN na PRN", locale="nyn") == "TIN na NIN na P-R-N"
-    assert phoneticize_bantu_acronyms("TIN ki NIN ki PRN", locale="ach") == "TIN ki NIN ki P-R-N"
+    assert phoneticize_bantu_acronyms("TIN na NIN na PRN", locale="nyn") == "TIN na NIN na P R N"
+    assert phoneticize_bantu_acronyms("TIN ki NIN ki PRN", locale="ach") == "TIN ki NIN ki P R N"
 
     monkeypatch.setenv("ORPHEUS_TTS_URL", "http://orpheus-tts:8100")
     assert orpheus_tts.speaker_for("nyn") == "salt_nyn_0001"

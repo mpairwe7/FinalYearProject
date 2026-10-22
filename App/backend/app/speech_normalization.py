@@ -246,7 +246,7 @@ _ACRONYMS = [
     (re.compile(r"\bTAT\b|\bT\.A\.T\b\.?"), "Tax Appeals Tribunal"),
     (re.compile(r"\bTPCA\b", re.IGNORECASE), "Tax Procedures Code Act"),
     (re.compile(r"\bITA\b"), "Income Tax Act"),
-    (re.compile(r"(?:\bP\.R\.N\b\.?|\bP-R-N\b|\bPRN\b)", re.IGNORECASE), "P-R-N"),
+    (re.compile(r"(?:\bP\.R\.N\b\.?|\bP-R-N\b|\bPRN\b)", re.IGNORECASE), "P R N"),
     (re.compile(r"(?:\bB\.R\.N\b\.?|\bB-R-N\b|\bBRN\b)", re.IGNORECASE), "B-R-N"),
     (re.compile(r"(?:\bT\.C\.C\b\.?|\bT-C-C\b|\bTCC\b)", re.IGNORECASE), "T-C-C"),
     (re.compile(r"(?:\bA\.E\.O\b\.?|\bA-E-O\b|\bAEO\b)", re.IGNORECASE), "A-E-O"),
@@ -551,12 +551,12 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
 _BANTU_ACRONYM_PHONETICS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(?:\bT\.I\.N\b\.?|\bT-I-N\b)", re.IGNORECASE), "TIN"),
     (re.compile(r"(?:\bN\.I\.N\b\.?|\bN-I-N\b)", re.IGNORECASE), "NIN"),
-    (re.compile(r"\bPRN\b", re.IGNORECASE), "P-R-N"),
+    (re.compile(r"(?:\bP\.R\.N\b\.?|\bP-R-N\b|\bPRN\b)", re.IGNORECASE), "P R N"),
 )
 
 
 def phoneticize_bantu_acronyms(text: str, locale: str = "lg") -> str:
-    """Normalize acronyms (TIN/tin kept as natural word, PRN -> P-R-N) for Orpheus Ugandan/East African voices."""
+    """Normalize acronyms (TIN/tin and NIN/nin kept as natural words, PRN -> P R N) for Orpheus Ugandan/East African voices."""
     if not text or (locale or "").lower() not in ("lg", "sw", "nyn", "ach"):
         return text or ""
     out = text

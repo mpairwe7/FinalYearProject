@@ -67,7 +67,8 @@ def test_standalone_tin_and_prn_and_nin():
     res = clean_text_for_speech(raw, locale="en")
     assert "TIN" in res
     assert "T-I-N" not in res
-    assert "P-R-N" in res
+    assert "P R N" in res
+    assert "P-R-N" not in res
     assert "NIN" in res
     assert "N-I-N" not in res
 
