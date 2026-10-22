@@ -390,7 +390,7 @@ App/backend/app/
 ├── retriever.py         # HybridRetriever (bge-m3 + BM25 + RRF + rerank) + CircuitBreaker
 ├── indexer.py           # JSONL → Qdrant indexing (Qdrant → Vectorize → keyword tiers)
 ├── faq_corpus.py        # ura_*_faqs.csv + teacher-QA → validated JSONL → vector docs
-├── pdf_corpus.py        # PDFs → hierarchical chunk JSONL (heading trail, atomic tables)
+├── pdf_corpus.py        # Statutory & 10-MDA PDF harvester + hierarchical chunk JSONL (186 PDFs → 5,639 chunks)
 ├── crawl_corpus.py      # Crawl pages → chunk JSONL (newest capture per URL, above floor)
 ├── speech_service.py    # ASR (Whisper) + TTS (Piper) + MT (prompted/ONNX)
 ├── sunbird.py           # Sunbird AI cloud fallback (Ugandan languages)
@@ -398,7 +398,7 @@ App/backend/app/
 ├── analytics.py         # Prometheus-compatible metrics middleware
 ├── database.py          # SQLite WAL store (11 tables, retention TTLs, migrations)
 ├── postgres.py          # PostgreSQL backend (opt-in, drop-in substitute for database.py)
-├── flags.py             # Feature flag registry (82 flags, env-backed, cohort rollout)
+├── flags.py             # Feature flag registry (85 flags, env-backed, cohort rollout)
 ├── resilience.py        # Circuit breaker (exponential backoff, CLOSED→OPEN→HALF_OPEN)
 ├── pdf_export.py        # Branded PDF conversation/tax summary export
 ├── evaluation.py        # RAG evaluation harness (8 metrics)

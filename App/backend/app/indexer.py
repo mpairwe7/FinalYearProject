@@ -457,7 +457,12 @@ def main() -> None:
     parser.add_argument(
         "--download-pdfs",
         action="store_true",
-        help="Retrieve/download statutory PDFs from --pdf-source-urls into --pdf-dir before export/indexing",
+        help="Retrieve/download statutory & 10-MDA PDFs from --pdf-source-urls into --pdf-dir before export/indexing",
+    )
+    parser.add_argument(
+        "--no-mda-sources",
+        action="store_true",
+        help="When --download-pdfs is set, skip the 10 high-dependency MDA statutory/fee PDF sources",
     )
     parser.add_argument(
         "--pdf-source-urls",
@@ -496,6 +501,7 @@ def main() -> None:
             harvest_stats = harvest_remote_pdfs(
                 pdf_dir,
                 source_urls=args.pdf_source_urls,
+                include_mda_sources=not args.no_mda_sources,
                 mirror_dirs=mirror_dirs,
             )
             logger.info("Statutory PDF harvest complete: %s", harvest_stats)

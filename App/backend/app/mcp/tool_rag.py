@@ -84,7 +84,28 @@ _MULTILINGUAL_TAX_SYNONYMS: dict[str, tuple[str, ...]] = {
     "kwano": ("calculate",),
     "mucara": ("salary", "paye"),
     "otwel": ("rental", "tax"),
-    "biacara": ("corporation", "business", "tax"),
+    "biacara": ("corporation", "business", "tax", "trading", "license"),
+    # 5-locale Cross-MDA / NTR / Licensing terms (Luganda, Swahili, Runyankole, Acholi)
+    "pamiti": ("resolve", "mda", "ntr", "payment", "driving", "permit", "mowt", "udls"),
+    "paasipooti": ("resolve", "mda", "ntr", "payment", "passport", "dcic"),
+    "pasipoti": ("resolve", "mda", "ntr", "payment", "passport", "dcic"),
+    "endagamuntu": ("assess", "life", "event", "onboarding", "national", "nira", "nin", "tin"),
+    "ndagamuntu": ("assess", "life", "event", "onboarding", "national", "nira", "nin", "tin"),
+    "kitambulisho": ("assess", "life", "event", "onboarding", "national", "nira", "nin", "tin"),
+    "karaata": ("assess", "life", "event", "onboarding", "national", "nira", "nin", "tin"),
+    "leseni": ("assess", "life", "event", "onboarding", "trading", "license", "kcca", "iras"),
+    "layisensi": ("assess", "life", "event", "onboarding", "trading", "license", "kcca", "iras"),
+    "ekyapa": ("resolve", "mda", "ntr", "payment", "land", "transfer", "mlhud", "stamp", "duty"),
+    "cheti": ("evaluate", "b2g", "uesw", "clearance", "certificate", "tcc", "unbs"),
+    "waraga": ("evaluate", "b2g", "uesw", "clearance", "permit", "certificate", "tcc"),
+    # 5-locale Tax Relief / Voluntary Disclosure / Instalments / Account Recovery terms
+    "ekisonyiwo": ("simulate", "tax", "relief", "instalments", "voluntary", "disclosure", "waiver"),
+    "msamaha": ("simulate", "tax", "relief", "instalments", "voluntary", "disclosure", "waiver"),
+    "okusaasirwa": ("simulate", "tax", "relief", "instalments", "voluntary", "disclosure", "waiver"),
+    "kica": ("simulate", "tax", "relief", "instalments", "voluntary", "disclosure", "waiver"),
+    "ebitundu": ("simulate", "tax", "relief", "instalments"),
+    "awamu": ("simulate", "tax", "relief", "instalments"),
+    "essimu": ("resolve", "efris", "account", "recovery", "lost", "sim", "tin"),
 }
 
 

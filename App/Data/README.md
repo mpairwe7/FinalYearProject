@@ -19,19 +19,21 @@ hashes and stable record ids, so the indexer rejects a missing, partial or
 stale export instead of silently indexing an incomplete corpus. Raw CSVs, PDFs
 and crawl JSON are never embedded directly.
 
-Current size: **7,924 vector documents** — 480 FAQ, 6 teacher-QA, 7,035 PDF
-chunks (135 unique PDFs after skipping 11 byte-identical duplicates), 403 crawl
+Current size: **7,251 vector documents** — 1,117 FAQ, 6 teacher-QA, 5,639 PDF
+chunks (175 unique PDFs across `186` total sources after skipping 11 byte-identical duplicates — including all 8 Parliament 2026 Tax Bills, 19 URA Laws & Acts compendiums, and 15 statutory/fee/PRN guides across the 10 high-dependency Ugandan MDAs; see `docs/adr/0009-statutory-and-10-mda-pdf-harvester-and-qdrant-indexing.md`), 489 crawl
 chunks. The single-container deployments serve all of it through an in-image
 Qdrant sidecar; see `docs/CLOUDFLARE_FALLBACKS.md` for the tier order.
 
 ## Building the corpus
 
 The two chunk corpora need an offline export first: they depend on
-`ml/scripts/data_aug/chunkers.py` and, for PDFs, `pymupdf4llm` — neither of
+`ml/scripts/data_aug/chunkers.py` and, for PDFs, `pypdfium2` / `pymupdf4llm` — neither of
 which ships in the serving image. Run these from a source checkout:
 
 ```bash
 cd App/backend
+python -m app.indexer --download-pdfs --export-pdf-jsonl \
+  --pdf-source-urls "https://www.parliament.go.ug/page/tax-bills-2026,https://ura.go.ug/download-category/laws-and-acts/"
 python -m app.indexer --export-faq-jsonl     # CSV  -> faq_jsonl/
 python -m app.indexer --export-pdf-jsonl     # PDFs -> pdf_jsonl/   (minutes)
 python -m app.indexer --export-crawl-jsonl   # crawl -> crawl_jsonl/ (seconds)

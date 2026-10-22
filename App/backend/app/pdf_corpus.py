@@ -50,7 +50,13 @@ from urllib.parse import unquote, urljoin, urlparse
 
 from .faq_corpus import CorpusValidationError
 from .malware_scan import MalwareRejected, scan_bytes
-from .pdf_guards import CORPUS_PDF_LIMITS, PdfRejected, inspect_pdf_bytes, inspect_pdf_path
+from .pdf_guards import (
+    CORPUS_PDF_LIMITS,
+    PdfRejected,
+    inspect_pdf_bytes,
+    inspect_pdf_path,
+    validate_pdf_header,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
@@ -67,6 +73,126 @@ DEFAULT_STATUTORY_PDF_SOURCE_URLS: tuple[str, ...] = (
     "https://www.parliament.go.ug/page/tax-bills-2026",
     "https://ura.go.ug/download-category/laws-and-acts/",
 )
+
+#: Top 10 Ugandan Government Bodies (MDAs) with high URA NTR/PRN, TIN, TCC,
+#: Stamp Duty, and ASYCUDA/UESW dependency driving URA CXP inquiry volume (October 2026):
+MDA_STATUTORY_PDF_REGISTRY: tuple[dict[str, str], ...] = (
+    {
+        "mda_code": "MDA1_MoWT",
+        "mda_name": "Ministry of Works and Transport (UDLS & Motor Vehicle Registry)",
+        "filename": "MoWT-Traffic-and-Road-Safety-Act-Cap-361.pdf",
+        "title": "Traffic and Road Safety Act, 1998 (Cap. 361) — Driving Permits & Vehicle Registration",
+        "url": "https://media.ulii.org/media/legislation/18258/source_file/5b5c2f1ce136c1a3/1998-15.pdf",
+    },
+    {
+        "mda_code": "MDA2_DCIC",
+        "mda_name": "Ministry of Internal Affairs — Directorate of Citizenship and Immigration Control (DCIC)",
+        "filename": "DCIC-Uganda-Citizenship-and-Immigration-Control-Act-Cap-313.pdf",
+        "title": "Uganda Citizenship and Immigration Control Act (Cap. 313) — Passports, Work Permits & Passes",
+        "url": "https://media.ulii.org/media/legislation/18262/source_file/8e4f495a61b25d69/1999-3.pdf",
+    },
+    {
+        "mda_code": "MDA2_DCIC",
+        "mda_name": "Ministry of Internal Affairs — Directorate of Citizenship and Immigration Control (DCIC)",
+        "filename": "DCIC-Uganda-Citizenship-and-Immigration-Control-Fees-Regulations-2021.pdf",
+        "title": "The Uganda Citizenship and Immigration Control (Fees) Regulations, 2021",
+        "url": "https://media.ulii.org/media/legislation/107108/source_file/uganda-citizenship-and-immigration-control-fees-regulations-2021.pdf",
+    },
+    {
+        "mda_code": "MDA3_NIRA",
+        "mda_name": "National Identification and Registration Authority (NIRA)",
+        "filename": "NIRA-Summary-of-Registration-of-Persons-Fees-2024-FY2024-25.pdf",
+        "title": "NIRA Summary of the Registration of Persons (Fees) Regulations (National ID & Certificates)",
+        "url": "https://www.nira.go.ug/media/2024/10/SUMMARY-OF-THE-REGISTRATION-OF-PERSONS-FEES.pdf",
+    },
+    {
+        "mda_code": "MDA3_NIRA",
+        "mda_name": "National Identification and Registration Authority (NIRA)",
+        "filename": "NIRA-Registration-of-Persons-Act-2015.pdf",
+        "title": "Registration of Persons Act, 2015 (Cap. 332) — NIN Issuance & TIN Verification",
+        "url": "https://media.ulii.org/media/legislation/17871/source_file/9715a09ebcdf6785/2015-4.pdf",
+    },
+    {
+        "mda_code": "MDA4_PPDA_MoFPED",
+        "mda_name": "PPDA (e-GP) & Ministry of Finance, Planning and Economic Development (IFMS)",
+        "filename": "PPDA-Public-Procurement-and-Disposal-of-Public-Assets-Act.pdf",
+        "title": "Public Procurement and Disposal of Public Assets Act — Tax Clearance & Supplier Compliance",
+        "url": "https://media.ulii.org/media/legislation/18276/source_file/40a9202d41ec69ad/2003-1.pdf",
+    },
+    {
+        "mda_code": "MDA5_UNBS",
+        "mda_name": "Uganda National Bureau of Standards (UNBS — E-Portal & PVoC Import Clearance)",
+        "filename": "UNBS-Uganda-National-Bureau-of-Standards-Act.pdf",
+        "title": "Uganda National Bureau of Standards Act — Compulsory Standards & Import Clearance",
+        "url": "https://media.ulii.org/media/legislation/73988/source_file/259e194e1d73cc25/1983-1.pdf",
+    },
+    {
+        "mda_code": "MDA6_MLHUD",
+        "mda_name": "Ministry of Lands, Housing and Urban Development (MLHUD / UgNLIS)",
+        "filename": "MLHUD-Registration-of-Titles-Act-Cap-230.pdf",
+        "title": "Registration of Titles Act (Cap. 230) — Land Transfer, Stamp Duty & Registration Fees",
+        "url": "https://mlhud.go.ug/wp-content/uploads/2019/03/Registration-of-Titles-Act-Chapter_230.pdf",
+    },
+    {
+        "mda_code": "MDA7_KCCA_MOLG",
+        "mda_name": "Kampala Capital City Authority (KCCA e-Citie) & Local Governments (IRAS)",
+        "filename": "KCCA-Trade-Licensing-Act-Cap-79.pdf",
+        "title": "Trade (Licensing) Act (Cap. 79) — Trading Licenses & Mandatory TIN Requirement",
+        "url": "https://media.ulii.org/media/legislation/18578/source_file/177d6b9459ffc6af/1969-14.pdf",
+    },
+    {
+        "mda_code": "MDA7_KCCA_MOLG",
+        "mda_name": "Kampala Capital City Authority (KCCA e-Citie) & Local Governments (IRAS)",
+        "filename": "MOLG-Local-Governments-Act-Cap-243.pdf",
+        "title": "Local Governments Act (Cap. 243) — Local Revenue, Rates & Agency Withholding",
+        "url": "https://media.ulii.org/media/legislation/18245/source_file/5461811597227ca8/1997-5.pdf",
+    },
+    {
+        "mda_code": "MDA8_UPF",
+        "mda_name": "Uganda Police Force (UPF — Express Penalty Scheme EPS & Traffic Regulation)",
+        "filename": "UPF-Traffic-and-Road-Safety-Speed-of-Motor-Vehicles-Order-2026-FY2026-27.pdf",
+        "title": "Traffic and Road Safety (Speed of Motor Vehicles) Order, 2026 (SI 50 of 2026)",
+        "url": "https://media.ulii.org/media/legislation/131751/source_file/f969ab7100677e30/ug-act-si-2026-50-publication-document.pdf",
+    },
+    {
+        "mda_code": "MDA8_UPF",
+        "mda_name": "Uganda Police Force (UPF) & MoWT — Express Penalty & Overloading Fines",
+        "filename": "MoWT-UPF-Roads-Act-2019-Express-Penalty.pdf",
+        "title": "Roads Act, 2019 — Express Penalty & Overloading Fines Paid via Revenue Collection Bank",
+        "url": "https://media.ulii.org/media/legislation/18052/source_file/2019-16.pdf",
+    },
+    {
+        "mda_code": "MDA9_URSB",
+        "mda_name": "Uganda Registration Services Bureau (URSB — OBRS Companies & Business Registry)",
+        "filename": "URSB-Companies-Act-2012.pdf",
+        "title": "Companies Act, 2012 — Company Incorporation, Returns & Statutory Registration Fees",
+        "url": "https://media.ulii.org/media/legislation/17888/source_file/7e53dcc2c056a04d/2012-1.pdf",
+    },
+    {
+        "mda_code": "MDA10_NDA_NEMA_UESW",
+        "mda_name": "National Drug Authority (NDA) & NEMA — Uganda Electronic Single Window (UESW)",
+        "filename": "NDA-National-Drug-Policy-and-Authority-Act.pdf",
+        "title": "National Drug Policy and Authority Act (Cap. 206) — Import Verification & Licensing",
+        "url": "https://media.ulii.org/media/legislation/121926/source_file/3d9e9752a5995226/1993-13.pdf",
+    },
+    {
+        "mda_code": "MDA10_NDA_NEMA_UESW",
+        "mda_name": "National Environment Management Authority (NEMA) — URA Portal PRN Integration",
+        "filename": "NEMA-Technical-Guide-URA-PRN-EIA-Fees.pdf",
+        "title": "NEMA Technical Guide on How to Generate PRN for 30% EIA Submission & 70% Approval Fees on URA Portal",
+        "url": "https://nema.go.ug/sites/all/themes/nema/docs/TECHNICAL%20GUIDE.pdf",
+    },
+)
+
+MDA_DIRECT_PDF_BY_URL: dict[str, dict[str, str]] = {
+    entry["url"]: entry for entry in MDA_STATUTORY_PDF_REGISTRY
+}
+DEFAULT_MDA_PDF_SOURCE_URLS: tuple[str, ...] = tuple(
+    entry["url"] for entry in MDA_STATUTORY_PDF_REGISTRY
+)
+DEFAULT_ALL_STATUTORY_AND_MDA_SOURCE_URLS: tuple[str, ...] = (
+    DEFAULT_STATUTORY_PDF_SOURCE_URLS + DEFAULT_MDA_PDF_SOURCE_URLS
+)
 DEFAULT_STATUTORY_PDF_SOURCES_CSV = ",".join(DEFAULT_STATUTORY_PDF_SOURCE_URLS)
 
 ALLOWED_STATUTORY_PDF_HOSTS: frozenset[str] = frozenset(
@@ -78,6 +204,54 @@ ALLOWED_STATUTORY_PDF_HOSTS: frozenset[str] = frozenset(
         "bills.parliament.ug",
         "ulii.org",
         "www.ulii.org",
+        "media.ulii.org",
+        "works.go.ug",
+        "www.works.go.ug",
+        "immigration.go.ug",
+        "www.immigration.go.ug",
+        "mia.go.ug",
+        "www.mia.go.ug",
+        "nira.go.ug",
+        "www.nira.go.ug",
+        "ppda.go.ug",
+        "www.ppda.go.ug",
+        "finance.go.ug",
+        "www.finance.go.ug",
+        "budget.finance.go.ug",
+        "unbs.go.ug",
+        "www.unbs.go.ug",
+        "mlhud.go.ug",
+        "www.mlhud.go.ug",
+        "kcca.go.ug",
+        "www.kcca.go.ug",
+        "iras.go.ug",
+        "www.iras.go.ug",
+        "molg.go.ug",
+        "www.molg.go.ug",
+        "upf.go.ug",
+        "www.upf.go.ug",
+        "ursb.go.ug",
+        "www.ursb.go.ug",
+        "nda.or.ug",
+        "www.nda.or.ug",
+        "nema.go.ug",
+        "www.nema.go.ug",
+        "agriculture.go.ug",
+        "www.agriculture.go.ug",
+        "ugandacoffee.go.ug",
+        "www.ugandacoffee.go.ug",
+        "singlewindow.go.ug",
+        "www.singlewindow.go.ug",
+    }
+)
+
+# Ugandan MDA hosts whose government CA intermediate chain is omitted from standard OS bundles
+_UG_GOV_INTERMEDIATE_TLS_HOSTS: frozenset[str] = frozenset(
+    {
+        "nira.go.ug",
+        "www.nira.go.ug",
+        "nema.go.ug",
+        "www.nema.go.ug",
     }
 )
 
@@ -636,6 +810,8 @@ def parse_pdf_source_urls(raw: str | Iterable[str] | None = None) -> list[str]:
         host = (parsed.hostname or "").strip().lower().rstrip(".")
         if parsed.scheme != "https" or not host:
             raise CorpusValidationError(f"Statutory PDF source URL must use https: {url!r}")
+        if parsed.username or parsed.password:
+            raise CorpusValidationError(f"Statutory PDF source URL must not contain credentials: {url!r}")
         if host not in ALLOWED_STATUTORY_PDF_HOSTS:
             raise CorpusValidationError(
                 f"Host {host!r} is not in ALLOWED_STATUTORY_PDF_HOSTS ({sorted(ALLOWED_STATUTORY_PDF_HOSTS)})."
@@ -791,6 +967,11 @@ def canonical_statutory_pdf_filename(
     source_page: str = "",
 ) -> str:
     """Derive a clean, deterministic `.pdf` filename with fiscal-year normalization for Tax Bills."""
+    # 0. Check curated 10-MDA statutory PDF registry first
+    reg_entry = MDA_DIRECT_PDF_BY_URL.get(url)
+    if reg_entry and reg_entry.get("filename"):
+        return reg_entry["filename"]
+
     # 1. Honour authoritative server Content-Disposition filename when present
     if content_disposition:
         cd_match = re.search(
@@ -852,11 +1033,101 @@ def _default_page_fetcher(url: str, timeout: float = 30.0) -> str:
         return resp.text
 
 
-def _default_pdf_fetcher(url: str, timeout: float = 45.0) -> tuple[bytes, dict[str, str]]:
-    """Stream a statutory PDF over HTTPS while enforcing host allowlists and ``PDF_CORPUS_MAX_BYTES``."""
+def _stream_pdf_with_tls_fallback(
+    url: str,
+    *,
+    timeout: float,
+    headers: dict[str, str],
+    existing_by_name: dict[str, tuple[str, int, str]] | None = None,
+    existing_by_size: dict[int, tuple[str, str]] | None = None,
+    title: str = "",
+    source_page: str = "",
+) -> dict[str, Any]:
+    """Stream *url* over HTTPS with redirect allowlist validation and Uganda Gov intermediate CA fallback."""
+    import ssl
     import httpx
 
-    max_bytes = PDF_CORPUS_MAX_BYTES
+    def _run_stream(verify_tls: bool) -> dict[str, Any]:
+        current = url
+        with httpx.Client(timeout=timeout, follow_redirects=False, headers=headers, verify=verify_tls) as client:
+            for _hop in range(6):
+                with client.stream("GET", current) as resp:
+                    if resp.is_redirect:
+                        loc = resp.headers.get("Location", "").strip()
+                        if not loc:
+                            raise CorpusValidationError(f"Redirect missing Location header for {current}")
+                        nxt = str(resp.url.join(loc))
+                        parsed = urlparse(nxt)
+                        host = (parsed.hostname or "").strip().lower().rstrip(".")
+                        if parsed.scheme != "https" or host not in ALLOWED_STATUTORY_PDF_HOSTS:
+                            raise CorpusValidationError(f"Disallowed PDF redirect target: {nxt}")
+                        current = nxt
+                        continue
+                    resp.raise_for_status()
+                    resp_headers = {str(k).lower(): str(v) for k, v in resp.headers.items()}
+                    if existing_by_name is not None:
+                        cd_header = resp_headers.get("content-disposition", "")
+                        cand_name = canonical_statutory_pdf_filename(
+                            current,
+                            title=title,
+                            content_disposition=cd_header,
+                            source_page=source_page,
+                        )
+                        if cand_name.lower() in existing_by_name:
+                            ex_name, ex_sz, ex_sha = existing_by_name[cand_name.lower()]
+                            return {
+                                "status": "existing",
+                                "pdf": ex_name,
+                                "url": url,
+                                "title": title,
+                                "sha256": ex_sha,
+                                "bytes": ex_sz,
+                            }
+                    if existing_by_size is not None:
+                        cl_str = resp_headers.get("content-length", "")
+                        if cl_str.isdigit() and int(cl_str) in existing_by_size:
+                            ex_name, ex_sha = existing_by_size[int(cl_str)]
+                            return {
+                                "status": "existing",
+                                "pdf": ex_name,
+                                "url": url,
+                                "title": title,
+                                "sha256": ex_sha,
+                                "bytes": int(cl_str),
+                            }
+                    buf = bytearray()
+                    for chunk in resp.iter_bytes(chunk_size=65536):
+                        if not chunk:
+                            continue
+                        buf.extend(chunk)
+                        if len(buf) > PDF_CORPUS_MAX_BYTES:
+                            raise CorpusValidationError(
+                                f"Remote PDF {url} exceeded corpus max_bytes ({PDF_CORPUS_MAX_BYTES})."
+                            )
+                    return {
+                        "status": "fetched",
+                        "url": url,
+                        "title": title,
+                        "source_page": source_page,
+                        "raw_bytes": bytes(buf),
+                        "headers": resp_headers,
+                    }
+            raise CorpusValidationError(f"Too many redirects fetching PDF {url}")
+
+    try:
+        return _run_stream(True)
+    except Exception as exc:
+        host = (urlparse(url).hostname or "").strip().lower().rstrip(".")
+        if host in _UG_GOV_INTERMEDIATE_TLS_HOSTS and (
+            isinstance(exc, ssl.SSLError) or "CERTIFICATE_VERIFY_FAILED" in str(exc)
+        ):
+            logger.info("Retrying %s with gov intermediate TLS fallback", url)
+            return _run_stream(False)
+        raise
+
+
+def _default_pdf_fetcher(url: str, timeout: float = 45.0) -> tuple[bytes, dict[str, str]]:
+    """Stream a statutory PDF over HTTPS while enforcing host allowlists and ``PDF_CORPUS_MAX_BYTES``."""
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -864,53 +1135,33 @@ def _default_pdf_fetcher(url: str, timeout: float = 45.0) -> tuple[bytes, dict[s
         ),
         "Accept": "application/pdf,*/*;q=0.8",
     }
-    current = url
-    with httpx.Client(timeout=timeout, follow_redirects=False, headers=headers) as client:
-        for _hop in range(6):
-            with client.stream("GET", current) as resp:
-                if resp.is_redirect:
-                    loc = resp.headers.get("Location", "").strip()
-                    if not loc:
-                        raise CorpusValidationError(f"Redirect missing Location header for {current}")
-                    nxt = str(resp.url.join(loc))
-                    parsed = urlparse(nxt)
-                    host = (parsed.hostname or "").strip().lower().rstrip(".")
-                    if parsed.scheme != "https" or host not in ALLOWED_STATUTORY_PDF_HOSTS:
-                        raise CorpusValidationError(f"Disallowed PDF redirect target: {nxt}")
-                    current = nxt
-                    continue
-                resp.raise_for_status()
-                buf = bytearray()
-                for chunk in resp.iter_bytes(chunk_size=65536):
-                    if not chunk:
-                        continue
-                    buf.extend(chunk)
-                    if len(buf) > max_bytes:
-                        raise CorpusValidationError(
-                            f"Remote PDF {url} exceeded corpus max_bytes ({max_bytes})."
-                        )
-                resp_headers = {str(k).lower(): str(v) for k, v in resp.headers.items()}
-                return bytes(buf), resp_headers
-        raise CorpusValidationError(f"Too many redirects fetching PDF {url}")
+    res = _stream_pdf_with_tls_fallback(url, timeout=timeout, headers=headers)
+    return res["raw_bytes"], res["headers"]
 
 
 def harvest_remote_pdfs(
     pdf_dir: Path,
     *,
     source_urls: str | Iterable[str] | None = None,
+    include_mda_sources: bool = False,
     mirror_dirs: Iterable[Path] = (),
     max_pages_per_source: int = 5,
     timeout: float = 30.0,
     page_fetcher: Callable[[str], str] | None = None,
     pdf_fetcher: Callable[[str], tuple[bytes, dict[str, str]]] | None = None,
 ) -> dict[str, Any]:
-    """Retrieve and download statutory PDFs from *source_urls* into *pdf_dir* with SHA-256 deduplication.
+    """Retrieve and download statutory & MDA PDFs from *source_urls* into *pdf_dir* with SHA-256 deduplication.
 
-    Supports both ``https://www.parliament.go.ug/page/tax-bills-2026`` and
-    ``https://ura.go.ug/download-category/laws-and-acts/`` (including WPDM
-    ``?wpdmdl=`` download links and ``?cp=`` pagination).
+    Supports:
+    * ``https://www.parliament.go.ug/page/tax-bills-2026``
+    * ``https://ura.go.ug/download-category/laws-and-acts/`` (including WPDM ``?wpdmdl=`` & ``?cp=`` pagination)
+    * Direct PDF URLs across the 10 high-dependency Ugandan MDAs (:data:`MDA_STATUTORY_PDF_REGISTRY`).
     """
     urls = parse_pdf_source_urls(source_urls)
+    if include_mda_sources:
+        for mda_url in DEFAULT_MDA_PDF_SOURCE_URLS:
+            if mda_url not in urls:
+                urls.append(mda_url)
     pdf_dir.mkdir(parents=True, exist_ok=True)
     mirrors = [Path(m) for m in mirror_dirs if Path(m).resolve() != pdf_dir.resolve()]
     for m_dir in mirrors:
@@ -939,6 +1190,20 @@ def harvest_remote_pdfs(
     page_errors: list[dict[str, str]] = []
 
     for seed_url in urls:
+        # Direct PDF URLs (e.g. 10-MDA statutory/fee PDFs) do not need HTML page parsing
+        if seed_url in MDA_DIRECT_PDF_BY_URL or (urlparse(seed_url).path or "").lower().endswith(".pdf"):
+            if seed_url not in seen_pdf_urls:
+                seen_pdf_urls.add(seed_url)
+                reg = MDA_DIRECT_PDF_BY_URL.get(seed_url, {})
+                discovered_items.append(
+                    {
+                        "url": seed_url,
+                        "title": reg.get("title", ""),
+                        "source_page": seed_url,
+                    }
+                )
+            continue
+
         queue = [seed_url]
         pages_for_seed = 0
         while queue and pages_for_seed < max_pages_per_source:
@@ -983,9 +1248,6 @@ def harvest_remote_pdfs(
                 "bytes": ex_sz,
             }
         if pdf_fetcher is None:
-            # Fast header check before streaming multi-megabyte bodies when Content-Disposition or Content-Length matches
-            import httpx
-
             headers_req = {
                 "User-Agent": (
                     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -993,69 +1255,15 @@ def harvest_remote_pdfs(
                 ),
                 "Accept": "application/pdf,*/*;q=0.8",
             }
-            current = pdf_url
-            with httpx.Client(timeout=max(timeout, 45.0), follow_redirects=False, headers=headers_req) as client:
-                for _hop in range(6):
-                    with client.stream("GET", current) as resp:
-                        if resp.is_redirect:
-                            loc = resp.headers.get("Location", "").strip()
-                            if not loc:
-                                raise CorpusValidationError(f"Redirect missing Location header for {current}")
-                            nxt = str(resp.url.join(loc))
-                            parsed = urlparse(nxt)
-                            host = (parsed.hostname or "").strip().lower().rstrip(".")
-                            if parsed.scheme != "https" or host not in ALLOWED_STATUTORY_PDF_HOSTS:
-                                raise CorpusValidationError(f"Disallowed PDF redirect target: {nxt}")
-                            current = nxt
-                            continue
-                        resp.raise_for_status()
-                        resp_headers = {str(k).lower(): str(v) for k, v in resp.headers.items()}
-                        cd_header = resp_headers.get("content-disposition", "")
-                        cand_name = canonical_statutory_pdf_filename(
-                            current,
-                            title=title,
-                            content_disposition=cd_header,
-                            source_page=source_page,
-                        )
-                        if cand_name.lower() in existing_by_name:
-                            ex_name, ex_sz, ex_sha = existing_by_name[cand_name.lower()]
-                            return {
-                                "status": "existing",
-                                "pdf": ex_name,
-                                "url": pdf_url,
-                                "title": title,
-                                "sha256": ex_sha,
-                                "bytes": ex_sz,
-                            }
-                        cl_str = resp_headers.get("content-length", "")
-                        if cl_str.isdigit() and int(cl_str) in existing_by_size:
-                            ex_name, ex_sha = existing_by_size[int(cl_str)]
-                            return {
-                                "status": "existing",
-                                "pdf": ex_name,
-                                "url": pdf_url,
-                                "title": title,
-                                "sha256": ex_sha,
-                                "bytes": int(cl_str),
-                            }
-                        buf = bytearray()
-                        for chunk in resp.iter_bytes(chunk_size=65536):
-                            if not chunk:
-                                continue
-                            buf.extend(chunk)
-                            if len(buf) > PDF_CORPUS_MAX_BYTES:
-                                raise CorpusValidationError(
-                                    f"Remote PDF {pdf_url} exceeded corpus max_bytes ({PDF_CORPUS_MAX_BYTES})."
-                                )
-                        return {
-                            "status": "fetched",
-                            "url": pdf_url,
-                            "title": title,
-                            "source_page": source_page,
-                            "raw_bytes": bytes(buf),
-                            "headers": resp_headers,
-                        }
-                raise CorpusValidationError(f"Too many redirects fetching PDF {pdf_url}")
+            return _stream_pdf_with_tls_fallback(
+                pdf_url,
+                timeout=max(timeout, 45.0),
+                headers=headers_req,
+                existing_by_name=existing_by_name,
+                existing_by_size=existing_by_size,
+                title=title,
+                source_page=source_page,
+            )
 
         raw_bytes, headers = fetch_pdf(pdf_url)
         return {
@@ -1119,6 +1327,7 @@ def harvest_remote_pdfs(
                 source_page=source_page,
             )
             try:
+                validate_pdf_header(raw_bytes)
                 inspect_pdf_bytes(raw_bytes, limits=CORPUS_PDF_LIMITS)
                 scan_bytes(raw_bytes, filename=filename)
             except (PdfRejected, MalwareRejected) as exc:

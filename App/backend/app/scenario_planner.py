@@ -766,6 +766,285 @@ def _rule_advance_vehicle_tax(facts: CaseFacts, question: str) -> list[ToolCallS
     return specs
 
 
+def _rule_mda_interdependence(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
+    """Plan deterministic Cross-MDA NTR/PRN, Life-Event Onboarding, and B2G/UESW Clearance tools."""
+    specs: list[ToolCallSpec] = []
+    q = question or ""
+    amounts = _ugx_amounts_in_text(q)
+    ugx_spans = [
+        (val, s, e)
+        for val, s, e in amounts
+        if not re.search(r"\b(?:usd|eur|gbp|us\$|\$)\s*$", q[max(0, s - 8) : s], re.IGNORECASE)
+    ]
+    if len(ugx_spans) >= 2:
+        non_threshold = [
+            val
+            for val, s, e in ugx_spans
+            if not (
+                val in (1_000_000.0, 2_000_000.0, 2_820_000.0, 5_000_000.0, 10_000_000.0, 150_000_000.0, 300_000_000.0)
+                and re.search(
+                    r"\b(threshold|below|under|exceed\w*|raised\s+from|lowered\s+from|up\s+to)\b",
+                    q[max(0, s - 32) : min(len(q), e + 24)],
+                    re.IGNORECASE,
+                )
+            )
+        ]
+        first_amt = non_threshold[0] if non_threshold else ugx_spans[0][0]
+    else:
+        first_amt = ugx_spans[0][0] if ugx_spans else (amounts[0][0] if amounts else 0.0)
+
+    prn_state = "paid_not_reflecting_at_mda"
+    if re.search(r"\b(wrong\s+(?:tax\s+)?head|wrong\s+mda|refund|dt[-\s]?3008)\b", q, re.IGNORECASE):
+        prn_state = "paid_wrong_head"
+    elif re.search(r"\b(expired\s+prn|reactivate\s+prn)\b", q, re.IGNORECASE):
+        prn_state = "expired"
+    elif re.search(r"\b(how\s+much|generate\s+a?\s*prn|what\s+is\s+the\s+fee|unpaid)\b", q, re.IGNORECASE):
+        prn_state = "unpaid_registered"
+
+    # 1. Pillar 1: Cross-MDA NTR / PRN Service Resolution (all 10 MDA services)
+    if re.search(r"\b(udls|driving\s+(?:permit|licen[cs]e)|learner\s+permit)\b", q, re.IGNORECASE):
+        specs.append(
+            ToolCallSpec(
+                "resolve_mda_ntr_payment",
+                params={"service_type": "mowt_driving_permit", "prn_status": prn_state},
+            )
+        )
+    elif re.search(r"\b(vehicle\s+transfer|transfer\s+of\s+ownership|logbook\s+transfer|duplicate\s+logbook)\b", q, re.IGNORECASE):
+        specs.append(
+            ToolCallSpec(
+                "resolve_mda_ntr_payment",
+                params={"service_type": "mowt_vehicle_transfer", "prn_status": prn_state},
+            )
+        )
+    elif re.search(r"\b(e[-\s]?passport|passport\s+(?:fee|prn|application)|dcic|passports\.go\.ug)\b", q, re.IGNORECASE):
+        specs.append(
+            ToolCallSpec(
+                "resolve_mda_ntr_payment",
+                params={"service_type": "dcic_passport", "prn_status": prn_state},
+            )
+        )
+    elif re.search(r"\b(work\s+permit|special\s+pass|dependant\s+pass|visas\.immigration)\b", q, re.IGNORECASE):
+        specs.append(
+            ToolCallSpec(
+                "resolve_mda_ntr_payment",
+                params={"service_type": "dcic_work_permit", "prn_status": prn_state},
+            )
+        )
+    elif re.search(r"\b(national\s+id\s+(?:replacement|renewal|fee|card)|lost\s+national\s+id|nira\s+(?:fee|prn)|birth\s+certificate\s+fee)\b", q, re.IGNORECASE):
+        specs.append(
+            ToolCallSpec(
+                "resolve_mda_ntr_payment",
+                params={"service_type": "nira_national_id", "prn_status": prn_state},
+            )
+        )
+    elif re.search(r"\b(land\s+transfer|registration\s+of\s+titles|ugnlis|chief\s+government\s+valuer|\bcgv\b|\bmzo\b)\b", q, re.IGNORECASE):
+        specs.append(
+            ToolCallSpec(
+                "resolve_mda_ntr_payment",
+                params={
+                    "service_type": "mlhud_land_transfer",
+                    "transaction_value_ugx": first_amt,
+                    "prn_status": prn_state,
+                },
+            )
+        )
+    elif re.search(r"\b(express\s+penalty|\beps\b\s+ticket|traffic\s+ticket|police\s+fine)\b", q, re.IGNORECASE):
+        specs.append(
+            ToolCallSpec(
+                "resolve_mda_ntr_payment",
+                params={"service_type": "upf_eps_traffic_ticket", "prn_status": prn_state},
+            )
+        )
+    elif re.search(r"\b(ursb|obrs|company\s+(?:registration|incorporation)|business\s+name\s+registration)\b", q, re.IGNORECASE):
+        specs.append(
+            ToolCallSpec(
+                "resolve_mda_ntr_payment",
+                params={"service_type": "ursb_company_registration", "prn_status": prn_state},
+            )
+        )
+    elif re.search(r"\b(nema|eia\s+(?:submission|approval|fee)|30%\s+eia|70%\s+approval)\b", q, re.IGNORECASE):
+        specs.append(
+            ToolCallSpec(
+                "resolve_mda_ntr_payment",
+                params={
+                    "service_type": "nema_eia_prn",
+                    "transaction_value_ugx": first_amt,
+                    "prn_status": prn_state,
+                },
+            )
+        )
+
+    # 2. Pillar 2: Life-Event Tax-Base Onboarding & NIRA NIN-to-TIN Pre-Flight
+    if re.search(r"\b(kcca|e[-\s]?citie|\biras\b|trading\s+licen[cs]e)\b", q, re.IGNORECASE):
+        specs.append(
+            ToolCallSpec(
+                "assess_life_event_tax_onboarding",
+                params={
+                    "life_event": "kcca_iras_trading_license",
+                    "annual_turnover_ugx": first_amt,
+                },
+            )
+        )
+    elif re.search(
+        r"\b(nira|national\s+id|\bnin\b)\b.*\b(mismatch|reject\w*|surname|given\s+name|instant\s+tin)\b",
+        q,
+        re.IGNORECASE,
+    ):
+        nin_m = re.search(r"\b((?:CM|CF)[A-Z0-9]{10,14})\b", q, re.IGNORECASE)
+        specs.append(
+            ToolCallSpec(
+                "assess_life_event_tax_onboarding",
+                params={
+                    "life_event": "nira_nin_tin_mismatch",
+                    "nin": nin_m.group(1).upper() if nin_m else "",
+                },
+            )
+        )
+    elif re.search(r"\b(ursb|obrs|incorporat\w+\s+a\s+company|register\w*\s+a\s+business\s+name)\b", q, re.IGNORECASE):
+        specs.append(
+            ToolCallSpec(
+                "assess_life_event_tax_onboarding",
+                params={"life_event": "ursb_business_registration"},
+            )
+        )
+
+    # 3. Pillar 3: B2G Supplier (PPDA e-GP / IFMS) & Single-Window (UESW / UNBS / NDA) Clearance
+    if re.search(r"\b(ppda|e[-\s]?gp|\bifms\b|government\s+(?:tender|supplier|contract\w*)|aid[-\s]?funded\s+project|deemed\s+vat)\b", q, re.IGNORECASE):
+        if re.search(r"\b(deemed\s+vat|aid[-\s]?funded)\b", q, re.IGNORECASE):
+            specs.append(
+                ToolCallSpec(
+                    "evaluate_b2g_and_uesw_clearance",
+                    params={"clearance_domain": "aid_funded_deemed_vat", "amount_ugx": first_amt},
+                )
+            )
+        else:
+            has_exempt = bool(re.search(r"\b(wht\s+exemption|exempt\s+from\s+withholding)\b", q, re.IGNORECASE))
+            specs.append(
+                ToolCallSpec(
+                    "evaluate_b2g_and_uesw_clearance",
+                    params={
+                        "clearance_domain": "ppda_egp_tcc_and_ifms_wht",
+                        "amount_ugx": first_amt,
+                        "has_valid_certificate": has_exempt,
+                    },
+                )
+            )
+    elif re.search(r"\b(unbs|pvoc|e[-\s]?portal\s+hold|compulsory\s+standards)\b", q, re.IGNORECASE):
+        usd_fob = 0.0
+        for mon in getattr(facts, "amounts", []) or []:
+            if getattr(mon, "currency", "") == "USD":
+                usd_fob = float(mon.amount)
+                break
+        if usd_fob <= 0.0:
+            m_usd = re.search(r"(?:usd|us\$|\$)\s*(\d[\d,]*(?:\.\d+)?)", q, re.IGNORECASE)
+            if m_usd:
+                usd_fob = float(m_usd.group(1).replace(",", ""))
+        has_coc = bool(
+            re.search(r"\b(?:with|holds?|have)\s+(?:a\s+)?(?:valid\s+)?(?:coc\b|pvoc\s+certificate|certificate\s+of\s+conformity)\b", q, re.IGNORECASE)
+            and not re.search(r"\b(?:without|no|lacking|missing)\s+(?:a\s+)?(?:valid\s+)?(?:coc\b|pvoc|certificate)\b", q, re.IGNORECASE)
+        )
+        specs.append(
+            ToolCallSpec(
+                "evaluate_b2g_and_uesw_clearance",
+                params={
+                    "clearance_domain": "unbs_pvoc_import_hold",
+                    "amount_ugx": first_amt,
+                    "fob_value_usd": usd_fob,
+                    "has_valid_certificate": has_coc,
+                },
+            )
+        )
+    elif re.search(r"\b(\bnda\b|ndamis|irims|single\s+window|\buesw\b)\b", q, re.IGNORECASE):
+        specs.append(
+            ToolCallSpec(
+                "evaluate_b2g_and_uesw_clearance",
+                params={"clearance_domain": "nda_nema_uesw_import_hold", "amount_ugx": first_amt},
+            )
+        )
+
+    # 4. Pillar 4: First-90-Days New Taxpayer Survival, Nil-Return Shield & VAT Downgrade / Dormancy
+    if re.search(
+        r"\b(nil\s+return|zero\s+sales|no\s+sales|inactive\s+tin|dormant\s+tin|closing\s+(?:my\s+)?(?:business|shop)|"
+        r"pausing\s+(?:my\s+)?business|vat\s+deregist\w*|deregister\s+(?:from\s+)?vat|"
+        r"salaried\s+employee\s+only|single\s+employer.*\bfile\b.*\breturns?)\b",
+        q,
+        re.IGNORECASE,
+    ):
+        m_unfiled = re.search(r"\b(\d{1,2})\s+months?\b", q, re.IGNORECASE)
+        unfiled_m = int(m_unfiled.group(1)) if m_unfiled else 1
+        if re.search(r"\b(vat\s+deregist\w*|deregister\s+(?:from\s+)?vat)\b", q, re.IGNORECASE):
+            prof = "vat_registered_150m_to_300m"
+        elif re.search(r"\b(closing|closed|pausing|paused|dormant\s+tin|deactivate\s+tax)\b", q, re.IGNORECASE):
+            prof = "closing_or_pausing_business"
+        elif re.search(r"\b(salaried\s+employee\s+only|single\s+employer)\b", q, re.IGNORECASE):
+            prof = "salaried_employee_only"
+        elif 0.0 < first_amt <= 10_000_000.0 and re.search(r"\b(small\s+shop|micro|turnover)\b", q, re.IGNORECASE):
+            prof = "micro_trader_under_10m"
+        else:
+            prof = "new_company_zero_sales"
+        specs.append(
+            ToolCallSpec(
+                "build_new_taxpayer_compliance_shield",
+                params={
+                    "taxpayer_profile": prof,
+                    "annual_turnover_ugx": first_amt,
+                    "unfiled_months": unfiled_m,
+                },
+            )
+        )
+
+    # 5. Pillar 5: Voluntary Disclosure (s.66(1a)) 100% Penalty/Interest Waiver & Instalment Plan (s.40)
+    if re.search(
+        r"\b(voluntary\s+disclosure|dt[-\s]?10307|waive\w*\s+(?:penalt\w*|interest)|penalty\s+waiver|"
+        r"pay\s+(?:in\s+)?(?:\d+\s+)?(?:monthly\s+)?instalments?|instalment\s+(?:plan|agreement))\b",
+        q,
+        re.IGNORECASE,
+    ):
+        m_late = re.search(r"\b(\d{1,2})\s+months?\s+(?:late|overdue|ago|unpaid)\b", q, re.IGNORECASE)
+        late_m = int(m_late.group(1)) if m_late else 1
+        m_inst = re.search(r"\b(\d{1,2})\s+(?:monthly\s+)?instalments?\b", q, re.IGNORECASE)
+        inst_m = int(m_inst.group(1)) if m_inst else 6
+        before_audit = not bool(re.search(r"\b(after\s+audit|already\s+audited|received\s+audit\s+notice)\b", q, re.IGNORECASE))
+        specs.append(
+            ToolCallSpec(
+                "simulate_tax_relief_and_instalments",
+                params={
+                    "principal_tax_ugx": first_amt,
+                    "months_late": late_m,
+                    "voluntary_before_audit_notice": before_audit,
+                    "instalment_months": inst_m,
+                },
+            )
+        )
+
+    # 6. Pillar 6: Zero-Cost EFRIS Channel Matcher, 5% E-Receipt Consumer Refund & Lost SIM/Email TIN Recovery
+    if re.search(
+        r"\b(e[-\s]?receipt\s+refund|5%\s+(?:vat\s+)?refund|efris\s+refund|without\s+buying\s+an?\s+efd|"
+        r"free\s+efris|lost\s+(?:my\s+)?(?:sim|phone\s+number|email)|change\s+(?:my\s+)?tin\s+(?:phone|email)|"
+        r"otp\s+(?:phone|number|email))\b",
+        q,
+        re.IGNORECASE,
+    ):
+        if re.search(r"\b(lost\s+(?:my\s+)?(?:sim|phone\s+number|email)|change\s+(?:my\s+)?tin\s+(?:phone|email)|otp\s+(?:phone|number|email))\b", q, re.IGNORECASE):
+            specs.append(
+                ToolCallSpec(
+                    "resolve_efris_and_account_recovery",
+                    params={"scenario": "lost_sim_or_email_tin_recovery"},
+                )
+            )
+        else:
+            specs.append(
+                ToolCallSpec(
+                    "resolve_efris_and_account_recovery",
+                    params={
+                        "scenario": "efris_free_channel_and_5pct_refund",
+                        "thirty_day_ereceipt_purchases_ugx": first_amt,
+                    },
+                )
+            )
+    return specs
+
+
 def _rule_foreign_currency(facts: CaseFacts, _question: str) -> list[ToolCallSpec]:
     """Plan convert_currency for any non-UGX monetary amount in *facts.amounts*."""
     from .flags import flags
@@ -812,6 +1091,7 @@ _PLANNER_RULES: tuple[Callable[[CaseFacts, str], list[ToolCallSpec]], ...] = (
     _rule_digital_services,
     _rule_gaming,
     _rule_advance_vehicle_tax,
+    _rule_mda_interdependence,
 )
 
 

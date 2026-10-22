@@ -1,0 +1,56 @@
+id: new_taxpayer_and_relief
+name: New Taxpayer Onboarding & Penalty Relief
+version: "1"
+description: >
+  Guide a first-time or distressed taxpayer through Day-1 compliance (avoiding
+  UGX 200,000 Nil-Return penalties), Voluntary Disclosure (100% penalty and
+  interest waiver under TPC Act s.66(1a)), Instalment Payment Plans (s.40),
+  free EFRIS onboarding, or lost-SIM/email TIN account recovery.
+requires_auth: false
+
+trigger_phrases:
+  - "new taxpayer survival guide"
+  - "voluntary disclosure relief"
+  - "pay tax in instalments"
+  - "lost tin phone number"
+
+steps:
+  - id: select_need
+    title: "How can we help?"
+    question: >
+      Which area do you need help with today: **new tin or nil return**,
+      **voluntary disclosure or instalments**, **free efris or 5% refund**,
+      or **lost sim or email recovery**?
+    slot: taxpayer_need
+    validator: "enum[new tin or nil return,voluntary disclosure or instalments,free efris or 5% refund,lost sim or email recovery]"
+
+  - id: select_activity_state
+    title: "Current status"
+    question: >
+      Has URA already sent you an audit notice or assessment for this period? (yes/no)
+    slot: has_audit_notice
+    validator: boolean
+    when: "taxpayer_need == voluntary disclosure or instalments"
+
+  - id: summary
+    title: "Your personalised action plan"
+    question: >
+      1) **Zero-Sales / Nil-Return Shield (TPC Act s.49(1))**: Always file a 60-second
+      **Nil Return** on https://ura.go.ug before the 15th of the month when your business
+      has zero activity so you never incur the UGX 200,000/month non-filing penalty.
+      (Businesses below UGX 10,000,000 annual turnover pay **0% / UGX 0** Presumptive Tax,
+      and the compulsory VAT threshold is now **UGX 300,000,000** in FY2026-27.)
+      2) **Voluntary Disclosure (TPC Act s.66(1a)) & Instalments (s.40)**: Disclosing
+      omitted tax on **Form DT-10307** before an audit notice waives **100% of penal tax
+      and interest**, and an approved **s.40 Instalment Plan** unlocks your Tax Clearance
+      Certificate (TCC) as soon as the initial down-payment PRN is paid.
+      3) **Free EFRIS & Lost SIM Recovery**: Issue EFRIS e-receipts for free via the URA
+      Web Portal or Mobile App (consumers with **UGX 2,000,000+** in 30-day e-receipts earn
+      a **5% VAT refund**), or press **Talk to an officer** in chat to update a lost TIN
+      phone/email without visiting a URA branch.
+    slot: ""
+    validator: text
+    portal_action: file_return
+    resources:
+      - starter_pack
+      - file_return

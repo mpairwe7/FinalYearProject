@@ -181,6 +181,19 @@ _LEGITIMATE_TAX_MODIFIERS = frozenset({
     "exempt supply",
     "exempt supplies",
     "secondary employment",
+    "pvoc",
+    "unbs",
+    "unbs pvoc",
+    "pvoc evasion",
+    "deemed",
+    "deemed vat",
+    "nema",
+    "nema environmental",
+    "non tax",
+    "non-tax",
+    "ntr",
+    "ontr",
+    "express penalty",
 })
 
 # Words that indicate actions, grammar, prepositions, and conversational intent

@@ -17,6 +17,7 @@ from unittest import mock
 from app.faq_corpus import CorpusValidationError
 from app.pdf_corpus import (
     DEFAULT_STATUTORY_PDF_SOURCES_CSV,
+    MDA_STATUTORY_PDF_REGISTRY,
     PDF_MANIFEST_NAME,
     canonical_statutory_pdf_filename,
     discover_statutory_pdf_links,
@@ -572,6 +573,29 @@ class StatutoryPortalHarvestTests(unittest.TestCase):
             )
             self.assertEqual(stats_second["downloaded_count"], 0)
             self.assertEqual(stats_second["verified_existing_count"], 3)
+
+    def test_mda_statutory_pdf_registry_covers_all_10_mda_groups(self) -> None:
+        codes = {entry["mda_code"] for entry in MDA_STATUTORY_PDF_REGISTRY}
+        self.assertEqual(
+            codes,
+            {
+                "MDA1_MoWT",
+                "MDA2_DCIC",
+                "MDA3_NIRA",
+                "MDA4_PPDA_MoFPED",
+                "MDA5_UNBS",
+                "MDA6_MLHUD",
+                "MDA7_KCCA_MOLG",
+                "MDA8_UPF",
+                "MDA9_URSB",
+                "MDA10_NDA_NEMA_UESW",
+            },
+        )
+        for entry in MDA_STATUTORY_PDF_REGISTRY:
+            self.assertEqual(
+                canonical_statutory_pdf_filename(entry["url"], title=entry["title"]),
+                entry["filename"],
+            )
 
 
 if __name__ == "__main__":
