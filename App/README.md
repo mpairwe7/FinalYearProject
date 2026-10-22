@@ -30,9 +30,15 @@ App/
 │   │   ├── llm.py           # Qwen3-8B vLLM + local generation + tool-calling
 │   │   ├── flags.py         # Feature flag registry (85 flags, cohort rollout)
 │   │   ├── agents/          # Supervisor router + agent graph runtime
-│   │   ├── tools/           # 19 tools (calculators, rates, calendar, RAG, education, empathy, escalate)
-│   │   ├── workflows/       # YAML-driven slot-filling engine + TIN registration
-│   │   ├── memory/          # Episodic + semantic + working memory
+│   │   ├── tools/           # 72 MCP tools across 18 namespaces (calculators, 10-MDA NTR/PRN, onboarding, B2G/UESW, relief, EFRIS, rates, calendar, RAG, education, empathy, escalate, connectors)
+│   │   ├── workflows/       # 21 YAML-driven guided journeys (TIN, filing, PRN, Cross-MDA NTR, New-Taxpayer Relief, TCC, objections, customs) + Journey Copilot
+│   │   ├── scenario_planner.py # Deterministic multi-tool planner & Verified Statutory Facts injection
+│   │   ├── calculator_router.py # Single-calculator fast path & multi-turn figure carryover
+│   │   ├── pdf_corpus.py    # Statutory & 10-MDA PDF harvester (186 PDFs → 5,639 chunks, ADR-0009)
+│   │   ├── web_research.py  # 8-trigger live web research planner & Tier-1/2/3 source authority (ADR-0008)
+│   │   ├── ephemeral_pdf_sandbox.py # Ephemeral tmpfs PDF/XLSX sandbox + GPU micro-reranking (ADR-0008)
+│   │   ├── corpus_sync.py   # Self-updating Qdrant comparator, hot-swap & web_sync_ledger (ADR-0008)
+│   │   ├── memory/          # Episodic + semantic + working + procedural memory + ResolutionLedger
 │   │   ├── guardrails.py    # OWASP LLM Top 10 guards + abstention
 │   │   ├── retriever.py     # Hybrid retriever (Qdrant + BM25 + reranking)
 │   │   ├── native_voice/    # Phase 28: streaming ASR/TTS, speculative prefetch, query planner
@@ -116,7 +122,9 @@ for normal chat usage.
 8. **Emotional intelligence** — `assess_emotional_tone` classifies frustration / anxiety / urgency / confusion / hardship and returns the acknowledgement, tone hint and handoff signal the reply should use; given the conversation `history` it flags distress sustained across turns. Every turn also passes `app/turn_guidance.py`: a repeated empathy opener is dropped, sustained distress adds a "Talk to an officer" action, and a "How do I…" answer offers the matching guided journey. A turn that is all feeling and no task gets a clarifying question instead of retrieval, and a message about self-harm gets Uganda crisis lines before any router. See [`docs/runbooks/guided-journey-probes.md`](../docs/runbooks/guided-journey-probes.md)
 9. **Context-aware escalation** — an escalated ticket carries the whole conversation (both sides, untruncated), the taxpayer's sentiment at the point of transfer, and whether the officer should be briefed first; queued urgent-first then longest-waiting, de-duplicated per conversation, and announced over a webhook that carries triage metadata but never the transcript. See [`docs/context-aware-escalation.md`](docs/context-aware-escalation.md)
 10. **Taxpayer education** — `explain_tax_concept` teaches a concept instead of only answering about it: fading scaffolding (worked → completion problem → transfer question), a check question whose answer is withheld until asked for, and every figure computed from the effective-dated rate tables
-11. **Observability** — OpenTelemetry per-stage spans, Prometheus metrics, analytics dashboard, live smoke + deploy preflight gates
+11. **Cross-MDA Interdependence, Queue-Reduction & New-Taxpayer Onboarding (`tools/mda_interdependence.py`, `ADR-0009`)** — 6 deterministic MCP tools (`resolve_mda_ntr_payment`, `assess_life_event_tax_onboarding`, `evaluate_b2g_and_uesw_clearance`, `build_new_taxpayer_compliance_shield`, `simulate_tax_relief_and_instalments`, `resolve_efris_and_account_recovery`) and 2 guided journeys (`mda_ntr_resolution.yaml`, `new_taxpayer_and_relief.yaml`) resolving 3-hop PRN settlement across all 10 high-dependency Ugandan MDAs (`MoWT`, `DCIC`, `NIRA`, `PPDA/MoFPED`, `UNBS`, `MLHUD`, `KCCA/MoLG`, `UPF`, `URSB`, `NDA/NEMA/UESW`), `0%` (`UGX 0`) Presumptive Tax onboarding below `UGX 10,000,000`, NIRA NIN-to-TIN pre-flight checks, B2G `IFMS` `6%` WHT / `18%` Deemed VAT / `UNBS` PVoC holds, Day-1 Nil-Return penalty shields (`UGX 200,000/month`), Voluntary Disclosure (`TPC Act s.66(1a)` 100% penalty/interest waiver) / `s.40` TCC-unlocking instalment plans, and FY2026-27 `5%` consumer EFRIS e-receipt refunds (`UGX 2,000,000` threshold)
+12. **Live Web Research, Ephemeral PDF Sandbox & Self-Updating Qdrant (`web_research.py`, `ephemeral_pdf_sandbox.py`, `corpus_sync.py`, `pdf_corpus.py`, `ADR-0008`, `ADR-0009`)** — live `XE.com` / Google Finance FX conversion, 8-trigger official portal discovery across URA/Parliament/ULII/10-MDA allowlists, `tmpfs`-isolated PDF/XLSX inspection (`pdf_guards` + GPU micro-reranking), and zero-downtime Qdrant corpus hot-swapping (`186` PDFs → `5,639` statutory chunks → `7,251` hybrid vectors)
+13. **Observability** — OpenTelemetry per-stage spans, Prometheus metrics, analytics dashboard, live smoke + deploy preflight gates
 
 ### Backend Architecture & Request Flows
 

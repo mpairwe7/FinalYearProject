@@ -65,7 +65,7 @@
 | Dataset | Source | Size | License |
 |---------|--------|------|---------|
 | URA FAQ CSV files | ura.go.ug (public) | 45 files | Public domain |
-| URA PDF handbooks & statutory acts (2018–2027) | ura.go.ug, bills.parliament.ug, ulii.org, ursb.go.ug, unbs.go.ug | 169 PDFs (158 unique, 3,988 verified JSONL chunks) | Public domain |
+| URA PDF handbooks, parliamentary bills & 10-MDA statutory acts (2018–2027) | ura.go.ug, parliament.go.ug, bills.parliament.ug, ulii.org, plus 10 Ugandan MDAs (`MoWT`, `DCIC`, `NIRA`, `PPDA/MoFPED`, `UNBS`, `MLHUD`, `KCCA/MoLG`, `UPF`, `URSB`, `NDA/NEMA/UESW`) | 186 PDFs (175 unique, 5,639 verified JSONL chunks; 7,251 Qdrant hybrid vectors — `ADR-0009`) | Public domain |
 | Luganda academic corpus | Makerere University | ~50K sentences | CC-BY-4.0 |
 | Teacher-generated QA pairs | Domain experts | ~2K pairs | Apache-2.0 |
 
@@ -147,7 +147,7 @@ Evaluated across 16 Ugandan tax heads (`paye`, `vat`, `withholding`, `rental`, `
 - **Database**: SQLite WAL (default) or PostgreSQL (opt-in), 11 tables
 - **Auth**: JWT (HS256 dev / RS256 OIDC prod), 5 RBAC roles
 - **Container**: Docker (non-root, read-only filesystem)
-- **Feature flags**: 82 env-backed flags for progressive rollout
+- **Feature flags**: 85 env-backed flags for progressive rollout
 
 ### Performance (SLO Targets)
 - p95 latency: < 2s for /v1/chat

@@ -392,6 +392,12 @@ App/backend/app/
 ├── faq_corpus.py        # ura_*_faqs.csv + teacher-QA → validated JSONL → vector docs
 ├── pdf_corpus.py        # Statutory & 10-MDA PDF harvester + hierarchical chunk JSONL (186 PDFs → 5,639 chunks)
 ├── crawl_corpus.py      # Crawl pages → chunk JSONL (newest capture per URL, above floor)
+├── web_research.py      # 8-trigger live web research planner & Tier-1/2/3 source authority (ADR-0008)
+├── ephemeral_pdf_sandbox.py # Ephemeral tmpfs PDF/XLSX sandbox + GPU micro-reranking (ADR-0008)
+├── corpus_sync.py       # Self-updating Qdrant comparator, hot-swap & web_sync_ledger (ADR-0008)
+├── scenario_planner.py  # Deterministic multi-tool planner & Verified Statutory Facts injection
+├── calculator_router.py # Single-calculator fast path & multi-turn amount carryover
+├── premise_guard.py     # False-premise detector & legitimate statutory modifier allowlist
 ├── speech_service.py    # ASR (Whisper) + TTS (Piper) + MT (prompted/ONNX)
 ├── sunbird.py           # Sunbird AI cloud fallback (Ugandan languages)
 ├── tracing.py           # OpenTelemetry GenAI 2025 semconv tracing
@@ -413,20 +419,25 @@ App/backend/app/
 │   ├── state.py         #   AgentRoute enum, RouteDecision dataclass
 │   └── graphs/          #   LangGraph orchestration (scaffolded for Phase 15)
 │
-├── tools/               # LLM tool-calling framework (Phase 14-A/B)
+├── tools/               # LLM & deterministic tool-calling framework (72 tools across 18 namespaces)
 │   ├── __init__.py      #   Tool base class + ToolRegistry (auto-registration)
 │   ├── calculators.py   #   VAT, PAYE, capital gains, corporation tax, customs duty,
 │   │                    #   rental income tax, withholding tax (FY-versioned rates)
-│   ├── rates.py         #   Tax rate lookups by category
+│   ├── statutory_2026.py #  BIK, residency, FX, stamp duty, DST, gaming, advance vehicle,
+│   │                    #   presumptive, startup exemption, penalties/interest, rental pooling, objection validity
+│   ├── mda_interdependence.py # 6 Cross-MDA NTR/PRN, life-event onboarding, B2G/UESW clearance,
+│   │                    #   Nil-Return Shield, Voluntary Disclosure/Instalment & EFRIS 5% refund tools (ADR-0009)
+│   ├── rates.py         #   Tax rate lookups & multi-year comparison by category
 │   ├── calendar.py      #   Filing deadlines, fiscal year, current date
 │   ├── escalate.py      #   Human escalation tool
 │   └── rag_tool.py      #   Knowledge base search tool (search_ura_knowledge_base)
 │
-├── workflows/           # Guided multi-step workflows (Phase 15)
+├── workflows/           # Guided multi-step workflows (21 YAML flows + Journey Copilot, ADR-0009/0010)
 │   ├── registry.py      #   WorkflowSession state machine + WorkflowRegistry
 │   ├── loader.py        #   YAML workflow definition loader
 │   ├── slots.py         #   Slot validators (TIN, email, phone, date, currency)
-│   └── flows/           #   YAML definitions (TIN registration, filing, payment, customs)
+│   └── flows/           #   21 YAML definitions (TIN, filing, payment, customs, objections, TCC,
+│                        #   mda_ntr_resolution.yaml, new_taxpayer_and_relief.yaml, calc_* flows)
 │
 ├── memory/              # Consent-gated, tenant-scoped personalization memory (Phase 16)
 │   ├── service.py       #   Unified memory interface (MemoryService)
@@ -498,15 +509,17 @@ abstain on.
 
 **Tool-calling loop** (`llm.generate_with_tools()`): bounded to 3 iterations. Parses `<tool_call>` XML blocks, dispatches through `ToolRegistry.call()`, feeds results back as `tool` role messages.
 
-## Workflow Engine (Phase 15)
+## Workflow Engine (Phase 15 & ADR-0009 / ADR-0010 — 21 Guided Journeys)
 
-YAML-defined guided workflows for procedural tax tasks:
+YAML-defined guided workflows (`App/backend/app/workflows/flows/`) for procedural tax and cross-agency tasks:
 
-1. **TIN Registration** — 6 steps (taxpayer type → ID → name → address → email → confirmation)
-2. **Return Filing** — 5 steps (TIN → tax type → period → amount → submit)
-3. **Payment** — 4 steps (TIN → payment type → amount → method)
-4. **Customs Declaration** — 5 steps (type → goods → country → value → HS code)
-5. **Objection Filing** — 4 steps (TIN → assessment → grounds → evidence)
+1. **TIN Registration (`tin_registration.yaml`, `tin_procedure_help.yaml`)** — Individual & non-individual TIN onboarding with NIRA NIN pre-flight guidance
+2. **Return Filing (`return_filing.yaml`)** — Monthly/annual return preparation, schedules, and nil-return walkthroughs
+3. **Payment & PRN (`payment.yaml`)** — PRN generation, bank/mobile money channels, and receipt verification
+4. **Cross-MDA NTR & PRN Payment Resolution (`mda_ntr_resolution.yaml`, `ADR-0009`)** — 3-hop PRN settlement troubleshooting (`Bank/MoMo -> URA e-Tax -> MDA portal`) across all 10 MDAs (`MoWT` UDLS, `DCIC` e-Passport, `NIRA`, `MLHUD` UgNLIS, `UPF` EPS, `URSB` OBRS, `NEMA` 30%/70% EIA, `UNBS` PVoC, `NDA`, `KCCA` IRAS) and `Form DT-3008` wrong-head refund steps
+5. **New Taxpayer Onboarding, Nil-Return Shield & Penalty Relief (`new_taxpayer_and_relief.yaml`, `ADR-0009`)** — Day-1 60-Second Nil-Return Shield (`UGX 200,000/month` penalty prevention), `0%` (`UGX 0`) Presumptive Tax disclosure below `UGX 10,000,000`, Voluntary Disclosure (`TPC Act s.66(1a)` / `Form DT-10307` 100% penalty/interest waiver), `s.40` TCC-unlocking instalment plans, FY2026-27 `5%` consumer EFRIS e-receipt refund (`UGX 2,000,000` threshold), and lost-SIM/email TIN recovery
+6. **Customs & Motor Vehicle (`customs_declaration.yaml`, `motor_vehicle_registration.yaml`)** — EAC CET import clearance, `UESW` Single Window holds, and motor vehicle transfer/first registration
+7. **Objections, TCC, VAT, EFRIS, Refunds & Amendments (`objection_filing.yaml`, `tax_clearance_certificate.yaml`, `vat_registration.yaml`, `efris_enrollment.yaml`, `refund_claim.yaml`, `registration_amendment.yaml`, `audit_invoice_compliance.yaml`, plus 6 `calc_*` flows)** — Interactive procedural and calculation flows with Prerequisite DAGs, A2UI forms, pushdown `goal_stack`, and Step-Up Auth migration (`ADR-0010`)
 
 State machine: `WorkflowRegistry.advance(session, user_input)` validates slots, advances steps, calls tools, and persists to `workflow_sessions` table.
 

@@ -14,6 +14,9 @@ This repository is a customer-service conversation AI for Uganda Revenue Authori
 | [Documentation Index](docs/README.md) | Getting started and project overview |
 | [API Reference](docs/API_REFERENCE.md) | REST API endpoints (sync + SSE streaming) |
 | [RAG Architecture](docs/RAG_ARCHITECTURE.md) | 12-stage production RAG + Agentic + Speech pipeline design |
+| [Agent Architecture](docs/AGENT_ARCHITECTURE.md) | Supervisor routing, 72 MCP tools across 18 namespaces, 21 guided workflows, and 85-flag registry |
+| [Architecture Decision Records (MADR 4.0)](docs/adr/README.md) | Canonical ADR catalog (`ADR-0001`–`ADR-0011`) governing monorepo boundaries, 5-locale stack, MCP security, sovereign reasoning, live web research (`ADR-0008`), 10-MDA statutory corpus & queue-reduction tools (`ADR-0009`), and Journey Copilot (`ADR-0010`) |
+| [Model Card](docs/MODEL_CARD.md) | EU AI Act Art. 53 & ISO/IEC 42001 model card (`Sunbird/Sunflower-Qwen3.5-9B` + `Qwen/Qwen3.8-27B-FP8`, 186 statutory/MDA PDFs → 7,251 Qdrant hybrid vectors) |
 | [Deployment Guide](docs/DEPLOYMENT.md) | Production deployment, TLS, scaling, SLOs |
 | [Monitoring & Observability](docs/MONITORING.md) | OpenTelemetry, Prometheus, alerting |
 | [Data Schema & Evaluation](docs/data-schema-and-eval.md) | Database models and evaluation criteria |
@@ -58,7 +61,15 @@ FinalYearProject/
 │   │       ├── corrective_rag.py # Corrective re-retrieval + clarification
 │   │       ├── guardrails.py  # OWASP LLM Top 10 input/output guards
 │   │       ├── retriever.py   # Qdrant hybrid retriever (dense+BM25+RRF+circuit breaker)
-│   │       ├── indexer.py     # Document indexing pipeline (PDF+CSV→Qdrant)
+│   │       ├── indexer.py     # Document indexing pipeline (PDF+CSV→Qdrant, 7,251 hybrid vectors)
+│   │       ├── pdf_corpus.py  # Statutory & 10-MDA PDF harvester (186 PDFs → 5,639 chunks, ADR-0009)
+│   │       ├── web_research.py # 8-trigger live web research planner & Tier-1/2/3 source authority (ADR-0008)
+│   │       ├── ephemeral_pdf_sandbox.py # Ephemeral tmpfs PDF/XLSX sandbox + GPU micro-reranking (ADR-0008)
+│   │       ├── corpus_sync.py # Self-updating Qdrant comparator, hot-swap & web_sync_ledger (ADR-0008)
+│   │       ├── scenario_planner.py # Deterministic multi-tool planner & Verified Statutory Facts block
+│   │       ├── calculator_router.py # Instant single-calculator router & multi-turn amount carryover
+│   │       ├── tools/         # 72 MCP tools across 18 namespaces (incl. mda_interdependence.py)
+│   │       ├── workflows/     # 21 YAML-driven guided journeys (Prerequisite DAG, A2UI, Step-Up Auth)
 │   │       ├── tracing.py     # OpenTelemetry GenAI tracing (per-stage spans)
 │   │       ├── analytics.py   # Prometheus-compatible metrics middleware
 │   │       └── database.py    # SQLite WAL analytics/feedback/session/conversation store
@@ -138,8 +149,11 @@ User Query
 | **Query Rewriting** | `query.py` | Abbreviation expansion (15+ URA terms), vernacular-safe spell correction, coreference resolution |
 | **Semantic Cache** | `cache.py` | Cosine similarity matching, configurable TTL/threshold/max-size |
 | **Corrective RAG** | `corrective_rag.py` | Re-retrieve with expanded query when initial quality is low |
-| **Generation** | `Sunbird/Sunflower-Qwen3.5-9B` | vLLM HTTP (FP8, native 256K / 262,144 context window without YaRN, `LLM_MAX_CONCURRENCY=12`, natively multilingual across 67 African languages); `Qwen/Qwen3-8B` + local Transformers/BnB 4-bit is the fallback and what the lg/sw/nyn/ach LoRA adapters target |
+| **Generation** | `Sunbird/Sunflower-Qwen3.5-9B` + `Qwen/Qwen3.8-27B-FP8` | vLLM HTTP (T1 9B FP8 with native 256K / 262,144 context window across 67 African languages; T2/T3 27.8B FP8 Sovereign Reasoning Tier for multi-hop statutory & dispute queries per `ADR-0007`); `Qwen/Qwen3-8B` + local Transformers/BnB 4-bit is the fallback and what the lg/sw/nyn/ach LoRA adapters target |
 | **LoRA Routing** | Qwen3 adapters for `lg`, `sw`, `nyn`, `ach` | Per-locale PEFT adapters loaded from `fine-tuning/adapters/` and selected with `set_adapter()` |
+| **Deterministic Tax, Cross-MDA & Relief Tools** | `tools/` (`72` MCP `2026-07-28` tools across `18` namespaces) + `scenario_planner.py` | `28` `tax_calculator` tools including 6 Cross-MDA & Queue-Reduction tools in `tools/mda_interdependence.py` (`resolve_mda_ntr_payment`, `assess_life_event_tax_onboarding`, `evaluate_b2g_and_uesw_clearance`, `build_new_taxpayer_compliance_shield`, `simulate_tax_relief_and_instalments`, `resolve_efris_and_account_recovery` — `ADR-0009`) |
+| **Statutory & 10-MDA Corpus + Self-Updating Qdrant** | `pdf_corpus.py` + `web_research.py` + `ephemeral_pdf_sandbox.py` + `corpus_sync.py` | `186` PDF sources (`175` unique, `5,639` structure-aware statutory chunks across URA, Parliament of Uganda, ULII, and all 10 high-dependency Ugandan MDAs) → `7,251` Qdrant hybrid vectors (`ADR-0008`, `ADR-0009`) |
+| **Guided Taxpayer & Cross-Agency Journeys** | `workflows/` (`21` YAML state machines) + `journey_copilot.py` | `21` guided workflows (including `mda_ntr_resolution.yaml` and `new_taxpayer_and_relief.yaml`) with Prerequisite DAGs, A2UI interactive forms, pushdown `goal_stack`, and Step-Up Auth session migration (`ADR-0010`) |
 | **Cognitive Memory** | `memory/` (`4-tier` + `ResolutionLedger`) | Working, Episodic, Semantic, and Procedural memory + multi-case `ResolutionLedger` and `HandoffEnvelope` v2.1 |
 | **Speech & Voice** | `Sunbird/SunflowerASR-51-african-languages` + `Orpheus-3B-TTS` | Hybrid S2S + Regulated Cascaded Router, `spoken_figure_guard`, multimodal affect prosody, and 8 kHz G.711 μ-law 2G/3G wire transcoding |
 | **Safety & Governance** | OWASP LLM Top 10 + `governance_v3.py` | Injection detection, PII redaction, `#NMBRA#` sentinel figure protection, `ActionAuditRecord` v3, and `InteractionQualityScorecard` |
