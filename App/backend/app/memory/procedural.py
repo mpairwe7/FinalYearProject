@@ -264,11 +264,16 @@ _DEFAULT_EXEMPLARS: list[TrajectoryExemplar] = [
 
 
 class ProceduralMemory:
-    """Manages system capabilities, skills, and high-fidelity trajectory banks."""
+    """Manages system capabilities, skills, and pre-indexed thread-safe ExpRAG trajectory banks."""
 
     def __init__(self) -> None:
+        import threading
+
+        self._lock = threading.RLock()
         self._skills: dict[str, ProceduralSkill] = {}
         self._exemplars: dict[str, TrajectoryExemplar] = {}
+        self._doc_tokens_map: dict[str, frozenset[str]] = {}
+        self._doc_freq: dict[str, int] = {}
         self._init_defaults()
 
     def _init_defaults(self) -> None:
@@ -320,7 +325,29 @@ class ProceduralMemory:
         return list(self._skills.values())
 
     def register_exemplar(self, exemplar: TrajectoryExemplar) -> None:
-        self._exemplars[exemplar.exemplar_id] = exemplar
+        with self._lock:
+            old_tokens = self._doc_tokens_map.get(exemplar.exemplar_id)
+            if old_tokens:
+                for tok in old_tokens:
+                    cnt = self._doc_freq.get(tok, 1) - 1
+                    if cnt <= 0:
+                        self._doc_freq.pop(tok, None)
+                    else:
+                        self._doc_freq[tok] = cnt
+            self._exemplars[exemplar.exemplar_id] = exemplar
+            corpus_str = " ".join(
+                [
+                    exemplar.intent,
+                    exemplar.domain,
+                    exemplar.user_query,
+                    " ".join(exemplar.plan),
+                    " ".join(exemplar.tool_sequence),
+                ]
+            ).lower()
+            new_tokens = frozenset(re.findall(r"[a-z0-9_]{2,}", corpus_str))
+            self._doc_tokens_map[exemplar.exemplar_id] = new_tokens
+            for tok in new_tokens:
+                self._doc_freq[tok] = self._doc_freq.get(tok, 0) + 1
 
     def find_exemplar(self, intent: str) -> TrajectoryExemplar | None:
         """Locate verified few-shot exemplar for a given intent or query string."""
@@ -391,36 +418,30 @@ class ProceduralMemory:
         domain: str | None = None,
         planned_tools: list[str] | None = None,
     ) -> list[TrajectoryExemplar]:
-        """ExpRAG (arXiv:2603.18272) trajectory retrieval combining lexical IDF, tool-sequence overlap, and faithfulness."""
+        """ExpRAG (arXiv:2603.18272) trajectory retrieval using pre-indexed IDF, tool-sequence overlap, and faithfulness."""
         import math
 
         q_clean = (query or "").strip().lower()
-        q_tokens = {tok for tok in re.findall(r"[a-z0-9_]{2,}", q_clean)}
+        q_tokens = frozenset(re.findall(r"[a-z0-9_]{2,}", q_clean))
         tool_set = {t.strip() for t in (planned_tools or []) if t and t.strip()}
-        candidates = self.list_exemplars(domain=domain)
-        if not candidates:
-            return []
-
-        doc_freq: dict[str, int] = {}
-        doc_tokens_map: dict[str, set[str]] = {}
-        for ex in candidates:
-            corpus_str = " ".join([ex.intent, ex.domain, ex.user_query, " ".join(ex.plan), " ".join(ex.tool_sequence)]).lower()
-            toks = {tok for tok in re.findall(r"[a-z0-9_]{2,}", corpus_str)}
-            doc_tokens_map[ex.exemplar_id] = toks
-            for tok in toks:
-                doc_freq[tok] = doc_freq.get(tok, 0) + 1
-
-        n_docs = max(1, len(candidates))
-        scored: list[tuple[float, TrajectoryExemplar]] = []
-        for ex in candidates:
-            toks = doc_tokens_map[ex.exemplar_id]
-            overlap = q_tokens & toks
-            idf_sum = sum(math.log(1.0 + n_docs / (1.0 + doc_freq.get(tok, 1))) for tok in overlap)
-            tool_bonus = 3.5 * len(tool_set & set(ex.tool_sequence)) if tool_set else 0.0
-            intent_bonus = 2.0 if ex.intent.lower() in q_clean else 0.0
-            score = (idf_sum + tool_bonus + intent_bonus) * max(0.5, float(ex.faithfulness_score))
-            if score > 0.0:
-                scored.append((score, ex))
+        with self._lock:
+            candidates = self.list_exemplars(domain=domain)
+            if not candidates:
+                return []
+            n_docs = max(1, len(self._exemplars))
+            scored: list[tuple[float, TrajectoryExemplar]] = []
+            for ex in candidates:
+                toks = self._doc_tokens_map.get(ex.exemplar_id, frozenset())
+                overlap = q_tokens & toks
+                idf_sum = sum(
+                    math.log(1.0 + n_docs / (1.0 + self._doc_freq.get(tok, 1)))
+                    for tok in overlap
+                )
+                tool_bonus = 3.5 * len(tool_set & set(ex.tool_sequence)) if tool_set else 0.0
+                intent_bonus = 2.0 if ex.intent.lower() in q_clean else 0.0
+                score = (idf_sum + tool_bonus + intent_bonus) * max(0.5, float(ex.faithfulness_score))
+                if score > 0.0:
+                    scored.append((score, ex))
 
         scored.sort(key=lambda item: (item[0], item[1].faithfulness_score), reverse=True)
         return [ex for _, ex in scored[: max(1, int(top_k))]]

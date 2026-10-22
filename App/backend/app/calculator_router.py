@@ -796,7 +796,9 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
         return None
     if is_explanation_question(text):
         return None
-    if _SCENARIO_PLANNER_BYPASS_RE.search(_collapse_ws(text)):
+    from .scenario_planner import should_defer_to_scenario_planner
+
+    if _SCENARIO_PLANNER_BYPASS_RE.search(_collapse_ws(text)) or should_defer_to_scenario_planner(text):
         return None
     if (
         re.search(r"\b(?:example|in\s+theory|theoretically|explain\b|how\s+is\b.*\b(?:determined|defined|accounted))\b", text, re.IGNORECASE)

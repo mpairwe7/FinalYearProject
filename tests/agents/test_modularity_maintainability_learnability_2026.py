@@ -149,7 +149,21 @@ def test_phase3_modularity_turn_pipeline_portal_pack_and_g224_fixes() -> None:
     assert verdict["missing_mandatory_guards"] == []
     assert verdict["manifest_sha256"] == CANONICAL_BEHAVIORAL_MANIFEST.digest_sha256()
 
-    # 2. Declarative Portal Knowledge Pack (MOD-GAP-03)
+    # 1b. Fail-closed stage exception containment: Stage 6 (OutputGuard + Audit) still executes on mid-pipeline failure
+    orch_err = TurnPipelineOrchestrator()
+    orch_err.register_stage(TurnStage.STAGE_1_INPUT_GUARD, lambda s: {"input_safe": True})
+
+    def _failing_stage(s: dict) -> dict:
+        raise RuntimeError("transient retriever timeout")
+
+    orch_err.register_stage(TurnStage.STAGE_4_HYBRID_RETRIEVAL_AND_WEB, _failing_stage)
+    orch_err.register_stage(TurnStage.STAGE_6_OUTPUT_GUARD_AND_AUDIT, lambda s: {"fail_closed_audited": True})
+    err_state, err_trace = orch_err.run({"query": "test"}, transport="sse", raise_on_error=False)
+    assert err_state["fail_closed_audited"] is True
+    assert "transient retriever timeout" in err_state["_stage_error"]
+    assert err_trace.verify_behavioral_integrity()["ok"] is True
+
+    # 2. Declarative Portal Knowledge Pack (MOD-GAP-03) & NavigateExternalPortalTool integration
     prov = get_portal_knowledge_provenance()
     assert prov["loaded"] is True
     assert len(prov["sha256"]) == 64
@@ -158,6 +172,37 @@ def test_phase3_modularity_turn_pipeline_portal_pack_and_g224_fixes() -> None:
     pack_meta = load_portal_knowledge_pack()
     assert pack_meta["workflow_count"] >= 2
     assert pack_meta["portal_count"] >= 5
+
+    from app.tools import ToolRegistry
+
+    nav_res = ToolRegistry.call(
+        "navigate_external_portal",
+        {
+            "extracted_text": "Paid PRN on Mobile Money but UDLS portal still shows unpaid",
+            "portal_name": "prn_payments",
+            "workflow_intent": "mda_ntr_prn_reconciliation",
+        },
+    )
+    assert nav_res["ok"] is True
+    assert nav_res["screen_diagnostic"]["detected_state"] == "mda_ntr_prn_reconciliation"
+    assert any("DT-3008" in step for step in nav_res["navigation_guidance"]["steps"])
+
+    # 2b. MemoryService integration & architecture_integrity_status in production_readiness
+    from app.memory.service import MemoryService
+    from app.production_readiness import architecture_integrity_status, readiness_report
+
+    memsvc = MemoryService()
+    exp_block = memsvc.retrieve_procedural_trajectories(
+        "How do I pay my driving permit PRN on UDLS?",
+        top_k=2,
+        planned_tools=["resolve_mda_ntr_payment"],
+    )
+    assert "resolve_mda_ntr_payment" in exp_block
+
+    arch = architecture_integrity_status()
+    assert arch["ok"] is True
+    assert arch["storage_backend_parity"]["signature_mismatches"] == []
+    assert "architecture_integrity" in readiness_report()
 
     # 3. Unified router -> scenario_planner deferral (MOD-GAP-02)
     assert should_defer_to_scenario_planner(

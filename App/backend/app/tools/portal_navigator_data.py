@@ -6721,18 +6721,24 @@ def find_relevant_forms_and_resources(
 # ---------------------------------------------------------------------------
 PORTAL_NAVIGATION_WORKFLOWS: dict[str, dict[str, Any]] = {}
 _WORKFLOWS = PORTAL_NAVIGATION_WORKFLOWS
+_PACK_CACHE: dict[tuple[str, int], dict[str, Any]] = {}
 
 
 def load_portal_knowledge_pack(pack_path: Any = None) -> dict[str, Any]:
-    """Load declarative JSON portal workflow/troubleshooting overrides and merge into `PORTAL_NAVIGATION_WORKFLOWS`."""
+    """Load declarative JSON portal workflow/troubleshooting overrides with mtime-keyed cache."""
     import hashlib
     import json
     from pathlib import Path
 
     default_path = Path(__file__).resolve().parent / "data" / "portal_navigation_overrides.json"
-    target = Path(pack_path) if pack_path is not None else default_path
+    target = (Path(pack_path) if pack_path is not None else default_path).resolve()
     if not target.is_file():
         return {"loaded": False, "workflow_count": len(PORTAL_NAVIGATION_WORKFLOWS), "sha256": ""}
+    mtime_ns = target.stat().st_mtime_ns
+    cache_key = (str(target), mtime_ns)
+    cached = _PACK_CACHE.get(cache_key)
+    if cached is not None and PORTAL_NAVIGATION_WORKFLOWS:
+        return dict(cached)
     raw_bytes = target.read_bytes()
     sha256 = hashlib.sha256(raw_bytes).hexdigest()
     payload = json.loads(raw_bytes.decode("utf-8"))
@@ -6746,13 +6752,15 @@ def load_portal_knowledge_pack(pack_path: Any = None) -> dict[str, Any]:
         for p_key, p_spec in portals_patch.items():
             if isinstance(p_spec, dict) and p_spec.get("canonical_url"):
                 EXTERNAL_URA_PORTALS[str(p_key)] = p_spec
-    return {
+    result = {
         "loaded": True,
         "path": str(target),
         "sha256": sha256,
         "workflow_count": len(PORTAL_NAVIGATION_WORKFLOWS),
         "portal_count": len(EXTERNAL_URA_PORTALS),
     }
+    _PACK_CACHE[cache_key] = result
+    return dict(result)
 
 
 def get_portal_knowledge_provenance() -> dict[str, Any]:

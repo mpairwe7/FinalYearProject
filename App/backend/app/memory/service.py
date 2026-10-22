@@ -390,6 +390,43 @@ class MemoryService:
             asr_confidence=asr_confidence,
         )
 
+    # -- ExpRAG Procedural Trajectory Retrieval & Promotion (ADR-0012) --
+    def retrieve_procedural_trajectories(
+        self,
+        query: str,
+        *,
+        top_k: int = 2,
+        planned_tools: list[str] | None = None,
+    ) -> str:
+        """Return formatted ExpRAG procedural trajectory memory block (no PII, consent-independent)."""
+        return self.procedural.format_experience_memory_block(
+            query,
+            top_k=top_k,
+            planned_tools=planned_tools,
+        )
+
+    def record_verified_trajectory(
+        self,
+        *,
+        intent: str,
+        domain: str,
+        user_query: str,
+        plan: list[str],
+        tool_sequence: list[str],
+        faithfulness_score: float = 1.0,
+        demonstration_turn: dict[str, Any] | None = None,
+    ) -> Any:
+        """Promote a high-faithfulness or officer-verified turn into ProceduralMemory."""
+        return self.procedural.record_verified_trajectory(
+            intent=intent,
+            domain=domain,
+            user_query=user_query,
+            plan=plan,
+            tool_sequence=tool_sequence,
+            faithfulness_score=faithfulness_score,
+            demonstration_turn=demonstration_turn,
+        )
+
     def get_active_resolution_case(
         self,
         user_id: str,
