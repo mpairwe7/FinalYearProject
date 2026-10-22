@@ -6,6 +6,7 @@ Exports pairs, then exits. A real Axolotl/DPO run is refused unless
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
