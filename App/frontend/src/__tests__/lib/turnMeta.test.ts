@@ -96,4 +96,20 @@ describe('applyTurnMeta', () => {
     );
     expect(replaced.connectorNotices).toEqual(fresh);
   });
+
+  it('propagates objective_hypothesis onto turn.objectiveHypothesis (Pillar 4)', () => {
+    const hypothesis = {
+      objective_id: 'wht_credit_and_filing',
+      title: 'Verify 6% Withholding Tax Deduction & Claim Tax Credit',
+      domain: 'returns',
+      workflow_id: 'return_filing',
+      confirm_action: 'Guide me step by step through Return Filing',
+      prerequisites_summary: 'WHT Certificate and EFRIS invoice',
+    };
+    const out = applyTurnMeta(turn(), { objective_hypothesis: hypothesis });
+    expect(out.objectiveHypothesis).toEqual(hypothesis);
+    // Subsequent metadata frames without objective_hypothesis preserve the existing one
+    const preserved = applyTurnMeta(out, { faithfulness_score: 0.91 });
+    expect(preserved.objectiveHypothesis).toEqual(hypothesis);
+  });
 });

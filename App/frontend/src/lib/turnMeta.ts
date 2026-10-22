@@ -1,4 +1,4 @@
-import type { ChatTurn, Citation, ContextResource, WorkflowState } from '../store/useChatStore';
+import type { ChatTurn, Citation, ContextResource, ObjectiveHypothesis, WorkflowState } from '../store/useChatStore';
 import type { ConnectorNotice } from './connectors';
 
 /** A turn's metadata as the server sends it (SSE `metadata`/`grounding`/`done`, or a metadata line). */
@@ -92,6 +92,9 @@ export function applyTurnMeta(turn: ChatTurn, meta: TurnMeta, notices: Connector
     officerHours: officerHoursFrom(meta) ?? turn.officerHours,
     nextActions,
     workflow,
+    objectiveHypothesis:
+      ((meta.objective_hypothesis ?? meta.objectiveHypothesis) as ObjectiveHypothesis | null | undefined) ??
+      turn.objectiveHypothesis,
     resources:
       (meta.resources as ContextResource[] | undefined) ??
       ((meta.workflow as { resources?: ContextResource[] } | undefined)?.resources ?? turn.resources),

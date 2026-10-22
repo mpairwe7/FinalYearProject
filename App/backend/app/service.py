@@ -5111,7 +5111,18 @@ class ChatModel:
     def _apply_personalization_to_workflow(
         session: WorkflowSession,
         personalization: dict[str, Any] | None,
+        *,
+        user_id: str | None = None,
     ) -> None:
+        if user_id:
+            from .workflows.journey_copilot import elevate_anonymous_workflow_session
+
+            elevate_anonymous_workflow_session(
+                session,
+                user_id=user_id,
+                profile_slots=(personalization or {}).get("prefill_slots"),
+            )
+            return
         if not personalization:
             return
         for slot_name, value in (personalization.get("prefill_slots") or {}).items():
@@ -6303,6 +6314,13 @@ class ChatModel:
                 else resource
                 for resource in out["resources"]
             ]
+
+        if "journey_gps" in out and isinstance(out["journey_gps"], dict):
+            gps_copy = dict(out["journey_gps"])
+            goal_name = str(gps_copy.get("active_goal") or "").strip()
+            if goal_name in names:
+                gps_copy["active_goal"] = names[goal_name]
+            out["journey_gps"] = gps_copy
 
         return out
 
@@ -7928,11 +7946,15 @@ class ChatModel:
 
     @staticmethod
     def _restore_workflow_session(row: dict[str, Any]) -> WorkflowSession:
+        slots = dict(row.get("slots") or {})
+        raw_stack = slots.get("_goal_stack")
+        goal_stack = list(raw_stack) if isinstance(raw_stack, list) else []
         return WorkflowSession(
             workflow_id=str(row.get("workflow_id", "")),
             current_step_idx=int(row.get("current_step_idx") or 0),
-            slots=dict(row.get("slots") or {}),
+            slots=slots,
             completed=str(row.get("status", "")) == "completed",
+            goal_stack=goal_stack,
         )
 
     @staticmethod
@@ -9533,7 +9555,7 @@ class ChatModel:
             leaving, persisted = persisted, None
         if persisted and persisted.get("status") == "active":
             session = self._restore_workflow_session(persisted)
-            self._apply_personalization_to_workflow(session, personalization)
+            self._apply_personalization_to_workflow(session, personalization, user_id=user_id)
             wf = WorkflowRegistry.get(session.workflow_id)
             if wf is None:
                 db.complete_workflow_session(
@@ -9541,6 +9563,13 @@ class ChatModel:
                 )
                 return None
             user_input = (message or "").strip()
+            from .workflows.journey_copilot import is_prerequisite_remediation, parse_resume_code
+
+            parsed_resume = parse_resume_code(user_input)
+            if parsed_resume is not None and (
+                not parsed_resume["workflow_id"] or parsed_resume["workflow_id"] == wf.id
+            ):
+                user_input = "resume"
             if user_input.lower() in _WORKFLOW_CANCEL_WORDS:
                 db.complete_workflow_session(
                     state_thread_id, status="cancelled", tenant_id=state_tenant_id
@@ -9682,6 +9711,25 @@ class ChatModel:
             prompt = turn.question or persisted.get("last_prompt", "") or f"Let's continue the {wf.name} workflow."
             if tool_messages:
                 prompt = "\n\n".join(tool_messages + [prompt]).strip()
+
+            # Pillar 3 (Oct 2026): If a pushed prerequisite sub-workflow just completed,
+            # pop the parent workflow from goal_stack and resume it seamlessly.
+            if status == "completed" and (session.goal_stack or session.slots.get("_goal_stack")):
+                sub_name = wf.name
+                if WorkflowRegistry.pop_subworkflow(session):
+                    parent_wf = WorkflowRegistry.get(session.workflow_id)
+                    if parent_wf is not None:
+                        wf = parent_wf
+                        parent_turn, _ = self._advance_workflow(session, "", thread_id, record=False)
+                        turn = parent_turn
+                        status = "completed" if (session.completed or turn.is_complete) else "active"
+                        parent_prompt = turn.question or f"Let's continue {wf.name}."
+                        prompt = (
+                            f"{prompt}\n\n---\n"
+                            f"**{sub_name} completed.** Returning to **{wf.name}** "
+                            f"(Step {turn.step_index} of {turn.total_steps}):\n\n{parent_prompt}"
+                        ).strip()
+
             # A step answered wrongly again and again is a loop, not a dialogue
             # (Phase 39): from the second miss a person and a way out are on
             # offer; from the third, say so.
@@ -9743,42 +9791,38 @@ class ChatModel:
                 ),
             }
 
-        matched = WorkflowRegistry.match_trigger(message) or WorkflowRegistry.match_trigger(rewritten)
+        from .workflows.journey_copilot import is_prerequisite_remediation, parse_resume_code
+
+        parsed_resume = parse_resume_code(message) or parse_resume_code(rewritten)
+        matched = (
+            WorkflowRegistry.get(parsed_resume["workflow_id"])
+            if parsed_resume and parsed_resume.get("workflow_id")
+            else None
+        ) or WorkflowRegistry.match_trigger(message) or WorkflowRegistry.match_trigger(rewritten)
         if matched is None:
             return None
         combined_query = f"{message or ''} {rewritten or ''}".strip()
         # G39: a question must not be captured as a task, in any language.
-        #
-        # `_INFORMATIONAL_WORKFLOW_QUERY_RE` is an English word list — "how do
-        # I", "what are the steps", "procedure". A Luganda or Kiswahili
-        # question matches no part of it, and reaches `match_trigger` through
-        # `rewritten`, its own English translation. So the trigger fired and
-        # the escape could not, and 80 of 186 measured probes were answered
-        # with a slot prompt instead of an answer — every one of them Luganda
-        # or Kiswahili.
-        #
-        # G38 fixed the mirror image of this on the way *out* of a flow and
-        # established the test to use: `_reads_as_question` reads an English
-        # interrogative opener or a trailing "?" on three words or more, which
-        # is what carries across locales. Applying it here closes the entrance
-        # the same way. It is asked of `message` — the taxpayer's own words —
-        # because `rewritten` is already English and already covered above.
-        #
-        # An explicit request to start a flow still starts one: "help me
-        # register" is not a question and does not reach this at all.
         informational = bool(
             _INFORMATIONAL_WORKFLOW_QUERY_RE.search(combined_query)
         ) or _reads_as_question(message)
-        if informational and not _EXPLICIT_WORKFLOW_START_RE.search(combined_query):
+        if parsed_resume is None and informational and not _EXPLICIT_WORKFLOW_START_RE.search(combined_query):
             return None
 
         session = WorkflowRegistry.create_session(matched.id)
         if session is None:
             return None
-        if leaving is not None:
+        if leaving is not None and is_prerequisite_remediation(
+            str(leaving.get("workflow_id") or ""), matched.id
+        ):
+            session = self._restore_workflow_session(leaving)
+            WorkflowRegistry.push_subworkflow(
+                session, matched.id, reason="prerequisite_remediation"
+            )
+        elif leaving is not None:
             self._close_flow_left_for(leaving, thread_id)
         self._record_journey(session.workflow_id, "started")
-        self._apply_personalization_to_workflow(session, personalization)
+        self._apply_personalization_to_workflow(session, personalization, user_id=user_id)
 
         turn, tool_messages = self._advance_workflow(session, "", thread_id)
         prompt = turn.question or f"Let's start the {matched.name} workflow."

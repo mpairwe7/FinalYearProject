@@ -25,16 +25,16 @@ We implemented the **October 2026 Agentic Journey Copilot (`App/backend/app/work
    Evaluates workflow prerequisites (`WORKFLOW_PREREQUISITE_DAG`) into `satisfied`, `missing`, or `pending` states and attaches 1-tap `remediation_action` buttons (`"Guide me step by step through ..."`) when a prerequisite is missing.
 2. **Pillar 2 — Declarative A2UI Form Co-Completion (`build_form_draft_surface`):**
    Implements a Google `A2UI/v1` / `AG-UI`-style declarative form schedule (`WORKFLOW_FORM_SCHEMAS`) that maps slots to official URA form boxes while strictly masking `_WORKFLOW_SENSITIVE_SLOTS` and never echoing raw free-text PII into the UI view.
-3. **Pillar 3 — Plan-Centric "Journey GPS" & Pushdown Goal Stack (`push_subworkflow`, `pop_subworkflow`, `build_journey_gps`):**
-   Extends `WorkflowSession` with a pushdown `goal_stack` (*Plover*, `arXiv:2607.15193`) so prerequisite sub-workflows can be pushed and popped without losing parent step state or slots.
-4. **Pillar 4 — Proactive Objective Inference (`infer_taxpayer_objective` in `turn_guidance.py`):**
-   Detects latent taxpayer objectives from situational problem descriptions (*arXiv:2608.22266*) and attaches `objective_hypothesis` metadata plus a 1-tap guided-mode confirmation chip to `next_actions`.
+3. **Pillar 3 — Plan-Centric "Journey GPS" & Pushdown Goal Stack (`push_subworkflow`, `pop_subworkflow`, `build_journey_gps`, `is_prerequisite_remediation`):**
+   Extends `WorkflowSession` with a pushdown `goal_stack` (*Plover*, `arXiv:2607.15193`) durably mirrored into `slots_json["_goal_stack"]` so prerequisite sub-workflows initiated mid-flow are pushed rather than cancelling the parent flow, and automatically pop back to the parent workflow step upon completion. `_localize_workflow` translates `journey_gps.active_goal` across all supported locales.
+4. **Pillar 4 — Proactive Objective Inference (`infer_taxpayer_objective` in `turn_guidance.py`, `applyTurnMeta` in `turnMeta.ts`, `ChatMessage.tsx`):**
+   Detects latent taxpayer objectives from situational problem descriptions (*arXiv:2608.22266*), attaches `objective_hypothesis` metadata plus a 1-tap guided-mode confirmation chip to `next_actions`, and renders an accessible Objective Confirmation Card in `ChatMessage.tsx`.
 5. **Pillar 5 — Just-In-Time Step-Up Auth & Zero-Data-Loss Elevation (`evaluate_step_up_auth`, `elevate_anonymous_workflow_session`):**
-   Follows IETF RFC 9470 and W3C WCAG 2.2 AA SC 3.3.7 by preserving 100% of anonymous slots when elevating a session or prompting for portal login/registration.
+   Follows IETF RFC 9470 and W3C WCAG 2.2 AA SC 3.3.7 by preserving 100% of anonymous slots when elevating a session (`_apply_personalization_to_workflow(..., user_id=user_id)`) or prompting for portal login/registration.
 6. **Pillar 6 — Multimodal "Snap-to-Fill" Slot Grounding & Stall Scaffolding (`bind_document_facts_to_workflow`, `build_stall_scaffolding`):**
-   Binds analysed OCR/document facts into unfilled workflow slots and provides progressive field examples and officer escalation chips when `failed_attempts >= 1`.
-7. **Pillar 7 — Cross-Channel Resume Token (`generate_resume_code`):**
-   Emits a deterministic, PII-free token (`URA-<FLOW>-S<N>-<HASH>`) rendered in `WorkflowStepper.tsx` across all 5 locales (`en`, `lg`, `sw`, `nyn`, `ach`).
+   Binds analysed OCR/document facts into unfilled workflow slots and provides progressive field examples and 1-tap helper/officer escalation chips in `WorkflowStepper.tsx` when `failed_attempts >= 1`.
+7. **Pillar 7 — Cross-Channel Resume Token (`generate_resume_code`, `parse_resume_code`):**
+   Emits a deterministic, PII-free token (`URA-<FLOW>-S<N>-<HASH>`) rendered in `WorkflowStepper.tsx` across all 5 locales (`en`, `lg`, `sw`, `nyn`, `ach`) and parsed directly in `ChatModel._maybe_handle_workflow()` so pasting a resume token resumes or launches the target workflow without triggering slot validation errors.
 
 ## Consequences
 

@@ -200,6 +200,9 @@ export const ach: Partial<Dictionary> = {
   'workflow.journeyGpsPaused': 'Ocung pi lapeny — rwom ma kikano',
   'workflow.scaffoldingHint': 'Kony pi kabedo man: {hint}',
   'workflow.stepUpAuth': 'Donyo i Akawunti me URA (lagam {count} kikano)',
+  'objective.cardTitle': 'Yub me URA ma Kinongo',
+  'objective.prerequisites': 'Yub jami magi:',
+  'objective.confirmBtn': 'Cak rwom me tela',
 
   'resource.title': 'Fom, karatac ki kama ngec me URA oa iye',
   'resource.verified': 'Ngec me URA ma kimoko',

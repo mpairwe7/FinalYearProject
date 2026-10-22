@@ -243,6 +243,27 @@ function ChatMessageInner({
           <WorkflowStepper workflow={turn.workflow} onSelectOption={onActionClick} />
         )}
 
+        {isAssistant && turn.objectiveHypothesis && !turn.workflow && (
+          <div className="objective-hypothesis-card" data-testid="objective-hypothesis-card" role="region" aria-label={t('objective.cardTitle')}>
+            <div className="objective-hypothesis-header">{t('objective.cardTitle')}</div>
+            <div className="objective-hypothesis-title">{turn.objectiveHypothesis.title}</div>
+            {turn.objectiveHypothesis.prerequisites_summary && (
+              <div className="objective-hypothesis-prereqs">
+                <strong>{t('objective.prerequisites')}</strong> {turn.objectiveHypothesis.prerequisites_summary}
+              </div>
+            )}
+            {turn.objectiveHypothesis.confirm_action && onActionClick && (
+              <button
+                type="button"
+                className="workflow-option-btn objective-confirm-btn"
+                onClick={() => onActionClick(turn.objectiveHypothesis!.confirm_action)}
+              >
+                {turn.objectiveHypothesis.confirm_action}
+              </button>
+            )}
+          </div>
+        )}
+
         {isAssistant && turn.resources && turn.resources.length > 0 && !turn.workflow && (
           <ResourceCards resources={turn.resources} />
         )}

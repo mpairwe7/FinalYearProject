@@ -200,6 +200,9 @@ export const nyn: Partial<Dictionary> = {
   'workflow.journeyGpsPaused': 'ihuriireho ahabw’ekibuuzo — idaara ryawe ryabiikwa',
   'workflow.scaffoldingHint': 'Obuyambi aha mwanya ogu: {hint}',
   'workflow.stepUpAuth': 'Okutaaha omu Akawunti ya URA (eby’okugarukamu {count} byabiikwa)',
+  'objective.cardTitle': 'Ekigyendererwa kya URA Ekizoirwe',
+  'objective.prerequisites': 'Teekateeka ebi:',
+  'objective.confirmBtn': 'Tandika amadaara g’okuhabura',
 
   'resource.title': 'Foomu, ebipande n’obukomooko obutongore obwa URA',
   'resource.verified': 'Obukomooko obutongore obuhamiibwe',

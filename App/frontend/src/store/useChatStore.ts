@@ -152,6 +152,17 @@ export interface WorkflowState {
   resume_code?: string;
 }
 
+export interface ObjectiveHypothesis {
+  objective_id: string;
+  title: string;
+  domain: string;
+  confidence?: number;
+  workflow_id: string;
+  workflow_name?: string;
+  confirm_action: string;
+  prerequisites_summary?: string;
+}
+
 export interface ChatTurn {
   id: string;
   role: 'user' | 'assistant';
@@ -178,6 +189,8 @@ export interface ChatTurn {
   nextActions?: string[];
   /** Active multi-step workflow status and interactive stepper state */
   workflow?: WorkflowState;
+  /** Proactive objective hypothesis inferred from situational taxpayer challenges */
+  objectiveHypothesis?: ObjectiveHypothesis | null;
   /** Relevant downloadable forms, online portal links, and statutory sources */
   resources?: ContextResource[];
   /** Whether this turn was answered from the offline RAG pipeline */

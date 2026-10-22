@@ -203,6 +203,9 @@ export const sw: Partial<Dictionary> = {
   'workflow.journeyGpsPaused': 'Imesitishwa kwa swali la pembeni — hatua yako imehifadhiwa',
   'workflow.scaffoldingHint': 'Msaada wa sehemu hii: {hint}',
   'workflow.stepUpAuth': 'Ufikiaji wa Akaunti na Tovuti (majibu {count} yamehifadhiwa)',
+  'objective.cardTitle': 'Lengo la URA Lililotambuliwa',
+  'objective.prerequisites': 'Andaa vifuatavyo:',
+  'objective.confirmBtn': 'Anza mwongozo wa hatua kwa hatua',
 
   'resource.title': 'Fomu, vielelezo na vyanzo rasmi vya URA',
   'resource.verified': 'Vyanzo rasmi vilivyothibitishwa',
