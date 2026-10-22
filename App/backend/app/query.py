@@ -899,7 +899,9 @@ def rewrite_with_history(
     # 0. Fast LLM Contextual Rewriter (Master Brain)
     llm_rewritten = _llm_rewrite_query(q, normalized_history)
     if llm_rewritten:
-        logger.debug("Query rewritten by LLM contextual rewriter: %s -> %s", q, llm_rewritten)
+        logger.debug(
+            "Query rewritten by LLM contextual rewriter (query_length=%d -> %d)", len(q), len(llm_rewritten)
+        )
         return llm_rewritten
 
     last_turn = normalized_history[-1]

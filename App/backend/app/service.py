@@ -4280,8 +4280,8 @@ def _simple_search(
         vernacular_hits = _vernacular_pass(query, match_query, locale)
         if vernacular_hits:
             logger.info(
-                "Direct native FAQ hit (%s): %r, %d hit(s)",
-                locale, query[:60], len(vernacular_hits),
+                "Direct native FAQ hit (%s, query_length=%d): %d hit(s)",
+                locale, len(query), len(vernacular_hits),
             )
             return vernacular_hits
 
@@ -4324,9 +4324,11 @@ def _simple_search(
     # translation still fails it.
     rescued = _one_pass(english, english)
     if rescued:
+        # Lengths, not text: the question may carry a salary or a name that
+        # the PII log filter's patterns do not catch.
         logger.info(
-            "Retrieval rescued by translation (%s -> en): %r -> %r, %d hit(s)",
-            locale, query[:60], english[:60], len(rescued),
+            "Retrieval rescued by translation (%s -> en, query_length=%d -> %d): %d hit(s)",
+            locale, len(query), len(english), len(rescued),
         )
         return rescued
     return _judge_rescue(english, faq_index, top_k) or rescued

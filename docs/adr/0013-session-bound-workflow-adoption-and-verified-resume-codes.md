@@ -76,4 +76,5 @@ Not exploitable, but worth recording: a client could in principle send a derived
 
 **Confirmation.**
 - `tests/agents/test_conversation_state_owner_binding.py` drives `ChatModel.generate`, so the wiring is tested, not only the helpers. 11 of its 12 cases fail on the pre-change code. The twelfth, a signed-in stranger asking about the salary, passes there too, because that key already carried the user id.
+- Driving `ChatModel.generate` with a salary-bearing question also exposed six log statements (`premise_guard.check_false_premise`, `query.rewrite_with_history`, `HybridRetriever.search_with_translation` ×2, and `service._simple_search` ×2) where raw question or translated-question text reached the logger (CodeQL `py/clear-text-logging-sensitive-data`, alerts #2623–#2630); the regex PII filter does not catch a stated salary or name, so those calls now log `query_length` instead of the question text.
 - Re-run live through `/v1/chat`: the owner's next turn keeps the salary and the VAT follow-up, and strangers get neither.
