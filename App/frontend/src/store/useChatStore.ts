@@ -59,6 +59,72 @@ export interface WorkflowStepSummary {
   resources?: ContextResource[];
 }
 
+export interface WorkflowPrerequisiteItem {
+  id: string;
+  label: string;
+  status: 'satisfied' | 'missing' | 'pending' | string;
+  slot?: string;
+  remediation_workflow?: string;
+  remediation_action?: string;
+}
+
+export interface WorkflowFormDraftField {
+  box: string;
+  label: string;
+  slot: string;
+  status: 'filled' | 'pending' | 'attention_needed' | string;
+  display_value: string;
+  masked?: boolean;
+}
+
+export interface WorkflowFormDraft {
+  protocol?: string;
+  surface_id?: string;
+  form_code: string;
+  title: string;
+  completion_pct: number;
+  filled_count?: number;
+  total_fields?: number;
+  ready_for_portal?: boolean;
+  fields: WorkflowFormDraftField[];
+}
+
+export interface WorkflowJourneyGps {
+  workflow_id: string;
+  active_goal: string;
+  step_index: number;
+  total_steps: number;
+  completion_pct: number;
+  is_paused_for_tangent?: boolean;
+  tangent_count?: number;
+  parked_step_prompt?: string;
+  resume_action?: string;
+  resume_code?: string;
+}
+
+export interface WorkflowScaffolding {
+  step_id?: string;
+  slot?: string;
+  failed_attempts: number;
+  level?: string;
+  hint: string;
+  examples?: string[];
+  helper_actions?: string[];
+}
+
+export interface WorkflowStepUpAuth {
+  required: boolean;
+  mode: string;
+  reason: string;
+  login_url?: string;
+  register_workflow_id?: string;
+  register_action?: string;
+  remediation_workflow_id?: string;
+  remediation_action?: string;
+  preserves_slots?: boolean;
+  preserved_slot_count?: number;
+}
+
 export interface WorkflowState {
   id: string;
   name: string;
@@ -78,6 +144,12 @@ export interface WorkflowState {
   masked_slots?: string[];
   pending_slot?: string;
   completed?: boolean;
+  prerequisites?: WorkflowPrerequisiteItem[];
+  form_draft?: WorkflowFormDraft;
+  journey_gps?: WorkflowJourneyGps;
+  scaffolding?: WorkflowScaffolding | null;
+  step_up_auth?: WorkflowStepUpAuth | null;
+  resume_code?: string;
 }
 
 export interface ChatTurn {

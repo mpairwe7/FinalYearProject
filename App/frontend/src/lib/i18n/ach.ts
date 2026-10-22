@@ -194,6 +194,12 @@ export const ach: Partial<Dictionary> = {
   'workflow.openPortal': 'Yab kabedo me URA: {label}',
   'workflow.openPortalDefault': 'Yab kabedo me URA ↗',
   'workflow.cancel': 'Juk yoo',
+  'workflow.prerequisites': 'Jami ma mite ma peya icako',
+  'workflow.formDraft': 'Yub me Fom ({code} · {pct}%)',
+  'workflow.resumeCode': 'Namba me mede: {code}',
+  'workflow.journeyGpsPaused': 'Ocung pi lapeny — rwom ma kikano',
+  'workflow.scaffoldingHint': 'Kony pi kabedo man: {hint}',
+  'workflow.stepUpAuth': 'Donyo i Akawunti me URA (lagam {count} kikano)',
 
   'resource.title': 'Fom, karatac ki kama ngec me URA oa iye',
   'resource.verified': 'Ngec me URA ma kimoko',

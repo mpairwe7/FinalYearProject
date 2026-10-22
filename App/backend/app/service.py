@@ -2987,6 +2987,7 @@ def _metadata_payload(result: dict[str, Any], *, include_short_circuit: bool) ->
         "ticket_id": result.get("ticket_id", ""),
         "resources": result.get("resources", []),
         "discrepancy_report": result.get("discrepancy_report"),
+        "objective_hypothesis": result.get("objective_hypothesis"),
     }
     if include_short_circuit:
         payload.update(
@@ -4754,7 +4755,9 @@ class ChatModel:
         fields describe *turn* when the flow has just advanced, else the step
         the session is parked on; a cancelled flow gets no stepper at all.
         """
-        filled_slots = [k for k in session.slots if session.slots.get(k) not in ("", None)]
+        filled_slots = [
+            k for k in session.slots if not k.startswith("_") and session.slots.get(k) not in ("", None)
+        ]
         masked_slots = sorted(set(filled_slots) & _WORKFLOW_SENSITIVE_SLOTS)
         visible_slots = sorted(set(filled_slots) - _WORKFLOW_SENSITIVE_SLOTS)
         view: dict[str, Any] = {
@@ -4772,6 +4775,15 @@ class ChatModel:
 
         stepper = turn if turn is not None else WorkflowRegistry.current_turn(session)
         if stepper is not None:
+            from .workflows.journey_copilot import build_form_draft_surface
+
+            form_draft = build_form_draft_surface(
+                session.workflow_id,
+                name,
+                session.slots,
+                stepper.all_steps,
+                sensitive_slots=_WORKFLOW_SENSITIVE_SLOTS,
+            )
             view.update(
                 {
                     "step_index": stepper.step_index,
@@ -4784,6 +4796,12 @@ class ChatModel:
                     "all_steps": stepper.all_steps,
                     # Only what the step declares; see resources_for_turn.
                     "resources": stepper.resources,
+                    "prerequisites": stepper.prerequisites,
+                    "form_draft": form_draft,
+                    "journey_gps": stepper.journey_gps,
+                    "scaffolding": stepper.scaffolding,
+                    "step_up_auth": stepper.step_up_auth,
+                    "resume_code": stepper.resume_code,
                 }
             )
         return view

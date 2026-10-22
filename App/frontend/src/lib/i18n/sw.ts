@@ -197,6 +197,12 @@ export const sw: Partial<Dictionary> = {
   'workflow.openPortal': 'Fungua tovuti rasmi: {label}',
   'workflow.openPortalDefault': 'Fungua tovuti ya URA ↗',
   'workflow.cancel': 'Ghairi mwongozo',
+  'workflow.prerequisites': 'Mahitaji ya Awali na Orodha ya Utayari',
+  'workflow.formDraft': 'Mpangilio wa Fomu ({code} · {pct}%)',
+  'workflow.resumeCode': 'Msimbo wa kuendelea: {code}',
+  'workflow.journeyGpsPaused': 'Imesitishwa kwa swali la pembeni — hatua yako imehifadhiwa',
+  'workflow.scaffoldingHint': 'Msaada wa sehemu hii: {hint}',
+  'workflow.stepUpAuth': 'Ufikiaji wa Akaunti na Tovuti (majibu {count} yamehifadhiwa)',
 
   'resource.title': 'Fomu, vielelezo na vyanzo rasmi vya URA',
   'resource.verified': 'Vyanzo rasmi vilivyothibitishwa',

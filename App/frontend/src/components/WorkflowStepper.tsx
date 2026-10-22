@@ -34,11 +34,47 @@ function WorkflowStepperInner({ workflow, onSelectOption }: WorkflowStepperProps
               {t('workflow.step', { current: currentIdx, total })}
             </span>
           )}
+          {workflow.resume_code && (
+            <span className="workflow-resume-pill" data-testid="workflow-resume-code">
+              {t('workflow.resumeCode', { code: workflow.resume_code })}
+            </span>
+          )}
           {isCompleted && (
             <span className="workflow-status-pill is-complete">{t('workflow.completed')}</span>
           )}
         </div>
       </div>
+
+      {workflow.journey_gps?.is_paused_for_tangent && (
+        <div className="workflow-journey-gps-banner" data-testid="workflow-journey-gps">
+          <span>{t('workflow.journeyGpsPaused')}</span>
+        </div>
+      )}
+
+      {workflow.prerequisites && workflow.prerequisites.length > 0 && (
+        <div className="workflow-prerequisites-box" data-testid="workflow-prerequisites">
+          <div className="workflow-prerequisites-title">{t('workflow.prerequisites')}</div>
+          <ul className="workflow-prerequisites-list">
+            {workflow.prerequisites.map((pr) => (
+              <li key={pr.id} className={`workflow-prereq-item is-${pr.status}`}>
+                <span aria-hidden="true">
+                  {pr.status === 'satisfied' ? '✓' : pr.status === 'missing' ? '⚠' : '○'}
+                </span>{' '}
+                <span>{pr.label}</span>
+                {pr.status === 'missing' && pr.remediation_action && onSelectOption && (
+                  <button
+                    type="button"
+                    className="workflow-prereq-remediate-btn"
+                    onClick={() => onSelectOption(pr.remediation_action!)}
+                  >
+                    {pr.remediation_action}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {workflow.all_steps && workflow.all_steps.length > 0 && (
         <div className="workflow-step-track" role="list" aria-label={t('workflow.stepProgress')}>
@@ -69,6 +105,41 @@ function WorkflowStepperInner({ workflow, onSelectOption }: WorkflowStepperProps
           <span className="workflow-step-heading">
             {t('workflow.currentStep', { title: workflow.step_title })}
           </span>
+        </div>
+      )}
+
+      {isActive && workflow.scaffolding?.hint && (
+        <div className="workflow-scaffolding-banner" data-testid="workflow-scaffolding">
+          <span>{t('workflow.scaffoldingHint', { hint: workflow.scaffolding.hint })}</span>
+        </div>
+      )}
+
+      {workflow.form_draft && workflow.form_draft.fields && workflow.form_draft.fields.length > 0 && (
+        <div className="workflow-form-draft" data-testid="workflow-form-draft">
+          <div className="workflow-form-draft-header">
+            {t('workflow.formDraft', {
+              code: workflow.form_draft.form_code,
+              pct: workflow.form_draft.completion_pct,
+            })}
+          </div>
+          <div className="workflow-form-draft-grid">
+            {workflow.form_draft.fields.map((fld) => (
+              <div key={fld.slot} className={`workflow-form-field is-${fld.status}`}>
+                <span className="workflow-form-box">{fld.box}</span>
+                <span className="workflow-form-label">{fld.label}</span>
+                <span className="workflow-form-val">{fld.display_value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {workflow.step_up_auth && (
+        <div className="workflow-step-up-auth" data-testid="workflow-step-up-auth">
+          <div className="workflow-step-up-title">
+            {t('workflow.stepUpAuth', { count: workflow.step_up_auth.preserved_slot_count ?? 0 })}
+          </div>
+          <p className="workflow-step-up-reason">{workflow.step_up_auth.reason}</p>
         </div>
       )}
 
