@@ -367,6 +367,9 @@ const MAX_TURNS = 200;
 const MAX_SESSIONS = 50;
 const CHAT_STORAGE_KEY = 'ura-chat-store';
 const CHAT_STORAGE_VERSION = 2;
+// Mirrors GUIDE_PREFIX in App/backend/app/workflows/journey_copilot.py.
+const OBJECTIVE_CONFIRM_PREFIX = 'Guide me step by step through ';
+const MAX_OBJECTIVE_ACTION_CHARS = 200;
 
 /** Derive a short title from the first user message. */
 function deriveTitle(turns: ChatTurn[]): string {
@@ -454,18 +457,29 @@ function sanitizeTurn(value: unknown): ChatTurn | null {
     turn.workflow = value.workflow as unknown as WorkflowState;
   }
   const objHyp = value.objectiveHypothesis ?? (value as Record<string, unknown>).objective_hypothesis;
+  // The card's button sends confirm_action as the taxpayer's next message in
+  // one tap, so restored state may only offer the guided-start action the
+  // server issues — never arbitrary text planted in storage.
   if (
     isRecord(objHyp) &&
     typeof objHyp.objective_id === 'string' &&
     typeof objHyp.title === 'string' &&
     typeof objHyp.workflow_id === 'string' &&
-    typeof objHyp.confirm_action === 'string'
+    typeof objHyp.confirm_action === 'string' &&
+    objHyp.confirm_action.startsWith(OBJECTIVE_CONFIRM_PREFIX) &&
+    objHyp.confirm_action.length <= MAX_OBJECTIVE_ACTION_CHARS
   ) {
     turn.objectiveHypothesis = {
       objective_id: objHyp.objective_id,
       title: objHyp.title,
       domain: typeof objHyp.domain === 'string' ? objHyp.domain : 'general',
-      confidence: typeof objHyp.confidence === 'number' ? objHyp.confidence : undefined,
+      confidence:
+        typeof objHyp.confidence === 'number' &&
+        Number.isFinite(objHyp.confidence) &&
+        objHyp.confidence >= 0 &&
+        objHyp.confidence <= 1
+          ? objHyp.confidence
+          : undefined,
       workflow_id: objHyp.workflow_id,
       workflow_name: typeof objHyp.workflow_name === 'string' ? objHyp.workflow_name : undefined,
       confirm_action: objHyp.confirm_action,
