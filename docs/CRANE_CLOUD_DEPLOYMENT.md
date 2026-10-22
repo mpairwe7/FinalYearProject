@@ -87,8 +87,8 @@ sibling image from 5.5 GB to 1.2 GB). Three stages:
 | Stage | Base | Purpose |
 |---|---|---|
 | 1. Python builder | `python:3.11-slim-bookworm` | Install backend deps into `/opt/venv`, aggressive cleanup (`__pycache__`, `tests/`, `*.dist-info`) |
-| 2. Frontend builder | `oven/bun:1.3.12-slim` | `bun install --frozen-lockfile && bun run build` (Next.js standalone output) |
-| 3. Runtime | `python:3.11-slim-bookworm` | Add nginx + supervisord + Node 20, copy `/opt/venv` and Next.js `.next/standalone`, bake BM25 state and knowledge base into `/app` |
+| 2. Frontend builder | `node:24-bookworm-slim` + Bun 1.4.3 binary (both digest-pinned; versions from `App/frontend/.nvmrc` / `.bun-version`) | `bun install --frozen-lockfile && bun run build` (Next.js standalone output) |
+| 3. Runtime | `python:3.11-slim-bookworm` | Add nginx + supervisord, copy the Node 24 binary from stage 2, `/opt/venv` and Next.js `.next/standalone`, bake BM25 state and knowledge base into `/app` |
 
 Build the image locally:
 

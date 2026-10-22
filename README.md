@@ -15,7 +15,7 @@ This repository is a customer-service conversation AI for Uganda Revenue Authori
 | [API Reference](docs/API_REFERENCE.md) | REST API endpoints (sync + SSE streaming) |
 | [RAG Architecture](docs/RAG_ARCHITECTURE.md) | 12-stage production RAG + Agentic + Speech pipeline design |
 | [Agent Architecture](docs/AGENT_ARCHITECTURE.md) | Supervisor routing, 72 MCP tools across 18 namespaces, 21 guided workflows, and 85-flag registry |
-| [Architecture Decision Records (MADR 4.0)](docs/adr/README.md) | Canonical ADR catalog (`ADR-0001`–`ADR-0011`) governing monorepo boundaries, 5-locale stack, MCP security, sovereign reasoning, live web research (`ADR-0008`), 10-MDA statutory corpus & queue-reduction tools (`ADR-0009`), and Journey Copilot (`ADR-0010`) |
+| [Architecture Decision Records (MADR 4.0)](docs/adr/README.md) | Canonical ADR catalog (`ADR-0001`–`ADR-0013`) governing monorepo boundaries, 5-locale stack, MCP security, sovereign reasoning, live web research (`ADR-0008`), 10-MDA statutory corpus & queue-reduction tools (`ADR-0009`), Journey Copilot (`ADR-0010`, `ADR-0013`), CI supply chain (`ADR-0011`), and storage parity (`ADR-0012`) |
 | [Model Card](docs/MODEL_CARD.md) | EU AI Act Art. 53 & ISO/IEC 42001 model card (`Sunbird/Sunflower-Qwen3.5-9B` + `Qwen/Qwen3.8-27B-FP8`, 186 statutory/MDA PDFs → 7,251 Qdrant hybrid vectors) |
 | [Deployment Guide](docs/DEPLOYMENT.md) | Production deployment, TLS, scaling, SLOs |
 | [Monitoring & Observability](docs/MONITORING.md) | OpenTelemetry, Prometheus, alerting |
