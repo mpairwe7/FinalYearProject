@@ -39,7 +39,7 @@ permissions:
   contents: read
 
 env:
-  NODE_VERSION: "20"
+  NODE_VERSION: "24"
   DEFAULT_URL: "https://ura-chatbot-6318a1b5.renu-01.cranecloud.io"
 
 jobs:
@@ -59,7 +59,7 @@ jobs:
             config: ./App/frontend/lighthouserc.live.desktop.json
     steps:
       - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 

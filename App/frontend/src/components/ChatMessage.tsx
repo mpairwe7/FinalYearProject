@@ -256,9 +256,10 @@ function ChatMessageInner({
               <button
                 type="button"
                 className="workflow-option-btn objective-confirm-btn"
+                title={turn.objectiveHypothesis.confirm_action}
                 onClick={() => onActionClick(turn.objectiveHypothesis!.confirm_action)}
               >
-                {turn.objectiveHypothesis.confirm_action}
+                {t('objective.confirmBtn')}
               </button>
             )}
           </div>
@@ -642,6 +643,9 @@ const ChatMessage = memo(ChatMessageInner, (prev, next) => {
     prev.turn.officerHours?.nextOnDuty === next.turn.officerHours?.nextOnDuty &&
     prev.turn.workflow?.status === next.turn.workflow?.status &&
     prev.turn.workflow?.step_index === next.turn.workflow?.step_index &&
+    prev.turn.workflow?.resume_code === next.turn.workflow?.resume_code &&
+    prev.turn.workflow?.scaffolding?.failed_attempts === next.turn.workflow?.scaffolding?.failed_attempts &&
+    prev.turn.objectiveHypothesis?.objective_id === next.turn.objectiveHypothesis?.objective_id &&
     actionsSignature(prev.turn.nextActions) === actionsSignature(next.turn.nextActions) &&
     connectorSignature(prev.turn) === connectorSignature(next.turn) &&
     prev.onActionClick === next.onActionClick &&

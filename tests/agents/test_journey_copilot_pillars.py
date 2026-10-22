@@ -58,8 +58,8 @@ def test_pillar1_prerequisite_dag_evaluates_pending_satisfied_and_missing():
     assert by_id["active_tin"]["status"] == "satisfied"
     assert by_id["supporting_schedules"]["status"] == "satisfied"
     assert by_id["portal_credentials"]["status"] == "missing"
-    assert by_id["portal_credentials"]["remediation_workflow"] == "tin_procedure_help"
-    assert "Guide me step by step through" in by_id["portal_credentials"]["remediation_action"]
+    assert by_id["portal_credentials"]["remediation_workflow"] == "tin_registration"
+    assert by_id["portal_credentials"]["remediation_action"] == "Guide me step by step through TIN Registration Guide"
 
 
 def test_pillar2_declarative_a2ui_form_draft_masks_sensitive_slots_and_never_echoes_raw_values():
@@ -332,4 +332,128 @@ def test_e2e_resume_code_parsing_and_localization_parity():
     )
     assert loc_lg is not None
     assert loc_lg["journey_gps"]["active_goal"] == loc_lg["name"]
+
+
+def test_qa_audit_subworkflow_cancel_returns_to_parent_and_anon_to_auth_migration():
+    """Verify QA-1 (anon->auth state key migration), QA-2 (sub-workflow cancel pop), QA-3 (cross-flow resume code), QA-4 (YAML slot alignment), and QA-6 (Node.js 24 CI pins)."""
+    import uuid
+
+    from app import database
+    from app.service import _ACTIVE_CONVERSATION_STATE, _ACTIVE_TENANT_ID
+
+    database.init_db()
+    model = ChatModel()
+    thread_id = f"conv-qa-{uuid.uuid4().hex[:10]}"
+
+    # QA-1: Start return_filing under anonymous state key (user_id=None)
+    anon_state = database.conversation_state_key(thread_id, user_id=None, tenant_id="default")
+    tok_state = _ACTIVE_CONVERSATION_STATE.set(anon_state)
+    tok_tenant = _ACTIVE_TENANT_ID.set("default")
+    try:
+        r1 = model._maybe_handle_workflow(
+            message="Help me file my return",
+            rewritten="Help me file my return",
+            thread_id=thread_id,
+            locale="en",
+            user_id=None,
+        )
+        assert r1 is not None
+        assert r1["workflow"]["id"] == "return_filing"
+
+        r2 = model._maybe_handle_workflow(
+            message="company",
+            rewritten="company",
+            thread_id=thread_id,
+            locale="en",
+            user_id=None,
+        )
+        assert r2 is not None
+        assert r2["workflow"]["step_index"] == 2
+    finally:
+        _ACTIVE_CONVERSATION_STATE.reset(tok_state)
+        _ACTIVE_TENANT_ID.reset(tok_tenant)
+
+    # Now user authenticates (user_id="usr-qa-99") -> state_thread_id changes to auth_state!
+    auth_state = database.conversation_state_key(thread_id, user_id="usr-qa-99", tenant_id="default")
+    assert auth_state != anon_state
+    tok_state2 = _ACTIVE_CONVERSATION_STATE.set(auth_state)
+    tok_tenant2 = _ACTIVE_TENANT_ID.set("default")
+    try:
+        # Push prerequisite sub-workflow tin_registration while authenticated
+        r3 = model._maybe_handle_workflow(
+            message="Guide me step by step through TIN Registration Guide",
+            rewritten="Guide me step by step through TIN Registration Guide",
+            thread_id=thread_id,
+            locale="en",
+            user_id="usr-qa-99",
+        )
+        assert r3 is not None
+        # Adopted anonymous session (where taxpayer_type='company' was already answered)
+        # and pushed tin_registration onto goal_stack!
+        assert r3["workflow"]["id"] == "tin_registration"
+        assert r3["workflow"]["step_id"] == "collect_documents_ready"
+
+        # QA-2: Cancel the sub-workflow -> must pop back to parent return_filing (Step 2) instead of cancelling parent!
+        r4 = model._maybe_handle_workflow(
+            message="cancel",
+            rewritten="cancel",
+            thread_id=thread_id,
+            locale="en",
+            user_id="usr-qa-99",
+        )
+        assert r4 is not None
+        assert "Returning to **Return Filing**" in r4["reply"]
+        assert r4["workflow"]["id"] == "return_filing"
+        assert r4["workflow"]["status"] == "active"
+        assert r4["workflow"]["step_id"] == "collect_tax_type"
+
+        # QA-3: Pasting a resume code for a different workflow (URA-PAY-S1-1234) while return_filing is active
+        # switches cleanly to payment_assistance instead of failing return_filing's enum validator!
+        r5 = model._maybe_handle_workflow(
+            message="URA-PAY-S1-1234",
+            rewritten="URA-PAY-S1-1234",
+            thread_id=thread_id,
+            locale="en",
+            user_id="usr-qa-99",
+        )
+        assert r5 is not None
+        assert r5["workflow"]["id"] == "payment_assistance"
+    finally:
+        _ACTIVE_CONVERSATION_STATE.reset(tok_state2)
+        _ACTIVE_TENANT_ID.reset(tok_tenant2)
+
+    # QA-4: Verify motor_vehicle_registration and mda_ntr_resolution prerequisites bind to exact YAML slots
+    mvr_prereqs = evaluate_prerequisites(
+        "motor_vehicle_registration",
+        {"registration_kind": "first registration", "has_tin": False},
+    )
+    mvr_by_id = {p["id"]: p for p in mvr_prereqs}
+    assert mvr_by_id["vehicle_registration_kind"]["status"] == "satisfied"
+    assert mvr_by_id["vehicle_owner_tin"]["status"] == "missing"
+
+    mda_prereqs = evaluate_prerequisites(
+        "mda_ntr_resolution",
+        {"mda_service": "passport or work permit", "has_prn": True},
+    )
+    mda_by_id = {p["id"]: p for p in mda_prereqs}
+    assert mda_by_id["mda_service_selected"]["status"] == "satisfied"
+    assert mda_by_id["ntr_prn_available"]["status"] == "satisfied"
+
+    # QA-6: Verify Node.js 24 upgrade across .github/workflows/*.yml
+    workflows_dir = FLOWS_DIR.parents[4] / ".github" / "workflows"
+    deprecated_node20_pins = (
+        "setup-python@a26af69b",
+        "download-artifact@d3f86a10",
+        "build-push-action@4f58ea79",
+        "checkout@34e11487",
+        "cache@0057852b",
+        "github-script@f28e40c7",
+    )
+    for wf_file in sorted(workflows_dir.glob("*.yml")):
+        content = wf_file.read_text(encoding="utf-8")
+        for old_pin in deprecated_node20_pins:
+            assert old_pin not in content, f"{wf_file.name} still references Node 20 action {old_pin}"
+        assert "NODE_VERSION: '20'" not in content
+        assert 'NODE_VERSION: "20"' not in content
+
 
