@@ -500,52 +500,86 @@ _OBJECTIVE_PATTERNS: tuple[tuple[re.Pattern[str], dict[str, str]], ...] = (
 
 _RESUME_CODE_RE = re.compile(r"\bURA-([A-Z0-9]{2,4})-S(\d{1,2})-([A-F0-9]{4})\b", re.IGNORECASE)
 
-_RESUME_PREFIX_TO_WORKFLOW: dict[str, str] = {
-    "RET": "return_filing",
-    "TIN": "tin_registration",
-    "PAY": "payment_assistance",
-    "TAX": "tax_clearance",
-    "CUS": "customs_clearance",
-    "OBJ": "objection_or_dispute",
-    "MOT": "motor_vehicle_registration",
-    "AUD": "audit_invoice_compliance",
-    "MDA": "mda_ntr_resolution",
-    "BWI": "bwims_warehouse_guidance",
-    "NEW": "new_taxpayer_and_relief",
+#: One unique, stable resume-code prefix per workflow. Explicit rather than
+#: derived from the id: the first three letters collide (``tin_procedure_help``
+#: and ``tin_registration`` both gave ``TIN``; all nine calculators gave
+#: ``CAL``, which no workflow mapped back to). The first eleven are the codes
+#: already issued and must not change.
+RESUME_CODE_PREFIXES: dict[str, str] = {
+    "return_filing": "RET",
+    "tin_registration": "TIN",
+    "payment_assistance": "PAY",
+    "tax_clearance": "TAX",
+    "customs_clearance": "CUS",
+    "objection_or_dispute": "OBJ",
+    "motor_vehicle_registration": "MOT",
+    "audit_invoice_compliance": "AUD",
+    "mda_ntr_resolution": "MDA",
+    "bwims_warehouse_guidance": "BWI",
+    "new_taxpayer_and_relief": "NEW",
+    "tin_procedure_help": "TPH",
+    "calc_paye": "PYE",
+    "calc_vat": "VAT",
+    "calc_vat_registration": "VRG",
+    "calc_withholding": "WHT",
+    "calc_rental_tax": "RNT",
+    "calc_corporation_tax": "CIT",
+    "calc_capital_gains": "CGT",
+    "calc_customs_duty": "CDE",
+    "calc_excise_duty": "EXD",
 }
 
+_RESUME_PREFIX_TO_WORKFLOW: dict[str, str] = {code: wf for wf, code in RESUME_CODE_PREFIXES.items()}
 
-def generate_resume_code(workflow_id: str, step_idx: int, slots: Mapping[str, Any]) -> str:
-    """Return a deterministic, PII-free short token to resume a workflow across channels (Pillar 7).
 
-    Hashes only the workflow id, step index, and *names* (never values) of filled
-    slots so no personal or financial data can ever be inferred from the token.
+def _resume_check(prefix: str, step_number: int) -> str:
+    """Four-hex check over the visible part of a resume code.
+
+    A typo or a made-up code-shaped string fails it, so it cannot pivot or
+    cancel the flow a taxpayer is in. It is an integrity check, not an
+    authenticator: a code carries no authority beyond naming a public
+    workflow, so it needs no secret and holds no slot names or values.
     """
-    prefix = re.sub(r"[^a-zA-Z0-9]", "", (workflow_id or "GEN")[:3]).upper() or "GEN"
-    filled_keys = ",".join(sorted(k for k in slots if not k.startswith("_") and slots.get(k) not in ("", None)))
-    digest = hashlib.sha256(f"{workflow_id}:{step_idx}:{filled_keys}".encode()).hexdigest()[:4].upper()
-    return f"URA-{prefix}-S{step_idx + 1}-{digest}"
+    return hashlib.sha256(f"ura-resume:{prefix}:{step_number}".encode()).hexdigest()[:4].upper()
+
+
+def generate_resume_code(workflow_id: str, step_idx: int) -> str:
+    """Return the cross-channel resume token for *workflow_id* at *step_idx* (Pillar 7).
+
+    Empty for a workflow without a registered prefix, so the UI shows no code
+    rather than one that cannot be parsed back.
+    """
+    prefix = RESUME_CODE_PREFIXES.get(workflow_id or "")
+    if prefix is None:
+        return ""
+    step_number = max(0, int(step_idx)) + 1
+    return f"URA-{prefix}-S{step_number}-{_resume_check(prefix, step_number)}"
 
 
 def parse_resume_code(text: str) -> dict[str, Any] | None:
-    """Parse a cross-channel resume token (e.g. ``URA-RET-S2-8A4F``) from *text* (Pillar 7)."""
+    """Parse and verify a cross-channel resume token (e.g. ``URA-RET-S2-…``) in *text* (Pillar 7).
+
+    Returns ``None`` for an unknown prefix or a check that does not match, so
+    only codes this service issued are routed.
+    """
     if not text:
         return None
-    m = _RESUME_CODE_RE.search(text)
-    if not m:
-        return None
-    prefix = m.group(1).upper()
-    step_num = max(1, int(m.group(2)))
-    digest = m.group(3).upper()
-    workflow_id = _RESUME_PREFIX_TO_WORKFLOW.get(prefix, "")
-    return {
-        "code": f"URA-{prefix}-S{step_num}-{digest}",
-        "prefix": prefix,
-        "workflow_id": workflow_id,
-        "step_number": step_num,
-        "step_idx": step_num - 1,
-        "digest": digest,
-    }
+    for m in _RESUME_CODE_RE.finditer(text):
+        prefix = m.group(1).upper()
+        step_num = int(m.group(2))
+        digest = m.group(3).upper()
+        workflow_id = _RESUME_PREFIX_TO_WORKFLOW.get(prefix)
+        if workflow_id is None or step_num < 1 or digest != _resume_check(prefix, step_num):
+            continue
+        return {
+            "code": f"URA-{prefix}-S{step_num}-{digest}",
+            "prefix": prefix,
+            "workflow_id": workflow_id,
+            "step_number": step_num,
+            "step_idx": step_num - 1,
+            "digest": digest,
+        }
+    return None
 
 
 def is_prerequisite_remediation(parent_workflow_id: str, target_workflow_id: str) -> bool:
@@ -933,7 +967,7 @@ def build_journey_gps(
         "tangent_count": int(session.slots.get("_tangent_count") or 0),
         "parked_step_prompt": parked_prompt,
         "resume_action": f"Continue {wf.name}",
-        "resume_code": generate_resume_code(wf.id, session.current_step_idx, session.slots),
+        "resume_code": generate_resume_code(wf.id, session.current_step_idx),
         "parent_goals": [
             {"workflow_id": g.get("workflow_id", ""), "step_idx": g.get("step_idx", 0)}
             for g in getattr(session, "goal_stack", ())

@@ -224,7 +224,7 @@ def test_pillar7_resume_code_and_chat_model_workflow_view_integration():
     WorkflowRegistry.advance(session, "")
     turn2 = WorkflowRegistry.advance(session, "individual")
 
-    code = generate_resume_code("return_filing", session.current_step_idx, session.slots)
+    code = generate_resume_code("return_filing", session.current_step_idx)
     assert code.startswith("URA-RET-S2-")
     assert "individual" not in code
 
@@ -311,15 +311,16 @@ def test_e2e_resume_code_parsing_and_localization_parity():
     model = ChatModel()
     thread_id = f"conv-resume-{uuid.uuid4().hex[:10]}"
 
-    parsed = parse_resume_code("Please resume URA-RET-S2-8A4F")
+    parsed = parse_resume_code(f"Please resume {generate_resume_code('return_filing', 1)}")
     assert parsed is not None
     assert parsed["workflow_id"] == "return_filing"
     assert parsed["step_number"] == 2
 
     # Starting via resume code on a fresh thread launches the corresponding workflow
+    tin_code = generate_resume_code("tin_registration", 0)
     started = model._maybe_handle_workflow(
-        message="URA-TIN-S1-9F2A",
-        rewritten="URA-TIN-S1-9F2A",
+        message=tin_code,
+        rewritten=tin_code,
         thread_id=thread_id,
         locale="en",
         user_id="usr-elevated-42",
@@ -414,11 +415,12 @@ def test_qa_audit_subworkflow_cancel_returns_to_parent_and_anon_to_auth_migratio
         assert r4["workflow"]["status"] == "active"
         assert r4["workflow"]["step_id"] == "collect_tax_type"
 
-        # QA-3: Pasting a resume code for a different workflow (URA-PAY-S1-1234) while return_filing is active
+        # QA-3: Pasting a resume code for a different workflow while return_filing is active
         # switches cleanly to payment_assistance instead of failing return_filing's enum validator!
+        pay_code = generate_resume_code("payment_assistance", 0)
         r5 = model._maybe_handle_workflow(
-            message="URA-PAY-S1-1234",
-            rewritten="URA-PAY-S1-1234",
+            message=pay_code,
+            rewritten=pay_code,
             thread_id=thread_id,
             locale="en",
             user_id="usr-qa-99",
@@ -621,9 +623,10 @@ def test_post_619_phased_audit_remediations_session_binding_goal_stack_snap_to_f
         assert sub_turn is not None
         assert sub_turn["workflow"]["id"] == "tin_registration"
 
+        parent_code = generate_resume_code("return_filing", 2)
         pop_turn = model._maybe_handle_workflow(
-            message="URA-RET-S3-ABCD",
-            rewritten="URA-RET-S3-ABCD",
+            message=parent_code,
+            rewritten=parent_code,
             thread_id=thread_id,
             locale="en",
             user_id="usr-p1-auth",

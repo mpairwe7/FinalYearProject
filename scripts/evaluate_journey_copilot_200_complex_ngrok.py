@@ -22,6 +22,7 @@ import argparse
 import concurrent.futures
 import json
 import statistics
+import sys
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -29,6 +30,11 @@ from pathlib import Path
 from typing import Any
 
 import requests
+
+# Resume codes carry a verified check, so the scenarios use codes the service
+# itself would issue. journey_copilot imports only the standard library.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "App" / "backend"))
+from app.workflows.journey_copilot import generate_resume_code  # noqa: E402
 
 DEFAULT_NGROK_DOMAIN = "struttingly-nongeological-briella.ngrok-free.dev"
 DEFAULT_BASE = f"https://{DEFAULT_NGROK_DOMAIN}/api"
@@ -511,16 +517,19 @@ def build_200_complex_scenarios() -> list[ComplexScenario]:
     # =========================================================================
     p8 = "Pillar 8: Cross-Channel Resume Codes & Direct Token Routing"
     resume_targets = [
-        ("URA-RET-S1-A1B2", "return_filing", "URA-RET-"),
-        ("URA-TIN-S1-C3D4", "tin_registration", "URA-TIN-"),
-        ("URA-PAY-S1-E5F6", "payment_assistance", "URA-PAY-"),
-        ("URA-TAX-S1-1122", "tax_clearance", "URA-TAX-"),
-        ("URA-CUS-S1-3344", "customs_clearance", "URA-CUS-"),
-        ("URA-OBJ-S1-5566", "objection_or_dispute", "URA-OBJ-"),
-        ("URA-MOT-S1-7788", "motor_vehicle_registration", "URA-MOT-"),
-        ("URA-AUD-S1-9900", "audit_invoice_compliance", "URA-AUD-"),
-        ("URA-MDA-S1-AABB", "mda_ntr_resolution", "URA-MDA-"),
-        ("URA-BWI-S1-CCDD", "bwims_warehouse_guidance", "URA-BWI-"),
+        (generate_resume_code(wf_id, 0), wf_id, generate_resume_code(wf_id, 0).rsplit("-", 2)[0] + "-")
+        for wf_id in (
+            "return_filing",
+            "tin_registration",
+            "payment_assistance",
+            "tax_clearance",
+            "customs_clearance",
+            "objection_or_dispute",
+            "motor_vehicle_registration",
+            "audit_invoice_compliance",
+            "mda_ntr_resolution",
+            "bwims_warehouse_guidance",
+        )
     ]
     for i in range(20):
         sc_num = 141 + i
