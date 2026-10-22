@@ -452,6 +452,26 @@ function sanitizeTurn(value: unknown): ChatTurn | null {
   if (isRecord(value.workflow) && typeof value.workflow.id === 'string') {
     turn.workflow = value.workflow as unknown as WorkflowState;
   }
+  const objHyp = value.objectiveHypothesis ?? (value as Record<string, unknown>).objective_hypothesis;
+  if (
+    isRecord(objHyp) &&
+    typeof objHyp.objective_id === 'string' &&
+    typeof objHyp.title === 'string' &&
+    typeof objHyp.workflow_id === 'string' &&
+    typeof objHyp.confirm_action === 'string'
+  ) {
+    turn.objectiveHypothesis = {
+      objective_id: objHyp.objective_id,
+      title: objHyp.title,
+      domain: typeof objHyp.domain === 'string' ? objHyp.domain : 'general',
+      confidence: typeof objHyp.confidence === 'number' ? objHyp.confidence : undefined,
+      workflow_id: objHyp.workflow_id,
+      workflow_name: typeof objHyp.workflow_name === 'string' ? objHyp.workflow_name : undefined,
+      confirm_action: objHyp.confirm_action,
+      prerequisites_summary:
+        typeof objHyp.prerequisites_summary === 'string' ? objHyp.prerequisites_summary : undefined,
+    };
+  }
   if (Array.isArray(value.resources)) {
     turn.resources = value.resources.filter(isRecord) as unknown as ContextResource[];
   }

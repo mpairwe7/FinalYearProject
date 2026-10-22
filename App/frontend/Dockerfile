@@ -40,7 +40,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN bun run build
 
 # Stage 3: Production runtime (minimal Node.js image)
-# Next.js 16 requires Node.js 20.9+ — use actively-maintained Node.js LTS with latest security patches.
+# October 2026 baseline requires Node.js 24+ — runner uses actively-maintained node:26-bookworm-slim.
 FROM node:26-bookworm-slim AS runner
 WORKDIR /app
 

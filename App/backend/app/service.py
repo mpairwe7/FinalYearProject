@@ -9495,18 +9495,26 @@ class ChatModel:
         inside the Tax Clearance checklist, which tells the taxpayer to do
         exactly that, was validated as the answer to the pending question and
         the filing guide never started. Only an explicit start ("help me file",
-        "guide me", "walk me through", "start") that names another flow counts;
-        a slot answer never does.
+        "guide me", "walk me through", "start") or a cross-channel resume code
+        that names another flow counts; a slot answer never does.
 
         No side effects: the active flow is closed only once the new one has
         actually started (see ``_close_flow_left_for``), so a refused start
         leaves the taxpayer in the flow they were in.
         """
+        from .workflows.journey_copilot import parse_resume_code
+
+        current = str(persisted.get("workflow_id") or "")
+        parsed_resume = parse_resume_code(message) or parse_resume_code(rewritten)
+        if parsed_resume and parsed_resume.get("workflow_id"):
+            resume_target = WorkflowRegistry.get(parsed_resume["workflow_id"])
+            if resume_target is not None and resume_target.id != current:
+                return resume_target
+
         combined = f"{message or ''} {rewritten or ''}"
         if not _EXPLICIT_WORKFLOW_START_RE.search(combined):
             return None
         target = WorkflowRegistry.match_trigger(message) or WorkflowRegistry.match_trigger(rewritten)
-        current = str(persisted.get("workflow_id") or "")
         if target is None or target.id == current:
             return None
         return target
@@ -9541,6 +9549,18 @@ class ChatModel:
         persisted = db.get_workflow_session(state_thread_id, tenant_id=state_tenant_id)
         if not persisted and state_thread_id != thread_id:
             persisted = db.get_workflow_session(thread_id, tenant_id=state_tenant_id)
+        # QA-1: When an anonymous taxpayer elevates to an authenticated session mid-conversation,
+        # _scoped_conversation_state computes a user-scoped state_thread_id while the existing
+        # workflow row lives under the anonymous state key for the same thread_id. Adopt and
+        # migrate that anonymous row (only when unowned) so zero slots are lost across login.
+        migrated_anon_key = ""
+        if not persisted and user_id and thread_id:
+            anon_key = db.conversation_state_key(thread_id, user_id=None, tenant_id=state_tenant_id)
+            if anon_key not in (state_thread_id, thread_id):
+                anon_row = db.get_workflow_session(anon_key, tenant_id=state_tenant_id)
+                if anon_row and not anon_row.get("user_id"):
+                    persisted = anon_row
+                    migrated_anon_key = anon_key
         # Past the conversation's retention the session keeps only its outcome
         # (the answers are blanked), so it is history, not something to resume.
         updated_at = (persisted or {}).get("updated_at")
@@ -9556,6 +9576,10 @@ class ChatModel:
         if persisted and persisted.get("status") == "active":
             session = self._restore_workflow_session(persisted)
             self._apply_personalization_to_workflow(session, personalization, user_id=user_id)
+            if migrated_anon_key:
+                db.complete_workflow_session(
+                    migrated_anon_key, status="completed", tenant_id=state_tenant_id
+                )
             wf = WorkflowRegistry.get(session.workflow_id)
             if wf is None:
                 db.complete_workflow_session(
@@ -9571,11 +9595,57 @@ class ChatModel:
             ):
                 user_input = "resume"
             if user_input.lower() in _WORKFLOW_CANCEL_WORDS:
+                pending = WorkflowRegistry.pending_step(session)
+                self._record_journey(session.workflow_id, "cancelled", pending.id if pending else "")
+                # QA-2: If cancelling a pushed prerequisite sub-workflow, return to the parent
+                # workflow on the goal_stack instead of destroying the parent journey.
+                if (session.goal_stack or session.slots.get("_goal_stack")) and WorkflowRegistry.pop_subworkflow(session):
+                    parent_wf = WorkflowRegistry.get(session.workflow_id)
+                    if parent_wf is not None:
+                        parent_turn, _ = self._advance_workflow(session, "", thread_id, record=False)
+                        parent_prompt = parent_turn.question or f"Let's continue {parent_wf.name}."
+                        reply_text = (
+                            f"I've stopped the {wf.name} sub-workflow. Returning to **{parent_wf.name}** "
+                            f"(Step {parent_turn.step_index} of {parent_turn.total_steps}):\n\n{parent_prompt}"
+                        ).strip()
+                        db.upsert_workflow_session(
+                            state_thread_id,
+                            session.workflow_id,
+                            session.current_step_idx,
+                            session.slots,
+                            status="active",
+                            last_prompt=reply_text,
+                            user_id=user_id or "",
+                            tenant_id=state_tenant_id,
+                        )
+                        workflow = self._workflow_view(
+                            session,
+                            name=parent_wf.name,
+                            status="active",
+                            pending_slot=parent_turn.slot_name,
+                            turn=parent_turn,
+                        )
+                        return {
+                            "reply": reply_text,
+                            "sources": [],
+                            "citations": [],
+                            "faithfulness_score": None,
+                            "retrieval_mode": "workflow",
+                            "model": self.name,
+                            "conversation_id": thread_id,
+                            "locale": locale,
+                            "escalation_required": False,
+                            "escalation_reason": "",
+                            "agent_role": "workflow_guide",
+                            "workflow": workflow,
+                            "next_actions": self._default_next_actions(
+                                agent_role="workflow_guide",
+                                workflow=workflow,
+                            ),
+                        }
                 db.complete_workflow_session(
                     state_thread_id, status="cancelled", tenant_id=state_tenant_id
                 )
-                pending = WorkflowRegistry.pending_step(session)
-                self._record_journey(session.workflow_id, "cancelled", pending.id if pending else "")
                 workflow = self._workflow_view(
                     session,
                     name=wf.name,

@@ -38,6 +38,7 @@ Complete documentation for the URA Chatbot MLOps project.
 | [Multilingual figure fidelity runbook](runbooks/multilingual-figure-fidelity.md) | Figure masking before translation, unprotected retry, decoding parameters per path, and what the localization metrics mean |
 | [Audit trail runbook](runbooks/audit-trail.md) | Separation of duties by role, what the tamper-evident trail records, verifying it, exporting evidence |
 | [Guided-journey probes runbook](runbooks/guided-journey-probes.md) | Live canary for journey routing, guided-mode offers, escalation, crisis and repair replies; branch builds on the local GPU stack; reading the journey funnel |
+| [Agentic Journey Copilot & Node.js 24 CI runbook](runbooks/agentic-journey-copilot-and-node24-ci.md) | ADR-0010 7-pillar Journey Copilot operations (Prerequisite DAG, A2UI form schedules, pushdown `goal_stack`, Step-Up Auth migration, resume codes) & ADR-0011 Node.js 24 CI action pins |
 | [Escalation & handoff runbook](runbooks/escalation-and-handoff.md) | Phase 38–40 emotion/stakes escalation, `HandoffEnvelope` v2.1, CXP operating hours (`07:00–23:00 EAT`), and business-hours SLA clock |
 | [Conversational safety & EQ runbook](runbooks/conversational-safety-and-eq.md) | Phase 39 mid-workflow emotional off-ramp, wellbeing check-in, and voice affect consent |
 | [Voice receptionist demo runbook](runbooks/voice-receptionist-demo.md) | 5-locale WebSocket/LiveKit receptionist, queue position, callback, and officer desk operations |
