@@ -1,4 +1,4 @@
-pipecat-ai[silero,websocket,livekit]==1.11.0
+pipecat-ai[silero,websocket,livekit]==1.12.0
 jellyfish
 onnxruntime>=1.20.0
 
