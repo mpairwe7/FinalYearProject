@@ -28,7 +28,7 @@
 # =============================================================================
 # Stage 1 — Python backend deps (slim, CPU-only)
 # =============================================================================
-FROM python:3.11-slim-bookworm AS backend-builder
+FROM python:3.11-slim-bookworm@sha256:f06d01d4ba3f8ad5af45a3ec87df19c1d317d8e8961edc0fabda61811af6f7cf AS backend-builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -112,7 +112,7 @@ RUN bun run build || npm run build
 # =============================================================================
 # Stage 3 — Runtime (nginx + supervisord + uvicorn + node)
 # =============================================================================
-FROM python:3.11-slim-bookworm AS runtime
+FROM python:3.11-slim-bookworm@sha256:f06d01d4ba3f8ad5af45a3ec87df19c1d317d8e8961edc0fabda61811af6f7cf AS runtime
 
 LABEL org.opencontainers.image.title="URA Chatbot (Crane Cloud)" \
       org.opencontainers.image.description="Single-container CPU image for Crane Cloud RENU cluster" \

@@ -1973,8 +1973,8 @@ class HybridRetriever:
         )
         if not en_hits:
             logger.info(
-                "G18 translate-leg (%s -> en): %r -> %r, first_pass=%d en_leg=0",
-                locale, (query or "")[:60], english[:60], len(hits),
+                "G18 translate-leg (%s -> en, query_length=%d -> %d): first_pass=%d en_leg=0",
+                locale, len(query or ""), len(english), len(hits),
             )
             return hits
         # G128: When reranker is disabled or ties, en_hits (translated leg) must
@@ -1992,10 +1992,12 @@ class HybridRetriever:
             vals = [r for h in rows if (r := hit_relevance(h)) is not None]
             return max(vals) if vals else -1.0
 
+        # Lengths, not text: the question may carry a salary or a name that
+        # the PII log filter's patterns do not catch.
         logger.info(
-            "G18 translate-leg (%s -> en): %r -> %r, first_pass=%d(best=%.3f) "
+            "G18 translate-leg (%s -> en, query_length=%d -> %d): first_pass=%d(best=%.3f) "
             "en_leg=%d(best=%.3f) merged=%d(best=%.3f)",
-            locale, (query or "")[:60], english[:60],
+            locale, len(query or ""), len(english),
             len(hits), _best(hits), len(en_hits), _best(en_hits),
             len(merged), _best(merged),
         )

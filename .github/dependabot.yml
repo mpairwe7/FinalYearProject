@@ -119,6 +119,8 @@ updates:
     directories:
       - "/"
       - "/App"
+      - "/App/backend"
+      - "/App/backend/orpheus_sidecar"
     target-branch: "dev"
     schedule:
       interval: "weekly"

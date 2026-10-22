@@ -265,10 +265,15 @@ jobs:
     timeout-minutes: 15
     strategy:
       fail-fast: false
+      # Each file is audited on the Python it is installed on: pip-audit
+      # resolves it, and on the wrong Python it cannot (App/backend needs
+      # numpy 2.5, i.e. 3.12+), writes no report, and used to pass vacuously.
       matrix:
-        requirements:
-          - requirements.txt
-          - App/backend/requirements.txt
+        include:
+          - requirements: requirements.txt
+            python: "3.11"          # ci-ml-pipeline.yml PYTHON_VERSION
+          - requirements: App/backend/requirements.txt
+            python: "3.14"          # Dockerfile / Dockerfile.gpu base image
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -278,7 +283,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
 
       - name: Install pip-audit
         run: pip install pip-audit

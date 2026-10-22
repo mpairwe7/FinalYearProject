@@ -427,12 +427,13 @@ def check_false_premise(
                 f"Please consult official URA guidelines or an authorized tax officer for statutory requirements."
             )
 
-        safe_query = query[:120].replace("\r", " ").replace("\n", " ").strip()
+        # The concept is enough to monitor the guard; the question itself may
+        # carry a salary or a name that the PII log filter does not catch.
         safe_concept = concept_display.replace("\r", " ").replace("\n", " ").strip()
         logger.warning(
-            "epistemic false-premise guard triggered for query '%s' (concept: %s)",
-            safe_query,
+            "epistemic false-premise guard triggered (concept: %s, query_length=%d)",
             safe_concept,
+            len(query),
         )
         return FalsePremiseResult(
             is_false_premise=True,

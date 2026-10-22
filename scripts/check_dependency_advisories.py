@@ -16,6 +16,12 @@ Comparing IDs rather than counts matters: a PR that fixes one advisory and
 introduces another leaves the count unchanged, and a count-based gate would
 wave it through.
 
+A report that is missing, unreadable or scanned nothing fails the gate. When
+pip-audit cannot resolve a requirements file it writes no report, and the
+scan step ends in `|| true`. Treating that as "no new advisories" let the
+backend audit pass for weeks while it was checking nothing: from #633 on,
+its file needed Python 3.12 and the job ran 3.11.
+
 Usage
 -----
     # gate (CI)
@@ -59,7 +65,33 @@ def advisories_from_audit(paths: list[Path]) -> dict[str, dict[str, str]]:
     return found
 
 
+def unusable_reports(paths: list[Path]) -> list[str]:
+    """Why each report cannot be trusted as a scan, if it cannot."""
+    problems: list[str] = []
+    for path in paths:
+        if not path.is_file():
+            problems.append(f"{path}: no report (pip-audit could not resolve the requirements?)")
+            continue
+        try:
+            report: Any = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            problems.append(f"{path}: not valid JSON")
+            continue
+        if not isinstance(report, dict) or not report.get("dependencies"):
+            problems.append(f"{path}: scanned no dependencies")
+            continue
+        skipped = [
+            f"{dep.get('name') or '?'} ({dep.get('skip_reason')})"
+            for dep in report.get("dependencies") or []
+            if isinstance(dep, dict) and dep.get("skip_reason")
+        ]
+        if skipped:
+            problems.append(f"{path}: skipped dependencies: {', '.join(skipped)}")
+    return problems
+
+
 def load_baseline(path: Path) -> dict[str, dict[str, str]]:
+    """Load the accepted advisory IDs from the committed baseline file."""
     if not path.is_file():
         return {}
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -67,6 +99,7 @@ def load_baseline(path: Path) -> dict[str, dict[str, str]]:
 
 
 def write_baseline(path: Path, advisories: dict[str, dict[str, str]]) -> None:
+    """Write the current advisory map to the baseline file in sorted order."""
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "_comment": (
@@ -80,6 +113,7 @@ def write_baseline(path: Path, advisories: dict[str, dict[str, str]]) -> None:
 
 
 def main() -> int:
+    """CLI entry point for the dependency-advisory gate."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--audit", nargs="+", required=True, help="pip-audit JSON report(s)")
     parser.add_argument("--baseline", default=str(DEFAULT_BASELINE))
@@ -90,6 +124,12 @@ def main() -> int:
 
     baseline_path = Path(args.baseline)
     reports = [Path(p) for p in args.audit]
+    # An empty scan is not a pass, and must never become a baseline.
+    problems = unusable_reports(reports)
+    if problems:
+        for problem in problems:
+            print(f"::error::{problem}")
+        return 2
     current = advisories_from_audit(reports)
 
     if args.update:

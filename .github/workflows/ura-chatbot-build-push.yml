@@ -65,9 +65,10 @@ jobs:
     permissions:
       contents: read
       packages: read
+    # No output may carry the image name: it contains the Docker Hub
+    # username, a secret, so the runner drops such an output ("Skip output
+    # ... since it may contain secret") and the consumer gets "".
     outputs:
-      image_ref:  ${{ steps.publish.outputs.image_ref }}
-      image_name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
       digest:     ${{ steps.build.outputs.digest }}
       tag:        ${{ steps.publish.outputs.tag }}
     steps:
@@ -208,8 +209,7 @@ jobs:
             TAG="sha-$(git rev-parse --short HEAD)"
           fi
           IMAGE_REF="${REGISTRY}/${IMAGE_NAME}:${TAG}"
-          echo "tag=${TAG}"             >> "$GITHUB_OUTPUT"
-          echo "image_ref=${IMAGE_REF}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           {
             echo "### URA Chatbot image pushed"
             echo
@@ -228,13 +228,18 @@ jobs:
   # ---------------------------------------------------------------------------
   sign:
     needs: build
+    # Only what can be deployed is signed, and verification accepts only these
+    # refs; a manual rebuild of a feature branch stays unsigned.
+    if: github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: read
       id-token: write
       attestations: write
     uses: ./.github/workflows/container-sign-provenance.yml
     with:
-      image: ${{ needs.build.outputs.image_name }}
+      # Literal, not a build output (see build.outputs). Same as env.REGISTRY
+      # / env.IMAGE_NAME, which a reusable-workflow `with:` cannot read.
+      image: docker.io/landwind/ura-chatbot
       digest: ${{ needs.build.outputs.digest }}
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}

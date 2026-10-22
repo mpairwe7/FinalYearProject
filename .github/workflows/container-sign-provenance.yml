@@ -81,9 +81,10 @@ jobs:
           DIGEST: ${{ inputs.digest }}
         run: cosign sign --yes --recursive "${IMAGE}@${DIGEST}"
 
-      # Verify against THIS repository's signing workflow only. The previous
-      # match-anything identity pattern accepted a signature made by any
-      # GitHub Actions workflow in any repository, so it proved nothing.
+      # Verify against THIS repository's signing workflow, run from a ref that
+      # can be deployed (dev, main, v* tags). The previous match-anything
+      # pattern accepted any workflow in any repository; "@refs/" alone still
+      # accepted a branch anyone with push access could sign from.
       - name: Verify signature
         env:
           IMAGE: ${{ inputs.image }}
@@ -91,7 +92,7 @@ jobs:
         run: |
           set -euo pipefail
           cosign verify \
-            --certificate-identity-regexp="^https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/container-sign-provenance\.yml@refs/" \
+            --certificate-identity-regexp="^https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/container-sign-provenance\.yml@refs/(heads/(dev|main)|tags/v[^/]+)$" \
             --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
             --certificate-github-workflow-repository="${GITHUB_REPOSITORY}" \
             "${IMAGE}@${DIGEST}" > /dev/null
