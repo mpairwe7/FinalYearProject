@@ -159,7 +159,7 @@ export function cleanMarkdownForSpeech(text: string): string {
   cleaned = cleaned.replace(/_([^_]+)_/g, '$1');
   // Normalize Ugandan .go.ug, .co.ug, and .or.ug domains before acronym expansion
   cleaned = cleaned.replace(
-    /\b([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*)\.(go|co|or)\.ug\b/gi,
+    /\b([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*)\.(go|co|or)\.ug\b(?![A-Za-z0-9-]|\.[A-Za-z0-9-])/gi,
     (_: string, host: string, tld: string) => `${host.replace(/\./g, ' dot ')} dot ${tld.toLowerCase()} dot u g`,
   );
 
