@@ -401,3 +401,15 @@ def test_each_requirements_file_is_audited_on_the_python_it_ships_on():
     ci_python = str(_load(ROOT / ".github" / "workflows" / "ci-ml-pipeline.yml")["env"]["PYTHON_VERSION"])
     api_python = set(re.findall(r"^FROM\s+python:(\d+\.\d+)", (ROOT / "Dockerfile").read_text(encoding="utf-8"), re.M))
     assert pairs == {"requirements.txt": ci_python, "App/backend/requirements.txt": api_python.pop()}
+
+
+def test_blog_nextjs_stays_in_step_with_frontend():
+    """#630 bumped App/frontend to next 16.4.1 (fixing GHSA-2464-fhr4-w9xw,
+    GHSA-673q-mjm6-r5xr, CVE-2026-94482) while App/blog stayed on 16.3.8."""
+    frontend_pkg = json.loads((ROOT / "App" / "frontend" / "package.json").read_text(encoding="utf-8"))
+    blog_pkg = json.loads((ROOT / "App" / "blog" / "package.json").read_text(encoding="utf-8"))
+    blog_lock = (ROOT / "App" / "blog" / "pnpm-lock.yaml").read_text(encoding="utf-8")
+    frontend_next = frontend_pkg["dependencies"]["next"]
+    assert blog_pkg["dependencies"]["next"] == frontend_next
+    assert f"next@{frontend_next}" in blog_lock
+
