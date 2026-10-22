@@ -28,9 +28,36 @@ jobs:
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
-      # Auto-merge minor, patch, and grouped updates when all CI checks pass
+      # `gh pr merge --auto` waits only for the checks the base branch
+      # REQUIRES. With none required it merges at once, before CI has run:
+      # that is how #633 merged a red, unresolvable OpenTelemetry bump into
+      # dev. Enable it only when the base branch requires status checks
+      # (ruleset or classic protection); otherwise leave the PR for a person.
+      - name: Check that the base branch requires status checks
+        id: gate
+        env:
+          BASE: ${{ github.event.pull_request.base.ref }}
+          REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$BASE" =~ ^(dev|main)$ ]] || { echo "::error::unexpected base branch"; exit 1; }
+          rules=$(gh api "repos/${REPO}/rules/branches/${BASE}" \
+            --jq '[.[] | select(.type == "required_status_checks")] | length')
+          classic=$(gh api "repos/${REPO}/branches/${BASE}" \
+            --jq '((.protection.required_status_checks.checks // []) + (.protection.required_status_checks.contexts // [])) | length')
+          if [ "$rules" -gt 0 ] || [ "$classic" -gt 0 ]; then
+            echo "required=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "required=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::${BASE} requires no status checks, so auto-merge would merge before CI finishes; leaving this PR for review."
+          fi
+
+      # Auto-merge minor, patch, and grouped updates once the required checks pass.
       - name: Enable auto-merge for non-major updates
-        if: steps.metadata.outputs.update-type != 'version-update:semver-major' || steps.metadata.outputs.package-group != ''
+        if: >-
+          steps.gate.outputs.required == 'true' &&
+          (steps.metadata.outputs.update-type != 'version-update:semver-major' || steps.metadata.outputs.package-group != '')
         run: |
           gh pr review --approve "$PR_URL"
           gh pr merge --auto --squash "$PR_URL"

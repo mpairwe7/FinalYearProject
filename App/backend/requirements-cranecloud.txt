@@ -23,7 +23,10 @@ psycopg-pool>=3.2.0
 
 # Data loading
 pandas>=3.0.5
-numpy>=2.5.4,<3
+# Installed on Python 3.11 (App/Dockerfile.cranecloud, and CI after the root
+# requirements' numpy==1.26.4), so: no 2.5 floor (numpy 2.5 needs 3.12) and a
+# floor low enough to share CI's environment. The image resolves 2.4.x.
+numpy>=1.26,<2.5
 
 # Document attachment analysis (POST /v1/documents/analyze) — pure-Python
 # (plus lxml wheel) extractors for DOCX/XLSX, PyMuPDF for PDF text, and
@@ -62,13 +65,15 @@ lingua-language-detector>=2.0.0
 prometheus-client>=0.26.0
 
 # OpenTelemetry (opt-in via OTEL_ENABLED=true). The SDK and the contrib
-# instrumentations release in lockstep (1.45.x <-> 0.66b0); pinning the family
-# together keeps a lone SDK bump from producing an unresolvable install.
+# instrumentations release in lockstep (1.45.Z <-> 0.66bZ): contrib pins
+# opentelemetry-api exactly, so a lone SDK bump is unresolvable. Move the
+# family together; tests/test_ci_supply_chain_policy.py fails otherwise.
+# 1.45.1 fixes CVE-2026-114603 (unbounded tracestate parsing).
 opentelemetry-api>=1.45.1,<1.46
 opentelemetry-sdk>=1.45.1,<1.46
 opentelemetry-exporter-otlp-proto-grpc>=1.45.1,<1.46
-opentelemetry-instrumentation-fastapi==0.66b0
-opentelemetry-instrumentation-httpx==0.66b0
+opentelemetry-instrumentation-fastapi==0.66b1
+opentelemetry-instrumentation-httpx==0.66b1
 
 # Phase 29 — WebSocket text-chat tests need this on the server side too
 # for the test runtime (the runtime endpoint itself uses Starlette's

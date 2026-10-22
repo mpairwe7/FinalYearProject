@@ -13,8 +13,11 @@ invariants here are structural, so they hold for pins nobody has seen yet:
   workflows and in every Dockerfile, whose directories Dependabot watches;
 * Node and Bun come from one version file each, and the Dockerfiles that
   ship the frontend use the same majors, digest-pinned;
-* every Dependabot ecosystem waits out a cooldown, and the frontend is
-  updated through its real lockfile (``bun``);
+* every Dependabot ecosystem waits out a cooldown, the frontend is updated
+  through its real lockfile (``bun``), and auto-merge is enabled only where
+  the base branch requires status checks;
+* the OpenTelemetry family moves in lockstep, and the backend lockfile
+  satisfies the requirements it was compiled from;
 * cosign verification is pinned to this repository's signing workflow.
 
 ``zizmor`` (actions-security.yml) audits the same tree more deeply in CI.
@@ -294,3 +297,107 @@ def test_signatures_are_verified_against_this_repository_only():
         assert "IMAGE_NAME" not in str(value) and "image_ref" not in str(value), (
             f"build output {name} would carry the secret-masked image name"
         )
+
+
+def _requirement_lines(path: Path) -> list[str]:
+    return [
+        line.split("#", 1)[0].strip()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.split("#", 1)[0].strip() and not line.lstrip().startswith(("-", "--"))
+    ]
+
+
+_OTEL_REQUIREMENTS = (
+    ROOT / "requirements.txt",
+    ROOT / "App" / "backend" / "requirements.txt",
+    ROOT / "App" / "backend" / "requirements-cranecloud.txt",
+)
+_OTEL_CORE = ("opentelemetry-api", "opentelemetry-sdk", "opentelemetry-exporter-otlp-proto-grpc")
+_OTEL_CONTRIB = ("opentelemetry-instrumentation-fastapi", "opentelemetry-instrumentation-httpx")
+
+
+def _otel_contrib_for(core: str) -> str:
+    """Core ``1.Y.Z`` ships with contrib ``0.(Y+21)bZ``, which pins the core exactly."""
+    _, minor, patch = (int(part) for part in core.split("."))
+    return f"0.{minor + 21}b{patch}"
+
+
+@pytest.mark.parametrize("path", _OTEL_REQUIREMENTS, ids=lambda p: str(p.relative_to(ROOT)))
+def test_opentelemetry_family_moves_in_lockstep(path: Path):
+    """#633 bumped the core to 1.45.1 and left contrib on 0.66b0, which pins
+    ``opentelemetry-api==1.45.0``: every backend install became unresolvable
+    while the root suite, which installs 1.45.0, stayed green."""
+    lines = {re.split(r"[<>=!~ ;\[]", line, maxsplit=1)[0].lower(): line for line in _requirement_lines(path)}
+    floors = set()
+    for name in _OTEL_CORE:
+        match = re.fullmatch(rf"{name}>=(\d+\.\d+\.\d+),<\d+\.\d+", lines.get(name, ""))
+        assert match, f"{path.name}: {name} must be pinned as >=1.Y.Z,<1.(Y+1)"
+        floors.add(match.group(1))
+    assert len(floors) == 1, f"{path.name}: the core packages disagree: {sorted(floors)}"
+    contrib = _otel_contrib_for(floors.pop())
+    for name in _OTEL_CONTRIB:
+        assert lines.get(name) == f"{name}=={contrib}", f"{path.name}: {name} must be =={contrib}"
+
+
+def test_backend_lockfile_satisfies_its_requirements():
+    """The lock is compiled from App/backend/requirements.txt (see its header).
+    Dependabot edits it in place, and it had drifted below its own floors
+    (Pillow 12.3.0 under ``Pillow>=13.0.0``, contrib 0.66b0 under api 1.45.1)."""
+    from packaging.requirements import Requirement
+    from packaging.utils import canonicalize_name
+
+    lock_text = (ROOT / "App" / "backend" / "requirements.lock.txt").read_text(encoding="utf-8")
+    pinned = {
+        canonicalize_name(name): version
+        for name, version in re.findall(r"^([A-Za-z0-9_.-]+)==([^\s;\\]+)", lock_text, re.M)
+    }
+    env = {"python_version": "3.14", "python_full_version": "3.14.0", "sys_platform": "linux",
+           "platform_system": "Linux", "platform_machine": "x86_64", "os_name": "posix",
+           "implementation_name": "cpython", "platform_python_implementation": "CPython", "extra": ""}
+    semconv = pinned.get("opentelemetry-semantic-conventions")
+    assert semconv == _otel_contrib_for(pinned["opentelemetry-api"]), "lock: OpenTelemetry contrib/core mismatch"
+    for line in _requirement_lines(ROOT / "App" / "backend" / "requirements.txt"):
+        req = Requirement(line)
+        if req.marker is not None and not req.marker.evaluate(env):
+            continue
+        version = pinned.get(canonicalize_name(req.name))
+        assert version is not None, f"lock is missing {req.name}"
+        assert req.specifier.contains(version, prereleases=True), f"lock pins {req.name}=={version}, outside {req}"
+
+
+def test_dependabot_automerge_waits_for_required_checks():
+    """``gh pr merge --auto`` waits only for required checks; with none it merges at once."""
+    doc = _load(ROOT / ".github" / "workflows" / "dependabot-automerge.yml")
+    steps = doc["jobs"]["dependabot-automerge"]["steps"]
+    gate = next(step for step in steps if step.get("id") == "gate")
+    assert "required_status_checks" in gate["run"]
+    for step in steps:
+        if "gh pr merge" in str(step.get("run", "")):
+            assert "steps.gate.outputs.required == 'true'" in str(step.get("if", "")), (
+                f"{step.get('name')}: auto-merge must be gated on the base branch requiring checks"
+            )
+
+
+def test_crane_cloud_requirements_install_on_the_python_they_ship_with():
+    """#633 raised numpy to >=2.5.4, which needs Python 3.12, in a file the
+    production image and CI install on 3.11 — so neither could install it."""
+    from packaging.requirements import Requirement
+
+    dockerfile = (ROOT / "App" / "Dockerfile.cranecloud").read_text(encoding="utf-8")
+    image_python = set(re.findall(r"^FROM\s+python:(\d+\.\d+)", dockerfile, re.M))
+    ci_python = _load(ROOT / ".github" / "workflows" / "ci-ml-pipeline.yml")["env"]["PYTHON_VERSION"]
+    assert image_python == {str(ci_python)}, "the Crane Cloud image and CI must test the same Python"
+    if image_python == {"3.11"}:
+        lines = _requirement_lines(ROOT / "App" / "backend" / "requirements-cranecloud.txt")
+        numpy = Requirement(next(line for line in lines if line.lower().startswith("numpy")))
+        assert not numpy.specifier.contains("2.5.0"), f"{numpy}: numpy 2.5 requires Python 3.12"
+        assert numpy.specifier.contains("1.26.4"), f"{numpy}: CI shares an env with the root numpy==1.26.4"
+
+
+def test_each_requirements_file_is_audited_on_the_python_it_ships_on():
+    """On the wrong Python pip-audit cannot resolve the file and scans nothing."""
+    audit = _load(ROOT / ".github" / "workflows" / "devsecops-sast-dast.yml")["jobs"]["pip-audit"]
+    pairs = {entry["requirements"]: str(entry["python"]) for entry in audit["strategy"]["matrix"]["include"]}
+    ci_python = str(_load(ROOT / ".github" / "workflows" / "ci-ml-pipeline.yml")["env"]["PYTHON_VERSION"])
+    api_python = set(re.findall(r"^FROM\s+python:(\d+\.\d+)", (ROOT / "Dockerfile").read_text(encoding="utf-8"), re.M))
+    assert pairs == {"requirements.txt": ci_python, "App/backend/requirements.txt": api_python.pop()}
