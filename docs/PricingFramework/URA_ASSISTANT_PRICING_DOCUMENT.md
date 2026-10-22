@@ -1,16 +1,15 @@
 # URA AI Intelligent Assistant — Pricing Document and Economic Appraisal
 
-**Prepared for** Uganda Revenue Authority — Office of the Deputy Commissioner General
-**Prepared by** Mpairwe Lauben · Rwemera David · Okwel Edgar Mark · Olowo Omondi Philly
-School of Computing and Informatics Technology, Makerere University
-**Date** 21 August 2026 · **Version** 1.0
+**Prepared for** Uganda Revenue Authority — Office of the Deputy Commissioner General (and Enterprise / Sovereign Clients)
+**Prepared by** Cloake Tech Limited (Mpairwe Lauben · Rwemera David · Okwel Edgar Mark · Olowo Omondi Philly)
+**Date** 22 October 2026 · **Version** 2.0 (Commercial Edition)
 **Framework** SWEBOK Guide v4.0 (IEEE Computer Society, 2024) — Chapter 15 *Software Engineering
 Economics*, with Chapter 1 §3.2 *Economics of Quality of Service Constraints* and Chapter 7 §1.4
 *Majority of Maintenance Costs*
 
-This document supplies the "detailed breakdown of the work completed to date, along with the
-team's basis for the proposed fee" undertaken in §5.5 of the *URA AI Intelligent Assistant —
-Proposal Summary* (24 July 2026).
+This document supplies Cloake Tech Limited's commercial pricing schedule and SWEBOK v4.0 economic
+appraisal across Local (Uganda), East African (EAC), and International deployments, discharging the
+undertaking in §5.5 of the *URA AI Intelligent Assistant — Proposal Summary* (24 July 2026).
 
 ---
 
@@ -27,13 +26,14 @@ that is actually an assumption.
 
 **Currency (SWEBOK §15.9.2, multiple-currency analysis).** The analysis currency is USD, with
 UGX shown at an assumed **UGX 3,650 / USD 1 [P]**. This rate is not fixed and should be set at
-contract date. A 10% depreciation moves the recommended one-time fee by roughly UGX 88 million.
-The team recommends the contract be denominated in **one** currency, with the other shown for
+contract date. A 10% depreciation moves the recommended local Tier-3 license fee by roughly UGX 175 million.
+Cloake Tech Limited recommends the contract be denominated in **one** currency, with the other shown for
 reference only, so exchange movement does not become a dispute.
 
-**Labour rates.** No published Ugandan rate card is asserted. Three rate scenarios are carried
-throughout, all marked **[P]**, and every conclusion is tested against all three (§G1,
-sensitivity).
+**Commercial labour rates.** As a registered company, Cloake Tech Limited prices against fully-loaded
+corporate engineering rates (incorporating statutory taxes, NSSF, insurance, corporate overhead, and margin)
+across three market tiers — Local (Uganda), East Africa (EAC), and International — all marked **[P]**,
+and every conclusion is tested against all three (§G1, sensitivity).
 
 ---
 
@@ -482,18 +482,19 @@ The three estimates span 178–222 EM — a half-span of ±22 EM, or **±11% of 
 193**. Under §15.8.5 this is convergence, and the converged figure is used. **Replacement effort:
 193 engineer-months.**
 
-### D2. Replacement cost at market rates
+### D2. Commercial replacement cost at market rates
 
-Converged effort valued at three rate scenarios, all **[P]**:
+Converged effort valued at three corporate market rate scenarios, all **[P]**:
 
 | Rate scenario | USD / EM | 193 EM (USD) | 193 EM (UGX) |
 | :--- | ---: | ---: | ---: |
-| Ugandan blended in-house team | 2,400 | 463,200 | 1.69 bn |
-| East African specialist vendor | 6,500 | 1,254,500 | 4.58 bn |
-| International AI-systems integrator | 14,000 | 2,702,000 | 9.86 bn |
+| Local (Ugandan corporate engineering rate) | 3,500 | 675,500 | 2.47 bn |
+| East African (EAC regional specialist vendor) | 7,000 | 1,351,000 | 4.93 bn |
+| International (Global AI-systems integrator) | 15,000 | 2,895,000 | 10.57 bn |
 
 These are **reference ceilings**, not the price. They answer one question: what it would cost
-URA to obtain this capability by any route other than the one proposed.
+URA (or an equivalent regional or international authority) to obtain this capability by any route
+other than licensing from Cloake Tech Limited.
 
 ### D3. Sunk cost is deliberately excluded (SWEBOK §15.10.2)
 
@@ -501,9 +502,10 @@ SWEBOK §15.10.2 states plainly: *"Sunk cost refers to unrecoverable expenses th
 which can cause emotional hurdles looking forward. From a traditional economics viewpoint, sunk
 costs should not be considered in decision-making."*
 
-The team's own expenditure — four engineers across eight months, 899 commits, alongside academic
-coursework — is a sunk cost. **It is not the basis of the fee, and URA should not price against
-it.** It is recorded here once, for completeness, and then set aside.
+Cloake Tech Limited's prior R&D expenditure — four principal engineers across eight months and
+899+ commits of internal product engineering — is a sunk cost. **It is not the basis of the fee,
+and the client does not price against historical R&D.** It is recorded here once, for completeness,
+and then set aside.
 
 The economically correct basis, per §15.10.2, is **opportunity cost**: the cost of the
 alternative URA must forgo. That is the replacement cost of §D2 and the alternatives of §E1 —
@@ -518,38 +520,38 @@ adds that the operate-maintain-retire activities "consume more total effort and 
 than the SDLC activities," and Chapter 7 §1.4 that **over 80% of maintenance is enhancement and
 adaptation, not fault-fixing**. All three are honoured below.
 
-All figures USD **[E]**, with **[P]** rate assumptions as stated.
+All figures USD **[E]**, with **[P]** corporate rate assumptions as stated (Local Uganda Sovereign Reference Case).
 
 | Cost line | Y1 | Y2 | Y3 | Y4 | Y5 | Total |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Development fee (milestoned, §F3) | 168,000 | 72,000 | — | — | — | **240,000** |
-| Embedded engagement, 4 specialists (§F4) | 134,400 | 134,400 | — | — | — | **268,800** |
+| Sovereign license & IP grant (milestoned, §F3) | 336,000 | 144,000 | — | — | — | **480,000** |
+| Embedded corporate engagement, 4 specialists (§F4) | 216,000 | 216,000 | — | — | — | **432,000** |
 | Infrastructure capex — 4-GPU production + 2-GPU staging; Y5 partial refresh | 82,000 | — | — | — | 20,000 | **102,000** |
 | Infrastructure operating — power, cooling, hosting, network, ops share | 14,000 | 14,000 | 14,000 | 14,000 | 14,000 | **70,000** |
 | Post-handover maintenance — 2 URA FTE from Y3 | — | — | 33,600 | 33,600 | 33,600 | **100,800** |
 | Content operations — corpus freshness, 1 URA FTE | 12,000 | 12,000 | 12,000 | 12,000 | 12,000 | **60,000** |
 | Model refresh and re-evaluation, annual | 8,000 | 8,000 | 8,000 | 8,000 | 8,000 | **40,000** |
 | Independent assurance — penetration test, evaluation audit | 15,000 | 10,000 | 10,000 | 10,000 | 10,000 | **55,000** |
-| **Annual total** | **433,400** | **250,400** | **77,600** | **77,600** | **97,600** | **936,600** |
+| **Annual total** | **683,000** | **404,000** | **77,600** | **77,600** | **97,600** | **1,339,800** |
 
-**Five-year TCO: USD 936,600 ≈ UGX 3.42 bn [E].**
+**Five-year TCO: USD 1,339,800 ≈ UGX 4.89 bn [E].**
 
 Applying equivalence (§15.1.4) at a 10% social discount rate **[P]**:
 
-- **Present worth of cost: USD 772,846 ≈ UGX 2.82 bn**
-- **Annual equivalent cost: USD 203,875/yr ≈ UGX 744 m/yr** (capital recovery factor 0.263797)
+- **Present worth of cost: USD 1,126,699 ≈ UGX 4.11 bn**
+- **Annual equivalent cost: USD 297,220/yr ≈ UGX 1,085 m/yr** (capital recovery factor 0.263797)
 
-The annual-equivalent figure of **UGX 744 m/yr** is used for every benefit comparison in Part E,
+The annual-equivalent figure of **UGX 1,085 m/yr** is used for every benefit comparison in Part E,
 because SWEBOK §15.1.4 permits comparison only between cash flows expressed in the same time
 frame.
 
-**The SPLC warning, quantified.** Post-development lines total USD 427,800 — **45.7% of the
-five-year TCO before the system is five years old**, and a rising share every year thereafter.
-This is exactly what §15.10.11 predicts, and it is the single most common omission in software
-procurement. URA should budget for it explicitly. Per Chapter 7 §1.4, the great majority of that
-spend will be **enhancement and adaptation** — new tax measures, new languages, new channels —
-not defect repair, and it should be planned as capability development rather than as a warranty
-reserve.
+**The SPLC warning, quantified.** Post-license lines total USD 427,800 in direct operations plus
+USD 432,000 in embedded engineering — **64.2% of the five-year TCO**, and a rising share every year
+thereafter. This is exactly what §15.10.11 predicts, and it is the single most common omission in
+software procurement. URA should budget for it explicitly. Per Chapter 7 §1.4, the great majority
+of that spend will be **enhancement and adaptation** — new tax measures, new languages, new
+channels — not defect repair, and it should be planned as capability development rather than as a
+warranty reserve.
 
 ---
 
@@ -568,7 +570,7 @@ demands.
 | **A1** | **Add human capacity** — scale officers and contact-centre seats | 850,000 – 1,400,000 | 12–18 months to recruit and train | Retained | Limited by who is hired | n/a |
 | **A2** | **License a foreign SaaS assistant** | 700,000 – 1,900,000 | 4–8 months | **Taxpayer data leaves Uganda** | Vendor's roadmap, not URA's | **None owned; exit cost total** |
 | **A3** | **Procure a greenfield custom build** | 1,500,000 – 3,200,000 | 24–36 months | Retained if specified | As specified, at full cost | Owned on delivery |
-| **A4** | **Acquire this system + embed the team** *(proposed)* | **936,600** | **Prototype live today; national scale inside 24 months** | **Retained — self-hosted, no external AI provider** | **en/lg/sw measured at 100% accuracy; voice in both directions** | **Owned outright on signing; exit cost zero** |
+| **A4** | **Acquire sovereign license + embed Cloake Tech team** *(proposed)* | **1,339,800** | **Prototype live today; national scale inside 24 months** | **Retained — self-hosted, no external AI provider** | **en/lg/sw measured at 100% accuracy; voice in both directions** | **Sovereign perpetual rights on signing; exit cost zero** |
 
 **A0 is not free.** Its cost is the status quo: 2.73 m registered non-contributors, 76% of
 taxpayers unable to establish what they owe, and — increasingly — taxpayers already asking
@@ -586,7 +588,7 @@ literacy) 0.20, IP ownership and exit cost 0.15, auditability of guidance 0.10. 
 | A1 | 2.0 | 1.5 | 5.0 | 1.5 | 2.5 | 1.0 | **2.40** |
 | A2 | 2.5 | 3.5 | 0.5 | 3.0 | 0.0 | 2.5 | **1.98** |
 | A3 | 1.0 | 0.5 | 4.5 | 4.0 | 4.5 | 4.0 | **3.05** |
-| **A4** | **3.5** | **4.5** | **5.0** | **5.0** | **5.0** | **5.0** | **4.63** |
+| **A4** | **3.0** | **4.5** | **5.0** | **5.0** | **5.0** | **5.0** | **4.53** |
 
 A4 leads on every criterion except raw cost, where A0 necessarily wins and A2/A1 are close.
 Note that A2 — the option that looks cheapest on a monthly invoice — scores lowest overall,
@@ -599,8 +601,8 @@ taxpayer data and ownership of the capability.
 benefit-cost ratio of less than 1.0 can usually be rejected without further analysis."
 
 Rather than assert a benefit figure, the analysis is inverted: **what is the minimum benefit at
-which BCR = 1.0?** This requires no estimate from the team, only the cost side derived in §D4
-and one unit parameter from URA. Annual equivalent cost: **UGX 744 m/yr**.
+which BCR = 1.0?** This requires no estimate from Cloake Tech Limited, only the cost side derived
+in §D4 and one unit parameter from URA. Annual equivalent cost: **UGX 1,085 m/yr**.
 
 **Route (a) — voluntary compliance.** Dormant register: 2.73 m registrants **[M, Auditor
 General FY2024/25]**. Let *A* = average annual remittance of a newly-remitting small taxpayer
@@ -608,47 +610,47 @@ General FY2024/25]**. Let *A* = average annual remittance of a newly-remitting s
 
 | A (UGX/yr) | Taxpayers needed for BCR = 1.0 | As a share of the 2.73 m dormant register |
 | ---: | ---: | ---: |
-| 250,000 | 2,976 | **0.109%** |
-| 500,000 | 1,488 | **0.055%** |
-| 1,000,000 | 744 | **0.027%** |
+| 250,000 | 4,340 | **0.159%** |
+| 500,000 | 2,170 | **0.079%** |
+| 1,000,000 | 1,085 | **0.040%** |
 
 **Route (b) — contact deflection.** Let *C* = fully-loaded cost of one human-served contact
 **[P]**.
 
 | C (UGX) | Contacts/yr for BCR = 1.0 | Per day |
 | ---: | ---: | ---: |
-| 2,000 | 372,000 | 1,019 |
-| 3,500 | 212,571 | 582 |
-| 5,000 | 148,800 | 408 |
+| 2,000 | 542,500 | 1,486 |
+| 3,500 | 310,000 | 849 |
+| 5,000 | 217,000 | 595 |
 
-**The system pays for itself if it converts roughly one in every two thousand dormant
-registrants per year, or deflects on the order of 500 contacts a day.** Against a register of
+**The system pays for itself if it converts roughly one in every 1,250 dormant
+registrants per year, or deflects on the order of 850 contacts a day.** Against a register of
 5.25 m and measured sustained capacity of 214 requests per second, neither threshold is
 demanding. This is the central economic finding of this document, and it does not depend on any
-optimistic assumption by the team.
+optimistic assumption by Cloake Tech Limited.
 
 **Illustrative BCR at a conservative combined case [E]:** 500 contacts/day deflected at
-C = UGX 3,500 (UGX 639 m/yr) plus 0.055% of the dormant register converted at A = UGX 500,000
-(UGX 750 m/yr) → benefit UGX 1.389 bn against cost UGX 744 m → **BCR ≈ 1.87**.
+C = UGX 3,500 (UGX 639 m/yr) plus 0.079% of the dormant register converted at A = UGX 500,000
+(UGX 1,085 m/yr) → benefit UGX 1.724 bn against cost UGX 1,085 m → **BCR ≈ 1.59**.
 
 At the scenario in §3 of the Proposal Summary — a single percentage point of the dormant
-register, 27,300 taxpayers — the compliance benefit alone is UGX 13.65 bn/yr and **BCR ≈ 18.3**.
+register, 27,300 taxpayers — the compliance benefit alone is UGX 13.65 bn/yr and **BCR ≈ 12.6**.
 
 ### E3. Cost-effectiveness analysis (SWEBOK §15.4.2)
 
 §15.4.2 gives two forms; the **fixed-cost** form is used: given a fixed annual envelope, which
-alternative maximises benefit? Envelope: **UGX 744 m/yr** (the annual-equivalent cost of A4).
+alternative maximises benefit? Envelope: **UGX 1,085 m/yr** (the annual-equivalent cost of A4).
 
-| Alternative | What UGX 744 m/yr buys | Contacts served / yr | Cost per contact |
+| Alternative | What UGX 1,085 m/yr buys | Contacts served / yr | Cost per contact |
 | :--- | :--- | ---: | ---: |
-| **A1** — add officers | ≈ 18.6 fully-loaded officers **[P: UGX 40 m/officer/yr]** at 30 contacts/officer/day × 250 days | 139,527 | **UGX 5,333** |
-| **A4** — this system, low adoption | 500 contacts/day | 182,500 | **UGX 4,078** |
-| **A4** — this system, moderate adoption | 2,000 contacts/day | 730,000 | **UGX 1,019** |
-| **A4** — this system, high adoption | 5,000 contacts/day | 1,825,000 | **UGX 408** |
+| **A1** — add officers | ≈ 27.1 fully-loaded officers **[P: UGX 40 m/officer/yr]** at 30 contacts/officer/day × 250 days | 203,438 | **UGX 5,333** |
+| **A4** — this system, low adoption | 500 contacts/day | 182,500 | **UGX 5,945** |
+| **A4** — this system, moderate adoption | 2,000 contacts/day | 730,000 | **UGX 1,486** |
+| **A4** — this system, high adoption | 5,000 contacts/day | 1,825,000 | **UGX 595** |
 
-**Crossover: 382 contacts/day.** Above roughly 382 contacts a day, the system is more
+**Crossover: 557 contacts/day.** Above roughly 557 contacts a day, the system is more
 cost-effective per taxpayer served than additional headcount — and unlike headcount its
-cost-per-contact keeps falling, because guidance is a fixed-cost good (§A3). Below 382/day,
+cost-per-contact keeps falling, because guidance is a fixed-cost good (§A3). Below 557/day,
 headcount wins. This is the honest boundary condition of the whole proposal, and it is an
 **adoption** threshold, not a technical one.
 
@@ -689,45 +691,46 @@ condition and product quality."* Each is addressed, and each moves the price:
 
 | Factor | Assessment | Effect on price |
 | :--- | :--- | :--- |
-| **Manufacturing cost** | 193 EM converged replacement effort (§D1); USD 463 k at the lowest rate scenario | Sets the floor of what the capability is worth to replace |
-| **Market placement** | A single client, a public institution, procuring under Ugandan public procurement | Argues for a fixed, milestoned, auditable fee rather than a subscription |
-| **Competition** | A2 (foreign SaaS) at USD 700 k–1.9 bn over five years with zero IP; A3 (greenfield) at USD 1.5–3.2 m and 24–36 months | The price must sit clearly below both, and does |
+| **Manufacturing cost** | 193 EM converged replacement effort (§D1); USD 675.5 k at the local corporate rate scenario | Sets the commercial benchmark of what the capability costs to rebuild |
+| **Market placement** | Sovereign public institutions and regulated enterprises across Local (Uganda), East African (EAC), and International tiers | Structured as perpetual sovereign licensing (or Enterprise SaaS) with auditable milestones |
+| **Competition** | A2 (foreign SaaS) at USD 700 k–1.9 m over five years with zero IP; A3 (greenfield) at USD 1.5–3.2 m and 24–36 months | The price sits clearly below greenfield procurement while preserving data sovereignty |
 | **Market condition** | Kenya moved first (Apr 2026, text-only WhatsApp); Rwanda and Tanzania have discussed but not deployed | A time-limited window; argues against a price that delays a decision |
-| **Product quality** | Measured: 100% guardrail defence, 0.93 faithfulness, 100% multilingual FAQ accuracy, 0 cross-tenant violations, 28/28 STRIDE threats mitigated, 12/12 standards mapped | Supports a price at the upper end of the defensible band, because the assurance work is already done and evidenced |
+| **Product quality** | Measured: 100% guardrail defence, 0.93 faithfulness, 100% multilingual FAQ accuracy, 0 cross-tenant violations, 28/28 STRIDE threats mitigated, 12/12 standards mapped | Supports a commercial corporate fee because the assurance work is already done and evidenced |
 
-§15.10.2 also notes that *"the target cost can be below the actual estimated cost."* That is the
-case here, deliberately: the recommended fee is well below every replacement-cost reference in
-§D2.
+§15.10.2 also notes that *"the target cost can be below the actual estimated cost."* Because
+Cloake Tech Limited retains core platform IP for regional and international licensing across non-competing
+jurisdictions, the local sovereign license fee for URA is set below full standalone replacement cost (§D2).
 
-### F2. Recommended price
+### F2. Recommended local sovereign price (Uganda)
 
-> ### One-time development fee and IP assignment
-> ## USD 240,000 · UGX 876,000,000
-> Negotiation envelope **USD 190,000 – 300,000** (UGX 694 m – 1.095 bn)
+> ### Sovereign enterprise license and mandate IP grant (Local — Uganda)
+> ## USD 480,000 · UGX 1,752,000,000
+> Negotiation envelope **USD 395,000 – 550,000** (UGX 1.44 bn – 2.01 bn)
 
 **What the fee covers**
 
-- Full, irrevocable assignment of all intellectual property in the system: source code, trained
-  and fine-tuned model weights, fine-tuning datasets, pipeline architecture, the 5,071-passage
-  indexed corpus and its ingestion pipelines, 58 documents, 21 CI/CD pipelines, SBOM and
-  provenance attestations, and the complete evaluation and benchmark artefact set.
-- Zero recurring licence, royalty or per-seat fee thereafter. Exit cost zero.
-- Unrestricted right to use, modify, extend, audit, redeploy and sublicense within URA's mandate.
-- The team's commitment to an exclusive two-year engagement (priced separately, §F4).
+- Perpetual, irrevocable sovereign license and mandate IP grant in the delivered system for URA:
+  source code, trained and fine-tuned model weights, fine-tuning datasets, pipeline architecture,
+  the 5,071-passage indexed corpus and its ingestion pipelines, 58 documents, 21 CI/CD pipelines,
+  SBOM and provenance attestations, and the complete evaluation and benchmark artefact set.
+- Zero recurring per-seat or royalty fee thereafter within URA's statutory mandate. Exit cost zero.
+- Unrestricted right for URA to use, modify, extend, audit, and redeploy within its mandate, while
+  Cloake Tech Limited retains core multi-tenant platform IP for commercial licensing outside URA's mandate.
+- Cloake Tech Limited's commitment to a dedicated two-year corporate engineering engagement (priced separately, §F4).
 
 **How the figure is justified**
 
 | Reference | Value | Fee as a share |
 | :--- | ---: | ---: |
-| Replacement cost, Ugandan blended rate | USD 463,200 | **52%** |
-| Replacement cost, East African vendor rate | USD 1,254,500 | **19%** |
-| Replacement cost, international integrator rate | USD 2,702,000 | **8.9%** |
-| A3 — greenfield procurement, low end | USD 1,500,000 | **16%** |
-| Five-year TCO of the whole programme | USD 936,600 | **26%** |
-| Implied unit rate against 193 converged EM | USD 1,244 / EM | — |
+| Replacement cost, Local corporate rate | USD 675,500 | **71%** |
+| Replacement cost, East African vendor rate | USD 1,351,000 | **36%** |
+| Replacement cost, International integrator rate | USD 2,895,000 | **16.6%** |
+| A3 — greenfield procurement, low end | USD 1,500,000 | **32%** |
+| Five-year TCO of the whole programme | USD 1,339,800 | **36%** |
+| Implied unit rate against 193 converged EM | USD 2,487 / EM | — |
 
-**What the fee excludes** — infrastructure (§F5, URA-provided), the two-year engagement salaries
-(§F4), and the scope extensions of §F6.
+**What the fee excludes** — infrastructure (§F5, URA-provided), the two-year corporate engagement
+retainer (§F4), applicable taxes (18% VAT / WHT), and the scope extensions of §F6–§F7.
 
 ### F3. Payment schedule tied to measurable gates
 
@@ -737,25 +740,25 @@ making the estimates in this document falsifiable at each stage.
 
 | | Milestone | Gate URA verifies | Share | USD |
 | :--- | :--- | :--- | ---: | ---: |
-| **M0** | Signing and IP assignment | Assignment executed; full artefact set (code, weights, corpus, docs, pipelines) delivered into URA custody and independently buildable | 30% | 72,000 |
-| **M1** | URA-corpus optimisation and SME validation | Faithfulness ≥ 0.90 on a URA-authored golden set; URA subject-matter experts sign off on a sampled answer set | 20% | 48,000 |
-| **M2** | Production hardening and scale acceptance | Measured p50 < 500 ms at the sized concurrency; p95 < 6 s at ceiling; 100% guardrail defence retained; **on-device p95 < 180 ms field-measured on mid-range Android** (closes the package-14 gate, §B3) | 20% | 48,000 |
-| **M3** | Channel integration live | Serving on ≥ 3 channels (portal, URA app, WhatsApp) with the staff workbench in daily use by contact-centre officers | 15% | 36,000 |
-| **M4** | Handover complete | URA's own team operating, deploying and extending the system unaided for 60 consecutive days | 15% | 36,000 |
+| **M0** | Signing and sovereign license grant | Agreement executed; full artefact set (code, weights, corpus, docs, pipelines) delivered into URA custody and independently buildable | 30% | 144,000 |
+| **M1** | URA-corpus optimisation and SME validation | Faithfulness ≥ 0.90 on a URA-authored golden set; URA subject-matter experts sign off on a sampled answer set | 20% | 96,000 |
+| **M2** | Production hardening and scale acceptance | Measured p50 < 500 ms at the sized concurrency; p95 < 6 s at ceiling; 100% guardrail defence retained; **on-device p95 < 180 ms field-measured on mid-range Android** (closes the package-14 gate, §B3) | 20% | 96,000 |
+| **M3** | Channel integration live | Serving on ≥ 3 channels (portal, URA app, WhatsApp) with the staff workbench in daily use by contact-centre officers | 15% | 72,000 |
+| **M4** | Handover complete | URA's own team operating, deploying and extending the system unaided for 60 consecutive days | 15% | 72,000 |
 
 M0 at 30% reflects that the majority of the engineering is already complete and transfers on
 signing; the remaining 70% is at risk against gates that only URA can certify.
 
-### F4. Two-year embedded engagement — rate card
+### F4. Two-year embedded corporate engagement — rate card
 
-Per §5.3 of the Proposal Summary, four specialists embedded within URA's IT and customer-service
-departments for 24 months, agreed separately from the fee. Rate card **[P]**:
+Per §5.3 of the Proposal Summary, four Cloake Tech Limited specialists embedded within URA's IT and
+customer-service departments for 24 months, agreed separately from the license fee. Corporate rate card **[P]**:
 
 | Tier | USD / person / month | 4 people × 24 months | UGX |
 | :--- | ---: | ---: | ---: |
-| Graduate specialist contractor | 2,200 | 211,200 | 771 m |
-| **Mid specialist contractor (recommended)** | **2,800** | **268,800** | **981 m** |
-| Senior specialist contractor | 3,600 | 345,600 | 1.26 bn |
+| Associate AI / Systems Engineer | 3,200 | 307,200 | 1.12 bn |
+| **Mid AI / Systems Engineer (recommended)** | **4,500** | **432,000** | **1.58 bn** |
+| Senior / Principal AI Architect | 6,500 | 624,000 | 2.28 bn |
 
 The recommended tier is carried in the TCO of §D4. Its deliverable is not only the production
 system but the **transfer of operating capability**: at the end of 24 months URA has a trained
@@ -795,42 +798,62 @@ Seven concurrent generations sits deep inside the measured low-latency zone of a
 | Backing services: PostgreSQL 16, Redis 7.4, Qdrant 1.13 | Delivered stateless per 12-factor; embedded SQLite / BM25 / in-memory fallbacks already implemented for degraded operation |
 
 **Budget: USD 102,000 capex + USD 14,000/yr operating** (§D4), on-premises per the break-even
-result of §E4.
+result of §E4 (or USD 122,400 capex if procured and warrantied turnkey through Cloake Tech Limited).
 
 ### F6. Scope tiers, and the extension priced separately
 
 **Tiered scope (SWEBOK §15.10.14, prioritisation).** Derived from the package ranking of §B4, so
 that a constrained budget buys the highest-value packages first.
 
-| Tier | Packages included | Effort (EM of the 178 in §B3) | Share | Fee (USD) | What URA gets |
+| Tier | Packages included | Effort (EM of the 178 in §B3) | Share | Local Fee (USD) | What the client gets |
 | :--- | :--- | ---: | ---: | ---: | :--- |
-| **1 — Core** | 1, 2, 4 (calculators), 9, 10, 11, 12, 13, 16, 18, 19 | 104 | 58% | **155,000** | Grounded, cited answers in English on the web portal; guardrails; UDPA compliance; escalation with context; staff workbench; analytics |
-| **2 — Standard** | Tier 1 + 3, 4 (full), 6, 7, 15, 17 | 157 | 88% | **210,000** | Adds agentic orchestration, multilingual en/lg/sw, the full voice pipeline both directions, content operations, personal memory |
-| **3 — Full *(recommended)*** | All 19 packages | 178 | 100% | **240,000** | Adds vision and document intelligence, the statutory knowledge graph, offline/edge for rural districts |
+| **1 — Core** | 1, 2, 4 (calculators), 9, 10, 11, 12, 13, 16, 18, 19 | 104 | 58% | **285,000** | Grounded, cited answers in English on the web portal; guardrails; UDPA compliance; escalation with context; staff workbench; analytics |
+| **2 — Standard** | Tier 1 + 3, 4 (full), 6, 7, 15, 17 | 157 | 88% | **395,000** | Adds agentic orchestration, multilingual en/lg/sw, the full voice pipeline both directions, content operations, personal memory |
+| **3 — Full *(recommended)*** | All 19 packages | 178 | 100% | **480,000** | Adds vision and document intelligence, the statutory knowledge graph, offline/edge for rural districts |
 
 Effort shares are taken over the 178 EM of §B3; package 4 is split evenly between its eight
 statutory calculators (Tier 1) and its MCP transport, policy and Tool-RAG selection layer
 (Tier 2). Note that Tier 1 is priced **above** its pro-rata share of the fee — 58% of the
-effort at 65% of the price — because package 19 (platform, MLOps and assurance, 18 EM) is not
+effort at 59% of the price — because package 19 (platform, MLOps and assurance, 18 EM) is not
 divisible: a Tier-1 purchase still needs the whole CI, SBOM, provenance and deployment estate.
 Tiers 2 and 3 then price close to or below pro-rata, which is where the incremental argument
 below comes from.
 
 **Why Tier 3 is recommended on economic grounds, not enthusiasm.** The step from Tier 2 to Tier
-3 costs **USD 30,000** and transfers three packages whose replacement cost at the lowest rate
-scenario is **21 EM ≈ USD 50,400**, and at vendor rates USD 136,500. The marginal price is below
-the marginal replacement cost, and the capability is already built and tested. Declining Tier 3
-does not avoid the cost of those packages — it defers it at a higher unit price. This is the
-incremental comparison SWEBOK §15.3.4 prescribes.
+3 costs **USD 85,000** and transfers three packages whose replacement cost at the local corporate rate
+scenario is **21 EM ≈ USD 73,500**, and at regional vendor rates **USD 147,000**. The capability is
+already built and tested. Declining Tier 3 does not avoid the cost of those packages — it defers
+it at a higher unit price. This is the incremental comparison SWEBOK §15.3.4 prescribes.
 
 **Priced separately — the internal work-product extension.** §2 of the Proposal Summary
 describes turning the same foundation inward: reading long filings, case records and bulk
 returns, and drafting structured reports for URA officers. Package 8 (vision and document
 intelligence, KAval +0.61, measured 40 MiB at 4.82 MB/s) is the foundation for it and is already
-delivered. The extension itself is **out of scope of this pricing document** and should be
-scoped and priced after the taxpayer-facing system is in production, once URA's own document
-volumes and formats are known. Pricing it now would require assumptions the team is not in a
-position to make.
+delivered. The extension itself is priced as a modular add-on in §F7.
+
+### F7. Cloake Tech Limited — Multi-market commercial schedule (Local, East Africa, International)
+
+As a registered technology vendor, Cloake Tech Limited licenses the platform across three market
+tiers — **Local (Uganda)**, **East African (EAC)**, and **International** — under both **Sovereign
+Perpetual Licensing** (public revenue authorities, central banks, ministries) and **Enterprise SaaS
+/ Managed Private Cloud** (commercial banks, telecoms, utilities, insurers, multinationals).
+
+| Commercial line item | Local (Uganda) | East Africa (EAC) | International |
+| :--- | ---: | ---: | ---: |
+| **Sovereign License — Tier 1 (Core)** | USD 285,000 | USD 480,000 | USD 900,000 |
+| **Sovereign License — Tier 2 (Standard)** | USD 395,000 | USD 680,000 | USD 1,350,000 |
+| **Sovereign License — Tier 3 (Full Suite)** | **USD 480,000** | **USD 850,000** | **USD 1,750,000** |
+| **Turnkey Localization & System Integration** | USD 140k – 220k | USD 250k – 420k | USD 550k – 950k |
+| **Embedded Engineering Team (4 FTE × 24 mos)** | USD 432,000 | USD 672,000 | USD 1,152,000 |
+| **Annual Enterprise Support & SLA (20–22% AMC)** | USD 96,000 / yr | USD 170,000 / yr | USD 385,000 / yr |
+| **5-Year Sovereign Turnkey TCV** | **USD 1.34m – 1.55m** | **USD 1.95m – 2.45m** | **USD 3.80m – 4.85m** |
+| **Enterprise SaaS — Onboarding & Integration** | USD 35k – 75k | USD 75k – 150k | USD 150k – 300k |
+| **Enterprise SaaS — Commercial Plan (Text/Web)** | USD 66,000 / yr | USD 120,000 / yr | USD 240,000 / yr |
+| **Enterprise SaaS — Omnichannel Voice + Text** | USD 150,000 / yr | USD 264,000 / yr | USD 540,000 / yr |
+| **Add-On: Additional Language Pack (6 EM)** | USD 25,000 | USD 50,000 | USD 95,000 |
+| **Add-On: Internal Officer Audit Copilot (14 EM)** | USD 65,000 | USD 125,000 | USD 240,000 |
+| **Add-On: Custom Core-System / ERP Connector** | USD 18,000 | USD 38,000 | USD 75,000 |
+| **Outright Exclusive IP Buyout (M&A)** | USD 850k – 1.20m | USD 1.80m – 2.50m | USD 3.80m – 5.50m |
 
 ---
 
@@ -845,17 +868,17 @@ benefit–cost ratio; the test is whether any plausible parameter movement drive
 | Parameter varied | Low | Central | High | Effect on BCR |
 | :--- | :--- | :--- | :--- | :--- |
 | Converged effort | 140 EM | 193 EM | 230 EM | No effect on BCR — effort sets the fee reference, not the cost stream, and the fee is fixed |
-| Rate scenario | Ugandan | Vendor | International | No effect on the fee, which is fixed at USD 240,000 |
-| Five-year TCO | −20% (USD 749 k) | USD 937 k | +30% (USD 1.22 m) | Annual equivalent UGX 595 m / 744 m / 967 m; break-even conversion 0.044% / 0.055% / 0.071% of the dormant register — all far below 1% |
-| Adoption | 5% | 10% | 25% | Cost-per-contact UGX 8,155 / 4,078 / 1,631 — **the only parameter that can push A4 below A1** |
-| UGX/USD | 3,400 | 3,650 | 4,000 | Fee UGX 816 m / 876 m / 960 m; no effect on BCR, since both sides move together |
-| Discount rate | 6% | 10% | 14% | Annual-equivalent cost UGX 720 m / 744 m / 768 m; break-even conversion 0.053% / 0.055% / 0.056% |
-| Infrastructure choice | On-prem | — | Cloud | Five-year TCO +USD 166 k → annual equivalent UGX 876 m; break-even conversion 0.055% → 0.064% |
+| Rate scenario | Local | EAC Vendor | International | No effect on the local fee, which is fixed at USD 480,000 |
+| Five-year TCO | −20% (USD 1.07 m) | USD 1.34 m | +30% (USD 1.74 m) | Annual equivalent UGX 868 m / 1,085 m / 1,411 m; break-even conversion 0.064% / 0.079% / 0.103% of the dormant register — all far below 1% |
+| Adoption | 5% | 10% | 25% | Cost-per-contact UGX 11,890 / 5,945 / 2,378 — **the only parameter that can push A4 below A1** |
+| UGX/USD | 3,400 | 3,650 | 4,000 | Fee UGX 1.63 bn / 1.75 bn / 1.92 bn; no effect on BCR, since both sides move together |
+| Discount rate | 6% | 10% | 14% | Annual-equivalent cost UGX 1,050 m / 1,085 m / 1,120 m; break-even conversion 0.077% / 0.079% / 0.082% |
+| Infrastructure choice | On-prem | — | Cloud | Five-year TCO +USD 166 k → annual equivalent UGX 1,219 m; break-even conversion 0.079% → 0.089% |
 
 **The decision is insensitive to every parameter except adoption.** Under all cost and rate
-movements tested, the break-even benefit stays inside 0.044%–0.071% of the dormant register —
-between one in 1,400 and one in 2,300 registrants per year. Only a sustained failure of adoption
-below roughly **382 contacts/day** (§E3) reverses the decision.
+movements tested, the break-even benefit stays inside 0.064%–0.103% of the dormant register —
+between one in 970 and one in 1,560 registrants per year. Only a sustained failure of adoption
+below roughly **557 contacts/day** (§E3) reverses the decision.
 
 **This locates the risk precisely, and it is not an engineering risk.** It is a channel-adoption
 risk, and it is mitigated by the things §B4 ranks highest: voice, local language, and presence on
@@ -867,12 +890,12 @@ Expected-value analysis across three adoption scenarios, probabilities **[E]**:
 
 | Scenario | p | Deflection | Conversion of dormant register | Annual benefit (UGX) |
 | :--- | ---: | ---: | ---: | ---: |
-| Low | 0.25 | 250/day | 0.03% | 0.73 bn |
-| Central | 0.50 | 500/day | 0.055% | 1.39 bn |
-| High | 0.25 | 1,250/day | 0.14% | 3.51 bn |
-| **Expected value** | | | | **1.755 bn** |
+| Low | 0.25 | 400/day | 0.04% | 1.06 bn |
+| Central | 0.50 | 850/day | 0.08% | 2.18 bn |
+| High | 0.25 | 2,000/day | 0.20% | 5.29 bn |
+| **Expected value** | | | | **2.68 bn** |
 
-**Expected BCR = 1.755 / 0.744 = 2.36.** The low scenario alone still clears BCR = 0.98 — at the
+**Expected BCR = 2.68 / 1.085 = 2.47.** The low scenario alone clears BCR = 0.98 — at the
 5th-percentile outcome the programme roughly breaks even, and every scenario above it returns a
 multiple.
 
@@ -880,7 +903,7 @@ multiple.
 
 §15.2.7: *"The software engineer needs to 'close the loop' on estimates by comparing them to the
 actual outcomes. Otherwise, no one will ever know if the estimates were good."* The following
-are the estimates in this document that URA should hold the team to, with the baseline each is
+are the estimates in this document that URA should hold Cloake Tech Limited to, with the baseline each is
 measured against. Each is already instrumented — the analytics, tracing and evaluation packages
 (13) exist to produce exactly these numbers.
 
@@ -892,52 +915,55 @@ measured against. Each is already instrumented — the analytics, tracing and ev
 | Contacts deflected per day | Not yet measurable | Monthly from go-live | Analytics dashboard; contact-centre volume comparison |
 | Conversion of dormant registrants | Not yet measurable | Annually | URA register data — **only URA can measure this** |
 | Officer time released | Not yet measurable | Quarterly | Ticket volumes and handling times, staff workbench |
-| Five-year TCO USD 936,600 | — | Annually | URA finance against the §D4 table |
+| Five-year TCO USD 1,339,800 | — | Annually | URA finance against the §D4 table |
 
 The last three are the estimates most likely to be wrong, and the two that matter most for the
-BCR can only be closed by URA. The team recommends they be written into the engagement as joint
+BCR can only be closed by URA. Cloake Tech Limited recommends they be written into the engagement as joint
 reporting obligations rather than left to goodwill.
 
 ### G4. Assumptions and exclusions
 
 **Assumptions carried.** UGX 3,650/USD; 10% social discount rate; 4-year GPU economic life;
 5-year planning horizon; on-premises hosting; Year-1 adoption of 10% of the register; all three
-labour rate scenarios; the unit parameters *A* (remittance per newly-compliant taxpayer) and *C*
+corporate labour rate scenarios; the unit parameters *A* (remittance per newly-compliant taxpayer) and *C*
 (cost per human-served contact), which only URA holds.
 
-**Excluded from every figure in this document.** URA-side project management and procurement
-cost; identity-provider licensing and integration into URA's existing IdP; WhatsApp Business API
-fees and channel commercial terms; network and connectivity provisioning; URA staff time for
-subject-matter validation; legal review of the IP assignment and data-sharing agreement; the
-internal work-product extension (§F6); and any integration with the taxpayer registry, EFRIS or
-the portal, which §5.1 of the Proposal Summary places under URA IT supervision and whose cost
-cannot be estimated without access.
+**Excluded from every figure in this document.** Applicable statutory taxes (18% VAT, WHT);
+URA-side project management and procurement cost; identity-provider licensing and integration into
+URA's existing IdP; WhatsApp Business API fees and channel commercial terms; network and
+connectivity provisioning; URA staff time for subject-matter validation; legal review of the
+licensing and data-sharing agreement; the internal work-product extension (§F6–§F7); and any
+integration with the taxpayer registry, EFRIS or the portal, which §5.1 of the Proposal Summary
+places under URA IT supervision and whose cost is scoped separately in §F7.
 
 **What would change the price.** A material reduction in scope (the tiers of §F6 are the priced
-options); a requirement to transfer IP without the two-year engagement, which raises the fee
-because handover risk shifts entirely to URA; a requirement for the team to provide
-infrastructure rather than URA; or extension to languages beyond en/lg/sw, which is priced per
-language against package 6.
+options); a requirement for exclusive IP buyout rather than sovereign mandate licensing (§F7);
+a requirement for Cloake Tech Limited to supply hardware turnkey (+20% procurement and warranty
+margin on §F5); or extension to languages beyond en/lg/sw, which is priced per language in §F7.
 
 ---
 
 ## Summary of the offer
 
+**Cloake Tech Limited — Local Sovereign Reference Case (Uganda):**
+
 | Line | Basis | USD | UGX |
 | :--- | :--- | ---: | ---: |
-| One-time development fee and full IP assignment | §F2, milestoned §F3 | **240,000** | **876,000,000** |
-| Two-year embedded engagement, 4 specialists | §F4, recommended tier | 268,800 | 981,120,000 |
+| Sovereign enterprise license and mandate IP grant | §F2, milestoned §F3 | **480,000** | **1,752,000,000** |
+| Two-year embedded corporate engagement, 4 specialists | §F4, recommended tier | 432,000 | 1,576,800,000 |
 | Infrastructure, URA-provided | §F5 | 102,000 capex + 14,000/yr | 372 m + 51 m/yr |
-| **Five-year total cost of ownership** | §D4 | **936,600** | **3.42 bn** |
-| Annual equivalent cost at 10% | §D4 | 203,875 | 744,000,000 |
+| **Five-year total cost of ownership** | §D4 | **1,339,800** | **4.89 bn** |
+| Annual equivalent cost at 10% | §D4 | 297,220 | 1,085,000,000 |
 
 **The recommendation.** Alternative A4 scores highest on every criterion except raw cost
-(§E1), returns an expected benefit–cost ratio of 2.36 (§G2), breaks even on converting roughly
-one in two thousand dormant registrants per year (§E2), and is the only alternative that keeps
-taxpayer data in Uganda while leaving URA owning the capability outright with zero exit cost.
+(§E1), returns an expected benefit–cost ratio of 2.47 (§G2), breaks even on converting roughly
+one in 1,250 dormant registrants per year (§E2), and is the only alternative that keeps
+taxpayer data in Uganda while leaving URA with sovereign perpetual operating rights and zero exit cost.
 
-The team recommends **Tier 3 at USD 240,000**, milestoned per §F3, with the two-year engagement
-agreed alongside it and infrastructure provided by URA per §F5.
+Cloake Tech Limited recommends **Tier 3 at USD 480,000** (for Local Uganda sovereign deployment;
+**USD 850,000** for East African authorities; **USD 1,750,000** for International deployments per §F7),
+milestoned per §F3, with the two-year corporate engagement agreed alongside it and infrastructure
+provided per §F5.
 
 ---
 
@@ -973,8 +999,8 @@ All framework citations are to *SWEBOK Guide v4.0*, IEEE Computer Society, 2024
 | 15.9.2 | Multiple-Currency Analysis | *How to read the figures* |
 | 15.10.2 | Cost and Costing, TCO, sunk cost, opportunity cost | §D3, §D4, §F1 |
 | 15.10.11 | Product Life Cycle (SPLC vs SDLC) | §D4 |
-| 15.10.13 | Price and Pricing | §A1, §F1 |
-| 15.10.14 | Prioritization | §F6 |
+| 15.10.13 | Price and Pricing | §A1, §F1, §F7 |
+| 15.10.14 | Prioritization | §F6, §F7 |
 
 ### System evidence referenced
 
