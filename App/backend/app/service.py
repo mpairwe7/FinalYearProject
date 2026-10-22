@@ -8435,6 +8435,12 @@ class ChatModel:
                 next_t = lesson["next_topics"][0].replace("_", " ").title()
                 actions.append(f"Explore {next_t}")
 
+        suspended_wf = self._get_suspended_workflow_name(state_thread_id)
+        if suspended_wf:
+            cont_act = _continue_flow_action(suspended_wf)
+            if cont_act not in actions:
+                actions.insert(0, cont_act)
+
         try:
             db.upsert_conversation_topic(
                 conversation_id=state_thread_id,
@@ -9670,7 +9676,11 @@ class ChatModel:
                     "next_actions": [],
                 }
 
-            if user_input.lower() in _WORKFLOW_RESUME_WORDS or user_input.lower() == _continue_flow_action(wf.name).lower():
+            if (
+                user_input.lower() in _WORKFLOW_RESUME_WORDS
+                or user_input.lower() == _continue_flow_action(wf.name).lower()
+                or user_input.lower() == f"guide me step by step through {wf.name}".lower()
+            ):
                 turn, _tool_messages = self._advance_workflow(session, "", thread_id, record=False)
                 prompt = turn.question or ""
                 workflow = self._workflow_view(
@@ -10060,6 +10070,20 @@ class ChatModel:
                 recent_turns=_recent_turns_for_guidance(result, user_id, tenant_id or "default"),
                 subject=user_id or None,
             )
+            if (
+                not result.get("workflow")
+                and not result.get("escalation_required")
+                and str(result.get("retrieval_mode") or "") not in ("crisis_support", "wellbeing_checkin", "escalated")
+            ):
+                suspended_wf = self._get_suspended_workflow_name(
+                    str(result.get("conversation_id") or conversation_id or "")
+                )
+                if suspended_wf:
+                    cont_act = _continue_flow_action(suspended_wf)
+                    cur_actions = list(result.get("next_actions") or [])
+                    if cont_act not in cur_actions:
+                        cur_actions.insert(0, cont_act)
+                        result["next_actions"] = cur_actions
             # reply_locale is the language the reply is actually in: when
             # translation fails, localize_reply hands back the English, and a
             # voice endpoint keying TTS off the caller's language would read

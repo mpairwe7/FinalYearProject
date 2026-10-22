@@ -213,15 +213,18 @@ def apply_turn_guidance(
     # Pillar 4 (Oct 2026): Proactive Objective Inference & Confirmation Card
     if (
         flags.is_enabled("workflows")
-        and not result.get("workflow")
-        and not result.get("escalation_required")
-        and str(result.get("retrieval_mode") or "") in _OFFER_MODES
+        and str(result.get("retrieval_mode") or "") not in SAFETY_MODES
     ):
         hypothesis = infer_taxpayer_objective(message, rewritten)
         if hypothesis is not None:
             result["objective_hypothesis"] = hypothesis
             confirm_act = str(hypothesis.get("confirm_action") or "")
-            if confirm_act and confirm_act not in actions:
+            if (
+                confirm_act
+                and confirm_act not in actions
+                and not result.get("workflow")
+                and not result.get("escalation_required")
+            ):
                 actions.insert(0, confirm_act)
 
     if str(result.get("retrieval_mode") or "") not in ("escalated", "crisis_support"):

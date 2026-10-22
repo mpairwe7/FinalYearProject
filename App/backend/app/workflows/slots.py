@@ -160,6 +160,8 @@ def _match_enum(value: str, options: list[str]) -> tuple[bool, str, str]:
         return False, value, f"Please choose one of: {', '.join(options)}"
 
     opt_words = {opt: _canonical(opt) for opt in options}
+    if "organisation" in reply and "organisation" not in options and "ngo" in options:
+        reply = ["ngo" if w == "organisation" else w for w in reply]
 
     # 1. The reply is exactly an option.
     for opt, words in opt_words.items():
