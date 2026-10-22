@@ -53,7 +53,7 @@ The policy is enforced by tests and a CI gate rather than a pin table here (Depe
 | Container images version + digest pinned (never `:latest`), in workflows and in every Dockerfile `FROM` / `COPY --from` (a binary such as uv comes from a named, pinned stage); only `App/deploy/hf-space/Dockerfile` uses our own rolled `sha-` tag; no `pull_request_target`; `workflow_run` only where reviewed (`lighthouse-live.yml`) | policy test + zizmor |
 | Node from `App/frontend/.nvmrc`, Bun from `App/frontend/.bun-version` (`node-version-file` / `bun-version-file`); both Dockerfiles use the same majors, digest-pinned | policy test |
 | Dependabot `cooldown.default-days >= 7` on every ecosystem (30 for pip/bun majors; security updates are never delayed); frontend on the `bun` ecosystem; docker watches every directory holding a Dockerfile (`/`, `/App`, `/App/backend`, `/App/backend/orpheus_sidecar`, `/App/frontend`) | policy test + zizmor `dependabot-cooldown` |
-| `cosign verify` pinned to this repo's `container-sign-provenance.yml`; signing + SLSA provenance run after every `landwind/ura-chatbot` push (`sign` job in `ura-chatbot-build-push.yml`) — not yet a deploy gate, so an image can roll out unsigned if that job fails | policy test |
+| `cosign verify` pinned to this repo's `container-sign-provenance.yml` **at a deployable ref** (`refs/heads/dev`, `refs/heads/main`, `refs/tags/v*`); `sign` runs only for those refs and gets the image name as a literal (a build output carrying it is dropped, because it contains the Docker Hub username secret); signing + SLSA provenance run after every such `landwind/ura-chatbot` push — not yet a deploy gate (G233a), so an image can roll out unsigned if that job fails | policy test |
 
 ```bash
 # Offline policy (also runs in the root pytest suite)
@@ -70,11 +70,11 @@ docker run --rm -e SHELLCHECK_OPTS=--severity=error -v "$PWD:/repo" -w /repo \
 
 **Moving to Node 26** (LTS from 2026-10-28): change `App/frontend/.nvmrc`, the `node:` stages in `App/frontend/Dockerfile` and `App/Dockerfile.cranecloud` (tag **and** digest), and `engines.node` in one PR — the policy test fails if any one of them is left behind. Rebuild and run `bun install --frozen-lockfile && bun run lint && bun run test && bun run build` inside the new image before merging.
 
-**After the first green `sign` job on `dev`:** check the signature and provenance from a workstation, then make `dispatch-deploy` / `dispatch-hf-space-roll` depend on `sign`:
+**After the first green `sign` job on `dev`:** check the signature and provenance from a workstation, then make `dispatch-deploy` / `dispatch-hf-space-roll` depend on `sign`. The first run (build-push run 39830641557, 2026-10-22) failed before signing because the image name reached it empty (G238), so no image is signed yet:
 
 ```bash
 cosign verify docker.io/landwind/ura-chatbot@<digest> \
-  --certificate-identity-regexp '^https://github\.com/mpairwe7/FinalYearProject/\.github/workflows/container-sign-provenance\.yml@refs/' \
+  --certificate-identity-regexp '^https://github\.com/mpairwe7/FinalYearProject/\.github/workflows/container-sign-provenance\.yml@refs/(heads/(dev|main)|tags/v[^/]+)$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 gh attestation verify oci://docker.io/landwind/ura-chatbot@<digest> --repo mpairwe7/FinalYearProject
 ```

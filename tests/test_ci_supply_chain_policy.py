@@ -58,6 +58,9 @@ _USES_LINE = re.compile(r"^\s*-?\s*uses:\s*(?P<ref>[^\s#]+)(?P<rest>.*)$", re.M)
 _PINNED = re.compile(r"^(?P<action>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)(?:/[^@]+)?@(?P<sha>[0-9a-f]{40})$")
 _VERSION_COMMENT = re.compile(r"#\s*v?\d+(\.\d+)*\b")
 _UNTRUSTED_EXPR = re.compile(r"\$\{\{\s*(inputs\.|github\.event\.|github\.head_ref|github\.base_ref)")
+#: The refs build-push signs from; verification accepts no other.
+_SIGNER_REFS = "@refs/(heads/(dev|main)|tags/v[^/]+)$"
+_SIGN_IF = "github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')"
 _DIGEST_IMAGE = re.compile(r"^[^\s:@]+(:[A-Za-z0-9_.-]+)?@sha256:[0-9a-f]{64}$")
 #: Our own image, rolled to an immutable ``sha-`` tag by ura-chatbot-roll-hf-space.yml.
 SELF_ROLLED = {"App/deploy/hf-space/Dockerfile": "landwind/ura-chatbot:sha-"}
@@ -273,7 +276,21 @@ def test_signatures_are_verified_against_this_repository_only():
         assert not re.search(r"certificate-identity-regexp=[\"']?\.\*[\"']?(\s|\\|$)", text), (
             f"{path.name}: cosign verify must pin the signer identity, not accept any workflow"
         )
+        # Any ref of this repo is not enough: a branch anyone can push to would
+        # sign as this workflow. Only the protected refs build-push signs from.
+        for pattern in re.findall(r"certificate-identity-regexp=\"([^\"]+)\"", text):
+            assert pattern.endswith(_SIGNER_REFS), f"{path.name}: {pattern} must end in {_SIGNER_REFS}"
     build = _load(ROOT / ".github" / "workflows" / "ura-chatbot-build-push.yml")
     sign = build["jobs"]["sign"]
     assert sign["uses"] == "./.github/workflows/container-sign-provenance.yml"
     assert "build" in ([sign["needs"]] if isinstance(sign["needs"], str) else sign["needs"])
+    assert sign["if"] == _SIGN_IF, "sign only what can be deployed: dev, main and v* tags"
+    # The image name contains the Docker Hub username, a secret, so a job
+    # output carrying it is dropped ("Skip output ... may contain secret") and
+    # the first real run signed nothing. It must be a literal.
+    env = build["env"]
+    assert sign["with"]["image"] == f"{env['REGISTRY']}/{env['IMAGE_NAME']}"
+    for name, value in (build["jobs"]["build"].get("outputs") or {}).items():
+        assert "IMAGE_NAME" not in str(value) and "image_ref" not in str(value), (
+            f"build output {name} would carry the secret-masked image name"
+        )
