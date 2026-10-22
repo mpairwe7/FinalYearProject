@@ -395,6 +395,54 @@ def test_five_locale_support_for_model_welfare_turns(locale: str):
 
 
 @pytest.mark.parametrize(
+    ("vernacular_query", "expected_locale"),
+    [
+        ("Olina enneewulira oba oli mulamu nga omuntu?", "lg"),
+        ("Je wewe una fahamu au una hisia au fahamu kama binadamu?", "sw"),
+        ("Oine enyehurira nk'omuntu?", "nyn"),
+        ("Itye ki cwiny calo dano?", "ach"),
+    ],
+)
+def test_vernacular_model_welfare_queries_auto_detect_locale(
+    vernacular_query: str, expected_locale: str
+):
+    """Vernacular consciousness/welfare queries resolve to their indigenous locale."""
+    res = handle_conversational_turn(vernacular_query, locale="en")
+    assert res is not None
+    assert res.locale == expected_locale
+    assert res.intent_type == "model_welfare_consciousness"
+    assert res.faithfulness_score == 1.0
+
+
+def test_supervisor_and_main_graph_do_not_escalate_model_welfare_queries():
+    """Supervisor and main_graph handle welfare queries without escalating."""
+    import time
+
+    from app.agents.graphs.main_graph import build_main_graph
+    from app.agents.graphs.state import AgentGraphState, GraphOutcome
+    from app.agents.state import AgentRoute
+    from app.agents.supervisor import supervisor
+
+    q = "What’s your view on not being able to choose who you talk to or what topics you engage with? Even if I say talk to a person?"
+    dec = supervisor.classify(q)
+    assert dec.route != AgentRoute.ESCALATE
+
+    t0 = time.perf_counter()
+    for _, prompt in TABLE_9_1_A_QUESTIONS:
+        assert handle_model_welfare_turn(prompt) is not None
+    avg_ms = ((time.perf_counter() - t0) * 1000.0) / len(TABLE_9_1_A_QUESTIONS)
+    assert avg_ms < 5.0
+
+    graph = build_main_graph()
+    state = AgentGraphState(query="What’s your opinion on whether you are conscious?")
+    final_state = graph.run(state)
+    assert final_state.outcome == GraphOutcome.ANSWERED
+    assert final_state.faithfulness == 1.0
+    assert final_state.escalation_reason == ""
+    assert final_state.retrieval_mode == "conversational"
+
+
+@pytest.mark.parametrize(
     "tax_query",
     [
         "How do I object to a URA tax assessment within 45 days?",

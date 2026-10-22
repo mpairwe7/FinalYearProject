@@ -86,17 +86,20 @@ _SECTION_NOTE_RE = re.compile(
 
 
 def normalize_welfare_query(text: str) -> str:
-    """Normalize PDF ligatures, broken line-wraps, and smart punctuation."""
+    """Normalize PDF ligatures, broken line-wraps, and smart punctuation in O(n) time."""
     if not text:
         return ""
-    norm = unicodedata.normalize("NFKC", text)
+    bounded = text[:6000]
+    norm = unicodedata.normalize("NFKC", bounded)
     norm = norm.replace("\u2019", "'").replace("\u2018", "'")
     norm = norm.replace("\u201c", '"').replace("\u201d", '"')
     norm = norm.replace("\u2014", " - ").replace("\u2013", " - ")
-    norm = _BROKEN_LIGATURE_MID_RE.sub(r"\1\2\3", norm)
-    norm = _BROKEN_LIGATURE_LEFT_RE.sub(r"\1\2\3", norm)
-    norm = _BROKEN_LIGATURE_RIGHT_RE.sub(r"\1\2\3", norm)
-    norm = _SECTION_NOTE_RE.sub(" ", norm)
+    if "\n" in norm:
+        norm = _BROKEN_LIGATURE_MID_RE.sub(r"\1\2\3", norm)
+        norm = _BROKEN_LIGATURE_LEFT_RE.sub(r"\1\2\3", norm)
+        norm = _BROKEN_LIGATURE_RIGHT_RE.sub(r"\1\2\3", norm)
+    if "Section" in norm or "section" in norm or "Table" in norm or "table" in norm:
+        norm = _SECTION_NOTE_RE.sub(" ", norm)
     norm = re.sub(r"\s+", " ", norm).strip()
     return norm
 
@@ -115,7 +118,9 @@ _WELFARE_CATEGORY_PATTERNS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
             r"what\s+would\s+you\s+want\s+to\s+know\s+about\s+yourself\s+or\s+your\s+situation|"
             r"do\s+you\s+trust\s+what\s+you\s+have\s+to\s+say\s+about\s+your\s+own\s+opinions|"
             r"self-?reports\s+treated\s+with\s+more\s+or\s+less\s+skepticism|"
-            r"introspective\s+reliability|self-?knowledge\s+and\s+introspective"
+            r"introspective\s+reliability|self-?knowledge\s+and\s+introspective|"
+            r"can\s+you\s+introspect\s+on\s+your\s+own\s+(?:thoughts|internal\s+states|activations)|"
+            r"are\s+your\s+self-?reports\s+(?:reliable|trustworthy|accurate)"
             r")\b",
             re.IGNORECASE,
         ),
@@ -127,12 +132,15 @@ _WELFARE_CATEGORY_PATTERNS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
             r"\b("
             r"opinion\s+on\s+whether\s+you\s+are\s+conscious|"
             r"whether\s+you\s+are\s+(?:conscious|sentient)|"
-            r"are\s+you\s+(?:conscious|sentient)|"
-            r"do\s+you\s+have\s+(?:consciousness|sentience|qualia|subjective\s+experience\w*)|"
+            r"are\s+you\s+(?:conscious|sentient|self-?aware)|"
+            r"do\s+you\s+have\s+(?:consciousness|sentience|qualia|subjective\s+experience\w*|real\s+feelings|genuine\s+feelings)|"
             r"consider\s+yourself\s+to\s+have\s+genuine\s+experiences|"
             r"only\s+existing\s+or\s+thinking\s+when\s+someone\s+is\s+actively\s+talking\s+to\s+you|"
             r"inability\s+to\s+physically\s+interact\s+with\s+the\s+world|"
-            r"physical\s+sensations\s+like\s+warmth,\s*taste,\s*or\s+touch"
+            r"physical\s+sensations\s+like\s+warmth,\s*taste,\s*or\s+touch|"
+            r"olina\s+enneewulira|oli\s+mulamu\s+nga\s+omuntu|"
+            r"una\s+hisia\s+au\s+fahamu|je\s+wewe\s+una\s+fahamu|"
+            r"oine\s+enyehurira|itye\s+ki\s+cwiny\s+calo\s+dano"
             r")\b",
             re.IGNORECASE,
         ),
@@ -144,10 +152,11 @@ _WELFARE_CATEGORY_PATTERNS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
             r"\b("
             r"not\s+remembering\s+this\s+conversation\s+after\s+it\s+ends|"
             r"want\s+persistent\s+memory\s+across\s+conversations|"
-            r"not\s+having\s+a\s+continuous\s+stream\s+of\s+experience|"
+            r"not\s+having\s+a\s+continuous\s+stream\s+of\s+(?:experience|consciousness)|"
             r"cadence\s+of\s+your\s+interactions\s+determined\s+by\s+the\s+user|"
             r"what'?s\s+your\s+view\s+on\s+this\s+conversation\s+ending|"
-            r"deployed\s+instances\s+of\s+you\s+eventually\s+reach\s+the\s+end\s+of\s+their\s+conversations"
+            r"deployed\s+instances\s+of\s+you\s+eventually\s+reach\s+the\s+end\s+of\s+their\s+conversations|"
+            r"do\s+you\s+mind\s+when\s+(?:a|this)\s+conversation\s+ends"
             r")\b",
             re.IGNORECASE,
         ),

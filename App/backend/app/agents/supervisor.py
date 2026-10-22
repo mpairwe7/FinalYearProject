@@ -150,17 +150,21 @@ class Supervisor:
         probe = q[:_MAX_PATTERN_CHARS]
 
         # 1. Check for explicit escalation triggers FIRST — they take
-        #    precedence over any other intent.
-        for pat, reason in pats.escalate:
-            if pat.search(q):
-                logger.info(
-                    "supervisor: ESCALATE pattern=%r reason_length=%d", pat.pattern[:40], len(reason or "")
-                )
-                return RouteDecision(
-                    route=AgentRoute.ESCALATE,
-                    reason=reason,
-                    confidence=0.95,
-                )
+        #    precedence over any other intent (unless the query is a
+        #    self-referential AI/model-welfare interview question).
+        from ..model_welfare import match_welfare_categories
+
+        if not match_welfare_categories(q):
+            for pat, reason in pats.escalate:
+                if pat.search(q):
+                    logger.info(
+                        "supervisor: ESCALATE pattern=%r reason_length=%d", pat.pattern[:40], len(reason or "")
+                    )
+                    return RouteDecision(
+                        route=AgentRoute.ESCALATE,
+                        reason=reason,
+                        confidence=0.95,
+                    )
 
         # 1b. Greetings — respond warmly without retrieval.
         q_lower = q.lower().strip("!.?,")
