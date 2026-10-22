@@ -214,6 +214,25 @@ WORKFLOW_PREREQUISITE_DAG: dict[str, tuple[PrerequisiteSpec, ...]] = {
             remediation_workflow_name="Payment Assistance",
         ),
     ),
+    "bwims_warehouse_guidance": (
+        PrerequisiteSpec(
+            id="bwims_request_goal",
+            label="Bonded warehouse / BWIMS enquiry category identified",
+            slot="request_goal",
+        ),
+        PrerequisiteSpec(
+            id="bwims_operator_role",
+            label="Customs stakeholder role (Importer, Clearing Agent, or Operator)",
+            slot="user_role",
+        ),
+    ),
+    "new_taxpayer_and_relief": (
+        PrerequisiteSpec(
+            id="onboarding_relief_need",
+            label="Primary compliance or penalty-relief area selected",
+            slot="taxpayer_need",
+        ),
+    ),
 }
 
 #: Declarative A2UI form box mappings for guided co-completion (Pillar 2).
@@ -291,6 +310,34 @@ WORKFLOW_FORM_SCHEMAS: dict[str, tuple[str, str, tuple[FormFieldSpec, ...]]] = {
             FormFieldSpec("Line 1", "Government Agency / Service", "mda_service"),
             FormFieldSpec("Line 2", "Reported NTR / PRN Issue", "mda_issue_kind"),
             FormFieldSpec("Line 3", "13-Digit PRN Available", "has_prn"),
+        ),
+    ),
+    "audit_invoice_compliance": (
+        "URA-EFR-INV-01",
+        "URA Tax Invoice & EFRIS Verification Schedule",
+        (
+            FormFieldSpec("Box 1", "Document Category", "doc_category"),
+            FormFieldSpec("Box 2", "Supplier TIN Visible", "supplier_tin_present"),
+            FormFieldSpec("Box 3", "Buyer TIN Visible", "buyer_tin_present"),
+            FormFieldSpec("Box 4", "Net Chargeable Amount (UGX)", "net_amount"),
+            FormFieldSpec("Box 5", "VAT Amount Shown (UGX)", "vat_amount"),
+            FormFieldSpec("Box 6", "EFRIS FDN / QR Code Present", "has_efris_code"),
+        ),
+    ),
+    "bwims_warehouse_guidance": (
+        "URA-CUS-BWM-01",
+        "URA Bonded Warehouse (BWIMS) Guidance Schedule",
+        (
+            FormFieldSpec("Sec 1", "Bonded Warehouse / BWIMS Goal", "request_goal"),
+            FormFieldSpec("Sec 2", "Customs Stakeholder Role", "user_role"),
+        ),
+    ),
+    "new_taxpayer_and_relief": (
+        "URA-TPC-REL-01",
+        "URA Taxpayer Onboarding & Statutory Relief Schedule",
+        (
+            FormFieldSpec("Sec 1", "Compliance or Relief Need", "taxpayer_need"),
+            FormFieldSpec("Sec 2", "Audit Notice / Assessment Status", "has_audit_notice"),
         ),
     ),
 }
@@ -524,7 +571,10 @@ def evaluate_prerequisites(
     for spec in specs:
         raw_val = slots.get(spec.slot) if spec.slot else None
         if raw_val in ("", None) and case_facts is not None and spec.slot:
-            raw_val = getattr(case_facts, spec.slot, None)
+            if isinstance(case_facts, Mapping):
+                raw_val = case_facts.get(spec.slot)
+            else:
+                raw_val = getattr(case_facts, spec.slot, None)
 
         if raw_val is False or str(raw_val).strip().lower() in ("false", "no", "unknown"):
             status = "missing"
@@ -646,8 +696,8 @@ def evaluate_step_up_auth(
             "mode": "recover_access",
             "reason": "URA e-Tax portal access is required to submit this declaration.",
             "login_url": "https://ura.go.ug",
-            "remediation_workflow_id": "tin_procedure_help",
-            "remediation_action": f"{GUIDE_PREFIX}TIN Registration & Account Help",
+            "remediation_workflow_id": "tin_registration",
+            "remediation_action": f"{GUIDE_PREFIX}TIN Registration Guide",
             "preserves_slots": True,
             "preserved_slot_count": len(filled_non_internal),
         }
@@ -658,7 +708,7 @@ def evaluate_step_up_auth(
             "reason": "Original identification (NIRA NIN/Passport) or URSB registration documents are required before portal submission.",
             "login_url": "https://ura.go.ug",
             "remediation_workflow_id": "mda_ntr_resolution",
-            "remediation_action": f"{GUIDE_PREFIX}Cross-MDA & NTR Verification Guide",
+            "remediation_action": f"{GUIDE_PREFIX}Cross-MDA NTR & PRN Resolution",
             "preserves_slots": True,
             "preserved_slot_count": len(filled_non_internal),
         }
@@ -736,33 +786,87 @@ def build_stall_scaffolding(
 
 def bind_document_facts_to_workflow(
     session: WorkflowSession,
-    doc_facts: Mapping[str, Any] | None,
+    doc_facts: Any | None,
 ) -> list[str]:
     """Auto-populate unfilled workflow slots from analysed OCR/document metadata (Pillar 6 'Snap-to-Fill').
 
-    Returns the list of slot names that were pre-filled from the document.
-    Never overwrites a slot the taxpayer has already answered directly.
+    Accepts either a ``Mapping`` of document facts or a ``DocumentRecord``
+    instance. Returns the list of slot names that were pre-filled from the
+    document. Never overwrites a slot the taxpayer has already answered directly.
     """
-    if not doc_facts or not isinstance(doc_facts, Mapping):
+    if doc_facts is None:
         return []
 
+    if isinstance(doc_facts, Mapping):
+        raw_map: Mapping[str, Any] = doc_facts
+        doc_type = str(raw_map.get("doc_type") or raw_map.get("document_type") or "").lower()
+        ocr_fields: Mapping[str, Any] = (
+            raw_map.get("fields") if isinstance(raw_map.get("fields"), Mapping) else {}
+        )
+    else:
+        doc_type = str(getattr(doc_facts, "doc_type", "") or "").lower()
+        raw_fields = getattr(doc_facts, "fields", None)
+        ocr_fields = raw_fields if isinstance(raw_fields, Mapping) else {}
+        raw_map = ocr_fields
+
+    if not doc_type and not raw_map and not ocr_fields:
+        return []
+
+    doc_tokens = {t for t in re.split(r"[^a-z0-9]+", doc_type) if t}
     candidate_map: dict[str, Any] = {}
-    doc_type = str(doc_facts.get("doc_type") or doc_facts.get("document_type") or "").lower()
-    if any(k in doc_type for k in ("invoice", "efris", "receipt", "payroll", "ledger")):
+    if doc_tokens & {"invoice", "efris", "receipt", "payroll", "ledger", "filing", "form", "assessment"}:
         candidate_map["supporting_records_ready"] = True
-    if any(k in doc_type for k in ("id", "nin", "passport", "ursb", "certificate")):
+    if doc_tokens & {"id", "nin", "passport", "ursb", "certificate", "tin", "customs"}:
         candidate_map["documents_ready"] = True
 
+    ocr_suggestions: dict[str, Any] = dict(session.slots.get("_ocr_suggestions") or {})
+    if ocr_fields.get("efris_invoice_numbers"):
+        ocr_suggestions["has_efris_code"] = True
+    if ocr_fields.get("tins"):
+        ocr_suggestions["supplier_tin_present"] = True
+        ocr_suggestions["has_tin"] = True
+    if ocr_fields.get("prns"):
+        ocr_suggestions["has_prn"] = True
+        ocr_suggestions["reference_kind"] = "prn"
+    if ocr_fields.get("ugx_amounts"):
+        ocr_suggestions["amount_known"] = True
+    if ocr_suggestions:
+        session.slots["_ocr_suggestions"] = ocr_suggestions
+
+    tax_heads = ocr_fields.get("tax_heads")
+    if isinstance(tax_heads, list) and tax_heads:
+        first_head = str(tax_heads[0] or "").strip().lower()
+        if first_head:
+            candidate_map.setdefault("tax_type", first_head)
+
     for slot_key in ("taxpayer_type", "tax_type", "filing_period", "reference_kind", "payment_channel"):
-        raw = doc_facts.get(slot_key)
+        raw = raw_map.get(slot_key)
         if isinstance(raw, str) and raw.strip():
             candidate_map[slot_key] = raw.strip().lower()
 
+    # Validate candidate slot values against the workflow's step validators when registered
+    from .registry import WorkflowRegistry
+    from .slots import validate_slot
+
+    wf_def = WorkflowRegistry.get(session.workflow_id)
+    step_validators: dict[str, str] = {}
+    if wf_def is not None:
+        for st in wf_def.steps:
+            if st.slot and st.validator:
+                step_validators[st.slot] = st.validator
+
     bound: list[str] = []
     for slot_name, val in candidate_map.items():
-        if session.slots.get(slot_name) in ("", None):
-            session.slots[slot_name] = val
-            bound.append(slot_name)
+        if session.slots.get(slot_name) not in ("", None):
+            continue
+        validator = step_validators.get(slot_name, "")
+        if validator and isinstance(val, str):
+            ok, norm_val, _ = validate_slot(val, validator)
+            if not ok:
+                continue
+            val = norm_val
+        session.slots[slot_name] = val
+        bound.append(slot_name)
 
     if bound:
         existing = list(session.slots.get("_snap_to_fill_fields") or [])

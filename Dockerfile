@@ -39,10 +39,14 @@ COPY App/backend/requirements.txt ./requirements.txt
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match
 
-# Voice receptionist (Pipecat + jellyfish phonetic keys)
+# Voice receptionist (Pipecat + jellyfish phonetic keys). Override pipecat-ai's
+# conservative Pillow<13 metadata cap via uv --override so the resolver keeps
+# Pillow>=13.0.0 (remediating CVE-2026-112393 et al.) in a single atomic pass.
 COPY App/backend/requirements-receptionist.txt ./requirements-receptionist.txt
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install -r requirements-receptionist.txt
+    printf "Pillow>=13.0.0\n" > /tmp/pillow-override.txt && \
+    uv pip install -r requirements-receptionist.txt --override /tmp/pillow-override.txt && \
+    rm -f /tmp/pillow-override.txt
 
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime - Production image

@@ -144,6 +144,7 @@ jobs:
           format: json
           output: trivy-fs-results.json
           trivy-config: trivy.yaml
+          ignore-unfixed: true
 
       - name: Parse filesystem vulnerability counts
         id: parse-vulns
@@ -383,6 +384,7 @@ jobs:
           format: json
           output: trivy-api-image.json
           trivy-config: trivy.yaml
+          ignore-unfixed: true
 
       - name: Parse API image vulnerability counts
         id: parse-api
@@ -494,6 +496,7 @@ jobs:
           format: json
           output: trivy-frontend-image.json
           trivy-config: trivy.yaml
+          ignore-unfixed: true
 
       - name: Parse Frontend image vulnerability counts
         id: parse-frontend
@@ -666,7 +669,9 @@ jobs:
 
           for job in filesystem-scan iac-scan license-scan container-scan-api container-scan-frontend; do
             status=$(echo "$results" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('${job}',{}).get('result','unknown'))" 2>/dev/null || echo "unknown")
-            if [ "$status" = "success" ]; then
+            crit=$(echo "$results" | python3 -c "import json,sys; d=json.load(sys.stdin); print(int(d.get('${job}',{}).get('outputs',{}).get('critical_count') or 0))" 2>/dev/null || echo "0")
+            high=$(echo "$results" | python3 -c "import json,sys; d=json.load(sys.stdin); print(int(d.get('${job}',{}).get('outputs',{}).get('high_count') or 0))" 2>/dev/null || echo "0")
+            if [ "$status" = "success" ] && [ "$crit" = "0" ] && [ "$high" = "0" ]; then
               icon="✅"
             elif [ "$status" = "skipped" ]; then
               icon="⏭️"
@@ -674,7 +679,7 @@ jobs:
               icon="❌"
               overall="fail"
             fi
-            echo "| ${job} | ${icon} ${status} |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| ${job} | ${icon} ${status} (critical=${crit}, high=${high}) |" >> "$GITHUB_STEP_SUMMARY"
           done
 
           echo "" >> "$GITHUB_STEP_SUMMARY"

@@ -455,5 +455,207 @@ def test_qa_audit_subworkflow_cancel_returns_to_parent_and_anon_to_auth_migratio
             assert old_pin not in content, f"{wf_file.name} still references Node 20 action {old_pin}"
         assert "NODE_VERSION: '20'" not in content
         assert 'NODE_VERSION: "20"' not in content
+        assert "NODE_VERSION: 20" not in content
+
+
+def test_post_619_phased_audit_remediations_session_binding_goal_stack_snap_to_fill_and_sha_pins():
+    """Verify Phase 1-4 post-#619 QA audit remediations end-to-end."""
+    import re
+    import uuid
+    from types import SimpleNamespace
+
+    from app import database
+    from app.service import _ACTIVE_CONVERSATION_STATE, _ACTIVE_TENANT_ID
+    from app.turn_guidance import apply_turn_guidance
+    from app.workflows.journey_copilot import (
+        _OBJECTIVE_PATTERNS,
+        WORKFLOW_FORM_SCHEMAS,
+        WORKFLOW_PREREQUISITE_DAG,
+    )
+
+    database.init_db()
+    model = ChatModel()
+
+    # 1. Every remediation_action / confirm_action across DAG, Objectives, and Step-Up Auth resolves via match_trigger
+    for wf_id, specs in WORKFLOW_PREREQUISITE_DAG.items():
+        wf_def = WorkflowRegistry.get(wf_id)
+        assert wf_def is not None, f"Unknown workflow {wf_id} in WORKFLOW_PREREQUISITE_DAG"
+        valid_slots = {s.slot for s in wf_def.steps if s.slot}
+        for spec in specs:
+            assert spec.slot in valid_slots, f"{wf_id}.{spec.id} references non-existent slot {spec.slot}"
+            if spec.remediation_workflow:
+                rem_action = f"Guide me step by step through {spec.remediation_workflow_name}"
+                matched = WorkflowRegistry.match_trigger(rem_action)
+                assert matched is not None
+                assert matched.id == spec.remediation_workflow
+
+    for wf_id, (_code, _title, field_specs) in WORKFLOW_FORM_SCHEMAS.items():
+        wf_def = WorkflowRegistry.get(wf_id)
+        assert wf_def is not None
+        valid_slots = {s.slot for s in wf_def.steps if s.slot}
+        for fspec in field_specs:
+            assert fspec.slot in valid_slots, f"Form schema {wf_id} box {fspec.box} references unknown slot {fspec.slot}"
+
+    for _pat, meta in _OBJECTIVE_PATTERNS:
+        matched = WorkflowRegistry.match_trigger(f"Guide me step by step through {meta['workflow_name']}")
+        assert matched is not None
+        assert matched.id == meta["workflow_id"]
+
+    rf_wf = WorkflowRegistry.get("return_filing")
+    tin_wf = WorkflowRegistry.get("tin_registration")
+    assert rf_wf is not None
+    assert tin_wf is not None
+    su_recover = evaluate_step_up_auth(rf_wf, rf_wf.steps[0], {"portal_access": False})
+    assert su_recover is not None
+    matched_rec = WorkflowRegistry.match_trigger(su_recover["remediation_action"])
+    assert matched_rec is not None
+    assert matched_rec.id == su_recover["remediation_workflow_id"] == "tin_registration"
+
+    su_docs = evaluate_step_up_auth(tin_wf, tin_wf.steps[0], {"documents_ready": False})
+    assert su_docs is not None
+    matched_docs = WorkflowRegistry.match_trigger(su_docs["remediation_action"])
+    assert matched_docs is not None
+    assert matched_docs.id == su_docs["remediation_workflow_id"] == "mda_ntr_resolution"
+
+    # 2. Out-of-jurisdiction / blocked turns must never attach an objective_hypothesis
+    ooj_res = {"reply": "This service covers Uganda.", "retrieval_mode": "out_of_jurisdiction", "next_actions": []}
+    apply_turn_guidance("My client deducted 6% WHT in Kenya", ooj_res)
+    assert "objective_hypothesis" not in ooj_res
+
+    # 3. Session-bound anonymous -> authenticated migration with session_id present + side-question & parent resume pop
+    thread_id = f"conv-p1-{uuid.uuid4().hex[:10]}"
+    sess_id = f"sess-{uuid.uuid4().hex[:8]}"
+    anon_session_state = database.conversation_state_key(
+        thread_id, session_id=sess_id, user_id=None, tenant_id="default"
+    )
+    tok_s = _ACTIVE_CONVERSATION_STATE.set(anon_session_state)
+    tok_t = _ACTIVE_TENANT_ID.set("default")
+    try:
+        # Start return_filing with a DocumentRecord attachment (Pillar 6 Snap-to-Fill end-to-end!)
+        mock_attachment = SimpleNamespace(
+            doc_type="invoice",
+            fields={"tax_heads": ["vat"], "efris_invoice_numbers": ["FDN1234567890123456"]},
+        )
+        t1 = model._maybe_handle_workflow(
+            message="Help me file my return",
+            rewritten="Help me file my return",
+            thread_id=thread_id,
+            locale="en",
+            user_id=None,
+            session_id=sess_id,
+            attachments=[mock_attachment],
+        )
+        assert t1 is not None
+        assert t1["workflow"]["id"] == "return_filing"
+        # Answer step 1 (taxpayer_type = company); step 2 (tax_type='vat') was pre-filled by Snap-to-Fill attachment!
+        t2 = model._maybe_handle_workflow(
+            message="company",
+            rewritten="company",
+            thread_id=thread_id,
+            locale="en",
+            user_id=None,
+            session_id=sess_id,
+        )
+        assert t2 is not None
+        # Because tax_type='vat' was pre-filled from the invoice attachment, it skipped collect_tax_type
+        # and advanced straight to collect_period!
+        assert t2["workflow"]["step_id"] == "collect_period"
+    finally:
+        _ACTIVE_CONVERSATION_STATE.reset(tok_s)
+        _ACTIVE_TENANT_ID.reset(tok_t)
+
+    # Now user logs in (user_id="usr-p1-auth", same session_id=sess_id) and asks an off-topic side question first!
+    auth_state = database.conversation_state_key(
+        thread_id, session_id=sess_id, user_id="usr-p1-auth", tenant_id="default"
+    )
+    tok_s2 = _ACTIVE_CONVERSATION_STATE.set(auth_state)
+    tok_t2 = _ACTIVE_TENANT_ID.set("default")
+    try:
+        side_q = model._maybe_handle_workflow(
+            message="What is the penalty if I pay on the 20th instead of the 15th?",
+            rewritten="What is the penalty if I pay on the 20th instead of the 15th?",
+            thread_id=thread_id,
+            locale="en",
+            user_id="usr-p1-auth",
+            session_id=sess_id,
+        )
+        # Side question yields None so RAG answers it, AND the migrated session is safely persisted under auth_state!
+        assert side_q is None
+        old_anon_row = database.get_workflow_session(anon_session_state, tenant_id="default")
+        assert old_anon_row is not None
+        assert old_anon_row["status"] == "cancelled"
+        migrated_row = database.get_workflow_session(auth_state, tenant_id="default")
+        assert migrated_row is not None
+        assert migrated_row["status"] == "active"
+        assert migrated_row["slots"]["taxpayer_type"] == "company"
+        assert migrated_row["slots"]["tax_type"] == "vat"
+
+        # Suspended workflow name lookup resolves under auth_state even without contextvar
+        assert (
+            model._get_suspended_workflow_name(
+                thread_id, session_id=sess_id, user_id="usr-p1-auth", tenant_id="default"
+            )
+            == "Return Filing"
+        )
+
+        # Push sub-workflow tin_registration, then return to parent return_filing via parent resume code!
+        sub_turn = model._maybe_handle_workflow(
+            message="Guide me step by step through TIN Registration Guide",
+            rewritten="Guide me step by step through TIN Registration Guide",
+            thread_id=thread_id,
+            locale="en",
+            user_id="usr-p1-auth",
+            session_id=sess_id,
+        )
+        assert sub_turn is not None
+        assert sub_turn["workflow"]["id"] == "tin_registration"
+
+        pop_turn = model._maybe_handle_workflow(
+            message="URA-RET-S3-ABCD",
+            rewritten="URA-RET-S3-ABCD",
+            thread_id=thread_id,
+            locale="en",
+            user_id="usr-p1-auth",
+            session_id=sess_id,
+        )
+        assert pop_turn is not None
+        assert pop_turn["workflow"]["id"] == "return_filing"
+        # Preserved parent slots (company + vat) and parked step (collect_period) instead of resetting to Step 1!
+        assert pop_turn["workflow"]["step_id"] == "collect_period"
+        assert "taxpayer_type" in pop_turn["workflow"]["filled_slots"]
+        assert "tax_type" in pop_turn["workflow"]["filled_slots"]
+    finally:
+        _ACTIVE_CONVERSATION_STATE.reset(tok_s2)
+        _ACTIVE_TENANT_ID.reset(tok_t2)
+
+    # 4. Supply-chain gate: 100% of workflow uses: lines are 40-char SHA pinned and Crane Cloud Dockerfile is Node 24
+    repo_root = FLOWS_DIR.parents[4]
+    workflows_dir = repo_root / ".github" / "workflows"
+    uses_re = re.compile(r"^\s*-?\s*uses:\s*([^\s#]+)", re.M)
+    sha_pin_re = re.compile(r"^[^@]+@[0-9a-f]{40}$")
+    forbidden_pins = (
+        "codecov-action@b9fd7d16",
+        "fetch-metadata@d7267f60",
+        "action-baseline@2b5fc7f9",
+        "scorecard-action@2d114668",
+        "cache@27d5ce7f",
+    )
+    for wf_file in sorted(workflows_dir.glob("*.yml")):
+        content = wf_file.read_text(encoding="utf-8")
+        for match in uses_re.finditer(content):
+            action_ref = match.group(1)
+            assert sha_pin_re.match(action_ref), f"Unpinned action in {wf_file.name}: {action_ref}"
+        for bad in forbidden_pins:
+            assert bad not in content, f"{wf_file.name} still contains outdated action pin {bad}"
+
+    crane_df = (repo_root / "App" / "Dockerfile.cranecloud").read_text(encoding="utf-8")
+    assert "FROM node:24-bookworm-slim AS frontend-builder" in crane_df
+    assert "COPY --from=oven/bun:1.4.3-slim /usr/local/bin/bun /usr/local/bin/bun" in crane_df
+    assert "COPY --from=frontend-builder /usr/local/bin/node /usr/local/bin/node" in crane_df
+    assert "App/frontend/bun.lock*" in crane_df
+    assert "node:20" not in crane_df
+    assert "setup_20.x" not in crane_df
+    assert "setup_24.x" not in crane_df
+
 
 

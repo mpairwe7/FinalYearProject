@@ -211,9 +211,17 @@ def apply_turn_guidance(
         actions.insert(0, offer)
 
     # Pillar 4 (Oct 2026): Proactive Objective Inference & Confirmation Card
+    _no_objective_modes = SAFETY_MODES | {
+        "out_of_jurisdiction",
+        "out_of_scope",
+        "blocked",
+        "officer_reply",
+        "escalated",
+    }
     if (
         flags.is_enabled("workflows")
-        and str(result.get("retrieval_mode") or "") not in SAFETY_MODES
+        and not result.get("escalation_required")
+        and str(result.get("retrieval_mode") or "") not in _no_objective_modes
     ):
         hypothesis = infer_taxpayer_objective(message, rewritten)
         if hypothesis is not None:

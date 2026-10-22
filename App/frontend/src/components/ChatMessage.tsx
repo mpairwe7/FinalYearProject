@@ -641,9 +641,16 @@ const ChatMessage = memo(ChatMessageInner, (prev, next) => {
     prev.turn.officerHours?.onDuty === next.turn.officerHours?.onDuty &&
     prev.turn.officerHours?.hours === next.turn.officerHours?.hours &&
     prev.turn.officerHours?.nextOnDuty === next.turn.officerHours?.nextOnDuty &&
+    prev.turn.workflow?.id === next.turn.workflow?.id &&
     prev.turn.workflow?.status === next.turn.workflow?.status &&
     prev.turn.workflow?.step_index === next.turn.workflow?.step_index &&
     prev.turn.workflow?.resume_code === next.turn.workflow?.resume_code &&
+    prev.turn.workflow?.form_draft?.completion_pct === next.turn.workflow?.form_draft?.completion_pct &&
+    prev.turn.workflow?.step_up_auth?.mode === next.turn.workflow?.step_up_auth?.mode &&
+    prev.turn.workflow?.step_up_auth?.remediation_action === next.turn.workflow?.step_up_auth?.remediation_action &&
+    prev.turn.workflow?.step_up_auth?.register_action === next.turn.workflow?.step_up_auth?.register_action &&
+    (prev.turn.workflow?.journey_gps?.parent_goals?.length ?? 0) ===
+      (next.turn.workflow?.journey_gps?.parent_goals?.length ?? 0) &&
     prev.turn.workflow?.scaffolding?.failed_attempts === next.turn.workflow?.scaffolding?.failed_attempts &&
     prev.turn.objectiveHypothesis?.objective_id === next.turn.objectiveHypothesis?.objective_id &&
     actionsSignature(prev.turn.nextActions) === actionsSignature(next.turn.nextActions) &&

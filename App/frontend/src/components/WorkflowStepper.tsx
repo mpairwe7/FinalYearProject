@@ -45,9 +45,17 @@ function WorkflowStepperInner({ workflow, onSelectOption }: WorkflowStepperProps
         </div>
       </div>
 
-      {workflow.journey_gps?.is_paused_for_tangent && (
+      {(workflow.journey_gps?.is_paused_for_tangent ||
+        (workflow.journey_gps?.parent_goals && workflow.journey_gps.parent_goals.length > 0)) && (
         <div className="workflow-journey-gps-banner" data-testid="workflow-journey-gps">
-          <span>{t('workflow.journeyGpsPaused')}</span>
+          {workflow.journey_gps?.is_paused_for_tangent && (
+            <span>{t('workflow.journeyGpsPaused')}</span>
+          )}
+          {workflow.journey_gps?.parent_goals && workflow.journey_gps.parent_goals.length > 0 && (
+            <span className="workflow-journey-gps-stack" data-testid="workflow-journey-gps-stack">
+              {workflow.journey_gps.parent_goals.map((pg) => pg.workflow_id).join(' → ')} → {workflow.id}
+            </span>
+          )}
         </div>
       )}
 
@@ -157,6 +165,24 @@ function WorkflowStepperInner({ workflow, onSelectOption }: WorkflowStepperProps
             {t('workflow.stepUpAuth', { count: workflow.step_up_auth.preserved_slot_count ?? 0 })}
           </div>
           <p className="workflow-step-up-reason">{workflow.step_up_auth.reason}</p>
+          {(workflow.step_up_auth.remediation_action || workflow.step_up_auth.register_action) &&
+            onSelectOption && (
+              <div className="workflow-step-up-actions">
+                <button
+                  type="button"
+                  className="workflow-option-btn workflow-step-up-action-btn"
+                  data-testid="workflow-step-up-action-btn"
+                  onClick={() =>
+                    onSelectOption(
+                      (workflow.step_up_auth!.remediation_action ||
+                        workflow.step_up_auth!.register_action)!,
+                    )
+                  }
+                >
+                  {workflow.step_up_auth.remediation_action || workflow.step_up_auth.register_action}
+                </button>
+              </div>
+            )}
         </div>
       )}
 

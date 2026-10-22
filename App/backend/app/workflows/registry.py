@@ -167,7 +167,11 @@ def _make_turn(
     step_index, total_steps, all_steps = compute_workflow_progress(wf, session, step.id if step else "")
     effective_slot = slot_name or (step.slot if step else "")
     options_list = list(step.options) if step else []
-    prereqs = evaluate_prerequisites(wf.id, session.slots)
+    prereqs = evaluate_prerequisites(
+        wf.id,
+        session.slots,
+        case_facts=session.slots.get("_case_facts"),
+    )
     scaffolding = build_stall_scaffolding(
         wf.id,
         step.id if step else "",
@@ -509,6 +513,28 @@ class WorkflowRegistry:
         return True
 
     @classmethod
+    def pop_to_workflow(cls, session: WorkflowSession, target_workflow_id: str) -> bool:
+        """Pop ``goal_stack`` back to *target_workflow_id* when it is an ancestor on the stack."""
+        if not target_workflow_id or target_workflow_id not in cls._workflows:
+            return False
+        if not session.goal_stack and isinstance(session.slots.get("_goal_stack"), list):
+            session.goal_stack = list(session.slots["_goal_stack"])
+        if not any(str(g.get("workflow_id") or "") == target_workflow_id for g in session.goal_stack):
+            return False
+        while session.goal_stack:
+            entry = session.goal_stack.pop()
+            if str(entry.get("workflow_id") or "") == target_workflow_id:
+                if session.goal_stack:
+                    session.slots["_goal_stack"] = list(session.goal_stack)
+                else:
+                    session.slots.pop("_goal_stack", None)
+                session.workflow_id = target_workflow_id
+                session.current_step_idx = int(entry.get("step_idx") or 0)
+                session.completed = False
+                return True
+        return False
+
+    @classmethod
     def pending_step(cls, session: WorkflowSession) -> WorkflowStep | None:
         """The step this session is waiting on, without advancing it.
 
@@ -522,7 +548,9 @@ class WorkflowRegistry:
         idx = session.current_step_idx
         while idx < len(wf.steps):
             candidate = wf.steps[idx]
-            if _eval_condition(candidate.when, session.slots):
+            if _eval_condition(candidate.when, session.slots) and not (
+                candidate.slot and session.slots.get(candidate.slot) not in ("", None)
+            ):
                 return candidate
             idx += 1
         return None
@@ -689,6 +717,10 @@ class WorkflowRegistry:
         while session.current_step_idx < len(wf.steps):
             nxt = wf.steps[session.current_step_idx]
             if not _eval_condition(nxt.when, session.slots):
+                session.current_step_idx += 1
+                continue
+
+            if nxt.slot and session.slots.get(nxt.slot) not in ("", None):
                 session.current_step_idx += 1
                 continue
 

@@ -578,7 +578,7 @@ risk_tracking:
 
   container-baseimage-backdooring@nextjs-frontend:
     status: mitigated
-    justification: "Official node:20-bookworm-slim base image, non-root runtime, Bun lockfile integrity verification."
+    justification: "Official node:24-bookworm-slim / node:26-bookworm-slim base image, non-root runtime, Bun lockfile integrity verification."
     ticket: "SEC-SUP-03"
     date: "2026-08-29"
     checked_by: "URA AI Security Team"

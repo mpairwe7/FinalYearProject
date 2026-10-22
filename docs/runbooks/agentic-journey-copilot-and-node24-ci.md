@@ -52,5 +52,12 @@ All GitHub Actions workflows in `.github/workflows/*.yml` must use `NODE_VERSION
 | `actions/attest-build-provenance` | `v4.2.2` | `4d101475d8b20a2381f78447822ac1eab6504dd8` |
 | `docker/build-push-action` | `v7.4.0` | `c3c9e263c25d99ce0380d002d59b67737d91b0dc` |
 | `docker/login-action` | `v4.6.0` | `dbcb813823bdd20940b903addbd779551569679f` |
+| `codecov/codecov-action` | `v7.1.1` | `303a32d7a59b442fa8d48b6a1cc6825c09c847a5` |
+| `dependabot/fetch-metadata` | `v3.1.0` | `25dd0e34f4fe68f24cc83900b1fe3fe149efef98` |
+| `gitleaks/gitleaks-action` | `v3.0.0` | `e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e` |
+| `zaproxy/action-baseline` | `v0.15.0` | `de8ad967d3548d44ef623df22cf95c3b0baf8b25` |
+| `ossf/scorecard-action` | `v2.5.0` | `fa7117db83c52d787ae5a89f350999701505d78e` |
+| `trufflesecurity/trufflehog` | `v3.97.4` | `363923b901c911a9164f50b6c423f47c15372b1c` |
+| `GitGuardian/ggshield-action` | `v1.54.0` | `7059aef1ffb7d2374ce27201144f5613beecefe0` |
 
-`tests/agents/test_journey_copilot_pillars.py` enforces in CI that no deprecated Node.js 20 action SHAs or `NODE_VERSION: 20` declarations are reintroduced.
+`tests/agents/test_journey_copilot_pillars.py` enforces in CI that 100% of workflow `uses:` steps are 40-char SHA-pinned and no deprecated Node.js 20 action SHAs or `NODE_VERSION: 20` declarations are reintroduced.

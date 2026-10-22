@@ -2290,6 +2290,30 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             recent_turns=history_turns,
             subject=user_id or None,
         )
+        if (
+            not result.get("workflow")
+            and not result.get("escalation_required")
+            and str(result.get("retrieval_mode") or "")
+            not in ("crisis_support", "wellbeing_checkin", "escalated")
+            and hasattr(model, "_get_suspended_workflow_name")
+        ):
+            try:
+                suspended_wf = await asyncio.to_thread(
+                    model._get_suspended_workflow_name,
+                    str(result.get("conversation_id") or conversation_id or ""),
+                    session_id=session_id,
+                    user_id=user_id,
+                    tenant_id=tenant_id,
+                )
+            except Exception:
+                logger.debug("suspended workflow lookup skipped", exc_info=True)
+                suspended_wf = None
+            if suspended_wf:
+                cont_act = _continue_flow_action(suspended_wf)
+                cur_actions = list(result.get("next_actions") or [])
+                if cont_act not in cur_actions:
+                    cur_actions.insert(0, cont_act)
+                    result["next_actions"] = cur_actions
         if locale not in ("", "en"):
             if result.get("resources"):
                 result["resources"] = [ChatModel._localize_resource(r, locale) for r in result["resources"]]
@@ -4827,15 +4851,34 @@ class ChatModel:
             return [_continue_flow_action(suspended_workflow), *base_actions]
         return base_actions
 
-    def _get_suspended_workflow_name(self, thread_id: str) -> str | None:
-        if not flags.is_enabled("workflows"):
+    def _get_suspended_workflow_name(
+        self,
+        thread_id: str,
+        *,
+        session_id: str | None = None,
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> str | None:
+        if not flags.is_enabled("workflows") or not thread_id:
             return None
         try:
-            persisted = db.get_workflow_session(
-                _state_conversation_id(thread_id), tenant_id=_state_tenant_id()
+            eff_tenant = tenant_id or _state_tenant_id()
+            candidate_keys: list[str] = [_state_conversation_id(thread_id)]
+            scoped_key = db.conversation_state_key(
+                thread_id,
+                session_id=session_id,
+                user_id=user_id,
+                tenant_id=eff_tenant,
             )
-            if not persisted and _state_conversation_id(thread_id) != thread_id:
-                persisted = db.get_workflow_session(thread_id, tenant_id=_state_tenant_id())
+            if scoped_key not in candidate_keys:
+                candidate_keys.append(scoped_key)
+            if thread_id not in candidate_keys:
+                candidate_keys.append(thread_id)
+            persisted = None
+            for key in candidate_keys:
+                persisted = db.get_workflow_session(key, tenant_id=eff_tenant)
+                if persisted:
+                    break
             if persisted and persisted.get("status") == "active":
                 wf = WorkflowRegistry.get(persisted.get("workflow_id", ""))
                 if wf:
@@ -5114,6 +5157,12 @@ class ChatModel:
         *,
         user_id: str | None = None,
     ) -> None:
+        active_cf = _ACTIVE_CASE_FACTS.get()
+        if active_cf is not None:
+            if hasattr(active_cf, "to_dict") and callable(active_cf.to_dict):
+                session.slots["_case_facts"] = active_cf.to_dict()
+            elif isinstance(active_cf, dict):
+                session.slots["_case_facts"] = dict(active_cf)
         if user_id:
             from .workflows.journey_copilot import elevate_anonymous_workflow_session
 
@@ -9528,11 +9577,14 @@ class ChatModel:
     def _close_flow_left_for(self, persisted: dict[str, Any], thread_id: str) -> None:
         """Count the flow the taxpayer left as cancelled, at the step it was on."""
         pending = WorkflowRegistry.pending_step(self._restore_workflow_session(persisted))
-        db.complete_workflow_session(
-            _state_conversation_id(thread_id),
-            status="cancelled",
-            tenant_id=_state_tenant_id(),
-        )
+        persisted_cid = str(persisted.get("conversation_id") or "")
+        state_cid = _state_conversation_id(thread_id)
+        for cid in {c for c in (persisted_cid, state_cid) if c}:
+            db.complete_workflow_session(
+                cid,
+                status="cancelled",
+                tenant_id=_state_tenant_id(),
+            )
         self._record_journey(str(persisted.get("workflow_id") or ""), "cancelled", pending.id if pending else "")
 
     def _maybe_handle_workflow(
@@ -9544,6 +9596,8 @@ class ChatModel:
         locale: str,
         personalization: dict[str, Any] | None = None,
         user_id: str | None = None,
+        session_id: str | None = None,
+        attachments: list[Any] | None = None,
         raw_message: str = "",
     ) -> dict[str, Any] | None:
         """Start or continue a durable guided workflow when appropriate."""
@@ -9557,21 +9611,58 @@ class ChatModel:
             persisted = db.get_workflow_session(thread_id, tenant_id=state_tenant_id)
         # QA-1: When an anonymous taxpayer elevates to an authenticated session mid-conversation,
         # _scoped_conversation_state computes a user-scoped state_thread_id while the existing
-        # workflow row lives under the anonymous state key for the same thread_id. Adopt and
-        # migrate that anonymous row (only when unowned) so zero slots are lost across login.
+        # workflow row lives under the anonymous state key (with or without session_id) for the
+        # same thread_id. Adopt and migrate that anonymous row (only when unowned) so zero slots
+        # are lost across login (NIST SP 800-63B-4 session binding & W3C WCAG 2.2 AA SC 3.3.7).
         migrated_anon_key = ""
         if not persisted and user_id and thread_id:
-            anon_key = db.conversation_state_key(thread_id, user_id=None, tenant_id=state_tenant_id)
-            if anon_key not in (state_thread_id, thread_id):
+            candidate_anon_keys: list[str] = []
+            if session_id:
+                candidate_anon_keys.append(
+                    db.conversation_state_key(
+                        thread_id,
+                        session_id=session_id,
+                        user_id=None,
+                        tenant_id=state_tenant_id,
+                    )
+                )
+            unsessioned_anon = db.conversation_state_key(
+                thread_id, user_id=None, tenant_id=state_tenant_id
+            )
+            if unsessioned_anon not in candidate_anon_keys:
+                candidate_anon_keys.append(unsessioned_anon)
+            for anon_key in candidate_anon_keys:
+                if anon_key in (state_thread_id, thread_id):
+                    continue
                 anon_row = db.get_workflow_session(anon_key, tenant_id=state_tenant_id)
                 if anon_row and not anon_row.get("user_id"):
                     persisted = anon_row
                     migrated_anon_key = anon_key
+                    break
         # Past the conversation's retention the session keeps only its outcome
         # (the answers are blanked), so it is history, not something to resume.
         updated_at = (persisted or {}).get("updated_at")
         if updated_at is not None and float(updated_at) < time.time() - db.conversation_ttl_seconds():
             persisted = None
+        if migrated_anon_key and persisted and persisted.get("status") == "active":
+            migrated_session = self._restore_workflow_session(persisted)
+            self._apply_personalization_to_workflow(
+                migrated_session, personalization, user_id=user_id
+            )
+            db.upsert_workflow_session(
+                state_thread_id,
+                migrated_session.workflow_id,
+                migrated_session.current_step_idx,
+                migrated_session.slots,
+                status="active",
+                last_prompt=str(persisted.get("last_prompt") or ""),
+                user_id=user_id or "",
+                tenant_id=state_tenant_id,
+            )
+            db.complete_workflow_session(
+                migrated_anon_key, status="cancelled", tenant_id=state_tenant_id
+            )
+            persisted = db.get_workflow_session(state_thread_id, tenant_id=state_tenant_id) or persisted
         # A flow the taxpayer asks to leave for another stays active until the
         # new one has started; if the start is refused below, they keep it.
         leaving: dict[str, Any] | None = None
@@ -9582,10 +9673,11 @@ class ChatModel:
         if persisted and persisted.get("status") == "active":
             session = self._restore_workflow_session(persisted)
             self._apply_personalization_to_workflow(session, personalization, user_id=user_id)
-            if migrated_anon_key:
-                db.complete_workflow_session(
-                    migrated_anon_key, status="completed", tenant_id=state_tenant_id
-                )
+            if attachments:
+                from .workflows.journey_copilot import bind_document_facts_to_workflow
+
+                for att in attachments:
+                    bind_document_facts_to_workflow(session, att)
             wf = WorkflowRegistry.get(session.workflow_id)
             if wf is None:
                 db.complete_workflow_session(
@@ -9683,6 +9775,16 @@ class ChatModel:
             ):
                 turn, _tool_messages = self._advance_workflow(session, "", thread_id, record=False)
                 prompt = turn.question or ""
+                db.upsert_workflow_session(
+                    state_thread_id,
+                    session.workflow_id,
+                    session.current_step_idx,
+                    session.slots,
+                    status="active",
+                    last_prompt=prompt,
+                    user_id=user_id or "",
+                    tenant_id=state_tenant_id,
+                )
                 workflow = self._workflow_view(
                     session,
                     name=wf.name,
@@ -9892,19 +9994,33 @@ class ChatModel:
         session = WorkflowRegistry.create_session(matched.id)
         if session is None:
             return None
-        if leaving is not None and is_prerequisite_remediation(
-            str(leaving.get("workflow_id") or ""), matched.id
-        ):
-            session = self._restore_workflow_session(leaving)
-            WorkflowRegistry.push_subworkflow(
-                session, matched.id, reason="prerequisite_remediation"
-            )
-        elif leaving is not None:
-            self._close_flow_left_for(leaving, thread_id)
-        self._record_journey(session.workflow_id, "started")
+        popped_parent = False
+        if leaving is not None:
+            leaving_session = self._restore_workflow_session(leaving)
+            if WorkflowRegistry.pop_to_workflow(leaving_session, matched.id):
+                session = leaving_session
+                popped_parent = True
+            elif is_prerequisite_remediation(
+                str(leaving.get("workflow_id") or ""), matched.id
+            ):
+                session = leaving_session
+                WorkflowRegistry.push_subworkflow(
+                    session, matched.id, reason="prerequisite_remediation"
+                )
+            else:
+                self._close_flow_left_for(leaving, thread_id)
+        if not popped_parent:
+            self._record_journey(session.workflow_id, "started")
         self._apply_personalization_to_workflow(session, personalization, user_id=user_id)
+        if attachments:
+            from .workflows.journey_copilot import bind_document_facts_to_workflow
 
-        turn, tool_messages = self._advance_workflow(session, "", thread_id)
+            for att in attachments:
+                bind_document_facts_to_workflow(session, att)
+
+        turn, tool_messages = self._advance_workflow(
+            session, "", thread_id, record=not popped_parent
+        )
         prompt = turn.question or f"Let's start the {matched.name} workflow."
         if tool_messages:
             prompt = "\n\n".join(tool_messages + [prompt]).strip()
@@ -9926,11 +10042,17 @@ class ChatModel:
             pending_slot=turn.slot_name,
             turn=turn,
         )
-        reply = (
-            f"I can guide you through the {matched.name} process step by step.\n\n{prompt}"
-            if prompt
-            else f"I can guide you through the {matched.name} process step by step."
-        )
+        if popped_parent:
+            reply = (
+                f"Returning to **{matched.name}** "
+                f"(Step {turn.step_index} of {turn.total_steps}):\n\n{prompt}"
+            ).strip()
+        else:
+            reply = (
+                f"I can guide you through the {matched.name} process step by step.\n\n{prompt}"
+                if prompt
+                else f"I can guide you through the {matched.name} process step by step."
+            )
         return {
             "reply": reply,
             "sources": [],
@@ -10076,7 +10198,10 @@ class ChatModel:
                 and str(result.get("retrieval_mode") or "") not in ("crisis_support", "wellbeing_checkin", "escalated")
             ):
                 suspended_wf = self._get_suspended_workflow_name(
-                    str(result.get("conversation_id") or conversation_id or "")
+                    str(result.get("conversation_id") or conversation_id or ""),
+                    session_id=session_id,
+                    user_id=user_id,
+                    tenant_id=tenant_id,
                 )
                 if suspended_wf:
                     cont_act = _continue_flow_action(suspended_wf)
@@ -10592,6 +10717,8 @@ class ChatModel:
                         locale=locale,
                         personalization=personalization,
                         user_id=user_id,
+                        session_id=session_id,
+                        attachments=attachments,
                         raw_message=message,
                     )
                 if workflow_result:
@@ -12509,6 +12636,8 @@ class ChatModel:
                 locale=locale,
                 personalization=personalization,
                 user_id=user_id,
+                session_id=session_id,
+                attachments=attachments,
                 raw_message=message,
             )
         if workflow_result:
