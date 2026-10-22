@@ -47,7 +47,7 @@ RUN bun run build
 # Cloud image ships. This ran node:26 while CI tested 24, and 26 is a Current
 # (non-LTS) release until 2026-10-28; move .nvmrc, both Dockerfiles and
 # engines together (tests/test_ci_supply_chain_policy.py enforces it).
-FROM node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS runner
+FROM node:25-bookworm-slim@sha256:81db02c4b671288a03915da9534dbd54f96d0e7c24d80ccc54f5b36b2e684370 AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
