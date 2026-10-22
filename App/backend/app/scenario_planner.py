@@ -885,8 +885,8 @@ def _rule_mda_interdependence(facts: CaseFacts, question: str) -> list[ToolCallS
                 },
             )
         )
-    elif re.search(
-        r"\b(nira|national\s+id|\bnin\b)\b.*\b(mismatch|reject\w*|surname|given\s+name|instant\s+tin)\b",
+    elif re.search(r"\b(nira|national\s+id|\bnin\b)\b", q, re.IGNORECASE) and re.search(
+        r"\b(mismatch|reject\w*|surname|given\s+name|instant\s+tin)\b",
         q,
         re.IGNORECASE,
     ):
@@ -966,10 +966,10 @@ def _rule_mda_interdependence(facts: CaseFacts, question: str) -> list[ToolCallS
     if re.search(
         r"\b(nil\s+return|zero\s+sales|no\s+sales|inactive\s+tin|dormant\s+tin|closing\s+(?:my\s+)?(?:business|shop)|"
         r"pausing\s+(?:my\s+)?business|vat\s+deregist\w*|deregister\s+(?:from\s+)?vat|"
-        r"salaried\s+employee\s+only|single\s+employer.*\bfile\b.*\breturns?)\b",
+        r"salaried\s+employee\s+only)\b",
         q,
         re.IGNORECASE,
-    ):
+    ) or (re.search(r"\bsingle\s+employer\b", q, re.IGNORECASE) and re.search(r"\breturns?\b", q, re.IGNORECASE)):
         m_unfiled = re.search(r"\b(\d{1,2})\s+months?\b", q, re.IGNORECASE)
         unfiled_m = int(m_unfiled.group(1)) if m_unfiled else 1
         if re.search(r"\b(vat\s+deregist\w*|deregister\s+(?:from\s+)?vat)\b", q, re.IGNORECASE):

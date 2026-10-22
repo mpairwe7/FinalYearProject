@@ -1043,87 +1043,74 @@ def _stream_pdf_with_tls_fallback(
     title: str = "",
     source_page: str = "",
 ) -> dict[str, Any]:
-    """Stream *url* over HTTPS with redirect allowlist validation and Uganda Gov intermediate CA fallback."""
-    import ssl
+    """Stream *url* over HTTPS with strict TLS verification and redirect allowlist validation."""
     import httpx
 
-    def _run_stream(verify_tls: bool) -> dict[str, Any]:
-        current = url
-        with httpx.Client(timeout=timeout, follow_redirects=False, headers=headers, verify=verify_tls) as client:
-            for _hop in range(6):
-                with client.stream("GET", current) as resp:
-                    if resp.is_redirect:
-                        loc = resp.headers.get("Location", "").strip()
-                        if not loc:
-                            raise CorpusValidationError(f"Redirect missing Location header for {current}")
-                        nxt = str(resp.url.join(loc))
-                        parsed = urlparse(nxt)
-                        host = (parsed.hostname or "").strip().lower().rstrip(".")
-                        if parsed.scheme != "https" or host not in ALLOWED_STATUTORY_PDF_HOSTS:
-                            raise CorpusValidationError(f"Disallowed PDF redirect target: {nxt}")
-                        current = nxt
+    current = url
+    with httpx.Client(timeout=timeout, follow_redirects=False, headers=headers) as client:
+        for _hop in range(6):
+            with client.stream("GET", current) as resp:
+                if resp.is_redirect:
+                    loc = resp.headers.get("Location", "").strip()
+                    if not loc:
+                        raise CorpusValidationError(f"Redirect missing Location header for {current}")
+                    nxt = str(resp.url.join(loc))
+                    parsed = urlparse(nxt)
+                    host = (parsed.hostname or "").strip().lower().rstrip(".")
+                    if parsed.scheme != "https" or host not in ALLOWED_STATUTORY_PDF_HOSTS:
+                        raise CorpusValidationError(f"Disallowed PDF redirect target: {nxt}")
+                    current = nxt
+                    continue
+                resp.raise_for_status()
+                resp_headers = {str(k).lower(): str(v) for k, v in resp.headers.items()}
+                if existing_by_name is not None:
+                    cd_header = resp_headers.get("content-disposition", "")
+                    cand_name = canonical_statutory_pdf_filename(
+                        current,
+                        title=title,
+                        content_disposition=cd_header,
+                        source_page=source_page,
+                    )
+                    if cand_name.lower() in existing_by_name:
+                        ex_name, ex_sz, ex_sha = existing_by_name[cand_name.lower()]
+                        return {
+                            "status": "existing",
+                            "pdf": ex_name,
+                            "url": url,
+                            "title": title,
+                            "sha256": ex_sha,
+                            "bytes": ex_sz,
+                        }
+                if existing_by_size is not None:
+                    cl_str = resp_headers.get("content-length", "")
+                    if cl_str.isdigit() and int(cl_str) in existing_by_size:
+                        ex_name, ex_sha = existing_by_size[int(cl_str)]
+                        return {
+                            "status": "existing",
+                            "pdf": ex_name,
+                            "url": url,
+                            "title": title,
+                            "sha256": ex_sha,
+                            "bytes": int(cl_str),
+                        }
+                buf = bytearray()
+                for chunk in resp.iter_bytes(chunk_size=65536):
+                    if not chunk:
                         continue
-                    resp.raise_for_status()
-                    resp_headers = {str(k).lower(): str(v) for k, v in resp.headers.items()}
-                    if existing_by_name is not None:
-                        cd_header = resp_headers.get("content-disposition", "")
-                        cand_name = canonical_statutory_pdf_filename(
-                            current,
-                            title=title,
-                            content_disposition=cd_header,
-                            source_page=source_page,
+                    buf.extend(chunk)
+                    if len(buf) > PDF_CORPUS_MAX_BYTES:
+                        raise CorpusValidationError(
+                            f"Remote PDF {url} exceeded corpus max_bytes ({PDF_CORPUS_MAX_BYTES})."
                         )
-                        if cand_name.lower() in existing_by_name:
-                            ex_name, ex_sz, ex_sha = existing_by_name[cand_name.lower()]
-                            return {
-                                "status": "existing",
-                                "pdf": ex_name,
-                                "url": url,
-                                "title": title,
-                                "sha256": ex_sha,
-                                "bytes": ex_sz,
-                            }
-                    if existing_by_size is not None:
-                        cl_str = resp_headers.get("content-length", "")
-                        if cl_str.isdigit() and int(cl_str) in existing_by_size:
-                            ex_name, ex_sha = existing_by_size[int(cl_str)]
-                            return {
-                                "status": "existing",
-                                "pdf": ex_name,
-                                "url": url,
-                                "title": title,
-                                "sha256": ex_sha,
-                                "bytes": int(cl_str),
-                            }
-                    buf = bytearray()
-                    for chunk in resp.iter_bytes(chunk_size=65536):
-                        if not chunk:
-                            continue
-                        buf.extend(chunk)
-                        if len(buf) > PDF_CORPUS_MAX_BYTES:
-                            raise CorpusValidationError(
-                                f"Remote PDF {url} exceeded corpus max_bytes ({PDF_CORPUS_MAX_BYTES})."
-                            )
-                    return {
-                        "status": "fetched",
-                        "url": url,
-                        "title": title,
-                        "source_page": source_page,
-                        "raw_bytes": bytes(buf),
-                        "headers": resp_headers,
-                    }
-            raise CorpusValidationError(f"Too many redirects fetching PDF {url}")
-
-    try:
-        return _run_stream(True)
-    except Exception as exc:
-        host = (urlparse(url).hostname or "").strip().lower().rstrip(".")
-        if host in _UG_GOV_INTERMEDIATE_TLS_HOSTS and (
-            isinstance(exc, ssl.SSLError) or "CERTIFICATE_VERIFY_FAILED" in str(exc)
-        ):
-            logger.info("Retrying %s with gov intermediate TLS fallback", url)
-            return _run_stream(False)
-        raise
+                return {
+                    "status": "fetched",
+                    "url": url,
+                    "title": title,
+                    "source_page": source_page,
+                    "raw_bytes": bytes(buf),
+                    "headers": resp_headers,
+                }
+        raise CorpusValidationError(f"Too many redirects fetching PDF {url}")
 
 
 def _default_pdf_fetcher(url: str, timeout: float = 45.0) -> tuple[bytes, dict[str, str]]:
