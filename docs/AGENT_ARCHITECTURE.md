@@ -115,7 +115,15 @@ in the supervisor-specialist graph.
 | `lookup_rate` | low | read-only | Single tax rate by key (`vat_standard`, `corporation_tax`, …) |
 | `list_available_rates` | low | read-only | All known rates in one call |
 | `search_ura_knowledge_base` | low | read-only | Existing hybrid retriever exposed as a tool |
+| `resolve_mda_ntr_payment` | low | pure fn | **Pillar 1 (`ADR-0009`)**: 10-MDA NTR/ONTR/Stamp Duty fee validator (`MoWT`, `DCIC`, `NIRA`, `PPDA`, `UNBS`, `MLHUD`, `KCCA/IRAS`, `UPF`, `URSB`, `NDA/NEMA/UESW`), 3-hop PRN settlement diagnostics (`A`/`T`/`R`/`X`), NEMA `30%`/`70%` split EIA PRNs, and `Form DT-3008` refund steps |
+| `assess_life_event_tax_onboarding` | low | pure fn | **Pillar 2 (`ADR-0009`)**: Mandatory TIN onboarding (TPC Act s.135), `0%` (`UGX 0`) Presumptive Tax disclosure below `UGX 10,000,000` + Second Schedule marginal bands (`10M–150M`), and NIRA NIN-to-TIN pre-flight Surname/Given-Name order check |
+| `evaluate_b2g_and_uesw_clearance` | low | pure fn | **Pillar 3 (`ADR-0009`)**: PPDA `e-GP` TCC readiness pre-check, `MoFPED IFMS` `6%` WHT above `UGX 1,000,000`, `18%` Deemed VAT on aid-funded projects (VAT Act s.24(7)), and `UNBS` PVoC (`USD 2,000` FOB threshold & `15%` CIF surcharge) / `NDA` / `NEMA` UESW clearance |
+| `build_new_taxpayer_compliance_shield` | low | pure fn | **Pillar 4 (`ADR-0009`)**: Day-1 60-Second Nil-Return Shield (`UGX 200,000/month` penalty prevention under TPC Act s.49(1)), FY2026-27 `UGX 300,000,000` VAT threshold downgrade advisor, and tax-head dormancy/closure guide |
+| `simulate_tax_relief_and_instalments` | low | pure fn | **Pillar 5 (`ADR-0009`)**: Voluntary Disclosure (`TPC Act s.66(1a)` / `Form DT-10307`) `100%` penalty and interest waiver vs. standard s.49(1)/s.39 exposure, plus TCC-unlocking `s.40` monthly instalment agreement simulator |
+| `resolve_efris_and_account_recovery` | low | pure fn | **Pillar 6 (`ADR-0009`)**: Zero-cost EFRIS channel matcher (Web Portal, URA App, `*252#` USSD, Client App), FY2026-27 `UGX 2,000,000` (`5%`) consumer e-receipt VAT refund calculator (VAT Amendment Act 2026 s.7), and lost-SIM/email TIN OTP recovery pre-packager |
 | `escalate_to_human` | **medium** | writes to `tickets` | Route the conversation to a URA officer via the ticket queue |
+
+*(Plus specialized statutory calculators in `tools/statutory_2026.py` — `value_benefit_in_kind`, `determine_residency`, `convert_currency`, `calculate_stamp_duty`, `calculate_digital_services_tax`, `calculate_gaming_betting_tax`, `calculate_advance_vehicle_tax`, `calculate_presumptive_tax`, `check_startup_exemption`, `calculate_penalties_and_interest`, `calculate_rental_pooled`, `check_objection_validity`, `audit_tax_document`, `compare_tax_years` — and 6 DMZ connector namespaces in `App/docs/mcp-architecture.md`, bringing `ToolRegistry` to **72 tools across 18 namespaces**.)*
 
 **Risk tiers** drive per-specialist tool scoping:
 

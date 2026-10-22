@@ -13,8 +13,8 @@ Complete documentation for the URA Chatbot MLOps project.
 | **Application** |
 | [API Reference](API_REFERENCE.md) | REST API endpoints (sync + SSE streaming + WebSocket voice) and usage |
 | [RAG Architecture](RAG_ARCHITECTURE.md) | 12-stage production RAG pipeline + streaming voice engine (2026) |
-| [Agent Architecture](AGENT_ARCHITECTURE.md) | Supervisor routing, LangGraph runtime, tool-calling loop, and 82-flag registry |
-| [Architecture Decision Records (MADR 4.0)](adr/README.md) | Canonical ADR catalog (`ADR-0001`, `ADR-0002`, `ADR-0003`) governing monorepo layer boundaries, 5-locale stack, CXP hours, and MCP/corpus integrity |
+| [Agent Architecture](AGENT_ARCHITECTURE.md) | Supervisor routing, LangGraph runtime, tool-calling loop (`72` tools across `18` namespaces), `21` guided journeys, and `85`-flag registry |
+| [Architecture Decision Records (MADR 4.0)](adr/README.md) | Canonical ADR catalog (`ADR-0001`–`ADR-0011`) governing monorepo layer boundaries, 5-locale stack, MCP security, sovereign reasoning, live web research (`ADR-0008`), 10-MDA statutory corpus & queue-reduction tools (`ADR-0009`), Journey Copilot (`ADR-0010`), and Node.js 24 CI (`ADR-0011`) |
 | [Enterprise Systems & Connectors](SYSTEM_CONNECTORS_AND_PLUGINS.md) | Local connector simulators, safe staff controls, guide-only customer journeys, and their production boundary |
 | [App Runtime](../App/README.md) | FastAPI, Next.js PWA, anonymous chat policy, Qwen/Whisper adapter runtime, and ngrok smoke flow |
 | [Agent repo map](../AGENTS.md) | 2026 layout (`apps/api`, `apps/web`, `agents/`, `evals/`) without moving `App/` |
@@ -39,6 +39,9 @@ Complete documentation for the URA Chatbot MLOps project.
 | [Audit trail runbook](runbooks/audit-trail.md) | Separation of duties by role, what the tamper-evident trail records, verifying it, exporting evidence |
 | [Guided-journey probes runbook](runbooks/guided-journey-probes.md) | Live canary for journey routing, guided-mode offers, escalation, crisis and repair replies; branch builds on the local GPU stack; reading the journey funnel |
 | [Agentic Journey Copilot & Node.js 24 CI runbook](runbooks/agentic-journey-copilot-and-node24-ci.md) | ADR-0010 7-pillar Journey Copilot operations (Prerequisite DAG, A2UI form schedules, pushdown `goal_stack`, Step-Up Auth migration, resume codes) & ADR-0011 Node.js 24 CI action pins |
+| [Live web research, ephemeral PDF sandbox & Qdrant auto-sync runbook](runbooks/live-web-research-and-qdrant-sync.md) | ADR-0008 live FX lookup, 8-trigger official portal research, ephemeral `tmpfs` PDF/XLSX sandbox, and self-updating Qdrant corpus hot-swap |
+| [Qdrant staged corpus rebuild & 10-MDA harvester runbook](runbooks/qdrant-staged-rebuild.md) | ADR-0009 statutory (`parliament.go.ug`, `ura.go.ug`) & 10-MDA PDF harvester (`--download-pdfs --export-pdf-jsonl`) and zero-downtime Qdrant alias cutover (`7,251` hybrid vectors) |
+| [Enterprise connectors & MCP runbook](runbooks/enterprise-connectors-and-mcp.md) | MCP `2026-07-28` wire protocol, OAuth 2.1 / mTLS DMZ bindings, `72` registered tools across `18` namespaces, and monetary transaction ceilings |
 | [Escalation & handoff runbook](runbooks/escalation-and-handoff.md) | Phase 38–40 emotion/stakes escalation, `HandoffEnvelope` v2.1, CXP operating hours (`07:00–23:00 EAT`), and business-hours SLA clock |
 | [Conversational safety & EQ runbook](runbooks/conversational-safety-and-eq.md) | Phase 39 mid-workflow emotional off-ramp, wellbeing check-in, and voice affect consent |
 | [Voice receptionist demo runbook](runbooks/voice-receptionist-demo.md) | 5-locale WebSocket/LiveKit receptionist, queue position, callback, and officer desk operations |

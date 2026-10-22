@@ -1,7 +1,7 @@
 # =============================================================================
 # AI Risk Manifest — NIST AI RMF 1.0 + ISO/IEC 42001:2023 + EU AI Act
 # URA AI Chatbot — Retrieval-Augmented Generation System
-# Updated: 2026-08-17
+# Updated: 2026-10-22
 # =============================================================================
 
 system:
@@ -10,8 +10,12 @@ system:
   classification: "Limited-risk AI system (EU AI Act Art. 6)"
   description: >
     Customer-facing chatbot for Uganda Revenue Authority (URA) that answers
-    tax-related questions using retrieval-augmented generation over official
-    URA documents, FAQ databases, and taxation handbooks.
+    tax-related and cross-agency Non-Tax Revenue (NTR) questions using
+    retrieval-augmented generation over official URA documents, Parliamentary
+    Tax Bills (FY2026-27), ULII statutes, 10 Ugandan MDA fee schedules
+    (186 PDFs, 5,639 chunks, 7,251 Qdrant hybrid vectors — ADR-0008/ADR-0009),
+    72 deterministic MCP 2026-07-28 tools across 18 namespaces, and 21 guided
+    taxpayer journeys (ADR-0010).
   intended_users: "URA taxpayers, tax agents, general public"
   deployment_regions: ["UG"]
   languages: ["en", "lg", "sw", "nyn", "ach"]
