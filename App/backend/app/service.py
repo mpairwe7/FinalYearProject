@@ -9672,11 +9672,15 @@ class ChatModel:
                 )
                 return None
             user_input = (message or "").strip()
-            from .workflows.journey_copilot import is_prerequisite_remediation, parse_resume_code
+            from .workflows.journey_copilot import looks_like_resume_code, parse_resume_code
 
             parsed_resume = parse_resume_code(user_input)
-            if parsed_resume is not None and (
-                not parsed_resume["workflow_id"] or parsed_resume["workflow_id"] == wf.id
+            # A code-shaped string this service did not issue keeps the taxpayer
+            # where they are: a free-text step would otherwise store it as the
+            # answer (a mistyped code became the filing period).
+            unrecognised_code = parsed_resume is None and looks_like_resume_code(user_input)
+            if unrecognised_code or (
+                parsed_resume is not None and parsed_resume["workflow_id"] == wf.id
             ):
                 user_input = "resume"
             if user_input.lower() in _WORKFLOW_CANCEL_WORDS:
@@ -9780,7 +9784,11 @@ class ChatModel:
                     turn=turn,
                 )
                 return {
-                    "reply": f"Resuming {wf.name}:\n\n{prompt}",
+                    "reply": (
+                        f"I don't recognise that resume code, so I've kept your place in {wf.name}:\n\n{prompt}"
+                        if unrecognised_code
+                        else f"Resuming {wf.name}:\n\n{prompt}"
+                    ),
                     "sources": [],
                     "citations": [],
                     "faithfulness_score": None,

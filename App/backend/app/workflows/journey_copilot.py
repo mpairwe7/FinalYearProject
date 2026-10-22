@@ -556,6 +556,15 @@ def generate_resume_code(workflow_id: str, step_idx: int) -> str:
     return f"URA-{prefix}-S{step_number}-{_resume_check(prefix, step_number)}"
 
 
+def looks_like_resume_code(text: str) -> bool:
+    """Whether *text* holds something shaped like a resume code, verified or not.
+
+    A free-text step accepts anything, so without this a mistyped code would
+    be stored as the answer (e.g. as the filing period).
+    """
+    return bool(text) and _RESUME_CODE_RE.search(text) is not None
+
+
 def parse_resume_code(text: str) -> dict[str, Any] | None:
     """Parse and verify a cross-channel resume token (e.g. ``URA-RET-S2-…``) in *text* (Pillar 7).
 

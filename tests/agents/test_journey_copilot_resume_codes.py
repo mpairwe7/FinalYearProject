@@ -18,6 +18,7 @@ from app.service import _ACTIVE_CONVERSATION_STATE, _ACTIVE_TENANT_ID, ChatModel
 from app.workflows.journey_copilot import (
     RESUME_CODE_PREFIXES,
     generate_resume_code,
+    looks_like_resume_code,
     parse_resume_code,
 )
 from app.workflows.loader import load_workflow
@@ -87,6 +88,7 @@ def test_unregistered_workflow_gets_no_code():
 )
 def test_forged_or_mistyped_codes_are_rejected(text):
     assert parse_resume_code(text) is None
+    assert looks_like_resume_code(text) is bool(text)
 
 
 def test_mistyped_check_is_rejected():
@@ -114,13 +116,23 @@ def test_forged_code_cannot_pivot_or_cancel_the_active_flow():
     started = _turn(model, thread_id, "Help me file my return")
     assert started is not None and started["workflow"]["id"] == "return_filing"
 
+    assert _turn(model, thread_id, "company") is not None
+    at_period = _turn(model, thread_id, "vat")
+    assert at_period is not None and at_period["workflow"]["step_id"] == "collect_period"
+
+    # collect_period is free text: before, a made-up code was either taken as a
+    # switch to Payment Assistance or stored as the filing period.
     forged = _turn(model, thread_id, "URA-PAY-S1-1234")
-    assert forged is None or forged["workflow"]["id"] == "return_filing"
+    assert forged is not None
+    assert forged["workflow"]["id"] == "return_filing"
+    assert forged["workflow"]["step_id"] == "collect_period"
+    assert "recognise that resume code" in forged["reply"]
     state = database.conversation_state_key(thread_id, session_id="sess-rc", tenant_id="default")
     row = database.get_workflow_session(state, tenant_id="default")
     assert row is not None
     assert row["workflow_id"] == "return_filing"
     assert row["status"] == "active"
+    assert "filing_period" not in row["slots"]
 
     switched = _turn(model, thread_id, generate_resume_code("payment_assistance", 0))
     assert switched is not None and switched["workflow"]["id"] == "payment_assistance"
