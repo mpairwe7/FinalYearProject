@@ -219,3 +219,33 @@ def test_madr_40_adr_catalog_and_living_docs_skill_integrity() -> None:
     skill_file = REPO_ROOT / ".claude" / "skills" / "living-docs-adr-runbooks-traceability" / "SKILL.md"
     assert skill_file.is_file()
     assert skill_file.stat().st_size > 200
+
+
+def test_storage_backend_api_parity_and_flag_lifecycle_taxonomy() -> None:
+    """database.py and postgres.py must expose 100% identical public functions, and all 85 flags must classify cleanly."""
+    from app import database, postgres
+    from app.flags import _REGISTRY, flags
+    from app.storage_protocol import StorageBackendProtocol, verify_storage_backend_parity
+
+    parity = verify_storage_backend_parity(APP_DIR)
+    assert parity["ok"] is True, f"Storage backend parity drift: {parity}"
+    assert parity["sqlite_function_count"] >= 103
+    assert parity["sqlite_function_count"] == parity["postgres_function_count"]
+    assert isinstance(database, StorageBackendProtocol)
+    assert isinstance(postgres, StorageBackendProtocol)
+
+    summary = flags.lifecycle_summary()
+    assert set(summary.keys()) >= {
+        "compliance_invariant",
+        "kill_switch",
+        "release_rollout",
+        "experimental_rag",
+    }
+    assert sum(len(v) for v in summary.values()) == len(_REGISTRY)
+    assert set(summary["compliance_invariant"]) == {
+        "audit_ledger",
+        "auth_required",
+        "multi_tenant",
+        "ticket_queue",
+        "voice_consent",
+    }

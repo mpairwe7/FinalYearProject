@@ -1,0 +1,37 @@
+{
+  "schema_version": "2026-10-22",
+  "description": "Declarative URA & Cross-MDA Portal Navigation Knowledge Pack (MOD-GAP-03)",
+  "workflows": {
+    "mda_ntr_prn_reconciliation": {
+      "title": "Cross-MDA NTR Payment Registration Number (PRN) Reconciliation & Form DT-3008 Refund",
+      "portal_key": "prn_payments",
+      "url": "https://ura.go.ug",
+      "estimated_minutes": 4,
+      "prerequisites": [
+        "13-digit Payment Registration Number (PRN)",
+        "Bank or Mobile Money transaction receipt"
+      ],
+      "steps": [
+        "Open https://ura.go.ug -> Payment Services -> Search PRN Status and enter your 13-digit PRN.",
+        "Confirm whether URA e-Tax shows 'T' (Transacted/Paid), 'A' (Available/Unpaid), 'R' (Received at Bank), or 'X' (Expired).",
+        "If status is 'T' (Paid) on URA e-Tax, return to the agency portal (UDLS, DCIC e-Passport, NIRA, MLHUD UgNLIS, URSB OBRS, NEMA, or UNBS) and click 'Verify Payment / Reconcile PRN'.",
+        "If paid under the wrong MDA or tax head, log in to https://portal.ura.go.ug -> e-Services -> Refund Application -> Form DT-3008 (NTR Refund) and attach your receipt plus the MDA Non-Utilization Confirmation Letter."
+      ]
+    },
+    "voluntary_disclosure_and_instalments": {
+      "title": "Voluntary Disclosure (Form DT-10307) 100% Penalty Waiver & Section 40 Instalment Plan",
+      "portal_key": "e_services",
+      "url": "https://portal.ura.go.ug",
+      "estimated_minutes": 6,
+      "prerequisites": [
+        "10-digit URA TIN",
+        "Schedule of omitted/unfiled tax periods prior to any URA audit notice"
+      ],
+      "steps": [
+        "Log in to https://portal.ura.go.ug -> e-Services -> Compliance -> Voluntary Disclosure (Form DT-10307) BEFORE any URA audit notice is served.",
+        "Declare the omitted principal tax to receive a 100% statutory waiver of penal tax and late-payment interest under TPC Act s.66(1a).",
+        "If paying in instalments under TPC Act s.40, open e-Services -> Debt Management -> Apply for Instalment Payment, generate the 25% down-payment PRN, and unlock your Tax Clearance Certificate (TCC)."
+      ]
+    }
+  }
+}

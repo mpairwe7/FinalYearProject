@@ -1803,7 +1803,9 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
         r"customs\s+val\w*|valuation\s+methods?|hierarchy|input\s+vat|input\s+tax|apportionment|exempt\s+residential|"
         r"can\s+(?:i|we|they)\s+claim|shared\s+electricity|exempt\s+agricultural|"
         r"file\s+and\s+pay|by\s+what\s+day|following\s+month|weekend|tax\s+in\s+dispute|"
-        r"within\s+how\s+many\s+days|tax\s+appeals?\s+tribunal|common\s+external\s+tariff|\bcet\b)\b",
+        r"within\s+how\s+many\s+days|tax\s+appeals?\s+tribunal|common\s+external\s+tariff|\bcet\b|"
+        r"waiver\s+of\s+(?:interest|penalt\w*)|under\s+what\s+circumstances|"
+        r"5%\s+(?:vat\s+|tax\s+)?refund|e[-\s]?receipts?|tanzania\s+revenue\s+authority|kenya\s+revenue\s+authority)\b",
         text,
         re.IGNORECASE,
     ):

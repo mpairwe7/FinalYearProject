@@ -4387,3 +4387,8 @@ if ANALYTICS_BACKEND == "postgres":
         logger.exception("Postgres backend requested but import failed; falling back to sqlite")
 else:
     logger.info("Analytics backend: sqlite")
+
+
+def close_pool() -> None:
+    """Drop-in alias for :func:`close_db` so ``database`` and ``postgres`` expose identical lifecycle APIs."""
+    close_db()

@@ -7,13 +7,115 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "App" / "backend"))
 
 from app import database as db  # noqa: E402
+
+#: Golden statutory anchor preference pairs replayed at ratio gamma=0.5 per DICE (ICLR 2025)
+#: and LoRR Reset Replay (arXiv:2508.06412) to prevent catastrophic forgetting of Ugandan statutory rates.
+_GOLDEN_STATUTORY_REPLAY_ANCHORS: tuple[dict[str, Any], ...] = (
+    {
+        "prompt": "What is the standard VAT rate and annual registration threshold in Uganda for FY2026-27?",
+        "chosen": "In Uganda for FY2026-27, the standard Value Added Tax (VAT) rate is 18% and the mandatory annual VAT registration threshold is UGX 300,000,000 (Value Added Tax (Amendment) Act 2026).",
+        "rejected": "The VAT rate in Uganda is 16% and the registration threshold is UGX 50,000,000.",
+        "source": "golden_statutory_replay_anchor",
+        "domain": "vat",
+    },
+    {
+        "prompt": "How much Presumptive Tax does a small business with annual turnover of UGX 8,500,000 pay?",
+        "chosen": "Under the Income Tax Act (Cap. 338) Second Schedule, a small business in Uganda with annual gross turnover not exceeding UGX 10,000,000 is in the 0% tax band and pays UGX 0 in Presumptive Tax.",
+        "rejected": "All small businesses must pay 1.5% turnover tax even if their turnover is below UGX 10,000,000.",
+        "source": "golden_statutory_replay_anchor",
+        "domain": "presumptive_tax",
+    },
+    {
+        "prompt": "How can I waive late-filing penalties if I declare omitted tax before a URA audit notice?",
+        "chosen": "Under Section 66(1a) of the Tax Procedures Code Act (Cap. 343), submitting a Voluntary Disclosure on Form DT-10307 before a URA audit notice waives 100% of penal tax and late-payment interest upon paying the principal tax.",
+        "rejected": "URA never waives penalties once a return is late.",
+        "source": "golden_statutory_replay_anchor",
+        "domain": "voluntary_disclosure",
+    },
+)
+
+_STATUTORY_SIGNAL_RE = re.compile(
+    r"\b(?:s\.\s*\d+[a-z0-9()]*|section\s+\d+|form\s+dt[-\s]?\d+|ugx\s*[\d,]+|\d+(?:\.\d+)?%|cap\.?\s*\d+)",
+    re.IGNORECASE,
+)
+
+
+def build_bilevel_preference_bundle(
+    pairs: list[dict[str, Any]],
+    *,
+    replay_ratio: float = 0.5,
+    max_length_ratio: float = 2.5,
+) -> dict[str, Any]:
+    """Construct a Bi-Level Preference Optimization (`BPO-RAG`, AAAI 2026) and `DICE`/`LoRR` replay bundle.
+
+    - **Level 1 (`retrieval_and_router_preferences`)**: Extracts statutory citations, forms, rates,
+      and UGX figures present in ``chosen`` officer replies but missing from ``rejected`` bot replies
+      to supervise retriever/router hard-negative tuning (`DecEx-RAG`, arXiv:2510.05691).
+    - **Level 2 (`dpo_length_debiased_replay`)**: Filters length-exploitation outliers
+      (`len(chosen) / len(rejected) > max_length_ratio`) and mixes on-policy preference pairs with
+      golden statutory replay anchors at ratio ``replay_ratio`` (`DICE`, ICLR 2025; `LoRR`, arXiv:2508.06412).
+    """
+    retrieval_prefs: list[dict[str, Any]] = []
+    debiased_dpo: list[dict[str, Any]] = []
+    length_filtered_count = 0
+
+    for item in pairs:
+        prompt = str(item.get("prompt") or "").strip()
+        chosen = str(item.get("chosen") or "").strip()
+        rejected = str(item.get("rejected") or "").strip()
+        if not prompt or not rejected:
+            continue
+
+        chosen_signals = {m.group(0).strip() for m in _STATUTORY_SIGNAL_RE.finditer(chosen)} if chosen else set()
+        rejected_signals = {m.group(0).strip() for m in _STATUTORY_SIGNAL_RE.finditer(rejected)}
+        missing_signals = sorted(chosen_signals - rejected_signals)
+
+        if missing_signals or item.get("source") == "thumbs_down":
+            retrieval_prefs.append(
+                {
+                    "prompt": prompt,
+                    "missing_statutory_signals": missing_signals,
+                    "rejected_excerpt": rejected[:240],
+                    "chosen_excerpt": chosen[:240] if chosen else "",
+                    "source": item.get("source", "unknown"),
+                }
+            )
+
+        if chosen:
+            len_ratio = len(chosen) / max(1, len(rejected))
+            if len_ratio > max_length_ratio:
+                length_filtered_count += 1
+                continue
+            enriched = dict(item)
+            enriched["length_ratio"] = round(len_ratio, 3)
+            debiased_dpo.append(enriched)
+
+    # Experience Replay mix (gamma = replay_ratio) from golden statutory anchors
+    clamped_gamma = max(0.0, min(1.0, float(replay_ratio)))
+    replay_anchors: list[dict[str, Any]] = []
+    if clamped_gamma > 0.0:
+        target_anchors = max(1, int(round(len(debiased_dpo) * clamped_gamma))) if debiased_dpo else len(_GOLDEN_STATUTORY_REPLAY_ANCHORS)
+        for idx in range(target_anchors):
+            anchor = dict(_GOLDEN_STATUTORY_REPLAY_ANCHORS[idx % len(_GOLDEN_STATUTORY_REPLAY_ANCHORS)])
+            anchor["length_ratio"] = round(len(anchor["chosen"]) / max(1, len(anchor["rejected"])), 3)
+            replay_anchors.append(anchor)
+
+    return {
+        "total_raw_pairs": len(pairs),
+        "length_filtered_count": length_filtered_count,
+        "replay_ratio": clamped_gamma,
+        "retrieval_and_router_preferences": retrieval_prefs,
+        "dpo_length_debiased_replay": debiased_dpo + replay_anchors,
+    }
 
 
 def export_pairs(path: Path, *, tenant_id: str | None = None) -> int:
