@@ -520,12 +520,13 @@ class AssessLifeEventTaxOnboardingTool(Tool):
                 "3. Pay Motor Vehicle Transfer Stamp Duty (UGX 200,000 vehicle / UGX 30,000 motorcycle) and Advance Transport Tax for commercial PSV/goods vehicles before MoWT logbook issuance.",
             ]
         elif life_event == "land_or_property_transfer":
+            sd_rate = float(get_table("FY2026-27").get("stamp_duty_property_transfer") or 0.01)
             est_tax = 0.0
-            rec_head = "Stamp Duty (1.5% above UGX 10,000,000) & Rental Income Tax (if leased/commercial property)"
+            rec_head = f"Stamp Duty ({sd_rate:.1%} of CGV value) & Rental Income Tax (if leased/commercial property)"
             basis = "Tax Procedures Code Act s.135, Stamp Duty Act 2014, & Income Tax Act s.5 (12% individual rental tax above UGX 2,820,000)"
             steps = [
                 "1. Under Tax Procedures Code Act s.135, MLHUD cannot register a land transfer or lease above UGX 10,000,000 without valid URA TINs for both parties.",
-                "2. Obtain Chief Government Valuer (CGV) valuation and generate the 1.5% Stamp Duty PRN on https://ura.go.ug.",
+                f"2. Obtain Chief Government Valuer (CGV) valuation and generate the {sd_rate:.1%} Stamp Duty PRN on https://ura.go.ug.",
                 "3. If the property generates rent above UGX 2,820,000/year, activate the Rental Income Tax obligation (12% on gross rent above UGX 2,820,000 for individuals).",
             ]
         elif life_event == "ursb_business_registration":
@@ -869,7 +870,8 @@ class BuildNewTaxpayerComplianceShieldTool(Tool):
 
         explanation = (
             f"New/Lifecycle Taxpayer Shield ({taxpayer_profile}): Monthly return required = {monthly_req}; "
-            f"Nil return required on zero sales = {nil_req}; Late-filing penalty exposure = UGX {pen_exp:,.0f}/return "
+            f"Nil return required on zero sales = {nil_req}; Total late-filing penalty exposure = UGX {pen_exp:,.0f} "
+            f"(UGX {min_pen:,.0f} per unfiled return) "
             f"(FY2026-27 VAT threshold = UGX {vat_thresh:,.0f}). "
             f"Action Plan: {' '.join(steps)} (Basis: {basis})."
         )
@@ -1010,12 +1012,21 @@ class SimulateTaxReliefAndInstalmentsTool(Tool):
             "Tax Procedures Code Act (Cap. 343) s.66(1a) (Voluntary Disclosure 100% penalty/interest waiver on "
             "Form DT-10307), s.40 (Instalment Payment Agreements), s.49(1) (Late-filing penalty), & s.39 (Interest cap)"
         )
+        if voluntary_before_audit_notice:
+            relief_note = (
+                f"Under Voluntary Disclosure (TPC Act s.66(1a), Form DT-10307) submitted BEFORE a URA audit notice, "
+                f"100% of penal tax and interest is WAIVED — you save UGX {saved:,.0f} and pay ONLY the principal UGX {vd_payable:,.0f}. "
+            )
+        else:
+            relief_note = (
+                "Voluntary Disclosure relief under TPC Act s.66(1a) is not available after a URA audit notice; "
+                f"the full amount of UGX {vd_payable:,.0f} (principal, penal tax and interest) remains payable. "
+            )
         explanation = (
             f"Tax Relief & Instalment Simulation on Principal UGX {principal:,.0f} ({months} month(s) overdue): "
             f"Without relief, Late-Filing Penal Tax = UGX {penal_tax:,.0f} + Late-Payment Interest (2%/month capped at principal) "
             f"= UGX {interest:,.0f} (Total = UGX {total_no_relief:,.0f}). "
-            f"Under Voluntary Disclosure (TPC Act s.66(1a), Form DT-10307) submitted BEFORE a URA audit notice, "
-            f"100% of penal tax and interest is WAIVED — you save UGX {saved:,.0f} and pay ONLY the principal UGX {vd_payable:,.0f}. "
+            f"{relief_note}"
             f"Under TPC Act s.40 (Instalment Agreement), you can pay a 25% initial down payment (UGX {down_payment:,.0f}) "
             f"plus {inst_m} monthly instalments of UGX {monthly_instalment:,.0f}/month, which immediately unlocks your "
             f"Tax Clearance Certificate (TCC) without queueing at a URA office (Basis: {basis})."

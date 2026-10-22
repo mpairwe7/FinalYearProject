@@ -18,7 +18,7 @@ Taxpayers frequently overwhelm URA Customer Experience (CXP) (`0800 117 000` / `
      3. **NIRA** (National ID NIN-to-TIN Verification, ID Replacement/Renewal & Civil Registration Fees)
      4. **PPDA (e-GP) & MoFPED (IFMS)** (Public Procurement TCC Verification, EFRIS FDN Supplier Invoicing & 6% WHT)
      5. **UNBS** (E-Portal & PVoC Import Clearance / ASYCUDA Holds)
-     6. **MLHUD** (UgNLIS Land Title Registration, CGV Valuation & 1.5% Stamp Duty PRNs)
+     6. **MLHUD** (UgNLIS Land Title Registration, CGV Valuation & 1% Stamp Duty PRNs)
      7. **KCCA (`e-Citie`) & Local Governments (`IRAS` / MoLG)** (Trading Licenses, Local Revenue & Presumptive Tax)
      8. **Uganda Police Force (UPF)** (Traffic Express Penalty Scheme EPS PRNs & Vehicle Transfer Blocks)
      9. **URSB (`OBRS`)** (Company Incorporation, Business Names, Annual Returns & Statutory Fees)

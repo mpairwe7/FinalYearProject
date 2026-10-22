@@ -438,7 +438,7 @@ def classify_source_authority(
 
 
 def can_persist_to_qdrant(url: str) -> bool:
-    """Return True if *url* is an HTTPS document from ``ura.go.ug`` or ``ulii.org``."""
+    """Return True if *url* is an HTTPS document from ``QDRANT_SYNC_ALLOWED_HOSTS``."""
     auth = classify_source_authority(url)
     return auth.tier == 1 and auth.can_write_qdrant
 

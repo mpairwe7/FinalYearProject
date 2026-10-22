@@ -99,6 +99,9 @@ _NON_REPLACING_FAMILIES: frozenset[str] = frozenset(
         "general_tax",
         "ura_general_publication",
         "public_notice",
+        "mda_ntr_schedule",
+        "b2g_ppda_ifms_compliance",
+        "unbs_nda_uesw_clearance",
     }
 )
 
@@ -201,7 +204,7 @@ def _family_sync_lock(doc_family: str) -> Iterator[bool]:
 
 
 def validate_qdrant_sync_origin(url: str) -> None:
-    """Enforce that *url* uses HTTPS and originates from ``ura.go.ug`` or ``ulii.org``."""
+    """Enforce HTTPS and membership in ``_QDRANT_SYNC_ALLOWED_HOSTS``."""
     raw = str(url or "").strip()
     if not raw:
         raise CorpusSyncOriginRejected("Empty document URL cannot be synced to Qdrant.")

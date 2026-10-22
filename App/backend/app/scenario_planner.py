@@ -792,6 +792,7 @@ def _rule_mda_interdependence(facts: CaseFacts, question: str) -> list[ToolCallS
         first_amt = non_threshold[0] if non_threshold else ugx_spans[0][0]
     else:
         first_amt = ugx_spans[0][0] if ugx_spans else (amounts[0][0] if amounts else 0.0)
+    missing_amount = first_amt <= 0.0
 
     prn_state = "paid_not_reflecting_at_mda"
     if re.search(r"\b(wrong\s+(?:tax\s+)?head|wrong\s+mda|refund|dt[-\s]?3008)\b", q, re.IGNORECASE):
@@ -838,14 +839,17 @@ def _rule_mda_interdependence(facts: CaseFacts, question: str) -> list[ToolCallS
             )
         )
     elif re.search(r"\b(land\s+transfer|registration\s+of\s+titles|ugnlis|chief\s+government\s+valuer|\bcgv\b|\bmzo\b)\b", q, re.IGNORECASE):
+        land_params: dict[str, Any] = {
+            "service_type": "mlhud_land_transfer",
+            "prn_status": prn_state,
+        }
+        if not missing_amount:
+            land_params["transaction_value_ugx"] = first_amt
         specs.append(
             ToolCallSpec(
                 "resolve_mda_ntr_payment",
-                params={
-                    "service_type": "mlhud_land_transfer",
-                    "transaction_value_ugx": first_amt,
-                    "prn_status": prn_state,
-                },
+                params=land_params,
+                missing_inputs=["transaction value (UGX)"] if missing_amount else [],
             )
         )
     elif re.search(r"\b(express\s+penalty|\beps\b\s+ticket|traffic\s+ticket|police\s+fine)\b", q, re.IGNORECASE):
@@ -863,14 +867,17 @@ def _rule_mda_interdependence(facts: CaseFacts, question: str) -> list[ToolCallS
             )
         )
     elif re.search(r"\b(nema|eia\s+(?:submission|approval|fee)|30%\s+eia|70%\s+approval)\b", q, re.IGNORECASE):
+        nema_params: dict[str, Any] = {
+            "service_type": "nema_eia_prn",
+            "prn_status": prn_state,
+        }
+        if not missing_amount:
+            nema_params["transaction_value_ugx"] = first_amt
         specs.append(
             ToolCallSpec(
                 "resolve_mda_ntr_payment",
-                params={
-                    "service_type": "nema_eia_prn",
-                    "transaction_value_ugx": first_amt,
-                    "prn_status": prn_state,
-                },
+                params=nema_params,
+                missing_inputs=["transaction value (UGX)"] if missing_amount else [],
             )
         )
 
@@ -1005,15 +1012,18 @@ def _rule_mda_interdependence(facts: CaseFacts, question: str) -> list[ToolCallS
         m_inst = re.search(r"\b(\d{1,2})\s+(?:monthly\s+)?instalments?\b", q, re.IGNORECASE)
         inst_m = int(m_inst.group(1)) if m_inst else 6
         before_audit = not bool(re.search(r"\b(after\s+audit|already\s+audited|received\s+audit\s+notice)\b", q, re.IGNORECASE))
+        relief_params: dict[str, Any] = {
+            "months_late": late_m,
+            "voluntary_before_audit_notice": before_audit,
+            "instalment_months": inst_m,
+        }
+        if not missing_amount:
+            relief_params["principal_tax_ugx"] = first_amt
         specs.append(
             ToolCallSpec(
                 "simulate_tax_relief_and_instalments",
-                params={
-                    "principal_tax_ugx": first_amt,
-                    "months_late": late_m,
-                    "voluntary_before_audit_notice": before_audit,
-                    "instalment_months": inst_m,
-                },
+                params=relief_params,
+                missing_inputs=["unpaid or undeclared principal tax amount (UGX)"] if missing_amount else [],
             )
         )
 
@@ -1188,6 +1198,15 @@ def build_verified_facts(
                     "income (including paragraph (a)) for the year of income; ADDED to employment income "
                     "[interpretation unverified] (basis: TAXATION-HANDBOOK-FY-2025-26-1, s.12.2.3)."
                 )
+            continue
+
+        if spec.missing_inputs and (
+            spec.tool == "simulate_tax_relief_and_instalments"
+            or (
+                spec.tool == "resolve_mda_ntr_payment"
+                and spec.params.get("service_type") in {"mlhud_land_transfer", "nema_eia_prn"}
+            )
+        ):
             continue
 
         if spec.tool == "calculate_paye":
