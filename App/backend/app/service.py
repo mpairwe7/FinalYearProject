@@ -2871,6 +2871,26 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             if locale not in ("", "en"):
                 yield ("translation.completed", {"locale": locale})
             yield ("token", full_reply)
+            if hits:
+                extractive_contexts = [h.get("text") or h.get("answer", "") for h in hits]
+                extractive_faith = HybridRetriever.compute_faithfulness(
+                    result.get("reply", ""),
+                    extractive_contexts,
+                    verified_facts=str(result.get("_web_verified_facts") or ""),
+                )
+                yield (
+                    "grounding",
+                    officer_hours.attach_status({
+                        "faithfulness_score": extractive_faith,
+                        "escalation_required": bool(result.get("escalation_required")),
+                        "escalation_reason": result.get("escalation_reason", "") if result.get("escalation_required") else "",
+                        "agent_role": result.get("agent_role", "rag_answerer"),
+                        "handoff": result.get("handoff"),
+                        "response_judge": result.get("response_judge"),
+                        "next_actions": result.get("next_actions", []),
+                        "ticket_id": result.get("ticket_id", ""),
+                    }),
+                )
 
         yield ("done", "")
         yield (
@@ -11311,15 +11331,38 @@ class ChatModel:
                         force_agentic = False
                         force_tool_whitelist = None
 
-            # 2. Try hybrid retrieval using rewritten query
+            # 2. Try hybrid retrieval using rewritten query (or model-welfare architectural context)
+            from .model_welfare import (
+                build_welfare_grounding_hits,
+                build_welfare_prompt_guidance,
+                match_welfare_categories,
+            )
+
+            welfare_cats = (
+                []
+                if (attachments or connector_intent is not None)
+                else match_welfare_categories(router_message or message)
+            )
             hits: list[dict[str, Any]] = []
             retrieval_mode = "keyword"
+            web_verified_facts = ""
+
+            if welfare_cats:
+                hits = build_welfare_grounding_hits(router_message or message, welfare_cats)
+                retrieval_mode = "model_welfare"
+                agent_role = "conversational_agent"
+                trace_ctx["agent_role"] = "conversational_agent"
+                web_verified_facts = build_welfare_prompt_guidance(welfare_cats)
+                set_turn_attribute(
+                    "gen_ai.conversation.intent",
+                    f"model_welfare_{welfare_cats[0]}" if len(welfare_cats) == 1 else "model_welfare_interview",
+                )
 
             # Auto-reconnect if Qdrant was lost after initial startup
-            if not self._retriever_ready and not self._retriever._ready:
+            if not welfare_cats and not self._retriever_ready and not self._retriever._ready:
                 self._retriever_ready = self._retriever.initialize()
 
-            if self._retriever_ready:
+            if not welfare_cats and self._retriever_ready:
                 with trace_stage("hybrid_search", timings=timings):
                     search_t0 = time.perf_counter()
                     hits = self._retriever.search_planned(
@@ -11352,7 +11395,7 @@ class ChatModel:
                     hits = _faq_hits_to_retrieval_hits(kw_hits, locale=locale)
 
             # 3b. Corrective RAG — re-retrieve if quality is low (Phase 6)
-            if hits and self._retriever_ready:
+            if not welfare_cats and hits and self._retriever_ready:
                 with trace_stage("corrective_rag", timings=timings):
                     hits, was_corrected = corrective_retrieve(
                         retrieval_query,
@@ -11374,8 +11417,7 @@ class ChatModel:
                         )
 
             # 3b1. Live Web Research + Ephemeral PDF Sandbox + Self-Updating Qdrant (Phase 41)
-            web_verified_facts = ""
-            if flags.is_enabled("live_web_research", subject=user_id or None):
+            if not welfare_cats and flags.is_enabled("live_web_research", subject=user_id or None):
                 with trace_stage("live_web_research", timings=timings):
                     try:
                         from .web_research import run_web_research
@@ -11408,79 +11450,67 @@ class ChatModel:
 
             # 3c. Always blend top FAQ keyword hits AFTER corrective RAG
             #     so precise CSV FAQ steps are never filtered out by reranking.
-            with trace_stage("faq_blend", timings=timings):
-                kw_hits = _simple_search(
-                    retrieval_query,
-                    self._faq_index,
-                    top_k=2,
-                    binding_query=binding_query,
-                    locale=locale,
-                )
-                priority_hits = self._priority_faq_hits(retrieval_query, top_k=2) or self._priority_faq_hits(binding_query, top_k=2)
-                hits, graph_fused = self._fuse_graph_leg(retrieval_query, hits)
-                if graph_fused:
-                    retrieval_mode = "graph"
-                seen_texts = {h.get("text", "")[:80] for h in hits}
-                if _prepend_unique(hits, priority_hits, seen_texts):
-                    retrieval_mode = "faq_priority"
-                for h in kw_hits:
-                    h_loc = h.get("_matched_locale") or locale
-                    q_val = (
-                        h.get(f"question_{h_loc}")
-                        if h_loc and h_loc != "en" and h.get(f"question_{h_loc}")
-                        else h["question"]
+            if not welfare_cats:
+                with trace_stage("faq_blend", timings=timings):
+                    kw_hits = _simple_search(
+                        retrieval_query,
+                        self._faq_index,
+                        top_k=2,
+                        binding_query=binding_query,
+                        locale=locale,
                     )
-                    a_val = (
-                        h.get(f"answer_{h_loc}")
-                        if h_loc and h_loc != "en" and h.get(f"answer_{h_loc}")
-                        else h["answer"]
-                    )
-                    faq_text = f"Question: {q_val}\nAnswer: {a_val}"
-                    existing = next((x for x in hits if x.get("text", "")[:80] == faq_text[:80]), None)
-                    if existing is not None:
-                        if not existing.get("question"):
-                            existing["question"] = q_val
-                        if not existing.get("answer"):
-                            existing["answer"] = a_val
-                    elif faq_text[:80] not in seen_texts:
-                        hits.append({
-                            "text": faq_text,
-                            "answer": a_val,
-                            "question": q_val,
-                            "source": h["source"],
-                            "chunk_id": "",
-                            "page": "",
-                            "section": h.get("tag", ""),
-                            "doc_type": "csv",
-                            "score_rrf": 0.5,
-                        })
-                        seen_texts.add(faq_text[:80])
+                    priority_hits = self._priority_faq_hits(retrieval_query, top_k=2) or self._priority_faq_hits(binding_query, top_k=2)
+                    hits, graph_fused = self._fuse_graph_leg(retrieval_query, hits)
+                    if graph_fused:
+                        retrieval_mode = "graph"
+                    seen_texts = {h.get("text", "")[:80] for h in hits}
+                    if _prepend_unique(hits, priority_hits, seen_texts):
+                        retrieval_mode = "faq_priority"
+                    for h in kw_hits:
+                        h_loc = h.get("_matched_locale") or locale
+                        q_val = (
+                            h.get(f"question_{h_loc}")
+                            if h_loc and h_loc != "en" and h.get(f"question_{h_loc}")
+                            else h["question"]
+                        )
+                        a_val = (
+                            h.get(f"answer_{h_loc}")
+                            if h_loc and h_loc != "en" and h.get(f"answer_{h_loc}")
+                            else h["answer"]
+                        )
+                        faq_text = f"Question: {q_val}\nAnswer: {a_val}"
+                        existing = next((x for x in hits if x.get("text", "")[:80] == faq_text[:80]), None)
+                        if existing is not None:
+                            if not existing.get("question"):
+                                existing["question"] = q_val
+                            if not existing.get("answer"):
+                                existing["answer"] = a_val
+                        elif faq_text[:80] not in seen_texts:
+                            hits.append({
+                                "text": faq_text,
+                                "answer": a_val,
+                                "question": q_val,
+                                "source": h["source"],
+                                "chunk_id": "",
+                                "page": "",
+                                "section": h.get("tag", ""),
+                                "doc_type": "csv",
+                                "score_rrf": 0.5,
+                            })
+                            seen_texts.add(faq_text[:80])
 
-            # Bind indexed FAQ passages to the user's original intent before
-            # they can be used as LLM context or as an extractive fallback.
-            # Same binding_query as above — a distress preamble in `message`
-            # would otherwise re-dilute this second authorization gate too
-            # and filter every hit out (score below cutoff for all of them).
-            hits = _filter_unbound_faq_hits(binding_query, hits)
-            # A chunk can outrank the FAQ row that answers the question
-            # verbatim; put an exact FAQ counterpart back in front.
-            hits = _promote_equivalent_faq_hits(binding_query, hits)
+                # Bind indexed FAQ passages to the user's original intent before
+                # they can be used as LLM context or as an extractive fallback.
+                hits = _filter_unbound_faq_hits(binding_query, hits)
+                hits = _promote_equivalent_faq_hits(binding_query, hits)
 
             # 3d. Attached documents — prepend as top-priority grounding hits.
-            #     They flow through the same LLM01 scrub + spotlight markers
-            #     as retrieved passages (llm._build_messages) and count as
-            #     grounding for faithfulness scoring. The raw user message
-            #     stays subject to the normal input guardrails above.
             if attachments:
                 hits = documents_module.attachment_passages(attachments) + hits
 
             # 3c. Clarification check — ask for more details if query is ambiguous
-            #     (skipped for attachment turns: "what is this?" is answerable
-            #     from the attached document, not ambiguous)
-            # A lookup in a chosen service asks for what it lacks itself
-            # (connector_intent.missing_arguments); passages cannot judge it.
             clarification = (
-                None if (attachments or connector_intent is not None) else needs_clarification(message, hits)
+                None if (attachments or connector_intent is not None or welfare_cats) else needs_clarification(message, hits)
             )
             if clarification:
                 clarify_result = {
@@ -11511,9 +11541,8 @@ class ChatModel:
             deterministic_curated = False
             deterministic_sources: list[str] = []
             deterministic_citations: list[dict[str, Any]] = []
-            # Attachment turns always go to the LLM — a canned procedure
-            # template cannot read the attached document.
-            if hits and not attachments and connector_intent is None:
+            # Attachment turns and model-welfare interview turns always go to the LLM.
+            if hits and not attachments and connector_intent is None and not welfare_cats:
                 deterministic_sources = ordered_sources(hits)
                 deterministic_citations = HybridRetriever.build_citations(hits)
                 deterministic_reply, deterministic_curated = self._deterministic_procedure_reply(
@@ -11559,10 +11588,10 @@ class ChatModel:
                 return result
 
             # 3e. Epistemic false-premise guard (G43) — reject non-existent statutory instruments
-            # Skipped when attachments are present: questions then ask about terms in the attached document
+            # Skipped when attachments or model-welfare interview context are present
             premise_res = (
                 check_false_premise(rewritten, hits)
-                if not (attachments or connector_intent is not None)
+                if not (attachments or connector_intent is not None or welfare_cats)
                 else None
             )
             if premise_res and premise_res.is_false_premise:
@@ -13145,13 +13174,32 @@ class ChatModel:
                     force_agentic = False
                     force_tool_whitelist = None
 
+        from .model_welfare import (
+            build_welfare_grounding_hits,
+            build_welfare_prompt_guidance,
+            match_welfare_categories,
+        )
+
+        welfare_cats_s = (
+            []
+            if (attachments or connector_intent is not None)
+            else match_welfare_categories(router_message or message)
+        )
         hits: list[dict[str, Any]] = []
         retrieval_mode = "keyword"
+        web_verified_facts = ""
+        web_research_events: list[tuple[str, dict[str, Any]]] = []
 
-        if not self._retriever_ready and not self._retriever._ready:
+        if welfare_cats_s:
+            hits = build_welfare_grounding_hits(router_message or message, welfare_cats_s)
+            retrieval_mode = "model_welfare"
+            agent_role = "conversational_agent"
+            web_verified_facts = build_welfare_prompt_guidance(welfare_cats_s)
+
+        if not welfare_cats_s and not self._retriever_ready and not self._retriever._ready:
             self._retriever_ready = self._retriever.initialize()
 
-        if self._retriever_ready:
+        if not welfare_cats_s and self._retriever_ready:
             hits = self._retriever.search_planned(
                 retrieval_query,
                 top_k=top_k,
@@ -13176,7 +13224,7 @@ class ChatModel:
             hits = _faq_hits_to_retrieval_hits(kw_hits, locale=locale)
 
         # Corrective RAG (Phase 6)
-        if hits and self._retriever_ready:
+        if not welfare_cats_s and hits and self._retriever_ready:
             hits, was_corrected = corrective_retrieve(
                 retrieval_query,
                 self._retriever,
@@ -13191,9 +13239,7 @@ class ChatModel:
                 )
 
         # Live Web Research + Ephemeral PDF Sandbox + Self-Updating Qdrant (Phase 41)
-        web_verified_facts = ""
-        web_research_events: list[tuple[str, dict[str, Any]]] = []
-        if flags.is_enabled("live_web_research", subject=user_id or None):
+        if not welfare_cats_s and flags.is_enabled("live_web_research", subject=user_id or None):
             try:
                 from .web_research import run_web_research
 
@@ -13227,64 +13273,63 @@ class ChatModel:
         # Blend top FAQ keyword hits after corrective RAG (parity with the
         # REST path, including the priority FAQ hits the deterministic
         # procedural fast path depends on).
-        kw_hits = _simple_search(
-            retrieval_query,
-            self._faq_index,
-            top_k=2,
-            binding_query=binding_query,
-            locale=locale,
-        )
-        hits, graph_fused = self._fuse_graph_leg(retrieval_query, hits)
-        if graph_fused:
-            retrieval_mode = "graph"
-        priority_hits = self._priority_faq_hits(retrieval_query, top_k=2) or self._priority_faq_hits(binding_query, top_k=2)
-        seen_texts = {h.get("text", "")[:80] for h in hits}
-        if _prepend_unique(hits, priority_hits, seen_texts):
-            retrieval_mode = "faq_priority"
-        for h in kw_hits:
-            h_loc = h.get("_matched_locale") or locale
-            q_val = (
-                h.get(f"question_{h_loc}")
-                if h_loc and h_loc != "en" and h.get(f"question_{h_loc}")
-                else h["question"]
+        if not welfare_cats_s:
+            kw_hits = _simple_search(
+                retrieval_query,
+                self._faq_index,
+                top_k=2,
+                binding_query=binding_query,
+                locale=locale,
             )
-            a_val = (
-                h.get(f"answer_{h_loc}")
-                if h_loc and h_loc != "en" and h.get(f"answer_{h_loc}")
-                else h["answer"]
-            )
-            faq_text = f"Question: {q_val}\nAnswer: {a_val}"
-            existing = next((x for x in hits if x.get("text", "")[:80] == faq_text[:80]), None)
-            if existing is not None:
-                if not existing.get("question"):
-                    existing["question"] = q_val
-                if not existing.get("answer"):
-                    existing["answer"] = a_val
-            elif faq_text[:80] not in seen_texts:
-                hits.append({
-                    "text": faq_text, "answer": a_val,
-                    "question": q_val, "source": h["source"],
-                    "chunk_id": "", "page": "", "section": h.get("tag", ""),
-                    "doc_type": "csv", "score_rrf": 0.5,
-                })
-                seen_texts.add(faq_text[:80])
+            hits, graph_fused = self._fuse_graph_leg(retrieval_query, hits)
+            if graph_fused:
+                retrieval_mode = "graph"
+            priority_hits = self._priority_faq_hits(retrieval_query, top_k=2) or self._priority_faq_hits(binding_query, top_k=2)
+            seen_texts = {h.get("text", "")[:80] for h in hits}
+            if _prepend_unique(hits, priority_hits, seen_texts):
+                retrieval_mode = "faq_priority"
+            for h in kw_hits:
+                h_loc = h.get("_matched_locale") or locale
+                q_val = (
+                    h.get(f"question_{h_loc}")
+                    if h_loc and h_loc != "en" and h.get(f"question_{h_loc}")
+                    else h["question"]
+                )
+                a_val = (
+                    h.get(f"answer_{h_loc}")
+                    if h_loc and h_loc != "en" and h.get(f"answer_{h_loc}")
+                    else h["answer"]
+                )
+                faq_text = f"Question: {q_val}\nAnswer: {a_val}"
+                existing = next((x for x in hits if x.get("text", "")[:80] == faq_text[:80]), None)
+                if existing is not None:
+                    if not existing.get("question"):
+                        existing["question"] = q_val
+                    if not existing.get("answer"):
+                        existing["answer"] = a_val
+                elif faq_text[:80] not in seen_texts:
+                    hits.append({
+                        "text": faq_text, "answer": a_val,
+                        "question": q_val, "source": h["source"],
+                        "chunk_id": "", "page": "", "section": h.get("tag", ""),
+                        "doc_type": "csv", "score_rrf": 0.5,
+                    })
+                    seen_texts.add(faq_text[:80])
 
-        # Apply the same FAQ intent binding as the REST path before streaming
-        # can expose a passage to the model.
-        hits = _filter_unbound_faq_hits(binding_query, hits)
-        # A chunk can outrank the FAQ row that answers the question
-        # verbatim; put an exact FAQ counterpart back in front.
-        hits = _promote_equivalent_faq_hits(binding_query, hits)
+            # Apply the same FAQ intent binding as the REST path before streaming
+            # can expose a passage to the model.
+            hits = _filter_unbound_faq_hits(binding_query, hits)
+            # A chunk can outrank the FAQ row that answers the question
+            # verbatim; put an exact FAQ counterpart back in front.
+            hits = _promote_equivalent_faq_hits(binding_query, hits)
 
         # Attached documents — prepend as top-priority grounding hits
         # (parity with generate(); see the comment there).
         if attachments:
             hits = documents_module.attachment_passages(attachments) + hits
 
-        # Clarification check (Phase 6) — skipped for attachment turns
-        # A lookup in a chosen service asks for what it lacks itself
-        # (connector_intent.missing_arguments); passages cannot judge it.
-        clarification = None if (attachments or connector_intent is not None) else needs_clarification(message, hits)
+        # Clarification check (Phase 6) — skipped for attachment and model-welfare turns
+        clarification = None if (attachments or connector_intent is not None or welfare_cats_s) else needs_clarification(message, hits)
         if clarification:
             return {
                 "reply": clarification,
@@ -13308,9 +13353,8 @@ class ChatModel:
         # Deterministic procedural fast path — parity with the REST path so
         # curated KB answers stream with their real (high) faithfulness
         # instead of being re-synthesised and re-scored via the LLM.
-        # Attachment turns always go to the LLM (templates can't read docs), and
-        # so does a lookup in a chosen service (nor can a template read that).
-        if hits and not attachments and connector_intent is None:
+        # Attachment turns and model-welfare interview turns always go to the LLM.
+        if hits and not attachments and connector_intent is None and not welfare_cats_s:
             deterministic_sources = ordered_sources(hits)
             deterministic_citations = HybridRetriever.build_citations(hits)
             deterministic_reply, deterministic_curated = self._deterministic_procedure_reply(
@@ -13340,9 +13384,9 @@ class ChatModel:
                     "_short_circuit": True,
                 }
 
-        # Epistemic false-premise guard (G43) — skipped when attachments are present
+        # Epistemic false-premise guard (G43) — skipped when attachments or model-welfare context are present
         premise_res = (
-            check_false_premise(rewritten, hits) if not (attachments or connector_intent is not None) else None
+            check_false_premise(rewritten, hits) if not (attachments or connector_intent is not None or welfare_cats_s) else None
         )
         if premise_res and premise_res.is_false_premise:
             reply = self._finalize_reply(premise_res.reply)

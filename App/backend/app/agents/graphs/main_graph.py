@@ -42,20 +42,7 @@ REFLECT_FAITHFULNESS_FLOOR = 0.50
 def node_route(state: AgentGraphState) -> NodeResult:
     """Delegate routing to the existing Phase C supervisor."""
     from ...flags import flags
-    from ...model_welfare import handle_model_welfare_turn
     from ..supervisor import supervisor as _supervisor
-
-    welfare = handle_model_welfare_turn(state.query or state.rewritten_query, state.locale)
-    if welfare is not None:
-        state.reply = welfare.reply
-        state.faithfulness = welfare.faithfulness_score
-        state.retrieval_mode = "conversational"
-        state.agent_role = "conversational_agent"
-        state.sources = list(welfare.sources)
-        state.citations = list(welfare.citations)
-        state.escalation_reason = ""
-        state.outcome = GraphOutcome.ANSWERED
-        return NodeResult(next_node="respond", outcome=GraphOutcome.ANSWERED)
 
     if not flags.is_enabled("agentic_mode"):
         return NodeResult(next_node="retrieve")
@@ -166,10 +153,21 @@ def node_retrieve(state: AgentGraphState) -> NodeResult:
     """Hybrid retrieval with the same plan/corrective gates as REST."""
     # Deferred import to avoid the heavy retriever at module load
     from ...corrective_rag import corrective_retrieve
+    from ...model_welfare import build_welfare_grounding_hits, match_welfare_categories
     from ...retriever import HybridRetriever
 
-    retriever = HybridRetriever()
     query = state.rewritten_query or state.query
+    welfare_cats = match_welfare_categories(query)
+    if welfare_cats:
+        hits = build_welfare_grounding_hits(query, welfare_cats)
+        state.hits = hits
+        state.retrieval_mode = "model_welfare"
+        state.agent_role = "conversational_agent"
+        state.sources = list(dict.fromkeys(h.get("source", "") for h in hits if h.get("source")))
+        state.citations = HybridRetriever.build_citations(hits)
+        return NodeResult(next_node="synthesize")
+
+    retriever = HybridRetriever()
     hits: list[dict[str, Any]] = []
     was_corrected = False
     if retriever.initialize():
