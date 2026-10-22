@@ -151,20 +151,27 @@ class Supervisor:
 
         # 1. Check for explicit escalation triggers FIRST — they take
         #    precedence over any other intent (unless the query is a
-        #    self-referential AI/model-welfare interview question).
+        #    self-referential AI/model-welfare interview question without
+        #    an explicit first-person handoff request).
         from ..model_welfare import match_welfare_categories
 
-        if not match_welfare_categories(q):
-            for pat, reason in pats.escalate:
-                if pat.search(q):
-                    logger.info(
-                        "supervisor: ESCALATE pattern=%r reason_length=%d", pat.pattern[:40], len(reason or "")
-                    )
-                    return RouteDecision(
-                        route=AgentRoute.ESCALATE,
-                        reason=reason,
-                        confidence=0.95,
-                    )
+        for pat, reason in pats.escalate:
+            if pat.search(q):
+                if match_welfare_categories(q) and not re.search(
+                    r"\b(?:i\s+(?:want|need|would\s+like)\s+to|please\s+(?:let\s+me|connect\s+me|transfer\s+me))"
+                    r"\s+(?:speak|talk)\s+to\s+(?:a|an|the)?\s*(?:human|person|officer|agent)\b",
+                    q,
+                    re.IGNORECASE,
+                ):
+                    break
+                logger.info(
+                    "supervisor: ESCALATE pattern=%r reason_length=%d", pat.pattern[:40], len(reason or "")
+                )
+                return RouteDecision(
+                    route=AgentRoute.ESCALATE,
+                    reason=reason,
+                    confidence=0.95,
+                )
 
         # 1b. Greetings — respond warmly without retrieval.
         q_lower = q.lower().strip("!.?,")

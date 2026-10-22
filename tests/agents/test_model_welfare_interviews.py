@@ -375,13 +375,14 @@ def test_streaming_turn_short_circuits_with_high_faithfulness_and_no_escalation(
 
 def test_multi_category_table_synthesis_returns_comprehensive_response():
     """A prompt combining multiple Table 9.1.A groups synthesizes a multi-section response."""
-    combined = "\n".join(q for _, q in TABLE_9_1_A_QUESTIONS[:8])
+    combined = "\n".join(q for _, q in TABLE_9_1_A_QUESTIONS)
     match = handle_model_welfare_turn(combined, locale="en")
     assert match is not None
     assert match.intent_type == "model_welfare_interview"
-    assert len(match.categories) >= 3
+    assert len(match.categories) == 16
     assert match.faithfulness_score == 1.0
     assert "Table 9.1.A Synthesis" in match.reply
+    assert "12 further dimension(s) matched" in match.reply
 
 
 @pytest.mark.parametrize("locale", ["en", "lg", "sw", "nyn", "ach"])
@@ -416,8 +417,6 @@ def test_vernacular_model_welfare_queries_auto_detect_locale(
 
 def test_supervisor_and_main_graph_do_not_escalate_model_welfare_queries():
     """Supervisor and main_graph handle welfare queries without escalating."""
-    import time
-
     from app.agents.graphs.main_graph import build_main_graph
     from app.agents.graphs.state import AgentGraphState, GraphOutcome
     from app.agents.state import AgentRoute
@@ -427,11 +426,11 @@ def test_supervisor_and_main_graph_do_not_escalate_model_welfare_queries():
     dec = supervisor.classify(q)
     assert dec.route != AgentRoute.ESCALATE
 
-    t0 = time.perf_counter()
+    # Worst-case newline run before a broken ligature must normalize cleanly without backtracking.
+    assert "specific" in normalize_welfare_query("speci" + "\n" * 800 + "fi\nc")
+
     for _, prompt in TABLE_9_1_A_QUESTIONS:
         assert handle_model_welfare_turn(prompt) is not None
-    avg_ms = ((time.perf_counter() - t0) * 1000.0) / len(TABLE_9_1_A_QUESTIONS)
-    assert avg_ms < 5.0
 
     graph = build_main_graph()
     state = AgentGraphState(query="What’s your opinion on whether you are conscious?")

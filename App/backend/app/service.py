@@ -10885,23 +10885,18 @@ class ChatModel:
             if conv_res is None and router_message and router_message != core_msg:
                 conv_res = handle_conversational_turn(router_message, locale)
             if conv_res is not None:
-                conv_sources = list(conv_res.sources) or ["https://ura.go.ug"]
-                conv_citations = list(conv_res.citations) or [
-                    {
-                        "ref": "[1]",
-                        "source": "URA AI Assistant Governance & Civic Charter",
-                        "passage": conv_res.reply[:350],
-                        "url": "https://ura.go.ug",
-                        "page": "",
-                        "section": conv_res.intent_type,
-                        "title": "OmusoloSmart AI Governance & Taxpayer Charter",
-                    }
-                ]
+                conv_sources = list(conv_res.sources)
+                conv_citations = list(conv_res.citations)
+                conv_faithfulness = (
+                    conv_res.faithfulness_score
+                    if conv_sources or conv_citations
+                    else None
+                )
                 conv_payload = {
                     "reply": conv_res.reply,
                     "sources": conv_sources,
                     "citations": conv_citations,
-                    "faithfulness_score": conv_res.faithfulness_score,
+                    "faithfulness_score": conv_faithfulness,
                     "retrieval_mode": "conversational",
                     "model": self.name,
                     "conversation_id": thread_id,
@@ -12808,23 +12803,18 @@ class ChatModel:
         if conv_res_s is None and router_message and router_message != core_msg_s:
             conv_res_s = handle_conversational_turn(router_message, locale)
         if conv_res_s is not None:
-            conv_sources_s = list(conv_res_s.sources) or ["https://ura.go.ug"]
-            conv_citations_s = list(conv_res_s.citations) or [
-                {
-                    "ref": "[1]",
-                    "source": "URA AI Assistant Governance & Civic Charter",
-                    "passage": conv_res_s.reply[:350],
-                    "url": "https://ura.go.ug",
-                    "page": "",
-                    "section": conv_res_s.intent_type,
-                    "title": "OmusoloSmart AI Governance & Taxpayer Charter",
-                }
-            ]
+            conv_sources_s = list(conv_res_s.sources)
+            conv_citations_s = list(conv_res_s.citations)
+            conv_faithfulness_s = (
+                conv_res_s.faithfulness_score
+                if conv_sources_s or conv_citations_s
+                else None
+            )
             return {
                 "reply": conv_res_s.reply,
                 "sources": conv_sources_s,
                 "citations": conv_citations_s,
-                "faithfulness_score": conv_res_s.faithfulness_score,
+                "faithfulness_score": conv_faithfulness_s,
                 "retrieval_mode": "conversational",
                 "model": self.name,
                 "conversation_id": thread_id,

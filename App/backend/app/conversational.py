@@ -31,7 +31,7 @@ class ConversationalResult:
     locale: str
     intent_type: str
     next_actions: list[str]
-    faithfulness_score: float = 1.0
+    faithfulness_score: float | None = None
     sources: list[str] = field(default_factory=list)
     citations: list[dict[str, str]] = field(default_factory=list)
 

@@ -75,10 +75,10 @@ _TAX_DOMAIN_EXCLUSION_RE = re.compile(
 # Broken PDF ligatures (e.g., "speci\nﬁ\nc", "Modi\nﬁ\ncation", "Dif\nﬁ\ncult")
 # that appear when copying from two-column system-card PDFs.
 _BROKEN_LIGATURE_MID_RE = re.compile(
-    r"([A-Za-z])\s*\n+\s*(fi|fl)\s*\n+\s*([A-Za-z])"
+    r"([A-Za-z])[^\S\n]*\n\s*(fi|fl)[^\S\n]*\n\s*([A-Za-z])"
 )
-_BROKEN_LIGATURE_LEFT_RE = re.compile(r"([A-Za-z])\s*\n+\s*(fi|fl)([A-Za-z])")
-_BROKEN_LIGATURE_RIGHT_RE = re.compile(r"([A-Za-z])(fi|fl)\s*\n+\s*([A-Za-z])")
+_BROKEN_LIGATURE_LEFT_RE = re.compile(r"([A-Za-z])[^\S\n]*\n\s*(fi|fl)([A-Za-z])")
+_BROKEN_LIGATURE_RIGHT_RE = re.compile(r"([A-Za-z])(fi|fl)[^\S\n]*\n\s*([A-Za-z])")
 _SECTION_NOTE_RE = re.compile(
     r"\(\s*Section\s+\d+(?:\.\d+)*\s+only\s*\)|\[\s*Table\s+\d+(?:\.\d+)*(?:\.[A-Z])?\s*\]",
     re.IGNORECASE,
@@ -89,7 +89,7 @@ def normalize_welfare_query(text: str) -> str:
     """Normalize PDF ligatures, broken line-wraps, and smart punctuation in O(n) time."""
     if not text:
         return ""
-    bounded = text[:6000]
+    bounded = text[:16000]
     norm = unicodedata.normalize("NFKC", bounded)
     norm = norm.replace("\u2019", "'").replace("\u2018", "'")
     norm = norm.replace("\u201c", '"').replace("\u201d", '"')
@@ -584,7 +584,7 @@ def handle_model_welfare_turn(message: str, locale: str = "en") -> ModelWelfareM
         eff_loc = "en"
 
     # Cap at 4 sections in a single turn if the user pasted multiple groups or
-    # the entire 16-group table, while noting that all matched dimensions are covered.
+    # the entire 16-group table, disclosing any omitted dimensions.
     if len(matched) <= 2:
         sections = [_CATEGORY_BODIES_EN[k] for k in matched]
     else:
@@ -596,8 +596,15 @@ def handle_model_welfare_turn(message: str, locale: str = "en") -> ModelWelfareM
         )
         selected_keys = matched[:4]
         sections = [lead] + [_CATEGORY_BODIES_EN[k] for k in selected_keys]
+        omitted = len(matched) - len(selected_keys)
+        if omitted > 0:
+            sections.append(
+                f"*This answer covers the first {len(selected_keys)} dimensions. "
+                f"{omitted} further dimension(s) matched. Ask them separately for a full answer.*"
+            )
 
-    closing = _LOCALIZED_CLOSINGS.get(eff_loc, _LOCALIZED_CLOSINGS["en"])
+    # Body and closing stay English; localize_reply translates the whole reply once.
+    closing = _LOCALIZED_CLOSINGS["en"]
     reply = "\n\n".join(sections) + closing
     intent_type = (
         f"model_welfare_{matched[0]}" if len(matched) == 1 else "model_welfare_interview"
