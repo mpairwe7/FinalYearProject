@@ -448,28 +448,11 @@ def test_qa_audit_subworkflow_cancel_returns_to_parent_and_anon_to_auth_migratio
     assert mda_by_id["mda_service_selected"]["status"] == "satisfied"
     assert mda_by_id["ntr_prn_available"]["status"] == "satisfied"
 
-    # QA-6: Verify Node.js 24 upgrade across .github/workflows/*.yml
-    workflows_dir = FLOWS_DIR.parents[4] / ".github" / "workflows"
-    deprecated_node20_pins = (
-        "setup-python@a26af69b",
-        "download-artifact@d3f86a10",
-        "build-push-action@4f58ea79",
-        "checkout@34e11487",
-        "cache@0057852b",
-        "github-script@f28e40c7",
-    )
-    for wf_file in sorted(workflows_dir.glob("*.yml")):
-        content = wf_file.read_text(encoding="utf-8")
-        for old_pin in deprecated_node20_pins:
-            assert old_pin not in content, f"{wf_file.name} still references Node 20 action {old_pin}"
-        assert "NODE_VERSION: '20'" not in content
-        assert 'NODE_VERSION: "20"' not in content
-        assert "NODE_VERSION: 20" not in content
+    # QA-6 (Node.js 24 CI pins) now lives in tests/test_ci_supply_chain_policy.py.
 
 
 def test_post_619_phased_audit_remediations_session_binding_goal_stack_snap_to_fill_and_sha_pins():
     """Verify Phase 1-4 post-#619 QA audit remediations end-to-end."""
-    import re
     import uuid
     from types import SimpleNamespace
 
@@ -642,34 +625,5 @@ def test_post_619_phased_audit_remediations_session_binding_goal_stack_snap_to_f
         _ACTIVE_CONVERSATION_STATE.reset(tok_s2)
         _ACTIVE_TENANT_ID.reset(tok_t2)
 
-    # 4. Supply-chain gate: 100% of workflow uses: lines are 40-char SHA pinned and Crane Cloud Dockerfile is Node 24
-    repo_root = FLOWS_DIR.parents[4]
-    workflows_dir = repo_root / ".github" / "workflows"
-    uses_re = re.compile(r"^\s*-?\s*uses:\s*([^\s#]+)", re.M)
-    sha_pin_re = re.compile(r"^[^@]+@[0-9a-f]{40}$")
-    forbidden_pins = (
-        "codecov-action@b9fd7d16",
-        "fetch-metadata@d7267f60",
-        "action-baseline@2b5fc7f9",
-        "scorecard-action@2d114668",
-        "cache@27d5ce7f",
-    )
-    for wf_file in sorted(workflows_dir.glob("*.yml")):
-        content = wf_file.read_text(encoding="utf-8")
-        for match in uses_re.finditer(content):
-            action_ref = match.group(1)
-            assert sha_pin_re.match(action_ref), f"Unpinned action in {wf_file.name}: {action_ref}"
-        for bad in forbidden_pins:
-            assert bad not in content, f"{wf_file.name} still contains outdated action pin {bad}"
-
-    crane_df = (repo_root / "App" / "Dockerfile.cranecloud").read_text(encoding="utf-8")
-    assert "FROM node:24-bookworm-slim AS frontend-builder" in crane_df
-    assert "COPY --from=oven/bun:1.4.3-slim /usr/local/bin/bun /usr/local/bin/bun" in crane_df
-    assert "COPY --from=frontend-builder /usr/local/bin/node /usr/local/bin/node" in crane_df
-    assert "App/frontend/bun.lock*" in crane_df
-    assert "node:20" not in crane_df
-    assert "setup_20.x" not in crane_df
-    assert "setup_24.x" not in crane_df
-
-
-
+    # 4. The supply-chain gate (SHA pins, Node/Bun parity, Dockerfile pins) now lives in
+    #    tests/test_ci_supply_chain_policy.py.

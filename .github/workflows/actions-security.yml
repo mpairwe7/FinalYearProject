@@ -1,0 +1,78 @@
+# =============================================================================
+# Security: GitHub Actions (ADR-0011)
+#
+# Gates every change to .github/ on two static audits:
+#
+#   * zizmor     — template injection, persisted checkout credentials, dangerous
+#                  triggers, unpinned images, bot-actor spoofing, Dependabot
+#                  cooldowns, and (online) impostor commits and known-vulnerable
+#                  action versions. Any medium-or-higher finding fails the check.
+#                  Reviewed exceptions are inline `# zizmor: ignore[...]` with a
+#                  written justification next to them.
+#   * actionlint — workflow syntax, expression types and runner labels, plus
+#                  error-level shellcheck findings in `run:` blocks.
+#
+# The weekly run catches actions that become known-vulnerable after they were
+# pinned. tests/test_ci_supply_chain_policy.py enforces the offline subset of the
+# same policy in the root pytest suite.
+# =============================================================================
+name: "Security: GitHub Actions"
+
+on:
+  pull_request:
+    paths:
+      - ".github/**"
+  push:
+    branches: [dev, main]
+    paths:
+      - ".github/**"
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: actions-security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Audit workflows, composite actions and dependabot.yml
+        uses: zizmorcore/zizmor-action@85b2b9fb8e3325e7a23d7d0a9d7ba5ae0f999e3e # v0.7.1
+        with:
+          version: "1.31.1"
+          min-severity: medium
+          # Gate mode: plain findings + annotations and a failing exit code,
+          # instead of a SARIF upload that never fails the check.
+          advanced-security: "false"
+          annotations: "true"
+
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Lint workflows
+        # The image bundles shellcheck; only error-level script findings fail.
+        run: |
+          docker run --rm \
+            -e SHELLCHECK_OPTS=--severity=error \
+            -v "${GITHUB_WORKSPACE}:/repo" -w /repo \
+            rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 \
+            -color

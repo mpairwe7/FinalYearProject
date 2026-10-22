@@ -60,6 +60,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          persist-credentials: true  # this job pushes a commit back
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
@@ -71,14 +72,17 @@ jobs:
         run: pip install requests beautifulsoup4 pydantic ftfy
 
       - name: Run crawler
+        env:
+          MAX_PAGES: ${{ inputs.max_pages || '200' }}
         run: |
+          [[ "$MAX_PAGES" =~ ^[0-9]{1,5}$ ]] || { echo "::error::max_pages must be a number"; exit 1; }
           python -c "
           from ml.scripts.data_aug.crawler import CrawlConfig, crawl_ura
           from pathlib import Path
-          import logging
+          import logging, os
           logging.basicConfig(level=logging.INFO)
           cfg = CrawlConfig(
-              max_pages=${{ inputs.max_pages || '200' }},
+              max_pages=int(os.environ['MAX_PAGES']),
               rate_limit_s=2.0,
               pdf_output_dir=Path('Data/pdfs'),
               crawl_output_dir=Path('Data/crawl'),

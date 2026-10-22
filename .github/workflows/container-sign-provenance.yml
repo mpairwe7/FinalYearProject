@@ -2,8 +2,9 @@
 # Container Signing & SLSA Provenance (2026)
 #
 # Signs container images with Sigstore cosign and generates SLSA v1.2
-# provenance attestations.  Runs after successful Docker push in the
-# ML Pipeline and Frontend CI/CD workflows.
+# provenance attestations.  Called by ura-chatbot-build-push.yml after every
+# push of landwind/ura-chatbot (the image Crane Cloud and the HF Space run);
+# it was documented as wired in but had no caller, so nothing was signed.
 #
 # Standards: SLSA v1.2 (Build L2), CISA SSDF, CycloneDX 1.6, Sigstore
 # =============================================================================
@@ -20,6 +21,11 @@ on:
         description: "Image digest (sha256:...)"
         required: true
         type: string
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: true
+      DOCKERHUB_TOKEN:
+        required: true
   workflow_dispatch:
     inputs:
       image:
@@ -41,13 +47,11 @@ jobs:
     permissions:
       contents: read
       id-token: write     # Sigstore OIDC token
-      packages: write     # Push attestation to registry
       attestations: write # GitHub Attestations API
+      # No packages: write — the image and its signature live on Docker Hub,
+      # pushed with the Docker Hub token, not on GHCR.
     timeout-minutes: 10
     steps:
-      - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
       - name: Install cosign
         uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
 
@@ -57,21 +61,41 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # Inputs reach the shell through env, never through ${{ }} in the
+      # script body, and are shape-checked before cosign sees them.
+      - name: Validate image reference
+        env:
+          IMAGE: ${{ inputs.image }}
+          DIGEST: ${{ inputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE" =~ ^[a-z0-9]+([._/-][a-z0-9]+)*(:[A-Za-z0-9_.-]{1,128})?$ ]] \
+            || { echo "::error::invalid image reference"; exit 1; }
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] \
+            || { echo "::error::invalid image digest"; exit 1; }
+
       # Keyless signing via Sigstore Fulcio + Rekor (no long-lived keys)
       - name: Sign container image (keyless)
-        run: |
-          cosign sign --yes \
-            --recursive \
-            "${{ inputs.image }}@${{ inputs.digest }}"
         env:
-          COSIGN_EXPERIMENTAL: "1"
+          IMAGE: ${{ inputs.image }}
+          DIGEST: ${{ inputs.digest }}
+        run: cosign sign --yes --recursive "${IMAGE}@${DIGEST}"
 
+      # Verify against THIS repository's signing workflow only. The previous
+      # match-anything identity pattern accepted a signature made by any
+      # GitHub Actions workflow in any repository, so it proved nothing.
       - name: Verify signature
+        env:
+          IMAGE: ${{ inputs.image }}
+          DIGEST: ${{ inputs.digest }}
         run: |
+          set -euo pipefail
           cosign verify \
-            --certificate-identity-regexp=".*" \
+            --certificate-identity-regexp="^https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/container-sign-provenance\.yml@refs/" \
             --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
-            "${{ inputs.image }}@${{ inputs.digest }}" | head -20
+            --certificate-github-workflow-repository="${GITHUB_REPOSITORY}" \
+            "${IMAGE}@${DIGEST}" > /dev/null
+          echo "Signature verified for ${IMAGE}@${DIGEST}"
 
       # Generate SLSA v1.2 provenance via GitHub's built-in attestation
       - name: Generate SLSA provenance attestation
@@ -82,10 +106,13 @@ jobs:
           push-to-registry: true
 
       - name: Step summary
+        env:
+          IMAGE: ${{ inputs.image }}
+          DIGEST: ${{ inputs.digest }}
         run: |
           echo "## Container Signing & Provenance" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Image**: \`${{ inputs.image }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Digest**: \`${{ inputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Image**: \`${IMAGE}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Digest**: \`${DIGEST}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Signing**: Sigstore cosign (keyless OIDC)" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Provenance**: SLSA v1.2 Build L2 (GitHub Attestations)" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Rekor log**: https://search.sigstore.dev/" >> "$GITHUB_STEP_SUMMARY"

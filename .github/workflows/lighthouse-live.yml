@@ -25,7 +25,10 @@ on:
         description: "Target URL to audit (defaults to the live Crane Cloud deploy)"
         type: string
         required: false
-  workflow_run:
+  # Reviewed: this run checks out the default branch (never the triggering
+  # run's head), holds contents: read only and keeps no credentials; it audits
+  # a public URL. Nothing from the triggering run is executed.
+  workflow_run:  # zizmor: ignore[dangerous-triggers]
     workflows: ["URA Chatbot — Deploy to Crane Cloud"]
     types: [completed]
   schedule:
@@ -39,7 +42,6 @@ permissions:
   contents: read
 
 env:
-  NODE_VERSION: "24"
   DEFAULT_URL: "https://ura-chatbot-6318a1b5.renu-01.cranecloud.io"
 
 jobs:
@@ -66,7 +68,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: App/frontend/.nvmrc
 
       - name: Resolve target URL
         id: target

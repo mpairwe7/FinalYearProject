@@ -4,14 +4,17 @@
 # Uses Bun for dependency install and build, Node.js slim for runtime
 # =============================================================================
 
+# Base images are pinned by tag AND digest so a re-pushed tag cannot change
+# what we build; Dependabot (docker ecosystem) moves both together.
+
 # Stage 1: Install dependencies
-FROM oven/bun:1.4.3-slim AS deps
+FROM oven/bun:1.4.3-slim@sha256:14a223fa35747ec728bce300ef85888bc5f7958164d15bbba6a54b22b52a3288 AS deps
 WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
 # Stage 2: Build the Next.js application
-FROM oven/bun:1.4.3-slim AS builder
+FROM oven/bun:1.4.3-slim@sha256:14a223fa35747ec728bce300ef85888bc5f7958164d15bbba6a54b22b52a3288 AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -40,8 +43,11 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN bun run build
 
 # Stage 3: Production runtime (minimal Node.js image)
-# October 2026 baseline requires Node.js 24+ — runner uses actively-maintained node:26-bookworm-slim.
-FROM node:26-bookworm-slim AS runner
+# Node 24 LTS, the same major CI tests on (App/frontend/.nvmrc) and the Crane
+# Cloud image ships. This ran node:26 while CI tested 24, and 26 is a Current
+# (non-LTS) release until 2026-10-28; move .nvmrc, both Dockerfiles and
+# engines together (tests/test_ci_supply_chain_policy.py enforces it).
+FROM node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production

@@ -52,6 +52,16 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      # The tag ends up in a Dockerfile line / deploy request, so it must be a
+      # plain Docker tag (no spaces, newlines, quotes, |, & or $) before any
+      # later step expands it.
+      - name: Validate image tag
+        env:
+          TAG: ${{ inputs.image_tag }}
+        run: |
+          [[ "$TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] \
+            || { echo "::error::image_tag is not a valid Docker tag"; exit 1; }
+
       - name: Validate required repo-level secrets
         env:
           CRANE_CLOUD_EMAIL: ${{ secrets.CRANE_CLOUD_EMAIL }}
@@ -65,6 +75,8 @@ jobs:
 
       - name: Resolve image reference
         id: img
+        env:
+          TAG: ${{ inputs.image_tag }}
         run: |
           set -euo pipefail
           # Crane Cloud diffs by image *string*, not Docker manifest digest, so
@@ -72,7 +84,6 @@ jobs:
           # docker-publish.yml works around this by pinning to a SHA-suffixed
           # tag on every push (e.g. cpu-abc1234).  When the build workflow
           # dispatches us with a `sha-<short>` tag we use that directly.
-          TAG="${{ inputs.image_tag }}"
           IMAGE="${IMAGE_BASE}:${TAG}"
           echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
           echo "→ Will PATCH app to image: ${IMAGE}"
@@ -257,15 +268,17 @@ jobs:
         env:
           URL: ${{ steps.patch.outputs.url }}
           IMAGE: ${{ steps.img.outputs.image }}
+          TAG: ${{ inputs.image_tag }}
+          JOB_STATUS: ${{ job.status }}
         run: |
           {
             echo "### URA Chatbot — Crane Cloud deploy"
             echo
             echo "| Field      | Value |"
             echo "| ---------- | ----- |"
-            echo "| image_tag  | \`${{ inputs.image_tag }}\` |"
+            echo "| image_tag  | \`${TAG}\` |"
             echo "| image      | \`${IMAGE}\` |"
-            echo "| status     | \`${{ job.status }}\` |"
+            echo "| status     | \`${JOB_STATUS}\` |"
             if [[ -n "${URL:-}" ]]; then
               echo "| public URL | ${URL} |"
               echo "| WS URL     | \`${URL/https/wss}/v2/chat/stream\` |"

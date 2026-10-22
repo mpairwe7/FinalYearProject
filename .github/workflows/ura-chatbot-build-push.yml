@@ -66,13 +66,15 @@ jobs:
       contents: read
       packages: read
     outputs:
-      image_ref: ${{ steps.publish.outputs.image_ref }}
-      digest:    ${{ steps.build.outputs.digest }}
-      tag:       ${{ steps.publish.outputs.tag }}
+      image_ref:  ${{ steps.publish.outputs.image_ref }}
+      image_name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+      digest:     ${{ steps.build.outputs.digest }}
+      tag:        ${{ steps.publish.outputs.tag }}
     steps:
       - name: Checkout (full context needed — Dockerfile copies Model/ + Data/)
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          persist-credentials: false
           lfs: false
 
       - name: Set up Docker Buildx
@@ -109,9 +111,14 @@ jobs:
       - name: Install corpus export dependencies
         run: pip install pymupdf4llm pymupdf ftfy pydantic
 
+      # Reviewed cache-poisoning trust boundary: the pdf-jsonl-v1-* key is
+      # written only by this workflow, which runs on push to dev/main/v* and on
+      # maintainer dispatch; the repo has no pull_request_target, issue_comment
+      # or other untrusted-input workflow that could write a cache on those
+      # refs (tests/test_ci_supply_chain_policy.py keeps it that way).
       - name: Cache the PDF chunk corpus
         id: pdf-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0  # zizmor: ignore[cache-poisoning]
         with:
           path: App/Data/pdf_jsonl
           key: pdf-jsonl-v1-${{ hashFiles('Data/pdfs/**') }}
@@ -191,14 +198,16 @@ jobs:
 
       - name: Compute primary deploy tag
         id: publish
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           set -euo pipefail
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             TAG="${GITHUB_REF_NAME}"
           else
             TAG="sha-$(git rev-parse --short HEAD)"
           fi
-          IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}"
+          IMAGE_REF="${REGISTRY}/${IMAGE_NAME}:${TAG}"
           echo "tag=${TAG}"             >> "$GITHUB_OUTPUT"
           echo "image_ref=${IMAGE_REF}" >> "$GITHUB_OUTPUT"
           {
@@ -207,10 +216,29 @@ jobs:
             echo "| Field      | Value |"
             echo "| ---------- | ----- |"
             echo "| Image      | \`${IMAGE_REF}\` |"
-            echo "| Digest     | \`${{ steps.build.outputs.digest }}\` |"
+            echo "| Digest     | \`${DIGEST}\` |"
             echo "| Tags       | see workflow log |"
             echo "| Builder    | linux/amd64 |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # Keyless Sigstore signature + signed SLSA provenance for the pushed digest.
+  # BuildKit's provenance/SBOM above are attached but unsigned. Not yet a gate
+  # for the deploys below: make it one once this job has run green on dev.
+  # ---------------------------------------------------------------------------
+  sign:
+    needs: build
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/container-sign-provenance.yml
+    with:
+      image: ${{ needs.build.outputs.image_name }}
+      digest: ${{ needs.build.outputs.digest }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   # ---------------------------------------------------------------------------
   # Auto-trigger Crane Cloud deploy after a successful push on dev / v* tag.
@@ -227,9 +255,11 @@ jobs:
     steps:
       - name: Dispatch Crane Cloud deploy
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          TAG: ${{ needs.build.outputs.tag }}
         with:
           script: |
-            const tag = '${{ needs.build.outputs.tag }}';
+            const tag = process.env.TAG;
             await github.rest.actions.createWorkflowDispatch({
               owner: context.repo.owner,
               repo:  context.repo.repo,
@@ -259,9 +289,11 @@ jobs:
     steps:
       - name: Dispatch HF Space roll
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          TAG: ${{ needs.build.outputs.tag }}
         with:
           script: |
-            const tag = '${{ needs.build.outputs.tag }}';
+            const tag = process.env.TAG;
             await github.rest.actions.createWorkflowDispatch({
               owner: context.repo.owner,
               repo:  context.repo.repo,

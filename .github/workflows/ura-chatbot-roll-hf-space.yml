@@ -63,6 +63,16 @@ jobs:
     timeout-minutes: 25
 
     steps:
+      # The tag ends up in a Dockerfile line / deploy request, so it must be a
+      # plain Docker tag (no spaces, newlines, quotes, |, & or $) before any
+      # later step expands it.
+      - name: Validate image tag
+        env:
+          TAG: ${{ inputs.image_tag }}
+        run: |
+          [[ "$TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] \
+            || { echo "::error::image_tag is not a valid Docker tag"; exit 1; }
+
       - name: Validate the HF token is configured
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
@@ -73,6 +83,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          persist-credentials: true  # this job pushes a commit back
           # The pin is committed back, so check out a real branch rather than
           # the detached SHA a dispatch would otherwise give us.
           ref: ${{ github.ref_name }}
@@ -200,6 +211,8 @@ jobs:
           PY
 
       - name: Confirm the app answers
+        env:
+          TAG: ${{ inputs.image_tag }}
         run: |
           set -uo pipefail
           # RUNNING is the scheduler's view. The build gate gives a booting image
@@ -208,7 +221,7 @@ jobs:
           for attempt in 1 2 3 4 5 6; do
             CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 45 "$SPACE_URL/health" || echo 000)
             echo "  [$attempt] /health → $CODE"
-            [[ "$CODE" == "200" ]] && { echo "::notice::HF Space healthy on ${{ inputs.image_tag }}"; exit 0; }
+            [[ "$CODE" == "200" ]] && { echo "::notice::HF Space healthy on ${TAG}"; exit 0; }
             sleep 20
           done
           echo "::error::Space reached RUNNING but /health never returned 200."

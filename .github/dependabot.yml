@@ -1,6 +1,12 @@
 # Dependabot Configuration for URA AI Taxpayer Chatbot
 # Runs weekly on Sundays, staggered by hour to avoid runner queue starvation
 # Docs: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates
+#
+# Every entry carries a cooldown: a release must be public for 7 days (30 for
+# a major) before Dependabot proposes it. Minor/patch PRs are auto-merged on
+# green CI (dependabot-automerge.yml), so without it a hijacked release — the
+# pattern of the March 2026 trivy-action and 2025 npm worm compromises — could
+# land within hours. Cooldown never delays *security* updates.
 
 version: 2
 updates:
@@ -15,6 +21,9 @@ updates:
       day: "sunday"
       time: "02:00"
       timezone: "Etc/UTC"
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
     open-pull-requests-limit: 2
     labels:
       - "dependencies"
@@ -51,6 +60,9 @@ updates:
       day: "sunday"
       time: "03:00"
       timezone: "Etc/UTC"
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
     open-pull-requests-limit: 2
     labels:
       - "dependencies"
@@ -69,7 +81,9 @@ updates:
   # =============================================================================
   # FRONTEND - Next.js 16 + React 19 + Bun (App/frontend) -> Sunday 04:00 UTC
   # =============================================================================
-  - package-ecosystem: "npm"
+  # "bun", not "npm": the npm ecosystem bumps package.json without bun.lock,
+  # which breaks every `bun install --frozen-lockfile` job (seen in PR #418).
+  - package-ecosystem: "bun"
     directory: "/App/frontend"
     target-branch: "dev"
     schedule:
@@ -77,6 +91,9 @@ updates:
       day: "sunday"
       time: "04:00"
       timezone: "Etc/UTC"
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
     open-pull-requests-limit: 2
     labels:
       - "dependencies"
@@ -96,14 +113,20 @@ updates:
   # =============================================================================
   # DOCKER - Backend & Frontend Base Images -> Sunday 05:00 UTC
   # =============================================================================
+  # "/App" holds Dockerfile.cranecloud, the image Crane Cloud and the HF Space
+  # actually run; it was not covered, so its base images never got bumped.
   - package-ecosystem: "docker"
-    directory: "/"
+    directories:
+      - "/"
+      - "/App"
     target-branch: "dev"
     schedule:
       interval: "weekly"
       day: "sunday"
       time: "05:00"
       timezone: "Etc/UTC"
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 1
     labels:
       - "dependencies"
@@ -127,6 +150,8 @@ updates:
       day: "sunday"
       time: "05:30"
       timezone: "Etc/UTC"
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 1
     labels:
       - "dependencies"
@@ -154,6 +179,8 @@ updates:
       day: "sunday"
       time: "06:00"
       timezone: "Etc/UTC"
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 1
     labels:
       - "dependencies"
