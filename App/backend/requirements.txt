@@ -27,11 +27,11 @@ pandas>=3.0.5
 
 # Hybrid retrieval (dense + sparse + reranking)
 sentence-transformers>=6.0.0,<7
-qdrant-client>=1.18,<1.19
-numpy>=2.4.4,<3
+qdrant-client>=1.19.1,<1.20
+numpy>=2.5.4,<3
 
 # PDF ingestion & document processing (permissive Apache-2.0 / MIT)
-pypdfium2>=5.13.0
+pypdfium2>=5.14.0
 pdfplumber>=0.11.0
 
 # Document attachment analysis (POST /v1/documents/analyze) — DOCX/XLSX
@@ -74,8 +74,8 @@ Pillow>=13.0.0
 # install and contradicted the `sentence-transformers>=6.0.0,<7` above — that
 # line already requires transformers 5.x, so the old floor could never be the
 # version actually resolved.
-transformers>=5.10.0,<6
-torch==2.14.0
+transformers>=5.20.0,<6
+torch==2.14.1
 accelerate>=1.2.0
 peft>=0.19.1
 bitsandbytes>=0.45.0
@@ -91,19 +91,19 @@ prometheus-client>=0.26.0
 # OpenTelemetry (opt-in via OTEL_ENABLED=true). The SDK and the contrib
 # instrumentations release in lockstep (1.45.x <-> 0.66b0); pinning the family
 # together keeps a lone SDK bump from producing an unresolvable install.
-opentelemetry-api>=1.45.0,<1.46
-opentelemetry-sdk>=1.45.0,<1.46
-opentelemetry-exporter-otlp-proto-grpc>=1.45.0,<1.46
+opentelemetry-api>=1.45.1,<1.46
+opentelemetry-sdk>=1.45.1,<1.46
+opentelemetry-exporter-otlp-proto-grpc>=1.45.1,<1.46
 opentelemetry-instrumentation-fastapi==0.66b0
 opentelemetry-instrumentation-httpx==0.66b0
 
 # Cloudflare free-tier + Gemini fallbacks (FLAG_CLOUDFLARE_FALLBACK)
 pydantic-settings>=2.15.0
-boto3>=1.43.81
+boto3>=1.43.114
 urllib3>=2.8.0
 # DNS-over-HTTPS resolver (doh_resolver.py) for DNS-broken pods (USE_DOH=true)
-dnspython>=2.8.0
+dnspython>=2.9.0
 
 # Cloud neural TTS fallback (edge-tts) — used when local Piper is unavailable;
 # English voice configurable via SPEECH_EN_EDGE_VOICE (default en-US-AriaNeural)
-edge-tts>=7.0,<8
+edge-tts>=7.3.1,<8
