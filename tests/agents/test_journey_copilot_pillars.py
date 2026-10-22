@@ -571,6 +571,8 @@ def test_post_619_phased_audit_remediations_session_binding_goal_stack_snap_to_f
         _ACTIVE_CONVERSATION_STATE.reset(tok_s)
         _ACTIVE_TENANT_ID.reset(tok_t)
 
+    anon_created_at = database.get_workflow_session(anon_session_state, tenant_id="default")["created_at"]
+
     # Now user logs in (user_id="usr-p1-auth", same session_id=sess_id) and asks an off-topic side question first!
     auth_state = database.conversation_state_key(
         thread_id, session_id=sess_id, user_id="usr-p1-auth", tenant_id="default"
@@ -588,12 +590,14 @@ def test_post_619_phased_audit_remediations_session_binding_goal_stack_snap_to_f
         )
         # Side question yields None so RAG answers it, AND the migrated session is safely persisted under auth_state!
         assert side_q is None
-        old_anon_row = database.get_workflow_session(anon_session_state, tenant_id="default")
-        assert old_anon_row is not None
-        assert old_anon_row["status"] == "cancelled"
+        # Re-keyed in place: no anonymous copy of the answers is left behind, and
+        # the journey keeps its start time instead of counting as cancelled + new.
+        assert database.get_workflow_session(anon_session_state, tenant_id="default") is None
         migrated_row = database.get_workflow_session(auth_state, tenant_id="default")
         assert migrated_row is not None
         assert migrated_row["status"] == "active"
+        assert migrated_row["user_id"] == "usr-p1-auth"
+        assert migrated_row["created_at"] == anon_created_at
         assert migrated_row["slots"]["taxpayer_type"] == "company"
         assert migrated_row["slots"]["tax_type"] == "vat"
 

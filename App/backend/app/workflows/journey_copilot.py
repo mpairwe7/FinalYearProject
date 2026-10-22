@@ -556,6 +556,36 @@ def is_prerequisite_remediation(parent_workflow_id: str, target_workflow_id: str
     return any(s.remediation_workflow == target_workflow_id for s in specs)
 
 
+#: Every slot a prerequisite reads; the only case facts a session may keep.
+_PREREQUISITE_SLOTS: frozenset[str] = frozenset(
+    spec.slot for specs in WORKFLOW_PREREQUISITE_DAG.values() for spec in specs if spec.slot
+)
+
+
+def prerequisite_case_facts(case_facts: Any | None) -> dict[str, Any]:
+    """The part of *case_facts* that a prerequisite in the DAG can read.
+
+    The workflow session is persisted with every turn, so storing whole
+    ``CaseFacts`` there would copy salary, turnover and residency figures
+    into durable storage for nothing (data minimisation). Accepts a
+    ``CaseFacts``-like object with ``to_dict()`` or a mapping.
+    """
+    if case_facts is None:
+        return {}
+    if isinstance(case_facts, Mapping):
+        source: Mapping[str, Any] = case_facts
+    elif callable(getattr(case_facts, "to_dict", None)):
+        raw = case_facts.to_dict()
+        source = raw if isinstance(raw, Mapping) else {}
+    else:
+        return {}
+    return {
+        key: source[key]
+        for key in sorted(_PREREQUISITE_SLOTS)
+        if source.get(key) not in ("", None)
+    }
+
+
 def evaluate_prerequisites(
     workflow_id: str,
     slots: Mapping[str, Any],

@@ -3187,6 +3187,49 @@ def complete_workflow_session(
     return touched
 
 
+def adopt_workflow_session(
+    from_conversation_id: str,
+    to_conversation_id: str,
+    *,
+    user_id: str,
+    tenant_id: str = "default",
+    min_updated_at: float = 0.0,
+) -> bool:
+    """Postgres mirror of :func:`app.database.adopt_workflow_session`."""
+    pool = _get_pool()
+    if pool is None or not from_conversation_id or not to_conversation_id or not user_id:
+        return False
+    if from_conversation_id == to_conversation_id:
+        return False
+    try:
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE workflow_sessions SET conversation_id = %s, user_id = %s
+                       WHERE conversation_id = %s AND tenant_id = %s AND user_id = ''
+                         AND status = 'active' AND updated_at >= %s
+                         AND NOT EXISTS (
+                           SELECT 1 FROM workflow_sessions WHERE conversation_id = %s
+                         )""",
+                    (
+                        to_conversation_id,
+                        user_id,
+                        from_conversation_id,
+                        tenant_id or "default",
+                        float(min_updated_at),
+                        to_conversation_id,
+                    ),
+                )
+                adopted = cur.rowcount > 0
+            conn.commit()
+    except Exception:
+        # A concurrent adoption that won the race surfaces as a unique
+        # violation on the new key; either way the row was not moved here.
+        logger.warning("workflow session adoption skipped", exc_info=True)
+        return False
+    return adopted
+
+
 # ---------------------------------------------------------------------------
 # Agent Graph Checkpoint Persistence (LangGraph 2026 Durable Execution)
 # ---------------------------------------------------------------------------

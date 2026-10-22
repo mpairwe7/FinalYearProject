@@ -5157,21 +5157,34 @@ class ChatModel:
         *,
         user_id: str | None = None,
     ) -> None:
-        active_cf = _ACTIVE_CASE_FACTS.get()
-        if active_cf is not None:
-            if hasattr(active_cf, "to_dict") and callable(active_cf.to_dict):
-                session.slots["_case_facts"] = active_cf.to_dict()
-            elif isinstance(active_cf, dict):
-                session.slots["_case_facts"] = dict(active_cf)
-        if user_id:
-            from .workflows.journey_copilot import elevate_anonymous_workflow_session
+        from .workflows.journey_copilot import (
+            elevate_anonymous_workflow_session,
+            prerequisite_case_facts,
+        )
 
+        # The session is persisted every turn, so it keeps only the case facts
+        # a prerequisite can read — never the salary, turnover or residency
+        # days the full CaseFacts carry. Re-filtering the stored copy when no
+        # facts arrive this turn also scrubs rows written before this rule.
+        active_cf = _ACTIVE_CASE_FACTS.get()
+        relevant_facts = prerequisite_case_facts(
+            active_cf if active_cf is not None else session.slots.get("_case_facts")
+        )
+        if relevant_facts:
+            session.slots["_case_facts"] = relevant_facts
+        else:
+            session.slots.pop("_case_facts", None)
+        if user_id:
             elevate_anonymous_workflow_session(
                 session,
                 user_id=user_id,
                 profile_slots=(personalization or {}).get("prefill_slots"),
             )
             return
+        # Being signed in is a property of this request, not of the stored
+        # session: a marker left from an earlier turn must not tell the
+        # step-up check that an anonymous caller is authenticated.
+        session.slots.pop("_authenticated_user_id", None)
         if not personalization:
             return
         for slot_name, value in (personalization.get("prefill_slots") or {}).items():
@@ -9609,60 +9622,34 @@ class ChatModel:
         persisted = db.get_workflow_session(state_thread_id, tenant_id=state_tenant_id)
         if not persisted and state_thread_id != thread_id:
             persisted = db.get_workflow_session(thread_id, tenant_id=state_tenant_id)
-        # QA-1: When an anonymous taxpayer elevates to an authenticated session mid-conversation,
-        # _scoped_conversation_state computes a user-scoped state_thread_id while the existing
-        # workflow row lives under the anonymous state key (with or without session_id) for the
-        # same thread_id. Adopt and migrate that anonymous row (only when unowned) so zero slots
-        # are lost across login (NIST SP 800-63B-4 session binding & W3C WCAG 2.2 AA SC 3.3.7).
-        migrated_anon_key = ""
+        # A taxpayer who signs in mid-flow gets a user-scoped state key, while
+        # their answers so far sit under the anonymous key. Only the anonymous
+        # key this request can itself prove — the same session id (or, with
+        # none, the same unsessioned conversation) — is ever adopted. Trying
+        # the unsessioned key as well let any signed-in caller holding someone
+        # else's conversation id take over that person's anonymous answers.
+        # The row is re-keyed in place, so the funnel sees one journey rather
+        # than a "cancelled" one plus a new one, and no copy is left behind.
         if not persisted and user_id and thread_id:
-            candidate_anon_keys: list[str] = []
-            if session_id:
-                candidate_anon_keys.append(
-                    db.conversation_state_key(
-                        thread_id,
-                        session_id=session_id,
-                        user_id=None,
-                        tenant_id=state_tenant_id,
-                    )
-                )
-            unsessioned_anon = db.conversation_state_key(
-                thread_id, user_id=None, tenant_id=state_tenant_id
+            anon_key = db.conversation_state_key(
+                thread_id,
+                session_id=session_id,
+                user_id=None,
+                tenant_id=state_tenant_id,
             )
-            if unsessioned_anon not in candidate_anon_keys:
-                candidate_anon_keys.append(unsessioned_anon)
-            for anon_key in candidate_anon_keys:
-                if anon_key in (state_thread_id, thread_id):
-                    continue
-                anon_row = db.get_workflow_session(anon_key, tenant_id=state_tenant_id)
-                if anon_row and not anon_row.get("user_id"):
-                    persisted = anon_row
-                    migrated_anon_key = anon_key
-                    break
+            if anon_key not in (state_thread_id, thread_id) and db.adopt_workflow_session(
+                anon_key,
+                state_thread_id,
+                user_id=user_id,
+                tenant_id=state_tenant_id,
+                min_updated_at=time.time() - db.conversation_ttl_seconds(),
+            ):
+                persisted = db.get_workflow_session(state_thread_id, tenant_id=state_tenant_id)
         # Past the conversation's retention the session keeps only its outcome
         # (the answers are blanked), so it is history, not something to resume.
         updated_at = (persisted or {}).get("updated_at")
         if updated_at is not None and float(updated_at) < time.time() - db.conversation_ttl_seconds():
             persisted = None
-        if migrated_anon_key and persisted and persisted.get("status") == "active":
-            migrated_session = self._restore_workflow_session(persisted)
-            self._apply_personalization_to_workflow(
-                migrated_session, personalization, user_id=user_id
-            )
-            db.upsert_workflow_session(
-                state_thread_id,
-                migrated_session.workflow_id,
-                migrated_session.current_step_idx,
-                migrated_session.slots,
-                status="active",
-                last_prompt=str(persisted.get("last_prompt") or ""),
-                user_id=user_id or "",
-                tenant_id=state_tenant_id,
-            )
-            db.complete_workflow_session(
-                migrated_anon_key, status="cancelled", tenant_id=state_tenant_id
-            )
-            persisted = db.get_workflow_session(state_thread_id, tenant_id=state_tenant_id) or persisted
         # A flow the taxpayer asks to leave for another stays active until the
         # new one has started; if the start is refused below, they keep it.
         leaving: dict[str, Any] | None = None

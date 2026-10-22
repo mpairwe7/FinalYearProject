@@ -1846,6 +1846,55 @@ def complete_workflow_session(
         return False
 
 
+def adopt_workflow_session(
+    from_conversation_id: str,
+    to_conversation_id: str,
+    *,
+    user_id: str,
+    tenant_id: str = "default",
+    min_updated_at: float = 0.0,
+) -> bool:
+    """Re-key an unowned, active anonymous workflow row to its new owner.
+
+    Used when a taxpayer signs in mid-flow: the row moves in place, so it
+    keeps its ``created_at`` (one journey, not a cancelled one and a new one)
+    and no second copy of the answers is left under the anonymous key. The
+    ``user_id = ''`` and ``status = 'active'`` guards make it a compare-and-
+    swap, so two concurrent sign-ins cannot both take the row; rows older
+    than *min_updated_at* are past retention and are never adopted. Returns
+    False when nothing matched or *to_conversation_id* is already taken.
+    """
+    if not from_conversation_id or not to_conversation_id or not user_id:
+        return False
+    if from_conversation_id == to_conversation_id:
+        return False
+    conn = _get_connection()
+    try:
+        cursor = conn.execute(
+            """UPDATE workflow_sessions SET conversation_id = ?, user_id = ?
+               WHERE conversation_id = ? AND tenant_id = ? AND user_id = ''
+                 AND status = 'active' AND updated_at >= ?
+                 AND NOT EXISTS (SELECT 1 FROM workflow_sessions WHERE conversation_id = ?)""",
+            (
+                to_conversation_id,
+                user_id,
+                from_conversation_id,
+                tenant_id or "default",
+                float(min_updated_at),
+                to_conversation_id,
+            ),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        return False
+    except Exception:
+        logger.exception("Failed to adopt workflow session")
+        conn.rollback()
+        return False
+
+
 def get_conversation_stats(days: int = 30) -> dict[str, Any]:
     """Conversation analytics for the last N days."""
     conn = _get_connection()
@@ -4382,6 +4431,7 @@ if ANALYTICS_BACKEND == "postgres":
         get_workflow_session = _pg.get_workflow_session  # type: ignore
         upsert_workflow_session = _pg.upsert_workflow_session  # type: ignore
         complete_workflow_session = _pg.complete_workflow_session  # type: ignore
+        adopt_workflow_session = _pg.adopt_workflow_session  # type: ignore
         logger.info("Analytics backend: postgres")
     except Exception:
         logger.exception("Postgres backend requested but import failed; falling back to sqlite")
