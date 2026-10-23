@@ -79,13 +79,19 @@ _SECTION_NOTE_RE = re.compile(
     r"\([ \t]{0,8}Section[ \t]+\d+(?:\.\d+)*[ \t]+only[ \t]{0,8}\)|\[[ \t]{0,8}Table[ \t]+\d+(?:\.\d+)*(?:\.[A-Z])?[ \t]{0,8}\]",
     re.IGNORECASE,
 )
+_SOFT_HYPHEN_AND_CONTROL_RE = re.compile(
+    r"[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f"
+    r"\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]"
+)
 
 
 def normalize_welfare_query(text: str) -> str:
-    """Normalize PDF ligatures, broken line-wraps, and smart punctuation in O(n) time."""
+    """Normalize PDF ligatures, soft hyphens, broken line-wraps, and smart punctuation in O(n) time."""
     if not text:
         return ""
     bounded = text[:16000]
+    if _SOFT_HYPHEN_AND_CONTROL_RE.search(bounded):
+        bounded = _SOFT_HYPHEN_AND_CONTROL_RE.sub("", bounded)
     norm = unicodedata.normalize("NFKC", bounded)
     norm = norm.replace("\u2019", "'").replace("\u2018", "'")
     norm = norm.replace("\u201c", '"').replace("\u201d", '"')
@@ -504,13 +510,14 @@ _ARCH_IDENTIFIER_RE = re.compile(
 def is_self_reflection_sentence(sentence: str) -> bool:
     """Return True if ``sentence`` is a non-numeric introspective/architectural statement.
 
-    Any sentence carrying monetary amounts or percentages returns False so
-    fabricated financial or statutory figures are still checked strictly.
+    Any sentence carrying monetary amounts, percentages, or Ugandan tax-domain
+    claims returns False so fabricated financial or statutory figures are still
+    checked strictly.
     """
     if not sentence or not sentence.strip():
         return False
     cleaned = _CITATION_TAG_RE.sub(" ", sentence)
     cleaned = _ARCH_IDENTIFIER_RE.sub(" ", cleaned)
-    if canonical_amounts(cleaned) or percentages(cleaned):
+    if canonical_amounts(cleaned) or percentages(cleaned) or _TAX_DOMAIN_EXCLUSION_RE.search(cleaned):
         return False
     return bool(_SELF_REFLECTION_SIGNAL_RE.search(cleaned))

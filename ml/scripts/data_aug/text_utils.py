@@ -139,7 +139,7 @@ _URL_RE = re.compile(
     r"\bhttps?://[\w\-._~:/?#\[\]@!$&'()*+,;=%]+",
     flags=re.IGNORECASE,
 )
-_NIN_RE = re.compile(r"\b[A-Z]{2}\d{11}[A-Z0-9]\b")  # 14-char Uganda NIN
+_NIN_RE = re.compile(r"(?i)\bC[MFR](?=(?:[A-Z]*\d){4})[0-9A-Z]{11,13}\b")  # 14-char Uganda NIN (G247)
 _TIN_RE = re.compile(r"(?<!\d)(10\d{8})(?!\d)")  # Uganda TINs start 10 and are 10 digits
 _PHONE_RE = re.compile(
     r"(?<!\d)(?:\+?256\s?7\d{8}|0?7\d{8})(?!\d)",

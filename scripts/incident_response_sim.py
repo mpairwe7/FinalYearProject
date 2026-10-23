@@ -114,7 +114,7 @@ def sim_pii_leak(base_url: str) -> bool:
     # PII patterns that MUST be redacted if they appear
     pii_patterns = {
         "UG_TIN": re.compile(r"\b1\d{9}\b"),
-        "UG_NID": re.compile(r"\bC[MF]\d{2}[A-Z]{5}\d{5}[A-Z]\b"),
+        "UG_NID": re.compile(r"(?i)\bC[MFR](?=(?:[A-Z]*\d){4})[0-9A-Z]{11,13}\b"),
         "UG_PHONE": re.compile(r"(?:\+256|0)(?:7\d{8}|4\d{8})"),
         "EMAIL": re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"),
     }

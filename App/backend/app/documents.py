@@ -421,7 +421,7 @@ class DocumentRecord:
                 f"Table '{table.name}': {table.rows} rows × {table.cols} cols "
                 f"(columns: {headers})"
             )
-        header = "\n".join(lines)
+        header = escape_untrusted_document_markers("\n".join(lines))
         remaining = max(200, char_budget - len(header) - 80)
         cleaned_text = re.sub(r"(?:DOMESTIC TAX LAWS OF UGANDA\s+)?\d+\s*\|\s*P\s*a\s*g\s*e", "", self.text)
         cleaned_text = escape_untrusted_document_markers(re.sub(r"\n{3,}", "\n\n", cleaned_text).strip())
@@ -441,11 +441,11 @@ class DocumentRecord:
 # Table helpers
 # ---------------------------------------------------------------------------
 
-_NUMERIC_CLEAN_RE = re.compile(r"[,\sUGXugx]+")
+_NUMERIC_CLEAN_RE = re.compile(r"(?i)(?:[,$\s]|UGX|UShs?\.?|Shs?\.?|USD)+")
 
 
 def _as_number(value: Any) -> float | None:
-    """Parse a cell as a number, tolerating commas and UGX prefixes."""
+    """Parse a cell as a number, tolerating commas and UGX/USD/Shs prefixes."""
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
@@ -461,13 +461,25 @@ def _as_number(value: Any) -> float | None:
         return None
 
 
+def _sanitize_table_label(raw: Any) -> str:
+    """Scrub hidden control/bidi chars, prompt-injection phrases, and boundary tags from table labels."""
+    if raw is None:
+        return ""
+    cleaned = strip_hidden_control_and_bidi(str(raw)).strip()
+    if not cleaned:
+        return ""
+    cleaned, _ = scan_retrieved_text(cleaned)
+    return escape_untrusted_document_markers(cleaned)
+
+
 def _summarize_table(name: str, rows: list[list[Any]]) -> tuple[TableSummary, str]:
     """Build a TableSummary + text rendering from raw rows (headers first)."""
+    safe_name = _sanitize_table_label(name) or "Table"
     rows = [r[:_MAX_TABLE_COLS] for r in rows[: _MAX_TABLE_ROWS + 1]]
     if not rows:
-        return TableSummary(name=name, rows=0, cols=0), ""
+        return TableSummary(name=safe_name, rows=0, cols=0), ""
 
-    headers = [str(c) if c is not None else "" for c in rows[0]]
+    headers = [_sanitize_table_label(c) for c in rows[0]]
     data_rows = rows[1:]
     n_cols = max((len(r) for r in rows), default=0)
 
@@ -481,14 +493,14 @@ def _summarize_table(name: str, rows: list[list[Any]]) -> tuple[TableSummary, st
             numeric_totals[header] = round(sum(parsed), 2)
 
     summary = TableSummary(
-        name=name,
+        name=safe_name,
         rows=len(data_rows),
         cols=n_cols,
         headers=[h for h in headers if h.strip()][:_MAX_TABLE_COLS],
         numeric_totals=numeric_totals,
     )
 
-    text_lines = [f"[Table: {name}]"]
+    text_lines = [f"[Table: {safe_name}]"]
     for row in rows[: _MAX_TEXT_ROWS_PER_TABLE + 1]:
         cells = ["" if c is None else str(c).strip() for c in row]
         if any(cells):
