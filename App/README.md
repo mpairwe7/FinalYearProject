@@ -2164,32 +2164,20 @@ Latest results from `Results/rag_quality_gates.json` (9/9 passed, score 1.0):
 | ASR Available | 1.0 | 1.0 | PASS |
 | MT Available | 1.0 | 1.0 | PASS |
 
-### CI/CD Pipeline (8-stage GitHub Actions)
+### CI/CD Pipeline (3-stage GitHub Actions)
 
 Defined in `.github/workflows/ci-ml-pipeline.yml`:
 
 | Stage | Job | Description |
 |-------|-----|-------------|
-| 1 | `lint-and-test` | Ruff lint + format check + pytest (current coverage ratchet >= 35%) |
-| 1a | `reproducibility` | `uv pip compile` → requirements.lock with hashes |
-| 1b | `governance-check` | NIST AI RMF, ISO/IEC 42001, OWASP LLM Top 10 compliance |
-| 1c | `data-aug-smoke` | Schema validation, PII redaction tests, pipeline dry-run (< 2 min) |
-| 2 | `data-validation` | Great Expectations patterns for CSV quality (missing ratios, duplicates) |
-| 3 | `prepare-training-data` | Full data augmentation pipeline (ingest → normalize → quality → format) |
-| 4 | `train` | Model training dry-run on CI (full GPU training via Kaggle) |
-| 5 | `evaluate` | Classifier metrics |
-| 5b | `evaluate-rag` | RAGAS faithfulness, relevancy, precision, recall |
-| 5c | `mobile-export` | GGUF Q4_K_M quantization validation |
-| 5d | `production-gates` | Tokenizer audit, safety eval, calibration, synthetic benchmark, model card |
-| 5e | `adapter-eval` | Multilingual LoRA quality gates (ROUGE-L, BLEU-1 per language) |
-| 6 | `push-model` | Push to Hugging Face Hub (`mpairweLandwind/ura-chatbot`) |
-| 7 | `build-push-docker` | Docker build + Trivy security scan + push |
-| 8 | `deploy-backend` | Backend deployment |
+| 1 | `lint-and-test` | Ruff lint + pytest (`tests/` and `App/backend/tests/`, coverage ratchet >= 35%) + corpus round-trip + retrieval ranking gate + corpus coverage gate + NIST/ISO/OWASP governance & CSV/data-aug validation |
+| 2 | `evaluate-rag` | RAG evaluation (English `rag_eval.jsonl` + Luganda `rag_eval_lg.jsonl`) |
+| 3 | `production-gates` | Blocking production quality gate against `ml/configs/quality_baseline.json` (`--max-regression 0.03`) |
 
 Additional scheduled workflows:
 - `scheduled-crawl.yml` — daily 04:00 UTC crawl of ura.go.ug
-- `scheduled-retrain.yml` — triggered on `Data/` changes
-- `kaggle-training.yml` — GPU/TPU training on Kaggle (multi-stage)
+- `publications-ingest.yml` — scheduled URA publications ingestion and reindex trigger
+- `index-freshness.yml` — weekly corpus freshness audit
 
 ### Mobile Export
 

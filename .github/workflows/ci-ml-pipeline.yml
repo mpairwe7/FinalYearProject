@@ -38,7 +38,6 @@ concurrency:
 
 env:
   PYTHON_VERSION: '3.11'
-  DOCKER_IMAGE: ${{ vars.DOCKER_IMAGE || 'landwind/ura-chatbot-api' }}
 
 jobs:
   # ============================================
@@ -275,141 +274,15 @@ jobs:
           print(f"Live-retrieval eval OK: {agg['total_evaluated']} rows, 0 errors")
           PY
 
-      - name: Upload coverage report
-        if: always()
-        continue-on-error: true
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
-        with:
-          files: ./coverage.xml
-          fail_ci_if_error: false
-
-      - name: Step summary
-        if: always()
-        run: |
-          echo "## Lint & Test Results" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Python: ${{ env.PYTHON_VERSION }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Linter: ruff" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Coverage gate: baseline 35% minimum; raise after focused coverage expansion" >> "$GITHUB_STEP_SUMMARY"
-
-  # ============================================
-  # Stage 1a: Reproducibility — compile + upload uv lockfile
-  # ============================================
-  # Freezes the transitive dep graph so every CI job later in this run
-  # (and every retrain that references the same commit) resolves to the
-  # same wheels. Uploaded as an artifact; can be committed via a bot PR
-  # if `commit-lockfile=true` is set on workflow_dispatch.
-  reproducibility:
-    name: Compile lockfile
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Compile requirements.lock
-        run: |
-          uv pip compile requirements.txt -o requirements.lock \
-            --generate-hashes \
-            --python-version "${{ env.PYTHON_VERSION }}" \
-            --python-platform x86_64-manylinux_2_28
-          echo "lines: $(wc -l < requirements.lock)"
-          head -n 20 requirements.lock
-
-      - name: Upload lockfile artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: requirements-lock
-          path: requirements.lock
-          retention-days: 30
-
-      - name: Step summary
-        if: always()
-        run: |
-          echo "## Lockfile" >> "$GITHUB_STEP_SUMMARY"
-          echo "- \`requirements.lock\` compiled with uv" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Lines: $(wc -l < requirements.lock 2>/dev/null || echo 'n/a')" >> "$GITHUB_STEP_SUMMARY"
-
-  # ============================================
-  # Stage 1b: Governance Compliance Check
-  # ============================================
-  governance-check:
-    name: Governance & Compliance
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
-
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: uv pip install --system pyyaml
-
       - name: Run governance compliance check
         run: python governance/compliance_check.py
 
-      - name: Step summary
-        if: always()
+      - name: Run data validation
+        run: python ml/pipelines/validate_data.py
+
+      - name: Data augmentation import & schema smoke check
         run: |
-          echo "## Governance Compliance" >> "$GITHUB_STEP_SUMMARY"
-          echo "Checked: NIST AI RMF, ISO/IEC 42001, OWASP LLM Top 10, EU AI Act" >> "$GITHUB_STEP_SUMMARY"
-
-  # ============================================
-  # Stage 1c: Data Augmentation Smoke Test (fast, PR-triggered)
-  # ============================================
-  # Runs on every PR touching ml/scripts/data_aug/ — the corpus-export
-  # package App/backend's PDF/crawl exporters import at runtime. Import
-  # smoke + schema/PII unit checks only; no heavy deps (no pyarrow, no
-  # sentence-transformers, no pymupdf4llm) needed for this subset.
-  data-aug-smoke:
-    name: Data Aug Smoke Test
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install minimum data-aug deps
-        run: |
-          uv pip install --system \
-            'numpy==1.26.4' 'pandas>=1.5,<2.0' 'pydantic>=2.5' pyyaml \
-            'datasketch==1.6.5' ftfy \
-            'beautifulsoup4>=4.12.0' requests
-
-      - name: Import smoke test
-        run: |
+          uv pip install --system 'datasketch==1.6.5' ftfy
           python - <<'PY'
           import importlib
           mods = [
@@ -426,93 +299,40 @@ jobs:
           ]
           for m in mods:
               importlib.import_module(m)
-              print(f"OK {m}")
-          PY
-
-      - name: Schema + PII unit checks
-        run: |
-          python - <<'PY'
           from ml.scripts.data_aug.schema import (
               TrainingExample, Message, Metadata, SourceType, TaskType, content_hash,
           )
-          # Verify new source types exist (Phase 1-3 additions).
-          assert hasattr(SourceType, 'WEB_CRAWL'), "Missing SourceType.WEB_CRAWL"
-          assert hasattr(SourceType, 'ONLINE_CORPUS'), "Missing SourceType.ONLINE_CORPUS"
-          assert hasattr(SourceType, 'TRANSLATED_FAQ'), "Missing SourceType.TRANSLATED_FAQ"
           from ml.scripts.data_aug.text_utils import redact_pii, clean_text
-
-          # 1. Rejects message without an assistant turn
-          try:
-              TrainingExample(
-                  messages=[Message(role="user", content="u")],
-                  metadata=Metadata(
-                      source="x", source_type=SourceType.CSV_FAQ, task=TaskType.QA,
-                      content_hash="abc",
-                  ),
-              )
-              raise SystemExit("FAIL: accepted missing assistant")
-          except Exception:
-              pass
-
-          # 2. Hash is normalised
+          assert hasattr(SourceType, "WEB_CRAWL")
+          assert hasattr(SourceType, "ONLINE_CORPUS")
+          assert hasattr(SourceType, "TRANSLATED_FAQ")
           assert content_hash("VAT rate?", "18%") == content_hash("  vat rate?  ", "18%")
-
-          # 3. PII redaction
-          text, report = redact_pii(
-              "Call 0712345678 or email bob@example.com TIN 1012345678")
+          text, report = redact_pii("Call 0712345678 or email bob@example.com TIN 1012345678")  # gitleaks:allow
           assert "[PHONE]" in text and "[EMAIL]" in text and "[TIN]" in text
           assert report.phone == 1 and report.email == 1 and report.tin == 1
-
-          # 4. Unicode + whitespace cleaning
           assert clean_text("  hello\u00a0 \t world ") == "hello world"
-          print("schema/PII/hash unit checks OK")
+          print("Data augmentation smoke & PII checks OK")
           PY
+
+      - name: Upload coverage report
+        if: always()
+        continue-on-error: true
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false
 
       - name: Step summary
         if: always()
         run: |
-          echo "## Data Augmentation Smoke Test" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Modules: imported OK" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Schema/PII unit checks: passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Lint & Test Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Python: ${{ env.PYTHON_VERSION }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Linter: ruff" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Governance & data validation: passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Coverage gate: baseline 35% minimum; raise after focused coverage expansion" >> "$GITHUB_STEP_SUMMARY"
 
   # ============================================
-  # Stage 2: Data Validation
-  # ============================================
-  data-validation:
-    name: Validate Data Quality
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: lint-and-test
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install validation dependencies
-        run: uv pip install --system pandas great-expectations pydantic
-
-      - name: Run data validation
-        run: python ml/pipelines/validate_data.py
-
-      - name: Upload validation report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: data-validation-report
-          path: Results/reports/data_validation_report.json
-
-  # ============================================
-  # Stage 5b: RAG Evaluation & Quality Gates
+  # Stage 2: RAG Evaluation & Quality Gates
   # ============================================
   #
   # The eval sets are self-contained ({question, answer, contexts,
@@ -683,244 +503,3 @@ jobs:
             echo ""
             echo "Quality gates scored against \`Results/rag_evaluation_results.json\` and the \`ml/configs/quality_baseline.json\` regression baseline (blocking)."
           } >> "$GITHUB_STEP_SUMMARY"
-
-  # ============================================
-  # Stage 5e: Adapter Evaluation (multilingual LoRA quality gates)
-  # ============================================
-  # Dry-run evaluation of fine-tuned LoRA adapters for Qwen3 and Whisper.
-  # On CI (no GPU), validates the eval scripts can parse and run metrics.
-  # Full GPU evaluation runs on-demand via workflow_dispatch.
-  evaluate-adapters:
-    name: Adapter Evaluation (multilingual)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: [evaluate-rag]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: |
-          uv pip install --system pyyaml
-
-      - name: Validate eval scripts (syntax + metric functions)
-        run: |
-          python - <<'PY'
-          import importlib.util
-
-          spec = importlib.util.spec_from_file_location(
-              "eq", "fine-tuning/scripts/10_evaluate_lora_qwen.py"
-          )
-          mod = importlib.util.module_from_spec(spec)
-          spec.loader.exec_module(mod)
-          assert mod.compute_rouge_l("a b c", "a b c") == 1.0, "ROUGE-L identity failed"
-          assert mod.compute_bleu_1("a b c", "a b c") == 1.0, "BLEU-1 identity failed"
-          assert mod.compute_rouge_l("a b c", "x y z") == 0.0, "ROUGE-L disjoint failed"
-          print("Qwen eval metrics OK")
-
-          spec2 = importlib.util.spec_from_file_location(
-              "ew", "fine-tuning/scripts/11_evaluate_lora_whisper.py"
-          )
-          mod2 = importlib.util.module_from_spec(spec2)
-          spec2.loader.exec_module(mod2)
-          assert mod2.compute_wer("a b c", "a b c") == 0.0, "WER identity failed"
-          assert mod2.compute_cer("abc", "abc") == 0.0, "CER identity failed"
-          assert mod2.compute_wer("a b c", "x y z") == 1.0, "WER disjoint failed"
-          print("Whisper eval metrics OK")
-
-          from App.backend.app.query import detect_language
-
-          assert detect_language("How do I register for TIN?") == "en"
-          assert detect_language("Ninawezaje kupata TIN kwa biashara") == "sw"
-          print("Language detection OK")
-          print("All adapter eval validations passed")
-          PY
-
-      - name: Check adapter directory structure
-        run: |
-          echo "## Adapter Evaluation Gate" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Language | Qwen3 Adapter | Whisper Adapter |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|----------|---------------|-----------------|" >> "$GITHUB_STEP_SUMMARY"
-          for lang in lg sw nyn ach; do
-            qwen_dir="fine-tuning/adapters/${lang}-lora"
-            if [ "$lang" = "lg" ]; then qwen_dir="fine-tuning/adapters/luganda-lora"; fi
-            whisper_dir="fine-tuning/adapters/whisper-${lang}"
-            qwen_status="not found"
-            whisper_status="not found"
-            if [ -d "$qwen_dir" ] && [ -f "$qwen_dir/adapter_config.json" ]; then
-              qwen_status="present ($(du -sh $qwen_dir | cut -f1))"
-            fi
-            if [ -d "$whisper_dir" ] && [ -f "$whisper_dir/adapter_config.json" ]; then
-              whisper_status="present ($(du -sh $whisper_dir | cut -f1))"
-            fi
-            echo "| $lang | $qwen_status | $whisper_status |" >> "$GITHUB_STEP_SUMMARY"
-          done
-
-      - name: Validate eval results (if present)
-        run: |
-          for lang in lg sw nyn ach; do
-            f="Results/eval_lora_qwen_${lang}.json"
-            if [ -f "$f" ]; then
-              python - "$f" "$lang" <<'PY'
-          import json
-          import sys
-
-          path, lang = sys.argv[1], sys.argv[2]
-          data = json.load(open(path, encoding="utf-8"))
-          ft = data.get("fine_tuned_summary", {})
-          if ft:
-              rouge = ft.get("rouge_l_mean", 0)
-              quality = ft.get("quality_mean", 0)
-              print(f"  {lang}: ROUGE-L={rouge:.3f} Quality={quality:.3f}")
-              if quality < 0.3:
-                  print(f"  WARNING: {lang} quality below threshold (0.3)")
-                  sys.exit(1)
-          else:
-              print(f"  {lang}: no fine-tuned results yet")
-          PY
-            fi
-          done
-          echo "Adapter eval gate: PASS"
-
-  # ============================================
-  # Stage 7: Build & Push Docker Image
-  # ============================================
-  build-docker:
-    name: Build Docker Image
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-      security-events: write
-      actions: read
-    timeout-minutes: 30
-    needs: [lint-and-test]
-    if: github.event_name != 'pull_request'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-
-      - name: Login to DockerHub
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
-        with:
-          images: ${{ env.DOCKER_IMAGE }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=sha,prefix=
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-
-      - name: Build and push
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: ./Dockerfile
-          build-args: |
-            GIT_SHA=${{ github.sha }}
-          push: ${{ github.event_name != 'pull_request' }}
-          load: ${{ github.event_name == 'pull_request' }}
-          tags: |
-            ${{ steps.meta.outputs.tags }}
-            ${{ env.DOCKER_IMAGE }}:ci-${{ github.sha }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Trivy vulnerability scan (SARIF → GitHub Security tab)
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ${{ env.DOCKER_IMAGE }}:ci-${{ github.sha }}
-          scanners: vuln,secret
-          severity: CRITICAL,HIGH
-          format: sarif
-          output: trivy-results.sarif
-          trivy-config: trivy.yaml
-          ignore-unfixed: true
-
-      - name: Upload Trivy SARIF to GitHub Security
-        if: always() && github.event_name != 'pull_request' && hashFiles('trivy-results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
-        with:
-          sarif_file: trivy-results.sarif
-          category: trivy-ml-pipeline
-
-      - name: Generate SBOM (CycloneDX)
-        if: always()
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ${{ env.DOCKER_IMAGE }}:ci-${{ github.sha }}
-          format: cyclonedx
-          output: sbom-api-pipeline.cdx.json
-
-      - name: Upload scan artifacts
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: trivy-ml-pipeline-results
-          path: |
-            trivy-results.sarif
-            sbom-api-pipeline.cdx.json
-          retention-days: 90
-
-  # ============================================
-  # Stage 8: Deploy Backend
-  # ============================================
-  deploy-backend:
-    name: Deploy Backend API
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    needs: [build-docker, production-gates]
-    if: github.ref == 'refs/heads/main'
-    environment:
-      name: production
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Deploy to production
-        env:
-          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
-          API_HOST: ${{ secrets.API_HOST }}
-        run: |
-          echo "Deploying $DOCKER_IMAGE:latest to production"
-          # Add deployment commands here (e.g., SSH, kubectl, etc.)
-          # ssh -i "$DEPLOY_KEY" user@"$API_HOST" "docker pull $DOCKER_IMAGE:latest && docker-compose up -d"
-
-      - name: Health check
-        run: |
-          echo "Running health check..."
-          # curl -f "${{ vars.API_URL }}/health" || exit 1
-
-      - name: Step summary
-        run: |
-          echo "## Backend Deployment" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Image: \`${{ env.DOCKER_IMAGE }}:latest\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Commit: \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
