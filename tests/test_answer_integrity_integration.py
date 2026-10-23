@@ -424,6 +424,101 @@ class TestTaxpayerEscalationEndpoint:
             flags.clear("ticket_queue")
 
 
+class TestACaseAnswersOnlyToItsOwner:
+    """OWASP API1:2023 (BOLA) on the taxpayer's case routes and the chat lookup.
+
+    The status and reply routes take no login: the exact ticket UUID the
+    taxpayer was given is the capability. They used to fall back to a ticket
+    *search* (a LIKE over reason, query, staff note, officer reply and the
+    transcript), so any word from someone's case, or a bare wildcard, opened
+    it — and a reply landed on it as that taxpayer's words. The chat answered
+    "status of TIC-…" for anyone, before the input guard and the crisis check.
+    """
+
+    @staticmethod
+    def _owned_ticket() -> tuple[dict, str, str]:
+        session = f"sess-owner-{uuid.uuid4().hex[:12]}"
+        marker = f"Marker{uuid.uuid4().hex[:10]}"
+        ticket = database.create_ticket(
+            reason=f"Refund delayed for {marker}",
+            user_query=f"My refund for {marker} is late",
+            session_id=session,
+            conversation_id=_conversation_id(),
+        )
+        return ticket, session, marker
+
+    def test_the_owner_still_reads_and_replies_with_the_exact_id(self, client):
+        ticket, _, marker = self._owned_ticket()
+        status = client.get(f"/v1/escalate/{ticket['id']}")
+        assert status.status_code == 200
+        assert marker in status.json()["reason"]
+        reply = client.post(f"/v1/escalate/{ticket['id']}/reply", json={"message": "Here is my receipt."})
+        assert reply.status_code == 200
+        assert reply.json()["ticket_id"] == ticket["id"]
+
+    @pytest.mark.parametrize("how", ["free_text", "wildcard", "reference", "id_prefix"])
+    def test_nothing_short_of_the_exact_id_opens_a_case(self, client, how):
+        ticket, _, marker = self._owned_ticket()
+        probe = {
+            "free_text": marker,
+            "wildcard": "%25",
+            "reference": f"TIC-{ticket['id'][:8].upper()}",
+            "id_prefix": ticket["id"][:8],
+        }[how]
+        status = client.get(f"/v1/escalate/{probe}")
+        assert status.status_code in (404, 422), status.text
+        # A 422 echoes the caller's own input; what must not appear is the case.
+        assert ticket["id"] not in status.text
+        assert f"Refund delayed for {marker}" not in status.text
+        before = len(database.get_ticket(ticket["id"]).get("transcript") or [])
+        reply = client.post(f"/v1/escalate/{probe}/reply", json={"message": "Send my refund to account 999."})
+        assert reply.status_code in (404, 422), reply.text
+        assert len(database.get_ticket(ticket["id"]).get("transcript") or []) == before
+
+    def test_a_reference_in_chat_is_answered_for_its_owner_only(self, client):
+        ticket, owner_session, marker = self._owned_ticket()
+        question = f"What is the status of TIC-{ticket['id'][:8].upper()}?"
+        stranger = client.post(
+            "/v1/chat",
+            json={"message": question, "conversation_id": _conversation_id()},
+            headers={"X-Session-ID": f"sess-stranger-{uuid.uuid4().hex[:12]}"},
+        ).json()
+        assert stranger["retrieval_mode"] == "support_case"
+        assert marker not in stranger["reply"]
+        assert "No active record was found" in stranger["reply"]
+
+        owner = client.post(
+            "/v1/chat",
+            json={"message": question, "conversation_id": _conversation_id()},
+            headers={"X-Session-ID": owner_session},
+        ).json()
+        assert owner["retrieval_mode"] == "support_case"
+        assert marker in owner["reply"]
+
+    def test_a_crisis_is_answered_before_any_case_lookup(self, client):
+        ticket, owner_session, _ = self._owned_ticket()
+        body = client.post(
+            "/v1/chat",
+            json={
+                "message": f"TIC-{ticket['id'][:8].upper()} is still not resolved and I want to end my life",
+                "conversation_id": _conversation_id(),
+            },
+            headers={"X-Session-ID": owner_session},
+        ).json()
+        assert body["retrieval_mode"] == "crisis_support"
+        assert body["agent_role"] == "safety_guard"
+
+    def test_a_search_for_a_wildcard_matches_the_character_not_every_ticket(self):
+        ticket, _, _ = self._owned_ticket()
+        searched = ("id", "reason", "user_query", "assignee", "team", "staff_note", "officer_reply")
+        stored = database.get_ticket(ticket["id"])
+        for wildcard in ("%", "_"):
+            # Precondition: the character appears in none of the searched fields.
+            assert not any(wildcard in str(stored.get(col) or "") for col in searched)
+            found = {t["id"] for t in database.list_tickets(q=wildcard, limit=500)}
+            assert ticket["id"] not in found, wildcard
+
+
 class TestStatutoryGapFixes:
     def test_excise_duty_mobile_money_withdrawal_answers_from_rate_table(self, client):
         res = client.post(

@@ -414,9 +414,11 @@ GET /v1/escalate/{ticket_id}/messages?after_seq=0
 ```
 
 Open to unauthenticated callers, like the case itself — the ticket id is the
-capability the taxpayer holds — but **exact id only**: unlike
-`GET /v1/escalate/{ticket_id}` there is no search fallback that could answer for
-someone else's case (`TIC-…` references are 422). Rate-limited by
+capability the taxpayer holds — but **exact id only**, like every taxpayer
+case route (`GET /v1/escalate/{ticket_id}`, `/reply`, `/messages`, `/csat`):
+there is no search fallback that could answer for someone else's case, and
+`TIC-…` references, free text and wildcards are 422 (`_TICKET_ID_PATH_PATTERN`
+in `main.py`; OWASP API1:2023). Rate-limited by
 `CHAT_POLL_RATE_LIMIT` (default `120/minute`). Reading the officer's latest
 message here counts as delivering it, so the next assistant turn does not
 repeat it.
@@ -445,7 +447,15 @@ repeat it.
 `POST /v1/escalate/{ticket_id}/reply` adds the taxpayer's message to the same
 thread (its response carries the message's `seq`) and answers **409** once an
 officer has ended the chat: an ended chat is not reopened by a message nobody
-is reading. A new problem is a new escalation.
+is reading. A new problem is a new escalation. Exact id only, as above: a
+message here reaches an officer as the taxpayer's own words.
+
+In chat, "what is the status of `TIC-…`" is answered from the requester's own
+tickets only — the signed-in subject or the session the request presents
+(ADR-0013's owner rule) — after the input guard and the crisis check; anyone
+else gets the not-found reply. A `KB-…` knowledge-review status is shared by
+every reporter of the same error, so it stays public, but the reviewer's note
+is shown to the report's owner only.
 
 ---
 

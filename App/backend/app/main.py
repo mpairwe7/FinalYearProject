@@ -2967,27 +2967,30 @@ def request_human_officer(
     )
 
 
+#: The taxpayer-facing case routes (status, reply, messages, rating) answer to
+#: the **exact** ticket id only. These routes take no login, so the random
+#: UUID the taxpayer was given at escalation is the capability that proves the
+#: case is theirs. A search fallback ("TIC-" short reference, free text, LIKE
+#: wildcards) would answer for someone else's case — OWASP API1:2023 BOLA.
+_TICKET_ID_PATH_PATTERN = r"^[a-f0-9-]{8,64}$"
+
+
 @app.get("/v1/escalate/{ticket_id}", response_model=EscalationDetailResponse, tags=["chat"])
 @limiter.limit(_RATE_LIMIT)
 def get_escalation_status(
     request: Request,
-    ticket_id: str,
+    ticket_id: str = Path(..., pattern=_TICKET_ID_PATH_PATTERN),
 ) -> EscalationDetailResponse:
     """Public status endpoint for an escalated support case.
 
-    Enables detached support room / drawer tracking and real-time officer reply delivery.
+    Enables detached support room / drawer tracking and real-time officer reply
+    delivery. Exact ticket id only — see ``_TICKET_ID_PATH_PATTERN``.
     """
-    clean_id = (ticket_id or "").strip().lstrip("#")
-    if clean_id.upper().startswith("TIC-"):
-        clean_id = clean_id[4:]
-    ticket = db.get_ticket(clean_id)
-    if not ticket:
-        candidates = db.list_tickets(limit=1, q=clean_id)
-        ticket = candidates[0] if candidates else None
+    ticket = db.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Support case not found")
 
-    tid = str(ticket.get("id") or clean_id)
+    tid = str(ticket.get("id") or ticket_id)
     status = str(ticket.get("status") or "open")
     priority = str(ticket.get("priority") or "normal")
     team = str(ticket.get("team") or "general")
@@ -3066,21 +3069,20 @@ def get_escalation_status(
 @limiter.limit(_RATE_LIMIT)
 def reply_to_escalation(
     request: Request,
-    ticket_id: str,
     body: TaxpayerReplyRequest,
+    ticket_id: str = Path(..., pattern=_TICKET_ID_PATH_PATTERN),
 ) -> dict:
-    """Taxpayer sends a follow-up message or reference directly to the assigned officer."""
-    clean_id = (ticket_id or "").strip().lstrip("#")
-    if clean_id.upper().startswith("TIC-"):
-        clean_id = clean_id[4:]
-    ticket = db.get_ticket(clean_id)
-    if not ticket:
-        candidates = db.list_tickets(limit=1, q=clean_id)
-        ticket = candidates[0] if candidates else None
+    """Taxpayer sends a follow-up message or reference directly to the assigned officer.
+
+    Exact ticket id only — see ``_TICKET_ID_PATH_PATTERN``. A message posted
+    here reaches an officer as the taxpayer's own words, so it must never land
+    on a case the sender cannot name exactly.
+    """
+    ticket = db.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Support case not found")
 
-    tid = str(ticket.get("id") or clean_id)
+    tid = str(ticket.get("id") or ticket_id)
     from . import officer_chat
 
     chat = officer_chat.get_chat(tid)
@@ -3118,7 +3120,7 @@ def reply_to_escalation(
 @limiter.limit(_CHAT_POLL_RATE_LIMIT)
 def escalation_messages(
     request: Request,
-    ticket_id: str = Path(..., pattern=r"^[a-f0-9-]{8,64}$"),
+    ticket_id: str = Path(..., pattern=_TICKET_ID_PATH_PATTERN),
     after_seq: int = Query(0, ge=0),
 ) -> OfficerChatThreadResponse:
     """The taxpayer's live chat with the officer: new messages, its state, the rating.
@@ -3167,7 +3169,7 @@ def escalation_messages(
 def rate_officer_chat(
     request: Request,
     body: ChatRatingRequest,
-    ticket_id: str = Path(..., pattern=r"^[a-f0-9-]{8,64}$"),
+    ticket_id: str = Path(..., pattern=_TICKET_ID_PATH_PATTERN),
 ) -> dict:
     """The taxpayer rates the chat an officer just ended (1–5), or skips (``score: null``).
 

@@ -127,6 +127,20 @@ risks:
     owner: backend-team
     cwe: "CWE-778"
 
+  - id: T-API-06
+    element: BFF API
+    framework: STRIDE
+    stride_category: I
+    threat: A taxpayer's support case read or written through the login-free case routes or the chat's TIC-/KB- reference lookup by someone who does not own it (G243)
+    severity: High
+    cvss: "8.2"
+    existing_controls: Case routes answer to the exact ticket UUID only (no search fallback); chat reference lookup runs after the input guard and crisis check and answers only the owning subject or session; LIKE wildcards escaped in ticket search
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: backend-team
+    cwe: "CWE-639"
+    owasp_api: "API1:2023 Broken Object Level Authorization"
+
   # ===========================================================================
   # 3. RAG Retrieval Engine & Vector Database (Qdrant)
   # ===========================================================================

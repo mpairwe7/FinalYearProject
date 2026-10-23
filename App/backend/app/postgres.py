@@ -1381,7 +1381,11 @@ def list_tickets(
         term = q.strip().lstrip("#")
         if term.upper().startswith("TIC-"):
             term = term[4:]
-        q_like = f"%{term}%"
+        # A search for "%" or "_" means those characters, not "every ticket".
+        # Backslash is PostgreSQL's default LIKE escape, and the term is a bound
+        # parameter, so escaping the term is enough (parity with database.py).
+        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        q_like = f"%{escaped}%"
         clause = "(id ILIKE %s OR reason ILIKE %s OR user_query ILIKE %s OR assignee ILIKE %s OR team ILIKE %s OR staff_note ILIKE %s OR officer_reply ILIKE %s OR transcript_json ILIKE %s)"
         sql += " AND " + clause if (status or priority or team or " WHERE " in sql) else " WHERE " + clause
         params.extend([q_like] * 8)

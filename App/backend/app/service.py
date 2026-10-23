@@ -7576,6 +7576,158 @@ class ChatModel:
             "next_actions": list(WELLBEING_CHECKIN_ACTIONS),
         }
 
+    @staticmethod
+    def _request_owns_record(
+        record: dict[str, Any],
+        *,
+        user_id: str | None,
+        session_id: str | None,
+    ) -> bool:
+        """Whether this request proves it owns *record* (a ticket or a KB report).
+
+        The proof is the signed-in subject, or the session the request itself
+        presents (``X-Session-ID``, else its conversation id) — the owner rule
+        ``db.conversation_state_key`` applies to conversation state (ADR-0013).
+        """
+        uid = (user_id or "").strip()
+        sid = (session_id or "").strip()
+        return bool(
+            (uid and str(record.get("user_id") or "") == uid)
+            or (sid and str(record.get("session_id") or "") == sid)
+        )
+
+    def _case_reference_status_result(
+        self,
+        message: str,
+        *,
+        thread_id: str,
+        locale: str,
+        user_id: str | None,
+        session_id: str | None,
+        tenant_id: str | None,
+    ) -> dict[str, Any] | None:
+        """Answer "what is the status of TIC-…/KB-…" from the requester's own records.
+
+        A reference is short (``TIC-`` + the first 8 hex digits of the ticket
+        id; ``KB-`` + the last 8 of a report id) and is printed on SMS, screens
+        and call summaries, so it names a record without proving the asker owns
+        it. A ticket is answered only for the request that owns it; anyone else
+        gets the not-found reply, which does not reveal whether the case exists
+        (OWASP API1:2023). A KB report is knowledge-base state shared by every
+        taxpayer who reported the same error, so its status is public to anyone
+        holding the reference; the reviewer's note is shown to its owner only.
+        Returns ``None`` when the message carries no reference, or when the
+        lookup itself failed (the turn then continues as a normal question
+        rather than claiming a case does not exist).
+        """
+        ref_match = re.search(r"\b(TIC-[A-Z0-9]{6,12})\b", message, re.I)
+        if ref_match:
+            t_ref = ref_match.group(1).upper()
+            prefix = t_ref[4:].lower()
+            ticket: dict[str, Any] | None = None
+            try:
+                # Ticket ids are UUIDs, so a well-formed reference is hex; the
+                # check also keeps LIKE wildcards out of the search term.
+                if re.fullmatch(r"[0-9a-f]{6,12}", prefix):
+                    for candidate in db.list_tickets(q=prefix, tenant_id=tenant_id or "default", limit=50):
+                        if str(candidate.get("id") or "").lower().startswith(prefix) and self._request_owns_record(
+                            candidate, user_id=user_id, session_id=session_id
+                        ):
+                            ticket = candidate
+                            break
+            except Exception:
+                logger.debug("Failed ticket reference lookup", exc_info=True)
+                return None
+            if ticket:
+                st = str(ticket.get("status") or "open").capitalize()
+                team = ticket.get("team") or "URA Support"
+                officer_reply = str(ticket.get("officer_reply") or "").strip()
+                if officer_reply:
+                    case_reply = (
+                        f"**Case Status for {t_ref}**:\n\n"
+                        f"- **Status**: Resolved\n"
+                        f"- **Officer Response**: {officer_reply}\n\n"
+                        f"If you need further assistance with this case, you can reply directly here or call the URA Contact Centre at 0800 117 000."
+                    )
+                else:
+                    case_reply = (
+                        f"**Case Status for {t_ref}**:\n\n"
+                        f"- **Status**: {st}\n"
+                        f"- **Assigned Team**: {team}\n"
+                        f"- **Summary**: {ticket.get('reason') or 'Taxpayer inquiry'}\n\n"
+                        f"A URA officer is currently reviewing your case. If you have additional documents or updates, please share them here."
+                    )
+            else:
+                case_reply = (
+                    f"**Case Status for {t_ref}**:\n\n"
+                    f"No active record was found matching reference `{t_ref}` in the URA ticket queue. "
+                    f"Please verify the reference code provided on your SMS, email confirmation, or call summary, "
+                    f"or contact the URA Contact Centre at 0800 117 000 / 0800 217 000 for direct assistance."
+                )
+            return self._deterministic_result(
+                reply=case_reply,
+                curated=True,
+                hits=[],
+                sources=["ura_support_case"],
+                citations=[],
+                retrieval_mode="support_case",
+                thread_id=thread_id,
+                locale=locale,
+                agent_role="support_triage",
+            )
+
+        disc_match = re.search(r"\b(KB-[A-Z0-9]{6,14})\b", message, re.I)
+        if not disc_match:
+            return None
+        k_ref = disc_match.group(1).upper()
+        disc: dict[str, Any] | None = None
+        try:
+            raw_id = k_ref.replace("KB-", "kb_").lower()
+            disc = db.get_discrepancy(raw_id)
+            if not disc:
+                discs = db.list_discrepancies(limit=200)
+                matching = [d for d in discs if d.get("id", "").upper().endswith(k_ref[3:])]
+                disc = matching[0] if matching else None
+        except Exception:
+            logger.debug("Failed discrepancy reference lookup", exc_info=True)
+            return None
+        if disc:
+            st = str(disc.get("status") or "pending").capitalize()
+            owned = self._request_owns_record(disc, user_id=user_id, session_id=session_id)
+            admin_note = (disc.get("admin_note") or "") if owned else ""
+            if disc.get("status") == "verified":
+                disc_reply = (
+                    f"**Knowledge Review Report {k_ref}**:\n\n"
+                    f"- **Status**: Verified & Patched\n"
+                    f"- **Topic**: {disc.get('discrepancy_type', '').replace('_', ' ').title()}\n"
+                    f"- **Resolution**: The URA tax policy and technical review team confirmed this legal update. An authoritative override has been deployed to the knowledge base."
+                )
+            else:
+                disc_reply = (
+                    f"**Knowledge Review Report {k_ref}**:\n\n"
+                    f"- **Status**: {st}\n"
+                    f"- **Topic**: {disc.get('discrepancy_type', '').replace('_', ' ').title()}\n"
+                    f"- **Note**: {admin_note or 'Under active review against current statutory instruments and gazettes.'}"
+                )
+        else:
+            disc_reply = (
+                f"**Knowledge Review Report {k_ref}**:\n\n"
+                f"No discrepancy report was found matching reference `{k_ref}`. "
+                f"If you encountered an inaccurate rate or outdated statutory provision, "
+                f"please state what was incorrect and our system will log a new review report for technical verification."
+            )
+        return self._deterministic_result(
+            reply=disc_reply,
+            curated=True,
+            hits=[],
+            sources=["knowledge_review_registry"],
+            citations=[],
+            retrieval_mode="discrepancy_status",
+            thread_id=thread_id,
+            locale=locale,
+            agent_role="knowledge_qa",
+        )
+
     def _workflow_offramp(
         self,
         *,
@@ -10411,131 +10563,6 @@ class ChatModel:
                 else:
                     rewritten = normalize_query(message)
 
-            # 0b-2. Omnichannel Case & Discrepancy Status Lookup (TIC-... / KB-...)
-            ref_match = re.search(r"\b(TIC-[A-Z0-9]{6,12})\b", message, re.I)
-            if ref_match:
-                t_ref = ref_match.group(1).upper()
-                try:
-                    tickets = db.list_tickets(q=t_ref, limit=1)
-                    if tickets:
-                        t = tickets[0]
-                        st = str(t.get("status") or "open").capitalize()
-                        team = t.get("team") or "URA Support"
-                        officer_reply = str(t.get("officer_reply") or "").strip()
-                        if officer_reply:
-                            case_reply = (
-                                f"**Case Status for {t_ref}**:\n\n"
-                                f"- **Status**: Resolved\n"
-                                f"- **Officer Response**: {officer_reply}\n\n"
-                                f"If you need further assistance with this case, you can reply directly here or call the URA Contact Centre at 0800 117 000."
-                            )
-                        else:
-                            case_reply = (
-                                f"**Case Status for {t_ref}**:\n\n"
-                                f"- **Status**: {st}\n"
-                                f"- **Assigned Team**: {team}\n"
-                                f"- **Summary**: {t.get('reason') or 'Taxpayer inquiry'}\n\n"
-                                f"A URA officer is currently reviewing your case. If you have additional documents or updates, please share them here."
-                            )
-                        return _with_discrepancy(
-                            self._deterministic_result(
-                                reply=case_reply,
-                                curated=True,
-                                hits=[],
-                                sources=["ura_support_case"],
-                                citations=[],
-                                retrieval_mode="support_case",
-                                thread_id=thread_id,
-                                locale=locale,
-                                agent_role="support_triage",
-                            )
-                        )
-                    else:
-                        case_reply = (
-                            f"**Case Status for {t_ref}**:\n\n"
-                            f"No active record was found matching reference `{t_ref}` in the URA ticket queue. "
-                            f"Please verify the reference code provided on your SMS, email confirmation, or call summary, "
-                            f"or contact the URA Contact Centre at 0800 117 000 / 0800 217 000 for direct assistance."
-                        )
-                        return _with_discrepancy(
-                            self._deterministic_result(
-                                reply=case_reply,
-                                curated=True,
-                                hits=[],
-                                sources=["ura_support_case"],
-                                citations=[],
-                                retrieval_mode="support_case",
-                                thread_id=thread_id,
-                                locale=locale,
-                                agent_role="support_triage",
-                            )
-                        )
-                except Exception:
-                    logger.debug("Failed ticket reference lookup", exc_info=True)
-
-            disc_match = re.search(r"\b(KB-[A-Z0-9]{6,14})\b", message, re.I)
-            if disc_match:
-                k_ref = disc_match.group(1).upper()
-                try:
-                    raw_id = k_ref.replace("KB-", "kb_").lower()
-                    disc = db.get_discrepancy(raw_id)
-                    if not disc:
-                        discs = db.list_discrepancies(limit=200)
-                        matching = [d for d in discs if d.get("id", "").upper().endswith(k_ref[3:])]
-                        disc = matching[0] if matching else None
-                    if disc:
-                        st = str(disc.get("status") or "pending").capitalize()
-                        admin_note = disc.get("admin_note") or ""
-                        if disc.get("status") == "verified":
-                            disc_reply = (
-                                f"**Knowledge Review Report {k_ref}**:\n\n"
-                                f"- **Status**: Verified & Patched\n"
-                                f"- **Topic**: {disc.get('discrepancy_type', '').replace('_', ' ').title()}\n"
-                                f"- **Resolution**: The URA tax policy and technical review team confirmed this legal update. An authoritative override has been deployed to the knowledge base."
-                            )
-                        else:
-                            disc_reply = (
-                                f"**Knowledge Review Report {k_ref}**:\n\n"
-                                f"- **Status**: {st}\n"
-                                f"- **Topic**: {disc.get('discrepancy_type', '').replace('_', ' ').title()}\n"
-                                f"- **Note**: {admin_note or 'Under active review against current statutory instruments and gazettes.'}"
-                            )
-                        return _with_discrepancy(
-                            self._deterministic_result(
-                                reply=disc_reply,
-                                curated=True,
-                                hits=[],
-                                sources=["knowledge_review_registry"],
-                                citations=[],
-                                retrieval_mode="discrepancy_status",
-                                thread_id=thread_id,
-                                locale=locale,
-                                agent_role="knowledge_qa",
-                            )
-                        )
-                    else:
-                        disc_reply = (
-                            f"**Knowledge Review Report {k_ref}**:\n\n"
-                            f"No discrepancy report was found matching reference `{k_ref}`. "
-                            f"If you encountered an inaccurate rate or outdated statutory provision, "
-                            f"please state what was incorrect and our system will log a new review report for technical verification."
-                        )
-                        return _with_discrepancy(
-                            self._deterministic_result(
-                                reply=disc_reply,
-                                curated=True,
-                                hits=[],
-                                sources=["knowledge_review_registry"],
-                                citations=[],
-                                retrieval_mode="discrepancy_status",
-                                thread_id=thread_id,
-                                locale=locale,
-                                agent_role="knowledge_qa",
-                            )
-                        )
-                except Exception:
-                    logger.debug("Failed discrepancy reference lookup", exc_info=True)
-
             if flags.is_enabled("answer_overrides"):
                 from . import cms as _cms
 
@@ -10715,6 +10742,20 @@ class ChatModel:
                     message=message, result=checkin, session_id=session_id, trace_ctx=trace_ctx
                 )
                 return checkin
+
+            # Case & knowledge-review status by reference (TIC-… / KB-…), after the
+            # input guard and the crisis check like every other fast path, and
+            # answered from the requester's own records only.
+            case_status = self._case_reference_status_result(
+                message,
+                thread_id=thread_id,
+                locale=locale,
+                user_id=user_id,
+                session_id=session_id,
+                tenant_id=tenant_id,
+            )
+            if case_status is not None:
+                return _with_discrepancy(case_status)
 
             # Direct transactional PRN generation when payment amount is explicitly provided
             if connector_intent is None and re.search(

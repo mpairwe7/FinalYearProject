@@ -2183,8 +2183,15 @@ def list_tickets(
         term = q.strip().lstrip("#")
         if term.upper().startswith("TIC-"):
             term = term[4:]
-        q_like = f"%{term}%"
-        clause = "(id LIKE ? OR reason LIKE ? OR user_query LIKE ? OR assignee LIKE ? OR team LIKE ? OR staff_note LIKE ? OR officer_reply LIKE ? OR transcript_json LIKE ?)"
+        # A search for "%" or "_" means those characters, not "every ticket"
+        # (same escaping as audit.ledger). SQLite LIKE has no default escape.
+        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        q_like = f"%{escaped}%"
+        clause = (
+            "(id LIKE ? ESCAPE '\\' OR reason LIKE ? ESCAPE '\\' OR user_query LIKE ? ESCAPE '\\'"
+            " OR assignee LIKE ? ESCAPE '\\' OR team LIKE ? ESCAPE '\\' OR staff_note LIKE ? ESCAPE '\\'"
+            " OR officer_reply LIKE ? ESCAPE '\\' OR transcript_json LIKE ? ESCAPE '\\')"
+        )
         sql += " AND " + clause if (status or priority or team or " WHERE " in sql) else " WHERE " + clause
         params.extend([q_like] * 8)
     if user_id:
