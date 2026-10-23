@@ -175,5 +175,5 @@ This project aligns with:
 | Threat Model | `threat-model.yml` | Push, PR, weekly, manual | Threagile automated analysis & risk register PR reporting |
 | Trivy Security | `security-trivy.yml` | Push, PR, weekly, manual | SCA, IaC, license, container, SBOM, PR vulnerability summary |
 | DevSecOps SAST/DAST | `devsecops-sast-dast.yml` | Push, PR, weekly, manual | Semgrep, Bandit, pip-audit, Checkov, ZAP, Scorecard, threat model |
-| ML Pipeline | `ci-ml-pipeline.yml` | Push, PR, manual | Lint, test, governance, training, RAG eval, Docker |
+| ML Pipeline | `ci-ml-pipeline.yml` | Push, PR, manual | Lint, unit/agent tests, governance & data validation, RAG eval & production quality gates |
 | Frontend | `frontend-deploy.yml` | Push, PR, manual | Lint, build, Docker, Trivy |
