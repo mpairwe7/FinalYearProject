@@ -1,7 +1,7 @@
 # Runbook — Simulated AI Phone Receptionist ("Call URA")
 
 Operator and deployment runbook for the browser voice receptionist powered by
-Pipecat 1.11, self-hosted LiveKit WebRTC media, Whisper-SALT confidence scoring,
+Pipecat 1.12, self-hosted LiveKit WebRTC media, Whisper-SALT confidence scoring,
 ClarifyGate terminology disambiguation, and staff takeover.
 
 ---
@@ -35,8 +35,11 @@ FastAPI (one worker and one replica; process-local call actor)
      → UraReceptionistBrain  (custom LLM service: intents → ClarifyGate → ChatModel.generate → transfer;
                               integrates GPU dense BGE-M3 + DBSF fusion + GPU mxbai-rerank with clean
                               single-sigmoid probabilities, G126–G132)
-     → UraSpeechTTS          (TTSService → SpeechModel.synthesize → PCM16 16k; streams from the
-                              local Orpheus sidecar for the languages in ORPHEUS_TTS_LANGUAGES)
+     → UraSpeechTTS          (TTSService with push_start_frame=True, push_stop_frames=True →
+                              SpeechModel.synthesize → PCM16 16k; streams from the local Orpheus
+                              sidecar for the languages in ORPHEUS_TTS_LANGUAGES and emits
+                              TTSStartedFrame/TTSStoppedFrame so BotStoppedSpeakingFrame fires
+                              immediately without the 3.0s BOT_VAD_STOP_FALLBACK_SECS delay, G249)
      → LiveKit audio/data output
    Observers: CallMetricsObserver (turn latency, barge-ins)
    On end: summary.py (always English; local Sunflower, or a deterministic summary if vLLM is down)
@@ -346,11 +349,13 @@ upstream (`502`) until it is brought up again.
 1. Caller indistinctly slurs a domain term: *"I want to know about group mid-port."*
 2. Whisper-SALT scores "mid-port" at probability `0.31` (< 0.55 threshold).
 3. `ClarifyGate` matches the Metaphone key against the URA lexicon + "group" bigram boost (`0.925` score).
+   - Words whose top lexicon candidate already matches the transcribed word (`cand_term == clean_target.lower()`, e.g., `"VAT"` with subword probability `< 0.55`) or context-repaired English homophones (`"standard vet rate"` $\rightarrow$ `"standard VAT rate"`, `"for a teen"` $\rightarrow$ `"for a TIN"`) are skipped during low-confidence assessment (`G249`), continuing to any remaining low-confidence words in the utterance.
 4. AI asks: *"Excuse me, did you say **import**?"*
 5. Caller responds: *"Yes, import."*
 6. AI confirms: *"So if I got it right, you're asking about **group import** — is that right?"*
 7. Caller says: *"Yes."*
 8. AI answers the corrected query directly from the knowledge base.
+   - If instead of a short yes/no or 1–4 word replacement term the caller asks a complete new question on the next turn (e.g., *"How do I register if I have no TIN?"*), `UraReceptionistBrain` supersedes the open clarification state and answers the new question directly (`G249`).
 
 ### In-call requests the assistant handles itself
 
@@ -657,3 +662,5 @@ check them, and have 3–5 Luganda speakers rate the Orpheus samples blind
 | Caller cannot talk over the assistant | api log `Caller talking over the assistant` (the sentinel's VAD stopped it); if absent, the caller's speech never reached the server over the playback: try headphones (the browser's echo canceller can mute a caller while the speaker plays) |
 | Assistant cuts itself off mid-sentence | its own voice leaking from speaker to mic: `RECEPTIONIST_LOCAL_BARGE_IN=false`, or raise `RECEPTIONIST_BARGE_IN_MIN_S` |
 | Stale or unjoined call stuck in queue | In `/calls`, an officer (`ura_staff`; administrators are refused desk actions) can click **Terminate call** (`POST /v1/admin/calls/{call_id}/end`). It ends the call through `CallRoom.end()` — countdown cancelled, media room closed, pipeline stopped, row `ended` — releases queue locks (`end_reason="officer_terminated_waiting"` or `officer_terminated_stale`) and refreshes the live lobby board. Before G176 it answered 500 on a call whose officer had dropped off, and skipped that teardown |
+| No voice/speech heard in browser, or `The AudioContext encountered an error` in console | Fixed in G249 (`PR #650`): `PCMPlayer` (`App/frontend/src/services/pcmPlayer.ts`) guards initialization with a singleton `initPromise` and `pendingChunks` FIFO queue, expands `pcm-player-worklet.js` to a 60s circular buffer (`16000 * 60`), falls back to an inline `Blob` `AudioWorklet` (and scheduled `AudioBufferSourceNode` queue) when external worklet scripts return `text/html` behind ngrok/proxies (`blob:` permitted in `script-src`/`worker-src` in `next.config.mjs`), and `useCall.ts` separates `dialToneCtxRef` from `audioCtxRef` (`getToneContext()`) |
+| Multi-turn call conversation stalls after greeting/Turn 1 or repeats *"Excuse me, did you say vat?"* | Fixed in G249 (`PR #650`): `UraSpeechTTS` (`tts.py`) enables `push_start_frame=True` and `push_stop_frames=True` so `TTSStoppedFrame` immediately triggers `BotStoppedSpeakingFrame` without the 3.0s `BOT_VAD_STOP_FALLBACK_SECS` window; `ClarifyGate.assess` (`clarify.py`) skips exact lexicon matches (`cand_term == clean_target.lower()`) and context-repaired homophones; and `UraReceptionistBrain` (`brain.py`) supersedes open clarification when the caller asks a complete new question and strips written-chat follow-up footers in `_spoken_answer` |

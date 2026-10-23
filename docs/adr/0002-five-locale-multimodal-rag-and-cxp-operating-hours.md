@@ -1,9 +1,9 @@
 # ADR-0002: 5-Locale (`en`, `lg`, `sw`, `nyn`, `ach`) Multimodal Speech/RAG Parity & CXP Operating Hours (`07:00–23:00 EAT`) SLA Calendar
 
-- **Status**: Accepted
-- **Date**: 2026-10-17
+- **Status**: Accepted (Amended 2026-10-24 — PR #649, PR #650)
+- **Date**: 2026-10-17 (Updated 2026-10-24)
 - **Deciders**: URA Capstone Architecture & CX Engineering Team
-- **Technical Story**: Issue #441, Gaps G174, G180, G186, G189, G195–G199 (`docs/plans/receptionist-cx-audit-2026-10-plan.md`)
+- **Technical Story**: Issue #441, Gaps G174, G180, G186, G189, G195–G199, G249 (`docs/plans/receptionist-cx-audit-2026-10-plan.md`, `docs/Reports/MULTILINGUAL_50000_CX_MULTIMODAL_NGROK_REPORT_2026-10-24.md`)
 
 ## Context and Problem Statement
 
@@ -32,5 +32,15 @@ Uganda Revenue Authority taxpayers interact across text chat, voice narration, a
 ## Confirmation
 
 Verified by:
-- `PYTHONPATH=App/backend python3 -m pytest App/backend/tests/test_officer_hours.py App/backend/tests/test_ticket_ops_sla.py tests/agents/test_agentic_voice_2026_enhancements.py tests/test_answer_integrity_integration.py -q`
-- `scripts/benchmark_40000_cx_multimodal_ngrok.py`
+- `PYTHONPATH=App/backend python3 -m pytest App/backend/tests/test_officer_hours.py App/backend/tests/test_ticket_ops_sla.py App/backend/tests/test_receptionist_brain.py App/backend/tests/test_receptionist_clarify.py tests/agents/test_agentic_voice_2026_enhancements.py tests/agents/test_cx_50000_multimodal_ngrok.py tests/test_answer_integrity_integration.py -q`
+- `scripts/benchmark_40000_cx_multimodal_ngrok.py` and `scripts/benchmark_50000_cx_multimodal_ngrok.py`
+
+## Amendment 1 (2026-10-24 — PR #649 & PR #650, Gap G249)
+
+1. **50,000-Scenario 5-Locale Multimodal (`TTT`, `STT`, `TTS`) & 173-Probe Live Ngrok Benchmark (`PR #649`)**:
+   - Expanded the 5-locale (`en`, `lg`, `sw`, `nyn`, `ach`) evaluation matrix to **50,000 scenarios** (`10,000` per locale; `25,000 TTT`, `15,000 STT`, `10,000 TTS`) including Phase 42 Portal Task Execution & Stuck-User DOM Co-Pilot (`ADR-0014`), achieving `50,000 / 50,000` (`100.0%`, `2,178.8 scenarios/s`) and `173 / 173` (`100.0%`) live ngrok probes (`docs/Reports/MULTILINGUAL_50000_CX_MULTIMODAL_NGROK_REPORT_2026-10-24.md`).
+   - Replaced dynamic chunk lazy-loading of `CallScreen` in `App/frontend/src/app/page.tsx` with a static import and explicit voice-recording consent disclosure (`call.consentTitle`, `call.consentText`) across `/` and `/portal/[portalKey]`.
+2. **Call Receptionist Browser Audio Pipeline & Multi-Turn Conversation Continuity (`PR #650`, `G249`)**:
+   - **Browser Audio Playback (`PCMPlayer` & `pcm-player-worklet.js`)**: Added a singleton `initPromise` guard, `pendingChunks` FIFO queue, non-blocking `void this.ctx.resume()`, inline `Blob` `AudioWorklet` fallback (`blob:` allowed in `script-src`/`worker-src` CSP), scheduled `AudioBufferSourceNode` fallback queue, 60-second circular worklet buffer (`16000 * 60`), and dedicated `dialToneCtxRef` vs. lazy `getToneContext()` (`useCall.ts`).
+   - **Pipecat 1.12 TTS Turn Lifecycle (`UraSpeechTTS`)**: Enabled `push_start_frame=True` and `push_stop_frames=True` so `TTSStartedFrame` and `TTSStoppedFrame` are emitted on every turn, flushing trailing buffered audio and firing `BotStoppedSpeakingFrame` immediately instead of holding `_bot_speaking=True` for `BOT_VAD_STOP_FALLBACK_SECS = 3.0s`.
+   - **Multi-Turn Clarification & Spoken Answer Hygiene (`ClarifyGate`, `UraReceptionistBrain`, `lexicon.py`)**: Skipped exact lexicon matches (`cand_term == clean_target.lower()`) and context-repaired English homophones (`standard vet rate -> standard VAT rate`, `for a teen -> for a TIN`) while continuing to assess remaining low-confidence words; superseded open clarification state when a caller asks a complete new question on the next turn (even when the question contains `"no"` mid-sentence, e.g., *"How do I register if I have no TIN?"*); and stripped written-chat follow-up footers (`You might also want to know:...`, `If you get stuck at any step...`) in `_spoken_answer`.
