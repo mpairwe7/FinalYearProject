@@ -173,8 +173,8 @@ export default function LanguageMenu({
       >
         <span className="sr-only">
           {auto
-            ? `Response language: Auto-detect (currently ${current.label})`
-            : `Response language: ${current.label}`}
+            ? t("language.triggerAuto", { value: current.label })
+            : t("language.triggerSelected", { value: current.label })}
         </span>
         <GlobeIcon />
         <span aria-hidden="true">{current.value.toUpperCase()}</span>

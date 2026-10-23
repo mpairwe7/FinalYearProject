@@ -88,7 +88,7 @@ _NIN_EXPLICIT_RE = re.compile(
     r"\bNIN(?::|\s+is|\s+number|\s+no\.?)?\s*(C[MFR][0-9A-Za-z]{11,13})\b", re.IGNORECASE
 )
 _STANDALONE_TIN_OR_PRN_RE = re.compile(
-    r"(?<!\bUGX\s)(?<!\bUSD\s)(?<!\bShs\s)\b(1\d{9}|2\d{11,14})\b", re.IGNORECASE
+    r"\b(?:(UGX|USD|Shs)\s+)?(1\d{9}|2\d{11,14})\b", re.IGNORECASE
 )
 _REDACTED_MARKER_RE = re.compile(
     r"\[REDACTED_(UG_NID|UG_TIN|UG_PHONE|EMAIL|CREDIT_CARD|AMEX_CARD|UG_PASSPORT)\]",
@@ -553,7 +553,12 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
     t = _NIN_EXPLICIT_RE.sub(_nin_sub, t)
 
     # 7c1. Normalize standalone 10-digit TINs and 12-15 digit PRNs so they are never spoken as "one billion..."
-    t = _STANDALONE_TIN_OR_PRN_RE.sub(lambda m: " ".join(list(m.group(1))), t)
+    def _standalone_tin_or_prn_sub(m: re.Match) -> str:
+        if m.group(1):
+            return m.group(0)
+        return " ".join(list(m.group(2)))
+
+    t = _STANDALONE_TIN_OR_PRN_RE.sub(_standalone_tin_or_prn_sub, t)
 
     # 7d. Normalize URA toll-free contact numbers for cadence
     t = _TOLLFREE_URA_RE.sub(r"0 800, \1, 0 0 0", t)

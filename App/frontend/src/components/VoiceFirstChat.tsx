@@ -35,6 +35,7 @@ import { authHeaders } from "@/lib/authSession";
 import { getChatSessionId } from "@/lib/chatSession";
 import { audioSignifiers } from "@/lib/audioSignifiers";
 import { LOCALE_OPTIONS, localeLabel } from "@/lib/locales";
+import { useTranslation } from "@/lib/i18n";
 import { pickSupportedAudioMimeType, stopPlayback } from "@/services/voiceService";
 
 /* ---------- Types ---------- */
@@ -191,6 +192,7 @@ const LatencyBadge = memo(function LatencyBadge({
 /* ---------- Main component ---------- */
 
 function VoiceFirstChatInner({ onClose, onOpenVision, locale = "en" }: VoiceFirstChatProps) {
+  const t = useTranslation();
   const isOnline = useVoiceStore((state) => state.isOnline);
   const wsState = useVoiceStore((state) => state.wsState);
   const voicePhase = useVoiceStore((state) => state.voicePhase);
@@ -508,7 +510,7 @@ function VoiceFirstChatInner({ onClose, onOpenVision, locale = "en" }: VoiceFirs
       className="vfc-root"
       role="dialog"
       aria-modal="true"
-      aria-label="Voice-first chat"
+      aria-label={t("voice.voiceFirstChat")}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.preventDefault();

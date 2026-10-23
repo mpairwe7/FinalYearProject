@@ -24,6 +24,7 @@ import { useChatStore } from "@/store/useChatStore";
 import { useVoiceStore } from "@/store/useVoiceStore";
 import { authHeaders } from "@/lib/authSession";
 import { getChatSessionId } from "@/lib/chatSession";
+import { useTranslation } from "@/lib/i18n";
 import { pickSupportedAudioMimeType, stopPlayback } from "@/services/voiceService";
 
 interface VoiceVisionModeProps {
@@ -34,6 +35,7 @@ interface VoiceVisionModeProps {
 type CaptureState = "preview" | "recording" | "processing" | "result";
 
 function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) {
+  const t = useTranslation();
   const activeConversationId = useChatStore((state) => state.activeConversationId);
   const addTurns = useChatStore((state) => state.addTurns);
   const setCameraActive = useVoiceStore((state) => state.setCameraActive);
@@ -41,7 +43,32 @@ function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+
+  const cleanupAudioRecording = useCallback(() => {
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.onstop = null;
+      if (mediaRecorderRef.current.state !== "inactive") {
+        try {
+          mediaRecorderRef.current.stop();
+        } catch {
+          // ignore if already stopped
+        }
+      }
+      mediaRecorderRef.current = null;
+    }
+    if (audioStreamRef.current) {
+      audioStreamRef.current.getTracks().forEach((track) => track.stop());
+      audioStreamRef.current = null;
+    }
+  }, []);
+
+  const handleClose = useCallback(() => {
+    cleanupAudioRecording();
+    stopPlayback();
+    onClose();
+  }, [cleanupAudioRecording, onClose]);
 
   const [captureState, setCaptureState] = useState<CaptureState>("preview");
   const [capturedImage, setCapturedImage] = useState<Blob | null>(null);
@@ -106,10 +133,11 @@ function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) 
         URL.revokeObjectURL(imageUrlRef.current);
         imageUrlRef.current = null;
       }
+      cleanupAudioRecording();
       stopPlayback();
       setCameraActive(false);
     };
-  }, [setCameraActive]);
+  }, [cleanupAudioRecording, setCameraActive]);
 
   /* Capture photo from video feed */
   const capturePhoto = useCallback(() => {
@@ -149,6 +177,7 @@ function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) 
           noiseSuppression: true,
         },
       });
+      audioStreamRef.current = audioStream;
 
       const mimeType = pickSupportedAudioMimeType();
       const recorder = mimeType
@@ -162,6 +191,9 @@ function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) 
 
       recorder.onstop = async () => {
         audioStream.getTracks().forEach((t) => t.stop());
+        if (audioStreamRef.current === audioStream) {
+          audioStreamRef.current = null;
+        }
         const audioBlob = new Blob(chunks, { type: mimeType || "audio/webm" });
         await sendRequestRef.current?.(audioBlob);
       };
@@ -289,17 +321,17 @@ function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) 
       className="vv-root"
       role="dialog"
       aria-modal="true"
-      aria-label="Voice and vision mode"
+      aria-label={t("voice.visionMode")}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.preventDefault();
-          onClose();
+          handleClose();
         }
       }}
     >
       {/* Top bar */}
       <div className="vv-topbar">
-        <button onClick={onClose} className="vfc-icon-btn" aria-label="Close vision mode">
+        <button onClick={handleClose} className="vfc-icon-btn" aria-label="Close vision mode">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>

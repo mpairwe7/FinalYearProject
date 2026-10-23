@@ -127,21 +127,32 @@ function VoiceModalInner({
 
   useEffect(() => {
     if (externalStream !== undefined) return;
+    let cancelled = false;
+    let activeStream: MediaStream | null = null;
     if (isRecording) {
       navigator.mediaDevices
         .getUserMedia({ audio: true })
-        .then(setLocalStream)
-        .catch(() => setLocalStream(null));
+        .then((s) => {
+          if (cancelled) {
+            s.getTracks().forEach((t) => t.stop());
+            return;
+          }
+          activeStream = s;
+          setLocalStream(s);
+        })
+        .catch(() => {
+          if (!cancelled) setLocalStream(null);
+        });
     } else {
-      if (localStream) {
-        localStream.getTracks().forEach((t) => t.stop());
-        setLocalStream(null);
-      }
+      setLocalStream((prev) => {
+        prev?.getTracks().forEach((t) => t.stop());
+        return null;
+      });
     }
     return () => {
-      localStream?.getTracks().forEach((t) => t.stop());
+      cancelled = true;
+      activeStream?.getTracks().forEach((t) => t.stop());
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRecording, externalStream]);
 
   const handleMicTap = useCallback(() => {

@@ -540,6 +540,9 @@ class VoiceSessionV2:
         self, text: str, language: str,
     ) -> AsyncGenerator[VoiceStreamEvent, None]:
         """V2 token-level streaming TTS via CosyVoice2."""
+        from .speech_normalization import clean_text_for_speech
+
+        text = clean_text_for_speech(text, language)
         audio_started = False
         chunk_idx = 0
 

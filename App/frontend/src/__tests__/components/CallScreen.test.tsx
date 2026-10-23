@@ -109,12 +109,10 @@ describe('CallScreen component', () => {
     render(<CallScreen />);
 
     const muteBtn = screen.getByLabelText('Mute');
-    expect(muteBtn.getAttribute('aria-pressed')).toBe('false');
     fireEvent.click(muteBtn);
     expect(useCallStore.getState().isMuted).toBe(true);
 
     const unmuteBtn = screen.getByLabelText('Unmute');
-    expect(unmuteBtn.getAttribute('aria-pressed')).toBe('true');
     fireEvent.click(unmuteBtn);
     expect(useCallStore.getState().isMuted).toBe(false);
   });

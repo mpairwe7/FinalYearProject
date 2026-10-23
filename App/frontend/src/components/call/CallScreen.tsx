@@ -364,7 +364,6 @@ export function CallScreen() {
                   type="button"
                   className={`call-ctl${isMuted ? ' call-ctl--muted' : ''}`}
                   onClick={toggleMute}
-                  aria-pressed={isMuted}
                   aria-label={isMuted ? t('call.unmute') : t('call.mute')}
                   title={isMuted ? t('call.unmute') : t('call.mute')}
                 >

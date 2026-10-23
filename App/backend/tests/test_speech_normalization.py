@@ -416,3 +416,8 @@ def test_redaction_markers_and_standalone_tin_prn_are_voiced_naturally():
     lg_spoken = clean_text_for_speech("[REDACTED_UG_NID] ne [REDACTED_UG_PHONE]", locale="lg")
     assert "ennamba ya NIN ekwekeddwa" in lg_spoken
     assert "ennamba y'essimu ekwekeddwa" in lg_spoken
+
+    # Repeated-whitespace currency amounts must not be split as standalone TIN/PRN digits
+    ugx_spoken = clean_text_for_speech("Turnover of UGX  1000123456.", locale="en")
+    assert "1 0 0 0 1 2 3 4 5 6" not in ugx_spoken
+    assert "1000123456 Uganda shillings" in ugx_spoken

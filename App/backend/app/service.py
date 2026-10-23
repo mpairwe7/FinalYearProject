@@ -2846,6 +2846,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
 
             if (
                 flags.is_enabled("semantic_cache")
+                and result.get("_cache_allowed")
                 and result.get("retrieval_mode") not in ("blocked", "abstained", "model_welfare")
                 and not escalate
                 and not ticket_id
@@ -6572,6 +6573,7 @@ class ChatModel:
         portal_context: dict[str, Any] | None = None,
         portal_task_submission: dict[str, Any] | None = None,
         attachments: list[Any] | None = None,
+        conversation_history: list[dict[str, str]] | None = None,
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
         """Evaluate Phase 42 Portal Task Execution & Stuck-User DOM Co-Pilot."""
         if not flags.is_enabled("portal_copilot", subject=user_id):
@@ -6614,6 +6616,7 @@ class ChatModel:
             message=router_message or message,
             portal_context=portal_context,
             portal_task_submission=portal_task_submission,
+            conversation_history=conversation_history,
             user_id=user_id,
             session_id=session_id,
             conversation_id=thread_id,
@@ -10629,8 +10632,6 @@ class ChatModel:
                     result["resources"] = [self._localize_resource(r, effective) for r in result["resources"]]
                 if "workflow" in result and isinstance(result["workflow"], dict):
                     result["workflow"] = self._localize_workflow(result["workflow"], effective)
-                if "portal_copilot" in result and isinstance(result["portal_copilot"], dict):
-                    result["portal_copilot"] = self._localize_portal_copilot(result["portal_copilot"], effective)
             if result.get("ticket_id") and flags.is_enabled("cxp_business_hours", subject=user_id or None):
                 from .escalation_policy import (
                     after_hours_escalation_notice,
@@ -10991,6 +10992,7 @@ class ChatModel:
                 portal_context=portal_context,
                 portal_task_submission=portal_task_submission,
                 attachments=attachments,
+                conversation_history=conversation_history,
             )
             if copilot_sc is not None:
                 self._audit_turn(
@@ -12967,6 +12969,7 @@ class ChatModel:
             portal_context=portal_context,
             portal_task_submission=portal_task_submission,
             attachments=attachments,
+            conversation_history=conversation_history,
         )
         if copilot_sc_s is not None:
             return {
@@ -13920,6 +13923,7 @@ class ChatModel:
             "_case_facts": _ACTIVE_CASE_FACTS.get(),
             "current_topic": str(stream_topic_ctx.get("current_topic") or ""),
             "portal_copilot": copilot_card_s,
+            "_cache_allowed": cache_allowed,
         }
 
     @staticmethod
