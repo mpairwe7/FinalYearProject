@@ -146,6 +146,30 @@ class TestClarifyGatePureLogic(unittest.TestCase):
         clean_action = self.gate.assess("How do I register for TIN?", words=None)
         self.assertEqual(clean_action.action, "none")
 
+    def test_exact_lexicon_acronym_below_threshold_is_not_asked_to_clarify(self):
+        words = [
+            WordConf("What", 0.98),
+            WordConf("is", 0.99),
+            WordConf("the", 0.99),
+            WordConf("standard", 0.95),
+            WordConf("VAT", 0.42),
+            WordConf("rate", 0.96),
+        ]
+        action = self.gate.assess("What is the standard VAT rate?", words=words, language="en")
+        self.assertEqual(action.action, "none")
+
+    def test_repaired_english_homophone_in_context_is_not_asked_to_clarify(self):
+        words = [
+            WordConf("What", 0.98),
+            WordConf("is", 0.99),
+            WordConf("the", 0.99),
+            WordConf("standard", 0.95),
+            WordConf("vet", 0.35),
+            WordConf("rate", 0.96),
+        ]
+        action = self.gate.assess("What is the standard vet rate?", words=words, language="en")
+        self.assertEqual(action.action, "none")
+
 
 class TestClarifyGateLanguages(unittest.TestCase):
     """Luganda and Swahili calls: localised prompts; Luganda confirms acronyms only."""

@@ -112,7 +112,8 @@ const nextConfig = {
           "default-src 'self'",
           // frame-ancestors controls who may embed this app (modern browsers).
           `frame-ancestors ${frameAncestors}`,
-          `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
+          `script-src 'self' 'unsafe-inline' blob:${isDev ? " 'unsafe-eval'" : ""}`,
+          "worker-src 'self' blob:",
           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
           "font-src 'self' https://fonts.gstatic.com",
           "img-src 'self' data:",

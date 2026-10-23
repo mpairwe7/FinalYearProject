@@ -91,6 +91,7 @@ export function useCall() {
   /** Start call audio the browser held back; wired to a tap on the call screen. */
   const resumeAudio = useCallback(() => {
     void liveKitSessionRef.current?.resumeAudio();
+    void playerRef.current?.resume();
   }, []);
 
   const requestOfficer = useCallback(() => {
@@ -142,11 +143,15 @@ export function useCall() {
       } catch {}
 
       const startLegacyAudio = async () => {
-        if (playerRef.current || liveKitSessionRef.current) return;
-        const player = new PCMPlayer(16000);
-        playerRef.current = player;
-        player.onLevel((level) => setOutputLevel(level));
-        player.init().catch(() => {});
+        if (liveKitSessionRef.current) return;
+        if (!playerRef.current) {
+          const player = new PCMPlayer(16000);
+          playerRef.current = player;
+          player.onLevel((level) => setOutputLevel(level));
+          void player.init().catch(() => {});
+        } else {
+          void playerRef.current.resume();
+        }
         try {
           const recorder = new AudioRecorder();
           let silenceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -192,10 +197,14 @@ export function useCall() {
 
           switch (msg.type) {
             case 'call_ready': {
-              // Stop dial tone and enter active AI call
+              // Stop dial tone and close its AudioContext before opening call audio
               if (dialToneCleanupRef.current) {
                 dialToneCleanupRef.current();
                 dialToneCleanupRef.current = null;
+              }
+              if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
+                audioCtxRef.current.close().catch(() => {});
+                audioCtxRef.current = null;
               }
               statusBeforeReconnectRef.current = 'ai';
               store.setStatus('ai');

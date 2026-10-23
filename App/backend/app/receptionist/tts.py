@@ -27,10 +27,17 @@ except ImportError:
         pass
 
     class TTSAudioRawFrame(Frame):  # type: ignore[no-redef]
-        def __init__(self, audio: bytes, sample_rate: int = 16000, num_channels: int = 1):
+        def __init__(
+            self,
+            audio: bytes,
+            sample_rate: int = 16000,
+            num_channels: int = 1,
+            context_id: str | None = None,
+        ):
             self.audio = audio
             self.sample_rate = sample_rate
             self.num_channels = num_channels
+            self.context_id = context_id
 
 
 try:
@@ -96,6 +103,8 @@ class UraSpeechTTS(TTSService):
     ) -> None:
         v = voice or get_tts_voice()
         settings = TTSSettings(language=language, voice=v) if TTSSettings else None
+        kwargs.setdefault("push_start_frame", True)
+        kwargs.setdefault("push_stop_frames", True)
         super().__init__(sample_rate=16000, settings=settings, **kwargs)
         self.speech_model = speech_model
         self.voice = v
@@ -134,12 +143,16 @@ class UraSpeechTTS(TTSService):
         if is_slow:
             silence = b"\x00" * 640  # 20 ms at 16 kHz mono PCM16
             for _ in range(get_slow_pause_ms() // 20):
-                yield TTSAudioRawFrame(audio=silence, sample_rate=16000, num_channels=1)
+                yield TTSAudioRawFrame(
+                    audio=silence, sample_rate=16000, num_channels=1, context_id=context_id or None
+                )
         elif 0.5 <= rec_rate < 0.98:
             scaled_pause_ms = max(60, int(dict_pause * (1.0 / max(0.75, rec_rate))))
             silence = b"\x00" * 640
             for _ in range(max(1, scaled_pause_ms // 20)):
-                yield TTSAudioRawFrame(audio=silence, sample_rate=16000, num_channels=1)
+                yield TTSAudioRawFrame(
+                    audio=silence, sample_rate=16000, num_channels=1, context_id=context_id or None
+                )
 
     async def _voice(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         clean_text = text.strip()
@@ -190,7 +203,9 @@ class UraSpeechTTS(TTSService):
         chunk_size = 640
         for i in range(0, len(pcm_bytes), chunk_size):
             chunk = pcm_bytes[i : i + chunk_size]
-            yield TTSAudioRawFrame(audio=chunk, sample_rate=16000, num_channels=1)
+            yield TTSAudioRawFrame(
+                audio=chunk, sample_rate=16000, num_channels=1, context_id=context_id or None
+            )
             # Yield control to event loop
             await asyncio.sleep(0.001)
 

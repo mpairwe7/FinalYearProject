@@ -371,9 +371,13 @@ _ASR_ENTITY_FIXES: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
     (re.compile(r"\b(?:w-h-t|w\.h\.t\.|dabulyu\s*ech\s*ti)\b", re.IGNORECASE), "WHT"),
     # English & telephony number mishears: "ten number" / "10 number" -> "TIN number"
     (re.compile(r"\b(?:ten\s+number|10\s+number|teen\s+number)\b", re.IGNORECASE), "TIN number"),
+    (re.compile(r"\b(for\s+a|get\s+a|my|new|your|ura)\s+teen\b", re.IGNORECASE), r"\1 TIN"),
+    (re.compile(r"\bteen\s+(registration|application|certificate|portal|on\s+the)\b", re.IGNORECASE), r"TIN \1"),
     (re.compile(r"\bteam\s+yange\b", re.IGNORECASE), "TIN yange"),
     # VAT acoustic variants (including Acholi/Runyankole Whisper-SALT hearings: viati, veya ti)
     (re.compile(r"\b(?:vee\s*ay\s*tee|v-a-t|v\s+a\s+t|v\.a\.t\.|vatt|vaat|veti|vaati|viati|veyati|veya\s+ti|baati|bbaati)\b", re.IGNORECASE), "VAT"),
+    (re.compile(r"\b(standard|pay|file|for|about|on|claim|input|output|monthly)\s+vet\b", re.IGNORECASE), r"\1 VAT"),
+    (re.compile(r"\bvet\s+(rate|rates|return|returns|threshold|registration|tax|refund|refunds|invoice|invoices|exemption|exemptions|number|compliance|audit|liability|credit)\b", re.IGNORECASE), r"VAT \1"),
     # Acholi Whisper-SALT hearing of "mucoro" (tax) and "i Uganda"
     (re.compile(r"\blucoro\b", re.IGNORECASE), "mucoro"),
     (re.compile(r"\biuganda\b", re.IGNORECASE), "i Uganda"),

@@ -303,8 +303,47 @@ export class AudioRecorder {
 
     try {
       const source = ctx.createMediaStreamSource(this.stream);
-      // Prefer AudioWorklet (modern browsers)
-      await ctx.audioWorklet.addModule('/audio-worklet-processor.js');
+      // Prefer AudioWorklet (modern browsers), with inline Blob fallback if external script fails
+      try {
+        await ctx.audioWorklet.addModule('/audio-worklet-processor.js');
+      } catch {
+        const inlineRecorderWorklet = `
+class PCM16Processor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this._buffer = [];
+    this._chunkSize = Math.floor(sampleRate * 0.02);
+  }
+  process(inputs) {
+    const input = inputs[0];
+    if (!input || !input[0]) return true;
+    const samples = input[0];
+    for (let i = 0; i < samples.length; i++) {
+      this._buffer.push(samples[i]);
+    }
+    while (this._buffer.length >= this._chunkSize) {
+      const chunk = this._buffer.splice(0, this._chunkSize);
+      const pcm16 = new Int16Array(chunk.length);
+      for (let i = 0; i < chunk.length; i++) {
+        const s = Math.max(-1, Math.min(1, chunk[i]));
+        pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+      this.port.postMessage(pcm16.buffer, [pcm16.buffer]);
+    }
+    return true;
+  }
+}
+registerProcessor('pcm16-processor', PCM16Processor);
+`;
+        const blobUrl = URL.createObjectURL(
+          new Blob([inlineRecorderWorklet], { type: 'application/javascript' }),
+        );
+        try {
+          await ctx.audioWorklet.addModule(blobUrl);
+        } finally {
+          URL.revokeObjectURL(blobUrl);
+        }
+      }
       const workletNode = new AudioWorkletNode(ctx, 'pcm16-processor');
       workletNode.port.onmessage = (e: MessageEvent) => {
         if (e.data instanceof ArrayBuffer) {
@@ -320,22 +359,30 @@ export class AudioRecorder {
         this._recording = false;
         workletNode.disconnect();
         source.disconnect();
-        ctx.close();
+        ctx.close().catch(() => {});
         this.releaseStream();
       };
     } catch {
-      // Fallback: ScriptProcessorNode (deprecated but widely supported)
+      // Fallback: ScriptProcessorNode with 16kHz downsampling and 20ms (640-byte) framing for SileroVAD
       const source = ctx.createMediaStreamSource(this.stream);
-      const bufSize = 4096;
+      const bufSize = 1024;
       const processor = ctx.createScriptProcessor(bufSize, 1, 1);
       processor.onaudioprocess = (e: AudioProcessingEvent) => {
         const input = e.inputBuffer.getChannelData(0);
-        const pcm16 = new Int16Array(input.length);
-        for (let i = 0; i < input.length; i++) {
-          const s = Math.max(-1, Math.min(1, input[i]));
-          pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        const pcmBuf =
+          ctx.sampleRate === TARGET_SAMPLE_RATE
+            ? (() => {
+                const arr = new Int16Array(input.length);
+                for (let i = 0; i < input.length; i++) {
+                  const s = Math.max(-1, Math.min(1, input[i]));
+                  arr[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+                }
+                return arr.buffer;
+              })()
+            : downsampleToPCM16(input, ctx.sampleRate, TARGET_SAMPLE_RATE);
+        for (let offset = 0; offset < pcmBuf.byteLength; offset += 640) {
+          onChunk(pcmBuf.slice(offset, Math.min(offset + 640, pcmBuf.byteLength)));
         }
-        onChunk(pcm16.buffer);
       };
       source.connect(processor);
       processor.connect(ctx.destination);
@@ -346,7 +393,7 @@ export class AudioRecorder {
         this._recording = false;
         processor.disconnect();
         source.disconnect();
-        ctx.close();
+        ctx.close().catch(() => {});
         this.releaseStream();
       };
     }

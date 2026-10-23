@@ -477,6 +477,33 @@ class TestReceptionistBrain(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list_turns(self.call_id)[-1]["text"], phrase("crisis_screen", "en"))
         self.assertEqual(self.state.pending_offer, "officer")
 
+    async def test_a_full_new_question_supersedes_an_open_clarification_turn(self):
+        self.state.clarify = ClarifyState(
+            stage="term",
+            original_question="I want to know about group mid-port",
+            target_word="mid-port",
+            suggested_term="import",
+            previous_word="group",
+            attempts=0,
+        )
+        await self.brain.handle_external_question(
+            "And what is the annual registration threshold for VAT?",
+            _words("And what is the annual registration threshold for VAT?"),
+        )
+        self.assertIsNone(self.state.clarify)
+        self.chat_model.generate.assert_called_once()
+
+    async def test_written_follow_up_footers_are_stripped_from_spoken_answer(self):
+        raw = (
+            "The standard VAT rate in Uganda is 18 percent.\n\n"
+            "If you get stuck at any step, URA is happy to help — call 0800 117 000.\n\n"
+            "You might also want to know: How do I file a VAT return?"
+        )
+        spoken = self.brain._spoken_answer(raw, offer_officer=False)
+        self.assertNotIn("You might also want to know", spoken)
+        self.assertNotIn("If you get stuck at any step", spoken)
+        self.assertIn("18 percent", spoken)
+
 
 class TestReceptionistBrainLanguages(unittest.IsolatedAsyncioTestCase):
     """The brain speaks the call's current language and hears officer requests in any."""

@@ -6,8 +6,8 @@
 class PCMPlayerProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    // Pre-allocated circular or growable buffer of float32 samples
-    this.buffer = new Float32Array(16000 * 5); // 5 seconds capacity at 16kHz
+    // Pre-allocated 60-second circular buffer at 16kHz so streamed TTS sentences never overwrite unspoken audio
+    this.buffer = new Float32Array(16000 * 60);
     this.readIndex = 0;
     this.writeIndex = 0;
     this.bufferedSamples = 0;
@@ -55,7 +55,7 @@ class PCMPlayerProcessor extends AudioWorkletProcessor {
       this.writeIndex = (this.writeIndex + 1) % this.buffer.length;
     }
 
-    this.bufferedSamples += len;
+    this.bufferedSamples = Math.min(this.bufferedSamples + len, this.buffer.length);
     if (!this.isPlaying && this.bufferedSamples >= this.minBufferSamples) {
       this.isPlaying = true;
     }
