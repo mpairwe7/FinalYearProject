@@ -157,6 +157,28 @@ export function pcm16ToWav(pcm16: ArrayBuffer, sampleRate: number): ArrayBuffer 
   return out;
 }
 
+/**
+ * Pick a supported MediaRecorder MIME type across Chrome, Firefox, Edge, and Safari/iOS.
+ */
+export function pickSupportedAudioMimeType(): string {
+  if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
+    return '';
+  }
+  for (const candidate of [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/mp4',
+    'audio/ogg;codecs=opus',
+  ]) {
+    try {
+      if (MediaRecorder.isTypeSupported(candidate)) return candidate;
+    } catch {
+      // ignore unsupported query
+    }
+  }
+  return '';
+}
+
 // ---------------------------------------------------------------------------
 // Audio recorder (MediaRecorder → PCM16 at 16 kHz)
 // ---------------------------------------------------------------------------
@@ -197,11 +219,10 @@ export class AudioRecorder {
         noiseSuppression: true,
       },
     });
-    this.mediaRecorder = new MediaRecorder(this.stream, {
-      mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : 'audio/webm',
-    });
+    const mimeType = pickSupportedAudioMimeType();
+    this.mediaRecorder = mimeType
+      ? new MediaRecorder(this.stream, { mimeType })
+      : new MediaRecorder(this.stream);
     this.mediaRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) this.chunks.push(e.data);
     };

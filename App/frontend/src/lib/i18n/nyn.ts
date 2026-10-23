@@ -336,6 +336,8 @@ export const nyn: Partial<Dictionary> = {
   'call.talkOfficer': 'Gamba n’omukozi wa URA',
   'call.callMeBack': 'Onteerere esimu',
   'call.queuePosition': 'Omwanya omu murongo: {position}',
+  'call.ticketChip': 'Tikiti: {ref}',
+  'call.officerNamed': 'Omukozi {name}',
   'call.hangup': 'ita esimu',
   'call.transferring': 'Ninkukwatanisa n’omukozi wa URA…',
   'call.onHold': 'Ninkushaba orindeho',

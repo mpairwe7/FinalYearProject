@@ -23,6 +23,8 @@ import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useChatStore } from "@/store/useChatStore";
 import { useVoiceStore } from "@/store/useVoiceStore";
 import { authHeaders } from "@/lib/authSession";
+import { getChatSessionId } from "@/lib/chatSession";
+import { pickSupportedAudioMimeType, stopPlayback } from "@/services/voiceService";
 
 interface VoiceVisionModeProps {
   onClose: () => void;
@@ -104,6 +106,7 @@ function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) 
         URL.revokeObjectURL(imageUrlRef.current);
         imageUrlRef.current = null;
       }
+      stopPlayback();
       setCameraActive(false);
     };
   }, [setCameraActive]);
@@ -147,7 +150,10 @@ function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) 
         },
       });
 
-      const recorder = new MediaRecorder(audioStream, { mimeType: "audio/webm" });
+      const mimeType = pickSupportedAudioMimeType();
+      const recorder = mimeType
+        ? new MediaRecorder(audioStream, { mimeType })
+        : new MediaRecorder(audioStream);
       const chunks: BlobPart[] = [];
 
       recorder.ondataavailable = (e) => {
@@ -156,7 +162,7 @@ function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) 
 
       recorder.onstop = async () => {
         audioStream.getTracks().forEach((t) => t.stop());
-        const audioBlob = new Blob(chunks, { type: "audio/webm" });
+        const audioBlob = new Blob(chunks, { type: mimeType || "audio/webm" });
         await sendRequestRef.current?.(audioBlob);
       };
 
@@ -200,7 +206,10 @@ function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) 
       try {
         const res = await fetch(`${API_BASE}/v1/voice/vision/chat`, {
           method: "POST",
-          headers: authHeaders({ "X-Voice-Consent": "true" }),
+          headers: authHeaders({
+            "X-Session-ID": getChatSessionId(),
+            "X-Voice-Consent": "true",
+          }),
           body: formData,
         });
 
@@ -276,7 +285,18 @@ function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) 
   }, [setCapturedImageBlob]);
 
   return (
-    <div className="vv-root" role="dialog" aria-modal="true" aria-label="Voice and vision mode">
+    <div
+      className="vv-root"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Voice and vision mode"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onClose();
+        }
+      }}
+    >
       {/* Top bar */}
       <div className="vv-topbar">
         <button onClick={onClose} className="vfc-icon-btn" aria-label="Close vision mode">
@@ -317,7 +337,7 @@ function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) 
 
         {/* Processing overlay */}
         {captureState === "processing" && (
-          <div className="vv-processing">
+          <div className="vv-processing" role="status" aria-live="polite">
             <div className="vv-processing-inner">
               <span className="vfc-spinner" aria-hidden="true" />
               <p className="vv-processing-text">Processing document + voice...</p>
@@ -361,7 +381,7 @@ function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) 
 
         {captureState === "result" && (
           <div className="vv-result">
-            {error && <p className="vv-result-error">{error}</p>}
+            {error && <p className="vv-result-error" role="alert">{error}</p>}
             {transcript && (
               <div className="vv-result-card vv-result-card-transcript">
                 <p className="vv-result-label">You said:</p>

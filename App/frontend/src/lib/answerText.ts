@@ -45,9 +45,16 @@ export function stripCitationMarkers(text: string): string {
  * naturally as words.
  */
 const URA_SPEECH_TERMS: Array<[RegExp, string | ((match: string, ...args: string[]) => string)]> = [
+  [/\[REDACTED_?UG_?NID\]/gi, 'redacted National ID'],
+  [/\[REDACTED_?UG_?TIN\]/gi, 'redacted TIN'],
+  [/\[REDACTED_?UG_?PHONE\]/gi, 'redacted phone number'],
+  [/\[REDACTED_?EMAIL\]/gi, 'redacted email address'],
+  [/\[REDACTED_?(?:CREDIT|AMEX)_?CARD\]/gi, 'redacted card number'],
+  [/\[REDACTED_?UG_?PASSPORT\]/gi, 'redacted passport number'],
   [/\b(?:T-?I-?N|T\.I\.N\.)(?::|\s+is|\s+number|\s+no\.?)?\s*([1-9]\d{8,9})\b/gi, (_: string, num: string) => `TIN ${num.split('').join(' ')}`],
   [/\b(?:P-?R-?N|P\.R\.N\.)(?::|\s+is|\s+number|\s+no\.?)?\s*(\d{10,14})\b/gi, (_: string, num: string) => `P R N ${num.split('').join(' ')}`],
   [/\bNIN(?::|\s+is|\s+number|\s+no\.?)?\s*(C[MFR][0-9A-Za-z]{11,13})\b/gi, (_: string, nin: string) => `NIN ${nin.toUpperCase().split('').join(' ')}`],
+  [/(?<!\bUGX\s)(?<!\bUSD\s)(?<!\bShs\s)\b(1\d{9}|2\d{11,14})\b/g, (_: string, num: string) => num.split('').join(' ')],
   [/\b0800\s*([12]17)\s*000\b/g, '0 800, $1, 0 0 0'],
   [/\b0800\s*(\d{3})\s*(\d{3})\b/g, '0 800, $1, $2'],
   [/\bE-?F-?R-?I-?S\b/gi, 'Efris'],

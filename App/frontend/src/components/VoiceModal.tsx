@@ -17,6 +17,7 @@ interface VoiceModalProps {
   isProcessing: boolean;
   transcript: string;
   locale: string;
+  stream?: MediaStream | null;
   onCancel: () => void;
   onApprove: () => void;
   onStartRecording: () => void;
@@ -103,30 +104,45 @@ function VoiceModalInner({
   isProcessing,
   transcript,
   locale,
+  stream: externalStream,
   onCancel,
   onApprove,
   onStartRecording,
   onStopRecording,
 }: VoiceModalProps) {
-  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const stream = externalStream ?? localStream;
 
   useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onCancel();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onCancel]);
+
+  useEffect(() => {
+    if (externalStream !== undefined) return;
     if (isRecording) {
       navigator.mediaDevices
         .getUserMedia({ audio: true })
-        .then(setStream)
-        .catch(() => setStream(null));
+        .then(setLocalStream)
+        .catch(() => setLocalStream(null));
     } else {
-      if (stream) {
-        stream.getTracks().forEach((t) => t.stop());
-        setStream(null);
+      if (localStream) {
+        localStream.getTracks().forEach((t) => t.stop());
+        setLocalStream(null);
       }
     }
     return () => {
-      stream?.getTracks().forEach((t) => t.stop());
+      localStream?.getTracks().forEach((t) => t.stop());
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isRecording]);
+  }, [isRecording, externalStream]);
 
   const handleMicTap = useCallback(() => {
     if (isRecording) onStopRecording();
@@ -144,7 +160,7 @@ function VoiceModalInner({
         </button>
 
         {/* Status */}
-        <div className="voice-modal-status">
+        <div className="voice-modal-status" role="status" aria-live="polite">
           {isProcessing
             ? "Processing..."
             : isRecording

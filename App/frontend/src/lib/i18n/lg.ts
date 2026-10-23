@@ -343,6 +343,8 @@ export const lg: Partial<Dictionary> = {
   'call.talkOfficer': 'Yogera n’omukozi wa URA',
   'call.callMeBack': 'Munkubire essimu',
   'call.queuePosition': 'Ekifo mu lunyiriri: {position}',
+  'call.ticketChip': 'Tikiti: {ref}',
+  'call.officerNamed': 'Omukozi {name}',
   'call.hangup': 'Mala essimu',
   'call.transferring': 'Kukukwataganya n’omukozi wa URA…',
   'call.onHold': 'Nsaba olindeko',

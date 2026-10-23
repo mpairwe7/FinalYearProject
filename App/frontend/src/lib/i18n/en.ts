@@ -358,6 +358,8 @@ export const en = {
   'call.talkOfficer': 'Talk to an officer',
   'call.callMeBack': 'Call me back instead',
   'call.queuePosition': 'Place in queue: {position}',
+  'call.ticketChip': 'Ticket: {ref}',
+  'call.officerNamed': 'Officer {name}',
   'call.hangup': 'End call',
   'call.transferring': 'Connecting you to an officer…',
   'call.onHold': 'On hold',

@@ -274,10 +274,20 @@ class VoiceSessionV2:
             return
 
         detected_lang = asr_result["language"]
+        from .receptionist.lexicon import (
+            normalize_acholi_tax_query,
+            normalize_luganda_tax_query,
+            normalize_runyankole_tax_query,
+            normalize_swahili_tax_query,
+            repair_asr_entities,
+        )
+
+        clean_asr_text = repair_asr_entities(asr_result["text"])
+        asr_result["text"] = clean_asr_text
         yield VoiceStreamEvent(
             type="transcript_final",
             data={
-                "text": asr_result["text"],
+                "text": clean_asr_text,
                 "language": detected_lang,
                 "latency_s": timings.get("asr_ms", 0) / 1000,
                 "backend": asr_result["backend"],
@@ -300,7 +310,15 @@ class VoiceSessionV2:
             return
 
         # ── Stage 2: MT (lg/sw/nyn/ach → en) ──────────────────────
-        query_text = asr_result["text"]
+        query_text = clean_asr_text
+        if detected_lang == "lg":
+            query_text = normalize_luganda_tax_query(clean_asr_text)
+        elif detected_lang == "sw":
+            query_text = normalize_swahili_tax_query(clean_asr_text)
+        elif detected_lang == "nyn":
+            query_text = normalize_runyankole_tax_query(clean_asr_text)
+        elif detected_lang == "ach":
+            query_text = normalize_acholi_tax_query(clean_asr_text)
         timings["mt_ms"] = 0.0
         mt_backend = ""
 
@@ -308,7 +326,7 @@ class VoiceSessionV2:
             t0 = time.perf_counter()
             try:
                 mt_result = await _run_blocking(
-                    self._speech.translate, asr_result["text"], detected_lang, "en",
+                    self._speech.translate, query_text, detected_lang, "en",
                 )
                 if mt_result.text and not mt_result.error:
                     query_text = mt_result.text
@@ -447,6 +465,10 @@ class VoiceSessionV2:
                 reply_for_tts = reply_text
         except Exception:
             logger.debug("voice_stream_v2: spoken figure guard skipped", exc_info=True)
+
+        from .guardrails import OutputGuard
+
+        reply_for_tts = OutputGuard.redact_pii(reply_for_tts)
 
         # ── Stage 6: TTS (streaming V2 or sentence-chunked V1) ────
         tts_first_chunk_ms: float | None = None

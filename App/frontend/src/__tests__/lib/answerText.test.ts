@@ -63,6 +63,15 @@ describe("answerText", () => {
     expect(speech).toContain("Step 2: Provide TIN 1 0 0 1 2 3 4 5 6 7 or NIN C M 9 3 0 0 3 9 1 8 2 L I R");
   });
 
+  it("converts redaction placeholders and standalone 10-digit TINs into natural spoken text", () => {
+    const raw = "Record for [REDACTED_UG_NID], [REDACTED_UG_TIN], and 1000123456.";
+    const speech = cleanMarkdownForSpeech(raw);
+    expect(speech).toContain("redacted National ID");
+    expect(speech).toContain("redacted TIN");
+    expect(speech).not.toContain("REDACTED_UG_NID");
+    expect(speech).toContain("1 0 0 0 1 2 3 4 5 6");
+  });
+
   it("normalizes Ugandan .go.ug, .co.ug, and .or.ug government domains for speech", () => {
     const raw =
       "Visit kcca.go.ug, obrs.ursb.go.ug, unbs.go.ug, nema.go.ug, udls.co.ug, or nda.or.ug. Ignore example.go.ug.com.";

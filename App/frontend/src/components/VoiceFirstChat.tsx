@@ -35,6 +35,7 @@ import { authHeaders } from "@/lib/authSession";
 import { getChatSessionId } from "@/lib/chatSession";
 import { audioSignifiers } from "@/lib/audioSignifiers";
 import { LOCALE_OPTIONS, localeLabel } from "@/lib/locales";
+import { pickSupportedAudioMimeType, stopPlayback } from "@/services/voiceService";
 
 /* ---------- Types ---------- */
 
@@ -210,6 +211,7 @@ function VoiceFirstChatInner({ onClose, onOpenVision, locale = "en" }: VoiceFirs
   const [waveformData, setWaveformData] = useState<number[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
   const animFrameRef = useRef<number>(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -250,8 +252,12 @@ function VoiceFirstChatInner({ onClose, onOpenVision, locale = "en" }: VoiceFirs
       });
       streamRef.current = stream;
 
-      // Set up waveform analyser
+      // Set up waveform analyser (close any previous context first)
+      if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
+        void audioCtxRef.current.close().catch(() => {});
+      }
       const ctx = new AudioContext({ sampleRate: 16000 });
+      audioCtxRef.current = ctx;
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
@@ -261,14 +267,17 @@ function VoiceFirstChatInner({ onClose, onOpenVision, locale = "en" }: VoiceFirs
       // Start waveform animation
       animFrameRef.current = requestAnimationFrame(updateWaveform);
 
-      // MediaRecorder for batch mode
-      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      // MediaRecorder for batch mode (cross-browser MIME selection)
+      const mimeType = pickSupportedAudioMimeType();
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
       const chunks: BlobPart[] = [];
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunks.push(e.data);
       };
       recorder.onstop = async () => {
-        const blob = new Blob(chunks, { type: "audio/webm" });
+        const blob = new Blob(chunks, { type: mimeType || "audio/webm" });
         const buffer = await blob.arrayBuffer();
         await handleAudioRef.current?.(new Uint8Array(buffer));
       };
@@ -298,6 +307,10 @@ function VoiceFirstChatInner({ onClose, onOpenVision, locale = "en" }: VoiceFirs
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
+    }
+    if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
+      void audioCtxRef.current.close().catch(() => {});
+      audioCtxRef.current = null;
     }
     analyserRef.current = null;
     setIsRecording(false);
@@ -482,11 +495,34 @@ function VoiceFirstChatInner({ onClose, onOpenVision, locale = "en" }: VoiceFirs
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
       }
+      if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
+        void audioCtxRef.current.close().catch(() => {});
+        audioCtxRef.current = null;
+      }
+      stopPlayback();
     };
   }, []);
 
   return (
-    <div className="vfc-root" role="dialog" aria-modal="true" aria-label="Voice-first chat">
+    <div
+      className="vfc-root"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Voice-first chat"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onClose();
+          return;
+        }
+        const target = e.target as HTMLElement;
+        if (e.code === "Space" && target.tagName !== "BUTTON" && target.tagName !== "INPUT") {
+          e.preventDefault();
+          if (phase === "speaking") handleBargeIn();
+          else handleOrbTap();
+        }
+      }}
+    >
       {/* Top bar */}
       <div className="vfc-topbar">
         <button onClick={onClose} className="vfc-icon-btn" aria-label="Close voice chat">
