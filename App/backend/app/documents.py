@@ -1242,6 +1242,37 @@ def _parse_currency_amount(raw: str) -> float | None:
         return None
 
 
+_USD_CURRENCY_RE = re.compile(r"\bUSD\b", re.IGNORECASE)
+_UGX_CURRENCY_RE = re.compile(r"\b(?:UGX|UShs?|Shs)\b", re.IGNORECASE)
+_ZERO_OR_EXEMPT_VAT_RE = re.compile(
+    r"\b(?:zero[- ]?rated|vat[ \t]+exempt|exempt[ \t]+supply|vat[ \t]{0,3}\(0%\)|0%[ \t]{0,3}vat)\b",
+    re.IGNORECASE,
+)
+_SUBTOTAL_LINE_RE = re.compile(
+    r"(?:Sub-?total|Taxable[ \t]+Value|Taxable[ \t]+Amount|Net[ \t]+Amount|Total[ \t]+Exclusive)"
+    r"[ \t:=-]{0,6}(?:(?:UGX|UShs?\.?|Shs?\.?|USD)[ \t]{0,4})?(\d{1,15}(?:,\d{3})*(?:\.\d{1,2})?)",
+    re.IGNORECASE,
+)
+_VAT_LINE_RE = re.compile(
+    r"(?:V\.?A\.?T\.?|Value[ \t]+Added[ \t]+Tax|Tax[ \t]+Amount)"
+    r"(?:[ \t]{0,4}\(\d{1,3}(?:\.\d{1,2})?%\))?"
+    r"[ \t:=-]{0,6}(?:(?:UGX|UShs?\.?|Shs?\.?|USD)[ \t]{0,4})?(\d{1,15}(?:,\d{3})*(?:\.\d{1,2})?)",
+    re.IGNORECASE,
+)
+_TOTAL_LINE_RE = re.compile(
+    r"(?:Total[ \t]+Payable|Grand[ \t]+Total|Total[ \t]+Amount|Gross[ \t]+Amount|"
+    r"Total[ \t]+Due|Amount[ \t]+Paid|Paid[ \t]+Amount|Net[ \t]+Payable)"
+    r"[ \t:=-]{0,6}(?:(?:UGX|UShs?\.?|Shs?\.?|USD)[ \t]{0,4})?(\d{1,15}(?:,\d{3})*(?:\.\d{1,2})?)",
+    re.IGNORECASE,
+)
+_WHT_LINE_RE = re.compile(
+    r"(?:Withholding[ \t]+Tax|W\.?H\.?T\.?)"
+    r"(?:[ \t]{0,4}\(\d{1,3}(?:\.\d{1,2})?%\))?"
+    r"[ \t:=-]{0,6}(?:(?:UGX|UShs?\.?|Shs?\.?|USD)[ \t]{0,4})?(\d{1,15}(?:,\d{3})*(?:\.\d{1,2})?)",
+    re.IGNORECASE,
+)
+
+
 def reconcile_tax_document(
     text: str,
     doc_type: str,
@@ -1281,39 +1312,22 @@ def reconcile_tax_document(
         notes.append(f"EFRIS fiscal device / invoice record identified ({', '.join(efris[:3])}).")
 
     # Detect primary currency (USD vs UGX)
-    has_usd = bool(re.search(r"\bUSD\b", text, re.I)) and not bool(re.search(r"\b(?:UGX|UShs?|Shs)\b", text, re.I))
+    has_usd = bool(_USD_CURRENCY_RE.search(text)) and not bool(_UGX_CURRENCY_RE.search(text))
     ccy = "USD" if has_usd else "UGX"
 
-    # 2. Extract financial figures associated with tax lines
-    subtotal_match = re.search(
-        r"(?:Sub-?total|Taxable\s+Value|Taxable\s+Amount|Net\s+Amount|Total\s+Exclusive)\s*[:=\-]?\s*(?:UGX|Shs?\.?|USD)?\s*([\d,]+(?:\.\d{1,2})?)",
-        text,
-        re.I,
-    )
-    vat_match = re.search(
-        r"(?:V\.?A\.?T\.?|Value\s+Added\s+Tax|Tax\s+Amount)\s*(?:\(\d+(?:\.\d+)?%\))?\s*[:=\-]?\s*(?:UGX|Shs?\.?|USD)?\s*([\d,]+(?:\.\d{1,2})?)",
-        text,
-        re.I,
-    )
-    total_match = re.search(
-        r"(?:Total\s+Payable|Grand\s+Total|Total\s+Amount|Gross\s+Amount|Total\s+Due|Amount\s+Paid|Paid\s+Amount|Net\s+Payable)\s*[:=\-]?\s*(?:UGX|Shs?\.?|USD)?\s*([\d,]+(?:\.\d{1,2})?)",
-        text,
-        re.I,
-    )
-    wht_match = re.search(
-        r"(?:Withholding\s+Tax|W\.?H\.?T\.?)\s*(?:\([0-9.]+%\))?\s*[:=\-]?\s*(?:UGX|Shs?\.?|USD)?\s*([\d,]+(?:\.\d{1,2})?)",
-        text,
-        re.I,
-    )
+    # 2. Extract financial figures associated with tax lines (bounded O(n) matchers)
+    bounded_text = text[:25000]
+    subtotal_match = _SUBTOTAL_LINE_RE.search(bounded_text)
+    vat_match = _VAT_LINE_RE.search(bounded_text)
+    total_match = _TOTAL_LINE_RE.search(bounded_text)
+    wht_match = _WHT_LINE_RE.search(bounded_text)
 
     subtotal_val = _parse_currency_amount(subtotal_match.group(1)) if subtotal_match else None
     vat_val = _parse_currency_amount(vat_match.group(1)) if vat_match else None
     total_val = _parse_currency_amount(total_match.group(1)) if total_match else None
     wht_val = _parse_currency_amount(wht_match.group(1)) if wht_match else None
 
-    is_zero_or_exempt = bool(
-        re.search(r"\b(?:zero[- ]?rated|vat\s+exempt|exempt\s+supply|vat\s*\(0%\)|0%\s*vat)\b", text, re.I)
-    )
+    is_zero_or_exempt = bool(_ZERO_OR_EXEMPT_VAT_RE.search(bounded_text))
 
     # Fallback to table numeric totals if present, and cross-check table totals against declared total
     table_total_candidate: float | None = None

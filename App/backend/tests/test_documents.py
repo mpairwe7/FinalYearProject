@@ -591,12 +591,33 @@ class ServiceInjectionTest(_RegistryIsolation):
 @unittest.skipUnless(_has("fpdf"), "fpdf2 not installed")
 class ReportPdfTest(_RegistryIsolation):
     def test_report_pdf_bytes(self):
-        from app.pdf_export import generate_document_report_pdf
+        from app.pdf_export import (
+            generate_conversation_pdf,
+            generate_document_report_pdf,
+            generate_tax_summary_pdf,
+        )
 
         record = _analyze_receipt()
         pdf_bytes = generate_document_report_pdf(record.to_report_payload())
         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
         self.assertGreater(len(pdf_bytes), 800)
+
+        # Ultra-long unbroken word in conversation PDF and mismatched tax summary PDF
+        long_url_word = "https://ura.go.ug/verify/" + ("A" * 240)
+        conv_pdf = generate_conversation_pdf(
+            [{"role": "user", "content": long_url_word, "timestamp": "2026-10-23"}],
+            session_id="sess-long",
+        )
+        self.assertTrue(conv_pdf.startswith(b"%PDF"))
+
+        summary_pdf = generate_tax_summary_pdf(
+            {
+                "items": [{"label": "PAYE", "amount": 100000}, {"label": "VAT", "amount": 50000}],
+                "total": 999999,
+                "notes": "Mismatched total test",
+            }
+        )
+        self.assertTrue(summary_pdf.startswith(b"%PDF"))
 
 
 # ---------------------------------------------------------------------------
@@ -878,40 +899,22 @@ class DocumentEndpointsTest(_RegistryIsolation):
         self.assertIn("[REDACTED_INSTRUCTION]", res["ocr_text"])
         self.assertIn("1001234567", res["fields"].get("tins", []))
 
-    @unittest.skipUnless(_has("fpdf"), "fpdf2 not installed")
-    def test_cached_report_bytes_do_not_break_export_user_documents_or_long_tokens(self):
+    def test_cached_report_bytes_do_not_break_export_user_documents(self):
         import json
-        from app.pdf_export import generate_conversation_pdf, generate_tax_summary_pdf
 
-        client = _client()
-        up = self._upload(client, headers={"X-Session-ID": "sess-cache-json"})
-        doc_id = up.json()["document_id"]
-        # Trigger report generation which caches _cached_report_pdf on record.meta
-        rep = client.get(f"/v1/documents/{doc_id}/report", headers={"X-Session-ID": "sess-cache-json"})
-        self.assertEqual(rep.status_code, 200)
+        record = _analyze_receipt(session_id="sess-cache-json", user_id="usr-cache-json")
+        record.meta["_cached_report_pdf"] = b"%PDF-1.4 fake cached bytes"
+        documents._spool_write(record)
 
-        rec = documents.get_document(doc_id, session_id="sess-cache-json")
+        rec = documents.get_document(
+            record.doc_id, session_id="sess-cache-json", user_id="usr-cache-json"
+        )
         self.assertIsNotNone(rec)
         # Must be cleanly JSON-serializable without TypeError on bytes
         serialized = json.dumps(rec.to_report_payload())
-        self.assertIn(doc_id, serialized)
-
-        # Ultra-long unbroken word in conversation PDF and mismatched tax summary PDF
-        long_url_word = "https://ura.go.ug/verify/" + ("A" * 240)
-        conv_pdf = generate_conversation_pdf(
-            [{"role": "user", "content": long_url_word, "timestamp": "2026-10-23"}],
-            session_id="sess-long",
-        )
-        self.assertTrue(conv_pdf.startswith(b"%PDF"))
-
-        summary_pdf = generate_tax_summary_pdf(
-            {
-                "items": [{"label": "PAYE", "amount": 100000}, {"label": "VAT", "amount": 50000}],
-                "total": 999999,
-                "notes": "Mismatched total test",
-            }
-        )
-        self.assertTrue(summary_pdf.startswith(b"%PDF"))
+        self.assertIn(record.doc_id, serialized)
+        exported = json.dumps(documents.export_user_documents("usr-cache-json"))
+        self.assertIn(record.doc_id, exported)
 
 
 if __name__ == "__main__":
