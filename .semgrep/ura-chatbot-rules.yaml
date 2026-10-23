@@ -236,7 +236,7 @@ rules:
   - id: ura-pii-ug-nid-hardcoded
     # Same shape as guardrails.redact_pii_text (G247): the former fixed
     # 15-character layout never matched a real 14-character NIN.
-    pattern-regex: "(?i)\\bC[MFR](?=(?:[A-Z]*\\d){4})[0-9A-Z]{11,13}\\b"
+    pattern-regex: "(?i)\\bC[MFR](?:(?=[0-9A-Z]*\\d)[0-9A-Z]{12}|(?=(?:[A-Z]*\\d){4})[0-9A-Z]{11,13})\\b"
     paths:
       exclude:
         - "*.test.*"

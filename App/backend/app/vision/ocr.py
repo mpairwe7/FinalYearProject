@@ -396,12 +396,26 @@ def extract_tin_numbers(text: str) -> list[str]:
     return list(dict.fromkeys(re.findall(r"\b1\d{9}\b", cleaned)))
 
 
+_NIN_CANONICAL_RE = re.compile(r"\bC[MFR](?=[0-9A-Z]*\d)[0-9A-Z]{12}\b")
+_NIN_HYPHEN_OR_SPACE_RE = re.compile(
+    r"\bC[MFR][0-9A-Z]{0,6}(?:-[0-9A-Z]{1,8}){1,3}\b|"
+    r"\bC[MFR][0-9A-Z]{0,4}(?: (?:(?=[0-9A-Z]*\d)[0-9A-Z]{1,8}|[A-Z]{1,4})){1,3}\b"
+)
+_NIN_LABELED_FALLBACK_RE = re.compile(
+    r"\bNIN[ \t:#=-]{1,6}([A-Z]{2}(?=(?:[A-Z]*\d){4})[0-9A-Z]{12})\b"
+)
+
+
 def extract_nin_numbers(text: str) -> list[str]:
     """Extract Ugandan 14-character National Identification Numbers (NIN)."""
-    cleaned = strip_hidden_control_and_bidi(text)
-    matches = re.findall(r"\b[C][MFR](?=[0-9A-Z]*\d)[0-9A-Z]{12}\b", cleaned.upper())
+    cleaned = strip_hidden_control_and_bidi(text).upper()
+    matches = list(_NIN_CANONICAL_RE.findall(cleaned))
+    for cand in _NIN_HYPHEN_OR_SPACE_RE.findall(cleaned):
+        alnum = re.sub(r"[- ]", "", cand)
+        if len(alnum) == 14 and sum(c.isdigit() for c in alnum) >= 4:
+            matches.append(alnum)
     if not matches:
-        matches = re.findall(r"\b[A-Z]{2}(?=[0-9A-Z]*\d)[0-9A-Z]{12}\b", cleaned.upper())
+        matches = list(_NIN_LABELED_FALLBACK_RE.findall(cleaned))
     return list(dict.fromkeys(matches))
 
 
