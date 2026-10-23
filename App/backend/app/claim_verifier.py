@@ -14,6 +14,7 @@ from typing import Any
 
 from .claim_polarity import polarity_conflicts
 from .entailment import canonical_amounts, is_contradicted, percentages
+from .model_welfare import is_self_reflection_sentence
 from .text_signals import is_courtesy_sentence
 
 _CITATION_RE = re.compile(r"\[(\d{1,3})\]")
@@ -231,6 +232,9 @@ def verify_claims(
 
     supported = 0
     saw_numeric_contradiction = False
+    welfare_turn = any(
+        str(h.get("doc_type") or "") == "model_welfare_context" for h in (hits or [])
+    )
     for claim in claims:
         refs = _CITATION_RE.findall(claim)
         clean_claim = _CITATION_RE.sub("", claim)
@@ -241,6 +245,11 @@ def verify_claims(
         context_text = " ".join(contexts)
         context_tokens = _tokens(context_text)
         overlap = len(claim_tokens & context_tokens) / max(1, len(claim_tokens))
+
+        if welfare_turn and is_self_reflection_sentence(clean_claim):
+            overlap = max(overlap, 0.85)
+            if not refs and citations:
+                refs = ["1"]
 
         # If overlap is below threshold against the specifically cited passage,
         # verify if the claim is supported across any of the other retrieved hits

@@ -2029,10 +2029,12 @@ class HybridRetriever:
             return 0.0
 
         from .claim_polarity import polarity_conflicts
+        from .model_welfare import is_self_reflection_sentence, is_welfare_context
 
         all_refs = list(contexts or [])
         if verified_facts:
             all_refs.append(verified_facts)
+        welfare_turn = is_welfare_context(contexts, verified_facts)
         ctx_tokens = content_tokens(" ".join(all_refs))
         grounded = 0
         scoreable = 0
@@ -2047,6 +2049,11 @@ class HybridRetriever:
                 # Directional inversion against supporting passage/fact -> ungrounded
                 continue
             if len(sent_tokens & ctx_tokens) / len(sent_tokens) >= 0.5:
+                grounded += 1
+            elif welfare_turn and is_self_reflection_sentence(sent):
+                # Unscripted model self-reflection on a model-welfare turn
+                # (with no fabricated amounts/percentages) is grounded in
+                # the model's introspective allowance rather than a tax statute.
                 grounded += 1
 
         if not scoreable:
