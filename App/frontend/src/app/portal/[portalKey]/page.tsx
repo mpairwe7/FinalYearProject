@@ -23,61 +23,99 @@ import {
   subscribeAuthToken,
 } from "../../../lib/authSession";
 import { getChatSessionId } from "../../../lib/chatSession";
-import { consumePendingPortalContinuation } from "../../../lib/portalContinuation";
+import { useTranslation, type TranslationKey } from "../../../lib/i18n";
+import {
+  consumePendingPortalContinuation,
+  sanitizeContinuationFields,
+  savePendingPortalContinuation,
+} from "../../../lib/portalContinuation";
 import type { PortalCopilotPayload } from "../../../store/useChatStore";
 import "./portal.css";
 
 interface PortalScreenField {
   name: string;
   label: string;
+  labelKey?: TranslationKey;
   selectorId: string;
   type: "text" | "number" | "select" | "textarea" | "date";
   required: boolean;
   placeholder?: string;
-  options?: { value: string; label: string }[];
+  options?: { value: string; label: string; labelKey?: TranslationKey }[];
 }
 
 interface PortalScreenConfig {
   key: string;
   title: string;
+  titleKey?: TranslationKey;
   formId: string;
   requiresAuth: boolean;
   taskId: string;
   stepTitle: string;
+  stepTitleKey?: TranslationKey;
   statutoryCitation: string;
   fields: PortalScreenField[];
   submitLabel: string;
+  submitLabelKey?: TranslationKey;
 }
 
 const PORTAL_SCREENS: Record<string, PortalScreenConfig> = {
   prn_payments: {
     key: "prn_payments",
     title: "URA e-Services — Payment Registration (PRN)",
+    titleKey: "portalWorkspace.prn.title",
     formId: "URA-PAY-PRN-201",
     requiresAuth: false,
     taskId: "payment_generate_prn",
     stepTitle: "Step 1: Tax Head, Taxpayer TIN & Payment Mode",
+    stepTitleKey: "portalWorkspace.prn.stepTitle",
     statutoryCitation: "TPCA Cap. 343 s. 37",
     submitLabel: "Generate Payment Registration Number (PRN)",
+    submitLabelKey: "portalWorkspace.prn.submitLabel",
     fields: [
       {
         name: "tax_head",
         label: "Tax Head / Revenue Regime",
+        labelKey: "portalWorkspace.prn.field.tax_head",
         selectorId: "ddlTaxHead",
         type: "select",
         required: true,
         options: [
-          { value: "VAT_STANDARD", label: "0010 — Value Added Tax (VAT)" },
-          { value: "CORPORATION_TAX", label: "0011 — Income / Corporation Tax" },
-          { value: "PAYE", label: "0012 — Pay As You Earn (PAYE)" },
-          { value: "WITHHOLDING_TAX", label: "0013 — Withholding Tax (WHT)" },
-          { value: "RENTAL_TAX", label: "0014 — Rental Income Tax" },
-          { value: "PASSPORT_FEE", label: "0090 — Non-Tax Revenue (Passport / MDA Fee)" },
+          {
+            value: "VAT_STANDARD",
+            label: "0010 — Value Added Tax (VAT)",
+            labelKey: "portalWorkspace.prn.opt.vat",
+          },
+          {
+            value: "CORPORATION_TAX",
+            label: "0011 — Income / Corporation Tax",
+            labelKey: "portalWorkspace.prn.opt.corp",
+          },
+          {
+            value: "PAYE",
+            label: "0012 — Pay As You Earn (PAYE)",
+            labelKey: "portalWorkspace.prn.opt.paye",
+          },
+          {
+            value: "WITHHOLDING_TAX",
+            label: "0013 — Withholding Tax (WHT)",
+            labelKey: "portalWorkspace.prn.opt.wht",
+          },
+          {
+            value: "RENTAL_TAX",
+            label: "0014 — Rental Income Tax",
+            labelKey: "portalWorkspace.prn.opt.rental",
+          },
+          {
+            value: "PASSPORT_FEE",
+            label: "0090 — Non-Tax Revenue (Passport / MDA Fee)",
+            labelKey: "portalWorkspace.prn.opt.passport",
+          },
         ],
       },
       {
         name: "tin",
         label: "10-Digit Taxpayer TIN",
+        labelKey: "portalWorkspace.prn.field.tin",
         selectorId: "txtTIN",
         type: "text",
         required: true,
@@ -86,6 +124,7 @@ const PORTAL_SCREENS: Record<string, PortalScreenConfig> = {
       {
         name: "amount_ugx",
         label: "Payment Amount (UGX)",
+        labelKey: "portalWorkspace.prn.field.amount_ugx",
         selectorId: "txtAmount",
         type: "number",
         required: true,
@@ -94,24 +133,37 @@ const PORTAL_SCREENS: Record<string, PortalScreenConfig> = {
       {
         name: "payment_mode",
         label: "Bank / Mobile Money Gateway",
+        labelKey: "portalWorkspace.prn.field.payment_mode",
         selectorId: "ddlPaymentMode",
         type: "select",
         required: true,
         options: [
-          { value: "COMMERCIAL_BANK", label: "Commercial Bank Counter / EFT" },
-          { value: "MOBILE_MONEY", label: "Mobile Money (*165# MTN / *185# Airtel)" },
-          { value: "VISA_MASTERCARD", label: "Online Card (VISA / MasterCard)" },
+          {
+            value: "COMMERCIAL_BANK",
+            label: "Commercial Bank Counter / EFT",
+            labelKey: "portalWorkspace.prn.opt.bank",
+          },
+          {
+            value: "MOBILE_MONEY",
+            label: "Mobile Money (*165# MTN / *185# Airtel)",
+            labelKey: "portalWorkspace.prn.opt.momo",
+          },
+          {
+            value: "VISA_MASTERCARD",
+            label: "Online Card (VISA / MasterCard)",
+            labelKey: "portalWorkspace.prn.opt.card",
+          },
         ],
       },
     ],
   },
   tin_registration: {
     key: "tin_registration",
-    title: "URA e-Services — Instant TIN Application",
+    title: "URA e-Services — Instant Individual TIN Application",
     formId: "URA-REG-TIN-001",
     requiresAuth: false,
     taskId: "tin_apply_individual",
-    stepTitle: "Step 1: Applicant Identity & NIRA / URSB Verification",
+    stepTitle: "Step 1: Individual Applicant Identity & NIRA NIN Verification",
     statutoryCitation: "TPCA Cap. 343 s. 4",
     submitLabel: "Submit TIN Application Draft",
     fields: [
@@ -121,15 +173,11 @@ const PORTAL_SCREENS: Record<string, PortalScreenConfig> = {
         selectorId: "ddlEntityType",
         type: "select",
         required: true,
-        options: [
-          { value: "individual", label: "Individual Citizen (NIRA NIN)" },
-          { value: "NON_INDIVIDUAL_COMPANY", label: "Company / Corporate Entity (URSB BRN)" },
-          { value: "TRUST_NGO", label: "Trust / NGO" },
-        ],
+        options: [{ value: "individual", label: "Individual Citizen (NIRA NIN)" }],
       },
       {
         name: "nin",
-        label: "14-Character NIN / URSB BRN",
+        label: "14-Character NIRA NIN",
         selectorId: "txtNIN",
         type: "text",
         required: true,
@@ -137,7 +185,7 @@ const PORTAL_SCREENS: Record<string, PortalScreenConfig> = {
       },
       {
         name: "surname",
-        label: "Surname / Registered Legal Name",
+        label: "Surname",
         selectorId: "txtFullName",
         type: "text",
         required: true,
@@ -362,10 +410,18 @@ const PORTAL_SCREENS: Record<string, PortalScreenConfig> = {
     formId: "URA-MV-701",
     requiresAuth: true,
     taskId: "payment_verify_advance_tax",
-    stepTitle: "Step 1: Customs SAD C-Number / 17-Char VIN & Plate Category",
+    stepTitle: "Step 1: Vehicle Registration Plate, Customs SAD / VIN & Plate Category",
     statutoryCitation: "Traffic and Road Safety Act & EACCMA",
     submitLabel: "Proceed to Assessment",
     fields: [
+      {
+        name: "vehicle_registration_number",
+        label: "Motor Vehicle Registration Plate",
+        selectorId: "txtVehicleRegistrationNumber",
+        type: "text",
+        required: true,
+        placeholder: "UBK 412A",
+      },
       {
         name: "chassis_vin",
         label: "Customs SAD C-Number or 17-Character Chassis VIN",
@@ -422,11 +478,23 @@ PORTAL_SCREENS.asycuda = PORTAL_SCREENS.motor_vehicle;
 
 const SECRET_FIELD_RE = /(?:password|passwd|pwd|otp|pin|cvv|cvc|csc|secret|token|passcode)/i;
 
+const PORTAL_TAB_KEYS: { key: string; labelKey: TranslationKey }[] = [
+  { key: "prn_payments", labelKey: "portalWorkspace.tab.prn_payments" },
+  { key: "tin_registration", labelKey: "portalWorkspace.tab.tin_registration" },
+  { key: "return_filing", labelKey: "portalWorkspace.tab.return_filing" },
+  { key: "tax_clearance", labelKey: "portalWorkspace.tab.tax_clearance" },
+  { key: "efris", labelKey: "portalWorkspace.tab.efris" },
+  { key: "dts", labelKey: "portalWorkspace.tab.dts" },
+  { key: "objection_appeals", labelKey: "portalWorkspace.tab.objection_appeals" },
+  { key: "motor_vehicle", labelKey: "portalWorkspace.tab.motor_vehicle" },
+];
+
 /**
  * Interactive URA Portal Workspace with the Inbuilt AI Co-Pilot side rail (Approach 3)
  * and live DOM telemetry bridge (`portal_context`).
  */
 export default function InbuiltPortalCopilotPage() {
+  const t = useTranslation();
   const params = useParams<{ portalKey?: string }>();
   const searchParams = useSearchParams();
   const rawKey = String(params?.portalKey || "prn_payments").toLowerCase();
@@ -437,6 +505,8 @@ export default function InbuiltPortalCopilotPage() {
   const isSignedIn = Boolean(token);
 
   const [values, setValues] = useState<Record<string, string>>({});
+  const [demoPlaceholders, setDemoPlaceholders] = useState<Record<string, string>>({});
+  const [statusNotice, setStatusNotice] = useState("");
   const [errorBanner, setErrorBanner] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [spotlightField, setSpotlightField] = useState<string | null>(null);
@@ -446,18 +516,42 @@ export default function InbuiltPortalCopilotPage() {
   const [stalledMs, setStalledMs] = useState(0);
   const lastActivityRef = useRef<number>(Date.now());
   const autoFilledKeyRef = useRef<string | null>(null);
+  const savedContinuationRef = useRef<Record<string, string>>({});
   const fieldRefs = useRef<Record<string, HTMLElement | null>>({});
+
+  const localizedTitle = screen.titleKey ? t(screen.titleKey) : screen.title;
+  const localizedStepTitle = screen.stepTitleKey ? t(screen.stepTitleKey) : screen.stepTitle;
+  const localizedSubmitLabel = screen.submitLabelKey
+    ? t(screen.submitLabelKey)
+    : screen.submitLabel;
+
+  const getFieldLabel = useCallback(
+    (field: PortalScreenField) => (field.labelKey ? t(field.labelKey) : field.label),
+    [t],
+  );
 
   // Consume any pending continuation state once on arrival and reset transient errors on screen switch
   useEffect(() => {
     const pending = consumePendingPortalContinuation();
+    if (pending?.collectedFields) {
+      savedContinuationRef.current = {
+        ...savedContinuationRef.current,
+        ...pending.collectedFields,
+      };
+    }
     setValues((prev) => {
       const next: Record<string, string> = {};
       for (const f of screen.fields) {
-        next[f.name] = pending?.collectedFields?.[f.name] || prev[f.name] || "";
+        next[f.name] =
+          pending?.collectedFields?.[f.name] ||
+          savedContinuationRef.current[f.name] ||
+          prev[f.name] ||
+          "";
       }
       return next;
     });
+    setDemoPlaceholders({});
+    setStatusNotice("");
     setErrorBanner("");
     setFieldErrors({});
     setSpotlightField(null);
@@ -485,6 +579,7 @@ export default function InbuiltPortalCopilotPage() {
   const recordFieldChange = useCallback((name: string, val: string) => {
     lastActivityRef.current = Date.now();
     setStalledMs(0);
+    setStatusNotice("");
     setValues((prev) => ({ ...prev, [name]: val }));
   }, []);
 
@@ -496,11 +591,19 @@ export default function InbuiltPortalCopilotPage() {
       promptText: string,
       submitTask = false,
       overrideFields?: Record<string, string>,
+      overrideFieldErrors?: Record<string, string>,
+      overrideErrorBanner?: string,
     ) => {
       setBusy(true);
       try {
         const activeValues = overrideFields ?? values;
-        const validationErrors = Object.entries(fieldErrors).map(([field, message]) => {
+        const activeFieldErrors = overrideFieldErrors ?? fieldErrors;
+        const activeErrorBanner = overrideErrorBanner ?? errorBanner;
+        const activeEmptyRequired = screen.fields
+          .filter((f) => f.required && !String(activeValues[f.name] || "").trim())
+          .map((f) => f.name);
+
+        const validationErrors = Object.entries(activeFieldErrors).map(([field, message]) => {
           const spec = screen.fields.find((s) => s.name === field);
           return {
             field,
@@ -512,7 +615,7 @@ export default function InbuiltPortalCopilotPage() {
         // Client-side defense-in-depth scrubbing of any secret/credential field names
         const scrubbedVisible: Record<string, string> = {};
         for (const [k, v] of Object.entries(activeValues)) {
-          if (!SECRET_FIELD_RE.test(k)) {
+          if (!SECRET_FIELD_RE.test(k) && String(v ?? "").trim() !== "") {
             scrubbedVisible[k] = v;
           }
         }
@@ -523,12 +626,12 @@ export default function InbuiltPortalCopilotPage() {
           portal_context: {
             portal_id: screen.key,
             current_route: `/portal/${screen.key}`,
-            active_step: screen.stepTitle,
+            active_step: localizedStepTitle,
             form_id: screen.formId,
             visible_fields: scrubbedVisible,
-            empty_required_fields: emptyRequiredFields.filter((k) => !SECRET_FIELD_RE.test(k)),
+            empty_required_fields: activeEmptyRequired.filter((k) => !SECRET_FIELD_RE.test(k)),
             validation_errors: validationErrors,
-            error_banner: errorBanner,
+            error_banner: activeErrorBanner,
             stalled_duration_ms: Math.min(3_600_000, Math.max(stalledMs, 15000)),
             last_user_action: submitTask ? "task_execution_requested" : "user_clicked_help_me",
           },
@@ -551,7 +654,18 @@ export default function InbuiltPortalCopilotPage() {
           body: JSON.stringify(payload),
         });
         const data = await res.json().catch(() => ({}));
-        const card = (data.portal_copilot ?? data.portalCopilot) as PortalCopilotPayload | undefined;
+        if (!res.ok) {
+          setCopilotCard(null);
+          setErrorBanner(
+            typeof data.detail === "string" && data.detail
+              ? data.detail
+              : t("portalWorkspace.requestErrorBanner"),
+          );
+          return;
+        }
+        const card = (data.portal_copilot ?? data.portalCopilot) as
+          | PortalCopilotPayload
+          | undefined;
         if (card) {
           setCopilotCard(card);
           const nextCoachmarks: Record<string, string> = {};
@@ -577,54 +691,86 @@ export default function InbuiltPortalCopilotPage() {
             node?.scrollIntoView?.({ behavior: "smooth", block: "center" });
           }
         }
+      } catch {
+        setCopilotCard(null);
+        setErrorBanner(t("portalWorkspace.requestErrorBanner"));
       } finally {
         setBusy(false);
       }
     },
-    [conversationId, emptyRequiredFields, errorBanner, fieldErrors, screen, stalledMs, values],
+    [
+      conversationId,
+      errorBanner,
+      fieldErrors,
+      localizedStepTitle,
+      screen.fields,
+      screen.formId,
+      screen.key,
+      screen.taskId,
+      stalledMs,
+      t,
+      values,
+    ],
   );
 
   /**
-   * Populate empty safe form fields with realistic sandbox values without triggering re-render loops.
+   * Restore user-supplied continuation fields into `values`, while keeping any example
+   * placeholder hints strictly separate from executable form `values` (`demoPlaceholders`).
    */
   const handleAutoFillSafeFields = useCallback(() => {
-    const defaults: Record<string, string> = {
-      tin: ["10000", "23456"].join(""),
-      buyer_tin: ["10000", "98765"].join(""),
+    const userContinuationFields: Record<string, string> = {
+      ...savedContinuationRef.current,
+      ...sanitizeContinuationFields(copilotCard?.preserved_fields),
+    };
+    const examplePlaceholderHints: Record<string, string> = {
       tax_head: "VAT_STANDARD",
-      amount_ugx: "2500000",
       payment_mode: "COMMERCIAL_BANK",
       entity_type: "individual",
-      nin: ["CM9201", "8100123A"].join(""),
-      surname: "Mukasa",
-      given_name: "Sarah",
-      date_of_birth: "1992-05-14",
-      mobile_number: "+256772123456",
-      email: "sarah.mukasa@example.ug",
       tcc_purpose: "BIDDING_TENDER",
       commodity_code: "50202301",
       product_category: "BOTTLED_WATER",
-      quantity: "10000",
-      assessment_ref: "ASMT-2026-00912",
-      grounds:
-        "Input VAT credit supported by verified 20-digit EFRIS FDNs under Section 28 VAT Act.",
-      chassis_vin: "JTEBU29J805012345",
       plate_category: "STANDARD_FIRST_REG",
+      vehicle_registration_number: "UBK 412A",
+      chassis_vin: "JTEBU29J805012345",
+      assessment_ref: "ASMT-2026-00912",
     };
+
     lastActivityRef.current = Date.now();
     setStalledMs(0);
+
+    let restoredCount = 0;
     setValues((prev) => {
+      let changed = false;
       const next: Record<string, string> = { ...prev };
       for (const f of screen.fields) {
-        if (!next[f.name] && defaults[f.name]) {
-          next[f.name] = defaults[f.name];
+        const candidate = userContinuationFields[f.name];
+        if (!next[f.name] && candidate && !SECRET_FIELD_RE.test(f.name)) {
+          next[f.name] = candidate;
+          changed = true;
+          restoredCount += 1;
+        }
+      }
+      return changed ? next : prev;
+    });
+
+    setDemoPlaceholders((prev) => {
+      const next: Record<string, string> = { ...prev };
+      for (const f of screen.fields) {
+        if (examplePlaceholderHints[f.name]) {
+          next[f.name] = examplePlaceholderHints[f.name];
         }
       }
       return next;
     });
+
+    if (restoredCount === 0) {
+      setStatusNotice(t("portalWorkspace.noSavedAutofillNotice"));
+    } else {
+      setStatusNotice("");
+    }
     setFieldErrors({});
     setErrorBanner("");
-  }, [screen.fields]);
+  }, [copilotCard?.preserved_fields, screen.fields, t]);
 
   useEffect(() => {
     if (searchParams?.get("autofill") === "1" && autoFilledKeyRef.current !== screen.key) {
@@ -639,32 +785,45 @@ export default function InbuiltPortalCopilotPage() {
       const errs: Record<string, string> = {};
       for (const f of screen.fields) {
         const v = String(values[f.name] || "").trim();
+        const label = getFieldLabel(f);
         if (f.required && !v) {
-          errs[f.name] = `${f.label} is mandatory before submitting.`;
+          errs[f.name] = t("portalWorkspace.fieldMandatoryError", { field: label });
         } else if (f.name === "tin" && v && !/^\d{10}$/.test(v)) {
-          errs[f.name] = "TIN must be an exact 10-digit number.";
+          errs[f.name] = t("portalWorkspace.tinFormatError");
         }
       }
       if (Object.keys(errs).length > 0) {
+        const nextBanner = t("portalWorkspace.validationBanner");
         setFieldErrors(errs);
-        setErrorBanner(
-          "Validation Error: Please complete or fix the highlighted mandatory fields.",
-        );
+        setErrorBanner(nextBanner);
         const firstErrField = Object.keys(errs)[0];
         setSpotlightField(firstErrField);
         fieldRefs.current[firstErrField]?.scrollIntoView?.({ behavior: "smooth", block: "center" });
         void askCopilotWithDomTelemetry(
           "I hit a validation error on this portal form, help me fix it",
           false,
+          values,
+          errs,
+          nextBanner,
         );
         return;
       }
       setFieldErrors({});
       setErrorBanner("");
-      void askCopilotWithDomTelemetry(`Execute ${screen.title}`, true);
+      void askCopilotWithDomTelemetry(`Execute ${localizedTitle}`, true, values, {}, "");
     },
-    [askCopilotWithDomTelemetry, screen.fields, screen.title, values],
+    [askCopilotWithDomTelemetry, getFieldLabel, localizedTitle, screen.fields, t, values],
   );
+
+  const handlePersistBeforeSignIn = useCallback(() => {
+    savePendingPortalContinuation({
+      conversationId,
+      taskId: screen.taskId,
+      portalKey: screen.key,
+      collectedFields: sanitizeContinuationFields(values),
+      returnMode: "portal",
+    });
+  }, [conversationId, screen.key, screen.taskId, values]);
 
   const handleDemoQuickSignIn = useCallback(async () => {
     try {
@@ -699,9 +858,12 @@ export default function InbuiltPortalCopilotPage() {
           <div className="ura-portal-brand">
             <span className="ura-portal-crest">URA</span>
             <div>
-              <strong>Uganda Revenue Authority — e-Services Portal</strong>
+              <strong>{t("portalWorkspace.brandTitle")}</strong>
               <div style={{ fontSize: "0.78rem", opacity: 0.85 }}>
-                Inbuilt AI Co-Pilot Workspace · {screen.formId} · {screen.statutoryCitation}
+                {t("portalWorkspace.brandSubtitle", {
+                  formId: screen.formId,
+                  citation: screen.statutoryCitation,
+                })}
               </div>
             </div>
           </div>
@@ -711,28 +873,19 @@ export default function InbuiltPortalCopilotPage() {
               className="ura-portal-back-link"
               data-testid="portal-back-to-chat-link"
             >
-              <ArrowLeftIcon size={14} /> Return to Full Chat Conversation
+              <ArrowLeftIcon size={14} /> {t("portalWorkspace.returnToChat")}
             </Link>
           </div>
         </header>
 
-        <nav className="ura-portal-switch-tabs" aria-label="URA Portal Services">
-          {[
-            { key: "prn_payments", label: "PRN Payments" },
-            { key: "tin_registration", label: "TIN Application" },
-            { key: "return_filing", label: "Return Filing" },
-            { key: "tax_clearance", label: "Tax Clearance (TCC)" },
-            { key: "efris", label: "EFRIS Invoicing" },
-            { key: "dts", label: "Digital Stamps (DTS)" },
-            { key: "objection_appeals", label: "Objections (s. 24)" },
-            { key: "motor_vehicle", label: "Motor Vehicle" },
-          ].map((tab) => (
+        <nav className="ura-portal-switch-tabs" aria-label={t("portalWorkspace.servicesNavLabel")}>
+          {PORTAL_TAB_KEYS.map((tab) => (
             <Link
               key={tab.key}
               href={`/portal/${tab.key}?conversation_id=${encodeURIComponent(conversationId)}&copilot=1`}
               className={`ura-portal-tab ${screen.key === tab.key ? "is-active" : ""}`}
             >
-              {tab.label}
+              {t(tab.labelKey)}
             </Link>
           ))}
         </nav>
@@ -742,23 +895,25 @@ export default function InbuiltPortalCopilotPage() {
             className="ura-portal-auth-gate"
             data-testid="portal-auth-gate"
             role="region"
-            aria-label="Sign-In Required"
+            aria-label={t("portalCopilot.stepUpBadge")}
           >
             <h2>
-              <LockIcon size={18} /> Sign-In Required for {screen.title}
+              <LockIcon size={18} />{" "}
+              {t("portalWorkspace.authGateTitle", { title: localizedTitle })}
             </h2>
             <p>
-              This URA portal service requires an authenticated taxpayer session under{" "}
-              <strong>{screen.statutoryCitation}</strong>. Once your login is accepted, you will be
-              returned automatically to this exact screen with the built-in AI Co-Pilot active.
+              {t("portalWorkspace.authGateBody", {
+                citation: screen.statutoryCitation,
+              })}
             </p>
             <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginTop: "1rem" }}>
               <Link
                 href={signInHref}
+                onClick={handlePersistBeforeSignIn}
                 className="ura-copilot-btn is-gold"
                 data-testid="portal-gate-oidc-signin-btn"
               >
-                <LockIcon size={14} /> Sign In to URA Portal &amp; Continue Here{" "}
+                <LockIcon size={14} /> {t("portalWorkspace.authGateOidcBtn")}{" "}
                 <ArrowRightIcon size={14} />
               </Link>
               <button
@@ -767,7 +922,7 @@ export default function InbuiltPortalCopilotPage() {
                 data-testid="portal-gate-demo-signin-btn"
                 onClick={() => void handleDemoQuickSignIn()}
               >
-                <ShieldCheckIcon size={14} /> Sandbox Taxpayer Quick Sign-In (Demo Account)
+                <ShieldCheckIcon size={14} /> {t("portalWorkspace.authGateDemoBtn")}
               </button>
             </div>
           </section>
@@ -777,10 +932,10 @@ export default function InbuiltPortalCopilotPage() {
           <div className="ura-portal-form-header">
             <div>
               <h1 id="portal-screen-heading" style={{ margin: 0, fontSize: "1.25rem" }}>
-                {screen.title}
+                {localizedTitle}
               </h1>
               <p style={{ margin: "0.35rem 0 0", fontSize: "0.875rem", color: "#475569" }}>
-                {screen.stepTitle}
+                {localizedStepTitle}
               </p>
             </div>
             <span className="ura-portal-form-code">{screen.formId}</span>
@@ -792,6 +947,17 @@ export default function InbuiltPortalCopilotPage() {
             </div>
           )}
 
+          {statusNotice && !errorBanner && (
+            <div
+              className="ura-portal-coachmark"
+              data-testid="portal-autofill-status-notice"
+              role="status"
+              style={{ marginBottom: "1rem" }}
+            >
+              <LightbulbIcon size={15} /> {statusNotice}
+            </div>
+          )}
+
           {stalledMs >= 15000 && emptyRequiredFields.length > 0 && !errorBanner && (
             <div
               className="ura-portal-coachmark"
@@ -799,8 +965,8 @@ export default function InbuiltPortalCopilotPage() {
               role="status"
               style={{ marginBottom: "1rem" }}
             >
-              <LightbulbIcon size={15} /> Need help with{" "}
-              <strong>{emptyRequiredFields[0]}</strong>? Click{" "}
+              <LightbulbIcon size={15} />{" "}
+              {t("portalWorkspace.stallPrompt", { field: emptyRequiredFields[0] })}{" "}
               <button
                 type="button"
                 style={{
@@ -818,9 +984,8 @@ export default function InbuiltPortalCopilotPage() {
                   )
                 }
               >
-                Highlight &amp; Guide Me
-              </button>{" "}
-              in the AI Co-Pilot rail.
+                {t("portalWorkspace.stallHighlightBtn")}
+              </button>
             </div>
           )}
 
@@ -831,6 +996,8 @@ export default function InbuiltPortalCopilotPage() {
                 const err = fieldErrors[f.name];
                 const coach = coachmarks[f.name];
                 const errId = `${f.selectorId}-err`;
+                const fieldLabel = getFieldLabel(f);
+                const effectivePlaceholder = demoPlaceholders[f.name] || f.placeholder || "";
                 return (
                   <div
                     key={f.name}
@@ -841,7 +1008,7 @@ export default function InbuiltPortalCopilotPage() {
                     data-testid={`portal-dom-field-${f.name}`}
                   >
                     <label htmlFor={f.selectorId}>
-                      {f.label} {f.required && <span aria-hidden="true">*</span>}
+                      {fieldLabel} {f.required && <span aria-hidden="true">*</span>}
                     </label>
                     {f.type === "select" ? (
                       <select
@@ -852,10 +1019,10 @@ export default function InbuiltPortalCopilotPage() {
                         aria-describedby={err ? errId : undefined}
                         onChange={(e) => recordFieldChange(f.name, e.target.value)}
                       >
-                        <option value="">-- Select --</option>
+                        <option value="">{t("portalWorkspace.selectPlaceholder")}</option>
                         {(f.options ?? []).map((opt) => (
                           <option key={opt.value} value={opt.value}>
-                            {opt.label}
+                            {opt.labelKey ? t(opt.labelKey) : opt.label}
                           </option>
                         ))}
                       </select>
@@ -864,7 +1031,7 @@ export default function InbuiltPortalCopilotPage() {
                         id={f.selectorId}
                         name={f.name}
                         rows={3}
-                        placeholder={f.placeholder || ""}
+                        placeholder={effectivePlaceholder}
                         value={values[f.name] || ""}
                         aria-invalid={Boolean(err)}
                         aria-describedby={err ? errId : undefined}
@@ -875,7 +1042,7 @@ export default function InbuiltPortalCopilotPage() {
                         id={f.selectorId}
                         name={f.name}
                         type={f.type}
-                        placeholder={f.placeholder || ""}
+                        placeholder={effectivePlaceholder}
                         value={values[f.name] || ""}
                         aria-invalid={Boolean(err)}
                         aria-describedby={err ? errId : undefined}
@@ -911,7 +1078,7 @@ export default function InbuiltPortalCopilotPage() {
                 className="ura-copilot-btn is-gold"
                 data-testid="portal-form-submit-btn"
               >
-                <CheckCircleIcon /> {screen.submitLabel}
+                <CheckCircleIcon /> {localizedSubmitLabel}
               </button>
               <button
                 type="button"
@@ -919,7 +1086,7 @@ export default function InbuiltPortalCopilotPage() {
                 data-testid="portal-autofill-safe-btn"
                 onClick={handleAutoFillSafeFields}
               >
-                <SparklesIcon /> Auto-Fill Safe Fields with AI Co-Pilot
+                <SparklesIcon /> {t("portalWorkspace.autofillBtn")}
               </button>
             </div>
           </form>
@@ -927,21 +1094,19 @@ export default function InbuiltPortalCopilotPage() {
       </main>
 
       {/* Embedded AI Co-Pilot Side Rail */}
-      <aside className="ura-copilot-rail" aria-label="Built-In URA AI Co-Pilot">
+      <aside className="ura-copilot-rail" aria-label={t("portalWorkspace.railTitle")}>
         <div className="ura-copilot-rail-head">
           <div>
-            <strong>Built-In URA AI Co-Pilot</strong>
+            <strong>{t("portalWorkspace.railTitle")}</strong>
             <div style={{ fontSize: "0.75rem", color: "#94a3b8" }}>
-              Live DOM Telemetry Bridge (Passwords/OTPs Scrubbed)
+              {t("portalWorkspace.railSubtitle")}
             </div>
           </div>
-          <span className="ura-copilot-live-pill">Active</span>
+          <span className="ura-copilot-live-pill">{t("portalWorkspace.railActivePill")}</span>
         </div>
 
         <p style={{ fontSize: "0.85rem", color: "#cbd5e1", margin: 0 }}>
-          Stuck on a field or validation error? The built-in AI Co-Pilot can inspect this form,
-          scroll to hidden errors, spotlight the exact input, or prepare the action for your
-          confirmation.
+          {t("portalWorkspace.railDescription")}
         </p>
 
         <div className="ura-copilot-rail-actions">
@@ -958,7 +1123,7 @@ export default function InbuiltPortalCopilotPage() {
             }
           >
             <CompassIcon size={15} />{" "}
-            {busy ? "Inspecting Portal DOM…" : "I'm Stuck — Highlight & Guide Me"}
+            {busy ? t("portalWorkspace.railGuideBusy") : t("portalWorkspace.railGuideBtn")}
           </button>
           <button
             type="button"
@@ -966,17 +1131,17 @@ export default function InbuiltPortalCopilotPage() {
             data-testid="copilot-rail-complete-task-btn"
             disabled={busy}
             onClick={() =>
-              void askCopilotWithDomTelemetry(`Prepare and review ${screen.title}`, true)
+              void askCopilotWithDomTelemetry(`Prepare and review ${localizedTitle}`, true)
             }
           >
-            <ShieldCheckIcon size={15} /> Review &amp; Execute Task (Allow / Disallow)
+            <ShieldCheckIcon size={15} /> {t("portalWorkspace.railExecuteBtn")}
           </button>
           <button
             type="button"
             className="ura-copilot-btn is-outline"
             onClick={handleAutoFillSafeFields}
           >
-            <SparklesIcon /> Pre-Fill Safe Form Fields
+            <SparklesIcon /> {t("portalWorkspace.railPrefillBtn")}
           </button>
         </div>
 
@@ -989,9 +1154,11 @@ export default function InbuiltPortalCopilotPage() {
                 const merged = { ...values, ...submittedFields };
                 setValues(merged);
                 void askCopilotWithDomTelemetry(
-                  `Submitted form for ${screen.title}`,
+                  `Submitted form for ${localizedTitle}`,
                   true,
                   merged,
+                  {},
+                  "",
                 );
               }}
             />

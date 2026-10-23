@@ -43,11 +43,7 @@ export default function SignInPage() {
     kind: "idle",
     message: "",
   });
-  const [returnTo, setReturnTo] = useState<string | undefined>(() => {
-    if (typeof window === "undefined") return undefined;
-    const params = new URLSearchParams(window.location.search);
-    return sanitizeReturnTo(params.get("returnTo"));
-  });
+  const [returnTo, setReturnTo] = useState<string | undefined>(undefined);
 
   const token = useSyncExternalStore(subscribeAuthToken, getAuthToken, getServerAuthToken);
   const signedIn = Boolean(token);

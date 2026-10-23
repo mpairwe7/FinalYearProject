@@ -2335,8 +2335,6 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 result["workflow"] = ChatModel._localize_workflow(result["workflow"], locale)
             if isinstance(result.get("portal_copilot"), dict):
                 result["portal_copilot"] = ChatModel._localize_portal_copilot(result["portal_copilot"], locale)
-            if isinstance(result.get("portal_copilot"), dict):
-                result["portal_copilot"] = ChatModel._localize_portal_copilot(result["portal_copilot"], locale)
 
         for evt_name, evt_payload in result.get("_web_research_events") or []:
             yield (evt_name, evt_payload)
@@ -10634,8 +10632,6 @@ class ChatModel:
                     result["resources"] = [self._localize_resource(r, effective) for r in result["resources"]]
                 if "workflow" in result and isinstance(result["workflow"], dict):
                     result["workflow"] = self._localize_workflow(result["workflow"], effective)
-                if "portal_copilot" in result and isinstance(result["portal_copilot"], dict):
-                    result["portal_copilot"] = self._localize_portal_copilot(result["portal_copilot"], effective)
             if result.get("ticket_id") and flags.is_enabled("cxp_business_hours", subject=user_id or None):
                 from .escalation_policy import (
                     after_hours_escalation_notice,

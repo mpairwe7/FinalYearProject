@@ -708,6 +708,13 @@ function readPersistedChatState(): PersistedChatState | null {
   }
 }
 
+function withoutTransientCards(conversations: Conversation[]): Conversation[] {
+  return conversations.map((c) => ({
+    ...c,
+    turns: c.turns.map((t) => (t.portalCopilot ? { ...t, portalCopilot: undefined } : t)),
+  }));
+}
+
 function writePersistedChatState(state: PersistedChatState): void {
   const storage = getChatStorage();
   if (!storage) return;
@@ -719,7 +726,7 @@ function writePersistedChatState(state: PersistedChatState): void {
         state: {
           locale: normalizeLocale(state.locale),
           localeExplicit: state.localeExplicit === true,
-          conversations: state.conversations.slice(0, MAX_SESSIONS),
+          conversations: withoutTransientCards(state.conversations.slice(0, MAX_SESSIONS)),
           activeConversationId: state.activeConversationId,
           draftMessage: state.draftMessage ?? '',
         },

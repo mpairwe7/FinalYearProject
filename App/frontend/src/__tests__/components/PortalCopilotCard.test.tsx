@@ -23,6 +23,9 @@ describe("sanitizeReturnTo (CWE-601 Open Redirect Protection)", () => {
     expect(sanitizeReturnTo("/\\evil.example.com")).toBeUndefined();
     expect(sanitizeReturnTo("/\t/evil.example.com")).toBeUndefined();
     expect(sanitizeReturnTo("/\n/evil.example.com")).toBeUndefined();
+    expect(sanitizeReturnTo("/%09/evil.example.com")).toBeUndefined();
+    expect(sanitizeReturnTo("/%0a/evil.example.com")).toBeUndefined();
+    expect(sanitizeReturnTo("/%5cevil.example.com")).toBeUndefined();
     expect(sanitizeReturnTo("javascript:alert(1)")).toBeUndefined();
   });
 });

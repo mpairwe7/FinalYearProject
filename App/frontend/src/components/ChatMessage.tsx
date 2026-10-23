@@ -1,15 +1,16 @@
-import React, { memo, useCallback, useMemo, useState } from 'react';
+import React, { memo, useCallback, useMemo, useState, useSyncExternalStore } from 'react';
 import { ChatAttachment, ChatTurn, Citation } from '../store/useChatStore';
 import { URA_CONTACTS, citationHref, sourceLabel, telDigits } from '../lib/uraContacts';
-import { formatDocType, stripStepPrefix } from '../lib/attachments';
+import { formatDocType, stripStepPrefix, type ScreenshotCopilotHandoff } from '../lib/attachments';
 import { stripCitationMarkers } from '../lib/answerText';
 import { formatNextShift } from '../lib/turnMeta';
 import { localeLabel } from '../lib/locales';
 import { useTranslation, type TranslationKey } from '../lib/i18n';
 import type { ConnectorNotice, ConnectorOutcome, ConnectorSkipReason, ConnectorUse } from '../lib/connectors';
 import { getChatSessionId } from '../lib/chatSession';
-import { authHeaders, getAuthToken } from '../lib/authSession';
+import { authHeaders, getAuthToken, getServerAuthToken, subscribeAuthToken } from '../lib/authSession';
 import { sanitizeReturnTo } from '../lib/oidcFlow';
+import { savePendingPortalContinuation } from '../lib/portalContinuation';
 import { detectDeadlineInMessage, downloadCalendarEvent, getGoogleCalendarUrl } from '../lib/calendarEvents';
 import FeedbackButtons from './FeedbackButtons';
 import HumanHandoff from './HumanHandoff';
@@ -178,6 +179,34 @@ function needsHuman(turn: ChatTurn): boolean {
   return turn.faithfulnessScore != null && turn.faithfulnessScore < 0.6;
 }
 
+const SCREENSHOT_PREFILL_FIELD_MAP: Record<string, string> = {
+  tin: 'tin',
+  prn: 'prn',
+  amount_ugx: 'amount_ugx',
+  tax_head: 'tax_head',
+  original_fdn: 'original_fdn',
+};
+
+function saveScreenshotHandoff(
+  handoff: ScreenshotCopilotHandoff,
+  conversationId: string | null,
+) {
+  const collectedFields: Record<string, string> = {};
+  for (const [sourceKey, targetKey] of Object.entries(SCREENSHOT_PREFILL_FIELD_MAP)) {
+    const value = handoff.prefill_state?.[sourceKey];
+    if (typeof value === 'string' && value.trim()) {
+      collectedFields[targetKey] = value.trim();
+    }
+  }
+  savePendingPortalContinuation({
+    conversationId: conversationId || 'default',
+    taskId: 'screenshot_copilot_handoff',
+    portalKey: handoff.portal_key,
+    collectedFields,
+    returnMode: 'portal',
+  });
+}
+
 function ChatMessageInner({
   turn,
   userQuery,
@@ -201,6 +230,8 @@ function ChatMessageInner({
   // are rated on their own service, not with the answer thumbs.
   const isOfficerReply = turn.retrievalMode === 'officer_reply';
   const t = useTranslation();
+  const authToken = useSyncExternalStore(subscribeAuthToken, getAuthToken, getServerAuthToken);
+  const isSignedIn = Boolean(authToken);
   // Outside officers' working hours, and when they are next on duty (G196).
   const offDuty = turn.officerHours?.onDuty === false;
   const nextShift =
@@ -376,12 +407,18 @@ function ChatMessageInner({
                   ) : null}
                   <div className="portal-guidance-actions">
                     {a.analysis.screenshot_guidance.copilot_handoff ? (
-                      a.analysis.screenshot_guidance.copilot_handoff.requires_login_first && !getAuthToken() ? (
+                      a.analysis.screenshot_guidance.copilot_handoff.requires_login_first && !isSignedIn ? (
                         <a
                           href={
                             sanitizeReturnTo(
                               a.analysis.screenshot_guidance.copilot_handoff.signin_then_portal_url,
                             ) || '/signin'
+                          }
+                          onClick={() =>
+                            saveScreenshotHandoff(
+                              a.analysis!.screenshot_guidance!.copilot_handoff!,
+                              conversationId,
+                            )
                           }
                           className="portal-action-btn is-primary"
                           data-testid="screenshot-signin-copilot-btn"
@@ -398,6 +435,12 @@ function ChatMessageInner({
                             sanitizeReturnTo(
                               a.analysis.screenshot_guidance.copilot_handoff.inbuilt_portal_url,
                             ) || '/portal/e_services?copilot=1'
+                          }
+                          onClick={() =>
+                            saveScreenshotHandoff(
+                              a.analysis!.screenshot_guidance!.copilot_handoff!,
+                              conversationId,
+                            )
                           }
                           className="portal-action-btn is-primary"
                           data-testid="screenshot-open-copilot-btn"

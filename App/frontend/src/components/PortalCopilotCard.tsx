@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import React, { useCallback, useEffect, useState } from "react";
-import { authHeaders, getAuthToken } from "../lib/authSession";
+import React, { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { authHeaders, getAuthToken, getServerAuthToken, subscribeAuthToken } from "../lib/authSession";
 import { getChatSessionId } from "../lib/chatSession";
 import { useTranslation } from "../lib/i18n";
 import { sanitizeReturnTo } from "../lib/oidcFlow";
@@ -72,7 +72,8 @@ export default function PortalCopilotCard({
     });
   }, [copilot.fields, copilot.task_id]);
 
-  const isSignedIn = Boolean(getAuthToken());
+  const authToken = useSyncExternalStore(subscribeAuthToken, getAuthToken, getServerAuthToken);
+  const isSignedIn = Boolean(authToken);
   const effectiveCardType = editing ? "inline_form" : copilot.card_type;
 
   const toggleReveal = useCallback((fieldName: string) => {
@@ -222,7 +223,9 @@ export default function PortalCopilotCard({
                     aria-describedby={f.validation_error || f.helper_text ? descId : undefined}
                     onChange={(e) => handleFieldChange(f.name, e.target.value)}
                   >
-                    <option value="">Select {f.label}…</option>
+                    <option value="">
+                      {t("portalCopilot.selectFieldPrompt", { field: f.label })}
+                    </option>
                     {f.options.map((opt) => (
                       <option key={opt.value} value={opt.value}>
                         {opt.label}
@@ -322,12 +325,12 @@ export default function PortalCopilotCard({
           <p className="portal-copilot-subtitle">{execState.summary}</p>
           {prnVal && (
             <div className="portal-receipt-kv" data-testid="portal-generated-prn">
-              <strong>PRN Reference:</strong> <code>{prnVal}</code>
+              <strong>{t("portalCopilot.prnReferenceLabel")}</strong> <code>{prnVal}</code>
             </div>
           )}
           {tinVal && (
             <div className="portal-receipt-kv" data-testid="portal-generated-tin">
-              <strong>TIN Reference:</strong> <code>{tinVal}</code>
+              <strong>{t("portalCopilot.tinReferenceLabel")}</strong> <code>{tinVal}</code>
             </div>
           )}
           <div className="portal-copilot-actions">
@@ -494,7 +497,7 @@ export default function PortalCopilotCard({
 
         {preservedEntries.length > 0 && (
           <div className="portal-preserved-summary">
-            <strong>Preserved details (saved across sign-in):</strong>
+            <strong>{t("portalCopilot.preservedDetailsHeading")}</strong>
             <ul>
               {preservedEntries.map(([k, v]) => (
                 <li key={k}>
@@ -551,7 +554,8 @@ export default function PortalCopilotCard({
             </>
           ) : effectiveCardType === "access_denied" ? (
             <>
-              <BanIcon size={13} /> {copilot.statutory_citation || "Access Denied"}
+              <BanIcon size={13} />{" "}
+              {copilot.statutory_citation || t("portalCopilot.accessDeniedBadge")}
             </>
           ) : (
             <>

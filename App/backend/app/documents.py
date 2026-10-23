@@ -1768,11 +1768,10 @@ def diagnose_portal_screenshot(
     )
 
     stripped_text = (text or "").strip()
-    has_header_signal = any(
+    has_header_signal = re.search(r"\bura\b", text_lower) is not None or any(
         hdr in text_lower
         for hdr in (
             "uganda revenue authority",
-            "ura",
             "e-services",
             "efris",
             "asycuda",

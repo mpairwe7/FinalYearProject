@@ -60,15 +60,25 @@ export const OIDC_RETURN_TO_KEY = "ura_oidc_return_to";
 export function sanitizeReturnTo(raw: string | null | undefined): string | undefined {
   if (!raw || typeof raw !== "string") return undefined;
   const trimmed = raw.trim();
+  if (/[\u0000-\u001F\u007F]/.test(trimmed)) return undefined;
+  let decoded = trimmed;
+  try {
+    decoded = decodeURIComponent(trimmed);
+  } catch {
+    return undefined;
+  }
   if (
     !trimmed.startsWith("/") ||
     trimmed.startsWith("//") ||
     trimmed.includes("\\") ||
-    /[\u0000-\u001F\u007F]/.test(trimmed)
+    !decoded.startsWith("/") ||
+    decoded.startsWith("//") ||
+    decoded.includes("\\") ||
+    /[\u0000-\u001F\u007F]/.test(decoded)
   ) {
     return undefined;
   }
-  if (/^\/[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) {
+  if (/^\/[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed) || /^\/[a-zA-Z][a-zA-Z0-9+.-]*:/.test(decoded)) {
     return undefined;
   }
   try {

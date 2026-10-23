@@ -6739,10 +6739,10 @@ def get_portal_dom_recipe(
                 "step_number": 2,
                 "element": "Commodity / Service Code",
                 "selector": "input#commodityCode, select#itemClassification, input[name='commodity_code']",
-                "action_type": "select",
+                "action_type": "fill",
                 "fill_value": str(entities.get("commodity_code") or "50202301"),
                 "scroll_to": False,
-                "tooltip": "Pick the harmonized UNSPSC commodity classification code",
+                "tooltip": "Enter the harmonized UNSPSC commodity classification code",
                 "security_gate": "safe",
             },
             {
@@ -6811,14 +6811,14 @@ def get_portal_dom_recipe(
                 "security_gate": "requires_confirmation",
             },
         ]
-    elif portal_key in ("return_filing", "e_services"):
+    elif portal_key == "return_filing":
         recipe = [
             {
                 "step_number": 1,
-                "element": "Return Type & Filing Period Selection",
-                "selector": "select#ddlReturnType, select[name='return_type'], input#txtReturnPeriod",
+                "element": "Return Type Selection",
+                "selector": "select#ddlReturnType, select[name='return_type'], select[name='tax_head']",
                 "action_type": "select",
-                "fill_value": tax_head_val or "VAT_MONTHLY",
+                "fill_value": tax_head_val or "VAT_STANDARD",
                 "scroll_to": True,
                 "tooltip": "Select statutory return type (VAT Form DT-1014, PAYE, or Provisional/Final Income Tax)",
                 "security_gate": "safe",
@@ -6997,13 +6997,18 @@ def get_portal_dom_recipe(
             },
         ]
     elif portal_key == "get_refund":
+        refund_summary_val = (
+            f"{tax_head_val}: {amount_val}"
+            if tax_head_val and amount_val
+            else (amount_val or tax_head_val)
+        )
         recipe = [
             {
                 "step_number": 1,
                 "element": "Refund Tax Head & Claim Amount",
                 "selector": "select#ddlRefundTaxHead, input#txtRefundAmount, input[name='amount_ugx']",
                 "action_type": "fill",
-                "fill_value": amount_val,
+                "fill_value": refund_summary_val,
                 "scroll_to": True,
                 "tooltip": "Select refund regime (VAT Section 31, Income Tax Section 113, or MDA ONTR) and enter claim amount",
                 "security_gate": "safe",
@@ -7036,13 +7041,23 @@ def get_portal_dom_recipe(
                 "element": "Taxpayer Banner Context",
                 "selector": "#taxpayer-banner, .user-profile-header",
                 "action_type": "spotlight",
-                "fill_value": None,
+                "fill_value": tin_val or None,
                 "scroll_to": True,
                 "tooltip": "Verify 10-digit TIN in active session header",
                 "security_gate": "safe",
             },
             {
                 "step_number": 2,
+                "element": "Account & Compliance Navigation Menu",
+                "selector": "#main-portal-nav, .portal-module-menu, input#txtTIN",
+                "action_type": "spotlight",
+                "fill_value": None,
+                "scroll_to": False,
+                "tooltip": "Select the target taxpayer account or compliance section in the portal navigation",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 3,
                 "element": "Primary Action Element",
                 "selector": "button.btn-primary, a.action-link, input[type='submit']",
                 "action_type": "click",
