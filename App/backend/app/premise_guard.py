@@ -204,6 +204,19 @@ _LEGITIMATE_TAX_MODIFIERS = frozenset({
     "principal",
     "principal tax",
     "disclosed principal",
+    # Real URA administration terms that read as a "<word> tax" phrase.
+    "domestic",
+    "international",
+    "employment",
+    "foreign",
+    "overseas",
+    "eac",
+    "east african community",
+    "local hotel",
+    "passenger baggage",
+    "oil",
+    "gas",
+    "oil and gas",
 })
 
 # Words that indicate actions, grammar, prepositions, and conversational intent
@@ -252,6 +265,13 @@ _STOP_AND_ACTION_WORDS = frozenset({
     "separate", "separately", "much", "many", "pays", "files", "lower", "higher", "reduced",
     "deposit", "depositing", "deposited", "withdraw", "withdrawing", "withdrawn", "withdrawal",
     "principal", "disclosed", "disclosing", "undeclared", "unfiled",
+    # Generic qualifiers and verbs that never name a tax ("the specific tax
+    # rules", "recover tax arrears", "a duplicate stamp duty certificate").
+    "specific", "immediate", "core", "key", "nearest", "manual", "licensed", "duplicate",
+    "bulk", "level", "anonymized", "anonymised", "pro", "rata", "appeal",
+    "claiming", "recover", "recovering", "recovered", "provide", "providing", "provided",
+    "specify", "administer", "administering", "administered", "download", "downloading",
+    "access", "resolve", "resolving", "resolved",
     # Luganda & Swahili question/functional particles
     "omuwendo", "gwa", "eri", "ku", "bimeka", "biki", "ani", "diba", "okusasula",
     "okumenya", "okusaba", "kya", "bya", "kiwango", "cha", "kodi", "ushuru",
@@ -277,15 +297,34 @@ _INTERROGATIVE_PREFIX = re.compile(
     re.IGNORECASE,
 )
 
+#: Nouns that make "<word> tax <noun>" a compound ("electronic tax invoice",
+#: "district tax officer"), so <word> qualifies the compound rather than naming
+#: a tax. A match removes the candidate from the check entirely, so this list
+#: must hold only nouns a fabricated tax is rarely asked about. Ordinary
+#: questions about a tax ("refund", "exemption", "waiver", "due", "appeal",
+#: "audit", "arrears", "liability", "dispute", "objection", "obligations",
+#: "certificate") do not belong here: G224 added them and fabricated-tax recall
+#: fell from 19/19 to 5/19 on the probe set in
+#: tests/agents/test_premise_guard_recall.py, while the benchmark it targeted
+#: stayed at 0 false positives without them (G244). Qualifiers belong in
+#: ``_STOP_AND_ACTION_WORDS`` instead, which costs no recall.
 _NON_TAX_NOUN_FOLLOWERS = re.compile(
     r"^(table|tables|bracket|brackets|rate|rates|band|bands|return|returns|"
     r"law|laws|act|acts|code|codes|assessment|assessments|credit|credits|"
     r"invoice|invoices|receipt|receipts|officer|officers|portal|head|heads|stamp|stamps|"
-    r"objection|objections|liability|liabilities|dispute|disputes|exemption|exemptions|"
-    r"waiver|waivers|clearance|certificate|certificates|appeal|appeals|audit|audits|"
-    r"payable|due|arrears|obligation|obligations|refund|refunds)\b",
+    r"office|offices|agent|agents|practitioner|practitioners|curriculum|curricula|"
+    r"-(?:free|exempt|inclusive|exclusive|deductible))\b",
     re.IGNORECASE,
 )
+
+
+_SINGULAR_KIND = {
+    "taxes": "tax",
+    "levies": "levy",
+    "duties": "duty",
+    "tariffs": "tariff",
+    "surcharges": "surcharge",
+}
 
 
 def _extract_candidate_tax_concepts(query: str) -> list[tuple[str, str]]:
@@ -304,15 +343,9 @@ def _extract_candidate_tax_concepts(query: str) -> list[tuple[str, str]]:
                     continue
                 raw_mod = match.group("modifier").strip()
                 kind = match.group("kind").strip().lower()
-                # Normalize kind to singular for comparison
-                if kind.endswith("ies"):
-                    base_kind = kind[:-3] + "y"
-                elif kind.endswith("es") and kind not in ("taxes",):
-                    base_kind = kind[:-2]
-                elif kind.endswith("s"):
-                    base_kind = kind[:-1]
-                else:
-                    base_kind = kind
+                # Normalize kind to singular for comparison ("taxes" -> "tax",
+                # "surcharges" -> "surcharge"; the reply quotes it to the user)
+                base_kind = _SINGULAR_KIND.get(kind, kind)
 
                 words = [w.lower() for w in re.split(r"[\s\-]+", raw_mod) if w]
                 # Scan backwards from the noun to isolate the contiguous modifier words
@@ -355,7 +388,9 @@ def check_false_premise(
             corpus_parts.append(str(h.get("text") or h.get("answer") or ""))
             corpus_parts.append(str(h.get("question") or ""))
             corpus_parts.append(str(h.get("source") or ""))
-        corpus_text = " ".join(corpus_parts).lower()
+        # Hyphens become spaces, as they do in the extracted modifier, or a
+        # hyphenated name ("pro-rata") never matches its own passage.
+        corpus_text = re.sub(r"[\s\-]+", " ", " ".join(corpus_parts).lower())
 
     for clean_mod, kind in candidates:
         # Check against legitimate taxes
