@@ -11,10 +11,13 @@ import {
   CompassIcon,
   LightbulbIcon,
   LockIcon,
+  PhoneIcon,
   ShieldCheckIcon,
   SparklesIcon,
 } from "../../../components/Icons";
+import { CallScreen } from "../../../components/call/CallScreen";
 import PortalCopilotCard from "../../../components/PortalCopilotCard";
+import { useCallStore } from "../../../store/useCallStore";
 import {
   authHeaders,
   getAuthToken,
@@ -501,6 +504,7 @@ export default function InbuiltPortalCopilotPage() {
   const screen = PORTAL_SCREENS[rawKey] || PORTAL_SCREENS.prn_payments;
 
   const conversationId = searchParams?.get("conversation_id") || "default";
+  const openCall = useCallStore((s) => s.openCall);
   const token = useSyncExternalStore(subscribeAuthToken, getAuthToken, getServerAuthToken);
   const isSignedIn = Boolean(token);
 
@@ -871,7 +875,18 @@ export default function InbuiltPortalCopilotPage() {
               </div>
             </div>
           </div>
-          <div className="ura-portal-top-actions">
+          <div className="ura-portal-top-actions" style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+            <button
+              type="button"
+              className="ura-portal-back-link"
+              aria-label={t("call.button")}
+              title={t("call.button")}
+              onClick={openCall}
+              data-testid="portal-call-ura-btn"
+              style={{ cursor: "pointer" }}
+            >
+              <PhoneIcon size={14} /> {t("call.button")}
+            </button>
             <Link
               href={`/?conversation_id=${encodeURIComponent(conversationId)}`}
               className="ura-portal-back-link"
@@ -1169,6 +1184,7 @@ export default function InbuiltPortalCopilotPage() {
           </div>
         )}
       </aside>
+      <CallScreen />
     </div>
   );
 }

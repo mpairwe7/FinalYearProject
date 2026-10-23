@@ -207,6 +207,12 @@ export function CallScreen() {
           </div>
           <h3 className="call-pre-title">{t('call.preTitle')}</h3>
           <p className="call-pre-subtitle">{t('call.preSubtitle')}</p>
+          <p className="call-pre-consent" data-testid="call-consent-title" style={{ fontWeight: 600 }}>
+            {t('call.consentTitle')}
+          </p>
+          <p className="call-pre-consent" data-testid="call-consent-text">
+            {t('call.consentText')}
+          </p>
           <p className="call-pre-consent">{t('call.preConsent')}</p>
           <p className="call-pre-consent" data-testid="call-tone-notice">
             {t('call.preConsentTone')}
