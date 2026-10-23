@@ -67,9 +67,10 @@ import { useOfficerChat } from '../hooks/useOfficerChat';
 import { ChatNotice } from '../components/ChatNotice';
 import type { SettingsTab } from '../components/settings/SettingsDialog';
 
+import { CallScreen } from '../components/call/CallScreen';
+
 const ConversationSearch = dynamic(() => import('../components/ConversationSearch'), { ssr: false });
 const SettingsDialog = dynamic(() => import('../components/settings/SettingsDialog'), { ssr: false });
-const CallScreen = dynamic(() => import('../components/call/CallScreen').then((m) => m.CallScreen), { ssr: false });
 const DocumentInspectionModal = dynamic(() => import('../components/DocumentInspectionModal').then((m) => m.DocumentInspectionModal), { ssr: false });
 const SupportCaseModal = dynamic(() => import('../components/SupportCaseModal').then((m) => m.SupportCaseModal), { ssr: false });
 const ServiceRatingDialog = dynamic(() => import('../components/ServiceRatingDialog').then((m) => m.ServiceRatingDialog), { ssr: false });
