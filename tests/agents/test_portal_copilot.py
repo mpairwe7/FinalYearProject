@@ -13,26 +13,29 @@ Exercises all 8 verification gates from `docs/plans/ura-portal-task-execution-an
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.auth.jwt_auth import make_dev_token
 from app.documents import diagnose_portal_screenshot
 from app.flags import flags
 from app.main import app
 from app.service import ChatModel
+from fastapi.testclient import TestClient
 
 
-@pytest.fixture()
+@pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv("MCP_REQUEST_STATE_SECRET", "test-secret-for-portal-copilot-hmac-2026-ura")
     flags.set("portal_copilot", True)
-    if not getattr(app.state, "model", None):
-        app.state.model = ChatModel()
+    prev_model = getattr(app.state, "model", None)
+    prev_overrides = dict(app.dependency_overrides)
+    app.dependency_overrides.clear()
+    app.state.model = ChatModel()
     yield TestClient(app)
+    app.state.model = prev_model
+    app.dependency_overrides.clear()
+    app.dependency_overrides.update(prev_overrides)
     flags.clear("portal_copilot")
 
 
@@ -190,7 +193,7 @@ def test_3_execute_endpoint_allow_disallow_and_idempotency(client: TestClient) -
     assert a_body["live"] is False
     assert a_body["mode"] == "simulation"
     first_prn = a_body["result"]["prn"]
-    assert first_prn.startswith("226") or first_prn.startswith("2")
+    assert first_prn.startswith(("226", "2"))
 
     # 3. Repeating the same `idempotency_key` returns the exact same PRN without duplicate creation
     r_replay = client.post(
@@ -459,6 +462,7 @@ def test_9_qa_hardening_temporal_ttl_intent_capsule_validators_and_multiturn_mem
 ) -> None:
     """Verify OWASP ASI01/ASI07 temporal TTL anti-replay, strict NIRA NIN/phone validators, and multi-turn memory."""
     import time
+
     from app import database as db
     from app.mcp import mrtr
     from app.portal_copilot import (

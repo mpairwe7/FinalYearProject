@@ -202,8 +202,8 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
                 label="10-Digit TIN, 14-Character NIN, or Registered Name",
                 input_type="text",
                 required=True,
-                placeholder="1000023456",
-                helper_text="Enter the 10-digit URA TIN (e.g. 1000023456) or 14-character NIRA NIN.",
+                placeholder="100-XXX-XXXX",
+                helper_text="Enter the 10-digit URA TIN (e.g. 100-XXX-XXXX) or 14-character NIRA NIN.",
             ),
         ),
     ),
@@ -308,7 +308,7 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
                 label="10-Digit Taxpayer TIN",
                 input_type="text",
                 required=True,
-                placeholder="1000023456",
+                placeholder="100-XXX-XXXX",
                 helper_text="Your 10-digit URA Taxpayer Identification Number.",
             ),
             PortalFieldSpec(
@@ -385,7 +385,7 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
                 label="14-Character National ID Number (NIN)",
                 input_type="text",
                 required=True,
-                placeholder="CM92018100123A",
+                placeholder="CM-14-CHAR-NIN",
                 helper_text="Enter your 14-character NIN exactly as printed on your National ID card.",
                 sensitive=True,
             ),
@@ -525,7 +525,7 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
                 label="Manufacturer / Importer 10-Digit TIN",
                 input_type="text",
                 required=True,
-                placeholder="1000023456",
+                placeholder="100-XXX-XXXX",
                 helper_text="Registered 10-digit URA TIN.",
             ),
             PortalFieldSpec(
@@ -601,7 +601,7 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
                 label="10-Digit Taxpayer TIN",
                 input_type="text",
                 required=True,
-                placeholder="1000023456",
+                placeholder="100-XXX-XXXX",
                 helper_text="Registered seller 10-digit URA TIN.",
             ),
             PortalFieldSpec(
@@ -654,7 +654,7 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
                 label="Primary Applicant / Director NIN",
                 input_type="text",
                 required=True,
-                placeholder="CM92018100123A",
+                placeholder="CM-14-CHAR-NIN",
                 helper_text="14-character NIRA NIN of the lead director or proprietor.",
                 sensitive=True,
             ),
@@ -686,7 +686,7 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
                 label="Your Authenticated 10-Digit TIN",
                 input_type="text",
                 required=True,
-                placeholder="1000023456",
+                placeholder="100-XXX-XXXX",
                 helper_text="Must match your signed-in taxpayer profile under TPCA s. 75.",
             ),
         ),
@@ -707,7 +707,7 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
                 label="Your Authenticated 10-Digit TIN",
                 input_type="text",
                 required=True,
-                placeholder="1000023456",
+                placeholder="100-XXX-XXXX",
                 helper_text="Must match your signed-in taxpayer profile under TPCA s. 75.",
             ),
             PortalFieldSpec(
@@ -737,7 +737,7 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
                 label="Your Authenticated 10-Digit TIN",
                 input_type="text",
                 required=True,
-                placeholder="1000023456",
+                placeholder="100-XXX-XXXX",
                 helper_text="Must match your signed-in taxpayer TIN.",
             ),
         ),
@@ -758,7 +758,7 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
                 label="Your Authenticated 10-Digit TIN",
                 input_type="text",
                 required=True,
-                placeholder="1000023456",
+                placeholder="100-XXX-XXXX",
                 helper_text="Must match your signed-in taxpayer TIN.",
             ),
         ),
@@ -830,7 +830,7 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
                 label="Importer 10-Digit TIN",
                 input_type="text",
                 required=False,
-                placeholder="1000023456",
+                placeholder="100-XXX-XXXX",
                 helper_text="Your authenticated importer TIN.",
             ),
         ),
@@ -852,7 +852,7 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
                 label="10-Digit Taxpayer TIN",
                 input_type="text",
                 required=False,
-                placeholder="1000023456",
+                placeholder="100-XXX-XXXX",
                 helper_text="Your 10-digit URA TIN.",
             ),
             PortalFieldSpec(
@@ -919,7 +919,7 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
                 label="10-Digit Taxpayer TIN",
                 input_type="text",
                 required=False,
-                placeholder="1000023456",
+                placeholder="100-XXX-XXXX",
                 helper_text="Your 10-digit URA TIN.",
             ),
             PortalFieldSpec(
@@ -949,7 +949,7 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
                 label="10-Digit Taxpayer TIN",
                 input_type="text",
                 required=False,
-                placeholder="1000023456",
+                placeholder="100-XXX-XXXX",
                 helper_text="Your 10-digit URA TIN.",
             ),
             PortalFieldSpec(
@@ -978,7 +978,7 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
                 label="Buyer 10-Digit TIN",
                 input_type="text",
                 required=False,
-                placeholder="1000098765",
+                placeholder="100-YYY-YYYY",
                 helper_text="Purchasing business TIN.",
             ),
             PortalFieldSpec(
@@ -1007,7 +1007,7 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
                 label="Original 20-Digit Fiscal Document Number (FDN)",
                 input_type="text",
                 required=False,
-                placeholder="10001234567890123456",
+                placeholder="FDN-20-DIGITS",
                 helper_text="20-digit FDN of the original EFRIS invoice.",
             ),
             PortalFieldSpec(
@@ -1131,14 +1131,14 @@ def sanitize_portal_context(portal_context: Mapping[str, Any] | None) -> dict[st
 
     raw_empty = portal_context.get("empty_required_fields")
     clean_empty: list[str] = []
-    if isinstance(raw_empty, Sequence) and not isinstance(raw_empty, (str, bytes)):
+    if isinstance(raw_empty, Sequence) and not isinstance(raw_empty, str | bytes):
         for item in raw_empty:
             if not _is_secret_key(str(item)):
                 clean_empty.append(str(item))
 
     raw_errors = portal_context.get("validation_errors")
     clean_errors: list[dict[str, str]] = []
-    if isinstance(raw_errors, Sequence) and not isinstance(raw_errors, (str, bytes)):
+    if isinstance(raw_errors, Sequence) and not isinstance(raw_errors, str | bytes):
         for err in raw_errors:
             if isinstance(err, Mapping):
                 f_name = str(err.get("field") or "")
@@ -1184,11 +1184,38 @@ _VEHICLE_PLATE_RE = re.compile(r"\b(U[A-Z]{1,2}\s?\d{3}[A-Z])\b", re.IGNORECASE)
 _EMAIL_RE = re.compile(r"\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b")
 _PHONE_RE = re.compile(r"(\+?256\s?7\d{8}|\b07\d{8}\b)")
 _DOB_RE = re.compile(r"\b((?:19|20)\d{2}-\d{2}-\d{2})\b")
-_AMOUNT_RE = re.compile(
-    r"(?:ugx|shs|shillings?|amount(?:\s+of)?)\s*[:=]?\s*([\d,]+(?:\.\d+)?)\b"
-    r"|\b([\d,]{4,}(?:\.\d+)?)\s*(?:ugx|shs|shillings?)\b",
-    re.IGNORECASE,
-)
+def _extract_amount_ugx(text: str) -> str:
+    """Linear-time token scanner for UGX currency amounts (avoids ReDoS backtracking)."""
+    tokens = text[:2000].replace(":", " ").replace("=", " ").split()
+    currency_words = {"ugx", "shs", "shilling", "shillings", "amount"}
+    for i, raw_tok in enumerate(tokens):
+        low_tok = raw_tok.lower().strip(".,;()[]")
+        if low_tok in currency_words:
+            for candidate_idx in (i + 1, i + 2, i - 1):
+                if 0 <= candidate_idx < len(tokens):
+                    cand = tokens[candidate_idx].strip(".,;()[]").replace(",", "")
+                    if cand.replace(".", "", 1).isdigit():
+                        try:
+                            val = float(cand)
+                            if val > 0 and not (len(cand) == 10 and cand.startswith("1")):
+                                return str(int(val))
+                        except ValueError:
+                            pass
+    return ""
+
+
+def _extract_quantity(text: str) -> str:
+    """Linear-time token scanner for stamp/item quantities."""
+    tokens = text[:2000].lower().split()
+    unit_words = {"stamp", "stamps", "unit", "units", "reel", "reels", "bottle", "bottles"}
+    for i, tok in enumerate(tokens):
+        clean_u = tok.strip(".,;()[]")
+        if clean_u in unit_words:
+            for prev_idx in range(max(0, i - 4), i):
+                cand = tokens[prev_idx].strip(".,;()[]").replace(",", "")
+                if cand.isdigit() and 2 <= len(cand) <= 7:
+                    return cand
+    return ""
 
 
 def extract_task_entities(message: str, portal_context: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -1251,14 +1278,9 @@ def extract_task_entities(message: str, portal_context: Mapping[str, Any] | None
     if dob_m:
         entities["date_of_birth"] = dob_m.group(1)
 
-    amt_m = _AMOUNT_RE.search(text)
-    if amt_m:
-        raw_num = (amt_m.group(1) or amt_m.group(2) or "").replace(",", "")
-        try:
-            if float(raw_num) > 0:
-                entities["amount_ugx"] = str(int(float(raw_num)))
-        except ValueError:
-            pass
+    amt_str = _extract_amount_ugx(text)
+    if amt_str:
+        entities["amount_ugx"] = amt_str
 
     # Tax head detection
     if re.search(r"\b(?:vat|value added tax|0010)\b", text_lower):
@@ -1299,9 +1321,9 @@ def extract_task_entities(message: str, portal_context: Mapping[str, Any] | None
         entities.setdefault("product_category", "SUGAR")
 
     # Quantity extraction for stamps / stock
-    qty_m = re.compile(r"\b(\d{2,7})\s+(?:digital\s+tax\s+)?(?:stamps?|units?|reels?|bottles?)\b", re.IGNORECASE).search(text)
-    if qty_m:
-        entities.setdefault("quantity", qty_m.group(1))
+    qty_str = _extract_quantity(text)
+    if qty_str:
+        entities.setdefault("quantity", qty_str)
 
     return entities
 
@@ -1604,7 +1626,7 @@ def validate_task_fields(
         # Field-specific format checks
         if f_spec.name in ("tin", "buyer_tin") and spec.task_id != "tin_search_verify":
             if not re.fullmatch(r"\d{10}", val_str):
-                errors[f_spec.name] = "TIN must be an exact 10-digit number (e.g. 1000023456)."
+                errors[f_spec.name] = "TIN must be an exact 10-digit number (e.g. 100-XXX-XXXX)."
                 continue
         elif f_spec.name == "prn":
             if not re.fullmatch(r"\d{10,14}", val_str):
@@ -1613,7 +1635,7 @@ def validate_task_fields(
         elif f_spec.name == "nin":
             if not re.fullmatch(r"C[MF][A-Za-z0-9]{12}", val_str, re.IGNORECASE):
                 errors[f_spec.name] = (
-                    "NIN must be 14 alphanumeric characters starting with CM or CF (e.g. CM92018100123A)."
+                    "NIN must be 14 alphanumeric characters starting with CM or CF (e.g. CM-14-CHAR-NIN)."
                 )
                 continue
             val_str = val_str.upper()
@@ -1995,7 +2017,7 @@ def build_portal_task_card(
     canonical_params = json.dumps(validated_params, sort_keys=True, separators=(",", ":"))
     params_sha256 = hashlib.sha256(canonical_params.encode("utf-8")).hexdigest()
     idempotency_key = "ura_task_" + hashlib.sha256(
-        f"{owner_key}:{spec.task_id}:{canonical_params}".encode("utf-8")
+        f"{owner_key}:{spec.task_id}:{canonical_params}".encode()
     ).hexdigest()[:32]
 
     issued_at = int(time.time())

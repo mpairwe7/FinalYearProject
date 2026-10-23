@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from app import database as db
 from app.flags import _REGISTRY, flags
 from app.portal_copilot import (

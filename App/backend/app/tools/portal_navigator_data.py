@@ -6601,9 +6601,7 @@ def portal_requires_auth(portal_key: str, intent: str = "") -> bool:
 
     if key in AUTHENTICATED_URA_PORTAL_KEYS:
         return True
-    if key in PUBLIC_URA_PORTAL_KEYS:
-        return False
-    return True
+    return key not in PUBLIC_URA_PORTAL_KEYS
 
 
 for _pkey, _pinfo in EXTERNAL_URA_PORTALS.items():

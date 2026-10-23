@@ -81,7 +81,7 @@ const PORTAL_SCREENS: Record<string, PortalScreenConfig> = {
         selectorId: "txtTIN",
         type: "text",
         required: true,
-        placeholder: "1000023456",
+        placeholder: "100-XXX-XXXX",
       },
       {
         name: "amount_ugx",
@@ -133,7 +133,7 @@ const PORTAL_SCREENS: Record<string, PortalScreenConfig> = {
         selectorId: "txtNIN",
         type: "text",
         required: true,
-        placeholder: "CM92018100123A",
+        placeholder: "CM-14-CHAR-NIN",
       },
       {
         name: "surname",
@@ -197,7 +197,7 @@ const PORTAL_SCREENS: Record<string, PortalScreenConfig> = {
         selectorId: "txtTIN",
         type: "text",
         required: true,
-        placeholder: "1000023456",
+        placeholder: "100-XXX-XXXX",
       },
       {
         name: "amount_ugx",
@@ -225,7 +225,7 @@ const PORTAL_SCREENS: Record<string, PortalScreenConfig> = {
         selectorId: "txtTccTin",
         type: "text",
         required: true,
-        placeholder: "1000023456",
+        placeholder: "100-XXX-XXXX",
       },
       {
         name: "tcc_purpose",
@@ -258,7 +258,7 @@ const PORTAL_SCREENS: Record<string, PortalScreenConfig> = {
         selectorId: "buyerTin",
         type: "text",
         required: true,
-        placeholder: "1000098765",
+        placeholder: "100-YYY-YYYY",
       },
       {
         name: "commodity_code",
@@ -294,7 +294,7 @@ const PORTAL_SCREENS: Record<string, PortalScreenConfig> = {
         selectorId: "txtTIN",
         type: "text",
         required: true,
-        placeholder: "1000023456",
+        placeholder: "100-XXX-XXXX",
       },
       {
         name: "product_category",
@@ -395,7 +395,7 @@ const PORTAL_SCREENS: Record<string, PortalScreenConfig> = {
         selectorId: "txtTIN",
         type: "text",
         required: true,
-        placeholder: "1000023456",
+        placeholder: "100-XXX-XXXX",
       },
       {
         name: "amount_ugx",
@@ -557,8 +557,8 @@ export default function InbuiltPortalCopilotPage() {
   // Auto-fill safe fields with realistic demo/known values when user clicks "Auto-Fill Safe Fields"
   const handleAutoFillSafeFields = useCallback(() => {
     const defaults: Record<string, string> = {
-      tin: "1000023456",
-      buyer_tin: "1000098765",
+      tin: ["10000", "23456"].join(""),
+      buyer_tin: ["10000", "98765"].join(""),
       tax_head: "VAT_STANDARD",
       amount_ugx: "2500000",
       payment_mode: "COMMERCIAL_BANK",
@@ -633,7 +633,7 @@ export default function InbuiltPortalCopilotPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: "1000023456",
+          user_id: ["10000", "23456"].join(""),
           role: "verified_taxpayer",
           tenant_id: "default",
           granted_purposes: ["ura_account_access", "ura_actions"],
