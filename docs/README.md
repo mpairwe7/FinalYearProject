@@ -20,6 +20,7 @@ Complete documentation for the URA Chatbot MLOps project.
 | [Agent repo map](../AGENTS.md) | 2026 layout (`apps/api`, `apps/web`, `agents/`, `evals/`) without moving `App/` |
 | **Data & Evaluation** |
 | [Data Schema & Evaluation](data-schema-and-eval.md) | Database models, RAG pipeline, and evaluation criteria |
+| [500-Scenario Complex CX, Cross-MDA & Journey Copilot Benchmark](Reports/CX_500_COMPLEX_NGROK_REPORT_2026-10-23.md) | 500 complex multi-turn CX scenarios (`1,452` turns across 10 pillars, `500/500 = 100.0%` accuracy, `p50 = 335.81 ms`, `p95 = 455.83 ms`) evaluated live over Docker GPU + ngrok (`ADR-0008`–`ADR-0012`) |
 | [40,000-Scenario 5-Locale Multimodal Benchmark](Reports/MULTILINGUAL_40000_CX_MULTIMODAL_NGROK_REPORT_2026-10-17.md) | 40,000 CX scenarios (`TTT`, `STT`, `TTS` across `en`, `lg`, `sw`, `nyn`, `ach`) + 166-probe live ngrok load evaluation |
 | **Operations & Deployment** |
 | [Deployment Guide](DEPLOYMENT.md) | Production deployment, TLS, scaling, rollback, SLOs |
