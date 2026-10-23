@@ -1063,6 +1063,7 @@ _TASK_CACHE_LOCK = threading.Lock()
 _EXECUTED_TASK_CACHE: OrderedDict[tuple[str, str], dict[str, Any]] = OrderedDict()
 _DECLINED_TASK_CACHE: OrderedDict[tuple[str, str], float] = OrderedDict()
 _IN_FLIGHT_TASK_KEYS: set[tuple[str, str]] = set()
+_SHARED_DECISION_KEYS: set[str] = set()
 
 
 def _durable_task_cache_id(cache_key: tuple[str, str]) -> str:
@@ -1102,8 +1103,10 @@ def _write_shared_task_decision(
 ) -> None:
     """Persist an executed or declined task decision in the shared database store across workers."""
     try:
+        cid = _durable_task_cache_id(cache_key)
+        _SHARED_DECISION_KEYS.add(cid)
         db.upsert_workflow_session(
-            _durable_task_cache_id(cache_key),
+            cid,
             "portal_task_decision",
             1,
             dict(payload or {"declined": True}),
@@ -1121,12 +1124,13 @@ def clear_portal_task_cache() -> None:
         _EXECUTED_TASK_CACHE.clear()
         _DECLINED_TASK_CACHE.clear()
         _IN_FLIGHT_TASK_KEYS.clear()
-    try:
-        conn = db._get_connection()
-        conn.execute("DELETE FROM workflow_sessions WHERE workflow_id = 'portal_task_decision'")
-        conn.commit()
-    except Exception:
-        logger.debug("Shared portal task decision cleanup skipped", exc_info=True)
+        keys_to_reset = list(_SHARED_DECISION_KEYS)
+        _SHARED_DECISION_KEYS.clear()
+    for cid in keys_to_reset:
+        try:
+            db.upsert_workflow_session(cid, "portal_task_decision", 0, {}, status="active")
+        except Exception:
+            logger.debug("Shared portal task decision cleanup skipped", exc_info=True)
 
 
 def classify_portal_task(task_id: str) -> PortalTaskSpec | None:
