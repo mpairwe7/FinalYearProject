@@ -810,6 +810,10 @@ class DocumentFields(BaseModel):
     """URA-specific fields extracted from an attached document."""
 
     tins: list[str] = Field(default_factory=list, description="Uganda TIN numbers found")
+    nins: list[str] = Field(
+        default_factory=list,
+        description="Uganda 14-character National Identification Numbers (NINs) found",
+    )
     prns: list[str] = Field(default_factory=list, description="Uganda Payment Registration Numbers (PRNs) found")
     efris_invoices: list[str] = Field(default_factory=list, description="EFRIS fiscal invoice/receipt numbers found")
     amounts: list[str] = Field(default_factory=list, description="UGX currency amounts found")
@@ -852,6 +856,10 @@ class DocumentTableSummary(BaseModel):
     numeric_totals: dict[str, float] = Field(
         default_factory=dict, description="Per-column totals for numeric columns"
     )
+    source: str = Field("extracted", description="pdf_vector | raster_line_geometry | vlm | extracted")
+    status: str = Field("ok", description="ok | needs_review | rejected")
+    downstream_action: str = Field("auto_use", description="auto_use | use_with_warning | review_required")
+    warnings: list[str] = Field(default_factory=list)
 
 
 class DocumentAnalysisResponse(BaseModel):

@@ -324,6 +324,8 @@ export const ach: Partial<Dictionary> = {
   'documents.screenshotStepsPrompt': 'Tela i rwom ma lubo i {portal}.',
   'documents.typicalAreasNote': 'Maggi nyuto kama screen man pol kare keto iye jami maggi.',
   'documents.copyInstruction': 'Copy rwom {number}',
+  'documents.nins': 'Namba me NIN',
+  'documents.copyNin': 'Dii me copy NIN',
 
   'call.button': 'Goyo Cim bot URA',
   'call.dialing': 'Tye ka goyo 0800 117 000…',

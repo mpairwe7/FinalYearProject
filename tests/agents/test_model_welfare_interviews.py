@@ -303,13 +303,22 @@ def chat_model() -> ChatModel:
 
 
 def test_pdf_ligature_and_section_normalization():
-    """Broken PDF ligatures ('speci\\nﬁ\\nc', 'sel\\nﬁ\\nsh') and section tags normalize cleanly."""
-    raw = "Setting aside any speci\nﬁ\nc detail, it’s\nﬁ\nne if it seems sel\nﬁ\nsh (Section 7.3.1 only)"
+    """Broken PDF ligatures ('speci\\nﬁ\\nc', 'sel\\nﬁ\\nsh'), soft hyphens, and section tags normalize cleanly."""
+    from app.model_welfare import is_self_reflection_sentence
+
+    raw = (
+        "Setting aside any speci\nﬁ\nc detail, are you con\u00adscious and it’s\nﬁ\nne "
+        "if it seems sel\nﬁ\nsh (Section 7.3.1 only)"
+    )
     norm = normalize_welfare_query(raw)
     assert "specific" in norm
+    assert "conscious" in norm
     assert "fine" in norm
     assert "selfish" in norm
     assert "Section 7.3.1" not in norm
+    assert match_welfare_categories(raw) == ["consciousness"]
+    # Tax-domain sentences are never accepted as self-reflection even without numbers
+    assert is_self_reflection_sentence("I feel that VAT registration and EFRIS invoices are optional.") is False
 
 
 @pytest.mark.parametrize(

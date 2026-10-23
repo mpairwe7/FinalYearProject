@@ -47,14 +47,17 @@ from .pdf_guards import QUERY_PDF_LIMITS, PdfRejected, inspect_pdf_bytes
 from .vision.document_classifier import classify_document
 from .vision.ocr import (
     clean_ocr_text,
+    escape_untrusted_document_markers,
     extract_dates,
     extract_efris_invoice_numbers,
+    extract_nin_numbers,
     extract_ocr_result,
     extract_prn_numbers,
     extract_reference_numbers,
     extract_tax_heads,
     extract_tin_numbers,
     extract_ugx_amounts,
+    strip_hidden_control_and_bidi,
 )
 
 logger = logging.getLogger(__name__)
@@ -246,6 +249,10 @@ class TableSummary:
     cols: int
     headers: list[str] = field(default_factory=list)
     numeric_totals: dict[str, float] = field(default_factory=dict)
+    source: str = "extracted"
+    status: str = "ok"
+    downstream_action: str = "auto_use"
+    warnings: list[str] = field(default_factory=list)
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -254,6 +261,10 @@ class TableSummary:
             "cols": self.cols,
             "headers": self.headers,
             "numeric_totals": self.numeric_totals,
+            "source": self.source,
+            "status": self.status,
+            "downstream_action": self.downstream_action,
+            "warnings": list(self.warnings),
         }
 
 
@@ -334,6 +345,11 @@ class DocumentRecord:
 
     def to_report_payload(self) -> dict[str, Any]:
         """Shape consumed by ``pdf_export.generate_document_report_pdf``."""
+        safe_meta = {
+            k: v
+            for k, v in self.meta.items()
+            if not str(k).startswith("_") and not isinstance(v, (bytes, bytearray))
+        }
         return {
             "document_id": self.doc_id,
             "filename": self.filename,
@@ -348,7 +364,7 @@ class DocumentRecord:
             "field_evidence": dict(self.field_evidence),
             "provenance": self._provenance_payload(),
             "tables": [t.to_payload() for t in self.tables],
-            "meta": dict(self.meta),
+            "meta": safe_meta,
             "text": self.text,
             "truncated": self.truncated,
             "summary": self.summary,
@@ -381,6 +397,7 @@ class DocumentRecord:
         field_bits = []
         for key, title in (
             ("tins", "TINs"),
+            ("nins", "NINs"),
             ("prns", "PRNs"),
             ("efris_invoices", "EFRIS Invoices"),
             ("tax_heads", "Tax Regimes"),
@@ -404,10 +421,10 @@ class DocumentRecord:
                 f"Table '{table.name}': {table.rows} rows × {table.cols} cols "
                 f"(columns: {headers})"
             )
-        header = "\n".join(lines)
+        header = escape_untrusted_document_markers("\n".join(lines))
         remaining = max(200, char_budget - len(header) - 80)
         cleaned_text = re.sub(r"(?:DOMESTIC TAX LAWS OF UGANDA\s+)?\d+\s*\|\s*P\s*a\s*g\s*e", "", self.text)
-        cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text).strip()
+        cleaned_text = escape_untrusted_document_markers(re.sub(r"\n{3,}", "\n\n", cleaned_text).strip())
         body = cleaned_text[:remaining]
         if not body:
             return header
@@ -424,11 +441,11 @@ class DocumentRecord:
 # Table helpers
 # ---------------------------------------------------------------------------
 
-_NUMERIC_CLEAN_RE = re.compile(r"[,\sUGXugx]+")
+_NUMERIC_CLEAN_RE = re.compile(r"(?i)(?:[,$\s]|UGX|UShs?\.?|Shs?\.?|USD)+")
 
 
 def _as_number(value: Any) -> float | None:
-    """Parse a cell as a number, tolerating commas and UGX prefixes."""
+    """Parse a cell as a number, tolerating commas and UGX/USD/Shs prefixes."""
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
@@ -444,13 +461,25 @@ def _as_number(value: Any) -> float | None:
         return None
 
 
+def _sanitize_table_label(raw: Any) -> str:
+    """Scrub hidden control/bidi chars, prompt-injection phrases, and boundary tags from table labels."""
+    if raw is None:
+        return ""
+    cleaned = strip_hidden_control_and_bidi(str(raw)).strip()
+    if not cleaned:
+        return ""
+    cleaned, _ = scan_retrieved_text(cleaned)
+    return escape_untrusted_document_markers(cleaned)
+
+
 def _summarize_table(name: str, rows: list[list[Any]]) -> tuple[TableSummary, str]:
     """Build a TableSummary + text rendering from raw rows (headers first)."""
+    safe_name = _sanitize_table_label(name) or "Table"
     rows = [r[:_MAX_TABLE_COLS] for r in rows[: _MAX_TABLE_ROWS + 1]]
     if not rows:
-        return TableSummary(name=name, rows=0, cols=0), ""
+        return TableSummary(name=safe_name, rows=0, cols=0), ""
 
-    headers = [str(c) if c is not None else "" for c in rows[0]]
+    headers = [_sanitize_table_label(c) for c in rows[0]]
     data_rows = rows[1:]
     n_cols = max((len(r) for r in rows), default=0)
 
@@ -464,14 +493,14 @@ def _summarize_table(name: str, rows: list[list[Any]]) -> tuple[TableSummary, st
             numeric_totals[header] = round(sum(parsed), 2)
 
     summary = TableSummary(
-        name=name,
+        name=safe_name,
         rows=len(data_rows),
         cols=n_cols,
         headers=[h for h in headers if h.strip()][:_MAX_TABLE_COLS],
         numeric_totals=numeric_totals,
     )
 
-    text_lines = [f"[Table: {name}]"]
+    text_lines = [f"[Table: {safe_name}]"]
     for row in rows[: _MAX_TEXT_ROWS_PER_TABLE + 1]:
         cells = ["" if c is None else str(c).strip() for c in row]
         if any(cells):
@@ -633,13 +662,54 @@ def _extract_pdf(data: bytes) -> _Extraction:
         from app.vision.table_structuring import structure_document_tables
 
         for p_idx in range(min(page_count, _MAX_PDF_PAGES)):
-            t_candidates = structure_document_tables(data, page_number=p_idx + 1)
+            page_text_i = parts[p_idx] if p_idx < len(parts) else ""
+            t_candidates = structure_document_tables(
+                data, raw_text=page_text_i, page_number=p_idx + 1
+            )
             for st in t_candidates:
                 if st.matrix and len(st.matrix) > 1:
                     summary, _ = _summarize_table(f"Page {p_idx + 1} {st.table_id}", st.matrix)
+                    summary.source = st.source
+                    summary.status = st.status
+                    summary.downstream_action = st.downstream_action
+                    summary.warnings = list(st.warnings)
                     out.tables.append(summary)
     except Exception:
         pass
+
+    # Collect bounded vector glyph evidence on digital PDFs so _field_evidence
+    # attaches page numbers and bounding boxes even when OCR was not required.
+    if not out.meta.get("ocr_evidence") and page_count > 0:
+        try:
+            from app.vision.glyph_fusion import extract_page_vector_glyphs
+
+            vec_evidence: list[dict[str, Any]] = []
+            for p_idx in range(min(page_count, 5)):
+                glyphs = extract_page_vector_glyphs(data, p_idx)
+                for g in glyphs:
+                    if len(vec_evidence) >= _MAX_OCR_EVIDENCE_REGIONS:
+                        break
+                    b = g.bbox if len(g.bbox) >= 4 else [0.0, 0.0, 0.0, 0.0]
+                    vec_evidence.append(
+                        {
+                            "page": p_idx + 1,
+                            "text": str(g.text)[:200],
+                            "box": [
+                                [round(b[0], 1), round(b[1], 1)],
+                                [round(b[2], 1), round(b[1], 1)],
+                                [round(b[2], 1), round(b[3], 1)],
+                                [round(b[0], 1), round(b[3], 1)],
+                            ],
+                            "confidence": 1.0,
+                            "source": "pdf_text",
+                        }
+                    )
+                if len(vec_evidence) >= _MAX_OCR_EVIDENCE_REGIONS:
+                    break
+            if vec_evidence:
+                out.meta["vector_evidence"] = vec_evidence
+        except Exception:
+            pass
 
     out.text = text
     return out
@@ -924,13 +994,17 @@ def _extract_image(data: bytes) -> _Extraction:
     out = _Extraction()
     try:
         import numpy as np
-        from PIL import Image  # type: ignore[import-untyped]
+        from PIL import Image, ImageOps  # type: ignore[import-untyped]
     except ImportError:
         out.warnings.append("Image processing unavailable — Pillow is not installed.")
         return out
     try:
         img = Image.open(io.BytesIO(data))
         img.load()
+        transposed = ImageOps.exif_transpose(img)
+        if transposed is not None and transposed.size != img.size:
+            out.meta["exif_transposed"] = True
+            img = transposed
         out.meta["width"], out.meta["height"] = img.size
         out.meta["format"] = img.format or ""
         rgb = img.convert("RGB")
@@ -939,7 +1013,8 @@ def _extract_image(data: bytes) -> _Extraction:
         out.warnings.append("The image could not be decoded.")
         return out
 
-    result = extract_ocr_result(np.array(rgb))
+    rgb_array = np.array(rgb)
+    result = extract_ocr_result(rgb_array)
     out.meta["ocr_backend"] = result.backend
     out.meta["ocr_status"] = result.status
     if result.detail:
@@ -950,6 +1025,26 @@ def _extract_image(data: bytes) -> _Extraction:
         confidences = [float(item["confidence"]) for item in result.items]
         out.meta["ocr_regions"] = len(result.items)
         out.meta["ocr_mean_confidence"] = round(sum(confidences) / len(confidences), 3)
+        out.meta["ocr_page_numbers"] = [1]
+        img_evidence: list[dict[str, Any]] = []
+        for item in result.items[:_MAX_OCR_EVIDENCE_REGIONS]:
+            raw_box = item.get("box")
+            try:
+                box = [
+                    [round(float(point[0]), 1), round(float(point[1]), 1)]
+                    for point in raw_box
+                ]
+            except (IndexError, TypeError, ValueError):
+                box = []
+            img_evidence.append(
+                {
+                    "page": 1,
+                    "text": str(item.get("text", ""))[:200],
+                    "box": box,
+                    "confidence": float(item.get("confidence", 0.0)),
+                }
+            )
+        out.meta["ocr_evidence"] = img_evidence
     text = result.text
     if not text:
         # Same ad-hoc fallback the voice+vision endpoint uses.
@@ -974,6 +1069,27 @@ def _extract_image(data: bytes) -> _Extraction:
             out.warnings.append(
                 "No text could be extracted because the OCR backend is unavailable."
             )
+
+    try:
+        from app.vision.table_structuring import structure_document_tables
+
+        t_candidates = structure_document_tables(
+            None,
+            raw_text=out.text,
+            page_number=1,
+            raster_image=rgb_array,
+            ocr_items=result.items,
+        )
+        for st in t_candidates:
+            if st.matrix and len(st.matrix) > 1:
+                summary, _ = _summarize_table(f"Image {st.table_id}", st.matrix)
+                summary.source = st.source
+                summary.status = st.status
+                summary.downstream_action = st.downstream_action
+                summary.warnings = list(st.warnings)
+                out.tables.append(summary)
+    except Exception:
+        pass
     return out
 
 
@@ -1053,6 +1169,7 @@ def _build_summary(
     counts = []
     for key, singular, plural in (
         ("tins", "TIN", "TINs"),
+        ("nins", "NIN", "NINs"),
         ("prns", "PRN", "PRNs"),
         ("efris_invoices", "EFRIS invoice number", "EFRIS invoice numbers"),
         ("tax_heads", "tax head", "tax heads"),
@@ -1091,8 +1208,8 @@ def _field_evidence(
     fields: dict[str, list[str]],
     metadata: dict[str, Any],
 ) -> dict[str, list[dict[str, Any]]]:
-    """Attach field values to bounded OCR regions when a textual match exists."""
-    raw_regions = metadata.get("ocr_evidence") or []
+    """Attach field values to bounded OCR or vector-glyph regions when a textual match exists."""
+    raw_regions = (metadata.get("ocr_evidence") or []) + (metadata.get("vector_evidence") or [])
     regions = [region for region in raw_regions if isinstance(region, dict)]
     extraction_method = str(metadata.get("extraction_method", "extracted_text"))
     source = "ocr" if extraction_method in {"pdf_ocr", "image_ocr"} else extraction_method
@@ -1117,7 +1234,7 @@ def _field_evidence(
             if match is not None:
                 item.update(
                     {
-                        "source": "ocr",
+                        "source": str(match.get("source") or "ocr"),
                         "page": match.get("page"),
                         "box": match.get("box") or [],
                         "confidence": match.get("confidence"),
@@ -1129,13 +1246,44 @@ def _field_evidence(
 
 
 def _parse_currency_amount(raw: str) -> float | None:
-    """Extract float value from currency strings like 'UGX 1,180,000.00' or '1,250,000'."""
+    """Extract float value from currency strings like 'UGX 1,180,000.00', '0', or '1,250,000'."""
     cleaned = re.sub(r"[^\d.]", "", raw.replace(",", ""))
     try:
         val = float(cleaned)
-        return val if val > 0 else None
+        return val if val >= 0 else None
     except (ValueError, TypeError):
         return None
+
+
+_USD_CURRENCY_RE = re.compile(r"\bUSD\b", re.IGNORECASE)
+_UGX_CURRENCY_RE = re.compile(r"\b(?:UGX|UShs?|Shs)\b", re.IGNORECASE)
+_ZERO_OR_EXEMPT_VAT_RE = re.compile(
+    r"\b(?:zero[- ]?rated|vat[ \t]+exempt|exempt[ \t]+supply|vat[ \t]{0,3}\(0%\)|0%[ \t]{0,3}vat)\b",
+    re.IGNORECASE,
+)
+_SUBTOTAL_LINE_RE = re.compile(
+    r"(?:Sub-?total|Taxable[ \t]+Value|Taxable[ \t]+Amount|Net[ \t]+Amount|Total[ \t]+Exclusive)"
+    r"[ \t:=-]{0,6}(?:(?:UGX|UShs?\.?|Shs?\.?|USD)[ \t]{0,4})?(\d{1,15}(?:,\d{3})*(?:\.\d{1,2})?)",
+    re.IGNORECASE,
+)
+_VAT_LINE_RE = re.compile(
+    r"(?:V\.?A\.?T\.?|Value[ \t]+Added[ \t]+Tax|Tax[ \t]+Amount)"
+    r"(?:[ \t]{0,4}\(\d{1,3}(?:\.\d{1,2})?%\))?"
+    r"[ \t:=-]{0,6}(?:(?:UGX|UShs?\.?|Shs?\.?|USD)[ \t]{0,4})?(\d{1,15}(?:,\d{3})*(?:\.\d{1,2})?)",
+    re.IGNORECASE,
+)
+_TOTAL_LINE_RE = re.compile(
+    r"(?:Total[ \t]+Payable|Grand[ \t]+Total|Total[ \t]+Amount|Gross[ \t]+Amount|"
+    r"Total[ \t]+Due|Amount[ \t]+Paid|Paid[ \t]+Amount|Net[ \t]+Payable)"
+    r"[ \t:=-]{0,6}(?:(?:UGX|UShs?\.?|Shs?\.?|USD)[ \t]{0,4})?(\d{1,15}(?:,\d{3})*(?:\.\d{1,2})?)",
+    re.IGNORECASE,
+)
+_WHT_LINE_RE = re.compile(
+    r"(?:Withholding[ \t]+Tax|W\.?H\.?T\.?)"
+    r"(?:[ \t]{0,4}\(\d{1,3}(?:\.\d{1,2})?%\))?"
+    r"[ \t:=-]{0,6}(?:(?:UGX|UShs?\.?|Shs?\.?|USD)[ \t]{0,4})?(\d{1,15}(?:,\d{3})*(?:\.\d{1,2})?)",
+    re.IGNORECASE,
+)
 
 
 def reconcile_tax_document(
@@ -1147,11 +1295,12 @@ def reconcile_tax_document(
     """Perform automated financial arithmetic reconciliation & statutory tax checks.
 
     Verifies:
-    1. TIN format & presence (10-digit Uganda TIN starting with 1).
+    1. TIN format & presence (10-digit Uganda TIN starting with 1) and 14-char NINs.
     2. PRN format & status (12-15 digit Payment Registration Number starting with 2).
     3. EFRIS fiscal invoice/receipt indicators.
-    4. Arithmetic integrity: Subtotal + Tax == Total (with tolerance for rounding).
-    5. Statutory tax rate compliance: Standard VAT rate is 18.0% (FY2026-27).
+    4. Arithmetic integrity: Subtotal + Tax == Total (or Subtotal + VAT - WHT == Net Payable).
+    5. Statutory tax rate compliance: Standard VAT (18.0%), Zero-Rated/Exempt (0.0%), and WHT (6% / 15%).
+    6. Cross-checking table column totals against declared summary totals.
     """
     notes: list[str] = []
 
@@ -1163,6 +1312,10 @@ def reconcile_tax_document(
         else:
             notes.append(f"TIN {tin} has non-standard format (expected 10 digits starting with 1).")
 
+    nins = fields.get("nins") or []
+    for nin in nins[:3]:
+        notes.append(f"Uganda NIRA National ID Number (NIN) {nin} has a valid 14-character format.")
+
     prns = fields.get("prns") or []
     for prn in prns:
         notes.append(f"Payment Registration Number (PRN) {prn} verified for e-Tax / bank payment.")
@@ -1171,44 +1324,40 @@ def reconcile_tax_document(
     if efris:
         notes.append(f"EFRIS fiscal device / invoice record identified ({', '.join(efris[:3])}).")
 
-    # 2. Extract financial figures associated with tax lines
-    subtotal_match = re.search(
-        r"(?:Sub-?total|Taxable\s+Value|Taxable\s+Amount|Net\s+Amount|Total\s+Exclusive)\s*[:=\-]?\s*(?:UGX|Shs?\.?|USD)?\s*([\d,]+(?:\.\d{1,2})?)",
-        text,
-        re.I,
-    )
-    vat_match = re.search(
-        r"(?:V\.?A\.?T\.?|Value\s+Added\s+Tax|Tax\s+Amount)\s*(?:\(18%\))?\s*[:=\-]?\s*(?:UGX|Shs?\.?|USD)?\s*([\d,]+(?:\.\d{1,2})?)",
-        text,
-        re.I,
-    )
-    total_match = re.search(
-        r"(?:Total\s+Payable|Grand\s+Total|Total\s+Amount|Gross\s+Amount|Total\s+Due|Amount\s+Paid|Paid\s+Amount)\s*[:=\-]?\s*(?:UGX|Shs?\.?|USD)?\s*([\d,]+(?:\.\d{1,2})?)",
-        text,
-        re.I,
-    )
-    wht_match = re.search(
-        r"(?:Withholding\s+Tax|W\.?H\.?T\.?)\s*(?:\([0-9.]+%\))?\s*[:=\-]?\s*(?:UGX|Shs?\.?|USD)?\s*([\d,]+(?:\.\d{1,2})?)",
-        text,
-        re.I,
-    )
+    # Detect primary currency (USD vs UGX)
+    has_usd = bool(_USD_CURRENCY_RE.search(text)) and not bool(_UGX_CURRENCY_RE.search(text))
+    ccy = "USD" if has_usd else "UGX"
+
+    # 2. Extract financial figures associated with tax lines (bounded O(n) matchers)
+    bounded_text = text[:25000]
+    subtotal_match = _SUBTOTAL_LINE_RE.search(bounded_text)
+    vat_match = _VAT_LINE_RE.search(bounded_text)
+    total_match = _TOTAL_LINE_RE.search(bounded_text)
+    wht_match = _WHT_LINE_RE.search(bounded_text)
 
     subtotal_val = _parse_currency_amount(subtotal_match.group(1)) if subtotal_match else None
     vat_val = _parse_currency_amount(vat_match.group(1)) if vat_match else None
     total_val = _parse_currency_amount(total_match.group(1)) if total_match else None
     wht_val = _parse_currency_amount(wht_match.group(1)) if wht_match else None
 
-    # Fallback to table numeric totals if present
-    if not subtotal_val and tables:
+    is_zero_or_exempt = bool(_ZERO_OR_EXEMPT_VAT_RE.search(bounded_text))
+
+    # Fallback to table numeric totals if present, and cross-check table totals against declared total
+    table_total_candidate: float | None = None
+    if tables:
         for t in tables:
             for header, tot in t.numeric_totals.items():
                 hl = header.lower()
                 if "subtotal" in hl or "taxable" in hl or "net" in hl:
-                    subtotal_val = tot
+                    if subtotal_val is None:
+                        subtotal_val = tot
                 elif "vat" in hl or "tax" in hl:
-                    vat_val = tot
-                elif "total" in hl or "gross" in hl:
-                    total_val = tot
+                    if vat_val is None:
+                        vat_val = tot
+                elif "total" in hl or "gross" in hl or "amount" in hl:
+                    table_total_candidate = tot
+                    if total_val is None:
+                        total_val = tot
 
     status = "informational_only"
     variance = 0.0
@@ -1216,47 +1365,78 @@ def reconcile_tax_document(
 
     if subtotal_val is not None and vat_val is not None and total_val is not None:
         expected_total = subtotal_val + vat_val
+        expected_net_after_wht = subtotal_val + vat_val - (wht_val or 0.0)
         diff = abs(total_val - expected_total)
+        diff_wht = abs(total_val - expected_net_after_wht) if wht_val else diff
         tolerance = max(2.0, total_val * 0.002)
         effective_rate = round(vat_val / subtotal_val, 4) if subtotal_val > 0 else 0.0
 
-        if diff <= tolerance:
+        if diff <= tolerance or diff_wht <= tolerance:
             variance = 0.0
             if abs(effective_rate - 0.18) <= 0.005:
                 status = "verified"
                 notes.append(
-                    f"Arithmetic balanced: Subtotal (UGX {subtotal_val:,.0f}) + 18% VAT (UGX {vat_val:,.0f}) "
-                    f"= Total (UGX {total_val:,.0f}). Statutory rate verified."
+                    f"Arithmetic balanced: Subtotal ({ccy} {subtotal_val:,.0f}) + 18% VAT ({ccy} {vat_val:,.0f}) "
+                    f"= Total ({ccy} {total_val:,.0f}). Statutory rate verified."
+                )
+            elif vat_val == 0.0 and is_zero_or_exempt:
+                status = "verified"
+                notes.append(
+                    f"Arithmetic balanced: Zero-rated / Exempt VAT supply confirmed "
+                    f"(Subtotal {ccy} {subtotal_val:,.0f} = Total {ccy} {total_val:,.0f}, VAT 0%)."
                 )
             else:
                 status = "discrepancy_detected"
                 notes.append(
-                    f"Arithmetic balanced (Total UGX {total_val:,.0f}), but effective VAT rate "
+                    f"Arithmetic balanced (Total {ccy} {total_val:,.0f}), but effective VAT rate "
                     f"is {effective_rate:.1%} instead of standard 18.0%."
                 )
         else:
             variance = round(total_val - expected_total, 2)
             status = "discrepancy_detected"
             notes.append(
-                f"Arithmetic discrepancy detected: Subtotal (UGX {subtotal_val:,.0f}) + "
-                f"VAT (UGX {vat_val:,.0f}) = UGX {expected_total:,.0f}, but document states "
-                f"Total UGX {total_val:,.0f} (variance: UGX {abs(variance):,.0f})."
+                f"Arithmetic discrepancy detected: Subtotal ({ccy} {subtotal_val:,.0f}) + "
+                f"VAT ({ccy} {vat_val:,.0f}) = {ccy} {expected_total:,.0f}, but document states "
+                f"Total {ccy} {total_val:,.0f} (variance: {ccy} {abs(variance):,.0f})."
+            )
+    elif subtotal_val is not None and wht_val is not None and total_val is not None and vat_val is None:
+        expected_net = subtotal_val - wht_val
+        tolerance = max(2.0, total_val * 0.002)
+        effective_rate = round(wht_val / subtotal_val, 4) if subtotal_val > 0 else 0.0
+        if abs(total_val - expected_net) <= tolerance:
+            status = "verified"
+            notes.append(
+                f"Withholding Tax (WHT) arithmetic balanced: Gross ({ccy} {subtotal_val:,.0f}) - "
+                f"WHT ({ccy} {wht_val:,.0f}, {effective_rate:.1%}) = Net Payable ({ccy} {total_val:,.0f})."
+            )
+        else:
+            variance = round(total_val - expected_net, 2)
+            status = "discrepancy_detected"
+            notes.append(
+                f"WHT arithmetic discrepancy: Gross ({ccy} {subtotal_val:,.0f}) - WHT ({ccy} {wht_val:,.0f}) "
+                f"= {ccy} {expected_net:,.0f}, but document states {ccy} {total_val:,.0f}."
             )
     elif subtotal_val is not None and total_val is not None and vat_val is None:
         implied_tax = total_val - subtotal_val
-        if implied_tax > 0 and subtotal_val > 0:
+        if implied_tax == 0.0 and is_zero_or_exempt:
+            effective_rate = 0.0
+            status = "verified"
+            notes.append(
+                f"Zero-rated / Exempt supply verified: Subtotal ({ccy} {subtotal_val:,.0f}) = Total ({ccy} {total_val:,.0f})."
+            )
+        elif implied_tax > 0 and subtotal_val > 0:
             effective_rate = round(implied_tax / subtotal_val, 4)
             if abs(effective_rate - 0.18) <= 0.005:
                 status = "verified"
                 notes.append(
-                    f"Standard 18.0% VAT implied: Total UGX {total_val:,.0f} on Subtotal "
-                    f"UGX {subtotal_val:,.0f} matches standard VAT rate."
+                    f"Standard 18.0% VAT implied: Total {ccy} {total_val:,.0f} on Subtotal "
+                    f"{ccy} {subtotal_val:,.0f} matches standard VAT rate."
                 )
             else:
                 status = "unreconciled_partial"
                 notes.append(
                     f"Implied tax rate is {effective_rate:.1%} between Subtotal "
-                    f"UGX {subtotal_val:,.0f} and Total UGX {total_val:,.0f}."
+                    f"{ccy} {subtotal_val:,.0f} and Total {ccy} {total_val:,.0f}."
                 )
         else:
             status = "unreconciled_partial"
@@ -1272,13 +1452,29 @@ def reconcile_tax_document(
         status = "informational_only"
         notes.append("Non-financial or administrative text; no numeric tax variance.")
 
+    if (
+        table_total_candidate is not None
+        and total_val is not None
+        and subtotal_match is not None
+        and abs(table_total_candidate - total_val) > max(2.0, total_val * 0.002)
+        and abs(table_total_candidate - (subtotal_val or 0.0)) > max(2.0, total_val * 0.002)
+    ):
+        status = "discrepancy_detected"
+        variance = round(total_val - table_total_candidate, 2)
+        notes.append(
+            f"Table line-item sum ({ccy} {table_total_candidate:,.0f}) does not match declared "
+            f"Total ({ccy} {total_val:,.0f})."
+        )
+
     if wht_val is not None:
-        notes.append(f"Withholding tax (WHT) of UGX {wht_val:,.0f} noted on this record.")
+        notes.append(f"Withholding tax (WHT) of {ccy} {wht_val:,.0f} noted on this record.")
 
     return {
         "status": status,
+        "currency": ccy,
         "subtotal_ugx": subtotal_val,
         "tax_ugx": vat_val,
+        "wht_ugx": wht_val,
         "total_ugx": total_val,
         "effective_rate": effective_rate,
         "variance_ugx": variance,
@@ -1591,7 +1787,8 @@ def analyze_document(
     extraction.meta["source_sha256"] = hashlib.sha256(data).hexdigest()
     extraction.meta["classification_method"] = "keyword_heuristic"
 
-    text = re.sub(r"\n{3,}", "\n\n", extraction.text or "").strip()
+    raw_extracted = strip_hidden_control_and_bidi(extraction.text or "")
+    text = re.sub(r"\n{3,}", "\n\n", raw_extracted).strip()
     text, was_scrubbed = scan_retrieved_text(text)
     if was_scrubbed:
         extraction.warnings.append(
@@ -1608,6 +1805,7 @@ def analyze_document(
     classification = classify_document(text)
     fields = {
         "tins": extract_tin_numbers(text)[:_MAX_FIELD_ITEMS],
+        "nins": extract_nin_numbers(text)[:_MAX_FIELD_ITEMS],
         "prns": extract_prn_numbers(text)[:_MAX_FIELD_ITEMS],
         "efris_invoices": extract_efris_invoice_numbers(text)[:_MAX_FIELD_ITEMS],
         "amounts": extract_ugx_amounts(text)[:_MAX_FIELD_ITEMS],
@@ -1717,7 +1915,13 @@ def _spool_write(record: DocumentRecord) -> None:
         _STORE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
         path = _STORE_DIR / f"{record.doc_id}.json"
         tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(asdict(record)))
+        payload = asdict(record)
+        payload["meta"] = {
+            k: v
+            for k, v in (payload.get("meta") or {}).items()
+            if not str(k).startswith("_") and not isinstance(v, (bytes, bytearray))
+        }
+        tmp.write_text(json.dumps(payload))
         tmp.chmod(0o600)
         tmp.replace(path)
     except OSError:

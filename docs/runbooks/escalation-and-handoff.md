@@ -112,6 +112,17 @@ consent-gated state and age out on `RESOLUTION_CASE_TTL_HOURS`.
   and history give the same tier, which is what makes it testable.
 * `POST /v1/escalate` now passes the caller's tenant. Before, a signed-in
   taxpayer in a non-default tenant raised the ticket under `default`.
+* The taxpayer's case routes (`GET /v1/escalate/{id}`, `/reply`, `/messages`,
+  `/csat`) take no login, so they answer to the **exact ticket UUID** only
+  (G243). Until 2026-10-23 the status and reply routes fell back to the staff
+  ticket *search*: any word from someone's case, or a bare wildcard, opened its
+  reason, query and transcript, and a reply landed on it as that taxpayer's
+  words. A taxpayer who lost the id asks in the chat that raised the case: the
+  chat answers "status of `TIC-…`" from the requester's own tickets only
+  (signed-in subject, or the session the request presents) and, like every
+  fast path, only after the input guard and the crisis check.
+* A ticket search (`list_tickets(q=…)`, the staff queue's search box) escapes
+  `%` and `_`, so a search for either matches that character, not every row.
 
 ## Verify after a change
 
@@ -119,6 +130,7 @@ consent-gated state and age out on `RESOLUTION_CASE_TTL_HOURS`.
 cd App/backend && pytest tests/test_escalation_policy.py tests/test_turn_cases.py \
   tests/test_taxpayer_escalation.py -q
 pytest tests/agents/test_phase38_cx.py -q        # root suite: the service paths
+pytest tests/test_answer_integrity_integration.py -k AnswersOnlyToItsOwner -q   # G243 BOLA
 ```
 
 Live (isolated api, flags on): drive hardship + enforcement through
