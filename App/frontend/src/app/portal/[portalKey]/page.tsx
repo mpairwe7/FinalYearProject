@@ -842,8 +842,9 @@ export default function InbuiltPortalCopilotPage() {
       });
       if (res.ok) {
         const data = await res.json();
-        if (data.access_token) {
-          setAuthToken(data.access_token, "dev");
+        const issuedToken = data.token || data.access_token;
+        if (issuedToken) {
+          setAuthToken(issuedToken, "dev");
         }
       }
     } catch {

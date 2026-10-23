@@ -1064,6 +1064,7 @@ _EXECUTED_TASK_CACHE: OrderedDict[tuple[str, str], dict[str, Any]] = OrderedDict
 _DECLINED_TASK_CACHE: OrderedDict[tuple[str, str], float] = OrderedDict()
 _IN_FLIGHT_TASK_KEYS: set[tuple[str, str]] = set()
 _SHARED_DECISION_KEYS: set[str] = set()
+_CONVERSATION_ENTITY_MEMORY: OrderedDict[str, dict[str, Any]] = OrderedDict()
 
 
 def _durable_task_cache_id(cache_key: tuple[str, str]) -> str:
@@ -1124,6 +1125,7 @@ def clear_portal_task_cache() -> None:
         _EXECUTED_TASK_CACHE.clear()
         _DECLINED_TASK_CACHE.clear()
         _IN_FLIGHT_TASK_KEYS.clear()
+        _CONVERSATION_ENTITY_MEMORY.clear()
         keys_to_reset = list(_SHARED_DECISION_KEYS)
         _SHARED_DECISION_KEYS.clear()
     for cid in keys_to_reset:
@@ -1490,16 +1492,25 @@ def detect_portal_task_intent(
         return _intent("payment_view_status", "prn_payments", 0.92)
 
     # 4. Verify TIN (Tier 1)
-    if any(
-        phrase in low
-        for phrase in (
-            "verify tin",
-            "search tin",
-            "check tin",
-            "lookup tin",
-            "validate tin",
+    if (
+        any(
+            phrase in low
+            for phrase in (
+                "verify tin",
+                "search tin",
+                "check tin",
+                "lookup tin",
+                "validate tin",
+                "verify if tin",
+                "check if tin",
+            )
         )
-    ) and not any(w in low for w in ("obligation", "apply", "register")):
+        or (
+            "tin" in low
+            and bool(extracted.get("tin"))
+            and any(w in low for w in ("verify", "validate", "lookup", "is active"))
+        )
+    ) and not any(w in low for w in ("obligation", "apply", "register", "tcc", "clearance", "prn", "return")):
         return _intent("tin_search_verify", "tin_registration", 0.93)
 
     # 5. Apply for Individual vs Non-Individual TIN (Tier 2)
@@ -2526,15 +2537,54 @@ def evaluate_turn(
 ) -> PortalCopilotOutcome | None:
     """Evaluate a chat turn for inline form elicitation, Claude-style confirmation, or live DOM co-pilot help."""
     conv_id = str(conversation_id or "default")
+    owner_key = db.conversation_state_key(
+        conv_id,
+        session_id=session_id or None,
+        user_id=user_id or None,
+        tenant_id=tenant_id,
+    )
+    anon_owner_key = db.conversation_state_key(
+        conv_id,
+        session_id=session_id or None,
+        user_id=None,
+        tenant_id=tenant_id,
+    )
 
-    # Gather entities from prior user turns in the same conversation for multi-turn context remembering
+    # Gather entities from prior user turns in the same conversation (both in-memory owner cache
+    # and conversation_history) so PII redacted by db.log_conversation is still remembered across turns
     history_entities: dict[str, Any] = {}
+    with _TASK_CACHE_LOCK:
+        if anon_owner_key in _CONVERSATION_ENTITY_MEMORY:
+            history_entities.update(_CONVERSATION_ENTITY_MEMORY[anon_owner_key])
+        if owner_key in _CONVERSATION_ENTITY_MEMORY:
+            history_entities.update(_CONVERSATION_ENTITY_MEMORY[owner_key])
+    def _should_carry_over_amount(msg_text: str) -> bool:
+        low_m = msg_text.lower()
+        if any(w in low_m for w in ("turnover", "annual sales", "gross sales", "salary", "threshold")):
+            return any(w in low_m for w in ("prn", "payment slip", "need to pay ugx", "want to pay ugx"))
+        return any(w in low_m for w in ("pay", "prn", "payment", "refund", "net tax"))
+
     if conversation_history:
         for turn in conversation_history:
             if isinstance(turn, Mapping):
                 u_msg = str(turn.get("user_message") or turn.get("content") or "")
                 if u_msg:
-                    history_entities.update(extract_task_entities(u_msg))
+                    turn_ent = extract_task_entities(u_msg)
+                    if "amount_ugx" in turn_ent and not _should_carry_over_amount(u_msg):
+                        turn_ent.pop("amount_ugx", None)
+                    history_entities.update(turn_ent)
+
+    current_turn_entities = extract_task_entities(message)
+    if current_turn_entities:
+        mem_entities = dict(current_turn_entities)
+        if "amount_ugx" in mem_entities and not _should_carry_over_amount(message):
+            mem_entities.pop("amount_ugx", None)
+        with _TASK_CACHE_LOCK:
+            merged_mem = {**history_entities, **mem_entities}
+            _CONVERSATION_ENTITY_MEMORY[owner_key] = merged_mem
+            _CONVERSATION_ENTITY_MEMORY.move_to_end(owner_key)
+            while len(_CONVERSATION_ENTITY_MEMORY) > _MAX_TASK_CACHE_ENTRIES:
+                _CONVERSATION_ENTITY_MEMORY.popitem(last=False)
 
     # 1. Explicit Inline Form Submission or Post-Login Resumption
     if portal_task_submission and isinstance(portal_task_submission, Mapping):
