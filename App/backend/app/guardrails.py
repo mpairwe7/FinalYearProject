@@ -265,9 +265,14 @@ _PII_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("ug_phone", re.compile(r"(?:^|(?<=\s))(?:\+256|0)(?:7[0-9]{8}|4[0-9]{8})\b")),
     # Standard contiguous TIN, context-bound TIN, or spaced/hyphenated variants
     ("ug_tin", re.compile(r"(?i)(?:\bTIN\s*[:#-]?\s*|\bTax Identification Number\s*[:#-]?\s*)(1\d{9})\b|\b1\d{2}[\s-]\d{3}[-\s]\d{4}\b|\b1\d{9}\b")),
-    ("ug_nid", re.compile(r"\bC[MF]\d{2}[A-Z]{5}\d{5}[A-Z]\b")),
-    # Spaced NID variant (e.g. "CM 89 ABCDE 12345 F")
-    ("ug_nid", re.compile(r"\bC[MF]\s?\d{2}\s?[A-Z]{5}\s?\d{5}\s?[A-Z]\b")),
+    # Ugandan National Identification Number: 14 characters, C + M/F (or R) +
+    # 12 letters and digits, the shape vision.ocr.extract_nin_numbers reads.
+    # NIRA does not publish the internal layout, so none is assumed. The former
+    # pattern assumed one with a fixed 15-character length and so never matched
+    # a real NIN (G247). 13-15 characters, so a NIN typed with one character
+    # dropped or doubled is still hidden; at least four digits, so a word such
+    # as "cryptocurrency" is not taken for one; case-insensitive, as typed.
+    ("ug_nid", re.compile(r"(?i)\bC[MFR](?=(?:[A-Z]*\d){4})[0-9A-Z]{11,13}\b")),
     ("credit_card", re.compile(r"\b(?:\d{4}[-\s]?){3}\d{4}\b")),
     ("amex_card", re.compile(r"\b3[47]\d{2}[-\s]?\d{6}[-\s]?\d{5}\b")),
     ("ug_passport", re.compile(r"\b[A-Z]{2}\d{7}\b")),

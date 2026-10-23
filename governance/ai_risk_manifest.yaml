@@ -159,7 +159,9 @@ owasp_llm:
     name: "Sensitive Information Disclosure"
     status: "mitigated"
     evidence: "App/backend/app/guardrails.py:OutputGuard.redact_pii(), App/backend/app/service.py (_state_conversation_id)"
-    controls: "PII pattern redaction (UG phone, TIN, NID, email, CC); stated case facts, calculator memory and workflow state are read back only under the caller's owner-scoped key, never by conversation id alone (ADR-0013 A)"
+    controls: "PII pattern redaction (UG phone, TIN, 14-character NIN (G247), email, CC); stated case facts, calculator memory and workflow state are read back only under the caller's owner-scoped key, never by conversation id alone (ADR-0013 A)"
+    verified_by:
+      - "tests/agents/test_nin_redaction.py"
   - id: "LLM03"
     name: "Supply Chain Vulnerabilities"
     status: "mitigated"

@@ -33,8 +33,8 @@ class TestStreamingDLPFilter(unittest.TestCase):
 
     def test_split_ug_nid_across_boundaries_is_masked(self) -> None:
         dlp = StreamingDLPFilter(buffer_size=24)
-        # 14-char Ugandan NIN: CM90ABCDE12345F, split across chunks
-        chunks = ["NIN record: ", "CM90", "ABCDE", "12345F", " has been validated."]
+        # 14-char Ugandan NIN: CM930039182LIR, split across chunks
+        chunks = ["NIN record: ", "CM93", "003918", "2LIR", " has been validated."]
         streamed = []
         for c in chunks:
             out = dlp.process_chunk(c)
@@ -42,7 +42,7 @@ class TestStreamingDLPFilter(unittest.TestCase):
                 streamed.append(out)
         streamed.append(dlp.flush())
         full = "".join(streamed)
-        self.assertNotIn("CM90ABCDE12345F", full)
+        self.assertNotIn("CM930039182LIR", full)
         self.assertIn("[REDACTED_UG_NID]", full)
 
     def test_official_ura_channels_are_exempt_from_redaction(self) -> None:
