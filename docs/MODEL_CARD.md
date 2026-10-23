@@ -35,7 +35,7 @@
 | **TTS (mobile)** | MMS-TTS VITS | ~40M per locale | On-device speech synthesis |
 | **Supervisor** | Rule-based + LLM fallback | N/A | Query routing (7 routes) |
 | **Tool Registry** | 72 tools across 18 namespaces | N/A | Tax calculators (28 tools incl. Cross-MDA NTR/PRN, life-event onboarding, B2G/UESW clearance, Nil-Return Shield, Voluntary Disclosure/Instalment simulator & EFRIS 5% refund/account recovery), rates, deadlines, KB search, memory operations, DMZ system connectors |
-| **Memory** | 4-Tier Cognitive Hierarchy | N/A | Working (entities/session), Episodic, Semantic (fact triplets), Procedural (statutory SOP exemplars) |
+| **Memory** | 4-Tier Cognitive Hierarchy | N/A | Working (entities/session), Episodic, Semantic (fact triplets), Procedural (curated SOP outlines matched by reviewed triggers; procedure only, no legal citations — G245) |
 | **VAD** | Energy-based (numpy) | N/A | Voice Activity Detection with hysteresis |
 | **Accent Detector** | Prosodic features + SVM | ~1M | Ugandan accent classification (5 profiles) |
 | **Offline Retriever** | FAISS + ONNX bge-m3 | ~80M bundle | Offline RAG when Qdrant is unavailable |
