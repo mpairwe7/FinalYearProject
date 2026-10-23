@@ -117,6 +117,22 @@ describe('CallScreen component', () => {
     expect(useCallStore.getState().isMuted).toBe(false);
   });
 
+  it('closes pre-call consent dialog on Escape key and marks errors with role="alert"', () => {
+    useCallStore.getState().openCall();
+    render(<CallScreen />);
+    expect(useCallStore.getState().isOpen).toBe(true);
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(useCallStore.getState().isOpen).toBe(false);
+
+    act(() => {
+      useCallStore.getState().openCall();
+      useCallStore.getState().setStatus('ai');
+      useCallStore.getState().setError('Microphone disconnected');
+    });
+    expect(screen.getByRole('alert').textContent).toBe('Microphone disconnected');
+  });
+
   it('offers a tap target while the browser holds call audio back', () => {
     useCallStore.getState().openCall();
     useCallStore.getState().setStatus('ai');

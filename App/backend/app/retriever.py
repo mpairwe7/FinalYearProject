@@ -2050,7 +2050,7 @@ class HybridRetriever:
                 continue
             if len(sent_tokens & ctx_tokens) / len(sent_tokens) >= 0.5:
                 grounded += 1
-            elif welfare_turn and is_self_reflection_sentence(sent):
+            elif welfare_turn and is_self_reflection_sentence(sent, in_welfare_turn=True):
                 # Unscripted model self-reflection on a model-welfare turn
                 # (with no fabricated amounts/percentages) is grounded in
                 # the model's introspective allowance rather than a tax statute.

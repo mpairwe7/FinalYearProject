@@ -18,7 +18,7 @@
 }
 @keyframes dlgv2-fade {
   from {
-    opacity: 0;
+    background-color: rgba(0, 0, 0, 0);
   }
 }
 
@@ -35,7 +35,6 @@
 @keyframes dlgv2-pop {
   from {
     transform: scale(0.97);
-    opacity: 0;
   }
 }
 
@@ -237,7 +236,7 @@
   border-top: 1px solid var(--border-0);
   background: var(--bg-1);
   font-size: 11.5px;
-  color: var(--text-2);
+  color: var(--text-1);
   flex-shrink: 0;
 }
 
@@ -669,7 +668,7 @@ dialog.connectors-dialog::backdrop,
 }
 
 .chatv2 .connectors-badge.is-demo {
-  color: #873600;
+  color: #6e2c00;
   background: var(--cv2-warning-soft);
 }
 

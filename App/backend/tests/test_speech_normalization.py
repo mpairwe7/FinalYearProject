@@ -398,3 +398,26 @@ def test_empty_and_whitespace():
     assert clean_text_for_speech("") == ""
     assert clean_text_for_speech("   ") == ""
     assert clean_text_for_speech(None) == ""
+
+
+def test_redaction_markers_and_standalone_tin_prn_are_voiced_naturally():
+    raw = (
+        "For [REDACTED_UG_NID] and [REDACTED_UG_TIN], records for 1000123456 "
+        "and PRN 2260001234567 show NIN CR900123456789."
+    )
+    en_spoken = clean_text_for_speech(raw, locale="en")
+    assert "redacted National ID" in en_spoken
+    assert "redacted TIN" in en_spoken
+    assert "REDACTED_UG_NID" not in en_spoken
+    assert "1 0 0 0 1 2 3 4 5 6" in en_spoken
+    assert "2 2 6 0 0 0 1 2 3 4 5 6 7" in en_spoken
+    assert "NIN C R 9 0 0 1 2 3 4 5 6 7 8 9" in en_spoken
+
+    lg_spoken = clean_text_for_speech("[REDACTED_UG_NID] ne [REDACTED_UG_PHONE]", locale="lg")
+    assert "ennamba ya NIN ekwekeddwa" in lg_spoken
+    assert "ennamba y'essimu ekwekeddwa" in lg_spoken
+
+    # Repeated-whitespace currency amounts must not be split as standalone TIN/PRN digits
+    ugx_spoken = clean_text_for_speech("Turnover of UGX  1000123456.", locale="en")
+    assert "1 0 0 0 1 2 3 4 5 6" not in ugx_spoken
+    assert "1000123456 Uganda shillings" in ugx_spoken

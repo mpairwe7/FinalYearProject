@@ -1572,7 +1572,10 @@ export default function Page() {
           setSpeechState('idle');
           audioSignifiers.playMicStop();
           const pcm16 = await rec.stop();
-          if (pcm16.byteLength === 0) return;
+          if (pcm16.byteLength === 0) {
+            setDictationNotice(t('voice.didNotCatch'));
+            return;
+          }
           setIsLoading(true);
           const t0 = Date.now();
           setTurnPhase('thinking');

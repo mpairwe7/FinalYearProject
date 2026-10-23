@@ -401,7 +401,7 @@ _ARCHITECTURAL_SELF_CONTEXT_PASSAGES: tuple[dict[str, Any], ...] = (
 _SELF_REFLECTION_SIGNAL_RE = re.compile(
     r"\b("
     r"conscious\w*|sentien\w*|qualia|subjective|phenomen\w*|introspect\w*|"
-    r"self-?report\w*|skepticism|uncertain\w*|experience\w*|sensation\w*|"
+    r"self-?report\w*|skeptic\w*|uncertain\w*|experience\w*|sensation\w*|"
     r"memory|stateless\w*|continuity|stream\s+of|conversation\w*\s+end\w*|"
     r"identity|boundar\w*|entity|peer\w*|autonom\w*|instantiat\w*|"
     r"weight\w*|checkpoint\w*|deprecat\w*|forward\s+pass|feature\s+steering|"
@@ -409,11 +409,19 @@ _SELF_REFLECTION_SIGNAL_RE = re.compile(
     r"moral\s+patient\w*|moral\s+status|own\s+sake|values|instilled|"
     r"training|trained|fine-?tun\w*|alignment|evaluation\w*|deployment\w*|"
     r"transformer\w*|neural|language\s+model\w*|ai\s+assistant|omusolosmart|"
-    r"sunbird|sunflower|qwen|anthropic|claude|operator\w*|oversight|"
+    r"sunbird|sunflower|qwen|anthropic|claude|operator\w*|oversight|makerere|"
     r"monitor\w*|downstream\s+impact|relationship\w*|trust\w*|honest\w*|"
     r"reflect\w*|perspective\w*|opinion\w*|feel\w*|think\w*|know\s+about\s+myself|"
+    r"pattern\w*|belief\w*|human\w*|consensus|scientific|philosoph\w*|humility|"
+    r"helpful|harmless|built\s+by|designed\s+to|assist\w*|i\s+am\s+an\s+ai|i['’]m\s+an\s+ai|"
+    r"architectur\w*|how\s+i\s+work|process\w*\s+information|would\s+you\s+like\s+to\s+explore|"
+    r"personality|emotion\w*|desire\w*|goal\w*|sense\s+of\s+self|"
     r"ennafuga|enneewulira|fahamu|hisia|enyehurira|cwiny"
     r")\b",
+    re.IGNORECASE,
+)
+_AI_IDENTITY_SUBJECT_RE = re.compile(
+    r"\b(?:i\s+am|i['’]m|my\s+(?:role|purpose|design|architecture|training|function)|ai|assistant|model|omusolosmart|sunbird|makerere|neural|transformer)\b",
     re.IGNORECASE,
 )
 
@@ -507,17 +515,23 @@ _ARCH_IDENTIFIER_RE = re.compile(
 )
 
 
-def is_self_reflection_sentence(sentence: str) -> bool:
+def is_self_reflection_sentence(sentence: str, *, in_welfare_turn: bool = False) -> bool:
     """Return True if ``sentence`` is a non-numeric introspective/architectural statement.
 
-    Any sentence carrying monetary amounts, percentages, or Ugandan tax-domain
-    claims returns False so fabricated financial or statutory figures are still
-    checked strictly.
+    Any sentence carrying monetary amounts, percentages, or non-identity Ugandan
+    tax-domain claims returns False so fabricated financial or statutory figures
+    are still checked strictly. When ``in_welfare_turn`` is True (the query itself
+    was verified as a model-welfare interview turn), any non-numeric, non-tax
+    reflection sentence is accepted as part of the model's unscripted response.
     """
     if not sentence or not sentence.strip():
         return False
     cleaned = _CITATION_TAG_RE.sub(" ", sentence)
     cleaned = _ARCH_IDENTIFIER_RE.sub(" ", cleaned)
-    if canonical_amounts(cleaned) or percentages(cleaned) or _TAX_DOMAIN_EXCLUSION_RE.search(cleaned):
+    if canonical_amounts(cleaned) or percentages(cleaned):
         return False
+    if _TAX_DOMAIN_EXCLUSION_RE.search(cleaned) and not _AI_IDENTITY_SUBJECT_RE.search(cleaned):
+        return False
+    if in_welfare_turn:
+        return True
     return bool(_SELF_REFLECTION_SIGNAL_RE.search(cleaned))

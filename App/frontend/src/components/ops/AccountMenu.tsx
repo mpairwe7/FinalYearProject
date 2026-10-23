@@ -331,8 +331,12 @@ export default function AccountMenu({
         onClick={() => onOpenChange(!open)}
         title={signedInName(who)}
       >
-        <span className="staff-acct-avatar" aria-hidden="true">
-          {roleInitials(who.role)}
+        <span
+          className="staff-acct-avatar"
+          data-initials={roleInitials(who.role)}
+          aria-hidden="true"
+        >
+          <span className="sr-only">{roleInitials(who.role)}</span>
         </span>
         {/* The separator is real text, not an aria-hidden decoration: hiding it
             left the button's accessible name as "OfficerAdmin" — two words run

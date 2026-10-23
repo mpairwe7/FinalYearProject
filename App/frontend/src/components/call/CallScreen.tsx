@@ -169,6 +169,18 @@ export function CallScreen() {
     }
   }, [captions, status]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && (status === 'consent' || status === 'ended')) {
+        event.preventDefault();
+        closeCall();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, status, closeCall]);
+
   const speakerLabel = (speaker: CaptionEntry['speaker']): string => {
     if (speaker === 'caller') return t('call.you');
     if (speaker === 'officer') return officerName || t('call.officer');
@@ -244,7 +256,7 @@ export function CallScreen() {
               {status === 'on_hold' && t('call.onHold')}
               {status === 'reconnecting' && t('call.reconnecting')}
               {status === 'officer' &&
-                (officerName ? `Officer ${officerName}` : t('call.officerSpeaking'))}
+                (officerName ? t('call.officerNamed', { name: officerName }) : t('call.officerSpeaking'))}
               {status === 'ended' && t('call.ended')}
             </span>
           </div>
@@ -258,7 +270,7 @@ export function CallScreen() {
               />
             )}
             {status === 'transferring' && ticketRef && (
-              <span className="call-ticket-chip">{`Ticket: ${caseReference(ticketRef)}`}</span>
+              <span className="call-ticket-chip">{t('call.ticketChip', { ref: caseReference(ticketRef) })}</span>
             )}
             {status === 'transferring' && queuePosition !== null && (
               <span className="call-ticket-chip call-queue-chip" role="status" data-testid="call-queue-position">
@@ -337,7 +349,7 @@ export function CallScreen() {
           )}
         </div>
 
-        {error && <p className="call-error">{error}</p>}
+        {error && <p className="call-error" role="alert">{error}</p>}
         {audioBlocked && status !== 'ended' && (
           <button type="button" className="call-audio-unlock" onClick={resumeAudio}>
             {t('call.tapToHear')}

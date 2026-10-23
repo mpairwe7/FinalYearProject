@@ -23,6 +23,9 @@ import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useChatStore } from "@/store/useChatStore";
 import { useVoiceStore } from "@/store/useVoiceStore";
 import { authHeaders } from "@/lib/authSession";
+import { getChatSessionId } from "@/lib/chatSession";
+import { useTranslation } from "@/lib/i18n";
+import { pickSupportedAudioMimeType, stopPlayback } from "@/services/voiceService";
 
 interface VoiceVisionModeProps {
   onClose: () => void;
@@ -32,6 +35,7 @@ interface VoiceVisionModeProps {
 type CaptureState = "preview" | "recording" | "processing" | "result";
 
 function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) {
+  const t = useTranslation();
   const activeConversationId = useChatStore((state) => state.activeConversationId);
   const addTurns = useChatStore((state) => state.addTurns);
   const setCameraActive = useVoiceStore((state) => state.setCameraActive);
@@ -39,7 +43,32 @@ function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+
+  const cleanupAudioRecording = useCallback(() => {
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.onstop = null;
+      if (mediaRecorderRef.current.state !== "inactive") {
+        try {
+          mediaRecorderRef.current.stop();
+        } catch {
+          // ignore if already stopped
+        }
+      }
+      mediaRecorderRef.current = null;
+    }
+    if (audioStreamRef.current) {
+      audioStreamRef.current.getTracks().forEach((track) => track.stop());
+      audioStreamRef.current = null;
+    }
+  }, []);
+
+  const handleClose = useCallback(() => {
+    cleanupAudioRecording();
+    stopPlayback();
+    onClose();
+  }, [cleanupAudioRecording, onClose]);
 
   const [captureState, setCaptureState] = useState<CaptureState>("preview");
   const [capturedImage, setCapturedImage] = useState<Blob | null>(null);
@@ -104,9 +133,11 @@ function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) 
         URL.revokeObjectURL(imageUrlRef.current);
         imageUrlRef.current = null;
       }
+      cleanupAudioRecording();
+      stopPlayback();
       setCameraActive(false);
     };
-  }, [setCameraActive]);
+  }, [cleanupAudioRecording, setCameraActive]);
 
   /* Capture photo from video feed */
   const capturePhoto = useCallback(() => {
@@ -146,8 +177,12 @@ function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) 
           noiseSuppression: true,
         },
       });
+      audioStreamRef.current = audioStream;
 
-      const recorder = new MediaRecorder(audioStream, { mimeType: "audio/webm" });
+      const mimeType = pickSupportedAudioMimeType();
+      const recorder = mimeType
+        ? new MediaRecorder(audioStream, { mimeType })
+        : new MediaRecorder(audioStream);
       const chunks: BlobPart[] = [];
 
       recorder.ondataavailable = (e) => {
@@ -156,7 +191,10 @@ function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) 
 
       recorder.onstop = async () => {
         audioStream.getTracks().forEach((t) => t.stop());
-        const audioBlob = new Blob(chunks, { type: "audio/webm" });
+        if (audioStreamRef.current === audioStream) {
+          audioStreamRef.current = null;
+        }
+        const audioBlob = new Blob(chunks, { type: mimeType || "audio/webm" });
         await sendRequestRef.current?.(audioBlob);
       };
 
@@ -200,7 +238,10 @@ function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) 
       try {
         const res = await fetch(`${API_BASE}/v1/voice/vision/chat`, {
           method: "POST",
-          headers: authHeaders({ "X-Voice-Consent": "true" }),
+          headers: authHeaders({
+            "X-Session-ID": getChatSessionId(),
+            "X-Voice-Consent": "true",
+          }),
           body: formData,
         });
 
@@ -276,10 +317,21 @@ function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) 
   }, [setCapturedImageBlob]);
 
   return (
-    <div className="vv-root" role="dialog" aria-modal="true" aria-label="Voice and vision mode">
+    <div
+      className="vv-root"
+      role="dialog"
+      aria-modal="true"
+      aria-label={t("voice.visionMode")}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          handleClose();
+        }
+      }}
+    >
       {/* Top bar */}
       <div className="vv-topbar">
-        <button onClick={onClose} className="vfc-icon-btn" aria-label="Close vision mode">
+        <button onClick={handleClose} className="vfc-icon-btn" aria-label="Close vision mode">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
@@ -317,7 +369,7 @@ function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) 
 
         {/* Processing overlay */}
         {captureState === "processing" && (
-          <div className="vv-processing">
+          <div className="vv-processing" role="status" aria-live="polite">
             <div className="vv-processing-inner">
               <span className="vfc-spinner" aria-hidden="true" />
               <p className="vv-processing-text">Processing document + voice...</p>
@@ -361,7 +413,7 @@ function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) 
 
         {captureState === "result" && (
           <div className="vv-result">
-            {error && <p className="vv-result-error">{error}</p>}
+            {error && <p className="vv-result-error" role="alert">{error}</p>}
             {transcript && (
               <div className="vv-result-card vv-result-card-transcript">
                 <p className="vv-result-label">You said:</p>

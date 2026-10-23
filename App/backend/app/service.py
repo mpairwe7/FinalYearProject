@@ -158,6 +158,7 @@ from .guardrails import (
 )
 from .language_state import LanguageDecision, normalize_locale_tag, resolve_turn_locale
 from .memory import get_memory_service
+from .model_welfare import is_model_welfare_query
 from .premise_guard import check_false_premise
 from .query import (
     SUPPORTED_LOCALES,
@@ -2164,6 +2165,8 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
     attachments: list[Any] | None = None,
     locale_explicit: bool | None = None,
     connector_namespaces: list[str] | None = None,
+    portal_context: dict[str, Any] | None = None,
+    portal_task_submission: dict[str, Any] | None = None,
 ) -> "AsyncIterator[tuple[str, Any]]":
     """Run a single chat turn and stream event tuples to the caller.
 
@@ -2255,6 +2258,8 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             granted_purposes=granted_purposes,
             locale_explicit=locale_explicit,
             connector_namespaces=connector_namespaces,
+            portal_context=portal_context,
+            portal_task_submission=portal_task_submission,
             turn_out=turn_out,
         )
         if result.get("_case_facts") is not None:
@@ -2328,6 +2333,8 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 result["next_actions"] = ChatModel._localize_next_actions(result["next_actions"], locale)
             if result.get("workflow"):
                 result["workflow"] = ChatModel._localize_workflow(result["workflow"], locale)
+            if isinstance(result.get("portal_copilot"), dict):
+                result["portal_copilot"] = ChatModel._localize_portal_copilot(result["portal_copilot"], locale)
 
         for evt_name, evt_payload in result.get("_web_research_events") or []:
             yield (evt_name, evt_payload)
@@ -2356,6 +2363,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             "false_premise_rejected",
             "greeting",
             "conversational",
+            "portal_copilot",
         ) or result.get("_short_circuit"):
             yield ("metadata", _metadata_payload(result, include_short_circuit=True))
             # These branches emit the whole reply as one frame, so it can be
@@ -2427,6 +2435,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             )
             and llm_module.is_available()
             and not result.get("_suppress_agentic")
+            and result.get("retrieval_mode") != "model_welfare"
         )
         agentic_used_tools = False
         if use_agentic:
@@ -2835,30 +2844,37 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 }),
             )
 
-            try:
-                model._cache.put(
-                    rewritten_query,
-                    {
-                        "reply": full_reply,
-                        "sources": result.get("sources", []),
-                        "citations": result.get("citations", []),
-                        "faithfulness_score": faith,
-                        "retrieval_mode": result.get("retrieval_mode"),
-                        "model": result.get("model"),
-                        "conversation_id": result.get("conversation_id"),
-                        "locale": result.get("locale"),
-                        "escalation_required": escalate,
-                        "escalation_reason": esc_reason,
-                        "agent_role": result.get("agent_role", "rag_answerer"),
-                        "handoff": handoff,
-                        "response_judge": response_judge,
-                        "next_actions": result.get("next_actions", []),
-                        "ticket_id": ticket_id,
-                    },
-                    tenant_id=tenant_id or "default",
-                )
-            except Exception:
-                logger.debug("Stream cache store failed", exc_info=True)
+            if (
+                flags.is_enabled("semantic_cache")
+                and result.get("_cache_allowed")
+                and result.get("retrieval_mode") not in ("blocked", "abstained", "model_welfare")
+                and not escalate
+                and not ticket_id
+            ):
+                try:
+                    model._cache.put(
+                        rewritten_query,
+                        {
+                            "reply": full_reply,
+                            "sources": result.get("sources", []),
+                            "citations": result.get("citations", []),
+                            "faithfulness_score": faith,
+                            "retrieval_mode": result.get("retrieval_mode"),
+                            "model": result.get("model"),
+                            "conversation_id": result.get("conversation_id"),
+                            "locale": result.get("locale"),
+                            "escalation_required": escalate,
+                            "escalation_reason": esc_reason,
+                            "agent_role": result.get("agent_role", "rag_answerer"),
+                            "handoff": handoff,
+                            "response_judge": response_judge,
+                            "next_actions": result.get("next_actions", []),
+                            "ticket_id": ticket_id,
+                        },
+                        tenant_id=tenant_id or "default",
+                    )
+                except Exception:
+                    logger.debug("Stream cache store failed", exc_info=True)
         else:
             # No LLM tier at all — extractive reply, same EI parity as above.
             full_reply = result.get("reply", "")
@@ -3041,6 +3057,7 @@ def _metadata_payload(result: dict[str, Any], *, include_short_circuit: bool) ->
         "resources": result.get("resources", []),
         "discrepancy_report": result.get("discrepancy_report"),
         "objective_hypothesis": result.get("objective_hypothesis"),
+        "portal_copilot": result.get("portal_copilot"),
     }
     if include_short_circuit:
         payload.update(
@@ -5465,7 +5482,17 @@ class ChatModel:
     # calculator hands over a figure — none of them want a second closer
     # bolted on.
     _FRAMED_MODES_EXCLUDED = frozenset(
-        {"workflow", "clarification", "abstained", "escalated", "calculator", "graph"}
+        {
+            "workflow",
+            "clarification",
+            "abstained",
+            "escalated",
+            "calculator",
+            "graph",
+            "model_welfare",
+            "greeting",
+            "conversational",
+        }
     )
 
     _PROCEDURAL_RE = re.compile(
@@ -6509,7 +6536,166 @@ class ChatModel:
                 out["next_actions"] = self._localize_next_actions(out["next_actions"], locale)
             if "resources" in out and isinstance(out["resources"], list):
                 out["resources"] = [self._localize_resource(r, locale) for r in out["resources"]]
+            if "portal_copilot" in out and isinstance(out["portal_copilot"], dict):
+                out["portal_copilot"] = self._localize_portal_copilot(out["portal_copilot"], locale)
         return out
+
+    @classmethod
+    def _localize_portal_copilot(cls, copilot: dict[str, Any], locale: str) -> dict[str, Any]:
+        """Localize user-facing labels on a `portal_copilot` card while preserving all figures, URLs, and selectors."""
+        if not copilot or locale in ("", "en"):
+            return copilot
+        out = dict(copilot)
+        for text_key in (
+            "title",
+            "description",
+            "verification_prompt",
+            "verification_warning",
+            "login_reason",
+            "diagnosis_summary",
+            "user_message",
+        ):
+            val = out.get(text_key)
+            if isinstance(val, str) and val.strip():
+                out[text_key] = cls._localize_reply(val, locale)
+        return out
+
+    def _evaluate_portal_copilot(
+        self,
+        *,
+        message: str,
+        router_message: str,
+        thread_id: str,
+        locale: str,
+        user_id: str | None = None,
+        session_id: str | None = None,
+        tenant_id: str | None = None,
+        portal_context: dict[str, Any] | None = None,
+        portal_task_submission: dict[str, Any] | None = None,
+        attachments: list[Any] | None = None,
+        conversation_history: list[dict[str, str]] | None = None,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """Evaluate Phase 42 Portal Task Execution & Stuck-User DOM Co-Pilot."""
+        if not flags.is_enabled("portal_copilot", subject=user_id):
+            return None, None
+
+        from . import portal_copilot as pc_mod
+
+        eff_tenant = tenant_id or "default"
+        if (
+            isinstance(portal_task_submission, dict)
+            and portal_task_submission.get("resumed_after_login")
+            and user_id
+            and thread_id
+        ):
+            anon_key = db.conversation_state_key(
+                thread_id,
+                session_id=session_id,
+                user_id=None,
+                tenant_id=eff_tenant,
+            )
+            authed_key = db.conversation_state_key(
+                thread_id,
+                session_id=session_id,
+                user_id=user_id,
+                tenant_id=eff_tenant,
+            )
+            if anon_key != authed_key:
+                try:
+                    db.adopt_workflow_session(
+                        anon_key,
+                        authed_key,
+                        user_id=user_id,
+                        tenant_id=eff_tenant,
+                        min_updated_at=time.time() - db.conversation_ttl_seconds(),
+                    )
+                except Exception:
+                    logger.debug("adopt_workflow_session on portal task resume skipped", exc_info=True)
+
+        outcome = pc_mod.evaluate_turn(
+            message=router_message or message,
+            portal_context=portal_context,
+            portal_task_submission=portal_task_submission,
+            conversation_history=conversation_history,
+            user_id=user_id,
+            session_id=session_id,
+            conversation_id=thread_id,
+            tenant_id=eff_tenant,
+        )
+        if outcome is None:
+            if attachments:
+                for att in attachments:
+                    sg = getattr(att, "screenshot_guidance", None) or (
+                        att.get("screenshot_guidance") if isinstance(att, dict) else None
+                    )
+                    if isinstance(sg, dict) and sg.get("copilot_handoff"):
+                        handoff = dict(sg["copilot_handoff"])
+                        return None, {
+                            "card_type": "screenshot_copilot_handoff",
+                            "portal_key": handoff.get("portal_key", "e_services"),
+                            "portal_name": handoff.get("detected_portal", "URA Portal"),
+                            "title": handoff.get("detected_state", "URA Portal Screen"),
+                            "requires_auth": bool(handoff.get("requires_login_first")),
+                            "is_authenticated": bool(user_id),
+                            "copilot_portal_url": handoff.get("inbuilt_portal_url", "/portal/e_services?copilot=1"),
+                            "signin_portal_href": handoff.get("signin_then_portal_url", "/signin"),
+                            "prefill_state": handoff.get("prefill_state", {}),
+                            "user_message": handoff.get("user_message", ""),
+                            "completeness_check": sg.get("completeness_check", {}),
+                        }
+            return None, None
+
+        card_dict = outcome.to_dict()
+        if outcome.card_type == "copilot_launch_banner":
+            return None, card_dict
+
+        # If there is no explicit form submission or DOM telemetry, defer to:
+        # 1. An already-active guided workflow or explicit "Guide me step by step..." start
+        # 2. The legacy situational PRN voucher generator when an amount is given without a TIN
+        if portal_task_submission is None and portal_context is None:
+            state_thread_id = _state_conversation_id(thread_id)
+            persisted = db.get_workflow_session(state_thread_id, tenant_id=eff_tenant)
+            if (persisted and persisted.get("status") == "active") or _EXPLICIT_WORKFLOW_START_RE.search(
+                f"{message} {router_message}"
+            ):
+                return None, card_dict
+
+            missing = card_dict.get("missing_fields") or []
+            if (
+                card_dict.get("task_id") == "payment_generate_prn"
+                and "tin" in missing
+                and "amount_ugx" not in missing
+            ):
+                return None, card_dict
+
+        sc_res: dict[str, Any] = {
+            "reply": outcome.deterministic_reply,
+            "sources": ["https://portal.ura.go.ug"],
+            "citations": [],
+            "faithfulness_score": 1.0,
+            "retrieval_mode": "portal_copilot",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": "portal_copilot",
+            "handoff": None,
+            "response_judge": {
+                "decision": "approve",
+                "final_decision": "approve",
+                "applied_revision": False,
+                "reasons": ["deterministic 4-tier portal copilot gate"],
+                "confidence_band": "high",
+            },
+            "next_actions": [
+                f"Open {card_dict.get('portal_name', 'URA Portal')} with AI Co-Pilot",
+                "Check my tax obligations",
+            ],
+            "ticket_id": "",
+            "portal_copilot": card_dict,
+        }
+        return sc_res, card_dict
 
     @staticmethod
     def _localize_reply(reply: str, locale: str, *, tone_register: str = "") -> str:
@@ -10289,6 +10475,8 @@ class ChatModel:
         locale_explicit: bool | None = None,
         memory_write: bool = True,
         connector_namespaces: list[str] | None = None,
+        portal_context: dict[str, Any] | None = None,
+        portal_task_submission: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Answer *message*, rendered in *locale*.
 
@@ -10327,6 +10515,8 @@ class ChatModel:
                 locale_explicit=locale_explicit,
                 memory_write=memory_write,
                 connector_namespaces=connector_namespaces,
+                portal_context=portal_context,
+                portal_task_submission=portal_task_submission,
             )
 
     def _generate_localized(
@@ -10348,6 +10538,8 @@ class ChatModel:
         locale_explicit: bool | None = None,
         memory_write: bool = True,
         connector_namespaces: list[str] | None = None,
+        portal_context: dict[str, Any] | None = None,
+        portal_task_submission: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """:meth:`generate`'s body: the English answer, localized, then audited."""
         turn_out: dict[str, str] = {}
@@ -10367,6 +10559,8 @@ class ChatModel:
             turn_out=turn_out,
             memory_write=memory_write,
             connector_namespaces=connector_namespaces,
+            portal_context=portal_context,
+            portal_task_submission=portal_task_submission,
         )
         if isinstance(result, dict) and turn_out.get("source"):
             # Why the reply is in this language: the client keeps a detected
@@ -10477,6 +10671,8 @@ class ChatModel:
         turn_out: dict[str, str] | None = None,
         memory_write: bool = True,
         connector_namespaces: list[str] | None = None,
+        portal_context: dict[str, Any] | None = None,
+        portal_task_submission: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Return a grounded, cited answer via hybrid retrieval + guardrails.
 
@@ -10566,7 +10762,11 @@ class ChatModel:
                 except Exception:
                     logger.debug("Discrepancy detection hook failed", exc_info=True)
 
+            copilot_card: dict[str, Any] | None = None
+
             def _with_discrepancy(res: dict[str, Any]) -> dict[str, Any]:
+                if copilot_card and not res.get("portal_copilot"):
+                    res["portal_copilot"] = copilot_card
                 if discrepancy_payload and not res.get("discrepancy_report"):
                     res["discrepancy_report"] = discrepancy_payload
                 if discrepancy_ack_prefix:
@@ -10643,6 +10843,7 @@ class ChatModel:
                 and not attachments
                 and not conversation_history
                 and not connector_namespaces
+                and not is_model_welfare_query(router_message or message)
             )
             # A taxpayer who chose a service and asked it for a record is not
             # asking for a template. The keyword answers below cannot read that
@@ -10779,6 +10980,26 @@ class ChatModel:
             if case_status is not None:
                 return _with_discrepancy(case_status)
 
+            # Phase 42 — URA Portal Task Execution & Stuck-User DOM Co-Pilot
+            copilot_sc, copilot_card = self._evaluate_portal_copilot(
+                message=message,
+                router_message=router_message,
+                thread_id=thread_id,
+                locale=locale,
+                user_id=user_id,
+                session_id=session_id,
+                tenant_id=tenant_id,
+                portal_context=portal_context,
+                portal_task_submission=portal_task_submission,
+                attachments=attachments,
+                conversation_history=conversation_history,
+            )
+            if copilot_sc is not None:
+                self._audit_turn(
+                    message=message, result=copilot_sc, session_id=session_id, trace_ctx=trace_ctx
+                )
+                return _with_discrepancy(copilot_sc)
+
             # Direct transactional PRN generation when payment amount is explicitly provided
             if connector_intent is None and re.search(
                 r"\b(?:generate|create|issue)\b.*\bprn\b", router_message, re.IGNORECASE
@@ -10790,6 +11011,8 @@ class ChatModel:
                         message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
                     )
                     if prn_res:
+                        if copilot_card and not prn_res.get("portal_copilot"):
+                            prn_res["portal_copilot"] = copilot_card
                         return _with_discrepancy(prn_res)
 
             if (
@@ -10810,6 +11033,8 @@ class ChatModel:
                         raw_message=message,
                     )
                 if workflow_result:
+                    if copilot_card and not workflow_result.get("portal_copilot"):
+                        workflow_result["portal_copilot"] = copilot_card
                     if distress and workflow_result.get("reply"):
                         workflow_result["reply"] = (
                             f"{empathy_ack(distress)}\n\n{workflow_result['reply']}"
@@ -11703,7 +11928,7 @@ class ChatModel:
                     bool(connector_namespaces)
                     and flags.is_enabled("enterprise_connectors")
                 )
-            ) and self._llm_available and not suppress_agentic_fallback
+            ) and self._llm_available and not suppress_agentic_fallback and not welfare_cats
 
             agentic_used_tools = False
             agentic_reply = ""
@@ -12416,7 +12641,7 @@ class ChatModel:
         if (
             cache_allowed
             and flags.is_enabled("semantic_cache")
-            and retrieval_mode not in ("blocked", "abstained")
+            and retrieval_mode not in ("blocked", "abstained", "model_welfare")
             and not escalate
             and not withheld_contradicted
             and not ticket_id
@@ -12548,6 +12773,8 @@ class ChatModel:
         turn_out: dict[str, str] | None = None,
         memory_write: bool = True,
         connector_namespaces: list[str] | None = None,
+        portal_context: dict[str, Any] | None = None,
+        portal_task_submission: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Run retrieval + guardrails but skip LLM generation (for SSE streaming).
 
@@ -12653,6 +12880,7 @@ class ChatModel:
             and not attachments
             and not conversation_history
             and not connector_namespaces
+            and not is_model_welfare_query(router_message or message)
         )
         # See generate(): a lookup in a service the taxpayer chose is not a
         # question for the keyword templates below.
@@ -12729,6 +12957,29 @@ class ChatModel:
                 "_short_circuit": True,
             }
 
+        # Phase 42 — URA Portal Task Execution & Stuck-User DOM Co-Pilot (streaming parity)
+        copilot_sc_s, copilot_card_s = self._evaluate_portal_copilot(
+            message=message,
+            router_message=router_message,
+            thread_id=thread_id,
+            locale=locale,
+            user_id=user_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            portal_context=portal_context,
+            portal_task_submission=portal_task_submission,
+            attachments=attachments,
+            conversation_history=conversation_history,
+        )
+        if copilot_sc_s is not None:
+            return {
+                **copilot_sc_s,
+                "_hits": [],
+                "_history": conversation_history,
+                "_rewritten": rewritten,
+                "_short_circuit": True,
+            }
+
         # Direct transactional PRN generation (parity with generate()).
         if connector_intent is None and re.search(
             r"\b(?:generate|create|issue)\b.*\bprn\b", router_message, re.IGNORECASE
@@ -12740,6 +12991,8 @@ class ChatModel:
                     message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
                 )
                 if prn_res:
+                    if copilot_card_s and not prn_res.get("portal_copilot"):
+                        prn_res["portal_copilot"] = copilot_card_s
                     return {**prn_res, "_hits": [], "_history": [], "_short_circuit": True}
 
         workflow_result = None
@@ -12756,6 +13009,8 @@ class ChatModel:
                 raw_message=message,
             )
         if workflow_result:
+            if copilot_card_s and not workflow_result.get("portal_copilot"):
+                workflow_result["portal_copilot"] = copilot_card_s
             if distress and workflow_result.get("reply"):
                 workflow_result["reply"] = (
                     f"{empathy_ack(distress)}\n\n{workflow_result['reply']}"
@@ -13439,6 +13694,8 @@ class ChatModel:
                     self._cache.put(rewritten, dict(result), tenant_id=tenant_id or "default")
                 if distress:
                     result["reply"] = f"{empathy_ack(distress)}\n\n{result['reply']}"
+                if copilot_card_s and not result.get("portal_copilot"):
+                    result["portal_copilot"] = copilot_card_s
                 return {
                     **result,
                     "_hits": hits,
@@ -13665,6 +13922,8 @@ class ChatModel:
             "_model_tier": stream_tier_decision.tier.value if stream_tier_decision is not None else ModelTier.T1.value,
             "_case_facts": _ACTIVE_CASE_FACTS.get(),
             "current_topic": str(stream_topic_ctx.get("current_topic") or ""),
+            "portal_copilot": copilot_card_s,
+            "_cache_allowed": cache_allowed,
         }
 
     @staticmethod

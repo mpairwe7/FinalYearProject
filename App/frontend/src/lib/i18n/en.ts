@@ -161,9 +161,13 @@ export const en = {
 
   // Language picker -------------------------------------------------------
   'language.trigger': 'Language',
+  'language.triggerAuto': 'Response language: Auto-detect (currently {value})',
+  'language.triggerSelected': 'Response language: {value}',
   'language.title': 'Language selection',
   'language.description':
     'Changes the interface and the language the assistant answers in.',
+  'voice.voiceFirstChat': 'Voice-first chat',
+  'voice.visionMode': 'Voice and vision mode',
 
   // Messages --------------------------------------------------------------
   'message.you': 'You said',
@@ -358,6 +362,8 @@ export const en = {
   'call.talkOfficer': 'Talk to an officer',
   'call.callMeBack': 'Call me back instead',
   'call.queuePosition': 'Place in queue: {position}',
+  'call.ticketChip': 'Ticket: {ref}',
+  'call.officerNamed': 'Officer {name}',
   'call.hangup': 'End call',
   'call.transferring': 'Connecting you to an officer…',
   'call.onHold': 'On hold',
@@ -398,6 +404,31 @@ export const en = {
   'call.lang.sw': 'Kiswahili',
   'call.lang.nyn': 'Runyankole',
   'call.lang.ach': 'Acholi',
+
+  // Portal Task Execution & Inbuilt Co-Pilot (Phase 42) -------------------
+  'portalCopilot.inlineFormBadge': 'Task Input Required',
+  'portalCopilot.inlineFormSubtitle': 'Complete the fields below directly in chat or open the URA portal with the built-in AI Co-Pilot.',
+  'portalCopilot.continueToReview': 'Review & Verify Details',
+  'portalCopilot.verifyNow': 'Verify Now',
+  'portalCopilot.confirmationBadge': 'Action Permission Required',
+  'portalCopilot.verificationPrompt': 'Please verify all information below carefully before allowing the URA AI to execute this action.',
+  'portalCopilot.simulationBadge': 'Simulation / Sandbox Mode (Not Live URA)',
+  'portalCopilot.allowBtn': 'Allow & Execute',
+  'portalCopilot.editBtn': 'Edit Details',
+  'portalCopilot.disallowBtn': 'Disallow',
+  'portalCopilot.revealSensitive': 'Show',
+  'portalCopilot.hideSensitive': 'Hide',
+  'portalCopilot.executing': 'Executing task…',
+  'portalCopilot.executedBadge': 'Action Executed',
+  'portalCopilot.declinedBadge': 'Action Cancelled',
+  'portalCopilot.stepUpBadge': 'Sign-In Required',
+  'portalCopilot.signInReturnChat': 'Sign In to URA Account & Return Here',
+  'portalCopilot.signInOpenPortal': 'Sign In & Open Portal with Built-In AI Co-Pilot',
+  'portalCopilot.openWithCopilot': 'Open {portal} with Built-In AI Co-Pilot ↗',
+  'portalCopilot.signInFirstThenCopilot': 'Sign In First, Then Open {portal} with Built-In AI Co-Pilot →',
+  'portalCopilot.incompleteScreenshotWarning': 'Parts of this portal screen appear cut off. Pick what you are doing or open the screen with the built-in AI Co-Pilot:',
+  'portalCopilot.statutoryBadge': 'Statutory Taxpayer Declaration Required',
+  'portalCopilot.stuckBadge': 'Live Portal Co-Pilot Guidance',
 } as const;
 
 export type TranslationKey = keyof typeof en;

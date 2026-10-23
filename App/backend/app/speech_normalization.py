@@ -83,10 +83,68 @@ _PRN_EXPLICIT_RE = re.compile(
     r"\b(?:P-?R-?N|P\.R\.N\.)(?::|\s+is|\s+number|\s+no\.?)?\s*(\d{10,14})\b", re.IGNORECASE
 )
 
-# National Identification Number (NIN - Ugandan 14-char standard CM/CF)
+# National Identification Number (NIN - Ugandan 14-char standard CM/CF/CR, 13-15 accepted per G247)
 _NIN_EXPLICIT_RE = re.compile(
-    r"\bNIN(?::|\s+is|\s+number|\s+no\.?)?\s*([CF][MF][0-9A-Za-z]{12})\b", re.IGNORECASE
+    r"\bNIN(?::|\s+is|\s+number|\s+no\.?)?\s*(C[MFR][0-9A-Za-z]{11,13})\b", re.IGNORECASE
 )
+_STANDALONE_TIN_OR_PRN_RE = re.compile(
+    r"\b(?:(UGX|USD|Shs)\s+)?(1\d{9}|2\d{11,14})\b", re.IGNORECASE
+)
+_REDACTED_MARKER_RE = re.compile(
+    r"\[REDACTED_(UG_NID|UG_TIN|UG_PHONE|EMAIL|CREDIT_CARD|AMEX_CARD|UG_PASSPORT)\]",
+    re.IGNORECASE,
+)
+_REDACTED_SPOKEN_LABELS: dict[str, dict[str, str]] = {
+    "UG_NID": {
+        "en": "redacted National ID",
+        "lg": "ennamba ya NIN ekwekeddwa",
+        "sw": "nambari ya kitambulisho iliyofichwa",
+        "nyn": "enamba ya NIN esherekirwe",
+        "ach": "namba me NIN ma kikano",
+    },
+    "UG_TIN": {
+        "en": "redacted TIN",
+        "lg": "ennamba ya TIN ekwekeddwa",
+        "sw": "nambari ya TIN iliyofichwa",
+        "nyn": "enamba ya TIN esherekirwe",
+        "ach": "namba me TIN ma kikano",
+    },
+    "UG_PHONE": {
+        "en": "redacted phone number",
+        "lg": "ennamba y'essimu ekwekeddwa",
+        "sw": "nambari ya simu iliyofichwa",
+        "nyn": "enamba y'esimu esherekirwe",
+        "ach": "namba me cim ma kikano",
+    },
+    "EMAIL": {
+        "en": "redacted email address",
+        "lg": "endagiriro ya email ekwekeddwa",
+        "sw": "anwani ya barua pepe iliyofichwa",
+        "nyn": "email esherekirwe",
+        "ach": "email ma kikano",
+    },
+    "CREDIT_CARD": {
+        "en": "redacted card number",
+        "lg": "ennamba ya kaadi ekwekeddwa",
+        "sw": "nambari ya kadi iliyofichwa",
+        "nyn": "enamba ya kaadi esherekirwe",
+        "ach": "namba me karatac ma kikano",
+    },
+    "AMEX_CARD": {
+        "en": "redacted card number",
+        "lg": "ennamba ya kaadi ekwekeddwa",
+        "sw": "nambari ya kadi iliyofichwa",
+        "nyn": "enamba ya kaadi esherekirwe",
+        "ach": "namba me karatac ma kikano",
+    },
+    "UG_PASSPORT": {
+        "en": "redacted passport number",
+        "lg": "ennamba ya paasipooti ekwekeddwa",
+        "sw": "nambari ya pasipoti iliyofichwa",
+        "nyn": "enamba ya paasipooti esherekirwe",
+        "ach": "namba me pasipot ma kikano",
+    },
+}
 
 # Toll-free and customer care numbers
 _TOLLFREE_URA_RE = re.compile(r"\b0800\s*([12]17)\s*000\b")
@@ -420,6 +478,13 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
 
     t = _CONTACT_FOOTER_RE.sub("", text)
 
+    # 0. Convert PII redaction placeholders ([REDACTED_UG_NID], etc.) into natural spoken words
+    #    before Markdown italic stripping (_..._) removes underscores inside [REDACTED_UG_NID].
+    t = _REDACTED_MARKER_RE.sub(
+        lambda m: _REDACTED_SPOKEN_LABELS.get(m.group(1).upper(), {}).get(locale, "redacted identifier"),
+        t,
+    )
+
     # 1. Strip markdown links, including a missing opening bracket, then any
     #    bare URL the model left behind. A neural voice reads "www dot" aloud.
     t = _MD_LINK_RE.sub(r"\1", t)
@@ -486,6 +551,14 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
         return f"NIN {chars}"
 
     t = _NIN_EXPLICIT_RE.sub(_nin_sub, t)
+
+    # 7c1. Normalize standalone 10-digit TINs and 12-15 digit PRNs so they are never spoken as "one billion..."
+    def _standalone_tin_or_prn_sub(m: re.Match) -> str:
+        if m.group(1):
+            return m.group(0)
+        return " ".join(list(m.group(2)))
+
+    t = _STANDALONE_TIN_OR_PRN_RE.sub(_standalone_tin_or_prn_sub, t)
 
     # 7d. Normalize URA toll-free contact numbers for cadence
     t = _TOLLFREE_URA_RE.sub(r"0 800, \1, 0 0 0", t)

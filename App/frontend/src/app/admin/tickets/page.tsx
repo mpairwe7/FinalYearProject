@@ -178,10 +178,10 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
               type="button"
               className={`ops-filter${view.priority === "" ? " is-active" : ""}`}
               aria-pressed={view.priority === ""}
-              aria-label="All priorities"
               onClick={() => setView({ priority: "" })}
             >
-              any
+              <span className="sr-only">All priorities</span>
+              <span aria-hidden="true">any</span>
             </button>
             {PRIORITIES.map((value) => (
               <button
@@ -209,10 +209,10 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
                   type="button"
                   className={`ops-filter${view.team === "" ? " is-active" : ""}`}
                   aria-pressed={view.team === ""}
-                  aria-label="All teams"
                   onClick={() => setView({ team: "" })}
                 >
-                  any
+                  <span className="sr-only">All teams</span>
+                  <span aria-hidden="true">any</span>
                 </button>
                 {teams.map((value) => (
                   <button
