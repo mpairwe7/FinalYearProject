@@ -773,6 +773,30 @@ class UraReceptionistBrain(LLMService):
 
         # 2. Pending Clarification
         if self.room.state.clarify is not None:
+            if (
+                reask_window is None
+                and len(user_text.split()) >= 5
+                and not re.match(
+                    r"^\W*(?:yes|yeah|yep|yup|no|nope|nah|yee|nedda|ndiyo|ndio|hapana|ego|ngaaha|eyo|pe)\b",
+                    user_text,
+                    re.IGNORECASE,
+                )
+                and (
+                    "?" in user_text
+                    or re.search(
+                        r"\b(what|how|when|where|who|why|which|can|could|do|does|is|are|tell|explain|ntya|bimeka|ninawezaje|ngapi|ntai|ningahi|niningo|adi)\b",
+                        user_text,
+                        re.IGNORECASE,
+                    )
+                )
+            ):
+                logger.info(
+                    "Caller spoke a full new question while clarification was open on call %s; superseding clarification",
+                    self.room.call_id,
+                )
+                self.room.state.clarify = None
+
+        if self.room.state.clarify is not None:
             action = self.clarify_gate.resolve(
                 user_text,
                 words=words,
@@ -1552,10 +1576,16 @@ class UraReceptionistBrain(LLMService):
         offer takes the place of "Would you like more detail?". Whichever is
         asked becomes the pending offer the caller's next turn may answer.
         """
-        sentences = _split_into_sentences(reply)
+        cleaned_reply = re.sub(
+            r"\n+\s*(?:\*\*)?(?:You might also want to know|If you get stuck at any step, URA is happy to help)\b.*",
+            "",
+            reply,
+            flags=re.IGNORECASE | re.DOTALL,
+        ).strip() or reply
+        sentences = _split_into_sentences(cleaned_reply)
         max_sentences = get_max_spoken_sentences()
         rest = sentences[max_sentences:]
-        spoken = " ".join(sentences[:max_sentences]) if rest else reply
+        spoken = " ".join(sentences[:max_sentences]) if rest else cleaned_reply
         if offer_officer:
             self._offer("officer", reason="offer_accepted", at_risk=at_risk)
             return f"{spoken} {phrase('officer_offer', self.language)}"

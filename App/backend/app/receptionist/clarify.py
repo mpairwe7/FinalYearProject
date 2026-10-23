@@ -12,7 +12,7 @@ from typing import Any
 
 from .config import clarify_repeat_enabled
 from .language import is_native_word
-from .lexicon import candidates
+from .lexicon import candidates, repair_asr_entities
 from .phrases import phrase, yes_no_patterns
 
 logger = logging.getLogger(__name__)
@@ -208,8 +208,9 @@ class ClarifyGate:
         loanwords_only = language != "en"
 
         # Case 1: words is None (fallback STT backend)
+        repaired_text = repair_asr_entities(text) if language == "en" else text
         if words is None:
-            tokens = [w.strip(",.?!;:\"'()") for w in text.split()]
+            tokens = [w.strip(",.?!;:\"'()") for w in repaired_text.split()]
             for i, tok in enumerate(tokens):
                 prev_word = tokens[i - 1] if i > 0 else None
                 misheard = entity_mishear(tok, prev_word)
@@ -298,12 +299,23 @@ class ClarifyGate:
         # Elsewhere most content words are not in the (English) lexicon at
         # all, so look for the least certain word that is one of its acronyms.
         ordered = sorted(low_items, key=prob_of)
-        for lowest_idx, _item in ordered if loanwords_only else ordered[:1]:
+        unmatched_lowest_idx: int | None = None
+        for lowest_idx, _item in ordered:
             target_str = word_at(lowest_idx)
             prev_str = word_at(lowest_idx - 1).strip(",.?!;:\"'()") if lowest_idx > 0 else None
             cands = candidates(target_str, context=prev_str, acronyms_only=loanwords_only)
             if cands and cands[0][1] >= 0.7:
                 cand_term = cands[0][0]
+                clean_target = target_str.strip(",.?!;:\"'()")
+                if cand_term == clean_target.lower():
+                    continue
+                if (
+                    language == "en"
+                    and repaired_text.lower() != text.lower()
+                    and re.search(rf"\b{re.escape(cand_term)}\b", repaired_text, re.IGNORECASE)
+                    and not re.search(rf"\b{re.escape(clean_target)}\b", repaired_text, re.IGNORECASE)
+                ):
+                    continue
                 return ClarifyAction(
                     action="ask_term",
                     candidate=cand_term,
@@ -311,8 +323,15 @@ class ClarifyGate:
                     previous_word=prev_str,
                     prompt=phrase("clarify_term", language, term=_spoken_term(cand_term, language)),
                 )
+            if unmatched_lowest_idx is None:
+                unmatched_lowest_idx = lowest_idx
+            if not loanwords_only:
+                break
 
-        lowest_idx = ordered[0][0]
+        if unmatched_lowest_idx is None:
+            return ClarifyAction(action="none")
+
+        lowest_idx = unmatched_lowest_idx
         target_str = word_at(lowest_idx)
         prev_str = word_at(lowest_idx - 1).strip(",.?!;:\"'()") if lowest_idx > 0 else None
         if not clarify_repeat_enabled(language):
@@ -376,7 +395,10 @@ class ClarifyGate:
         # ------------------------------------------------------------------
         if state.stage == "term":
             sugg = (state.suggested_term or "").lower()
-            confirmed = decision == "yes" or (sugg and sugg in reply_lower)
+            reply_tokens = [w.strip(",.?!;:\"'()") for w in reply_text.split() if w.strip(",.?!;:\"'()")]
+            confirmed = decision == "yes" or (
+                bool(sugg) and len(reply_tokens) <= 5 and sugg in reply_lower
+            )
 
             if confirmed:
                 corrected = _replace_word(
@@ -403,6 +425,8 @@ class ClarifyGate:
 
             # Restatement / neither: caller spoke a replacement word
             cands = candidates(reply_text, context=state.previous_word, acronyms_only=loanwords_only)
+            if not cands and 1 < len(reply_tokens) <= 4:
+                cands = candidates(reply_tokens[-1], context=state.previous_word, acronyms_only=loanwords_only)
             if cands and cands[0][1] >= 0.7:
                 new_cand = cands[0][0]
                 corrected = _replace_word(

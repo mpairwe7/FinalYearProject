@@ -30,8 +30,22 @@ export function useCall() {
   const playerRef = useRef<PCMPlayer | null>(null);
   const micCleanupRef = useRef<(() => void) | null>(null);
   const dialToneCleanupRef = useRef<(() => void) | null>(null);
+  const dialToneCtxRef = useRef<AudioContext | null>(null);
   const holdToneCleanupRef = useRef<(() => void) | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+
+  const getToneContext = useCallback((): AudioContext | null => {
+    if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
+      return audioCtxRef.current;
+    }
+    try {
+      audioCtxRef.current = new AudioContext();
+      void audioCtxRef.current.resume().catch(() => {});
+      return audioCtxRef.current;
+    } catch {
+      return null;
+    }
+  }, []);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const statusBeforeReconnectRef = useRef<CallStatus>('ai');
   const speakingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -72,6 +86,10 @@ export function useCall() {
       playerRef.current.close();
       playerRef.current = null;
     }
+    if (dialToneCtxRef.current && dialToneCtxRef.current.state !== 'closed') {
+      dialToneCtxRef.current.close().catch(() => {});
+    }
+    dialToneCtxRef.current = null;
     if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
       audioCtxRef.current.close().catch(() => {});
       audioCtxRef.current = null;
@@ -91,6 +109,7 @@ export function useCall() {
   /** Start call audio the browser held back; wired to a tap on the call screen. */
   const resumeAudio = useCallback(() => {
     void liveKitSessionRef.current?.resumeAudio();
+    void playerRef.current?.resume();
   }, []);
 
   const requestOfficer = useCallback(() => {
@@ -137,16 +156,20 @@ export function useCall() {
       // Play dialing ring tone
       try {
         const toneCtx = new AudioContext();
-        audioCtxRef.current = toneCtx;
+        dialToneCtxRef.current = toneCtx;
         dialToneCleanupRef.current = playDialTone(toneCtx);
       } catch {}
 
       const startLegacyAudio = async () => {
-        if (playerRef.current || liveKitSessionRef.current) return;
-        const player = new PCMPlayer(16000);
-        playerRef.current = player;
-        player.onLevel((level) => setOutputLevel(level));
-        player.init().catch(() => {});
+        if (liveKitSessionRef.current) return;
+        if (!playerRef.current) {
+          const player = new PCMPlayer(16000);
+          playerRef.current = player;
+          player.onLevel((level) => setOutputLevel(level));
+          void player.init().catch(() => {});
+        } else {
+          void playerRef.current.resume();
+        }
         try {
           const recorder = new AudioRecorder();
           let silenceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -192,11 +215,15 @@ export function useCall() {
 
           switch (msg.type) {
             case 'call_ready': {
-              // Stop dial tone and enter active AI call
+              // Stop dial tone and close its AudioContext before opening call audio
               if (dialToneCleanupRef.current) {
                 dialToneCleanupRef.current();
                 dialToneCleanupRef.current = null;
               }
+              if (dialToneCtxRef.current && dialToneCtxRef.current.state !== 'closed') {
+                dialToneCtxRef.current.close().catch(() => {});
+              }
+              dialToneCtxRef.current = null;
               statusBeforeReconnectRef.current = 'ai';
               store.setStatus('ai');
               {
@@ -301,14 +328,18 @@ export function useCall() {
                 store.setStatus('officer');
                 if (msg.officer_name) store.setOfficerName(String(msg.officer_name));
                 // Play join chime
-                if (audioCtxRef.current) {
-                  playJoinChime(audioCtxRef.current);
+                const chimeCtx = getToneContext();
+                if (chimeCtx) {
+                  playJoinChime(chimeCtx);
                 }
               } else if (msg.status === 'on_hold') {
                 statusBeforeReconnectRef.current = 'on_hold';
                 store.setStatus('on_hold');
-                if (!holdToneCleanupRef.current && audioCtxRef.current) {
-                  holdToneCleanupRef.current = playHoldTone(audioCtxRef.current);
+                if (!holdToneCleanupRef.current) {
+                  const holdCtx = getToneContext();
+                  if (holdCtx) {
+                    holdToneCleanupRef.current = playHoldTone(holdCtx);
+                  }
                 }
               } else if (msg.status === 'reconnecting') {
                 if (holdToneCleanupRef.current) {
@@ -386,7 +417,7 @@ export function useCall() {
           : {}),
       });
     },
-    [cleanupAudio, hangup, store, t],
+    [cleanupAudio, getToneContext, hangup, store, t],
   );
 
   useEffect(() => {
