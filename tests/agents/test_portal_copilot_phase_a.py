@@ -251,5 +251,16 @@ def test_policy_gates_inline_form_confirmation_step_up_and_execution() -> None:
             conversation_id="conv-a",
         )
 
-    # 4. Masking helper
+    # 4. Masking helper & sales-figure exclusion
     assert mask_sensitive_value("nin", "CM92018100123A") == "CM92*******23A"
+    intent_tcc_verify = detect_portal_task_intent("verify TIN 1000023456 for my tax clearance")
+    assert intent_tcc_verify is not None
+    assert intent_tcc_verify.task_id == "tin_search_verify"
+    intent_mixed = detect_portal_task_intent(
+        "Annual sales UGX 80000000; I need a payment slip for UGX 50000"
+    )
+    assert intent_mixed is not None
+    assert intent_mixed.extracted_fields.get("amount_ugx") == "50000"
+    intent_sales_only = detect_portal_task_intent("My annual sales are UGX 80000000; generate a PRN")
+    assert intent_sales_only is not None
+    assert "amount_ugx" not in intent_sales_only.extracted_fields

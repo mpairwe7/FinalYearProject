@@ -244,6 +244,7 @@ class PortalTaskDecisionResponse(BaseModel):
     result: dict[str, Any] = Field(default_factory=dict)
     dom_actions: list[dict[str, Any]] = Field(default_factory=list)
     copilot_portal_url: str = ""
+    idempotent_replay: bool = False
 
 
 

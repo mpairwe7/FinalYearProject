@@ -1064,6 +1064,7 @@ _EXECUTED_TASK_CACHE: OrderedDict[tuple[str, str], dict[str, Any]] = OrderedDict
 _DECLINED_TASK_CACHE: OrderedDict[tuple[str, str], float] = OrderedDict()
 _IN_FLIGHT_TASK_KEYS: set[tuple[str, str]] = set()
 _SHARED_DECISION_KEYS: set[str] = set()
+_CONVERSATION_ENTITY_MEMORY: OrderedDict[str, dict[str, Any]] = OrderedDict()
 
 
 def _durable_task_cache_id(cache_key: tuple[str, str]) -> str:
@@ -1124,6 +1125,7 @@ def clear_portal_task_cache() -> None:
         _EXECUTED_TASK_CACHE.clear()
         _DECLINED_TASK_CACHE.clear()
         _IN_FLIGHT_TASK_KEYS.clear()
+        _CONVERSATION_ENTITY_MEMORY.clear()
         keys_to_reset = list(_SHARED_DECISION_KEYS)
         _SHARED_DECISION_KEYS.clear()
     for cid in keys_to_reset:
@@ -1258,12 +1260,23 @@ _EMAIL_RE = re.compile(r"\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b")
 _PHONE_RE = re.compile(r"(\+?256\s?7\d{8}|\b07\d{8}\b)")
 _DOB_RE = re.compile(r"\b((?:19|20)\d{2}-\d{2}-\d{2})\b")
 def _extract_amount_ugx(text: str) -> str:
-    """Linear-time token scanner for UGX currency amounts (avoids ReDoS backtracking)."""
+    """Linear-time token scanner for UGX currency amounts (excludes turnover/sales figures)."""
     tokens = text[:2000].replace(":", " ").replace("=", " ").split()
     currency_words = {"ugx", "shs", "shilling", "shillings", "amount"}
+    sales_context_words = {"turnover", "sales", "salary", "threshold", "income", "revenue"}
+    payment_context_words = {"pay", "payment", "prn", "slip", "refund", "payable", "deposit", "settle"}
+    fallback_val = ""
+    has_any_sales_word = any(
+        t.lower().strip(".,;()[]") in sales_context_words for t in tokens
+    )
     for i, raw_tok in enumerate(tokens):
         low_tok = raw_tok.lower().strip(".,;()[]")
         if low_tok in currency_words:
+            prev_window = {
+                tokens[j].lower().strip(".,;()[]") for j in range(max(0, i - 6), i)
+            }
+            if prev_window & sales_context_words and not (prev_window & payment_context_words):
+                continue
             for candidate_idx in (i + 1, i + 2, i - 1):
                 if 0 <= candidate_idx < len(tokens):
                     cand = tokens[candidate_idx].strip(".,;()[]").replace(",", "")
@@ -1271,10 +1284,14 @@ def _extract_amount_ugx(text: str) -> str:
                         try:
                             val = float(cand)
                             if val > 0 and not (len(cand) == 10 and cand.startswith("1")):
-                                return str(int(val))
+                                parsed = str(int(val))
+                                if prev_window & payment_context_words:
+                                    return parsed
+                                if not fallback_val and not has_any_sales_word:
+                                    fallback_val = parsed
                         except ValueError:
                             pass
-    return ""
+    return fallback_val
 
 
 def _extract_quantity(text: str) -> str:
@@ -1452,6 +1469,7 @@ def detect_portal_task_intent(
             "register a payment",
             "generate a payment slip",
             "generate payment slip",
+            "need a payment slip",
             "get a prn for",
         )
     ) or (
@@ -1490,7 +1508,7 @@ def detect_portal_task_intent(
         return _intent("payment_view_status", "prn_payments", 0.92)
 
     # 4. Verify TIN (Tier 1)
-    if any(
+    explicit_verify_tin = any(
         phrase in low
         for phrase in (
             "verify tin",
@@ -1498,8 +1516,17 @@ def detect_portal_task_intent(
             "check tin",
             "lookup tin",
             "validate tin",
+            "verify if tin",
+            "check if tin",
         )
-    ) and not any(w in low for w in ("obligation", "apply", "register")):
+    ) and not any(w in low for w in ("obligation", "apply", "register"))
+    implicit_active_tin = (
+        "tin" in low
+        and bool(extracted.get("tin"))
+        and "is active" in low
+        and not any(w in low for w in ("obligation", "apply", "register", "tcc", "clearance", "prn"))
+    )
+    if explicit_verify_tin or implicit_active_tin:
         return _intent("tin_search_verify", "tin_registration", 0.93)
 
     # 5. Apply for Individual vs Non-Individual TIN (Tier 2)
@@ -2526,15 +2553,61 @@ def evaluate_turn(
 ) -> PortalCopilotOutcome | None:
     """Evaluate a chat turn for inline form elicitation, Claude-style confirmation, or live DOM co-pilot help."""
     conv_id = str(conversation_id or "default")
+    has_proven_session = bool(user_id) or (
+        bool(session_id) and str(session_id).strip() not in ("", conv_id, "default")
+    )
+    owner_key = db.conversation_state_key(
+        conv_id,
+        session_id=session_id or None,
+        user_id=user_id or None,
+        tenant_id=tenant_id,
+    )
+    anon_owner_key = (
+        db.conversation_state_key(
+            conv_id,
+            session_id=session_id or None,
+            user_id=None,
+            tenant_id=tenant_id,
+        )
+        if bool(session_id) and str(session_id).strip() not in ("", conv_id, "default")
+        else ""
+    )
 
-    # Gather entities from prior user turns in the same conversation for multi-turn context remembering
+    # Gather entities from prior user turns in the same conversation (both in-memory owner cache
+    # when a proven session/user scope exists and conversation_history)
     history_entities: dict[str, Any] = {}
+    if has_proven_session:
+        with _TASK_CACHE_LOCK:
+            if anon_owner_key and anon_owner_key in _CONVERSATION_ENTITY_MEMORY:
+                history_entities.update(_CONVERSATION_ENTITY_MEMORY[anon_owner_key])
+            if owner_key in _CONVERSATION_ENTITY_MEMORY:
+                history_entities.update(_CONVERSATION_ENTITY_MEMORY[owner_key])
+
+    def _should_carry_over_amount(msg_text: str) -> bool:
+        low_m = msg_text.lower()
+        return any(w in low_m for w in ("pay", "prn", "payment", "slip", "refund", "net tax"))
+
     if conversation_history:
         for turn in conversation_history:
             if isinstance(turn, Mapping):
                 u_msg = str(turn.get("user_message") or turn.get("content") or "")
                 if u_msg:
-                    history_entities.update(extract_task_entities(u_msg))
+                    turn_ent = extract_task_entities(u_msg)
+                    if "amount_ugx" in turn_ent and not _should_carry_over_amount(u_msg):
+                        turn_ent.pop("amount_ugx", None)
+                    history_entities.update(turn_ent)
+
+    current_turn_entities = extract_task_entities(message)
+    if current_turn_entities and has_proven_session:
+        mem_entities = dict(current_turn_entities)
+        if "amount_ugx" in mem_entities and not _should_carry_over_amount(message):
+            mem_entities.pop("amount_ugx", None)
+        with _TASK_CACHE_LOCK:
+            merged_mem = {**history_entities, **mem_entities}
+            _CONVERSATION_ENTITY_MEMORY[owner_key] = merged_mem
+            _CONVERSATION_ENTITY_MEMORY.move_to_end(owner_key)
+            while len(_CONVERSATION_ENTITY_MEMORY) > _MAX_TASK_CACHE_ENTRIES:
+                _CONVERSATION_ENTITY_MEMORY.popitem(last=False)
 
     # 1. Explicit Inline Form Submission or Post-Login Resumption
     if portal_task_submission and isinstance(portal_task_submission, Mapping):
