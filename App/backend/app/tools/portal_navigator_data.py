@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import re
+import threading
 import urllib.parse
 from typing import Any
 
 from ..verified_resources import get_resource, is_authoritative_ura_url
+
+logger = logging.getLogger(__name__)
 
 EXTERNAL_URA_PORTALS: dict[str, dict[str, Any]] = {
     "e_services": {
@@ -6717,50 +6721,176 @@ def find_relevant_forms_and_resources(
 
 
 # ---------------------------------------------------------------------------
-# Declarative Portal Knowledge Pack Loader & Provenance (`MOD-GAP-03`)
+# Declarative Portal Knowledge Pack Loader & Provenance (`MOD-GAP-03`, G246)
 # ---------------------------------------------------------------------------
+#: Workflows from the declarative pack, keyed by workflow intent. Each load
+#: replaces the whole set under ``_PACK_LOCK``, so a workflow removed from the
+#: pack stops being served at the next load rather than at the next restart.
+#: Read it through :func:`get_portal_workflow`.
 PORTAL_NAVIGATION_WORKFLOWS: dict[str, dict[str, Any]] = {}
 _WORKFLOWS = PORTAL_NAVIGATION_WORKFLOWS
-_PACK_CACHE: dict[tuple[str, int], dict[str, Any]] = {}
+_PACK_LOCK = threading.Lock()
+#: The built-in portal registry as shipped, before any pack override, so an
+#: override removed from the pack is undone on the next load.
+_BUILTIN_PORTALS: dict[str, dict[str, Any]] = {k: dict(v) for k, v in EXTERNAL_URA_PORTALS.items()}
+#: The last load: its (path, mtime_ns, size) key and its result.
+_PACK_STATE: dict[str, Any] = {"key": None, "result": None}
+_WORKFLOW_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
+_SOURCE_PATH_RE = re.compile(r"^Data/[A-Za-z0-9_./-]+$")
+_URL_IN_TEXT_RE = re.compile(r"https?://[^\s)>\]\"']+")
+_MAX_WORKFLOW_STEPS = 12
+
+
+def _pack_url_ok(url: str) -> bool:
+    """An https URL on URA's own hosts (``is_authoritative_ura_url``)."""
+    return is_authoritative_ura_url(url.rstrip(".,;:"))
+
+
+def _pack_source_ok(source: Any) -> bool:
+    """A citation: an official URA URL, or a tracked corpus file under ``Data/``."""
+    text = str(source or "").strip()
+    if _SOURCE_PATH_RE.match(text):
+        return ".." not in text.split("/")
+    return _pack_url_ok(text)
+
+
+def _validated_workflow(key: str, spec: Any) -> dict[str, Any] | None:
+    """*spec* as served, or ``None`` when any part of it is unusable.
+
+    A workflow is shown to taxpayers as official steps, so it must cite where
+    each one comes from (``sources``), name a known portal, and link only to
+    URA's own hosts — in its ``url`` and inside every step.
+    """
+    if not _WORKFLOW_KEY_RE.match(key) or not isinstance(spec, dict):
+        return None
+    title = spec.get("title")
+    steps = spec.get("steps")
+    prerequisites = spec.get("prerequisites", [])
+    sources = spec.get("sources")
+    portal_key = spec.get("portal_key")
+    url = spec.get("url")
+    minutes = spec.get("estimated_minutes")
+    if not isinstance(title, str) or not title.strip() or len(title) > 200:
+        return None
+    if not isinstance(steps, list) or not 1 <= len(steps) <= _MAX_WORKFLOW_STEPS:
+        return None
+    if not all(isinstance(s, str) and s.strip() and len(s) <= 600 for s in steps):
+        return None
+    if not isinstance(prerequisites, list) or not all(isinstance(p, str) and len(p) <= 300 for p in prerequisites):
+        return None
+    if not isinstance(sources, list) or not sources or not all(_pack_source_ok(s) for s in sources):
+        return None
+    if portal_key is not None and portal_key not in _BUILTIN_PORTALS:
+        return None
+    if url is not None and not (isinstance(url, str) and _pack_url_ok(url)):
+        return None
+    if not all(_pack_url_ok(u) for text in (*steps, *prerequisites) for u in _URL_IN_TEXT_RE.findall(text)):
+        return None
+    served: dict[str, Any] = {
+        "title": title.strip(),
+        "steps": [s.strip() for s in steps],
+        "prerequisites": [p.strip() for p in prerequisites if p.strip()],
+        "sources": [str(s).strip() for s in sources],
+    }
+    if portal_key is not None:
+        served["portal_key"] = portal_key
+    if url is not None:
+        served["url"] = url
+    if isinstance(minutes, int) and not isinstance(minutes, bool) and 0 < minutes <= 240:
+        served["estimated_minutes"] = minutes
+    return served
+
+
+def _validated_portal_override(key: str, spec: Any) -> dict[str, Any] | None:
+    """A pack may re-point a *known* portal to another URA URL, and nothing else."""
+    if key not in _BUILTIN_PORTALS or not isinstance(spec, dict):
+        return None
+    url = spec.get("canonical_url")
+    if not isinstance(url, str) or not _pack_url_ok(url):
+        return None
+    return {**_BUILTIN_PORTALS[key], "canonical_url": url}
+
+
+def get_portal_workflow(intent: str) -> dict[str, Any] | None:
+    """The declarative workflow for *intent*, as last loaded (a copy), or ``None``."""
+    with _PACK_LOCK:
+        spec = PORTAL_NAVIGATION_WORKFLOWS.get((intent or "").strip())
+        return dict(spec) if spec is not None else None
 
 
 def load_portal_knowledge_pack(pack_path: Any = None) -> dict[str, Any]:
-    """Load declarative JSON portal workflow/troubleshooting overrides with mtime-keyed cache."""
+    """Load the declarative workflow pack, cached by (path, mtime_ns, size).
+
+    Every entry is validated (``_validated_workflow``); an invalid one is
+    skipped and listed in ``rejected``. The served set is then replaced as a
+    whole. A missing, unreadable or malformed pack keeps the previous set and
+    is reported with ``loaded: False`` and an ``error`` — the readiness report
+    treats that as a failure — instead of failing every import of this module.
+    """
     import hashlib
     import json
     from pathlib import Path
 
     default_path = Path(__file__).resolve().parent / "data" / "portal_navigation_overrides.json"
     target = (Path(pack_path) if pack_path is not None else default_path).resolve()
-    if not target.is_file():
-        return {"loaded": False, "workflow_count": len(PORTAL_NAVIGATION_WORKFLOWS), "sha256": ""}
-    mtime_ns = target.stat().st_mtime_ns
-    cache_key = (str(target), mtime_ns)
-    cached = _PACK_CACHE.get(cache_key)
-    if cached is not None and PORTAL_NAVIGATION_WORKFLOWS:
-        return dict(cached)
-    raw_bytes = target.read_bytes()
-    sha256 = hashlib.sha256(raw_bytes).hexdigest()
-    payload = json.loads(raw_bytes.decode("utf-8"))
-    workflows_patch = payload.get("workflows", {})
-    if isinstance(workflows_patch, dict):
-        for wf_key, wf_spec in workflows_patch.items():
-            if isinstance(wf_spec, dict) and wf_spec.get("title") and wf_spec.get("steps"):
-                PORTAL_NAVIGATION_WORKFLOWS[str(wf_key)] = wf_spec
-    portals_patch = payload.get("portals", {})
-    if isinstance(portals_patch, dict):
-        for p_key, p_spec in portals_patch.items():
-            if isinstance(p_spec, dict) and p_spec.get("canonical_url"):
-                EXTERNAL_URA_PORTALS[str(p_key)] = p_spec
-    result = {
-        "loaded": True,
-        "path": str(target),
-        "sha256": sha256,
-        "workflow_count": len(PORTAL_NAVIGATION_WORKFLOWS),
-        "portal_count": len(EXTERNAL_URA_PORTALS),
-    }
-    _PACK_CACHE[cache_key] = result
-    return dict(result)
+    with _PACK_LOCK:
+        try:
+            stat = target.stat()
+        except OSError:
+            return {"loaded": False, "error": "pack not found", "workflow_count": len(PORTAL_NAVIGATION_WORKFLOWS), "sha256": ""}
+        cache_key = (str(target), stat.st_mtime_ns, stat.st_size)
+        if _PACK_STATE["key"] == cache_key and _PACK_STATE["result"] is not None:
+            return dict(_PACK_STATE["result"])
+        try:
+            raw_bytes = target.read_bytes()
+            payload = json.loads(raw_bytes.decode("utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError("pack is not a JSON object")
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            logger.error("portal knowledge pack %s rejected: %s", target.name, exc)
+            return {
+                "loaded": False,
+                "error": f"invalid pack: {type(exc).__name__}",
+                "path": str(target),
+                "workflow_count": len(PORTAL_NAVIGATION_WORKFLOWS),
+                "sha256": "",
+            }
+        rejected: list[str] = []
+        workflows: dict[str, dict[str, Any]] = {}
+        raw_workflows = payload.get("workflows", {})
+        for wf_key, wf_spec in (raw_workflows.items() if isinstance(raw_workflows, dict) else ()):
+            served = _validated_workflow(str(wf_key), wf_spec)
+            if served is None:
+                rejected.append(f"workflow:{wf_key}")
+            else:
+                workflows[str(wf_key)] = served
+        overrides: dict[str, dict[str, Any]] = {}
+        raw_portals = payload.get("portals", {})
+        for p_key, p_spec in (raw_portals.items() if isinstance(raw_portals, dict) else ()):
+            merged = _validated_portal_override(str(p_key), p_spec)
+            if merged is None:
+                rejected.append(f"portal:{p_key}")
+            else:
+                overrides[str(p_key)] = merged
+        PORTAL_NAVIGATION_WORKFLOWS.clear()
+        PORTAL_NAVIGATION_WORKFLOWS.update(workflows)
+        # Assigning to an existing key never resizes the registry, so a reader
+        # iterating it concurrently is not broken; removed overrides revert.
+        for p_key, builtin in _BUILTIN_PORTALS.items():
+            EXTERNAL_URA_PORTALS[p_key] = overrides.get(p_key, dict(builtin))
+        if rejected:
+            logger.warning("portal knowledge pack %s: skipped invalid entries %s", target.name, rejected)
+        result = {
+            "loaded": True,
+            "path": str(target),
+            "sha256": hashlib.sha256(raw_bytes).hexdigest(),
+            "schema_version": str(payload.get("schema_version") or ""),
+            "workflow_count": len(PORTAL_NAVIGATION_WORKFLOWS),
+            "portal_count": len(EXTERNAL_URA_PORTALS),
+            "rejected": rejected,
+        }
+        _PACK_STATE["key"], _PACK_STATE["result"] = cache_key, result
+        return dict(result)
 
 
 def get_portal_knowledge_provenance() -> dict[str, Any]:

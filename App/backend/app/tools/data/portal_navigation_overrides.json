@@ -1,36 +1,47 @@
 {
-  "schema_version": "2026-10-22",
-  "description": "Declarative URA & Cross-MDA Portal Navigation Knowledge Pack (MOD-GAP-03)",
+  "schema_version": "2026-10-23",
+  "description": "Declarative URA & Cross-MDA Portal Navigation Knowledge Pack (MOD-GAP-03). Every workflow cites its sources: tracked corpus files under Data/ or official ura.go.ug pages (G246).",
   "workflows": {
     "mda_ntr_prn_reconciliation": {
-      "title": "Cross-MDA NTR Payment Registration Number (PRN) Reconciliation & Form DT-3008 Refund",
+      "title": "A paid PRN not reflecting at the agency, and refunds of Non-Tax Revenue paid in error",
       "portal_key": "prn_payments",
       "url": "https://ura.go.ug",
-      "estimated_minutes": 4,
+      "estimated_minutes": 10,
       "prerequisites": [
         "13-digit Payment Registration Number (PRN)",
-        "Bank or Mobile Money transaction receipt"
+        "Bank or Mobile Money payment receipt"
       ],
       "steps": [
-        "Open https://ura.go.ug -> Payment Services -> Search PRN Status and enter your 13-digit PRN.",
-        "Confirm whether URA e-Tax shows 'T' (Transacted/Paid), 'A' (Available/Unpaid), 'R' (Received at Bank), or 'X' (Expired).",
-        "If status is 'T' (Paid) on URA e-Tax, return to the agency portal (UDLS, DCIC e-Passport, NIRA, MLHUD UgNLIS, URSB OBRS, NEMA, or UNBS) and click 'Verify Payment / Reconcile PRN'.",
-        "If paid under the wrong MDA or tax head, log in to https://portal.ura.go.ug -> e-Services -> Refund Application -> Form DT-3008 (NTR Refund) and attach your receipt plus the MDA Non-Utilization Confirmation Letter."
+        "If the agency still shows the PRN as unpaid after you paid, contact URA on toll-free 0800 117 000 / 0800 217 000 or WhatsApp 0772 140 000 with the PRN and your payment receipt.",
+        "Fee paid in error to a Ministry, Department or Agency (ONTR): on https://ura.go.ug click 'Get a Refund', select 'Payment made to Ministry, Department or Agency (MDAs)', enter the 13-digit PRN and the refund and bank details (an account in the applicant's name), upload the erroneous and correct bank slips and the MDA letter if you have one, and submit to receive an acknowledgement tracking number.",
+        "Motor vehicle or driving permit fee paid in error (NTR): on https://ura.go.ug go to 'Get a Refund' > 'Motor vehicle or Driving permit', enter the plate or permit number, the amount, the PRN and your bank details, then send copies of the attachments (erroneous and correct PRN, the permit or transfer reference, your NIN) to the nearest URA service centre or to services@ura.go.ug, because the portal has no upload field for NTR refunds.",
+        "Other Non-Tax Revenue paid in error is refunded manually: download Form DT-3008 (e-Services > Download Manual Forms > Domestic > Refund), attach the original bank payment slip, the correct PRN if you re-paid, and the MDA confirmation letter, and deliver it to your local URA domestic tax office."
+      ],
+      "sources": [
+        "Data/dataset/ura_make_a_payment_faqs.csv",
+        "Data/dataset/ura_tax_refunds_faqs.csv",
+        "Data/dataset/ura_non_tax_revenues_faqs.csv",
+        "https://ura.go.ug/en/tax-education/tax-refunds/",
+        "https://ura.go.ug/en/tax-education/non-tax-revenues/"
       ]
     },
     "voluntary_disclosure_and_instalments": {
-      "title": "Voluntary Disclosure (Form DT-10307) 100% Penalty Waiver & Section 40 Instalment Plan",
+      "title": "Voluntary disclosure of unpaid tax, and paying a tax liability in instalments",
       "portal_key": "e_services",
-      "url": "https://portal.ura.go.ug",
-      "estimated_minutes": 6,
+      "url": "https://ura.go.ug/en/dt-faqs/",
+      "estimated_minutes": 15,
       "prerequisites": [
-        "10-digit URA TIN",
-        "Schedule of omitted/unfiled tax periods prior to any URA audit notice"
+        "Your TIN",
+        "The details and amount of the unpaid tax you are disclosing"
       ],
       "steps": [
-        "Log in to https://portal.ura.go.ug -> e-Services -> Compliance -> Voluntary Disclosure (Form DT-10307) BEFORE any URA audit notice is served.",
-        "Declare the omitted principal tax to receive a 100% statutory waiver of penal tax and late-payment interest under TPC Act s.66(1a).",
-        "If paying in instalments under TPC Act s.40, open e-Services -> Debt Management -> Apply for Instalment Payment, generate the 25% down-payment PRN, and unlock your Tax Clearance Certificate (TCC)."
+        "Make the disclosure on the Voluntary Disclosure Form (VDF), which is free on the URA web portal; section 66(1a) of the Tax Procedures Code Act gives preferential treatment to a voluntary disclosure.",
+        "Pay the principal tax due, attach the Payment Registration Number (PRN) form showing the payment, and submit the VDF at any URA office or by email to services@ura.go.ug.",
+        "A disclosure can spare you the penalties and interest on what you disclose. It does not cover the principal tax, or penalties, interest and fines already imposed for late or missing returns, and it is not available for a case already under audit or investigation, or in receivership or bankruptcy.",
+        "To pay a tax liability in instalments, agree the instalment plan with your tax office. Interest still accrues on the unpaid balance."
+      ],
+      "sources": [
+        "https://ura.go.ug/en/dt-faqs/"
       ]
     }
   }
