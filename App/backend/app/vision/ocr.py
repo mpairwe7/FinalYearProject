@@ -357,16 +357,36 @@ def extract_text_with_boxes(image_array: np.ndarray) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
+_HIDDEN_CONTROL_AND_BIDI_RE = re.compile(
+    r"[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f"
+    r"\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]"
+)
+
+
+def strip_hidden_control_and_bidi(text: str) -> str:
+    """Remove invisible zero-width, control, and bidirectional override characters.
+
+    Defends against Trojan Source / Unicode bidi spoofing of TINs, PRNs, and
+    monetary figures as well as zero-width prompt-injection smuggling in OCR
+    and document text layers (OWASP LLM01:2026 / ASI01).
+    """
+    if not text:
+        return ""
+    return _HIDDEN_CONTROL_AND_BIDI_RE.sub("", text)
+
+
 def extract_tin_numbers(text: str) -> list[str]:
     """Extract Uganda TIN numbers (10-digit, starting with 1)."""
-    return list(set(re.findall(r"\b1\d{9}\b", text)))
+    cleaned = strip_hidden_control_and_bidi(text)
+    return list(dict.fromkeys(re.findall(r"\b1\d{9}\b", cleaned)))
 
 
 def extract_nin_numbers(text: str) -> list[str]:
     """Extract Ugandan 14-character National Identification Numbers (NIN)."""
-    matches = re.findall(r"\b[C][MFR][0-9A-Z]{12}\b", text.upper())
+    cleaned = strip_hidden_control_and_bidi(text)
+    matches = re.findall(r"\b[C][MFR][0-9A-Z]{12}\b", cleaned.upper())
     if not matches:
-        matches = [m for m in re.findall(r"\b[A-Z]{2}[0-9A-Z]{12}\b", text.upper()) if len(m) == 14]
+        matches = [m for m in re.findall(r"\b[A-Z]{2}[0-9A-Z]{12}\b", cleaned.upper()) if len(m) == 14]
     return list(dict.fromkeys(matches))
 
 
@@ -426,7 +446,7 @@ def normalize_thermal_receipt_text(text: str) -> str:
     """
     if not text:
         return ""
-    cleaned = text
+    cleaned = strip_hidden_control_and_bidi(text)
     spaced_acronyms = [
         (r"\bE\s+F\s+R\s+I\s+S\b", "EFRIS"),
         (r"\bF\s+D\s+N\b", "FDN"),
@@ -516,7 +536,7 @@ def extract_tax_heads(text: str) -> list[str]:
 
 def clean_ocr_text(raw_text: str) -> str:
     """Clean OCR output for dense financial tables and alphanumeric codes."""
-    text = raw_text
+    text = strip_hidden_control_and_bidi(raw_text)
     # Common OCR substitutions in financial documents
     text = re.sub(r"\bO(\d)", r"0\1", text)  # O → 0 before digit
     text = re.sub(r"(\d)O\b", r"\g<1>0", text)  # O → 0 after digit

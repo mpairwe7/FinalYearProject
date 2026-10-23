@@ -219,7 +219,7 @@ export function DocumentInspectionModal({
                     <div className="doc-modal-recon-item">
                       <span className="doc-modal-recon-label">Taxable Subtotal</span>
                       <span className="doc-modal-recon-val">
-                        UGX {recon.subtotal_ugx.toLocaleString()}
+                        {recon.currency || 'UGX'} {recon.subtotal_ugx.toLocaleString()}
                       </span>
                     </div>
                   )}
@@ -229,7 +229,7 @@ export function DocumentInspectionModal({
                         VAT / Tax {recon.effective_rate ? `(${(recon.effective_rate * 100).toFixed(1)}%)` : ''}
                       </span>
                       <span className="doc-modal-recon-val">
-                        UGX {recon.tax_ugx.toLocaleString()}
+                        {recon.currency || 'UGX'} {recon.tax_ugx.toLocaleString()}
                       </span>
                     </div>
                   )}
@@ -237,7 +237,7 @@ export function DocumentInspectionModal({
                     <div className="doc-modal-recon-item doc-modal-recon-item-total">
                       <span className="doc-modal-recon-label">Total Payable</span>
                       <span className="doc-modal-recon-val">
-                        UGX {recon.total_ugx.toLocaleString()}
+                        {recon.currency || 'UGX'} {recon.total_ugx.toLocaleString()}
                       </span>
                     </div>
                   )}
@@ -275,6 +275,25 @@ export function DocumentInspectionModal({
                           title="Click to copy TIN"
                         >
                           {tin} 📋
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {fields.nins && fields.nins.length > 0 && (
+                  <div className="doc-modal-field-block">
+                    <span className="doc-modal-field-label">NINs</span>
+                    <div className="doc-modal-chip-wrap">
+                      {fields.nins.map((nin) => (
+                        <button
+                          key={nin}
+                          type="button"
+                          className="doc-modal-entity-chip"
+                          onClick={() => copyToClipboard(nin)}
+                          title="Click to copy NIN"
+                        >
+                          {nin} 📋
                         </button>
                       ))}
                     </div>

@@ -9,8 +9,10 @@
 
 export interface DocumentTaxReconciliation {
   status: 'verified' | 'discrepancy_detected' | 'unreconciled_partial' | 'informational_only';
+  currency?: string;
   subtotal_ugx?: number | null;
   tax_ugx?: number | null;
+  wht_ugx?: number | null;
   total_ugx?: number | null;
   effective_rate?: number | null;
   variance_ugx?: number | null;
@@ -64,6 +66,7 @@ export interface DocumentAnalysisData {
   matchedKeywords?: string[];
   fields?: {
     tins?: string[];
+    nins?: string[];
     prns?: string[];
     efris_invoices?: string[];
     amounts?: string[];

@@ -21,20 +21,12 @@ Macro-enabled Office (`.xlsm`, `.docm`, `.pptm`) is rejected.
   `vbaProject.bin` macros are rejected.
 - Upload filenames are stripped to a basename; NULs and path segments are
   dropped.
-- Extracted text is passed through `scan_retrieved_text` (OWASP LLM01) before
-  classification. Attachment passages injected into chat are wrapped in
-  `<untrusted_user_document>` and treated as evidence, not instructions.
-- Records are bound to their upload session and/or authenticated user. A
-  legacy record without either binding is never retrievable by document ID.
-- Responses include a SHA-256 source fingerprint, extraction method, OCR
-  backend/status, page numbers, region count, and mean OCR score. Extracted
-  values retain a bounded source pointer (page, OCR box, and region score)
-  when they can be matched to OCR text. The classifier score is a keyword
-  heuristic, not a probability.
-- Automated tax reconciliation audits commercial documents (invoices, receipts,
-  assessments): extracts taxable subtotal, VAT @ 18.0% standard rate, and grand
-  total payable, detecting arithmetic variances, non-standard tax rates, and
-  validating 10-digit Uganda TINs, 12-15 digit PRNs, and EFRIS fiscal references.
+- Extracted text (across `documents.py`, `vision/encoder.py`, `voice_stream_v2.py`, and `/v1/voice/vision/chat`) is scrubbed of invisible Unicode control/bidi overrides (`strip_hidden_control_and_bidi`) and passed through `scan_retrieved_text` (OWASP LLM01 / ASI01) before classification or model context injection. Attachment and visual-evidence passages injected into chat are wrapped in `<untrusted_user_document>` and treated as evidence, not instructions.
+- Image uploads apply `ImageOps.exif_transpose` before OCR/VLM decoding so rotated phone camera photos (EXIF orientations 3/6/8) are right-side-up.
+- Records are bound to their upload session and/or authenticated user. A legacy record without either binding is never retrievable by document ID.
+- Responses include a SHA-256 source fingerprint, extraction method, OCR backend/status, page numbers, region count, and mean OCR score. Extracted values (including 10-digit `tins`, 14-character `nins`, 12–15 digit `prns`, and `efris_invoices`) retain a bounded source pointer (page, OCR or PDF vector glyph box, and region score).
+- Automated tax reconciliation audits commercial documents (invoices, receipts, assessments, WHT certificates) across `UGX` and `USD`: reconciles taxable subtotal, standard 18.0% VAT, zero-rated/exempt (0%) supplies, and Withholding Tax (`6%`/`15%`) net payable equations, cross-checking table column totals against summary totals and routing discrepancies or unbordered fallback tables into `hitl_routing.assess_document_for_human_review`.
+- Branded PDF reports (`pdf_export.py`) embed PDF metadata, a deterministic `Report Audit SHA-256` digest, HITL officer review badges, line-item vs. total arithmetic verification warnings on tax summaries, and safe token wrapping for long unbroken strings.
 - Interactive taxpayer and officer inspection modal allows inline verification of
   extracted tax fields, arithmetic breakdown, audit notes, and quick suggested
   questions in English, Luganda, and Swahili without requiring a raw PDF download.
