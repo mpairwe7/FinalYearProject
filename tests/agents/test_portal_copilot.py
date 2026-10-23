@@ -1,6 +1,6 @@
 """Comprehensive backend integration, security & privacy test suite for Phase 42 (`portal_copilot.py`).
 
-Exercises all 8 verification gates from `docs/plans/ura-portal-task-execution-and-inbuilt-copilot-plan.md`:
+Exercises all 8 verification gates from `docs/plans/ura-portal-copilot-and-tasks-plan.md`:
 1. Tier 1 Autonomous Read & Inline Form Elicitation (`/v1/chat` + `portal_task_submission`)
 2. Tier 2 Claude-Style Allow / Disallow Confirmation Card
 3. `POST /v1/portal/tasks/execute` Allow vs. Disallow & Idempotency
