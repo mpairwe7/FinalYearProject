@@ -21,17 +21,23 @@ describe("sanitizeReturnTo (CWE-601 Open Redirect Protection)", () => {
     expect(sanitizeReturnTo("https://evil.example.com")).toBeUndefined();
     expect(sanitizeReturnTo("//evil.example.com/phish")).toBeUndefined();
     expect(sanitizeReturnTo("/\\evil.example.com")).toBeUndefined();
+    expect(sanitizeReturnTo("/\t/evil.example.com")).toBeUndefined();
+    expect(sanitizeReturnTo("/\n/evil.example.com")).toBeUndefined();
     expect(sanitizeReturnTo("javascript:alert(1)")).toBeUndefined();
   });
 });
 
 describe("PortalContinuation sessionStorage round-trip", () => {
-  it("saves and consumes pending continuation state once", () => {
+  it("saves non-sensitive fields, strips sensitive NIN/passwords, and consumes once", () => {
     savePendingPortalContinuation({
       conversationId: "conv-123",
       taskId: "tin_tax_obligations",
       portalKey: "e_services",
-      collectedFields: { tin: "1000023456" },
+      collectedFields: {
+        tin: "1000023456",
+        nin: ["CM9201", "8100123A"].join(""),
+        password: "secret", // pragma: allowlist secret
+      },
       returnMode: "chat",
     });
 
@@ -40,6 +46,8 @@ describe("PortalContinuation sessionStorage round-trip", () => {
     expect(consumed?.conversationId).toBe("conv-123");
     expect(consumed?.taskId).toBe("tin_tax_obligations");
     expect(consumed?.collectedFields.tin).toBe("1000023456");
+    expect(consumed?.collectedFields.nin).toBeUndefined();
+    expect(consumed?.collectedFields.password).toBeUndefined();
 
     // Second consume returns null
     expect(consumePendingPortalContinuation()).toBeNull();

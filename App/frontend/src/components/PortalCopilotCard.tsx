@@ -1,11 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { authHeaders, getAuthToken } from "../lib/authSession";
 import { getChatSessionId } from "../lib/chatSession";
 import { useTranslation } from "../lib/i18n";
-import { savePendingPortalContinuation } from "../lib/portalContinuation";
+import { sanitizeReturnTo } from "../lib/oidcFlow";
+import {
+  sanitizeContinuationFields,
+  savePendingPortalContinuation,
+} from "../lib/portalContinuation";
 import type { PortalCopilotPayload } from "../store/useChatStore";
 import {
   AlertTriangleIcon,
@@ -30,6 +34,10 @@ export interface PortalCopilotCardProps {
   onActionClick?: (action: string) => void;
 }
 
+/**
+ * Declarative A2UI card surface for URA Portal Task Execution, Inline Form Elicitation,
+ * Claude-Style Allow/Disallow Confirmation, Step-Up Login, and Stuck-User DOM Co-Pilot handoffs.
+ */
 export default function PortalCopilotCard({
   copilot,
   conversationId,
@@ -52,6 +60,17 @@ export default function PortalCopilotCard({
     summary?: string;
     result?: Record<string, unknown>;
   }>({ status: "idle" });
+
+  // Keep formValues synchronized when a new task_id or updated field defaults arrive
+  useEffect(() => {
+    setFormValues((prev) => {
+      const next: Record<string, string> = {};
+      for (const f of copilot.fields ?? []) {
+        next[f.name] = f.value !== undefined && f.value !== "" ? f.value : (prev[f.name] ?? "");
+      }
+      return next;
+    });
+  }, [copilot.fields, copilot.task_id]);
 
   const isSignedIn = Boolean(getAuthToken());
   const effectiveCardType = editing ? "inline_form" : copilot.card_type;
@@ -115,7 +134,8 @@ export default function PortalCopilotCard({
         }
         setExecState({
           status: body.status === "declined" ? "declined" : "executed",
-          summary: body.summary || (decision === "disallow" ? "Action cancelled." : "Task executed."),
+          summary:
+            body.summary || (decision === "disallow" ? "Action cancelled." : "Task executed."),
           result: body.result || {},
         });
       } catch (err) {
@@ -129,27 +149,29 @@ export default function PortalCopilotCard({
   );
 
   const handleStepUpLogin = useCallback(
-    (returnMode: "chat" | "portal", href: string) => {
+    (returnMode: "chat" | "portal", rawHref: string) => {
+      const safeHref =
+        sanitizeReturnTo(rawHref) ||
+        `/signin?continue=signin&returnTo=${encodeURIComponent(
+          `/?conversation_id=${conversationId || "default"}&auth_resumed=1`,
+        )}`;
       savePendingPortalContinuation({
         conversationId: conversationId || "default",
         taskId: copilot.task_id || "",
         portalKey: copilot.portal_key || "e_services",
-        collectedFields: copilot.raw_preserved_fields || copilot.preserved_fields || formValues,
+        collectedFields: sanitizeContinuationFields(copilot.preserved_fields || formValues),
         returnMode,
       });
       if (typeof window !== "undefined") {
-        window.location.assign(href);
+        window.location.assign(safeHref);
       }
     },
-    [
-      conversationId,
-      copilot.portal_key,
-      copilot.preserved_fields,
-      copilot.raw_preserved_fields,
-      copilot.task_id,
-      formValues,
-    ],
+    [conversationId, copilot.portal_key, copilot.preserved_fields, copilot.task_id, formValues],
   );
+
+  const safeCopilotPortalUrl =
+    sanitizeReturnTo(copilot.copilot_portal_url) ||
+    `/portal/${copilot.portal_key || "e_services"}?copilot=1`;
 
   // ── 1. Inline Chat Input Form Card (`inline_form`) ──────────────────────────
   if (effectiveCardType === "inline_form") {
@@ -246,7 +268,7 @@ export default function PortalCopilotCard({
             </button>
             {copilot.copilot_portal_url && (
               <Link
-                href={copilot.copilot_portal_url}
+                href={safeCopilotPortalUrl}
                 className="portal-action-btn is-ghost"
                 data-testid="portal-open-copilot-link"
               >
@@ -328,7 +350,7 @@ export default function PortalCopilotCard({
               </button>
             )}
             {copilot.copilot_portal_url && (
-              <Link href={copilot.copilot_portal_url} className="portal-action-btn is-ghost">
+              <Link href={safeCopilotPortalUrl} className="portal-action-btn is-ghost">
                 {t("portalCopilot.openWithCopilot", {
                   portal: copilot.portal_name || "URA Portal",
                 })}{" "}
@@ -445,15 +467,13 @@ export default function PortalCopilotCard({
   if (effectiveCardType === "step_up_login") {
     const preservedEntries = Object.entries(copilot.preserved_fields ?? {});
     const chatHref =
-      copilot.signin_chat_href ||
+      sanitizeReturnTo(copilot.signin_chat_href) ||
       `/signin?continue=signin&returnTo=${encodeURIComponent(
         `/?conversation_id=${conversationId || "default"}&auth_resumed=1`,
       )}`;
     const portalHref =
-      copilot.signin_portal_href ||
-      `/signin?continue=signin&returnTo=${encodeURIComponent(
-        copilot.copilot_portal_url || "/portal/e_services?copilot=1",
-      )}`;
+      sanitizeReturnTo(copilot.signin_portal_href) ||
+      `/signin?continue=signin&returnTo=${encodeURIComponent(safeCopilotPortalUrl)}`;
 
     return (
       <section
@@ -509,11 +529,9 @@ export default function PortalCopilotCard({
 
   // ── 4. Statutory Co-Pilot Handoff, Stuck Portal Assistance, Executed Result & Launch Banner ──
   const needsLoginBeforePortal = Boolean(copilot.requires_auth && !isSignedIn);
-  const targetPortalUrl =
-    copilot.copilot_portal_url || `/portal/${copilot.portal_key || "e_services"}?copilot=1`;
   const signInThenPortalUrl =
-    copilot.signin_portal_href ||
-    `/signin?continue=signin&returnTo=${encodeURIComponent(targetPortalUrl)}`;
+    sanitizeReturnTo(copilot.signin_portal_href) ||
+    `/signin?continue=signin&returnTo=${encodeURIComponent(safeCopilotPortalUrl)}`;
 
   return (
     <section
@@ -609,7 +627,7 @@ export default function PortalCopilotCard({
           </Link>
         ) : (
           <Link
-            href={targetPortalUrl}
+            href={safeCopilotPortalUrl}
             className="portal-action-btn is-primary"
             data-testid="portal-direct-copilot-link"
           >

@@ -380,6 +380,7 @@ export const PaymentLogo = ({ size = 28 }: { size?: number } = {}) => (
   </svg>
 );
 
+/** Warning triangle icon for field validation alerts and confirmation notices. */
 export const AlertTriangleIcon = ({ size = 16 }: { size?: number } = {}) => (
   <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
@@ -388,6 +389,7 @@ export const AlertTriangleIcon = ({ size = 16 }: { size?: number } = {}) => (
   </svg>
 );
 
+/** Padlock icon for authenticated portal routes and step-up login prompts. */
 export const LockIcon = ({ size = 16 }: { size?: number } = {}) => (
   <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
@@ -395,6 +397,7 @@ export const LockIcon = ({ size = 16 }: { size?: number } = {}) => (
   </svg>
 );
 
+/** Ban/prohibition icon for declined actions and official secrecy refusals. */
 export const BanIcon = ({ size = 16 }: { size?: number } = {}) => (
   <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="10" />
@@ -402,6 +405,7 @@ export const BanIcon = ({ size = 16 }: { size?: number } = {}) => (
   </svg>
 );
 
+/** Compass icon for portal navigation and DOM Co-Pilot guidance. */
 export const CompassIcon = ({ size = 16 }: { size?: number } = {}) => (
   <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="10" />
@@ -409,6 +413,7 @@ export const CompassIcon = ({ size = 16 }: { size?: number } = {}) => (
   </svg>
 );
 
+/** External link icon for opening portal workspaces. */
 export const ExternalLinkIcon = ({ size = 14 }: { size?: number } = {}) => (
   <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
@@ -417,6 +422,7 @@ export const ExternalLinkIcon = ({ size = 14 }: { size?: number } = {}) => (
   </svg>
 );
 
+/** Right arrow icon for forward continuation actions. */
 export const ArrowRightIcon = ({ size = 15 }: { size?: number } = {}) => (
   <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <line x1="5" y1="12" x2="19" y2="12" />
@@ -424,6 +430,7 @@ export const ArrowRightIcon = ({ size = 15 }: { size?: number } = {}) => (
   </svg>
 );
 
+/** Left arrow icon for returning to the chat conversation. */
 export const ArrowLeftIcon = ({ size = 15 }: { size?: number } = {}) => (
   <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <line x1="19" y1="12" x2="5" y2="12" />
@@ -431,6 +438,7 @@ export const ArrowLeftIcon = ({ size = 15 }: { size?: number } = {}) => (
   </svg>
 );
 
+/** Eye-off icon for re-masking revealed sensitive fields on confirmation cards. */
 export const EyeOffIcon = ({ size = 15 }: { size?: number } = {}) => (
   <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
@@ -439,6 +447,7 @@ export const EyeOffIcon = ({ size = 15 }: { size?: number } = {}) => (
   </svg>
 );
 
+/** Lightbulb icon for inline field coachmarks and stall recovery hints. */
 export const LightbulbIcon = ({ size = 15 }: { size?: number } = {}) => (
   <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5" />

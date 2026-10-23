@@ -71,6 +71,7 @@ class PortalFieldSpec:
     default_value: str = ""
 
     def to_dict(self, *, value: Any = "", validation_error: str = "") -> dict[str, Any]:
+        """Serialize this field specification with its current value and optional validation error."""
         val_str = str(value if value not in (None, "") else self.default_value)
         payload: dict[str, Any] = {
             "name": self.name,
@@ -129,6 +130,7 @@ class PortalCopilotOutcome:
     deterministic_reply: str = ""
 
     def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable dictionary representation of this portal co-pilot outcome."""
         out = dict(self.payload)
         out["card_type"] = self.card_type
         return out
@@ -1112,6 +1114,7 @@ def sanitize_portal_context(portal_context: Mapping[str, Any] | None) -> dict[st
     )
 
     def _is_secret_key(k: str) -> bool:
+        """Return True when field key or selector *k* names a secret or credential."""
         k_str = str(k or "").strip()
         if not k_str:
             return False
@@ -1356,6 +1359,7 @@ def detect_portal_task_intent(
     )
 
     def _intent(task_id: str, portal_key: str, confidence: float = 0.94) -> PortalTaskIntent:
+        """Build a `PortalTaskIntent` with the extracted entities and how-to flag."""
         return PortalTaskIntent(
             task_id=task_id,
             portal_key=portal_key,
@@ -1917,7 +1921,11 @@ def build_portal_task_card(
                 k: mask_sensitive_value(k, v) if any(f.name == k and f.sensitive for f in spec.fields) else v
                 for k, v in fields_map.items()
             },
-            "raw_preserved_fields": dict(fields_map),
+            "raw_preserved_fields": {
+                k: v
+                for k, v in fields_map.items()
+                if not any(f.name == k and f.sensitive for f in spec.fields)
+            },
             "copilot_portal_url": copilot_portal_url,
         }
 
@@ -2249,6 +2257,7 @@ def handle_portal_task_decision(
 
 
 def hmac_compare(a: str, b: str) -> bool:
+    """Compare two hex digests in constant time."""
     import hmac
 
     return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))

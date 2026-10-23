@@ -1108,7 +1108,11 @@ export default function Page() {
     }
   }, [setSelectedConnectorNamespaces]);
 
-  const sendMessage = useCallback(async (overrideText?: string, portalTaskSubmission?: Record<string, unknown>) => {
+  const sendMessage = useCallback(async (
+    overrideText?: string,
+    portalTaskSubmission?: Record<string, unknown>,
+    overrideConversationId?: string,
+  ) => {
     const text = (overrideText ?? message).trim();
     if (!text || isLoading) return;
     // Enter can fire while an upload is analysing — wait for it to settle.
@@ -1143,7 +1147,8 @@ export default function Page() {
         docType: a.docType,
         analysis: a.analysis,
       }));
-    const conversationId = activeConversationId ?? ensureActiveConversationId();
+    const conversationId =
+      overrideConversationId ?? activeConversationId ?? ensureActiveConversationId();
     shouldStickToBottomRef.current = true;
     setShowScrollToLatest(false);
 
@@ -1564,11 +1569,17 @@ export default function Page() {
       switchSession(pending.conversationId);
     }
     window.history.replaceState({}, '', window.location.pathname);
-    void sendMessage(`Resuming ${pending.taskId.replace(/_/g, ' ')} after sign-in`, {
-      task_id: pending.taskId,
-      fields: pending.collectedFields,
-      resumed_after_login: true,
-    });
+    void sendMessage(
+      `Resuming ${pending.taskId.replace(/_/g, ' ')} after sign-in`,
+      {
+        task_id: pending.taskId,
+        fields: pending.collectedFields,
+        resumed_after_login: true,
+      },
+      pending.conversationId && pending.conversationId !== 'default'
+        ? pending.conversationId
+        : undefined,
+    );
   }, [sendMessage, switchSession]);
 
   // ---- Voice input ----

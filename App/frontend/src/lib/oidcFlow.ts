@@ -54,18 +54,37 @@ export const OIDC_RETURN_TO_KEY = "ura_oidc_return_to";
 
 /**
  * Validate that a `returnTo` redirect target is a safe, same-origin relative path
- * starting with a single `/` (mitigates CWE-601 Open Redirect).
+ * starting with a single `/` (mitigates CWE-601 Open Redirect, including WHATWG
+ * URL tab/newline stripping bypasses such as `/\t/evil.com`).
  */
 export function sanitizeReturnTo(raw: string | null | undefined): string | undefined {
   if (!raw || typeof raw !== "string") return undefined;
   const trimmed = raw.trim();
-  if (!trimmed.startsWith("/") || trimmed.startsWith("//") || trimmed.includes("\\")) {
+  if (
+    !trimmed.startsWith("/") ||
+    trimmed.startsWith("//") ||
+    trimmed.includes("\\") ||
+    /[\u0000-\u001F\u007F]/.test(trimmed)
+  ) {
     return undefined;
   }
   if (/^\/[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) {
     return undefined;
   }
-  return trimmed;
+  try {
+    const base = "https://ura-same-origin.internal";
+    const parsed = new URL(trimmed, base);
+    if (
+      parsed.origin !== base ||
+      !parsed.pathname.startsWith("/") ||
+      parsed.pathname.startsWith("//")
+    ) {
+      return undefined;
+    }
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return undefined;
+  }
 }
 
 /** True when this deployment has an identity provider configured. */

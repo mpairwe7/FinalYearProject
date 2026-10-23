@@ -9,6 +9,7 @@ import { useTranslation, type TranslationKey } from '../lib/i18n';
 import type { ConnectorNotice, ConnectorOutcome, ConnectorSkipReason, ConnectorUse } from '../lib/connectors';
 import { getChatSessionId } from '../lib/chatSession';
 import { authHeaders, getAuthToken } from '../lib/authSession';
+import { sanitizeReturnTo } from '../lib/oidcFlow';
 import { detectDeadlineInMessage, downloadCalendarEvent, getGoogleCalendarUrl } from '../lib/calendarEvents';
 import FeedbackButtons from './FeedbackButtons';
 import HumanHandoff from './HumanHandoff';
@@ -377,7 +378,11 @@ function ChatMessageInner({
                     {a.analysis.screenshot_guidance.copilot_handoff ? (
                       a.analysis.screenshot_guidance.copilot_handoff.requires_login_first && !getAuthToken() ? (
                         <a
-                          href={a.analysis.screenshot_guidance.copilot_handoff.signin_then_portal_url}
+                          href={
+                            sanitizeReturnTo(
+                              a.analysis.screenshot_guidance.copilot_handoff.signin_then_portal_url,
+                            ) || '/signin'
+                          }
                           className="portal-action-btn is-primary"
                           data-testid="screenshot-signin-copilot-btn"
                         >
@@ -389,7 +394,11 @@ function ChatMessageInner({
                         </a>
                       ) : (
                         <a
-                          href={a.analysis.screenshot_guidance.copilot_handoff.inbuilt_portal_url}
+                          href={
+                            sanitizeReturnTo(
+                              a.analysis.screenshot_guidance.copilot_handoff.inbuilt_portal_url,
+                            ) || '/portal/e_services?copilot=1'
+                          }
                           className="portal-action-btn is-primary"
                           data-testid="screenshot-open-copilot-btn"
                         >

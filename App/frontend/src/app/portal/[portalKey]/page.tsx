@@ -23,7 +23,7 @@ import {
   subscribeAuthToken,
 } from "../../../lib/authSession";
 import { getChatSessionId } from "../../../lib/chatSession";
-import { peekPendingPortalContinuation } from "../../../lib/portalContinuation";
+import { consumePendingPortalContinuation } from "../../../lib/portalContinuation";
 import type { PortalCopilotPayload } from "../../../store/useChatStore";
 import "./portal.css";
 
@@ -31,7 +31,7 @@ interface PortalScreenField {
   name: string;
   label: string;
   selectorId: string;
-  type: "text" | "number" | "select" | "textarea";
+  type: "text" | "number" | "select" | "textarea" | "date";
   required: boolean;
   placeholder?: string;
   options?: { value: string; label: string }[];
@@ -150,6 +150,14 @@ const PORTAL_SCREENS: Record<string, PortalScreenConfig> = {
         type: "text",
         required: true,
         placeholder: "Sarah",
+      },
+      {
+        name: "date_of_birth",
+        label: "Date of Birth",
+        selectorId: "txtDob",
+        type: "date",
+        required: true,
+        placeholder: "1992-05-14",
       },
       {
         name: "mobile_number",
@@ -414,6 +422,10 @@ PORTAL_SCREENS.asycuda = PORTAL_SCREENS.motor_vehicle;
 
 const SECRET_FIELD_RE = /(?:password|passwd|pwd|otp|pin|cvv|cvc|csc|secret|token|passcode)/i;
 
+/**
+ * Interactive URA Portal Workspace with the Inbuilt AI Co-Pilot side rail (Approach 3)
+ * and live DOM telemetry bridge (`portal_context`).
+ */
 export default function InbuiltPortalCopilotPage() {
   const params = useParams<{ portalKey?: string }>();
   const searchParams = useSearchParams();
@@ -424,14 +436,7 @@ export default function InbuiltPortalCopilotPage() {
   const token = useSyncExternalStore(subscribeAuthToken, getAuthToken, getServerAuthToken);
   const isSignedIn = Boolean(token);
 
-  const [values, setValues] = useState<Record<string, string>>(() => {
-    const init: Record<string, string> = {};
-    const pending = peekPendingPortalContinuation();
-    for (const f of screen.fields) {
-      init[f.name] = pending?.collectedFields?.[f.name] || "";
-    }
-    return init;
-  });
+  const [values, setValues] = useState<Record<string, string>>({});
   const [errorBanner, setErrorBanner] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [spotlightField, setSpotlightField] = useState<string | null>(null);
@@ -440,7 +445,25 @@ export default function InbuiltPortalCopilotPage() {
   const [busy, setBusy] = useState(false);
   const [stalledMs, setStalledMs] = useState(0);
   const lastActivityRef = useRef<number>(Date.now());
+  const autoFilledKeyRef = useRef<string | null>(null);
   const fieldRefs = useRef<Record<string, HTMLElement | null>>({});
+
+  // Consume any pending continuation state once on arrival and reset transient errors on screen switch
+  useEffect(() => {
+    const pending = consumePendingPortalContinuation();
+    setValues((prev) => {
+      const next: Record<string, string> = {};
+      for (const f of screen.fields) {
+        next[f.name] = pending?.collectedFields?.[f.name] || prev[f.name] || "";
+      }
+      return next;
+    });
+    setErrorBanner("");
+    setFieldErrors({});
+    setSpotlightField(null);
+    setCoachmarks({});
+    setCopilotCard(null);
+  }, [screen.fields, screen.key]);
 
   const emptyRequiredFields = useMemo(
     () =>
@@ -465,11 +488,18 @@ export default function InbuiltPortalCopilotPage() {
     setValues((prev) => ({ ...prev, [name]: val }));
   }, []);
 
-  // Send live DOM telemetry (`portal_context`) to `/api/v1/chat`
+  /**
+   * Send live DOM telemetry (`portal_context`) to `/api/v1/chat` and execute returned DOM spotlight recipes.
+   */
   const askCopilotWithDomTelemetry = useCallback(
-    async (promptText: string, submitTask = false) => {
+    async (
+      promptText: string,
+      submitTask = false,
+      overrideFields?: Record<string, string>,
+    ) => {
       setBusy(true);
       try {
+        const activeValues = overrideFields ?? values;
         const validationErrors = Object.entries(fieldErrors).map(([field, message]) => {
           const spec = screen.fields.find((s) => s.name === field);
           return {
@@ -481,7 +511,7 @@ export default function InbuiltPortalCopilotPage() {
 
         // Client-side defense-in-depth scrubbing of any secret/credential field names
         const scrubbedVisible: Record<string, string> = {};
-        for (const [k, v] of Object.entries(values)) {
+        for (const [k, v] of Object.entries(activeValues)) {
           if (!SECRET_FIELD_RE.test(k)) {
             scrubbedVisible[k] = v;
           }
@@ -554,7 +584,9 @@ export default function InbuiltPortalCopilotPage() {
     [conversationId, emptyRequiredFields, errorBanner, fieldErrors, screen, stalledMs, values],
   );
 
-  // Auto-fill safe fields with realistic demo/known values when user clicks "Auto-Fill Safe Fields"
+  /**
+   * Populate empty safe form fields with realistic sandbox values without triggering re-render loops.
+   */
   const handleAutoFillSafeFields = useCallback(() => {
     const defaults: Record<string, string> = {
       tin: ["10000", "23456"].join(""),
@@ -566,6 +598,7 @@ export default function InbuiltPortalCopilotPage() {
       nin: ["CM9201", "8100123A"].join(""),
       surname: "Mukasa",
       given_name: "Sarah",
+      date_of_birth: "1992-05-14",
       mobile_number: "+256772123456",
       email: "sarah.mukasa@example.ug",
       tcc_purpose: "BIDDING_TENDER",
@@ -573,28 +606,32 @@ export default function InbuiltPortalCopilotPage() {
       product_category: "BOTTLED_WATER",
       quantity: "10000",
       assessment_ref: "ASMT-2026-00912",
-      grounds: "Input VAT credit supported by verified 20-digit EFRIS FDNs under Section 28 VAT Act.",
+      grounds:
+        "Input VAT credit supported by verified 20-digit EFRIS FDNs under Section 28 VAT Act.",
       chassis_vin: "JTEBU29J805012345",
       plate_category: "STANDARD_FIRST_REG",
     };
-    const next: Record<string, string> = { ...values };
-    for (const f of screen.fields) {
-      if (!next[f.name] && defaults[f.name]) {
-        next[f.name] = defaults[f.name];
-      }
-    }
     lastActivityRef.current = Date.now();
     setStalledMs(0);
-    setValues(next);
+    setValues((prev) => {
+      const next: Record<string, string> = { ...prev };
+      for (const f of screen.fields) {
+        if (!next[f.name] && defaults[f.name]) {
+          next[f.name] = defaults[f.name];
+        }
+      }
+      return next;
+    });
     setFieldErrors({});
     setErrorBanner("");
-  }, [screen.fields, values]);
+  }, [screen.fields]);
 
   useEffect(() => {
-    if (searchParams?.get("autofill") === "1") {
+    if (searchParams?.get("autofill") === "1" && autoFilledKeyRef.current !== screen.key) {
+      autoFilledKeyRef.current = screen.key;
       handleAutoFillSafeFields();
     }
-  }, [handleAutoFillSafeFields, searchParams]);
+  }, [handleAutoFillSafeFields, screen.key, searchParams]);
 
   const handlePortalFormSubmit = useCallback(
     (e: React.FormEvent) => {
@@ -610,7 +647,9 @@ export default function InbuiltPortalCopilotPage() {
       }
       if (Object.keys(errs).length > 0) {
         setFieldErrors(errs);
-        setErrorBanner("Validation Error: Please complete or fix the highlighted mandatory fields.");
+        setErrorBanner(
+          "Validation Error: Please complete or fix the highlighted mandatory fields.",
+        );
         const firstErrField = Object.keys(errs)[0];
         setSpotlightField(firstErrField);
         fieldRefs.current[firstErrField]?.scrollIntoView?.({ behavior: "smooth", block: "center" });
@@ -947,8 +986,13 @@ export default function InbuiltPortalCopilotPage() {
               copilot={copilotCard}
               conversationId={conversationId}
               onSubmitInlineForm={(_taskId, submittedFields) => {
-                setValues((prev) => ({ ...prev, ...submittedFields }));
-                void askCopilotWithDomTelemetry(`Submitted form for ${screen.title}`, true);
+                const merged = { ...values, ...submittedFields };
+                setValues(merged);
+                void askCopilotWithDomTelemetry(
+                  `Submitted form for ${screen.title}`,
+                  true,
+                  merged,
+                );
               }}
             />
           </div>
