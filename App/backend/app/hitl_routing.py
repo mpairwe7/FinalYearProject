@@ -59,15 +59,39 @@ def assess_document_for_human_review(
     if not tins and getattr(doc_record, "doc_type", "") in {"assessment", "receipt", "return"}:
         reasons.append("Official tax document is missing detectable Taxpayer Identification Number (TIN)")
 
-    # 4. Check table structuring review flags
+    # 4. Check table structuring review flags (supports both TableSummary objects and dicts)
     tables = getattr(doc_record, "tables", []) or []
     for t in tables:
-        if isinstance(t, dict) and t.get("status") in {"needs_review", "rejected"}:
-            reasons.append(f"Table {t.get('name', 'unnamed')} flagged with status: {t.get('status')}")
+        if isinstance(t, dict):
+            t_name = t.get("name", "unnamed")
+            t_status = t.get("status")
+            t_action = t.get("downstream_action")
+        else:
+            t_name = getattr(t, "name", "unnamed")
+            t_status = getattr(t, "status", "ok")
+            t_action = getattr(t, "downstream_action", "auto_use")
+        if t_status in {"needs_review", "rejected"}:
+            reasons.append(f"Table {t_name} flagged with status: {t_status}")
+        elif t_action in {"use_with_warning", "review_required"}:
+            reasons.append(f"Table {t_name} structured via unbordered fallback ({t_action})")
+
+    # 5. Check financial arithmetic reconciliation & statutory rate discrepancies
+    recon = getattr(doc_record, "tax_reconciliation", {}) or {}
+    if isinstance(recon, dict) and recon.get("status") == "discrepancy_detected":
+        recon_notes = recon.get("notes") or []
+        detail = recon_notes[-1] if recon_notes else "Arithmetic or statutory tax rate variance detected"
+        reasons.append(f"Tax reconciliation discrepancy: {detail}")
 
     requires_review = len(reasons) > 0
-    priority = "high" if any("TIN" in r or "rejected" in r for r in reasons) else ("medium" if requires_review else "low")
-    action = "officer_review" if requires_review else "auto_approve"
+    is_urgent = any(
+        k in r for r in reasons for k in ("TIN", "rejected", "Tax reconciliation discrepancy")
+    )
+    priority = "high" if is_urgent else ("medium" if requires_review else "low")
+    action = (
+        "urgent_audit"
+        if any("Tax reconciliation discrepancy" in r for r in reasons)
+        else ("officer_review" if requires_review else "auto_approve")
+    )
 
     return ReviewAssessment(
         requires_review=requires_review,

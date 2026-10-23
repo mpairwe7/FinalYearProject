@@ -327,6 +327,8 @@ export const sw: Partial<Dictionary> = {
   'documents.screenshotStepsPrompt': 'Niongoze kupitia hatua zinazofuata kwenye {portal}.',
   'documents.typicalAreasNote': 'Hizi zinaonyesha mahali skrini hii kwa kawaida huweka vipengele hivi. Hazikutambuliwa kutoka kwenye picha yako.',
   'documents.copyInstruction': 'Nakili hatua ya {number}',
+  'documents.nins': 'Nambari za NIN',
+  'documents.copyNin': 'Bofya kunakili NIN',
 
   // Call URA receptionist
   'call.button': 'Piga Simu URA',
