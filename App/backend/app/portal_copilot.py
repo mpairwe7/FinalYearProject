@@ -1054,13 +1054,79 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
 }
 
 
-# Replay-safe bounded LRU idempotency & decline caches for Tier 2 / Tier 3 portal task executions.
-# Keyed by (owner_key, idempotency_key). Guarded by `_TASK_CACHE_LOCK` (OWASP ASI07 / LLM10).
+# Replay-safe bounded LRU idempotency & decline caches for Tier 2 / Tier 3 portal task executions,
+# backed by the shared `workflow_sessions` database table across Uvicorn workers and guarded
+# in-process by `_TASK_CACHE_LOCK` + `_IN_FLIGHT_TASK_KEYS` (OWASP ASI07 / LLM10).
 _MAX_TASK_CACHE_ENTRIES = 2048
 PORTAL_TASK_STATE_TTL_SECONDS = max(60, int(os.getenv("PORTAL_TASK_STATE_TTL_SECONDS", "900")))
 _TASK_CACHE_LOCK = threading.Lock()
 _EXECUTED_TASK_CACHE: OrderedDict[tuple[str, str], dict[str, Any]] = OrderedDict()
 _DECLINED_TASK_CACHE: OrderedDict[tuple[str, str], float] = OrderedDict()
+_IN_FLIGHT_TASK_KEYS: set[tuple[str, str]] = set()
+
+
+def _durable_task_cache_id(cache_key: tuple[str, str]) -> str:
+    """Return a deterministic shared-store key for `(owner_key, idempotency_key)`."""
+    digest = hashlib.sha256(f"{cache_key[0]}:{cache_key[1]}".encode()).hexdigest()[:40]
+    return f"portal_task_decision:{digest}"
+
+
+def _read_shared_task_decision(
+    cache_key: tuple[str, str],
+) -> tuple[str | None, dict[str, Any] | None]:
+    """Read a previously executed or declined task decision from the shared database store."""
+    try:
+        row = db.get_workflow_session(_durable_task_cache_id(cache_key))
+        if not row or row.get("workflow_id") != "portal_task_decision":
+            return None, None
+        updated_at = float(row.get("updated_at") or 0.0)
+        if updated_at and (time.time() - updated_at) > PORTAL_TASK_STATE_TTL_SECONDS:
+            return None, None
+        status = str(row.get("status") or "")
+        slots = row.get("slots")
+        if status == "cancelled":
+            return "declined", None
+        if status == "completed" and isinstance(slots, dict) and slots:
+            return "executed", dict(slots)
+    except Exception:
+        logger.debug("Shared portal task decision read skipped", exc_info=True)
+    return None, None
+
+
+def _write_shared_task_decision(
+    cache_key: tuple[str, str],
+    *,
+    declined: bool,
+    payload: dict[str, Any] | None = None,
+    user_id: str | None = None,
+) -> None:
+    """Persist an executed or declined task decision in the shared database store across workers."""
+    try:
+        db.upsert_workflow_session(
+            _durable_task_cache_id(cache_key),
+            "portal_task_decision",
+            1,
+            dict(payload or {"declined": True}),
+            status="cancelled" if declined else "completed",
+            last_prompt=cache_key[1],
+            user_id=str(user_id or ""),
+        )
+    except Exception:
+        logger.debug("Shared portal task decision write skipped", exc_info=True)
+
+
+def clear_portal_task_cache() -> None:
+    """Clear in-memory and shared-store portal task idempotency caches (used in test fixtures)."""
+    with _TASK_CACHE_LOCK:
+        _EXECUTED_TASK_CACHE.clear()
+        _DECLINED_TASK_CACHE.clear()
+        _IN_FLIGHT_TASK_KEYS.clear()
+    try:
+        conn = db._get_connection()
+        conn.execute("DELETE FROM workflow_sessions WHERE workflow_id = 'portal_task_decision'")
+        conn.commit()
+    except Exception:
+        logger.debug("Shared portal task decision cleanup skipped", exc_info=True)
 
 
 def classify_portal_task(task_id: str) -> PortalTaskSpec | None:
@@ -1753,95 +1819,102 @@ def execute_portal_task(
 
     # Map canonical PortalFieldSpec names to each tool's parameter schema
     if spec.task_id == "tin_search_verify":
-        raw = tool.execute(query=str(p.get("tin") or p.get("query") or ""))
+        tool_args: dict[str, Any] = {"query": str(p.get("tin") or p.get("query") or "")}
     elif spec.task_id == "payment_view_status":
-        raw = tool.execute(prn=str(p.get("prn") or ""))
+        tool_args = {"prn": str(p.get("prn") or "")}
     elif spec.task_id == "dts_verify_stamp":
-        raw = tool.execute(stamp_code=str(p.get("stamp_serial") or p.get("stamp_code") or ""))
+        tool_args = {"stamp_code": str(p.get("stamp_serial") or p.get("stamp_code") or "")}
     elif spec.task_id == "ursb_verify_business":
-        raw = tool.execute(query=str(p.get("ursb_brn") or p.get("query") or ""))
+        tool_args = {"query": str(p.get("ursb_brn") or p.get("query") or "")}
     elif spec.task_id == "payment_verify_advance_tax":
-        raw = tool.execute(vehicle_registration_number=str(p.get("vehicle_registration_number") or ""))
+        tool_args = {"vehicle_registration_number": str(p.get("vehicle_registration_number") or "")}
     elif spec.task_id == "payment_generate_prn":
-        raw = tool.execute(
-            taxpayer_name=str(p.get("taxpayer_name") or "Registered Taxpayer"),
-            amount_ugx=float(p.get("amount_ugx") or 0),
-            taxpayer_tin=str(p.get("tin") or ""),
-            tax_head=str(p.get("tax_head") or "VAT_STANDARD"),
-            payment_channel=str(p.get("payment_mode") or "COMMERCIAL_BANK"),
-        )
+        tool_args = {
+            "taxpayer_name": str(p.get("taxpayer_name") or "Registered Taxpayer"),
+            "amount_ugx": float(p.get("amount_ugx") or 0),
+            "taxpayer_tin": str(p.get("tin") or ""),
+            "tax_head": str(p.get("tax_head") or "VAT_STANDARD"),
+            "payment_channel": str(p.get("payment_mode") or "COMMERCIAL_BANK"),
+        }
     elif spec.task_id == "payment_reactivate_prn":
-        raw = tool.execute(prn=str(p.get("prn") or ""))
+        tool_args = {"prn": str(p.get("prn") or "")}
     elif spec.task_id == "tin_apply_individual":
         surname = str(p.get("surname") or "").strip()
         given = str(p.get("given_name") or "").strip()
         full_name = str(p.get("full_name") or f"{surname} {given}".strip() or "Applicant")
-        raw = tool.execute(
-            nin=str(p.get("nin") or ""),
-            full_name=full_name,
-            date_of_birth=str(p.get("date_of_birth") or "1992-01-01"),
-            mobile=str(p.get("mobile_number") or "+256700000000"),
-            email=str(p.get("email") or "taxpayer@example.ug"),
-            district=str(p.get("district") or "Kampala"),
-        )
+        tool_args = {
+            "nin": str(p.get("nin") or ""),
+            "full_name": full_name,
+            "date_of_birth": str(p.get("date_of_birth") or "1992-01-01"),
+            "mobile": str(p.get("mobile_number") or "+256700000000"),
+            "email": str(p.get("email") or "taxpayer@example.ug"),
+            "district": str(p.get("district") or "Kampala"),
+        }
     elif spec.task_id == "tin_apply_non_individual":
-        raw = tool.execute(
-            ursb_registration_number=str(p.get("ursb_brn") or ""),
-            business_name=str(p.get("legal_name") or ""),
-            category=str(p.get("entity_type") or "NON_INDIVIDUAL_COMPANY"),
-            district=str(p.get("district") or "Kampala"),
-            mobile=str(p.get("mobile_number") or "+256700000000"),
-            email=str(p.get("email") or "info@company.co.ug"),
-        )
+        tool_args = {
+            "ursb_registration_number": str(p.get("ursb_brn") or ""),
+            "business_name": str(p.get("legal_name") or ""),
+            "category": str(p.get("entity_type") or "NON_INDIVIDUAL_COMPANY"),
+            "district": str(p.get("district") or "Kampala"),
+            "mobile": str(p.get("mobile_number") or "+256700000000"),
+            "email": str(p.get("email") or "info@company.co.ug"),
+        }
     elif spec.task_id == "dts_order_stamps":
-        raw = tool.execute(
-            taxpayer_tin=str(p.get("tin") or ""),
-            product_category=str(p.get("product_category") or "BOTTLED_WATER"),
-            quantity=int(float(p.get("quantity") or 1000)),
-        )
+        tool_args = {
+            "taxpayer_tin": str(p.get("tin") or ""),
+            "product_category": str(p.get("product_category") or "BOTTLED_WATER"),
+            "quantity": int(float(p.get("quantity") or 1000)),
+        }
     elif spec.task_id == "dts_activate_stamps":
         serials = [s.strip() for s in str(p.get("stamp_serial") or "").split(",") if s.strip()]
-        raw = tool.execute(
-            action="activate",
-            order_id=str(p.get("order_id") or ""),
-            line_id=str(p.get("line_id") or "LINE-KLA-01"),
-            stamp_serials=serials,
-        )
+        tool_args = {
+            "action": "activate",
+            "order_id": str(p.get("order_id") or ""),
+            "line_id": str(p.get("line_id") or "LINE-KLA-01"),
+            "stamp_serials": serials,
+        }
     elif spec.task_id == "efris_stock_management":
-        raw = tool.execute(
-            action="stock_in",
-            tin=str(p.get("tin") or ""),
-            commodity_code=str(p.get("commodity_code") or ""),
-            description=str(p.get("description") or "Portal Co-Pilot Stock-In"),
-            quantity=float(p.get("quantity") or 0),
-            unit_cost=float(p.get("unit_cost") or 0),
-        )
+        tool_args = {
+            "action": "stock_in",
+            "tin": str(p.get("tin") or ""),
+            "commodity_code": str(p.get("commodity_code") or ""),
+            "description": str(p.get("description") or "Portal Co-Pilot Stock-In"),
+            "quantity": float(p.get("quantity") or 0),
+            "unit_cost": float(p.get("unit_cost") or 0),
+        }
     elif spec.task_id == "ursb_register_business":
-        raw = tool.execute(
-            business_name=str(p.get("legal_name") or ""),
-            applicant_nin=str(p.get("nin") or ""),
-            district=str(p.get("district") or "Kampala"),
-        )
+        tool_args = {
+            "business_name": str(p.get("legal_name") or ""),
+            "applicant_nin": str(p.get("nin") or ""),
+            "district": str(p.get("district") or "Kampala"),
+        }
     elif spec.task_id == "ura_account_profile":
-        raw = tool.execute(taxpayer_id=str(p.get("tin") or user_id or ""))
+        tool_args = {"taxpayer_id": str(p.get("tin") or user_id or "")}
     elif spec.task_id == "tin_tax_obligations":
-        raw = tool.execute(
-            tin=str(p.get("tin") or ""),
-            tax_head=str(p.get("tax_head") or "VAT_STANDARD"),
-        )
+        tool_args = {
+            "tin": str(p.get("tin") or ""),
+            "tax_head": str(p.get("tax_head") or "VAT_STANDARD"),
+        }
     elif spec.task_id in ("efris_taxpayer_status", "dts_taxpayer_status"):
-        raw = tool.execute(tin=str(p.get("tin") or ""))
+        tool_args = {"tin": str(p.get("tin") or "")}
     elif spec.task_id == "ursb_compliance_status":
-        raw = tool.execute(registration_number=str(p.get("ursb_brn") or ""))
+        tool_args = {"registration_number": str(p.get("ursb_brn") or "")}
     elif spec.task_id == "bwims_consignment_status":
-        raw = tool.execute(entry_number=str(p.get("entry_number") or ""))
+        tool_args = {"entry_number": str(p.get("entry_number") or "")}
     elif spec.task_id == "bwims_warehouse_inventory":
-        raw = tool.execute(
-            warehouse_code=str(p.get("warehouse_code") or "WH-KLA-001"),
-            importer_tin=str(p.get("tin") or "") or None,
-        )
+        tool_args = {
+            "warehouse_code": str(p.get("warehouse_code") or "WH-KLA-001"),
+            "importer_tin": str(p.get("tin") or "") or None,
+        }
     else:
-        raw = tool.execute(**p)
+        tool_args = dict(p)
+
+    raw = ToolRegistry.call(
+        spec.tool_name,
+        tool_args,
+        user_id=str(user_id or ""),
+        caller_confirmed=True,
+    )
 
     result_dict = dict(raw) if isinstance(raw, Mapping) else {"ok": True, "data": raw}
     result_dict.setdefault("live", False)
@@ -2165,11 +2238,13 @@ def handle_portal_task_decision(
 
     decision_clean = str(decision or "").strip().lower()
     if decision_clean in ("disallow", "decline", "cancel"):
+        shared_state, _ = _read_shared_task_decision(cache_key)
         with _TASK_CACHE_LOCK:
-            if cache_key not in _EXECUTED_TASK_CACHE:
+            if cache_key not in _EXECUTED_TASK_CACHE and shared_state != "executed":
                 _DECLINED_TASK_CACHE[cache_key] = time.time()
                 while len(_DECLINED_TASK_CACHE) > _MAX_TASK_CACHE_ENTRIES:
                     _DECLINED_TASK_CACHE.popitem(last=False)
+                _write_shared_task_decision(cache_key, declined=True, user_id=user_id)
         return {
             "ok": True,
             "status": "declined",
@@ -2196,64 +2271,88 @@ def handle_portal_task_decision(
             cached = dict(_EXECUTED_TASK_CACHE[cache_key])
             cached["idempotent_replay"] = True
             return cached
+        shared_state, shared_payload = _read_shared_task_decision(cache_key)
+        if shared_state == "declined":
+            _DECLINED_TASK_CACHE[cache_key] = time.time()
+            raise PortalTaskValidationError(
+                "This action proposal was already declined by the taxpayer and cannot be replayed."
+            )
+        if shared_state == "executed" and shared_payload:
+            _EXECUTED_TASK_CACHE[cache_key] = dict(shared_payload)
+            cached = dict(shared_payload)
+            cached["idempotent_replay"] = True
+            return cached
+        if cache_key in _IN_FLIGHT_TASK_KEYS:
+            raise PortalTaskValidationError("This action proposal is already being executed.")
+        _IN_FLIGHT_TASK_KEYS.add(cache_key)
 
-    # Re-verify 4-Tier Policy Gate at execution time
-    if spec.requires_auth and not user_id:
-        return {
-            "ok": False,
-            "status": "requires_auth",
+    try:
+        # Re-verify 4-Tier Policy Gate at execution time
+        if spec.requires_auth and not user_id:
+            return {
+                "ok": False,
+                "status": "requires_auth",
+                "task_id": spec.task_id,
+                "portal_key": spec.portal_key,
+                "live": False,
+                "mode": "simulation",
+                "summary": f"Authentication is required to execute {spec.title}.",
+                "result": {},
+                "dom_actions": [],
+                "copilot_portal_url": copilot_portal_url,
+            }
+
+        allowed_tin, secrecy_err = check_subject_tin_ownership(
+            spec,
+            str(params.get("tin") or ""),
+            user_id=user_id,
+            authenticated_tin=authenticated_tin,
+        )
+        if not allowed_tin:
+            raise PortalTaskOwnershipError(secrecy_err)
+
+        exec_result = execute_portal_task(spec.task_id, params, user_id=user_id)
+        ok = bool(exec_result.get("ok", True))
+        live = bool(exec_result.get("live", False))
+        mode = "live" if live else "simulation"
+        dom_actions = get_portal_dom_recipe(spec.portal_key, state=spec.task_id, entities=dict(params))
+
+        summary_msg = str(
+            exec_result.get("message")
+            or (
+                f"Completed {spec.title} in simulation mode (PRN: {exec_result['prn']})."
+                if exec_result.get("prn")
+                else f"Completed {spec.title} ({mode} mode)."
+            )
+        )
+
+        response_payload = {
+            "ok": ok,
+            "status": "executed" if ok else "error",
             "task_id": spec.task_id,
             "portal_key": spec.portal_key,
-            "live": False,
-            "mode": "simulation",
-            "summary": f"Authentication is required to execute {spec.title}.",
-            "result": {},
-            "dom_actions": [],
+            "live": live,
+            "mode": mode,
+            "summary": summary_msg,
+            "result": exec_result,
+            "dom_actions": dom_actions,
             "copilot_portal_url": copilot_portal_url,
         }
-
-    allowed_tin, secrecy_err = check_subject_tin_ownership(
-        spec,
-        str(params.get("tin") or ""),
-        user_id=user_id,
-        authenticated_tin=authenticated_tin,
-    )
-    if not allowed_tin:
-        raise PortalTaskOwnershipError(secrecy_err)
-
-    exec_result = execute_portal_task(spec.task_id, params, user_id=user_id)
-    ok = bool(exec_result.get("ok", True))
-    live = bool(exec_result.get("live", False))
-    mode = "live" if live else "simulation"
-    dom_actions = get_portal_dom_recipe(spec.portal_key, state=spec.task_id, entities=dict(params))
-
-    summary_msg = str(
-        exec_result.get("message")
-        or (
-            f"Completed {spec.title} in simulation mode (PRN: {exec_result['prn']})."
-            if exec_result.get("prn")
-            else f"Completed {spec.title} ({mode} mode)."
-        )
-    )
-
-    response_payload = {
-        "ok": ok,
-        "status": "executed" if ok else "error",
-        "task_id": spec.task_id,
-        "portal_key": spec.portal_key,
-        "live": live,
-        "mode": mode,
-        "summary": summary_msg,
-        "result": exec_result,
-        "dom_actions": dom_actions,
-        "copilot_portal_url": copilot_portal_url,
-    }
-    if ok:
+        if ok:
+            with _TASK_CACHE_LOCK:
+                _EXECUTED_TASK_CACHE[cache_key] = dict(response_payload)
+                while len(_EXECUTED_TASK_CACHE) > _MAX_TASK_CACHE_ENTRIES:
+                    _EXECUTED_TASK_CACHE.popitem(last=False)
+                _write_shared_task_decision(
+                    cache_key,
+                    declined=False,
+                    payload=response_payload,
+                    user_id=user_id,
+                )
+        return response_payload
+    finally:
         with _TASK_CACHE_LOCK:
-            _EXECUTED_TASK_CACHE[cache_key] = dict(response_payload)
-            while len(_EXECUTED_TASK_CACHE) > _MAX_TASK_CACHE_ENTRIES:
-                _EXECUTED_TASK_CACHE.popitem(last=False)
-    return response_payload
+            _IN_FLIGHT_TASK_KEYS.discard(cache_key)
 
 
 def hmac_compare(a: str, b: str) -> bool:

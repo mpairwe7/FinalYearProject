@@ -15,6 +15,7 @@ from app.portal_copilot import (
     analyze_portal_context,
     build_portal_task_card,
     classify_portal_task,
+    clear_portal_task_cache,
     detect_portal_task_intent,
     handle_portal_task_decision,
     mask_sensitive_value,
@@ -180,6 +181,7 @@ def test_analyze_portal_context_scrubs_secrets_and_spotlights_errors() -> None:
 
 def test_policy_gates_inline_form_confirmation_step_up_and_execution() -> None:
     """Verify Gate 1 (Step-Up Login), Gate 2 (Inline Form), Gate 4 (Claude-style Confirmation), and Execution."""
+    clear_portal_task_cache()
     # 1. Missing inputs -> Inline Form
     intent = detect_portal_task_intent("Generate a VAT PRN for me")
     assert intent is not None

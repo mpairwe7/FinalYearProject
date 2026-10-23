@@ -1114,7 +1114,6 @@ export default function Page() {
   const sendMessage = useCallback(async (
     overrideText?: string,
     portalTaskSubmission?: Record<string, unknown>,
-    overrideConversationId?: string,
   ) => {
     const text = (overrideText ?? message).trim();
     if (!text || isLoading) return;
@@ -1152,8 +1151,7 @@ export default function Page() {
         docType: a.docType,
         analysis: a.analysis,
       }));
-    const conversationId =
-      overrideConversationId ?? activeConversationId ?? ensureActiveConversationId();
+    const conversationId = activeConversationId ?? ensureActiveConversationId();
     shouldStickToBottomRef.current = true;
     setShowScrollToLatest(false);
 
@@ -1595,7 +1593,12 @@ export default function Page() {
         ? preview.conversationId
         : undefined;
     if (targetConvId && activeConversationId !== targetConvId) {
-      switchSession(targetConvId);
+      if (conversations.some((c) => c.id === targetConvId)) {
+        switchSession(targetConvId);
+      } else {
+        createNewSession();
+        useChatStore.setState({ activeConversationId: targetConvId });
+      }
       return;
     }
     const pending = consumePendingPortalContinuation();
@@ -1611,10 +1614,11 @@ export default function Page() {
         fields: pending.collectedFields,
         resumed_after_login: true,
       },
-      targetConvId,
     );
   }, [
     activeConversationId,
+    conversations,
+    createNewSession,
     isLoading,
     pendingAttachments,
     resolvePortalTaskLabel,

@@ -20,6 +20,7 @@ from app.auth.jwt_auth import make_dev_token
 from app.documents import diagnose_portal_screenshot
 from app.flags import flags
 from app.main import app
+from app.portal_copilot import clear_portal_task_cache
 from app.service import ChatModel
 from fastapi.testclient import TestClient
 
@@ -28,6 +29,7 @@ from fastapi.testclient import TestClient
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv("MCP_REQUEST_STATE_SECRET", "test-secret-for-portal-copilot-hmac-2026-ura")
     flags.set("portal_copilot", True)
+    clear_portal_task_cache()
     prev_model = getattr(app.state, "model", None)
     prev_overrides = dict(app.dependency_overrides)
     app.dependency_overrides.clear()

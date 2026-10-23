@@ -738,20 +738,23 @@ export default function InbuiltPortalCopilotPage() {
     lastActivityRef.current = Date.now();
     setStalledMs(0);
 
-    let restoredCount = 0;
-    setValues((prev) => {
-      let changed = false;
-      const next: Record<string, string> = { ...prev };
-      for (const f of screen.fields) {
-        const candidate = userContinuationFields[f.name];
-        if (!next[f.name] && candidate && !SECRET_FIELD_RE.test(f.name)) {
-          next[f.name] = candidate;
-          changed = true;
-          restoredCount += 1;
-        }
+    const restored: Record<string, string> = {};
+    for (const f of screen.fields) {
+      const candidate = userContinuationFields[f.name];
+      if (!values[f.name] && candidate && !SECRET_FIELD_RE.test(f.name)) {
+        restored[f.name] = candidate;
       }
-      return changed ? next : prev;
-    });
+    }
+    const restoredCount = Object.keys(restored).length;
+    if (restoredCount > 0) {
+      setValues((prev) => {
+        const next: Record<string, string> = { ...prev };
+        for (const [name, val] of Object.entries(restored)) {
+          if (!next[name]) next[name] = val;
+        }
+        return next;
+      });
+    }
 
     setDemoPlaceholders((prev) => {
       const next: Record<string, string> = { ...prev };
@@ -770,7 +773,7 @@ export default function InbuiltPortalCopilotPage() {
     }
     setFieldErrors({});
     setErrorBanner("");
-  }, [copilotCard?.preserved_fields, screen.fields, t]);
+  }, [copilotCard?.preserved_fields, screen.fields, t, values]);
 
   useEffect(() => {
     if (searchParams?.get("autofill") === "1" && autoFilledKeyRef.current !== screen.key) {
