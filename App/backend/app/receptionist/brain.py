@@ -17,7 +17,7 @@ from ..analytics import record_chat_turn
 from ..flags import flags
 from ..speech_normalization import clean_text_for_speech
 from ..text_signals import detect_crisis
-from .clarify import ClarifyGate, ClarifyState, classify_yes_no
+from .clarify import ClarifyGate, ClarifyState
 from .config import (
     KNOWN_LANGUAGES,
     _env_float,
@@ -776,7 +776,11 @@ class UraReceptionistBrain(LLMService):
             if (
                 reask_window is None
                 and len(user_text.split()) >= 5
-                and classify_yes_no(user_text, language) == "neither"
+                and not re.match(
+                    r"^\W*(?:yes|yeah|yep|yup|no|nope|nah|yee|nedda|ndiyo|ndio|hapana|ego|ngaaha|eyo|pe)\b",
+                    user_text,
+                    re.IGNORECASE,
+                )
                 and (
                     "?" in user_text
                     or re.search(

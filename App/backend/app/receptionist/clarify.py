@@ -299,7 +299,8 @@ class ClarifyGate:
         # Elsewhere most content words are not in the (English) lexicon at
         # all, so look for the least certain word that is one of its acronyms.
         ordered = sorted(low_items, key=prob_of)
-        for lowest_idx, _item in ordered if loanwords_only else ordered[:1]:
+        unmatched_lowest_idx: int | None = None
+        for lowest_idx, _item in ordered:
             target_str = word_at(lowest_idx)
             prev_str = word_at(lowest_idx - 1).strip(",.?!;:\"'()") if lowest_idx > 0 else None
             cands = candidates(target_str, context=prev_str, acronyms_only=loanwords_only)
@@ -307,14 +308,14 @@ class ClarifyGate:
                 cand_term = cands[0][0]
                 clean_target = target_str.strip(",.?!;:\"'()")
                 if cand_term == clean_target.lower():
-                    return ClarifyAction(action="none")
+                    continue
                 if (
                     language == "en"
                     and repaired_text.lower() != text.lower()
                     and re.search(rf"\b{re.escape(cand_term)}\b", repaired_text, re.IGNORECASE)
                     and not re.search(rf"\b{re.escape(clean_target)}\b", repaired_text, re.IGNORECASE)
                 ):
-                    return ClarifyAction(action="none")
+                    continue
                 return ClarifyAction(
                     action="ask_term",
                     candidate=cand_term,
@@ -322,8 +323,15 @@ class ClarifyGate:
                     previous_word=prev_str,
                     prompt=phrase("clarify_term", language, term=_spoken_term(cand_term, language)),
                 )
+            if unmatched_lowest_idx is None:
+                unmatched_lowest_idx = lowest_idx
+            if not loanwords_only:
+                break
 
-        lowest_idx = ordered[0][0]
+        if unmatched_lowest_idx is None:
+            return ClarifyAction(action="none")
+
+        lowest_idx = unmatched_lowest_idx
         target_str = word_at(lowest_idx)
         prev_str = word_at(lowest_idx - 1).strip(",.?!;:\"'()") if lowest_idx > 0 else None
         if not clarify_repeat_enabled(language):

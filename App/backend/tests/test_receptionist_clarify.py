@@ -158,6 +158,18 @@ class TestClarifyGatePureLogic(unittest.TestCase):
         action = self.gate.assess("What is the standard VAT rate?", words=words, language="en")
         self.assertEqual(action.action, "none")
 
+        # When an exact match has the lowest probability and a genuine near-miss is also below threshold,
+        # assessment skips the exact match and clarifies the near-miss.
+        words_with_near_miss = [
+            WordConf("VAT", 0.30),
+            WordConf("for", 0.99),
+            WordConf("group", 0.95),
+            WordConf("mid-port", 0.40),
+        ]
+        action_near = self.gate.assess("VAT for group mid-port", words=words_with_near_miss, language="en")
+        self.assertEqual(action_near.action, "ask_term")
+        self.assertEqual(action_near.candidate, "import")
+
     def test_repaired_english_homophone_in_context_is_not_asked_to_clarify(self):
         words = [
             WordConf("What", 0.98),

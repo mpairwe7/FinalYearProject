@@ -487,8 +487,8 @@ class TestReceptionistBrain(unittest.IsolatedAsyncioTestCase):
             attempts=0,
         )
         await self.brain.handle_external_question(
-            "And what is the annual registration threshold for VAT?",
-            _words("And what is the annual registration threshold for VAT?"),
+            "How do I register if I have no TIN?",
+            _words("How do I register if I have no TIN?"),
         )
         self.assertIsNone(self.state.clarify)
         self.chat_model.generate.assert_called_once()

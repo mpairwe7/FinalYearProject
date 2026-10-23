@@ -160,7 +160,7 @@ export class PCMPlayer {
         this.ctx = new AudioContext({ sampleRate: this.sampleRate });
       }
       if (this.ctx.state === 'suspended') {
-        await this.ctx.resume().catch(() => {});
+        void this.ctx.resume().catch(() => {});
       }
 
       if (this.ctx.audioWorklet && typeof this.ctx.audioWorklet.addModule === 'function') {
