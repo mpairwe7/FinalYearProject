@@ -144,6 +144,10 @@ class TestSqliteQueueColumnParity:
 class TestLiveBackendRoundTrip:
     """Executes the real SQL. Only runs where a Postgres is available."""
 
+    def test_postgres_ticket_search_matches_the_character_not_every_ticket(self):
+        pg.init_db()
+        assert _wildcard_search_result(pg) == {"%": ["percent"], "_": ["underscore"]}
+
     def test_a_ticket_survives_a_write_read_round_trip(self):
         pg.init_db()
         conversation = f"conv-{os.getpid()}"
@@ -194,3 +198,33 @@ class TestLiveBackendRoundTrip:
             f"{sorted(set(sqlite_ticket) - set(pg_ticket))}, "
             f"postgres-only: {sorted(set(pg_ticket) - set(sqlite_ticket))}"
         )
+
+
+def _wildcard_search_result(backend) -> dict[str, list[str]]:
+    """Which of three fresh tickets a search for each LIKE wildcard returns.
+
+    One reason holds a literal ``%``, one a literal ``_``, one neither. A
+    search is a staff lookup; the taxpayer case routes no longer fall back to
+    it (G243), but an unescaped term still turned "%" into "every ticket".
+    """
+    import uuid
+
+    nonce = uuid.uuid4().hex[:10]
+    made = {
+        "percent": backend.create_ticket(reason=f"Paid 100% of it {nonce}")["id"],
+        "underscore": backend.create_ticket(reason=f"Quoted ref_{nonce}")["id"],
+        "plain": backend.create_ticket(reason=f"Nothing special {nonce}")["id"],
+    }
+    by_id = {v: k for k, v in made.items()}
+    out: dict[str, list[str]] = {}
+    for term in ("%", "_"):
+        hits = backend.list_tickets(q=term, limit=500)
+        out[term] = sorted(by_id[t["id"]] for t in hits if t["id"] in by_id)
+    return out
+
+
+class TestTicketSearchEscapesWildcards:
+    """SQLite here; the Postgres half is in ``TestLiveBackendRoundTrip``."""
+
+    def test_sqlite_matches_the_character_not_every_ticket(self, tmp_db):
+        assert _wildcard_search_result(tmp_db) == {"%": ["percent"], "_": ["underscore"]}

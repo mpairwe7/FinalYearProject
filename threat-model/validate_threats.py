@@ -570,6 +570,20 @@ THREAT_REGISTRY: list[dict] = [
         ],
         "status": "mitigated",
     },
+    {
+        "id": "T41",
+        "category": "Information Disclosure",
+        "description": "A taxpayer's support case (reason, query, transcript, officer reply) read, or written to, through the login-free case routes or the chat's TIC-/KB- reference lookup by someone who does not own it (OWASP API1:2023 BOLA, G243)",
+        "owasp_llm": "LLM02",
+        "mitre_atlas": "",
+        "mitigation": "Case routes answer to the exact ticket UUID only (_TICKET_ID_PATH_PATTERN + db.get_ticket, no search fallback); the chat reference lookup runs after the input guard and crisis check and answers only the owning subject or session; list_tickets escapes LIKE wildcards in both backends",
+        "evidence": [
+            "App/backend/app/main.py",
+            "App/backend/app/service.py",
+            "tests/test_answer_integrity_integration.py",
+        ],
+        "status": "mitigated",
+    },
 ]
 
 
