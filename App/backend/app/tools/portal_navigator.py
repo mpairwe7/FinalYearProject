@@ -13,11 +13,11 @@ from ..verified_resources import get_resource
 from . import Tool, ToolRegistry, ToolSchema
 from .portal_navigator_data import (
     EXTERNAL_URA_PORTALS,
-    PORTAL_NAVIGATION_WORKFLOWS,
     _diagnose_portal_state,
     build_portal_deep_link,
     export_companion_manifest,
     get_portal_dom_recipe,
+    get_portal_workflow,
 )
 
 PORTAL_NAVIGATOR_NAMESPACE = "portal_navigator"
@@ -240,8 +240,11 @@ class NavigateExternalPortalTool(Tool):
                 "tax_heads": extract_tax_heads(text)[:5],
             }
 
-        # 3. Diagnose issue & detect screen state (with declarative workflow override check)
-        decl_wf = PORTAL_NAVIGATION_WORKFLOWS.get(str(workflow_intent or "").strip())
+        # 3. Diagnose issue & detect screen state (with declarative workflow override check).
+        #    A workflow written for another portal must not relabel this portal's screen.
+        decl_wf = get_portal_workflow(str(workflow_intent or ""))
+        if decl_wf is not None and decl_wf.get("portal_key") not in (None, portal_key):
+            decl_wf = None
         if decl_wf is not None:
             state = str(workflow_intent).strip()
             issue = str(decl_wf.get("title") or "Declarative Portal Workflow")
@@ -319,6 +322,8 @@ class NavigateExternalPortalTool(Tool):
                 "breadcrumb_trail": breadcrumbs,
                 "deep_link_url": deep_link_url,
                 "dom_recipe": dom_recipe,
+                # Where declarative steps come from (corpus files / ura.go.ug pages).
+                "sources": list(decl_wf.get("sources") or []) if decl_wf is not None else [],
             },
             "explanation": explanation,
         }

@@ -72,3 +72,22 @@ Verified by:
 | `ProceduralMemory.retrieve_exemplars` (pre-indexed `ExpRAG` RLock bank) | `0.020 ms` | `0.021 ms` | `0.025 ms` | Thread-safe IDF + tool-sequence + faithfulness ranking |
 | `TurnPipelineOrchestrator.run` + `verify_behavioral_integrity` (`ASI10`) | `0.015 ms` | `0.016 ms` | `0.020 ms` | Monotonic stage order + fail-closed `STAGE_6` audit on error |
 | `architecture_integrity_status` (`production_readiness.py`) | `0.392 ms` | `0.412 ms` | `0.439 ms` | Integrated into `readiness_report()` |
+
+---
+
+## Amendment 1 — 2026-10-23: answer-safety corrections (G244, G245, G246)
+
+A post-merge audit of #624/#626 found that three of the Phase 2–3 changes made
+answers less safe while their tests stayed green. Each was measured, and each is
+corrected with a test that pins the property the original test missed.
+
+| Decision in this ADR | What it did in production | Correction |
+| :--- | :--- | :--- |
+| `G224`: question nouns (`refund`, `exemption`, `waiver`, `due`, `appeal`, `audit`, `arrears`, `liability`, …) added to `_NON_TAX_NOUN_FOLLOWERS` | Fabricated-tax recall fell from 19/19 to 5/19: "How do I claim a Wealth Tax refund?" was no longer challenged. The 105 scenarios did not need the change. | Reverted. Precision now comes from qualifier stop words, compound-noun followers and hyphen normalisation: 0 false positives on the benchmark, the real-tax probes and the FAQ corpus; held-out set 13/186 (from 14). **G244**, `tests/agents/test_premise_guard_recall.py`. |
+| 12 exemplars with legal bases; `find_exemplar` matches on any two shared words | 82% of FAQ questions got a "Statutory Procedural Checklist" in the prompt, about 19 in 20 for a different procedure. The rendered `legal_basis` is cited verbatim under `COMPLEX_ANSWER_CONTRACT`, and most #624 citations are absent from the corpus. | Reviewed per-exemplar triggers (3% of FAQ questions, each on its own procedure). The block is a **Procedure Outline**, operating sequence only, and exemplars carry procedure, not law. Recorded and imported trajectories are validated, redacted, bounded and barred from curated ids (OWASP ASI06). **G245**, `tests/agents/test_procedural_memory_safety.py`. |
+| Declarative portal pack with "SHA-256 provenance" | The hash proved the file's integrity, not that its steps were true. The NTR refund and voluntary-disclosure steps contradicted the corpus and URA's FAQ. The loader could not retract a workflow, checked no links, and let a pack re-point any portal. | Every workflow must cite `sources` (corpus files or `ura.go.ug` pages), links must be `is_authoritative_ura_url`, each load validates and replaces the whole set under a lock, and invalid entries are reported in `rejected`. Both workflows are rewritten from their sources. **G246**, `tests/agents/test_portal_knowledge_pack_integrity.py`. |
+
+**Consequence for this ADR's claims.** "Zero false-premise false positives
+across the 105-scenario benchmark" still holds, and is now stated with its recall
+(19/19 and 8/12 on two independent fabricated sets). Provenance now means *cited
+sources*, not a file hash.

@@ -3,15 +3,62 @@
 Completes the 4-tier cognitive memory taxonomy alongside Working, Episodic,
 and Semantic memory. Manages executable workflows, deterministic skills,
 policy rules, and dynamic few-shot trajectory exemplars.
+
+Exemplars carry *procedure*, not law. The matched exemplar's operating
+sequence reaches every generation prompt (``ChatModel._get_procedural_guidance_context``),
+and the answer contract tells the model to cite the legal bases it is given,
+so a section number written here would be quoted to taxpayers as statute.
+Statutory citations come from retrieved passages and tool results, which carry
+their own sources (G245).
+
+Only curated exemplars, matched by their reviewed triggers
+(``_CURATED_TRIGGERS``), are offered to a natural-language query. A dynamic or
+imported trajectory is unreviewed memory (OWASP ASI06): it is validated,
+redacted and bounded on the way in, and it can never take a curated id.
 """
 from __future__ import annotations
 
+import json
 import logging
+import math
+import os
 import re
+import tempfile
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+#: Dynamic (recorded or imported) exemplars kept at most; the oldest goes first.
+MAX_DYNAMIC_EXEMPLARS = 500
+#: Rows read from one JSONL import at most.
+MAX_IMPORT_ROWS = 5000
+_MAX_QUERY_CHARS = 2000
+_MAX_PLAN_STEPS = 12
+_MAX_STEP_CHARS = 300
+_TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
+#: Words that carry no topic; dropped before ranking so "how do I" matches nothing.
+_STOPWORDS = frozenset(
+    """
+    a an the and or but if of to in on at by for from with without into onto over under about
+    above below is are was were be been being am do does did done have has had having can could
+    would should may might must shall will i me my mine we us our you your he him his she her it
+    its they them their this that these those what which who whom whose when where why how there
+    here than then so too very just also only not no nor any all some each every more most other
+    such own same both few further once again per via tax taxes ura uganda ugandan ugx please tell
+    explain need want know get use using used online portal
+    """.split()
+)
+
+
+def _content_tokens(text: str) -> frozenset[str]:
+    """Topic tokens of *text*: lowercase alphanumerics, underscores split, stopwords dropped."""
+    return frozenset(
+        t for t in re.findall(r"[a-z0-9]{2,}", (text or "").lower().replace("_", " ")) if t not in _STOPWORDS
+    )
 
 
 @dataclass
@@ -116,7 +163,6 @@ _DEFAULT_EXEMPLARS: list[TrajectoryExemplar] = [
         demonstration_turn={
             "action": "Online VAT return submission on portal.ura.go.ug",
             "statutory_deadline": "15th day of the month following the tax period",
-            "required_form": "Form DT-1011",
         },
     ),
     TrajectoryExemplar(
@@ -130,7 +176,6 @@ _DEFAULT_EXEMPLARS: list[TrajectoryExemplar] = [
         demonstration_turn={
             "action": "Portal e-Services > Objections and Appeals > Object to a Tax Assessment",
             "statutory_deadline": "45 days from service of assessment notice",
-            "legal_basis": "Tax Procedures Code Act Section 24",
         },
     ),
     TrajectoryExemplar(
@@ -147,7 +192,6 @@ _DEFAULT_EXEMPLARS: list[TrajectoryExemplar] = [
         faithfulness_score=1.0,
         demonstration_turn={
             "tool_args": {"service_type": "mowt_driving_permit", "prn_status": "paid_not_reflecting_at_mda"},
-            "legal_basis": "Traffic and Road Safety Act (Cap. 361) & Public Finance Management Act 2015 s.29",
         },
     ),
     TrajectoryExemplar(
@@ -164,7 +208,6 @@ _DEFAULT_EXEMPLARS: list[TrajectoryExemplar] = [
         faithfulness_score=1.0,
         demonstration_turn={
             "tool_args": {"life_event": "kcca_iras_trading_license", "annual_turnover_ugx": 8_000_000.0},
-            "legal_basis": "Tax Procedures Code Act s.135(1) & Income Tax Act s.4(5) Second Schedule",
         },
     ),
     TrajectoryExemplar(
@@ -181,7 +224,6 @@ _DEFAULT_EXEMPLARS: list[TrajectoryExemplar] = [
         faithfulness_score=1.0,
         demonstration_turn={
             "tool_args": {"clearance_domain": "ppda_egp_tcc_and_ifms_wht", "amount_ugx": 50_000_000.0},
-            "legal_basis": "PPDA Act (Cap. 205) & Income Tax Act s.119(1)",
         },
     ),
     TrajectoryExemplar(
@@ -192,13 +234,12 @@ _DEFAULT_EXEMPLARS: list[TrajectoryExemplar] = [
         plan=[
             "Identify new company with zero sales and unfiled months",
             "Execute build_new_taxpayer_compliance_shield tool",
-            "Warn of UGX 200,000/month late-filing penalty under TPC Act s.49(1) and provide 60-Second Nil-Return steps",
+            "Warn of the late-filing penalty the tool returns and provide the nil-return filing steps",
         ],
         tool_sequence=["build_new_taxpayer_compliance_shield"],
         faithfulness_score=1.0,
         demonstration_turn={
             "tool_args": {"taxpayer_profile": "new_company_zero_sales", "unfiled_months": 3},
-            "legal_basis": "Tax Procedures Code Act (Cap. 343) s.49(1)",
         },
     ),
     TrajectoryExemplar(
@@ -209,7 +250,7 @@ _DEFAULT_EXEMPLARS: list[TrajectoryExemplar] = [
         plan=[
             "Extract unpaid principal tax, months overdue, pre-audit status, and instalment months",
             "Execute simulate_tax_relief_and_instalments tool",
-            "Compare standard s.49(1)/s.39 exposure against 100% waiver under Voluntary Disclosure (s.66(1a), Form DT-10307) and s.40 TCC-unlocking instalment schedule",
+            "Compare the penalty and interest exposure with the voluntary-disclosure relief and instalment schedule the tool returns",
         ],
         tool_sequence=["simulate_tax_relief_and_instalments"],
         faithfulness_score=1.0,
@@ -220,7 +261,6 @@ _DEFAULT_EXEMPLARS: list[TrajectoryExemplar] = [
                 "voluntary_before_audit_notice": True,
                 "instalment_months": 6,
             },
-            "legal_basis": "Tax Procedures Code Act s.66(1a) & s.40",
         },
     ),
     TrajectoryExemplar(
@@ -240,7 +280,6 @@ _DEFAULT_EXEMPLARS: list[TrajectoryExemplar] = [
                 "scenario": "efris_free_channel_and_5pct_refund",
                 "thirty_day_ereceipt_purchases_ugx": 2_360_000.0,
             },
-            "legal_basis": "Value Added Tax (Amendment) Act 2026 s.7",
         },
     ),
     TrajectoryExemplar(
@@ -257,23 +296,98 @@ _DEFAULT_EXEMPLARS: list[TrajectoryExemplar] = [
         faithfulness_score=1.0,
         demonstration_turn={
             "tool_args": {"entity_type": "individual", "building_rents": [20_000_000.0, 20_000_000.0, 20_000_000.0]},
-            "legal_basis": "Income Tax Act (Cap. 338) s.5 & Third Schedule Part VI",
         },
     ),
 ]
 
+_CURATED_BY_ID: dict[str, TrajectoryExemplar] = {ex.exemplar_id: ex for ex in _DEFAULT_EXEMPLARS}
+
+
+def _trigger(*require: str, exclude: tuple[str, ...] = ()) -> tuple[tuple[re.Pattern[str], ...], tuple[re.Pattern[str], ...]]:
+    return (
+        tuple(re.compile(p, re.IGNORECASE) for p in require),
+        tuple(re.compile(p, re.IGNORECASE) for p in exclude),
+    )
+
+
+#: Reviewed natural-language triggers for the curated exemplars, most specific
+#: first. Every ``require`` pattern must match and no ``exclude`` pattern may.
+#: Reviewed against every question in the FAQ corpus (G245): they fire on 3%
+#: of them, each on its own procedure. The rule they replace (any two shared
+#: words) fired on 82% and offered a different procedure about 19 times in 20.
+_CURATED_TRIGGERS: tuple[tuple[str, tuple[re.Pattern[str], ...], tuple[re.Pattern[str], ...]], ...] = (
+    ("ex-mda-ntr-06", *_trigger(r"\bprn\b", r"\b(paid|unpaid|not reflect\w*|still shows?)\b")),
+    ("ex-life-event-07", *_trigger(r"\b(trading licen[cs]e|kcca|iras)\b")),
+    ("ex-b2g-uesw-08", *_trigger(r"\b(ppda|e-?gp|government contracts?|ifms|public procurement)\b")),
+    ("ex-nil-shield-09", *_trigger(r"\b(nil returns?|zero sales|no sales|dormant)\b")),
+    (
+        "ex-voluntary-disclosure-10",
+        *_trigger(r"\b(voluntary disclosure|instal+ments?|waive|waiver)\b", r"\b(penalt\w*|interest)\b"),
+    ),
+    (
+        "ex-efris-refund-11",
+        *_trigger(
+            r"(\be-?receipts?\b.*\brefund\b|\brefund\b.*\be-?receipts?\b|\b5%\s+(?:vat\s+)?refund\b"
+            r"|\blost (?:my )?(?:sim|phone|email)\b|\botp\b)"
+        ),
+    ),
+    ("ex-rental-pooled-12", *_trigger(r"\b(landlord|rental)\b", r"\b(buildings|properties|houses|several|multiple|each)\b")),
+    # Customs objections run under the EACCMA, with their own deadline.
+    ("ex-tax-objection-05", *_trigger(r"\b(object|objection|objections)\b", exclude=(r"\b(aeo|customs|eaccma)\b",))),
+    ("ex-paye-calc-01", *_trigger(r"\bpaye\b", r"\b(calculat\w*|comput\w*|how much|salary|deduct\w*)\b")),
+    ("ex-vat-return-04", *_trigger(r"\bvat\b", r"\b(returns?|file|filing)\b")),
+    (
+        "ex-vat-calc-02",
+        *_trigger(r"\bvat\b", r"(\b(calculat\w*|comput\w*|how much|inclusive|exclusive)\b|\bvat on (?:ugx|shs?\b|\d))"),
+    ),
+    ("ex-tin-reg-03", *_trigger(r"\btin\b", r"\b(register|registration|apply|obtain|get)\b")),
+)
+
+
+def _valid_identifier(value: Any) -> str:
+    """*value* as a snake_case identifier (intent, domain or tool name), or ``""``."""
+    text = str(value or "").strip()
+    return text if _TOOL_NAME_RE.match(text) else ""
+
+
+def _redact(value: Any) -> Any:
+    """PII-redact every string in *value*, recursively (the guardrails redactor)."""
+    if isinstance(value, str):
+        from ..guardrails import redact_pii_text
+
+        return redact_pii_text(value)
+    if isinstance(value, list):
+        return [_redact(item) for item in value]
+    if isinstance(value, dict):
+        return {str(k): _redact(v) for k, v in value.items()}
+    return value
+
+
+def _valid_faithfulness(value: Any) -> float | None:
+    """A finite score in [0, 1], or ``None`` — NaN would pass ``score < floor``."""
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return None
+    return score if math.isfinite(score) and 0.0 <= score <= 1.0 else None
+
 
 class ProceduralMemory:
-    """Manages system capabilities, skills, and pre-indexed thread-safe ExpRAG trajectory banks."""
+    """Manages system capabilities, skills, and pre-indexed thread-safe ExpRAG trajectory banks.
+
+    Every read of the bank works on a snapshot taken under the lock: iterating
+    a dict another thread is writing raises ``RuntimeError`` (Python's thread
+    safety guarantees: iteration is never atomic).
+    """
 
     def __init__(self) -> None:
-        import threading
-
         self._lock = threading.RLock()
         self._skills: dict[str, ProceduralSkill] = {}
         self._exemplars: dict[str, TrajectoryExemplar] = {}
         self._doc_tokens_map: dict[str, frozenset[str]] = {}
         self._doc_freq: dict[str, int] = {}
+        #: Dynamic exemplar ids, oldest first, for the MAX_DYNAMIC_EXEMPLARS bound.
+        self._dynamic_ids: OrderedDict[str, None] = OrderedDict()
         self._init_defaults()
 
     def _init_defaults(self) -> None:
@@ -324,58 +438,96 @@ class ProceduralMemory:
             return [s for s in self._skills.values() if s.domain == domain]
         return list(self._skills.values())
 
+    def _unindex(self, exemplar_id: str) -> None:
+        for tok in self._doc_tokens_map.pop(exemplar_id, frozenset()):
+            cnt = self._doc_freq.get(tok, 1) - 1
+            if cnt <= 0:
+                self._doc_freq.pop(tok, None)
+            else:
+                self._doc_freq[tok] = cnt
+
     def register_exemplar(self, exemplar: TrajectoryExemplar) -> None:
+        """Add or replace *exemplar* and its token index.
+
+        A curated id belongs to the reviewed default bank: anything but that
+        exemplar itself raises ``ValueError``, or an import could swap the
+        procedure a reviewed trigger puts into prompts. Dynamic exemplars are
+        bounded by ``MAX_DYNAMIC_EXEMPLARS``; the oldest is evicted first.
+        """
+        ex_id = exemplar.exemplar_id
+        curated = _CURATED_BY_ID.get(ex_id)
+        if curated is not None and exemplar != curated:
+            raise ValueError(f"exemplar id {ex_id!r} is curated and cannot be replaced")
         with self._lock:
-            old_tokens = self._doc_tokens_map.get(exemplar.exemplar_id)
-            if old_tokens:
-                for tok in old_tokens:
-                    cnt = self._doc_freq.get(tok, 1) - 1
-                    if cnt <= 0:
-                        self._doc_freq.pop(tok, None)
-                    else:
-                        self._doc_freq[tok] = cnt
-            self._exemplars[exemplar.exemplar_id] = exemplar
-            corpus_str = " ".join(
-                [
-                    exemplar.intent,
-                    exemplar.domain,
-                    exemplar.user_query,
-                    " ".join(exemplar.plan),
-                    " ".join(exemplar.tool_sequence),
-                ]
-            ).lower()
-            new_tokens = frozenset(re.findall(r"[a-z0-9_]{2,}", corpus_str))
-            self._doc_tokens_map[exemplar.exemplar_id] = new_tokens
+            self._unindex(ex_id)
+            self._exemplars[ex_id] = exemplar
+            new_tokens = _content_tokens(
+                " ".join(
+                    [
+                        exemplar.intent,
+                        exemplar.domain,
+                        exemplar.user_query,
+                        " ".join(exemplar.plan),
+                        " ".join(exemplar.tool_sequence),
+                    ]
+                )
+            )
+            self._doc_tokens_map[ex_id] = new_tokens
             for tok in new_tokens:
                 self._doc_freq[tok] = self._doc_freq.get(tok, 0) + 1
+            if curated is None:
+                self._dynamic_ids.pop(ex_id, None)
+                self._dynamic_ids[ex_id] = None
+                while len(self._dynamic_ids) > MAX_DYNAMIC_EXEMPLARS:
+                    oldest, _ = self._dynamic_ids.popitem(last=False)
+                    self._exemplars.pop(oldest, None)
+                    self._unindex(oldest)
 
     def find_exemplar(self, intent: str) -> TrajectoryExemplar | None:
-        """Locate verified few-shot exemplar for a given intent or query string."""
-        q_lower = intent.lower().strip()
-        # 1. Exact match on intent
-        for ex in self._exemplars.values():
+        """The exemplar for an intent name, or the curated one a question triggers.
+
+        1. Exact intent (``"calculate_paye"``), any exemplar — the memory tool asks this way.
+        2. An identifier naming part of a curated intent (``"paye"``).
+        3. A curated intent written inside the query ("run calculate_paye on 3m").
+        4. A natural-language question: the first curated exemplar whose
+           reviewed trigger it satisfies (``_CURATED_TRIGGERS``).
+
+        There is no shared-words fallback. The result reaches every generation
+        prompt, and an unrelated procedure there is worse than none.
+        """
+        query = (intent or "").strip()
+        if not query:
+            return None
+        q_lower = query.lower()
+        with self._lock:
+            snapshot = dict(self._exemplars)
+        for ex in snapshot.values():
             if ex.intent.lower() == q_lower:
                 return ex
-        # 2. Substring match on intent
-        for ex in self._exemplars.values():
-            if ex.intent.lower() in q_lower or q_lower in ex.intent.lower():
-                return ex
-        # 3. Token overlap match with user_query and plan
-        q_tokens = set(re.findall(r"\w+", q_lower))
-        best_match: TrajectoryExemplar | None = None
-        best_score = 0
-        for ex in self._exemplars.values():
-            ex_tokens = set(re.findall(r"\w+", (ex.user_query + " " + ex.intent).lower()))
-            overlap = len(q_tokens & ex_tokens)
-            if overlap > best_score and overlap >= 2:
-                best_score = overlap
-                best_match = ex
-        return best_match
+        if re.fullmatch(r"[a-z0-9_]{3,64}", q_lower):
+            parts = [p for p in q_lower.split("_") if p and p not in _STOPWORDS]
+            if not parts:
+                return None
+            for ex_id in _CURATED_BY_ID:
+                ex = snapshot.get(ex_id)
+                intent_parts = ex.intent.lower().split("_") if ex else []
+                if any(intent_parts[i : i + len(parts)] == parts for i in range(len(intent_parts))):
+                    return ex
+            return None
+        for ex_id, ex in _CURATED_BY_ID.items():
+            if re.search(rf"(?<![a-z0-9_]){re.escape(ex.intent.lower())}(?![a-z0-9_])", q_lower):
+                return snapshot.get(ex_id)
+        for ex_id, require, exclude in _CURATED_TRIGGERS:
+            if all(p.search(query) for p in require) and not any(p.search(query) for p in exclude):
+                return snapshot.get(ex_id)
+        return None
 
     def list_exemplars(self, domain: str | None = None) -> list[TrajectoryExemplar]:
+        with self._lock:
+            snapshot = list(self._exemplars.values())
         if domain:
-            return [e for e in self._exemplars.values() if e.domain == domain]
-        return list(self._exemplars.values())
+            return [e for e in snapshot if e.domain == domain]
+        return snapshot
 
     def record_verified_trajectory(
         self,
@@ -389,23 +541,37 @@ class ProceduralMemory:
         demonstration_turn: dict[str, Any] | None = None,
         min_faithfulness: float = 0.85,
     ) -> TrajectoryExemplar | None:
-        """Promote a verified high-faithfulness or officer-approved turn into the ExpRAG trajectory bank."""
+        """Promote a verified high-faithfulness or officer-approved turn into the ExpRAG trajectory bank.
+
+        Returns ``None`` — nothing stored — unless the score is a finite number
+        in [0, 1] at or above *min_faithfulness*, and the intent, domain and
+        every tool are snake_case identifiers. Text is PII-redacted and
+        length-bounded before it is stored.
+        """
         import hashlib
 
-        if faithfulness_score < min_faithfulness or not user_query.strip() or not tool_sequence:
+        score = _valid_faithfulness(faithfulness_score)
+        tools = [_valid_identifier(t) for t in tool_sequence or []]
+        query = _redact((user_query or "").strip())[:_MAX_QUERY_CHARS]
+        if score is None or score < min_faithfulness or not query or not tools or not all(tools):
             return None
+        clean_intent = _valid_identifier(intent) or tools[0]
+        clean_domain = _valid_identifier(domain) or "domestic_tax"
+        if not _valid_identifier(clean_intent):
+            return None
+        steps = [str(_redact(str(s)))[:_MAX_STEP_CHARS] for s in (plan or [])][:_MAX_PLAN_STEPS]
         digest = hashlib.sha256(
-            f"{intent.strip().lower()}|{'/'.join(tool_sequence)}|{user_query.strip().lower()[:160]}".encode("utf-8")
+            f"{clean_intent.lower()}|{'/'.join(tools)}|{query.lower()[:160]}".encode("utf-8")
         ).hexdigest()[:12]
         ex = TrajectoryExemplar(
             exemplar_id=f"ex-dyn-{digest}",
-            intent=intent.strip() or tool_sequence[0],
-            domain=domain.strip() or "domestic_tax",
-            user_query=user_query.strip(),
-            plan=list(plan) or [f"Execute {t}" for t in tool_sequence],
-            tool_sequence=list(tool_sequence),
-            faithfulness_score=float(faithfulness_score),
-            demonstration_turn=dict(demonstration_turn or {}),
+            intent=clean_intent,
+            domain=clean_domain,
+            user_query=query,
+            plan=steps or [f"Execute {t}" for t in tools],
+            tool_sequence=tools,
+            faithfulness_score=score,
+            demonstration_turn=_redact(dict(demonstration_turn or {})),
         )
         self.register_exemplar(ex)
         return ex
@@ -418,11 +584,13 @@ class ProceduralMemory:
         domain: str | None = None,
         planned_tools: list[str] | None = None,
     ) -> list[TrajectoryExemplar]:
-        """ExpRAG (arXiv:2603.18272) trajectory retrieval using pre-indexed IDF, tool-sequence overlap, and faithfulness."""
-        import math
+        """ExpRAG (arXiv:2603.18272) trajectory retrieval using pre-indexed IDF, tool-sequence overlap, and faithfulness.
 
+        Ranks on topic tokens only (``_content_tokens``), so a question that
+        shares nothing but "how do I" with an exemplar does not retrieve it.
+        """
         q_clean = (query or "").strip().lower()
-        q_tokens = frozenset(re.findall(r"[a-z0-9_]{2,}", q_clean))
+        q_tokens = _content_tokens(q_clean)
         tool_set = {t.strip() for t in (planned_tools or []) if t and t.strip()}
         with self._lock:
             candidates = self.list_exemplars(domain=domain)
@@ -453,7 +621,10 @@ class ProceduralMemory:
         top_k: int = 2,
         planned_tools: list[str] | None = None,
     ) -> str:
-        """Render top-K retrieved trajectories as an in-context procedural memory block (`ExpRAG`)."""
+        """Render top-K retrieved trajectories as an in-context procedural memory block (`ExpRAG`).
+
+        Procedure only: legal bases are not rendered (see the module docstring).
+        """
         hits = self.retrieve_exemplars(query, top_k=top_k, planned_tools=planned_tools)
         if not hits:
             return ""
@@ -461,49 +632,91 @@ class ProceduralMemory:
         for ex in hits:
             tools_str = ", ".join(ex.tool_sequence)
             plan_str = " -> ".join(ex.plan)
-            basis = ex.demonstration_turn.get("legal_basis", "")
-            basis_suffix = f" (Basis: {basis})" if basis else ""
-            lines.append(
-                f"- [{ex.exemplar_id}] Intent `{ex.intent}` (tools: `{tools_str}`): {plan_str}{basis_suffix}"
-            )
+            lines.append(f"- [{ex.exemplar_id}] Intent `{ex.intent}` (tools: `{tools_str}`): {plan_str}")
         return "\n".join(lines)
 
     def export_trajectories_jsonl(self, path: Any) -> int:
-        """Persist all registered exemplars to a JSONL file."""
-        import json
-        from pathlib import Path
+        """Persist all registered exemplars to a JSONL file, atomically.
 
+        Written to a temporary file in the same directory and renamed over the
+        target, so a crash mid-write never leaves a half-written bank.
+        """
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
-        rows = [ex.to_dict() for ex in self._exemplars.values()]
-        with target.open("w", encoding="utf-8") as fh:
-            for row in rows:
-                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        rows = [ex.to_dict() for ex in self.list_exemplars()]
+        fd, tmp_name = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                for row in rows:
+                    fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+            os.replace(tmp_name, target)
+        except BaseException:
+            Path(tmp_name).unlink(missing_ok=True)
+            raise
         return len(rows)
 
     def load_trajectories_jsonl(self, path: Any) -> int:
-        """Load persisted exemplars from a JSONL file into memory."""
-        import json
-        from pathlib import Path
+        """Load exemplars from a JSONL export; returns how many rows were loaded.
 
+        A row is imported memory, so it gets the checks a recorded trajectory
+        gets (identifiers, a finite score in [0, 1], redaction, bounds). A
+        curated id loads only when the row is that curated exemplar unchanged.
+        A bad row is skipped and counted, never fatal; at most
+        ``MAX_IMPORT_ROWS`` rows are read.
+        """
         target = Path(path)
         if not target.is_file():
             return 0
-        loaded = 0
-        for line in target.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            data = json.loads(line)
-            ex = TrajectoryExemplar(
-                exemplar_id=str(data["exemplar_id"]),
-                intent=str(data.get("intent") or ""),
-                domain=str(data.get("domain") or "domestic_tax"),
-                user_query=str(data.get("user_query") or ""),
-                plan=list(data.get("plan") or []),
-                tool_sequence=list(data.get("tool_sequence") or []),
-                faithfulness_score=float(data.get("faithfulness_score", 1.0)),
-                demonstration_turn=dict(data.get("demonstration_turn") or {}),
-            )
-            self.register_exemplar(ex)
-            loaded += 1
+        loaded = rejected = 0
+        with target.open(encoding="utf-8") as fh:
+            for n, line in enumerate(fh):
+                if n >= MAX_IMPORT_ROWS:
+                    logger.warning("procedural import stopped at %d rows (%s)", MAX_IMPORT_ROWS, target.name)
+                    break
+                if not line.strip():
+                    continue
+                try:
+                    data = json.loads(line)
+                    if not isinstance(data, dict):
+                        raise ValueError("row is not an object")
+                    curated = _CURATED_BY_ID.get(str(data.get("exemplar_id") or ""))
+                    if curated is not None:
+                        if data != curated.to_dict():
+                            raise ValueError("curated exemplar altered")
+                        self.register_exemplar(curated)
+                    else:
+                        self.register_exemplar(self._exemplar_from_row(data))
+                except (ValueError, TypeError, KeyError) as exc:
+                    rejected += 1
+                    logger.debug("skipped procedural row %d of %s: %s", n + 1, target.name, exc)
+                    continue
+                loaded += 1
+        if rejected:
+            logger.warning("skipped %d invalid procedural rows from %s", rejected, target.name)
         return loaded
+
+    @staticmethod
+    def _exemplar_from_row(data: dict[str, Any]) -> TrajectoryExemplar:
+        """Validate and redact one imported row; ``ValueError`` when it is unusable."""
+        ex_id = str(data.get("exemplar_id") or "")
+        if not re.fullmatch(r"ex-[a-z0-9-]{1,64}", ex_id):
+            raise ValueError("invalid exemplar_id")
+        intent = _valid_identifier(data.get("intent"))
+        tools = [_valid_identifier(t) for t in data.get("tool_sequence") or []]
+        score = _valid_faithfulness(data.get("faithfulness_score", 1.0))
+        plan = data.get("plan") or []
+        demo = data.get("demonstration_turn") or {}
+        if not intent or not tools or not all(tools) or score is None:
+            raise ValueError("invalid intent, tools or score")
+        if not isinstance(plan, list) or not isinstance(demo, dict):
+            raise ValueError("invalid plan or demonstration_turn")
+        return TrajectoryExemplar(
+            exemplar_id=ex_id,
+            intent=intent,
+            domain=_valid_identifier(data.get("domain")) or "domestic_tax",
+            user_query=str(_redact(str(data.get("user_query") or "")))[:_MAX_QUERY_CHARS],
+            plan=[str(_redact(str(s)))[:_MAX_STEP_CHARS] for s in plan][:_MAX_PLAN_STEPS],
+            tool_sequence=tools,
+            faithfulness_score=score,
+            demonstration_turn=_redact(demo),
+        )

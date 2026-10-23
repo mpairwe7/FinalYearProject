@@ -5100,24 +5100,27 @@ class ChatModel:
 
     @staticmethod
     def _get_procedural_guidance_context(query: str) -> str:
-        """Retrieve verified procedural workflow guidance for statutory operations."""
+        """The operating sequence of the curated procedure this question triggers, if any.
+
+        It reaches every generation prompt, so it carries the procedure only:
+        never the exemplar's ``demonstration_turn`` (tool arguments, forms,
+        deadlines, legal bases). The answer contract tells the model to cite
+        the legal bases it is given, and those must come from retrieved
+        passages and tool results, which carry their sources (G245).
+        """
         try:
             from .memory import get_memory_service
 
             exemplar = get_memory_service().procedural.find_exemplar(query)
             if not exemplar or not exemplar.plan:
                 return ""
-            lines = [
-                f"## Statutory Procedural Checklist ({exemplar.intent.replace('_', ' ').title()})",
-                f"Standard Operating Sequence: {' -> '.join(exemplar.plan)}",
-            ]
-            if exemplar.demonstration_turn:
-                for k, v in exemplar.demonstration_turn.items():
-                    if isinstance(v, list):
-                        lines.append(f"- {k.replace('_', ' ').title()}: {', '.join(str(i) for i in v)}")
-                    else:
-                        lines.append(f"- {k.replace('_', ' ').title()}: {v}")
-            return "\n".join(lines)
+            return "\n".join(
+                [
+                    f"## Procedure Outline ({exemplar.intent.replace('_', ' ').title()})",
+                    f"Standard Operating Sequence: {' -> '.join(exemplar.plan)}",
+                    "Take rates, deadlines, forms and legal provisions from the retrieved passages or the verified facts, never from this outline.",
+                ]
+            )
         except Exception:
             return ""
 
