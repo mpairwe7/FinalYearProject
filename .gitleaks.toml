@@ -24,8 +24,10 @@ keywords = ["tin", "taxpayer"]
 
 [[rules]]
 id = "uganda-nin"
-description = "Uganda National ID Number (CM + 13 digits + letter)"
-regex = '''(?i)\b(nin|national[_\s-]?id)[\s:=_-]*[A-Z]{2}\d{13}[A-Z]\b'''
+# A NIN is 14 characters: C + M/F (or R) + 12 letters and digits (13-15 accepted,
+# as in guardrails.redact_pii_text). The former 16-character shape matched none (G247).
+description = "Uganda National ID Number (C + M/F/R + 12 letters/digits)"
+regex = '''(?i)\b(nin|national[_\s-]?id)[\s:=_-]*["\']?C[MFR][0-9A-Z]{11,13}\b'''
 tags = ["pii", "uganda"]
 keywords = ["nin", "national"]
 

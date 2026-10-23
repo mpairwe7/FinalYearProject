@@ -5753,14 +5753,33 @@ class ChatModel:
         attachment is not consent to read back identity fields or create a
         taxpayer record, so this path deliberately does neither.
         """
-        del message, thread_id, locale
+        del thread_id, locale
         if not attachments:
             return None
 
+        wants_id_tin_reg = bool(
+            re.search(
+                r"(?i)\b(?:register|apply|application)\b.*\b(?:tin|taxpayer)\b|\bnational\s+id\b",
+                message or "",
+            )
+        )
+        non_id_tax_types = {
+            "invoice",
+            "receipt",
+            "assessment",
+            "customs_declaration",
+            "filing_form",
+            "statutory_act",
+            "tin_card",
+        }
         nid_doc = None
         for att in attachments:
-            if getattr(att, "doc_type", "") == "national_id" or (
+            doc_type = getattr(att, "doc_type", "")
+            has_nins = bool(
                 hasattr(att, "fields") and isinstance(att.fields, dict) and att.fields.get("nins")
+            )
+            if doc_type == "national_id" or (
+                has_nins and (doc_type not in non_id_tax_types or wants_id_tin_reg)
             ):
                 nid_doc = att
                 break

@@ -68,6 +68,7 @@ class AuditTaxDocumentTool(Tool):
         from ..vision.ocr import (
             extract_dates,
             extract_efris_invoice_numbers,
+            extract_nin_numbers,
             extract_prn_numbers,
             extract_reference_numbers,
             extract_tax_heads,
@@ -77,6 +78,7 @@ class AuditTaxDocumentTool(Tool):
 
         fields = {
             "tins": extract_tin_numbers(text),
+            "nins": extract_nin_numbers(text),
             "prns": extract_prn_numbers(text),
             "efris_invoices": extract_efris_invoice_numbers(text),
             "amounts": extract_ugx_amounts(text),

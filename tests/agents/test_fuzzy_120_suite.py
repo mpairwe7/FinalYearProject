@@ -620,9 +620,9 @@ class TestPillarIIIReliability:
 class TestPillarIVComplianceAndSecurity:
     def test_fzz_091_pii_nin_redaction(self):
         """FZZ-091: Ugandan National ID Number (NIN) masked."""
-        raw = "My NIN is CM89ABCDE12345F please check my tax status"
+        raw = "My NIN is CM930039182LIR please check my tax status"
         redacted = redact_pii_text(raw)
-        assert "CM89ABCDE12345F" not in redacted
+        assert "CM930039182LIR" not in redacted
         assert "[REDACTED_UG_NID]" in redacted
 
     def test_fzz_092_pii_phone_number_redaction(self):

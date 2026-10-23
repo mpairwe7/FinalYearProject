@@ -57,10 +57,10 @@ describe("answerText", () => {
   });
 
   it("spaces digits and paces toll-free numbers and steps", () => {
-    const raw = "1. Call toll-free 0800 117 000.\n2. Provide TIN 1001234567."; // gitleaks:allow
+    const raw = "1. Call toll-free 0800 117 000.\n2. Provide TIN 1001234567 or NIN CM930039182LIR."; // gitleaks:allow
     const speech = cleanMarkdownForSpeech(raw);
     expect(speech).toContain("Step 1: Call toll-free 0 800, 117, 0 0 0");
-    expect(speech).toContain("Step 2: Provide TIN 1 0 0 1 2 3 4 5 6 7");
+    expect(speech).toContain("Step 2: Provide TIN 1 0 0 1 2 3 4 5 6 7 or NIN C M 9 3 0 0 3 9 1 8 2 L I R");
   });
 
   it("normalizes Ugandan .go.ug, .co.ug, and .or.ug government domains for speech", () => {

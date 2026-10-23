@@ -33,8 +33,8 @@ class TestStreamingDLPFilter(unittest.TestCase):
 
     def test_split_ug_nid_across_boundaries_is_masked(self) -> None:
         dlp = StreamingDLPFilter(buffer_size=24)
-        # 14-char Ugandan NIN: CM90ABCDE12345F, split across chunks
-        chunks = ["NIN record: ", "CM90", "ABCDE", "12345F", " has been validated."]
+        # 14-char Ugandan NIN: CM930039182LIR, split across chunks
+        chunks = ["NIN record: ", "CM93", "003918", "2LIR", " has been validated."]
         streamed = []
         for c in chunks:
             out = dlp.process_chunk(c)
@@ -42,8 +42,33 @@ class TestStreamingDLPFilter(unittest.TestCase):
                 streamed.append(out)
         streamed.append(dlp.flush())
         full = "".join(streamed)
-        self.assertNotIn("CM90ABCDE12345F", full)
+        self.assertNotIn("CM930039182LIR", full)
         self.assertIn("[REDACTED_UG_NID]", full)
+
+    def test_spaced_nid_and_spaced_card_and_long_prefix_nid_are_masked(self) -> None:
+        dlp = StreamingDLPFilter(buffer_size=24)
+        chunks = [
+            "Details: ",
+            "CM93 ",
+            "0039 ",
+            "182LIR ",
+            "and card ",
+            "4111 ",
+            "2222 ",
+            "3333 ",
+            "4444 ",
+            "Ref:" + ("-" * 16) + "CM930039182LI",
+            "R.",
+        ]
+        streamed = [dlp.process_chunk(c) for c in chunks]
+        streamed.append(dlp.flush())
+        full = "".join(streamed)
+        self.assertNotIn("CM93", full)
+        self.assertNotIn("182LIR", full)
+        self.assertNotIn("4111 2222", full)
+        self.assertNotIn("[REDACTED_UG_NID]R", full)
+        self.assertEqual(full.count("[REDACTED_UG_NID]"), 2)
+        self.assertIn("[REDACTED_CREDIT_CARD]", full)
 
     def test_official_ura_channels_are_exempt_from_redaction(self) -> None:
         dlp = StreamingDLPFilter(buffer_size=15)

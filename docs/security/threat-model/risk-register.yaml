@@ -212,7 +212,7 @@ risks:
     threat: PII leakage (Uganda TIN, National ID, Phone, Email, Bank info) in generated output
     severity: Critical
     cvss: "9.0"
-    existing_controls: OutputGuard PII regex & entity redaction with automatic masking ([TIN-REDACTED], [PHONE-REDACTED])
+    existing_controls: OutputGuard PII regex & entity redaction with automatic masking ([TIN-REDACTED], [PHONE-REDACTED]); National ID pattern corrected to the 14-character NIN on 2026-10-23 — the former fixed 15-character pattern matched no real NIN (G247, tests/agents/test_nin_redaction.py)
     status: Mitigated
     mitigation_target: Shipped
     owner: ai-team

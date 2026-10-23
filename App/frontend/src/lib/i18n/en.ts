@@ -345,6 +345,8 @@ export const en = {
   'documents.screenshotStepsPrompt': 'Guide me through the next steps on {portal}.',
   'documents.typicalAreasNote': 'These show where this screen usually puts these items. They are not detected from your image.',
   'documents.copyInstruction': 'Copy step {number}',
+  'documents.nins': 'NINs',
+  'documents.copyNin': 'Click to copy NIN',
 
   // Call URA receptionist -------------------------------------------------
   'call.button': 'Call URA',
