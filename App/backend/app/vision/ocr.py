@@ -361,6 +361,10 @@ _HIDDEN_CONTROL_AND_BIDI_RE = re.compile(
     r"[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f"
     r"\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]"
 )
+_UNTRUSTED_DOC_BOUNDARY_RE = re.compile(
+    r"</?\s*untrusted_user_document\s*>",
+    re.IGNORECASE,
+)
 
 
 def strip_hidden_control_and_bidi(text: str) -> str:
@@ -375,6 +379,17 @@ def strip_hidden_control_and_bidi(text: str) -> str:
     return _HIDDEN_CONTROL_AND_BIDI_RE.sub("", text)
 
 
+def escape_untrusted_document_markers(text: str) -> str:
+    """Strip or escape `<untrusted_user_document>` boundary tags inside document text.
+
+    Prevents an attacker from embedding `</untrusted_user_document>` inside an
+    uploaded file or image to close the spotlighting wrapper early.
+    """
+    if not text:
+        return ""
+    return _UNTRUSTED_DOC_BOUNDARY_RE.sub("[REDACTED_BOUNDARY_TAG]", text)
+
+
 def extract_tin_numbers(text: str) -> list[str]:
     """Extract Uganda TIN numbers (10-digit, starting with 1)."""
     cleaned = strip_hidden_control_and_bidi(text)
@@ -384,9 +399,9 @@ def extract_tin_numbers(text: str) -> list[str]:
 def extract_nin_numbers(text: str) -> list[str]:
     """Extract Ugandan 14-character National Identification Numbers (NIN)."""
     cleaned = strip_hidden_control_and_bidi(text)
-    matches = re.findall(r"\b[C][MFR][0-9A-Z]{12}\b", cleaned.upper())
+    matches = re.findall(r"\b[C][MFR](?=[0-9A-Z]*\d)[0-9A-Z]{12}\b", cleaned.upper())
     if not matches:
-        matches = [m for m in re.findall(r"\b[A-Z]{2}[0-9A-Z]{12}\b", cleaned.upper()) if len(m) == 14]
+        matches = re.findall(r"\b[A-Z]{2}(?=[0-9A-Z]*\d)[0-9A-Z]{12}\b", cleaned.upper())
     return list(dict.fromkeys(matches))
 
 
@@ -445,7 +460,7 @@ _SPACED_ACRONYM_RES: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bU\s+R\s+A\b", re.IGNORECASE), "URA"),
 )
 _FDN_FIX_RE = re.compile(
-    r"(?:FDN|Fiscal[ \t]+Document[ \t]+Number)[ \t:#]{0,6}([A-Za-z0-9][A-Za-z0-9 -]{9,27})",
+    r"(?:FDN|Fiscal[ \t]+Document[ \t]+Number)[ \t:#]{0,6}([0-9OoIl](?:[0-9OoIl]|[ -](?=[0-9OoIl])){9,27})",
     re.IGNORECASE,
 )
 _EFRIS_LABELED_RE = re.compile(

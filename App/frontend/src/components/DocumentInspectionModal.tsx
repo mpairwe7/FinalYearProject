@@ -283,7 +283,7 @@ export function DocumentInspectionModal({
 
                 {fields.nins && fields.nins.length > 0 && (
                   <div className="doc-modal-field-block">
-                    <span className="doc-modal-field-label">NINs</span>
+                    <span className="doc-modal-field-label">{t('documents.nins')}</span>
                     <div className="doc-modal-chip-wrap">
                       {fields.nins.map((nin) => (
                         <button
@@ -291,7 +291,7 @@ export function DocumentInspectionModal({
                           type="button"
                           className="doc-modal-entity-chip"
                           onClick={() => copyToClipboard(nin)}
-                          title="Click to copy NIN"
+                          title={t('documents.copyNin')}
                         >
                           {nin} 📋
                         </button>

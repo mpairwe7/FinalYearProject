@@ -367,10 +367,13 @@ class VoiceSessionV2:
         message_for_llm = query_text
         if image_context:
             from .guardrails import scan_retrieved_text
+            from .vision.ocr import escape_untrusted_document_markers
 
             doc_type = image_context.get("doc_type", "document")
             ocr_text, _ = scan_retrieved_text(str(image_context.get("ocr_text", "")))
             summary, _ = scan_retrieved_text(str(image_context.get("summary", "")))
+            ocr_text = escape_untrusted_document_markers(ocr_text)
+            summary = escape_untrusted_document_markers(summary)
             message_for_llm = (
                 f"{query_text}\n\n"
                 f"[Scanned {doc_type}]\n"

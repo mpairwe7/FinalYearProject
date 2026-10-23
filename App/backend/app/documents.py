@@ -47,6 +47,7 @@ from .pdf_guards import QUERY_PDF_LIMITS, PdfRejected, inspect_pdf_bytes
 from .vision.document_classifier import classify_document
 from .vision.ocr import (
     clean_ocr_text,
+    escape_untrusted_document_markers,
     extract_dates,
     extract_efris_invoice_numbers,
     extract_nin_numbers,
@@ -423,7 +424,7 @@ class DocumentRecord:
         header = "\n".join(lines)
         remaining = max(200, char_budget - len(header) - 80)
         cleaned_text = re.sub(r"(?:DOMESTIC TAX LAWS OF UGANDA\s+)?\d+\s*\|\s*P\s*a\s*g\s*e", "", self.text)
-        cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text).strip()
+        cleaned_text = escape_untrusted_document_markers(re.sub(r"\n{3,}", "\n\n", cleaned_text).strip())
         body = cleaned_text[:remaining]
         if not body:
             return header
@@ -1301,7 +1302,7 @@ def reconcile_tax_document(
 
     nins = fields.get("nins") or []
     for nin in nins[:3]:
-        notes.append(f"Uganda NIRA National ID Number (NIN) {nin} verified (14-character format).")
+        notes.append(f"Uganda NIRA National ID Number (NIN) {nin} has a valid 14-character format.")
 
     prns = fields.get("prns") or []
     for prn in prns:

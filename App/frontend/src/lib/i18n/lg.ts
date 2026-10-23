@@ -330,6 +330,8 @@ export const lg: Partial<Dictionary> = {
   'documents.screenshotStepsPrompt': 'Nduŋŋamye mu mitendera egiddako ku {portal}.',
   'documents.typicalAreasNote': 'Bino biraga wa screen eno w’ebiseeka bulijjo. Tebizuuliddwa mu kifaananyi kyo.',
   'documents.copyInstruction': 'Koppa omutendera {number}',
+  'documents.nins': 'Ennamba za NIN',
+  'documents.copyNin': 'Nyiga okukoppa NIN',
 
   // Call URA receptionist
   'call.button': 'Kuba Essimu ku URA',

@@ -186,7 +186,7 @@ def detect_raster_line_table_grid(
     if h < 24 or w < 24:
         return []
 
-    gray = image.mean(axis=2) if image.ndim >= 3 else image.astype(np.float32)
+    gray = image.mean(axis=2, dtype=np.float32) if image.ndim >= 3 else image.astype(np.float32)
     # Dark pixels relative to page background
     threshold = min(180.0, float(np.percentile(gray, 50)) * 0.78)
     dark = gray < threshold

@@ -513,7 +513,13 @@ def generate_document_report_pdf(analysis: dict[str, Any]) -> bytes:
             pdf.set_fill_color(*_URA_NAVY)
             pdf.set_x(pdf.l_margin)
             pdf.cell(50, 6, "Financial Component", border=1, fill=True)
-            pdf.cell(70, 6, "Declared Amount (UGX)", border=1, fill=True)
+            pdf.cell(
+                70,
+                6,
+                _safe_text(pdf, f"Declared Amount ({recon.get('currency') or 'UGX'})"),
+                border=1,
+                fill=True,
+            )
             pdf.cell(70, 6, "Audit Status / Rate", border=1, fill=True)
             pdf.ln()
 
