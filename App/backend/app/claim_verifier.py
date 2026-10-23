@@ -246,7 +246,7 @@ def verify_claims(
         context_tokens = _tokens(context_text)
         overlap = len(claim_tokens & context_tokens) / max(1, len(claim_tokens))
 
-        if welfare_turn and is_self_reflection_sentence(clean_claim):
+        if welfare_turn and is_self_reflection_sentence(clean_claim, in_welfare_turn=True):
             overlap = max(overlap, 0.85)
             if not refs and citations:
                 refs = ["1"]

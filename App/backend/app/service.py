@@ -158,6 +158,7 @@ from .guardrails import (
 )
 from .language_state import LanguageDecision, normalize_locale_tag, resolve_turn_locale
 from .memory import get_memory_service
+from .model_welfare import is_model_welfare_query
 from .premise_guard import check_false_premise
 from .query import (
     SUPPORTED_LOCALES,
@@ -2427,6 +2428,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             )
             and llm_module.is_available()
             and not result.get("_suppress_agentic")
+            and result.get("retrieval_mode") != "model_welfare"
         )
         agentic_used_tools = False
         if use_agentic:
@@ -5465,7 +5467,17 @@ class ChatModel:
     # calculator hands over a figure — none of them want a second closer
     # bolted on.
     _FRAMED_MODES_EXCLUDED = frozenset(
-        {"workflow", "clarification", "abstained", "escalated", "calculator", "graph"}
+        {
+            "workflow",
+            "clarification",
+            "abstained",
+            "escalated",
+            "calculator",
+            "graph",
+            "model_welfare",
+            "greeting",
+            "conversational",
+        }
     )
 
     _PROCEDURAL_RE = re.compile(
@@ -10643,6 +10655,7 @@ class ChatModel:
                 and not attachments
                 and not conversation_history
                 and not connector_namespaces
+                and not is_model_welfare_query(message)
             )
             # A taxpayer who chose a service and asked it for a record is not
             # asking for a template. The keyword answers below cannot read that
@@ -11703,7 +11716,7 @@ class ChatModel:
                     bool(connector_namespaces)
                     and flags.is_enabled("enterprise_connectors")
                 )
-            ) and self._llm_available and not suppress_agentic_fallback
+            ) and self._llm_available and not suppress_agentic_fallback and not welfare_cats
 
             agentic_used_tools = False
             agentic_reply = ""
@@ -12416,7 +12429,7 @@ class ChatModel:
         if (
             cache_allowed
             and flags.is_enabled("semantic_cache")
-            and retrieval_mode not in ("blocked", "abstained")
+            and retrieval_mode not in ("blocked", "abstained", "model_welfare")
             and not escalate
             and not withheld_contradicted
             and not ticket_id
@@ -12653,6 +12666,7 @@ class ChatModel:
             and not attachments
             and not conversation_history
             and not connector_namespaces
+            and not is_model_welfare_query(message)
         )
         # See generate(): a lookup in a service the taxpayer chose is not a
         # question for the keyword templates below.
