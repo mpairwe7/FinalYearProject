@@ -118,3 +118,21 @@ This evaluation validates the URA AI Taxpayer Assistant (including Phase 42 Port
 - **Runner Script**: `scripts/benchmark_50000_cx_multimodal_ngrok.py`
 - **Raw Telemetry JSON**: `docs/Reports/data/ura_50000_cx_multimodal_ngrok_report_2026_10_24.json`
 - **Regression Schema Test**: `tests/agents/test_cx_50000_multimodal_ngrok.py`
+
+---
+
+## 5. Post-Benchmark Call Receptionist Audio & Multi-Turn Continuity Hardening (`PR #649`, `PR #650`, `G249`)
+
+Following the 50,000-scenario benchmark, live browser inspection and multi-turn WebSocket call testing against `https://struttingly-nongeological-briella.ngrok-free.dev` resolved four browser and pipeline issues (`G249`):
+
+1. **Voice Consent Dialog & Static `CallScreen` Mounting (`PR #649`)**:
+   - Replaced `dynamic(() => import('@/components/call/CallScreen'))` in `App/frontend/src/app/page.tsx` with a static import and added explicit `call.consentTitle` / `call.consentText` copy in `CallScreen.tsx` and `/portal/[portalKey]`.
+2. **Browser Audio Playback & Recording Worklet Resilience (`PR #650`)**:
+   - Guarded `PCMPlayer.init()` (`App/frontend/src/services/pcmPlayer.ts`) with a singleton `initPromise`, non-blocking `void this.ctx.resume()`, and a `pendingChunks` FIFO queue so incoming 20 ms WebSocket audio frames never spawn multiple `AudioContext` instances while the worklet module is loading.
+   - Added inline `Blob` `AudioWorklet` fallbacks (`PCMPlayer` and `AudioRecorder.startStreaming` in `App/frontend/src/services/voiceService.ts`), a scheduled `AudioBufferSourceNode` fallback queue, 60-second circular worklet buffering (`16000 * 60` in `App/frontend/public/pcm-player-worklet.js`), `blob:` CSP support in `App/frontend/next.config.mjs`, and separated `dialToneCtxRef` from `getToneContext()` in `App/frontend/src/hooks/useCall.ts`.
+3. **Pipecat 1.12 TTS Turn Lifecycle (`UraSpeechTTS`, `PR #650`)**:
+   - Enabled `push_start_frame=True` and `push_stop_frames=True` in `App/backend/app/receptionist/tts.py` so `TTSStartedFrame` and `TTSStoppedFrame` are emitted on every turn, flushing trailing audio and firing `BotStoppedSpeakingFrame` immediately instead of holding `_bot_speaking=True` for `3.0s` (`BOT_VAD_STOP_FALLBACK_SECS`).
+4. **Multi-Turn Clarification & Spoken Answer Hygiene (`ClarifyGate`, `UraReceptionistBrain`, `lexicon.py`, `PR #650`)**:
+   - Skipped exact lexicon matches (`cand_term == clean_target.lower()`) and context-repaired English homophones (`standard vet rate -> standard VAT rate`, `for a teen -> for a TIN`) in `ClarifyGate.assess` while continuing to check remaining low-confidence words.
+   - Superseded open clarification state in `UraReceptionistBrain.handle_external_question` when the caller asks a complete new question on the next turn (including questions containing `"no"` mid-sentence such as *"How do I register if I have no TIN?"*), and stripped written-chat follow-up footers (`You might also want to know:...`, `If you get stuck at any step...`) in `_spoken_answer`.
+   - Verified live over `wss://struttingly-nongeological-briella.ngrok-free.dev/api/v1/calls/stream` across a continuous 3-turn call (`Turn 1: 966,400 B`, `Turn 2: 990,720 B`, `Turn 3: 857,600 B`, `0` browser `AudioContext` errors).
