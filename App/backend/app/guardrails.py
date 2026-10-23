@@ -593,11 +593,11 @@ _STREAM_HOLD_TAIL_RE = re.compile(
     r"(?<!\d[ -])\b1\d{2}(?:[ -]\d{3})?|"
     r"(?<!\d[ -])\b\d{4}(?:[ -]\d{4}){0,2}|"
     r"(?<!\d[ -])\b3[47]\d{2}(?:[ -]\d{6})?|"
-    r"\b(?:TIN|Tax[ \t]+Identification[ \t]+Number)[ \t:#-]{0,4}"
-    r")[ \t]+$"
+    r"\b(?:TIN|Tax[ \t]{1,4}Identification[ \t]{1,4}Number)[ \t:#-]{0,4}"
+    r")[ \t]{1,8}$"
 )
 _STREAM_CONTIGUOUS_TAIL_RE = re.compile(
-    r"(?i)(?:\bC[MFR][0-9A-Z-]{0,14}|\+?256\d{0,9}|[0-9A-Z._%+-]+@[0-9A-Z.-]*|\b[A-Z]{2}\d{1,7}|\b\d[\d-]{0,18})$"
+    r"(?i)(?:\bC[MFR][0-9A-Z-]{0,14}|\b[A-Z]{2}\d{1,7}|\b\d[\d-]{0,18})$"
 )
 
 
