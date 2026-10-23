@@ -144,6 +144,10 @@ class TestSqliteQueueColumnParity:
 class TestLiveBackendRoundTrip:
     """Executes the real SQL. Only runs where a Postgres is available."""
 
+    def test_postgres_ticket_search_matches_the_character_not_every_ticket(self):
+        pg.init_db()
+        assert _wildcard_search_result(pg) == {"%": ["percent"], "_": ["underscore"]}
+
     def test_a_ticket_survives_a_write_read_round_trip(self):
         pg.init_db()
         conversation = f"conv-{os.getpid()}"
@@ -220,15 +224,7 @@ def _wildcard_search_result(backend) -> dict[str, list[str]]:
 
 
 class TestTicketSearchEscapesWildcards:
+    """SQLite here; the Postgres half is in ``TestLiveBackendRoundTrip``."""
+
     def test_sqlite_matches_the_character_not_every_ticket(self, tmp_db):
         assert _wildcard_search_result(tmp_db) == {"%": ["percent"], "_": ["underscore"]}
-
-
-@pytest.mark.skipif(
-    not os.getenv("POSTGRES_DSN"),
-    reason="set POSTGRES_DSN to run the live backend round-trip",
-)
-class TestTicketSearchEscapesWildcardsOnPostgres:
-    def test_postgres_matches_the_character_not_every_ticket(self):
-        pg.init_db()
-        assert _wildcard_search_result(pg) == {"%": ["percent"], "_": ["underscore"]}
