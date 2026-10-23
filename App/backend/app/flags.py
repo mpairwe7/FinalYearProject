@@ -663,6 +663,14 @@ _REGISTRY: dict[str, Flag] = {
             "Qdrant, delete/tombstone outdated editions, upsert newer editions into Qdrant, and "
             "record updates in web_sync_ledger to prevent redundant web searches.",
         ),
+        Flag(
+            "portal_copilot",
+            True,
+            "Phase 42 (FLAG_PORTAL_COPILOT): 4-tier URA portal task execution, Claude-style HITL "
+            "confirmation cards, inline form elicitation, and inbuilt stuck-user DOM co-pilot.",
+            category="kill_switch",
+            owner="agentic_runtime",
+        ),
     ]
 }
 
@@ -846,6 +854,7 @@ class FeatureFlags:
                 "workflow_emotional_offramp",
                 "wellbeing_checkin",
                 "cxp_business_hours",
+                "portal_copilot",
             )
         }
 

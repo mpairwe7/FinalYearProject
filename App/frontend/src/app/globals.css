@@ -3913,3 +3913,187 @@ figcaption {
   font-size: 0.9rem;
   color: var(--text-2);
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   Portal Task Execution & Inbuilt Co-Pilot Cards (Phase 42)
+   ════════════════════════════════════════════════════════════════════ */
+
+.portal-copilot-card {
+  margin-top: 0.875rem;
+  padding: 1rem 1.125rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.portal-copilot-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.portal-copilot-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+}
+
+.portal-copilot-badge.is-amber {
+  background: rgba(245, 158, 11, 0.18);
+  color: #b45309;
+}
+
+.portal-copilot-badge.is-emerald {
+  background: rgba(16, 185, 129, 0.18);
+  color: #047857;
+}
+
+.portal-copilot-badge.is-sim {
+  background: rgba(59, 130, 246, 0.15);
+  color: #1d4ed8;
+}
+
+.portal-copilot-citation {
+  font-size: 0.75rem;
+  color: var(--text-2, #64748b);
+}
+
+.portal-copilot-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.portal-copilot-subtitle {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.portal-verification-banner {
+  margin: 0;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.5rem;
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  font-size: 0.85rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.portal-inline-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.portal-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.portal-form-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.portal-form-input {
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  font-size: 0.9rem;
+  background: var(--surface-1, #ffffff);
+  color: inherit;
+}
+
+.portal-field-helper {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-2, #64748b);
+}
+
+.portal-field-error {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #dc2626;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.portal-verification-table {
+  margin: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.portal-verification-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.4rem;
+  background: rgba(148, 163, 184, 0.1);
+  font-size: 0.85rem;
+}
+
+.portal-verification-row dt {
+  font-weight: 600;
+}
+
+.portal-verification-row dd {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.portal-sensitive-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 0.35rem;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  background: transparent;
+  cursor: pointer;
+  color: inherit;
+}
+
+.portal-copilot-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-top: 0.25rem;
+}
+
+.portal-action-btn.is-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: rgba(239, 68, 68, 0.14);
+  color: #dc2626;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  padding: 0.45rem 0.85rem;
+  border-radius: 0.5rem;
+  font-weight: 600;
+  cursor: pointer;
+}

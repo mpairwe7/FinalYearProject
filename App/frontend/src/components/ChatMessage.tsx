@@ -1,20 +1,23 @@
-import React, { memo, useCallback, useMemo, useState } from 'react';
+import React, { memo, useCallback, useMemo, useState, useSyncExternalStore } from 'react';
 import { ChatAttachment, ChatTurn, Citation } from '../store/useChatStore';
 import { URA_CONTACTS, citationHref, sourceLabel, telDigits } from '../lib/uraContacts';
-import { formatDocType, stripStepPrefix } from '../lib/attachments';
+import { formatDocType, stripStepPrefix, type ScreenshotCopilotHandoff } from '../lib/attachments';
 import { stripCitationMarkers } from '../lib/answerText';
 import { formatNextShift } from '../lib/turnMeta';
 import { localeLabel } from '../lib/locales';
 import { useTranslation, type TranslationKey } from '../lib/i18n';
 import type { ConnectorNotice, ConnectorOutcome, ConnectorSkipReason, ConnectorUse } from '../lib/connectors';
 import { getChatSessionId } from '../lib/chatSession';
-import { authHeaders } from '../lib/authSession';
+import { authHeaders, getAuthToken, getServerAuthToken, subscribeAuthToken } from '../lib/authSession';
+import { sanitizeReturnTo } from '../lib/oidcFlow';
+import { savePendingPortalContinuation } from '../lib/portalContinuation';
 import { detectDeadlineInMessage, downloadCalendarEvent, getGoogleCalendarUrl } from '../lib/calendarEvents';
 import FeedbackButtons from './FeedbackButtons';
 import HumanHandoff from './HumanHandoff';
-import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon, FileIcon, DownloadIcon, EyeIcon, PlugIcon } from './Icons';
+import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon, FileIcon, DownloadIcon, EyeIcon, PlugIcon, ArrowRightIcon, ExternalLinkIcon, AlertTriangleIcon, LockIcon } from './Icons';
 import LoadingState from './LoadingState';
 import Markdown from './Markdown';
+import PortalCopilotCard from './PortalCopilotCard';
 import WorkflowStepper from './WorkflowStepper';
 import ResourceCards from './ResourceCards';
 
@@ -151,6 +154,7 @@ interface ChatMessageProps {
   phaseStartedAt?: number;
   onInspectAttachment?: (attachment: ChatAttachment) => void;
   onActionClick?: (action: string) => void;
+  onSubmitInlineForm?: (taskId: string, fields: Record<string, string>) => void;
 }
 
 /**
@@ -175,6 +179,34 @@ function needsHuman(turn: ChatTurn): boolean {
   return turn.faithfulnessScore != null && turn.faithfulnessScore < 0.6;
 }
 
+const SCREENSHOT_PREFILL_FIELD_MAP: Record<string, string> = {
+  tin: 'tin',
+  prn: 'prn',
+  amount_ugx: 'amount_ugx',
+  tax_head: 'tax_head',
+  original_fdn: 'original_fdn',
+};
+
+function saveScreenshotHandoff(
+  handoff: ScreenshotCopilotHandoff,
+  conversationId: string | null,
+) {
+  const collectedFields: Record<string, string> = {};
+  for (const [sourceKey, targetKey] of Object.entries(SCREENSHOT_PREFILL_FIELD_MAP)) {
+    const value = handoff.prefill_state?.[sourceKey];
+    if (typeof value === 'string' && value.trim()) {
+      collectedFields[targetKey] = value.trim();
+    }
+  }
+  savePendingPortalContinuation({
+    conversationId: conversationId || 'default',
+    taskId: 'screenshot_copilot_handoff',
+    portalKey: handoff.portal_key,
+    collectedFields,
+    returnMode: 'portal',
+  });
+}
+
 function ChatMessageInner({
   turn,
   userQuery,
@@ -190,6 +222,7 @@ function ChatMessageInner({
   phaseStartedAt,
   onInspectAttachment,
   onActionClick,
+  onSubmitInlineForm,
 }: ChatMessageProps) {
   const isAssistant = turn.role === 'assistant';
   const isGreeting = turn.id === 'greeting-0';
@@ -197,6 +230,8 @@ function ChatMessageInner({
   // are rated on their own service, not with the answer thumbs.
   const isOfficerReply = turn.retrievalMode === 'officer_reply';
   const t = useTranslation();
+  const authToken = useSyncExternalStore(subscribeAuthToken, getAuthToken, getServerAuthToken);
+  const isSignedIn = Boolean(authToken);
   // Outside officers' working hours, and when they are next on duty (G196).
   const offDuty = turn.officerHours?.onDuty === false;
   const nextShift =
@@ -241,6 +276,15 @@ function ChatMessageInner({
 
         {isAssistant && turn.workflow && (
           <WorkflowStepper workflow={turn.workflow} onSelectOption={onActionClick} />
+        )}
+
+        {isAssistant && turn.portalCopilot && (
+          <PortalCopilotCard
+            copilot={turn.portalCopilot}
+            conversationId={conversationId}
+            onSubmitInlineForm={onSubmitInlineForm}
+            onActionClick={onActionClick}
+          />
         )}
 
         {isAssistant && turn.objectiveHypothesis && !turn.workflow && (
@@ -334,13 +378,86 @@ function ChatMessageInner({
                     </div>
                   ) : null}
                   <p className="portal-guidance-caution">{t('documents.screenshotCaution')}</p>
+                  {a.analysis.screenshot_guidance.completeness_check &&
+                  !a.analysis.screenshot_guidance.completeness_check.is_complete ? (
+                    <div className="portal-completeness-guard" data-testid="screenshot-completeness-guard">
+                      <p className="portal-field-error">
+                        <AlertTriangleIcon size={14} /> {t('portalCopilot.incompleteScreenshotWarning')}
+                      </p>
+                      {a.analysis.screenshot_guidance.completeness_check.clarifying_options?.length ? (
+                        <div className="portal-clarifying-chips">
+                          {a.analysis.screenshot_guidance.completeness_check.clarifying_options.map((chip) => (
+                            <button
+                              key={chip}
+                              type="button"
+                              className="workflow-option-btn"
+                              onClick={() => onActionClick?.(chip)}
+                            >
+                              {chip}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {a.analysis.screenshot_guidance.copilot_handoff?.user_message ? (
+                    <p className="portal-copilot-subtitle">
+                      {a.analysis.screenshot_guidance.copilot_handoff.user_message}
+                    </p>
+                  ) : null}
                   <div className="portal-guidance-actions">
+                    {a.analysis.screenshot_guidance.copilot_handoff ? (
+                      a.analysis.screenshot_guidance.copilot_handoff.requires_login_first && !isSignedIn ? (
+                        <a
+                          href={
+                            sanitizeReturnTo(
+                              a.analysis.screenshot_guidance.copilot_handoff.signin_then_portal_url,
+                            ) || '/signin'
+                          }
+                          onClick={() =>
+                            saveScreenshotHandoff(
+                              a.analysis!.screenshot_guidance!.copilot_handoff!,
+                              conversationId,
+                            )
+                          }
+                          className="portal-action-btn is-primary"
+                          data-testid="screenshot-signin-copilot-btn"
+                        >
+                          <LockIcon size={14} />{' '}
+                          {t('portalCopilot.signInFirstThenCopilot', {
+                            portal: a.analysis.screenshot_guidance.detected_portal || 'URA Portal',
+                          })}{' '}
+                          <ArrowRightIcon size={14} />
+                        </a>
+                      ) : (
+                        <a
+                          href={
+                            sanitizeReturnTo(
+                              a.analysis.screenshot_guidance.copilot_handoff.inbuilt_portal_url,
+                            ) || '/portal/e_services?copilot=1'
+                          }
+                          onClick={() =>
+                            saveScreenshotHandoff(
+                              a.analysis!.screenshot_guidance!.copilot_handoff!,
+                              conversationId,
+                            )
+                          }
+                          className="portal-action-btn is-primary"
+                          data-testid="screenshot-open-copilot-btn"
+                        >
+                          {t('portalCopilot.openWithCopilot', {
+                            portal: a.analysis.screenshot_guidance.detected_portal || 'URA Portal',
+                          })}{' '}
+                          <ExternalLinkIcon size={13} />
+                        </a>
+                      )
+                    ) : null}
                     {a.analysis.screenshot_guidance.portal_url ? (
                       <a
                         href={a.analysis.screenshot_guidance.portal_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="portal-action-btn is-primary"
+                        className="portal-action-btn is-ghost"
                       >
                         {a.analysis.screenshot_guidance.direct_action?.label || t('documents.openOfficialPortal')}
                       </a>

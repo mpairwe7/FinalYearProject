@@ -25,8 +25,26 @@ export interface PortalDomAction {
   selector: string;
   action_type: 'click' | 'fill' | 'select' | 'spotlight' | 'inspect';
   fill_value?: string | null;
+  scroll_to?: boolean;
   tooltip: string;
   security_gate: 'safe' | 'requires_confirmation' | 'blocked';
+}
+
+export interface ScreenshotCompletenessCheck {
+  is_complete: boolean;
+  missing_context_hints?: string[];
+  clarifying_options?: string[];
+}
+
+export interface ScreenshotCopilotHandoff {
+  portal_key: string;
+  detected_portal?: string;
+  detected_state?: string;
+  inbuilt_portal_url: string;
+  requires_login_first: boolean;
+  signin_then_portal_url: string;
+  prefill_state?: Record<string, string>;
+  user_message?: string;
 }
 
 export interface ScreenshotHotspot {
@@ -42,13 +60,17 @@ export interface ScreenshotHotspot {
 export interface ScreenshotGuidance {
   is_screenshot?: boolean;
   detected_portal?: string;
+  portal_key?: string;
   portal_url?: string;
   portal_category?: string;
   detected_state?: string;
+  requires_auth?: boolean;
   issues_detected?: string[];
   steps?: string[];
   hotspots?: ScreenshotHotspot[];
   dom_recipe?: PortalDomAction[];
+  completeness_check?: ScreenshotCompletenessCheck;
+  copilot_handoff?: ScreenshotCopilotHandoff;
   direct_action?: {
     label: string;
     url: string;

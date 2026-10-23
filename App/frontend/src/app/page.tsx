@@ -31,6 +31,10 @@ import { useVoiceEscape } from '../hooks/useVoiceEscape';
 import { authHeaders, clearAuthToken, getAuthToken } from '../lib/authSession';
 import { getChatSessionId } from '../lib/chatSession';
 import {
+  consumePendingPortalContinuation,
+  peekPendingPortalContinuation,
+} from '../lib/portalContinuation';
+import {
   MAX_SELECTED_CONNECTORS,
   connectorsUsedFromTrace,
   parseConnectorNotices,
@@ -1107,7 +1111,10 @@ export default function Page() {
     }
   }, [setSelectedConnectorNamespaces]);
 
-  const sendMessage = useCallback(async (overrideText?: string) => {
+  const sendMessage = useCallback(async (
+    overrideText?: string,
+    portalTaskSubmission?: Record<string, unknown>,
+  ) => {
     const text = (overrideText ?? message).trim();
     if (!text || isLoading) return;
     // Enter can fire while an upload is analysing — wait for it to settle.
@@ -1123,7 +1130,7 @@ export default function Page() {
       recognitionRef.current?.stop();
     }
     // An officer has the case: the message is theirs, and the assistant waits
-    // until they end the chat.
+    // until they end the chat (unless a structured portal task submission is also attached).
     if (withOfficer) {
       setMessage('');
       shouldStickToBottomRef.current = true;
@@ -1132,7 +1139,9 @@ export default function Page() {
         setMessage(text);
         setChatLiveStatus(t('officerChat.sendFailed'));
       }
-      return;
+      if (!portalTaskSubmission) {
+        return;
+      }
     }
     const sentAttachments = pendingAttachments
       .filter((a) => a.status === 'ready' && a.documentId)
@@ -1191,6 +1200,7 @@ export default function Page() {
       ...(selectedConnectorNamespaces.length
         ? { connector_namespaces: selectedConnectorNamespaces }
         : {}),
+      ...(portalTaskSubmission ? { portal_task_submission: portalTaskSubmission } : {}),
     });
     const requestHeaders = authHeaders({
       'Content-Type': 'application/json',
@@ -1244,6 +1254,7 @@ export default function Page() {
           frequency_count: typeof disc.frequency_count === 'number' ? disc.frequency_count : 1,
           discrepancy_type: typeof disc.discrepancy_type === 'string' ? disc.discrepancy_type : 'outdated_law',
         } : undefined,
+        portalCopilot: d.portal_copilot ?? d.portalCopilot ?? undefined,
       };
       const cur = useChatStore.getState().chat;
       const last = cur[cur.length - 1];
@@ -1547,6 +1558,74 @@ export default function Page() {
     revealQueueRef.current?.stop();
     streamAbortRef.current?.abort();
   }, []);
+
+  const resolvePortalTaskLabel = useCallback(
+    (taskId: string): string => {
+      const keyMap: Record<string, Parameters<typeof t>[0]> = {
+        payment_generate_prn: 'portalCopilot.task.payment_generate_prn',
+        tin_apply_individual: 'portalCopilot.task.tin_apply_individual',
+        return_filing_submit: 'portalCopilot.task.return_filing_submit',
+        tax_clearance_apply: 'portalCopilot.task.tax_clearance_apply',
+        efris_fiscal_invoice: 'portalCopilot.task.efris_fiscal_invoice',
+        dts_order_stamps: 'portalCopilot.task.dts_order_stamps',
+        objection_appeals_lodge: 'portalCopilot.task.objection_appeals_lodge',
+        payment_verify_advance_tax: 'portalCopilot.task.payment_verify_advance_tax',
+        get_refund_claim: 'portalCopilot.task.get_refund_claim',
+        tin_tax_obligations: 'portalCopilot.task.tin_tax_obligations',
+        ura_account_profile: 'portalCopilot.task.ura_account_profile',
+      };
+      return t(keyMap[taskId] ?? 'portalCopilot.task.default');
+    },
+    [t],
+  );
+
+  // Automatic post-login task continuation (Phase C / ADR-0013 / RFC 9470)
+  const resumedTaskRef = useRef(false);
+  useEffect(() => {
+    if (resumedTaskRef.current || typeof window === 'undefined') return;
+    if (isLoading || pendingAttachments.some((a) => a.status === 'uploading')) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('auth_resumed') !== '1' || !getAuthToken()) return;
+    const preview = peekPendingPortalContinuation();
+    if (!preview) return;
+    const targetConvId =
+      preview.conversationId && preview.conversationId !== 'default'
+        ? preview.conversationId
+        : undefined;
+    if (targetConvId && activeConversationId !== targetConvId) {
+      if (conversations.some((c) => c.id === targetConvId)) {
+        switchSession(targetConvId);
+      } else {
+        createNewSession();
+        useChatStore.setState({ activeConversationId: targetConvId });
+      }
+      return;
+    }
+    const pending = consumePendingPortalContinuation();
+    if (!pending) return;
+    resumedTaskRef.current = true;
+    window.history.replaceState({}, '', window.location.pathname);
+    void sendMessage(
+      t('portalCopilot.resumingAfterSignIn', {
+        task: resolvePortalTaskLabel(pending.taskId),
+      }),
+      {
+        task_id: pending.taskId,
+        fields: pending.collectedFields,
+        resumed_after_login: true,
+      },
+    );
+  }, [
+    activeConversationId,
+    conversations,
+    createNewSession,
+    isLoading,
+    pendingAttachments,
+    resolvePortalTaskLabel,
+    sendMessage,
+    switchSession,
+    t,
+  ]);
 
   // ---- Voice input ----
 
@@ -2214,6 +2293,17 @@ export default function Page() {
                     phaseStartedAt={isPending ? turnStartedAt ?? undefined : undefined}
                     onInspectAttachment={(att) => setInspectingDoc(att)}
                     onActionClick={(action) => sendMessage(action)}
+                    onSubmitInlineForm={(taskId, fields) =>
+                      void sendMessage(
+                        t('portalCopilot.submittedDetailsFor', {
+                          task: resolvePortalTaskLabel(taskId),
+                        }),
+                        {
+                          task_id: taskId,
+                          fields,
+                        },
+                      )
+                    }
                   />
                 );
               })}

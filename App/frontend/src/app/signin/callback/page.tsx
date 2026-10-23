@@ -24,6 +24,7 @@ import {
   OIDC_RETURN_TO_KEY,
   OIDC_STATE_KEY,
   PKCE_VERIFIER_KEY,
+  sanitizeReturnTo,
 } from "../../../lib/oidcFlow";
 import { isStaffRole, staffDestinationsFor, staffLandingPath } from "../../../lib/roles";
 import "../signin.css";
@@ -157,7 +158,15 @@ export default function OidcCallbackPage() {
       // Staff land on the tool their role can open; everyone else goes where the
       // flow started, which for sign-up is the assistant itself. A non-staff
       // account used to be left on this page with nowhere to go.
-      const target = staff ? staffLandingPath(me.role) : returnTo || "/";
+      const safeReturnTo = sanitizeReturnTo(returnTo);
+      const explicitPortalOrChatContinuation =
+        safeReturnTo &&
+        (safeReturnTo.startsWith("/portal/") || safeReturnTo.startsWith("/?conversation_id="));
+      const target = explicitPortalOrChatContinuation
+        ? safeReturnTo
+        : staff
+          ? staffLandingPath(me.role)
+          : safeReturnTo || "/";
       window.setTimeout(() => window.location.replace(target), 900);
     } catch (err) {
       setPhase("error");
