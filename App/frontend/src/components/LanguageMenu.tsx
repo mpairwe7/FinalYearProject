@@ -160,11 +160,6 @@ export default function LanguageMenu({
         ref={btnRef}
         type="button"
         className="langsel-btn"
-        aria-label={
-          auto
-            ? `Response language: Auto-detect (currently ${current.label})`
-            : `Response language: ${current.label}`
-        }
         aria-haspopup="dialog"
         aria-expanded={open}
         title={auto ? "Response language: auto-detected" : "Response language"}
@@ -176,9 +171,14 @@ export default function LanguageMenu({
           }
         }}
       >
+        <span className="sr-only">
+          {auto
+            ? `Response language: Auto-detect (currently ${current.label})`
+            : `Response language: ${current.label}`}
+        </span>
         <GlobeIcon />
-        <span>{current.value.toUpperCase()}</span>
-        {auto && <span className="langsel-auto">auto</span>}
+        <span aria-hidden="true">{current.value.toUpperCase()}</span>
+        {auto && <span className="langsel-auto" aria-hidden="true">auto</span>}
         <ChevronDownIcon />
       </button>
 

@@ -421,7 +421,7 @@ _SELF_REFLECTION_SIGNAL_RE = re.compile(
     re.IGNORECASE,
 )
 _AI_IDENTITY_SUBJECT_RE = re.compile(
-    r"\b(?:i\s+am|i['’]m|ai|assistant|model|omusolosmart|sunbird|makerere|neural|transformer)\b",
+    r"\b(?:i\s+am|i['’]m|my\s+(?:role|purpose|design|architecture|training|function)|ai|assistant|model|omusolosmart|sunbird|makerere|neural|transformer)\b",
     re.IGNORECASE,
 )
 
@@ -530,8 +530,8 @@ def is_self_reflection_sentence(sentence: str, *, in_welfare_turn: bool = False)
     cleaned = _ARCH_IDENTIFIER_RE.sub(" ", cleaned)
     if canonical_amounts(cleaned) or percentages(cleaned):
         return False
-    if in_welfare_turn:
-        return True
     if _TAX_DOMAIN_EXCLUSION_RE.search(cleaned) and not _AI_IDENTITY_SUBJECT_RE.search(cleaned):
         return False
+    if in_welfare_turn:
+        return True
     return bool(_SELF_REFLECTION_SIGNAL_RE.search(cleaned))

@@ -506,6 +506,10 @@
   letter-spacing: 0.02em;
 }
 
+.staff-acct-avatar::before {
+  content: attr(data-initials);
+}
+
 /* Collapsed, the avatar is the whole row — the name and chevron have nowhere
    to go, and unlike the old block the identity itself stays visible. */
 .staff-acct-label,
