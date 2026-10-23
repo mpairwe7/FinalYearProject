@@ -8,13 +8,14 @@ import { localeLabel } from '../lib/locales';
 import { useTranslation, type TranslationKey } from '../lib/i18n';
 import type { ConnectorNotice, ConnectorOutcome, ConnectorSkipReason, ConnectorUse } from '../lib/connectors';
 import { getChatSessionId } from '../lib/chatSession';
-import { authHeaders } from '../lib/authSession';
+import { authHeaders, getAuthToken } from '../lib/authSession';
 import { detectDeadlineInMessage, downloadCalendarEvent, getGoogleCalendarUrl } from '../lib/calendarEvents';
 import FeedbackButtons from './FeedbackButtons';
 import HumanHandoff from './HumanHandoff';
-import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon, FileIcon, DownloadIcon, EyeIcon, PlugIcon } from './Icons';
+import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon, FileIcon, DownloadIcon, EyeIcon, PlugIcon, ArrowRightIcon, ExternalLinkIcon, AlertTriangleIcon, LockIcon } from './Icons';
 import LoadingState from './LoadingState';
 import Markdown from './Markdown';
+import PortalCopilotCard from './PortalCopilotCard';
 import WorkflowStepper from './WorkflowStepper';
 import ResourceCards from './ResourceCards';
 
@@ -151,6 +152,7 @@ interface ChatMessageProps {
   phaseStartedAt?: number;
   onInspectAttachment?: (attachment: ChatAttachment) => void;
   onActionClick?: (action: string) => void;
+  onSubmitInlineForm?: (taskId: string, fields: Record<string, string>) => void;
 }
 
 /**
@@ -190,6 +192,7 @@ function ChatMessageInner({
   phaseStartedAt,
   onInspectAttachment,
   onActionClick,
+  onSubmitInlineForm,
 }: ChatMessageProps) {
   const isAssistant = turn.role === 'assistant';
   const isGreeting = turn.id === 'greeting-0';
@@ -241,6 +244,15 @@ function ChatMessageInner({
 
         {isAssistant && turn.workflow && (
           <WorkflowStepper workflow={turn.workflow} onSelectOption={onActionClick} />
+        )}
+
+        {isAssistant && turn.portalCopilot && (
+          <PortalCopilotCard
+            copilot={turn.portalCopilot}
+            conversationId={conversationId}
+            onSubmitInlineForm={onSubmitInlineForm}
+            onActionClick={onActionClick}
+          />
         )}
 
         {isAssistant && turn.objectiveHypothesis && !turn.workflow && (
@@ -334,13 +346,66 @@ function ChatMessageInner({
                     </div>
                   ) : null}
                   <p className="portal-guidance-caution">{t('documents.screenshotCaution')}</p>
+                  {a.analysis.screenshot_guidance.completeness_check &&
+                  !a.analysis.screenshot_guidance.completeness_check.is_complete ? (
+                    <div className="portal-completeness-guard" data-testid="screenshot-completeness-guard">
+                      <p className="portal-field-error">
+                        <AlertTriangleIcon size={14} /> {t('portalCopilot.incompleteScreenshotWarning')}
+                      </p>
+                      {a.analysis.screenshot_guidance.completeness_check.clarifying_options?.length ? (
+                        <div className="portal-clarifying-chips">
+                          {a.analysis.screenshot_guidance.completeness_check.clarifying_options.map((chip) => (
+                            <button
+                              key={chip}
+                              type="button"
+                              className="workflow-option-btn"
+                              onClick={() => onActionClick?.(chip)}
+                            >
+                              {chip}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {a.analysis.screenshot_guidance.copilot_handoff?.user_message ? (
+                    <p className="portal-copilot-subtitle">
+                      {a.analysis.screenshot_guidance.copilot_handoff.user_message}
+                    </p>
+                  ) : null}
                   <div className="portal-guidance-actions">
+                    {a.analysis.screenshot_guidance.copilot_handoff ? (
+                      a.analysis.screenshot_guidance.copilot_handoff.requires_login_first && !getAuthToken() ? (
+                        <a
+                          href={a.analysis.screenshot_guidance.copilot_handoff.signin_then_portal_url}
+                          className="portal-action-btn is-primary"
+                          data-testid="screenshot-signin-copilot-btn"
+                        >
+                          <LockIcon size={14} />{' '}
+                          {t('portalCopilot.signInFirstThenCopilot', {
+                            portal: a.analysis.screenshot_guidance.detected_portal || 'URA Portal',
+                          })}{' '}
+                          <ArrowRightIcon size={14} />
+                        </a>
+                      ) : (
+                        <a
+                          href={a.analysis.screenshot_guidance.copilot_handoff.inbuilt_portal_url}
+                          className="portal-action-btn is-primary"
+                          data-testid="screenshot-open-copilot-btn"
+                        >
+                          {t('portalCopilot.openWithCopilot', {
+                            portal: a.analysis.screenshot_guidance.detected_portal || 'URA Portal',
+                          })}{' '}
+                          <ExternalLinkIcon size={13} />
+                        </a>
+                      )
+                    ) : null}
                     {a.analysis.screenshot_guidance.portal_url ? (
                       <a
                         href={a.analysis.screenshot_guidance.portal_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="portal-action-btn is-primary"
+                        className="portal-action-btn is-ghost"
                       >
                         {a.analysis.screenshot_guidance.direct_action?.label || t('documents.openOfficialPortal')}
                       </a>

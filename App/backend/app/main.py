@@ -101,6 +101,8 @@ from .models import (
     OfflineStatusResponse,
     OfflineSyncRequest,
     OfflineSyncResponse,
+    PortalTaskDecisionRequest,
+    PortalTaskDecisionResponse,
     QuantizedModelsResponse,
     SpeechHealthResponse,
     SynthesizeRequest,
@@ -1266,6 +1268,8 @@ def chat(
         granted_purposes=ctx.user.granted_purposes if ctx.user else [],
         attachments=attachments or None,
         connector_namespaces=connector_namespaces,
+        portal_context=body.portal_context.model_dump() if body.portal_context else None,
+        portal_task_submission=body.portal_task_submission,
         channel="rest",
     )
 
@@ -1331,6 +1335,81 @@ def chat(
     return ChatResponse(**served)
 
 
+@app.post("/v1/portal/tasks/execute", response_model=PortalTaskDecisionResponse, tags=["chat"])
+@limiter.limit(_RATE_LIMIT)
+def execute_portal_task_decision(
+    body: PortalTaskDecisionRequest,
+    request: Request,
+    ctx: AuthContext = Depends(optional_user),
+) -> PortalTaskDecisionResponse:
+    """Verify HMAC-signed `request_state` and execute or decline a confirmed URA portal task."""
+    from . import portal_copilot as pc_mod
+    from .flags import flags
+
+    if not flags.is_enabled("portal_copilot", subject=ctx.user_id or None):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Portal task execution co-pilot is disabled.",
+        )
+
+    session_id = request.headers.get("X-Session-ID") or body.conversation_id or ""
+    conv_id = body.conversation_id or "default"
+    tenant_id = ctx.tenant_id or "default"
+
+    owner_key = db.conversation_state_key(
+        conv_id,
+        session_id=session_id or None,
+        user_id=ctx.user_id or None,
+        tenant_id=tenant_id,
+    )
+    candidate_owner_keys: list[str] = []
+    if ctx.user_id and session_id:
+        candidate_owner_keys.append(
+            db.conversation_state_key(
+                conv_id,
+                session_id=session_id,
+                user_id=None,
+                tenant_id=tenant_id,
+            )
+        )
+
+    try:
+        outcome = pc_mod.handle_portal_task_decision(
+            body.decision,
+            body.request_state,
+            body.idempotency_key,
+            owner_key=owner_key,
+            candidate_owner_keys=candidate_owner_keys,
+            user_id=ctx.user_id or None,
+            conversation_id=conv_id,
+        )
+    except pc_mod.PortalTaskValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except pc_mod.PortalTaskOwnershipError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    if flags.is_enabled("audit_ledger"):
+        try:
+            db.append_audit_event(
+                event_type=f"portal_task_{outcome.get('status', 'decision')}",
+                actor_id=ctx.user_id or session_id or "anonymous",
+                tenant_id=tenant_id,
+                payload={
+                    "task_id": outcome.get("task_id", ""),
+                    "portal_key": outcome.get("portal_key", ""),
+                    "decision": body.decision,
+                    "status": outcome.get("status", ""),
+                    "live": bool(outcome.get("live", False)),
+                    "mode": outcome.get("mode", "simulation"),
+                    "idempotency_key": body.idempotency_key,
+                },
+            )
+        except Exception:
+            logger.debug("Portal task audit event logging skipped", exc_info=True)
+
+    return PortalTaskDecisionResponse(**outcome)
+
+
 # ---------------------------------------------------------------------------
 # SSE streaming chat endpoint (Phase 3)
 # ---------------------------------------------------------------------------
@@ -1387,6 +1466,8 @@ async def chat_stream(
             granted_purposes=ctx.user.granted_purposes if ctx.user else [],
             attachments=attachments or None,
             connector_namespaces=connector_namespaces,
+            portal_context=body.portal_context.model_dump() if body.portal_context else None,
+            portal_task_submission=body.portal_task_submission,
         ):
             if event_type == "_keepalive":
                 yield {

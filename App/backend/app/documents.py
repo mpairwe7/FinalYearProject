@@ -1732,15 +1732,135 @@ def diagnose_portal_screenshot(
         else []
     )
 
+    # 4. Canonical portal_key, Auth Requirement & Screenshot Completeness Check (Phase 42)
+    import urllib.parse
+
+    from .tools.portal_navigator_data import portal_requires_auth
+
+    if "tax clearance" in text_lower or "tcc" in text_lower or "tcc" in clean_fn:
+        portal_key = "tax_clearance"
+    elif "objection" in text_lower or "section 24" in text_lower or doc_type == "assessment":
+        portal_key = "objection_appeals"
+    elif any(k in text_lower for k in ("file a return", "return filing", "vat return", "paye return", "income tax return", "dt-1014", "dt-1001")):
+        portal_key = "return_filing"
+    elif "digital tax stamp" in text_lower or "dts" in text_lower or "kakasa" in text_lower:
+        portal_key = "dts"
+    elif "refund" in text_lower:
+        portal_key = "get_refund"
+    elif "motor vehicle" in text_lower or "logbook" in text_lower:
+        portal_key = "motor_vehicle"
+    elif portal_category == "prn":
+        portal_key = "prn_payments"
+    elif portal_category == "tin":
+        portal_key = "tin_registration"
+    elif portal_category == "efris":
+        portal_key = "efris"
+    elif portal_category == "customs":
+        portal_key = "asycuda"
+    else:
+        portal_key = "e_services"
+
+    requires_login_first = portal_requires_auth(portal_key)
+    step_slug = re.sub(r"[^a-z0-9_]+", "_", detected_state.lower()).strip("_")[:48] or "active_form"
+    inbuilt_portal_url = f"/portal/{portal_key}?step={urllib.parse.quote(step_slug)}&copilot=1"
+    signin_then_portal_url = (
+        f"/signin?continue=signin&returnTo={urllib.parse.quote(inbuilt_portal_url, safe='')}"
+    )
+
+    stripped_text = (text or "").strip()
+    has_header_signal = any(
+        hdr in text_lower
+        for hdr in (
+            "uganda revenue authority",
+            "ura",
+            "e-services",
+            "efris",
+            "asycuda",
+            "payment registration",
+            "taxpayer identification",
+            "tax clearance",
+            "return",
+            "objection",
+            "fiscal receipt",
+            "assessment",
+        )
+    )
+    is_truncated_error = bool(
+        stripped_text.endswith(("...", "…"))
+        or re.search(r"\b(?:error|missing|invalid|required)\s*:\s*$", text_lower)
+    )
+    missing_context_hints: list[str] = []
+    if len(stripped_text) < 40 or not has_header_signal:
+        missing_context_hints.append(
+            "The portal page header, breadcrumb trail, or tax type selector appears cut off in this screenshot."
+        )
+    if is_truncated_error:
+        missing_context_hints.append(
+            "The validation error banner or field message appears truncated at the edge of the capture."
+        )
+    is_complete = len(missing_context_hints) == 0
+
+    clarifying_options = [
+        "I am on Payment Registration (PRN)",
+        "I am uploading a VAT / PAYE / Income Tax Return",
+        "I am applying for an Individual or Company TIN",
+        "I am on EFRIS Invoicing or Tax Clearance (TCC)",
+    ]
+
+    prefill_state: dict[str, str] = {}
+    if fields.get("tins"):
+        prefill_state["tin"] = str(fields["tins"][0])
+    if fields.get("prns"):
+        prefill_state["prn"] = str(fields["prns"][0])
+    if fields.get("amounts"):
+        cleaned_amt = re.sub(r"[^\d.]", "", str(fields["amounts"][0]))
+        if cleaned_amt:
+            prefill_state["amount_ugx"] = cleaned_amt
+    if fields.get("tax_heads"):
+        prefill_state["tax_head"] = str(fields["tax_heads"][0])
+    if fields.get("efris_invoices"):
+        prefill_state["original_fdn"] = str(fields["efris_invoices"][0])
+
+    if requires_login_first:
+        handoff_user_msg = (
+            "Accessing this URA portal screen requires signing in first. Click the sign-in link below — "
+            "once your login is accepted, you will be taken straight to this screen with the built-in AI Co-Pilot "
+            "active to guide you."
+        )
+    else:
+        handoff_user_msg = (
+            "You can continue directly on this screen with the built-in URA AI Co-Pilot enabled — "
+            "it can see the full form, highlight the exact field, or complete the step for you."
+        )
+
+    copilot_handoff = {
+        "portal_key": portal_key,
+        "detected_portal": detected_portal,
+        "detected_state": detected_state,
+        "inbuilt_portal_url": inbuilt_portal_url,
+        "requires_login_first": requires_login_first,
+        "signin_then_portal_url": signin_then_portal_url,
+        "prefill_state": prefill_state,
+        "user_message": handoff_user_msg,
+    }
+
     return {
         "is_screenshot": True,
         "detected_portal": detected_portal,
+        "portal_key": portal_key,
         "portal_url": portal_url,
         "portal_category": portal_category,
         "detected_state": detected_state,
+        "requires_auth": requires_login_first,
         "issues_detected": issues_detected,
         "steps": steps,
         "hotspots": hotspots,
+        "completeness_check": {
+            "is_complete": is_complete,
+            "missing_context_hints": missing_context_hints,
+            "clarifying_options": clarifying_options if not is_complete else [],
+        },
+        "copilot_handoff": copilot_handoff,
         "direct_action": {
             "label": f"Open {detected_portal} ↗",
             "url": portal_url,

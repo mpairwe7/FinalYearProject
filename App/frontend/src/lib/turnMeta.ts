@@ -1,4 +1,11 @@
-import type { ChatTurn, Citation, ContextResource, ObjectiveHypothesis, WorkflowState } from '../store/useChatStore';
+import type {
+  ChatTurn,
+  Citation,
+  ContextResource,
+  ObjectiveHypothesis,
+  PortalCopilotPayload,
+  WorkflowState,
+} from '../store/useChatStore';
 import type { ConnectorNotice } from './connectors';
 
 /** A turn's metadata as the server sends it (SSE `metadata`/`grounding`/`done`, or a metadata line). */
@@ -99,5 +106,7 @@ export function applyTurnMeta(turn: ChatTurn, meta: TurnMeta, notices: Connector
       (meta.resources as ContextResource[] | undefined) ??
       ((meta.workflow as { resources?: ContextResource[] } | undefined)?.resources ?? turn.resources),
     discrepancyReport: discrepancyFrom(meta.discrepancy_report ?? meta.discrepancyReport, turn.discrepancyReport),
+    portalCopilot:
+      ((meta.portal_copilot ?? meta.portalCopilot) as PortalCopilotPayload | null | undefined) ?? turn.portalCopilot,
   };
 }

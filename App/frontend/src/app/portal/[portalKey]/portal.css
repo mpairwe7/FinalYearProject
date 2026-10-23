@@ -1,0 +1,265 @@
+/* Inbuilt URA Portal Co-Pilot Workspace (Phase 42 — Approach 3 + Approach 2 Contract) */
+
+.ura-portal-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  min-height: 100vh;
+  background: #f8fafc;
+  color: #0f172a;
+  font-family: inherit;
+}
+
+@media (max-width: 1024px) {
+  .ura-portal-workspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ura-portal-main {
+  padding: 1.5rem 2rem 4rem;
+  max-width: 920px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.ura-portal-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.875rem 1.25rem;
+  background: #0b2545;
+  color: #ffffff;
+  border-radius: 0.75rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.ura-portal-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.ura-portal-crest {
+  background: #f59e0b;
+  color: #0b2545;
+  font-weight: 800;
+  padding: 0.35rem 0.65rem;
+  border-radius: 0.375rem;
+  font-size: 0.85rem;
+  letter-spacing: 0.05em;
+}
+
+.ura-portal-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.ura-portal-back-link {
+  color: #fde68a;
+  text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding: 0.4rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(253, 230, 138, 0.35);
+}
+
+.ura-portal-back-link:hover {
+  background: rgba(253, 230, 138, 0.12);
+}
+
+.ura-portal-switch-tabs {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding-bottom: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.ura-portal-tab {
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-decoration: none;
+  background: #e2e8f0;
+  color: #1e293b;
+  white-space: nowrap;
+}
+
+.ura-portal-tab.is-active {
+  background: #0b2545;
+  color: #ffffff;
+}
+
+.ura-portal-form-card {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.875rem;
+  padding: 1.5rem;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05);
+}
+
+.ura-portal-form-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.ura-portal-form-code {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #0369a1;
+  background: #e0f2fe;
+  padding: 0.25rem 0.6rem;
+  border-radius: 0.375rem;
+}
+
+.ura-portal-error-banner {
+  background: #fef2f2;
+  border: 1px solid #f87171;
+  color: #991b1b;
+  padding: 0.85rem 1rem;
+  border-radius: 0.625rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.ura-portal-field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+}
+
+.ura-portal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.65rem;
+  border-radius: 0.625rem;
+  border: 2px solid transparent;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.ura-portal-field.copilot-dom-spotlight {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.22);
+}
+
+.ura-portal-field label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.ura-portal-field input,
+.ura-portal-field select,
+.ura-portal-field textarea {
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid #94a3b8;
+  font-size: 0.92rem;
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.ura-portal-coachmark {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #92400e;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  padding: 0.35rem 0.6rem;
+  border-radius: 0.375rem;
+  margin-top: 0.25rem;
+}
+
+.ura-portal-submit-bar {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Embedded AI Co-Pilot Side Rail */
+.ura-copilot-rail {
+  background: #0f172a;
+  color: #f8fafc;
+  border-left: 1px solid #1e293b;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.ura-copilot-rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #1e293b;
+  padding-bottom: 0.75rem;
+}
+
+.ura-copilot-live-pill {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: rgba(16, 185, 129, 0.2);
+  color: #6ee7b7;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+}
+
+.ura-copilot-rail-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ura-copilot-btn {
+  padding: 0.6rem 0.9rem;
+  border-radius: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  text-align: left;
+}
+
+.ura-copilot-btn.is-gold {
+  background: #f59e0b;
+  color: #0f172a;
+}
+
+.ura-copilot-btn.is-emerald {
+  background: #10b981;
+  color: #052e16;
+}
+
+.ura-copilot-btn.is-outline {
+  background: rgba(255, 255, 255, 0.06);
+  color: #e2e8f0;
+  border-color: #334155;
+}
+
+.ura-portal-auth-gate {
+  background: #ffffff;
+  border: 2px solid #f59e0b;
+  border-radius: 0.875rem;
+  padding: 1.75rem;
+  margin-bottom: 1.5rem;
+}

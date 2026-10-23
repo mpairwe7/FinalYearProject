@@ -745,9 +745,10 @@ All major subsystems are behind feature flags for progressive rollout:
 | `cxp_business_hours` (`FLAG_CXP_BUSINESS_HOURS`) | off | Phase 40 (G174): timezone-aware URA CXP operating schedule (`07:00–23:00 EAT`, closing at 11:00 PM EAT). Escalations after 11:00 PM when no live officer is online queue for priority morning review/callback with SLA pause/resume (`business_hours_elapsed_seconds`) and transparent 5-locale after-hours disclosure |
 | `live_web_research` (`FLAG_LIVE_WEB_RESEARCH`) | off | Phase 41: live FX lookup (`web_fx.py` via `XE.com` / Google Currency / Open ER mirror, wired into `convert_currency` and `scenario_planner.py`), 8-trigger web research planner and 3-tier source authority filter (`web_research.py`), and ephemeral `tmpfs` PDF/XLSX document sandbox (`ephemeral_pdf_sandbox.py`), wired end-to-end into `_generate_en` and `generate_retrieval_only` / `_run_chat_turn_events` |
 | `auto_qdrant_web_sync` (`FLAG_AUTO_QDRANT_WEB_SYNC`) | off | Phase 41: self-updating Qdrant comparator (`corpus_sync.py`) that compares `ura.go.ug` / `ulii.org` PDFs against Qdrant, tombstones/deletes superseded documents, upserts newer editions, archives replaced `.jsonl` files, and records 7-day state in `web_sync_ledger` |
+| `portal_copilot` (`FLAG_PORTAL_COPILOT`) | on | Phase 42: 4-tier URA portal task execution (`portal_copilot.py`), Claude-style HITL Allow/Disallow confirmation cards (`POST /v1/portal/tasks/execute`), inline chat form elicitation, step-up login auto-return (`returnTo`), screenshot-to-co-pilot handoff, and inbuilt stuck-user DOM co-pilot (`/portal/[portalKey]`) |
 
 The table above lists the flags that gate a subsystem; `flags.py` holds
-**85** in total, including the per-phase switches for voice, offline and
+**86** in total, including the per-phase switches for voice, offline and
 quantization. `flags.all()` is the authoritative list. Production also
 forces `auth_required`, `multi_tenant`, `audit_ledger`, `ticket_queue`,
 and `voice_consent` unless explicitly disabled (startup then refuses).

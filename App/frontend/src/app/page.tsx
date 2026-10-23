@@ -30,6 +30,7 @@ import NarrationBar from '../components/NarrationBar';
 import { useVoiceEscape } from '../hooks/useVoiceEscape';
 import { authHeaders, clearAuthToken, getAuthToken } from '../lib/authSession';
 import { getChatSessionId } from '../lib/chatSession';
+import { consumePendingPortalContinuation } from '../lib/portalContinuation';
 import {
   MAX_SELECTED_CONNECTORS,
   connectorsUsedFromTrace,
@@ -1107,7 +1108,7 @@ export default function Page() {
     }
   }, [setSelectedConnectorNamespaces]);
 
-  const sendMessage = useCallback(async (overrideText?: string) => {
+  const sendMessage = useCallback(async (overrideText?: string, portalTaskSubmission?: Record<string, unknown>) => {
     const text = (overrideText ?? message).trim();
     if (!text || isLoading) return;
     // Enter can fire while an upload is analysing — wait for it to settle.
@@ -1191,6 +1192,7 @@ export default function Page() {
       ...(selectedConnectorNamespaces.length
         ? { connector_namespaces: selectedConnectorNamespaces }
         : {}),
+      ...(portalTaskSubmission ? { portal_task_submission: portalTaskSubmission } : {}),
     });
     const requestHeaders = authHeaders({
       'Content-Type': 'application/json',
@@ -1244,6 +1246,7 @@ export default function Page() {
           frequency_count: typeof disc.frequency_count === 'number' ? disc.frequency_count : 1,
           discrepancy_type: typeof disc.discrepancy_type === 'string' ? disc.discrepancy_type : 'outdated_law',
         } : undefined,
+        portalCopilot: d.portal_copilot ?? d.portalCopilot ?? undefined,
       };
       const cur = useChatStore.getState().chat;
       const last = cur[cur.length - 1];
@@ -1547,6 +1550,26 @@ export default function Page() {
     revealQueueRef.current?.stop();
     streamAbortRef.current?.abort();
   }, []);
+
+  // Automatic post-login task continuation (Phase C / ADR-0013 / RFC 9470)
+  const resumedTaskRef = useRef(false);
+  useEffect(() => {
+    if (resumedTaskRef.current || typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('auth_resumed') !== '1' || !getAuthToken()) return;
+    const pending = consumePendingPortalContinuation();
+    if (!pending) return;
+    resumedTaskRef.current = true;
+    if (pending.conversationId && pending.conversationId !== 'default') {
+      switchSession(pending.conversationId);
+    }
+    window.history.replaceState({}, '', window.location.pathname);
+    void sendMessage(`Resuming ${pending.taskId.replace(/_/g, ' ')} after sign-in`, {
+      task_id: pending.taskId,
+      fields: pending.collectedFields,
+      resumed_after_login: true,
+    });
+  }, [sendMessage, switchSession]);
 
   // ---- Voice input ----
 
@@ -2214,6 +2237,12 @@ export default function Page() {
                     phaseStartedAt={isPending ? turnStartedAt ?? undefined : undefined}
                     onInspectAttachment={(att) => setInspectingDoc(att)}
                     onActionClick={(action) => sendMessage(action)}
+                    onSubmitInlineForm={(taskId, fields) =>
+                      void sendMessage(`Submitted details for ${taskId.replace(/_/g, ' ')}`, {
+                        task_id: taskId,
+                        fields,
+                      })
+                    }
                   />
                 );
               })}

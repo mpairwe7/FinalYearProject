@@ -52,6 +52,22 @@ export const OIDC_STATE_KEY = "ura_oidc_state";
 /** Where to send the browser once the exchange succeeds (see the callback). */
 export const OIDC_RETURN_TO_KEY = "ura_oidc_return_to";
 
+/**
+ * Validate that a `returnTo` redirect target is a safe, same-origin relative path
+ * starting with a single `/` (mitigates CWE-601 Open Redirect).
+ */
+export function sanitizeReturnTo(raw: string | null | undefined): string | undefined {
+  if (!raw || typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("/") || trimmed.startsWith("//") || trimmed.includes("\\")) {
+    return undefined;
+  }
+  if (/^\/[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) {
+    return undefined;
+  }
+  return trimmed;
+}
+
 /** True when this deployment has an identity provider configured. */
 export const OIDC_CONFIGURED = Boolean(OIDC_ISSUER && OIDC_CLIENT_ID);
 
@@ -160,6 +176,7 @@ export async function beginOidcFlow({
   if (!OIDC_CONFIGURED) {
     throw new Error("No identity provider is configured for this deployment.");
   }
+  const safeReturnTo = sanitizeReturnTo(returnTo);
 
   // Embedded (the Hugging Face Space frames this app): hand the flow to a new
   // top-level tab instead of redirecting here.
@@ -188,7 +205,7 @@ export async function beginOidcFlow({
   if (isEmbedded()) {
     const target = new URL(mode === "signup" ? "/signup" : "/signin", window.location.origin);
     target.searchParams.set("continue", mode);
-    if (returnTo) target.searchParams.set("returnTo", returnTo);
+    if (safeReturnTo) target.searchParams.set("returnTo", safeReturnTo);
     // Carried through, or the new tab starts an ordinary flow and the
     // provider signs the person straight back in as whoever it remembers.
     if (prompt) target.searchParams.set("prompt", prompt);
@@ -214,7 +231,7 @@ export async function beginOidcFlow({
   if (endpoints.end_session_endpoint) {
     localStorage.setItem(END_SESSION_ENDPOINT_KEY, endpoints.end_session_endpoint);
   }
-  if (returnTo) sessionStorage.setItem(OIDC_RETURN_TO_KEY, returnTo);
+  if (safeReturnTo) sessionStorage.setItem(OIDC_RETURN_TO_KEY, safeReturnTo);
   else sessionStorage.removeItem(OIDC_RETURN_TO_KEY);
 
   const url = new URL(endpoints.authorization_endpoint);

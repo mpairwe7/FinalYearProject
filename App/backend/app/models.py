@@ -7,8 +7,29 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
 # ---------------------------------------------------------------------------
-# Chat
+# Chat & Portal Co-Pilot (Phase 42)
 # ---------------------------------------------------------------------------
+class PortalFieldError(BaseModel):
+    field: str = Field(..., max_length=64)
+    message: str = Field(..., max_length=300)
+    selector: str = Field("", max_length=160)
+
+
+class PortalContextInput(BaseModel):
+    portal_id: str = Field(..., pattern=r"^[a-z0-9_]{1,64}$")
+    current_route: str = Field("", max_length=240)
+    active_step: str = Field("", max_length=160)
+    form_id: str = Field("", max_length=64)
+    visible_fields: dict[str, str] = Field(default_factory=dict)
+    empty_required_fields: list[str] = Field(default_factory=list, max_length=25)
+    validation_errors: list[PortalFieldError] = Field(default_factory=list, max_length=15)
+    error_banner: str = Field("", max_length=400)
+    stalled_duration_ms: int = Field(0, ge=0, le=3_600_000)
+    last_user_action: str = Field("", max_length=120)
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000, description="User message text")
     conversation_id: str | None = Field(
@@ -42,6 +63,14 @@ class ChatRequest(BaseModel):
         default_factory=list,
         max_length=8,
         description="Deployment-configured chat connectors selected for this turn",
+    )
+    portal_context: PortalContextInput | None = Field(
+        None,
+        description="Live DOM telemetry from the inbuilt URA Portal Co-Pilot or Browser Companion",
+    )
+    portal_task_submission: dict[str, Any] | None = Field(
+        None,
+        description="Submitted values from an inline chat elicitation form card",
     )
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
@@ -188,6 +217,33 @@ class ChatResponse(BaseModel):
         None,
         description="Eval-only generation metadata when EVAL_DEBUG=1 (rejected in production)",
     )
+    portal_copilot: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "Structured inbuilt portal co-pilot assistance, inline form card, or "
+            "Claude-style Allow/Disallow action confirmation card"
+        ),
+    )
+
+
+class PortalTaskDecisionRequest(BaseModel):
+    decision: Literal["allow", "disallow", "accept", "decline", "cancel"]
+    request_state: dict[str, Any]
+    idempotency_key: str = Field(..., min_length=8, max_length=128, pattern=r"^[a-zA-Z0-9_:-]+$")
+    conversation_id: str | None = Field(None, pattern=r"^[a-zA-Z0-9_-]{1,64}$")
+
+
+class PortalTaskDecisionResponse(BaseModel):
+    ok: bool
+    status: Literal["executed", "declined", "requires_auth", "error"]
+    task_id: str
+    portal_key: str = ""
+    live: bool = False
+    mode: Literal["simulation", "live"] = "simulation"
+    summary: str
+    result: dict[str, Any] = Field(default_factory=dict)
+    dom_actions: list[dict[str, Any]] = Field(default_factory=list)
+    copilot_portal_url: str = ""
 
 
 

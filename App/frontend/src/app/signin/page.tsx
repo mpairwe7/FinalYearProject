@@ -34,6 +34,7 @@ import {
   endOidcSession,
   isEmbedded,
   OIDC_CONFIGURED,
+  sanitizeReturnTo,
 } from "../../lib/oidcFlow";
 import "./signin.css";
 
@@ -42,14 +43,19 @@ export default function SignInPage() {
     kind: "idle",
     message: "",
   });
+  const [returnTo, setReturnTo] = useState<string | undefined>(() => {
+    if (typeof window === "undefined") return undefined;
+    const params = new URLSearchParams(window.location.search);
+    return sanitizeReturnTo(params.get("returnTo"));
+  });
 
   const token = useSyncExternalStore(subscribeAuthToken, getAuthToken, getServerAuthToken);
   const signedIn = Boolean(token);
 
-  const startOidc = useCallback(async (prompt?: "login") => {
+  const startOidc = useCallback(async (prompt?: "login", customReturnTo?: string) => {
     if (!OIDC_CONFIGURED) return;
     try {
-      await beginOidcFlow({ mode: "signin", prompt });
+      await beginOidcFlow({ mode: "signin", prompt, returnTo: customReturnTo ?? returnTo });
       if (isEmbedded()) {
         setStatus({
           kind: "ok",
@@ -63,16 +69,18 @@ export default function SignInPage() {
         message: `Could not start the sign-in redirect: ${(err as Error).message}`,
       });
     }
-  }, []);
+  }, [returnTo]);
 
-  // Auto-start when the embedded page handed the flow to this tab.
+  // Auto-start when the embedded page or chat step-up handed the flow to this tab.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (isEmbedded() || !OIDC_CONFIGURED) return;
     const params = new URLSearchParams(window.location.search);
+    const parsedReturnTo = sanitizeReturnTo(params.get("returnTo"));
+    if (parsedReturnTo) setReturnTo(parsedReturnTo);
+    if (isEmbedded() || !OIDC_CONFIGURED) return;
     if (params.get("continue") !== "signin") return;
     const prompt = params.get("prompt") === "login" ? "login" : undefined;
-    queueMicrotask(() => void startOidc(prompt));
+    queueMicrotask(() => void startOidc(prompt, parsedReturnTo));
     window.history.replaceState({}, "", window.location.pathname);
   }, [startOidc]);
 
@@ -98,6 +106,11 @@ export default function SignInPage() {
 
         <section className="signin-block" aria-labelledby="oidc-h">
           <h2 id="oidc-h">Sign in with your URA account</h2>
+          {returnTo && (
+            <p className="signin-status ok" data-testid="signin-return-to-banner" role="status">
+              After signing in, you will be returned automatically to your active URA assistant task.
+            </p>
+          )}
           <p className="signin-note">
             Accounts, passwords, Google sign-in and security recovery are managed by URA&apos;s configured Auth0 identity provider.
             Universal Login authenticates taxpayers, tax agents, and administrators, routing each user to their designated workspace upon sign-in.

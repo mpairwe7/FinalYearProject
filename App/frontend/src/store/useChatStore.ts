@@ -164,6 +164,96 @@ export interface ObjectiveHypothesis {
   prerequisites_summary?: string;
 }
 
+export interface PortalFieldSpecItem {
+  name: string;
+  label: string;
+  input_type: 'text' | 'number' | 'select' | 'date' | 'email' | 'tel' | string;
+  required: boolean;
+  placeholder?: string;
+  helper_text?: string;
+  sensitive?: boolean;
+  value?: string;
+  options?: { value: string; label: string }[];
+  validation_error?: string;
+}
+
+export interface PortalDisplayField {
+  name: string;
+  label: string;
+  value: string;
+  raw_value?: string;
+  sensitive?: boolean;
+}
+
+export interface PortalCopilotPayload {
+  card_type:
+    | 'inline_form'
+    | 'confirmation_required'
+    | 'step_up_login'
+    | 'statutory_copilot_handoff'
+    | 'stuck_portal_assistance'
+    | 'executed_result'
+    | 'access_denied'
+    | 'copilot_launch_banner'
+    | 'screenshot_copilot_handoff'
+    | string;
+  task_id?: string;
+  portal_key?: string;
+  portal_name?: string;
+  title?: string;
+  tier?: string;
+  requires_auth?: boolean;
+  is_authenticated?: boolean;
+  statutory_citation?: string;
+  description?: string;
+  missing_fields?: string[];
+  field_errors?: Record<string, string>;
+  fields?: PortalFieldSpecItem[];
+  submit_label?: string;
+  verification_prompt?: string;
+  verification_warning?: string;
+  reversibility_notice?: string;
+  display_fields?: PortalDisplayField[];
+  allow_label?: string;
+  disallow_label?: string;
+  edit_label?: string;
+  request_state?: Record<string, unknown>;
+  idempotency_key?: string;
+  expires_in_seconds?: number;
+  simulation_mode?: boolean;
+  live?: boolean;
+  mode?: 'simulation' | 'live' | string;
+  result?: Record<string, unknown>;
+  login_reason?: string;
+  return_to_chat_url?: string;
+  return_to_portal_url?: string;
+  signin_chat_href?: string;
+  signin_portal_href?: string;
+  preserved_fields?: Record<string, string>;
+  raw_preserved_fields?: Record<string, string>;
+  copilot_portal_url?: string;
+  open_portal_label?: string;
+  dom_actions?: Array<{
+    step_number: number;
+    element: string;
+    selector: string;
+    action_type: string;
+    fill_value?: string | null;
+    scroll_to?: boolean;
+    tooltip: string;
+    security_gate: string;
+  }>;
+  diagnosis_summary?: string;
+  diagnosis_points?: string[];
+  error?: string;
+  user_message?: string;
+  completeness_check?: {
+    is_complete: boolean;
+    missing_context_hints?: string[];
+    clarifying_options?: string[];
+  };
+}
+
 export interface ChatTurn {
   id: string;
   role: 'user' | 'assistant';
@@ -216,6 +306,8 @@ export interface ChatTurn {
   connectorsUsed?: ConnectorUse[];
   /** Selected services this answer was given without, and why. */
   connectorNotices?: ConnectorNotice[];
+  /** Phase 42 — URA Portal Task Execution & Inbuilt Co-Pilot card state */
+  portalCopilot?: PortalCopilotPayload | null;
 }
 
 /** The chat's own notices: an officer joining, and the hand-back to the AI. */

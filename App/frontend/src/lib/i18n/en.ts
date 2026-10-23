@@ -424,11 +424,14 @@ export const en = {
   'portalCopilot.stepUpBadge': 'Sign-In Required',
   'portalCopilot.signInReturnChat': 'Sign In to URA Account & Return Here',
   'portalCopilot.signInOpenPortal': 'Sign In & Open Portal with Built-In AI Co-Pilot',
-  'portalCopilot.openWithCopilot': 'Open {portal} with Built-In AI Co-Pilot ↗',
-  'portalCopilot.signInFirstThenCopilot': 'Sign In First, Then Open {portal} with Built-In AI Co-Pilot →',
+  'portalCopilot.openWithCopilot': 'Open {portal} with Built-In AI Co-Pilot',
+  'portalCopilot.signInFirstThenCopilot': 'Sign In First, Then Open {portal} with Built-In AI Co-Pilot',
   'portalCopilot.incompleteScreenshotWarning': 'Parts of this portal screen appear cut off. Pick what you are doing or open the screen with the built-in AI Co-Pilot:',
   'portalCopilot.statutoryBadge': 'Statutory Taxpayer Declaration Required',
   'portalCopilot.stuckBadge': 'Live Portal Co-Pilot Guidance',
+  'portalCopilot.reversibilityNotice': 'Reversibility & Safeguard: You can edit any field before allowing execution, or cancel at any time. Unpaid PRNs expire automatically after 21 days.',
+  'portalCopilot.copyReceipt': 'Copy Reference',
+  'portalCopilot.copiedReceipt': 'Copied',
 } as const;
 
 export type TranslationKey = keyof typeof en;

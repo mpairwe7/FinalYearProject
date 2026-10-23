@@ -6492,26 +6492,139 @@ def build_portal_deep_link(portal_key: str, intent: str = "") -> tuple[str, list
 
 
 # ---------------------------------------------------------------------------
-# In-Browser Companion DOM Action Recipes & Security Contract
+# Portal Authentication Policy & In-Browser Companion DOM Action Recipes
 # ---------------------------------------------------------------------------
+
+PUBLIC_URA_PORTAL_KEYS: frozenset[str] = frozenset(
+    {
+        "tin_registration",
+        "prn_payments",
+        "document_authentication",
+        "track_status",
+        "whistle_blow",
+        "elearning",
+        "laws_and_acts",
+        "research_publications",
+        "touchpoint",
+        "health_sector",
+        "business_formalisation",
+        "oil_and_gas",
+        "agriculture_sector",
+        "hospitality_sector",
+        "wholesale_retail_sector",
+        "construction_sector",
+        "manufacturing_sector",
+        "education_sector",
+        "mining_sector",
+        "entertainment_sector",
+        "schools_curriculum",
+        "real_estate_sector",
+        "fishing_sector",
+        "transport_sector",
+        "government_agencies",
+        "opportunities_portal",
+        "double_taxation_agreements",
+        "case_summary_reports",
+        "court_of_appeal",
+        "debt_collections",
+        "financial_intelligence_authority",
+        "export_process",
+        "customs_valuation",
+        "single_customs_territory",
+        "exempt_importation",
+        "aeo",
+        "customs_audits_refunds",
+        "warehousing",
+        "customs_enforcements",
+        "customs_systems",
+    }
+)
+
+AUTHENTICATED_URA_PORTAL_KEYS: frozenset[str] = frozenset(
+    {
+        "e_services",
+        "return_filing",
+        "efris",
+        "tax_clearance",
+        "objection_appeals",
+        "voluntary_disclosure",
+        "get_refund",
+        "tax_incentives",
+        "choose_tax_agent",
+        "asycuda",
+        "bwims",
+        "motor_vehicle",
+        "dts",
+        "stamp_duty",
+    }
+)
+
+
+def portal_requires_auth(portal_key: str, intent: str = "") -> bool:
+    """Return True when accessing the target URA portal screen or intent requires sign-in."""
+    key = str(portal_key or "").strip().lower()
+    intent_clean = str(intent or "").strip().lower()
+
+    if intent_clean in {
+        "tin_search_verify",
+        "verify_tin",
+        "search_tin",
+        "payment_view_status",
+        "view_payment_status",
+        "dts_verify_stamp",
+        "verify_stamp",
+        "ursb_verify_business",
+        "payment_verify_advance_tax",
+        "document_authentication",
+        "track_status",
+    }:
+        return False
+
+    if intent_clean in {
+        "tin_tax_obligations",
+        "ura_account_profile",
+        "efris_taxpayer_status",
+        "dts_taxpayer_status",
+        "return_filing",
+        "return_filing_submit",
+        "file_return",
+        "tax_clearance_apply",
+        "objection_appeals_lodge",
+        "get_refund_claim",
+        "efris_fiscal_invoice",
+        "efris_credit_note",
+        "efris_stock_management",
+        "dts_order_stamps",
+        "dts_activate_stamps",
+    }:
+        return True
+
+    if key in AUTHENTICATED_URA_PORTAL_KEYS:
+        return True
+    if key in PUBLIC_URA_PORTAL_KEYS:
+        return False
+    return True
+
+
+for _pkey, _pinfo in EXTERNAL_URA_PORTALS.items():
+    _pinfo.setdefault("requires_auth", portal_requires_auth(_pkey))
+
 
 def get_portal_dom_recipe(
     portal_key: str,
     state: str = "",
     entities: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return sequential DOM actions for an in-browser companion or web extension.
-
-    Provides exact CSS selectors, action types (click, fill, select, spotlight),
-    prefilled values, and security constraints (e.g. no password autofill).
-    """
+    """Return sequential DOM actions for an in-browser companion or inbuilt portal co-pilot."""
     entities = entities or {}
 
     tin_val = ""
     if entities.get("tins"):
         tin_val = str(entities["tins"][0])
-    elif "tin" in entities:
+    elif entities.get("tin"):
         tin_val = str(entities["tin"])
+    elif entities.get("taxpayer_tin"):
+        tin_val = str(entities["taxpayer_tin"])
 
     amount_val = ""
     if entities.get("amounts"):
@@ -6519,127 +6632,31 @@ def get_portal_dom_recipe(
         cleaned_amt = re.sub(r"[^\d.]", "", raw_amt)
         if cleaned_amt:
             amount_val = cleaned_amt
+    elif entities.get("amount_ugx") is not None:
+        raw_amt = str(entities["amount_ugx"])
+        cleaned_amt = re.sub(r"[^\d.]", "", raw_amt)
+        if cleaned_amt:
+            amount_val = cleaned_amt
 
     tax_head_val = ""
     if entities.get("tax_heads"):
         tax_head_val = str(entities["tax_heads"][0])
+    elif entities.get("tax_head"):
+        tax_head_val = str(entities["tax_head"])
 
-    if portal_key == "prn_payments":
-        recipe = [
-            {
-                "step_number": 1,
-                "element": "Tax Head Selection",
-                "selector": "select#ddlTaxHead, select[name='taxHead']",
-                "action_type": "select",
-                "fill_value": tax_head_val or "0010",
-                "tooltip": "Select the statutory tax regime (e.g. 0010 - VAT)",
-                "security_gate": "safe",
-            },
-            {
-                "step_number": 2,
-                "element": "Taxpayer TIN Input",
-                "selector": "input#txtTIN, input[name='tin']",
-                "action_type": "fill",
-                "fill_value": tin_val,
-                "tooltip": "Confirm your 10-digit URA TIN",
-                "security_gate": "safe",
-            },
-            {
-                "step_number": 3,
-                "element": "Payment Amount",
-                "selector": "input#txtAmount, input[name='amount']",
-                "action_type": "fill",
-                "fill_value": amount_val,
-                "tooltip": "Enter the assessment amount to pay",
-                "security_gate": "safe",
-            },
-            {
-                "step_number": 4,
-                "element": "Bank / Mobile Money Gateway",
-                "selector": "select#ddlPaymentMode, select[name='paymentMode']",
-                "action_type": "select",
-                "fill_value": "Bank",
-                "tooltip": "Select commercial bank gateway or mobile money network",
-                "security_gate": "safe",
-            },
-            {
-                "step_number": 5,
-                "element": "Generate PRN Button",
-                "selector": "button#btnGeneratePRN, input#btnSubmit[value*='PRN']",
-                "action_type": "click",
-                "fill_value": None,
-                "tooltip": "Click to register PRN with URA servers",
-                "security_gate": "requires_confirmation",
-            },
-        ]
-    elif portal_key == "efris":
-        recipe = [
-            {
-                "step_number": 1,
-                "element": "Buyer TIN Verification",
-                "selector": "input#buyerTin, input[name='purchaserTin']",
-                "action_type": "fill",
-                "fill_value": entities.get("buyer_tin", ""),
-                "tooltip": "Enter purchasing business TIN for B2B validation",
-                "security_gate": "safe",
-            },
-            {
-                "step_number": 2,
-                "element": "Commodity / Service Code",
-                "selector": "input#commodityCode, select#itemClassification",
-                "action_type": "select",
-                "fill_value": None,
-                "tooltip": "Pick the harmonized commodity classification code",
-                "security_gate": "safe",
-            },
-            {
-                "step_number": 3,
-                "element": "Issue Fiscal Invoice",
-                "selector": "button#btnIssueInvoice, button.submit-fiscal",
-                "action_type": "click",
-                "fill_value": None,
-                "tooltip": "Generate encrypted fiscal receipt with 20-digit FDN",
-                "security_gate": "requires_confirmation",
-            },
-        ]
-    elif portal_key == "tin_registration":
-        recipe = [
-            {
-                "step_number": 1,
-                "element": "Taxpayer Entity Category",
-                "selector": "input[name='taxpayerType'], select#ddlEntityType",
-                "action_type": "select",
-                "fill_value": "individual",
-                "tooltip": "Choose Individual, Company, or NGO",
-                "security_gate": "safe",
-            },
-            {
-                "step_number": 2,
-                "element": "National Identification Number (NIN)",
-                "selector": "input#txtNIN, input[name='nin']",
-                "action_type": "fill",
-                "fill_value": entities.get("nin", ""),
-                "tooltip": "Enter 14-character NIN for biometric NIRA validation",
-                "security_gate": "safe",
-            },
-            {
-                "step_number": 3,
-                "element": "Submit Registration Draft",
-                "selector": "button#btnSubmitRegistration, input#btnApply",
-                "action_type": "click",
-                "fill_value": None,
-                "tooltip": "Send initial TIN application draft",
-                "security_gate": "requires_confirmation",
-            },
-        ]
-    elif "Server Error" in state or "Timeout" in state:
-        recipe = [
+    payment_mode_val = str(
+        entities.get("payment_mode") or entities.get("payment_channel") or "Bank"
+    )
+
+    if "Server Error" in state or "Timeout" in state:
+        return [
             {
                 "step_number": 1,
                 "element": "Error Banner / Notice",
                 "selector": "#error-banner, .alert-danger, .session-expired-notice",
                 "action_type": "spotlight",
                 "fill_value": None,
+                "scroll_to": True,
                 "tooltip": "Active server error or timeout indicator",
                 "security_gate": "safe",
             },
@@ -6649,8 +6666,369 @@ def get_portal_dom_recipe(
                 "selector": "a#loginLink, button#btnRefresh, a[href*='login']",
                 "action_type": "click",
                 "fill_value": None,
+                "scroll_to": True,
                 "tooltip": "Click to return to login or clear expired session state",
                 "security_gate": "safe",
+            },
+        ]
+
+    if portal_key == "prn_payments":
+        recipe = [
+            {
+                "step_number": 1,
+                "element": "Tax Head / NTR MDA Selection",
+                "selector": "select#ddlTaxHead, select[name='taxHead'], select[name='tax_head']",
+                "action_type": "select",
+                "fill_value": tax_head_val or "0010",
+                "scroll_to": True,
+                "tooltip": "Select the statutory tax regime (e.g. 0010 - VAT, 0011 - Income Tax, or NTR/MDA fee)",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 2,
+                "element": "Taxpayer TIN Input",
+                "selector": "input#txtTIN, input[name='tin']",
+                "action_type": "fill",
+                "fill_value": tin_val,
+                "scroll_to": False,
+                "tooltip": "Confirm your 10-digit URA TIN (or Non-TIN NIN/Passport for NTR fees)",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 3,
+                "element": "Payment Amount",
+                "selector": "input#txtAmount, input[name='amount'], input[name='amount_ugx']",
+                "action_type": "fill",
+                "fill_value": amount_val,
+                "scroll_to": False,
+                "tooltip": "Enter the assessment amount to pay in UGX",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 4,
+                "element": "Bank / Mobile Money Gateway",
+                "selector": "select#ddlPaymentMode, select[name='paymentMode'], select[name='payment_mode']",
+                "action_type": "select",
+                "fill_value": payment_mode_val,
+                "scroll_to": False,
+                "tooltip": "Select commercial bank gateway or mobile money network",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 5,
+                "element": "Generate PRN Button",
+                "selector": "button#btnGeneratePRN, input#btnSubmit[value*='PRN']",
+                "action_type": "click",
+                "fill_value": None,
+                "scroll_to": True,
+                "tooltip": "Click to register PRN with URA servers",
+                "security_gate": "requires_confirmation",
+            },
+        ]
+    elif portal_key == "efris":
+        recipe = [
+            {
+                "step_number": 1,
+                "element": "Buyer TIN Verification",
+                "selector": "input#buyerTin, input[name='purchaserTin'], input[name='buyer_tin']",
+                "action_type": "fill",
+                "fill_value": str(entities.get("buyer_tin") or tin_val or ""),
+                "scroll_to": True,
+                "tooltip": "Enter purchasing business TIN for B2B validation",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 2,
+                "element": "Commodity / Service Code",
+                "selector": "input#commodityCode, select#itemClassification, input[name='commodity_code']",
+                "action_type": "select",
+                "fill_value": str(entities.get("commodity_code") or "50202301"),
+                "scroll_to": False,
+                "tooltip": "Pick the harmonized UNSPSC commodity classification code",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 3,
+                "element": "Offline Sync & Device Buffer Check",
+                "selector": "#efris-sync-status, button#btnSyncOffline",
+                "action_type": "spotlight",
+                "fill_value": None,
+                "scroll_to": False,
+                "tooltip": "Verify EFD/SDC offline buffer is within the 24-hour transmission window",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 4,
+                "element": "Issue Fiscal Invoice",
+                "selector": "button#btnIssueInvoice, button.submit-fiscal",
+                "action_type": "click",
+                "fill_value": None,
+                "scroll_to": True,
+                "tooltip": "Generate encrypted fiscal receipt with 20-digit FDN",
+                "security_gate": "requires_confirmation",
+            },
+        ]
+    elif portal_key == "tin_registration":
+        entity_type_val = str(entities.get("entity_type") or "individual")
+        nin_or_brn = str(entities.get("nin") or entities.get("ursb_brn") or "")
+        recipe = [
+            {
+                "step_number": 1,
+                "element": "Taxpayer Entity Category",
+                "selector": "input[name='taxpayerType'], select#ddlEntityType, select[name='entity_type']",
+                "action_type": "select",
+                "fill_value": entity_type_val,
+                "scroll_to": True,
+                "tooltip": "Choose Individual, Company (URSB BRN), or NGO",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 2,
+                "element": "National Identification Number (NIN) / URSB BRN",
+                "selector": "input#txtNIN, input[name='nin'], input#txtURSBBrn, input[name='ursb_brn']",
+                "action_type": "fill",
+                "fill_value": nin_or_brn,
+                "scroll_to": False,
+                "tooltip": "Enter 14-character NIN for biometric NIRA validation or URSB BRN for companies",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 3,
+                "element": "Applicant Legal Name & Contact",
+                "selector": "input#txtFullName, input[name='surname'], input[name='legal_name']",
+                "action_type": "fill",
+                "fill_value": str(entities.get("full_name") or entities.get("surname") or entities.get("legal_name") or ""),
+                "scroll_to": False,
+                "tooltip": "Enter legal name matching NIRA National ID or URSB Certificate of Incorporation",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 4,
+                "element": "Submit Registration Draft",
+                "selector": "button#btnSubmitRegistration, input#btnApply",
+                "action_type": "click",
+                "fill_value": None,
+                "scroll_to": True,
+                "tooltip": "Send initial TIN application draft",
+                "security_gate": "requires_confirmation",
+            },
+        ]
+    elif portal_key in ("return_filing", "e_services"):
+        recipe = [
+            {
+                "step_number": 1,
+                "element": "Return Type & Filing Period Selection",
+                "selector": "select#ddlReturnType, select[name='return_type'], input#txtReturnPeriod",
+                "action_type": "select",
+                "fill_value": tax_head_val or "VAT_MONTHLY",
+                "scroll_to": True,
+                "tooltip": "Select statutory return type (VAT Form DT-1014, PAYE, or Provisional/Final Income Tax)",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 2,
+                "element": "Macro-Validated .xlsm Return Template Upload",
+                "selector": "input#fileReturnUpload, input[type='file'][name*='template']",
+                "action_type": "spotlight",
+                "fill_value": None,
+                "scroll_to": True,
+                "tooltip": "Upload the encrypted macro-validated Excel (.xlsm) return schedule generated with 'Enable Content'",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 3,
+                "element": "Net Tax Payable Verification",
+                "selector": "input#txtNetTaxPayable, input[name='net_tax_payable']",
+                "action_type": "fill",
+                "fill_value": amount_val,
+                "scroll_to": False,
+                "tooltip": "Confirm net tax payable or credit carried forward before signing declaration",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 4,
+                "element": "Statutory Declaration & Submit Return (TPCA s. 16)",
+                "selector": "button#btnSubmitReturn, input#btnDeclareReturn",
+                "action_type": "click",
+                "fill_value": None,
+                "scroll_to": True,
+                "tooltip": "Taxpayer must personally review and confirm the statutory return declaration under TPCA s. 16",
+                "security_gate": "requires_confirmation",
+            },
+        ]
+    elif portal_key == "tax_clearance":
+        recipe = [
+            {
+                "step_number": 1,
+                "element": "Applicant TIN Input",
+                "selector": "input#txtTccTin, input[name='tin']",
+                "action_type": "fill",
+                "fill_value": tin_val,
+                "scroll_to": True,
+                "tooltip": "Confirm active 10-digit URA TIN for compliance check",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 2,
+                "element": "TCC Statutory Purpose Selection",
+                "selector": "select#ddlTccPurpose, select[name='tcc_purpose']",
+                "action_type": "select",
+                "fill_value": str(entities.get("tcc_purpose") or "BIDDING_TENDER"),
+                "scroll_to": False,
+                "tooltip": "Select purpose (Public Procurement Bidding, License Renewal, Work Permit, or Vehicle Transfer)",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 3,
+                "element": "Compliance Pre-Check Ledger Spotlight",
+                "selector": "#tcc-compliance-ledger, .compliance-status-panel",
+                "action_type": "spotlight",
+                "fill_value": None,
+                "scroll_to": False,
+                "tooltip": "Verify all returns are filed and liabilities settled or covered by an approved instalment MOU",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 4,
+                "element": "Submit TCC Application",
+                "selector": "button#btnApplyTCC, input#btnSubmitTCC",
+                "action_type": "click",
+                "fill_value": None,
+                "scroll_to": True,
+                "tooltip": "Submit Tax Clearance Certificate statutory declaration",
+                "security_gate": "requires_confirmation",
+            },
+        ]
+    elif portal_key == "objection_appeals":
+        recipe = [
+            {
+                "step_number": 1,
+                "element": "Assessment Reference Number (ARN) Input",
+                "selector": "input#txtAssessmentRef, input[name='assessment_ref']",
+                "action_type": "fill",
+                "fill_value": str(entities.get("assessment_ref") or ""),
+                "scroll_to": True,
+                "tooltip": "Enter the Assessment Registration Number (ARN) within the 45-day statutory deadline",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 2,
+                "element": "45-Day Grounds of Objection & Schedule Upload",
+                "selector": "textarea#txtObjectionGrounds, textarea[name='grounds'], input#fileObjectionEvidence",
+                "action_type": "spotlight",
+                "fill_value": str(entities.get("grounds") or ""),
+                "scroll_to": False,
+                "tooltip": "Detail specific legal and factual grounds of objection and attach audited schedules",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 3,
+                "element": "Lodge Formal Section 24 Objection",
+                "selector": "button#btnLodgeObjection, input#btnSubmitObjection",
+                "action_type": "click",
+                "fill_value": None,
+                "scroll_to": True,
+                "tooltip": "Taxpayer must personally confirm formal objection lodging under TPCA s. 24",
+                "security_gate": "requires_confirmation",
+            },
+        ]
+    elif portal_key in ("motor_vehicle", "asycuda"):
+        recipe = [
+            {
+                "step_number": 1,
+                "element": "Customs SAD C-Number / 17-Character Chassis VIN Input",
+                "selector": "input#txtChassisVin, input#txtSadNumber, input[name='chassis_vin']",
+                "action_type": "fill",
+                "fill_value": str(entities.get("chassis_vin") or entities.get("sad_number") or ""),
+                "scroll_to": True,
+                "tooltip": "Enter the ASYCUDA Single Administrative Document (SAD C-Number) or 17-character vehicle VIN",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 2,
+                "element": "Registration / ITMS Digital Plate Category Selector",
+                "selector": "select#ddlVehicleCategory, select[name='plate_category']",
+                "action_type": "select",
+                "fill_value": str(entities.get("plate_category") or "STANDARD_FIRST_REG"),
+                "scroll_to": False,
+                "tooltip": "Select first registration, ownership transfer (Form TR VII), or ITMS digital number plate category",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 3,
+                "element": "Proceed to Motor Vehicle / Customs Assessment",
+                "selector": "button#btnVehicleAssess, input#btnProceedAssessment",
+                "action_type": "click",
+                "fill_value": None,
+                "scroll_to": True,
+                "tooltip": "Confirm vehicle and customs valuation details to generate duty/registration assessment",
+                "security_gate": "requires_confirmation",
+            },
+        ]
+    elif portal_key == "dts":
+        recipe = [
+            {
+                "step_number": 1,
+                "element": "Excise Product Category Selector",
+                "selector": "select#ddlDtsCategory, select[name='product_category']",
+                "action_type": "select",
+                "fill_value": str(entities.get("product_category") or "BOTTLED_WATER"),
+                "scroll_to": True,
+                "tooltip": "Select gazetted excise commodity category (Beer, Spirits, Wine, Soda, Water, Cement, Sugar)",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 2,
+                "element": "Stamp Reel Quantity Input",
+                "selector": "input#txtStampQuantity, input[name='quantity']",
+                "action_type": "fill",
+                "fill_value": str(entities.get("quantity") or ""),
+                "scroll_to": False,
+                "tooltip": "Enter exact quantity of digital tax stamps to order or activate on packaging line",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 3,
+                "element": "Submit Digital Tax Stamp Order",
+                "selector": "button#btnOrderStamps, input#btnSubmitDtsOrder",
+                "action_type": "click",
+                "fill_value": None,
+                "scroll_to": True,
+                "tooltip": "Confirm and submit Digital Tax Stamp order with URA / SICPA",
+                "security_gate": "requires_confirmation",
+            },
+        ]
+    elif portal_key == "get_refund":
+        recipe = [
+            {
+                "step_number": 1,
+                "element": "Refund Tax Head & Claim Amount",
+                "selector": "select#ddlRefundTaxHead, input#txtRefundAmount, input[name='amount_ugx']",
+                "action_type": "fill",
+                "fill_value": amount_val,
+                "scroll_to": True,
+                "tooltip": "Select refund regime (VAT Section 31, Income Tax Section 113, or MDA ONTR) and enter claim amount",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 2,
+                "element": "Registered EFT Bank Account Spotlight",
+                "selector": "input#txtBankAccountName, #eft-bank-verification",
+                "action_type": "spotlight",
+                "fill_value": None,
+                "scroll_to": False,
+                "tooltip": "Verify bank account holder name matches your registered URA TIN legal name exactly",
+                "security_gate": "safe",
+            },
+            {
+                "step_number": 3,
+                "element": "Submit Refund Claim (TPCA s. 42)",
+                "selector": "button#btnSubmitRefund, input#btnClaimRefund",
+                "action_type": "click",
+                "fill_value": None,
+                "scroll_to": True,
+                "tooltip": "Confirm and submit statutory tax refund claim for audit and EFT disbursement",
+                "security_gate": "requires_confirmation",
             },
         ]
     else:
@@ -6661,6 +7039,7 @@ def get_portal_dom_recipe(
                 "selector": "#taxpayer-banner, .user-profile-header",
                 "action_type": "spotlight",
                 "fill_value": None,
+                "scroll_to": True,
                 "tooltip": "Verify 10-digit TIN in active session header",
                 "security_gate": "safe",
             },
@@ -6670,6 +7049,7 @@ def get_portal_dom_recipe(
                 "selector": "button.btn-primary, a.action-link, input[type='submit']",
                 "action_type": "click",
                 "fill_value": None,
+                "scroll_to": True,
                 "tooltip": "Advance to next statutory submission stage",
                 "security_gate": "requires_confirmation",
             },
@@ -6701,7 +7081,10 @@ def export_companion_manifest() -> dict[str, Any]:
                 "input[name*='password']",
                 "input[name*='otp']",
                 "input[name*='pin']",
+                "input[name*='cvv']",
+                "input[name*='secret']",
                 "input[autocomplete='one-time-code']",
+                "input[autocomplete='cc-csc']",
             ],
             "client_side_only": True,
             "requires_user_confirmation_for_writes": True,
