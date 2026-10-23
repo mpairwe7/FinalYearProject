@@ -357,16 +357,51 @@ def extract_text_with_boxes(image_array: np.ndarray) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
+_HIDDEN_CONTROL_AND_BIDI_RE = re.compile(
+    r"[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f"
+    r"\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]"
+)
+_UNTRUSTED_DOC_BOUNDARY_RE = re.compile(
+    r"</?\s*untrusted_user_document\s*>",
+    re.IGNORECASE,
+)
+
+
+def strip_hidden_control_and_bidi(text: str) -> str:
+    """Remove invisible zero-width, control, and bidirectional override characters.
+
+    Defends against Trojan Source / Unicode bidi spoofing of TINs, PRNs, and
+    monetary figures as well as zero-width prompt-injection smuggling in OCR
+    and document text layers (OWASP LLM01:2026 / ASI01).
+    """
+    if not text:
+        return ""
+    return _HIDDEN_CONTROL_AND_BIDI_RE.sub("", text)
+
+
+def escape_untrusted_document_markers(text: str) -> str:
+    """Strip or escape `<untrusted_user_document>` boundary tags inside document text.
+
+    Prevents an attacker from embedding `</untrusted_user_document>` inside an
+    uploaded file or image to close the spotlighting wrapper early.
+    """
+    if not text:
+        return ""
+    return _UNTRUSTED_DOC_BOUNDARY_RE.sub("[REDACTED_BOUNDARY_TAG]", text)
+
+
 def extract_tin_numbers(text: str) -> list[str]:
     """Extract Uganda TIN numbers (10-digit, starting with 1)."""
-    return list(set(re.findall(r"\b1\d{9}\b", text)))
+    cleaned = strip_hidden_control_and_bidi(text)
+    return list(dict.fromkeys(re.findall(r"\b1\d{9}\b", cleaned)))
 
 
 def extract_nin_numbers(text: str) -> list[str]:
     """Extract Ugandan 14-character National Identification Numbers (NIN)."""
-    matches = re.findall(r"\b[C][MFR][0-9A-Z]{12}\b", text.upper())
+    cleaned = strip_hidden_control_and_bidi(text)
+    matches = re.findall(r"\b[C][MFR](?=[0-9A-Z]*\d)[0-9A-Z]{12}\b", cleaned.upper())
     if not matches:
-        matches = [m for m in re.findall(r"\b[A-Z]{2}[0-9A-Z]{12}\b", text.upper()) if len(m) == 14]
+        matches = re.findall(r"\b[A-Z]{2}(?=[0-9A-Z]*\d)[0-9A-Z]{12}\b", cleaned.upper())
     return list(dict.fromkeys(matches))
 
 
@@ -416,6 +451,24 @@ def extract_national_id_card_data(text: str) -> dict[str, Any]:
     }
 
 
+_SPACED_ACRONYM_RES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bE\s+F\s+R\s+I\s+S\b", re.IGNORECASE), "EFRIS"),
+    (re.compile(r"\bF\s+D\s+N\b", re.IGNORECASE), "FDN"),
+    (re.compile(r"\bP\s+R\s+N\b", re.IGNORECASE), "PRN"),
+    (re.compile(r"\bV\s+A\s+T\b", re.IGNORECASE), "VAT"),
+    (re.compile(r"\bT\s+I\s+N\b", re.IGNORECASE), "TIN"),
+    (re.compile(r"\bU\s+R\s+A\b", re.IGNORECASE), "URA"),
+)
+_FDN_FIX_RE = re.compile(
+    r"(?:FDN|Fiscal[ \t]+Document[ \t]+Number)[ \t:#]{0,6}([0-9OoIl](?:[0-9OoIl]|[ -](?=[0-9OoIl])){9,27})",
+    re.IGNORECASE,
+)
+_EFRIS_LABELED_RE = re.compile(
+    r"(?:FDN|Fiscal[ \t]+Document[ \t]+Number)[ \t:#]{0,6}([A-Z0-9-]{10,25})",
+    re.IGNORECASE,
+)
+
+
 def normalize_thermal_receipt_text(text: str) -> str:
     """Clean up common thermal receipt & phone camera OCR artifacts.
 
@@ -426,32 +479,24 @@ def normalize_thermal_receipt_text(text: str) -> str:
     """
     if not text:
         return ""
-    cleaned = text
-    spaced_acronyms = [
-        (r"\bE\s+F\s+R\s+I\s+S\b", "EFRIS"),
-        (r"\bF\s+D\s+N\b", "FDN"),
-        (r"\bP\s+R\s+N\b", "PRN"),
-        (r"\bV\s+A\s+T\b", "VAT"),
-        (r"\bT\s+I\s+N\b", "TIN"),
-        (r"\bU\s+R\s+A\b", "URA"),
-    ]
-    for pattern, replacement in spaced_acronyms:
-        cleaned = re.sub(pattern, replacement, cleaned, flags=re.IGNORECASE)
+    cleaned = strip_hidden_control_and_bidi(text)
+    for pattern, replacement in _SPACED_ACRONYM_RES:
+        cleaned = pattern.sub(replacement, cleaned)
 
-    def _fix_fdn(m: re.Match) -> str:
+    def _fix_fdn(m: re.Match[str]) -> str:
         prefix = m.group(0).split(":")[0] if ":" in m.group(0) else "FDN"
         val = m.group(1).replace("O", "0").replace("o", "0").replace("I", "1").replace("l", "1").replace(" ", "")
         return f"{prefix}: {val}"
 
-    cleaned = re.sub(r"(?:FDN|Fiscal\s+Document\s+Number)[:\s#]*([A-Za-z0-9\s-]{10,28})", _fix_fdn, cleaned, flags=re.IGNORECASE)
+    cleaned = _FDN_FIX_RE.sub(_fix_fdn, cleaned)
     return cleaned
 
 
 def extract_prn_numbers(text: str) -> list[str]:
     """Extract Uganda Payment Registration Numbers (PRNs: 12-15 digits, typically starts with 2)."""
     norm_text = normalize_thermal_receipt_text(text)
-    matches = set(re.findall(r"(?:PRN[:\s#]*)?\b(2\d{11,14})\b", norm_text, re.I))
-    spaced = re.findall(r"(?:PRN[:\s#]*)?\b(2\d{3}[-\s]\d{4}[-\s]\d{4,6})\b", norm_text, re.I)
+    matches = set(re.findall(r"(?:PRN[ \t:#]{0,4})?\b(2\d{11,14})\b", norm_text, re.I))
+    spaced = re.findall(r"(?:PRN[ \t:#]{0,4})?\b(2\d{3}[- ]\d{4}[- ]\d{4,6})\b", norm_text, re.I)
     for s in spaced:
         matches.add(re.sub(r"[-\s]", "", s))
     return list(matches)
@@ -464,7 +509,7 @@ def extract_efris_invoice_numbers(text: str) -> list[str]:
     matches.update(re.findall(r"\b(?:FD|INV|EF)[A-Z0-9]{8,24}\b", norm_text, re.I))
     matches.update(re.findall(r"\b(0\d{19,23})\b", norm_text))
     matches.update(re.findall(r"\b(\d{10}-\d{4}-\d{5,8})\b", norm_text))
-    labeled = re.findall(r"(?:FDN|Fiscal\s+Document\s+Number)[:\s#]*([A-Z0-9-]{10,25})", norm_text, re.I)
+    labeled = _EFRIS_LABELED_RE.findall(norm_text)
     for m in labeled:
         clean_m = m.strip().replace(" ", "")
         if re.search(r"\d{6,}", clean_m):
@@ -516,7 +561,7 @@ def extract_tax_heads(text: str) -> list[str]:
 
 def clean_ocr_text(raw_text: str) -> str:
     """Clean OCR output for dense financial tables and alphanumeric codes."""
-    text = raw_text
+    text = strip_hidden_control_and_bidi(raw_text)
     # Common OCR substitutions in financial documents
     text = re.sub(r"\bO(\d)", r"0\1", text)  # O → 0 before digit
     text = re.sub(r"(\d)O\b", r"\g<1>0", text)  # O → 0 after digit

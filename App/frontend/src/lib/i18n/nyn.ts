@@ -324,6 +324,8 @@ export const nyn: Partial<Dictionary> = {
   'documents.screenshotStepsPrompt': 'Mpabura omu madaara agarikukurataho aha {portal}.',
   'documents.typicalAreasNote': 'Ebi nibiraga ahu screen egi erikuta ebintu buriijo.',
   'documents.copyInstruction': 'Koppa idaara {number}',
+  'documents.nins': 'Enamba za NIN',
+  'documents.copyNin': 'Koona okukoppa NIN',
 
   'call.button': 'Teera Esimu ahari URA',
   'call.dialing': 'Ninteera 0800 117 000…',

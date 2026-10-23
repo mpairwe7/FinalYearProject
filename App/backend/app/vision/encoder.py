@@ -23,6 +23,22 @@ import re
 import threading
 from typing import Any
 
+from ..guardrails import scan_retrieved_text
+from .document_classifier import classify_with_context
+from .ocr import (
+    clean_ocr_text,
+    extract_dates,
+    extract_efris_invoice_numbers,
+    extract_nin_numbers,
+    extract_ocr_result,
+    extract_prn_numbers,
+    extract_reference_numbers,
+    extract_tax_heads,
+    extract_tin_numbers,
+    extract_ugx_amounts,
+    strip_hidden_control_and_bidi,
+)
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -33,6 +49,8 @@ VISION_MODEL = os.getenv("VISION_MODEL", "Qwen/Qwen2-VL-2B-Instruct")
 VISION_DEVICE = os.getenv("VISION_DEVICE", "cuda:0")
 VISION_MAX_PIXELS = int(os.getenv("VISION_MAX_PIXELS", str(1280 * 720)))
 VISION_MAX_TOKENS = int(os.getenv("VISION_MAX_TOKENS", "256"))
+_VISION_MAX_IMAGE_BYTES = int(os.getenv("DOCUMENT_MAX_BYTES", str(40 * 1024 * 1024)))
+_VISION_MAX_DECODE_PIXELS = int(os.getenv("DOCUMENT_MAX_IMAGE_PIXELS", "20_000_000"))
 
 # URA document analysis prompt — tuned for Ugandan tax documents
 _VLM_PROMPT = (
@@ -145,11 +163,24 @@ class VisionEncoder:
             "confidence": 0.0,
         }
 
-        # Load image
-        try:
-            from PIL import Image
+        if not image_bytes or len(image_bytes) > _VISION_MAX_IMAGE_BYTES:
+            logger.warning("Rejected empty or oversized vision image (%d bytes)", len(image_bytes or b""))
+            return result
 
-            image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        # Load image with EXIF orientation normalization and pixel bomb guard
+        try:
+            from PIL import Image, ImageOps
+
+            with Image.open(io.BytesIO(image_bytes)) as raw_img:
+                if raw_img.width * raw_img.height > _VISION_MAX_DECODE_PIXELS:
+                    logger.warning(
+                        "Vision image exceeds decode pixel cap (%d > %d)",
+                        raw_img.width * raw_img.height,
+                        _VISION_MAX_DECODE_PIXELS,
+                    )
+                    return result
+                transposed = ImageOps.exif_transpose(raw_img)
+                image = (transposed if transposed is not None else raw_img).convert("RGB")
         except Exception:
             logger.warning("Failed to decode image", exc_info=True)
             return result
@@ -161,11 +192,17 @@ class VisionEncoder:
             new_h = max(1, int(image.height * ratio))
             image = image.resize((new_w, new_h))
 
-        # OCR pass
-        result["ocr_text"] = self._run_ocr(image)
+        # OCR pass + OWASP LLM01/ASI01 visual indirect prompt injection scrub
+        raw_ocr = clean_ocr_text(self._run_ocr(image))
+        scrubbed_ocr, ocr_scrubbed = scan_retrieved_text(raw_ocr)
+        result["ocr_text"] = scrubbed_ocr
 
-        # VLM pass
-        vlm_output = self._run_vlm(image)
+        # VLM pass + visual indirect prompt injection scrub
+        raw_vlm = strip_hidden_control_and_bidi(self._run_vlm(image))
+        vlm_output, vlm_scrubbed = scan_retrieved_text(raw_vlm)
+        if ocr_scrubbed or vlm_scrubbed:
+            result["indirect_injection_scrubbed"] = True
+
         if vlm_output:
             result["summary"] = vlm_output
             result["doc_type"] = _classify_doc_type(vlm_output, result["ocr_text"])
@@ -186,6 +223,16 @@ class VisionEncoder:
 
     def _run_ocr(self, image) -> str:
         """Run OCR on a PIL Image.  Returns extracted text or empty string."""
+        try:
+            import numpy as np
+
+            arr = np.array(image)
+            unified = extract_ocr_result(arr)
+            if unified.status == "ready" and unified.text.strip():
+                return unified.text.strip()
+        except Exception:
+            logger.debug("Unified OCR pass skipped in VisionEncoder", exc_info=True)
+
         if not self._ensure_ocr():
             return ""
         try:
@@ -224,7 +271,7 @@ class VisionEncoder:
             ).to(self._model.device)
 
             with torch.no_grad():
-                output_ids = self._model.generate(
+                output_ids = self._model.generate(  # nosemgrep: ura-llm01-raw-user-input-to-llm -- PyTorch vision model with fixed _VLM_PROMPT; output scrubbed via scan_retrieved_text.
                     **inputs,
                     max_new_tokens=VISION_MAX_TOKENS,
                     do_sample=False,
@@ -264,7 +311,8 @@ def _classify_doc_type(vlm_output: str, ocr_text: str) -> str:
     for pattern, doc_type in _DOC_PATTERNS:
         if pattern.search(combined):
             return doc_type
-    return "generic"
+    cls_res = classify_with_context(ocr_text, vlm_output)
+    return cls_res.doc_type.value
 
 
 # ---------------------------------------------------------------------------
@@ -273,31 +321,44 @@ def _classify_doc_type(vlm_output: str, ocr_text: str) -> str:
 
 
 def _extract_fields(vlm_output: str, ocr_text: str) -> dict[str, list[str]]:
-    """Extract structured fields from text via regex."""
-    combined = f"{vlm_output} {ocr_text}"
+    """Extract structured fields from text via URA OCR extractors and regex."""
+    combined = strip_hidden_control_and_bidi(f"{vlm_output} {ocr_text}")
     fields: dict[str, list[str]] = {}
 
-    # UGX amounts
-    amounts = re.findall(r"UGX?\s*[\d,]+(?:\.\d{1,2})?", combined, re.I)
+    amounts = extract_ugx_amounts(combined)
     if not amounts:
-        # Try standalone large numbers (likely amounts)
         amounts = re.findall(r"\b[\d,]{4,}(?:\.\d{1,2})?\b", combined)
     if amounts:
-        fields["amounts"] = amounts[:10]  # cap at 10
+        fields["amounts"] = amounts[:10]
 
-    # TIN numbers (10-digit, starts with 1)
-    tins = re.findall(r"\b1\d{9}\b", combined)
+    tins = extract_tin_numbers(combined)
     if tins:
-        fields["tin_numbers"] = list(set(tins))
+        fields["tin_numbers"] = tins[:10]
+        fields["tins"] = tins[:10]
 
-    # Dates
-    dates = re.findall(r"\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}", combined)
+    nins = extract_nin_numbers(combined)
+    if nins:
+        fields["nins"] = nins[:10]
+
+    prns = extract_prn_numbers(combined)
+    if prns:
+        fields["prns"] = prns[:10]
+
+    efris = extract_efris_invoice_numbers(combined)
+    if efris:
+        fields["efris_invoices"] = efris[:10]
+
+    dates = extract_dates(combined)
     if dates:
         fields["dates"] = dates[:10]
 
-    # Reference numbers
-    refs = re.findall(r"\b[A-Z]{2,4}[-/]?\d{6,12}\b", combined)
+    refs = extract_reference_numbers(combined)
     if refs:
         fields["reference_numbers"] = refs[:5]
+        fields["references"] = refs[:5]
+
+    tax_heads = extract_tax_heads(combined)
+    if tax_heads:
+        fields["tax_heads"] = tax_heads[:10]
 
     return fields

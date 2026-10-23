@@ -154,18 +154,135 @@ def detect_pdf_vector_table_grid(
 # ---------------------------------------------------------------------------
 
 
+def _cluster_1d_indices(indices: np.ndarray, max_gap: int = 4) -> list[int]:
+    """Cluster adjacent 1D line indices into single canonical line centers."""
+    if indices.size == 0:
+        return []
+    clusters: list[int] = []
+    start = int(indices[0])
+    prev = start
+    for idx in indices[1:]:
+        val = int(idx)
+        if val - prev <= max_gap:
+            prev = val
+        else:
+            clusters.append((start + prev) // 2)
+            start = val
+            prev = val
+    clusters.append((start + prev) // 2)
+    return clusters
+
+
 def detect_raster_line_table_grid(
     image: np.ndarray,
     page_number: int = 1,
+    *,
+    ocr_items: list[dict[str, Any]] | None = None,
 ) -> list[StructuredTable]:
     """Detect table cell grids from raster image horizontal and vertical line borders."""
-    if image is None or image.ndim < 2:
+    if image is None or not isinstance(image, np.ndarray) or image.ndim < 2:
         return []
-    # Fast lightweight heuristic line grid detection
     h, w = image.shape[:2]
-    # Check if horizontal and vertical dark lines exist across the matrix
-    # If unbordered, emit empty so pipeline falls back to VLM
-    return []
+    if h < 24 or w < 24:
+        return []
+
+    gray = image.mean(axis=2, dtype=np.float32) if image.ndim >= 3 else image.astype(np.float32)
+    # Dark pixels relative to page background
+    threshold = min(180.0, float(np.percentile(gray, 50)) * 0.78)
+    dark = gray < threshold
+
+    # Horizontal lines: rows where >= 35% of width consists of dark pixels
+    row_density = dark.mean(axis=1)
+    h_indices = np.where(row_density >= 0.35)[0]
+    h_lines = _cluster_1d_indices(h_indices, max_gap=max(2, h // 150))
+
+    # Vertical lines: cols where >= 25% of height consists of dark pixels
+    col_density = dark.mean(axis=0)
+    v_indices = np.where(col_density >= 0.25)[0]
+    v_lines = _cluster_1d_indices(v_indices, max_gap=max(2, w // 150))
+
+    # Filter out lines that are too close to form real table cells (< 8px apart)
+    filtered_h: list[int] = []
+    for y in h_lines:
+        if not filtered_h or (y - filtered_h[-1]) >= 8:
+            filtered_h.append(y)
+    filtered_v: list[int] = []
+    for x in v_lines:
+        if not filtered_v or (x - filtered_v[-1]) >= 8:
+            filtered_v.append(x)
+
+    if len(filtered_h) < 3 or len(filtered_v) < 3:
+        return []
+
+    num_rows = len(filtered_h) - 1
+    num_cols = len(filtered_v) - 1
+    matrix: list[list[str]] = [["" for _ in range(num_cols)] for _ in range(num_rows)]
+
+    # Populate cell text from OCR bounding boxes when provided
+    for item in ocr_items or []:
+        text = str(item.get("text", "")).strip()
+        if not text:
+            continue
+        raw_box = item.get("box") or item.get("polygon") or []
+        cx, cy = 0.0, 0.0
+        try:
+            if len(raw_box) >= 4 and isinstance(raw_box[0], list | tuple):
+                xs = [float(p[0]) for p in raw_box]
+                ys = [float(p[1]) for p in raw_box]
+                cx = (min(xs) + max(xs)) / 2.0
+                cy = (min(ys) + max(ys)) / 2.0
+            elif len(raw_box) == 4:
+                cx = (float(raw_box[0]) + float(raw_box[2])) / 2.0
+                cy = (float(raw_box[1]) + float(raw_box[3])) / 2.0
+        except (TypeError, ValueError, IndexError):
+            logger.debug("Skipping malformed OCR box in raster grid mapping")
+            continue
+
+        r_match = next(
+            (r for r in range(num_rows) if filtered_h[r] <= cy <= filtered_h[r + 1]),
+            None,
+        )
+        c_match = next(
+            (c for c in range(num_cols) if filtered_v[c] <= cx <= filtered_v[c + 1]),
+            None,
+        )
+        if r_match is not None and c_match is not None:
+            existing = matrix[r_match][c_match]
+            matrix[r_match][c_match] = f"{existing} {text}".strip() if existing else text
+
+    cells: list[TableCell] = []
+    for r_i in range(num_rows):
+        for c_i in range(num_cols):
+            cells.append(
+                TableCell(
+                    row_idx=r_i,
+                    col_idx=c_i,
+                    text=matrix[r_i][c_i],
+                    bbox=[
+                        float(filtered_v[c_i]),
+                        float(filtered_h[r_i]),
+                        float(filtered_v[c_i + 1]),
+                        float(filtered_h[r_i + 1]),
+                    ],
+                    confidence=0.88,
+                    bbox_source="raster_line_geometry",
+                )
+            )
+
+    return [
+        StructuredTable(
+            table_id=f"raster_table_p{page_number}_1",
+            page_number=page_number,
+            rows=num_rows,
+            cols=num_cols,
+            cells=cells,
+            matrix=matrix,
+            source="raster_line_geometry",
+            status="ok",
+            downstream_action="auto_use",
+            grid_confidence=0.88,
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +410,8 @@ def structure_document_tables(
     raw_text: str = "",
     page_number: int = 1,
     *,
+    raster_image: np.ndarray | None = None,
+    ocr_items: list[dict[str, Any]] | None = None,
     enable_vlm_fallback: bool = True,
 ) -> list[StructuredTable]:
     """Execute end-to-end table structuring pipeline on a document page."""
@@ -301,10 +420,15 @@ def structure_document_tables(
         pdf_vector_candidates = detect_pdf_vector_table_grid(pdf_bytes, page_number - 1)
 
     raster_line_candidates: list[StructuredTable] = []
+    if not pdf_vector_candidates and raster_image is not None:
+        raster_line_candidates = detect_raster_line_table_grid(
+            raster_image, page_number=page_number, ocr_items=ocr_items
+        )
+
     fallback_candidates: list[StructuredTable] = []
 
-    # If vector candidates are missing or unbordered, generate fallback candidate
-    if not pdf_vector_candidates and raw_text:
+    # If vector and raster-line candidates are missing, generate fallback candidate
+    if not pdf_vector_candidates and not raster_line_candidates and raw_text:
         fb = detect_borderless_or_vlm_table(
             raw_text,
             page_number=page_number,
