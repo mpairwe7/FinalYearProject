@@ -1248,22 +1248,40 @@ def sanitize_portal_context(portal_context: Mapping[str, Any] | None) -> dict[st
 # ---------------------------------------------------------------------------
 
 _TIN_RE = re.compile(r"\b(1\d{2}[-\s]?\d{3}[-\s]?\d{4}|1\d{9})\b")
-_PRN_RE = re.compile(r"\b(2\d{9,12})\b")
+_PRN_RE = re.compile(r"\b(?!2567\d{8}\b)(2\d{9,12})\b")
 _NIN_RE = re.compile(r"\b(C[MFR][-\s]?[A-Z0-9]{11,13})\b", re.IGNORECASE)
 _STAMP_RE = re.compile(r"\b(UG-DTS-\d{4}-\d{4,8})\b", re.IGNORECASE)
-_BRN_RE = re.compile(r"\b(800\d{11}|URSB-[A-Z0-9-]+)\b", re.IGNORECASE)
+_BRN_RE = re.compile(r"\b(1?800\d{10,12}|URSB-[A-Z0-9-]+)\b", re.IGNORECASE)
 _ENTRY_RE = re.compile(r"\b(\d{4}-ASY-IM[47]-\d+)\b", re.IGNORECASE)
 _ASSESSMENT_REF_RE = re.compile(r"\b(ASMT-\d{4}-\d{3,8}|ASMT-\d{5,10})\b", re.IGNORECASE)
 _FDN_RE = re.compile(r"\b(\d{20})\b")
 _VEHICLE_PLATE_RE = re.compile(r"\b(U[A-Z]{1,2}\s?\d{3}[A-Z])\b", re.IGNORECASE)
 _EMAIL_RE = re.compile(r"\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b")
-_PHONE_RE = re.compile(r"(\+?256\s?7\d{8}|\b07\d{8}\b)")
+_PHONE_RE = re.compile(r"((?:\+256|(?<!\d)256|(?<!\d)0)[ \t-]?7\d{2}[ \t-]?\d{3}[ \t-]?\d{3})\b")
 _DOB_RE = re.compile(r"\b((?:19|20)\d{2}-\d{2}-\d{2})\b")
-_COMMODITY_CODE_RE = re.compile(
-    r"\b(?:commodity(?:\s+code)?|unspsc|item\s+code|commodity_code)\s*[:#=-]?\s*(\d{8})\b",
-    re.IGNORECASE,
-)
 _DTS_ORDER_ID_RE = re.compile(r"\b(DTS-ORD-\d{4}-\d{3,6})\b", re.IGNORECASE)
+
+
+def _extract_commodity_code(text: str) -> str:
+    """Linear-time token scanner for 8-digit EFRIS/UNSPSC commodity codes."""
+    tokens = (
+        text[:2000]
+        .replace(":", " ")
+        .replace("#", " ")
+        .replace("=", " ")
+        .replace("-", " ")
+        .split()
+    )
+    trigger_words = {"commodity", "unspsc", "commodity_code", "item"}
+    for i, raw_tok in enumerate(tokens):
+        low_tok = raw_tok.lower().strip(".,;()[]")
+        if low_tok in trigger_words:
+            for candidate_idx in (i + 1, i + 2):
+                if candidate_idx < len(tokens):
+                    cand = tokens[candidate_idx].strip(".,;()[]")
+                    if len(cand) == 8 and cand.isdigit():
+                        return cand
+    return ""
 def _extract_amount_ugx(text: str) -> str:
     """Linear-time token scanner for UGX currency amounts (excludes turnover/sales figures)."""
     tokens = text[:2000].replace(":", " ").replace("=", " ").split()
@@ -1343,7 +1361,10 @@ def extract_task_entities(message: str, portal_context: Mapping[str, Any] | None
 
     brn_m = _BRN_RE.search(text)
     if brn_m:
-        entities["ursb_brn"] = brn_m.group(1).upper()
+        raw_brn = brn_m.group(1).upper()
+        if len(raw_brn) == 15 and raw_brn.startswith("1800"):
+            raw_brn = raw_brn[1:]
+        entities["ursb_brn"] = raw_brn
 
     entry_m = _ENTRY_RE.search(text)
     if entry_m:
@@ -1367,15 +1388,15 @@ def extract_task_entities(message: str, portal_context: Mapping[str, Any] | None
 
     phone_m = _PHONE_RE.search(text)
     if phone_m:
-        entities["mobile_number"] = re.sub(r"\s+", "", phone_m.group(1))
+        entities["mobile_number"] = re.sub(r"[ \t-]+", "", phone_m.group(1))
 
     dob_m = _DOB_RE.search(text)
     if dob_m:
         entities["date_of_birth"] = dob_m.group(1)
 
-    comm_m = _COMMODITY_CODE_RE.search(text)
-    if comm_m:
-        entities["commodity_code"] = comm_m.group(1)
+    comm_str = _extract_commodity_code(text)
+    if comm_str:
+        entities["commodity_code"] = comm_str
 
     ord_m = _DTS_ORDER_ID_RE.search(text)
     if ord_m:

@@ -1070,6 +1070,29 @@ def _extract_image(data: bytes) -> _Extraction:
                 out.meta["ocr_used_fallback"] = True
         except Exception:
             text = ""
+        if not text:
+            try:
+                import shutil
+                import subprocess  # nosec B404
+
+                if shutil.which("tesseract"):
+                    buf = io.BytesIO()
+                    rgb.save(buf, format="PNG")
+                    proc = subprocess.run(  # nosec B603, B607
+                        ["tesseract", "stdin", "stdout", "-l", "eng", "--psm", "6"],
+                        input=buf.getvalue(),
+                        capture_output=True,
+                        timeout=15,
+                        check=False,
+                    )
+                    cli_text = proc.stdout.decode("utf-8", errors="replace")
+                    if cli_text.strip():
+                        text = cli_text
+                        out.meta["ocr_backend"] = "tesseract_cli"
+                        out.meta["ocr_status"] = "ready"
+                        out.meta["ocr_used_fallback"] = True
+            except Exception:
+                text = ""
     if text.strip():
         out.text = clean_ocr_text(text)
         out.meta["ocr_used"] = True
@@ -1513,6 +1536,19 @@ _PORTAL_SCREEN_TERMS = (
     "session expired",
     "taxpayer dashboard",
     "error code",
+    "apply to tax payment in installment",
+    "basis of installment",
+    "liability breakdown",
+    "installment details",
+    "generate payment schedule",
+    "upload documents and submit application",
+    "first-time registration",
+    "purpose of registration",
+    "registration effective date",
+    "fiscal document validation",
+    "validation history",
+    "detailed vat sales report",
+    "detailed vat purchase report",
 )
 #: Portal vocabulary that printed documents carry too (receipts, slips, SADs).
 _PORTAL_DOCUMENT_TERMS = ("efris", "asycuda", "payment registration number", "customs entry")
@@ -1551,7 +1587,41 @@ def diagnose_portal_screenshot(
     is_screen_capture = doc_type == "portal_screenshot" or is_image
 
     # 1. Identify specific portal or tax verification domain
-    if "efris" in text_lower or "efris" in clean_fn or doc_type in ("receipt", "invoice"):
+    is_installment_screen = any(
+        k in text_lower
+        for k in (
+            "apply to tax payment in installment",
+            "basis of installment",
+            "installment payment towards",
+            "liability breakdown",
+            "outstanding liability wise breakdown",
+            "installment details",
+            "generate payment schedule",
+            "reason for requesting to pay tax in installment",
+        )
+    )
+    is_efris_screen = (
+        "efris" in text_lower
+        or "efris" in clean_fn
+        or any(
+            k in text_lower
+            for k in (
+                "first-time registration",
+                "purpose of registration",
+                "registration effective date",
+                "fiscal document validation",
+                "validation history",
+                "detailed vat sales report",
+                "detailed vat purchase report",
+            )
+        )
+        or doc_type in ("receipt", "invoice")
+    )
+    if is_installment_screen:
+        detected_portal = "URA e-Services — Tax Payment in Installments Portal"
+        portal_url = "https://portal.ura.go.ug"
+        portal_category = "prn"
+    elif is_efris_screen:
         detected_portal = "URA EFRIS Invoicing & Fiscal Portal"
         portal_url = "https://efris.ura.go.ug"
         portal_category = "efris"
@@ -1586,6 +1656,7 @@ def diagnose_portal_screenshot(
     err_diag = diagnose_ura_error(text)
     issues_detected: list[str] = []
     steps: list[str] = []
+    screen_checklist: list[dict[str, str]] = []
 
     _ERROR_STATE_TITLES: dict[str, str] = {
         "EFRIS_INSUFFICIENT_STOCK": "EFRIS Error — Insufficient Stock Balance (EFRIS_INSUFFICIENT_STOCK)",
@@ -1621,6 +1692,276 @@ def diagnose_portal_screenshot(
             "Step 1: Click 'Back to Login' on the URA e-Services homepage.",
             "Step 2: Enter your 10-digit TIN and password. If prompted, verify the SMS OTP.",
             "Step 3: Once authenticated, re-open the filing or PRN form directly.",
+        ]
+    elif any(
+        k in text_lower
+        for k in (
+            "reason for requesting to pay tax",
+            "accepting payment of due tax in installment",
+            "full payment of 0.0",
+            "document to be uploaded",
+        )
+    ):
+        detected_state = "Tax Payment in Installments — Section F: Upload Documents & Statutory Declaration"
+        if "0.0" in text_lower:
+            issues_detected.append(
+                "The statutory installment declaration shows 'full payment of 0.0' because earlier liability/schedule sections (Sections C–E) have not generated a payment schedule yet, and the mandatory Reason* and supporting document fields are still empty."
+            )
+        else:
+            issues_detected.append(
+                "Section F requires attaching a supporting cash-flow/hardship document, entering the mandatory Reason* (up to 200 characters), and ticking the statutory undertaking checkbox before clicking Submit."
+            )
+        steps = [
+            "Step 1: Confirm that Sections C, D, and E above have loaded your outstanding tax liability and generated a valid installment schedule (so the down-payment amount is not 0.0).",
+            "Step 2: In Section F under 'Upload Document', select the Document Type (e.g. cash-flow statement, bank statement, or hardship letter) and click 'Browse...' to attach the file.",
+            "Step 3: Fill in the mandatory 'Reason for requesting to pay tax in installment*' text box (maximum 200 characters).",
+            "Step 4: Tick the red statutory undertaking checkbox confirming payment of all installments on or before their due dates, then click 'Submit'.",
+        ]
+        screen_checklist = [
+            {
+                "item": "Section C–E Liability & Schedule Calculation",
+                "status": "action_needed" if "0.0" in text_lower else "detected",
+                "detail": "Down-payment shows 0.0 — complete Sections C–E and click 'Generate Payment Schedule' first"
+                if "0.0" in text_lower
+                else "Installment payment schedule calculated",
+            },
+            {
+                "item": "Section F — Supporting Document Upload",
+                "status": "action_needed",
+                "detail": "Click 'Browse...' in Section F to attach cash-flow or hardship evidence",
+            },
+            {
+                "item": "Section F — Mandatory Installment Reason*",
+                "status": "action_needed",
+                "detail": "Enter 'Reason for requesting to pay tax in installment*' (max 200 chars)",
+            },
+            {
+                "item": "Section F — Statutory Undertaking Checkbox",
+                "status": "action_needed",
+                "detail": "Tick the red statutory declaration checkbox before clicking 'Submit'",
+            },
+        ]
+    elif any(
+        k in text_lower
+        for k in (
+            "section d",
+            "number of installments",
+            "installment start date",
+            "equal installment",
+            "varying installment",
+            "generate payment schedule",
+        )
+    ):
+        detected_state = "Tax Payment in Installments — Sections D & E: Liability Breakdown & Schedule Generation"
+        issues_detected.append(
+            "Outstanding Principle/Interest/Penalty Tax balances are currently 0 and mandatory schedule fields ('Tax Type*', 'Number of installments*', 'Installment Start Date*', 'Installment Type*') have not been completed yet."
+        )
+        steps = [
+            "Step 1: In Section D ('Outstanding Liability Wise Breakdown'), open the 'Tax Type*' dropdown (currently '---Select---') and select the applicable tax head after linking your assessment in Section C.",
+            "Step 2: Verify that 'Total Amount Due' and 'Remaining Balance to be paid in installments' populate in Section E.",
+            "Step 3: In Section E ('Installment Details'), enter 'Promised Amount By Taxpayer' (initial down-payment), 'Number of installments*', and 'Installment Start Date*' (DD/MM/YYYY).",
+            "Step 4: Select the 'Installment Type*' radio option and click 'Generate Payment Schedule' before proceeding to Section F.",
+        ]
+        screen_checklist = [
+            {
+                "item": "Section D — Tax Type* Dropdown",
+                "status": "action_needed",
+                "detail": "Select the applicable Tax Type* from the '---Select---' dropdown so liability balances populate",
+            },
+            {
+                "item": "Section E — Number of Installments*",
+                "status": "action_needed",
+                "detail": "Enter the requested number of installments (currently 0)",
+            },
+            {
+                "item": "Section E — Installment Start Date* & Type*",
+                "status": "action_needed",
+                "detail": "Select 'Installment Start Date*' (DD/MM/YYYY), choose 'Installment Type*', and click 'Generate Payment Schedule'",
+            },
+        ]
+    elif any(
+        k in text_lower
+        for k in (
+            "enter instrument/notice reference",
+            "instrument/notice reference number",
+            "search for return/assessment",
+            "tax type liability amount",
+        )
+    ):
+        detected_state = "Tax Payment in Installments — Section C: Liability Breakdown & Reference Lookup"
+        issues_detected.append(
+            "No Return or Assessment Reference Number has been linked in Section C ('Instrument/Notice reference number*' is empty)."
+        )
+        steps = [
+            "Step 1: Ensure 'Self Compliance' is selected in Section B ('Basis Of Installment').",
+            "Step 2: In Section C option 1 ('Enter Return/Assessment Reference Number'), enter your 'Instrument/Notice reference number*' and click 'Submit'.",
+            "Step 3: If you do not have the reference number offhand, click '2) Search for Return/Assessment' to look up your unpaid return or assessment by tax type and period.",
+            "Step 4: Once your tax liability loads, proceed to Section D and Section E to generate the installment payment schedule.",
+        ]
+        screen_checklist = [
+            {
+                "item": "Section C — Instrument/Notice Reference Number*",
+                "status": "action_needed",
+                "detail": "Enter your Return/Assessment Reference Number and click 'Submit', or click '2) Search for Return/Assessment'",
+            },
+        ]
+    elif any(
+        k in text_lower
+        for k in (
+            "self compliance",
+            "account/ledger balance",
+            "installment payment towards",
+            "apply to tax payment in installment",
+            "basis of installment",
+        )
+    ):
+        detected_state = "Tax Payment in Installments — Section B: Basis of Installment Selection"
+        issues_detected.append(
+            "You are at the start of the Installment Application wizard (Section B); 'Self Compliance' must be selected before loading your tax liabilities in Section C."
+        )
+        steps = [
+            "Step 1: In Section B ('Basis Of Installment'), select the 'Self Compliance' radio button under 'Installment Payment Towards*'.",
+            "Step 2: Expand Section C ('Liability Breakdown') and enter your Return or Assessment reference number (or search for it) and click 'Submit'.",
+            "Step 3: Complete Section D ('Tax Type*') and Section E ('Installment Details' -> 'Generate Payment Schedule'), then attach your supporting hardship document in Section F.",
+        ]
+        screen_checklist = [
+            {
+                "item": "Section B — Installment Payment Towards*",
+                "status": "action_needed",
+                "detail": "Select the 'Self Compliance' radio button under 'Installment Payment Towards*'",
+            },
+            {
+                "item": "Section C — Liability Breakdown",
+                "status": "action_needed",
+                "detail": "Proceed to Section C to link your Return or Assessment Reference Number",
+            },
+        ]
+    elif "validation history" in text_lower:
+        detected_state = "EFRIS Portal — Fiscal Document Validation History & VAT Reports"
+        issues_detected.append(
+            "The EFRIS Validation History screen and 'Reports' dropdown ('Detailed VAT Sales Report' / 'Detailed VAT Purchase Report') are open awaiting filter criteria or report selection."
+        )
+        steps = [
+            "Step 1: To inspect verified invoices or credit notes, enter the 'FDN/Credit Note No' or 'Validation Date' range on the Validation History screen and click 'Search'.",
+            "Step 2: To reconcile your monthly VAT return schedules, click 'Detailed VAT Sales Report' (output tax) or 'Detailed VAT Purchase Report' (input tax credit) from the open 'Reports' menu.",
+            "Step 3: Set the 'Application Date' range to match your filing period, click 'Search', and click 'Export All Records' to download the Excel/CSV schedule.",
+        ]
+        screen_checklist = [
+            {
+                "item": "EFRIS Validation History & Reports Menu",
+                "status": "detected",
+                "detail": "Validation History table and Reports dropdown ('Detailed VAT Sales/Purchase Report') visible",
+            },
+            {
+                "item": "Select VAT Report or Filter Validation History",
+                "status": "action_needed",
+                "detail": "Click 'Detailed VAT Sales/Purchase Report' in the menu or enter an FDN/Validation Date range and click 'Search'",
+            },
+        ]
+    elif any(
+        k in text_lower
+        for k in (
+            "detailed vat sales report",
+            "detailed vat purchase report",
+            "export all records",
+        )
+    ):
+        detected_state = "EFRIS Portal — Detailed VAT Sales / Purchase Report Reconciliation"
+        issues_detected.append(
+            "The EFRIS Detailed VAT Report table currently shows 'There is no data' for the selected date range or filter criteria."
+        )
+        steps = [
+            "Step 1: Verify whether you need 'Detailed VAT Sales Report' (output tax invoices issued) or 'Detailed VAT Purchase Report' (input tax invoices received) in the Reports menu.",
+            "Step 2: Adjust the 'Application Date' start and end dates to match the exact tax period you are reconciling, and clear any restrictive 'Invoice No' or 'Buyer's TIN' filters.",
+            "Step 3: Click 'Search' to load matching fiscalized transactions, then click 'Export All Records' to download the schedule for your VAT return.",
+        ]
+        screen_checklist = [
+            {
+                "item": "EFRIS Detailed VAT Report Filters",
+                "status": "detected",
+                "detail": "Application Date, Buyer's TIN, Invoice No, and Source filter fields visible",
+            },
+            {
+                "item": "Adjust Application Date Range & Search",
+                "status": "action_needed",
+                "detail": "Set 'Application Date' to the target tax period, click 'Search', then click 'Export All Records'",
+            },
+        ]
+    elif any(
+        k in text_lower
+        for k in (
+            "fiscal document validation",
+            "fiscal invoice/receipt validation",
+            "credit note validation",
+        )
+    ):
+        detected_state = "EFRIS Portal — Fiscal Document Validation Menu & Enrollment Screen"
+        issues_detected.append(
+            "The 'Fiscal Document Validation' navigation menu is open over an incomplete EFRIS First-time Registration form (Section B mandatory fields are still blank)."
+        )
+        steps = [
+            "Step 1: If you want to verify a supplier's fiscal invoice or credit note, click 'Fiscal Invoice/Receipt Validation' or 'Credit Note Validation' in the open menu and enter the 20-digit FDN.",
+            "Step 2: If you are completing EFRIS onboarding for this taxpayer, close the top menu and finish 'Section B: Purpose of Registration' on the page below.",
+            "Step 3: Select 'Registration Effective Date *', tick 'E-Invoicing' or 'EFDs' under 'Registration Type *', choose 'YES' or 'NO' under 'Other Branch', and click 'Submit' in Section C.",
+        ]
+        screen_checklist = [
+            {
+                "item": "Fiscal Document Validation Menu",
+                "status": "detected",
+                "detail": "Menu options visible: Fiscal Invoice/Receipt Validation, Credit Note Validation, Validation History",
+            },
+            {
+                "item": "Select Validation Option or Complete Section B Enrollment",
+                "status": "action_needed",
+                "detail": "Click a validation option in the menu, or fill 'Registration Effective Date *' and 'Registration Type *' below",
+            },
+        ]
+    elif any(
+        k in text_lower
+        for k in (
+            "first-time registration",
+            "purpose of registration",
+            "registration effective date",
+            "section c: supporting document",
+        )
+    ):
+        detected_state = "EFRIS First-Time Registration — Section B (Purpose of Registration) & Section C (Submit)"
+        issues_detected.append(
+            "Section A (Taxpayer's Details) is pre-filled from your URA TIN profile, but mandatory fields in Section B ('Registration Effective Date *', 'Registration Type *' EFDs/E-Invoicing, and 'Other Branch') must be completed before clicking 'Submit' in Section C."
+        )
+        steps = [
+            "Step 1: Verify the pre-filled profile in 'Section A: Taxpayer's Details' (TIN, Taxpayer's Name, NIN/BRN, Contact Number, Email Address, and Registered Tax Type: Income Tax, VAT).",
+            "Step 2: In 'Section B: Purpose of Registration', select your 'Registration Effective Date *' using the calendar picker.",
+            "Step 3: Under 'Registration Type *', tick at least one fiscalization channel — 'E-Invoicing' (web portal / system-to-system API) and/or 'EFDs' (Electronic Fiscal Devices).",
+            "Step 4: Under 'Other Branch' ('Do you have any additional place of Business?'), select 'YES' or 'NO'.",
+            "Step 5: In 'Section C: Supporting Document', optionally click 'Upload' (PDF, DOC, DOCX, JPG, PNG, BMP) if supporting documents are required, then click 'Submit'.",
+        ]
+        screen_checklist = [
+            {
+                "item": "Section A — Taxpayer's Details (Pre-filled)",
+                "status": "detected",
+                "detail": "Taxpayer TIN, Business Name, NIN/BRN, Contact Number, Email, and Registered Tax Types loaded",
+            },
+            {
+                "item": "Section B — Registration Effective Date *",
+                "status": "action_needed",
+                "detail": "Pick the mandatory Registration Effective Date * using the calendar control",
+            },
+            {
+                "item": "Section B — Registration Type * (EFDs / E-Invoicing)",
+                "status": "action_needed",
+                "detail": "Tick 'E-Invoicing' and/or 'EFDs' checkbox",
+            },
+            {
+                "item": "Section B — Other Branch (YES / NO)",
+                "status": "action_needed",
+                "detail": "Select 'YES' or 'NO' for 'Do you have any additional place of Business?'",
+            },
+            {
+                "item": "Section C — Supporting Document & Submit",
+                "status": "action_needed",
+                "detail": "Optionally upload supporting file and click 'Submit' to complete EFRIS enrollment",
+            },
         ]
     elif doc_type in ("receipt", "invoice"):
         detected_state = "EFRIS Invoice & Fiscal Receipt Validation"
@@ -1793,7 +2134,11 @@ def diagnose_portal_screenshot(
 
     from .tools.portal_navigator_data import portal_requires_auth
 
-    if "tax clearance" in text_lower or "tcc" in text_lower or "tcc" in clean_fn:
+    if is_installment_screen:
+        portal_key = "prn_payments"
+    elif is_efris_screen:
+        portal_key = "efris"
+    elif "tax clearance" in text_lower or re.search(r"\btcc\b", text_lower) or "tcc" in clean_fn:
         portal_key = "tax_clearance"
     elif "objection" in text_lower or "section 24" in text_lower or doc_type == "assessment":
         portal_key = "objection_appeals"
@@ -1844,6 +2189,13 @@ def diagnose_portal_screenshot(
             "objection",
             "fiscal receipt",
             "assessment",
+            "installment",
+            "first-time registration",
+            "purpose of registration",
+            "liability breakdown",
+            "validation history",
+            "vat sales report",
+            "vat purchase report",
         )
     )
     is_truncated_error = bool(
@@ -1878,7 +2230,9 @@ def diagnose_portal_screenshot(
     if fields.get("nins"):
         prefill_state["nin"] = str(fields["nins"][0])
     if fields.get("prns"):
-        prefill_state["prn"] = str(fields["prns"][0])
+        valid_prns = [str(p) for p in fields["prns"] if not re.fullmatch(r"2567\d{8}", str(p))]
+        if valid_prns:
+            prefill_state["prn"] = valid_prns[0]
     if fields.get("amounts"):
         cleaned_amt = re.sub(r"[^\d.]", "", str(fields["amounts"][0]))
         if cleaned_amt:
@@ -1892,23 +2246,29 @@ def diagnose_portal_screenshot(
     checklist: list[dict[str, str]] = []
     if prefill_state.get("tin"):
         checklist.append({"item": "10-Digit Taxpayer TIN", "status": "detected", "detail": f"Detected TIN {prefill_state['tin']}"})
-    elif portal_key in ("prn_payments", "return_filing", "efris", "tax_clearance", "dts"):
+    elif portal_key in ("prn_payments", "return_filing", "efris", "tax_clearance", "dts") and not screen_checklist:
         checklist.append({"item": "10-Digit Taxpayer TIN", "status": "action_needed", "detail": "Enter your 10-digit URA TIN in the taxpayer field"})
+
+    if prefill_state.get("ursb_brn"):
+        checklist.append({"item": "URSB Business Registration Number (BRN)", "status": "detected", "detail": f"Detected BRN {prefill_state['ursb_brn']}"})
 
     if prefill_state.get("prn"):
         checklist.append({"item": "Payment Registration Number (PRN)", "status": "detected", "detail": f"Detected PRN {prefill_state['prn']}"})
-    elif portal_key == "prn_payments" and not err_diag:
+    elif portal_key == "prn_payments" and not err_diag and not screen_checklist:
         checklist.append({"item": "Payment Mode & PRN Generation", "status": "action_needed", "detail": "Select Bank or Mobile Money and click 'Generate PRN'"})
 
     if prefill_state.get("nin"):
         checklist.append({"item": "NIRA National ID (NIN)", "status": "detected", "detail": f"Detected NIN {prefill_state['nin']}"})
-    elif portal_key == "tin_registration" and "company" not in text_lower:
+    elif portal_key == "tin_registration" and "company" not in text_lower and not screen_checklist:
         checklist.append({"item": "NIRA National ID (NIN)", "status": "action_needed", "detail": "Enter your 14-character NIRA NIN (starting with CM, CF, or CR)"})
 
     if prefill_state.get("amount_ugx"):
         checklist.append({"item": "Declared / Payment Amount (UGX)", "status": "detected", "detail": f"Detected UGX {prefill_state['amount_ugx']}"})
-    elif portal_key in ("prn_payments", "return_filing"):
+    elif portal_key in ("prn_payments", "return_filing") and not screen_checklist:
         checklist.append({"item": "Declared / Payment Amount (UGX)", "status": "action_needed", "detail": "Enter the numeric UGX amount without commas or currency symbols"})
+
+    if screen_checklist:
+        checklist.extend(screen_checklist)
 
     if err_diag is not None:
         checklist.insert(
