@@ -1015,4 +1015,26 @@ def test_phase10_screenshot_analysis_error_resolution_and_completion_checklist()
     assert "Section F" in sg_inst["detected_state"]
     assert "0.0" in sg_inst["what_needs_to_be_done"]
 
+    # 6. Fuzzy PRN expired with inline PRN number, TCC application rejected, 5,000-space commodity padding,
+    #    and Resolve <ERROR_CODE> with <spec.title> intent resolution
+    from app.portal_copilot import diagnose_ura_error, evaluate_turn
+
+    prn_exp = diagnose_ura_error("URA e-Tax Payment Portal — PRN 226000112233 has expired after 21 days.")
+    assert prn_exp is not None and prn_exp["error_code"] == "PRN_EXPIRED_OR_INVALID"
+    tcc_blk = diagnose_ura_error("URA e-Services — TCC application rejected due to outstanding tax arrears.")
+    assert tcc_blk is not None and tcc_blk["error_code"] == "TCC_COMPLIANCE_BLOCK"
+    padded_ents = extract_task_entities("EFRIS-204 insufficient stock for commodity" + (" " * 5000) + "50202301")
+    assert padded_ents.get("commodity_code") == "50202301"
+    prn_intent = detect_portal_task_intent("Resolve PRN_EXPIRED_OR_INVALID with Reactivate Expired Payment Registration Number (PRN)")
+    assert prn_intent is not None and prn_intent.task_id == "payment_reactivate_prn"
+    err_turn = evaluate_turn(
+        message="I am getting error EFRIS-204 insufficient stock balance for commodity 50202301 on TIN 1059787194",
+        conversation_id="conv-err-chk-1",
+    )
+    assert err_turn is not None and err_turn.card_type == "error_diagnosis"
+    assert err_turn.payload.get("what_needs_to_be_done")
+    assert err_turn.payload.get("checklist")
+    assert err_turn.payload.get("preserved_fields", {}).get("tin") == "1059787194"
+
+
 

@@ -1265,12 +1265,12 @@ _DTS_ORDER_ID_RE = re.compile(r"\b(DTS-ORD-\d{4}-\d{3,6})\b", re.IGNORECASE)
 def _extract_commodity_code(text: str) -> str:
     """Linear-time token scanner for 8-digit EFRIS/UNSPSC commodity codes."""
     tokens = (
-        text[:2000]
+        text[:16000]
         .replace(":", " ")
         .replace("#", " ")
         .replace("=", " ")
         .replace("-", " ")
-        .split()
+        .split()[:500]
     )
     trigger_words = {"commodity", "unspsc", "commodity_code", "item"}
     for i, raw_tok in enumerate(tokens):
@@ -1489,6 +1489,11 @@ def detect_portal_task_intent(
             is_guidance_or_portal_link_request=is_how_to_question,
         )
 
+    if low.startswith("resolve "):
+        for cat_spec in PORTAL_TASK_CATALOG.values():
+            if cat_spec.title.lower() in low or cat_spec.task_id.lower() in low:
+                return _intent(cat_spec.task_id, cat_spec.portal_key, 0.96)
+
     # 1. PRN Generation (Tier 2)
     if any(
         phrase in low
@@ -1524,7 +1529,7 @@ def detect_portal_task_intent(
             "reactivate my expired prn",
             "renew expired prn",
         )
-    ):
+    ) or ("prn" in low and "reactivate" in low):
         return _intent("payment_reactivate_prn", "prn_payments", 0.95)
 
     # 3. PRN Payment Status Check (Tier 1)
@@ -2565,7 +2570,7 @@ _URA_ERROR_PATTERNS: tuple[tuple[str, re.Pattern[str], str, str, tuple[str, ...]
     ),
     (
         "EFRIS_NOT_ENROLLED",
-        re.compile(r"\b(?:err_tin_not_enrolled|efris[-_]?101|not\s+enrolled\s+for\s+efris|device\s+not\s+initialized)\b", re.IGNORECASE),
+        re.compile(r"\b(?:err_tin_not_enrolled|efris[-_]?(?:101|109)|not\s+enrolled\s+for\s+efris|device\s+not\s+initialized)\b", re.IGNORECASE),
         "The seller TIN is not yet enrolled or activated on EFRIS, or the virtual/EFD device has not been initialized.",
         "TPCA Cap. 343 s. 73A (Electronic Fiscal Receipting and Invoicing)",
         (
@@ -2587,7 +2592,7 @@ _URA_ERROR_PATTERNS: tuple[tuple[str, re.Pattern[str], str, str, tuple[str, ...]
     ),
     (
         "PRN_EXPIRED_OR_INVALID",
-        re.compile(r"\b(?:prn_expired|prn\s+(?:has\s+)?expired|expired\s+prn|invalid\s+or\s+expired\s+prn)\b", re.IGNORECASE),
+        re.compile(r"\b(?:prn_expired|prn(?:\s+2\d{9,12})?\s+(?:has\s+|is\s+)?expired|expired\s+prn|invalid\s+or\s+expired\s+prn)\b", re.IGNORECASE),
         "Unpaid URA Payment Registration Numbers (PRNs) expire automatically after 21 days.",
         "TPCA Cap. 343 s. 37 (Payment Registration Slip Validity)",
         (
@@ -2609,7 +2614,7 @@ _URA_ERROR_PATTERNS: tuple[tuple[str, re.Pattern[str], str, str, tuple[str, ...]
     ),
     (
         "TCC_COMPLIANCE_BLOCK",
-        re.compile(r"\b(?:err_tcc_arrears|tcc\s+rejected|outstanding\s+arrears|unfiled\s+returns\s+detected)\b", re.IGNORECASE),
+        re.compile(r"\b(?:err_tcc_arrears|tcc(?:\s+application)?\s+rejected|outstanding(?:\s+tax)?\s+arrears|unfiled\s+returns\s+detected)\b", re.IGNORECASE),
         "A Tax Clearance Certificate (TCC) requires all due returns to be filed and any outstanding tax liabilities to be settled or covered by an approved instalment agreement.",
         "TPCA Cap. 343 s. 43 (Tax Clearance Certificate) & s. 40 (Payment by Instalments)",
         (
@@ -3011,6 +3016,47 @@ def evaluate_turn(
             f"**Statutory Basis**: {msg_diag['statutory_citation']}\n\n"
             f"**How to Resolve**:\n{steps_text}"
         )
+        merged_err_ents = {**history_entities, **current_turn_entities}
+        err_checklist: list[dict[str, str]] = [
+            {
+                "item": f"Resolve {msg_diag['error_code']}",
+                "status": "action_needed",
+                "detail": (msg_diag.get("resolution_steps") or [msg_diag["root_cause"]])[0],
+            }
+        ]
+        if merged_err_ents.get("tin"):
+            err_checklist.append(
+                {
+                    "item": "10-Digit Taxpayer TIN",
+                    "status": "detected",
+                    "detail": f"Detected TIN {merged_err_ents['tin']}",
+                }
+            )
+        if merged_err_ents.get("commodity_code"):
+            err_checklist.append(
+                {
+                    "item": "EFRIS Commodity Code",
+                    "status": "detected",
+                    "detail": f"Detected Commodity {merged_err_ents['commodity_code']}",
+                }
+            )
+        if merged_err_ents.get("prn"):
+            err_checklist.append(
+                {
+                    "item": "Payment Registration Number (PRN)",
+                    "status": "detected",
+                    "detail": f"Detected PRN {merged_err_ents['prn']}",
+                }
+            )
+        err_prompts: list[str] = []
+        if rem_spec is not None:
+            err_prompts.append(f"Resolve {msg_diag['error_code']} with {rem_spec.title}")
+        if merged_err_ents.get("tin"):
+            err_prompts.append(f"Check tax obligations for TIN {merged_err_ents['tin']}")
+        err_what_needs = (
+            f"{msg_diag['root_cause']} Next step: "
+            f"{(msg_diag.get('resolution_steps') or ['Follow the guided recovery steps.'])[0]}"
+        )
         return PortalCopilotOutcome(
             card_type="error_diagnosis",
             payload={
@@ -3023,6 +3069,10 @@ def evaluate_turn(
                     f"Resolve with {rem_spec.title}" if rem_spec else f"Open {rem_portal_info['name']}"
                 ),
                 "diagnosis_summary": msg_diag["root_cause"],
+                "what_needs_to_be_done": err_what_needs,
+                "checklist": err_checklist,
+                "recommended_prompts": err_prompts,
+                "preserved_fields": {k: str(v) for k, v in merged_err_ents.items() if v},
                 "error_diagnosis": dict(msg_diag),
                 **msg_diag,
                 "remediation_title": rem_spec.title if rem_spec else "",
