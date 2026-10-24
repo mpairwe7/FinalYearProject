@@ -10,6 +10,9 @@ on:
       - "App/backend/**"
       - "App/frontend/**"
       - "docs/security/threat-model/**"
+      - "governance/**"
+      - "plugins/**"
+      - ".semgrep/**"
       - "scripts/validate-risk-register.py"
       - "threat-model/**"
       - ".github/workflows/threat-model.yml"
@@ -22,6 +25,9 @@ on:
       - "App/backend/**"
       - "App/frontend/**"
       - "docs/security/threat-model/**"
+      - "governance/**"
+      - "plugins/**"
+      - ".semgrep/**"
       - "scripts/validate-risk-register.py"
       - "threat-model/**"
       - ".github/workflows/threat-model.yml"
@@ -83,7 +89,7 @@ jobs:
 
       - name: Validate risk register
         id: validate
-        run: python scripts/validate-risk-register.py --register ${{ env.RISK_REGISTER }}
+        run: python scripts/validate-risk-register.py --register ${{ env.RISK_REGISTER }} --fail-on-critical 0
 
       - name: Gate on critical risks
         if: steps.validate.outputs.open_critical != '0'

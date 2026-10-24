@@ -672,10 +672,10 @@ def continue_calculation(saved: dict[str, Any], message: str) -> dict[str, Any] 
                         updated = True
                 elif tool == "calculate_vat":
                     if re.search(r"\binclusive\b|\bincludes?\s+vat\b", text, re.IGNORECASE):
-                        params["direction"] = "inclusive"
+                        params["direction"] = "extract"
                         updated = True
                     elif re.search(r"\bexclusive\b|\bexcludes?\s+vat\b", text, re.IGNORECASE):
-                        params["direction"] = "exclusive"
+                        params["direction"] = "add"
                         updated = True
                 elif tool == "calculate_rental_tax":
                     if re.search(r"\b(?:company|corporate|corporation)\b", text, re.IGNORECASE):

@@ -254,3 +254,25 @@ rules:
       category: security
       cwe: "CWE-359"
       confidence: MEDIUM
+
+  - id: ura-httpx-follow-redirects-true
+    pattern-either:
+      - pattern: httpx.Client(..., follow_redirects=True, ...)
+      - pattern: httpx.AsyncClient(..., follow_redirects=True, ...)
+      - pattern: httpx.post(..., follow_redirects=True, ...)
+      - pattern: httpx.get(..., follow_redirects=True, ...)
+    paths:
+      include:
+        - "App/backend/app/mcp/*"
+        - "App/backend/app/web_research.py"
+        - "App/backend/app/publications.py"
+    message: >
+      follow_redirects=True on outbound MCP, web research, or publication
+      HTTP calls can leak bearer tokens or bypass SSRF pre-connect DNS IP
+      validation (CWE-918 / OWASP MCP01). Keep follow_redirects=False.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-918"
+      confidence: HIGH

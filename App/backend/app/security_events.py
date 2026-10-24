@@ -26,8 +26,38 @@ logger = logging.getLogger("app.security")
 EVENT_BY_STATUS = {
     401: "authn_login_fail",
     403: "authz_fail",
+    413: "input_validation_payload_too_large",
     429: "excess_rate_limit_exceeded",
 }
+
+#: Bounded MCP security event kinds (OWASP ASVS 5.0 V16 / OWASP MCP Top 10).
+MCP_SECURITY_EVENT_KINDS: frozenset[str] = frozenset(
+    {
+        "mcp_integrity_fail",
+        "mcp_output_blocked",
+        "mcp_idempotency_conflict",
+        "mcp_request_state_fail",
+    }
+)
+
+
+def record_mcp_security_event(
+    kind: str,
+    *,
+    tool_name: str = "",
+    namespace: str = "",
+    reason: str = "",
+    actor: str = "",
+) -> None:
+    """Record a bounded MCP boundary security event."""
+    safe_kind = kind if kind in MCP_SECURITY_EVENT_KINDS else "mcp_integrity_fail"
+    record_security_event(
+        safe_kind,
+        reason=reason,
+        tool_name=tool_name,
+        namespace=namespace,
+        actor=actor,
+    )
 
 
 def record_security_event(event: str, *, reason: str = "", **fields: Any) -> None:

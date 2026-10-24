@@ -173,6 +173,14 @@ def coerce_arguments_to_schema(
                 if len(ci_matches) == 1:
                     coerced[key] = ci_matches[0]
                     continue
+                if set(choices) == {"add", "extract"}:
+                    low_val = stripped.lower().replace("-", "_")
+                    if low_val in ("inclusive", "vat_inclusive"):
+                        coerced[key] = "extract"
+                        continue
+                    if low_val in ("exclusive", "vat_exclusive"):
+                        coerced[key] = "add"
+                        continue
 
             # 2. Numeric coercion ("number" or "integer" when "string" is not declared)
             if ("number" in type_set or "integer" in type_set) and "string" not in type_set:

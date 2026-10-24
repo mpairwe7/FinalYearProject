@@ -53,9 +53,13 @@ routes in production.
 | Payment system | Sample PRNs, status, and checkout records; no bank settlement or URA ledger update |
 
 Mutating plugin tools require a proposal, explicit confirmation, and an
-idempotency key at the dispatch boundary. This protects simulated state from an
-unreviewed agent call; it does not turn a simulator action into a real filing,
-registration, customs release, or payment.
+idempotency key at the dispatch boundary. Both `MCPClient` and
+`plugins/server.py` verify the SHA-256 digest of the canonical arguments on
+replay (`_mcp_args_sha256` / `_args_sha256`) and reject key reuse with mutated
+parameters (`error="idempotency_key_conflict"`, `ADR-0015`). This protects
+simulated state from an unreviewed agent call or parameter-tampered replay; it
+does not turn a simulator action into a real filing, registration, customs
+release, or payment.
 
 ## Customer journeys
 

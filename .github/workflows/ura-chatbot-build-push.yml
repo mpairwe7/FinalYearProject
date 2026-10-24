@@ -252,7 +252,7 @@ jobs:
   # docker-publish.yml (Stage 3: deploy-crane-cloud, gated on needs.build).
   # ---------------------------------------------------------------------------
   dispatch-deploy:
-    needs: build
+    needs: [build, sign]
     if: github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -283,10 +283,10 @@ jobs:
   # one is indistinguishable from "the fix never landed". A corpus change is
   # invisible there until the pin moves, because the image bakes its Qdrant
   # collection at build time. Roll it on the same signal Crane Cloud deploys on:
-  # a green build of dev.
+  # a green build + Cosign/SLSA signature of dev.
   # ---------------------------------------------------------------------------
   dispatch-hf-space-roll:
-    needs: build
+    needs: [build, sign]
     if: github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
     permissions:

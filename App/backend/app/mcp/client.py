@@ -35,8 +35,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..resilience import CircuitBreaker
+from ..security_events import record_mcp_security_event
 from ..tracing import trace_tool_call
-from .mrtr import parse_input_required, unwrap_request_state
+from .mrtr import parse_input_required, unwrap_request_state, wrap_request_state
 from .policy import authorize_tool_call
 from .transport import (
     MCP_PROTOCOL_VERSION,
@@ -700,6 +701,13 @@ class MCPClient:
 
         integrity_errors = self._verify_and_pin_descriptor(descriptor)
         if integrity_errors:
+            record_mcp_security_event(
+                "mcp_integrity_fail",
+                tool_name=name,
+                namespace=namespace,
+                reason=integrity_errors[0],
+                actor=user_id,
+            )
             return finish(
                 {
                     "ok": False,
@@ -797,6 +805,13 @@ class MCPClient:
             if cached is not None:
                 cached_digest = cached.pop("_mcp_args_sha256", None)
                 if cached_digest and cached_digest != args_digest:
+                    record_mcp_security_event(
+                        "mcp_idempotency_conflict",
+                        tool_name=name,
+                        namespace=namespace,
+                        reason="idempotency_key_reused_with_different_arguments",
+                        actor=user_id,
+                    )
                     return finish(
                         {
                             "ok": False,
@@ -833,6 +848,13 @@ class MCPClient:
                 )
                 is None
             ):
+                record_mcp_security_event(
+                    "mcp_request_state_fail",
+                    tool_name=name,
+                    namespace=namespace,
+                    reason="request_state_verification_failed",
+                    actor=user_id,
+                )
                 return finish(
                     {
                         "ok": False,
@@ -894,10 +916,16 @@ class MCPClient:
         if not isinstance(raw, dict):
             raw = {"ok": True, "result": raw}
         required = parse_input_required(raw)
-        if required is not None and not input_responses:
-            raw = required
-        elif required is not None and input_responses:
-            # Already retried with responses; do not loop.
+        if required is not None:
+            req_state = required.get("requestState")
+            if isinstance(req_state, dict) and ("payload" not in req_state or "alg" not in req_state):
+                required["requestState"] = wrap_request_state(
+                    req_state,
+                    tool_name=name,
+                    namespace=namespace,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                )
             raw = required
         raw.setdefault("policy", policy)
         # An elicitation is not a finished calculation, so it is not checked
@@ -926,6 +954,13 @@ class MCPClient:
                         "MCP result for %s blocked by output safety screen: %s",
                         name,
                         hard_violations[:3],
+                    )
+                    record_mcp_security_event(
+                        "mcp_output_blocked",
+                        tool_name=name,
+                        namespace=namespace,
+                        reason=hard_violations[0],
+                        actor=user_id,
                     )
                     raw = {
                         "ok": False,
@@ -1061,6 +1096,18 @@ class MCPClient:
 
         if isinstance(resume_from, dict):
             start_idx = int(resume_from.get("halted_at_step") or 0)
+            if start_idx < 0 or start_idx >= len(steps):
+                return {
+                    "ok": False,
+                    "status": "invalid_step",
+                    "halted_at_step": start_idx,
+                    "error": f"Invalid resume_from halted_at_step ({start_idx}) for chain of length {len(steps)}",
+                    "completed_steps": [],
+                    "namespaces_traversed": [],
+                    "shared_context": shared_context,
+                    "audit_trail": [],
+                    "total_duration_ms": round((time.perf_counter() - t0) * 1000, 2),
+                }
             shared_context.update(resume_from.get("shared_context") or {})
             for prev_rec in resume_from.get("completed_steps") or []:
                 if not isinstance(prev_rec, dict):
@@ -1146,7 +1193,10 @@ class MCPClient:
                             "total_duration_ms": round((time.perf_counter() - t0) * 1000, 2),
                         }
 
-            descriptor, _ = self._descriptor(tool_name)
+            try:
+                descriptor, _ = self._descriptor(tool_name)
+            except TransportError:
+                descriptor = None
             if descriptor is not None:
                 input_schema = descriptor.get("inputSchema") or {}
                 props = (input_schema.get("properties") or {}) if isinstance(input_schema, dict) else {}

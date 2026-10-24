@@ -85,27 +85,42 @@ of whether the tool should be offered at all. A test asserts the two
 agree for every registered tool, so the list the model is shown cannot
 drift from the list it is allowed to use.
 
-### 3. Argument validation
+### 3. Argument coercion, validation & output schema enforcement
 
-Arguments are checked against the tool's JSON Schema 2020-12
+Before `authorize_tool_call` runs, `coerce_arguments_to_schema` losslessly
+coerces unambiguous `UGX`-prefixed/thousands-grouped numeric strings
+(`"UGX 4,500,000"`), boolean strings (`"true"`/`"false"`), and
+differently-cased enum strings (`"Resident"` $\rightarrow$ `"resident"`), while
+leaving foreign currencies (`"USD 2,000"`), percentages (`"15%"`), or malformed
+numbers untouched. Running coercion before authorization ensures that string
+amounts such as `"UGX 60,000,000"` are evaluated against
+`MAX_TRANSACTION_CEILING_UGX`.
+
+Arguments are then checked against the tool's JSON Schema 2020-12
 `inputSchema` before dispatch, so a bad call becomes
-`monthly_gross: 'a lot' is not of type 'number'` instead of a `TypeError`
-from inside the tool. Calculator schemas set
-`additionalProperties: false`, so a hallucinated argument is caught
+`monthly_gross: 'a lot' is not of type 'number'` alongside structured
+`repair_hints` (`missing_required`, `unexpected_fields`, `expected_types`,
+`allowed_enums`) instead of a `TypeError` from inside the tool. Calculator
+schemas set `additionalProperties: false`, so a hallucinated argument is caught
 rather than silently ignored.
 
-Results are checked against `outputSchema` too, but mismatches are
-**logged, not raised** — a server adding a field should not break a
-working answer, though the drift must be visible.
+Results are validated against `outputSchema` (`result_matches_schema`) and
+screened by `screen_tool_result` (`ADR-0003`, `ADR-0015`): any schema drift or
+hard output violation (Markdown-image exfiltration link, leaked PEM key, DB
+connection password, bearer JWT, or `sk-`/`ghp_`/`hf_` token) is refused at the
+boundary (`ok: false`) before reaching the model.
 
-### 4. Idempotency
+### 4. Idempotency & conflict detection
 
 A call carrying an `idempotency_key` stores its result keyed by
-`tenant:tool:key`. A retry returns the stored result with
-`replayed=True` and never reaches the transport. Keys are tenant-scoped
-so they cannot collide across tenants. Critical tools require a key
-(`requires_confirmation` implies it), which is what stops a retried
-filing submission from acting twice.
+`tenant:user:tool:key` together with the SHA-256 digest of the canonical
+arguments (`_mcp_args_sha256`). A retry with the same arguments returns the
+stored result with `replayed=True` and never reaches the transport. Reusing the
+same `idempotency_key` with different arguments fails closed with
+`error="idempotency_key_conflict"` (per the IETF `Idempotency-Key`
+specification, `ADR-0015` / `G250`). Critical tools require a key
+(`requires_confirmation` implies it), which stops a retried filing or payment
+submission from acting twice.
 
 ### 5. Circuit breaking
 
@@ -228,11 +243,11 @@ demo data and are not offered in production. See
 - **Distributed Sliding-Window Velocity Limiter**: Mutating critical tool actions are capped at 10 actions/hour per user (`MCP_MAX_CRITICAL_ACTIONS_PER_HOUR`). Enforced via Redis sorted sets (`mcp:velocity:{user_id}`) with resilient fallback to thread-safe in-process sliding windows. Tool discovery probes (`discovery-probe`) are exempt to prevent discovery from consuming runtime quotas.
 - **Token Vaulting (`TokenVault`)**: All sensitive API keys, bearer tokens, and connector credentials stored in state or databases are encrypted using AES-256-GCM envelope encryption with HKDF key derivation.
 - **Saga Distributed Compensation**: Connectors implement `SystemConnector.compensate()`, allowing coordinated rollback of multi-action transactional sagas when downstream steps fail.
-- **Strict Output Schemas**: All 72 registered tools across 18 namespaces declare explicit `output_schema` contracts guaranteeing the `ok: bool` property and strongly-typed return keys. Client-side and wire-server validation verifies responses and logs drift before passing results to the LLM.
-- **Canonical Tool Descriptor SHA-256 Pinning & Rug-Pull Guard (`OWASP MCP03/MCP08`, `ADR-0003`)**: Every MCP tool descriptor carries `ug.go.ura.chatbot/descriptorSha256` computed over `(name, description, inputSchema, outputSchema, annotations, securityMeta)`. `MCPClient` verifies descriptor hashes, scans descriptions for prompt-injection poisoning, and pins hashes per tool to block mid-session remote rug-pull mutations.
-- **Indirect Prompt Injection & Credential Screening on Tool Outputs (`OWASP MCP06 / AISVS 10.4.2`)**: `screen_tool_result` inspects all tool return strings before they enter the model context, quarantining outputs that contain prompt-override directives, chat-template control tokens, or leaked bearer/API credentials.
-- **Verified Caller Identity & Tenant Injection (`OWASP MCP04/MCP07`)**: `InProcessTransport` and `StatelessMCPServer` propagate verified `_meta` identity (`userId`, `tenantId`) into `ToolRegistry.call`, which binds them into `tool.execute` without allowing untrusted LLM arguments to spoof another taxpayer or tenant.
-- **Tool RAG Dense Auto-Injection**: During FastAPI startup (`lifespan`), the dense semantic embedder from `HybridRetriever` is auto-injected into `tool_rag.py`, enabling cosine similarity retrieval for tool selection alongside multilingual stem expansion.
+- **Strict Output Schemas**: All 72 registered tools across 18 namespaces declare explicit `output_schema` contracts guaranteeing the `ok: bool` property and strongly-typed return keys. Client-side and wire-server validation verifies responses and refuses drifted payloads (`ok: false`) before passing results to the LLM.
+- **Canonical Tool Descriptor SHA-256 Pinning & Rug-Pull Guard (`OWASP MCP03/MCP08`, `ADR-0003`)**: Every MCP tool descriptor carries `ug.go.ura.chatbot/descriptorSha256` computed over `(name, description, inputSchema, outputSchema, annotations, securityMeta)`. `MCPClient` verifies descriptor hashes, scans descriptions for prompt-injection poisoning (including Markdown-image exfiltration links), and pins hashes per tool to block mid-session remote rug-pull mutations.
+- **Indirect Prompt Injection & Credential Screening on Tool Outputs & Resources (`OWASP MCP06 / AISVS 10.4.2`, `ADR-0015`)**: `screen_tool_result` inspects all tool and resource outputs before they enter the model context, quarantining outputs that contain prompt-override directives, chat-template control tokens, Markdown-image exfiltration links, PEM private keys, DB password URIs, or leaked bearer/API/VCS/HF credentials. `validate_resource_uri` enforces scheme allowlisting (`ura`, `efris`, `dts`, `digital_tax_stamps`, `ursb`, `bwims`, `tin`, `tin_registration`, `payment`, `payments`, `payment_system`, `wire`) and blocks path traversal (`..`, `%2e%2e`).
+- **Verified Caller Identity, Consent & Confirmation Propagation (`OWASP MCP04/MCP07`, `ADR-0015`)**: `request_meta()` propagates `ug.go.ura.chatbot/{tenantId,userId,userRole,callId,confirmed,idempotencyKey,grantedPurposes}` and `InProcessTransport` / `StatelessMCPServer` honour them only when `trusted_identity=True`, binding verified caller identity into `ToolRegistry.call` without allowing untrusted LLM arguments to spoof another taxpayer or tenant.
+- **ToolAthlon Long-Horizon Multi-Server Chain Executor & 5-Locale Diversified Tool RAG (`ADR-0015`, `G250`)**: `MCPClient.execute_tool_chain(..., resume_from=...)` executes multi-step cross-namespace workflows with explicit `bind_from` slot validation (requiring explicit `bind_from` or `arguments` for financial/identity fields `amount_ugx`, `amount`, `tin`, `taxpayer_tin`, `taxpayer_name`, `prn`), fail-closed confirmation/elicitation halting, and multi-turn `resume_from` continuation. `ToolRAGSelector` indexes parameter property keys and namespaces, expands 5-locale (`en`, `lg`, `sw`, `nyn`, `ach`) tax and connector stems, and applies 2-pass namespace diversity (`diversify_namespaces=True`).
 - **W3C Distributed Traceability**: Outbound HTTP tool invocations inject standard W3C `traceparent` headers for distributed OpenTelemetry GenAI request tracking.
 
 ## The `mcp_tax_calculator` server
@@ -285,9 +300,7 @@ address.
   (`vat_calculation_guide`, `paye_withholding_guide`).
 - **Connection Pooling.** `HttpTransport` maintains persistent `httpx.Client`
   connection pools per namespace to minimize SSL/TCP overhead.
-- **Multilingual Tool RAG.** `ToolRAGSelector` expands Ugandan multilingual
-  stems (Luganda & Swahili terms for tax, duty, customs, salaries, withholding)
-  to ensure high retrieval recall across local languages.
+- **Multilingual & Namespace-Diversified Tool RAG (`ADR-0005`, `ADR-0015`).** `ToolRAGSelector` expands 5-locale Ugandan stems (`en`, `lg`, `sw`, `nyn`, `ach` terms for tax, duty, customs, salaries, withholding, Cross-MDA NTR, and enterprise connectors `efris`/`dts`/`ursb`/`bwims`), indexes parameter property names and namespaces, and applies 2-pass namespace diversity (`diversify_namespaces=True`) so multi-server queries preserve candidates across all matched namespaces.
 - **Document Audit Tool.** Added `audit_tax_document` to `tax_calculator`,
   exposing automated financial arithmetic reconciliation and statutory tax rate
   auditing to MCP clients.
@@ -298,19 +311,25 @@ address.
 - **Full JSON Schema 2020-12** on input and output, and
   `structuredContent` on results alongside a human-readable `content`
   text block. Every registered tool sets `additionalProperties: false`.
-- **Multi Round-Trip Requests** replace server-initiated requests.
+- **Multi Round-Trip Requests (`mrtr.py`, `ADR-0005`, `ADR-0015`)** replace server-initiated requests.
   `HttpTransport` normalizes `inputRequests` (legacy `elicitations`
-  still parsed). `requestState` is HMAC-SHA256 when
-  `MCP_REQUEST_STATE_SECRET` is set. The agent loop emits
+  still parsed). `wrap_request_state` and `unwrap_request_state` sign and verify
+  `payload` + optional `_binding` (`tool_name`, `namespace`, `tenant_id`,
+  `user_id`, `iat`, `exp`, default 1800s TTL) with HMAC-SHA256 (`MCP_REQUEST_STATE_SECRET`,
+  mandatory in production; when unset outside production, `wrap_request_state`
+  emits `alg: "none"`, which provides no authenticity guarantee and is refused
+  whenever a secret is configured or `APP_ENV=production`). The agent loop emits
   `tool_call.input_required` and retries once when the caller supplies
   `inputResponses`.
 - **Unknown tools** return `Unknown tool: <name>` only — they do not
   enumerate the registry.
 - **Circuit breaker** trips on transport failures, not on tool-level
   `ok: false` (bad taxpayer input is not a sick server).
-- **Idempotency** is tenant-scoped. When `REDIS_URL` is set the replay
-  cache is shared across replicas (`MCP_IDEMPOTENCY_TTL_S`, default 1
-  day); otherwise it is the in-process 512-entry map.
+- **Idempotency (`ADR-0015`)** is scoped by `(tenant_id, user_id, tool_name, idempotency_key)`
+  and verifies canonical `arguments_sha256` (`idempotency_key_conflict` on
+  parameter mutation). When `REDIS_URL` is set the replay cache is shared across
+  replicas (`MCP_IDEMPOTENCY_TTL_S`, default 1 day); otherwise it is the
+  in-process 512-entry map.
 
 ## Long-running work (`tasks`)
 

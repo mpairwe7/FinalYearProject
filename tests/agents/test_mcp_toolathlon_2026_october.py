@@ -533,6 +533,16 @@ def test_phase4_multiturn_case_facts_retraction_and_calculator_sensitivity() -> 
     assert non_res_switch["params"]["residency"] == "non_resident"
     assert non_res_switch["params"]["monthly_gross"] == 4_000_000.0
 
+    saved_vat = {
+        "tool": "calculate_vat",
+        "params": {"amount": 1_180_000.0, "direction": "add"},
+        "pending": [],
+        "assumptions": [],
+    }
+    vat_incl_switch = continue_calculation(saved_vat, "What if that amount includes VAT?")
+    assert vat_incl_switch is not None and vat_incl_switch["ready"] is True
+    assert vat_incl_switch["params"]["direction"] == "extract"
+
     # 3. ICLR 2026 / ACL 2026 MT-OSC Consolidated Multi-Turn Specification
     mgr = RollingContextManager()
     ctx = mgr.build_context(
@@ -545,3 +555,55 @@ def test_phase4_multiturn_case_facts_retraction_and_calculator_sensitivity() -> 
     assert "Resident" not in ctx.active_entities.taxpayer_types
     assert "Active focus: PAYE" in ctx.consolidated_spec
     assert "Current taxpayer profile: Non-Resident" in ctx.consolidated_spec
+
+
+def test_phase5_mcp_security_event_telemetry_and_threat_registry_parity(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+    from app.security_events import EVENT_BY_STATUS, MCP_SECURITY_EVENT_KINDS
+
+    assert EVENT_BY_STATUS[413] == "input_validation_payload_too_large"
+    assert {
+        "mcp_integrity_fail",
+        "mcp_output_blocked",
+        "mcp_idempotency_conflict",
+        "mcp_request_state_fail",
+    } <= MCP_SECURITY_EVENT_KINDS
+
+    reset_client()
+    client = MCPClient()
+    with caplog.at_level(logging.WARNING, logger="app.security"):
+        bad_state = client.call_tool(
+            "calculate_vat",
+            {"amount": 1_000_000},
+            user_id="taxpayer-sec-1",
+            request_state={"unwrapped": "forged"},
+        )
+        assert bad_state.ok is False
+        assert any(
+            getattr(r, "event", "") == "mcp_request_state_fail"
+            for r in caplog.records
+        )
+
+        # Idempotency conflict emits mcp_idempotency_conflict
+        client.call_tool(
+            "calculate_vat",
+            {"amount": 1_000_000},
+            user_id="taxpayer-sec-1",
+            user_role="verified_taxpayer",
+            confirmed=True,
+            idempotency_key="sec-idem-1",
+        )
+        conflict = client.call_tool(
+            "calculate_vat",
+            {"amount": 2_000_000},
+            user_id="taxpayer-sec-1",
+            user_role="verified_taxpayer",
+            confirmed=True,
+            idempotency_key="sec-idem-1",
+        )
+        assert conflict.ok is False
+        assert any(
+            getattr(r, "event", "") == "mcp_idempotency_conflict"
+            for r in caplog.records
+        )
+
