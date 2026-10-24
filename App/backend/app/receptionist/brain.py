@@ -466,10 +466,18 @@ class UraReceptionistBrain(LLMService):
         """Broadcast the active AI turn phase and user-control availability to the caller's screen."""
         state = self.room.state
         eff_phase = phase or ("thinking" if self._answering else ("speaking" if self._bot_speaking else "listening"))
+        clarify = getattr(state, "clarify", None)
+        clarify_yn = bool(clarify and getattr(clarify, "stage", "") in ("term", "confirm"))
+        effective_offer = (
+            state.pending_offer
+            or ("clarify" if clarify_yn else "")
+            or ("confirm" if getattr(state, "pending_confirm_challenge", "") else "")
+            or ("review" if getattr(state, "review_state", "") == "asking_end" else "")
+        )
         payload = {
             "type": "call_state",
             "phase": eff_phase,
-            "pending_offer": state.pending_offer,
+            "pending_offer": effective_offer,
             "speech_rate_slow": bool(state.speech_rate_slow),
             "has_more_detail": bool(state.more_detail or getattr(state, "last_more_detail", "")),
             "has_last_answer": bool(state.last_assistant_answer),

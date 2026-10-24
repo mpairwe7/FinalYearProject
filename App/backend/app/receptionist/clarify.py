@@ -453,7 +453,10 @@ class ClarifyGate:
         # Stage 2: "repeat" (AI asked: "Sorry, I didn't catch the word...")
         # ------------------------------------------------------------------
         if state.stage == "repeat":
+            reply_tokens = [w.strip(",.?!;:\"'()") for w in reply_text.split() if w.strip(",.?!;:\"'()")]
             cands = candidates(reply_text, context=state.previous_word, acronyms_only=loanwords_only)
+            if not cands and 1 < len(reply_tokens) <= 4:
+                cands = candidates(reply_tokens[-1], context=state.previous_word, acronyms_only=loanwords_only)
             if cands and cands[0][1] >= 0.7:
                 new_cand = cands[0][0]
                 corrected = _replace_word(
@@ -485,6 +488,31 @@ class ClarifyGate:
                     action="answer",
                     corrected_text=state.original_question,
                 )
+
+            # If caller said "No, export" (negative + replacement term), repair in place
+            reply_tokens = [w.strip(",.?!;:\"'()") for w in reply_text.split() if w.strip(",.?!;:\"'()")]
+            if (
+                2 <= len(reply_tokens) <= 4
+                and state.attempts + 1 < limit
+                and classify_yes_no(reply_tokens[-1], language) == "neither"
+            ):
+                probe = reply_tokens[-1]
+                cands = candidates(probe, context=state.previous_word, acronyms_only=loanwords_only)
+                if cands and cands[0][1] >= 0.75 and cands[0][0].lower() != (state.suggested_term or "").lower():
+                    new_cand = cands[0][0]
+                    old_target = state.suggested_term or state.target_word or ""
+                    corrected = _replace_word(state.original_question, old_target, new_cand)
+                    state.attempts += 1
+                    state.target_word = old_target
+                    state.suggested_term = new_cand
+                    state.original_question = corrected
+                    return ClarifyAction(
+                        action="ask_confirm_question",
+                        candidate=new_cand,
+                        target_word=old_target,
+                        corrected_text=corrected,
+                        prompt=confirm_prompt(new_cand),
+                    )
 
             # Caller said "No" or neither
             state.attempts += 1

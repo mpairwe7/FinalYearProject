@@ -803,5 +803,37 @@ def test_phase8_call_receptionist_multiturn_controls_normal_pace_and_text_turn()
         assert state.last_more_detail == ""
         assert "Sentence four" in state.last_assistant_answer
 
+        # 4. Effective offer covers clarify ("term" / "confirm") and review ("asking_end")
+        from app.receptionist.clarify import ClarifyGate, ClarifyState
+
+        state.clarify = ClarifyState(
+            stage="term",
+            original_question="I want to know about group mid-port",
+            target_word="mid-port",
+            suggested_term="import",
+            previous_word="group",
+        )
+        await brain._publish_call_state()
+        last_pushed = brain.push_frame.call_args_list[-1].args[0]
+        assert last_pushed.message["pending_offer"] == "clarify"
+
+        # 5. ClarifyGate Stage 2 multi-word restatement ("I said import") & Stage 3 inline replacement ("No, export")
+        gate = ClarifyGate(threshold=0.55, max_attempts=2)
+        rep_state = ClarifyState(
+            stage="repeat",
+            original_question="I want to know about group zzz",
+            target_word="zzz",
+            previous_word="group",
+        )
+        act_rep = gate.resolve("I said import", state=rep_state)
+        assert act_rep.action == "ask_confirm_question"
+        assert act_rep.candidate == "import"
+        assert rep_state.stage == "confirm"
+
+        act_inline = gate.resolve("No, export", state=rep_state, max_attempts=2)
+        assert act_inline.action == "ask_confirm_question"
+        assert act_inline.candidate == "export"
+        assert "export" in (act_inline.corrected_text or "")
+
     asyncio.run(_run())
 
