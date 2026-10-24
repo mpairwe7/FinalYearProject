@@ -1036,6 +1036,7 @@ function ChatInputInner({
                           <span>{t('composer.connectorAuthPasswordLabel')}</span>
                           <input
                             type="password"
+                            autoComplete="current-password"
                             required
                             minLength={4}
                             value={authPassword}
@@ -1113,6 +1114,7 @@ function ChatInputInner({
                             <span>{t('composer.connectorAuthPasswordLabel')}</span>
                             <input
                               type="password"
+                              autoComplete="new-password"
                               required
                               minLength={6}
                               value={authPassword}
@@ -1151,110 +1153,119 @@ function ChatInputInner({
                   </form>
                 </div>
               ) : (
-                chatConnectors.length > 0 && (
-                  <div className="connectors-options" role="group" aria-label={t('composer.connectorsTitle')}>
-                    {chatConnectors.map((connector) => {
-                      const selected = selectedConnectorNamespaces.includes(connector.namespace);
-                      const unavailable = connector.status === 'unavailable';
-                      const operations = connector.operations ?? [];
-                      const shown = operations.slice(0, 3).map((operation) => operation.title);
-                      const more = operations.length - shown.length;
-                      const summary = connector.summary || connector.description;
-                      const requiresAuth =
-                        Boolean(onAuthenticateConnector) &&
-                        Boolean(connector.requires_account_link) &&
-                        !connector.account;
-                      return (
-                        <div key={connector.namespace} className="connectors-option-wrap">
-                          <button
-                            type="button"
-                            className={`connectors-option${selected ? ' is-selected' : ''}${unavailable ? ' is-unavailable' : ''}`}
-                            aria-pressed={selected}
-                            disabled={unavailable && !selected}
-                            onClick={() => {
-                              if (requiresAuth && !selected) {
-                                openConnectorAuth(connector.namespace, 'login');
-                              } else {
-                                onToggleConnector?.(connector.namespace);
-                              }
-                            }}
-                          >
-                            <span className="connectors-option-icon" aria-hidden="true">
-                              {connectorMonogram(connector.label)}
-                            </span>
-                            <span className="connectors-option-copy">
-                              <span className="connectors-option-top">
-                                <span className="connectors-option-name">{connector.label}</span>
-                                {connector.mode === 'simulation' && (
-                                  <span className="connectors-badge is-demo">{t('composer.connectorDemo')}</span>
+                <>
+                  {authError && (
+                    <div className="connectors-auth-error" role="alert">
+                      {authError}
+                    </div>
+                  )}
+                  {chatConnectors.length > 0 && (
+                    <div className="connectors-options" role="group" aria-label={t('composer.connectorsTitle')}>
+                      {chatConnectors.map((connector) => {
+                        const selected = selectedConnectorNamespaces.includes(connector.namespace);
+                        const unavailable = connector.status === 'unavailable';
+                        const operations = connector.operations ?? [];
+                        const shown = operations.slice(0, 3).map((operation) => operation.title);
+                        const more = operations.length - shown.length;
+                        const summary = connector.summary || connector.description;
+                        const requiresAuth =
+                          Boolean(onAuthenticateConnector) &&
+                          Boolean(connector.requires_account_link) &&
+                          !connector.account;
+                        return (
+                          <div key={connector.namespace} className="connectors-option-wrap">
+                            <button
+                              type="button"
+                              className={`connectors-option${selected ? ' is-selected' : ''}${unavailable ? ' is-unavailable' : ''}`}
+                              aria-pressed={selected}
+                              disabled={unavailable && !selected}
+                              onClick={() => {
+                                if (requiresAuth && !selected) {
+                                  openConnectorAuth(connector.namespace, 'login');
+                                } else {
+                                  onToggleConnector?.(connector.namespace);
+                                }
+                              }}
+                            >
+                              <span className="connectors-option-icon" aria-hidden="true">
+                                {connectorMonogram(connector.label)}
+                              </span>
+                              <span className="connectors-option-copy">
+                                <span className="connectors-option-top">
+                                  <span className="connectors-option-name">{connector.label}</span>
+                                  {connector.mode === 'simulation' && (
+                                    <span className="connectors-badge is-demo">{t('composer.connectorDemo')}</span>
+                                  )}
+                                  {connector.mode === 'live' && (
+                                    <span className="connectors-badge is-live">{t('composer.connectorLive')}</span>
+                                  )}
+                                  {unavailable && (
+                                    <span className="connectors-badge is-down">{t('composer.connectorUnavailableTag')}</span>
+                                  )}
+                                </span>
+                                {connector.account && (
+                                  <span className="connectors-account-pill">
+                                    {t('composer.connectorConnectedAs', {
+                                      name: connector.account.entity_name,
+                                      tin: connector.account.tin,
+                                    })}
+                                  </span>
                                 )}
-                                {connector.mode === 'live' && (
-                                  <span className="connectors-badge is-live">{t('composer.connectorLive')}</span>
+                                {summary && <span className="connectors-option-description">{summary}</span>}
+                                {shown.length > 0 ? (
+                                  <span className="connectors-option-meta">
+                                    {t('composer.connectorOperations')}: {shown.join(' · ')}
+                                    {more > 0 ? ` · ${t('composer.connectorsMore', { count: more })}` : ''}
+                                  </span>
+                                ) : (
+                                  <span className="connectors-option-meta">
+                                    {t('composer.connectorReadOnly')} ·{' '}
+                                    {t('composer.connectorOperationCount', { count: connector.operation_count })}
+                                  </span>
                                 )}
                                 {unavailable && (
-                                  <span className="connectors-badge is-down">{t('composer.connectorUnavailableTag')}</span>
+                                  <span className="connectors-option-meta is-warn">
+                                    {t('composer.connectorUnavailableHint')}
+                                  </span>
                                 )}
                               </span>
-                              {connector.account && (
-                                <span className="connectors-account-pill">
-                                  {t('composer.connectorConnectedAs', {
-                                    name: connector.account.entity_name,
-                                    tin: connector.account.tin,
-                                  })}
+                              <span className="connectors-option-action">
+                                {selected ? <CheckIcon /> : <PlusIcon size={14} />}
+                                <span>
+                                  {selected
+                                    ? t('composer.connectorSelected')
+                                    : requiresAuth
+                                      ? t('composer.connectorSignInToAdd')
+                                      : t('composer.connectorAdd')}
                                 </span>
-                              )}
-                              {summary && <span className="connectors-option-description">{summary}</span>}
-                              {shown.length > 0 ? (
-                                <span className="connectors-option-meta">
-                                  {t('composer.connectorOperations')}: {shown.join(' · ')}
-                                  {more > 0 ? ` · ${t('composer.connectorsMore', { count: more })}` : ''}
-                                </span>
-                              ) : (
-                                <span className="connectors-option-meta">
-                                  {t('composer.connectorReadOnly')} ·{' '}
-                                  {t('composer.connectorOperationCount', { count: connector.operation_count })}
-                                </span>
-                              )}
-                              {unavailable && (
-                                <span className="connectors-option-meta is-warn">
-                                  {t('composer.connectorUnavailableHint')}
-                                </span>
-                              )}
-                            </span>
-                            <span className="connectors-option-action">
-                              {selected ? <CheckIcon /> : <PlusIcon size={14} />}
-                              <span>
-                                {selected
-                                  ? t('composer.connectorSelected')
-                                  : requiresAuth
-                                    ? t('composer.connectorSignInToAdd')
-                                    : t('composer.connectorAdd')}
                               </span>
-                            </span>
-                          </button>
-                          {onAuthenticateConnector && connector.account && (
-                            <div className="connectors-account-bar">
-                              <button
-                                type="button"
-                                className="connectors-account-link-btn"
-                                onClick={() => openConnectorAuth(connector.namespace, 'login')}
-                              >
-                                {t('composer.connectorSwitchAccount')}
-                              </button>
-                              <button
-                                type="button"
-                                className="connectors-account-link-btn is-danger"
-                                onClick={() => void handleDisconnectConnectorAccount(connector.namespace)}
-                              >
-                                {t('composer.connectorDisconnect')}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )
+                            </button>
+                            {onAuthenticateConnector && connector.account && (
+                              <div className="connectors-account-bar">
+                                <button
+                                  type="button"
+                                  className="connectors-account-link-btn"
+                                  disabled={authSubmitting}
+                                  onClick={() => openConnectorAuth(connector.namespace, 'login')}
+                                >
+                                  {t('composer.connectorSwitchAccount')}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="connectors-account-link-btn is-danger"
+                                  disabled={authSubmitting}
+                                  onClick={() => void handleDisconnectConnectorAccount(connector.namespace)}
+                                >
+                                  {t('composer.connectorDisconnect')}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
               )}
 
               <details className="connectors-details">

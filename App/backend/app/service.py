@@ -11990,13 +11990,24 @@ class ChatModel:
                                 (linked_map[ns] for ns in connector_namespaces if ns in linked_map),
                                 None,
                             )
-                            if first_acc and first_acc.get("tin") not in agentic_query:
-                                agentic_query = (
-                                    f"{agentic_query} "
-                                    f"[Connected account: TIN {first_acc['tin']}, "
-                                    f"BRN {first_acc.get('brn', '')}, "
-                                    f"Entity {first_acc['entity_name']}]"
+                            if first_acc and first_acc.get("tin"):
+                                _ACTIVE_USER_STATED_IDS.set(
+                                    (*_ACTIVE_USER_STATED_IDS.get(), str(first_acc["tin"]))
                                 )
+                                has_explicit_id = bool(user_stated_identifiers(router_message))
+                                if not has_explicit_id and first_acc["tin"] not in agentic_query:
+                                    linked_json = json.dumps(
+                                        {
+                                            "tin": first_acc["tin"],
+                                            "brn": first_acc.get("brn", ""),
+                                            "entity_name": first_acc["entity_name"],
+                                        },
+                                        ensure_ascii=False,
+                                    )
+                                    agentic_query = (
+                                        f"{agentic_query}\n"
+                                        f"<linked_account_data>{linked_json}</linked_account_data>"
+                                    )
                     agentic_call_kwargs: dict[str, Any] = {
                         "query": agentic_query,
                         # A lookup is answered from the service, not from
@@ -13947,13 +13958,24 @@ class ChatModel:
                     (linked_map_s[ns] for ns in connector_namespaces if ns in linked_map_s),
                     None,
                 )
-                if first_acc_s and first_acc_s.get("tin") not in stream_rewritten:
-                    stream_rewritten = (
-                        f"{stream_rewritten} "
-                        f"[Connected account: TIN {first_acc_s['tin']}, "
-                        f"BRN {first_acc_s.get('brn', '')}, "
-                        f"Entity {first_acc_s['entity_name']}]"
+                if first_acc_s and first_acc_s.get("tin"):
+                    _ACTIVE_USER_STATED_IDS.set(
+                        (*_ACTIVE_USER_STATED_IDS.get(), str(first_acc_s["tin"]))
                     )
+                    has_explicit_id_s = bool(user_stated_identifiers(router_message))
+                    if not has_explicit_id_s and first_acc_s["tin"] not in stream_rewritten:
+                        linked_json_s = json.dumps(
+                            {
+                                "tin": first_acc_s["tin"],
+                                "brn": first_acc_s.get("brn", ""),
+                                "entity_name": first_acc_s["entity_name"],
+                            },
+                            ensure_ascii=False,
+                        )
+                        stream_rewritten = (
+                            f"{stream_rewritten}\n"
+                            f"<linked_account_data>{linked_json_s}</linked_account_data>"
+                        )
 
         return {
             "reply": reply,

@@ -90,7 +90,7 @@ export const en = {
   'composer.connectorAuthSubtitle': 'Sign in with an existing local simulation profile or create a new account to provision your taxpayer record across the local simulation databases.',
   'composer.connectorAuthPresetsLabel': 'Quick-fill demo account',
   'composer.connectorAuthIdentifierLabel': 'TIN, URSB Registration No., Email, or Business Name',
-  'composer.connectorAuthIdentifierPlaceholder': 'e.g. 1000000005, URSB-CO-10005, or business name',
+  'composer.connectorAuthIdentifierPlaceholder': 'e.g. URSB-CO-10005, email, or business name',
   'composer.connectorAuthPasswordLabel': 'Simulation Password', // pragma: allowlist secret
   'composer.connectorAuthPasswordPlaceholder': 'Enter password (min. 6 characters)', // pragma: allowlist secret
   'composer.connectorAuthNameLabel': 'Full Name or Registered Business Name',

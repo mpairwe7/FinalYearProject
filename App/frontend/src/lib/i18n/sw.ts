@@ -87,7 +87,7 @@ export const sw: Partial<Dictionary> = {
   'composer.connectorAuthSubtitle': 'Ingia kwenye akaunti ya majaribio au fungua akaunti mpya.',
   'composer.connectorAuthPresetsLabel': 'Jaza akaunti ya majaribio haraka',
   'composer.connectorAuthIdentifierLabel': 'TIN, Nambari ya URSB, Barua pepe, au Jina la Biashara',
-  'composer.connectorAuthIdentifierPlaceholder': 'mfano: 1000000005 au URSB-CO-10005',
+  'composer.connectorAuthIdentifierPlaceholder': 'mfano: URSB-CO-10005 au jina la biashara',
   'composer.connectorAuthPasswordLabel': 'Nenosiri la Majaribio', // pragma: allowlist secret
   'composer.connectorAuthPasswordPlaceholder': 'Weka nenosiri (angalau herufi 6)', // pragma: allowlist secret
   'composer.connectorAuthNameLabel': 'Jina Kamili au Jina la Biashara',

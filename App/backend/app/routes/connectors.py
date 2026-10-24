@@ -33,7 +33,7 @@ def list_system_connectors(request: Request, response: Response) -> dict[str, An
     """List the taxpayer-safe chat catalog or staff-only connector health."""
     response.headers["Cache-Control"] = "private, no-store"
     if request.query_params.get("view") == "chat":
-        response.headers["Vary"] = "Authorization, X-Session-ID"
+        response.headers["Vary"] = "Authorization"
         from .. import database as db
         from ..auth.dependencies import optional_user
         from ..mcp import get_client
@@ -41,10 +41,15 @@ def list_system_connectors(request: Request, response: Response) -> dict[str, An
 
         ctx = optional_user(request, request.headers.get("Authorization"))
         sess_id = (request.headers.get("X-Session-ID") or "").strip()
-        owner_key = db.conversation_state_key(
-            sess_id or None,
-            user_id=ctx.user_id if ctx.authenticated else None,
-            tenant_id=ctx.tenant_id or "default",
+        is_authed = bool(getattr(ctx, "authenticated", False))
+        owner_key = (
+            db.conversation_state_key(
+                sess_id or None,
+                user_id=getattr(ctx, "user_id", None) if is_authed else None,
+                tenant_id=getattr(ctx, "tenant_id", "default") or "default",
+            )
+            if (sess_id or is_authed)
+            else ""
         )
         return chat_connector_catalog(
             get_client(),
@@ -200,13 +205,17 @@ def authenticate_connector_account(
 
     ctx = optional_user(request, request.headers.get("Authorization"))
     sess_id = (request.headers.get("X-Session-ID") or "").strip()
+    is_authed = bool(getattr(ctx, "authenticated", False))
+    if not sess_id and not is_authed:
+        raise HTTPException(
+            status_code=400,
+            detail="Session or user identity is required to link a connector account.",
+        )
     owner_key = db.conversation_state_key(
         sess_id or None,
-        user_id=ctx.user_id if ctx.authenticated else None,
-        tenant_id=ctx.tenant_id or "default",
+        user_id=getattr(ctx, "user_id", None) if is_authed else None,
+        tenant_id=getattr(ctx, "tenant_id", "default") or "default",
     )
-    if not owner_key:
-        raise HTTPException(status_code=400, detail="Session or user identity is required to link a connector account.")
 
     action = str(payload.get("action") or "login").strip().lower()
     link_all = bool(payload.get("link_all", True))

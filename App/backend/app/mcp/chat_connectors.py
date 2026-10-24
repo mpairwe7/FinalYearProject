@@ -272,7 +272,7 @@ def chat_connector_catalog(
             ],
             "read_only": True,
         }
-        if mode == MODE_SIMULATION:
+        if mode == MODE_SIMULATION and owner_key:
             linked_acc = linked_accounts.get(namespace)
             entry["requires_account_link"] = True
             entry["connected"] = linked_acc is not None

@@ -85,7 +85,7 @@ export const ach: Partial<Dictionary> = {
   'composer.connectorAuthSubtitle': 'Dony ki akaunt me temo onyo yab akaunt manyen.',
   'composer.connectorAuthPresetsLabel': 'Yero akaunt me temo oyot',
   'composer.connectorAuthIdentifierLabel': 'TIN, Namba me URSB, Email, onyo Nying Biacara',
-  'composer.connectorAuthIdentifierPlaceholder': 'labole: 1000000005 onyo URSB-CO-10005',
+  'composer.connectorAuthIdentifierPlaceholder': 'labole: URSB-CO-10005 onyo nying biacara',
   'composer.connectorAuthPasswordLabel': 'Password me temo', // pragma: allowlist secret
   'composer.connectorAuthPasswordPlaceholder': 'Coo password (nukuta 6+)', // pragma: allowlist secret
   'composer.connectorAuthNameLabel': 'Nyingi Weng onyo Nying Biacara',

@@ -89,7 +89,7 @@ export const lg: Partial<Dictionary> = {
   'composer.connectorAuthSubtitle': 'Yingira n’akawunti ey’okugezesa oba tandikawo akawunti empya.',
   'composer.connectorAuthPresetsLabel': 'Kozesa akawunti ey’okugezesa',
   'composer.connectorAuthIdentifierLabel': 'TIN, ennamba ya URSB, Email, oba Erinnya lya Bizinensi',
-  'composer.connectorAuthIdentifierPlaceholder': 'okulabira ku: 1000000005 oba URSB-CO-10005',
+  'composer.connectorAuthIdentifierPlaceholder': 'okulabira ku: URSB-CO-10005 oba erinnya lya bizinensi',
   'composer.connectorAuthPasswordLabel': 'Password ey’okugezesa', // pragma: allowlist secret
   'composer.connectorAuthPasswordPlaceholder': 'Wandika password (ennukuta 6+)', // pragma: allowlist secret
   'composer.connectorAuthNameLabel': 'Erinnya Lyo oba Erya Bizinensi',

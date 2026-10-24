@@ -85,7 +85,7 @@ export const nyn: Partial<Dictionary> = {
   'composer.connectorAuthSubtitle': 'Taahamu n’akawunti y’okugezesa nari otandikye akawunti ensya.',
   'composer.connectorAuthPresetsLabel': 'Koresa akawunti y’okugezesa',
   'composer.connectorAuthIdentifierLabel': 'TIN, enamba ya URSB, Email, nari Eiziina ry’obushuubuzi',
-  'composer.connectorAuthIdentifierPlaceholder': 'nk’eky’okureeberaho: 1000000005 nari URSB-CO-10005',
+  'composer.connectorAuthIdentifierPlaceholder': 'nk’eky’okureeberaho: URSB-CO-10005 nari eiziina ry’obushuubuzi',
   'composer.connectorAuthPasswordLabel': 'Password y’okugezesa', // pragma: allowlist secret
   'composer.connectorAuthPasswordPlaceholder': 'Handiika password (enyuguta 6+)', // pragma: allowlist secret
   'composer.connectorAuthNameLabel': 'Eiziina ryawe nari ery’Obushuubuzi',
