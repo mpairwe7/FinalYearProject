@@ -94,7 +94,7 @@ _PATTERNS: list[tuple[DocumentType, re.Pattern, float]] = [
             r"tcc\s+rejected|nin\s+validation\s+failed|warehousing\s+period\s+expired",
             re.I,
         ),
-        0.95,
+        0.97,
     ),
     # EFRIS and electronic receipts are high-priority
     (

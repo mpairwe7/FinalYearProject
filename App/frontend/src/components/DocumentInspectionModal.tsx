@@ -54,8 +54,11 @@ export function DocumentInspectionModal({
   const quickPrompts: string[] = [];
   if (sg?.is_screenshot) {
     if (sg.recommended_prompts && sg.recommended_prompts.length > 0) {
-      for (const rp of sg.recommended_prompts.slice(0, 2)) {
-        quickPrompts.push(rp);
+      const firstPrompt = sg.recommended_prompts[0];
+      const walkthroughPrompt = sg.recommended_prompts[sg.recommended_prompts.length - 1];
+      quickPrompts.push(firstPrompt);
+      if (walkthroughPrompt && walkthroughPrompt !== firstPrompt) {
+        quickPrompts.push(walkthroughPrompt);
       }
     } else {
       const portalName = sg.detected_portal || t('documents.unknownPortal');
