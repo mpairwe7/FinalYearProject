@@ -1010,6 +1010,7 @@ def get_conversation_context(
     return {
         "recent_turns": ctx.recent_turns,
         "context_summary": ctx.context_summary,
+        "consolidated_spec": ctx.consolidated_spec,
         "active_entities": ctx.active_entities,
         "total_turns": ctx.total_turns,
         "all_turns": ctx.all_turns,
