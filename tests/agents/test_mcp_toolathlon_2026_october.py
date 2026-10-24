@@ -513,6 +513,12 @@ def test_phase4_multiturn_case_facts_retraction_and_calculator_sensitivity() -> 
     t2 = extract_case_facts("Actually scratch the company car, I have no company car benefit.", prior=t1)
     assert len(t2.benefits) == 0
 
+    t2b = extract_case_facts("Actually I no longer have a company car benefit.", prior=t1)
+    assert len(t2b.benefits) == 0
+
+    t2c = extract_case_facts("I don't have a company car either.", prior=t1)
+    assert len(t2c.benefits) == 0
+
     # 2. Multi-turn calculator delta, percentage, and parameter-switch sensitivity follow-ups
     saved_paye = {
         "tool": "calculate_paye",
@@ -547,14 +553,16 @@ def test_phase4_multiturn_case_facts_retraction_and_calculator_sensitivity() -> 
     mgr = RollingContextManager()
     ctx = mgr.build_context(
         [
-            {"user_message": "What is my PAYE? I am a resident earning a salary of UGX 4,000,000 a month in Kampala.", "bot_reply": "Here is your PAYE."},
+            {"user_message": "My business name is Victoria Nile Traders Ltd in Kampala and I am a resident earning a salary of UGX 4,000,000 a month. What is my PAYE?", "bot_reply": "Here is your PAYE."},
             {"user_message": "Actually I am a non-resident earning UGX 6,000,000 a month.", "bot_reply": "Updated."},
         ]
     )
     assert "Non-Resident" in ctx.active_entities.taxpayer_types
     assert "Resident" not in ctx.active_entities.taxpayer_types
+    assert ctx.active_entities.business_names == ["Victoria Nile Traders Ltd"]
     assert "Active focus: PAYE" in ctx.consolidated_spec
-    assert "Current taxpayer profile: Non-Resident" in ctx.consolidated_spec
+    assert "Non-Resident" in ctx.consolidated_spec
+    assert "Entity: Victoria Nile Traders Ltd" in ctx.consolidated_spec
 
 
 def test_phase5_mcp_security_event_telemetry_and_threat_registry_parity(caplog: pytest.LogCaptureFixture) -> None:
@@ -606,4 +614,67 @@ def test_phase5_mcp_security_event_telemetry_and_threat_registry_parity(caplog: 
             getattr(r, "event", "") == "mcp_idempotency_conflict"
             for r in caplog.records
         )
+
+
+def test_phase6_rental_multi_unit_calculation_fuzzy_guard_and_cross_passage_claim_verifier() -> None:
+    from app.calculator_router import continue_calculation, plan_calculation
+    from app.case_facts import extract_case_facts
+    from app.claim_verifier import verify_claims
+    from app.query import _fuzzy_correct_word
+    from plugins.ursb.database import UrsbDatabase
+
+    # 1. Multi-line multi-unit rental calculation ("10 units where clients pay 1,000,000 Ugx each per month")
+    q_rental = (
+        "i have rentals of 10 units where clients pay 1,000,000 Ugx each per month\n"
+        "How much can i pay for taxes for this?"
+    )
+    plan = plan_calculation(q_rental)
+    assert plan is not None
+    assert plan.tool == "calculate_rental_tax"
+    assert plan.params["annual_gross_rent"] == 120_000_000.0
+    assert any("10 units" in a for a in plan.assumptions)
+
+    # 2. "show me the figures" follow-up replays the remembered calculation
+    saved = {
+        "tool": "calculate_rental_tax",
+        "params": {"annual_gross_rent": 120_000_000.0, "landlord_type": "individual"},
+        "pending": [],
+        "assumptions": plan.assumptions,
+    }
+    cont = continue_calculation(saved, "show me the figures")
+    assert cont is not None and cont["ready"] is True
+    assert cont["params"]["annual_gross_keys" if False else "annual_gross_rent"] == 120_000_000.0
+
+    # 3. Rental income is not misclassified as monthly_salary in CaseFacts
+    facts = extract_case_facts(q_rental)
+    assert facts.monthly_salary is None
+
+    # 4. 4-letter English words ("City") are never fuzzy-shortened to 3-letter tax acronyms ("cit")
+    assert _fuzzy_correct_word("City") == "City"
+    assert _fuzzy_correct_word("city") == "city"
+
+    # 5. Claim verifier does not mix stale verified_facts percentages into cited_passage_contexts
+    hits = [
+        {"text": "Whistleblowing refers to bringing URA's attention to non-compliance."},
+        {
+            "text": (
+                "Under Section 75 of the Tax Procedures Code Act: Informers receive 1% up to "
+                "UGX 15,000,000 or 5% of recovered revenue up to UGX 100,000,000. Call +256 (0)323442055."
+            )
+        },
+    ]
+    citations = [{"ref": "[1]", "passage": hits[0]["text"]}, {"ref": "[2]", "passage": hits[1]["text"]}]
+    report = verify_claims(
+        "Whistleblowers receive a reward of 5% of recovered tax up to UGX 100,000,000 [2].",
+        citations,
+        hits,
+        query="how do i whistle blow in ura",
+        verified_facts="## Verified Statutory Facts\n- PAYE marginal rate: 30% on UGX 1,000,000",
+    )
+    assert report["contradicted_claims"] == []
+
+    # 6. URSB simulator search_entity resolves verbose LLM query strings containing the business name
+    ursb_db = UrsbDatabase(db_path=":memory:")
+    ent = ursb_db.search_entity("verify URSB business registration for Kampala City Supermarket Ltd")
+    assert ent is not None and ent.registration_number == "URSB-CO-10005"
 

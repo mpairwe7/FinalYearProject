@@ -531,7 +531,12 @@ _BENEFIT_PATTERNS: list[tuple[BenefitKindLiteral, re.Pattern[str]]] = [
 
 
 _BENEFIT_NEGATION_PRE_RE = re.compile(
-    r"\b(?:no|not|without|neither|never|remove|removed|scratch|cancel|cancelled|dropped|stopped|exclude|excluding|instead\s+of)\s+"
+    r"\b(?:"
+    r"no|not|without|neither|never|remove|removed|scratch|cancel|cancelled|dropped|stopped|exclude|excluding|instead\s+of"
+    r"|no\s+longer(?:\s+(?:have|has|had|get|gets|getting|receive|receives|receiving|use|using|given))?"
+    r"|(?:do|does|did)\s+not\s+(?:have|get|receive|use)"
+    r"|(?:don['’]?t|doesn['’]?t|didn['’]?t)\s+(?:have|get|receive|use)"
+    r")\s+"
     r"(?:any\s+|a\s+|an\s+|the\s+|my\s+|our\s+|his\s+|her\s+)?$",
     re.IGNORECASE,
 )
@@ -769,12 +774,24 @@ def extract_case_facts(
             post_clause = re.split(r"(?:[,;]|\b(?:plus|and|with)\b)", text[me : min(len(text), me + 35)], flags=re.I)[0]
             same_clause_window = f"{pre_clause} {text[ms:me]} {post_clause}"
             is_benefit_span = any(pat.search(same_clause_window) for _, pat in _BENEFIT_PATTERNS)
+            is_rental_span = bool(
+                re.search(
+                    r"\b(rent(?!\s*-\s*free)\b|rentals?|tenants?|landlords?)\b",
+                    ctx_window,
+                    re.IGNORECASE,
+                )
+                and not re.search(
+                    r"\b(paye|employ\w+|hiring|expat\w*|salar\w+|wages?)\b",
+                    same_clause_window,
+                    re.IGNORECASE,
+                )
+            )
             has_explicit_salary_kw = bool(_STRONG_SALARY_KW_RE.search(same_clause_window))
             if _TURNOVER_KW_RE.search(ctx_window):
                 mon.label = "annual_turnover"
                 _set("annual_turnover", mon)
             elif (
-                (has_explicit_salary_kw or (not saw_salary_in_turn and (_SALARY_KW_RE.search(ctx_window) or _MONTHLY_CADENCE_RE.search(ctx_window))))
+                (has_explicit_salary_kw or (not saw_salary_in_turn and not is_rental_span and (_SALARY_KW_RE.search(ctx_window) or _MONTHLY_CADENCE_RE.search(ctx_window))))
                 and (not is_benefit_span or has_explicit_salary_kw)
             ):
                 saw_salary_in_turn = True

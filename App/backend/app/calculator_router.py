@@ -315,6 +315,30 @@ _ALREADY_REGISTERED_RE = re.compile(
     re.IGNORECASE,
 )
 
+_RENTAL_UNIT_COUNT_RE = re.compile(
+    r"(?<!\d)(?<!\d,)\b(?P<count>\d{1,3}(?:,\d{3})+|\d{1,4})\s+(?:rental\s+|commercial\s+|residential\s+)?(?:units?|apartments?|flats?|houses?|rooms?|shops?|tenants?|clients?|properties)\b",
+    re.IGNORECASE,
+)
+_RENTAL_PER_UNIT_RE = re.compile(
+    r"\b(?:each|per\s+(?:unit|apartment|flat|house|room|shop|tenant|client|property)|apiece)\b",
+    re.IGNORECASE,
+)
+
+
+def extract_rental_unit_multiplier(text: str) -> int:
+    """Return the unit count N when *text* states N rental units paying an amount 'each' / 'per unit'."""
+    if not text or not _RENTAL_PER_UNIT_RE.search(text):
+        return 1
+    m = _RENTAL_UNIT_COUNT_RE.search(text)
+    if not m:
+        return 1
+    try:
+        val = int(m.group("count").replace(",", ""))
+        return val if 1 <= val <= 5000 else 1
+    except ValueError:
+        return 1
+
+
 _INTENT_RES: list[tuple[str, re.Pattern[str]]] = [
     ("customs", re.compile(r"\b(customs|import\s+(?:duty|tax|charges?|cost)|cif)\b", re.IGNORECASE)),
     ("withholding", re.compile(r"\b(withholding|wht)\b", re.IGNORECASE)),
@@ -328,7 +352,10 @@ _INTENT_RES: list[tuple[str, re.Pattern[str]]] = [
     (
         "rental",
         re.compile(
-            r"\b(rent(?:al)?\s+(?:income|tax)|tax\s+(?:due\s+|payable\s+|will\s+i\s+pay\s+)?on\s+(?:a\s+|my\s+)?rent(?:al)?|tax\b.*\brent(?:al)?"
+            r"\b(rent(?:al)?s?\s+(?:income|tax(?:es)?|units?|apartments?|properties)"
+            r"|tax(?:es)?\s+(?:due\s+|payable\s+|will\s+i\s+pay\s+)?on\s+(?:a\s+|my\s+)?rent(?:al)?s?"
+            r"|rent(?:al)?s?\b[^?.!]{0,60}\btax(?:es)?\b"
+            r"|\brentals?\s+of\s+\d[\d,]*\s+(?:units?|apartments?|flats?|houses?|rooms?|shops?)"
             r"|kodi\s+ya\s+pango|ushuru\s+wa\s+pango|upangishaji|kupangisha"
             r"|(?:omusolo\s+gw['’])?o?bupangisa|amapangisa|amayumba\s+ag['’]o?bupangisa)\b",
             re.IGNORECASE,
@@ -685,6 +712,19 @@ def continue_calculation(saved: dict[str, Any], message: str) -> dict[str, Any] 
                         params["landlord_type"] = "individual"
                         updated = True
                 if not updated:
+                    return None
+            # 4. Direct breakdown/figures request on the remembered calculation ("show me the figures")
+            elif (
+                not amts
+                and len(text.split()) <= 8
+                and re.search(
+                    r"\b(?:show|give|what\s+are)\b[^?.\n]{0,40}\b(?:figures?|numbers?|breakdown|calculations?)\b",
+                    text,
+                    re.IGNORECASE,
+                )
+            ):
+                named_intent = detect_calculator_intent(text)
+                if named_intent is not None and INTENT_TOOLS.get(named_intent) != tool:
                     return None
             else:
                 return None
@@ -1068,13 +1108,26 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
                 params["allowable_expenses"] = expense
                 rent = others[0]
         if rent is not None:
+            unit_mult = extract_rental_unit_multiplier(text)
+            per_unit_rent = rent
+            if unit_mult > 1:
+                rent = rent * unit_mult
             if _MONTHLY_RE.search(text):
                 params["annual_gross_rent"] = rent * 12
-                assumptions.append(
-                    f"monthly rent of UGX {rent:,.0f} → UGX {rent * 12:,.0f} per year"
-                )
+                if unit_mult > 1:
+                    assumptions.append(
+                        f"{unit_mult} units × UGX {per_unit_rent:,.0f}/month × 12 months → UGX {rent * 12:,.0f} per year"
+                    )
+                else:
+                    assumptions.append(
+                        f"monthly rent of UGX {rent:,.0f} → UGX {rent * 12:,.0f} per year"
+                    )
             else:
                 params["annual_gross_rent"] = rent
+                if unit_mult > 1:
+                    assumptions.append(
+                        f"{unit_mult} units × UGX {per_unit_rent:,.0f} → UGX {rent:,.0f} per year"
+                    )
         else:
             missing.append("annual_gross_rent")
         return CalcPlan("calculate_rental_tax", "calc_rental_tax", params, missing, assumptions)

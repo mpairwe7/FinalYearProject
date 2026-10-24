@@ -11947,7 +11947,7 @@ class ChatModel:
                         and router_rewritten
                         and not llm_module.can_generate_in_locale(locale)
                     )
-                    else rewritten
+                    else (router_message if connector_intent is not None else rewritten)
                 )
                 with trace_stage("llm_agentic", timings=timings):
                     eff_tool_whitelist = force_tool_whitelist
@@ -13925,7 +13925,7 @@ class ChatModel:
                     and router_rewritten
                     and not llm_module.can_generate_in_locale(locale)
                 )
-                else rewritten
+                else (router_message if connector_intent is not None else rewritten)
             ),
             "_personalization_context": eff_pers_ctx,
             "_web_verified_facts": web_verified_facts,

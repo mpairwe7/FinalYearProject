@@ -258,11 +258,14 @@ class UrsbDatabase:
             cur.execute(
                 """
                 SELECT * FROM ursb_entities
-                WHERE registration_number = ? OR LOWER(business_name) LIKE LOWER(?)
+                WHERE registration_number = ?
+                   OR LOWER(business_name) LIKE LOWER(?)
+                   OR LOWER(?) LIKE '%' || LOWER(business_name) || '%'
+                   OR LOWER(?) LIKE '%' || LOWER(registration_number) || '%'
                 ORDER BY (registration_number = ? OR LOWER(business_name) = LOWER(?)) DESC
                 LIMIT 1
                 """,
-                (q, f"%{q}%", q, q),
+                (q, f"%{q}%", q, q, q, q),
             )
         row = cur.fetchone()
         if not row:
