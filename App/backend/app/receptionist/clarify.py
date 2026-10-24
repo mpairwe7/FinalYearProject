@@ -492,13 +492,18 @@ class ClarifyGate:
             # If caller said "No, export" (negative + replacement term), repair in place
             reply_tokens = [w.strip(",.?!;:\"'()") for w in reply_text.split() if w.strip(",.?!;:\"'()")]
             if (
-                2 <= len(reply_tokens) <= 4
+                decision == "no"
+                and 2 <= len(reply_tokens) <= 4
                 and state.attempts + 1 < limit
                 and classify_yes_no(reply_tokens[-1], language) == "neither"
             ):
                 probe = reply_tokens[-1]
                 cands = candidates(probe, context=state.previous_word, acronyms_only=loanwords_only)
-                if cands and cands[0][1] >= 0.75 and cands[0][0].lower() != (state.suggested_term or "").lower():
+                if (
+                    cands
+                    and (cands[0][1] >= 0.75 or cands[0][0].lower() == probe.lower())
+                    and cands[0][0].lower() != (state.suggested_term or "").lower()
+                ):
                     new_cand = cands[0][0]
                     old_target = state.suggested_term or state.target_word or ""
                     corrected = _replace_word(state.original_question, old_target, new_cand)

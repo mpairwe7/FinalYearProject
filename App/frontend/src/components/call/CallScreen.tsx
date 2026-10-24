@@ -464,7 +464,17 @@ export function CallScreen() {
         )}
 
         {status === 'ai' && showTextInput && (
-          <form className="call-text-form" onSubmit={handleTypedSubmit} data-testid="call-text-form">
+          <form
+            className="call-text-form"
+            onSubmit={handleTypedSubmit}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.stopPropagation();
+                setShowTextInput(false);
+              }
+            }}
+            data-testid="call-text-form"
+          >
             <input
               ref={textInputRef}
               type="text"
@@ -472,12 +482,6 @@ export function CallScreen() {
               maxLength={500}
               value={typedTurn}
               onChange={(e) => setTypedTurn(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  e.stopPropagation();
-                  setShowTextInput(false);
-                }
-              }}
               placeholder={t('call.typePlaceholder')}
               aria-label={t('call.typePlaceholder')}
               data-testid="call-text-input"
