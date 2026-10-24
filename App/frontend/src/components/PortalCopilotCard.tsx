@@ -584,6 +584,11 @@ export default function PortalCopilotCard({
       </div>
 
       {copilot.title && <h3 className="portal-copilot-title">{copilot.title}</h3>}
+      {copilot.what_needs_to_be_done && (
+        <p className="portal-copilot-subtitle" data-testid="portal-card-what-needs-to-be-done">
+          {copilot.what_needs_to_be_done}
+        </p>
+      )}
       {(copilot.verification_warning ||
         copilot.user_message ||
         copilot.diagnosis_summary ||
@@ -594,6 +599,16 @@ export default function PortalCopilotCard({
             copilot.user_message ||
             copilot.diagnosis_summary}
         </p>
+      )}
+
+      {copilot.checklist && copilot.checklist.length > 0 && (
+        <ul className="portal-guidance-checklist" data-testid="portal-card-checklist">
+          {copilot.checklist.map((item, idx) => (
+            <li key={idx} className={`is-${item.status}`}>
+              <strong>{item.item}:</strong> <span>{item.detail}</span>
+            </li>
+          ))}
+        </ul>
       )}
 
       {copilot.completeness_check && !copilot.completeness_check.is_complete && (
@@ -633,6 +648,21 @@ export default function PortalCopilotCard({
             <li key={idx}>{stepText}</li>
           ))}
         </ol>
+      ) : null}
+
+      {copilot.recommended_prompts && copilot.recommended_prompts.length > 0 && onActionClick ? (
+        <div className="portal-clarifying-chips" data-testid="portal-card-recommended-prompts">
+          {copilot.recommended_prompts.map((promptText) => (
+            <button
+              key={promptText}
+              type="button"
+              className="workflow-option-btn"
+              onClick={() => onActionClick(promptText)}
+            >
+              {promptText}
+            </button>
+          ))}
+        </div>
       ) : null}
 
       <div className="portal-copilot-actions">

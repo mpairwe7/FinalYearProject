@@ -185,6 +185,15 @@ const SCREENSHOT_PREFILL_FIELD_MAP: Record<string, string> = {
   amount_ugx: 'amount_ugx',
   tax_head: 'tax_head',
   original_fdn: 'original_fdn',
+  ursb_brn: 'ursb_brn',
+  entry_number: 'entry_number',
+  assessment_ref: 'assessment_ref',
+  commodity_code: 'commodity_code',
+  vehicle_registration_number: 'vehicle_registration_number',
+  stamp_serial: 'stamp_serial',
+  order_id: 'order_id',
+  product_category: 'product_category',
+  quantity: 'quantity',
 };
 
 function saveScreenshotHandoff(
@@ -200,7 +209,7 @@ function saveScreenshotHandoff(
   }
   savePendingPortalContinuation({
     conversationId: conversationId || 'default',
-    taskId: 'screenshot_copilot_handoff',
+    taskId: handoff.remediation_task_id || 'screenshot_copilot_handoff',
     portalKey: handoff.portal_key,
     collectedFields,
     returnMode: 'portal',

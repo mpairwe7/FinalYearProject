@@ -1259,6 +1259,11 @@ _VEHICLE_PLATE_RE = re.compile(r"\b(U[A-Z]{1,2}\s?\d{3}[A-Z])\b", re.IGNORECASE)
 _EMAIL_RE = re.compile(r"\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b")
 _PHONE_RE = re.compile(r"(\+?256\s?7\d{8}|\b07\d{8}\b)")
 _DOB_RE = re.compile(r"\b((?:19|20)\d{2}-\d{2}-\d{2})\b")
+_COMMODITY_CODE_RE = re.compile(
+    r"\b(?:commodity(?:\s+code)?|unspsc|item\s+code|commodity_code)\s*[:#=-]?\s*(\d{8})\b",
+    re.IGNORECASE,
+)
+_DTS_ORDER_ID_RE = re.compile(r"\b(DTS-ORD-\d{4}-\d{3,6})\b", re.IGNORECASE)
 def _extract_amount_ugx(text: str) -> str:
     """Linear-time token scanner for UGX currency amounts (excludes turnover/sales figures)."""
     tokens = text[:2000].replace(":", " ").replace("=", " ").split()
@@ -1367,6 +1372,14 @@ def extract_task_entities(message: str, portal_context: Mapping[str, Any] | None
     dob_m = _DOB_RE.search(text)
     if dob_m:
         entities["date_of_birth"] = dob_m.group(1)
+
+    comm_m = _COMMODITY_CODE_RE.search(text)
+    if comm_m:
+        entities["commodity_code"] = comm_m.group(1)
+
+    ord_m = _DTS_ORDER_ID_RE.search(text)
+    if ord_m:
+        entities["order_id"] = ord_m.group(1).upper()
 
     amt_str = _extract_amount_ugx(text)
     if amt_str:

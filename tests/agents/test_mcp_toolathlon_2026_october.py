@@ -949,6 +949,7 @@ def test_phase10_screenshot_analysis_error_resolution_and_completion_checklist()
     assert "Stock Management" in sg["what_needs_to_be_done"]
     assert "intent=efris_stock_management" in sg["copilot_handoff"]["inbuilt_portal_url"]
     assert sg["copilot_handoff"]["prefill_state"]["tin"] == "1000010001"
+    assert sg["copilot_handoff"]["prefill_state"]["commodity_code"] == "50202301"
     assert any(item["status"] == "action_needed" and "EFRIS_INSUFFICIENT_STOCK" in item["item"] for item in sg["checklist"])
     assert any(item["status"] == "detected" and "1000010001" in item["detail"] for item in sg["checklist"])
     assert any("Resolve EFRIS_INSUFFICIENT_STOCK" in p for p in sg["recommended_prompts"])

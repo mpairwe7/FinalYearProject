@@ -248,6 +248,13 @@ export interface PortalCopilotPayload {
   diagnosis_points?: string[];
   error?: string;
   user_message?: string;
+  what_needs_to_be_done?: string;
+  checklist?: Array<{
+    item: string;
+    status: 'detected' | 'action_needed' | string;
+    detail: string;
+  }>;
+  recommended_prompts?: string[];
   completeness_check?: {
     is_complete: boolean;
     missing_context_hints?: string[];
