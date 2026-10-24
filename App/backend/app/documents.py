@@ -1071,6 +1071,8 @@ def _extract_image(data: bytes) -> _Extraction:
         except Exception:
             text = ""
         if not text:
+            # Direct tesseract CLI fallback when the system binary is installed
+            # (baked into Dockerfile.gpu; omitted from the minimal CPU Dockerfile).
             try:
                 import shutil
                 import subprocess  # nosec B404
@@ -1657,6 +1659,7 @@ def diagnose_portal_screenshot(
     issues_detected: list[str] = []
     steps: list[str] = []
     screen_checklist: list[dict[str, str]] = []
+    has_zero_downpayment = re.search(r"(?<![\d.,])0\.0+(?!\d)", text_lower) is not None
 
     _ERROR_STATE_TITLES: dict[str, str] = {
         "EFRIS_INSUFFICIENT_STOCK": "EFRIS Error — Insufficient Stock Balance (EFRIS_INSUFFICIENT_STOCK)",
@@ -1693,17 +1696,16 @@ def diagnose_portal_screenshot(
             "Step 2: Enter your 10-digit TIN and password. If prompted, verify the SMS OTP.",
             "Step 3: Once authenticated, re-open the filing or PRN form directly.",
         ]
-    elif any(
+    elif is_installment_screen and any(
         k in text_lower
         for k in (
             "reason for requesting to pay tax",
             "accepting payment of due tax in installment",
             "full payment of 0.0",
-            "document to be uploaded",
         )
     ):
         detected_state = "Tax Payment in Installments — Section F: Upload Documents & Statutory Declaration"
-        if "0.0" in text_lower:
+        if has_zero_downpayment:
             issues_detected.append(
                 "The statutory installment declaration shows 'full payment of 0.0' because earlier liability/schedule sections (Sections C–E) have not generated a payment schedule yet, and the mandatory Reason* and supporting document fields are still empty."
             )
@@ -1720,9 +1722,9 @@ def diagnose_portal_screenshot(
         screen_checklist = [
             {
                 "item": "Section C–E Liability & Schedule Calculation",
-                "status": "action_needed" if "0.0" in text_lower else "detected",
+                "status": "action_needed" if has_zero_downpayment else "detected",
                 "detail": "Down-payment shows 0.0 — complete Sections C–E and click 'Generate Payment Schedule' first"
-                if "0.0" in text_lower
+                if has_zero_downpayment
                 else "Installment payment schedule calculated",
             },
             {
@@ -1741,10 +1743,10 @@ def diagnose_portal_screenshot(
                 "detail": "Tick the red statutory declaration checkbox before clicking 'Submit'",
             },
         ]
-    elif any(
+    elif is_installment_screen and any(
         k in text_lower
         for k in (
-            "section d",
+            "section d -",
             "number of installments",
             "installment start date",
             "equal installment",
@@ -1779,7 +1781,7 @@ def diagnose_portal_screenshot(
                 "detail": "Select 'Installment Start Date*' (DD/MM/YYYY), choose 'Installment Type*', and click 'Generate Payment Schedule'",
             },
         ]
-    elif any(
+    elif is_installment_screen and any(
         k in text_lower
         for k in (
             "enter instrument/notice reference",
@@ -1805,16 +1807,7 @@ def diagnose_portal_screenshot(
                 "detail": "Enter your Return/Assessment Reference Number and click 'Submit', or click '2) Search for Return/Assessment'",
             },
         ]
-    elif any(
-        k in text_lower
-        for k in (
-            "self compliance",
-            "account/ledger balance",
-            "installment payment towards",
-            "apply to tax payment in installment",
-            "basis of installment",
-        )
-    ):
+    elif is_installment_screen:
         detected_state = "Tax Payment in Installments — Section B: Basis of Installment Selection"
         issues_detected.append(
             "You are at the start of the Installment Application wizard (Section B); 'Self Compliance' must be selected before loading your tax liabilities in Section C."

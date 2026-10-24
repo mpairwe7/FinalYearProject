@@ -546,11 +546,14 @@ export default function InbuiltPortalCopilotPage() {
     setValues((prev) => {
       const next: Record<string, string> = {};
       for (const f of screen.fields) {
-        next[f.name] =
+        const candidate =
           pending?.collectedFields?.[f.name] ||
           savedContinuationRef.current[f.name] ||
           prev[f.name] ||
           "";
+        const isAllowed =
+          f.type !== "select" || (f.options ?? []).some((opt) => opt.value === candidate);
+        next[f.name] = isAllowed ? candidate : "";
       }
       return next;
     });
@@ -745,7 +748,9 @@ export default function InbuiltPortalCopilotPage() {
     const restored: Record<string, string> = {};
     for (const f of screen.fields) {
       const candidate = userContinuationFields[f.name];
-      if (!values[f.name] && candidate && !SECRET_FIELD_RE.test(f.name)) {
+      const isAllowed =
+        f.type !== "select" || (f.options ?? []).some((opt) => opt.value === candidate);
+      if (!values[f.name] && candidate && isAllowed && !SECRET_FIELD_RE.test(f.name)) {
         restored[f.name] = candidate;
       }
     }
