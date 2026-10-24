@@ -384,6 +384,51 @@ risks:
     owasp_llm: "LLM10"
     mitre_atlas: "AML.T0029"
 
+  - id: M-AGT-10
+    element: Portal Co-Pilot & Step-Up Auth
+    framework: MAESTRO
+    stride_category: E
+    threat: Agentic portal task confirmation tampering, cross-session replay, step-up OAuth open-redirect (returnTo), or DOM co-pilot secret harvesting (ADR-0013, ADR-0014, OWASP ASI02/ASI03/ASI09)
+    severity: Critical
+    cvss: "9.1"
+    existing_controls: 4-tier portal task policy engine (portal_copilot.py), HMAC-SHA256 signed request_state bound to owner_key and idempotency_key on POST /v1/portal/tasks/execute, TPCA s.75 subject-TIN ownership verification, sanitizeReturnTo CWE-601 guard in oidcFlow.ts, and sanitize_portal_context secret scrubbing
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: backend-team
+    cwe: "CWE-863"
+    owasp_llm: "LLM06"
+    mitre_atlas: "AML.T0051"
+
+  - id: M-AGT-11
+    element: Live Web Research & PDF Sandbox
+    framework: MAESTRO
+    stride_category: E
+    threat: Live web research SSRF, DNS rebinding to internal/metadata IPs, or malicious statutory/MDA PDF extraction outside the ephemeral sandbox (ADR-0008, ADR-0009, OWASP ASI04/ASI05)
+    severity: High
+    cvss: "8.5"
+    existing_controls: Domain allowlisting with pre-connect DNS IP resolution blocking private/loopback/link-local ranges, follow_redirects=False, and isolated subprocess extraction in ephemeral_pdf_sandbox.py with structural pdf_guards.py checks
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: backend-team
+    cwe: "CWE-918"
+    owasp_llm: "LLM01"
+    mitre_atlas: "AML.T0052"
+
+  - id: M-AGT-12
+    element: MCP ToolAthlon Chain & Replay Gate
+    framework: MAESTRO
+    stride_category: T
+    threat: MCP cross-tool/cross-user requestState replay, idempotency_key parameter mutation replay, implicit financial slot aliasing, or Markdown-image exfiltration in tool outputs and resource URIs (ADR-0015, G250, OWASP MCP01/MCP02/MCP06)
+    severity: High
+    cvss: "8.7"
+    existing_controls: "Context- and TTL-bound HMAC-SHA256 requestState (_binding: tool_name, namespace, tenant_id, user_id, exp), user-scoped idempotency keys with canonical _mcp_args_sha256 conflict rejection (idempotency_key_conflict), pre-authz coerce_arguments_to_schema, explicit bind_from required for financial/identity slots in execute_tool_chain, markdown_exfiltration_link & extended secret-leak guards, and validate_resource_uri path-traversal blocking"
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: backend-team
+    cwe: "CWE-345"
+    owasp_llm: "LLM06"
+    mitre_atlas: "AML.T0098"
+
   # ===========================================================================
   # 6. Privacy & Data Protection (LINDDUN Framework)
   # ===========================================================================

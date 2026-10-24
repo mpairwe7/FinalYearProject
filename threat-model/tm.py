@@ -187,10 +187,21 @@ faq_csv.isSQL = False
 faq_csv.storesLogData = False
 faq_csv.storesPII = False
 
-ura_pdfs = Datastore("URA/URSB/UNBS Statutory PDFs (169 files)")
+ura_pdfs = Datastore("URA/Parliament/10-MDA Statutory PDFs (186 files)")
 ura_pdfs.inBoundary = data_layer
 ura_pdfs.isEncrypted = False
 ura_pdfs.storesPII = False
+
+portal_copilot_gate = Server("Portal Co-Pilot & Step-Up Auth Gate (ADR-0014)")
+portal_copilot_gate.inBoundary = backend_container
+portal_copilot_gate.sanitizesInput = True
+portal_copilot_gate.encodesOutput = True
+portal_copilot_gate.hasAccessControl = True
+
+ephemeral_pdf_sandbox = Server("Ephemeral PDF Sandbox & Web Research Router (ADR-0008)")
+ephemeral_pdf_sandbox.inBoundary = backend_container
+ephemeral_pdf_sandbox.sanitizesInput = True
+ephemeral_pdf_sandbox.hasAccessControl = True
 
 sqlite_db = Datastore("SQLite Analytics DB")
 sqlite_db.inBoundary = data_layer

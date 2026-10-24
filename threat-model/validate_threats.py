@@ -584,6 +584,63 @@ THREAT_REGISTRY: list[dict] = [
         ],
         "status": "mitigated",
     },
+    {
+        "id": "T42",
+        "category": "Elevation of Privilege",
+        "description": "Agentic portal task confirmation tampering, cross-session replay, step-up OAuth open-redirect (returnTo), or DOM co-pilot secret harvesting (ADR-0013, ADR-0014, OWASP ASI02/ASI03/ASI09, TPCA Cap. 343 s. 75)",
+        "owasp_llm": "LLM06",
+        "mitre_atlas": "AML.T0051",
+        "mitigation": "4-tier portal task policy engine (portal_copilot.py), HMAC-SHA256 signed request_state bound to owner_key and idempotency_key on POST /v1/portal/tasks/execute, TPCA s.75 subject-TIN ownership verification, sanitizeReturnTo CWE-601 guard in oidcFlow.ts, and sanitize_portal_context secret scrubbing",
+        "evidence": [
+            "App/backend/app/portal_copilot.py",
+            "App/frontend/src/lib/oidcFlow.ts",
+            "tests/agents/test_portal_copilot.py",
+        ],
+        "status": "mitigated",
+    },
+    {
+        "id": "T43",
+        "category": "Elevation of Privilege",
+        "description": "Live web research SSRF, DNS rebinding to internal/metadata IPs, or malicious statutory/MDA PDF extraction outside the ephemeral sandbox (ADR-0008, ADR-0009, OWASP ASI04/ASI05/LLM01)",
+        "owasp_llm": "LLM01",
+        "mitre_atlas": "AML.T0052",
+        "mitigation": "Domain allowlisting (ura.go.ug, parliament.go.ug, bou.or.ug, ulii.org, etc.) with pre-connect DNS IP resolution blocking private/loopback/link-local ranges, follow_redirects=False, and isolated subprocess extraction in ephemeral_pdf_sandbox.py with structural pdf_guards.py checks",
+        "evidence": [
+            "App/backend/app/web_research.py",
+            "App/backend/app/ephemeral_pdf_sandbox.py",
+            "tests/agents/test_ephemeral_pdf_sandbox.py",
+        ],
+        "status": "mitigated",
+    },
+    {
+        "id": "T44",
+        "category": "Tampering",
+        "description": "MCP cross-tool/cross-user requestState replay, idempotency_key parameter mutation replay, or Markdown-image exfiltration in tool outputs and resource URIs (ADR-0015, G250, OWASP MCP01/MCP02/MCP06)",
+        "owasp_llm": "LLM06",
+        "mitre_atlas": "AML.T0098",
+        "mitigation": "Context- and TTL-bound HMAC-SHA256 requestState (_binding: tool_name, namespace, tenant_id, user_id, exp), user-scoped idempotency keys with canonical _mcp_args_sha256 conflict rejection (idempotency_key_conflict), pre-authz coerce_arguments_to_schema, markdown_exfiltration_link & extended secret-leak guards, and validate_resource_uri path-traversal blocking",
+        "evidence": [
+            "App/backend/app/mcp/mrtr.py",
+            "App/backend/app/mcp/client.py",
+            "App/backend/app/mcp/validation.py",
+            "tests/agents/test_mcp_toolathlon_2026_october.py",
+        ],
+        "status": "mitigated",
+    },
+    {
+        "id": "T45",
+        "category": "Information Disclosure",
+        "description": "Visual prompt injection in OCR/VLM uploads or unredacted 14-character Uganda National ID (NIN) exposure across tickets, transcripts, and TTS speech normalization (G243, G247, G248, G249, OWASP LLM01/LLM02/ASI01)",
+        "owasp_llm": "LLM02",
+        "mitre_atlas": "AML.T0024.001",
+        "mitigation": "strip_hidden_control_and_bidi, scan_retrieved_text, and <untrusted_user_document> wrapping on OCR/VLM paths; unified 13-15 char C[MFR] NIN redaction across guardrails.py, StreamingDLPFilter, Semgrep, and gitleaks; and localized spoken redaction labels in speech_normalization.py",
+        "evidence": [
+            "App/backend/app/guardrails.py",
+            "App/backend/app/speech_normalization.py",
+            "tests/agents/test_nin_redaction.py",
+        ],
+        "status": "mitigated",
+    },
 ]
 
 

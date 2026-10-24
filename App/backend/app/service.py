@@ -10720,6 +10720,13 @@ class ChatModel:
                     )
                     conversation_history = conv_ctx["recent_turns"]
                     context_summary = conv_ctx["context_summary"]
+                    consolidated_spec = str(conv_ctx.get("consolidated_spec") or "")
+                    if consolidated_spec:
+                        context_summary = (
+                            f"{context_summary}\nConsolidated Turn State: {consolidated_spec}"
+                            if context_summary
+                            else f"Consolidated Turn State: {consolidated_spec}"
+                        )
                 except Exception:
                     logger.debug("Failed to fetch conversation history", exc_info=True)
 
@@ -12812,6 +12819,12 @@ class ChatModel:
             )
             conversation_history = conv_ctx.recent_turns
             context_summary = conv_ctx.context_summary
+            if conv_ctx.consolidated_spec:
+                context_summary = (
+                    f"{context_summary}\nConsolidated Turn State: {conv_ctx.consolidated_spec}"
+                    if context_summary
+                    else f"Consolidated Turn State: {conv_ctx.consolidated_spec}"
+                )
         else:
             history_session_id = session_id
             if conversation_id or history_session_id:
@@ -12826,6 +12839,13 @@ class ChatModel:
                     )
                     conversation_history = conv_ctx["recent_turns"]
                     context_summary = conv_ctx["context_summary"]
+                    consolidated_spec = str(conv_ctx.get("consolidated_spec") or "")
+                    if consolidated_spec:
+                        context_summary = (
+                            f"{context_summary}\nConsolidated Turn State: {consolidated_spec}"
+                            if context_summary
+                            else f"Consolidated Turn State: {consolidated_spec}"
+                        )
                 except Exception:
                     logger.debug("Failed to fetch conversation history", exc_info=True)
 

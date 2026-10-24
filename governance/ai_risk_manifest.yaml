@@ -310,7 +310,7 @@ devsecops_threat_modelling:
       status: "implemented"
       evidence: "threat-model/validate_threats.py, .semgrep/ura-chatbot-rules.yaml"
       description: >
-        28 threats mapped to OWASP LLM 2025 categories with evidence-based
+        45 threats mapped to OWASP LLM 2025 categories with evidence-based
         mitigation validation in CI (10/10 LLM IDs; T21 accepted).
         2026 remumbering is documented in owasp_llm_2026_crosswalk.
     - framework: "MITRE ATLAS"
@@ -378,7 +378,7 @@ devsecops_threat_modelling:
     - tool: "SLSA v1.2 provenance + Sigstore keyless signing"
       status: "implemented"
       evidence: ".github/workflows/container-sign-provenance.yml, .github/workflows/ura-chatbot-build-push.yml (sign job)"
-      description: "Signing and SLSA attestation run after each landwind/ura-chatbot push from dev, main or a v* tag (sign job); not yet a deployment gate, so a failed signing does not block rollout (G233a); the first run failed before signing (G238). cosign verify is pinned to this repository's signing workflow at those refs only (ADR-0011 A2, A9)"
+      description: "Signing and SLSA attestation run after each landwind/ura-chatbot push from dev, main or a v* tag (sign job); dispatch-deploy and dispatch-hf-space-roll depend on needs: [build, sign] (G233a closed in G251). cosign verify is pinned to this repository's signing workflow at those refs only (ADR-0011 A2, A9)"
     - tool: "zizmor + actionlint"
       type: "GitHub Actions static audit (template injection, credential persistence, dangerous triggers, unpinned images, Dependabot cooldown, impostor commits)"
       status: "implemented"
@@ -404,15 +404,15 @@ devsecops_threat_modelling:
       evidence: ".pre-commit-config.yaml, .github/workflows/secret-scanning.yml"
 
   threat_registry:
-    total_threats: 28
+    total_threats: 45
     stride_coverage: "6/6 categories"
-    owasp_llm_coverage: "10/10 (LLM06 → T28)"
-    mitre_atlas_techniques: 10
-    mitre_atlas_mappings: 19
+    owasp_llm_coverage: "10/10 (LLM06 → T28, T30–T34, T37, T42, T44)"
+    mitre_atlas_techniques: 14
+    mitre_atlas_mappings: 28
     statuses:
-      mitigated: 27
+      mitigated: 44
       accepted: 1
-    validation: "CI gate in .github/workflows/devsecops-sast-dast.yml (threat-model job)"
+    validation: "CI gate in .github/workflows/devsecops-sast-dast.yml and .github/workflows/threat-model.yml"
 
 # =============================================================================
 # OWASP Top 10 for Agentic Applications 2026 (ASI01–ASI10) & AIBOM Inventory
@@ -431,10 +431,12 @@ owasp_agentic_2026:
     - id: "ASI02"
       name: "Tool Misuse and Exploitation"
       status: "mitigated"
-      evidence: "App/backend/app/mcp/policy.py, App/backend/app/tools/__init__.py"
-      controls: "Allow-listed ToolRegistry and MCP policy engine with per-tool risk tiers, required scopes, and bounded tool-call budgets"
+      evidence: "App/backend/app/mcp/policy.py, App/backend/app/mcp/mrtr.py, App/backend/app/mcp/validation.py, App/backend/app/portal_copilot.py, App/backend/app/tools/__init__.py"
+      controls: "Allow-listed ToolRegistry and MCP policy engine with per-tool risk tiers, required scopes, context-bound HMAC-SHA256 requestState (_binding), user-scoped idempotency conflict detection, pre-authz schema coercion, 4-tier portal task policy engine (ADR-0014, ADR-0015), and bounded tool-call budgets"
       verified_by:
         - "App/backend/tests/test_mcp_policy.py"
+        - "tests/agents/test_mcp_toolathlon_2026_october.py"
+        - "tests/agents/test_portal_copilot.py"
     - id: "ASI03"
       name: "Identity and Privilege Abuse"
       status: "mitigated"
@@ -456,10 +458,11 @@ owasp_agentic_2026:
     - id: "ASI05"
       name: "Unexpected Code Execution (RCE)"
       status: "mitigated"
-      evidence: "App/backend/app/documents.py, .bandit.yaml"
-      controls: "No eval/exec tool execution; isolated subprocess document parsing (DOCUMENT_PARSE_ISOLATED) and PDF structural/malware guards"
+      evidence: "App/backend/app/documents.py, App/backend/app/ephemeral_pdf_sandbox.py, .bandit.yaml"
+      controls: "No eval/exec tool execution; isolated subprocess document parsing (DOCUMENT_PARSE_ISOLATED, ephemeral_pdf_sandbox.py — ADR-0008) and PDF structural/malware guards"
       verified_by:
         - "App/backend/tests/test_pdf_guards.py"
+        - "tests/agents/test_ephemeral_pdf_sandbox.py"
     - id: "ASI06"
       name: "Memory and Context Poisoning"
       status: "mitigated"

@@ -316,7 +316,9 @@ address.
   still parsed). `wrap_request_state` and `unwrap_request_state` sign and verify
   `payload` + optional `_binding` (`tool_name`, `namespace`, `tenant_id`,
   `user_id`, `iat`, `exp`, default 1800s TTL) with HMAC-SHA256 (`MCP_REQUEST_STATE_SECRET`,
-  mandatory in production). The agent loop emits
+  mandatory in production; when unset outside production, `wrap_request_state`
+  emits `alg: "none"`, which provides no authenticity guarantee and is refused
+  whenever a secret is configured or `APP_ENV=production`). The agent loop emits
   `tool_call.input_required` and retries once when the caller supplies
   `inputResponses`.
 - **Unknown tools** return `Unknown tool: <name>` only — they do not

@@ -78,6 +78,14 @@ def validate(risks: list[dict]) -> list[str]:
             if "accepted_by" not in r:
                 errors.append(f"{loc}: accepted risk missing 'accepted_by'")
 
+        # Critical and High risks must declare owner, existing_controls, cwe, and mitigation_target/justification
+        if sev in ("Critical", "High"):
+            for req_high in ("owner", "existing_controls", "cwe"):
+                if not str(r.get(req_high) or "").strip():
+                    errors.append(f"{loc}: {sev} risk missing non-empty '{req_high}'")
+            if status != "Accepted" and not str(r.get("mitigation_target") or "").strip():
+                errors.append(f"{loc}: {sev} risk missing 'mitigation_target'")
+
     accepted_path = Path("docs/security/threat-model/accepted-risks.yaml")
     if accepted_path.exists():
         with open(accepted_path) as af:

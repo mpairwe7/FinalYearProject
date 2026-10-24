@@ -67,7 +67,7 @@ _SIGN_IF = "github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main' ||
 _DIGEST_IMAGE = re.compile(r"^[^\s:@]+:[A-Za-z0-9_.-]+@sha256:[0-9a-f]{64}$")
 #: Our own image, rolled to an immutable ``sha-`` tag by ura-chatbot-roll-hf-space.yml.
 SELF_ROLLED = {"App/deploy/hf-space/Dockerfile": "landwind/ura-chatbot:sha-"}
-_SKIP_DIRS = {"node_modules"}
+_SKIP_DIRS = {"node_modules", "CosyVoice"}
 
 
 def _dockerfiles() -> list[Path]:
@@ -311,6 +311,14 @@ def test_signatures_are_verified_against_this_repository_only():
     for name, value in (build["jobs"]["build"].get("outputs") or {}).items():
         assert "IMAGE_NAME" not in str(value) and "image_ref" not in str(value), (
             f"build output {name} would carry the secret-masked image name"
+        )
+    # G233(a): Deploy dispatches must depend on `sign` as well as `build` so no
+    # unsigned image rolls out to Crane Cloud or the HF Space.
+    for deploy_job in ("dispatch-deploy", "dispatch-hf-space-roll"):
+        needs = build["jobs"][deploy_job].get("needs") or []
+        needs_set = {needs} if isinstance(needs, str) else set(needs)
+        assert {"build", "sign"} <= needs_set, (
+            f"{deploy_job} must depend on both 'build' and 'sign' (got {sorted(needs_set)})"
         )
 
 
