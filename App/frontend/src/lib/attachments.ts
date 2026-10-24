@@ -57,6 +57,12 @@ export interface ScreenshotHotspot {
   confidence?: number;
 }
 
+export interface ScreenshotChecklistItem {
+  item: string;
+  status: 'detected' | 'action_needed' | string;
+  detail: string;
+}
+
 export interface ScreenshotGuidance {
   is_screenshot?: boolean;
   detected_portal?: string;
@@ -65,8 +71,18 @@ export interface ScreenshotGuidance {
   portal_category?: string;
   detected_state?: string;
   requires_auth?: boolean;
+  what_needs_to_be_done?: string;
   issues_detected?: string[];
   steps?: string[];
+  checklist?: ScreenshotChecklistItem[];
+  recommended_prompts?: string[];
+  error_diagnosis?: {
+    error_code: string;
+    root_cause: string;
+    statutory_citation: string;
+    resolution_steps: string[];
+    remediation_task_id?: string;
+  };
   hotspots?: ScreenshotHotspot[];
   dom_recipe?: PortalDomAction[];
   completeness_check?: ScreenshotCompletenessCheck;

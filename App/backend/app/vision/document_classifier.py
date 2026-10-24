@@ -87,10 +87,14 @@ _PATTERNS: list[tuple[DocumentType, re.Pattern, float]] = [
             r"internal\s+server\s+error|failed\s+to\s+submit|mandatory\s+field|"
             r"payment\s+registration\s+number\s*\(prn\)|bank\s+selection|"
             r"efris\s+web|stock\s+reconciliation|taxpayer\s+dashboard|"
-            r"browser\s+not\s+supported|connection\s+timed\s+out|invalid\s+tin\s+format",
+            r"browser\s+not\s+supported|connection\s+timed\s+out|invalid\s+tin\s+format|"
+            r"\befris[-_]?\d{3}\b|\berr_[a-z0-9_]+\b|\bprn_expired\b|"
+            r"insufficient\s+stock|negative\s+stock|not\s+enrolled\s+for\s+efris|"
+            r"device\s+not\s+initialized|prn\s+(?:has\s+)?expired|return\s+already\s+filed|"
+            r"tcc\s+rejected|nin\s+validation\s+failed|warehousing\s+period\s+expired",
             re.I,
         ),
-        0.95,
+        0.97,
     ),
     # EFRIS and electronic receipts are high-priority
     (

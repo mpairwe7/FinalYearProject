@@ -59,3 +59,12 @@ Validated by:
 - `tests/test_all_endpoints_e2e.py` (`POST /v1/portal/tasks/execute` registered and verified)
 - `App/frontend/src/__tests__/components/PortalCopilotCard.test.tsx` & `App/frontend/src/__tests__/lib/i18n.test.ts` (5-locale dictionary parity + component interaction tests)
 - `tests/test_monorepo_architecture_governance.py`
+
+## Amendment 1 (2026-10-25 — PR #659 & PR #660, Gaps G254 & G255)
+
+1. **Statutory Portal Error-Code Resolver & Cross-Field Identifier Diagnostics (`portal_copilot.py`, `G254`)**:
+   - Added `diagnose_ura_error(error_text)` mapping 8 statutory URA/EFRIS/e-Tax/PRN/NIRA/BWIMS error families (`EFRIS_INSUFFICIENT_STOCK`, `EFRIS_NOT_ENROLLED`, `EFRIS_INVALID_FDN`, `PRN_EXPIRED_OR_INVALID`, `DUPLICATE_RETURN_PERIOD`, `TCC_COMPLIANCE_BLOCK`, `NIRA_NIN_MISMATCH`, `CUSTOMS_BOND_OR_IM7_EXPIRED`) to root causes, statutory citations, step-by-step resolution plans, and `remediation_task_id`s across `analyze_portal_context`, `evaluate_turn`, `build_portal_task_card`, `handle_portal_task_decision`, and `PortalCopilotCard.tsx`.
+   - Added separator-tolerant TIN/PRN/`CM`/`CF`/`CR`-NIN normalization and cross-field identifier mix-up diagnostics in `validate_task_fields` and `extract_task_entities`.
+2. **Screenshot Error Diagnosis, Screen Completion Checklist & Remediation Handoff (`vision/document_classifier.py`, `documents.py`, `service.py`, `ChatMessage.tsx`, `DocumentInspectionModal.tsx`, `G255`)**:
+   - Expanded `DocumentType.PORTAL_SCREENSHOT` in `vision/document_classifier.py` with EFRIS/e-Tax/PRN/TCC/NIN/BWIMS error patterns so portal error captures are classified as `portal_screenshot` before `DocumentType.RECEIPT`.
+   - Integrated `diagnose_ura_error` and `extract_task_entities` into `diagnose_portal_screenshot` (`documents.py`), routing `inbuilt_portal_url` directly to `&intent={remediation_task_id}`, computing `what_needs_to_be_done`, `checklist` (`detected` vs `action_needed` items), and `recommended_prompts`, and injecting them into `DocumentRecord.passage_text` and the `screenshot_copilot_handoff` card.

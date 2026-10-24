@@ -6554,10 +6554,37 @@ class ChatModel:
             "login_reason",
             "diagnosis_summary",
             "user_message",
+            "what_needs_to_be_done",
         ):
             val = out.get(text_key)
             if isinstance(val, str) and val.strip():
                 out[text_key] = cls._localize_reply(val, locale)
+        if isinstance(out.get("checklist"), list):
+            loc_checklist = []
+            for item in out["checklist"]:
+                if isinstance(item, dict):
+                    item_copy = dict(item)
+                    if isinstance(item_copy.get("item"), str) and item_copy["item"].strip():
+                        item_copy["item"] = cls._localize_reply(item_copy["item"], locale)
+                    if isinstance(item_copy.get("detail"), str) and item_copy["detail"].strip():
+                        item_copy["detail"] = cls._localize_reply(item_copy["detail"], locale)
+                    loc_checklist.append(item_copy)
+            out["checklist"] = loc_checklist
+        if isinstance(out.get("recommended_prompts"), list):
+            out["recommended_prompts"] = [
+                cls._localize_reply(p, locale) if isinstance(p, str) and p.strip() else p
+                for p in out["recommended_prompts"]
+            ]
+        if isinstance(out.get("error_diagnosis"), dict):
+            ed_copy = dict(out["error_diagnosis"])
+            if isinstance(ed_copy.get("root_cause"), str) and ed_copy["root_cause"].strip():
+                ed_copy["root_cause"] = cls._localize_reply(ed_copy["root_cause"], locale)
+            if isinstance(ed_copy.get("resolution_steps"), list):
+                ed_copy["resolution_steps"] = [
+                    cls._localize_reply(s, locale) if isinstance(s, str) and s.strip() else s
+                    for s in ed_copy["resolution_steps"]
+                ]
+            out["error_diagnosis"] = ed_copy
         return out
 
     def _evaluate_portal_copilot(
@@ -6612,11 +6639,28 @@ class ChatModel:
                 except Exception:
                     logger.debug("adopt_workflow_session on portal task resume skipped", exc_info=True)
 
+        eff_history = list(conversation_history or [])
+        if attachments:
+            for att in attachments:
+                sg_att = getattr(att, "screenshot_guidance", None) or (
+                    att.get("screenshot_guidance") if isinstance(att, dict) else None
+                )
+                if isinstance(sg_att, dict) and isinstance(sg_att.get("copilot_handoff"), dict):
+                    pf = sg_att["copilot_handoff"].get("prefill_state")
+                    if isinstance(pf, dict) and pf:
+                        synth_bits = [
+                            f"pay UGX {v}" if k == "amount_ugx" else f"{k} {v}"
+                            for k, v in pf.items()
+                            if v
+                        ]
+                        if synth_bits:
+                            eff_history.append({"user_message": " ".join(synth_bits)})
+
         outcome = pc_mod.evaluate_turn(
             message=router_message or message,
             portal_context=portal_context,
             portal_task_submission=portal_task_submission,
-            conversation_history=conversation_history,
+            conversation_history=eff_history,
             user_id=user_id,
             session_id=session_id,
             conversation_id=thread_id,
@@ -6630,7 +6674,7 @@ class ChatModel:
                     )
                     if isinstance(sg, dict) and sg.get("copilot_handoff"):
                         handoff = dict(sg["copilot_handoff"])
-                        return None, {
+                        sc_card: dict[str, Any] = {
                             "card_type": "screenshot_copilot_handoff",
                             "portal_key": handoff.get("portal_key", "e_services"),
                             "portal_name": handoff.get("detected_portal", "URA Portal"),
@@ -6641,8 +6685,14 @@ class ChatModel:
                             "signin_portal_href": handoff.get("signin_then_portal_url", "/signin"),
                             "prefill_state": handoff.get("prefill_state", {}),
                             "user_message": handoff.get("user_message", ""),
+                            "what_needs_to_be_done": sg.get("what_needs_to_be_done", ""),
+                            "checklist": sg.get("checklist", []),
+                            "recommended_prompts": sg.get("recommended_prompts", []),
                             "completeness_check": sg.get("completeness_check", {}),
                         }
+                        if isinstance(sg.get("error_diagnosis"), dict):
+                            sc_card["error_diagnosis"] = dict(sg["error_diagnosis"])
+                        return None, sc_card
             return None, None
 
         card_dict = outcome.to_dict()

@@ -53,9 +53,18 @@ export function DocumentInspectionModal({
   // Build quick prompt suggestions based on document type, screenshot diagnosis, and fields
   const quickPrompts: string[] = [];
   if (sg?.is_screenshot) {
-    const portalName = sg.detected_portal || t('documents.unknownPortal');
-    quickPrompts.push(t('documents.screenshotIssuePrompt', { portal: portalName }));
-    quickPrompts.push(t('documents.screenshotStepsPrompt', { portal: portalName }));
+    if (sg.recommended_prompts && sg.recommended_prompts.length > 0) {
+      const firstPrompt = sg.recommended_prompts[0];
+      const walkthroughPrompt = sg.recommended_prompts[sg.recommended_prompts.length - 1];
+      quickPrompts.push(firstPrompt);
+      if (walkthroughPrompt && walkthroughPrompt !== firstPrompt) {
+        quickPrompts.push(walkthroughPrompt);
+      }
+    } else {
+      const portalName = sg.detected_portal || t('documents.unknownPortal');
+      quickPrompts.push(t('documents.screenshotIssuePrompt', { portal: portalName }));
+      quickPrompts.push(t('documents.screenshotStepsPrompt', { portal: portalName }));
+    }
   }
   if (fields?.tins && fields.tins.length > 0) {
     quickPrompts.push(`Verify taxpayer TIN ${fields.tins[0]} and explain filing obligations.`);
@@ -147,12 +156,31 @@ export function DocumentInspectionModal({
                 ) : null}
               </div>
 
+              {sg.what_needs_to_be_done && (
+                <p className="doc-modal-summary-text" data-testid="doc-modal-what-needs-to-be-done">
+                  {sg.what_needs_to_be_done}
+                </p>
+              )}
+
               {sg.issues_detected && sg.issues_detected.length > 0 && (
                 <div className="doc-modal-portal-issue-box">
                   <strong>{t('documents.possibleIssue')}:</strong>
                   <ul>
                     {sg.issues_detected.map((issue, idx) => (
                       <li key={idx}>{issue}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {sg.checklist && sg.checklist.length > 0 && (
+                <div className="doc-modal-hotspots-panel" data-testid="doc-modal-screenshot-checklist">
+                  <ul className="doc-modal-hotspots-list">
+                    {sg.checklist.map((item, idx) => (
+                      <li key={idx} className={`doc-modal-hotspot-item is-${item.status === 'detected' ? 'target' : 'error'}`}>
+                        <strong>{item.item}</strong>
+                        <p>{item.detail}</p>
+                      </li>
                     ))}
                   </ul>
                 </div>

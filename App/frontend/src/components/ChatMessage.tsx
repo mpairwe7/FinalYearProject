@@ -369,11 +369,25 @@ function ChatMessageInner({
                       </div>
                     ) : null}
                   </div>
+                  {a.analysis.screenshot_guidance.what_needs_to_be_done ? (
+                    <p className="portal-copilot-subtitle" data-testid="screenshot-what-needs-to-be-done">
+                      {a.analysis.screenshot_guidance.what_needs_to_be_done}
+                    </p>
+                  ) : null}
                   {a.analysis.screenshot_guidance.issues_detected && a.analysis.screenshot_guidance.issues_detected.length > 0 ? (
                     <div className="portal-guidance-issue">
                       <strong>{t('documents.possibleIssue')}</strong>
                       <p>{a.analysis.screenshot_guidance.issues_detected.join(' ')}</p>
                     </div>
+                  ) : null}
+                  {a.analysis.screenshot_guidance.checklist && a.analysis.screenshot_guidance.checklist.length > 0 ? (
+                    <ul className="portal-guidance-checklist" data-testid="screenshot-completion-checklist">
+                      {a.analysis.screenshot_guidance.checklist.map((item, idx) => (
+                        <li key={idx} className={`is-${item.status}`}>
+                          <strong>{item.item}:</strong> <span>{item.detail}</span>
+                        </li>
+                      ))}
+                    </ul>
                   ) : null}
                   {a.analysis.screenshot_guidance.steps && a.analysis.screenshot_guidance.steps.length > 0 ? (
                     <div className="portal-guidance-steps-wrap">
@@ -383,6 +397,22 @@ function ChatMessageInner({
                           <li key={idx}>{stripStepPrefix(step)}</li>
                         ))}
                       </ol>
+                    </div>
+                  ) : null}
+                  {a.analysis.screenshot_guidance.recommended_prompts &&
+                  a.analysis.screenshot_guidance.recommended_prompts.length > 0 &&
+                  onActionClick ? (
+                    <div className="portal-clarifying-chips" data-testid="screenshot-recommended-prompts">
+                      {a.analysis.screenshot_guidance.recommended_prompts.map((promptText) => (
+                        <button
+                          key={promptText}
+                          type="button"
+                          className="workflow-option-btn"
+                          onClick={() => onActionClick(promptText)}
+                        >
+                          {promptText}
+                        </button>
+                      ))}
                     </div>
                   ) : null}
                   <p className="portal-guidance-caution">{t('documents.screenshotCaution')}</p>

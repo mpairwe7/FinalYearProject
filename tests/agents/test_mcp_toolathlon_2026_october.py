@@ -919,3 +919,48 @@ def test_phase9_error_understanding_detection_and_resolution_mechanisms() -> Non
     )
     assert hints["suggested_renames"] == {"tin": "taxpayer_tin", "amount": "amount_ugx"}
 
+
+def test_phase10_screenshot_analysis_error_resolution_and_completion_checklist() -> None:
+    from app.documents import diagnose_portal_screenshot
+    from app.vision.document_classifier import DocumentType, classify_document
+
+    # 1. EFRIS error screenshot is classified as PORTAL_SCREENSHOT (not RECEIPT)
+    shot_text = (
+        "Uganda Revenue Authority — EFRIS Web Portal\n"
+        "Taxpayer TIN: 1000010001\n"
+        "EFRIS-204: Insufficient stock balance for commodity 50202301 when issuing invoice."
+    )
+    cls_res = classify_document(shot_text)
+    assert cls_res.doc_type == DocumentType.PORTAL_SCREENSHOT
+
+    # 2. diagnose_portal_screenshot extracts error_diagnosis, what_needs_to_be_done, checklist,
+    #    recommended_prompts, and routes inbuilt_portal_url to intent=efris_stock_management
+    sg = diagnose_portal_screenshot(
+        text=shot_text,
+        filename="efris_error_screenshot.png",
+        fields={"tins": ["1000010001"], "nins": [], "prns": [], "amounts": [], "tax_heads": ["VAT"], "efris_invoices": []},
+        meta={},
+        doc_type=cls_res.doc_type.value,
+        kind="image",
+    )
+    assert sg["is_screenshot"] is True
+    assert sg["error_diagnosis"]["error_code"] == "EFRIS_INSUFFICIENT_STOCK"
+    assert "EFRIS_INSUFFICIENT_STOCK" in sg["detected_state"]
+    assert "Stock Management" in sg["what_needs_to_be_done"]
+    assert "intent=efris_stock_management" in sg["copilot_handoff"]["inbuilt_portal_url"]
+    assert sg["copilot_handoff"]["prefill_state"]["tin"] == "1000010001"
+    assert any(item["status"] == "action_needed" and "EFRIS_INSUFFICIENT_STOCK" in item["item"] for item in sg["checklist"])
+    assert any(item["status"] == "detected" and "1000010001" in item["detail"] for item in sg["checklist"])
+    assert any("Resolve EFRIS_INSUFFICIENT_STOCK" in p for p in sg["recommended_prompts"])
+
+    # 3. Clicking the recommended remediation prompt triggers detect_portal_task_intent -> efris_stock_management
+    from app.portal_copilot import detect_portal_task_intent
+
+    rem_prompt = sg["recommended_prompts"][0]
+    intent = detect_portal_task_intent(rem_prompt)
+    assert intent is not None and intent.task_id == "efris_stock_management"
+
+    # 4. NIN validation error screen with a CM/CF/CR NIN is still classified as PORTAL_SCREENSHOT (0.97 > 0.96)
+    nin_err_shot = "URA e-Tax Portal: NIN validation failed for CM92010101ABCD — name or date of birth mismatch."
+    assert classify_document(nin_err_shot).doc_type == DocumentType.PORTAL_SCREENSHOT
+
