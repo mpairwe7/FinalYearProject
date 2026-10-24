@@ -1508,7 +1508,12 @@ original text with `backend: "passthrough"` and `latency_s: 0.0`.
 ### Voice Chat (Compound Pipeline)
 
 Full round-trip: audio in -> ASR -> [MT] -> LLM -> [MT] -> TTS -> audio out.
-This is the primary endpoint for voice mode in the web client.
+One request for clients that want the whole turn at once. The web client's
+voice mode no longer uses it (ADR-0016). It transcribes on `/v1/asr`
+(`domain=tax`), shows what was heard at once, and sends it through
+`/v1/chat/stream` with `locale` set to the language heard and
+`locale_explicit: true`, so the answer streams instead of arriving with the
+transcript.
 
 ```http
 POST /v1/voice/chat?language=en&sample_rate=16000&tts_enabled=true&top_k=4

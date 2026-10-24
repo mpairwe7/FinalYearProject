@@ -537,11 +537,12 @@ The local serving stack operates across dedicated hardware allocations on NVIDIA
                        ▼
             [ ura-app-frontend (Next.js 16+, port 3032) ]
                        │
-         ┌─────────────┴─────────────┐
-         ▼                           ▼
-[ /api/v1/calls/stream ]     [ /api/v1/voice/chat ]
-         │                           │
-         └─────────────┬─────────────┘
+         ┌─────────────┴──────────────────┐
+         ▼                                ▼
+[ /api/v1/calls/stream ]     [ voice mode: /api/v1/asr,  ]
+         │                   [ then /api/v1/chat/stream  ]
+         │                                │
+         └─────────────┬──────────────────┘
                        ▼
         [ ura-app-api:gpu (FastAPI on GPU 3, port 8083) ]
          ├── ASR: Sunbird/asr-whisper-large-v3-salt (cuda:0)
@@ -586,9 +587,20 @@ The local serving stack operates across dedicated hardware allocations on NVIDIA
 #### 2. REST Voice Chat Pipeline (`POST /v1/voice/chat`)
 - Ingests audio payloads (PCM, WAV, MP3).
 - **Pipeline**: Inbound Audio → ASR Transcribe → Language Detection (Lingua) → [Prompted MT to English] → RAG / Tool Execution → [Prompted MT to Target Locale] → TTS Synthesize → Outbound Audio + Transcript.
+- One request for the whole turn. The web chat's voice mode no longer uses it (ADR-0016; see 4).
 
-#### 3. Streaming Reply Speech (`GET /v1/chat/stream/speech`)
-- Streams sentence-by-sentence synthesized audio chunks paired with text generation tokens for accessible audio narration in the web UI.
+#### 3. Streaming Reply Speech (`POST /v1/tts/stream`)
+- Streams a reply's speech as NDJSON, one piece (Ogg/Opus where the browser plays it, else WAV) as soon as each sentence-sized piece is voiced. The web UI plays the pieces back to back, for a Listen tap, for narration, and in voice mode.
+
+#### 4. Web Chat Voice Mode (`/v1/asr` → `/v1/chat/stream`, ADR-0016)
+- The browser records and decides the end of the turn itself (`endOfTurn.ts`: a speech-band level detector, a 1.2 s pause by default, shown as a countdown ring).
+- **Pipeline**:
+  1. `POST /v1/asr?domain=tax` transcribes the turn, with the same `repair_asr_entities` as `/v1/voice/chat`.
+  2. The transcript is shown at once as the taxpayer's turn.
+  3. `POST /v1/chat/stream` answers it, with `locale` set to the language heard and `locale_explicit: true`.
+  4. `POST /v1/tts/stream` reads the answer once it has finished arriving.
+  5. The mic opens again.
+- `VoiceModeDock` names each step (listening, hearing you, sending when you stop, got it, the answer's step, speaking).
 
 ---
 

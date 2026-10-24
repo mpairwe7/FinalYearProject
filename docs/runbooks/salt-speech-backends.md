@@ -665,9 +665,10 @@ The one miss is Luganda 0% (acoustic boundary: "zeero" heard as "z'erokubuli"). 
 The chat speaks a reply through `POST /v1/tts/stream` (API reference, "Stream
 Reply Speech"): NDJSON, one line per piece as soon as it is voiced. Before, the
 whole answer was synthesised into one WAV, and nothing was heard until all of
-it arrived. Voice mode now asks `/v1/voice/chat` for text only
-(`tts_enabled=false`), shows the answer, and speaks it through the stream when
-narration is on.
+it arrived. Voice mode transcribes on `/v1/asr`, answers the words it heard
+through `/v1/chat/stream`, and speaks the answer through this stream once it
+has finished arriving (ADR-0016; before 2026-10-24 it asked `/v1/voice/chat`
+for text only).
 
 * **Pieces grow.** Cut at sentence, clause, then word breaks: at most
   `SPEECH_STREAM_FIRST_PIECE_CHARS` (60) characters for the first, 90 for the
