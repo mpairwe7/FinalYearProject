@@ -974,10 +974,28 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
                 re.IGNORECASE,
             )
         )
+        include_lst = bool(
+            re.search(
+                r"\b(lst|local\s+service\s+tax)\b",
+                text,
+                re.IGNORECASE,
+            )
+        )
+        has_pwd = bool(
+            re.search(
+                r"\b(disabilit\w*|person\s+with\s+disabilit\w*|\bpwd\b)\b",
+                text,
+                re.IGNORECASE,
+            )
+        )
         params: dict[str, object] = {
             "residency": "non_resident" if _NON_RESIDENT_RE.search(text) else "resident",
             "include_nssf": include_nssf,
         }
+        if include_lst:
+            params["include_lst"] = True
+        if has_pwd:
+            params["has_disability_exemption"] = True
         assumptions = []
         if params["residency"] == "resident" and not re.search(r"resident", text, re.IGNORECASE):
             assumptions.append("resident employee (say “non-resident” if not)")
@@ -985,6 +1003,10 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
             assumptions.append("non-resident employee tax rates applied")
         if include_nssf:
             assumptions.append("includes 5% employee NSSF deduction")
+        if include_lst:
+            assumptions.append("includes monthly Local Service Tax (LST) deduction")
+        if has_pwd:
+            assumptions.append("applies person-with-disability exemption threshold (s.21(1)(v))")
         missing = []
         if single is not None:
             if _ANNUAL_RE.search(text):
@@ -1015,11 +1037,15 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
 
     if intent == "corporation":
         params, missing = {}, []
+        assumptions = []
+        if re.search(r"\b(non[-\s]?resident\s+branch|branch\s+repatriat\w*|foreign\s+branch)\b", text, re.IGNORECASE):
+            params["is_non_resident_branch"] = True
+            assumptions.append("non-resident branch (includes 15% branch profit repatriation tax under s.82)")
         if single is not None:
             params["chargeable_income"] = single
         else:
             missing.append("chargeable_income")
-        return CalcPlan("calculate_corporation_tax", "calc_corporation_tax", params, missing, [])
+        return CalcPlan("calculate_corporation_tax", "calc_corporation_tax", params, missing, assumptions)
 
     if intent == "capital_gains":
         params, missing = {}, []
@@ -1095,18 +1121,29 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
                 assumptions.append("mobile money cash withdrawal (0.5% rate)")
             else:
                 missing.append("excise_type")
-        if single is not None:
+        _specific_excise_types = {
+            "fuel_petrol",
+            "fuel_diesel",
+            "fuel_kerosene",
+            "cement_50kg",
+            "sugar_kg",
+            "cooking_oil_litre",
+            "cooking_fat_kg",
+            "motorcycle_first_registration",
+        }
+        m_qty = re.search(
+            r"\b(\d[\d,]*(?:\.\d+)?)\s*(?:50\s*kg\s+)?(?:litres?|bags?|kg|kilograms?|motorcycles?|units?)\b",
+            text,
+            re.IGNORECASE,
+        )
+        if excise_type in _specific_excise_types and m_qty:
+            params["amount"] = float(m_qty.group(1).replace(",", ""))
+        elif single is not None:
             params["amount"] = single
+        elif m_qty:
+            params["amount"] = float(m_qty.group(1).replace(",", ""))
         else:
-            m_qty = re.search(
-                r"\b(\d[\d,]*(?:\.\d+)?)\s*(?:litres?|bags?|kg|kilograms?|motorcycles?|units?)\b",
-                text,
-                re.IGNORECASE,
-            )
-            if m_qty:
-                params["amount"] = float(m_qty.group(1).replace(",", ""))
-            else:
-                missing.append("amount")
+            missing.append("amount")
         return CalcPlan("calculate_excise_duty", "calc_excise_duty", params, missing, assumptions)
 
     if intent == "rental":
@@ -1223,9 +1260,19 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
         ]
         if result.get("nssf_included"):
             lines.append(f"- NSSF employee contribution: {_ugx(result['nssf_employee'])} (5% of gross)")
-            tot_ded = float(result.get("paye", 0)) + float(result.get("nssf_employee", 0))
+            if float(result.get("nssf_employer") or 0) > 0:
+                lines.append(
+                    f"- NSSF employer contribution: {_ugx(result['nssf_employer'])} (10% of gross; total employer cost: {_ugx(result['total_employer_cost'])})"
+                )
+            tot_ded = (
+                float(result.get("paye", 0))
+                + float(result.get("nssf_employee", 0))
+                + float(result.get("lst_monthly", 0))
+            )
             tot_pct = (tot_ded / gross_val * 100) if gross_val > 0 else 0
             lines.append(f"- Total statutory deductions ({tot_pct:.1f}%): **{_ugx(tot_ded)}**")
+        if result.get("lst_included") and float(result.get("lst_monthly") or 0) > 0:
+            lines.append(f"- Local Service Tax (LST): {_ugx(result['lst_monthly'])} per month")
         lines += [
             f"- Net take-home: **{_ugx(result['net_take_home'])}**",
             f"- Band applied: {float(band.get('marginal_rate', 0)) * 100:.0f}% marginal ({band_span})",
@@ -1248,6 +1295,12 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
             "",
             f"- Chargeable income: {_ugx(result['chargeable_income'])}",
             f"- Tax at {float(result['rate']) * 100:.0f}%: **{_ugx(result['tax'])}**",
+        ]
+        if float(result.get("branch_repatriation_tax") or 0) > 0:
+            rep_pct = float(result.get("branch_repatriation_tax_rate") or 0.15) * 100
+            lines.append(f"- Branch repatriation tax at {rep_pct:.0f}% (s.82): **{_ugx(result['branch_repatriation_tax'])}**")
+            lines.append(f"- Total corporate & branch tax: **{_ugx(result['total_tax'])}**")
+        lines += [
             f"- After-tax income: {_ugx(result['after_tax'])}",
             "- Statutory Basis: Income Tax Act",
         ]
