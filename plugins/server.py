@@ -7,7 +7,9 @@ requires a service key and confirmation plus idempotency for simulated writes.
 
 from __future__ import annotations
 
+import hashlib
 import hmac
+import json
 import logging
 import os
 import sys
@@ -125,11 +127,25 @@ def _run_confirmed_rest_action(
             "message": "No connector action has run. Review and confirm the proposal before retrying.",
         }
 
+    args_digest = hashlib.sha256(
+        json.dumps(arguments, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
     replay_key = f"rest:{operation}:{key}"
     with _MCP_REPLAY_LOCK:
         cached = _MCP_REPLAY_CACHE.get(replay_key)
         if cached is not None:
-            return {**cached, "replayed": True}
+            saved_digest = cached.get("_args_sha256")
+            if saved_digest and saved_digest != args_digest:
+                return {
+                    "ok": False,
+                    "submitted": False,
+                    "error": "idempotency_key_conflict",
+                    "detail": f"Idempotency key for '{operation}' was already used with different arguments.",
+                    "mode": "simulation",
+                    "live": False,
+                }
+            public_cached = {k: v for k, v in cached.items() if k != "_args_sha256"}
+            return {**public_cached, "replayed": True}
         result = execute(arguments)
         response = {
             "ok": bool(result.get("ok", True)) if isinstance(result, dict) else True,
@@ -142,7 +158,7 @@ def _run_confirmed_rest_action(
         if response["ok"]:
             if len(_MCP_REPLAY_CACHE) >= 512:
                 _MCP_REPLAY_CACHE.pop(next(iter(_MCP_REPLAY_CACHE)))
-            _MCP_REPLAY_CACHE[replay_key] = response
+            _MCP_REPLAY_CACHE[replay_key] = {**response, "_args_sha256": args_digest}
         return response
 
 
@@ -265,12 +281,26 @@ def call_mcp_tool(
             "live": False,
         }
 
+    args_digest = hashlib.sha256(
+        json.dumps(tool_arguments, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
     replay_key = f"{safe_tool_id}:{body.idempotency_key.strip()}" if tool.schema.requires_confirmation else ""
     if replay_key:
         with _MCP_REPLAY_LOCK:
             cached = _MCP_REPLAY_CACHE.get(replay_key)
             if cached is not None:
-                return {**cached, "replayed": True}
+                saved_digest = cached.get("_args_sha256")
+                if saved_digest and saved_digest != args_digest:
+                    return {
+                        "ok": False,
+                        "tool_name": safe_tool_id,
+                        "error": "idempotency_key_conflict",
+                        "detail": f"Idempotency key for '{safe_tool_id}' was already used with different arguments.",
+                        "mode": "simulation",
+                        "live": False,
+                    }
+                public_cached = {k: v for k, v in cached.items() if k != "_args_sha256"}
+                return {**public_cached, "replayed": True}
             try:
                 result = tool.execute(**tool_arguments)
                 response = {
@@ -287,7 +317,7 @@ def call_mcp_tool(
             if response["ok"]:
                 if len(_MCP_REPLAY_CACHE) >= 512:
                     _MCP_REPLAY_CACHE.pop(next(iter(_MCP_REPLAY_CACHE)))
-                _MCP_REPLAY_CACHE[replay_key] = response
+                _MCP_REPLAY_CACHE[replay_key] = {**response, "_args_sha256": args_digest}
             return response
 
     try:

@@ -66,9 +66,11 @@ Every HTTP request to a connector server must present a bearer credential. With 
 - Remote MCP endpoints are supplied through reviewed deployment configuration. Before rollout, review DNS resolution, HTTPS/TLS identity, redirects, and network egress rules so the configured server cannot reach loopback, private, or cloud metadata services.
 - The `/admin/connectors` screen only reports and checks configured connectors. Its health checks are not a substitute for the endpoint and network review.
 
-### 2.6 Distributed Saga Compensation
-- Multi-action business sequences support atomic rollbacks via `SystemConnector.compensate()`.
-- If a downstream action fails (e.g. payment recorded but invoice creation fails), the orchestrator triggers reverse compensation routines.
+### 2.6 Distributed Saga Compensation & ToolAthlon Long-Horizon Chain Execution (`ADR-0015`, `G250`)
+- Multi-action business sequences support atomic rollbacks via `SystemConnector.compensate()` and deterministic cross-server execution via `MCPClient.execute_tool_chain()`.
+- `execute_tool_chain()` automatically binds output fields from earlier steps into downstream steps (`_CHAIN_SLOT_ALIASES` + explicit `bind_from`), applies lossless schema-guided argument coercion (`coerce_arguments_to_schema`) and structured self-correction `repair_hints` (`build_validation_repair_hints`), and halts fail-closed at the first confirmation (`status="awaiting_confirmation"`) or elicitation (`status="input_required"`) boundary.
+- Idempotency replay keys are scoped by `(tenant_id, user_id, tool_name, idempotency_key)` and verified against the SHA-256 digest of canonical arguments (`_mcp_args_sha256`), rejecting key reuse with mutated parameters (`error="idempotency_key_conflict"`).
+- `wrap_request_state` / `unwrap_request_state` (`mrtr.py`) bind `(tool_name, namespace, tenant_id, user_id, exp)` inside the HMAC-SHA256 envelope, and `MCPClient.read_resource` enforces `validate_resource_uri` (scheme allowlisting + path-traversal blocking) and output safety screening (`screen_tool_result`).
 
 ---
 

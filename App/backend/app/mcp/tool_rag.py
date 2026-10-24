@@ -106,6 +106,16 @@ _MULTILINGUAL_TAX_SYNONYMS: dict[str, tuple[str, ...]] = {
     "ebitundu": ("simulate", "tax", "relief", "instalments"),
     "awamu": ("simulate", "tax", "relief", "instalments"),
     "essimu": ("resolve", "efris", "account", "recovery", "lost", "sim", "tin"),
+    # 5-locale Enterprise Connector & ToolAthlon Multi-App Synonyms (EFRIS, DTS, URSB, BWIMS, Payment)
+    "risiti": ("efris", "fiscal", "invoice", "receipt"),
+    "stakabadhi": ("efris", "fiscal", "invoice", "receipt"),
+    "ankara": ("efris", "fiscal", "invoice"),
+    "sitampu": ("dts", "digital", "stamp", "stamps", "excise"),
+    "stempu": ("dts", "digital", "stamp", "stamps", "excise"),
+    "kampuni": ("ursb", "business", "register", "verify", "corporation"),
+    "kkampuni": ("ursb", "business", "register", "verify", "corporation"),
+    "ebitongole": ("ursb", "business", "register", "verify"),
+    "boondi": ("bwims", "bonded", "warehouse", "consignment", "inventory"),
 }
 
 
@@ -169,14 +179,20 @@ class ToolRAGSelector:
         """
         schema = tool.schema
         name_tokens = _tokenize(schema.name.replace("_", " "))
-        desc_tokens = _tokenize(schema.description) - name_tokens
+        ns_tokens = _tokenize(schema.namespace.replace("_", " "))
+        props = (schema.parameters or {}).get("properties") or {}
+        param_tokens: set[str] = set()
+        if isinstance(props, dict):
+            for prop_key in props:
+                param_tokens.update(_tokenize(str(prop_key).replace("_", " ")))
+        desc_tokens = (_tokenize(schema.description) | ns_tokens | param_tokens) - name_tokens
         if not query_tokens:
             return 0.0
         name_hits = len(query_tokens & name_tokens)
         desc_hits = len(query_tokens & desc_tokens)
         if name_hits == 0 and desc_hits == 0:
             return 0.0
-        # Name hits get a 5x weight, desc hits get 1x.  Normalise by
+        # Name hits get a 5x weight, desc/param/namespace hits get 1x. Normalise by
         # query length so scores are comparable across tools.
         weighted = (name_hits * 5 + desc_hits) / max(len(query_tokens), 1)
         return round(weighted, 4)
@@ -206,12 +222,19 @@ class ToolRAGSelector:
         eligible_names: list[str],
         k: int = 5,
         min_score: float = 0.0,
+        *,
+        diversify_namespaces: bool = True,
     ) -> ToolSelection:
         """Return the top-k tool names for *query*.
 
         *eligible_names* is the post-authz whitelist from
         :py:meth:`MCPClient.available_for`.  Mandatory rails are
         always appended (deduplicated) at the end.
+
+        When *diversify_namespaces* is True (ToolAthlon multi-server mode),
+        the highest-scoring tool from each strongly matched MCP namespace is
+        represented before remaining *k* slots are filled with runners-up from
+        already-represented namespaces.
         """
         from ..tools import ToolRegistry
 
@@ -220,6 +243,8 @@ class ToolRAGSelector:
 
         query_tokens = _tokenize(query)
         scores: dict[str, float] = {}
+        tool_namespaces: dict[str, str] = {}
+        tool_has_name_hit: dict[str, bool] = {}
         use_dense = self._dense_model is not None
 
         for name in eligible_names:
@@ -228,17 +253,42 @@ class ToolRAGSelector:
                 continue
             if use_dense:
                 s = self._score_dense(query, tool)
+                has_name_hit = True
             else:
                 s = self._score_token_overlap(query_tokens, tool)
+                name_toks = _tokenize(tool.schema.name.replace("_", " ")) | _tokenize(
+                    tool.schema.namespace.replace("_", " ")
+                )
+                has_name_hit = bool(query_tokens & name_toks)
             # Only record tools that actually matched — otherwise
             # a zero-score tool would prevent the fallback branch
             # from firing when the query has no relevant tools.
             if s > 0 and s >= min_score:
                 scores[name] = round(s, 4)
+                tool_namespaces[name] = tool.schema.namespace
+                tool_has_name_hit[name] = has_name_hit
 
-        # Top-k by score, descending
-        ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:k]
-        selected = [name for name, _ in ranked]
+        ranked_all = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
+        if diversify_namespaces and ranked_all and k > 1:
+            best_score = ranked_all[0][1]
+            selected: list[str] = []
+            seen_ns: set[str] = set()
+            # Pass 1: top tool from each namespace with a direct name/namespace match
+            for name, score in ranked_all:
+                if len(selected) >= k:
+                    break
+                ns = tool_namespaces.get(name, "core")
+                if ns not in seen_ns and tool_has_name_hit.get(name, False) and score >= best_score * 0.25:
+                    selected.append(name)
+                    seen_ns.add(ns)
+            # Pass 2: fill remaining k slots by score order
+            for name, _score in ranked_all:
+                if len(selected) >= k:
+                    break
+                if name not in selected:
+                    selected.append(name)
+        else:
+            selected = [name for name, _ in ranked_all[:k]]
 
         # Always add the mandatory rails (preserving order; dedupe)
         for rail in MANDATORY_RAILS:
