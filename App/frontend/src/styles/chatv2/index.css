@@ -7,6 +7,8 @@
    After shell.css because it restyles the same rail selectors. */
 @import "./sidebar.css";
 @import "./composer.css";
+/* Voice mode's dock, in the composer's place while voice mode is on. */
+@import "./voice-dock.css";
 @import "./messages.css";
 /* The working indicator + "Thought for …". After messages.css because it sits
    inside the transcript it styles. */

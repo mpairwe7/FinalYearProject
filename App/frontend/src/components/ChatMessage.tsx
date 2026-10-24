@@ -14,7 +14,7 @@ import { savePendingPortalContinuation } from '../lib/portalContinuation';
 import { detectDeadlineInMessage, downloadCalendarEvent, getGoogleCalendarUrl } from '../lib/calendarEvents';
 import FeedbackButtons from './FeedbackButtons';
 import HumanHandoff from './HumanHandoff';
-import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon, FileIcon, DownloadIcon, EyeIcon, PlugIcon, ArrowRightIcon, ExternalLinkIcon, AlertTriangleIcon, LockIcon } from './Icons';
+import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon, FileIcon, DownloadIcon, EyeIcon, PlugIcon, ArrowRightIcon, ExternalLinkIcon, AlertTriangleIcon, LockIcon, MicIcon } from './Icons';
 import LoadingState from './LoadingState';
 import Markdown from './Markdown';
 import PortalCopilotCard from './PortalCopilotCard';
@@ -265,6 +265,14 @@ function ChatMessageInner({
             the indicator itself was, so the turn ends where it was running. */}
         {isAssistant && phaseLabel && phaseStartedAt != null && (
           <LoadingState label={phaseLabel} variant={phaseVariant} startedAt={phaseStartedAt} />
+        )}
+        {/* What the speech recogniser heard, marked as such: a mishearing then
+            reads as one, not as something the taxpayer typed. */}
+        {!isAssistant && turn.spoken && (
+          <p className="msg-spoken-tag" aria-hidden="true">
+            <MicIcon />
+            {t('message.spoken')}
+          </p>
         )}
         <div className="msg-content">
           {isAssistant ? (

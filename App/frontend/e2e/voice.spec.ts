@@ -3,11 +3,13 @@
  *
  * Exercises the browser side of the STT/TTS surface against a fully stubbed
  * `/api/*` (see helpers.ts): the real getUserMedia → MediaRecorder → AudioContext
- * capture pipeline runs against Chromium's fake media device, and the captured
- * audio is POSTed to the stubbed `/v1/voice/chat`, and replies are read from the
- * stubbed `/v1/tts/stream` (or `/v1/tts`, its fallback). We assert the UI
- * state machine and the *request contract* (raw-audio body, consent header,
- * sample-rate query) rather than transcription accuracy (the fake mic is silent).
+ * capture pipeline runs against Chromium's fake media device. In voice mode the
+ * captured audio is POSTed to the stubbed `/v1/asr`, what it heard goes out as
+ * a turn on the stubbed `/v1/chat/stream`, and the answer is read from the
+ * stubbed `/v1/tts/stream` (or `/v1/tts`, its fallback). We assert the voice
+ * dock's state machine and the *request contract* (raw-audio body, consent
+ * header, sample-rate query, the language heard) rather than transcription
+ * accuracy (the fake mic is silent).
  *
  * Requires the config-level `--use-fake-{ui,device}-for-media-stream` flags,
  * `permissions: ['microphone']`, and `--autoplay-policy=no-user-gesture-required`.
@@ -20,7 +22,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { silentWavB64 } from "./audio";
 import { TINY_WAV_B64 } from "./fixtures";
-import { clearChatStore, mockBackend, seedConsent, sendMessage } from "./helpers";
+import { clearChatStore, mockBackend, seedConsent, sendMessage, sseReply } from "./helpers";
 
 // Desktop-only: some composer controls are hidden <720px.
 const HEADER_ONLY = "these controls are hidden on the mobile layout (<720px)";
@@ -104,57 +106,142 @@ test.describe("Voice STT/TTS (mocked)", () => {
     await expect(page.getByRole("button", { name: "Enter voice mode" })).toBeEnabled();
   });
 
-  test("voice-mode toggle is enabled when speech is ready", async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name === "mobile-chrome", HEADER_ONLY);
+  /**
+   * Entering voice mode used to change a placeholder and nothing else: the mic
+   * wanted a second tap on another button, and nothing said so. Now the dock
+   * takes the composer's place with the mic already open, says "Listening",
+   * and has the focus; End puts the composer back, with the focus in it.
+   */
+  test("entering voice mode opens the mic at once, in a dock that says so", async ({ page }) => {
     await mockBackend(page);
     await page.goto("/");
-    const voiceToggle = page.getByRole("button", { name: "Enter voice mode" });
-    await expect(voiceToggle).toBeEnabled();
-    await voiceToggle.click();
-    // The one primary slot now reads "Exit voice mode" — same button, engaged.
-    await expect(page.getByRole("button", { name: "Exit voice mode" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    // The mic affordance is present and enabled in the composer.
-    await expect(page.getByRole("button", { name: "Start speaking" })).toBeEnabled();
-  });
-
-  test("recording a turn POSTs WAV audio + consent to /v1/voice/chat and renders transcript + reply", async ({
-    page,
-  }, testInfo) => {
-    test.skip(testInfo.project.name === "mobile-chrome", HEADER_ONLY);
-    test.slow(); // real MediaRecorder capture needs a recording window
-    await mockBackend(page);
-    await page.goto("/");
-
     await page.getByRole("button", { name: "Enter voice mode" }).click();
 
-    // Start recording → composer switches to the "Listening…" state.
-    await page.getByRole("button", { name: "Start speaking" }).click();
-    await expect(page.getByText("Listening...")).toBeVisible({ timeout: 10_000 });
+    const dock = page.getByTestId("voice-dock");
+    await expect(dock).toBeVisible();
+    await expect(page.getByLabel("Type your message")).toHaveCount(0);
+    await expect(page.getByTestId("voice-dock-label")).toHaveText("Listening", { timeout: 10_000 });
+    await expect(page.getByRole("button", { name: "Send now" })).toBeFocused();
+    await expect(dock.locator(".call-orb")).toHaveAttribute("data-state", "listening");
 
+    await page.getByRole("button", { name: "End voice mode" }).click();
+    await expect(dock).toHaveCount(0);
+    await expect(page.getByLabel("Type your message")).toBeFocused();
+  });
+
+  test("Escape turns the mic off first, then leaves voice mode", async ({ page }) => {
+    await mockBackend(page);
+    await page.goto("/");
+    await page.getByRole("button", { name: "Enter voice mode" }).click();
+    await expect(page.getByTestId("voice-dock-label")).toHaveText("Listening", { timeout: 10_000 });
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("voice-dock-label")).toHaveText("Tap the mic to talk");
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("voice-dock")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Enter voice mode" })).toBeVisible();
+  });
+
+  /**
+   * The gap this change closes. The turn used to go to /v1/voice/chat, which
+   * answered with the transcript and the whole reply together, 2–20 s later,
+   * with nothing on screen moving in between — on the landing page, nothing
+   * at all. Now what was heard is the taxpayer's turn before any answer
+   * exists, the dock says it back and offers Stop while the answer is worked
+   * on, and the answer streams in and is read aloud once it has all arrived.
+   */
+  test("a spoken turn shows what was heard at once, then streams the answer and reads it aloud", async ({
+    page,
+  }) => {
+    test.slow(); // real MediaRecorder capture needs a recording window
+    await mockBackend(page);
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/v1/chat/stream", async (route) => {
+      await held;
+      await route.fulfill({
+        status: 200,
+        headers: { "content-type": "text/event-stream; charset=utf-8" },
+        body: sseReply("The standard VAT rate in Uganda is 18%."),
+      });
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: "Enter voice mode" }).click();
+    const send = page.getByRole("button", { name: "Send now" });
+    await expect(send).toBeVisible({ timeout: 10_000 });
     // Let the fake device feed the MediaRecorder so the decoded PCM is non-empty.
     await page.waitForTimeout(1500);
 
-    const voiceReq = page.waitForRequest("**/api/v1/voice/chat**");
-    await page.getByRole("button", { name: "Send recording" }).click();
+    const asrReq = page.waitForRequest("**/api/v1/asr**");
+    const chatReq = page.waitForRequest("**/api/v1/chat/stream");
+    await send.click();
 
-    const req = await voiceReq;
-    expect(req.method()).toBe("POST");
+    const asr = await asrReq;
+    expect(asr.method()).toBe("POST");
     // WAV, not headerless PCM: a recording starting on sample -1 (FF FF) was sniffed as MP3 (G93).
-    expect((req.headers()["content-type"] || "")).toContain("audio/wav");
-    expect(req.postDataBuffer()?.subarray(0, 4).toString("ascii")).toBe("RIFF");
-    expect(req.headers()["x-voice-consent"]).toBe("true");
-    expect(req.url()).toContain("sample_rate=");
+    expect(asr.headers()["content-type"] || "").toContain("audio/wav");
+    expect(asr.postDataBuffer()?.subarray(0, 4).toString("ascii")).toBe("RIFF");
+    expect(asr.headers()["x-voice-consent"]).toBe("true");
+    const asrUrl = new URL(asr.url());
+    expect(asrUrl.searchParams.get("sample_rate")).toBeTruthy();
+    expect(asrUrl.searchParams.get("language")).toBe("en");
+    expect(asrUrl.searchParams.get("domain")).toBe("tax");
 
-    // The stubbed compound reply is rendered as user transcript + assistant turn.
-    await expect(page.locator(".message-row-user").last()).toContainText("VAT", {
-      timeout: 15_000,
+    // What was heard goes out as a turn, answered in the language it was heard in…
+    expect((await chatReq).postDataJSON()).toMatchObject({
+      message: "what is the standard VAT rate in Uganda",
+      locale: "en",
+      locale_explicit: true,
     });
+    // …and is on screen, marked as spoken, while the answer is still being worked on.
+    const userTurn = page.locator(".message-row-user").last();
+    await expect(userTurn).toContainText("what is the standard VAT rate in Uganda");
+    await expect(userTurn).toContainText("Spoken");
+    await expect(page.getByTestId("voice-dock-detail")).toContainText(
+      "You said: “what is the standard VAT rate in Uganda”",
+    );
+    await expect(page.getByTestId("voice-dock-primary")).toHaveAccessibleName("Stop");
+
+    const ttsReq = page.waitForRequest("**/api/v1/tts/stream");
+    release();
     await expect(page.locator(".message-row-assistant").last()).toContainText("18%", {
       timeout: 15_000,
     });
+    expect((await ttsReq).postDataJSON().text).toContain("18%");
+  });
+
+  test("Stop in voice mode stops the answer, and does not read it out", async ({ page }) => {
+    test.slow();
+    await mockBackend(page);
+    // An answer held back until the test is over: only Stop ends this turn.
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/v1/chat/stream", async (route) => {
+      await held;
+      // The page gave up on this request when Stop was pressed.
+      await route.fulfill({ body: "" }).catch(() => {});
+    });
+    const tts: string[] = [];
+    page.on("request", (r) => {
+      if (r.url().includes("/api/v1/tts")) tts.push(r.url());
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: "Enter voice mode" }).click();
+    const primary = page.getByTestId("voice-dock-primary");
+    await expect(primary).toHaveAccessibleName("Send now", { timeout: 10_000 });
+    await page.waitForTimeout(1200);
+    await primary.click();
+
+    await expect(primary).toHaveAccessibleName("Stop", { timeout: 15_000 });
+    await primary.click();
+    await expect(page.getByTestId("voice-dock-label")).toHaveText("Tap the mic to talk", { timeout: 10_000 });
+    await page.waitForTimeout(1000);
+    expect(tts).toEqual([]);
+    release();
   });
 
   test("listening to a reply streams its speech from /v1/tts/stream", async ({ page }) => {
@@ -232,45 +319,43 @@ test.describe("Voice STT/TTS (mocked)", () => {
     await expect(page.getByRole("button", { name: /Listen in English/ }).last()).toBeEnabled();
   });
 
-  test("voice mode sends the turn by itself when the speaker pauses", async ({ page }) => {
+  test("voice mode sends the turn by itself when the speaker pauses, and says it will", async ({ page }) => {
     test.slow(); // a real recording window, then the pause
     await speakThenPause(page);
     await mockBackend(page);
     await page.goto("/");
 
+    const asrReq = page.waitForRequest("**/api/v1/asr**", { timeout: 15_000 });
     await page.locator('[data-testid="composer-voicemode"]').click();
-    const voiceReq = page.waitForRequest("**/api/v1/voice/chat**", { timeout: 15_000 });
-    await page.locator('[data-testid="composer-mic"]').click();
-    await expect(page.locator('[data-testid="composer-rec-confirm"]')).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText("Sends when you pause.", { exact: false })).toBeVisible();
+    // The tone is speech to the meter: the dock hears it, then counts the
+    // pause down round the send button before the turn goes.
+    await expect(page.getByTestId("voice-dock-label")).toHaveText("Hearing you…", { timeout: 10_000 });
+    await expect(page.getByTestId("voice-dock")).toHaveAttribute("data-phase", "pausing", { timeout: 5_000 });
 
-    // No tap on the checkmark: 1.5 s of sound, then 1.2 s of quiet sends it.
-    const req = await voiceReq;
+    // No tap: 1.5 s of sound, then 1.2 s of quiet sends it.
+    const req = await asrReq;
     expect(req.postDataBuffer()?.subarray(0, 4).toString("ascii")).toBe("RIFF");
-    await expect(page.locator('[data-testid="composer-rec-confirm"]')).toBeHidden();
     await expect(page.locator(".message-row-assistant").last()).toContainText("18%", {
       timeout: 15_000,
     });
   });
 
-  test("voice mode closes a mic that heard nothing, and sends nothing", async ({ page }) => {
+  test("voice mode closes a mic that heard nothing, says why, and sends nothing", async ({ page }) => {
     test.slow(); // waits out the 8 s of silence
     await mockBackend(page);
     const sent: string[] = [];
     page.on("request", (r) => {
-      if (r.url().includes("/api/v1/voice/chat")) sent.push(r.url());
+      if (r.url().includes("/api/v1/asr") || r.url().includes("/api/v1/chat")) sent.push(r.url());
     });
     await page.goto("/");
 
     await page.locator('[data-testid="composer-voicemode"]').click();
-    await page.locator('[data-testid="composer-mic"]').click();
-    const confirm = page.locator('[data-testid="composer-rec-confirm"]');
-    await expect(confirm).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("voice-dock-label")).toHaveText("Listening", { timeout: 10_000 });
 
     // Chromium's fake device is silence with a short beep every 500 ms: nothing
     // a person said, so after 8 s the mic closes by itself and says why.
-    await expect(confirm).toBeHidden({ timeout: 15_000 });
-    await expect(page.getByText("I didn’t hear anything", { exact: false })).toBeVisible();
+    await expect(page.getByTestId("voice-dock-label")).toHaveText("Tap the mic to talk", { timeout: 15_000 });
+    await expect(page.getByTestId("voice-dock-detail")).toContainText("I didn’t hear anything");
     expect(sent).toEqual([]);
   });
 
@@ -280,12 +365,11 @@ test.describe("Voice STT/TTS (mocked)", () => {
     await mockBackend(page);
     const sent: string[] = [];
     page.on("request", (r) => {
-      if (r.url().includes("/api/v1/voice/chat")) sent.push(r.url());
+      if (r.url().includes("/api/v1/asr")) sent.push(r.url());
     });
     await page.goto("/");
 
     await page.locator('[data-testid="composer-voicemode"]').click();
-    await page.locator('[data-testid="composer-mic"]').click();
     // The first turn sends itself; its reply is read (one short piece); then the
     // mic opens again with no tap, and the second turn sends itself too.
     await expect.poll(() => sent.length, { timeout: 30_000 }).toBeGreaterThanOrEqual(2);

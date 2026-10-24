@@ -33,7 +33,6 @@ interface ChatInputProps {
   isTransitioning: boolean;
   speechUnavailable: boolean;
   speechState: string;
-  voiceMode: boolean;
   onMessageChange: (value: string) => void;
   onSend: () => void;
   onMicClick: () => void;
@@ -53,8 +52,11 @@ interface ChatInputProps {
      that describe one activity, and asking someone to tick "Voice" and then
      tick "Narrate" to hold a spoken conversation is a worse question than
      "do you want to talk to it?". Entering voice mode now turns narration on
-     by itself, so the capability survives without the controls. */
-  onVoiceModeChange?: (on: boolean) => void;
+     by itself, so the capability survives without the controls.
+
+     Only *entering* is here. Once voice mode is on, its dock (VoiceModeDock)
+     takes this composer's place and carries the way out. */
+  onEnterVoiceMode?: () => void;
   voiceModeDisabled?: boolean;
   /* A one-line result from the last dictation attempt, shown in the hint slot.
      Without it, dictation that heard nothing was a dead end: the recording
@@ -64,8 +66,6 @@ interface ChatInputProps {
   onStop?: () => void;
   /** Live audio frequency levels [0..1] for responsive waveform */
   audioLevels?: number[];
-  /** Voice mode sends the turn by itself when the speaker pauses (Settings → Voice). */
-  autoSend?: boolean;
   chatConnectors?: ChatConnector[];
   connectorsEnabled?: boolean;
   /** The deployment has no chat connectors switched on: leave "Add a connector" out of the menu. */
@@ -112,7 +112,6 @@ function ChatInputInner({
   isTransitioning,
   speechUnavailable,
   speechState,
-  voiceMode,
   onMessageChange,
   onSend,
   onMicClick,
@@ -122,12 +121,11 @@ function ChatInputInner({
   onAttachFiles,
   onRemoveAttachment,
   onInspectAttachment,
-  onVoiceModeChange,
+  onEnterVoiceMode,
   voiceModeDisabled,
   dictationNotice,
   onStop,
   audioLevels,
-  autoSend = false,
   chatConnectors = [],
   connectorsEnabled = false,
   connectorsHidden = false,
@@ -337,15 +335,12 @@ function ChatInputInner({
 
   // ── Recording state: in-composer waveform + cancel/confirm ──
   //
-  // Two flows land here and the checkmark means different things in each. In
-  // voice mode it sends the utterance as a turn. In dictation it does not send
-  // anything — it stops the recording and drops the transcript into the
-  // composer for you to edit. The panel said "Send recording" and "Tap
-  // checkmark to send" either way, which promised the wrong outcome to anyone
-  // dictating: they tap expecting their question to go, and get text in a box.
-  // Both the accessible name and the hint follow the flow now.
+  // Dictation only: the checkmark sends nothing — it stops the recording and
+  // drops the transcript into the composer for you to edit, and its name and
+  // hint say so. (This panel used to serve voice mode too, where the same
+  // checkmark sent the turn; voice mode now has its own dock.)
   if (isRecording) {
-    const confirmLabel = voiceMode ? t('composer.sendRecording') : t('composer.stopAndInsert');
+    const confirmLabel = t('composer.stopAndInsert');
     return (
       <>
         <div className="composer cmpv2 composer-active-recording">
@@ -375,11 +370,7 @@ function ChatInputInner({
             </button>
           </div>
         </div>
-        <p className="composer-hint composer-hint-rec">
-          {voiceMode
-            ? t(autoSend ? 'composer.recHintVoiceAuto' : 'composer.recHintVoice')
-            : t('composer.recHintDictation')}
-        </p>
+        <p className="composer-hint composer-hint-rec">{t('composer.recHintDictation')}</p>
       </>
     );
   }
@@ -499,7 +490,7 @@ function ChatInputInner({
           id="composer-input"
           aria-label={t('composer.label')}
           aria-multiline="true"
-          placeholder={placeholder ?? (voiceMode ? t('composer.placeholderVoice') : t('composer.placeholder'))}
+          placeholder={placeholder ?? t('composer.placeholder')}
           value={message}
           rows={1}
           enterKeyHint="send"
@@ -753,7 +744,7 @@ function ChatInputInner({
             >
               <StopIcon />
             </button>
-          ) : canSend || !onVoiceModeChange ? (
+          ) : canSend || !onEnterVoiceMode ? (
             <button
               className="composer-circle-btn send-circle-btn"
               data-testid="composer-send"
@@ -766,30 +757,23 @@ function ChatInputInner({
             </button>
           ) : (
             <button
-              className={`composer-circle-btn voicemode-circle-btn ${voiceMode ? 'is-active' : ''}`}
-              onClick={() => onVoiceModeChange(!voiceMode)}
+              className="composer-circle-btn voicemode-circle-btn"
+              onClick={onEnterVoiceMode}
               disabled={voiceModeDisabled}
-              aria-pressed={voiceMode}
               data-testid="composer-voicemode"
-              aria-label={voiceMode ? t('composer.voiceExit') : t('composer.voiceEnter')}
-              data-tip={voiceMode ? t('composer.voiceExit') : t('composer.voiceEnter')}
+              aria-label={t('composer.voiceEnter')}
+              data-tip={t('composer.voiceEnter')}
             >
               <VoiceWaveIcon />
             </button>
           )}
         </div>
       </div>
-      {/* The hint carries what the removed toggles used to say — that voice
-          mode answers aloud — so nothing is only discoverable by tooltip. A
-          dictation result takes the slot while it is there: it is about the
+      {/* A dictation result takes the slot while it is there: it is about the
           thing that just happened, so it outranks a standing disclaimer.
           role=status announces it without stealing focus from the composer. */}
       <p className={`composer-hint${dictationNotice ? ' composer-hint-notice' : ''}`} role="status">
-        {dictationNotice
-          ? dictationNotice
-          : voiceMode
-            ? t('composer.voiceHint')
-            : t('composer.disclaimer')}
+        {dictationNotice ? dictationNotice : t('composer.disclaimer')}
       </p>
 
       {showConnectorsDialog && (

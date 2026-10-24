@@ -288,6 +288,8 @@ export interface ChatTurn {
   offlineMode?: boolean;
   /** Documents attached to this (user) turn */
   attachments?: ChatAttachment[];
+  /** A taxpayer turn the speech recogniser wrote down from what they said (voice mode). */
+  spoken?: boolean;
   /**
    * Wall-clock time the assistant spent on this turn, from the moment the
    * question was sent to the moment the reply finished. Persisted so the

@@ -1,0 +1,222 @@
+/* =============================================================================
+ * chatv2 — voice mode's dock (VoiceModeDock), in the composer's place.
+ *
+ * Same footprint as the composer card, so entering voice mode changes what the
+ * bar says rather than moving the page. Who has the floor shows three ways at
+ * once — the label, the orb's colour, the card's edge — because colour alone
+ * is not enough (WCAG 2.2 SC 1.4.1): teal while the taxpayer talks, gold while
+ * the answer is worked on, the accent while it is read.
+ * ========================================================================== */
+
+.chatv2 .voice-dock {
+  --orb-size: 40px;
+  --orb-wrap-w: 52px;
+  --orb-wrap-h: 52px;
+  --vd-floor: var(--border-1);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 10px 10px 12px;
+  background: var(--bg-0);
+  border: 1px solid var(--vd-floor);
+  border-radius: 16px;
+  box-shadow: var(--shadow-sm), 0 0 0 3px color-mix(in srgb, var(--vd-floor) 16%, transparent);
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+
+.chatv2 .voice-dock[data-floor='listening'] {
+  --vd-floor: var(--ura-teal-light);
+}
+.chatv2 .voice-dock[data-floor='thinking'] {
+  --vd-floor: var(--ura-gold-muted);
+}
+.chatv2 .voice-dock[data-floor='speaking'] {
+  --vd-floor: var(--cv2-accent);
+}
+.chatv2 .voice-dock[data-floor='idle'] {
+  --vd-floor: var(--border-1);
+  box-shadow: var(--shadow-sm);
+}
+
+.chatv2 .voice-dock-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  /* Two lines of detail without the card changing height between phases. */
+  min-height: 52px;
+}
+
+.chatv2 .voice-dock-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chatv2 .voice-dock-label {
+  margin: 0;
+  color: var(--text-0);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.chatv2 .voice-dock-detail {
+  margin: 2px 0 0;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* Something went wrong, or nothing was heard: in the reader's eye line. */
+.chatv2 .voice-dock-detail.is-notice {
+  color: var(--text-1);
+  font-weight: 500;
+}
+
+.chatv2 .voice-dock-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chatv2 .voice-dock-spacer {
+  flex: 1 1 auto;
+}
+
+/* "End": words, not an icon. A cross beside a mic-off button would be two
+   ways to say "stop" for two different things. */
+.chatv2 .voice-dock-end {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid var(--border-1);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.chatv2 .voice-dock-end:hover {
+  background: var(--surface-2);
+  color: var(--text-0);
+}
+
+.chatv2 .voice-dock-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text-0);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background 150ms ease, transform 120ms ease;
+}
+.chatv2 .voice-dock-btn:hover:not([aria-disabled='true']) {
+  background: var(--surface-3);
+}
+.chatv2 .voice-dock-btn:active:not([aria-disabled='true']) {
+  transform: scale(0.94);
+}
+
+.chatv2 .voice-dock-end:focus-visible,
+.chatv2 .voice-dock-btn:focus-visible {
+  outline: 2px solid var(--cv2-focus);
+  outline-offset: 2px;
+}
+
+/* The one control that always takes the floor back. Its fill says what a tap
+   does: teal sends the taxpayer's words, the stop treatment matches the
+   composer's Stop, the accent talks. */
+.chatv2 .voice-dock-primary {
+  width: 56px;
+  height: 56px;
+  background: var(--cv2-accent);
+  color: var(--cv2-accent-contrast);
+}
+.chatv2 .voice-dock-primary:hover:not([aria-disabled='true']) {
+  background: var(--cv2-accent-hover);
+}
+.chatv2 .voice-dock-primary[data-action='send'] {
+  background: var(--ura-teal-light);
+}
+.chatv2 .voice-dock-primary[data-action='send']:hover {
+  background: color-mix(in srgb, var(--ura-teal-light) 86%, var(--text-0));
+}
+.chatv2 .voice-dock-primary[data-action='stop'],
+.chatv2 .voice-dock-primary[data-action='stop']:hover {
+  background: var(--text-0);
+  color: var(--bg-0);
+}
+.chatv2 .voice-dock-primary[aria-disabled='true'] {
+  opacity: 0.55;
+  cursor: progress;
+  animation: vd-busy 1.4s ease-in-out infinite;
+}
+@keyframes vd-busy {
+  50% { opacity: 0.3; }
+}
+
+.chatv2 .voice-dock-primary svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* The end-of-turn countdown: a ring that closes round the send button over
+   the pause that will send the turn, and opens again if the taxpayer goes on
+   talking. `--eot` (0…1) is written every frame by the dock. */
+.chatv2 .voice-dock-ring {
+  position: absolute;
+  inset: -6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+.chatv2 .voice-dock[data-phase='pausing'] .voice-dock-ring {
+  opacity: 1;
+}
+.chatv2 .voice-dock-ring svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+.chatv2 .voice-dock-ring circle {
+  fill: none;
+  stroke: var(--ura-teal-light);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  stroke-dashoffset: calc(100 - var(--eot, 0) * 100);
+}
+
+@media (max-width: 720px) {
+  .chatv2 .voice-dock {
+    border-radius: 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chatv2 .voice-dock,
+  .chatv2 .voice-dock-btn {
+    transition: none;
+  }
+  .chatv2 .voice-dock-btn:active:not([aria-disabled='true']) {
+    transform: none;
+  }
+  .chatv2 .voice-dock-primary[aria-disabled='true'] {
+    animation: none;
+  }
+}

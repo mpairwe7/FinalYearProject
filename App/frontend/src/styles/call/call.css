@@ -546,88 +546,8 @@
   color: var(--text-3, #6e6e6e);
 }
 
-/* ---------------------------------------------------------------------- orb */
-
-.call-orb-wrap {
-  width: 96px;
-  height: 64px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-}
-
-.call-orb {
-  --orb-level: 0;
-  position: relative;
-  width: 56px;
-  height: 56px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  /* Scale is driven straight from the audio level written by CallOrb, so the
-     orb tracks the voice rather than running a fixed animation loop. */
-  transform: scale(calc(1 + var(--orb-level) * 0.18));
-  transition: transform 0.06s linear;
-}
-
-.call-orb-core {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  /* URA navy with a gold sheen, rather than the generic blue/purple orb. */
-  background:
-    radial-gradient(circle at 32% 28%, rgba(249, 199, 79, 0.55), transparent 42%),
-    radial-gradient(circle at 60% 65%, #0b57d0, #003087 72%);
-  box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.18);
-}
-
-.call-orb-halo {
-  position: absolute;
-  inset: -14px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(11, 87, 208, 0.42), transparent 68%);
-  opacity: calc(0.15 + var(--orb-level) * 0.85);
-  transition: opacity 0.08s linear;
-  pointer-events: none;
-}
-
-/* Light theme washes out a wide bloom, so the glow tightens and the orb gets
-   a defining edge instead. */
-.call-orb::after {
-  content: '';
-  position: absolute;
-  inset: -2px;
-  border-radius: 50%;
-  border: 1px solid rgba(0, 48, 135, 0.18);
-}
-
-:root[data-theme='dark'] .call-orb::after {
-  border-color: rgba(255, 255, 255, 0.14);
-}
-
-:root[data-theme='dark'] .call-orb-halo {
-  inset: -20px;
-}
-
-.call-orb[data-mode='listening'] .call-orb-core {
-  background:
-    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.5), transparent 42%),
-    radial-gradient(circle at 60% 65%, #12b886, #00756b 72%);
-}
-
-.call-orb[data-mode='listening'] .call-orb-halo {
-  background: radial-gradient(circle, rgba(0, 117, 107, 0.42), transparent 68%);
-}
-
-.call-orb[data-mode='idle'] {
-  animation: callOrbBreathe 4s ease-in-out infinite;
-}
-
-@keyframes callOrbBreathe {
-  0%, 100% { transform: scale(0.97); }
-  50% { transform: scale(1.02); }
-}
+/* The orb's own rules live beside it, in orb.css (imported by CallOrb): the
+   chat's voice mode draws the same orb and must not depend on this sheet. */
 
 /* ------------------------------------------------------------------ responsive */
 
@@ -666,13 +586,7 @@
   }
 
   .call-bubble-cursor,
-  .call-orb[data-mode='idle'],
   .call-status-pill--active .call-status-dot {
     animation: none;
-  }
-
-  .call-orb {
-    transform: none;
-    transition: none;
   }
 }

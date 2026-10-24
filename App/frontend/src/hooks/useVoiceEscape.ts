@@ -7,24 +7,30 @@ interface VoiceEscapeOptions {
   dictating: boolean;
   /** A reply is being read aloud, or its audio is being fetched. */
   reading: boolean;
+  /** Voice mode is on (its dock is in the composer's place). */
+  voiceMode?: boolean;
   onCancelRecording: () => unknown;
   onStopDictation: () => unknown;
   onStopReading: () => unknown;
+  onEndVoiceMode?: () => unknown;
 }
 
 /**
  * Escape stops what the voice is doing (G204): a recording is cancelled,
  * dictation stops listening (what it heard stays in the composer), and a reply
- * being read aloud stops — in that order, one per press. Never while a dialog
- * that Escape belongs to is open, nor when something else already handled it.
+ * being read aloud stops — in that order, one per press. With none of those
+ * going on, it leaves voice mode. Never while a dialog that Escape belongs to
+ * is open, nor when something else already handled it.
  */
 export function useVoiceEscape({
   recording,
   dictating,
   reading,
+  voiceMode = false,
   onCancelRecording,
   onStopDictation,
   onStopReading,
+  onEndVoiceMode,
 }: VoiceEscapeOptions): void {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -36,9 +42,11 @@ export function useVoiceEscape({
         void onStopDictation();
       } else if (reading) {
         void onStopReading();
+      } else if (voiceMode && onEndVoiceMode) {
+        void onEndVoiceMode();
       }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [recording, dictating, reading, onCancelRecording, onStopDictation, onStopReading]);
+  }, [recording, dictating, reading, voiceMode, onCancelRecording, onStopDictation, onStopReading, onEndVoiceMode]);
 }

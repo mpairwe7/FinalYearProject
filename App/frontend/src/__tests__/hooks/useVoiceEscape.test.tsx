@@ -9,8 +9,13 @@ function press(key = 'Escape'): KeyboardEvent {
   return event;
 }
 
-function setup(state: { recording?: boolean; dictating?: boolean; reading?: boolean }) {
-  const handlers = { onCancelRecording: vi.fn(), onStopDictation: vi.fn(), onStopReading: vi.fn() };
+function setup(state: { recording?: boolean; dictating?: boolean; reading?: boolean; voiceMode?: boolean }) {
+  const handlers = {
+    onCancelRecording: vi.fn(),
+    onStopDictation: vi.fn(),
+    onStopReading: vi.fn(),
+    onEndVoiceMode: vi.fn(),
+  };
   renderHook(() =>
     useVoiceEscape({ recording: false, dictating: false, reading: false, ...state, ...handlers }),
   );
@@ -53,6 +58,19 @@ describe('useVoiceEscape (G204)', () => {
     document.body.appendChild(dialog);
     press();
     expect(h.onStopReading).not.toHaveBeenCalled();
+  });
+
+  it('leaves voice mode when the voice has nothing else going on', () => {
+    const h = setup({ voiceMode: true });
+    press();
+    expect(h.onEndVoiceMode).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops what voice mode is doing before it leaves it', () => {
+    const h = setup({ voiceMode: true, recording: true, dictating: true });
+    press();
+    expect(h.onCancelRecording).toHaveBeenCalledTimes(1);
+    expect(h.onEndVoiceMode).not.toHaveBeenCalled();
   });
 
   it('does nothing when the voice is idle', () => {
