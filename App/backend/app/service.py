@@ -6639,11 +6639,28 @@ class ChatModel:
                 except Exception:
                     logger.debug("adopt_workflow_session on portal task resume skipped", exc_info=True)
 
+        eff_history = list(conversation_history or [])
+        if attachments:
+            for att in attachments:
+                sg_att = getattr(att, "screenshot_guidance", None) or (
+                    att.get("screenshot_guidance") if isinstance(att, dict) else None
+                )
+                if isinstance(sg_att, dict) and isinstance(sg_att.get("copilot_handoff"), dict):
+                    pf = sg_att["copilot_handoff"].get("prefill_state")
+                    if isinstance(pf, dict) and pf:
+                        synth_bits = [
+                            f"pay UGX {v}" if k == "amount_ugx" else f"{k} {v}"
+                            for k, v in pf.items()
+                            if v
+                        ]
+                        if synth_bits:
+                            eff_history.append({"user_message": " ".join(synth_bits)})
+
         outcome = pc_mod.evaluate_turn(
             message=router_message or message,
             portal_context=portal_context,
             portal_task_submission=portal_task_submission,
-            conversation_history=conversation_history,
+            conversation_history=eff_history,
             user_id=user_id,
             session_id=session_id,
             conversation_id=thread_id,

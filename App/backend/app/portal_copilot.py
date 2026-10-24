@@ -1693,6 +1693,59 @@ def detect_portal_task_intent(
     ):
         return _intent("get_refund_claim", "get_refund", 0.91)
 
+    if any(
+        phrase in low
+        for phrase in (
+            "record efris inventory stock-in",
+            "record efris stock-in",
+            "efris stock-in",
+            "add efris stock",
+            "efris_stock_management",
+        )
+    ):
+        return _intent("efris_stock_management", "efris", 0.94)
+
+    if any(
+        phrase in low
+        for phrase in (
+            "stage efris credit note",
+            "apply for efris credit note",
+            "issue efris credit note",
+            "efris_credit_note",
+        )
+    ):
+        return _intent("efris_credit_note", "efris", 0.93)
+
+    if any(
+        phrase in low
+        for phrase in (
+            "stage efris fiscal invoice",
+            "issue efris fiscal invoice",
+            "efris_fiscal_invoice",
+        )
+    ):
+        return _intent("efris_fiscal_invoice", "efris", 0.93)
+
+    if any(
+        phrase in low
+        for phrase in (
+            "check customs bonded warehouse consignment",
+            "im7 consignment status",
+            "bwims_consignment_status",
+        )
+    ):
+        return _intent("bwims_consignment_status", "bwims", 0.93)
+
+    if any(
+        phrase in low
+        for phrase in (
+            "check customs bonded warehouse inventory",
+            "warehouse inventory balance",
+            "bwims_warehouse_inventory",
+        )
+    ):
+        return _intent("bwims_warehouse_inventory", "bwims", 0.93)
+
     return None
 
 

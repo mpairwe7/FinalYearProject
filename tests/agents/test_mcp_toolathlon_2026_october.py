@@ -953,3 +953,14 @@ def test_phase10_screenshot_analysis_error_resolution_and_completion_checklist()
     assert any(item["status"] == "detected" and "1000010001" in item["detail"] for item in sg["checklist"])
     assert any("Resolve EFRIS_INSUFFICIENT_STOCK" in p for p in sg["recommended_prompts"])
 
+    # 3. Clicking the recommended remediation prompt triggers detect_portal_task_intent -> efris_stock_management
+    from app.portal_copilot import detect_portal_task_intent
+
+    rem_prompt = sg["recommended_prompts"][0]
+    intent = detect_portal_task_intent(rem_prompt)
+    assert intent is not None and intent.task_id == "efris_stock_management"
+
+    # 4. NIN validation error screen with a CM/CF/CR NIN is still classified as PORTAL_SCREENSHOT (0.97 > 0.96)
+    nin_err_shot = "URA e-Tax Portal: NIN validation failed for CM92010101ABCD — name or date of birth mismatch."
+    assert classify_document(nin_err_shot).doc_type == DocumentType.PORTAL_SCREENSHOT
+
