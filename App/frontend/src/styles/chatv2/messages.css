@@ -37,6 +37,23 @@
   max-width: min(78%, 640px);
 }
 
+/* A turn the speech recogniser wrote down from what the taxpayer said. */
+.chatv2 .msg-spoken-tag {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 2px;
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.chatv2 .msg-spoken-tag svg {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+
 /* Assistant: brand roundel + flowing text (no box) */
 .chatv2 .message-row-assistant {
   display: grid;

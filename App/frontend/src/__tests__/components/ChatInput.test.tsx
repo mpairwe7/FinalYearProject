@@ -17,7 +17,6 @@ const defaults = {
   isTransitioning: false,
   speechUnavailable: false,
   speechState: "idle",
-  voiceMode: false,
   onMessageChange: vi.fn(),
   onSend: vi.fn(),
   onMicClick: vi.fn(),
@@ -80,18 +79,30 @@ describe("ChatInput", () => {
     expect(screen.getByLabelText("Start speaking")).toBeDisabled();
   });
 
-  it("shows voice mode placeholder when voiceMode is true", () => {
-    render(<ChatInput {...defaults} voiceMode />);
-    expect(
-      screen.getByPlaceholderText(/Voice mode on/),
-    ).toBeInTheDocument();
+  /**
+   * The composer only ever *enters* voice mode: once it is on, the voice dock
+   * takes the composer's place and carries the way out, so there is no
+   * engaged state here to show.
+   */
+  it("offers voice mode in the empty primary slot, and enters it", async () => {
+    const onEnterVoiceMode = vi.fn();
+    render(<ChatInput {...defaults} onEnterVoiceMode={onEnterVoiceMode} />);
+    expect(screen.queryByLabelText("Send message")).not.toBeInTheDocument();
+    const enter = screen.getByRole("button", { name: "Enter voice mode" });
+    expect(enter).not.toHaveAttribute("aria-pressed");
+    await userEvent.click(enter);
+    expect(onEnterVoiceMode).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives the primary slot to send once something is typed", () => {
+    render(<ChatInput {...defaults} message="VAT" onEnterVoiceMode={vi.fn()} />);
+    expect(screen.getByLabelText("Send message")).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Enter voice mode" })).not.toBeInTheDocument();
   });
 
   it("shows recording controls when isRecording", () => {
-    // `defaults` has voiceMode: false, i.e. dictation — where the checkmark
-    // inserts text rather than sending. This asserted "Send recording" for that
-    // case, which is the copy bug the "recording panel" tests below now cover
-    // on both flows.
+    // Dictation — the only recording this panel serves — inserts text, it
+    // does not send: the checkmark says so.
     render(<ChatInput {...defaults} isRecording />);
     expect(screen.getByLabelText("Cancel recording")).toBeInTheDocument();
     expect(screen.getByLabelText("Stop and insert text")).toBeInTheDocument();
@@ -489,21 +500,14 @@ describe("ChatInput attachments", () => {
   });
 
   /**
-   * Recording replaces the whole composer with a waveform panel, and its
-   * checkmark means two different things: in voice mode it sends the utterance
-   * as a turn, in dictation it only drops the transcript into the box. The
-   * panel used to say "Send recording" for both, promising the wrong outcome to
-   * anyone dictating.
+   * Recording replaces the whole composer with a waveform panel. Its checkmark
+   * only drops the transcript into the box — the panel once said "Send
+   * recording", promising the wrong outcome to anyone dictating. (Voice mode,
+   * where a turn is sent, records in its own dock.)
    */
   describe("recording panel", () => {
-    it("offers to send the utterance in voice mode", () => {
-      render(<ChatInput {...defaults} isRecording voiceMode onVoiceModeChange={vi.fn()} />);
-      expect(screen.getByLabelText("Send recording")).toBeInTheDocument();
-      expect(screen.getByText(/Tap checkmark to send/)).toBeInTheDocument();
-    });
-
     it("offers to insert the text when dictating, and does not claim to send", () => {
-      render(<ChatInput {...defaults} isRecording voiceMode={false} onVoiceModeChange={vi.fn()} />);
+      render(<ChatInput {...defaults} isRecording onEnterVoiceMode={vi.fn()} />);
       expect(screen.getByLabelText("Stop and insert text")).toBeInTheDocument();
       expect(screen.queryByLabelText("Send recording")).not.toBeInTheDocument();
       expect(screen.getByText(/add what you said to the message/)).toBeInTheDocument();

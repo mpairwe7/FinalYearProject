@@ -9,8 +9,8 @@
  *   SPEECH_MT_BACKEND=mock LLM_ENABLED=false
  *
  * so it serves /v1/speech/health (ready), /v1/tts/stream (real WAV pieces), and
- * /v1/voice/chat (200; mock ASR yields no transcript → the graceful
- * "No speech detected" path) without downloading any heavy models.
+ * /v1/asr (200; mock ASR yields no transcript → voice mode's graceful
+ * "Didn't catch that" path) without downloading any heavy models.
  *
  * Gated behind VOICE_INTEGRATION=1 so it never runs in the default (mocked)
  * suite or a stray local run. See .github/workflows/voice-e2e.yml.
@@ -40,31 +40,29 @@ test.describe("Voice STT/TTS — real backend (integration)", () => {
     await expect(page.getByRole("button", { name: "Enter voice mode" })).toBeEnabled();
   });
 
-  test("real voice round-trip: capture → /v1/voice/chat (200) → graceful reply", async ({
-    page,
-  }) => {
+  test("real voice round-trip: capture → /v1/asr (200) → graceful notice", async ({ page }) => {
     test.slow();
     await page.goto("/");
+    // Voice mode opens the mic itself: no second tap.
     await page.getByRole("button", { name: "Enter voice mode" }).click();
-
-    await page.getByRole("button", { name: "Start speaking" }).click();
-    await expect(page.getByText("Listening...")).toBeVisible({ timeout: 10_000 });
+    const send = page.getByRole("button", { name: "Send now" });
+    await expect(send).toBeVisible({ timeout: 10_000 });
     await page.waitForTimeout(1500);
 
     const resp = page.waitForResponse(
-      (r) => r.url().includes("/api/v1/voice/chat") && r.request().method() === "POST",
+      (r) => r.url().includes("/api/v1/asr") && r.request().method() === "POST",
       { timeout: 30_000 },
     );
-    await page.getByRole("button", { name: "Send recording" }).click();
+    await send.click();
     const r = await resp;
     expect(r.status()).toBe(200);
 
-    // Mock ASR returns no transcript → the server says why (error_code: no_speech) and
-    // the client words it for the reader: "Didn't catch that", not an outage (G201).
-    await expect(page.locator(".message-row-assistant").last()).toContainText(
-      /didn.t catch that/i,
-      { timeout: 20_000 },
-    );
+    // Mock ASR returns no transcript, and no error: the dock words it for the
+    // reader — "Didn't catch that", not an outage (G201) — and nothing is sent.
+    await expect(page.getByTestId("voice-dock-detail")).toContainText(/didn.t catch that/i, {
+      timeout: 20_000,
+    });
+    await expect(page.locator(".message-row-user")).toHaveCount(0);
   });
 
   test("real TTS: narrating a reply streams audio from /v1/tts/stream", async ({ page }) => {

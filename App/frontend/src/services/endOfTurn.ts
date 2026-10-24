@@ -120,6 +120,17 @@ export class EndOfTurnDetector {
   }
 
   /**
+   * How far the current pause has gone towards ending the turn, as of the
+   * last frame: 0 while the speaker is sounding (or has not started), 1 once
+   * the turn ends. Voice mode draws it as a countdown, so a turn is never sent
+   * without warning and the speaker can see that talking again holds it open.
+   */
+  get silenceProgress(): number {
+    if (!this.speaking || this.lastAt === null) return 0;
+    return Math.min(1, Math.max(0, (this.lastAt - this.lastSoundAt) / this.silenceMs));
+  }
+
+  /**
    * One frame: the microphone's level in dBFS at `now` (ms, monotonic).
    * Returns the event this frame decides, if any. After 'end', 'no-speech' or
    * 'too-long' the detector is done and returns null.
@@ -186,6 +197,10 @@ export class EndOfTurnDetector {
 
 export interface EndOfTurnWatch extends EndOfTurnOptions {
   onEvent: (event: TurnEvent) => void;
+  /** Once speech has started, the pause's `silenceProgress` (0…1) after every reading. */
+  onProgress?: (silenceProgress: number) => void;
+  /** Every reading's speech-band level, in dBFS — what the detector itself decides on. */
+  onLevel?: (dbfs: number) => void;
   /** How often the level is read, in ms. */
   intervalMs?: number;
 }
@@ -201,7 +216,7 @@ export interface EndOfTurnWatch extends EndOfTurnOptions {
 export function watchEndOfTurn(
   ctx: BaseAudioContext,
   source: AudioNode,
-  { onEvent, intervalMs = 50, ...options }: EndOfTurnWatch,
+  { onEvent, onProgress, onLevel, intervalMs = 50, ...options }: EndOfTurnWatch,
 ): () => void {
   const detector = new EndOfTurnDetector(options);
   const highpass = ctx.createBiquadFilter();
@@ -232,7 +247,9 @@ export function watchEndOfTurn(
     const db = levelDbfs(samples);
     // Suppress non-vocal acoustic transients (table thumps, click spikes)
     const effectiveDb = isVocalAcousticProfile(samples) ? db : Math.min(db, SILENT_DBFS + 20);
+    onLevel?.(effectiveDb);
     const event = detector.push(effectiveDb, performance.now());
+    if (onProgress && detector.hasSpeech) onProgress(detector.silenceProgress);
     if (!event) return;
     if (event !== 'speech') stop();
     onEvent(event);

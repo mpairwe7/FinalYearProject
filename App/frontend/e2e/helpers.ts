@@ -81,7 +81,8 @@ export async function clearChatStore(page: Page) {
   });
 }
 
-function sseReply(text: string, opts: { escalate?: boolean } = {}): string {
+/** A whole streamed answer, as /v1/chat/stream frames it (metadata, token, grounding, done). */
+export function sseReply(text: string, opts: { escalate?: boolean } = {}): string {
   return [
     "event: metadata",
     `data: ${JSON.stringify({ sources: ["vat.pdf"], citations: [], conversation_id: "c-e2e" })}`,

@@ -1,0 +1,161 @@
+/* =============================================================================
+ * The live orb (CallOrb): the call dock's centre, and the chat's voice mode.
+ *
+ * Imported by the component itself, so wherever the orb is drawn its rules are
+ * there — the voice-mode dock must not depend on the call sheet having loaded.
+ * Size comes from `--orb-size` (and the wrapper from `--orb-wrap-w/-h`); the
+ * call dock keeps the defaults.
+ * ========================================================================== */
+
+.call-orb-wrap {
+  width: var(--orb-wrap-w, 96px);
+  height: var(--orb-wrap-h, 64px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.call-orb {
+  --orb-level: 0;
+  position: relative;
+  width: var(--orb-size, 56px);
+  height: var(--orb-size, 56px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Scale is driven straight from the audio level written by CallOrb, so the
+     orb tracks the voice rather than running a fixed animation loop. */
+  transform: scale(calc(1 + var(--orb-level) * 0.18));
+  transition: transform 0.06s linear;
+}
+
+.call-orb-core {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  /* URA navy with a gold sheen, rather than the generic blue/purple orb. */
+  background:
+    radial-gradient(circle at 32% 28%, rgba(249, 199, 79, 0.55), transparent 42%),
+    radial-gradient(circle at 60% 65%, #0b57d0, #003087 72%);
+  box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.18);
+  transition: background 0.2s ease, filter 0.2s ease;
+}
+
+.call-orb-halo {
+  position: absolute;
+  inset: -14px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(11, 87, 208, 0.42), transparent 68%);
+  opacity: calc(0.15 + var(--orb-level) * 0.85);
+  transition: opacity 0.08s linear;
+  pointer-events: none;
+}
+
+/* Light theme washes out a wide bloom, so the glow tightens and the orb gets
+   a defining edge instead. */
+.call-orb::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 48, 135, 0.18);
+}
+
+:root[data-theme='dark'] .call-orb::after {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+:root[data-theme='dark'] .call-orb-halo {
+  inset: -20px;
+}
+
+.call-orb[data-mode='listening'] .call-orb-core {
+  background:
+    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.5), transparent 42%),
+    radial-gradient(circle at 60% 65%, #12b886, #00756b 72%);
+}
+
+.call-orb[data-mode='listening'] .call-orb-halo {
+  background: radial-gradient(circle, rgba(0, 117, 107, 0.42), transparent 68%);
+}
+
+.call-orb[data-mode='idle'] {
+  animation: callOrbBreathe 4s ease-in-out infinite;
+}
+
+@keyframes callOrbBreathe {
+  0%, 100% { transform: scale(0.97); }
+  50% { transform: scale(1.02); }
+}
+
+/* ---------------------------------------------------------------------------
+ * Voice mode names who has the floor (CallOrb `state`). It outranks the levels:
+ * an open mic in a quiet room is still listening, a reply being worked on is
+ * not silence, and echo of the reply through the speakers must not turn the
+ * orb to "listening" while the assistant talks. Later in the sheet than the
+ * level-driven rules, at the same specificity, so these win.
+ * ------------------------------------------------------------------------- */
+
+/* The taxpayer's turn: URA teal, the call's own "listening" colour. */
+.call-orb[data-state='listening'] .call-orb-core {
+  background:
+    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.5), transparent 42%),
+    radial-gradient(circle at 60% 65%, #12b886, #00756b 72%);
+}
+
+.call-orb[data-state='listening'] .call-orb-halo {
+  background: radial-gradient(circle, rgba(0, 117, 107, 0.42), transparent 68%);
+}
+
+/* The assistant's turn: navy and gold, whatever the microphone hears. */
+.call-orb[data-state='speaking'] .call-orb-core {
+  background:
+    radial-gradient(circle at 32% 28%, rgba(249, 199, 79, 0.55), transparent 42%),
+    radial-gradient(circle at 60% 65%, #0b57d0, #003087 72%);
+}
+
+.call-orb[data-state='speaking'] .call-orb-halo {
+  background: radial-gradient(circle, rgba(11, 87, 208, 0.42), transparent 68%);
+}
+
+/* Working on it: a gold arc runs round the edge — the one motion that means
+   "busy" in every interface, and silent for a reason the levels cannot show. */
+.call-orb[data-state='thinking']::after {
+  inset: -4px;
+  border: 2px solid transparent;
+  border-top-color: var(--ura-gold, #f9c74f);
+  border-right-color: color-mix(in srgb, var(--ura-gold, #f9c74f) 45%, transparent);
+  animation: callOrbSpin 1.1s linear infinite;
+}
+
+@keyframes callOrbSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* Nobody has the floor and nothing is open: the orb dims. */
+.call-orb[data-state='idle'] .call-orb-core {
+  filter: saturate(0.55) brightness(0.92);
+}
+
+.call-orb[data-state='idle'] .call-orb-halo {
+  opacity: 0.12;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .call-orb[data-mode='idle'] {
+    animation: none;
+  }
+
+  .call-orb {
+    transform: none;
+    transition: none;
+  }
+
+  /* Still says "working", as a still ring instead of a moving one. */
+  .call-orb[data-state='thinking']::after {
+    animation: none;
+    border-style: dashed;
+    border-color: var(--ura-gold, #f9c74f);
+  }
+}

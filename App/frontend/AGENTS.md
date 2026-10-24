@@ -20,6 +20,7 @@ bun run lint
 | `src/components/quality/` | Audit pieces: rating strip, position chart, conversation timeline, ratings panel (chats and calls), satisfaction levels, AI-calls panel |
 | `src/components/rating/SatisfactionScale.tsx` | The one 5-face satisfaction scale (taxpayer rating dialog, officer wrap-up) |
 | `src/hooks/useOfficerChat.ts` | Taxpayer side of a live officer chat: thread poll, notices, rating, hand-back to the AI |
+| `src/components/VoiceModeDock.tsx` | Voice mode's dock, in the composer's place: one named state, the shared `CallOrb`, the end-of-turn countdown, what was heard, the one control (ADR-0016) |
 | `src/app/agent/` | Officer workbench |
 | `src/components/staff/` | Queue, case, live chat thread, composer (End chat), live banner |
 | `src/components/charts/chartTheme.tsx` | Chart palette **and** the plain-language layer |

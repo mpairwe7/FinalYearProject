@@ -23,10 +23,11 @@ import {
   stopPlayback,
   isPlaying,
   transcribe,
-  voiceChat,
 } from '../services/voiceService';
 import { watchEndOfTurn, type TurnEvent } from '../services/endOfTurn';
+import { setInputLevel, setPauseProgress } from '../services/audioLevelBus';
 import NarrationBar from '../components/NarrationBar';
+import VoiceModeDock, { PAUSE_SHOWN_FROM, type VoiceDockPhase } from '../components/VoiceModeDock';
 import { useVoiceEscape } from '../hooks/useVoiceEscape';
 import { authHeaders, clearAuthToken, getAuthToken } from '../lib/authSession';
 import { getChatSessionId } from '../lib/chatSession';
@@ -127,6 +128,18 @@ const RAIL_COLLAPSED_KEY = 'ura-rail-collapsed';
  * non-stream fallback) simply go thinking → churning.
  */
 type TurnPhase = 'thinking' | 'searching' | 'churning' | 'translating';
+
+/**
+ * How one turn differs from the conversation's defaults. A spoken turn is
+ * answered in the language the recogniser heard, as /v1/voice/chat always
+ * answered it, and its bubble says it was spoken — so a mishearing reads as
+ * one, not as something the taxpayer typed.
+ */
+interface TurnOptions {
+  locale?: string;
+  localeExplicit?: boolean;
+  spoken?: boolean;
+}
 
 /* The label is a dictionary key, not a string: these are the only words on
    screen while the assistant is working, and leaving them English on a Luganda
@@ -391,9 +404,51 @@ export default function Page() {
   const onTurnEventRef = useRef<(event: TurnEvent) => void>(() => {});
   // Hands-free voice mode opens the mic again once a reply has been read.
   const listenAgainRef = useRef<() => void>(() => {});
+  /**
+   * Voice mode's turn, step by step, for its dock (VoiceModeDock).
+   *
+   * `heardSpeech` and `pausing` come from the end-of-turn watcher. `voiceStage`
+   * covers the waits nothing else describes — the recording is with the
+   * recogniser, or the question is held for a file still being read — and
+   * `voiceHeard` is what the recogniser heard, said back while the answer is
+   * worked on.
+   */
+  const [heardSpeech, setHeardSpeech] = useState(false);
+  const [pausing, setPausing] = useState(false);
+  const pausingRef = useRef(false);
+  const [voiceStage, setVoiceStage] = useState<'transcribing' | 'queued' | null>(null);
+  const [voiceHeard, setVoiceHeard] = useState<string | null>(null);
+  /** Bumped to abandon the voice turn in flight: Stop, leaving voice mode. */
+  const voiceTurnRef = useRef(0);
+  /** A spoken question held until an attachment has been read (see the effect below). */
+  const queuedVoiceTurnRef = useRef<{ text: string; options: TurnOptions } | null>(null);
+  /** Set on entering voice mode: the mic opens as soon as the mode has rendered. */
+  const listenOnEnterRef = useRef(false);
+  /**
+   * Narration's bookkeeping, as state because the dock's phase reads it: the
+   * reply already read (each is read once) and when narration was switched on
+   * (only replies that arrived after it are read — opening an old
+   * conversation must not read its last answer out).
+   */
+  const [narratedTurnId, setNarratedTurnId] = useState<string | null>(null);
+  const [narrationArmedAt, setNarrationArmedAt] = useState(0);
+
+  // The end-of-turn countdown. Every reading goes to the dock's ring, outside
+  // React; only crossing the "about to send" line changes page state.
+  const onPauseProgress = useCallback((progress: number) => {
+    setPauseProgress(progress);
+    const shown = progress >= PAUSE_SHOWN_FROM;
+    if (shown !== pausingRef.current) {
+      pausingRef.current = shown;
+      setPausing(shown);
+    }
+  }, []);
 
   // Live microphone frequency analyser for responsive composer waveform, and
-  // in voice mode the end-of-turn watcher, on the same audio graph.
+  // in voice mode the end-of-turn watcher, on the same audio graph. Voice
+  // mode's orb takes its level from the watcher, through the level bus rather
+  // than page state: the waveform's 60 re-renders a second of the whole
+  // conversation are a cost the dock does not need to pay.
   useEffect(() => {
     if (!isRecording) {
       if (animFrameRef.current !== null) {
@@ -420,31 +475,40 @@ export default function Page() {
       const ctx = new AudioCtx();
       audioContextRef.current = ctx;
       const source = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 64;
-      source.connect(analyser);
-      if (voiceMode && silenceTimeout > 0) {
+      if (voiceMode) {
+        // With tap-to-send too: the dock still says when speech has started.
+        // Only a turn that sends itself also ends, or closes, by itself.
+        const autoSend = silenceTimeout > 0;
         stopWatching = watchEndOfTurn(ctx, source, {
-          silenceMs: silenceTimeout,
+          silenceMs: autoSend ? silenceTimeout : Number.POSITIVE_INFINITY,
+          noSpeechMs: autoSend ? undefined : Number.POSITIVE_INFINITY,
           onEvent: (event) => onTurnEventRef.current(event),
+          onProgress: autoSend ? onPauseProgress : undefined,
+          // The speech-band level the detector decides on: a quiet room reads
+          // as nothing (−55 dBFS and below) and a voice at arm's length fills
+          // the orb (−15 dBFS), so the orb moves when, and only when, it hears.
+          onLevel: (dbfs) => setInputLevel((dbfs + 55) / 40),
         });
-      }
-
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
-      const update = () => {
-        if (!recorderRef.current?.isRecording) return;
-        analyser.getByteFrequencyData(dataArray);
-        const bands = [
-          dataArray[1] / 255,
-          dataArray[3] / 255,
-          dataArray[6] / 255,
-          dataArray[10] / 255,
-          dataArray[15] / 255,
-        ].map((v) => Math.min(1.0, Math.max(0.15, (v || 0) * 1.6)));
-        setAudioLevels(bands);
+      } else {
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 64;
+        source.connect(analyser);
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        const update = () => {
+          if (!recorderRef.current?.isRecording) return;
+          analyser.getByteFrequencyData(dataArray);
+          const bands = [
+            dataArray[1] / 255,
+            dataArray[3] / 255,
+            dataArray[6] / 255,
+            dataArray[10] / 255,
+            dataArray[15] / 255,
+          ].map((v) => Math.min(1.0, Math.max(0.15, (v || 0) * 1.6)));
+          setAudioLevels(bands);
+          animFrameRef.current = requestAnimationFrame(update);
+        };
         animFrameRef.current = requestAnimationFrame(update);
-      };
-      animFrameRef.current = requestAnimationFrame(update);
+      }
     } catch {
       setAudioLevels(undefined);
     }
@@ -460,7 +524,7 @@ export default function Page() {
         audioContextRef.current = null;
       }
     };
-  }, [isRecording, voiceMode, silenceTimeout]);
+  }, [isRecording, voiceMode, silenceTimeout, onPauseProgress]);
 
   // TanStack Query — cached speech health (auto-refreshes every 60s)
   const { data: speechHealth } = useSpeechHealth();
@@ -840,8 +904,6 @@ export default function Page() {
     return () => window.clearTimeout(timer);
   }, [narrationFailed]);
 
-  // Auto-narrate new assistant messages
-  const lastChatLength = useRef(chat.length);
   // The current read-aloud request. A stop, or a newer request, makes an older
   // one stale: its whole-reply fallback must not start playing when it lands.
   const listenRequestRef = useRef(0);
@@ -910,17 +972,38 @@ export default function Page() {
     }
   }, [playingTurnId, ttsLoading, locale, ttsMutation, stopReading]);
 
+  /**
+   * The reply to read aloud next: the newest one, once it has finished
+   * arriving, while narration is on — read once, and only if it arrived after
+   * narration was switched on.
+   *
+   * "Finished arriving" is the point. A streamed reply is written into a turn
+   * that exists from the moment the question is sent, and the rule this
+   * replaces fired when a turn was *added* — so it found that turn empty, and
+   * a typed question's answer was never read aloud, narration on or not.
+   */
+  const lastTurn = chat[chat.length - 1];
+  const replyToNarrate =
+    autoNarrate &&
+    !isLoading &&
+    lastTurn?.role === 'assistant' &&
+    lastTurn.id !== 'greeting-0' &&
+    !lastTurn.notice &&
+    lastTurn.id !== narratedTurnId &&
+    lastTurn.timestamp >= narrationArmedAt &&
+    lastTurn.content.trim()
+      ? lastTurn
+      : null;
   useEffect(() => {
-    if (!autoNarrate || chat.length <= lastChatLength.current) {
-      lastChatLength.current = chat.length;
-      return;
-    }
-    lastChatLength.current = chat.length;
-    const last = chat[chat.length - 1];
-    if (last?.role === 'assistant' && last.content && last.id !== 'greeting-0' && !isLoading && !isPlaying()) {
-      handleListenToReply(last.id, last.content);
-    }
-  }, [chat, autoNarrate, isLoading, handleListenToReply]);
+    if (!replyToNarrate) return;
+    setNarratedTurnId(replyToNarrate.id);
+    // Something is already being read (a Listen tap on an older reply): leave it.
+    if (isPlaying()) return;
+    void handleListenToReply(replyToNarrate.id, replyToNarrate.content).then((how) => {
+      // Hands-free: once the answer has been heard, the floor goes back to the taxpayer.
+      if (how === 'ended') listenAgainRef.current();
+    });
+  }, [replyToNarrate, handleListenToReply]);
 
   // ---- Document attachments ----
 
@@ -1115,6 +1198,7 @@ export default function Page() {
   const sendMessage = useCallback(async (
     overrideText?: string,
     portalTaskSubmission?: Record<string, unknown>,
+    turnOptions?: TurnOptions,
   ) => {
     const text = (overrideText ?? message).trim();
     if (!text || isLoading) return;
@@ -1153,13 +1237,17 @@ export default function Page() {
         analysis: a.analysis,
       }));
     const conversationId = activeConversationId ?? ensureActiveConversationId();
+    const userTurnMeta = {
+      ...(sentAttachments.length ? { attachments: sentAttachments } : {}),
+      ...(turnOptions?.spoken ? { spoken: true } : {}),
+    };
     shouldStickToBottomRef.current = true;
     setShowScrollToLatest(false);
 
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       const offlineMsg = t('handoff.offline') || 'You appear to be offline. Try again when you reconnect, or call URA toll-free on 0800 117 000.';
       addTurns([
-        createTurn('user', text, sentAttachments.length ? { attachments: sentAttachments } : undefined),
+        createTurn('user', text, userTurnMeta),
         createTurn('assistant', offlineMsg, { offlineMode: true }),
       ]);
       setMessage('');
@@ -1169,7 +1257,7 @@ export default function Page() {
     }
 
     addTurns([
-      createTurn('user', text, sentAttachments.length ? { attachments: sentAttachments } : undefined),
+      createTurn('user', text, userTurnMeta),
       // The empty assistant turn used to be added only once the stream
       // responded. It is created up front now because the working indicator
       // renders inside this bubble: without it there is nothing on screen to
@@ -1193,10 +1281,11 @@ export default function Page() {
       message: text,
       conversation_id: conversationId,
       top_k: 4,
-      locale,
+      locale: turnOptions?.locale ?? locale,
       // Until the taxpayer picks a language, `locale` is only a hint and the
-      // backend detects the language from what they type.
-      locale_explicit: localeExplicit,
+      // backend detects the language from what they type. A spoken turn is
+      // answered in the language the recogniser heard.
+      locale_explicit: turnOptions?.localeExplicit ?? localeExplicit,
       ...(sentAttachments.length ? { attachment_ids: sentAttachments.map((a) => a.id) } : {}),
       ...(selectedConnectorNamespaces.length
         ? { connector_namespaces: selectedConnectorNamespaces }
@@ -1554,6 +1643,8 @@ export default function Page() {
 
   const stopGeneration = useCallback(() => {
     userStoppedRef.current = true;
+    // A reply the reader stopped is not read aloud either.
+    setNarratedTurnId(useChatStore.getState().chat.at(-1)?.id ?? null);
     // Commit what has arrived rather than abandoning it mid-word: the reader
     // asked it to stop, not to throw away the part it had already written.
     revealQueueRef.current?.stop();
@@ -1644,55 +1735,65 @@ export default function Page() {
       setIsTransitioning(true);
       try {
         if (isRecording) {
-          // Stop recording
+          // Stop recording, and send what was said. Transcribed first, on its
+          // own, so the taxpayer sees their words as their turn within a
+          // second; then answered through the same stream as a typed question
+          // — its steps, its Stop, its text arriving as it is written. The one
+          // request this replaces (/v1/voice/chat) returned the transcript and
+          // the whole reply together, 2–20 s later, with nothing moving between.
           const rec = recorderRef.current;
           if (!rec) { setIsTransitioning(false); return; }
           recorderRef.current = null;
           setIsRecording(false);
           setSpeechState('idle');
           audioSignifiers.playMicStop();
-          const pcm16 = await rec.stop();
-          if (pcm16.byteLength === 0) {
-            setDictationNotice(t('voice.didNotCatch'));
-            return;
-          }
-          setIsLoading(true);
-          const t0 = Date.now();
-          setTurnPhase('thinking');
-          setTurnStartedAt(t0);
-          const conversationId = activeConversationId ?? ensureActiveConversationId();
-          trackChatSent(0);
+          const turn = ++voiceTurnRef.current;
+          setVoiceStage('transcribing');
+          let heard = '';
+          let heardLanguage: string | null = null;
           try {
-            // Text first, then speech: the answer is on screen as soon as it is
-            // known (0.4 s in English, ~4.6 s in Luganda on the GPU stack), and
-            // is spoken as a stream, instead of both waiting for the whole
-            // reply to be synthesised (9–20 s).
-            const r = await voiceChat(pcm16, {
-              language: locale,
-              conversationId,
-              ttsEnabled: false,
-              voice: useVoiceStore.getState().voiceByLocale[locale] || undefined,
-              sessionId: getChatSessionId(),
-            });
-            if (r.error && !r.transcript) {
-              // Hearing nothing is not an outage: say so, in the reader's language (G201).
-              addTurns([createTurn('assistant', t(r.error_code === 'no_speech' ? 'voice.didNotCatch' : 'voice.turnFailed'))]);
-              // Silence is an expected outcome, not a failure to count.
-              if (r.error_code !== 'no_speech') trackErrorOccurred('voice_chat_failed');
+            const pcm16 = await rec.stop();
+            // The recording is in hand, so the transition is over. What follows
+            // is transcription, which has its own stage and its own Stop: a
+            // tap after that Stop must not wait on the network to be heard.
+            setIsTransitioning(false);
+            if (pcm16.byteLength === 0) {
+              setDictationNotice(t('voice.didNotCatch'));
               return;
             }
-            if (r.transcript) { addTurns([createTurn('user', r.transcript)]); lastUserQueryRef.current = r.transcript; }
-            if (r.reply) {
-              addTurns([createTurn('assistant', r.reply, { citations: r.citations ?? [], faithfulnessScore: r.faithfulness_score ?? null, retrievalMode: r.retrieval_mode ?? 'keyword', thoughtForMs: Date.now() - t0 })]);
-              trackChatReceived(Date.now() - t0, (r.sources?.length ?? 0) > 0);
-              const tid = useChatStore.getState().chat[useChatStore.getState().chat.length - 1]?.id;
-              if (autoNarrate && tid) {
-                void handleListenToReply(tid, r.reply).then((how) => {
-                  if (how === 'ended') listenAgainRef.current();
-                });
-              }
+            const r = await transcribe(pcm16, locale, undefined, { domain: 'tax' });
+            // Stopped, or voice mode left, while it was being transcribed.
+            if (turn !== voiceTurnRef.current) return;
+            heard = r.text?.trim() ?? '';
+            heardLanguage = r.language;
+            if (!heard) {
+              // Hearing nothing is not an outage: say which it was, in the
+              // reader's language (G201) — and count only the outage.
+              setDictationNotice(t(r.error ? 'voice.recognitionUnavailable' : 'voice.didNotCatch'));
+              if (r.error) trackErrorOccurred('voice_chat_failed');
+              return;
             }
-          } catch { addTurns([createTurn('assistant', t('voice.turnFailed'))]); trackErrorOccurred('voice_recording_failed'); } finally { setIsLoading(false); setTurnPhase(null); saveCurrentSession(); }
+          } catch {
+            if (turn !== voiceTurnRef.current) return;
+            setDictationNotice(t('voice.turnFailed'));
+            trackErrorOccurred('voice_recording_failed');
+            return;
+          } finally {
+            if (turn === voiceTurnRef.current) setVoiceStage(null);
+          }
+          setVoiceHeard(heard);
+          // The recogniser heard this language; the answer comes in it — if it
+          // is one the app speaks. A code it does not ("unknown", a language
+          // the picker does not offer) would be refused by /v1/chat, so the
+          // reader's own language stands instead.
+          const heardLocale = LOCALE_OPTIONS.find((option) => option.value === heardLanguage)?.value ?? locale;
+          // Held for one render, so it is sent by the effect that sees the
+          // attachments as they are now (see below).
+          queuedVoiceTurnRef.current = {
+            text: heard,
+            options: { locale: heardLocale, localeExplicit: true, spoken: true },
+          };
+          setVoiceStage('queued');
         } else {
           // Start recording. `starting` and the watchdog for the same reason
           // the dictation path uses them: getUserMedia shows a permission
@@ -1702,6 +1803,11 @@ export default function Page() {
           try {
             const rec = new AudioRecorder();
             recorderRef.current = rec;
+            // A new turn: nothing heard yet, and the last one's words are done with.
+            setHeardSpeech(false);
+            pausingRef.current = false;
+            setPausing(false);
+            setVoiceHeard(null);
             armMic(() => {
               rec.cancel();
               if (recorderRef.current === rec) recorderRef.current = null;
@@ -1859,7 +1965,7 @@ export default function Page() {
     } finally {
       setIsTransitioning(false);
     }
-  }, [isTransitioning, voiceMode, hasMediaRecorder, isRecording, locale, activeConversationId, autoNarrate, addTurns, ensureActiveConversationId, saveCurrentSession, speechState, setSpeechState, setMessage, handleListenToReply, stopReading, armMic, disarmMic, t]);
+  }, [isTransitioning, voiceMode, hasMediaRecorder, isRecording, locale, speechState, setSpeechState, setMessage, stopReading, armMic, disarmMic, t]);
 
   const handleCancelRecording = useCallback(() => {
     if (recorderRef.current) {
@@ -1872,12 +1978,34 @@ export default function Page() {
     setIsTransitioning(false);
   }, [disarmMic, setSpeechState]);
 
+  // A spoken question is sent once nothing attached is still being read, and
+  // no answer is still being written (a suggestion tapped while the mic was
+  // open). A file attached before voice mode was entered goes with the
+  // question, as it would with a typed one — and sendMessage refuses to send
+  // past an upload or a running answer, which would have dropped the question
+  // without a word. Usually this is the very next render; the dock says
+  // "Analysing attachment…" when it is not.
+  useEffect(() => {
+    const queued = queuedVoiceTurnRef.current;
+    if (voiceStage !== 'queued' || !queued || isLoading) return;
+    if (pendingAttachments.some((a) => a.status === 'uploading')) return;
+    queuedVoiceTurnRef.current = null;
+    setVoiceStage(null);
+    void sendMessage(queued.text, undefined, queued.options);
+  }, [voiceStage, isLoading, pendingAttachments, sendMessage]);
+
   // Voice mode's end of turn. A pause after speech, or a turn that reached
   // its limit, is sent as the checkmark sends it. A mic that heard nothing
   // closes and says so: left open, it would listen to the room indefinitely.
+  // With tap-to-send (Settings → Voice) only the start of speech is used.
   useEffect(() => {
     onTurnEventRef.current = (event) => {
-      if (event === 'speech' || !recorderRef.current?.isRecording) return;
+      if (!recorderRef.current?.isRecording) return;
+      if (event === 'speech') {
+        setHeardSpeech(true);
+        return;
+      }
+      if (silenceTimeout <= 0) return;
       if (event === 'no-speech') {
         handleCancelRecording();
         audioSignifiers.playMicStop();
@@ -1895,15 +2023,109 @@ export default function Page() {
     };
   }, [handleCancelRecording, handleMicClick, t, voiceMode, silenceTimeout, isRecording]);
 
+  /**
+   * Voice mode and narration move together, in both directions.
+   *
+   * Entering voice mode turns narration on — a voice mode that listens but
+   * answers in silence is not what anyone means by it. The reverse also has to
+   * hold: turning narration off in Settings while voice mode is on used to
+   * leave `voiceMode=true, autoNarrate=false`, the exact pair this coupling
+   * exists to prevent, because the composer owned the rule and the settings
+   * toggle wrote past it. Both entry points now go through these.
+   *
+   * Entering also opens the microphone (the effect below): voice mode means
+   * "talk to it", and a mode that then waited for a tap on a second button
+   * looked as if it had done nothing. Leaving lets go of everything voice was
+   * doing — the mic, the reading, a question not yet sent — but not an answer
+   * already being written, which carries on as text.
+   */
+  const enterVoiceMode = useCallback(() => {
+    // Dictation still listening would be a second consumer of the mic, typing
+    // into a composer the dock is about to hide.
+    if (dictationActiveRef.current) {
+      dictationActiveRef.current = false;
+      recognitionRef.current?.stop();
+    }
+    listenOnEnterRef.current = true;
+    setDictationNotice(null);
+    setVoiceHeard(null);
+    setNarrationArmedAt(Date.now());
+    setVoiceMode(true);
+    setAutoNarrate(true);
+  }, []);
+
+  const exitVoiceMode = useCallback(() => {
+    // The dock is about to go. If it had the focus, the composer taking its
+    // place gets it, rather than the page.
+    const dockHadFocus = Boolean(document.activeElement?.closest('[data-testid="voice-dock"]'));
+    voiceTurnRef.current += 1;
+    queuedVoiceTurnRef.current = null;
+    listenOnEnterRef.current = false;
+    if (recorderRef.current) handleCancelRecording();
+    stopReading();
+    setVoiceStage(null);
+    setVoiceHeard(null);
+    setDictationNotice(null);
+    setVoiceMode(false);
+    setAutoNarrate(false);
+    if (dockHadFocus) window.requestAnimationFrame(() => document.getElementById('composer-input')?.focus());
+  }, [handleCancelRecording, stopReading]);
+
+  const setNarration = useCallback((on: boolean) => {
+    // Silencing narration leaves voice mode listening with nothing to say back.
+    if (!on && voiceMode) {
+      exitVoiceMode();
+      return;
+    }
+    if (on) setNarrationArmedAt(Date.now());
+    setAutoNarrate(on);
+  }, [voiceMode, exitVoiceMode]);
+
+  // Entering voice mode opens the mic — once the mode has rendered, so the
+  // press takes the voice path, and not over an answer still being written.
+  useEffect(() => {
+    if (!voiceMode || !listenOnEnterRef.current || isLoading) return;
+    listenOnEnterRef.current = false;
+    if (!isRecording && !recorderRef.current) void handleMicClick();
+  }, [voiceMode, isLoading, isRecording, handleMicClick]);
+
+  // A call takes the microphone, and a chat with an officer is typed: either
+  // one ends voice mode rather than leaving a mic open behind it.
+  const callOpen = useCallStore((s) => s.isOpen);
+  useEffect(() => {
+    if (voiceMode && (callOpen || withOfficer)) exitVoiceMode();
+  }, [voiceMode, callOpen, withOfficer, exitVoiceMode]);
+
+  // The dock's mic-off: nothing is sent, and the mic's closing tone says so.
+  const turnMicOff = useCallback(() => {
+    handleCancelRecording();
+    audioSignifiers.playMicStop();
+  }, [handleCancelRecording]);
+
+  // The dock's Stop. A question still being transcribed, or held for a file,
+  // is dropped; an answer being written stops as the composer's Stop stops it.
+  const stopVoiceTurn = useCallback(() => {
+    if (voiceStage) {
+      voiceTurnRef.current += 1;
+      queuedVoiceTurnRef.current = null;
+      setVoiceStage(null);
+      return;
+    }
+    stopGeneration();
+  }, [voiceStage, stopGeneration]);
+
   // Escape cancels the recording, stops dictation, or stops a reply being read
-  // aloud (G204) — not while a dialog that Escape belongs to is open.
+  // aloud (G204) — not while a dialog that Escape belongs to is open. With
+  // none of those going on, it leaves voice mode.
   useVoiceEscape({
     recording: isRecording,
     dictating: speechState === 'listening',
     reading: Boolean(playingTurnId || ttsLoading),
+    voiceMode,
     onCancelRecording: handleCancelRecording,
     onStopDictation: handleMicClick,
     onStopReading: stopReading,
+    onEndVoiceMode: exitVoiceMode,
   });
 
   // Leaving the page stops playback. That must not read as a reply that
@@ -1921,27 +2143,6 @@ export default function Page() {
     trackStarterPromptUsed(prompt);
     sendMessage(prompt);
   }, [sendMessage]);
-
-  /**
-   * Voice mode and narration move together, in both directions.
-   *
-   * Entering voice mode turns narration on — a voice mode that listens but
-   * answers in silence is not what anyone means by it. The reverse also has to
-   * hold: turning narration off in Settings while voice mode is on used to
-   * leave `voiceMode=true, autoNarrate=false`, the exact pair this coupling
-   * exists to prevent, because the composer owned the rule and the settings
-   * toggle wrote past it. Both entry points now go through these.
-   */
-  const setVoiceModeWithNarration = useCallback((on: boolean) => {
-    setVoiceMode(on);
-    setAutoNarrate(on);
-  }, []);
-
-  const setNarration = useCallback((on: boolean) => {
-    setAutoNarrate(on);
-    // Silencing narration leaves voice mode listening with nothing to say back.
-    if (!on) setVoiceMode(false);
-  }, []);
 
   // ---- Derived state ----
 
@@ -2035,8 +2236,6 @@ export default function Page() {
     isTransitioning,
     speechUnavailable: speechState === 'unavailable' && !hasMediaRecorder,
     speechState,
-    voiceMode,
-    autoSend: silenceTimeout > 0,
     onMessageChange: setMessage,
     onSend: sendMessage,
     onMicClick: handleMicClick,
@@ -2074,16 +2273,64 @@ export default function Page() {
     // and a voice mode that listens but answers in silence is not the thing
     // anyone means by voice mode — so entering turns auto-narrate on and
     // leaving turns it off, which is what ticking both boxes used to do.
-    onVoiceModeChange: setVoiceModeWithNarration,
-    voiceModeDisabled: !serverReady && !hasMediaRecorder,
+    // Once on, the dock takes the composer's place (below).
+    onEnterVoiceMode: enterVoiceMode,
+    // Voice mode records what is said for the server to transcribe: without a
+    // recorder it has nothing to send, and its mic would fall through to
+    // dictation into a composer the dock is hiding.
+    voiceModeDisabled: !hasMediaRecorder,
     dictationNotice,
     onStop: stopGeneration,
     // With an officer, the composer is a plain message box to them: files,
     // connectors and voice mode are the assistant's tools.
     ...(officerChat.withOfficer
-      ? { onAttachFiles: undefined, onVoiceModeChange: undefined, placeholder: t('officerChat.placeholder') }
+      ? { onAttachFiles: undefined, onEnterVoiceMode: undefined, placeholder: t('officerChat.placeholder') }
       : {}),
   };
+
+  // ---- Voice mode's dock, in the composer's place ----
+  //
+  // One phase at a time, from the state each step already keeps. `replyToNarrate`
+  // covers the moment between an answer settling and its reading starting, which
+  // would otherwise flash "Tap the mic to talk" (and announce it) between the two.
+  const voiceDockPhase: VoiceDockPhase =
+    speechState === 'starting'
+      ? 'opening'
+      : isRecording
+        ? pausing
+          ? 'pausing'
+          : heardSpeech
+            ? 'hearing'
+            : 'listening'
+        : voiceStage === 'transcribing'
+          ? 'transcribing'
+          : voiceStage === 'queued' || isLoading
+            ? 'thinking'
+            : playingTurnId
+              ? 'speaking'
+              : ttsLoading || replyToNarrate
+                ? 'preparing'
+                : 'idle';
+  const voiceDock = voiceMode ? (
+    <VoiceModeDock
+      phase={voiceDockPhase}
+      workingLabel={
+        voiceStage === 'queued' && pendingAttachments.some((a) => a.status === 'uploading')
+          ? t('composer.analysing')
+          : turnPhase
+            ? t(PHASE_UI[turnPhase].label)
+            : undefined
+      }
+      heard={voiceHeard}
+      notice={dictationNotice ?? (narrationFailed ? t('narration.failed') : null)}
+      autoSend={silenceTimeout > 0}
+      onTalk={handleMicClick}
+      onSend={handleMicClick}
+      onCancel={turnMicOff}
+      onStop={stopVoiceTurn}
+      onEnd={exitVoiceMode}
+    />
+  ) : null;
 
   // Say so when an officer joins or the chat hands back to the assistant.
   const officerStateRef = useRef(officerChat.state);
@@ -2227,7 +2474,7 @@ export default function Page() {
             </div>
 
             <div ref={chatDockRef} className="landing-composer landing-dock chat-dock">
-              <ChatInput {...composerProps} />
+              {voiceDock ?? <ChatInput {...composerProps} />}
             </div>
 
             <div className="landing-prompts" role="group" aria-label="Suggested questions">
@@ -2345,17 +2592,20 @@ export default function Page() {
             )}
 
             <div ref={chatDockRef} className="chat-dock">
-              <NarrationBar
-                active={Boolean(playingTurnId || ttsLoading)}
-                loading={Boolean(ttsLoading) && !playingTurnId}
-                onStop={stopReading}
-                failed={narrationFailed !== null}
-                onRetry={() => {
-                  if (narrationFailed) void handleListenToReply(narrationFailed.turnId, narrationFailed.text);
-                }}
-                onDismiss={() => setNarrationFailed(null)}
-              />
-              <ChatInput {...composerProps} />
+              {/* In voice mode the dock carries the reading's controls itself. */}
+              {!voiceMode && (
+                <NarrationBar
+                  active={Boolean(playingTurnId || ttsLoading)}
+                  loading={Boolean(ttsLoading) && !playingTurnId}
+                  onStop={stopReading}
+                  failed={narrationFailed !== null}
+                  onRetry={() => {
+                    if (narrationFailed) void handleListenToReply(narrationFailed.turnId, narrationFailed.text);
+                  }}
+                  onDismiss={() => setNarrationFailed(null)}
+                />
+              )}
+              {voiceDock ?? <ChatInput {...composerProps} />}
             </div>
           </div>
         )}

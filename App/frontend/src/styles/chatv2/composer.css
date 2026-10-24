@@ -117,24 +117,6 @@
   transform: none;
 }
 
-/* Voice mode engaged. A ring rather than a colour change: the button keeps the
-   accent fill it had a moment ago, so "on" is legible without the control
-   appearing to become a different button. */
-.chatv2 .cmpv2-bar .voicemode-circle-btn.is-active {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cv2-accent) 30%, transparent);
-}
-.chatv2 .cmpv2-bar .voicemode-circle-btn.is-active svg {
-  animation: cv2-voicewave 1.6s ease-in-out infinite;
-}
-@keyframes cv2-voicewave {
-  50% { opacity: 0.55; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .chatv2 .cmpv2-bar .voicemode-circle-btn.is-active svg {
-    animation: none;
-  }
-}
-
 /* Mic keeps its legacy recording pulse via .btn-recording. */
 .chatv2 .cmpv2-bar .mic-circle-btn {
   border-radius: 50%;
@@ -419,6 +401,14 @@
 }
 
 @media (max-width: 720px) {
+  /* The phone dock lets taps through its gradient (pointer-events: none, in
+     globals.css) and takes them back only on what it holds. The composer
+     always did; the reading bar and voice mode's dock did not, so on a phone
+     their buttons were dead and a tap on End or Pause reached the page behind. */
+  .chatv2 .chat-dock .voice-dock,
+  .chatv2 .chat-dock .narration-bar {
+    pointer-events: auto;
+  }
   .chatv2 .chat-dock .composer.cmpv2 {
     border-radius: 20px;
     padding: 0;

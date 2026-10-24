@@ -319,40 +319,63 @@ test.describe("Voice round-trip carries the language", () => {
     await expect(page.locator("#composer-input")).toHaveValue(/vat rate/);
   });
 
-  test("voice mode POSTs /v1/voice/chat with the chosen language", async ({ page }) => {
+  test("voice mode transcribes in the chosen language, and answers in the language it heard", async ({ page }) => {
     test.slow();
     await seedConsent(page);
     await clearChatStore(page);
     await mockBackend(page);
     await mockVoiceCatalogue(page);
 
-    const urls: string[] = [];
-    await page.route("**/api/v1/voice/chat**", async (route) => {
-      urls.push(route.request().url());
+    const asrUrls: URL[] = [];
+    await page.route("**/api/v1/asr**", async (route) => {
+      asrUrls.push(new URL(route.request().url()));
       await route.fulfill({
-        json: {
-          transcript: "emisolo", transcript_language: "lg", conversation_id: "c-e2e",
-          reply: "18%", reply_audio_base64: "", sample_rate: 22050, duration_s: 0.05,
-          sources: [], citations: [], faithfulness_score: 0.9, retrieval_mode: "hybrid",
-          asr_backend: "stub", tts_backend: "stub", mt_backend: "stub", error: null,
-        },
+        json: { text: "emisolo", language: "lg", duration_s: 0.05,
+                latency_s: 0.1, rtf: 2.0, backend: "stub", error: null },
       });
     });
+    const chat = page.waitForRequest("**/api/v1/chat/stream", { timeout: 20_000 });
 
     await page.goto("/");
     await chooseLanguage(page, "Luganda");
     await page.locator('[data-testid="composer-voicemode"]').click();
-    await page.locator('[data-testid="composer-mic"]').click();
-    await expect(page.locator('[data-testid="composer-rec-confirm"]')).toBeVisible({
-      timeout: 10_000,
-    });
+    // The dock speaks Luganda now, so it is found by what it is, not by its words.
+    const send = page.getByTestId("voice-dock-primary");
+    await expect(send).toHaveAttribute("data-action", "send", { timeout: 10_000 });
     await page.waitForTimeout(1200);
-    await page.locator('[data-testid="composer-rec-confirm"]').click();
+    await send.click();
 
-    await expect.poll(() => urls.length, { timeout: 20_000 }).toBeGreaterThan(0);
-    expect(urls[0]).toContain("language=lg");
-    // Text first: the reply is shown when it is known and spoken as a stream,
-    // not held back until all of it is synthesised.
-    expect(urls[0]).toContain("tts_enabled=false");
+    const body = (await chat).postDataJSON();
+    expect(asrUrls[0].searchParams.get("language")).toBe("lg");
+    expect(asrUrls[0].searchParams.get("domain")).toBe("tax");
+    // The recogniser heard Luganda; the answer is asked for in it, as
+    // /v1/voice/chat always answered — text first, and spoken as a stream.
+    expect(body).toMatchObject({ message: "emisolo", locale: "lg", locale_explicit: true });
+  });
+
+  test("voice mode answers in the reader's language when the recogniser names one the app does not speak", async ({ page }) => {
+    test.slow();
+    await seedConsent(page);
+    await clearChatStore(page);
+    await mockBackend(page);
+    await mockVoiceCatalogue(page);
+    // "unknown" fails /v1/chat's locale pattern: passed on, the turn would be refused.
+    await page.route("**/api/v1/asr**", (route) =>
+      route.fulfill({
+        json: { text: "emisolo", language: "unknown", duration_s: 0.05,
+                latency_s: 0.1, rtf: 2.0, backend: "stub", error: null },
+      }),
+    );
+    const chat = page.waitForRequest("**/api/v1/chat/stream", { timeout: 20_000 });
+
+    await page.goto("/");
+    await chooseLanguage(page, "Luganda");
+    await page.locator('[data-testid="composer-voicemode"]').click();
+    const send = page.getByTestId("voice-dock-primary");
+    await expect(send).toHaveAttribute("data-action", "send", { timeout: 10_000 });
+    await page.waitForTimeout(1200);
+    await send.click();
+
+    expect((await chat).postDataJSON()).toMatchObject({ message: "emisolo", locale: "lg", locale_explicit: true });
   });
 });

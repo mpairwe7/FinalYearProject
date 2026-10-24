@@ -46,6 +46,29 @@ answering a mishearing. G206: playback speed, pitch-preserving — that needs an
 also gives Media Session (lock-screen and headset) controls; iOS autoplay rules
 make it a change to verify on devices, so it is its own phase.
 
+### V3 — Feedback while it works (2026-10-24, `ADR-0016`)
+
+The owner reported getting no feedback during a voice conversation (G251–G255).
+Voice mode now has a dock in the composer's place (`VoiceModeDock`):
+
+- one named state at a time, in five languages;
+- the call's orb (`CallOrb`, now shared), coloured by who has the floor and
+  moving with the live voice;
+- an end-of-turn countdown round the send button;
+- what was heard, said back while the answer is worked on, then the sentence
+  being read;
+- one control that always takes the floor back (send now, stop, interrupt and
+  talk), plus mic-off and End.
+
+Entering voice mode opens the mic. A turn is transcribed first (`/v1/asr`) and
+shown at once as the taxpayer's turn, then answered through `/v1/chat/stream`
+in the language heard. Narration reads a reply once it has finished arriving,
+which also fixes typed questions' answers never being read (G254). Barge-in by
+voice (G256) and speaking while the answer streams (G257) stay open.
+
+V2 is still to do, and V3 makes G203 smaller: a mishearing is now on screen
+before the answer exists, and Stop ends the turn.
+
 ### Later
 
 G205 (the Settings dialog in five languages) with the other Settings sections.

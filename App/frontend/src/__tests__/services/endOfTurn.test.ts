@@ -107,6 +107,28 @@ describe('EndOfTurnDetector', () => {
     expect(events.map((e) => e.event)).toEqual(['speech', 'end']);
   });
 
+  it('counts a pause down towards the end of the turn, and starts over when speech resumes', () => {
+    // The dock draws this as a ring round the send button: a turn must never
+    // send without warning, and talking again must visibly hold it open.
+    const detector = new EndOfTurnDetector({ silenceMs: 1200 });
+    let now = 0;
+    const feed = (segments: Array<[number, number]>) => {
+      for (const [ms, db] of segments) {
+        for (let t = 0; t < ms; t += FRAME_MS, now += FRAME_MS) detector.push(db, now);
+      }
+    };
+    feed([[1000, ROOM]]);
+    expect(detector.silenceProgress).toBe(0); // nothing said yet
+    feed(speech(1000));
+    expect(detector.silenceProgress).toBe(0); // still talking
+    feed([[600, ROOM]]);
+    expect(detector.silenceProgress).toBeCloseTo(0.5, 5);
+    feed(speech(600));
+    expect(detector.silenceProgress).toBe(0); // went on talking: the countdown starts over
+    feed([[1300, ROOM]]);
+    expect(detector.silenceProgress).toBe(1); // sent
+  });
+
   it('decides nothing more after the turn has ended', () => {
     const { detector } = run([[1000, ROOM], ...speech(1000), [2000, ROOM]]);
     expect(detector.push(VOICE, 100_000)).toBeNull();
@@ -152,6 +174,23 @@ describe('watchEndOfTurn', () => {
     vi.advanceTimersByTime(6000);
     expect(onEvent.mock.calls.map((c) => c[0])).toEqual(['speech', 'end']);
     expect(disconnect).toHaveBeenCalled();
+  });
+
+  it('reports every reading’s level, and the pause only once speech has started', () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] });
+    const start = performance.now();
+    const { ctx, source } = fakeGraph((ms) => (ms - start > 1000 && ms - start < 2500 ? VOICE : ROOM));
+    const onLevel = vi.fn();
+    const onProgress = vi.fn();
+    watchEndOfTurn(ctx, source, { silenceMs: 1200, onEvent: vi.fn(), onLevel, onProgress });
+    vi.advanceTimersByTime(900);
+    expect(onLevel).toHaveBeenCalled();
+    expect(onLevel.mock.calls.at(-1)?.[0]).toBeCloseTo(ROOM, 3);
+    expect(onProgress).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(6000);
+    const progress = onProgress.mock.calls.map((c) => c[0] as number);
+    expect(progress[0]).toBe(0);
+    expect(progress.at(-1)).toBe(1);
   });
 
   it('stops when asked, before any event', () => {

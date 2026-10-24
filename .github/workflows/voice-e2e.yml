@@ -17,7 +17,8 @@
 #   Tier B (tier-b-integration) — same browser flow against a REAL FastAPI
 #       backend reached via the Next.js /api rewrite, started with deterministic
 #       mock speech backends (no heavy models, no network): /v1/speech/health
-#       ready, /v1/tts real WAV, /v1/voice/chat graceful no-speech path.
+#       ready, /v1/tts real WAV, /v1/asr's graceful no-speech path (voice mode
+#       transcribes first, then answers through /v1/chat/stream).
 # =============================================================================
 name: "URA Chatbot — Voice E2E (STT/TTS)"
 
@@ -31,6 +32,13 @@ on:
       - "App/frontend/src/components/ChatMessage.tsx"
       - "App/frontend/src/components/ThemeToggle.tsx"
       - "App/frontend/src/services/voice*.ts"
+      # Voice mode's dock: when a turn ends, the countdown and the orb's levels,
+      # Escape, and the orb itself — each one a voice.spec.ts flow.
+      - "App/frontend/src/services/endOfTurn.ts"
+      - "App/frontend/src/services/audioLevelBus.ts"
+      - "App/frontend/src/hooks/useVoiceEscape.ts"
+      - "App/frontend/src/hooks/useNarration.ts"
+      - "App/frontend/src/components/call/CallOrb.tsx"
       - "App/frontend/src/hooks/useSpeech.ts"
       - "App/frontend/src/hooks/useTheme.ts"
       - "App/frontend/src/lib/theme.ts"

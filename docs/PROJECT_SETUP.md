@@ -452,7 +452,7 @@ the chrome duplicates them.
 | Control | What it does |
 | --- | --- |
 | **Dictate** (mic) | Fills the composer with what you say. Does not send. |
-| **Enter voice mode** (waveform) | Holds a spoken conversation — records, sends, and reads the reply back. Carries narration with it. |
+| **Enter voice mode** (waveform) | Holds a spoken conversation: opens the voice dock in the composer's place with the mic already open, sends what you say, and reads the reply back. Carries narration with it. |
 
 **Dictation transcribes live.** Words appear as they are spoken rather than
 after you stop, because the recognizer runs with `interimResults` and
@@ -477,7 +477,7 @@ would cancel nothing.
 after every sentence is not hands-free, so voice mode sends a turn once the
 speaker has paused for `useVoiceStore.silenceTimeout`: 1.2 s by default, the top
 of the 0.8–1.2 s that voice agents use, with 0.8 s, 2 s and Off (tap only) in
-Settings → Voice. The checkmark still sends at once. The decision is made in
+Settings → Voice. **Send now** (the tick) still sends at once. The decision is made in
 the browser from the microphone's level (`services/endOfTurn.ts`): speech is
 sound 12 dB above the room's own level in the 250–3800 Hz band, the floor is the
 quiet end of the last 4 s, so it follows a noisy room (and holds still once a
@@ -492,6 +492,36 @@ been read aloud, the mic opens again for the next turn. A reply stopped by the
 listener does not reopen it. Opening the mic, by a tap or by itself, silences a
 reply still being read, so it neither talks over the speaker nor ends up in
 their recording.
+
+**Voice mode says what it is doing** (`components/VoiceModeDock.tsx`, ADR-0016,
+G251–G255). Entering it puts a dock in the composer's place and opens the mic,
+with the focus on the dock's control. The dock shows:
+
+- one named state at a time: *Opening the microphone*, *Listening*, *Hearing
+  you*, *Sending when you stop*, *Got it*, the answer's step (*Searching the
+  URA knowledge base*, *Writing the answer*…), *Getting ready to speak*,
+  *Speaking*, *Paused*, *Tap the mic to talk*;
+- the call's orb, teal while you have the floor and navy while the assistant
+  does, with a gold arc while the answer is worked on, moving with whoever is
+  talking;
+- a countdown ring round **Send now** while a pause is about to send the turn,
+  which opens again if you go on talking;
+- what was heard, as *You said: "…"*, while the answer is worked on, then the
+  sentence being read.
+
+Its one primary control changes job with the state (*Send now*, *Stop*,
+*Interrupt and talk*, *Start talking*). Beside it are *Turn the microphone off*
+(nothing is sent) and **End**.
+
+A turn is transcribed first (`/v1/asr`, `domain=tax`). What was heard becomes
+your turn at once, marked *Spoken*, and the answer streams in through
+`/v1/chat/stream` in the language heard. Before, one `/v1/voice/chat` request
+returned both together, 2–20 s later, with nothing moving in between. A reply is
+read aloud once it has finished arriving; one you stopped is not.
+
+Changes are announced politely, never while the mic is open, where a screen
+reader would be recorded into the turn. A call, or an officer taking the chat,
+ends voice mode, and so does Escape once nothing else is running.
 On a phone, the composer's hint line hid everything, including these notices;
 it now hides only the standing disclaimer.
 
@@ -508,7 +538,8 @@ keyboard (`hooks/useVoiceEscape.ts`, G204): it cancels a recording, else stops
 dictation (what was heard stays in the composer), else stops the reading — one
 per press, and never while a dialog that Escape belongs to is open. A reply that
 could not be read aloud at all says so on the bar for 8 s, with **Try again**,
-instead of a Listen tap that silently did nothing (G202).
+instead of a Listen tap that silently did nothing (G202). In voice mode the dock
+carries the same pause and resume, and says so there.
 
 **The voice speaks the reader's language** (G201). The Listen button, the bar,
 every dictation notice and the voice-mode errors are translated in en, lg, sw,
@@ -526,7 +557,8 @@ detected. Please speak clearly and try again."*), but it is gated on `error`
 being unset, so the failure branch always won. The chain now leaves `error`
 unset when a transcriber ran and returned nothing, and names the backend that
 answered. The composer says so too, rather than closing the recording panel onto
-an empty box: *"Didn't catch that. Try again, or type your question."*
+an empty box: *"Didn't catch that. Try again, or type your question."* In voice
+mode the dock says it, and nothing is sent as a turn.
 
 ### Answering a guided flow's questions
 

@@ -488,11 +488,56 @@ export async function resumePlayback(): Promise<boolean> {
   return true;
 }
 
+/** Where speech is connected: an analyser on the way to the speakers, else the speakers. */
+let _playbackOut: AudioNode | null = null;
+let _playbackAnalyser: AnalyserNode | null = null;
+let _playbackSamples: Float32Array<ArrayBuffer> | null = null;
+
 function getPlaybackContext(): AudioContext {
   if (!_playbackCtx || _playbackCtx.state === 'closed') {
     _playbackCtx = new AudioContext();
+    _playbackOut = null;
+    _playbackAnalyser = null;
   }
   return _playbackCtx;
+}
+
+/**
+ * The node a piece of speech plays into. It passes through an analyser so
+ * voice mode's orb can move with the reply being read — the only sign, for
+ * someone not looking at the transcript, that the assistant has the floor.
+ * A context that cannot make one plays straight to the speakers.
+ */
+function playbackOutput(ctx: AudioContext): AudioNode {
+  if (_playbackOut) return _playbackOut;
+  try {
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.connect(ctx.destination);
+    _playbackAnalyser = analyser;
+    _playbackOut = analyser;
+  } catch {
+    _playbackOut = ctx.destination;
+  }
+  return _playbackOut;
+}
+
+/**
+ * How loud the reply being read aloud is at this moment, 0..1 — 0 when
+ * nothing plays or it is paused. Read from an animation frame, never stored.
+ */
+export function readPlaybackLevel(): number {
+  const analyser = _playbackAnalyser;
+  if (!analyser || _narrationPaused || !isPlaying()) return 0;
+  if (!_playbackSamples || _playbackSamples.length !== analyser.fftSize) {
+    _playbackSamples = new Float32Array(analyser.fftSize);
+  }
+  analyser.getFloatTimeDomainData(_playbackSamples);
+  let sum = 0;
+  for (let i = 0; i < _playbackSamples.length; i++) sum += _playbackSamples[i] * _playbackSamples[i];
+  // Synthesised speech sits around 0.05–0.25 RMS: scaled so a normal voice
+  // spans the orb's range instead of barely moving it.
+  return Math.min(1, Math.sqrt(sum / _playbackSamples.length) * 4);
 }
 
 /** Play a base64-encoded WAV audio blob. Returns a promise that resolves on end. */
@@ -511,7 +556,7 @@ export async function playAudioBase64(base64: string): Promise<void> {
   const buffer = await ctx.decodeAudioData(audioBuf);
   const source = ctx.createBufferSource();
   source.buffer = buffer;
-  source.connect(ctx.destination);
+  source.connect(playbackOutput(ctx));
   _currentSource = source;
 
   return new Promise<void>((resolve) => {
@@ -532,6 +577,8 @@ export function closePlaybackContext(): void {
     _playbackCtx.close().catch(() => {});
     _playbackCtx = null;
   }
+  _playbackOut = null;
+  _playbackAnalyser = null;
 }
 
 /** Stop any currently playing audio, including a streamed reply and what it has queued. */
@@ -700,7 +747,7 @@ export async function speakStreamed(
       if (controller.signal.aborted) break;
       const source = ctx.createBufferSource();
       source.buffer = buffer;
-      source.connect(ctx.destination);
+      source.connect(playbackOutput(ctx));
       const startAt = Math.max(ctx.currentTime + 0.02, nextStart);
       source.start(startAt);
       nextStart = startAt + buffer.duration;
