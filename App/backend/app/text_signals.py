@@ -198,8 +198,9 @@ _HARDSHIP_RE = re.compile(
     r"|ssente\s+zaggwawo|sirina\s+ssente|talina\s+ssente"
     r"|ebintu\s+byange\s+babikutte|bamazze\s+okusiba\s+edduuka|edduuka\s+lyange\s+baligadde|bizinesi\s+yange\s+egudde"
     r"|sina\s+pesa|biashara\s+imefungwa|duka\s+langu\s+limefungwa|bidhaa\s+zimekamatwa|akaunti\s+imefungwa"
-    r"|tihaine\s+sente|ebyangye\s+babikwata"
-    r"|cente\s+peke|jami\s+na\s+gimako)\b"
+    r"|tihaine\s+e?sente|tindina\s+(?:e?sente|shiringi)|tinyine\s+e?sente|e?sente\s+zihweireho|ebyangye\s+babikwata"
+    r"|obushuubuzi\s+(?:bwangye\s+)?(?:bugumire|bwagwa|bwahendeka)|eduuka\s+(?:ryangye\s+)?baariigara"
+    r"|cente\s+pe(?:ke)?|pe\s+atye\s+ki\s+cente|jami\s+na\s+gimako|biacara\s+(?:mera\s+|na\s+)?(?:tek|opoto|olor)|duka\s+(?:mera\s+|na\s+)?gicego)\b"
 )
 
 #: Comprehension trouble — the explanation needs rebuilding, not

@@ -666,10 +666,14 @@ _LISTISH_VERB_RE = re.compile(
     r"\b(?:is|are|was|were|must|should|will|shall|means|applies)\b",
     re.IGNORECASE,
 )
-_SENTENCE_BREAK_RE = re.compile(r"(?<=[a-z][.!?])\s+(?=[A-Z])")
+_SENTENCE_BREAK_RE = re.compile(
+    r"(?<!\be\.g)(?<!\bi\.e)(?<!\bsec)(?<!\bcap)(?<!\bart)(?<!\bsch)(?<!\bvs)(?<!\bno)(?<!\bmr)(?<!\bdr)(?<!\bms)(?<=[a-z][.!?])\s+(?=[A-Z])",
+    re.IGNORECASE,
+)
 _GLUED_STEP_RE = re.compile(
     r"(?i)(?<![A-Za-z])(?!(?:section|article|schedule|form|act|rule|clause|"
-    r"paragraph|ekitundu|kifungu|ibarra|vat|paye|wht|tin|cit|pit|ugx|efris|rate|percent|percentage)\d)"
+    r"paragraph|ekitundu|kifungu|ekicweka|ibarra|dul|rwom|idaara|omutendera|hatua|"
+    r"vat|paye|wht|tin|cit|pit|ugx|efris|rate|percent|percentage)\d)"
     r"([A-Za-z]{3,})((?:[1-9]|1[0-2]))[\.\)][ \t]*(\*{0,2}[A-Za-z])"
 )
 
@@ -1027,6 +1031,16 @@ class OutputGuard:
                 text = re.sub(
                     r"^(Bino bye biragiro ebisinga okuba eby'omugaso bye nazuula mu nsibuko za URA entongole:)",
                     r"**Obulagirizi obw'obutongole**:\n\nBino bye biragiro ebisinga okuba eby'omugaso bye nazuula mu nsibuko za URA entongole:",
+                    text,
+                )
+                text = re.sub(
+                    r"^(Ebi nibyo bihandiiko ebirikukirayo obukuru ebi naashangire omu bukomooko bwa URA obutongore:)",
+                    r"**Obuhabuzi bw'Obutongore**:\n\nEbi nibyo bihandiiko ebirikukirayo obukuru ebi naashangire omu bukomooko bwa URA obutongore:",
+                    text,
+                )
+                text = re.sub(
+                    r"^(Man aye tela ma pire tek loyo ma anongo ki i kama ngec me URA oa iye:)",
+                    r"**Tela me URA ma Kimoko**:\n\nMan aye tela ma pire tek loyo ma anongo ki i kama ngec me URA oa iye:",
                     text,
                 )
             if "**" not in text and not re.search(r"\d+\.\s|\n-\s", text):

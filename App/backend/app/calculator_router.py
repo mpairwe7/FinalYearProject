@@ -404,6 +404,14 @@ _WHT_TYPE_RES: list[tuple[str, re.Pattern[str]]] = [
         re.compile(r"\b(telecom\w*|mobile\s*money|airtime|mobile\s*network)\b[^?]{0,40}\bcommission", re.IGNORECASE),
     ),
     (
+        "insurance_agent_commission",
+        re.compile(r"\binsurance\s+(?:agent\s+)?commission\w*\b", re.IGNORECASE),
+    ),
+    (
+        "payment_service_provider_commission",
+        re.compile(r"\b(payment\s+service\s+provider|agent\s+banking|banking\s+agent)\b[^?]{0,40}\bcommission\w*\b", re.IGNORECASE),
+    ),
+    (
         "foreign_interest",
         re.compile(r"\binterest\b.*\b(non[-\s]?resident|foreign|offshore)\b|\b(non[-\s]?resident|foreign|offshore)\b.*\binterest\b", re.IGNORECASE),
     ),
@@ -419,6 +427,11 @@ _EXCISE_TYPE_RES: list[tuple[str, re.Pattern[str]]] = [
     ("fuel_petrol", re.compile(r"\b(petrol|gasoline)\b", re.IGNORECASE)),
     ("fuel_diesel", re.compile(r"\b(diesel|gasoil)\b", re.IGNORECASE)),
     ("fuel_kerosene", re.compile(r"\b(kerosene|paraffin)\b", re.IGNORECASE)),
+    ("cement_50kg", re.compile(r"\b(cement|adhesives?|grout|lime)\b", re.IGNORECASE)),
+    ("sugar_kg", re.compile(r"\bsugar\b", re.IGNORECASE)),
+    ("cooking_oil_litre", re.compile(r"\bcooking\s+oil\b", re.IGNORECASE)),
+    ("cooking_fat_kg", re.compile(r"\bcooking\s+fat\b", re.IGNORECASE)),
+    ("motorcycle_first_registration", re.compile(r"\b(motorcycle|boda[-\s]?boda)\s+first\s+registration\b", re.IGNORECASE)),
 ]
 
 
@@ -1085,9 +1098,13 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
         if single is not None:
             params["amount"] = single
         else:
-            m_litres = re.search(r"\b(\d[\d,]*(?:\.\d+)?)\s*litres?\b", text, re.IGNORECASE)
-            if m_litres:
-                params["amount"] = float(m_litres.group(1).replace(",", ""))
+            m_qty = re.search(
+                r"\b(\d[\d,]*(?:\.\d+)?)\s*(?:litres?|bags?|kg|kilograms?|motorcycles?|units?)\b",
+                text,
+                re.IGNORECASE,
+            )
+            if m_qty:
+                params["amount"] = float(m_qty.group(1).replace(",", ""))
             else:
                 missing.append("amount")
         return CalcPlan("calculate_excise_duty", "calc_excise_duty", params, missing, assumptions)
@@ -1260,16 +1277,26 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
             )
         if result.get("vat_included"):
             lines.append(f"- VAT on (CIF + duty + levy): {_ugx(result['vat'])}")
+        if float(result.get("infrastructure_levy") or 0) > 0:
+            lines.append(f"- Infrastructure levy (1.5% on CIF): {_ugx(result['infrastructure_levy'])}")
         if result.get("wht_included"):
             lines.append(f"- Commercial import WHT (6% on CIF): {_ugx(result['wht'])}")
         lines.append(f"- Estimated landed cost: **{_ugx(result['landed_cost'])}**")
         lines.append("- Statutory Basis: East African Community Customs Management Act (EACCMA)")
     elif tool == "calculate_excise_duty":
-        excise_type = str(result.get("excise_type", "")).replace("_", " ")
+        raw_et = str(result.get("excise_type", ""))
+        excise_type = raw_et.replace("_", " ")
         is_specific = bool(result.get("is_specific_rate"))
         if is_specific:
-            rate_str = f"UGX {float(result['rate']):,.0f}/litre"
-            amt_str = f"{float(result['amount']):,.0f} litres"
+            unit_map = {
+                "cement_50kg": ("50 kg bag", "50 kg bags"),
+                "sugar_kg": ("kg", "kg"),
+                "cooking_fat_kg": ("kg", "kg"),
+                "motorcycle_first_registration": ("motorcycle", "motorcycles"),
+            }
+            u_sing, u_plur = unit_map.get(raw_et, ("litre", "litres"))
+            rate_str = f"UGX {float(result['rate']):,.0f}/{u_sing}"
+            amt_str = f"{float(result['amount']):,.0f} {u_plur}"
         else:
             rate_str = f"{float(result['rate']) * 100:.1f}%"
             amt_str = _ugx(result['amount'])

@@ -17,6 +17,8 @@ import json
 from typing import Any
 
 from ....tools import ToolRegistry
+from ....tools import calculators as _calculators  # noqa: F401
+from ....tools import mda_interdependence as _mda_interdependence  # noqa: F401
 from ..wire import (  # noqa: F401 - part of this module's public surface
     HEADER_MISMATCH,
     INTERNAL_ERROR,
@@ -109,6 +111,28 @@ def _prompts() -> list[dict[str, Any]]:
                 }
             ],
         },
+        {
+            "name": "rental_tax_guide",
+            "description": "Guidance on individual vs corporate rental income tax computation in Uganda.",
+            "arguments": [
+                {
+                    "name": "annual_gross_rent",
+                    "description": "Annual gross rental income in UGX",
+                    "required": True,
+                }
+            ],
+        },
+        {
+            "name": "tax_relief_and_instalment_guide",
+            "description": "Guidance on Section 40 instalment payment agreements and Section 66(1a) voluntary disclosure penalty waivers.",
+            "arguments": [
+                {
+                    "name": "principal_tax_ugx",
+                    "description": "Principal tax liability in UGX",
+                    "required": True,
+                }
+            ],
+        },
     ]
 
 
@@ -127,6 +151,20 @@ def _get_prompt(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         text = (
             f"Please calculate PAYE on a monthly gross salary of UGX {salary} "
             "under the current resident PAYE tax bands."
+        )
+    elif name == "rental_tax_guide":
+        rent = arguments.get("annual_gross_rent", "24000000")
+        description = "Rental income tax calculation guidance"
+        text = (
+            f"Please calculate the rental income tax on annual gross rent of UGX {rent} "
+            "and explain the difference between individual and corporate landlords."
+        )
+    elif name == "tax_relief_and_instalment_guide":
+        principal = arguments.get("principal_tax_ugx", "10000000")
+        description = "Tax relief, instalment plan, and voluntary disclosure guidance"
+        text = (
+            f"Please simulate Section 40 instalment payment and Section 66(1a) voluntary disclosure "
+            f"relief options for a principal tax liability of UGX {principal}."
         )
     else:
         raise LookupError(name)

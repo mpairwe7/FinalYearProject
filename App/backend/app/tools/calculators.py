@@ -463,6 +463,30 @@ class PAYECalculator(CalculatorTool):
                         ),
                         "default": False,
                     },
+                    "is_secondary_employment": {
+                        "type": "boolean",
+                        "description": (
+                            "Whether this salary is from a secondary employment (30% flat rate up to "
+                            "UGX 10,000,000/month and 40% on the excess above UGX 10,000,000 under Third Schedule)."
+                        ),
+                        "default": False,
+                    },
+                    "include_lst": {
+                        "type": "boolean",
+                        "description": (
+                            "Also deduct monthly Local Service Tax (LST) under the Local Governments Act "
+                            "Fifth Schedule (graduated bands up to UGX 100,000/year)."
+                        ),
+                        "default": False,
+                    },
+                    "has_disability_exemption": {
+                        "type": "boolean",
+                        "description": (
+                            "Whether the employee qualifies for the person-with-disability employment income "
+                            "exemption threshold under Income Tax Act s.21(1)(v)."
+                        ),
+                        "default": False,
+                    },
                 },
                 ["monthly_gross"],
             ),
@@ -470,6 +494,34 @@ class PAYECalculator(CalculatorTool):
             namespace=TAX_CALCULATOR_NAMESPACE,
             output_schema=CALCULATOR_OUTPUT_SCHEMA,
         )
+
+    @staticmethod
+    def _compute_monthly_lst(gross: Decimal) -> Decimal:
+        """Compute monthly Local Service Tax (LST) under Local Governments Act Fifth Schedule (annual / 12)."""
+        g = float(gross)
+        if g < 100_000:
+            annual = 0
+        elif g < 200_000:
+            annual = 5_000
+        elif g < 300_000:
+            annual = 10_000
+        elif g < 400_000:
+            annual = 20_000
+        elif g < 500_000:
+            annual = 30_000
+        elif g < 600_000:
+            annual = 40_000
+        elif g < 700_000:
+            annual = 60_000
+        elif g < 800_000:
+            annual = 70_000
+        elif g < 900_000:
+            annual = 80_000
+        elif g <= 1_000_000:
+            annual = 90_000
+        else:
+            annual = 100_000
+        return Decimal(str(round(annual / 12.0, 2)))
 
     def compute(
         self,
@@ -479,6 +531,9 @@ class PAYECalculator(CalculatorTool):
         include_nssf: bool = False,
         benefits: list[dict[str, Any]] | None = None,
         compare_residency: bool = False,
+        is_secondary_employment: bool = False,
+        include_lst: bool = False,
+        has_disability_exemption: bool = False,
         **_: Any,
     ) -> CalcResult:
         if residency not in ("resident", "non_resident"):
@@ -507,36 +562,69 @@ class PAYECalculator(CalculatorTool):
 
         key = f"paye_bands_{residency}"
         bands = _require_bands(table, key)
+        keys = [key]
 
-        paye, breakdown = apply_bands(chargeable_verified, bands)
-        lower, upper, marginal_rate = marginal_band(chargeable_verified, bands)
-        effective_rate = (paye / chargeable_verified) if chargeable_verified > 0 else Decimal(0)
+        if has_disability_exemption and table.get("disability_income_tax_threshold_monthly") is not None:
+            pwd_thresh = _require_scalar(table, "disability_income_tax_threshold_monthly")
+            keys.append("disability_income_tax_threshold_monthly")
+            chargeable_verified = max(Decimal(0), chargeable_verified - pwd_thresh)
+            chargeable_conditional = max(Decimal(0), chargeable_conditional - pwd_thresh)
+
+        if is_secondary_employment:
+            sec_rate = _require_scalar(table, "paye_secondary_employment_rate")
+            keys.append("paye_secondary_employment_rate")
+            top_cap = Decimal("10000000")
+            if chargeable_verified <= top_cap:
+                paye = chargeable_verified * sec_rate
+                lower, upper, marginal_rate = 0.0, 10_000_000.0, float(sec_rate)
+                breakdown = [{"lower": 0.0, "upper": 10_000_000.0, "rate": float(sec_rate), "tax": to_float(paye)}]
+            else:
+                base_sec = top_cap * sec_rate
+                excess_sec = (chargeable_verified - top_cap) * Decimal("0.40")
+                paye = base_sec + excess_sec
+                lower, upper, marginal_rate = 10_000_000.0, None, 0.40
+                breakdown = [
+                    {"lower": 0.0, "upper": 10_000_000.0, "rate": float(sec_rate), "tax": to_float(base_sec)},
+                    {"lower": 10_000_000.0, "upper": None, "rate": 0.40, "tax": to_float(excess_sec)},
+                ]
+        else:
+            paye, breakdown = apply_bands(chargeable_verified, bands)
+            lower, upper, marginal_rate = marginal_band(chargeable_verified, bands)
+        effective_rate = (paye / (gross + verified_bik)) if (gross + verified_bik) > 0 else Decimal(0)
 
         # NSSF comes out of pay *after* PAYE: the employee's own
         # contribution is not a deduction against employment income, so
         # it changes take-home without changing the tax.
-        keys = [key]
         nssf_rate = Decimal(0)
         nssf = Decimal(0)
+        nssf_employer = Decimal(0)
         if include_nssf:
             nssf_rate = _require_scalar(table, "nssf_employee_contribution")
             nssf = gross * nssf_rate
+            nssf_employer = gross * Decimal("0.10")
             keys.append("nssf_employee_contribution")
-        net = gross - paye - nssf
+        lst_monthly = self._compute_monthly_lst(gross) if include_lst else Decimal(0)
+        net = gross - paye - nssf - lst_monthly
 
         deducted = f"PAYE {_ugx(paye)}"
         if include_nssf:
             deducted += f" and NSSF {_ugx(nssf)} ({nssf_rate * 100:.0f}%)"
+        if include_lst and lst_monthly > 0:
+            deducted += f" and LST {_ugx(lst_monthly)}"
         # Naming what was *not* deducted matters as much as the total:
         # a figure labelled "take-home" that silently omits a deduction
         # is read as final and reconciled against a payslip that differs.
         caveat = (
             "Local Service Tax and any voluntary deductions are not included."
-            if include_nssf
+            if include_nssf and not include_lst
             else (
-                "This is net of PAYE only — NSSF (5%), Local Service Tax and any "
-                "voluntary deductions still come off. Ask again with NSSF included "
-                "for a closer take-home figure."
+                "Includes PAYE, 5% employee NSSF, and monthly Local Service Tax."
+                if include_nssf and include_lst
+                else (
+                    "This is net of PAYE only — NSSF (5%), Local Service Tax and any "
+                    "voluntary deductions still come off. Ask again with NSSF included "
+                    "for a closer take-home figure."
+                )
             )
         )
 
@@ -544,10 +632,16 @@ class PAYECalculator(CalculatorTool):
             "monthly_gross": to_float(gross),
             "chargeable_monthly": to_float(chargeable_verified),
             "residency": residency,
+            "is_secondary_employment": is_secondary_employment,
+            "has_disability_exemption": has_disability_exemption,
             "paye": to_float(paye),
             "paye_verified": to_float(paye),
             "nssf_included": include_nssf,
             "nssf_employee": to_float(nssf),
+            "nssf_employer": to_float(nssf_employer),
+            "total_employer_cost": to_float(gross + nssf_employer),
+            "lst_included": include_lst,
+            "lst_monthly": to_float(lst_monthly),
             "net_take_home": to_float(net),
             "annual_paye": to_float(paye * 12),
             "effective_rate": round(float(effective_rate), 4),
@@ -633,7 +727,23 @@ class CorporationTaxCalculator(CalculatorTool):
                             "Annual chargeable income in UGX "
                             "(gross income minus allowable deductions)."
                         ),
-                    }
+                    },
+                    "is_non_resident_branch": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": (
+                            "Whether the entity is a Ugandan branch of a non-resident company "
+                            "subject to 15% branch profit repatriation tax under Income Tax Act s.82."
+                        ),
+                    },
+                    "repatriated_income": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": (
+                            "Optional repatriated branch income in UGX (defaults to after-tax income "
+                            "when is_non_resident_branch=true)."
+                        ),
+                    },
                 },
                 ["chargeable_income"],
             ),
@@ -642,22 +752,51 @@ class CorporationTaxCalculator(CalculatorTool):
             output_schema=CALCULATOR_OUTPUT_SCHEMA,
         )
 
-    def compute(self, table: RateTable, chargeable_income: Any, **_: Any) -> CalcResult:
+    def compute(
+        self,
+        table: RateTable,
+        chargeable_income: Any,
+        is_non_resident_branch: bool = False,
+        repatriated_income: Any = None,
+        **_: Any,
+    ) -> CalcResult:
         income = to_decimal(chargeable_income, field="chargeable_income")
         rate = _require_scalar(table, "corporation_tax")
         tax = income * rate
+        after_tax = income - tax
+        keys = ["corporation_tax"]
+        repat_tax = Decimal(0)
+        repat_rate = Decimal(0)
+        if is_non_resident_branch:
+            repat_rate = _require_scalar(table, "branch_repatriation_tax_rate")
+            keys.append("branch_repatriation_tax_rate")
+            repat_base = (
+                to_decimal(repatriated_income, field="repatriated_income")
+                if repatriated_income is not None
+                else after_tax
+            )
+            repat_tax = repat_base * repat_rate
+        total_tax = tax + repat_tax
         return CalcResult(
             {
                 "chargeable_income": to_float(income),
                 "rate": float(rate),
                 "tax": to_float(tax),
-                "after_tax": to_float(income - tax),
+                "branch_repatriation_tax_rate": float(repat_rate),
+                "branch_repatriation_tax": to_float(repat_tax),
+                "total_tax": to_float(total_tax),
+                "after_tax": to_float(after_tax - repat_tax),
                 "explanation": (
                     f"{rate * 100:.0f}% corporation tax on chargeable income of "
-                    f"{_ugx(income)} = {_ugx(tax)}."
+                    f"{_ugx(income)} = {_ugx(tax)}"
+                    + (
+                        f", plus {repat_rate * 100:.0f}% branch repatriation tax ({_ugx(repat_tax)}) = {_ugx(total_tax)} total."
+                        if is_non_resident_branch
+                        else "."
+                    )
                 ),
             },
-            rate_keys=("corporation_tax",),
+            rate_keys=tuple(keys),
         )
 
 
@@ -809,6 +948,19 @@ class CustomsDutyCalculator(CalculatorTool):
                         "description": "Whether to include 6% commercial import withholding tax (s.119). Default false.",
                         "default": False,
                     },
+                    "include_infrastructure_levy": {
+                        "type": "boolean",
+                        "description": "Whether to include 1.5% infrastructure development levy on CIF. Default false.",
+                        "default": False,
+                    },
+                    "vehicle_age_years": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": (
+                            "Optional age of imported motor vehicle in years: 5-8 years applies 35% environmental levy, "
+                            "9-15 years applies 50% environmental levy, >15 years is prohibited."
+                        ),
+                    },
                 },
                 ["cif_value"],
             ),
@@ -824,6 +976,8 @@ class CustomsDutyCalculator(CalculatorTool):
         duty_rate: Any = None,
         include_vat: bool = True,
         include_wht: bool = False,
+        include_infrastructure_levy: bool = False,
+        vehicle_age_years: int | None = None,
         goods_category: str = "general",
         **_: Any,
     ) -> CalcResult:
@@ -841,6 +995,16 @@ class CustomsDutyCalculator(CalculatorTool):
                     ),
                 }
             )
+        import_prohibited = False
+        if vehicle_age_years is not None:
+            age_int = int(vehicle_age_years)
+            if age_int > 15:
+                import_prohibited = True
+            elif age_int > 8 and goods_category == "general":
+                goods_category = "used_vehicle_over_8_years"
+            elif 5 <= age_int <= 8 and goods_category == "general":
+                goods_category = "used_vehicle_5_to_8_years"
+
         cif = to_decimal(cif_value, field="cif_value")
         keys: list[str] = []
 
@@ -867,11 +1031,36 @@ class CustomsDutyCalculator(CalculatorTool):
             levy = cif * levy_rate
             keys.append("environmental_levy_used_clothing")
         elif goods_category == "used_vehicle_5_to_8_years":
-            levy_rate = Decimal("0.35")
+            levy_rate = (
+                _require_scalar(table, "environmental_levy_used_vehicles_5_to_8_years")
+                if table.get("environmental_levy_used_vehicles_5_to_8_years") is not None
+                else Decimal("0.35")
+            )
             levy = cif * levy_rate
+            if table.get("environmental_levy_used_vehicles_5_to_8_years") is not None:
+                keys.append("environmental_levy_used_vehicles_5_to_8_years")
         elif goods_category == "used_vehicle_over_8_years":
-            levy_rate = Decimal("0.50")
+            levy_rate = (
+                _require_scalar(table, "environmental_levy_used_vehicles_over_8_years")
+                if table.get("environmental_levy_used_vehicles_over_8_years") is not None
+                else Decimal("0.50")
+            )
             levy = cif * levy_rate
+            if table.get("environmental_levy_used_vehicles_over_8_years") is not None:
+                keys.append("environmental_levy_used_vehicles_over_8_years")
+
+        # Infrastructure Development Levy (1.5% on CIF)
+        infra_rate = Decimal(0)
+        infra_levy = Decimal(0)
+        if include_infrastructure_levy:
+            infra_rate = (
+                _require_scalar(table, "customs_infrastructure_levy")
+                if table.get("customs_infrastructure_levy") is not None
+                else Decimal("0.015")
+            )
+            infra_levy = cif * infra_rate
+            if table.get("customs_infrastructure_levy") is not None:
+                keys.append("customs_infrastructure_levy")
 
         # VAT compounding: VAT = (CIF + Duty + Levy) * 18%
         vat_rate = Decimal(0)
@@ -885,11 +1074,15 @@ class CustomsDutyCalculator(CalculatorTool):
         wht = Decimal(0)
         if include_wht:
             wht = cif * Decimal("0.06")
+            if table.get("customs_import_wht") is not None:
+                keys.append("customs_import_wht")
 
-        total = cif + duty + levy + vat + wht
+        total = cif + duty + levy + infra_levy + vat + wht
         parts = [f"CIF {_ugx(cif)} + duty {rate * 100:.0f}% ({_ugx(duty)})"]
         if levy > 0:
             parts.append(f" + environmental levy {levy_rate * 100:.0f}% ({_ugx(levy)})")
+        if infra_levy > 0:
+            parts.append(f" + infrastructure levy {infra_rate * 100:.1f}% ({_ugx(infra_levy)})")
         if include_vat:
             parts.append(f" + {vat_rate * 100:.0f}% VAT ({_ugx(vat)})")
         if include_wht:
@@ -901,8 +1094,13 @@ class CustomsDutyCalculator(CalculatorTool):
                 "duty_rate": float(rate),
                 "duty": to_float(duty),
                 "goods_category": goods_category,
+                "vehicle_age_years": vehicle_age_years,
+                "import_prohibited_over_15_years": import_prohibited,
                 "environmental_levy_rate": float(levy_rate),
                 "environmental_levy": to_float(levy),
+                "infrastructure_levy_included": include_infrastructure_levy,
+                "infrastructure_levy_rate": float(infra_rate),
+                "infrastructure_levy": to_float(infra_levy),
                 "vat_included": include_vat,
                 "vat": to_float(vat),
                 "wht_included": include_wht,
@@ -1057,6 +1255,8 @@ class WithholdingTaxCalculator(CalculatorTool):
         "betting_winnings": "withholding_betting_winnings",
         "foreign_interest": "withholding_foreign_interest",
         "telecom_commission": "withholding_telecom_commission",
+        "insurance_agent_commission": "withholding_insurance_agent_commission",
+        "payment_service_provider_commission": "withholding_payment_service_provider_commission",
         "non_business_asset": "withholding_non_business_asset",
     }
 
@@ -1129,7 +1329,7 @@ class WithholdingTaxCalculator(CalculatorTool):
 
 
 class ExciseDutyCalculator(CalculatorTool):
-    """Compute statutory excise duty for mobile money, data, airtime, and fuel."""
+    """Compute statutory excise duty for mobile money, data, airtime, fuel, cement, sugar, cooking oil/fat, and motorcycles."""
 
     _RATE_KEYS: dict[str, str] = {
         "mobile_money_withdrawal": "excise_duty_mobile_money_withdrawal",
@@ -1139,6 +1339,22 @@ class ExciseDutyCalculator(CalculatorTool):
         "fuel_petrol": "excise_duty_fuel_petrol_per_litre",
         "fuel_diesel": "excise_duty_fuel_diesel_per_litre",
         "fuel_kerosene": "excise_duty_fuel_kerosene_per_litre",
+        "cement_50kg": "excise_duty_cement_per_50kg",
+        "sugar_kg": "excise_duty_sugar_per_kg",
+        "cooking_oil_litre": "excise_duty_cooking_oil_per_litre",
+        "cooking_fat_kg": "excise_duty_cooking_fat_per_kg",
+        "motorcycle_first_registration": "excise_duty_motorcycle_first_registration_ugx",
+    }
+
+    _SPECIFIC_UNITS: dict[str, tuple[str, str]] = {
+        "fuel_petrol": ("litres of Petrol", "litre"),
+        "fuel_diesel": ("litres of Diesel", "litre"),
+        "fuel_kerosene": ("litres of Kerosene", "litre"),
+        "cement_50kg": ("50 kg bags of Cement", "50 kg bag"),
+        "sugar_kg": ("kg of Sugar", "kg"),
+        "cooking_oil_litre": ("litres of Cooking Oil", "litre"),
+        "cooking_fat_kg": ("kg of Cooking Fat", "kg"),
+        "motorcycle_first_registration": ("Motorcycle(s) at First Registration", "motorcycle"),
     }
 
     @property
@@ -1146,10 +1362,11 @@ class ExciseDutyCalculator(CalculatorTool):
         return ToolSchema(
             name="calculate_excise_duty",
             description=(
-                "Calculate Uganda statutory excise duty under the Excise Duty Act 2014: "
+                "Calculate Uganda statutory excise duty under the Excise Duty Act 2014 (as amended through FY2026-27): "
                 "0.5% on mobile money cash withdrawals; 12% on internet data and voice calls; "
-                "60% on malt beer; UGX 1,450 per litre on petrol; UGX 1,130 per litre on diesel. "
-                "Use when the user asks how much excise duty applies to a withdrawal, fuel, airtime, or excisable items."
+                "60% on malt beer; UGX 1,750/L on petrol; UGX 1,430/L on diesel; UGX 200/L on kerosene; "
+                "UGX 750 per 50 kg bag on cement; UGX 200/kg on sugar; UGX 400/L on cooking oil; "
+                "UGX 500/kg on cooking fat; UGX 500,000 per motorcycle at first registration."
             ),
             parameters=_schema_params(
                 {
@@ -1161,7 +1378,7 @@ class ExciseDutyCalculator(CalculatorTool):
                     "amount": {
                         "type": "number",
                         "minimum": 0,
-                        "description": "Transaction value in UGX (or litres for fuel).",
+                        "description": "Transaction value in UGX, or quantity in litres/kg/50kg-bags/units for specific-rate items.",
                     },
                 },
                 ["excise_type", "amount"],
@@ -1186,13 +1403,13 @@ class ExciseDutyCalculator(CalculatorTool):
         base = to_decimal(amount, field="amount")
         rate = _require_scalar(table, rate_key)
 
-        is_fuel = excise_type in ("fuel_petrol", "fuel_diesel", "fuel_kerosene")
-        if is_fuel:
+        is_specific = excise_type in self._SPECIFIC_UNITS
+        if is_specific:
             excise_tax = base * rate
-            fuel_name = excise_type.replace("fuel_", "").capitalize()
+            unit_plural, unit_singular = self._SPECIFIC_UNITS[excise_type]
             explanation = (
-                f"Excise duty on {base:,.0f} litres of {fuel_name} at "
-                f"UGX {rate:,.0f}/litre is {_ugx(excise_tax)}."
+                f"Excise duty on {base:,.0f} {unit_plural} at "
+                f"UGX {rate:,.0f}/{unit_singular} is {_ugx(excise_tax)}."
             )
         else:
             excise_tax = base * rate
@@ -1209,7 +1426,7 @@ class ExciseDutyCalculator(CalculatorTool):
                 "amount": to_float(base),
                 "rate": float(rate),
                 "excise_duty": to_float(excise_tax),
-                "is_specific_rate": is_fuel,
+                "is_specific_rate": is_specific,
                 "explanation": explanation,
             },
             rate_keys=(rate_key,),
@@ -2120,6 +2337,9 @@ class LateFilingPenaltyTool(CalculatorTool):
         pct_penalty = tax_payable * monthly_rate * Decimal(months)
         penal_tax = max(min_ugx, pct_penalty)
         monthly_interest = tax_payable * interest_rate * Decimal(months)
+        in_duplum_cap = tax_payable + penal_tax
+        capped_interest = min(monthly_interest, in_duplum_cap)
+        is_capped = bool(monthly_interest > in_duplum_cap and tax_payable > 0)
 
         return CalcResult(
             {
@@ -2131,11 +2351,14 @@ class LateFilingPenaltyTool(CalculatorTool):
                 "penal_tax": to_float(penal_tax),
                 "late_payment_interest_monthly_rate": float(interest_rate),
                 "late_payment_interest_ugx": to_float(monthly_interest),
+                "capped_interest_ugx": to_float(capped_interest),
+                "interest_capped_under_s39_5": is_capped,
+                "total_liability_ugx": to_float(tax_payable + penal_tax + capped_interest),
                 "explanation": (
                     f"Late filing penal tax under TPC Act s.49(1) is the greater of {_ugx(min_ugx)} "
                     f"or {monthly_rate * 100:.0f}% of tax payable per month ({_ugx(pct_penalty)} for "
                     f"{months} month(s)) = {_ugx(penal_tax)}. Late payment interest under s.39 runs at "
-                    f"{interest_rate * 100:.0f}% per month."
+                    f"{interest_rate * 100:.0f}% per month (capped under s.39(5) at principal + penal tax = {_ugx(capped_interest)})."
                 ),
             },
             rate_keys=(
@@ -2372,6 +2595,11 @@ class PresumptiveOrStartupTaxTool(CalculatorTool):
                         "minimum": 0,
                         "description": "Years since the start-up commenced operations.",
                     },
+                    "has_records": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Whether the small business maintains sales records under Second Schedule (default true).",
+                    },
                 },
                 [],
             ),
@@ -2379,6 +2607,23 @@ class PresumptiveOrStartupTaxTool(CalculatorTool):
             namespace=TAX_CALCULATOR_NAMESPACE,
             output_schema=CALCULATOR_OUTPUT_SCHEMA,
         )
+
+    @staticmethod
+    def _compute_second_schedule_presumptive(turnover: Decimal) -> tuple[Decimal, Decimal, str]:
+        """Return (with_records_tax, without_records_tax, band_label) under Income Tax Act Second Schedule."""
+        if turnover <= Decimal("10000000"):
+            return Decimal(0), Decimal(0), "Up to UGX 10,000,000 (0% — Exempt)"
+        if turnover <= Decimal("30000000"):
+            with_rec = (turnover - Decimal("10000000")) * Decimal("0.004")
+            return with_rec, Decimal("80000"), "UGX 10,000,001 to 30,000,000 (0.4% above 10M with records; UGX 80,000 without records)"
+        if turnover <= Decimal("50000000"):
+            with_rec = Decimal("80000") + (turnover - Decimal("30000000")) * Decimal("0.005")
+            return with_rec, Decimal("200000"), "UGX 30,000,001 to 50,000,000 (UGX 80,000 + 0.5% above 30M with records; UGX 200,000 without records)"
+        if turnover <= Decimal("80000000"):
+            with_rec = Decimal("180000") + (turnover - Decimal("50000000")) * Decimal("0.006")
+            return with_rec, Decimal("400000"), "UGX 50,000,001 to 80,000,000 (UGX 180,000 + 0.6% above 50M with records; UGX 400,000 without records)"
+        with_rec = Decimal("360000") + (turnover - Decimal("80000000")) * Decimal("0.007")
+        return with_rec, Decimal("900000"), "UGX 80,000,001 to 150,000,000 (UGX 360,000 + 0.7% above 80M with records; UGX 900,000 without records)"
 
     def compute(
         self,
@@ -2388,6 +2633,7 @@ class PresumptiveOrStartupTaxTool(CalculatorTool):
         chargeable_income_ugx: Any = None,
         is_citizen_startup: bool | None = None,
         years_in_operation: int | None = None,
+        has_records: bool = True,
         **_: Any,
     ) -> CalcResult:
         lower = _require_scalar(table, "presumptive_tax_lower_threshold")
@@ -2403,6 +2649,14 @@ class PresumptiveOrStartupTaxTool(CalculatorTool):
         qualifies_presumptive = (
             (lower <= turnover <= upper) if turnover is not None else None
         )
+        pres_with_rec: Decimal | None = None
+        pres_without_rec: Decimal | None = None
+        pres_selected: Decimal | None = None
+        pres_band = ""
+        if turnover is not None and turnover <= upper:
+            pres_with_rec, pres_without_rec, pres_band = self._compute_second_schedule_presumptive(turnover)
+            pres_selected = pres_with_rec if has_records else pres_without_rec
+
         capital_within_cap = (capital <= cap) if capital is not None else None
         if (
             capital_within_cap is False
@@ -2427,11 +2681,22 @@ class PresumptiveOrStartupTaxTool(CalculatorTool):
         else:
             corp_tax = chargeable * corp_rate
 
+        pres_note = (
+            f" Second Schedule presumptive tax on {_ugx(turnover)} ({pres_band}): "
+            f"{_ugx(pres_with_rec)} with records, {_ugx(pres_without_rec)} without records."
+            if pres_with_rec is not None and pres_without_rec is not None
+            else ""
+        )
+
         return CalcResult(
             {
                 "presumptive_lower_threshold": to_float(lower),
                 "presumptive_upper_threshold": to_float(upper),
                 "qualifies_for_presumptive": qualifies_presumptive,
+                "presumptive_band": pres_band,
+                "presumptive_tax_with_records": to_float(pres_with_rec) if pres_with_rec is not None else None,
+                "presumptive_tax_without_records": to_float(pres_without_rec) if pres_without_rec is not None else None,
+                "presumptive_tax": to_float(pres_selected) if pres_selected is not None else None,
                 "startup_capital_cap": to_float(cap),
                 "startup_exemption_years": years,
                 "capital_within_startup_cap": capital_within_cap,
@@ -2439,7 +2704,8 @@ class PresumptiveOrStartupTaxTool(CalculatorTool):
                 "corporation_tax_rate": float(corp_rate),
                 "tax": to_float(corp_tax) if corp_tax is not None else None,
                 "explanation": (
-                    f"Presumptive tax applies to annual turnover between {_ugx(lower)} and {_ugx(upper)}. "
+                    f"Presumptive tax applies to annual turnover between {_ugx(lower)} and {_ugx(upper)}."
+                    f"{pres_note} "
                     f"The {years}-year citizen startup exemption applies to investment capital up to {_ugx(cap)}."
                 ),
             },

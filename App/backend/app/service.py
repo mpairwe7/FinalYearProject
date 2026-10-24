@@ -5501,6 +5501,12 @@ class ChatModel:
         re.IGNORECASE | re.MULTILINE,
     )
 
+    _HARDSHIP_CALC_RELIEF_NOTE = (
+        "\n\n**Statutory Relief & Instalment Options**: Under **Section 40 of the Tax Procedures Code Act (TPCA) Cap. 343**, "
+        "you can apply on the URA portal to pay assessed tax in **instalments** if you are experiencing temporary cash-flow hardship, "
+        "or apply for a **100% penalty and interest waiver** under **Section 66(1a) (Voluntary Disclosure)** before an audit notice."
+    )
+
     def _add_conversational_frame(
         self,
         reply: str,
@@ -11148,7 +11154,12 @@ class ChatModel:
                     )
             if calc_result:
                 if distress and calc_result.get("reply"):
-                    calc_result["reply"] = f"{empathy_ack(distress)}\n\n{calc_result['reply']}"
+                    relief_suffix = (
+                        self._HARDSHIP_CALC_RELIEF_NOTE
+                        if distress == "hardship" and "Section 40" not in str(calc_result["reply"])
+                        else ""
+                    )
+                    calc_result["reply"] = f"{empathy_ack(distress)}\n\n{calc_result['reply']}{relief_suffix}"
                 trace_ctx["agent_role"] = calc_result.get("agent_role", "tool_specialist")
                 self._audit_turn(
                     message=message,
@@ -13175,7 +13186,12 @@ class ChatModel:
             )
         if calc_result:
             if distress and calc_result.get("reply"):
-                calc_result["reply"] = f"{empathy_ack(distress)}\n\n{calc_result['reply']}"
+                relief_suffix = (
+                    self._HARDSHIP_CALC_RELIEF_NOTE
+                    if distress == "hardship" and "Section 40" not in str(calc_result["reply"])
+                    else ""
+                )
+                calc_result["reply"] = f"{empathy_ack(distress)}\n\n{calc_result['reply']}{relief_suffix}"
             return {
                 **calc_result,
                 "_hits": [],
