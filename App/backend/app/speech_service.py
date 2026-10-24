@@ -1979,9 +1979,15 @@ class SpeechModel:
         # Luganda sentence on the local GPU stack paid that before Spark.
         resolved_orpheus_speaker = orpheus_tts.speaker_for(language, voice=voice)
         if resolved_orpheus_speaker and not orpheus_tts.in_cooldown():
+            from .speech_normalization import verbalize_digits_for_tts
+
             t_orpheus = time.perf_counter()
             try:
-                pcm = orpheus_tts.synthesize(text, language, voice=voice)
+                pcm = orpheus_tts.synthesize(
+                    verbalize_digits_for_tts(text, locale=language),
+                    language,
+                    voice=voice,
+                )
                 n = len(pcm) // 2
                 return SynthesizeResult(
                     audio=orpheus_tts.pcm16_to_wav(pcm),

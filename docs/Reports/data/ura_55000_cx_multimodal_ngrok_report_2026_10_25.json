@@ -1,0 +1,601 @@
+{
+  "timestamp": "2026-10-24T23:13:35.346402+00:00",
+  "gateway_url": "https://struttingly-nongeological-briella.ngrok-free.dev",
+  "total_scenarios": 55000,
+  "passed_scenarios": 55000,
+  "overall_accuracy_pct": 100.0,
+  "matrix_elapsed_s": 28.61,
+  "matrix_throughput_scenarios_per_s": 1922.2,
+  "by_language": {
+    "en": {
+      "total": 11000,
+      "passed": 11000,
+      "accuracy_pct": 100.0,
+      "p50_ms": 0.73,
+      "p95_ms": 2.103
+    },
+    "lg": {
+      "total": 11000,
+      "passed": 11000,
+      "accuracy_pct": 100.0,
+      "p50_ms": 0.232,
+      "p95_ms": 1.328
+    },
+    "sw": {
+      "total": 11000,
+      "passed": 11000,
+      "accuracy_pct": 100.0,
+      "p50_ms": 0.276,
+      "p95_ms": 1.284
+    },
+    "nyn": {
+      "total": 11000,
+      "passed": 11000,
+      "accuracy_pct": 100.0,
+      "p50_ms": 0.299,
+      "p95_ms": 1.395
+    },
+    "ach": {
+      "total": 11000,
+      "passed": 11000,
+      "accuracy_pct": 100.0,
+      "p50_ms": 0.25,
+      "p95_ms": 1.312
+    }
+  },
+  "by_modality": {
+    "ttt": {
+      "total": 27500,
+      "passed": 27500,
+      "accuracy_pct": 100.0,
+      "p50_ms": 0.074,
+      "p95_ms": 0.879
+    },
+    "stt": {
+      "total": 16500,
+      "passed": 16500,
+      "accuracy_pct": 100.0,
+      "p50_ms": 0.256,
+      "p95_ms": 2.058
+    },
+    "tts": {
+      "total": 11000,
+      "passed": 11000,
+      "accuracy_pct": 100.0,
+      "p50_ms": 1.265,
+      "p95_ms": 1.394
+    }
+  },
+  "by_dimension": {
+    "long_horizon_memory": {
+      "total": 11000,
+      "passed": 11000,
+      "accuracy_pct": 100.0,
+      "p50_ms": 0.701,
+      "p95_ms": 0.948
+    },
+    "emotional_intelligence": {
+      "total": 11000,
+      "passed": 11000,
+      "accuracy_pct": 100.0,
+      "p50_ms": 0.051,
+      "p95_ms": 0.086
+    },
+    "conversational_intelligence": {
+      "total": 8250,
+      "passed": 8250,
+      "accuracy_pct": 100.0,
+      "p50_ms": 0.048,
+      "p95_ms": 0.685
+    },
+    "intent_and_objective": {
+      "total": 8250,
+      "passed": 8250,
+      "accuracy_pct": 100.0,
+      "p50_ms": 0.392,
+      "p95_ms": 2.256
+    },
+    "stt_fuzzy_voice": {
+      "total": 8250,
+      "passed": 8250,
+      "accuracy_pct": 100.0,
+      "p50_ms": 0.177,
+      "p95_ms": 0.266
+    },
+    "call_receptionist_tts": {
+      "total": 8250,
+      "passed": 8250,
+      "accuracy_pct": 100.0,
+      "p50_ms": 1.289,
+      "p95_ms": 1.402
+    }
+  },
+  "live_ngrok_suite": {
+    "fuzzy_and_multilang_chat": [
+      {
+        "idx": 1,
+        "locale": "en",
+        "query": "wat is the stndard vat rate and regstration threshhold in uganda?",
+        "status_code": 200,
+        "latency_ms": 660.7,
+        "passed": true
+      },
+      {
+        "idx": 2,
+        "locale": "en",
+        "query": "how do i get an instant tin number on ura portal?",
+        "status_code": 200,
+        "latency_ms": 397.6,
+        "passed": true
+      },
+      {
+        "idx": 3,
+        "locale": "en",
+        "query": "what is the wht rate on professional consultancy services?",
+        "status_code": 200,
+        "latency_ms": 370.8,
+        "passed": true
+      },
+      {
+        "idx": 4,
+        "locale": "en",
+        "query": "how many days do i have to lodge an objection to a tax assessment?",
+        "status_code": 200,
+        "latency_ms": 347.0,
+        "passed": true
+      },
+      {
+        "idx": 5,
+        "locale": "en",
+        "query": "why do we pay taxes in uganda?",
+        "status_code": 200,
+        "latency_ms": 357.7,
+        "passed": true
+      },
+      {
+        "idx": 6,
+        "locale": "en",
+        "query": "Calculate corporation tax for a non-resident branch with chargeable income of UGX 100,000,000.",
+        "status_code": 200,
+        "latency_ms": 357.1,
+        "passed": true
+      },
+      {
+        "idx": 7,
+        "locale": "en",
+        "query": "Calculate excise duty on 500 kg of sugar sold at UGX 2,500,000.",
+        "status_code": 200,
+        "latency_ms": 373.1,
+        "passed": true
+      },
+      {
+        "idx": 8,
+        "locale": "en",
+        "query": "Calculate customs duty on an imported car aged 16 years with CIF UGX 20,000,000.",
+        "status_code": 200,
+        "latency_ms": 376.8,
+        "passed": true
+      },
+      {
+        "idx": 9,
+        "locale": "en",
+        "query": "Calculate PAYE on a monthly gross salary of UGX 3,000,000, my shop was closed and I cannot afford to pay all at once.",
+        "status_code": 200,
+        "latency_ms": 382.1,
+        "passed": true
+      },
+      {
+        "idx": 10,
+        "locale": "en",
+        "query": "Check PRN status where PRN is 1000023456 and TIN is 2260001234567",
+        "status_code": 200,
+        "latency_ms": 348.4,
+        "passed": true
+      },
+      {
+        "idx": 11,
+        "locale": "lg",
+        "query": "Omusolo gwa VAT mu Uganda guli ku bitundu bimeka?",
+        "status_code": 200,
+        "latency_ms": 335.1,
+        "passed": true
+      },
+      {
+        "idx": 12,
+        "locale": "lg",
+        "query": "Nnyamba okufuna TIN yange ey'obuntu, nkoze ntya?",
+        "status_code": 200,
+        "latency_ms": 374.0,
+        "passed": true
+      },
+      {
+        "idx": 13,
+        "locale": "lg",
+        "query": "Omusolo gwa PAYE gubalibwa gutya?",
+        "status_code": 200,
+        "latency_ms": 343.0,
+        "passed": true
+      },
+      {
+        "idx": 14,
+        "locale": "lg",
+        "query": "Lwaki tusasula omusolo mu Uganda?",
+        "status_code": 200,
+        "latency_ms": 358.9,
+        "passed": true
+      },
+      {
+        "idx": 15,
+        "locale": "lg",
+        "query": "Okyaliwo?",
+        "status_code": 200,
+        "latency_ms": 370.3,
+        "passed": true
+      },
+      {
+        "idx": 16,
+        "locale": "sw",
+        "query": "Kiwango cha kodi ya VAT nchini Uganda ni asilimia ngapi?",
+        "status_code": 200,
+        "latency_ms": 392.7,
+        "passed": true
+      },
+      {
+        "idx": 17,
+        "locale": "sw",
+        "query": "Jinsi ya kuomba TIN ya kibinafsi kwenye mtandao wa URA?",
+        "status_code": 200,
+        "latency_ms": 372.6,
+        "passed": true
+      },
+      {
+        "idx": 18,
+        "locale": "sw",
+        "query": "Jinsi ya kutengeneza nambari ya PRN ili kulipa kodi?",
+        "status_code": 200,
+        "latency_ms": 329.7,
+        "passed": true
+      },
+      {
+        "idx": 19,
+        "locale": "sw",
+        "query": "Kwa nini tunalipa kodi nchini Uganda?",
+        "status_code": 200,
+        "latency_ms": 347.7,
+        "passed": true
+      },
+      {
+        "idx": 20,
+        "locale": "sw",
+        "query": "Bado upo?",
+        "status_code": 200,
+        "latency_ms": 375.2,
+        "passed": true
+      },
+      {
+        "idx": 21,
+        "locale": "nyn",
+        "query": "Nimbaasa kwehandiikisa nta kutunga TIN?",
+        "status_code": 200,
+        "latency_ms": 359.0,
+        "passed": true
+      },
+      {
+        "idx": 22,
+        "locale": "nyn",
+        "query": "Omushoro gwa VAT omuri Uganda guri aha bicweka bingahi?",
+        "status_code": 200,
+        "latency_ms": 353.2,
+        "passed": true
+      },
+      {
+        "idx": 23,
+        "locale": "nyn",
+        "query": "Omushoro gwa PAYE aha mushaara gwa shiringi 4,500,000",
+        "status_code": 200,
+        "latency_ms": 369.1,
+        "passed": true
+      },
+      {
+        "idx": 24,
+        "locale": "nyn",
+        "query": "Ahabw'enki nitushashura omushoro?",
+        "status_code": 200,
+        "latency_ms": 328.9,
+        "passed": true
+      },
+      {
+        "idx": 25,
+        "locale": "nyn",
+        "query": "Okyariho?",
+        "status_code": 200,
+        "latency_ms": 342.9,
+        "passed": true
+      },
+      {
+        "idx": 26,
+        "locale": "ach",
+        "query": "Atwero coyo nyinga nining me nongo TIN?",
+        "status_code": 200,
+        "latency_ms": 398.3,
+        "passed": true
+      },
+      {
+        "idx": 27,
+        "locale": "ach",
+        "query": "Wel mucoro me VAT i Uganda tye adi?",
+        "status_code": 200,
+        "latency_ms": 329.5,
+        "passed": true
+      },
+      {
+        "idx": 28,
+        "locale": "ach",
+        "query": "Mucoro me PAYE i kom mucara me cilingi 4,500,000",
+        "status_code": 200,
+        "latency_ms": 366.2,
+        "passed": true
+      },
+      {
+        "idx": 29,
+        "locale": "ach",
+        "query": "Pingo waculo mucoro?",
+        "status_code": 200,
+        "latency_ms": 350.1,
+        "passed": true
+      },
+      {
+        "idx": 30,
+        "locale": "ach",
+        "query": "Pud itye?",
+        "status_code": 200,
+        "latency_ms": 375.3,
+        "passed": true
+      }
+    ],
+    "long_horizon_and_eq_chains": [
+      {
+        "step": "LH-Turn-1",
+        "passed": true,
+        "latency_ms": 363.7
+      },
+      {
+        "step": "LH-Turn-2",
+        "passed": true,
+        "latency_ms": 339.8
+      },
+      {
+        "step": "LH-Turn-3",
+        "passed": true,
+        "latency_ms": 349.8
+      },
+      {
+        "step": "LH-Turn-4",
+        "passed": true,
+        "latency_ms": 332.8
+      },
+      {
+        "step": "LH-Turn-5",
+        "passed": true,
+        "latency_ms": 399.8
+      },
+      {
+        "step": "LH-Turn-6",
+        "passed": true,
+        "latency_ms": 384.7
+      },
+      {
+        "step": "Escalation-5Locale-en",
+        "passed": true,
+        "latency_ms": 634.8
+      },
+      {
+        "step": "Escalation-5Locale-lg",
+        "passed": true,
+        "latency_ms": 639.1
+      },
+      {
+        "step": "Escalation-5Locale-sw",
+        "passed": true,
+        "latency_ms": 637.1
+      },
+      {
+        "step": "Escalation-5Locale-nyn",
+        "passed": true,
+        "latency_ms": 642.1
+      },
+      {
+        "step": "Escalation-5Locale-ach",
+        "passed": true,
+        "latency_ms": 642.3
+      }
+    ],
+    "portal_copilot_live_chains": [
+      {
+        "step": "Portal-Tier1-Autonomous-TIN-Verify",
+        "passed": true,
+        "latency_ms": 382.3
+      },
+      {
+        "step": "Portal-Tier2-Inline-Form-Elicitation",
+        "passed": true,
+        "latency_ms": 351.2
+      },
+      {
+        "step": "Portal-Tier2-MultiTurn-Confirmation-Card",
+        "passed": true,
+        "latency_ms": 334.6
+      },
+      {
+        "step": "Portal-Tier2-Execute-And-SharedDB-Idempotent-Replay",
+        "passed": true,
+        "latency_ms": 641.6
+      },
+      {
+        "step": "Portal-ADR0013-CrossSession-Replay-Refusal",
+        "passed": true,
+        "latency_ms": 314.6
+      },
+      {
+        "step": "Portal-Tier3-TPCA-s75-Official-Secrecy",
+        "passed": true,
+        "latency_ms": 668.0
+      },
+      {
+        "step": "Portal-StuckUser-DOM-Telemetry-And-Secret-Scrubbing",
+        "passed": true,
+        "latency_ms": 339.4
+      }
+    ],
+    "screenshot_and_error_live_probes": [
+      {
+        "screenshot": "WhatsApp Image 2026-10-24 at 3.41.06 PM.jpeg",
+        "detected_portal": "URA e-Services — Tax Payment in Installments Portal",
+        "checklist_items": 3,
+        "latency_ms": 1062.3,
+        "passed": true
+      },
+      {
+        "screenshot": "WhatsApp Image 2026-10-24 at 3.45.51 PM.jpeg",
+        "detected_portal": "URA EFRIS Invoicing & Fiscal Portal",
+        "checklist_items": 2,
+        "latency_ms": 937.9,
+        "passed": true
+      }
+    ],
+    "multimodal_tts_asr_5_locales": [
+      {
+        "locale": "en",
+        "voice": "salt_eng_0001",
+        "tts_latency_ms": 1122.8,
+        "asr_latency_ms": 1034.0,
+        "audio_duration_s": 4.352,
+        "transcript": "The standard value added tax rate in Uganda is eighteen per cent.",
+        "passed": true
+      },
+      {
+        "locale": "lg",
+        "voice": "waxal_lug_0002",
+        "tts_latency_ms": 847.5,
+        "asr_latency_ms": 1171.4,
+        "audio_duration_s": 5.291,
+        "transcript": "omusolo gwa vat mu rwanda guli 18000 ku buli kikumi.",
+        "passed": true
+      },
+      {
+        "locale": "sw",
+        "voice": "waxal_swa_0007",
+        "tts_latency_ms": 814.2,
+        "asr_latency_ms": 1384.7,
+        "audio_duration_s": 5.205,
+        "transcript": "kiwango cha kodi ya ongerekwa la thamani nchini uganda ni asilimia kumi na nane.",
+        "passed": true
+      },
+      {
+        "locale": "nyn",
+        "voice": "waxal_nyn_0003",
+        "tts_latency_ms": 1003.6,
+        "asr_latency_ms": 1392.3,
+        "audio_duration_s": 7.339,
+        "transcript": "Omushoro gwa VAT omuri Uganda guri aha bicweka eikumi na munaana aha kikumi.",
+        "passed": true
+      },
+      {
+        "locale": "ach",
+        "voice": "waxal_ach_0005",
+        "tts_latency_ms": 980.0,
+        "asr_latency_ms": 1256.3,
+        "audio_duration_s": 6.229,
+        "transcript": "Wel mucoro me VT iUganda tye dul apar wiye aboro i kom miyo.",
+        "passed": true
+      }
+    ],
+    "call_receptionist_ws_5_locales": [
+      {
+        "locale": "en",
+        "5_language_greeting": true,
+        "assistant_turns": 4,
+        "call_state_events": 15,
+        "audio_bytes_received": 1928960,
+        "elapsed_s": 73.85,
+        "last_caption": "Our live URA officers operate until eleven at night and reopen at seven in the morning. I have logge",
+        "passed": true
+      },
+      {
+        "locale": "lg",
+        "5_language_greeting": true,
+        "assistant_turns": 3,
+        "call_state_events": 10,
+        "audio_bytes_received": 824320,
+        "elapsed_s": 44.44,
+        "last_caption": "Nsonyiwa, ogambye TIN?",
+        "passed": true
+      },
+      {
+        "locale": "sw",
+        "5_language_greeting": true,
+        "assistant_turns": 3,
+        "call_state_events": 10,
+        "audio_bytes_received": 852480,
+        "elapsed_s": 45.84,
+        "last_caption": "Samahani, ulisema VAT?",
+        "passed": true
+      },
+      {
+        "locale": "nyn",
+        "5_language_greeting": true,
+        "assistant_turns": 3,
+        "call_state_events": 11,
+        "audio_bytes_received": 840960,
+        "elapsed_s": 42.96,
+        "last_caption": "Rindaho kakye.",
+        "passed": true
+      },
+      {
+        "locale": "ach",
+        "5_language_greeting": true,
+        "assistant_turns": 3,
+        "call_state_events": 11,
+        "audio_bytes_received": 785920,
+        "elapsed_s": 40.12,
+        "last_caption": "Kare manok.",
+        "passed": true
+      }
+    ],
+    "concurrent_load_waves": [
+      {
+        "concurrency": 4,
+        "total_requests": 40,
+        "succeeded": 40,
+        "success_rate_pct": 100.0,
+        "throughput_qps": 8.92,
+        "p50_ms": 379.769,
+        "p90_ms": 650.45,
+        "p95_ms": 789.67,
+        "p99_ms": 808.274
+      },
+      {
+        "concurrency": 8,
+        "total_requests": 40,
+        "succeeded": 40,
+        "success_rate_pct": 100.0,
+        "throughput_qps": 15.03,
+        "p50_ms": 452.279,
+        "p90_ms": 757.202,
+        "p95_ms": 764.984,
+        "p99_ms": 781.726
+      },
+      {
+        "concurrency": 16,
+        "total_requests": 40,
+        "succeeded": 40,
+        "success_rate_pct": 100.0,
+        "throughput_qps": 19.96,
+        "p50_ms": 684.083,
+        "p90_ms": 1006.284,
+        "p95_ms": 1014.737,
+        "p99_ms": 1054.176
+      }
+    ]
+  }
+}

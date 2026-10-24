@@ -1038,6 +1038,7 @@ def test_phase10_screenshot_analysis_error_resolution_and_completion_checklist()
 
 
 def test_phase11_mcp_tax_calculator_tool_rag_empathy_and_structuring_parity() -> None:
+    """Verify MCP tax_calculator tools/prompts, 5-locale empathy Tool-RAG, and paragraph structuring."""
     from app.conversational import handle_conversational_turn
     from app.guardrails import OutputGuard
     from app.mcp.servers.tax_calculator.server import server as tax_calc_server
@@ -1166,7 +1167,34 @@ def test_phase11_mcp_tax_calculator_tool_rag_empathy_and_structuring_parity() ->
         {"tax_payable_ugx": 10_000_000, "months_late": 70, "fiscal_year": "FY2026-27"},
     )
     assert pen_cap["ok"] is True
-    assert pen_cap["interest_capped_under_s39_5"] is False or pen_cap["capped_interest_ugx"] <= pen_cap["tax_payable_ugx"] + pen_cap["penal_tax"]
+    assert pen_cap["interest_capped_under_s39_5"] is False
+    assert pen_cap["capped_interest_ugx"] == pen_cap["late_payment_interest_ugx"]
+
+    import datetime as _dt
+    from app.tax.tables import RateTable
+    from app.tools.calculators import LateFilingPenaltyTool
+
+    capped_table = RateTable(
+        fiscal_year="FY2026-27-CAP-TEST",
+        effective_from=_dt.date(2026, 7, 1),
+        effective_to=_dt.date(2027, 6, 30),
+        status="confirmed",
+        rates={
+            "penal_tax_late_filing_monthly_rate": 0.02,
+            "penal_tax_late_filing_minimum_ugx": 200000,
+            "late_payment_interest_monthly_rate": 0.05,
+        },
+        legal_basis={
+            "penal_tax_late_filing_monthly_rate": "TPC Act s.49(1)",
+            "penal_tax_late_filing_minimum_ugx": "TPC Act s.49(1)",
+            "late_payment_interest_monthly_rate": "TPC Act s.39",
+        },
+    )
+    capped_res = LateFilingPenaltyTool().compute(
+        capped_table, tax_payable_ugx=10_000_000, months_late=70
+    ).payload
+    assert capped_res["interest_capped_under_s39_5"] is True
+    assert capped_res["capped_interest_ugx"] == capped_res["tax_payable_ugx"] + capped_res["penal_tax"]
 
 
 

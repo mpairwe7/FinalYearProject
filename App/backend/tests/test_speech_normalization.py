@@ -521,3 +521,47 @@ def test_contact_and_url_rules_run_in_linear_time():
         assert time.perf_counter() - start < 0.3
 
 
+def test_verbalize_digits_for_tts_and_inline_step_structuring_across_5_locales():
+    """Verify dynamic locale digit verbalization, 2-7 phone formats, inline steps, and breadcrumbs."""
+    from app.speech_normalization import verbalize_digits_for_tts
+
+    raw = (
+        "To register: 1. Visit https://askura.ura.go.ug or https://singlewindow.go.ug "
+        "2. Select eServices > TIN Registration 3. Call +256 41 4334000 or 041 4334000 "
+        "or 0800 117 000 or dial *165*4*1# or write to P.O. Box 7279."
+    )
+    en_voiced = clean_text_for_speech(raw, locale="en", verbalize_digits=True)
+    assert "Step 1: Visit Ask U R A dot U R A dot go dot u g or single window dot go dot u g." in en_voiced
+    assert "Step 2: Select e-Services, then TIN Registration." in en_voiced
+    assert "Step 3: Call plus two five six, four one four, three three four, zero zero zero" in en_voiced
+    assert "zero four one four, three three four, zero zero zero" in en_voiced
+    assert "zero eight hundred, one one seven, zero zero zero" in en_voiced
+    assert "star one six five star four star one hash" in en_voiced
+    assert "P O Box seven two seven nine" in en_voiced
+
+    lg_voiced = verbalize_digits_for_tts(clean_text_for_speech(raw, locale="lg"), locale="lg")
+    assert "Odaala emu:" in lg_voiced and ". Odaala bbiri:" in lg_voiced and ". Odaala ssatu:" in lg_voiced
+    assert ", oluvannyuma TIN Registration" in lg_voiced
+    assert "zeero nnya emu nnya, ssatu ssatu nnya, zeero zeero zeero" in lg_voiced
+    assert "star emu mukaaga ttaano star nnya star emu hash" in lg_voiced
+
+    sw_voiced = verbalize_digits_for_tts(clean_text_for_speech(raw, locale="sw"), locale="sw")
+    assert "Hatua moja:" in sw_voiced and ". Hatua mbili:" in sw_voiced and ". Hatua tatu:" in sw_voiced
+    assert ", kisha TIN Registration" in sw_voiced
+    assert "sufuri nne moja nne, tatu tatu nne, sufuri sufuri sufuri" in sw_voiced
+    assert "star moja sita tano star nne star moja hash" in sw_voiced
+
+    nyn_voiced = verbalize_digits_for_tts(clean_text_for_speech(raw, locale="nyn"), locale="nyn")
+    assert "Idaara emwe:" in nyn_voiced and ". Idaara ibiri:" in nyn_voiced and ". Idaara ishatu:" in nyn_voiced
+    assert ", bwanyima TIN Registration" in nyn_voiced
+    assert "zeero ina emwe ina, ishatu ishatu ina, zeero zeero zeero" in nyn_voiced
+    assert "star emwe mukaaga itaano star ina star emwe hash" in nyn_voiced
+
+    ach_voiced = verbalize_digits_for_tts(clean_text_for_speech(raw, locale="ach"), locale="ach")
+    assert "Rwom acel:" in ach_voiced and ". Rwom aryo:" in ach_voiced and ". Rwom adek:" in ach_voiced
+    assert ", ci TIN Registration" in ach_voiced
+    assert "zero angwen acel angwen, adek adek angwen, zero zero zero" in ach_voiced
+    assert "star acel abicel abic star angwen star acel hash" in ach_voiced
+
+
+

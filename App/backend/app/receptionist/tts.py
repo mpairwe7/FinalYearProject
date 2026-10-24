@@ -219,13 +219,16 @@ class UraSpeechTTS(TTSService):
     async def _stream_orpheus(
         self, text: str, language: str, context_id: str, t0: float
     ) -> AsyncGenerator[Frame, None]:
+        from ..speech_normalization import verbalize_digits_for_tts
+
+        voiced_text = verbalize_digits_for_tts(text, locale=language)
         pieces: list[bytes] = []
         complete = True
 
         async def source() -> AsyncIterator[bytes]:
             nonlocal complete
             try:
-                async for pcm in orpheus_tts.stream(text, language, voice=self.voice):
+                async for pcm in orpheus_tts.stream(voiced_text, language, voice=self.voice):
                     if not pieces:
                         self.last_first_chunk_ms = round((time.perf_counter() - t0) * 1000, 1)
                     pieces.append(pcm)

@@ -9539,10 +9539,8 @@ class ChatModel:
         locale: str,
         tool: str,
     ) -> dict[str, Any]:
-        """The shared calculator reply, spoken in the caller's language."""
+        """Return the English calculator reply for the caller's localisation pass."""
         text = self._finalize_reply(reply)
-        if locale not in ("", "en"):
-            text = localize_reply(text, locale)
         return {
             "reply": text,
             "sources": [],

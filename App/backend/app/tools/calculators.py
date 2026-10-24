@@ -405,6 +405,7 @@ class PAYECalculator(CalculatorTool):
 
     @property
     def schema(self) -> ToolSchema:
+        """Return the tool schema for calculate_paye."""
         return ToolSchema(
             name="calculate_paye",
             description=(
@@ -536,6 +537,7 @@ class PAYECalculator(CalculatorTool):
         has_disability_exemption: bool = False,
         **_: Any,
     ) -> CalcResult:
+        """Compute monthly PAYE, NSSF, LST, disability exemption, and net take-home pay."""
         if residency not in ("resident", "non_resident"):
             return CalcResult(
                 {
@@ -564,32 +566,72 @@ class PAYECalculator(CalculatorTool):
         bands = _require_bands(table, key)
         keys = [key]
 
-        if has_disability_exemption and table.get("disability_income_tax_threshold_monthly") is not None:
+        if has_disability_exemption:
             pwd_thresh = _require_scalar(table, "disability_income_tax_threshold_monthly")
             keys.append("disability_income_tax_threshold_monthly")
             chargeable_verified = max(Decimal(0), chargeable_verified - pwd_thresh)
             chargeable_conditional = max(Decimal(0), chargeable_conditional - pwd_thresh)
 
+        sec_rate = Decimal(0)
         if is_secondary_employment:
             sec_rate = _require_scalar(table, "paye_secondary_employment_rate")
             keys.append("paye_secondary_employment_rate")
-            top_cap = Decimal("10000000")
-            if chargeable_verified <= top_cap:
-                paye = chargeable_verified * sec_rate
-                lower, upper, marginal_rate = 0.0, 10_000_000.0, float(sec_rate)
-                breakdown = [{"lower": 0.0, "upper": 10_000_000.0, "rate": float(sec_rate), "tax": to_float(paye)}]
-            else:
+
+        def _compute_paye_mode(
+            amount: Decimal,
+            mode_bands: list[Any],
+        ) -> tuple[Decimal, list[dict[str, Any]], float, float | None, float]:
+            """Compute PAYE, band breakdown, and marginal band under the selected employment mode."""
+            if is_secondary_employment:
+                top_cap = Decimal("10000000")
+                if amount <= top_cap:
+                    tax_amt = amount * sec_rate
+                    return (
+                        tax_amt,
+                        [
+                            {
+                                "lower": 0.0,
+                                "upper": 10_000_000.0,
+                                "rate": float(sec_rate),
+                                "taxable_in_band": to_float(amount),
+                                "tax_in_band": to_float(tax_amt),
+                            }
+                        ],
+                        0.0,
+                        10_000_000.0,
+                        float(sec_rate),
+                    )
                 base_sec = top_cap * sec_rate
-                excess_sec = (chargeable_verified - top_cap) * Decimal("0.40")
-                paye = base_sec + excess_sec
-                lower, upper, marginal_rate = 10_000_000.0, None, 0.40
-                breakdown = [
-                    {"lower": 0.0, "upper": 10_000_000.0, "rate": float(sec_rate), "tax": to_float(base_sec)},
-                    {"lower": 10_000_000.0, "upper": None, "rate": 0.40, "tax": to_float(excess_sec)},
-                ]
-        else:
-            paye, breakdown = apply_bands(chargeable_verified, bands)
-            lower, upper, marginal_rate = marginal_band(chargeable_verified, bands)
+                excess_amt = amount - top_cap
+                excess_sec = excess_amt * Decimal("0.40")
+                tax_amt = base_sec + excess_sec
+                return (
+                    tax_amt,
+                    [
+                        {
+                            "lower": 0.0,
+                            "upper": 10_000_000.0,
+                            "rate": float(sec_rate),
+                            "taxable_in_band": 10_000_000.0,
+                            "tax_in_band": to_float(base_sec),
+                        },
+                        {
+                            "lower": 10_000_000.0,
+                            "upper": None,
+                            "rate": 0.40,
+                            "taxable_in_band": to_float(excess_amt),
+                            "tax_in_band": to_float(excess_sec),
+                        },
+                    ],
+                    10_000_000.0,
+                    None,
+                    0.40,
+                )
+            tax_amt, bd = apply_bands(amount, mode_bands)
+            low, up, marg = marginal_band(amount, mode_bands)
+            return tax_amt, bd, low, up, marg
+
+        paye, breakdown, lower, upper, marginal_rate = _compute_paye_mode(chargeable_verified, bands)
         effective_rate = (paye / (gross + verified_bik)) if (gross + verified_bik) > 0 else Decimal(0)
 
         # NSSF comes out of pay *after* PAYE: the employee's own
@@ -614,19 +656,21 @@ class PAYECalculator(CalculatorTool):
         # Naming what was *not* deducted matters as much as the total:
         # a figure labelled "take-home" that silently omits a deduction
         # is read as final and reconciled against a payslip that differs.
-        caveat = (
-            "Local Service Tax and any voluntary deductions are not included."
-            if include_nssf and not include_lst
-            else (
-                "Includes PAYE, 5% employee NSSF, and monthly Local Service Tax."
-                if include_nssf and include_lst
-                else (
-                    "This is net of PAYE only — NSSF (5%), Local Service Tax and any "
-                    "voluntary deductions still come off. Ask again with NSSF included "
-                    "for a closer take-home figure."
-                )
+        if include_nssf and include_lst:
+            caveat = "Includes PAYE, 5% employee NSSF, and monthly Local Service Tax."
+        elif include_nssf:
+            caveat = "Local Service Tax and any voluntary deductions are not included."
+        elif include_lst:
+            caveat = (
+                "This is net of PAYE and Local Service Tax only — NSSF (5%) and any "
+                "voluntary deductions still come off."
             )
-        )
+        else:
+            caveat = (
+                "This is net of PAYE only — NSSF (5%), Local Service Tax and any "
+                "voluntary deductions still come off. Ask again with NSSF included "
+                "for a closer take-home figure."
+            )
 
         payload: dict[str, Any] = {
             "monthly_gross": to_float(gross),
@@ -670,7 +714,7 @@ class PAYECalculator(CalculatorTool):
             payload["verified_benefits_monthly"] = to_float(verified_bik)
             payload["unverified_benefits_monthly"] = to_float(unverified_bik)
             if unverified_kinds:
-                paye_cond, _ = apply_bands(chargeable_conditional, bands)
+                paye_cond, *_ = _compute_paye_mode(chargeable_conditional, bands)
                 payload["paye_conditional"] = to_float(paye_cond)
                 payload["annual_paye_conditional"] = to_float(paye_cond * 12)
                 payload["chargeable_monthly_conditional"] = to_float(chargeable_conditional)
@@ -683,7 +727,7 @@ class PAYECalculator(CalculatorTool):
             other_res = "non_resident" if residency == "resident" else "resident"
             other_key = f"paye_bands_{other_res}"
             other_bands = _require_bands(table, other_key)
-            other_paye, _ = apply_bands(chargeable_verified, other_bands)
+            other_paye, *_ = _compute_paye_mode(chargeable_verified, other_bands)
             if other_key not in keys:
                 keys.append(other_key)
             diff = abs(other_paye - paye)
@@ -709,6 +753,7 @@ class CorporationTaxCalculator(CalculatorTool):
 
     @property
     def schema(self) -> ToolSchema:
+        """Return the tool schema for calculate_corporation_tax."""
         return ToolSchema(
             name="calculate_corporation_tax",
             description=(
@@ -760,6 +805,7 @@ class CorporationTaxCalculator(CalculatorTool):
         repatriated_income: Any = None,
         **_: Any,
     ) -> CalcResult:
+        """Compute 30% corporation tax and optional 15% non-resident branch repatriation tax."""
         income = to_decimal(chargeable_income, field="chargeable_income")
         rate = _require_scalar(table, "corporation_tax")
         tax = income * rate
@@ -889,6 +935,7 @@ class CustomsDutyCalculator(CalculatorTool):
 
     @property
     def schema(self) -> ToolSchema:
+        """Return the tool schema for calculate_customs_duty."""
         return ToolSchema(
             name="calculate_customs_duty",
             description=(
@@ -981,6 +1028,7 @@ class CustomsDutyCalculator(CalculatorTool):
         goods_category: str = "general",
         **_: Any,
     ) -> CalcResult:
+        """Compute customs duty, environmental levy, infrastructure levy, VAT, WHT, and landed cost."""
         valid_cats = (
             "general", "raw_materials", "intermediate", "sensitive",
             "used_clothing", "used_vehicle_5_to_8_years", "used_vehicle_over_8_years"
@@ -1031,36 +1079,21 @@ class CustomsDutyCalculator(CalculatorTool):
             levy = cif * levy_rate
             keys.append("environmental_levy_used_clothing")
         elif goods_category == "used_vehicle_5_to_8_years":
-            levy_rate = (
-                _require_scalar(table, "environmental_levy_used_vehicles_5_to_8_years")
-                if table.get("environmental_levy_used_vehicles_5_to_8_years") is not None
-                else Decimal("0.35")
-            )
+            levy_rate = _require_scalar(table, "environmental_levy_used_vehicles_5_to_8_years")
             levy = cif * levy_rate
-            if table.get("environmental_levy_used_vehicles_5_to_8_years") is not None:
-                keys.append("environmental_levy_used_vehicles_5_to_8_years")
+            keys.append("environmental_levy_used_vehicles_5_to_8_years")
         elif goods_category == "used_vehicle_over_8_years":
-            levy_rate = (
-                _require_scalar(table, "environmental_levy_used_vehicles_over_8_years")
-                if table.get("environmental_levy_used_vehicles_over_8_years") is not None
-                else Decimal("0.50")
-            )
+            levy_rate = _require_scalar(table, "environmental_levy_used_vehicles_over_8_years")
             levy = cif * levy_rate
-            if table.get("environmental_levy_used_vehicles_over_8_years") is not None:
-                keys.append("environmental_levy_used_vehicles_over_8_years")
+            keys.append("environmental_levy_used_vehicles_over_8_years")
 
         # Infrastructure Development Levy (1.5% on CIF)
         infra_rate = Decimal(0)
         infra_levy = Decimal(0)
         if include_infrastructure_levy:
-            infra_rate = (
-                _require_scalar(table, "customs_infrastructure_levy")
-                if table.get("customs_infrastructure_levy") is not None
-                else Decimal("0.015")
-            )
+            infra_rate = _require_scalar(table, "customs_infrastructure_levy")
             infra_levy = cif * infra_rate
-            if table.get("customs_infrastructure_levy") is not None:
-                keys.append("customs_infrastructure_levy")
+            keys.append("customs_infrastructure_levy")
 
         # VAT compounding: VAT = (CIF + Duty + Levy) * 18%
         vat_rate = Decimal(0)
@@ -1172,6 +1205,7 @@ class RentalIncomeTaxCalculator(CalculatorTool):
         allowable_expenses: Any = 0,
         **_: Any,
     ) -> CalcResult:
+        """Compute individual or corporate rental income tax."""
         if landlord_type not in ("individual", "company"):
             return CalcResult(
                 {
@@ -1296,6 +1330,7 @@ class WithholdingTaxCalculator(CalculatorTool):
         )
 
     def compute(self, table: RateTable, payment_type: str, amount: Any, **_: Any) -> CalcResult:
+        """Compute withholding tax and net payable amount for the given payment_type."""
         rate_key = self._RATE_KEYS.get(payment_type)
         if rate_key is None:
             return CalcResult(
@@ -1359,6 +1394,7 @@ class ExciseDutyCalculator(CalculatorTool):
 
     @property
     def schema(self) -> ToolSchema:
+        """Return the tool schema for calculate_excise_duty."""
         return ToolSchema(
             name="calculate_excise_duty",
             description=(
@@ -1389,6 +1425,7 @@ class ExciseDutyCalculator(CalculatorTool):
         )
 
     def compute(self, table: RateTable, excise_type: str, amount: Any, **_: Any) -> CalcResult:
+        """Compute ad-valorem or specific excise duty for the specified excise_type."""
         rate_key = self._RATE_KEYS.get(excise_type)
         if rate_key is None:
             return CalcResult(
@@ -2292,6 +2329,7 @@ class LateFilingPenaltyTool(CalculatorTool):
 
     @property
     def schema(self) -> ToolSchema:
+        """Return the tool schema for penalty_late_filing."""
         return ToolSchema(
             name="penalty_late_filing",
             description=(
@@ -2328,6 +2366,7 @@ class LateFilingPenaltyTool(CalculatorTool):
         months_late: int = 1,
         **_: Any,
     ) -> CalcResult:
+        """Compute late filing penal tax (s.49(1)) and capped late payment interest (s.39(5))."""
         tax_payable = to_decimal(tax_payable_ugx, field="tax_payable_ugx")
         months = max(1, int(months_late or 1))
         monthly_rate = _require_scalar(table, "penal_tax_late_filing_monthly_rate")
@@ -2358,7 +2397,10 @@ class LateFilingPenaltyTool(CalculatorTool):
                     f"Late filing penal tax under TPC Act s.49(1) is the greater of {_ugx(min_ugx)} "
                     f"or {monthly_rate * 100:.0f}% of tax payable per month ({_ugx(pct_penalty)} for "
                     f"{months} month(s)) = {_ugx(penal_tax)}. Late payment interest under s.39 runs at "
-                    f"{interest_rate * 100:.0f}% per month (capped under s.39(5) at principal + penal tax = {_ugx(capped_interest)})."
+                    f"{interest_rate * 100:.0f}% per month ({_ugx(monthly_interest)} for {months} month(s)). "
+                    f"Interest is capped under s.39(5) at principal plus penal tax ({_ugx(in_duplum_cap)}), "
+                    f"so the interest payable is {_ugx(capped_interest)}"
+                    + (" (cap applied)." if is_capped else " (cap not reached).")
                 ),
             },
             rate_keys=(
@@ -2517,6 +2559,7 @@ class WHTNonResidentServiceTool(CalculatorTool):
         is_employment_contract: bool = False,
         **_: Any,
     ) -> CalcResult:
+        """Compute 15% WHT on non-resident service contracts (excluding employment contracts)."""
         amt = to_decimal(amount_ugx, field="amount_ugx")
         rate = _require_scalar(table, "withholding_non_resident_service_contract")
         if is_employment_contract:
@@ -2562,6 +2605,7 @@ class PresumptiveOrStartupTaxTool(CalculatorTool):
 
     @property
     def schema(self) -> ToolSchema:
+        """Return the tool schema for calculate_presumptive_or_startup_tax."""
         return ToolSchema(
             name="calculate_presumptive_or_startup_tax",
             description=(
@@ -2636,6 +2680,7 @@ class PresumptiveOrStartupTaxTool(CalculatorTool):
         has_records: bool = True,
         **_: Any,
     ) -> CalcResult:
+        """Compute Second Schedule presumptive tax bands and 3-year citizen startup exemption."""
         lower = _require_scalar(table, "presumptive_tax_lower_threshold")
         upper = _require_scalar(table, "presumptive_tax_upper_threshold")
         cap = _require_scalar(table, "startup_citizen_exemption_capital_cap_ugx")

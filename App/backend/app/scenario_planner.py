@@ -78,6 +78,7 @@ def _amount_near_pattern(
 # Declarative per-head planning rules: when(facts, question) -> list[ToolCallSpec]
 # ---------------------------------------------------------------------------
 def _rule_residency(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
+    """Plan determine_residency when the question or case facts mention individual tax residency."""
     has_residency_signal = (
         facts.days_in_uganda is not None
         or facts.contract_months is not None
@@ -135,6 +136,7 @@ def _rule_residency(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
 
 
 def _rule_paye_and_bik(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
+    """Plan value_benefit_in_kind and calculate_paye for employment income and benefits in kind."""
     specs: list[ToolCallSpec] = []
     q_low = question.lower()
     mentions_paye = (
@@ -557,6 +559,7 @@ def _rule_withholding(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
 
 
 def _rule_corporation_presumptive_startup(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
+    """Plan calculate_presumptive_or_startup_tax and calculate_corporation_tax for business income."""
     if not re.search(
         r"\b(presumptive|start[-\s]?up|investment\s+capital|corporation\s+tax|corporate\s+tax|chargeable\s+(?:profit|income))\b",
         question,

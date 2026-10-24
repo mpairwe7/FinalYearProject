@@ -667,7 +667,7 @@ _LISTISH_VERB_RE = re.compile(
     re.IGNORECASE,
 )
 _SENTENCE_BREAK_RE = re.compile(
-    r"(?<!\be\.g)(?<!\bi\.e)(?<!\bsec)(?<!\bcap)(?<!\bart)(?<!\bsch)(?<!\bvs)(?<!\bno)(?<!\bmr)(?<!\bdr)(?<!\bms)(?<=[a-z][.!?])\s+(?=[A-Z])",
+    r"(?<!\be\.g\.)(?<!\bi\.e\.)(?<!\bsec\.)(?<!\bcap\.)(?<!\bart\.)(?<!\bsch\.)(?<!\bvs\.)(?<!\bno\.)(?<!\bmr\.)(?<!\bdr\.)(?<!\bms\.)(?<=[a-z][.!?])\s+(?=[A-Z])",
     re.IGNORECASE,
 )
 _GLUED_STEP_RE = re.compile(

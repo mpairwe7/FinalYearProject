@@ -66,8 +66,8 @@ _IDENTITY_ORIGINS_RE = re.compile(
     r"|wewe\s+ni\s+nani|je\s+wewe\s+ni\s+(?:binadamu|roboti)|nani\s+alikuunda|nani\s+aliyekutengeneza"
     r"|wewe\s+watoka\s+wapi|unatoka\s+wapi|unapatikana\s+wapi|ofisi\s+zako\s+ziko\s+wapi|uko\s+wapi"
     r"|unaweza\s+(?:kuongea|kuzungumza)\s+(?:kiswahili|kiingereza|kiganda|kirunyankole|kiacholi)|unajua\s+nini"
-    r"|iwe\s+ori\s+oha|oha\s+owakukozire|nooruga\s+nkahi|ofisi\s+zaawe\s+ziri\s+nkahi|noobaasa\s+kugamba\s+(?:orunyankore|runyankole)"
-    r"|in\s+ibedo\s+nga|nga\s+ma\s+oyubi|ia\s+kwene|ofici\s+ni\s+tye\s+kwene|itwero\s+loko\s+(?:leb\s+acoli|acoli|acholi))\b",
+    r"|(?:iwe\s+)?ori\s+oha|oha\s+owakukozire|nooruga\s+nkahi|ofisi\s+zaawe\s+ziri\s+nkahi|noobaasa\s+kugamba\s+(?:orunyankore|runyankole)"
+    r"|in\s+(?:ibedo\s+)?nga|nga\s+ma\s+oyubi|ia\s+kwene|ofici\s+ni\s+tye\s+kwene|itwero\s+loko\s+(?:leb\s+acoli|acoli|acholi))\b",
     re.IGNORECASE,
 )
 

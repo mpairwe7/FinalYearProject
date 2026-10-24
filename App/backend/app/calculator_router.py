@@ -1089,10 +1089,25 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
         elif re.search(r"\b(used\s+cloth\w*|second\s+hand\s+cloth\w*|worn\s+cloth\w*|mivumba|mitumba)\b", text, re.IGNORECASE):
             params["goods_category"] = "used_clothing"
             assumptions.append("used clothing includes 30% environmental levy on CIF")
-        elif re.search(r"\b(car|vehicle|motor\s*vehicle)\b.*\b(?:[5-8]|five|six|seven|eight)\s*(?:years?|yrs?)\b|\b(?:[5-8]|five|six|seven|eight)\s*(?:years?|yrs?)\b.*\b(car|vehicle|motor\s*vehicle)\b", text, re.IGNORECASE):
+        elif re.search(r"\b(car|vehicle|motor\s*vehicle|truck|bus|lorry|van)\b", text, re.IGNORECASE) and (
+            m_veh_age := re.search(r"\b(?:aged?\s+)?(\d{1,2})\s*(?:years?|yrs?)\b", text, re.IGNORECASE)
+        ):
+            veh_age = int(m_veh_age.group(1))
+            params["vehicle_age_years"] = veh_age
+            if veh_age > 15:
+                assumptions.append(f"motor vehicle aged {veh_age} years (>15 years import prohibited under Traffic Act)")
+            elif veh_age > 8:
+                params["goods_category"] = "used_vehicle_over_8_years"
+                assumptions.append("used motor vehicle 8-15 years: 50% environmental levy")
+            elif veh_age >= 5:
+                params["goods_category"] = "used_vehicle_5_to_8_years"
+                assumptions.append("used motor vehicle 5-8 years: 35% environmental levy")
+            else:
+                assumptions.append("common external tariff duty of 25%")
+        elif re.search(r"\b(car|vehicle|motor\s*vehicle)\b.*\b(?:five|six|seven|eight)\s*(?:years?|yrs?)\b|\b(?:five|six|seven|eight)\s*(?:years?|yrs?)\b.*\b(car|vehicle|motor\s*vehicle)\b", text, re.IGNORECASE):
             params["goods_category"] = "used_vehicle_5_to_8_years"
             assumptions.append("used motor vehicle 5-8 years: 35% environmental levy")
-        elif re.search(r"\b(car|vehicle|motor\s*vehicle)\b.*\b(?:9|1[0-5]|nine|ten|eleven|twelve|thirteen|fourteen|fifteen)\s*(?:years?|yrs?)\b|\b(?:9|1[0-5]|nine|ten|eleven|twelve|thirteen|fourteen|fifteen)\s*(?:years?|yrs?)\b.*\b(car|vehicle|motor\s*vehicle)\b", text, re.IGNORECASE):
+        elif re.search(r"\b(car|vehicle|motor\s*vehicle)\b.*\b(?:nine|ten|eleven|twelve|thirteen|fourteen|fifteen)\s*(?:years?|yrs?)\b|\b(?:nine|ten|eleven|twelve|thirteen|fourteen|fifteen)\s*(?:years?|yrs?)\b.*\b(car|vehicle|motor\s*vehicle)\b", text, re.IGNORECASE):
             params["goods_category"] = "used_vehicle_over_8_years"
             assumptions.append("used motor vehicle 8-15 years: 50% environmental levy (vehicles >15 yrs prohibited)")
         else:
@@ -1101,6 +1116,9 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
         if re.search(r"\b(wht|withholding)\b", text, re.IGNORECASE):
             params["include_wht"] = True
             assumptions.append("includes 6% commercial import withholding tax (s.119)")
+        if re.search(r"\binfrastructure\s+levy\b", text, re.IGNORECASE):
+            params["include_infrastructure_levy"] = True
+            assumptions.append("includes 1.5% infrastructure development levy on CIF")
 
         missing = []
         if single is not None:
@@ -1334,6 +1352,11 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
             lines.append(f"- Infrastructure levy (1.5% on CIF): {_ugx(result['infrastructure_levy'])}")
         if result.get("wht_included"):
             lines.append(f"- Commercial import WHT (6% on CIF): {_ugx(result['wht'])}")
+        if result.get("import_prohibited_over_15_years"):
+            lines.append(
+                "- **Import prohibited:** Vehicles over 15 years are prohibited "
+                "under the Traffic Act."
+            )
         lines.append(f"- Estimated landed cost: **{_ugx(result['landed_cost'])}**")
         lines.append("- Statutory Basis: East African Community Customs Management Act (EACCMA)")
     elif tool == "calculate_excise_duty":

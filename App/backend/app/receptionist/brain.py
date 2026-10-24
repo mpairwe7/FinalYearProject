@@ -351,7 +351,16 @@ def _is_goodbye(text: str) -> bool:
 
 _TRAILING_LIST_NUMBER_RE = re.compile(r"(?:^|\s)(\d{1,2})\.$")
 _TRAILING_ABBREVIATION_RE = re.compile(
-    r"(?:^|\s)(?:e\.g|i\.e|etc|No|Sec|Art|Cap|Mr|Mrs|Ms|Dr|St|vs)\.$", re.IGNORECASE
+    r"(?:^|\s)(?:e\.g|i\.e|etc|No|Sec|Art|Cap|Sch|Para|Reg|Vol|Ch|Pt|Shs|UGX|Mr|Mrs|Ms|Dr|St|vs)\.$",
+    re.IGNORECASE,
+)
+_UNPUNCTUATED_BULLET_OR_HEADING_RE = re.compile(
+    r"^([ \t]*(?:[-*+•][ \t]+[^\n]+|#{1,6}[ \t]+[^\n]+|\*\*[^*\n]+\*\*))[ \t]*$",
+    re.MULTILINE,
+)
+_STEP_OR_BULLET_START_RE = re.compile(
+    r"^\s*(?:\d{1,2}[.)]\s+|(?:Step|Odaala|Hatua|Idaara|Rwom)\s+\d+|[-*+•]\s+)",
+    re.IGNORECASE,
 )
 
 
@@ -375,15 +384,37 @@ def _ends_mid_sentence(sentence: str) -> bool:
     return re.search(rf"(?:^|\s){number - 1}\.\s", sentence) is not None
 
 
+def _join_structured_sentences(sentences: list[str]) -> str:
+    """Join *sentences*, keeping newline breaks before numbered steps or bullet items."""
+    if not sentences:
+        return ""
+    out = [sentences[0]]
+    for piece in sentences[1:]:
+        sep = "\n" if _STEP_OR_BULLET_START_RE.match(piece) else " "
+        out.append(f"{sep}{piece}")
+    return "".join(out)
+
+
 def _split_into_sentences(text: str) -> list[str]:
     """Split text into sentences, keeping a numbered procedure in one piece.
 
     The spoken answer is cut to RECEPTIONIST_MAX_SPOKEN_SENTENCES. Splitting at
     every full stop counted "1." and "2." as sentences, so a TIN guide was read
     out as its first step, cut off, then "2." and "Would you like more detail?".
+    Multi-line markdown bullets or headings without trailing periods receive a
+    period first so calculator/checklist items split into discrete sentences.
     """
+    def _punctuate_line(m: re.Match[str]) -> str:
+        line = m.group(1).rstrip()
+        if line.endswith((".", "!", "?", ":", ";")):
+            return line
+        if line.endswith(("_", "*")) and len(line) >= 2 and line[-2] in ".!?:;":
+            return line[:-1] + "."
+        return f"{line}."
+
+    prepared = _UNPUNCTUATED_BULLET_OR_HEADING_RE.sub(_punctuate_line, text.strip())
     sentences: list[str] = []
-    for piece in re.split(r"(?<=[.!?])\s+", text.strip()):
+    for piece in re.split(r"(?<=[.!?])\s+", prepared):
         piece = piece.strip()
         if not piece:
             continue
@@ -548,6 +579,18 @@ class UraReceptionistBrain(LLMService):
             self.room.state.offer_interrupted = False
             self._bot_speaking = False
             await self.push_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            if self.room.state.language_source in ("default", "auto"):
+                from ..query import detect_language
+                from .router import announce_language
+
+                det_lang = detect_language(frame.text, default_lang=self.language)
+                if det_lang in KNOWN_LANGUAGES and det_lang != self.language:
+                    self.room.state.locale = det_lang
+                    self.room.state.language_switches += 1
+                    lang_msg = announce_language(self.room, det_lang, "auto")
+                    await self.push_frame(
+                        OutputTransportMessageUrgentFrame(lang_msg), FrameDirection.DOWNSTREAM
+                    )
             caption_data = {
                 "type": "caption",
                 "speaker": "caller",
@@ -1715,13 +1758,14 @@ class UraReceptionistBrain(LLMService):
         sentences = _split_into_sentences(cleaned_reply)
         max_sentences = get_max_spoken_sentences()
         rest = sentences[max_sentences:]
-        spoken = " ".join(sentences[:max_sentences]) if rest else cleaned_reply
-        self.room.state.last_more_detail = " ".join(rest) if (rest and not offer_officer) else ""
+        spoken = _join_structured_sentences(sentences[:max_sentences]) if rest else cleaned_reply
+        more_joined = _join_structured_sentences(rest) if rest else ""
+        self.room.state.last_more_detail = more_joined if (rest and not offer_officer) else ""
         if offer_officer:
             self._offer("officer", reason="offer_accepted", at_risk=at_risk)
             return f"{spoken} {phrase('officer_offer', self.language)}"
         if rest:
-            self._offer("more", more=" ".join(rest))
+            self._offer("more", more=more_joined)
             return f"{spoken} {phrase('more_detail', self.language)}"
         return spoken
 

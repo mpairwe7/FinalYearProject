@@ -125,6 +125,14 @@ const URA_SPEECH_TERMS: Array<[RegExp, string | ((match: string, ...args: string
   [/\bB2C\b/gi, 'B 2 C'],
   [/\be-?GP\b/gi, 'E G P'],
   [/\be-?Citie\b/gi, 'E-City'],
+  [/\beservices\b/gi, 'e-Services'],
+  [/\beregistration\b/gi, 'e-Registration'],
+  [/\bereturns\b/gi, 'e-Returns'],
+  [/\baskura\b/gi, 'Ask U R A'],
+  [/\bsinglewindow\b/gi, 'single window'],
+  [/\bwebportal\b/gi, 'web portal'],
+  [/\bhelpdesk\b/gi, 'help desk'],
+  [/\bmygov\b/gi, 'my gov'],
   [/\bBOU\b/g, 'Bank of Uganda'],
   [/\bTAT\b/g, 'Tax Appeals Tribunal'],
   [/\bTCC\b|\bT\.C\.C\.?|\bT-C-C\b/gi, 'T-C-C'],
@@ -164,9 +172,9 @@ export function cleanMarkdownForSpeech(text: string): string {
   );
   // Strip links [Title](url) -> Title
   cleaned = cleaned.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
-  // Strip "portal/website at/via https://..." redundant preposition URLs
+  // Strip "portal/website at/via https://..." redundant preposition URLs across all 5 locales
   cleaned = cleaned.replace(
-    /\b(portal|website|site|page|platform|mukutu(?:\s+gwa\s+URA)?|tovuti(?:\s+ya\s+URA)?|urubuga(?:\s+rwa\s+URA)?)\s(?:at|via|ku|katika|kwenye|kupitia|aha)\s+(?:https?:\/\/|www\.)[^\s<>"]*[^\s<>".,;:!?)\]]/gi,
+    /\b(portal|website|site|page|platform|o?mukutu(?:\s+gwa\s+URA)?|tovuti(?:\s+ya\s+URA)?|[ou]rubuga(?:\s+rwa\s+URA)?|(?:kabedo|kubbe|intanet)(?:\s+me\s+URA)?)\s(?:at|via|ku|katika|kwenye|kupitia|aha|i|ki)\s+(?:(?:https?:\/\/|www\.)[^\s<>"]*[^\s<>".,;:!?)\]]|(?:[A-Za-z0-9-]+\.)?ura\.go\.ug(?:[:/?#][^\s<>"]*[^\s<>".,;:!?)\]])?)/gi,
     '$1',
   );
   // Normalize email addresses before domain/URL stripping
@@ -200,19 +208,25 @@ export function cleanMarkdownForSpeech(text: string): string {
   cleaned = cleaned.replace(/\b(?:https?:\/\/|www\.)\S+/gi, '');
   // Normalize Ugandan international (+256), bare-256, and local (07../03../04..) phone numbers and P.O. Box
   cleaned = cleaned.replace(
-    /(?<!\w)\+256[ \t-]?(?:\(0\)[ \t-]?)?\(?0?([1-9]\d{2})\)?[ \t-]?(\d{3})[ \t-]?(\d{3})\b/g,
-    (m: string, g1: string, g2: string, g3: string) =>
-      `plus 2 5 6, ${m.includes('(0)') ? '0, ' : ''}${g1.split('').join(' ')}, ${g2.split('').join(' ')}, ${g3.split('').join(' ')}`,
+    /(?<!\w)\+256[ \t-]?(?:\(0\)[ \t-]?)?\(?0?([1-9]\d(?:[ \t()-]{0,2}\d){7})\b/g,
+    (m: string, raw9: string) => {
+      const d = raw9.replace(/\D/g, '');
+      return `plus 2 5 6, ${m.includes('(0)') ? '0, ' : ''}${d.slice(0, 3).split('').join(' ')}, ${d.slice(3, 6).split('').join(' ')}, ${d.slice(6, 9).split('').join(' ')}`;
+    },
   );
   cleaned = cleaned.replace(
-    /\b256[ \t-]?(7\d{2})[ \t-]?(\d{3})[ \t-]?(\d{3})\b/g,
-    (_: string, g1: string, g2: string, g3: string) =>
-      `2 5 6, ${g1.split('').join(' ')}, ${g2.split('').join(' ')}, ${g3.split('').join(' ')}`,
+    /\b256[ \t-]?(7\d(?:[ \t()-]{0,2}\d){7})\b/g,
+    (_: string, raw9: string) => {
+      const d = raw9.replace(/\D/g, '');
+      return `2 5 6, ${d.slice(0, 3).split('').join(' ')}, ${d.slice(3, 6).split('').join(' ')}, ${d.slice(6, 9).split('').join(' ')}`;
+    },
   );
   cleaned = cleaned.replace(
-    /(?<!\w)\(?(0[2347]\d{2})\)?[ \t-]?(\d{3})[ \t-]?(\d{3})\b/g,
-    (_: string, g1: string, g2: string, g3: string) =>
-      `${g1.split('').join(' ')}, ${g2.split('').join(' ')}, ${g3.split('').join(' ')}`,
+    /(?<!\w)\(?(0[2347]\d)\)?[ \t()-]{0,2}(\d(?:[ \t()-]{0,2}\d){6})\b/g,
+    (_: string, p2: string, tail7: string) => {
+      const d = (p2 + tail7).replace(/\D/g, '');
+      return `${d.slice(0, 4).split('').join(' ')}, ${d.slice(4, 7).split('').join(' ')}, ${d.slice(7, 10).split('').join(' ')}`;
+    },
   );
   cleaned = cleaned.replace(
     /\bP\.?[ \t]?O\.?[ \t]?Box[ \t]{1,4}(\d{1,6})\b/gi,
@@ -228,8 +242,13 @@ export function cleanMarkdownForSpeech(text: string): string {
   // Strip table rows
   cleaned = cleaned.replace(/^\s*\|.*\|\s*$/gm, ' ');
   cleaned = cleaned.replace(/\s*\|\s*/g, ', ');
-  // Paced numbered steps: 1. -> Step 1:
-  cleaned = cleaned.replace(/^\s*(\d+)\.\s+/gm, 'Step $1: ');
+  cleaned = cleaned.replace(/(?<=[A-Za-z0-9*_)\]])[ \t]*(?:->|→|>)[ \t]*(?=[A-Za-z0-9*_(\[])/g, ', then ');
+  // Paced numbered steps: 1. -> Step 1: (both line-start and inline)
+  cleaned = cleaned.replace(/^\s*(\d{1,2})[.)]\s+/gm, 'Step $1: ');
+  cleaned = cleaned.replace(/([:;.!?])[ \t]+(\d{1,2})[.)][ \t]+(?=[A-Z*])/g, '$1 Step $2: ');
+  if (cleaned.includes('Step 1: ')) {
+    cleaned = cleaned.replace(/(?<![.!?:;\n])[ \t]+([2-9]|1[0-2])[.)][ \t]+(?=[A-Z*])/g, '. Step $1: ');
+  }
   // Strip headers and list bullets
   cleaned = cleaned.replace(/^\s*#{1,6}\s+/gm, '');
   cleaned = cleaned.replace(/^\s*[-*+•]\s+/gm, ', ');
