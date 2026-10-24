@@ -222,19 +222,18 @@ def extract_conversation_entities(turns: list[dict[str, str]]) -> ConversationEn
         if user_matched_topic:
             active_subject = user_matched_topic
 
-        # Taxpayer status (latest turn wins when opposing statuses like Resident vs Non-Resident appear)
+        # Taxpayer status (prevent 'non-resident' from also matching 'resident', and honour explicit residency corrections)
+        is_correction = bool(
+            re.search(r"\b(?:actually|instead|sorry|correction|meant|no\s+longer)\b", user_msg, re.I)
+        )
         for pat, status_label in _TAXPAYER_STATUS_PATTERNS:
             if pat.search(user_msg):
                 if status_label == "Resident" and re.search(r"\bnon[-\s]?resident\b", user_msg, re.I):
                     continue
-                if status_label == "Non-Resident":
+                if is_correction and status_label == "Non-Resident":
                     taxpayer_types = [t for t in taxpayer_types if t != "Resident"]
-                elif status_label == "Resident":
+                elif is_correction and status_label == "Resident":
                     taxpayer_types = [t for t in taxpayer_types if t != "Non-Resident"]
-                elif status_label == "Company / Organization":
-                    taxpayer_types = [t for t in taxpayer_types if t != "Individual / Sole Proprietor"]
-                elif status_label == "Individual / Sole Proprietor":
-                    taxpayer_types = [t for t in taxpayer_types if t != "Company / Organization"]
                 if status_label not in taxpayer_types:
                     taxpayer_types.append(status_label)
 
