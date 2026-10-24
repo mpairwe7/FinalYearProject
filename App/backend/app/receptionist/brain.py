@@ -429,6 +429,11 @@ class UraReceptionistBrain(LLMService):
         # True while the assistant's audio is going out: an interruption then
         # is the caller talking over it (see CallState.offer_interrupted).
         self._bot_speaking = False
+        self._active_gen_task: asyncio.Task[Any] | None = None
+
+    def _cancel_active_generation(self) -> None:
+        if self._active_gen_task is not None and not self._active_gen_task.done():
+            self._active_gen_task.cancel()
 
     @property
     def language(self) -> str:
@@ -509,6 +514,7 @@ class UraReceptionistBrain(LLMService):
             # Caller barged in: invalidate pending LLM generation.
             self.room.state.generation_id += 1
             self.room.state.barge_in_count += 1
+            self._cancel_active_generation()
             # Pipecat also interrupts as each caller turn starts; only one that
             # cuts the assistant off can have cut off the question it ended on.
             if self.room.state.pending_offer and self._bot_speaking:
@@ -529,6 +535,7 @@ class UraReceptionistBrain(LLMService):
 
         if isinstance(frame, CallControlFrame):
             self.room.state.generation_id += 1
+            self._cancel_active_generation()
             self.room.state.offer_interrupted = False
             self._bot_speaking = False
             await self.push_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
@@ -537,6 +544,7 @@ class UraReceptionistBrain(LLMService):
 
         if isinstance(frame, CallTextTurnFrame):
             self.room.state.generation_id += 1
+            self._cancel_active_generation()
             self.room.state.offer_interrupted = False
             self._bot_speaking = False
             await self.push_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
@@ -569,16 +577,19 @@ class UraReceptionistBrain(LLMService):
         if action == "repeat":
             await self.handle_external_question("repeat that", words=None)
         elif action == "slower":
+            self.room.state.turn_seq += 1
             self.room.state.speech_rate_slow = True
             await self._publish_call_state()
             await self._say_and_record(phrase("slow_ack", language), kind="notice")
         elif action == "normal_speed":
+            self.room.state.turn_seq += 1
             self.room.state.speech_rate_slow = False
             await self._publish_call_state()
             await self._say_and_record(phrase("normal_ack", language), kind="notice")
         elif action == "more_detail":
             more_txt = self.room.state.more_detail or getattr(self.room.state, "last_more_detail", "")
             if more_txt:
+                self.room.state.turn_seq += 1
                 self._take_offer()
                 self.room.state.last_more_detail = ""
                 await self._say_more(more_txt)
@@ -1456,6 +1467,8 @@ class UraReceptionistBrain(LLMService):
                 )
             )
 
+        self._active_gen_task = gen_task
+
         # Wait up to FILLER_AFTER_MS before sending filler audio
         filler_ms = get_filler_after_ms()
         done, _ = await asyncio.wait([gen_task], timeout=filler_ms / 1000.0)
@@ -1469,6 +1482,11 @@ class UraReceptionistBrain(LLMService):
         # Wait up to 25s for completion
         try:
             result = await asyncio.wait_for(gen_task, timeout=25.0)
+        except asyncio.CancelledError:
+            if curr_gen_id != self.room.state.generation_id:
+                logger.info("Cancelled in-flight generation for call %s after barge-in", self.room.call_id)
+                return
+            raise
         except asyncio.TimeoutError:
             logger.warning("Generation timed out for call %s", self.room.call_id)
             record_chat_turn({}, elapsed_ms=(time.perf_counter() - t0) * 1000, channel="call", error=True)
@@ -1698,7 +1716,7 @@ class UraReceptionistBrain(LLMService):
         max_sentences = get_max_spoken_sentences()
         rest = sentences[max_sentences:]
         spoken = " ".join(sentences[:max_sentences]) if rest else cleaned_reply
-        self.room.state.last_more_detail = " ".join(rest) if rest else ""
+        self.room.state.last_more_detail = " ".join(rest) if (rest and not offer_officer) else ""
         if offer_officer:
             self._offer("officer", reason="offer_accepted", at_risk=at_risk)
             return f"{spoken} {phrase('officer_offer', self.language)}"

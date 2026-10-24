@@ -186,7 +186,7 @@ export const useCallStore = create<CallStoreState>((set) => ({
         captions,
         currentCaption: caption,
         activeAiText: isAssistant ? caption.text : state.activeAiText,
-        isUserSpeaking: caption.speaker === 'caller',
+        isUserSpeaking: caption.speaker === 'caller' && caption.final === false,
       };
     }),
   setError: (error) => set({ error }),
@@ -202,6 +202,10 @@ export const useCallStore = create<CallStoreState>((set) => ({
       speechRateSlow: patch.speechRateSlow ?? state.speechRateSlow,
       hasMoreDetail: patch.hasMoreDetail ?? state.hasMoreDetail,
       hasLastAnswer: patch.hasLastAnswer ?? state.hasLastAnswer,
+      isUserSpeaking:
+        patch.turnPhase === 'thinking' || patch.turnPhase === 'speaking'
+          ? false
+          : state.isUserSpeaking,
     })),
   reset: () => set(initialState),
 }));

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -112,11 +113,25 @@ class CallTextTurnFrame(Frame):
     text: str = ""
 
 
+_CONTROL_RATE_WINDOW_S = 10.0
+_MAX_CONTROL_FRAMES_PER_WINDOW = 15
+
+
 class BrowserCallSerializer(FrameSerializer):
     """Serializes frames to/from the taxpayer browser WebSocket connection."""
 
     def __init__(self, room: Any = None) -> None:
         self.room = room
+        self._control_timestamps: list[float] = []
+
+    def _allow_control_frame(self) -> bool:
+        now = time.monotonic()
+        cutoff = now - _CONTROL_RATE_WINDOW_S
+        self._control_timestamps = [ts for ts in self._control_timestamps if ts >= cutoff]
+        if len(self._control_timestamps) >= _MAX_CONTROL_FRAMES_PER_WINDOW:
+            return False
+        self._control_timestamps.append(now)
+        return True
 
     async def serialize(self, frame: Frame) -> bytes | str | None:
         """Convert a Pipecat frame into a WebSocket message (with 2G/3G mu-law & caption-only support)."""
@@ -186,13 +201,13 @@ class BrowserCallSerializer(FrameSerializer):
 
             if msg_type == "call_control":
                 action = str(msg.get("action") or "").strip().lower()
-                if action in _ALLOWED_CALL_CONTROLS:
+                if action in _ALLOWED_CALL_CONTROLS and self._allow_control_frame():
                     return CallControlFrame(action=action)
                 return None
 
             if msg_type == "text_turn":
                 text = " ".join(str(msg.get("text") or "").split()).strip()
-                if text and len(text) <= 500:
+                if text and len(text) <= 500 and self._allow_control_frame():
                     return CallTextTurnFrame(text=text)
                 return None
 
