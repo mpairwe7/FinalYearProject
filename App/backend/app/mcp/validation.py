@@ -15,6 +15,7 @@ down.
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import logging
@@ -167,6 +168,17 @@ def coerce_arguments_to_schema(
 
         if isinstance(value, str):
             stripped = value.strip()
+            # 0. Hyphenated/spaced 10-digit TIN normalization on TIN string properties
+            if (
+                "string" in type_set
+                and key in ("tin", "taxpayer_tin", "buyer_tin", "importer_tin")
+                and ("-" in stripped or " " in stripped)
+            ):
+                compact_tin = re.sub(r"[\s-]+", "", stripped)
+                if re.fullmatch(r"\d{10}", compact_tin):
+                    coerced[key] = compact_tin
+                    continue
+
             # 1. Case-insensitive enum match when string is not already in choices
             if isinstance(choices, list) and choices and value not in choices:
                 ci_matches = [c for c in choices if isinstance(c, str) and c.lower() == stripped.lower()]
@@ -215,6 +227,15 @@ def coerce_arguments_to_schema(
     return coerced
 
 
+_PARAM_ALIAS_GROUPS: tuple[frozenset[str], ...] = (
+    frozenset({"tin", "taxpayer_tin", "buyer_tin", "importer_tin", "taxpayer_id"}),
+    frozenset({"amount", "amount_ugx", "gross_amount", "payment_amount"}),
+    frozenset({"brn", "ursb_brn", "ursb_registration_number", "registration_number"}),
+    frozenset({"stamp_serial", "stamp_code", "stamp_serials"}),
+    frozenset({"mobile", "mobile_number", "phone", "telephone"}),
+)
+
+
 def build_validation_repair_hints(
     schema: dict[str, Any] | None,
     arguments: dict[str, Any],
@@ -240,12 +261,39 @@ def build_validation_repair_hints(
             expected_types[prop_name] = prop_spec["type"]
         if isinstance(prop_spec.get("enum"), list):
             allowed_enums[prop_name] = list(prop_spec["enum"])
-    return {
+
+    suggested_renames: dict[str, str] = {}
+    candidate_targets = missing_required or [str(p) for p in properties if p not in arguments]
+    for bad_key in unexpected_fields:
+        bad_low = bad_key.lower()
+        matched_target = ""
+        for group in _PARAM_ALIAS_GROUPS:
+            if bad_low in group:
+                for tgt in candidate_targets:
+                    if tgt.lower() in group:
+                        matched_target = tgt
+                        break
+            if matched_target:
+                break
+        if not matched_target and candidate_targets:
+            best_ratio, best_tgt = max(
+                (difflib.SequenceMatcher(None, bad_low, tgt.lower()).ratio(), tgt)
+                for tgt in candidate_targets
+            )
+            if best_ratio >= 0.65:
+                matched_target = best_tgt
+        if matched_target:
+            suggested_renames[bad_key] = matched_target
+
+    hints: dict[str, Any] = {
         "missing_required": missing_required,
         "unexpected_fields": unexpected_fields,
         "expected_types": expected_types,
         "allowed_enums": allowed_enums,
     }
+    if suggested_renames:
+        hints["suggested_renames"] = suggested_renames
+    return hints
 
 
 def result_matches_schema(schema: dict[str, Any] | None, result: Any) -> list[str]:

@@ -196,6 +196,7 @@ export interface PortalCopilotPayload {
     | 'access_denied'
     | 'copilot_launch_banner'
     | 'screenshot_copilot_handoff'
+    | 'error_diagnosis'
     | string;
   task_id?: string;
   portal_key?: string;
@@ -251,6 +252,13 @@ export interface PortalCopilotPayload {
     is_complete: boolean;
     missing_context_hints?: string[];
     clarifying_options?: string[];
+  };
+  error_diagnosis?: {
+    error_code: string;
+    root_cause: string;
+    statutory_citation: string;
+    resolution_steps: string[];
+    remediation_task_id?: string;
   };
 }
 

@@ -1247,9 +1247,9 @@ def sanitize_portal_context(portal_context: Mapping[str, Any] | None) -> dict[st
 # Entity Extraction from Natural-Language Prompts
 # ---------------------------------------------------------------------------
 
-_TIN_RE = re.compile(r"\b(1\d{9})\b")
+_TIN_RE = re.compile(r"\b(1\d{2}[-\s]?\d{3}[-\s]?\d{4}|1\d{9})\b")
 _PRN_RE = re.compile(r"\b(2\d{9,12})\b")
-_NIN_RE = re.compile(r"\b(C[MF][A-Z0-9]{12})\b", re.IGNORECASE)
+_NIN_RE = re.compile(r"\b(C[MFR][-\s]?[A-Z0-9]{11,13})\b", re.IGNORECASE)
 _STAMP_RE = re.compile(r"\b(UG-DTS-\d{4}-\d{4,8})\b", re.IGNORECASE)
 _BRN_RE = re.compile(r"\b(800\d{11}|URSB-[A-Z0-9-]+)\b", re.IGNORECASE)
 _ENTRY_RE = re.compile(r"\b(\d{4}-ASY-IM[47]-\d+)\b", re.IGNORECASE)
@@ -1322,7 +1322,7 @@ def extract_task_entities(message: str, portal_context: Mapping[str, Any] | None
 
     tin_m = _TIN_RE.search(text)
     if tin_m:
-        entities["tin"] = tin_m.group(1)
+        entities["tin"] = re.sub(r"[-\s]+", "", tin_m.group(1))
 
     prn_m = _PRN_RE.search(text)
     if prn_m:
@@ -1330,7 +1330,7 @@ def extract_task_entities(message: str, portal_context: Mapping[str, Any] | None
 
     nin_m = _NIN_RE.search(text)
     if nin_m:
-        entities["nin"] = nin_m.group(1).upper()
+        entities["nin"] = re.sub(r"[-\s]+", "", nin_m.group(1)).upper()
 
     stamp_m = _STAMP_RE.search(text)
     if stamp_m:
@@ -1724,22 +1724,50 @@ def validate_task_fields(
                 missing.append(f_spec.name)
             continue
 
-        # Field-specific format checks
+        # Field-specific format checks with separator normalization & cross-field error diagnosis
         if f_spec.name in ("tin", "buyer_tin") and spec.task_id != "tin_search_verify":
-            if not re.fullmatch(r"\d{10}", val_str):
-                errors[f_spec.name] = "TIN must be an exact 10-digit number (e.g. 100-XXX-XXXX)."
+            compact_tin = re.sub(r"[\s-]+", "", val_str)
+            if not re.fullmatch(r"\d{10}", compact_tin):
+                if re.fullmatch(r"C[MFR][A-Za-z0-9]{11,13}", compact_tin, re.IGNORECASE):
+                    errors[f_spec.name] = (
+                        "You entered a 14-character NIRA National ID (NIN) in the TIN field. "
+                        "A URA TIN is an exact 10-digit number (e.g. 100-XXX-XXXX). "
+                        "Use 'Search / Verify TIN' or 'Apply for Instant Individual TIN' if you only have your NIN."
+                    )
+                elif compact_tin.isdigit():
+                    errors[f_spec.name] = (
+                        f"You entered {len(compact_tin)} digits, but a URA TIN must be an exact 10-digit number (e.g. 100-XXX-XXXX)."
+                    )
+                else:
+                    errors[f_spec.name] = "TIN must be an exact 10-digit number (e.g. 100-XXX-XXXX)."
                 continue
+            val_str = compact_tin
         elif f_spec.name == "prn":
-            if not re.fullmatch(r"\d{10,14}", val_str):
-                errors[f_spec.name] = "PRN must be a 10 to 14-digit Payment Registration Number."
+            compact_prn = re.sub(r"[\s-]+", "", val_str)
+            if not re.fullmatch(r"\d{10,14}", compact_prn) or (len(compact_prn) == 10 and compact_prn.startswith("1")):
+                if len(compact_prn) == 10 and compact_prn.startswith("1"):
+                    errors[f_spec.name] = (
+                        "It looks like you entered a 10-digit URA TIN starting with 1 instead of a "
+                        "Payment Registration Number (PRN, which starts with 2 and has 10 to 14 digits)."
+                    )
+                else:
+                    errors[f_spec.name] = "PRN must be a 10 to 14-digit Payment Registration Number."
                 continue
+            val_str = compact_prn
         elif f_spec.name == "nin":
-            if not re.fullmatch(r"C[MF][A-Za-z0-9]{12}", val_str, re.IGNORECASE):
-                errors[f_spec.name] = (
-                    "NIN must be 14 alphanumeric characters starting with CM or CF (e.g. CM-14-CHAR-NIN)."
-                )
+            compact_nin = re.sub(r"[\s-]+", "", val_str).upper()
+            if not re.fullmatch(r"C[MFR][A-Z0-9]{11,13}", compact_nin):
+                if re.fullmatch(r"\d{10}", compact_nin):
+                    errors[f_spec.name] = (
+                        "It looks like you entered a 10-digit URA TIN in the NIN field. "
+                        "A NIRA NIN has 13 to 15 alphanumeric characters starting with CM, CF, or CR (e.g. CM-14-CHAR-NIN)."
+                    )
+                else:
+                    errors[f_spec.name] = (
+                        "NIN must be 14 alphanumeric characters starting with CM, CF, or CR (e.g. CM-14-CHAR-NIN)."
+                    )
                 continue
-            val_str = val_str.upper()
+            val_str = compact_nin
         elif f_spec.name == "mobile_number":
             normalized_phone = re.sub(r"[\s()-]+", "", val_str)
             if not re.fullmatch(r"(?:\+?256|0)7\d{8}", normalized_phone):
@@ -2111,7 +2139,12 @@ def build_portal_task_card(
     if spec.tier == PortalTaskTier.AUTONOMOUS_VERIFY:
         exec_res = execute_portal_task(spec.task_id, validated_params, user_id=user_id)
         dom_actions = get_portal_dom_recipe(spec.portal_key, state=spec.task_id, entities=validated_params)
-        return {
+        err_diag = (
+            diagnose_ura_error(str(exec_res.get("error") or exec_res.get("message") or ""))
+            if not exec_res.get("ok", True)
+            else None
+        )
+        card_out: dict[str, Any] = {
             "card_type": "executed_result",
             "task_id": spec.task_id,
             "portal_key": spec.portal_key,
@@ -2124,6 +2157,9 @@ def build_portal_task_card(
             "dom_actions": dom_actions,
             "copilot_portal_url": copilot_portal_url,
         }
+        if err_diag:
+            card_out["error_diagnosis"] = err_diag
+        return card_out
 
     # ── Gate 5: Tier 2 & Tier 3 Claude-Style Confirmation Card (`confirmation_required`) ──
     canonical_params = json.dumps(validated_params, sort_keys=True, separators=(",", ":"))
@@ -2348,16 +2384,24 @@ def handle_portal_task_decision(
         mode = "live" if live else "simulation"
         dom_actions = get_portal_dom_recipe(spec.portal_key, state=spec.task_id, entities=dict(params))
 
-        summary_msg = str(
-            exec_result.get("message")
-            or (
-                f"Completed {spec.title} in simulation mode (PRN: {exec_result['prn']})."
-                if exec_result.get("prn")
-                else f"Completed {spec.title} ({mode} mode)."
+        if ok:
+            summary_msg = str(
+                exec_result.get("message")
+                or (
+                    f"Completed {spec.title} in simulation mode (PRN: {exec_result['prn']})."
+                    if exec_result.get("prn")
+                    else f"Completed {spec.title} ({mode} mode)."
+                )
             )
-        )
+        else:
+            summary_msg = str(
+                exec_result.get("error")
+                or exec_result.get("message")
+                or f"Could not complete {spec.title}."
+            )
+        err_diag = diagnose_ura_error(summary_msg) if not ok else None
 
-        response_payload = {
+        response_payload: dict[str, Any] = {
             "ok": ok,
             "status": "executed" if ok else "error",
             "task_id": spec.task_id,
@@ -2369,6 +2413,8 @@ def handle_portal_task_decision(
             "dom_actions": dom_actions,
             "copilot_portal_url": copilot_portal_url,
         }
+        if err_diag:
+            response_payload["error_diagnosis"] = err_diag
         if ok:
             with _TASK_CACHE_LOCK:
                 _EXECUTED_TASK_CACHE[cache_key] = dict(response_payload)
@@ -2416,6 +2462,121 @@ _FIELD_SELECTOR_MAP: dict[str, str] = {
     "quantity": "input#txtStampQuantity, input[name='quantity']",
     "chassis_vin": "input#txtChassisVin, input#txtSadNumber, input[name='chassis_vin']",
 }
+
+
+_URA_ERROR_PATTERNS: tuple[tuple[str, re.Pattern[str], str, str, tuple[str, ...], str], ...] = (
+    (
+        "EFRIS_INSUFFICIENT_STOCK",
+        re.compile(r"\b(?:err_insufficient_stock|efris[-_]?204|insufficient\s+stock|negative\s+stock|stock\s+balance\s+is\s+zero)\b", re.IGNORECASE),
+        "EFRIS requires positive stock-in inventory for the commodity code before a fiscal invoice can be issued.",
+        "Tax Procedures Code Act (TPCA) Cap. 343 s. 73A (EFRIS Stock Management)",
+        (
+            "Open EFRIS Stock Management and record a Stock-In entry for the 8-digit UNSPSC commodity code.",
+            "Verify the quantity and unit cost, then retry issuing the fiscal invoice.",
+        ),
+        "efris_stock_management",
+    ),
+    (
+        "EFRIS_NOT_ENROLLED",
+        re.compile(r"\b(?:err_tin_not_enrolled|efris[-_]?101|not\s+enrolled\s+for\s+efris|device\s+not\s+initialized)\b", re.IGNORECASE),
+        "The seller TIN is not yet enrolled or activated on EFRIS, or the virtual/EFD device has not been initialized.",
+        "TPCA Cap. 343 s. 73A (Electronic Fiscal Receipting and Invoicing)",
+        (
+            "Check your EFRIS taxpayer enrollment status using your 10-digit TIN.",
+            "Complete EFRIS onboarding on the URA portal and configure your system-to-system or web invoicing credentials.",
+        ),
+        "efris_taxpayer_status",
+    ),
+    (
+        "EFRIS_INVALID_FDN",
+        re.compile(r"\b(?:err_invalid_fdn|efris[-_]?302|original\s+fdn\s+not\s+found|fdn\s+not\s+found|credit\s+note\s+exceeds)\b", re.IGNORECASE),
+        "A credit note or debit note in EFRIS must reference a valid 20-digit Fiscal Document Number (FDN) and cannot exceed the original invoice value.",
+        "VAT Act Cap. 344 s. 28 & TPCA Cap. 343 s. 73A",
+        (
+            "Confirm the exact 20-digit FDN printed on the original EFRIS fiscal invoice.",
+            "Ensure the credit note adjustment amount does not exceed the original invoice gross amount.",
+        ),
+        "efris_credit_note",
+    ),
+    (
+        "PRN_EXPIRED_OR_INVALID",
+        re.compile(r"\b(?:prn_expired|prn\s+(?:has\s+)?expired|expired\s+prn|invalid\s+or\s+expired\s+prn)\b", re.IGNORECASE),
+        "Unpaid URA Payment Registration Numbers (PRNs) expire automatically after 21 days.",
+        "TPCA Cap. 343 s. 37 (Payment Registration Slip Validity)",
+        (
+            "Reactivate the expired PRN to extend its 21-day validity window, or generate a fresh PRN for the same tax head and amount.",
+            "Complete payment via your bank, Mobile Money (*165# / *185#), or card using the active PRN.",
+        ),
+        "payment_reactivate_prn",
+    ),
+    (
+        "DUPLICATE_RETURN_PERIOD",
+        re.compile(r"\b(?:err_duplicate_return|return\s+already\s+filed|duplicate\s+return|already\s+submitted\s+for\s+this\s+period)\b", re.IGNORECASE),
+        "An original tax return has already been submitted for this tax period and tax head.",
+        "TPCA Cap. 343 s. 21 (Amended Tax Returns)",
+        (
+            "Select 'Amended Return' instead of 'Original Return' on the e-Tax return filing portal.",
+            "Enter the acknowledgement reference of the original return and declare the corrected schedule figures.",
+        ),
+        "return_filing_submit",
+    ),
+    (
+        "TCC_COMPLIANCE_BLOCK",
+        re.compile(r"\b(?:err_tcc_arrears|tcc\s+rejected|outstanding\s+arrears|unfiled\s+returns\s+detected)\b", re.IGNORECASE),
+        "A Tax Clearance Certificate (TCC) requires all due returns to be filed and any outstanding tax liabilities to be settled or covered by an approved instalment agreement.",
+        "TPCA Cap. 343 s. 43 (Tax Clearance Certificate) & s. 40 (Payment by Instalments)",
+        (
+            "Inspect your TIN tax obligations and filing ledger to identify any unfiled returns or unpaid assessments.",
+            "Submit pending returns, settle the PRN balance (or apply for a Section 40 instalment plan), then re-submit your TCC application.",
+        ),
+        "tin_tax_obligations",
+    ),
+    (
+        "NIRA_NIN_MISMATCH",
+        re.compile(r"\b(?:err_nin_mismatch|nin\s+validation\s+failed|nira\s+mismatch|name\s+or\s+date\s+of\s+birth\s+mismatch)\b", re.IGNORECASE),
+        "The surname, given name, or date of birth entered does not match the NIRA National Identification Register record for this 14-character NIN.",
+        "TPCA Cap. 343 s. 4 & NIRA-URA Instant TIN Integration",
+        (
+            "Verify that your 14-character NIN starts with CM, CF, or CR and has no transposed characters.",
+            "Enter your surname, given name, and date of birth (YYYY-MM-DD) exactly as printed on your NIRA National ID card.",
+        ),
+        "tin_apply_individual",
+    ),
+    (
+        "CUSTOMS_BOND_OR_IM7_EXPIRED",
+        re.compile(r"\b(?:err_im7_bond|bond\s+guarantee\s+insufficient|warehousing\s+period\s+expired|im7\s+expired)\b", re.IGNORECASE),
+        "Bonded warehouse consignments under IM7 require sufficient customs bond coverage and must be cleared or re-warehoused within the statutory 3-month warehousing period.",
+        "East African Community Customs Management Act (EACCMA) 2004 s. 47–67",
+        (
+            "Check the IM7 consignment status and remaining warehousing days in BWIMS.",
+            "Lodge an ex-warehouse home-consumption entry (IM4) and pay the assessed customs duties, or apply for bond reinstatement before release.",
+        ),
+        "bwims_consignment_status",
+    ),
+)
+
+
+_EXPLICIT_ERROR_REPORT_RE = re.compile(
+    r"\b(?:efris[-_]?(?:101|204|302)|err_[a-z0-9_]+|prn_expired|getting\s+(?:an?\s+)?error|portal\s+says|error\s*:|rejected|failed|cannot\s+issue|won't\s+let\s+me)\b",
+    re.IGNORECASE,
+)
+
+
+def diagnose_ura_error(error_text: str) -> dict[str, Any] | None:
+    """Match a portal/connector error message or code to a structured root-cause diagnosis and remediation plan."""
+    clean = str(error_text or "").strip()
+    if not clean:
+        return None
+    for code, pattern, root_cause, citation, steps, task_id in _URA_ERROR_PATTERNS:
+        if pattern.search(clean):
+            return {
+                "error_code": code,
+                "root_cause": root_cause,
+                "statutory_citation": citation,
+                "resolution_steps": list(steps),
+                "remediation_task_id": task_id,
+            }
+    return None
 
 
 def analyze_portal_context(
@@ -2511,8 +2672,12 @@ def analyze_portal_context(
     conv_q = f"&conversation_id={urllib.parse.quote(conversation_id)}" if conversation_id else ""
     copilot_portal_url = f"/portal/{portal_key}?copilot=1{conv_q}"
     requires_auth = portal_requires_auth(portal_key)
+    combined_err_text = " ".join(
+        [error_banner] + [str(e.get("message") or "") for e in validation_errors]
+    ).strip()
+    err_diagnosis = diagnose_ura_error(combined_err_text)
 
-    return {
+    out_payload: dict[str, Any] = {
         "card_type": "stuck_portal_assistance",
         "portal_key": portal_key,
         "portal_name": portal_info["name"],
@@ -2532,6 +2697,9 @@ def analyze_portal_context(
             "validation_error_count": len(validation_errors),
         },
     }
+    if err_diagnosis:
+        out_payload["error_diagnosis"] = err_diagnosis
+    return out_payload
 
 
 # ---------------------------------------------------------------------------
@@ -2690,6 +2858,17 @@ def evaluate_turn(
             conversation_id=conv_id,
         )
         diag = assistance["diagnosis_summary"]
+        err_diag_obj = assistance.get("error_diagnosis")
+        err_diag_block = ""
+        if isinstance(err_diag_obj, Mapping):
+            res_steps = "\n".join(
+                f"- {s}" for s in (err_diag_obj.get("resolution_steps") or [])
+            )
+            err_diag_block = (
+                f"\n\n**Root Cause ({err_diag_obj.get('error_code')})**: {err_diag_obj.get('root_cause')}\n"
+                f"**Statutory Basis**: {err_diag_obj.get('statutory_citation')}\n"
+                f"**Resolution Plan**:\n{res_steps}"
+            )
         action_lines = "\n".join(
             f"{a['step_number']}. **{a['element']}**: {a['tooltip']}"
             for a in assistance["dom_actions"][:5]
@@ -2697,13 +2876,13 @@ def evaluate_turn(
         stuck_reply = (
             f"### Inbuilt URA Portal Co-Pilot — {assistance['portal_name']}\n\n"
             f"**Active Step**: {assistance['active_step']}\n"
-            f"**Diagnosis**: {diag}\n\n"
+            f"**Diagnosis**: {diag}{err_diag_block}\n\n"
             f"**Guided Recovery Steps**:\n{action_lines}"
         )
         grounding = (
             f"[LIVE URA PORTAL DOM TELEMETRY — {assistance['portal_name']}]\n"
             f"Active Step: {assistance['active_step']}\n"
-            f"Diagnosis: {diag}\n"
+            f"Diagnosis: {diag}{err_diag_block}\n"
             f"Recommended DOM Actions: {len(assistance['dom_actions'])} interactive step(s) ready."
         )
         return PortalCopilotOutcome(
@@ -2711,6 +2890,58 @@ def evaluate_turn(
             payload=assistance,
             grounding_block=grounding,
             deterministic_reply=stuck_reply,
+        )
+
+    # 4. Natural-Language Error Code / Portal Banner Diagnosis in Chat
+    msg_diag = diagnose_ura_error(message) if _EXPLICIT_ERROR_REPORT_RE.search(message) else None
+    if msg_diag is not None:
+        rem_task = str(msg_diag.get("remediation_task_id") or "")
+        rem_spec = classify_portal_task(rem_task) if rem_task else None
+        rem_portal_key = rem_spec.portal_key if rem_spec else "e_services"
+        rem_portal_info = EXTERNAL_URA_PORTALS.get(
+            "e_services" if rem_portal_key == "return_filing" else rem_portal_key,
+            EXTERNAL_URA_PORTALS["e_services"],
+        )
+        rem_url = (
+            f"/portal/{rem_portal_key}?intent={urllib.parse.quote(rem_task)}"
+            f"&conversation_id={urllib.parse.quote(conv_id)}&copilot=1"
+            if rem_task
+            else f"/portal/{rem_portal_key}?copilot=1"
+        )
+        steps_text = "\n".join(
+            f"{idx}. {st}" for idx, st in enumerate(msg_diag.get("resolution_steps") or [], start=1)
+        )
+        grounding = (
+            f"[VERIFIED URA ERROR DIAGNOSIS — {msg_diag['error_code']}]\n"
+            f"Root Cause: {msg_diag['root_cause']}\n"
+            f"Statutory Basis: {msg_diag['statutory_citation']}\n"
+            f"Resolution Steps:\n{steps_text}\n"
+            + (f"Remediation Task: {rem_spec.title} ({rem_task})" if rem_spec else "")
+        )
+        det_reply = (
+            f"### URA Error Diagnosis — `{msg_diag['error_code']}`\n\n"
+            f"**Root Cause**: {msg_diag['root_cause']}\n\n"
+            f"**Statutory Basis**: {msg_diag['statutory_citation']}\n\n"
+            f"**How to Resolve**:\n{steps_text}"
+        )
+        return PortalCopilotOutcome(
+            card_type="error_diagnosis",
+            payload={
+                "card_type": "error_diagnosis",
+                "title": rem_spec.title if rem_spec else f"URA Error Diagnosis ({msg_diag['error_code']})",
+                "portal_key": rem_portal_key,
+                "portal_name": rem_portal_info["name"],
+                "copilot_portal_url": rem_url,
+                "open_portal_label": (
+                    f"Resolve with {rem_spec.title}" if rem_spec else f"Open {rem_portal_info['name']}"
+                ),
+                "diagnosis_summary": msg_diag["root_cause"],
+                "error_diagnosis": dict(msg_diag),
+                **msg_diag,
+                "remediation_title": rem_spec.title if rem_spec else "",
+            },
+            grounding_block=grounding,
+            deterministic_reply=det_reply,
         )
 
     return None
@@ -2734,8 +2965,14 @@ def _outcome_from_card(card: dict[str, Any]) -> PortalCopilotOutcome:
         reply = f"### Official Secrecy Protection ({citation})\n\n{card.get('error')}"
     elif ctype == "inline_form":
         missing = ", ".join(card.get("missing_fields") or [])
+        field_errors = card.get("field_errors")
+        err_block = ""
+        if isinstance(field_errors, Mapping) and field_errors:
+            err_lines = "\n".join(f"- **{k}**: {v}" for k, v in field_errors.items())
+            err_block = f"**Please correct the following details**:\n{err_lines}\n\n"
         reply = (
             f"### Complete Details for {title}\n\n"
+            f"{err_block}"
             f"Please fill in the form fields directly on the card below"
             f"{f' ({missing})' if missing else ''} and click **{card.get('submit_label', 'Review & Verify Details')}**.\n\n"
             f"You can also [open this screen with the Built-In URA AI Co-Pilot]({portal_url}) so the assistant can guide you or highlight fields directly on the portal."
@@ -2755,7 +2992,10 @@ def _outcome_from_card(card: dict[str, Any]) -> PortalCopilotOutcome:
         )
     elif ctype == "executed_result":
         res = card.get("result") or {}
-        msg = str(res.get("message") or f"Completed {title} verification.")
+        if res.get("ok", True) is False:
+            msg = str(res.get("error") or res.get("message") or f"Could not complete {title} verification.")
+        else:
+            msg = str(res.get("message") or f"Completed {title} verification.")
         reply = (
             f"### {title}\n\n"
             f"{msg}\n\n"
