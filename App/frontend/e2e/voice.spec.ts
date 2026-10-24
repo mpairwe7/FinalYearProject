@@ -319,6 +319,41 @@ test.describe("Voice STT/TTS (mocked)", () => {
     await expect(page.getByRole("button", { name: /Listen in English/ }).last()).toBeEnabled();
   });
 
+  test("Stop while a turn is transcribed drops it, and the mic opens again at once", async ({ page }) => {
+    test.slow();
+    await mockBackend(page);
+    // A recogniser that never answers: the stopped turn must not hold the next one up.
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/v1/asr**", async (route) => {
+      await held;
+      await route.fulfill({ json: { text: "too late", language: "en", error: null } }).catch(() => {});
+    });
+    const sent: string[] = [];
+    page.on("request", (r) => {
+      if (r.url().includes("/api/v1/chat")) sent.push(r.url());
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: "Enter voice mode" }).click();
+    const primary = page.getByTestId("voice-dock-primary");
+    await expect(primary).toHaveAccessibleName("Send now", { timeout: 10_000 });
+    await page.waitForTimeout(1200);
+    await primary.click();
+
+    await expect(page.getByTestId("voice-dock-label")).toHaveText("Got it", { timeout: 10_000 });
+    await primary.click(); // Stop
+    await expect(page.getByTestId("voice-dock-label")).toHaveText("Tap the mic to talk");
+    await primary.click(); // Start talking — while the dropped turn is still in flight
+    await expect(page.getByTestId("voice-dock-label")).toHaveText("Listening", { timeout: 5_000 });
+
+    release();
+    await page.waitForTimeout(500);
+    // The late transcript of the stopped turn is not sent.
+    expect(sent).toEqual([]);
+  });
+
   test("voice mode sends the turn by itself when the speaker pauses, and says it will", async ({ page }) => {
     test.slow(); // a real recording window, then the pause
     await speakThenPause(page);

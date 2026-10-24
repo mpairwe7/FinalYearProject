@@ -1753,6 +1753,10 @@ export default function Page() {
           let heardLanguage: string | null = null;
           try {
             const pcm16 = await rec.stop();
+            // The recording is in hand, so the transition is over. What follows
+            // is transcription, which has its own stage and its own Stop: a
+            // tap after that Stop must not wait on the network to be heard.
+            setIsTransitioning(false);
             if (pcm16.byteLength === 0) {
               setDictationNotice(t('voice.didNotCatch'));
               return;
@@ -1782,9 +1786,7 @@ export default function Page() {
           // is one the app speaks. A code it does not ("unknown", a language
           // the picker does not offer) would be refused by /v1/chat, so the
           // reader's own language stands instead.
-          const heardLocale = LOCALE_OPTIONS.some((option) => option.value === heardLanguage)
-            ? (heardLanguage as string)
-            : locale;
+          const heardLocale = LOCALE_OPTIONS.find((option) => option.value === heardLanguage)?.value ?? locale;
           // Held for one render, so it is sent by the effect that sees the
           // attachments as they are now (see below).
           queuedVoiceTurnRef.current = {
