@@ -421,3 +421,103 @@ def test_redaction_markers_and_standalone_tin_prn_are_voiced_naturally():
     ugx_spoken = clean_text_for_speech("Turnover of UGX  1000123456.", locale="en")
     assert "1 0 0 0 1 2 3 4 5 6" not in ugx_spoken
     assert "1000123456 Uganda shillings" in ugx_spoken
+
+
+@pytest.mark.parametrize("locale", ["en", "lg", "sw", "nyn", "ach"])
+def test_contact_numbers_ussd_emails_po_box_and_subdomain_urls_across_all_5_locales(locale):
+    raw = (
+        "Call +256 (0)323442055 or +256772123456 or 0772123456 or 0800 21 21 21. "
+        "Dial *165# on MTN or *185# on Airtel Money. "
+        "Email help.desk@ura.go.ug or support@nira.go.ug or cloaketech@gmail.com. "
+        "Log in to https://efris.ura.go.ug or https://portal.ura.go.ug or "
+        "confirm the TIN at https://ura.go.ug/en/domestic-taxes/tin-application/search-tin/. "
+        "Send to P.O. Box 7279, Kampala."
+    )
+    spoken = clean_text_for_speech(raw, locale=locale)
+    assert "plus 2 5 6, 0, 3 2 3, 4 4 2, 0 5 5" in spoken
+    assert "plus 2 5 6, 7 7 2, 1 2 3, 4 5 6" in spoken
+    assert "0 7 7 2, 1 2 3, 4 5 6" in spoken
+    assert "0 800, 21, 21, 21" in spoken
+    assert "star 1 6 5 hash on M T N or star 1 8 5 hash" in spoken
+    assert "help dot desk at U R A dot go dot u g" in spoken
+    assert "support at Nira dot go dot u g" in spoken
+    assert "cloaketech at gmail dot com" in spoken
+    assert "Efris dot U R A dot go dot u g" in spoken
+    assert "portal dot U R A dot go dot u g" in spoken
+    assert "confirm the TIN at U R A dot go dot u g." in spoken
+    assert "P O Box 7 2 7 9" in spoken
+    assert "https://" not in spoken
+
+    # Edge cases: hyphenated toll-free, underscore/hyphen/digit email local part,
+    # international .int/.org URLs, and vernacular redundant portal prepositions
+    edge_raw = (
+        "Call 0800-117-000 or 0800-217-000 or (0414) 258 641 or +256 (414) 258 641 or 999 or 112. "
+        "Contact tax_help-24@ura.go.ug or customs+clearance@ura.go.ug or customer_care@kcca.go.ug. "
+        "Open https://ura.go.ug/en/download/?wpdmdl=20305&refresh=abc#top or https://efris.ura.go.ug:8443/login. "
+        "Check https://www.eac.int/customs or comesa.int or wcoomd.org. "
+        "Genda ku mukutu gwa URA ku https://ura.go.ug. "
+        "Tembelea tovuti ya URA katika https://ura.go.ug."
+    )
+    edge_spoken = clean_text_for_speech(edge_raw, locale=locale)
+    assert "0 800, 117, 0 0 0" in edge_spoken
+    assert "0 800, 217, 0 0 0" in edge_spoken
+    assert "0 4 1 4, 2 5 8, 6 4 1" in edge_spoken
+    assert "plus 2 5 6, 4 1 4, 2 5 8, 6 4 1" in edge_spoken
+    assert "9 9 9 or 1 1 2" in edge_spoken
+    assert "tax underscore help dash 2 4 at U R A dot go dot u g" in edge_spoken
+    assert "customs plus clearance at U R A dot go dot u g" in edge_spoken
+    assert "customer underscore care at K C C A dot go dot u g" in edge_spoken
+    assert "wpdmdl" not in edge_spoken and "8443" not in edge_spoken
+    assert "E A C dot int" in edge_spoken
+    assert "Comesa dot int" in edge_spoken
+    assert "wcoomd dot org" in edge_spoken
+    assert "Genda ku mukutu gwa U R A." in edge_spoken
+    assert "Tembelea tovuti ya U R A." in edge_spoken
+
+
+def test_contact_and_url_rules_run_in_linear_time():
+    import time
+
+    from app.speech_normalization import (
+        _GENERAL_EMAIL_RE,
+        _GENERIC_URL_DOMAIN_RE,
+        _GOV_DOMAIN_RE,
+        _GOV_EMAIL_RE,
+        _PO_BOX_RE,
+        _TOLLFREE_PAIRS_RE,
+        _UG_BARE_256_PHONE_RE,
+        _UG_INTL_PHONE_RE,
+        _UG_LOCAL_PHONE_RE,
+        _URA_DOMAIN_RE,
+        _URA_EMAIL_RE,
+        _USSD_CODE_RE,
+    )
+
+    rules = (
+        _USSD_CODE_RE,
+        _URA_EMAIL_RE,
+        _GOV_EMAIL_RE,
+        _GENERAL_EMAIL_RE,
+        _URA_DOMAIN_RE,
+        _GOV_DOMAIN_RE,
+        _GENERIC_URL_DOMAIN_RE,
+        _UG_INTL_PHONE_RE,
+        _UG_BARE_256_PHONE_RE,
+        _UG_LOCAL_PHONE_RE,
+        _TOLLFREE_PAIRS_RE,
+        _PO_BOX_RE,
+    )
+    for text in (
+        "*165*" * 4000,
+        "a.b_c-1@" * 2000,
+        "https://sub.domain." * 1500,
+        "+256 772 " * 2500,
+        "0800-117-" * 2500,
+        "P.O. Box " * 2500,
+    ):
+        start = time.perf_counter()
+        for rule in rules:
+            rule.sub("", text)
+        assert time.perf_counter() - start < 0.3
+
+

@@ -49,8 +49,9 @@ const URA_SPEECH_TERMS: Array<[RegExp, string | ((match: string, ...args: string
   [/\b(?:P-?R-?N|P\.R\.N\.)(?::|\s+is|\s+number|\s+no\.?)?\s*(\d{10,14})\b/gi, (_: string, num: string) => `P R N ${num.split('').join(' ')}`],
   [/\bNIN(?::|\s+is|\s+number|\s+no\.?)?\s*(C[MFR][0-9A-Za-z]{11,13})\b/gi, (_: string, nin: string) => `NIN ${nin.toUpperCase().split('').join(' ')}`],
   [/\b(?:(UGX|USD|Shs)\s+)?(1\d{9}|2\d{11,14})\b/gi, (match: string, currency: string | undefined, num: string) => (currency ? match : num.split('').join(' '))],
-  [/\b0800\s*([12]17)\s*000\b/g, '0 800, $1, 0 0 0'],
-  [/\b0800\s*(\d{3})\s*(\d{3})\b/g, '0 800, $1, $2'],
+  [/\b0800[ \t-]*([12]17)[ \t-]*000\b/g, '0 800, $1, 0 0 0'],
+  [/\b0800[ \t-]*(\d{3})[ \t-]*(\d{3})\b/g, '0 800, $1, $2'],
+  [/\b0800[ \t-]+(\d{2})[ \t-]+(\d{2})[ \t-]+(\d{2})\b/g, '0 800, $1, $2, $3'],
   [/\bE-?F-?R-?I-?S\b/gi, 'Efris'],
   [/\bU\.R\.A\.?|\bU-R-A\b|\bURA\b/gi, 'U R A'],
   [/\bP\.A\.Y\.E\.?|\bP-A-Y-E\b|\bPAYE\b/gi, 'Payee'],
@@ -129,6 +130,7 @@ const URA_SPEECH_TERMS: Array<[RegExp, string | ((match: string, ...args: string
   [/\bTCC\b|\bT\.C\.C\.?|\bT-C-C\b/gi, 'T-C-C'],
   [/\bPRN\b|\bP\.R\.N\.?|\bP-R-N\b/gi, 'P R N'],
   [/\bBRN\b|\bB\.R\.N\.?|\bB-R-N\b/gi, 'B-R-N'],
+  [/\bMTN\b|\bM\.T\.N\.?|\bM-T-N\b/gi, 'M T N'],
   [/\bDT-(\d{3,5})\b/gi, 'D-T $1'],
 ];
 
@@ -137,11 +139,89 @@ const URA_SPEECH_TERMS: Array<[RegExp, string | ((match: string, ...args: string
  * markdown formatting (headings, bold, lists, tables), expands URA tax acronyms
  * for proper phonetic sounding, and paces numbers/steps.
  */
+function formatEmailLocalForSpeech(user: string): string {
+  return user
+    .replace(/\./g, ' dot ')
+    .replace(/_/g, ' underscore ')
+    .replace(/-/g, ' dash ')
+    .replace(/\+/g, ' plus ')
+    .replace(/\d/g, (d) => ` ${d} `)
+    .replace(/[ \t]+/g, ' ')
+    .trim();
+}
+
 export function cleanMarkdownForSpeech(text: string): string {
   if (!text) return '';
   let cleaned = stripCitationMarkers(text);
+  // Convert USSD shortcodes (*165#, *185#) before markdown italic stripping (*...*)
+  cleaned = cleaned.replace(
+    /(?<!\w)\*(\d{3}(?:\*\d{1,4}){0,5})#(?!\w)/g,
+    (_: string, code: string) =>
+      `star ${code
+        .split('*')
+        .map((seg) => seg.split('').join(' '))
+        .join(' star ')} hash`,
+  );
   // Strip links [Title](url) -> Title
   cleaned = cleaned.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
+  // Strip "portal/website at/via https://..." redundant preposition URLs
+  cleaned = cleaned.replace(
+    /\b(portal|website|site|page|platform|mukutu(?:\s+gwa\s+URA)?|tovuti(?:\s+ya\s+URA)?|urubuga(?:\s+rwa\s+URA)?)\s(?:at|via|ku|katika|kwenye|kupitia|aha)\s+(?:https?:\/\/|www\.)[^\s<>"]*[^\s<>".,;:!?)\]]/gi,
+    '$1',
+  );
+  // Normalize email addresses before domain/URL stripping
+  cleaned = cleaned.replace(
+    /\b([A-Za-z0-9._%+-]{1,64})@(?:www\.)?ura\.go\.ug\b/gi,
+    (_: string, user: string) => `${formatEmailLocalForSpeech(user)} at U R A dot go dot u g`,
+  );
+  cleaned = cleaned.replace(
+    /\b([A-Za-z0-9._%+-]{1,64})@(?:www\.)?([A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,4})\.(go|co|or|ac|sc)\.ug\b/gi,
+    (_: string, user: string, host: string, tld: string) =>
+      `${formatEmailLocalForSpeech(user)} at ${host.replace(/\./g, ' dot ')} dot ${tld.toLowerCase()} dot u g`,
+  );
+  cleaned = cleaned.replace(
+    /\b([A-Za-z0-9._%+-]{1,64})@(?:www\.)?([A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){1,4})\b/gi,
+    (_: string, user: string, domain: string) =>
+      `${formatEmailLocalForSpeech(user)} at ${domain.replace(/\./g, ' dot ')}`,
+  );
+  // Normalize Ugandan .go.ug, .co.ug, .or.ug, .ac.ug, .sc.ug domains (including https:// and paths/queries) before acronym expansion
+  cleaned = cleaned.replace(
+    /(?<![A-Za-z0-9@.-])(?:https?:\/\/)?(?:www\.)?([A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,4})\.(go|co|or|ac|sc)\.ug(?:[:/?#][^\s<>"'.,;:!)\]]*)?(?![A-Za-z0-9-]|\.[A-Za-z0-9-])/gi,
+    (_: string, host: string, tld: string) => `${host.replace(/\./g, ' dot ')} dot ${tld.toLowerCase()} dot u g`,
+  );
+  cleaned = cleaned.replace(
+    /(?<![A-Za-z0-9@.-])(?:https?:\/\/|www\.)(?:www\.)?([A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,3})\.(int|org|com|net|edu|gov|africa|ug)(?:[:/?#][^\s<>"'.,;:!)\]]*)?(?![A-Za-z0-9-]|\.[A-Za-z0-9-])/gi,
+    (_: string, host: string, tld: string) => `${host.replace(/\./g, ' dot ')} dot ${tld.toLowerCase()}`,
+  );
+  cleaned = cleaned.replace(
+    /(?<![A-Za-z0-9@.-])([A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,3})\.(int|org)(?:[:/?#][^\s<>"'.,;:!)\]]*)?(?![A-Za-z0-9-]|\.[A-Za-z0-9-])/gi,
+    (_: string, host: string, tld: string) => `${host.replace(/\./g, ' dot ')} dot ${tld.toLowerCase()}`,
+  );
+  cleaned = cleaned.replace(/\b(?:https?:\/\/|www\.)\S+/gi, '');
+  // Normalize Ugandan international (+256), bare-256, and local (07../03../04..) phone numbers and P.O. Box
+  cleaned = cleaned.replace(
+    /(?<!\w)\+256[ \t-]?(?:\(0\)[ \t-]?)?\(?0?([1-9]\d{2})\)?[ \t-]?(\d{3})[ \t-]?(\d{3})\b/g,
+    (m: string, g1: string, g2: string, g3: string) =>
+      `plus 2 5 6, ${m.includes('(0)') ? '0, ' : ''}${g1.split('').join(' ')}, ${g2.split('').join(' ')}, ${g3.split('').join(' ')}`,
+  );
+  cleaned = cleaned.replace(
+    /\b256[ \t-]?(7\d{2})[ \t-]?(\d{3})[ \t-]?(\d{3})\b/g,
+    (_: string, g1: string, g2: string, g3: string) =>
+      `2 5 6, ${g1.split('').join(' ')}, ${g2.split('').join(' ')}, ${g3.split('').join(' ')}`,
+  );
+  cleaned = cleaned.replace(
+    /(?<!\w)\(?(0[2347]\d{2})\)?[ \t-]?(\d{3})[ \t-]?(\d{3})\b/g,
+    (_: string, g1: string, g2: string, g3: string) =>
+      `${g1.split('').join(' ')}, ${g2.split('').join(' ')}, ${g3.split('').join(' ')}`,
+  );
+  cleaned = cleaned.replace(
+    /\bP\.?[ \t]?O\.?[ \t]?Box[ \t]{1,4}(\d{1,6})\b/gi,
+    (_: string, box: string) => `P O Box ${box.split('').join(' ')}`,
+  );
+  cleaned = cleaned.replace(
+    /(?<![\w/-])(?<![0-9][.,])\b(999|112)\b(?![\w/-])(?![.,][0-9])/g,
+    (_: string, em: string) => em.split('').join(' '),
+  );
   // Strip code blocks
   cleaned = cleaned.replace(/```[\s\S]*?```/g, ' ');
   cleaned = cleaned.replace(/`([^`]+)`/g, '$1');
@@ -158,11 +238,6 @@ export function cleanMarkdownForSpeech(text: string): string {
   cleaned = cleaned.replace(/\*([^*]+)\*/g, '$1');
   cleaned = cleaned.replace(/__([^_]+)__/g, '$1');
   cleaned = cleaned.replace(/(^|[^\w])_([^_]+)_(?=[^\w]|$)/g, '$1$2');
-  // Normalize Ugandan .go.ug, .co.ug, and .or.ug domains before acronym expansion
-  cleaned = cleaned.replace(
-    /\b([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*)\.(go|co|or)\.ug\b(?![A-Za-z0-9-]|\.[A-Za-z0-9-])/gi,
-    (_: string, host: string, tld: string) => `${host.replace(/\./g, ' dot ')} dot ${tld.toLowerCase()} dot u g`,
-  );
 
   // URA terms and proper sounding
   for (const [pattern, replacement] of URA_SPEECH_TERMS) {
