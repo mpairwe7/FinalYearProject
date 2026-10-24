@@ -560,6 +560,13 @@
   cursor: not-allowed;
 }
 
+.call-chip-btn:focus-visible,
+.call-text-input:focus-visible,
+.call-text-send:focus-visible {
+  outline: 2px solid var(--cv2-accent, #1d3a70);
+  outline-offset: 2px;
+}
+
 /* --------------------------------------------------------------------- dock */
 
 .call-dock {

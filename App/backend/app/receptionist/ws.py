@@ -517,23 +517,49 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                 await room.end("media_pipeline_unavailable")
                 return
             from ..main import app
+            from .phrases import phrase
+            from .router import announce_language
+            from .serializer import BrowserCallSerializer, SetLanguageFrame
+
             chat_model = getattr(getattr(app, "state", None), "model", None)
+            serializer = BrowserCallSerializer(room=room)
             brain = UraReceptionistBrain(room=room, chat_model=chat_model)
+
+            async def _fallback_push_frame(frame: Any, _direction: Any = None) -> None:
+                out = await serializer.serialize(frame)
+                if isinstance(out, str):
+                    try:
+                        await websocket.send_text(out)
+                    except Exception:
+                        pass
+
+            brain.push_frame = _fallback_push_frame  # type: ignore[method-assign]
             room.brain = brain
             await brain.say_greeting()
 
             while room.state.mode != "ended":
                 message = await websocket.receive()
+                if message.get("type") == "websocket.disconnect":
+                    break
                 if "bytes" in message and message["bytes"]:
                     pass  # Audio frames in fallback mode
                 elif "text" in message and message["text"]:
-                    data = json.loads(message["text"])
+                    data = _control_message(message["text"])
+                    if data is None:
+                        continue
                     mtype = data.get("type")
                     if mtype == "hangup":
                         await room.end("caller_hangup")
                         break
-                    if mtype == "request_officer":
-                        await brain._transfer("caller_requested")
+                    deserialized = await serializer.deserialize(message["text"])
+                    if isinstance(deserialized, SetLanguageFrame):
+                        room.state.locale = deserialized.language
+                        await websocket.send_text(
+                            json.dumps(announce_language(room, deserialized.language, "override", 1.0))
+                        )
+                        await brain._say_and_record(phrase("switched", deserialized.language), kind="notice")
+                    elif deserialized is not None:
+                        await brain.process_frame(deserialized)
 
     except WebSocketDisconnect:
         logger.info("Caller disconnected: %s", call_id)

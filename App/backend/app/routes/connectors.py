@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
+import time
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
@@ -175,6 +177,25 @@ def register_external_connector() -> None:
 
 
 _CONNECTOR_NS_RE = re.compile(r"^[a-z0-9_]{1,64}$")
+_AUTH_RATE_LOCK = threading.Lock()
+_AUTH_RATE_BUCKETS: dict[str, list[float]] = {}
+_AUTH_RATE_WINDOW_S = 60.0
+_AUTH_RATE_MAX_ATTEMPTS = 25
+
+
+def _check_connector_auth_rate_limit(owner_key: str) -> None:
+    now = time.monotonic()
+    cutoff = now - _AUTH_RATE_WINDOW_S
+    with _AUTH_RATE_LOCK:
+        bucket = [ts for ts in _AUTH_RATE_BUCKETS.get(owner_key, []) if ts >= cutoff]
+        if len(bucket) >= _AUTH_RATE_MAX_ATTEMPTS:
+            _AUTH_RATE_BUCKETS[owner_key] = bucket
+            raise HTTPException(
+                status_code=429,
+                detail="Too many authentication attempts. Please wait a minute and try again.",
+            )
+        bucket.append(now)
+        _AUTH_RATE_BUCKETS[owner_key] = bucket
 
 
 @router.post("/v1/connectors/{name}/auth")
@@ -218,6 +239,8 @@ def authenticate_connector_account(
     )
 
     action = str(payload.get("action") or "login").strip().lower()
+    if action in ("login", "signup"):
+        _check_connector_auth_rate_limit(owner_key)
     link_all = bool(payload.get("link_all", True))
     try:
         if action == "disconnect":

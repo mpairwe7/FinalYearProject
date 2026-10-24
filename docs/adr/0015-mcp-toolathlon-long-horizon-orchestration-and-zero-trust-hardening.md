@@ -1,9 +1,9 @@
 # ADR-0015: MCP Zero-Trust Context Binding, IETF Idempotency Conflict Detection & ICLR 2026 ToolAthlon Long-Horizon Multi-Server Orchestration
 
-- **Date:** 2026-10-24
+- **Date:** 2026-10-24 (Amended 2026-10-25 — PR #653, PR #655, PR #656, PR #658)
 - **Owner:** URA Capstone Architecture, QA Audit & Security Engineering Team
 - **Builds upon:** [ADR-0003](0003-mcp-tool-integrity-and-2026-statutory-corpus.md), [ADR-0004](0004-mcp-security-threat-model-and-ai-governance-2026.md), and [ADR-0005](0005-mcp-mrtr-transport-hardening-and-csa-aicm-maestro.md)
-- **Technical Story:** Gap G250
+- **Technical Story:** Gaps G250, G251, G252
 
 ## Status
 
@@ -61,3 +61,14 @@ Validated by:
 - `PYTHONPATH=App/backend python3 -m pytest tests/agents/test_mcp_toolathlon_2026_october.py App/backend/tests/test_mcp*.py tests/agents/test_mcp*.py -q`
 - `PYTHONPATH=App/backend python3 -m pytest tests/test_monorepo_architecture_governance.py -q`
 - `python3 governance/compliance_check.py`
+
+## Amendment 1 (2026-10-25 — PR #653, PR #655, PR #656, PR #658; Gaps G251, G252)
+
+1. **Signed-Deploy CI Gate, MCP Security Telemetry & MT-OSC Prompt Injection (`PR #653`, `G233(a)`, `G251`)**:
+   - Gated `dispatch-deploy` and `dispatch-hf-space-roll` on `needs: [build, sign]` in `.github/workflows/ura-chatbot-build-push.yml`, registered threats `T42`–`T45` and mitigations `M-AGT-10`–`M-AGT-12` in `threat-model/threats.yaml`, wired `record_mcp_security_event` across `MCPClient`, and injected `ConversationContext.consolidated_spec` (`<consolidated_turn_spec>`) into the LLM context summary in `service.py`.
+2. **Multi-Unit Rental Calculation, Claim-Verifier Passage Isolation & Fuzzy Guard (`PR #655`, `PR #658`, `G251`)**:
+   - Added `extract_rental_unit_multiplier` (supporting stacked adjectives such as `"4 commercial rental units each paying UGX 1,500,000 per month"`) and `"show me the figures"` calculator continuation in `calculator_router.py`.
+   - Kept `cited_passage_contexts` in `claim_verifier.py` strictly scoped to cited retrieval passages (`all_contradiction_contexts` used only for contradiction checks), stripped `+256` phone prefixes in `entailment.py`, and protected 4-letter English words (`"City"`) from 3-letter acronym shortening (`"cit"`) in `_fuzzy_correct_word` (`query.py`).
+3. **Local Simulation Connector Account Sign-In, Sign-Up & Cross-Simulator DB Provisioning (`PR #656`, `PR #658`, `G252`)**:
+   - Added `App/backend/app/mcp/connector_accounts.py` and `POST /v1/connectors/{name}/auth` (`login`, `signup`, `disconnect`, fail-closed `409 Conflict` in `APP_ENV=production`, and rate-limited at 25 attempts / 60 s per owner via `_check_connector_auth_rate_limit`).
+   - Used `PBKDF2-HMAC-SHA256` (`200,000` iterations, 16-byte salt), persisted `connector_accounts` and `connector_account_links` through the dual-DB seam (`database.py`), provisioned new accounts across `tin_system.db`, `efris_system.db`, `ursb_system.db`, and `dts_system.db`, injected sanitized `<linked_accounts>` / `<linked_account_data>` blocks in `service.py`, and added the 5-locale **Sign in / Create account** modal sub-view in `ChatInput.tsx`.

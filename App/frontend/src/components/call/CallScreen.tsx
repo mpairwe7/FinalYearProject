@@ -142,6 +142,13 @@ export function CallScreen() {
 
   const [showTextInput, setShowTextInput] = useState(false);
   const [typedTurn, setTypedTurn] = useState('');
+  const textInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (showTextInput && status === 'ai') {
+      textInputRef.current?.focus();
+    }
+  }, [showTextInput, status]);
 
   const handleTypedSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -457,8 +464,19 @@ export function CallScreen() {
         )}
 
         {status === 'ai' && showTextInput && (
-          <form className="call-text-form" onSubmit={handleTypedSubmit} data-testid="call-text-form">
+          <form
+            className="call-text-form"
+            onSubmit={handleTypedSubmit}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.stopPropagation();
+                setShowTextInput(false);
+              }
+            }}
+            data-testid="call-text-form"
+          >
             <input
+              ref={textInputRef}
               type="text"
               className="call-text-input"
               maxLength={500}
@@ -529,7 +547,7 @@ export function CallScreen() {
         </footer>
 
         {status !== 'ended' && (
-          <p className="call-hint">
+          <p className="call-hint" role="status" aria-live="polite">
             {isMuted
               ? t('call.mutedHint')
               : status === 'ai' && turnPhase === 'thinking'

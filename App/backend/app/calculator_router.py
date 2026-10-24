@@ -316,7 +316,7 @@ _ALREADY_REGISTERED_RE = re.compile(
 )
 
 _RENTAL_UNIT_COUNT_RE = re.compile(
-    r"(?<!\d)(?<!\d,)\b(?P<count>\d{1,3}(?:,\d{3})+|\d{1,4})\s+(?:rental\s+|commercial\s+|residential\s+)?(?:units?|apartments?|flats?|houses?|rooms?|shops?|tenants?|clients?|properties)\b",
+    r"(?<!\d)(?<!\d,)\b(?P<count>\d{1,3}(?:,\d{3})+|\d{1,4})\s+(?:rental\s+|commercial\s+|residential\s+){0,2}(?:units?|apartments?|flats?|houses?|rooms?|shops?|tenants?|clients?|properties)\b",
     re.IGNORECASE,
 )
 _RENTAL_PER_UNIT_RE = re.compile(

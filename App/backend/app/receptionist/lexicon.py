@@ -190,8 +190,8 @@ class ReceptionistLexicon:
                     max_meta_len = max(len(w_meta), len(t_meta), 1)
                     phonetic_sim = max(0.0, 1.0 - (meta_dist / max_meta_len))
 
-            # Base score: weighted combination of edit distance and phonetics
-            score = 0.5 * edit_sim + 0.5 * phonetic_sim
+            # Base score: weighted combination of edit distance and phonetics (or edit_sim when jellyfish is absent)
+            score = (0.5 * edit_sim + 0.5 * phonetic_sim) if t_meta else edit_sim
 
             # 3. Context multi-word term bonus
             multi_boost = 0.0

@@ -76,7 +76,7 @@ Every HTTP request to a connector server must present a bearer credential. With 
 - In simulation mode (`APP_ENV != "production"`), `GET /v1/connectors?view=chat` marks simulation connectors with `requires_account_link: true`, `connected: bool`, `account: {tin, brn, entity_name, email, category}`, and `demo_accounts`.
 - Before an unlinked simulation connector can be added in the taxpayer composer (`ChatInput.tsx`), clicking the connector opens the **Sign in / Create account** sub-view (`POST /v1/connectors/{name}/auth`).
 - **Sign Up (`action: "signup"`)** hashes the password with `PBKDF2-HMAC-SHA256` (`200,000` iterations, 16-byte random salt), provisions the new individual or company profile across `tin_system.db`, `efris_system.db`, `ursb_system.db`, and `dts_system.db`, and links the account to the caller's owner-scoped session key (`db.conversation_state_key`).
-- **Sign In (`action: "login"`)** authenticates against custom accounts or seeded simulator fixture accounts (`1000000001`, `1000000005`, `1000000008`), and **Disconnect (`action: "disconnect"`)** unlinks the session. In production (`APP_ENV=production`), `POST /v1/connectors/{name}/auth` refuses all requests with `409 Conflict`.
+- **Sign In (`action: "login"`)** authenticates against custom accounts or seeded simulator fixture accounts (`1000000001`, `1000000005`, `1000000008`), and **Disconnect (`action: "disconnect"`)** unlinks the session. `login` and `signup` are rate-limited per owner key (`_check_connector_auth_rate_limit`, 25 attempts per 60 seconds, returning `429 Too Many Requests`), and in production (`APP_ENV=production`) `POST /v1/connectors/{name}/auth` refuses all requests with `409 Conflict`.
 
 ---
 
