@@ -776,11 +776,15 @@ def extract_case_facts(
             is_benefit_span = any(pat.search(same_clause_window) for _, pat in _BENEFIT_PATTERNS)
             is_rental_span = bool(
                 re.search(
-                    r"\b(rentals?|rental\s+(?:income|units?|apartments?|properties|tax)|tenants?|landlords?)\b",
-                    text,
+                    r"\b(rent(?!\s*-\s*free)\b|rentals?|tenants?|landlords?)\b",
+                    ctx_window,
                     re.IGNORECASE,
                 )
-                and not re.search(r"\b(paye|employ\w+|hiring|expat\w*|salar\w+|wages?)\b", text, re.IGNORECASE)
+                and not re.search(
+                    r"\b(paye|employ\w+|hiring|expat\w*|salar\w+|wages?)\b",
+                    same_clause_window,
+                    re.IGNORECASE,
+                )
             )
             has_explicit_salary_kw = bool(_STRONG_SALARY_KW_RE.search(same_clause_window))
             if _TURNOVER_KW_RE.search(ctx_window):

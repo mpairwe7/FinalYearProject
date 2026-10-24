@@ -316,7 +316,7 @@ _ALREADY_REGISTERED_RE = re.compile(
 )
 
 _RENTAL_UNIT_COUNT_RE = re.compile(
-    r"\b(?P<count>\d{1,4})\s+(?:rental\s+|commercial\s+|residential\s+)?(?:units?|apartments?|flats?|houses?|rooms?|shops?|tenants?|clients?|properties)\b",
+    r"(?<!\d)(?<!\d,)\b(?P<count>\d{1,3}(?:,\d{3})+|\d{1,4})\s+(?:rental\s+|commercial\s+|residential\s+)?(?:units?|apartments?|flats?|houses?|rooms?|shops?|tenants?|clients?|properties)\b",
     re.IGNORECASE,
 )
 _RENTAL_PER_UNIT_RE = re.compile(
@@ -333,7 +333,7 @@ def extract_rental_unit_multiplier(text: str) -> int:
     if not m:
         return 1
     try:
-        val = int(m.group("count"))
+        val = int(m.group("count").replace(",", ""))
         return val if 1 <= val <= 5000 else 1
     except ValueError:
         return 1
@@ -354,7 +354,8 @@ _INTENT_RES: list[tuple[str, re.Pattern[str]]] = [
         re.compile(
             r"\b(rent(?:al)?s?\s+(?:income|tax(?:es)?|units?|apartments?|properties)"
             r"|tax(?:es)?\s+(?:due\s+|payable\s+|will\s+i\s+pay\s+)?on\s+(?:a\s+|my\s+)?rent(?:al)?s?"
-            r"|tax(?:es)?\b[\s\S]*\brent(?:al)?s?\b|\brent(?:al)?s?\b[\s\S]*\btax(?:es)?\b"
+            r"|rent(?:al)?s?\b[^?.!]{0,60}\btax(?:es)?\b"
+            r"|\brentals?\s+of\s+\d[\d,]*\s+(?:units?|apartments?|flats?|houses?|rooms?|shops?)"
             r"|kodi\s+ya\s+pango|ushuru\s+wa\s+pango|upangishaji|kupangisha"
             r"|(?:omusolo\s+gw['’])?o?bupangisa|amapangisa|amayumba\s+ag['’]o?bupangisa)\b",
             re.IGNORECASE,
@@ -717,12 +718,14 @@ def continue_calculation(saved: dict[str, Any], message: str) -> dict[str, Any] 
                 not amts
                 and len(text.split()) <= 8
                 and re.search(
-                    r"\b(?:show|give|what\s+are)\b[\s\S]*\b(?:figures?|numbers?|breakdown|calculations?)\b",
+                    r"\b(?:show|give|what\s+are)\b[^?.\n]{0,40}\b(?:figures?|numbers?|breakdown|calculations?)\b",
                     text,
                     re.IGNORECASE,
                 )
             ):
-                pass
+                named_intent = detect_calculator_intent(text)
+                if named_intent is not None and INTENT_TOOLS.get(named_intent) != tool:
+                    return None
             else:
                 return None
         else:

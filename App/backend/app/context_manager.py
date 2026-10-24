@@ -260,11 +260,12 @@ def extract_conversation_entities(turns: list[dict[str, str]]) -> ConversationEn
         # Business and entity names
         found_biz = biz_re.findall(user_msg)
         for biz in found_biz:
-            biz_val = (biz[0] or biz[1] if isinstance(biz, tuple) else biz).strip()
+            biz_val = " ".join((biz[0] or biz[1] if isinstance(biz, tuple) else biz).split())
             biz_val = re.split(
-                r"\s+\b(?:in|at|from|and|with|which|who|where|whose|for|that|operating)\b",
+                r" (?:in|at|from|with|which|who|where|whose|for|that|operating)\b| and (?:i|we|he|she|they|my|our|have|am|are|is)\b",
                 biz_val,
                 maxsplit=1,
+                flags=re.IGNORECASE,
             )[0].strip()
             if biz_val and len(biz_val) > 2 and biz_val not in business_names:
                 business_names.append(biz_val)

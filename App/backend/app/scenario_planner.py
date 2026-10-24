@@ -404,8 +404,9 @@ def _rule_rental(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
         unit_mult = extract_rental_unit_multiplier(question)
         if unit_mult > 1:
             pooled_gross *= unit_mult
-        if _MONTHLY_RE.search(question) and not _ANNUAL_RE.search(question):
-            pooled_gross *= 12
+
+    if _MONTHLY_RE.search(question) and not _ANNUAL_RE.search(question):
+        pooled_gross *= 12
 
     params: dict[str, Any] = {
         "annual_gross_rent": pooled_gross,

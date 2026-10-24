@@ -653,7 +653,7 @@ def test_phase6_rental_multi_unit_calculation_fuzzy_guard_and_cross_passage_clai
     assert _fuzzy_correct_word("City") == "City"
     assert _fuzzy_correct_word("city") == "city"
 
-    # 5. Claim verifier checks all retrieved hits before flagging numeric_contradiction
+    # 5. Claim verifier does not mix stale verified_facts percentages into cited_passage_contexts
     hits = [
         {"text": "Whistleblowing refers to bringing URA's attention to non-compliance."},
         {
@@ -665,10 +665,11 @@ def test_phase6_rental_multi_unit_calculation_fuzzy_guard_and_cross_passage_clai
     ]
     citations = [{"ref": "[1]", "passage": hits[0]["text"]}, {"ref": "[2]", "passage": hits[1]["text"]}]
     report = verify_claims(
-        "Whistleblowers receive a reward of 5% of recovered tax up to UGX 100,000,000 [1].",
+        "Whistleblowers receive a reward of 5% of recovered tax up to UGX 100,000,000 [2].",
         citations,
         hits,
         query="how do i whistle blow in ura",
+        verified_facts="## Verified Statutory Facts\n- PAYE marginal rate: 30% on UGX 1,000,000",
     )
     assert report["contradicted_claims"] == []
 
