@@ -633,6 +633,10 @@ def test_phase6_rental_multi_unit_calculation_fuzzy_guard_and_cross_passage_clai
     assert plan.tool == "calculate_rental_tax"
     assert plan.params["annual_gross_rent"] == 120_000_000.0
     assert any("10 units" in a for a in plan.assumptions)
+    plan_comm = plan_calculation(
+        "I own 4 commercial rental units each paying UGX 1,500,000 per month as an individual. What is my rental tax?"
+    )
+    assert plan_comm is not None and plan_comm.params["annual_gross_rent"] == 72_000_000.0
 
     # 2. "show me the figures" follow-up replays the remembered calculation
     saved = {
