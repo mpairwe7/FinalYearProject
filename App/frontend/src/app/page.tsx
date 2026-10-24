@@ -40,6 +40,7 @@ import {
   connectorsUsedFromTrace,
   parseConnectorNotices,
   type ChatConnector,
+  type ConnectorAuthPayload,
   type ConnectorNotice,
   type ConnectorUse,
 } from '../lib/connectors';
@@ -1161,6 +1162,31 @@ export default function Page() {
     }
   }, [setSelectedConnectorNamespaces]);
 
+  const authenticateChatConnector = useCallback(async (namespace: string, payload: ConnectorAuthPayload) => {
+    const response = await fetch(`${API_URL}/v1/connectors/${encodeURIComponent(namespace)}/auth`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders({ 'X-Session-ID': getChatSessionId() }),
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = typeof data?.detail === 'string' ? data.detail : 'Failed to authenticate simulation account.';
+      throw new Error(detail);
+    }
+    await loadChatConnectors();
+    const current = useChatStore.getState().selectedConnectorNamespaces;
+    if (payload.action === 'disconnect') {
+      if (current.includes(namespace)) {
+        setSelectedConnectorNamespaces(current.filter((item) => item !== namespace));
+      }
+    } else if (!current.includes(namespace) && current.length < MAX_SELECTED_CONNECTORS) {
+      setSelectedConnectorNamespaces([...current, namespace]);
+    }
+  }, [loadChatConnectors, setSelectedConnectorNamespaces]);
+
   /**
    * What the server said about the selected services on this turn: which were
    * left out (and why) and which answered. A service this account can no longer
@@ -2256,6 +2282,7 @@ export default function Page() {
     selectedConnectorNamespaces,
     onOpenConnectors: loadChatConnectors,
     onToggleConnector: toggleChatConnector,
+    onAuthenticateConnector: authenticateChatConnector,
     onAttachFiles: attachFiles,
     onRemoveAttachment: removeAttachment,
     onInspectAttachment: (att: PendingAttachment) =>

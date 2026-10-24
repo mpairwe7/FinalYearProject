@@ -337,6 +337,87 @@ describe("ChatInput attachments", () => {
       expect(within(chips).getByTitle("This service is not responding right now.")).toHaveTextContent("Unavailable");
       expect(chips.querySelector(".composer-connector-chip")).toHaveClass("is-unavailable");
     });
+
+    it("requires sign-in or sign-up before connecting an unlinked simulation service when onAuthenticateConnector is provided", async () => {
+      const onAuthenticateConnector = vi.fn().mockResolvedValue(undefined);
+      const onToggleConnector = vi.fn();
+      const unlinkedEfris = {
+        ...efris,
+        requires_account_link: true,
+        connected: false,
+        account: null,
+        demo_accounts: [
+          {
+            tin: "1000000005",
+            brn: "URSB-CO-10005",
+            entity_name: "Kampala City Supermarket Ltd",
+            email: "grace@kampalacitysupermarket.ug",
+            category: "COMPANY",
+          },
+        ],
+      };
+
+      const dialog = await open({
+        chatConnectors: [unlinkedEfris],
+        onAuthenticateConnector,
+        onToggleConnector,
+      });
+
+      expect(within(dialog).getByText("Sign in to connect")).toBeInTheDocument();
+      await userEvent.click(within(dialog).getByRole("button", { name: /EFRIS/ }));
+      expect(onToggleConnector).not.toHaveBeenCalled();
+
+      // Opens the Sign-In / Create Account sub-view
+      const authPanel = within(dialog).getByTestId("connector-auth-panel");
+      expect(authPanel).toBeInTheDocument();
+
+      // Clicking a demo preset fills the identifier & password
+      await userEvent.click(within(authPanel).getByRole("button", { name: /Kampala City Supermarket Ltd/ }));
+      expect(within(authPanel).getByTestId("connector-auth-identifier")).toHaveValue("1000000005");
+
+      await userEvent.click(within(authPanel).getByTestId("connector-auth-submit"));
+      expect(onAuthenticateConnector).toHaveBeenCalledWith("efris", {
+        action: "login",
+        identifier: "1000000005",
+        password: "demo1234", // pragma: allowlist secret
+        link_all: true,
+      });
+    });
+
+    it("supports creating a new simulation account in the Create account tab", async () => {
+      const onAuthenticateConnector = vi.fn().mockResolvedValue(undefined);
+      const unlinkedEfris = {
+        ...efris,
+        requires_account_link: true,
+        connected: false,
+        account: null,
+      };
+
+      const dialog = await open({
+        chatConnectors: [unlinkedEfris],
+        onAuthenticateConnector,
+      });
+
+      await userEvent.click(within(dialog).getByRole("button", { name: /EFRIS/ }));
+      const authPanel = within(dialog).getByTestId("connector-auth-panel");
+
+      await userEvent.click(within(authPanel).getByRole("tab", { name: "Create account" }));
+      await userEvent.type(within(authPanel).getByTestId("connector-signup-name"), "Nile Valley Logistics Ltd");
+      await userEvent.type(within(authPanel).getByTestId("connector-signup-email"), "finance@nilevalley.ug");
+      await userEvent.type(within(authPanel).getByTestId("connector-signup-password"), "secret123");
+
+      await userEvent.click(within(authPanel).getByTestId("connector-auth-submit"));
+      expect(onAuthenticateConnector).toHaveBeenCalledWith("efris", {
+        action: "signup",
+        entity_name: "Nile Valley Logistics Ltd",
+        email: "finance@nilevalley.ug",
+        password: "secret123", // pragma: allowlist secret
+        category: "COMPANY",
+        tin: "",
+        district: "Kampala",
+        link_all: true,
+      });
+    });
   });
 
   it("shows an attached image as itself on its chip", () => {

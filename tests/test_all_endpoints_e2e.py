@@ -205,6 +205,7 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("POST", "/v1/connectors/register"),
     ("POST", "/v1/connectors/{name}/test"),
     ("POST", "/v1/connectors/{name}/configure"),
+    ("POST", "/v1/connectors/{name}/auth"),
     # --- Receptionist (simulated phone calls) ---
     ("GET", "/v1/admin/calls"),
     ("GET", "/v1/admin/calls/metrics"),
@@ -343,6 +344,7 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("POST", "/v1/connectors/register"): "this:test_connectors_endpoints",
     ("POST", "/v1/connectors/{name}/test"): "this:test_connectors_endpoints",
     ("POST", "/v1/connectors/{name}/configure"): "this:test_connectors_endpoints",
+    ("POST", "/v1/connectors/{name}/auth"): "this:test_connectors_endpoints",
     ("GET", "/v1/admin/calls"): "App.backend.tests.test_receptionist_ws",
     ("GET", "/v1/admin/calls/metrics"): "App.backend.tests.test_receptionist_ws",
     ("GET", "/v1/admin/calls/{call_id}"): "App.backend.tests.test_receptionist_ws",
@@ -513,7 +515,7 @@ def test_manifest_endpoint_count():
     """Lock the surface size so additions are deliberate (124 HTTP + 7 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 124, f"expected 124 HTTP endpoints, found {len(http)}"
+    assert len(http) == 125, f"expected 125 HTTP endpoints, found {len(http)}"
     assert len(ws) == 7, f"expected 7 WS endpoints, found {len(ws)}"
 
 
@@ -925,6 +927,14 @@ def test_connectors_endpoints():
     assert diag["ok"] is True
     assert set(diag) >= {"enabled", "environment", "protocol_version", "servers", "refused_bindings"}
     assert "://" not in json.dumps(diag)  # no server address reaches the console
+
+    r8 = c.post(
+        "/v1/connectors/efris/auth",
+        json={"action": "login", "identifier": "1000000001", "password": "demo-password"},  # pragma: allowlist secret
+        headers={"X-Session-ID": "e2e-conn-sess-1"},
+    )
+    assert r8.status_code == 200
+    assert r8.json().get("connected") is True
 
 
 def test_outbox_live_endpoints() -> None:

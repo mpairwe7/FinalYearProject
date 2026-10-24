@@ -34,15 +34,28 @@ def list_system_connectors(request: Request, response: Response) -> dict[str, An
     response.headers["Cache-Control"] = "private, no-store"
     if request.query_params.get("view") == "chat":
         response.headers["Vary"] = "Authorization"
+        from .. import database as db
         from ..auth.dependencies import optional_user
         from ..mcp import get_client
         from ..mcp.chat_connectors import chat_connector_catalog
 
         ctx = optional_user(request, request.headers.get("Authorization"))
+        sess_id = (request.headers.get("X-Session-ID") or "").strip()
+        is_authed = bool(getattr(ctx, "authenticated", False))
+        owner_key = (
+            db.conversation_state_key(
+                sess_id or None,
+                user_id=getattr(ctx, "user_id", None) if is_authed else None,
+                tenant_id=getattr(ctx, "tenant_id", "default") or "default",
+            )
+            if (sess_id or is_authed)
+            else ""
+        )
         return chat_connector_catalog(
             get_client(),
             user_role=ctx.role,
             granted_purposes=ctx.user.granted_purposes if ctx.user else [],
+            owner_key=owner_key,
         )
 
     get_admin_access(request)
@@ -159,3 +172,102 @@ def register_external_connector() -> None:
         status_code=410,
         detail="Dynamic connector registration is disabled. Configure a reviewed server through deployment settings.",
     )
+
+
+_CONNECTOR_NS_RE = re.compile(r"^[a-z0-9_]{1,64}$")
+
+
+@router.post("/v1/connectors/{name}/auth")
+def authenticate_connector_account(
+    name: str,
+    request: Request,
+    response: Response,
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    """Sign in, sign up, or disconnect a local simulation account for a chat connector."""
+    response.headers["Cache-Control"] = "private, no-store"
+    if os.getenv("APP_ENV", "development").lower() == "production":
+        raise HTTPException(
+            status_code=409,
+            detail="Local simulator account authentication is disabled in production.",
+        )
+    if not _CONNECTOR_NS_RE.fullmatch(name):
+        raise HTTPException(status_code=422, detail="Invalid connector namespace.")
+
+    from .. import database as db
+    from ..auth.dependencies import optional_user
+    from ..mcp.connector_accounts import (
+        disconnect_connector_account,
+        get_all_linked_accounts,
+        login_connector_account,
+        signup_connector_account,
+    )
+
+    ctx = optional_user(request, request.headers.get("Authorization"))
+    sess_id = (request.headers.get("X-Session-ID") or "").strip()
+    is_authed = bool(getattr(ctx, "authenticated", False))
+    if not sess_id and not is_authed:
+        raise HTTPException(
+            status_code=400,
+            detail="Session or user identity is required to link a connector account.",
+        )
+    owner_key = db.conversation_state_key(
+        sess_id or None,
+        user_id=getattr(ctx, "user_id", None) if is_authed else None,
+        tenant_id=getattr(ctx, "tenant_id", "default") or "default",
+    )
+
+    action = str(payload.get("action") or "login").strip().lower()
+    link_all = bool(payload.get("link_all", True))
+    try:
+        if action == "disconnect":
+            disconnect_connector_account(owner_key, name)
+            return {
+                "ok": True,
+                "namespace": name,
+                "connected": False,
+                "account": None,
+                "linked_accounts": get_all_linked_accounts(owner_key),
+            }
+        if action == "signup":
+            acc = signup_connector_account(
+                owner_key=owner_key,
+                namespace=name,
+                entity_name=str(payload.get("entity_name") or ""),
+                email=str(payload.get("email") or ""),
+                password=str(payload.get("password") or ""),
+                category=str(payload.get("category") or "INDIVIDUAL"),
+                tin=str(payload.get("tin") or ""),
+                brn=str(payload.get("brn") or ""),
+                nin_or_passport=str(payload.get("nin_or_passport") or ""),
+                mobile=str(payload.get("mobile") or ""),
+                district=str(payload.get("district") or "Kampala"),
+                link_all=link_all,
+            )
+            return {
+                "ok": True,
+                "namespace": name,
+                "connected": True,
+                "account": acc,
+                "linked_accounts": get_all_linked_accounts(owner_key),
+            }
+        if action == "login":
+            acc = login_connector_account(
+                owner_key=owner_key,
+                namespace=name,
+                identifier=str(payload.get("identifier") or ""),
+                password=str(payload.get("password") or ""),
+                link_all=link_all,
+            )
+            return {
+                "ok": True,
+                "namespace": name,
+                "connected": True,
+                "account": acc,
+                "linked_accounts": get_all_linked_accounts(owner_key),
+            }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    raise HTTPException(status_code=422, detail="action must be 'login', 'signup', or 'disconnect'.")
+

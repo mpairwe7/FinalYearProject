@@ -5,6 +5,42 @@ export interface ChatConnectorOperation {
   description: string;
 }
 
+/** Linked local simulation account for a connector. */
+export interface ConnectorLinkedAccount {
+  account_id?: string;
+  tin: string;
+  brn?: string;
+  entity_name: string;
+  email?: string;
+  category?: 'INDIVIDUAL' | 'COMPANY' | string;
+  connected_at?: number;
+}
+
+/** Pre-seeded demo simulation account preset for quick testing. */
+export interface ConnectorDemoPreset {
+  tin: string;
+  brn: string;
+  entity_name: string;
+  email: string;
+  category: string;
+  district?: string;
+  hint?: string;
+}
+
+/** Payload sent to POST /api/v1/connectors/{namespace}/auth. */
+export interface ConnectorAuthPayload {
+  action: 'login' | 'signup' | 'disconnect';
+  identifier?: string;
+  password?: string;
+  entity_name?: string;
+  email?: string;
+  category?: 'INDIVIDUAL' | 'COMPANY';
+  tin?: string;
+  brn?: string;
+  district?: string;
+  link_all?: boolean;
+}
+
 /** Browser-safe discovery shape for reviewed, deployment-configured MCP services. */
 export interface ChatConnector {
   namespace: string;
@@ -26,6 +62,14 @@ export interface ChatConnector {
   operations?: ChatConnectorOperation[];
   /** Which server software answered. Sent to staff roles only. */
   server?: { name?: string; version?: string };
+  /** Whether adding this simulation service requires signing in or creating a local simulation profile. */
+  requires_account_link?: boolean;
+  /** Whether the current session has an authenticated simulation account linked. */
+  connected?: boolean;
+  /** The linked simulation account profile, if connected. */
+  account?: ConnectorLinkedAccount | null;
+  /** Quick-fill demo presets for local simulation testing. */
+  demo_accounts?: ConnectorDemoPreset[];
 }
 
 /** How a lookup in a service ended, as the server classified it. */
