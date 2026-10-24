@@ -451,17 +451,23 @@ def test_contact_numbers_ussd_emails_po_box_and_subdomain_urls_across_all_5_loca
     # Edge cases: hyphenated toll-free, underscore/hyphen/digit email local part,
     # international .int/.org URLs, and vernacular redundant portal prepositions
     edge_raw = (
-        "Call 0800-117-000 or 0800-217-000. "
-        "Contact tax_help-24@ura.go.ug or customer_care@kcca.go.ug. "
-        "Check https://www.eac.int/customs or https://comesa.int or https://wcoomd.org. "
+        "Call 0800-117-000 or 0800-217-000 or (0414) 258 641 or +256 (414) 258 641 or 999 or 112. "
+        "Contact tax_help-24@ura.go.ug or customs+clearance@ura.go.ug or customer_care@kcca.go.ug. "
+        "Open https://ura.go.ug/en/download/?wpdmdl=20305&refresh=abc#top or https://efris.ura.go.ug:8443/login. "
+        "Check https://www.eac.int/customs or comesa.int or wcoomd.org. "
         "Genda ku mukutu gwa URA ku https://ura.go.ug. "
         "Tembelea tovuti ya URA katika https://ura.go.ug."
     )
     edge_spoken = clean_text_for_speech(edge_raw, locale=locale)
     assert "0 800, 117, 0 0 0" in edge_spoken
     assert "0 800, 217, 0 0 0" in edge_spoken
+    assert "0 4 1 4, 2 5 8, 6 4 1" in edge_spoken
+    assert "plus 2 5 6, 4 1 4, 2 5 8, 6 4 1" in edge_spoken
+    assert "9 9 9 or 1 1 2" in edge_spoken
     assert "tax underscore help dash 2 4 at U R A dot go dot u g" in edge_spoken
+    assert "customs plus clearance at U R A dot go dot u g" in edge_spoken
     assert "customer underscore care at K C C A dot go dot u g" in edge_spoken
+    assert "wpdmdl" not in edge_spoken and "8443" not in edge_spoken
     assert "E A C dot int" in edge_spoken
     assert "Comesa dot int" in edge_spoken
     assert "wcoomd dot org" in edge_spoken

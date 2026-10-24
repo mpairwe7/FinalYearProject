@@ -47,7 +47,7 @@ _URA_EMAIL_RE = re.compile(
     r"\b([A-Za-z0-9._%+-]{1,64})@(?:www\.)?ura\.go\.ug\b", re.IGNORECASE
 )
 _URA_DOMAIN_RE = re.compile(
-    r"(?<![A-Za-z0-9@.-])(?:https?://)?(?:www\.)?ura\.go\.ug(?:/[^\s.,;:!?)\]]*)?",
+    r"(?<![A-Za-z0-9@.-])(?:https?://)?(?:www\.)?ura\.go\.ug(?:[:/?#][^\s<>\"'.,;:!)\]]*)?",
     re.IGNORECASE,
 )
 _GOV_EMAIL_RE = re.compile(
@@ -59,22 +59,29 @@ _GENERAL_EMAIL_RE = re.compile(
     re.IGNORECASE,
 )
 _GOV_DOMAIN_RE = re.compile(
-    r"(?<![A-Za-z0-9@.-])(?:https?://)?(?:www\.)?([A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,4})\.(go|co|or|ac|sc)\.ug(?:/[^\s.,;:!?)\]]*)?(?![A-Za-z0-9-]|\.[A-Za-z0-9-])",
+    r"(?<![A-Za-z0-9@.-])(?:https?://)?(?:www\.)?([A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,4})\.(go|co|or|ac|sc)\.ug(?:[:/?#][^\s<>\"'.,;:!)\]]*)?(?![A-Za-z0-9-]|\.[A-Za-z0-9-])",
     re.IGNORECASE,
 )
 _GENERIC_URL_DOMAIN_RE = re.compile(
-    r"(?<![A-Za-z0-9@.-])(?:https?://|www\.)(?:www\.)?([A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,3})\.(int|org|com|net|edu|gov|africa|ug)(?:/[^\s.,;:!?)\]]*)?(?![A-Za-z0-9-]|\.[A-Za-z0-9-])",
+    r"(?<![A-Za-z0-9@.-])(?:https?://|www\.)(?:www\.)?([A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,3})\.(int|org|com|net|edu|gov|africa|ug)(?:[:/?#][^\s<>\"'.,;:!)\]]*)?(?![A-Za-z0-9-]|\.[A-Za-z0-9-])",
+    re.IGNORECASE,
+)
+_BARE_INTL_DOMAIN_RE = re.compile(
+    r"(?<![A-Za-z0-9@.-])([A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,3})\.(int|org)(?:[:/?#][^\s<>\"'.,;:!)\]]*)?(?![A-Za-z0-9-]|\.[A-Za-z0-9-])",
     re.IGNORECASE,
 )
 _USSD_CODE_RE = re.compile(r"(?<!\w)\*(\d{3}(?:\*\d{1,4}){0,5})#(?!\w)")
 _UG_INTL_PHONE_RE = re.compile(
-    r"(?<!\w)\+256[ \t-]?(?:\(0\)[ \t-]?)?([1-9]\d{2})[ \t-]?(\d{3})[ \t-]?(\d{3})\b"
+    r"(?<!\w)\+256[ \t-]?(?:\(0\)[ \t-]?)?\(?0?([1-9]\d{2})\)?[ \t-]?(\d{3})[ \t-]?(\d{3})\b"
 )
 _UG_BARE_256_PHONE_RE = re.compile(
     r"\b256[ \t-]?(7\d{2})[ \t-]?(\d{3})[ \t-]?(\d{3})\b"
 )
 _UG_LOCAL_PHONE_RE = re.compile(
-    r"\b(0[2347]\d{2})[ \t-]?(\d{3})[ \t-]?(\d{3})\b"
+    r"(?<!\w)\(?(0[2347]\d{2})\)?[ \t-]?(\d{3})[ \t-]?(\d{3})\b"
+)
+_EMERGENCY_SHORTCODE_RE = re.compile(
+    r"(?<![\w/-])(?<![0-9][.,])\b(999|112)\b(?![\w/-])(?![.,][0-9])"
 )
 _PO_BOX_RE = re.compile(
     r"\bP\.?[ \t]?O\.?[ \t]?Box[ \t]{1,4}(\d{1,6})\b", re.IGNORECASE
@@ -490,8 +497,13 @@ def _drop_echo(match: re.Match[str]) -> str:
 
 
 def _format_email_local(user: str) -> str:
-    """Format an email local part so dots, underscores, hyphens, and digits are spoken naturally."""
-    out = user.replace(".", " dot ").replace("_", " underscore ").replace("-", " dash ")
+    """Format an email local part so dots, underscores, hyphens, pluses, and digits are spoken naturally."""
+    out = (
+        user.replace(".", " dot ")
+        .replace("_", " underscore ")
+        .replace("-", " dash ")
+        .replace("+", " plus ")
+    )
     out = re.sub(r"\d", lambda d: f" {d.group(0)} ", out)
     return re.sub(r"[ \t]+", " ", out).strip()
 
@@ -546,6 +558,10 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
         t,
     )
     t = _GENERIC_URL_DOMAIN_RE.sub(
+        lambda m: f"{m.group(1).replace('.', ' dot ')} dot {m.group(2).lower()}",
+        t,
+    )
+    t = _BARE_INTL_DOMAIN_RE.sub(
         lambda m: f"{m.group(1).replace('.', ' dot ')} dot {m.group(2).lower()}",
         t,
     )
@@ -618,6 +634,7 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
         t,
     )
     t = _PO_BOX_RE.sub(lambda m: f"P O Box {' '.join(m.group(1))}", t)
+    t = _EMERGENCY_SHORTCODE_RE.sub(lambda m: " ".join(m.group(1)), t)
 
     # 7c1. Normalize standalone 10-digit TINs and 12-15 digit PRNs so they are never spoken as "one billion..."
     def _standalone_tin_or_prn_sub(m: re.Match) -> str:
