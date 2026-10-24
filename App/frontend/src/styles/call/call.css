@@ -479,6 +479,87 @@
   outline-offset: 2px;
 }
 
+.call-controls-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.375rem 1rem;
+  border-top: 1px solid var(--border-0, #e6e6e6);
+}
+
+.call-chip-btn {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-1, #d2d2d2);
+  background: var(--surface-1, #f7f7f7);
+  color: var(--text-1, #3f3f3f);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.call-chip-btn:hover {
+  background: var(--surface-2, #f0f0f0);
+}
+
+.call-chip-btn.is-active,
+.call-chip-btn--primary {
+  border-color: var(--cv2-accent, #1d3a70);
+  background: var(--cv2-accent, #1d3a70);
+  color: #ffffff;
+}
+
+.call-chip-btn--interrupt {
+  border-color: var(--danger, #b42318);
+  background: var(--cv2-danger-soft, #fee4e2);
+  color: var(--danger, #b42318);
+}
+
+.call-text-form {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 1.25rem;
+}
+
+.call-text-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0.375rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-1, #d2d2d2);
+  background: var(--bg-0, #ffffff);
+  color: var(--text-0, #0d0d0d);
+  font: inherit;
+  font-size: 0.8125rem;
+}
+
+.call-text-send {
+  min-height: 34px;
+  padding: 0.375rem 0.875rem;
+  border-radius: 999px;
+  border: none;
+  background: var(--cv2-accent, #1d3a70);
+  color: #ffffff;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.call-text-send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* --------------------------------------------------------------------- dock */
 
 .call-dock {

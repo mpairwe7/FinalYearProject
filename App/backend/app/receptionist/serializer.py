@@ -86,6 +86,32 @@ class SetLanguageFrame(Frame):
     language: str = "en"
 
 
+_ALLOWED_CALL_CONTROLS: frozenset[str] = frozenset(
+    {
+        "repeat",
+        "slower",
+        "normal_speed",
+        "more_detail",
+        "accept_offer",
+        "decline_offer",
+    }
+)
+
+
+@dataclass
+class CallControlFrame(Frame):
+    """The caller triggered an on-screen call control (repeat, slower, normal_speed, more_detail, accept_offer, decline_offer)."""
+
+    action: str = ""
+
+
+@dataclass
+class CallTextTurnFrame(Frame):
+    """The caller typed a question or identifier (TIN/PRN/NIN) during the call."""
+
+    text: str = ""
+
+
 class BrowserCallSerializer(FrameSerializer):
     """Serializes frames to/from the taxpayer browser WebSocket connection."""
 
@@ -157,6 +183,18 @@ class BrowserCallSerializer(FrameSerializer):
             if msg_type == "set_language":
                 language = call_language(msg.get("language"))
                 return SetLanguageFrame(language=language) if language else None
+
+            if msg_type == "call_control":
+                action = str(msg.get("action") or "").strip().lower()
+                if action in _ALLOWED_CALL_CONTROLS:
+                    return CallControlFrame(action=action)
+                return None
+
+            if msg_type == "text_turn":
+                text = " ".join(str(msg.get("text") or "").split()).strip()
+                if text and len(text) <= 500:
+                    return CallTextTurnFrame(text=text)
+                return None
 
             if msg_type == "hangup":
                 if self.room and hasattr(self.room, "end"):

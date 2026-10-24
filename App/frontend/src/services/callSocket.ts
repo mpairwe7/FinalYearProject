@@ -128,6 +128,28 @@ export class CallSocket {
     }
   }
 
+  /** Trigger an explicit in-call control action (repeat, slower, normal_speed, more_detail, accept_offer, decline_offer). */
+  sendControl(action: string): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'call_control', action }));
+    }
+  }
+
+  /** Send a typed question or identifier (TIN, PRN, NIN) during an active voice call. */
+  sendTextTurn(text: string): void {
+    const trimmed = text.trim();
+    if (trimmed && this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'text_turn', text: trimmed }));
+    }
+  }
+
+  /** Immediately interrupt/stop assistant TTS playback on the call. */
+  interrupt(): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'interrupt' }));
+    }
+  }
+
   hangup(): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'hangup' }));

@@ -423,6 +423,18 @@ export const nyn: Partial<Dictionary> = {
   'call.lang.sw': 'Oruswahiri',
   'call.lang.nyn': 'Orunyankore',
   'call.lang.ach': 'Oruacholi',
+  'call.phaseThinking': 'Nshwijuma ebiragiro bya URA…',
+  'call.phaseSpeaking': 'Omuhwezi naagamba',
+  'call.stopSpeaking': 'emerera okugamba',
+  'call.repeatLast': 'Garukamu',
+  'call.moreDetail': 'Ebindi ebikukiraho',
+  'call.slowerPace': 'Gamba mpora',
+  'call.normalPace': 'Omuvugo gwa buriijo',
+  'call.offerYes': 'Eego',
+  'call.offerNo': 'Ngaaha',
+  'call.typeQuestion': 'Handiika aha simu',
+  'call.typePlaceholder': 'Handiika ekibuuzo, TIN, nari PRN…',
+  'call.sendTyped': 'Sindika',
 
   // Portal Task Execution & Inbuilt Co-Pilot (Phase 42) -------------------
   'portalCopilot.inlineFormBadge': 'Ebirikwetengyesa Okujjuza',

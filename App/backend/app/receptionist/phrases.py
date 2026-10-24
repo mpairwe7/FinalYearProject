@@ -123,6 +123,7 @@ _PHRASES: dict[str, dict[str, str]] = {
         # "Speak slower": the local voices have no speed control, so the call
         # pauses between sentences — say so rather than promise a new speed.
         "slow_ack": "Of course. I'll slow down, with a pause between points. What is your question?",
+        "normal_ack": "Of course. I'll return to my normal speaking pace. What is your question?",
         "offer_declined": "No problem. What else can I help you with?",
         "idle_goodbye": "I haven't heard anything, so I'll end the call now. Thank you for calling URA. Goodbye.",
         # The caller's review of the AI (review.py): asked once, after an answer.
@@ -214,6 +215,7 @@ _PHRASES: dict[str, dict[str, str]] = {
         "officer_closing": "Webale okukuba essimu eri URA. Weeraba.",
         "idle_check": "Okyaliwo? Ndi wano, buuza ekibuuzo kyo bw'oba weetegese.",
         "slow_ack": "Kale. Nja kwogera mpola, nga nnyimiriramu wakati. Ekibuuzo kyo kiri kki?",
+        "normal_ack": "Kale. Nadda ku sipiidi eya bulijjo. Ekibuuzo kyo kiri kki?",
         "offer_declined": "Kale. Kiki ekirala kye nnyinza okukuyambako?",
         "idle_goodbye": "Siwulidde kintu kyonna, kale nkomya essimu kati. Webale okukuba essimu eri URA. Weeraba.",
         "review_ask_end": "Nga tonnagenda, essimu eno ekuyambye?",
@@ -302,6 +304,7 @@ _PHRASES: dict[str, dict[str, str]] = {
         "officer_closing": "Asante kwa kupiga simu URA. Kwaheri.",
         "idle_check": "Bado uko kwenye simu? Niko hapa, uliza swali lako ukiwa tayari.",
         "slow_ack": "Sawa. Nitaongea polepole, nikipumzika kati ya hoja. Una swali gani?",
+        "normal_ack": "Sawa. Nitarudi kwenye kasi ya kawaida ya kuongea. Una swali gani?",
         "offer_declined": "Sawa. Nikusaidie nini kingine?",
         "idle_goodbye": "Sijasikia chochote, kwa hiyo nitakata simu sasa. Asante kwa kupiga simu URA. Kwaheri.",
         "review_ask_end": "Kabla hujaondoka, je, simu hii imekusaidia?",
@@ -390,6 +393,7 @@ _PHRASES: dict[str, dict[str, str]] = {
         "officer_closing": "Webare kuteera esimu ahari URA. Ogumeho.",
         "idle_check": "Okyariho? Ndi aha, buuza ekibuuzo kyawe waaba oyeteekateekire.",
         "slow_ack": "Kare. Niija kugamba mpora, ndikuhuumuraho ahagati y'enshonga. Ekibuuzo kyawe niki?",
+        "normal_ack": "Kare. Niija kugaruka aha muvugo gw'okugamba ogwa buriijo. Ekibuuzo kyawe niki?",
         "offer_declined": "Kare. Niki ekindi eki ndikubaasa kukuhweraho?",
         "idle_goodbye": "Tihaine eki mpuriire, nahabwekyo niija kukingaho esimu hati. Webare kuteera esimu ahari URA. Ogumeho.",
         "review_ask_end": "Otakaagiire, esimu egi ekuhwereire?",
@@ -478,6 +482,7 @@ _PHRASES: dict[str, dict[str, str]] = {
         "officer_closing": "Apwoyo goyo cim bot URA. Wabineno.",
         "idle_check": "Pud itye? Atye kany, peny lapeny ni ka itye atera.",
         "slow_ack": "Ber. Abiloko mot, kun ayweyo i kin lok. Lapeny ni obedo ngo?",
+        "normal_ack": "Ber. Abidwogo i rwom me lok ma kare ducu. Lapeny ni obedo ngo?",
         "offer_declined": "Ber. Gin ango mukene ma atwero konyi iye?",
         "idle_goodbye": "Pe awinyo gin mo, pi meno abigiko cim kombedi. Apwoyo goyo cim bot URA. Wabineno.",
         "review_ask_end": "Ma peya icit, cim man okonyi?",
