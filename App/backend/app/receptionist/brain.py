@@ -51,6 +51,8 @@ from .transfer import (
 logger = logging.getLogger(__name__)
 
 from .serializer import (
+    CallControlFrame,
+    CallTextTurnFrame,
     Frame,
     InterruptionFrame,
     OutputTransportMessageFrame,
@@ -291,6 +293,15 @@ _SPEED_SLOW_PATTERNS: Final[re.Pattern[str]] = re.compile(
     re.IGNORECASE,
 )
 
+_SPEED_NORMAL_PATTERNS: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:speak\s+(?:normally|faster)|normal\s+(?:speed|pace)|regular\s+(?:speed|pace)|talk\s+faster"
+    r"|yogera\s+bulijjo|sipiidi\s+eya\s+bulijjo"
+    r"|ongea\s+kawaida|kasi\s+ya\s+kawaida"
+    r"|gamba\s+gye|omuvugo\s+gwa\s+buriijo"
+    r"|lok\s+kit\s+ma\s+kare\s+ducu)\b",
+    re.IGNORECASE,
+)
+
 #: A waiting caller asking to be called back instead (G186): "call me back",
 #: "can I get a callback"; Luganda "munkubire / onkubire essimu" ("call me"),
 #: Swahili "nipigie simu", Runyankole "onteerere / munteerere esimu", Acholi
@@ -450,14 +461,30 @@ class UraReceptionistBrain(LLMService):
         self._prefilled = True
         await self._say_and_record(self._pick_filler(), kind="filler", skip_log=True)
 
+    async def _publish_call_state(self, phase: str | None = None) -> None:
+        """Broadcast the active AI turn phase and user-control availability to the caller's screen."""
+        state = self.room.state
+        eff_phase = phase or ("thinking" if self._answering else ("speaking" if self._bot_speaking else "listening"))
+        payload = {
+            "type": "call_state",
+            "phase": eff_phase,
+            "pending_offer": state.pending_offer,
+            "speech_rate_slow": bool(state.speech_rate_slow),
+            "has_more_detail": bool(state.more_detail or getattr(state, "last_more_detail", "")),
+            "has_last_answer": bool(state.last_assistant_answer),
+        }
+        await self.push_frame(OutputTransportMessageFrame(payload), FrameDirection.DOWNSTREAM)
+
     async def process_frame(
         self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
     ) -> None:
         """Process incoming Pipecat frames."""
         if isinstance(frame, BotStartedSpeakingFrame):
             self._bot_speaking = True
+            await self._publish_call_state("speaking")
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._bot_speaking = False
+            await self._publish_call_state("listening")
 
         if isinstance(frame, InterruptionFrame):
             switching = bool((getattr(frame, "metadata", None) or {}).get("language_switch"))
@@ -477,7 +504,9 @@ class UraReceptionistBrain(LLMService):
             # cuts the assistant off can have cut off the question it ended on.
             if self.room.state.pending_offer and self._bot_speaking:
                 self.room.state.offer_interrupted = True
+            self._bot_speaking = False
             await self.push_frame(frame, direction)
+            await self._publish_call_state("listening")
             return
 
         if isinstance(frame, RequestOfficerFrame):
@@ -489,11 +518,58 @@ class UraReceptionistBrain(LLMService):
                 await self._callback_instead()
             return
 
+        if isinstance(frame, CallControlFrame):
+            await self._handle_call_control(frame.action)
+            return
+
+        if isinstance(frame, CallTextTurnFrame):
+            self.room.state.generation_id += 1
+            await self.push_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            caption_data = {
+                "type": "caption",
+                "speaker": "caller",
+                "text": frame.text,
+                "final": True,
+                "turn_id": self.room.state.turn_seq + 1,
+            }
+            await self.push_frame(
+                OutputTransportMessageFrame(caption_data), FrameDirection.DOWNSTREAM
+            )
+            hub.publish_call(self.room.call_id, "caption", caption_data)
+            await self.handle_external_question(frame.text, words=None)
+            return
+
         if isinstance(frame, LLMContextFrame):
             await self._handle_context_frame(frame, direction)
             return
 
         await self.push_frame(frame, direction)
+
+    async def _handle_call_control(self, action: str) -> None:
+        """Execute an explicit on-screen caller control action."""
+        if self.room.state.mode != "ai":
+            return
+        language = self.language
+        if action == "repeat":
+            await self.handle_external_question("repeat that", words=None)
+        elif action == "slower":
+            self.room.state.speech_rate_slow = True
+            await self._publish_call_state()
+            await self._say_and_record(phrase("slow_ack", language), kind="notice")
+        elif action == "normal_speed":
+            self.room.state.speech_rate_slow = False
+            await self._publish_call_state()
+            await self._say_and_record(phrase("normal_ack", language), kind="notice")
+        elif action == "more_detail":
+            more_txt = self.room.state.more_detail or getattr(self.room.state, "last_more_detail", "")
+            if more_txt:
+                self._take_offer()
+                self.room.state.last_more_detail = ""
+                await self._say_more(more_txt)
+        elif action == "accept_offer":
+            await self.handle_external_question("yes", words=None)
+        elif action == "decline_offer":
+            await self.handle_external_question("no", words=None)
 
     async def _handle_context_frame(
         self, frame: LLMContextFrame, direction: FrameDirection
@@ -742,15 +818,15 @@ class UraReceptionistBrain(LLMService):
                     "nyn": "Kare, ka nkigarukemu: ",
                     "ach": "Ber, wek anwo: ",
                 }.get(language, "Sure, let me repeat that: ")
-                await self._say_and_record(f"{prefix}{last_ans}", kind="answer")
                 # A repeat is still the last answer (not "Sure, let me repeat
                 # that: Sure, let me repeat that: …" the next time), and it ends
                 # on the same question, which is open again.
-                self.room.state.last_assistant_answer = last_ans
                 self._offer(offer, reason=offer_reason, more=more, at_risk=offer_at_risk)
                 if offer_at_risk:
                     # Heard now: the at-risk offer has been made, once.
                     self.room.state.risk_offer_made = True
+                await self._say_and_record(f"{prefix}{last_ans}", kind="answer")
+                self.room.state.last_assistant_answer = last_ans
                 return
 
         # 1c. In-Call User Control: Speech Rate Adjustment. The local voices
@@ -758,8 +834,23 @@ class UraReceptionistBrain(LLMService):
         # (UraSpeechTTS, RECEPTIONIST_SLOW_PAUSE_MS), which is what it promises.
         if _is_control_request(_SPEED_SLOW_PATTERNS, user_text):
             self.room.state.speech_rate_slow = True
+            await self._publish_call_state()
             await self._say_and_record(phrase("slow_ack", language), kind="notice")
             return
+
+        if _is_control_request(_SPEED_NORMAL_PATTERNS, user_text):
+            self.room.state.speech_rate_slow = False
+            await self._publish_call_state()
+            await self._say_and_record(phrase("normal_ack", language), kind="notice")
+            return
+
+        # 1c-bis. Persistent "tell me more" / "more detail" even after a repeat or pace turn
+        if not offer and _MORE_ACCEPT_RE.search(user_text):
+            saved_more = getattr(self.room.state, "last_more_detail", "")
+            if saved_more:
+                self.room.state.last_more_detail = ""
+                await self._say_more(saved_more)
+                return
 
         # 1d. In-Call User Control: Voice Hangup / Disconnect. A caller the AI
         # has helped is asked, once, whether the call was helpful first.
@@ -1256,6 +1347,7 @@ class UraReceptionistBrain(LLMService):
     async def _answer_question(self, question: str, mean_word_prob: float | None = None) -> None:
         """Answer *question*; until it has been handed to TTS, caller silence is not idleness."""
         self._answering = True
+        await self._publish_call_state("thinking")
         try:
             await self._generate_and_speak(question, mean_word_prob)
         finally:
@@ -1586,6 +1678,7 @@ class UraReceptionistBrain(LLMService):
         max_sentences = get_max_spoken_sentences()
         rest = sentences[max_sentences:]
         spoken = " ".join(sentences[:max_sentences]) if rest else cleaned_reply
+        self.room.state.last_more_detail = " ".join(rest) if rest else ""
         if offer_officer:
             self._offer("officer", reason="offer_accepted", at_risk=at_risk)
             return f"{spoken} {phrase('officer_offer', self.language)}"
@@ -1675,6 +1768,7 @@ class UraReceptionistBrain(LLMService):
             OutputTransportMessageFrame(caption_data), FrameDirection.DOWNSTREAM
         )
         hub.publish_call(self.room.call_id, "caption", caption_data)
+        await self._publish_call_state("speaking" if speak else "listening")
         if not speak:
             return
 

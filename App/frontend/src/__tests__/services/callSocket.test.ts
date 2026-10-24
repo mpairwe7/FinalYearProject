@@ -75,4 +75,28 @@ describe('CallSocket authentication', () => {
     expect(sent).not.toHaveProperty('chat_session');
     socket.close();
   });
+
+  it('sends in-call control actions, typed text turns, and interrupts over the call socket', () => {
+    vi.stubGlobal('WebSocket', FakeSocket);
+    const socket = new CallSocket({ onAudio: vi.fn(), onMessage: vi.fn(), onError: vi.fn(), onClose: vi.fn() });
+    socket.connect({ locale: 'en', voice_consent_accepted: true });
+    const fake = FakeSocket.find('/calls/stream')!;
+    fake.open();
+
+    socket.sendControl('repeat');
+    expect(JSON.parse(String(fake.sent[fake.sent.length - 1]))).toEqual({
+      type: 'call_control',
+      action: 'repeat',
+    });
+
+    socket.sendTextTurn('  What is my PAYE on UGX 4,000,000?  ');
+    expect(JSON.parse(String(fake.sent[fake.sent.length - 1]))).toEqual({
+      type: 'text_turn',
+      text: 'What is my PAYE on UGX 4,000,000?',
+    });
+
+    socket.interrupt();
+    expect(JSON.parse(String(fake.sent[fake.sent.length - 1]))).toEqual({ type: 'interrupt' });
+    socket.close();
+  });
 });

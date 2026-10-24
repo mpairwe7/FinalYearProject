@@ -17,6 +17,17 @@ export type CallLanguage = 'en' | 'lg' | 'sw' | 'nyn' | 'ach';
 /** How the call came to be in its current language. */
 export type CallLanguageSource = 'default' | 'auto' | 'explicit' | 'override';
 
+/** Current turn lifecycle phase of the AI receptionist. */
+export type CallTurnPhase = 'listening' | 'thinking' | 'speaking';
+
+export type CallControlAction =
+  | 'repeat'
+  | 'slower'
+  | 'normal_speed'
+  | 'more_detail'
+  | 'accept_offer'
+  | 'decline_offer';
+
 export const CALL_LANGUAGES: readonly CallLanguage[] = ['en', 'lg', 'sw', 'nyn', 'ach'];
 
 export function isCallLanguage(value: unknown): value is CallLanguage {
@@ -55,6 +66,11 @@ interface CallStoreState {
   languageSource: CallLanguageSource;
   /** The caller's place in the officers' queue while waiting (server `queue` message). */
   queuePosition: number | null;
+  turnPhase: CallTurnPhase;
+  pendingOffer: string;
+  speechRateSlow: boolean;
+  hasMoreDetail: boolean;
+  hasLastAnswer: boolean;
 
   openCall: () => void;
   closeCall: () => void;
@@ -71,6 +87,13 @@ interface CallStoreState {
   setLanguageOptions: (detection: boolean, languages: CallLanguage[], language: CallLanguage) => void;
   setLanguage: (language: CallLanguage, source: CallLanguageSource) => void;
   setQueuePosition: (position: number | null) => void;
+  setCallRuntimeState: (patch: {
+    turnPhase?: CallTurnPhase;
+    pendingOffer?: string;
+    speechRateSlow?: boolean;
+    hasMoreDetail?: boolean;
+    hasLastAnswer?: boolean;
+  }) => void;
   reset: () => void;
 }
 
@@ -92,6 +115,11 @@ const initialState = {
   language: 'en' as CallLanguage,
   languageSource: 'default' as CallLanguageSource,
   queuePosition: null as number | null,
+  turnPhase: 'listening' as CallTurnPhase,
+  pendingOffer: '',
+  speechRateSlow: false,
+  hasMoreDetail: false,
+  hasLastAnswer: false,
 };
 
 export const useCallStore = create<CallStoreState>((set) => ({
@@ -113,6 +141,11 @@ export const useCallStore = create<CallStoreState>((set) => ({
       language: 'en',
       languageSource: 'default',
       queuePosition: null,
+      turnPhase: 'listening',
+      pendingOffer: '',
+      speechRateSlow: false,
+      hasMoreDetail: false,
+      hasLastAnswer: false,
     }),
   closeCall: () => set({ isOpen: false, status: 'idle' }),
   // A place in the queue only means something while the caller is waiting.
@@ -162,5 +195,13 @@ export const useCallStore = create<CallStoreState>((set) => ({
     set({ languageDetection, languages, language, languageSource: 'default' }),
   setLanguage: (language, languageSource) => set({ language, languageSource }),
   setQueuePosition: (queuePosition) => set({ queuePosition }),
+  setCallRuntimeState: (patch) =>
+    set((state) => ({
+      turnPhase: patch.turnPhase ?? state.turnPhase,
+      pendingOffer: patch.pendingOffer ?? state.pendingOffer,
+      speechRateSlow: patch.speechRateSlow ?? state.speechRateSlow,
+      hasMoreDetail: patch.hasMoreDetail ?? state.hasMoreDetail,
+      hasLastAnswer: patch.hasLastAnswer ?? state.hasLastAnswer,
+    })),
   reset: () => set(initialState),
 }));

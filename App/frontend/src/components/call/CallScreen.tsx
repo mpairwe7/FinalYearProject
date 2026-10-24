@@ -124,13 +124,33 @@ export function CallScreen() {
     requestOfficer,
     requestCallback,
     queuePosition,
+    turnPhase,
+    pendingOffer,
+    speechRateSlow,
+    hasMoreDetail,
+    hasLastAnswer,
     toggleMute,
     languageDetection,
     languages,
     language,
     languageSource,
     setLanguage,
+    sendControl,
+    sendTextTurn,
+    interruptCall,
   } = useCall();
+
+  const [showTextInput, setShowTextInput] = useState(false);
+  const [typedTurn, setTypedTurn] = useState('');
+
+  const handleTypedSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = typedTurn.trim();
+    if (!clean) return;
+    sendTextTurn(clean);
+    setTypedTurn('');
+    setShowTextInput(false);
+  };
 
   const threadRef = useRef<HTMLDivElement | null>(null);
   const threadEndRef = useRef<HTMLDivElement | null>(null);
@@ -362,6 +382,102 @@ export function CallScreen() {
           </button>
         )}
 
+        {status === 'ai' && (
+          <div className="call-controls-strip" role="toolbar" aria-label={t('call.assistantName')}>
+            {turnPhase === 'speaking' && (
+              <button
+                type="button"
+                className="call-chip-btn call-chip-btn--interrupt"
+                onClick={interruptCall}
+                data-testid="call-interrupt-btn"
+              >
+                {t('call.stopSpeaking')}
+              </button>
+            )}
+            {pendingOffer && (
+              <>
+                <button
+                  type="button"
+                  className="call-chip-btn call-chip-btn--primary"
+                  onClick={() => sendControl('accept_offer')}
+                  data-testid="call-offer-yes"
+                >
+                  {t('call.offerYes')}
+                </button>
+                <button
+                  type="button"
+                  className="call-chip-btn"
+                  onClick={() => sendControl('decline_offer')}
+                  data-testid="call-offer-no"
+                >
+                  {t('call.offerNo')}
+                </button>
+              </>
+            )}
+            {hasLastAnswer && (
+              <button
+                type="button"
+                className="call-chip-btn"
+                onClick={() => sendControl('repeat')}
+                data-testid="call-repeat-btn"
+              >
+                {t('call.repeatLast')}
+              </button>
+            )}
+            {hasMoreDetail && pendingOffer !== 'more' && (
+              <button
+                type="button"
+                className="call-chip-btn"
+                onClick={() => sendControl('more_detail')}
+                data-testid="call-more-detail-btn"
+              >
+                {t('call.moreDetail')}
+              </button>
+            )}
+            <button
+              type="button"
+              className={`call-chip-btn${speechRateSlow ? ' is-active' : ''}`}
+              aria-pressed={speechRateSlow}
+              onClick={() => sendControl(speechRateSlow ? 'normal_speed' : 'slower')}
+              data-testid="call-pace-btn"
+            >
+              {speechRateSlow ? t('call.normalPace') : t('call.slowerPace')}
+            </button>
+            <button
+              type="button"
+              className={`call-chip-btn${showTextInput ? ' is-active' : ''}`}
+              aria-expanded={showTextInput}
+              onClick={() => setShowTextInput((prev) => !prev)}
+              data-testid="call-type-toggle-btn"
+            >
+              {t('call.typeQuestion')}
+            </button>
+          </div>
+        )}
+
+        {status === 'ai' && showTextInput && (
+          <form className="call-text-form" onSubmit={handleTypedSubmit} data-testid="call-text-form">
+            <input
+              type="text"
+              className="call-text-input"
+              maxLength={500}
+              value={typedTurn}
+              onChange={(e) => setTypedTurn(e.target.value)}
+              placeholder={t('call.typePlaceholder')}
+              aria-label={t('call.typePlaceholder')}
+              data-testid="call-text-input"
+            />
+            <button
+              type="submit"
+              className="call-text-send"
+              disabled={!typedTurn.trim()}
+              data-testid="call-text-send"
+            >
+              {t('call.sendTyped')}
+            </button>
+          </form>
+        )}
+
         <footer className="call-dock">
           {status !== 'ended' ? (
             <>
@@ -412,7 +528,15 @@ export function CallScreen() {
         </footer>
 
         {status !== 'ended' && (
-          <p className="call-hint">{isMuted ? t('call.mutedHint') : t('call.listeningHint')}</p>
+          <p className="call-hint">
+            {isMuted
+              ? t('call.mutedHint')
+              : status === 'ai' && turnPhase === 'thinking'
+                ? t('call.phaseThinking')
+                : status === 'ai' && turnPhase === 'speaking'
+                  ? t('call.phaseSpeaking')
+                  : t('call.listeningHint')}
+          </p>
         )}
       </div>
     </div>

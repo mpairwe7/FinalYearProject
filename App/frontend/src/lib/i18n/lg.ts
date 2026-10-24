@@ -430,6 +430,18 @@ export const lg: Partial<Dictionary> = {
   'call.lang.sw': 'Kiswahili',
   'call.lang.nyn': 'Runyankole',
   'call.lang.ach': 'Acholi',
+  'call.phaseThinking': 'Nkebera amateeka ga URA…',
+  'call.phaseSpeaking': 'Omuyambi ayogera',
+  'call.stopSpeaking': 'Sirika',
+  'call.repeatLast': 'Kiddemu',
+  'call.moreDetail': 'Ebisingawo',
+  'call.slowerPace': 'Yogera mpola',
+  'call.normalPace': 'Sipiidi ya bulijjo',
+  'call.offerYes': 'Yee',
+  'call.offerNo': 'Nedda',
+  'call.typeQuestion': 'Wandika ku ssimu',
+  'call.typePlaceholder': 'Wandika ekibuuzo, TIN, oba PRN…',
+  'call.sendTyped': 'Sindika',
 
   // Portal Task Execution & Inbuilt Co-Pilot (Phase 42) -------------------
   'portalCopilot.inlineFormBadge': 'By’etaagisa Okujjuza',
