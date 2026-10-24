@@ -49,6 +49,7 @@ DOCUMENT_ENABLE_SPATIAL_OCR=false
 | `auto` | Query Triton/sidecar when `OCR_SERVICE_URL` is configured; fall back gracefully to in-process PP-OCR. |
 | `ppocrv6` / `paddleocr` | In-process PP-OCRv6 engine. |
 | `easyocr` | Embedded lightweight CPU fallback. |
+| `tesseract_cli` | Automatic CLI fallback (`shutil.which("tesseract")`) in `documents._extract_image` when `tesseract-ocr` is installed in `Dockerfile.gpu` and Python OCR bindings are absent. |
 | `disabled` | Disable OCR for strict text-only processing. |
 
 ## Domain-Specific Alphanumeric Extraction

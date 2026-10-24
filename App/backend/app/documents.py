@@ -1551,6 +1551,9 @@ _PORTAL_SCREEN_TERMS = (
     "validation history",
     "detailed vat sales report",
     "detailed vat purchase report",
+    "tcc application rejected",
+    "outstanding tax arrears",
+    "warehousing period expired",
 )
 #: Portal vocabulary that printed documents carry too (receipts, slips, SADs).
 _PORTAL_DOCUMENT_TERMS = ("efris", "asycuda", "payment registration number", "customs entry")
