@@ -45,6 +45,7 @@ export interface ScreenshotCopilotHandoff {
   signin_then_portal_url: string;
   prefill_state?: Record<string, string>;
   user_message?: string;
+  remediation_task_id?: string;
 }
 
 export interface ScreenshotHotspot {

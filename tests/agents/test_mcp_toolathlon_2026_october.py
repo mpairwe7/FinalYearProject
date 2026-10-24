@@ -949,6 +949,7 @@ def test_phase10_screenshot_analysis_error_resolution_and_completion_checklist()
     assert "Stock Management" in sg["what_needs_to_be_done"]
     assert "intent=efris_stock_management" in sg["copilot_handoff"]["inbuilt_portal_url"]
     assert sg["copilot_handoff"]["prefill_state"]["tin"] == "1000010001"
+    assert sg["copilot_handoff"]["prefill_state"]["commodity_code"] == "50202301"
     assert any(item["status"] == "action_needed" and "EFRIS_INSUFFICIENT_STOCK" in item["item"] for item in sg["checklist"])
     assert any(item["status"] == "detected" and "1000010001" in item["detail"] for item in sg["checklist"])
     assert any("Resolve EFRIS_INSUFFICIENT_STOCK" in p for p in sg["recommended_prompts"])
@@ -963,4 +964,55 @@ def test_phase10_screenshot_analysis_error_resolution_and_completion_checklist()
     # 4. NIN validation error screen with a CM/CF/CR NIN is still classified as PORTAL_SCREENSHOT (0.97 > 0.96)
     nin_err_shot = "URA e-Tax Portal: NIN validation failed for CM92010101ABCD — name or date of birth mismatch."
     assert classify_document(nin_err_shot).doc_type == DocumentType.PORTAL_SCREENSHOT
+
+    # 5. Real URA Installment Payment (Sections B–F) & EFRIS First-Time Registration / Reports screenshots
+    #    plus 10/12-digit Ugandan phone numbers (07..., 2567..., +2567...) never misclassified as PRNs
+    from app.portal_copilot import extract_task_entities
+
+    for ph in ("0752427971", "256783354554", "+256783354554"):
+        ph_ents = extract_task_entities(f"Contact Mobile Number: {ph}")
+        assert ph_ents.get("mobile_number") == ph
+        assert "prn" not in ph_ents
+
+    efris_reg_shot = (
+        "Home > Portal > Home Logged in as, CLOAKE TECH LTD\n"
+        "Registration First-time Registration\n"
+        "TIN 1059787194 NIN/BRN /80048538707631 Mobile Number(1) 256783354554\n"
+        "Section B: Purpose of Registration\n"
+        "Registration Effective Date * Registration Type * EFDs E-Invoicing\n"
+        "Section C: Supporting Document"
+    )
+    assert classify_document(efris_reg_shot).doc_type == DocumentType.PORTAL_SCREENSHOT
+    sg_efris = diagnose_portal_screenshot(
+        text=efris_reg_shot,
+        filename="efris_reg.jpeg",
+        fields={"tins": ["1059787194"], "nins": [], "prns": ["256783354554"], "amounts": [], "tax_heads": [], "efris_invoices": []},
+        meta={},
+        doc_type="portal_screenshot",
+        kind="image",
+    )
+    assert sg_efris["portal_key"] == "efris"
+    assert "EFRIS First-Time Registration" in sg_efris["detected_state"]
+    assert sg_efris["copilot_handoff"]["prefill_state"]["tin"] == "1059787194"
+    assert sg_efris["copilot_handoff"]["prefill_state"]["ursb_brn"] == "80048538707631"
+    assert "prn" not in sg_efris["copilot_handoff"]["prefill_state"]
+
+    inst_sec_f = (
+        "Home > Portal > Apply To Tax Payment In Installment Logged in as, CLOAKE TECH LTD\n"
+        "Document to be uploaded* No file chosen Upload\n"
+        "Reason for requesting to pay tax in installment*\n"
+        "Your application for installment payment shall not be processed until further full payment of 0.0 has been made."
+    )
+    sg_inst = diagnose_portal_screenshot(
+        text=inst_sec_f,
+        filename="installment_f.jpeg",
+        fields={"tins": [], "nins": [], "prns": [], "amounts": [], "tax_heads": [], "efris_invoices": []},
+        meta={},
+        doc_type="portal_screenshot",
+        kind="image",
+    )
+    assert sg_inst["portal_key"] == "prn_payments"
+    assert "Section F" in sg_inst["detected_state"]
+    assert "0.0" in sg_inst["what_needs_to_be_done"]
+
 

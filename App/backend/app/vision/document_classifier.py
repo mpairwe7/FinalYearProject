@@ -91,7 +91,15 @@ _PATTERNS: list[tuple[DocumentType, re.Pattern, float]] = [
             r"\befris[-_]?\d{3}\b|\berr_[a-z0-9_]+\b|\bprn_expired\b|"
             r"insufficient\s+stock|negative\s+stock|not\s+enrolled\s+for\s+efris|"
             r"device\s+not\s+initialized|prn\s+(?:has\s+)?expired|return\s+already\s+filed|"
-            r"tcc\s+rejected|nin\s+validation\s+failed|warehousing\s+period\s+expired",
+            r"tcc\s+rejected|nin\s+validation\s+failed|warehousing\s+period\s+expired|"
+            r"apply\s+to\s+tax\s+payment\s+in\s+instal+ment|basis\s+of\s+instal+ment|"
+            r"instal+ment\s+payment\s+towards|liability\s+breakdown|"
+            r"outstanding\s+liability\s+wise\s+breakdown|instal+ment\s+details|"
+            r"generate\s+payment\s+schedule|upload\s+documents?\s+and\s+submit\s+application|"
+            r"reason\s+for\s+requesting\s+to\s+pay\s+tax\s+in\s+instal+ment|"
+            r"first-?time\s+registration|purpose\s+of\s+registration|registration\s+effective\s+date|"
+            r"fiscal\s+document\s+validation|validation\s+history|"
+            r"detailed\s+vat\s+(?:sales|purchase)\s+report|export\s+all\s+records",
             re.I,
         ),
         0.97,
