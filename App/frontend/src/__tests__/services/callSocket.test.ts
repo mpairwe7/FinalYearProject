@@ -89,7 +89,7 @@ describe('CallSocket authentication', () => {
       action: 'repeat',
     });
 
-    socket.sendTextTurn('  What is my PAYE on UGX 4,000,000?  ');
+    expect(socket.sendTextTurn('  What is my PAYE on UGX 4,000,000?  ')).toBe(true);
     expect(JSON.parse(String(fake.sent[fake.sent.length - 1]))).toEqual({
       type: 'text_turn',
       text: 'What is my PAYE on UGX 4,000,000?',
@@ -98,5 +98,6 @@ describe('CallSocket authentication', () => {
     socket.interrupt();
     expect(JSON.parse(String(fake.sent[fake.sent.length - 1]))).toEqual({ type: 'interrupt' });
     socket.close();
+    expect(socket.sendTextTurn('After close')).toBe(false);
   });
 });

@@ -147,9 +147,10 @@ export function CallScreen() {
     e.preventDefault();
     const clean = typedTurn.trim();
     if (!clean) return;
-    sendTextTurn(clean);
-    setTypedTurn('');
-    setShowTextInput(false);
+    if (sendTextTurn(clean)) {
+      setTypedTurn('');
+      setShowTextInput(false);
+    }
   };
 
   const threadRef = useRef<HTMLDivElement | null>(null);

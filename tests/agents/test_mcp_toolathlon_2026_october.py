@@ -789,9 +789,11 @@ def test_phase8_call_receptionist_multiturn_controls_normal_pace_and_text_turn()
         assert state.ai_answers_count == 1
         assert "Sentence four" in state.last_more_detail
 
-        # 2. Slower pace control -> sets speech_rate_slow=True; Normal pace control -> sets speech_rate_slow=False
+        # 2. Slower pace control -> resets idle_prompts and sets speech_rate_slow=True; Normal pace control -> sets speech_rate_slow=False
+        state.idle_prompts = 1
         await brain.process_frame(CallControlFrame(action="slower"))
         assert state.speech_rate_slow is True
+        assert state.idle_prompts == 0
 
         await brain.handle_external_question("speak normally please", words=None)
         assert state.speech_rate_slow is False

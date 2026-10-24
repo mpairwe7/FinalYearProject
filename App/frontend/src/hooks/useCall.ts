@@ -154,11 +154,11 @@ export function useCall() {
     socketRef.current?.sendControl(action);
   }, []);
 
-  const sendTextTurn = useCallback((text: string) => {
+  const sendTextTurn = useCallback((text: string): boolean => {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed) return false;
     playerRef.current?.flush();
-    socketRef.current?.sendTextTurn(trimmed);
+    return socketRef.current?.sendTextTurn(trimmed) ?? false;
   }, []);
 
   const interruptCall = useCallback(() => {

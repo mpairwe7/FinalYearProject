@@ -136,11 +136,13 @@ export class CallSocket {
   }
 
   /** Send a typed question or identifier (TIN, PRN, NIN) during an active voice call. */
-  sendTextTurn(text: string): void {
+  sendTextTurn(text: string): boolean {
     const trimmed = text.trim();
-    if (trimmed && this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type: 'text_turn', text: trimmed }));
+    if (!trimmed || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
     }
+    this.ws.send(JSON.stringify({ type: 'text_turn', text: trimmed }));
+    return true;
   }
 
   /** Immediately interrupt/stop assistant TTS playback on the call. */

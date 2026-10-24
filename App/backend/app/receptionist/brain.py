@@ -485,7 +485,7 @@ class UraReceptionistBrain(LLMService):
             await self._publish_call_state("speaking")
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self._bot_speaking = False
-            await self._publish_call_state("listening")
+            await self._publish_call_state()
 
         if isinstance(frame, InterruptionFrame):
             switching = bool((getattr(frame, "metadata", None) or {}).get("language_switch"))
@@ -556,6 +556,7 @@ class UraReceptionistBrain(LLMService):
         """Execute an explicit on-screen caller control action."""
         if self.room.state.mode != "ai":
             return
+        self.room.state.idle_prompts = 0
         language = self.language
         if action == "repeat":
             await self.handle_external_question("repeat that", words=None)
