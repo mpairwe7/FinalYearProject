@@ -23,7 +23,7 @@
  * turn; the mic's own tones say it opened. Controls are 44 px or more (SC 2.5.8
  * asks for 24). Escape still cancels a recording or stops the reading (G204).
  */
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 import { useNarration } from '../hooks/useNarration';
 import { useTranslation } from '../lib/i18n';
@@ -118,6 +118,18 @@ export default function VoiceModeDock({
   const micOpen = MIC_OPEN.has(phase);
   const reading = READING.has(phase);
 
+  // Between two pieces of a reading there is a moment with no sentence — the
+  // next one is still being voiced — and the hint used to flash up in its
+  // place for a second. The last sentence stays until the next one starts.
+  const [lastSentence, setLastSentence] = useState('');
+  useEffect(() => {
+    if (sentence) setLastSentence(sentence);
+  }, [sentence]);
+  useEffect(() => {
+    if (!reading) setLastSentence('');
+  }, [reading]);
+  const sentenceShown = sentence || lastSentence;
+
   // The button that opened voice mode went with the composer (and the first
   // answer moves the dock from the landing page into the conversation): focus
   // lands on the control that matters now rather than falling back to the
@@ -170,8 +182,8 @@ export default function VoiceModeDock({
         transcribing: t('voiceDock.transcribingHint'),
         thinking: youSaid,
         preparing: youSaid,
-        speaking: sentence || t('voiceDock.speakingHint'),
-        paused: sentence || t('voiceDock.speakingHint'),
+        speaking: sentenceShown || t('voiceDock.speakingHint'),
+        paused: sentenceShown || t('voiceDock.speakingHint'),
         idle: t('voiceDock.idleHint'),
       }[phase];
 

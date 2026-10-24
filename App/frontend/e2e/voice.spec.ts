@@ -400,11 +400,42 @@ test.describe("Voice STT/TTS (mocked)", () => {
     });
     await page.getByRole("button", { name: /Listen in English/ }).last().click();
     await expect(page.getByRole("button", { name: "Stop listening" }).last()).toBeVisible();
+    // Playing, not still loading: a reply that has not started has no sound to
+    // stop, and on a slow device this used to open the mic before it had.
+    await expect(page.getByTestId("narration-bar")).toContainText("Reading the reply aloud");
 
     // Dictate over it: the reply stops at once, rather than being recorded too.
     await page.getByRole("button", { name: "Start speaking" }).click();
     await expect(page.getByRole("button", { name: "Stop and insert text" })).toBeVisible({ timeout: 10_000 });
     expect(await page.evaluate(() => (window as unknown as { __stopped?: number }).__stopped ?? 0)).toBeGreaterThan(0);
+  });
+
+  /**
+   * The phone dock lets taps through its gradient and takes them back only on
+   * what it holds. The reading bar was never given them back, so on a phone a
+   * tap on Pause reached the conversation behind it and the reading went on.
+   */
+  test("the reading bar's controls answer a tap, on a phone too", async ({ page }) => {
+    await mockBackend(page, { reply: "The standard VAT rate in Uganda is 18%." });
+    // A reply that takes 20 s to read, so there is time to pause it.
+    await page.route("**/api/v1/tts/stream", (route) =>
+      route.fulfill({
+        contentType: "application/x-ndjson",
+        body: `${JSON.stringify({ seq: 0, text: "long", format: "wav", audio_base64: silentWavB64(20), duration_s: 20 })}\n${JSON.stringify({ done: true, pieces: 1, failed: 0 })}\n`,
+      }),
+    );
+    await page.goto("/");
+    await sendMessage(page, "What is the VAT rate?");
+    await expect(page.locator(".message-row-assistant").last()).toContainText("18%", {
+      timeout: 15_000,
+    });
+    await page.getByRole("button", { name: /Listen in English/ }).last().click();
+
+    // A real click: Playwright refuses one that another element would receive.
+    await page.getByRole("button", { name: "Pause reading" }).click({ timeout: 10_000 });
+    await expect(page.getByRole("button", { name: "Resume reading" })).toBeVisible();
+    await page.getByRole("button", { name: "Stop reading" }).click();
+    await expect(page.getByTestId("narration-bar")).toHaveCount(0);
   });
 
   test("dictation still works with no browser Speech API", async ({ page }) => {

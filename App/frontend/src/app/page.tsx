@@ -1778,12 +1778,18 @@ export default function Page() {
             if (turn === voiceTurnRef.current) setVoiceStage(null);
           }
           setVoiceHeard(heard);
+          // The recogniser heard this language; the answer comes in it — if it
+          // is one the app speaks. A code it does not ("unknown", a language
+          // the picker does not offer) would be refused by /v1/chat, so the
+          // reader's own language stands instead.
+          const heardLocale = LOCALE_OPTIONS.some((option) => option.value === heardLanguage)
+            ? (heardLanguage as string)
+            : locale;
           // Held for one render, so it is sent by the effect that sees the
           // attachments as they are now (see below).
           queuedVoiceTurnRef.current = {
             text: heard,
-            // The recogniser heard this language; the answer comes in it.
-            options: { locale: heardLanguage || locale, localeExplicit: true, spoken: true },
+            options: { locale: heardLocale, localeExplicit: true, spoken: true },
           };
           setVoiceStage('queued');
         } else {

@@ -401,6 +401,14 @@
 }
 
 @media (max-width: 720px) {
+  /* The phone dock lets taps through its gradient (pointer-events: none, in
+     globals.css) and takes them back only on what it holds. The composer
+     always did; the reading bar and voice mode's dock did not, so on a phone
+     their buttons were dead and a tap on End or Pause reached the page behind. */
+  .chatv2 .chat-dock .voice-dock,
+  .chatv2 .chat-dock .narration-bar {
+    pointer-events: auto;
+  }
   .chatv2 .chat-dock .composer.cmpv2 {
     border-radius: 20px;
     padding: 0;

@@ -352,4 +352,30 @@ test.describe("Voice round-trip carries the language", () => {
     // /v1/voice/chat always answered — text first, and spoken as a stream.
     expect(body).toMatchObject({ message: "emisolo", locale: "lg", locale_explicit: true });
   });
+
+  test("voice mode answers in the reader's language when the recogniser names one the app does not speak", async ({ page }) => {
+    test.slow();
+    await seedConsent(page);
+    await clearChatStore(page);
+    await mockBackend(page);
+    await mockVoiceCatalogue(page);
+    // "unknown" fails /v1/chat's locale pattern: passed on, the turn would be refused.
+    await page.route("**/api/v1/asr**", (route) =>
+      route.fulfill({
+        json: { text: "emisolo", language: "unknown", duration_s: 0.05,
+                latency_s: 0.1, rtf: 2.0, backend: "stub", error: null },
+      }),
+    );
+    const chat = page.waitForRequest("**/api/v1/chat/stream", { timeout: 20_000 });
+
+    await page.goto("/");
+    await chooseLanguage(page, "Luganda");
+    await page.locator('[data-testid="composer-voicemode"]').click();
+    const send = page.getByTestId("voice-dock-primary");
+    await expect(send).toHaveAttribute("data-action", "send", { timeout: 10_000 });
+    await page.waitForTimeout(1200);
+    await send.click();
+
+    expect((await chat).postDataJSON()).toMatchObject({ message: "emisolo", locale: "lg", locale_explicit: true });
+  });
 });

@@ -159,6 +159,20 @@ describe('VoiceModeDock', () => {
     expect(pausePlayback).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps the last sentence up between two pieces of the reading', () => {
+    narration.value = { active: true, paused: false, sentence: 'VAT is 18 percent.' };
+    const { rerender, onTalk, onSend, onCancel, onStop, onEnd } = dock({ phase: 'speaking' });
+    const handlers = { onTalk, onSend, onCancel, onStop, onEnd };
+    // The first piece has ended and the next is still being voiced.
+    narration.value = { active: true, paused: false, sentence: '' };
+    rerender(<VoiceModeDock phase="speaking" autoSend {...handlers} />);
+    expect(detail()).toHaveTextContent('VAT is 18 percent.');
+    // A new reading starts from the hint, not from the last one's sentence.
+    rerender(<VoiceModeDock phase="listening" autoSend {...handlers} />);
+    rerender(<VoiceModeDock phase="speaking" autoSend {...handlers} />);
+    expect(detail()).toHaveTextContent('Tap the mic to interrupt.');
+  });
+
   it('knows a paused reading from the player, and resumes it', () => {
     narration.value = { active: true, paused: true, sentence: 'VAT is 18 percent.' };
     dock({ phase: 'speaking' });
