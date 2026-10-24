@@ -234,8 +234,18 @@ and the API obtains one with the client-credentials grant
 operations with its `mode` (`simulation` unless the deployment sets
 `MCP_SERVER_MODE_<NAMESPACE>=live`) and `status` (`available` /
 `unavailable`). The six system connectors are simulators: they are shown as
-demo data and are not offered in production. See
-`docs/SYSTEM_CONNECTORS_AND_PLUGINS.md`.
+demo data and are not offered in production. In simulation mode, each
+connector also carries `requires_account_link: true`, `connected: bool`,
+`account: {tin, brn, entity_name, email, category}`, and `demo_accounts`;
+clicking an unlinked connector in `ChatInput.tsx` opens the 5-locale
+**Sign in / Create account** view backed by `POST /v1/connectors/{name}/auth`
+(`login`, `signup`, `disconnect`, rate-limited at 25 attempts / 60 s per
+owner and refused with `409 Conflict` in production, `G252`). New simulation
+accounts are hashed with `PBKDF2-HMAC-SHA256` (200,000 iterations) and
+provisioned across `tin_system.db`, `efris_system.db`, `ursb_system.db`, and
+`dts_system.db`, and connected profiles are injected into chat turns inside
+sanitized `<linked_accounts>` / `<linked_account_data>` blocks (`service.py`).
+See `docs/SYSTEM_CONNECTORS_AND_PLUGINS.md`.
 
 ## Enterprise Security Controls (2026 Standards)
 

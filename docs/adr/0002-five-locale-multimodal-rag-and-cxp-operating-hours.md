@@ -1,9 +1,9 @@
 # ADR-0002: 5-Locale (`en`, `lg`, `sw`, `nyn`, `ach`) Multimodal Speech/RAG Parity & CXP Operating Hours (`07:00–23:00 EAT`) SLA Calendar
 
-- **Status**: Accepted (Amended 2026-10-24 — PR #649, PR #650)
-- **Date**: 2026-10-17 (Updated 2026-10-24)
+- **Status**: Accepted (Amended 2026-10-25 — PR #649, PR #650, PR #657, PR #658)
+- **Date**: 2026-10-17 (Updated 2026-10-25)
 - **Deciders**: URA Capstone Architecture & CX Engineering Team
-- **Technical Story**: Issue #441, Gaps G174, G180, G186, G189, G195–G199, G249 (`docs/plans/receptionist-cx-audit-2026-10-plan.md`, `docs/Reports/MULTILINGUAL_50000_CX_MULTIMODAL_NGROK_REPORT_2026-10-24.md`)
+- **Technical Story**: Issue #441, Gaps G174, G180, G186, G189, G195–G199, G249, G253 (`docs/plans/receptionist-cx-audit-2026-10-plan.md`, `docs/Reports/MULTILINGUAL_50000_CX_MULTIMODAL_NGROK_REPORT_2026-10-24.md`)
 
 ## Context and Problem Statement
 
@@ -44,3 +44,13 @@ Verified by:
    - **Browser Audio Playback (`PCMPlayer` & `pcm-player-worklet.js`)**: Added a singleton `initPromise` guard, `pendingChunks` FIFO queue, non-blocking `void this.ctx.resume()`, inline `Blob` `AudioWorklet` fallback (`blob:` allowed in `script-src`/`worker-src` CSP), scheduled `AudioBufferSourceNode` fallback queue, 60-second circular worklet buffer (`16000 * 60`), and dedicated `dialToneCtxRef` vs. lazy `getToneContext()` (`useCall.ts`).
    - **Pipecat 1.12 TTS Turn Lifecycle (`UraSpeechTTS`)**: Enabled `push_start_frame=True` and `push_stop_frames=True` so `TTSStartedFrame` and `TTSStoppedFrame` are emitted on every turn, flushing trailing buffered audio and firing `BotStoppedSpeakingFrame` immediately instead of holding `_bot_speaking=True` for `BOT_VAD_STOP_FALLBACK_SECS = 3.0s`.
    - **Multi-Turn Clarification & Spoken Answer Hygiene (`ClarifyGate`, `UraReceptionistBrain`, `lexicon.py`)**: Skipped exact lexicon matches (`cand_term == clean_target.lower()`) and context-repaired English homophones (`standard vet rate -> standard VAT rate`, `for a teen -> for a TIN`) while continuing to assess remaining low-confidence words; superseded open clarification state when a caller asks a complete new question on the next turn (even when the question contains `"no"` mid-sentence, e.g., *"How do I register if I have no TIN?"*); and stripped written-chat follow-up footers (`You might also want to know:...`, `If you get stuck at any step...`) in `_spoken_answer`.
+
+## Amendment 2 (2026-10-25 — PR #657 & PR #658, Gap G253)
+
+1. **Multi-Turn Detail Retention & Bidirectional Pace Control (`brain.py`, `state.py`, `phrases.py`)**:
+   - Added `CallState.last_more_detail` so truncated statutory sentences survive intervening repeat or pace-adjustment turns when the caller subsequently asks *"tell me more"* / *"more detail"*, while preserving the invariant that an active officer offer (`offer_officer=True`) treats *"tell me more"* as a new question.
+   - Added 5-locale (`en`, `lg`, `sw`, `nyn`, `ach`) normal-pace voice patterns (`_SPEED_NORMAL_PATTERNS`) and `normal_ack` confirmations so callers can restore regular speaking speed (`speech_rate_slow = False`) by voice or screen control.
+2. **Multimodal On-Screen Controls, EN 301 549 v4.1.1 Clause 6.2 Real-Time Text (RTT) & WCAG 2.2 AA (`serializer.py`, `ws.py`, `brain.py`, `clarify.py`, `lexicon.py`, `CallScreen.tsx`, `useCall.ts`, `useCallStore.ts`, `callSocket.ts`)**:
+   - Added `CallControlFrame` (`repeat`, `slower`, `normal_speed`, `more_detail`, `accept_offer`, `decline_offer`) and `CallTextTurnFrame` (`text_turn`, up to 500 chars) across `BrowserCallSerializer`, LiveKit `_forward_control`, and the non-Pipecat fallback loop in `ws.py`, with a per-connection sliding-window rate guard (`_allow_control_frame`, 15 frames / 10 s) and immediate cancellation of in-flight LLM generation on barge-in (`_cancel_active_generation`).
+   - Added `OutputTransportMessageUrgentFrame` `call_state` broadcasting (`phase: "listening" | "thinking" | "speaking"`, `pending_offer` covering `pending_offer`, `ClarifyState` in `"term"`/`"confirm"`, `pending_confirm_challenge`, and `review_state == "asking_end"`), Stage 2 (`repeat`) multi-word tail-token resolution + Stage 3 (`confirm`) explicit negative inline term replacement (`"No, export"`) in `ClarifyGate.resolve`, and `edit_sim` preservation in `lexicon.py` when `jellyfish` is absent.
+   - Added the 5-locale quick-control toolbar, inline **Type on call** form (with `boolean` send acknowledgement, auto-focus, and form-level `Escape` dismissal), `role="status" aria-live="polite"` phase announcements, `:focus-visible` keyboard focus rings, and decorative section-emoji stripping in `speech_normalization.py`.
