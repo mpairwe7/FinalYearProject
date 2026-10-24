@@ -288,8 +288,13 @@ def _validate_regex(value: str, spec: str) -> tuple[bool, str, str]:
     if not m:
         return False, value, "Invalid regex spec"
     pattern = m.group(1)
-    if re.match(pattern, value.strip()):
-        return True, value.strip(), ""
+    stripped = value.strip()
+    if re.match(pattern, stripped):
+        return True, stripped, ""
+    if r"\d" in pattern:
+        compact = re.sub(r"[\s-]+", "", stripped)
+        if compact and re.match(pattern, compact):
+            return True, compact, ""
     return False, value, f"Invalid format (expected pattern: {pattern})"
 
 

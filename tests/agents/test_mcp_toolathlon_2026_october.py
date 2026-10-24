@@ -841,3 +841,81 @@ def test_phase8_call_receptionist_multiturn_controls_normal_pace_and_text_turn()
 
     asyncio.run(_run())
 
+
+def test_phase9_error_understanding_detection_and_resolution_mechanisms() -> None:
+    from app.mcp.validation import build_validation_repair_hints, coerce_arguments_to_schema
+    from app.portal_copilot import (
+        analyze_portal_context,
+        classify_portal_task,
+        diagnose_ura_error,
+        evaluate_turn,
+        extract_task_entities,
+        validate_task_fields,
+    )
+    from app.workflows.slots import validate_slot
+
+    # 1. Hyphenated/spaced TINs and CR-prefixed refugee NINs normalize cleanly
+    ents = extract_task_entities("My TIN is 100-001-0001 and my refugee NIN is CR-92010101ABCD")
+    assert ents["tin"] == "1000010001"
+    assert ents["nin"] == "CR92010101ABCD"
+
+    ok, norm_tin, _ = validate_slot("100-001-0001", r"regex[^\d{10}$]")
+    assert ok is True and norm_tin == "1000010001"
+
+    # 2. Cross-field identifier mix-up diagnosis in validate_task_fields
+    spec_prn = classify_portal_task("payment_generate_prn")
+    assert spec_prn is not None
+    _, _, errs = validate_task_fields(
+        spec_prn,
+        {"tin": "CM92010101ABCD", "tax_head": "VAT_STANDARD", "amount_ugx": "2500000", "payment_mode": "COMMERCIAL_BANK"},
+    )
+    assert "NIRA National ID (NIN)" in errs["tin"]
+
+    spec_view_prn = classify_portal_task("payment_view_status")
+    assert spec_view_prn is not None
+    _, _, errs_prn = validate_task_fields(spec_view_prn, {"prn": "1000010001"})
+    assert "10-digit URA TIN" in errs_prn["prn"]
+
+    # 3. URA / EFRIS / e-Tax / ASYCUDA error-code & banner diagnostic engine
+    diag_stock = diagnose_ura_error("EFRIS-204: Insufficient stock balance for commodity 50202301")
+    assert diag_stock is not None
+    assert diag_stock["error_code"] == "EFRIS_INSUFFICIENT_STOCK"
+    assert diag_stock["remediation_task_id"] == "efris_stock_management"
+
+    portal_assist = analyze_portal_context({
+        "portal_id": "prn_payments",
+        "active_step": "PRN Verification",
+        "error_banner": "PRN_EXPIRED: The Payment Registration Number has expired after 21 days.",
+    })
+    assert portal_assist["error_diagnosis"]["error_code"] == "PRN_EXPIRED_OR_INVALID"
+    assert portal_assist["error_diagnosis"]["remediation_task_id"] == "payment_reactivate_prn"
+
+    chat_diag_outcome = evaluate_turn(
+        message="I am getting EFRIS-204 insufficient stock balance when issuing an invoice",
+        conversation_id="conv-err-diag-1",
+    )
+    assert chat_diag_outcome is not None
+    assert chat_diag_outcome.card_type == "error_diagnosis"
+    assert "EFRIS_INSUFFICIENT_STOCK" in chat_diag_outcome.deterministic_reply
+    assert "efris_stock_management" in chat_diag_outcome.grounding_block
+
+    # 4. Self-healing MCP argument coercion & suggested_renames repair hints
+    schema = {
+        "type": "object",
+        "properties": {
+            "taxpayer_tin": {"type": "string"},
+            "amount_ugx": {"type": "number"},
+        },
+        "required": ["taxpayer_tin", "amount_ugx"],
+        "additionalProperties": False,
+    }
+    coerced = coerce_arguments_to_schema(schema, {"taxpayer_tin": "100-001-0001", "amount_ugx": "UGX 1,500,000"})
+    assert coerced == {"taxpayer_tin": "1000010001", "amount_ugx": 1500000}
+
+    hints = build_validation_repair_hints(
+        schema,
+        {"tin": "1000010001", "amount": 1500000},
+        ["taxpayer_tin is required", "amount_ugx is required"],
+    )
+    assert hints["suggested_renames"] == {"tin": "taxpayer_tin", "amount": "amount_ugx"}
+

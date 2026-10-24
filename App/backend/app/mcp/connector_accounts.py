@@ -406,7 +406,7 @@ def signup_connector_account(
         raise ValueError("Password must be at least 6 characters.")
 
     cat_upper = "COMPANY" if (category or "").strip().upper() == "COMPANY" else "INDIVIDUAL"
-    clean_tin = (tin or "").strip()
+    clean_tin = re.sub(r"[\s-]+", "", (tin or "").strip())
     if clean_tin:
         if not _TIN_RE.fullmatch(clean_tin):
             raise ValueError("TIN must be an exact 10-digit number (or leave blank to auto-generate).")
@@ -556,6 +556,9 @@ def login_connector_account(
 ) -> dict[str, Any]:
     """Authenticate an existing custom or fixture simulation account and link it."""
     ident = (identifier or "").strip()
+    compact_ident = re.sub(r"[\s-]+", "", ident)
+    if _TIN_RE.fullmatch(compact_ident):
+        ident = compact_ident
     pw = password or ""
     if not ident:
         raise ValueError("Please enter your TIN, URSB Registration Number, email, or business name.")
