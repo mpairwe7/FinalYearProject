@@ -85,4 +85,21 @@ describe("answerText", () => {
     expect(speech).toContain("example.go.ug.com");
     expect(speech).not.toContain("example dot go dot u g.com");
   });
+
+  it("normalizes USSD shortcodes, +256 / 07.. phones, P.O. Box, emails, and https://portal.ura.go.ug URLs", () => {
+    const raw =
+      "Call +256 (0)323442055 or +256772123456 or 0772123456 or 0800-117-000. Dial *165# on MTN or *185#. Email tax_help-24@ura.go.ug or cloaketech@gmail.com. Open https://efris.ura.go.ug or https://portal.ura.go.ug or https://www.eac.int/customs. Mail P.O. Box 7279.";
+    const speech = cleanMarkdownForSpeech(raw);
+    expect(speech).toContain("plus 2 5 6, 0, 3 2 3, 4 4 2, 0 5 5");
+    expect(speech).toContain("plus 2 5 6, 7 7 2, 1 2 3, 4 5 6");
+    expect(speech).toContain("0 7 7 2, 1 2 3, 4 5 6");
+    expect(speech).toContain("0 800, 117, 0 0 0");
+    expect(speech).toContain("star 1 6 5 hash on M T N or star 1 8 5 hash");
+    expect(speech).toContain("tax underscore help dash 2 4 at U R A dot go dot u g");
+    expect(speech).toContain("cloaketech at gmail dot com");
+    expect(speech).toContain("Efris dot U R A dot go dot u g");
+    expect(speech).toContain("portal dot U R A dot go dot u g");
+    expect(speech).toContain("E A C dot int");
+    expect(speech).toContain("P O Box 7 2 7 9");
+  });
 });

@@ -37,24 +37,47 @@ _BARE_URL_RE = re.compile(r"\b(?:https?://|www\.)\S+", re.IGNORECASE)
 # One leading whitespace character, not a run of them: "\s+at\s+" could be
 # retried from every position of a long run of spaces (polynomial backtracking).
 _URL_WITH_PREPOSITION_RE = re.compile(
-    r"\s(?:at|via)\s+(?:https?://|www\.)[^\s<>\"]*[^\s<>\".,;:!?)\]]", re.IGNORECASE
+    r"\b(portal|website|site|page|platform|mukutu(?:\s+gwa\s+URA)?|tovuti(?:\s+ya\s+URA)?|urubuga(?:\s+rwa\s+URA)?)\s(?:at|via|ku|katika|kwenye|kupitia|aha)\s+(?:https?://|www\.)[^\s<>\"]*[^\s<>\".,;:!?)\]]",
+    re.IGNORECASE,
 )
 
 # URA and Ugandan government/MDA official emails and web domains:
 # spoken naturally as "<agency> dot go dot u g" / "<agency> dot co dot u g" / "<agency> dot or dot u g"
 _URA_EMAIL_RE = re.compile(
-    r"\b([A-Za-z0-9._%+-]+)@(?:www\.)?ura\.go\.ug\b", re.IGNORECASE
+    r"\b([A-Za-z0-9._%+-]{1,64})@(?:www\.)?ura\.go\.ug\b", re.IGNORECASE
 )
 _URA_DOMAIN_RE = re.compile(
-    r"\b(?:https?://)?(?:www\.)?ura\.go\.ug(?:/[^\s.,;:!?)\]]*)?\b", re.IGNORECASE
+    r"(?<![A-Za-z0-9@.-])(?:https?://)?(?:www\.)?ura\.go\.ug(?:/[^\s.,;:!?)\]]*)?",
+    re.IGNORECASE,
 )
 _GOV_EMAIL_RE = re.compile(
-    r"\b([A-Za-z0-9._%+-]+)@(?:www\.)?([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*)\.(go|co|or)\.ug\b",
+    r"\b([A-Za-z0-9._%+-]{1,64})@(?:www\.)?([A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,4})\.(go|co|or|ac|sc)\.ug\b",
+    re.IGNORECASE,
+)
+_GENERAL_EMAIL_RE = re.compile(
+    r"\b([A-Za-z0-9._%+-]{1,64})@(?:www\.)?([A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){1,4})\b",
     re.IGNORECASE,
 )
 _GOV_DOMAIN_RE = re.compile(
-    r"\b([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*)\.(go|co|or)\.ug(?:/[^\s.,;:!?)\]]*)?\b(?![A-Za-z0-9-]|\.[A-Za-z0-9-])",
+    r"(?<![A-Za-z0-9@.-])(?:https?://)?(?:www\.)?([A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,4})\.(go|co|or|ac|sc)\.ug(?:/[^\s.,;:!?)\]]*)?(?![A-Za-z0-9-]|\.[A-Za-z0-9-])",
     re.IGNORECASE,
+)
+_GENERIC_URL_DOMAIN_RE = re.compile(
+    r"(?<![A-Za-z0-9@.-])(?:https?://|www\.)(?:www\.)?([A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,3})\.(int|org|com|net|edu|gov|africa|ug)(?:/[^\s.,;:!?)\]]*)?(?![A-Za-z0-9-]|\.[A-Za-z0-9-])",
+    re.IGNORECASE,
+)
+_USSD_CODE_RE = re.compile(r"(?<!\w)\*(\d{3}(?:\*\d{1,4}){0,5})#(?!\w)")
+_UG_INTL_PHONE_RE = re.compile(
+    r"(?<!\w)\+256[ \t-]?(?:\(0\)[ \t-]?)?([1-9]\d{2})[ \t-]?(\d{3})[ \t-]?(\d{3})\b"
+)
+_UG_BARE_256_PHONE_RE = re.compile(
+    r"\b256[ \t-]?(7\d{2})[ \t-]?(\d{3})[ \t-]?(\d{3})\b"
+)
+_UG_LOCAL_PHONE_RE = re.compile(
+    r"\b(0[2347]\d{2})[ \t-]?(\d{3})[ \t-]?(\d{3})\b"
+)
+_PO_BOX_RE = re.compile(
+    r"\bP\.?[ \t]?O\.?[ \t]?Box[ \t]{1,4}(\d{1,6})\b", re.IGNORECASE
 )
 
 # Code blocks and inline code
@@ -148,8 +171,9 @@ _REDACTED_SPOKEN_LABELS: dict[str, dict[str, str]] = {
 }
 
 # Toll-free and customer care numbers
-_TOLLFREE_URA_RE = re.compile(r"\b0800\s*([12]17)\s*000\b")
-_GENERAL_TOLLFREE_RE = re.compile(r"\b0800\s*(\d{3})\s*(\d{3})\b")
+_TOLLFREE_URA_RE = re.compile(r"\b0800[ \t-]*([12]17)[ \t-]*000\b")
+_GENERAL_TOLLFREE_RE = re.compile(r"\b0800[ \t-]*(\d{3})[ \t-]*(\d{3})\b")
+_TOLLFREE_PAIRS_RE = re.compile(r"\b0800[ \t-]+(\d{2})[ \t-]+(\d{2})[ \t-]+(\d{2})\b")
 
 # Numbered steps for cadence and pacing
 _NUMBERED_STEP_RE = re.compile(r"^\s*(\d+)\.\s+", re.MULTILINE)
@@ -317,6 +341,7 @@ _ACRONYMS = [
     (re.compile(r"\be-?Portal\b", re.IGNORECASE), "E-Portal"),
     (re.compile(r"\be-?Filing\b", re.IGNORECASE), "E-Filing"),
     (re.compile(r"\be-?Immigration\b", re.IGNORECASE), "E-Immigration"),
+    (re.compile(r"(?:\bM\.T\.N\b\.?|\bM-T-N\b|\bMTN\b)", re.IGNORECASE), "M T N"),
     (re.compile(r"\bDT-([0-9]{3,5})\b", re.IGNORECASE), r"D-T \1"),
 ]
 
@@ -464,6 +489,13 @@ def _drop_echo(match: re.Match[str]) -> str:
     return "" if echoed and not preceding[-len(said) - 1 : -len(said)].isalnum() else match.group(0)
 
 
+def _format_email_local(user: str) -> str:
+    """Format an email local part so dots, underscores, hyphens, and digits are spoken naturally."""
+    out = user.replace(".", " dot ").replace("_", " underscore ").replace("-", " dash ")
+    out = re.sub(r"\d", lambda d: f" {d.group(0)} ", out)
+    return re.sub(r"[ \t]+", " ", out).strip()
+
+
 def clean_text_for_speech(text: str, locale: str = "en") -> str:
     """Pre-process text for natural, audible TTS synthesis in the tax domain.
 
@@ -479,30 +511,45 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
 
     t = _CONTACT_FOOTER_RE.sub("", text)
 
-    # 0. Convert PII redaction placeholders ([REDACTED_UG_NID], etc.) into natural spoken words
-    #    before Markdown italic stripping (_..._) removes underscores inside [REDACTED_UG_NID].
+    # 0. Convert PII redaction placeholders ([REDACTED_UG_NID], etc.) and USSD shortcodes (*165#, *185#)
+    #    into natural spoken words before Markdown italic stripping (*...* / _..._) removes * or _.
     t = _REDACTED_MARKER_RE.sub(
         lambda m: _REDACTED_SPOKEN_LABELS.get(m.group(1).upper(), {}).get(locale, "redacted identifier"),
         t,
     )
+    t = _USSD_CODE_RE.sub(
+        lambda m: "star " + " star ".join(" ".join(seg) for seg in m.group(1).split("*")) + " hash",
+        t,
+    )
 
-    # 1. Strip markdown links, including a missing opening bracket, then any
-    #    bare URL the model left behind. A neural voice reads "www dot" aloud.
+    # 1. Strip markdown links, including a missing opening bracket, then normalize
+    #    official emails and .ug domains before stripping any remaining bare URLs.
     t = _MD_LINK_RE.sub(r"\1", t)
     t = _BROKEN_MD_LINK_RE.sub(r"\1", t)
     t = _DANGLING_URL_TAIL_RE.sub("", t)
-    t = _URL_WITH_PREPOSITION_RE.sub("", t)
-    t = _URA_EMAIL_RE.sub(r"\1 at U R A dot go dot u g", t)
-    t = _URA_DOMAIN_RE.sub("U R A dot go dot u g", t)
-    t = _GOV_EMAIL_RE.sub(
-        lambda m: f"{m.group(1)} at {m.group(2).replace('.', ' dot ')} dot {m.group(3).lower()} dot u g",
+    t = _URL_WITH_PREPOSITION_RE.sub(r"\1", t)
+    t = _URA_EMAIL_RE.sub(
+        lambda m: f"{_format_email_local(m.group(1))} at U R A dot go dot u g",
         t,
     )
-    t = _BARE_URL_RE.sub("", t)
+    t = _GOV_EMAIL_RE.sub(
+        lambda m: f"{_format_email_local(m.group(1))} at {m.group(2).replace('.', ' dot ')} dot {m.group(3).lower()} dot u g",
+        t,
+    )
+    t = _GENERAL_EMAIL_RE.sub(
+        lambda m: f"{_format_email_local(m.group(1))} at {m.group(2).replace('.', ' dot ')}",
+        t,
+    )
+    t = _URA_DOMAIN_RE.sub("U R A dot go dot u g", t)
     t = _GOV_DOMAIN_RE.sub(
         lambda m: f"{m.group(1).replace('.', ' dot ')} dot {m.group(2).lower()} dot u g",
         t,
     )
+    t = _GENERIC_URL_DOMAIN_RE.sub(
+        lambda m: f"{m.group(1).replace('.', ' dot ')} dot {m.group(2).lower()}",
+        t,
+    )
+    t = _BARE_URL_RE.sub("", t)
 
     # 2. Strip inline citation markers: [1], [1, 2]
     t = _CITATION_RE.sub("", t)
@@ -554,6 +601,24 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
 
     t = _NIN_EXPLICIT_RE.sub(_nin_sub, t)
 
+    # 7c0. Normalize Ugandan international (+256), bare-256, and local (07../03../04..) phone numbers
+    #      and P.O. Box numbers before standalone TIN/PRN and vernacular cardinal number conversion.
+    t = _UG_INTL_PHONE_RE.sub(
+        lambda m: "plus 2 5 6, "
+        + ("0, " if "(0)" in m.group(0) else "")
+        + f"{' '.join(m.group(1))}, {' '.join(m.group(2))}, {' '.join(m.group(3))}",
+        t,
+    )
+    t = _UG_BARE_256_PHONE_RE.sub(
+        lambda m: f"2 5 6, {' '.join(m.group(1))}, {' '.join(m.group(2))}, {' '.join(m.group(3))}",
+        t,
+    )
+    t = _UG_LOCAL_PHONE_RE.sub(
+        lambda m: f"{' '.join(m.group(1))}, {' '.join(m.group(2))}, {' '.join(m.group(3))}",
+        t,
+    )
+    t = _PO_BOX_RE.sub(lambda m: f"P O Box {' '.join(m.group(1))}", t)
+
     # 7c1. Normalize standalone 10-digit TINs and 12-15 digit PRNs so they are never spoken as "one billion..."
     def _standalone_tin_or_prn_sub(m: re.Match) -> str:
         if m.group(1):
@@ -565,6 +630,7 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
     # 7d. Normalize URA toll-free contact numbers for cadence
     t = _TOLLFREE_URA_RE.sub(r"0 800, \1, 0 0 0", t)
     t = _GENERAL_TOLLFREE_RE.sub(r"0 800, \1, \2", t)
+    t = _TOLLFREE_PAIRS_RE.sub(r"0 800, \1, \2, \3", t)
 
     # 7e. Paced numbered steps for structured guidance
     if locale == "lg":
