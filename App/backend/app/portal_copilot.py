@@ -2556,6 +2556,12 @@ _URA_ERROR_PATTERNS: tuple[tuple[str, re.Pattern[str], str, str, tuple[str, ...]
 )
 
 
+_EXPLICIT_ERROR_REPORT_RE = re.compile(
+    r"\b(?:efris[-_]?(?:101|204|302)|err_[a-z0-9_]+|prn_expired|getting\s+(?:an?\s+)?error|portal\s+says|error\s*:|rejected|failed|cannot\s+issue|won't\s+let\s+me)\b",
+    re.IGNORECASE,
+)
+
+
 def diagnose_ura_error(error_text: str) -> dict[str, Any] | None:
     """Match a portal/connector error message or code to a structured root-cause diagnosis and remediation plan."""
     clean = str(error_text or "").strip()
@@ -2887,10 +2893,21 @@ def evaluate_turn(
         )
 
     # 4. Natural-Language Error Code / Portal Banner Diagnosis in Chat
-    msg_diag = diagnose_ura_error(message)
+    msg_diag = diagnose_ura_error(message) if _EXPLICIT_ERROR_REPORT_RE.search(message) else None
     if msg_diag is not None:
         rem_task = str(msg_diag.get("remediation_task_id") or "")
         rem_spec = classify_portal_task(rem_task) if rem_task else None
+        rem_portal_key = rem_spec.portal_key if rem_spec else "e_services"
+        rem_portal_info = EXTERNAL_URA_PORTALS.get(
+            "e_services" if rem_portal_key == "return_filing" else rem_portal_key,
+            EXTERNAL_URA_PORTALS["e_services"],
+        )
+        rem_url = (
+            f"/portal/{rem_portal_key}?intent={urllib.parse.quote(rem_task)}"
+            f"&conversation_id={urllib.parse.quote(conv_id)}&copilot=1"
+            if rem_task
+            else f"/portal/{rem_portal_key}?copilot=1"
+        )
         steps_text = "\n".join(
             f"{idx}. {st}" for idx, st in enumerate(msg_diag.get("resolution_steps") or [], start=1)
         )
@@ -2911,6 +2928,15 @@ def evaluate_turn(
             card_type="error_diagnosis",
             payload={
                 "card_type": "error_diagnosis",
+                "title": rem_spec.title if rem_spec else f"URA Error Diagnosis ({msg_diag['error_code']})",
+                "portal_key": rem_portal_key,
+                "portal_name": rem_portal_info["name"],
+                "copilot_portal_url": rem_url,
+                "open_portal_label": (
+                    f"Resolve with {rem_spec.title}" if rem_spec else f"Open {rem_portal_info['name']}"
+                ),
+                "diagnosis_summary": msg_diag["root_cause"],
+                "error_diagnosis": dict(msg_diag),
                 **msg_diag,
                 "remediation_title": rem_spec.title if rem_spec else "",
             },

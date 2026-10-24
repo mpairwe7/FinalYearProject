@@ -126,7 +126,7 @@ export default function PortalCopilotCard({
           }),
         });
         const body = await res.json().catch(() => ({}));
-        if (!res.ok) {
+        if (!res.ok || body.ok === false || body.status === "error") {
           setExecState({
             status: "error",
             summary: body.detail || body.summary || `Request failed (${res.status})`,
@@ -543,12 +543,20 @@ export default function PortalCopilotCard({
       aria-label={copilot.title || copilot.portal_name || "URA Portal Co-Pilot"}
     >
       <div className="portal-copilot-header">
-        <span className="portal-copilot-badge is-emerald">
+        <span
+          className={`portal-copilot-badge ${
+            effectiveCardType === "error_diagnosis" ||
+            effectiveCardType === "access_denied" ||
+            copilot.result?.ok === false
+              ? "is-amber"
+              : "is-emerald"
+          }`}
+        >
           {effectiveCardType === "statutory_copilot_handoff" ? (
             <>
               <ShieldCheckIcon size={13} /> {t("portalCopilot.statutoryBadge")}
             </>
-          ) : effectiveCardType === "executed_result" ? (
+          ) : effectiveCardType === "executed_result" && copilot.result?.ok !== false ? (
             <>
               <CheckCircleIcon /> {t("portalCopilot.executedBadge")}
             </>
@@ -556,6 +564,11 @@ export default function PortalCopilotCard({
             <>
               <BanIcon size={13} />{" "}
               {copilot.statutory_citation || t("portalCopilot.accessDeniedBadge")}
+            </>
+          ) : effectiveCardType === "error_diagnosis" || copilot.result?.ok === false ? (
+            <>
+              <AlertTriangleIcon size={13} />{" "}
+              {copilot.error_diagnosis?.error_code || t("portalCopilot.stuckBadge")}
             </>
           ) : (
             <>
@@ -605,7 +618,7 @@ export default function PortalCopilotCard({
         </div>
       )}
 
-      {copilot.dom_actions && copilot.dom_actions.length > 0 && (
+      {copilot.dom_actions && copilot.dom_actions.length > 0 ? (
         <ol className="portal-dom-recipe-list">
           {copilot.dom_actions.slice(0, 5).map((step) => (
             <li key={step.step_number}>
@@ -614,7 +627,13 @@ export default function PortalCopilotCard({
             </li>
           ))}
         </ol>
-      )}
+      ) : copilot.error_diagnosis?.resolution_steps?.length ? (
+        <ol className="portal-dom-recipe-list" data-testid="portal-error-resolution-steps">
+          {copilot.error_diagnosis.resolution_steps.map((stepText, idx) => (
+            <li key={idx}>{stepText}</li>
+          ))}
+        </ol>
+      ) : null}
 
       <div className="portal-copilot-actions">
         {needsLoginBeforePortal ? (
