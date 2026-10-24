@@ -450,6 +450,18 @@ export const en = {
   'call.lang.sw': 'Kiswahili',
   'call.lang.nyn': 'Runyankole',
   'call.lang.ach': 'Acholi',
+  'call.phaseThinking': 'Checking URA rules…',
+  'call.phaseSpeaking': 'Assistant speaking',
+  'call.stopSpeaking': 'Stop speaking',
+  'call.repeatLast': 'Repeat',
+  'call.moreDetail': 'More detail',
+  'call.slowerPace': 'Slower pace',
+  'call.normalPace': 'Normal pace',
+  'call.offerYes': 'Yes',
+  'call.offerNo': 'No',
+  'call.typeQuestion': 'Type on call',
+  'call.typePlaceholder': 'Type a question, TIN, or PRN…',
+  'call.sendTyped': 'Send',
 
   // Portal Task Execution & Inbuilt Co-Pilot (Phase 42) -------------------
   'portalCopilot.inlineFormBadge': 'Task Input Required',

@@ -41,6 +41,7 @@ class CallState:
     pending_offer: str = ""
     offer_reason: str = ""
     more_detail: str = ""
+    last_more_detail: str = ""
     # The caller talked over the turn that asked it, so the question at its
     # end may not have been heard: "okay" then is a backchannel, not a yes.
     offer_interrupted: bool = False

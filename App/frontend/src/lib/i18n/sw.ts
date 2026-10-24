@@ -430,6 +430,18 @@ export const sw: Partial<Dictionary> = {
   'call.lang.sw': 'Kiswahili',
   'call.lang.nyn': 'Runyankole',
   'call.lang.ach': 'Acholi',
+  'call.phaseThinking': 'Inakagua sheria za URA…',
+  'call.phaseSpeaking': 'Msaidizi anaongea',
+  'call.stopSpeaking': 'Simamisha sauti',
+  'call.repeatLast': 'Rudia',
+  'call.moreDetail': 'Maelezo zaidi',
+  'call.slowerPace': 'Ongea polepole',
+  'call.normalPace': 'Kasi ya kawaida',
+  'call.offerYes': 'Ndiyo',
+  'call.offerNo': 'Hapana',
+  'call.typeQuestion': 'Andika kwenye simu',
+  'call.typePlaceholder': 'Andika swali, TIN, au PRN…',
+  'call.sendTyped': 'Tuma',
 
   // Portal Task Execution & Inbuilt Co-Pilot (Phase 42) -------------------
   'portalCopilot.inlineFormBadge': 'Maelezo Yanayohitajika',

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from '@/lib/i18n';
 import {
+  type CallControlAction,
   type CallLanguage,
   type CallLanguageSource,
   type CallStatus,
+  type CallTurnPhase,
   isCallLanguage,
   useCallStore,
 } from '@/store/useCallStore';
@@ -146,6 +148,24 @@ export function useCall() {
     },
     [store],
   );
+
+  const sendControl = useCallback((action: CallControlAction) => {
+    playerRef.current?.flush();
+    socketRef.current?.sendControl(action);
+  }, []);
+
+  const sendTextTurn = useCallback((text: string): boolean => {
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    playerRef.current?.flush();
+    return socketRef.current?.sendTextTurn(trimmed) ?? false;
+  }, []);
+
+  const interruptCall = useCallback(() => {
+    playerRef.current?.flush();
+    socketRef.current?.interrupt();
+    store.setCallRuntimeState({ turnPhase: 'listening' });
+  }, [store]);
 
   const startCall = useCallback(
     async (locale = 'en') => {
@@ -366,6 +386,21 @@ export function useCall() {
               store.setQueuePosition(typeof position === 'number' && position > 0 ? position : null);
               break;
             }
+            case 'call_state': {
+              const rawPhase = msg.phase;
+              const turnPhase: CallTurnPhase | undefined =
+                rawPhase === 'thinking' || rawPhase === 'speaking' || rawPhase === 'listening'
+                  ? rawPhase
+                  : undefined;
+              store.setCallRuntimeState({
+                turnPhase,
+                pendingOffer: typeof msg.pending_offer === 'string' ? msg.pending_offer : undefined,
+                speechRateSlow: typeof msg.speech_rate_slow === 'boolean' ? msg.speech_rate_slow : undefined,
+                hasMoreDetail: typeof msg.has_more_detail === 'boolean' ? msg.has_more_detail : undefined,
+                hasLastAnswer: typeof msg.has_last_answer === 'boolean' ? msg.has_last_answer : undefined,
+              });
+              break;
+            }
             case 'language': {
               const language = msg.language;
               if (!isCallLanguage(language)) break;
@@ -452,8 +487,16 @@ export function useCall() {
     requestOfficer,
     requestCallback,
     queuePosition: store.queuePosition,
+    turnPhase: store.turnPhase,
+    pendingOffer: store.pendingOffer,
+    speechRateSlow: store.speechRateSlow,
+    hasMoreDetail: store.hasMoreDetail,
+    hasLastAnswer: store.hasLastAnswer,
     toggleMute,
     setLanguage,
+    sendControl,
+    sendTextTurn,
+    interruptCall,
     audioBlocked: store.audioBlocked,
     resumeAudio,
   };

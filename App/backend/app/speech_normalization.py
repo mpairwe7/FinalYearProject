@@ -68,6 +68,7 @@ _TABLE_PIPE_RE = re.compile(r"\s*\|\s*")
 # Headers and list bullets
 _HEADER_RE = re.compile(r"^\s*#{1,6}\s+", re.MULTILINE)
 _BULLET_RE = re.compile(r"^\s*[-*+]\s+", re.MULTILINE)
+_SECTION_EMOJI_RE = re.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]\ufe0f?[ \t]*")
 
 # Markdown bold / italics
 _BOLD_RE = re.compile(r"\*\*([^*]+)\*\*|__([^_]+)__")
@@ -513,9 +514,10 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
     # 4. Handle table rows: replace pipes with commas/spaces
     t = _TABLE_PIPE_RE.sub(", ", t)
 
-    # 5. Strip Markdown headers and bullet points
+    # 5. Strip Markdown headers, bullet points, and decorative section emojis
     t = _HEADER_RE.sub("", t)
     t = _BULLET_RE.sub("", t)
+    t = _SECTION_EMOJI_RE.sub("", t)
 
     # 6. Strip bold / italic markers
     t = _BOLD_RE.sub(lambda m: m.group(1) or m.group(2) or "", t)

@@ -110,10 +110,20 @@ async def _forward_control(task: Any, data: dict[str, Any]) -> None:
     The WebSocket transport reads the same messages in ``BrowserCallSerializer``;
     both take the call's language through :func:`config.call_language`.
     """
-    from .serializer import RequestCallbackFrame, RequestOfficerFrame, SetLanguageFrame
+    from .serializer import (
+        _ALLOWED_CALL_CONTROLS,
+        CallControlFrame,
+        CallTextTurnFrame,
+        InterruptionFrame,
+        RequestCallbackFrame,
+        RequestOfficerFrame,
+        SetLanguageFrame,
+    )
 
     message_type = data.get("type")
-    if message_type == "request_officer":
+    if message_type == "interrupt":
+        await task.queue_frame(InterruptionFrame())
+    elif message_type == "request_officer":
         await task.queue_frame(RequestOfficerFrame(reason=str(data.get("reason") or "caller_requested")))
     elif message_type == "request_callback":
         await task.queue_frame(RequestCallbackFrame())
@@ -121,6 +131,14 @@ async def _forward_control(task: Any, data: dict[str, Any]) -> None:
         language = call_language(data.get("language"))
         if language is not None:
             await task.queue_frame(SetLanguageFrame(language=language))
+    elif message_type == "call_control":
+        action = str(data.get("action") or "").strip().lower()
+        if action in _ALLOWED_CALL_CONTROLS:
+            await task.queue_frame(CallControlFrame(action=action))
+    elif message_type == "text_turn":
+        text = " ".join(str(data.get("text") or "").split()).strip()
+        if text and len(text) <= 500:
+            await task.queue_frame(CallTextTurnFrame(text=text))
 
 
 async def _refuse_officer(websocket: WebSocket, detail: str) -> None:

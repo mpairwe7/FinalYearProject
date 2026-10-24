@@ -423,6 +423,18 @@ export const ach: Partial<Dictionary> = {
   'call.lang.sw': 'Kiswahili',
   'call.lang.nyn': 'Runyankole',
   'call.lang.ach': 'Leb Acoli',
+  'call.phaseThinking': 'Atye ka ngiyo cik me URA…',
+  'call.phaseSpeaking': 'Lakony tye ka lok',
+  'call.stopSpeaking': 'Juk lok',
+  'call.repeatLast': 'Nwo',
+  'call.moreDetail': 'Ngec mukene',
+  'call.slowerPace': 'Lok mot',
+  'call.normalPace': 'Rwom me lok ma kare ducu',
+  'call.offerYes': 'Eyo',
+  'call.offerNo': 'Pe',
+  'call.typeQuestion': 'Coo i cim',
+  'call.typePlaceholder': 'Coo lapeny, TIN, onyo PRN…',
+  'call.sendTyped': 'Cwal',
 
   // Portal Task Execution & Inbuilt Co-Pilot (Phase 42) -------------------
   'portalCopilot.inlineFormBadge': 'Gin ma Mite me Pongo',

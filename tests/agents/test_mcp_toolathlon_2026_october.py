@@ -746,3 +746,62 @@ def test_phase7_local_simulation_connector_account_signup_login_and_cross_db_pro
     assert logged_in["tin"] == created["tin"]
     assert "ursb" in get_all_linked_accounts(owner_key)
 
+
+def test_phase8_call_receptionist_multiturn_controls_normal_pace_and_text_turn() -> None:
+    import asyncio
+    import json
+    from unittest.mock import AsyncMock, MagicMock
+    from app.receptionist.brain import UraReceptionistBrain
+    from app.receptionist.serializer import (
+        BrowserCallSerializer,
+        CallControlFrame,
+        CallTextTurnFrame,
+    )
+    from app.receptionist.state import CallRoom, CallState
+
+    async def _run() -> None:
+        serializer = BrowserCallSerializer()
+        ctrl_frame = await serializer.deserialize(json.dumps({"type": "call_control", "action": "slower"}))
+        assert isinstance(ctrl_frame, CallControlFrame) and ctrl_frame.action == "slower"
+
+        invalid_ctrl = await serializer.deserialize(json.dumps({"type": "call_control", "action": "invalid"}))
+        assert invalid_ctrl is None
+
+        txt_frame = await serializer.deserialize(json.dumps({"type": "text_turn", "text": "  What is the VAT rate?  "}))
+        assert isinstance(txt_frame, CallTextTurnFrame) and txt_frame.text == "What is the VAT rate?"
+
+        state = CallState(call_id="call-ctrl-1", conversation_id="conv-ctrl-1", locale="en", mode="ai")
+        room = CallRoom(call_id="call-ctrl-1", state=state)
+        chat_model = MagicMock()
+        chat_model.generate.return_value = {
+            "reply": (
+                "Sentence one about VAT. Sentence two about 18% standard rate. "
+                "Sentence three about registration threshold. Sentence four about monthly filing by the 15th."
+            ),
+            "sources": ["Value Added Tax Act"],
+            "faithfulness_score": 0.95,
+        }
+        brain = UraReceptionistBrain(room=room, chat_model=chat_model)
+        brain.push_frame = AsyncMock()
+
+        # 1. Text turn during a call triggers answer generation and saves last_more_detail
+        await brain.process_frame(CallTextTurnFrame(text="Explain VAT rules in Uganda"))
+        assert state.ai_answers_count == 1
+        assert "Sentence four" in state.last_more_detail
+
+        # 2. Slower pace control -> resets idle_prompts and sets speech_rate_slow=True; Normal pace control -> sets speech_rate_slow=False
+        state.idle_prompts = 1
+        await brain.process_frame(CallControlFrame(action="slower"))
+        assert state.speech_rate_slow is True
+        assert state.idle_prompts == 0
+
+        await brain.handle_external_question("speak normally please", words=None)
+        assert state.speech_rate_slow is False
+
+        # 3. Even after pace adjustments consumed pending_offer, "tell me more" still reads last_more_detail!
+        await brain.handle_external_question("tell me more", words=None)
+        assert state.last_more_detail == ""
+        assert "Sentence four" in state.last_assistant_answer
+
+    asyncio.run(_run())
+
