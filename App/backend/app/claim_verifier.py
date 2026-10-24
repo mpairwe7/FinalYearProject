@@ -300,10 +300,16 @@ def verify_claims(
         backed_by_verified_facts = bool(
             verified_numbers and claim_numbers and claim_numbers <= (verified_numbers | query_numbers)
         )
+        all_contradiction_contexts = list(contexts)
+        if hits:
+            for h in hits:
+                h_txt = str(h.get("text") or h.get("answer") or "").strip()
+                if h_txt and h_txt not in all_contradiction_contexts:
+                    all_contradiction_contexts.append(h_txt)
         contradicted = (
             False
             if backed_by_verified_facts
-            else is_contradicted(clean_claim, contexts, user_query=query)
+            else is_contradicted(clean_claim, all_contradiction_contexts, user_query=query)
         )
         if contradicted:
             saw_numeric_contradiction = True

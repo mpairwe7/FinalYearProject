@@ -16,11 +16,14 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from .calculator_router import (
+    _ANNUAL_RE,
     _COMPANY_RE,
     _EXPENSE_KW_RE,
+    _MONTHLY_RE,
     _SALE_KW_RE,
     _COST_KW_RE,
     extract_amounts,
+    extract_rental_unit_multiplier,
     format_calc_reply,
     has_money_amount,
     plan_calculation,
@@ -350,7 +353,7 @@ def _rule_paye_and_bik(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
 
 
 def _rule_rental(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
-    if not re.search(r"\b(rent|rental|landlord)\b", question, re.IGNORECASE) and "rental_tax" not in facts.tax_heads:
+    if not re.search(r"\b(rent(?:al)?s?|landlords?|tenants?)\b", question, re.IGNORECASE) and "rental_tax" not in facts.tax_heads:
         return []
     amounts = _ugx_amounts_in_text(question)
     if not amounts:
@@ -398,6 +401,11 @@ def _rule_rental(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
         pooled_gross = sum(rent_vals)
     else:
         pooled_gross = rent_vals[0]
+        unit_mult = extract_rental_unit_multiplier(question)
+        if unit_mult > 1:
+            pooled_gross *= unit_mult
+        if _MONTHLY_RE.search(question) and not _ANNUAL_RE.search(question):
+            pooled_gross *= 12
 
     params: dict[str, Any] = {
         "annual_gross_rent": pooled_gross,

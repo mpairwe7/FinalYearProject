@@ -566,6 +566,7 @@ _COMMON_ENGLISH_WORDS: frozenset[str] = frozenset({
     "want", "need", "like", "know", "tell", "give", "take", "make", "get", "find", "check", "help",
     "pay", "paid", "paying", "rate", "rates", "year", "years", "month", "months", "day", "days", "date", "dates", "time", "times",
     "good", "well", "great", "please", "thanks", "thank", "goodbye",
+    "city", "cities", "town", "towns", "supermarket", "hotel", "bank", "hospital", "school", "shop", "shops", "store", "stores", "market", "markets", "unit", "units", "client", "clients", "tenant", "tenants", "landlord", "landlords", "show", "figures", "numbers",
 })
 
 _LUGANDA_WORDS: frozenset[str] = frozenset({
@@ -703,6 +704,8 @@ def _fuzzy_correct_word(word: str) -> str:
     best_dist = max_dist + 1
 
     for candidate in _ALL_CORRECTABLE_VOCAB:
+        if len(candidate) < 4:
+            continue
         if abs(len(candidate) - len(low)) > max_dist:
             continue
         dist = _damerau_levenshtein(low, candidate)

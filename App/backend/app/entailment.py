@@ -320,9 +320,9 @@ def canonical_amounts(text: str) -> set[float]:
         without_pct = re.sub(r"\b[eo]?b[iu]cweka\s+" + re.escape(phrase) + r"(?:\s+aha\s+(?:buli\s+)?kikumi)?\b", " ", without_pct)
     for phrase, _ in _ACHOLI_PCT_WORDS:
         without_pct = re.sub(r"\bdula?\s+" + re.escape(phrase) + r"(?:\s+(?:i\s+kom\s+m?iya|ekomya))?\b", " ", without_pct)
-    # Strip Ugandan toll-free and mobile phone numbers (e.g. 0800 117 000, 0772 140 000)
+    # Strip Ugandan toll-free, landline, and mobile phone numbers (e.g. 0800 117 000, +256 (0)323442055, 0772 140 000)
     # so contact lines are not falsely parsed as tax amounts
-    without_pct = re.sub(r"\b0\d{2,3}[\s-]?\d{3}[\s-]?\d{3}\b", " ", without_pct)
+    without_pct = re.sub(r"(?:\+256\s*(?:\(0\))?\s*|\b0)\d{2,3}[\s-]?\d{3}[\s-]?\d{3}\b", " ", without_pct)
     amounts: set[float] = set()
 
     # 1. Prefix multipliers (e.g. "milioni 150", "obukadde 150", "emitwalo 23.5")
@@ -472,6 +472,14 @@ def numeric_contradiction(claim: str, context: str, user_query: str = "") -> boo
     ca = canonical_amounts(claim)
     xa = canonical_amounts(context)
     qa = canonical_amounts(user_query) if user_query else set()
+    if len(qa) >= 1:
+        qa_list = list(qa)
+        for v in qa_list:
+            qa.add(v * 12.0)
+        for i, v1 in enumerate(qa_list):
+            for v2 in qa_list[i + 1 :]:
+                qa.add(v1 * v2)
+                qa.add(v1 * v2 * 12.0)
     model_amounts = ca - qa
     ca_money = {a for a in model_amounts if a >= 1000.0}
     xa_money = {a for a in xa if a >= 1000.0}

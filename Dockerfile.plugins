@@ -12,11 +12,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sqlite3 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install minimal server requirements matching backend stack
+# Install minimal server requirements matching backend stack (cp314 wheels)
 RUN pip install --no-cache-dir \
-    "fastapi>=0.115.5,<0.116" \
-    "uvicorn>=0.32.0,<0.33" \
-    "pydantic>=2.10.1,<2.11"
+    "fastapi>=0.141.1,<0.142" \
+    "uvicorn>=0.52.4,<0.53" \
+    "pydantic>=2.13.5,<2.14"
 
 # Create non-root user
 RUN groupadd --gid 10001 appuser && \
