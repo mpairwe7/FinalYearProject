@@ -72,6 +72,12 @@ Every HTTP request to a connector server must present a bearer credential. With 
 - Idempotency replay keys are scoped by `(tenant_id, user_id, tool_name, idempotency_key)` and verified against the SHA-256 digest of canonical arguments (`_mcp_args_sha256`), rejecting key reuse with mutated parameters (`error="idempotency_key_conflict"`).
 - `wrap_request_state` / `unwrap_request_state` (`mrtr.py`) bind `(tool_name, namespace, tenant_id, user_id, exp)` inside the HMAC-SHA256 envelope, and `MCPClient.read_resource` enforces `validate_resource_uri` (scheme allowlisting + path-traversal blocking) and output safety screening (`screen_tool_result`).
 
+### 2.7 Local Simulation Account Sign-In, Sign-Up & Cross-Simulator Provisioning (`G252`)
+- In simulation mode (`APP_ENV != "production"`), `GET /v1/connectors?view=chat` marks simulation connectors with `requires_account_link: true`, `connected: bool`, `account: {tin, brn, entity_name, email, category}`, and `demo_accounts`.
+- Before an unlinked simulation connector can be added in the taxpayer composer (`ChatInput.tsx`), clicking the connector opens the **Sign in / Create account** sub-view (`POST /v1/connectors/{name}/auth`).
+- **Sign Up (`action: "signup"`)** hashes the password with `PBKDF2-HMAC-SHA256` (`200,000` iterations, 16-byte random salt), provisions the new individual or company profile across `tin_system.db`, `efris_system.db`, `ursb_system.db`, and `dts_system.db`, and links the account to the caller's owner-scoped session key (`db.conversation_state_key`).
+- **Sign In (`action: "login"`)** authenticates against custom accounts or seeded simulator fixture accounts (`1000000001`, `1000000005`, `1000000008`), and **Disconnect (`action: "disconnect"`)** unlinks the session. In production (`APP_ENV=production`), `POST /v1/connectors/{name}/auth` refuses all requests with `409 Conflict`.
+
 ---
 
 ## 3. Operational Procedures

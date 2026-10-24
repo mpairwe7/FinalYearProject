@@ -218,6 +218,7 @@ def chat_connector_catalog(
     *,
     user_role: str,
     granted_purposes: list[str] | None = None,
+    owner_key: str = "",
 ) -> dict[str, Any]:
     """Build a browser-safe list without returning schemas, URLs, or secrets.
 
@@ -226,8 +227,11 @@ def chat_connector_catalog(
     (``operations``) — the three things a person needs before agreeing
     to let it be used in their chat.
     """
+    from .connector_accounts import DEMO_CONNECTOR_PRESETS, get_all_linked_accounts
+
     enabled = flags.is_enabled("enterprise_connectors")
     remotes = client.remote_namespaces() if enabled else []
+    linked_accounts = get_all_linked_accounts(owner_key) if owner_key else {}
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for namespace, descriptor in _eligible_from(
         client, remotes, user_role=user_role, granted_purposes=granted_purposes
@@ -268,6 +272,12 @@ def chat_connector_catalog(
             ],
             "read_only": True,
         }
+        if mode == MODE_SIMULATION:
+            linked_acc = linked_accounts.get(namespace)
+            entry["requires_account_link"] = True
+            entry["connected"] = linked_acc is not None
+            entry["account"] = linked_acc
+            entry["demo_accounts"] = DEMO_CONNECTOR_PRESETS
         if user_role in _STAFF_ROLES and remote.server.get("name"):
             entry["server"] = {
                 "name": _display_text(remote.server.get("name"), 80),

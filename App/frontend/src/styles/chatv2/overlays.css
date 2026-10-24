@@ -736,6 +736,231 @@ dialog.connectors-dialog::backdrop,
   background: transparent;
 }
 
+.chatv2 .connectors-option-wrap {
+  display: grid;
+  gap: 4px;
+}
+
+.chatv2 .connectors-account-pill {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--success);
+  background: var(--cv2-success-soft);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.chatv2 .connectors-account-bar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 6px 2px;
+}
+
+.chatv2 .connectors-account-link-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.chatv2 .connectors-account-link-btn.is-danger {
+  color: var(--danger);
+}
+
+.chatv2 .connectors-auth-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border-1);
+  border-radius: 14px;
+  background: var(--surface-1);
+}
+
+.chatv2 .connectors-auth-top {
+  display: grid;
+  gap: 10px;
+}
+
+.chatv2 .connectors-auth-back {
+  width: fit-content;
+  padding: 4px 10px;
+  border: 1px solid var(--border-1);
+  border-radius: 999px;
+  background: var(--bg-0);
+  color: var(--text-0);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chatv2 .connectors-auth-target {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.chatv2 .connectors-auth-subtitle {
+  margin: 4px 0 0;
+  color: var(--text-1);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.chatv2 .connectors-auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--bg-0);
+  border: 1px solid var(--border-0);
+}
+
+.chatv2 .connectors-auth-tab {
+  min-height: 34px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.chatv2 .connectors-auth-tab.is-active {
+  background: var(--surface-2);
+  color: var(--text-0);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.chatv2 .connectors-auth-error {
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--danger);
+  background: var(--cv2-danger-soft);
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.chatv2 .connectors-auth-presets {
+  display: grid;
+  gap: 6px;
+}
+
+.chatv2 .connectors-auth-presets-label {
+  color: var(--text-1);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+.chatv2 .connectors-auth-presets-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chatv2 .connectors-auth-preset-chip {
+  display: grid;
+  gap: 1px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-1);
+  border-radius: 10px;
+  background: var(--bg-0);
+  color: var(--text-0);
+  font: inherit;
+  font-size: 11.5px;
+  text-align: start;
+  cursor: pointer;
+}
+
+.chatv2 .connectors-auth-preset-chip:hover {
+  border-color: var(--cv2-accent);
+  background: var(--surface-2);
+}
+
+.chatv2 .connectors-auth-preset-chip span {
+  color: var(--text-1);
+  font-size: 10.5px;
+}
+
+.chatv2 .connectors-auth-form {
+  display: grid;
+  gap: 10px;
+}
+
+.chatv2 .connectors-auth-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.chatv2 .connectors-auth-field {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-0);
+}
+
+.chatv2 .connectors-auth-field input,
+.chatv2 .connectors-auth-field select {
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-1);
+  border-radius: 9px;
+  background: var(--bg-0);
+  color: var(--text-0);
+  font: inherit;
+  font-size: 13px;
+}
+
+.chatv2 .connectors-auth-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-1);
+  cursor: pointer;
+}
+
+.chatv2 .connectors-auth-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+
+.chatv2 .connectors-auth-submit {
+  min-height: 38px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 999px;
+  background: var(--cv2-accent);
+  color: #ffffff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chatv2 .connectors-auth-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .chatv2 .connectors-details {
   padding: 0 2px;
   color: var(--text-1);

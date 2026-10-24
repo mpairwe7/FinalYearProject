@@ -678,3 +678,71 @@ def test_phase6_rental_multi_unit_calculation_fuzzy_guard_and_cross_passage_clai
     ent = ursb_db.search_entity("verify URSB business registration for Kampala City Supermarket Ltd")
     assert ent is not None and ent.registration_number == "URSB-CO-10005"
 
+
+def test_phase7_local_simulation_connector_account_signup_login_and_cross_db_provisioning(
+    tmp_path, monkeypatch
+) -> None:
+    from app.mcp.connector_accounts import (
+        disconnect_connector_account,
+        format_linked_accounts_prompt_context,
+        get_all_linked_accounts,
+        login_connector_account,
+        signup_connector_account,
+    )
+
+    monkeypatch.setenv("CONNECTOR_DATA_STORE_DIR", str(tmp_path))
+    monkeypatch.setenv("TIN_DB_PATH", str(tmp_path / "tin_system.db"))
+    monkeypatch.setenv("EFRIS_DB_PATH", str(tmp_path / "efris_system.db"))
+    monkeypatch.setenv("URSB_DB_PATH", str(tmp_path / "ursb_system.db"))
+    monkeypatch.setenv("DTS_DB_PATH", str(tmp_path / "dts_system.db"))
+
+    owner_key = "default:anon:sess-sim-test-1"
+
+    # 1. Sign up a new local simulation account and verify cross-DB provisioning
+    created = signup_connector_account(
+        owner_key=owner_key,
+        namespace="efris",
+        entity_name="Rwenzori Solar Tech Ltd",
+        email="ops@rwenzorisolar.ug",
+        password="SolarPassword2026!",  # pragma: allowlist secret
+        category="COMPANY",
+        district="Kasese",
+        link_all=True,
+    )
+    assert len(created["tin"]) == 10
+    assert created["brn"].startswith("URSB-CO-")
+    assert created["entity_name"] == "Rwenzori Solar Tech Ltd"
+
+    # Verify it is linked across all 6 simulation namespaces
+    linked = get_all_linked_accounts(owner_key)
+    assert "efris" in linked and "ursb" in linked and "tin_registration" in linked
+    assert linked["efris"]["tin"] == created["tin"]
+
+    # Verify prompt context generation
+    ctx_str = format_linked_accounts_prompt_context(owner_key, ["efris", "ursb"])
+    assert "Rwenzori Solar Tech Ltd" in ctx_str
+    assert created["tin"] in ctx_str
+
+    # Verify the new profile exists in the provisioned simulator SQLite DBs
+    from plugins.efris.database import EfrisDatabase
+    from plugins.tin_registration.database import TinDatabase
+    from plugins.ursb.database import UrsbDatabase
+
+    assert TinDatabase().search_taxpayer(created["tin"]) is not None
+    assert EfrisDatabase().get_taxpayer(created["tin"]) is not None
+    assert UrsbDatabase().search_entity(created["brn"]) is not None
+
+    # 2. Disconnect and re-authenticate via login_connector_account
+    disconnect_connector_account(owner_key, "all")
+    assert get_all_linked_accounts(owner_key) == {}
+
+    logged_in = login_connector_account(
+        owner_key=owner_key,
+        namespace="ursb",
+        identifier="ops@rwenzorisolar.ug",
+        password="SolarPassword2026!",  # pragma: allowlist secret
+        link_all=False,
+    )
+    assert logged_in["tin"] == created["tin"]
+    assert "ursb" in get_all_linked_accounts(owner_key)
+

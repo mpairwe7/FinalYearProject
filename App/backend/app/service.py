@@ -11971,6 +11971,32 @@ class ChatModel:
                     )
                     if web_verified_facts:
                         base_pers_ctx = f"{base_pers_ctx}\n\n{web_verified_facts}".strip()
+                    if connector_namespaces:
+                        from .mcp.connector_accounts import (
+                            format_linked_accounts_prompt_context,
+                            get_all_linked_accounts,
+                        )
+
+                        conn_owner_key = db.conversation_state_key(
+                            session_id or conversation_id or None,
+                            user_id=user_id,
+                            tenant_id=tenant_id or "default",
+                        )
+                        conn_ctx = format_linked_accounts_prompt_context(conn_owner_key, connector_namespaces)
+                        if conn_ctx:
+                            base_pers_ctx = f"{base_pers_ctx}\n\n{conn_ctx}".strip()
+                            linked_map = get_all_linked_accounts(conn_owner_key)
+                            first_acc = next(
+                                (linked_map[ns] for ns in connector_namespaces if ns in linked_map),
+                                None,
+                            )
+                            if first_acc and first_acc.get("tin") not in agentic_query:
+                                agentic_query = (
+                                    f"{agentic_query} "
+                                    f"[Connected account: TIN {first_acc['tin']}, "
+                                    f"BRN {first_acc.get('brn', '')}, "
+                                    f"Entity {first_acc['entity_name']}]"
+                                )
                     agentic_call_kwargs: dict[str, Any] = {
                         "query": agentic_query,
                         # A lookup is answered from the service, not from
@@ -13893,6 +13919,41 @@ class ChatModel:
         )
         if web_verified_facts:
             eff_pers_ctx = f"{eff_pers_ctx}\n\n{web_verified_facts}".strip()
+        stream_rewritten = (
+            router_rewritten
+            if (
+                locale not in ("", "en")
+                and router_rewritten
+                and not llm_module.can_generate_in_locale(locale)
+            )
+            else (router_message if connector_intent is not None else rewritten)
+        )
+        if connector_namespaces:
+            from .mcp.connector_accounts import (
+                format_linked_accounts_prompt_context,
+                get_all_linked_accounts,
+            )
+
+            conn_owner_key_s = db.conversation_state_key(
+                session_id or thread_id or None,
+                user_id=user_id,
+                tenant_id=tenant_id or "default",
+            )
+            conn_ctx_s = format_linked_accounts_prompt_context(conn_owner_key_s, connector_namespaces)
+            if conn_ctx_s:
+                eff_pers_ctx = f"{eff_pers_ctx}\n\n{conn_ctx_s}".strip()
+                linked_map_s = get_all_linked_accounts(conn_owner_key_s)
+                first_acc_s = next(
+                    (linked_map_s[ns] for ns in connector_namespaces if ns in linked_map_s),
+                    None,
+                )
+                if first_acc_s and first_acc_s.get("tin") not in stream_rewritten:
+                    stream_rewritten = (
+                        f"{stream_rewritten} "
+                        f"[Connected account: TIN {first_acc_s['tin']}, "
+                        f"BRN {first_acc_s.get('brn', '')}, "
+                        f"Entity {first_acc_s['entity_name']}]"
+                    )
 
         return {
             "reply": reply,
@@ -13918,15 +13979,7 @@ class ChatModel:
             "_hits": hits,
             "_history": conversation_history,
             "_context_summary": context_summary,
-            "_rewritten": (
-                router_rewritten
-                if (
-                    locale not in ("", "en")
-                    and router_rewritten
-                    and not llm_module.can_generate_in_locale(locale)
-                )
-                else (router_message if connector_intent is not None else rewritten)
-            ),
+            "_rewritten": stream_rewritten,
             "_personalization_context": eff_pers_ctx,
             "_web_verified_facts": web_verified_facts,
             "_web_research_events": web_research_events,
