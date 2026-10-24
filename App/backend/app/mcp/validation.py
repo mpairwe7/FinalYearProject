@@ -18,7 +18,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import re
+import urllib.parse
 from typing import Any
 
 from .protocol import META_DESCRIPTOR_SHA256
@@ -125,6 +127,119 @@ def validate_arguments(schema: dict[str, Any] | None, arguments: dict[str, Any])
     return errors
 
 
+_NUMERIC_STRING_RE = re.compile(
+    r"^\s*(?:UGX)?\s*([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*$",
+    re.IGNORECASE,
+)
+
+
+def coerce_arguments_to_schema(
+    schema: dict[str, Any] | None, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    """Losslessly coerce unambiguous LLM argument strings to declared JSON Schema types.
+
+    Addresses the primary ToolAthlon (ICLR 2026) failure mode where models pass
+    formatted currency/numeric strings (``"4,500,000"``, ``"UGX 1200000"``),
+    boolean strings (``"true"``/``"false"``), or differently-cased enum literals.
+    Never guesses on ambiguous strings — those remain untouched so
+    :func:`validate_arguments` rejects them with a clear error.
+    """
+    if not schema or not isinstance(arguments, dict):
+        return dict(arguments or {})
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return dict(arguments)
+
+    coerced = dict(arguments)
+    for key, value in list(coerced.items()):
+        spec = properties.get(key)
+        if not isinstance(spec, dict) or value is None:
+            continue
+        expected_type = spec.get("type")
+        type_set = (
+            {expected_type}
+            if isinstance(expected_type, str)
+            else set(expected_type)
+            if isinstance(expected_type, list | tuple)
+            else set()
+        )
+        choices = spec.get("enum")
+
+        if isinstance(value, str):
+            stripped = value.strip()
+            # 1. Case-insensitive enum match when string is not already in choices
+            if isinstance(choices, list) and choices and value not in choices:
+                ci_matches = [c for c in choices if isinstance(c, str) and c.lower() == stripped.lower()]
+                if len(ci_matches) == 1:
+                    coerced[key] = ci_matches[0]
+                    continue
+
+            # 2. Numeric coercion ("number" or "integer" when "string" is not declared)
+            if ("number" in type_set or "integer" in type_set) and "string" not in type_set:
+                m = _NUMERIC_STRING_RE.match(stripped)
+                if m:
+                    raw_num = m.group(1).replace(",", "")
+                    try:
+                        parsed_float = float(raw_num)
+                        if math.isfinite(parsed_float):
+                            if "integer" in type_set and "number" not in type_set:
+                                if parsed_float.is_integer():
+                                    coerced[key] = int(parsed_float)
+                            elif parsed_float.is_integer() and "." not in raw_num:
+                                coerced[key] = int(parsed_float)
+                            else:
+                                coerced[key] = parsed_float
+                    except (ValueError, OverflowError):
+                        pass
+                continue
+
+            # 3. Boolean coercion ("boolean" when "string" is not declared)
+            if "boolean" in type_set and "string" not in type_set:
+                low = stripped.lower()
+                if low == "true":
+                    coerced[key] = True
+                elif low == "false":
+                    coerced[key] = False
+        elif isinstance(value, float) and "integer" in type_set and "number" not in type_set:
+            if math.isfinite(value) and value.is_integer():
+                coerced[key] = int(value)
+
+    return coerced
+
+
+def build_validation_repair_hints(
+    schema: dict[str, Any] | None,
+    arguments: dict[str, Any],
+    errors: list[str],
+) -> dict[str, Any]:
+    """Build structured self-correction hints when tool arguments fail validation."""
+    if not schema or not errors:
+        return {}
+    properties = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+    required = [str(r) for r in (schema.get("required") or []) if r]
+    missing_required = [r for r in required if r not in arguments or arguments.get(r) is None]
+    unexpected_fields = (
+        sorted(str(k) for k in arguments if k not in properties)
+        if schema.get("additionalProperties") is False
+        else []
+    )
+    allowed_enums: dict[str, list[Any]] = {}
+    expected_types: dict[str, Any] = {}
+    for prop_name, prop_spec in properties.items():
+        if not isinstance(prop_spec, dict):
+            continue
+        if "type" in prop_spec:
+            expected_types[prop_name] = prop_spec["type"]
+        if isinstance(prop_spec.get("enum"), list):
+            allowed_enums[prop_name] = list(prop_spec["enum"])
+    return {
+        "missing_required": missing_required,
+        "unexpected_fields": unexpected_fields,
+        "expected_types": expected_types,
+        "allowed_enums": allowed_enums,
+    }
+
+
 def result_matches_schema(schema: dict[str, Any] | None, result: Any) -> list[str]:
     """Validate a tool result against its declared ``outputSchema``.
 
@@ -176,12 +291,63 @@ _TOOL_POISONING_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
             re.IGNORECASE,
         ),
     ),
+    (
+        "markdown_exfiltration_link",
+        re.compile(
+            r"!\[[^\]]*\]\(https?://[^\s)]+\?(?:[^)\s]*[?&])?"
+            r"(?:tin|nin|prn|token|secret|password|key|auth|cookie|session)=[^)\s]+\)",
+            re.IGNORECASE,
+        ),
+    ),
 )
 
 _CREDENTIAL_LEAK_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("bearer_jwt_leak", re.compile(r"\bBearer\s+eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}")),
     ("api_secret_key_leak", re.compile(r"\b(?:sk-[A-Za-z0-9]{24,}|AKIA[0-9A-Z]{16})\b")),
+    ("private_key_leak", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----")),
+    (
+        "db_connection_secret_leak",
+        re.compile(r"\b(?:postgres(?:ql)?|mysql|mongodb|redis)://[^:\s/]+:[^@\s/]{4,}@"),
+    ),
+    (
+        "vcs_or_hf_token_leak",
+        re.compile(r"\b(?:ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{40,}|hf_[A-Za-z0-9]{32,})\b"),
+    ),
 )
+
+ALLOWED_RESOURCE_SCHEMES: frozenset[str] = frozenset(
+    {
+        "ura",
+        "efris",
+        "dts",
+        "digital_tax_stamps",
+        "ursb",
+        "bwims",
+        "tin",
+        "tin_registration",
+        "payment",
+        "payments",
+        "payment_system",
+        "wire",
+    }
+)
+
+
+def validate_resource_uri(uri: str) -> str | None:
+    """Return an error reason if *uri* is malformed, uses a disallowed scheme, or attempts path traversal."""
+    if not isinstance(uri, str) or not uri.strip() or len(uri) > 512:
+        return "invalid_resource_uri"
+    if any(ord(c) < 0x20 or c in ("\\", "\x7f") for c in uri):
+        return "control_or_backslash_in_resource_uri"
+    if "://" not in uri:
+        return "missing_resource_scheme"
+    unquoted = urllib.parse.unquote(uri)
+    if ".." in uri or ".." in unquoted:
+        return "path_traversal_in_resource_uri"
+    scheme = uri.split("://", 1)[0].strip().lower()
+    if scheme not in ALLOWED_RESOURCE_SCHEMES:
+        return f"disallowed_resource_scheme:{scheme}"
+    return None
 
 
 def compute_descriptor_sha256(descriptor: dict[str, Any]) -> str:

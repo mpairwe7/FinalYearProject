@@ -23,6 +23,7 @@ The agent layer never imports :mod:`app.tools` directly.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -46,12 +47,15 @@ from .transport import (
     request_meta,
 )
 from .validation import (
+    build_validation_repair_hints,
+    coerce_arguments_to_schema,
     compute_descriptor_sha256,
     inspect_descriptor_integrity,
     result_matches_schema,
     screen_tool_result,
     scrub_prompt_overrides_in_result,
     validate_arguments,
+    validate_resource_uri,
 )
 
 logger = logging.getLogger(__name__)
@@ -495,11 +499,27 @@ class MCPClient:
         return resources
 
     def read_resource(self, uri: str, *, tenant_id: str = "default", user_id: str = "") -> dict[str, Any]:
-        """Read the contents of a URI-addressable MCP resource."""
+        """Read the contents of a URI-addressable MCP resource with scheme and output screening."""
+        uri_err = validate_resource_uri(uri)
+        if uri_err:
+            if uri_err.startswith(("disallowed_resource_scheme", "missing_resource_scheme")):
+                raise LookupError(f"No transport supports reading resource URI '{uri}'")
+            raise ValueError(f"Invalid resource URI '{uri}': {uri_err}")
         scheme = uri.split("://")[0].lower() if "://" in uri else ""
         transport = self._transports.get(scheme, self._transports.get("core", next(iter(self._transports.values()))))
         if hasattr(transport, "read_resource"):
-            return transport.read_resource(uri)
+            res = transport.read_resource(uri)
+            violations = screen_tool_result(res)
+            if violations:
+                hard = [
+                    v
+                    for v in violations
+                    if not v.startswith("indirect_prompt_injection:prompt_override_directive@")
+                ]
+                if hard:
+                    raise ValueError(f"Resource '{uri}' blocked by output safety screen: {hard[:3]}")
+                res = scrub_prompt_overrides_in_result(res)
+            return res
         raise LookupError(f"No transport supports reading resource URI '{uri}'")
 
     def list_prompts(self, namespace: str | None = None) -> list[dict[str, Any]]:
@@ -694,6 +714,8 @@ class MCPClient:
         requires_confirmation = bool(
             _meta_of(descriptor, "requiresConfirmation", False)
         )
+        input_schema = descriptor.get("inputSchema") or {}
+        coerced_args = coerce_arguments_to_schema(input_schema, args)
         # A write proposal must pass role and consent checks before it is
         # shown to the user, but the proposal itself is not a write. The
         # approval replay below is the only call that satisfies the
@@ -711,7 +733,7 @@ class MCPClient:
             allowed_roles=tuple(_meta_of(descriptor, "allowedRoles", ()) or ()),
             scope_exempt_roles=tuple(_meta_of(descriptor, "scopeExemptRoles", ()) or ()),
             requires_confirmation=requires_confirmation and confirmed,
-            arguments=args,
+            arguments=coerced_args,
         )
         if not policy["allowed"]:
             return finish(
@@ -721,9 +743,8 @@ class MCPClient:
                 namespace=namespace,
             )
 
-        input_schema = descriptor.get("inputSchema") or {}
         declared_properties = set((input_schema.get("properties") or {}).keys())
-        validation_args = dict(args)
+        validation_args = dict(coerced_args)
         # These are MCP dispatch controls, not tool inputs. Older tools do
         # not declare them in their schemas; strip them only in that case so
         # strict additionalProperties validation remains useful.
@@ -737,6 +758,9 @@ class MCPClient:
                     "ok": False,
                     "error": f"Invalid arguments for {name}: " + "; ".join(errors),
                     "validation_errors": errors,
+                    "repair_hints": build_validation_repair_hints(
+                        input_schema, validation_args, errors
+                    ),
                     "expected": input_schema,
                     "policy": policy,
                 },
@@ -764,26 +788,51 @@ class MCPClient:
                 namespace=namespace,
             )
 
-        replay_key = self._replay_key(name, tenant_id, idempotency_key)
+        args_digest = hashlib.sha256(
+            json.dumps(validation_args, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+        ).hexdigest()
+        replay_key = self._replay_key(name, tenant_id, idempotency_key, user_id=user_id)
         if replay_key is not None:
             cached = self._replay_lookup(replay_key)
             if cached is not None:
+                cached_digest = cached.pop("_mcp_args_sha256", None)
+                if cached_digest and cached_digest != args_digest:
+                    return finish(
+                        {
+                            "ok": False,
+                            "error": "idempotency_key_conflict",
+                            "detail": f"Idempotency key for '{name}' was already used with different arguments.",
+                            "policy": policy,
+                        },
+                        ok=False,
+                        risk=risk,
+                        namespace=namespace,
+                    )
                 logger.info("MCP replayed %s for idempotency key (no re-execution)", name)
                 return finish(
                     cached, ok=bool(cached.get("ok", True)), risk=risk, namespace=namespace, replayed=True
                 )
 
         meta = request_meta(
-            tenant_id=tenant_id, user_id=user_id, user_role=user_role, call_id=call_id
+            tenant_id=tenant_id,
+            user_id=user_id,
+            user_role=user_role,
+            call_id=call_id,
+            confirmed=confirmed,
+            idempotency_key=idempotency_key,
+            granted_purposes=granted_purposes,
         )
-        require_signed_state = bool(os.getenv("MCP_REQUEST_STATE_SECRET")) or (
-            os.getenv("APP_ENV", "development").lower() == "production"
-        )
-        if request_state is not None and (
-            require_signed_state
-            or (isinstance(request_state, dict) and ("alg" in request_state or "sig" in request_state))
-        ):
-            if unwrap_request_state(request_state) is None:
+        if request_state is not None:
+            if (
+                unwrap_request_state(
+                    request_state,
+                    expected_tool=name,
+                    expected_namespace=namespace,
+                    expected_tenant=tenant_id,
+                    expected_user=user_id,
+                )
+                is None
+            ):
                 return finish(
                     {
                         "ok": False,
@@ -892,17 +941,18 @@ class MCPClient:
         breaker.record_success()
 
         if replay_key is not None and ok:
-            self._replay_store(replay_key, raw)
+            self._replay_store(replay_key, raw, args_sha256=args_digest)
 
         return finish(raw, ok=ok, risk=risk, namespace=namespace)
 
     # -- Idempotency ---------------------------------------------------
     @staticmethod
-    def _replay_key(name: str, tenant_id: str, idempotency_key: str) -> str | None:
-        """Replay is scoped by tenant so keys cannot collide across them."""
+    def _replay_key(name: str, tenant_id: str, idempotency_key: str, *, user_id: str = "") -> str | None:
+        """Replay is scoped by (tenant_id, user_id, tool_name, idempotency_key) so keys never leak across users."""
         if not idempotency_key:
             return None
-        return f"{tenant_id}:{name}:{idempotency_key}"
+        scoped_user = user_id or "anon"
+        return f"{tenant_id}:{scoped_user}:{name}:{idempotency_key}"
 
     def _replay_lookup(self, key: str) -> dict[str, Any] | None:
         store = _shared_store()
@@ -911,7 +961,7 @@ class MCPClient:
                 raw = store.get(_IDEMPOTENCY_REDIS_PREFIX + key)
                 if raw:
                     data = json.loads(raw)
-                    return data if isinstance(data, dict) else None
+                    return dict(data) if isinstance(data, dict) else None
             except Exception:
                 logger.debug("MCP idempotency redis get failed", exc_info=True)
         with self._lock:
@@ -920,8 +970,10 @@ class MCPClient:
                 self._idempotency.move_to_end(key)
             return dict(cached) if cached is not None else None
 
-    def _replay_store(self, key: str, result: dict[str, Any]) -> None:
+    def _replay_store(self, key: str, result: dict[str, Any], *, args_sha256: str = "") -> None:
         payload = dict(result)
+        if args_sha256:
+            payload["_mcp_args_sha256"] = args_sha256
         store = _shared_store()
         if store is not None:
             try:
@@ -937,6 +989,277 @@ class MCPClient:
             self._idempotency.move_to_end(key)
             while len(self._idempotency) > _IDEMPOTENCY_CACHE_SIZE:
                 self._idempotency.popitem(last=False)
+
+    # -- Long-Horizon Multi-Server ToolAthlon Chain Executor -----------
+    _EXPLICIT_BIND_ONLY_SLOTS: frozenset[str] = frozenset(
+        {"amount_ugx", "amount", "tin", "taxpayer_tin", "taxpayer_name", "prn"}
+    )
+    _CHAIN_SLOT_ALIASES: dict[str, tuple[str, ...]] = {
+        "gross_income": ("gross_income", "ugx_amount", "converted_amount_ugx", "amount_ugx", "monthly_gross"),
+        "monthly_gross": ("monthly_gross", "ugx_amount", "converted_amount_ugx", "amount_ugx", "gross_income"),
+        "brn": ("brn", "registration_number", "business_registration_number"),
+        "business_name": ("business_name", "entity_name"),
+    }
+
+    def execute_tool_chain(  # noqa: PLR0913 - multi-step chain execution context
+        self,
+        steps: list[dict[str, Any]],
+        *,
+        tenant_id: str = "default",
+        user_id: str = "",
+        user_role: str = "public",
+        granted_purposes: list[str] | None = None,
+        initial_context: dict[str, Any] | None = None,
+        resume_from: dict[str, Any] | None = None,
+        max_steps: int = 10,
+        timeout_per_step_s: float = DEFAULT_TIMEOUT_S,
+    ) -> dict[str, Any]:
+        """Execute a multi-step, cross-namespace ToolAthlon tool chain with explicit slot binding and multi-turn resume.
+
+        Each item in *steps* is ``{"name": "<tool_name>", "arguments": {...},
+        "bind_from": {"<arg_name>": "<prev_step_or_key>"}, "confirmed": bool,
+        "idempotency_key": str}``.
+
+        - Financial and identity slots (``amount_ugx``, ``amount``, ``tin``,
+          ``taxpayer_tin``, ``taxpayer_name``, ``prn``) require explicit ``arguments``
+          or ``bind_from`` references. Unresolved ``bind_from`` references halt
+          fail-closed with ``status="invalid_step"``.
+        - Supports multi-turn continuation via *resume_from*: when a chain halted at
+          ``halted_at_step`` (``awaiting_confirmation`` or ``input_required``),
+          passing *resume_from* resumes execution from that step without re-running
+          already completed steps.
+        """
+        t0 = time.perf_counter()
+        if not steps:
+            return {
+                "ok": False,
+                "status": "empty_chain",
+                "completed_steps": [],
+                "namespaces_traversed": [],
+                "shared_context": dict(initial_context or {}),
+                "audit_trail": [],
+                "total_duration_ms": 0.0,
+            }
+        if len(steps) > max_steps:
+            return {
+                "ok": False,
+                "status": "chain_too_long",
+                "error": f"Tool chain length ({len(steps)}) exceeds max_steps ({max_steps})",
+                "completed_steps": [],
+                "namespaces_traversed": [],
+                "shared_context": dict(initial_context or {}),
+                "audit_trail": [],
+                "total_duration_ms": 0.0,
+            }
+
+        shared_context: dict[str, Any] = dict(initial_context or {})
+        step_outputs: dict[str, dict[str, Any]] = {}
+        completed_steps: list[dict[str, Any]] = []
+        namespaces_traversed: list[str] = []
+        audit_trail: list[dict[str, Any]] = []
+        start_idx = 0
+
+        if isinstance(resume_from, dict):
+            start_idx = int(resume_from.get("halted_at_step") or 0)
+            shared_context.update(resume_from.get("shared_context") or {})
+            for prev_rec in resume_from.get("completed_steps") or []:
+                if not isinstance(prev_rec, dict):
+                    continue
+                completed_steps.append(prev_rec)
+                prev_idx = int(prev_rec.get("step_index", 0))
+                prev_name = str(prev_rec.get("tool_name") or "")
+                prev_res = prev_rec.get("result") if isinstance(prev_rec.get("result"), dict) else {}
+                flat: dict[str, Any] = {}
+                for k, v in prev_res.items():
+                    if k in ("ok", "policy", "mode", "live", "simulation_notice") or v is None:
+                        continue
+                    if isinstance(v, dict):
+                        for sub_k, sub_v in v.items():
+                            if sub_v is not None and not isinstance(sub_v, dict | list):
+                                flat[sub_k] = sub_v
+                    else:
+                        flat[k] = v
+                if 0 <= prev_idx < len(steps):
+                    sid = str(steps[prev_idx].get("id") or prev_name)
+                    step_outputs[sid] = flat
+                if prev_name:
+                    step_outputs[prev_name] = flat
+            for ns in resume_from.get("namespaces_traversed") or []:
+                if ns and ns not in namespaces_traversed:
+                    namespaces_traversed.append(str(ns))
+            for entry in resume_from.get("audit_trail") or []:
+                if isinstance(entry, dict):
+                    audit_trail.append(entry)
+
+        for idx in range(start_idx, len(steps)):
+            step = steps[idx]
+            tool_name = str(step.get("name") or "").strip()
+            if not tool_name:
+                return {
+                    "ok": False,
+                    "status": "invalid_step",
+                    "halted_at_step": idx,
+                    "error": f"Step {idx} is missing tool 'name'",
+                    "completed_steps": completed_steps,
+                    "namespaces_traversed": namespaces_traversed,
+                    "shared_context": shared_context,
+                    "audit_trail": audit_trail,
+                    "total_duration_ms": round((time.perf_counter() - t0) * 1000, 2),
+                }
+
+            step_args = dict(step.get("arguments") or {})
+            bind_from = step.get("bind_from")
+            if isinstance(bind_from, dict):
+                for target_arg, source_ref in bind_from.items():
+                    if target_arg in step_args and step_args[target_arg] is not None:
+                        continue
+                    ref_str = str(source_ref or "")
+                    if "." in ref_str:
+                        src_step, src_field = ref_str.split(".", 1)
+                        src_dict = step_outputs.get(src_step, {})
+                        if src_field in src_dict and src_dict[src_field] is not None:
+                            step_args[target_arg] = src_dict[src_field]
+                        else:
+                            return {
+                                "ok": False,
+                                "status": "invalid_step",
+                                "halted_at_step": idx,
+                                "error": f"Step {idx}: bind_from '{ref_str}' did not resolve",
+                                "completed_steps": completed_steps,
+                                "namespaces_traversed": namespaces_traversed,
+                                "shared_context": shared_context,
+                                "audit_trail": audit_trail,
+                                "total_duration_ms": round((time.perf_counter() - t0) * 1000, 2),
+                            }
+                    elif ref_str in shared_context and shared_context[ref_str] is not None:
+                        step_args[target_arg] = shared_context[ref_str]
+                    else:
+                        return {
+                            "ok": False,
+                            "status": "invalid_step",
+                            "halted_at_step": idx,
+                            "error": f"Step {idx}: bind_from '{ref_str}' did not resolve",
+                            "completed_steps": completed_steps,
+                            "namespaces_traversed": namespaces_traversed,
+                            "shared_context": shared_context,
+                            "audit_trail": audit_trail,
+                            "total_duration_ms": round((time.perf_counter() - t0) * 1000, 2),
+                        }
+
+            descriptor, _ = self._descriptor(tool_name)
+            if descriptor is not None:
+                input_schema = descriptor.get("inputSchema") or {}
+                props = (input_schema.get("properties") or {}) if isinstance(input_schema, dict) else {}
+                for prop_name in props:
+                    if prop_name in step_args and step_args[prop_name] is not None:
+                        continue
+                    if prop_name in self._EXPLICIT_BIND_ONLY_SLOTS:
+                        continue
+                    candidates = self._CHAIN_SLOT_ALIASES.get(prop_name, (prop_name,))
+                    for cand_key in candidates:
+                        if cand_key in shared_context and shared_context[cand_key] is not None:
+                            step_args[prop_name] = shared_context[cand_key]
+                            break
+
+            call_res = self.call_tool(
+                tool_name,
+                step_args,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                user_role=user_role,
+                granted_purposes=granted_purposes,
+                confirmed=bool(step.get("confirmed", False)),
+                idempotency_key=str(step.get("idempotency_key") or ""),
+                iteration=idx,
+                timeout_s=timeout_per_step_s,
+                input_responses=step.get("input_responses"),
+                request_state=step.get("request_state"),
+            )
+            audit_trail.append(call_res.to_audit_dict())
+            if call_res.namespace not in namespaces_traversed:
+                namespaces_traversed.append(call_res.namespace)
+
+            res_payload = call_res.result
+            step_record = {
+                "step_index": idx,
+                "tool_name": tool_name,
+                "namespace": call_res.namespace,
+                "arguments": step_args,
+                "result": res_payload,
+                "ok": call_res.ok,
+                "replayed": call_res.replayed,
+                "duration_ms": call_res.duration_ms,
+            }
+
+            if res_payload.get("requires_confirmation") is True and res_payload.get("submitted") is False:
+                return {
+                    "ok": True,
+                    "status": "awaiting_confirmation",
+                    "halted_at_step": idx,
+                    "pending_step": step_record,
+                    "pending_proposal": res_payload.get("proposal"),
+                    "completed_steps": completed_steps,
+                    "namespaces_traversed": namespaces_traversed,
+                    "shared_context": shared_context,
+                    "audit_trail": audit_trail,
+                    "total_duration_ms": round((time.perf_counter() - t0) * 1000, 2),
+                }
+
+            if res_payload.get("input_required") is True:
+                return {
+                    "ok": False,
+                    "status": "input_required",
+                    "halted_at_step": idx,
+                    "pending_step": step_record,
+                    "input_requests": res_payload.get("inputRequests"),
+                    "request_state": res_payload.get("requestState"),
+                    "completed_steps": completed_steps,
+                    "namespaces_traversed": namespaces_traversed,
+                    "shared_context": shared_context,
+                    "audit_trail": audit_trail,
+                    "total_duration_ms": round((time.perf_counter() - t0) * 1000, 2),
+                }
+
+            if not call_res.ok:
+                return {
+                    "ok": False,
+                    "status": "step_failed",
+                    "halted_at_step": idx,
+                    "failed_step": step_record,
+                    "error": res_payload.get("error") or f"Step {idx} ({tool_name}) failed",
+                    "completed_steps": completed_steps,
+                    "namespaces_traversed": namespaces_traversed,
+                    "shared_context": shared_context,
+                    "audit_trail": audit_trail,
+                    "total_duration_ms": round((time.perf_counter() - t0) * 1000, 2),
+                }
+
+            completed_steps.append(step_record)
+            step_key = str(step.get("id") or tool_name)
+            flattened: dict[str, Any] = {}
+            for k, v in res_payload.items():
+                if k in ("ok", "policy", "mode", "live", "simulation_notice") or v is None:
+                    continue
+                if isinstance(v, dict):
+                    for sub_k, sub_v in v.items():
+                        if sub_v is not None and not isinstance(sub_v, dict | list):
+                            flattened[sub_k] = sub_v
+                            shared_context[sub_k] = sub_v
+                else:
+                    flattened[k] = v
+                    shared_context[k] = v
+            step_outputs[step_key] = flattened
+            step_outputs[tool_name] = flattened
+
+        return {
+            "ok": True,
+            "status": "completed",
+            "completed_steps": completed_steps,
+            "namespaces_traversed": namespaces_traversed,
+            "shared_context": shared_context,
+            "audit_trail": audit_trail,
+            "total_duration_ms": round((time.perf_counter() - t0) * 1000, 2),
+        }
 
     # -- Health --------------------------------------------------------
     def health(self) -> dict[str, Any]:

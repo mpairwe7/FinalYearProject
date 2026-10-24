@@ -32,9 +32,12 @@ def request_meta(
     user_id: str = "",
     user_role: str = "public",
     call_id: str = "",
+    confirmed: bool = False,
+    idempotency_key: str = "",
+    granted_purposes: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """The ``_meta`` block every stateless request carries."""
-    return {
+    meta: dict[str, Any] = {
         META_PROTOCOL_VERSION: MCP_PROTOCOL_VERSION,
         META_CLIENT_INFO: {"name": CLIENT_NAME, "version": "2.0"},
         META_CLIENT_CAPABILITIES: dict(DEFAULT_CLIENT_CAPABILITIES),
@@ -43,6 +46,14 @@ def request_meta(
         "ug.go.ura.chatbot/userRole": user_role,
         "ug.go.ura.chatbot/callId": call_id,
     }
+    if confirmed:
+        meta["ug.go.ura.chatbot/confirmed"] = True
+        meta["confirmed"] = True
+    if idempotency_key:
+        meta["ug.go.ura.chatbot/idempotencyKey"] = str(idempotency_key)
+    if granted_purposes:
+        meta["ug.go.ura.chatbot/grantedPurposes"] = [str(p) for p in granted_purposes if p]
+    return meta
 
 
 def missing_required_meta(meta: dict[str, Any] | None) -> list[str]:

@@ -34,7 +34,15 @@ from ...tools import ToolRegistry
 from ..auth import OAUTH_CLIENT_CREDENTIALS_EXTENSION, ServerAuth
 from ..policy import authorize_tool_call
 from ..protocol import MCP_PROTOCOL_VERSION, META_PROTOCOL_VERSION, missing_required_meta
-from ..validation import result_matches_schema, screen_tool_result, validate_arguments
+from ..validation import (
+    build_validation_repair_hints,
+    coerce_arguments_to_schema,
+    result_matches_schema,
+    screen_tool_result,
+    scrub_prompt_overrides_in_result,
+    validate_arguments,
+    validate_resource_uri,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +155,7 @@ def decode_header_value(value: str) -> str:
     return value
 
 
-def _identity(meta: dict[str, Any], *, trusted: bool) -> dict[str, str]:
+def _identity(meta: dict[str, Any], *, trusted: bool) -> dict[str, Any]:
     """Who the call is for.
 
     The vendor fields are the chat backend's statement about the taxpayer
@@ -156,11 +164,23 @@ def _identity(meta: dict[str, Any], *, trusted: bool) -> dict[str, str]:
     the body says.
     """
     if not trusted:
-        return {"tenant_id": "default", "user_id": "", "user_role": "public"}
+        return {
+            "tenant_id": "default",
+            "user_id": "",
+            "user_role": "public",
+            "confirmed": False,
+            "idempotency_key": "",
+            "granted_purposes": [],
+        }
+    raw_purposes = meta.get("ug.go.ura.chatbot/grantedPurposes")
+    purposes = [str(p) for p in raw_purposes if p] if isinstance(raw_purposes, list | tuple) else []
     return {
         "tenant_id": str(meta.get("ug.go.ura.chatbot/tenantId", "default")),
         "user_id": str(meta.get("ug.go.ura.chatbot/userId", "")),
         "user_role": str(meta.get("ug.go.ura.chatbot/userRole", "public")),
+        "confirmed": bool(meta.get("ug.go.ura.chatbot/confirmed") or meta.get("confirmed", False)),
+        "idempotency_key": str(meta.get("ug.go.ura.chatbot/idempotencyKey") or ""),
+        "granted_purposes": purposes,
     }
 
 
@@ -272,17 +292,25 @@ class StatelessMCPServer:
             raise ProtocolError(INVALID_PARAMS, f"Unknown tool: {name}")
 
         identity = _identity(params.get("_meta") or {}, trusted=trusted_identity)
+        effective_idem_key = str(
+            identity.get("idempotency_key") or arguments.get("idempotency_key") or ""
+        )
+        input_schema = tool.schema.parameters or {}
+        coerced_args = coerce_arguments_to_schema(input_schema, arguments)
         decision = authorize_tool_call(
             name=name,
             risk=tool.schema.risk,
             user_role=identity["user_role"],
+            granted_purposes=list(identity.get("granted_purposes") or []),
             user_id=identity["user_id"],
             tenant_id=identity["tenant_id"],
+            confirmed=bool(identity.get("confirmed", False)),
+            idempotency_key=effective_idem_key,
             required_scopes=tool.schema.required_scopes,
             allowed_roles=tool.schema.allowed_roles,
             scope_exempt_roles=tool.schema.scope_exempt_roles,
             requires_confirmation=tool.schema.requires_confirmation,
-            arguments=arguments,
+            arguments=coerced_args,
         )
         if not decision["allowed"]:
             # Defence in depth: the calling client authorizes too, but a
@@ -291,9 +319,8 @@ class StatelessMCPServer:
                 {"ok": False, "error": "policy_denied", "policy": decision}, is_error=True
             )
 
-        input_schema = tool.schema.parameters or {}
         declared_properties = set((input_schema.get("properties") or {}).keys())
-        validation_args = dict(arguments)
+        validation_args = dict(coerced_args)
         for control in ("submit", "idempotency_key"):
             if control not in declared_properties:
                 validation_args.pop(control, None)
@@ -307,6 +334,9 @@ class StatelessMCPServer:
                     "ok": False,
                     "error": err_msg,
                     "validation_errors": arg_errors,
+                    "repair_hints": build_validation_repair_hints(
+                        input_schema, validation_args, arg_errors
+                    ),
                     "expected": input_schema,
                 },
                 is_error=True,
@@ -318,7 +348,7 @@ class StatelessMCPServer:
             user_id=str(identity.get("user_id") or ""),
             tenant_id=str(identity.get("tenant_id") or "default"),
             channel="mcp",
-            caller_confirmed=bool((params.get("_meta") or {}).get("confirmed", False)),
+            caller_confirmed=bool(identity.get("confirmed", False)),
         )
         drift = result_matches_schema(tool.schema.output_schema, result)
         if drift:
@@ -330,11 +360,19 @@ class StatelessMCPServer:
         else:
             output_violations = screen_tool_result(result)
             if output_violations:
-                result = {
-                    "ok": False,
-                    "error": "untrusted_tool_output",
-                    "violations": output_violations[:8],
-                }
+                hard_violations = [
+                    v
+                    for v in output_violations
+                    if not v.startswith("indirect_prompt_injection:prompt_override_directive@")
+                ]
+                if hard_violations:
+                    result = {
+                        "ok": False,
+                        "error": "untrusted_tool_output",
+                        "violations": hard_violations[:8],
+                    }
+                else:
+                    result = scrub_prompt_overrides_in_result(result)
         return call_result(result, is_error=not result.get("ok", True))
 
     def handle_resources_list(self) -> dict[str, Any]:
@@ -342,6 +380,9 @@ class StatelessMCPServer:
 
     def handle_resources_read(self, params: dict[str, Any]) -> dict[str, Any]:
         uri = str(params.get("uri", ""))
+        uri_err = validate_resource_uri(uri)
+        if uri_err:
+            raise ProtocolError(INVALID_PARAMS, f"Invalid resource URI '{uri}': {uri_err}")
         contents: dict[str, Any] | None = None
         if self._read_resource is not None:
             try:

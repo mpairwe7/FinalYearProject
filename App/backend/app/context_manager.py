@@ -222,10 +222,20 @@ def extract_conversation_entities(turns: list[dict[str, str]]) -> ConversationEn
         if user_matched_topic:
             active_subject = user_matched_topic
 
-        # Taxpayer status
+        # Taxpayer status (prevent 'non-resident' from also matching 'resident', and honour explicit residency corrections)
+        is_correction = bool(
+            re.search(r"\b(?:actually|instead|sorry|correction|meant|no\s+longer)\b", user_msg, re.I)
+        )
         for pat, status_label in _TAXPAYER_STATUS_PATTERNS:
-            if pat.search(user_msg) and status_label not in taxpayer_types:
-                taxpayer_types.append(status_label)
+            if pat.search(user_msg):
+                if status_label == "Resident" and re.search(r"\bnon[-\s]?resident\b", user_msg, re.I):
+                    continue
+                if is_correction and status_label == "Non-Resident":
+                    taxpayer_types = [t for t in taxpayer_types if t != "Resident"]
+                elif is_correction and status_label == "Resident":
+                    taxpayer_types = [t for t in taxpayer_types if t != "Non-Resident"]
+                if status_label not in taxpayer_types:
+                    taxpayer_types.append(status_label)
 
         # Monetary figures
         found_amounts = amount_re.findall(user_msg)
@@ -292,6 +302,38 @@ def summarize_older_turns(turns: list[dict[str, str]]) -> str:
     return " ".join(lines)
 
 
+def build_consolidated_turn_spec(
+    turns: list[dict[str, str]],
+    entities: ConversationEntities | None = None,
+) -> str:
+    """Synthesize a single consolidated multi-turn specification (ICLR 2026 'Lost in Conversation' / ACL 2026 'MT-OSC').
+
+    Rather than forcing the generator to reconstruct sharded constraints scattered
+    across early assistant replies, this produces a compact, user-only consolidated
+    state specification reflecting the latest active tax focus, latest overridden
+    taxpayer status, and latest figures.
+    """
+    if len(turns) < 2:
+        return ""
+    ent = entities if entities is not None else extract_conversation_entities(turns)
+    parts: list[str] = []
+    if ent.active_subject:
+        parts.append(f"Active focus: {ent.active_subject}")
+    if ent.tax_topics and len(ent.tax_topics) > 1:
+        parts.append(f"Domains in scope: {', '.join(ent.tax_topics)}")
+    if ent.taxpayer_types:
+        parts.append(f"Current taxpayer profile: {', '.join(ent.taxpayer_types)}")
+    if ent.business_names:
+        parts.append(f"Entity: {ent.business_names[-1]}")
+    if ent.locations:
+        parts.append(f"Location: {ent.locations[-1]}")
+    if ent.amounts:
+        parts.append(f"Latest figure: {ent.amounts[-1]}")
+        if len(ent.amounts) > 1:
+            parts.append(f"Prior figures: {', '.join(ent.amounts[:-1][-3:])}")
+    return " | ".join(parts)
+
+
 @dataclass
 class ConversationContext:
     """Full conversational context bundle for agent prompt and RAG stages."""
@@ -300,6 +342,7 @@ class ConversationContext:
     active_entities: ConversationEntities
     total_turns: int
     all_turns: list[dict[str, str]]
+    consolidated_spec: str = ""
 
 
 class RollingContextManager:
@@ -339,6 +382,7 @@ class RollingContextManager:
         recent = normalized[-self.recent_limit:] if self.recent_limit > 0 else normalized
         verbatim = max(1, min(PROMPT_VERBATIM_TURNS, self.recent_limit or PROMPT_VERBATIM_TURNS))
         summary = summarize_older_turns(normalized[:-verbatim]) if total > verbatim else ""
+        consolidated = build_consolidated_turn_spec(normalized, entities)
 
         return ConversationContext(
             recent_turns=recent,
@@ -346,6 +390,7 @@ class RollingContextManager:
             active_entities=entities,
             total_turns=total,
             all_turns=normalized,
+            consolidated_spec=consolidated,
         )
 
 # Global helper instance

@@ -619,9 +619,10 @@ csa_aicm_maestro_2026:
       name: "Agent Frameworks"
       aicm_domains: ["AA", "AIS"]
       status: "mitigated"
-      controls: "Bounded ReAct/revision loops, 5-locale ToolRAGSelector, typed HandoffEnvelope v2.1, and HMAC-SHA256 MRTR requestState verification (mrtr.py)"
+      controls: "CSA AICM / MAESTRO L3: Bounded ReAct/revision loops, 5-locale namespace-diversified ToolRAGSelector, typed HandoffEnvelope v2.1, context-bound HMAC-SHA256 MRTR requestState verification (mrtr.py), and MCPClient.execute_tool_chain"
       verified_by:
         - "tests/agents/test_mcp_2026_october_audit.py"
+        - "tests/agents/test_mcp_toolathlon_2026_october.py"
     - id: "MAESTRO-L4"
       name: "Deployment & Infrastructure"
       aicm_domains: ["IVS", "BCR"]
