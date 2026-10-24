@@ -56,6 +56,7 @@ from .serializer import (
     Frame,
     InterruptionFrame,
     OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
     RequestCallbackFrame,
     RequestOfficerFrame,
 )
@@ -473,7 +474,7 @@ class UraReceptionistBrain(LLMService):
             "has_more_detail": bool(state.more_detail or getattr(state, "last_more_detail", "")),
             "has_last_answer": bool(state.last_assistant_answer),
         }
-        await self.push_frame(OutputTransportMessageFrame(payload), FrameDirection.DOWNSTREAM)
+        await self.push_frame(OutputTransportMessageUrgentFrame(payload), FrameDirection.DOWNSTREAM)
 
     async def process_frame(
         self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
@@ -519,11 +520,17 @@ class UraReceptionistBrain(LLMService):
             return
 
         if isinstance(frame, CallControlFrame):
+            self.room.state.generation_id += 1
+            self.room.state.offer_interrupted = False
+            self._bot_speaking = False
+            await self.push_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
             await self._handle_call_control(frame.action)
             return
 
         if isinstance(frame, CallTextTurnFrame):
             self.room.state.generation_id += 1
+            self.room.state.offer_interrupted = False
+            self._bot_speaking = False
             await self.push_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
             caption_data = {
                 "type": "caption",
@@ -533,7 +540,7 @@ class UraReceptionistBrain(LLMService):
                 "turn_id": self.room.state.turn_seq + 1,
             }
             await self.push_frame(
-                OutputTransportMessageFrame(caption_data), FrameDirection.DOWNSTREAM
+                OutputTransportMessageUrgentFrame(caption_data), FrameDirection.DOWNSTREAM
             )
             hub.publish_call(self.room.call_id, "caption", caption_data)
             await self.handle_external_question(frame.text, words=None)
@@ -770,6 +777,8 @@ class UraReceptionistBrain(LLMService):
             await self._say_and_record(phrase(_offer_question(offer, offer_reason), language), kind="notice")
             return
         if offer and _OFFER_DECLINE_RE.search(user_text):
+            if offer == "more":
+                self.room.state.last_more_detail = ""
             declined = "crisis_declined" if offer_reason == "safety_concern" else "offer_declined"
             await self._say_and_record(phrase(declined, language), kind="notice")
             return
@@ -834,12 +843,14 @@ class UraReceptionistBrain(LLMService):
         # (UraSpeechTTS, RECEPTIONIST_SLOW_PAUSE_MS), which is what it promises.
         if _is_control_request(_SPEED_SLOW_PATTERNS, user_text):
             self.room.state.speech_rate_slow = True
+            self._offer(offer, reason=offer_reason, more=more, at_risk=offer_at_risk)
             await self._publish_call_state()
             await self._say_and_record(phrase("slow_ack", language), kind="notice")
             return
 
         if _is_control_request(_SPEED_NORMAL_PATTERNS, user_text):
             self.room.state.speech_rate_slow = False
+            self._offer(offer, reason=offer_reason, more=more, at_risk=offer_at_risk)
             await self._publish_call_state()
             await self._say_and_record(phrase("normal_ack", language), kind="notice")
             return
