@@ -253,13 +253,12 @@ class ToolRAGSelector:
                 continue
             if use_dense:
                 s = self._score_dense(query, tool)
-                has_name_hit = True
             else:
                 s = self._score_token_overlap(query_tokens, tool)
-                name_toks = _tokenize(tool.schema.name.replace("_", " ")) | _tokenize(
-                    tool.schema.namespace.replace("_", " ")
-                )
-                has_name_hit = bool(query_tokens & name_toks)
+            name_toks = _tokenize(tool.schema.name.replace("_", " ")) | _tokenize(
+                tool.schema.namespace.replace("_", " ")
+            )
+            has_name_hit = bool(query_tokens & name_toks)
             # Only record tools that actually matched — otherwise
             # a zero-score tool would prevent the fallback branch
             # from firing when the query has no relevant tools.

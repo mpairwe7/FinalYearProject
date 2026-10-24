@@ -595,8 +595,23 @@ def payment_type_reply(message: str) -> str | None:
     return _PAYMENT_TYPE_REPLY.get(re.sub(r"\s+", " ", (message or "").strip().lower()))
 
 
+_DELTA_INCREASE_RE = re.compile(
+    r"\b(?:increas(?:e|es|ed|ing)?|goes\s+up|rises?|rasied|raised|add(?:ed|ing)?|plus|more|higher)\s*(?:by)?\b",
+    re.IGNORECASE,
+)
+_DELTA_DECREASE_RE = re.compile(
+    r"\b(?:decreas(?:e|es|ed|ing)?|goes\s+down|drops?|dropped|reduc(?:e|ed|es|ing)|minus|less|lower)\s*(?:by)?\b",
+    re.IGNORECASE,
+)
+_PCT_DELTA_RE = re.compile(r"\b(\d+(?:\.\d+)?)\s*%", re.IGNORECASE)
+_WHAT_IF_PREFIX_RE = re.compile(
+    r"^\s*(?:what\s+(?:if|about)|and\s+(?:if|for|what\s+if)|how\s+about|suppose|assuming|instead)\b",
+    re.IGNORECASE,
+)
+
+
 def continue_calculation(saved: dict[str, Any], message: str) -> dict[str, Any] | None:
-    """Fill the pending slot of a remembered calculator from *message*.
+    """Fill the pending slot or apply a multi-turn sensitivity adjustment to a remembered calculator.
 
     Returns ``{"ready": True, ...}`` when the tool can run, ``{"ready": False}``
     when another slot is still open, and None when the message is a new question.
@@ -607,19 +622,74 @@ def continue_calculation(saved: dict[str, Any], message: str) -> dict[str, Any] 
     params = dict(saved.get("params") or {})
     pending = [str(slot) for slot in (saved.get("pending") or [])]
     assumptions = list(saved.get("assumptions") or [])
+    text = (message or "").strip()
     if pending and pending[0] == "payment_type":
-        kind = payment_type_reply(message)
+        kind = payment_type_reply(text)
         if kind is None:
             return None
         params["payment_type"] = kind
         pending = pending[1:]
     else:
-        amount = lone_amount(message)
-        if amount is None:
-            return None
         slot = pending[0] if pending and pending[0] in _AMOUNT_SLOTS else AMOUNT_SLOT_BY_TOOL[tool]
-        params[slot] = amount
-        pending = [item for item in pending if item != slot]
+        amount = lone_amount(text)
+        if amount is not None:
+            params[slot] = amount
+            pending = [item for item in pending if item != slot]
+        elif not pending and isinstance(params.get(slot), int | float) and float(params[slot]) > 0:
+            prev_val = float(params[slot])
+            # 1. Percentage delta follow-up ("what if it increases by 20%?", "what if 10% lower?")
+            m_pct = _PCT_DELTA_RE.search(text)
+            amts = extract_amounts(text)
+            if m_pct and not amts and (_DELTA_INCREASE_RE.search(text) or _DELTA_DECREASE_RE.search(text)):
+                pct = float(m_pct.group(1))
+                if _DELTA_DECREASE_RE.search(text):
+                    params[slot] = round(max(0.0, prev_val * (1.0 - pct / 100.0)), 2)
+                else:
+                    params[slot] = round(prev_val * (1.0 + pct / 100.0), 2)
+            # 2. Additive / subtractive delta follow-up ("what if it increases by 1,500,000?")
+            elif len(amts) == 1 and (_DELTA_INCREASE_RE.search(text) or _DELTA_DECREASE_RE.search(text)):
+                delta = float(amts[0][0])
+                if _DELTA_DECREASE_RE.search(text):
+                    params[slot] = round(max(0.0, prev_val - delta), 2)
+                else:
+                    params[slot] = round(prev_val + delta, 2)
+            # 3. Parameter-switch sensitivity follow-up on the remembered amount ("what if non-resident?")
+            elif not amts and _WHAT_IF_PREFIX_RE.search(text) and len(text.split()) <= 12:
+                updated = False
+                if tool == "calculate_paye":
+                    if _NON_RESIDENT_RE.search(text):
+                        params["residency"] = "non_resident"
+                        assumptions = [a for a in assumptions if "resident" not in a.lower()]
+                        assumptions.append("non-resident employee tax rates applied")
+                        updated = True
+                    elif re.search(r"\bresident\b", text, re.IGNORECASE):
+                        params["residency"] = "resident"
+                        assumptions = [a for a in assumptions if "resident" not in a.lower()]
+                        assumptions.append("resident employee")
+                        updated = True
+                    if re.search(r"\b(?:nssf|take[-\s]?home|net\s+pay)\b", text, re.IGNORECASE):
+                        params["include_nssf"] = not bool(re.search(r"\bwithout\s+nssf\b", text, re.IGNORECASE))
+                        updated = True
+                elif tool == "calculate_vat":
+                    if re.search(r"\binclusive\b|\bincludes?\s+vat\b", text, re.IGNORECASE):
+                        params["direction"] = "inclusive"
+                        updated = True
+                    elif re.search(r"\bexclusive\b|\bexcludes?\s+vat\b", text, re.IGNORECASE):
+                        params["direction"] = "exclusive"
+                        updated = True
+                elif tool == "calculate_rental_tax":
+                    if re.search(r"\b(?:company|corporate|corporation)\b", text, re.IGNORECASE):
+                        params["landlord_type"] = "company"
+                        updated = True
+                    elif re.search(r"\b(?:individual|person)\b", text, re.IGNORECASE):
+                        params["landlord_type"] = "individual"
+                        updated = True
+                if not updated:
+                    return None
+            else:
+                return None
+        else:
+            return None
     return {
         "tool": tool,
         "params": params,

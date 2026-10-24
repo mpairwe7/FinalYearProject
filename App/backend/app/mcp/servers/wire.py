@@ -295,6 +295,8 @@ class StatelessMCPServer:
         effective_idem_key = str(
             identity.get("idempotency_key") or arguments.get("idempotency_key") or ""
         )
+        input_schema = tool.schema.parameters or {}
+        coerced_args = coerce_arguments_to_schema(input_schema, arguments)
         decision = authorize_tool_call(
             name=name,
             risk=tool.schema.risk,
@@ -308,7 +310,7 @@ class StatelessMCPServer:
             allowed_roles=tool.schema.allowed_roles,
             scope_exempt_roles=tool.schema.scope_exempt_roles,
             requires_confirmation=tool.schema.requires_confirmation,
-            arguments=arguments,
+            arguments=coerced_args,
         )
         if not decision["allowed"]:
             # Defence in depth: the calling client authorizes too, but a
@@ -317,13 +319,11 @@ class StatelessMCPServer:
                 {"ok": False, "error": "policy_denied", "policy": decision}, is_error=True
             )
 
-        input_schema = tool.schema.parameters or {}
         declared_properties = set((input_schema.get("properties") or {}).keys())
-        validation_args = dict(arguments)
+        validation_args = dict(coerced_args)
         for control in ("submit", "idempotency_key"):
             if control not in declared_properties:
                 validation_args.pop(control, None)
-        validation_args = coerce_arguments_to_schema(input_schema, validation_args)
         arg_errors = validate_arguments(input_schema, validation_args)
         if arg_errors:
             err_msg = f"Invalid arguments for {name}: " + "; ".join(arg_errors)

@@ -128,7 +128,7 @@ def validate_arguments(schema: dict[str, Any] | None, arguments: dict[str, Any])
 
 
 _NUMERIC_STRING_RE = re.compile(
-    r"^\s*(?:UGX|USD|EUR|GBP|KES|TZS|RWF|\$)?\s*([+-]?\d[\d,]*(?:\.\d+)?)\s*%?\s*$",
+    r"^\s*(?:UGX)?\s*([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*$",
     re.IGNORECASE,
 )
 
@@ -326,6 +326,7 @@ ALLOWED_RESOURCE_SCHEMES: frozenset[str] = frozenset(
         "tin",
         "tin_registration",
         "payment",
+        "payments",
         "payment_system",
         "wire",
     }

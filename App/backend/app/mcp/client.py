@@ -714,6 +714,8 @@ class MCPClient:
         requires_confirmation = bool(
             _meta_of(descriptor, "requiresConfirmation", False)
         )
+        input_schema = descriptor.get("inputSchema") or {}
+        coerced_args = coerce_arguments_to_schema(input_schema, args)
         # A write proposal must pass role and consent checks before it is
         # shown to the user, but the proposal itself is not a write. The
         # approval replay below is the only call that satisfies the
@@ -731,7 +733,7 @@ class MCPClient:
             allowed_roles=tuple(_meta_of(descriptor, "allowedRoles", ()) or ()),
             scope_exempt_roles=tuple(_meta_of(descriptor, "scopeExemptRoles", ()) or ()),
             requires_confirmation=requires_confirmation and confirmed,
-            arguments=args,
+            arguments=coerced_args,
         )
         if not policy["allowed"]:
             return finish(
@@ -741,16 +743,14 @@ class MCPClient:
                 namespace=namespace,
             )
 
-        input_schema = descriptor.get("inputSchema") or {}
         declared_properties = set((input_schema.get("properties") or {}).keys())
-        validation_args = dict(args)
+        validation_args = dict(coerced_args)
         # These are MCP dispatch controls, not tool inputs. Older tools do
         # not declare them in their schemas; strip them only in that case so
         # strict additionalProperties validation remains useful.
         for control in ("submit", "idempotency_key"):
             if control not in declared_properties:
                 validation_args.pop(control, None)
-        validation_args = coerce_arguments_to_schema(input_schema, validation_args)
         errors = validate_arguments(input_schema, validation_args)
         if errors:
             return finish(
@@ -991,45 +991,14 @@ class MCPClient:
                 self._idempotency.popitem(last=False)
 
     # -- Long-Horizon Multi-Server ToolAthlon Chain Executor -----------
+    _EXPLICIT_BIND_ONLY_SLOTS: frozenset[str] = frozenset(
+        {"amount_ugx", "amount", "tin", "taxpayer_tin", "taxpayer_name", "prn"}
+    )
     _CHAIN_SLOT_ALIASES: dict[str, tuple[str, ...]] = {
-        "amount_ugx": (
-            "amount_ugx",
-            "ugx_amount",
-            "converted_amount_ugx",
-            "total_tax_ugx",
-            "vat",
-            "vat_amount",
-            "vat_payable",
-            "paye",
-            "paye_tax",
-            "net_tax",
-            "tax_payable",
-            "wht_amount",
-            "presumptive_tax",
-            "corporation_tax",
-            "rental_tax",
-            "total_duty_ugx",
-            "stamp_duty_ugx",
-            "amount",
-        ),
-        "amount": (
-            "amount",
-            "ugx_amount",
-            "converted_amount_ugx",
-            "amount_ugx",
-            "vat",
-            "vat_amount",
-            "paye",
-            "tax_payable",
-        ),
         "gross_income": ("gross_income", "ugx_amount", "converted_amount_ugx", "amount_ugx", "monthly_gross"),
         "monthly_gross": ("monthly_gross", "ugx_amount", "converted_amount_ugx", "amount_ugx", "gross_income"),
-        "tin": ("tin", "taxpayer_tin", "issued_tin", "verified_tin"),
-        "taxpayer_tin": ("taxpayer_tin", "tin", "issued_tin", "verified_tin"),
         "brn": ("brn", "registration_number", "business_registration_number"),
-        "prn": ("prn", "generated_prn", "payment_registration_number"),
-        "taxpayer_name": ("taxpayer_name", "business_name", "entity_name", "full_name", "name"),
-        "business_name": ("business_name", "entity_name", "taxpayer_name"),
+        "business_name": ("business_name", "entity_name"),
     }
 
     def execute_tool_chain(  # noqa: PLR0913 - multi-step chain execution context
@@ -1041,21 +1010,24 @@ class MCPClient:
         user_role: str = "public",
         granted_purposes: list[str] | None = None,
         initial_context: dict[str, Any] | None = None,
+        resume_from: dict[str, Any] | None = None,
         max_steps: int = 10,
         timeout_per_step_s: float = DEFAULT_TIMEOUT_S,
     ) -> dict[str, Any]:
-        """Execute a multi-step, cross-namespace ToolAthlon tool chain with automatic slot binding.
+        """Execute a multi-step, cross-namespace ToolAthlon tool chain with explicit slot binding and multi-turn resume.
 
         Each item in *steps* is ``{"name": "<tool_name>", "arguments": {...},
         "bind_from": {"<arg_name>": "<prev_step_or_key>"}, "confirmed": bool,
         "idempotency_key": str}``.
 
-        - Automatically resolves missing declared arguments from ``shared_context``
-          (populated by prior steps' outputs and *initial_context*) via explicit
-          ``bind_from`` mappings or :attr:`_CHAIN_SLOT_ALIASES`.
-        - Stops fail-closed at the first step that fails (``ok=False``), requires
-          confirmation (``requires_confirmation=True`` and ``submitted=False``),
-          or requests elicitation (``input_required=True``).
+        - Financial and identity slots (``amount_ugx``, ``amount``, ``tin``,
+          ``taxpayer_tin``, ``taxpayer_name``, ``prn``) require explicit ``arguments``
+          or ``bind_from`` references. Unresolved ``bind_from`` references halt
+          fail-closed with ``status="invalid_step"``.
+        - Supports multi-turn continuation via *resume_from*: when a chain halted at
+          ``halted_at_step`` (``awaiting_confirmation`` or ``input_required``),
+          passing *resume_from* resumes execution from that step without re-running
+          already completed steps.
         """
         t0 = time.perf_counter()
         if not steps:
@@ -1085,8 +1057,42 @@ class MCPClient:
         completed_steps: list[dict[str, Any]] = []
         namespaces_traversed: list[str] = []
         audit_trail: list[dict[str, Any]] = []
+        start_idx = 0
 
-        for idx, step in enumerate(steps):
+        if isinstance(resume_from, dict):
+            start_idx = int(resume_from.get("halted_at_step") or 0)
+            shared_context.update(resume_from.get("shared_context") or {})
+            for prev_rec in resume_from.get("completed_steps") or []:
+                if not isinstance(prev_rec, dict):
+                    continue
+                completed_steps.append(prev_rec)
+                prev_idx = int(prev_rec.get("step_index", 0))
+                prev_name = str(prev_rec.get("tool_name") or "")
+                prev_res = prev_rec.get("result") if isinstance(prev_rec.get("result"), dict) else {}
+                flat: dict[str, Any] = {}
+                for k, v in prev_res.items():
+                    if k in ("ok", "policy", "mode", "live", "simulation_notice") or v is None:
+                        continue
+                    if isinstance(v, dict):
+                        for sub_k, sub_v in v.items():
+                            if sub_v is not None and not isinstance(sub_v, dict | list):
+                                flat[sub_k] = sub_v
+                    else:
+                        flat[k] = v
+                if 0 <= prev_idx < len(steps):
+                    sid = str(steps[prev_idx].get("id") or prev_name)
+                    step_outputs[sid] = flat
+                if prev_name:
+                    step_outputs[prev_name] = flat
+            for ns in resume_from.get("namespaces_traversed") or []:
+                if ns and ns not in namespaces_traversed:
+                    namespaces_traversed.append(str(ns))
+            for entry in resume_from.get("audit_trail") or []:
+                if isinstance(entry, dict):
+                    audit_trail.append(entry)
+
+        for idx in range(start_idx, len(steps)):
+            step = steps[idx]
             tool_name = str(step.get("name") or "").strip()
             if not tool_name:
                 return {
@@ -1113,8 +1119,32 @@ class MCPClient:
                         src_dict = step_outputs.get(src_step, {})
                         if src_field in src_dict and src_dict[src_field] is not None:
                             step_args[target_arg] = src_dict[src_field]
+                        else:
+                            return {
+                                "ok": False,
+                                "status": "invalid_step",
+                                "halted_at_step": idx,
+                                "error": f"Step {idx}: bind_from '{ref_str}' did not resolve",
+                                "completed_steps": completed_steps,
+                                "namespaces_traversed": namespaces_traversed,
+                                "shared_context": shared_context,
+                                "audit_trail": audit_trail,
+                                "total_duration_ms": round((time.perf_counter() - t0) * 1000, 2),
+                            }
                     elif ref_str in shared_context and shared_context[ref_str] is not None:
                         step_args[target_arg] = shared_context[ref_str]
+                    else:
+                        return {
+                            "ok": False,
+                            "status": "invalid_step",
+                            "halted_at_step": idx,
+                            "error": f"Step {idx}: bind_from '{ref_str}' did not resolve",
+                            "completed_steps": completed_steps,
+                            "namespaces_traversed": namespaces_traversed,
+                            "shared_context": shared_context,
+                            "audit_trail": audit_trail,
+                            "total_duration_ms": round((time.perf_counter() - t0) * 1000, 2),
+                        }
 
             descriptor, _ = self._descriptor(tool_name)
             if descriptor is not None:
@@ -1122,6 +1152,8 @@ class MCPClient:
                 props = (input_schema.get("properties") or {}) if isinstance(input_schema, dict) else {}
                 for prop_name in props:
                     if prop_name in step_args and step_args[prop_name] is not None:
+                        continue
+                    if prop_name in self._EXPLICIT_BIND_ONLY_SLOTS:
                         continue
                     candidates = self._CHAIN_SLOT_ALIASES.get(prop_name, (prop_name,))
                     for cand_key in candidates:

@@ -51,7 +51,7 @@ def wrap_request_state(
     namespace: str = "",
     tenant_id: str = "",
     user_id: str = "",
-    ttl_s: float | None = None,
+    ttl_s: float | None = DEFAULT_STATE_TTL_S,
 ) -> dict[str, Any]:
     """Sign *payload* (and optional caller/tool context binding) so a retry proves origin and scope."""
     binding: dict[str, Any] = {}

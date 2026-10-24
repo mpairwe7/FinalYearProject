@@ -530,12 +530,24 @@ _BENEFIT_PATTERNS: list[tuple[BenefitKindLiteral, re.Pattern[str]]] = [
 ]
 
 
-def _extract_benefits(text: str, money_spans: list[tuple[Money, int, int]]) -> list[BenefitFact]:
+_BENEFIT_NEGATION_PRE_RE = re.compile(
+    r"\b(?:no|not|without|neither|never|remove|removed|scratch|cancel|cancelled|dropped|stopped|exclude|excluding|instead\s+of)\s+"
+    r"(?:any\s+|a\s+|an\s+|the\s+|my\s+|our\s+|his\s+|her\s+)?$",
+    re.IGNORECASE,
+)
+
+
+def _extract_benefits(text: str, money_spans: list[tuple[Money, int, int]]) -> tuple[list[BenefitFact], set[BenefitKindLiteral]]:
     found: list[BenefitFact] = []
+    retracted: set[BenefitKindLiteral] = set()
     lowered = (text or "").lower()
     for kind, pat in _BENEFIT_PATTERNS:
         m = pat.search(text or "")
         if not m:
+            continue
+        prefix_window = (text or "")[max(0, m.start() - 40) : m.start()]
+        if _BENEFIT_NEGATION_PRE_RE.search(prefix_window):
+            retracted.add(kind)
             continue
         bf = BenefitFact(kind=kind)
         window_start = max(0, m.start() - 60)
@@ -579,7 +591,7 @@ def _extract_benefits(text: str, money_spans: list[tuple[Money, int, int]]) -> l
             if nearby_money:
                 bf.monthly_cost = nearby_money[0]
         found.append(bf)
-    return found
+    return found, retracted
 
 
 # ---------------------------------------------------------------------------
@@ -792,12 +804,14 @@ def extract_case_facts(
                     )
             new_amounts.append(mon)
         base.amounts.extend(new_amounts)
+        if len(base.amounts) > 20:
+            base.amounts = base.amounts[-20:]
         base.provenance["amounts"] = eff_turn
 
-    # 9. Benefits in kind
-    extracted_benefits = _extract_benefits(text, money_spans)
-    if extracted_benefits:
-        by_kind = {b.kind: b for b in base.benefits}
+    # 9. Benefits in kind (with multi-turn retraction support)
+    extracted_benefits, retracted_kinds = _extract_benefits(text, money_spans)
+    if extracted_benefits or retracted_kinds:
+        by_kind = {b.kind: b for b in base.benefits if b.kind not in retracted_kinds}
         for bf in extracted_benefits:
             existing = by_kind.get(bf.kind)
             if existing is None:
@@ -857,6 +871,10 @@ def _scoped_case_key(
     return f"{_CASE_FACTS_KEY_PREFIX}{scoped}"
 
 
+def _user_index_key(tenant_id: str, user_id: str) -> str:
+    return f"case_facts_user_index:{tenant_id or 'default'}:{user_id}"
+
+
 def remember_case_facts(
     conversation_id: str,
     facts: CaseFacts,
@@ -864,7 +882,7 @@ def remember_case_facts(
     user_id: str = "",
     tenant_id: str = "default",
 ) -> None:
-    """Persist *facts* for *conversation_id* in Redis (with TTL) and in-process fallback."""
+    """Persist *facts* for *conversation_id* in Redis (with TTL + user index) and in-process fallback."""
     key = _scoped_case_key(conversation_id, user_id=user_id, tenant_id=tenant_id)
     if not key:
         return
@@ -879,6 +897,10 @@ def remember_case_facts(
         return
     try:
         store.setex(key, _CASE_FACTS_TTL_S, json.dumps(payload))
+        if user_id:
+            idx_key = _user_index_key(tenant_id, user_id)
+            store.sadd(idx_key, key)
+            store.expire(idx_key, _CASE_FACTS_TTL_S)
     except Exception:
         logger.debug("case_facts redis set failed", exc_info=True)
 
@@ -949,13 +971,35 @@ def export_user_case_facts(
     if not user_id:
         return []
     now = time.monotonic()
-    items: list[dict[str, Any]] = []
+    by_key: dict[str, dict[str, Any]] = {}
     with _CASE_FACTS_lock:
         keys = set(_user_case_keys.get((tenant_id or "default", user_id), set()))
         for k, (exp, payload) in list(_case_facts_memory.items()):
             if exp > now and (k in keys or f":{user_id}:" in k):
-                items.append({"key": k, "facts": dict(payload)})
-    return items
+                by_key[k] = {"key": k, "facts": dict(payload)}
+
+    store = _redis_store()
+    if store is not None:
+        try:
+            idx_key = _user_index_key(tenant_id, user_id)
+            raw_members = store.smembers(idx_key) or set()
+            redis_keys = {
+                m.decode("utf-8") if isinstance(m, bytes) else str(m)
+                for m in raw_members
+                if m
+            }
+            for k in sorted(redis_keys):
+                if k in by_key:
+                    continue
+                raw_val = store.get(k)
+                if raw_val:
+                    parsed = json.loads(raw_val)
+                    if isinstance(parsed, dict):
+                        by_key[k] = {"key": k, "facts": parsed}
+        except Exception:
+            logger.debug("case_facts redis export failed", exc_info=True)
+
+    return list(by_key.values())
 
 
 def forget_user_case_facts(
@@ -978,7 +1022,18 @@ def forget_user_case_facts(
                 removed += 1
     store = _redis_store()
     if store is not None:
+        try:
+            idx_key = _user_index_key(tenant_id, user_id)
+            raw_members = store.smembers(idx_key) or set()
+            for m in raw_members:
+                rk = m.decode("utf-8") if isinstance(m, bytes) else str(m)
+                if rk:
+                    keys_to_delete.add(rk)
+            store.delete(idx_key)
+        except Exception:
+            logger.debug("case_facts redis index lookup failed", exc_info=True)
         for k in keys_to_delete:
             with contextlib.suppress(Exception):
-                store.delete(k)
+                if store.delete(k) and removed == 0:
+                    removed += 1
     return removed

@@ -280,6 +280,38 @@ def test_phase2_schema_guided_argument_coercion_and_repair_hints() -> None:
         "tax_type": "VAT",
         "active": False,
     }
+    # Non-UGX currency prefixes, percentage suffixes, and malformed thousands grouping are NOT coerced
+    uncoerced = coerce_arguments_to_schema(
+        schema,
+        {
+            "amount_ugx": "USD 2,000",
+            "count": "1,5",
+            "tax_type": "VAT",
+        },
+    )
+    assert uncoerced["amount_ugx"] == "USD 2,000"
+    assert uncoerced["count"] == "1,5"
+
+    # Coercion runs before authorize_tool_call so a formatted UGX string exceeding MAX_TRANSACTION_CEILING_UGX is blocked
+    over_ceiling = client.call_tool(
+        "payment_generate_prn",
+        {
+            "taxpayer_name": "Big Corp Ltd",
+            "amount_ugx": "UGX 60,000,000",
+            "tax_head": "VAT",
+            "payment_channel": "COMMERCIAL_BANK",
+        },
+        tenant_id="default",
+        user_id="taxpayer-101",
+        user_role="verified_taxpayer",
+        granted_purposes=["ura_account_access"],
+        confirmed=True,
+        idempotency_key="ceil-check-1",
+    )
+    assert over_ceiling.ok is False
+    assert over_ceiling.result["error"] == "policy_denied"
+    assert any("exceeds session ceiling" in r for r in over_ceiling.result["policy"]["reasons"])
+
     repair = build_validation_repair_hints(
         schema,
         {"bogus": 1},
@@ -316,6 +348,7 @@ def test_phase2_markdown_exfiltration_and_extended_credential_leak_guards() -> N
 def test_phase2_resource_uri_traversal_and_scheme_hardening() -> None:
     assert validate_resource_uri("ura://rates/current") is None
     assert validate_resource_uri("efris://taxpayers/profile") is None
+    assert validate_resource_uri("payments://prn/status") is None
     assert validate_resource_uri("ura://../../etc/passwd") == "path_traversal_in_resource_uri"
     assert validate_resource_uri("ura://%2e%2e/secret") == "path_traversal_in_resource_uri"
     assert validate_resource_uri("file:///etc/passwd") == "disallowed_resource_scheme:file"
@@ -343,6 +376,29 @@ def test_phase3_tool_rag_multi_namespace_diversity_and_5_locale_connector_synony
     assert "tax_calculator" in selected_namespaces
     assert "payment_system" in selected_namespaces
 
+    # Dense-mode regression test: a lower-scoring tool in another namespace without a direct
+    # query token hit must NOT displace a higher-scoring tool from an already-selected namespace
+    class _FakeDenseModel:
+        def encode(self, text: str, normalize_embeddings: bool = True):
+            import numpy as np
+
+            if text.startswith("calculate_paye:"):
+                return np.array([1.0, 0.0])
+            if text.startswith("calculate_vat:"):
+                return np.array([0.9, 0.0])
+            if text.startswith("bwims_consignment_status:"):
+                return np.array([0.4, 0.0])
+            return np.array([1.0, 0.0])
+
+    dense_selector = ToolRAGSelector(dense_model=_FakeDenseModel())
+    dense_sel = dense_selector.select(
+        "calculate paye and vat",
+        ["calculate_paye", "calculate_vat", "bwims_consignment_status"],
+        k=2,
+        diversify_namespaces=True,
+    )
+    assert dense_sel.tool_names[:2] == ["calculate_paye", "calculate_vat"]
+
     # 5-locale connector synonym expansion (Swahili/Luganda/Runyankole/Acholi)
     sw_tokens = _tokenize("Nahitaji stakabadhi ya EFRIS na stempu za kampuni")
     assert "efris" in sw_tokens
@@ -354,10 +410,24 @@ def test_phase3_toolathlon_long_horizon_multi_server_chain_execution() -> None:
     reset_client()
     client = MCPClient()
 
+    # Unresolved bind_from halts fail-closed with invalid_step instead of falling back to aliases
+    bad_chain = client.execute_tool_chain(
+        [
+            {
+                "id": "paye_step",
+                "name": "calculate_paye",
+                "arguments": {},
+                "bind_from": {"monthly_gross": "nonexistent_step.amount_ugx"},
+            }
+        ]
+    )
+    assert bad_chain["ok"] is False
+    assert bad_chain["status"] == "invalid_step"
+
     # Step 1: Convert USD 2,000 salary to UGX (tax_calculator)
-    # Step 2: Calculate PAYE on the converted UGX salary (auto-bound from Step 1!)
+    # Step 2: Calculate PAYE on the converted UGX salary (bound from Step 1)
     # Step 3: Verify business registration at URSB (ursb)
-    # Step 4: Propose PRN generation for the PAYE amount (payment_system, halts for confirmation when confirmed=False)
+    # Step 4: Propose PRN generation for the PAYE amount & URSB business_name (payment_system)
     steps_unconfirmed = [
         {
             "id": "fx_step",
@@ -383,7 +453,10 @@ def test_phase3_toolathlon_long_horizon_multi_server_chain_execution() -> None:
                 "tax_head": "PAYE",
                 "payment_channel": "mobile_money",
             },
-            "bind_from": {"amount_ugx": "paye_step.paye"},
+            "bind_from": {
+                "amount_ugx": "paye_step.paye",
+                "taxpayer_name": "ursb_step.business_name",
+            },
             "confirmed": False,
         },
     ]
@@ -400,9 +473,10 @@ def test_phase3_toolathlon_long_horizon_multi_server_chain_execution() -> None:
     assert chain_res["halted_at_step"] == 3
     assert len(chain_res["completed_steps"]) == 3
     assert chain_res["pending_proposal"]["amount_ugx"] > 0
+    assert chain_res["pending_proposal"]["taxpayer_name"] == "Kampala City Supermarket Ltd"
     assert set(chain_res["namespaces_traversed"]) == {"tax_calculator", "ursb", "payment_system"}
 
-    # Now confirm Step 4 with the proposal's idempotency_key -> full 4-step chain completes
+    # Multi-turn resume: confirm Step 4 using resume_from=chain_res without re-running Steps 0..2
     idem_key = chain_res["pending_proposal"]["idempotency_key"]
     steps_confirmed = list(steps_unconfirmed)
     steps_confirmed[3] = {
@@ -416,9 +490,58 @@ def test_phase3_toolathlon_long_horizon_multi_server_chain_execution() -> None:
         user_id="taxpayer-chain-1",
         user_role="verified_taxpayer",
         granted_purposes=["ura_account_access"],
+        resume_from=chain_res,
     )
     assert completed_res["ok"] is True
     assert completed_res["status"] == "completed"
     assert len(completed_res["completed_steps"]) == 4
-    assert len(completed_res["audit_trail"]) == 4
+    # Audit trail has 3 initial steps + 1 proposal attempt + 1 confirmed execution = 5 entries
+    assert len(completed_res["audit_trail"]) == 5
     assert all(len(entry["arguments_sha256"]) == 64 for entry in completed_res["audit_trail"])
+
+
+def test_phase4_multiturn_case_facts_retraction_and_calculator_sensitivity() -> None:
+    from app.calculator_router import continue_calculation
+    from app.case_facts import extract_case_facts
+    from app.context_manager import RollingContextManager
+
+    # 1. Multi-turn benefit retraction in CaseFacts
+    t1 = extract_case_facts("I earn UGX 6,000,000 per month and have a company car worth UGX 40,000,000.")
+    assert len(t1.benefits) == 1
+    assert t1.benefits[0].kind == "car"
+
+    t2 = extract_case_facts("Actually scratch the company car, I have no company car benefit.", prior=t1)
+    assert len(t2.benefits) == 0
+
+    # 2. Multi-turn calculator delta, percentage, and parameter-switch sensitivity follow-ups
+    saved_paye = {
+        "tool": "calculate_paye",
+        "params": {"monthly_gross": 4_000_000.0, "residency": "resident", "include_nssf": False},
+        "pending": [],
+        "assumptions": ["resident employee"],
+    }
+    inc_delta = continue_calculation(saved_paye, "What if it increases by UGX 1,000,000?")
+    assert inc_delta is not None and inc_delta["ready"] is True
+    assert inc_delta["params"]["monthly_gross"] == 5_000_000.0
+
+    pct_delta = continue_calculation(saved_paye, "What if my salary increases by 25%?")
+    assert pct_delta is not None and pct_delta["ready"] is True
+    assert pct_delta["params"]["monthly_gross"] == 5_000_000.0
+
+    non_res_switch = continue_calculation(saved_paye, "What if I am a non-resident?")
+    assert non_res_switch is not None and non_res_switch["ready"] is True
+    assert non_res_switch["params"]["residency"] == "non_resident"
+    assert non_res_switch["params"]["monthly_gross"] == 4_000_000.0
+
+    # 3. ICLR 2026 / ACL 2026 MT-OSC Consolidated Multi-Turn Specification
+    mgr = RollingContextManager()
+    ctx = mgr.build_context(
+        [
+            {"user_message": "What is my PAYE? I am a resident earning a salary of UGX 4,000,000 a month in Kampala.", "bot_reply": "Here is your PAYE."},
+            {"user_message": "Actually I am a non-resident earning UGX 6,000,000 a month.", "bot_reply": "Updated."},
+        ]
+    )
+    assert "Non-Resident" in ctx.active_entities.taxpayer_types
+    assert "Resident" not in ctx.active_entities.taxpayer_types
+    assert "Active focus: PAYE" in ctx.consolidated_spec
+    assert "Current taxpayer profile: Non-Resident" in ctx.consolidated_spec
