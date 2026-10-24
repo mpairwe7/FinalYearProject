@@ -6630,7 +6630,7 @@ class ChatModel:
                     )
                     if isinstance(sg, dict) and sg.get("copilot_handoff"):
                         handoff = dict(sg["copilot_handoff"])
-                        return None, {
+                        sc_card: dict[str, Any] = {
                             "card_type": "screenshot_copilot_handoff",
                             "portal_key": handoff.get("portal_key", "e_services"),
                             "portal_name": handoff.get("detected_portal", "URA Portal"),
@@ -6641,8 +6641,14 @@ class ChatModel:
                             "signin_portal_href": handoff.get("signin_then_portal_url", "/signin"),
                             "prefill_state": handoff.get("prefill_state", {}),
                             "user_message": handoff.get("user_message", ""),
+                            "what_needs_to_be_done": sg.get("what_needs_to_be_done", ""),
+                            "checklist": sg.get("checklist", []),
+                            "recommended_prompts": sg.get("recommended_prompts", []),
                             "completeness_check": sg.get("completeness_check", {}),
                         }
+                        if isinstance(sg.get("error_diagnosis"), dict):
+                            sc_card["error_diagnosis"] = dict(sg["error_diagnosis"])
+                        return None, sc_card
             return None, None
 
         card_dict = outcome.to_dict()

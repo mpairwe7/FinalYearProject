@@ -388,8 +388,20 @@ class DocumentRecord:
             lines.append(f"Portal: {sg.get('detected_portal', 'URA Web Portal')} ({sg.get('portal_url', '')})")
             if sg.get("detected_state"):
                 lines.append(f"Screen State: {sg.get('detected_state')}")
+            if sg.get("what_needs_to_be_done"):
+                lines.append(f"What Needs To Be Done: {sg.get('what_needs_to_be_done')}")
+            if isinstance(sg.get("error_diagnosis"), dict):
+                ed = sg["error_diagnosis"]
+                lines.append(f"Diagnosed Error ({ed.get('error_code', '')}): {ed.get('root_cause', '')}")
+                if ed.get("statutory_citation"):
+                    lines.append(f"Statutory Basis: {ed['statutory_citation']}")
             if sg.get("issues_detected"):
                 lines.append(f"Detected Issues: {'; '.join(sg.get('issues_detected', []))}")
+            if sg.get("checklist"):
+                lines.append("Screen Completion Checklist:")
+                for item in sg.get("checklist", []):
+                    if isinstance(item, dict):
+                        lines.append(f"- [{item.get('status', 'pending')}] {item.get('item', '')}: {item.get('detail', '')}")
             if sg.get("steps"):
                 lines.append("Interactive Resolution Steps:")
                 for step in sg.get("steps", []):
@@ -1568,11 +1580,33 @@ def diagnose_portal_screenshot(
         portal_url = "https://portal.ura.go.ug"
         portal_category = "e_services"
 
-    # 2. Identify issues & error states
+    # 2. Identify issues & error states (including the 8 URA statutory error families from portal_copilot)
+    from .portal_copilot import classify_portal_task, diagnose_ura_error, extract_task_entities
+
+    err_diag = diagnose_ura_error(text)
     issues_detected: list[str] = []
     steps: list[str] = []
 
-    if any(k in text_lower for k in ("error 500", "internal server error", "server error")):
+    _ERROR_STATE_TITLES: dict[str, str] = {
+        "EFRIS_INSUFFICIENT_STOCK": "EFRIS Error — Insufficient Stock Balance (EFRIS_INSUFFICIENT_STOCK)",
+        "EFRIS_NOT_ENROLLED": "EFRIS Error — Seller TIN Not Enrolled / Device Uninitialized (EFRIS_NOT_ENROLLED)",
+        "EFRIS_INVALID_FDN": "EFRIS Error — Invalid Original FDN / Credit Note Limit (EFRIS_INVALID_FDN)",
+        "PRN_EXPIRED_OR_INVALID": "PRN Error — Payment Registration Number Expired (PRN_EXPIRED_OR_INVALID)",
+        "DUPLICATE_RETURN_PERIOD": "Return Filing Error — Duplicate Return for Period (DUPLICATE_RETURN_PERIOD)",
+        "TCC_COMPLIANCE_BLOCK": "TCC Error — Compliance Block / Outstanding Arrears (TCC_COMPLIANCE_BLOCK)",
+        "NIRA_NIN_MISMATCH": "TIN Registration Error — NIRA NIN Identity Mismatch (NIRA_NIN_MISMATCH)",
+        "CUSTOMS_BOND_OR_IM7_EXPIRED": "Customs BWIMS Error — IM7 Bond / Warehousing Expired (CUSTOMS_BOND_OR_IM7_EXPIRED)",
+    }
+
+    if err_diag is not None:
+        code = str(err_diag.get("error_code") or "")
+        detected_state = _ERROR_STATE_TITLES.get(code, f"URA Portal Error ({code})")
+        issues_detected.append(str(err_diag.get("root_cause") or "Portal validation or compliance error detected."))
+        steps = [
+            f"Step {idx}: {st}"
+            for idx, st in enumerate(err_diag.get("resolution_steps") or [], start=1)
+        ]
+    elif any(k in text_lower for k in ("error 500", "internal server error", "server error")):
         detected_state = "Server Error (HTTP 500)"
         issues_detected.append("The URA web service encountered an unexpected internal server fault.")
         steps = [
@@ -1697,6 +1731,28 @@ def diagnose_portal_screenshot(
         action_bbox = [68, 62, 78, 88]
         action_selector = "button#btnValidateSubmit, input#btnValidate"
         action_instruction = "Click 'Validate & Submit' after entering required inputs"
+    elif err_diag is not None:
+        rem_code = str(err_diag.get("error_code") or "")
+        error_bbox = [12, 10, 28, 90]
+        error_selector = "#error-banner, .alert-danger, .validation-summary-errors"
+        action_bbox = [52, 42, 66, 86]
+        if rem_code == "EFRIS_INSUFFICIENT_STOCK":
+            action_selector = "input#commodityCode, input#txtQuantity, button#btnStockIn"
+            action_instruction = "Open EFRIS Stock Management and record Stock-In for the commodity code"
+        elif rem_code == "PRN_EXPIRED_OR_INVALID":
+            action_selector = "input#txtPRN, button#btnReactivatePRN, button#btnGeneratePRN"
+            action_instruction = "Reactivate the expired PRN or generate a new 21-day PRN"
+        elif rem_code == "DUPLICATE_RETURN_PERIOD":
+            action_selector = "select#ddlReturnType, input[value='AMENDED']"
+            action_instruction = "Switch Return Type from 'Original' to 'Amended Return'"
+        elif rem_code == "NIRA_NIN_MISMATCH":
+            action_selector = "input#txtNIN, input#txtSurname, input#txtDOB"
+            action_instruction = "Match NIN, Surname, Given Name, and Date of Birth (YYYY-MM-DD) to NIRA ID"
+        else:
+            action_selector = "button.btn-primary, a.remediation-link"
+            action_instruction = (
+                (err_diag.get("resolution_steps") or ["Follow the resolution step to clear the error"])[0]
+            )
     else:
         error_bbox = [8, 12, 18, 88]
         error_selector = ".taxpayer-banner, #top-nav"
@@ -1762,7 +1818,13 @@ def diagnose_portal_screenshot(
 
     requires_login_first = portal_requires_auth(portal_key)
     step_slug = re.sub(r"[^a-z0-9_]+", "_", detected_state.lower()).strip("_")[:48] or "active_form"
-    inbuilt_portal_url = f"/portal/{portal_key}?step={urllib.parse.quote(step_slug)}&copilot=1"
+    rem_task_id = str(err_diag.get("remediation_task_id") or "") if err_diag else ""
+    rem_spec = classify_portal_task(rem_task_id) if rem_task_id else None
+    if rem_spec is not None and portal_key == "e_services":
+        portal_key = rem_spec.portal_key
+        requires_login_first = portal_requires_auth(portal_key)
+    intent_param = f"&intent={urllib.parse.quote(rem_task_id)}" if rem_task_id else ""
+    inbuilt_portal_url = f"/portal/{portal_key}?step={urllib.parse.quote(step_slug)}{intent_param}&copilot=1"
     signin_then_portal_url = (
         f"/signin?continue=signin&returnTo={urllib.parse.quote(inbuilt_portal_url, safe='')}"
     )
@@ -1807,8 +1869,14 @@ def diagnose_portal_screenshot(
     ]
 
     prefill_state: dict[str, str] = {}
+    extracted_ents = extract_task_entities(text)
+    for ent_key, ent_val in extracted_ents.items():
+        if ent_val not in (None, ""):
+            prefill_state[ent_key] = str(ent_val)
     if fields.get("tins"):
         prefill_state["tin"] = str(fields["tins"][0])
+    if fields.get("nins"):
+        prefill_state["nin"] = str(fields["nins"][0])
     if fields.get("prns"):
         prefill_state["prn"] = str(fields["prns"][0])
     if fields.get("amounts"):
@@ -1819,6 +1887,57 @@ def diagnose_portal_screenshot(
         prefill_state["tax_head"] = str(fields["tax_heads"][0])
     if fields.get("efris_invoices"):
         prefill_state["original_fdn"] = str(fields["efris_invoices"][0])
+
+    # Build structured Screen Completion Checklist ("What was read vs. What still needs to be done")
+    checklist: list[dict[str, str]] = []
+    if prefill_state.get("tin"):
+        checklist.append({"item": "10-Digit Taxpayer TIN", "status": "detected", "detail": f"Detected TIN {prefill_state['tin']}"})
+    elif portal_key in ("prn_payments", "return_filing", "efris", "tax_clearance", "dts"):
+        checklist.append({"item": "10-Digit Taxpayer TIN", "status": "action_needed", "detail": "Enter your 10-digit URA TIN in the taxpayer field"})
+
+    if prefill_state.get("prn"):
+        checklist.append({"item": "Payment Registration Number (PRN)", "status": "detected", "detail": f"Detected PRN {prefill_state['prn']}"})
+    elif portal_key == "prn_payments" and not err_diag:
+        checklist.append({"item": "Payment Mode & PRN Generation", "status": "action_needed", "detail": "Select Bank or Mobile Money and click 'Generate PRN'"})
+
+    if prefill_state.get("nin"):
+        checklist.append({"item": "NIRA National ID (NIN)", "status": "detected", "detail": f"Detected NIN {prefill_state['nin']}"})
+    elif portal_key == "tin_registration" and "company" not in text_lower:
+        checklist.append({"item": "NIRA National ID (NIN)", "status": "action_needed", "detail": "Enter your 14-character NIRA NIN (starting with CM, CF, or CR)"})
+
+    if prefill_state.get("amount_ugx"):
+        checklist.append({"item": "Declared / Payment Amount (UGX)", "status": "detected", "detail": f"Detected UGX {prefill_state['amount_ugx']}"})
+    elif portal_key in ("prn_payments", "return_filing"):
+        checklist.append({"item": "Declared / Payment Amount (UGX)", "status": "action_needed", "detail": "Enter the numeric UGX amount without commas or currency symbols"})
+
+    if err_diag is not None:
+        checklist.insert(
+            0,
+            {
+                "item": f"Resolve {err_diag['error_code']}",
+                "status": "action_needed",
+                "detail": (err_diag.get("resolution_steps") or [err_diag["root_cause"]])[0],
+            },
+        )
+        what_needs_to_be_done = (
+            f"{err_diag['root_cause']} Next step: {(err_diag.get('resolution_steps') or ['Follow the guided recovery steps.'])[0]}"
+        )
+    elif issues_detected:
+        first_step = re.sub(r"^Step\s*\d+\s*:\s*", "", steps[0], flags=re.IGNORECASE) if steps else action_instruction
+        what_needs_to_be_done = f"{issues_detected[0]} Next step: {first_step}"
+    else:
+        what_needs_to_be_done = (
+            f"Review the detected fields on {detected_portal} and {action_instruction[:1].lower() + action_instruction[1:] if action_instruction else 'complete the remaining form steps'}."
+        )
+
+    recommended_prompts: list[str] = []
+    if err_diag is not None and rem_spec is not None:
+        recommended_prompts.append(f"Resolve {err_diag['error_code']} with {rem_spec.title}")
+    if prefill_state.get("prn"):
+        recommended_prompts.append(f"Check status or reactivate PRN {prefill_state['prn']}")
+    if prefill_state.get("tin"):
+        recommended_prompts.append(f"Check tax obligations for TIN {prefill_state['tin']}")
+    recommended_prompts.append(f"Walk me step by step through completing {detected_portal}")
 
     if requires_login_first:
         handoff_user_msg = (
@@ -1841,9 +1960,10 @@ def diagnose_portal_screenshot(
         "signin_then_portal_url": signin_then_portal_url,
         "prefill_state": prefill_state,
         "user_message": handoff_user_msg,
+        "remediation_task_id": rem_task_id,
     }
 
-    return {
+    out_guidance: dict[str, Any] = {
         "is_screenshot": True,
         "detected_portal": detected_portal,
         "portal_key": portal_key,
@@ -1851,8 +1971,11 @@ def diagnose_portal_screenshot(
         "portal_category": portal_category,
         "detected_state": detected_state,
         "requires_auth": requires_login_first,
+        "what_needs_to_be_done": what_needs_to_be_done,
         "issues_detected": issues_detected,
         "steps": steps,
+        "checklist": checklist,
+        "recommended_prompts": recommended_prompts[:4],
         "hotspots": hotspots,
         "completeness_check": {
             "is_complete": is_complete,
@@ -1865,6 +1988,9 @@ def diagnose_portal_screenshot(
             "url": portal_url,
         },
     }
+    if err_diag is not None:
+        out_guidance["error_diagnosis"] = err_diag
+    return out_guidance
 
 
 def analyze_document(
