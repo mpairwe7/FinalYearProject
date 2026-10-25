@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import StaffGuard, { type StaffIdentity } from "../../../components/StaffGuard";
 import { EmptyState, ErrorState, SkeletonRows } from "../../../components/ops/States";
 import { OpsPage, OpsPanel } from "../../../components/ops/OpsPage";
-import { InfoCircleIcon } from "../../../components/ops/icons";
+import { CheckIcon, CloseIcon, InfoCircleIcon } from "../../../components/ops/icons";
 import { ModalDialog } from "../../../components/ModalDialog";
 import { authHeaders } from "../../../lib/authSession";
 import type { ChatConnector } from "../../../lib/connectors";
@@ -625,7 +625,9 @@ export function ConnectorBoard({ who }: { who?: StaffIdentity } = {}) {
                             <ul>
                               {server.tools.map((tool) => (
                                 <li key={tool.name} className={tool.offered_to.length ? "is-offered" : "is-excluded"}>
-                                  <span aria-hidden="true">{tool.offered_to.length ? "✓" : "✗"}</span>{" "}
+                                  <span aria-hidden="true">
+                                    {tool.offered_to.length ? <CheckIcon /> : <CloseIcon />}
+                                  </span>{" "}
                                   {toolLine(tool)}
                                 </li>
                               ))}
@@ -677,7 +679,7 @@ export function ConnectorBoard({ who }: { who?: StaffIdentity } = {}) {
               onClick={() => setShowAddModal(false)}
               aria-label="Close connector setup"
             >
-              ×
+              <CloseIcon />
             </button>
           </header>
 
@@ -771,7 +773,7 @@ export function ConnectorBoard({ who }: { who?: StaffIdentity } = {}) {
               onClick={() => setConfiguringConnector(null)}
               aria-label="Close deployment notes"
             >
-              ×
+              <CloseIcon />
             </button>
           </header>
 

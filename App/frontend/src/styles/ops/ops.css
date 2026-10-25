@@ -963,8 +963,6 @@ a.ops-btn.is-ghost { color: var(--text-2); }
   border: 1px solid var(--ops-line);
   border-radius: var(--ops-radius-md);
   background: var(--ops-panel);
-  content-visibility: auto;
-  contain-intrinsic-size: auto 320px;
 }
 
 .ops-table {
