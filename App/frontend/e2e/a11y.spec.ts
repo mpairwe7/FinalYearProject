@@ -325,6 +325,108 @@ async function prepareStaffSession(page: Page, role = "ura_admin") {
       },
     }),
   );
+  await page.route("**/api/v1/admin/discrepancies**", (route) =>
+    route.fulfill({
+      json: {
+        discrepancies: [
+          {
+            id: "disc-00000001",
+            status: "pending",
+            priority: "high",
+            discrepancy_type: "rate_mismatch",
+            frequency_count: 2,
+            bot_statement: "Presumptive tax is 2% across all brackets.",
+            user_correction: "Second Schedule uses turnover brackets.",
+            cited_sources: ["income_tax_act.pdf"],
+            created_at: 1_760_000_000,
+          },
+        ],
+        stats: { total: 1, pending: 1, verified: 0, dismissed: 0 },
+      },
+    }),
+  );
+  await page.route("**/api/v1/admin/precedences**", (route) =>
+    route.fulfill({ json: { precedences: [] } }),
+  );
+  await page.route("**/api/v1/admin/tombstones**", (route) =>
+    route.fulfill({ json: { tombstones: [] } }),
+  );
+  await page.route("**/api/v1/connectors/diagnostics", (route) =>
+    route.fulfill({
+      json: {
+        ok: true,
+        enabled: true,
+        environment: "development",
+        protocol_version: "2026-07-28",
+        servers: [],
+        refused_bindings: [],
+      },
+    }),
+  );
+  await page.route(
+    (url) => url.pathname === "/api/v1/connectors" && url.searchParams.get("view") === "chat",
+    (route) => route.fulfill({ json: { ok: true, enabled: false, connectors: [] } }),
+  );
+  await page.route(
+    (url) => url.pathname === "/api/v1/connectors" && !url.searchParams.get("view"),
+    (route) =>
+      route.fulfill({
+        json: {
+          ok: true,
+          live: false,
+          mode: "simulation",
+          connectors: [
+            {
+              id: "efris",
+              name: "EFRIS",
+              description: "Electronic fiscal invoicing simulator.",
+              connected: true,
+              healthy: true,
+              status: "active",
+              tools: ["efris_taxpayer_status"],
+            },
+          ],
+        },
+      }),
+  );
+  await page.route("**/api/v1/admin/audit/verify**", (route) =>
+    route.fulfill({
+      json: {
+        ledger_enabled: true,
+        valid: true,
+        scope: "full",
+        rows_checked: 2,
+        first_seq: 1,
+        last_seq: 2,
+        head_hash: "f".repeat(64),
+        breaks: [],
+        anchors_checked: 1,
+        anchor_breaks: [],
+        latest_anchor: null,
+        unsealed_rows: 2,
+        verified_at: 1_760_000_000,
+      },
+    }),
+  );
+  await page.route("**/api/v1/admin/audit/events**", (route) =>
+    route.fulfill({
+      json: {
+        ledger_enabled: true,
+        events: [
+          {
+            seq: 1,
+            event_id: "e-1",
+            event_type: "staff.ticket_viewed",
+            actor: "accessibility.audit@ura.go.ug",
+            ts: 1_760_000_000,
+            payload: { actor_role: "ura_admin", ticket_id: "tkt-1" },
+            row_hash: "a".repeat(64),
+          },
+        ],
+        next_before_seq: null,
+      },
+    }),
+  );
   await page.route("**/api/v1/feedback/summary**", (route) =>
     route.fulfill({
       json: {
@@ -433,8 +535,11 @@ test.describe("WCAG 2.2 AA automated route audit", () => {
         ["/admin/quality?tab=officer-calls", "Service quality audit"],
         ["/admin/quality?tab=needs-review", "Service quality audit"],
         ["/admin/flags", "Feature flags"],
+        ["/admin/discrepancies", "Knowledge & Bug Reports"],
         ["/admin/overrides", "Answer overrides"],
-        ["/admin/outbox", "Notification outbox"],
+        ["/admin/outbox", "Notification Outbox & Delivery"],
+        ["/admin/connectors", "System connectors"],
+        ["/admin/audit", "Audit trail"],
         ["/analytics", "Analytics Dashboard"],
         ["/analytics/evaluation", "Answer evaluation"],
       ],

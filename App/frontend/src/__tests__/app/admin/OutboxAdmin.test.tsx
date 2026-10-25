@@ -122,5 +122,8 @@ describe("OutboxAdmin Board", () => {
     expect(screen.queryByRole("button", { name: /Dispatch Outbox/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Send Live Test/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Retry/i })).not.toBeInTheDocument();
+    // Delivered row shows OK, queued row shows neutral dash instead of false OK
+    expect(screen.getAllByText(/^OK$/)).toHaveLength(1);
+    expect(screen.getByText("—")).toBeInTheDocument();
   });
 });

@@ -346,18 +346,19 @@
    cannot. */
 .staff-rail-toggle {
   position: fixed;
-  top: var(--ops-space-2);
-  left: var(--ops-space-2);
+  top: max(var(--ops-space-2), env(safe-area-inset-top, 0px));
+  left: max(var(--ops-space-2), env(safe-area-inset-left, 0px));
   z-index: 22;
   display: none;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
+  width: 44px;
+  height: 44px;
   border-radius: var(--ops-radius-sm);
   border: 1px solid var(--ops-line-strong);
   background: var(--ops-panel);
   color: var(--text-1);
+  box-shadow: var(--ops-elev-1);
   cursor: pointer;
 }
 

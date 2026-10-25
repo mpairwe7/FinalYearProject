@@ -453,15 +453,19 @@ export function OutboxBoard({ who }: { who?: StaffIdentity }) {
                         {row.created_at ? new Date(row.created_at * 1000).toLocaleTimeString() : "-"}
                       </td>
                       <td className="is-num">
-                        {canMutate && (isFailed || isQueued) ? (
-                          <button
-                            type="button"
-                            className="ops-btn is-sm is-ghost"
-                            disabled={retryMutation.isPending}
-                            onClick={() => retryMutation.mutate(row.id)}
-                          >
-                            Retry
-                          </button>
+                        {isFailed || isQueued ? (
+                          canMutate ? (
+                            <button
+                              type="button"
+                              className="ops-btn is-sm is-ghost"
+                              disabled={retryMutation.isPending}
+                              onClick={() => retryMutation.mutate(row.id)}
+                            >
+                              Retry
+                            </button>
+                          ) : (
+                            <span className="ops-stat-hint">—</span>
+                          )
                         ) : (
                           <span className="ops-chip is-good">
                             <CheckIcon /> OK

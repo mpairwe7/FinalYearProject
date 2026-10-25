@@ -108,11 +108,11 @@ export const LOCALE_LABELS: Record<string, string> = {
 };
 
 export function ticketLocaleFlag(locale?: string): string {
-  const loc = (locale || "en").toLowerCase();
-  if (loc.startsWith("lg")) return "UG";
+  const loc = (locale || "en").trim().toLowerCase();
+  if (!loc || loc === "en" || loc.startsWith("en-") || loc.startsWith("en_")) return "EN";
+  if (loc.startsWith("lg") || loc.startsWith("nyn") || loc.startsWith("ach")) return "UG";
   if (loc.startsWith("sw")) return "KE";
-  if (loc.startsWith("nyn") || loc.startsWith("ach")) return "UG";
-  return "EN";
+  return loc.split(/[-_]/)[0].toUpperCase();
 }
 
 export function ticketLocaleLabel(locale?: string): string {

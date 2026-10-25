@@ -71,6 +71,7 @@ describe("ticketUi", () => {
     expect(ticketLocaleFlag("lg")).toBe("UG");
     expect(ticketLocaleFlag("sw")).toBe("KE");
     expect(ticketLocaleFlag("en")).toBe("EN");
+    expect(ticketLocaleFlag("fr")).toBe("FR");
     expect(ticketLocaleLabel("lg")).toBe("Luganda");
     expect(ticketLocaleLabel("sw")).toBe("Swahili");
   });
