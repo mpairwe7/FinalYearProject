@@ -81,7 +81,18 @@ def _resolve_ws_auth(websocket: WebSocket, *, required: bool = False) -> tuple[s
             raise JWTAuthError("authentication required")
         return "", "default"
 
-    claims = JWTVerifier().verify(token)
+    from .auth.dependencies import APP_ENV, _get_verifier
+
+    verifier = _get_verifier()
+    try:
+        claims = verifier.verify(token)
+    except JWTAuthError as e:
+        if APP_ENV != "production" and verifier.dev_secret and "unexpected alg" in str(e):
+            from .auth.jwt_auth import _hs256_verify
+
+            claims = _hs256_verify(token, verifier.dev_secret)
+        else:
+            raise
     return str(claims.get("sub", "")), str(claims.get("tenant_id", "default"))
 
 
