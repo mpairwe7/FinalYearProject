@@ -93,11 +93,34 @@ describe("OutboxAdmin Board", () => {
 
     render(<OutboxBoard />, { wrapper });
 
-    const testBtn = await screen.findByText("✉️ Send Live Test");
+    const testBtn = await screen.findByRole("button", { name: /Send Live Test/i });
     fireEvent.click(testBtn);
 
     expect(screen.getByText("Send Live Test Notification")).toBeInTheDocument();
     expect(screen.getByDisplayValue("taxpayer@ura.go.ug")).toBeInTheDocument();
     expect(screen.getByText("Send Now")).toBeInTheDocument();
+  });
+
+  it("enforces read-only governance mode for ura_auditor while preserving CSV export", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => mockOutboxData,
+      })
+    );
+
+    render(
+      <OutboxBoard
+        who={{ authenticated: true, role: "ura_auditor", email: "auditor@ura.go.ug" }}
+      />,
+      { wrapper }
+    );
+
+    expect(await screen.findByText("Read-only for your role")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Export 2 as CSV/i })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /Dispatch Outbox/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Send Live Test/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Retry/i })).not.toBeInTheDocument();
   });
 });

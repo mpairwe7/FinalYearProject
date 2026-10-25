@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { analyticsApi, type EscalationCaseDetail } from "../services/analyticsApi";
-import { CloseIcon, LoadingDots, CheckCircleIcon } from "./Icons";
+import { BuildingIcon, CheckCircleIcon, CloseIcon, CopyIcon, LoadingDots, PhoneIcon } from "./Icons";
 import { useTranslation } from "../lib/i18n";
 import "./supportCaseModal.css";
 
@@ -161,7 +161,7 @@ export function SupportCaseModal({
               className="scm-action-btn is-hotline"
               title="Call URA toll-free helpline"
             >
-              📞 0800 117 000
+              <PhoneIcon size={14} /> 0800 117 000
             </a>
             <button
               type="button"
@@ -169,11 +169,11 @@ export function SupportCaseModal({
               onClick={copyRef}
               title="Copy reference code to quote over phone or email"
             >
-              📋 Quote #{refCode}
+              <CopyIcon /> Quote #{refCode}
             </button>
             {caseData?.team_label && (
               <span className="scm-team-pill" title="Assigned Department">
-                🏢 {caseData.team_label}
+                <BuildingIcon /> {caseData.team_label}
               </span>
             )}
           </div>

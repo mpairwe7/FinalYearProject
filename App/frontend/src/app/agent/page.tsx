@@ -19,6 +19,7 @@ import StaffGuard, { type StaffIdentity } from "../../components/StaffGuard";
 import { OpsPage } from "../../components/ops/OpsPage";
 import { KeyHint } from "../../components/ops/Controls";
 import { EmptyState, ErrorState, SkeletonRows } from "../../components/ops/States";
+import { GlobeIcon, RefreshIcon } from "../../components/ops/icons";
 import { QueueRow } from "../../components/staff/QueueRow";
 import { signedInName } from "../../lib/roles";
 import { TicketCase } from "../../components/staff/TicketCase";
@@ -168,7 +169,7 @@ export function AgentQueue({ who }: { who: StaffIdentity }) {
             title="Refresh queue"
             aria-label="Refresh queue"
           >
-            🔄 Refresh
+            <RefreshIcon /> Refresh
           </button>
         </div>
       }
@@ -205,42 +206,42 @@ export function AgentQueue({ who }: { who: StaffIdentity }) {
             className={`st-trans-btn${!view.locale ? " is-active" : ""}`}
             onClick={() => setView({ locale: "" })}
           >
-            All
+            <GlobeIcon /> All
           </button>
           <button
             type="button"
             className={`st-trans-btn${view.locale === "en" ? " is-active" : ""}`}
             onClick={() => setView({ locale: "en" })}
           >
-            🇬🇧 EN
+            EN
           </button>
           <button
             type="button"
             className={`st-trans-btn${view.locale === "lg" ? " is-active" : ""}`}
             onClick={() => setView({ locale: "lg" })}
           >
-            🇺🇬 Luganda
+            Luganda
           </button>
           <button
             type="button"
             className={`st-trans-btn${view.locale === "sw" ? " is-active" : ""}`}
             onClick={() => setView({ locale: "sw" })}
           >
-            🇰🇪 Swahili
+            Swahili
           </button>
           <button
             type="button"
             className={`st-trans-btn${view.locale === "nyn" ? " is-active" : ""}`}
             onClick={() => setView({ locale: "nyn" })}
           >
-            🇺🇬 Runyankole
+            Runyankole
           </button>
           <button
             type="button"
             className={`st-trans-btn${view.locale === "ach" ? " is-active" : ""}`}
             onClick={() => setView({ locale: "ach" })}
           >
-            🇺🇬 Acholi
+            Acholi
           </button>
         </div>
 

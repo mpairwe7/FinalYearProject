@@ -22,6 +22,9 @@
 .staff-gate {
   font-family: var(--ops-font-sans);
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 1, "cv01" 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* ── Scrollbars ───────────────────────────────────────────────────────────────
@@ -303,6 +306,7 @@
 .ops-panel-head {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--ops-space-2);
   padding: var(--ops-space-3) var(--ops-space-4);
   border-bottom: 1px solid var(--ops-hairline);
@@ -686,6 +690,13 @@ a.ops-btn.is-ghost { color: var(--text-2); }
   font-size: var(--ops-text-xs);
 }
 
+.ops-btn.is-xs {
+  min-height: 26px;
+  padding: 3px 8px;
+  font-size: var(--ops-text-2xs);
+  gap: 5px;
+}
+
 .ops-icon-btn {
   display: inline-grid;
   place-items: center;
@@ -711,6 +722,8 @@ a.ops-btn.is-ghost { color: var(--text-2); }
 
 .ops-segmented {
   display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
   gap: 2px;
   padding: 3px;
   border-radius: var(--ops-radius-sm);

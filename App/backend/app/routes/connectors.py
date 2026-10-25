@@ -118,13 +118,17 @@ def toggle_system_connector(
             status_code=409,
             detail="Local simulator connectors cannot be enabled in production.",
         )
+    from ..main import _audit_staff_action
     from ..plugins import get_orchestrator
 
     orchestrator = get_orchestrator()
     enable = payload.get("enable", True)
     if not isinstance(enable, bool):
         raise HTTPException(status_code=422, detail="enable must be a boolean")
-    return orchestrator.toggle_connector(name, enable)
+    res = orchestrator.toggle_connector(name, enable)
+    if res.get("ok"):
+        _audit_staff_action(ctx, "staff.connector_toggled", {"connector": name, "enabled": enable})
+    return res
 
 
 @router.get("/v1/connectors/{name}/records")

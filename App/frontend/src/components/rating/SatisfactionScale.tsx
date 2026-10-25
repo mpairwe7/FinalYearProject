@@ -14,7 +14,53 @@
 import React, { useId, useRef } from "react";
 import "./satisfactionScale.css";
 
-export const SATISFACTION_FACES = ["😠", "🙁", "😐", "🙂", "😄"] as const;
+const faceSvgProps = {
+  "aria-hidden": true as const,
+  viewBox: "0 0 24 24",
+  width: "1em",
+  height: "1em",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 1.75,
+  strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const,
+  style: { display: "inline-block", verticalAlign: "-0.125em" },
+};
+
+export const SATISFACTION_FACES: readonly React.ReactNode[] = [
+  <svg key="face-1" {...faceSvgProps}>
+    <circle cx="12" cy="12" r="9.5" />
+    <path d="m8 8.5 2 1.2" />
+    <path d="m16 8.5-2 1.2" />
+    <circle cx="9" cy="10.5" r="0.8" fill="currentColor" />
+    <circle cx="15" cy="10.5" r="0.8" fill="currentColor" />
+    <path d="M8.2 16.5c1.1-1.6 2.4-2.3 3.8-2.3s2.7.7 3.8 2.3" />
+  </svg>,
+  <svg key="face-2" {...faceSvgProps}>
+    <circle cx="12" cy="12" r="9.5" />
+    <circle cx="9" cy="10" r="0.8" fill="currentColor" />
+    <circle cx="15" cy="10" r="0.8" fill="currentColor" />
+    <path d="M8.8 16c.9-1 2-1.5 3.2-1.5s2.3.5 3.2 1.5" />
+  </svg>,
+  <svg key="face-3" {...faceSvgProps}>
+    <circle cx="12" cy="12" r="9.5" />
+    <circle cx="9" cy="10" r="0.8" fill="currentColor" />
+    <circle cx="15" cy="10" r="0.8" fill="currentColor" />
+    <line x1="8.8" y1="15" x2="15.2" y2="15" />
+  </svg>,
+  <svg key="face-4" {...faceSvgProps}>
+    <circle cx="12" cy="12" r="9.5" />
+    <circle cx="9" cy="10" r="0.8" fill="currentColor" />
+    <circle cx="15" cy="10" r="0.8" fill="currentColor" />
+    <path d="M8.8 14.2c.9 1.1 2 1.6 3.2 1.6s2.3-.5 3.2-1.6" />
+  </svg>,
+  <svg key="face-5" {...faceSvgProps}>
+    <circle cx="12" cy="12" r="9.5" />
+    <path d="M8 9.8c.4-.6 1.2-.6 1.6 0" />
+    <path d="M14.4 9.8c.4-.6 1.2-.6 1.6 0" />
+    <path d="M8.2 13.8c.9 1.8 2.2 2.7 3.8 2.7s2.9-.9 3.8-2.7Z" />
+  </svg>,
+] as const;
 
 /** English level names, for the staff console and the audit. */
 export const SATISFACTION_LABELS_EN = [

@@ -8,13 +8,31 @@
  * - SMS: Africa's Talking / Twilio
  * - Webhook: Signed HMAC-SHA256 delivery
  * - In-App: Real-time taxpayer reminder inbox & websocket stream
+ *
+ * Auditors inspect delivery logs and export CSV evidence read-only;
+ * administrators dispatch and test live channels.
  */
 import React, { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import StaffGuard from "../../../components/StaffGuard";
+import StaffGuard, { type StaffIdentity } from "../../../components/StaffGuard";
 import { OpsPage, OpsPanel, TableScroll } from "../../../components/ops/OpsPage";
+import { Freshness } from "../../../components/ops/Controls";
+import { StatCard } from "../../../components/ops/StatCard";
 import { EmptyState, ErrorState, SkeletonRows } from "../../../components/ops/States";
+import {
+  BellIcon,
+  CheckIcon,
+  CloseIcon,
+  DownloadIcon,
+  GlobeIcon,
+  InfoCircleIcon,
+  MailIcon,
+  SendIcon,
+  SmartphoneIcon,
+  ZapIcon,
+} from "../../../components/ops/icons";
 import { analyticsApi, OutboxItem } from "../../../services/analyticsApi";
+import { csvFilename, csvTime, downloadCsv, toCsv } from "../../../lib/csv";
 import { queryKeys } from "../../../lib/queryKeys";
 import "../admin.css";
 
@@ -24,26 +42,59 @@ function statusTone(status: string): string {
   const value = status.toLowerCase();
   if (FAILED.has(value)) return "is-danger";
   if (value === "sent" || value === "delivered") return "is-good";
-  if (value === "queued") return "is-caution";
+  if (value === "queued") return "is-warn";
   return "";
 }
 
-function channelBadge(channel: string): string {
-  switch (channel.toLowerCase()) {
-    case "email":
-      return "📧 Email";
-    case "sms":
-      return "📱 SMS";
-    case "webhook":
-      return "🌐 Webhook";
-    case "in_app":
-      return "🔔 In-App";
-    default:
-      return channel;
+function ChannelBadge({ channel }: { channel: string }) {
+  const normalized = channel.toLowerCase();
+  if (normalized === "email") {
+    return (
+      <span className="ob-channel-cell">
+        <MailIcon /> Email
+      </span>
+    );
   }
+  if (normalized === "sms") {
+    return (
+      <span className="ob-channel-cell">
+        <SmartphoneIcon /> SMS
+      </span>
+    );
+  }
+  if (normalized === "webhook") {
+    return (
+      <span className="ob-channel-cell">
+        <GlobeIcon /> Webhook
+      </span>
+    );
+  }
+  if (normalized === "in_app") {
+    return (
+      <span className="ob-channel-cell">
+        <BellIcon /> In-App
+      </span>
+    );
+  }
+  return <span className="ob-channel-cell">{channel}</span>;
 }
 
-export function OutboxBoard() {
+export function outboxToCsv(items: OutboxItem[]): string {
+  return toCsv(
+    ["id", "channel", "recipient", "provider", "status", "provider_msg_id", "created_utc"],
+    items.map((row) => [
+      row.id,
+      row.channel,
+      String(row.payload?.recipient || row.user_id || ""),
+      row.provider,
+      row.status,
+      String(row.provider_msg_id || row.id || ""),
+      csvTime(row.created_at),
+    ]),
+  );
+}
+
+export function OutboxBoard({ who }: { who?: StaffIdentity }) {
   const queryClient = useQueryClient();
   const [filterStatus, setFilterStatus] = useState<string>("");
   const [showTestDialog, setShowTestDialog] = useState(false);
@@ -53,7 +104,9 @@ export function OutboxBoard() {
   const [testMessage, setTestMessage] = useState("Your monthly VAT return is due soon. File on eTax to avoid penalties.");
   const [actionNotice, setActionNotice] = useState<string>("");
 
-  const { data, isLoading, error, refetch } = useQuery({
+  const canMutate = !who || who.role === "ura_admin";
+
+  const { data, isLoading, isFetching, dataUpdatedAt, error, refetch } = useQuery({
     queryKey: queryKeys.admin.outbox(),
     queryFn: () => analyticsApi.outbox(),
     staleTime: 5_000,
@@ -122,56 +175,68 @@ export function OutboxBoard() {
       title="Notification Outbox & Delivery"
       description="Multi-channel notification dispatcher for taxpayer filing reminders, escalation updates, and live alerts."
       width="read"
+      actions={
+        <>
+          <Freshness updatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={() => void refetch()} />
+          <button
+            type="button"
+            className="ops-btn is-sm is-ghost"
+            disabled={items.length === 0}
+            onClick={() => downloadCsv(outboxToCsv(items), csvFilename("notification-outbox"))}
+          >
+            <DownloadIcon />
+            Export {items.length} as CSV
+          </button>
+        </>
+      }
       toolbar={
-        <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-          <button
-            type="button"
-            className="ops-btn ops-btn-primary"
-            disabled={dispatchMutation.isPending}
-            onClick={() => dispatchMutation.mutate()}
-          >
-            {dispatchMutation.isPending ? "Dispatching..." : "⚡ Dispatch Outbox"}
-          </button>
-          <button
-            type="button"
-            className="ops-btn"
-            onClick={() => setShowTestDialog(!showTestDialog)}
-          >
-            ✉️ Send Live Test
-          </button>
-        </div>
+        canMutate ? (
+          <div className="ops-row-inline">
+            <button
+              type="button"
+              className="ops-btn is-primary is-sm"
+              disabled={dispatchMutation.isPending}
+              onClick={() => dispatchMutation.mutate()}
+            >
+              <ZapIcon />
+              {dispatchMutation.isPending ? "Dispatching..." : "Dispatch Outbox"}
+            </button>
+            <button
+              type="button"
+              className="ops-btn is-sm"
+              onClick={() => setShowTestDialog(!showTestDialog)}
+            >
+              <SendIcon />
+              Send Live Test
+            </button>
+          </div>
+        ) : undefined
       }
     >
-      {/* Live Provider Status Banner */}
-      <div
-        className="ops-panel"
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          flexWrap: "wrap",
-          gap: "12px",
-          padding: "14px 16px",
-          marginBottom: "16px",
-          backgroundColor: isLiveMode ? "rgba(16, 185, 129, 0.08)" : "rgba(245, 158, 11, 0.08)",
-          borderColor: isLiveMode ? "rgba(16, 185, 129, 0.25)" : "rgba(245, 158, 11, 0.25)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <span
-            style={{
-              display: "inline-block",
-              width: "10px",
-              height: "10px",
-              borderRadius: "50%",
-              backgroundColor: isLiveMode ? "#10B981" : "#F59E0B",
-            }}
-          />
+      {!canMutate ? (
+        <div className="ops-note" role="note">
+          <span className="ops-note-mark" aria-hidden="true">
+            <InfoCircleIcon />
+          </span>
           <div>
-            <strong style={{ fontSize: "14px" }}>
+            <p className="ops-note-title">Read-only for your role</p>
+            <p className="ops-note-body">
+              Auditors can inspect notification delivery logs and export CSV records. Dispatching queues and sending
+              live test messages stays with administrators.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Live Provider Status Banner */}
+      <div className={`ob-provider-banner${isLiveMode ? " is-live" : ""}`} role="status">
+        <div className="ob-provider-head">
+          <span className="ob-provider-dot" aria-hidden="true" />
+          <div>
+            <strong className="ob-provider-title">
               {isLiveMode ? "Live Notification Engine Active" : "Simulation Mode (Local Sandbox)"}
             </strong>
-            <p style={{ margin: "2px 0 0", fontSize: "12px", color: "var(--text-muted)" }}>
+            <p className="ob-provider-sub">
               {isLiveMode
                 ? "Active providers connect directly to live email, SMS, and webhook delivery gateways."
                 : "Messages are recorded with simulated delivery verification. Connect real gateways for live dispatch."}
@@ -179,12 +244,11 @@ export function OutboxBoard() {
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+        <div className="ob-provider-chips">
           {Object.entries(providers).map(([ch, info]) => (
             <span
               key={ch}
               className={`ops-chip ${info.configured ? "is-good" : ""}`}
-              style={{ fontSize: "11px" }}
             >
               {ch.toUpperCase()}: {info.backend || (info.configured ? "ready" : "inactive")}
             </span>
@@ -192,28 +256,39 @@ export function OutboxBoard() {
         </div>
       </div>
 
+      <section aria-label="Outbox delivery summary">
+        <div className="ops-stat-grid ov-stats">
+          <StatCard label="Total Notifications" value={stats.total} />
+          <StatCard label="Queued" value={stats.queued} />
+          <StatCard label="Delivered / Sent" value={(stats.delivered ?? 0) + (stats.sent ?? 0)} />
+          <StatCard label="Failed" value={stats.failed} />
+        </div>
+      </section>
+
       {actionNotice ? (
-        <div
-          className="ops-note"
-          role="status"
-          style={{ marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}
-        >
-          <span>{actionNotice}</span>
+        <div className="ops-note" role="status">
+          <span className="ops-note-mark" aria-hidden="true">
+            <InfoCircleIcon />
+          </span>
+          <div style={{ flex: 1 }}>
+            <p className="ops-note-body">{actionNotice}</p>
+          </div>
           <button
             type="button"
-            className="ops-btn ops-btn-sm"
+            className="ops-icon-btn"
             onClick={() => setActionNotice("")}
             aria-label="Dismiss notice"
           >
-            ✕
+            <CloseIcon />
           </button>
         </div>
       ) : null}
 
       {/* Test Notification Panel */}
-      {showTestDialog ? (
-        <OpsPanel id="test-notification-panel" title="Send Live Test Notification">
+      {showTestDialog && canMutate ? (
+        <OpsPanel id="test-notification-panel" title="Send Live Test Notification" glass>
           <form
+            className="ov-form"
             onSubmit={(e) => {
               e.preventDefault();
               testMutation.mutate({
@@ -223,11 +298,10 @@ export function OutboxBoard() {
                 message: testMessage,
               });
             }}
-            style={{ display: "flex", flexDirection: "column", gap: "12px", maxWidth: "600px" }}
           >
-            <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
-              <label style={{ flex: "1 1 140px", fontSize: "13px" }}>
-                Channel
+            <div className="disc-drawer-grid">
+              <label className="ops-field">
+                <span className="ops-field-label">Channel</span>
                 <select
                   className="ops-select"
                   value={testChannel}
@@ -238,7 +312,6 @@ export function OutboxBoard() {
                     else if (c === "webhook") setTestRecipient("https://hooks.ura.go.ug/notifications");
                     else setTestRecipient("taxpayer@ura.go.ug");
                   }}
-                  style={{ width: "100%", marginTop: "4px" }}
                 >
                   <option value="email">Email</option>
                   <option value="sms">SMS</option>
@@ -246,102 +319,81 @@ export function OutboxBoard() {
                 </select>
               </label>
 
-              <label style={{ flex: "2 1 240px", fontSize: "13px" }}>
-                Recipient Address / Phone / URL
+              <label className="ops-field">
+                <span className="ops-field-label">Recipient Address / Phone / URL</span>
                 <input
                   type="text"
                   className="ops-input"
                   value={testRecipient}
                   onChange={(e) => setTestRecipient(e.target.value)}
                   required
-                  style={{ width: "100%", marginTop: "4px" }}
                 />
               </label>
             </div>
 
             {testChannel === "email" ? (
-              <label style={{ fontSize: "13px" }}>
-                Subject
+              <label className="ops-field">
+                <span className="ops-field-label">Subject</span>
                 <input
                   type="text"
                   className="ops-input"
                   value={testSubject}
                   onChange={(e) => setTestSubject(e.target.value)}
                   required
-                  style={{ width: "100%", marginTop: "4px" }}
                 />
               </label>
             ) : null}
 
-            <label style={{ fontSize: "13px" }}>
-              Notification Body
+            <label className="ops-field">
+              <span className="ops-field-label">Notification Body</span>
               <textarea
-                className="ops-input"
+                className="ops-textarea"
                 rows={3}
                 value={testMessage}
                 onChange={(e) => setTestMessage(e.target.value)}
                 required
-                style={{ width: "100%", marginTop: "4px" }}
               />
             </label>
 
-            <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-              <button
-                type="button"
-                className="ops-btn"
-                onClick={() => setShowTestDialog(false)}
-              >
-                Cancel
-              </button>
+            <div className="ov-form-actions">
               <button
                 type="submit"
-                className="ops-btn ops-btn-primary"
+                className="ops-btn is-primary"
                 disabled={testMutation.isPending}
               >
                 {testMutation.isPending ? "Sending..." : "Send Now"}
+              </button>
+              <button
+                type="button"
+                className="ops-btn is-ghost"
+                onClick={() => setShowTestDialog(false)}
+              >
+                Cancel
               </button>
             </div>
           </form>
         </OpsPanel>
       ) : null}
 
-      {/* Filter and Metrics Row */}
-      <div style={{ display: "flex", gap: "8px", margin: "16px 0", flexWrap: "wrap", alignItems: "center" }}>
-        <button
-          type="button"
-          className={`ops-chip ${filterStatus === "" ? "ops-chip-active" : ""}`}
-          onClick={() => setFilterStatus("")}
-        >
-          All ({stats.total})
-        </button>
-        <button
-          type="button"
-          className={`ops-chip is-caution ${filterStatus === "queued" ? "ops-chip-active" : ""}`}
-          onClick={() => setFilterStatus("queued")}
-        >
-          Queued ({stats.queued})
-        </button>
-        <button
-          type="button"
-          className={`ops-chip is-good ${filterStatus === "sent" ? "ops-chip-active" : ""}`}
-          onClick={() => setFilterStatus("sent")}
-        >
-          Sent ({stats.sent})
-        </button>
-        <button
-          type="button"
-          className={`ops-chip is-good ${filterStatus === "delivered" ? "ops-chip-active" : ""}`}
-          onClick={() => setFilterStatus("delivered")}
-        >
-          Delivered ({stats.delivered})
-        </button>
-        <button
-          type="button"
-          className={`ops-chip is-danger ${filterStatus === "failed" ? "ops-chip-active" : ""}`}
-          onClick={() => setFilterStatus("failed")}
-        >
-          Failed ({stats.failed})
-        </button>
+      {/* Filter Row */}
+      <div className="ob-filters" role="group" aria-label="Filter notifications by status">
+        {[
+          { key: "", label: `All (${stats.total})` },
+          { key: "queued", label: `Queued (${stats.queued})` },
+          { key: "sent", label: `Sent (${stats.sent})` },
+          { key: "delivered", label: `Delivered (${stats.delivered})` },
+          { key: "failed", label: `Failed (${stats.failed})` },
+        ].map((f) => (
+          <button
+            key={f.key || "all"}
+            type="button"
+            className={`ops-filter${filterStatus === f.key ? " is-active" : ""}`}
+            aria-pressed={filterStatus === f.key}
+            onClick={() => setFilterStatus(f.key)}
+          >
+            {f.label}
+          </button>
+        ))}
       </div>
 
       <OpsPanel id="outbox" title="Notification Logs & Delivery History" flush bare>
@@ -370,7 +422,7 @@ export function OutboxBoard() {
                   <th scope="col">Status</th>
                   <th scope="col">Message Reference</th>
                   <th scope="col">Time</th>
-                  <th scope="col" style={{ textAlign: "right" }}>Action</th>
+                  <th scope="col" className="is-num">Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -383,11 +435,9 @@ export function OutboxBoard() {
                   return (
                     <tr key={row.id}>
                       <td>
-                        <span className="ops-cell-strong">{channelBadge(row.channel)}</span>
+                        <ChannelBadge channel={row.channel} />
                       </td>
-                      <td>
-                        <span style={{ fontSize: "13px" }}>{recipient}</span>
-                      </td>
+                      <td>{recipient}</td>
                       <td>
                         <code>{row.provider}</code>
                       </td>
@@ -399,23 +449,23 @@ export function OutboxBoard() {
                       <td>
                         <code title={refId}>{refId.slice(0, 16)}</code>
                       </td>
-                      <td>
-                        <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-                          {row.created_at ? new Date(row.created_at * 1000).toLocaleTimeString() : "-"}
-                        </span>
+                      <td className="au-when">
+                        {row.created_at ? new Date(row.created_at * 1000).toLocaleTimeString() : "-"}
                       </td>
-                      <td style={{ textAlign: "right" }}>
-                        {isFailed || isQueued ? (
+                      <td className="is-num">
+                        {canMutate && (isFailed || isQueued) ? (
                           <button
                             type="button"
-                            className="ops-btn ops-btn-sm"
+                            className="ops-btn is-sm is-ghost"
                             disabled={retryMutation.isPending}
                             onClick={() => retryMutation.mutate(row.id)}
                           >
                             Retry
                           </button>
                         ) : (
-                          <span style={{ color: "var(--text-muted)", fontSize: "12px" }}>✓ OK</span>
+                          <span className="ops-chip is-good">
+                            <CheckIcon /> OK
+                          </span>
                         )}
                       </td>
                     </tr>
@@ -433,8 +483,7 @@ export function OutboxBoard() {
 export default function OutboxPage() {
   return (
     <StaffGuard current="/admin/outbox" requireRoles={["ura_admin", "ura_auditor"]}>
-      {() => <OutboxBoard />}
+      {(who) => <OutboxBoard who={who} />}
     </StaffGuard>
   );
 }
-

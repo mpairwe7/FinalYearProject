@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
 import { useTranslation } from '../lib/i18n';
 import type { ContextResource } from '../store/useChatStore';
+import { BookIcon, DownloadIcon, FolderIcon, GlobeIcon, ScaleIcon } from './Icons';
 
 interface ResourceCardsProps {
   resources: ContextResource[];
@@ -15,7 +16,7 @@ function ResourceCardsInner({ resources, title }: ResourceCardsProps) {
   return (
     <div className="resource-cards-container" role="region" aria-label={heading}>
       <div className="resource-cards-header">
-        <span className="resource-cards-title-icon" aria-hidden="true">📂</span>
+        <span className="resource-cards-title-icon" aria-hidden="true"><FolderIcon /></span>
         <span className="resource-cards-title">{heading}</span>
         <span className="resource-cards-count-badge">{resources.length}</span>
         <span className="resource-verified-banner" aria-label={t('resource.verified')}>✓ {t('resource.verified')}</span>
@@ -47,10 +48,26 @@ function ResourceCardsInner({ resources, title }: ResourceCardsProps) {
             >
               <div className="resource-card-top">
                 <span className={`resource-type-pill is-${res.type || 'generic'}`}>
-                  {isDownload && `📥 ${t('resource.type.download')}`}
-                  {isOnlineForm && `🌐 ${t('resource.type.online')}`}
-                  {isStatute && `⚖️ ${t('resource.type.statute')}`}
-                  {!isDownload && !isOnlineForm && !isStatute && `📖 ${t('resource.type.guide')}`}
+                  {isDownload && (
+                    <>
+                      <DownloadIcon /> {t('resource.type.download')}
+                    </>
+                  )}
+                  {isOnlineForm && (
+                    <>
+                      <GlobeIcon /> {t('resource.type.online')}
+                    </>
+                  )}
+                  {isStatute && (
+                    <>
+                      <ScaleIcon /> {t('resource.type.statute')}
+                    </>
+                  )}
+                  {!isDownload && !isOnlineForm && !isStatute && (
+                    <>
+                      <BookIcon /> {t('resource.type.guide')}
+                    </>
+                  )}
                 </span>
 
                 <div className="resource-meta-group">

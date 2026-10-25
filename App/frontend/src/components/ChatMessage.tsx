@@ -14,7 +14,7 @@ import { savePendingPortalContinuation } from '../lib/portalContinuation';
 import { detectDeadlineInMessage, downloadCalendarEvent, getGoogleCalendarUrl } from '../lib/calendarEvents';
 import FeedbackButtons from './FeedbackButtons';
 import HumanHandoff from './HumanHandoff';
-import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon, FileIcon, DownloadIcon, EyeIcon, PlugIcon, ArrowRightIcon, ExternalLinkIcon, AlertTriangleIcon, LockIcon, MicIcon } from './Icons';
+import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon, FileIcon, DownloadIcon, EyeIcon, PlugIcon, ArrowRightIcon, ExternalLinkIcon, AlertTriangleIcon, LockIcon, MicIcon, BookIcon, PhoneIcon, CalendarIcon, ClipboardIcon } from './Icons';
 import LoadingState from './LoadingState';
 import Markdown from './Markdown';
 import PortalCopilotCard from './PortalCopilotCard';
@@ -581,15 +581,15 @@ function ChatMessageInner({
           <div className="grounding-row">
             {turn.retrievalMode === 'calculator' ? (
               <span className="grounding-badge grounding-ok" title="Deterministic arithmetic against official URA statutory rate tables">
-                ✓ Official Statutory Calculator
+                <CheckIcon /> Official Statutory Calculator
               </span>
             ) : turn.retrievalMode === 'education' ? (
               <span className="grounding-badge grounding-ok" title="Scaffolded curriculum verified against URA taxpayer handbooks">
-                📚 Verified Taxpayer Education
+                <BookIcon /> Verified Taxpayer Education
               </span>
             ) : turn.retrievalMode === 'contact_channels' ? (
               <span className="grounding-badge grounding-ok" title="Official URA toll-free, WhatsApp, email and portal channels">
-                📞 Official URA Helpdesk
+                <PhoneIcon size={14} /> Official URA Helpdesk
               </span>
             ) : turn.faithfulnessScore != null ? (
               <span
@@ -646,7 +646,7 @@ function ChatMessageInner({
 
         {isAssistant && !isGreeting && !phaseLabel && deadlineEvent && (
           <div className="deadline-sync-banner" role="region" aria-label="Statutory Tax Deadline Sync">
-            <span className="deadline-sync-icon" aria-hidden="true">📅</span>
+            <span className="deadline-sync-icon" aria-hidden="true"><CalendarIcon /></span>
             <div className="deadline-sync-info">
               <span className="deadline-sync-title">{deadlineEvent.title}</span>
               <span className="deadline-sync-date">
@@ -716,7 +716,7 @@ function ChatMessageInner({
               color: "var(--text-1, #1e293b)",
             }}
           >
-            <span aria-hidden="true">📋</span>
+            <span aria-hidden="true"><ClipboardIcon /></span>
             <span>
               Knowledge review report <strong>#{turn.discrepancyReport.id.slice(-8)}</strong> logged for URA verification
             </span>

@@ -202,3 +202,123 @@ export const ShieldIcon = () => (
     <path d="M12 3 5 6v5c0 4.4 3 8.3 7 10 4-1.7 7-5.6 7-10V6l-7-3Z" />
   </svg>
 );
+
+export const BugIcon = () => (
+  <svg {...base}>
+    <rect x="8" y="6" width="8" height="14" rx="4" />
+    <path d="m19 7-3 2" /><path d="m5 7 3 2" />
+    <path d="m19 19-3-2" /><path d="m5 19 3-2" />
+    <path d="M20 13h-4" /><path d="M4 13h4" />
+    <path d="m10 4 1 2" /><path d="m14 4-1 2" />
+  </svg>
+);
+
+export const PlugIcon = () => (
+  <svg {...base}>
+    <path d="M12 22v-5" />
+    <path d="M9 8V2" /><path d="M15 8V2" />
+    <path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z" />
+  </svg>
+);
+
+export const GlobeIcon = () => (
+  <svg {...base} width={14} height={14}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M3 12h18" />
+    <path d="M12 3a13.5 13.5 0 0 1 0 18 13.5 13.5 0 0 1 0-18Z" />
+  </svg>
+);
+
+export const BuildingIcon = () => (
+  <svg {...base} width={13} height={13}>
+    <rect x="4" y="3" width="16" height="18" rx="1.5" />
+    <path d="M9 7h2" /><path d="M13 7h2" />
+    <path d="M9 11h2" /><path d="M13 11h2" />
+    <path d="M9 15h2" /><path d="M13 15h2" />
+    <path d="M10 21v-3h4v3" />
+  </svg>
+);
+
+export const UserIcon = () => (
+  <svg {...base} width={13} height={13}>
+    <circle cx="12" cy="8" r="4" />
+    <path d="M5 20a7 7 0 0 1 14 0" />
+  </svg>
+);
+
+export const CopyIcon = () => (
+  <svg {...base} width={14} height={14}>
+    <rect x="9" y="9" width="11" height="11" rx="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </svg>
+);
+
+export const LinkIcon = () => (
+  <svg {...base} width={14} height={14}>
+    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+  </svg>
+);
+
+export const MicIcon = () => (
+  <svg {...base} width={13} height={13}>
+    <rect x="9" y="3" width="6" height="11" rx="3" />
+    <path d="M5 11a7 7 0 0 0 14 0" />
+    <path d="M12 18v3" />
+  </svg>
+);
+
+export const MailIcon = () => (
+  <svg {...base} width={14} height={14}>
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <path d="m3 7 9 6 9-6" />
+  </svg>
+);
+
+export const SmartphoneIcon = () => (
+  <svg {...base} width={14} height={14}>
+    <rect x="6" y="2" width="12" height="20" rx="2" />
+    <path d="M12 18h.01" />
+  </svg>
+);
+
+export const BellIcon = () => (
+  <svg {...base} width={14} height={14}>
+    <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+    <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+  </svg>
+);
+
+export const ZapIcon = () => (
+  <svg {...base} width={14} height={14}>
+    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+  </svg>
+);
+
+export const SparklesIcon = () => (
+  <svg {...base} width={12} height={12}>
+    <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z" />
+  </svg>
+);
+
+export const CloseIcon = () => (
+  <svg {...base} width={14} height={14}>
+    <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+  </svg>
+);
+
+export const DownloadIcon = () => (
+  <svg {...base} width={14} height={14}>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="7 10 12 15 17 10" />
+    <line x1="12" y1="15" x2="12" y2="3" />
+  </svg>
+);
+
+export const InfoCircleIcon = () => (
+  <svg {...base}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 16v-4" /><path d="M12 8h.01" />
+  </svg>
+);
+

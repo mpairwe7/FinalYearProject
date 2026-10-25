@@ -3,7 +3,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import StaffGuard, { type StaffIdentity } from '@/components/StaffGuard';
 import { OpsPage } from '@/components/ops/OpsPage';
+import { KeyHint } from '@/components/ops/Controls';
 import { EmptyState, ErrorState, SkeletonRows } from '@/components/ops/States';
+import { InfoCircleIcon } from '@/components/ops/icons';
 import { CallQueue, queueOrder } from '@/components/staff/calls/CallQueue';
 import { CallWorkspace } from '@/components/staff/calls/CallWorkspace';
 import { CallContextRail } from '@/components/staff/calls/CallContextRail';
@@ -158,26 +160,51 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
   const callbacksCount = callbackCalls.length;
 
   return (
-    <OpsPage title="Phone Calls" description="Live calls, callers waiting for an officer, and how the receptionist is doing">
+    <OpsPage
+      eyebrow="Work"
+      title="Phone Calls"
+      description="Live calls, callers waiting for an officer, and how the receptionist is doing"
+    >
+      {!canTake ? (
+        <div className="ops-note" role="note">
+          <span className="ops-note-mark" aria-hidden="true">
+            <InfoCircleIcon />
+          </span>
+          <div>
+            <p className="ops-note-title">Read-only for your role</p>
+            <p className="ops-note-body">
+              Auditors can monitor live call transcripts, history, and receptionist performance. Taking or terminating
+              calls stays with officers on duty.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
       <div className="ag-tabbar">
-        <div className="ag-tabs" role="tablist">
+        <div className="ops-segmented ag-tabs" role="tablist" aria-label="Call console view">
           {ALL_TABS.map((t) => (
             <button
               key={t}
+              type="button"
               role="tab"
               aria-selected={tab === t}
-              className={`ag-tab ${tab === t ? 'ag-tab--active' : ''}`}
+              className={`ag-tab ${tab === t ? 'ag-tab--active is-active' : ''}`}
               onClick={() => setTab(t)}
             >
               {TAB_LABEL[t]}
-              {t === 'desk' && waitingCount > 0 && <span className="ag-tab-count">{waitingCount}</span>}
-              {t === 'callbacks' && callbacksCount > 0 && <span className="ag-tab-count">{callbacksCount}</span>}
+              {t === 'desk' && waitingCount > 0 && <span className="ag-tab-count ops-filter-count">{waitingCount}</span>}
+              {t === 'callbacks' && callbacksCount > 0 && <span className="ag-tab-count ops-filter-count">{callbacksCount}</span>}
             </button>
           ))}
         </div>
         {tab === 'desk' && (
-          <span className="ag-hints calls-hints">
-            <kbd>J</kbd>/<kbd>K</kbd> move · <kbd>A</kbd> take · <kbd>M</kbd> mute · <kbd>H</kbd> hold · <kbd>T</kbd> transfer · <kbd>E</kbd> end
+          <span className="ops-hints ag-hints calls-hints">
+            <KeyHint keys={['j', 'k']}>move</KeyHint>
+            {canTake ? <KeyHint keys={['a']}>take</KeyHint> : null}
+            {canTake ? <KeyHint keys={['m']}>mute</KeyHint> : null}
+            {canTake ? <KeyHint keys={['h']}>hold</KeyHint> : null}
+            {canTake ? <KeyHint keys={['t']}>transfer</KeyHint> : null}
+            {canTake ? <KeyHint keys={['e']}>end</KeyHint> : null}
           </span>
         )}
       </div>

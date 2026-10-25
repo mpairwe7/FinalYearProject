@@ -109,10 +109,10 @@ export const LOCALE_LABELS: Record<string, string> = {
 
 export function ticketLocaleFlag(locale?: string): string {
   const loc = (locale || "en").toLowerCase();
-  if (loc.startsWith("lg")) return "🇺🇬";
-  if (loc.startsWith("sw")) return "🇰🇪";
-  if (loc.startsWith("nyn") || loc.startsWith("ach")) return "🇺🇬";
-  return "🌐";
+  if (loc.startsWith("lg")) return "UG";
+  if (loc.startsWith("sw")) return "KE";
+  if (loc.startsWith("nyn") || loc.startsWith("ach")) return "UG";
+  return "EN";
 }
 
 export function ticketLocaleLabel(locale?: string): string {

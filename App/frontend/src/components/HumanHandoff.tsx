@@ -5,7 +5,7 @@ import { authHeaders } from '../lib/authSession';
 import { getChatSessionId } from '../lib/chatSession';
 import { useTranslation } from '../lib/i18n';
 import { useChatStore } from '../store/useChatStore';
-import { LoadingDots, UserIcon } from './Icons';
+import { ExternalLinkIcon, HeadphonesIcon, LoadingDots, UserIcon } from './Icons';
 
 /**
  * "Talk to a person" — the taxpayer's own way into the officer queue.
@@ -98,7 +98,7 @@ export default function HumanHandoff({ conversationId, locale, reason }: HumanHa
             onClick={() => useChatStore.getState().setSupportCaseOpen(true)}
             data-testid="open-support-case-btn"
           >
-            🎧 {t('handoff.open_case')} ↗
+            <HeadphonesIcon /> {t('handoff.open_case')} <ExternalLinkIcon />
           </button>
         </div>
       </div>

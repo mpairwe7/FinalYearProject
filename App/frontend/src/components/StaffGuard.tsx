@@ -31,7 +31,7 @@ import {
   subscribeAuthToken,
 } from "../lib/authSession";
 import { endOidcSession } from "../lib/oidcFlow";
-import { isStaffRole, signedInName, staffSectionsFor, watchesLiveQueue } from "../lib/roles";
+import { isStaffRole, signedInName, staffLandingPath, staffSectionsFor, watchesLiveQueue } from "../lib/roles";
 import { useTicketStream, type LiveEscalation } from "../hooks/useTicketStream";
 import AccountMenu from "./ops/AccountMenu";
 import {
@@ -41,6 +41,7 @@ import {
 } from "./ops/CommandPalette";
 import {
   BeakerIcon,
+  BugIcon,
   ChartIcon,
   ChevronsLeftIcon,
   ChevronsRightIcon,
@@ -51,6 +52,7 @@ import {
   ListIcon,
   PanelLeftIcon,
   PhoneIcon,
+  PlugIcon,
   SendIcon,
   ShieldIcon,
   SlidersIcon,
@@ -110,9 +112,10 @@ const DESTINATION_ICON: Record<string, () => React.JSX.Element> = {
   "/admin/tickets": ListIcon,
   "/calls": PhoneIcon,
   "/admin/flags": FlagIcon,
+  "/admin/discrepancies": BugIcon,
   "/admin/overrides": SlidersIcon,
   "/admin/outbox": SendIcon,
-  "/admin/connectors": ListIcon,
+  "/admin/connectors": PlugIcon,
   "/analytics": ChartIcon,
   "/analytics/evaluation": BeakerIcon,
   "/admin/quality": ClipboardCheckIcon,
@@ -221,7 +224,7 @@ export function StaffNav({
         onMouseLeave={() => mode === "hover" && setHovered(false)}
       >
         <div className="staff-rail-head">
-          <Link className="staff-brand" href="/admin" aria-label="URA Operations console">
+          <Link className="staff-brand" href={staffLandingPath(who.role)} aria-label="URA Operations console">
             <span className="staff-brand-mark" aria-hidden="true">
               URA
             </span>

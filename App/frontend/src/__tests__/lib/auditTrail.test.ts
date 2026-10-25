@@ -29,6 +29,11 @@ describe("eventLabel", () => {
   it("names staff actions in plain words", () => {
     expect(eventLabel("staff.ticket_viewed")).toBe("Opened a ticket and its transcript");
     expect(eventLabel("staff.flag_set")).toBe("Changed a feature switch");
+    expect(eventLabel("staff.discrepancy_verified")).toBe(
+      "Verified a knowledge discrepancy and deployed a hotfix",
+    );
+    expect(eventLabel("staff.outbox_dispatched")).toBe("Dispatched queued outbox notifications");
+    expect(eventLabel("staff.connector_toggled")).toBe("Enabled or disabled a system connector");
   });
 
   it("reads voice events and unknown types without raw punctuation", () => {

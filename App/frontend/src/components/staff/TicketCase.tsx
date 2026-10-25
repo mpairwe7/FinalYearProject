@@ -5,7 +5,6 @@ import type { TicketDetail, TicketPatch } from "../../services/analyticsApi";
 import {
   officerHandle,
   STATUS_LABEL,
-  ticketLocaleFlag,
   ticketLocaleLabel,
   ticketRef,
   topicLabel,
@@ -13,6 +12,15 @@ import {
   waitTone,
 } from "../../lib/ticketUi";
 import { analyticsApi } from "../../services/analyticsApi";
+import {
+  BuildingIcon,
+  CheckIcon,
+  ClockIcon,
+  CopyIcon,
+  GlobeIcon,
+  LinkIcon,
+  MicIcon,
+} from "../ops/icons";
 import { Skeleton } from "../ops/States";
 import { isLiveOfficer } from "../../lib/roles";
 import type { StaffIdentity } from "../StaffGuard";
@@ -146,7 +154,7 @@ export function TicketCase({
               }}
               title="Copy reference code"
             >
-              📋 Copy Ref
+              <CopyIcon /> Copy Ref
             </button>
             <button
               type="button"
@@ -159,20 +167,20 @@ export function TicketCase({
               }}
               title="Copy deep link to this ticket"
             >
-              🔗 Copy Link
+              <LinkIcon /> Copy Link
             </button>
             {ticket.team ? (
               <span className="st-pill st-pill-team">
-                🏢 {ticket.team.replace(/_/g, " ")}
+                <BuildingIcon /> {ticket.team.replace(/_/g, " ")}
               </span>
             ) : null}
             {ticket.reply_delivered_at ? (
               <span className="st-pill is-delivered" title="Taxpayer received officer reply">
-                ✓ Delivered to Taxpayer
+                <CheckIcon /> Delivered to Taxpayer
               </span>
             ) : ticket.officer_reply ? (
               <span className="st-pill is-pending-delivery" title="Reply queued for taxpayer delivery">
-                ⏳ Queued for Delivery
+                <ClockIcon /> Queued for Delivery
               </span>
             ) : null}
           </div>
@@ -181,12 +189,12 @@ export function TicketCase({
             <span className="st-pill">{STATUS_LABEL[ticket.status] || ticket.status}</span>
             {ticket.locale && ticket.locale !== "en" ? (
               <span className="st-pill st-pill-lang" title={`Taxpayer language is ${ticketLocaleLabel(ticket.locale)}`}>
-                {ticketLocaleFlag(ticket.locale)} {ticketLocaleLabel(ticket.locale)}
+                <GlobeIcon /> {ticketLocaleLabel(ticket.locale)}
               </span>
             ) : null}
             {ticket.modality === "voice" ? (
               <span className="st-pill st-pill-voice" title="Transcribed from taxpayer voice note">
-                🎙️ Voice Note
+                <MicIcon /> Voice Note
               </span>
             ) : null}
             {handoff.sentiment && handoff.sentiment !== "neutral" ? (
@@ -207,7 +215,9 @@ export function TicketCase({
 
       {ticket.user_query_en && ticket.user_query_en !== ticket.user_query ? (
         <section className="st-query-translation-banner" aria-label="Query Translation">
-          <span className="st-brief-label">🇬🇧 English Translation of Citizen Query</span>
+          <span className="st-brief-label">
+            <GlobeIcon /> English Translation of Citizen Query
+          </span>
           <p className="st-query-translation-text">{ticket.user_query_en}</p>
           <span className="st-query-translation-orig">
             Original ({ticketLocaleLabel(ticket.locale)}): “{ticket.user_query}”
@@ -306,7 +316,9 @@ export function TicketCase({
                         {turn.user_message}
                       </p>
                       <p className="st-turn-trans">
-                        <span className="st-turn-who">🌐 English Translation</span>
+                        <span className="st-turn-who">
+                          <GlobeIcon /> English Translation
+                        </span>
                         {turn.user_message_en}
                       </p>
                     </div>
