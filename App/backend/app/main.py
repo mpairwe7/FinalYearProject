@@ -521,9 +521,17 @@ def _require_voice_processing_consent(request: Request, ctx: AuthContext) -> Non
         return
 
     if ctx.user_id:
-        from .voice_consent import require_voice_consent
+        from .voice_consent import grant_voice_consent, require_voice_consent
 
-        if require_voice_consent(ctx.user_id):
+        eff_tenant = ctx.tenant_id or "default"
+        if require_voice_consent(ctx.user_id, tenant_id=eff_tenant):
+            return
+        if _request_truthy_header(request, "X-Voice-Consent"):
+            grant_voice_consent(
+                ctx.user_id,
+                purpose="voice_recording",
+                tenant_id=eff_tenant,
+            )
             return
         raise HTTPException(status_code=403, detail="voice recording consent required")
 

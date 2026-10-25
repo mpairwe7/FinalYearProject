@@ -45,6 +45,7 @@ def test_cx_55000_multimodal_ngrok_telemetry_integrity() -> None:
         assert dim_stat["total"] == expected_total
         assert dim_stat["passed"] == expected_total
         assert dim_stat["accuracy_pct"] == 100.0
+        assert int(dim_stat.get("unique_inputs", 0)) >= 10
 
     live = data["live_ngrok_suite"]
     assert len(live["fuzzy_and_multilang_chat"]) == 30
@@ -60,7 +61,18 @@ def test_cx_55000_multimodal_ngrok_telemetry_integrity() -> None:
     assert all(item["passed"] for item in live["screenshot_and_error_live_probes"])
 
     assert len(live["multimodal_tts_asr_5_locales"]) == 5
-    assert all(item["passed"] for item in live["multimodal_tts_asr_5_locales"])
+    expected_b3_tokens = {
+        "en": ("eighteen", "18", "value added", "vat"),
+        "lg": ("uganda", "kkumi", "munaana", "kikumi"),
+        "sw": ("uganda", "kumi", "nane", "asilimia"),
+        "nyn": ("uganda", "munaana", "kikumi", "ikumi"),
+        "ach": ("uganda", "apar", "aboro", "mucoro"),
+    }
+    for item in live["multimodal_tts_asr_5_locales"]:
+        assert item["passed"] is True
+        tr = str(item.get("transcript") or "").lower()
+        assert "rwanda" not in tr and "18000" not in tr
+        assert any(tok in tr for tok in expected_b3_tokens[item["locale"]])
 
     assert len(live["call_receptionist_ws_5_locales"]) == 5
     assert all(item["passed"] for item in live["call_receptionist_ws_5_locales"])

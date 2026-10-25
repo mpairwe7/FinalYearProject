@@ -171,12 +171,16 @@ async def voice_stream_ws(websocket: WebSocket, app: object) -> None:
         # ── Consent check ──────────────────────────────────────────
         if flags.is_enabled("voice_consent"):
             try:
-                from .voice_consent import require_voice_consent
+                from .voice_consent import grant_voice_consent, require_voice_consent
 
+                accepted_flag = bool(config.get("voice_consent_accepted"))
                 if session_user_id:
                     consent_ok = require_voice_consent(session_user_id)
+                    if not consent_ok and accepted_flag:
+                        grant_voice_consent(session_user_id, purpose="voice_recording")
+                        consent_ok = True
                 else:
-                    consent_ok = bool(config.get("voice_consent_accepted"))
+                    consent_ok = accepted_flag
                 if not consent_ok:
                     _inc_metric("_consent_denied_total")
                     await _send_error(

@@ -158,8 +158,14 @@ function formatEmailLocalForSpeech(user: string): string {
     .trim();
 }
 
-export function cleanMarkdownForSpeech(text: string): string {
+import { translate } from './i18n';
+
+export function cleanMarkdownForSpeech(text: string, locale: string = 'en'): string {
   if (!text) return '';
+  const stepWord = translate(locale, 'speech.step');
+  const thenWord = translate(locale, 'speech.then');
+  const gtWord = translate(locale, 'speech.greaterThan');
+  const ltWord = translate(locale, 'speech.lessThan');
   let cleaned = stripCitationMarkers(text);
   // Convert USSD shortcodes (*165#, *185#) before markdown italic stripping (*...*)
   cleaned = cleaned.replace(
@@ -242,12 +248,17 @@ export function cleanMarkdownForSpeech(text: string): string {
   // Strip table rows
   cleaned = cleaned.replace(/^\s*\|.*\|\s*$/gm, ' ');
   cleaned = cleaned.replace(/\s*\|\s*/g, ', ');
-  cleaned = cleaned.replace(/(?<=[A-Za-z0-9*_)\]])[ \t]*(?:->|→|>)[ \t]*(?=[A-Za-z0-9*_(\[])/g, ', then ');
+  cleaned = cleaned.replace(/[ \t]*>[ \t]*(?=(?:UGX|USD|Shs)?[ \t]*\d)/gi, gtWord);
+  cleaned = cleaned.replace(/[ \t]*<[ \t]*(?=(?:UGX|USD|Shs)?[ \t]*\d)/gi, ltWord);
+  cleaned = cleaned.replace(
+    /(?<=[A-Za-z0-9*_)\]])[ \t]*(?:->|→)[ \t]*(?=[A-Za-z0-9*_(\[])|(?<=[A-Za-z*_)\]])[ \t]+>[ \t]+(?=[A-Za-z*_(\[])/g,
+    thenWord,
+  );
   // Paced numbered steps: 1. -> Step 1: (both line-start and inline)
-  cleaned = cleaned.replace(/^\s*(\d{1,2})[.)]\s+/gm, 'Step $1: ');
-  cleaned = cleaned.replace(/([:;.!?])[ \t]+(\d{1,2})[.)][ \t]+(?=[A-Z*])/g, '$1 Step $2: ');
-  if (cleaned.includes('Step 1: ')) {
-    cleaned = cleaned.replace(/(?<![.!?:;\n])[ \t]+([2-9]|1[0-2])[.)][ \t]+(?=[A-Z*])/g, '. Step $1: ');
+  cleaned = cleaned.replace(/^\s*(\d{1,2})[.)]\s+/gm, `${stepWord} $1: `);
+  cleaned = cleaned.replace(/([:;.!?])[ \t]+(\d{1,2})[.)][ \t]+(?=[A-Z*])/g, `$1 ${stepWord} $2: `);
+  if (cleaned.includes(`${stepWord} 1: `)) {
+    cleaned = cleaned.replace(/(?<![.!?:;\n])[ \t]+([2-9]|1[0-2])[.)][ \t]+(?=[A-Z*])/g, `. ${stepWord} $1: `);
   }
   // Strip headers and list bullets
   cleaned = cleaned.replace(/^\s*#{1,6}\s+/gm, '');

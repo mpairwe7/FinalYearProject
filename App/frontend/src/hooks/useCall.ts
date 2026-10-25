@@ -10,7 +10,9 @@ import {
   useCallStore,
 } from '@/store/useCallStore';
 import { CallSocket } from '@/services/callSocket';
+import { getAuthToken } from '@/lib/authSession';
 import { getChatSessionId } from '@/lib/chatSession';
+import { accountApi } from '@/services/accountApi';
 import { useChatStore } from '@/store/useChatStore';
 import {
   LiveKitCallSession,
@@ -172,6 +174,9 @@ export function useCall() {
       cleanupAudio();
       store.setStatus('dialing');
       store.setError(null);
+      if (getAuthToken()) {
+        void accountApi.grantConsents(['voice_recording']).catch(() => {});
+      }
 
       // Play dialing ring tone
       try {

@@ -558,6 +558,10 @@ export const en = {
   'portalWorkspace.prn.opt.bank': 'Commercial Bank Counter / EFT',
   'portalWorkspace.prn.opt.momo': 'Mobile Money (*165# MTN / *185# Airtel)',
   'portalWorkspace.prn.opt.card': 'Online Card (VISA / MasterCard)',
+  'speech.step': 'Step',
+  'speech.then': ', then ',
+  'speech.greaterThan': ' greater than ',
+  'speech.lessThan': ' less than ',
 } as const;
 
 export type TranslationKey = keyof typeof en;

@@ -82,6 +82,8 @@ _RUNYANKOLE_FUNCTION_WORDS: frozenset[str] = frozenset({
     "nkuhwere", "kuhwera", "okushashura", "nshashura", "okwehandiikisa", "kwehandiikisa",
     "shangahi", "bingahi", "nta", "ki", "oha", "nkahi", "ryari", "agandi", "webare",
     "munonga", "kare", "tugambe", "orunyankore", "runyankole", "runyankore", "hati", "erizooba",
+    "ori", "okyariho", "nintina", "ntiina", "ebindi", "ekibuuzo", "ebibuuzo", "omukutu",
+    "orubuga", "esimu", "kunkorera", "okukora", "ninga",
 })
 
 _ACHOLI_FUNCTION_WORDS: frozenset[str] = frozenset({
@@ -89,13 +91,20 @@ _ACHOLI_FUNCTION_WORDS: frozenset[str] = frozenset({
     "mega", "megi", "atwero", "itwero", "watwero", "amito", "imito", "tim", "ber",
     "konyi", "akonyi", "culu", "aculu", "coyo", "nying", "nyinga", "adi", "ango",
     "ningo", "nining", "kwene", "awene", "kopango", "apwoyo", "matek", "walok",
-    "alok", "acoli", "kombedi", "tye", "pe", "eyo", "ku",
+    "alok", "acoli", "kombedi", "tye", "pe", "eyo", "ku", "pud", "itye", "alworo",
+    "cwinya", "banya", "cim", "kabedo", "ngec", "mukene", "pingo", "waculo", "culo",
 })
 
 _LG_ALL = _LUGANDA_WORDS | _LUGANDA_FUNCTION_WORDS
 _SW_ALL = _SWAHILI_WORDS | _SWAHILI_FUNCTION_WORDS
 _NYN_ALL = _RUNYANKOLE_WORDS | _RUNYANKOLE_FUNCTION_WORDS
 _ACH_ALL = _ACHOLI_WORDS | _ACHOLI_FUNCTION_WORDS
+_AMBIGUOUS_PARTICLES: frozenset[str] = frozenset({"an", "in", "ki", "ku"})
+_LG_CORE = _LG_ALL - _AMBIGUOUS_PARTICLES
+_SW_CORE = _SW_ALL - _AMBIGUOUS_PARTICLES
+_NYN_CORE = _NYN_ALL - _AMBIGUOUS_PARTICLES
+_ACH_CORE = _ACH_ALL - _AMBIGUOUS_PARTICLES
+_EN_CORE = _COMMON_ENGLISH_WORDS - _AMBIGUOUS_PARTICLES
 _NATIVE_WORDS: dict[str, frozenset[str]] = {
     "lg": frozenset(_LG_ALL),
     "sw": frozenset(_SW_ALL),
@@ -179,17 +188,31 @@ def lexical_hits(text: str) -> dict[str, int]:
     """Count words that belong to each language, from local word lists only.
 
     Never calls a network detector (unlike :func:`app.query.detect_language`,
-    which may ask Sunbird): this runs inside a live call turn.
+    which may ask Sunbird): this runs inside a live call turn. Cross-language
+    homographs (``an``/``in`` in English vs Acholi, ``ki``/``ku`` across Luganda,
+    Runyankole, and Acholi) are credited to a language only when that language
+    also has unambiguous core words in the utterance (or no competing language does).
     """
     words = _WORD_RE.findall((text or "").lower())
-    lg = sum(1 for w in words if w in _LG_ALL)
-    sw = sum(1 for w in words if w in _SW_ALL)
-    # query's marker regex also knows a few Swahili words the lists do not;
-    # count those without counting a listed word twice.
-    sw += sum(1 for m in _SW_MARKERS.findall(text or "") if m.lower() not in _SW_ALL)
-    nyn = sum(1 for w in words if w in _NYN_ALL)
-    ach = sum(1 for w in words if w in _ACH_ALL)
-    en = sum(1 for w in words if w in _COMMON_ENGLISH_WORDS)
+    lg_core = sum(1 for w in words if w in _LG_CORE)
+    sw_core = sum(1 for w in words if w in _SW_CORE)
+    sw_core += sum(1 for m in _SW_MARKERS.findall(text or "") if m.lower() not in _SW_ALL)
+    nyn_core = sum(1 for w in words if w in _NYN_CORE)
+    ach_core = sum(1 for w in words if w in _ACH_CORE)
+    en_core = sum(1 for w in words if w in _EN_CORE)
+
+    ki_ku = sum(1 for w in words if w in ("ki", "ku"))
+    an_in = sum(1 for w in words if w in ("an", "in"))
+
+    lg = lg_core + (ki_ku if (lg_core > 0 or (nyn_core == 0 and ach_core == 0)) else 0)
+    sw = sw_core
+    nyn = nyn_core + (sum(1 for w in words if w == "ki") if (nyn_core > 0 and lg_core == 0 and ach_core == 0) else 0)
+    ach = (
+        ach_core
+        + (ki_ku if (ach_core > 0 and lg_core == 0 and nyn_core == 0) else 0)
+        + (an_in if ach_core > 0 else 0)
+    )
+    en = en_core + (an_in if (en_core > 0 or ach_core == 0) else 0)
     return {"en": en, "lg": lg, "sw": sw, "nyn": nyn, "ach": ach}
 
 
@@ -201,27 +224,33 @@ def lexical_hits(text: str) -> dict[str, int]:
 _EXPLICIT_REQUESTS: dict[str, tuple[str, ...]] = {
     "lg": (
         "twogere oluganda", "njagala oluganda", "tuyinza okwogera oluganda",
-        "speak in luganda", "speak luganda", "switch to luganda", "in luganda",
-        "mu luganda", "oluganda",
+        "nnyamba mu luganda", "nnyonnyola mu luganda", "ddamu mu luganda",
+        "speak in luganda", "speak luganda", "switch to luganda", "answer in luganda",
+        "reply in luganda", "in luganda", "mu luganda", "oluganda",
     ),
     "sw": (
         "tuongee kiswahili", "naomba kiswahili", "tuzungumze kiswahili",
-        "speak in swahili", "speak swahili", "switch to swahili", "in swahili",
-        "kwa kiswahili", "kiswahili",
+        "nijibu kwa kiswahili", "jibu kwa kiswahili", "tumia kiswahili",
+        "speak in swahili", "speak swahili", "switch to swahili", "answer in swahili",
+        "reply in swahili", "in swahili", "kwa kiswahili", "kiswahili",
     ),
     "nyn": (
         "tugambe orunyankore", "tugambe runyankole", "ninkunda orunyankore",
-        "speak in runyankole", "speak runyankole", "switch to runyankole", "in runyankole",
+        "ngarukamu omu runyankole", "ngarukamu omu runyankore",
+        "speak in runyankole", "speak runyankole", "switch to runyankole",
+        "answer in runyankole", "reply in runyankole", "in runyankole",
         "omu runyankole", "omu runyankore", "orunyankore", "runyankole", "runyankore",
     ),
     "ach": (
         "walok leb acoli", "walok acoli", "amito leb acoli",
-        "speak in acholi", "speak acholi", "switch to acholi", "in acholi",
-        "i leb acoli", "leb acoli", "acholi", "acoli",
+        "gamo i leb acoli", "lok i leb acoli",
+        "speak in acholi", "speak acholi", "switch to acholi", "answer in acholi",
+        "reply in acholi", "in acholi", "i leb acoli", "leb acoli", "acholi", "acoli",
     ),
     "en": (
-        "speak in english", "speak english", "switch to english", "in english",
-        "mu lungereza", "kwa kiingereza", "omu rungyereza", "i leb munu", "lungereza",
+        "speak in english", "speak english", "switch to english", "answer in english",
+        "reply in english", "use english", "let's speak english", "can we speak english",
+        "in english", "mu lungereza", "kwa kiingereza", "omu rungyereza", "i leb munu", "lungereza",
     ),
 }
 _EXPLICIT_RES: dict[str, re.Pattern[str]] = {

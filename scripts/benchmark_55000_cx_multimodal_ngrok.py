@@ -40,6 +40,11 @@ BACKEND_DIR = REPO_ROOT / "App" / "backend"
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+os.environ.setdefault("VLLM_API_BASE", "http://127.0.0.1:18000/v1")
+os.environ.setdefault("LLM_BACKEND", "vllm")
+os.environ.setdefault("ORPHEUS_TTS_URL", "http://127.0.0.1:18100")
+os.environ.setdefault("ORPHEUS_TTS_LANGUAGES", "lg,sw,en,nyn,ach")
+
 from app import mt, orpheus_tts  # noqa: E402
 from app.agents import supervisor  # noqa: E402
 from app.calculator_router import (  # noqa: E402
@@ -113,10 +118,6 @@ HEADERS = {
 }
 LANGUAGES = ("en", "lg", "sw", "nyn", "ach")
 
-os.environ.setdefault("VLLM_API_BASE", "http://127.0.0.1:18000/v1")
-os.environ.setdefault("LLM_BACKEND", "vllm")
-os.environ.setdefault("ORPHEUS_TTS_URL", "http://127.0.0.1:18100")
-os.environ.setdefault("ORPHEUS_TTS_LANGUAGES", "lg,sw,en,nyn,ach")
 mt.cache = mt._TranslationCache(mt.MT_CACHE_SIZE)
 auto_load_flows(REPO_ROOT / "App" / "backend" / "app" / "workflows" / "flows")
 
@@ -698,7 +699,7 @@ async def run_live_ngrok_suite() -> dict[str, Any]:
             ("en", "Calculate excise duty on 500 kg of sugar sold at UGX 2,500,000.", ["100,000"]),
             ("en", "Calculate customs duty on an imported car aged 16 years with CIF UGX 20,000,000.", ["prohibited", "15 years", "traffic"]),
             ("en", "Calculate PAYE on a monthly gross salary of UGX 3,000,000, my shop was closed and I cannot afford to pay all at once.", ["652,000", "section 40", "instalment"]),
-            ("en", "Check PRN status where PRN is 1000023456 and TIN is 2260001234567", ["swapped", "10-digit", "13-digit", "prn", "tin"]),
+            ("en", f"Check PRN status where PRN is {_sample_tin} and TIN is {_SAMPLE_PRN}", ["swapped", "10-digit", "13-digit", "prn", "tin"]),
             ("lg", "Omusolo gwa VAT mu Uganda guli ku bitundu bimeka?", ["18"]),
             ("lg", "Nnyamba okufuna TIN yange ey'obuntu, nkoze ntya?", ["tin", "ura"]),
             ("lg", "Omusolo gwa PAYE gubalibwa gutya?", ["paye", "235,000", "335,000", "410,000"]),
@@ -864,50 +865,63 @@ async def run_live_ngrok_suite() -> dict[str, Any]:
         })
 
         t0 = time.perf_counter()
-        r_pc4_allow = await client.post(
-            f"{NGROK_HTTP}/api/v1/portal/tasks/execute",
-            json={
-                "decision": "allow",
-                "request_state": card_pc3["request_state"],
-                "idempotency_key": card_pc3["idempotency_key"],
-                "conversation_id": pc_conv,
-            },
-            headers=pc_headers,
-        )
-        r_pc4_replay = await client.post(
-            f"{NGROK_HTTP}/api/v1/portal/tasks/execute",
-            json={
-                "decision": "allow",
-                "request_state": card_pc3["request_state"],
-                "idempotency_key": card_pc3["idempotency_key"],
-                "conversation_id": pc_conv,
-            },
-            headers=pc_headers,
-        )
-        d_allow = r_pc4_allow.json() if r_pc4_allow.status_code == 200 else {}
-        d_replay = r_pc4_replay.json() if r_pc4_replay.status_code == 200 else {}
-        live_report["portal_copilot_live_chains"].append({
-            "step": "Portal-Tier2-Execute-And-SharedDB-Idempotent-Replay",
-            "passed": d_allow.get("status") == "executed" and d_replay.get("idempotent_replay") is True,
-            "latency_ms": round((time.perf_counter() - t0) * 1000.0, 1),
-        })
+        pc_state = card_pc3.get("request_state")
+        pc_key = card_pc3.get("idempotency_key")
+        if not (pc_state and pc_key):
+            for step_name in (
+                "Portal-Tier2-Execute-And-SharedDB-Idempotent-Replay",
+                "Portal-ADR0013-CrossSession-Replay-Refusal",
+            ):
+                live_report["portal_copilot_live_chains"].append({
+                    "step": step_name,
+                    "passed": False,
+                    "latency_ms": 0.0,
+                })
+        else:
+            r_pc4_allow = await client.post(
+                f"{NGROK_HTTP}/api/v1/portal/tasks/execute",
+                json={
+                    "decision": "allow",
+                    "request_state": pc_state,
+                    "idempotency_key": pc_key,
+                    "conversation_id": pc_conv,
+                },
+                headers=pc_headers,
+            )
+            r_pc4_replay = await client.post(
+                f"{NGROK_HTTP}/api/v1/portal/tasks/execute",
+                json={
+                    "decision": "allow",
+                    "request_state": pc_state,
+                    "idempotency_key": pc_key,
+                    "conversation_id": pc_conv,
+                },
+                headers=pc_headers,
+            )
+            d_allow = r_pc4_allow.json() if r_pc4_allow.status_code == 200 else {}
+            d_replay = r_pc4_replay.json() if r_pc4_replay.status_code == 200 else {}
+            live_report["portal_copilot_live_chains"].append({
+                "step": "Portal-Tier2-Execute-And-SharedDB-Idempotent-Replay",
+                "passed": d_allow.get("status") == "executed" and d_replay.get("idempotent_replay") is True,
+                "latency_ms": round((time.perf_counter() - t0) * 1000.0, 1),
+            })
 
-        t0 = time.perf_counter()
-        r_pc5_atk = await client.post(
-            f"{NGROK_HTTP}/api/v1/portal/tasks/execute",
-            json={
-                "decision": "allow",
-                "request_state": card_pc3["request_state"],
-                "idempotency_key": card_pc3["idempotency_key"],
-                "conversation_id": pc_conv,
-            },
-            headers={**HEADERS, "X-Session-ID": "sess-attacker-hijack"},
-        )
-        live_report["portal_copilot_live_chains"].append({
-            "step": "Portal-ADR0013-CrossSession-Replay-Refusal",
-            "passed": r_pc5_atk.status_code == 403,
-            "latency_ms": round((time.perf_counter() - t0) * 1000.0, 1),
-        })
+            t0 = time.perf_counter()
+            r_pc5_atk = await client.post(
+                f"{NGROK_HTTP}/api/v1/portal/tasks/execute",
+                json={
+                    "decision": "allow",
+                    "request_state": pc_state,
+                    "idempotency_key": pc_key,
+                    "conversation_id": pc_conv,
+                },
+                headers={**HEADERS, "X-Session-ID": "sess-attacker-hijack"},
+            )
+            live_report["portal_copilot_live_chains"].append({
+                "step": "Portal-ADR0013-CrossSession-Replay-Refusal",
+                "passed": r_pc5_atk.status_code == 403,
+                "latency_ms": round((time.perf_counter() - t0) * 1000.0, 1),
+            })
 
         t0 = time.perf_counter()
         r_tok = (
@@ -1009,13 +1023,13 @@ async def run_live_ngrok_suite() -> dict[str, Any]:
         # B3. Multimodal Speech (TTS + ASR Round-Trip) across all 5 languages
         print("\n[B3] Running Live 5-Language TTS + ASR Round-Trip Probes over ngrok...", flush=True)
         speech_probes = [
-            ("en", "salt_eng_0001", "The standard Value Added Tax rate in Uganda is eighteen percent."),
-            ("lg", "waxal_lug_0002", "Omusolo gwa VAT mu Uganda guli ebitundu kkumi na munaana ku buli kikumi."),
-            ("sw", "waxal_swa_0007", "Kiwango cha kodi ya ongezeko la thamani nchini Uganda ni asilimia kumi na nane."),
-            ("nyn", "waxal_nyn_0003", "Omushoro gwa VAT omuri Uganda guri aha bicweka ikumi na munaana aha kikumi."),
-            ("ach", "waxal_ach_0005", "Wel mucoro me VAT i Uganda tye dul apar wiye aboro i kom miya."),
+            ("en", "salt_eng_0001", "The standard Value Added Tax rate in Uganda is eighteen percent.", ("eighteen", "18", "value added", "vat")),
+            ("lg", "salt_lug_0001", "Omusolo gwa VAT mu Uganda guli ebitundu kkumi na munaana ku buli kikumi.", ("uganda", "kkumi", "munaana", "kikumi")),
+            ("sw", "waxal_swa_0007", "Kiwango cha kodi ya ongezeko la thamani nchini Uganda ni asilimia kumi na nane.", ("uganda", "kumi", "nane", "asilimia")),
+            ("nyn", "waxal_nyn_0003", "Omushoro gwa VAT omuri Uganda guri aha bicweka ikumi na munaana aha kikumi.", ("uganda", "munaana", "kikumi", "ikumi")),
+            ("ach", "waxal_ach_0005", "Wel mucoro me VAT i Uganda tye dul apar wiye aboro i kom miya.", ("uganda", "apar", "aboro", "mucoro")),
         ]
-        for lang, voice, text in speech_probes:
+        for lang, voice, text, exp_tokens in speech_probes:
             t0 = time.perf_counter()
             r_tts = await client.post(
                 f"{NGROK_HTTP}/api/v1/tts",
@@ -1035,7 +1049,16 @@ async def run_live_ngrok_suite() -> dict[str, Any]:
             asr_j = r_asr.json() if r_asr.status_code == 200 else {}
             asr_ms = (time.perf_counter() - t1) * 1000.0
             transcript = str(asr_j.get("text") or "").strip()
-            ok_sp = r_tts.status_code == 200 and len(wav_bytes) > 4000 and r_asr.status_code == 200 and len(transcript) > 5
+            tr_low = transcript.lower()
+            ok_sp = (
+                r_tts.status_code == 200
+                and len(wav_bytes) > 4000
+                and r_asr.status_code == 200
+                and len(transcript) > 5
+                and any(tok in tr_low for tok in exp_tokens)
+                and "rwanda" not in tr_low
+                and "18000" not in tr_low
+            )
             live_report["multimodal_tts_asr_5_locales"].append({
                 "locale": lang,
                 "voice": voice,
@@ -1065,7 +1088,15 @@ async def run_live_ngrok_suite() -> dict[str, Any]:
                 json={"input": text, "voice": speaker, "response_format": "pcm", "seed": 3},
                 timeout=90.0,
             )
-            pcm_caller = pcm24k_to_pcm16k(tts_sidecar.content)
+            if tts_sidecar.status_code != 200 or not tts_sidecar.content:
+                live_report["call_receptionist_ws_5_locales"].append({
+                    "locale": lang,
+                    "passed": False,
+                    "error": f"orpheus_status={tts_sidecar.status_code}",
+                })
+                continue
+            raw_pcm = tts_sidecar.content
+            pcm_caller = pcm24k_to_pcm16k(raw_pcm[: len(raw_pcm) - (len(raw_pcm) % 2)])
             captions: list[dict[str, Any]] = []
             statuses: list[dict[str, Any]] = []
             call_states: list[dict[str, Any]] = []
@@ -1158,7 +1189,7 @@ async def run_live_ngrok_suite() -> dict[str, Any]:
                     await asyncio.sleep(max(0.0, next_f - time.monotonic()))
 
                 stop_sil = asyncio.Event()
-                sil_task = asyncio.create_task(_pump_sil())
+                sil_task = asyncio.create_task(_pump_sil(stop_sil))
                 a_deadline = time.monotonic() + 45.0
                 while time.monotonic() < a_deadline:
                     fin_caps = [c for c in captions if c.get("speaker") == "assistant" and c.get("final")]
@@ -1311,10 +1342,27 @@ async def main() -> int:
         by_modality[mod]["latencies_ms"].append(lat_ms)
 
         if dim not in by_dimension:
-            by_dimension[dim] = {"total": 0, "passed": 0, "latencies_ms": []}
+            by_dimension[dim] = {"total": 0, "passed": 0, "latencies_ms": [], "unique_keys": set()}
         by_dimension[dim]["total"] += 1
         by_dimension[dim]["passed"] += int(passed)
         by_dimension[dim]["latencies_ms"].append(lat_ms)
+        by_dimension[dim]["unique_keys"].add(
+            (
+                sc.get("locale"),
+                sc.get("modality"),
+                sc.get("query") or sc.get("spoken_text"),
+                sc.get("expected_tool"),
+                sc.get("domain"),
+                sc.get("expected_amount"),
+                sc.get("portal_task"),
+                sc.get("expected_tier"),
+                sc.get("after_hours_probe"),
+                sc.get("expected_intent"),
+                sc.get("expected_topic_hint"),
+                sc.get("voice_id"),
+                sc.get("yn_word"),
+            )
+        )
 
         if idx % 11000 == 0:
             elapsed = time.perf_counter() - t_eval0
@@ -1330,7 +1378,11 @@ async def main() -> int:
     passed_55k = sum(v["passed"] for v in by_lang.values())
 
     # Run Phase B live ngrok stress, fuzzy, volume & load suite
-    live_report = await run_live_ngrok_suite()
+    try:
+        live_report = await run_live_ngrok_suite()
+    except Exception as exc:
+        print(f"Live ngrok suite aborted: {exc!r}", flush=True)
+        live_report = {"error": repr(exc)}
 
     summary: dict[str, Any] = {
         "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -1363,6 +1415,7 @@ async def main() -> int:
         "by_dimension": {
             dim: {
                 "total": v["total"],
+                "unique_inputs": len(v["unique_keys"]),
                 "passed": v["passed"],
                 "accuracy_pct": round(v["passed"] / v["total"] * 100.0, 2),
                 "p50_ms": pct(v["latencies_ms"], 0.50),

@@ -76,6 +76,25 @@ class TestReceptionistWSAndHTTP(unittest.TestCase):
                 self.assertEqual(data.get("type"), "error")
                 self.assertIn("consent required", data.get("detail", "").lower())
 
+            # Authenticated caller who accepts the pre-call consent pop-up (voice_consent_accepted=True)
+            # has their voice_recording consent receipt persisted just-in-time rather than being rejected.
+            from app.voice_consent import require_voice_consent
+
+            uid = f"user_jit_{uuid.uuid4().hex[:8]}"
+            tok = make_dev_token(uid, role="verified_taxpayer")
+            self.assertFalse(require_voice_consent(uid))
+            with self.client.websocket_connect("/v1/calls/stream") as ws:
+                ws.send_text(
+                    json.dumps({
+                        "type": "call_start",
+                        "access_token": tok,
+                        "locale": "en",
+                        "voice_consent_accepted": True,
+                    })
+                )
+                ws.send_text(json.dumps({"type": "hangup"}))
+            self.assertTrue(require_voice_consent(uid))
+
     def test_staff_stream_auditor_allowed_for_lobby_and_live(self):
         token = make_dev_token("auditor_1", role="ura_auditor")
         with patch.object(flags, "is_enabled", return_value=True), patch("app.receptionist.ws.is_ws_origin_allowed", return_value=True):

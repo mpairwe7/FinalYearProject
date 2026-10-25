@@ -531,4 +531,8 @@ export const ach: Partial<Dictionary> = {
   'portalWorkspace.prn.opt.bank': 'Bank / EFT',
   'portalWorkspace.prn.opt.momo': 'Mobile Money (*165# MTN / *185# Airtel)',
   'portalWorkspace.prn.opt.card': 'Kad me Bank (VISA / MasterCard)',
+  'speech.step': 'Rwom',
+  'speech.then': ', ci ',
+  'speech.greaterThan': ' makato ',
+  'speech.lessThan': ' piny ki ',
 };

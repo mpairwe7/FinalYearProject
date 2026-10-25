@@ -186,7 +186,26 @@ _TOLLFREE_PAIRS_RE = re.compile(r"\b0800[ \t-]+(\d{2})[ \t-]+(\d{2})[ \t-]+(\d{2
 _NUMBERED_STEP_RE = re.compile(r"^\s*(\d{1,2})[.)]\s+", re.MULTILINE)
 _INLINE_STEP_AFTER_PUNCT_RE = re.compile(r"([:;.!?])[ \t]+(\d{1,2})[.)][ \t]+(?=[A-Z*])")
 _INLINE_STEP_CONT_RE = re.compile(r"(?<![.!?:;\n])[ \t]+([2-9]|1[0-2])[.)][ \t]+(?=[A-Z*])")
-_BREADCRUMB_ARROW_RE = re.compile(r"(?<=[A-Za-z0-9*_)\]])[ \t]*(?:->|→|>)[ \t]*(?=[A-Za-z0-9*_(\[])")
+_BREADCRUMB_ARROW_RE = re.compile(
+    r"(?<=[A-Za-z0-9*_)\]])[ \t]*(?:->|→)[ \t]*(?=[A-Za-z0-9*_(\[])"
+    r"|(?<=[A-Za-z*_)\]])[ \t]+>[ \t]+(?=[A-Za-z*_(\[])"
+)
+_COMPARISON_GT_RE = re.compile(r"[ \t]*>[ \t]*(?=(?:UGX|USD|Shs)?[ \t]*\d)", re.IGNORECASE)
+_COMPARISON_LT_RE = re.compile(r"[ \t]*<[ \t]*(?=(?:UGX|USD|Shs)?[ \t]*\d)", re.IGNORECASE)
+_COMPARISON_GT_WORD = {
+    "en": " greater than ",
+    "lg": " okusinga ",
+    "sw": " zaidi ya ",
+    "nyn": " okukira ",
+    "ach": " makato ",
+}
+_COMPARISON_LT_WORD = {
+    "en": " less than ",
+    "lg": " wansi wa ",
+    "sw": " chini ya ",
+    "nyn": " ahansi ya ",
+    "ach": " piny ki ",
+}
 _BREADCRUMB_WORD = {
     "en": ", then ",
     "lg": ", oluvannyuma ",
@@ -697,8 +716,10 @@ def clean_text_for_speech(text: str, locale: str = "en", *, verbalize_digits: bo
     t = _CODE_BLOCK_RE.sub(" ", t)
     t = _INLINE_CODE_RE.sub(r"\1", t)
 
-    # 4. Handle table rows: replace pipes with commas/spaces, and convert breadcrumb arrows (>)
+    # 4. Handle table rows: replace pipes with commas/spaces, and convert comparisons/breadcrumb arrows
     t = _TABLE_PIPE_RE.sub(", ", t)
+    t = _COMPARISON_GT_RE.sub(_COMPARISON_GT_WORD.get(locale, " greater than "), t)
+    t = _COMPARISON_LT_RE.sub(_COMPARISON_LT_WORD.get(locale, " less than "), t)
     t = _BREADCRUMB_ARROW_RE.sub(_BREADCRUMB_WORD.get(locale, ", then "), t)
 
     # 5. Strip Markdown headers, bullet points, and decorative section emojis

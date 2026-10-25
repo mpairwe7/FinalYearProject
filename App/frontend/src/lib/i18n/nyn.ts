@@ -531,4 +531,8 @@ export const nyn: Partial<Dictionary> = {
   'portalWorkspace.prn.opt.bank': 'Banka / EFT',
   'portalWorkspace.prn.opt.momo': 'Mobile Money (*165# MTN / *185# Airtel)',
   'portalWorkspace.prn.opt.card': 'Kaadi ya Banka (VISA / MasterCard)',
+  'speech.step': 'Idaara',
+  'speech.then': ', bwanyima ',
+  'speech.greaterThan': ' okukira ',
+  'speech.lessThan': ' ahansi ya ',
 };

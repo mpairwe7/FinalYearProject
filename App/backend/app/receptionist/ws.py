@@ -19,7 +19,7 @@ from ..chat_ws_v2 import _resolve_ws_principal
 from ..flags import flags
 from ..query import SUPPORTED_LOCALES
 from ..tenancy import tenant_enabled
-from ..voice_consent import log_voice_event, require_voice_consent
+from ..voice_consent import grant_voice_consent, log_voice_event, require_voice_consent
 from ..ws_concurrency import is_ws_origin_allowed, rekey_slot, release, try_acquire
 from . import brief as call_brief
 from . import desk, livekit, risk
@@ -234,10 +234,19 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
             preferred_locale = locale
         consent_accepted = init_msg.get("voice_consent_accepted") is True
 
-        # Consent check
+        # Consent check: if an authenticated caller explicitly accepted the pre-call
+        # voice consent dialog (voice_consent_accepted=True), persist the auditable
+        # consent receipt just-in-time so the call proceeds without dead-ending.
         if flags.is_enabled("voice_consent"):
             if user_id:
                 consent_ok = require_voice_consent(user_id, tenant_id=tenant_id or "default")
+                if not consent_ok and consent_accepted:
+                    grant_voice_consent(
+                        user_id,
+                        purpose="voice_recording",
+                        tenant_id=tenant_id or "default",
+                    )
+                    consent_ok = True
             else:
                 consent_ok = consent_accepted
             if not consent_ok:

@@ -538,4 +538,8 @@ export const sw: Partial<Dictionary> = {
   'portalWorkspace.prn.opt.bank': 'Kaunta ya Benki / EFT',
   'portalWorkspace.prn.opt.momo': 'Pesa kwa Simu (*165# MTN / *185# Airtel)',
   'portalWorkspace.prn.opt.card': 'Kadi ya Mtandaoni (VISA / MasterCard)',
+  'speech.step': 'Hatua',
+  'speech.then': ', kisha ',
+  'speech.greaterThan': ' zaidi ya ',
+  'speech.lessThan': ' chini ya ',
 };
