@@ -28,6 +28,7 @@ import {
   Skeleton,
   SkeletonRows,
 } from "../../../components/ops/States";
+import { RefreshIcon } from "../../../components/ops/icons";
 import { QueueRow } from "../../../components/staff/QueueRow";
 import { TicketCase } from "../../../components/staff/TicketCase";
 import {
@@ -259,7 +260,7 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
               aria-pressed={view.locale === "lg"}
               onClick={() => setView({ locale: "lg" })}
             >
-              🇺🇬 Luganda
+              Luganda
             </button>
             <button
               type="button"
@@ -267,7 +268,7 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
               aria-pressed={view.locale === "sw"}
               onClick={() => setView({ locale: "sw" })}
             >
-              🇰🇪 Swahili
+              Swahili
             </button>
             <button
               type="button"
@@ -275,7 +276,7 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
               aria-pressed={view.locale === "nyn"}
               onClick={() => setView({ locale: "nyn" })}
             >
-              🇺🇬 Runyankole
+              Runyankole
             </button>
             <button
               type="button"
@@ -283,7 +284,7 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
               aria-pressed={view.locale === "ach"}
               onClick={() => setView({ locale: "ach" })}
             >
-              🇺🇬 Acholi
+              Acholi
             </button>
           </span>
 
@@ -322,7 +323,7 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
           title="Refresh ticket queue"
           aria-label="Refresh ticket queue"
         >
-          🔄 Refresh
+          <RefreshIcon /> Refresh
         </button>
         {narrowed ? (
           <button

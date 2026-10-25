@@ -21,7 +21,7 @@ import StaffGuard, { type StaffIdentity } from "../../../components/StaffGuard";
 import { OpsPage, TableScroll } from "../../../components/ops/OpsPage";
 import { Switch } from "../../../components/ops/Controls";
 import { EmptyState, ErrorState, SkeletonRows } from "../../../components/ops/States";
-import { AlertTriangleIcon } from "../../../components/ops/icons";
+import { AlertTriangleIcon, InfoCircleIcon } from "../../../components/ops/icons";
 import { analyticsApi, type FlagRecord } from "../../../services/analyticsApi";
 import { queryKeys } from "../../../lib/queryKeys";
 import "../admin.css";
@@ -123,6 +123,21 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
           </p>
         </div>
       </div>
+
+      {!canToggle ? (
+        <div className="ops-note" role="note">
+          <span className="ops-note-mark" aria-hidden="true">
+            <InfoCircleIcon />
+          </span>
+          <div>
+            <p className="ops-note-title">Read-only for your role</p>
+            <p className="ops-note-body">
+              Auditors can inspect active feature flags and replica overrides. Toggling or resetting flags stays with
+              administrators.
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       {isLoading ? <SkeletonRows rows={6} height={56} /> : null}
       {error ? (

@@ -150,7 +150,7 @@ export default function SignInPage() {
         {signedIn && (
           <nav className="signin-onward" aria-label="Continue to">
             <a href="/agent" style={{ fontWeight: 700 }}>
-              👉 Escalation Queue &amp; User Queries (/agent)
+              Escalation Queue &amp; User Queries (/agent)
             </a>
             <a href="/admin">Operations overview (/admin)</a>
             <a href="/analytics">Analytics (/analytics)</a>

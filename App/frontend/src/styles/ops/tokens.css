@@ -47,9 +47,9 @@
   --ops-text-xl:   26px;
   --ops-text-2xl:  34px;
 
-  --ops-lh-tight:  1.2;
-  --ops-lh-snug:   1.4;
-  --ops-lh-normal: 1.55;
+  --ops-lh-tight:  1.22;
+  --ops-lh-snug:   1.38;
+  --ops-lh-normal: 1.56;
 
   /* Five weights, every one a real master in the shipped subsets — nothing here
      is synthesised. `light` is Plex Mono only: it is the metadata voice (see
@@ -67,9 +67,9 @@
   --ops-weight-semi:   600;
   --ops-weight-bold:   700;
 
-  --ops-tracking-caps:  0.04em;
+  --ops-tracking-caps:  0.045em;
   --ops-tracking-meta:  0.06em;
-  --ops-tracking-tight: -0.01em;
+  --ops-tracking-tight: -0.015em;
 
   /* ── Space — 4pt grid ─────────────────────────────────────────────────── */
   --ops-space-1:  4px;

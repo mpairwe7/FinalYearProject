@@ -15,6 +15,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import StaffGuard, { type StaffIdentity } from "../../../components/StaffGuard";
 import { OpsPage, OpsPanel } from "../../../components/ops/OpsPage";
 import { EmptyState, ErrorState, SkeletonRows } from "../../../components/ops/States";
+import { InfoCircleIcon } from "../../../components/ops/icons";
 import { analyticsApi } from "../../../services/analyticsApi";
 import { queryKeys } from "../../../lib/queryKeys";
 import "../admin.css";
@@ -153,7 +154,7 @@ function OverridesBoard({ who }: { who: StaffIdentity }) {
       ) : (
         <div className="ops-note" role="note">
           <span className="ops-note-mark" aria-hidden="true">
-            ⓘ
+            <InfoCircleIcon />
           </span>
           <div>
             <p className="ops-note-title">Read-only for your role</p>

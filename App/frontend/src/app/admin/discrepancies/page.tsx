@@ -5,24 +5,63 @@
  * Allows URA administrators to triage taxpayer-reported inaccuracies,
  * verify real statutory/procedural bugs with 1-click hotfixes
  * (Answer Overrides, Solution C Statutory Precedences, Solution B Chunk Tombstones),
- * or dismiss invalid reports.
+ * or dismiss invalid reports. Officers and auditors inspect reports read-only.
  */
 
 import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import StaffGuard, { type StaffIdentity } from "../../../components/StaffGuard";
 import { OpsPage, OpsPanel } from "../../../components/ops/OpsPage";
+import { Freshness } from "../../../components/ops/Controls";
 import { StatCard } from "../../../components/ops/StatCard";
 import { EmptyState, ErrorState, SkeletonRows } from "../../../components/ops/States";
+import { AlertTriangleIcon, CloseIcon, DownloadIcon, InfoCircleIcon } from "../../../components/ops/icons";
 import {
   analyticsApi,
   type DiscrepancyRecord,
   type VerifyDiscrepancyPayload,
 } from "../../../services/analyticsApi";
+import { csvFilename, csvTime, downloadCsv, toCsv } from "../../../lib/csv";
 import { queryKeys } from "../../../lib/queryKeys";
 import "../admin.css";
 
-function DiscrepanciesWorkbench({ who }: { who: StaffIdentity }) {
+const STATUS_OPTIONS = [
+  { value: "", label: "All" },
+  { value: "pending", label: "Pending" },
+  { value: "verified", label: "Verified" },
+  { value: "dismissed", label: "Dismissed" },
+] as const;
+
+export function discrepanciesToCsv(rows: DiscrepancyRecord[]): string {
+  return toCsv(
+    [
+      "id",
+      "status",
+      "priority",
+      "discrepancy_type",
+      "frequency_count",
+      "bot_statement",
+      "user_correction",
+      "cited_sources",
+      "admin_note",
+      "created_utc",
+    ],
+    rows.map((d) => [
+      d.id,
+      d.status,
+      d.priority,
+      d.discrepancy_type,
+      d.frequency_count,
+      d.bot_statement,
+      d.user_correction,
+      d.cited_sources.join("; "),
+      d.admin_note ?? "",
+      csvTime(d.created_at),
+    ]),
+  );
+}
+
+export function DiscrepanciesWorkbench({ who }: { who?: StaffIdentity }) {
   const client = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string>("pending");
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
@@ -36,8 +75,10 @@ function DiscrepanciesWorkbench({ who }: { who: StaffIdentity }) {
   const [statuteRef, setStatuteRef] = useState("");
   const [tombstoneCited, setTombstoneCited] = useState(true);
   const [adminNote, setAdminNote] = useState("");
+  const [actionNotice, setActionNotice] = useState<string>("");
+  const [actionError, setActionError] = useState<string>("");
 
-  const { data, isLoading, error, refetch } = useQuery({
+  const { data, isLoading, isFetching, dataUpdatedAt, error, refetch } = useQuery({
     queryKey: queryKeys.admin.discrepancies(statusFilter || undefined),
     queryFn: () => analyticsApi.discrepancies({ status: statusFilter || undefined, limit: 100 }),
     staleTime: 10_000,
@@ -58,34 +99,58 @@ function DiscrepanciesWorkbench({ who }: { who: StaffIdentity }) {
   const verifyMutation = useMutation({
     mutationFn: (payload: { id: string; body: VerifyDiscrepancyPayload }) =>
       analyticsApi.verifyDiscrepancy(payload.id, payload.body),
-    onSuccess: () => {
+    onSuccess: (_res, vars) => {
       setVerifyingId(null);
       resetForms();
-      client.invalidateQueries({ queryKey: queryKeys.admin.discrepancies() });
-      client.invalidateQueries({ queryKey: queryKeys.admin.overrides() });
-      client.invalidateQueries({ queryKey: queryKeys.admin.precedences() });
-      client.invalidateQueries({ queryKey: queryKeys.admin.tombstones() });
+      setActionError("");
+      setActionNotice(`Verified report #${vars.id.slice(-8)} and applied hotfixes.`);
+      void client.invalidateQueries({ queryKey: queryKeys.admin.discrepancies() });
+      void client.invalidateQueries({ queryKey: queryKeys.admin.overrides() });
+      void client.invalidateQueries({ queryKey: queryKeys.admin.precedences() });
+      void client.invalidateQueries({ queryKey: queryKeys.admin.tombstones() });
+    },
+    onError: (err) => {
+      setActionError(err instanceof Error ? err.message : "Could not verify discrepancy report.");
     },
   });
 
   const dismissMutation = useMutation({
     mutationFn: (payload: { id: string; note: string }) =>
       analyticsApi.dismissDiscrepancy(payload.id, { admin_note: payload.note, reason: payload.note }),
-    onSuccess: () => {
+    onSuccess: (_res, vars) => {
       setDismissingId(null);
       resetForms();
-      client.invalidateQueries({ queryKey: queryKeys.admin.discrepancies() });
+      setActionError("");
+      setActionNotice(`Dismissed report #${vars.id.slice(-8)}.`);
+      void client.invalidateQueries({ queryKey: queryKeys.admin.discrepancies() });
+    },
+    onError: (err) => {
+      setActionError(err instanceof Error ? err.message : "Could not dismiss discrepancy report.");
     },
   });
 
   const deleteTombstoneMutation = useMutation({
     mutationFn: (id: string) => analyticsApi.deleteTombstone(id),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.admin.tombstones() }),
+    onSuccess: () => {
+      setActionError("");
+      setActionNotice("Removed corpus tombstone.");
+      void client.invalidateQueries({ queryKey: queryKeys.admin.tombstones() });
+    },
+    onError: (err) => {
+      setActionError(err instanceof Error ? err.message : "Could not remove corpus tombstone.");
+    },
   });
 
   const deletePrecedenceMutation = useMutation({
     mutationFn: (id: string) => analyticsApi.deletePrecedence(id),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.admin.precedences() }),
+    onSuccess: () => {
+      setActionError("");
+      setActionNotice("Removed statutory precedence rule.");
+      void client.invalidateQueries({ queryKey: queryKeys.admin.precedences() });
+    },
+    onError: (err) => {
+      setActionError(err instanceof Error ? err.message : "Could not remove statutory precedence rule.");
+    },
   });
 
   function resetForms() {
@@ -126,235 +191,243 @@ function DiscrepanciesWorkbench({ who }: { who: StaffIdentity }) {
 
   const reports = useMemo(() => data?.discrepancies ?? [], [data]);
   const stats = data?.stats ?? { total: 0, pending: 0, verified: 0, dismissed: 0 };
-  const canEdit = who.role === "ura_admin";
+  const canEdit = !who || who.role === "ura_admin";
 
   return (
     <OpsPage
+      eyebrow="Configure"
       title="Knowledge & Bug Reports"
       description="Taxpayer-reported factual inaccuracies, outdated laws, and automated verification."
       actions={
-        <button
-          type="button"
-          className="ops-btn ops-btn-secondary"
-          onClick={() => refetch()}
-          disabled={isLoading}
-        >
-          Refresh
-        </button>
+        <>
+          <Freshness updatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={() => void refetch()} />
+          <button
+            type="button"
+            className="ops-btn is-sm is-ghost"
+            disabled={reports.length === 0}
+            onClick={() => downloadCsv(discrepanciesToCsv(reports), csvFilename("knowledge-discrepancies"))}
+          >
+            <DownloadIcon />
+            Export {reports.length} as CSV
+          </button>
+        </>
       }
     >
-      <div className="ops-stats-grid">
-        <StatCard label="Total Discrepancies" value={stats.total} />
-        <StatCard label="Pending Review" value={stats.pending} />
-        <StatCard label="Verified & Patched" value={stats.verified} />
-        <StatCard label="Dismissed / N/A" value={stats.dismissed} />
-      </div>
+      {!canEdit ? (
+        <div className="ops-note" role="note">
+          <span className="ops-note-mark" aria-hidden="true">
+            <InfoCircleIcon />
+          </span>
+          <div>
+            <p className="ops-note-title">Read-only for your role</p>
+            <p className="ops-note-body">
+              Officers and auditors can inspect reported inaccuracies, active statutory precedences, and corpus
+              tombstones. Verifying reports and deploying corpus hotfixes stays with administrators.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      <section aria-label="Discrepancy summary">
+        <div className="ops-stat-grid ov-stats">
+          <StatCard label="Total Discrepancies" value={stats.total} />
+          <StatCard label="Pending Review" value={stats.pending} />
+          <StatCard label="Verified & Patched" value={stats.verified} />
+          <StatCard label="Dismissed / N/A" value={stats.dismissed} />
+        </div>
+      </section>
+
+      {actionError ? (
+        <div className="ops-error" role="alert" style={{ marginBottom: "var(--ops-space-4)" }}>
+          <span className="ops-note-mark" aria-hidden="true">
+            <AlertTriangleIcon />
+          </span>
+          <div style={{ flex: 1 }}>
+            <p className="ops-error-title">Action could not be completed</p>
+            <p className="ops-error-body">{actionError}</p>
+          </div>
+          <button
+            type="button"
+            className="ops-icon-btn"
+            onClick={() => setActionError("")}
+            aria-label="Dismiss error"
+          >
+            <CloseIcon />
+          </button>
+        </div>
+      ) : null}
+
+      {actionNotice ? (
+        <div className="ops-note" role="status">
+          <span className="ops-note-mark" aria-hidden="true">
+            <InfoCircleIcon />
+          </span>
+          <div style={{ flex: 1 }}>
+            <p className="ops-note-body">{actionNotice}</p>
+          </div>
+          <button
+            type="button"
+            className="ops-icon-btn"
+            onClick={() => setActionNotice("")}
+            aria-label="Dismiss notice"
+          >
+            <CloseIcon />
+          </button>
+        </div>
+      ) : null}
 
       <OpsPanel
+        id="reported-inaccuracies"
         title="Reported Inaccuracies"
         note="Conversational pushbacks detected from taxpayer turns with cited evidence."
         end={
-          <div className="ops-segmented-control" role="group" aria-label="Status filter">
-            {["all", "pending", "verified", "dismissed"].map((s) => (
+          <div className="ops-segmented" role="group" aria-label="Status filter">
+            {STATUS_OPTIONS.map((opt) => (
               <button
-                key={s}
+                key={opt.label}
                 type="button"
-                className={`ops-pill ${statusFilter === (s === "all" ? "" : s) ? "active" : ""}`}
-                onClick={() => setStatusFilter(s === "all" ? "" : s)}
+                aria-pressed={statusFilter === opt.value}
+                className={statusFilter === opt.value ? "is-active" : undefined}
+                onClick={() => setStatusFilter(opt.value)}
               >
-                {s.toUpperCase()}
+                {opt.label}
               </button>
             ))}
           </div>
         }
       >
-        {isLoading && <SkeletonRows rows={4} />}
-        {error && <ErrorState title="Error" body="Failed to load discrepancy reports" onRetry={() => refetch()} />}
-        {!isLoading && !error && reports.length === 0 && (
+        {isLoading ? <SkeletonRows rows={4} height={96} /> : null}
+        {error ? (
+          <ErrorState
+            title="Error"
+            body="Failed to load discrepancy reports"
+            onRetry={() => void refetch()}
+          />
+        ) : null}
+        {!isLoading && !error && reports.length === 0 ? (
           <EmptyState
             title="No discrepancy reports found"
             body="When taxpayers challenge bot answers with updated facts or rates, reports appear here."
           />
-        )}
+        ) : null}
 
-        <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-          {reports.map((d) => (
-            <div
-              key={d.id}
-              style={{
-                border: "1px solid var(--border-color, #e2e8f0)",
-                borderRadius: "8px",
-                padding: "1rem",
-                background: "var(--card-bg, #ffffff)",
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5rem" }}>
-                <div>
-                  <strong style={{ fontSize: "0.95rem" }}>Report #{d.id.slice(-8)}</strong>
-                  <span
-                    style={{
-                      marginLeft: "0.5rem",
-                      fontSize: "0.75rem",
-                      padding: "0.15rem 0.4rem",
-                      borderRadius: "4px",
-                      background: d.priority === "high" ? "#fee2e2" : "#f1f5f9",
-                      color: d.priority === "high" ? "#991b1b" : "#475569",
-                      fontWeight: 600,
-                    }}
-                  >
-                    {d.priority.toUpperCase()}
+        {reports.length > 0 ? (
+          <ul className="disc-list" aria-label="Discrepancy reports">
+            {reports.map((d) => (
+              <li key={d.id} className="disc-card">
+                <div className="disc-head">
+                  <div className="disc-head-left">
+                    <strong className="disc-id">Report #{d.id.slice(-8)}</strong>
+                    <span className={`ops-chip ${d.priority === "high" ? "is-danger" : ""}`}>
+                      {d.priority.toUpperCase()}
+                    </span>
+                    <span className="ops-chip is-info">{d.discrepancy_type}</span>
+                    {d.frequency_count > 1 ? (
+                      <span className="ops-chip is-warn">Reported {d.frequency_count}x</span>
+                    ) : null}
+                  </div>
+                  <span className="disc-when">
+                    {new Date(d.created_at * 1000).toLocaleString()}
                   </span>
-                  <span
-                    style={{
-                      marginLeft: "0.5rem",
-                      fontSize: "0.75rem",
-                      padding: "0.15rem 0.4rem",
-                      borderRadius: "4px",
-                      background: "#e0f2fe",
-                      color: "#0369a1",
-                    }}
-                  >
-                    {d.discrepancy_type}
-                  </span>
-                  {d.frequency_count > 1 && (
-                    <span
-                      style={{
-                        marginLeft: "0.5rem",
-                        fontSize: "0.75rem",
-                        padding: "0.15rem 0.4rem",
-                        borderRadius: "4px",
-                        background: "#fef3c7",
-                        color: "#92400e",
-                        fontWeight: 600,
+                </div>
+
+                <div className="disc-diff">
+                  <div className="disc-box disc-box-bot">
+                    <span className="disc-box-label">Challenged Bot Statement</span>
+                    <p className="disc-box-text">{d.bot_statement}</p>
+                    {d.cited_sources.length > 0 ? (
+                      <span className="disc-box-sources">
+                        Cited: {d.cited_sources.join(", ")}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div className="disc-box disc-box-user">
+                    <span className="disc-box-label">Taxpayer Correction</span>
+                    <p className="disc-box-text">{d.user_correction}</p>
+                  </div>
+                </div>
+
+                {d.admin_note ? (
+                  <p className="disc-note">
+                    <strong>Admin Note:</strong> {d.admin_note}
+                  </p>
+                ) : null}
+
+                {d.status === "pending" && canEdit && verifyingId !== d.id && dismissingId !== d.id ? (
+                  <div className="disc-actions">
+                    <button
+                      type="button"
+                      className="ops-btn is-primary is-sm"
+                      onClick={() => startVerify(d)}
+                    >
+                      Verify &amp; Hotfix
+                    </button>
+                    <button
+                      type="button"
+                      className="ops-btn is-ghost is-sm"
+                      onClick={() => {
+                        setDismissingId(d.id);
+                        setAdminNote("Taxpayer misunderstanding / Law unchanged");
                       }}
                     >
-                      Reported {d.frequency_count}x
-                    </span>
-                  )}
-                </div>
-                <div style={{ fontSize: "0.8rem", color: "var(--text-3, #64748b)" }}>
-                  {new Date(d.created_at * 1000).toLocaleString()}
-                </div>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", margin: "0.75rem 0" }}>
-                <div style={{ padding: "0.75rem", background: "#fef2f2", borderRadius: "6px", borderLeft: "3px solid #ef4444" }}>
-                  <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "#991b1b", marginBottom: "0.25rem" }}>
-                    CHALLENGED BOT STATEMENT
+                      Dismiss (Doesn&apos;t Apply)
+                    </button>
                   </div>
-                  <div style={{ fontSize: "0.85rem", color: "#1e293b" }}>{d.bot_statement}</div>
-                  {d.cited_sources.length > 0 && (
-                    <div style={{ fontSize: "0.75rem", color: "#64748b", marginTop: "0.4rem" }}>
-                      Cited: {d.cited_sources.join(", ")}
-                    </div>
-                  )}
-                </div>
+                ) : null}
 
-                <div style={{ padding: "0.75rem", background: "#f0fdf4", borderRadius: "6px", borderLeft: "3px solid #22c55e" }}>
-                  <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "#166534", marginBottom: "0.25rem" }}>
-                    TAXPAYER CORRECTION
-                  </div>
-                  <div style={{ fontSize: "0.85rem", color: "#1e293b" }}>{d.user_correction}</div>
-                </div>
-              </div>
-
-              {d.admin_note && (
-                <div style={{ fontSize: "0.8rem", color: "var(--text-2, #334155)", margin: "0.4rem 0" }}>
-                  <strong>Admin Note:</strong> {d.admin_note}
-                </div>
-              )}
-
-              {/* Action buttons */}
-              {d.status === "pending" && canEdit && verifyingId !== d.id && dismissingId !== d.id && (
-                <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.75rem" }}>
-                  <button
-                    type="button"
-                    className="ops-btn ops-btn-primary"
-                    style={{ fontSize: "0.8rem", padding: "0.3rem 0.75rem" }}
-                    onClick={() => startVerify(d)}
-                  >
-                    Verify & Hotfix
-                  </button>
-                  <button
-                    type="button"
-                    className="ops-btn ops-btn-secondary"
-                    style={{ fontSize: "0.8rem", padding: "0.3rem 0.75rem" }}
-                    onClick={() => { setDismissingId(d.id); setAdminNote("Taxpayer misunderstanding / Law unchanged"); }}
-                  >
-                    Dismiss (Doesn&apos;t Apply)
-                  </button>
-                </div>
-              )}
-
-              {/* Verify Hotfix Drawer / Form */}
-              {verifyingId === d.id && (
-                <div
-                  style={{
-                    marginTop: "0.75rem",
-                    padding: "1rem",
-                    background: "#f8fafc",
-                    border: "1px solid #cbd5e1",
-                    borderRadius: "6px",
-                  }}
-                >
-                  <h4 style={{ margin: "0 0 0.5rem 0", fontSize: "0.9rem" }}>
-                    Verify Bug & Deploy Hotfixes (Solutions B & C)
-                  </h4>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                    <label style={{ fontSize: "0.8rem", fontWeight: 600 }}>
-                      Answer Override Query (exact match bypass):
+                {verifyingId === d.id ? (
+                  <div className="disc-drawer">
+                    <h4>Verify Bug &amp; Deploy Hotfixes (Solutions B &amp; C)</h4>
+                    <label className="ops-field">
+                      <span className="ops-field-label">Answer Override Query (exact match bypass)</span>
                       <input
                         type="text"
                         className="ops-input"
-                        style={{ width: "100%", marginTop: "0.2rem" }}
                         value={overrideQuery}
                         onChange={(e) => setOverrideQuery(e.target.value)}
                       />
                     </label>
-                    <label style={{ fontSize: "0.8rem", fontWeight: 600 }}>
-                      Verified Override Answer:
+                    <label className="ops-field">
+                      <span className="ops-field-label">Verified Override Answer</span>
                       <textarea
-                        className="ops-input"
+                        className="ops-textarea"
                         rows={2}
-                        style={{ width: "100%", marginTop: "0.2rem" }}
                         value={overrideReply}
                         onChange={(e) => setOverrideReply(e.target.value)}
                         placeholder="Enter verified statutory guidance..."
                       />
                     </label>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
-                      <label style={{ fontSize: "0.8rem", fontWeight: 600 }}>
-                        Active Statutory Precedence Topic (Solution C):
+                    <div className="disc-drawer-grid">
+                      <label className="ops-field">
+                        <span className="ops-field-label">Active Statutory Precedence Topic (Solution C)</span>
                         <input
                           type="text"
                           className="ops-input"
-                          style={{ width: "100%", marginTop: "0.2rem" }}
                           value={precedenceTopic}
                           onChange={(e) => setPrecedenceTopic(e.target.value)}
                         />
                       </label>
-                      <label style={{ fontSize: "0.8rem", fontWeight: 600 }}>
-                        Statute Reference (e.g. Finance Act 2023):
+                      <label className="ops-field">
+                        <span className="ops-field-label">Statute Reference (e.g. Finance Act 2023)</span>
                         <input
                           type="text"
                           className="ops-input"
-                          style={{ width: "100%", marginTop: "0.2rem" }}
                           value={statuteRef}
                           onChange={(e) => setStatuteRef(e.target.value)}
                         />
                       </label>
                     </div>
-                    <label style={{ fontSize: "0.8rem", fontWeight: 600 }}>
-                      Precedence Rule Statement (Injected into LLM context):
+                    <label className="ops-field">
+                      <span className="ops-field-label">Precedence Rule Statement (Injected into LLM context)</span>
                       <input
                         type="text"
                         className="ops-input"
-                        style={{ width: "100%", marginTop: "0.2rem" }}
                         value={precedenceRule}
                         onChange={(e) => setPrecedenceRule(e.target.value)}
                       />
                     </label>
-                    <label style={{ fontSize: "0.8rem", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                    <label className="disc-check">
                       <input
                         type="checkbox"
                         checked={tombstoneCited}
@@ -362,10 +435,10 @@ function DiscrepanciesWorkbench({ who }: { who: StaffIdentity }) {
                       />
                       <span>Tombstone cited chunk / sources in Qdrant (Solution B)</span>
                     </label>
-                    <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
+                    <div className="disc-actions">
                       <button
                         type="button"
-                        className="ops-btn ops-btn-primary"
+                        className="ops-btn is-primary is-sm"
                         onClick={() => handleConfirmVerify(d)}
                         disabled={verifyMutation.isPending}
                       >
@@ -373,137 +446,130 @@ function DiscrepanciesWorkbench({ who }: { who: StaffIdentity }) {
                       </button>
                       <button
                         type="button"
-                        className="ops-btn ops-btn-secondary"
-                        onClick={() => { setVerifyingId(null); resetForms(); }}
+                        className="ops-btn is-ghost is-sm"
+                        onClick={() => {
+                          setVerifyingId(null);
+                          resetForms();
+                        }}
                       >
                         Cancel
                       </button>
                     </div>
                   </div>
-                </div>
-              )}
+                ) : null}
 
-              {/* Dismiss form */}
-              {dismissingId === d.id && (
-                <div style={{ marginTop: "0.75rem", padding: "0.75rem", background: "#f8fafc", borderRadius: "6px" }}>
-                  <label style={{ fontSize: "0.8rem", fontWeight: 600 }}>
-                    Reason for dismissal:
-                    <input
-                      type="text"
-                      className="ops-input"
-                      style={{ width: "100%", marginTop: "0.2rem" }}
-                      value={adminNote}
-                      onChange={(e) => setAdminNote(e.target.value)}
-                    />
-                  </label>
-                  <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
-                    <button
-                      type="button"
-                      className="ops-btn ops-btn-primary"
-                      onClick={() => dismissMutation.mutate({ id: d.id, note: adminNote })}
-                      disabled={dismissMutation.isPending}
-                    >
-                      {dismissMutation.isPending ? "Dismissing..." : "Confirm Dismissal"}
-                    </button>
-                    <button
-                      type="button"
-                      className="ops-btn ops-btn-secondary"
-                      onClick={() => { setDismissingId(null); resetForms(); }}
-                    >
-                      Cancel
-                    </button>
+                {dismissingId === d.id ? (
+                  <div className="disc-drawer">
+                    <label className="ops-field">
+                      <span className="ops-field-label">Reason for dismissal</span>
+                      <input
+                        type="text"
+                        className="ops-input"
+                        value={adminNote}
+                        onChange={(e) => setAdminNote(e.target.value)}
+                      />
+                    </label>
+                    <div className="disc-actions">
+                      <button
+                        type="button"
+                        className="ops-btn is-primary is-sm"
+                        onClick={() => dismissMutation.mutate({ id: d.id, note: adminNote })}
+                        disabled={dismissMutation.isPending}
+                      >
+                        {dismissMutation.isPending ? "Dismissing..." : "Confirm Dismissal"}
+                      </button>
+                      <button
+                        type="button"
+                        className="ops-btn is-ghost is-sm"
+                        onClick={() => {
+                          setDismissingId(null);
+                          resetForms();
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </OpsPanel>
 
-      {/* Active Precedences (Solution C) */}
       <OpsPanel
+        id="active-precedences"
         title="Active Statutory Precedences (Solution C)"
         note="Prompt-injected legal rules that strictly supersede older retrieved passages across all queries."
+        bare
       >
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-          {precData?.precedences.map((p) => (
-            <div
-              key={p.id}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                padding: "0.6rem 0.8rem",
-                borderRadius: "6px",
-                border: "1px solid #e2e8f0",
-                background: "#fafafa",
-              }}
-            >
-              <div>
-                <strong>{p.topic}</strong>: {p.rule_statement}
-                {p.statute_reference && <span style={{ color: "#64748b" }}> ({p.statute_reference})</span>}
-              </div>
-              {canEdit && (
-                <button
-                  type="button"
-                  className="ops-btn ops-btn-secondary"
-                  style={{ fontSize: "0.75rem", padding: "0.2rem 0.5rem" }}
-                  onClick={() => deletePrecedenceMutation.mutate(p.id)}
-                >
-                  Delete
-                </button>
-              )}
-            </div>
-          ))}
-          {(!precData?.precedences || precData.precedences.length === 0) && (
-            <div style={{ fontSize: "0.85rem", color: "#64748b" }}>No active precedences currently registered.</div>
-          )}
-        </div>
+        {precData?.precedences && precData.precedences.length > 0 ? (
+          <ul className="ov-list">
+            {precData.precedences.map((p) => (
+              <li key={p.id} className="ov-list-item">
+                <div>
+                  <p className="ov-list-title">{p.topic}</p>
+                  <p className="ov-list-body">
+                    {p.rule_statement}
+                    {p.statute_reference ? <span className="ops-cell-sub"> ({p.statute_reference})</span> : null}
+                  </p>
+                </div>
+                {canEdit ? (
+                  <button
+                    type="button"
+                    className="ops-btn is-sm is-ghost"
+                    disabled={deletePrecedenceMutation.isPending}
+                    onClick={() => deletePrecedenceMutation.mutate(p.id)}
+                  >
+                    Delete
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="ov-empty">No active precedences currently registered.</p>
+        )}
       </OpsPanel>
 
-      {/* Corpus Tombstones (Solution B) */}
       <OpsPanel
+        id="corpus-tombstones"
         title="Corpus Tombstones (Solution B)"
         note="Outdated document passages filtered out from retrieval results across all queries."
+        bare
       >
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-          {tombData?.tombstones.map((t) => (
-            <div
-              key={t.id}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                padding: "0.6rem 0.8rem",
-                borderRadius: "6px",
-                border: "1px solid #e2e8f0",
-                background: "#fafafa",
-              }}
-            >
-              <div>
-                <code>{t.source_uri || t.chunk_id}</code>
-                {t.reason && <span style={{ color: "#64748b" }}> — {t.reason}</span>}
-              </div>
-              {canEdit && (
-                <button
-                  type="button"
-                  className="ops-btn ops-btn-secondary"
-                  style={{ fontSize: "0.75rem", padding: "0.2rem 0.5rem" }}
-                  onClick={() => deleteTombstoneMutation.mutate(t.id)}
-                >
-                  Remove
-                </button>
-              )}
-            </div>
-          ))}
-          {(!tombData?.tombstones || tombData.tombstones.length === 0) && (
-            <div style={{ fontSize: "0.85rem", color: "#64748b" }}>No corpus tombstones currently active.</div>
-          )}
-        </div>
+        {tombData?.tombstones && tombData.tombstones.length > 0 ? (
+          <ul className="ov-list">
+            {tombData.tombstones.map((t) => (
+              <li key={t.id} className="ov-list-item">
+                <div>
+                  <p className="ov-list-title">
+                    <code>{t.source_uri || t.chunk_id}</code>
+                  </p>
+                  {t.reason ? <p className="ov-list-body">{t.reason}</p> : null}
+                </div>
+                {canEdit ? (
+                  <button
+                    type="button"
+                    className="ops-btn is-sm is-ghost"
+                    disabled={deleteTombstoneMutation.isPending}
+                    onClick={() => deleteTombstoneMutation.mutate(t.id)}
+                  >
+                    Remove
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="ov-empty">No corpus tombstones currently active.</p>
+        )}
       </OpsPanel>
     </OpsPage>
   );
 }
 
-export default function DiscrepanciesPage() {
+export default function AdminDiscrepanciesPage() {
   return (
     <StaffGuard current="/admin/discrepancies" requireRoles={["ura_staff", "ura_admin", "ura_auditor"]}>
       {(who) => <DiscrepanciesWorkbench who={who} />}

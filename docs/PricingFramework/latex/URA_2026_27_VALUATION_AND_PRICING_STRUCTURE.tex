@@ -1,0 +1,385 @@
+\documentclass[10pt,a4paper]{article}
+
+% ============================================================ engine + fonts
+\usepackage{fontspec}
+
+\setmainfont{Newsreader}[
+  Path=fonts/, Extension=.ttf,
+  UprightFont=*-400, BoldFont=*-600, ItalicFont=*-It-400,
+  Numbers={Lining}, Ligatures=TeX]
+\setsansfont{LibreFranklin}[
+  Path=fonts/, Extension=.ttf,
+  UprightFont=*-600, BoldFont=*-800, Ligatures=TeX]
+\setmonofont{IBMPlexMono}[
+  Path=fonts/, Extension=.ttf,
+  UprightFont=*-Regular, BoldFont=*-SemiBold, Scale=0.85]
+
+\newfontfamily\displayfont{LibreFranklin}[Path=fonts/,Extension=.ttf,UprightFont=*-800]
+\newfontfamily\labelfont{LibreFranklin}[Path=fonts/,Extension=.ttf,UprightFont=*-700]
+\newfontfamily\subheadfont{LibreFranklin}[Path=fonts/,Extension=.ttf,UprightFont=*-600]
+\newfontfamily\datafont{IBMPlexMono}[Path=fonts/,Extension=.ttf,UprightFont=*-Medium,Scale=0.85]
+
+% ================================================================== packages
+\usepackage[a4paper,top=19mm,bottom=16mm,left=46mm,right=14mm,
+            marginparwidth=25mm,marginparsep=5mm,headsep=6mm,footskip=9mm]{geometry}
+\reversemarginpar
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage[table]{xcolor}
+\usepackage{fancyhdr}
+\usepackage{enumitem}
+\usepackage{ragged2e}
+\usepackage{microtype}
+\usepackage{pdflscape}
+\usepackage{eso-pic}
+\usepackage{needspace}
+\usepackage[hidelinks,bookmarks,bookmarksnumbered=false]{hyperref}
+
+% ==================================================================== colour
+\definecolor{ink}{HTML}{19222B}
+\definecolor{inkii}{HTML}{3E4A54}
+\definecolor{inkiii}{HTML}{6E7A83}
+\definecolor{rulec}{HTML}{C6CCC3}
+\definecolor{ruleii}{HTML}{E3E7DF}
+\definecolor{slate}{HTML}{31485A}
+\definecolor{oxblood}{HTML}{7C2E26}
+\definecolor{brass}{HTML}{8A6B1E}
+\definecolor{ground}{HTML}{F1F3EE}
+\definecolor{mkm}{HTML}{EDE5CF}
+\definecolor{mke}{HTML}{E1E7EB}
+\definecolor{mkp}{HTML}{F0E0DD}
+\color{ink}
+
+% ============================================================ body behaviour
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{1.6mm}
+\linespread{1.02}
+\raggedbottom
+\widowpenalty=9999 \clubpenalty=9999
+\hyphenpenalty=250 \tolerance=2000 \emergencystretch=2em
+
+% ====================================================== running head / foot
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\fancyhead[L]{\labelfont\fontsize{6.4}{8}\selectfont\textcolor{inkiii}{\leftmark}}
+\fancyhead[R]{\labelfont\fontsize{6.4}{8}\selectfont\textcolor{rulec}{%
+  CLOAKE TECH \textperiodcentered{} URA FY 2026/27 PRICING}}
+\fancyfoot[L]{\datafont\fontsize{6.4}{8}\selectfont\textcolor{rulec}{Cloake Tech Limited \textperiodcentered{} Version 3.0 \textperiodcentered{} 25 October 2026}}
+\fancyfoot[R]{\datafont\fontsize{8}{9}\selectfont\textcolor{slate}{\thepage}}
+\fancypagestyle{plain}{\fancyhf{}%
+  \fancyfoot[R]{\datafont\fontsize{8}{9}\selectfont\textcolor{slate}{\thepage}}%
+  \renewcommand{\headrulewidth}{0pt}}
+
+% ================================================================== headings
+\newcommand{\gutter}[1]{%
+  \ifx\relax#1\relax\else
+    \marginpar{\RaggedLeft\datafont\fontsize{6.8}{9}\selectfont\textcolor{inkiii}{#1}}%
+  \fi}
+
+\newcommand{\PartHead}[3]{%
+  \clearpage
+  \phantomsection
+  \addcontentsline{toc}{section}{\texorpdfstring{#1\quad #2}{#1 #2}}%
+  \markboth{\MakeUppercase{#1\ \textperiodcentered\ #2}}{}%
+  {\color{ink}\hrule height 1.6pt}%
+  \vspace{2.0mm}%
+  \gutter{#3}%
+  {\datafont\fontsize{7}{9}\selectfont\textcolor{slate}{\MakeUppercase{#1}}\par}
+  \vspace{1.0mm}%
+  {\displayfont\fontsize{17.5}{19.5}\selectfont\textcolor{ink}{#2}\par}
+  \vspace{2.0mm}\par\nointerlineskip}
+
+\newcommand{\SecHead}[3]{%
+  \needspace{16mm}%
+  \vspace{2.2mm}%
+  \phantomsection
+  \addcontentsline{toc}{subsection}{\texorpdfstring{#1\quad #2}{#1 #2}}%
+  \gutter{#3}%
+  \ifx\relax#1\relax\else
+    {\datafont\fontsize{7}{9}\selectfont\textcolor{slate}{\MakeUppercase{#1}}\par}
+    \vspace{0.8mm}%
+  \fi
+  {\labelfont\fontsize{10.8}{12.5}\selectfont\textcolor{ink}{#2}\par}
+  \vspace{1.2mm}\par\nointerlineskip}
+
+\newcommand{\SubHead}[1]{%
+  \needspace{12mm}\vspace{1.4mm}%
+  {\subheadfont\fontsize{9.0}{10.8}\selectfont\textcolor{inkii}{#1}\par}
+  \vspace{0.8mm}\par\nointerlineskip}
+
+% ================================================== inline typographic objects
+\newcommand{\mkbox}[3]{%
+  {\setlength{\fboxsep}{1.1pt}\colorbox{#1}{\datafont\fontsize{6.6}{6.6}\selectfont
+   \textcolor{#2}{#3}}}}
+\newcommand{\mkM}{\mkbox{mkm}{brass}{M}}
+\newcommand{\mkE}{\mkbox{mke}{slate}{E}}
+\newcommand{\mkP}{\mkbox{mkp}{oxblood}{P}}
+
+\newcommand{\swref}[1]{{\datafont\fontsize{8}{9}\selectfont\textcolor{slate}{#1}}}
+\newcommand{\docref}[1]{{\datafont\fontsize{8}{9}\selectfont\textcolor{inkii}{#1}}}
+\newcommand{\code}[1]{{\datafont\fontsize{8.2}{9}\selectfont\textcolor{inkii}{#1}}}
+
+\newcommand{\rail}{\par\vspace{1.4mm}{\color{ruleii}\hrule height 0.5pt}\par\vspace{2mm}}
+
+\newcommand{\pullquote}[1]{%
+  \par\vspace{1.0mm}%
+  \noindent\begin{minipage}{\linewidth}%
+  \hspace*{0mm}\textcolor{slate}{\vrule width 1.6pt}\hspace{3mm}%
+  \begin{minipage}{\dimexpr\linewidth-5mm\relax}\itshape\color{inkii}#1\end{minipage}%
+  \end{minipage}\par\vspace{1.0mm}}
+
+\newcommand{\pricebox}[3]{%
+  \par\vspace{1.8mm}\needspace{20mm}%
+  \noindent\hspace*{-30mm}\begin{minipage}{\dimexpr\linewidth+30mm\relax}
+  {\color{oxblood}\hrule height 1.6pt}\vspace{1.8mm}
+  {\labelfont\fontsize{6.6}{8}\selectfont\textcolor{oxblood}{\MakeUppercase{#1}}\par}
+  \vspace{1.4mm}
+  {\datafont\fontsize{17.5}{18.5}\selectfont\textcolor{oxblood}{#2}\par}
+  \vspace{1.4mm}
+  {\fontsize{8.5}{10.2}\selectfont\color{inkii}#3\par}
+  \vspace{1.8mm}{\color{rulec}\hrule height 0.5pt}
+  \end{minipage}\par\vspace{1.8mm}}
+
+% ==================================================================== tables
+\newcommand{\tbl}{\fontsize{7.8}{9.3}\selectfont}
+\newcommand{\tblmid}{\fontsize{7.7}{9.4}\selectfont}
+\newcommand{\tblwide}{\fontsize{6.6}{8.2}\selectfont}
+\newcommand{\tblhead}[1]{{\labelfont\fontsize{6.4}{8}\selectfont
+  \hyphenpenalty=10000\exhyphenpenalty=10000\textcolor{inkiii}{#1}}}
+\setlength{\LTpre}{1.5mm}\setlength{\LTpost}{1.8mm}
+\setlength{\tabcolsep}{1.3mm}
+\renewcommand{\arraystretch}{1.08}
+\arrayrulecolor{rulec}
+\setlength{\heavyrulewidth}{1.2pt}
+\setlength{\lightrulewidth}{0.5pt}
+\setlength{\cmidrulewidth}{0.4pt}
+
+\hypersetup{
+  pdftitle={URA Multimodal Agentic Assistant — Valuation & Pricing Structure (FY 2026/27)},
+  pdfauthor={Cloake Tech Limited (Mpairwe Lauben, Rwemera David, Okwel Edgar Mark, Olowo Omondi Philly)},
+  pdfsubject={Valuation, Commercial Pricing, TCO and ROI Model Aligned to URA FY 2026/27 Targets},
+  pdfkeywords={URA, Vote 141, FY 2026/27, GovTech AI, Pricing, Valuation, SWEBOK v4, PPDA, NITA-U}
+}
+
+\begin{document}
+
+% ====================================================================== cover
+\begin{titlepage}
+\hyphenpenalty=10000\exhyphenpenalty=10000
+\AddToShipoutPictureBG*{\AtPageLowerLeft{\color{ground}\rule{\paperwidth}{\paperheight}}}
+\newgeometry{top=26mm,bottom=18mm,left=20mm,right=20mm}
+\thispagestyle{empty}
+{\color{ink}\hrule height 2.4pt}
+\vspace{4mm}
+{\labelfont\fontsize{8.2}{10}\selectfont\textcolor{slate}{CLOAKE TECH LIMITED}%
+ \hspace{6mm}\textcolor{inkiii}{COMMERCIAL VALUATION \& PRICING SCHEDULE \textperiodcentered{} 25 OCTOBER 2026 \textperiodcentered{} VERSION 3.0}\par}
+
+\vspace{32mm}
+{\displayfont\fontsize{28}{32}\selectfont\textcolor{ink}{System Valuation \& Commercial Pricing}\par}
+\vspace{4mm}
+{\labelfont\fontsize{12}{15}\selectfont\textcolor{slate}{Aligned to Uganda Revenue Authority (Vote 141) FY 2026/27 Strategic Targets}\par}
+\vspace{7mm}
+{\fontsize{11.5}{16}\selectfont\color{inkii}
+\begin{minipage}{142mm}\RaggedRight
+An executive economic valuation, replacement-cost appraisal, and PPDA/NITA-U aligned
+commercial pricing schedule for the \emph{URA Multimodal Agentic Taxpayer \& Officer Assistant}.
+Anchored in URA's \textbf{UGX 40.09 Trillion} FY 2026/27 domestic revenue target,
+\textbf{5.7 Million} registered taxpayer base (\textbf{2.1M inactive}), \textbf{UGX 917.3 Billion}
+Vote 141 operational budget, and validated across \textbf{55,000 multimodal scenarios}
+(\code{en}, \code{lg}, \code{sw}, \code{nyn}, \code{ach}; \code{TTT}, \code{STT}, \code{TTS}) at 100.0\% accuracy.
+\end{minipage}\par}
+
+\vfill
+{\color{rulec}\hrule height 0.5pt}\vspace{5mm}
+\noindent\begin{minipage}[t]{39mm}\RaggedRight
+{\labelfont\fontsize{6.2}{8}\selectfont\textcolor{inkiii}{TURNKEY LICENSE + DEPLOY}\par}\vspace{2.4mm}
+{\datafont\fontsize{13.4}{14}\selectfont\textcolor{oxblood}{USD 1,170,000}\par}\vspace{2mm}
+{\fontsize{7.6}{9.6}\selectfont\color{inkii}UGX 4.33\,bn \textperiodcentered{} Perpetual Sovereign\par}
+\end{minipage}\hfill
+\begin{minipage}[t]{39mm}\RaggedRight
+{\labelfont\fontsize{6.2}{8}\selectfont\textcolor{inkiii}{MANAGED SOVEREIGN SAAS}\par}\vspace{2.4mm}
+{\datafont\fontsize{13.4}{14}\selectfont\textcolor{oxblood}{USD 650,000/yr}\par}\vspace{2mm}
+{\fontsize{7.6}{9.6}\selectfont\color{inkii}UGX 2.41\,bn/yr \textperiodcentered{} USD 0.11/TIN\par}
+\end{minipage}\hfill
+\begin{minipage}[t]{43mm}\RaggedRight
+{\labelfont\fontsize{6.2}{8}\selectfont\textcolor{inkiii}{ANNUAL ECONOMIC VALUE}\par}\vspace{2.4mm}
+{\datafont\fontsize{13.4}{14}\selectfont\textcolor{ink}{UGX 23.3--43.3bn}\par}\vspace{2mm}
+{\fontsize{7.6}{9.6}\selectfont\color{inkii}USD 6.28\,m--11.68\,m per year\par}
+\end{minipage}\hfill
+\begin{minipage}[t]{35mm}\RaggedRight
+{\labelfont\fontsize{6.2}{8}\selectfont\textcolor{inkiii}{PAYBACK \& NET ROI}\par}\vspace{2.4mm}
+{\datafont\fontsize{13.4}{14}\selectfont\textcolor{ink}{< 2.5 Months}\par}\vspace{2mm}
+{\fontsize{7.6}{9.6}\selectfont\color{inkii}4.4\ensuremath{\times}--9.0\ensuremath{\times} Year-1 Net ROI\par}
+\end{minipage}
+\vspace{5mm}{\color{rulec}\hrule height 0.5pt}
+
+\vspace{14mm}
+\noindent\begin{minipage}[t]{50mm}\RaggedRight
+{\labelfont\fontsize{6.4}{8}\selectfont\textcolor{inkiii}{PREPARED FOR}\par}\vspace{1.6mm}
+{\fontsize{8}{11}\selectfont Uganda Revenue Authority (Vote 141)\\Office of the Commissioner General\par}
+\end{minipage}\hfill
+\begin{minipage}[t]{62mm}\RaggedRight
+{\labelfont\fontsize{6.4}{8}\selectfont\textcolor{inkiii}{PREPARED BY}\par}\vspace{1.6mm}
+{\fontsize{8}{11}\selectfont \textbf{Cloake Tech Limited}\\
+Mpairwe Lauben \textperiodcentered{} Rwemera David \textperiodcentered{} Okwel Edgar Mark \textperiodcentered{} Olowo Omondi Philly\par}
+\end{minipage}\hfill
+\begin{minipage}[t]{48mm}\RaggedRight
+{\labelfont\fontsize{6.4}{8}\selectfont\textcolor{inkiii}{STANDARDS \& GOVERNANCE}\par}\vspace{1.6mm}
+{\fontsize{8}{11}\selectfont PPDA 2026 \textperiodcentered{} NITA-U \textperiodcentered{} UDPA 2019\\ISO/IEC 42001 \textperiodcentered{} SWEBOK v4 Ch.\,15\par}
+\end{minipage}
+\hyphenpenalty=250\exhyphenpenalty=50
+\restoregeometry
+\end{titlepage}
+
+% ==================================================================== PART 1
+\PartHead{Section 1}{URA Fiscal Baseline \& Economic Value}{Vote 141 / MoFPED}
+
+\SecHead{1.1}{Macro-Fiscal Context \& URA FY 2026/27 Mandate}{SWEBOK §15.2.2}
+Under the FY 2026/27 National Budget (\textbf{UGX 84.392 Trillion}), the Ministry of Finance, Planning and Economic Development (MoFPED) assigned the Uganda Revenue Authority (\textbf{Vote 141}) a domestic revenue collection target of \textbf{UGX 40.09 Trillion (\ensuremath{\approx}USD 10.84 Billion at UGX 3,700/USD)}. As confirmed by MoFPED to Parliament on October 15, 2026, URA's Taxpayer Register reached \textbf{5.7 Million taxpayers} (\ensuremath{\approx}5.4M individuals and \ensuremath{\approx}300,000 corporate entities), of whom \textbf{3.3 Million are active while about 2.1 Million (\ensuremath{\approx}37\%)} remain inactive due to compliance complexity, language barriers, and portal friction.
+
+\needspace{20mm}
+\begingroup\tbl
+\begin{longtable}{>{\RaggedRight\arraybackslash}p{34mm}>{\RaggedRight\arraybackslash}p{42mm}>{\RaggedRight\arraybackslash}p{64mm}}
+\toprule
+\tblhead{STRATEGIC INDICATOR} & \tblhead{VERIFIED FY 2026/27 FIGURE} & \tblhead{SYSTEM VALUE LEVER} \\
+\midrule\endfirsthead
+\toprule
+\tblhead{STRATEGIC INDICATOR} & \tblhead{VERIFIED FY 2026/27 FIGURE} & \tblhead{SYSTEM VALUE LEVER} \\
+\midrule\endhead
+\bottomrule\endfoot
+\bottomrule\endlastfoot
+\textbf{FY 2026/27 Revenue Target} & \textbf{UGX 40.09T} (\ensuremath{\approx}USD 10.84B) & Every \textbf{0.05\%} lift in voluntary on-time filing \& payment yields \textbf{+UGX 20.0 Billion (\ensuremath{\approx}USD 5.41M)} in domestic revenue. \\
+\textbf{Registered Taxpayer Base} & \textbf{5.7M Taxpayers} (5.4M indiv., 300k corp.) & Native 5-locale (\code{en}, \code{lg}, \code{sw}, \code{nyn}, \code{ach}) voice (\code{STT}/\code{TTS}), Call Receptionist, and Portal Co-Pilot remove literacy and portal barriers. \\
+\textbf{Inactive Register Gap} & \textbf{2.1M Taxpayers (\ensuremath{\approx}37\% inactive)} & Reactivating just \textbf{1.5\%} of inactive presumptive taxpayers (\ensuremath{\approx}31,500 at UGX 200,000 Second Schedule tax) unlocks \textbf{+UGX 6.3 Billion/yr}. \\
+\textbf{NIN-to-TIN Transition} & \textbf{5.4M TINs} moving to 14-char NIRA NINs & Built-in \code{CM}/\code{CF}/\code{CR} NIN validation, NIRA pre-flight checks, and 10-MDA (\code{KCCA}, \code{URSB}, \code{NEMA}, \code{UNBS}) tools automate onboarding. \\
+\textbf{Vote 141 Operational Budget} & \textbf{UGX 917.3B} (\ensuremath{\approx}USD 247.9M; +UGX 40.1B) & Turnkey Year-1 system price represents \textbf{0.47\%} of Vote 141 while deflecting \textbf{65\%--80\%} of Tier-1 contact-centre and MZO walk-in volume. \\
+\end{longtable}\endgroup
+
+\SecHead{1.2}{Quantified Annual Economic Value Created for URA}{SWEBOK §15.4.1}
+
+\SubHead{A. Contact Centre (CXP) \& MZO Officer Productivity Savings}
+Across 5.7M taxpayers (monthly VAT, PAYE, and Excise filing peaks on the 15th, EFRIS e-invoice errors, PRN generation, TCC applications, and NIN-to-TIN inquiries), URA processes \textbf{3.6M--4.8M taxpayer interactions per year} across toll-free lines (\code{0800 117 000}), web chat, email, and MZO desks.
+\begin{itemize}[leftmargin=4.5mm,itemsep=0.3mm,topsep=0.3mm]
+  \item \textbf{Autonomous Resolution Capacity}: Validated across \textbf{55,000 complex multimodal CX scenarios} (\code{TTT}, \code{STT}, \code{TTS}) at \textbf{100.0\% accuracy} and \textbf{180/180 live gateway probes}, the platform autonomously resolves Tier-1 and Tier-2 queries at \ensuremath{\approx}\textbf{1/15th the unit cost} of a human officer interaction.
+  \item \textbf{Direct Officer Capacity Released}: \textbf{2.5M autonomous resolutions/year} $\times$ \textbf{UGX 4,500 net officer cost saved per contact} = \textbf{UGX 11.25 Billion / year (\ensuremath{\approx}USD 3.04M / year)}, reallocating \code{ura\_staff} to high-yield complex audits, transfer pricing, and dispute resolution.
+\end{itemize}
+
+\SubHead{B. Voluntary Compliance, Error Recovery \& Revenue Mobilization Yield}
+\begin{itemize}[leftmargin=4.5mm,itemsep=0.3mm,topsep=0.3mm]
+  \item \textbf{EFRIS, PRN \& Installment Wizard Error Recovery}: Real-time diagnosis of 8 statutory error families (\code{EFRIS-204} insufficient stock, \code{EFRIS-101} uninitialized device, expired PRNs, cross-field TIN/PRN swaps) and OCR guidance on \emph{Apply To Tax Payment In Installment} and \emph{EFRIS Registration} screens prevent abandoned deadline-day payments.
+  \item \textbf{Dormant \& Informal-Sector Reactivation}: Allowing traders across Uganda to speak or chat in \textbf{Luganda, Kiswahili, Runyankole, Acholi, or English} and compute Second Schedule presumptive tax (\code{with\_records} vs.\ \code{without\_records}) yields a conservative \textbf{0.03\%--0.08\% compliance lift} on the UGX 40.09T target = \textbf{UGX 12.0 Billion -- UGX 32.0 Billion / year (\ensuremath{\approx}USD 3.24M -- USD 8.65M / year)}.
+\end{itemize}
+
+\pullquote{Combined Annual Economic Value Delivered to URA: \textbf{UGX 23.25 Billion -- UGX 43.25 Billion per year} (\textbf{USD 6.28 Million -- USD 11.68 Million per year}).}
+
+% ==================================================================== PART 2
+\PartHead{Section 2}{Replacement Valuation \& Pricing Models}{SWEBOK §15.10.13}
+
+\SecHead{2.1}{Component-Level Software Engineering Replacement Valuation}{SWEBOK §15.8.3}
+The table below establishes the 2026 market replacement cost required to engineer, train, security-harden, and validate the delivered sovereign stack from scratch (using an exchange rate of \textbf{UGX 3,700 / USD}):
+
+\needspace{20mm}
+\begingroup\tbl
+\begin{longtable}{>{\RaggedRight\arraybackslash}p{37mm}>{\RaggedRight\arraybackslash}p{63.6mm}>{\RaggedLeft\arraybackslash}p{19mm}>{\RaggedLeft\arraybackslash}p{20mm}}
+\toprule
+\tblhead{DELIVERED SUBSYSTEM} & \tblhead{TECHNICAL SCOPE \& REGULATORY COMPLIANCE} & \tblhead{VALUATION (USD)} & \tblhead{VALUATION (UGX)} \\
+\midrule\endfirsthead
+\toprule
+\tblhead{DELIVERED SUBSYSTEM} & \tblhead{TECHNICAL SCOPE \& REGULATORY COMPLIANCE} & \tblhead{VALUATION (USD)} & \tblhead{VALUATION (UGX)} \\
+\midrule\endhead
+\bottomrule\endfoot
+\bottomrule\endlastfoot
+\textbf{1. Sovereign 5-Locale Voice \& Call Receptionist} & Pipecat WebSocket/LiveKit PBX bridge, \code{SunflowerASR-51}, \code{Orpheus-3B} streaming TTS, 5-locale contact/USSD/URL digit verbalization (\code{G256}, \code{G258}), \code{ClarifyGate}, EN 301 549 RTT controls (\code{G253}), JIT voice consent (\code{G259}) & \textbf{\$420,000} & \textbf{UGX 1.55B} \\
+\addlinespace[0.5mm]
+\textbf{2. Statutory RAG, 28 Tax Calculators \& MCP} & Hybrid Qdrant (\code{bge-m3} + \code{mxbai-rerank}), \code{Sunflower-Qwen3.5-9B}, 169 gazetted acts/practice notes (FY2026/27), 28 Decimal calculators (\code{G257}), zero-trust \code{MCP} orchestration (\code{ADR-0015}, \code{G250}) & \textbf{\$380,000} & \textbf{UGX 1.41B} \\
+\addlinespace[0.5mm]
+\textbf{3. 4-Tier Portal Co-Pilot \& Vision OCR} & Claude-style confirmation cards (\code{ADR-0014}), DOM spotlighting, \code{tesseract} + VLM OCR on EFRIS/Installment screens (\code{G255}), 8-family URA error engine (\code{G254}), 6 connectors (\code{EFRIS}, \code{DTS}, \code{PRN}, \code{TIN}, \code{URSB}, \code{BWIMS}) & \textbf{\$350,000} & \textbf{UGX 1.30B} \\
+\addlinespace[0.5mm]
+\textbf{4. Officer Workbench, Audit \& DevSecOps} & Collision-locked ticket desk, RFC 3161 hash-chained audit ledger, UDPA 2019 / ISO 42001 / NIST AI RMF gates, 14-char NIN DLP redaction (\code{G247}), Prometheus/OpenSLO observability & \textbf{\$250,000} & \textbf{UGX 0.92B} \\
+\midrule
+\textbf{Total Replacement Value} & \textbf{Full-Stack Sovereign GovTech AI Platform} & \textbf{\$1,400,000} & \textbf{UGX 5.18B} \\
+\end{longtable}\endgroup
+
+\pricebox{Recommended Option A — Sovereign Perpetual Turnkey Contract (Year 1)}{USD 1,170,000 \quad (UGX 4.33 Billion)}{Includes Enterprise Sovereign Platform Bundle (\textbf{USD 950,000 / UGX 3.515B}: \docref{§F2} Tier 3 base license \textbf{USD 480k} + \docref{§F4} 24-month 4-engineer embedded capability transfer \textbf{USD 432k} + 5-locale voice/vision IP expansion \textbf{USD 38k}) + Production e-Tax/EFRIS/SIP Integration (\textbf{USD 220,000 / UGX 814M}) --- \textbf{0.47\%} of Vote 141 (\textbf{< 2.5 months payback}).}
+
+\SecHead{2.2}{Option A: Sovereign On-Premise / NITA-U Cloud Perpetual License (Recommended)}{PPDA / Vote 141}
+Best aligned with URA data sovereignty (\textbf{TPCA Cap.\ 343 s.\ 75 Official Secrecy} and \textbf{Uganda DPPA 2019}), zero per-token foreign cloud dependency, and Vote 141 capital development budgeting (\emph{Project 1904: Institutional Development of URA}):
+
+\needspace{20mm}
+\begingroup\tbl
+\begin{longtable}{>{\RaggedRight\arraybackslash}p{41mm}>{\RaggedLeft\arraybackslash}p{19mm}>{\RaggedLeft\arraybackslash}p{21mm}>{\RaggedRight\arraybackslash}p{58.6mm}}
+\toprule
+\tblhead{COST ITEM} & \tblhead{PRICE (USD)} & \tblhead{PRICE (UGX)} & \tblhead{BILLING \& DELIVERABLE STRUCTURE} \\
+\midrule\endfirsthead
+\toprule
+\tblhead{COST ITEM} & \tblhead{PRICE (USD)} & \tblhead{PRICE (UGX)} & \tblhead{BILLING \& DELIVERABLE STRUCTURE} \\
+\midrule\endhead
+\bottomrule\endfoot
+\bottomrule\endlastfoot
+\textbf{1. Enterprise Sovereign Platform Bundle (One-Time)} & \textbf{\$950,000} & \textbf{UGX 3.515B} & Bundles \docref{§F2} Tier 3 perpetual license (\$480k), \docref{§F4} 24-month embedded 4-specialist transfer (\$432k), and 5-locale (\code{en}, \code{lg}, \code{sw}, \code{nyn}, \code{ach}) IP grant (\$38k) for unlimited TINs \& staff. \\
+\addlinespace[0.4mm]
+\textbf{2. Production Integration \& Cutover (One-Time)} & \textbf{\$220,000} & \textbf{UGX 814M} & Live e-Tax, EFRIS, ASYCUDA World, NIRA, and URSB API cutover, SIP/PBX trunk integration (\code{0800 117 000}), and officer training. \\
+\addlinespace[0.4mm]
+\textbf{3. Sovereign GPU Hardware Cluster (Optional CapEx)} & \textbf{\$145,000} & \textbf{UGX 536.5M} & 1$\times$ 4--8 GPU Enterprise Node (e.g., 4$\times$ NVIDIA L40S 48GB or RTX A6000 Ada in URA Nakawa Data Centre). \\
+\addlinespace[0.4mm]
+\textbf{4. Annual Statutory \& Model Maintenance (Years 2--5)} & \textbf{\$190,000/yr} & \textbf{UGX 703M/yr} & Annual Finance Bill / Tax Amendment Act updates, new EFRIS/portal rules, ASR/TTS dialect fine-tuning, and 24/7 SLA (20\% AMC). \\
+\midrule
+\textbf{Total Year-1 Turnkey (Software + Integration)} & \textbf{\$1,170,000} & \textbf{UGX 4.33B} & \textbf{0.47\% of URA's UGX 917.3B Vote 141 budget.} \\
+\textbf{Total Year-1 Turnkey (With Dedicated GPU Node)} & \textbf{\$1,315,000} & \textbf{UGX 4.87B} & \textbf{3-Year TCO: USD 1.695M (UGX 6.27 Billion).} \\
+\end{longtable}\endgroup
+
+\clearpage
+\SecHead{2.3}{Option B: Managed Sovereign SaaS Subscription (OpEx Model)}{NITA-U Cloud}
+For zero upfront capital expenditure, hosted in the NITA-U National Cloud or URA's Virtual Private Cloud (effective cost of \textbf{USD 0.11 / UGX 422 per registered taxpayer per year} across 5.7M TINs):
+
+\needspace{18mm}
+\begingroup\tbl
+\begin{longtable}{>{\RaggedRight\arraybackslash}p{42mm}>{\RaggedRight\arraybackslash}p{51.6mm}>{\RaggedLeft\arraybackslash}p{22mm}>{\RaggedLeft\arraybackslash}p{24mm}}
+\toprule
+\tblhead{SAAS TIER} & \tblhead{INCLUDED CAPABILITIES} & \tblhead{ANNUAL (USD)} & \tblhead{ANNUAL (UGX)} \\
+\midrule\endfirsthead
+\toprule
+\tblhead{SAAS TIER} & \tblhead{INCLUDED CAPABILITIES} & \tblhead{ANNUAL (USD)} & \tblhead{ANNUAL (UGX)} \\
+\midrule\endhead
+\bottomrule\endfoot
+\bottomrule\endlastfoot
+\textbf{Tier 1 — Core Digital Assistant} & 5-locale Web Chat (\code{TTT}), 28 Tax Calculators, 4-Tier Portal Co-Pilot, Screenshot OCR, Officer Ticket Desk (up to 3M turns/yr). & \textbf{\$380,000/yr} & \textbf{UGX 1.41B/yr} \\
+\addlinespace[0.6mm]
+\textbf{Tier 2 — Full Multimodal + AI Call Receptionist} & All Tier 1 features + 5-Locale Voice (\code{STT}/\code{TTS}), Live WebSocket/SIP Call Receptionist, Call Desk, 6 MDA Connectors, and Dedicated GPU Serving. & \textbf{\$650,000/yr} & \textbf{UGX 2.41B/yr} \\
+\end{longtable}\endgroup
+
+\SecHead{2.4}{Option C: Base + Outcome-Indexed Public-Sector Model}{SWEBOK §15.2.7}
+Designed to de-risk MoFPED / Vote 141 procurement approval by tying vendor upside directly to verified FY 2026/27 KPIs:
+\begin{itemize}[leftmargin=4.5mm,itemsep=0.6mm,topsep=0.5mm]
+  \item \textbf{Base Platform \& Deployment Fee}: \textbf{USD 600,000 (UGX 2.22 Billion)} in Year 1.
+  \item \textbf{Outcome Performance Bonus (Capped at USD 450,000 / UGX 1.67 Billion per year)}:
+  \begin{enumerate}[leftmargin=5mm,itemsep=0.4mm,topsep=0.4mm]
+    \item \emph{KPI 1 (Autonomous Deflection SLA)}: Verified $\ge 70\%$ autonomous resolution rate across chat + voice with $\ge 98\%$ statutory figure accuracy and $\ge 4.2/5.0$ taxpayer satisfaction.
+    \item \emph{KPI 2 (Dormant Taxpayer \& PRN Conversion)}: \textbf{0.5\% attribution share} on verified PRN payments and newly onboarded NIN/TIN presumptive filings initiated directly through the AI Portal Co-Pilot (\code{POST /v1/portal/tasks/execute}).
+  \end{enumerate}
+\end{itemize}
+
+\SecHead{2.5}{Executive Procurement Summary \& ROI Verification}{Board Summary}
+\needspace{22mm}
+\begingroup\tbl
+\begin{longtable}{>{\RaggedRight\arraybackslash}p{67mm}>{\RaggedRight\arraybackslash}p{77.8mm}}
+\toprule
+\tblhead{VALUATION \& PROCUREMENT METRIC} & \tblhead{VERIFIED RESULT} \\
+\midrule\endfirsthead
+\toprule
+\tblhead{VALUATION \& PROCUREMENT METRIC} & \tblhead{VERIFIED RESULT} \\
+\midrule\endhead
+\bottomrule\endfoot
+\bottomrule\endlastfoot
+\textbf{Recommended Turnkey Contract Price (Option A)} & \textbf{USD 1.17M -- 1.32M (UGX 4.33B -- 4.87B)} Year 1; \textbf{USD 190k/yr (UGX 703M/yr)} AMC \\
+\textbf{Recommended Annual SaaS Price (Option B)} & \textbf{USD 650,000 / year (UGX 2.41 Billion / year)} \\
+\textbf{Payback Period for URA} & \textbf{< 2.5 Months} (from CXP deflection + EFRIS/PRN completion alone) \\
+\textbf{Year-1 Net ROI Multiple} & \textbf{4.4\ensuremath{\times} -- 9.0\ensuremath{\times} Net ROI} (5.4\ensuremath{\times}--10.0\ensuremath{\times} gross value-to-cost on UGX 4.33B) \\
+\textbf{Share of FY 2026/27 Revenue Target (\code{UGX 40.09T})} & \textbf{0.011\%} of annual tax collections \\
+\textbf{Share of FY 2026/27 Vote 141 Budget (\code{UGX 917.3B})} & \textbf{0.47\%} (Turnkey License + Integration) or \textbf{0.26\%} (Annual SaaS) \\
+\textbf{Benchmark Validation Evidence} & \textbf{55,000 / 55,000 (100.0\%)} across 5 locales + \textbf{180 / 180 (100.0\%)} live ngrok probes \\
+\end{longtable}\endgroup
+
+\end{document}

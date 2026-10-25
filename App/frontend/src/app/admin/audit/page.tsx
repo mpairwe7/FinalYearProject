@@ -25,6 +25,7 @@ import StaffGuard from "../../../components/StaffGuard";
 import { OpsPage, OpsPanel, TableScroll } from "../../../components/ops/OpsPage";
 import { PeriodPicker } from "../../../components/ops/Controls";
 import { EmptyState, ErrorState, SkeletonRows } from "../../../components/ops/States";
+import { AlertTriangleIcon, CheckIcon, InfoCircleIcon } from "../../../components/ops/icons";
 import { analyticsApi } from "../../../services/analyticsApi";
 import type { AuditVerification } from "../../../services/analyticsApi";
 import { queryKeys } from "../../../lib/queryKeys";
@@ -64,7 +65,7 @@ function Integrity({ data, seal }: { data: AuditVerification; seal: SealControl 
     return (
       <div className="ops-note" role="alert">
         <span className="ops-note-mark" aria-hidden="true">
-          !
+          <AlertTriangleIcon />
         </span>
         <div>
           <p className="ops-note-title">
@@ -91,7 +92,7 @@ function Integrity({ data, seal }: { data: AuditVerification; seal: SealControl 
   return (
     <div className="ops-note" role="status">
       <span className="ops-note-mark" aria-hidden="true">
-        ✓
+        <CheckIcon />
       </span>
       <div>
         <p className="ops-note-title">
@@ -244,7 +245,7 @@ function AuditBoard() {
       {recording === false ? (
         <div className="ops-note" role="note">
           <span className="ops-note-mark" aria-hidden="true">
-            ⓘ
+            <InfoCircleIcon />
           </span>
           <div>
             <p className="ops-note-title">This deployment is not recording new events</p>

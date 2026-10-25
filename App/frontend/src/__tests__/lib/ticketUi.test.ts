@@ -68,9 +68,10 @@ describe("ticketUi", () => {
   it("identifies voice tickets and locale flags accurately", () => {
     expect(isVoiceTicket({ modality: "voice" })).toBe(true);
     expect(isVoiceTicket({ modality: "text" })).toBe(false);
-    expect(ticketLocaleFlag("lg")).toBe("🇺🇬");
-    expect(ticketLocaleFlag("sw")).toBe("🇰🇪");
-    expect(ticketLocaleFlag("en")).toBe("🌐");
+    expect(ticketLocaleFlag("lg")).toBe("UG");
+    expect(ticketLocaleFlag("sw")).toBe("KE");
+    expect(ticketLocaleFlag("en")).toBe("EN");
+    expect(ticketLocaleFlag("fr")).toBe("FR");
     expect(ticketLocaleLabel("lg")).toBe("Luganda");
     expect(ticketLocaleLabel("sw")).toBe("Swahili");
   });

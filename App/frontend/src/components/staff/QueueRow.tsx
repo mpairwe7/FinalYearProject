@@ -3,6 +3,14 @@
 import React, { useState } from "react";
 import type { TicketQueueItem } from "../../services/analyticsApi";
 import {
+  AlertTriangleIcon,
+  BuildingIcon,
+  GlobeIcon,
+  MicIcon,
+  SparklesIcon,
+  UserIcon,
+} from "../ops/icons";
+import {
   isRecentTicket,
   ticketLocaleFlag,
   ticketLocaleLabel,
@@ -52,7 +60,11 @@ export function QueueRow({
       <div className="st-row-badge-col">
         <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
           <span className={`st-pri st-pri-${ticket.priority}`}>{ticket.priority}</span>
-          {isRecent ? <span className="st-new-badge">✨ NEW</span> : null}
+          {isRecent ? (
+            <span className="st-new-badge">
+              <SparklesIcon /> NEW
+            </span>
+          ) : null}
         </div>
         <button
           type="button"
@@ -75,12 +87,12 @@ export function QueueRow({
               className="st-row-lang-pill"
               title={`Taxpayer language: ${ticketLocaleLabel(ticket.locale)} (transcribed/translated to English)`}
             >
-              {ticketLocaleFlag(ticket.locale)} {ticketLocaleLabel(ticket.locale)} → EN
+              <GlobeIcon /> {ticketLocaleLabel(ticket.locale)} → EN
             </span>
           ) : null}
           {isVoice ? (
             <span className="st-row-voice-pill" title="Transcribed from taxpayer voice note">
-              🎙️ Voice
+              <MicIcon /> Voice
             </span>
           ) : null}
         </div>
@@ -105,17 +117,25 @@ export function QueueRow({
                 setShowOriginal((v) => !v);
               }}
             >
-              {showOriginal ? "🇬🇧 EN" : `${ticketLocaleFlag(ticket.locale)} Orig`}
+              <GlobeIcon /> {showOriginal ? "EN" : `${ticketLocaleFlag(ticket.locale)} Orig`}
             </button>
           ) : null}
         </div>
 
         <div className="st-row-meta">
-          {ticket.team ? <span className="st-row-team">🏢 {ticket.team.replace(/_/g, " ")}</span> : null}
+          {ticket.team ? (
+            <span className="st-row-team">
+              <BuildingIcon /> {ticket.team.replace(/_/g, " ")}
+            </span>
+          ) : null}
           {ticket.assignee ? (
-            <span className="st-row-assignee">👤 {ticket.assignee.split("@")[0]}</span>
+            <span className="st-row-assignee">
+              <UserIcon /> {ticket.assignee.split("@")[0]}
+            </span>
           ) : (
-            <span className="st-row-unclaimed">⚠️ Unassigned</span>
+            <span className="st-row-unclaimed">
+              <AlertTriangleIcon /> Unassigned
+            </span>
           )}
           {ticket.status !== "open" ? (
             <span className="st-row-status">{ticket.status}</span>

@@ -17,6 +17,13 @@ import React, { useState } from "react";
 import type { TicketDetail } from "../../services/analyticsApi";
 import type { TicketPatch } from "../../services/analyticsApi";
 import { analyticsApi } from "../../services/analyticsApi";
+import {
+  AlertTriangleIcon,
+  CheckIcon,
+  CloseIcon,
+  GlobeIcon,
+  PhoneIcon,
+} from "../ops/icons";
 import { useEndChat } from "../../hooks/useAnalyticsDashboard";
 import { TICKET_MACROS } from "../../lib/ticketMacros";
 import {
@@ -165,7 +172,7 @@ export function TicketComposer({
             setReply((prev) => (prev.trim() ? `${prev.trim()}\n\n${hotline}` : hotline));
           }}
         >
-          📞 Hotline
+          <PhoneIcon /> Hotline
         </button>
         {TICKET_MACROS.map((macro) => (
           <button
@@ -199,7 +206,10 @@ export function TicketComposer({
               onClick={generatePreview}
               title={`Preview translation into ${ticketLocaleLabel(ticket.locale)}`}
             >
-              {isPreviewing ? "Translating…" : `🌐 Preview ${ticketLocaleFlag(ticket.locale)} ${ticketLocaleLabel(ticket.locale)}`}
+              <GlobeIcon />
+              {isPreviewing
+                ? "Translating…"
+                : `Preview ${ticketLocaleFlag(ticket.locale)} ${ticketLocaleLabel(ticket.locale)}`}
             </button>
           ) : null}
         </div>
@@ -223,7 +233,7 @@ export function TicketComposer({
         <div className="st-translation-preview-panel" role="region" aria-label="Translation Preview">
           <div className="st-preview-header">
             <span className="st-preview-title">
-              {ticketLocaleFlag(ticket.locale)} Taxpayer Delivery Preview ({ticketLocaleLabel(ticket.locale)})
+              <GlobeIcon /> Taxpayer Delivery Preview ({ticketLocaleLabel(ticket.locale)})
             </span>
             {previewBackend ? (
               <span className="st-preview-backend">Engine: {previewBackend}</span>
@@ -233,7 +243,7 @@ export function TicketComposer({
               className="ops-btn is-ghost is-xs st-preview-close"
               onClick={() => setShowPreview(false)}
             >
-              ✕ Hide
+              <CloseIcon /> Hide
             </button>
           </div>
           {isPreviewing ? (
@@ -243,11 +253,12 @@ export function TicketComposer({
               <p className="st-preview-content">{previewText}</p>
               {figuresSurvived === false ? (
                 <div className="st-fidelity-alert" role="alert">
-                  ⚠️ <strong>Figure Check:</strong> Numbers, percentages, or tax amounts may have shifted during translation. Please verify before sending.
+                  <AlertTriangleIcon />{" "}
+                  <strong>Figure Check:</strong> Numbers, percentages, or tax amounts may have shifted during translation. Please verify before sending.
                 </div>
               ) : figuresSurvived === true ? (
                 <div className="st-fidelity-ok">
-                  ✓ Figures & statutory amounts verified
+                  <CheckIcon /> Figures &amp; statutory amounts verified
                 </div>
               ) : null}
             </>

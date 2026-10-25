@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
-import StaffGuard from "../../../components/StaffGuard";
+import StaffGuard, { type StaffIdentity } from "../../../components/StaffGuard";
 import { EmptyState, ErrorState, SkeletonRows } from "../../../components/ops/States";
 import { OpsPage, OpsPanel } from "../../../components/ops/OpsPage";
+import { InfoCircleIcon } from "../../../components/ops/icons";
 import { ModalDialog } from "../../../components/ModalDialog";
 import { authHeaders } from "../../../lib/authSession";
 import type { ChatConnector } from "../../../lib/connectors";
@@ -188,7 +189,8 @@ function isChatConnector(value: unknown): value is ChatConnector {
   );
 }
 
-export function ConnectorBoard() {
+export function ConnectorBoard({ who }: { who?: StaffIdentity } = {}) {
+  const canMutate = !who || who.role !== "ura_auditor";
   const [data, setData] = useState<ConnectorList | null>(null);
   const [chatCatalog, setChatCatalog] = useState<ChatConnectorCatalog | null>(null);
   const [loading, setLoading] = useState(true);
@@ -387,7 +389,7 @@ export function ConnectorBoard() {
       }
     >
       <div className="ops-note" role="note">
-        <span className="ops-note-mark" aria-hidden="true">ⓘ</span>
+        <span className="ops-note-mark" aria-hidden="true"><InfoCircleIcon /></span>
         <div>
           <p className="ops-note-title">These are local simulations</p>
           <p className="ops-note-body">
@@ -396,6 +398,19 @@ export function ConnectorBoard() {
           </p>
         </div>
       </div>
+
+      {!canMutate ? (
+        <div className="ops-note" role="note">
+          <span className="ops-note-mark" aria-hidden="true"><InfoCircleIcon /></span>
+          <div>
+            <p className="ops-note-title">Read-only for your role</p>
+            <p className="ops-note-body">
+              Auditors can inspect connector diagnostics, MCP tool annotations, and simulator health. Enabling or
+              disabling local simulators stays with administrators.
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       <OpsPanel id="connectors" title="Built-in connector status" flush bare>
         <p aria-live="polite" className="ops-stat-hint">
@@ -450,15 +465,17 @@ export function ConnectorBoard() {
                     <span className={`ops-chip ${connector.connected ? "is-good" : ""}`}>
                       {connector.connected ? "Enabled" : "Disabled"}
                     </span>
-                    <button
-                      className="ops-btn is-ghost is-sm"
-                      type="button"
-                      onClick={() => void toggle(connector)}
-                      disabled={busyId !== null || loading}
-                      aria-label={`${connector.connected ? "Disable" : "Enable"} ${connector.name}`}
-                    >
-                      {busyId === connector.id ? "Saving…" : connector.connected ? "Disable" : "Enable"}
-                    </button>
+                    {canMutate ? (
+                      <button
+                        className="ops-btn is-ghost is-sm"
+                        type="button"
+                        onClick={() => void toggle(connector)}
+                        disabled={busyId !== null || loading}
+                        aria-label={`${connector.connected ? "Disable" : "Enable"} ${connector.name}`}
+                      >
+                        {busyId === connector.id ? "Saving…" : connector.connected ? "Disable" : "Enable"}
+                      </button>
+                    ) : null}
                   </div>
                 </li>
               );
@@ -792,8 +809,8 @@ export function ConnectorBoard() {
 
 export default function ConnectorsAdminPage() {
   return (
-    <StaffGuard current="/admin/connectors" requireRoles={["ura_staff", "ura_admin"]}>
-      {() => <ConnectorBoard />}
+    <StaffGuard current="/admin/connectors" requireRoles={["ura_staff", "ura_admin", "ura_auditor"]}>
+      {(who) => <ConnectorBoard who={who} />}
     </StaffGuard>
   );
 }

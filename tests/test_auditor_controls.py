@@ -448,3 +448,17 @@ def test_every_voice_event_the_code_writes_is_a_known_type():
                 used.update(constants(node.args[2]))
     assert used, "the scan found no voice events at all"
     assert used - VOICE_EVENT_TYPES == set()
+
+
+def test_connector_toggle_refuses_auditor_and_records_audit_event(client, tenant, ledger_on):
+    auditor = _headers("aud-conn", "ura_auditor", tenant)
+    admin = _headers("adm-conn", "ura_admin", tenant)
+    assert client.post("/v1/connectors/efris/toggle", headers=auditor, json={"enable": True}).status_code == 403
+    toggled = client.post("/v1/connectors/efris/toggle", headers=admin, json={"enable": True})
+    assert toggled.status_code == 200
+    events = client.get("/v1/admin/audit/events?event_type=staff.connector", headers=auditor).json()["events"]
+    assert len(events) == 1
+    assert events[0]["event_type"] == "staff.connector_toggled"
+    assert events[0]["actor"] == "adm-conn"
+    assert events[0]["payload"] == {"actor_role": "ura_admin", "connector": "efris", "enabled": True}
+

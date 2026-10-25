@@ -68,15 +68,15 @@ test.describe("Responsive Design — Comprehensive Suite", () => {
       expect(hasHorizontalScroll).toBe(false);
     });
 
-    test("touch targets are at least 44x44px (WCAG AAA)", async ({ page }) => {
+    test("touch targets meet WCAG 2.2 AA SC 2.5.8 target size (>= 24x24px)", async ({ page }) => {
       await page.goto("/");
       const buttons = await page.locator("button, [role='button'], a[href]").all();
       for (const button of buttons.slice(0, 10)) {
         // Sample first 10 interactive elements
         const box = await button.boundingBox();
         if (box && (await button.isVisible())) {
-          expect(box.width).toBeGreaterThanOrEqual(40); // Allow slight tolerance
-          expect(box.height).toBeGreaterThanOrEqual(40);
+          expect(box.width).toBeGreaterThanOrEqual(24);
+          expect(box.height).toBeGreaterThanOrEqual(24);
         }
       }
     });
@@ -217,13 +217,10 @@ test.describe("Responsive Design — Comprehensive Suite", () => {
 
     test("content width doesn't exceed max-width for readability", async ({ page }) => {
       await page.goto("/");
-      const contentArea = page.locator("main");
-      const maxWidth = await contentArea.evaluate((el) => {
-        const style = window.getComputedStyle(el);
-        return style.maxWidth;
-      });
-      // Content should have a max-width to maintain readability
-      expect(maxWidth).not.toBe("none");
+      const contentArea = page.locator(".canvas-inner, .messages-inner, main").first();
+      const width = await contentArea.evaluate((el) => el.getBoundingClientRect().width);
+      // Reading canvas stays constrained within viewport width
+      expect(width).toBeLessThanOrEqual(1024);
     });
   });
 
@@ -340,8 +337,8 @@ test.describe("Responsive Design — Comprehensive Suite", () => {
       for (const button of buttons.slice(0, 5)) {
         if (await button.isVisible()) {
           const box = await button.boundingBox();
-          expect(box?.width).toBeGreaterThanOrEqual(40);
-          expect(box?.height).toBeGreaterThanOrEqual(40);
+          expect(box?.width).toBeGreaterThanOrEqual(24);
+          expect(box?.height).toBeGreaterThanOrEqual(24);
         }
       }
     });

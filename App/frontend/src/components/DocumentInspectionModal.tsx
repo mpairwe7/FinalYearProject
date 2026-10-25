@@ -8,6 +8,7 @@ import { useChatStore } from '../store/useChatStore';
 import { ModalDialog } from './ModalDialog';
 import {
   CloseIcon,
+  CopyIcon,
   DownloadIcon,
   FileIcon,
   CheckCircleIcon,
@@ -302,7 +303,7 @@ export function DocumentInspectionModal({
                           onClick={() => copyToClipboard(tin)}
                           title="Click to copy TIN"
                         >
-                          {tin} 📋
+                          {tin} <CopyIcon />
                         </button>
                       ))}
                     </div>
@@ -321,7 +322,7 @@ export function DocumentInspectionModal({
                           onClick={() => copyToClipboard(nin)}
                           title={t('documents.copyNin')}
                         >
-                          {nin} 📋
+                          {nin} <CopyIcon />
                         </button>
                       ))}
                     </div>
@@ -340,7 +341,7 @@ export function DocumentInspectionModal({
                           onClick={() => copyToClipboard(prn)}
                           title="Click to copy PRN"
                         >
-                          {prn} 📋
+                          {prn} <CopyIcon />
                         </button>
                       ))}
                     </div>
@@ -359,7 +360,7 @@ export function DocumentInspectionModal({
                           onClick={() => copyToClipboard(inv)}
                           title="Click to copy Invoice"
                         >
-                          {inv} 📋
+                          {inv} <CopyIcon />
                         </button>
                       ))}
                     </div>
