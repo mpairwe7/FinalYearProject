@@ -1,7 +1,7 @@
 # Core API backend (2026 production stable)
-fastapi>=0.141.1,<0.142
-uvicorn[standard]>=0.52.4,<0.53
-pydantic>=2.13.4,<2.14
+fastapi>=0.143.3,<0.144
+uvicorn[standard]>=0.54.0,<0.55
+pydantic>=2.14.1,<2.15
 
 # Rate limiting — slowapi's in-process buckets are per-worker; for
 # multi-replica deploys set `SLOWAPI_STORAGE_URI=redis://...` (see
@@ -100,7 +100,7 @@ opentelemetry-instrumentation-fastapi==0.66b1
 opentelemetry-instrumentation-httpx==0.66b1
 
 # Cloudflare free-tier + Gemini fallbacks (FLAG_CLOUDFLARE_FALLBACK)
-pydantic-settings>=2.15.0
+pydantic-settings>=2.16.0
 boto3>=1.43.114
 urllib3>=2.8.0
 # DNS-over-HTTPS resolver (doh_resolver.py) for DNS-broken pods (USE_DOH=true)
