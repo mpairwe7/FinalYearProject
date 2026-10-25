@@ -88,7 +88,7 @@ test.describe("Staff Call Desk", () => {
 
     const bar = page.locator(".cc-bar");
     await expect(bar).toBeVisible();
-    await expect(bar.getByText(/Available|Busy|Away/i)).toBeVisible();
+    await expect(bar.getByLabel("Availability")).toHaveValue("available");
     await expect(bar.getByText(/Live 0/i)).toBeVisible();
   });
 

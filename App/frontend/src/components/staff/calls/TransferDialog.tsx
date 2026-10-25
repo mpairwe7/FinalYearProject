@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { CloseIcon } from '@/components/ops/icons';
 import { callsApi, type OfficerPresence } from '@/services/callsApi';
 import { transferCall } from '@/services/officerCallSession';
 
@@ -83,8 +84,13 @@ export function TransferDialog({
       >
         <header className="cc-dialog-head">
           <h3>Transfer Call</h3>
-          <button type="button" className="cc-btn cc-btn--quiet" onClick={onClose}>
-            ✕
+          <button
+            type="button"
+            className="cc-btn cc-btn--quiet"
+            onClick={onClose}
+            aria-label="Close transfer dialog"
+          >
+            <CloseIcon />
           </button>
         </header>
 

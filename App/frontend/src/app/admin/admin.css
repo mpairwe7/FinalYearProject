@@ -192,6 +192,8 @@
   border: 1px solid var(--ops-hairline);
   border-radius: var(--ops-radius-sm);
   background: var(--ops-row);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 72px;
 }
 
 .ov-list-title {
@@ -557,6 +559,8 @@
   border-radius: var(--ops-radius-md);
   background: var(--ops-panel);
   box-shadow: var(--ops-elev-1);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 180px;
 }
 
 .disc-head {
