@@ -81,7 +81,18 @@ def _resolve_ws_auth(websocket: WebSocket, *, required: bool = False) -> tuple[s
             raise JWTAuthError("authentication required")
         return "", "default"
 
-    claims = JWTVerifier().verify(token)
+    from .auth.dependencies import APP_ENV, _get_verifier
+
+    verifier = _get_verifier()
+    try:
+        claims = verifier.verify(token)
+    except JWTAuthError as e:
+        if APP_ENV != "production" and verifier.dev_secret and "unexpected alg" in str(e):
+            from .auth.jwt_auth import _hs256_verify
+
+            claims = _hs256_verify(token, verifier.dev_secret)
+        else:
+            raise
     return str(claims.get("sub", "")), str(claims.get("tenant_id", "default"))
 
 
@@ -163,12 +174,20 @@ async def voice_stream_ws_v2(websocket: WebSocket, app: object) -> None:
         # ── Consent check (same as V1) ────────────────────────────
         if flags.is_enabled("voice_consent"):
             try:
-                from .voice_consent import require_voice_consent
+                from .voice_consent import grant_voice_consent, require_voice_consent
 
+                accepted_flag = bool(config.get("voice_consent_accepted"))
                 if session_user_id:
-                    consent_ok = require_voice_consent(session_user_id)
+                    consent_ok = require_voice_consent(session_user_id, tenant_id=session_tenant_id or "default")
+                    if not consent_ok and accepted_flag:
+                        grant_voice_consent(
+                            session_user_id,
+                            purpose="voice_recording",
+                            tenant_id=session_tenant_id or "default",
+                        )
+                        consent_ok = True
                 else:
-                    consent_ok = bool(config.get("voice_consent_accepted"))
+                    consent_ok = accepted_flag
                 if not consent_ok:
                     await _send_error(
                         websocket,

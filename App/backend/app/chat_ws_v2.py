@@ -151,10 +151,18 @@ def _resolve_ws_principal(
             raise JWTAuthError("authentication required")
         return "", "default", "public", []
 
-    from .auth.dependencies import _get_verifier, resolve_role
+    from .auth.dependencies import APP_ENV, _get_verifier, resolve_role
 
     verifier = _get_verifier()
-    claims = verifier.verify(token)
+    try:
+        claims = verifier.verify(token)
+    except JWTAuthError as e:
+        if APP_ENV != "production" and verifier.dev_secret and "unexpected alg" in str(e):
+            from .auth.jwt_auth import _hs256_verify
+
+            claims = _hs256_verify(token, verifier.dev_secret)
+        else:
+            raise
     role = resolve_role(claims, verifier.audience)
     granted = claims.get("granted_purposes", [])
     purposes = [str(p) for p in granted] if isinstance(granted, list) else []

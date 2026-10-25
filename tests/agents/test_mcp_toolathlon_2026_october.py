@@ -1037,4 +1037,166 @@ def test_phase10_screenshot_analysis_error_resolution_and_completion_checklist()
     assert err_turn.payload.get("preserved_fields", {}).get("tin") == "1059787194"
 
 
+def test_phase11_mcp_tax_calculator_tool_rag_empathy_and_structuring_parity() -> None:
+    """Verify MCP tax_calculator tools/prompts, 5-locale empathy Tool-RAG, and paragraph structuring."""
+    from app.conversational import handle_conversational_turn
+    from app.guardrails import OutputGuard
+    from app.mcp.servers.tax_calculator.server import server as tax_calc_server
+    from app.mcp.tool_rag import ToolRAGSelector
+    from app.tools import ToolRegistry
+    from app.tools.empathy import assess, fuse_multimodal_affect
+
+    # 1. mcp_tax_calculator exposes all 28 tax_calculator tools and 4 prompts
+    tools_list = [x["name"] for x in tax_calc_server.handle_tools_list()["tools"]]
+    assert len(tools_list) == 28
+    assert "simulate_tax_relief_and_instalments" in tools_list
+    assert "resolve_mda_ntr_payment" in tools_list
+    prompts_list = [x["name"] for x in tax_calc_server.handle_prompts_list()["prompts"]]
+    assert set(prompts_list) == {
+        "vat_calculation_guide",
+        "paye_withholding_guide",
+        "rental_tax_guide",
+        "tax_relief_and_instalment_guide",
+    }
+
+    # 2. 5-locale ToolRAGSelector selects both assess_emotional_tone and simulate_tax_relief_and_instalments
+    #    and assess() / fuse_multimodal_affect() classify hardship across en, lg, sw, nyn, ach
+    eligible_names = [tool.schema.name for tool in ToolRegistry.all()]
+    selector = ToolRAGSelector()
+    for loc, q in (
+        ("en", "I am terrified and cannot afford to pay my tax arrears, URA sealed my shop"),
+        ("lg", "Bizinesi yange egudde era sirina ssente zisasula musolo gwa URA"),
+        ("sw", "Biashara yangu imefungwa na sina pesa za kulipa kodi ya URA"),
+        ("nyn", "Obushuubuzi bwangye bugumire kandi tindina sente zokushashura omushoro"),
+        ("ach", "Biacara mera tek dok cente pe me culu mucoro pa URA"),
+    ):
+        sel = selector.select(q, eligible_names, k=5)
+        assert "assess_emotional_tone" in sel.tool_names
+        assert "simulate_tax_relief_and_instalments" in sel.tool_names
+        a = assess(q, locale=loc)
+        f = fuse_multimodal_affect(q, locale=loc)
+        assert a["kind"] == "hardship" and a["intensity"] == "high"
+        assert f.locale == loc and bool(f.localized_acknowledgement)
+
+    # 3. OutputGuard.normalize_structure preserves abbreviations across paragraph breaks and 5-locale headers
+    long_text = (
+        "Taxpayers must register under Cap. 340 of the Laws of Uganda. "
+        "Deductions apply for e.g. National Social Security Fund contributions. "
+        "Interest is governed by Sec. 39 of the Tax Procedures Code Act. "
+        "Instalments are available under Sec. 40 upon formal application."
+    )
+    norm_text = OutputGuard.normalize_structure(long_text)
+    assert "e.g.\n\nNational" not in norm_text
+    assert "Cap.\n\n340" not in norm_text
+    assert "Sec.\n\n39" not in norm_text
+
+    # 4. Conversational engine handles vernacular out-of-scope tangents cleanly without leading spaces
+    conv_nyn = handle_conversational_turn("Nintina okutandika obushuubuzi", locale="nyn")
+    assert conv_nyn is not None and not conv_nyn.reply.startswith(" ")
+    conv_div = handle_conversational_turn("Ani yawangula world cup?", locale="lg")
+    assert conv_div is not None and conv_div.intent_type == "out_of_scope_divert"
+
+    # 5. Expanded URA Portal Tax Calculators: Second Schedule Presumptive Tax (with/without records),
+    #    Secondary Employment PAYE + Employer 10% NSSF + LST, Non-Resident Branch Repatriation Tax (15%),
+    #    Customs Infrastructure Levy (1.5%) + Vehicle Age auto-routing, FY2026-27 Excise (cement, sugar, cooking oil),
+    #    Insurance/PSP Commission WHT (10%), and TPCA s.39(5) in-duplum interest cap
+    pres_calc = ToolRegistry.call(
+        "calculate_presumptive_or_startup_tax",
+        {"annual_turnover_ugx": 40_000_000, "has_records": True, "fiscal_year": "FY2026-27"},
+    )
+    assert pres_calc["ok"] is True
+    assert pres_calc["presumptive_tax_with_records"] == 130_000.0
+    assert pres_calc["presumptive_tax_without_records"] == 200_000.0
+    assert pres_calc["presumptive_tax"] == 130_000.0
+
+    paye_ext = ToolRegistry.call(
+        "calculate_paye",
+        {
+            "monthly_gross": 2_000_000,
+            "is_secondary_employment": True,
+            "include_nssf": True,
+            "include_lst": True,
+            "fiscal_year": "FY2026-27",
+        },
+    )
+    assert paye_ext["ok"] is True
+    assert paye_ext["paye"] == 600_000.0
+    assert paye_ext["nssf_employee"] == 100_000.0
+    assert paye_ext["nssf_employer"] == 200_000.0
+    assert paye_ext["total_employer_cost"] == 2_200_000.0
+    assert paye_ext["lst_monthly"] == 8333.33
+
+    corp_branch = ToolRegistry.call(
+        "calculate_corporation_tax",
+        {"chargeable_income": 100_000_000, "is_non_resident_branch": True, "fiscal_year": "FY2026-27"},
+    )
+    assert corp_branch["ok"] is True
+    assert corp_branch["tax"] == 30_000_000.0
+    assert corp_branch["branch_repatriation_tax"] == 10_500_000.0
+    assert corp_branch["total_tax"] == 40_500_000.0
+
+    cust_veh = ToolRegistry.call(
+        "calculate_customs_duty",
+        {
+            "cif_value": 20_000_000,
+            "vehicle_age_years": 7,
+            "include_wht": True,
+            "include_infrastructure_levy": True,
+            "fiscal_year": "FY2026-27",
+        },
+    )
+    assert cust_veh["ok"] is True
+    assert cust_veh["goods_category"] == "used_vehicle_5_to_8_years"
+    assert cust_veh["environmental_levy"] == 7_000_000.0
+    assert cust_veh["infrastructure_levy"] == 300_000.0
+
+    exc_cement = ToolRegistry.call(
+        "calculate_excise_duty",
+        {"excise_type": "cement_50kg", "amount": 100, "fiscal_year": "FY2026-27"},
+    )
+    assert exc_cement["ok"] is True and exc_cement["excise_duty"] == 75_000.0
+
+    wht_ins = ToolRegistry.call(
+        "calculate_withholding",
+        {"payment_type": "insurance_agent_commission", "amount": 5_000_000, "fiscal_year": "FY2026-27"},
+    )
+    assert wht_ins["ok"] is True and wht_ins["withholding_tax"] == 500_000.0
+
+    pen_cap = ToolRegistry.call(
+        "penalty_late_filing",
+        {"tax_payable_ugx": 10_000_000, "months_late": 70, "fiscal_year": "FY2026-27"},
+    )
+    assert pen_cap["ok"] is True
+    assert pen_cap["interest_capped_under_s39_5"] is False
+    assert pen_cap["capped_interest_ugx"] == pen_cap["late_payment_interest_ugx"]
+
+    import datetime as _dt
+    from app.tax.tables import RateTable
+    from app.tools.calculators import LateFilingPenaltyTool
+
+    capped_table = RateTable(
+        fiscal_year="FY2026-27-CAP-TEST",
+        effective_from=_dt.date(2026, 7, 1),
+        effective_to=_dt.date(2027, 6, 30),
+        status="confirmed",
+        rates={
+            "penal_tax_late_filing_monthly_rate": 0.02,
+            "penal_tax_late_filing_minimum_ugx": 200000,
+            "late_payment_interest_monthly_rate": 0.05,
+        },
+        legal_basis={
+            "penal_tax_late_filing_monthly_rate": "TPC Act s.49(1)",
+            "penal_tax_late_filing_minimum_ugx": "TPC Act s.49(1)",
+            "late_payment_interest_monthly_rate": "TPC Act s.39",
+        },
+    )
+    capped_res = LateFilingPenaltyTool().compute(
+        capped_table, tax_payable_ugx=10_000_000, months_late=70
+    ).payload
+    assert capped_res["interest_capped_under_s39_5"] is True
+    assert capped_res["capped_interest_ugx"] == capped_res["tax_payable_ugx"] + capped_res["penal_tax"]
+
+
+
+
 

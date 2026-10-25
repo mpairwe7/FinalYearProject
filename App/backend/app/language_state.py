@@ -143,14 +143,20 @@ def _switch_target(message: str, established: str) -> str | None:
     words = _words(message)
     hits = lexical_hits(message)
     if established in _LOCAL:
-        if hits.get(established, 0) > 0:
-            return None  # still using the established language's own words
+        est_hits = hits.get(established, 0)
         other_locals = sorted(
             ((hits.get(loc, 0), loc) for loc in _LOCAL if loc != established),
             reverse=True,
         )
-        if other_locals and other_locals[0][0] >= SWITCH_MIN_HITS:
+        if (
+            other_locals
+            and other_locals[0][0] >= SWITCH_MIN_HITS
+            and other_locals[0][0] > est_hits * 2
+            and other_locals[0][0] >= hits.get("en", 0)
+        ):
             return other_locals[0][1]
+        if est_hits > 0:
+            return None  # still using the established language's own words
         if (
             len(words) >= SWITCH_MIN_WORDS
             and hits.get("en", 0) >= SWITCH_MIN_HITS

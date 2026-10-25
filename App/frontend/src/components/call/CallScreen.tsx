@@ -540,9 +540,22 @@ export function CallScreen() {
               </div>
             </>
           ) : (
-            <button type="button" className="call-btn call-btn--primary call-btn--block" onClick={closeCall}>
-              {t('common.close')}
-            </button>
+            <div className="call-pre-actions" style={{ width: '100%' }}>
+              <button type="button" className="call-btn call-btn--ghost call-btn--block" onClick={closeCall}>
+                {t('common.close')}
+              </button>
+              {error && (
+                <button
+                  type="button"
+                  className="call-btn call-btn--primary call-btn--block"
+                  onClick={() => startCall(locale)}
+                  data-testid="call-retry-btn"
+                >
+                  <PhoneIcon size={16} />
+                  {t('call.button')}
+                </button>
+              )}
+            </div>
           )}
         </footer>
 

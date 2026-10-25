@@ -538,4 +538,8 @@ export const lg: Partial<Dictionary> = {
   'portalWorkspace.prn.opt.bank': 'Bbanka / EFT',
   'portalWorkspace.prn.opt.momo': 'Mobile Money (*165# MTN / *185# Airtel)',
   'portalWorkspace.prn.opt.card': 'Kaadi ya Bbanka (VISA / MasterCard)',
+  'speech.step': 'Odaala',
+  'speech.then': ', oluvannyuma ',
+  'speech.greaterThan': ' okusinga ',
+  'speech.lessThan': ' wansi wa ',
 };

@@ -78,6 +78,7 @@ def _amount_near_pattern(
 # Declarative per-head planning rules: when(facts, question) -> list[ToolCallSpec]
 # ---------------------------------------------------------------------------
 def _rule_residency(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
+    """Plan determine_residency when the question or case facts mention individual tax residency."""
     has_residency_signal = (
         facts.days_in_uganda is not None
         or facts.contract_months is not None
@@ -94,6 +95,16 @@ def _rule_residency(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
         )
     )
     if not has_residency_signal:
+        return []
+    if re.search(
+        r"\b(branch|corporation\s+tax|corporate\s+tax|digital\s+services\s+tax|\bdst\b)\b",
+        question,
+        re.IGNORECASE,
+    ) and not re.search(
+        r"\b(days|months|individual|employee|expat\w*|specialist|consultant|engineer)\b",
+        question,
+        re.IGNORECASE,
+    ):
         return []
 
     params: dict[str, Any] = {}
@@ -125,6 +136,7 @@ def _rule_residency(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
 
 
 def _rule_paye_and_bik(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
+    """Plan value_benefit_in_kind and calculate_paye for employment income and benefits in kind."""
     specs: list[ToolCallSpec] = []
     q_low = question.lower()
     mentions_paye = (
@@ -324,14 +336,27 @@ def _rule_paye_and_bik(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
     )
     res_mode = facts.residency_claim or "resident"
     if sal is not None and sal.currency == "UGX":
+        is_sec_emp = bool(re.search(r"\bsecondary\s+(?:employment|employer|job)\b", question, re.IGNORECASE))
+        inc_nssf = bool(re.search(r"\b(nssf|take[-\s]?home)\b", question, re.IGNORECASE))
+        inc_lst = bool(re.search(r"\b(lst|local\s+service\s+tax)\b", question, re.IGNORECASE))
+        has_pwd = bool(re.search(r"\b(disabilit\w*|person\s+with\s+disabilit\w*|\bpwd\b)\b", question, re.IGNORECASE))
+        paye_spec_params: dict[str, Any] = {
+            "monthly_gross": float(sal.amount),
+            "residency": res_mode,
+            "compare_residency": compare_res,
+        }
+        if is_sec_emp:
+            paye_spec_params["is_secondary_employment"] = True
+        if inc_nssf:
+            paye_spec_params["include_nssf"] = True
+        if inc_lst:
+            paye_spec_params["include_lst"] = True
+        if has_pwd:
+            paye_spec_params["has_disability_exemption"] = True
         specs.append(
             ToolCallSpec(
                 "calculate_paye",
-                params={
-                    "monthly_gross": float(sal.amount),
-                    "residency": res_mode,
-                    "compare_residency": compare_res,
-                },
+                params=paye_spec_params,
             )
         )
     elif sal is not None and sal.currency != "UGX":
@@ -534,6 +559,7 @@ def _rule_withholding(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
 
 
 def _rule_corporation_presumptive_startup(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
+    """Plan calculate_presumptive_or_startup_tax and calculate_corporation_tax for business income."""
     if not re.search(
         r"\b(presumptive|start[-\s]?up|investment\s+capital|corporation\s+tax|corporate\s+tax|chargeable\s+(?:profit|income))\b",
         question,
@@ -562,11 +588,16 @@ def _rule_corporation_presumptive_startup(facts: CaseFacts, question: str) -> li
             params["investment_capital_ugx"] = cap_amt
         if profit_amt is not None:
             params["chargeable_income_ugx"] = profit_amt
+        if re.search(r"\b(without\s+records|no\s+records)\b", question, re.IGNORECASE):
+            params["has_records"] = False
         specs.append(ToolCallSpec("calculate_presumptive_or_startup_tax", params=params))
 
     if profit_amt is not None:
+        corp_params: dict[str, Any] = {"chargeable_income": profit_amt}
+        if re.search(r"\b(non[-\s]?resident\s+branch|branch\s+repatriat\w*|foreign\s+branch)\b", question, re.IGNORECASE):
+            corp_params["is_non_resident_branch"] = True
         specs.append(
-            ToolCallSpec("calculate_corporation_tax", params={"chargeable_income": profit_amt})
+            ToolCallSpec("calculate_corporation_tax", params=corp_params)
         )
     return specs
 
@@ -1149,12 +1180,18 @@ _SCENARIO_EXCLUSIVE_TOOLS: frozenset[str] = frozenset(
         "determine_residency",
         "calculate_stamp_duty",
         "calculate_digital_services_tax",
+        "calculate_gaming_tax",
         "calculate_gaming_betting_tax",
         "calculate_advance_vehicle_tax",
+        "calculate_presumptive_or_startup_tax",
         "calculate_presumptive_tax",
         "check_startup_exemption",
+        "penalty_late_filing",
         "calculate_penalties_and_interest",
+        "objection_requirements",
         "check_objection_validity",
+        "vat_input_claim_eligibility",
+        "wht_non_resident_service",
     }
 )
 

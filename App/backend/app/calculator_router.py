@@ -404,6 +404,14 @@ _WHT_TYPE_RES: list[tuple[str, re.Pattern[str]]] = [
         re.compile(r"\b(telecom\w*|mobile\s*money|airtime|mobile\s*network)\b[^?]{0,40}\bcommission", re.IGNORECASE),
     ),
     (
+        "insurance_agent_commission",
+        re.compile(r"\binsurance\s+(?:agent\s+)?commission\w*\b", re.IGNORECASE),
+    ),
+    (
+        "payment_service_provider_commission",
+        re.compile(r"\b(payment\s+service\s+provider|agent\s+banking|banking\s+agent)\b[^?]{0,40}\bcommission\w*\b", re.IGNORECASE),
+    ),
+    (
         "foreign_interest",
         re.compile(r"\binterest\b.*\b(non[-\s]?resident|foreign|offshore)\b|\b(non[-\s]?resident|foreign|offshore)\b.*\binterest\b", re.IGNORECASE),
     ),
@@ -419,6 +427,11 @@ _EXCISE_TYPE_RES: list[tuple[str, re.Pattern[str]]] = [
     ("fuel_petrol", re.compile(r"\b(petrol|gasoline)\b", re.IGNORECASE)),
     ("fuel_diesel", re.compile(r"\b(diesel|gasoil)\b", re.IGNORECASE)),
     ("fuel_kerosene", re.compile(r"\b(kerosene|paraffin)\b", re.IGNORECASE)),
+    ("cement_50kg", re.compile(r"\b(cement|adhesives?|grout|lime)\b", re.IGNORECASE)),
+    ("sugar_kg", re.compile(r"\bsugar\b", re.IGNORECASE)),
+    ("cooking_oil_litre", re.compile(r"\bcooking\s+oil\b", re.IGNORECASE)),
+    ("cooking_fat_kg", re.compile(r"\bcooking\s+fat\b", re.IGNORECASE)),
+    ("motorcycle_first_registration", re.compile(r"\b(motorcycle|boda[-\s]?boda)\s+first\s+registration\b", re.IGNORECASE)),
 ]
 
 
@@ -961,10 +974,28 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
                 re.IGNORECASE,
             )
         )
+        include_lst = bool(
+            re.search(
+                r"\b(lst|local\s+service\s+tax)\b",
+                text,
+                re.IGNORECASE,
+            )
+        )
+        has_pwd = bool(
+            re.search(
+                r"\b(disabilit\w*|person\s+with\s+disabilit\w*|\bpwd\b)\b",
+                text,
+                re.IGNORECASE,
+            )
+        )
         params: dict[str, object] = {
             "residency": "non_resident" if _NON_RESIDENT_RE.search(text) else "resident",
             "include_nssf": include_nssf,
         }
+        if include_lst:
+            params["include_lst"] = True
+        if has_pwd:
+            params["has_disability_exemption"] = True
         assumptions = []
         if params["residency"] == "resident" and not re.search(r"resident", text, re.IGNORECASE):
             assumptions.append("resident employee (say “non-resident” if not)")
@@ -972,6 +1003,10 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
             assumptions.append("non-resident employee tax rates applied")
         if include_nssf:
             assumptions.append("includes 5% employee NSSF deduction")
+        if include_lst:
+            assumptions.append("includes monthly Local Service Tax (LST) deduction")
+        if has_pwd:
+            assumptions.append("applies person-with-disability exemption threshold (s.21(1)(v))")
         missing = []
         if single is not None:
             if _ANNUAL_RE.search(text):
@@ -1002,11 +1037,15 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
 
     if intent == "corporation":
         params, missing = {}, []
+        assumptions = []
+        if re.search(r"\b(non[-\s]?resident\s+branch|branch\s+repatriat\w*|foreign\s+branch)\b", text, re.IGNORECASE):
+            params["is_non_resident_branch"] = True
+            assumptions.append("non-resident branch (includes 15% branch profit repatriation tax under s.82)")
         if single is not None:
             params["chargeable_income"] = single
         else:
             missing.append("chargeable_income")
-        return CalcPlan("calculate_corporation_tax", "calc_corporation_tax", params, missing, [])
+        return CalcPlan("calculate_corporation_tax", "calc_corporation_tax", params, missing, assumptions)
 
     if intent == "capital_gains":
         params, missing = {}, []
@@ -1050,10 +1089,25 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
         elif re.search(r"\b(used\s+cloth\w*|second\s+hand\s+cloth\w*|worn\s+cloth\w*|mivumba|mitumba)\b", text, re.IGNORECASE):
             params["goods_category"] = "used_clothing"
             assumptions.append("used clothing includes 30% environmental levy on CIF")
-        elif re.search(r"\b(car|vehicle|motor\s*vehicle)\b.*\b(?:[5-8]|five|six|seven|eight)\s*(?:years?|yrs?)\b|\b(?:[5-8]|five|six|seven|eight)\s*(?:years?|yrs?)\b.*\b(car|vehicle|motor\s*vehicle)\b", text, re.IGNORECASE):
+        elif re.search(r"\b(car|vehicle|motor\s*vehicle|truck|bus|lorry|van)\b", text, re.IGNORECASE) and (
+            m_veh_age := re.search(r"\b(?:aged?\s+)?(\d{1,2})\s*(?:years?|yrs?)\b", text, re.IGNORECASE)
+        ):
+            veh_age = int(m_veh_age.group(1))
+            params["vehicle_age_years"] = veh_age
+            if veh_age > 15:
+                assumptions.append(f"motor vehicle aged {veh_age} years (>15 years import prohibited under Traffic Act)")
+            elif veh_age > 8:
+                params["goods_category"] = "used_vehicle_over_8_years"
+                assumptions.append("used motor vehicle 8-15 years: 50% environmental levy")
+            elif veh_age >= 5:
+                params["goods_category"] = "used_vehicle_5_to_8_years"
+                assumptions.append("used motor vehicle 5-8 years: 35% environmental levy")
+            else:
+                assumptions.append("common external tariff duty of 25%")
+        elif re.search(r"\b(car|vehicle|motor\s*vehicle)\b.*\b(?:five|six|seven|eight)\s*(?:years?|yrs?)\b|\b(?:five|six|seven|eight)\s*(?:years?|yrs?)\b.*\b(car|vehicle|motor\s*vehicle)\b", text, re.IGNORECASE):
             params["goods_category"] = "used_vehicle_5_to_8_years"
             assumptions.append("used motor vehicle 5-8 years: 35% environmental levy")
-        elif re.search(r"\b(car|vehicle|motor\s*vehicle)\b.*\b(?:9|1[0-5]|nine|ten|eleven|twelve|thirteen|fourteen|fifteen)\s*(?:years?|yrs?)\b|\b(?:9|1[0-5]|nine|ten|eleven|twelve|thirteen|fourteen|fifteen)\s*(?:years?|yrs?)\b.*\b(car|vehicle|motor\s*vehicle)\b", text, re.IGNORECASE):
+        elif re.search(r"\b(car|vehicle|motor\s*vehicle)\b.*\b(?:nine|ten|eleven|twelve|thirteen|fourteen|fifteen)\s*(?:years?|yrs?)\b|\b(?:nine|ten|eleven|twelve|thirteen|fourteen|fifteen)\s*(?:years?|yrs?)\b.*\b(car|vehicle|motor\s*vehicle)\b", text, re.IGNORECASE):
             params["goods_category"] = "used_vehicle_over_8_years"
             assumptions.append("used motor vehicle 8-15 years: 50% environmental levy (vehicles >15 yrs prohibited)")
         else:
@@ -1062,6 +1116,9 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
         if re.search(r"\b(wht|withholding)\b", text, re.IGNORECASE):
             params["include_wht"] = True
             assumptions.append("includes 6% commercial import withholding tax (s.119)")
+        if re.search(r"\binfrastructure\s+levy\b", text, re.IGNORECASE):
+            params["include_infrastructure_levy"] = True
+            assumptions.append("includes 1.5% infrastructure development levy on CIF")
 
         missing = []
         if single is not None:
@@ -1082,14 +1139,29 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
                 assumptions.append("mobile money cash withdrawal (0.5% rate)")
             else:
                 missing.append("excise_type")
-        if single is not None:
+        _specific_excise_types = {
+            "fuel_petrol",
+            "fuel_diesel",
+            "fuel_kerosene",
+            "cement_50kg",
+            "sugar_kg",
+            "cooking_oil_litre",
+            "cooking_fat_kg",
+            "motorcycle_first_registration",
+        }
+        m_qty = re.search(
+            r"\b(\d[\d,]*(?:\.\d+)?)\s*(?:50\s*kg\s+)?(?:litres?|bags?|kg|kilograms?|motorcycles?|units?)\b",
+            text,
+            re.IGNORECASE,
+        )
+        if excise_type in _specific_excise_types and m_qty:
+            params["amount"] = float(m_qty.group(1).replace(",", ""))
+        elif single is not None:
             params["amount"] = single
+        elif m_qty:
+            params["amount"] = float(m_qty.group(1).replace(",", ""))
         else:
-            m_litres = re.search(r"\b(\d[\d,]*(?:\.\d+)?)\s*litres?\b", text, re.IGNORECASE)
-            if m_litres:
-                params["amount"] = float(m_litres.group(1).replace(",", ""))
-            else:
-                missing.append("amount")
+            missing.append("amount")
         return CalcPlan("calculate_excise_duty", "calc_excise_duty", params, missing, assumptions)
 
     if intent == "rental":
@@ -1206,9 +1278,19 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
         ]
         if result.get("nssf_included"):
             lines.append(f"- NSSF employee contribution: {_ugx(result['nssf_employee'])} (5% of gross)")
-            tot_ded = float(result.get("paye", 0)) + float(result.get("nssf_employee", 0))
+            if float(result.get("nssf_employer") or 0) > 0:
+                lines.append(
+                    f"- NSSF employer contribution: {_ugx(result['nssf_employer'])} (10% of gross; total employer cost: {_ugx(result['total_employer_cost'])})"
+                )
+            tot_ded = (
+                float(result.get("paye", 0))
+                + float(result.get("nssf_employee", 0))
+                + float(result.get("lst_monthly", 0))
+            )
             tot_pct = (tot_ded / gross_val * 100) if gross_val > 0 else 0
             lines.append(f"- Total statutory deductions ({tot_pct:.1f}%): **{_ugx(tot_ded)}**")
+        if result.get("lst_included") and float(result.get("lst_monthly") or 0) > 0:
+            lines.append(f"- Local Service Tax (LST): {_ugx(result['lst_monthly'])} per month")
         lines += [
             f"- Net take-home: **{_ugx(result['net_take_home'])}**",
             f"- Band applied: {float(band.get('marginal_rate', 0)) * 100:.0f}% marginal ({band_span})",
@@ -1231,6 +1313,12 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
             "",
             f"- Chargeable income: {_ugx(result['chargeable_income'])}",
             f"- Tax at {float(result['rate']) * 100:.0f}%: **{_ugx(result['tax'])}**",
+        ]
+        if float(result.get("branch_repatriation_tax") or 0) > 0:
+            rep_pct = float(result.get("branch_repatriation_tax_rate") or 0.15) * 100
+            lines.append(f"- Branch repatriation tax at {rep_pct:.0f}% (s.82): **{_ugx(result['branch_repatriation_tax'])}**")
+            lines.append(f"- Total corporate & branch tax: **{_ugx(result['total_tax'])}**")
+        lines += [
             f"- After-tax income: {_ugx(result['after_tax'])}",
             "- Statutory Basis: Income Tax Act",
         ]
@@ -1260,16 +1348,31 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
             )
         if result.get("vat_included"):
             lines.append(f"- VAT on (CIF + duty + levy): {_ugx(result['vat'])}")
+        if float(result.get("infrastructure_levy") or 0) > 0:
+            lines.append(f"- Infrastructure levy (1.5% on CIF): {_ugx(result['infrastructure_levy'])}")
         if result.get("wht_included"):
             lines.append(f"- Commercial import WHT (6% on CIF): {_ugx(result['wht'])}")
+        if result.get("import_prohibited_over_15_years"):
+            lines.append(
+                "- **Import prohibited:** Vehicles over 15 years are prohibited "
+                "under the Traffic Act."
+            )
         lines.append(f"- Estimated landed cost: **{_ugx(result['landed_cost'])}**")
         lines.append("- Statutory Basis: East African Community Customs Management Act (EACCMA)")
     elif tool == "calculate_excise_duty":
-        excise_type = str(result.get("excise_type", "")).replace("_", " ")
+        raw_et = str(result.get("excise_type", ""))
+        excise_type = raw_et.replace("_", " ")
         is_specific = bool(result.get("is_specific_rate"))
         if is_specific:
-            rate_str = f"UGX {float(result['rate']):,.0f}/litre"
-            amt_str = f"{float(result['amount']):,.0f} litres"
+            unit_map = {
+                "cement_50kg": ("50 kg bag", "50 kg bags"),
+                "sugar_kg": ("kg", "kg"),
+                "cooking_fat_kg": ("kg", "kg"),
+                "motorcycle_first_registration": ("motorcycle", "motorcycles"),
+            }
+            u_sing, u_plur = unit_map.get(raw_et, ("litre", "litres"))
+            rate_str = f"UGX {float(result['rate']):,.0f}/{u_sing}"
+            amt_str = f"{float(result['amount']):,.0f} {u_plur}"
         else:
             rate_str = f"{float(result['rate']) * 100:.1f}%"
             amt_str = _ugx(result['amount'])

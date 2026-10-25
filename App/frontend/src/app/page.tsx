@@ -927,7 +927,7 @@ export default function Page() {
     setNarrationFailed(null);
     setTtsLoading(turnId);
     try {
-      const speechText = cleanMarkdownForSpeech(text);
+      const speechText = cleanMarkdownForSpeech(text, locale);
       if (!speechText) {
         setTtsLoading(null);
         return 'ended';

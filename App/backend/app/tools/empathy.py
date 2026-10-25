@@ -233,6 +233,8 @@ class AffectiveState:
     smoothed_score: float = 0.0
     sustained: bool = False
     crisis: bool = False
+    locale: str = "en"
+    localized_acknowledgement: str = ""
     tone_register: str = "neutral"  # "neutral" | "empathetic_reassuring" | "patient_clear" | "direct_urgent"
     should_auto_escalate: bool = False
     recommended_speech_rate: float = 1.0
@@ -251,11 +253,13 @@ def fuse_multimodal_affect(
     prosody_profile: Any | None = None,
     clarifications_asked: int = 0,
     previous_smoothed_score: float = 0.0,
+    locale: str = "",
     user_id: str | None = None,
     record_metric: bool = True,
 ) -> AffectiveState:
     """Fuse lexical distress, multi-turn trajectory, acoustic prosody, and clarification effort."""
-    lex = assess(message, history=history, record_metric=False)
+    lex = assess(message, history=history, locale=locale, record_metric=False)
+    eff_loc = str(lex.get("locale") or "en")
     if lex.get("crisis"):
         return AffectiveState(
             affect="hardship",
@@ -264,6 +268,8 @@ def fuse_multimodal_affect(
             smoothed_score=1.0,
             sustained=True,
             crisis=True,
+            locale=eff_loc,
+            localized_acknowledgement="",
             tone_register="empathetic_reassuring",
             should_auto_escalate=True,
             recommended_speech_rate=0.88,
@@ -372,6 +378,8 @@ def fuse_multimodal_affect(
         smoothed_score=smoothed,
         sustained=sustained,
         crisis=False,
+        locale=eff_loc,
+        localized_acknowledgement=str(lex.get("localized_acknowledgement") or empathy_ack(kind, eff_loc)),
         tone_register=tone_reg,
         should_auto_escalate=should_escalate,
         recommended_speech_rate=round(speech_rate, 2),

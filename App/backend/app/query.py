@@ -621,6 +621,10 @@ _RUNYANKOLE_WORDS: frozenset[str] = frozenset({
     "ahari", "omuri", "kuruga", "kuhika", "kugamba", "nkore", "nkunda", "tinkunda",
     "kushonga", "oine", "aine", "niwe", "turi", "twine", "wangye", "yaawe", "enshonga",
     "nimanya", "tihaine", "ebyangye", "naabaasa", "okugarukamu", "ninkushaba", "orurimi",
+    "aha", "omu", "nari", "kandi", "kwonka", "nyowe", "iwe", "itwe", "yangye",
+    "noobaasa", "ori", "oha", "nkahi", "ryari", "kare", "tugambe", "okyariho",
+    "nintina", "ntiina", "ebindi", "ekibuuzo", "ebibuuzo", "omukutu", "orubuga",
+    "esimu", "kunkorera", "okukora", "ninga", "nitushashura",
 })
 
 _ACHOLI_WORDS: frozenset[str] = frozenset({
@@ -630,7 +634,10 @@ _ACHOLI_WORDS: frozenset[str] = frozenset({
     "coyo", "nying", "nyinga", "waraga", "lacul", "lutic", "latic", "konyi",
     "akonyi", "lapeny", "lagam", "gamo", "culu", "aculu", "iculo", "adi", "cente",
     "cilingi", "biacara", "jami", "ngiyo", "peny", "penyo", "peke", "gimako",
-    "alok", "walok", "kede", "acoli",
+    "alok", "walok", "kede", "acoli", "onyo", "ento", "dok", "wan", "wun",
+    "mega", "megi", "itwero", "watwero", "amito", "imito", "tim", "ber",
+    "kwene", "awene", "pud", "itye", "pe", "eyo", "alworo", "cwinya", "banya",
+    "cim", "kabedo", "ngec", "mukene", "pingo", "waculo", "culo",
 })
 
 _LOCAL_LANGUAGE_WORDS = _LUGANDA_WORDS | _SWAHILI_WORDS | _RUNYANKOLE_WORDS | _ACHOLI_WORDS
@@ -1114,10 +1121,14 @@ def detect_language(text: str, default_lang: str = "en") -> str:
     if not raw_words:
         return default_lang
 
-    lg_hits = len(raw_words & _LUGANDA_WORDS)
+    lg_core = len((raw_words - {"ki", "ku"}) & _LUGANDA_WORDS)
     sw_hits = len(raw_words & _SWAHILI_WORDS) + len(_SW_MARKERS.findall(cleaned))
-    nyn_hits = len(raw_words & _RUNYANKOLE_WORDS) + len(_NYN_PREFIXES.findall(cleaned))
-    ach_hits = len(raw_words & _ACHOLI_WORDS)
+    nyn_core = len((raw_words - {"ki", "ku"}) & _RUNYANKOLE_WORDS) + len(_NYN_PREFIXES.findall(cleaned))
+    ach_core = len((raw_words - {"ki", "ku", "an", "in"}) & _ACHOLI_WORDS)
+    ki_ku_hits = len(raw_words & {"ki", "ku"})
+    lg_hits = lg_core + (ki_ku_hits if (lg_core > 0 or (nyn_core == 0 and ach_core == 0)) else 0)
+    nyn_hits = nyn_core + (len(raw_words & {"ki"}) if (nyn_core > 0 and lg_core == 0 and ach_core == 0) else 0)
+    ach_hits = ach_core + (ki_ku_hits if (ach_core > 0 and lg_core == 0 and nyn_core == 0) else 0)
     en_common = len(raw_words & _COMMON_ENGLISH_WORDS)
 
     # 2. Check for noisy or misspelled English ONLY when vernacular markers are absent.
@@ -1125,7 +1136,10 @@ def detect_language(text: str, default_lang: str = "en") -> str:
         corrected = correct_spelling(normalized)
         corr_cleaned = corrected.strip().lower()
         corr_words = set(re.findall(r"[a-z'’ŋ]+", corr_cleaned))
-        en_hits = len(corr_words & _COMMON_ENGLISH_WORDS) + len(corr_words & _TAX_DOMAIN_VOCAB)
+        corr_en_common = len(corr_words & _COMMON_ENGLISH_WORDS)
+        en_hits = corr_en_common + len(corr_words & _TAX_DOMAIN_VOCAB)
+        if corr_en_common >= 2 or (corr_en_common >= 1 and en_hits >= 2 and len(corr_words) >= 3):
+            return "en"
         if en_hits > 0:
             return default_lang
         detector_text = corrected

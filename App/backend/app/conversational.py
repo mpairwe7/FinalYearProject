@@ -66,8 +66,8 @@ _IDENTITY_ORIGINS_RE = re.compile(
     r"|wewe\s+ni\s+nani|je\s+wewe\s+ni\s+(?:binadamu|roboti)|nani\s+alikuunda|nani\s+aliyekutengeneza"
     r"|wewe\s+watoka\s+wapi|unatoka\s+wapi|unapatikana\s+wapi|ofisi\s+zako\s+ziko\s+wapi|uko\s+wapi"
     r"|unaweza\s+(?:kuongea|kuzungumza)\s+(?:kiswahili|kiingereza|kiganda|kirunyankole|kiacholi)|unajua\s+nini"
-    r"|iwe\s+ori\s+oha|oha\s+owakukozire|nooruga\s+nkahi|ofisi\s+zaawe\s+ziri\s+nkahi|noobaasa\s+kugamba\s+(?:orunyankore|runyankole)"
-    r"|in\s+ibedo\s+nga|nga\s+ma\s+oyubi|ia\s+kwene|ofici\s+ni\s+tye\s+kwene|itwero\s+loko\s+(?:leb\s+acoli|acoli|acholi))\b",
+    r"|(?:iwe\s+)?ori\s+oha|oha\s+owakukozire|nooruga\s+nkahi|ofisi\s+zaawe\s+ziri\s+nkahi|noobaasa\s+kugamba\s+(?:orunyankore|runyankole)"
+    r"|in\s+(?:ibedo\s+)?nga|nga\s+ma\s+oyubi|ia\s+kwene|ofici\s+ni\s+tye\s+kwene|itwero\s+loko\s+(?:leb\s+acoli|acoli|acholi))\b",
     re.IGNORECASE,
 )
 
@@ -114,7 +114,9 @@ _OUT_OF_SCOPE_TANGENT_RE = re.compile(
     r"\b(who\s+(?:won|will\s+win)\s+(?:the\s+)?(?:(?:football\s+)?world\s+cup|premier\s+league|match|game|election)"
     r"|write\s+(?:python|javascript|java|code)\s+for"
     r"|capital\s+of\s+(?:france|germany|japan|canada|usa|kenya)"
-    r"|what\s+is\s+the\s+weather\s+in\s+(?:paris|london|new\s+york|kampala))\b",
+    r"|what\s+is\s+the\s+weather\s+in\s+(?:paris|london|new\s+york|kampala)"
+    r"|ani\s+yawangula\s+(?:world\s+cup|ekikopo)|nani\s+alishinda\s+(?:kombe\s+la\s+dunia|world\s+cup)"
+    r"|ekibuga\s+ekikulu\s+ekya\s+(?:france|bufalansa|japan)|mji\s+mkuu\s+wa\s+(?:ufaransa|ujerumani|japani))\b",
     re.IGNORECASE,
 )
 
@@ -279,7 +281,7 @@ _BUSINESS_EMPATHY_RESPONSES = {
     ),
     "nyn": (
         "**Okutandika nari okwebembera obushuubuzi nikyetenga obumanzi, kandi n'ekya buriijo okutina emishoro.**\n\n"
-        " Reeba amakuru marungi agarikuhwera abashuubuzi ba Uganda:\n\n"
+        "Reeba amakuru marungi agarikuhwera abashuubuzi ba Uganda:\n\n"
         "1. **Torikushashura Omushoro Otakabaire na Magoba**: Omushoro gw'entaasya nigushashurwa aha magoba gonka, ti ha sente zaawe z'okutandika.\n"
         "2. **Obuhwezi bw'Obushuubuzi Bukye (Presumptive Tax)**: Entaasya yaawe y'omwaka yaaba eri ahansi ya shiringi obukaikuru 10, torikushashura mushoro gw'obushuubuzi. Ahagati y'obukaikuru 10 na 50, hariho omushoro mukye hatariho kwetenga ebitabo bikuru.\n"
         "3. **Obugarukiro bwa VAT**: Torikugyemeserezibwa kwehandiikisa aha VAT kureka entaasya yaawe yahika **shiringi obukaikuru 150** omwaka.\n"
@@ -395,7 +397,7 @@ _DIVERT_RESPONSES = {
         "Nitafurahi sana kukusaidia kuhusu kodi za biashara yako, ukokotoaji wa kodi, au forodha — nikusaidie nini leo?"
     ),
     "nyn": (
-        " N'obu ekibuuzo kyawe kiraabe kiri kirungi, obukugu bwangye nk'**Omuhwezi wa URA** "
+        "N'obu ekibuuzo kyawe kiraabe kiri kirungi, obukugu bwangye nk'**Omuhwezi wa URA** "
         "buri aha biragiro by'emishoro ya Uganda, eby'ensharo, okwehandiikisa TIN, n'obuhereza bwa URA.\n\n"
         "Nimbaasa kukuhwera aha TIN, PAYE, VAT, nari okuheereza ebihandiiko by'omushoro — nkuhwere aha ki?"
     ),

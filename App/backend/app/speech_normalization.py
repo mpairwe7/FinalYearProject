@@ -37,7 +37,7 @@ _BARE_URL_RE = re.compile(r"\b(?:https?://|www\.)\S+", re.IGNORECASE)
 # One leading whitespace character, not a run of them: "\s+at\s+" could be
 # retried from every position of a long run of spaces (polynomial backtracking).
 _URL_WITH_PREPOSITION_RE = re.compile(
-    r"\b(portal|website|site|page|platform|mukutu(?:\s+gwa\s+URA)?|tovuti(?:\s+ya\s+URA)?|urubuga(?:\s+rwa\s+URA)?)\s(?:at|via|ku|katika|kwenye|kupitia|aha)\s+(?:https?://|www\.)[^\s<>\"]*[^\s<>\".,;:!?)\]]",
+    r"\b(portal|website|site|page|platform|o?mukutu(?:\s+gwa\s+URA)?|tovuti(?:\s+ya\s+URA)?|[ou]rubuga(?:\s+rwa\s+URA)?|(?:kabedo|kubbe|intanet)(?:\s+me\s+URA)?)\s(?:at|via|ku|katika|kwenye|kupitia|aha|i|ki)\s+(?:(?:https?://|www\.)[^\s<>\"]*[^\s<>\".,;:!?)\]]|(?:[A-Za-z0-9-]+\.)?ura\.go\.ug(?:[:/?#][^\s<>\"]*[^\s<>\".,;:!?)\]])?)",
     re.IGNORECASE,
 )
 
@@ -72,13 +72,13 @@ _BARE_INTL_DOMAIN_RE = re.compile(
 )
 _USSD_CODE_RE = re.compile(r"(?<!\w)\*(\d{3}(?:\*\d{1,4}){0,5})#(?!\w)")
 _UG_INTL_PHONE_RE = re.compile(
-    r"(?<!\w)\+256[ \t-]?(?:\(0\)[ \t-]?)?\(?0?([1-9]\d{2})\)?[ \t-]?(\d{3})[ \t-]?(\d{3})\b"
+    r"(?<!\w)\+256[ \t-]?(?:\(0\)[ \t-]?)?\(?0?([1-9]\d(?:[ \t()-]{0,2}\d){7})\b"
 )
 _UG_BARE_256_PHONE_RE = re.compile(
-    r"\b256[ \t-]?(7\d{2})[ \t-]?(\d{3})[ \t-]?(\d{3})\b"
+    r"\b256[ \t-]?(7\d(?:[ \t()-]{0,2}\d){7})\b"
 )
 _UG_LOCAL_PHONE_RE = re.compile(
-    r"(?<!\w)\(?(0[2347]\d{2})\)?[ \t-]?(\d{3})[ \t-]?(\d{3})\b"
+    r"(?<!\w)\(?(0[2347]\d)\)?[ \t()-]{0,2}(\d(?:[ \t()-]{0,2}\d){6})\b"
 )
 _EMERGENCY_SHORTCODE_RE = re.compile(
     r"(?<![\w/-])(?<![0-9][.,])\b(999|112)\b(?![\w/-])(?![.,][0-9])"
@@ -183,7 +183,43 @@ _GENERAL_TOLLFREE_RE = re.compile(r"\b0800[ \t-]*(\d{3})[ \t-]*(\d{3})\b")
 _TOLLFREE_PAIRS_RE = re.compile(r"\b0800[ \t-]+(\d{2})[ \t-]+(\d{2})[ \t-]+(\d{2})\b")
 
 # Numbered steps for cadence and pacing
-_NUMBERED_STEP_RE = re.compile(r"^\s*(\d+)\.\s+", re.MULTILINE)
+_NUMBERED_STEP_RE = re.compile(r"^\s*(\d{1,2})[.)]\s+", re.MULTILINE)
+_INLINE_STEP_AFTER_PUNCT_RE = re.compile(r"([:;.!?])[ \t]+(\d{1,2})[.)][ \t]+(?=[A-Z*])")
+_INLINE_STEP_CONT_RE = re.compile(r"(?<![.!?:;\n])[ \t]+([2-9]|1[0-2])[.)][ \t]+(?=[A-Z*])")
+_BREADCRUMB_ARROW_RE = re.compile(
+    r"(?<=[A-Za-z0-9*_)\]])[ \t]*(?:->|→)[ \t]*(?=[A-Za-z0-9*_(\[])"
+    r"|(?<=[A-Za-z*_)\]])[ \t]+>[ \t]+(?=[A-Za-z*_(\[])"
+)
+_COMPARISON_GT_RE = re.compile(r"[ \t]*>[ \t]*(?=(?:UGX|USD|Shs)?[ \t]*\d)", re.IGNORECASE)
+_COMPARISON_LT_RE = re.compile(r"[ \t]*<[ \t]*(?=(?:UGX|USD|Shs)?[ \t]*\d)", re.IGNORECASE)
+_COMPARISON_GT_WORD = {
+    "en": " greater than ",
+    "lg": " okusinga ",
+    "sw": " zaidi ya ",
+    "nyn": " okukira ",
+    "ach": " makato ",
+}
+_COMPARISON_LT_WORD = {
+    "en": " less than ",
+    "lg": " wansi wa ",
+    "sw": " chini ya ",
+    "nyn": " ahansi ya ",
+    "ach": " piny ki ",
+}
+_BREADCRUMB_WORD = {
+    "en": ", then ",
+    "lg": ", oluvannyuma ",
+    "sw": ", kisha ",
+    "nyn": ", bwanyima ",
+    "ach": ", ci ",
+}
+_STEP_WORD = {
+    "en": "Step",
+    "lg": "Odaala",
+    "sw": "Hatua",
+    "nyn": "Idaara",
+    "ach": "Rwom",
+}
 
 # Currency amounts
 _UGX_RE = re.compile(r"\bUGX\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)\b", re.IGNORECASE)
@@ -224,8 +260,10 @@ _ALIAS_ASIDE_RE = re.compile(r"\(([^()/]{1,60}(?:/[^()/]{1,60})+)\)")
 # "Withholding Tax (WHT)" once the acronym is expanded: a name said twice.
 _ECHO_ASIDE_RE = re.compile(r"[ \t]?\(([^()]{2,60})\)")
 
-# A range, "UGX 335,000 – UGX 410,000", read as a pause without its "to".
-_RANGE_RE = re.compile(r"([0-9][0-9,.]{0,24}[ \t]?%?)[ \t]+[\u2013\u2014-][ \t]+(?=(?:UGX|USD)?[ \t]?[0-9])")
+# A range, "UGX 335,000 – UGX 410,000" or "UGX 485,000–UGX 10,000,000", read as a pause without its "to".
+_RANGE_RE = re.compile(
+    r"([0-9][0-9,.]{0,24}[ \t]?%?)(?:[ \t]*[\u2013\u2014][ \t]*|[ \t]+-[ \t]+)(?=(?:UGX|USD)?[ \t]?[0-9])"
+)
 _RANGE_WORD = {
     "en": "to",
     "lg": "okutuuka ku",
@@ -348,6 +386,14 @@ _ACRONYMS = [
     (re.compile(r"\be-?Portal\b", re.IGNORECASE), "E-Portal"),
     (re.compile(r"\be-?Filing\b", re.IGNORECASE), "E-Filing"),
     (re.compile(r"\be-?Immigration\b", re.IGNORECASE), "E-Immigration"),
+    (re.compile(r"\beservices\b", re.IGNORECASE), "e-Services"),
+    (re.compile(r"\beregistration\b", re.IGNORECASE), "e-Registration"),
+    (re.compile(r"\bereturns\b", re.IGNORECASE), "e-Returns"),
+    (re.compile(r"\baskura\b", re.IGNORECASE), "Ask U R A"),
+    (re.compile(r"\bsinglewindow\b", re.IGNORECASE), "single window"),
+    (re.compile(r"\bwebportal\b", re.IGNORECASE), "web portal"),
+    (re.compile(r"\bhelpdesk\b", re.IGNORECASE), "help desk"),
+    (re.compile(r"\bmygov\b", re.IGNORECASE), "my gov"),
     (re.compile(r"(?:\bM\.T\.N\b\.?|\bM-T-N\b|\bMTN\b)", re.IGNORECASE), "M T N"),
     (re.compile(r"\bDT-([0-9]{3,5})\b", re.IGNORECASE), r"D-T \1"),
 ]
@@ -471,20 +517,115 @@ def _bare_number(match: re.Match[str], locale: str) -> str:
     """A number left in Luganda or Swahili text, as words; digit runs stay as they are."""
     text, start, end = match.string, match.start(), match.end()
     digits = match.group(1)
-    before = text[max(0, start - 8) : start]
+    before = text[max(0, start - 14) : start]
+    after = text[end : end + 6]
     # A TIN, PRN or toll-free number read digit by digit ("0 800, 117, 0 0 0"),
-    # a phone number (a leading zero), and a form name ("D-T 2027") are not amounts.
+    # a phone number (a leading zero), a USSD/email/P.O. Box digit segment,
+    # and a form name ("D-T 2027") are not amounts.
     if (
         (len(digits) > 1 and digits.startswith("0") and not match.group(2))
         or re.search(r"\d[ \t]$|\d,[ \t]$", before)
         or re.match(r"[ \t]\d|,[ \t]\d", text[end : end + 3])
-        or before.endswith("D-T ")
+        or before.endswith(("D-T ", "star ", "dash ", "plus ", "underscore ", "dot ", "Box "))
+        or after.startswith((" star", " hash"))
     ):
         return match.group(0)
     number = digits.replace(",", "") + (match.group(2) or "")
     if before.endswith("Section "):
         return _spoken_number(number, "en")
     return _spoken_number(number, locale)
+
+
+def _format_ug_phone_9(raw_9: str) -> str:
+    """Format a 9-digit Ugandan subscriber number into 3-3-3 spaced groups."""
+    d = re.sub(r"\D", "", raw_9)
+    if len(d) != 9:
+        return " ".join(d)
+    return f"{' '.join(d[:3])}, {' '.join(d[3:6])}, {' '.join(d[6:9])}"
+
+
+def _format_ug_local_phone(prefix_2: str, tail_7: str) -> str:
+    """Format a 10-digit Ugandan local phone number (0XX + 7 digits) into 4-3-3 spaced groups."""
+    d = re.sub(r"\D", "", prefix_2 + tail_7)
+    if len(d) != 10:
+        return " ".join(d)
+    return f"{' '.join(d[:4])}, {' '.join(d[4:7])}, {' '.join(d[7:10])}"
+
+
+def _format_numbered_steps(text: str, locale: str) -> str:
+    """Convert both line-start and inline numbered steps (1., 2., 3.) into paced locale step headers."""
+    step_word = _STEP_WORD.get(locale, "Step")
+    out = _NUMBERED_STEP_RE.sub(rf"{step_word} \1: ", text)
+    out = _INLINE_STEP_AFTER_PUNCT_RE.sub(rf"\1 {step_word} \2: ", out)
+    if f"{step_word} 1: " in out:
+        out = _INLINE_STEP_CONT_RE.sub(rf". {step_word} \1: ", out)
+    return out
+
+
+_TTS_DIGIT_WORDS: dict[str, dict[str, str]] = {
+    "en": {
+        "0": "zero", "1": "one", "2": "two", "3": "three", "4": "four",
+        "5": "five", "6": "six", "7": "seven", "8": "eight", "9": "nine",
+    },
+    "lg": {
+        "0": "zeero", "1": "emu", "2": "bbiri", "3": "ssatu", "4": "nnya",
+        "5": "ttaano", "6": "mukaaga", "7": "musanvu", "8": "munaana", "9": "mwenda",
+    },
+    "sw": {
+        "0": "sufuri", "1": "moja", "2": "mbili", "3": "tatu", "4": "nne",
+        "5": "tano", "6": "sita", "7": "saba", "8": "nane", "9": "tisa",
+    },
+    "nyn": {
+        "0": "zeero", "1": "emwe", "2": "ibiri", "3": "ishatu", "4": "ina",
+        "5": "itaano", "6": "mukaaga", "7": "mushanju", "8": "munaana", "9": "mwenda",
+    },
+    "ach": {
+        "0": "zero", "1": "acel", "2": "aryo", "3": "adek", "4": "angwen",
+        "5": "abic", "6": "abicel", "7": "abiro", "8": "aboro", "9": "abongwen",
+    },
+}
+_TOLLFREE_NORMALIZED_RE = re.compile(
+    r"\b0 800, (\d{2,3}), (\d{2,3}|\d \d \d)(?:, (\d{2,3}))?\b"
+)
+_SPACED_DIGIT_RUN_RE = re.compile(
+    r"\b\d(?:(?:[ \t]+|,[ \t]*)\d)+\b"
+)
+_CONTACT_SINGLE_DIGIT_RE = re.compile(
+    r"\b(star|dash|plus|underscore|dot|Box)[ \t]+(\d)\b"
+)
+
+
+def verbalize_digits_for_tts(text: str, locale: str = "en") -> str:
+    """Convert spaced contact, phone, toll-free, USSD, TIN, PRN, and P.O. Box digit runs into natural spoken words for *locale*.
+
+    Called dynamically right before TTS synthesis (Orpheus / SpeechModel) so the
+    caller's visual caption keeps readable digits while the voice model speaks
+    fluent words in the active language (en, lg, sw, nyn, ach).
+    """
+    if not text:
+        return ""
+    loc = (locale or "en").strip().lower()
+    dmap = _TTS_DIGIT_WORDS.get(loc, _TTS_DIGIT_WORDS["en"])
+
+    def _digits_to_words(s: str) -> str:
+        return re.sub(r"\d", lambda m: dmap.get(m.group(0), m.group(0)), s)
+
+    def _tollfree_sub(m: re.Match[str]) -> str:
+        prefix = "zero eight hundred" if loc == "en" else _digits_to_words("0 8 0 0")
+        g1 = " ".join(dmap.get(c, c) for c in m.group(1) if c.isdigit())
+        g2 = " ".join(dmap.get(c, c) for c in m.group(2) if c.isdigit())
+        if m.group(3):
+            g3 = " ".join(dmap.get(c, c) for c in m.group(3) if c.isdigit())
+            return f"{prefix}, {g1}, {g2}, {g3}"
+        return f"{prefix}, {g1}, {g2}"
+
+    out = _TOLLFREE_NORMALIZED_RE.sub(_tollfree_sub, text)
+    out = _SPACED_DIGIT_RUN_RE.sub(lambda m: _digits_to_words(m.group(0)), out)
+    out = _CONTACT_SINGLE_DIGIT_RE.sub(
+        lambda m: f"{m.group(1)} {dmap.get(m.group(2), m.group(2))}",
+        out,
+    )
+    return out
 
 
 def _drop_echo(match: re.Match[str]) -> str:
@@ -508,12 +649,13 @@ def _format_email_local(user: str) -> str:
     return re.sub(r"[ \t]+", " ", out).strip()
 
 
-def clean_text_for_speech(text: str, locale: str = "en") -> str:
+def clean_text_for_speech(text: str, locale: str = "en", *, verbalize_digits: bool = False) -> str:
     """Pre-process text for natural, audible TTS synthesis in the tax domain.
 
     Args:
         text: Raw text or Markdown response from LLM / ChatModel.
         locale: Target language code ('en', 'lg', 'sw', 'nyn', 'ach').
+        verbalize_digits: When True, also converts spaced phone/USSD/TIN/PRN digit runs into locale digit words.
 
     Returns:
         A cleaned, punctuation-normalised string ready for speech synthesis.
@@ -574,8 +716,11 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
     t = _CODE_BLOCK_RE.sub(" ", t)
     t = _INLINE_CODE_RE.sub(r"\1", t)
 
-    # 4. Handle table rows: replace pipes with commas/spaces
+    # 4. Handle table rows: replace pipes with commas/spaces, and convert comparisons/breadcrumb arrows
     t = _TABLE_PIPE_RE.sub(", ", t)
+    t = _COMPARISON_GT_RE.sub(_COMPARISON_GT_WORD.get(locale, " greater than "), t)
+    t = _COMPARISON_LT_RE.sub(_COMPARISON_LT_WORD.get(locale, " less than "), t)
+    t = _BREADCRUMB_ARROW_RE.sub(_BREADCRUMB_WORD.get(locale, ", then "), t)
 
     # 5. Strip Markdown headers, bullet points, and decorative section emojis
     t = _HEADER_RE.sub("", t)
@@ -622,15 +767,15 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
     t = _UG_INTL_PHONE_RE.sub(
         lambda m: "plus 2 5 6, "
         + ("0, " if "(0)" in m.group(0) else "")
-        + f"{' '.join(m.group(1))}, {' '.join(m.group(2))}, {' '.join(m.group(3))}",
+        + _format_ug_phone_9(m.group(1)),
         t,
     )
     t = _UG_BARE_256_PHONE_RE.sub(
-        lambda m: f"2 5 6, {' '.join(m.group(1))}, {' '.join(m.group(2))}, {' '.join(m.group(3))}",
+        lambda m: f"2 5 6, {_format_ug_phone_9(m.group(1))}",
         t,
     )
     t = _UG_LOCAL_PHONE_RE.sub(
-        lambda m: f"{' '.join(m.group(1))}, {' '.join(m.group(2))}, {' '.join(m.group(3))}",
+        lambda m: _format_ug_local_phone(m.group(1), m.group(2)),
         t,
     )
     t = _PO_BOX_RE.sub(lambda m: f"P O Box {' '.join(m.group(1))}", t)
@@ -649,17 +794,8 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
     t = _GENERAL_TOLLFREE_RE.sub(r"0 800, \1, \2", t)
     t = _TOLLFREE_PAIRS_RE.sub(r"0 800, \1, \2, \3", t)
 
-    # 7e. Paced numbered steps for structured guidance
-    if locale == "lg":
-        t = _NUMBERED_STEP_RE.sub(r"Odaala \1: ", t)
-    elif locale == "sw":
-        t = _NUMBERED_STEP_RE.sub(r"Hatua \1: ", t)
-    elif locale == "nyn":
-        t = _NUMBERED_STEP_RE.sub(r"Idaara \1: ", t)
-    elif locale == "ach":
-        t = _NUMBERED_STEP_RE.sub(r"Rwom \1: ", t)
-    else:
-        t = _NUMBERED_STEP_RE.sub(r"Step \1: ", t)
+    # 7e. Paced numbered steps for structured guidance (both line-start and inline)
+    t = _format_numbered_steps(t, locale)
 
     # 7e. A range's dash is a "to"
     t = _RANGE_RE.sub(lambda m: f"{m.group(1)} {_RANGE_WORD.get(locale, 'to')} ", t)
@@ -703,6 +839,8 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
     t = re.sub(r"[ \t]+", " ", t)
     t = re.sub(r"\n\s*\n+", "\n\n", t)
 
+    if verbalize_digits:
+        t = verbalize_digits_for_tts(t, locale)
     return t.strip()
 
 

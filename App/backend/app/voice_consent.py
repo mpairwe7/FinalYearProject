@@ -170,15 +170,23 @@ def grant_voice_consent(
         logger.warning("Invalid voice consent purpose: %s", safe_purp)
         return None
 
+    if not user_id:
+        return None
+
     try:
         from . import database as db
 
-        receipt_id = db.grant_consent(
-            user_id=user_id,
+        target_uid = user_id
+        if hasattr(db, "upsert_user"):
+            row = db.upsert_user(external_id=user_id, tenant_id=tenant_id or "default")
+            if isinstance(row, dict) and row.get("id"):
+                target_uid = str(row["id"])
+        receipt = db.grant_consent(
+            user_id=target_uid,
             purpose=purpose,
             version=version,
-            tenant_id=tenant_id,
         )
+        receipt_id = str(receipt.get("receipt_id") if isinstance(receipt, dict) else receipt or "")
         log_voice_event(
             user_id=user_id,
             session_id="consent_grant",
@@ -186,7 +194,7 @@ def grant_voice_consent(
             metadata={"purpose": purpose, "version": version, "granted": True},
             tenant_id=tenant_id,
         )
-        return receipt_id
+        return receipt_id or None
     except Exception:
         logger.exception("Failed to grant voice consent")
         return None
