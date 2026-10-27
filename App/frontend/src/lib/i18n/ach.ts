@@ -464,6 +464,8 @@ export const ach: Partial<Dictionary> = {
   'portalCopilot.accessDeniedBadge': 'Kikwero Donyo',
   'portalCopilot.resumingAfterSignIn': 'Mede ki {task} inge donyo',
   'portalCopilot.submittedDetailsFor': 'Lok ma kicwalo pi {task}',
+  'portalCopilot.highValueAckLabel': 'Amoko wel cente madit man me UGX (≥ UGX 50,000,000) ki namba me TIN.',
+  'portalCopilot.decisionReceiptLabel': 'Waraga Moko Tam:',
   'portalCopilot.task.payment_generate_prn': 'Yubu Namba me Culo PRN',
   'portalCopilot.task.tin_apply_individual': 'Kwac me TIN pa Dano',
   'portalCopilot.task.return_filing_submit': 'Cwalo Ripot me Mucoro',

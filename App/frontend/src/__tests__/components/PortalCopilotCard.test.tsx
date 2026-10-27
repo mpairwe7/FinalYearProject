@@ -182,4 +182,123 @@ describe("PortalCopilotCard interactive sub-components", () => {
     expect(updated.portalCopilot?.card_type).toBe("step_up_login");
     expect(updated.portalCopilot?.task_id).toBe("tin_tax_obligations");
   });
+
+  it("enforces high-value cognitive friction checkbox, supports zero-LLM inline prepare, and renders decision receipt", async () => {
+    const fetchMock = vi
+      .fn()
+      // 1st call: inline prepare (`decision: "prepare"`)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          status: "prepared",
+          updated_card: {
+            card_type: "confirmation_required",
+            task_id: "payment_generate_prn",
+            portal_key: "prn_payments",
+            title: "Generate Payment Registration Number (PRN)",
+            live: false,
+            high_value_requires_ack: true,
+            displayed_fields_sha256: "a".repeat(64),
+            display_fields: [
+              {
+                name: "amount_ugx",
+                label: "Payment Amount (UGX)",
+                value: "65000000",
+                raw_value: "65000000",
+              },
+            ],
+            fields: [
+              {
+                name: "amount_ugx",
+                label: "Payment Amount (UGX)",
+                input_type: "number",
+                required: true,
+                value: "65000000",
+              },
+            ],
+            request_state: { alg: "hmac-sha256", sig: "def", payload: {} },
+            idempotency_key: "ura_task_updated_99",
+          },
+        }),
+      })
+      // 2nd call: execute (`decision: "allow"`)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          status: "executed",
+          summary: "Completed Generate Payment Registration Number (PRN) in simulation mode.",
+          result: { prn: "226000008888" },
+          decision_receipt: {
+            receipt_id: "rcpt_9988776655443322",
+            params_sha256: "b".repeat(64),
+          },
+        }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <PortalCopilotCard
+        conversationId="conv-hv-1"
+        copilot={{
+          card_type: "confirmation_required",
+          task_id: "payment_generate_prn",
+          portal_key: "prn_payments",
+          title: "Generate Payment Registration Number (PRN)",
+          live: false,
+          high_value_requires_ack: false,
+          displayed_fields_sha256: "c".repeat(64),
+          display_fields: [
+            {
+              name: "amount_ugx",
+              label: "Payment Amount (UGX)",
+              value: "2500000",
+              raw_value: "2500000",
+            },
+          ],
+          fields: [
+            {
+              name: "amount_ugx",
+              label: "Payment Amount (UGX)",
+              input_type: "number",
+              required: true,
+              value: "2500000",
+            },
+          ],
+          request_state: { alg: "hmac-sha256", sig: "abc", payload: {} },
+          idempotency_key: "ura_task_initial_01",
+        }}
+      />,
+    );
+
+    // Click Edit Details -> updates amount inline via `decision: "prepare"`
+    fireEvent.click(screen.getByTestId("portal-task-edit-btn"));
+    const amtInput = screen.getByLabelText(/Payment Amount/i) as HTMLInputElement;
+    fireEvent.change(amtInput, { target: { value: "65000000" } });
+    fireEvent.click(screen.getByTestId("portal-inline-form-submit-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("portal-confirm-value-amount_ugx").textContent).toBe("65000000");
+    });
+
+    // High-value ack checkbox must be checked before Allow button unlocks
+    const allowBtn = screen.getByTestId("portal-task-allow-btn") as HTMLButtonElement;
+    expect(allowBtn.disabled).toBe(true);
+    fireEvent.click(screen.getByTestId("portal-high-value-ack-checkbox"));
+    expect(allowBtn.disabled).toBe(false);
+
+    // Click Allow & Execute -> verifies decision receipt rendered and high_value_acknowledged + computed WYSIWYS digest sent
+    fireEvent.click(allowBtn);
+    await waitFor(() => {
+      expect(screen.getByTestId("portal-decision-receipt-id").textContent).toContain(
+        "rcpt_9988776655443322",
+      );
+    });
+    const secondCallBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body || "{}"));
+    expect(secondCallBody.high_value_acknowledged).toBe(true);
+    expect(secondCallBody.displayed_fields_sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(secondCallBody.displayed_fields_sha256).not.toBe("a".repeat(64));
+    vi.unstubAllGlobals();
+  });
 });

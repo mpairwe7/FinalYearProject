@@ -74,6 +74,9 @@ _instruments: dict[str, Any] = {}
 _TURN_USAGE: contextvars.ContextVar[dict[str, int] | None] = contextvars.ContextVar(
     "turn_llm_usage", default=None
 )
+_TURN_TOOL_CALLS: contextvars.ContextVar[list[int] | None] = contextvars.ContextVar(
+    "turn_tool_calls", default=None
+)
 _TURN_ATTRIBUTES: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
     "turn_span_attributes", default=None
 )
@@ -196,9 +199,14 @@ def trace_rag_pipeline(
     The query is recorded by length only.
     """
     ctx: dict[str, Any] = {"timings": {}, "request_id": request_id}
+    started_agent = time.perf_counter()
     previous_usage = _TURN_USAGE.get()
     if previous_usage is None:
         _TURN_USAGE.set({"input_tokens": 0, "output_tokens": 0, "calls": 0})
+    previous_tool_calls = _TURN_TOOL_CALLS.get()
+    tool_calls_box = [0] if previous_tool_calls is None else previous_tool_calls
+    if previous_tool_calls is None:
+        _TURN_TOOL_CALLS.set(tool_calls_box)
     try:
         if _tracer is None:
             yield ctx
@@ -213,20 +221,39 @@ def trace_rag_pipeline(
             attributes["ura.request_id"] = request_id
         with _tracer.start_as_current_span(f"invoke_agent {AGENT_NAME}", attributes=attributes) as span:
             ctx["span"] = span
-            yield ctx
-            for stage, ms in ctx["timings"].items():
-                span.set_attribute(f"rag.stage.{stage}.duration_ms", ms)
-            if "num_sources" in ctx:
-                span.set_attribute("rag.retrieval.num_results", ctx["num_sources"])
-            if "locale" in ctx:
-                span.set_attribute("ura.locale", ctx["locale"])
-            _apply_turn_attributes(span)
-            usage = _TURN_USAGE.get() or {}
-            if usage.get("calls"):
-                span.set_attribute("gen_ai.usage.input_tokens", usage["input_tokens"])
-                span.set_attribute("gen_ai.usage.output_tokens", usage["output_tokens"])
+            try:
+                yield ctx
+            finally:
+                for stage, ms in ctx["timings"].items():
+                    span.set_attribute(f"rag.stage.{stage}.duration_ms", ms)
+                if "num_sources" in ctx:
+                    span.set_attribute("rag.retrieval.num_results", ctx["num_sources"])
+                if "locale" in ctx:
+                    span.set_attribute("ura.locale", ctx["locale"])
+                _apply_turn_attributes(span)
+                usage = _TURN_USAGE.get() or {}
+                if usage.get("calls"):
+                    span.set_attribute("gen_ai.usage.input_tokens", usage["input_tokens"])
+                    span.set_attribute("gen_ai.usage.output_tokens", usage["output_tokens"])
+                tool_call_count = int(tool_calls_box[0])
+                span.set_attribute("gen_ai.invoke_agent.tool_calls", tool_call_count)
+                if _meter is not None:
+                    agent_attrs = {"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": AGENT_NAME}
+                    _instrument(
+                        "histogram",
+                        "gen_ai.invoke_agent.duration",
+                        "s",
+                        "Duration of full agent invocation",
+                    ).record(time.perf_counter() - started_agent, agent_attrs)
+                    _instrument(
+                        "histogram",
+                        "gen_ai.invoke_agent.tool_calls",
+                        "{tool_call}",
+                        "Number of tool calls made during an agent invocation",
+                    ).record(tool_call_count, agent_attrs)
     finally:
         _TURN_USAGE.set(previous_usage)
+        _TURN_TOOL_CALLS.set(previous_tool_calls)
 
 
 @contextmanager
@@ -454,12 +481,17 @@ def _finish_llm_call(
                 usage["input_tokens"] += call.input_tokens
                 usage["output_tokens"] += call.output_tokens or 0
                 usage["calls"] += 1
-        _record_otel_llm_metrics(call, operation, model, provider, duration, error_type)
+        _record_otel_llm_metrics(call, operation, model, provider, duration, started, error_type)
         if span is not None:
             if call.input_tokens is not None:
                 span.set_attribute("gen_ai.usage.input_tokens", call.input_tokens)
             if call.output_tokens is not None:
                 span.set_attribute("gen_ai.usage.output_tokens", call.output_tokens)
+            if call.first_token_at is not None:
+                span.set_attribute(
+                    "gen_ai.response.time_to_first_chunk_ms",
+                    round((call.first_token_at - started) * 1000, 2),
+                )
             if call.response_model:
                 span.set_attribute("gen_ai.response.model", call.response_model)
             if call.finish_reason:
@@ -483,7 +515,13 @@ def _instrument(kind: str, name: str, unit: str, description: str, **kwargs: Any
 
 
 def _record_otel_llm_metrics(
-    call: LLMCall, operation: str, model: str, provider: str, duration: float, error_type: str
+    call: LLMCall,
+    operation: str,
+    model: str,
+    provider: str,
+    duration: float,
+    started: float,
+    error_type: str,
 ) -> None:
     if _meter is None:
         return
@@ -502,6 +540,14 @@ def _record_otel_llm_metrics(
         "GenAI operation duration",
         explicit_bucket_boundaries_advisory=[0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48, 40.96, 81.92],
     ).record(duration, duration_attrs)
+    if call.first_token_at is not None:
+        _instrument(
+            "histogram",
+            "gen_ai.client.operation.time_to_first_chunk",
+            "s",
+            "Streaming latency to the first chunk",
+            explicit_bucket_boundaries_advisory=[0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24],
+        ).record(max(0.0, call.first_token_at - started), attrs)
     usage_hist = _instrument(
         "histogram",
         "gen_ai.client.token.usage",
@@ -547,16 +593,35 @@ def trace_tool_call(
         error_type = type(exc).__name__
         raise
     finally:
+        tool_duration = time.perf_counter() - started
         status = "ok" if outcome["ok"] and not error_type else "error"
         if span is not None and status == "error":
             span.set_attribute("error.type", error_type or "tool_error")
+        tool_calls_box = _TURN_TOOL_CALLS.get()
+        if tool_calls_box is not None:
+            with _usage_lock:
+                tool_calls_box[0] += 1
         try:
             from .analytics import metrics
 
             metrics.inc("tool_calls_total", labels={"tool": tool_name, "status": status})
             metrics.observe(
-                "tool_call_duration_seconds", time.perf_counter() - started, labels={"tool": tool_name}
+                "tool_call_duration_seconds", tool_duration, labels={"tool": tool_name}
             )
+            if _meter is not None:
+                tool_attrs = {
+                    "gen_ai.operation.name": "execute_tool",
+                    "gen_ai.tool.name": tool_name,
+                    "gen_ai.tool.type": tool_type,
+                }
+                if status == "error":
+                    tool_attrs["error.type"] = error_type or "tool_error"
+                _instrument(
+                    "histogram",
+                    "gen_ai.execute_tool.duration",
+                    "s",
+                    "Duration of a single tool execution",
+                ).record(tool_duration, tool_attrs)
         except Exception:
             logger.debug("Tool call metrics failed", exc_info=True)
         if span_cm is not None:
@@ -564,8 +629,20 @@ def trace_tool_call(
 
 
 def record_evaluation(name: str, score: float | None, label: str = "", explanation: str = "") -> None:
-    """Attach a ``gen_ai.evaluation.result`` event to the current span."""
-    if _tracer is None or score is None:
+    """Attach a ``gen_ai.evaluation.result`` event to the current span and record Prometheus histogram."""
+    if score is None:
+        return
+    try:
+        from .analytics import metrics
+
+        metrics.observe(
+            "genai_evaluation_score",
+            float(score),
+            labels={"name": str(name or "unknown"), "label": str(label or "unlabelled")},
+        )
+    except Exception:
+        logger.debug("Prometheus evaluation metric recording failed", exc_info=True)
+    if _tracer is None:
         return
     try:
         from opentelemetry import trace

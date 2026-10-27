@@ -26,7 +26,8 @@ import secrets
 import time
 from typing import Any
 
-_SECRET_ENV = "WS_CONFIRM_HMAC_SECRET"
+_SECRET_ENV = "WS_CONFIRM_HMAC_SECRET"  # pragma: allowlist secret
+MIN_SECRET_CHARS = 32
 # In production this MUST come from the environment.  Development falls
 # back to a per-process random secret so tests are reproducible within a
 # run but tokens never leak across deployments.
@@ -37,10 +38,35 @@ _DEV_FALLBACK = secrets.token_bytes(32)
 _DEFAULT_TTL_SECONDS = 300
 
 
+def _is_production() -> bool:
+    return os.getenv("APP_ENV", "development").strip().lower() == "production"
+
+
+def effective_secret_str() -> str:
+    """Return the first configured confirmation secret with at least 32 chars.
+
+    Checks ``WS_CONFIRM_HMAC_SECRET`` first, falling back to
+    ``MCP_REQUEST_STATE_SECRET`` when the primary is unset or shorter than 32
+    characters.
+    """
+    for env_name in (_SECRET_ENV, "MCP_REQUEST_STATE_SECRET"):
+        candidate = (os.getenv(env_name) or "").strip()
+        if len(candidate) >= MIN_SECRET_CHARS:
+            return candidate
+    if not _is_production():
+        for env_name in (_SECRET_ENV, "MCP_REQUEST_STATE_SECRET"):
+            candidate = (os.getenv(env_name) or "").strip()
+            if candidate:
+                return candidate
+    return ""
+
+
 def _secret() -> bytes:
-    raw = os.getenv(_SECRET_ENV, "")
-    if raw:
-        return raw.encode("utf-8")
+    selected = effective_secret_str()
+    if _is_production():
+        return selected.encode("utf-8") if len(selected) >= MIN_SECRET_CHARS else b""
+    if selected:
+        return selected.encode("utf-8")
     return _DEV_FALLBACK
 
 
@@ -73,8 +99,13 @@ def sign(
         "session_id": session_id,
         "exp": int(time.time()) + max(60, ttl_seconds),
     }
+    secret = _secret()
+    if not secret:
+        raise RuntimeError(
+            "WS_CONFIRM_HMAC_SECRET or MCP_REQUEST_STATE_SECRET (>=32 chars) is required in production"
+        )
     payload_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
-    tag = hmac.new(_secret(), payload_bytes, hashlib.sha256).digest()
+    tag = hmac.new(secret, payload_bytes, hashlib.sha256).digest()
     return f"{_b64(payload_bytes)}.{_b64(tag)}"
 
 
@@ -99,7 +130,10 @@ def verify(
     except (ValueError, base64.binascii.Error):
         return None
 
-    actual_tag = hmac.new(_secret(), payload_bytes, hashlib.sha256).digest()
+    secret = _secret()
+    if not secret:
+        return None
+    actual_tag = hmac.new(secret, payload_bytes, hashlib.sha256).digest()
     if not hmac.compare_digest(actual_tag, expected_tag):
         return None
 

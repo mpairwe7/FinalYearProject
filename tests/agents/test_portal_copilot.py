@@ -540,3 +540,273 @@ def test_9_qa_hardening_temporal_ttl_intent_capsule_validators_and_multiturn_mem
     # Verify no emojis in deterministic reply
     for emoji_char in ("⚠️", "🔒", "⛔", "📝", "✅", "🛡️", "🧭"):
         assert emoji_char not in outcome.deterministic_reply
+
+
+def test_10_wysiwys_digest_inline_prepare_high_value_friction_auditor_rbac_and_confirm_tokens(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify October 2026 QA/Auditor hardening: WYSIWYS ASI09 digest, zero-LLM `prepare`, high-value friction, auditor RBAC, and confirm_tokens fail-closed."""
+    from app import confirm_tokens
+
+    headers = {"X-Session-ID": "sess-qa-10"}
+
+    # 1. High-value PRN (>= UGX 50,000,000) sets `high_value_requires_ack=True` and emits `displayed_fields_sha256`
+    r_high = client.post(
+        "/v1/chat",
+        json={
+            "message": "Generate a VAT PRN for UGX 65,000,000 for TIN 1000023456 via Stanbic Bank",
+            "conversation_id": "conv-qa-10",
+        },
+        headers=headers,
+    )
+    assert r_high.status_code == 200
+    copilot_high = r_high.json()["portal_copilot"]
+    assert copilot_high["card_type"] == "confirmation_required"
+    assert copilot_high["high_value_requires_ack"] is True
+    assert len(copilot_high["displayed_fields_sha256"]) == 64
+
+    # 2. Server-enforced high-value cognitive friction gate rejects allow when `high_value_acknowledged` is omitted/False (QA-07)
+    r_hv_missing_ack = client.post(
+        "/v1/portal/tasks/execute",
+        json={
+            "decision": "allow",
+            "request_state": copilot_high["request_state"],
+            "idempotency_key": copilot_high["idempotency_key"],
+            "conversation_id": "conv-qa-10",
+            "displayed_fields_sha256": copilot_high["displayed_fields_sha256"],
+        },
+        headers=headers,
+    )
+    assert r_hv_missing_ack.status_code == 400
+    assert "high_value_acknowledged=True" in r_hv_missing_ack.json()["detail"]
+
+    # 3. Tampered `displayed_fields_sha256` (OWASP ASI09 UI-payload mismatch) is rejected with 400 (QA-01 / QA-06)
+    r_wysiwys_fail = client.post(
+        "/v1/portal/tasks/execute",
+        json={
+            "decision": "allow",
+            "request_state": copilot_high["request_state"],
+            "idempotency_key": copilot_high["idempotency_key"],
+            "conversation_id": "conv-qa-10",
+            "displayed_fields_sha256": "0" * 64,
+            "high_value_acknowledged": True,
+        },
+        headers=headers,
+    )
+    assert r_wysiwys_fail.status_code == 400
+    assert "WYSIWYS" in r_wysiwys_fail.json()["detail"]
+
+    # 4. Unknown field injection in `edited_fields` is rejected with 400 (QA-08)
+    r_unknown_field = client.post(
+        "/v1/portal/tasks/execute",
+        json={
+            "decision": "prepare",
+            "request_state": copilot_high["request_state"],
+            "idempotency_key": copilot_high["idempotency_key"],
+            "conversation_id": "conv-qa-10",
+            "edited_fields": {"__proto_injected__": "malicious"},
+        },
+        headers=headers,
+    )
+    assert r_unknown_field.status_code == 400
+    assert "Unknown field" in r_unknown_field.json()["detail"]
+
+    # 5. Zero-LLM inline payload editing (`decision="prepare"`) validates & re-signs in-place
+    r_prep_err = client.post(
+        "/v1/portal/tasks/execute",
+        json={
+            "decision": "prepare",
+            "request_state": copilot_high["request_state"],
+            "idempotency_key": copilot_high["idempotency_key"],
+            "conversation_id": "conv-qa-10",
+            "edited_fields": {"tin": "123", "amount_ugx": "4500000"},
+        },
+        headers=headers,
+    )
+    assert r_prep_err.status_code == 200
+    prep_err_body = r_prep_err.json()
+    assert prep_err_body["status"] == "validation_error"
+    assert "tin" in prep_err_body["result"]["field_errors"]
+
+    r_prep_ok = client.post(
+        "/v1/portal/tasks/execute",
+        json={
+            "decision": "prepare",
+            "request_state": copilot_high["request_state"],
+            "idempotency_key": copilot_high["idempotency_key"],
+            "conversation_id": "conv-qa-10",
+            "edited_fields": {"tin": "1000023456", "amount_ugx": "4500000"},
+        },
+        headers=headers,
+    )
+    assert r_prep_ok.status_code == 200
+    prep_ok_body = r_prep_ok.json()
+    assert prep_ok_body["status"] == "prepared"
+    updated_card = prep_ok_body["updated_card"]
+    assert updated_card["card_type"] == "confirmation_required"
+    assert updated_card["high_value_requires_ack"] is False
+    assert updated_card["idempotency_key"] != copilot_high["idempotency_key"]
+
+    # 6. Both `ura_auditor` and `ura_admin` are refused with 403 Forbidden on `/v1/portal/tasks/execute` (QA-04 / QA-09)
+    for blocked_role in ("ura_auditor", "ura_admin"):
+        role_token = make_dev_token(
+            user_id=f"{blocked_role}-1",
+            role=blocked_role,
+            tenant_id="default",
+        )
+        r_blocked = client.post(
+            "/v1/portal/tasks/execute",
+            json={
+                "decision": "allow",
+                "request_state": updated_card["request_state"],
+                "idempotency_key": updated_card["idempotency_key"],
+                "conversation_id": "conv-qa-10",
+            },
+            headers={"Authorization": f"Bearer {role_token}", "X-Session-ID": "sess-qa-10"},
+        )
+        assert r_blocked.status_code == 403
+        assert "read-only" in r_blocked.json()["detail"].lower()
+
+    # 7. Execute the re-signed card with matching `displayed_fields_sha256` and verify deterministic `decision_receipt` (QA-10)
+    r_exec_ok = client.post(
+        "/v1/portal/tasks/execute",
+        json={
+            "decision": "allow",
+            "request_state": updated_card["request_state"],
+            "idempotency_key": updated_card["idempotency_key"],
+            "conversation_id": "conv-qa-10",
+            "displayed_fields_sha256": updated_card["displayed_fields_sha256"],
+        },
+        headers=headers,
+    )
+    assert r_exec_ok.status_code == 200
+    exec_body = r_exec_ok.json()
+    assert exec_body["status"] == "executed"
+    receipt = exec_body["decision_receipt"]
+    assert receipt is not None
+    assert receipt["receipt_id"].startswith("rcpt_")
+    assert receipt["displayed_fields_sha256"] == updated_card["displayed_fields_sha256"]
+
+    # 8. Attempting `decision="prepare"` on an already-executed proposal is refused with 400 (QA-08)
+    r_prep_locked = client.post(
+        "/v1/portal/tasks/execute",
+        json={
+            "decision": "prepare",
+            "request_state": updated_card["request_state"],
+            "idempotency_key": updated_card["idempotency_key"],
+            "conversation_id": "conv-qa-10",
+            "edited_fields": {"amount_ugx": "1000000"},
+        },
+        headers=headers,
+    )
+    assert r_prep_locked.status_code == 400
+    assert "already been executed or declined" in r_prep_locked.json()["detail"]
+
+    # 9. Multi-task liability calculation & strict select option validation (QA-07 + CodeRabbit)
+    from app.portal_copilot import (
+        classify_portal_task,
+        compute_estimated_liability_ugx,
+        validate_task_fields,
+    )
+
+    stock_spec = classify_portal_task("efris_stock_management")
+    assert stock_spec is not None
+    assert (
+        compute_estimated_liability_ugx(stock_spec, {"quantity": "50000", "unit_cost": "1500"})
+        == 75_000_000.0
+    )
+    dts_spec = classify_portal_task("dts_order_stamps")
+    assert dts_spec is not None
+    _, _, dts_errs = validate_task_fields(
+        dts_spec,
+        {"tin": "1000023456", "product_category": "INVALID_COMMODITY", "quantity": "1000"},
+    )
+    assert "product_category" in dts_errs
+    assert (
+        compute_estimated_liability_ugx(
+            dts_spec, {"product_category": "INVALID_COMMODITY", "quantity": "1000"}
+        )
+        == 0.0
+    )
+
+    # 10. Evals & Observability: segment metrics, GenAI evaluation histogram, and PII scrubbing in preference export
+    from app import tracing
+    from app.analytics import metrics
+    from app.evaluation import EvalMetric, EvalReport, record_eval_report
+    from evals.export_preferences import build_bilevel_preference_bundle
+
+    tracing.record_evaluation("faithfulness", 0.92, label="high")
+    sample_report = EvalReport(
+        sample_size=6,
+        started_at=1700000000.0,
+        duration_ms=42.5,
+        metrics=[EvalMetric(name="faithfulness", value=0.88, threshold=0.7, passed=True)],
+        regressions=[],
+        backend="heuristic",
+        by_segment={
+            "locale": {
+                "lg": [EvalMetric(name="faithfulness", value=0.85, threshold=0.7, passed=True)]
+            }
+        },
+    )
+    record_eval_report(sample_report)
+    prom_text = sample_report.to_prometheus()
+    assert 'ura_eval_segment_metric{name="faithfulness",segment_dim="locale",segment="lg",backend="heuristic"}' in prom_text
+    snap = metrics.snapshot()
+    assert any("portal_copilot_decisions_total" in k for k in snap["counters"])
+    assert any("eval_segment_metric" in k for k in snap["gauges"])
+
+    # Verify stale segments are removed when omitted from a subsequent report
+    empty_seg_report = EvalReport(
+        sample_size=4,
+        started_at=1700000060.0,
+        duration_ms=20.0,
+        metrics=[EvalMetric(name="faithfulness", value=0.90, threshold=0.7, passed=True)],
+        regressions=[],
+        backend="ragas",
+        by_segment={},
+    )
+    record_eval_report(empty_seg_report)
+    snap_after = metrics.snapshot()
+    assert not any('segment="lg"' in k for k in snap_after["gauges"])
+
+    bundle = build_bilevel_preference_bundle(
+        [
+            {
+                "prompt": "My NIN is CM92018100123A, phone +256772123456, email jane@example.ug. How do I waive penalties under Section 66(1a)?",
+                "chosen": "Submit Form DT-10307 under Section 66(1a) of Cap. 343 to waive 100% penalty for jane@example.ug.",
+                "rejected": "Contact +256772123456 with NIN CM92018100123A.",
+                "source": "officer_reply",
+            }
+        ]
+    )
+    serialized_bundle = str(bundle)
+    assert "CM92018100123A" not in serialized_bundle
+    assert "+256772123456" not in serialized_bundle
+    assert "jane@example.ug" not in serialized_bundle
+    assert "[REDACTED_NIN]" in serialized_bundle
+    assert "Form DT-10307" in serialized_bundle
+
+    # 11. `confirm_tokens` falls back when primary is <32 chars and fails closed in production when both are short/missing
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("WS_CONFIRM_HMAC_SECRET", "too-short")
+    monkeypatch.setenv("MCP_REQUEST_STATE_SECRET", "fallback-secret-at-least-32-chars-long-2026")
+    tok = confirm_tokens.sign(
+        call_id="c1",
+        tool_name="t1",
+        idempotency_key="idem1",
+        session_id="s1",
+    )
+    assert confirm_tokens.verify(tok, expected_call_id="c1", expected_session_id="s1") is not None
+
+    monkeypatch.delenv("WS_CONFIRM_HMAC_SECRET", raising=False)
+    monkeypatch.delenv("MCP_REQUEST_STATE_SECRET", raising=False)
+    with pytest.raises(RuntimeError, match="required in production"):
+        confirm_tokens.sign(
+            call_id="c1",
+            tool_name="t1",
+            idempotency_key="idem1",
+            session_id="s1",
+        )
+    assert confirm_tokens.verify("invalid.token") is None

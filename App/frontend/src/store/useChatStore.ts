@@ -216,6 +216,8 @@ export interface PortalCopilotPayload {
   verification_warning?: string;
   reversibility_notice?: string;
   display_fields?: PortalDisplayField[];
+  displayed_fields_sha256?: string;
+  high_value_requires_ack?: boolean;
   allow_label?: string;
   disallow_label?: string;
   edit_label?: string;

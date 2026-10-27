@@ -35,6 +35,30 @@ export interface PortalCopilotCardProps {
 }
 
 /**
+ * Compute canonical WYSIWYS SHA-256 digest over rendered `display_fields` (`[{name, value}]`)
+ * matching `portal_copilot.compute_displayed_fields_sha256` on the backend (OWASP ASI09).
+ */
+export async function computeDisplayedFieldsSha256(
+  displayFields: ReadonlyArray<{ name: string; value: string; raw_value?: string }> | undefined,
+): Promise<string | undefined> {
+  if (!displayFields || displayFields.length === 0) return undefined;
+  try {
+    if (typeof crypto === "undefined" || !crypto.subtle) return undefined;
+    const canonical = displayFields.map((item) => ({
+      name: String(item.name ?? ""),
+      value: String(item.raw_value !== undefined ? item.raw_value : (item.value ?? "")),
+    }));
+    const bytes = new TextEncoder().encode(JSON.stringify(canonical));
+    const digestBuf = await crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digestBuf))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Declarative A2UI card surface for URA Portal Task Execution, Inline Form Elicitation,
  * Claude-Style Allow/Disallow Confirmation, Step-Up Login, and Stuck-User DOM Co-Pilot handoffs.
  */
@@ -45,7 +69,9 @@ export default function PortalCopilotCard({
   onActionClick,
 }: PortalCopilotCardProps) {
   const t = useTranslation();
+  const [activeCopilot, setActiveCopilot] = useState<PortalCopilotPayload>(copilot);
   const [editing, setEditing] = useState(false);
+  const [highValueAck, setHighValueAck] = useState(false);
   const [copiedRef, setCopiedRef] = useState(false);
   const [revealedFields, setRevealedFields] = useState<Record<string, boolean>>({});
   const [formValues, setFormValues] = useState<Record<string, string>>(() => {
@@ -59,10 +85,18 @@ export default function PortalCopilotCard({
     status: "idle" | "busy" | "executed" | "declined" | "error";
     summary?: string;
     result?: Record<string, unknown>;
+    decisionReceipt?: {
+      receipt_id?: string;
+      params_sha256?: string;
+      displayed_fields_sha256?: string;
+      statutory_citation?: string;
+    };
   }>({ status: "idle" });
 
-  // Keep formValues synchronized when a new task_id or updated field defaults arrive
+  // Keep activeCopilot and formValues synchronized when a new prop arrives
   useEffect(() => {
+    setActiveCopilot(copilot);
+    setHighValueAck(false);
     setFormValues((prev) => {
       const next: Record<string, string> = {};
       for (const f of copilot.fields ?? []) {
@@ -70,11 +104,11 @@ export default function PortalCopilotCard({
       }
       return next;
     });
-  }, [copilot.fields, copilot.task_id]);
+  }, [copilot]);
 
   const authToken = useSyncExternalStore(subscribeAuthToken, getAuthToken, getServerAuthToken);
   const isSignedIn = Boolean(authToken);
-  const effectiveCardType = editing ? "inline_form" : copilot.card_type;
+  const effectiveCardType = editing ? "inline_form" : activeCopilot.card_type;
 
   const toggleReveal = useCallback((fieldName: string) => {
     setRevealedFields((prev) => ({ ...prev, [fieldName]: !prev[fieldName] }));
@@ -95,35 +129,95 @@ export default function PortalCopilotCard({
   }, []);
 
   const handleFormSubmit = useCallback(
-    (e: React.FormEvent) => {
+    async (e: React.FormEvent) => {
       e.preventDefault();
-      const taskId = copilot.task_id || "";
+      const taskId = activeCopilot.task_id || "";
       if (!taskId) return;
+
+      // Zero-LLM inline payload re-validation & HMAC re-signing when editing an existing confirmation card
+      if (editing && activeCopilot.request_state && activeCopilot.idempotency_key) {
+        setExecState({ status: "busy" });
+        try {
+          const res = await fetch("/api/v1/portal/tasks/execute", {
+            method: "POST",
+            headers: authHeaders({
+              "Content-Type": "application/json",
+              "X-Session-ID": getChatSessionId(),
+            }),
+            body: JSON.stringify({
+              decision: "prepare",
+              request_state: activeCopilot.request_state,
+              idempotency_key: activeCopilot.idempotency_key,
+              conversation_id: conversationId || "default",
+              edited_fields: formValues,
+            }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (body.status === "validation_error" && body.updated_card) {
+            setActiveCopilot((prev) => ({
+              ...prev,
+              fields: body.updated_card.fields ?? prev.fields,
+              field_errors: body.updated_card.field_errors ?? prev.field_errors,
+            }));
+            setExecState({ status: "idle" });
+            return;
+          }
+          if (res.ok && body.status === "prepared" && body.updated_card) {
+            setActiveCopilot(body.updated_card as PortalCopilotPayload);
+            setHighValueAck(false);
+            setEditing(false);
+            setExecState({ status: "idle" });
+            return;
+          }
+        } catch {
+          // Fall through to callback if network prepare fails
+        }
+        setExecState({ status: "idle" });
+      }
+
       setEditing(false);
       if (onSubmitInlineForm) {
         onSubmitInlineForm(taskId, formValues);
       }
     },
-    [copilot.task_id, formValues, onSubmitInlineForm],
+    [
+      activeCopilot.idempotency_key,
+      activeCopilot.request_state,
+      activeCopilot.task_id,
+      conversationId,
+      editing,
+      formValues,
+      onSubmitInlineForm,
+    ],
   );
 
   const handleDecision = useCallback(
     async (decision: "allow" | "disallow") => {
-      if (!copilot.request_state || !copilot.idempotency_key) return;
+      if (!activeCopilot.request_state || !activeCopilot.idempotency_key) return;
       setExecState({ status: "busy" });
       try {
+        const payloadBody: Record<string, unknown> = {
+          decision,
+          request_state: activeCopilot.request_state,
+          idempotency_key: activeCopilot.idempotency_key,
+          conversation_id: conversationId || "default",
+        };
+        const computedDigest =
+          (await computeDisplayedFieldsSha256(activeCopilot.display_fields)) ||
+          activeCopilot.displayed_fields_sha256;
+        if (computedDigest) {
+          payloadBody.displayed_fields_sha256 = computedDigest;
+        }
+        if (activeCopilot.high_value_requires_ack) {
+          payloadBody.high_value_acknowledged = highValueAck;
+        }
         const res = await fetch("/api/v1/portal/tasks/execute", {
           method: "POST",
           headers: authHeaders({
             "Content-Type": "application/json",
             "X-Session-ID": getChatSessionId(),
           }),
-          body: JSON.stringify({
-            decision,
-            request_state: copilot.request_state,
-            idempotency_key: copilot.idempotency_key,
-            conversation_id: conversationId || "default",
-          }),
+          body: JSON.stringify(payloadBody),
         });
         const body = await res.json().catch(() => ({}));
         if (!res.ok || body.ok === false || body.status === "error") {
@@ -138,6 +232,7 @@ export default function PortalCopilotCard({
           summary:
             body.summary || (decision === "disallow" ? "Action cancelled." : "Task executed."),
           result: body.result || {},
+          decisionReceipt: body.decision_receipt || undefined,
         });
       } catch (err) {
         setExecState({
@@ -146,7 +241,15 @@ export default function PortalCopilotCard({
         });
       }
     },
-    [conversationId, copilot.idempotency_key, copilot.request_state],
+    [
+      activeCopilot.display_fields,
+      activeCopilot.displayed_fields_sha256,
+      activeCopilot.high_value_requires_ack,
+      activeCopilot.idempotency_key,
+      activeCopilot.request_state,
+      conversationId,
+      highValueAck,
+    ],
   );
 
   const handleStepUpLogin = useCallback(
@@ -196,8 +299,8 @@ export default function PortalCopilotCard({
         </p>
 
         <form className="portal-inline-form" onSubmit={handleFormSubmit}>
-          {(copilot.fields ?? []).map((f) => {
-            const inputId = `portal-field-${copilot.task_id || "task"}-${f.name}`;
+          {(activeCopilot.fields ?? []).map((f) => {
+            const inputId = `portal-field-${activeCopilot.task_id || "task"}-${f.name}`;
             const descId = `${inputId}-desc`;
             const currentVal = formValues[f.name] ?? "";
             const hasErr = Boolean(f.validation_error);
@@ -333,6 +436,12 @@ export default function PortalCopilotCard({
               <strong>{t("portalCopilot.tinReferenceLabel")}</strong> <code>{tinVal}</code>
             </div>
           )}
+          {execState.decisionReceipt?.receipt_id && (
+            <div className="portal-receipt-kv" data-testid="portal-decision-receipt-id">
+              <strong>{t("portalCopilot.decisionReceiptLabel")}</strong>{" "}
+              <code>{execState.decisionReceipt.receipt_id}</code>
+            </div>
+          )}
           <div className="portal-copilot-actions">
             {refToCopy && (
               <button
@@ -388,7 +497,7 @@ export default function PortalCopilotCard({
         </p>
 
         <dl className="portal-verification-table">
-          {(copilot.display_fields ?? []).map((df) => {
+          {(activeCopilot.display_fields ?? []).map((df) => {
             const isRevealed = Boolean(revealedFields[df.name]);
             const shownValue = isRevealed && df.raw_value ? df.raw_value : df.value;
             return (
@@ -420,6 +529,21 @@ export default function PortalCopilotCard({
           })}
         </dl>
 
+        {activeCopilot.high_value_requires_ack && (
+          <label
+            className="portal-high-value-ack"
+            data-testid="portal-high-value-ack-label"
+          >
+            <input
+              type="checkbox"
+              data-testid="portal-high-value-ack-checkbox"
+              checked={highValueAck}
+              onChange={(e) => setHighValueAck(e.target.checked)}
+            />{" "}
+            <span>{t("portalCopilot.highValueAckLabel")}</span>
+          </label>
+        )}
+
         <p className="portal-field-helper" data-testid="portal-reversibility-notice">
           {t("portalCopilot.reversibilityNotice")}
         </p>
@@ -435,13 +559,16 @@ export default function PortalCopilotCard({
             type="button"
             className="portal-action-btn is-primary"
             data-testid="portal-task-allow-btn"
-            disabled={execState.status === "busy"}
+            disabled={
+              execState.status === "busy" ||
+              (Boolean(activeCopilot.high_value_requires_ack) && !highValueAck)
+            }
             onClick={() => void handleDecision("allow")}
           >
             <CheckCircleIcon />{" "}
             {execState.status === "busy"
               ? t("portalCopilot.executing")
-              : copilot.allow_label || t("portalCopilot.allowBtn")}
+              : activeCopilot.allow_label || t("portalCopilot.allowBtn")}
           </button>
           <button
             type="button"

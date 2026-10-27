@@ -54,7 +54,7 @@ Taxpayers using URA portals (`portal.ura.go.ug`, `efris.ura.go.ug`, `ura.go.ug`)
 ## Confirmation
 
 Validated by:
-- `tests/agents/test_portal_copilot.py` (8 end-to-end backend + security + privacy regression tests)
+- `tests/agents/test_portal_copilot.py` (10 end-to-end backend + security + privacy + WYSIWYS + auditor RBAC regression tests)
 - `tests/agents/test_portal_copilot_phase_a.py` (17 unit tests covering flag registration, 9 portal DOM recipes, 4-tier catalog, and secret scrubbing)
 - `tests/test_all_endpoints_e2e.py` (`POST /v1/portal/tasks/execute` registered and verified)
 - `App/frontend/src/__tests__/components/PortalCopilotCard.test.tsx` & `App/frontend/src/__tests__/lib/i18n.test.ts` (5-locale dictionary parity + component interaction tests)
@@ -70,7 +70,23 @@ Validated by:
    - Expanded `DocumentType.PORTAL_SCREENSHOT` in `vision/document_classifier.py` and `diagnose_portal_screenshot` in `documents.py` with dedicated recognition, checklists, and step-by-step completion instructions for URA's **Apply To Tax Payment In Installment** wizard (Sections B–F: `Basis Of Installment`, `Liability Breakdown`, `Outstanding Liability Wise Breakdown`, `Installment Details`, and `Upload Documents and Submit application` with numeric-boundary `has_zero_downpayment` check) and **EFRIS Web Portal** (`First-time Registration` Sections A–C, `Fiscal Document Validation`, `Validation History`, and `Detailed VAT Sales/Purchase Report`).
    - Integrated `diagnose_ura_error` and `extract_task_entities` into `diagnose_portal_screenshot` (`documents.py`), routing `inbuilt_portal_url` directly to `&intent={remediation_task_id}`, computing `what_needs_to_be_done`, `checklist` (`detected` vs `action_needed` items), and `recommended_prompts`, carrying `prefill_state` into `evaluate_turn` (`service.py`), and validating `<select>` option membership on continuation restore in `portal/[portalKey]/page.tsx`.
 
-## Amendment 2 (2026-10-27 — Gap G266): the workspace wears ura.go.ug's frame
+## Amendment 2 (2026-10-27 — QA, Auditor & OWASP Agentic ASI09 WYSIWYS Hardening)
+
+1. **What-You-See-Is-What-You-Sign (`WYSIWYS`) Digest Verification (`portal_copilot.py`, `models.py`, `PortalCopilotCard.tsx`, `QA-01`/`QA-06`)**:
+   - `build_portal_task_card` computes `displayed_fields_sha256` (`compute_displayed_fields_sha256`) over canonical `(name, raw_value)` display tuples and signs it inside `request_state`.
+   - `PortalCopilotCard.tsx` computes `computeDisplayedFieldsSha256(activeCopilot.display_fields)` directly from the rendered DOM display fields via Web Crypto (`crypto.subtle.digest("SHA-256", ...)`), and `handle_portal_task_decision` verifies both the internal `request_state` display digest and the client-supplied digest in constant time (`hmac_compare`) on `allow`/`accept` (`OWASP Agentic Top 10 ASI09` defense against UI-payload spoofing).
+2. **Zero-LLM Inline Payload Re-Signing, Lock Enforcement & Memory Sync (`decision="prepare"` + `edited_fields`, `QA-02`/`QA-08`/`QA-10`)**:
+   - When a taxpayer clicks **Edit Details** on a `confirmation_required` card and modifies fields inline, `PortalCopilotCard.tsx` calls `POST /v1/portal/tasks/execute` with `decision="prepare"` and `edited_fields`, deterministically validating and minting a fresh HMAC-signed `request_state` and `idempotency_key` in `<10ms` without invoking the LLM, while synchronizing `_CONVERSATION_ENTITY_MEMORY` for subsequent turns.
+   - `decision="prepare"` enforces an allowlist of `spec.fields` names (`<=512` chars) and refuses to modify proposals that have already been executed or declined.
+3. **Server-Enforced High-Value Liability Cognitive Friction Guard (`high_value_requires_ack` / `high_value_acknowledged`) & Deterministic Decision Receipt (`QA-03`/`QA-07`/`QA-10`)**:
+   - `compute_estimated_liability_ugx` evaluates UGX exposure across `amount_ugx`, `efris_stock_management` (`quantity * unit_cost`), and `dts_order_stamps` (`quantity * stamp_rate`). Exposures `>= UGX 50,000,000` (`HIGH_VALUE_LIABILITY_THRESHOLD_UGX`) bind `high_value_requires_ack=True` inside `request_state` and require both the frontend checkbox (`PortalCopilotCard.tsx`) and server-verified `high_value_acknowledged=True` on `POST /v1/portal/tasks/execute`.
+   - Confirmed executions return a deterministic `decision_receipt` (`receipt_id`, `params_sha256`, `displayed_fields_sha256`, `statutory_citation`, `executed_at`) and log only SHA-256 digests to the audit ledger.
+4. **Administrator & Auditor Read-Only RBAC Gate (`ura_admin`, `ura_auditor`) & Production Fail-Closed `confirm_tokens.py` (`QA-04`/`QA-05`/`QA-09`)**:
+   - `POST /v1/portal/tasks/execute` refuses both `ura_auditor` and `ura_admin` (`403 Forbidden`, `AGENTS.md` Invariant 2), and `confirm_tokens.py` (`effective_secret_str`) + `main.py` enforce `>=32`-character secret precedence (`WS_CONFIRM_HMAC_SECRET`, then `MCP_REQUEST_STATE_SECRET`) and fail closed in `APP_ENV=production`.
+5. **Evals & Observability Completeness (`evaluation.py`, `tracing.py`, `portal_copilot.py`, `evals/export_preferences.py`, `EO-01`–`EO-04`)**:
+   - `record_eval_report` exports per-segment (`topic`, `locale`, `taxpayer_type`, `variant`) metrics to dedicated `ura_eval_segment_metric` / `ura_eval_segment_metric_passed` gauges; `tracing.py` records OpenTelemetry GenAI (`v1.42+`, July–Oct 2026) histograms `gen_ai.client.operation.time_to_first_chunk`, `gen_ai.execute_tool.duration`, `gen_ai.invoke_agent.duration`, `gen_ai.invoke_agent.tool_calls`, and Prometheus `ura_genai_evaluation_score`; `portal_copilot.py` emits `ura_portal_copilot_cards_total`, `ura_portal_copilot_decisions_total`, and `ura_portal_copilot_decision_duration_ms`; and `evals/export_preferences.py` scrubs NIRA NINs, phone numbers, and email addresses via `_scrub_preference_text`.
+
+## Amendment 3 (2026-10-27 — Gap G267): the workspace wears ura.go.ug's frame
 
 The owner asked that the inbuilt portal look like the official one, so that a
 taxpayer moving between this workspace and ura.go.ug is never unsure which part
