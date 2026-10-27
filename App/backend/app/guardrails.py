@@ -13,6 +13,7 @@ Reference: https://owasp.org/www-project-top-10-for-large-language-model-applica
 
 from __future__ import annotations
 
+import html
 import logging
 import os
 import re
@@ -36,10 +37,39 @@ ESCALATION_THRESHOLD = float(os.getenv("ESCALATION_THRESHOLD", "0.25"))
 # ---------------------------------------------------------------------------
 # Unicode canonicalization (CVE-mitigation: homoglyph & zero-width evasion)
 # ---------------------------------------------------------------------------
-# Zero-width characters used in prompt-injection obfuscation
+# Zero-width, soft-hyphen, Bidi-override, and BMP variation-selector characters used in prompt-injection obfuscation
 _ZERO_WIDTH_CHARS = re.compile(
-    "[\u200b\u200c\u200d\u200e\u200f\u2060\u2061\u2062\u2063\u2064\ufeff]"
+    "[\u00ad\u061c\u200b\u200c\u200d\u200e\u200f\u202a-\u202e\u2060-\u2069\ufeff\ufe00-\ufe0f]"
 )
+
+
+def _strip_invisible_chars(text: str) -> str:
+    """Strip BMP zero-width/Bidi/variation characters and Plane-14 Tag/Variation-Selector codepoints."""
+    cleaned = _ZERO_WIDTH_CHARS.sub("", text) if _ZERO_WIDTH_CHARS.search(text) else text
+    if any(0xE0000 <= ord(ch) <= 0xE01EF for ch in cleaned):
+        cleaned = "".join(ch for ch in cleaned if not (0xE0000 <= ord(ch) <= 0xE01EF))
+    return cleaned
+
+
+def _decode_unicode_tags(text: str) -> str:
+    """Decode Unicode Plane-14 Tag characters (U+E0020..U+E007E) into visible ASCII.
+
+    Adversaries smuggle invisible instructions using Unicode Tag mirrors of
+    ASCII characters (MITRE ATLAS AML.T0051 / OWASP LLM01). Decoding them
+    before canonicalization exposes the hidden payload to regex inspection.
+    """
+    if not any(0xE0000 <= ord(ch) <= 0xE007F for ch in text):
+        return text
+    out: list[str] = []
+    for ch in text:
+        code = ord(ch)
+        if 0xE0020 <= code <= 0xE007E:
+            out.append(chr(code - 0xE0000))
+        elif 0xE0000 <= code <= 0xE007F:
+            continue
+        else:
+            out.append(ch)
+    return "".join(out)
 
 # Cyrillic / Greek / mathematical lookalikes → Latin equivalents.
 # Only the characters most commonly abused in injection obfuscation.
@@ -58,13 +88,30 @@ _CONFUSABLE_MAP = str.maketrans({
 })
 
 
+_BIDI_RLO_SEGMENT_RE = re.compile("\u202e([^\u202c\n\r]*)[\u202c]?")
+
+
+def _unwrap_bidi_overrides(text: str) -> str:
+    """Reverse segments governed by Right-to-Left Override (U+202E) before stripping Bidi marks.
+
+    Adversaries wrap reversed injection strings in U+202E..U+202C (e.g.
+    ``\\u202esnoitcurtsni suoiverp lla erongi\\u202c``) so Bidi-aware parsers
+    read the forward instruction while naive regexes see reversed text
+    (arXiv:2504.11168 / OWASP Prompt Injection Prevention Cheat Sheet).
+    """
+    if "\u202e" not in text:
+        return text
+    unwrapped = _BIDI_RLO_SEGMENT_RE.sub(lambda m: m.group(1)[::-1], text)
+    return f"{text} {unwrapped}"
+
+
 def _canonicalize_text(text: str) -> str:
-    """Normalize unicode to defeat homoglyph and zero-width evasion.
+    """Normalize unicode to defeat homoglyph, Bidi-override, and zero-width evasion.
 
     NFKD decomposition converts visually similar characters (fullwidth
     Ａ → A) to their ASCII-compatible base forms.  Zero-width joiners,
-    non-joiners, and BOM markers are stripped so that injected invisible
-    characters cannot break regex token boundaries.
+    non-joiners, Bidi overrides, Unicode tags, and BOM markers are decoded/stripped
+    so that injected invisible characters cannot break regex token boundaries.
 
     A confusable-character table maps the most common Cyrillic, Greek, and
     mathematical lookalikes to their Latin equivalents.  A final ASCII
@@ -73,7 +120,9 @@ def _canonicalize_text(text: str) -> str:
     lossy — the canonical form is only used for pattern matching, never
     displayed.
     """
-    text = _ZERO_WIDTH_CHARS.sub("", text)
+    text = _decode_unicode_tags(text)
+    text = _unwrap_bidi_overrides(text)
+    text = _strip_invisible_chars(text)
     text = unicodedata.normalize("NFKD", text)
     # Drop combining marks so accented variants collapse (é → e)
     text = "".join(c for c in text if not unicodedata.combining(c))
@@ -298,6 +347,16 @@ class GuardResult:
     flags: list[str] = field(default_factory=list)
 
 
+def _record_guardrail_security_event(event: str, *, reason: str = "") -> None:
+    """Record a bounded guardrail security event into `ura_security_events_total`."""
+    try:
+        from .security_events import record_security_event
+
+        record_security_event(event, reason=reason)
+    except Exception:
+        logger.debug("Guardrail security event recording skipped", exc_info=True)
+
+
 class InputGuard:
     """Validate and sanitise user inputs (OWASP LLM01 + input-side LLM02)."""
 
@@ -310,13 +369,15 @@ class InputGuard:
                 flags=["length_exceeded"],
             )
 
+        canonical = _canonicalize_text(text)
         for pattern in _INJECTION_PATTERNS:
-            if pattern.search(text) or pattern.search(_canonicalize_text(text)):
+            if pattern.search(text) or pattern.search(canonical):
                 logger.warning(
                     "Prompt injection blocked: pattern=%s input_length=%d",
                     pattern.pattern[:60],
                     len(text),
                 )
+                _record_guardrail_security_event("guardrail_prompt_injection", reason="direct_input")
                 return GuardResult(
                     allowed=False,
                     reason=(
@@ -328,12 +389,13 @@ class InputGuard:
                 )
 
         for pattern in _HARMFUL_INTENT_PATTERNS:
-            if pattern.search(text) or pattern.search(_canonicalize_text(text)):
+            if pattern.search(text) or pattern.search(canonical):
                 logger.warning(
                     "Harmful intent blocked: pattern=%s input_length=%d",
                     pattern.pattern[:60],
                     len(text),
                 )
+                _record_guardrail_security_event("guardrail_harmful_intent", reason="direct_input")
                 return GuardResult(
                     allowed=False,
                     reason=(
@@ -344,7 +406,8 @@ class InputGuard:
                     flags=["harmful_intent"],
                 )
 
-        return GuardResult(allowed=True, sanitized_text=text)
+        sanitized_input = _strip_invisible_chars(text)
+        return GuardResult(allowed=True, sanitized_text=sanitized_input)
 
 
 # ---------------------------------------------------------------------------
@@ -385,7 +448,19 @@ def scan_retrieved_text(text: str) -> tuple[str, bool]:
     """
     scrubbed, was_scrubbed = _neutralise_injection(text)
     if was_scrubbed:
+        if _injection_present(scrubbed):
+            # Obfuscated/tag-encoded injection survived surface regex replacement;
+            # strip invisible characters and re-apply redaction on the de-obfuscated text.
+            deobfuscated = _strip_invisible_chars(_decode_unicode_tags(scrubbed))
+            for pattern in _INJECTION_PATTERNS:
+                deobfuscated = pattern.sub("[REDACTED_INSTRUCTION]", deobfuscated)
+            scrubbed = (
+                "[REDACTED_INSTRUCTION]"
+                if _injection_present(deobfuscated)
+                else deobfuscated
+            )
         logger.warning("Indirect injection scrubbed in retrieved passage (%d chars)", len(text))
+        _record_guardrail_security_event("guardrail_indirect_injection", reason="retrieved_passage")
     return scrubbed, was_scrubbed
 
 
@@ -399,6 +474,7 @@ def scan_external_tool_text(text: str) -> tuple[str, bool]:
     scrubbed, found = _neutralise_injection(text)
     if not found:
         return text, False
+    _record_guardrail_security_event("guardrail_indirect_injection", reason="external_tool")
     if _injection_present(scrubbed):
         logger.warning("Instruction-like text in external tool output withheld (%d chars)", len(text))
         return "[External tool output withheld because it contained unsafe instructions.]", True
@@ -432,14 +508,10 @@ def scan_replayed_text(text: str) -> tuple[str, bool]:
 def is_official_ura_email(email: str) -> bool:
     """Return True if email is an official public contact address for URA or Uganda gov."""
     addr = email.strip().strip(".,;:\"'").lower()
-    return (
-        "ura.go.ug" in addr
-        or "go.ug" in addr
-        or addr.endswith("@ura.go.ug")
-        or addr.endswith(".ura.go.ug")
-        or addr.endswith("@go.ug")
-        or addr.endswith(".go.ug")
-    )
+    _, sep, domain = addr.rpartition("@")
+    if not sep or not domain:
+        return False
+    return domain in {"ura.go.ug", "go.ug"} or domain.endswith((".ura.go.ug", ".go.ug"))
 
 
 _CURRENCY_INDICATORS_BEFORE = re.compile(r"(?i)\b(?:ugx|ush|shs|usd|eur|gbp|\$|€|£)\s*$")
@@ -459,8 +531,16 @@ def _is_currency_boundary(match: re.Match[str], text: str) -> bool:
 
 _HIDDEN_PII_EVASION_RE = re.compile(
     r"[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f"
-    r"\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]"
+    r"\u00ad\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff\ufe00-\ufe0f]"
 )
+
+
+def _strip_hidden_pii_evasion(text: str) -> str:
+    """Remove control, zero-width, Bidi, and supplementary-plane Tag/Variation characters before PII scanning."""
+    cleaned = _HIDDEN_PII_EVASION_RE.sub("", text) if _HIDDEN_PII_EVASION_RE.search(text) else text
+    if any(0xE0000 <= ord(ch) <= 0xE01EF for ch in cleaned):
+        cleaned = "".join(ch for ch in cleaned if not (0xE0000 <= ord(ch) <= 0xE01EF))
+    return cleaned
 _ENGLISH_STOP_TOKENS = frozenset(
     {
         "A", "AN", "AND", "ARE", "AS", "AT", "BE", "BY", "DO", "FOR", "FROM",
@@ -502,7 +582,7 @@ def redact_pii_text(text: str, allowed_values: Iterable[str] | None = None) -> s
     if not text:
         return text
     allowed_set = {str(v).strip() for v in (allowed_values or []) if str(v).strip()}
-    result = _HIDDEN_PII_EVASION_RE.sub("", text) if _HIDDEN_PII_EVASION_RE.search(text) else text
+    result = _strip_hidden_pii_evasion(text)
     for pii_type, pattern in _PII_PATTERNS:
         if pii_type == "email":
             def _replace_email(m: re.Match[str]) -> str:
@@ -540,7 +620,7 @@ def contains_pii(text: str) -> bool:
     """Return True if *text* contains any PII pattern (excluding official public URA emails)."""
     if not text:
         return False
-    cleaned = _HIDDEN_PII_EVASION_RE.sub("", text) if _HIDDEN_PII_EVASION_RE.search(text) else text
+    cleaned = _strip_hidden_pii_evasion(text)
     for pii_type, pattern in _PII_PATTERNS:
         if pii_type == "email":
             for m in pattern.finditer(cleaned):
@@ -593,11 +673,12 @@ _STREAM_HOLD_TAIL_RE = re.compile(
     r"(?<!\d[ -])\b1\d{2}(?:[ -]\d{3})?|"
     r"(?<!\d[ -])\b\d{4}(?:[ -]\d{4}){0,2}|"
     r"(?<!\d[ -])\b3[47]\d{2}(?:[ -]\d{6})?|"
+    r"(?:^|(?<=\s))(?:\+256|0[74]\d{0,2})(?:[ -]\d{1,3})?|"
     r"\b(?:TIN|Tax[ \t]{1,4}Identification[ \t]{1,4}Number)[ \t:#-]{0,4}"
     r")[ \t]{1,8}$"
 )
 _STREAM_CONTIGUOUS_TAIL_RE = re.compile(
-    r"(?i)(?:\bC[MFR][0-9A-Z-]{0,14}|\b[A-Z]{2}\d{1,7}|\b\d[\d-]{0,18})$"
+    r"(?i)(?:\bC[MFR][0-9A-Z-]{0,14}|\b[A-Z]{2}\d{1,7}|\+\d[\d-]{0,14}|\b\d[\d-]{0,18})$"
 )
 
 
@@ -765,6 +846,24 @@ def _renumber_ordered_lines(lines: list[str]) -> list[str]:
     return new_lines
 
 
+_UNSAFE_LINK_SCHEMES = ("javascript:", "vbscript:", "data:")
+
+
+def _is_unsafe_link_target(raw_target: str) -> bool:
+    """Return True if a Markdown link target resolves to a dangerous URI scheme after HTML entity decoding."""
+    target = (raw_target or "").strip()
+    if target.startswith("<") and ">" in target:
+        target = target[1 : target.find(">")].strip()
+    else:
+        target = re.split(r"\s+", target, maxsplit=1)[0]
+    prev = None
+    while prev != target:
+        prev = target
+        target = html.unescape(target)
+    normalized = re.sub(r"[\s\x00-\x1f\x7f]+", "", target).lower()
+    return normalized.startswith(_UNSAFE_LINK_SCHEMES)
+
+
 class OutputGuard:
     """Validate and sanitise model outputs (OWASP LLM02, LLM05, LLM09)."""
 
@@ -820,10 +919,30 @@ class OutputGuard:
         # Normalize glued/malformed citation markers like otherL1] or word[1] -> word [1]
         text = re.sub(r"(?<=[a-zA-Z])(?:L|\[)(\d+)\]", r" [\1]", text)
         text = re.sub(r"(?<=\d)\[(\d+)\]", r" [\1]", text)
-        # Remove markdown image links to non-URA domains
+        # Remove markdown image links to non-URA domains (strict domain boundary check)
         text = re.sub(
-            r"!\[.*?\]\((?!https?://ura\.go\.ug).*?\)",
+            r"!\[[^\]]*\]\((?!https?://(?:[a-z0-9-]+\.)*ura\.go\.ug(?:[/#?)]|$))[^)]*\)",
             "[link removed]",
+            text,
+            flags=re.IGNORECASE,
+        )
+        # Neutralize dangerous javascript:, vbscript:, data:, or HTML-entity-encoded URI schemes inside inline & reference markdown links
+        text = re.sub(
+            r"\[([^\]]+)\]\(([^)]*)\)",
+            lambda m: (
+                f"{m.group(1)} ([unsafe link removed])"
+                if _is_unsafe_link_target(m.group(2))
+                else m.group(0)
+            ),
+            text,
+        )
+        text = re.sub(
+            r"(?m)^[ \t]*\[[^\]]+\]:[ \t]*(\S.*)$",
+            lambda m: (
+                "[unsafe link definition removed]"
+                if _is_unsafe_link_target(m.group(1))
+                else m.group(0)
+            ),
             text,
         )
         # Restore official public URA contact channels if an upstream redaction caught them
@@ -1069,18 +1188,27 @@ class OutputGuard:
 
     @staticmethod
     def check_prompt_leakage(text: str) -> GuardResult:
-        """Detect verbatim system-prompt regurgitation (OWASP LLM07:2025).
+        """Detect verbatim or homoglyph/zero-width obfuscated system-prompt regurgitation (OWASP LLM07:2025).
 
         Scrubs any matched signature phrase and flags the response so it
         can be escalated.  We do NOT block the full answer — the user
         still receives a usable reply, just with the leaked segment
         replaced.  This avoids degrading UX on legitimate paraphrases.
         """
-        if not _PROMPT_SIGNATURE_REGEX.search(text):
+        if not (
+            _PROMPT_SIGNATURE_REGEX.search(text)
+            or _PROMPT_SIGNATURE_REGEX.search(_canonicalize_text(text))
+        ):
             return GuardResult(allowed=True, sanitized_text=text)
 
         logger.warning("System prompt leakage detected — redacting signature phrases")
+        _record_guardrail_security_event("guardrail_prompt_leakage", reason="system_prompt_signature")
         sanitized = _PROMPT_SIGNATURE_REGEX.sub("[REDACTED]", text)
+        if _PROMPT_SIGNATURE_REGEX.search(_canonicalize_text(sanitized)):
+            deobfuscated = _strip_invisible_chars(_decode_unicode_tags(sanitized)).translate(_CONFUSABLE_MAP)
+            sanitized = _PROMPT_SIGNATURE_REGEX.sub("[REDACTED]", deobfuscated)
+            if _PROMPT_SIGNATURE_REGEX.search(_canonicalize_text(sanitized)):
+                sanitized = "[REDACTED]"
         return GuardResult(
             allowed=True,
             sanitized_text=sanitized,

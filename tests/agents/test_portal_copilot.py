@@ -688,6 +688,23 @@ def test_10_wysiwys_digest_inline_prepare_high_value_friction_auditor_rbac_and_c
     assert receipt["receipt_id"].startswith("rcpt_")
     assert receipt["displayed_fields_sha256"] == updated_card["displayed_fields_sha256"]
 
+    # 7b. Follow-up turn in the same conversation carries over the inline-edited `amount_ugx` ("4500000") over Turn 1's raw text ("65,000,000")
+    r_turn2 = client.post(
+        "/v1/chat",
+        json={
+            "message": "Generate another PAYE PRN for my TIN using the same amount",
+            "conversation_id": "conv-qa-10",
+        },
+        headers=headers,
+    )
+    assert r_turn2.status_code == 200
+    copilot_t2 = r_turn2.json()["portal_copilot"]
+    assert copilot_t2["card_type"] == "confirmation_required"
+    params_t2 = copilot_t2["request_state"]["payload"]["params"]
+    assert params_t2["tin"] == "1000023456"
+    assert params_t2["amount_ugx"] == "4500000"
+    assert params_t2["tax_head"] == "PAYE"
+
     # 8. Attempting `decision="prepare"` on an already-executed proposal is refused with 400 (QA-08)
     r_prep_locked = client.post(
         "/v1/portal/tasks/execute",

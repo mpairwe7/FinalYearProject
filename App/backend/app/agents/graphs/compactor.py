@@ -51,13 +51,44 @@ _ESSENTIAL_STATUTORY_KEYS = frozenset({
 })
 
 
+def _scrub_tool_str(text: str, limit: int) -> str:
+    """Scrub indirect prompt-injection payloads from tool string values before compaction."""
+    from ...guardrails import scan_external_tool_text
+
+    scrubbed, _ = scan_external_tool_text(str(text or "")[: limit * 2])
+    return scrubbed[:limit]
+
+
+def _sanitize_obs_value(val: Any, *, str_limit: int = 200, depth: int = 0) -> Any:
+    """Recursively sanitize nested tool observation values up to depth 3."""
+    if isinstance(val, (int, float, bool)) or val is None:
+        return val
+    if isinstance(val, str):
+        return _scrub_tool_str(val, str_limit)
+    if depth >= 3:
+        if isinstance(val, (list, dict)):
+            return "[nested_structure_truncated]"
+        return _scrub_tool_str(str(val), str_limit)
+    if isinstance(val, list):
+        return [
+            _sanitize_obs_value(item, str_limit=str_limit, depth=depth + 1)
+            for item in val[:3]
+        ]
+    if isinstance(val, dict):
+        return {
+            str(k)[:64]: _sanitize_obs_value(v, str_limit=str_limit, depth=depth + 1)
+            for k, v in list(val.items())[:5]
+        }
+    return _scrub_tool_str(str(val), str_limit)
+
+
 def compact_tool_observation(obs: Any, max_tokens: int = MAX_OBSERVATION_TOKENS) -> dict[str, Any]:
     """Compress verbose tool payloads into bounded statutory fact structures."""
     if not isinstance(obs, dict):
-        return {"data": str(obs)[:max_tokens * 3], "ok": True}
+        return {"data": _scrub_tool_str(str(obs), max_tokens * 3), "ok": True}
 
     if not obs.get("ok", True) or obs.get("error"):
-        err_msg = str(obs.get("error", "tool failed"))[:300]
+        err_msg = _scrub_tool_str(str(obs.get("error", "tool failed")), 300)
         return {"ok": False, "error": err_msg}
 
     compacted: dict[str, Any] = {"ok": True}
@@ -65,25 +96,12 @@ def compact_tool_observation(obs: Any, max_tokens: int = MAX_OBSERVATION_TOKENS)
     # Extract primary statutory fields
     for key in _ESSENTIAL_STATUTORY_KEYS:
         if key in obs and obs[key] is not None:
-            val = obs[key]
-            if isinstance(val, (int, float, bool)):
-                compacted[key] = val
-            elif isinstance(val, str):
-                compacted[key] = val[:400]
-            elif isinstance(val, list):
-                compacted[key] = val[:3]
-            elif isinstance(val, dict):
-                compacted[key] = {k: v for k, v in list(val.items())[:5]}
+            compacted[key] = _sanitize_obs_value(obs[key], str_limit=400, depth=0)
 
     # Retain lists and sub-dicts with bounded slices (e.g. deadlines, line items)
     for key, val in obs.items():
-        if key not in compacted:
-            if isinstance(val, list):
-                compacted[key] = val[:3]
-            elif isinstance(val, dict):
-                compacted[key] = {k: v for k, v in list(val.items())[:5]}
-            elif isinstance(val, (int, float, str, bool)):
-                compacted[key] = val if not isinstance(val, str) else val[:200]
+        if key not in compacted and isinstance(val, (int, float, str, bool, list, dict)):
+            compacted[key] = _sanitize_obs_value(val, str_limit=200, depth=0)
 
     return compacted
 
@@ -102,15 +120,19 @@ def compact_messages(
     if turn_count <= max_messages:
         return list(messages), ""
 
+    from ...guardrails import redact_pii_text, scan_replayed_text
+
     older = messages[:-max_messages]
     recent = list(messages[-max_messages:])
 
     summary_chunks: list[str] = []
     for msg in older:
         role = str(msg.get("role", "")).lower()
-        content = str(msg.get("content") or msg.get("user_message") or msg.get("bot_reply") or "").strip()
-        if not content:
+        raw_content = str(msg.get("content") or msg.get("user_message") or msg.get("bot_reply") or "").strip()
+        if not raw_content:
             continue
+        replayed_safe, _ = scan_replayed_text(raw_content)
+        content = redact_pii_text(replayed_safe)
         if role in ("user", "") and "user_message" in msg:
             summary_chunks.append(f"Taxpayer: {content[:120]}")
         elif role in ("assistant", "") and "bot_reply" in msg:

@@ -3068,20 +3068,16 @@ def evaluate_turn(
         else ""
     )
 
-    # Gather entities from prior user turns in the same conversation (both in-memory owner cache
-    # when a proven session/user scope exists and conversation_history)
-    history_entities: dict[str, Any] = {}
-    if has_proven_session:
-        with _TASK_CACHE_LOCK:
-            if anon_owner_key and anon_owner_key in _CONVERSATION_ENTITY_MEMORY:
-                history_entities.update(_CONVERSATION_ENTITY_MEMORY[anon_owner_key])
-            if owner_key in _CONVERSATION_ENTITY_MEMORY:
-                history_entities.update(_CONVERSATION_ENTITY_MEMORY[owner_key])
-
     def _should_carry_over_amount(msg_text: str) -> bool:
         low_m = msg_text.lower()
         return any(w in low_m for w in ("pay", "prn", "payment", "slip", "refund", "net tax"))
 
+    # Gather entities from prior user turns in the same conversation:
+    # 1. Extract completed past turns (`bot_reply` present in turn) first;
+    # 2. Overlay `_CONVERSATION_ENTITY_MEMORY` (so inline `decision="prepare"` edits override older turns);
+    # 3. Overlay current-turn synthetic attachment prefill entries (no `bot_reply` key) so fresh screenshot values win.
+    history_entities: dict[str, Any] = {}
+    attachment_prefill_entities: dict[str, Any] = {}
     if conversation_history:
         for turn in conversation_history:
             if isinstance(turn, Mapping):
@@ -3090,7 +3086,20 @@ def evaluate_turn(
                     turn_ent = extract_task_entities(u_msg)
                     if "amount_ugx" in turn_ent and not _should_carry_over_amount(u_msg):
                         turn_ent.pop("amount_ugx", None)
-                    history_entities.update(turn_ent)
+                    if "bot_reply" in turn or "role" in turn:
+                        history_entities.update(turn_ent)
+                    else:
+                        attachment_prefill_entities.update(turn_ent)
+
+    if has_proven_session:
+        with _TASK_CACHE_LOCK:
+            if anon_owner_key and anon_owner_key in _CONVERSATION_ENTITY_MEMORY:
+                history_entities.update(_CONVERSATION_ENTITY_MEMORY[anon_owner_key])
+            if owner_key in _CONVERSATION_ENTITY_MEMORY:
+                history_entities.update(_CONVERSATION_ENTITY_MEMORY[owner_key])
+
+    if attachment_prefill_entities:
+        history_entities.update(attachment_prefill_entities)
 
     current_turn_entities = extract_task_entities(message)
     if current_turn_entities and has_proven_session:
