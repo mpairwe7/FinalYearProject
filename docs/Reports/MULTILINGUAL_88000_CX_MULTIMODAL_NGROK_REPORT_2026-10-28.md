@@ -1,4 +1,4 @@
-# 88,000 Complex URA CX Scenarios (`TTT`, `STT`, `TTS`) Across `EN`, `LG`, `SW`, `NYN`, `ACH` — Stress, Fuzzy, Volume & Live Ngrok Load Benchmark Report (`G265`)
+# 88,000-Iteration (137 Unique Scenarios) URA CX Matrix (`TTT`, `STT`, `TTS` Local Text-Helper Checks) & Live Ngrok Multimodal Benchmark Report (`G265`/`G268`)
 
 - **Date:** 2026-10-28
 - **Target HTTP Gateway:** `https://struttingly-nongeological-briella.ngrok-free.dev`
@@ -11,15 +11,15 @@
 
 ## 1. Executive Summary
 
-We formulated and executed **88,000 complex URA Customer Experience (CX) scenarios** across all 5 supported Ugandan languages (**English (`en`)**, **Luganda (`lg`)**, **Kiswahili (`sw`)**, **Runyankole (`nyn`)**, and **Acholi (`ach`)** — **17,600 scenarios per language**) and across all 3 modalities (**`TTT = 44,000`**, **`STT = 26,400`**, **`TTS = 17,600`**), paired with a live end-to-end **Stress, Fuzzy, Volume, Multimodal Speech, WebSocket Call Receptionist, and Concurrent Load Suite** over the live ngrok gateway (`https://struttingly-nongeological-briella.ngrok-free.dev`).
+We executed **88,000 repeated local deterministic evaluations** generated from **137 unique scenario templates** (`10–40` unique inputs per dimension) balanced across all 5 supported Ugandan languages (**English (`en`)**, **Luganda (`lg`)**, **Kiswahili (`sw`)**, **Runyankole (`nyn`)**, and **Acholi (`ach`)** — **17,600 iterations per language**) and 3 local helper categories (**`TTT = 44,000`**, **`STT text-helper checks = 26,400`**, **`TTS text-helper checks = 17,600`**), paired with a separate **Phase B Live Ngrok Suite** (`30` live chat probes, `24` live long-horizon/Portal Co-Pilot/screenshot probes, `5` live `Orpheus-TTS` $\rightarrow$ `Whisper-SALT` speech round-trips, `5` live WebSocket Call Receptionist voice calls, and `120` concurrent load requests) over `https://struttingly-nongeological-briella.ngrok-free.dev`.
 
-- **Total Matrix Scenarios Executed:** `88,000`
-- **Passed Scenarios:** `88,000 / 88,000` (**`100.00%`** accuracy)
-- **Matrix Execution Time & Throughput:** `46.37s` (**`1,897.6 scenarios/sec`**)
+- **Total Local Matrix Iterations Executed:** `88,000` (`137` unique scenario templates; `10–40` unique inputs per dimension)
+- **Passed Local Matrix Iterations:** `88,000 / 88,000` (**`100.00%`** accuracy; measures deterministic local text-helper stability, not live ASR/TTS execution)
+- **Local Matrix Execution Time & Throughput:** `46.37s` (**`1,897.6 iterations/sec`**)
 
 ---
 
-## 2. Accuracy & Latency by Language (`17,600` Scenarios per Locale)
+## 2. Accuracy & Latency by Language (`17,600` Local Matrix Iterations per Locale)
 
 | Locale | Language | Total Scenarios | Passed | Accuracy (%) | `p50` (ms) | `p95` (ms) |
 | :-: | :--- | ---: | ---: | ---: | ---: | ---: |
@@ -32,13 +32,15 @@ We formulated and executed **88,000 complex URA Customer Experience (CX) scenari
 
 ---
 
-## 3. Accuracy & Latency by Modality (`TTT`, `STT`, `TTS`)
+## 3. Accuracy & Latency by Local Matrix Category (`TTT`, `STT`, `TTS` Local Text-Helper Checks)
 
-| Modality | Description | Total Scenarios | Passed | Accuracy (%) | `p50` (ms) | `p95` (ms) |
-| :-: | :--- | ---: | ---: | ---: | ---: | ---: |
-| **`TTT`** | Text-to-Text (Long-Horizon, EQ, Calculators, Portal Co-Pilot, G265 WYSIWYS) | 44,000 | 44,000 | **100.00%** | 0.069 | 0.906 |
-| **`STT`** | Speech-to-Text / ASR Fuzzy Entity Repair, Vernacular Lexicon & Endpointing | 26,400 | 26,400 | **100.00%** | 0.246 | 2.056 |
-| **`TTS`** | Text-to-Speech / Call Receptionist Figure Guard, 5-Locale Contact/URL Verbalization | 17,600 | 17,600 | **100.00%** | 1.281 | 1.407 |
+*Note: The matrix below evaluates deterministic in-process text helpers across `137` unique inputs (`10–40` per dimension) repeated to `88,000` iterations; it does not run live ASR or TTS audio synthesis. Live `Orpheus-TTS` $\rightarrow$ `Whisper-SALT` ASR speech round-trip results (`5 / 5` locales) are reported separately in Section 5.3.*
+
+| Category | Description | Total Checks | Passed | Accuracy (%) | `p50` (ms) | `p95` (ms) |
+| :--- | :--- | ---: | ---: | ---: | ---: | ---: |
+| **`TTT` (Local Text-Helper Checks)** | Repeated local checks: Long-Horizon, EQ, Calculators, Portal Co-Pilot, G265 WYSIWYS | 44,000 | 44,000 | **100.00%** | 0.069 | 0.906 |
+| **`STT` (Local Text-Helper Checks)** | Repeated local text-helper checks (not live ASR): Fuzzy Entity Repair, Lexicon & Endpointing | 26,400 | 26,400 | **100.00%** | 0.246 | 2.056 |
+| **`TTS` (Local Text-Helper Checks)** | Repeated local text-helper checks (not live TTS): Figure Guard & 5-Locale Contact/URL Verbalization | 17,600 | 17,600 | **100.00%** | 1.281 | 1.407 |
 
 ---
 
@@ -87,12 +89,12 @@ All 30 live probes over `POST https://struttingly-nongeological-briella.ngrok-fr
 | `ach` | `waxal_ach_0005` | 4,733.0 | 1,642.8 | 5.632 | *"Wel mucoro me viyegi iUganda tye dule apar wiye aboro i kom yee."* | **PASS** |
 
 ### 5.4 Live 5-Language Call Receptionist WebSocket Suite (`B4`: `5 / 5` Passed)
-All 5 end-to-end voice calls over `wss://struttingly-nongeological-briella.ngrok-free.dev/api/v1/calls/stream` (`en`, `lg`, `sw`, `nyn`, `ach`) verified the 5-language greeting, live PCM audio streaming (`787 KB`–`1.89 MB` per call), `call_control` pace adjustment (`slow_down` / `normal_speed`), and officer callback ticket creation (`TIC-...`).
+All 5 end-to-end voice calls over `wss://struttingly-nongeological-briella.ngrok-free.dev/api/v1/calls/stream` (`en`, `lg`, `sw`, `nyn`, `ach`) verified the 5-language greeting and live PCM audio streaming (`787 KB`–`1.89 MB` per call); on the English (`en`) call, the driver also sent `call_control` (`slow_down` / `normal_speed`) frames and verified officer callback ticket creation (`TIC-...`).
 
 ### 5.5 Live Ngrok Concurrent Load & Volume Waves (`B5`: `120 / 120` Succeeded)
 
 | Concurrency (`c`) | Total Requests | Succeeded | Success Rate | Throughput (QPS) | `p50` (ms) | `p90` (ms) | `p95` (ms) | `p99` (ms) |
 | :-: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **`c = 4`** | 40 | 40 | **100.0%** | **9.15 req/s** | 429.1 | 557.8 | 644.2 | 665.5 |
-| **`c = 8`** | 40 | 40 | **100.0%** | **15.14 req/s** | 493.7 | 654.4 | 678.8 | 759.2 |
-| **`c = 16`** | 40 | 40 | **100.0%** | **19.94 req/s** | 688.2 | 1,158.9 | 1,221.4 | 1,290.4 |
+| **`c = 4`** | 40 | 40 | **100.0%** | **9.15 req/s** | 429.1 | 631.1 | 644.2 | 660.1 |
+| **`c = 8`** | 40 | 40 | **100.0%** | **15.14 req/s** | 493.7 | 646.8 | 678.8 | 724.1 |
+| **`c = 16`** | 40 | 40 | **100.0%** | **19.94 req/s** | 688.2 | 1,157.4 | 1,221.4 | 1,290.5 |

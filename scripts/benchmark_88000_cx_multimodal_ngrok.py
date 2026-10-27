@@ -142,6 +142,17 @@ def pct(values: list[float], q: float) -> float:
     return round(s[idx], 3)
 
 
+def _safe_json(resp: httpx.Response) -> dict[str, Any]:
+    """Decode a 200 JSON object response safely, returning {} on non-200 or invalid JSON."""
+    if resp.status_code != 200:
+        return {}
+    try:
+        data = resp.json()
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 # ---------------------------------------------------------------------------
 # 1. Formulate 88,000 Complex URA CX Scenarios across EN, LG, SW, NYN, ACH
 # ---------------------------------------------------------------------------
@@ -813,18 +824,18 @@ async def run_live_ngrok_suite() -> dict[str, Any]:
         for lang in LANGUAGES:
             t0 = time.perf_counter()
             esc_conv = f"b2-esc-{lang}-{uuid.uuid4().hex[:6]}"
-            r_esc1 = (
+            r_esc1 = _safe_json(
                 await client.post(
                     f"{NGROK_HTTP}/api/v1/escalate",
                     json={"conversation_id": esc_conv, "session_id": esc_conv, "reason": "Objection to VAT assessment", "locale": lang},
                 )
-            ).json()
-            r_esc2 = (
+            )
+            r_esc2 = _safe_json(
                 await client.post(
                     f"{NGROK_HTTP}/api/v1/escalate",
                     json={"conversation_id": esc_conv, "session_id": esc_conv, "reason": "Repeat escalation", "locale": lang},
                 )
-            ).json()
+            )
             ok_esc = (
                 r_esc1.get("ok") is True
                 and bool(r_esc1.get("ticket_id"))
@@ -1045,7 +1056,7 @@ async def run_live_ngrok_suite() -> dict[str, Any]:
 
         # Step 10: Tier 3 TPCA s. 75 Official Secrecy + G265 Admin/Auditor RBAC Refusal (403)
         t0 = time.perf_counter()
-        r_tok = (
+        r_tok = _safe_json(
             await client.post(
                 f"{NGROK_HTTP}/api/v1/auth/dev-token",
                 json={
@@ -1055,14 +1066,14 @@ async def run_live_ngrok_suite() -> dict[str, Any]:
                     "granted_purposes": ["ura_account_access", "ura_actions"],
                 },
             )
-        ).json()
+        )
         jwt_tok = r_tok.get("token") or r_tok.get("access_token") or ""
-        r_aud_tok = (
+        r_aud_tok = _safe_json(
             await client.post(
                 f"{NGROK_HTTP}/api/v1/auth/dev-token",
                 json={"user_id": "auditor-1", "role": "ura_auditor", "tenant_id": "default"},
             )
-        ).json()
+        )
         aud_jwt = r_aud_tok.get("token") or r_aud_tok.get("access_token") or ""
         r_aud_refuse = await client.post(
             f"{NGROK_HTTP}/api/v1/portal/tasks/execute",
@@ -1127,30 +1138,37 @@ async def run_live_ngrok_suite() -> dict[str, Any]:
             ("WhatsApp Image 2026-10-24 at 3.45.51 PM.jpeg", "EFRIS"),
         ):
             img_path = REPO_ROOT / "screenshots" / img_name
-            if img_path.exists():
-                t0 = time.perf_counter()
-                r_img = await client.post(
-                    f"{NGROK_HTTP}/api/v1/documents/analyze",
-                    files={"file": (img_name, img_path.read_bytes(), "image/jpeg")},
-                    headers=pc_headers,
-                    timeout=90.0,
-                )
-                d_img = r_img.json() if r_img.status_code == 200 else {}
-                doc_obj = d_img.get("document") if isinstance(d_img.get("document"), dict) else d_img
-                sg_img = (doc_obj or {}).get("screenshot_guidance") or {}
-                ok_img = (
-                    r_img.status_code == 200
-                    and sg_img.get("is_screenshot") is True
-                    and exp_portal_sub.lower() in str(sg_img.get("detected_portal") or "").lower()
-                    and len(sg_img.get("checklist") or []) >= 1
-                )
+            if not img_path.exists():
                 live_report["screenshot_and_error_live_probes"].append({
                     "screenshot": img_name,
-                    "detected_portal": sg_img.get("detected_portal"),
-                    "checklist_items": len(sg_img.get("checklist") or []),
-                    "latency_ms": round((time.perf_counter() - t0) * 1000.0, 1),
-                    "passed": ok_img,
+                    "passed": False,
+                    "skipped": True,
+                    "reason": "missing_file",
                 })
+                continue
+            t0 = time.perf_counter()
+            r_img = await client.post(
+                f"{NGROK_HTTP}/api/v1/documents/analyze",
+                files={"file": (img_name, img_path.read_bytes(), "image/jpeg")},
+                headers=pc_headers,
+                timeout=90.0,
+            )
+            d_img = _safe_json(r_img)
+            doc_obj = d_img.get("document") if isinstance(d_img.get("document"), dict) else d_img
+            sg_img = (doc_obj or {}).get("screenshot_guidance") or {}
+            ok_img = (
+                r_img.status_code == 200
+                and sg_img.get("is_screenshot") is True
+                and exp_portal_sub.lower() in str(sg_img.get("detected_portal") or "").lower()
+                and len(sg_img.get("checklist") or []) >= 1
+            )
+            live_report["screenshot_and_error_live_probes"].append({
+                "screenshot": img_name,
+                "detected_portal": sg_img.get("detected_portal"),
+                "checklist_items": len(sg_img.get("checklist") or []),
+                "latency_ms": round((time.perf_counter() - t0) * 1000.0, 1),
+                "passed": ok_img,
+            })
 
         b2_passed = sum(1 for x in live_report["long_horizon_and_eq_chains"] if x["passed"])
         pc_passed = sum(1 for x in live_report["portal_copilot_live_chains"] if x["passed"])
@@ -1165,20 +1183,20 @@ async def run_live_ngrok_suite() -> dict[str, Any]:
         # B3. Multimodal Speech (TTS + ASR Round-Trip) across all 5 languages
         print("\n[B3] Running Live 5-Language TTS + ASR Round-Trip Probes over ngrok...", flush=True)
         speech_probes = [
-            ("en", "salt_eng_0001", "The standard Value Added Tax rate in Uganda is eighteen percent.", ("eighteen", "18", "value added", "vat")),
-            ("lg", "salt_lug_0001", "Omusolo gwa VAT mu Uganda guli ebitundu kkumi na munaana ku buli kikumi.", ("uganda", "kkumi", "munaana", "kikumi")),
-            ("sw", "waxal_swa_0007", "Kiwango cha kodi ya ongezeko la thamani nchini Uganda ni asilimia kumi na nane.", ("uganda", "kumi", "nane", "asilimia")),
-            ("nyn", "waxal_nyn_0003", "Omushoro gwa VAT omuri Uganda guri aha bicweka ikumi na munaana aha kikumi.", ("uganda", "munaana", "kikumi", "ikumi")),
-            ("ach", "waxal_ach_0005", "Wel mucoro me VAT i Uganda tye dul apar wiye aboro i kom miya.", ("uganda", "apar", "aboro", "mucoro")),
+            ("en", "salt_eng_0001", "The standard Value Added Tax rate in Uganda is eighteen percent.", ("value added", "vat", "uganda"), ("eighteen", "18")),
+            ("lg", "salt_lug_0001", "Omusolo gwa VAT mu Uganda guli ebitundu kkumi na munaana ku buli kikumi.", ("uganda", "omusono", "omusolo"), ("kkumi", "munaana")),
+            ("sw", "waxal_swa_0007", "Kiwango cha kodi ya ongezeko la thamani nchini Uganda ni asilimia kumi na nane.", ("uganda", "kodi", "thamani"), ("kumi", "nane")),
+            ("nyn", "waxal_nyn_0003", "Omushoro gwa VAT omuri Uganda guri aha bicweka ikumi na munaana aha kikumi.", ("uganda", "omushoro"), ("ikumi", "munaana")),
+            ("ach", "waxal_ach_0005", "Wel mucoro me VAT i Uganda tye dul apar wiye aboro i kom miya.", ("uganda", "mucoro"), ("apar", "aboro")),
         ]
-        for lang, voice, text, exp_tokens in speech_probes:
+        for lang, voice, text, subj_tokens, rate_tokens in speech_probes:
             t0 = time.perf_counter()
             r_tts = await client.post(
                 f"{NGROK_HTTP}/api/v1/tts",
                 json={"text": text, "language": lang, "voice": voice},
                 timeout=90.0,
             )
-            tts_j = r_tts.json() if r_tts.status_code == 200 else {}
+            tts_j = _safe_json(r_tts)
             wav_bytes = base64.b64decode(tts_j.get("audio_base64") or "")
             tts_ms = (time.perf_counter() - t0) * 1000.0
             t1 = time.perf_counter()
@@ -1188,7 +1206,7 @@ async def run_live_ngrok_suite() -> dict[str, Any]:
                 headers={**HEADERS, "Content-Type": "audio/wav"},
                 timeout=90.0,
             )
-            asr_j = r_asr.json() if r_asr.status_code == 200 else {}
+            asr_j = _safe_json(r_asr)
             asr_ms = (time.perf_counter() - t1) * 1000.0
             transcript = str(asr_j.get("text") or "").strip()
             tr_low = transcript.lower()
@@ -1197,7 +1215,8 @@ async def run_live_ngrok_suite() -> dict[str, Any]:
                 and len(wav_bytes) > 4000
                 and r_asr.status_code == 200
                 and len(transcript) > 5
-                and any(tok in tr_low for tok in exp_tokens)
+                and any(tok in tr_low for tok in subj_tokens)
+                and any(tok in tr_low for tok in rate_tokens)
                 and "rwanda" not in tr_low
                 and "18000" not in tr_low
             )
@@ -1517,6 +1536,7 @@ async def main() -> int:
     eval_elapsed_s = time.perf_counter() - t_eval0
     total_88k = len(scenarios)
     passed_88k = sum(v["passed"] for v in by_lang.values())
+    unique_total = sum(len(v["unique_keys"]) for v in by_dimension.values())
 
     # Run Phase B live ngrok stress, fuzzy, volume & load suite
     try:
@@ -1529,6 +1549,7 @@ async def main() -> int:
         "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
         "gateway_url": NGROK_HTTP,
         "total_scenarios": total_88k,
+        "unique_scenarios": unique_total,
         "passed_scenarios": passed_88k,
         "overall_accuracy_pct": round(passed_88k / total_88k * 100.0, 2),
         "matrix_elapsed_s": round(eval_elapsed_s, 2),
@@ -1571,7 +1592,13 @@ async def main() -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"\nSaved telemetry JSON -> {out_path} ({out_path.stat().st_size} bytes)", flush=True)
-    return 0
+    live_ok = "error" not in live_report and all(
+        entry.get("passed", True)
+        for section in live_report.values()
+        if isinstance(section, list)
+        for entry in section
+    )
+    return 0 if passed_88k == total_88k and live_ok else 1
 
 
 if __name__ == "__main__":

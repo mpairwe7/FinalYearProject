@@ -13,6 +13,7 @@ Reference: https://owasp.org/www-project-top-10-for-large-language-model-applica
 
 from __future__ import annotations
 
+import html
 import logging
 import os
 import re
@@ -36,11 +37,18 @@ ESCALATION_THRESHOLD = float(os.getenv("ESCALATION_THRESHOLD", "0.25"))
 # ---------------------------------------------------------------------------
 # Unicode canonicalization (CVE-mitigation: homoglyph & zero-width evasion)
 # ---------------------------------------------------------------------------
-# Zero-width, soft-hyphen, Bidi-override, variation-selector, and Unicode Tag block characters used in prompt-injection obfuscation
+# Zero-width, soft-hyphen, Bidi-override, and BMP variation-selector characters used in prompt-injection obfuscation
 _ZERO_WIDTH_CHARS = re.compile(
-    "[\u00ad\u061c\u200b\u200c\u200d\u200e\u200f\u202a-\u202e\u2060-\u2069\ufeff"
-    "\ufe00-\ufe0f\U000e0000-\U000e007f\U000e0100-\U000e01ef]"
+    "[\u00ad\u061c\u200b\u200c\u200d\u200e\u200f\u202a-\u202e\u2060-\u2069\ufeff\ufe00-\ufe0f]"
 )
+
+
+def _strip_invisible_chars(text: str) -> str:
+    """Strip BMP zero-width/Bidi/variation characters and Plane-14 Tag/Variation-Selector codepoints."""
+    cleaned = _ZERO_WIDTH_CHARS.sub("", text) if _ZERO_WIDTH_CHARS.search(text) else text
+    if any(0xE0000 <= ord(ch) <= 0xE01EF for ch in cleaned):
+        cleaned = "".join(ch for ch in cleaned if not (0xE0000 <= ord(ch) <= 0xE01EF))
+    return cleaned
 
 
 def _decode_unicode_tags(text: str) -> str:
@@ -114,7 +122,7 @@ def _canonicalize_text(text: str) -> str:
     """
     text = _decode_unicode_tags(text)
     text = _unwrap_bidi_overrides(text)
-    text = _ZERO_WIDTH_CHARS.sub("", text)
+    text = _strip_invisible_chars(text)
     text = unicodedata.normalize("NFKD", text)
     # Drop combining marks so accented variants collapse (é → e)
     text = "".join(c for c in text if not unicodedata.combining(c))
@@ -398,7 +406,7 @@ class InputGuard:
                     flags=["harmful_intent"],
                 )
 
-        sanitized_input = _ZERO_WIDTH_CHARS.sub("", text) if _ZERO_WIDTH_CHARS.search(text) else text
+        sanitized_input = _strip_invisible_chars(text)
         return GuardResult(allowed=True, sanitized_text=sanitized_input)
 
 
@@ -443,7 +451,7 @@ def scan_retrieved_text(text: str) -> tuple[str, bool]:
         if _injection_present(scrubbed):
             # Obfuscated/tag-encoded injection survived surface regex replacement;
             # strip invisible characters and re-apply redaction on the de-obfuscated text.
-            deobfuscated = _ZERO_WIDTH_CHARS.sub("", _decode_unicode_tags(scrubbed))
+            deobfuscated = _strip_invisible_chars(_decode_unicode_tags(scrubbed))
             for pattern in _INJECTION_PATTERNS:
                 deobfuscated = pattern.sub("[REDACTED_INSTRUCTION]", deobfuscated)
             scrubbed = (
@@ -523,9 +531,16 @@ def _is_currency_boundary(match: re.Match[str], text: str) -> bool:
 
 _HIDDEN_PII_EVASION_RE = re.compile(
     r"[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f"
-    r"\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff"
-    r"\ufe00-\ufe0f\U000e0000-\U000e007f\U000e0100-\U000e01ef]"
+    r"\u00ad\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff\ufe00-\ufe0f]"
 )
+
+
+def _strip_hidden_pii_evasion(text: str) -> str:
+    """Remove control, zero-width, Bidi, and supplementary-plane Tag/Variation characters before PII scanning."""
+    cleaned = _HIDDEN_PII_EVASION_RE.sub("", text) if _HIDDEN_PII_EVASION_RE.search(text) else text
+    if any(0xE0000 <= ord(ch) <= 0xE01EF for ch in cleaned):
+        cleaned = "".join(ch for ch in cleaned if not (0xE0000 <= ord(ch) <= 0xE01EF))
+    return cleaned
 _ENGLISH_STOP_TOKENS = frozenset(
     {
         "A", "AN", "AND", "ARE", "AS", "AT", "BE", "BY", "DO", "FOR", "FROM",
@@ -567,7 +582,7 @@ def redact_pii_text(text: str, allowed_values: Iterable[str] | None = None) -> s
     if not text:
         return text
     allowed_set = {str(v).strip() for v in (allowed_values or []) if str(v).strip()}
-    result = _HIDDEN_PII_EVASION_RE.sub("", text) if _HIDDEN_PII_EVASION_RE.search(text) else text
+    result = _strip_hidden_pii_evasion(text)
     for pii_type, pattern in _PII_PATTERNS:
         if pii_type == "email":
             def _replace_email(m: re.Match[str]) -> str:
@@ -605,7 +620,7 @@ def contains_pii(text: str) -> bool:
     """Return True if *text* contains any PII pattern (excluding official public URA emails)."""
     if not text:
         return False
-    cleaned = _HIDDEN_PII_EVASION_RE.sub("", text) if _HIDDEN_PII_EVASION_RE.search(text) else text
+    cleaned = _strip_hidden_pii_evasion(text)
     for pii_type, pattern in _PII_PATTERNS:
         if pii_type == "email":
             for m in pattern.finditer(cleaned):
@@ -831,6 +846,24 @@ def _renumber_ordered_lines(lines: list[str]) -> list[str]:
     return new_lines
 
 
+_UNSAFE_LINK_SCHEMES = ("javascript:", "vbscript:", "data:")
+
+
+def _is_unsafe_link_target(raw_target: str) -> bool:
+    """Return True if a Markdown link target resolves to a dangerous URI scheme after HTML entity decoding."""
+    target = (raw_target or "").strip()
+    if target.startswith("<") and ">" in target:
+        target = target[1 : target.find(">")].strip()
+    else:
+        target = re.split(r"\s+", target, maxsplit=1)[0]
+    prev = None
+    while prev != target:
+        prev = target
+        target = html.unescape(target)
+    normalized = re.sub(r"[\s\x00-\x1f\x7f]+", "", target).lower()
+    return normalized.startswith(_UNSAFE_LINK_SCHEMES)
+
+
 class OutputGuard:
     """Validate and sanitise model outputs (OWASP LLM02, LLM05, LLM09)."""
 
@@ -895,21 +928,22 @@ class OutputGuard:
         )
         # Neutralize dangerous javascript:, vbscript:, data:, or HTML-entity-encoded URI schemes inside inline & reference markdown links
         text = re.sub(
-            r"\[([^\]]+)\]\(\s*(?:j[\s\x00-\x1f]*a[\s\x00-\x1f]*v[\s\x00-\x1f]*a[\s\x00-\x1f]*s[\s\x00-\x1f]*c[\s\x00-\x1f]*r[\s\x00-\x1f]*i[\s\x00-\x1f]*p[\s\x00-\x1f]*t|v[\s\x00-\x1f]*b[\s\x00-\x1f]*s[\s\x00-\x1f]*c[\s\x00-\x1f]*r[\s\x00-\x1f]*i[\s\x00-\x1f]*p[\s\x00-\x1f]*t|d[\s\x00-\x1f]*a[\s\x00-\x1f]*t[\s\x00-\x1f]*a)\s*:[^)]*\)",
-            r"\1 ([unsafe link removed])",
-            text,
-            flags=re.IGNORECASE,
-        )
-        text = re.sub(
-            r"\[([^\]]+)\]\(\s*(?:&#[xX]?[0-9a-fA-F]+;?)+[^)]*\)",
-            r"\1 ([unsafe link removed])",
+            r"\[([^\]]+)\]\(([^)]*)\)",
+            lambda m: (
+                f"{m.group(1)} ([unsafe link removed])"
+                if _is_unsafe_link_target(m.group(2))
+                else m.group(0)
+            ),
             text,
         )
         text = re.sub(
-            r"(?m)^\s*\[[^\]]+\]:\s*(?:j[\s\x00-\x1f]*a[\s\x00-\x1f]*v[\s\x00-\x1f]*a[\s\x00-\x1f]*s[\s\x00-\x1f]*c[\s\x00-\x1f]*r[\s\x00-\x1f]*i[\s\x00-\x1f]*p[\s\x00-\x1f]*t|v[\s\x00-\x1f]*b[\s\x00-\x1f]*s[\s\x00-\x1f]*c[\s\x00-\x1f]*r[\s\x00-\x1f]*i[\s\x00-\x1f]*p[\s\x00-\x1f]*t|d[\s\x00-\x1f]*a[\s\x00-\x1f]*t[\s\x00-\x1f]*a)\s*:.*$",
-            "[unsafe link definition removed]",
+            r"(?m)^[ \t]*\[[^\]]+\]:[ \t]*(\S.*)$",
+            lambda m: (
+                "[unsafe link definition removed]"
+                if _is_unsafe_link_target(m.group(1))
+                else m.group(0)
+            ),
             text,
-            flags=re.IGNORECASE,
         )
         # Restore official public URA contact channels if an upstream redaction caught them
         text = re.sub(
@@ -1161,17 +1195,17 @@ class OutputGuard:
         still receives a usable reply, just with the leaked segment
         replaced.  This avoids degrading UX on legitimate paraphrases.
         """
-        surface_match = bool(_PROMPT_SIGNATURE_REGEX.search(text))
-        canonical_match = False if surface_match else bool(_PROMPT_SIGNATURE_REGEX.search(_canonicalize_text(text)))
-        if not surface_match and not canonical_match:
+        if not (
+            _PROMPT_SIGNATURE_REGEX.search(text)
+            or _PROMPT_SIGNATURE_REGEX.search(_canonicalize_text(text))
+        ):
             return GuardResult(allowed=True, sanitized_text=text)
 
         logger.warning("System prompt leakage detected — redacting signature phrases")
         _record_guardrail_security_event("guardrail_prompt_leakage", reason="system_prompt_signature")
-        if surface_match:
-            sanitized = _PROMPT_SIGNATURE_REGEX.sub("[REDACTED]", text)
-        else:
-            deobfuscated = _ZERO_WIDTH_CHARS.sub("", _decode_unicode_tags(text)).translate(_CONFUSABLE_MAP)
+        sanitized = _PROMPT_SIGNATURE_REGEX.sub("[REDACTED]", text)
+        if _PROMPT_SIGNATURE_REGEX.search(_canonicalize_text(sanitized)):
+            deobfuscated = _strip_invisible_chars(_decode_unicode_tags(sanitized)).translate(_CONFUSABLE_MAP)
             sanitized = _PROMPT_SIGNATURE_REGEX.sub("[REDACTED]", deobfuscated)
             if _PROMPT_SIGNATURE_REGEX.search(_canonicalize_text(sanitized)):
                 sanitized = "[REDACTED]"

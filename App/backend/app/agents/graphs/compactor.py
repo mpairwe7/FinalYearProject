@@ -66,6 +66,8 @@ def _sanitize_obs_value(val: Any, *, str_limit: int = 200, depth: int = 0) -> An
     if isinstance(val, str):
         return _scrub_tool_str(val, str_limit)
     if depth >= 3:
+        if isinstance(val, (list, dict)):
+            return "[nested_structure_truncated]"
         return _scrub_tool_str(str(val), str_limit)
     if isinstance(val, list):
         return [

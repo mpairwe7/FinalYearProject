@@ -2,6 +2,7 @@
   "timestamp": "2026-10-27T16:27:50.984465+00:00",
   "gateway_url": "https://struttingly-nongeological-briella.ngrok-free.dev",
   "total_scenarios": 88000,
+  "unique_scenarios": 137,
   "passed_scenarios": 88000,
   "overall_accuracy_pct": 100.0,
   "matrix_elapsed_s": 46.37,

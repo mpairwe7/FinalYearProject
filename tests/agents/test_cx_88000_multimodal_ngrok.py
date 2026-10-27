@@ -17,6 +17,7 @@ def test_cx_88000_multimodal_ngrok_telemetry_integrity() -> None:
 
     data = json.loads(REPORT_JSON.read_text(encoding="utf-8"))
     assert data["total_scenarios"] == 88000
+    assert data["unique_scenarios"] == 137
     assert data["passed_scenarios"] == 88000
     assert data["overall_accuracy_pct"] == 100.0
 
@@ -61,18 +62,20 @@ def test_cx_88000_multimodal_ngrok_telemetry_integrity() -> None:
     assert all(item["passed"] for item in live["screenshot_and_error_live_probes"])
 
     assert len(live["multimodal_tts_asr_5_locales"]) == 5
-    expected_b3_tokens = {
-        "en": ("eighteen", "18", "value added", "vat"),
-        "lg": ("uganda", "kkumi", "munaana", "kikumi"),
-        "sw": ("uganda", "kumi", "nane", "asilimia"),
-        "nyn": ("uganda", "munaana", "kikumi", "ikumi"),
-        "ach": ("uganda", "apar", "aboro", "mucoro"),
+    expected_b3_subject_and_rate = {
+        "en": (("value added", "vat", "uganda"), ("eighteen", "18")),
+        "lg": (("uganda", "omusono", "omusolo"), ("kkumi", "munaana")),
+        "sw": (("uganda", "kodi", "thamani"), ("kumi", "nane")),
+        "nyn": (("uganda", "omushoro"), ("ikumi", "munaana")),
+        "ach": (("uganda", "mucoro"), ("apar", "aboro")),
     }
     for item in live["multimodal_tts_asr_5_locales"]:
         assert item["passed"] is True
         tr = str(item.get("transcript") or "").lower()
         assert "rwanda" not in tr and "18000" not in tr
-        assert any(tok in tr for tok in expected_b3_tokens[item["locale"]])
+        subj_tokens, rate_tokens = expected_b3_subject_and_rate[item["locale"]]
+        assert any(tok in tr for tok in subj_tokens), f"Missing subject token in {item['locale']}: {tr}"
+        assert any(tok in tr for tok in rate_tokens), f"Missing rate token in {item['locale']}: {tr}"
 
     assert len(live["call_receptionist_ws_5_locales"]) == 5
     assert all(item["passed"] for item in live["call_receptionist_ws_5_locales"])
