@@ -496,3 +496,21 @@ export const BuildingIcon = ({ size = 14 }: { size?: number } = {}) => (
   </svg>
 );
 
+
+/** Notification bell, as on ura.go.ug's "Media Center" link. */
+export const BellIcon = ({ size = 16 }: { size?: number } = {}) => (
+  <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+    <path d="M12 2a6 6 0 0 0-6 6v3.6c0 .9-.3 1.7-.9 2.4L4 15.4V17h16v-1.6L18.9 14c-.6-.7-.9-1.5-.9-2.4V8a6 6 0 0 0-6-6Z" />
+    <path d="M9.8 19a2.3 2.3 0 0 0 4.4 0Z" />
+  </svg>
+);
+
+/** The accessibility symbol at the head of ura.go.ug's main navigation. */
+export const AccessibilityIcon = ({ size = 26 }: { size?: number } = {}) => (
+  <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="10" cy="3.8" r="1.6" />
+    <path d="M10 7v6.5h5.2l2.3 5.5 2-.8" />
+    <path d="M10 10h5" />
+    <path d="M7.4 10.6a5.6 5.6 0 1 0 7.4 7.9" />
+  </svg>
+);

@@ -1,265 +1,1261 @@
-/* Inbuilt URA Portal Co-Pilot Workspace (Phase 42 — Approach 3 + Approach 2 Contract) */
+/* Inbuilt URA Portal Co-Pilot Workspace, dressed as ura.go.ug.
+ *
+ * A taxpayer arrives here from the chat and goes on to the real portal, so the
+ * workspace wears the official site's frame rather than a look of its own: the
+ * white header with the logo and utility links, the blue section bar with its
+ * mega menus, an inner page's banner with the yellow title and the quick-links
+ * band, and the "Chat with us." launcher.
+ *
+ * Colours come from the official logo (`public/ura-logo.png`: yellow #FFF200,
+ * royal blue #233F8E) and from the owner's screenshots of ura.go.ug
+ * (2026-10-27): the section bar's blue, the mega menus' near-white, the yellow
+ * page titles, the sky-blue "Click for details" button. The type is Montserrat
+ * (`app/portal/layout.tsx`), the open match for the site's geometric sans.
+ * Light only, like the site. Sizes are in em so the accessibility control can
+ * scale the whole workspace.
+ */
 
 .ura-portal-workspace {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 380px;
+  --urap-blue: #1d5ba8;
+  --urap-blue-dark: #164a8c;
+  --urap-blue-deep: #0f3a73;
+  --urap-logo-blue: #233f8e;
+  --urap-yellow: #fff200;
+  --urap-yellow-strong: #e2bd00;
+  --urap-sky: #4a90d9;
+  --urap-sky-dark: #3479c2;
+  --urap-ink: #333333;
+  --urap-ink-soft: #5b5f66;
+  --urap-line: #d9dde3;
+  --urap-page: #f4f6f9;
+  --urap-mega: rgba(248, 248, 248, 0.98);
+  --urap-danger: #c62828;
+  --urap-shell: 1280px;
+
+  /* PortalCopilotCard is shared with the chat and reads the app theme's
+     tokens; pinned to light values here so it matches the frame in either
+     app theme. */
+  --bg-0: #ffffff;
+  --bg-1: #f7f8fa;
+  --bg-2: #ffffff;
+  --surface-1: #ffffff;
+  --surface-2: #f2f4f7;
+  --surface-3: #e8ebf0;
+  --border-0: #dfe3e8;
+  --border-1: #c9ced6;
+  --text-0: #1d1d1f;
+  --text-1: #333333;
+  --text-2: #5b5f66;
+  --text-3: #6b6f75;
+  --success: #067647;
+  --warning: #b54708;
+  --danger: #b42318;
+  --ura-blue-bright: var(--urap-blue);
+  --cv2-focus: var(--urap-blue);
+  --cv2-accent: var(--urap-blue);
+  --cv2-accent-contrast: #ffffff;
+  --cv2-accent-hover: var(--urap-blue-dark);
+  --cv2-accent-soft: #e8f0fb;
+
+  position: relative;
   min-height: 100vh;
-  background: #f8fafc;
-  color: #0f172a;
-  font-family: inherit;
+  background: var(--urap-page);
+  color: var(--urap-ink);
+  color-scheme: light;
+  font-family: var(--font-urap), "Montserrat", "Segoe UI", Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
 }
 
-@media (max-width: 1024px) {
-  .ura-portal-workspace {
-    grid-template-columns: 1fr;
-  }
+.ura-portal-workspace.is-large-text {
+  font-size: 17px;
 }
 
-.ura-portal-main {
-  padding: 1.5rem 2rem 4rem;
-  max-width: 920px;
+.ura-portal-workspace *,
+.ura-portal-workspace *::before,
+.ura-portal-workspace *::after {
+  box-sizing: border-box;
+}
+
+/* globals.css colours every anchor for the chat (`a`, and in light theme
+   `:root[data-theme="light"] a` and its :hover). Here a link takes the colour
+   of the part of the frame it sits in; equal specificity, later in the
+   cascade. */
+:root .ura-portal-workspace a,
+:root .ura-portal-workspace a:hover {
+  color: inherit;
+}
+
+.ura-portal-workspace :is(a, button, input, select, textarea, summary):focus-visible {
+  outline: 3px solid var(--urap-yellow-strong);
+  outline-offset: 2px;
+}
+
+.urap-shell {
   width: 100%;
+  max-width: var(--urap-shell);
   margin: 0 auto;
+  padding-inline: 1.6em;
 }
 
-.ura-portal-topbar {
+.urap-skip {
+  position: absolute;
+  left: 1em;
+  top: -10em;
+  z-index: 60;
+  padding: 0.6em 1em;
+  background: var(--urap-blue);
+  color: #ffffff;
+  border-radius: 4px;
+}
+.urap-skip:focus {
+  top: 1em;
+}
+
+/* ---------------------------------------------------------------------------
+ * Header: logo left; utility links, search, FAQs and language right.
+ * ------------------------------------------------------------------------- */
+.urap-header {
+  background: #ffffff;
+  border-bottom: 1px solid #edf0f3;
+}
+
+.urap-header-inner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  padding: 0.875rem 1.25rem;
-  background: #0b2545;
-  color: #ffffff;
-  border-radius: 0.75rem;
-  margin-bottom: 1.25rem;
-  flex-wrap: wrap;
+  gap: 1.5em;
+  min-height: 7em;
+  padding-block: 0.6em;
 }
 
-.ura-portal-brand {
+.urap-logo {
+  display: block;
+  flex: none;
+}
+
+.urap-logo img {
+  display: block;
+  width: auto;
+  height: 5.6em;
+}
+
+.urap-header-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.75em;
+  min-width: 0;
+}
+
+.urap-utility {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  row-gap: 0.4em;
+  color: var(--urap-ink);
+}
+
+.urap-utility-link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  padding: 0 0.95em;
+  border: 0;
+  background: none;
+  color: var(--urap-ink);
+  font: inherit;
+  font-size: 1.1em;
+  font-weight: 500;
+  line-height: 1.25;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.urap-utility-link + .urap-utility-link {
+  border-left: 1.5px solid var(--urap-blue);
+}
+
+.urap-utility-link:last-child {
+  padding-right: 0.15em;
+}
+
+:root .ura-portal-workspace .urap-utility-link:hover {
+  color: var(--urap-blue);
+}
+
+/* The small notification dots the site puts on "Contact Us" and "Login". */
+.urap-utility-link.has-dot::after {
+  content: "";
+  position: absolute;
+  top: -0.5em;
+  right: 0.35em;
+  width: 0.62em;
+  height: 0.62em;
+  border-radius: 50%;
+  background: var(--urap-sky);
+}
+
+.urap-utility-link.is-login.has-dot::after {
+  right: -0.35em;
+  background: var(--urap-blue-dark);
+}
+
+.urap-utility-link.is-signed-in {
+  color: var(--success);
+  cursor: default;
+}
+
+.urap-utility-link svg {
+  flex: none;
+}
+
+.urap-tools {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.6em;
 }
 
-.ura-portal-crest {
-  background: #f59e0b;
-  color: #0b2545;
-  font-weight: 800;
-  padding: 0.35rem 0.65rem;
-  border-radius: 0.375rem;
-  font-size: 0.85rem;
-  letter-spacing: 0.05em;
-}
-
-.ura-portal-top-actions {
+.urap-search {
   display: flex;
   align-items: center;
-  gap: 0.65rem;
-  flex-wrap: wrap;
+  width: 20em;
+  height: 2.6em;
+  background: #ffffff;
+  border: 1.5px solid var(--urap-blue);
+  border-radius: 5px;
 }
 
-.ura-portal-back-link {
-  color: #fde68a;
+.urap-search:focus-within {
+  box-shadow: 0 0 0 3px rgba(29, 91, 168, 0.18);
+}
+
+.urap-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 0.75em;
+  border: 0;
+  background: transparent;
+  color: var(--urap-ink);
+  font: inherit;
+  font-size: 1.07em;
+}
+
+.urap-search input::placeholder {
+  color: #7a7f87;
+}
+
+.urap-search input:focus {
+  outline: none;
+}
+
+.urap-search button {
+  display: grid;
+  place-items: center;
+  width: 2.6em;
+  height: 100%;
+  border: 0;
+  background: none;
+  color: var(--urap-blue);
+  cursor: pointer;
+}
+
+.urap-search button svg {
+  width: 1.35em;
+  height: 1.35em;
+  stroke-width: 2.4;
+}
+
+.urap-select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  height: 2.6em;
+  padding: 0 0.75em;
+  background: #ffffff;
+  border: 1px solid #8f949b;
+  border-radius: 5px;
+  color: var(--urap-ink);
+  font-size: 1.02em;
   text-decoration: none;
-  font-size: 0.875rem;
-  font-weight: 600;
-  padding: 0.4rem 0.75rem;
-  border-radius: 0.5rem;
-  border: 1px solid rgba(253, 230, 138, 0.35);
-}
-
-.ura-portal-back-link:hover {
-  background: rgba(253, 230, 138, 0.12);
-}
-
-.ura-portal-switch-tabs {
-  display: flex;
-  gap: 0.5rem;
-  overflow-x: auto;
-  padding-bottom: 0.75rem;
-  margin-bottom: 1.25rem;
-}
-
-.ura-portal-tab {
-  padding: 0.45rem 0.85rem;
-  border-radius: 999px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  text-decoration: none;
-  background: #e2e8f0;
-  color: #1e293b;
   white-space: nowrap;
 }
 
-.ura-portal-tab.is-active {
-  background: #0b2545;
+.urap-select svg {
+  width: 0.85em;
+  height: 0.85em;
+}
+
+.urap-language select {
+  appearance: none;
+  padding-right: 1.5em;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.urap-language select:focus {
+  outline: none;
+}
+
+.urap-language:focus-within {
+  outline: 3px solid var(--urap-yellow-strong);
+  outline-offset: 2px;
+}
+
+.urap-language::after {
+  content: "▼";
+  position: absolute;
+  right: 0.7em;
+  font-size: 0.72em;
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------------------
+ * The blue section bar and its mega menus.
+ * ------------------------------------------------------------------------- */
+.urap-mainnav {
+  position: relative;
+  z-index: 30;
+  background: var(--urap-blue);
   color: #ffffff;
 }
 
-.ura-portal-form-card {
+.urap-mainnav-inner {
+  display: flex;
+  align-items: stretch;
+  min-height: 4.4em;
+}
+
+.urap-a11y {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 4.6em;
+  border: 0;
+  background: var(--urap-blue-dark);
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.urap-a11y svg {
+  width: 2.1em;
+  height: 2.1em;
+}
+
+.urap-a11y[aria-pressed="true"] {
+  background: var(--urap-blue-deep);
+  box-shadow: inset 0 -4px 0 var(--urap-yellow);
+}
+
+.urap-menu-toggle {
+  display: none;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0 1.1em;
+  border: 0;
+  background: none;
+  color: #ffffff;
+  font: inherit;
+  font-size: 1.1em;
+  cursor: pointer;
+}
+
+.urap-menu {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: stretch;
+  margin: 0;
+  padding: 0 0 0 0.6em;
+  list-style: none;
+}
+
+.urap-menu-item {
+  display: flex;
+  align-items: stretch;
+}
+
+.urap-menu-link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  min-height: 3.6em;
+  padding: 0 1.15em;
+  border: 0;
+  background: transparent;
+  color: #ffffff;
+  font: inherit;
+  font-size: 1.22em;
+  font-weight: 400;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+:root .ura-portal-workspace .urap-menu-link {
+  color: #ffffff;
+}
+
+.urap-menu-link svg {
+  width: 0.7em;
+  height: 0.7em;
+  opacity: 0.85;
+}
+
+/* The thin dividers between sections. */
+.urap-menu-item + .urap-menu-item > .urap-menu-link::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 1.5em;
+  border-left: 1px solid rgba(255, 255, 255, 0.65);
+  transform: translateY(-50%);
+}
+
+/* The section this page is in, and an open menu, sit in a white tab. */
+:root .ura-portal-workspace .urap-menu-item.is-current > .urap-menu-link,
+:root .ura-portal-workspace .urap-menu-item.is-open > .urap-menu-link,
+:root .ura-portal-workspace .urap-menu-link:hover {
   background: #ffffff;
-  border: 1px solid #cbd5e1;
-  border-radius: 0.875rem;
-  padding: 1.5rem;
-  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05);
+  color: var(--urap-ink);
+}
+
+.urap-menu-item.is-current > .urap-menu-link::before,
+.urap-menu-item.is-open > .urap-menu-link::before,
+.urap-menu-item.is-current + .urap-menu-item > .urap-menu-link::before,
+.urap-menu-item.is-open + .urap-menu-item > .urap-menu-link::before {
+  display: none;
+}
+
+.urap-mega {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  background: var(--urap-mega);
+  color: var(--urap-ink);
+  border-top: 1px solid #e6e8eb;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.12);
+}
+
+.urap-mega-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0 2em;
+  padding-block: 2.2em 2.6em;
+  padding-left: calc(1.6em + 4.6em);
+}
+
+.urap-mega-col {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.urap-mega-col li + li {
+  margin-top: 1.55em;
+}
+
+.urap-mega-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: 1.15em;
+  text-decoration: none;
+}
+
+:root .ura-portal-workspace .urap-mega-link {
+  color: #3c3c3c;
+}
+
+:root .ura-portal-workspace .urap-mega-link:hover,
+:root .ura-portal-workspace .urap-mega-link.is-current {
+  color: var(--urap-blue);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.urap-mega-link svg {
+  opacity: 0.6;
+}
+
+/* ---------------------------------------------------------------------------
+ * Banner: breadcrumb and Back, the yellow title, the quick-links band.
+ * ------------------------------------------------------------------------- */
+.urap-banner {
+  position: relative;
+  color: #ffffff;
+  background:
+    linear-gradient(180deg, rgba(8, 28, 64, 0.2), rgba(8, 28, 64, 0.5)),
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.035) 0 14px, rgba(255, 255, 255, 0) 14px 28px),
+    linear-gradient(115deg, var(--urap-blue-deep), var(--urap-blue) 55%, var(--urap-logo-blue));
+}
+
+.urap-banner-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1em;
+  padding-top: 1em;
+}
+
+.urap-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4em;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.95em;
+}
+
+.urap-breadcrumb li + li::before {
+  content: "›";
+  margin-right: 0.4em;
+  opacity: 0.8;
+}
+
+.urap-breadcrumb a {
+  text-decoration: none;
+}
+
+:root .ura-portal-workspace .urap-breadcrumb a:hover {
+  text-decoration: underline;
+}
+
+.urap-back {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.45em 0.9em;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.15);
+  font-size: 0.95em;
+  text-decoration: none;
+}
+
+:root .ura-portal-workspace .urap-back:hover {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.urap-banner-body {
+  padding-block: 1.3em 1.7em;
+  text-align: center;
+}
+
+.urap-banner-title {
+  margin: 0;
+  color: var(--urap-yellow);
+  font-size: 2.7em;
+  font-weight: 500;
+  line-height: 1.15;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+}
+
+.urap-banner-sub {
+  margin: 0.6em 0 0;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 0.92em;
+}
+
+.urap-quicklinks {
+  background: rgba(0, 0, 0, 0.38);
+}
+
+.urap-quicklinks-inner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding-block: 0.55em;
+}
+
+.urap-quicklink {
+  position: relative;
+  padding: 0.45em 1.1em;
+  font-size: 1.12em;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.urap-quicklink + .urap-quicklink::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 1.3em;
+  border-left: 1px solid rgba(255, 255, 255, 0.75);
+  transform: translateY(-50%);
+}
+
+:root .ura-portal-workspace .urap-quicklink:hover,
+:root .ura-portal-workspace .urap-quicklink.is-active {
+  color: var(--urap-yellow);
+}
+
+.urap-quicklink.is-active {
+  font-weight: 600;
+}
+
+.urap-quicklink.is-active::after {
+  content: "";
+  position: absolute;
+  left: 1.1em;
+  right: 1.1em;
+  bottom: 0.1em;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--urap-yellow);
+}
+
+/* ---------------------------------------------------------------------------
+ * Body: the form, and the Co-Pilot rail beside it.
+ * ------------------------------------------------------------------------- */
+.urap-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 25em;
+  gap: 1.6em;
+  align-items: start;
+  padding-block: 1.8em 4em;
+}
+
+.ura-portal-main {
+  min-width: 0;
+}
+
+.ura-portal-auth-gate {
+  margin-bottom: 1.4em;
+  padding: 1.4em 1.5em;
+  background: #ffffff;
+  border: 1px solid var(--urap-line);
+  border-left: 5px solid var(--urap-yellow-strong);
+  border-radius: 6px;
+}
+
+.ura-portal-auth-gate h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  margin: 0 0 0.5em;
+  color: var(--urap-blue-deep);
+  font-size: 1.2em;
+  font-weight: 600;
+}
+
+.ura-portal-auth-gate p {
+  margin: 0;
+  color: var(--urap-ink-soft);
+}
+
+.ura-portal-auth-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75em;
+  margin-top: 1.1em;
+}
+
+.ura-portal-form-card {
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid var(--urap-line);
+  border-radius: 6px;
+  box-shadow: 0 2px 10px rgba(16, 24, 40, 0.05);
 }
 
 .ura-portal-form-header {
   display: flex;
-  justify-content: space-between;
   align-items: flex-start;
-  gap: 1rem;
-  border-bottom: 1px solid #e2e8f0;
-  padding-bottom: 1rem;
-  margin-bottom: 1.25rem;
+  justify-content: space-between;
+  gap: 1em;
+  padding: 1.1em 1.4em;
+  background: var(--urap-blue);
+  color: #ffffff;
+}
+
+.ura-portal-form-title {
+  margin: 0;
+  font-size: 1.3em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.ura-portal-form-step {
+  margin: 0.3em 0 0;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 0.92em;
 }
 
 .ura-portal-form-code {
-  font-size: 0.75rem;
+  flex: none;
+  padding: 0.3em 0.65em;
+  background: var(--urap-yellow);
+  border-radius: 3px;
+  color: #1d1d1f;
+  font-size: 0.8em;
   font-weight: 700;
-  color: #0369a1;
-  background: #e0f2fe;
-  padding: 0.25rem 0.6rem;
-  border-radius: 0.375rem;
+  letter-spacing: 0.03em;
+}
+
+.ura-portal-form-body {
+  padding: 1.4em;
 }
 
 .ura-portal-error-banner {
-  background: #fef2f2;
-  border: 1px solid #f87171;
-  color: #991b1b;
-  padding: 0.85rem 1rem;
-  border-radius: 0.625rem;
-  margin-bottom: 1.25rem;
-  font-size: 0.9rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+  margin-bottom: 1.2em;
+  padding: 0.8em 1em;
+  background: #fdecec;
+  border: 1px solid #f1a7a7;
+  border-left: 4px solid var(--urap-danger);
+  border-radius: 4px;
+  color: #8a1c1c;
+  font-size: 0.95em;
   font-weight: 600;
 }
 
 .ura-portal-field-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16em), 1fr));
+  gap: 0.4em 1.2em;
 }
 
 .ura-portal-field {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  padding: 0.65rem;
-  border-radius: 0.625rem;
+  gap: 0.4em;
+  margin: 0 -0.55em;
+  padding: 0.55em;
   border: 2px solid transparent;
+  border-radius: 6px;
   transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 }
 
 .ura-portal-field.copilot-dom-spotlight {
-  border-color: #f59e0b;
-  background: #fffbeb;
-  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.22);
+  background: #fffbe0;
+  border-color: var(--urap-yellow-strong);
+  box-shadow: 0 0 0 4px rgba(255, 242, 0, 0.3);
 }
 
 .ura-portal-field label {
-  font-size: 0.85rem;
+  color: var(--urap-ink);
+  font-size: 0.92em;
   font-weight: 600;
-  color: #1e293b;
+}
+
+.ura-portal-required {
+  color: var(--urap-danger);
 }
 
 .ura-portal-field input,
 .ura-portal-field select,
 .ura-portal-field textarea {
-  padding: 0.6rem 0.75rem;
-  border-radius: 0.5rem;
-  border: 1px solid #94a3b8;
-  font-size: 0.92rem;
+  width: 100%;
+  min-height: 2.75em;
+  padding: 0.55em 0.75em;
   background: #ffffff;
-  color: #0f172a;
+  border: 1px solid #b9bfc7;
+  border-radius: 4px;
+  color: #1d1d1f;
+  font: inherit;
+  font-size: 1em;
+}
+
+.ura-portal-field textarea {
+  min-height: 6em;
+  resize: vertical;
+}
+
+.ura-portal-field input:focus,
+.ura-portal-field select:focus,
+.ura-portal-field textarea:focus {
+  border-color: var(--urap-blue);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(29, 91, 168, 0.18);
+}
+
+.ura-portal-field [aria-invalid="true"] {
+  border-color: var(--urap-danger);
+}
+
+.ura-portal-field-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  color: var(--urap-danger);
+  font-size: 0.85em;
+  font-weight: 600;
 }
 
 .ura-portal-coachmark {
-  font-size: 0.8rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45em;
+  padding: 0.5em 0.7em;
+  background: #fff8d6;
+  border: 1px solid var(--urap-yellow-strong);
+  border-radius: 4px;
+  color: #5c4a00;
+  font-size: 0.88em;
   font-weight: 600;
-  color: #92400e;
-  background: #fef3c7;
-  border: 1px solid #f59e0b;
-  padding: 0.35rem 0.6rem;
-  border-radius: 0.375rem;
-  margin-top: 0.25rem;
+}
+
+.ura-portal-coachmark.is-banner {
+  margin-bottom: 1em;
+}
+
+.ura-portal-coachmark svg {
+  flex: none;
+  margin-top: 0.15em;
+}
+
+.ura-portal-link-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .ura-portal-submit-bar {
-  margin-top: 1.5rem;
-  padding-top: 1rem;
-  border-top: 1px solid #e2e8f0;
   display: flex;
-  gap: 0.75rem;
-  align-items: center;
   flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75em;
+  margin-top: 1.4em;
+  padding-top: 1.2em;
+  border-top: 1px solid #e7eaee;
 }
 
-/* Embedded AI Co-Pilot Side Rail */
+/* Buttons: the section bar's blue for the main action, the site's sky blue
+   ("Click for details") for the second, outlined for the rest. */
+.ura-copilot-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5em;
+  min-height: 2.75em;
+  padding: 0.55em 1.1em;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.95em;
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.ura-copilot-btn:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+:root .ura-portal-workspace .ura-copilot-btn.is-primary {
+  background: var(--urap-blue);
+  color: #ffffff;
+}
+
+:root .ura-portal-workspace .ura-copilot-btn.is-primary:hover:not(:disabled) {
+  background: var(--urap-blue-dark);
+  color: #ffffff;
+}
+
+:root .ura-portal-workspace .ura-copilot-btn.is-secondary {
+  background: var(--urap-sky);
+  color: #ffffff;
+}
+
+:root .ura-portal-workspace .ura-copilot-btn.is-secondary:hover:not(:disabled) {
+  background: var(--urap-sky-dark);
+  color: #ffffff;
+}
+
+:root .ura-portal-workspace .ura-copilot-btn.is-outline {
+  background: #ffffff;
+  border-color: var(--urap-blue);
+  color: var(--urap-blue);
+}
+
+:root .ura-portal-workspace .ura-copilot-btn.is-outline:hover:not(:disabled) {
+  background: #eef4fc;
+  color: var(--urap-blue-dark);
+}
+
+/* ---------------------------------------------------------------------------
+ * The built-in AI Co-Pilot rail.
+ * ------------------------------------------------------------------------- */
 .ura-copilot-rail {
-  background: #0f172a;
-  color: #f8fafc;
-  border-left: 1px solid #1e293b;
-  padding: 1.25rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+  position: sticky;
+  top: 1em;
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid var(--urap-line);
+  border-radius: 6px;
+  box-shadow: 0 2px 10px rgba(16, 24, 40, 0.05);
+  scroll-margin-top: 1em;
 }
 
 .ura-copilot-rail-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid #1e293b;
-  padding-bottom: 0.75rem;
+  gap: 0.75em;
+  padding: 0.95em 1.1em;
+  background: var(--urap-blue-deep);
+  border-bottom: 3px solid var(--urap-yellow);
+  color: #ffffff;
+}
+
+.ura-copilot-rail-head strong {
+  display: block;
+  font-size: 1.05em;
+  font-weight: 600;
+}
+
+.ura-copilot-rail-sub {
+  display: block;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.78em;
 }
 
 .ura-copilot-live-pill {
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  background: rgba(16, 185, 129, 0.2);
-  color: #6ee7b7;
-  padding: 0.2rem 0.55rem;
+  flex: none;
+  padding: 0.2em 0.6em;
+  background: rgba(16, 185, 129, 0.22);
   border-radius: 999px;
+  color: #a7f3d0;
+  font-size: 0.72em;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.ura-copilot-rail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1em;
+  padding: 1.1em;
+}
+
+.ura-copilot-rail-desc {
+  margin: 0;
+  color: var(--urap-ink-soft);
+  font-size: 0.9em;
 }
 
 .ura-copilot-rail-actions {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.55em;
 }
 
-.ura-copilot-btn {
-  padding: 0.6rem 0.9rem;
-  border-radius: 0.5rem;
-  font-size: 0.85rem;
+.ura-copilot-rail-actions .ura-copilot-btn {
+  justify-content: flex-start;
+}
+
+.ura-copilot-card-wrap .portal-copilot-card {
+  margin-top: 0;
+  background: #f8fafc;
+}
+
+/* ---------------------------------------------------------------------------
+ * Footer and the "Chat with us." launcher.
+ * ------------------------------------------------------------------------- */
+.urap-footer {
+  background: var(--urap-blue-deep);
+  border-top: 4px solid var(--urap-yellow);
+  color: rgba(255, 255, 255, 0.9);
+  scroll-margin-top: 1em;
+}
+
+.urap-footer-inner {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2em;
+  padding-block: 2.2em 3.2em;
+}
+
+.urap-footer-brand {
+  margin: 0;
+  color: #ffffff;
+  font-size: 1.1em;
   font-weight: 600;
+}
+
+.urap-footer-tagline {
+  margin: 0.3em 0 0;
+  color: var(--urap-yellow);
+  font-size: 0.85em;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.urap-footer-title {
+  margin: 0 0 0.6em;
+  color: #ffffff;
+  font-size: 1em;
+  font-weight: 600;
+}
+
+.urap-footer-list {
+  display: grid;
+  gap: 0.35em;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.92em;
+}
+
+.urap-footer-list a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.urap-footer-note {
+  margin: 0;
+  font-size: 0.88em;
+}
+
+.urap-chat-launcher {
+  position: fixed;
+  right: 1.4em;
+  bottom: 1.4em;
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
   cursor: pointer;
-  border: 1px solid transparent;
-  text-align: left;
 }
 
-.ura-copilot-btn.is-gold {
-  background: #f59e0b;
-  color: #0f172a;
+.urap-chat-bubble {
+  padding: 0.45em 1em;
+  background: var(--urap-yellow);
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  color: #1d1d1f;
+  font-size: 1.12em;
+  font-weight: 500;
 }
 
-.ura-copilot-btn.is-emerald {
-  background: #10b981;
-  color: #052e16;
+.urap-chat-avatar {
+  display: grid;
+  place-items: center;
+  width: 3.4em;
+  height: 3.4em;
+  border: 3px solid #ffffff;
+  border-radius: 50%;
+  background: var(--urap-blue);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  color: #ffffff;
 }
 
-.ura-copilot-btn.is-outline {
-  background: rgba(255, 255, 255, 0.06);
-  color: #e2e8f0;
-  border-color: #334155;
+.urap-chat-avatar svg {
+  width: 1.5em;
+  height: 1.5em;
 }
 
-.ura-portal-auth-gate {
-  background: #ffffff;
-  border: 2px solid #f59e0b;
-  border-radius: 0.875rem;
-  padding: 1.75rem;
-  margin-bottom: 1.5rem;
+/* ---------------------------------------------------------------------------
+ * Narrower screens.
+ * ------------------------------------------------------------------------- */
+@media (max-width: 1100px) {
+  .urap-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ura-copilot-rail {
+    position: static;
+  }
+
+  .urap-search {
+    width: 15em;
+  }
+
+  .urap-menu-link {
+    padding: 0 0.85em;
+    font-size: 1.1em;
+  }
+}
+
+@media (max-width: 900px) {
+  .urap-header-inner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .urap-logo {
+    align-self: center;
+  }
+
+  .urap-header-right {
+    align-items: stretch;
+  }
+
+  .urap-utility {
+    justify-content: center;
+  }
+
+  .urap-tools {
+    flex-wrap: wrap;
+  }
+
+  .urap-search {
+    flex: 1 1 100%;
+    width: auto;
+  }
+
+  .urap-menu-toggle {
+    display: inline-flex;
+  }
+
+  .urap-menu {
+    display: none;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    flex-direction: column;
+    padding: 0;
+    background: var(--urap-blue);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.2);
+  }
+
+  .urap-menu.is-open {
+    display: flex;
+  }
+
+  .urap-menu-item {
+    flex-direction: column;
+    border-top: 1px solid rgba(255, 255, 255, 0.18);
+  }
+
+  .urap-menu-link {
+    justify-content: space-between;
+    width: 100%;
+    min-height: 3.2em;
+    padding: 0 1.4em;
+  }
+
+  .urap-menu-item + .urap-menu-item > .urap-menu-link::before {
+    display: none;
+  }
+
+  .urap-mega {
+    position: static;
+    box-shadow: none;
+  }
+
+  .urap-mega-grid {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 1em 1.6em 1.2em;
+  }
+
+  .urap-mega-col li,
+  .urap-mega-col li + li {
+    margin-top: 0.9em;
+  }
+
+  .urap-footer-inner {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.4em;
+  }
+}
+
+@media (max-width: 640px) {
+  .urap-shell {
+    padding-inline: 1em;
+  }
+
+  .urap-logo img {
+    height: 4.6em;
+  }
+
+  /* Wrapped onto two lines, a divider would start the second one: spacing
+     separates the links instead. */
+  .urap-utility {
+    gap: 0.35em 1.1em;
+  }
+
+  .urap-utility-link,
+  .urap-utility-link:last-child {
+    padding: 0;
+    font-size: 0.98em;
+  }
+
+  .urap-utility-link + .urap-utility-link {
+    border-left: 0;
+  }
+
+  .urap-utility-link.has-dot::after,
+  .urap-utility-link.is-login.has-dot::after {
+    right: -0.55em;
+  }
+
+  .urap-banner-top {
+    flex-wrap: wrap;
+  }
+
+  .urap-banner-title {
+    font-size: 1.9em;
+  }
+
+  /* The quick-links band scrolls sideways instead of wrapping into a block. */
+  .urap-quicklinks-inner {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .urap-quicklinks-inner::-webkit-scrollbar {
+    display: none;
+  }
+
+  .ura-portal-form-header {
+    flex-direction: column;
+  }
+
+  .ura-portal-form-body {
+    padding: 1.1em;
+  }
+
+  .ura-portal-submit-bar .ura-copilot-btn {
+    width: 100%;
+  }
+
+  .urap-chat-bubble {
+    display: none;
+  }
+
+  .urap-body {
+    padding-bottom: 6em;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ura-portal-field,
+  .ura-copilot-btn {
+    transition: none;
+  }
 }

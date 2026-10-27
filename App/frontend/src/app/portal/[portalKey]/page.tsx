@@ -3,21 +3,32 @@
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import Image from "next/image";
 import {
+  AccessibilityIcon,
   AlertTriangleIcon,
   ArrowLeftIcon,
   ArrowRightIcon,
+  BellIcon,
+  BotIcon,
   CheckCircleIcon,
+  ChevronDownIcon,
   CompassIcon,
+  ExternalLinkIcon,
   LightbulbIcon,
   LockIcon,
+  MenuIcon,
   PhoneIcon,
+  SearchIcon,
   ShieldCheckIcon,
   SparklesIcon,
 } from "../../../components/Icons";
 import { CallScreen } from "../../../components/call/CallScreen";
 import PortalCopilotCard from "../../../components/PortalCopilotCard";
 import { useCallStore } from "../../../store/useCallStore";
+import { useChatStore } from "../../../store/useChatStore";
+import { LOCALE_OPTIONS } from "../../../lib/locales";
+import { URA_CONTACTS, telDigits } from "../../../lib/uraContacts";
 import {
   authHeaders,
   getAuthToken,
@@ -481,15 +492,108 @@ PORTAL_SCREENS.asycuda = PORTAL_SCREENS.motor_vehicle;
 
 const SECRET_FIELD_RE = /(?:password|passwd|pwd|otp|pin|cvv|cvc|csc|secret|token|passcode)/i;
 
+/**
+ * The services, in the order of ura.go.ug's quick-links band ("Make a Payment |
+ * Get a TIN | File a Return | EFRIS | DTS | …"), then the rest of this workspace.
+ */
 const PORTAL_TAB_KEYS: { key: string; labelKey: TranslationKey }[] = [
   { key: "prn_payments", labelKey: "portalWorkspace.tab.prn_payments" },
   { key: "tin_registration", labelKey: "portalWorkspace.tab.tin_registration" },
   { key: "return_filing", labelKey: "portalWorkspace.tab.return_filing" },
-  { key: "tax_clearance", labelKey: "portalWorkspace.tab.tax_clearance" },
   { key: "efris", labelKey: "portalWorkspace.tab.efris" },
   { key: "dts", labelKey: "portalWorkspace.tab.dts" },
+  { key: "tax_clearance", labelKey: "portalWorkspace.tab.tax_clearance" },
+  { key: "get_refund", labelKey: "portalWorkspace.tab.get_refund" },
   { key: "objection_appeals", labelKey: "portalWorkspace.tab.objection_appeals" },
   { key: "motor_vehicle", labelKey: "portalWorkspace.tab.motor_vehicle" },
+];
+
+const URA_SITE = "https://ura.go.ug/en/";
+
+/** A mega-menu entry: one of this workspace's screens, or a page on ura.go.ug. */
+interface MenuLink {
+  labelKey: TranslationKey;
+  portalKey?: string;
+  href?: string;
+}
+
+interface MainMenuItem {
+  id: string;
+  labelKey: TranslationKey;
+  href?: string;
+  /** Columns, as ura.go.ug lays its mega menus out. */
+  mega?: MenuLink[][];
+  /** The section this workspace belongs to; shown selected, as the site does. */
+  current?: boolean;
+}
+
+/*
+ * ura.go.ug's main navigation and its two mega menus, as the owner's
+ * screenshots show them (2026-10-27). Entries this workspace serves open here;
+ * the rest open the official page in a new tab. Every official URL below is a
+ * page the project's own crawl of ura.go.ug (Data/crawl) fetched; entries whose
+ * page it never saw (Whistle Blow, Voluntary Disclosure, Stamp Duty, Sitemap)
+ * are left out rather than guessed.
+ */
+const DOMESTIC_TAXES_MEGA: MenuLink[][] = [
+  [
+    { labelKey: "portalWorkspace.tab.tin_registration", portalKey: "tin_registration" },
+    { labelKey: "portalWorkspace.tab.return_filing", portalKey: "return_filing" },
+    { labelKey: "portalWorkspace.tab.prn_payments", portalKey: "prn_payments" },
+  ],
+  [
+    { labelKey: "portalWorkspace.tab.efris", portalKey: "efris" },
+    { labelKey: "portalWorkspace.tab.dts", portalKey: "dts" },
+    { labelKey: "portalWorkspace.tab.get_refund", portalKey: "get_refund" },
+  ],
+  [
+    {
+      labelKey: "portalWorkspace.mega.taxIncentives",
+      href: "https://ura.go.ug/en/download/a-guide-on-tax-incentives-exemptions-available-to-the-uganda-investors/",
+    },
+    { labelKey: "portalWorkspace.tab.motor_vehicle", portalKey: "motor_vehicle" },
+    { labelKey: "portalWorkspace.mega.chooseAgent", href: "https://ura.go.ug/en/choose-agents/" },
+  ],
+  [
+    { labelKey: "portalWorkspace.tab.objection_appeals", portalKey: "objection_appeals" },
+    { labelKey: "portalWorkspace.tab.tax_clearance", portalKey: "tax_clearance" },
+  ],
+];
+
+const LEGAL_POLICY_MEGA: MenuLink[][] = [
+  [
+    { labelKey: "portalWorkspace.mega.laws", href: "https://ura.go.ug/download-category/laws-and-acts/" },
+    {
+      labelKey: "portalWorkspace.mega.dta",
+      href: "https://ura.go.ug/en/category/legal-policy/double-taxation-agreements/",
+    },
+  ],
+  [
+    {
+      labelKey: "portalWorkspace.mega.caseSummaries",
+      href: "https://ura.go.ug/download-category/case-summery-reports/",
+    },
+    {
+      labelKey: "portalWorkspace.mega.competentAuthority",
+      href: "https://ura.go.ug/en/delegated-competent-authorities/",
+    },
+  ],
+  [{ labelKey: "portalWorkspace.mega.debtCollections", href: "https://ura.go.ug/download-category/debt-collections/" }],
+  [
+    {
+      labelKey: "portalWorkspace.mega.fia",
+      href: "https://ura.go.ug/download-category/financial-intelligence-authority/",
+    },
+  ],
+];
+
+const MAIN_MENU: MainMenuItem[] = [
+  { id: "domestic", labelKey: "portalWorkspace.nav.domesticTaxes", mega: DOMESTIC_TAXES_MEGA, current: true },
+  { id: "import", labelKey: "portalWorkspace.nav.importExport", href: "https://ura.go.ug/en/import-export/" },
+  { id: "legal", labelKey: "portalWorkspace.nav.legalPolicy", mega: LEGAL_POLICY_MEGA },
+  { id: "education", labelKey: "portalWorkspace.nav.taxEducation", href: "https://ura.go.ug/en/category/tax-education/" },
+  { id: "opportunities", labelKey: "portalWorkspace.nav.opportunities", href: "https://ura.go.ug/en/category/opportunities/" },
+  { id: "research", labelKey: "portalWorkspace.nav.research", href: "https://ura.go.ug/en/category/publications/" },
 ];
 
 /**
@@ -827,6 +931,56 @@ export default function InbuiltPortalCopilotPage() {
     [askCopilotWithDomTelemetry, getFieldLabel, localizedTitle, screen.fields, t, values],
   );
 
+  const locale = useChatStore((s) => s.locale);
+  const setLocale = useChatStore((s) => s.setLocale);
+  const [largeText, setLargeText] = useState(false);
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const navRef = useRef<HTMLElement | null>(null);
+  const railRef = useRef<HTMLElement | null>(null);
+  const guideButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  const closeMenus = useCallback(() => {
+    setOpenMenu(null);
+    setMobileMenuOpen(false);
+  }, []);
+
+  // A mega menu closes on Escape and on a click outside the navigation.
+  useEffect(() => {
+    if (!openMenu) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpenMenu(null);
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (!navRef.current?.contains(event.target as Node)) setOpenMenu(null);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [openMenu]);
+
+  /** The "Chat with us." launcher: bring the Co-Pilot rail into view and focus it. */
+  const focusCopilot = useCallback(() => {
+    railRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    guideButtonRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  /** The header's search asks the Co-Pilot, in the context of this screen. */
+  const handleSearch = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      const query = searchQuery.trim();
+      if (!query) return;
+      focusCopilot();
+      void askCopilotWithDomTelemetry(query, false);
+    },
+    [askCopilotWithDomTelemetry, focusCopilot, searchQuery],
+  );
+
   const handlePersistBeforeSignIn = useCallback(() => {
     savePendingPortalContinuation({
       conversationId,
@@ -863,332 +1017,585 @@ export default function InbuiltPortalCopilotPage() {
 
   const currentPortalPath = `/portal/${screen.key}?conversation_id=${encodeURIComponent(conversationId)}&copilot=1`;
   const signInHref = `/signin?continue=signin&returnTo=${encodeURIComponent(currentPortalPath)}`;
+  const chatHref = `/?conversation_id=${encodeURIComponent(conversationId)}`;
+  const portalHref = (key: string) =>
+    `/portal/${key}?conversation_id=${encodeURIComponent(conversationId)}&copilot=1`;
+  const serviceTab = PORTAL_TAB_KEYS.find((tab) => tab.key === screen.key);
+  const serviceLabel = serviceTab ? t(serviceTab.labelKey) : localizedTitle;
 
   return (
-    <div className="ura-portal-workspace" data-testid="inbuilt-portal-workspace">
-      <main className="ura-portal-main">
-        <header className="ura-portal-topbar">
-          <div className="ura-portal-brand">
-            <span className="ura-portal-crest">URA</span>
-            <div>
-              <strong>{t("portalWorkspace.brandTitle")}</strong>
-              <div style={{ fontSize: "0.78rem", opacity: 0.85 }}>
-                {t("portalWorkspace.brandSubtitle", {
-                  formId: screen.formId,
+    <div
+      className={`ura-portal-workspace${largeText ? " is-large-text" : ""}`}
+      data-testid="inbuilt-portal-workspace"
+    >
+      <a className="urap-skip" href="#portal-screen-heading">
+        {t("portalWorkspace.skipToForm")}
+      </a>
+
+      {/* ura.go.ug's header: the logo, the utility links, search, FAQs and language. */}
+      <header className="urap-header">
+        <div className="urap-shell urap-header-inner">
+          <a
+            className="urap-logo"
+            href={URA_SITE}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={t("portalWorkspace.officialSite")}
+          >
+            <Image
+              src="/ura-logo-wordmark.png"
+              alt={t("portalWorkspace.brandTitle")}
+              width={148}
+              height={91}
+              priority
+            />
+          </a>
+          <div className="urap-header-right">
+            <nav className="urap-utility" aria-label={t("portalWorkspace.utilityNavLabel")}>
+              <a className="urap-utility-link has-dot" href="#urap-contact">
+                {t("portalWorkspace.util.contact")}
+              </a>
+              <a
+                className="urap-utility-link"
+                href="https://ura.go.ug/en/about-ura/"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {t("portalWorkspace.util.about")}
+              </a>
+              <a
+                className="urap-utility-link"
+                href="https://ura.go.ug/en/media-center/"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {t("portalWorkspace.util.media")} <BellIcon size={15} />
+              </a>
+              <button
+                type="button"
+                className="urap-utility-link"
+                aria-label={t("call.button")}
+                onClick={openCall}
+                data-testid="portal-call-ura-btn"
+              >
+                <PhoneIcon size={14} /> {t("call.button")}
+              </button>
+              {isSignedIn ? (
+                <span className="urap-utility-link is-signed-in">
+                  <CheckCircleIcon /> {t("portalWorkspace.util.signedIn")}
+                </span>
+              ) : (
+                <Link
+                  className="urap-utility-link has-dot is-login"
+                  href={signInHref}
+                  onClick={handlePersistBeforeSignIn}
+                >
+                  {t("portalWorkspace.util.login")}
+                </Link>
+              )}
+            </nav>
+            <div className="urap-tools">
+              <form className="urap-search" role="search" onSubmit={handleSearch}>
+                <input
+                  type="search"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder={t("portalWorkspace.search")}
+                  aria-label={t("portalWorkspace.searchLabel")}
+                />
+                <button type="submit" aria-label={t("portalWorkspace.search")}>
+                  <SearchIcon />
+                </button>
+              </form>
+              <a
+                className="urap-select"
+                href="https://ura.go.ug/en/crm-faqs/"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {t("portalWorkspace.faqs")} <ChevronDownIcon />
+              </a>
+              <label className="urap-select urap-language">
+                <span className="sr-only">{t("portalWorkspace.language")}</span>
+                <select value={locale} onChange={(e) => setLocale(e.target.value)}>
+                  {LOCALE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.native}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* The blue section bar, its accessibility control and mega menus. */}
+      <nav className="urap-mainnav" aria-label={t("portalWorkspace.mainNavLabel")} ref={navRef}>
+        <div className="urap-mainnav-inner">
+          <button
+            type="button"
+            className="urap-a11y"
+            aria-pressed={largeText}
+            aria-label={t("portalWorkspace.largeText")}
+            title={t("portalWorkspace.largeText")}
+            onClick={() => setLargeText((on) => !on)}
+          >
+            <AccessibilityIcon />
+          </button>
+          <button
+            type="button"
+            className="urap-menu-toggle"
+            aria-expanded={mobileMenuOpen}
+            aria-controls="urap-menu"
+            onClick={() => setMobileMenuOpen((open) => !open)}
+          >
+            <MenuIcon /> {t("portalWorkspace.menu")}
+          </button>
+          <ul id="urap-menu" className={`urap-menu${mobileMenuOpen ? " is-open" : ""}`}>
+            {MAIN_MENU.map((item) => {
+              const isOpen = openMenu === item.id;
+              return (
+                <li
+                  key={item.id}
+                  className={`urap-menu-item${item.mega ? " has-mega" : ""}${isOpen ? " is-open" : ""}${
+                    item.current ? " is-current" : ""
+                  }`}
+                  onPointerEnter={
+                    item.mega
+                      ? (e) => {
+                          if (e.pointerType === "mouse") setOpenMenu(item.id);
+                        }
+                      : undefined
+                  }
+                  onPointerLeave={
+                    item.mega
+                      ? (e) => {
+                          if (e.pointerType === "mouse") {
+                            setOpenMenu((current) => (current === item.id ? null : current));
+                          }
+                        }
+                      : undefined
+                  }
+                >
+                  {item.mega ? (
+                    <button
+                      type="button"
+                      className="urap-menu-link"
+                      aria-expanded={isOpen}
+                      aria-controls={`urap-mega-${item.id}`}
+                      onClick={() => setOpenMenu(isOpen ? null : item.id)}
+                    >
+                      {t(item.labelKey)} <ChevronDownIcon />
+                    </button>
+                  ) : (
+                    <a className="urap-menu-link" href={item.href} target="_blank" rel="noopener noreferrer">
+                      {t(item.labelKey)}
+                      <span className="sr-only"> {t("portalWorkspace.opensNewTab")}</span>
+                    </a>
+                  )}
+                  {item.mega && isOpen ? (
+                    <div id={`urap-mega-${item.id}`} className="urap-mega">
+                      <div className="urap-shell urap-mega-grid">
+                        {item.mega.map((column, columnIndex) => (
+                          <ul key={columnIndex} className="urap-mega-col">
+                            {column.map((link) => (
+                              <li key={link.labelKey}>
+                                {link.portalKey ? (
+                                  <Link
+                                    href={portalHref(link.portalKey)}
+                                    className={`urap-mega-link${link.portalKey === screen.key ? " is-current" : ""}`}
+                                    aria-current={link.portalKey === screen.key ? "page" : undefined}
+                                    onClick={closeMenus}
+                                  >
+                                    {t(link.labelKey)}
+                                  </Link>
+                                ) : (
+                                  <a
+                                    href={link.href}
+                                    className="urap-mega-link"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={closeMenus}
+                                  >
+                                    {t(link.labelKey)} <ExternalLinkIcon size={12} />
+                                    <span className="sr-only"> {t("portalWorkspace.opensNewTab")}</span>
+                                  </a>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      </nav>
+
+      {/* An inner page's banner: breadcrumb and Back, the yellow title, the quick-links band. */}
+      <section className="urap-banner" aria-label={serviceLabel}>
+        <div className="urap-shell urap-banner-top">
+          <nav aria-label={t("portalWorkspace.breadcrumbLabel")}>
+            <ol className="urap-breadcrumb">
+              <li>
+                <a href={URA_SITE} target="_blank" rel="noopener noreferrer">
+                  {t("portalWorkspace.breadcrumbHome")}
+                </a>
+              </li>
+              <li>{t("portalWorkspace.nav.domesticTaxes")}</li>
+              <li aria-current="page">{serviceLabel}</li>
+            </ol>
+          </nav>
+          <Link href={chatHref} className="urap-back" data-testid="portal-back-to-chat-link">
+            <ArrowLeftIcon size={14} /> {t("portalWorkspace.returnToChat")}
+          </Link>
+        </div>
+        <div className="urap-shell urap-banner-body">
+          <p className="urap-banner-title">{serviceLabel}</p>
+          <p className="urap-banner-sub">
+            {t("portalWorkspace.brandSubtitle", {
+              formId: screen.formId,
+              citation: screen.statutoryCitation,
+            })}
+          </p>
+        </div>
+        <nav className="urap-quicklinks" aria-label={t("portalWorkspace.servicesNavLabel")}>
+          <div className="urap-shell urap-quicklinks-inner">
+            {PORTAL_TAB_KEYS.map((tab) => (
+              <Link
+                key={tab.key}
+                href={portalHref(tab.key)}
+                className={`urap-quicklink${screen.key === tab.key ? " is-active" : ""}`}
+                aria-current={screen.key === tab.key ? "page" : undefined}
+              >
+                {t(tab.labelKey)}
+              </Link>
+            ))}
+          </div>
+        </nav>
+      </section>
+
+      <div className="urap-shell urap-body">
+        <main className="ura-portal-main">
+          {screen.requiresAuth && !isSignedIn ? (
+            <section
+              className="ura-portal-auth-gate"
+              data-testid="portal-auth-gate"
+              role="region"
+              aria-label={t("portalCopilot.stepUpBadge")}
+            >
+              <h2>
+                <LockIcon size={18} /> {t("portalWorkspace.authGateTitle", { title: localizedTitle })}
+              </h2>
+              <p>
+                {t("portalWorkspace.authGateBody", {
                   citation: screen.statutoryCitation,
                 })}
+              </p>
+              <div className="ura-portal-auth-actions">
+                <Link
+                  href={signInHref}
+                  onClick={handlePersistBeforeSignIn}
+                  className="ura-copilot-btn is-primary"
+                  data-testid="portal-gate-oidc-signin-btn"
+                >
+                  <LockIcon size={14} /> {t("portalWorkspace.authGateOidcBtn")} <ArrowRightIcon size={14} />
+                </Link>
+                <button
+                  type="button"
+                  className="ura-copilot-btn is-outline"
+                  data-testid="portal-gate-demo-signin-btn"
+                  onClick={() => void handleDemoQuickSignIn()}
+                >
+                  <ShieldCheckIcon size={14} /> {t("portalWorkspace.authGateDemoBtn")}
+                </button>
               </div>
+            </section>
+          ) : null}
+
+          <section className="ura-portal-form-card" aria-labelledby="portal-screen-heading">
+            <div className="ura-portal-form-header">
+              <div>
+                <h1 id="portal-screen-heading" className="ura-portal-form-title">
+                  {localizedTitle}
+                </h1>
+                <p className="ura-portal-form-step">{localizedStepTitle}</p>
+              </div>
+              <span className="ura-portal-form-code">{screen.formId}</span>
             </div>
-          </div>
-          <div className="ura-portal-top-actions" style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-            <button
-              type="button"
-              className="ura-portal-back-link"
-              aria-label={t("call.button")}
-              title={t("call.button")}
-              onClick={openCall}
-              data-testid="portal-call-ura-btn"
-              style={{ cursor: "pointer" }}
-            >
-              <PhoneIcon size={14} /> {t("call.button")}
-            </button>
-            <Link
-              href={`/?conversation_id=${encodeURIComponent(conversationId)}`}
-              className="ura-portal-back-link"
-              data-testid="portal-back-to-chat-link"
-            >
-              <ArrowLeftIcon size={14} /> {t("portalWorkspace.returnToChat")}
-            </Link>
-          </div>
-        </header>
 
-        <nav className="ura-portal-switch-tabs" aria-label={t("portalWorkspace.servicesNavLabel")}>
-          {PORTAL_TAB_KEYS.map((tab) => (
-            <Link
-              key={tab.key}
-              href={`/portal/${tab.key}?conversation_id=${encodeURIComponent(conversationId)}&copilot=1`}
-              className={`ura-portal-tab ${screen.key === tab.key ? "is-active" : ""}`}
-            >
-              {t(tab.labelKey)}
-            </Link>
-          ))}
-        </nav>
+            <div className="ura-portal-form-body">
+              {errorBanner && (
+                <div id="error-banner" className="ura-portal-error-banner" role="alert">
+                  <AlertTriangleIcon size={16} /> {errorBanner}
+                </div>
+              )}
 
-        {screen.requiresAuth && !isSignedIn ? (
-          <section
-            className="ura-portal-auth-gate"
-            data-testid="portal-auth-gate"
-            role="region"
-            aria-label={t("portalCopilot.stepUpBadge")}
-          >
-            <h2>
-              <LockIcon size={18} />{" "}
-              {t("portalWorkspace.authGateTitle", { title: localizedTitle })}
-            </h2>
-            <p>
-              {t("portalWorkspace.authGateBody", {
-                citation: screen.statutoryCitation,
-              })}
-            </p>
-            <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginTop: "1rem" }}>
-              <Link
-                href={signInHref}
-                onClick={handlePersistBeforeSignIn}
-                className="ura-copilot-btn is-gold"
-                data-testid="portal-gate-oidc-signin-btn"
-              >
-                <LockIcon size={14} /> {t("portalWorkspace.authGateOidcBtn")}{" "}
-                <ArrowRightIcon size={14} />
-              </Link>
-              <button
-                type="button"
-                className="ura-copilot-btn is-emerald"
-                data-testid="portal-gate-demo-signin-btn"
-                onClick={() => void handleDemoQuickSignIn()}
-              >
-                <ShieldCheckIcon size={14} /> {t("portalWorkspace.authGateDemoBtn")}
-              </button>
+              {statusNotice && !errorBanner && (
+                <div
+                  className="ura-portal-coachmark is-banner"
+                  data-testid="portal-autofill-status-notice"
+                  role="status"
+                >
+                  <LightbulbIcon size={15} /> {statusNotice}
+                </div>
+              )}
+
+              {stalledMs >= 15000 && emptyRequiredFields.length > 0 && !errorBanner && (
+                <div
+                  className="ura-portal-coachmark is-banner"
+                  data-testid="portal-stall-detector-banner"
+                  role="status"
+                >
+                  <LightbulbIcon size={15} />{" "}
+                  <span>
+                    {t("portalWorkspace.stallPrompt", { field: emptyRequiredFields[0] })}{" "}
+                    <button
+                      type="button"
+                      className="ura-portal-link-btn"
+                      onClick={() =>
+                        void askCopilotWithDomTelemetry(
+                          "I paused on this step, highlight the next field I need to fill",
+                          false,
+                        )
+                      }
+                    >
+                      {t("portalWorkspace.stallHighlightBtn")}
+                    </button>
+                  </span>
+                </div>
+              )}
+
+              <form onSubmit={handlePortalFormSubmit} noValidate>
+                <div className="ura-portal-field-grid">
+                  {screen.fields.map((f) => {
+                    const isSpotlighted = spotlightField === f.name;
+                    const err = fieldErrors[f.name];
+                    const coach = coachmarks[f.name];
+                    const errId = `${f.selectorId}-err`;
+                    const fieldLabel = getFieldLabel(f);
+                    const effectivePlaceholder = demoPlaceholders[f.name] || f.placeholder || "";
+                    return (
+                      <div
+                        key={f.name}
+                        ref={(el) => {
+                          fieldRefs.current[f.name] = el;
+                        }}
+                        className={`ura-portal-field ${isSpotlighted ? "copilot-dom-spotlight" : ""}`}
+                        data-testid={`portal-dom-field-${f.name}`}
+                      >
+                        <label htmlFor={f.selectorId}>
+                          {fieldLabel}{" "}
+                          {f.required && (
+                            <span className="ura-portal-required" aria-hidden="true">
+                              *
+                            </span>
+                          )}
+                        </label>
+                        {f.type === "select" ? (
+                          <select
+                            id={f.selectorId}
+                            name={f.name}
+                            value={values[f.name] || ""}
+                            aria-invalid={Boolean(err)}
+                            aria-describedby={err ? errId : undefined}
+                            onChange={(e) => recordFieldChange(f.name, e.target.value)}
+                          >
+                            <option value="">{t("portalWorkspace.selectPlaceholder")}</option>
+                            {(f.options ?? []).map((opt) => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.labelKey ? t(opt.labelKey) : opt.label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : f.type === "textarea" ? (
+                          <textarea
+                            id={f.selectorId}
+                            name={f.name}
+                            rows={3}
+                            placeholder={effectivePlaceholder}
+                            value={values[f.name] || ""}
+                            aria-invalid={Boolean(err)}
+                            aria-describedby={err ? errId : undefined}
+                            onChange={(e) => recordFieldChange(f.name, e.target.value)}
+                          />
+                        ) : (
+                          <input
+                            id={f.selectorId}
+                            name={f.name}
+                            type={f.type}
+                            placeholder={effectivePlaceholder}
+                            value={values[f.name] || ""}
+                            aria-invalid={Boolean(err)}
+                            aria-describedby={err ? errId : undefined}
+                            onChange={(e) => recordFieldChange(f.name, e.target.value)}
+                          />
+                        )}
+                        {err && (
+                          <span id={errId} className="ura-portal-field-error" role="alert">
+                            <AlertTriangleIcon size={13} /> {err}
+                          </span>
+                        )}
+                        {coach && (
+                          <div className="ura-portal-coachmark" data-testid={`portal-coachmark-${f.name}`}>
+                            <LightbulbIcon size={14} /> AI Co-Pilot: {coach}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="ura-portal-submit-bar">
+                  <button
+                    type="submit"
+                    id="btnGeneratePRN"
+                    className="ura-copilot-btn is-primary"
+                    data-testid="portal-form-submit-btn"
+                  >
+                    <CheckCircleIcon /> {localizedSubmitLabel}
+                  </button>
+                  <button
+                    type="button"
+                    className="ura-copilot-btn is-secondary"
+                    data-testid="portal-autofill-safe-btn"
+                    onClick={handleAutoFillSafeFields}
+                  >
+                    <SparklesIcon /> {t("portalWorkspace.autofillBtn")}
+                  </button>
+                </div>
+              </form>
             </div>
           </section>
-        ) : null}
+        </main>
 
-        <section className="ura-portal-form-card" aria-labelledby="portal-screen-heading">
-          <div className="ura-portal-form-header">
+        {/* Embedded AI Co-Pilot Side Rail */}
+        <aside
+          id="urap-copilot"
+          ref={railRef}
+          className="ura-copilot-rail"
+          aria-label={t("portalWorkspace.railTitle")}
+        >
+          <div className="ura-copilot-rail-head">
             <div>
-              <h1 id="portal-screen-heading" style={{ margin: 0, fontSize: "1.25rem" }}>
-                {localizedTitle}
-              </h1>
-              <p style={{ margin: "0.35rem 0 0", fontSize: "0.875rem", color: "#475569" }}>
-                {localizedStepTitle}
-              </p>
+              <strong>{t("portalWorkspace.railTitle")}</strong>
+              <span className="ura-copilot-rail-sub">{t("portalWorkspace.railSubtitle")}</span>
             </div>
-            <span className="ura-portal-form-code">{screen.formId}</span>
+            <span className="ura-copilot-live-pill">{t("portalWorkspace.railActivePill")}</span>
           </div>
 
-          {errorBanner && (
-            <div id="error-banner" className="ura-portal-error-banner" role="alert">
-              <AlertTriangleIcon size={16} /> {errorBanner}
-            </div>
-          )}
+          <div className="ura-copilot-rail-body">
+            <p className="ura-copilot-rail-desc">{t("portalWorkspace.railDescription")}</p>
 
-          {statusNotice && !errorBanner && (
-            <div
-              className="ura-portal-coachmark"
-              data-testid="portal-autofill-status-notice"
-              role="status"
-              style={{ marginBottom: "1rem" }}
-            >
-              <LightbulbIcon size={15} /> {statusNotice}
-            </div>
-          )}
-
-          {stalledMs >= 15000 && emptyRequiredFields.length > 0 && !errorBanner && (
-            <div
-              className="ura-portal-coachmark"
-              data-testid="portal-stall-detector-banner"
-              role="status"
-              style={{ marginBottom: "1rem" }}
-            >
-              <LightbulbIcon size={15} />{" "}
-              {t("portalWorkspace.stallPrompt", { field: emptyRequiredFields[0] })}{" "}
+            <div className="ura-copilot-rail-actions">
               <button
+                ref={guideButtonRef}
                 type="button"
-                style={{
-                  background: "none",
-                  border: "none",
-                  textDecoration: "underline",
-                  fontWeight: 700,
-                  cursor: "pointer",
-                  color: "inherit",
-                }}
+                className="ura-copilot-btn is-primary"
+                data-testid="copilot-rail-guide-me-btn"
+                disabled={busy}
                 onClick={() =>
                   void askCopilotWithDomTelemetry(
-                    "I paused on this step, highlight the next field I need to fill",
+                    "I am stuck on this portal screen, highlight what I need to do next",
                     false,
                   )
                 }
               >
-                {t("portalWorkspace.stallHighlightBtn")}
-              </button>
-            </div>
-          )}
-
-          <form onSubmit={handlePortalFormSubmit} noValidate>
-            <div className="ura-portal-field-grid">
-              {screen.fields.map((f) => {
-                const isSpotlighted = spotlightField === f.name;
-                const err = fieldErrors[f.name];
-                const coach = coachmarks[f.name];
-                const errId = `${f.selectorId}-err`;
-                const fieldLabel = getFieldLabel(f);
-                const effectivePlaceholder = demoPlaceholders[f.name] || f.placeholder || "";
-                return (
-                  <div
-                    key={f.name}
-                    ref={(el) => {
-                      fieldRefs.current[f.name] = el;
-                    }}
-                    className={`ura-portal-field ${isSpotlighted ? "copilot-dom-spotlight" : ""}`}
-                    data-testid={`portal-dom-field-${f.name}`}
-                  >
-                    <label htmlFor={f.selectorId}>
-                      {fieldLabel} {f.required && <span aria-hidden="true">*</span>}
-                    </label>
-                    {f.type === "select" ? (
-                      <select
-                        id={f.selectorId}
-                        name={f.name}
-                        value={values[f.name] || ""}
-                        aria-invalid={Boolean(err)}
-                        aria-describedby={err ? errId : undefined}
-                        onChange={(e) => recordFieldChange(f.name, e.target.value)}
-                      >
-                        <option value="">{t("portalWorkspace.selectPlaceholder")}</option>
-                        {(f.options ?? []).map((opt) => (
-                          <option key={opt.value} value={opt.value}>
-                            {opt.labelKey ? t(opt.labelKey) : opt.label}
-                          </option>
-                        ))}
-                      </select>
-                    ) : f.type === "textarea" ? (
-                      <textarea
-                        id={f.selectorId}
-                        name={f.name}
-                        rows={3}
-                        placeholder={effectivePlaceholder}
-                        value={values[f.name] || ""}
-                        aria-invalid={Boolean(err)}
-                        aria-describedby={err ? errId : undefined}
-                        onChange={(e) => recordFieldChange(f.name, e.target.value)}
-                      />
-                    ) : (
-                      <input
-                        id={f.selectorId}
-                        name={f.name}
-                        type={f.type}
-                        placeholder={effectivePlaceholder}
-                        value={values[f.name] || ""}
-                        aria-invalid={Boolean(err)}
-                        aria-describedby={err ? errId : undefined}
-                        onChange={(e) => recordFieldChange(f.name, e.target.value)}
-                      />
-                    )}
-                    {err && (
-                      <span
-                        id={errId}
-                        style={{ color: "#b91c1c", fontSize: "0.8rem", fontWeight: 600 }}
-                        role="alert"
-                      >
-                        <AlertTriangleIcon size={13} /> {err}
-                      </span>
-                    )}
-                    {coach && (
-                      <div
-                        className="ura-portal-coachmark"
-                        data-testid={`portal-coachmark-${f.name}`}
-                      >
-                        <LightbulbIcon size={14} /> AI Co-Pilot: {coach}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="ura-portal-submit-bar">
-              <button
-                type="submit"
-                id="btnGeneratePRN"
-                className="ura-copilot-btn is-gold"
-                data-testid="portal-form-submit-btn"
-              >
-                <CheckCircleIcon /> {localizedSubmitLabel}
+                <CompassIcon size={15} />{" "}
+                {busy ? t("portalWorkspace.railGuideBusy") : t("portalWorkspace.railGuideBtn")}
               </button>
               <button
                 type="button"
-                className="ura-copilot-btn is-emerald"
-                data-testid="portal-autofill-safe-btn"
-                onClick={handleAutoFillSafeFields}
+                className="ura-copilot-btn is-secondary"
+                data-testid="copilot-rail-complete-task-btn"
+                disabled={busy}
+                onClick={() => void askCopilotWithDomTelemetry(`Prepare and review ${localizedTitle}`, true)}
               >
-                <SparklesIcon /> {t("portalWorkspace.autofillBtn")}
+                <ShieldCheckIcon size={15} /> {t("portalWorkspace.railExecuteBtn")}
+              </button>
+              <button type="button" className="ura-copilot-btn is-outline" onClick={handleAutoFillSafeFields}>
+                <SparklesIcon /> {t("portalWorkspace.railPrefillBtn")}
               </button>
             </div>
-          </form>
-        </section>
-      </main>
 
-      {/* Embedded AI Co-Pilot Side Rail */}
-      <aside className="ura-copilot-rail" aria-label={t("portalWorkspace.railTitle")}>
-        <div className="ura-copilot-rail-head">
-          <div>
-            <strong>{t("portalWorkspace.railTitle")}</strong>
-            <div style={{ fontSize: "0.75rem", color: "#94a3b8" }}>
-              {t("portalWorkspace.railSubtitle")}
-            </div>
+            {copilotCard && (
+              <div className="ura-copilot-card-wrap">
+                <PortalCopilotCard
+                  copilot={copilotCard}
+                  conversationId={conversationId}
+                  onSubmitInlineForm={(_taskId, submittedFields) => {
+                    const merged = { ...values, ...submittedFields };
+                    setValues(merged);
+                    void askCopilotWithDomTelemetry(
+                      `Submitted form for ${localizedTitle}`,
+                      true,
+                      merged,
+                      {},
+                      "",
+                    );
+                  }}
+                />
+              </div>
+            )}
           </div>
-          <span className="ura-copilot-live-pill">{t("portalWorkspace.railActivePill")}</span>
-        </div>
+        </aside>
+      </div>
 
-        <p style={{ fontSize: "0.85rem", color: "#cbd5e1", margin: 0 }}>
-          {t("portalWorkspace.railDescription")}
-        </p>
-
-        <div className="ura-copilot-rail-actions">
-          <button
-            type="button"
-            className="ura-copilot-btn is-gold"
-            data-testid="copilot-rail-guide-me-btn"
-            disabled={busy}
-            onClick={() =>
-              void askCopilotWithDomTelemetry(
-                "I am stuck on this portal screen, highlight what I need to do next",
-                false,
-              )
-            }
-          >
-            <CompassIcon size={15} />{" "}
-            {busy ? t("portalWorkspace.railGuideBusy") : t("portalWorkspace.railGuideBtn")}
-          </button>
-          <button
-            type="button"
-            className="ura-copilot-btn is-emerald"
-            data-testid="copilot-rail-complete-task-btn"
-            disabled={busy}
-            onClick={() =>
-              void askCopilotWithDomTelemetry(`Prepare and review ${localizedTitle}`, true)
-            }
-          >
-            <ShieldCheckIcon size={15} /> {t("portalWorkspace.railExecuteBtn")}
-          </button>
-          <button
-            type="button"
-            className="ura-copilot-btn is-outline"
-            onClick={handleAutoFillSafeFields}
-          >
-            <SparklesIcon /> {t("portalWorkspace.railPrefillBtn")}
-          </button>
-        </div>
-
-        {copilotCard && (
-          <div style={{ marginTop: "0.5rem" }}>
-            <PortalCopilotCard
-              copilot={copilotCard}
-              conversationId={conversationId}
-              onSubmitInlineForm={(_taskId, submittedFields) => {
-                const merged = { ...values, ...submittedFields };
-                setValues(merged);
-                void askCopilotWithDomTelemetry(
-                  `Submitted form for ${localizedTitle}`,
-                  true,
-                  merged,
-                  {},
-                  "",
-                );
-              }}
-            />
+      <footer className="urap-footer" id="urap-contact">
+        <div className="urap-shell urap-footer-inner">
+          <div className="urap-footer-col">
+            <p className="urap-footer-brand">{t("portalWorkspace.brandTitle")}</p>
+            <p className="urap-footer-tagline">{t("portalWorkspace.footer.tagline")}</p>
           </div>
-        )}
-      </aside>
+          <div className="urap-footer-col">
+            <h2 className="urap-footer-title">{t("portalWorkspace.footer.contactTitle")}</h2>
+            <ul className="urap-footer-list">
+              <li>
+                {t("portalWorkspace.footer.tollFree")}:{" "}
+                {URA_CONTACTS.tollFree.map((number, index) => (
+                  <React.Fragment key={number}>
+                    {index > 0 && " / "}
+                    <a href={`tel:${telDigits(number)}`}>{number}</a>
+                  </React.Fragment>
+                ))}
+              </li>
+              <li>
+                {t("portalWorkspace.footer.whatsapp")}:{" "}
+                <a href={`tel:${telDigits(URA_CONTACTS.whatsapp)}`}>{URA_CONTACTS.whatsapp}</a>
+              </li>
+              <li>
+                {t("portalWorkspace.footer.website")}:{" "}
+                <a href={URA_CONTACTS.website} target="_blank" rel="noopener noreferrer">
+                  ura.go.ug
+                </a>
+              </li>
+            </ul>
+          </div>
+          <div className="urap-footer-col">
+            <h2 className="urap-footer-title">{t("portalWorkspace.footer.copilotTitle")}</h2>
+            <p className="urap-footer-note">{t("portalWorkspace.footer.copilotNote")}</p>
+          </div>
+        </div>
+      </footer>
+
+      {/* ura.go.ug's "Chat with us." launcher, opening this workspace's own Co-Pilot. */}
+      <button
+        type="button"
+        className="urap-chat-launcher"
+        aria-label={t("portalWorkspace.chatWithUsLabel")}
+        onClick={focusCopilot}
+      >
+        <span className="urap-chat-bubble" aria-hidden="true">
+          {t("portalWorkspace.chatWithUs")}
+        </span>
+        <span className="urap-chat-avatar" aria-hidden="true">
+          <BotIcon />
+        </span>
+      </button>
       <CallScreen />
     </div>
   );

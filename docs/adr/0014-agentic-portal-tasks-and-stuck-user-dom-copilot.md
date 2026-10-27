@@ -69,3 +69,30 @@ Validated by:
    - Installed `tesseract-ocr` in `Dockerfile.gpu` and added a `shutil.which("tesseract")` CLI fallback (`tesseract_cli`) in `_extract_image` (`documents.py`) for local GPU deployments when `paddleocr`/`easyocr`/`pytesseract` are not installed.
    - Expanded `DocumentType.PORTAL_SCREENSHOT` in `vision/document_classifier.py` and `diagnose_portal_screenshot` in `documents.py` with dedicated recognition, checklists, and step-by-step completion instructions for URA's **Apply To Tax Payment In Installment** wizard (Sections B–F: `Basis Of Installment`, `Liability Breakdown`, `Outstanding Liability Wise Breakdown`, `Installment Details`, and `Upload Documents and Submit application` with numeric-boundary `has_zero_downpayment` check) and **EFRIS Web Portal** (`First-time Registration` Sections A–C, `Fiscal Document Validation`, `Validation History`, and `Detailed VAT Sales/Purchase Report`).
    - Integrated `diagnose_ura_error` and `extract_task_entities` into `diagnose_portal_screenshot` (`documents.py`), routing `inbuilt_portal_url` directly to `&intent={remediation_task_id}`, computing `what_needs_to_be_done`, `checklist` (`detected` vs `action_needed` items), and `recommended_prompts`, carrying `prefill_state` into `evaluate_turn` (`service.py`), and validating `<select>` option membership on continuation restore in `portal/[portalKey]/page.tsx`.
+
+## Amendment 2 (2026-10-27 — Gap G266): the workspace wears ura.go.ug's frame
+
+The owner asked that the inbuilt portal look like the official one, so that a
+taxpayer moving between this workspace and ura.go.ug is never unsure which part
+of URA they are in. The workspace (`portal/[portalKey]/page.tsx`, `portal.css`)
+had its own navy-and-amber look.
+
+1. **The official frame, from the owner's screenshots of ura.go.ug (2026-10-27).**
+   The cloud workspace could not load the site: the egress answered "upstream request failed" even with
+   the domain allowed.
+   - **Header:** white, with the official logo (`public/ura-logo-wordmark.png`, cropped from the repository's `ura-logo.png`). Utility links (Contact Us, About Us, Media Center, Call URA, Login), a blue-bordered search, FAQs and Select Language.
+   - **Section bar:** blue, led by the accessibility control. The current section ("Domestic Taxes") sits in a white tab. Two mega menus copy the site's columns (Domestic Taxes, Legal & Policy).
+   - **Banner:** an inner page's banner with breadcrumb, Back, the yellow title and the quick-links band. The services are relabelled in the site's own words: Make a Payment, Get a TIN, File a Return, EFRIS, DTS, and the rest.
+   - **Also:** a blue footer with the official contact numbers (`URA_CONTACTS`), and the site's yellow "Chat with us." launcher.
+2. **Colours and type.**
+   - Colours come from the official logo (`#FFF200`, `#233F8E`) and the screenshots: section bar `#1D5BA8`, sky-blue secondary `#4A90D9`, near-white mega menus.
+   - Type is Montserrat (SIL OFL 1.1), the open match for the site's geometric sans. It is vendored as one variable latin woff2 and loaded by `app/portal/layout.tsx`, so only `/portal/*` downloads it.
+   - The frame is light only, like the site. The shared `PortalCopilotCard` tokens are pinned light inside it.
+3. **Links are verified, not guessed.** Entries this workspace serves open here. The rest open the official page in a new tab, and only pages the project's own crawl of ura.go.ug (`Data/crawl`) fetched are linked. Whistle Blow, Voluntary Disclosure, Stamp Duty and Sitemap are left out.
+4. **What the frame must not imply.**
+   - Sign-in stays the app's own `/signin` (OIDC) flow; nothing imitates the official credential form.
+   - The banner names the screen an "Inbuilt AI Co-Pilot Workspace". The footer says the Co-Pilot asks before it submits anything.
+   - The header search asks the Co-Pilot about the screen rather than searching ura.go.ug.
+5. **Unchanged contracts:** every field `id`/`selectorId` the DOM telemetry and spotlight address, every `data-testid`, the auth gate, continuation and autofill.
+
+Confirmed by `bunx vitest run` (765 tests), `bun run lint`, `tsc --noEmit`, a production `next build`, a server render of the portal routes, and Playwright captures at 1440 px and 390 px, with no horizontal overflow at 390 px.
