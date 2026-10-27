@@ -74,6 +74,9 @@ _instruments: dict[str, Any] = {}
 _TURN_USAGE: contextvars.ContextVar[dict[str, int] | None] = contextvars.ContextVar(
     "turn_llm_usage", default=None
 )
+_TURN_TOOL_CALLS: contextvars.ContextVar[list[int] | None] = contextvars.ContextVar(
+    "turn_tool_calls", default=None
+)
 _TURN_ATTRIBUTES: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
     "turn_span_attributes", default=None
 )
@@ -199,7 +202,11 @@ def trace_rag_pipeline(
     started_agent = time.perf_counter()
     previous_usage = _TURN_USAGE.get()
     if previous_usage is None:
-        _TURN_USAGE.set({"input_tokens": 0, "output_tokens": 0, "calls": 0, "tool_calls": 0})
+        _TURN_USAGE.set({"input_tokens": 0, "output_tokens": 0, "calls": 0})
+    previous_tool_calls = _TURN_TOOL_CALLS.get()
+    tool_calls_box = [0] if previous_tool_calls is None else previous_tool_calls
+    if previous_tool_calls is None:
+        _TURN_TOOL_CALLS.set(tool_calls_box)
     try:
         if _tracer is None:
             yield ctx
@@ -226,7 +233,7 @@ def trace_rag_pipeline(
             if usage.get("calls"):
                 span.set_attribute("gen_ai.usage.input_tokens", usage["input_tokens"])
                 span.set_attribute("gen_ai.usage.output_tokens", usage["output_tokens"])
-            tool_call_count = int(usage.get("tool_calls") or 0)
+            tool_call_count = int(tool_calls_box[0])
             span.set_attribute("gen_ai.invoke_agent.tool_calls", tool_call_count)
             if _meter is not None:
                 agent_attrs = {"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": AGENT_NAME}
@@ -244,6 +251,7 @@ def trace_rag_pipeline(
                 ).record(tool_call_count, agent_attrs)
     finally:
         _TURN_USAGE.set(previous_usage)
+        _TURN_TOOL_CALLS.set(previous_tool_calls)
 
 
 @contextmanager
@@ -286,7 +294,7 @@ def turn_usage_scope() -> Generator[dict[str, int], None, None]:
     ``set`` rather than a token reset, so it is safe across an async
     generator that may be finalised from another context.
     """
-    usage = {"input_tokens": 0, "output_tokens": 0, "calls": 0, "tool_calls": 0}
+    usage = {"input_tokens": 0, "output_tokens": 0, "calls": 0}
     previous = _TURN_USAGE.get()
     _TURN_USAGE.set(usage)
     try:
@@ -587,10 +595,10 @@ def trace_tool_call(
         status = "ok" if outcome["ok"] and not error_type else "error"
         if span is not None and status == "error":
             span.set_attribute("error.type", error_type or "tool_error")
-        usage = _TURN_USAGE.get()
-        if usage is not None:
+        tool_calls_box = _TURN_TOOL_CALLS.get()
+        if tool_calls_box is not None:
             with _usage_lock:
-                usage["tool_calls"] = int(usage.get("tool_calls") or 0) + 1
+                tool_calls_box[0] += 1
         try:
             from .analytics import metrics
 
