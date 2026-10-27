@@ -3068,20 +3068,14 @@ def evaluate_turn(
         else ""
     )
 
-    # Gather entities from prior user turns in the same conversation (both in-memory owner cache
-    # when a proven session/user scope exists and conversation_history)
-    history_entities: dict[str, Any] = {}
-    if has_proven_session:
-        with _TASK_CACHE_LOCK:
-            if anon_owner_key and anon_owner_key in _CONVERSATION_ENTITY_MEMORY:
-                history_entities.update(_CONVERSATION_ENTITY_MEMORY[anon_owner_key])
-            if owner_key in _CONVERSATION_ENTITY_MEMORY:
-                history_entities.update(_CONVERSATION_ENTITY_MEMORY[owner_key])
-
     def _should_carry_over_amount(msg_text: str) -> bool:
         low_m = msg_text.lower()
         return any(w in low_m for w in ("pay", "prn", "payment", "slip", "refund", "net tax"))
 
+    # Gather entities from prior user turns in the same conversation: extract raw
+    # conversation_history first, then overlay `_CONVERSATION_ENTITY_MEMORY` so
+    # in-place inline edits (`decision="prepare"`) take precedence over older turn text.
+    history_entities: dict[str, Any] = {}
     if conversation_history:
         for turn in conversation_history:
             if isinstance(turn, Mapping):
@@ -3091,6 +3085,13 @@ def evaluate_turn(
                     if "amount_ugx" in turn_ent and not _should_carry_over_amount(u_msg):
                         turn_ent.pop("amount_ugx", None)
                     history_entities.update(turn_ent)
+
+    if has_proven_session:
+        with _TASK_CACHE_LOCK:
+            if anon_owner_key and anon_owner_key in _CONVERSATION_ENTITY_MEMORY:
+                history_entities.update(_CONVERSATION_ENTITY_MEMORY[anon_owner_key])
+            if owner_key in _CONVERSATION_ENTITY_MEMORY:
+                history_entities.update(_CONVERSATION_ENTITY_MEMORY[owner_key])
 
     current_turn_entities = extract_task_entities(message)
     if current_turn_entities and has_proven_session:
