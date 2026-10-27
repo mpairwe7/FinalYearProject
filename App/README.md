@@ -71,6 +71,7 @@ generation over either local Transformers or vLLM.
 - `GET /ready` — Readiness probe (model + Qdrant status)
 - `POST /v1/chat` — Synchronous chat with full RAG pipeline
 - `POST /v1/chat/stream` — SSE streaming chat (progressive token delivery)
+- `POST /v1/chat/title` — Few-word summary title of a conversation's opening exchange (chat sidebar)
 - `POST /classify` — Text classification
 - `POST /classify/batch` — Batch classification
 - `POST /v1/index` — Trigger document re-indexing (auth required)
@@ -98,7 +99,7 @@ still return `401`.
 
 | Surface | Anonymous? | Auth/consent behavior |
 |---------|------------|-----------------------|
-| `POST /v1/chat`, `POST /v1/chat/stream` | Yes | Optional bearer token; anonymous turns still get RAG/workflows and citations |
+| `POST /v1/chat`, `POST /v1/chat/stream`, `POST /v1/chat/title` | Yes | Optional bearer token; anonymous turns still get RAG/workflows and citations |
 | `GET /v1/speech/health`, `POST /v1/tts`, `POST /v1/translate` | Yes | Optional bearer token |
 | `POST /v1/asr`, `POST /v1/voice/chat`, voice WebSocket, `POST /v1/voice/vision/chat` | Yes | Requires explicit voice consent: `X-Voice-Consent: true` for HTTP or `voice_consent_accepted=true` in the WebSocket `session_start` frame |
 | `/v1/me/*`, feedback writes/summaries, analytics dashboards, metrics, evaluation exports, offline bundle APIs | No | Require a verified user or staff/admin role depending on route |

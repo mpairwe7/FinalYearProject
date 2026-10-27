@@ -694,6 +694,35 @@ class SynthesizeResponse(BaseModel):
     error: str | None = None
 
 
+class ChatTitleMessage(BaseModel):
+    """One turn of the exchange a conversation title is made from."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1, max_length=2000)
+
+
+class ChatTitleRequest(BaseModel):
+    """A conversation's opening exchange, to be named for the sidebar."""
+
+    messages: list[ChatTitleMessage] = Field(..., min_length=1, max_length=4)
+    locale: str = Field("en", pattern=r"^[a-z]{2,3}$")
+
+    @model_validator(mode="after")
+    def _names_a_user_message(self) -> "ChatTitleRequest":
+        if not any(message.role == "user" for message in self.messages):
+            raise ValueError("A title needs at least one user message")
+        return self
+
+
+class ChatTitleResponse(BaseModel):
+    """``title`` is null when no usable title came back; the client keeps its own."""
+
+    title: str | None = None
+    source: Literal["model", "unavailable", "blocked"]
+
+
 class TranslateRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=4000)
     source_lang: str = Field("en", pattern=r"^[a-z]{2,3}$")

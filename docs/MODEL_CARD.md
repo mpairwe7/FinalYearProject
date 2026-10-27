@@ -49,6 +49,10 @@
 - Answering taxpayer questions about URA services, tax rates, filing procedures, penalties, and exemptions
 - Providing grounded answers with source citations from official URA publications
 
+### Auxiliary Uses (same model, ungrounded, output capped and checked)
+- Restating a reply as one of a workflow's options (`llm.classify_choice`), re-checked by the deterministic matcher
+- Naming a conversation for the sidebar from its opening exchange (`llm.summarize_title`, `POST /v1/chat/title`, ADR-0017): input guarded and stripped of TINs, NINs, emails and digit runs; the reply is cut to ≤ 6 words and rejected if it reads as a refusal or carries an identifier
+
 ### Out-of-Scope Uses
 - **NOT legal/tax advice**: Responses include mandatory disclaimers
 - **NOT a replacement for URA staff**: Complex cases are escalated to human agents

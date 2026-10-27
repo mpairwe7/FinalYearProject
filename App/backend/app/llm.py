@@ -2357,6 +2357,61 @@ def classify_choice(reply: str, options: list[str]) -> str:
             pass
 
 
+def summarize_title(messages: list[dict[str, str]]) -> str:
+    """Name a conversation in a few words, for the sidebar.
+
+    Shaped after classify_choice: a minimal ungrounded prompt against the model
+    already loaded, output capped hard, every failure an empty string. The
+    caller (app.chat_title) guards the input, strips personal data before it
+    gets here, and cleans or rejects what comes back, so nothing this returns
+    is shown unchecked.
+    """
+    if not LLM_ENABLED or not messages:
+        return ""
+
+    if LLM_BACKEND == "vllm":
+        try:
+            return (_vllm_generate(messages, temperature=0.2, max_tokens=24) or "").strip()
+        except Exception:  # noqa: BLE001 — a title is never worth an exception
+            logger.debug("vLLM title summarisation failed", exc_info=True)
+            return ""
+
+    if not _load_model() or _tokenizer is None or _model is None:
+        return ""
+
+    try:
+        import torch
+
+        with _local_generation_context():
+            prompt = _tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True,
+                enable_thinking=False,
+            )
+            inputs = _tokenizer([prompt], return_tensors="pt").to(_model.device)
+            with torch.no_grad():
+                output_ids = _model.generate(  # nosemgrep: ura-llm01-raw-user-input-to-llm
+                    **inputs,
+                    max_new_tokens=20,  # six words and nothing else
+                    do_sample=False,
+                    use_cache=True,
+                    pad_token_id=_tokenizer.eos_token_id,
+                )
+            text = _tokenizer.decode(
+                output_ids[0][inputs["input_ids"].shape[-1]:], skip_special_tokens=True
+            )
+        return strip_thought(text).strip()
+    except Exception:  # noqa: BLE001 — same: the client keeps its own title
+        logger.debug("local title summarisation failed", exc_info=True)
+        return ""
+    finally:
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+
+
 # One-shot exemplars for prompted MT into English, keyed by source locale.
 #
 # Deliberately everyday sentences with no tax vocabulary. A tax-domain

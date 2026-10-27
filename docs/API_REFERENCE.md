@@ -294,6 +294,46 @@ reader.releaseLock();
 
 ---
 
+### Name a Conversation (Chat Title)
+
+A few-word summary title for a conversation, for the chat sidebar — the way
+ChatGPT, Claude and Gemini name a chat. The web client asks once per
+conversation, after the first answer lands (`hooks/useAutoTitle.ts`), and keeps
+its own provisional title (`lib/chatTitle.ts`) until — or instead of — this one.
+A title the user typed always wins.
+
+```http
+POST /v1/chat/title
+```
+
+**Request Body**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `messages` | array | Yes | 1–4 turns `{role: "user"\|"assistant", content}` (≤ 2,000 chars each); at least one `user` turn. The client sends the first question and the first answer |
+| `locale` | string | No | Conversation language (`en` default). A non-English title is generated in English and localized through `localize_reply`, falling back to English |
+
+**Response**
+
+```json
+{ "title": "TIN verification for tax clearance", "source": "model" }
+```
+
+| `source` | `title` | Meaning |
+|----------|---------|---------|
+| `model` | string | The model's title, cleaned: one line, ≤ 6 words / 60 chars, no quotes or trailing punctuation |
+| `unavailable` | `null` | No usable title: model off or failed, or its reply rejected (a refusal, or a digit run / PII) |
+| `blocked` | `null` | The input guard refused the opening message; nothing was sent to the model |
+
+The opening message passes `InputGuard` and is stripped of TINs, NINs, emails
+and digit runs (phone and account numbers) before the model sees it, so an
+identifier never becomes a sidebar title. Anonymous callers are allowed
+(`optional_user`). Counted as `chat_title_total{source}`.
+
+**Rate Limiting**: Same limit as `/v1/chat` (`RATE_LIMIT`).
+
+---
+
 ### Trigger Re-Indexing
 
 Rebuild the Qdrant vector index from all PDFs and FAQ CSVs. Requires `Authorization: Bearer <INDEX_API_KEY>` when configured (OWASP LLM10 — unbounded consumption protection).
