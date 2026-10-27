@@ -2,6 +2,7 @@ import { officerHoursFrom, type OfficerHours } from '../lib/turnMeta';
 import { create } from 'zustand';
 import { conversationTtlMs, resetChatSession } from '../lib/chatSession';
 import { normalizeLocale } from '../lib/locales';
+import { provisionalTitle } from '../lib/chatTitle';
 import type { DocumentAnalysisData } from '../lib/attachments';
 import {
   sanitizeConnectorSelection,
@@ -361,6 +362,12 @@ export interface Conversation {
    * Without this flag a rename survives only until the next turn is saved.
    */
   titleCustom?: boolean;
+  /**
+   * The title is the model's summary of the opening exchange
+   * (`/v1/chat/title`, see `hooks/useAutoTitle.ts`). Kept across saves like a
+   * typed title; a rename still replaces it.
+   */
+  titleGenerated?: boolean;
   /** Active escalation ticket ID associated with this conversation */
   activeTicketId?: string;
   /** The live chat with an officer on that ticket, if one has started. */
@@ -447,6 +454,8 @@ interface ChatStore {
   switchSession: (id: string) => void;
   deleteSession: (id: string) => void;
   renameSession: (id: string, title: string) => void;
+  /** Name a conversation with the model's summary title, unless the user renamed it. */
+  setGeneratedTitle: (id: string, title: string) => void;
   togglePinSession: (id: string) => void;
   clearAllSessions: () => void;
   hydratePersisted: () => void;
@@ -479,11 +488,11 @@ const MAX_SESSIONS = 50;
 const CHAT_STORAGE_KEY = 'ura-chat-store';
 const CHAT_STORAGE_VERSION = 2;
 
-/** Derive a short title from the first user message. */
+/** The provisional title: the first user message, boiled down (lib/chatTitle). */
 function deriveTitle(turns: ChatTurn[]): string {
   const first = turns.find((t) => t.role === 'user');
   if (!first) return 'New chat';
-  return first.content.slice(0, 60) + (first.content.length > 60 ? '...' : '');
+  return provisionalTitle(first.content) || 'New chat';
 }
 
 type PersistedChatState = Pick<ChatStore, 'locale' | 'conversations' | 'activeConversationId'> & {
@@ -641,6 +650,7 @@ function sanitizeConversation(value: unknown): Conversation | null {
   };
   if (value.pinned === true) conversation.pinned = true;
   if (value.titleCustom === true) conversation.titleCustom = true;
+  if (value.titleGenerated === true) conversation.titleGenerated = true;
   if (typeof value.activeTicketId === 'string' && value.activeTicketId) conversation.activeTicketId = value.activeTicketId;
   const sync = sanitizeOfficerChat(value.officerChat);
   if (sync) conversation.officerChat = sync;
@@ -1027,15 +1037,16 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     const existing = conversations.find((c) => c.id === id);
 
     if (existing) {
-      // A title the user typed is theirs. `deriveTitle` re-runs on every save,
-      // so without this guard a rename lasts exactly until the next turn.
+      // A title the user typed is theirs, and one the model summarised is
+      // better than the first message. `deriveTitle` re-runs on every save, so
+      // without this guard either lasts exactly until the next turn.
       set({
         activeConversationId: id,
         conversations: conversations.map((c) =>
           c.id === id
             ? {
                 ...c,
-                title: c.titleCustom ? c.title : title,
+                title: c.titleCustom || c.titleGenerated ? c.title : title,
                 preview,
                 turns: chat,
                 updatedAt: now,
@@ -1131,6 +1142,23 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     set((s) => ({
       conversations: s.conversations.map((c) =>
         c.id === id ? { ...c, title: next, titleCustom: true } : c,
+      ),
+    }));
+    writePersistedChatState(get());
+  },
+
+  /**
+   * Replace the provisional title with the model's summary. A rename wins: a
+   * summary that arrives after the user typed a title is dropped.
+   */
+  setGeneratedTitle: (id, title) => {
+    const next = title.trim().slice(0, 80);
+    if (!next) return;
+    const target = get().conversations.find((c) => c.id === id);
+    if (!target || target.titleCustom || (target.titleGenerated && target.title === next)) return;
+    set((s) => ({
+      conversations: s.conversations.map((c) =>
+        c.id === id ? { ...c, title: next, titleGenerated: true } : c,
       ),
     }));
     writePersistedChatState(get());

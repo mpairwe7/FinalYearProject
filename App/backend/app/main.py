@@ -78,6 +78,8 @@ from .models import (
     ChatRatingRequest,
     ChatRequest,
     ChatResponse,
+    ChatTitleRequest,
+    ChatTitleResponse,
     Citation,
     ClassifyRequest,
     ClassifyResponse,
@@ -1653,6 +1655,28 @@ def _log_stream_conversation(
         )
     except Exception:
         logger.warning("Stream conversation logging failed", exc_info=True)
+
+
+@app.post("/v1/chat/title", response_model=ChatTitleResponse, tags=["chat"])
+@limiter.limit(_RATE_LIMIT)
+async def chat_title(
+    request: Request,
+    body: ChatTitleRequest,
+    _ctx: AuthContext = Depends(optional_user),
+) -> ChatTitleResponse:
+    """A few-word summary title for a conversation, for the chat sidebar.
+
+    The client asks once per conversation, after the first answer lands — the
+    way ChatGPT, Claude and Gemini name a chat. A null title means no usable
+    one came back; the client keeps the provisional title it already shows.
+    """
+    from .chat_title import generate_title
+
+    user_text = next(message.content for message in body.messages if message.role == "user")
+    assistant_text = next((message.content for message in body.messages if message.role == "assistant"), "")
+    title, source = await asyncio.to_thread(generate_title, user_text, assistant_text, gate_locale(body.locale))
+    metrics.inc("chat_title_total", labels={"source": source})
+    return ChatTitleResponse(title=title, source=source)
 
 
 # ---------------------------------------------------------------------------

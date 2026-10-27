@@ -99,6 +99,20 @@ function RenameRow({
   );
 }
 
+/**
+ * A row's title, faded in when it changes under the reader — the moment the
+ * model's summary replaces the provisional title. The key remounts the span so
+ * the fade runs once per new title, never on first paint.
+ */
+function RailItemTitle({ title }: { title: string }) {
+  const [firstTitle] = useState(title);
+  return (
+    <span key={title} className={`rail-item-title${title !== firstTitle ? ' is-renamed' : ''}`}>
+      {title}
+    </span>
+  );
+}
+
 interface RowProps {
   conversation: Conversation;
   isActive: boolean;
@@ -123,7 +137,7 @@ function ConversationRow({
     >
       <button className="rail-item-main" onClick={onSelect}>
         <span className="rail-item-dot" aria-hidden="true" />
-        <span className="rail-item-title">{conversation.title}</span>
+        <RailItemTitle title={conversation.title} />
       </button>
       <ConversationMenu
         pinned={Boolean(conversation.pinned)}

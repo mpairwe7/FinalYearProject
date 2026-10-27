@@ -304,3 +304,59 @@ describe("normalizeAssistantResponse", () => {
     expect(result).not.toContain("\n18. File");
   });
 });
+
+describe("conversation titles", () => {
+  const TIN = ["10000", "23456"].join(""); // a sample TIN, built so secret scanners do not flag it
+  beforeEach(() => {
+    localStorage.clear();
+    useChatStore.setState({ conversations: [], activeConversationId: null });
+    store().reset();
+  });
+
+  const startConversation = (question: string) => {
+    const id = store().ensureActiveConversationId();
+    store().addTurns([createTurn("user", question), createTurn("assistant", "Here is how it works.")]);
+    store().saveCurrentSession();
+    return id;
+  };
+  const titleOf = (id: string) => store().conversations.find((c) => c.id === id)?.title;
+
+  it("names a new conversation provisionally, without the TIN it was asked with", () => {
+    const id = startConversation(`Verify TIN ${TIN} for my tax clearance`);
+    expect(titleOf(id)).toBe("Verify TIN for my tax clearance");
+  });
+
+  it("takes the model's title and keeps it as the conversation goes on", () => {
+    const id = startConversation(`Verify TIN ${TIN} for my tax clearance`);
+    store().setGeneratedTitle(id, "TIN verification for tax clearance");
+    expect(titleOf(id)).toBe("TIN verification for tax clearance");
+
+    store().addTurns([createTurn("user", "And how long does it take?"), createTurn("assistant", "About two days.")]);
+    store().saveCurrentSession();
+    expect(titleOf(id)).toBe("TIN verification for tax clearance");
+  });
+
+  it("never lets a late model title overwrite a rename", () => {
+    const id = startConversation("What is VAT?");
+    store().renameSession(id, "My VAT notes");
+    store().setGeneratedTitle(id, "VAT basics");
+    expect(titleOf(id)).toBe("My VAT notes");
+  });
+
+  it("a rename still replaces the model's title", () => {
+    const id = startConversation("What is VAT?");
+    store().setGeneratedTitle(id, "VAT basics");
+    store().renameSession(id, "Shop VAT");
+    expect(titleOf(id)).toBe("Shop VAT");
+  });
+
+  it("the model's title survives a reload", () => {
+    const id = startConversation("What is VAT?");
+    store().setGeneratedTitle(id, "VAT basics");
+    useChatStore.setState({ conversations: [] });
+    store().hydratePersisted();
+    const restored = store().conversations.find((c) => c.id === id);
+    expect(restored?.title).toBe("VAT basics");
+    expect(restored?.titleGenerated).toBe(true);
+  });
+});

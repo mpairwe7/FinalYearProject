@@ -66,6 +66,8 @@ import ChatHeader from '../components/ChatHeader';
 import { useCallStore } from '../store/useCallStore';
 import { useIdentity } from '../hooks/useIdentity';
 import { useOfficerChat } from '../hooks/useOfficerChat';
+import { useAutoTitle } from '../hooks/useAutoTitle';
+import { provisionalTitle } from '../lib/chatTitle';
 import { ChatNotice } from '../components/ChatNotice';
 import type { SettingsTab } from '../components/settings/SettingsDialog';
 
@@ -300,6 +302,8 @@ export default function Page() {
   );
   const sessionIdRef = useRef<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  // Names the conversation from its opening exchange once the first answer lands.
+  useAutoTitle(isLoading);
   // The live chat with an officer once one takes the case. It holds while an
   // answer streams, because the stream writes into the last turn.
   const officerChat = useOfficerChat({ hold: isLoading });
@@ -2190,7 +2194,7 @@ export default function Page() {
     if (activeConversation) return activeConversation.title;
     const first = chat.find((t) => t.role === 'user');
     if (!first) return undefined;
-    return first.content.slice(0, 60) + (first.content.length > 60 ? '...' : '');
+    return provisionalTitle(first.content) || undefined;
   }, [activeConversation, chat]);
 
   /** Delete is confirm-wrapped wherever it is reached from. */

@@ -734,3 +734,22 @@
 .chatv2 .csrch-head:focus-within {
   border-bottom-color: var(--cv2-focus, var(--border-1));
 }
+
+/* A conversation the model has just named: the new title fades in where the
+   provisional one was (ConversationRail's RailItemTitle). */
+.chatv2 .rail-item-title.is-renamed {
+  animation: cv2-title-in 320ms ease-out both;
+}
+@keyframes cv2-title-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chatv2 .rail-item-title.is-renamed {
+    animation: none;
+  }
+}

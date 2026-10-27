@@ -87,6 +87,7 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     # --- Chat ---
     ("POST", "/v1/chat"),
     ("POST", "/v1/chat/stream"),
+    ("POST", "/v1/chat/title"),
     ("POST", "/v1/portal/tasks/execute"),
     ("POST", "/v1/escalate"),
     ("GET", "/v1/escalate/{ticket_id}"),
@@ -246,6 +247,7 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("GET", "/v1/escalate/{ticket_id}/messages"): "App/backend/tests/test_officer_chat.py:TaxpayerThreadTests",
     ("POST", "/v1/escalate/{ticket_id}/csat"): "App/backend/tests/test_officer_chat.py:ChatRatingTests",
     ("POST", "/v1/chat/stream"): "test_fallback_integration.TestChatStreamEndpointFallback",
+    ("POST", "/v1/chat/title"): "this:test_chat_title_names_conversation + App/backend/tests/test_chat_title.py",
     ("POST", "/classify"): "test_api_endpoints.ClassificationKnowledge",
     ("POST", "/classify/batch"): "test_api_endpoints.ClassificationKnowledge",
     ("GET", "/tags"): "test_api_endpoints.ClassificationKnowledge",
@@ -512,10 +514,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (124 HTTP + 7 WS)."""
+    """Lock the surface size so additions are deliberate (126 HTTP + 7 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 125, f"expected 125 HTTP endpoints, found {len(http)}"
+    assert len(http) == 126, f"expected 126 HTTP endpoints, found {len(http)}"
     assert len(ws) == 7, f"expected 7 WS endpoints, found {len(ws)}"
 
 
@@ -558,6 +560,37 @@ def test_chat_happy_path():
     r = _client().post("/v1/chat", json={"message": "What is the VAT rate?"})
     assert r.status_code == 200
     assert r.json()["reply"] == "The standard VAT rate is 18%."
+
+
+def test_chat_title_names_conversation():
+    """The sidebar title comes from the model, cleaned, and the TIN never reaches it."""
+    sent: list = []
+
+    def fake_summarize(messages):
+        sent.append(messages)
+        return '"Title: TIN verification for tax clearance."'
+
+    with mock.patch("App.backend.app.llm.summarize_title", side_effect=fake_summarize):
+        r = _client().post(
+            "/v1/chat/title",
+            json={
+                "messages": [
+                    {"role": "user", "content": "Verify TIN 1000023456 for my tax clearance"},
+                    {"role": "assistant", "content": "To get a tax clearance certificate, first confirm your returns are filed."},
+                ],
+                "locale": "en",
+            },
+        )
+    assert r.status_code == 200
+    assert r.json() == {"title": "TIN verification for tax clearance", "source": "model"}
+    assert "1000023456" not in json.dumps(sent[0][-1])
+
+
+def test_chat_title_is_null_when_no_usable_title_comes_back():
+    with mock.patch("App.backend.app.llm.summarize_title", return_value=""):
+        r = _client().post("/v1/chat/title", json={"messages": [{"role": "user", "content": "What is VAT?"}]})
+    assert r.status_code == 200
+    assert r.json() == {"title": None, "source": "unavailable"}
 
 
 # ---------------------------------------------------------------------------
