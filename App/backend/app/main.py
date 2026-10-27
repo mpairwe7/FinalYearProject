@@ -393,10 +393,14 @@ def _validate_production_env() -> None:
     # The confirmation HMAC secret must come from real config in prod;
     # leaving the env unset would fall back to a per-process random key
     # and break any cross-replica confirmation flow.
-    if _production_flag_enabled("ws_chat") and not os.getenv("WS_CONFIRM_HMAC_SECRET"):
+    from . import confirm_tokens
+
+    if _production_flag_enabled("ws_chat") and (
+        len(confirm_tokens.effective_secret_str()) < confirm_tokens.MIN_SECRET_CHARS
+    ):
         errors.append(
-            "WS_CONFIRM_HMAC_SECRET must be set in production when FLAG_WS_CHAT=true "
-            "(per-process random fallback is not safe across replicas)."
+            "WS_CONFIRM_HMAC_SECRET must be set (>=32 chars, or MCP_REQUEST_STATE_SECRET >=32 chars) "
+            "in production when FLAG_WS_CHAT=true (per-process random fallback is not safe across replicas)."
         )
     # P1-9: voice sockets spin up ASR/TTS/LLM work per connection and must
     # likewise never serve anonymous traffic in production.

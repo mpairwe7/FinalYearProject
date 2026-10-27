@@ -47,6 +47,19 @@ _STATUTORY_SIGNAL_RE = re.compile(
     r"\b(?:s\.\s*\d+[a-z0-9()]*|section\s+\d+|form\s+dt[-\s]?\d+|ugx\s*[\d,]+|\d+(?:\.\d+)?%|cap\.?\s*\d+)",
     re.IGNORECASE,
 )
+_PII_NIN_RE = re.compile(r"\bC[MFR][-\s]?[A-Z0-9]{11,13}\b", re.IGNORECASE)
+_PII_EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+_PII_PHONE_RE = re.compile(r"(?:\+256|(?<!\d)256|(?<!\d)0)[ \t-]?7\d{2}[ \t-]?\d{3}[ \t-]?\d{3}\b")
+
+
+def _scrub_preference_text(text: str) -> str:
+    """Scrub taxpayer NINs, mobile numbers, and emails from preference pairs (ISO/IEC 42001 A.7.4)."""
+    if not text:
+        return ""
+    cleaned = _PII_NIN_RE.sub("[REDACTED_NIN]", str(text))
+    cleaned = _PII_EMAIL_RE.sub("[REDACTED_EMAIL]", cleaned)
+    cleaned = _PII_PHONE_RE.sub("[REDACTED_PHONE]", cleaned)
+    return cleaned
 
 
 def build_bilevel_preference_bundle(
@@ -69,9 +82,9 @@ def build_bilevel_preference_bundle(
     length_filtered_count = 0
 
     for item in pairs:
-        prompt = str(item.get("prompt") or "").strip()
-        chosen = str(item.get("chosen") or "").strip()
-        rejected = str(item.get("rejected") or "").strip()
+        prompt = _scrub_preference_text(str(item.get("prompt") or "").strip())
+        chosen = _scrub_preference_text(str(item.get("chosen") or "").strip())
+        rejected = _scrub_preference_text(str(item.get("rejected") or "").strip())
         if not prompt or not rejected:
             continue
 
@@ -96,6 +109,9 @@ def build_bilevel_preference_bundle(
                 length_filtered_count += 1
                 continue
             enriched = dict(item)
+            enriched["prompt"] = prompt
+            enriched["chosen"] = chosen
+            enriched["rejected"] = rejected
             enriched["length_ratio"] = round(len_ratio, 3)
             debiased_dpo.append(enriched)
 

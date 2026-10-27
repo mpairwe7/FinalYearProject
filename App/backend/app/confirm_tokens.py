@@ -27,6 +27,7 @@ import time
 from typing import Any
 
 _SECRET_ENV = "WS_CONFIRM_HMAC_SECRET"  # pragma: allowlist secret
+MIN_SECRET_CHARS = 32
 # In production this MUST come from the environment.  Development falls
 # back to a per-process random secret so tests are reproducible within a
 # run but tokens never leak across deployments.
@@ -41,14 +42,31 @@ def _is_production() -> bool:
     return os.getenv("APP_ENV", "development").strip().lower() == "production"
 
 
+def effective_secret_str() -> str:
+    """Return the first configured confirmation secret with at least 32 chars.
+
+    Checks ``WS_CONFIRM_HMAC_SECRET`` first, falling back to
+    ``MCP_REQUEST_STATE_SECRET`` when the primary is unset or shorter than 32
+    characters.
+    """
+    for env_name in (_SECRET_ENV, "MCP_REQUEST_STATE_SECRET"):
+        candidate = (os.getenv(env_name) or "").strip()
+        if len(candidate) >= MIN_SECRET_CHARS:
+            return candidate
+    if not _is_production():
+        for env_name in (_SECRET_ENV, "MCP_REQUEST_STATE_SECRET"):
+            candidate = (os.getenv(env_name) or "").strip()
+            if candidate:
+                return candidate
+    return ""
+
+
 def _secret() -> bytes:
-    raw = (os.getenv(_SECRET_ENV) or os.getenv("MCP_REQUEST_STATE_SECRET") or "").strip()
+    selected = effective_secret_str()
     if _is_production():
-        if len(raw) < 32:
-            return b""
-        return raw.encode("utf-8")
-    if raw:
-        return raw.encode("utf-8")
+        return selected.encode("utf-8") if len(selected) >= MIN_SECRET_CHARS else b""
+    if selected:
+        return selected.encode("utf-8")
     return _DEV_FALLBACK
 
 

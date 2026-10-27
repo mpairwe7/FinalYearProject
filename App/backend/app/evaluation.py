@@ -92,17 +92,21 @@ class EvalReport:
             "# TYPE ura_eval_metric gauge",
         ]
         for m in self.metrics:
-            lines.append(f'ura_eval_metric{{name="{m.name}"}} {m.value:.4f}')
+            lines.append(f'ura_eval_metric{{name="{m.name}",backend="{self.backend}"}} {m.value:.4f}')
             lines.append(f'ura_eval_metric_passed{{name="{m.name}"}} {1 if m.passed else 0}')
-        # Per-segment — one label set per (metric, dim, segment_value)
+        # Per-segment — dedicated gauge family so label keys never collide with global ura_eval_metric
         for dim, segments in self.by_segment.items():
             for seg, metrics in segments.items():
                 for m in metrics:
                     lines.append(
-                        f'ura_eval_metric{{name="{m.name}",'
-                        f'segment_dim="{dim}",segment="{seg}"}} {m.value:.4f}'
+                        f'ura_eval_segment_metric{{name="{m.name}",'
+                        f'segment_dim="{dim}",segment="{seg}",backend="{self.backend}"}} {m.value:.4f}'
                     )
-        lines.append(f"ura_eval_sample_size {self.sample_size}")
+                    lines.append(
+                        f'ura_eval_segment_metric_passed{{name="{m.name}",'
+                        f'segment_dim="{dim}",segment="{seg}"}} {1 if m.passed else 0}'
+                    )
+        lines.append(f"ura_eval_samples {self.sample_size}")
         lines.append(f"ura_eval_duration_ms {self.duration_ms:.2f}")
         return "\n".join(lines) + "\n"
 
@@ -466,9 +470,23 @@ def record_eval_report(report: EvalReport) -> None:
 
     metrics.set_gauge("eval_samples", report.sample_size)
     metrics.set_gauge("eval_last_run_timestamp_seconds", report.started_at)
+    metrics.set_gauge("eval_duration_ms", round(report.duration_ms, 2))
     for metric in report.metrics:
         metrics.set_gauge("eval_metric", metric.value, labels={"name": metric.name, "backend": report.backend})
         metrics.set_gauge("eval_metric_passed", 1 if metric.passed else 0, labels={"name": metric.name})
+    for dim, segments in report.by_segment.items():
+        for seg, seg_metrics in segments.items():
+            for m in seg_metrics:
+                metrics.set_gauge(
+                    "eval_segment_metric",
+                    m.value,
+                    labels={"name": m.name, "segment_dim": dim, "segment": seg, "backend": report.backend},
+                )
+                metrics.set_gauge(
+                    "eval_segment_metric_passed",
+                    1 if m.passed else 0,
+                    labels={"name": m.name, "segment_dim": dim, "segment": seg},
+                )
 
 
 def main() -> int:

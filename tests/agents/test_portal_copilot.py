@@ -703,8 +703,12 @@ def test_10_wysiwys_digest_inline_prepare_high_value_friction_auditor_rbac_and_c
     assert r_prep_locked.status_code == 400
     assert "already been executed or declined" in r_prep_locked.json()["detail"]
 
-    # 9. Multi-task liability calculation for `efris_stock_management` (quantity * unit_cost >= 50M) (QA-07)
-    from app.portal_copilot import classify_portal_task, compute_estimated_liability_ugx
+    # 9. Multi-task liability calculation & strict select option validation (QA-07 + CodeRabbit)
+    from app.portal_copilot import (
+        classify_portal_task,
+        compute_estimated_liability_ugx,
+        validate_task_fields,
+    )
 
     stock_spec = classify_portal_task("efris_stock_management")
     assert stock_spec is not None
@@ -712,9 +716,76 @@ def test_10_wysiwys_digest_inline_prepare_high_value_friction_auditor_rbac_and_c
         compute_estimated_liability_ugx(stock_spec, {"quantity": "50000", "unit_cost": "1500"})
         == 75_000_000.0
     )
+    dts_spec = classify_portal_task("dts_order_stamps")
+    assert dts_spec is not None
+    _, _, dts_errs = validate_task_fields(
+        dts_spec,
+        {"tin": "1000023456", "product_category": "INVALID_COMMODITY", "quantity": "1000"},
+    )
+    assert "product_category" in dts_errs
+    assert (
+        compute_estimated_liability_ugx(
+            dts_spec, {"product_category": "INVALID_COMMODITY", "quantity": "1000"}
+        )
+        == 0.0
+    )
 
-    # 6. `confirm_tokens` fails closed in production when secrets are missing
+    # 10. Evals & Observability: segment metrics, GenAI evaluation histogram, and PII scrubbing in preference export
+    from app import tracing
+    from app.analytics import metrics
+    from app.evaluation import EvalMetric, EvalReport, record_eval_report
+    from evals.export_preferences import build_bilevel_preference_bundle
+
+    tracing.record_evaluation("faithfulness", 0.92, label="high")
+    sample_report = EvalReport(
+        sample_size=6,
+        started_at=1700000000.0,
+        duration_ms=42.5,
+        metrics=[EvalMetric(name="faithfulness", value=0.88, threshold=0.7, passed=True)],
+        regressions=[],
+        backend="heuristic",
+        by_segment={
+            "locale": {
+                "lg": [EvalMetric(name="faithfulness", value=0.85, threshold=0.7, passed=True)]
+            }
+        },
+    )
+    record_eval_report(sample_report)
+    prom_text = sample_report.to_prometheus()
+    assert 'ura_eval_segment_metric{name="faithfulness",segment_dim="locale",segment="lg",backend="heuristic"}' in prom_text
+    snap = metrics.snapshot()
+    assert any("portal_copilot_decisions_total" in k for k in snap["counters"])
+    assert any("eval_segment_metric" in k for k in snap["gauges"])
+
+    bundle = build_bilevel_preference_bundle(
+        [
+            {
+                "prompt": "My NIN is CM92018100123A, phone +256772123456, email jane@example.ug. How do I waive penalties under Section 66(1a)?",
+                "chosen": "Submit Form DT-10307 under Section 66(1a) of Cap. 343 to waive 100% penalty for jane@example.ug.",
+                "rejected": "Contact +256772123456 with NIN CM92018100123A.",
+                "source": "officer_reply",
+            }
+        ]
+    )
+    serialized_bundle = str(bundle)
+    assert "CM92018100123A" not in serialized_bundle
+    assert "+256772123456" not in serialized_bundle
+    assert "jane@example.ug" not in serialized_bundle
+    assert "[REDACTED_NIN]" in serialized_bundle
+    assert "Form DT-10307" in serialized_bundle
+
+    # 11. `confirm_tokens` falls back when primary is <32 chars and fails closed in production when both are short/missing
     monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("WS_CONFIRM_HMAC_SECRET", "too-short")
+    monkeypatch.setenv("MCP_REQUEST_STATE_SECRET", "fallback-secret-at-least-32-chars-long-2026")
+    tok = confirm_tokens.sign(
+        call_id="c1",
+        tool_name="t1",
+        idempotency_key="idem1",
+        session_id="s1",
+    )
+    assert confirm_tokens.verify(tok, expected_call_id="c1", expected_session_id="s1") is not None
+
     monkeypatch.delenv("WS_CONFIRM_HMAC_SECRET", raising=False)
     monkeypatch.delenv("MCP_REQUEST_STATE_SECRET", raising=False)
     with pytest.raises(RuntimeError, match="required in production"):

@@ -162,17 +162,25 @@ ENTITY_TYPE_OPTIONS: tuple[dict[str, str], ...] = (
     {"value": "TRUST_NGO", "label": "Trust / NGO / Association"},
 )
 
-DTS_PRODUCT_OPTIONS: tuple[dict[str, str], ...] = (
-    {"value": "BOTTLED_WATER", "label": "Bottled Water (UGX 13 / stamp)"},
-    {"value": "SODA", "label": "Non-Alcoholic Soda / Beverage (UGX 17 / stamp)"},
-    {"value": "BEER", "label": "Beer (UGX 36 / stamp)"},
-    {"value": "WINES", "label": "Wine (UGX 55 / stamp)"},
-    {"value": "SPIRITS", "label": "Spirits (UGX 55 / stamp)"},
-    {"value": "TOBACCO", "label": "Tobacco / Cigarettes (UGX 75 / stamp)"},
-    {"value": "CEMENT", "label": "Cement (UGX 135 / stamp)"},
-    {"value": "SUGAR", "label": "Sugar (UGX 100 / stamp)"},
-    {"value": "COOKING_OIL", "label": "Cooking Oil (UGX 30 / stamp)"},
+_DTS_PRODUCT_CATALOG: tuple[tuple[str, str, float], ...] = (
+    ("BOTTLED_WATER", "Bottled Water (UGX 13 / stamp)", 13.0),
+    ("SODA", "Non-Alcoholic Soda / Beverage (UGX 17 / stamp)", 17.0),
+    ("BEER", "Beer (UGX 36 / stamp)", 36.0),
+    ("WINES", "Wine (UGX 55 / stamp)", 55.0),
+    ("SPIRITS", "Spirits (UGX 55 / stamp)", 55.0),
+    ("TOBACCO", "Tobacco / Cigarettes (UGX 75 / stamp)", 75.0),
+    ("CEMENT", "Cement (UGX 135 / stamp)", 135.0),
+    ("SUGAR", "Sugar (UGX 100 / stamp)", 100.0),
+    ("COOKING_OIL", "Cooking Oil (UGX 30 / stamp)", 30.0),
 )
+
+DTS_PRODUCT_OPTIONS: tuple[dict[str, str], ...] = tuple(
+    {"value": code, "label": label} for code, label, _ in _DTS_PRODUCT_CATALOG
+)
+
+_DTS_STAMP_UNIT_RATES_UGX: dict[str, float] = {
+    code: rate for code, _, rate in _DTS_PRODUCT_CATALOG
+}
 
 TCC_PURPOSE_OPTIONS: tuple[dict[str, str], ...] = (
     {"value": "BIDDING_TENDER", "label": "Public Procurement Bidding / Government Tender"},
@@ -1816,6 +1824,17 @@ def validate_task_fields(
                 missing.append(f_spec.name)
             continue
 
+        if f_spec.input_type == "select" and f_spec.options:
+            option_map = {str(opt["value"]).upper(): str(opt["value"]) for opt in f_spec.options}
+            canonical_opt = option_map.get(val_str.upper())
+            if canonical_opt is None:
+                allowed_vals = ", ".join(str(opt["value"]) for opt in f_spec.options)
+                errors[f_spec.name] = (
+                    f"Invalid selection '{val_str}' for {f_spec.label}. Allowed values: {allowed_vals}."
+                )
+                continue
+            val_str = canonical_opt
+
         # Field-specific format checks with separator normalization & cross-field error diagnosis
         if f_spec.name in ("tin", "buyer_tin") and spec.task_id != "tin_search_verify":
             compact_tin = re.sub(r"[\s-]+", "", val_str)
@@ -2297,7 +2316,7 @@ def build_portal_task_card(
     }
     signed_request_state = mrtr.wrap_request_state(state_payload)
 
-    return {
+    card_out_confirm = {
         "card_type": "confirmation_required",
         "task_id": spec.task_id,
         "portal_key": spec.portal_key,
@@ -2328,6 +2347,8 @@ def build_portal_task_card(
         "live": False,
         "copilot_portal_url": copilot_portal_url,
     }
+    _record_copilot_card_metric(card_out_confirm, spec.tier.value)
+    return card_out_confirm
 
 
 # ---------------------------------------------------------------------------
@@ -2336,17 +2357,43 @@ def build_portal_task_card(
 
 
 HIGH_VALUE_LIABILITY_THRESHOLD_UGX = 50_000_000
-_DTS_STAMP_UNIT_RATES_UGX: dict[str, float] = {
-    "BOTTLED_WATER": 13.0,
-    "SODA": 17.0,
-    "BEER": 36.0,
-    "WINES": 55.0,
-    "SPIRITS": 55.0,
-    "TOBACCO": 75.0,
-    "CEMENT": 135.0,
-    "SUGAR": 100.0,
-    "COOKING_OIL": 30.0,
-}
+
+
+def _record_copilot_card_metric(card: Mapping[str, Any], tier: str) -> None:
+    """Emit bounded Prometheus counter for generated Portal Co-Pilot cards."""
+    try:
+        from .analytics import metrics
+
+        metrics.inc(
+            "portal_copilot_cards_total",
+            labels={"card_type": str(card.get("card_type") or "unknown"), "tier": str(tier or "unknown")},
+        )
+    except Exception:
+        logger.debug("Portal copilot card metric recording skipped", exc_info=True)
+
+
+def _record_copilot_decision_metric(
+    decision: str, status_label: str, tier: str, duration_ms: float
+) -> None:
+    """Emit bounded Prometheus counter and latency histogram for Portal Co-Pilot HITL decisions."""
+    try:
+        from .analytics import metrics
+
+        metrics.inc(
+            "portal_copilot_decisions_total",
+            labels={
+                "decision": str(decision or "unknown"),
+                "status": str(status_label or "unknown"),
+                "tier": str(tier or "unknown"),
+            },
+        )
+        metrics.observe(
+            "portal_copilot_decision_duration_ms",
+            round(max(0.0, duration_ms), 2),
+            labels={"decision": str(decision or "unknown")},
+        )
+    except Exception:
+        logger.debug("Portal copilot decision metric recording skipped", exc_info=True)
 
 
 def compute_estimated_liability_ugx(spec: PortalTaskSpec, params: Mapping[str, Any]) -> float:
@@ -2360,8 +2407,10 @@ def compute_estimated_liability_ugx(spec: PortalTaskSpec, params: Mapping[str, A
             return qty * cost
         if spec.task_id == "dts_order_stamps":
             qty = float(str(params.get("quantity") or 0).replace(",", ""))
-            cat = str(params.get("product_category") or "BOTTLED_WATER").upper()
-            rate = _DTS_STAMP_UNIT_RATES_UGX.get(cat, 30.0)
+            cat = str(params.get("product_category") or "").strip().upper()
+            rate = _DTS_STAMP_UNIT_RATES_UGX.get(cat)
+            if rate is None:
+                return 0.0
             return qty * rate
     except (TypeError, ValueError):
         return 0.0
@@ -2398,6 +2447,7 @@ def handle_portal_task_decision(
     high_value_acknowledged: bool | None = None,
 ) -> dict[str, Any]:
     """Verify HMAC-signed `request_state`, enforce owner/session binding (`ADR-0013`), and execute, prepare, or decline."""
+    t0_decision = time.perf_counter()
     unwrapped = mrtr.unwrap_request_state(dict(request_state) if isinstance(request_state, Mapping) else None)
     if unwrapped is None:
         raise PortalTaskValidationError("Invalid or tampered request_state signature.")
@@ -2516,6 +2566,9 @@ def handle_portal_task_decision(
                     mem[f_spec.name] = merged_fields[f_spec.name]
             _CONVERSATION_ENTITY_MEMORY[owner_key] = mem
             _CONVERSATION_ENTITY_MEMORY.move_to_end(owner_key)
+            while len(_CONVERSATION_ENTITY_MEMORY) > _MAX_TASK_CACHE_ENTRIES:
+                _CONVERSATION_ENTITY_MEMORY.popitem(last=False)
+        _record_copilot_decision_metric("prepare", "prepared", spec.tier.value, (time.perf_counter() - t0_decision) * 1000)
         return {
             "ok": True,
             "status": "prepared",
@@ -2539,6 +2592,7 @@ def handle_portal_task_decision(
                 while len(_DECLINED_TASK_CACHE) > _MAX_TASK_CACHE_ENTRIES:
                     _DECLINED_TASK_CACHE.popitem(last=False)
                 _write_shared_task_decision(cache_key, declined=True, user_id=user_id)
+        _record_copilot_decision_metric("disallow", "declined", spec.tier.value, (time.perf_counter() - t0_decision) * 1000)
         return {
             "ok": True,
             "status": "declined",
@@ -2693,6 +2747,12 @@ def handle_portal_task_decision(
                     payload=response_payload,
                     user_id=user_id,
                 )
+        _record_copilot_decision_metric(
+            "allow",
+            "executed" if ok else "error",
+            spec.tier.value,
+            (time.perf_counter() - t0_decision) * 1000,
+        )
         return response_payload
     finally:
         with _TASK_CACHE_LOCK:
