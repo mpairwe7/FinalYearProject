@@ -93,10 +93,48 @@ describe("ChatMessage", () => {
     expect(await screen.findByRole("button", { name: "Reply copied" })).toBeInTheDocument();
   });
 
-  it("shows citations with source details", () => {
+  it("folds the answer's sources into a pill that lists them on demand", () => {
     renderMsg(assistantTurn);
-    expect(screen.getByText(/Sources \(1\)/)).toBeInTheDocument();
+    const pill = screen.getByRole("button", { name: "Sources (1)" });
+    expect(screen.queryByText("URA FAQ")).not.toBeInTheDocument();
+    fireEvent.click(pill);
     expect(screen.getByText("URA FAQ")).toBeInTheDocument();
+  });
+
+  it("puts official forms in the same pill instead of a card grid", () => {
+    renderMsg({
+      ...assistantTurn,
+      resources: [
+        {
+          id: "tcc_online",
+          title: "Tax clearance certificate",
+          type: "online_form",
+          url: "https://ura.go.ug/en/tax-clearance/",
+        },
+      ],
+    });
+    expect(screen.queryByText("Official URA Forms, Templates & Sources")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Sources (2)" }));
+    expect(screen.getByText("Tax clearance certificate").closest("a")).toHaveAttribute(
+      "href",
+      "https://ura.go.ug/en/tax-clearance/",
+    );
+  });
+
+  it("shows a guided step's forms in the pill", () => {
+    renderMsg({
+      ...assistantTurn,
+      citations: [],
+      workflow: {
+        id: "tcc_apply",
+        name: "Tax clearance",
+        status: "active",
+        resources: [
+          { id: "tcc_online", title: "Tax clearance certificate", type: "online_form", url: "https://ura.go.ug/en/tax-clearance/" },
+        ],
+      },
+    });
+    expect(screen.getByRole("button", { name: "Sources (1)" })).toBeInTheDocument();
   });
 
   it("rerenders when streaming metadata adds citations without changing content", () => {
@@ -107,7 +145,7 @@ describe("ChatMessage", () => {
     };
     const { rerender } = renderMsg(withoutMetadata);
 
-    expect(screen.queryByText(/Sources \(1\)/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sources (1)" })).not.toBeInTheDocument();
 
     rerender(
       <ChatMessage
@@ -122,7 +160,7 @@ describe("ChatMessage", () => {
       />,
     );
 
-    expect(screen.getByText(/Sources \(1\)/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sources (1)" })).toBeInTheDocument();
     expect(screen.getByText(/Well grounded/)).toBeInTheDocument();
   });
 

@@ -88,7 +88,6 @@
 .chatv2 .lmv2,
 .chatv2 .dlgv2,
 .chatv2 .bubble.user,
-.chatv2 .citations ol,
 .chatv2 .landing-chip,
 /* The conversation row / title menu is portalled to <body> and carries
    `.chatv2` itself to pick up the tokens — which also matches the

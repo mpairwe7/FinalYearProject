@@ -6,7 +6,7 @@
  *   - Deep-dark canvas with animated gradient mesh (blue/teal blobs)
  *   - Floating glass panels with 20-30px backdrop blur + subtle borders
  *   - Gold accent for user actions, blue-to-teal gradient for primary CTA
- *   - Pill citations, segmented locale switch, sleek floating composer
+ *   - Segmented locale switch, sleek floating composer
  *   - Smooth entrance animations, typing indicator, premium micro-interactions
  *   - WCAG 2.2 AA/AAA compliant contrast ratios throughout
  *
@@ -648,77 +648,6 @@ main {
   font-size: 0.97rem;
   line-height: 1.72;
 }
-
-/* -----------------------------------------------------------------------------
-   Citations (pill style, URA gold accent)
-   -------------------------------------------------------------------------- */
-.citations {
-  margin-top: 0.75rem;
-  font-size: 0.8rem;
-}
-.citations summary {
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.85rem;
-  min-height: 44px;
-  border-radius: var(--radius-pill);
-  background: rgba(249, 199, 79, 0.08);
-  backdrop-filter: blur(var(--blur-sm));
-  -webkit-backdrop-filter: blur(var(--blur-sm));
-  border: 1px solid rgba(249, 199, 79, 0.2);
-  color: var(--ura-gold);
-  font-weight: 500;
-  list-style: none;
-  transition: all 180ms ease;
-}
-.citations summary::-webkit-details-marker { display: none; }
-.citations summary:hover {
-  background: rgba(249, 199, 79, 0.14);
-  color: var(--ura-gold);
-  border-color: rgba(249, 199, 79, 0.35);
-}
-.citations summary .grounding-ok    { color: var(--success); }
-.citations summary .grounding-warn  { color: var(--warning); }
-
-.citations ol {
-  margin: 0.65rem 0 0;
-  padding: 0.75rem 0.9rem;
-  list-style: none;
-  background: var(--surface-1);
-  border: 1px solid var(--border-0);
-  border-radius: var(--radius-md);
-}
-.citations li {
-  padding: 0.5rem 0;
-  border-bottom: 1px solid var(--border-0);
-  color: var(--text-2);
-}
-.citations li:last-child { border-bottom: none; padding-bottom: 0; }
-.citations li strong {
-  color: var(--ura-gold-muted);
-  font-size: 0.82rem;
-  font-weight: 600;
-}
-.citations li .cite-passage {
-  margin-top: 0.3rem;
-  font-size: 0.74rem;
-  color: var(--text-3);
-  line-height: 1.55;
-  opacity: 0.85;
-}
-
-/* Clickable citation source → official URA portal */
-.cite-source-link {
-  color: var(--ura-gold-muted);
-  text-decoration: underline;
-  text-decoration-color: rgba(249, 199, 79, 0.3);
-  text-underline-offset: 2px;
-  transition: text-decoration-color 150ms ease;
-}
-.cite-source-link:hover { text-decoration-color: var(--ura-gold); }
-.cite-source-link strong { color: inherit; font-weight: 600; }
 
 /* -----------------------------------------------------------------------------
    Voice controls (hero area)
@@ -2782,7 +2711,6 @@ main {
 .rail-close:focus-visible,
 .rail-item-main:focus-visible,
 .rail-item-delete:focus-visible,
-.citations summary:focus-visible,
 a:focus-visible {
   outline: 2px solid var(--ura-gold);
   outline-offset: 2px;
@@ -3063,12 +2991,6 @@ summary {
     flex-basis: 100%;
     margin-left: 0;
   }
-  .citations summary {
-    width: 100%;
-    justify-content: space-between;
-    border-radius: var(--radius-md);
-  }
-
   /* Landing prompts: stack single column on mobile */
   .landing-prompts { grid-template-columns: 1fr; }
   .landing {

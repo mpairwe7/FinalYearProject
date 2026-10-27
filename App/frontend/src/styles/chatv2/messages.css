@@ -145,32 +145,17 @@
 }
 
 /* ---------------------------------------------------------------------------
- * Citations: quiet link-style summary instead of the gold pill.
+ * The answer's last row: grounding badge, then the sources pill.
  * ------------------------------------------------------------------------- */
-.chatv2 .citations summary {
-  min-height: 36px;
-  padding: 0.3rem 0.5rem;
-  background: transparent;
-  border: none;
-  border-radius: 8px;
-  color: var(--ura-blue-bright);
-  font-size: 0.82rem;
-}
-.chatv2 .citations summary:hover {
-  background: var(--surface-2);
-  color: var(--ura-blue-bright);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.chatv2 .citations ol {
-  background: var(--bg-1);
-  border-color: var(--border-0);
-}
-
-/* Grounding badge (moved out of the summary by ChatMessage.tsx) */
 .chatv2 .grounding-row {
   margin-top: 10px;
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.chatv2 .grounding-row:empty {
+  display: none;
 }
 .chatv2 .grounding-badge {
   padding: 2px 9px;
@@ -581,5 +566,224 @@
   }
   .chatv2 .landing .landing-sub {
     margin-bottom: 12px;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Sources pill (SourcesPill.tsx): the forms and passages behind an answer,
+ * folded into one pill; the list opens on hover, tap or Enter.
+ * ------------------------------------------------------------------------- */
+.chatv2 .sources-pill-wrap {
+  position: relative;
+  display: inline-flex;
+}
+/* A bridge over the gap between pill and list, so moving the pointer from one
+   to the other does not count as leaving. */
+.chatv2 .sources-pill-wrap.is-open::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 10px;
+}
+.chatv2 .sources-pill-wrap.is-open.is-up::after {
+  bottom: 100%;
+}
+.chatv2 .sources-pill-wrap.is-open.is-down::after {
+  top: 100%;
+}
+.chatv2 .sources-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 6px 0 4px;
+  background: var(--bg-0);
+  border: 1px solid var(--border-0);
+  border-radius: 999px;
+  color: var(--text-1);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.chatv2 .sources-pill:hover,
+.chatv2 .sources-pill[aria-expanded="true"] {
+  background: var(--surface-2);
+  border-color: var(--border-1);
+  color: var(--text-0);
+}
+.chatv2 .sources-pill-icons {
+  display: inline-flex;
+}
+.chatv2 .sources-pill-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--cv2-accent-soft);
+  color: var(--ura-blue-bright);
+  box-shadow: 0 0 0 2px var(--bg-0);
+}
+.chatv2 .sources-pill:hover .sources-pill-icon,
+.chatv2 .sources-pill[aria-expanded="true"] .sources-pill-icon {
+  box-shadow: 0 0 0 2px var(--surface-2);
+}
+.chatv2 .sources-pill-icon + .sources-pill-icon {
+  margin-left: -5px;
+}
+.chatv2 .sources-pill-icon svg {
+  width: 11px;
+  height: 11px;
+}
+.chatv2 .sources-pill-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-0);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.chatv2 .sources-popover {
+  position: absolute;
+  left: 0;
+  z-index: 40;
+  width: min(360px, calc(100vw - 32px));
+  max-height: 320px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px;
+  background: var(--bg-0);
+  border: 1px solid var(--border-1);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  animation: cv2-sources-in 120ms ease-out both;
+}
+.chatv2 .sources-popover.is-up {
+  bottom: calc(100% + 6px);
+  transform-origin: bottom left;
+}
+.chatv2 .sources-popover.is-down {
+  top: calc(100% + 6px);
+  transform-origin: top left;
+}
+@keyframes cv2-sources-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.chatv2 .sources-group + .sources-group {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-0);
+}
+.chatv2 .sources-group-title {
+  margin: 6px 8px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.chatv2 .sources-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.chatv2 .sources-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 8px;
+  color: var(--text-1);
+  text-decoration: none;
+}
+.chatv2 a.sources-row:hover,
+.chatv2 a.sources-row:focus-visible {
+  background: var(--surface-2);
+}
+.chatv2 .sources-row-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--cv2-accent-soft);
+  color: var(--ura-blue-bright);
+}
+.chatv2 .sources-row-icon svg {
+  width: 15px;
+  height: 15px;
+}
+.chatv2 .sources-row-text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.chatv2 .sources-row-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--text-0);
+}
+.chatv2 .sources-row-meta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+.chatv2 .sources-row-detail {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-2);
+}
+.chatv2 .sources-row-go {
+  flex: none;
+  margin-top: 2px;
+  color: var(--text-2);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.chatv2 a.sources-row:hover .sources-row-go,
+.chatv2 a.sources-row:focus-visible .sources-row-go {
+  opacity: 1;
+}
+@media (hover: none) {
+  .chatv2 .sources-row-go {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chatv2 .sources-popover {
+    animation: none;
+  }
+  .chatv2 .sources-pill,
+  .chatv2 .sources-row-go {
+    transition: none;
   }
 }

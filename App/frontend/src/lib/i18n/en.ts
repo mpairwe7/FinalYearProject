@@ -233,7 +233,6 @@ export const en = {
   'workflow.quickOptions': 'Quick options',
   'workflow.chooseOption': 'Choose an option to advance:',
   'workflow.selectOption': 'Select: {label}',
-  'workflow.resources': 'Required Forms & Source References',
   'workflow.openPortal': 'Open official portal: {label}',
   'workflow.openPortalDefault': 'Open URA Portal ↗',
   'workflow.cancel': 'Cancel workflow',
@@ -247,21 +246,18 @@ export const en = {
   'objective.prerequisites': 'Have ready:',
   'objective.confirmBtn': 'Start guided steps',
 
-  // Official resources shown alongside workflow guidance ------------------
-  'resource.title': 'Official URA Forms, Templates & Sources',
-  'resource.verified': 'Official Verified Sources',
+  // The forms and passages behind an answer (SourcesPill) ---------------
   'resource.type.download': 'Downloadable Form',
   'resource.type.online': 'Online Form',
   'resource.type.statute': 'Statutory Law',
   'resource.type.guide': 'Official Guide',
-  'resource.effectivePeriod': 'Effective statutory period',
-  'resource.statutoryBasis': 'Statutory Basis:',
-  'resource.checklist': 'Checklist before submitting:',
   'resource.action.download': 'Download Template',
   'resource.action.online': 'Open Online Form',
   'resource.action.statute': 'View Statute',
   'resource.action.guide': 'Access Guide',
-  'resource.source': 'Source: {domain}',
+  'sources.label': 'Sources',
+  'sources.groupForms': 'Forms & services',
+  'sources.groupReferences': 'References',
 
   // Human handoff. The taxpayer's own way into the officer queue — every
   // other route into it is a judgement the system makes for them.

@@ -1,6 +1,6 @@
 import React, { memo, useCallback, useMemo, useState, useSyncExternalStore } from 'react';
 import { ChatAttachment, ChatTurn, Citation } from '../store/useChatStore';
-import { URA_CONTACTS, citationHref, sourceLabel, telDigits } from '../lib/uraContacts';
+import { URA_CONTACTS, telDigits } from '../lib/uraContacts';
 import { formatDocType, stripStepPrefix, type ScreenshotCopilotHandoff } from '../lib/attachments';
 import { stripCitationMarkers } from '../lib/answerText';
 import { formatNextShift } from '../lib/turnMeta';
@@ -14,12 +14,12 @@ import { savePendingPortalContinuation } from '../lib/portalContinuation';
 import { detectDeadlineInMessage, downloadCalendarEvent, getGoogleCalendarUrl } from '../lib/calendarEvents';
 import FeedbackButtons from './FeedbackButtons';
 import HumanHandoff from './HumanHandoff';
-import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon, FileIcon, DownloadIcon, EyeIcon, PlugIcon, ArrowRightIcon, ExternalLinkIcon, AlertTriangleIcon, LockIcon, MicIcon, BookIcon, PhoneIcon, CalendarIcon, ClipboardIcon } from './Icons';
+import { SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon, FileIcon, DownloadIcon, EyeIcon, PlugIcon, ArrowRightIcon, ExternalLinkIcon, AlertTriangleIcon, LockIcon, MicIcon, BookIcon, PhoneIcon, CalendarIcon, ClipboardIcon } from './Icons';
 import LoadingState from './LoadingState';
 import Markdown from './Markdown';
 import PortalCopilotCard from './PortalCopilotCard';
 import WorkflowStepper from './WorkflowStepper';
-import ResourceCards from './ResourceCards';
+import SourcesPill from './SourcesPill';
 
 const CONNECTOR_OUTCOME_KEY: Record<ConnectorOutcome, TranslationKey> = {
   found: 'message.connectorOutcomeFound',
@@ -326,10 +326,6 @@ function ChatMessageInner({
           </div>
         )}
 
-        {isAssistant && turn.resources && turn.resources.length > 0 && !turn.workflow && (
-          <ResourceCards resources={turn.resources} />
-        )}
-
         {!isAssistant && turn.content && (
           <div className="bubble-actions bubble-actions-user">
             <CopyButton text={turn.content} noun="message" />
@@ -561,7 +557,7 @@ function ChatMessageInner({
         )}
 
         {/* The way out, offered exactly where the assistant ran out of answer.
-            It sits above the grounding badge and the citations on purpose: by
+            It sits above the grounding badge and the sources on purpose: by
             the time someone is reading "Verify with URA" they have already
             decided this answer is not enough, and the next thing they should
             find is a person rather than a phone number that starts the
@@ -574,9 +570,10 @@ function ChatMessageInner({
           />
         )}
 
-        {/* chatv2: grounding sits outside the citations block — a low-confidence
-            answer often has no citations, and that is exactly when the reader
-            most needs the warning. */}
+        {/* The answer's last row: the grounding badge, then the sources pill.
+            The badge never depends on there being sources — a low-confidence
+            answer often has none, and that is exactly when the reader most
+            needs the warning. */}
         {isAssistant && !isGreeting && !phaseLabel && turn.content && (
           <div className="grounding-row">
             {turn.retrievalMode === 'calculator' ? (
@@ -598,50 +595,17 @@ function ChatMessageInner({
                 {turn.faithfulnessScore >= 0.6 ? 'Well grounded' : 'Verify with URA'}
               </span>
             ) : null}
+            {/* The forms and passages behind the answer, behind one pill. A
+                guided step's forms arrive as the workflow's own resources. */}
+            <SourcesPill
+              citations={turn.citations}
+              resources={turn.resources?.length ? turn.resources : turn.workflow?.resources}
+            />
           </div>
         )}
 
         {isAssistant && !isGreeting && !phaseLabel && turn.content && (
           <ConnectorAttribution used={turn.connectorsUsed} notices={turn.connectorNotices} />
-        )}
-
-        {isAssistant && turn.citations && turn.citations.length > 0 && (
-          <details className="citations">
-            <summary>
-              <SparklesIcon /> Sources ({turn.citations.length})
-            </summary>
-            <ol>
-              {turn.citations.map((c: Citation) => {
-                const href = citationHref(c);
-                const label = c.title?.trim() || sourceLabel(c.source);
-                return (
-                  <li key={c.ref}>
-                    {href ? (
-                      <a
-                        className="cite-source-link"
-                        href={href}
-                        target="_blank"
-                        rel="noopener noreferrer nofollow"
-                        title={c.url || `${c.source} — official URA documents`}
-                      >
-                        <strong>{label}</strong>
-                      </a>
-                    ) : (
-                      <strong title={c.source}>{label}</strong>
-                    )}
-                    {c.effective_date ? ` (${c.effective_date})` : ''}
-                    {c.page ? ` p.${c.page}` : ''}
-                    {c.section ? ` ${c.section}` : ''}
-                    {c.passage && (
-                      <div className="cite-passage">
-                        {c.passage.slice(0, 180)}{c.passage.length > 180 ? '...' : ''}
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ol>
-          </details>
         )}
 
         {isAssistant && !isGreeting && !phaseLabel && deadlineEvent && (
@@ -772,6 +736,11 @@ function citationSignature(citations: Citation[] | undefined): string {
     .join('\u001e');
 }
 
+function resourceSignature(turn: ChatTurn): string {
+  const resources = turn.resources?.length ? turn.resources : turn.workflow?.resources;
+  return (resources ?? []).map((r) => `${r.id ?? ''}\u001f${r.url ?? ''}\u001f${r.title ?? ''}`).join('\u001e');
+}
+
 function attachmentSignature(attachments: ChatAttachment[] | undefined): string {
   return (attachments ?? []).map((a) => `${a.id}${a.docType ?? ''}`).join('|');
 }
@@ -822,6 +791,7 @@ const ChatMessage = memo(ChatMessageInner, (prev, next) => {
     prev.onActionClick === next.onActionClick &&
     attachmentSignature(prev.turn.attachments) === attachmentSignature(next.turn.attachments) &&
     citationSignature(prev.turn.citations) === citationSignature(next.turn.citations) &&
+    resourceSignature(prev.turn) === resourceSignature(next.turn) &&
     prev.userQuery === next.userQuery &&
     prev.turn.discrepancyReport?.id === next.turn.discrepancyReport?.id &&
     prev.turn.discrepancyReport?.status === next.turn.discrepancyReport?.status &&

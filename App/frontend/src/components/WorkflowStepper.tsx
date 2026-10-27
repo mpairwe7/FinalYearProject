@@ -1,7 +1,6 @@
 import React, { memo } from 'react';
 import { WorkflowState } from '../store/useChatStore';
 import { useTranslation } from '../lib/i18n';
-import ResourceCards from './ResourceCards';
 
 interface WorkflowStepperProps {
   workflow: WorkflowState;
@@ -207,10 +206,6 @@ function WorkflowStepperInner({ workflow, onSelectOption }: WorkflowStepperProps
             })}
           </div>
         </div>
-      )}
-
-      {workflow.resources && workflow.resources.length > 0 && (
-        <ResourceCards resources={workflow.resources} title={t('workflow.resources')} />
       )}
 
       <div className="workflow-footer-actions">
