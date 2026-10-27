@@ -189,6 +189,20 @@ class MetricsStore:
         """Move an up/down gauge such as active connections (summed across live workers)."""
         self._record("gauge_sum", name, labels, lambda child: child.inc(delta))
 
+    def remove_gauge(self, name: str, labels: Mapping[str, Any]) -> None:
+        """Remove a labelled gauge child series when a segment is omitted on a later run."""
+        try:
+            full = exported_name(name)
+            family = self._families.get(full)
+            if family is None or not family.label_names:
+                return
+            values = tuple(_clean_label_value(labels.get(key, "")) for key in family.label_names)
+            with self._lock:
+                family.seen.discard(values)
+                family.metric.remove(*values)
+        except Exception:
+            logger.debug("Gauge series removal skipped for %s", name, exc_info=True)
+
     def _record(
         self,
         kind: str,

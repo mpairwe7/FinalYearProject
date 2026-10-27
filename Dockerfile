@@ -58,8 +58,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 FROM python:3.14.8-slim-bookworm@sha256:44e000a07b48bef1517a2b14adc93c17af728ca98858b5e24c6e1b18de1b2ef2 AS runtime
 
 # Keep OS packages current with bookworm-security errata (fixes perl-base,
-# libpcre2, openssl/libssl3 CVEs).
-RUN apt-get update && apt-get -y --no-install-recommends upgrade \
+# libpcre2, openssl/libssl3 3.0.22-1~deb12u2 CVE-2026-84782).
+RUN apt-get update \
+    && apt-get -y --no-install-recommends dist-upgrade \
+    && apt-get install -y --no-install-recommends --only-upgrade openssl libssl3 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

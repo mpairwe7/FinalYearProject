@@ -493,6 +493,8 @@ export const en = {
   'portalCopilot.accessDeniedBadge': 'Access Denied',
   'portalCopilot.resumingAfterSignIn': 'Resuming {task} after sign-in',
   'portalCopilot.submittedDetailsFor': 'Submitted details for {task}',
+  'portalCopilot.highValueAckLabel': 'I have verified this high-value UGX figure (≥ UGX 50,000,000) and the taxpayer TIN.',
+  'portalCopilot.decisionReceiptLabel': 'Verifiable Decision Receipt:',
   'portalCopilot.task.payment_generate_prn': 'PRN Payment Registration',
   'portalCopilot.task.tin_apply_individual': 'Individual TIN Application',
   'portalCopilot.task.return_filing_submit': 'Return Filing',

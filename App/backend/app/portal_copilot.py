@@ -162,17 +162,25 @@ ENTITY_TYPE_OPTIONS: tuple[dict[str, str], ...] = (
     {"value": "TRUST_NGO", "label": "Trust / NGO / Association"},
 )
 
-DTS_PRODUCT_OPTIONS: tuple[dict[str, str], ...] = (
-    {"value": "BOTTLED_WATER", "label": "Bottled Water (UGX 13 / stamp)"},
-    {"value": "SODA", "label": "Non-Alcoholic Soda / Beverage (UGX 17 / stamp)"},
-    {"value": "BEER", "label": "Beer (UGX 36 / stamp)"},
-    {"value": "WINES", "label": "Wine (UGX 55 / stamp)"},
-    {"value": "SPIRITS", "label": "Spirits (UGX 55 / stamp)"},
-    {"value": "TOBACCO", "label": "Tobacco / Cigarettes (UGX 75 / stamp)"},
-    {"value": "CEMENT", "label": "Cement (UGX 135 / stamp)"},
-    {"value": "SUGAR", "label": "Sugar (UGX 100 / stamp)"},
-    {"value": "COOKING_OIL", "label": "Cooking Oil (UGX 30 / stamp)"},
+_DTS_PRODUCT_CATALOG: tuple[tuple[str, str, float], ...] = (
+    ("BOTTLED_WATER", "Bottled Water (UGX 13 / stamp)", 13.0),
+    ("SODA", "Non-Alcoholic Soda / Beverage (UGX 17 / stamp)", 17.0),
+    ("BEER", "Beer (UGX 36 / stamp)", 36.0),
+    ("WINES", "Wine (UGX 55 / stamp)", 55.0),
+    ("SPIRITS", "Spirits (UGX 55 / stamp)", 55.0),
+    ("TOBACCO", "Tobacco / Cigarettes (UGX 75 / stamp)", 75.0),
+    ("CEMENT", "Cement (UGX 135 / stamp)", 135.0),
+    ("SUGAR", "Sugar (UGX 100 / stamp)", 100.0),
+    ("COOKING_OIL", "Cooking Oil (UGX 30 / stamp)", 30.0),
 )
+
+DTS_PRODUCT_OPTIONS: tuple[dict[str, str], ...] = tuple(
+    {"value": code, "label": label} for code, label, _ in _DTS_PRODUCT_CATALOG
+)
+
+_DTS_STAMP_UNIT_RATES_UGX: dict[str, float] = {
+    code: rate for code, _, rate in _DTS_PRODUCT_CATALOG
+}
 
 TCC_PURPOSE_OPTIONS: tuple[dict[str, str], ...] = (
     {"value": "BIDDING_TENDER", "label": "Public Procurement Bidding / Government Tender"},
@@ -1816,6 +1824,17 @@ def validate_task_fields(
                 missing.append(f_spec.name)
             continue
 
+        if f_spec.input_type == "select" and f_spec.options:
+            option_map = {str(opt["value"]).upper(): str(opt["value"]) for opt in f_spec.options}
+            canonical_opt = option_map.get(val_str.upper())
+            if canonical_opt is None:
+                allowed_vals = ", ".join(str(opt["value"]) for opt in f_spec.options)
+                errors[f_spec.name] = (
+                    f"Invalid selection '{val_str}' for {f_spec.label}. Allowed values: {allowed_vals}."
+                )
+                continue
+            val_str = canonical_opt
+
         # Field-specific format checks with separator normalization & cross-field error diagnosis
         if f_spec.name in ("tin", "buyer_tin") and spec.task_id != "tin_search_verify":
             compact_tin = re.sub(r"[\s-]+", "", val_str)
@@ -2254,27 +2273,6 @@ def build_portal_task_card(
         return card_out
 
     # ── Gate 5: Tier 2 & Tier 3 Claude-Style Confirmation Card (`confirmation_required`) ──
-    canonical_params = json.dumps(validated_params, sort_keys=True, separators=(",", ":"))
-    params_sha256 = hashlib.sha256(canonical_params.encode("utf-8")).hexdigest()
-    idempotency_key = "ura_task_" + hashlib.sha256(
-        f"{owner_key}:{spec.task_id}:{canonical_params}".encode()
-    ).hexdigest()[:32]
-
-    issued_at = int(time.time())
-    state_payload = {
-        "task_id": spec.task_id,
-        "portal_key": spec.portal_key,
-        "tier": spec.tier.value,
-        "params": validated_params,
-        "params_sha256": params_sha256,
-        "owner_key": owner_key,
-        "user_id": str(user_id or ""),
-        "issued_at": issued_at,
-        "expires_at": issued_at + PORTAL_TASK_STATE_TTL_SECONDS,
-        "idempotency_key": idempotency_key,
-    }
-    signed_request_state = mrtr.wrap_request_state(state_payload)
-
     display_fields: list[dict[str, Any]] = []
     for f in spec.fields:
         if f.name not in validated_params:
@@ -2290,7 +2288,35 @@ def build_portal_task_card(
             }
         )
 
-    return {
+    displayed_fields_sha256 = compute_displayed_fields_sha256(display_fields)
+    canonical_params = json.dumps(validated_params, sort_keys=True, separators=(",", ":"))
+    params_sha256 = hashlib.sha256(canonical_params.encode("utf-8")).hexdigest()
+    idempotency_key = "ura_task_" + hashlib.sha256(
+        f"{owner_key}:{spec.task_id}:{canonical_params}".encode()
+    ).hexdigest()[:32]
+
+    high_value_requires_ack = (
+        compute_estimated_liability_ugx(spec, validated_params) >= HIGH_VALUE_LIABILITY_THRESHOLD_UGX
+    )
+
+    issued_at = int(time.time())
+    state_payload = {
+        "task_id": spec.task_id,
+        "portal_key": spec.portal_key,
+        "tier": spec.tier.value,
+        "params": validated_params,
+        "params_sha256": params_sha256,
+        "displayed_fields_sha256": displayed_fields_sha256,
+        "high_value_requires_ack": high_value_requires_ack,
+        "owner_key": owner_key,
+        "user_id": str(user_id or ""),
+        "issued_at": issued_at,
+        "expires_at": issued_at + PORTAL_TASK_STATE_TTL_SECONDS,
+        "idempotency_key": idempotency_key,
+    }
+    signed_request_state = mrtr.wrap_request_state(state_payload)
+
+    card_out_confirm = {
         "card_type": "confirmation_required",
         "task_id": spec.task_id,
         "portal_key": spec.portal_key,
@@ -2305,6 +2331,8 @@ def build_portal_task_card(
             "or cancel at any time. Unpaid PRNs expire automatically after 21 days."
         ),
         "display_fields": display_fields,
+        "displayed_fields_sha256": displayed_fields_sha256,
+        "high_value_requires_ack": high_value_requires_ack,
         "fields": [
             f.to_dict(value=validated_params.get(f.name, ""))
             for f in spec.fields
@@ -2319,11 +2347,87 @@ def build_portal_task_card(
         "live": False,
         "copilot_portal_url": copilot_portal_url,
     }
+    _record_copilot_card_metric(card_out_confirm, spec.tier.value)
+    return card_out_confirm
 
 
 # ---------------------------------------------------------------------------
 # Confirmed Task Decision Handler (`POST /v1/portal/tasks/execute`)
 # ---------------------------------------------------------------------------
+
+
+HIGH_VALUE_LIABILITY_THRESHOLD_UGX = 50_000_000
+
+
+def _record_copilot_card_metric(card: Mapping[str, Any], tier: str) -> None:
+    """Emit bounded Prometheus counter for generated Portal Co-Pilot cards."""
+    try:
+        from .analytics import metrics
+
+        metrics.inc(
+            "portal_copilot_cards_total",
+            labels={"card_type": str(card.get("card_type") or "unknown"), "tier": str(tier or "unknown")},
+        )
+    except Exception:
+        logger.debug("Portal copilot card metric recording skipped", exc_info=True)
+
+
+def _record_copilot_decision_metric(
+    decision: str, status_label: str, tier: str, duration_ms: float
+) -> None:
+    """Emit bounded Prometheus counter and latency histogram for Portal Co-Pilot HITL decisions."""
+    try:
+        from .analytics import metrics
+
+        metrics.inc(
+            "portal_copilot_decisions_total",
+            labels={
+                "decision": str(decision or "unknown"),
+                "status": str(status_label or "unknown"),
+                "tier": str(tier or "unknown"),
+            },
+        )
+        metrics.observe(
+            "portal_copilot_decision_duration_ms",
+            round(max(0.0, duration_ms), 2),
+            labels={"decision": str(decision or "unknown")},
+        )
+    except Exception:
+        logger.debug("Portal copilot decision metric recording skipped", exc_info=True)
+
+
+def compute_estimated_liability_ugx(spec: PortalTaskSpec, params: Mapping[str, Any]) -> float:
+    """Compute estimated UGX financial exposure across PRN, EFRIS stock-in, and DTS stamp orders."""
+    try:
+        if "amount_ugx" in params and params["amount_ugx"] is not None:
+            return float(str(params["amount_ugx"]).replace(",", ""))
+        if spec.task_id == "efris_stock_management":
+            qty = float(str(params.get("quantity") or 0).replace(",", ""))
+            cost = float(str(params.get("unit_cost") or 0).replace(",", ""))
+            return qty * cost
+        if spec.task_id == "dts_order_stamps":
+            qty = float(str(params.get("quantity") or 0).replace(",", ""))
+            cat = str(params.get("product_category") or "").strip().upper()
+            rate = _DTS_STAMP_UNIT_RATES_UGX.get(cat)
+            if rate is None:
+                return 0.0
+            return qty * rate
+    except (TypeError, ValueError):
+        return 0.0
+    return 0.0
+
+
+def compute_displayed_fields_sha256(display_fields: Sequence[Mapping[str, Any]]) -> str:
+    """Compute canonical WYSIWYS SHA-256 digest over ordered `(name, raw_value)` display tuples (OWASP ASI09)."""
+    canonical = [
+        {
+            "name": str(item.get("name") or ""),
+            "value": str(item.get("raw_value") if item.get("raw_value") is not None else item.get("value") or ""),
+        }
+        for item in display_fields
+    ]
+    raw = json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def handle_portal_task_decision(
@@ -2336,8 +2440,14 @@ def handle_portal_task_decision(
     user_id: str | None = None,
     authenticated_tin: str | None = None,
     conversation_id: str | None = None,
+    session_id: str | None = None,
+    tenant_id: str = "default",
+    edited_fields: Mapping[str, Any] | None = None,
+    displayed_fields_sha256: str | None = None,
+    high_value_acknowledged: bool | None = None,
 ) -> dict[str, Any]:
-    """Verify HMAC-signed `request_state`, enforce owner/session binding (`ADR-0013`), and execute or decline."""
+    """Verify HMAC-signed `request_state`, enforce owner/session binding (`ADR-0013`), and execute, prepare, or decline."""
+    t0_decision = time.perf_counter()
     unwrapped = mrtr.unwrap_request_state(dict(request_state) if isinstance(request_state, Mapping) else None)
     if unwrapped is None:
         raise PortalTaskValidationError("Invalid or tampered request_state signature.")
@@ -2348,6 +2458,8 @@ def handle_portal_task_decision(
     state_user = str(unwrapped.get("user_id") or "").strip()
     state_tier = str(unwrapped.get("tier") or "").strip()
     state_params_hash = str(unwrapped.get("params_sha256") or "").strip()
+    state_displayed_hash = str(unwrapped.get("displayed_fields_sha256") or "").strip()
+    state_high_value_ack = bool(unwrapped.get("high_value_requires_ack", False))
     params = unwrapped.get("params")
 
     if not task_id or not isinstance(params, Mapping):
@@ -2396,6 +2508,82 @@ def handle_portal_task_decision(
     cache_key = (state_owner, state_idem)
 
     decision_clean = str(decision or "").strip().lower()
+    if decision_clean == "prepare":
+        with _TASK_CACHE_LOCK:
+            shared_state, _ = _read_shared_task_decision(cache_key)
+            if (
+                cache_key in _DECLINED_TASK_CACHE
+                or cache_key in _EXECUTED_TASK_CACHE
+                or shared_state in ("declined", "executed")
+            ):
+                raise PortalTaskValidationError(
+                    "Cannot modify a proposal that has already been executed or declined."
+                )
+        allowed_field_names = {f.name for f in spec.fields}
+        merged_fields: dict[str, Any] = dict(params)
+        if edited_fields and isinstance(edited_fields, Mapping):
+            if len(edited_fields) > len(allowed_field_names) + 4:
+                raise PortalTaskValidationError("Too many fields in edited_fields payload.")
+            for k, v in edited_fields.items():
+                k_str = str(k).strip()
+                if k_str not in allowed_field_names:
+                    raise PortalTaskValidationError(f"Unknown field '{k_str}' for task '{spec.task_id}'.")
+                v_str = str(v if v is not None else "")
+                if len(v_str) > 512:
+                    raise PortalTaskValidationError(f"Field '{k_str}' exceeds maximum length (512 chars).")
+                merged_fields[k_str] = v_str
+        updated_card = build_portal_task_card(
+            spec.task_id,
+            extracted_fields=merged_fields,
+            user_id=user_id,
+            authenticated_tin=authenticated_tin,
+            session_id=session_id,
+            conversation_id=conv_id,
+            tenant_id=tenant_id,
+        )
+        card_type = str(updated_card.get("card_type") or "")
+        if card_type == "inline_form":
+            return {
+                "ok": False,
+                "status": "validation_error",
+                "task_id": spec.task_id,
+                "portal_key": spec.portal_key,
+                "live": False,
+                "mode": "simulation",
+                "summary": "Please correct the highlighted field errors before confirming.",
+                "result": {"field_errors": updated_card.get("field_errors", {})},
+                "dom_actions": [],
+                "copilot_portal_url": copilot_portal_url,
+                "updated_card": updated_card,
+            }
+        if card_type == "access_denied":
+            raise PortalTaskOwnershipError(str(updated_card.get("error") or "Access denied under TPCA s. 75."))
+        # Synchronize conversational entity memory so subsequent turns reflect the inline edit
+        with _TASK_CACHE_LOCK:
+            mem = dict(_CONVERSATION_ENTITY_MEMORY.get(owner_key) or {})
+            for f_spec in spec.fields:
+                if f_spec.name in merged_fields and not f_spec.sensitive:
+                    mem[f_spec.name] = merged_fields[f_spec.name]
+            _CONVERSATION_ENTITY_MEMORY[owner_key] = mem
+            _CONVERSATION_ENTITY_MEMORY.move_to_end(owner_key)
+            while len(_CONVERSATION_ENTITY_MEMORY) > _MAX_TASK_CACHE_ENTRIES:
+                _CONVERSATION_ENTITY_MEMORY.popitem(last=False)
+        _record_copilot_decision_metric("prepare", "prepared", spec.tier.value, (time.perf_counter() - t0_decision) * 1000)
+        return {
+            "ok": True,
+            "status": "prepared",
+            "task_id": spec.task_id,
+            "portal_key": spec.portal_key,
+            "live": False,
+            "mode": "simulation",
+            "summary": "Updated details validated and re-signed. Please review and confirm.",
+            "result": {},
+            "dom_actions": [],
+            "copilot_portal_url": copilot_portal_url,
+            "displayed_fields_sha256": updated_card.get("displayed_fields_sha256"),
+            "updated_card": updated_card,
+        }
+
     if decision_clean in ("disallow", "decline", "cancel"):
         shared_state, _ = _read_shared_task_decision(cache_key)
         with _TASK_CACHE_LOCK:
@@ -2404,6 +2592,7 @@ def handle_portal_task_decision(
                 while len(_DECLINED_TASK_CACHE) > _MAX_TASK_CACHE_ENTRIES:
                     _DECLINED_TASK_CACHE.popitem(last=False)
                 _write_shared_task_decision(cache_key, declined=True, user_id=user_id)
+        _record_copilot_decision_metric("disallow", "declined", spec.tier.value, (time.perf_counter() - t0_decision) * 1000)
         return {
             "ok": True,
             "status": "declined",
@@ -2419,6 +2608,30 @@ def handle_portal_task_decision(
 
     if decision_clean not in ("allow", "accept"):
         raise PortalTaskValidationError(f"Unsupported decision: {decision}")
+
+    # WYSIWYS Displayed Fields Digest check (OWASP ASI09 Human-Agent Trust Exploitation defense)
+    expected_display_fields = [
+        {"name": f.name, "raw_value": str(params[f.name])}
+        for f in spec.fields
+        if f.name in params
+    ]
+    recomputed_displayed_hash = compute_displayed_fields_sha256(expected_display_fields)
+    if state_displayed_hash and not hmac_compare(state_displayed_hash.lower(), recomputed_displayed_hash.lower()):
+        raise PortalTaskValidationError(
+            "WYSIWYS displayed_fields_sha256 integrity failure inside request_state."
+        )
+    if displayed_fields_sha256:
+        target_hash = (state_displayed_hash or recomputed_displayed_hash).lower()
+        if not hmac_compare(target_hash, str(displayed_fields_sha256).strip().lower()):
+            raise PortalTaskValidationError(
+                "WYSIWYS displayed_fields_sha256 mismatch (OWASP ASI09): displayed fields do not match signed request_state."
+            )
+
+    # Server-enforced high-value statutory liability cognitive friction gate (OWASP ASI09 / WCAG 2.2 SC 3.3.4)
+    if state_high_value_ack and high_value_acknowledged is not True:
+        raise PortalTaskValidationError(
+            "High-value statutory transaction (>= UGX 50,000,000) requires explicit high_value_acknowledged=True confirmation."
+        )
 
     with _TASK_CACHE_LOCK:
         if cache_key in _DECLINED_TASK_CACHE:
@@ -2493,6 +2706,20 @@ def handle_portal_task_decision(
             )
         err_diag = diagnose_ura_error(summary_msg) if not ok else None
 
+        decision_receipt = {
+            "receipt_id": "rcpt_"
+            + hashlib.sha256(f"{state_idem}:{computed_hash}".encode("utf-8")).hexdigest()[:16],
+            "task_id": spec.task_id,
+            "portal_key": spec.portal_key,
+            "tier": spec.tier.value,
+            "statutory_citation": spec.statutory_citation,
+            "params_sha256": computed_hash,
+            "displayed_fields_sha256": state_displayed_hash or recomputed_displayed_hash,
+            "executed_at": int(time.time()),
+            "live": live,
+            "mode": mode,
+        }
+
         response_payload: dict[str, Any] = {
             "ok": ok,
             "status": "executed" if ok else "error",
@@ -2504,6 +2731,8 @@ def handle_portal_task_decision(
             "result": exec_result,
             "dom_actions": dom_actions,
             "copilot_portal_url": copilot_portal_url,
+            "displayed_fields_sha256": state_displayed_hash or None,
+            "decision_receipt": decision_receipt if ok else None,
         }
         if err_diag:
             response_payload["error_diagnosis"] = err_diag
@@ -2518,6 +2747,12 @@ def handle_portal_task_decision(
                     payload=response_payload,
                     user_id=user_id,
                 )
+        _record_copilot_decision_metric(
+            "allow",
+            "executed" if ok else "error",
+            spec.tier.value,
+            (time.perf_counter() - t0_decision) * 1000,
+        )
         return response_payload
     finally:
         with _TASK_CACHE_LOCK:
