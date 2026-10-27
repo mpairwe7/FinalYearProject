@@ -146,8 +146,8 @@ def export_pairs(path: Path, *, tenant_id: str | None = None) -> int:
     for row in rows or []:
         if not isinstance(row, dict):
             continue
-        rejected = str(row.get("bot_reply") or row.get("assistant") or "").strip()
-        query = str(row.get("user_query") or row.get("query") or "").strip()
+        rejected = _scrub_preference_text(str(row.get("bot_reply") or row.get("assistant") or "").strip())
+        query = _scrub_preference_text(str(row.get("user_query") or row.get("query") or "").strip())
         if query and rejected:
             pairs.append(
                 {
@@ -157,9 +157,9 @@ def export_pairs(path: Path, *, tenant_id: str | None = None) -> int:
                 }
             )
     for ticket in tickets or []:
-        reply = str(ticket.get("officer_reply") or "").strip()
-        query = str(ticket.get("user_query") or "").strip()
-        rejected = str(ticket.get("bot_reply") or "").strip()
+        reply = _scrub_preference_text(str(ticket.get("officer_reply") or "").strip())
+        query = _scrub_preference_text(str(ticket.get("user_query") or "").strip())
+        rejected = _scrub_preference_text(str(ticket.get("bot_reply") or "").strip())
         if query and reply:
             pairs.append(
                 {
@@ -183,9 +183,9 @@ def export_pairs(path: Path, *, tenant_id: str | None = None) -> int:
         if not batch:
             break
         for pref in batch:
-            chosen = str(pref.get("chosen_reply") or "").strip()
-            rejected = str(pref.get("rejected_draft") or "").strip()
-            prompt_ctx = str(pref.get("prompt_context") or pref.get("topic") or "").strip()
+            chosen = _scrub_preference_text(str(pref.get("chosen_reply") or "").strip())
+            rejected = _scrub_preference_text(str(pref.get("rejected_draft") or "").strip())
+            prompt_ctx = _scrub_preference_text(str(pref.get("prompt_context") or pref.get("topic") or "").strip())
             if prompt_ctx and chosen and rejected:
                 pairs.append(
                     {

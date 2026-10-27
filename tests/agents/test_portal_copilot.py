@@ -757,6 +757,20 @@ def test_10_wysiwys_digest_inline_prepare_high_value_friction_auditor_rbac_and_c
     assert any("portal_copilot_decisions_total" in k for k in snap["counters"])
     assert any("eval_segment_metric" in k for k in snap["gauges"])
 
+    # Verify stale segments are removed when omitted from a subsequent report
+    empty_seg_report = EvalReport(
+        sample_size=4,
+        started_at=1700000060.0,
+        duration_ms=20.0,
+        metrics=[EvalMetric(name="faithfulness", value=0.90, threshold=0.7, passed=True)],
+        regressions=[],
+        backend="ragas",
+        by_segment={},
+    )
+    record_eval_report(empty_seg_report)
+    snap_after = metrics.snapshot()
+    assert not any('segment="lg"' in k for k in snap_after["gauges"])
+
     bundle = build_bilevel_preference_bundle(
         [
             {

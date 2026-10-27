@@ -94,13 +94,14 @@ class EvalReport:
         for m in self.metrics:
             lines.append(f'ura_eval_metric{{name="{m.name}",backend="{self.backend}"}} {m.value:.4f}')
             lines.append(f'ura_eval_metric_passed{{name="{m.name}"}} {1 if m.passed else 0}')
-        # Per-segment — dedicated gauge family so label keys never collide with global ura_eval_metric
+        # Per-segment — dedicated gauge family so label keys never collide with global ura_eval_metric;
+        # segment metrics are computed by _metrics_for_group using heuristic scorers.
         for dim, segments in self.by_segment.items():
             for seg, metrics in segments.items():
                 for m in metrics:
                     lines.append(
                         f'ura_eval_segment_metric{{name="{m.name}",'
-                        f'segment_dim="{dim}",segment="{seg}",backend="{self.backend}"}} {m.value:.4f}'
+                        f'segment_dim="{dim}",segment="{seg}",backend="heuristic"}} {m.value:.4f}'
                     )
                     lines.append(
                         f'ura_eval_segment_metric_passed{{name="{m.name}",'
@@ -456,6 +457,9 @@ def _compute_by_segment(
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+_PUBLISHED_SEGMENT_SERIES: set[tuple[str, str, str]] = set()
+
+
 def record_eval_report(report: EvalReport) -> None:
     """Publish a report on ``/metrics`` so the eval-regression alert can see it.
 
@@ -474,19 +478,33 @@ def record_eval_report(report: EvalReport) -> None:
     for metric in report.metrics:
         metrics.set_gauge("eval_metric", metric.value, labels={"name": metric.name, "backend": report.backend})
         metrics.set_gauge("eval_metric_passed", 1 if metric.passed else 0, labels={"name": metric.name})
+    current_segments: set[tuple[str, str, str]] = set()
     for dim, segments in report.by_segment.items():
         for seg, seg_metrics in segments.items():
             for m in seg_metrics:
+                key = (m.name, dim, seg)
+                current_segments.add(key)
                 metrics.set_gauge(
                     "eval_segment_metric",
                     m.value,
-                    labels={"name": m.name, "segment_dim": dim, "segment": seg, "backend": report.backend},
+                    labels={"name": m.name, "segment_dim": dim, "segment": seg, "backend": "heuristic"},
                 )
                 metrics.set_gauge(
                     "eval_segment_metric_passed",
                     1 if m.passed else 0,
                     labels={"name": m.name, "segment_dim": dim, "segment": seg},
                 )
+    for stale_name, stale_dim, stale_seg in list(_PUBLISHED_SEGMENT_SERIES - current_segments):
+        metrics.remove_gauge(
+            "eval_segment_metric",
+            {"name": stale_name, "segment_dim": stale_dim, "segment": stale_seg, "backend": "heuristic"},
+        )
+        metrics.remove_gauge(
+            "eval_segment_metric_passed",
+            {"name": stale_name, "segment_dim": stale_dim, "segment": stale_seg},
+        )
+    _PUBLISHED_SEGMENT_SERIES.clear()
+    _PUBLISHED_SEGMENT_SERIES.update(current_segments)
 
 
 def main() -> int:

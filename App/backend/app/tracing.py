@@ -221,34 +221,36 @@ def trace_rag_pipeline(
             attributes["ura.request_id"] = request_id
         with _tracer.start_as_current_span(f"invoke_agent {AGENT_NAME}", attributes=attributes) as span:
             ctx["span"] = span
-            yield ctx
-            for stage, ms in ctx["timings"].items():
-                span.set_attribute(f"rag.stage.{stage}.duration_ms", ms)
-            if "num_sources" in ctx:
-                span.set_attribute("rag.retrieval.num_results", ctx["num_sources"])
-            if "locale" in ctx:
-                span.set_attribute("ura.locale", ctx["locale"])
-            _apply_turn_attributes(span)
-            usage = _TURN_USAGE.get() or {}
-            if usage.get("calls"):
-                span.set_attribute("gen_ai.usage.input_tokens", usage["input_tokens"])
-                span.set_attribute("gen_ai.usage.output_tokens", usage["output_tokens"])
-            tool_call_count = int(tool_calls_box[0])
-            span.set_attribute("gen_ai.invoke_agent.tool_calls", tool_call_count)
-            if _meter is not None:
-                agent_attrs = {"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": AGENT_NAME}
-                _instrument(
-                    "histogram",
-                    "gen_ai.invoke_agent.duration",
-                    "s",
-                    "Duration of full agent invocation",
-                ).record(time.perf_counter() - started_agent, agent_attrs)
-                _instrument(
-                    "histogram",
-                    "gen_ai.invoke_agent.tool_calls",
-                    "{tool_call}",
-                    "Number of tool calls made during an agent invocation",
-                ).record(tool_call_count, agent_attrs)
+            try:
+                yield ctx
+            finally:
+                for stage, ms in ctx["timings"].items():
+                    span.set_attribute(f"rag.stage.{stage}.duration_ms", ms)
+                if "num_sources" in ctx:
+                    span.set_attribute("rag.retrieval.num_results", ctx["num_sources"])
+                if "locale" in ctx:
+                    span.set_attribute("ura.locale", ctx["locale"])
+                _apply_turn_attributes(span)
+                usage = _TURN_USAGE.get() or {}
+                if usage.get("calls"):
+                    span.set_attribute("gen_ai.usage.input_tokens", usage["input_tokens"])
+                    span.set_attribute("gen_ai.usage.output_tokens", usage["output_tokens"])
+                tool_call_count = int(tool_calls_box[0])
+                span.set_attribute("gen_ai.invoke_agent.tool_calls", tool_call_count)
+                if _meter is not None:
+                    agent_attrs = {"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": AGENT_NAME}
+                    _instrument(
+                        "histogram",
+                        "gen_ai.invoke_agent.duration",
+                        "s",
+                        "Duration of full agent invocation",
+                    ).record(time.perf_counter() - started_agent, agent_attrs)
+                    _instrument(
+                        "histogram",
+                        "gen_ai.invoke_agent.tool_calls",
+                        "{tool_call}",
+                        "Number of tool calls made during an agent invocation",
+                    ).record(tool_call_count, agent_attrs)
     finally:
         _TURN_USAGE.set(previous_usage)
         _TURN_TOOL_CALLS.set(previous_tool_calls)
