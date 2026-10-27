@@ -477,6 +477,8 @@ export const lg: Partial<Dictionary> = {
   'portalCopilot.accessDeniedBadge': 'Olukusa Lugaanyi',
   'portalCopilot.resumingAfterSignIn': ' okugenda mu maaso ne {task} oluvannyuma lw’okuyingira',
   'portalCopilot.submittedDetailsFor': 'Ebiweereddwayo ku {task}',
+  'portalCopilot.highValueAckLabel': 'Nkakasizza omuwendo guno omunene ogwa UGX (≥ UGX 50,000,000) n’ennamba ya TIN.',
+  'portalCopilot.decisionReceiptLabel': 'Risiti y’Okusalawo Ekakasibwa:',
   'portalCopilot.task.payment_generate_prn': 'Okufuna Ennamba ya PRN',
   'portalCopilot.task.tin_apply_individual': 'Okusaba TIN y’Omuntu Sekinnomu',
   'portalCopilot.task.return_filing_submit': 'Okuwaayo Alipoota y’Omusolo',

@@ -1360,6 +1360,12 @@ def execute_portal_task_decision(
             detail="Portal task execution co-pilot is disabled.",
         )
 
+    if getattr(ctx, "role", None) in ("ura_auditor", "ura_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrators and auditors have audit/read-only access and cannot execute or modify live portal tasks.",
+        )
+
     session_id = request.headers.get("X-Session-ID") or body.conversation_id or ""
     conv_id = body.conversation_id or "default"
     tenant_id = ctx.tenant_id or "default"
@@ -1390,6 +1396,11 @@ def execute_portal_task_decision(
             candidate_owner_keys=candidate_owner_keys,
             user_id=ctx.user_id or None,
             conversation_id=conv_id,
+            session_id=session_id or None,
+            tenant_id=tenant_id,
+            edited_fields=body.edited_fields,
+            displayed_fields_sha256=body.displayed_fields_sha256,
+            high_value_acknowledged=body.high_value_acknowledged,
         )
     except pc_mod.PortalTaskValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -1398,6 +1409,7 @@ def execute_portal_task_decision(
 
     if flags.is_enabled("audit_ledger"):
         try:
+            receipt = outcome.get("decision_receipt") or {}
             db.append_audit_event(
                 event_type=f"portal_task_{outcome.get('status', 'decision')}",
                 actor_id=ctx.user_id or session_id or "anonymous",
@@ -1410,6 +1422,10 @@ def execute_portal_task_decision(
                     "live": bool(outcome.get("live", False)),
                     "mode": outcome.get("mode", "simulation"),
                     "idempotency_key": body.idempotency_key,
+                    "params_sha256": receipt.get("params_sha256", ""),
+                    "displayed_fields_sha256": outcome.get("displayed_fields_sha256")
+                    or receipt.get("displayed_fields_sha256", ""),
+                    "receipt_id": receipt.get("receipt_id", ""),
                 },
             )
         except Exception:

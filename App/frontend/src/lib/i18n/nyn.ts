@@ -470,6 +470,8 @@ export const nyn: Partial<Dictionary> = {
   'portalCopilot.accessDeniedBadge': 'Orusa Rwayangwa',
   'portalCopilot.resumingAfterSignIn': 'Okugumizamu na {task} bwanyima y’okutaaha',
   'portalCopilot.submittedDetailsFor': 'Ebihandiikirwe aha {task}',
+  'portalCopilot.highValueAckLabel': 'Mpamiize esente ezi nyingi za UGX (≥ UGX 50,000,000) n’enamba ya TIN.',
+  'portalCopilot.decisionReceiptLabel': 'Risiti y’Okusharamu Erikuhamibwa:',
   'portalCopilot.task.payment_generate_prn': 'Okutunga Enamba ya PRN',
   'portalCopilot.task.tin_apply_individual': 'Okushaba TIN y’Omuntu',
   'portalCopilot.task.return_filing_submit': 'Okuhaayo Empapura z’Omushoro',

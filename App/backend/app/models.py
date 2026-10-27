@@ -227,15 +227,28 @@ class ChatResponse(BaseModel):
 
 
 class PortalTaskDecisionRequest(BaseModel):
-    decision: Literal["allow", "disallow", "accept", "decline", "cancel"]
+    decision: Literal["allow", "disallow", "accept", "decline", "cancel", "prepare"]
     request_state: dict[str, Any]
     idempotency_key: str = Field(..., min_length=8, max_length=128, pattern=r"^[a-zA-Z0-9_:-]+$")
     conversation_id: str | None = Field(None, pattern=r"^[a-zA-Z0-9_-]{1,64}$")
+    edited_fields: dict[str, str] | None = Field(
+        None,
+        description="Inline edited field values when decision='prepare' re-validates and re-signs request_state without an LLM call",
+    )
+    displayed_fields_sha256: str | None = Field(
+        None,
+        pattern=r"^[a-fA-F0-9]{64}$",
+        description="Optional WYSIWYS SHA-256 digest of rendered display_fields verified against request_state (OWASP ASI09)",
+    )
+    high_value_acknowledged: bool | None = Field(
+        None,
+        description="Explicit human acknowledgement required when high_value_requires_ack is True (>= UGX 50,000,000)",
+    )
 
 
 class PortalTaskDecisionResponse(BaseModel):
     ok: bool
-    status: Literal["executed", "declined", "requires_auth", "error"]
+    status: Literal["executed", "declined", "requires_auth", "prepared", "validation_error", "error"]
     task_id: str
     portal_key: str = ""
     live: bool = False
@@ -245,6 +258,9 @@ class PortalTaskDecisionResponse(BaseModel):
     dom_actions: list[dict[str, Any]] = Field(default_factory=list)
     copilot_portal_url: str = ""
     idempotent_replay: bool = False
+    displayed_fields_sha256: str | None = None
+    updated_card: dict[str, Any] | None = None
+    decision_receipt: dict[str, Any] | None = None
 
 
 

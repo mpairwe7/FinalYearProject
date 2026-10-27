@@ -26,7 +26,7 @@ import secrets
 import time
 from typing import Any
 
-_SECRET_ENV = "WS_CONFIRM_HMAC_SECRET"
+_SECRET_ENV = "WS_CONFIRM_HMAC_SECRET"  # pragma: allowlist secret
 # In production this MUST come from the environment.  Development falls
 # back to a per-process random secret so tests are reproducible within a
 # run but tokens never leak across deployments.
@@ -37,8 +37,16 @@ _DEV_FALLBACK = secrets.token_bytes(32)
 _DEFAULT_TTL_SECONDS = 300
 
 
+def _is_production() -> bool:
+    return os.getenv("APP_ENV", "development").strip().lower() == "production"
+
+
 def _secret() -> bytes:
-    raw = os.getenv(_SECRET_ENV, "")
+    raw = (os.getenv(_SECRET_ENV) or os.getenv("MCP_REQUEST_STATE_SECRET") or "").strip()
+    if _is_production():
+        if len(raw) < 32:
+            return b""
+        return raw.encode("utf-8")
     if raw:
         return raw.encode("utf-8")
     return _DEV_FALLBACK
@@ -73,8 +81,13 @@ def sign(
         "session_id": session_id,
         "exp": int(time.time()) + max(60, ttl_seconds),
     }
+    secret = _secret()
+    if not secret:
+        raise RuntimeError(
+            "WS_CONFIRM_HMAC_SECRET or MCP_REQUEST_STATE_SECRET (>=32 chars) is required in production"
+        )
     payload_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
-    tag = hmac.new(_secret(), payload_bytes, hashlib.sha256).digest()
+    tag = hmac.new(secret, payload_bytes, hashlib.sha256).digest()
     return f"{_b64(payload_bytes)}.{_b64(tag)}"
 
 
@@ -99,7 +112,10 @@ def verify(
     except (ValueError, base64.binascii.Error):
         return None
 
-    actual_tag = hmac.new(_secret(), payload_bytes, hashlib.sha256).digest()
+    secret = _secret()
+    if not secret:
+        return None
+    actual_tag = hmac.new(secret, payload_bytes, hashlib.sha256).digest()
     if not hmac.compare_digest(actual_tag, expected_tag):
         return None
 

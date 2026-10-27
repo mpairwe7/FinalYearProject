@@ -477,6 +477,8 @@ export const sw: Partial<Dictionary> = {
   'portalCopilot.accessDeniedBadge': 'Ufikiaji Umekataliwa',
   'portalCopilot.resumingAfterSignIn': 'Kuendelea na {task} baada ya kuingia',
   'portalCopilot.submittedDetailsFor': 'Maelezo yaliyowasilishwa kwa {task}',
+  'portalCopilot.highValueAckLabel': 'Nimehakiki kiasi hiki kikubwa cha UGX (≥ UGX 50,000,000) na TIN ya mlipakodi.',
+  'portalCopilot.decisionReceiptLabel': 'Stakabadhi ya Uamuzi Inayothibitishwa:',
   'portalCopilot.task.payment_generate_prn': 'Usajili wa Malipo ya PRN',
   'portalCopilot.task.tin_apply_individual': 'Maombi ya TIN ya Mtu Binafsi',
   'portalCopilot.task.return_filing_submit': 'Uwasilishaji wa Ritani ya Kodi',
