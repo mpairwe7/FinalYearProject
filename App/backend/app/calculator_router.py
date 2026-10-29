@@ -33,14 +33,23 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Amount extraction
 # ---------------------------------------------------------------------------
-_CURRENCY = r"(?:ugx|ug\.?\s?shs?|u\.?shs?|shs?\.?|shillings?|shilingi|shiringi|cilingi|ssente|sente|esente|cente|ensimbi|/=|/-\b)"
+_CURRENCY = r"(?:\b(?:ugx|ug\.?\s?shs?|u\.?\s?shs?|shs?\.?|shillings?|shilingi|shiringi|siringi|cilingi|ssente|sente|esente|cente|ensimbi|fedha|pesa|lim)\b|/=|/-\b)"
+_FOREIGN_CURRENCY_BEFORE_RE = re.compile(
+    r"(?:\b(?:usd|eur|gbp|kes|kshs?|tzs|tshs?|rwf|dola)\b|us\$|\$|€|£)\s{0,4}$",
+    re.IGNORECASE,
+)
+_FOREIGN_CURRENCY_AFTER_RE = re.compile(
+    r"^\s{0,4}(?:us\s+dollars?|dollars?|euros?|pounds?|usd|eur|gbp|kes|kshs?|tzs|rwf)\b",
+    re.IGNORECASE,
+)
 _AMOUNT_PREFIX_RE = re.compile(
-    r"\b(milioni|bilioni|elfu|laki|o?bukadde|a?kakadde|o?bukaikuru|a?kakaikuru|o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?mitwaro|o?mutwaro|e?nkumi|o?lukumi|o?rukumi)\s+"
+    r"\b(mili{1,3}y?oni|bili{1,3}y?oni|el?ufu|elfu|tutemia|laki|o?bukadde|a?kakadde|o?bukaikuru|a?kakaikuru|o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?mitwaro|o?mutwaro|e?nkumi|o?lukumi|o?rukumi)\s+"
     r"(\d{1,3}(?:[,\s]\d{3})*|\d+(?:\.\d+)?)\b",
     re.IGNORECASE,
 )
 _AMOUNT_PREFIX_MULTIPLIERS = {
-    "milioni": 1e6, "bilioni": 1e9, "elfu": 1e3, "laki": 1e5,
+    "milioni": 1e6, "miliyoni": 1e6, "bilioni": 1e9, "biliyoni": 1e9,
+    "elfu": 1e3, "elufu": 1e3, "tutemia": 1e3, "laki": 1e5,
     "bukadde": 1e6, "obukadde": 1e6, "kakadde": 1e6, "akakadde": 1e6,
     "bukaikuru": 1e6, "obukaikuru": 1e6, "kakaikuru": 1e6, "akakaikuru": 1e6,
     "buwumbi": 1e9, "obuwumbi": 1e9, "kawumbi": 1e9, "akawumbi": 1e9,
@@ -92,8 +101,27 @@ def extract_amounts(text: str) -> list[tuple[float, int, int]]:
         )
     ]
 
-    # 1. Prefix matches (East African Bantu: Luganda obukadde, Swahili milioni)
+    # 1. Vernacular scale-prefixed amounts (including multi-scale compounds like "milioni 3 na elfu 500", "obukadde busatu n'emitwalo ataano")
+    from .number_words import _SCALE_NOUN_RE, parse_vernacular_scale_amount_at
+
+    for m in _SCALE_NOUN_RE.finditer(text or ""):
+        if any(s <= m.start() and m.end() <= e for s, e in seen_spans):
+            continue
+        total_ugx, end_pos = parse_vernacular_scale_amount_at(text or "", m)
+        if total_ugx is not None:
+            before_slice = (text or "")[max(0, m.start() - 12) : m.start()]
+            after_slice = (text or "")[end_pos : end_pos + 16]
+            seen_spans.append((m.start(), end_pos))
+            if not (
+                _FOREIGN_CURRENCY_BEFORE_RE.search(before_slice)
+                or _FOREIGN_CURRENCY_AFTER_RE.search(after_slice)
+            ):
+                found.append((total_ugx, m.start(), end_pos))
+
+    # 1b. Remaining prefix matches (e.g. comma-grouped digits > 999 after a scale noun, like "milioni 1,500")
     for m in _AMOUNT_PREFIX_RE.finditer(text or ""):
+        if any(s <= m.start() and m.end() <= e for s, e in seen_spans):
+            continue
         mult = _AMOUNT_PREFIX_MULTIPLIERS.get(m.group(1).lower(), 1)
         digits = m.group(2).replace(",", "").replace(" ", "")
         try:
@@ -2027,7 +2055,16 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
     if not text or extract_amounts(text):
         return None
     if is_explanation_question(text):
-        return None
+        if not (
+            re.search(
+                r"\bhow\s+is\s+(?:the\s+)?(?:paye|pay\s+as\s+you\s+earn(?:\s+\(paye\))?)(?:\s+tax)?\s+(?:calculated|computed)\b",
+                text,
+                re.IGNORECASE,
+            )
+            and not _SCENARIO_PLANNER_BYPASS_RE.search(_collapse_ws(text))
+            and not re.search(r"\bsecond[-\s]+(?:job|employment|employer)\b", text, re.IGNORECASE)
+        ):
+            return None
     if re.search(
         r"\b(unauthori[sz]|access|system|smuggl|fraud|offence|crime|conviction|prison|jail|imprison|allowances?|"
         r"customs\s+val\w*|valuation\s+methods?|hierarchy|input\s+vat|input\s+tax|apportionment|exempt\s+residential|"

@@ -143,6 +143,7 @@ _CONTINUATION_NUMBER_WORDS: frozenset[str] = frozenset({
     "kakadde", "akakadde", "bukadde", "obukadde", "kawumbi", "akawumbi", "buwumbi", "obuwumbi",
     "rukumi", "orukumi", "mutwaro", "omutwaro", "mitwaro", "emitwaro",
     "kakaikuru", "akakaikuru", "bukaikuru", "obukaikuru",
+    "eigana", "igana", "magana", "amagana",
     "mia", "miya", "elfu", "laki", "milioni", "bilioni", "nukta", "tutemia",
 })
 
