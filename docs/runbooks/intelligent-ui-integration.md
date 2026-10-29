@@ -63,8 +63,9 @@ Registry facts are unchanged by this frontend change: 72 tools in 18 namespaces,
    confirmation may appear in the newly opened conversation. Reopening the old
    chat must show it as incomplete, never as an actionable completed answer.
 4. Advance a workflow and return to its earlier card. Earlier options must not
-   submit. Reload: stored workflow controls require refreshed server guidance.
-   Check this alongside officer takeover and release of the conversation.
+   submit. Reload, or reopen the chat from the conversation list: stored
+   workflow and sign-in controls require refreshed server guidance. Check this
+   alongside officer takeover and release of the conversation.
 5. In a portal confirmation, edit a value and interrupt preparation. Preserve
    the edit and show an error; no chat submission follows. An empty/unrecognised
    execution response must not display success. With Web Crypto unavailable,

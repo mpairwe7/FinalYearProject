@@ -111,6 +111,18 @@ describe("PortalCopilotCard interactive sub-components", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
+  it('keeps a historical sign-in card from saving a continuation that resubmits after sign-in', () => {
+    render(<PortalCopilotCard disabled conversationId="c" copilot={{
+      card_type: 'step_up_login', task_id: 'payment_generate_prn', title: 'Sign in to continue',
+      preserved_fields: { amount: '1200' },
+    }} />);
+    for (const testId of ['portal-stepup-chat-btn', 'portal-stepup-portal-btn']) {
+      const button = screen.getByTestId(testId);
+      expect(button).toBeDisabled();
+      fireEvent.click(button);
+    }
+    expect(consumePendingPortalContinuation()).toBeNull();
+  });
   it("renders PortalInlineFormCard and submits entered field values", () => {
     const onSubmit = vi.fn();
     render(

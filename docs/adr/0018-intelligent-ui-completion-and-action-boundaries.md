@@ -37,8 +37,9 @@ to the last turn of whichever conversation was open at that moment.
 
 The UI can expose failures that it previously concealed. A taxpayer may need to
 check a portal task's status or ask for refreshed workflow guidance after a
-reload. Web Crypto must be available to approve a card. Portal links outside
-the URA domain policy need explicit review before being introduced.
+reload or on reopening a conversation. Web Crypto must be available to approve
+a card. Portal links outside the URA domain policy need explicit review before
+being introduced.
 
 Frames after `done` are ignored. On the extractive fallback paths that send no
 `grounding` frame, the server flushes its buffered `agent_trace` after `done`,

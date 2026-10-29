@@ -273,6 +273,9 @@ export default function PortalCopilotCard({
 
   const handleStepUpLogin = useCallback(
     (returnMode: "chat" | "portal", rawHref: string) => {
+      // The saved continuation is resubmitted after sign-in, so a historical
+      // card must not create one (ADR-0018).
+      if (disabled) return;
       const safeHref =
         sanitizeReturnTo(rawHref) ||
         `/signin?continue=signin&returnTo=${encodeURIComponent(
@@ -289,7 +292,7 @@ export default function PortalCopilotCard({
         window.location.assign(safeHref);
       }
     },
-    [conversationId, copilot.portal_key, copilot.preserved_fields, copilot.task_id, formValues],
+    [conversationId, copilot.portal_key, copilot.preserved_fields, copilot.task_id, disabled, formValues],
   );
 
   const safeCopilotPortalUrl =
@@ -665,6 +668,7 @@ export default function PortalCopilotCard({
             type="button"
             className="portal-action-btn is-primary"
             data-testid="portal-stepup-chat-btn"
+            disabled={disabled}
             onClick={() => handleStepUpLogin("chat", chatHref)}
           >
             <LockIcon size={14} /> {t("portalCopilot.signInReturnChat")} <ArrowRightIcon size={14} />
@@ -673,6 +677,7 @@ export default function PortalCopilotCard({
             type="button"
             className="portal-action-btn is-ghost"
             data-testid="portal-stepup-portal-btn"
+            disabled={disabled}
             onClick={() => handleStepUpLogin("portal", portalHref)}
           >
             {t("portalCopilot.signInOpenPortal")} <ExternalLinkIcon size={13} />

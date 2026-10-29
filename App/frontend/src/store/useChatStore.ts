@@ -1090,7 +1090,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
 
   /** Save current, then load target session. */
   switchSession: (id) => {
-    const { saveCurrentSession } = get();
+    const { saveCurrentSession, activeConversationId } = get();
     saveCurrentSession();
     // A tab can stay open past the retention period: drop what the server has
     // already forgotten before reopening anything (G122).
@@ -1103,7 +1103,9 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     }
     set({
       conversations,
-      chat: target.turns,
+      // A reopened conversation is history, as after a reload: its actions need
+      // refreshed guidance (ADR-0018). Re-selecting the open chat keeps it live.
+      chat: id === activeConversationId ? target.turns : target.turns.map((turn) => ({ ...turn, restored: true })),
       activeConversationId: id,
       message: '',
       activeTicketId: target.activeTicketId || null,
