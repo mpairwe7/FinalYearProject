@@ -19,6 +19,33 @@ beforeEach(() => {
 });
 
 describe("useChatStore", () => {
+  it('preserves interrupted status across reload and treats restored actions as historical', () => {
+    store().ensureActiveConversationId();
+    store().addTurns([
+      createTurn('user', 'Continue my filing'),
+      createTurn('assistant', 'Partial guidance', { responseIncomplete: true, nextActions: ['Continue'] }),
+    ]);
+    store().saveCurrentSession();
+    useChatStore.setState({ chat: [] });
+    store().hydratePersisted();
+    expect(store().chat.at(-1)).toMatchObject({ responseIncomplete: true, restored: true });
+  });
+  it('locks actions in a reopened conversation but keeps the open chat live', () => {
+    const first = store().ensureActiveConversationId();
+    store().addTurns([
+      createTurn('user', 'Register me'),
+      createTurn('assistant', 'Choose the taxpayer type.', { nextActions: ['Individual applicant'] }),
+    ]);
+    store().switchSession(first);
+    expect(store().chat.at(-1)?.restored).toBeUndefined();
+
+    store().saveCurrentSession();
+    store().createNewSession();
+    store().ensureActiveConversationId();
+    store().addTurns([createTurn('user', 'What is VAT?')]);
+    store().switchSession(first);
+    expect(store().chat.at(-1)).toMatchObject({ content: 'Choose the taxpayer type.', restored: true });
+  });
   it("initialises with a greeting message", () => {
     expect(store().chat).toHaveLength(1);
     expect(store().chat[0].role).toBe("assistant");

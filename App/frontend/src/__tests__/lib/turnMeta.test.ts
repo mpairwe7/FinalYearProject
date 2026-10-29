@@ -15,6 +15,32 @@ const turn = (over: Partial<ChatTurn> = {}): ChatTurn =>
   ({ id: 'a1', role: 'assistant', content: '', ...over }) as ChatTurn;
 
 describe('applyTurnMeta', () => {
+  it('removes actions and cards explicitly withdrawn by the server', () => {
+    const before = turn({ workflow: { id: 'w', name: 'W', status: 'active' },
+      nextActions: ['Continue'], portalCopilot: { card_type: 'confirmation_required' } });
+    const out = applyTurnMeta(before, { workflow: null, next_actions: null, portal_copilot: null });
+    expect(out.workflow).toBeUndefined();
+    expect(out.portalCopilot).toBeFalsy();
+    expect(out.nextActions).toEqual([]);
+  });
+  it('clears a grounding score explicitly withdrawn by the final frame', () => {
+    expect(applyTurnMeta(turn({ faithfulnessScore: 0.99 }), { faithfulness_score: null }).faithfulnessScore).toBeNull();
+  });
+
+  it.each([NaN, Infinity, -1, 1.1, '0.99', {}, false])('rejects invalid grounding evidence %s', (value) => {
+    expect(applyTurnMeta(turn(), { faithfulness_score: value }).faithfulnessScore).toBeNull();
+  });
+
+  it('drops malformed source rows and malformed inferred objectives', () => {
+    const out = applyTurnMeta(turn(), {
+      citations: [null, { ref: '[1]', source: 'VAT', passage: {} }],
+      resources: [{ title: 'VAT', url: 'https://ura.go.ug', description: [] }],
+      objective_hypothesis: { objective_id: 'x', title: {}, confirm_action: ['send'] },
+    });
+    expect(out.citations).toEqual([]);
+    expect(out.resources).toEqual([]);
+    expect(out.objectiveHypothesis).toBeNull();
+  });
   it('carries the suggested actions a metadata line brings', () => {
     const line = {
       retrieval_mode: 'workflow',

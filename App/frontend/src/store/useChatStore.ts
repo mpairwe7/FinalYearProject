@@ -289,6 +289,10 @@ export interface ChatTurn {
   officerName?: string;
   citations?: Citation[];
   faithfulnessScore?: number | null;
+  /** Interrupted/stopped replies are retained as partial text, never as finished guidance. */
+  responseIncomplete?: boolean;
+  /** Browser history cannot establish that an action is still current on the server. */
+  restored?: boolean;
   retrievalMode?: string;
   escalationRequired?: boolean;
   escalationReason?: string;
@@ -525,6 +529,7 @@ function sanitizeTurn(value: unknown): ChatTurn | null {
     role,
     content,
     timestamp: typeof value.timestamp === 'number' ? value.timestamp : 0,
+    restored: true,
   };
 
   if (Array.isArray(value.citations)) turn.citations = value.citations as Citation[];
@@ -540,6 +545,7 @@ function sanitizeTurn(value: unknown): ChatTurn | null {
   const hours = officerHoursFrom({ officer_hours: value.officerHours });
   if (hours) turn.officerHours = hours;
   if (typeof value.offlineMode === 'boolean') turn.offlineMode = value.offlineMode;
+  if (typeof value.responseIncomplete === 'boolean') turn.responseIncomplete = value.responseIncomplete;
   if (typeof value.thoughtForMs === 'number' && Number.isFinite(value.thoughtForMs)) {
     turn.thoughtForMs = value.thoughtForMs;
   }
@@ -1084,7 +1090,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
 
   /** Save current, then load target session. */
   switchSession: (id) => {
-    const { saveCurrentSession } = get();
+    const { saveCurrentSession, activeConversationId } = get();
     saveCurrentSession();
     // A tab can stay open past the retention period: drop what the server has
     // already forgotten before reopening anything (G122).
@@ -1097,7 +1103,9 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     }
     set({
       conversations,
-      chat: target.turns,
+      // A reopened conversation is history, as after a reload: its actions need
+      // refreshed guidance (ADR-0018). Re-selecting the open chat keeps it live.
+      chat: id === activeConversationId ? target.turns : target.turns.map((turn) => ({ ...turn, restored: true })),
       activeConversationId: id,
       message: '',
       activeTicketId: target.activeTicketId || null,

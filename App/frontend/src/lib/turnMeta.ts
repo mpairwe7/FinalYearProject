@@ -11,6 +11,36 @@ import type { ConnectorNotice } from './connectors';
 /** A turn's metadata as the server sends it (SSE `metadata`/`grounding`/`done`, or a metadata line). */
 export type TurnMeta = Record<string, unknown>;
 
+function record(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Invalid evidence must not produce a reassuring grounding badge or crash a source list. */
+function score(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
+}
+
+function citationsFrom(value: unknown): Citation[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((c): c is Citation => record(c) && typeof c.ref === 'string' &&
+    typeof c.source === 'string' && ['page', 'section', 'passage', 'url', 'effective_date', 'title']
+      .every((key) => c[key] === undefined || typeof c[key] === 'string'));
+}
+
+function resourcesFrom(value: unknown): ContextResource[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((r): r is ContextResource => record(r) && typeof r.title === 'string' &&
+    typeof r.url === 'string' && ['type', 'format', 'size', 'description', 'citation', 'effective_year', 'source_domain']
+      .every((key) => r[key] === undefined || typeof r[key] === 'string'));
+}
+
+function objectiveFrom(value: unknown): ObjectiveHypothesis | null {
+  if (!record(value) || !['objective_id', 'title', 'domain', 'workflow_id', 'confirm_action']
+    .every((key) => typeof value[key] === 'string') ||
+    !['workflow_name', 'prerequisites_summary'].every((key) => value[key] === undefined || typeof value[key] === 'string')) return null;
+  return { ...value, confidence: score(value.confidence) ?? undefined } as unknown as ObjectiveHypothesis;
+}
+
 /** Whether officers were on duty when a handoff was queued (`app.officer_hours.status`). */
 export interface OfficerHours {
   onDuty: boolean;
@@ -83,30 +113,31 @@ function discrepancyFrom(value: unknown, fallback: ChatTurn['discrepancyReport']
  * though every API response carried them (found 2026-10-16, Phase 39).
  */
 export function applyTurnMeta(turn: ChatTurn, meta: TurnMeta, notices: ConnectorNotice[] = []): ChatTurn {
-  const workflow = (meta.workflow as WorkflowState | undefined) ?? turn.workflow;
+  if (!record(meta)) return turn;
+  const workflow = 'workflow' in meta
+    ? (record(meta.workflow) ? meta.workflow as unknown as WorkflowState : undefined) : turn.workflow;
   const nextActions = Array.isArray(meta.next_actions)
     ? meta.next_actions.filter((action): action is string => typeof action === 'string')
-    : turn.nextActions;
+    : ('next_actions' in meta ? [] : turn.nextActions);
   return {
     ...turn,
     serverTurnId: typeof meta.turn_id === 'string' ? meta.turn_id : turn.serverTurnId,
     connectorNotices: notices.length ? notices : turn.connectorNotices,
-    citations: (meta.citations as Citation[] | undefined) ?? turn.citations,
-    faithfulnessScore: (meta.faithfulness_score as number | null | undefined) ?? turn.faithfulnessScore,
-    retrievalMode: (meta.retrieval_mode as string | undefined) ?? turn.retrievalMode,
-    escalationRequired: (meta.escalation_required as boolean | undefined) ?? turn.escalationRequired,
-    escalationReason: (meta.escalation_reason as string | undefined) ?? turn.escalationReason,
+    citations: 'citations' in meta ? citationsFrom(meta.citations) : turn.citations,
+    faithfulnessScore: 'faithfulness_score' in meta ? score(meta.faithfulness_score) : turn.faithfulnessScore,
+    retrievalMode: typeof meta.retrieval_mode === 'string' ? meta.retrieval_mode : turn.retrievalMode,
+    escalationRequired: typeof meta.escalation_required === 'boolean' ? meta.escalation_required : turn.escalationRequired,
+    escalationReason: typeof meta.escalation_reason === 'string' ? meta.escalation_reason : turn.escalationReason,
     officerHours: officerHoursFrom(meta) ?? turn.officerHours,
     nextActions,
     workflow,
-    objectiveHypothesis:
-      ((meta.objective_hypothesis ?? meta.objectiveHypothesis) as ObjectiveHypothesis | null | undefined) ??
-      turn.objectiveHypothesis,
+    objectiveHypothesis: 'objective_hypothesis' in meta || 'objectiveHypothesis' in meta
+      ? objectiveFrom(meta.objective_hypothesis ?? meta.objectiveHypothesis) : turn.objectiveHypothesis,
     resources:
-      (meta.resources as ContextResource[] | undefined) ??
-      ((meta.workflow as { resources?: ContextResource[] } | undefined)?.resources ?? turn.resources),
+      'resources' in meta ? resourcesFrom(meta.resources) :
+        (record(meta.workflow) && 'resources' in meta.workflow ? resourcesFrom(meta.workflow.resources) : turn.resources),
     discrepancyReport: discrepancyFrom(meta.discrepancy_report ?? meta.discrepancyReport, turn.discrepancyReport),
-    portalCopilot:
-      ((meta.portal_copilot ?? meta.portalCopilot) as PortalCopilotPayload | null | undefined) ?? turn.portalCopilot,
+    portalCopilot: 'portal_copilot' in meta || 'portalCopilot' in meta
+      ? ((meta.portal_copilot ?? meta.portalCopilot) as PortalCopilotPayload | null | undefined) : turn.portalCopilot,
   };
 }

@@ -86,6 +86,15 @@ Validated by:
 5. **Evals & Observability Completeness (`evaluation.py`, `tracing.py`, `portal_copilot.py`, `evals/export_preferences.py`, `EO-01`–`EO-04`)**:
    - `record_eval_report` exports per-segment (`topic`, `locale`, `taxpayer_type`, `variant`) metrics to dedicated `ura_eval_segment_metric` / `ura_eval_segment_metric_passed` gauges; `tracing.py` records OpenTelemetry GenAI (`v1.42+`, July–Oct 2026) histograms `gen_ai.client.operation.time_to_first_chunk`, `gen_ai.execute_tool.duration`, `gen_ai.invoke_agent.duration`, `gen_ai.invoke_agent.tool_calls`, and Prometheus `ura_genai_evaluation_score`; `portal_copilot.py` emits `ura_portal_copilot_cards_total`, `ura_portal_copilot_decisions_total`, and `ura_portal_copilot_decision_duration_ms`; and `evals/export_preferences.py` scrubs NIRA NINs, phone numbers, and email addresses via `_scrub_preference_text`.
 
+### Digest limitation identified 2026-10-30
+
+The server currently checks the client digest only when supplied. The earlier
+verification claim therefore does not establish mandatory API enforcement.
+[ADR-0018](0018-intelligent-ui-completion-and-action-boundaries.md) requires local
+browser digest computation without a server-digest fallback. Audit UI-09 tracks
+mandatory API digest enforcement and its compatibility policy. G265 is reopened
+for that remaining portion; the other Amendment 2 controls retain their evidence.
+
 ## Amendment 3 (2026-10-27 — Gap G267): the workspace wears ura.go.ug's frame
 
 The owner asked that the inbuilt portal look like the official one, so that a

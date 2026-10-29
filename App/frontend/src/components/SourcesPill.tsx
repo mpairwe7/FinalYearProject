@@ -1,6 +1,7 @@
 import React, { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Citation, ContextResource } from '../store/useChatStore';
 import { citationHref, sourceLabel } from '../lib/uraContacts';
+import { safeHttpUrl } from '../lib/safeUrl';
 import { useTranslation, type TranslationKey } from '../lib/i18n';
 import { BookIcon, DownloadIcon, ExternalLinkIcon, FileIcon, GlobeIcon, ScaleIcon } from './Icons';
 
@@ -63,11 +64,6 @@ function resourceKind(type: string | undefined): SourceKind {
   return 'guide';
 }
 
-function httpUrl(value: unknown): string | null {
-  const raw = typeof value === 'string' ? value.trim() : '';
-  return /^https?:\/\/\S+$/i.test(raw) ? raw : null;
-}
-
 function dedupeKey(href: string): string {
   return href.replace(/#.*$/, '').replace(/\/+$/, '').toLowerCase();
 }
@@ -94,7 +90,7 @@ export function collectSources(
   for (const res of resources ?? []) {
     const title = typeof res?.title === 'string' ? res.title.trim() : '';
     if (!title) continue;
-    const href = httpUrl(res.url);
+    const href = safeHttpUrl(res.url);
     const key = href ? dedupeKey(href) : `title:${title.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -112,7 +108,7 @@ export function collectSources(
   }
 
   for (const c of citations ?? []) {
-    const explicit = httpUrl(c.url);
+    const explicit = safeHttpUrl(c.url);
     const key = explicit ? dedupeKey(explicit) : `cite:${c.source}|${c.page ?? ''}|${c.section ?? ''}`;
     if (seen.has(key)) continue;
     seen.add(key);

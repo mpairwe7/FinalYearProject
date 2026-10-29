@@ -1,6 +1,7 @@
 import React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { webcrypto } from 'node:crypto';
 import PortalCopilotCard from "../../components/PortalCopilotCard";
 import { sanitizeReturnTo } from "../../lib/oidcFlow";
 import {
@@ -58,6 +59,70 @@ describe("PortalContinuation sessionStorage round-trip", () => {
 });
 
 describe("PortalCopilotCard interactive sub-components", () => {
+  beforeEach(() => vi.stubGlobal('crypto', webcrypto));
+  afterEach(() => vi.unstubAllGlobals());
+
+  const confirmation = {
+    card_type: 'confirmation_required', task_id: 'payment_generate_prn', title: 'Review payment',
+    request_state: { signed: true }, idempotency_key: 'k', displayed_fields_sha256: 'server-supplied-hash',
+    display_fields: [{ name: 'amount', label: 'Amount', value: '1200' }],
+    fields: [{ name: 'amount', label: 'Amount', input_type: 'number', required: true, value: '1200' }],
+  };
+
+  it('does not substitute a server digest when local verification is unavailable', async () => {
+    vi.stubGlobal('crypto', {});
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    render(<PortalCopilotCard conversationId="c" copilot={confirmation} />);
+    fireEvent.click(screen.getByTestId('portal-task-allow-btn'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('No approval was sent');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('requires an explicit successful execution response', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
+    render(<PortalCopilotCard conversationId="c" copilot={confirmation} />);
+    fireEvent.click(screen.getByTestId('portal-task-allow-btn'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('outcome could not be confirmed');
+    expect(screen.queryByTestId('portal-task-decision-result')).not.toBeInTheDocument();
+  });
+
+  it('retains edited values without resubmitting through chat when prepare fails', async () => {
+    const onSubmit = vi.fn();
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network lost')));
+    render(<PortalCopilotCard conversationId="c" copilot={confirmation} onSubmitInlineForm={onSubmit} />);
+    fireEvent.click(screen.getByTestId('portal-task-edit-btn'));
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '2400' } });
+    fireEvent.click(screen.getByTestId('portal-inline-form-submit-btn'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('remain in this form');
+    expect(screen.getByRole('spinbutton')).toHaveValue(2400);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+  it('prevents direct execution from a historical confirmation card', () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    render(<PortalCopilotCard disabled conversationId="c" copilot={{
+      card_type: 'confirmation_required', task_id: 'payment_generate_prn', title: 'Review payment',
+      request_state: { signed: true }, idempotency_key: 'k',
+    }} />);
+    const button = screen.getByTestId('portal-task-allow-btn');
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+  it('keeps a historical sign-in card from saving a continuation that resubmits after sign-in', () => {
+    render(<PortalCopilotCard disabled conversationId="c" copilot={{
+      card_type: 'step_up_login', task_id: 'payment_generate_prn', title: 'Sign in to continue',
+      preserved_fields: { amount: '1200' },
+    }} />);
+    for (const testId of ['portal-stepup-chat-btn', 'portal-stepup-portal-btn']) {
+      const button = screen.getByTestId(testId);
+      expect(button).toBeDisabled();
+      fireEvent.click(button);
+    }
+    expect(consumePendingPortalContinuation()).toBeNull();
+  });
   it("renders PortalInlineFormCard and submits entered field values", () => {
     const onSubmit = vi.fn();
     render(

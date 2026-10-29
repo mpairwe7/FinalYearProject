@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { useChatStore, ChatTurn, createTurn, cleanResponse } from '../store/useChatStore';
+import { useChatStore, ChatTurn, type ChatAttachment, createTurn, cleanResponse } from '../store/useChatStore';
 import { useVoiceStore } from '../store/useVoiceStore';
 import { LOCALE_OPTIONS } from '../lib/locales';
 import { useTranslation, type TranslationKey } from '../lib/i18n';
@@ -44,7 +44,8 @@ import {
   type ConnectorNotice,
   type ConnectorUse,
 } from '../lib/connectors';
-import { applyTurnMeta, officerHoursFrom } from '../lib/turnMeta';
+import { applyTurnMeta } from '../lib/turnMeta';
+import { consumeChatStream } from '../lib/chatStream';
 import { createRevealQueue, type RevealQueue } from '../lib/revealQueue';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import {
@@ -994,6 +995,7 @@ export default function Page() {
     lastTurn?.role === 'assistant' &&
     lastTurn.id !== 'greeting-0' &&
     !lastTurn.notice &&
+    !lastTurn.responseIncomplete &&
     lastTurn.id !== narratedTurnId &&
     lastTurn.timestamp >= narrationArmedAt &&
     lastTurn.content.trim()
@@ -1230,8 +1232,8 @@ export default function Page() {
     portalTaskSubmission?: Record<string, unknown>,
     turnOptions?: TurnOptions,
   ) => {
-    const text = (overrideText ?? message).trim();
-    if (!text || isLoading) return;
+    const text = (overrideText ?? useChatStore.getState().message).trim();
+    if (!text || isLoading || streamAbortRef.current) return;
     // Enter can fire while an upload is analysing — wait for it to settle.
     if (pendingAttachments.some((a) => a.status === 'uploading')) return;
     // Sending ends the dictation session. Without this the recognizer keeps
@@ -1286,13 +1288,21 @@ export default function Page() {
       return;
     }
 
+    const responseTurn = createTurn('assistant', '', { responseIncomplete: true });
+    const isResponseActive = () => {
+      const state = useChatStore.getState();
+      return state.activeConversationId === conversationId && state.chat.at(-1)?.id === responseTurn.id;
+    };
+    const updateResponse = (updater: (turn: ChatTurn) => ChatTurn) => {
+      if (isResponseActive()) updateLastTurn(updater);
+    };
     addTurns([
       createTurn('user', text, userTurnMeta),
       // The empty assistant turn used to be added only once the stream
       // responded. It is created up front now because the working indicator
       // renders inside this bubble: without it there is nothing on screen to
       // hold "Thinking" while retrieval runs.
-      createTurn('assistant', '', {}),
+      responseTurn,
     ]);
     setMessage('');
     setPendingAttachments([]);
@@ -1305,6 +1315,9 @@ export default function Page() {
     trackChatSent(text.length);
     const ac = new AbortController();
     streamAbortRef.current = ac;
+    const unsubscribe = useChatStore.subscribe(() => {
+      if (!isResponseActive()) ac.abort();
+    });
     userStoppedRef.current = false;
     const timeout = setTimeout(() => ac.abort(), isLowBandwidth ? 180_000 : 120_000);
     const requestBody = JSON.stringify({
@@ -1348,60 +1361,22 @@ export default function Page() {
       }
       if (!sync.ok) throw new Error(`API ${sync.status}`);
       const d = await sync.json();
+      if (!isResponseActive()) throw new Error('Conversation changed');
+      if (!d || typeof d.reply !== 'string' || !d.reply.trim()) throw new Error('Invalid chat reply');
       if (d.conversation_id) sessionIdRef.current = d.conversation_id;
       if (d.locale) {
         useChatStore.getState().adoptResponseLocale(d.locale, d.locale_source);
       }
       const content = cleanResponse(d.reply ?? '');
-      const disc = d.discrepancy_report ?? d.discrepancyReport;
       const connectorNotices = parseConnectorNotices(d.connector_notices);
       if (connectorNotices.length) applyConnectorTurnState(connectorNotices);
-      const meta = {
-        serverTurnId: typeof d.turn_id === 'string' ? d.turn_id : undefined,
-        ...(connectorNotices.length ? { connectorNotices } : {}),
-        citations: d.citations ?? [],
-        faithfulnessScore: d.faithfulness_score ?? null,
-        retrievalMode: d.retrieval_mode ?? 'keyword',
-        escalationRequired: d.escalation_required ?? false,
-        escalationReason: d.escalation_reason ?? '',
-        officerHours: officerHoursFrom(d),
-        nextActions: d.next_actions ?? [],
-        workflow: d.workflow ?? undefined,
-        resources: d.resources ?? (d.workflow?.resources ?? []),
-        discrepancyReport: disc && typeof disc === 'object' ? {
-          id: String(disc.id || ''),
-          status: String(disc.status || 'pending'),
-          frequency_count: typeof disc.frequency_count === 'number' ? disc.frequency_count : 1,
-          discrepancy_type: typeof disc.discrepancy_type === 'string' ? disc.discrepancy_type : 'outdated_law',
-        } : undefined,
-        portalCopilot: d.portal_copilot ?? d.portalCopilot ?? undefined,
-      };
-      const cur = useChatStore.getState().chat;
-      const last = cur[cur.length - 1];
-      if (last?.role === 'assistant') {
-        updateLastTurn((t) => ({ ...t, content, ...meta }));
-      } else {
-        addTurns([createTurn('assistant', content, meta)]);
-      }
+      updateResponse((turn) => applyTurnMeta({ ...turn, content, responseIncomplete: false }, d, connectorNotices));
       trackChatReceived(Date.now() - t0, (d.sources?.length ?? 0) > 0);
     };
 
-    // A browser, proxy, or network can interrupt an otherwise healthy SSE
-    // response. The regular chat endpoint carries the same answer, so retry it
-    // once with a new controller: `ac` may already have timed out or aborted.
-    const recoverFromStreamFailure = async () => {
-      revealQueueRef.current?.stop();
-      revealQueueRef.current = null;
-      const fallbackAbort = new AbortController();
-      streamAbortRef.current = fallbackAbort;
-      const fallbackTimeout = setTimeout(() => fallbackAbort.abort(), 120_000);
-      try {
-        await applySyncReply(fallbackAbort.signal);
-        return true;
-      } finally {
-        clearTimeout(fallbackTimeout);
-      }
-    };
+    // Chat advances workflows and may queue human help. Never replay a POST
+    // after an ambiguous network failure; only an explicit transport rejection
+    // (404/405) or authentication rejection is eligible for the sync endpoint.
 
     try {
       const res = await fetch(`${API_URL}/v1/chat/stream`, {
@@ -1419,18 +1394,33 @@ export default function Page() {
           clearAuthToken();
           delete requestHeaders['Authorization'];
         }
+        if (res.status !== 404 && res.status !== 405 && res.status !== 401) throw new Error(`API ${res.status}`);
         await applySyncReply();
         setChatLiveStatus('URA response ready.');
         return;
       }
+      if (!res.headers.get('content-type')?.toLowerCase().startsWith('text/event-stream')) {
+        throw new Error('Invalid chat stream content type');
+      }
       const reader = res.body?.getReader();
       if (!reader) throw new Error('No body');
-      const dec = new TextDecoder();
-      let buf = '', meta: Record<string, unknown> = {}, evt = 'token';
-      let currentDataLines: string[] = [];
+      let meta: Record<string, unknown> = {};
 
       const dispatchEvent = (eventName: string, dataLines: string[]) => {
+        if (!isResponseActive()) throw new Error('Conversation changed');
         if (dataLines.length === 0) return;
+        if (eventName === 'done') {
+          const raw = dataLines.join('\n').trim();
+          if (raw) {
+            const p = JSON.parse(raw);
+            meta = { ...meta, ...p };
+            if (p.conversation_id) sessionIdRef.current = p.conversation_id;
+            if (p.locale) useChatStore.getState().adoptResponseLocale(p.locale, p.locale_source);
+            if (typeof p.reply === 'string') reveal.set(cleanResponse(p.reply));
+            updateResponse((turn) => applyTurnMeta(turn, p));
+          }
+          return;
+        }
 
         // Which services the answer looked things up in. Read before the line
         // filter below, which takes any `[{"type":` line for a stray metadata
@@ -1439,7 +1429,7 @@ export default function Page() {
           try {
             const used = connectorsUsedFromTrace(JSON.parse(dataLines.join('\n')));
             if (used.length) {
-              updateLastTurn((t) => {
+              updateResponse((t) => {
                 const merged = new Map((t.connectorsUsed ?? []).map((use) => [use.namespace, use]));
                 for (const use of used) merged.set(use.namespace, { ...merged.get(use.namespace), ...use });
                 return { ...t, connectorsUsed: [...merged.values()] };
@@ -1487,7 +1477,7 @@ export default function Page() {
                 }
                 const notices = parseConnectorNotices(p.connector_notices);
                 if (notices.length) applyConnectorTurnState(notices);
-                updateLastTurn((t) => applyTurnMeta(t, p, notices));
+                updateResponse((t) => applyTurnMeta(t, p, notices));
               }
             } catch {}
             continue;
@@ -1499,27 +1489,6 @@ export default function Page() {
         const data = cleanLines.join('\n');
         const trimmedData = data.trim();
 
-        if (eventName === 'error') {
-          updateLastTurn((t) => ({ ...t, content: 'Sorry, an error occurred. Please try again.' }));
-          return;
-        }
-        if (eventName === 'done') {
-          if (trimmedData) {
-            try {
-              const p = JSON.parse(trimmedData);
-              meta = { ...meta, ...p };
-              if (p.conversation_id) sessionIdRef.current = p.conversation_id;
-              if (p.locale) {
-                useChatStore.getState().adoptResponseLocale(p.locale, p.locale_source);
-              }
-              if (typeof p.reply === 'string' && p.reply.trim()) {
-                reveal.set(cleanResponse(p.reply));
-              }
-              updateLastTurn((t) => applyTurnMeta(t, p));
-            } catch {}
-          }
-          return;
-        }
         if (eventName === 'revision') {
           reveal.set(cleanResponse(data));
           return;
@@ -1532,7 +1501,7 @@ export default function Page() {
             if (p.conversation_id) sessionIdRef.current = p.conversation_id;
             const notices = parseConnectorNotices(p.connector_notices);
             if (notices.length) applyConnectorTurnState(notices);
-            updateLastTurn((t) => applyTurnMeta(t, p, notices));
+            updateResponse((t) => applyTurnMeta(t, p, notices));
           } catch {}
           return;
         }
@@ -1547,7 +1516,7 @@ export default function Page() {
           return;
         }
         // Token event — preserves exact multiline formatting, paragraph breaks, and numbered lists
-        if (data || eventName === 'token') {
+        if (eventName === 'token' || eventName === 'message') {
           setTurnPhase('churning');
           reveal.push(data || '\n');
         }
@@ -1558,99 +1527,49 @@ export default function Page() {
          the stream is. `reveal.getTarget()` is everything that has arrived —
          the old `streamed` accumulator. */
       const reveal = createRevealQueue({
-        onCommit: (textSoFar) => updateLastTurn((t) => ({ ...t, content: textSoFar })),
+        onCommit: (textSoFar) => updateResponse((t) => ({ ...t, content: textSoFar })),
         instant: prefersReducedMotion(),
       });
       revealQueueRef.current = reveal;
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += dec.decode(value, { stream: true });
-          const normalized = buf.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-          const lines = normalized.split('\n');
-          buf = lines.pop() || '';
-          for (const ln of lines) {
-            if (ln === '') {
-              // Empty line signals end of an SSE event
-              if (currentDataLines.length > 0) {
-                dispatchEvent(evt, currentDataLines);
-                currentDataLines = [];
-              }
-              evt = 'token';
-              continue;
-            }
-            if (ln.startsWith('event: ')) {
-              if (currentDataLines.length > 0) {
-                dispatchEvent(evt, currentDataLines);
-                currentDataLines = [];
-              }
-              evt = ln.slice(7).trim();
-              continue;
-            }
-            if (ln.startsWith('data: ')) {
-              currentDataLines.push(ln.slice(6));
-              continue;
-            }
-            if (ln === 'data:' || ln === 'data: ') {
-              currentDataLines.push('');
-              continue;
-            }
-          }
-        }
-        if (currentDataLines.length > 0) {
-          dispatchEvent(evt, currentDataLines);
-          currentDataLines = [];
-        }
-        dec.decode();
-        const arrived = reveal.getTarget();
-        const cleaned = cleanResponse(arrived);
-        if (cleaned !== arrived) reveal.set(cleaned);
-        // Let the reveal run out before anything downstream reads the turn.
-        // The emptiness check below, the analytics call and saveCurrentSession
-        // in `finally` all inspect the stored content, and a half-typed reply
-        // would look like a short one — or get persisted as one.
-        await reveal.finish();
-      } finally { reader.releaseLock(); }
-      if (!useChatStore.getState().chat.at(-1)?.content.trim()) {
-        await recoverFromStreamFailure();
-        setChatLiveStatus('URA response ready.');
-        return;
-      }
+      await consumeChatStream(reader, dispatchEvent);
+      const arrived = reveal.getTarget();
+      const cleaned = cleanResponse(arrived);
+      if (cleaned !== arrived) reveal.set(cleaned);
+      // Let the reveal run out before anything downstream reads the turn.
+      // The emptiness check below, the analytics call and saveCurrentSession
+      // in `finally` all inspect the stored content, and a half-typed reply
+      // would look like a short one — or get persisted as one.
+      await reveal.finish();
+
+      if (!isResponseActive()) throw new Error('Conversation changed');
+      if (!useChatStore.getState().chat.at(-1)?.content.trim()) throw new Error('Empty chat reply');
+      updateResponse((turn) => ({ ...turn, responseIncomplete: false }));
       trackChatReceived(Date.now() - t0, (Array.isArray(meta.sources) && meta.sources.length > 0));
       setChatLiveStatus('URA response ready.');
     } catch {
-      let recovered = false;
-      const cur = useChatStore.getState().chat;
-      const last = cur[cur.length - 1];
-      if (!userStoppedRef.current && last?.role === 'assistant' && !last.content.trim()) {
-        try {
-          recovered = await recoverFromStreamFailure();
-        } catch {
-          // The user-facing error below is reserved for failure of both paths.
-        }
-      }
+      revealQueueRef.current?.stop();
+      if (!isResponseActive()) return;
       const currentLast = useChatStore.getState().chat.at(-1);
+      updateResponse((turn) => ({ ...turn, responseIncomplete: true }));
       if (userStoppedRef.current) {
         if (currentLast?.role === 'assistant' && !currentLast.content.trim()) {
-          updateLastTurn((t) => ({ ...t, content: 'Stopped.' }));
+          updateResponse((turn) => ({ ...turn, content: t('message.stopped') }));
         }
-      } else if (recovered) {
-        setChatLiveStatus('URA response ready.');
       } else if (currentLast?.role === 'assistant' && !currentLast.content.trim()) {
         const isOff = typeof navigator !== 'undefined' && !navigator.onLine;
         const fallbackText = isOff
           ? (t('handoff.offline') || 'You appear to be offline. Try again when you reconnect, or call URA toll-free on 0800 117 000.')
           : (t('handoff.failed') || 'Sorry, I could not reach the URA knowledge base. Please try again shortly.');
-        updateLastTurn((t) => ({ ...t, content: fallbackText, offlineMode: isOff }));
+        updateResponse((t) => ({ ...t, content: fallbackText, offlineMode: isOff }));
       }
       if (userStoppedRef.current) {
         setChatLiveStatus('Response stopped.');
-      } else if (!recovered) {
+      } else {
         trackErrorOccurred('chat_fetch_failed');
         setChatLiveStatus('URA response unavailable. Please try again.');
       }
     } finally {
+      unsubscribe();
       clearTimeout(timeout);
       // Whatever path got us here — done, abort, error — the reveal must not
       // outlive the turn, or it keeps committing into a turn nobody is waiting
@@ -1665,11 +1584,11 @@ export default function Page() {
       const elapsedMs = Date.now() - t0;
       const finished = useChatStore.getState().chat.at(-1);
       if (finished?.role === 'assistant' && finished.content.trim()) {
-        updateLastTurn((turn) => ({ ...turn, thoughtForMs: elapsedMs }));
+        updateResponse((turn) => ({ ...turn, thoughtForMs: elapsedMs }));
       }
-      saveCurrentSession();
+      if (isResponseActive()) saveCurrentSession();
     }
-  }, [message, isLoading, locale, localeExplicit, activeConversationId, pendingAttachments, selectedConnectorNamespaces, applyConnectorTurnState, isLowBandwidth, t, addTurns, ensureActiveConversationId, setMessage, updateLastTurn, saveCurrentSession, withOfficer, sendToOfficer]);
+  }, [isLoading, locale, localeExplicit, activeConversationId, pendingAttachments, selectedConnectorNamespaces, applyConnectorTurnState, isLowBandwidth, t, addTurns, ensureActiveConversationId, setMessage, updateLastTurn, saveCurrentSession, withOfficer, sendToOfficer]);
 
   const stopGeneration = useCallback(() => {
     userStoppedRef.current = true;
@@ -1700,6 +1619,17 @@ export default function Page() {
     },
     [t],
   );
+
+  const handleSuggestedAction = useCallback((action: string) => {
+    void sendMessage(action);
+  }, [sendMessage]);
+  const handleInlineSubmission = useCallback((taskId: string, fields: Record<string, string>) => {
+    void sendMessage(t('portalCopilot.submittedDetailsFor', { task: resolvePortalTaskLabel(taskId) }),
+      { task_id: taskId, fields });
+  }, [sendMessage, t, resolvePortalTaskLabel]);
+  const handleInspectAttachment = useCallback((attachment: ChatAttachment) => {
+    setInspectingDoc(attachment);
+  }, []);
 
   // Automatic post-login task continuation (Phase C / ADR-0013 / RFC 9470)
   const resumedTaskRef = useRef(false);
@@ -2567,22 +2497,13 @@ export default function Page() {
                     onListen={handleListenToReply}
                     conversationId={activeConversationId}
                     answerNumber={answerNumbers[turn.id]}
+                    actionsDisabled={isLoading || withOfficer || i !== chat.length - 1 || turn.responseIncomplete === true || turn.restored === true}
                     phaseLabel={isPending ? t(PHASE_UI[turnPhase].label) : undefined}
                     phaseVariant={isPending ? PHASE_UI[turnPhase].variant : undefined}
                     phaseStartedAt={isPending ? turnStartedAt ?? undefined : undefined}
-                    onInspectAttachment={(att) => setInspectingDoc(att)}
-                    onActionClick={(action) => sendMessage(action)}
-                    onSubmitInlineForm={(taskId, fields) =>
-                      void sendMessage(
-                        t('portalCopilot.submittedDetailsFor', {
-                          task: resolvePortalTaskLabel(taskId),
-                        }),
-                        {
-                          task_id: taskId,
-                          fields,
-                        },
-                      )
-                    }
+                    onInspectAttachment={handleInspectAttachment}
+                    onActionClick={handleSuggestedAction}
+                    onSubmitInlineForm={handleInlineSubmission}
                   />
                 );
               })}

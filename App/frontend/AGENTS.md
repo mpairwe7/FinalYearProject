@@ -42,13 +42,21 @@ Live work (`/agent`, `/admin/tickets`, `/calls`, the call layer) is for
   plain name, never instead of it. See `docs/OPS_CONSOLE_REDESIGN.md`.
 - **Taxpayer-facing strings are dictionary keys**, not literals — `useTranslation()`
   and `lib/i18n/en.ts`. The staff console stays English.
+- **REST and SSE share `lib/turnMeta.ts`.** Update turns immutably so memoized
+  cards receive revised fields. Explicitly withdrawn evidence must clear the UI.
+- **Workflow and portal actions belong to the latest completed response.** Busy,
+  interrupted and restored turns cannot submit; history needs refreshed guidance.
+  Approval requires a locally computed digest; the API owns authorization.
+- **A chat POST may advance a workflow.** Never automatically replay an ambiguous
+  failure. SSE needs a delimited `done` event, and response writes must remain
+  bound to their originating conversation and turn (ADR-0018).
 - **Signing out ends the provider session too** (`endOidcSession`). Do not add a
   sign-out path that only clears the local token: the next sign-in is then
   answered from the provider's surviving cookie, as the same account.
 
 <!-- BEGIN:nextjs-agent-rules -->
 
-# This is NOT the Next.js you know
+## This is NOT the Next.js you know
 
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
 

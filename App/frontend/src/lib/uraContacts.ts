@@ -11,6 +11,8 @@
  * (escalation contact line + clickable source citations).
  */
 
+import { safeHttpUrl } from './safeUrl';
+
 export const URA_CONTACTS = {
   /** Toll-free contact-centre lines. */
   tollFree: ["0800 117 000", "0800 217 000"] as const,
@@ -57,8 +59,8 @@ export function citationHref(citation: {
   url?: string | null;
   source?: string | null;
 }): string | null {
-  const raw = (citation.url || "").trim();
-  if (/^https?:\/\/[^\s]+$/i.test(raw)) return raw;
+  const href = safeHttpUrl(citation.url);
+  if (href) return href;
   return sourceUrl(citation.source);
 }
 

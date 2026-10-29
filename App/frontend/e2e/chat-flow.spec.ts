@@ -46,18 +46,90 @@ test.describe("Agentic chat flow", () => {
     });
   });
 
-  test("falls back to the regular chat endpoint when the SSE connection breaks", async ({ page }) => {
+  test("falls back to the regular chat endpoint when streaming is explicitly unsupported", async ({ page }) => {
     const faqReply = "URA provides domestic tax, customs, taxpayer registration, and online services.";
     await mockBackend(page, { reply: faqReply });
-    // Added after mockBackend so this request deliberately fails while the
-    // normal /v1/chat response remains available for recovery.
-    await page.route("**/api/v1/chat/stream", (route) => route.abort("failed"));
+    await page.route("**/api/v1/chat/stream", (route) => route.fulfill({ status: 405 }));
     await page.goto("/");
     await sendMessage(page, "What services does URA provide?");
 
     const reply = page.locator(".message-row-assistant").last();
     await expect(reply).toContainText(faqReply, { timeout: 15_000 });
     await expect(reply).not.toContainText("could not reach the URA knowledge base");
+  });
+
+  test("a truncated stream keeps partial text, disables actions and never replays the POST", async ({ page }) => {
+    await mockBackend(page);
+    let syncRequests = 0;
+    await page.route("**/api/v1/chat", (route) => { syncRequests++; return route.fulfill({ json: { reply: 'Replayed' } }); });
+    await page.route("**/api/v1/chat/stream", (route) => route.fulfill({
+      contentType: 'text/event-stream', body: [
+        'event:metadata',
+        'data:{"faithfulness_score":0.99,"next_actions":["Advance payment"]}', '',
+        'event:token', 'data:Partial payment guidance', '', '',
+      ].join('\n'),
+    }));
+    await page.goto('/');
+    await sendMessage(page, 'Help with payment');
+    const reply = page.locator('.message-row-assistant').last();
+    await expect(reply).toContainText('Partial payment guidance');
+    await expect(reply.getByRole('status')).toContainText('interrupted');
+    await expect(reply.getByText('Well grounded')).toHaveCount(0);
+    await expect(reply.getByRole('button', { name: 'Advance payment' })).toHaveCount(0);
+    expect(syncRequests).toBe(0);
+  });
+
+  test('JSON replies retain the inferred objective card and supersede old workflow controls', async ({ page }) => {
+    await mockBackend(page);
+    await page.route('**/api/v1/chat/stream', (route) => route.fulfill({ status: 405 }));
+    let calls = 0;
+    await page.route('**/api/v1/chat', (route) => route.fulfill({ json: ++calls === 1 ? {
+      reply: 'Choose the taxpayer type.',
+      workflow: { id: 'tin', name: 'TIN Registration', status: 'active', options: ['Individual applicant'] },
+    } : {
+      reply: 'Would you like help with filing?',
+      objective_hypothesis: { objective_id: 'filing', title: 'Return filing support', domain: 'returns',
+        workflow_id: 'return_filing', confirm_action: 'Guide me through return filing' },
+    } }));
+    await page.goto('/');
+    await sendMessage(page, 'Help with registration');
+    await expect(page.getByRole('button', { name: 'Individual applicant' })).toBeVisible();
+    await sendMessage(page, 'I have a filing problem');
+    await expect(page.getByTestId('objective-hypothesis-card')).toContainText('Return filing support');
+    await expect(page.getByRole('button', { name: 'Individual applicant' })).toHaveCount(0);
+  });
+
+  test('network failure does not silently resubmit a stateful chat request', async ({ page }) => {
+    await mockBackend(page);
+    let syncRequests = 0;
+    await page.route('**/api/v1/chat', (route) => { syncRequests++; return route.fulfill({ json: {} }); });
+    await page.route('**/api/v1/chat/stream', (route) => route.abort('failed'));
+    await page.goto('/');
+    await sendMessage(page, 'Continue my registration');
+    await expect(page.locator('.message-row-assistant').last().getByRole('status')).toContainText('interrupted');
+    expect(syncRequests).toBe(0);
+  });
+
+  test('a reply from a previous conversation cannot overwrite a new chat', async ({ page }) => {
+    await mockBackend(page);
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    let requestStarted!: () => void;
+    const started = new Promise<void>((resolve) => { requestStarted = resolve; });
+    await page.route('**/api/v1/chat/stream', async (route) => {
+      requestStarted();
+      await pending;
+      await route.fulfill({ contentType: 'text/event-stream', body: 'event:token\ndata:Old private response\n\nevent:done\ndata:\n\n' }).catch(() => {});
+    });
+    await page.goto('/');
+    await sendMessage(page, 'Help with my registration');
+    await started;
+    // A new chat remains available while the prior request is pending.
+    await page.getByRole('button', { name: 'New chat', exact: true }).first().click();
+    release();
+    await expect(page.locator('.message-row-assistant')).toHaveCount(0);
+    await expect(page.getByRole('heading', { level: 1, name: /How can I help with your taxes/i })).toBeVisible();
+    await expect(page.getByText('Old private response')).toHaveCount(0);
   });
 
   test("a starter prompt seeds the conversation", async ({ page }) => {

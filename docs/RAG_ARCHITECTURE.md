@@ -908,6 +908,18 @@ over the localized text and a per-locale golden set to gate it (G58).
 
 * **Stream Transport Resilience**: `/v1/chat/stream` emits `Cache-Control: no-cache, no-transform` and `X-Accel-Buffering: no`, and Next.js standalone disables proxy compression (`compress: false`), preventing reverse proxies (ngrok, Cloudflare) from gzipping and buffering event streams.
 
+* **Intelligent UI completion and actions (ADR-0018, 2026-10-30)**: REST and SSE
+  use `lib/turnMeta.ts` for the same response metadata. The browser bounds SSE
+  events and requires a delimited `done` frame; truncated replies retain an
+  incomplete status and cannot offer workflow/portal actions or automatic
+  narration. Writes are bound to the conversation and response ID. A failed
+  stateful chat POST is not automatically repeated after an ambiguous network
+  outcome; only explicit 404/405/401 responses permit the existing REST path.
+  Historical/restored cards require refreshed guidance. Portal approvals require
+  local digest calculation, but API-wide mandatory digest enforcement remains
+  open. See the [audit and remaining release work](plans/intelligent-ui-integration-audit-2026-10.md)
+  and [verification runbook](runbooks/intelligent-ui-integration.md).
+
 | Setting | Default | Effect |
 |---------|---------|--------|
 | `RETRIEVAL_MT_BACKEND` | `local_first` | Question → English, for searching the corpus |

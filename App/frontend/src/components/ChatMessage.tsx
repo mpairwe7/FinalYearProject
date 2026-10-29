@@ -1,9 +1,10 @@
 import React, { memo, useCallback, useMemo, useState, useSyncExternalStore } from 'react';
-import { ChatAttachment, ChatTurn, Citation } from '../store/useChatStore';
+import { ChatAttachment, ChatTurn } from '../store/useChatStore';
 import { URA_CONTACTS, telDigits } from '../lib/uraContacts';
 import { formatDocType, stripStepPrefix, type ScreenshotCopilotHandoff } from '../lib/attachments';
 import { stripCitationMarkers } from '../lib/answerText';
 import { formatNextShift } from '../lib/turnMeta';
+import { safePortalUrl } from '../lib/safeUrl';
 import { localeLabel } from '../lib/locales';
 import { useTranslation, type TranslationKey } from '../lib/i18n';
 import type { ConnectorNotice, ConnectorOutcome, ConnectorSkipReason, ConnectorUse } from '../lib/connectors';
@@ -155,6 +156,8 @@ interface ChatMessageProps {
   onInspectAttachment?: (attachment: ChatAttachment) => void;
   onActionClick?: (action: string) => void;
   onSubmitInlineForm?: (taskId: string, fields: Record<string, string>) => void;
+  /** Historical, busy and interrupted turns cannot submit workflow/portal actions. */
+  actionsDisabled?: boolean;
 }
 
 /**
@@ -230,8 +233,9 @@ function ChatMessageInner({
   phaseVariant,
   phaseStartedAt,
   onInspectAttachment,
-  onActionClick,
-  onSubmitInlineForm,
+  onActionClick: actionCallback,
+  onSubmitInlineForm: inlineCallback,
+  actionsDisabled = false,
 }: ChatMessageProps) {
   const isAssistant = turn.role === 'assistant';
   const isGreeting = turn.id === 'greeting-0';
@@ -239,6 +243,9 @@ function ChatMessageInner({
   // are rated on their own service, not with the answer thumbs.
   const isOfficerReply = turn.retrievalMode === 'officer_reply';
   const t = useTranslation();
+  const disabled = actionsDisabled || Boolean(phaseLabel) || turn.responseIncomplete === true || turn.restored === true;
+  const onActionClick = disabled ? undefined : actionCallback;
+  const onSubmitInlineForm = disabled ? undefined : inlineCallback;
   const authToken = useSyncExternalStore(subscribeAuthToken, getAuthToken, getServerAuthToken);
   const isSignedIn = Boolean(authToken);
   // Outside officers' working hours, and when they are next on duty (G196).
@@ -291,6 +298,10 @@ function ChatMessageInner({
           )}
         </div>
 
+        {isAssistant && !phaseLabel && turn.responseIncomplete && (
+          <p className="portal-field-error" role="status">{t('message.incomplete')}</p>
+        )}
+
         {isAssistant && turn.workflow && (
           <WorkflowStepper workflow={turn.workflow} onSelectOption={onActionClick} />
         )}
@@ -298,6 +309,7 @@ function ChatMessageInner({
         {isAssistant && turn.portalCopilot && (
           <PortalCopilotCard
             copilot={turn.portalCopilot}
+            disabled={disabled}
             conversationId={conversationId}
             onSubmitInlineForm={onSubmitInlineForm}
             onActionClick={onActionClick}
@@ -495,9 +507,9 @@ function ChatMessageInner({
                         </a>
                       )
                     ) : null}
-                    {a.analysis.screenshot_guidance.portal_url ? (
+                    {safePortalUrl(a.analysis.screenshot_guidance.portal_url) ? (
                       <a
-                        href={a.analysis.screenshot_guidance.portal_url}
+                        href={safePortalUrl(a.analysis.screenshot_guidance.portal_url)!}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="portal-action-btn is-ghost"
@@ -574,7 +586,7 @@ function ChatMessageInner({
             The badge never depends on there being sources — a low-confidence
             answer often has none, and that is exactly when the reader most
             needs the warning. */}
-        {isAssistant && !isGreeting && !phaseLabel && turn.content && (
+        {isAssistant && !isGreeting && !phaseLabel && !turn.responseIncomplete && turn.content && (
           <div className="grounding-row">
             {turn.retrievalMode === 'calculator' ? (
               <span className="grounding-badge grounding-ok" title="Deterministic arithmetic against official URA statutory rate tables">
@@ -730,77 +742,8 @@ function ChatMessageInner({
   );
 }
 
-function citationSignature(citations: Citation[] | undefined): string {
-  return (citations ?? [])
-    .map((c) => [c.ref, c.source, c.page ?? '', c.section ?? '', c.passage ?? '', c.url ?? '', c.effective_date ?? ''].join('\u001f'))
-    .join('\u001e');
-}
-
-function resourceSignature(turn: ChatTurn): string {
-  const resources = turn.resources?.length ? turn.resources : turn.workflow?.resources;
-  return (resources ?? []).map((r) => `${r.id ?? ''}\u001f${r.url ?? ''}\u001f${r.title ?? ''}`).join('\u001e');
-}
-
-function attachmentSignature(attachments: ChatAttachment[] | undefined): string {
-  return (attachments ?? []).map((a) => `${a.id}${a.docType ?? ''}`).join('|');
-}
-
-function actionsSignature(actions: string[] | undefined): string {
-  return (actions ?? []).join('|');
-}
-
-function connectorSignature(turn: ChatTurn): string {
-  const used = (turn.connectorsUsed ?? []).map((use) => `${use.namespace}:${use.mode ?? ''}:${use.outcome ?? ''}`);
-  const notices = (turn.connectorNotices ?? []).map((notice) => `${notice.namespace}:${notice.reason}`);
-  return `${used.join('|')}#${notices.join('|')}`;
-}
-
-const ChatMessage = memo(ChatMessageInner, (prev, next) => {
-  return (
-    prev.turn.id === next.turn.id &&
-    prev.turn.content === next.turn.content &&
-    prev.turn.thoughtForMs === next.turn.thoughtForMs &&
-    prev.phaseLabel === next.phaseLabel &&
-    prev.phaseVariant === next.phaseVariant &&
-    prev.phaseStartedAt === next.phaseStartedAt &&
-    prev.conversationId === next.conversationId &&
-    prev.answerNumber === next.answerNumber &&
-    prev.turn.serverTurnId === next.turn.serverTurnId &&
-    prev.turn.officerName === next.turn.officerName &&
-    prev.turn.faithfulnessScore === next.turn.faithfulnessScore &&
-    prev.turn.retrievalMode === next.turn.retrievalMode &&
-    prev.turn.escalationRequired === next.turn.escalationRequired &&
-    prev.turn.escalationReason === next.turn.escalationReason &&
-    prev.turn.officerHours?.onDuty === next.turn.officerHours?.onDuty &&
-    prev.turn.officerHours?.hours === next.turn.officerHours?.hours &&
-    prev.turn.officerHours?.nextOnDuty === next.turn.officerHours?.nextOnDuty &&
-    prev.turn.workflow?.id === next.turn.workflow?.id &&
-    prev.turn.workflow?.status === next.turn.workflow?.status &&
-    prev.turn.workflow?.step_index === next.turn.workflow?.step_index &&
-    prev.turn.workflow?.resume_code === next.turn.workflow?.resume_code &&
-    prev.turn.workflow?.form_draft?.completion_pct === next.turn.workflow?.form_draft?.completion_pct &&
-    prev.turn.workflow?.step_up_auth?.mode === next.turn.workflow?.step_up_auth?.mode &&
-    prev.turn.workflow?.step_up_auth?.remediation_action === next.turn.workflow?.step_up_auth?.remediation_action &&
-    prev.turn.workflow?.step_up_auth?.register_action === next.turn.workflow?.step_up_auth?.register_action &&
-    (prev.turn.workflow?.journey_gps?.parent_goals?.length ?? 0) ===
-      (next.turn.workflow?.journey_gps?.parent_goals?.length ?? 0) &&
-    prev.turn.workflow?.scaffolding?.failed_attempts === next.turn.workflow?.scaffolding?.failed_attempts &&
-    prev.turn.objectiveHypothesis?.objective_id === next.turn.objectiveHypothesis?.objective_id &&
-    actionsSignature(prev.turn.nextActions) === actionsSignature(next.turn.nextActions) &&
-    connectorSignature(prev.turn) === connectorSignature(next.turn) &&
-    prev.onActionClick === next.onActionClick &&
-    attachmentSignature(prev.turn.attachments) === attachmentSignature(next.turn.attachments) &&
-    citationSignature(prev.turn.citations) === citationSignature(next.turn.citations) &&
-    resourceSignature(prev.turn) === resourceSignature(next.turn) &&
-    prev.userQuery === next.userQuery &&
-    prev.turn.discrepancyReport?.id === next.turn.discrepancyReport?.id &&
-    prev.turn.discrepancyReport?.status === next.turn.discrepancyReport?.status &&
-    prev.playingTurnId === next.playingTurnId &&
-    prev.ttsLoading === next.ttsLoading &&
-    prev.locale === next.locale &&
-    prev.onInspectAttachment === next.onInspectAttachment &&
-    prev.isTransitioning === next.isTransitioning
-  );
-});
+// Store updates replace the turn object. Shallow memoization compares every
+// prop without a hand-maintained list that can omit new confirmation fields.
+const ChatMessage = memo(ChatMessageInner);
 
 export default ChatMessage;

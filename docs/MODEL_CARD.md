@@ -177,6 +177,12 @@ Evaluated across 16 Ugandan tax heads (`paye`, `vat`, `withholding`, `rental`, `
 3. **Luganda quality**: Lower accuracy due to limited multilingual training data
 4. **Context window**: 8192 tokens (configurable, Qwen3-8B supports up to 128K) — very long queries may be truncated
 5. **Offline mobile**: On-device Gemma-2B has no retrieval context, reducing accuracy
+6. **Intelligent UI evidence (2026-10-30)**: Interrupted responses carry an
+   incomplete status; workflow/portal mutations require a current completed
+   response. These controls do not establish answer correctness. Nested payload
+   validation, mandatory portal API digest enforcement, reviewed translations and
+   authenticated staging acceptance remain open in the
+   [UI integration audit](plans/intelligent-ui-integration-audit-2026-10.md).
 
 ---
 

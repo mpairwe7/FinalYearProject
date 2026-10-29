@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
 import { WorkflowState } from '../store/useChatStore';
 import { useTranslation } from '../lib/i18n';
+import { safePortalUrl } from '../lib/safeUrl';
 
 interface WorkflowStepperProps {
   workflow: WorkflowState;
@@ -15,6 +16,7 @@ function WorkflowStepperInner({ workflow, onSelectOption }: WorkflowStepperProps
   const isCompleted = workflow.status === 'completed';
   const total = workflow.total_steps || (workflow.all_steps?.length ?? 0);
   const currentIdx = workflow.step_index || ((workflow.current_step_idx ?? 0) + 1);
+  const portalHref = safePortalUrl(workflow.portal_action?.url);
 
   return (
     <div
@@ -68,7 +70,7 @@ function WorkflowStepperInner({ workflow, onSelectOption }: WorkflowStepperProps
                   {pr.status === 'satisfied' ? '✓' : pr.status === 'missing' ? '⚠' : '○'}
                 </span>{' '}
                 <span>{pr.label}</span>
-                {pr.status === 'missing' && pr.remediation_action && onSelectOption && (
+                {isActive && pr.status === 'missing' && pr.remediation_action && onSelectOption && (
                   <button
                     type="button"
                     className="workflow-prereq-remediate-btn"
@@ -94,6 +96,7 @@ function WorkflowStepperInner({ workflow, onSelectOption }: WorkflowStepperProps
                 key={st.id || i}
                 className={`workflow-step-node ${isCur ? 'is-current' : isDone ? 'is-done' : 'is-pending'}`}
                 role="listitem"
+                aria-current={isCur ? 'step' : undefined}
                 title={`${stepNum}. ${st.title} (${st.status})`}
               >
                 <div className="workflow-step-dot" aria-hidden="true">
@@ -164,7 +167,7 @@ function WorkflowStepperInner({ workflow, onSelectOption }: WorkflowStepperProps
             {t('workflow.stepUpAuth', { count: workflow.step_up_auth.preserved_slot_count ?? 0 })}
           </div>
           <p className="workflow-step-up-reason">{workflow.step_up_auth.reason}</p>
-          {(workflow.step_up_auth.remediation_action || workflow.step_up_auth.register_action) &&
+          {isActive && (workflow.step_up_auth.remediation_action || workflow.step_up_auth.register_action) &&
             onSelectOption && (
               <div className="workflow-step-up-actions">
                 <button
@@ -209,15 +212,15 @@ function WorkflowStepperInner({ workflow, onSelectOption }: WorkflowStepperProps
       )}
 
       <div className="workflow-footer-actions">
-        {workflow.portal_action?.url && (
+        {portalHref && (
           <a
-            href={workflow.portal_action.url}
+            href={portalHref}
             target="_blank"
             rel="noopener noreferrer"
             className="workflow-portal-btn"
-            title={t('workflow.openPortal', { label: workflow.portal_action.label || 'URA Portal' })}
+            title={t('workflow.openPortal', { label: workflow.portal_action?.label || t('workflow.openPortalDefault') })}
           >
-            {workflow.portal_action.label || t('workflow.openPortalDefault')}
+            {workflow.portal_action?.label || t('workflow.openPortalDefault')}
           </a>
         )}
         {isActive && onSelectOption && (

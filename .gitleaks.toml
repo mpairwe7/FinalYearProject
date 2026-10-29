@@ -43,7 +43,9 @@ keywords = ["phone", "mobile", "256"]
 [[rules]]
 id = "openai-api-key"
 description = "OpenAI API Key"
-regex = '''sk-[a-zA-Z0-9_-]{20,}'''
+# A key starts at a word boundary (after =, :, a quote or whitespace). Without
+# \b the rule fired inside prose such as "ai-risk-management-framework".
+regex = '''\bsk-[a-zA-Z0-9_-]{20,}'''
 tags = ["api-key", "ml"]
 keywords = ["sk-"]
 
