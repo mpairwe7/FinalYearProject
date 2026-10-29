@@ -100,7 +100,7 @@ _STATUS_SMALLTALK_RE = re.compile(
     r"habari\s+yako\s+ya\s+leo|uko\s+salama(?:\s+leo)?(?:\s+na\s+kazi\s+zinaendeleaje)?|unaendeleaje(?:\s+leo)?|habari\s+za\s+leo|"
     r"agandi\s+erizooba|ori\s+gye|oraire\s+ota\s+erizooba|"
     r"kopango\s+tin|itye\s+maber|itye\s+nining\s+tin)"
-    r"(?:\s+(?:mwattu|bambi|nno|sebo|nyabo|rafiki|ndugu|mukama\s+wangye|lamera|friend|today))?[?.! ]*$",
+    r"(?:\s+(?:mwattu|bambi|nno|s?sebo|n?nyabo|rafiki|ndugu|bwana|bibi|kaka|dada|mukama\s+wangye|lamera|friend|today))?[?.! ]*$",
     re.IGNORECASE,
 )
 
@@ -468,6 +468,13 @@ _CONVERSATIONAL_LOCALE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 def _resolve_conversational_locale(text: str, locale: str = "en") -> str:
     """Resolve the active locale for a conversational turn, honouring both text evidence and thread locale."""
     norm_loc = (locale or "en").strip().lower()
+    if re.match(
+        r"^\s*(?:can\s+you|do\s+you)\s+(?:speak|understand)\s+"
+        r"(?:luganda|swahili|kiswahili|runyankole|runyankore|orunyankore|acholi|acoli|english)\b[?.! ]*$",
+        text,
+        re.IGNORECASE,
+    ):
+        return "en"
     if norm_loc in ("lg", "sw", "nyn", "ach"):
         try:
             from .language_state import resolve_turn_locale

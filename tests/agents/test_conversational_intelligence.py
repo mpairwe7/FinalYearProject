@@ -346,3 +346,67 @@ class TestConversationalIntelligenceEngine:
         )
         assert coerced_bantu["annual_turnover"] == 15_000_000.0
         assert coerced_bantu["rate"] == 0.18
+
+        # 6. TIN/PRN/BRN identifier spans excluded from UGX amount extraction & ChatResponse.connectors_used
+        from app.calculator_router import extract_amounts
+        from app.connector_intent import detect_connector_intent, missing_arguments
+        from app.models import ChatResponse
+        from app.speech_normalization import _format_ugx_amount
+        from app.text_signals import detect_crisis, detect_high_stakes
+
+        assert extract_amounts("What does EFRIS hold for TIN 1000000001?") == []
+        assert extract_amounts("What does EFRIS hold for TIN 1000-000-001?") == []
+        assert extract_amounts("Check payment status for PRN 220000000001") == []
+        assert extract_amounts("Verify BRN: 80020000012345") == []
+        resp_model = ChatResponse(
+            reply="Kakira Sugar Limited",
+            connectors_used=[{"namespace": "efris", "label": "EFRIS", "mode": "simulation", "outcome": "found"}],
+        )
+        assert resp_model.connectors_used[0]["namespace"] == "efris"
+        assert resp_model.connectors_used[0]["outcome"] == "found"
+
+        # 7. English capability question naming a vernacular language stays in English ("en")
+        cap_nyn_in_en = handle_conversational_turn("Can you speak Runyankole?", "nyn")
+        assert cap_nyn_in_en is not None and cap_nyn_in_en.locale == "en"
+        st_ssebo = handle_conversational_turn("Oli otya leero ssebo?", "lg")
+        assert st_ssebo is not None and st_ssebo.locale == "lg" and st_ssebo.intent_type == "status_smalltalk"
+
+        # 8. 5-locale high-stakes (enforcement, deadline_today, Bantu large_amount) & phrasal crisis detection
+        assert "enforcement" in detect_high_stakes("Eduuka ryangye baariigara")
+        assert "enforcement" in detect_high_stakes("Duka mera gicego")
+        assert "deadline_today" in detect_high_stakes("Erizooba n'ekiro ky'aha muheru")
+        assert "deadline_today" in detect_high_stakes("Tin aye nino me agikki")
+        assert "large_amount" in detect_high_stakes("Bampadde ekibonerezo kya obukadde 20")
+        assert "large_amount" in detect_high_stakes("Nimepewa adhabu ya milioni 50")
+        assert detect_crisis("Njagala kufa olw'ebbanja ly'omusolo") is True
+        assert detect_crisis("Nataka kufa kwa sababu ya deni") is True
+        assert detect_crisis("Ninyenda kufa") is True
+        assert detect_crisis("Amito to") is True
+
+        # 9. Structuring ordinal word-boundary & comma handling + nested parenthesized step indentation + zero-cent TTS
+        assert "5. **Tano**:" not in OutputGuard.normalize_structure("Tanoa kisu. Pilika nyingi.")
+        norm_comma = OutputGuard.normalize_structure("Kwanza, fungua akaunti. Pili, weka TIN.")
+        assert ": ," not in norm_comma and "1. **Kwanza**: fungua akaunti." in norm_comma
+        nested_paren = OutputGuard.normalize_structure(
+            "1. Main step one:\n   (1) Sub-step A\n   (2) Sub-step B\n1. Main step two"
+        )
+        assert "2. Main step two" in nested_paren
+        assert "sifuri" not in _format_ugx_amount("1,000,000.00", "sw")
+        assert "zero" not in _format_ugx_amount("3,500,000.00", "lg")
+
+        # 10. Connector intent hyphenated TIN & integer identifier grounding/coercion
+        efris_desc = {
+            "name": "efris_taxpayer_status",
+            "description": "Look up EFRIS registration status by TIN.",
+            "inputSchema": {"type": "object", "properties": {"tin": {"type": "string"}}, "required": ["tin"]},
+        }
+        ci_hyph = detect_connector_intent("Check EFRIS status for TIN 1000-000-001", [("efris", efris_desc)])
+        assert ci_hyph is not None and ci_hyph.operations == ("efris_taxpayer_status",)
+        assert missing_arguments({"tin": 9999999999}, efris_desc["inputSchema"], "Check EFRIS status") == ["tin"]
+        assert missing_arguments(
+            {"tin": 220000000001},
+            efris_desc["inputSchema"],
+            "Check EFRIS status for 220000000001",
+        ) == ["tin"]
+        coerced_int_id = coerce_arguments_to_schema(efris_desc["inputSchema"], {"tin": 1000000001})
+        assert coerced_int_id["tin"] == "1000000001"
