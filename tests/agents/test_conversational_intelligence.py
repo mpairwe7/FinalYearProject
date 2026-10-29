@@ -356,6 +356,7 @@ class TestConversationalIntelligenceEngine:
 
         assert extract_amounts("What does EFRIS hold for TIN 1000000001?") == []
         assert extract_amounts("What does EFRIS hold for TIN 1000-000-001?") == []
+        assert [value for value, _, _ in extract_amounts("Generate a PRN for TIN 1000000001 20000000")] == [20_000_000.0]
         assert extract_amounts("Check payment status for PRN 220000000001") == []
         assert extract_amounts("Verify BRN: 80020000012345") == []
         resp_model = ChatResponse(
@@ -374,25 +375,33 @@ class TestConversationalIntelligenceEngine:
         # 8. 5-locale high-stakes (enforcement, deadline_today, Bantu large_amount) & phrasal crisis detection
         assert "enforcement" in detect_high_stakes("Eduuka ryangye baariigara")
         assert "enforcement" in detect_high_stakes("Duka mera gicego")
+        assert "enforcement" not in detect_high_stakes("Sirina ssente, bizinesi yange egudde")
         assert "deadline_today" in detect_high_stakes("Erizooba n'ekiro ky'aha muheru")
         assert "deadline_today" in detect_high_stakes("Tin aye nino me agikki")
         assert "large_amount" in detect_high_stakes("Bampadde ekibonerezo kya obukadde 20")
         assert "large_amount" in detect_high_stakes("Nimepewa adhabu ya milioni 50")
+        assert "large_amount" not in detect_high_stakes("Nimepewa adhabu ya milioni 50 TZS")
         assert detect_crisis("Njagala kufa olw'ebbanja ly'omusolo") is True
         assert detect_crisis("Nataka kufa kwa sababu ya deni") is True
         assert detect_crisis("Ninyenda kufa") is True
         assert detect_crisis("Amito to") is True
+        assert detect_crisis("Pe amito to") is False
 
         # 9. Structuring ordinal word-boundary & comma handling + nested parenthesized step indentation + zero-cent TTS
         assert "5. **Tano**:" not in OutputGuard.normalize_structure("Tanoa kisu. Pilika nyingi.")
         norm_comma = OutputGuard.normalize_structure("Kwanza, fungua akaunti. Pili, weka TIN.")
         assert ": ," not in norm_comma and "1. **Kwanza**: fungua akaunti." in norm_comma
+        assert "1. **Kwanza**: fungua" in OutputGuard.normalize_structure("Kwanza:fungua akaunti.")
+        assert "1. File\n  2. Pay" in OutputGuard.normalize_structure("(1)File\n  (2)Pay")
         nested_paren = OutputGuard.normalize_structure(
             "1. Main step one:\n   (1) Sub-step A\n   (2) Sub-step B\n1. Main step two"
         )
         assert "2. Main step two" in nested_paren
         assert "sifuri" not in _format_ugx_amount("1,000,000.00", "sw")
         assert "zero" not in _format_ugx_amount("3,500,000.00", "lg")
+        from app.speech_normalization import _spoken_number
+
+        assert _spoken_number("2026.00", "lg") == "two thousand and twenty-six"
 
         # 10. Connector intent hyphenated TIN & integer identifier grounding/coercion
         efris_desc = {
@@ -410,3 +419,4 @@ class TestConversationalIntelligenceEngine:
         ) == ["tin"]
         coerced_int_id = coerce_arguments_to_schema(efris_desc["inputSchema"], {"tin": 1000000001})
         assert coerced_int_id["tin"] == "1000000001"
+        assert coerce_arguments_to_schema(efris_desc["inputSchema"], {"tin": 220000000001})["tin"] == 220000000001

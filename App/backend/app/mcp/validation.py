@@ -226,7 +226,8 @@ def coerce_arguments_to_schema(
             and key in ("tin", "taxpayer_tin", "buyer_tin", "importer_tin", "prn", "payment_registration_number")
         ):
             str_id = str(value)
-            if re.fullmatch(r"\d{10}|\d{12,14}", str_id):
+            id_pattern = r"\d{10}|\d{12,14}" if key in ("prn", "payment_registration_number") else r"\d{10}"
+            if re.fullmatch(id_pattern, str_id):
                 coerced[key] = str_id
                 continue
 

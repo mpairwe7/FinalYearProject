@@ -482,6 +482,7 @@ def _spoken_number(number: str, locale: str, years: bool = True) -> str:
         whole_part, _, frac_part = number.partition(".")
         if not frac_part or set(frac_part) == {"0"}:
             number = whole_part or "0"
+            years = False
         else:
             return decimal_words(number, "sw" if locale == "sw" else "en")
     n = int(number)

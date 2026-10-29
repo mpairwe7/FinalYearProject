@@ -667,7 +667,7 @@ _ENFORCEMENT_RE = re.compile(
     r"|auction\w*|enforcement\s+(?:notice|action|officers?)|demand\s+notice"
     # Luganda / Swahili / Runyankole / Acholi forms of the same events: the
     # phrases _HARDSHIP_RE lists as enforcement cues, so one lexicon says it.
-    r"|ebintu\s+byange\s+babikutte|bamazze\s+okusiba\s+edduuka|edduuka\s+lyange\s+baligadde|bizinesi\s+yange\s+egudde"
+    r"|ebintu\s+byange\s+babikutte|bamazze\s+okusiba\s+edduuka|edduuka\s+lyange\s+baligadde"
     r"|akaunti\s+imefungwa|bidhaa\s+zimekamatwa|duka\s+langu\s+limefungwa|biashara\s+imefungwa"
     r"|ebyangye\s+babikwata|eduuka\s+(?:ryangye\s+)?baariigara"
     r"|jami\s+na\s+gimako|duka\s+(?:mera\s+|na\s+)?gicego)\b"
@@ -688,6 +688,10 @@ _AMOUNT_RE = re.compile(
 _BANTU_STAKES_AMOUNT_RE = re.compile(
     r"\b(?P<bu>milioni|bilioni|elfu|laki|o?bukadde|a?kakadde|o?bukaikuru|a?kakaikuru|o?buwumbi|a?kawumbi)"
     r"\s+(?P<ba>\d[\d,]*(?:\.\d+)?)\b",
+    re.IGNORECASE,
+)
+_NON_UGX_CURRENCY_RE = re.compile(
+    r"\b(?:usd|us\s*\$|kes|kshs?|tzs|tshs?|eur|gbp|rwf|dollars?|euros?|pounds?)\b",
     re.IGNORECASE,
 )
 _UNIT = {
@@ -726,6 +730,10 @@ def _amounts_ugx(text: str) -> list[float]:
             continue
         amounts.append(value * _UNIT.get(unit, 1))
     for match in _BANTU_STAKES_AMOUNT_RE.finditer(text):
+        before = text[max(0, match.start() - 16) : match.start()]
+        after = text[match.end() : min(len(text), match.end() + 16)]
+        if _NON_UGX_CURRENCY_RE.search(before) or _NON_UGX_CURRENCY_RE.search(after):
+            continue
         raw_b = match.group("ba") or ""
         unit_b = (match.group("bu") or "").lower()
         try:
@@ -789,7 +797,7 @@ _CRISIS_RE = re.compile(
     r"|okwetta|njagala\s+kufa|nsinze\s+okufa"
     r"|kujiua|nataka\s+kufa|bora\s+nife"
     r"|okweyita|kweyita|ninyenda\s+kufa"
-    r"|neko\s+koma|aneka\s+koma|amito\s+to)\b"
+    r"|neko\s+koma|aneka\s+koma|(?<!\bpe\s)amito\s+to)\b"
 )
 
 #: Hopelessness — "I can't cope", "I give up", "no way out". Alone it is often

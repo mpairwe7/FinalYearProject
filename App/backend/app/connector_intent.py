@@ -98,7 +98,9 @@ _REFERENCE_ARGUMENT_WORDS = frozenset(
     {"number", "code", "id", "reference", "entry", "registration", "stamp", "warehouse", "vehicle", "invoice"}
 )
 _TIN_RE = re.compile(r"(?<![\w-])(?:\d{10}|\d{4}[-\s]\d{3}[-\s]\d{3}|\d{3}[-\s]\d{3}[-\s]\d{4})(?![\w-])")
-_PRN_RE = re.compile(r"(?<![\w-])(?:\d{12,13}|\d{4}[-\s]\d{4}[-\s]\d{4,5})(?![\w-])")
+_PRN_RE = re.compile(
+    r"(?<![\w-])(?:\d{12,13}|\d{4}[-\s]\d{4}[-\s]\d{4,5}|\d{4}[-\s]\d{4}[-\s]\d{4}[-\s]\d)(?![\w-])"
+)
 #: A reference code has a digit and a letter or a separator: ``IM7-0001``,
 #: ``WH-KLA-01``, ``URSB-CO-10001``. A bare run of digits is a TIN or a PRN.
 _REFERENCE_RE = re.compile(

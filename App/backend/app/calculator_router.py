@@ -85,7 +85,8 @@ def extract_amounts(text: str) -> list[tuple[float, int, int]]:
         (m.start(), m.end())
         for m in re.finditer(
             r"\b(?:s\.|section|sec\.|sch\.|schedule|block|part|form|dt|hs|code|cap\.?|tin|prn|brn|nin|fdn|efd)"
-            r"(?:[ \t]+(?:dt|no\.?|number|id|code))?(?:[ \t]*[-:#][ \t]*|[ \t]+)\d+(?:[-\s]\d+)*[a-zA-Z]?\b",
+            r"(?:[ \t]+(?:dt|no\.?|number|id|code))?(?:[ \t]*[-:#][ \t]*|[ \t]+)"
+            r"(?:\d{4}[ \t]+\d{3}[ \t]+\d{3}|\d{3}[ \t]+\d{3}[ \t]+\d{4}|\d{4}[ \t]+\d{4}[ \t]+\d{4,5}|\d+(?:-\d+)*[a-zA-Z]?)\b",
             text or "",
             re.IGNORECASE,
         )
