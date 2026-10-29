@@ -276,8 +276,11 @@ _RANGE_WORD = {
 # "ku bitundu ebitundu 18 ku buli kikumi", nor "asilimia 18%" "asilimia asilimia".
 _LG_PCT_RE = re.compile(r"\b(e?bitundu[ \t]+)?([0-9]+(?:\.[0-9]+)?)[ \t]?%(?:[ \t]+ku[ \t]+buli[ \t]+kikumi\b)?", re.IGNORECASE)
 _SW_PCT_RE = re.compile(r"\b(?:asilimia[ \t]+)?([0-9]+(?:\.[0-9]+)?)[ \t]?%", re.IGNORECASE)
-_NYN_PCT_RE = re.compile(r"\b(e?bicweka[ \t]+)?([0-9]+(?:\.[0-9]+)?)[ \t]?%(?:[ \t]+aha[ \t]+(?:buli[ \t]+)?kikumi\b)?", re.IGNORECASE)
-_ACH_PCT_RE = re.compile(r"\b(dul[ \t]+)?([0-9]+(?:\.[0-9]+)?)[ \t]?%(?:[ \t]+i[ \t]+kom[ \t]+miya\b)?", re.IGNORECASE)
+_NYN_PCT_RE = re.compile(
+    r"\b(e?bicweka[ \t]+)?([0-9]+(?:\.[0-9]+)?)[ \t]?%(?:[ \t]+aha[ \t]+(?:bu[lr]i[ \t]+)?(kikumi|e?igana)\b)?",
+    re.IGNORECASE,
+)
+_ACH_PCT_RE = re.compile(r"\b(dul[ \t]+)?([0-9]+(?:\.[0-9]+)?)[ \t]?%(?:[ \t]+i[ \t]+kom[ \t]+miya(?:[ \t]+acel)?\b)?", re.IGNORECASE)
 
 # A number standing on its own: not part of a word (118A, 30th), a date, a
 # time, a decimal or a range written without spaces. ASCII digits only here
@@ -518,7 +521,8 @@ def _lg_percent(match: re.Match[str]) -> str:
 def _nyn_percent(match: re.Match[str]) -> str:
     number = _strip_zero_decimals(match.group(2))
     words = nyn_words(int(number), "bi") if "." not in number else None
-    return f"{match.group(1) or 'ebicweka '}{words or _spoken_number(number, 'en')} aha kikumi"
+    hundred_noun = (match.group(3) or "kikumi").lower()
+    return f"{match.group(1) or 'ebicweka '}{words or _spoken_number(number, 'en')} aha {hundred_noun}"
 
 
 def _ach_percent(match: re.Match[str]) -> str:

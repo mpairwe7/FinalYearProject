@@ -378,9 +378,14 @@ _ASR_ENTITY_FIXES: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
     (re.compile(r"\b(?:vee\s*ay\s*tee|v-a-t|v\s+a\s+t|v\.a\.t\.|vatt|vaat|veti|vaati|viati|veyati|veya\s+ti|baati|bbaati)\b", re.IGNORECASE), "VAT"),
     (re.compile(r"\b(standard|pay|file|for|about|on|claim|input|output|monthly)\s+vet\b", re.IGNORECASE), r"\1 VAT"),
     (re.compile(r"\bvet\s+(rate|rates|return|returns|threshold|registration|tax|refund|refunds|invoice|invoices|exemption|exemptions|number|compliance|audit|liability|credit)\b", re.IGNORECASE), r"VAT \1"),
-    # Acholi Whisper-SALT hearing of "mucoro" (tax) and "i Uganda"
+    # Acholi / Runyankole / Swahili / Luganda Whisper-SALT hearings of tax & percentage idioms
     (re.compile(r"\blucoro\b", re.IGNORECASE), "mucoro"),
     (re.compile(r"\biuganda\b", re.IGNORECASE), "i Uganda"),
+    (re.compile(r"\baha\s+(?:bu[lr]i\s+)?kikuru\b", re.IGNORECASE), "aha kikumi"),
+    (re.compile(r"\bomusono\b", re.IGNORECASE), "omusolo"),
+    (re.compile(r"\bni\s+silimia\b", re.IGNORECASE), "ni asilimia"),
+    (re.compile(r"\bi\s+kom\s+miyo\b", re.IGNORECASE), "i kom miya"),
+    (re.compile(r"\bidulu\b", re.IGNORECASE), "dul"),
     # PAYE acoustic variants
     # Not "payee": that is an English word ("who is the payee on a PRN?").
     (re.compile(r"\b(?:peeyi|pee\s+yi|p-a-y-e|p\.a\.y\.e\.|p\s+a\s+y\s+e)\b", re.IGNORECASE), "PAYE"),
@@ -532,6 +537,9 @@ RUNYANKOLE_ENGLISH_TAX_TERMS: Final[dict[str, str]] = {
     "omushoro gwa vat": "VAT Value Added Tax rate",
     "mushoro gwa vat": "VAT Value Added Tax rate",
     "ebicweka bingahi": "what percentage",
+    "aha eigana": "percent",
+    "aha igana": "percent",
+    "aha kikumi": "percent",
     # PAYE & Rental & Corporate & WHT
     "omushoro gwa paye": "PAYE Pay As You Earn tax",
     "omushoro gw'omushaara": "PAYE salary tax",

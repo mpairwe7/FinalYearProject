@@ -325,13 +325,16 @@ def figures(text: str, locale: str | None = None) -> set[float]:
     stripped = re.sub(r"\b(?:19|20)\d{2}\b", " ", stripped)
     # Strip tariff chapter references (Chapters 84 and 85, Sura 84)
     stripped = re.sub(r"\b(?:chapters?|sura|essuula)\s+\d+(?:\s*(?:and|ne|na|&)\s*\d+)?\b", " ", stripped, flags=re.IGNORECASE)
-    # Strip percentage per-hundred idioms so "kikumi" / "miya" is not read as 100
+    # Strip percentage per-hundred idioms so "kikumi" / "eigana" / "miya" is not read as 100
     stripped = re.sub(r"\bku\s+buli\s+kikumi\b", " ", stripped, flags=re.IGNORECASE)
-    stripped = re.sub(r"\baha\s+(?:buli\s+)?kikumi\b", " ", stripped, flags=re.IGNORECASE)
+    stripped = re.sub(r"\baha\s+(?:bu[lr]i\s+)?(?:kikumi|e?igana)\b", " ", stripped, flags=re.IGNORECASE)
     stripped = re.sub(r"\bi\s+kom\s+miya(?:\s+acel)?\b", " ", stripped, flags=re.IGNORECASE)
     stripped = re.sub(r"\bkatika\s+kila\s+(?:mia\s+moja|mia)\b", " ", stripped, flags=re.IGNORECASE)
     # Strip Swahili idiom "moja kwa moja" (direct/directly) so "moja" is not read as 1.0
     stripped = re.sub(r"\bmoja\s+kwa\s+moja\b", " ", stripped, flags=re.IGNORECASE)
+    from .number_words import normalize_vernacular_amount_words
+
+    stripped = normalize_vernacular_amount_words(stripped)
     values = canonical_amounts(stripped)
     values |= {float(value) for value in percentages(stripped)}
     stripped_lower = stripped.lower()
@@ -397,7 +400,10 @@ _EN_WORD_NUMBERS: dict[str, float] = {
 
 
 _SW_WORD_NUMBERS: dict[str, float] = {
+    "nusu": 0.5,
     "moja": 1.0,
+    "moja na nusu": 1.5,
+    "moja nukta tano": 1.5,
     "mbili": 2.0,
     "tatu": 3.0,
     "nne": 4.0,
@@ -411,22 +417,36 @@ _SW_WORD_NUMBERS: dict[str, float] = {
     "tisa": 9.0,
     "kumi": 10.0,
     "kumi na mbili": 12.0,
+    "kumi na nne": 14.0,
     "kumi na tano": 15.0,
     "kumi na nane": 18.0,
     "ishirini": 20.0,
+    "ishirini na tano": 25.0,
     "thelathini": 30.0,
     "thelathini na tano": 35.0,
     "arobaini": 40.0,
     "arobaini na tano": 45.0,
     "hamsini": 50.0,
+    "sitini": 60.0,
+    "sabini": 70.0,
+    "sabini na tano": 75.0,
+    "themanini": 80.0,
+    "tisini": 90.0,
     "mia moja": 100.0,
+    "mia mbili": 200.0,
+    "mia tatu": 300.0,
     "elfu moja": 1000.0,
 }
 
 _LG_WORD_NUMBERS: dict[str, float] = {
+    "ekitundu": 0.5,
     "emu": 1.0,
     "kimu": 1.0,
     "kamu": 1.0,
+    "lumu": 1.0,
+    "gumu": 1.0,
+    "emu n'ekitundu": 1.5,
+    "kimu n'ekitundu": 1.5,
     "bbiri": 2.0,
     "bibiri": 2.0,
     "babiri": 2.0,
@@ -461,24 +481,45 @@ _LG_WORD_NUMBERS: dict[str, float] = {
     "kkumi n'ebiri": 12.0,
     "ekkumi n'ebbiri": 12.0,
     "ekkumi n'ebiri": 12.0,
+    "kkumi na nnya": 14.0,
+    "kkumi na bina": 14.0,
     "kkumi na ttaano": 15.0,
     "kkumi na bitaano": 15.0,
     "kkumi na munaana": 18.0,
     "ekkumi n'omunaana": 18.0,
     "abiri": 20.0,
+    "amakumi abiri": 20.0,
+    "amakumi abiri mu bitaano": 25.0,
+    "abiri mu bitaano": 25.0,
     "asatu": 30.0,
+    "amakumi asatu": 30.0,
+    "amakumi asatu mu bitaano": 35.0,
     "asatu mu bitaano": 35.0,
     "amakumi ana": 40.0,
+    "amakumi ana mu bitaano": 45.0,
     "ana mu bitaano": 45.0,
     "ataano": 50.0,
+    "amakumi ataano": 50.0,
+    "nkaaga": 60.0,
+    "nsanvu": 70.0,
+    "nsanvu mu bitaano": 75.0,
+    "kinaana": 80.0,
+    "kyenda": 90.0,
     "kikumi": 100.0,
+    "bikumi bibiri": 200.0,
+    "bikumi bisatu": 300.0,
     "lukumi": 1000.0,
 }
 
 _NYN_WORD_NUMBERS: dict[str, float] = {
+    "ekicweka": 0.5,
     "emwe": 1.0,
     "kimwe": 1.0,
     "kamwe": 1.0,
+    "rumwe": 1.0,
+    "gumwe": 1.0,
+    "emwe n'ekicweka": 1.5,
+    "kimwe n'ekicweka": 1.5,
     "ibiri": 2.0,
     "bibiri": 2.0,
     "bubiri": 2.0,
@@ -498,21 +539,38 @@ _NYN_WORD_NUMBERS: dict[str, float] = {
     "ikumi": 10.0,
     "ikumi na ibiri": 12.0,
     "ikumi na bibiri": 12.0,
+    "ikumi na ina": 14.0,
+    "ikumi na bina": 14.0,
     "ikumi na itaano": 15.0,
     "ikumi na bitaano": 15.0,
     "ikumi na munaana": 18.0,
     "makumi abiri": 20.0,
+    "makumi abiri na itaano": 25.0,
+    "makumi abiri na bitaano": 25.0,
     "makumi ashatu": 30.0,
+    "makumi ashatu na itaano": 35.0,
     "makumi ashatu na bitaano": 35.0,
     "makumi ana": 40.0,
+    "makumi ana na itaano": 45.0,
     "makumi ana na bitaano": 45.0,
     "makumi ataano": 50.0,
+    "nkaaga": 60.0,
+    "nshanju": 70.0,
+    "nshanju na bitaano": 75.0,
+    "kinaana": 80.0,
+    "kyenda": 90.0,
+    "eigana": 100.0,
+    "igana": 100.0,
     "kikumi": 100.0,
+    "magana abiri": 200.0,
+    "magana ashatu": 300.0,
     "rukumi": 1000.0,
 }
 
 _ACH_WORD_NUMBERS: dict[str, float] = {
+    "nucu": 0.5,
     "acel": 1.0,
+    "acel ki nucu": 1.5,
     "aryo": 2.0,
     "adek": 3.0,
     "angwen": 4.0,
@@ -523,16 +581,26 @@ _ACH_WORD_NUMBERS: dict[str, float] = {
     "abongwen": 9.0,
     "apar": 10.0,
     "apar wiye aryo": 12.0,
+    "apar wiye angwen": 14.0,
     "apar wiye abic": 15.0,
     "apar wiye aboro": 18.0,
     "pyeraryo": 20.0,
+    "pyeraryo wiye abic": 25.0,
     "pyeradek": 30.0,
     "pyeradek wiye abic": 35.0,
     "pyerangwen": 40.0,
     "pyerangwen wiye abic": 45.0,
     "pyerabic": 50.0,
+    "pyerabicel": 60.0,
+    "pyerabiro": 70.0,
+    "pyerabiro wiye abic": 75.0,
+    "pyeraboro": 80.0,
+    "pyerabongwen": 90.0,
     "miya acel": 100.0,
+    "miya aryo": 200.0,
+    "miya adek": 300.0,
     "elfu acel": 1000.0,
+    "tutemia": 1000.0,
 }
 
 

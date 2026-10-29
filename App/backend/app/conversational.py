@@ -173,7 +173,7 @@ _CIVIC_RESPONSES = {
         "- **Yoo ki Abur**: Gero gudi madongo me kolasi ki yoo me caro ma UNRA gero i lobo weng.\n"
         "- **Yot Kom**: Keto yat ki jami tic i ot yat madongo pa gamente kacel ki culu ludaktari.\n"
         "- **Kwan**: Konyo gang kwan pa gamente me UPE, USE ki yunivasiti.\n"
-        "- **Kuc ki Gwok**: Konyoaskari ki lurok ma gigwoko kwo pa dano ki biacara.\n"
+        "- **Kuc ki Gwok**: Konyo askari ki lurok ma gigwoko kwo pa dano ki biacara.\n"
         "- **Chung Ken i Lim**: Dwoko piny banya ki woko dok gero Uganda ma cung kene i te Vision 2040.\n\n"
         "Culu mucoro pe obedo cik keken — obedo ticwa kacel me gero anyim me lobowa."
     ),
@@ -290,7 +290,7 @@ _BUSINESS_EMPATHY_RESPONSES = {
         "Nooyenda kutandika nari nookora bushuubuzi ki? Nimbaasa kukushoboororera idaara aha rindi."
     ),
     "ach": (
-        "**Cako onyo doro biacara mito tekcwiny, dok obedo gin maupore me bedo ki lworo i kom mucoro.**\n\n"
+        "**Cako onyo doro biacara mito tekcwiny, dok obedo gin ma opore me bedo ki lworo i kom mucoro.**\n\n"
         "Man aye lok maber ma konyo lutim biacara i Uganda:\n\n"
         "1. **Pe Kiculi Mucoro Ma Peya Inongo Magoba**: Mucoro me lim ma odonyo kiculo i kom magoba keken, pe i kom lim me cako biacara.\n"
         "2. **Kony pi Biacara Matidi (Presumptive Tax)**: Ka lim ma odonyo i mwaka tye i te cilingi milioni 10, pe iculo mucoro me biacara. I kin milioni 10 naka 50, iculo mucoro matidi ma pe mito buk me kwano lim madongo.\n"

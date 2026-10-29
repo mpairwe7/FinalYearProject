@@ -16,6 +16,7 @@ Extracts, merges, and persists structured taxpayer scenario facts across turns:
 from __future__ import annotations
 
 import calendar
+import contextlib
 import datetime as _dt
 import json
 import logging
@@ -29,7 +30,18 @@ from typing import Any, Literal
 from .calculator_router import _MULTIPLIERS, _redis_store, extract_amounts
 from .context_manager import extract_conversation_entities
 from .guardrails import redact_pii_text
-from .number_words import _LG_AGREEING, _LG_TENS, _LG_UNITS, _SW_TENS, _SW_UNITS
+from .number_words import (
+    _ACH_TENS,
+    _ACH_UNITS,
+    _LG_AGREEING,
+    _LG_TENS,
+    _LG_UNITS,
+    _NYN_AGREEING,
+    _NYN_TENS,
+    _NYN_UNITS,
+    _SW_TENS,
+    _SW_UNITS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -262,10 +274,32 @@ def _build_vernacular_word_map() -> dict[str, int]:
             if len(parts) == 2 and parts[0] in ("amakumi", "makumi"):
                 mapping[parts[1]] = idx * 10
     mapping["kikumi"] = 100
+    mapping["eigana"] = 100
+    mapping["igana"] = 100
+    mapping["miya"] = 100
     for idx, w in enumerate(_SW_UNITS):
         if w:
             mapping[w] = idx
     for idx, w in enumerate(_SW_TENS):
+        if w:
+            mapping[w] = idx * 10
+    for idx, w in enumerate(_NYN_UNITS):
+        if w:
+            mapping[w] = idx
+    for agree_list in _NYN_AGREEING.values():
+        for idx, w in enumerate(agree_list):
+            if w:
+                mapping[w] = idx
+    for idx, w in enumerate(_NYN_TENS):
+        if w:
+            mapping[w] = idx * 10
+            parts = w.split()
+            if len(parts) == 2 and parts[0] in ("amakumi", "makumi"):
+                mapping[parts[1]] = idx * 10
+    for idx, w in enumerate(_ACH_UNITS):
+        if w:
+            mapping[w] = idx
+    for idx, w in enumerate(_ACH_TENS):
         if w:
             mapping[w] = idx * 10
     return mapping
@@ -275,43 +309,16 @@ _VERNACULAR_WORD_TO_INT = _build_vernacular_word_map()
 _VERNACULAR_SCALE_PREFIX_RE = re.compile(
     r"\b(?P<scale>milioni|bilioni|elfu|laki|o?bukadde|a?kakadde|o?bukaikuru|a?kakaikuru|"
     r"o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?mitwaro|o?mutwaro|e?nkumi|o?lukumi|o?rukumi)"
-    r"(?:\s+(?P<w1>[a-zA-Z]+)(?:\s+(?:(?:na|mu)\s+)?(?P<w2>[a-zA-Z]+))?)?\b",
+    r"(?:\s+(?P<w1>[a-zA-Z]+)(?:\s+(?:(?:na|mu|wiye)\s+)?(?P<w2>[a-zA-Z]+))?)?\b",
     re.IGNORECASE,
 )
 
 
 def _normalize_vernacular_amount_words(text: str) -> str:
-    """Convert Luganda/Swahili number words after scale nouns into digits for ``extract_amounts``."""
-    if not text:
-        return ""
+    """Convert Luganda/Swahili/Runyankole/Acholi number words after scale nouns into digits for ``extract_amounts``."""
+    from .number_words import normalize_vernacular_amount_words
 
-    def _replace(match: re.Match[str]) -> str:
-        scale = match.group("scale")
-        w1 = (match.group("w1") or "").lower()
-        w2 = (match.group("w2") or "").lower()
-        trailing = text[match.end() :]
-        if not w1:
-            if (
-                scale.lower() in {"kakadde", "akakadde", "mutwalo", "omutwalo", "lukumi", "olukumi", "laki"}
-                and not re.match(r"^\s*\d", trailing)
-            ):
-                return f"{scale} 1"
-            return match.group(0)
-        phrase_two = f"{w1} {w2}".strip()
-        if phrase_two in _VERNACULAR_WORD_TO_INT:
-            return f"{scale} {_VERNACULAR_WORD_TO_INT[phrase_two]}"
-        if w1 in _VERNACULAR_WORD_TO_INT:
-            total = _VERNACULAR_WORD_TO_INT[w1]
-            if w2 and w2 in _VERNACULAR_WORD_TO_INT:
-                total += _VERNACULAR_WORD_TO_INT[w2]
-                return f"{scale} {total}"
-            # Keep w2 untouched if it was an ordinary word like "kwa" or "buli"
-            if match.group("w2"):
-                return f"{scale} {total} {match.group('w2')}"
-            return f"{scale} {total}"
-        return match.group(0)
-
-    return _VERNACULAR_SCALE_PREFIX_RE.sub(_replace, text)
+    return normalize_vernacular_amount_words(text)
 
 
 # ---------------------------------------------------------------------------
@@ -864,7 +871,6 @@ def extract_case_facts(
 # ---------------------------------------------------------------------------
 # Conversation-scoped persistence (Redis + in-process fallback) & /v1/me support
 # ---------------------------------------------------------------------------
-import contextlib
 
 
 def _scoped_case_key(

@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import pytest
-
 from app.conversational import handle_conversational_turn
 from app.text_signals import (
     _resolve_courtesy_locale,
     get_farewell_reply,
     get_gratitude_reply,
-    get_greeting_next_actions,
     get_greeting_reply,
     is_courtesy_sentence,
 )
@@ -386,6 +384,13 @@ class TestConversationalIntelligenceEngine:
         assert detect_crisis("Ninyenda kufa") is True
         assert detect_crisis("Amito to") is True
         assert detect_crisis("Pe amito to") is False
+        assert detect_crisis("I do not want to die") is False
+        assert detect_crisis("Sinjagala kufa") is False
+        assert detect_crisis("Sitaki kufa") is False
+        from app.calculator_router import plan_rate_lookup
+
+        paye_rate_plan = plan_rate_lookup("How is PAYE tax calculated?")
+        assert paye_rate_plan is not None and paye_rate_plan.summary == "paye"
 
         # 9. Structuring ordinal word-boundary & comma handling + nested parenthesized step indentation + zero-cent TTS
         assert "5. **Tano**:" not in OutputGuard.normalize_structure("Tanoa kisu. Pilika nyingi.")
@@ -420,3 +425,80 @@ class TestConversationalIntelligenceEngine:
         coerced_int_id = coerce_arguments_to_schema(efris_desc["inputSchema"], {"tin": 1000000001})
         assert coerced_int_id["tin"] == "1000000001"
         assert coerce_arguments_to_schema(efris_desc["inputSchema"], {"tin": 220000000001})["tin"] == 220000000001
+
+        # 11. Runyankole ("eigana" / "igana" / "kikumi") & 4-locale TTS/ASR/entailment/MT/case_facts parity
+        from app import mt
+        from app.case_facts import _normalize_vernacular_amount_words
+        from app.entailment import percentages
+        from app.receptionist.lexicon import repair_asr_entities
+        from app.speech_normalization import clean_text_for_speech
+
+        assert clean_text_for_speech("Omushoro gwa VAT guri ebicweka 18% aha eigana.", locale="nyn") == (
+            "Omushoro gwa VAT guri ebicweka ikumi na munaana aha eigana."
+        )
+        assert clean_text_for_speech("Omushoro gwa VAT guri ebicweka 18% aha kikumi.", locale="nyn") == (
+            "Omushoro gwa VAT guri ebicweka ikumi na munaana aha kikumi."
+        )
+        assert "18" in percentages("Omushoro gwa VAT guri ebicweka ikumi na munaana aha eigana.")
+        assert "18" in percentages("Omushoro gwa VAT guri ebicweka 18 aha igana.")
+        assert mt.figures_survived(
+            "The standard VAT rate is 18%.",
+            "Omushoro gwa VAT guri ebicweka 18 aha eigana.",
+            locale="nyn",
+        )
+        repaired_nyn = repair_asr_entities("Omushoro gwa VAT omuri Uganda guri aha bicweka ikumi na munaana aha kikuru.")
+        assert "aha kikumi" in repaired_nyn and "kikuru" not in repaired_nyn
+        assert "ni asilimia" in repair_asr_entities("Kiwango cha VAT ni silimia kumi na nane.")
+        assert "dul apar wiye aboro i kom miya" in repair_asr_entities("Wel mucoro tye idulu apar wiye aboro i kom miyo.")
+        assert "obukaikuru 100" in _normalize_vernacular_amount_words("obukaikuru eigana")
+        assert "obukaikuru 18" in _normalize_vernacular_amount_words("obukaikuru ikumi na munaana")
+        assert "milioni 25" in _normalize_vernacular_amount_words("milioni pyeraryo wiye abic")
+
+        # 12. Expanded vernacular number-words, compound hundreds/tens/halves & money extraction across lg, sw, nyn, ach
+        from app.entailment import canonical_amounts
+
+        assert [v for v, _, _ in extract_amounts("shilingi obukadde amakumi asatu mu bitaano")] == [35_000_000.0]
+        assert [v for v, _, _ in extract_amounts("shiringi obukaikuru makumi ashatu na bitaano")] == [35_000_000.0]
+        assert [v for v, _, _ in extract_amounts("shilingi milioni mia tatu")] == [300_000_000.0]
+        assert [v for v, _, _ in extract_amounts("shilingi obukadde bikumi bisatu")] == [300_000_000.0]
+        assert [v for v, _, _ in extract_amounts("shiringi obukaikuru magana ashatu")] == [300_000_000.0]
+        assert [v for v, _, _ in extract_amounts("cilingi milioni miya adek")] == [300_000_000.0]
+        assert [v for v, _, _ in extract_amounts("shilingi akakadde kamu n'ekitundu")] == [1_500_000.0]
+        assert [v for v, _, _ in extract_amounts("shiringi akakaikuru kamwe n'ekicweka")] == [1_500_000.0]
+        assert [v for v, _, _ in extract_amounts("shilingi milioni moja na nusu")] == [1_500_000.0]
+        assert [v for v, _, _ in extract_amounts("cilingi milioni acel ki nucu")] == [1_500_000.0]
+        assert [v for v, _, _ in extract_amounts("elfu mia tatu thelathini na tano")] == [335_000.0]
+        assert 300_000_000.0 in canonical_amounts("shiringi obukaikuru magana ashatu")
+        assert 300_000_000.0 in canonical_amounts("cilingi milioni miya adek")
+        assert "large_amount" in detect_high_stakes("Bampadde ekibonerezo kya obukadde amakumi abiri")
+        assert "large_amount" in detect_high_stakes("Nimepewa adhabu ya milioni hamsini")
+        assert "large_amount" in detect_high_stakes("Nyine ebanja rya obukaikuru makumi ashatu")
+        assert "large_amount" in detect_high_stakes("Banya mera romo milioni pyeradek")
+        coerced_words = coerce_arguments_to_schema(
+            {"type": "object", "properties": {"annual_turnover": {"type": "number"}}},
+            {"annual_turnover": "obukaikuru makumi ashatu na bitaano"},
+        )
+        assert coerced_words["annual_turnover"] == 35_000_000.0
+        assert [v for v, _, _ in extract_amounts("obukadde ekkumi n'omunaana")] == [18_000_000.0]
+        assert [v for v, _, _ in extract_amounts("obukadde kikumi n'ebitaano")] == [105_000_000.0]
+        assert [v for v, _, _ in extract_amounts("milioni tatu na elfu mia tano")] == [3_500_000.0]
+        assert [v for v, _, _ in extract_amounts("milioni 3 na elfu 500")] == [3_500_000.0]
+        assert [v for v, _, _ in extract_amounts("obukadde busatu n'emitwalo ataano")] == [3_500_000.0]
+        assert [v for v, _, _ in extract_amounts("obukadde 3 n'emitwalo 50")] == [3_500_000.0]
+        assert [v for v, _, _ in extract_amounts("obukaikuru bushatu n'emitwaro ataano")] == [3_500_000.0]
+        assert extract_amounts("prelim 2 and slim 5") == []
+        assert mt.figures("shilingi milioni tatu na elfu mia tano", locale="sw") == {3_500_000.0}
+        assert 10_000.0 in canonical_amounts("tutemia apar")
+        assert 10_000_000.0 in canonical_amounts("miliyoni kumi")
+        assert 20_000.0 in canonical_amounts("elufu makumi abiri")
+        assert "large_amount" in detect_high_stakes("Bampadde ekibonerezo kya emitwalo rukumi")
+        assert detect_crisis("I do not want to kill myself") is False
+        assert detect_crisis("I don't want to end my life") is False
+        assert detect_crisis("Pe amito neko koma") is False
+        assert detect_crisis("Sitaki kujiua") is False
+        assert detect_crisis("Sinjagala okwetta") is False
+        assert detect_crisis("Tindikwenda okweyita") is False
+        assert detect_crisis("I can't pay my taxes and I want to die") is True
+        assert clean_text_for_speech("Wel mucoro tye dul 18% i kom miya acel.", locale="ach") == (
+            "Wel mucoro tye dul apar wiye aboro i kom miya."
+        )
