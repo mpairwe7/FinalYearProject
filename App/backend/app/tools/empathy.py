@@ -37,9 +37,11 @@ from typing import Any
 
 from ..text_signals import (
     detect_crisis,
+    detect_high_stakes,
     detect_user_distress,
     distress_trajectory,
     empathy_ack,
+    needs_wellbeing_checkin,
     tone_hint_for,
 )
 from . import Tool, ToolRegistry, ToolSchema
@@ -111,16 +113,20 @@ def assess(
     if eff_locale not in ("en", "lg", "sw", "nyn", "ach"):
         eff_locale = "en"
 
+    stakes = list(detect_high_stakes(text))
     if detect_crisis(text):
         return {
             "kind": "hardship",
             "intensity": "high",
             "crisis": True,
+            "wellbeing_checkin": False,
             "sustained": False,
+            "stakes": stakes,
             "locale": eff_locale,
             "acknowledgement": "",
             "localized_acknowledgement": "",
             "tone_hint": "",
+            "tone_register": "empathetic_reassuring",
             "lead_with_acknowledgement": False,
             "offer_human_handoff": True,
             "avoid": "Do not answer a tax question in this turn; give the crisis lines first.",
@@ -131,26 +137,31 @@ def assess(
         }
     kind = detect_user_distress(text)
     trajectory = distress_trajectory(kind, history or [])
+    wellbeing_checkin = needs_wellbeing_checkin(text, history or ())
 
     cue_count = sum(1 for pattern in _INTENSITY_CUES if pattern.search(text))
-    if not kind:
+    if not kind and not wellbeing_checkin:
         intensity = "none"
-    elif cue_count >= 2 or kind == "hardship":
+    elif cue_count >= 2 or kind == "hardship" or wellbeing_checkin:
         intensity = "high"
     elif cue_count == 1:
         intensity = "moderate"
     else:
         intensity = "low"
 
+    if wellbeing_checkin and not kind:
+        kind = "hardship"
+
     acknowledgement = empathy_ack(kind, "en")
     localized_ack = empathy_ack(kind, eff_locale)
     tone_hint = tone_hint_for(kind)
     guidance = _GUIDANCE.get(kind, _GUIDANCE[""])
 
-    # A human is offered for hardship or high-intensity anxiety/frustration —
+    # A human is offered for hardship, wellbeing check-in, or high-intensity anxiety/frustration —
     # offering too early on mild queries reads as a brush-off.
     offer_human = (
         kind == "hardship"
+        or wellbeing_checkin
         or (kind in ("frustration", "anxiety") and intensity == "high")
         or trajectory["sustained"]
     )
@@ -159,6 +170,7 @@ def assess(
     relief_terms = ""
     if (
         kind == "hardship"
+        or wellbeing_checkin
         or (kind == "anxiety" and intensity in ("moderate", "high"))
         or (kind in ("frustration", "anxiety") and trajectory["sustained"])
     ):
@@ -179,7 +191,7 @@ def assess(
         else "neutral"
     )
 
-    priority_boost = "high" if offer_human else "normal"
+    priority_boost = "urgent" if wellbeing_checkin else ("high" if offer_human else "normal")
 
     if kind and record_metric:
         try:
@@ -202,7 +214,9 @@ def assess(
         "kind": kind,
         "intensity": intensity,
         "crisis": False,
+        "wellbeing_checkin": wellbeing_checkin,
         "sustained": trajectory["sustained"],
+        "stakes": stakes,
         "locale": eff_locale,
         "acknowledgement": acknowledgement,
         "localized_acknowledgement": localized_ack,
@@ -211,9 +225,15 @@ def assess(
         "lead_with_acknowledgement": bool(acknowledgement)
         and guidance["lead_with_acknowledgement"],
         "offer_human_handoff": offer_human,
-        "avoid": guidance["avoid"],
+        "avoid": (
+            "Check in on the taxpayer's wellbeing and provide the crisis support lines before addressing the tax issue."
+            if wellbeing_checkin
+            else guidance["avoid"]
+        ),
         "explanation": (
-            f"The message reads as {kind} ({intensity} intensity)."
+            "The message expresses hopelessness amid hardship or enforcement; check in on wellbeing with crisis support lines first."
+            if wellbeing_checkin
+            else f"The message reads as {kind} ({intensity} intensity)."
             if kind
             else "The message reads as neutral; answer directly without an empathy opener."
         ),
@@ -233,6 +253,8 @@ class AffectiveState:
     smoothed_score: float = 0.0
     sustained: bool = False
     crisis: bool = False
+    wellbeing_checkin: bool = False
+    stakes: list[str] = field(default_factory=list)
     locale: str = "en"
     localized_acknowledgement: str = ""
     tone_register: str = "neutral"  # "neutral" | "empathetic_reassuring" | "patient_clear" | "direct_urgent"
@@ -260,6 +282,8 @@ def fuse_multimodal_affect(
     """Fuse lexical distress, multi-turn trajectory, acoustic prosody, and clarification effort."""
     lex = assess(message, history=history, locale=locale, record_metric=False)
     eff_loc = str(lex.get("locale") or "en")
+    stakes = list(lex.get("stakes") or [])
+    wellbeing_checkin = bool(lex.get("wellbeing_checkin", False))
     if lex.get("crisis"):
         return AffectiveState(
             affect="hardship",
@@ -268,6 +292,8 @@ def fuse_multimodal_affect(
             smoothed_score=1.0,
             sustained=True,
             crisis=True,
+            wellbeing_checkin=False,
+            stakes=stakes,
             locale=eff_loc,
             localized_acknowledgement="",
             tone_register="empathetic_reassuring",
@@ -378,6 +404,8 @@ def fuse_multimodal_affect(
         smoothed_score=smoothed,
         sustained=sustained,
         crisis=False,
+        wellbeing_checkin=wellbeing_checkin,
+        stakes=stakes,
         locale=eff_loc,
         localized_acknowledgement=str(lex.get("localized_acknowledgement") or empathy_ack(kind, eff_loc)),
         tone_register=tone_reg,
@@ -431,6 +459,7 @@ class EmotionalToneTool(Tool):
                 "type": "object",
                 "properties": {
                     "ok": {"type": "boolean"},
+                    "error": {"type": "string"},
                     "kind": {
                         "type": "string",
                         "enum": ["", "frustration", "anxiety", "urgency", "confusion", "hardship"],
@@ -439,13 +468,25 @@ class EmotionalToneTool(Tool):
                         "type": "string",
                         "enum": ["none", "low", "moderate", "high"],
                     },
+                    "locale": {"type": "string"},
                     "acknowledgement": {"type": "string"},
+                    "localized_acknowledgement": {"type": "string"},
                     "tone_hint": {"type": "string"},
+                    "tone_register": {
+                        "type": "string",
+                        "enum": ["neutral", "empathetic_reassuring", "patient_clear", "direct_urgent"],
+                    },
                     "lead_with_acknowledgement": {"type": "boolean"},
                     "offer_human_handoff": {"type": "boolean"},
                     "crisis": {"type": "boolean"},
+                    "wellbeing_checkin": {"type": "boolean"},
                     "sustained": {"type": "boolean"},
+                    "stakes": {"type": "array", "items": {"type": "string"}},
                     "avoid": {"type": "string"},
+                    "explanation": {"type": "string"},
+                    "recommended_relief_statutes": {"type": "array", "items": {"type": "string"}},
+                    "retrieval_preference_terms": {"type": "string"},
+                    "priority_boost": {"type": "string"},
                 },
                 "required": ["ok", "kind", "intensity"],
                 "additionalProperties": True,
@@ -462,7 +503,7 @@ class EmotionalToneTool(Tool):
         locale: str = "",
     ) -> dict[str, Any]:
         if not str(message).strip():
-            return {"ok": False, "error": "message is required"}
+            return {"ok": False, "kind": "", "intensity": "none", "error": "message is required"}
         return {
             "ok": True,
             **assess(

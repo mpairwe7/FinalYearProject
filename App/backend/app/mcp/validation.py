@@ -106,6 +106,18 @@ def _fallback_errors(schema: dict[str, Any], payload: dict[str, Any]) -> list[st
                 errors.append(f"{key}: {value} is greater than the maximum of {maximum}")
         if isinstance(value, str) and len(value) < (spec.get("minLength") or 0):
             errors.append(f"{key}: {value!r} should be non-empty")
+        if isinstance(value, list | tuple):
+            min_items, max_items = spec.get("minItems"), spec.get("maxItems")
+            if min_items is not None and len(value) < min_items:
+                errors.append(f"{key}: array length {len(value)} is less than minItems {min_items}")
+            if max_items is not None and len(value) > max_items:
+                errors.append(f"{key}: array length {len(value)} exceeds maxItems {max_items}")
+            items_spec = spec.get("items")
+            if isinstance(items_spec, dict) and items_spec.get("type"):
+                for idx, elem in enumerate(value):
+                    elem_err = _type_error(f"{key}[{idx}]", elem, items_spec.get("type"))
+                    if elem_err:
+                        errors.append(elem_err)
     return errors
 
 
@@ -129,9 +141,48 @@ def validate_arguments(schema: dict[str, Any] | None, arguments: dict[str, Any])
 
 
 _NUMERIC_STRING_RE = re.compile(
-    r"^\s*(?:UGX)?\s*([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*$",
+    r"^\s*(?:UGX|UShs?|Shs?\.?)?\s*([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)"
+    r"\s*(k|thousand|m|million|bn|b|billion)?\s*(?:UGX|UShs?|Shs?\.?|/=|/-)?\s*$",
     re.IGNORECASE,
 )
+_BANTU_PREFIX_NUMERIC_RE = re.compile(
+    r"^\s*(?:UGX|UShs?|Shs?\.?|shilingi|shiringi|cilingi)?\s*"
+    r"(milioni|bilioni|elfu|laki|o?bukadde|a?kakadde|o?bukaikuru|a?kakaikuru|o?buwumbi|a?kawumbi|e?mitwalo|e?nkumi)"
+    r"\s+([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*(?:UGX|UShs?|Shs?\.?|/=|/-)?\s*$",
+    re.IGNORECASE,
+)
+_PERCENT_RATE_STRING_RE = re.compile(
+    r"^\s*(\d+(?:\.\d+)?)\s*%\s*$"
+)
+_SCALE_MULTIPLIERS: dict[str, float] = {
+    "k": 1e3,
+    "thousand": 1e3,
+    "m": 1e6,
+    "million": 1e6,
+    "b": 1e9,
+    "bn": 1e9,
+    "billion": 1e9,
+    "milioni": 1e6,
+    "bilioni": 1e9,
+    "elfu": 1e3,
+    "laki": 1e5,
+    "bukadde": 1e6,
+    "obukadde": 1e6,
+    "kakadde": 1e6,
+    "akakadde": 1e6,
+    "bukaikuru": 1e6,
+    "obukaikuru": 1e6,
+    "kakaikuru": 1e6,
+    "akakaikuru": 1e6,
+    "buwumbi": 1e9,
+    "obuwumbi": 1e9,
+    "kawumbi": 1e9,
+    "akawumbi": 1e9,
+    "mitwalo": 1e4,
+    "emitwalo": 1e4,
+    "nkumi": 1e3,
+    "enkumi": 1e3,
+}
 
 
 def coerce_arguments_to_schema(
@@ -168,7 +219,7 @@ def coerce_arguments_to_schema(
 
         if isinstance(value, str):
             stripped = value.strip()
-            # 0. Hyphenated/spaced 10-digit TIN normalization on TIN string properties
+            # 0. Hyphenated/spaced 10-digit TIN, 12-14 digit PRN, or 14-char NIN normalization on string properties
             if (
                 "string" in type_set
                 and key in ("tin", "taxpayer_tin", "buyer_tin", "importer_tin")
@@ -177,6 +228,24 @@ def coerce_arguments_to_schema(
                 compact_tin = re.sub(r"[\s-]+", "", stripped)
                 if re.fullmatch(r"\d{10}", compact_tin):
                     coerced[key] = compact_tin
+                    continue
+            if (
+                "string" in type_set
+                and key in ("prn", "payment_registration_number")
+                and ("-" in stripped or " " in stripped)
+            ):
+                compact_prn = re.sub(r"[\s-]+", "", stripped)
+                if re.fullmatch(r"\d{12,14}", compact_prn):
+                    coerced[key] = compact_prn
+                    continue
+            if (
+                "string" in type_set
+                and key in ("nin", "national_id")
+                and ("-" in stripped or " " in stripped)
+            ):
+                compact_nin = re.sub(r"[\s-]+", "", stripped).upper()
+                if re.fullmatch(r"C[MFR][A-Z0-9]{12}", compact_nin):
+                    coerced[key] = compact_nin
                     continue
 
             # 1. Case-insensitive enum match when string is not already in choices
@@ -196,16 +265,43 @@ def coerce_arguments_to_schema(
 
             # 2. Numeric coercion ("number" or "integer" when "string" is not declared)
             if ("number" in type_set or "integer" in type_set) and "string" not in type_set:
+                if "number" in type_set and spec.get("maximum") == 1:
+                    m_pct = _PERCENT_RATE_STRING_RE.match(stripped)
+                    if m_pct:
+                        try:
+                            pct_val = round(float(m_pct.group(1)) / 100.0, 6)
+                            if 0.0 <= pct_val <= 1.0:
+                                coerced[key] = pct_val
+                                continue
+                        except (ValueError, OverflowError):
+                            pass
+                m_bantu = _BANTU_PREFIX_NUMERIC_RE.match(stripped)
+                if m_bantu:
+                    bantu_mult = _SCALE_MULTIPLIERS.get(m_bantu.group(1).lower(), 1.0)
+                    raw_bantu_num = m_bantu.group(2).replace(",", "")
+                    try:
+                        parsed_bantu = float(raw_bantu_num) * bantu_mult
+                        if math.isfinite(parsed_bantu):
+                            if "integer" in type_set and "number" not in type_set:
+                                if parsed_bantu.is_integer():
+                                    coerced[key] = int(parsed_bantu)
+                            else:
+                                coerced[key] = parsed_bantu
+                            continue
+                    except (ValueError, OverflowError):
+                        pass
                 m = _NUMERIC_STRING_RE.match(stripped)
                 if m:
                     raw_num = m.group(1).replace(",", "")
+                    scale_suffix = (m.group(2) or "").lower()
+                    scale_mult = _SCALE_MULTIPLIERS.get(scale_suffix, 1.0)
                     try:
-                        parsed_float = float(raw_num)
+                        parsed_float = float(raw_num) * scale_mult
                         if math.isfinite(parsed_float):
                             if "integer" in type_set and "number" not in type_set:
                                 if parsed_float.is_integer():
                                     coerced[key] = int(parsed_float)
-                            elif parsed_float.is_integer() and "." not in raw_num:
+                            elif parsed_float.is_integer() and "." not in raw_num and scale_mult == 1.0:
                                 coerced[key] = int(parsed_float)
                             else:
                                 coerced[key] = parsed_float
@@ -303,8 +399,10 @@ def result_matches_schema(schema: dict[str, Any] | None, result: Any) -> list[st
     a drifted payload. A server that adds a field still passes when the
     schema allows additional properties.
     """
-    if not schema or not _HAVE_JSONSCHEMA:
+    if not schema:
         return []
+    if not _HAVE_JSONSCHEMA:
+        return _fallback_errors(schema, result) if isinstance(result, dict) else []
     validator = Draft202012Validator(schema)
     return [
         f"{'.'.join(str(p) for p in e.path) or '(root)'}: {e.message}"
@@ -464,6 +562,10 @@ def inspect_descriptor_integrity(descriptor: dict[str, Any]) -> list[str]:
 
     for field_name in ("description", "inputSchema", "outputSchema", "annotations"):
         for path, text in _iter_strings(descriptor.get(field_name), f"$.{field_name}"):
+            if field_name in ("inputSchema", "outputSchema") and path.endswith((".$ref", ".$dynamicRef")):
+                # MCP SEP-2106: reject external/network $ref / $dynamicRef URIs to prevent SSRF and Fetch-DoS
+                if not text.strip().startswith("#"):
+                    violations.append(f"tool_poisoning:external_schema_ref@{path}")
             if _BIDI_OVERRIDE_RE.search(text):
                 violations.append(f"tool_poisoning:bidi_control_smuggling@{path}")
             normalized_text = _UNICODE_CONTROL_RE.sub("", text)

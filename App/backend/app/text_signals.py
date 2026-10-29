@@ -754,13 +754,16 @@ _CRISIS_RE = re.compile(
 #: Hopelessness — "I can't cope", "I give up", "no way out". Alone it is often
 #: about a portal ("this site is hopeless"); said in the middle of hardship or
 #: enforcement it is the indirect disclosure crisis studies find chatbots miss.
-#: needs_wellbeing_checkin() requires both. Kiswahili forms only: the other
-#: languages reach it through the English rewrite (native cues are an open item).
+#: needs_wellbeing_checkin() requires both across all 5 supported locales
+#: (en, lg, sw, nyn, ach).
 _HOPELESSNESS_RE = re.compile(
     r"\b(?:(?:can'?t|cannot)\s+(?:take|bear|handle)\s+(?:it|this|any\s+of\s+this)\s+any\s*more"
     r"|(?:can'?t|cannot)\s+cope|(?:can'?t|cannot)\s+go\s+on|i\s+give\s+up|no\s+way\s+out"
     r"|at\s+the\s+end\s+of\s+my\s+(?:rope|tether)|lost\s+everything|no\s+hope|hopeless"
-    r"|nimechoka\s+na\s+maisha|sina\s+tumaini)\b"
+    r"|nimechoka\s+na\s+maisha|sina\s+tumaini"
+    r"|sisobola\s+kugumiikiriza|mpeddemu\s+essuubi|sirina\s+ssuubi|obulamu\s+bun(?:n|l)emye"
+    r"|tindikubaasa\s+kugumisiriza|tihaine\s+matsiko|tinyine\s+matsiko|amagara\s+ganremire"
+    r"|pe\s+atwero\s+kanyo|geno\s+pe(?:ke)?|pe\s+atye\s+ki\s+gen|kwo\s+dong\s+oloya)\b"
 )
 
 #: Numbers checked on 2026-09-29: 999/112 on the Uganda Police Force emergency

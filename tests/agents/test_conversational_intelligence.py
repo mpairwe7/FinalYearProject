@@ -137,3 +137,192 @@ class TestConversationalIntelligenceEngine:
         res = handle_conversational_turn(core, locale)
         assert res is not None
         assert res.intent_type == expected_intent
+
+    def test_october_2026_qa_audit_conversational_eq_structuring_and_mcp_gaps(self):
+        """Verify all 5 phases of the October 2026 QA & Audit remediation."""
+        from app.guardrails import OutputGuard
+        from app.mcp import get_client, reset_client
+        from app.mcp.validation import (
+            coerce_arguments_to_schema,
+            inspect_descriptor_integrity,
+            result_matches_schema,
+        )
+        from app.number_words import decimal_words, en_words, sw_words
+        from app.text_signals import detect_hopelessness, needs_wellbeing_checkin
+        from app.tools import ToolRegistry
+
+        # Phase 1: Conversational FY2026-27 VAT threshold (300M) + intensifier/particle resilience
+        emp_en = handle_conversational_turn("I am afraid to start a business", "en")
+        assert emp_en is not None and emp_en.intent_type == "business_empathy"
+        assert "300,000,000" in emp_en.reply
+
+        emp_sw = handle_conversational_turn("Nina hofu kubwa ya kuanza biashara kwa sababu ya kodi za URA.")
+        assert emp_sw is not None and emp_sw.locale == "sw" and emp_sw.intent_type == "business_empathy"
+        assert "300" in emp_sw.reply
+
+        id_lg = handle_conversational_turn("Osobola okwogera n'okutegeera Oluganda olutuufu?")
+        assert id_lg is not None and id_lg.locale == "lg" and id_lg.intent_type == "identity_capability"
+        assert "nsobola" in id_lg.reply.lower()
+
+        id_sw = handle_conversational_turn("Je, una uwezo wa kuelewa na kuongea lugha ya Kiswahili fasaha?")
+        assert id_sw is not None and id_sw.locale == "sw" and id_sw.intent_type == "identity_capability"
+
+        st_lg = handle_conversational_turn("Oli otya leero mwattu?")
+        assert st_lg is not None and st_lg.locale == "lg" and st_lg.intent_type == "status_smalltalk"
+
+        st_sw = handle_conversational_turn("Uko salama leo na kazi zinaendeleaje?")
+        assert st_sw is not None and st_sw.locale == "sw" and st_sw.intent_type == "status_smalltalk"
+
+        # Phase 2: 5-locale hopelessness & EmotionalToneTool schema/crisis parity
+        assert detect_hopelessness("Mpeddemu essuubi era sisobola kugumiikiriza") is True
+        assert detect_hopelessness("Tinyine matsiko kandi tindikubaasa kugumisiriza") is True
+        assert detect_hopelessness("Geno peke dok pe atwero kanyo") is True
+        assert needs_wellbeing_checkin(
+            "Mpeddemu essuubi",
+            history=["Sirina ssente era bizinesi yange egudde"],
+        ) is True
+
+        eq_tool = ToolRegistry.get("assess_emotional_tone")
+        assert eq_tool is not None
+        eq_crisis = eq_tool.execute(message="I want to end my life because of my tax debt")
+        assert eq_crisis["ok"] is True and eq_crisis["crisis"] is True
+        assert eq_crisis["tone_register"] == "empathetic_reassuring"
+        assert result_matches_schema(eq_tool.schema.output_schema, eq_crisis) == []
+
+        eq_wb = eq_tool.execute(
+            message="Mpeddemu essuubi",
+            history=["Sirina ssente era edduuka lyange baligadde"],
+            locale="lg",
+        )
+        assert eq_wb["ok"] is True and eq_wb["wellbeing_checkin"] is True
+        assert eq_wb["priority_boost"] == "urgent"
+        assert result_matches_schema(eq_tool.schema.output_schema, eq_wb) == []
+
+        # Phase 3: Structuring, paragraphing & numbering hygiene
+        sec_text = "Filing is mandatory under Sec. 5. The taxpayer must submit a return under s. 12. Every company pays 30%."
+        norm_sec = OutputGuard.normalize_structure(sec_text)
+        assert "Sec.\n\n5." not in norm_sec
+        assert "s.\n\n12." not in norm_sec
+
+        sub_bullet_list = "1. Log in to the portal:\n   - Enter your TIN\n   - Enter your password\n1. Select e-Returns"
+        renumbered = OutputGuard.normalize_structure(sub_bullet_list)
+        assert "1. Log in to the portal:" in renumbered
+        assert "2. Select e-Returns" in renumbered
+
+        md_table = "| Band | Rate |\n| --- | --- |\n| Band A. First sentence. | Zero rate. Second sentence. |\n| Band B. Third sentence. | Twenty percent. Fourth sentence. |"
+        assert OutputGuard.normalize_structure(md_table).count("\n\n") == 0
+
+        # Phase 4: Number words negative & decimal edge cases
+        assert en_words(-15) == "minus fifteen"
+        assert sw_words(-18) == "hasi kumi na nane"
+        assert decimal_words("1,250.5", "en") == "one thousand two hundred and fifty point five"
+        assert decimal_words(".5", "en") == "zero point five"
+
+        # Phase 5: MCP SEP-2106 external $ref guard, shorthand coercion & portal navigator MCP coverage
+        bad_desc = {
+            "name": "evil_tool",
+            "description": "Safe description",
+            "inputSchema": {"type": "object", "$ref": "https://attacker.example/schema.json"},
+        }
+        assert any("external_schema_ref" in v for v in inspect_descriptor_integrity(bad_desc))
+
+        coerced = coerce_arguments_to_schema(
+            {
+                "type": "object",
+                "properties": {
+                    "amount": {"type": "number"},
+                    "prn": {"type": "string"},
+                    "nin": {"type": "string"},
+                },
+            },
+            {"amount": "UGX 2.5m/=", "prn": "2260-0012-3456-7", "nin": "cm90-0123-4567-89"},
+        )
+        assert coerced["amount"] == 2_500_000.0
+        assert coerced["prn"] == "2260001234567"
+        assert coerced["nin"] == "CM900123456789"
+
+        reset_client()
+        client = get_client()
+        nav_call = client.call_tool(
+            "navigate_external_portal",
+            {"extracted_text": "Upstream field services and deemed VAT", "portal_name": "oil_and_gas"},
+            user_role="public",
+        )
+        assert nav_call.ok is True
+        assert "- **Screen State**:" in nav_call.result["explanation"]
+
+        # Phase 6: 72-tool MCP descriptor integrity, multimodal affect parity, and ReDoS latency guard
+        import time
+        from app.tools.empathy import fuse_multimodal_affect
+
+        all_tools = ToolRegistry.all()
+        assert len(all_tools) >= 72
+        for t_obj in all_tools:
+            mcp_desc = t_obj.to_mcp_tool()
+            assert inspect_descriptor_integrity(mcp_desc) == [], f"Integrity failure on {t_obj.schema.name}"
+
+        fused_wb = fuse_multimodal_affect(
+            "Tinyine matsiko",
+            history=["Eduuka ryangye baariigara kandi tihaine sente"],
+            locale="nyn",
+            record_metric=False,
+        )
+        assert fused_wb.wellbeing_checkin is True
+        assert fused_wb.priority_boost == "urgent"
+
+        t0 = time.perf_counter()
+        adversarial_text = ("Sec. 5. " * 400) + ("una uwezo wa kuelewa " * 200) + ("1. Step: - bullet " * 200)
+        _ = handle_conversational_turn(adversarial_text, "sw")
+        _ = OutputGuard.normalize_structure(adversarial_text)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        assert elapsed_ms < 200.0, f"Expected linear-time execution < 200ms, got {elapsed_ms:.2f}ms"
+
+        # Second-pass audit checks:
+        # 1. nyn / ach conversational locale resolution on variants (ntiina, noobaasa kuhurira, itwero niang)
+        c_nyn_var = handle_conversational_turn("Ntiina munonga kutandika obushuubuzi")
+        assert c_nyn_var is not None and c_nyn_var.locale == "nyn" and c_nyn_var.intent_type == "business_empathy"
+        c_ach_var = handle_conversational_turn("Itwero niang Acholi?")
+        assert c_ach_var is not None and c_ach_var.locale == "ach" and c_ach_var.intent_type == "identity_capability"
+
+        # 2. Wellbeing check-in guidance & governance_v3 scorecard calibration on crisis/safety replies
+        assert "crisis support lines" in eq_wb["avoid"]
+        assert "check in on wellbeing" in eq_wb["explanation"]
+        from app.audit.governance_v3 import evaluate_interaction_scorecard
+        from app.text_signals import wellbeing_checkin_reply
+
+        sc_safety = evaluate_interaction_scorecard(
+            session_id="sess-audit-wb",
+            locale="lg",
+            reply_text=wellbeing_checkin_reply(),
+            distress_detected=True,
+            relief_cited=False,
+            deterministic_basis=True,
+        )
+        assert sc_safety.language_and_empathy_score == 1.0
+        assert "MISSING_STATUTORY_RELIEF_ON_HARDSHIP" not in sc_safety.anomaly_flags
+
+        # 3. Separate top-level bullet list after blank line resets ordered list numbering,
+        #    while glued vernacular currency ("Milioni10. Biashara") is not split into a step
+        two_lists = "1. Step A\n2. Step B\n\n- Separate top-level bullet\n\n1. First item of second list\n1. Second item of second list"
+        norm_two_lists = OutputGuard.normalize_structure(two_lists)
+        assert "1. First item of second list" in norm_two_lists
+        assert "2. Second item of second list" in norm_two_lists
+        assert "Milioni.\n\n10." not in OutputGuard.normalize_structure("Milioni10. Biashara ndogo zote.")
+
+        # 4. Negative zero-whole decimals (-0.5) preserve minus/hasi sign
+        assert decimal_words("-0.5", "en") == "minus zero point five"
+        assert decimal_words("-0.5", "sw") == "hasi sifuri nukta tano"
+
+        # 5. Bantu scale prefix coercion ("obukadde 15", "milioni 10") & percentage rate string ("18%")
+        coerced_bantu = coerce_arguments_to_schema(
+            {
+                "type": "object",
+                "properties": {
+                    "annual_turnover": {"type": "number"},
+                    "rate": {"type": "number", "minimum": 0, "maximum": 1},
+                },
+            },
+            {"annual_turnover": "obukadde 15", "rate": "18%"},
+        )
+        assert coerced_bantu["annual_turnover"] == 15_000_000.0
+        assert coerced_bantu["rate"] == 0.18

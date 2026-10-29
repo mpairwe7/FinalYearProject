@@ -748,13 +748,20 @@ _LISTISH_VERB_RE = re.compile(
     re.IGNORECASE,
 )
 _SENTENCE_BREAK_RE = re.compile(
-    r"(?<!\be\.g\.)(?<!\bi\.e\.)(?<!\bsec\.)(?<!\bcap\.)(?<!\bart\.)(?<!\bsch\.)(?<!\bvs\.)(?<!\bno\.)(?<!\bmr\.)(?<!\bdr\.)(?<!\bms\.)(?<=[a-z][.!?])\s+(?=[A-Z])",
+    r"(?<!\be\.g\.)(?<!\bi\.e\.)(?<!\bsec\.)(?<!\bcap\.)(?<!\bart\.)(?<!\bsch\.)"
+    r"(?<!\breg\.)(?<!\bpara\.)(?<!\bpt\.)(?<!\bvol\.)(?<!\bed\.)(?<!\bltd\.)"
+    r"(?<!\binc\.)(?<!\bco\.)(?<!\bcorp\.)(?<!\bshs\.)(?<!\bushs\.)(?<!\bugx\.)"
+    r"(?<!\bmin\.)(?<!\bmax\.)(?<!\bapprox\.)(?<!\bcf\.)(?<!\bal\.)"
+    r"(?<!\bvs\.)(?<!\bno\.)(?<!\bmr\.)(?<!\bdr\.)(?<!\bms\.)(?<!\bs\.)(?<!\bss\.)"
+    r"(?<=[a-z][.!?])\s+(?=[A-Z])",
     re.IGNORECASE,
 )
 _GLUED_STEP_RE = re.compile(
     r"(?i)(?<![A-Za-z])(?!(?:section|article|schedule|form|act|rule|clause|"
-    r"paragraph|ekitundu|kifungu|ekicweka|ibarra|dul|rwom|idaara|omutendera|hatua|"
-    r"vat|paye|wht|tin|cit|pit|ugx|efris|rate|percent|percentage)\d)"
+    r"paragraph|part|table|tier|band|method|chapter|item|page|line|note|step|"
+    r"ekitundu|kifungu|ekicweka|ibarra|dul|rwom|idaara|omutendera|hatua|"
+    r"vat|paye|wht|tin|cit|pit|ugx|usd|shs|ushs|shilingi|shiringi|cilingi|"
+    r"milioni|bilioni|bukadde|obukadde|bukaikuru|obukaikuru|efris|rate|percent|percentage)\d)"
     r"([A-Za-z]{3,})((?:[1-9]|1[0-2]))[\.\)][ \t]*(\*{0,2}[A-Za-z])"
 )
 
@@ -788,14 +795,16 @@ def _split_marked_list(line: str, separator: str, *, word_limit: int) -> list[st
 def _break_long_paragraphs(text: str) -> str:
     """A wall of four or more sentences becomes paragraphs of at most three.
 
-    List lines, headings, and a period after a digit ("Section 18. The Act")
-    stay as they are.
+    List lines, headings, tables, blockquotes, code blocks, and a period after
+    a digit ("Section 18. The Act") stay as they are.
     """
     blocks = re.split(r"\n\s*\n", text)
     rebuilt: list[str] = []
     for block in blocks:
         stripped = block.strip()
-        if not stripped or re.search(r"(?m)^\s*(?:\d{1,2}[.)]|[-*]\s|#{1,4}\s)", stripped):
+        if not stripped or re.search(
+            r"(?m)^\s*(?:\d{1,2}[.)]|[-*]\s|#{1,4}\s|\||>|```)", stripped
+        ):
             rebuilt.append(block.strip())
             continue
         sentences = [part.strip() for part in _SENTENCE_BREAK_RE.split(stripped) if part.strip()]
@@ -812,16 +821,32 @@ def _renumber_ordered_lines(lines: list[str]) -> list[str]:
 
     A jump such as step 2 followed by "18. The Act" ends the list. A deeper
     indent is its own list, so a nested "1." does not become the parent's 3.
+    Indented bullet sub-items or continuation lines under an active step stay
+    inside that step without resetting the parent ordered list counter, while
+    an unindented top-level bullet list separated by a blank line starts a new
+    section and resets the ordered list counter.
     """
     stacks: list[list[int]] = []
     new_lines: list[str] = []
+    saw_blank = False
     for line in lines:
         matched = re.match(r"^(\s*)(\d{1,2})([.)])(\s+.*)$", line)
         if matched is None:
-            if line.strip():
-                stacks.clear()
+            stripped_line = line.strip()
+            if not stripped_line:
+                saw_blank = True
+            else:
+                line_indent = len(line[: len(line) - len(line.lstrip())].replace("\t", "    "))
+                is_bullet_subitem = bool(re.match(r"^[-*+]\s+", stripped_line))
+                if stacks and (line_indent > stacks[0][0] or (is_bullet_subitem and not saw_blank)):
+                    while len(stacks) > 1 and stacks[-1][0] >= line_indent:
+                        stacks.pop()
+                else:
+                    stacks.clear()
+                saw_blank = False
             new_lines.append(line)
             continue
+        saw_blank = False
         indent, num_s, delim, rest = matched.groups()
         indent_len = len(indent.replace("\t", "    "))
         raw = int(num_s)
@@ -1077,9 +1102,10 @@ class OutputGuard:
         text = re.sub(r"([a-z])\.([A-Z])", r"\1. \2", text)
 
         # Separate lead-in from first numbered item if smashed on same line (e.g. 'offered:1.Tax' or 'services:1.**')
-        # Requires (?<!\d) before punctuation so decimal numbers like 1.5% or Section 5.1 are not split
+        # Requires (?<!\d) and statutory abbreviation lookbehinds before punctuation so decimal numbers (1.5%),
+        # subsection references (Section 5.1), and abbreviated citations (Sec. 5. The Act, s. 12. Every) are not split
         text = re.sub(
-            r"(?<!\d)([;:\.!?])[ \t]*(\d{1,2})[\.\)][ \t]*(\*{0,2}[A-Za-z])",
+            r"(?i)(?<!\d)(?<!\bsec)(?<!\bcap)(?<!\bart)(?<!\bsch)(?<!\breg)(?<!\bno)(?<!\bpara)(?<!\bpt)(?<!\bs)(?<!\bss)([;:\.!?])[ \t]*(\d{1,2})[\.\)][ \t]*(\*{0,2}[A-Z])",
             r"\1\n\n\2. \3",
             text,
         )
@@ -1167,14 +1193,15 @@ class OutputGuard:
 
         # Bold numbered list headers if followed by a colon on the same line (e.g. '\n1. Tax Administration:' -> '\n1. **Tax Administration**:')
         text = re.sub(r"(?:^|\n)(\s*\d{1,2}\.\s+)(?!\*\*)([A-Za-z0-9 /&,-]+?):([ \t]+)", r"\n\1**\2**:\3", text)
-        # Separate smashed bullet items (e.g. 'including:* Item' or 'laws.- Item')
+        # Separate smashed bullet items on the same line (e.g. 'including:* Item' or 'laws.- Item')
+        # Using [ \t]* instead of \s* preserves indentation on sub-bullets that are already on the next line.
         text = re.sub(
-            r"([;:])\s*([*\-•])(?!\*)\s*([A-Za-z])",
+            r"([;:])[ \t]*([*\-•])(?!\*)[ \t]*([A-Za-z])",
             r"\1\n\n\2 \3",
             text,
         )
         text = re.sub(
-            r"([a-z0-9\)])\.\s*([*\-•])(?!\*)\s*([A-Za-z])",
+            r"([a-z0-9\)])\.[ \t]*([*\-•])(?!\*)[ \t]*([A-Za-z])",
             r"\1.\n\n\2 \3",
             text,
         )

@@ -62,12 +62,12 @@ _IDENTITY_ORIGINS_RE = re.compile(
     r"|(?:can\s+you|do\s+you)\s+(?:speak|understand)\s+(?:luganda|swahili|kiswahili|runyankole|runyankore|orunyankore|acholi|acoli|english)"
     r"|(?:gwe|ggwe)\s+ani|oli\s+(?:muntu|kyuma|mukazi|musajja)|ani\s+yakukola|ani\s+yakutonda"
     r"|ova\s+wa|ova\s+ludda\s+wa|ofisi\s+zo\s+ziri\s+wa"
-    r"|osobola\s+(?:okwogera|okutegeera|okukozesa)\b[^?]{0,30}\b(?:oluganda|oluswayiri|olungereza|orunyankore|acholi)"
+    r"|osobola\s+(?:okwogera|okutegeera|okukozesa)\b[^?]{0,40}\b(?:o?luganda|o?luswayiri|o?lungereza|o?runyankore|runyankole|acholi)"
     r"|wewe\s+ni\s+nani|je\s+wewe\s+ni\s+(?:binadamu|roboti)|nani\s+alikuunda|nani\s+aliyekutengeneza"
     r"|wewe\s+watoka\s+wapi|unatoka\s+wapi|unapatikana\s+wapi|ofisi\s+zako\s+ziko\s+wapi|uko\s+wapi"
-    r"|unaweza\s+(?:kuongea|kuzungumza)\s+(?:kiswahili|kiingereza|kiganda|kirunyankole|kiacholi)|unajua\s+nini"
-    r"|(?:iwe\s+)?ori\s+oha|oha\s+owakukozire|nooruga\s+nkahi|ofisi\s+zaawe\s+ziri\s+nkahi|noobaasa\s+kugamba\s+(?:orunyankore|runyankole)"
-    r"|in\s+(?:ibedo\s+)?nga|nga\s+ma\s+oyubi|ia\s+kwene|ofici\s+ni\s+tye\s+kwene|itwero\s+loko\s+(?:leb\s+acoli|acoli|acholi))\b",
+    r"|(?:unaweza|una\s+uwezo\s+wa)\s+(?:(?:kuelewa|kuongea|kuzungumza)(?:\s+na\s+(?:kuongea|kuzungumza|kuelewa))?\s+(?:lugha\s+ya\s+)?)?(?:kiswahili|kiingereza|kiganda|kirunyankole|kiacholi)|unajua\s+nini"
+    r"|(?:iwe\s+)?ori\s+oha|oha\s+owakukozire|nooruga\s+nkahi|ofisi\s+zaawe\s+ziri\s+nkahi|noobaasa\s+(?:kugamba|kuhurira)\b[^?]{0,30}\b(?:orunyankore|runyankole)"
+    r"|in\s+(?:ibedo\s+)?nga|nga\s+ma\s+oyubi|ia\s+kwene|ofici\s+ni\s+tye\s+kwene|itwero\s+(?:loko|niang)\b[^?]{0,30}\b(?:leb\s+acoli|acoli|acholi))\b",
     re.IGNORECASE,
 )
 
@@ -83,13 +83,13 @@ _PRESENCE_CHECK_RE = re.compile(
 )
 
 _EMPATHY_BUSINESS_STRESS_RE = re.compile(
-    r"\b((?:scared|afraid|terrified|worried|nervous)\s+(?:of|about)\s+(?:starting\s+a\s+business|taxes|ura)"
+    r"\b((?:scared|afraid|terrified|worried|nervous)\s+(?:of|about|to)\s+(?:start(?:ing)?\s+a\s+business|taxes|ura)"
     r"|business\s+is\s+(?:really\s+)?(?:tough|hard|struggling|bad|failing|slow)"
     r"|feel\s+overwhelmed\s+by\s+tax\w*|taxes\s+are\s+(?:too\s+)?confusing|struggling\s+to\s+survive"
-    r"|(?:ntya|ntidde)\s+okutandika\s+(?:bizinensi|obusuubuzi)|embeera\s+ya\s+bizinensi\s+nzibu|obusuubuzi\s+buzibu|sirina\s+ssente\s+zimala"
-    r"|nina\s+hofu\s+ya\s+(?:kuanza\s+biashara|kodi)|biashara\s+ni\s+ngumu|kodi\s+zinanitisha|ugumu\s+wa\s+maisha"
-    r"|(?:nintina|ntiina)\s+o?kutandika\s+obushuubuzi|obushuubuzi\s+bugumire|omushoro\s+niguntiinisa"
-    r"|(?:alworo|atye\s+ki\s+lworo\s+me)\s+cako\s+biacara|biacara\s+tek|mucoro\s+miyo\s+lworo)\b",
+    r"|(?:ntya|ntidde)(?:\s+nnyo)?\s+okutandika\s+(?:bizinensi|obusuubuzi)|embeera\s+ya\s+bizinensi\s+nzibu|obusuubuzi\s+buzibu|sirina\s+ssente\s+zimala"
+    r"|nina\s+hofu(?:\s+(?:kubwa|sana))?\s+ya\s+(?:kuanza\s+biashara|kodi)|biashara\s+ni\s+ngumu|kodi\s+zinanitisha|ugumu\s+wa\s+maisha"
+    r"|(?:nintina|ntiina)(?:\s+munonga)?\s+o?kutandika\s+obushuubuzi|obushuubuzi\s+bugumire|omushoro\s+niguntiinisa"
+    r"|(?:alworo|atye\s+ki\s+lworo\s+me)(?:\s+(?:matek|tutwal))?\s+cako\s+biacara|biacara\s+tek|mucoro\s+miyo\s+lworo)\b",
     re.IGNORECASE,
 )
 
@@ -97,9 +97,10 @@ _STATUS_SMALLTALK_RE = re.compile(
     r"^(how\s+are\s+you(?:\s+doing)?(?:\s+today)?|how\s+is\s+it\s+going|how\s+is\s+your\s+day|"
     r"what('s|\s+is)\s+up|how\s+do\s+you\s+do|"
     r"oli\s+otya\s+leero|oli\s+bulungi|gyebaleko\s+leero|muli\s+mutya|"
-    r"habari\s+yako\s+ya\s+leo|uko\s+salama|unaendeleaje|habari\s+za\s+leo|"
+    r"habari\s+yako\s+ya\s+leo|uko\s+salama(?:\s+leo)?(?:\s+na\s+kazi\s+zinaendeleaje)?|unaendeleaje(?:\s+leo)?|habari\s+za\s+leo|"
     r"agandi\s+erizooba|ori\s+gye|oraire\s+ota\s+erizooba|"
-    r"kopango\s+tin|itye\s+maber|itye\s+nining\s+tin)[?.! ]*$",
+    r"kopango\s+tin|itye\s+maber|itye\s+nining\s+tin)"
+    r"(?:\s+(?:mwattu|bambi|nno|sebo|nyabo|rafiki|ndugu|mukama\s+wangye|lamera|friend|today))?[?.! ]*$",
     re.IGNORECASE,
 )
 
@@ -194,7 +195,7 @@ _IDENTITY_RESPONSES = {
         "**Nze OmusoloSmart, Omuyambi ow'Enkizo owa Digito ow'ekitongole kya Uganda Revenue Authority (URA) akozesa amagezi ag'obwengula (AI).**\n\n"
         "Nva wano mu Uganda, era nnakolebwa mu Makerere University (School of Computing) ne Sunbird AI wamu ne URA.\n\n"
         "- **Gye Nsanyukira Okubeera**: Nze ndi muyambi wa digito ku mutimbagano, naye ofisi enkulu eya URA esangibwa ku URA Tower e Nakawa mu Kampala, wamu n'amatabi ag'omu bitundu byonna ebya Uganda.\n"
-        "- **Ennimi ze Ntegeera**: Oluganda, Olungereza, Oluswayiri, Orunyankore, ne Leb Acoli.\n"
+        "- **Ennimi ze Ntegeera era ze Nsobola Okwogera**: Nsobola okwogera n'okutegeera Oluganda, Olungereza, Oluswayiri, Orunyankore, ne Leb Acoli.\n"
         "- **Kye Nnyinza Okukukolera**: Ndi wano essaawa 24/7 okukuyamba ku by'okufuna TIN, okubalira emisolo gyo (PAYE, VAT, Omusolo gw'Ennyumba, WHT), "
         "obudde bw'okuwaayo alipoota, n'engeri y'okukolaganamu ne URA mu mateeka.\n\n"
         "Nkozesa ebiwandiiko ebitongole ebya URA ebikakasiddwa — nkuyambe ntya leero?"
@@ -257,7 +258,7 @@ _BUSINESS_EMPATHY_RESPONSES = {
         "Here is the good news that helps many Ugandan entrepreneurs breathe easier:\n\n"
         "1. **You Are Not Taxed Before You Earn**: Income tax applies only to net profits, not your startup capital.\n"
         "2. **Small Business Relief (Presumptive Tax)**: If your annual turnover is under UGX 10,000,000, you are legally exempt from business income tax. For turnover between 10M and 50M, fixed, modest presumptive rates apply without requiring audited books.\n"
-        "3. **VAT Threshold Protection**: You are not required to register for VAT unless your annual taxable sales reach **UGX 150,000,000** (or UGX 37,500,000 in three consecutive months).\n"
+        "3. **VAT Threshold Protection**: Under the FY2026-27 VAT Amendment, you are not required to register for VAT unless your annual taxable sales reach **UGX 300,000,000** (up from the previous UGX 150,000,000 threshold, or UGX 75,000,000 in three consecutive months).\n"
         "4. **URA Advisory Support**: URA offers free taxpayer education clinics, Taxpayer Starter Packs, and mobile support.\n\n"
         "Take it step by step. What kind of business are you running or planning to start? I'd be glad to map out exactly what applies to you."
     ),
@@ -266,7 +267,7 @@ _BUSINESS_EMPATHY_RESPONSES = {
         "Naye luno lwe lusalira olunaakuyamba okussa ekikkowe:\n\n"
         "1. **Tebakusoloozaako nga Tonnafuna Magoba**: Omusolo gw'ensimbi ez'obusuubuzi gusasulwa ku magoba amatongeze gokka, si ku nsimbi zo ez'entandikwa.\n"
         "2. **Okuyambibwa kw'Obusuubuzi Obutono (Presumptive Tax)**: Singa omutindo gwo ogw'okutunda guba wansi w'obukadde 10 buli mwaka, tosasula musolo gwa bizinensi. Bw'oba wakati w'obukadde 10 ne 50, osasula omusolo mutono ogw'akafunda awatali kwetaagisa bitabo binene by'abalirizi b'ebitabo.\n"
-        "3. **Ekkomo lya VAT**: Tewalizibwa kwewandiisa ku VAT okuggyako nga bizinensi yo etuuse ku bukadde **150 buli mwaka**.\n"
+        "3. **Ekkomo lya VAT**: Tewalizibwa kwewandiisa ku VAT okuggyako nga bizinensi yo etuuse ku bukadde **300 buli mwaka** (okuva ku bukadde 150 obwaliwo).\n"
         "4. **Obuyambi bwa URA bwa Bwereere**: URA erina emisomo egy'obwereere n'obutabo obuyamba abasuubuzi abapya.\n\n"
         "Bizinensi ki gy'otandika oba gy'oddukanya? Ndi wano okukunnyonnyola ebisaanidde mu ngeri ennyangu."
     ),
@@ -275,7 +276,7 @@ _BUSINESS_EMPATHY_RESPONSES = {
         "Hapa kuna ukweli utakaokupa utulivu na matumaini:\n\n"
         "1. **Hutozwi Kodi Kabla ya Kupata Faida**: Kodi ya mapato ya biashara hutozwa tu kwenye faida halisi uliyopata, si mtaji wako wa mwanzo.\n"
         "2. **Unafuu kwa Biashara Ndogo (Kodi ya Makadirio)**: Ikiwa mapato yako ya mwaka yako chini ya Shilingi milioni 10, umesamehewa kisheria. Mapato kati ya milioni 10 na milioni 50 yanalipiwa viwango vidogo vilivyowekwa bila kuhitaji mahesabu magumu ya uhasibu.\n"
-        "3. **Kikomo cha VAT Kinakulinda**: Huruhusiwi kulazimishwa kujiandikisha kwa VAT hadi mauzo yako ya mwaka yafikie **Shilingi milioni 150**.\n"
+        "3. **Kikomo cha VAT Kinakulinda**: Huruhusiwi kulazimishwa kujiandikisha kwa VAT hadi mauzo yako ya mwaka yafikie **Shilingi milioni 300** (kutoka milioni 150 za awali).\n"
         "4. **Mafunzo ya Bure ya URA**: URA inatoa semina na miongozo ya bure kwa wajasiriamali wapya kote nchini.\n\n"
         "Unafanya au unapanga biashara ya aina gani? Ninaweza kukuonyesha hatua kwa hatua unachopaswa kufanya kwa wepesi."
     ),
@@ -284,7 +285,7 @@ _BUSINESS_EMPATHY_RESPONSES = {
         "Reeba amakuru marungi agarikuhwera abashuubuzi ba Uganda:\n\n"
         "1. **Torikushashura Omushoro Otakabaire na Magoba**: Omushoro gw'entaasya nigushashurwa aha magoba gonka, ti ha sente zaawe z'okutandika.\n"
         "2. **Obuhwezi bw'Obushuubuzi Bukye (Presumptive Tax)**: Entaasya yaawe y'omwaka yaaba eri ahansi ya shiringi obukaikuru 10, torikushashura mushoro gw'obushuubuzi. Ahagati y'obukaikuru 10 na 50, hariho omushoro mukye hatariho kwetenga ebitabo bikuru.\n"
-        "3. **Obugarukiro bwa VAT**: Torikugyemeserezibwa kwehandiikisa aha VAT kureka entaasya yaawe yahika **shiringi obukaikuru 150** omwaka.\n"
+        "3. **Obugarukiro bwa VAT**: Torikugyemeserezibwa kwehandiikisa aha VAT kureka entaasya yaawe yahika **shiringi obukaikuru 300** omwaka (kuruga aha bukaikuru 150).\n"
         "4. **Okwegyesa kw'Obusha okwa URA**: URA neeha obuhabuzi bw'obusha aha bashuubuzi basya.\n\n"
         "Nooyenda kutandika nari nookora bushuubuzi ki? Nimbaasa kukushoboororera idaara aha rindi."
     ),
@@ -293,7 +294,7 @@ _BUSINESS_EMPATHY_RESPONSES = {
         "Man aye lok maber ma konyo lutim biacara i Uganda:\n\n"
         "1. **Pe Kiculi Mucoro Ma Peya Inongo Magoba**: Mucoro me lim ma odonyo kiculo i kom magoba keken, pe i kom lim me cako biacara.\n"
         "2. **Kony pi Biacara Matidi (Presumptive Tax)**: Ka lim ma odonyo i mwaka tye i te cilingi milioni 10, pe iculo mucoro me biacara. I kin milioni 10 naka 50, iculo mucoro matidi ma pe mito buk me kwano lim madongo.\n"
-        "3. **Rwom me VAT**: Pe kicoyo nying pi VAT kono lim me cato jami me mwaka oo **cilingi milioni 150**.\n"
+        "3. **Rwom me VAT**: Pe kicoyo nying pi VAT kono lim me cato jami me mwaka oo **cilingi milioni 300** (ki i milioni 150 macon).\n"
         "4. **Pwony me Nono pa URA**: URA miyo pwony ki tela me nono bot lutim biacara.\n\n"
         "Biacara ango ma itye ka timo onyo imito cako? Atwero tito boti rwom ki rwom."
     ),
@@ -427,7 +428,8 @@ _CONVERSATIONAL_LOCALE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         "nyn",
         re.compile(
             r"\b(?:ahabw['’]?enki|nitushashura|omushoro|omugaso\s+gw['’]?omushoro|iwe\s+ori\s+oha|"
-            r"owakukozire|nooruga\s+nkahi|orunyankore|ori\s+aho|okyariho|nintina|obushuubuzi|"
+            r"owakukozire|nooruga\s+nkahi|o?runyankore|runyankole|noobaasa\s+(?:kugamba|kuhurira)|"
+            r"ori\s+aho|okyariho|(?:nintina|ntiina)|obushuubuzi|"
             r"agandi\s+erizooba|ori\s+gye|oraire\s+ota|ekikwate\s+aha\s+mushoro|oine\s+enyehurira)\b",
             re.IGNORECASE,
         ),
@@ -435,17 +437,17 @@ _CONVERSATIONAL_LOCALE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "ach",
         re.compile(
-            r"\b(?:pingo\s+waculo|mucoro|in\s+ibedo\s+nga|oyubi|ia\s+kwene|leb\s+acoli|"
-            r"itye\s+kany|pud\s+itye|alworo|biacara|kopango\s+tin|itye\s+maber|itye\s+nining|"
-            r"wer\s+me\s+mucoro|itye\s+ki\s+cwiny\s+calo\s+dano)\b",
+            r"\b(?:pingo\s+waculo|mucoro|in\s+ibedo\s+nga|oyubi|ia\s+kwene|leb\s+acoli|itwero\s+(?:loko|niang)|"
+            r"itye\s+kany|pud\s+itye|(?:alworo|atye\s+ki\s+lworo)|biacara|kopango\s+tin|itye\s+maber|itye\s+nining|"
+            r"coo\s+wer|wer\s+me\s+mucoro|itye\s+ki\s+cwiny\s+calo\s+dano)\b",
             re.IGNORECASE,
         ),
     ),
     (
         "lg",
         re.compile(
-            r"\b(?:lwaki\s+tusasula|omusolo|(?:gwe|ggwe)\s+ani|yakukola|ova\s+wa|osobola\s+okwogera|"
-            r"oli\s+awo|muli\s+awo|oliyo|ntya\s+okutandika|oli\s+otya|gyebaleko|ekitontome|"
+            r"\b(?:lwaki\s+tusasula|omusolo|(?:gwe|ggwe)\s+ani|yakukola|ova\s+wa|osobola\s+(?:okwogera|okutegeera)|"
+            r"oli\s+awo|muli\s+awo|oliyo|(?:ntya|ntidde)(?:\s+nnyo)?\s+okutandika|oli\s+otya|gyebaleko|ekitontome|"
             r"olina\s+enneewulira|oli\s+mulamu\s+nga\s+omuntu)\b",
             re.IGNORECASE,
         ),
@@ -454,8 +456,9 @@ _CONVERSATIONAL_LOCALE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         "sw",
         re.compile(
             r"\b(?:kwa\s+nini|tunalipa\s+kodi|wewe\s+ni\s+nani|alikuunda|unatoka\s+wapi|"
-            r"unaweza\s+kuongea|upo|uko\s+hapo|nina\s+hofu|biashara\s+ni\s+ngumu|habari\s+yako|"
-            r"uko\s+salama|shairi\s+kuhusu\s+kodi|una\s+hisia\s+au\s+fahamu|je\s+wewe\s+una\s+fahamu)\b",
+            r"unaweza\s+kuongea|una\s+uwezo\s+wa\s+(?:kuelewa|kuongea)|lugha\s+ya\s+kiswahili|"
+            r"upo|uko\s+hapo|nina\s+hofu|biashara\s+ni\s+ngumu|habari\s+yako|"
+            r"uko\s+salama|andika\s+shairi|shairi\s+(?:kuhusu\s+kodi|fupi)|una\s+hisia\s+au\s+fahamu|je\s+wewe\s+una\s+fahamu)\b",
             re.IGNORECASE,
         ),
     ),

@@ -50,6 +50,7 @@ class AuditTaxDocumentTool(Tool):
                     "effective_rate": {"type": ["number", "null"]},
                     "variance_ugx": {"type": ["number", "null"]},
                     "notes": {"type": "array", "items": {"type": "string"}},
+                    "fields": {"type": "object"},
                     "explanation": {"type": "string"},
                 },
                 "required": ["ok", "status", "notes"],
@@ -88,7 +89,11 @@ class AuditTaxDocumentTool(Tool):
         }
 
         recon = reconcile_tax_document(text=text, doc_type=doc_type, fields=fields, tables=[])
-        explanation = "; ".join(recon.get("notes", [])) or "No financial reconciliation notes generated."
+        notes = list(recon.get("notes", []) or [])
+        if len(notes) > 1:
+            explanation = "\n".join(f"{i}. {note}" for i, note in enumerate(notes, 1))
+        else:
+            explanation = notes[0] if notes else "No financial reconciliation notes generated."
         return {
             "ok": True,
             "status": recon["status"],
