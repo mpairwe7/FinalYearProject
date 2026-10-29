@@ -217,7 +217,7 @@ export async function mockBackend(
       body: sseReply(reply, { escalate: opts.escalate }),
     }),
   );
-  // Non-stream fallback the app uses if the stream is not-ok/empty.
+  // Non-stream fallback for an explicit unsupported-transport/auth rejection.
   await page.route("**/api/v1/chat", (route) =>
     route.fulfill({
       json: {

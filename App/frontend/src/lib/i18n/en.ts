@@ -109,6 +109,11 @@ export const en = {
   'composer.connectorAuthSubmitting': 'Connecting…',
   // Which services an answer used, which it left out, and what a lookup sends.
   'composer.connectorDataShared': 'Only what a lookup needs is sent to the service — for example a TIN, PRN or stamp code you type — with your account reference if you are signed in.',
+  'message.incomplete': 'This response was interrupted and may be incomplete. Verify the guidance before acting. For a portal submission, check its status before trying again.',
+  'message.stopped': 'Stopped.',
+  'portalCopilot.prepareFailed': 'Your changes could not be prepared for review. They remain in this form; try reviewing them again.',
+  'portalCopilot.verificationUnavailable': 'Your browser could not verify the details shown. No approval was sent. Please reload and review the details again.',
+  'portalCopilot.resultUnconfirmed': 'The outcome could not be confirmed. Check the task status before trying again.',
   'message.connectorsUsed': 'Looked up in',
   'message.connectorOutcomeFound': 'Record found',
   'message.connectorOutcomeNoRecord': 'No matching record',

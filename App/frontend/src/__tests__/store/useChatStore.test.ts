@@ -19,6 +19,17 @@ beforeEach(() => {
 });
 
 describe("useChatStore", () => {
+  it('preserves interrupted status across reload and treats restored actions as historical', () => {
+    store().ensureActiveConversationId();
+    store().addTurns([
+      createTurn('user', 'Continue my filing'),
+      createTurn('assistant', 'Partial guidance', { responseIncomplete: true, nextActions: ['Continue'] }),
+    ]);
+    store().saveCurrentSession();
+    useChatStore.setState({ chat: [] });
+    store().hydratePersisted();
+    expect(store().chat.at(-1)).toMatchObject({ responseIncomplete: true, restored: true });
+  });
   it("initialises with a greeting message", () => {
     expect(store().chat).toHaveLength(1);
     expect(store().chat[0].role).toBe("assistant");

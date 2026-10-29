@@ -40,6 +40,20 @@ describe("WorkflowStepper", () => {
     expect(screen.getByText("Entity Type")).toBeInTheDocument();
     expect(screen.getByText("Legal Name")).toBeInTheDocument();
     expect(screen.getByText("NIN Verification")).toBeInTheDocument();
+    expect(screen.getByText("Entity Type").closest('[role="listitem"]')).toHaveAttribute('aria-current', 'step');
+  });
+
+  it('does not expose an unsafe model-supplied portal action', () => {
+    render(<WorkflowStepper workflow={{ ...activeWorkflow, portal_action: { label: 'Unsafe portal', url: 'https://ura.go.ug.evil.example' } }} />);
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  });
+
+  it.each(['completed', 'cancelled'] as const)('does not remediate or register from a %s workflow', (status) => {
+    render(<WorkflowStepper onSelectOption={vi.fn()} workflow={{ ...activeWorkflow, status,
+      prerequisites: [{ id: 'id', label: 'Identity', status: 'missing', remediation_action: 'Start identity workflow' }],
+      step_up_auth: { required: true, mode: 'login', reason: 'Sign in', register_action: 'Register' },
+    }} />);
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
   it("renders interactive options and triggers onSelectOption on click", () => {

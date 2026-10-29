@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import React, { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import React, { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { authHeaders, getAuthToken, getServerAuthToken, subscribeAuthToken } from "../lib/authSession";
 import { getChatSessionId } from "../lib/chatSession";
 import { useTranslation } from "../lib/i18n";
@@ -32,6 +32,7 @@ export interface PortalCopilotCardProps {
   conversationId: string | null;
   onSubmitInlineForm?: (taskId: string, fields: Record<string, string>) => void;
   onActionClick?: (action: string) => void;
+  disabled?: boolean;
 }
 
 /**
@@ -41,7 +42,7 @@ export interface PortalCopilotCardProps {
 export async function computeDisplayedFieldsSha256(
   displayFields: ReadonlyArray<{ name: string; value: string; raw_value?: string }> | undefined,
 ): Promise<string | undefined> {
-  if (!displayFields || displayFields.length === 0) return undefined;
+  if (!Array.isArray(displayFields)) return undefined;
   try {
     if (typeof crypto === "undefined" || !crypto.subtle) return undefined;
     const canonical = displayFields.map((item) => ({
@@ -67,8 +68,11 @@ export default function PortalCopilotCard({
   conversationId,
   onSubmitInlineForm,
   onActionClick,
+  disabled = false,
 }: PortalCopilotCardProps) {
   const t = useTranslation();
+  const fieldIdPrefix = useId();
+  const decisionInFlight = useRef(false);
   const [activeCopilot, setActiveCopilot] = useState<PortalCopilotPayload>(copilot);
   const [editing, setEditing] = useState(false);
   const [highValueAck, setHighValueAck] = useState(false);
@@ -131,6 +135,7 @@ export default function PortalCopilotCard({
   const handleFormSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
+      if (disabled || execState.status === "busy") return;
       const taskId = activeCopilot.task_id || "";
       if (!taskId) return;
 
@@ -170,9 +175,11 @@ export default function PortalCopilotCard({
             return;
           }
         } catch {
-          // Fall through to callback if network prepare fails
+          // Keep edited values for review; an ambiguous prepare failure must
+          // not fall through to a second submission through chat.
         }
-        setExecState({ status: "idle" });
+        setExecState({ status: "error", summary: t("portalCopilot.prepareFailed") });
+        return;
       }
 
       setEditing(false);
@@ -188,12 +195,17 @@ export default function PortalCopilotCard({
       editing,
       formValues,
       onSubmitInlineForm,
+      disabled,
+      execState.status,
+      t,
     ],
   );
 
   const handleDecision = useCallback(
     async (decision: "allow" | "disallow") => {
+      if (disabled || decisionInFlight.current || execState.status === "busy") return;
       if (!activeCopilot.request_state || !activeCopilot.idempotency_key) return;
+      decisionInFlight.current = true;
       setExecState({ status: "busy" });
       try {
         const payloadBody: Record<string, unknown> = {
@@ -202,10 +214,12 @@ export default function PortalCopilotCard({
           idempotency_key: activeCopilot.idempotency_key,
           conversation_id: conversationId || "default",
         };
-        const computedDigest =
-          (await computeDisplayedFieldsSha256(activeCopilot.display_fields)) ||
-          activeCopilot.displayed_fields_sha256;
-        if (computedDigest) {
+        if (decision === "allow") {
+          const computedDigest = await computeDisplayedFieldsSha256(activeCopilot.display_fields);
+          if (!computedDigest) {
+            setExecState({ status: "error", summary: t("portalCopilot.verificationUnavailable") });
+            return;
+          }
           payloadBody.displayed_fields_sha256 = computedDigest;
         }
         if (activeCopilot.high_value_requires_ack) {
@@ -220,10 +234,11 @@ export default function PortalCopilotCard({
           body: JSON.stringify(payloadBody),
         });
         const body = await res.json().catch(() => ({}));
-        if (!res.ok || body.ok === false || body.status === "error") {
+        const expectedStatus = decision === "disallow" ? "declined" : "executed";
+        if (!res.ok || body.ok !== true || body.status !== expectedStatus) {
           setExecState({
             status: "error",
-            summary: body.detail || body.summary || `Request failed (${res.status})`,
+            summary: t("portalCopilot.resultUnconfirmed"),
           });
           return;
         }
@@ -234,21 +249,25 @@ export default function PortalCopilotCard({
           result: body.result || {},
           decisionReceipt: body.decision_receipt || undefined,
         });
-      } catch (err) {
+      } catch {
         setExecState({
           status: "error",
-          summary: err instanceof Error ? err.message : "Network error while executing task.",
+          summary: t("portalCopilot.resultUnconfirmed"),
         });
+      } finally {
+        decisionInFlight.current = false;
       }
     },
     [
       activeCopilot.display_fields,
-      activeCopilot.displayed_fields_sha256,
       activeCopilot.high_value_requires_ack,
       activeCopilot.idempotency_key,
       activeCopilot.request_state,
       conversationId,
       highValueAck,
+      disabled,
+      execState.status,
+      t,
     ],
   );
 
@@ -300,7 +319,7 @@ export default function PortalCopilotCard({
 
         <form className="portal-inline-form" onSubmit={handleFormSubmit}>
           {(activeCopilot.fields ?? []).map((f) => {
-            const inputId = `portal-field-${activeCopilot.task_id || "task"}-${f.name}`;
+            const inputId = `${fieldIdPrefix}-portal-field-${f.name}`;
             const descId = `${inputId}-desc`;
             const currentVal = formValues[f.name] ?? "";
             const hasErr = Boolean(f.validation_error);
@@ -317,6 +336,7 @@ export default function PortalCopilotCard({
                 </label>
                 {f.input_type === "select" && f.options?.length ? (
                   <select
+                    disabled={disabled || execState.status === "busy"}
                     id={inputId}
                     name={f.name}
                     className="portal-form-input"
@@ -337,6 +357,7 @@ export default function PortalCopilotCard({
                   </select>
                 ) : (
                   <input
+                    disabled={disabled || execState.status === "busy"}
                     id={inputId}
                     name={f.name}
                     type={f.input_type || "text"}
@@ -363,11 +384,15 @@ export default function PortalCopilotCard({
             );
           })}
 
+          {execState.status === "error" && (
+            <p className="portal-field-error" role="alert">{execState.summary}</p>
+          )}
           <div className="portal-copilot-actions">
             <button
               type="submit"
               className="portal-action-btn is-primary"
               data-testid="portal-inline-form-submit-btn"
+              disabled={disabled || execState.status === "busy" || (!onSubmitInlineForm && !editing)}
             >
               <ShieldCheckIcon size={15} />{" "}
               {copilot.submit_label || t("portalCopilot.continueToReview")}
@@ -560,7 +585,7 @@ export default function PortalCopilotCard({
             className="portal-action-btn is-primary"
             data-testid="portal-task-allow-btn"
             disabled={
-              execState.status === "busy" ||
+              disabled || execState.status === "busy" ||
               (Boolean(activeCopilot.high_value_requires_ack) && !highValueAck)
             }
             onClick={() => void handleDecision("allow")}
@@ -574,7 +599,7 @@ export default function PortalCopilotCard({
             type="button"
             className="portal-action-btn is-ghost"
             data-testid="portal-task-edit-btn"
-            disabled={execState.status === "busy"}
+            disabled={disabled || execState.status === "busy"}
             onClick={() => setEditing(true)}
           >
             <PencilIcon /> {copilot.edit_label || t("portalCopilot.editBtn")}
@@ -583,7 +608,7 @@ export default function PortalCopilotCard({
             type="button"
             className="portal-action-btn is-danger"
             data-testid="portal-task-disallow-btn"
-            disabled={execState.status === "busy"}
+            disabled={disabled || execState.status === "busy"}
             onClick={() => void handleDecision("disallow")}
           >
             <BanIcon size={14} /> {copilot.disallow_label || t("portalCopilot.disallowBtn")}

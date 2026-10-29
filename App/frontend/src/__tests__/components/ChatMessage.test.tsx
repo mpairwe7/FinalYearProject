@@ -53,6 +53,42 @@ const attachmentTurn: ChatTurn = {
 };
 
 describe("ChatMessage", () => {
+  it('updates changed workflow options even when its ID and step number stay the same', () => {
+    const workflow = { id: 'w', name: 'Payment', status: 'active' as const, step_index: 1, options: ['Old option'] };
+    const props = { userQuery: '', locale: 'en', playingTurnId: null, ttsLoading: null,
+      isTransitioning: false, onListen: vi.fn(), conversationId: 'conv-1', onActionClick: vi.fn() };
+    const { rerender } = render(<ChatMessage {...props} turn={{ ...assistantTurn, workflow }} />);
+    expect(screen.getByRole('button', { name: 'Old option' })).toBeInTheDocument();
+    rerender(<ChatMessage {...props} turn={{ ...assistantTurn, workflow: { ...workflow, options: ['Corrected option'] } }} />);
+    expect(screen.getByText('Corrected option')).toBeInTheDocument();
+    expect(screen.queryByText('Old option')).not.toBeInTheDocument();
+  });
+
+  it('renders a portal confirmation arriving after the answer text', () => {
+    const props = { userQuery: '', locale: 'en', playingTurnId: null, ttsLoading: null,
+      isTransitioning: false, onListen: vi.fn(), conversationId: 'conv-1' };
+    const { rerender } = render(<ChatMessage {...props} turn={assistantTurn} />);
+    rerender(<ChatMessage {...props} turn={{ ...assistantTurn, portalCopilot: {
+      card_type: 'confirmation_required', title: 'Review corrected payment', task_id: 'payment_generate_prn',
+      display_fields: [{ name: 'amount', label: 'Amount', value: '1200' }],
+    } }} />);
+    expect(screen.getByText('Review corrected payment')).toBeInTheDocument();
+    expect(screen.getByText('1200')).toBeInTheDocument();
+  });
+
+  it.each([{ actionsDisabled: true }, { phaseLabel: 'Thinking' }])('hides stale/busy workflow controls: %s', (overrides) => {
+    renderMsg({ ...assistantTurn, workflow: { id: 'w', name: 'Payment', status: 'active', options: ['Submit stale option'] }, nextActions: ['Advance'] },
+      { onActionClick: vi.fn(), ...overrides });
+    expect(screen.queryByText('Submit stale option')).not.toBeInTheDocument();
+    expect(screen.queryByText('Advance')).not.toBeInTheDocument();
+  });
+
+  it('marks interrupted answers and withholds reassuring badges and actions', () => {
+    renderMsg({ ...assistantTurn, responseIncomplete: true, nextActions: ['Advance'] }, { onActionClick: vi.fn() });
+    expect(screen.getByRole('status')).toHaveTextContent('interrupted');
+    expect(screen.queryByText('Well grounded')).not.toBeInTheDocument();
+    expect(screen.queryByText('Advance')).not.toBeInTheDocument();
+  });
   it("renders user message with user icon", () => {
     renderMsg(userTurn);
     expect(screen.getByText("What is VAT?")).toBeInTheDocument();
