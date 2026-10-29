@@ -213,6 +213,13 @@ class ChatResponse(BaseModel):
             "answered either way; nothing listed here was consulted."
         ),
     )
+    connectors_used: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "MCP connectors consulted on this turn and their outcome "
+            "(found / no_record / needs_input / unavailable)."
+        ),
+    )
     debug: dict[str, Any] | None = Field(
         None,
         description="Eval-only generation metadata when EVAL_DEBUG=1 (rejected in production)",

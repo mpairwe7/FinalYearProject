@@ -668,26 +668,81 @@ _ENFORCEMENT_RE = re.compile(
     # Luganda / Swahili / Runyankole / Acholi forms of the same events: the
     # phrases _HARDSHIP_RE lists as enforcement cues, so one lexicon says it.
     r"|ebintu\s+byange\s+babikutte|bamazze\s+okusiba\s+edduuka|edduuka\s+lyange\s+baligadde"
-    r"|akaunti\s+imefungwa|bidhaa\s+zimekamatwa|duka\s+langu\s+limefungwa|ebyangye\s+babikwata"
-    r"|jami\s+na\s+gimako)\b"
+    r"|akaunti\s+imefungwa|bidhaa\s+zimekamatwa|duka\s+langu\s+limefungwa|biashara\s+imefungwa"
+    r"|ebyangye\s+babikwata|eduuka\s+(?:ryangye\s+)?baariigara"
+    r"|jami\s+na\s+gimako|duka\s+(?:mera\s+|na\s+)?gicego)\b"
 )
 _DEADLINE_TODAY_RE = re.compile(
     r"\b(?:(?:due|deadline|expires?|closes?)\s+(?:is\s+)?(?:today|tonight|by\s+midnight)"
     r"|(?:today|tonight)\s+is\s+the\s+(?:last\s+day|deadline)"
     r"|last\s+day\s+(?:is\s+)?today|by\s+(?:midnight|end\s+of\s+(?:the\s+)?day)\s+today"
     r"|leo\s+ni\s+siku\s+ya\s+mwisho|siku\s+ya\s+mwisho\s+ni\s+leo"
-    r"|olwaleero\s+lwe\s+lunaku\s+olusembayo)\b"
+    r"|olwaleero\s+lwe\s+lunaku\s+olusembayo"
+    r"|erizooba\s+n['’]?(?:ekiro|eizooba)\s+(?:ky|ry)['’]?aha\s+muheru|ekiro\s+ky['’]?aha\s+muheru\s+ni\s+erizooba"
+    r"|tin\s+aye\s+nino\s+me\s+agikki|nino\s+me\s+agikki\s+obedo\s+tin)\b"
 )
 _AMOUNT_RE = re.compile(
     r"(?:\b(?:ugx|ushs?|shs?)\.?\s*(?P<a1>\d[\d,]*(?:\.\d+)?)\s*(?P<u1>bn|billion|m|million|k)?\b)"
     r"|(?:\b(?P<a2>\d[\d,]*(?:\.\d+)?)\s*(?P<u2>bn|billion|m|million)\b)"
 )
-_UNIT = {"k": 1_000, "m": 1_000_000, "million": 1_000_000, "bn": 1_000_000_000, "billion": 1_000_000_000}
+_BANTU_STAKES_AMOUNT_RE = re.compile(
+    r"\b(?P<bu>mili+y?oni|bili+y?oni|el?ufu|elfu|tutemia|laki|o?bukadde|a?kakadde|o?bukaikuru|a?kakaikuru|o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?mitwaro|o?mutwaro|e?nkumi|o?lukumi|o?rukumi)"
+    r"\s+(?P<ba>\d[\d,]*(?:\.\d+)?)\b",
+    re.IGNORECASE,
+)
+_NON_UGX_CURRENCY_RE = re.compile(
+    r"\b(?:usd|us\s*\$|kes|kshs?|tzs|tshs?|eur|gbp|rwf|dollars?|euros?|pounds?)\b",
+    re.IGNORECASE,
+)
+_UNIT = {
+    "k": 1_000,
+    "m": 1_000_000,
+    "million": 1_000_000,
+    "bn": 1_000_000_000,
+    "billion": 1_000_000_000,
+    "elfu": 1_000,
+    "elufu": 1_000,
+    "tutemia": 1_000,
+    "nkumi": 1_000,
+    "enkumi": 1_000,
+    "lukumi": 1_000,
+    "olukumi": 1_000,
+    "rukumi": 1_000,
+    "orukumi": 1_000,
+    "mitwalo": 10_000,
+    "emitwalo": 10_000,
+    "mutwalo": 10_000,
+    "omutwalo": 10_000,
+    "mitwaro": 10_000,
+    "emitwaro": 10_000,
+    "mutwaro": 10_000,
+    "omutwaro": 10_000,
+    "laki": 100_000,
+    "milioni": 1_000_000,
+    "miliyoni": 1_000_000,
+    "bukadde": 1_000_000,
+    "obukadde": 1_000_000,
+    "kakadde": 1_000_000,
+    "akakadde": 1_000_000,
+    "bukaikuru": 1_000_000,
+    "obukaikuru": 1_000_000,
+    "kakaikuru": 1_000_000,
+    "akakaikuru": 1_000_000,
+    "bilioni": 1_000_000_000,
+    "biliyoni": 1_000_000_000,
+    "buwumbi": 1_000_000_000,
+    "obuwumbi": 1_000_000_000,
+    "kawumbi": 1_000_000_000,
+    "akawumbi": 1_000_000_000,
+}
 
 
 def _amounts_ugx(text: str) -> list[float]:
+    from .number_words import normalize_vernacular_amount_words
+
+    norm_text = normalize_vernacular_amount_words(text)
     amounts: list[float] = []
-    for match in _AMOUNT_RE.finditer(text):
+    for match in _AMOUNT_RE.finditer(norm_text):
         raw = match.group("a1") or match.group("a2") or ""
         unit = (match.group("u1") or match.group("u2") or "").lower()
         try:
@@ -695,6 +750,18 @@ def _amounts_ugx(text: str) -> list[float]:
         except ValueError:
             continue
         amounts.append(value * _UNIT.get(unit, 1))
+    for match in _BANTU_STAKES_AMOUNT_RE.finditer(norm_text):
+        before = norm_text[max(0, match.start() - 16) : match.start()]
+        after = norm_text[match.end() : min(len(norm_text), match.end() + 16)]
+        if _NON_UGX_CURRENCY_RE.search(before) or _NON_UGX_CURRENCY_RE.search(after):
+            continue
+        raw_b = match.group("ba") or ""
+        unit_b = (match.group("bu") or "").lower()
+        try:
+            value_b = float(raw_b.replace(",", ""))
+        except ValueError:
+            continue
+        amounts.append(value_b * _UNIT.get(unit_b, 1))
     return amounts
 
 
@@ -739,16 +806,20 @@ def detect_high_stakes(message: str, *, amount_threshold_ugx: float = 10_000_000
 # ---------------------------------------------------------------------------
 
 _CRISIS_RE = re.compile(
-    r"\b(?:kill(?:ing)?\s+myself|end\s+my\s+(?:own\s+)?life|end\s+it\s+all"
-    r"|take\s+my\s+(?:own\s+)?life|suicid\w*|want\s+to\s+die|wish\s+i\s+(?:was|were)\s+dead"
-    r"|better\s+off\s+dead|no\s+reason\s+to\s+live|harm\s+myself|hurt\s+myself"
+    r"\b(?:(?<!\bnot\s)(?<!\bdon't\s)(?<!\bdont\s)(?<!\bnever\s)(?:kill(?:ing)?\s+myself|end\s+my\s+(?:own\s+)?life|end\s+it\s+all"
+    r"|take\s+my\s+(?:own\s+)?life|want\s+to\s+die|harm\s+myself|hurt\s+myself)"
+    r"|suicid\w*|wish\s+i\s+(?:was|were)\s+dead"
+    r"|better\s+off\s+dead|no\s+reason\s+to\s+live"
     # Passive ideation — a recognised warning sign, and how disclosure often
     # starts: indirectly, before anything explicit (Phase 39).
     r"|nothing\s+(?:left\s+)?to\s+live\s+for"
     r"|(?:everyone|everybody|they|my\s+family|my\s+children|my\s+kids)\s+(?:would|will)\s+be\s+better\s+off\s+without\s+me"
     r"|(?:don'?t|do\s+not)\s+want\s+to\s+(?:live|be\s+alive)\s+any\s*more"
     r"|tired\s+of\s+(?:living|being\s+alive)|(?:can'?t|cannot)\s+go\s+on\s+living"
-    r"|okwetta|kujiua|okweyita|kweyita|neko\s+koma)\b"
+    r"|okwetta|(?<!\bsinjagala\s)njagala\s+kufa|nsinze\s+okufa"
+    r"|kujiua|(?<!\bsitaki\s)nataka\s+kufa|bora\s+nife"
+    r"|okweyita|kweyita|(?<!\btindikwenda\s)ninyenda\s+kufa"
+    r"|neko\s+koma|aneka\s+koma|(?<!\bpe\s)amito\s+to)\b"
 )
 
 #: Hopelessness — "I can't cope", "I give up", "no way out". Alone it is often
@@ -772,9 +843,34 @@ _HOPELESSNESS_RE = re.compile(
 CRISIS_LINES_VERIFIED_ON = "2026-09-29"
 
 
+_CRISIS_NEGATION_PREFIX_RE = re.compile(
+    r"\b(?:not|no|never|don'?t|doesn'?t|didn'?t|won'?t|wouldn'?t|shouldn'?t|cannot|can'?t"
+    r"|si|tetwagala|sinjagala|siwagira"
+    r"|sitaki|hatutaki|siwezi"
+    r"|tindikwenda|titurikwenda|tininyenda"
+    r"|pe(?:\s{1,4}amito)?|pe\s{1,4}atwero)\s{1,4}"
+    r"(?:(?:ever|really|actually|even)\s{1,4})?"
+    r"(?:(?:want|wished|wish|plan|planning|going|intend|trying|need)\s{1,4}(?:to\s{1,4})?)?$",
+    re.IGNORECASE,
+)
+
+
+_CRISIS_DOUBLE_NEGATION_RE = re.compile(
+    r"\b(?:not|no|never|don'?t|doesn'?t|didn'?t|won'?t|wouldn'?t|shouldn'?t|cannot|can'?t)\s{1,4}$",
+    re.IGNORECASE,
+)
+
+
 def detect_crisis(message: str) -> bool:
     """True when *message* expresses intent to self-harm."""
-    return bool(_CRISIS_RE.search(_normalise(message)))
+    norm = _normalise(message)
+    for m in _CRISIS_RE.finditer(norm):
+        prefix = norm[max(0, m.start() - 38) : m.start()]
+        m_neg = _CRISIS_NEGATION_PREFIX_RE.search(prefix)
+        if m_neg and not _CRISIS_DOUBLE_NEGATION_RE.search(prefix[: m_neg.start()]):
+            continue
+        return True
+    return False
 
 
 #: Conversational repair: a turn that is all feeling and no task ("This is

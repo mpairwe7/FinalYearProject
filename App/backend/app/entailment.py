@@ -31,15 +31,18 @@ _PCT_RE = re.compile(
     r"(?:"
     r"\b(?:asilimia|ebitundu|[eo]?b[iu]cweka|ekicweka|kigero\s{1,4}kya)\s{0,4}(\d{1,6}(?:\.\d{1,4})?)\b"
     r"|"
-    r"\b(?:dula?\s{1,4})?(\d{1,6}(?:\.\d{1,4})?)\s{0,4}(?:%|per\s?cent(?:age)?|\b(?:kwa\s{1,4}mia|ku\s{1,4}buli\s{1,4}kikumi|aha\s{1,4}(?:buli\s{1,4})?kikumi|i\s{1,4}kom\s{1,4}m?iya|ekomya|ku\s{1,4}100)\b)"
+    r"\b(?:dula?\s{1,4})?(\d{1,6}(?:\.\d{1,4})?)\s{0,4}(?:%|per\s?cent(?:age)?|\b(?:kwa\s{1,4}mia|ku\s{1,4}buli\s{1,4}kikumi|aha\s{1,4}(?:bu[lr]i\s{1,4})?(?:kikumi|e?igana)|i\s{1,4}kom\s{1,4}m?iya|ekomya|ku\s{1,4}100)\b)"
     r")",
     re.IGNORECASE,
 )
 
 _SWAHILI_PCT_WORDS = [
     ("kumi na mbili", "12"),
+    ("kumi na nne", "14"),
     ("kumi na tano", "15"),
     ("kumi na nane", "18"),
+    ("ishirini na tano", "25"),
+    ("thelathini na tano", "35"),
     ("kumi", "10"),
     ("tisa", "9"),
     ("nane", "8"),
@@ -51,7 +54,9 @@ _SWAHILI_PCT_WORDS = [
     ("tatu", "3"),
     ("mbili", "2"),
     ("moja nukta tano", "1.5"),
+    ("moja na nusu", "1.5"),
     ("moja", "1"),
+    ("sifuri nukta tano", "0.5"),
     ("nusu", "0.5"),
     ("sifuri", "0"),
     ("ishirini", "20"),
@@ -62,6 +67,7 @@ _SWAHILI_PCT_WORDS = [
     ("sabini", "70"),
     ("themanini", "80"),
     ("tisini", "90"),
+    ("mia moja", "100"),
     ("mia", "100"),
 ]
 
@@ -74,10 +80,17 @@ _LUGANDA_PCT_WORDS = [
     ("ekkumi n'ebbiri", "12"),
     ("kumi na bbiri", "12"),
     ("kumi na biri", "12"),
+    ("kkumi na nnya", "14"),
+    ("kkumi na bina", "14"),
     ("kkumi na bitaano", "15"),
     ("kkumi na ttaano", "15"),
     ("kumi na bitaano", "15"),
     ("kumi na tano", "15"),
+    ("amakumi abiri mu bitaano", "25"),
+    ("amakumi abiri mu ttaano", "25"),
+    ("abiri mu bitaano", "25"),
+    ("amakumi asatu mu bitaano", "35"),
+    ("asatu mu bitaano", "35"),
     ("kkumi", "10"),
     ("ekkumi", "10"),
     ("kumi", "10"),
@@ -85,21 +98,33 @@ _LUGANDA_PCT_WORDS = [
     ("munaana", "8"),
     ("musanvu", "7"),
     ("mukaaga", "6"),
+    ("bitaano", "5"),
     ("ttaano", "5"),
     ("taano", "5"),
+    ("bina", "4"),
     ("nnya", "4"),
+    ("bisatu", "3"),
     ("ssatu", "3"),
+    ("bibiri", "2"),
     ("bbiri", "2"),
     ("emu n'ekitundu", "1.5"),
+    ("kimu n'ekitundu", "1.5"),
+    ("kimu", "1"),
     ("emu", "1"),
+    ("ekitundu", "0.5"),
     ("kitundu", "0.5"),
     ("abiri", "20"),
     ("amakumi abiri", "20"),
     ("asatu", "30"),
     ("amakumi asatu", "30"),
+    ("ana", "40"),
     ("amakumi ana", "40"),
     ("ataano", "50"),
     ("amakumi ataano", "50"),
+    ("nkaaga", "60"),
+    ("nsanvu", "70"),
+    ("kinaana", "80"),
+    ("kyenda", "90"),
     ("kikumi", "100"),
 ]
 
@@ -107,8 +132,14 @@ _RUNYANKOLE_PCT_WORDS = [
     ("ikumi na munaana", "18"),
     ("ikumi na bitaano", "15"),
     ("ikumi na itaano", "15"),
+    ("ikumi na bina", "14"),
+    ("ikumi na ina", "14"),
     ("ikumi na bibiri", "12"),
     ("ikumi na ibiri", "12"),
+    ("makumi abiri na bitaano", "25"),
+    ("makumi abiri na itaano", "25"),
+    ("makumi ashatu na bitaano", "35"),
+    ("makumi ashatu na itaano", "35"),
     ("ikumi", "10"),
     ("mwenda", "9"),
     ("munaana", "8"),
@@ -122,19 +153,31 @@ _RUNYANKOLE_PCT_WORDS = [
     ("ishatu", "3"),
     ("bibiri", "2"),
     ("ibiri", "2"),
+    ("emwe n'ekicweka", "1.5"),
+    ("kimwe n'ekicweka", "1.5"),
     ("kimwe", "1"),
     ("emwe", "1"),
+    ("ekicweka", "0.5"),
     ("makumi abiri", "20"),
     ("makumi ashatu", "30"),
     ("makumi ana", "40"),
     ("makumi ataano", "50"),
+    ("nkaaga", "60"),
+    ("nshanju", "70"),
+    ("kinaana", "80"),
+    ("kyenda", "90"),
+    ("eigana", "100"),
+    ("igana", "100"),
     ("kikumi", "100"),
 ]
 
 _ACHOLI_PCT_WORDS = [
     ("apar wiye aboro", "18"),
     ("apar wiye abic", "15"),
+    ("apar wiye angwen", "14"),
     ("apar wiye aryo", "12"),
+    ("pyeraryo wiye abic", "25"),
+    ("pyeradek wiye abic", "35"),
     ("apar", "10"),
     ("abongwen", "9"),
     ("aboro", "8"),
@@ -144,11 +187,17 @@ _ACHOLI_PCT_WORDS = [
     ("angwen", "4"),
     ("adek", "3"),
     ("aryo", "2"),
+    ("acel ki nucu", "1.5"),
     ("acel", "1"),
+    ("nucu", "0.5"),
     ("pyeraryo", "20"),
     ("pyeradek", "30"),
     ("pyerangwen", "40"),
     ("pyerabic", "50"),
+    ("pyerabicel", "60"),
+    ("pyerabiro", "70"),
+    ("pyeraboro", "80"),
+    ("pyerabongwen", "90"),
     ("miya acel", "100"),
     ("miya", "100"),
 ]
@@ -156,9 +205,9 @@ _ACHOLI_PCT_WORDS = [
 # A money amount: comma- or space-grouped ("1,500,000"), plain ("335000"), or
 # suffixed ("1.5m", "300 million").  Percentages are excluded by the caller.
 _AMOUNT_RE = re.compile(
-    r"(?:ugx|ug\s?shs?|shs|shillings?|ssente|ensimbi|esente|cente|shilingi|shiringi|cilingi)?\s*"
+    r"(?:ugx|ug\s?shs?|shs|shillings?|ssente|ensimbi|esente|cente|shilingi|shiringi|siringi|cilingi|fedha|pesa|lim)?\s*"
     r"(\d{1,3}(?:[,\s]\d{3})+|\d+(?:\.\d+)?)\s*"
-    r"(k|m|bn|b|thousand|million|billion|milioni|bilioni|elfu|laki|o?bukadde|a?kakadde|o?bukaikuru|a?kakaikuru|o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?mitwaro|o?mutwaro|e?nkumi|o?lukumi|o?rukumi)?\b",
+    r"(k|m|bn|b|thousand|million|billion|mili+y?oni|bili+y?oni|el?ufu|elfu|tutemia|laki|o?bukadde|a?kakadde|o?bukaikuru|a?kakaikuru|o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?mitwaro|o?mutwaro|e?nkumi|o?lukumi|o?rukumi)?\b",
     re.IGNORECASE,
 )
 _AMOUNT_SUFFIX = {
@@ -170,8 +219,12 @@ _AMOUNT_SUFFIX = {
     "bn": 1_000_000_000,
     "billion": 1_000_000_000,
     "milioni": 1_000_000,
+    "miliyoni": 1_000_000,
     "bilioni": 1_000_000_000,
+    "biliyoni": 1_000_000_000,
     "elfu": 1_000,
+    "elufu": 1_000,
+    "tutemia": 1_000,
     "laki": 100_000,
     "obukadde": 1_000_000,
     "bukadde": 1_000_000,
@@ -203,16 +256,20 @@ _AMOUNT_SUFFIX = {
 
 # Multipliers placed BEFORE digits (common in Swahili, Luganda, Runyankole, & Acholi, e.g. "milioni 150", "obukadde 150", "obukaikuru 150")
 _AMOUNT_PREFIX_RE = re.compile(
-    r"\b(milioni|bilioni|elfu|laki|o?bukadde|a?kakadde|o?bukaikuru|a?kakaikuru|o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?mitwaro|o?mutwaro|e?nkumi|o?lukumi|o?rukumi)"
+    r"\b(mili+y?oni|bili+y?oni|el?ufu|elfu|tutemia|laki|o?bukadde|a?kakadde|o?bukaikuru|a?kakaikuru|o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?mitwaro|o?mutwaro|e?nkumi|o?lukumi|o?rukumi)"
     r"(?:\s{1,4}(?:bwa|kwa|za|ya|nga|me))?"
-    r"(?:\s{1,4}(?:ssente|sente|esente|cente|siringi|shilingi|shiringi|cilingi|shs|ugx))?"
+    r"(?:\s{1,4}(?:ssente|sente|esente|cente|siringi|shilingi|shiringi|cilingi|fedha|pesa|lim|shs|ugx))?"
     r"\s{1,4}(\d{1,3}(?:[,\s]\d{3}){1,6}|\d{1,15}(?:\.\d{1,4})?)\b",
     re.IGNORECASE,
 )
 _AMOUNT_PREFIX_MULTIPLIERS = {
     "milioni": 1_000_000,
+    "miliyoni": 1_000_000,
     "bilioni": 1_000_000_000,
+    "biliyoni": 1_000_000_000,
     "elfu": 1_000,
+    "elufu": 1_000,
+    "tutemia": 1_000,
     "laki": 100_000,
     "obukadde": 1_000_000,
     "bukadde": 1_000_000,
@@ -282,7 +339,7 @@ def percentages(text: str) -> set[str]:
 
     # Detect Runyankole spoken percentage phrases, e.g. "ebicweka ikumi na munaana" / "bucweka ikumi na munaana" -> "18"
     for word_phrase, num_str in _RUNYANKOLE_PCT_WORDS:
-        pattern = r"\b[eo]?b[iu]cweka\s+" + re.escape(word_phrase) + r"(?:\s+aha\s+(?:buli\s+)?kikumi)?\b"
+        pattern = r"\b[eo]?b[iu]cweka\s+" + re.escape(word_phrase) + r"(?:\s+aha\s+(?:bu[lr]i\s+)?(?:kikumi|e?igana))?\b"
         if re.search(pattern, check_text):
             results.add(num_str)
             check_text = re.sub(pattern, " ", check_text)
@@ -317,12 +374,15 @@ def canonical_amounts(text: str) -> set[float]:
     for phrase, _ in _LUGANDA_PCT_WORDS:
         without_pct = re.sub(r"\be?bitundu\s+" + re.escape(phrase) + r"\b", " ", without_pct)
     for phrase, _ in _RUNYANKOLE_PCT_WORDS:
-        without_pct = re.sub(r"\b[eo]?b[iu]cweka\s+" + re.escape(phrase) + r"(?:\s+aha\s+(?:buli\s+)?kikumi)?\b", " ", without_pct)
+        without_pct = re.sub(r"\b[eo]?b[iu]cweka\s+" + re.escape(phrase) + r"(?:\s+aha\s+(?:bu[lr]i\s+)?(?:kikumi|e?igana))?\b", " ", without_pct)
     for phrase, _ in _ACHOLI_PCT_WORDS:
         without_pct = re.sub(r"\bdula?\s+" + re.escape(phrase) + r"(?:\s+(?:i\s+kom\s+m?iya|ekomya))?\b", " ", without_pct)
     # Strip Ugandan toll-free, landline, and mobile phone numbers (e.g. 0800 117 000, +256 (0)323442055, 0772 140 000)
     # so contact lines are not falsely parsed as tax amounts
     without_pct = re.sub(r"(?:\+256[ ]?(?:\(0\)[ ]?)?|\b0)\d{2,3}[ -]?\d{3}[ -]?\d{3}\b", " ", without_pct)
+    from .number_words import normalize_vernacular_amount_words
+
+    without_pct = normalize_vernacular_amount_words(without_pct)
     amounts: set[float] = set()
 
     # 1. Prefix multipliers (e.g. "milioni 150", "obukadde 150", "emitwalo 23.5")

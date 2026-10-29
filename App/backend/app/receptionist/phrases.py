@@ -416,7 +416,7 @@ _PHRASES: dict[str, dict[str, str]] = {
         ),
         "more_detail": "Imito ngec mukene?",
         "timeout_transfer": (
-            "kica, yenyo ngec tye ka tero kare malac loyo kit ma myero obed. "
+            "Kica, yenyo ngec tye ka tero kare malac loyo kit ma myero obed. "
             "Wek akubi ki latic me URA."
         ),
         "error_transfer": (

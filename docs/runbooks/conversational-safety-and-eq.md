@@ -19,7 +19,7 @@ Checked before any router, in this order, for the taxpayer's words and the Engli
 
 | Tier | Trigger | Reply | Flag |
 |---|---|---|---|
-| Crisis | `text_signals.detect_crisis`: explicit intent ("kill myself", *okwetta*, *kujiua*) and passive ideation ("nothing to live for", "better off without me", "don't want to live anymore") | `crisis_support_reply`: crisis lines, no tax content, officer offered | always on |
+| Crisis | `text_signals.detect_crisis`: explicit intent ("kill myself", *okwetta*, *kujiua*, *okweyita*, *neko koma*) and passive ideation ("nothing to live for", "better off without me", "don't want to live anymore"), guarded by a 38-char preceding negation window (`_CRISIS_NEGATION_PREFIX_RE`) so indirect negations ("I do not want to kill myself", *Sitaki kujiua*, *Sinjagala okwetta*, *Tindikwenda okweyita*, *Pe amito neko koma*) do not false-trigger | `crisis_support_reply`: crisis lines, no tax content, officer offered | always on |
 | Check-in | `needs_wellbeing_checkin`: hopelessness ("can't cope", "I give up", "no way out", *nimechoka na maisha*, *mpeddemu essuubi*, *tinyine matsiko*, *geno peke*) **and** hardship or enforcement in this or the last two messages | `wellbeing_checkin_reply`: the same crisis lines, then the remedy question and an officer; once per conversation | `wellbeing_checkin` |
 
 Neither tier carries tax content: both are in `turn_guidance.SAFETY_MODES` (no guided-steps
