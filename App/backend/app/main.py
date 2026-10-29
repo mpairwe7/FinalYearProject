@@ -2781,6 +2781,43 @@ def _audit_staff_action(ctx: AuthContext, event_type: str, payload: dict[str, An
         logger.exception("audit append failed for %s", event_type)
 
 
+_INDEX_REBUILD_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def _exclusive_index_rebuild():
+    """One rebuild at a time, in this process and across workers sharing the status dir.
+
+    Two overlapping calls — or a retry after a proxy timeout, likely when a full
+    rebuild takes minutes — both built the same candidate collection, and the
+    second deleted the first's half-built candidate under it. A second call is
+    now refused with 409 while one runs. The file lock covers the workers of one
+    host; replicas on other hosts still need the lifecycle run as a single job.
+    """
+    if not _INDEX_REBUILD_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="An index rebuild is already running")
+    handle = None
+    try:
+        try:
+            import fcntl
+
+            from .freshness import LIFECYCLE_STATUS_PATH
+
+            path = LIFECYCLE_STATUS_PATH.with_name("index_rebuild.lock")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            handle = path.open("a")
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise HTTPException(status_code=409, detail="An index rebuild is already running") from None
+        except OSError:
+            logger.warning("Index rebuild lock file unavailable; serialising within this process only", exc_info=True)
+        yield
+    finally:
+        if handle is not None:
+            handle.close()
+        _INDEX_REBUILD_LOCK.release()
+
+
 @app.post("/v1/index", tags=["knowledge"])
 def trigger_indexing(
     request: Request,
@@ -2788,33 +2825,46 @@ def trigger_indexing(
 ) -> dict:
     """Trigger document re-indexing into the Qdrant vector store.
 
-    Requires ``Authorization: Bearer <INDEX_API_KEY>`` when configured.
-    Ingests all PDFs and FAQ CSVs, rebuilds the collection, and
-    re-initialises the hybrid retriever.
+    Requires ``Authorization: Bearer <INDEX_API_KEY>`` when configured. Runs
+    the staged index lifecycle (``app.index_lifecycle``): the whole corpus —
+    FAQ, teacher QA, PDF and crawl chunks — into a candidate collection, a
+    canary retrieval gate, then one atomic alias swap; then re-initialises the
+    hybrid retriever (G286).
+
+    It used to rebuild the live collection in place from FAQ and teacher-QA
+    rows only, with ``recreate=True``. One call deleted the PDF and crawl
+    corpus — most of the index — left every search failing while it rebuilt,
+    and wrote no freshness status, so cached answers outlived the rebuild. A
+    legacy physical collection (not an alias) is refused with 409 rather than
+    deleted; the message names the alias to migrate to.
     """
     _require_ops_key(request)
 
     from .faq_corpus import CorpusValidationError
-    from .indexer import (
-        DATA_DIR,
-        FAQ_JSONL_DIR,
-        TEACHER_QA_DIR,
-        build_index,
-        ingest_faq_jsonls,
-        ingest_teacher_qa_jsonls,
-    )
+    from .freshness import write_lifecycle_status
+    from .index_lifecycle import IndexLifecycleError, rebuild_if_needed
 
-    try:
-        documents: list[dict] = []
-        documents.extend(ingest_faq_jsonls(DATA_DIR, FAQ_JSONL_DIR))
-        documents.extend(ingest_teacher_qa_jsonls(TEACHER_QA_DIR))
-    except CorpusValidationError as exc:
-        raise HTTPException(status_code=422, detail=f"Vector corpus validation failed: {exc}") from exc
+    def _record_failure(exc: Exception) -> None:
+        with contextlib.suppress(Exception):
+            write_lifecycle_status(ok=False, error=str(exc))
 
-    if not documents:
-        raise HTTPException(status_code=404, detail="No FAQ or teacher-QA JSONL documents found to index")
-
-    stats = build_index(documents, recreate=True)
+    with _exclusive_index_rebuild():
+        try:
+            stats = rebuild_if_needed(force=True)
+        except IndexLifecycleError as exc:
+            _record_failure(exc)
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except CorpusValidationError as exc:
+            _record_failure(exc)
+            raise HTTPException(status_code=422, detail=f"Vector corpus validation failed: {exc}") from exc
+        except Exception as exc:
+            _record_failure(exc)
+            # The alias may already point at the new collection: bookkeeping
+            # after promotion re-raises. Re-bind, so this process does not go
+            # on querying new vectors with the old BM25 state and cache stamp.
+            model._retriever_ready = model._retriever.initialize()
+            logger.exception("Index rebuild failed")
+            raise HTTPException(status_code=500, detail="Index rebuild failed; see the lifecycle status") from exc
 
     # Re-initialise the retriever so it picks up the new collection
     model._retriever_ready = model._retriever.initialize()
@@ -4010,6 +4060,11 @@ def create_tombstone_endpoint(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # Retire cached answers at once on this replica; others within the cache
+    # generation's 60 s memo (G277).
+    from .cache import reset_index_stamp
+
+    reset_index_stamp()
     _audit_staff_action(ctx, "staff.tombstone_created", {"tombstone_id": tomb.get("id")})
     return tomb
 
@@ -4024,6 +4079,9 @@ def delete_tombstone_endpoint(
     ok = db.delete_corpus_tombstone(tombstone_id)
     if not ok:
         raise HTTPException(status_code=404, detail="tombstone not found")
+    from .cache import reset_index_stamp
+
+    reset_index_stamp()
     _audit_staff_action(ctx, "staff.tombstone_deleted", {"tombstone_id": tombstone_id})
     return {"ok": True, "id": tombstone_id}
 

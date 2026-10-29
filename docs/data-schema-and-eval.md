@@ -140,7 +140,7 @@ User Query
   → Language Detection (en, lg, sw, nyn, ach)
   → InputGuard (OWASP LLM01: 11 prompt injection patterns + harmful intent + length)
   → Workflow Check [FLAG_WORKFLOWS] — trigger guided slot-filling if matched
-  → Semantic Cache Lookup (cosine ≥ 0.92 → instant return)
+  → Semantic Cache Lookup (same corpus generation + same question terms + cosine ≥ 0.92 → instant return; G277)
   → Supervisor Routing [FLAG_AGENTIC_MODE] — RAG | TOOLS | SPECIALIST | CLARIFY | ESCALATE
   → HybridRetriever.search()
       ├─ Dense: BAAI/bge-m3 (1024-dim, multilingual, MTEB 63.0)

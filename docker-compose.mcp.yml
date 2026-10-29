@@ -40,7 +40,9 @@ x-mcp-server: &mcp-server
     # The simulators keep their fixture databases here and seed them on first
     # use. In memory on purpose: nothing a simulator holds is a URA record,
     # and a restart returning it to the fixtures is the right behaviour.
-    - /app/data_store
+    # Owned by the image's appuser: a bare entry mounts root:root 0755, which
+    # the read-only appuser container cannot write (G296).
+    - /app/data_store:uid=10001,gid=10001
   networks:
     - ura-network
 

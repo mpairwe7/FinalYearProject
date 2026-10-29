@@ -34,6 +34,22 @@ ABSTENTION_THRESHOLD_NORM_NYN = float(os.getenv("ABSTENTION_THRESHOLD_NORM_NYN",
 ABSTENTION_THRESHOLD_NORM_ACH = float(os.getenv("ABSTENTION_THRESHOLD_NORM_ACH", "0.20"))
 ESCALATION_THRESHOLD = float(os.getenv("ESCALATION_THRESHOLD", "0.25"))
 
+
+def _record_abstention(signal: str, abstained: bool) -> None:
+    """Count one abstention decision by the signal it rested on.
+
+    ``rerank`` (calibrated cross-encoder), ``lexical`` (the IDF floor),
+    ``no_hits``, or ``none`` — hits with no relevance score at all, answered
+    anyway. ``none`` is the fail-open path; a deployment where it dominates is
+    answering without a relevance gate, and nothing else would show it.
+    """
+    from .analytics import metrics
+
+    metrics.inc(
+        "retrieval_abstention_decisions_total",
+        labels={"signal": signal, "abstained": "true" if abstained else "false"},
+    )
+
 # ---------------------------------------------------------------------------
 # Unicode canonicalization (CVE-mitigation: homoglyph & zero-width evasion)
 # ---------------------------------------------------------------------------
@@ -1355,13 +1371,15 @@ class OutputGuard:
         Failing both, relevance is unknown and we do not abstain on an
         incomparable raw score.
 
-        For cross-lingual queries (Luganda or Swahili), reranker logits against
-        an English corpus are systematically lower due to cross-lingual embedding
-        geometry; a calibrated threshold of 0.02 is used.
+        For cross-lingual queries (Luganda, Swahili, Runyankole, Acholi),
+        reranker scores against an English corpus are systematically lower due
+        to cross-lingual embedding geometry; ``ABSTENTION_THRESHOLD_NORM_<LOCALE>``
+        (default 0.20) is used instead.
         """
         if not hits:
+            _record_abstention("no_hits", True)
             return True
-        from .retriever import LEXICAL_RELEVANCE_FLOOR, hit_relevance
+        from .retriever import LEXICAL_RELEVANCE_FLOOR, gating_relevance
 
         loc = (locale or "en").strip().lower().split("-")[0]
         if loc == "lg":
@@ -1375,9 +1393,13 @@ class OutputGuard:
         else:
             eff_threshold = threshold
 
-        scores = [r for h in hits if (r := hit_relevance(h)) is not None]
+        # The reranker's own score: ranking boosts reorder evidence, they do
+        # not make a weak passage answerable (G284).
+        scores = [r for h in hits if (r := gating_relevance(h)) is not None]
         if scores:
-            return max(scores) < eff_threshold
+            abstain = max(scores) < eff_threshold
+            _record_abstention("rerank", abstain)
+            return abstain
 
         stamped: list[float] = []
         for hit in hits:
@@ -1389,8 +1411,11 @@ class OutputGuard:
             except (TypeError, ValueError):
                 continue
         if not stamped:
+            _record_abstention("none", False)
             return False  # degraded mode — cannot assess relevance by score
-        return max(stamped) < LEXICAL_RELEVANCE_FLOOR
+        abstain = max(stamped) < LEXICAL_RELEVANCE_FLOOR
+        _record_abstention("lexical", abstain)
+        return abstain
 
     @staticmethod
     def should_escalate(

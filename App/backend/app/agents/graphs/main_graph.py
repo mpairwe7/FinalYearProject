@@ -197,7 +197,7 @@ def node_retrieve(state: AgentGraphState) -> NodeResult:
                     hits = search(query, top_k=state.top_k)
         if hits:
             hits, was_corrected = corrective_retrieve(
-                query, retriever, hits, top_k=state.top_k, subject=subject
+                query, retriever, hits, top_k=state.top_k, subject=subject, locale=state.locale
             )
 
     # The statutory leg can answer a rate query even when dense/keyword

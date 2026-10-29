@@ -4551,6 +4551,17 @@ def _canonical_faq_url(source: str) -> str:
     return canonical_source_url(source)
 
 
+def _retrieval_degraded(retriever: Any) -> bool:
+    """``retriever.serving_degraded()``, tolerating doubles that lack it."""
+    probe = getattr(retriever, "serving_degraded", None)
+    if not callable(probe):
+        return False
+    try:
+        return bool(probe())
+    except Exception:
+        return False
+
+
 def _faq_hits_to_retrieval_hits(
     entries: list[dict[str, str]],
     locale: str = "en",
@@ -4770,6 +4781,15 @@ class ChatModel:
     def __init__(self) -> None:
         self.name = llm_module.LLM_MODEL or "unknown"
         self._faq_index, self._tag_labels = _load_faq_data(_DATA_DIR)
+        # The spelling corrector must not "fix" words the FAQ rows use (G282);
+        # on a keyword-only deployment these rows are the whole corpus.
+        from .query import register_corpus_text
+
+        register_corpus_text(
+            f"{entry.get('question', '')} {entry.get('answer', '')}"
+            for entries in self._faq_index.values()
+            for entry in entries
+        )
 
         # Hybrid retriever (graceful degradation)
         self._retriever = HybridRetriever()
@@ -10906,6 +10926,8 @@ class ChatModel:
                 and not connector_namespaces
                 and not is_model_welfare_query(router_message or message)
             )
+            # Set when keyword fallback answers for an unavailable vector index.
+            degraded_retrieval = False
             # A taxpayer who chose a service and asked it for a record is not
             # asking for a template. The keyword answers below cannot read that
             # service, and one of them answered "check EFRIS" with an invented
@@ -11747,6 +11769,11 @@ class ChatModel:
                         locale=locale,
                     )
                     hits = _faq_hits_to_retrieval_hits(kw_hits, locale=locale)
+                # An answer built from these hits during an outage is not the
+                # corpus's answer; cached, it would keep being served for the
+                # cache TTL after Qdrant recovers. Curated templates, which do
+                # not depend on retrieval, stay cacheable.
+                degraded_retrieval = _retrieval_degraded(self._retriever)
 
             # 3b. Corrective RAG — re-retrieve if quality is low (Phase 6)
             if not welfare_cats and hits and self._retriever_ready:
@@ -11758,6 +11785,7 @@ class ChatModel:
                         top_k=top_k,
                         filters=extract_retrieval_filters(retrieval_query) or None,
                         subject=user_id or None,
+                        locale=locale,
                     )
                     if was_corrected:
                         from .query import extract_retrieval_preferences
@@ -12740,9 +12768,11 @@ class ChatModel:
         # Store in semantic cache (Phase 5) — a copy, so the empathy prefix
         # below never reaches a later (possibly calm) user via a cache hit.
         # Never cache escalated, contradicted-withheld, or ticket-bearing turns
-        # (OWASP Agentic Risk #6: cross-session cache poisoning prevention).
+        # (OWASP Agentic Risk #6: cross-session cache poisoning prevention),
+        # nor an answer built from keyword fallback during a Qdrant outage.
         if (
             cache_allowed
+            and not degraded_retrieval
             and flags.is_enabled("semantic_cache")
             and retrieval_mode not in ("blocked", "abstained", "model_welfare")
             and not escalate
@@ -12998,6 +13028,8 @@ class ChatModel:
             and not connector_namespaces
             and not is_model_welfare_query(router_message or message)
         )
+        # Set when keyword fallback answers for an unavailable vector index.
+        degraded_retrieval = False
         # See generate(): a lookup in a service the taxpayer chose is not a
         # question for the keyword templates below.
         connector_intent = self._connector_intent(
@@ -13661,6 +13693,8 @@ class ChatModel:
                 locale=locale,
             )
             hits = _faq_hits_to_retrieval_hits(kw_hits, locale=locale)
+            # Parity with generate(): never cache an answer built during an outage.
+            degraded_retrieval = _retrieval_degraded(self._retriever)
 
         # Corrective RAG (Phase 6)
         if not welfare_cats_s and hits and self._retriever_ready:
@@ -13671,6 +13705,7 @@ class ChatModel:
                 top_k=top_k,
                 filters=extract_retrieval_filters(retrieval_query) or None,
                 subject=user_id or None,
+                locale=locale,
             )
             if was_corrected:
                 retrieval_mode = (
@@ -14082,7 +14117,7 @@ class ChatModel:
             "_case_facts": _ACTIVE_CASE_FACTS.get(),
             "current_topic": str(stream_topic_ctx.get("current_topic") or ""),
             "portal_copilot": copilot_card_s,
-            "_cache_allowed": cache_allowed,
+            "_cache_allowed": cache_allowed and not degraded_retrieval,
         }
 
     @staticmethod

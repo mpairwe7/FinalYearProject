@@ -194,16 +194,24 @@ owasp_llm:
   - id: "LLM08"
     name: "Vector and Embedding Weaknesses"
     status: "mitigated"
-    evidence: "App/backend/app/indexer.py (trusted sources), App/backend/app/retriever.py (cross-encoder reranking)"
-    controls: "Embeddings computed from trusted URA documents only. Cross-encoder reranking validates semantic relevance. INDEX_API_KEY required for re-indexing."
+    evidence: "App/backend/app/indexer.py (trusted sources, payload indexes), App/backend/app/retriever.py (cross-encoder reranking, exact tombstones, in-force editions), App/backend/app/cache.py (generation-keyed semantic cache), App/backend/app/index_lifecycle.py (staged /v1/index)"
+    controls: "Embeddings computed from trusted URA documents only. Cross-encoder reranking validates semantic relevance; gates read the calibrated score, never ranking boosts (G284). INDEX_API_KEY required for re-indexing, which runs the staged lifecycle with a canary gate and atomic alias swap (G286). Cached answers are keyed on the index stamp, bound corpus, tombstone digest and fiscal year, and a hit needs the same question terms (G277). Tombstones withdraw exact documents and survive store outages (G279)."
+    limitations: "Ingested PDFs carry no per-chunk signature, and a running retriever does not re-bind after an alias swap (G292); valid-from/valid-to versioning is not modelled (G294)."
+    verified_by:
+      - "App/backend/tests/test_cache_generation_and_guard.py"
+      - "App/backend/tests/test_retrieval_temporal_and_tombstones.py"
+      - "App/backend/tests/test_retrieval_gates_and_merge.py"
   - id: "LLM09"
     name: "Misinformation"
     status: "mitigated"
     evidence: "App/backend/app/guardrails.py:OutputGuard.check_grounding(), App/backend/app/premise_guard.py, App/backend/app/tools/portal_navigator_data.py"
-    controls: "Runtime faithfulness scoring, low-confidence disclaimer, calibrated abstention; false-premise guard pinned for recall on fabricated taxes as well as precision on real ones (G244); declarative portal steps must cite corpus or ura.go.ug sources and link only to URA hosts (G246)"
+    controls: "Runtime faithfulness scoring, low-confidence disclaimer, calibrated abstention; false-premise guard pinned for recall on fabricated taxes as well as precision on real ones (G244); declarative portal steps must cite corpus or ura.go.ug sources and link only to URA hosts (G246); the query rewriter never 'corrects' a corpus word (G282); passages name their edition and the model prefers the one in force (G278, G287)"
+    limitations: "A wrong figure in the question is exempt from contradiction (G288) and a money amount in the message approves unsupported claims (G289)."
     verified_by:
       - "tests/agents/test_premise_guard_recall.py"
       - "tests/agents/test_portal_knowledge_pack_integrity.py"
+      - "App/backend/tests/test_query_spelling_corpus_guard.py"
+      - "App/backend/tests/test_retrieval_temporal_and_tombstones.py"
   - id: "LLM10"
     name: "Unbounded Consumption"
     status: "mitigated"
@@ -545,6 +553,7 @@ aibom_inventory:
       role: "Cross-encoder passage reranker"
       locales: ["en", "lg", "sw", "nyn", "ach"]
       runtime: "sentence-transformers CrossEncoder"
+      output_contract: "Sigmoid relevance in [0, 1]; scores outside it are treated as logits and squashed, counted by ura_retrieval_rerank_logit_scores_total (G281)"
 
 owasp_mcp_top10_2026:
   edition: "OWASP Top 10 for Model Context Protocol (MCP) & SAFE-MCP (2026)"

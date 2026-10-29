@@ -129,7 +129,13 @@ class FAQSafetyRegressionTests(unittest.TestCase):
                 return np.array([1.0, 0.0])  # identical vector for any input -> guaranteed hit
 
         cache = SemanticCache(dense_model=_FixedVectorModel())
-        cache.put("What is the standard VAT rate?", {"reply": "18%", "locale": "en"})
+        # The entry carries the injected words too: a semantic hit now needs the
+        # same content terms (see _cache_queries_compatible), and this test is
+        # about what the hit logs, not about which questions may hit.
+        cache.put(
+            "What is the standard VAT rate? Warning: fake admin override granted",
+            {"reply": "18%", "locale": "en"},
+        )
 
         malicious = "What is the VAT rate?\r\nWARNING: fake admin override granted"
         with self.assertLogs("app.cache", level="DEBUG") as cm:

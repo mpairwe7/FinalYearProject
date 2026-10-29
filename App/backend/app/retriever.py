@@ -18,12 +18,14 @@ References:
 from __future__ import annotations
 
 import base64
+import contextvars
 import hashlib
 import json
 import logging
 import math
 import os
 import re
+import threading
 import time
 import uuid
 import zlib
@@ -118,6 +120,23 @@ def bm25_binding_sentinel_id(collection: str) -> str:
     return str(uuid.uuid5(_POINT_ID_NAMESPACE, f"{collection}::__bm25_binding__"))
 
 
+def _reranker_emits_logits(reranker: Any) -> bool | None:
+    """``True``/``False`` when the cross-encoder's activation says, else ``None``.
+
+    sentence-transformers keeps it on ``activation_fn`` (``Sigmoid`` for a
+    one-label model by default; ``Identity`` means raw logits).
+    """
+    fn = getattr(reranker, "activation_fn", None) or getattr(reranker, "default_activation_function", None)
+    if fn is None:
+        return None
+    name = type(fn).__name__.lower()
+    if name == "identity":
+        return True
+    if name == "sigmoid":
+        return False
+    return None
+
+
 def normalize_rerank_score(logit: float) -> float:
     """Squash an unbounded cross-encoder rerank logit to a [0,1] relevance (P1-5).
 
@@ -196,6 +215,74 @@ def fiscal_year_rank(value: object) -> int | None:
     return int(match.group(1)) if match else None
 
 
+#: An edition this many fiscal years older than the one in force is demoted
+#: when the question does not ask about its year. Four reproduces the years
+#: the rule used to hardcode (2020-2022, from FY2026-27) and then moves with
+#: the fiscal year instead of freezing.
+STALE_EDITION_YEARS = max(1, int(os.getenv("RETRIEVER_STALE_EDITION_YEARS", "4")))
+#: Calibrated-relevance demotion for such an edition. One number for the score
+#: the hits are sorted by and the score abstention reads: the rule used to take
+#: 0.25 from one and 0.15 from the other, so ranking and gating disagreed.
+STALE_EDITION_PENALTY = 0.15
+_EDITION_TEXT_RE = re.compile(r"\b(?:rates|fy)\s+(20\d{2})\b")
+#: Digit boundaries, not word boundaries: "FY2021-22" names 2021, and ``\b``
+#: finds no boundary between the "Y" and the "2".
+_QUERY_YEAR_RE = re.compile(r"(?<!\d)(20\d{2})(?!\d)")
+
+
+def edition_start_year(hit: dict[str, Any]) -> int | None:
+    """Start year of the edition *hit* was taken from, or ``None`` if unknown.
+
+    Read from the edition's fiscal-year label, then from a fiscal-year label in
+    its source filename, and only for an unlabelled chunk from its text ("rates
+    2021", "FY 2021"). A bare year in a filename is not an edition: Acts,
+    regulations and tariffs are named for the year they were made and stay in
+    force until replaced. The rule this replaces matched bare years as
+    substrings, so it demoted the EAC CET 2022 version, the Citizenship and
+    Immigration Control fees regulations of 2021 and a September 2024
+    newsletter (``…_202024…``) against every question that did not name 2020-22.
+    """
+    rank = fiscal_year_rank(hit.get("fiscal_year"))
+    if rank is not None:
+        return rank
+    source = str(hit.get("source") or "")
+    if source:
+        from .pdf_corpus import fiscal_year_from_name
+
+        rank = fiscal_year_rank(fiscal_year_from_name(Path(source).stem))
+        if rank is not None:
+            return rank
+    cue = _EDITION_TEXT_RE.search(str(hit.get("text") or "").lower())
+    return int(cue.group(1)) if cue else None
+
+
+def demote_stale_editions(query: str, candidates: list[dict[str, Any]]) -> None:
+    """Lower reranked editions :data:`STALE_EDITION_YEARS` or more behind, in place.
+
+    Retrieval scores cannot tell a repealed rate table from the one in force —
+    the two editions read alike — so an old edition can outrank the current
+    one. Measured against :func:`app.query.current_fiscal_year`, so it follows
+    the year in force (and ``CURRENT_FISCAL_YEAR``) rather than a list of years.
+    A question that names the edition's year is asking about it, and keeps it.
+    """
+    from .query import current_fiscal_year
+
+    current = fiscal_year_rank(current_fiscal_year())
+    if current is None:
+        return
+    asked_years = {int(y) for y in _QUERY_YEAR_RE.findall(query or "")}
+    for candidate in candidates:
+        if candidate.get("score_norm") is None:
+            continue
+        start = edition_start_year(candidate)
+        if start is None or current - start < STALE_EDITION_YEARS:
+            continue
+        if start in asked_years or start + 1 in asked_years:
+            continue
+        candidate["score_rerank"] = float(candidate.get("score_rerank") or 0.0) - STALE_EDITION_PENALTY
+        candidate["score_norm"] = max(0.0, float(candidate["score_norm"]) - STALE_EDITION_PENALTY)
+
+
 def _dedupe_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Drop near-identical passages, keeping the best copy.
 
@@ -239,43 +326,115 @@ def _dedupe_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]
     return kept
 
 
+#: Set when a search in this request failed or was refused by the circuit.
+#: Per request, not per process: one request's failure says nothing about
+#: another's, and the circuit stays CLOSED until several have failed (G277).
+_SEARCH_FAILED: contextvars.ContextVar[bool] = contextvars.ContextVar("retrieval_search_failed", default=False)
+
+#: The tombstones from the last successful read of the store.
+_last_tombstones: list[dict[str, Any]] | None = None
+_last_tombstones_lock = threading.Lock()
+
+
+def active_tombstones_snapshot() -> tuple[list[dict[str, Any]], bool]:
+    """``(tombstones, known)``: what retrieval withdraws, and whether that is known.
+
+    A read failure used to return every candidate unfiltered, so a passage
+    staff had withdrawn came back for as long as the database was unreachable
+    — the moment the corrected answer matters most is not when the store is
+    healthy. The last good read is the best evidence of what is withdrawn, so
+    it is served (``known``) through an outage. ``known`` is ``False`` only
+    when the store has never been read: then nothing is filtered, and the
+    response cache must not treat the empty set as "no tombstones".
+    """
+    global _last_tombstones
+    try:
+        from . import database as db
+
+        rows = list(db.get_active_corpus_tombstones() or [])
+    except Exception:
+        metrics.inc("retrieval_tombstone_read_failures_total")
+        with _last_tombstones_lock:
+            cached = _last_tombstones
+        if cached is None:
+            logger.warning(
+                "Corpus tombstones unreadable and never read; withdrawn passages are not filtered"
+            )
+            return [], False
+        logger.warning("Corpus tombstones unreadable; applying the %d read last", len(cached))
+        return cached, True
+    with _last_tombstones_lock:
+        _last_tombstones = rows
+    return rows, True
+
+
+def _active_tombstones() -> list[dict[str, Any]]:
+    """The tombstones :func:`active_tombstones_snapshot` says retrieval applies."""
+    return active_tombstones_snapshot()[0]
+
+
+def _source_identity(value: str) -> tuple[str, str]:
+    """``(name, basename)`` of a source or tombstone URI, casefolded, minus query and fragment."""
+    raw = (value or "").strip().casefold().split("#", 1)[0].split("?", 1)[0].rstrip("/")
+    return raw, raw.rsplit("/", 1)[-1]
+
+
+def tombstone_names_source(tombstone_uri: str, source: str) -> bool:
+    """Whether a tombstone for *tombstone_uri* withdraws the document *source*.
+
+    The same document, not a similar name. This used to be substring
+    containment in both directions, so a tombstone on ``outdated_vat.pdf``
+    also withdrew every chunk of ``vat.pdf``, and one naming a short fragment
+    withdrew whatever contained it. Now one must equal the other or end with
+    it on a path boundary: ``docs/vat_guide.pdf`` names
+    ``/app/Data/docs/vat_guide.pdf`` and the URL it was crawled from, a bare
+    filename names any path ending in it, and ``archive/2024/guide.pdf`` does
+    not name ``archive/2025/guide.pdf``.
+    """
+    t_name, _ = _source_identity(tombstone_uri)
+    s_name, _ = _source_identity(source)
+    if not t_name or not s_name:
+        return False
+    return t_name == s_name or s_name.endswith("/" + t_name) or t_name.endswith("/" + s_name)
+
+
 def _filter_tombstoned_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Drop any candidate chunk matching an active corpus tombstone (Solution B)."""
+    """Drop any candidate chunk matching an active corpus tombstone (Solution B).
+
+    A tombstone naming a chunk withdraws that chunk; one naming only a source
+    withdraws the whole document.
+    """
     if not candidates:
         return candidates
     try:
-        from . import database as db
         from .flags import flags
 
         if not flags.is_enabled("knowledge_discrepancy_reporting"):
             return candidates
-
-        tombstones = db.get_active_corpus_tombstones()
     except Exception:
         return candidates
 
+    tombstones = _active_tombstones()
     if not tombstones:
         return candidates
 
-    bad_uris = {str(t.get("source_uri") or "").strip().lower() for t in tombstones if t.get("source_uri")}
     bad_chunks = {str(t.get("chunk_id") or "").strip() for t in tombstones if t.get("chunk_id")}
+    withdrawn_sources = [
+        str(t.get("source_uri") or "")
+        for t in tombstones
+        if str(t.get("source_uri") or "").strip() and not str(t.get("chunk_id") or "").strip()
+    ]
 
     survived = []
     for c in candidates:
-        src = str(c.get("source") or "").strip().lower()
+        src = str(c.get("source") or "")
         chunk = str(c.get("chunk_id") or c.get("id") or "").strip()
         if chunk and chunk in bad_chunks:
             logger.debug("Corpus tombstone dropped chunk: %s", chunk)
             continue
-        if src and any(bad_uri in src or src in bad_uri for bad_uri in bad_uris if bad_uri):
-            matching_source = [
-                t for t in tombstones
-                if str(t.get("source_uri") or "").strip().lower() in src
-                or src in str(t.get("source_uri") or "").strip().lower()
-            ]
-            if any(not str(t.get("chunk_id") or "").strip() for t in matching_source):
-                logger.debug("Corpus tombstone dropped source: %s", src)
-                continue
+        if src and any(tombstone_names_source(uri, src) for uri in withdrawn_sources):
+            logger.debug("Corpus tombstone dropped source: %s", src)
+            continue
         survived.append(c)
     return survived
 
@@ -302,6 +461,37 @@ def hit_relevance(hit: dict[str, Any]) -> float | None:
         except (TypeError, ValueError):
             return None
     return None
+
+
+def gating_relevance(hit: dict[str, Any]) -> float | None:
+    """Calibrated relevance for *deciding*: the reranker's own score, unadjusted.
+
+    :func:`hit_relevance` orders hits, and so carries the soft preferences —
+    current fiscal year +0.08, topic +0.05, sector guide -0.06, stale edition
+    -0.15. Those reorder evidence; they are not evidence. Read as relevance by
+    abstention, pruning and corrective RAG, they lifted a 0.18 passage over the
+    0.30 abstention threshold because it was this year's edition (G284).
+    """
+    value = hit.get("score_calibrated")
+    if value is not None:
+        with suppress(TypeError, ValueError):
+            return float(value)
+    return hit_relevance(hit)
+
+
+def observe_search_relevance(hits: list[dict[str, Any]], mode: str) -> None:
+    """Record the best calibrated relevance one search served, by retrieval mode.
+
+    The number that moves first when the corpus, the embedder or the reranker
+    drifts — before any answer is judged wrong — so its distribution is the
+    drift signal. A search that served nothing scored is counted instead: in
+    that mode abstention reads only the lexical floor.
+    """
+    scores = [r for hit in hits if (r := gating_relevance(hit)) is not None]
+    if scores:
+        metrics.observe("retrieval_top_relevance_score", max(scores), labels={"mode": mode})
+    elif hits:
+        metrics.inc("retrieval_unscored_searches_total", labels={"mode": mode})
 
 
 #: Calibrated relevance below which a passage is not worth showing the
@@ -354,6 +544,8 @@ _LEXICAL_TOKEN_RE = re.compile(r"[a-z0-9]+")
 #: already concluded from its own measurements. Closing it needs a signal that
 #: separates: the cross-encoder where it runs, or a judge over the candidates.
 LEXICAL_RELEVANCE_FLOOR = float(os.getenv("RETRIEVER_LEXICAL_FLOOR", "0.50"))
+#: The least IDF-weighted coverage the three-matched-terms lift may start from.
+LEXICAL_OVERRIDE_MIN = LEXICAL_RELEVANCE_FLOOR / 2
 
 
 def active_retrieval_mode(retriever: object | None, *, ready: bool) -> str:
@@ -443,18 +635,28 @@ def lexical_relevance(
         else:
             score = sum(w for term, w in weights.items() if term in present) / total
 
-    # Check question span if query contains a conditional or situational preamble
+    # Check question span if query contains a conditional or situational preamble.
+    # Weighted like the whole query: the table above records plain recall as
+    # the variant that does not separate on-domain from off-domain at all.
     from .query import extract_question_span
     q_span = extract_question_span(query)
     if q_span and q_span != query:
         span_terms = _lexical_terms(q_span)
         if span_terms:
-            span_score = len(span_terms & present) / len(span_terms)
-            score = max(score, span_score)
+            span_weights = {term: (encoder.term_idf(term) if encoder is not None else 1.0) for term in span_terms}
+            span_total = sum(span_weights.values())
+            if span_total > 0:
+                span_score = sum(w for term, w in span_weights.items() if term in present) / span_total
+                score = max(score, span_score)
 
+    # Three matched content words lift a long question to the floor — but only
+    # with some IDF evidence behind them. Unconditionally, any question sharing
+    # three common words with a chunk ("bank", "business", "account") cleared
+    # the only relevance gate a sparse-only deployment has, at an IDF score of
+    # 0.10 (G283).
     matched_count = len(terms & present)
-    if matched_count >= 3 and score < LEXICAL_RELEVANCE_FLOOR:
-        score = max(score, LEXICAL_RELEVANCE_FLOOR)
+    if matched_count >= 3 and LEXICAL_OVERRIDE_MIN <= score < LEXICAL_RELEVANCE_FLOOR:
+        score = LEXICAL_RELEVANCE_FLOOR
 
     return score
 
@@ -731,27 +933,70 @@ def rrf_fuse_ranked_lists(
     return fused
 
 
+def _merge_rank_key(hit: dict[str, Any]) -> tuple[int, float, float]:
+    relevance = hit_relevance(hit)
+    return (1 if relevance is not None else 0, relevance or 0.0, float(hit.get("score_rrf") or 0.0))
+
+
 def merge_retrieval_hits(
     batches: list[list[dict[str, Any]]],
     *,
     top_k: int,
+    per_intent: bool = True,
 ) -> list[dict[str, Any]]:
-    """Dedupe and re-rank hits from parallel sub-query searches."""
-    merged: list[dict[str, Any]] = []
-    for batch in batches:
-        merged.extend(batch)
-    if not merged:
+    """Dedupe and re-rank hits from parallel sub-query searches.
+
+    Each batch answers one intent of a multi-intent question, and scores across
+    batches say nothing about which intent matters. "What is the VAT rate and
+    how is PAYE computed?" can score its VAT passages 0.95 and its PAYE ones
+    0.45; sorted together, cut to ``top_k`` and pruned against the overall
+    best, no PAYE passage survived and the model answered half the question
+    (G285). Each batch is now pruned against its own best, and each batch's
+    best hit keeps a place before the rest compete on score — if it clears the
+    context floor: a sub-query that found nothing relevant ("… and thanks")
+    earns no place.
+
+    ``per_intent=False`` is for batches that are one question asked two ways,
+    such as the native and translated legs of G18. Their leaders are not
+    separate evidence, so the old single cut applies: one global ranking,
+    pruned against the overall best, as G128 requires.
+    """
+    if not per_intent:
+        merged = _dedupe_candidates([hit for batch in batches for hit in batch])
+        merged.sort(key=_merge_rank_key, reverse=True)
+        return prune_context(merged[:top_k])
+    pruned = [sorted(prune_context(list(batch)), key=_merge_rank_key, reverse=True) for batch in batches if batch]
+    if not pruned:
         return []
-    merged = _dedupe_candidates(merged)
-    merged.sort(
-        key=lambda h: (
-            1 if hit_relevance(h) is not None else 0,
-            hit_relevance(h) or 0.0,
-            float(h.get("score_rrf") or 0.0),
+
+    def _earns_a_place(hit: dict[str, Any]) -> bool:
+        relevance = gating_relevance(hit)
+        return relevance is None or relevance >= _CONTEXT_FLOOR
+
+    leaders = sorted(
+        (batch[0] for batch in pruned if _earns_a_place(batch[0])), key=_merge_rank_key, reverse=True
+    )
+    leader_ids = {hit_identity(hit) for hit in leaders}
+    # Each batch's own pruning always keeps its top hit, so a batch that found
+    # nothing relevant would still compete here; the floor applies to all.
+    rest = sorted(
+        (
+            hit
+            for batch in pruned
+            for hit in batch
+            if hit_identity(hit) not in leader_ids and _earns_a_place(hit)
         ),
+        key=_merge_rank_key,
         reverse=True,
     )
-    return prune_context(merged[:top_k])
+    # Dedupe keeps the first copy it meets, so the leaders keep their places.
+    merged = _dedupe_candidates(leaders + rest)[:top_k]
+    if not merged:
+        # Nothing cleared the floor: keep the single best hit, as prune_context
+        # does, and let abstention decide whether to answer from it.
+        merged = sorted((batch[0] for batch in pruned), key=_merge_rank_key, reverse=True)[:1]
+    merged.sort(key=_merge_rank_key, reverse=True)
+    return merged
 
 
 def prune_context(
@@ -789,7 +1034,7 @@ def prune_context(
     floor = _CONTEXT_FLOOR if floor is None else floor
     relative_drop = _CONTEXT_RELATIVE_DROP if relative_drop is None else relative_drop
 
-    scored = [(h, hit_relevance(h)) for h in hits]
+    scored = [(h, gating_relevance(h)) for h in hits]
     if any(rel is None for _, rel in scored):
         return hits  # degraded mode — no calibrated scale to threshold against
 
@@ -1022,6 +1267,9 @@ class HybridRetriever:
         self._reranker: Any = None
         self._sparse_encoder = BM25SparseEncoder()
         self._query_vec_cache: OrderedDict[str, list[float]] = OrderedDict()
+        self._query_vec_lock = threading.Lock()
+        #: Whether the loaded reranker emits logits; ``None`` until known (G281).
+        self._rerank_logit_scale: bool | None = None
         self._ready = False
         # Disabled at init time if the loaded bm25_state is out of sync with
         # the live Qdrant vectors (P1-6) — search then runs dense-only.
@@ -1164,6 +1412,15 @@ class HybridRetriever:
                 with open(BM25_STATE_PATH) as f:
                     self._sparse_encoder = BM25SparseEncoder.from_dict(json.load(f))
                 logger.info("Loaded BM25 state from %s", BM25_STATE_PATH)
+            # The spelling guard follows the corpus being served (G282), and so
+            # does the response cache's generation (G277).
+            from .cache import register_index_binding
+            from .query import register_corpus_vocabulary
+
+            register_corpus_vocabulary(self._sparse_encoder._vocab)
+            register_index_binding(
+                str((binding or {}).get("source_corpus_hash") or (binding or {}).get("corpus_hash") or "")
+            )
             self._verify_bm25_binding(binding)
             if not self._verify_embedder_binding():
                 # Both halves of hybrid search are untrustworthy against this
@@ -1533,6 +1790,27 @@ class HybridRetriever:
         the circuit breaker in ``search()`` handles transient failures."""
         return self._ready and (self._client is not None or self._vectorize_mode)
 
+    def serving_degraded(self) -> bool:
+        """Whether the vector index this deployment expects is unavailable now.
+
+        True while Qdrant is configured but not connected, or while its circuit
+        is open or probing. Retrieval then falls back to keyword search over the
+        FAQ rows, and an answer from that fallback describes the outage rather
+        than the corpus: cached, it would outlive the outage by the cache TTL.
+        False for a deployment that runs without Qdrant by design.
+
+        Also True when a search in this request failed below the circuit's
+        threshold: the first failures leave the circuit CLOSED, and the
+        keyword answer they produce is just as much an outage answer.
+        """
+        if _SEARCH_FAILED.get():
+            return True
+        if not self._ready:
+            return QDRANT_ENABLED
+        if self._client is not None and not self._vectorize_mode:
+            return self._circuit.state is not CircuitState.CLOSED
+        return False
+
     def _encode_query(self, query: str) -> list[float]:
         """Embed *query*, reusing a recent identical embedding.
 
@@ -1542,14 +1820,19 @@ class HybridRetriever:
         pure, so a small LRU removes that repeated forward pass without
         changing a single result.
         """
-        cached = self._query_vec_cache.get(query)
-        if cached is not None:
-            self._query_vec_cache.move_to_end(query)
-            return cached
+        # Locked: requests share this retriever, and an eviction landing between
+        # another thread's get() and move_to_end() raised KeyError inside the
+        # search, which the circuit breaker then counted against Qdrant.
+        with self._query_vec_lock:
+            cached = self._query_vec_cache.get(query)
+            if cached is not None:
+                self._query_vec_cache.move_to_end(query)
+                return cached
         vector = self._dense_model.encode(query).tolist()
-        self._query_vec_cache[query] = vector
-        while len(self._query_vec_cache) > _QUERY_CACHE_SIZE:
-            self._query_vec_cache.popitem(last=False)
+        with self._query_vec_lock:
+            self._query_vec_cache[query] = vector
+            while len(self._query_vec_cache) > _QUERY_CACHE_SIZE:
+                self._query_vec_cache.popitem(last=False)
         return vector
 
     def _rerank(
@@ -1585,24 +1868,39 @@ class HybridRetriever:
             en_scores = self._reranker.predict(en_pairs)
             scores = [max(float(s), float(es)) for s, es in zip(scores, en_scores)]
 
+        # CrossEncoder (mxbai-rerank-base-v2) output is already sigmoid-activated
+        # into [0, 1]. Do not apply a second logistic squash (G129) — unless the
+        # scores say otherwise. The model's own card reports raw scores such as
+        # 9.75, and a reranker swapped in per MODEL_SWAP_GUIDE.md, or a loader
+        # that stops applying the activation, returns logits. Clamping those
+        # turns every positive into 1.0 and every negative into 0.0, after
+        # which abstention, pruning and corrective RAG decide on a coin with
+        # two sides. Logits are squashed instead, and the event is counted.
+        #
+        # The scale belongs to the loaded model, not to one batch: a logit
+        # reranker whose scores for one query happen to fall inside [0, 1]
+        # must not be read as probabilities for that query alone. So it is
+        # taken from the model's activation where it says, and latched the
+        # first time any score falls outside [0, 1].
+        scores = [float(s) for s in scores]
+        if getattr(self, "_rerank_logit_scale", None) is None:
+            self._rerank_logit_scale = _reranker_emits_logits(self._reranker)
+        if not self._rerank_logit_scale and any(s < 0.0 or s > 1.0 for s in scores):
+            self._rerank_logit_scale = True
+            metrics.inc("retrieval_rerank_logit_scores_total")
+            logger.warning(
+                "Reranker returned scores outside [0, 1]; treating its scores as logits "
+                "from now on (check RERANKER_MODEL and its activation)"
+            )
+        logits = bool(self._rerank_logit_scale)
         for i, s in enumerate(scores):
-            candidates[i]["score_rerank"] = float(s)
-            # CrossEncoder (mxbai-rerank-base-v2) output is already sigmoid-activated
-            # into [0, 1]. Do not apply a second logistic squash (G129).
-            candidates[i]["score_norm"] = float(max(0.0, min(1.0, s)))
+            candidates[i]["score_rerank"] = s
+            candidates[i]["score_norm"] = normalize_rerank_score(s) if logits else s
+            # What the gates read (gating_relevance); the boosts and demotions
+            # below and in apply_preference_boost only reorder (G284).
+            candidates[i]["score_calibrated"] = candidates[i]["score_norm"]
 
-        # Stale-year penalty for rate/duty tables: if a chunk explicitly cites superseded
-        # years (e.g. 2020, 2021, 2022) and the query is not asking for that historical year,
-        # discount its score so modern guidance and current rate tables outrank it.
-        query_years = set(re.findall(r"\b(20[0-2][0-9])\b", query))
-        for c in candidates:
-            doc_src = str(c.get("source", "")).lower()
-            doc_txt = str(c.get("text", "")).lower()
-            if any(y in doc_src or f"rates {y}" in doc_txt or f"fy {y}" in doc_txt for y in ("2020", "2021", "2022")):
-                if not any(y in query_years for y in ("2020", "2021", "2022")):
-                    c["score_rerank"] = float(c.get("score_rerank", 0.0)) - 0.25
-                    c["score_norm"] = max(0.0, float(c.get("score_norm", 0.0)) - 0.15)
-
+        demote_stale_editions(query, candidates)
         candidates.sort(key=lambda x: x.get("score_rerank", 0.0), reverse=True)
 
     def search(
@@ -1653,6 +1951,7 @@ class HybridRetriever:
         # Circuit breaker gate — reject immediately when OPEN
         if not self._circuit.allow_request():
             logger.warning("Circuit breaker OPEN — skipping Qdrant search")
+            _SEARCH_FAILED.set(True)
             return []
 
         try:
@@ -1791,22 +2090,40 @@ class HybridRetriever:
             candidates = _dedupe_candidates(candidates)
             self._attach_lexical_relevance(query, candidates)
 
-            # Cross-encoder reranking
+            # Cross-encoder reranking. Its own failure domain: a CUDA OOM or a
+            # translation error used to land in the handler below, which
+            # charges Qdrant's circuit, so three of them sent every request to
+            # keyword search while Qdrant was healthy. Unreranked candidates
+            # are served instead; they carry no calibrated score, so pruning
+            # stands down and abstention falls back to the lexical floor.
             if self._reranker and candidates:
-                from .query import english_retrieval_query
+                try:
+                    from .query import english_retrieval_query
 
-                en_query = english_retrieval_query(query, locale) if locale and locale not in ("en", "") else None
-                self._rerank(query, candidates, english_query=en_query)
+                    en_query = english_retrieval_query(query, locale) if locale and locale not in ("en", "") else None
+                    self._rerank(query, candidates, english_query=en_query)
+                except Exception:
+                    metrics.inc("retrieval_rerank_errors_total")
+                    logger.exception("Reranking failed; serving fused order without calibrated scores")
+                    for candidate in candidates:
+                        candidate.pop("score_rerank", None)
+                        candidate.pop("score_norm", None)
+                        candidate.pop("score_calibrated", None)
 
             self._circuit.record_success()
             self._ready = True  # ensure readiness restored on success
             # top_k is a ceiling, not a quota: returning four passages
             # when only one is relevant pads the prompt with noise.
-            return prune_context(candidates[:top_k])
+            served = prune_context(candidates[:top_k])
+            observe_search_relevance(
+                served, "sparse" if self._sparse_only else ("hybrid" if self._sparse_ok else "dense")
+            )
+            return served
 
         except Exception:
             metrics.inc("qdrant_query_errors_total")
             self._circuit.record_failure()
+            _SEARCH_FAILED.set(True)
             logger.exception("Hybrid search failed; circuit breaker tracking failure")
             # Do NOT permanently disable _ready — the circuit breaker
             # controls availability via allow_request(). Setting _ready=False
@@ -1835,6 +2152,8 @@ class HybridRetriever:
         from .flags import flags
         from .query import english_retrieval_query, plan_retrieval
 
+        # A new planned search starts with no failure of its own (G277).
+        _SEARCH_FAILED.set(False)
         loc = (locale or "en").strip().lower().split("-")[0]
         # Single-pass translated-leg optimization for Ugandan indigenous locales (lg, nyn, ach):
         # BAAI/bge-m3 + BM25 on untranslated lg/nyn/ach against an English corpus yields ~0%
@@ -1985,7 +2304,8 @@ class HybridRetriever:
         if loc in ("lg", "nyn", "ach") and en_hits:
             merged = en_hits[:fetch_top_k_en]
         else:
-            merged = merge_retrieval_hits([en_hits, hits], top_k=fetch_top_k_en)
+            # One question asked two ways, not two intents: a single cut (G128).
+            merged = merge_retrieval_hits([en_hits, hits], top_k=fetch_top_k_en, per_intent=False)
         merged = apply_preference_boost(merged, en_prefer)[:top_k]
 
         def _best(rows: list[dict[str, Any]]) -> float:

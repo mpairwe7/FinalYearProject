@@ -16,6 +16,7 @@ Environment variables:
 
 from __future__ import annotations
 
+import inspect
 import logging
 import os
 from typing import Any
@@ -87,24 +88,40 @@ def _improved(final: list[dict[str, Any]], initial: list[dict[str, Any]]) -> boo
 
 def _avg_relevance(hits: list[dict[str, Any]]) -> float | None:
     """Average calibrated [0,1] relevance, or ``None`` when no reranker signal
-    is available (RRF-only / keyword fallback) — see :func:`retriever.hit_relevance`."""
-    from .retriever import hit_relevance
+    is available (RRF-only / keyword fallback) — see :func:`retriever.gating_relevance`,
+    which this decides on rather than the boosted ranking score (G284)."""
+    from .retriever import gating_relevance
 
-    scores = [r for h in hits if (r := hit_relevance(h)) is not None]
+    scores = [r for h in hits if (r := gating_relevance(h)) is not None]
     if not scores:
         return None
     return sum(scores) / len(scores)
 
 
-def _expand_query(query: str) -> str:
-    """Simple query expansion for re-retrieval."""
+def _expand_query(query: str, locale: str | None = None) -> str:
+    """Simple query expansion for re-retrieval.
+
+    English spelling correction only for English, as in ``query.rewrite``
+    (G135): its fuzzy matcher turns vernacular words into English ones, and
+    this path used to run it on every Luganda and Swahili question.
+    """
     from .query import correct_spelling, expand_abbreviations
 
-    expanded = expand_abbreviations(correct_spelling(query))
+    loc = (locale or "en").strip().lower().split("-")[0]
+    expanded = expand_abbreviations(correct_spelling(query) if loc in ("", "en") else query)
     # Add "Uganda Revenue Authority" context if not present
     if "ura" not in expanded.lower() and "uganda" not in expanded.lower():
         expanded = f"{expanded} Uganda Revenue Authority"
     return expanded
+
+
+def _accepts_keyword(fn: Any, name: str) -> bool:
+    """Whether *fn* takes keyword *name*, or any keyword at all."""
+    try:
+        params = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.name == name or p.kind is inspect.Parameter.VAR_KEYWORD for p in params)
 
 
 def should_correct(hits: list[dict[str, Any]]) -> bool:
@@ -133,8 +150,15 @@ def corrective_retrieve(
     top_k: int = 4,
     filters: dict[str, Any] | None = None,
     subject: str | None = None,
+    locale: str | None = None,
 ) -> tuple[list[dict[str, Any]], bool]:
     """Run corrective re-retrieval if initial results are poor.
+
+    *locale* is the question's language, passed on so the re-retrieval takes
+    the same translated English pass as the first one (G18). Without it a
+    Luganda question was re-searched in Luganda against the English corpus —
+    the case the translate leg exists for — which found nothing usable and
+    cost a full embed, search and rerank on every low-confidence turn.
 
     Returns (final_hits, was_corrected).
     """
@@ -144,27 +168,18 @@ def corrective_retrieve(
     logger.info(
         "Corrective RAG triggered: avg_score=%.3f < threshold=%.3f",
         _avg_score(initial_hits),
-        CORRECTIVE_THRESHOLD,
+        CORRECTIVE_THRESHOLD_NORM,
     )
 
-    expanded = _expand_query(query)
+    expanded = _expand_query(query, locale)
     search = getattr(retriever, "search_planned", None) or retriever.search
-    if search is retriever.search:
-        new_hits = retriever.search(
-            expanded,
-            top_k=top_k + 2,
-            prefetch_limit=30,
-            filters=filters,
-            subject=subject,
-        )
-    else:
-        new_hits = retriever.search_planned(
-            expanded,
-            top_k=top_k + 2,
-            prefetch_limit=30,
-            filters=filters,
-            subject=subject,
-        )
+    kwargs: dict[str, Any] = {"top_k": top_k + 2, "prefetch_limit": 30, "filters": filters, "subject": subject}
+    # Read from the signature, not from a TypeError: a retriever that predates
+    # *locale* (as LangGraph's node allows for) is asked without it, and a
+    # TypeError raised inside planning or boosting stays an error.
+    if locale and _accepts_keyword(search, "locale"):
+        kwargs["locale"] = locale
+    new_hits = search(expanded, **kwargs)
 
     if not new_hits:
         return initial_hits, False
@@ -182,7 +197,12 @@ def corrective_retrieve(
     # Re-sort on a scale that is actually comparable across the two calls.
     merged.sort(key=_ranking_key, reverse=True)
 
-    final = merged[:top_k]
+    # Each call pruned its own tail; the merged list needs it again, against
+    # the merged best — a hit kept beside an initial best of 0.4 is noise
+    # beside a corrected best of 0.9.
+    from .retriever import prune_context
+
+    final = prune_context(merged[:top_k])
     improved = _improved(final, initial_hits)
     logger.info(
         "Corrective RAG: %s (initial_relevance=%s → corrected=%s)",
