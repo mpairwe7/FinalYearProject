@@ -217,6 +217,20 @@ def coerce_arguments_to_schema(
         )
         choices = spec.get("enum")
 
+        if (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and "string" in type_set
+            and "integer" not in type_set
+            and "number" not in type_set
+            and key in ("tin", "taxpayer_tin", "buyer_tin", "importer_tin", "prn", "payment_registration_number")
+        ):
+            str_id = str(value)
+            id_pattern = r"\d{10}|\d{12,14}" if key in ("prn", "payment_registration_number") else r"\d{10}"
+            if re.fullmatch(id_pattern, str_id):
+                coerced[key] = str_id
+                continue
+
         if isinstance(value, str):
             stripped = value.strip()
             # 0. Hyphenated/spaced 10-digit TIN, 12-14 digit PRN, or 14-char NIN normalization on string properties

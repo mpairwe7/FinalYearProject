@@ -668,21 +668,55 @@ _ENFORCEMENT_RE = re.compile(
     # Luganda / Swahili / Runyankole / Acholi forms of the same events: the
     # phrases _HARDSHIP_RE lists as enforcement cues, so one lexicon says it.
     r"|ebintu\s+byange\s+babikutte|bamazze\s+okusiba\s+edduuka|edduuka\s+lyange\s+baligadde"
-    r"|akaunti\s+imefungwa|bidhaa\s+zimekamatwa|duka\s+langu\s+limefungwa|ebyangye\s+babikwata"
-    r"|jami\s+na\s+gimako)\b"
+    r"|akaunti\s+imefungwa|bidhaa\s+zimekamatwa|duka\s+langu\s+limefungwa|biashara\s+imefungwa"
+    r"|ebyangye\s+babikwata|eduuka\s+(?:ryangye\s+)?baariigara"
+    r"|jami\s+na\s+gimako|duka\s+(?:mera\s+|na\s+)?gicego)\b"
 )
 _DEADLINE_TODAY_RE = re.compile(
     r"\b(?:(?:due|deadline|expires?|closes?)\s+(?:is\s+)?(?:today|tonight|by\s+midnight)"
     r"|(?:today|tonight)\s+is\s+the\s+(?:last\s+day|deadline)"
     r"|last\s+day\s+(?:is\s+)?today|by\s+(?:midnight|end\s+of\s+(?:the\s+)?day)\s+today"
     r"|leo\s+ni\s+siku\s+ya\s+mwisho|siku\s+ya\s+mwisho\s+ni\s+leo"
-    r"|olwaleero\s+lwe\s+lunaku\s+olusembayo)\b"
+    r"|olwaleero\s+lwe\s+lunaku\s+olusembayo"
+    r"|erizooba\s+n['’]?(?:ekiro|eizooba)\s+(?:ky|ry)['’]?aha\s+muheru|ekiro\s+ky['’]?aha\s+muheru\s+ni\s+erizooba"
+    r"|tin\s+aye\s+nino\s+me\s+agikki|nino\s+me\s+agikki\s+obedo\s+tin)\b"
 )
 _AMOUNT_RE = re.compile(
     r"(?:\b(?:ugx|ushs?|shs?)\.?\s*(?P<a1>\d[\d,]*(?:\.\d+)?)\s*(?P<u1>bn|billion|m|million|k)?\b)"
     r"|(?:\b(?P<a2>\d[\d,]*(?:\.\d+)?)\s*(?P<u2>bn|billion|m|million)\b)"
 )
-_UNIT = {"k": 1_000, "m": 1_000_000, "million": 1_000_000, "bn": 1_000_000_000, "billion": 1_000_000_000}
+_BANTU_STAKES_AMOUNT_RE = re.compile(
+    r"\b(?P<bu>milioni|bilioni|elfu|laki|o?bukadde|a?kakadde|o?bukaikuru|a?kakaikuru|o?buwumbi|a?kawumbi)"
+    r"\s+(?P<ba>\d[\d,]*(?:\.\d+)?)\b",
+    re.IGNORECASE,
+)
+_NON_UGX_CURRENCY_RE = re.compile(
+    r"\b(?:usd|us\s*\$|kes|kshs?|tzs|tshs?|eur|gbp|rwf|dollars?|euros?|pounds?)\b",
+    re.IGNORECASE,
+)
+_UNIT = {
+    "k": 1_000,
+    "m": 1_000_000,
+    "million": 1_000_000,
+    "bn": 1_000_000_000,
+    "billion": 1_000_000_000,
+    "elfu": 1_000,
+    "laki": 100_000,
+    "milioni": 1_000_000,
+    "bukadde": 1_000_000,
+    "obukadde": 1_000_000,
+    "kakadde": 1_000_000,
+    "akakadde": 1_000_000,
+    "bukaikuru": 1_000_000,
+    "obukaikuru": 1_000_000,
+    "kakaikuru": 1_000_000,
+    "akakaikuru": 1_000_000,
+    "bilioni": 1_000_000_000,
+    "buwumbi": 1_000_000_000,
+    "obuwumbi": 1_000_000_000,
+    "kawumbi": 1_000_000_000,
+    "akawumbi": 1_000_000_000,
+}
 
 
 def _amounts_ugx(text: str) -> list[float]:
@@ -695,6 +729,18 @@ def _amounts_ugx(text: str) -> list[float]:
         except ValueError:
             continue
         amounts.append(value * _UNIT.get(unit, 1))
+    for match in _BANTU_STAKES_AMOUNT_RE.finditer(text):
+        before = text[max(0, match.start() - 16) : match.start()]
+        after = text[match.end() : min(len(text), match.end() + 16)]
+        if _NON_UGX_CURRENCY_RE.search(before) or _NON_UGX_CURRENCY_RE.search(after):
+            continue
+        raw_b = match.group("ba") or ""
+        unit_b = (match.group("bu") or "").lower()
+        try:
+            value_b = float(raw_b.replace(",", ""))
+        except ValueError:
+            continue
+        amounts.append(value_b * _UNIT.get(unit_b, 1))
     return amounts
 
 
@@ -748,7 +794,10 @@ _CRISIS_RE = re.compile(
     r"|(?:everyone|everybody|they|my\s+family|my\s+children|my\s+kids)\s+(?:would|will)\s+be\s+better\s+off\s+without\s+me"
     r"|(?:don'?t|do\s+not)\s+want\s+to\s+(?:live|be\s+alive)\s+any\s*more"
     r"|tired\s+of\s+(?:living|being\s+alive)|(?:can'?t|cannot)\s+go\s+on\s+living"
-    r"|okwetta|kujiua|okweyita|kweyita|neko\s+koma)\b"
+    r"|okwetta|njagala\s+kufa|nsinze\s+okufa"
+    r"|kujiua|nataka\s+kufa|bora\s+nife"
+    r"|okweyita|kweyita|ninyenda\s+kufa"
+    r"|neko\s+koma|aneka\s+koma|(?<!\bpe\s)amito\s+to)\b"
 )
 
 #: Hopelessness — "I can't cope", "I give up", "no way out". Alone it is often
