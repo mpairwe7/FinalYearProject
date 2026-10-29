@@ -483,8 +483,10 @@ def evaluate_interaction_scorecard(
     figure_score = 1.0 if figure_fidelity_passed else 0.0
     policy_score = 1.0 if policy_adherence_passed else 0.0
 
+    is_safety_checkin_reply = "0800 21 21 21" in (reply_text or "")
+    effective_relief_or_safety = bool(relief_cited or is_safety_checkin_reply)
     if distress_detected:
-        empathy_score = 1.0 if relief_cited else 0.65
+        empathy_score = 1.0 if effective_relief_or_safety else 0.65
     else:
         empathy_score = 1.0 if reply_text.strip() else 0.5
 
@@ -510,7 +512,7 @@ def evaluate_interaction_scorecard(
         anomalies.append("POLICY_GATE_VIOLATION")
     if repeated_tool_failures >= 2:
         anomalies.append("REPEATED_TOOL_FAILURE")
-    if distress_detected and not relief_cited:
+    if distress_detected and not effective_relief_or_safety:
         anomalies.append("MISSING_STATUTORY_RELIEF_ON_HARDSHIP")
 
     flagged = bool(anomalies) or composite < 0.88

@@ -57,3 +57,9 @@ def test_years(year, words):
 def test_decimals():
     assert decimal_words("2.5", "sw") == "mbili nukta tano"
     assert decimal_words("0.25", "en") == "zero point two five"
+    assert decimal_words("1,250.5", "en") == "one thousand two hundred and fifty point five"
+    assert decimal_words(".5", "en") == "zero point five"
+    assert decimal_words("-0.5", "en") == "minus zero point five"
+    assert decimal_words("-0.5", "sw") == "hasi sifuri nukta tano"
+    assert en_words(-15) == "minus fifteen"
+    assert sw_words(-18) == "hasi kumi na nane"

@@ -154,6 +154,31 @@ class OutputGuardSanitizerTests(unittest.TestCase):
         self.assertIn("1. **Okusooka**:", sanitized)
         self.assertIn("2. **Eky'okubiri**:", sanitized)
 
+    def test_abbreviated_section_and_sub_bullet_renumbering_hygiene(self) -> None:
+        sec_raw = "Interest is remitted under Sec. 5. The Commissioner may also grant relief under s. 12. Every taxpayer must file."
+        sec_norm = OutputGuard.normalize_structure(sec_raw)
+        self.assertNotIn("Sec.\n\n5.", sec_norm)
+        self.assertNotIn("s.\n\n12.", sec_norm)
+        self.assertIn("Sec. 5", sec_norm)
+        self.assertIn("s. 12", sec_norm)
+
+        list_with_sub_bullets = "1. Open the URA portal:\n   - Enter your TIN\n   - Enter your password\n1. Submit the return"
+        list_norm = OutputGuard.normalize_structure(list_with_sub_bullets)
+        self.assertIn("1. Open the URA portal:", list_norm)
+        self.assertIn("2. Submit the return", list_norm)
+
+        mixed_block = (
+            "Register for a TIN before you trade. "
+            "File the return by the fifteenth. "
+            "Pay the assessed tax through the portal. "
+            "Keep the acknowledgement for five years.\n"
+            "| Band | Rate |\n"
+            "| --- | --- |\n"
+            "| Standard | 18% |"
+        )
+        mixed_norm = OutputGuard.normalize_structure(mixed_block)
+        self.assertIn("\n\nKeep the acknowledgement for five years.\n| Band | Rate |", mixed_norm)
+
 
 if __name__ == "__main__":
     unittest.main()

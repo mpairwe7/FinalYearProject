@@ -44,6 +44,8 @@ def _en_below_1000(n: int) -> str:
 
 def en_words(n: int) -> str:
     """335000 -> "three hundred and thirty-five thousand"."""
+    if n < 0:
+        return f"minus {en_words(-n)}"
     if n == 0:
         return "zero"
     words = []
@@ -93,6 +95,8 @@ def _sw_below_1000(n: int) -> str:
 
 def sw_words(n: int) -> str:
     """Standard Swahili: 18 -> "kumi na nane", 335000 -> "elfu mia tatu thelathini na tano"."""
+    if n < 0:
+        return f"hasi {sw_words(-n)}"
     if n < 1000:
         return _sw_below_1000(n)
     for scale, name in _SW_SCALES:
@@ -187,7 +191,20 @@ def ach_words(n: int) -> str | None:
 
 def decimal_words(number: str, locale: str) -> str:
     """"2.5" -> "mbili nukta tano" (sw) or "two point five": digits after the point one by one."""
-    whole, _, fraction = number.partition(".")
-    if locale == "sw":
-        return f"{sw_words(int(whole))} nukta " + " ".join(_SW_UNITS[int(d)] for d in fraction)
-    return f"{en_words(int(whole))} point " + " ".join(_EN_UNITS[int(d)] for d in fraction)
+    cleaned = (number or "").replace(",", "").strip()
+    is_neg = cleaned.startswith("-")
+    if cleaned.startswith(("+", "-")):
+        cleaned = cleaned[1:].strip()
+    whole, _, fraction = cleaned.partition(".")
+    whole_int = int(whole) if whole else 0
+    frac_digits = [int(d) for d in fraction if d.isdigit()]
+    loc = (locale or "en").strip().lower()
+    if loc == "sw":
+        prefix = "hasi " if is_neg else ""
+        if not frac_digits:
+            return f"{prefix}{sw_words(whole_int)}"
+        return f"{prefix}{sw_words(whole_int)} nukta " + " ".join(_SW_UNITS[d] for d in frac_digits)
+    prefix = "minus " if is_neg else ""
+    if not frac_digits:
+        return f"{prefix}{en_words(whole_int)}"
+    return f"{prefix}{en_words(whole_int)} point " + " ".join(_EN_UNITS[d] for d in frac_digits)

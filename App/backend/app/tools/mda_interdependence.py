@@ -337,11 +337,12 @@ class ResolveMdaNtrPaymentTool(Tool):
             if split_prns
             else ""
         )
+        steps_block = "\n".join(steps)
         explanation = (
             f"{info['mda_name']} ({info['mda_code']}): Select URA head '{info['ura_tax_head']}'. "
-            f"Statutory payable amount: UGX {payable_ugx:,.0f}.{split_note} "
-            f"Guardrail: {info['wrong_head_warning']} "
-            f"Reconciliation ({prn_status}): {' '.join(steps)} "
+            f"Statutory payable amount: UGX {payable_ugx:,.0f}.{split_note}\n\n"
+            f"Guardrail: {info['wrong_head_warning']}\n\n"
+            f"Reconciliation ({prn_status}):\n{steps_block}\n\n"
             f"(Basis: {info['statutory_basis']})."
         )
         return {
@@ -548,11 +549,13 @@ class AssessLifeEventTaxOnboardingTool(Tool):
                 "3. If NIRA's record has a spelling or DOB error, apply for a NIRA Change of Particulars before re-submitting on URA e-Tax.",
             ]
 
+        steps_block = "\n".join(steps)
         explanation = (
             f"Life-Event Onboarding ({life_event}): Mandatory URA TIN under TPC Act s.135 = True. "
-            f"Recommended Tax Head: {rec_head} (Estimated Annual Tax: UGX {est_tax:,.0f}). "
-            f"NIRA NIN Pre-Flight: {nira_preflight['name_order_guidance']} "
-            f"Steps: {' '.join(steps)} (Basis: {basis})."
+            f"Recommended Tax Head: {rec_head} (Estimated Annual Tax: UGX {est_tax:,.0f}).\n\n"
+            f"NIRA NIN Pre-Flight: {nira_preflight['name_order_guidance']}\n\n"
+            f"Steps:\n{steps_block}\n\n"
+            f"(Basis: {basis})."
         )
         return {
             "ok": True,
@@ -708,10 +711,12 @@ class EvaluateB2gAndUeswClearanceTool(Tool):
                 "(>8 years pay 50% CIF); EIA project clearances require two separate URA ONTR PRNs (30% submission + 70% approval).",
             ]
 
+        checklist_block = "\n".join(checklist)
         explanation = (
             f"B2G / Single-Window Clearance ({clearance_domain} — {agency}): "
-            f"Computed WHT / Surcharge / Deemed Tax = UGX {wht_due:,.0f}. "
-            f"Checklist: {' '.join(checklist)} (Basis: {basis})."
+            f"Computed WHT / Surcharge / Deemed Tax = UGX {wht_due:,.0f}.\n\n"
+            f"Checklist:\n{checklist_block}\n\n"
+            f"(Basis: {basis})."
         )
         return {
             "ok": True,
@@ -868,12 +873,14 @@ class BuildNewTaxpayerComplianceShieldTool(Tool):
                 "3. Submit an 'Amendment of Registration -> Deactivate Tax Head / Temporary Dormancy' request on https://ura.go.ug attaching your closure notice or LC1/trading license cessation letter.",
             ]
 
+        steps_block = "\n".join(steps)
         explanation = (
             f"New/Lifecycle Taxpayer Shield ({taxpayer_profile}): Monthly return required = {monthly_req}; "
             f"Nil return required on zero sales = {nil_req}; Total late-filing penalty exposure = UGX {pen_exp:,.0f} "
             f"(UGX {min_pen:,.0f} per unfiled return) "
-            f"(FY2026-27 VAT threshold = UGX {vat_thresh:,.0f}). "
-            f"Action Plan: {' '.join(steps)} (Basis: {basis})."
+            f"(FY2026-27 VAT threshold = UGX {vat_thresh:,.0f}).\n\n"
+            f"Action Plan:\n{steps_block}\n\n"
+            f"(Basis: {basis})."
         )
         return {
             "ok": True,
@@ -1139,8 +1146,9 @@ class ResolveEfrisAndAccountRecoveryTool(Tool):
                 "2. If the number cannot be recovered, prepare: (a) your 14-character NIRA National ID (NIN), (b) a newly registered phone number in your own NIN name, and (c) an active email address.",
                 "3. Submit an 'Amendment of Registration Particulars (Contact Update)' request via the URA portal or press 'Talk to an officer' right here in chat — your verified NIN slot and conversation history are packaged into an async ticket so a URA officer updates your registered phone/email without a branch visit.",
             ]
+            steps_block = "\n".join(steps)
             explanation = (
-                f"TIN Account & Lost SIM/Email Recovery: {' '.join(steps)} (Basis: {basis})."
+                f"TIN Account & Lost SIM/Email Recovery:\n{steps_block}\n\n(Basis: {basis})."
             )
         else:
             basis = (
@@ -1154,11 +1162,13 @@ class ResolveEfrisAndAccountRecoveryTool(Tool):
                 f"2. FY2026-27 Consumer 5% E-Receipt Refund (VAT Act s.38): Consumers who collect at least UGX {thresh:,.0f} in fiscalized EFRIS e-receipts/e-invoices within 30 consecutive days qualify for a 5% cash refund of the VAT paid (on UGX {purchases:,.0f} VAT-inclusive purchases: Qualifies = {qualifies}, Embedded VAT = UGX {embedded_vat:,.0f}, 5% Refund = UGX {refund_ugx:,.0f}).",
                 f"3. Revised FY2026-27 EFRIS Penalty (TPC Act s.93): Failure to issue an EFRIS e-invoice or tamper with an EFD carries a penal tax of double the tax due or 10 currency points (UGX {min_pen:,.0f}), whichever is higher.",
             ]
+            steps_block = "\n".join(steps)
             explanation = (
                 f"EFRIS Free Onboarding & FY2026-27 5% E-Receipt Refund: Qualifying 30-day threshold = UGX {thresh:,.0f} "
                 f"(reduced from UGX 5,000,000); Qualifies on UGX {purchases:,.0f} = {qualifies}; "
-                f"Estimated 5% VAT Refund = UGX {refund_ugx:,.0f}; Minimum EFRIS non-issuance penalty = UGX {min_pen:,.0f}. "
-                f"Steps: {' '.join(steps)} (Basis: {basis})."
+                f"Estimated 5% VAT Refund = UGX {refund_ugx:,.0f}; Minimum EFRIS non-issuance penalty = UGX {min_pen:,.0f}.\n\n"
+                f"Steps:\n{steps_block}\n\n"
+                f"(Basis: {basis})."
             )
 
         return {

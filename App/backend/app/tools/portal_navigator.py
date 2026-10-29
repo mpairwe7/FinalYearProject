@@ -48,41 +48,46 @@ class NavigateExternalPortalTool(Tool):
                             "Target URA portal if known: 'e_services', 'efris', 'asycuda', "
                             "'prn_payments', 'tin_registration', 'track_status', 'document_authentication', or 'auto'."
                         ),
-                        "enum": [
-                            "auto",
-                            "e_services",
-                            "efris",
-                            "asycuda",
-                            "prn_payments",
-                            "tin_registration",
-                            "track_status",
-                            "document_authentication",
-                            "tax_clearance",
-                            "motor_vehicle",
-                            "objection_appeals",
-                            "voluntary_disclosure",
-                            "whistle_blow",
-                            "dts",
-                            "tax_incentives",
-                            "get_refund",
-                            "stamp_duty",
-                            "choose_tax_agent",
-                            "export_process",
-                            "customs_valuation",
-                            "single_customs_territory",
-                            "exempt_importation",
-                            "aeo",
-                            "customs_audits_refunds",
-                            "warehousing",
-                            "customs_enforcements",
-                            "laws_and_acts",
-                            "double_taxation_agreements",
-                            "case_summary_reports",
-                            "court_of_appeal",
-                            "debt_collections",
-                            "financial_intelligence_authority",
-                            "customs_systems",
-                        ],
+                        "enum": list(
+                            dict.fromkeys(
+                                [
+                                    "auto",
+                                    "e_services",
+                                    "efris",
+                                    "asycuda",
+                                    "prn_payments",
+                                    "tin_registration",
+                                    "track_status",
+                                    "document_authentication",
+                                    "tax_clearance",
+                                    "motor_vehicle",
+                                    "objection_appeals",
+                                    "voluntary_disclosure",
+                                    "whistle_blow",
+                                    "dts",
+                                    "tax_incentives",
+                                    "get_refund",
+                                    "stamp_duty",
+                                    "choose_tax_agent",
+                                    "export_process",
+                                    "customs_valuation",
+                                    "single_customs_territory",
+                                    "exempt_importation",
+                                    "aeo",
+                                    "customs_audits_refunds",
+                                    "warehousing",
+                                    "customs_enforcements",
+                                    "laws_and_acts",
+                                    "double_taxation_agreements",
+                                    "case_summary_reports",
+                                    "court_of_appeal",
+                                    "debt_collections",
+                                    "financial_intelligence_authority",
+                                    "customs_systems",
+                                    *sorted(EXTERNAL_URA_PORTALS.keys()),
+                                ]
+                            )
+                        ),
                     },
                     "workflow_intent": {
                         "type": "string",
@@ -290,9 +295,9 @@ class NavigateExternalPortalTool(Tool):
         steps_text = "\n".join(f"{i+1}. {s}" for i, s in enumerate(steps))
         explanation = (
             f"**External Portal Navigation & Diagnostic — {portal_info['name']}**\n\n"
-            f"• **Screen State**: {state}\n"
-            f"• **Status / Alert**: {issue}\n"
-            f"• **Navigation Trail**: {' › '.join(breadcrumbs)}\n\n"
+            f"- **Screen State**: {state}\n"
+            f"- **Status / Alert**: {issue}\n"
+            f"- **Navigation Trail**: {' › '.join(breadcrumbs)}\n\n"
             f"**Recommended Action Steps**:\n{steps_text}\n\n"
             f"Official page: [{breadcrumbs[-1]}]({deep_link_url})"
         )
