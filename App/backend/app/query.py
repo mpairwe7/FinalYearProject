@@ -616,7 +616,7 @@ _SWAHILI_WORDS: frozenset[str] = frozenset({
     "shilingi", "milioni", "bilioni", "elfu", "laki", "mia", "fedha", "pesa",
     "mtaji", "faida", "hasara", "mshahara", "mishahara", "deni", "madeni",
     "riba", "faini", "kikomo", "mauzo", "ununuzi", "malipo",
-    "moja", "mbili", "tatu", "nne", "tano", "sita", "saba", "nane", "tisa", "kumi",
+    "moja", "mbili", "tatu", "nne", "tano", "sita", "nane", "tisa", "kumi",
     "ishirini", "thelathini", "arobaini", "hamsini", "sitini", "sabini", "themanini", "tisini",
     "nusu", "nukta", "sifuri",
 })

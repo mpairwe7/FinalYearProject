@@ -494,11 +494,18 @@ class TestConversationalIntelligenceEngine:
         assert "large_amount" in detect_high_stakes("Bampadde ekibonerezo kya emitwalo rukumi")
         assert detect_crisis("I do not want to kill myself") is False
         assert detect_crisis("I don't want to end my life") is False
+        assert detect_crisis("I am not suicidal") is False
+        assert detect_crisis("I am not not suicidal") is True
         assert detect_crisis("Pe amito neko koma") is False
         assert detect_crisis("Sitaki kujiua") is False
         assert detect_crisis("Sinjagala okwetta") is False
         assert detect_crisis("Tindikwenda okweyita") is False
         assert detect_crisis("I can't pay my taxes and I want to die") is True
+        assert extract_amounts("USD milioni tatu") == []
+        assert [v for v, _, _ in extract_amounts("milioni 1,500")] == [1_500_000_000.0]
+        assert [v for v, _, _ in extract_amounts("akakadde n'ekitundu")] == [1_500_000.0]
+        assert _normalize_vernacular_amount_words("milioni 9 na elfu 999 na 999") == "milioni 9.999999"
+        assert plan_rate_lookup("How is PAYE tax calculated for my second job?") is None
         assert clean_text_for_speech("Wel mucoro tye dul 18% i kom miya acel.", locale="ach") == (
             "Wel mucoro tye dul apar wiye aboro i kom miya."
         )

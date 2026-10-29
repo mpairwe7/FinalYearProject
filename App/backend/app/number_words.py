@@ -273,7 +273,7 @@ VERNACULAR_HUNDRED_HEADS: frozenset[str] = frozenset({
 _CONJUNCTION_TOKENS: frozenset[str] = frozenset({"na", "mu", "ne", "n", "wiye", "ki"})
 _TENS_PREFIX_TOKENS: frozenset[str] = frozenset({"amakumi", "makumi"})
 _HALF_PHRASE_RE = _re.compile(
-    r"^(?:n['’]?ekitundu|ne\s+kitundu|n['’]?ekicweka|ne\s+kicweka|na\s+nusu|ki\s+nucu)\b",
+    r"\s{0,8}(?:n['’]?ekitundu|ne\s{1,4}kitundu|n['’]?ekicweka|ne\s{1,4}kicweka|na\s{1,4}nusu|ki\s{1,4}nucu)\b",
     _re.IGNORECASE,
 )
 
@@ -289,14 +289,16 @@ _SINGULAR_ONE_SCALES: frozenset[str] = frozenset({
 })
 
 _SCALE_NOUN_RE = _re.compile(
-    r"\b(?P<scale>mili+y?oni|bili+y?oni|el?ufu|elfu|tutemia|laki|"
+    r"\b(?P<scale>mili{1,3}y?oni|bili{1,3}y?oni|el?ufu|elfu|tutemia|laki|"
     r"o?bukadde|a?kakadde|o?bukaikuru|a?kakaikuru|"
     r"o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?mitwaro|o?mutwaro|"
     r"e?nkumi|o?lukumi|o?rukumi)\b",
     _re.IGNORECASE,
 )
 
-_WORD_TOKEN_RE = _re.compile(r"\s*([a-zA-Z'’]+)")
+_WORD_TOKEN_RE = _re.compile(r"\s{0,8}([a-zA-Z'’]{1,32})")
+_SUB_THOUSAND_DIGIT_RE = _re.compile(r"\s{0,8}(\d{1,3}(?:\.\d{1,4})?)(?!,\d{3})\b")
+_LEADING_DIGIT_RE = _re.compile(r"\s{0,8}\d")
 
 
 def _parse_vernacular_tokens_at(text: str, pos: int) -> tuple[float | None, int]:
@@ -306,23 +308,22 @@ def _parse_vernacular_tokens_at(text: str, pos: int) -> tuple[float | None, int]
     matched_any = False
 
     # Allow numeric digits < 1000 inside a scale segment (e.g. "milioni 3 na elfu 500", "obukadde 3 n'emitwalo 50")
-    m_num = _re.match(r"\s*(\d{1,3}(?:\.\d+)?)\b", text[cur:])
+    m_num = _SUB_THOUSAND_DIGIT_RE.match(text, cur, cur + 32)
     if m_num:
         try:
             d_val = float(m_num.group(1))
             if 0 < d_val < 1000:
-                cur += m_num.end()
-                m_half_d = _HALF_PHRASE_RE.match(text[cur:].lstrip())
+                cur = m_num.end()
+                m_half_d = _HALF_PHRASE_RE.match(text, cur, cur + 32)
                 if m_half_d:
-                    ws_len = len(text[cur:]) - len(text[cur:].lstrip())
-                    cur += ws_len + m_half_d.end()
+                    cur = m_half_d.end()
                     d_val += 0.5
                 return d_val, cur
         except ValueError:
             pass
 
     def _peek_word(p: int) -> tuple[str, int] | None:
-        m = _WORD_TOKEN_RE.match(text, p)
+        m = _WORD_TOKEN_RE.match(text, p, p + 48)
         if not m:
             return None
         return m.group(1), m.end()
@@ -420,10 +421,9 @@ def _parse_vernacular_tokens_at(text: str, pos: int) -> tuple[float | None, int]
         return None, pos
 
     # 4. Optional fractional half ("n'ekitundu", "n'ekicweka", "na nusu", "ki nucu")
-    m_half = _HALF_PHRASE_RE.match(text[cur:].lstrip())
+    m_half = _HALF_PHRASE_RE.match(text, cur, cur + 32)
     if m_half:
-        ws_len = len(text[cur:]) - len(text[cur:].lstrip())
-        cur += ws_len + m_half.end()
+        cur = m_half.end()
         return float(total) + 0.5, cur
 
     return float(total), cur
@@ -444,14 +444,14 @@ _SCALE_NOUN_MULTIPLIERS: dict[str, float] = {
 }
 
 _DESCENDING_SCALE_LINK_RE = _re.compile(
-    r"^\s*(?:(?:na|mu|ne|wiye|ki)\s+|n['’])?(?P<next_scale>mili+y?oni|bili+y?oni|el?ufu|elfu|tutemia|laki|"
+    r"\s{0,8}(?:(?:na|mu|ne|wiye|ki)\s{1,8}|n['’])?(?P<next_scale>mili{1,3}y?oni|bili{1,3}y?oni|el?ufu|elfu|tutemia|laki|"
     r"o?bukadde|a?kakadde|o?bukaikuru|a?kakaikuru|"
     r"o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?mitwaro|o?mutwaro|"
     r"e?nkumi|o?lukumi|o?rukumi)\b",
     _re.IGNORECASE,
 )
 _DESCENDING_SUB_THOUSAND_LINK_RE = _re.compile(
-    r"^\s*(?:na|mu|ne|wiye|ki)\s+",
+    r"\s{0,8}(?:na|mu|ne|wiye|ki)\s{1,8}",
     _re.IGNORECASE,
 )
 
@@ -462,9 +462,13 @@ def parse_vernacular_scale_amount_at(text: str, scale_match: _re.Match[str]) -> 
     first_mult = _SCALE_NOUN_MULTIPLIERS.get(first_scale, 1.0)
     val1, end_pos = _parse_vernacular_tokens_at(text, scale_match.end())
     if val1 is None:
-        if first_scale in _SINGULAR_ONE_SCALES and not _re.match(r"^\s*\d", text[scale_match.end() :]):
+        if first_scale in _SINGULAR_ONE_SCALES and not _LEADING_DIGIT_RE.match(text, scale_match.end(), scale_match.end() + 16):
             val1 = 1.0
             end_pos = scale_match.end()
+            m_half1 = _HALF_PHRASE_RE.match(text, end_pos, end_pos + 32)
+            if m_half1:
+                val1 += 0.5
+                end_pos = m_half1.end()
         else:
             return None, scale_match.end()
 
@@ -475,16 +479,20 @@ def parse_vernacular_scale_amount_at(text: str, scale_match: _re.Match[str]) -> 
     # Fold strictly descending scale segments joined by na / mu / ne / n' / ki
     # e.g. "milioni tatu na elfu mia tano" (3M + 500k = 3.5M), "obukadde busatu n'emitwalo ataano" (3.5M)
     while True:
-        m_link = _DESCENDING_SCALE_LINK_RE.match(text[cur_end:])
+        m_link = _DESCENDING_SCALE_LINK_RE.match(text, cur_end, cur_end + 48)
         if m_link:
             nxt_scale = m_link.group("next_scale").lower()
             nxt_mult = _SCALE_NOUN_MULTIPLIERS.get(nxt_scale, 1.0)
             if nxt_mult < prev_mult:
-                seg_start = cur_end + m_link.end()
+                seg_start = m_link.end()
                 nxt_val, nxt_end = _parse_vernacular_tokens_at(text, seg_start)
-                if nxt_val is None and nxt_scale in _SINGULAR_ONE_SCALES and not _re.match(r"^\s*\d", text[seg_start:]):
+                if nxt_val is None and nxt_scale in _SINGULAR_ONE_SCALES and not _LEADING_DIGIT_RE.match(text, seg_start, seg_start + 16):
                     nxt_val = 1.0
                     nxt_end = seg_start
+                    m_half_nxt = _HALF_PHRASE_RE.match(text, nxt_end, nxt_end + 32)
+                    if m_half_nxt:
+                        nxt_val += 0.5
+                        nxt_end = m_half_nxt.end()
                 if nxt_val is not None:
                     total_ugx += nxt_val * nxt_mult
                     prev_mult = nxt_mult
@@ -492,9 +500,9 @@ def parse_vernacular_scale_amount_at(text: str, scale_match: _re.Match[str]) -> 
                     continue
         # Also fold trailing sub-thousand hundred/ten/unit block after a >=1000 scale ("elfu mbili na mia tano" -> 2500)
         if prev_mult >= 1000.0:
-            m_sub = _DESCENDING_SUB_THOUSAND_LINK_RE.match(text[cur_end:])
+            m_sub = _DESCENDING_SUB_THOUSAND_LINK_RE.match(text, cur_end, cur_end + 24)
             if m_sub:
-                sub_start = cur_end + m_sub.end()
+                sub_start = m_sub.end()
                 sub_val, sub_end = _parse_vernacular_tokens_at(text, sub_start)
                 if sub_val is not None and sub_val < 1000.0:
                     total_ugx += sub_val
@@ -529,7 +537,11 @@ def normalize_vernacular_amount_words(text: str) -> str:
         total_ugx, end_pos = parse_vernacular_scale_amount_at(text, m)
         if total_ugx is not None:
             scaled_val = total_ugx / first_mult
-            num_str = str(int(scaled_val)) if scaled_val == int(scaled_val) else f"{scaled_val:g}"
+            num_str = (
+                str(int(scaled_val))
+                if scaled_val == int(scaled_val)
+                else f"{scaled_val:.10f}".rstrip("0").rstrip(".")
+            )
             out.append(f"{canon_scale} {num_str}")
             last_idx = end_pos
         else:

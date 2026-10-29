@@ -33,9 +33,17 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Amount extraction
 # ---------------------------------------------------------------------------
-_CURRENCY = r"(?:\b(?:ugx|ug\.?\s?shs?|u\.?shs?|shs?\.?|shillings?|shilingi|shiringi|siringi|cilingi|ssente|sente|esente|cente|ensimbi|fedha|pesa|lim)\b|/=|/-\b)"
+_CURRENCY = r"(?:\b(?:ugx|ug\.?\s?shs?|u\.?\s?shs?|shs?\.?|shillings?|shilingi|shiringi|siringi|cilingi|ssente|sente|esente|cente|ensimbi|fedha|pesa|lim)\b|/=|/-\b)"
+_FOREIGN_CURRENCY_BEFORE_RE = re.compile(
+    r"(?:\b(?:usd|eur|gbp|kes|kshs?|tzs|tshs?|rwf|dola)\b|us\$|\$|€|£)\s{0,4}$",
+    re.IGNORECASE,
+)
+_FOREIGN_CURRENCY_AFTER_RE = re.compile(
+    r"^\s{0,4}(?:us\s+dollars?|dollars?|euros?|pounds?|usd|eur|gbp|kes|kshs?|tzs|rwf)\b",
+    re.IGNORECASE,
+)
 _AMOUNT_PREFIX_RE = re.compile(
-    r"\b(mili+y?oni|bili+y?oni|el?ufu|elfu|tutemia|laki|o?bukadde|a?kakadde|o?bukaikuru|a?kakaikuru|o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?mitwaro|o?mutwaro|e?nkumi|o?lukumi|o?rukumi)\s+"
+    r"\b(mili{1,3}y?oni|bili{1,3}y?oni|el?ufu|elfu|tutemia|laki|o?bukadde|a?kakadde|o?bukaikuru|a?kakaikuru|o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?mitwaro|o?mutwaro|e?nkumi|o?lukumi|o?rukumi)\s+"
     r"(\d{1,3}(?:[,\s]\d{3})*|\d+(?:\.\d+)?)\b",
     re.IGNORECASE,
 )
@@ -101,8 +109,14 @@ def extract_amounts(text: str) -> list[tuple[float, int, int]]:
             continue
         total_ugx, end_pos = parse_vernacular_scale_amount_at(text or "", m)
         if total_ugx is not None:
-            found.append((total_ugx, m.start(), end_pos))
+            before_slice = (text or "")[max(0, m.start() - 12) : m.start()]
+            after_slice = (text or "")[end_pos : end_pos + 16]
             seen_spans.append((m.start(), end_pos))
+            if not (
+                _FOREIGN_CURRENCY_BEFORE_RE.search(before_slice)
+                or _FOREIGN_CURRENCY_AFTER_RE.search(after_slice)
+            ):
+                found.append((total_ugx, m.start(), end_pos))
 
     # 1b. Remaining prefix matches (e.g. comma-grouped digits > 999 after a scale noun, like "milioni 1,500")
     for m in _AMOUNT_PREFIX_RE.finditer(text or ""):
@@ -2048,6 +2062,7 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
                 re.IGNORECASE,
             )
             and not _SCENARIO_PLANNER_BYPASS_RE.search(_collapse_ws(text))
+            and not re.search(r"\bsecond[-\s]+(?:job|employment|employer)\b", text, re.IGNORECASE)
         ):
             return None
     if re.search(

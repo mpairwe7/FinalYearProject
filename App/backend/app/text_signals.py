@@ -848,9 +848,15 @@ _CRISIS_NEGATION_PREFIX_RE = re.compile(
     r"|si|tetwagala|sinjagala|siwagira"
     r"|sitaki|hatutaki|siwezi"
     r"|tindikwenda|titurikwenda|tininyenda"
-    r"|pe(?:\s+amito)?|pe\s+atwero)\s+"
-    r"(?:(?:ever|really|actually|even)\s+)?"
-    r"(?:(?:want|wished|wish|plan|planning|going|intend|trying|need)\s+(?:to\s+)?)?$",
+    r"|pe(?:\s{1,4}amito)?|pe\s{1,4}atwero)\s{1,4}"
+    r"(?:(?:ever|really|actually|even)\s{1,4})?"
+    r"(?:(?:want|wished|wish|plan|planning|going|intend|trying|need)\s{1,4}(?:to\s{1,4})?)?$",
+    re.IGNORECASE,
+)
+
+
+_CRISIS_DOUBLE_NEGATION_RE = re.compile(
+    r"\b(?:not|no|never|don'?t|doesn'?t|didn'?t|won'?t|wouldn'?t|shouldn'?t|cannot|can'?t)\s{1,4}$",
     re.IGNORECASE,
 )
 
@@ -860,7 +866,8 @@ def detect_crisis(message: str) -> bool:
     norm = _normalise(message)
     for m in _CRISIS_RE.finditer(norm):
         prefix = norm[max(0, m.start() - 38) : m.start()]
-        if _CRISIS_NEGATION_PREFIX_RE.search(prefix):
+        m_neg = _CRISIS_NEGATION_PREFIX_RE.search(prefix)
+        if m_neg and not _CRISIS_DOUBLE_NEGATION_RE.search(prefix[: m_neg.start()]):
             continue
         return True
     return False

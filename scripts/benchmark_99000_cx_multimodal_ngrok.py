@@ -24,6 +24,7 @@ import base64
 import datetime as dt
 import json
 import os
+import re
 import sys
 import time
 import uuid
@@ -47,6 +48,7 @@ os.environ.setdefault("ORPHEUS_TTS_LANGUAGES", "lg,sw,en,nyn,ach")
 
 from app import mt, orpheus_tts  # noqa: E402
 from app.agents import supervisor  # noqa: E402
+from app.agents.state import AgentRoute  # noqa: E402
 from app.audit.governance_v3 import evaluate_interaction_scorecard  # noqa: E402
 from app.calculator_router import (  # noqa: E402
     extract_amounts,
@@ -69,7 +71,7 @@ from app.mcp.validation import (  # noqa: E402
     coerce_arguments_to_schema,
     inspect_descriptor_integrity,
 )
-from app.memory.resolution_ledger import objective_for  # noqa: E402
+from app.memory.resolution_ledger import DOMAIN_OBJECTIVES, objective_for  # noqa: E402
 from app.number_words import ach_words, decimal_words, nyn_words  # noqa: E402
 from app.officer_handoff import prune_required_details  # noqa: E402
 from app.portal_copilot import (  # noqa: E402
@@ -117,7 +119,7 @@ from app.text_signals import (  # noqa: E402
     wellbeing_checkin_reply,
 )
 from app.tools import ToolRegistry  # noqa: E402
-from app.workflows.registry import WorkflowRegistry, auto_load_flows  # noqa: E402
+from app.workflows.registry import WorkflowRegistry, WorkflowSession, auto_load_flows  # noqa: E402
 
 NGROK_HTTP = os.environ.get(
     "NGROK_BASE_URL", "https://struttingly-nongeological-briella.ngrok-free.dev"
@@ -289,7 +291,7 @@ def build_99000_scenarios() -> list[dict[str, Any]]:
         "en": [
             ("How do I register to get an individual TIN on the URA web portal?", "tin_registration"),
             ("What is the standard VAT rate in Uganda and when must I register?", "vat"),
-            ("How do I generate a Payment Registration Number PRN to pay tax by mobile money?", "payments"),
+            ("How do I generate a Payment Registration Number PRN to pay tax by mobile money?", "payment"),
             ("How do I clear imported goods and motor vehicles through customs?", "customs"),
         ],
         "lg": [
@@ -301,19 +303,19 @@ def build_99000_scenarios() -> list[dict[str, Any]]:
         "sw": [
             ("Jinsi ya kuomba TIN ya kibinafsi?", "tin_registration"),
             ("Kodi ya ongezeko la thamani VAT ni asilimia ngapi?", "vat"),
-            ("Jinsi ya kutengeneza nambari ya PRN ili kulipa kodi benki au kwa simu?", "payments"),
+            ("Jinsi ya kutengeneza nambari ya PRN ili kulipa kodi benki au kwa simu?", "payment"),
             ("Mwongozo wa kusafisha mizigo forodha?", "customs"),
         ],
         "nyn": [
             ("Nimbaasa kwehandiikisa nta kutunga TIN?", "tin_registration"),
             ("Omushoro gwa VAT omuri Uganda guri aha bicweka bingahi?", "vat"),
-            ("Nimbaasa kukora nta enamba ya PRN okushashura omushoro?", "payments"),
+            ("Nimbaasa kukora nta enamba ya PRN okushashura omushoro?", "payment"),
             ("EFRIS neekoresibwa eta?", "efris"),
         ],
         "ach": [
             ("Atwero coyo nyinga nining me nongo TIN?", "tin_registration"),
             ("Wel mucoro me VAT i Uganda tye adi?", "vat"),
-            ("Atwero yubo namba me PRN nining me culu mucoro?", "payments"),
+            ("Atwero yubo namba me PRN nining me culu mucoro?", "payment"),
             ("EFRIS tiyo nining?", "efris"),
         ],
     }
@@ -523,9 +525,9 @@ _G270_MCP_OK = (
     )
     and coerce_arguments_to_schema(
         {"type": "object", "properties": {"tin": {"type": "string"}, "annual_turnover": {"type": "number"}}},
-        {"tin": 1000000001, "annual_turnover": "obukadde 15"},
+        {"tin": int(_DEMO_TIN), "annual_turnover": "obukadde 15"},
     )
-    == {"tin": "1000000001", "annual_turnover": 15_000_000.0}
+    == {"tin": _DEMO_TIN, "annual_turnover": 15_000_000.0}
 )
 _EFRIS_DESC = {
     "name": "efris_taxpayer_status",
@@ -613,6 +615,8 @@ def evaluate_single_scenario(sc: dict[str, Any], tz: ZoneInfo) -> tuple[bool, fl
         plan = plan_calculation(q)
         obj = objective_for(sc["domain"])
         wf = WorkflowRegistry.get("tin_registration")
+        wf_sess = WorkflowRegistry.create_session("tin_registration") or WorkflowSession(workflow_id="tin_registration")
+        wf_turn = WorkflowRegistry.advance(wf_sess, "individual")
         pruned = prune_required_details(
             ["TIN or registered taxpayer email", "assessment or objection reference number"],
             ["tin", "_tangent_count"],
@@ -639,6 +643,8 @@ def evaluate_single_scenario(sc: dict[str, Any], tz: ZoneInfo) -> tuple[bool, fl
             and plan.tool == sc["expected_tool"]
             and len(obj) > 5
             and wf is not None
+            and wf_sess.slots.get("taxpayer_type") == "individual"
+            and wf_turn.step_index >= 2
             and "TIN or registered taxpayer email" not in pruned
             and "assessment or objection reference number" in pruned
             and mixed_ent.get("amount_ugx") == "50000"
@@ -705,7 +711,13 @@ def evaluate_single_scenario(sc: dict[str, Any], tz: ZoneInfo) -> tuple[bool, fl
         en_q = english_retrieval_query(q, lang) if lang != "en" else q
         canon_q = canonicalize_tax_terms(normalize_query(en_q))
         sup = supervisor.classify(canon_q)
-        obj = objective_for(sc["expected_topic_hint"])
+        expected_hint = sc["expected_topic_hint"]
+        obj = objective_for(expected_hint)
+        expected_routes = (
+            (AgentRoute.CUSTOMS_SPECIALIST, AgentRoute.RAG)
+            if expected_hint == "customs"
+            else (AgentRoute.RAG, AgentRoute.TOOLS)
+        )
         p_intent = detect_portal_task_intent(f"verify TIN {_sample_tin} for my tax clearance")
         dom_diag = analyze_portal_context(
             {
@@ -723,8 +735,10 @@ def evaluate_single_scenario(sc: dict[str, Any], tz: ZoneInfo) -> tuple[bool, fl
             and dec.locale == lang
             and len(en_q) > 5
             and sup is not None
-            and bool(sup.route)
-            and len(obj) > 5
+            and sup.route in expected_routes
+            and expected_hint in DOMAIN_OBJECTIVES
+            and expected_hint != "general"
+            and obj == DOMAIN_OBJECTIVES[expected_hint]
             and p_intent is not None
             and p_intent.task_id == "tin_search_verify"
             and dom_diag.get("card_type") == "stuck_portal_assistance"
@@ -790,28 +804,30 @@ def evaluate_single_scenario(sc: dict[str, Any], tz: ZoneInfo) -> tuple[bool, fl
 # ---------------------------------------------------------------------------
 # 2. Live Ngrok Stress, Fuzzy, Volume & Concurrent Load Suite
 # ---------------------------------------------------------------------------
-async def run_live_ngrok_suite() -> dict[str, Any]:
+async def run_live_ngrok_suite(live_report: dict[str, Any] | None = None) -> dict[str, Any]:
     """Execute live stress, fuzzy, G265/G269/G270 portal co-pilot + MCP, screenshot OCR, multimodal speech, WS receptionist, and load waves over ngrok."""
     print("\n" + "=" * 80, flush=True)
     print("PHASE B: LIVE NGROK STRESS, FUZZY, VOLUME & CONCURRENT LOAD SUITE", flush=True)
     print(f"Target HTTP Gateway: {NGROK_HTTP}", flush=True)
     print(f"Target WS Gateway:   {NGROK_WS}", flush=True)
     print("=" * 80, flush=True)
-
-    live_report: dict[str, Any] = {
-        "fuzzy_and_multilang_chat": [],
-        "long_horizon_and_eq_chains": [],
-        "portal_copilot_live_chains": [],
-        "screenshot_and_error_live_probes": [],
-        "multimodal_tts_asr_5_locales": [],
-        "call_receptionist_ws_5_locales": [],
-        "concurrent_load_waves": [],
-    }
+    if live_report is None:
+        live_report = {}
+    for k in (
+        "fuzzy_and_multilang_chat",
+        "long_horizon_and_eq_chains",
+        "portal_copilot_live_chains",
+        "screenshot_and_error_live_probes",
+        "multimodal_tts_asr_5_locales",
+        "call_receptionist_ws_5_locales",
+        "concurrent_load_waves",
+    ):
+        live_report.setdefault(k, [])
 
     async with httpx.AsyncClient(headers=HEADERS, timeout=120.0) as client:
         # B1. Fuzzy, Code-Switched, Calculator, G269/G270 300M VAT & Capability Probes across all 5 languages (35 live probes)
         fuzzy_probes = [
-            ("en", "wat is the stndard vat rate and regstration threshhold in uganda?", ["18%", "300,000,000", "150,000,000"]),
+            ("en", "wat is the stndard vat rate and regstration threshhold in uganda?", ["18%", "300,000,000"]),
             ("en", "how do i get an instant tin number on ura portal?", ["tin", "ura"]),
             ("en", "what is the wht rate on professional consultancy services?", ["6%", "withholding"]),
             ("en", "how many days do i have to lodge an objection to a tax assessment?", ["45", "objection"]),
@@ -861,7 +877,12 @@ async def run_live_ngrok_suite() -> dict[str, Any]:
             reply = str(body.get("reply") or "")
             card_str = json.dumps(body.get("portal_copilot") or {})
             combined = f"{reply} {card_str}".lower()
-            passed = resp.status_code == 200 and len(reply) > 15 and any(t.lower() in combined for t in tokens)
+            token_match = (
+                all(t.lower() in combined for t in tokens)
+                if idx == 1
+                else any(t.lower() in combined for t in tokens)
+            )
+            passed = resp.status_code == 200 and len(reply) > 15 and token_match
             if q == "Can you speak Runyankole?":
                 passed = passed and body.get("locale") == "en"
             if not passed:
@@ -1290,7 +1311,7 @@ async def run_live_ngrok_suite() -> dict[str, Any]:
             "latency_ms": round((time.perf_counter() - t0) * 1000.0, 1),
         })
 
-        # Step 13: G270 Live MCP Hyphenated TIN Coercion (`TIN 1000-000-001` -> `1000000001`)
+        # Step 13: G270 Live MCP Hyphenated TIN Coercion (`TIN 1000-000-001` -> canonical 10-digit string)
         t0 = time.perf_counter()
         r_mcp2 = await client.post(
             f"{NGROK_HTTP}/api/v1/chat",
@@ -1399,7 +1420,10 @@ async def run_live_ngrok_suite() -> dict[str, Any]:
                 and r_asr.status_code == 200
                 and len(transcript) > 5
                 and any(tok in tr_low for tok in subj_tokens)
-                and any(tok in tr_low for tok in rate_tokens)
+                and any(
+                    re.search(rf"(?<!\d){re.escape(tok)}(?!\d)", tr_low) if tok.isdigit() else (tok in tr_low)
+                    for tok in rate_tokens
+                )
                 and "rwanda" not in tr_low
                 and "18000" not in tr_low
             )
@@ -1634,6 +1658,7 @@ async def run_live_ngrok_suite() -> dict[str, Any]:
                 "total_requests": total_reqs,
                 "succeeded": wave_success,
                 "success_rate_pct": round(wave_success / total_reqs * 100.0, 2),
+                "passed": wave_success == total_reqs,
                 "throughput_qps": qps,
                 "p50_ms": pct(wave_latencies, 0.50),
                 "p90_ms": pct(wave_latencies, 0.90),
@@ -1722,14 +1747,15 @@ async def main() -> int:
     unique_total = sum(len(v["unique_keys"]) for v in by_dimension.values())
 
     # Run Phase B live ngrok stress, fuzzy, volume & load suite
+    live_report: dict[str, Any] = {}
     try:
-        live_report = await run_live_ngrok_suite()
+        live_report = await run_live_ngrok_suite(live_report)
     except Exception as exc:
         print(f"Live ngrok suite aborted: {exc!r}", flush=True)
-        live_report = {"error": repr(exc)}
+        live_report["error"] = repr(exc)
 
     summary: dict[str, Any] = {
-        "timestamp": dt.datetime.now(dt.UTC).isoformat(),
+        "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),  # noqa: UP017
         "gateway_url": NGROK_HTTP,
         "total_scenarios": total_99k,
         "unique_scenarios": unique_total,
@@ -1776,7 +1802,7 @@ async def main() -> int:
     out_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"\nSaved telemetry JSON -> {out_path} ({out_path.stat().st_size} bytes)", flush=True)
     live_ok = "error" not in live_report and all(
-        entry.get("passed", True)
+        bool(entry.get("passed"))
         for section in live_report.values()
         if isinstance(section, list)
         for entry in section

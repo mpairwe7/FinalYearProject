@@ -62,10 +62,11 @@ def test_cx_99000_multimodal_ngrok_telemetry_integrity() -> None:
     assert all(item["passed"] for item in live["screenshot_and_error_live_probes"])
 
     assert len(live["multimodal_tts_asr_5_locales"]) == 5
+    assert {item["locale"] for item in live["multimodal_tts_asr_5_locales"]} == {"en", "lg", "sw", "nyn", "ach"}
     expected_b3_subject_and_rate = {
         "en": (("value added", "vat", "uganda"), ("eighteen", "18")),
         "lg": (("uganda", "omusono", "omusolo"), ("kkumi", "munaana")),
-        "sw": (("uganda", "kodi", "thamani"), ("kumi", "nane")),
+        "sw": (("uganda", "kodi", "thamani"), ("kumi na nane", "18")),
         "nyn": (("uganda", "omushoro"), ("ikumi", "munaana")),
         "ach": (("uganda", "mucoro"), ("apar", "aboro")),
     }
@@ -78,6 +79,7 @@ def test_cx_99000_multimodal_ngrok_telemetry_integrity() -> None:
         assert any(tok in tr for tok in rate_tokens), f"Missing rate token in {item['locale']}: {tr}"
 
     assert len(live["call_receptionist_ws_5_locales"]) == 5
+    assert {item["locale"] for item in live["call_receptionist_ws_5_locales"]} == {"en", "lg", "sw", "nyn", "ach"}
     assert all(item["passed"] for item in live["call_receptionist_ws_5_locales"])
 
     assert len(live["concurrent_load_waves"]) == 3
@@ -85,3 +87,4 @@ def test_cx_99000_multimodal_ngrok_telemetry_integrity() -> None:
         assert wave["total_requests"] == 40
         assert wave["succeeded"] == 40
         assert wave["success_rate_pct"] == 100.0
+        assert wave["passed"] is True

@@ -48,7 +48,7 @@ We executed **99,000 repeated local deterministic evaluations** generated from *
 
 | Dimension | Scenarios | Unique Inputs | Passed | Accuracy (%) | `p50` (ms) | `p95` (ms) | Key Capabilities Validated |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
-| `long_horizon_memory` | 19,800 | 21 | 19,800 | **100.00%** | 0.712 | 1.012 | Multi-turn context carryover, G265 WYSIWYS `displayed_fields_sha256`, `SEP-2106` external `$ref` guard, `TIN`/`PRN`/`BRN` amount exclusion |
+| `long_horizon_memory` | 19,800 | 21 | 19,800 | **100.00%** | 0.712 | 1.012 | `WorkflowSession` slot carryover, G265 WYSIWYS `displayed_fields_sha256`, `SEP-2106` external `$ref` guard, `TIN`/`PRN`/`BRN` amount exclusion |
 | `emotional_intelligence` | 19,800 | 26 | 19,800 | **100.00%** | 0.069 | 0.104 | 5-locale hopelessness, server-gated `wellbeing_checkin`, negation-safe phrasal crisis (`Pe amito to` / `I do not want to die`), Bantu high-stakes & CXP hours |
 | `conversational_intelligence` | 14,850 | 50 | 14,850 | **100.00%** | 0.051 | 0.750 | 5-locale civic philosophy, FY2026-27 `UGX 300,000,000` VAT threshold, capability locale guard, ISO 24495-1 structuring/numbering |
 | `intent_and_objective` | 14,850 | 20 | 14,850 | **100.00%** | 0.400 | 2.252 | 5-locale intent/objective routing, hyphenated TIN/PRN `detect_connector_intent`, integer TIN/PRN grounding, 8-family URA error & screenshot OCR |
