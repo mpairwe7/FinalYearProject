@@ -231,3 +231,85 @@ class AssuranceTests(unittest.IsolatedAsyncioTestCase):
                 await ws.call_stream_endpoint(socket)
         remove.assert_awaited_once()
         release.assert_called_once_with("call", "anon::test")
+
+    def test_already_departed_participant_not_found_does_not_fail_revocation(self):
+        from app.receptionist import livekit
+
+        class NotFoundError(Exception):
+            code = "not_found"
+
+        self.assertTrue(livekit._is_participant_absent_error(NotFoundError("participant does not exist")))
+        self.assertFalse(livekit._is_participant_absent_error(RuntimeError("service unavailable")))
+
+    async def test_caller_hangup_during_revocation_still_restores_officer_presence(self):
+        room = self.room()
+
+        async def revoke_and_hangup(r, _ident):
+            r.state.mode = "ended"
+            return True
+
+        with (
+            patch.object(desk, "revoke_media", revoke_and_hangup),
+            patch.object(desk.presence, "finish_wrap_up") as finish_wrap,
+        ):
+            await desk._expire_reconnect_grace(room, "old-officer", 0)
+        finish_wrap.assert_called_once_with("old-officer")
+        self.assertIsNone(room.state.reconnecting_officer)
+
+    async def test_caller_hangup_on_bridged_call_moves_officer_to_wrap_up(self):
+        from app.receptionist import ws
+
+        room = self.room()
+        room.state.mode = "bridged"
+        room.state.officer_id = "officer-active"
+        room.state.reconnecting_officer = None
+        room.end = AsyncMock()
+        with (
+            patch.object(ws.call_brief, "stop"),
+            patch.object(ws.risk, "stop"),
+            patch.object(ws, "review_settle"),
+            patch.object(ws, "record_call_end_metrics"),
+            patch.object(ws, "log_voice_event"),
+            patch.object(ws.hub, "publish_lobby"),
+            patch.object(ws.desk.presence, "set_wrap_up") as set_wrap,
+            patch.object(ws.desk, "_save_draft_wrapup", AsyncMock()),
+            patch.object(ws.asyncio, "to_thread", AsyncMock()),
+        ):
+            await ws._finish_call(room)
+            await asyncio.sleep(0)
+        set_wrap.assert_called_once_with("officer-active", call_id="call_assurance")
+
+    async def test_wrapup_ticket_failure_does_not_commit_wrapup_before_ticket(self):
+        from app import database as db
+        from app.flags import flags
+
+        with (
+            patch.object(desk, "get_call", return_value={"call_id": "call_assurance"}),
+            patch.object(flags, "is_enabled", return_value=True),
+            patch.object(db, "create_ticket", side_effect=RuntimeError("db down")),
+            patch.object(desk, "update_call") as update,
+        ):
+            with self.assertRaises(desk.DeskError) as err:
+                await desk.wrapup(
+                    "call_assurance", "officer", "follow_up", "Needs help", ticket_action="create"
+                )
+        self.assertEqual(err.exception.status, 503)
+        update.assert_not_called()
+
+    def test_conditional_draft_wrapup_does_not_overwrite_submitted_officer_wrapup(self):
+        from app import database as db
+        from app.receptionist.store import (
+            create_call,
+            get_call,
+            init_receptionist_schema,
+            save_draft_wrapup_if_empty,
+            update_call,
+        )
+
+        db.init_db()
+        init_receptionist_schema()
+        create_call("call_draft_race", status="ended")
+        update_call("call_draft_race", outcome="resolved", wrapup_note="Officer verified note", wrapup_at=100.0)
+        wrote = save_draft_wrapup_if_empty("call_draft_race", "Generated draft note")
+        self.assertFalse(wrote)
+        self.assertEqual(get_call("call_draft_race")["wrapup_note"], "Officer verified note")

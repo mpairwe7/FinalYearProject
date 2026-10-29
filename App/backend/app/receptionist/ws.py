@@ -112,6 +112,8 @@ async def _finish_call(room: Any) -> None:
     """
     call_id = room.call_id
     abandoned = room.state.mode == "transferring"
+    bridged_officer = getattr(room.state, "officer_id", None) if room.state.mode == "bridged" else None
+    reconnecting_officer = getattr(room.state, "reconnecting_officer", None)
     for stop in (call_brief.stop, risk.stop):
         try:
             stop(call_id)
@@ -131,6 +133,10 @@ async def _finish_call(room: Any) -> None:
             "abandoned_while_waiting": abandoned,
         })),
     ]
+    if bridged_officer:
+        operations.insert(0, ("presence", lambda: desk.presence.set_wrap_up(bridged_officer, call_id=call_id)))
+    elif reconnecting_officer:
+        operations.insert(0, ("presence", lambda: desk.presence.finish_wrap_up(reconnecting_officer)))
     if abandoned:
         operations.insert(0, ("callback", lambda: update_call(
             call_id, needs_callback=1, callback_reason="caller_left_waiting", outcome="abandoned",
@@ -140,6 +146,8 @@ async def _finish_call(room: Any) -> None:
             callback()
         except Exception:
             logger.exception("Call %s finalization failed for %s", operation, call_id)
+    if bridged_officer:
+        asyncio.create_task(desk._save_draft_wrapup(call_id))
     asyncio.create_task(asyncio.to_thread(generate_call_summary, call_id))
 
 
@@ -641,7 +649,7 @@ async def staff_calls_stream_endpoint(
         auth_message = json.loads(await asyncio.wait_for(websocket.receive_text(), timeout=5.0))
         if not isinstance(auth_message, dict) or auth_message.get("type") != "authenticate":
             raise ValueError("missing WebSocket authentication message")
-        user_id, tenant_id, role, _ = _resolve_ws_principal(
+        user_id, tenant_id, role, claims = _resolve_ws_principal(
             websocket, required=True, token_override=str(auth_message.get("access_token") or "")
         )
     except Exception:
@@ -668,26 +676,39 @@ async def staff_calls_stream_endpoint(
             metadata={"actor_role": role, "view": "live"},
             tenant_id=tenant_id or "default",
         )
-        await websocket.send_text(
-            json.dumps({
-                "type": "snapshot",
-                "call": snapshot,
-                "turns": snapshot.get("turns", []),
-            })
+        await asyncio.wait_for(
+            websocket.send_text(
+                json.dumps({
+                    "type": "snapshot",
+                    "call": snapshot,
+                    "turns": snapshot.get("turns", []),
+                })
+            ),
+            timeout=5.0,
         )
         queue = hub.subscribe_call(call_id, loop)
     else:
         # Lobby mode (metadata only)
         queue = hub.subscribe_lobby(loop, tenant_id=tenant_scope)
 
+    token_exp = float(claims["exp"]) if isinstance(claims, dict) and isinstance(claims.get("exp"), (int, float)) else None
     try:
         while True:
+            if token_exp is not None and time.time() >= token_exp:
+                await websocket.close(code=4401)
+                break
             # Wait for event from hub or ping timeout (25s)
             try:
                 event = await asyncio.wait_for(queue.get(), timeout=25.0)
-                await websocket.send_text(json.dumps(event))
+                if token_exp is not None and time.time() >= token_exp:
+                    await websocket.close(code=4401)
+                    break
+                await asyncio.wait_for(websocket.send_text(json.dumps(event)), timeout=5.0)
             except asyncio.TimeoutError:
-                await websocket.send_text(json.dumps({"type": "ping", "ts": time.time()}))
+                await asyncio.wait_for(
+                    websocket.send_text(json.dumps({"type": "ping", "ts": time.time()})),
+                    timeout=5.0,
+                )
     except WebSocketDisconnect:
         pass
     except Exception:
