@@ -547,6 +547,13 @@ async def wrapup(
     call = get_call(call_id)
     if not call:
         raise DeskError(404, "Call not found")
+    if ticket_action not in (None, "", "create", "resolve", "keep_open"):
+        raise DeskError(400, "Invalid ticket action")
+    if ticket_action:
+        from ..flags import flags
+
+        if not flags.is_enabled("ticket_queue"):
+            raise DeskError(409, "Ticket queue is unavailable")
     valid_outcomes = {"resolved", "follow_up", "callback", "referred", "abandoned", "ai_resolved"}
     if outcome not in valid_outcomes:
         raise DeskError(400, f"Invalid outcome '{outcome}'")
@@ -610,6 +617,9 @@ async def wrapup(
                     db.update_ticket(ticket_id, staff_note=note)
             elif ticket_action == "create":
                 t = db.create_ticket(
+                    tenant_id=call.get("tenant_id") or "default",
+                    conversation_id=call.get("conversation_id") or None,
+                    locale=call.get("locale") or "en",
                     user_id=call.get("user_id") or "",
                     user_query=note or call.get("topic") or "Phone inquiry",
                     team=call.get("target_team") or "general",
@@ -690,12 +700,12 @@ def draft_wrapup_note(call_id: str) -> str:
         sentences.append(f"Reason for escalation: {why.rstrip('.')}.")
 
     if officer_utterances:
-        sentences.append("Officer connected with taxpayer and provided statutory guidance.")
+        sentences.append("Officer speech is recorded in the transcript; review it for the advice given.")
 
     if still_open:
         sentences.append(f"Follow-up context: {still_open.rstrip('.')}.")
     else:
-        sentences.append("Inquiry addressed and taxpayer confirmed understanding.")
+        sentences.append("Resolution and taxpayer understanding are not verified; officer review is required.")
 
     return " ".join(sentences)
 
@@ -752,6 +762,20 @@ async def _expire_reconnect_grace(room: CallRoom, officer_id: str, grace_s: floa
     async with room.desk_lock:
         if getattr(room.state, "reconnecting_officer", None) != officer_id or room.state.mode != "transferring":
             return
+        # Keep the claim while revoking media. Publishing availability first
+        # lets the next officer join while the previous one can still listen.
+        stale_identity = room.state.livekit_officer_identity
+        room.state.livekit_officer_identity = ""
+        room.state.livekit_officer_route_active = False
+        if not await revoke_media(room, stale_identity):
+            try:
+                presence.finish_wrap_up(officer_id)
+            except Exception:
+                logger.warning("Could not restore officer presence on call %s", room.call_id, exc_info=True)
+            return
+        # The caller can hang up while the media service is responding.
+        if room.state.mode != "transferring":
+            return
         logger.info("Reconnect grace period expired for %s on %s; releasing to queue", officer_id, room.call_id)
         room.state.reconnecting_officer = None
         # The lapsed officer is off the call: nobody may treat them as its
@@ -761,9 +785,6 @@ async def _expire_reconnect_grace(room: CallRoom, officer_id: str, grace_s: floa
         # The lapsed officer's media identity would otherwise stay on the
         # allowlist and refuse the next officer's audio (4409): the call sat
         # in the queue unanswerable.
-        stale_identity = room.state.livekit_officer_identity
-        room.state.livekit_officer_identity = ""
-        room.state.livekit_officer_route_active = False
         await _release_locked(room, "officer_disconnected")
         begin_wait(room)
         room.state.turn_seq += 1
@@ -795,21 +816,17 @@ async def _expire_reconnect_grace(room: CallRoom, officer_id: str, grace_s: floa
         presence.finish_wrap_up(officer_id)
     except Exception:
         logger.warning("Could not restore the lapsed officer's presence on call %s", room.call_id, exc_info=True)
-    # Outside the lock: a slow LiveKit API must not hold up the next claim.
-    await revoke_media(room, stale_identity)
 
 
-async def revoke_media(room: CallRoom, identity: str) -> None:
-    """Best effort: take *identity* out of the call's LiveKit room.
-
-    For clean-up paths that must not fail (a listener leaving, a lapsed
-    officer). Transfers call :func:`livekit.revoke_participant` directly and
-    refuse to proceed if it fails.
-    """
+async def revoke_media(room: CallRoom, identity: str) -> bool:
+    """Revoke access before reuse; terminate the call if isolation is uncertain."""
     if not (room.state.livekit_room and identity):
-        return
+        return True
     try:
-        await livekit.revoke_participant(room.state.livekit_room, identity)
+        await asyncio.wait_for(
+            livekit.revoke_participant(room.state.livekit_room, identity), timeout=5.0,
+        )
+        return True
     except Exception:
         logger.warning(
             "Could not revoke LiveKit participant (ref %s) on call %s",
@@ -817,6 +834,8 @@ async def revoke_media(room: CallRoom, identity: str) -> None:
             room.call_id,
             exc_info=True,
         )
+        await room.end("media_revocation_failed")
+        return False
 
 
 async def hang_up_caller(room: CallRoom, reason: str) -> None:

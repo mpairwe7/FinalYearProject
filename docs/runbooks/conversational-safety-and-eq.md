@@ -1,5 +1,12 @@
 # Runbook — conversational safety and emotional intelligence
 
+Call evidence update (2026-10-30, ADR-0020): draft wrap-ups no longer infer
+statutory advice from an officer utterance or resolution from missing
+follow-up data. Officers must verify advice, outcome and taxpayer
+understanding against the transcript. A generated draft is not confirmation
+that the taxpayer understood, agreed, or had their issue resolved. See the
+[assurance review](../plans/receptionist-assurance-2026-10-30.md).
+
 How the assistant responds when a taxpayer is in distress, at risk, or stuck; what is
 behind a flag; what to watch; and what to re-verify. Audit and design:
 [`docs/plans/conversational-eq-phase39-plan.md`](../plans/conversational-eq-phase39-plan.md);

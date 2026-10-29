@@ -88,7 +88,7 @@ async def _stop_pipeline(room: Any, task: Any) -> None:
         return
     if not runner.done():
         try:
-            await task.cancel()
+            await asyncio.wait_for(task.cancel(), timeout=_PIPELINE_STOP_TIMEOUT_S)
         except Exception:
             logger.debug("Pipeline task for %s did not cancel cleanly", room.call_id, exc_info=True)
     # Shielded so a slow runner is cancelled without this coroutine waiting on
@@ -102,6 +102,45 @@ async def _stop_pipeline(room: Any, task: Any) -> None:
         raise
     except Exception:
         logger.debug("Pipeline runner for %s ended with an error", room.call_id, exc_info=True)
+
+
+async def _finish_call(room: Any) -> None:
+    """Release live resources even when persistence or reporting is unavailable.
+
+    Each failed reporting operation is logged once, never replayed. The caller
+    endpoint owns registry and concurrency-slot removal in its outer finally.
+    """
+    call_id = room.call_id
+    abandoned = room.state.mode == "transferring"
+    for stop in (call_brief.stop, risk.stop):
+        try:
+            stop(call_id)
+        except Exception:
+            logger.exception("Could not stop call monitor for %s", call_id)
+    await room.end("caller_hangup")
+    operations = [
+        ("review", lambda: review_settle(room)),
+        ("metrics", lambda: record_call_end_metrics(call_id, room.state)),
+        ("audit", lambda: log_voice_event(
+            user_id=room.state.user_id or "", session_id=call_id, event_type="call_ended",
+            tenant_id=room.state.tenant_id or "default",
+        )),
+        ("lobby", lambda: hub.publish_lobby("call.ended", {
+            "call_id": call_id, "status": "ended",
+            "reason": room.state.end_reason or "caller_hangup",
+            "abandoned_while_waiting": abandoned,
+        })),
+    ]
+    if abandoned:
+        operations.insert(0, ("callback", lambda: update_call(
+            call_id, needs_callback=1, callback_reason="caller_left_waiting", outcome="abandoned",
+        )))
+    for operation, callback in operations:
+        try:
+            callback()
+        except Exception:
+            logger.exception("Call %s finalization failed for %s", operation, call_id)
+    asyncio.create_task(asyncio.to_thread(generate_call_summary, call_id))
 
 
 async def _forward_control(task: Any, data: dict[str, Any]) -> None:
@@ -188,11 +227,10 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
         await websocket.close(code=1013)
         return
 
-    await websocket.accept()
-
     call_id = f"call_{uuid.uuid4().hex[:12]}"
     room = None
     try:
+        await websocket.accept()
         # 5. Read first text frame: call_start
         try:
             raw_init = await asyncio.wait_for(websocket.receive_text(), timeout=15.0)
@@ -401,13 +439,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                             livekit.log_ref(identity),
                             call_id,
                         )
-                        try:
-                            await livekit.revoke_participant(room.state.livekit_room, identity)
-                        except Exception:
-                            logger.exception(
-                                "Could not revoke unissued LiveKit participant in call %s",
-                                call_id,
-                            )
+                        await desk.revoke_media(room, identity)
                         return
                     if identity == room.state.livekit_caller_identity:
                         reconnect_task = room.caller_reconnect_task
@@ -575,31 +607,15 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
     except Exception:
         logger.exception("Error in call stream: %s", call_id)
     finally:
-        if room:
-            call_brief.stop(call_id)
-            risk.stop(call_id)
-            abandoned_while_waiting = (room.state.mode == "transferring")
-            if abandoned_while_waiting:
-                update_call(call_id, needs_callback=1, callback_reason="caller_left_waiting", outcome="abandoned")
-            # A review question the caller hung up on is unanswered. Here as
-            # well as in room.end: a call the desk ended is already "ended".
-            review_settle(room)
-            await room.end("caller_hangup")
-            record_call_end_metrics(call_id, room.state)
-            asyncio.create_task(asyncio.to_thread(generate_call_summary, call_id))
-            log_voice_event(user_id=user_id or "", session_id=call_id, event_type="call_ended", tenant_id=tenant_id or "default")
-            hub.publish_lobby(
-                "call.ended",
-                {
-                    "call_id": call_id,
-                    "status": "ended",
-                    "reason": room.state.end_reason or "caller_hangup",
-                    "abandoned_while_waiting": abandoned_while_waiting,
-                },
-            )
-            await registry.remove(call_id)
-        if key:
-            release("call", key)
+        try:
+            if room:
+                await _finish_call(room)
+        finally:
+            try:
+                if room:
+                    await registry.remove(call_id)
+            finally:
+                release("call", key)
 
 
 # ---------------------------------------------------------------------------
