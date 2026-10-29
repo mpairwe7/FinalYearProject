@@ -267,7 +267,7 @@ _BUSINESS_EMPATHY_RESPONSES = {
         "Naye luno lwe lusalira olunaakuyamba okussa ekikkowe:\n\n"
         "1. **Tebakusoloozaako nga Tonnafuna Magoba**: Omusolo gw'ensimbi ez'obusuubuzi gusasulwa ku magoba amatongeze gokka, si ku nsimbi zo ez'entandikwa.\n"
         "2. **Okuyambibwa kw'Obusuubuzi Obutono (Presumptive Tax)**: Singa omutindo gwo ogw'okutunda guba wansi w'obukadde 10 buli mwaka, tosasula musolo gwa bizinensi. Bw'oba wakati w'obukadde 10 ne 50, osasula omusolo mutono ogw'akafunda awatali kwetaagisa bitabo binene by'abalirizi b'ebitabo.\n"
-        "3. **Ekkomo lya VAT**: Tewalizibwa kwewandiisa ku VAT okuggyako nga bizinensi yo etuuse ku bukadde **300 buli mwaka** (okuva ku bukadde 150 obwaliwo).\n"
+        "3. **Ekkomo lya VAT**: Tewalizibwa kwewandiisa ku VAT okuggyako nga bizinensi yo mu kutunda ebintu ebikozesebwako VAT etuuse ku bukadde **300 buli mwaka** (okuva ku bukadde 150 obwaliwo).\n"
         "4. **Obuyambi bwa URA bwa Bwereere**: URA erina emisomo egy'obwereere n'obutabo obuyamba abasuubuzi abapya.\n\n"
         "Bizinensi ki gy'otandika oba gy'oddukanya? Ndi wano okukunnyonnyola ebisaanidde mu ngeri ennyangu."
     ),
@@ -276,7 +276,7 @@ _BUSINESS_EMPATHY_RESPONSES = {
         "Hapa kuna ukweli utakaokupa utulivu na matumaini:\n\n"
         "1. **Hutozwi Kodi Kabla ya Kupata Faida**: Kodi ya mapato ya biashara hutozwa tu kwenye faida halisi uliyopata, si mtaji wako wa mwanzo.\n"
         "2. **Unafuu kwa Biashara Ndogo (Kodi ya Makadirio)**: Ikiwa mapato yako ya mwaka yako chini ya Shilingi milioni 10, umesamehewa kisheria. Mapato kati ya milioni 10 na milioni 50 yanalipiwa viwango vidogo vilivyowekwa bila kuhitaji mahesabu magumu ya uhasibu.\n"
-        "3. **Kikomo cha VAT Kinakulinda**: Huruhusiwi kulazimishwa kujiandikisha kwa VAT hadi mauzo yako ya mwaka yafikie **Shilingi milioni 300** (kutoka milioni 150 za awali).\n"
+        "3. **Kikomo cha VAT Kinakulinda**: Huruhusiwi kulazimishwa kujiandikisha kwa VAT hadi mauzo yako ya mwaka yanayotozwa VAT yafikie **Shilingi milioni 300** (kutoka milioni 150 za awali).\n"
         "4. **Mafunzo ya Bure ya URA**: URA inatoa semina na miongozo ya bure kwa wajasiriamali wapya kote nchini.\n\n"
         "Unafanya au unapanga biashara ya aina gani? Ninaweza kukuonyesha hatua kwa hatua unachopaswa kufanya kwa wepesi."
     ),
@@ -285,7 +285,7 @@ _BUSINESS_EMPATHY_RESPONSES = {
         "Reeba amakuru marungi agarikuhwera abashuubuzi ba Uganda:\n\n"
         "1. **Torikushashura Omushoro Otakabaire na Magoba**: Omushoro gw'entaasya nigushashurwa aha magoba gonka, ti ha sente zaawe z'okutandika.\n"
         "2. **Obuhwezi bw'Obushuubuzi Bukye (Presumptive Tax)**: Entaasya yaawe y'omwaka yaaba eri ahansi ya shiringi obukaikuru 10, torikushashura mushoro gw'obushuubuzi. Ahagati y'obukaikuru 10 na 50, hariho omushoro mukye hatariho kwetenga ebitabo bikuru.\n"
-        "3. **Obugarukiro bwa VAT**: Torikugyemeserezibwa kwehandiikisa aha VAT kureka entaasya yaawe yahika **shiringi obukaikuru 300** omwaka (kuruga aha bukaikuru 150).\n"
+        "3. **Obugarukiro bwa VAT**: Torikugyemeserezibwa kwehandiikisa aha VAT kureka entaasya yaawe y'ebintu ebirikushashurirwa VAT yahika **shiringi obukaikuru 300** omwaka (kuruga aha bukaikuru 150).\n"
         "4. **Okwegyesa kw'Obusha okwa URA**: URA neeha obuhabuzi bw'obusha aha bashuubuzi basya.\n\n"
         "Nooyenda kutandika nari nookora bushuubuzi ki? Nimbaasa kukushoboororera idaara aha rindi."
     ),
@@ -294,7 +294,7 @@ _BUSINESS_EMPATHY_RESPONSES = {
         "Man aye lok maber ma konyo lutim biacara i Uganda:\n\n"
         "1. **Pe Kiculi Mucoro Ma Peya Inongo Magoba**: Mucoro me lim ma odonyo kiculo i kom magoba keken, pe i kom lim me cako biacara.\n"
         "2. **Kony pi Biacara Matidi (Presumptive Tax)**: Ka lim ma odonyo i mwaka tye i te cilingi milioni 10, pe iculo mucoro me biacara. I kin milioni 10 naka 50, iculo mucoro matidi ma pe mito buk me kwano lim madongo.\n"
-        "3. **Rwom me VAT**: Pe kicoyo nying pi VAT kono lim me cato jami me mwaka oo **cilingi milioni 300** (ki i milioni 150 macon).\n"
+        "3. **Rwom me VAT**: Pe kicoyo nying pi VAT kono lim me cato jami ma kiculo iye VAT me mwaka oo **cilingi milioni 300** (ki i milioni 150 macon).\n"
         "4. **Pwony me Nono pa URA**: URA miyo pwony ki tela me nono bot lutim biacara.\n\n"
         "Biacara ango ma itye ka timo onyo imito cako? Atwero tito boti rwom ki rwom."
     ),
@@ -428,7 +428,7 @@ _CONVERSATIONAL_LOCALE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         "nyn",
         re.compile(
             r"\b(?:ahabw['’]?enki|nitushashura|omushoro|omugaso\s+gw['’]?omushoro|iwe\s+ori\s+oha|"
-            r"owakukozire|nooruga\s+nkahi|o?runyankore|runyankole|noobaasa\s+(?:kugamba|kuhurira)|"
+            r"owakukozire|nooruga\s+nkahi|orunyankore|noobaasa\s+(?:kugamba|kuhurira)|"
             r"ori\s+aho|okyariho|(?:nintina|ntiina)|obushuubuzi|"
             r"agandi\s+erizooba|ori\s+gye|oraire\s+ota|ekikwate\s+aha\s+mushoro|oine\s+enyehurira)\b",
             re.IGNORECASE,

@@ -269,7 +269,7 @@ def coerce_arguments_to_schema(
                     m_pct = _PERCENT_RATE_STRING_RE.match(stripped)
                     if m_pct:
                         try:
-                            pct_val = round(float(m_pct.group(1)) / 100.0, 6)
+                            pct_val = float(m_pct.group(1)) / 100.0
                             if 0.0 <= pct_val <= 1.0:
                                 coerced[key] = pct_val
                                 continue

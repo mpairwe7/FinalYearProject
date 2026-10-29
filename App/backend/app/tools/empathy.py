@@ -36,6 +36,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from ..text_signals import (
+    checkin_already_given,
     detect_crisis,
     detect_high_stakes,
     detect_user_distress,
@@ -84,11 +85,38 @@ _GUIDANCE: dict[str, dict[str, Any]] = {
 }
 
 
+def _wellbeing_checkin_allowed(*, user_id: str | None = None) -> bool:
+    """Evaluate server-side wellbeing_checkin flag and once-per-conversation state."""
+    try:
+        from ..flags import flags
+
+        if not flags.is_enabled("wellbeing_checkin", subject=user_id or None):
+            return False
+    except Exception:
+        return False
+
+    try:
+        from .. import database as db
+        from ..service import _ACTIVE_CONVERSATION_STATE, _ACTIVE_TENANT_ID
+
+        active_conv = _ACTIVE_CONVERSATION_STATE.get()
+        if active_conv:
+            active_tenant = _ACTIVE_TENANT_ID.get() or "default"
+            turns = db.get_recent_turns(active_conv, limit=10, tenant_id=active_tenant)
+            prior_replies = [str(t.get("bot_reply") or "") for t in (turns or ())]
+            if checkin_already_given(prior_replies):
+                return False
+    except Exception:
+        pass
+    return True
+
+
 def assess(
     message: str,
     history: list[str] | None = None,
     *,
     locale: str = "",
+    user_id: str | None = None,
     record_metric: bool = True,
 ) -> dict[str, Any]:
     """Classify *message* and return handling guidance.
@@ -137,7 +165,10 @@ def assess(
         }
     kind = detect_user_distress(text)
     trajectory = distress_trajectory(kind, history or [])
-    wellbeing_checkin = needs_wellbeing_checkin(text, history or ())
+    wellbeing_checkin = bool(
+        needs_wellbeing_checkin(text, history or ())
+        and _wellbeing_checkin_allowed(user_id=user_id)
+    )
 
     cue_count = sum(1 for pattern in _INTENSITY_CUES if pattern.search(text))
     if not kind and not wellbeing_checkin:
@@ -280,7 +311,7 @@ def fuse_multimodal_affect(
     record_metric: bool = True,
 ) -> AffectiveState:
     """Fuse lexical distress, multi-turn trajectory, acoustic prosody, and clarification effort."""
-    lex = assess(message, history=history, locale=locale, record_metric=False)
+    lex = assess(message, history=history, locale=locale, user_id=user_id, record_metric=False)
     eff_loc = str(lex.get("locale") or "en")
     stakes = list(lex.get("stakes") or [])
     wellbeing_checkin = bool(lex.get("wellbeing_checkin", False))
@@ -501,7 +532,10 @@ class EmotionalToneTool(Tool):
         message: str = "",
         history: list[str] | None = None,
         locale: str = "",
+        user_id: str = "",
+        tenant_id: str = "default",
     ) -> dict[str, Any]:
+        _ = tenant_id
         if not str(message).strip():
             return {"ok": False, "kind": "", "intensity": "none", "error": "message is required"}
         return {
@@ -510,6 +544,7 @@ class EmotionalToneTool(Tool):
                 message,
                 history=[str(h) for h in (history or [])][-10:],
                 locale=locale,
+                user_id=user_id or None,
             ),
         }
 

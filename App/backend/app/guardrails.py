@@ -792,27 +792,56 @@ def _split_marked_list(line: str, separator: str, *, word_limit: int) -> list[st
     return [f"- {part}" for part in parts]
 
 
+_STRUCTURAL_LINE_RE = re.compile(r"^\s*(?:\d{1,2}[.)]|[-*]\s|#{1,4}\s|\||>|```)")
+
+
+def _paragraph_prose_text(prose: str) -> str:
+    stripped = prose.strip()
+    if not stripped:
+        return ""
+    sentences = [part.strip() for part in _SENTENCE_BREAK_RE.split(stripped) if part.strip()]
+    if len(sentences) < 4:
+        return stripped
+    chunks = [" ".join(sentences[i : i + 3]) for i in range(0, len(sentences), 3)]
+    return "\n\n".join(chunks)
+
+
 def _break_long_paragraphs(text: str) -> str:
     """A wall of four or more sentences becomes paragraphs of at most three.
 
     List lines, headings, tables, blockquotes, code blocks, and a period after
-    a digit ("Section 18. The Act") stay as they are.
+    a digit ("Section 18. The Act") stay as they are. In mixed blocks (e.g. a
+    prose run followed directly by a table), prose runs are paragraphed while
+    structural lines are preserved intact.
     """
     blocks = re.split(r"\n\s*\n", text)
     rebuilt: list[str] = []
     for block in blocks:
         stripped = block.strip()
-        if not stripped or re.search(
-            r"(?m)^\s*(?:\d{1,2}[.)]|[-*]\s|#{1,4}\s|\||>|```)", stripped
-        ):
-            rebuilt.append(block.strip())
+        if not stripped:
             continue
-        sentences = [part.strip() for part in _SENTENCE_BREAK_RE.split(stripped) if part.strip()]
-        if len(sentences) < 4:
-            rebuilt.append(stripped)
+        if not _STRUCTURAL_LINE_RE.search(stripped):
+            rebuilt.append(_paragraph_prose_text(stripped))
             continue
-        chunks = [" ".join(sentences[i : i + 3]) for i in range(0, len(sentences), 3)]
-        rebuilt.append("\n\n".join(chunks))
+        lines = stripped.split("\n")
+        runs: list[tuple[bool, list[str]]] = []
+        in_fence = False
+        for line in lines:
+            is_fence = bool(re.match(r"^\s*```", line))
+            is_struct = in_fence or is_fence or bool(_STRUCTURAL_LINE_RE.match(line))
+            if is_fence:
+                in_fence = not in_fence
+            if runs and runs[-1][0] == is_struct:
+                runs[-1][1].append(line)
+            else:
+                runs.append((is_struct, [line]))
+        formatted_runs: list[str] = []
+        for is_struct, run_lines in runs:
+            raw_run = "\n".join(run_lines).strip()
+            if not raw_run:
+                continue
+            formatted_runs.append(raw_run if is_struct else _paragraph_prose_text(raw_run))
+        rebuilt.append("\n".join(formatted_runs))
     return "\n\n".join(part for part in rebuilt if part)
 
 
@@ -838,7 +867,7 @@ def _renumber_ordered_lines(lines: list[str]) -> list[str]:
             else:
                 line_indent = len(line[: len(line) - len(line.lstrip())].replace("\t", "    "))
                 is_bullet_subitem = bool(re.match(r"^[-*+]\s+", stripped_line))
-                if stacks and (line_indent > stacks[0][0] or (is_bullet_subitem and not saw_blank)):
+                if stacks and (line_indent > stacks[0][0] or (is_bullet_subitem and line_indent > 0 and not saw_blank)):
                     while len(stacks) > 1 and stacks[-1][0] >= line_indent:
                         stacks.pop()
                 else:
