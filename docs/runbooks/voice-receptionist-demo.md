@@ -1,8 +1,29 @@
 # Runbook — Simulated AI Phone Receptionist ("Call URA")
 
 Operator and deployment runbook for the browser voice receptionist powered by
-Pipecat 1.12, self-hosted LiveKit WebRTC media, Whisper-SALT confidence scoring,
+Pipecat 1.15, self-hosted LiveKit WebRTC media, Whisper-SALT confidence scoring,
 ClarifyGate terminology disambiguation, and staff takeover.
+
+### Assurance update — 2026-10-30 (ADR-0020)
+
+Reconnect expiry revokes the previous officer's media before releasing the
+claim. Revocation failure ends the call with `media_revocation_failed` and
+attempts room deletion; it does not advertise another transfer. Check SFU
+room state if deletion fails, suspend new calls and investigate before
+restoring service. Self-hosted LiveKit tokens cannot be invalidated by
+participant removal alone. See [the review and outstanding release gates](../plans/receptionist-assurance-2026-10-30.md).
+
+Call termination precedes callback/review/metrics/audit reporting. Each failed
+report is logged independently; registry/admission cleanup still runs. A
+database outage can leave a stale row requiring reconciliation. Timers do
+not cancel their own teardown; cancellation and media-close awaits have
+cooperative five-second deadlines. This is not process-loss recovery.
+
+Install `requirements-cranecloud.txt` and `requirements-receptionist.txt`
+together. Pipecat is pinned to 1.15.0 (released 2026-10-29); the old 1.12.0
+pin required Pillow below 13 and could not resolve with the backend's Pillow
+13 floor. The combined profiles and pipeline tests were verified with Pillow
+13.0.0. Do not install the old profile separately and silently downgrade Pillow.
 
 ---
 

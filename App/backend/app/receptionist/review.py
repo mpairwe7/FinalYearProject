@@ -19,6 +19,7 @@ before answering, is a ``no_answer`` rather than a gap (:func:`settle`).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -187,7 +188,11 @@ def record(room: CallRoom, text: str, language: str, *, status: str = "answered"
         return ""
     sentiment = classify_spoken_review(text, language) if status == "answered" else ""
     state.review_state = "done"
-    if state.review_timer_task is not None and not state.review_timer_task.done():
+    if (
+        state.review_timer_task is not None
+        and not state.review_timer_task.done()
+        and state.review_timer_task is not asyncio.current_task()
+    ):
         state.review_timer_task.cancel()
     try:
         if service_ratings.answer(
@@ -210,7 +215,11 @@ def settle(room: CallRoom, status: str = "no_answer") -> None:
     every way a call can end is safe.
     """
     state = room.state
-    if state.review_timer_task is not None and not state.review_timer_task.done():
+    if (
+        state.review_timer_task is not None
+        and not state.review_timer_task.done()
+        and state.review_timer_task is not asyncio.current_task()
+    ):
         state.review_timer_task.cancel()
     if state.review_state in ASKING:
         state.review_state = "done"

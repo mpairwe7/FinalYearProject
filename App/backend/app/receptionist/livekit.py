@@ -139,6 +139,21 @@ def mint_token(
     )
 
 
+def _is_participant_absent_error(exc: Exception) -> bool:
+    """Return True when a LiveKit API error indicates the participant or room is already gone."""
+    code = str(getattr(exc, "code", "") or "").lower()
+    status = getattr(exc, "status", None)
+    msg = str(exc).lower()
+    return (
+        code in {"not_found", "notfound"}
+        or status == 404
+        or "participant does not exist" in msg
+        or "participant not found" in msg
+        or "room does not exist" in msg
+        or "requested room does not exist" in msg
+    )
+
+
 async def revoke_participant(room_name: str, identity: str) -> None:
     """Restrict active room permissions, then disconnect the participant.
 
@@ -169,12 +184,16 @@ async def revoke_participant(room_name: str, identity: str) -> None:
                 ),
             )
         except Exception as exc:
+            if _is_participant_absent_error(exc):
+                return
             update_error = exc
         try:
             await client.room.remove_participant(
                 api.RoomParticipantIdentity(room=room_name, identity=identity)
             )
-        except Exception:
+        except Exception as remove_exc:
+            if _is_participant_absent_error(remove_exc):
+                return
             if update_error is not None:
                 raise RuntimeError(
                     "LiveKit participant permissions and removal both failed"

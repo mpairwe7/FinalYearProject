@@ -1,7 +1,7 @@
 # =============================================================================
 # AI Risk Manifest — NIST AI RMF 1.0 + ISO/IEC 42001:2023 + EU AI Act
 # URA AI Chatbot — Retrieval-Augmented Generation System
-# Updated: 2026-10-22
+# Updated: 2026-10-30 (receptionist assurance addendum, ADR-0020)
 # =============================================================================
 
 system:
@@ -444,12 +444,15 @@ owasp_agentic_2026:
     - id: "ASI03"
       name: "Identity and Privilege Abuse"
       status: "mitigated"
+      receptionist_assurance: "ADR-0020: revoke media before requeue, terminate on revocation failure; preserve tenant on wrap-up tickets. Self-hosted token replay remains G303; session expiry remains G304."
       evidence: "App/backend/app/auth.py, App/backend/app/main.py"
       controls: "Strict role separation (_require_live_officer, _desk_writer) ensuring only ura_staff handle live taxpayer queues/calls while admins/auditors are read/audit-only; guided-workflow state adopted on sign-in only from the anonymous session the request proves (compare-and-swap re-key), with signed-in state decided per request (ADR-0013); case facts, calculator memory and workflow lookups bound to the same owner-scoped key, with no bare-conversation-id fallback (ADR-0013 A)"
       verified_by:
         - "tests/agents/test_auth.py"
         - "tests/agents/test_journey_copilot_session_binding.py"
         - "tests/agents/test_conversation_state_owner_binding.py"
+        - "App/backend/tests/test_receptionist_assurance.py"
+        - "tests/test_answer_integrity_integration.py"
     - id: "ASI04"
       name: "Agentic Supply Chain"
       status: "mitigated"
@@ -486,21 +489,25 @@ owasp_agentic_2026:
     - id: "ASI08"
       name: "Cascading Agent Failures"
       status: "mitigated"
+      receptionist_assurance: "ADR-0020: cleanup independent of reporting, current-task-safe timer cancellation, cooperative media shutdown deadlines. Durable reconciliation and process-loss recovery remain G306."
       evidence: "App/backend/app/resilience.py, App/backend/app/quality_circuit_breaker.py, App/frontend/src/lib/chatStream.ts, App/frontend/src/app/page.tsx"
       controls: "Provider circuit breakers, bounded ReAct/revision loops, and runtime quality circuit breaker throttling autonomy on grounding degradation. Bounded SSE requires explicit completion; ambiguous stateful chat failures are not automatically replayed; response writes are conversation-bound (ADR-0018)."
       limitations: "Distributed execution and authenticated proxy/staging probes remain UI-10; local browser tests use a mocked backend."
       verified_by:
         - "App/backend/tests/test_resilience.py"
+        - "App/backend/tests/test_receptionist_assurance.py"
         - "App/frontend/src/__tests__/lib/chatStream.test.ts"
         - "App/frontend/e2e/chat-flow.spec.ts"
     - id: "ASI09"
       name: "Human-Agent Trust Exploitation"
       status: "mitigated"
+      receptionist_assurance: "ADR-0020: draft notes explicitly leave resolution and understanding unverified; recorded officer speech does not establish statutory advice. Wrap-up ownership/atomic writes remain G305."
       evidence: "App/backend/app/receptionist/brain.py, App/backend/app/escalation_policy.py, plugins/apps/common_ui.py, App/frontend/src/components/ChatMessage.tsx, App/frontend/src/components/PortalCopilotCard.tsx"
       controls: "Fail-closed spoken action confirmation (G177), explicit AI disclosure (G170), simulation headers (live=false), and transparent 5-locale CXP operating-hours disclosure (G174/G196). Only current completed replies offer workflow/portal actions; interrupted replies retain a warning without a grounding badge. Portal approval requires a local digest; unknown execution outcomes cannot appear successful (ADR-0018)."
       limitations: "Mandatory API digest enforcement remains UI-09/G265; reviewed translations and manual accessibility acceptance remain UI-11. See docs/plans/intelligent-ui-integration-audit-2026-10.md."
       verified_by:
         - "App/backend/tests/test_receptionist_safety_integrity.py"
+        - "App/backend/tests/test_receptionist_assurance.py"
         - "tests/agents/test_plugin_apps_boundary.py"
         - "App/frontend/src/__tests__/components/ChatMessage.test.tsx"
         - "App/frontend/src/__tests__/components/PortalCopilotCard.test.tsx"
@@ -514,6 +521,12 @@ owasp_agentic_2026:
 
 aibom_inventory:
   schema: "CycloneDX-AIBOM-1.6"
+  speech_frameworks:
+    - id: "pipecat-ai"
+      version: "1.15.0"
+      evidence: "App/backend/requirements-receptionist.txt; G308; ADR-0020"
+      compatibility: "Combined CPU/receptionist profiles resolve with Pillow 13.0.0; pipeline and LiveKit control tests run with extras installed."
+      limitations: "Existing PipelineTask/PipelineRunner APIs are deprecated for removal in Pipecat 2.0; live SFU acceptance remains G303/G307."
   models:
     - id: "Sunbird/Sunflower-Qwen3.5-9B"
       role: "Primary T1 multilingual RAG & vernacular LLM (262k native context)"

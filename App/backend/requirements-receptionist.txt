@@ -1,4 +1,6 @@
-pipecat-ai[silero,websocket,livekit]==1.12.0
+# 1.14+ supports the backend's Pillow>=13 floor; verified together with the
+# CPU deployment profile. Keep exact pins and exercise the real pipeline tests.
+pipecat-ai[silero,websocket,livekit]==1.15.0
 jellyfish
 onnxruntime>=1.20.0
 

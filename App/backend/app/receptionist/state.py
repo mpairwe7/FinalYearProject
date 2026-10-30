@@ -215,8 +215,12 @@ class CallRoom:
             self.state.end_reason = reason
             self.end_event.set()
 
-            for timer in (self.state.transfer_timer_task, self.hold_timer):
-                if timer is not None and not timer.done():
+            for timer in (
+                self.state.transfer_timer_task, self.hold_timer, self.claim_timer,
+                self.state.reconnect_timer, self.caller_reconnect_task,
+                self.state.review_timer_task,
+            ):
+                if timer is not None and not timer.done() and timer is not asyncio.current_task():
                     timer.cancel()
             # A review question still waiting for its answer is now unanswered.
             try:
@@ -225,15 +229,13 @@ class CallRoom:
                 settle(self)
             except Exception:
                 logger.debug("Could not settle the review of call %s", self.call_id, exc_info=True)
-            if self.caller_reconnect_task and not self.caller_reconnect_task.done():
-                self.caller_reconnect_task.cancel()
 
         # An ended call must not keep its Pipecat pipeline running until the caller's control loop notices. PipelineTask.cancel()
         # only queues a CancelFrame, so it is safe from inside the pipeline too.
         runner = self.pipeline_runner_task
         if runner is not None and not runner.done() and self.pipeline_task is not None:
             try:
-                await self.pipeline_task.cancel()
+                await asyncio.wait_for(self.pipeline_task.cancel(), timeout=5.0)
             except Exception:
                 logger.debug("Could not cancel the pipeline for call %s", self.call_id, exc_info=True)
 
@@ -251,7 +253,7 @@ class CallRoom:
         # Notify officer leg if present
         if self.officer is not None:
             try:
-                await self.officer.close(reason=reason)
+                await asyncio.wait_for(self.officer.close(reason=reason), timeout=5.0)
             except Exception:
                 pass
 
@@ -259,7 +261,7 @@ class CallRoom:
             try:
                 from . import livekit
 
-                await livekit.close_room(self.state.livekit_room)
+                await asyncio.wait_for(livekit.close_room(self.state.livekit_room), timeout=5.0)
             except Exception:
                 logger.warning(
                     "Failed to close LiveKit room for call %s",

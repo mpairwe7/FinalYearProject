@@ -1,5 +1,13 @@
 # Model Card — URA Chatbot RAG Pipeline
 
+Receptionist assurance addendum, 2026-10-30: operational draft notes explicitly
+leave resolution and taxpayer understanding unverified (ADR-0020). Cleanup
+and media-revocation fault tests do not establish speech quality or production
+availability. Self-hosted token replay, session lifetime, durable call state
+and multilingual media acceptance remain open; see the
+[review](plans/receptionist-assurance-2026-10-30.md). Model weights and inference
+defaults are unchanged by this addendum.
+
 **Aligned with**: EU AI Act Article 53 (2026), ML Model Cards (Mitchell et al., 2019)
 
 ---

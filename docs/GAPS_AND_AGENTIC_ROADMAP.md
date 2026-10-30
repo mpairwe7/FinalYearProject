@@ -579,6 +579,24 @@ G42 fix, which is live there. The one failure:
 | G276 ⚪ | **UI-12/13: Dependency and retrieval-freshness release gates remain unresolved.** | Pinned Bun audit: 25 findings (7 high, 14 moderate, 4 low) through development/test dependencies. The retrieval freshness snapshot is absent. An earlier hygiene failure came from a sandbox-mounted `.agents` path; the test passes outside that sandbox. | **Open — build/retrieval owners.** Triage compatible dependency upgrades and generate freshness evidence from the real indexed corpus. No release certification is inferred from passing frontend tests. |
 
 
+### Receptionist assurance — 2026-10-30
+
+Reviewed on branch `fix/receptionist-assurance-2026-10-30`; [evidence, sources and phased acceptance](plans/receptionist-assurance-2026-10-30.md), ADR-0020. Fixed means implemented with local regressions; production deployment is pending.
+
+| Gap | Finding | Status |
+| --- | --- | --- |
+| G298 🟢 | ~~Reporting failures skipped call teardown/registry/slot release; failed socket acceptance leaked its slot.~~ | Fixed: teardown before isolated reporting; unconditional registry/slot finalization. |
+| G299 🟢 | ~~Timers cancelled their own teardown, other timers survived, and pipeline cancellation itself was unbounded.~~ | Fixed: skip the current task, cancel other timers, cooperative shutdown deadlines. |
+| G300 🟢 | ~~Reconnect expiry exposed a claimable call before old media was revoked; failed revocation continued the call.~~ | Fixed: revoke before release, end on uncertain isolation. SFU admission/deletion assurance remains G303. |
+| G301 🟢 | ~~Draft wrap-ups asserted advice, resolution and taxpayer understanding without evidence.~~ | Fixed: recorded speech and unverified outcome are explicit. |
+| G302 🟢 | ~~Wrap-up ticket creation dropped tenant/conversation/locale and bypassed the queue flag.~~ | Fixed: preserve context; reject disabled/unknown ticket actions before mutation. |
+| G303 ⚪ | Self-hosted token replay and media-revocation/room-deletion outage. | Open: security/media owners; prove admission denial and zero stale media delivery in staging. |
+| G304 ⚪ | Staff socket session lifetime and bounded admission/transcription work. | Open: backend owner; expiry/logout, flood, slow-reader and bounded-queue tests. |
+| G305 ⚪ | Wrap-up ownership, partial ticket writes and draft-vs-officer write race. | Open: desk/storage owners; transferred-call policy, idempotency and conditional/atomic writes. |
+| G306 ⚪ | Process-local call state and failed audit/end-record reconciliation. | Open: SRE owner; process-loss/drain drills and durable ownership before scale-out. |
+| G307 ⚪ | Five-language live speech, impaired-network/load and accessibility acceptance. | Open: QA/speech/service owners; measured tail latency, figure fidelity, handoff and timing/caption acceptance. |
+| G308 🟢 | ~~CPU/receptionist dependency profiles could not resolve together: Pipecat 1.12.0 required Pillow<13, backend requires Pillow>=13.~~ | Fixed: Pipecat 1.15.0, combined profile resolution and optional pipeline/LiveKit regressions. |
+
 Two probe bugs were found and corrected rather than reported as defects: `invoic`
 and `regist` were asserted as stems against a token-boundary matcher, so
 "Invoicing" and "registered" could never satisfy them. The service was right both
