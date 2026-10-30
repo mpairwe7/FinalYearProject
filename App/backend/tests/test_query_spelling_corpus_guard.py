@@ -150,6 +150,11 @@ class ShorthandTests(unittest.TestCase):
             "Part B of the Second Schedule",
             "Country C",
             "Is Schedule c still in force?",
+            "bank a/c number",
+            "balance b/f and c/f",
+            "exempt u/s 19",
+            "see (b) and (c) below",
+            "b) file return",
         ):
             with self.subTest(text=text):
                 self.assertEqual(correct_spelling(text), text)

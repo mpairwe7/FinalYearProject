@@ -281,6 +281,10 @@ def demote_stale_editions(query: str, candidates: list[dict[str, Any]]) -> None:
             continue
         candidate["score_rerank"] = float(candidate.get("score_rerank") or 0.0) - STALE_EDITION_PENALTY
         candidate["score_norm"] = max(0.0, float(candidate["score_norm"]) - STALE_EDITION_PENALTY)
+        if candidate.get("score_calibrated") is not None:
+            candidate["score_calibrated"] = max(
+                0.0, float(candidate["score_calibrated"]) - STALE_EDITION_PENALTY
+            )
 
 
 def _dedupe_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1889,7 +1893,7 @@ class HybridRetriever:
             self._rerank_logit_scale = True
             metrics.inc("retrieval_rerank_logit_scores_total")
             logger.warning(
-                "Reranker returned scores outside [0, 1]; treating its scores as logits "
+                "Reranker returned scores outside [0, 1]; using logit scale "
                 "from now on (check RERANKER_MODEL and its activation)"
             )
         logits = bool(self._rerank_logit_scale)

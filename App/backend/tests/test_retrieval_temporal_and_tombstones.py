@@ -60,7 +60,13 @@ class EditionTests(unittest.TestCase):
                 self.assertIsNone(edition_start_year({"source": source, "text": "Customs duty is 25%."}))
 
     def _hit(self, **fields: Any) -> dict[str, Any]:
-        return {"text": "The rate is 18%.", "score_rerank": 0.8, "score_norm": 0.8, **fields}
+        return {
+            "text": "The rate is 18%.",
+            "score_rerank": 0.8,
+            "score_norm": 0.8,
+            "score_calibrated": 0.8,
+            **fields,
+        }
 
     def test_old_editions_are_demoted_on_both_scores_and_recent_ones_are_not(self) -> None:
         old = self._hit(source="Tax-Amendments-FY-2020-21.pdf")
@@ -70,6 +76,7 @@ class EditionTests(unittest.TestCase):
             demote_stale_editions("What is the excise duty on sugar?", [old, recent, tariff])
         self.assertAlmostEqual(old["score_norm"], 0.8 - STALE_EDITION_PENALTY)
         self.assertAlmostEqual(old["score_rerank"], 0.8 - STALE_EDITION_PENALTY, msg="rank and gate agree")
+        self.assertAlmostEqual(old["score_calibrated"], 0.8 - STALE_EDITION_PENALTY)
         self.assertEqual(recent["score_norm"], 0.8)
         self.assertEqual(tariff["score_norm"], 0.8)
 

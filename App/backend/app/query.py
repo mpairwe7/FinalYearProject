@@ -927,10 +927,10 @@ def correct_spelling(query: str) -> str:
             continue  # an identity entry would only lowercase what the user typed
         if len(wrong) <= 2:
             # Texting shorthand ("u", "r", "c", "b"): lowercase only, and never a
-            # letter that names a provision — "Part B", "Schedule C" and
-            # "Country C" came out as "Part be" and "Country see".
+            # letter that names a provision ("Part B", "Schedule C", "Country C")
+            # or an accounting/list abbreviation ("a/c", "b/f", "c/f", "u/s", "(b)", "b)").
             result = re.sub(
-                rf"(?<![\w'’-]){re.escape(wrong)}(?![\w'’-])",
+                rf"(?<![\w'’(/.-]){re.escape(wrong)}(?![\w'’)/-])",
                 lambda m, right=right: m.group(0) if _names_a_provision(m) else right,
                 result,
             )

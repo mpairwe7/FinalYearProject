@@ -90,13 +90,18 @@ _CACHE_FILLER_TERMS = frozenset(
 
 #: Negation flips the answer and is invisible to the term sets, because "not"
 #: and "no" are stopwords there.
-_CACHE_NEGATION_RE = re.compile(r"\b(?:not|no|never|without|cannot|neither|nor|none)\b|n['’]t\b", re.I)
+_CACHE_NEGATION_RE = re.compile(
+    r"\b(?:not|no|never|without|cannot|neither|nor|none|bila|hapana|tewali|nedda|ngaaha|pe)\b|n['’]t\b",
+    re.I,
+)
+_COMMA_GROUPED_DIGIT_RE = re.compile(r"(?<=\d),(?=\d{3}\b)")
 
 
 def _query_terms(text: str) -> set[str]:
+    cleaned = _COMMA_GROUPED_DIGIT_RE.sub("", (text or "").lower())
     return {
         _CACHE_TERM_ALIASES.get(token, token)
-        for token in re.findall(r"[a-z0-9]+", (text or "").lower())
+        for token in re.findall(r"[a-z0-9]+", cleaned)
         if token not in _CACHE_QUERY_STOPWORDS
     }
 
@@ -265,13 +270,23 @@ def cache_generation() -> str:
     now = time.time()
     with _generation_lock:
         if _generation_tail is None or (now - _generation_read_at) >= _INDEX_STAMP_TTL_SECONDS:
-            _generation_tail = f"{_read_tombstone_stamp()}.{_read_fiscal_year()}"
-            _generation_read_at = time.time()
-        tail = _generation_tail
+            tomb_stamp = _read_tombstone_stamp()
+            tail = f"{tomb_stamp}.{_read_fiscal_year()}"
+            if not tomb_stamp.startswith("unread-"):
+                _generation_tail = tail
+                _generation_read_at = time.time()
+        else:
+            tail = _generation_tail
     return f"{stamp}.{tail}"
 
 
-def exact_cache_key(query: str, locale: str = "en", tenant_id: str | None = None) -> str:
+def exact_cache_key(
+    query: str,
+    locale: str = "en",
+    tenant_id: str | None = None,
+    *,
+    generation: str | None = None,
+) -> str:
     """Return a model-free lookup key: casefolded, punctuation-stripped query.
 
     The similarity tiers below need an embedding, so they return ``None`` the
@@ -294,7 +309,8 @@ def exact_cache_key(query: str, locale: str = "en", tenant_id: str | None = None
     """
     normalised = _EXACT_KEY_WS_RE.sub(" ", _EXACT_KEY_STRIP_RE.sub(" ", (query or "").casefold())).strip()
     prefix = tenant_id or "default"
-    return f"{prefix}\x1f{cache_generation()}\x1f{locale}\x1f{normalised}"
+    gen = generation if generation is not None else cache_generation()
+    return f"{prefix}\x1f{gen}\x1f{locale}\x1f{normalised}"
 
 
 def _record_lookup(backend: str, outcome: str) -> None:
@@ -370,7 +386,8 @@ class SemanticCache:
             return None
 
         t_id = tenant_id or "default"
-        key = exact_cache_key(query, locale, tenant_id=t_id)
+        generation = cache_generation()
+        key = exact_cache_key(query, locale, tenant_id=t_id, generation=generation)
         with self._lock:
             self._evict_expired()
             exact = self._exact.get(key)
@@ -387,11 +404,12 @@ class SemanticCache:
             _record_lookup("memory", "miss")
             return None
 
-        generation = cache_generation()
         with self._lock:
             # Embed inside lock to prevent model swap race with set_model()
             embedding = self._embed(query)
             if embedding is None:
+                self._stats["misses"] += 1
+                _record_lookup("memory", "miss")
                 return None
 
             self._evict_expired()
@@ -439,21 +457,27 @@ class SemanticCache:
             return
 
         t_id = tenant_id or response.get("tenant_id") or "default"
+        generation = cache_generation()
         # The exact tier is always written, so a deployment with no embedder
         # still accumulates a usable cache.
-        key = exact_cache_key(query, response.get("locale") or "en", tenant_id=t_id)
+        key = exact_cache_key(query, response.get("locale") or "en", tenant_id=t_id, generation=generation)
         with self._lock:
             if len(self._exact) >= CACHE_MAX_SIZE:
                 oldest = sorted(self._exact.items(), key=lambda kv: kv[1].created_at)
                 for stale_key, _entry in oldest[: len(self._exact) - CACHE_MAX_SIZE + 1]:
                     del self._exact[stale_key]
                     self._stats["evictions"] += 1
-            self._exact[key] = CacheEntry(query=query, embedding=_EMPTY_EMBEDDING, response=response, tenant_id=t_id)
+            self._exact[key] = CacheEntry(
+                query=query,
+                embedding=_EMPTY_EMBEDDING,
+                response=response,
+                tenant_id=t_id,
+                generation=generation,
+            )
 
         if not self._dense_model:
             return
 
-        generation = cache_generation()
         with self._lock:
             embedding = self._embed(query)
             if embedding is None:
@@ -529,8 +553,16 @@ class RedisSemanticCache:
         return np.frombuffer(base64.b64decode(blob), dtype=np.float32)
 
     @staticmethod
-    def _exact_redis_key(query: str, locale: str, tenant_id: str = "default") -> str:
-        digest = hashlib.sha256(exact_cache_key(query, locale, tenant_id=tenant_id).encode("utf-8")).hexdigest()[:32]
+    def _exact_redis_key(
+        query: str,
+        locale: str,
+        tenant_id: str = "default",
+        *,
+        generation: str | None = None,
+    ) -> str:
+        digest = hashlib.sha256(
+            exact_cache_key(query, locale, tenant_id=tenant_id, generation=generation).encode("utf-8")
+        ).hexdigest()[:32]
         return f"{CACHE_REDIS_PREFIX}{tenant_id}:exact:{digest}"
 
     @staticmethod
@@ -552,10 +584,11 @@ class RedisSemanticCache:
             return None
 
         t_id = tenant_id or "default"
+        generation = cache_generation()
         # Exact tier: a single GET, and the only tier that works without an
         # embedder — which is every deployment shipping without torch.
         try:
-            raw = self._client.get(self._exact_redis_key(query, locale, tenant_id=t_id))
+            raw = self._client.get(self._exact_redis_key(query, locale, tenant_id=t_id, generation=generation))
             if raw:
                 self._stats["hits"] += 1
                 logger.debug("Redis cache HIT (exact, query_length=%d)", len(query))
@@ -571,9 +604,10 @@ class RedisSemanticCache:
 
         embedding = self._embed(query)
         if embedding is None:
+            self._stats["misses"] += 1
+            _record_lookup("redis", "miss")
             return None
 
-        generation = cache_generation()
         try:
             # Linear scan over one tenant/locale/generation scope — fine for the
             # hundreds/low-thousands range typical for a domain chatbot. For
@@ -631,6 +665,8 @@ class RedisSemanticCache:
             return None
         except Exception:
             logger.debug("Redis cache get failed", exc_info=True)
+            self._stats["misses"] += 1
+            _record_lookup("redis", "miss")
             return None
 
     def put(self, query: str, response: dict[str, Any], tenant_id: str | None = None) -> None:
@@ -639,9 +675,10 @@ class RedisSemanticCache:
 
         t_id = tenant_id or response.get("tenant_id") or "default"
         locale = response.get("locale") or "en"
+        generation = cache_generation()
         try:
             self._client.set(
-                self._exact_redis_key(query, locale, tenant_id=t_id),
+                self._exact_redis_key(query, locale, tenant_id=t_id, generation=generation),
                 _json.dumps(response).encode("utf-8"),
                 ex=CACHE_TTL_SECONDS,
             )
@@ -654,7 +691,6 @@ class RedisSemanticCache:
         if embedding is None:
             return
         try:
-            generation = cache_generation()
             # A random suffix: two replicas inserting in the same millisecond
             # must not overwrite each other's entry.
             key = f"{self._semantic_scope(t_id, locale, generation)}{uuid.uuid4().hex}"

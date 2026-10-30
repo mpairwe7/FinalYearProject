@@ -92,6 +92,8 @@ class CompatibilityGuardTests(unittest.TestCase):
     def test_a_different_fiscal_year_or_amount_is_a_different_question(self) -> None:
         self.assertFalse(_cache_queries_compatible("VAT rate for FY2023-24", "VAT rate for FY2025-26"))
         self.assertFalse(_cache_queries_compatible("VAT on UGX 1,500,000", "VAT on UGX 2,000,000"))
+        self.assertFalse(_cache_queries_compatible("VAT on UGX 1,500,000", "VAT on UGX 1,000,500"))
+        self.assertTrue(_cache_queries_compatible("VAT on UGX 1,500,000", "VAT on UGX 1500000"))
 
     def test_negation_is_a_different_question(self) -> None:
         self.assertFalse(_cache_queries_compatible("Is a TIN not required to import?", "Is a TIN required to import?"))
