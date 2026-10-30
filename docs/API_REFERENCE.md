@@ -336,7 +336,9 @@ identifier never becomes a sidebar title. Anonymous callers are allowed
 
 ### Trigger Re-Indexing
 
-Rebuild the Qdrant vector index from all PDFs and FAQ CSVs. Requires `Authorization: Bearer <INDEX_API_KEY>` when configured (OWASP LLM10 — unbounded consumption protection).
+Rebuild the Qdrant vector index through the staged lifecycle (`app.index_lifecycle`, ADR-0019 / G286). The whole corpus (FAQ, teacher QA, PDF and crawl chunks) is built into a candidate collection, which must pass a canary retrieval gate. One atomic alias swap then promotes it, and the retriever is re-initialised. The serving collection is never rebuilt in place. Requires `Authorization: Bearer <INDEX_API_KEY>` when configured (OWASP LLM10 — unbounded consumption protection).
+
+Returns **409** when `QDRANT_COLLECTION` names a legacy physical collection instead of an alias (migrate to an alias, see `docs/runbooks/qdrant-staged-rebuild.md`), or while another rebuild runs. Returns **422** when the corpus fails validation. Returns **500** for any other failure; the failure is recorded in the lifecycle status, and the retriever is re-bound in case the alias had already moved. The request blocks for the whole rebuild, which takes minutes on GPU and over an hour on CPU for the full corpus, so a scheduled job is usually the better caller. Before G286 this route rebuilt the live collection in place from FAQ and teacher-QA rows only, dropping the PDF and crawl corpus.
 
 ```http
 POST /v1/index
@@ -347,14 +349,22 @@ POST /v1/index
 |--------|----------|-------------|
 | `Authorization` | When `INDEX_API_KEY` is set | `Bearer <INDEX_API_KEY>` |
 
-**Response**
+**Response** (from the verification stack's bootstrap of 2026-10-30, plus the `retrieval_mode` this route adds)
 ```json
 {
-  "collection": "ura_knowledge_base",
-  "total_documents": 1250,
-  "total_upserted": 1250,
-  "pdf_documents": 800,
-  "csv_documents": 450,
+  "alias": "ura_knowledge_base",
+  "binding_collection": "ura_knowledge_base",
+  "collection": "ura_knowledge_base__build_55a2175b9b40aac0",
+  "previous_collection": "",
+  "faq_jsonl_documents": 1113,
+  "pdf_chunk_documents": 6855,
+  "crawl_chunk_documents": 489,
+  "teacher_qa_jsonl_documents": 6,
+  "total_documents": 8463,
+  "total_upserted": 8463,
+  "quality_gate": {"canaries": 3, "passed": 3, "hit_rate": 1.0, "minimum_hit_rate": 1.0, "misses": []},
+  "reindexed": true,
+  "source_corpus_hash": "55a2175b9b40aac0...",
   "retrieval_mode": "hybrid"
 }
 ```

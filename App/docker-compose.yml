@@ -123,7 +123,8 @@ services:
       - ALL
     tmpfs:
       - /tmp
-      - /app/cache
+      # appuser-owned: a bare entry is root:root 0755, unwritable by the API (G296)
+      - /app/cache:uid=10001,gid=10001
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

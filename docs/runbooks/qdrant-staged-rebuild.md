@@ -62,6 +62,32 @@ python -m app.freshness --check --verify-qdrant --write-status
 freshness command exits non-zero. Run it with `--notify` where
 `FRESHNESS_SLACK_WEBHOOK` is configured to alert the owning operations channel.
 
+`POST /v1/index` runs this same lifecycle with `--force` semantics (ADR-0019,
+G286), and refuses a legacy physical collection with 409.
+
+## Payload indexes
+
+Every build creates keyword payload indexes on the fields queries and corpus
+sync filter on: `fiscal_year`, `doc_type`, `tax_type`, `tag`, `source`,
+`chunk_id` and `doc_family`. Without them a restrictive filter, such as one
+fiscal year's edition, is checked point by point during the HNSW search and can
+lose recall. A collection built before 2026-10-30 lacks them. Backfill it in
+place. This is idempotent and needs no rebuild:
+
+```bash
+PYTHONPATH=App/backend \
+QDRANT_COLLECTION=ura_knowledge_base_active \
+python -m app.indexer --ensure-payload-indexes
+```
+
+Confirm with `GET /collections/<physical collection>`: `payload_schema` lists all
+seven fields as `keyword`.
+
+A rebuild or alias swap also retires every cached answer. The response cache
+keys on the index stamp and on the corpus the retriever binds to
+(`cache_generation()`), so stale answers end once the retriever re-initialises.
+`/v1/index` re-initialises it; elsewhere, restart the API.
+
 ## Expected duration
 
 - Reusing an already matching alias: seconds (only source hashing and a

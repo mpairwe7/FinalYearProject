@@ -146,6 +146,12 @@ translation and retried unmasked when the tier mangles the sentinels.
 | `ura_eval_last_run_timestamp_seconds`, `ura_eval_samples` | gauge | | When it ran, on how many turns |
 | `ura_web_vitals_ms{metric,rating,route}`, `ura_web_vitals_cls{rating,route}` | histogram | | Real-user Core Web Vitals |
 | `ura_client_errors_total{kind,route}` | counter | | Browser errors and error-boundary renders |
+| `ura_retrieval_top_relevance_score` | histogram | `mode` (`hybrid`/`dense`/`sparse`) | Best calibrated reranker relevance per search, before ranking boosts. The retrieval drift signal: compare its distribution week on week and after every index, embedder or reranker change (ADR-0019) |
+| `ura_retrieval_unscored_searches_total` | counter | `mode` | Searches that served hits without a calibrated score (no reranker, or a rerank failure) |
+| `ura_retrieval_abstention_decisions_total` | counter | `signal` (`rerank`/`lexical`/`no_hits`/`none`), `abstained` | What each abstention decision rested on. `signal="none"` means answered with no relevance signal at all |
+| `ura_retrieval_rerank_errors_total`, `ura_retrieval_rerank_logit_scores_total` | counter | | Rerank failures (served unscored, Qdrant's circuit untouched); reranker scores outside [0, 1] treated as logits |
+| `ura_retrieval_tombstone_read_failures_total` | counter | | Tombstone reads that fell back to the last good read |
+| `ura_semantic_cache_lookups_total` | counter | `backend` (`memory`/`redis`), `outcome` (`hit_exact`/`hit_semantic`/`guard_rejected`/`miss`) | `guard_rejected`: a ≥ 0.92 neighbour asked a different question (G277) |
 
 ### Audit, security and housekeeping
 

@@ -147,6 +147,17 @@ python -m App.backend.app.indexer
 | Qwen/Qwen3-Reranker-0.6B | 600M | ~52 | Apache-2.0 | Qwen ecosystem; pairs with Qwen3-Embedding |
 | cross-encoder/ms-marco-MiniLM-L-6-v2 | 22M | ~48 | Apache-2.0 | Legacy — 2021-era, fast but low quality |
 
+### Score scale
+
+Abstention (0.30, 0.20 for lg/sw/nyn/ach), context pruning and corrective RAG
+threshold the reranker's score as a probability in [0, 1]. The default loads
+through `CrossEncoder` with a sigmoid activation. A model or loader that returns
+raw logits (the mxbai card itself shows scores such as 9.75) is detected and
+squashed. It is not clamped, which would turn every positive into 1.0 and every
+negative into 0.0. After a swap, check that `ura_retrieval_rerank_logit_scores_total`
+stays at zero, and re-measure `ura_retrieval_top_relevance_score` before trusting
+the thresholds (G281).
+
 ### Swap command (no re-index needed)
 
 ```bash

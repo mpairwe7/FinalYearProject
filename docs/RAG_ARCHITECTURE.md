@@ -46,7 +46,7 @@ User Query
   │         └── If matched: enter slot-filling state machine, skip RAG
   │
   ├─► Stage 1c: Semantic Cache Lookup (cache.py)  [FLAG_SEMANTIC_CACHE]
-  │     └── Cosine similarity ≥ 0.92 on embeddings → instant return
+  │     └── Same corpus generation + same question terms + cosine ≥ 0.92 → instant return (G277)
   │
   ├─► Stage 1d: Supervisor Routing (agents/supervisor.py)  [FLAG_AGENTIC_MODE]
   │     ├── Rule-based fast path (regex+keywords) + optional LLM fallback
@@ -56,7 +56,7 @@ User Query
   │     ├── Dense: BAAI/bge-m3 (1024-dim multilingual) → Qdrant ANN search
   │     │     └── Optional HyDE document as the *dense* query only  [FLAG_HYDE]
   │     ├── Sparse: BM25 on the taxpayer's original words (never HyDE)
-  │     ├── Fusion: Qdrant server-side RRF at Qdrant's default k=2 (RRF_K=60 applies only to the graph leg)
+  │     ├── Fusion: Qdrant server-side DBSF (`HYBRID_FUSION=dbsf`, G127; `rrf` uses Qdrant's default k=2 — RRF_K=60 applies only to the graph leg)
   │     ├── Graph leg: statutory rate claims fused by rank, not prepended  [FLAG_GRAPH_FUSION + FLAG_TAX_GRAPH]
   │     ├── Reranking: mxbai-rerank-base-v2 (500M, BEIR 55.6) — scores the raw query
   │     │     (and, for lg/sw, its English form; keeps the higher). On only when RERANK_ENABLED=true
@@ -313,9 +313,25 @@ chat's owner (`receptionist/carryover.py`).
 
 **Semantic Cache** (`cache.py`):
 - Shares embedding model with retriever
-- Cosine similarity matching (threshold: 0.92)
-- TTL-based expiry (default: 1 hour)
-- LRU eviction when max size reached (default: 1000 entries)
+- Two tiers, both keyed on `cache_generation()` (G277): the freshness index stamp,
+  the corpus hash of the collection the retriever bound to, a digest of the
+  active tombstones and the fiscal year in force. A reindex, a re-bind, a new
+  tombstone or 1 July retires every entry in both tiers; an unreadable tombstone
+  store yields a fresh value per read, never a reusable one.
+- Exact tier: casefolded, punctuation-stripped question.
+- Similarity tier: cosine ≥ 0.92 **and** the same content terms once filler
+  ("steps", "Uganda", "please") is set aside **and** negation parity
+  (`_cache_queries_compatible`). The threshold chooses between phrasings of one
+  question; it never decides whether two questions are the same.
+- Redis: similarity entries live under `{prefix}sem:<tenant/locale/generation>:`
+  and are read in one pipeline; exact entries under `{prefix}<tenant>:exact:`.
+- Not stored: blocked, abstained, escalated, withheld and ticket turns, and
+  answers served from keyword fallback while Qdrant is configured but
+  unavailable (`HybridRetriever.serving_degraded()`).
+- TTL-based expiry (default: 1 hour); LRU eviction at `CACHE_MAX_SIZE` (1000)
+- `ura_semantic_cache_lookups_total{backend,outcome}` — `hit_exact`,
+  `hit_semantic`, `guard_rejected` (a ≥ 0.92 neighbour refused by the guard),
+  `miss`
 - Thread-safe: all operations under `threading.Lock`
 
 ### Phase 5: Observability
@@ -348,9 +364,9 @@ chat's owner (`receptionist/carryover.py`).
 | LLM10 Unbounded Consumption | Rate limiting, bearer auth on indexing, semantic cache | `main.py` (slowapi), `cache.py` |
 
 **Corrective RAG** (`corrective_rag.py`):
-- Triggers when average reranker score < `CORRECTIVE_RAG_THRESHOLD` (default: 0.3)
-- Re-retrieves with expanded query + domain context
-- Merges and deduplicates by chunk_id, keeps results only if quality improved
+- Triggers when average calibrated relevance (`gating_relevance`) < `CORRECTIVE_RAG_THRESHOLD_NORM` (default: 0.50); `CORRECTIVE_RAG_THRESHOLD` is logged only
+- Re-retrieves with expanded query + domain context, in the question's locale (translated leg kept; English spelling correction for English only, G280)
+- Merges and deduplicates by chunk_id, re-prunes against the merged best, keeps results only if quality improved
 
 **Protected translation & statutory projection** (`mt.py`, `service.py`, `llm.py`):
 - Figures are masked behind opaque sentinels (`#NMBRA#`) *before* a reply is handed to a translator and restored verbatim afterwards — `mt.protect_figures` / `mt.restore_figures`, wired in `service.localize_reply`. A translator that never sees a digit cannot paraphrase one, so figure mutation is prevented rather than detected.
@@ -702,7 +718,7 @@ All major subsystems are behind feature flags for progressive rollout:
 | `corrective_rag` | on | Re-retrieval on low quality |
 | `semantic_cache` | on | Cache similar queries |
 | `query_rewrite` | on | Spell/abbreviation/coreference |
-| `reranker` | on | Nothing: no code reads it. Reranking follows the `RERANK_ENABLED` env var (G126) |
+| `reranker` | on | Runtime kill switch read by `HybridRetriever._rerank`; the cross-encoder is only loaded when `RERANK_ENABLED=true` (G126). Off, hits carry no calibrated score: pruning stands down and abstention reads the lexical floor |
 | `workflows` | on | Guided multi-step workflows |
 | `handoff_summaries` | on | Human triage packets |
 | `ticket_queue` | on | Persist escalations for the staff workbench |
@@ -958,6 +974,68 @@ answers.
 | Setting | Default | Effect |
 |---------|---------|--------|
 | `WITHHOLD_CONTRADICTED_CLAIMS` | `true` | Off only to diagnose a suspected false positive |
+
+### Retrieval answer integrity (ADR-0019, 2026-10-30)
+
+Each rule below closes a path that served a confident, cited and wrong answer
+while every existing gate passed (G277–G287).
+
+* **Decisions read calibrated evidence.** `_rerank` stores the cross-encoder's
+  own score as `score_calibrated`. Abstention, pruning, corrective RAG and the
+  drift histogram read it through `retriever.gating_relevance`. Preference boosts
+  (current FY +0.08, topic +0.05, sector guide −0.06) and the stale-edition
+  demotion only reorder. Scores outside [0, 1] are treated as logits and
+  squashed rather than clamped. The scale is decided once per loaded model,
+  from its activation where it says and latched on the first out-of-range
+  score, never per batch. A rerank failure serves unscored hits and is never
+  charged to Qdrant's circuit breaker.
+* **In-force editions.** `demote_stale_editions` takes 0.15 from editions
+  `RETRIEVER_STALE_EDITION_YEARS` (4) or more fiscal years behind
+  `current_fiscal_year()`, unless the question names that year. The edition is
+  read from the `fiscal_year` label, then a fiscal-year label in the source name,
+  then a text cue for unlabelled chunks. It is never read from a bare year: Acts,
+  regulations and tariffs (EAC CET 2022) are named by the year they were made.
+  Passage headers carry `Edition`/`Effective`. Prompt rule 8 uses the edition for
+  the period asked: the most recent one, unless the question names an earlier
+  year.
+* **Withdrawals.** A tombstone names a document: the same path, or one ending
+  with the other on a path boundary (`docs/x.pdf` names `/app/Data/docs/x.pdf`
+  and its URL). When the store is unreadable, the last good read still applies,
+  and the response cache stamps that same snapshot. Creating or deleting a
+  tombstone through the admin API retires cached answers on that replica at once.
+* **Query rewriting only fixes misspellings.** `query._fuzzy_correct_word` never
+  changes a word the served corpus uses: the BM25 vocabulary the retriever
+  registers, the FAQ rows the service registers, or the state file as fallback.
+  It used to rewrite 23% of the FAQ questions (taxes→taxis, exporting→importing).
+  Texting shorthand applies to lowercase letters only, and never after "Part",
+  "Schedule" or "Item". Corrective RAG passes the question's locale and spells in
+  English only for English.
+* **Lexical floor.** The three-matched-words lift needs at least half of
+  `RETRIEVER_LEXICAL_FLOOR` in IDF coverage, and the question-span score is
+  IDF-weighted.
+* **Multi-intent merge.** Each sub-query is pruned against its own best, and its
+  best hit keeps a place in `top_k` if it clears the context floor. The native
+  and translated legs of one question take a single cut instead (G128).
+* **Index operations.** `build_index` ensures keyword payload indexes on
+  `fiscal_year`, `doc_type`, `tax_type`, `tag`, `source`, `chunk_id` and
+  `doc_family`. Backfill a live collection with
+  `python -m app.indexer --ensure-payload-indexes`. `POST /v1/index` runs the
+  staged lifecycle (`app.index_lifecycle`), one rebuild at a time (409
+  otherwise), and re-binds the retriever even when bookkeeping after the alias
+  swap fails.
+
+| Setting | Default | Effect |
+|---------|---------|--------|
+| `RETRIEVER_STALE_EDITION_YEARS` | 4 | Fiscal years behind the one in force at which an edition is demoted. 4 reproduces the 2020–2022 set the rule hardcoded (from FY2026-27) and then moves with the year |
+
+| Metric | Meaning |
+|--------|---------|
+| `ura_retrieval_top_relevance_score{mode}` | Best calibrated relevance per search — the drift signal |
+| `ura_retrieval_unscored_searches_total{mode}` | Searches that served hits with no calibrated score |
+| `ura_retrieval_abstention_decisions_total{signal,abstained}` | `rerank`, `lexical`, `no_hits` or `none` (answered with no relevance signal) |
+| `ura_retrieval_tombstone_read_failures_total` | Tombstone reads that fell back to the last good read |
+| `ura_retrieval_rerank_errors_total`, `ura_retrieval_rerank_logit_scores_total` | Rerank failures; logit-scale scores squashed |
+| `ura_semantic_cache_lookups_total{backend,outcome}` | Cache outcomes, including `guard_rejected` |
 
 ### Sovereign Two-Tier Reasoning, Scenario Planner & Figure Lock (ADR-0007)
 

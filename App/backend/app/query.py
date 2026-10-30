@@ -11,12 +11,18 @@ Transforms raw user queries into optimized retrieval queries:
 from __future__ import annotations
 
 import functools
+import json
 import logging
 import os
 import re
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from . import mt
+from ._root import PROJECT_ROOT as _PROJECT_ROOT
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 logger = logging.getLogger(__name__)
 
@@ -680,9 +686,74 @@ _GENERAL_ENGLISH_VOCAB: frozenset[str] = frozenset({
     "separate", "believe", "believing", "occurred", "occurring", "definitely",
     "category", "recommend", "recommended", "familiar", "difficulty", "difficult",
     "password", "passwords", "objective", "objectives",
+    # Correct words the corpus vocabulary lacks, which the matcher otherwise
+    # "corrected" (audio -> radio, exposed -> exported, authorize -> authority).
+    "audio", "exposed", "authorize", "authorise", "authorized", "authorised",
 })
 
 _ALL_CORRECTABLE_VOCAB = _TAX_DOMAIN_VOCAB | _GENERAL_ENGLISH_VOCAB
+
+#: Words the served corpus uses, registered by whoever loads it: the retriever's
+#: BM25 vocabulary, the FAQ rows the keyword path searches. Only ever grows — a
+#: word that left the corpus is still a word.
+_REGISTERED_VOCAB: frozenset[str] = frozenset()
+#: The BM25 state file's vocabulary, read once on first use; ``None`` until then.
+_STATE_FILE_VOCAB: frozenset[str] | None = None
+#: Test hook. ``None`` means :func:`_bm25_state_paths`' default.
+_BM25_STATE_PATHS: tuple[Path, ...] | None = None
+_VOCAB_TOKEN_RE = re.compile(r"[a-z]{4,}")
+
+
+def _bm25_state_paths() -> tuple[Path, ...]:
+    """Where a BM25 state may sit: the retriever's own path, then a checkout's ``Model/``."""
+    if _BM25_STATE_PATHS is not None:
+        return _BM25_STATE_PATHS
+    from .retriever import BM25_STATE_PATH
+
+    return (BM25_STATE_PATH, _PROJECT_ROOT / "Model" / "bm25_state.json")
+
+
+def register_corpus_vocabulary(words: Iterable[str]) -> None:
+    """Record words the served corpus uses; they are never "corrected" (G282).
+
+    The retriever calls this whenever it loads a BM25 state, so the guard
+    follows the index being served, including after an alias swap; the
+    service calls it with the FAQ rows, which is all a keyword-only
+    deployment has.
+    """
+    global _REGISTERED_VOCAB
+    added = frozenset(str(word).lower() for word in words if word)
+    if not added - _REGISTERED_VOCAB:
+        return
+    _REGISTERED_VOCAB = _REGISTERED_VOCAB | added
+    _fuzzy_correct_word.cache_clear()
+
+
+def register_corpus_text(texts: Iterable[str]) -> None:
+    """:func:`register_corpus_vocabulary` for raw text, tokenised the corrector's way."""
+    register_corpus_vocabulary(
+        token for text in texts for token in _VOCAB_TOKEN_RE.findall(str(text or "").lower())
+    )
+
+
+def _state_file_vocabulary() -> frozenset[str]:
+    global _STATE_FILE_VOCAB
+    if _STATE_FILE_VOCAB is None:
+        vocabulary: frozenset[str] = frozenset()
+        for path in _bm25_state_paths():
+            try:
+                state = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            vocabulary = frozenset(str(word).lower() for word in (state.get("vocab") or {}))
+            if vocabulary:
+                break
+        _STATE_FILE_VOCAB = vocabulary
+    return _STATE_FILE_VOCAB
+
+
+def _is_corpus_word(low: str) -> bool:
+    return low in _REGISTERED_VOCAB or low in _state_file_vocabulary()
 
 
 def _damerau_levenshtein(s1: str, s2: str) -> int:
@@ -708,9 +779,21 @@ def _damerau_levenshtein(s1: str, s2: str) -> int:
 
 @functools.lru_cache(maxsize=8192)
 def _fuzzy_correct_word(word: str) -> str:
-    """Fuzzy match an unrecognized token against tax and general English vocabulary."""
+    """Fuzzy match an unrecognized token against tax and general English vocabulary.
+
+    "Unrecognized" used to mean "absent from a few hundred listed words", so
+    correctly spelled words one edit from a listed one were replaced: 23% of
+    URA's own FAQ questions came out rewritten, among them taxes -> taxis,
+    exporting -> importing, reductions -> deductions, reported -> exported and
+    pension -> person — before retrieval, routing, the cache and the model
+    ever saw them (G282). A word the indexed corpus itself uses is not a
+    misspelling here, so it is left alone. The typos this exists for
+    ("witholdng", "penalti", "regstration") are in no corpus and still fixed.
+    """
     low = word.lower()
     if low in _ALL_CORRECTABLE_VOCAB or low in _COMMON_ENGLISH_WORDS or low in _LOCAL_LANGUAGE_WORDS:
+        return word
+    if _is_corpus_word(low):
         return word
     if word.isupper() or any(ch.isdigit() for ch in word):
         return word
@@ -808,6 +891,25 @@ def correct_syntax_errors(query: str) -> str:
     return q
 
 
+#: Nouns a statute or form labels with a letter. Deliberately not everyday words
+#: that can precede a pronoun ("what category r we", "which plan u need").
+_PROVISION_NOUN_RE = re.compile(
+    r"\b(?:part|schedule|item|section|sub-?section|form|annex(?:ure)?|appendix|paragraph|para|"
+    r"chapter|clause|article|regulation|country)\s+$",
+    re.IGNORECASE,
+)
+
+
+def _names_a_provision(match: re.Match) -> bool:
+    """Whether a lone letter follows a noun it labels ("part b", "schedule c").
+
+    Shorthand matching is lowercase-only on purpose: an uppercase single letter
+    ("Part B", "Item C") is far more often a label than "are" or "see", so
+    "R U registered" is left for the model and the retriever to read as typed.
+    """
+    return bool(_PROVISION_NOUN_RE.search(match.string[max(0, match.start() - 24) : match.start()]))
+
+
 def correct_spelling(query: str) -> str:
     """Fix domain-specific and general English misspellings, syntax slips, and typos.
 
@@ -821,6 +923,18 @@ def correct_spelling(query: str) -> str:
     # Disambiguate "wht is/are/does" (typo for "what is...") vs "WHT" (Withholding Tax)
     result = re.sub(r"\bwht\s+(is|are|does|do|can|will|should)\b", r"what \1", result, flags=re.IGNORECASE)
     for wrong, right in _CORRECTIONS.items():
+        if wrong.lower() == right.lower():
+            continue  # an identity entry would only lowercase what the user typed
+        if len(wrong) <= 2:
+            # Texting shorthand ("u", "r", "c", "b"): lowercase only, and never a
+            # letter that names a provision ("Part B", "Schedule C", "Country C")
+            # or an accounting/list abbreviation ("a/c", "b/f", "c/f", "u/s", "(b)", "b)").
+            result = re.sub(
+                rf"(?<![\w'’(/.-]){re.escape(wrong)}(?![\w'’)/-])",
+                lambda m, right=right: m.group(0) if _names_a_provision(m) else right,
+                result,
+            )
+            continue
         result = re.sub(rf"\b{re.escape(wrong)}\b", right, result, flags=re.IGNORECASE)
 
     # Token-level fuzzy corrections for non-dictionary typographical slips

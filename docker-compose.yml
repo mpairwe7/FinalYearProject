@@ -148,10 +148,15 @@ services:
     cap_drop:
       - ALL
     read_only: true
+    # Owned by the image's appuser (10001). A bare tmpfs entry mounts root:root
+    # 0755 over the image's appuser-owned directory, so the API — which runs as
+    # appuser on a read-only root — could not create /app/data_store/analytics.db:
+    # conversations, workflow state, tombstones and discrepancy reports all
+    # failed at startup with "unable to open database file" (G296).
     tmpfs:
       - /tmp
-      - /app/cache
-      - /app/data_store
+      - /app/cache:uid=10001,gid=10001
+      - /app/data_store:uid=10001,gid=10001
     volumes:
       - ./artifacts/models:/app/models:ro
       - ./artifacts/offline:/app/offline:ro

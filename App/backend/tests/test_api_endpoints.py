@@ -400,6 +400,18 @@ class AdminEndpoints(_Base):
 # Ops-key endpoints
 # ---------------------------------------------------------------------------
 class OpsKeyEndpoints(_Base):
+    def setUp(self) -> None:
+        # /v1/index takes a lock file beside the lifecycle status; keep it out
+        # of the checkout.
+        import tempfile
+        from pathlib import Path
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patcher = mock.patch("app.freshness.LIFECYCLE_STATUS_PATH", Path(tmp.name) / "index_lifecycle_status.json")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_ops_endpoints_reject_when_key_configured(self):
         c = _client()
         with mock.patch.object(main_mod, "_INDEX_API_KEY", "secret-ops-key"):
@@ -413,6 +425,72 @@ class OpsKeyEndpoints(_Base):
         c = _client()
         with mock.patch.object(main_mod, "_INDEX_API_KEY", ""):
             self.assertEqual(c.post("/v1/index").status_code, 503)
+
+    def test_index_runs_the_staged_lifecycle_never_an_in_place_rebuild(self):
+        """G286: it used to recreate the live collection from FAQ rows only."""
+        c = _client()
+        stats = {"reindexed": True, "alias": "ura_knowledge_base", "collection": "ura_knowledge_base__build_x"}
+        with mock.patch.object(main_mod, "_INDEX_API_KEY", "secret-ops-key"), mock.patch(
+            "app.index_lifecycle.rebuild_if_needed", return_value=dict(stats)
+        ) as rebuild, mock.patch("app.indexer.build_index") as in_place:
+            r = c.post("/v1/index", headers=_bearer("secret-ops-key"))
+        self.assertEqual(r.status_code, 200, r.text)
+        rebuild.assert_called_once_with(force=True)
+        in_place.assert_not_called()
+        self.assertTrue(r.json()["reindexed"])
+        self.assertIn("retrieval_mode", r.json())
+        app.state.model._retriever.initialize.assert_called_once()
+
+    def test_index_refuses_a_legacy_physical_collection_with_409(self):
+        from app.index_lifecycle import IndexLifecycleError
+
+        c = _client()
+        with mock.patch.object(main_mod, "_INDEX_API_KEY", "secret-ops-key"), mock.patch(
+            "app.index_lifecycle.rebuild_if_needed",
+            side_effect=IndexLifecycleError("'ura_knowledge_base' is a physical legacy collection, not an alias."),
+        ), mock.patch("app.freshness.write_lifecycle_status") as status:
+            r = c.post("/v1/index", headers=_bearer("secret-ops-key"))
+        self.assertEqual(r.status_code, 409, r.text)
+        self.assertIn("not an alias", r.json()["detail"])
+        status.assert_called_once()
+        app.state.model._retriever.initialize.assert_not_called()
+
+    def test_index_failure_after_promotion_still_rebinds_the_retriever(self):
+        """Bookkeeping after the alias swap re-raises; the process must not keep the old binding."""
+        c = _client()
+        with mock.patch.object(main_mod, "_INDEX_API_KEY", "secret-ops-key"), mock.patch(
+            "app.index_lifecycle.rebuild_if_needed", side_effect=OSError("read-only file system")
+        ), mock.patch("app.freshness.write_lifecycle_status") as status:
+            r = c.post("/v1/index", headers=_bearer("secret-ops-key"))
+        self.assertEqual(r.status_code, 500, r.text)
+        status.assert_called_once()
+        app.state.model._retriever.initialize.assert_called_once()
+
+    def test_a_tombstone_retires_cached_answers_on_this_replica_at_once(self):
+        """Without this, a withdrawn passage's cached answer lived out the 60 s memo (G277)."""
+        c = _client()
+        with mock.patch.object(main_mod, "_INDEX_API_KEY", "secret-ops-key"), mock.patch.object(
+            db, "add_corpus_tombstone", return_value={"id": "tomb_x", "source_uri": "old.pdf"}
+        ), mock.patch.object(db, "delete_corpus_tombstone", return_value=True), mock.patch(
+            "app.cache.reset_index_stamp"
+        ) as reset:
+            created = c.post("/v1/admin/tombstones", json={"source_uri": "old.pdf"}, headers=_bearer("secret-ops-key"))
+            deleted = c.delete("/v1/admin/tombstones/tomb_x", headers=_bearer("secret-ops-key"))
+        self.assertEqual((created.status_code, deleted.status_code), (200, 200), (created.text, deleted.text))
+        self.assertEqual(reset.call_count, 2)
+
+    def test_a_second_rebuild_is_refused_while_one_runs(self):
+        c = _client()
+        self.assertTrue(main_mod._INDEX_REBUILD_LOCK.acquire(blocking=False))
+        try:
+            with mock.patch.object(main_mod, "_INDEX_API_KEY", "secret-ops-key"), mock.patch(
+                "app.index_lifecycle.rebuild_if_needed"
+            ) as rebuild:
+                r = c.post("/v1/index", headers=_bearer("secret-ops-key"))
+        finally:
+            main_mod._INDEX_REBUILD_LOCK.release()
+        self.assertEqual(r.status_code, 409, r.text)
+        rebuild.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

@@ -72,6 +72,10 @@ def _extractive_seams(model):
         ),
         mock.patch.object(model._cache, "get", return_value=None),
         mock.patch.object(model._cache, "put"),
+        # The scenario is every LLM tier down with retrieval healthy. With no
+        # vector index in the test environment the service would otherwise
+        # treat the turn as an outage answer, which it never caches (G277).
+        mock.patch.object(service, "_retrieval_degraded", return_value=False),
     )
 
 
@@ -85,12 +89,22 @@ class ExtractiveFallbackEmpathyRestTest(unittest.TestCase):
 
         cls.model = service.ChatModel()
 
-    def _generate(self, message: str):
-        patches = _extractive_seams(self.model)
+    def _generate(self, message: str, *, retrieval_down: bool = False):
+        from app import service
+
+        patches = list(_extractive_seams(self.model))
+        if retrieval_down:
+            patches[9] = mock.patch.object(service, "_retrieval_degraded", return_value=True)
         with patches[0], patches[1], patches[2], patches[3], patches[4], patches[
             5
-        ], patches[6], patches[7], patches[8] as cache_put:
+        ], patches[6], patches[7], patches[8] as cache_put, patches[9]:
             return self.model.generate(message=message), cache_put
+
+    def test_an_answer_built_during_a_retrieval_outage_is_not_cached(self) -> None:
+        """Served, but never stored: cached, it would outlive the outage (G277)."""
+        result, cache_put = self._generate("What is the VAT registration threshold?", retrieval_down=True)
+        self.assertTrue(result["reply"])
+        cache_put.assert_not_called()
 
     def test_distressed_extractive_reply_opens_with_ack(self) -> None:
         result, cache_put = self._generate(

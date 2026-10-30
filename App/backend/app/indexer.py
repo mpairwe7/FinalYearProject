@@ -186,6 +186,58 @@ def _packed_bm25_state(state: dict[str, Any]) -> str:
     return base64.b64encode(zlib.compress(raw, level=9)).decode("ascii")
 
 
+#: Payload fields a query or a corpus sync filters on: the explicit fiscal-year
+#: filter, the caller's doc_type/tag/tax_type filters, and corpus_sync's
+#: source/doc_family deletes. Qdrant asks for an index on every filtered field.
+#: Without one the HNSW search checks the condition point by point, and a
+#: restrictive filter — one fiscal year's edition — can leave the graph
+#: disconnected and lose recall; with one the planner can estimate the
+#: filter's cardinality and use a filter-aware graph or an exact scan instead.
+FILTERED_PAYLOAD_FIELDS: tuple[str, ...] = (
+    "fiscal_year",
+    "doc_type",
+    "tax_type",
+    "tag",
+    "source",
+    "chunk_id",
+    "doc_family",
+)
+
+
+def ensure_payload_indexes(client: Any, collection: str) -> list[str]:
+    """Create the keyword payload indexes *collection* lacks; return the fields indexed.
+
+    Idempotent, so it serves a fresh build and a backfill of a collection built
+    before these indexes existed (``python -m app.indexer --ensure-payload-indexes``).
+    A failure is logged, not raised: an unindexed collection is slower and less
+    exact under filters, which is no reason to abandon a build.
+    """
+    from qdrant_client import models
+
+    try:
+        existing = set((client.get_collection(collection).payload_schema or {}).keys())
+    except Exception:
+        existing = set()
+    created: list[str] = []
+    for field_name in FILTERED_PAYLOAD_FIELDS:
+        if field_name in existing:
+            continue
+        try:
+            client.create_payload_index(
+                collection_name=collection,
+                field_name=field_name,
+                field_schema=models.PayloadSchemaType.KEYWORD,
+                wait=True,
+            )
+        except Exception:
+            logger.warning("Could not create payload index %s on %s", field_name, collection, exc_info=True)
+            continue
+        created.append(field_name)
+    if created:
+        logger.info("Created payload indexes on %s: %s", collection, ", ".join(created))
+    return created
+
+
 def load_dense_model(device: str | None = None):
     """Load the dense embedding model on the configured device.
 
@@ -291,6 +343,7 @@ def build_index(
             collection,
             "sparse only" if SPARSE_ONLY_INDEX else f"dense {DENSE_DIM}d + sparse",
         )
+    ensure_payload_indexes(client, collection)
 
     # -- BM25 sparse encoder -------------------------------------------------
     # Fitted on the same text that gets embedded, so dense and sparse retrieval
@@ -474,6 +527,11 @@ def main() -> None:
         ),
     )
     parser.add_argument("--recreate", action="store_true", help="Drop and recreate collection")
+    parser.add_argument(
+        "--ensure-payload-indexes",
+        action="store_true",
+        help="Create any missing payload indexes on the live collection (or alias) and exit",
+    )
     parser.add_argument("--csv-dir", type=str, default=str(DATA_DIR))
     parser.add_argument("--faq-jsonl-dir", type=str, default=str(FAQ_JSONL_DIR))
     parser.add_argument("--teacher-qa-dir", type=str, default=str(TEACHER_QA_DIR))
@@ -482,6 +540,16 @@ def main() -> None:
     parser.add_argument("--crawl-pages-dir", type=str, default=str(CRAWL_PAGES_DIR))
     parser.add_argument("--crawl-jsonl-dir", type=str, default=str(CRAWL_JSONL_DIR))
     args = parser.parse_args()
+
+    if args.ensure_payload_indexes:
+        from qdrant_client import QdrantClient
+
+        from .index_lifecycle import alias_target
+
+        client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=30)
+        target = alias_target(client, QDRANT_COLLECTION) or QDRANT_COLLECTION
+        logger.info("Payload indexes created on %s: %s", target, ensure_payload_indexes(client, target) or "none missing")
+        return
 
     csv_dir = Path(args.csv_dir)
     faq_jsonl_dir = Path(args.faq_jsonl_dir)
