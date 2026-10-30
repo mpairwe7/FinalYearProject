@@ -486,20 +486,15 @@ _CORRECTIONS: dict[str, str] = {
     "registr": "register",
     "penalti": "penalty",
     "penalites": "penalties",
-    "retun": "return",
-    "retuns": "returns",
     "incom": "income",
-    "customes": "customs",
     "costoms": "customs",
     "witholdng": "withholding",
-    "witholding": "withholding",
     "with-holding": "withholding",
     "environmntal": "environmental",
     "environmetal": "environmental",
     "enviromental": "environmental",
     "presumptve": "presumptive",
     "transacion": "transaction",
-    "assesment": "assessment",
     "assesments": "assessments",
     "objectionn": "objection",
     "clearanc": "clearance",
@@ -596,6 +591,14 @@ _LUGANDA_WORDS: frozenset[str] = frozenset({
     "mmeka", "bimeka", "meka", "etya", "zitya", "gitya", "atya", "lwaki",
     "eri", "kiri", "ziri", "ngiwaayo", "ngifuna", "amateeka", "kkomo",
     "buvunaanyizibwa", "bizinensi", "zaayo", "ekwatagana", "ebalirira", "okusasulwa",
+    # Number words, scale nouns, currency & financial context vocabulary
+    "obukadde", "bukadde", "akakadde", "kakadde", "obuwumbi", "buwumbi", "akawumbi", "kawumbi",
+    "emitwalo", "mitwalo", "omutwalo", "mutwalo", "enkumi", "nkumi", "olukumi", "lukumi",
+    "ebikumi", "bikumi", "kikumi", "ensimbi", "shilingi", "siringi",
+    "kkumi", "ekkumi", "amakumi", "nkaaga", "nsanvu", "kinaana", "kyenda",
+    "bbiri", "bibiri", "bubiri", "ssatu", "bisatu", "busatu", "nnya", "bina", "buna",
+    "ttaano", "bitaano", "butaano", "mukaaga", "musanvu", "munaana", "mwenda", "ekitundu",
+    "amagoba", "magoba", "emisaala", "musaala", "ebbanja", "amabanja", "omuwendo", "ekkomo",
 })
 
 _SWAHILI_WORDS: frozenset[str] = frozenset({
@@ -615,6 +618,13 @@ _SWAHILI_WORDS: frozenset[str] = frozenset({
     "ninahitaji", "nini", "gani", "lini", "vipi", "wapi", "ngapi",
     "tuongee", "kiswahili", "hii", "hiyo", "kuna", "sijui", "sawa",
     "yapi", "hawa", "kuhusu", "kisheria", "majukumu", "inahusiana",
+    # Number words, scale nouns, currency & financial context vocabulary
+    "shilingi", "milioni", "bilioni", "elfu", "laki", "mia", "fedha", "pesa",
+    "mtaji", "faida", "hasara", "mshahara", "mishahara", "deni", "madeni",
+    "riba", "faini", "kikomo", "mauzo", "ununuzi", "malipo",
+    "moja", "mbili", "tatu", "nne", "tano", "sita", "nane", "tisa", "kumi",
+    "ishirini", "thelathini", "arobaini", "hamsini", "sitini", "sabini", "themanini", "tisini",
+    "nusu", "nukta", "sifuri",
 })
 
 _RUNYANKOLE_WORDS: frozenset[str] = frozenset({
@@ -631,6 +641,15 @@ _RUNYANKOLE_WORDS: frozenset[str] = frozenset({
     "noobaasa", "ori", "oha", "nkahi", "ryari", "kare", "tugambe", "okyariho",
     "nintina", "ntiina", "ebindi", "ekibuuzo", "ebibuuzo", "omukutu", "orubuga",
     "esimu", "kunkorera", "okukora", "ninga", "nitushashura",
+    # Number words, scale nouns, currency & financial context vocabulary
+    "bukaikuru", "kakaikuru", "obuwumbi", "buwumbi", "akawumbi", "kawumbi",
+    "emitwaro", "mitwaro", "omutwaro", "mutwaro", "orukumi", "rukumi",
+    "eigana", "igana", "amagana", "magana", "ekikumi", "ebikumi", "esente",
+    "emwe", "kimwe", "kamwe", "rumwe", "gumwe", "ibiri", "bibiri", "bubiri",
+    "ishatu", "bishatu", "bushatu", "ashatu", "ina", "bina", "buna",
+    "itaano", "bitaano", "butaano", "mukaaga", "mushanju", "munaana", "mwenda",
+    "ikumi", "makumi", "nshanju", "ekicweka", "mushaara", "emishaara",
+    "amagoba", "magoba", "entaasya", "ebanja", "amabanja", "ekibonerezo", "obugarukiro", "obupangisa",
 })
 
 _ACHOLI_WORDS: frozenset[str] = frozenset({
@@ -644,6 +663,11 @@ _ACHOLI_WORDS: frozenset[str] = frozenset({
     "mega", "megi", "itwero", "watwero", "amito", "imito", "tim", "ber",
     "kwene", "awene", "pud", "itye", "pe", "eyo", "alworo", "cwinya", "banya",
     "cim", "kabedo", "ngec", "mukene", "pingo", "waculo", "culo",
+    # Number words, scale nouns, currency & financial context vocabulary
+    "miya", "tutemia", "lim", "acel", "aryo", "adek", "angwen", "abic",
+    "abicel", "abiro", "aboro", "abongwen", "apar", "wiye",
+    "pyeraryo", "pyeradek", "pyerangwen", "pyerabic", "pyerabicel", "pyerabiro", "pyeraboro", "pyerabongwen",
+    "nucu", "dul", "magoba", "pwod", "kipango", "cul",
 })
 
 _LOCAL_LANGUAGE_WORDS = _LUGANDA_WORDS | _SWAHILI_WORDS | _RUNYANKOLE_WORDS | _ACHOLI_WORDS

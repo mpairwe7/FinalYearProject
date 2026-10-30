@@ -364,7 +364,7 @@ POST /v1/index
   "total_upserted": 8463,
   "quality_gate": {"canaries": 3, "passed": 3, "hit_rate": 1.0, "minimum_hit_rate": 1.0, "misses": []},
   "reindexed": true,
-  "source_corpus_hash": "55a2175b9b40aac040743cc8fb5ca693d357b98fa6b9165fe98915595a1c1414",
+  "source_corpus_hash": "55a2175b9b40aac0...",
   "retrieval_mode": "hybrid"
 }
 ```
@@ -1911,6 +1911,12 @@ case on the chat events.
 ---
 
 #### Call wrap-up: the caller's satisfaction
+
+Receptionist assurance update (2026-10-30, ADR-0020): `ticket_action` accepts
+`create`, `resolve`, or `keep_open` (omit it for no ticket action). An unknown
+action returns 400; a ticket action while `ticket_queue` is disabled returns
+409 before changing the wrap-up. New tickets retain the call's tenant,
+conversation and locale. See [remaining ownership and atomic-write limits](plans/receptionist-assurance-2026-10-30.md).
 
 ```http
 POST /v1/admin/calls/{call_id}/wrapup

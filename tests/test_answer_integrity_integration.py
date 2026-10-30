@@ -93,6 +93,39 @@ def _drain(agen):
     return asyncio.run(_run())
 
 
+@pytest.mark.parametrize("queue_enabled", [True, False])
+def test_call_wrapup_ticket_respects_tenant_and_queue_switch(queue_enabled):
+    """The real desk route must not create cross-tenant or disabled handoffs."""
+    from app import database as call_db
+    from app.auth.jwt_auth import make_dev_token
+    from app.flags import flags as call_flags
+    from app.main import app as call_app
+    from app.receptionist.store import create_call, get_call, init_receptionist_schema
+
+    call_db.init_db()
+    init_receptionist_schema()
+    call_id = f"call_integrity_{uuid.uuid4().hex[:10]}"
+    create_call(call_id, conversation_id=f"conv_{call_id}", tenant_id="qa-tenant", status="ended", locale="lg")
+    token = make_dev_token("qa-officer", tenant_id="qa-tenant", role="ura_staff")
+    with mock.patch.object(call_flags, "is_enabled", side_effect=lambda name, **kw: (
+        queue_enabled if name == "ticket_queue" else name in ("auth_required", "multi_tenant")
+    )):
+        response = TestClient(call_app).post(
+            f"/v1/admin/calls/{call_id}/wrapup",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"outcome": "follow_up", "note": "Officer review needed", "ticket_action": "create"},
+        )
+    saved = get_call(call_id)
+    if queue_enabled:
+        assert response.status_code == 200, response.text
+        ticket = call_db.query_one("SELECT tenant_id, conversation_id, locale FROM tickets WHERE id = ?", (saved["ticket_id"],))
+        assert dict(ticket) == {"tenant_id": "qa-tenant", "conversation_id": f"conv_{call_id}", "locale": "lg"}
+    else:
+        assert response.status_code == 409, response.text
+        assert not saved.get("ticket_id")
+        assert not saved.get("wrapup_at")
+
+
 # ---------------------------------------------------------------------------
 # The translation memo
 # ---------------------------------------------------------------------------

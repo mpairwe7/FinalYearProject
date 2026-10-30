@@ -146,8 +146,8 @@ _NUMERIC_STRING_RE = re.compile(
     re.IGNORECASE,
 )
 _BANTU_PREFIX_NUMERIC_RE = re.compile(
-    r"^\s*(?:UGX|UShs?|Shs?\.?|shilingi|shiringi|cilingi)?\s*"
-    r"(milioni|bilioni|elfu|laki|o?bukadde|a?kakadde|o?bukaikuru|a?kakaikuru|o?buwumbi|a?kawumbi|e?mitwalo|e?nkumi)"
+    r"^\s*(?:UGX|UShs?|Shs?\.?|shilingi|shiringi|siringi|cilingi|ssente|sente|esente|cente|ensimbi|fedha|pesa|lim)?\s*"
+    r"(mili+y?oni|bili+y?oni|el?ufu|elfu|tutemia|laki|o?bukadde|a?kakadde|o?bukaikuru|a?kakaikuru|o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?mitwaro|o?mutwaro|e?nkumi|o?lukumi|o?rukumi)"
     r"\s+([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*(?:UGX|UShs?|Shs?\.?|/=|/-)?\s*$",
     re.IGNORECASE,
 )
@@ -163,8 +163,12 @@ _SCALE_MULTIPLIERS: dict[str, float] = {
     "bn": 1e9,
     "billion": 1e9,
     "milioni": 1e6,
+    "miliyoni": 1e6,
     "bilioni": 1e9,
+    "biliyoni": 1e9,
     "elfu": 1e3,
+    "elufu": 1e3,
+    "tutemia": 1e3,
     "laki": 1e5,
     "bukadde": 1e6,
     "obukadde": 1e6,
@@ -180,8 +184,18 @@ _SCALE_MULTIPLIERS: dict[str, float] = {
     "akawumbi": 1e9,
     "mitwalo": 1e4,
     "emitwalo": 1e4,
+    "mutwalo": 1e4,
+    "omutwalo": 1e4,
+    "mitwaro": 1e4,
+    "emitwaro": 1e4,
+    "mutwaro": 1e4,
+    "omutwaro": 1e4,
     "nkumi": 1e3,
     "enkumi": 1e3,
+    "lukumi": 1e3,
+    "olukumi": 1e3,
+    "rukumi": 1e3,
+    "orukumi": 1e3,
 }
 
 
@@ -216,6 +230,20 @@ def coerce_arguments_to_schema(
             else set()
         )
         choices = spec.get("enum")
+
+        if (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and "string" in type_set
+            and "integer" not in type_set
+            and "number" not in type_set
+            and key in ("tin", "taxpayer_tin", "buyer_tin", "importer_tin", "prn", "payment_registration_number")
+        ):
+            str_id = str(value)
+            id_pattern = r"\d{10}|\d{12,14}" if key in ("prn", "payment_registration_number") else r"\d{10}"
+            if re.fullmatch(id_pattern, str_id):
+                coerced[key] = str_id
+                continue
 
         if isinstance(value, str):
             stripped = value.strip()
@@ -275,7 +303,10 @@ def coerce_arguments_to_schema(
                                 continue
                         except (ValueError, OverflowError):
                             pass
-                m_bantu = _BANTU_PREFIX_NUMERIC_RE.match(stripped)
+                from ..number_words import normalize_vernacular_amount_words
+
+                norm_stripped = normalize_vernacular_amount_words(stripped)
+                m_bantu = _BANTU_PREFIX_NUMERIC_RE.match(norm_stripped)
                 if m_bantu:
                     bantu_mult = _SCALE_MULTIPLIERS.get(m_bantu.group(1).lower(), 1.0)
                     raw_bantu_num = m_bantu.group(2).replace(",", "")

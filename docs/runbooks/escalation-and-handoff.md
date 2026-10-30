@@ -1,5 +1,12 @@
 # Runbook — escalation policy and structured text handoffs
 
+Call wrap-up update (2026-10-30, ADR-0020): ticket actions honor `ticket_queue`
+before saving the outcome (409 when unavailable; 400 for an unknown action).
+Created tickets retain the call's tenant, conversation and locale. Reconnect
+expiry revokes old media before requeueing; failed revocation terminates the
+call. [Assurance review](../plans/receptionist-assurance-2026-10-30.md) records
+the remaining ownership, atomic-write and production media gates.
+
 How the text chat decides to offer an officer, how the ticket it raises is
 prioritised and briefed, and how to roll the two Phase 38 flags out and back.
 Design and findings: [`docs/plans/agentic-cx-phase38-plan.md`](../plans/agentic-cx-phase38-plan.md);

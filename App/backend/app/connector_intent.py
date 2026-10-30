@@ -97,8 +97,10 @@ _FREE_ARGUMENT_WORDS = frozenset({"query", "name", "text", "search", "keyword", 
 _REFERENCE_ARGUMENT_WORDS = frozenset(
     {"number", "code", "id", "reference", "entry", "registration", "stamp", "warehouse", "vehicle", "invoice"}
 )
-_TIN_RE = re.compile(r"(?<![\w-])\d{10}(?![\w-])")
-_PRN_RE = re.compile(r"(?<![\w-])\d{12,13}(?![\w-])")
+_TIN_RE = re.compile(r"(?<![\w-])(?:\d{10}|\d{4}[-\s]\d{3}[-\s]\d{3}|\d{3}[-\s]\d{3}[-\s]\d{4})(?![\w-])")
+_PRN_RE = re.compile(
+    r"(?<![\w-])(?:\d{12,13}|\d{4}[-\s]\d{4}[-\s]\d{4,5}|\d{4}[-\s]\d{4}[-\s]\d{4}[-\s]\d)(?![\w-])"
+)
 #: A reference code has a digit and a letter or a separator: ``IM7-0001``,
 #: ``WH-KLA-01``, ``URSB-CO-10001``. A bare run of digits is a TIN or a PRN.
 _REFERENCE_RE = re.compile(
@@ -268,6 +270,10 @@ def _wrong_kind(name: str, value: Any) -> bool:
     :func:`_required_inputs_present`; an argument that is not recognised takes
     anything.
     """
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        value = str(value)
     if not isinstance(value, str) or not value.strip():
         return False
     words = set(str(name).lower().split("_"))
@@ -331,9 +337,12 @@ def ungrounded_arguments(
     properties = (schema or {}).get("properties") or {}
     missing: list[str] = []
     for name, value in (arguments or {}).items():
+        definition = properties.get(name)
+        if isinstance(value, int) and not isinstance(value, bool):
+            if isinstance(definition, dict) and definition.get("type") == "string":
+                value = str(value)
         if not isinstance(value, str) or not value.strip():
             continue
-        definition = properties.get(name)
         if isinstance(definition, dict) and definition.get("enum"):
             continue
         needle = _squash(value)

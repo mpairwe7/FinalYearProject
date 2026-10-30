@@ -276,8 +276,11 @@ _RANGE_WORD = {
 # "ku bitundu ebitundu 18 ku buli kikumi", nor "asilimia 18%" "asilimia asilimia".
 _LG_PCT_RE = re.compile(r"\b(e?bitundu[ \t]+)?([0-9]+(?:\.[0-9]+)?)[ \t]?%(?:[ \t]+ku[ \t]+buli[ \t]+kikumi\b)?", re.IGNORECASE)
 _SW_PCT_RE = re.compile(r"\b(?:asilimia[ \t]+)?([0-9]+(?:\.[0-9]+)?)[ \t]?%", re.IGNORECASE)
-_NYN_PCT_RE = re.compile(r"\b(e?bicweka[ \t]+)?([0-9]+(?:\.[0-9]+)?)[ \t]?%(?:[ \t]+aha[ \t]+(?:buli[ \t]+)?kikumi\b)?", re.IGNORECASE)
-_ACH_PCT_RE = re.compile(r"\b(dul[ \t]+)?([0-9]+(?:\.[0-9]+)?)[ \t]?%(?:[ \t]+i[ \t]+kom[ \t]+miya\b)?", re.IGNORECASE)
+_NYN_PCT_RE = re.compile(
+    r"\b(e?bicweka[ \t]+)?([0-9]+(?:\.[0-9]+)?)[ \t]?%(?:[ \t]+aha[ \t]+(?:bu[lr]i[ \t]+)?(kikumi|e?igana)\b)?",
+    re.IGNORECASE,
+)
+_ACH_PCT_RE = re.compile(r"\b(dul[ \t]+)?([0-9]+(?:\.[0-9]+)?)[ \t]?%(?:[ \t]+i[ \t]+kom[ \t]+miya(?:[ \t]+acel)?\b)?", re.IGNORECASE)
 
 # A number standing on its own: not part of a word (118A, 30th), a date, a
 # time, a decimal or a range written without spaces. ASCII digits only here
@@ -479,7 +482,12 @@ def _spoken_number(number: str, locale: str, years: bool = True) -> str:
     ("twenty twenty-six"); *years* is off for amounts of money.
     """
     if "." in number:
-        return decimal_words(number, "sw" if locale == "sw" else "en")
+        whole_part, _, frac_part = number.partition(".")
+        if not frac_part or set(frac_part) == {"0"}:
+            number = whole_part or "0"
+            years = False
+        else:
+            return decimal_words(number, "sw" if locale == "sw" else "en")
     n = int(number)
     if locale == "sw":
         return sw_words(n)
@@ -495,20 +503,30 @@ def _spoken_number(number: str, locale: str, years: bool = True) -> str:
     return en_words(n)
 
 
+def _strip_zero_decimals(number: str) -> str:
+    if "." not in number:
+        return number
+    whole_part, _, frac_part = number.partition(".")
+    if not frac_part or set(frac_part) == {"0"}:
+        return whole_part or "0"
+    return number
+
+
 def _lg_percent(match: re.Match[str]) -> str:
-    number = match.group(2)
+    number = _strip_zero_decimals(match.group(2))
     words = lg_words(int(number), "bi") if "." not in number else None
     return f"{match.group(1) or 'ebitundu '}{words or _spoken_number(number, 'en')} ku buli kikumi"
 
 
 def _nyn_percent(match: re.Match[str]) -> str:
-    number = match.group(2)
+    number = _strip_zero_decimals(match.group(2))
     words = nyn_words(int(number), "bi") if "." not in number else None
-    return f"{match.group(1) or 'ebicweka '}{words or _spoken_number(number, 'en')} aha kikumi"
+    hundred_noun = (match.group(3) or "kikumi").lower()
+    return f"{match.group(1) or 'ebicweka '}{words or _spoken_number(number, 'en')} aha {hundred_noun}"
 
 
 def _ach_percent(match: re.Match[str]) -> str:
-    number = match.group(2)
+    number = _strip_zero_decimals(match.group(2))
     words = ach_words(int(number)) if "." not in number else None
     return f"{match.group(1) or 'dul '}{words or _spoken_number(number, 'en')} i kom miya"
 

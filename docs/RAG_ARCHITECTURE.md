@@ -1094,6 +1094,17 @@ cryptography>=44.0.0
 opentelemetry-api, opentelemetry-sdk, opentelemetry-exporter-otlp-proto-grpc
 ```
 
+## Receptionist lifecycle assurance
+
+Receptionist lifecycle assurance (2026-10-30, ADR-0020): call resource teardown
+precedes best-effort reporting; registry and admission slots are finalized even
+on reporting failure. Reconnect expiry revokes old media before requeueing and
+ends the call if isolation cannot be established. Wrap-up ticket creation
+preserves tenant/conversation/locale and honors `ticket_queue`; generated drafts
+do not assert unverified outcomes. See [review and release gaps](plans/receptionist-assurance-2026-10-30.md).
+The receptionist profile pins Pipecat 1.15.0, compatible with the backend's
+Pillow 13 floor; install both dependency profiles together (G308).
+
 ## Turns answered by a chosen service
 
 A turn that selected a connector and asked it for a record does not use retrieval as its

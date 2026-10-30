@@ -265,6 +265,22 @@ def release_claim(call_id: str, officer_id: str | None = None) -> bool:
     return affected > 0
 
 
+def save_draft_wrapup_if_empty(call_id: str, note: str) -> bool:
+    """Persist a generated draft wrap-up note only when no note or officer wrap-up exists."""
+    if not note:
+        return False
+    affected = db.execute(
+        """
+        UPDATE voice_calls SET wrapup_note = ?
+        WHERE call_id = ?
+          AND (wrapup_note IS NULL OR wrapup_note = '')
+          AND wrapup_at IS NULL
+        """,
+        (note, call_id),
+    )
+    return affected > 0
+
+
 def update_call(call_id: str, **kwargs: Any) -> bool:
     """Update fields on a call record."""
     if not kwargs:

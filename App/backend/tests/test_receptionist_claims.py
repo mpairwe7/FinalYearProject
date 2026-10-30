@@ -287,7 +287,7 @@ class LapsedOfficerMediaTests(DeskTestCase):
         revoke.assert_awaited_once_with(f"ura-{self.call_id}", "officer-okello-opaque")
         self.assertEqual(self.room.state.claimed_by, "")
 
-    async def test_a_failed_revoke_does_not_keep_the_call_locked(self):
+    async def test_a_failed_revoke_ends_the_call_without_requeueing(self):
         await desk.claim(self.call_id, "okello")
         self.room.state.livekit_room = f"ura-{self.call_id}"
         self.room.state.livekit_officer_identity = "officer-okello-opaque"
@@ -295,11 +295,16 @@ class LapsedOfficerMediaTests(DeskTestCase):
         with (
             patch.object(desk, "get_officer_reconnect_grace_s", return_value=0.05),
             patch.object(desk.livekit, "revoke_participant", new=AsyncMock(side_effect=RuntimeError("down"))),
+            patch.object(desk.livekit, "close_room", new=AsyncMock()) as close_room,
         ):
             await desk.handle_officer_disconnect(self.room, "okello", speech_model=None)
             await asyncio.sleep(0.2)
         self.assertEqual(self.room.state.livekit_officer_identity, "")
-        self.assertEqual(self.lobby_events("call.transfer_requested")[-1]["reason"], "officer_disconnected")
+        self.assertEqual(self.room.state.mode, "ended")
+        self.assertEqual(self.room.state.end_reason, "media_revocation_failed")
+        self.assertEqual(self.lobby_events("call.transfer_requested"), [])
+        self.assertEqual(desk.presence.get_presence("okello")["current_call_id"], "")
+        close_room.assert_awaited_once_with(f"ura-{self.call_id}")
 
 
 class QuietAITests(unittest.IsolatedAsyncioTestCase):

@@ -30,8 +30,8 @@ translator that is never shown a digit cannot paraphrase one.
 
 Only the digits are masked. `UGX` and `%` stay visible, because they are the
 cue the target language needs to build the right construction — Luganda
-renders a rate as *"ebitundu 18 ku buli kikumi"* and can only do that if it
-can still see that 18 was a percentage.
+renders a rate as *"ebitundu 18 ku buli kikumi"* (Runyankole: *"ebicweka 18 aha kikumi / aha eigana"*; Acholi: *"dul 18 i kom miya"*; Swahili: *"asilimia 18"*) and can only do that if it
+can still see that 18 was a percentage. Furthermore, `number_words.normalize_vernacular_amount_words` and `parse_vernacular_scale_amount_at` fold descending multi-scale vernacular amount phrases (e.g. *"milioni tatu na elfu mia tano"*, *"obukadde busatu n'emitwalo ataano"*, *"obukaikuru bushatu n'emitwaro ataano"*) into canonical figures (`3,500,000.0`) before `entailment.canonical_amounts` and `mt.figures` compare English and translated figures.
 
 Sentinel labels are letters, never digits (`A`…`Z`, `AA`, …). A numeric index
 would be exposed to exactly the failure the sentinel exists to prevent.

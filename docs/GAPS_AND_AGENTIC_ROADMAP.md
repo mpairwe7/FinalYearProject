@@ -600,6 +600,24 @@ G42 fix, which is live there. The one failure:
 | G297 ⚪ | **The root `Dockerfile` image cannot use a CUDA 12 driver.** Its `--extra-index-url …/whl/cu128` never matches the `torch==2.14.1` pin, because the cu128 index publishes no 2.14.1, so uv installs PyPI's CUDA 13.0 build. On this host's 535 driver (CUDA 12.2), a GPU-reserved container fell back to CPU for bge-m3 and the reranker. `Dockerfile.gpu` (torch 2.11.0 from cu128) is unaffected. | Found building and running the compose stack, 2026-10-30. `uv pip compile` shows `torch==2.14.1` resolves on cu126 but not on cu128. | **Open — build owners.** Either drop the inert index, so the root image is honestly CPU/CUDA-13, or pin `torch==2.14.1+cu126` from an explicit index if this image must run on CUDA 12 hosts. Keep GPU deployments on `Dockerfile.gpu` until then. |
 
 
+### Receptionist assurance — 2026-10-30
+
+Reviewed on branch `fix/receptionist-assurance-2026-10-30`; [evidence, sources and phased acceptance](plans/receptionist-assurance-2026-10-30.md), ADR-0020. Fixed means implemented with local regressions; production deployment is pending.
+
+| Gap | Finding | Status |
+| --- | --- | --- |
+| G298 🟢 | ~~Reporting failures skipped call teardown/registry/slot release; failed socket acceptance leaked its slot.~~ | Fixed: teardown before isolated reporting; unconditional registry/slot finalization. |
+| G299 🟢 | ~~Timers cancelled their own teardown, other timers survived, and pipeline cancellation itself was unbounded.~~ | Fixed: skip the current task, cancel other timers, cooperative shutdown deadlines. |
+| G300 🟢 | ~~Reconnect expiry exposed a claimable call before old media was revoked; failed revocation continued the call.~~ | Fixed: revoke before release, end on uncertain isolation. SFU admission/deletion assurance remains G303. |
+| G301 🟢 | ~~Draft wrap-ups asserted advice, resolution and taxpayer understanding without evidence.~~ | Fixed: recorded speech and unverified outcome are explicit. |
+| G302 🟢 | ~~Wrap-up ticket creation dropped tenant/conversation/locale and bypassed the queue flag.~~ | Fixed: preserve context; reject disabled/unknown ticket actions before mutation. |
+| G303 ⚪ | Self-hosted token replay and media-revocation/room-deletion outage. | Open: security/media owners; prove admission denial and zero stale media delivery in staging. |
+| G304 ⚪ | Staff socket session lifetime and bounded admission/transcription work. | Open: backend owner; expiry/logout, flood, slow-reader and bounded-queue tests. |
+| G305 ⚪ | Wrap-up ownership, partial ticket writes and draft-vs-officer write race. | Open: desk/storage owners; transferred-call policy, idempotency and conditional/atomic writes. |
+| G306 ⚪ | Process-local call state and failed audit/end-record reconciliation. | Open: SRE owner; process-loss/drain drills and durable ownership before scale-out. |
+| G307 ⚪ | Five-language live speech, impaired-network/load and accessibility acceptance. | Open: QA/speech/service owners; measured tail latency, figure fidelity, handoff and timing/caption acceptance. |
+| G308 🟢 | ~~CPU/receptionist dependency profiles could not resolve together: Pipecat 1.12.0 required Pillow<13, backend requires Pillow>=13.~~ | Fixed: Pipecat 1.15.0, combined profile resolution and optional pipeline/LiveKit regressions. |
+
 Two probe bugs were found and corrected rather than reported as defects: `invoic`
 and `regist` were asserted as stems against a token-boundary matcher, so
 "Invoicing" and "registered" could never satisfy them. The service was right both
@@ -1023,6 +1041,7 @@ full agent chain is locked.
 
 ---
 
+*Document version 2.6 — updated 2026-10-30: closed G269 and G270 across 5-locale conversational intelligence (`conversational.py`: FY2026-27 UGX 300,000,000 VAT threshold alignment, English capability locale preservation, and Luganda/Swahili polite address particles), emotional intelligence (`text_signals.py`, `tools/empathy.py`, `audit/governance_v3.py`: 5-locale hopelessness, phrasal self-harm crisis detection with windowed indirect-negation guard `_CRISIS_NEGATION_PREFIX_RE`, enforcement/deadline-today/Bantu-scale high-stakes detection, server-gated `wellbeing_checkin`, and crisis scorecard exemption), ISO 24495-1 structuring/paragraphing/numbering & duplex TN/ITN figure normalization (`guardrails.py`, `number_words.py`, `speech_normalization.py`, `entailment.py`, `mt.py`: mixed prose+table paragraphing, nested parenthesized step indentation, word-bounded/comma-safe 5-locale ordinal unsmashing, descending multi-scale compound vernacular amount folding via `parse_vernacular_scale_amount_at` / `normalize_vernacular_amount_words`, Runyankole `eigana`/`igana`/`kikumi` + Whisper-SALT `aha kikuru` ASR repair, negative zero-whole decimal words, and zero-cent `.00` stripping), and MCP `SEP-2106` tool validation & identifier grounding (`mcp/validation.py`, `connector_intent.py`, `calculator_router.py`, `models.py`: external `$ref` SSRF guard, Bantu scale-prefix & integer TIN/PRN coercion/grounding, word-bounded currency matching, TIN/PRN/BRN/NIN/FDN/EFD exclusion from UGX amount extraction, and `ChatResponse.connectors_used` parity), pinned in `tests/agents/test_conversational_intelligence.py` and `tests/agents/test_cx_99000_multimodal_ngrok.py` (`99,000 / 99,000` TTT+STT+TTS scenarios + live ngrok suites).*
 *Document version 2.5 — updated 2026-09-17: closed G59 (vernacular numeral & idiom disambiguation: Luganda verb 'saba' vs Swahili numeral '7', 'mtu wa tatu', 'ekiwandiiko 1.2', currency qualifiers 'milioni'/'obukadde'/'emitwalo'), G60 (W3C SSE multiline event-buffered reader loop in page.tsx and list unsmashing normalizers resolving chat UI procedural step collapse), and G61 (multiline sentence splitting in text_signals.py and cross-passage corroboration in claim_verifier.py eliminating false low-faithfulness escalations on URA service catalogs). Verified 100% accuracy on 1,000 FAQs, 300 FAQs, and 100 FAQs multimodal benchmarks.*
 *Document version 2.4 — updated 2026-09-16: resolved G59 closing the 100-FAQ multimodal benchmark accuracy gap. Wired missing statutory heads (mobile money withdrawal excise 0.5%, presumptive threshold 10m-150m, TPCA late-filing penalty 200k/2%) into FY2026-27 rate table and calculator router fast lookups; added local government tax out-of-scope handler; improved small-business FAQ priority routing; added stale PDF chunk discounting; and corrected leaky benchmark gold labels.*
 *Document version 2.3 — updated 2026-09-02: G44 re-probed on the deployed
