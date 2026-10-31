@@ -154,7 +154,9 @@ Recorded because a reader should know how far to trust the process.
 
 Automated review of the pull request raised 12 findings against code written here. Eleven were
 real, and two of those contradicted a claim above: that an enforced control holds, and that
-duplicates are handled. Each was confirmed by a test that failed on the unfixed code.
+duplicates are handled. Nine were confirmed by a test that failed on the unfixed code. The two
+in monitoring were confirmed by reading the rule and the gauge, because `promtool` is not
+available here.
 
 | Finding | Gap | Outcome |
 | --- | --- | --- |
@@ -177,30 +179,35 @@ rule still covers those lines.
 
 ## Test evidence
 
-**Mutation sweep.** Each of 59 critical controls was disabled in turn in an isolated worktree,
-and its contract tests had to fail: 59 of 59 caught, with every mutant compiling and pytest
-reporting a test failure rather than an error. The first run left one survivor, the fix for
-G336: its test used the human route, which the gate now always allows, so removing the fix
-changed nothing. A test with a high-tier tool closed that. This shows the tests detect these
-controls being removed. It does not show the controls are sufficient.
+**CI's two test steps, in CI's order, one process each**, on a clean worktree at `b721fd73`:
 
-**Full suite** (`App/backend/tests`, `tests/agents`, `tests/chaos`), four shards, Python 3.11:
-5,533 passed, 8 failed, 29 skipped. Seven of the eight fail the same way on clean `dev`
-(below). The eighth, `test_late_payment_penalty_preserves_2_percent`, failed once under shard
-load, then passed 3 of 3 alone and 22 of 22 with its file on both trees. It mocks the chat model,
-so it does not reach code changed here. Timing is the likely cause, but that is unconfirmed.
-The root `tests/*.py` integration tests: 620 passed, 4 skipped.
-Three modules cannot be collected here because `opentelemetry`, `requests` and `soundfile`
-are not installed, so `test_tracing_genai.py`, `test_speech_streaming.py` and
-`test_cx_500_complex_ngrok_schema.py` did not run locally. CI runs them.
+| Step | Passed | Failed | Skipped | Not collected |
+| --- | --- | --- | --- | --- |
+| `pytest tests/` | 2,751 | 0 | 13 | 1 |
+| `cd App/backend && pytest tests/` | 3,431 | 2 | 20 | 2 |
+
+Both failures are in `test_pdf_corpus.py`. `beautifulsoup4` is in `requirements.txt` but not
+installed here, so the parser falls back to a regex that cannot isolate page content. They fail
+the same way on clean `dev`, and this change does not touch that path. Three modules cannot be
+collected here because `opentelemetry`, `requests` and `soundfile` are not installed:
+`test_tracing_genai.py`, `test_speech_streaming.py` and `test_cx_500_complex_ngrok_schema.py`.
+CI runs them, and its result is on the pull request.
+
+**Mutation sweep.** Each of 79 critical controls was disabled in turn in an isolated worktree,
+and its contract tests had to fail: 79 of 79 caught, with every mutant compiling and pytest
+reporting a test failure rather than an error. Earlier runs each left a survivor. The fix for
+G336 was tested on the human route, which the gate now always allows, so removing it changed
+nothing. A duplicate's settled result was tested only for a failed original, which looks the
+same as its provisional result. Both now have a test that tells them apart. This shows the tests
+detect these controls being removed. It does not show the controls are sufficient.
 
 Environment notes, each confirmed by experiment rather than assumed:
 
 * With DNS down, a blocking `getaddrinfo` for the default `vllm` host stalled receptionist
   tests past their 25 s budget. Pointing `VLLM_BASE_URL` at a refused local port removed it.
-* `test_chat_connectors.py` and `test_connector_link_integration.py` fail after
-  `test_prompt_budget.py` in the same process. The pair fails identically on clean `dev`.
-* `test_pdf_corpus.py` (2) and one officer wrap-up test fail on clean `dev` here.
+* In shards, `test_chat_connectors.py` (3) and `test_connector_link_integration.py` (1) fail after
+  `test_prompt_budget.py` in the same process, on clean `dev` too. CI runs those directories in
+  separate processes, so it never sees this. One officer wrap-up test also fails only in shards.
 
 A clock-dependent test from #676 was fixed: it asserted `"16"` was absent from a notice that
 carries the time of the check.
