@@ -401,6 +401,14 @@ store=…`); fix the store and the next run catches up.
 attempts against one route is an attack — rate limits already apply, block at
 the edge if it continues.
 
+### Live web research and planner
+
+`ura_web_research_turns_total{status}`, `ura_web_search_requests_total{provider,outcome}`,
+`ura_web_results_rejected_total{reason}`, `ura_fx_quotes_total{outcome}`,
+`ura_plan_steps_total{outcome}`, `ura_turn_pipeline_attestations_total{transport,ok}` and
+`ura_turn_stage_sla_breaches_total{stage}`. See
+[Operating the live check](runbooks/live-web-research-and-qdrant-sync.md#6-operating-the-live-check).
+
 ### Dependencies
 
 `RedisDown`: rate limits and the response cache fall back to per-worker

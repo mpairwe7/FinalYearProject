@@ -460,3 +460,62 @@ groups:
           summary: "Qdrant restore drill failed or has not completed in 35 days"
           description: "Run the restore drill before relying on the retained snapshots for recovery."
           runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/qdrant-staged-rebuild.md#backup-and-restore-drill"
+
+  # Planner and live web research (ADR-0021)
+  - name: ura_agent_planner_and_live_research
+    rules:
+      - alert: LiveChecksMostlyUnavailable
+        expr: >
+          sum(rate(ura_web_research_turns_total{status="unavailable"}[30m]))
+          / sum(rate(ura_web_research_turns_total[30m])) > 0.5
+        for: 15m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "Most live checks could not complete"
+          description: "Taxpayers are being told the check failed. Inspect ura_web_search_requests_total by outcome."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/live-web-research-and-qdrant-sync.md#live-checks-failing"
+
+      - alert: WebResultInjectionRejected
+        expr: sum(increase(ura_web_results_rejected_total{reason="injection"}[1h])) > 0
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "A web result was dropped for reading like an instruction"
+          description: "The result never reached the model. Check the logged hostname."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/live-web-research-and-qdrant-sync.md#injection-attempts-in-web-results"
+
+      - alert: FxSourcesDisagreeing
+        expr: sum(increase(ura_fx_quotes_total{outcome="diverged"}[1h])) > 3
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "Market FX sources keep disagreeing"
+          description: "No rate is being served for the affected currencies. Volatility or a broken parser."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/live-web-research-and-qdrant-sync.md#fx-sources-disagreeing"
+
+      - alert: PlannedStepsFailing
+        expr: >
+          sum(rate(ura_plan_steps_total{outcome=~"failed|skipped"}[30m]))
+          / sum(rate(ura_plan_steps_total[30m])) > 0.1
+        for: 15m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "Planned tool steps are not completing"
+          description: "Answers are listing calculations as not calculated."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/live-web-research-and-qdrant-sync.md#planned-steps-failing"
+
+      - alert: TurnPipelineAttestationFailing
+        expr: sum(increase(ura_turn_pipeline_attestations_total{ok="false"}[15m])) > 0
+        labels:
+          severity: critical
+          team: security
+        annotations:
+          summary: "A turn left the declared pipeline"
+          description: "A REST turn ran stages out of order or without the input guard."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/live-web-research-and-qdrant-sync.md#pipeline-attestation-failing"

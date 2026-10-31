@@ -51,7 +51,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Mapping
+    from collections.abc import Callable, Generator, Mapping
 
 logger = logging.getLogger(__name__)
 
@@ -339,6 +339,44 @@ def trace_stage(
             span.set_attribute(f"rag.{name}.duration_ms", duration_ms)
             if timings is not None:
                 timings[name] = duration_ms
+
+
+@contextmanager
+def trace_plan() -> Generator[Callable[[str, int], None], None, None]:
+    """``plan`` span around task decomposition; yields ``annotate(digest, step_count)``.
+
+    The operation is the well-known ``plan`` value from the GenAI conventions
+    (Development status). It wraps the deterministic planner only, because that
+    is the phase which can be told apart reliably from generation.
+    """
+    span_cm = None
+    span = None
+    if _tracer is not None:
+        attributes = {"gen_ai.operation.name": "plan", "gen_ai.agent.name": AGENT_NAME}
+        try:
+            span_cm = _tracer.start_as_current_span(f"plan {AGENT_NAME}", attributes=attributes)
+            span = span_cm.__enter__()
+        except Exception:  # noqa: BLE001 - a tracing fault must not cost the verified figures
+            logger.debug("plan span not started", exc_info=True)
+            span_cm = None
+
+    def annotate(digest: str, steps: int) -> None:
+        if span is None:
+            return
+        try:
+            span.set_attribute("ura.plan.sha256", digest)
+            span.set_attribute("ura.plan.step_count", steps)
+        except Exception:  # noqa: BLE001 - as above
+            logger.debug("plan span not annotated", exc_info=True)
+
+    try:
+        yield annotate
+    finally:
+        if span_cm is not None:
+            try:
+                span_cm.__exit__(None, None, None)
+            except Exception:  # noqa: BLE001 - as above
+                logger.debug("plan span not closed", exc_info=True)
 
 
 class LLMCall:

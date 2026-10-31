@@ -652,9 +652,10 @@ _REGISTRY: dict[str, Flag] = {
         Flag(
             "live_web_research",
             False,
-            "Phase 41 (FLAG_LIVE_WEB_RESEARCH): enable live FX lookup (XE.com / Google Currency) "
-            "and tiered official web/PDF research (ura.go.ug, ulii.org, bou.or.ug, eac.int) "
-            "inside an ephemeral RAM-backed document sandbox.",
+            "Phase 41 (FLAG_LIVE_WEB_RESEARCH): check official sources (ura.go.ug, ulii.org, "
+            "bou.or.ug, eac.int) when a question needs current information, through a configured "
+            "search provider and an ephemeral RAM-backed document sandbox, with indicative market "
+            "FX. Web text stays evidence and a failed check is disclosed (ADR-0021).",
         ),
         Flag(
             "auto_qdrant_web_sync",

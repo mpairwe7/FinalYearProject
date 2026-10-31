@@ -291,9 +291,14 @@ def _scoped_conversation_state(method: Callable[..., Any]) -> Callable[..., Any]
         token = _ACTIVE_CONVERSATION_STATE.set(state_id)
         tenant_token = _ACTIVE_TENANT_ID.set(values.get("tenant_id") or "default")
         facts_ctx_reset = _ACTIVE_CASE_FACTS.set(None)
+        # A streamed turn opened this scope already, and its guards run after
+        # this wrapper returns, so they must see the same plans.
+        plans_reset = _TURN_PLANS.set({}) if _TURN_PLANS.get() is None else None
         try:
             return method(*bound.args, **bound.kwargs)
         finally:
+            if plans_reset is not None:
+                _TURN_PLANS.reset(plans_reset)
             _ACTIVE_CASE_FACTS.reset(facts_ctx_reset)
             _ACTIVE_TENANT_ID.reset(tenant_token)
             _ACTIVE_CONVERSATION_STATE.reset(token)
@@ -1021,16 +1026,114 @@ _ACTIVE_CASE_FACTS: contextvars.ContextVar[Any] = contextvars.ContextVar(
 )
 
 
-def _evaluate_calculation_context(query: str, facts: Any = None) -> str:
-    """Build the verified statutory facts & calculations block via :mod:`app.scenario_planner`."""
-    from .scenario_planner import build_verified_facts
+def _live_research_for_turn(
+    query: str,
+    *,
+    hits: list[dict[str, Any]],
+    retriever: Any,
+    turn_id: str,
+) -> tuple[list[dict[str, Any]], str, Any]:
+    """Run the turn's live research: ``(hits, retrieval mode, outcome)``.
 
+    One implementation for REST, SSE and the graph, because the three drifted
+    once already. A crash is reported as a failed check when the question needed
+    one: going quiet is how a stale answer comes to look current.
+    """
+    from .web_research import (
+        WebResearchTurnOutcome,
+        merge_into_hits,
+        query_is_time_sensitive,
+        run_web_research,
+        unavailable_outcome,
+    )
+
+    facts = _ACTIVE_CASE_FACTS.get()
+    try:
+        outcome = run_web_research(
+            query,
+            case_facts=facts,
+            hits=hits,
+            retriever=retriever,
+            turn_id=turn_id,
+        )
+        merged, mode = merge_into_hits(outcome, hits)
+    except Exception:
+        logger.warning("Live web research step failed", exc_info=True)
+        outcome = unavailable_outcome() if query_is_time_sensitive(query, facts) else WebResearchTurnOutcome()
+        merged, mode = hits, ""
+    # Recorded here, outside any return path, so a stream that exits early still
+    # has the check to disclose and audit.
+    record = _TURN_LIVE_CHECK.get()
+    if record is not None:
+        record.update(
+            audit=outcome.audit,
+            disclosure=outcome.disclosure,
+            events=list(outcome.events),
+        )
+    return merged, mode, outcome
+
+
+def _with_live_check_disclosure(reply: str, disclosure: str) -> str:
+    """*reply* with the live-check sentence owed to the taxpayer, once."""
+    if not disclosure or not reply or disclosure in reply:
+        return reply
+    return f"{reply.rstrip()}\n\n{disclosure}"
+
+
+#: Replies that say nothing about the present, so owe no sentence about checking it.
+_NO_LIVE_DISCLOSURE_MODES = frozenset({"blocked", "clarification", "escalated"})
+
+
+def _disclosed_reply(result: dict[str, Any]) -> str:
+    """The result's reply, carrying its live-check disclosure when it owes one."""
+    reply = str(result.get("reply") or "")
+    if result.get("retrieval_mode") in _NO_LIVE_DISCLOSURE_MODES:
+        return reply
+    return _with_live_check_disclosure(reply, str(result.get("_live_check_disclosure") or ""))
+
+
+#: This turn's live check, shared with the threads the streamed turn runs in.
+_TURN_LIVE_CHECK: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "_turn_live_check", default=None
+)
+#: A turn's executed plans, so prompt building and verification share one run.
+_TURN_PLANS: contextvars.ContextVar[dict[str, tuple[str, dict[str, Any]]] | None] = contextvars.ContextVar(
+    "_turn_plans", default=None
+)
+
+
+def _turn_plan_summary() -> dict[str, Any]:
+    """The audit record of this turn's plan: the last one that had any steps."""
+    for _, summary in reversed(list((_TURN_PLANS.get() or {}).values())):
+        if summary.get("sha256"):
+            return summary
+    return {}
+
+
+def _evaluate_calculation_context(query: str, facts: Any = None) -> str:
+    """Build the verified statutory facts & calculations block via :mod:`app.scenario_planner`.
+
+    Called while building the prompt and again while verifying the reply. Running
+    the plan twice paid for every live FX step twice, and let the two disagree
+    when a source failed in between, so a reply could be judged against figures
+    the model never saw. The first run of a turn is the run.
+    """
+    from .scenario_planner import PlanRunReport, build_verified_facts
+
+    plans = _TURN_PLANS.get()
+    key = " ".join(str(query or "").lower().split())
+    if plans is not None and key in plans:
+        return plans[key][0]
+    report = PlanRunReport()
     try:
         eff_facts = facts if facts is not None else _ACTIVE_CASE_FACTS.get()
-        return build_verified_facts(query, eff_facts)
-    except Exception:
-        logger.debug("build_verified_facts failed", exc_info=True)
-        return ""
+        block = build_verified_facts(query, eff_facts, report=report)
+    except Exception as exc:  # noqa: BLE001 - the answer proceeds and the failure is on record
+        logger.warning("build_verified_facts failed: %s", type(exc).__name__)
+        block = ""
+    if plans is not None:
+        plans[key] = (block, report.summary())
+    return block
 
 
 def _is_non_t1_endpoint(endpoint: Any) -> bool:
@@ -1817,6 +1920,7 @@ def _apply_output_guards(
     tool_grounded: bool = False,
     verified_facts: str = "",
     calculation_message: str | None = None,
+    live_check_disclosure: str = "",
 ) -> dict[str, Any]:
     """Run the full post-generation guard pipeline for a streamed turn.
 
@@ -2000,6 +2104,11 @@ def _apply_output_guards(
             tenant_id=tenant_id or "default",
         )
 
+    # Added after every verifier, so the sentence is never judged as a claim.
+    disclosed = _with_live_check_disclosure(reply, live_check_disclosure)
+    if disclosed != reply:
+        reply, revised = disclosed, True
+
     return {
         "reply": reply,
         "faithfulness": faith,
@@ -2058,6 +2167,8 @@ async def run_chat_turn(
     # stream's redaction, and the TIN a taxpayer asked about came back as
     # [REDACTED_UG_TIN] (G143, G154).
     _ACTIVE_USER_STATED_IDS.set(user_stated_identifiers(str(kwargs.get("message") or "")))
+    _TURN_PLANS.set({})
+    _TURN_LIVE_CHECK.set({})
     with turn_usage_scope() as usage, turn_attributes_scope():
         async for event_type, payload in _run_chat_turn_events(model, **kwargs):
             if event_type == "error":
@@ -2336,6 +2447,11 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             if isinstance(result.get("portal_copilot"), dict):
                 result["portal_copilot"] = ChatModel._localize_portal_copilot(result["portal_copilot"], locale)
 
+        live_check = _TURN_LIVE_CHECK.get() or {}
+        if live_check.get("audit"):
+            result.setdefault("_live_check", live_check["audit"])
+            result.setdefault("_live_check_disclosure", live_check.get("disclosure", ""))
+            result.setdefault("_web_research_events", live_check.get("events", []))
         for evt_name, evt_payload in result.get("_web_research_events") or []:
             yield (evt_name, evt_payload)
 
@@ -2370,7 +2486,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             # localized before it is sent rather than corrected afterwards.
             if locale not in ("", "en"):
                 yield ("translation.started", {"locale": locale})
-            full_reply = _localized(result.get("reply", ""))
+            full_reply = _localized(_disclosed_reply(result))
             if locale not in ("", "en"):
                 yield ("translation.completed", {"locale": locale})
             result["reply"] = full_reply
@@ -2503,6 +2619,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     tool_grounded=bool(connector_forced and agentic_used_tools),
                     verified_facts=str(result.get("_web_verified_facts") or ""),
                     calculation_message=str(result.get("_english_message") or message),
+                    live_check_disclosure=str(result.get("_live_check_disclosure") or ""),
                 )
                 full_reply = guard["reply"]
                 if guard["revised"]:
@@ -2599,7 +2716,11 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             finalize_turn_actions(result, escalated=escalate)
             if locale not in ("", "en"):
                 yield ("translation.started", {"locale": locale})
-            full_reply = _localized(abstained_reply)
+            full_reply = _localized(
+                _with_live_check_disclosure(
+                    abstained_reply, str(result.get("_live_check_disclosure") or "")
+                )
+            )
             if locale not in ("", "en"):
                 yield ("translation.completed", {"locale": locale})
             result["reply"] = full_reply
@@ -2731,7 +2852,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 if attachments and hasattr(model, "_format_attachment_fallback_reply"):
                     full_reply = model._format_attachment_fallback_reply(attachments)
                 else:
-                    full_reply = result.get("reply", "")
+                    full_reply = _disclosed_reply(result)
                 if hasattr(model, "_finalize_reply"):
                     finalized = model._finalize_reply(full_reply, attachments=attachments)
                     if isinstance(finalized, str):
@@ -2783,6 +2904,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 locale=locale,
                 verified_facts=str(result.get("_web_verified_facts") or ""),
                 calculation_message=str(result.get("_english_message") or message),
+                live_check_disclosure=str(result.get("_live_check_disclosure") or ""),
             )
             full_reply = guard["reply"]
             faith = guard["faithfulness"]
@@ -2877,7 +2999,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     logger.debug("Stream cache store failed", exc_info=True)
         else:
             # No LLM tier at all — extractive reply, same EI parity as above.
-            full_reply = result.get("reply", "")
+            full_reply = _disclosed_reply(result)
             if turn_ack and full_reply:
                 full_reply = f"{turn_ack}\n\n{full_reply}"
             # One frame, so localize before sending rather than revising after.
@@ -11414,7 +11536,14 @@ class ChatModel:
                 )
                 return contact_result
 
-            # 1b. Semantic cache check AFTER guardrails (Phase 5)
+            # 1b. Semantic cache check AFTER guardrails (Phase 5). An answer about
+            #     the present is neither served from the cache nor stored in it.
+            if cache_allowed and flags.is_enabled("live_web_research", subject=user_id or None):
+                from .web_research import query_is_time_sensitive
+
+                cache_allowed = not query_is_time_sensitive(
+                    router_rewritten or rewritten, _ACTIVE_CASE_FACTS.get()
+                )
             if cache_allowed and flags.is_enabled("semantic_cache"):
                 with trace_stage("cache_lookup", timings=timings):
                     cached = self._cache.get(rewritten, locale=locale, tenant_id=tenant_id or "default")
@@ -11467,7 +11596,7 @@ class ChatModel:
                 from .scenario_planner import plan_tools
 
                 active_cf = _ACTIVE_CASE_FACTS.get()
-                planned_specs = plan_tools(rewritten, active_cf)
+                planned_specs = plan_tools(router_rewritten or rewritten, active_cf)
                 has_premise_contra = bool(check_fact_contradictions(active_cf))
                 eff_route_conf = (
                     1.0
@@ -11502,7 +11631,7 @@ class ChatModel:
                 from .scenario_planner import plan_tools
 
                 active_cf = _ACTIVE_CASE_FACTS.get()
-                planned_specs = plan_tools(rewritten, active_cf)
+                planned_specs = plan_tools(router_rewritten or rewritten, active_cf)
                 has_premise_contra = bool(check_fact_contradictions(active_cf))
                 tier_decision = select_tier(
                     "rag",
@@ -11522,6 +11651,10 @@ class ChatModel:
                     trace_ctx["endpoint_model"] = turn_endpoint.model
                 log_tier("chat", tier_decision)
 
+            # The route binds whichever branch above produced it. Nesting this
+            # under ``elif tiering_enabled`` made it unreachable with
+            # agentic_mode on and a None dereference with it off (G309).
+            if route_decision is not None:
                 # Early returns — CLARIFY and ESCALATE don't need retrieval.
                 if route_decision.route == AgentRoute.GREET:
                     greeted = {
@@ -11857,32 +11990,24 @@ class ChatModel:
                         )
 
             # 3b1. Live Web Research + Ephemeral PDF Sandbox + Self-Updating Qdrant (Phase 41)
+            live_check_notice = ""
             if not welfare_cats and flags.is_enabled("live_web_research", subject=user_id or None):
                 with trace_stage("live_web_research", timings=timings):
-                    try:
-                        from .web_research import run_web_research
-
-                        web_outcome = run_web_research(
-                            retrieval_query,
-                            case_facts=_ACTIVE_CASE_FACTS.get(),
-                            hits=hits,
-                            retriever=self._retriever if self._retriever_ready else None,
-                            turn_id=request_id or thread_id,
-                        )
-                        if web_outcome.superseded_sources:
-                            sup_set = {s.strip().lower() for s in web_outcome.superseded_sources if s}
-                            hits = [
-                                h
-                                for h in hits
-                                if str(h.get("source") or "").strip().lower() not in sup_set
-                            ]
-                        if web_outcome.web_hits:
-                            hits = list(web_outcome.web_hits) + hits
-                            retrieval_mode = "live_web_verified"
-                        if web_outcome.verified_facts_addition:
-                            web_verified_facts = web_outcome.verified_facts_addition
-                    except Exception:
-                        logger.warning("Live web research step failed in _generate_en", exc_info=True)
+                    # The English router form: the triggers and the search
+                    # vocabulary read English, whatever language was asked in.
+                    hits, live_mode, web_outcome = _live_research_for_turn(
+                        router_rewritten or retrieval_query,
+                        hits=hits,
+                        retriever=self._retriever if self._retriever_ready else None,
+                        turn_id=request_id or thread_id,
+                    )
+                if live_mode:
+                    retrieval_mode = live_mode
+                live_check_notice = web_outcome.live_check_notice
+                trace_ctx["live_check"] = web_outcome.audit
+                trace_ctx["live_check_disclosure"] = web_outcome.disclosure
+                if web_outcome.triggered:
+                    cache_allowed = False
 
             # 3b2. G131 fix: removed buggy substring-matching language boost that
             #      matched 'sw' inside 'Answer' and corrupted reranker ordering with
@@ -12116,6 +12241,8 @@ class ChatModel:
                     )
                     if web_verified_facts:
                         base_pers_ctx = f"{base_pers_ctx}\n\n{web_verified_facts}".strip()
+                    if live_check_notice:
+                        base_pers_ctx = f"{base_pers_ctx}\n\n{live_check_notice}".strip()
                     if connector_namespaces:
                         from .mcp.connector_accounts import (
                             format_linked_accounts_prompt_context,
@@ -12304,6 +12431,8 @@ class ChatModel:
                         )
                         if web_verified_facts:
                             gen_pers_ctx = f"{gen_pers_ctx}\n\n{web_verified_facts}".strip()
+                        if live_check_notice:
+                            gen_pers_ctx = f"{gen_pers_ctx}\n\n{live_check_notice}".strip()
                         gen_call_kwargs: dict[str, Any] = {
                             "query": llm_query,
                             "passages": hits,
@@ -12889,8 +13018,24 @@ class ChatModel:
         (:py:meth:`record_turn_audit`), so its reply digest is of the text
         the taxpayer received.
         """
+        from .turn_pipeline import attest_turn
+
         trace_ctx = trace_ctx or {}
         result["current_topic"] = str(trace_ctx.get("current_topic") or "")
+        # Runs on every exit of every turn, so a fault here must not cost the answer.
+        try:
+            result["_attestation"] = attest_turn(trace_ctx.get("timings") or {}, transport="rest")
+        except Exception as exc:  # noqa: BLE001 - telemetry must never fail a turn
+            logger.warning("Pipeline attestation failed: %s", type(exc).__name__)
+        # Taken here because the plan scope closes before the ledger row is written.
+        result["_plan"] = _turn_plan_summary()
+        # Every exit comes through here, so none can lose the check. After every
+        # verifier, so the sentence is never judged as a claim, and before
+        # localization, so the taxpayer reads it in their language.
+        if trace_ctx.get("live_check"):
+            result["_live_check"] = trace_ctx["live_check"]
+            result["_live_check_disclosure"] = str(trace_ctx.get("live_check_disclosure") or "")
+            result["reply"] = _disclosed_reply(result)
         if trace_ctx.get("connectors_used"):
             result.setdefault("connectors_used", list(trace_ctx["connectors_used"]))
         _PENDING_TURN_AUDIT.set(
@@ -12928,6 +13073,7 @@ class ChatModel:
         from .audit.turns import append_turn
 
         enriched = dict(result) if isinstance(result, dict) else {}
+        enriched.setdefault("_plan", _turn_plan_summary())
         enriched.setdefault("figure_fidelity_passed", not bool(enriched.get("figure_fidelity_rescued", False)))
         enriched.setdefault(
             "policy_adherence_passed",
@@ -13455,7 +13601,14 @@ class ChatModel:
                 "_short_circuit": True,
             }
 
-        # Semantic cache check (Phase 5)
+        # Semantic cache check (Phase 5). An answer about the present is neither
+        # served from the cache nor stored in it.
+        if cache_allowed and flags.is_enabled("live_web_research", subject=user_id or None):
+            from .web_research import query_is_time_sensitive
+
+            cache_allowed = not query_is_time_sensitive(
+                router_rewritten or rewritten, _ACTIVE_CASE_FACTS.get()
+            )
         if cache_allowed and flags.is_enabled("semantic_cache"):
             cached = self._cache.get(rewritten, locale=locale, tenant_id=tenant_id or "default")
             if cached:
@@ -13483,7 +13636,7 @@ class ChatModel:
             from .scenario_planner import plan_tools
 
             active_cf_s = _ACTIVE_CASE_FACTS.get()
-            planned_specs_s = plan_tools(rewritten, active_cf_s)
+            planned_specs_s = plan_tools(router_rewritten or rewritten, active_cf_s)
             has_premise_contra_s = bool(check_fact_contradictions(active_cf_s))
         if flags.is_enabled("agentic_mode"):
             route_decision = supervisor.classify(
@@ -13747,6 +13900,9 @@ class ChatModel:
         retrieval_mode = "keyword"
         web_verified_facts = ""
         web_research_events: list[tuple[str, dict[str, Any]]] = []
+        live_check_notice = ""
+        live_check_disclosure = ""
+        live_check_audit: dict[str, Any] | None = None
 
         if welfare_cats_s:
             hits = build_welfare_grounding_hits(router_message or message, welfare_cats_s)
@@ -13801,31 +13957,20 @@ class ChatModel:
 
         # Live Web Research + Ephemeral PDF Sandbox + Self-Updating Qdrant (Phase 41)
         if not welfare_cats_s and flags.is_enabled("live_web_research", subject=user_id or None):
-            try:
-                from .web_research import run_web_research
-
-                web_outcome = run_web_research(
-                    retrieval_query,
-                    case_facts=_ACTIVE_CASE_FACTS.get(),
-                    hits=hits,
-                    retriever=self._retriever if self._retriever_ready else None,
-                    turn_id=request_id or thread_id,
-                )
-                web_research_events = list(web_outcome.events)
-                if web_outcome.superseded_sources:
-                    sup_set = {s.strip().lower() for s in web_outcome.superseded_sources if s}
-                    hits = [
-                        h
-                        for h in hits
-                        if str(h.get("source") or "").strip().lower() not in sup_set
-                    ]
-                if web_outcome.web_hits:
-                    hits = list(web_outcome.web_hits) + hits
-                    retrieval_mode = "live_web_verified"
-                if web_outcome.verified_facts_addition:
-                    web_verified_facts = web_outcome.verified_facts_addition
-            except Exception:
-                logger.warning("Live web research step failed in generate_retrieval_only", exc_info=True)
+            hits, live_mode, web_outcome = _live_research_for_turn(
+                router_rewritten or retrieval_query,
+                hits=hits,
+                retriever=self._retriever if self._retriever_ready else None,
+                turn_id=request_id or thread_id,
+            )
+            if live_mode:
+                retrieval_mode = live_mode
+            web_research_events = list(web_outcome.events)
+            live_check_notice = web_outcome.live_check_notice
+            live_check_disclosure = web_outcome.disclosure
+            live_check_audit = web_outcome.audit
+            if web_outcome.triggered:
+                cache_allowed = False
 
         # G131 fix: removed buggy substring-matching language boost that
         # matched 'sw' inside 'Answer' and corrupted reranker ordering with
@@ -14116,6 +14261,8 @@ class ChatModel:
         )
         if web_verified_facts:
             eff_pers_ctx = f"{eff_pers_ctx}\n\n{web_verified_facts}".strip()
+        if live_check_notice:
+            eff_pers_ctx = f"{eff_pers_ctx}\n\n{live_check_notice}".strip()
         stream_rewritten = (
             router_rewritten
             if (
@@ -14191,6 +14338,8 @@ class ChatModel:
             "_personalization_context": eff_pers_ctx,
             "_web_verified_facts": web_verified_facts,
             "_web_research_events": web_research_events,
+            "_live_check": live_check_audit,
+            "_live_check_disclosure": live_check_disclosure,
             "_tone_hint": tone_hint,
             "_distress": distress,
             "_force_agentic": force_agentic,

@@ -195,6 +195,20 @@ def _citation_contexts(
     return [str(h.get("text") or h.get("answer") or "") for h in hits or [] if h]
 
 
+def _cited_hits(
+    refs: list[str],
+    citations: list[dict[str, Any]],
+    hits: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """The hits a claim cites, or every hit when it cites none."""
+    by_ref = {
+        str(citation.get("ref") or f"[{idx}]").strip("[]"): hits[idx - 1]
+        for idx, citation in enumerate(citations or [], 1)
+        if idx - 1 < len(hits or [])
+    }
+    return [by_ref[ref] for ref in refs if ref in by_ref] or list(hits or [])
+
+
 def verify_claims(
     reply: str,
     citations: list[dict[str, Any]] | None,
@@ -297,7 +311,15 @@ def verify_claims(
         claim_numbers = _numbers(clean_claim)
         context_numbers = _numbers(context_text)
         model_introduced_numbers = claim_numbers - query_numbers
-        if model_introduced_numbers and not model_introduced_numbers <= (context_numbers | verified_numbers):
+        # Rule 8 tells the model to name the edition, and the passage header shows
+        # it, so the edition of a cited passage is not a figure the model
+        # introduced. Only the cited passage: another hit's edition is no support.
+        edition_numbers = _numbers(
+            " ".join(str(h.get("fiscal_year") or "") for h in _cited_hits(refs, citations or [], hits or []))
+        )
+        if model_introduced_numbers and not model_introduced_numbers <= (
+            context_numbers | verified_numbers | edition_numbers
+        ):
             overlap = min(overlap, 0.25)
 
         # P1-8: a claim whose percentage conflicts with the cited context is a

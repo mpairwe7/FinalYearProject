@@ -101,6 +101,15 @@ once:
 Tickets already raised keep what they were given. Resolution cases are
 consent-gated state and age out on `RESOLUTION_CASE_TTL_HOURS`.
 
+## Routes bind (G309)
+
+The supervisor's ESCALATE and specialist routes apply on REST and SSE alike, whichever
+branch produced the decision. Handoff phrasing ("connect me to a supervisor", "transfer
+me to a person") is matched before every other intent, so a stray "now" cannot route an
+upset taxpayer to today's date. To confirm after a change, ask for a person **on an index
+that returns passages**: an empty index abstains and opens a ticket by another path,
+which is how G309 stayed hidden.
+
 ## Privacy and limits
 
 * The envelope carries slot **names** (`tax type`, `filing period`, `tin`) and
