@@ -303,7 +303,7 @@ below is still open.
 | G372 | A change made directly on the Space is still deleted by the next roll, without warning. | Platform |
 | G373 | One optional feature that cannot start stops the whole API. | Backend |
 | G374 | Nothing raises an alarm when the Space is down: the keepalive passes on a 502, and a failed roll leaves the broken image live. | Platform |
-| G375 | The Space layer's speech fallback posts recordings to Google with no locale policy, budget or breaker. | Service owner |
+| G375 | The Space layer's speech fallback is off until `STT_FALLBACK_BACKEND=gemini`. Turning it on sends English recordings to Google when every other tier has failed, which needs a decision under DPPA 2019 s.19. | Service owner |
 | G376 | The Space layer's edits to app source are a base64 blob that reviews and CI do not see. | Backend |
 
 Also open from the previous review: G326 to G329 and G331.

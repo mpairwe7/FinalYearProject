@@ -702,7 +702,7 @@ Reviewed on branch `fix/agentic-orchestrator-resilience-assurance-2026-10-31`; [
 | G372 ⚪ | A change made directly on the Space is still deleted by the next roll, without warning. | Open: platform, to refuse a roll when the Space has diverged. |
 | G373 ⚪ | One optional feature that cannot start stops the whole API: `main.py` re-raises for the receptionist. | Open: backend, to choose between failing loud and degrading. |
 | G374 ⚪ | Nothing raises an alarm when the Space is down. The keepalive passes on a 502, and a failed roll leaves the broken image live. | Open: platform. |
-| G375 ⚪ | The layer's speech fallback posts recordings to Google with no locale policy, budget or breaker. | Open: service owner, on DPPA 2019 s.19. Restored as it was. |
+| G375 🟡 | ~~The layer's speech fallback posted recordings to Google with no locale policy, budget or breaker.~~ | Fixed, and now opt-in through `STT_FALLBACK_BACKEND=gemini`. Open: service owner, on DPPA 2019 s.19, before anyone turns it on. |
 | G376 ⚪ | The layer's edits to app source are a base64 blob, so they do not appear in a review and CI does not run them. | Open: backend, to move them into the source. |
 
 **Open follow-ups.**
