@@ -687,7 +687,7 @@ Reviewed on branch `fix/agentic-orchestrator-resilience-assurance-2026-10-31`; [
 | G357 🟢 | ~~A model-chosen tool route opened every eligible tool, with no time limit.~~ | Fixed: closed read-only list and a timeout. |
 | G358 🟢 | ~~A raw passage served because generation failed carried no notice.~~ | Fixed. |
 | G359 🟢 | ~~The ledger could not say what wrote an answer or whether it left Uganda.~~ | Fixed: a `generation` block. |
-| G360 ⚪ | Enforcing the figure lock on T1 and cloud answers. | Open: service owner and tax policy, on `ura:figure_lock:shadow_reject_ratio_1d` plus a reviewed sample. |
+| G360 ⚪ | Enforcing the figure lock on T1 and cloud answers. | Open: service owner and tax policy, on `ura:figure_lock:shadow_reject_ratio_1d` plus a reviewed sample. The Space already enforces it through `evaluator_optimizer`, so there the decision is whether to keep that. |
 | G361 ⚪ | `intent_confidence` is a constant, so the gate's 0.80 floor is inert. | Open: needs calibrated confidence (G367). |
 | G362 ⚪ | Ticket APIs apply no tenant filter; `same_tenant` has no callers. | Open: tenancy decision first, since filtering could hide tickets. |
 | G363 ⚪ | Confirmation exists only on the WebSocket. | Open: on SSE and REST a proposal cannot be approved. Nothing runs. |
