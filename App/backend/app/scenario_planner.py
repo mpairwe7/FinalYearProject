@@ -86,7 +86,7 @@ class ToolCallSpec:
 def plan_digest(specs: list[ToolCallSpec]) -> str:
     """A stable identity for a plan, so the audit row can prove which one ran."""
     canonical = json.dumps(
-        [[spec.tool, spec.params, spec.label] for spec in specs],
+        [[spec.tool, spec.params, spec.missing_inputs, spec.label] for spec in specs],
         sort_keys=True,
         default=str,
     )

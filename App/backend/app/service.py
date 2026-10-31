@@ -1057,12 +1057,20 @@ def _live_research_for_turn(
             turn_id=turn_id,
         )
         merged, mode = merge_into_hits(outcome, hits)
-        return merged, mode, outcome
     except Exception:
         logger.warning("Live web research step failed", exc_info=True)
-        if query_is_time_sensitive(query, facts):
-            return hits, "", unavailable_outcome()
-        return hits, "", WebResearchTurnOutcome()
+        outcome = unavailable_outcome() if query_is_time_sensitive(query, facts) else WebResearchTurnOutcome()
+        merged, mode = hits, ""
+    # Recorded here, outside any return path, so a stream that exits early still
+    # has the check to disclose and audit.
+    record = _TURN_LIVE_CHECK.get()
+    if record is not None:
+        record.update(
+            audit=outcome.audit,
+            disclosure=outcome.disclosure,
+            events=list(outcome.events),
+        )
+    return merged, mode, outcome
 
 
 def _with_live_check_disclosure(reply: str, disclosure: str) -> str:
@@ -1072,6 +1080,22 @@ def _with_live_check_disclosure(reply: str, disclosure: str) -> str:
     return f"{reply.rstrip()}\n\n{disclosure}"
 
 
+#: Replies that say nothing about the present, so owe no sentence about checking it.
+_NO_LIVE_DISCLOSURE_MODES = frozenset({"blocked", "clarification", "escalated"})
+
+
+def _disclosed_reply(result: dict[str, Any]) -> str:
+    """The result's reply, carrying its live-check disclosure when it owes one."""
+    reply = str(result.get("reply") or "")
+    if result.get("retrieval_mode") in _NO_LIVE_DISCLOSURE_MODES:
+        return reply
+    return _with_live_check_disclosure(reply, str(result.get("_live_check_disclosure") or ""))
+
+
+#: This turn's live check, shared with the threads the streamed turn runs in.
+_TURN_LIVE_CHECK: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "_turn_live_check", default=None
+)
 #: A turn's executed plans, so prompt building and verification share one run.
 _TURN_PLANS: contextvars.ContextVar[dict[str, tuple[str, dict[str, Any]]] | None] = contextvars.ContextVar(
     "_turn_plans", default=None
@@ -2144,6 +2168,7 @@ async def run_chat_turn(
     # [REDACTED_UG_TIN] (G143, G154).
     _ACTIVE_USER_STATED_IDS.set(user_stated_identifiers(str(kwargs.get("message") or "")))
     _TURN_PLANS.set({})
+    _TURN_LIVE_CHECK.set({})
     with turn_usage_scope() as usage, turn_attributes_scope():
         async for event_type, payload in _run_chat_turn_events(model, **kwargs):
             if event_type == "error":
@@ -2422,6 +2447,11 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             if isinstance(result.get("portal_copilot"), dict):
                 result["portal_copilot"] = ChatModel._localize_portal_copilot(result["portal_copilot"], locale)
 
+        live_check = _TURN_LIVE_CHECK.get() or {}
+        if live_check.get("audit"):
+            result.setdefault("_live_check", live_check["audit"])
+            result.setdefault("_live_check_disclosure", live_check.get("disclosure", ""))
+            result.setdefault("_web_research_events", live_check.get("events", []))
         for evt_name, evt_payload in result.get("_web_research_events") or []:
             yield (evt_name, evt_payload)
 
@@ -2456,7 +2486,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             # localized before it is sent rather than corrected afterwards.
             if locale not in ("", "en"):
                 yield ("translation.started", {"locale": locale})
-            full_reply = _localized(result.get("reply", ""))
+            full_reply = _localized(_disclosed_reply(result))
             if locale not in ("", "en"):
                 yield ("translation.completed", {"locale": locale})
             result["reply"] = full_reply
@@ -2686,7 +2716,11 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             finalize_turn_actions(result, escalated=escalate)
             if locale not in ("", "en"):
                 yield ("translation.started", {"locale": locale})
-            full_reply = _localized(abstained_reply)
+            full_reply = _localized(
+                _with_live_check_disclosure(
+                    abstained_reply, str(result.get("_live_check_disclosure") or "")
+                )
+            )
             if locale not in ("", "en"):
                 yield ("translation.completed", {"locale": locale})
             result["reply"] = full_reply
@@ -2818,7 +2852,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 if attachments and hasattr(model, "_format_attachment_fallback_reply"):
                     full_reply = model._format_attachment_fallback_reply(attachments)
                 else:
-                    full_reply = result.get("reply", "")
+                    full_reply = _disclosed_reply(result)
                 if hasattr(model, "_finalize_reply"):
                     finalized = model._finalize_reply(full_reply, attachments=attachments)
                     if isinstance(finalized, str):
@@ -2965,9 +2999,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     logger.debug("Stream cache store failed", exc_info=True)
         else:
             # No LLM tier at all — extractive reply, same EI parity as above.
-            full_reply = _with_live_check_disclosure(
-                result.get("reply", ""), str(result.get("_live_check_disclosure") or "")
-            )
+            full_reply = _disclosed_reply(result)
             if turn_ack and full_reply:
                 full_reply = f"{turn_ack}\n\n{full_reply}"
             # One frame, so localize before sending rather than revising after.
@@ -12869,12 +12901,6 @@ class ChatModel:
         reply = self._add_conversational_frame(
             reply, query=message, hits=hits, retrieval_mode=retrieval_mode
         )
-        # After every verifier, so the sentence is never judged as a claim, and
-        # before localization, so the taxpayer reads it in their language.
-        if retrieval_mode not in ("abstained", "blocked"):
-            reply = _with_live_check_disclosure(
-                reply, str(trace_ctx.get("live_check_disclosure") or "")
-            )
 
         elapsed_ms = (time.perf_counter() - t0) * 1000
         logger.info(
@@ -12890,7 +12916,6 @@ class ChatModel:
 
         result = {
             "reply": reply,
-            "_live_check": trace_ctx.get("live_check"),
             "sources": sources,
             "citations": citations,
             "faithfulness_score": faithfulness_score,
@@ -13000,6 +13025,13 @@ class ChatModel:
         result["_attestation"] = attest_turn(trace_ctx.get("timings") or {}, transport="rest")
         # Taken here because the plan scope closes before the ledger row is written.
         result["_plan"] = _turn_plan_summary()
+        # Every exit comes through here, so none can lose the check. After every
+        # verifier, so the sentence is never judged as a claim, and before
+        # localization, so the taxpayer reads it in their language.
+        if trace_ctx.get("live_check"):
+            result["_live_check"] = trace_ctx["live_check"]
+            result["_live_check_disclosure"] = str(trace_ctx.get("live_check_disclosure") or "")
+            result["reply"] = _disclosed_reply(result)
         if trace_ctx.get("connectors_used"):
             result.setdefault("connectors_used", list(trace_ctx["connectors_used"]))
         _PENDING_TURN_AUDIT.set(

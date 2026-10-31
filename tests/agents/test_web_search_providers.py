@@ -347,11 +347,26 @@ class TestProcessorGovernance:
         assert "web search (tavily)" in pr._external_processor_names()
         assert any("web search (tavily)" in error for error in pr._cross_border_errors())
 
-    def test_a_key_with_the_flag_off_sends_nothing_so_needs_no_approval(self, monkeypatch):
+    def test_a_provider_counts_once_configured_not_once_enabled(self, monkeypatch):
+        # The flag can be turned on at runtime by a persisted override, long
+        # after this gate ran, so the key is the material fact.
         from app import production_readiness as pr
 
         monkeypatch.delenv("FLAG_LIVE_WEB_RESEARCH", raising=False)
         monkeypatch.setenv("TAVILY_API_KEY", "tvly-test")
+
+        assert "web search (tavily)" in pr._external_processor_names()
+
+    def test_a_self_hosted_searxng_is_still_an_external_processor(self, monkeypatch):
+        # A metasearch engine: its documentation says the query goes to external services.
+        from app import production_readiness as pr
+
+        monkeypatch.setenv("SEARXNG_URL", "http://searxng:8080")
+
+        assert "web search (searxng)" in pr._external_processor_names()
+
+    def test_no_provider_adds_no_processor(self):
+        from app import production_readiness as pr
 
         assert not any("web search" in name for name in pr._external_processor_names())
 

@@ -40,10 +40,11 @@ these and found the supervisor's route ignored on REST since #599.
 
 ## Decision Outcome
 
-**Control flow stays with the planner.** Whether to search and what to search for are
-decided deterministically from the taxpayer's question, before any retrieved text is
-read. The model has no search tool. This follows CaMeL's separation of control flow
-from untrusted data.
+**Control flow stays with the planner.** Whether to search is decided in code, from the
+taxpayer's question and the metadata of local retrieval, such as a passage's edition.
+What to search for comes from the question alone. A turn searches once, so nothing from
+the web can start or shape a search, and the model has no search tool. This follows
+CaMeL's separation of control flow from untrusted data.
 
 **Web text is evidence, never a verified fact.** It reaches the model only as scanned,
 spotlighted passages whose headers state authority, evidence and age. The prompt
@@ -52,13 +53,20 @@ result that reads as an instruction is dropped whole. `live_web_verified` is res
 for a document actually read this turn.
 
 **Only a closed vocabulary leaves the deployment.** Outbound queries contain listed
-generic tax terms and nothing else. Hosted providers are external processors under
-the G35 cross-border gate, and are refused in sovereign mode.
+generic tax terms and nothing else. Every provider is an external processor under the
+G35 cross-border gate once configured, including a self-hosted SearXNG, which passes the
+query on to external engines. Hosted keys are refused in sovereign mode.
+
+**A turn cannot change the production corpus by itself.** `auto_qdrant_web_sync` also
+needs `WEB_SYNC_PRODUCTION_APPROVED` in production, because a compose overlay defaults
+the flag on and a working provider would otherwise activate it unnoticed.
 
 **Failure is an outcome.** Every check ends in one of `confirmed`, `unconfirmed`,
 `stale_only`, `no_official_result`, `unavailable` or `ledger_fresh`, and the taxpayer
-is told what that means, on REST, SSE and the graph. "Found nothing" is never worded
-as "there is nothing". The status is in the audit row.
+is told what that means, on REST, SSE and the graph, however the turn exits. A topic
+that was left out or whose search failed is disclosed even when another topic was
+confirmed. "Found nothing" is never worded as "there is nothing". The status is in the
+audit row.
 
 **Search has a documented contract or it does not run in production.** Providers sit
 behind one interface with failover and a breaker each. The HTML fallback is

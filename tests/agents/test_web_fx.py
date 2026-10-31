@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -106,7 +107,9 @@ def test_lookup_live_exchange_rate_falls_back_to_open_er_and_offline() -> None:
         """Simulate XE/Google failure and Open ER success."""
         host = (urlparse(url).hostname or "").lower()
         if host == "open.er-api.com":
-            return json.dumps({"result": "success", "rates": {"UGX": 3762.25}})
+            return json.dumps(
+                {"result": "success", "time_last_update_unix": int(time.time()), "rates": {"UGX": 3762.25}}
+            )
         raise RuntimeError("upstream timeout")
 
     quote = web_fx.lookup_live_exchange_rate("USD", http_fetcher=_mirror_fetch)
@@ -305,6 +308,12 @@ class TestQuoteIntegrity:
 
         assert web_fx.lookup_live_exchange_rate("USD", http_fetcher=mirror, allow_offline_fallback=False) is None
 
+    @pytest.mark.parametrize("stamp", [None, "yesterday", True])
+    def test_a_mirror_that_cannot_say_how_old_it_is_is_refused(self, stamp) -> None:
+        payload = {"result": "success", "time_last_update_unix": stamp, "rates": {"UGX": 3700.0}}
+
+        assert web_fx._parse_open_er_api_rate(payload, "USD") is None
+
     def test_a_mirror_reporting_failure_is_refused(self) -> None:
         payload = {"result": "error", "rates": {"UGX": 3700.0}}
 
@@ -367,8 +376,27 @@ class TestOfficialRate:
         monkeypatch.setattr(web_fx, "_load_bou_fx_file", lambda: self.SNAPSHOT)
 
         assert web_fx.official_bou_rate("USD", "2026-10-05") == 3950.0
-        assert web_fx.official_bou_rate("USD", "2025-01-05") == 3900.0
         assert web_fx.official_bou_rate("EUR") == 4400.0
+
+    @pytest.mark.parametrize(
+        ("currency", "day"),
+        [("USD", "2025-01-05"), ("EUR", "2026-10-05")],
+    )
+    def test_a_dated_transaction_needs_its_own_months_rate(
+        self, monkeypatch: pytest.MonkeyPatch, currency: str, day: str
+    ) -> None:
+        # A default or undated entry says nothing about what applied on that day.
+        monkeypatch.setattr(web_fx, "_load_bou_fx_file", lambda: self.SNAPSHOT)
+
+        assert web_fx.official_bou_rate(currency, day) is None
+
+    def test_an_invalid_month_does_not_fall_through_to_the_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        snapshot = {"status": "verified", "rates": {"USD": {"2026-10": 0, "default": 3900.0}}}
+        monkeypatch.setattr(web_fx, "_load_bou_fx_file", lambda: snapshot)
+
+        assert web_fx.official_bou_rate("USD", "2026-10-05") is None
 
     def test_an_unverified_snapshot_is_not(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(web_fx, "_load_bou_fx_file", lambda: {**self.SNAPSHOT, "status": "unverified"})

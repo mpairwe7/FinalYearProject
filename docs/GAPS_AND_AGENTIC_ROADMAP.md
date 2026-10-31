@@ -646,7 +646,7 @@ Reviewed on branch `fix/agentic-planner-web-assurance-2026-10-31`; [evidence, so
 | G328 ⚪ | Recency cues are English; other locales depend on translation. | Open: reviewed vernacular vocabulary, not invented terms. |
 | G329 ⚪ | Notices published as HTML stay `unconfirmed`: pages are not opened. | Open: backend, after confirming the listing structure. |
 | G330 🟢 | ~~Threat T43 claimed a pre-connect DNS check that did not exist.~~ | Fixed and reworded: it narrows rebinding, it does not close it. |
-| G331 ⚪ | `auto_qdrant_web_sync` can change the corpus from a user turn (ASI06). The key is set on the Space, value unreadable. | Open: confirm it is off before adding a search provider; needs human approval before production use. |
+| G331 🟡 | `auto_qdrant_web_sync` can change the corpus from a user turn (ASI06), and one compose overlay defaults it on. | Part fixed: production also needs `WEB_SYNC_PRODUCTION_APPROVED`. Open: review of each change before it applies. |
 | G332 ⚪ | Graph: no `thread_id` so checkpoints never run, and `node_synthesize` skips the claim verifier. | Open: keep `langgraph` off until resolved. |
 
 Two probe bugs were found and corrected rather than reported as defects: `invoic`

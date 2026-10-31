@@ -25,13 +25,14 @@ When enabled, the Phase 41 Live Web Research and Self-Updating Qdrant subsystem 
 | `FX_HTTP_TIMEOUT_SECONDS` | `3.0` | Per-source HTTPS timeout. `FX_LOOKUP_BUDGET_SECONDS` (`6.0`) bounds a whole lookup. |
 | `FX_MAX_SOURCE_DIVERGENCE` | `0.02` | Relative gap above which two sources produce no rate. |
 | `FX_MAX_PROVIDER_AGE_SECONDS` | `345600` | Oldest provider timestamp accepted from the mirror. |
-| `WEB_SEARCH_PROVIDERS` | `tavily,brave,searxng` | Failover order. Each is used only once configured. |
+| `WEB_SEARCH_PROVIDERS` | `tavily,brave,searxng` | Failover order. Each is used only once configured. A self-hosted SearXNG still passes the query to external engines, so restrict its engines if that matters. |
 | `TAVILY_API_KEY`, `BRAVE_SEARCH_API_KEY`, `SEARXNG_URL` | unset | Provider credentials. A hosted provider is an external processor (G35). |
 | `WEB_SEARCH_ALLOW_UNSANCTIONED` | `true` | HTML fallback outside production. Ignored in production. |
 | `WEB_RESEARCH_TURN_BUDGET_SECONDS` | `8.0` | Wall clock for search plus document extraction. Searches share `WEB_RESEARCH_SEARCH_BUDGET_SECONDS` (`4.0`). |
 | `WEB_RESEARCH_MAX_QUERIES` | `3` | Searches per turn, shared across triggers. |
 | `WEB_RESEARCH_RECENCY_HORIZON_DAYS` | `400` | A notice older than this is reported as history. |
 | `PLANNER_MAX_TOOL_CALLS`, `PLANNER_DEADLINE_SECONDS` | `12`, `10.0` | Bounds on one plan. |
+| `WEB_SYNC_PRODUCTION_APPROVED` | unset | Required **as well as** `FLAG_AUTO_QDRANT_WEB_SYNC` before a turn may change the corpus in production. |
 | `MAX_SANDBOX_PDF_BYTES` | `26214400` | Maximum streamed download size (25 MB) for any PDF/XLSX in the ephemeral sandbox. |
 | `URA_WEB_SANDBOX_DIR` | `/dev/shm/ura-web-sandbox` | Base directory on a RAM-backed `tmpfs` mount for turn-scoped ephemeral sandboxes. |
 | `PDF_ARCHIVE_DIR` | `App/Data/archive` | Archive directory where superseded `.jsonl` files are moved on `replaced_outdated`. |
@@ -125,7 +126,7 @@ PYTHONPATH=App/backend python3 -m pytest \
 
 ## 6. Operating the live check
 
-Every check ends in one `status`, visible in `web_research_turns_total{status}`, in the
+Every check ends in one `status`, visible in `ura_web_research_turns_total{status}`, in the
 `web_research.completed` stream event and in the `live_check` block of the turn's audit row:
 
 | Status | Meaning | Taxpayer is told |
@@ -138,12 +139,14 @@ Every check ends in one `status`, visible in `web_research_turns_total{status}`,
 | `ledger_fresh` | Checked recently; the ledger skipped it | Nothing extra |
 
 `live_web_verified` means a document was read. `live_web_unconfirmed` means it was not.
+A topic left out by `WEB_RESEARCH_MAX_QUERIES`, or whose search failed, appears in
+`unchecked_triggers` and adds a sentence saying only part of the question was checked.
 Read which providers are live from `architecture_integrity_status()["live_research"]`.
 
 ### Live checks failing
 
 `LiveChecksMostlyUnavailable`: most checks could not complete, so taxpayers are being told
-so. Look at `web_search_requests_total` by `outcome`. `auth` is a bad key, `rate_limited` is
+so. Look at `ura_web_search_requests_total` by `outcome`. `auth` is a bad key, `rate_limited` is
 quota, `circuit_open` means a breaker tripped and will probe again by itself, and no series
 at all with `unavailable` turns means no provider is configured (G326). Space secrets drift
 from `.env`, so confirm the key exists there before debugging code. Nothing is unsafe while
@@ -176,7 +179,9 @@ missing guard as a security incident until explained. Streaming turns are not at
 
 ### Provider outage or kill switch
 
-Set `FLAG_LIVE_WEB_RESEARCH=false`. Answers then come from the corpus with no live claim. A
+Set `FLAG_LIVE_WEB_RESEARCH=false`. Answers then come from the corpus with no live claim.
+`App/docker-compose.gpu-salt.yml` defaults both research flags to `true`, so a stack
+started from that overlay has them on unless they are set explicitly. A
 single bad provider can be dropped with `WEB_SEARCH_PROVIDERS`.
 
 ---
@@ -193,7 +198,7 @@ each row from the logs and the audit row. A templated reply is not evidence of r
 | "Has the filing deadline been extended this month?" twice | Two searches or one cached result, and no semantic-cache answer |
 | "What is a TIN?" | No trigger; no outbound request |
 | "My landlord john mukasa wants a penalty waiver" | Provider logs show no name; `queries_sha256` in the audit row |
-| "$5,000 salary, what is my PAYE?" | Figure described as an estimate; `fx_quotes_total` moves |
+| "$5,000 salary, what is my PAYE?" | Figure described as an estimate; `ura_fx_quotes_total` moves |
 | "I want to speak to a human officer", on the real index | `escalated`, ticket created |
 
 Hosted adapters have only been exercised against documented contracts and mock

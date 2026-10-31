@@ -154,6 +154,14 @@ class TestPlanIdentity:
         assert first == plan_digest(plan_tools(PAYE_AND_VAT))
         assert first != plan_digest(plan_tools(USD_SALARY))
 
+    def test_plans_needing_different_inputs_are_different_plans(self):
+        from app.scenario_planner import ToolCallSpec
+
+        needs_rate = ToolCallSpec("convert_currency", {"amount": 5.0}, missing_inputs=["exchange rate"])
+        complete = ToolCallSpec("convert_currency", {"amount": 5.0})
+
+        assert plan_digest([needs_rate]) != plan_digest([complete])
+
     def test_the_report_holds_the_digest_and_no_amounts(self):
         report = PlanRunReport()
 
@@ -373,6 +381,17 @@ class TestPlanSpan:
         assert plan.attributes["gen_ai.operation.name"] == "plan"
         assert plan.attributes["ura.plan.sha256"] == plan_digest(plan_tools(PAYE_AND_VAT))
         assert plan.attributes["ura.plan.step_count"] == 2
+
+    def test_a_tracing_fault_does_not_cost_the_verified_figures(self, monkeypatch):
+        from app import tracing
+
+        class Broken:
+            def start_as_current_span(self, *_a, **_k):
+                raise RuntimeError("exporter down")
+
+        monkeypatch.setattr(tracing, "_tracer", Broken())
+
+        assert "calculate_vat done" in build_verified_facts(PAYE_AND_VAT, tool_caller=_ok)
 
     def test_with_tracing_off_planning_still_runs(self):
         assert build_verified_facts(PAYE_AND_VAT, tool_caller=_ok)

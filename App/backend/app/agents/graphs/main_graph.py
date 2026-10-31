@@ -229,11 +229,16 @@ def _apply_live_research(
 
     The graph answered without it, so turning ``langgraph`` on quietly removed
     the live check and its disclosure. Reflection re-enters retrieval, hence the
-    once-per-turn guard: a second pass would pay for the same searches.
+    once-per-turn guard: a second pass would pay for the same searches. Its
+    evidence is kept and merged back, or the retry would drop what the notice
+    and citations still describe.
     """
     from ...flags import flags
+    from ...web_research import merge_web_hits
 
-    if state.live_checked or not flags.is_enabled("live_web_research", subject=state.user_id or None):
+    if state.live_checked:
+        return merge_web_hits(state.live_web_hits, hits), state.live_mode
+    if not flags.is_enabled("live_web_research", subject=state.user_id or None):
         return hits, ""
     from ...service import _live_research_for_turn
 
@@ -246,6 +251,8 @@ def _apply_live_research(
     )
     state.live_check_notice = outcome.live_check_notice
     state.live_check_disclosure = outcome.disclosure
+    state.live_web_hits = list(outcome.web_hits)
+    state.live_mode = mode
     return merged, mode
 
 
@@ -835,13 +842,17 @@ def _is_reasoning_miss(state: AgentGraphState) -> bool:
 
 def node_respond(state: AgentGraphState) -> NodeResult:
     """Ensure every controlled terminal route has a safe, non-empty reply."""
-    if state.reply and state.reply.strip():
-        if state.live_check_disclosure and state.outcome == GraphOutcome.ANSWERED:
-            from ...service import _with_live_check_disclosure
+    if not (state.reply and state.reply.strip()):
+        _fill_terminal_reply(state)
+    if state.live_check_disclosure and state.outcome in (GraphOutcome.ANSWERED, GraphOutcome.ABSTAINED):
+        from ...service import _with_live_check_disclosure
 
-            state.reply = _with_live_check_disclosure(state.reply, state.live_check_disclosure)
-        return NodeResult(next_node=END, outcome=state.outcome)
+        state.reply = _with_live_check_disclosure(state.reply, state.live_check_disclosure)
+    return NodeResult(next_node=END, outcome=state.outcome)
 
+
+def _fill_terminal_reply(state: AgentGraphState) -> None:
+    """The safe reply for a route that reached the end without one."""
     if state.outcome == GraphOutcome.CLARIFY:
         state.reply = state.clarification_question.strip() or CLARIFICATION_PROMPT
     elif state.outcome == GraphOutcome.ESCALATED:
@@ -853,7 +864,6 @@ def node_respond(state: AgentGraphState) -> NodeResult:
         state.reply = ABSTENTION_REPLY
     else:
         state.reply = ABSTENTION_REPLY
-    return NodeResult(next_node=END, outcome=state.outcome)
 
 
 # ---------------------------------------------------------------------------

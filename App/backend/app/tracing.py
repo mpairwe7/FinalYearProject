@@ -349,17 +349,34 @@ def trace_plan() -> Generator[Callable[[str, int], None], None, None]:
     (Development status). It wraps the deterministic planner only, because that
     is the phase which can be told apart reliably from generation.
     """
-    if _tracer is None:
-        yield lambda _digest, _steps: None
-        return
-    attributes = {"gen_ai.operation.name": "plan", "gen_ai.agent.name": AGENT_NAME}
-    with _tracer.start_as_current_span(f"plan {AGENT_NAME}", attributes=attributes) as span:
+    span_cm = None
+    span = None
+    if _tracer is not None:
+        attributes = {"gen_ai.operation.name": "plan", "gen_ai.agent.name": AGENT_NAME}
+        try:
+            span_cm = _tracer.start_as_current_span(f"plan {AGENT_NAME}", attributes=attributes)
+            span = span_cm.__enter__()
+        except Exception:  # noqa: BLE001 - a tracing fault must not cost the verified figures
+            logger.debug("plan span not started", exc_info=True)
+            span_cm = None
 
-        def annotate(digest: str, steps: int) -> None:
+    def annotate(digest: str, steps: int) -> None:
+        if span is None:
+            return
+        try:
             span.set_attribute("ura.plan.sha256", digest)
             span.set_attribute("ura.plan.step_count", steps)
+        except Exception:  # noqa: BLE001 - as above
+            logger.debug("plan span not annotated", exc_info=True)
 
+    try:
         yield annotate
+    finally:
+        if span_cm is not None:
+            try:
+                span_cm.__exit__(None, None, None)
+            except Exception:  # noqa: BLE001 - as above
+                logger.debug("plan span not closed", exc_info=True)
 
 
 class LLMCall:

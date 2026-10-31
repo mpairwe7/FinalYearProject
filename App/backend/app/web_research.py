@@ -6,9 +6,11 @@ a turn needs the live web and turns what comes back into evidence the rest of
 the pipeline can treat honestly.
 
 **When.** :func:`detect_research_triggers` runs deterministically over the
-taxpayer's question. The model never asks for a search and is not given a search
-tool: a query string written by a model that has read untrusted text is an
-exfiltration channel, so control flow stays with the planner (ADR-0021).
+taxpayer's question and the metadata of local retrieval, such as a passage's
+edition. Nothing from the web can start or shape a search, and a turn searches
+once. The model never asks for a search and is not given a search tool: a query
+string written by a model that has read untrusted text is an exfiltration
+channel, so control flow stays with the planner (ADR-0021).
 
 **What leaves.** :func:`build_search_queries` is built from a closed vocabulary
 of tax terms (:data:`_SEARCH_VOCABULARY`). Filtering out what looks personal
@@ -63,6 +65,7 @@ from .web_search_providers import (
     ALLOWED_SEARCH_ENGINE_HOSTS,
     RawResult,
     SearchRequest,
+    active_providers,
     parse_ddg_html,
     search_with_failover,
     strip_markup,
@@ -122,6 +125,12 @@ LIVE_STALE_ONLY = "stale_only"  # everything found is older than the horizon
 LIVE_NO_RESULT = "no_official_result"  # search worked; nothing admissible
 LIVE_UNAVAILABLE = "unavailable"  # search failed, or none is configured
 LIVE_LEDGER_FRESH = "ledger_fresh"  # checked recently; the ledger says skip
+
+#: Added when part of a question could not be checked, whatever the rest found.
+LIVE_PARTIAL_DISCLOSURE = (
+    "I could only check part of this just now. Please confirm the rest at "
+    "https://ura.go.ug or on 0800 117 000."
+)
 
 #: What the taxpayer is told. English here, localized with the rest of the
 #: reply. "Found nothing" is never worded as "there is nothing".
@@ -1312,7 +1321,16 @@ def search_spec(
 ) -> SearchAttempt:
     """Run one search through the provider chain, or through an injected fetcher."""
     time_bound = spec.trigger_category in _TIME_BOUND_TRIGGERS
-    cache_key = hashlib.sha256(f"{spec.doc_family}:{spec.query}".encode("utf-8")).hexdigest()[:24]
+    identity = "|".join(
+        (
+            spec.trigger_category,
+            spec.doc_family,
+            spec.query,
+            str(spec.freshness_days),
+            ",".join(provider.name for provider in active_providers()),
+        )
+    )
+    cache_key = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
     if http_fetcher is None:
         cached = _cache_get(cache_key)
         if cached is not None:
@@ -1524,12 +1542,15 @@ _NOTICE_BY_STATUS: dict[str, str] = {
 }
 
 
-def _live_check_notice(status: str, checked_at: str) -> str:
+def _live_check_notice(status: str, checked_at: str, unchecked: Iterable[str] = ()) -> str:
     """Prompt guidance for this turn. Must never include text from a web page."""
     lines = [
         "## Live source check (system-generated)",
         f"- Checked {checked_at}: {_NOTICE_BY_STATUS.get(status, 'not checked')}.",
     ]
+    topics = ", ".join(category.replace("_", " ") for category in unchecked)
+    if topics:
+        lines.append(f"- Not checked this turn: {topics}. Say so rather than implying these are current.")
     if status in (LIVE_CONFIRMED, LIVE_UNCONFIRMED, LIVE_STALE_ONLY):
         lines.extend(
             [
@@ -1572,11 +1593,22 @@ def _concluded(
     unsearched: list[str] | None = None,
 ) -> WebResearchTurnOutcome:
     """Stamp the status and everything derived from it, in one place."""
+    # A topic the cap left out, or whose every search failed, was not checked,
+    # whatever another topic in the same question found.
+    answered = {a.spec.trigger_category for a in attempts or () if a.status != "unavailable"}
+    failed = {a.spec.trigger_category for a in attempts or ()} - answered
+    unchecked = sorted({*(unsearched or ()), *failed}) if outcome.web_hits else sorted(unsearched or ())
     outcome.status = status
-    outcome.disclosure = LIVE_DISCLOSURES.get(status, "")
+    outcome.disclosure = " ".join(
+        sentence
+        for sentence in (LIVE_DISCLOSURES.get(status, ""), LIVE_PARTIAL_DISCLOSURE if unchecked else "")
+        if sentence
+    )
     # A topic the ledger verified recently is simply current corpus: there is no
     # live evidence to describe, and nothing to warn the model about.
-    outcome.live_check_notice = "" if status == LIVE_LEDGER_FRESH else _live_check_notice(status, checked_at)
+    outcome.live_check_notice = (
+        "" if status == LIVE_LEDGER_FRESH else _live_check_notice(status, checked_at, unchecked)
+    )
     rejected: Counter[str] = Counter()
     for attempt in attempts or ():
         rejected.update(dict(attempt.rejected))
@@ -1588,7 +1620,7 @@ def _concluded(
         "queries_sha256": [
             hashlib.sha256(a.spec.query.encode("utf-8")).hexdigest()[:16] for a in attempts or ()
         ],
-        "unsearched_triggers": sorted(set(unsearched or ())),
+        "unchecked_triggers": unchecked,
         "rejected": dict(rejected),
         "sources": [
             {
@@ -1618,24 +1650,45 @@ def unavailable_outcome() -> WebResearchTurnOutcome:
     )
 
 
+def merge_web_hits(web_hits: list[dict[str, Any]], hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Official evidence first, commentary after the corpus, so a blog cannot outrank a statute."""
+    official = [h for h in web_hits if h.get("live_authority") == "official"]
+    commentary = [h for h in web_hits if h.get("live_authority") != "official"]
+    live_ids = {h.get("chunk_id") for h in web_hits}
+    corpus = [h for h in hits if h.get("chunk_id") not in live_ids or not h.get("live_authority")]
+    return [*official, *corpus, *commentary]
+
+
 def merge_into_hits(
     outcome: WebResearchTurnOutcome,
     hits: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], str]:
     """Hits with the turn's web evidence in place, and the retrieval mode that earned.
 
-    Official evidence leads and commentary follows the corpus, so an adviser's
-    blog cannot outrank a statute. ``live_web_verified`` is reserved for a document
-    actually read: a search summary does not verify anything.
+    ``live_web_verified`` is reserved for a document actually read: a search
+    summary does not verify anything.
     """
     superseded = {s.strip().lower() for s in outcome.superseded_sources if s}
     kept = [h for h in hits if str(h.get("source") or "").strip().lower() not in superseded]
     if not outcome.web_hits:
         return kept, ""
-    official = [h for h in outcome.web_hits if h.get("live_authority") == "official"]
-    commentary = [h for h in outcome.web_hits if h.get("live_authority") != "official"]
     mode = "live_web_verified" if outcome.status == LIVE_CONFIRMED else "live_web_unconfirmed"
-    return [*official, *kept, *commentary], mode
+    return merge_web_hits(outcome.web_hits, kept), mode
+
+
+def corpus_sync_permitted() -> bool:
+    """Whether a taxpayer's turn may change the corpus.
+
+    ``auto_qdrant_web_sync`` rewrites the knowledge base from a document a
+    question happened to surface, and one compose overlay defaults it on. In
+    production that needs an operator's explicit approval as well as the flag, so
+    a search provider going live cannot switch it on by accident (ASI06, G331).
+    """
+    from .production_readiness import is_production
+
+    if not is_production():
+        return True
+    return (os.getenv("WEB_SYNC_PRODUCTION_APPROVED") or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def run_web_research(
@@ -1763,13 +1816,20 @@ def run_web_research(
                 if auto_sync_qdrant is None
                 else bool(auto_sync_qdrant)
             )
-            if do_sync and can_persist_to_qdrant(sandbox_doc.url):
+            if do_sync and not corpus_sync_permitted():
+                logger.warning("Corpus sync refused: WEB_SYNC_PRODUCTION_APPROVED is not set")
+            elif do_sync and can_persist_to_qdrant(sandbox_doc.url):
                 from .corpus_sync import compare_and_sync_ura_document, serialize_sync_outcome
 
+                # The topic of the search that found this document, not the
+                # turn's first: the ledger must not mark the wrong topic as checked.
+                topic_key = next(
+                    a.spec.topic_key for a in attempts if any(r.url == top_doc.url for r in a.results)
+                )
                 sync_out = compare_and_sync_ura_document(
                     sandbox_doc,
                     retriever,
-                    topic_key=active_triggers[0].topic_key,
+                    topic_key=topic_key,
                     pdf_jsonl_dir=pdf_jsonl_dir,
                     archive_dir=archive_dir,
                     freshness_snapshot_path=freshness_snapshot_path,

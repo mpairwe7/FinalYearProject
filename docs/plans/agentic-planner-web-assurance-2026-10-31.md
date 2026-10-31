@@ -53,7 +53,7 @@ Secret values are not readable, so a flag's state comes from which stages the
 | Routes are ignored | `supervisor: route=tools`, then `agent_role=rag_answerer` | G309 live |
 | The graph is not running | No `langgraph_execution` stage, though `FLAG_LANGGRAPH` is set | G332 is latent |
 | No provider exists | No `TAVILY_API_KEY`, `BRAVE_SEARCH_API_KEY` or `SEARXNG_URL` | G326: the check cannot succeed until one is added |
-| Corpus sync flag is set | `FLAG_AUTO_QDRANT_WEB_SYNC` key updated with the research flag, value unreadable | G331 needs a decision **before** a provider is added: today no search succeeds, so nothing can trigger it |
+| Corpus sync flag is set | `FLAG_AUTO_QDRANT_WEB_SYNC` key updated with the research flag, value unreadable | G331. No search succeeds today, so nothing could trigger it; a production guard now stops a future provider activating it |
 
 An explicit request for a person was deliberately not probed in production, because it
 could open a real ticket. G309's escalation behaviour was reproduced locally.
@@ -102,7 +102,7 @@ The shipped snapshot is `status: unverified` with `rates: []`, so **no official 
 rate is available in the product today**: every conversion without a taxpayer-supplied
 rate is an estimate, and now says so. Dropping the forged cookie and browser identity
 may make XE and Google refuse requests, leaving the mirror as a single source
-(`fx_quotes_total{outcome="single_source"}`). That was accepted deliberately.
+(`ura_fx_quotes_total{outcome="single_source"}`). That was accepted deliberately.
 
 ### Phase 4: planner hardening
 
@@ -118,6 +118,17 @@ Implemented (`resolves_to_public_address`) and the entry reworded: the check nar
 rebinding but cannot close it, because the client resolves again on connect. The
 runbook and `.env.example` documented `LIVE_FX_*` variables the code never read;
 corrected to the real `FX_*` names.
+
+## What independent review changed
+
+CodeRabbit reviewed the first version of these fixes and found real faults in them, all
+confirmed against the code before being fixed: every hit's edition was pooled, so a claim
+could pass on another passage's metadata; SearXNG was left off the cross-border list although
+it forwards queries to external engines; the disclosure and audit were lost on early exits;
+a topic capped out of the search got no warning; and a default-on compose overlay contradicted
+the claim that corpus sync stayed off. CI separately caught tests that only passed in isolation,
+one of them passing without testing anything. The audit's own first draft had these defects,
+which is the argument for independent review of work like this.
 
 ## Design decisions worth challenging
 
@@ -141,7 +152,7 @@ corrected to the real `FX_*` names.
 | G327 | Obtain Bank of Uganda rates through a supported route and load a verified snapshot. Confirm ITA s.57 text. | Tax policy, data owner |
 | G328 | Recency cues are English; other locales rely on `retrieval_query` being translated. Vernacular cues need reviewed vocabulary, not invented terms. | Language leads |
 | G329 | Tier-1 HTML pages are snippet-only, so a notice published as a web page stays `unconfirmed`. The listing URL is known from the crawl (`/en/category/publications/public-notices/`); its structure is unverified, so no parser was written. | Backend |
-| G331 | `auto_qdrant_web_sync` can change the corpus from a user turn (ASI06). The flag's key is set on the Space and its value is unreadable. Today no search succeeds, so nothing fires; **confirm it is off before adding a provider**, and add a human approval step before any production use. | Corpus owner |
+| G331 | `auto_qdrant_web_sync` can change the corpus from a user turn (ASI06), and `App/docker-compose.gpu-salt.yml` defaults it on. Production now also requires `WEB_SYNC_PRODUCTION_APPROVED`, so a working provider cannot activate it by accident. Reviewing each change before it applies remains open. | Corpus owner |
 | G332 | Graph path: `graph.run` passes no `thread_id`, so durable checkpoints and resume never run, and `node_synthesize` skips the claim verifier. Logs show the graph is not running in production; it should stay that way until both are resolved. | Backend |
 
 Production acceptance needs a live probe per status on the deployed Space, asserted

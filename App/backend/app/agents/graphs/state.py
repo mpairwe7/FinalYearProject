@@ -166,6 +166,8 @@ class AgentGraphState:
     live_checked: bool = False
     live_check_notice: str = ""
     live_check_disclosure: str = ""
+    live_web_hits: list[dict[str, Any]] = field(default_factory=list)
+    live_mode: str = ""
 
     # -- Telemetry --
     trace: list[dict[str, Any]] = field(default_factory=list)  # (node, duration_ms)
@@ -244,6 +246,8 @@ class AgentGraphState:
             "live_checked": self.live_checked,
             "live_check_notice": self.live_check_notice,
             "live_check_disclosure": self.live_check_disclosure,
+            "live_web_hits": list(self.live_web_hits),
+            "live_mode": self.live_mode,
         }
 
     @classmethod
@@ -314,5 +318,7 @@ class AgentGraphState:
             live_checked=bool(data.get("live_checked", False)),
             live_check_notice=str(data.get("live_check_notice", "")),
             live_check_disclosure=str(data.get("live_check_disclosure", "")),
+            live_web_hits=list(data.get("live_web_hits", [])),
+            live_mode=str(data.get("live_mode", "")),
         )
         return state

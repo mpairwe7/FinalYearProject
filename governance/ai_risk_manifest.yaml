@@ -487,7 +487,7 @@ owasp_agentic_2026:
     - id: "ASI06"
       name: "Memory and Context Poisoning"
       status: "mitigated"
-      live_web_assurance: "ADR-0021: time-sensitive turns neither read nor write the semantic cache. auto_qdrant_web_sync can still change the corpus from a user turn and stays off pending human approval (G331)."
+      live_web_assurance: "ADR-0021: time-sensitive turns neither read nor write the semantic cache. auto_qdrant_web_sync can change the corpus from a user turn, and a compose overlay defaults it on, so production also requires WEB_SYNC_PRODUCTION_APPROVED. Outside production the flag alone suffices. A human review step for each change remains open (G331)."
       evidence: "App/backend/app/web_research.py, App/backend/app/memory/service.py, App/backend/app/officer_handoff.py, App/backend/app/memory/procedural.py"
       controls: "Tenant- and user-scoped 4-tier cognitive memory, low-ASR-confidence memory write suppression, and _-prefixed internal workflow state exclusion (G171); procedural memory reaches prompts only through reviewed curated triggers, as an operating sequence with no legal citations, and recorded or imported trajectories are validated, PII-redacted, bounded and barred from curated ids (G245)"
       verified_by:

@@ -195,6 +195,20 @@ def _citation_contexts(
     return [str(h.get("text") or h.get("answer") or "") for h in hits or [] if h]
 
 
+def _cited_hits(
+    refs: list[str],
+    citations: list[dict[str, Any]],
+    hits: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """The hits a claim cites, or every hit when it cites none."""
+    by_ref = {
+        str(citation.get("ref") or f"[{idx}]").strip("[]"): hits[idx - 1]
+        for idx, citation in enumerate(citations or [], 1)
+        if idx - 1 < len(hits or [])
+    }
+    return [by_ref[ref] for ref in refs if ref in by_ref] or list(hits or [])
+
+
 def verify_claims(
     reply: str,
     citations: list[dict[str, Any]] | None,
@@ -236,9 +250,6 @@ def verify_claims(
         str(h.get("doc_type") or "") == "model_welfare_context" for h in (hits or [])
     )
     verified_numbers = _numbers(verified_facts) if verified_facts else set()
-    # Rule 8 tells the model to name the edition, and the passage header shows
-    # it, so a fiscal year from metadata is not a figure the model introduced.
-    edition_numbers = _numbers(" ".join(str(h.get("fiscal_year") or "") for h in hits or []))
     query_pcts = percentages(query) if query else set()
     query_numbers = (_numbers(query) - query_pcts) if query else set()
     for claim in claims:
@@ -300,6 +311,12 @@ def verify_claims(
         claim_numbers = _numbers(clean_claim)
         context_numbers = _numbers(context_text)
         model_introduced_numbers = claim_numbers - query_numbers
+        # Rule 8 tells the model to name the edition, and the passage header shows
+        # it, so the edition of a cited passage is not a figure the model
+        # introduced. Only the cited passage: another hit's edition is no support.
+        edition_numbers = _numbers(
+            " ".join(str(h.get("fiscal_year") or "") for h in _cited_hits(refs, citations or [], hits or []))
+        )
         if model_introduced_numbers and not model_introduced_numbers <= (
             context_numbers | verified_numbers | edition_numbers
         ):

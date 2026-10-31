@@ -20,8 +20,8 @@ Three things follow from that, and this module is where they are enforced:
   (:func:`unsanctioned_allowed`), whatever the environment says.
 
 Only the closed-vocabulary query from :func:`app.web_research.build_search_queries`
-reaches this module. Every hosted provider here is an external processor, so
-:func:`hosted_provider_names` feeds the cross-border gate in
+reaches this module. Every provider here is an external processor, so
+:func:`external_provider_names` feeds the cross-border gate in
 :mod:`app.production_readiness` (G35).
 """
 
@@ -422,13 +422,13 @@ def active_providers() -> list[SearchProvider]:
     ]
 
 
-def hosted_provider_names() -> list[str]:
-    """Hosted APIs a query would leave the deployment for (G35 cross-border gate)."""
-    return [
-        provider.name
-        for provider in active_providers()
-        if provider.name in (TavilyProvider.name, BraveProvider.name)
-    ]
+def external_provider_names() -> list[str]:
+    """Providers a query leaves the deployment through (G35 cross-border gate).
+
+    SearXNG is on this list even when self-hosted: it is a metasearch engine, and
+    its own documentation says the query is passed to external services.
+    """
+    return [provider.name for provider in active_providers() if provider.sanctioned]
 
 
 def sanctioned_provider_configured() -> bool:

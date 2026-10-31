@@ -182,8 +182,8 @@ def official_bou_rate(currency: str, date: str | None = None) -> float | None:
 
     Only a snapshot whose ``status`` is ``verified`` qualifies: the file ships
     empty and ``unverified``, and a number nobody confirmed is not official
-    because of the file it sits in. A monthly entry applies to its month; a flat
-    entry or ``default`` applies to any date.
+    because of the file it sits in. A dated transaction needs its own month's
+    entry: an undated or default rate is no evidence of what applied on that day.
     """
     data = _load_bou_fx_file()
     if str(data.get("status") or "").lower() != "verified":
@@ -191,8 +191,11 @@ def official_bou_rate(currency: str, date: str | None = None) -> float | None:
     rates = data.get("rates")
     entry = rates.get((currency or "").strip().upper()) if isinstance(rates, dict) else None
     if isinstance(entry, dict):
-        entry = entry.get((date or _utc_now_iso())[:7]) or entry.get("default")
-    if isinstance(entry, int | float) and float(entry) > 0:
+        month = (date or _utc_now_iso())[:7]
+        entry = entry[month] if month in entry else (None if date else entry.get("default"))
+    elif date:
+        entry = None
+    if isinstance(entry, int | float) and not isinstance(entry, bool) and float(entry) > 0:
         return float(entry)
     return None
 
@@ -355,10 +358,15 @@ def _parse_open_er_api_rate(payload: str | dict[str, Any], currency: str, target
         data = json.loads(payload) if isinstance(payload, str) else payload
         if not isinstance(data, dict) or data.get("result", "success") != "success":
             return None
-        # "Live" describes when it was fetched, not how old the figure is.
+        # "Live" describes when it was fetched, not how old the figure is, and a
+        # figure that cannot say how old it is cannot pass this check.
         updated = data.get("time_last_update_unix")
-        if isinstance(updated, int | float) and time.time() - float(updated) > FX_MAX_PROVIDER_AGE_SECONDS:
-            logger.warning("Rejected a stale FX mirror payload for %s", currency)
+        if (
+            isinstance(updated, bool)
+            or not isinstance(updated, int | float)
+            or time.time() - float(updated) > FX_MAX_PROVIDER_AGE_SECONDS
+        ):
+            logger.warning("Rejected a stale or undated FX mirror payload for %s", currency)
             _count_quote("stale_provider")
             return None
         rates = data.get("rates") or {}

@@ -312,10 +312,11 @@ def _external_processor_names() -> list[str]:
         providers.append("remote vLLM")
     # A search query leaves the deployment too. It is built from a closed
     # vocabulary, but that is a reason to approve the transfer, not to skip it.
-    from .web_search_providers import hosted_provider_names
+    # Counted once configured, not once enabled: the flag can be turned on at
+    # runtime by a persisted override, long after this gate last ran.
+    from .web_search_providers import external_provider_names
 
-    if _truthy("FLAG_LIVE_WEB_RESEARCH"):
-        providers.extend(f"web search ({name})" for name in hosted_provider_names())
+    providers.extend(f"web search ({name})" for name in external_provider_names())
     return providers
 
 
@@ -430,12 +431,14 @@ def _live_research_status() -> dict[str, Any]:
     outage of every other answer.
     """
     from .flags import flags
+    from .web_research import corpus_sync_permitted
     from .web_search_providers import active_providers, sanctioned_provider_configured
 
     return {
         "enabled": flags.is_enabled("live_web_research"),
         "providers": [provider.name for provider in active_providers()],
         "sanctioned_provider": sanctioned_provider_configured(),
+        "corpus_sync_permitted": corpus_sync_permitted(),
     }
 
 

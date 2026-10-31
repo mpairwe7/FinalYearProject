@@ -160,6 +160,28 @@ class TestEditionMetadata:
 
         assert self._decision(reply) == "approve"
 
+    def test_another_passages_edition_is_no_support(self):
+        # Pooling every hit's edition let a claim cite FY2024-25 and name FY2026-27.
+        from app.claim_verifier import verify_claims
+
+        cited = {
+            "text": "Individual rental income tax is 12% of gross rental income exceeding UGX 2,820,000.",
+            "fiscal_year": "FY2024-25",
+        }
+        unrelated = {"text": "Stamp duty on a lease.", "fiscal_year": "FY2026-27"}
+        citations = [{"ref": "[1]", "passage": cited["text"]}, {"ref": "[2]", "passage": unrelated["text"]}]
+
+        report = verify_claims(
+            "For FY2026-27, individual rental income tax is 12% of gross rental income "
+            "exceeding UGX 2,820,000 [1].",
+            citations,
+            [cited, unrelated],
+            query="rental tax",
+            locale="en",
+        )
+
+        assert report["decision"] != "approve"
+
     def test_an_edition_nothing_supports_is_still_refused(self):
         reply = (
             "For FY2031-32, individual rental income tax is 12% of gross rental "

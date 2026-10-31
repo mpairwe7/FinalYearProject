@@ -143,7 +143,61 @@ class TestBudgets:
             self.QUESTION, search_http_fetcher=lambda _q: "", persist_files=False
         )
 
-        assert len(outcome.audit["unsearched_triggers"]) == 2
+        assert len(outcome.audit["unchecked_triggers"]) == 2
+
+    def test_a_topic_left_out_is_disclosed_even_when_another_was_found(self, monkeypatch):
+        monkeypatch.setattr(wr, "WEB_RESEARCH_MAX_QUERIES", 1)
+        body = (
+            '<a class="result__a" href="https://ura.go.ug/en/notice/">Notice</a>'
+            '<a class="result__snippet">Penalty waiver.</a>'
+        )
+
+        outcome = wr.run_web_research(self.QUESTION, search_http_fetcher=lambda _q: body, persist_files=False)
+
+        assert outcome.web_hits
+        assert wr.LIVE_PARTIAL_DISCLOSURE in outcome.disclosure
+        assert "Not checked this turn: " in outcome.live_check_notice
+
+    def test_a_topic_whose_search_failed_is_disclosed_too(self):
+        body = (
+            '<a class="result__a" href="https://ura.go.ug/en/notice/">Notice</a>'
+            '<a class="result__snippet">Penalty waiver.</a>'
+        )
+
+        def partly_down(query: str) -> str:
+            if query.startswith("site:ulii.org"):
+                raise RuntimeError("HTTP 503")
+            return body
+
+        outcome = wr.run_web_research(self.QUESTION, search_http_fetcher=partly_down, persist_files=False)
+
+        assert wr.TRIGGER_BILL_ASSENT in outcome.audit["unchecked_triggers"]
+        assert wr.LIVE_PARTIAL_DISCLOSURE in outcome.disclosure
+
+    def test_a_complete_check_says_nothing_about_parts(self):
+        outcome = wr.run_web_research(
+            "Is there a penalty waiver public notice?",
+            search_http_fetcher=lambda _q: (
+                '<a class="result__a" href="https://ura.go.ug/en/notice/">Notice</a>'
+                '<a class="result__snippet">Penalty waiver.</a>'
+            ),
+            persist_files=False,
+        )
+
+        assert wr.LIVE_PARTIAL_DISCLOSURE not in outcome.disclosure
+
+    def test_the_same_query_from_two_triggers_does_not_share_a_cache_entry(self, monkeypatch):
+        calls: list[int] = []
+
+        def chain(*_a, **_k):
+            calls.append(1)
+            return ChainResult("empty")
+
+        monkeypatch.setattr(wr, "search_with_failover", chain)
+        for category in (wr.TRIGGER_PUBLIC_NOTICE, wr.TRIGGER_RECENCY):
+            wr.search_spec(wr.SearchSpec(category, "t", "public_notice", "same query", ("ura.go.ug",)))
+
+        assert len(calls) == 2
 
     def test_a_hung_search_cannot_hold_the_turn(self, monkeypatch):
         monkeypatch.setattr(wr, "WEB_RESEARCH_SEARCH_BUDGET_SECONDS", 0.2)
@@ -436,6 +490,142 @@ class TestLedgerFresh:
         assert (outcome.live_check_notice, outcome.disclosure) == ("", "")
 
 
+class TestEveryExit:
+    """The check is disclosed and audited however the turn ends."""
+
+    @pytest.fixture
+    def empty(self, model):
+        class Nothing(_Retriever):
+            def search(self, *_a, **_k) -> list[dict]:
+                return []
+
+            def search_planned(self, *_a, **_k) -> list[dict]:
+                return []
+
+        model._retriever = Nothing()
+        return model
+
+    def test_an_abstained_rest_turn_says_the_check_failed(self, empty):
+        result = empty.generate(QUESTION)  # nosemgrep: ura-llm01-raw-user-input-to-llm
+
+        assert result["retrieval_mode"] == "abstained"
+        assert UNAVAILABLE in result["reply"]
+        assert result["_live_check"]["status"] == wr.LIVE_UNAVAILABLE
+
+    def test_an_abstained_stream_says_the_check_failed(self, empty):
+        from app.service import run_chat_turn
+
+        async def collect() -> list:
+            return [
+                event
+                async for event in run_chat_turn(
+                    empty,
+                    message=QUESTION,
+                    conversation_id="c-abstain",
+                    top_k=4,
+                    locale="en",
+                    session_id="s-abstain",
+                    request_id="r-abstain",
+                    user_id="",
+                    tenant_id="default",
+                )
+            ]
+
+        events = asyncio.run(collect())
+
+        assert UNAVAILABLE in "".join(str(data) for name, data in events if name in ("token", "revision"))
+
+    def test_a_clarifying_question_makes_no_claim_but_is_still_audited(self, model):
+        result: dict = {"reply": "Which return do you mean?", "retrieval_mode": "clarification"}
+
+        model._audit_turn(
+            message="q",
+            result=result,
+            session_id="s",
+            trace_ctx={"live_check": {"status": "unavailable"}, "live_check_disclosure": UNAVAILABLE},
+        )
+
+        assert result["reply"] == "Which return do you mean?"
+        assert result["_live_check"] == {"status": "unavailable"}
+
+    @pytest.mark.parametrize("mode", ["hybrid", "calculator", "false_premise_rejected", "abstained"])
+    def test_every_answering_exit_carries_it(self, model, mode):
+        result: dict = {"reply": "An answer.", "retrieval_mode": mode}
+
+        model._audit_turn(
+            message="q",
+            result=result,
+            session_id="s",
+            trace_ctx={"live_check": {"status": "unavailable"}, "live_check_disclosure": UNAVAILABLE},
+        )
+
+        assert result["reply"].endswith(UNAVAILABLE)
+
+
+class TestCorpusSyncApproval:
+    PDF_URL = "https://ura.go.ug/en/wp-content/uploads/2026/07/Guide-FY2026-27.pdf"
+
+    @pytest.mark.parametrize(
+        ("env", "approved", "expected"),
+        [
+            ("development", "", True),
+            ("production", "", False),
+            ("production", "false", False),
+            ("production", "true", True),
+        ],
+    )
+    def test_production_needs_an_explicit_approval(self, monkeypatch, env, approved, expected):
+        monkeypatch.setenv("APP_ENV", env)
+        monkeypatch.setenv("WEB_SYNC_PRODUCTION_APPROVED", approved)
+
+        assert wr.corpus_sync_permitted() is expected
+
+    def _research(self, monkeypatch, sync: list[str], query: str):
+        from types import SimpleNamespace
+
+        import app.corpus_sync as corpus_sync
+        import app.ephemeral_pdf_sandbox as sandbox
+
+        document = SimpleNamespace(
+            url=self.PDF_URL, filename="Guide.pdf", stem="Guide", sha256="a" * 64, fiscal_year="FY2026-27", top_chunks=[]
+        )
+        monkeypatch.setattr(sandbox, "fetch_and_extract_sandbox_document", lambda *_a, **_k: document)
+
+        def record(_doc, _retriever, *, topic_key, **_kw):
+            sync.append(topic_key)
+            return SimpleNamespace(action_taken="verified", superseded_source="")
+
+        monkeypatch.setattr(corpus_sync, "compare_and_sync_ura_document", record)
+        monkeypatch.setattr(corpus_sync, "serialize_sync_outcome", lambda _o: {})
+
+        def fetch(search: str) -> str:
+            if "eac.int" not in search:
+                return ""
+            return f'<a class="result__a" href="{self.PDF_URL}">Guide</a><a class="result__snippet">Tariff.</a>'
+
+        return wr.run_web_research(query, search_http_fetcher=fetch, auto_sync_qdrant=True, persist_files=False)
+
+    QUESTION = "Is the penalty waiver public notice out, and what about the EAC CET stay of application?"
+
+    def test_a_flag_alone_cannot_change_the_production_corpus(self, monkeypatch):
+        monkeypatch.setenv("APP_ENV", "production")
+        monkeypatch.delenv("WEB_SYNC_PRODUCTION_APPROVED", raising=False)
+        synced: list[str] = []
+
+        self._research(monkeypatch, synced, self.QUESTION)
+
+        assert synced == []
+
+    def test_the_ledger_records_the_topic_that_found_the_document(self, monkeypatch):
+        # Not the turn's first trigger: that would mark the wrong topic as checked.
+        monkeypatch.delenv("APP_ENV", raising=False)
+        synced: list[str] = []
+
+        self._research(monkeypatch, synced, self.QUESTION)
+
+        assert synced == ["eac_cet_uganda_stay_schedule"]
+
+
 class TestGraphParity:
     def _state(self, query: str = QUESTION):
         from app.agents.graphs.state import AgentGraphState
@@ -463,6 +653,49 @@ class TestGraphParity:
         assert searched_once >= 1
         assert len(calls) == searched_once
         assert state.live_check_disclosure == UNAVAILABLE
+
+    def test_a_retried_retrieval_keeps_the_live_evidence(self, monkeypatch):
+        # Reflection re-enters retrieval, and the check does not run again, so
+        # the evidence the notice describes must survive the second pass.
+        from app.agents.graphs import main_graph
+
+        monkeypatch.setenv("FLAG_LIVE_WEB_RESEARCH", "true")
+        rows = (RawResult("Notice", "https://ura.go.ug/en/notice/", "Penalty waiver."),)
+        monkeypatch.setattr(wr, "search_with_failover", lambda *_a, **_k: ChainResult("ok", rows, "tavily"))
+        monkeypatch.setattr("app.retriever.get_shared_retriever", lambda **_k: _Retriever())
+        state = self._state()
+
+        main_graph.node_retrieve(state)
+        main_graph.node_retrieve(state)
+
+        assert state.hits[0]["source_url"] == "https://ura.go.ug/en/notice/"
+        assert sum(1 for hit in state.hits if hit.get("live_authority")) == 1
+        assert state.retrieval_mode == "live_web_unconfirmed"
+
+    def test_an_abstained_graph_reply_carries_the_disclosure(self):
+        from app.agents.graphs import main_graph
+        from app.agents.graphs.state import GraphOutcome
+
+        state = self._state()
+        state.outcome = GraphOutcome.ABSTAINED
+        state.live_check_disclosure = UNAVAILABLE
+
+        main_graph.node_respond(state)
+
+        assert state.reply.endswith(UNAVAILABLE)
+
+    def test_a_clarifying_graph_reply_does_not(self):
+        from app.agents.graphs import main_graph
+        from app.agents.graphs.state import GraphOutcome
+
+        state = self._state()
+        state.outcome = GraphOutcome.CLARIFY
+        state.clarification_question = "Which return?"
+        state.live_check_disclosure = UNAVAILABLE
+
+        main_graph.node_respond(state)
+
+        assert state.reply == "Which return?"
 
     def test_the_graph_appends_the_disclosure_to_an_answer(self):
         from app.agents.graphs import main_graph
