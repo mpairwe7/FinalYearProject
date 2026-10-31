@@ -1481,8 +1481,9 @@ def build_verified_facts(
             fetched_val = str(res.get("fetched_at_utc") or "")[:16].replace("T", " ")
             if res.get("is_live_rate") and rate_val:
                 bullet_lines.append(
-                    f"- Currency Conversion: {expl} "
-                    f"[Live FX: 1 {res.get('currency')} = UGX {float(rate_val):,.2f} via {src_val}, fetched {fetched_val} UTC]"
+                    f"- Currency Conversion (estimate): {expl} "
+                    f"[Live FX: 1 {res.get('currency')} = UGX {float(rate_val):,.2f} via {src_val}, fetched {fetched_val} UTC; "
+                    "indicative market rate, not the Bank of Uganda mid-rate, so state that it is an estimate]"
                 )
             else:
                 bullet_lines.append(f"- convert_currency: {expl}")

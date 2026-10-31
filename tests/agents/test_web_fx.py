@@ -6,6 +6,7 @@ import json
 from typing import Any
 from urllib.parse import urlparse
 
+import httpx
 import pytest
 
 from app import flags as flags_mod
@@ -118,12 +119,14 @@ def test_lookup_live_exchange_rate_falls_back_to_open_er_and_offline() -> None:
         """Simulate complete network outage."""
         raise RuntimeError("offline")
 
-    offline_quote = web_fx.lookup_live_exchange_rate(
-        "USD", http_fetcher=_all_fail_fetch, allow_offline_fallback=True
+    # The shipped snapshot is empty and unverified, so nothing may be quoted from
+    # it: the plausibility anchor is a sanity bound, not a Bank of Uganda rate.
+    assert (
+        web_fx.lookup_live_exchange_rate(
+            "USD", http_fetcher=_all_fail_fetch, allow_offline_fallback=True
+        )
+        is None
     )
-    assert offline_quote is not None
-    assert offline_quote.is_live is False
-    assert "BOU_mid_rates_2026.json" in offline_quote.source
 
     assert (
         web_fx.lookup_live_exchange_rate(
@@ -255,3 +258,159 @@ def test_negative_cache_skips_repeat_network_fetches(monkeypatch: pytest.MonkeyP
     assert web_fx.lookup_live_exchange_rate("USD", allow_offline_fallback=False) is None
     assert len(calls) == 3
 
+
+
+class TestQuoteIntegrity:
+    XE = '{"rates":{"USD":1,"UGX":3700.0}}'
+
+    @staticmethod
+    def _google(rate: float) -> str:
+        return f'<div data-last-price="{rate}" data-source="USD" data-target="UGX"></div>'
+
+    def _fetch(self, url: str, google: float) -> str:
+        return self.XE if "xe.com" in url else self._google(google)
+
+    def test_sources_that_disagree_produce_no_rate(self) -> None:
+        # XE's figure used to win, flagged live, with a 16% gap on a tax estimate.
+        quote = web_fx.lookup_live_exchange_rate(
+            "USD", http_fetcher=lambda url: self._fetch(url, 4300.0), allow_offline_fallback=False
+        )
+
+        assert quote is None
+
+    def test_sources_that_agree_are_marked_corroborated(self) -> None:
+        quote = web_fx.lookup_live_exchange_rate("USD", http_fetcher=lambda url: self._fetch(url, 3710.0))
+
+        assert quote is not None
+        assert quote.corroborated is True
+
+    def test_a_lone_source_is_not_called_corroborated(self) -> None:
+        def only_xe(url: str) -> str:
+            if "xe.com" in url:
+                return self.XE
+            raise RuntimeError("down")
+
+        quote = web_fx.lookup_live_exchange_rate("USD", http_fetcher=only_xe)
+
+        assert quote is not None
+        assert quote.corroborated is False
+
+    def test_a_stale_mirror_is_refused_even_though_it_was_fetched_now(self) -> None:
+        def mirror(url: str) -> str:
+            if "er-api" in url:
+                return json.dumps(
+                    {"result": "success", "time_last_update_unix": 1_600_000_000, "rates": {"UGX": 3700.0}}
+                )
+            raise RuntimeError("down")
+
+        assert web_fx.lookup_live_exchange_rate("USD", http_fetcher=mirror, allow_offline_fallback=False) is None
+
+    def test_a_mirror_reporting_failure_is_refused(self) -> None:
+        payload = {"result": "error", "rates": {"UGX": 3700.0}}
+
+        assert web_fx._parse_open_er_api_rate(payload, "USD") is None
+
+    def test_todays_market_is_not_evidence_of_an_earlier_month(self) -> None:
+        calls: list[str] = []
+
+        def fetch(url: str) -> str:
+            calls.append(url)
+            return self.XE
+
+        quote = web_fx.lookup_live_exchange_rate(
+            "USD", date="2020-01-15", http_fetcher=fetch, allow_offline_fallback=False
+        )
+
+        assert quote is None
+        assert calls == []
+
+    def test_no_browser_identity_or_forged_consent_is_sent(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        seen: list[httpx.Request] = []
+        real_client = httpx.Client
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return httpx.Response(200, text="ok")
+
+        monkeypatch.setattr(
+            web_fx.httpx,
+            "Client",
+            lambda **kw: real_client(transport=httpx.MockTransport(handler), **kw),
+        )
+
+        web_fx._default_http_fetcher("https://www.xe.com/currencyconverter/")
+
+        assert "Mozilla" not in seen[0].headers["user-agent"]
+        assert "cookie" not in seen[0].headers
+
+    def test_a_redirect_off_the_allowlist_is_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        real_client = httpx.Client
+        monkeypatch.setattr(
+            web_fx.httpx,
+            "Client",
+            lambda **kw: real_client(
+                transport=httpx.MockTransport(
+                    lambda _r: httpx.Response(302, headers={"Location": "https://attacker.example/"})
+                ),
+                **kw,
+            ),
+        )
+
+        with pytest.raises(ValueError, match="Disallowed FX URL"):
+            web_fx._default_http_fetcher("https://www.xe.com/currencyconverter/")
+
+
+class TestOfficialRate:
+    SNAPSHOT = {"status": "verified", "rates": {"USD": {"2026-10": 3950.0, "default": 3900.0}, "EUR": 4400.0}}
+
+    def test_a_verified_snapshot_is_official(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(web_fx, "_load_bou_fx_file", lambda: self.SNAPSHOT)
+
+        assert web_fx.official_bou_rate("USD", "2026-10-05") == 3950.0
+        assert web_fx.official_bou_rate("USD", "2025-01-05") == 3900.0
+        assert web_fx.official_bou_rate("EUR") == 4400.0
+
+    def test_an_unverified_snapshot_is_not(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(web_fx, "_load_bou_fx_file", lambda: {**self.SNAPSHOT, "status": "unverified"})
+
+        assert web_fx.official_bou_rate("USD") is None
+
+    def test_the_shipped_snapshot_claims_nothing(self) -> None:
+        assert web_fx.official_bou_rate("USD") is None
+
+    def test_the_official_rate_outranks_a_fresh_market_quote(
+        self, monkeypatch: pytest.MonkeyPatch, clean_flags
+    ) -> None:
+        from app.tools import ToolRegistry
+
+        clean_flags.set("live_web_research", True)
+        monkeypatch.setattr(web_fx, "_load_bou_fx_file", lambda: self.SNAPSHOT)
+        monkeypatch.setattr(
+            web_fx,
+            "lookup_live_exchange_rate",
+            lambda *_a, **_k: pytest.fail("a market quote must not be fetched"),
+        )
+
+        result = ToolRegistry.get("convert_currency").execute(amount=100.0, currency="EUR")
+
+        assert result["rate_source"] == "bou_official_snapshot"
+        assert result["ugx_amount"] == pytest.approx(440_000.0)
+        assert result["verified"] is True
+
+    def test_a_market_quote_is_described_as_an_estimate(
+        self, monkeypatch: pytest.MonkeyPatch, clean_flags
+    ) -> None:
+        from app.tools import ToolRegistry
+
+        clean_flags.set("live_web_research", True)
+        monkeypatch.setattr(
+            web_fx,
+            "lookup_live_exchange_rate",
+            lambda *_a, **_k: web_fx.LiveFXQuote("USD", 3750.0, "XE.com", "2026-10-22T09:30:00Z", True),
+        )
+
+        result = ToolRegistry.get("convert_currency").execute(amount=100.0, currency="USD")
+
+        assert result["verified"] is False
+        assert "estimate" in result["explanation"]
+        assert "Bank of Uganda mid-exchange rate" in result["explanation"]

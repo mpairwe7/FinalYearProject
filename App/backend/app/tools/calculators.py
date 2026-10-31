@@ -2138,6 +2138,33 @@ class CurrencyConversionTool(CalculatorTool):
 
         from datetime import datetime, timezone
         from ..flags import flags
+        from ..web_fx import official_bou_rate
+
+        # The Bank of Uganda rate is the one that counts for a return, so a
+        # verified copy outranks any market quote, however fresh.
+        official = official_bou_rate(curr, date)
+        if official is not None:
+            rate_dec = Decimal(str(official))
+            ugx_val = amt * rate_dec
+            return CalcResult(
+                {
+                    "amount": to_float(amt),
+                    "currency": curr,
+                    "ugx_amount": to_float(ugx_val),
+                    "amount_ugx": to_float(ugx_val),
+                    "exchange_rate": to_float(rate_dec),
+                    "rate_used": to_float(rate_dec),
+                    "rate_source": "bou_official_snapshot",
+                    "is_live_rate": False,
+                    "needs_exchange_rate": False,
+                    "verified": True,
+                    "explanation": (
+                        f"Converted {curr} {float(amt):,.2f} at the Bank of Uganda mid-rate "
+                        f"UGX {float(rate_dec):,.2f}/{curr} = {_ugx(ugx_val)}."
+                    ),
+                },
+                rate_keys=("fx_conversion_rule",),
+            )
 
         today_month = datetime.now(timezone.utc).strftime("%Y-%m")
         date_is_current = not date or str(date).strip()[:7] == today_month
@@ -2164,12 +2191,14 @@ class CurrencyConversionTool(CalculatorTool):
                         "rate_source": quote.source,
                         "fetched_at_utc": quote.fetched_at_utc,
                         "is_live_rate": quote.is_live,
+                        "rate_corroborated": quote.corroborated,
                         "needs_exchange_rate": False,
                         "verified": False,
                         "explanation": (
-                            f"Converted {curr} {float(amt):,.2f} to {_ugx(ugx_val)} using live exchange rate "
+                            f"Converted {curr} {float(amt):,.2f} to {_ugx(ugx_val)} using an indicative market rate "
                             f"1 {curr} = UGX {float(rate_dec):,.2f} (Source: {quote.source}, fetched {fetched_disp} UTC). "
-                            "Note: for official URA return filing, apply the prevailing rate on the payment date."
+                            "This is an estimate, not the Bank of Uganda rate: for a return, use the "
+                            "Bank of Uganda mid-exchange rate for the transaction date."
                         ),
                     },
                     rate_keys=("fx_conversion_rule",),
