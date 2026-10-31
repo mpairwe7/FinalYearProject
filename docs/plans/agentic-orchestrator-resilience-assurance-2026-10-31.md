@@ -184,11 +184,11 @@ rule still covers those lines.
 
 ## Test evidence
 
-**CI's two test steps, in CI's order, one process each**, on a clean worktree at `b721fd73`:
+**CI's two test steps, in CI's order, one process each**, on a clean worktree at `7e47eeea`:
 
 | Step | Passed | Failed | Skipped | Not collected |
 | --- | --- | --- | --- | --- |
-| `pytest tests/` | 2,751 | 0 | 13 | 1 |
+| `pytest tests/` | 2,760 | 0 | 13 | 1 |
 | `cd App/backend && pytest tests/` | 3,431 | 2 | 20 | 2 |
 
 Both failures are in `test_pdf_corpus.py`. `beautifulsoup4` is in `requirements.txt` but not
@@ -198,8 +198,8 @@ collected here because `opentelemetry`, `requests` and `soundfile` are not insta
 `test_tracing_genai.py`, `test_speech_streaming.py` and `test_cx_500_complex_ngrok_schema.py`.
 CI runs them, and its result is on the pull request.
 
-**Mutation sweep.** Each of 79 critical controls was disabled in turn in an isolated worktree,
-and its contract tests had to fail: 79 of 79 caught, with every mutant compiling and pytest
+**Mutation sweep.** Each of 86 critical controls was disabled in turn in an isolated worktree,
+and its contract tests had to fail: 86 of 86 caught, with every mutant compiling and pytest
 reporting a test failure rather than an error. Earlier runs each left a survivor. The fix for
 G336 was tested on the human route, which the gate now always allows, so removing it changed
 nothing. A duplicate's settled result was tested only for a failed original, which looks the
