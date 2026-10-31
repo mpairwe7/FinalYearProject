@@ -632,6 +632,7 @@ def append_action_audit_v3(
     statutory_basis: list[str] | None = None,
     declared_risk: str | None = None,
     decided_outcome: AutonomyOutcome | None = None,
+    approval_timestamp_utc: str | None = None,
 ) -> tuple[ActionAuditRecord, DecisionReceipt]:
     """Construct, risk-gate, and append an ActionAuditRecord v3 to the tamper-evident AuditLedger.
 
@@ -639,6 +640,9 @@ def append_action_audit_v3(
     again. Evidence must describe what happened: re-running the gate after a call
     filed it as "proposed" with the ticket it opened already in the queue, because
     the second opinion had nothing to do with the first.
+
+    *approval_timestamp_utc* is taken at that decision. This record is written after
+    the action, so a time taken here would put the approval after what it allowed.
     """
     now_utc_dt = dt.datetime.now(_UTC_TZ)
     now_eat_dt = now_utc_dt.astimezone(_EAT_TZ)
@@ -676,9 +680,7 @@ def append_action_audit_v3(
                 if approving_officer_id
                 else ""
             ),
-            approval_timestamp_utc=(
-                now_utc_dt.isoformat() if outcome == "officer_approved_executed" else None
-            ),
+            approval_timestamp_utc=approval_timestamp_utc,
             ticket_id=ticket_id,
         )
     rev_contract = get_reversibility_contract(

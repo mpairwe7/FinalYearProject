@@ -152,11 +152,12 @@ Recorded because a reader should know how far to trust the process.
 
 ## What review of this change found
 
-Automated review of the pull request raised 12 findings against code written here. Eleven were
-real, and two of those contradicted a claim above: that an enforced control holds, and that
-duplicates are handled. Nine were confirmed by a test that failed on the unfixed code. The two
-in monitoring were confirmed by reading the rule and the gauge, because `promtool` is not
-available here.
+Automated review of the pull request raised 16 findings against code written here, over two
+passes. Fifteen were real, and three of those contradicted a claim above: that an enforced
+control holds, that the figure lock enforces on the reasoning tier on every transport, and that
+a served passage is always labelled. Twelve were confirmed by a test that failed on the unfixed
+code. The two in monitoring were confirmed by reading the rule and the gauge, because `promtool`
+is not available here, and one was a weakness in a test.
 
 | Finding | Gap | Outcome |
 | --- | --- | --- |
@@ -172,6 +173,10 @@ available here.
 | The shadow reject ratio recorded nothing until the first reject. | G360 | Fixed. |
 | `CircuitBreakerOpen` can fire on an idle worker after the back-off has passed. | G348 | Alert and runbook now say what the gauge can show. |
 | A probe that reports after its lease was reclaimed still changes the breaker. | G341 | Declined; see [Design decisions](#design-decisions-worth-challenging). |
+| A graph turn that selected T3 only measured figures, because the tier never reached the guards. | G354 | Fixed on both transports. |
+| `node_reflect` replaced an unsupported draft with a raw passage, credited the model and told the taxpayer nothing. | G358, G359 | Fixed: the row names the passage and the reply carries the fallback notice. |
+| An officer's approval was timed after the action it allowed. | G336 | Fixed: the time is the gate's. Latent: no production path passes an approval today. |
+| The saturated-pool test could not detect a wait. | G357 | Fixed. |
 
 Semgrep also flagged three log lines as personal data. All three were false positives: its rule
 matches `tin` inside "testing" and "starting". They were reworded rather than suppressed, so the

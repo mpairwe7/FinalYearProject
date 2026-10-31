@@ -768,9 +768,9 @@ def node_synthesize(state: AgentGraphState) -> NodeResult:
             except Exception:
                 logger.warning("graph: LLM synthesis failed, using best hit", exc_info=True)
         if not state.reply:
-            from ...service import _note_generation
+            from ...service import _note_passage_served
 
-            _note_generation(degraded="generation_unavailable")
+            _note_passage_served("generation_unavailable")
             best = state.hits[0]
             state.reply = best.get("answer") or best.get("text", "")
         if usable and state.specialist_handoffs:
@@ -840,9 +840,12 @@ def node_reflect(state: AgentGraphState) -> NodeResult:
         best = state.hits[0]
         verified_text = best.get("answer") or best.get("text", "")
         if verified_text:
+            from ...service import _note_passage_served
+
             state.reply = verified_text.strip()
             state.reflections.append("grounded revision: aligned synthesis with verified statutory passage")
             state.faithfulness = 1.0
+            _note_passage_served("draft_unsupported")
 
     return NodeResult(next_node="respond")
 

@@ -20,6 +20,7 @@ from app.agents.graphs.main_graph import build_main_graph, node_human_gate
 from app.agents.graphs.runtime import END, GraphRuntime, InMemoryCheckpointStore, NodeResult
 from app.agents.graphs.state import AgentGraphState, GraphOutcome, TaxpayerActionRequest
 from app.flags import flags
+from app.providers.routing import ModelTier, TierDecision
 from app.resilience import turn_deadline
 from app.service import ChatModel
 
@@ -163,6 +164,35 @@ def _node(name: str, then: str = END, *, outcome: GraphOutcome | None = None, se
         return NodeResult(next_node=then, outcome=outcome)
 
     return run
+
+
+class TestAReasoningTurnOnTheGraph:
+    """A turn's tier reaches the guards, or the figure lock depends on which path ran it."""
+
+    @pytest.fixture
+    def tier(self, monkeypatch):
+        def choose(tier: ModelTier) -> None:
+            monkeypatch.setattr(service_module, "select_tier", lambda *_a, **_k: TierDecision(tier=tier, reason="test"))
+
+        return choose
+
+    @pytest.mark.parametrize("transport", ["generate", "generate_retrieval_only"])
+    def test_an_invented_figure_is_stripped(self, chat_model, on_graph, tier, transport) -> None:
+        tier(ModelTier.T3)
+        on_graph(_final("The penalty is UGX 7,777,777 [1]."))
+        with mock.patch.object(service_module, "verify_claims", return_value={"decision": "approve"}):
+            result = getattr(chat_model, transport)("What is the VAT rate?", session_id=uuid.uuid4().hex)
+        assert "7,777,777" not in result["reply"]
+        assert result["_figure_lock"]["mode"] == "enforced"
+
+    @pytest.mark.parametrize("transport", ["generate", "generate_retrieval_only"])
+    def test_below_that_tier_it_only_measures(self, chat_model, on_graph, tier, transport) -> None:
+        tier(ModelTier.T1)
+        on_graph(_final("The penalty is UGX 7,777,777 [1]."))
+        with mock.patch.object(service_module, "verify_claims", return_value={"decision": "approve"}):
+            result = getattr(chat_model, transport)("What is the VAT rate?", session_id=uuid.uuid4().hex)
+        assert "7,777,777" in result["reply"]
+        assert result["_figure_lock"]["mode"] == "shadow"
 
 
 class TestTheGraphHasADeadline:

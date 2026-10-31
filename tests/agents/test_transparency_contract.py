@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 from app import service as service_module
-from app.agents.graphs.main_graph import node_synthesize
+from app.agents.graphs.main_graph import node_reflect, node_synthesize
 from app.agents.graphs.state import AgentGraphState
 from app.audit import turns
 from app.flags import flags
@@ -100,6 +100,9 @@ def stream(monkeypatch):
 
 
 class TestAFallbackSaysSo:
+    def test_a_passage_that_replaced_a_draft_says_so_too(self) -> None:
+        assert UNAVAILABLE in service_module._with_degraded_disclosure("A passage.", ["draft_unsupported"])
+
     def test_it_does_not_call_the_passage_official(self) -> None:
         # With nothing official found, the closest passage can be web commentary.
         assert "official" not in UNAVAILABLE.lower()
@@ -325,6 +328,39 @@ class TestTheRowNamesWhatAnswered:
         assert served == "The penalty is calculated on the"
         assert record["backend"] == "gemini"
         assert record["model"] == "gemini_flash"
+
+    def test_a_draft_replaced_by_a_passage_is_not_credited_to_the_model(self, record, monkeypatch) -> None:
+        record.update(backend="local", model="some-model", tier="T1")
+        monkeypatch.setattr("app.retriever.HybridRetriever.compute_faithfulness", lambda *_a, **_k: 0.0)
+        state = AgentGraphState(query="q", reply="An unsupported draft.", hits=[HIT], locale="en", max_reflections=0)
+
+        node_reflect(state)
+
+        assert state.reply == HIT["text"]
+        assert (record["backend"], record["model"], record["tier"]) == ("passage", "", "")
+        assert record["degraded"] == ["draft_unsupported"]
+
+    def test_a_draft_that_was_supported_stays_the_models(self, record, monkeypatch) -> None:
+        record.update(backend="local", model="some-model")
+        monkeypatch.setattr("app.retriever.HybridRetriever.compute_faithfulness", lambda *_a, **_k: 0.95)
+        state = AgentGraphState(
+            query="VAT rate", reply="The VAT rate is 18 percent.", hits=[HIT], locale="en", max_reflections=0
+        )
+
+        node_reflect(state)
+
+        assert state.reply == "The VAT rate is 18 percent."
+        assert record["backend"] == "local"
+        assert record["degraded"] == []
+
+    def test_a_fallback_after_a_good_first_pass_loses_that_passs_author(self, record, monkeypatch) -> None:
+        record.update(backend="local", model="some-model")
+        monkeypatch.setattr(service_module.llm_module, "is_available", lambda: False)
+
+        node_synthesize(AgentGraphState(query="q", hits=[HIT], locale="en"))
+
+        assert (record["backend"], record["model"]) == ("passage", "")
+        assert record["degraded"] == ["generation_unavailable"]
 
     def test_a_graph_answer(self, record, monkeypatch) -> None:
         monkeypatch.setattr(service_module.llm_module, "is_available", lambda: True)

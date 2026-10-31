@@ -196,8 +196,9 @@ Evaluated across 16 Ugandan tax heads (`paye`, `vat`, `withholding`, `rental`, `
    held until checked (`stream_figure_hold`, on). The lock enforces on the reasoning tier
    and under `evaluator_optimizer`. On other tiers it only measures, so a figure that does
    not contradict a passage can still be shown (G360). Number words in Ugandan languages are
-   not held (G364). When every model tier fails, the reply is the closest passage found,
-   labelled as a fallback, which can be web commentary if nothing official was found (G369). See [ADR-0022](adr/0022-control-integrity-turn-accounting-and-verified-release.md).
+   not held (G364). When every model tier fails, or a graph draft is not supported by its
+   passages, the reply is the closest passage found, labelled as a fallback. That can be web
+   commentary if nothing official was found (G369). See [ADR-0022](adr/0022-control-integrity-turn-accounting-and-verified-release.md).
 
 ---
 

@@ -10,6 +10,7 @@ so a new tool cannot quietly fall outside the contract.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import uuid
 
@@ -200,7 +201,31 @@ class TestTheRecordSaysWhatHappened:
         assert row["autonomy_outcome"] == "autonomous_executed"
         assert row["resolution_status"] == "resolved"
 
-    def test_a_decided_officer_approval_keeps_its_time(self, clean_flags, tmp_db) -> None:
+    def test_an_approval_is_timed_before_the_action_it_allowed(self, gates, tmp_db, probe_name) -> None:
+        # The row is written after the tool returns. Stamped then, it says the
+        # officer approved something that had already happened.
+        class Clocked(list):
+            def append(self, _item) -> None:
+                super().append(dt.datetime.now(dt.timezone.utc))
+
+        flags.set("action_level_audit_v3", True)
+        ran = Clocked()
+        _tool(probe_name, risk="high", ran=ran)
+
+        ToolRegistry.call(
+            probe_name,
+            {},
+            user_id="u1",
+            caller_confirmed=True,
+            officer_approved=True,
+            approving_officer_id="officer-1",
+        )
+
+        row = _ledger_rows(tmp_db)[-1]
+        assert row["autonomy_outcome"] == "officer_approved_executed"
+        assert dt.datetime.fromisoformat(row["approval_gate"]["approval_timestamp_utc"]) <= ran[0]
+
+    def test_a_decided_approval_keeps_the_time_it_was_given(self, clean_flags, tmp_db) -> None:
         record, _receipt = gov.append_action_audit_v3(
             session_id="c1",
             tool_or_action_name="tin_registration_submit",
@@ -212,9 +237,10 @@ class TestTheRecordSaysWhatHappened:
             officer_approved=True,
             approving_officer_id="officer-1",
             decided_outcome="officer_approved_executed",
+            approval_timestamp_utc="2026-10-31T10:00:00+00:00",
         )
 
-        assert record.approval_gate.approval_timestamp_utc
+        assert record.approval_gate.approval_timestamp_utc == "2026-10-31T10:00:00+00:00"
 
     def test_no_approval_time_is_invented(self, clean_flags, tmp_db) -> None:
         record, _receipt = gov.append_action_audit_v3(

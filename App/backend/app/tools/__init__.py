@@ -473,7 +473,7 @@ class ToolRegistry:
                 return "", None
             from ..audit import governance_v3
 
-            outcome, _ = governance_v3.evaluate_autonomy_gate(
+            outcome, decision = governance_v3.evaluate_autonomy_gate(
                 name,
                 intent_confidence=1.0,
                 caller_confirmed=bool(audit_context["caller_confirmed"]),
@@ -483,6 +483,8 @@ class ToolRegistry:
                 subject=subject,
                 declared_risk=schema.risk,
             )
+            # Kept now: the audit row is written after the action this allowed.
+            audit_context["approval_timestamp_utc"] = decision.approval_timestamp_utc
         except Exception:
             logger.exception("Autonomy gate could not decide for %s", name)
             cls._gate_fault("evaluate")

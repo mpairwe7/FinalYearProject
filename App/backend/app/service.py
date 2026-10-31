@@ -1167,11 +1167,16 @@ _TURN_GENERATION: contextvars.ContextVar[dict[str, Any] | None] = contextvars.Co
 #: Owed to the taxpayer when a turn could not do all it should have (OWASP ASI09:
 #: an answer must not look more certain than it is). Added after every verifier, so
 #: the sentence is never judged as a claim, and before localization.
+#: A retrieved passage served in place of an answer a model wrote.
+_PASSAGE_DISCLOSURE = (
+    "I could not write a tailored answer just now, so this is the closest passage I "
+    "found. It may not fit your exact situation. Please confirm with URA on 0800 117 000."
+)
+
 DEGRADED_DISCLOSURES: dict[str, str] = {
-    "generation_unavailable": (
-        "I could not write a tailored answer just now, so this is the closest passage I "
-        "found. It may not fit your exact situation. Please confirm with URA on 0800 117 000."
-    ),
+    "generation_unavailable": _PASSAGE_DISCLOSURE,
+    # The model answered, but not from its sources, so a passage replaced its draft.
+    "draft_unsupported": _PASSAGE_DISCLOSURE,
     "tool_loop_truncated": (
         "This answer may not be complete, because I ran out of steps while checking it. "
         "Please confirm the details with URA on 0800 117 000."
@@ -1217,6 +1222,14 @@ def _note_generation(
     if degraded and degraded not in record["degraded"]:
         record["degraded"].append(degraded)
         metrics.inc("turn_degraded_total", labels={"reason": degraded})
+
+
+def _note_passage_served(reason: str) -> None:
+    """The reply is a retrieved passage, so no model wrote it, whichever one was tried."""
+    record = _TURN_GENERATION.get()
+    if record is not None:
+        record.update(backend="passage", model="", tier="")
+    _note_generation(degraded=reason)
 
 
 def _turn_degradations() -> list[str]:
@@ -8942,6 +8955,7 @@ class ChatModel:
         locale: str,
         conversation_history: list[dict[str, Any]] | None,
         calculation_message: str,
+        model_tier: str = "",
     ) -> dict[str, Any]:
         """A finished graph turn, held to the pipeline every other model answer meets.
 
@@ -8987,6 +9001,7 @@ class ChatModel:
                 tool_grounded=bool(final_state.tool_calls) and not final_state.hits,
                 calculation_message=calculation_message,
                 live_check_disclosure=disclosure,
+                model_tier=model_tier,
                 tool_outputs=[
                     call["result"]
                     for call in final_state.tool_calls
@@ -12499,6 +12514,7 @@ class ChatModel:
                                 locale=locale,
                                 conversation_history=conversation_history,
                                 calculation_message=router_message or message,
+                                model_tier=str(trace_ctx.get("model_tier") or ""),
                             )
                         self._persist_personalization_turn(
                             user_id=user_id,
@@ -14510,6 +14526,7 @@ class ChatModel:
                         locale=locale,
                         conversation_history=conversation_history,
                         calculation_message=router_message or message,
+                        model_tier=stream_tier_decision.tier.value if stream_tier_decision is not None else "",
                     )
                     _mark_stage("output_guard", graph_guard_started)
                     graph_result.update(

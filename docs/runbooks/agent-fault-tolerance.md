@@ -11,6 +11,7 @@ evidence is in the [assurance review](../plans/agentic-orchestrator-resilience-a
 | Reasoner down | `llm_reasoner` breaker opens; turns go straight to T1 | A normal answer |
 | T1 down | `llm` breaker opens; turns go to the cloud chain if configured | A normal answer |
 | Every model down | The closest passage is served | The passage, and a sentence saying it is a fallback |
+| A graph draft is not supported by its passages | The closest passage replaces it | The same passage and sentence |
 | Tool loop out of steps | The last text is served | The text, and a sentence saying it may be incomplete |
 | Stream breaks part-way | Text so far is kept; no second answer is appended | The text, and a sentence saying it was cut off |
 | Figure check fails while enforcing | Every figure is removed, or the reply is withheld if that fails too | The rest of the answer and a note to confirm with URA |
@@ -72,6 +73,8 @@ control instead of fixing what it depends on.
   three settings the cloud chain needs: `FLAG_CLOUDFLARE_FALLBACK`, `LLM_FALLBACK_BACKEND`
   and the Gemini key. Each fails silently when unset, so a healthy-looking Space can be
   serving passages.
+* `draft_unsupported`: a graph draft was not supported by its passages, so the closest
+  passage replaced it. A sustained rise usually means a model or retrieval change.
 * `tool_loop_truncated`: the loop ran out of iterations or budget. A sustained rise usually
   means a model or prompt change. Look at `ura_tool_calls_total`.
 * `stream_interrupted`: a worker failed part-way through a stream.

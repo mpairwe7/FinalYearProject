@@ -570,10 +570,12 @@ class TestAModelCannotWidenItsOwnTools:
         asked: list[str] = []
         base = RouteDecision(route=AgentRoute.RAG, reason="default", confidence=0.6)
 
+        started = time.perf_counter()
         with mock.patch("app.agents.tiebreak._CLASSIFIER_SLOTS", threading.BoundedSemaphore(1)) as slots:
             slots.acquire()
             decision = refine("a third question", base, classifier=lambda prompt: asked.append(prompt) or "")
 
+        assert time.perf_counter() - started < 1.0
         assert decision is base
         assert asked == []
 
