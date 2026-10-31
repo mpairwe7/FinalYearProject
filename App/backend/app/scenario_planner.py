@@ -6,12 +6,23 @@ through the MCP client (`get_client().call_tool(...)`), checks for statutory
 premise contradictions via :func:`app.premise_guard.check_fact_contradictions`,
 and renders a single ``## Verified Statutory Facts & Calculations`` block
 injected before retrieved passages in both REST and streaming paths.
+
+The plan is derived from the taxpayer's own question before any retrieved text
+is read, so nothing on a web page can add a step. Execution is bounded by a
+:class:`~app.agents.loop_control.ToolCallBudget` and a wall-clock deadline, and
+its record is :class:`PlanRunReport`: a step that did not run is named in the
+block, so the model cannot quietly fill the gap from memory.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import os
 import re
+import time
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -35,6 +46,32 @@ logger = logging.getLogger(__name__)
 
 ToolCaller = Callable[[str, dict[str, Any]], dict[str, Any]]
 
+#: Tool calls one plan may make. The largest compound question measured plans 9.
+PLANNER_MAX_TOOL_CALLS = int(os.getenv("PLANNER_MAX_TOOL_CALLS", "12"))
+#: Wall clock for a plan. Calculators are instant; live FX is what can be slow.
+PLANNER_DEADLINE_SECONDS = float(os.getenv("PLANNER_DEADLINE_SECONDS", "10.0"))
+
+STEP_OK = "ok"
+STEP_NEEDS_INPUT = "needs_input"
+STEP_FAILED = "failed"
+STEP_SKIPPED = "skipped"
+
+
+@dataclass
+class PlanRunReport:
+    """What one plan was and how each step ended. Holds no taxpayer text."""
+
+    plan_sha256: str = ""
+    outcomes: Counter[str] = field(default_factory=Counter)
+    not_computed: list[str] = field(default_factory=list)
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "sha256": self.plan_sha256,
+            "steps": dict(self.outcomes),
+            "not_computed": list(self.not_computed),
+        }
+
 
 @dataclass
 class ToolCallSpec:
@@ -44,6 +81,16 @@ class ToolCallSpec:
     params: dict[str, Any] = field(default_factory=dict)
     missing_inputs: list[str] = field(default_factory=list)
     label: str = ""
+
+
+def plan_digest(specs: list[ToolCallSpec]) -> str:
+    """A stable identity for a plan, so the audit row can prove which one ran."""
+    canonical = json.dumps(
+        [[spec.tool, spec.params, spec.label] for spec in specs],
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
 
 
 def _default_mcp_caller(tool_name: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -1220,15 +1267,29 @@ def build_verified_facts(
     facts: CaseFacts | None = None,
     *,
     tool_caller: ToolCaller | None = None,
+    report: PlanRunReport | None = None,
 ) -> str:
-    """Execute planned tools via MCP and render the ``## Verified Statutory Facts & Calculations`` block."""
+    """Execute planned tools via MCP and render the ``## Verified Statutory Facts & Calculations`` block.
+
+    A step that fails or runs out of budget is listed as not calculated. Dropping
+    it left a block ending "present these exact computed figures" with the PAYE
+    line simply absent, and the model filled that silence from memory.
+    """
+    from .agents.loop_control import Admission, ToolCallBudget
+    from .tracing import trace_plan
+
     text = (question or "").strip()
     if not text:
         return ""
 
     eff_facts = facts if facts is not None else extract_case_facts(text)
     caller = tool_caller or _default_mcp_caller
-    specs = plan_tools(text, eff_facts)
+    with trace_plan() as annotate_plan:
+        specs = plan_tools(text, eff_facts)
+        digest = plan_digest(specs) if specs else ""
+        annotate_plan(digest, len(specs))
+    run = report if report is not None else PlanRunReport()
+    run.plan_sha256 = digest
 
     if not specs:
         # Out-of-coverage disclosure when the current question has numeric figures on an uncovered topic
@@ -1242,139 +1303,40 @@ def build_verified_facts(
         return ""
 
     tool_results: dict[str, Any] = {}
+    # By currency, not by tool: with two conversions in a plan, "the" result of
+    # convert_currency is whichever ran last, and PAYE needs the salary's.
+    fx_by_currency: dict[str, dict[str, Any]] = {}
+    salary_currency = eff_facts.monthly_salary.currency if eff_facts.monthly_salary is not None else ""
     bik_results: list[dict[str, Any]] = []
     bullet_lines: list[str] = []
     still_needed: list[str] = []
+    budget = ToolCallBudget(
+        max_total_calls=PLANNER_MAX_TOOL_CALLS,
+        max_calls_per_iteration=1,  # a plan is sequential: each step is its own round
+        max_calls_per_tool=PLANNER_MAX_TOOL_CALLS,
+    )
+    deadline = time.monotonic() + PLANNER_DEADLINE_SECONDS
 
     def _add_needed(item: str) -> None:
         if item and item not in still_needed:
             still_needed.append(item)
 
-    for spec in specs:
-        for m_in in spec.missing_inputs:
-            _add_needed(m_in)
-
-        if spec.tool == "value_benefit_in_kind" and not spec.missing_inputs:
-            if spec.params.get("kind") == "housing" and "monthly_gross" not in spec.params:
-                fx_out_h = tool_results.get("convert_currency")
-                if isinstance(fx_out_h, dict) and fx_out_h.get("ok") and fx_out_h.get("ugx_amount"):
-                    h_p = dict(spec.params)
-                    h_p["monthly_gross"] = fx_out_h["ugx_amount"]
-                    spec = ToolCallSpec(spec.tool, params=h_p, label=spec.label)
-                else:
-                    spec = ToolCallSpec(
-                        spec.tool,
-                        params=spec.params,
-                        missing_inputs=["gross monthly salary in UGX"],
-                        label=spec.label,
-                    )
-                    _add_needed("gross monthly salary in UGX")
-
-        # Skip calling tools whose required inputs are already known to be missing
-        if spec.tool == "value_benefit_in_kind" and spec.missing_inputs:
-            kind = spec.params.get("kind", "benefit")
-            if kind == "car":
-                bullet_lines.append(
-                    "- Car benefit: statutory formula is (20% × A × B/C) − D (20% of market value A when first provided, "
-                    "depreciated at 35% p.a. reducing balance for subsequent years, multiplied by private-use days B / "
-                    "days in the year of income C (365), minus employee payment D; state 20% explicitly); ADDED to employment income "
-                    "(basis: TAXATION-HANDBOOK-FY-2025-26-1, s.12.2.3)."
-                )
-            elif kind == "housing":
-                bullet_lines.append(
-                    "- Housing benefit: lesser of (a) market rent less employee payment and (b) 15% of employment "
-                    "income (including paragraph (a)) for the year of income; ADDED to employment income "
-                    "[interpretation unverified] (basis: TAXATION-HANDBOOK-FY-2025-26-1, s.12.2.3)."
-                )
-            continue
-
-        if spec.missing_inputs and (
-            spec.tool == "simulate_tax_relief_and_instalments"
-            or (
-                spec.tool == "resolve_mda_ntr_payment"
-                and spec.params.get("service_type") in {"mlhud_land_transfer", "nema_eia_prn"}
-            )
-        ):
-            continue
-
-        if spec.tool == "calculate_paye":
-            # Chain residency from determine_residency and FX salary / BIK values if available
-            paye_params = dict(spec.params)
-            res_out = tool_results.get("determine_residency")
-            if isinstance(res_out, dict) and res_out.get("ok"):
-                if res_out.get("status") == "resident" or res_out.get("likely_resident"):
-                    paye_params["residency"] = "resident"
-                elif res_out.get("status") == "non_resident" or res_out.get("likely_non_resident"):
-                    paye_params["residency"] = "non_resident"
-            fx_out = tool_results.get("convert_currency")
-            if "monthly_gross" not in paye_params and isinstance(fx_out, dict) and fx_out.get("ok"):
-                paye_params["monthly_gross"] = fx_out.get("ugx_amount")
-            if bik_results:
-                paye_params["benefits"] = [
-                    {
-                        "kind": b.get("kind", "benefit"),
-                        "monthly_value": b.get("monthly_value", 0.0),
-                        "verified": b.get("verified", True),
-                    }
-                    for b in bik_results
-                    if b.get("ok")
-                ]
-            if "monthly_gross" not in paye_params or paye_params["monthly_gross"] is None:
-                try:
-                    from decimal import Decimal
-                    from .tax.money import apply_bands
-                    from .tax.tables import get_table
-
-                    tbl = get_table()
-                    res_b = tbl["paye_bands_resident"]
-                    nonres_b = tbl["paye_bands_non_resident"]
-                    nil_ceil = res_b[0][1] or 0
-                    nonres_first_pct = nonres_b[0][2] * 100
-                    comp_threshold = Decimal(str(res_b[-2][0]))
-                    res_tax_at_comp, _ = apply_bands(comp_threshold, res_b)
-                    nonres_tax_at_comp, _ = apply_bands(comp_threshold, nonres_b)
-                    diff_monthly = nonres_tax_at_comp - res_tax_at_comp
-
-                    def _fmt_bands(bands: tuple[tuple[int, int | None, float], ...]) -> str:
-                        parts_b: list[str] = []
-                        for lo, hi, rate in bands:
-                            pct = round(rate * 100, 2)
-                            if hi is not None:
-                                parts_b.append(f"UGX {lo:,}–{hi:,}: {pct:g}%")
-                            else:
-                                parts_b.append(f"Above UGX {lo:,}: {pct:g}% marginal")
-                        return "; ".join(parts_b)
-
-                    bullet_lines.append(
-                        f"- PAYE Bands Comparison ({tbl.fiscal_year} — supersedes older FY2023-24/2024-25 UGX 235,000 tables; use ONLY these {tbl.fiscal_year} bands):\n"
-                        f"  * Resident monthly bands: {_fmt_bands(res_b)} (0% tax-free threshold up to UGX {nil_ceil:,.0f}).\n"
-                        f"  * Non-resident monthly bands: {_fmt_bands(nonres_b)} (NO tax-free threshold; {nonres_first_pct:.0f}% on the first UGX {nil_ceil:,.0f}).\n"
-                        f"  * Difference: above UGX {float(comp_threshold):,.0f}/month a non-resident pays exactly UGX {float(diff_monthly):,.0f}/month more than a resident."
-                    )
-                except Exception:
-                    pass
-                continue
-            spec = ToolCallSpec(spec.tool, params=paye_params, missing_inputs=spec.missing_inputs)
-
+    def _step(spec_: ToolCallSpec, outcome: str) -> None:
+        run.outcomes[outcome] += 1
+        if outcome in (STEP_FAILED, STEP_SKIPPED):
+            name = spec_.tool.replace("_", " ")
+            label = f"{name} ({spec_.label})" if spec_.label else name
+            if label not in run.not_computed:
+                run.not_computed.append(label)
         try:
-            res = caller(spec.tool, spec.params)
-        except Exception:
-            logger.debug("scenario_planner tool call failed for %s", spec.tool, exc_info=True)
-            continue
+            from .analytics import metrics
 
-        if not isinstance(res, dict):
-            continue
+            metrics.inc("plan_steps_total", labels={"outcome": outcome})
+        except Exception:  # noqa: BLE001 - telemetry must never fail a turn
+            logger.debug("plan_steps_total not recorded", exc_info=True)
 
-        if not res.get("ok"):
-            need = res.get("needs")
-            if need:
-                _add_needed(str(need).replace("_", " "))
-            continue
-
-        tool_results[spec.tool] = res
-        if spec.tool == "value_benefit_in_kind":
-            bik_results.append(res)
-
+    def _render_step(spec: ToolCallSpec, res: dict[str, Any]) -> None:
+        """Add one tool's lines to the block. Guarded per step by the caller."""
         # Render verified bullet line per tool
         if spec.tool == "determine_residency":
             st = res.get("status", "undetermined")
@@ -1492,6 +1454,165 @@ def build_verified_facts(
             expl = res.get("explanation") or format_calc_reply(spec.tool, res, [])
             bullet_lines.append(f"- {spec.tool}: {expl}")
 
+    for step_index, spec in enumerate(specs):
+        for m_in in spec.missing_inputs:
+            _add_needed(m_in)
+
+        if spec.tool == "value_benefit_in_kind" and not spec.missing_inputs:
+            if spec.params.get("kind") == "housing" and "monthly_gross" not in spec.params:
+                fx_out_h = fx_by_currency.get(salary_currency)
+                if isinstance(fx_out_h, dict) and fx_out_h.get("ok") and fx_out_h.get("ugx_amount"):
+                    h_p = dict(spec.params)
+                    h_p["monthly_gross"] = fx_out_h["ugx_amount"]
+                    spec = ToolCallSpec(spec.tool, params=h_p, label=spec.label)
+                else:
+                    spec = ToolCallSpec(
+                        spec.tool,
+                        params=spec.params,
+                        missing_inputs=["gross monthly salary in UGX"],
+                        label=spec.label,
+                    )
+                    _add_needed("gross monthly salary in UGX")
+
+        # Skip calling tools whose required inputs are already known to be missing
+        if spec.tool == "value_benefit_in_kind" and spec.missing_inputs:
+            kind = spec.params.get("kind", "benefit")
+            if kind == "car":
+                bullet_lines.append(
+                    "- Car benefit: statutory formula is (20% × A × B/C) − D (20% of market value A when first provided, "
+                    "depreciated at 35% p.a. reducing balance for subsequent years, multiplied by private-use days B / "
+                    "days in the year of income C (365), minus employee payment D; state 20% explicitly); ADDED to employment income "
+                    "(basis: TAXATION-HANDBOOK-FY-2025-26-1, s.12.2.3)."
+                )
+            elif kind == "housing":
+                bullet_lines.append(
+                    "- Housing benefit: lesser of (a) market rent less employee payment and (b) 15% of employment "
+                    "income (including paragraph (a)) for the year of income; ADDED to employment income "
+                    "[interpretation unverified] (basis: TAXATION-HANDBOOK-FY-2025-26-1, s.12.2.3)."
+                )
+            _step(spec, STEP_NEEDS_INPUT)
+            continue
+
+        if spec.missing_inputs and (
+            spec.tool == "simulate_tax_relief_and_instalments"
+            or (
+                spec.tool == "resolve_mda_ntr_payment"
+                and spec.params.get("service_type") in {"mlhud_land_transfer", "nema_eia_prn"}
+            )
+        ):
+            _step(spec, STEP_NEEDS_INPUT)
+            continue
+
+        if spec.tool == "calculate_paye":
+            # Chain residency from determine_residency and FX salary / BIK values if available
+            paye_params = dict(spec.params)
+            res_out = tool_results.get("determine_residency")
+            if isinstance(res_out, dict) and res_out.get("ok"):
+                if res_out.get("status") == "resident" or res_out.get("likely_resident"):
+                    paye_params["residency"] = "resident"
+                elif res_out.get("status") == "non_resident" or res_out.get("likely_non_resident"):
+                    paye_params["residency"] = "non_resident"
+            fx_out = fx_by_currency.get(salary_currency)
+            if "monthly_gross" not in paye_params and isinstance(fx_out, dict) and fx_out.get("ok"):
+                paye_params["monthly_gross"] = fx_out.get("ugx_amount")
+            if bik_results:
+                paye_params["benefits"] = [
+                    {
+                        "kind": b.get("kind", "benefit"),
+                        "monthly_value": b.get("monthly_value", 0.0),
+                        "verified": b.get("verified", True),
+                    }
+                    for b in bik_results
+                    if b.get("ok")
+                ]
+            if "monthly_gross" not in paye_params or paye_params["monthly_gross"] is None:
+                _step(spec, STEP_NEEDS_INPUT)
+                if salary_currency not in ("", "UGX"):
+                    _add_needed(f"exchange rate ({salary_currency} to UGX) on payment date")
+                try:
+                    from decimal import Decimal
+                    from .tax.money import apply_bands
+                    from .tax.tables import get_table
+
+                    tbl = get_table()
+                    res_b = tbl["paye_bands_resident"]
+                    nonres_b = tbl["paye_bands_non_resident"]
+                    nil_ceil = res_b[0][1] or 0
+                    nonres_first_pct = nonres_b[0][2] * 100
+                    comp_threshold = Decimal(str(res_b[-2][0]))
+                    res_tax_at_comp, _ = apply_bands(comp_threshold, res_b)
+                    nonres_tax_at_comp, _ = apply_bands(comp_threshold, nonres_b)
+                    diff_monthly = nonres_tax_at_comp - res_tax_at_comp
+
+                    def _fmt_bands(bands: tuple[tuple[int, int | None, float], ...]) -> str:
+                        parts_b: list[str] = []
+                        for lo, hi, rate in bands:
+                            pct = round(rate * 100, 2)
+                            if hi is not None:
+                                parts_b.append(f"UGX {lo:,}–{hi:,}: {pct:g}%")
+                            else:
+                                parts_b.append(f"Above UGX {lo:,}: {pct:g}% marginal")
+                        return "; ".join(parts_b)
+
+                    bullet_lines.append(
+                        f"- PAYE Bands Comparison ({tbl.fiscal_year} — supersedes older FY2023-24/2024-25 UGX 235,000 tables; use ONLY these {tbl.fiscal_year} bands):\n"
+                        f"  * Resident monthly bands: {_fmt_bands(res_b)} (0% tax-free threshold up to UGX {nil_ceil:,.0f}).\n"
+                        f"  * Non-resident monthly bands: {_fmt_bands(nonres_b)} (NO tax-free threshold; {nonres_first_pct:.0f}% on the first UGX {nil_ceil:,.0f}).\n"
+                        f"  * Difference: above UGX {float(comp_threshold):,.0f}/month a non-resident pays exactly UGX {float(diff_monthly):,.0f}/month more than a resident."
+                    )
+                except Exception:
+                    pass
+                continue
+            spec = ToolCallSpec(spec.tool, params=paye_params, missing_inputs=spec.missing_inputs)
+
+        if time.monotonic() >= deadline:
+            logger.warning("Plan deadline reached before %s", spec.tool)
+            _step(spec, STEP_SKIPPED)
+            continue
+        admission = budget.admit(spec.tool, spec.params, iteration=step_index)
+        if admission.admission is Admission.DENIED:
+            _step(spec, STEP_SKIPPED)
+            continue
+
+        if admission.admission is Admission.REPEAT:
+            res = admission.result
+        else:
+            try:
+                res = caller(spec.tool, spec.params)
+            except Exception as exc:  # noqa: BLE001 - one step must not cost the whole plan
+                logger.warning("Planned tool %s failed: %s", spec.tool, type(exc).__name__)
+                _step(spec, STEP_FAILED)
+                continue
+            budget.record(spec.tool, spec.params, res)
+
+        if not isinstance(res, dict):
+            _step(spec, STEP_FAILED)
+            continue
+
+        if not res.get("ok"):
+            need = res.get("needs")
+            if need:
+                _add_needed(str(need).replace("_", " "))
+                _step(spec, STEP_NEEDS_INPUT)
+            else:
+                logger.warning("Planned tool %s returned an error", spec.tool)
+                _step(spec, STEP_FAILED)
+            continue
+
+        tool_results[spec.tool] = res
+        if spec.tool == "convert_currency":
+            fx_by_currency[str(res.get("currency") or spec.params.get("currency") or "")] = res
+        if spec.tool == "value_benefit_in_kind":
+            bik_results.append(res)
+
+        try:
+            _render_step(spec, res)
+        except Exception as exc:  # noqa: BLE001 - one bad result must not cost the other figures
+            logger.warning("Planned tool %s could not be rendered: %s", spec.tool, type(exc).__name__)
+            _step(spec, STEP_FAILED)
+            continue
+        _step(spec, STEP_OK)
+
     # Run premise/fact contradiction checks and prepend them so the model addresses them first
     contradictions = check_fact_contradictions(eff_facts, tool_results)
     contradiction_lines = [f"- {c.format_bullet()}" for c in contradictions]
@@ -1522,6 +1643,11 @@ def build_verified_facts(
             "applies to commercial/business asset transactions rather than a purely personal non-business land sale."
         )
 
+    if run.not_computed:
+        bullet_lines.append(
+            f"- Not calculated: {', '.join(run.not_computed)}. The calculation could not be "
+            "completed just now, so no figure is available for it; do not estimate one."
+        )
     if still_needed:
         bullet_lines.append(f"- Still needed for an exact figure: {'; '.join(still_needed)}.")
 

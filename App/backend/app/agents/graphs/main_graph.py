@@ -346,17 +346,14 @@ def bind_arguments(tool_name: str, state: AgentGraphState) -> dict[str, object] 
         "calculate_presumptive_tax",
     ):
         try:
-            import re
-            from ...tax.money import parse_money_amount
+            from ...calculator_router import extract_amounts
 
-            match = re.search(
-                r"\b(\d[\d,]*(?:\.\d+)?\s*(?:m|k|bn|million|billion|thousand|bukadde|mitwalo)?)\b",
-                query,
-                re.I,
-            )
-            if match:
-                parsed = parse_money_amount(match.group(1))
-                if parsed is not None and parsed > 0:
+            # Only an unambiguous figure binds. The first number in the question
+            # was once taken, so "In 2026, VAT on 500,000" computed VAT on 2026.
+            amounts = extract_amounts(query)
+            if len(amounts) == 1:
+                parsed = amounts[0][0]
+                if parsed > 0:
                     params: dict[str, Any] = {}
                     for p in required:
                         if p in ("amount", "net_amount", "gross_amount", "value", "payment"):

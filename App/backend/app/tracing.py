@@ -51,7 +51,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Mapping
+    from collections.abc import Callable, Generator, Mapping
 
 logger = logging.getLogger(__name__)
 
@@ -339,6 +339,27 @@ def trace_stage(
             span.set_attribute(f"rag.{name}.duration_ms", duration_ms)
             if timings is not None:
                 timings[name] = duration_ms
+
+
+@contextmanager
+def trace_plan() -> Generator[Callable[[str, int], None], None, None]:
+    """``plan`` span around task decomposition; yields ``annotate(digest, step_count)``.
+
+    The operation is the well-known ``plan`` value from the GenAI conventions
+    (Development status). It wraps the deterministic planner only, because that
+    is the phase which can be told apart reliably from generation.
+    """
+    if _tracer is None:
+        yield lambda _digest, _steps: None
+        return
+    attributes = {"gen_ai.operation.name": "plan", "gen_ai.agent.name": AGENT_NAME}
+    with _tracer.start_as_current_span(f"plan {AGENT_NAME}", attributes=attributes) as span:
+
+        def annotate(digest: str, steps: int) -> None:
+            span.set_attribute("ura.plan.sha256", digest)
+            span.set_attribute("ura.plan.step_count", steps)
+
+        yield annotate
 
 
 class LLMCall:

@@ -291,9 +291,14 @@ def _scoped_conversation_state(method: Callable[..., Any]) -> Callable[..., Any]
         token = _ACTIVE_CONVERSATION_STATE.set(state_id)
         tenant_token = _ACTIVE_TENANT_ID.set(values.get("tenant_id") or "default")
         facts_ctx_reset = _ACTIVE_CASE_FACTS.set(None)
+        # A streamed turn opened this scope already, and its guards run after
+        # this wrapper returns, so they must see the same plans.
+        plans_reset = _TURN_PLANS.set({}) if _TURN_PLANS.get() is None else None
         try:
             return method(*bound.args, **bound.kwargs)
         finally:
+            if plans_reset is not None:
+                _TURN_PLANS.reset(plans_reset)
             _ACTIVE_CASE_FACTS.reset(facts_ctx_reset)
             _ACTIVE_TENANT_ID.reset(tenant_token)
             _ACTIVE_CONVERSATION_STATE.reset(token)
@@ -1067,16 +1072,44 @@ def _with_live_check_disclosure(reply: str, disclosure: str) -> str:
     return f"{reply.rstrip()}\n\n{disclosure}"
 
 
-def _evaluate_calculation_context(query: str, facts: Any = None) -> str:
-    """Build the verified statutory facts & calculations block via :mod:`app.scenario_planner`."""
-    from .scenario_planner import build_verified_facts
+#: A turn's executed plans, so prompt building and verification share one run.
+_TURN_PLANS: contextvars.ContextVar[dict[str, tuple[str, dict[str, Any]]] | None] = contextvars.ContextVar(
+    "_turn_plans", default=None
+)
 
+
+def _turn_plan_summary() -> dict[str, Any]:
+    """The audit record of this turn's plan: the last one that had any steps."""
+    for _, summary in reversed(list((_TURN_PLANS.get() or {}).values())):
+        if summary.get("sha256"):
+            return summary
+    return {}
+
+
+def _evaluate_calculation_context(query: str, facts: Any = None) -> str:
+    """Build the verified statutory facts & calculations block via :mod:`app.scenario_planner`.
+
+    Called while building the prompt and again while verifying the reply. Running
+    the plan twice paid for every live FX step twice, and let the two disagree
+    when a source failed in between, so a reply could be judged against figures
+    the model never saw. The first run of a turn is the run.
+    """
+    from .scenario_planner import PlanRunReport, build_verified_facts
+
+    plans = _TURN_PLANS.get()
+    key = " ".join(str(query or "").lower().split())
+    if plans is not None and key in plans:
+        return plans[key][0]
+    report = PlanRunReport()
     try:
         eff_facts = facts if facts is not None else _ACTIVE_CASE_FACTS.get()
-        return build_verified_facts(query, eff_facts)
-    except Exception:
-        logger.debug("build_verified_facts failed", exc_info=True)
-        return ""
+        block = build_verified_facts(query, eff_facts, report=report)
+    except Exception as exc:  # noqa: BLE001 - the answer proceeds and the failure is on record
+        logger.warning("build_verified_facts failed: %s", type(exc).__name__)
+        block = ""
+    if plans is not None:
+        plans[key] = (block, report.summary())
+    return block
 
 
 def _is_non_t1_endpoint(endpoint: Any) -> bool:
@@ -2110,6 +2143,7 @@ async def run_chat_turn(
     # stream's redaction, and the TIN a taxpayer asked about came back as
     # [REDACTED_UG_TIN] (G143, G154).
     _ACTIVE_USER_STATED_IDS.set(user_stated_identifiers(str(kwargs.get("message") or "")))
+    _TURN_PLANS.set({})
     with turn_usage_scope() as usage, turn_attributes_scope():
         async for event_type, payload in _run_chat_turn_events(model, **kwargs):
             if event_type == "error":
@@ -11530,7 +11564,7 @@ class ChatModel:
                 from .scenario_planner import plan_tools
 
                 active_cf = _ACTIVE_CASE_FACTS.get()
-                planned_specs = plan_tools(rewritten, active_cf)
+                planned_specs = plan_tools(router_rewritten or rewritten, active_cf)
                 has_premise_contra = bool(check_fact_contradictions(active_cf))
                 eff_route_conf = (
                     1.0
@@ -11565,7 +11599,7 @@ class ChatModel:
                 from .scenario_planner import plan_tools
 
                 active_cf = _ACTIVE_CASE_FACTS.get()
-                planned_specs = plan_tools(rewritten, active_cf)
+                planned_specs = plan_tools(router_rewritten or rewritten, active_cf)
                 has_premise_contra = bool(check_fact_contradictions(active_cf))
                 tier_decision = select_tier(
                     "rag",
@@ -12959,8 +12993,13 @@ class ChatModel:
         (:py:meth:`record_turn_audit`), so its reply digest is of the text
         the taxpayer received.
         """
+        from .turn_pipeline import attest_turn
+
         trace_ctx = trace_ctx or {}
         result["current_topic"] = str(trace_ctx.get("current_topic") or "")
+        result["_attestation"] = attest_turn(trace_ctx.get("timings") or {}, transport="rest")
+        # Taken here because the plan scope closes before the ledger row is written.
+        result["_plan"] = _turn_plan_summary()
         if trace_ctx.get("connectors_used"):
             result.setdefault("connectors_used", list(trace_ctx["connectors_used"]))
         _PENDING_TURN_AUDIT.set(
@@ -12998,6 +13037,7 @@ class ChatModel:
         from .audit.turns import append_turn
 
         enriched = dict(result) if isinstance(result, dict) else {}
+        enriched.setdefault("_plan", _turn_plan_summary())
         enriched.setdefault("figure_fidelity_passed", not bool(enriched.get("figure_fidelity_rescued", False)))
         enriched.setdefault(
             "policy_adherence_passed",
@@ -13560,7 +13600,7 @@ class ChatModel:
             from .scenario_planner import plan_tools
 
             active_cf_s = _ACTIVE_CASE_FACTS.get()
-            planned_specs_s = plan_tools(rewritten, active_cf_s)
+            planned_specs_s = plan_tools(router_rewritten or rewritten, active_cf_s)
             has_premise_contra_s = bool(check_fact_contradictions(active_cf_s))
         if flags.is_enabled("agentic_mode"):
             route_decision = supervisor.classify(
