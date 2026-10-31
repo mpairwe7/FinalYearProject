@@ -28,7 +28,7 @@ App/
 │   │   ├── speech_service.py # SpeechModel (ASR/Whisper + TTS/Piper + MT + Sunbird fallback)
 │   │   ├── service.py       # ChatModel (RAG orchestrator + agentic routing)
 │   │   ├── llm.py           # Qwen3-8B vLLM + local generation + tool-calling
-│   │   ├── flags.py         # Feature flag registry (85 flags, cohort rollout)
+│   │   ├── flags.py         # Feature flag registry (87 flags, cohort rollout)
 │   │   ├── agents/          # Supervisor router + agent graph runtime
 │   │   ├── tools/           # 72 MCP tools across 18 namespaces (calculators, 10-MDA NTR/PRN, onboarding, B2G/UESW, relief, EFRIS, rates, calendar, RAG, education, empathy, escalate, connectors)
 │   │   ├── workflows/       # 21 YAML-driven guided journeys (TIN, filing, PRN, Cross-MDA NTR, New-Taxpayer Relief, TCC, objections, customs) + Journey Copilot

@@ -158,6 +158,13 @@ translation and retried unmasked when the tier mangles the sentinels.
 | Metric | Labels | Meaning |
 | --- | --- | --- |
 | `ura_audit_append_failed_total` | `event_type` | Ledger appends that failed — including `generate` (answers) |
+| `ura_circuit_breaker_state` | `breaker` | 0 closed, 1 half-open, 2 open |
+| `ura_circuit_breaker_transitions_total` | `breaker`, `to` | Every state change |
+| `ura_circuit_breaker_probes_lost_total` | `breaker` | Half-open probes reclaimed by the lease: a call path that never reported |
+| `ura_autonomy_gate_faults_total` | `stage` (`evaluate`/`audit`) | The gate could not decide, or could not record a refusal |
+| `ura_turn_degraded_total` | `reason` | Answers that carry a disclosure of what they could not do |
+| `ura_turn_deadline_exceeded_total` | `stage` (`stream`/`generation`/`agentic`) | Work stopped at the turn deadline |
+| `ura_figure_lock_checks_total` | `mode` (`enforced`/`shadow`), `outcome` (`pass`/`reject`/`skipped`/`error`) | Figure lock verdicts; `ura:figure_lock:shadow_reject_ratio_1d` is the evidence for G360 |
 | `ura_audit_seals_total`, `ura_audit_seal_failed_total` | `trigger` | Seals made / failed |
 | `ura_audit_last_seal_timestamp_seconds` | — | Last successful seal |
 | `ura_audit_chain_breaks_total` | `scope` | Integrity check found a break |
@@ -408,6 +415,11 @@ the edge if it continues.
 `ura_plan_steps_total{outcome}`, `ura_turn_pipeline_attestations_total{transport,ok}` and
 `ura_turn_stage_sla_breaches_total{stage}`. See
 [Operating the live check](runbooks/live-web-research-and-qdrant-sync.md#6-operating-the-live-check).
+
+### Agent resilience
+
+`CircuitBreakerOpen`, `CircuitBreakerProbeLost`, `AutonomyGateFaulting`, `AnswersDegraded`
+and `TurnsHittingDeadline`. See the [fault tolerance runbook](runbooks/agent-fault-tolerance.md).
 
 ### Dependencies
 

@@ -159,7 +159,7 @@ Evaluated across 16 Ugandan tax heads (`paye`, `vat`, `withholding`, `rental`, `
 - **Database**: SQLite WAL (default) or PostgreSQL (opt-in), 11 tables
 - **Auth**: JWT (HS256 dev / RS256 OIDC prod), 5 RBAC roles
 - **Container**: Docker (non-root, read-only filesystem)
-- **Feature flags**: 85 env-backed flags for progressive rollout
+- **Feature flags**: 87 env-backed flags for progressive rollout
 
 ### Performance (SLO Targets)
 - p95 latency: < 2s for /v1/chat
@@ -191,6 +191,13 @@ Evaluated across 16 Ugandan tax heads (`paye`, `vat`, `withholding`, `rental`, `
    validation, mandatory portal API digest enforcement, reviewed translations and
    authenticated staging acceptance remain open in the
    [UI integration audit](plans/intelligent-ui-integration-audit-2026-10.md).
+7. **Figure verification (2026-10-31)**: every figure in a reply is traced to the question,
+   verified facts, passages or a tool result on every transport, and a streamed figure is
+   held until checked (`stream_figure_hold`, on). The lock enforces on the reasoning tier
+   and under `evaluator_optimizer`. On other tiers it only measures, so a figure that does
+   not contradict a passage can still be shown (G360). Number words in Ugandan languages are
+   not held (G364). When every model tier fails, the reply is an official passage labelled
+   as a fallback. See [ADR-0022](adr/0022-control-integrity-turn-accounting-and-verified-release.md).
 
 ---
 

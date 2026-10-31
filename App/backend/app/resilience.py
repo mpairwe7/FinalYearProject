@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 #: How long a half-open probe may stay unreported before it is presumed lost.
-#: Longer than any single call a breaker guards (the reasoner's 90 s deadline),
+#: Longer than any single call a breaker guards (the reasoner runs up to 90 s),
 #: so a slow probe is not replaced while it is still working.
 DEFAULT_PROBE_TIMEOUT_S = 120.0
 

@@ -70,7 +70,7 @@ TTS (`Sunbird/orpheus-3b-tts-multilingual` streaming sidecar + `Spark-TTS-SALT` 
 - **Memory system** — 4-tier cognitive memory (working, episodic, semantic, procedural) + multi-case `ResolutionLedger` and `HandoffEnvelope` v2.1 (`memory/` directory)
 - **Audit ledger** — hash-chained, Merkle tree proofs, and `ActionAuditRecord` v3 with `InteractionQualityScorecard` (`audit/`
 directory)
-- **Feature flags** — 85 flags via `flags.py`, with percentage / cohort / allowlist rollout
+- **Feature flags** — 87 flags via `flags.py`, with percentage / cohort / allowlist rollout
 - **MCP 2026-07-28** — spec `_meta`, `Mcp-Name` check, MRTR `inputRequests`,
   shared idempotency. Decision log:
   `App/docs/traceability/mcp-hardening-2026-08-17.md`.
@@ -640,19 +640,62 @@ Reviewed on branch `fix/agentic-planner-web-assurance-2026-10-31`; [evidence, so
 | G322 🟢 | ~~Time-sensitive answers were cached for an hour.~~ | Fixed: such turns neither read nor write the semantic cache. |
 | G323 🟢 | ~~FX: disagreeing sources served, stale mirror accepted, a constant labelled as a BoU rate, forged consent cookie, redirects unchecked.~~ | Fixed: fail closed, BoU precedence, market quotes labelled estimates. |
 | G324 🟢 | ~~Planner: failed steps vanished, one render error lost every figure, the plan ran twice per turn with no budget or deadline.~~ | Fixed: `PlanRunReport`, "Not calculated" lines, one budgeted run, plan digest in the audit row. |
-| G325 🟡 | The ASI10 "every turn" claim ran only in tests. | Part fixed: `attest_turn` covers REST with real timings. Open: SSE records no stage timings, so it is not attested. |
+| G325 🟢 | ~~The ASI10 "every turn" claim ran only in tests.~~ | Fixed by G350: streamed turns are attested from real stage timings. Was: SSE records no stage timings, so it is not attested. |
 | G326 ⚪ | No sanctioned search provider is configured or funded, and no transfer assessment exists. | Open: service owner and DPO. Until then production reports a disclosed `unavailable`. |
 | G327 ⚪ | No verified Bank of Uganda rate is available; ITA s.57 text unconfirmed (both sites unreachable from review). | Open: tax policy and data owner. |
 | G328 ⚪ | Recency cues are English; other locales depend on translation. | Open: reviewed vernacular vocabulary, not invented terms. |
 | G329 ⚪ | Notices published as HTML stay `unconfirmed`: pages are not opened. | Open: backend, after confirming the listing structure. |
 | G330 🟢 | ~~Threat T43 claimed a pre-connect DNS check that did not exist.~~ | Fixed and reworded: it narrows rebinding, it does not close it. |
 | G331 🟡 | `auto_qdrant_web_sync` can change the corpus from a user turn (ASI06), and one compose overlay defaults it on. | Part fixed: production also needs `WEB_SYNC_PRODUCTION_APPROVED`. Open: review of each change before it applies. |
-| G332 ⚪ | Graph: no `thread_id` so checkpoints never run, and `node_synthesize` skips the claim verifier. | Open: keep `langgraph` off until resolved. |
+| G332 🟢 | ~~Graph: no `thread_id` so checkpoints never run, and `node_synthesize` skips the claim verifier.~~ | Fixed by G351 and G352: graph answers pass the output guards. Checkpoints stay unwired on purpose: turns are single-request, and the store is safe if that changes. |
 
 Two probe bugs were found and corrected rather than reported as defects: `invoic`
 and `regist` were asserted as stems against a token-boundary matcher, so
 "Invoicing" and "registered" could never satisfy them. The service was right both
 times. Recorded because the same mistake in the repo harness is what G40 was.
+
+### Orchestrator, reasoner and resilience assurance — 2026-10-31
+
+Reviewed on branch `fix/agentic-orchestrator-resilience-assurance-2026-10-31`; [evidence, sources and acceptance](plans/agentic-orchestrator-resilience-assurance-2026-10-31.md), ADR-0022, [runbook](runbooks/agent-fault-tolerance.md).
+
+| Gap | Finding | Status |
+| --- | --- | --- |
+| G333 🟢 | ~~A critical action refused by the gate ran when the audit write failed.~~ | Fixed: decision and record are separate; a gate that cannot decide fails closed. |
+| G334 🟢 | ~~The gate rated 17 of 72 tools below their declared tier; 14 of its 24 names are not tools.~~ | Fixed: `ToolSchema.risk` is the floor; an unrated action is held as high. |
+| G335 🟢 | ~~With gates on, `escalate_to_human` was refused and informational tools were held.~~ | Fixed: human oversight cannot be gated; keywords do not override a declaration. |
+| G336 🟢 | ~~The ledger recorded "proposed" for calls that had run.~~ | Fixed: the record states the decision taken. |
+| G337 🟢 | ~~A tool that raised left no audit row.~~ | Fixed. |
+| G338 🟢 | ~~The escalate tool wrote a ticket with no conversation or owner, and told nobody, while promising an officer.~~ | Fixed: `ESCALATION_ROUTE` through `_maybe_create_ticket`. |
+| G339 🟢 | ~~Every ticket was labelled `default`, and an open ticket could be reused across tenants.~~ | Fixed. |
+| G340 🟢 | ~~"Awaiting an officer" reached no officer.~~ | Fixed: a held action opens a ticket. |
+| G341 🟢 | ~~A half-open breaker could refuse forever after a closed tab, a budget refusal or a reasoner fallback, with nothing logged.~~ | Fixed: the probe is a lease; `release()`, `admit()`. |
+| G342 🟢 | ~~A down reasoner cost every turn its deadline.~~ | Fixed: its own breaker. |
+| G343 🟢 | ~~An abandoned tool loop kept dispatching, and the agentic stream ignored disconnects and the deadline.~~ | Fixed: `CancelScope`. In-flight calls complete; see G368. |
+| G344 🟢 | ~~Translation and guards blocked the event loop, freezing every stream on a worker.~~ | Fixed. |
+| G345 🟢 | ~~No deadline covered retrieval, and REST had none.~~ | Fixed: one deadline across stages and transports. |
+| G346 🟢 | ~~A cancelled stream counted as a model failure and made a paid cloud call; a broken stream appended a second answer.~~ | Fixed. |
+| G347 🟢 | ~~Parallel tool calls ran duplicates, overlapped side effects, lost context and raced the budget.~~ | Fixed. |
+| G348 🟢 | ~~Breaker state was visible only in logs.~~ | Fixed: metrics and alerts. |
+| G349 🟢 | ~~Failed, cancelled and deadline turns left no audit row.~~ | Fixed: `disposition` on every row, payload schema 3. |
+| G350 🟢 | ~~Attestation supplied Stage 6 itself, and streamed turns were not attested.~~ | Fixed: model text needs a guard stage. |
+| G351 🟢 | ~~Graph answers skipped the output guards.~~ | Fixed. |
+| G352 🟢 | ~~Checkpoints had no retention, erasure or owner binding; a corrupt outcome read as answered.~~ | Fixed. |
+| G353 🟢 | ~~A contradicted figure was on screen before it was withheld.~~ | Fixed: `FigureReleaseGate`. |
+| G354 🟡 | The figure lock never ran on the stream, rejected correct calculator figures, and skipped a kind of figure the sources lacked. | Fixed on every transport for T3 and `evaluator_optimizer`. Measuring elsewhere: G360. |
+| G355 🟢 | ~~Slots bound near-synonyms (turnover as chargeable income) and identifiers from tool output.~~ | Fixed: exact meanings; the reply names what was assumed. |
+| G356 🟢 | ~~A truncated tool loop looked finished.~~ | Fixed. |
+| G357 🟢 | ~~A model-chosen tool route opened every eligible tool, with no time limit.~~ | Fixed: closed read-only list and a timeout. |
+| G358 🟢 | ~~A raw passage served because generation failed carried no notice.~~ | Fixed. |
+| G359 🟢 | ~~The ledger could not say what wrote an answer or whether it left Uganda.~~ | Fixed: a `generation` block. |
+| G360 ⚪ | Enforcing the figure lock on T1 and cloud answers. | Open: service owner and tax policy, on `ura:figure_lock:shadow_reject_ratio_1d` plus a reviewed sample. |
+| G361 ⚪ | `intent_confidence` is a constant, so the gate's 0.80 floor is inert. | Open: needs calibrated confidence (G367). |
+| G362 ⚪ | Ticket APIs apply no tenant filter; `same_tenant` has no callers. | Open: tenancy decision first, since filtering could hide tickets. |
+| G363 ⚪ | Confirmation exists only on the WebSocket. | Open: on SSE and REST a proposal cannot be approved. Nothing runs. |
+| G364 ⚪ | The release gate reads digits and English number words only. | Open: reviewed vernacular vocabulary. |
+| G365 ⚪ | The receptionist's direct model call has no breaker; a DNS outage can spend its 25 s budget. | Open: backend. |
+| G366 ⚪ | No write-ahead record for high-risk actions. | Open: backend and audit. |
+| G367 ⚪ | Supervisor confidences are uncalibrated constants that tier selection reads. | Open: backend and evaluation. |
+| G368 ⚪ | After a reasoner timeout, T1 can repeat a tool call that was in flight. | Open: tickets dedupe; other tools rely on idempotency keys. |
 
 **Open follow-ups.**
 

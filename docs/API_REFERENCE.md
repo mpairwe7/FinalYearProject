@@ -226,8 +226,9 @@ POST /v1/chat/stream
 |-------|------|-------------|
 | `phase` | string | What the server is doing right now — see the table below |
 | `metadata` | JSON | Sources, citations, retrieval mode, locale, and `turn_id` — the answer's id in the conversation log, which a rating sends back (sent first). Carries `connector_notices` (as on `/v1/chat`) when a chosen connector was left out of the turn |
-| `token` | string | Generated text chunk (sanitized, XSS-safe) |
+| `token` | string | Generated text chunk (sanitized, XSS-safe). With `stream_figure_hold` on, text from the sentence holding the first figure arrives only after the output guards have read it, so a reply may pause and then finish in one chunk |
 | `revision` | string | The **whole** reply, replacing what was streamed so far |
+| `deadline_exceeded` | empty | The turn was stopped at its deadline. Its notice has already arrived as a `token`, and `done` follows. Safe to ignore |
 | `agent_trace` | JSON | Buffered retrieval/tool trace, emitted just before `grounding`. A `tool_call.completed` entry for a connector carries `connector`, `connector_mode` (`simulation`/`live`), `connector_label` and `connector_outcome` (`found`, `no_record`, `needs_input`, `unavailable`) — never arguments or the record |
 | `grounding` | JSON | `faithfulness_score`, `escalation_required`, `escalation_reason` |
 | `done` | empty | Stream complete |

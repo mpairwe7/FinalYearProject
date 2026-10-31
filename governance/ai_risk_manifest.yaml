@@ -104,6 +104,7 @@ nist_ai_rmf:
       verified_by:
         - "tests/test_monitoring_config.py::test_slo_objectives_match_the_burn_rate_rules"
         - "tests/test_observability_integration.py::test_streamed_turn_is_audited_and_counted"
+        - "tests/agents/test_turn_terminal_contract.py"
       gap: "Formal decommission runbook"
 
 # =============================================================================
@@ -260,7 +261,10 @@ owasp_llm_2026_crosswalk:
       project_status: "mitigated"
 
 # =============================================================================
-# EU AI Act Compliance (full applicability 2 Aug 2026)
+# EU AI Act Compliance. An engineering reference: the Act does not bind URA.
+# Annex III high-risk obligations moved from 2 Aug 2026 to 2 Dec 2027 under the
+# Digital Omnibus on AI (Regulation (EU) 2026/1744). Source: Orrick, 29 Jul 2026,
+# a secondary source; the Official Journal text could not be read on 2026-10-31.
 # Reference: https://digital-strategy.ec.europa.eu/en/policies/regulatory-framework-ai
 # =============================================================================
 eu_ai_act:
@@ -295,13 +299,15 @@ eu_ai_act:
     - requirement: "Logging of AI system operation (Art. 12-style traceability; ISO/IEC 42001 A.6.2.8)"
       status: "implemented"
       evidence: >
-        App/backend/app/audit/turns.py — one hash-chained `generate` row per answer on every
-        transport (REST, SSE, WebSocket, voice, calls) with sources, citation digests, build,
-        prompt and corpus provenance; App/backend/app/audit/tsa.py — RFC 3161 timestamps on
+        App/backend/app/audit/turns.py — one hash-chained `generate` row per turn on every
+        transport (REST, SSE, WebSocket, voice, calls), including turns that failed or were
+        cut short, with a disposition, what generated the reply, sources, citation digests,
+        build, prompt and corpus provenance; App/backend/app/audit/tsa.py — RFC 3161 timestamps on
         seals; structured logs with request and trace ids (App/backend/app/logging_config.py).
       verified_by:
         - "tests/test_observability_integration.py::test_rest_turn_is_audited_with_the_served_reply"
         - "tests/test_observability_integration.py::test_streamed_turn_is_audited_and_counted"
+        - "tests/agents/test_turn_terminal_contract.py"
         - "App/backend/tests/test_audit_tsa.py::test_seal_is_timestamped_and_verified"
 
 # =============================================================================
@@ -416,14 +422,15 @@ devsecops_threat_modelling:
       evidence: ".pre-commit-config.yaml, .github/workflows/secret-scanning.yml"
 
   threat_registry:
-    total_threats: 45
+    total_threats: 52
     stride_coverage: "6/6 categories"
-    owasp_llm_coverage: "10/10 (LLM06 → T28, T30–T34, T37, T42, T44)"
-    mitre_atlas_techniques: 14
-    mitre_atlas_mappings: 28
+    owasp_llm_coverage: "10/10 (LLM06 → T28–T30, T32, T34, T36, T38, T39, T42, T44, T48, T49)"
+    mitre_atlas_techniques: 17
+    mitre_atlas_mappings: 41
     statuses:
-      mitigated: 44
+      mitigated: 50
       accepted: 1
+      in_progress: 1
     validation: "CI gate in .github/workflows/devsecops-sast-dast.yml and .github/workflows/threat-model.yml"
 
 # =============================================================================
@@ -446,10 +453,12 @@ owasp_agentic_2026:
     - id: "ASI02"
       name: "Tool Misuse and Exploitation"
       status: "mitigated"
+      control_integrity: "ADR-0022: a tool's declared tier is the floor of the autonomy gate, a gate that cannot decide fails closed, a refusal does not depend on its record, and every call is recorded as what actually happened, including failures (G333, G334, G336, G337). Calls with effects run one at a time. Limitation: intent_confidence is a constant, so the 0.80 floor is inert (G361)."
       live_web_assurance: "ADR-0021: planned tools run under ToolCallBudget and a wall-clock deadline; the route decision binds REST as well as SSE (G309)."
       evidence: "App/backend/app/scenario_planner.py, App/backend/app/mcp/policy.py, App/backend/app/mcp/mrtr.py, App/backend/app/mcp/validation.py, App/backend/app/portal_copilot.py, App/backend/app/tools/__init__.py"
       controls: "Allow-listed ToolRegistry and MCP policy engine with per-tool risk tiers, required scopes, context-bound HMAC-SHA256 requestState (_binding), user-scoped idempotency conflict detection, pre-authz schema coercion, 4-tier portal task policy engine (ADR-0014, ADR-0015), and bounded tool-call budgets"
       verified_by:
+        - "tests/agents/test_autonomy_gate_contract.py"
         - "tests/agents/test_plan_execution_contract.py"
         - "tests/agents/test_supervisor_route_contract.py"
         - "App/backend/tests/test_mcp_policy.py"
@@ -458,17 +467,20 @@ owasp_agentic_2026:
     - id: "ASI03"
       name: "Identity and Privilege Abuse"
       status: "mitigated"
+      control_integrity: "ADR-0022: an identifier never binds from a tool's output, a suspended thread can only be resumed by its owner, and tickets keep their tenant (G339, G352, G355). Limitation: ticket APIs apply no tenant filter (G362)."
       receptionist_assurance: "ADR-0020: revoke media before requeue, terminate on revocation failure; preserve tenant on wrap-up tickets. Self-hosted token replay remains G303; session expiry remains G304."
       evidence: "App/backend/app/auth.py, App/backend/app/main.py"
       controls: "Strict role separation (_require_live_officer, _desk_writer) ensuring only ura_staff handle live taxpayer queues/calls while admins/auditors are read/audit-only; guided-workflow state adopted on sign-in only from the anonymous session the request proves (compare-and-swap re-key), with signed-in state decided per request (ADR-0013); case facts, calculator memory and workflow lookups bound to the same owner-scoped key, with no bare-conversation-id fallback (ADR-0013 A)"
       verified_by:
         - "tests/agents/test_auth.py"
+        - "tests/agents/test_reasoner_integrity.py"
+        - "tests/agents/test_graph_orchestrator_contract.py"
         - "tests/agents/test_journey_copilot_session_binding.py"
         - "tests/agents/test_conversation_state_owner_binding.py"
         - "App/backend/tests/test_receptionist_assurance.py"
         - "tests/test_answer_integrity_integration.py"
     - id: "ASI04"
-      name: "Agentic Supply Chain"
+      name: "Agentic Supply Chain Vulnerabilities"
       status: "mitigated"
       evidence: "governance/ai_risk_manifest.yaml, App/backend/app/mcp/client.py"
       controls: "Pinned model and dependency manifests (aibom_inventory), Mcp-Name verification, disabled dynamic remote MCP registration, SLSA/Trivy CI gates, SHA-pinned actions with zizmor/actionlint gate, digest-pinned base images, Dependabot cooldown, and Sigstore-signed images (ADR-0011)"
@@ -485,7 +497,7 @@ owasp_agentic_2026:
         - "App/backend/tests/test_pdf_guards.py"
         - "tests/agents/test_ephemeral_pdf_sandbox.py"
     - id: "ASI06"
-      name: "Memory and Context Poisoning"
+      name: "Memory & Context Poisoning"
       status: "mitigated"
       live_web_assurance: "ADR-0021: time-sensitive turns neither read nor write the semantic cache. auto_qdrant_web_sync can change the corpus from a user turn, and a compose overlay defaults it on, so production also requires WEB_SYNC_PRODUCTION_APPROVED. Outside production the flag alone suffices. A human review step for each change remains open (G331)."
       evidence: "App/backend/app/web_research.py, App/backend/app/memory/service.py, App/backend/app/officer_handoff.py, App/backend/app/memory/procedural.py"
@@ -503,14 +515,17 @@ owasp_agentic_2026:
       verified_by:
         - "tests/agents/test_phase38_cx.py"
     - id: "ASI08"
-      name: "Cascading Agent Failures"
+      name: "Cascading Failures"
       status: "mitigated"
+      control_integrity: "ADR-0022: the half-open probe is a lease so no caller can wedge a dependency; each tier has its own breaker; one deadline bounds every stage on every transport; a cancel scope stops an abandoned tool loop; blocking work runs off the event loop (G341 to G348). Limitation: the receptionist's direct model call has no breaker (G365)."
       live_web_assurance: "ADR-0021: search providers fail over behind a breaker each, under a turn deadline and a bulkhead pool; one failed planned step costs only that step. Hosted adapters are unproven against live APIs (G326)."
       receptionist_assurance: "ADR-0020: cleanup independent of reporting, current-task-safe timer cancellation, cooperative media shutdown deadlines. Durable reconciliation and process-loss recovery remain G306."
       evidence: "App/backend/app/web_search_providers.py, App/backend/app/resilience.py, App/backend/app/quality_circuit_breaker.py, App/frontend/src/lib/chatStream.ts, App/frontend/src/app/page.tsx"
       controls: "Provider circuit breakers, bounded ReAct/revision loops, and runtime quality circuit breaker throttling autonomy on grounding degradation. Bounded SSE requires explicit completion; ambiguous stateful chat failures are not automatically replayed; response writes are conversation-bound (ADR-0018)."
       limitations: "Distributed execution and authenticated proxy/staging probes remain UI-10; local browser tests use a mocked backend."
       verified_by:
+        - "tests/agents/test_fault_tolerance_contract.py"
+        - "tests/chaos/test_failure_modes.py"
         - "tests/agents/test_web_search_providers.py"
         - "App/backend/tests/test_resilience.py"
         - "App/backend/tests/test_receptionist_assurance.py"
@@ -519,12 +534,15 @@ owasp_agentic_2026:
     - id: "ASI09"
       name: "Human-Agent Trust Exploitation"
       status: "mitigated"
+      control_integrity: "ADR-0022: a streamed figure is held until the guards have read it, a fallback or incomplete answer says so, the reply names inputs assumed from memory, and the route to a person cannot be gated (G335, G353, G355, G358). Limitation: the figure lock measures rather than enforces outside the reasoning tier (G360), and vernacular number words are not held (G364)."
       live_web_assurance: "ADR-0021: a failed live check is disclosed on every serving path, commentary and search summaries are labelled as such, and a market rate is described as an estimate. Disclosures reach the audit row."
       receptionist_assurance: "ADR-0020: draft notes explicitly leave resolution and understanding unverified; recorded officer speech does not establish statutory advice. Wrap-up ownership/atomic writes remain G305."
       evidence: "App/backend/app/web_fx.py, App/backend/app/service.py, App/backend/app/receptionist/brain.py, App/backend/app/escalation_policy.py, plugins/apps/common_ui.py, App/frontend/src/components/ChatMessage.tsx, App/frontend/src/components/PortalCopilotCard.tsx"
       controls: "Fail-closed spoken action confirmation (G177), explicit AI disclosure (G170), simulation headers (live=false), and transparent 5-locale CXP operating-hours disclosure (G174/G196). Only current completed replies offer workflow/portal actions; interrupted replies retain a warning without a grounding badge. Portal approval requires a local digest; unknown execution outcomes cannot appear successful (ADR-0018)."
       limitations: "Mandatory API digest enforcement remains UI-09/G265; reviewed translations and manual accessibility acceptance remain UI-11. See docs/plans/intelligent-ui-integration-audit-2026-10.md."
       verified_by:
+        - "tests/agents/test_reasoner_integrity.py"
+        - "tests/agents/test_transparency_contract.py"
         - "tests/agents/test_web_fx.py"
         - "App/backend/tests/test_receptionist_safety_integrity.py"
         - "App/backend/tests/test_receptionist_assurance.py"
@@ -532,12 +550,15 @@ owasp_agentic_2026:
         - "App/frontend/src/__tests__/components/ChatMessage.test.tsx"
         - "App/frontend/src/__tests__/components/PortalCopilotCard.test.tsx"
     - id: "ASI10"
-      name: "Rogue Agents & Unaudited Autonomy"
+      name: "Rogue Agents"
       status: "mitigated"
+      control_integrity: "ADR-0022: attestation now needs evidence: a turn that served model text must show a guard stage, streamed turns are attested (closes G325), and the graph path runs the output guards (G350, G351). Every turn writes a row with its disposition and what generated it (G349, G359)."
       live_web_assurance: "ADR-0021: attest_turn holds each REST turn to the behavioural manifest from its real stage timings, and the plan digest and verdict enter the audit row. Streaming turns are not attested (G325)."
       evidence: "App/backend/app/turn_pipeline.py, App/backend/app/audit/turns.py, App/backend/app/audit/ledger.py, App/backend/app/flags.py"
       controls: "Hash-chained turn and action audit ledger v3 with RFC 3161 seals, risk-tiered autonomy gates, and per-feature kill switches"
       verified_by:
+        - "tests/agents/test_turn_terminal_contract.py"
+        - "tests/agents/test_graph_orchestrator_contract.py"
         - "tests/agents/test_plan_execution_contract.py"
         - "App/backend/tests/test_audit_turns.py"
 

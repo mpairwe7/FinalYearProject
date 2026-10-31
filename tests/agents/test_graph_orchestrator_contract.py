@@ -129,6 +129,19 @@ class TestAGraphAnswerIsCheckedLikeAnyOther:
         assert result["reply"].startswith("Today is Monday")
         assert result["escalation_required"] is False
 
+    def test_a_streamed_clarification_does_not_fail_attestation(self, chat_model, on_graph) -> None:
+        # The alert on this pages someone: canned text has nothing to verify.
+        from app.turn_pipeline import attest_turn
+
+        on_graph(_final("Which tax do you mean?", outcome=GraphOutcome.CLARIFY, hits=[], citations=[]))
+        stages = {"input_guard": 1.0}
+        token = service_module._TURN_STAGES.set(stages)
+        try:
+            chat_model.generate_retrieval_only("that one", session_id=uuid.uuid4().hex)
+        finally:
+            service_module._TURN_STAGES.reset(token)
+        assert attest_turn(stages, transport="sse")["ok"] is True
+
     def test_the_stream_gets_the_same_checks(self, chat_model, on_graph) -> None:
         on_graph(_final())
         with mock.patch.object(service_module, "verify_claims", return_value=CONTRADICTED):

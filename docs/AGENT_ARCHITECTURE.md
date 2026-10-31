@@ -5,7 +5,7 @@
 > `feat/agentic-workflows` branch actually *ships* (Phases A-D of
 > the broader Phase 14 work).
 
-Most capabilities below are **gated behind a feature flag** (`flags.py`, 85 flags total).
+Most capabilities below are **gated behind a feature flag** (`flags.py`, 87 flags total).
 `FLAG_TOOL_USE` defaults OFF; `FLAG_TICKET_QUEUE` defaults ON (`true`).
 `FLAG_AGENTIC_MODE` defaults ON after the English routing golden set
 holds ≥ 0.95 (`agentic_mode_gate`, currently `36/36`).
@@ -132,10 +132,13 @@ ToolRegistry.openai_specs(allow_risk=["low"])          # RAG specialist
 ToolRegistry.openai_specs(allow_risk=["low","medium"]) # customs specialist
 ```
 
-Tools with `requires_confirmation=True` on their schema are
-**reserved** for a future UI confirmation step — not yet enforced,
-but plumbed through so adding `mcp_ura_actions` in Phase 14+ won't
-break the contract.
+Tools with `requires_confirmation=True` get a proposal, not an execution,
+until the taxpayer confirms: the MCP client enforces this on every path, and
+the WebSocket is the channel that can carry the confirmation (G363).
+
+With `risk_tiered_autonomy_gates` on, `ToolSchema.risk` is the floor of the tier
+the gate applies. `high` needs an officer and opens a ticket, `critical` is
+refused, and `escalate_to_human` is never held (ADR-0022).
 
 ### Adding a new tool — the 3-step recipe
 
@@ -286,10 +289,11 @@ iteration 3: same (final allowed iteration)
 max_iterations hit → return best text + truncated=True
 ```
 
-Every iteration runs inside the **shared circuit breaker**
-(`service._LLM_CIRCUIT`), with a wall-clock deadline that's
-**2× the sync deadline** by default (90s for the tool-loop vs
-45s for plain `generate()`).
+Every iteration runs inside its **tier's circuit breaker**
+(`service._LLM_CIRCUIT`, or `_REASONER_CIRCUIT` for the reasoner), with a
+wall-clock deadline that's **2× the sync deadline** by default (90s for the
+tool-loop vs 45s for plain `generate()`), clamped to what is left of the turn.
+A `CancelScope` stops the loop before its next round or dispatch.
 
 The parser (`_parse_tool_calls`) is **tolerant**:
 
@@ -510,7 +514,7 @@ Three non-negotiable controls:
    every `execute()` in try/except and returns a structured
    `{"ok": false, "error": "..."}` on any raise.  The LLM never
    sees a Python traceback; a misbehaving tool can't crash the
-   request.
+   request.  The failure is recorded like any other call.
 
 2. **Risk tiers gate tool scope.**  Specialists declare
    `allow_risk=["low"]` or `["low","medium"]`; tools with
@@ -597,11 +601,13 @@ Qwen.  Live-LLM integration tests belong in a separate
 
 ## 12. What this branch does NOT include
 
-Runtime clarification (2026-09-29): the langgraph flag currently selects a
+Runtime clarification (updated 2026-10-31): the langgraph flag selects a
 repository-owned, synchronous, request-scoped dispatcher with LangGraph-style
-nodes; it is not the upstream LangGraph package and does not provide
-checkpointing, durable resume, interrupts, or retries. It runs only when
-`agentic_mode` is enabled, and tool dispatch additionally requires `tool_use`.
+nodes; it is not the upstream LangGraph package. The checkpoint store and
+`resume` exist but the service passes no `thread_id`, so nothing persists and
+nothing retries. Every answer it drafts goes through `_apply_output_guards`
+(ADR-0022). It runs only when `agentic_mode` is enabled, and tool dispatch
+additionally requires `tool_use`.
 Graph fusion and tax graph remain off by default pending stronger held-out evaluation. See
 RAG_ARCHITECTURE.md for the runtime boundary and fusion details.
 
@@ -649,8 +655,21 @@ also keeps the budget and vocabulary controls out of the model's reach.
 
 Web text is evidence: labelled passages only, never `verified_facts`. A step or check that
 does not complete says so: "Not calculated" in the facts block, or a sentence to the
-taxpayer. The audit row holds the plan digest, the live-check status and its sources, and
-the pipeline attestation (REST only, G325).
+taxpayer. The audit row holds the plan digest, the live-check status and its sources, the
+pipeline attestation, how the turn ended and what generated it.
+
+## Failure and verification (ADR-0022)
+
+| Concern | Where | What holds |
+| --- | --- | --- |
+| A dependency fails | `resilience.CircuitBreaker` | The half-open probe is a lease, so no caller can wedge it. Each tier has its own breaker |
+| A turn runs long | `resilience.turn_deadline` | One deadline across every stage and transport. The tool loop stops at its next check |
+| A figure is wrong | `guardrails.FigureReleaseGate`, `_apply_output_guards` | Streams hold from the first figure. The lock runs on every transport |
+| A control faults | `ToolRegistry._autonomy_gate` | Writes fail closed. A refusal does not depend on its record |
+| A person is needed | `tools/escalate.ESCALATION_ROUTE` | Cannot be gated. Goes through `_maybe_create_ticket` |
+| Something degrades | `DEGRADED_DISCLOSURES` | The taxpayer is told, and the row records it |
+
+See the [runbook](runbooks/agent-fault-tolerance.md).
 
 ## 13. Change log (feat/agentic-workflows branch)
 

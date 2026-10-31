@@ -52,3 +52,8 @@ PYTHONPATH=App/backend python3 -m app.seed_prototype   # development only
 - Live research goes through `_live_research_for_turn`, so REST, SSE and the graph cannot drift. A new search backend implements `web_search_providers.SearchProvider` and stops at `RawResult`: authority, screening and recency are decided once, in `web_research.admit_results`. New words in `_SEARCH_VOCABULARY` must be generic tax terms, never drawn from a query.
 - A planned step that does not complete must end in a `PlanRunReport` outcome and show in the block. A market FX rate is an estimate: only `official_bou_rate` may be called a Bank of Uganda rate.
 - A new model client wraps its HTTP call in `tracing.llm_call(...)` and reports the provider's `usage`; never estimate tokens from words.
+- Every `allow_request()` ends in `record_success()`, `record_failure()` or `release()`. Where a budget also has to agree, use `resilience.admit()`. A cancelled call is `release()`, not a failure.
+- Anything slow in an `async def` turn goes through `asyncio.to_thread`: translation and the guards used to run on the event loop and froze every stream on the worker.
+- A new generation path calls `_note_generation` with what answered, so the audit row can name it. A new way to degrade adds its sentence to `DEGRADED_DISCLOSURES`.
+- A ticket from a tool goes through `ESCALATION_ROUTE`, never `db.create_ticket`. A tool has no conversation of its own.
+- A calculator slot in `_SLOT_CANDIDATE_KEYS` lists only keys with the same meaning, and an identifier never binds from a tool's output.

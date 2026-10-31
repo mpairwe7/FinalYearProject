@@ -256,6 +256,13 @@ class ProtectedFlagTests(unittest.TestCase):
 
 
 class RegistryIntegrityTests(unittest.TestCase):
+    def test_the_figure_hold_defaults_on_and_is_a_kill_switch(self) -> None:
+        """A safety control ships on, with a way to turn it off in an incident."""
+        registry = FeatureFlags()
+        self.assertTrue(registry.is_enabled("stream_figure_hold"))
+        self.assertEqual(_REGISTRY["stream_figure_hold"].effective_category, "kill_switch")
+        self.assertIn("stream_figure_hold", registry.logged_variants())
+
     def test_every_phase_30_flag_defaults_off(self) -> None:
         """Nothing from this increment may be on before its gate passes."""
         for name in (

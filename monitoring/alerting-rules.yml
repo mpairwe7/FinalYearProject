@@ -517,5 +517,62 @@ groups:
           team: security
         annotations:
           summary: "A turn left the declared pipeline"
-          description: "A REST turn ran stages out of order or without the input guard."
+          description: "A turn ran stages out of order, without the input guard, or served model text with no output guard."
           runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/live-web-research-and-qdrant-sync.md#pipeline-attestation-failing"
+
+  - name: ura_agent_resilience
+    rules:
+      - alert: CircuitBreakerOpen
+        expr: max by (breaker) (ura_circuit_breaker_state) == 2
+        for: 10m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "A dependency has been refused for 10 minutes"
+          description: "Turns are falling back or degrading. Check the dependency the breaker names."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/agent-fault-tolerance.md#circuit-breaker-open"
+
+      - alert: CircuitBreakerProbeLost
+        expr: sum by (breaker) (increase(ura_circuit_breaker_probes_lost_total[1h])) > 0
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "A half-open probe was taken and never reported"
+          description: "The lease recovered it, but a call path is leaking probes. It would have wedged the breaker."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/agent-fault-tolerance.md#half-open-probe-lost"
+
+      - alert: AutonomyGateFaulting
+        expr: sum(increase(ura_autonomy_gate_faults_total[15m])) > 0
+        labels:
+          severity: critical
+          team: security
+        annotations:
+          summary: "The autonomy gate could not decide, or could not record a refusal"
+          description: "Writes are failing closed. Reads continue. Refusals may be missing from the ledger."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/agent-fault-tolerance.md#autonomy-gate-faulting"
+
+      - alert: AnswersDegraded
+        expr: >
+          sum(rate(ura_turn_degraded_total[15m]))
+          / sum(rate(ura_chat_turns_total[15m])) > 0.1
+        for: 15m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "More than 10% of answers are degraded"
+          description: "Taxpayers are being told their answer is a fallback or may be incomplete."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/agent-fault-tolerance.md#answers-degraded"
+
+      - alert: TurnsHittingDeadline
+        expr: sum(increase(ura_turn_deadline_exceeded_total[15m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "Turns are running out of time"
+          description: "Generation is being skipped or streams stopped at AGENTIC_TURN_DEADLINE_S."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/agent-fault-tolerance.md#turns-hitting-the-deadline"

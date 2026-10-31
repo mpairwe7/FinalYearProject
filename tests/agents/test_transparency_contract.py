@@ -179,6 +179,97 @@ class TestOnRest:
         assert result["_generation"]["degraded"] == ["tool_loop_truncated"]
 
 
+class TestADegradedAnswerIsNotKept:
+    """A cached fallback would outlive its outage, and a cache hit carries no disclosure."""
+
+    GROUNDED = "The standard VAT rate in Uganda is 18 percent. [1]"
+
+    def test_on_the_stream(self, stream, monkeypatch) -> None:
+        # The same grounded sentence as the control below, so that being cut off is
+        # the only reason it is not stored.
+        def breaks(**_kwargs: Any):
+            yield self.GROUNDED
+            raise ConnectionError("worker died")
+
+        monkeypatch.setattr(service_module.llm_module, "generate_stream", breaks)
+        monkeypatch.setattr(
+            service_module,
+            "stream_llm_tokens",
+            lambda *_a, **_k: service_module._stream_local_then_cloud("q", [HIT], None, "en"),
+        )
+        monkeypatch.setattr(service_module.flags, "is_enabled", lambda name, **_kw: name == "semantic_cache")
+        service_module._LLM_CIRCUIT.record_success()
+        model = Model()
+        stored: list[Any] = []
+        model._cache.put = lambda *a, **_k: stored.append(a)
+        original = model.generate_retrieval_only
+        model.generate_retrieval_only = lambda **kw: {**original(**kw), "_cache_allowed": True}
+
+        run_turn(model)
+
+        assert stored == []
+
+    def test_a_healthy_answer_still_is(self, stream, monkeypatch) -> None:
+        stream(self.GROUNDED)
+        monkeypatch.setattr(service_module.flags, "is_enabled", lambda name, **_kw: name == "semantic_cache")
+        model = Model()
+        stored: list[Any] = []
+        model._cache.put = lambda *a, **_k: stored.append(a)
+        original = model.generate_retrieval_only
+        model.generate_retrieval_only = lambda **kw: {**original(**kw), "_cache_allowed": True}
+
+        run_turn(model)
+
+        assert len(stored) == 1
+
+    def test_on_rest(self, chat_model, clean_flags, tmp_db, monkeypatch) -> None:
+        flags.set("agentic_mode", False)
+        flags.set("semantic_cache", True)
+        monkeypatch.setattr(service_module, "_cloud_llm_ready", lambda: True)
+        monkeypatch.setattr(service_module, "_call_llm_with_deadline", lambda **_kw: "")
+        monkeypatch.setattr(chat_model, "_llm_available", True)
+        monkeypatch.setattr(service_module, "_simple_search", lambda *_a, **_k: [])
+        monkeypatch.setattr(
+            service_module,
+            "_faq_hits_to_retrieval_hits",
+            lambda *_a, **_k: [{**HIT, "doc_type": "faq", "answer": HIT["text"]}],
+        )
+        monkeypatch.setattr(OutputGuard, "should_abstain", lambda _self, _hits, locale="en": False)
+        stored: list[Any] = []
+        monkeypatch.setattr(chat_model._cache, "put", lambda *a, **_k: stored.append(a))
+
+        chat_model.generate("Tell me about keeping records for a small shop", session_id=uuid.uuid4().hex)
+
+        assert stored == []
+
+
+class TestAGraphFallback:
+    def test_says_so_on_the_stream_too(self, chat_model, clean_flags, tmp_db, monkeypatch) -> None:
+        from app.agents.graphs.state import AgentGraphState, GraphOutcome
+
+        final = AgentGraphState(
+            query="q", reply=HIT["text"], outcome=GraphOutcome.ANSWERED,
+            hits=[HIT], citations=[CITATION], sources=["vat.pdf"], retrieval_mode="hybrid",
+        )
+
+        class Graph:
+            def run(self, state: AgentGraphState, thread_id: str = "") -> AgentGraphState:
+                service_module._note_generation(degraded="generation_unavailable")
+                return final
+
+        flags.set("langgraph", True)
+        flags.set("agentic_mode", True)
+        monkeypatch.setattr("app.agents.graphs.main_graph.build_main_graph", lambda: Graph())
+        token = service_module._TURN_GENERATION.set(service_module._new_generation_record())
+        try:
+            result = chat_model.generate_retrieval_only(
+                "Tell me about keeping records for a small shop", session_id=uuid.uuid4().hex
+            )
+        finally:
+            service_module._TURN_GENERATION.reset(token)
+        assert UNAVAILABLE in result["reply"]
+
+
 class TestTheRowNamesWhatAnswered:
     @pytest.fixture
     def record(self):

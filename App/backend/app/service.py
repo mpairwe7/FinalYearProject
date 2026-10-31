@@ -729,8 +729,8 @@ _LLM_CIRCUIT = CircuitBreaker(
 )
 #: The reasoner is a separate server on a separate GPU. Sharing the T1 breaker
 #: meant a down reasoner tripped nothing, so every turn routed to it spent its
-#: whole deadline (90 s by default) before falling back, and a reasoner that took
-#: the shared half-open probe left T1 unable to run at all.
+#: whole REASONER_DEADLINE_S before falling back, and a reasoner that took the
+#: shared half-open probe left T1 unable to run at all.
 _REASONER_CIRCUIT = CircuitBreaker(
     name="llm_reasoner",
     failure_threshold=3,
@@ -1200,6 +1200,7 @@ def _note_generation(
         record["fallbacks"].append(fallback)
     if degraded and degraded not in record["degraded"]:
         record["degraded"].append(degraded)
+        metrics.inc("turn_degraded_total", labels={"reason": degraded})
 
 
 def _turn_degradations() -> list[str]:
@@ -1410,6 +1411,7 @@ def _local_llm_then_cloud(
     effective_deadline = remaining_turn_seconds(own_deadline)
     if effective_deadline <= 0:
         logger.warning("Turn deadline reached; not starting a generation")
+        metrics.inc("turn_deadline_exceeded_total", labels={"stage": "generation"})
         return ""
 
     def _fallback_to_t1(reason: str) -> str:
@@ -1912,6 +1914,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     effective_deadline = remaining_turn_seconds(own_deadline)
     if effective_deadline <= 0:
         logger.warning("Turn deadline reached; not starting the agentic loop")
+        metrics.inc("turn_deadline_exceeded_total", labels={"stage": "agentic"})
         return empty
 
     if not circuit.allow_request():
@@ -3344,6 +3347,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 and result.get("retrieval_mode") not in ("blocked", "abstained", "model_welfare")
                 and not escalate
                 and not ticket_id
+                and not _turn_degradations()
             ):
                 try:
                     model._cache.put(
@@ -3410,6 +3414,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
 
     except _TurnDeadlineExceeded:
         logger.warning("chat turn stopped at its %.1fs deadline", deadline_s)
+        metrics.inc("turn_deadline_exceeded_total", labels={"stage": "stream"})
         cancel_event.set()
         try:
             notice = await asyncio.wait_for(asyncio.to_thread(localize_reply, TURN_DEADLINE_MESSAGE, locale), timeout=3)
@@ -8977,7 +8982,8 @@ class ChatModel:
 
         role_label = getattr(final_state, "agent_role", "graph_agent") or "graph_agent"
         return {
-            "reply": graph_reply,
+            # Here as well as in _audit_turn: the stream never reaches that.
+            "reply": _with_degraded_disclosure(graph_reply, _turn_degradations()),
             "sources": final_state.sources,
             "citations": final_state.citations,
             "faithfulness_score": faithfulness,
@@ -13583,6 +13589,9 @@ class ChatModel:
             and not escalate
             and not withheld_contradicted
             and not ticket_id
+            # A fallback cached here would outlive the outage it came from, and a
+            # cache hit carries no disclosure.
+            and not _turn_degradations()
         ):
             self._cache.put(rewritten, dict(result), tenant_id=tenant_id or "default")
 
@@ -14449,6 +14458,9 @@ class ChatModel:
                     final_state.outcome in usable_outcomes
                     and (final_state.reply or "").strip()
                 ):
+                    # Recorded whichever outcome this is: a clarification is canned
+                    # text with nothing to verify, not a guard that was skipped.
+                    graph_guard_started = time.perf_counter()
                     graph_result = self._graph_turn_result(
                         final_state,
                         message=message,
@@ -14460,6 +14472,7 @@ class ChatModel:
                         conversation_history=conversation_history,
                         calculation_message=router_message or message,
                     )
+                    _mark_stage("output_guard", graph_guard_started)
                     graph_result.update(
                         {
                             "_hits": final_state.hits,

@@ -786,8 +786,8 @@ class FigureReleaseGate:
     screen before it has been checked.
 
     Only whole sentences go out: half a sentence left frozen on screen while the
-    guards run reads as a fault. Words in Ugandan languages are not covered, though
-    digits are; see G354 in the gap register.
+    guards run reads as a fault. Number words in Ugandan languages are not covered,
+    though digits are; see G364 in the gap register.
     """
 
     def __init__(self, enabled: bool = True) -> None:
