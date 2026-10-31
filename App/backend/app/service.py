@@ -744,6 +744,14 @@ def _circuit_for(endpoint: Any) -> CircuitBreaker:
     return _REASONER_CIRCUIT if _is_non_t1_endpoint(endpoint) else _LLM_CIRCUIT
 
 
+def _endpoint_model(endpoint: Any) -> str:
+    return str(getattr(endpoint, "model", "") or llm_module.LLM_MODEL)
+
+
+def _tier_name(tier: Any) -> str:
+    return str(getattr(tier, "value", tier) or "")
+
+
 def _chain_deadline() -> float:
     """Absolute deadline for a walk down the cloud chain, within what the turn has left."""
     return time.monotonic() + remaining_turn_seconds(LLM_TOTAL_BUDGET_SECONDS)
@@ -878,6 +886,7 @@ def _llm_cloud_fallback(
             )
             breakers.GEMINI_BREAKER.record_success()
             routing.log_model_use("llm", "gemini_flash")
+            _note_generation(backend="gemini", model="gemini_flash")
             # "[1, 3]" -> "[1][3]" before anything downstream reads citations.
             text = normalise_citation_markers(text)
             if text and text.strip() and not _looks_truncated(text):
@@ -948,6 +957,7 @@ def _llm_cloud_fallback(
             text = gw.workers_ai_chat(messages, model=model, max_tokens=512, temperature=0.2)
             breakers.CF_LLM_BREAKER.record_success()
             routing.log_model_use("llm", model)
+            _note_generation(backend="workers_ai", model=str(model))
             text = normalise_citation_markers(text)
             if text and text.strip() and not _looks_truncated(text):
                 logger.info("LLM via Workers AI (%s) succeeded", model)
@@ -1133,6 +1143,76 @@ _TURN_STAGES: contextvars.ContextVar[dict[str, float] | None] = contextvars.Cont
 _TURN_PLANS: contextvars.ContextVar[dict[str, tuple[str, dict[str, Any]]] | None] = contextvars.ContextVar(
     "_turn_plans", default=None
 )
+
+
+#: What produced this turn's words, for the audit row. A deployment can answer from
+#: a local model, a reasoner, Gemini or Workers AI, or fall back to a raw passage,
+#: and ``result["model"]`` names the configured model whichever of those ran, so the
+#: ledger could not say who wrote an answer or whether it left the country (DPPA
+#: 2019 s.19). The dict is shared by reference with the turn's threads.
+_TURN_GENERATION: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "_turn_generation", default=None
+)
+
+#: Owed to the taxpayer when a turn could not do all it should have (OWASP ASI09:
+#: an answer must not look more certain than it is). Added after every verifier, so
+#: the sentence is never judged as a claim, and before localization.
+DEGRADED_DISCLOSURES: dict[str, str] = {
+    "generation_unavailable": (
+        "I could not write a tailored answer just now, so this is the closest official "
+        "guidance I found. It may not fit your exact situation. Please confirm with URA "
+        "on 0800 117 000."
+    ),
+    "tool_loop_truncated": (
+        "This answer may not be complete, because I ran out of steps while checking it. "
+        "Please confirm the details with URA on 0800 117 000."
+    ),
+    "stream_interrupted": (
+        "My answer was cut off before it finished, so it may not be complete. Please try "
+        "again, or confirm with URA on 0800 117 000."
+    ),
+}
+
+
+def _new_generation_record() -> dict[str, Any]:
+    return {"backend": "", "model": "", "tier": "", "fallbacks": [], "degraded": []}
+
+
+def _note_generation(
+    *,
+    backend: str = "",
+    model: str = "",
+    tier: str = "",
+    fallback: str = "",
+    degraded: str = "",
+) -> None:
+    """Record what served this turn. Does nothing outside a turn."""
+    record = _TURN_GENERATION.get()
+    if record is None:
+        return
+    if backend:
+        record["backend"] = backend
+    if model:
+        record["model"] = model
+    if tier:
+        record["tier"] = tier
+    if fallback and fallback not in record["fallbacks"]:
+        record["fallbacks"].append(fallback)
+    if degraded and degraded not in record["degraded"]:
+        record["degraded"].append(degraded)
+
+
+def _turn_degradations() -> list[str]:
+    return list((_TURN_GENERATION.get() or {}).get("degraded") or [])
+
+
+def _with_degraded_disclosure(reply: str, reasons: Iterable[str]) -> str:
+    """*reply* with the sentence each of *reasons* owes the taxpayer, once."""
+    for reason in reasons:
+        sentence = DEGRADED_DISCLOSURES.get(reason, "")
+        if sentence and reply and sentence not in reply:
+            reply = f"{reply.rstrip()}\n\n{sentence}"
+    return reply
 
 
 def _mark_stage(name: str, started: float) -> None:
@@ -1334,6 +1414,7 @@ def _local_llm_then_cloud(
 
     def _fallback_to_t1(reason: str) -> str:
         log_tier_fallback(reason=reason)
+        _note_generation(fallback=f"reasoner_{reason}")
         t1_ep = get_endpoint(ModelTier.T1)
         logger.warning(
             "Reasoner endpoint (%s) failed (%s) — falling back to local T1 (%s) with verified-facts context",
@@ -1417,6 +1498,7 @@ def _local_llm_then_cloud(
         llm_module.set_last_generation_meta(gen_meta)
         if reply and reply.strip():
             circuit.record_success()
+            _note_generation(backend="local", model=_endpoint_model(endpoint), tier=_tier_name(tier))
             from .production_readiness import is_sovereign_mode
 
             finish_reason = gen_meta.get("finish_reason")
@@ -1573,6 +1655,7 @@ def _stream_local_then_cloud(
 
     def _t1_stream(reason: str) -> Generator[str, None, None]:
         log_tier_fallback(reason=reason)
+        _note_generation(fallback=f"reasoner_{reason}")
         yield from _stream_local_then_cloud(
             query,
             passages,
@@ -1630,6 +1713,7 @@ def _stream_local_then_cloud(
         reported = True
         if saw_tokens:
             circuit.record_success()
+            _note_generation(backend="local", model=_endpoint_model(endpoint), tier=_tier_name(tier))
         elif cancel_event is not None and cancel_event.is_set():
             # Nothing was asked of the model, and nobody is waiting for an
             # answer: neither a failure to count nor a cloud call to pay for.
@@ -1646,6 +1730,8 @@ def _stream_local_then_cloud(
         # After tokens have gone out, a second answer would be appended to the
         # first half of this one.
         fall_back = "" if saw_tokens else "error"
+        if saw_tokens:
+            _note_generation(degraded="stream_interrupted")
     finally:
         # A generator closed mid-yield (GeneratorExit, a client leaving) reaches
         # neither branch above, and that used to strand a half-open probe.
@@ -1789,6 +1875,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
 
     def _on_t1(reason: str) -> dict[str, Any]:
         log_tier_fallback(reason=reason)
+        _note_generation(fallback=f"reasoner_{reason}")
         return _call_llm_agentic(
             query,
             passages,
@@ -1877,6 +1964,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
         result = _with_connector_outcomes(future.result(timeout=effective_deadline))
         if result and result.get("text"):
             circuit.record_success()
+            _note_generation(backend="local", model=_endpoint_model(endpoint), tier=_tier_name(tier))
             return result
         if run_cancel.is_set():
             circuit.release()
@@ -1963,6 +2051,45 @@ def _resolve_turn_deadline() -> float:
 _STREAM_QUEUE_MAX = 256
 
 
+def _figure_lock(
+    reply: str,
+    *,
+    query: str,
+    verified_facts: str,
+    contexts: list[str],
+    tool_outputs: list[dict[str, Any]] | None,
+    enforce: bool,
+) -> tuple[str, dict[str, Any]]:
+    """Trace every figure in *reply* to a source: strip what fails, or only measure.
+
+    Enforced for the reasoning tier and under ``evaluator_optimizer``, as on REST.
+    Everywhere else it measures, because a blocking control with an unknown false
+    positive rate should not be switched on for live taxpayers blind:
+    ``figure_lock_checks_total{mode="shadow"}`` is the evidence for enforcing it.
+    """
+    from .agents.evaluator import strip_unverified_figure_sentences, verify_figure_lock
+
+    mode = "enforced" if enforce else "shadow"
+    try:
+        passed, offending, detail = verify_figure_lock(
+            reply,
+            query=query,
+            verified_facts=verified_facts,
+            passages=contexts,
+            tool_outputs=tool_outputs,
+        )
+    except Exception:
+        logger.warning("Figure lock could not run", exc_info=True)
+        metrics.inc("figure_lock_checks_total", labels={"mode": mode, "outcome": "error"})
+        return reply, {"mode": mode, "ok": None, "rejected": 0}
+    outcome = "skipped" if detail.get("skipped") else ("pass" if passed else "reject")
+    metrics.inc("figure_lock_checks_total", labels={"mode": mode, "outcome": outcome})
+    summary = {"mode": mode, "ok": passed, "rejected": len(offending)}
+    if passed or not enforce:
+        return reply, summary
+    return strip_unverified_figure_sentences(reply, offending), summary
+
+
 def _apply_output_guards(
     model: Any,
     *,
@@ -1983,6 +2110,8 @@ def _apply_output_guards(
     verified_facts: str = "",
     calculation_message: str | None = None,
     live_check_disclosure: str = "",
+    model_tier: str = "",
+    tool_outputs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run the full post-generation guard pipeline for a streamed turn.
 
@@ -2134,6 +2263,21 @@ def _apply_output_guards(
         response_judge["withheld_contradicted"] = True
         faith = None
 
+    # Deterministic, so it needs no model and cannot be out of service. The REST
+    # path alone used to run this; the stream is what the web client uses.
+    figure_lock: dict[str, Any] = {}
+    if not withheld and reply:
+        locked, figure_lock = _figure_lock(
+            reply,
+            query=f"{message}\n{calculation_message or ''}",
+            verified_facts=verified_facts_block,
+            contexts=contexts,
+            tool_outputs=tool_outputs,
+            enforce=flags.is_enabled("evaluator_optimizer") or model_tier == ModelTier.T3.value,
+        )
+        if locked != reply:
+            reply, revised = locked, True
+
     # "claim_verification" is the draft's — the report the judge acted on.
     # When a revision was substituted, the re-verification of that replacement
     # is carried alongside it rather than in its place.
@@ -2183,6 +2327,7 @@ def _apply_output_guards(
         "ticket_id": ticket_id,
         "revised": revised,
         "claim_report": claim_report,
+        "figure_lock": figure_lock,
     }
 
 
@@ -2259,6 +2404,7 @@ async def run_chat_turn(
     _TURN_PLANS.set({})
     _TURN_LIVE_CHECK.set({})
     _TURN_STAGES.set({})
+    _TURN_GENERATION.set(_new_generation_record())
     try:
         with turn_usage_scope() as usage, turn_attributes_scope():
             async for event_type, payload in _run_chat_turn_events(model, progress=progress, **kwargs):
@@ -2334,7 +2480,12 @@ def _finish_streamed_turn(
     from .turn_pipeline import attest_turn
 
     result = log_payload.get("result") or {}
-    served = {**result, "reply": str(log_payload.get("full_reply") or ""), "_disposition": disposition}
+    served = {
+        **result,
+        "reply": str(log_payload.get("full_reply") or ""),
+        "_disposition": disposition,
+        "_generation": dict(_TURN_GENERATION.get() or {}),
+    }
     completed = disposition == "completed"
     if completed:
         try:
@@ -2459,7 +2610,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
     """
     import inspect
 
-    from .guardrails import OutputGuard
+    from .guardrails import FigureReleaseGate, OutputGuard
 
     _output_guard = OutputGuard()
     t0 = time.perf_counter()
@@ -2701,6 +2852,9 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             and result.get("retrieval_mode") != "model_welfare"
         )
         agentic_used_tools = False
+        agentic_tool_outputs: list[dict[str, Any]] = []
+        # What the taxpayer's screen holds. Everything else in full_reply is unseen.
+        on_screen = ""
         if use_agentic:
             agentic_started = time.perf_counter()
             async for event in _stream_agentic_turn(
@@ -2744,9 +2898,17 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 if event[0] == "_used_tools":
                     agentic_used_tools = bool(event[1])
                     continue
+                if event[0] == "_tool_outputs":
+                    agentic_tool_outputs = list(event[1])
+                    continue
+                if event[0] == "_truncated":
+                    _note_generation(degraded="tool_loop_truncated")
+                    continue
                 if event[0] == "_connectors_used":
                     result["connectors_used"] = list(event[1])
                     continue
+                if event[0] == "token":
+                    on_screen += str(event[1])
                 yield event
 
             if await _should_stop():
@@ -2761,7 +2923,9 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     english_only = await asyncio.to_thread(_answer_in_english, full_reply)
                     if english_only != full_reply:
                         full_reply = english_only
-                        yield ("revision", full_reply)
+                        if on_screen:
+                            yield ("revision", full_reply)
+                            on_screen = full_reply
                 # P0-3: run the SAME post-generation guard pipeline the
                 # token-streaming branch uses (judge + claim verification +
                 # grounded revision + escalation/handoff/ticket), not just a
@@ -2786,10 +2950,14 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     verified_facts=str(result.get("_web_verified_facts") or ""),
                     calculation_message=str(result.get("_english_message") or message),
                     live_check_disclosure=str(result.get("_live_check_disclosure") or ""),
+                    model_tier=turn_tier.value,
+                    tool_outputs=agentic_tool_outputs,
                 )
-                full_reply = guard["reply"]
-                if guard["revised"]:
+                full_reply = _with_degraded_disclosure(guard["reply"], _turn_degradations())
+                result["_figure_lock"] = guard.get("figure_lock") or {}
+                if (guard["revised"] or full_reply != guard["reply"]) and on_screen:
                     yield ("revision", full_reply)
+                    on_screen = full_reply
                 # Same localization the token branch does below. The agentic
                 # path had none at all, so enabling `tool_use` silently turned
                 # every non-English conversation back into an English one.
@@ -2799,7 +2967,11 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     yield ("translation.completed", {"locale": locale})
                     if localized != full_reply:
                         full_reply = localized
-                        yield ("revision", full_reply)
+                        if on_screen:
+                            yield ("revision", full_reply)
+                            on_screen = full_reply
+                if not on_screen:
+                    yield ("token", full_reply)
                 result["handoff"] = guard["handoff"]
                 result["response_judge"] = guard["response_judge"]
                 result["ticket_id"] = guard["ticket_id"]
@@ -2967,6 +3139,9 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             saw_streamed_token = False
             pending_stream_chunk = ""
             stream_started = time.perf_counter()
+            release_gate = FigureReleaseGate(
+                enabled=flags.is_enabled("stream_figure_hold", subject=user_id or None)
+            )
 
             def _flush_stream_chunk(*, force: bool = False) -> str:
                 nonlocal pending_stream_chunk, full_reply, saw_streamed_token
@@ -3007,11 +3182,20 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                         yield ("token", final_chunk)
                     break
 
-                pending_stream_chunk += payload or ""
+                pending_stream_chunk += release_gate.feed(payload or "")
                 sanitized = _flush_stream_chunk()
                 if not sanitized:
                     continue
                 yield ("token", sanitized)
+
+            # The tail of the stream is unseen until the guards have read it. It
+            # still counts as output: a reply held from its first word is an
+            # answer, not a model that said nothing.
+            on_screen = full_reply
+            held_text = _output_guard.sanitize(release_gate.drain())
+            if held_text:
+                full_reply += held_text
+                saw_streamed_token = True
 
             if not saw_streamed_token:
                 # Pump produced nothing (breaker open or empty stream) — the
@@ -3025,6 +3209,8 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     finalized = model._finalize_reply(full_reply, attachments=attachments)
                     if isinstance(finalized, str):
                         full_reply = finalized
+                _note_generation(degraded="generation_unavailable")
+                full_reply = _with_degraded_disclosure(full_reply, _turn_degradations())
                 if turn_ack and full_reply:
                     full_reply = f"{turn_ack}\n\n{full_reply}"
                 # One frame, so localize before sending rather than revising
@@ -3054,7 +3240,10 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 english_only = await asyncio.to_thread(_answer_in_english, full_reply)
                 if english_only != full_reply:
                     full_reply = english_only
-                    yield ("revision", full_reply)
+                    # With text held, this is not checked yet and must not be shown.
+                    if not held_text:
+                        yield ("revision", full_reply)
+                        on_screen = full_reply
 
             guard = await asyncio.to_thread(
                 _apply_output_guards,
@@ -3075,16 +3264,19 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 verified_facts=str(result.get("_web_verified_facts") or ""),
                 calculation_message=str(result.get("_english_message") or message),
                 live_check_disclosure=str(result.get("_live_check_disclosure") or ""),
+                model_tier=turn_tier.value,
             )
-            full_reply = guard["reply"]
+            full_reply = _with_degraded_disclosure(guard["reply"], _turn_degradations())
+            result["_figure_lock"] = guard.get("figure_lock") or {}
             faith = guard["faithfulness"]
             escalate = guard["escalate"]
             esc_reason = guard["escalation_reason"]
             response_judge = guard["response_judge"]
             handoff = guard["handoff"]
             ticket_id = guard["ticket_id"]
-            if guard["revised"]:
+            if guard["revised"] or full_reply != guard["reply"]:
                 yield ("revision", full_reply)
+                on_screen = full_reply
 
             # Tokens streamed in English (the model has no adapter for these
             # languages — see llm.can_generate_in_locale), so the localized
@@ -3103,6 +3295,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 if localized != full_reply:
                     full_reply = localized
                     yield ("revision", full_reply)
+                    on_screen = full_reply
 
             if ticket_id and flags.is_enabled("cxp_business_hours", subject=user_id or None):
                 from .escalation_policy import (
@@ -3116,6 +3309,15 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     if notice.strip() not in full_reply:
                         full_reply = f"{full_reply.rstrip()}{notice}"
                         yield ("revision", full_reply)
+                        on_screen = full_reply
+
+            # Cleared now: release what was held, unless a revision already did.
+            if held_text and full_reply != on_screen:
+                if full_reply.startswith(on_screen):
+                    yield ("token", full_reply[len(on_screen):])
+                else:
+                    yield ("revision", full_reply)
+                on_screen = full_reply
 
             result["handoff"] = handoff
             result["response_judge"] = response_judge
@@ -3356,13 +3558,20 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
 
     sanitized = _output_guard.sanitize(_output_guard.redact_pii(text))
     if sanitized:
-        yield ("token", sanitized)
+        # Not shown yet. The loop's reply arrives whole, so checking it first costs
+        # no latency, and sending it first showed what the guards then withheld.
         yield ("_full_reply", sanitized)
         if (agentic or {}).get("tool_calls"):
             yield ("_used_tools", True)
+            yield (
+                "_tool_outputs",
+                [call["result"] for call in agentic["tool_calls"] if isinstance(call.get("result"), dict)],
+            )
             used = _connectors_used(agentic["tool_calls"])
             if used:
                 yield ("_connectors_used", used)
+        if (agentic or {}).get("truncated"):
+            yield ("_truncated", True)
 
 
 def _metadata_payload(result: dict[str, Any], *, include_short_circuit: bool) -> dict[str, Any]:
@@ -8700,11 +8909,16 @@ class ChatModel:
         or contradiction withholding, and ``attest_turn`` reported it clean. A
         clarification or an abstention is canned text with no claim to check.
         """
+        from .agents.graphs.main_graph import assumed_inputs_notice
         from .agents.graphs.state import GraphOutcome
 
         disclosure = final_state.live_check_disclosure or ""
-        # Added back after the verifiers, so the sentence is never judged as a claim.
-        draft = final_state.reply.replace(disclosure, "").rstrip() if disclosure else final_state.reply
+        notice = assumed_inputs_notice(final_state)
+        # Added back after the verifiers, so neither sentence is judged as a claim.
+        draft = final_state.reply
+        for sentence in (disclosure, notice):
+            if sentence:
+                draft = draft.replace(sentence, "").rstrip()
         graph_reply = self._finalize_reply(draft)
         escalate = final_state.outcome == GraphOutcome.ESCALATED
         esc_reason = final_state.escalation_reason
@@ -8731,8 +8945,15 @@ class ChatModel:
                 tool_grounded=bool(final_state.tool_calls) and not final_state.hits,
                 calculation_message=calculation_message,
                 live_check_disclosure=disclosure,
+                tool_outputs=[
+                    call["result"]
+                    for call in final_state.tool_calls
+                    if isinstance(call, dict) and isinstance(call.get("result"), dict)
+                ],
             )
             graph_reply = guard["reply"]
+            if notice and notice not in graph_reply:
+                graph_reply = f"{graph_reply.rstrip()}\n\n{notice}"
             faithfulness = guard["faithfulness"]
             escalate = guard["escalate"]
             esc_reason = guard["escalation_reason"]
@@ -11114,6 +11335,7 @@ class ChatModel:
         transcript).
         """
         _PENDING_TURN_AUDIT.set(None)
+        _TURN_GENERATION.set(_new_generation_record())
         deadline_s = _resolve_turn_deadline()
         # A call turn stays on local models, whatever this deployment allows
         # chat (G122; see providers.scope).
@@ -12567,6 +12789,8 @@ class ChatModel:
 
             agentic_used_tools = False
             agentic_reply = ""
+            agentic_tool_outputs: list[dict[str, Any]] = []
+            figure_lock_summary: dict[str, Any] = {}
             if use_agentic:
                 agentic_query = (
                     router_rewritten
@@ -12673,8 +12897,13 @@ class ChatModel:
                     )
                     agentic = _call_llm_agentic(**agentic_call_kwargs)
                 agentic_reply = agentic.get("text", "")
+                if agentic.get("truncated"):
+                    _note_generation(degraded="tool_loop_truncated")
                 if agentic.get("tool_calls"):
                     agentic_used_tools = True
+                    agentic_tool_outputs = [
+                        call["result"] for call in agentic["tool_calls"] if isinstance(call.get("result"), dict)
+                    ]
                     retrieval_mode = "agentic"
                     trace_ctx["tool_calls"] = [
                         tc.get("name") for tc in agentic["tool_calls"]
@@ -12830,6 +13059,7 @@ class ChatModel:
                     if not reply:
                         # Fallback to best-hit answer if LLM fails, times out,
                         # or the circuit breaker is open
+                        _note_generation(degraded="generation_unavailable")
                         if attachments:
                             reply = self._format_attachment_fallback_reply(attachments)
                         else:
@@ -12972,7 +13202,14 @@ class ChatModel:
                         faithfulness=faithfulness_score,
                         verified_facts=verified_facts_block,
                         passages=contexts,
+                        # Without these a correct calculator figure reads as invented.
+                        tool_outputs=agentic_tool_outputs,
                     )
+                figure_lock_summary = {
+                    "mode": "enforced",
+                    "ok": verdict.numerically_consistent,
+                    "rejected": len(verdict.detail.get("offending_figures") or []),
+                }
                 trace_ctx["numeric_verification"] = {
                     "accepted": verdict.accepted,
                     "failures": verdict.failures(),
@@ -13055,6 +13292,7 @@ class ChatModel:
                                 faithfulness=faithfulness_score,
                                 verified_facts=verified_facts_block,
                                 passages=contexts,
+                                tool_outputs=agentic_tool_outputs,
                             )
                             trace_ctx["numeric_revision"] = {
                                 "attempted": True,
@@ -13091,6 +13329,15 @@ class ChatModel:
                             from .agents.evaluator import strip_unverified_figure_sentences
 
                             reply = strip_unverified_figure_sentences(reply, offending_figs)
+            elif reply:
+                _, figure_lock_summary = _figure_lock(
+                    reply,
+                    query=f"{message}\n{router_message or ''}",
+                    verified_facts=verified_facts_block,
+                    contexts=contexts,
+                    tool_outputs=agentic_tool_outputs,
+                    enforce=False,
+                )
 
             # 8. Escalation check
             if connector_intent is not None or (agentic_used_tools and not hits):
@@ -13302,6 +13549,8 @@ class ChatModel:
             ),
             "ticket_id": ticket_id,
         }
+        if figure_lock_summary:
+            result["_figure_lock"] = figure_lock_summary
         if connector_intent is not None:
             # Read by resources_for_turn: no form links under a service's record.
             result["connector_lookup"] = True
@@ -13400,6 +13649,12 @@ class ChatModel:
             logger.warning("Pipeline attestation failed: %s", type(exc).__name__)
         # Taken here because the plan scope closes before the ledger row is written.
         result["_plan"] = _turn_plan_summary()
+        # Every exit comes through here, and before localization, so whatever this
+        # turn could not do is said in the taxpayer's language on every path.
+        generation = _TURN_GENERATION.get()
+        if generation is not None:
+            result["_generation"] = dict(generation)
+            result["reply"] = _with_degraded_disclosure(str(result.get("reply") or ""), generation["degraded"])
         # Every exit comes through here, so none can lose the check. After every
         # verifier, so the sentence is never judged as a claim, and before
         # localization, so the taxpayer reads it in their language.

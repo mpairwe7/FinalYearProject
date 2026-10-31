@@ -403,28 +403,38 @@ def bind_arguments(tool_name: str, state: AgentGraphState) -> dict[str, object] 
     return None
 
 
+#: Keys that mean the same thing as a slot, and nothing else. Tax turns on the
+#: difference: chargeable income is not turnover, a landed cost already contains
+#: VAT, and a rent may be monthly or annual. A loose alias here computes a confident
+#: figure on the wrong base, so a slot with no exact match stays unfilled and the
+#: taxpayer is asked.
 _SLOT_CANDIDATE_KEYS: dict[str, tuple[str, ...]] = {
-    "amount": ("amount", "taxable_amount", "invoice_amount", "payment_amount", "landed_cost", "cif_value", "cif", "annual_turnover"),
-    "net_amount": ("net_amount", "net", "amount", "taxable_amount"),
-    "gross_amount": ("gross_amount", "gross", "amount", "monthly_gross"),
-    "value": ("value", "cif_value", "cif", "amount"),
-    "payment": ("payment", "payment_amount", "amount"),
-    "monthly_gross": ("monthly_gross", "monthly_salary", "gross_salary", "salary", "gross_amount"),
+    "amount": ("amount", "taxable_amount", "invoice_amount", "payment_amount"),
+    "net_amount": ("net_amount", "net", "taxable_amount"),
+    "gross_amount": ("gross_amount", "gross"),
+    "value": ("value",),
+    "payment": ("payment", "payment_amount"),
+    "monthly_gross": ("monthly_gross", "monthly_salary", "gross_salary", "salary"),
     "monthly_salary": ("monthly_salary", "gross_salary", "salary", "monthly_gross"),
     "salary": ("salary", "monthly_salary", "gross_salary", "monthly_gross"),
     "gross_salary": ("gross_salary", "monthly_salary", "salary", "monthly_gross"),
     "gross_turnover": ("gross_turnover", "annual_turnover", "turnover"),
     "turnover": ("turnover", "annual_turnover", "gross_turnover"),
     "annual_turnover": ("annual_turnover", "gross_turnover", "turnover"),
-    "annual_gross_rent": ("annual_gross_rent", "gross_rent", "rental_income", "rent"),
-    "gross_rent": ("gross_rent", "annual_gross_rent", "rental_income", "rent"),
-    "rent": ("rent", "gross_rent", "annual_gross_rent", "rental_income"),
-    "rental_income": ("rental_income", "gross_rent", "annual_gross_rent", "rent"),
-    "chargeable_income": ("chargeable_income", "taxable_income", "annual_turnover", "amount"),
-    "cif_value": ("cif_value", "cif", "customs_value", "amount"),
+    "annual_gross_rent": ("annual_gross_rent",),
+    "gross_rent": ("gross_rent",),
+    "rent": ("rent",),
+    "rental_income": ("rental_income",),
+    "chargeable_income": ("chargeable_income", "taxable_income"),
+    "cif_value": ("cif_value", "cif", "customs_value"),
     "taxpayer_id": ("tin", "taxpayer_id"),
     "tin": ("tin", "taxpayer_id"),
 }
+
+#: Slots that decide *whose* record a tool reads. These never come from a tool's
+#: output: that would let one tool's result choose the subject of the next call,
+#: and connector results are not trusted input.
+_IDENTITY_SLOTS = frozenset({"taxpayer_id", "tin", "nin", "brn"})
 
 
 def _bind_from_memory_or_dag(
@@ -441,7 +451,7 @@ def _bind_from_memory_or_dag(
         if not isinstance(obs, dict) or not obs.get("ok", True):
             continue
         for req in required:
-            if req in params:
+            if req in params or req in _IDENTITY_SLOTS:
                 continue
             for cand in _SLOT_CANDIDATE_KEYS.get(req, (req,)):
                 val = obs.get(cand)
@@ -489,6 +499,9 @@ def _bind_from_memory_or_dag(
 
     if params and all(p in params for p in required):
         if bound_source:
+            assumed = {"tool": tool_name, "inputs": sorted(params), "source": bound_source}
+            if assumed not in state.assumed_inputs:
+                state.assumed_inputs.append(assumed)
             try:
                 from ...analytics import metrics
 
@@ -749,8 +762,11 @@ def node_synthesize(state: AgentGraphState) -> NodeResult:
 
                         state.reply = _answer_in_english(state.reply)
             except Exception:
-                logger.debug("graph: LLM synthesis failed, using best hit", exc_info=True)
+                logger.warning("graph: LLM synthesis failed, using best hit", exc_info=True)
         if not state.reply:
+            from ...service import _note_generation
+
+            _note_generation(degraded="generation_unavailable")
             best = state.hits[0]
             state.reply = best.get("answer") or best.get("text", "")
         if usable and state.specialist_handoffs:
@@ -846,10 +862,26 @@ def _is_reasoning_miss(state: AgentGraphState) -> bool:
     return (len(asked & answered) / len(asked)) < 0.20
 
 
+def assumed_inputs_notice(state: AgentGraphState) -> str:
+    """The sentence owed when a figure rests on something the taxpayer did not say this turn.
+
+    Names the inputs, never their values: the taxpayer can correct "monthly salary"
+    without the reply repeating it.
+    """
+    names = sorted({name.replace("_", " ") for item in state.assumed_inputs for name in item.get("inputs", ())})
+    if not names:
+        return ""
+    listed = ", ".join(names)
+    return f"This uses the {listed} from earlier in your case. Please tell me if that has changed."
+
+
 def node_respond(state: AgentGraphState) -> NodeResult:
     """Ensure every controlled terminal route has a safe, non-empty reply."""
     if not (state.reply and state.reply.strip()):
         _fill_terminal_reply(state)
+    notice = assumed_inputs_notice(state)
+    if notice and state.outcome == GraphOutcome.ANSWERED and notice not in state.reply:
+        state.reply = f"{state.reply.rstrip()}\n\n{notice}"
     if state.live_check_disclosure and state.outcome in (GraphOutcome.ANSWERED, GraphOutcome.ABSTAINED):
         from ...service import _with_live_check_disclosure
 

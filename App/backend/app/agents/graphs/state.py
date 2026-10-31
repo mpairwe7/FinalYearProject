@@ -123,6 +123,9 @@ class AgentGraphState:
     #: Tools the plan named but ``node_act`` did not dispatch, with why —
     #: unfillable arguments, or a spend ceiling.
     skipped_tools: list[dict[str, Any]] = field(default_factory=list)
+    #: Calculator inputs filled from memory or an earlier result, not from this
+    #: turn: which tool, which inputs, where from. The reply has to say so.
+    assumed_inputs: list[dict[str, Any]] = field(default_factory=list)
     #: Per-turn tool spend ceilings and duplicate-call memo.  Excluded
     #: from ``repr`` because state is logged on every graph transition.
     budget: ToolCallBudget = field(default_factory=ToolCallBudget, repr=False)
@@ -224,6 +227,7 @@ class AgentGraphState:
             "tool_calls": list(self.tool_calls),
             "observations": list(self.observations),
             "skipped_tools": list(self.skipped_tools),
+            "assumed_inputs": list(self.assumed_inputs),
             "iterations": self.iterations,
             "max_iterations": self.max_iterations,
             "hits": list(self.hits),
@@ -300,6 +304,7 @@ class AgentGraphState:
             tool_calls=list(data.get("tool_calls", [])),
             observations=list(data.get("observations", [])),
             skipped_tools=list(data.get("skipped_tools", [])),
+            assumed_inputs=list(data.get("assumed_inputs", [])),
             iterations=int(data.get("iterations", 0)),
             max_iterations=int(data.get("max_iterations", 3)),
             hits=list(data.get("hits", [])),

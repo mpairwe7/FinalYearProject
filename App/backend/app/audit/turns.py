@@ -304,6 +304,9 @@ def build_turn_payload(
         "live_check": result.get("_live_check") or {},
         "plan": result.get("_plan") or {},
         "pipeline_attestation": result.get("_attestation") or {},
+        # What produced the words, and whether the lock could vouch for the figures.
+        "generation": result.get("_generation") or {},
+        "figure_lock": result.get("_figure_lock") or {},
         "flag_variants_sha256": _sha256(flag_variants) if flag_variants else "",
         "provenance": provenance(),
     }

@@ -428,21 +428,23 @@ def verify_figure_lock(
         is_cond_labelled = bool(_CONDITIONAL_LABEL_RE.search(sent))
         effective_money_pool = allowed_money | (conditional_money if is_cond_labelled else set())
 
+        # A kind of figure the sources do not contain is not a kind that needs no
+        # support. These checks used to be skipped when their own pool was empty,
+        # so with a percentage in the passages an invented UGX amount passed.
         for m_val in sorted(s_money):
-            if allowed_money or conditional_money:
-                if not _money_matches(m_val, effective_money_pool):
-                    formatted = f"UGX {m_val:,.0f}" if m_val == int(m_val) else f"UGX {m_val:,.2f}"
-                    if formatted not in offending:
-                        offending.append(formatted)
+            if not _money_matches(m_val, effective_money_pool):
+                formatted = f"UGX {m_val:,.0f}" if m_val == int(m_val) else f"UGX {m_val:,.2f}"
+                if formatted not in offending:
+                    offending.append(formatted)
 
         for p_val in sorted(s_pcts):
-            if allowed_pcts and not _pct_matches(p_val, allowed_pcts):
+            if not _pct_matches(p_val, allowed_pcts):
                 formatted_p = f"{p_val:g}%"
                 if formatted_p not in offending:
                     offending.append(formatted_p)
 
         for d_val in sorted(s_days):
-            if allowed_days and d_val not in allowed_days:
+            if d_val not in allowed_days:
                 formatted_d = f"{d_val} days"
                 if formatted_d not in offending:
                     offending.append(formatted_d)

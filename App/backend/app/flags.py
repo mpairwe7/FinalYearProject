@@ -556,6 +556,12 @@ _REGISTRY: dict[str, Flag] = {
         ),
         # Phase 34 (2026) — Enterprise Governance, Action-Level Audit v3 & Continuous QA Scorecard
         Flag(
+            "stream_figure_hold",
+            True,
+            "Hold streamed text from the first figure until the output guards have "
+            "checked it. Off restores token-by-token text that is corrected afterwards.",
+        ),
+        Flag(
             "action_level_audit_v3",
             False,
             "Emit structured ActionAuditRecord v3 (decision trace, guardrail verdicts, "
@@ -834,6 +840,7 @@ class FeatureFlags:
                 "corrective_rag",
                 "query_decomposition",
                 "evaluator_optimizer",
+                "stream_figure_hold",
                 "hybrid_speech_s2s",
                 "multi_agent_dag",
                 "spoken_figure_guard",
