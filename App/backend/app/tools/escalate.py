@@ -22,13 +22,39 @@ missed but the LLM recognised mid-conversation.
 
 from __future__ import annotations
 
+import contextvars
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .. import officer_hours
 from . import Tool, ToolRegistry, ToolSchema
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 logger = logging.getLogger(__name__)
+
+#: How this turn reaches an officer. A tool has no conversation of its own, so a
+#: ticket it writes directly cannot be traced to anyone: no conversation, no
+#: transcript, nobody told, and the model still says an officer will review it.
+#: The service sets this to ``ChatModel._maybe_create_ticket``, bound to the turn,
+#: which is the one path that dedupes, routes and announces. Takes ``reason``,
+#: ``priority`` and ``summary``; returns the ticket id, or "" if none was opened.
+ESCALATION_ROUTE: contextvars.ContextVar[Callable[..., str] | None] = contextvars.ContextVar(
+    "escalation_route", default=None
+)
+
+
+def refer_to_officer(reason: str, *, priority: str = "normal", summary: str = "") -> str:
+    """Hand *reason* to an officer through this turn's route; "" if that did not happen."""
+    route = ESCALATION_ROUTE.get()
+    if route is None:
+        return ""
+    try:
+        return str(route(reason=reason, priority=priority, summary=summary) or "")
+    except Exception:
+        logger.exception("Referral to an officer failed")
+        return ""
 
 
 class EscalateToHumanTool(Tool):
@@ -112,6 +138,8 @@ class EscalateToHumanTool(Tool):
         reason: str,
         priority: str = "normal",
         summary: str = "",
+        user_id: str = "",
+        tenant_id: str = "default",
     ) -> dict[str, Any]:
         try:
             from .. import database as db  # noqa: PLC0415
@@ -125,23 +153,30 @@ class EscalateToHumanTool(Tool):
                 "error": "ticket_queue is off — escalation was not persisted",
             }
 
-        # We don't have access to the request-scoped session_id /
-        # conversation_id here — the calling service layer will
-        # enrich them via the `escalation_context` kwarg when
-        # available (see service.py Phase 14-D hook).  This tool
-        # creates the ticket with whatever it has; the service layer
-        # may also call db.create_ticket directly for supervisor-
-        # driven escalations.
-        try:
-            ticket = db.create_ticket(
-                reason=reason,
-                user_query=(summary or reason)[:2000],
-                bot_reply="",
-                priority=priority,
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.exception("escalate_to_human: ticket creation failed")
-            return {"ok": False, "error": f"could not create ticket: {e}"}
+        if ESCALATION_ROUTE.get() is not None:
+            ticket_id = refer_to_officer(reason, priority=priority, summary=summary)
+            if not ticket_id:
+                return {
+                    "ok": False,
+                    "error": "The escalation could not be queued, so no officer has it.",
+                }
+            ticket: dict[str, Any] = {"id": ticket_id, "priority": priority}
+        else:
+            # Outside a turn (an MCP server, a staff script) there is no
+            # conversation to attach, but there is still someone who asked.
+            try:
+                ticket = db.create_ticket(
+                    reason=reason,
+                    user_query=(summary or reason)[:2000],
+                    bot_reply="",
+                    priority=priority,
+                    user_id=user_id,
+                    tenant_id=tenant_id or "default",
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.exception("escalate_to_human: ticket creation failed")
+                return {"ok": False, "error": f"could not create ticket: {e}"}
+            self._announce(ticket)
 
         # Outside officers' working hours, say when the review will happen
         # rather than implying someone is looking now (G196).
@@ -186,6 +221,22 @@ class EscalateToHumanTool(Tool):
             "next_open_eat": next_open_eat,
             "message": msg,
         }
+
+    @staticmethod
+    def _announce(ticket: dict[str, Any]) -> None:
+        """Tell staff. A ticket nobody hears about is a queue entry, not a handoff."""
+        try:
+            from ..escalation_notify import notify_ticket_created  # noqa: PLC0415
+
+            notify_ticket_created(ticket)
+        except Exception:
+            logger.warning("escalation notification dispatch failed", exc_info=True)
+        try:
+            from ..ticket_events import build_event, publish  # noqa: PLC0415
+
+            publish(build_event(ticket))
+        except Exception:
+            logger.warning("ticket event publish failed", exc_info=True)
 
 
 ToolRegistry.register(EscalateToHumanTool())

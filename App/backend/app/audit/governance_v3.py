@@ -250,30 +250,58 @@ _RISK_TIER_MAP: dict[str, tuple[RiskTier, str, int | None]] = {
 }
 
 
-def classify_action_risk(tool_or_action_name: str) -> RiskTier:
-    """Return the canonical RiskTier for a URA tool or action name."""
+#: Least to most consequential; an action is held to the higher of two opinions.
+_TIER_ORDER: tuple[RiskTier, ...] = ("low", "medium", "high", "critical")
+
+#: The way out of the agent. Refusing it answers a request for oversight with
+#: more automation, so no tier, throttle or failed guardrail may hold it. It only
+#: ever hands work to a person.
+HUMAN_OVERSIGHT_ACTIONS = frozenset({"escalate_to_human"})
+
+
+def classify_action_risk(tool_or_action_name: str, declared_risk: str | None = None) -> RiskTier:
+    """Return the tier an action is held to.
+
+    A registered tool declares its tier on ``ToolSchema.risk``, and that is the
+    floor: this function used to read names alone, and rated 17 of the 72
+    registered tools below their own declaration (``ura_action_proposal``,
+    declared critical, came out low). A table entry may raise a declared tier.
+    Words in a name may not touch one, or "objection_requirements" is held for an
+    officer for mentioning objections. An action nobody rated is held as high: an
+    unknown is not a licence to skip the checks (compare ``mcp.policy``).
+    """
     norm = (tool_or_action_name or "").strip().lower()
-    if norm in _RISK_TIER_MAP:
-        return _RISK_TIER_MAP[norm][0]
+    mapped: RiskTier | None = _RISK_TIER_MAP[norm][0] if norm in _RISK_TIER_MAP else None
+    if declared_risk is not None:
+        if declared_risk not in _TIER_ORDER:
+            return "critical"
+        declared: RiskTier = declared_risk  # type: ignore[assignment]
+        if mapped is None:
+            return declared
+        return max(declared, mapped, key=_TIER_ORDER.index)
+    if mapped is not None:
+        return mapped
     if any(k in norm for k in ("disburse", "write_off", "delete_ledger", "mutate_liability")):
         return "critical"
     if any(k in norm for k in ("submit", "amend", "objection", "refund", "remission", "adjustment")):
         return "high"
     if any(k in norm for k in ("prn", "verify_tin", "prefill", "sync_offline", "status")):
         return "medium"
-    return "low"
+    return "high"
 
 
 def get_reversibility_contract(
     tool_or_action_name: str,
     pre_state: dict[str, Any] | None = None,
+    declared_risk: str | None = None,
 ) -> ReversibilityContract:
     """Build a structured ReversibilityContract for any tool or action."""
     norm = (tool_or_action_name or "").strip().lower()
-    tier, proc, window_h = _RISK_TIER_MAP.get(
+    tier = classify_action_risk(norm, declared_risk)
+    _, proc, window_h = _RISK_TIER_MAP.get(
         norm,
         (
-            classify_action_risk(norm),
+            tier,
             "Standard URA administrative review or workflow reset.",
             168,
         ),
@@ -350,15 +378,31 @@ def evaluate_autonomy_gate(
     ticket_id: str | None = None,
     guardrails_passed: bool = True,
     subject: str | None = None,
+    declared_risk: str | None = None,
 ) -> tuple[AutonomyOutcome, HumanApprovalGateRecord]:
-    """Evaluate whether an action may execute autonomously, needs soft confirmation, or requires officer sign-off."""
-    tier = classify_action_risk(tool_or_action_name)
+    """Evaluate whether an action may execute autonomously, needs soft confirmation, or requires officer sign-off.
+
+    *declared_risk* is the tool's own ``ToolSchema.risk``; see :func:`classify_action_risk`.
+    """
+    tier = classify_action_risk(tool_or_action_name, declared_risk)
     now_utc = dt.datetime.now(_UTC_TZ).isoformat()
     officer_hash = (
         hashlib.sha256(approving_officer_id.encode()).hexdigest()[:32]
         if approving_officer_id
         else ""
     )
+
+    if (tool_or_action_name or "").strip().lower() in HUMAN_OVERSIGHT_ACTIONS:
+        return (
+            "autonomous_executed",
+            HumanApprovalGateRecord(
+                approval_required=False,
+                caller_confirm_challenge_verified=caller_confirmed,
+                officer_approval_obtained=officer_approved,
+                approving_officer_id_hash=officer_hash,
+                ticket_id=ticket_id,
+            ),
+        )
 
     if not guardrails_passed:
         return (
@@ -586,8 +630,16 @@ def append_action_audit_v3(
     guardrails: GuardrailEvaluationTrace | None = None,
     pre_state: dict[str, Any] | None = None,
     statutory_basis: list[str] | None = None,
+    declared_risk: str | None = None,
+    decided_outcome: AutonomyOutcome | None = None,
 ) -> tuple[ActionAuditRecord, DecisionReceipt]:
-    """Construct, risk-gate, and append an ActionAuditRecord v3 to the tamper-evident AuditLedger."""
+    """Construct, risk-gate, and append an ActionAuditRecord v3 to the tamper-evident AuditLedger.
+
+    *decided_outcome* records a decision already taken, and the gate is not asked
+    again. Evidence must describe what happened: re-running the gate after a call
+    filed it as "proposed" with the ticket it opened already in the queue, because
+    the second opinion had nothing to do with the first.
+    """
     now_utc_dt = dt.datetime.now(_UTC_TZ)
     now_eat_dt = now_utc_dt.astimezone(_EAT_TZ)
 
@@ -599,18 +651,36 @@ def append_action_audit_v3(
         and guardrail_trace.figure_fidelity_passed
     )
 
-    outcome, approval_rec = evaluate_autonomy_gate(
-        tool_or_action_name,
-        intent_confidence=intent_confidence,
-        caller_confirmed=caller_confirmed,
-        officer_approved=officer_approved,
-        approving_officer_id=approving_officer_id,
-        ticket_id=ticket_id,
-        guardrails_passed=guardrails_ok,
-        subject=user_id or None,
+    tier = classify_action_risk(tool_or_action_name, declared_risk)
+    if decided_outcome is None:
+        outcome, approval_rec = evaluate_autonomy_gate(
+            tool_or_action_name,
+            intent_confidence=intent_confidence,
+            caller_confirmed=caller_confirmed,
+            officer_approved=officer_approved,
+            approving_officer_id=approving_officer_id,
+            ticket_id=ticket_id,
+            guardrails_passed=guardrails_ok,
+            subject=user_id or None,
+            declared_risk=declared_risk,
+        )
+    else:
+        outcome = decided_outcome
+        approval_rec = HumanApprovalGateRecord(
+            approval_required=tier in ("high", "critical")
+            and tool_or_action_name not in HUMAN_OVERSIGHT_ACTIONS,
+            caller_confirm_challenge_verified=caller_confirmed,
+            officer_approval_obtained=officer_approved,
+            approving_officer_id_hash=(
+                hashlib.sha256(approving_officer_id.encode()).hexdigest()[:32]
+                if approving_officer_id
+                else ""
+            ),
+            ticket_id=ticket_id,
+        )
+    rev_contract = get_reversibility_contract(
+        tool_or_action_name, pre_state=pre_state, declared_risk=declared_risk
     )
-    tier = classify_action_risk(tool_or_action_name)
-    rev_contract = get_reversibility_contract(tool_or_action_name, pre_state=pre_state)
 
     params_dict = dict(parameters_redacted or {})
     digest_dict = dict(parameters_digest_source if parameters_digest_source is not None else params_dict)
@@ -627,7 +697,8 @@ def append_action_audit_v3(
             "resolved", "awaiting_user_action", "escalated_to_officer", "abstained"
         ] = "escalated_to_officer" if outcome == "proposed_awaiting_officer" else "abstained"
     else:
-        res_status = "resolved"
+        # An action that errored or timed out resolved nothing.
+        res_status = "resolved" if execution_status not in ("error", "timeout") else "abstained"
 
     statutes = list(statutory_basis or ["Income Tax Act Cap 340 / Tax Procedures Code Act (FY2026-27)"])
     explanation = (

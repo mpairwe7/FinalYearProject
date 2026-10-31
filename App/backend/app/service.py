@@ -1699,6 +1699,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     forced_operations: list[str] | None = None,
     endpoint: Any = None,
     tier: Any = None,
+    escalation_route: Callable[..., str] | None = None,
 ) -> dict[str, Any]:
     """Run :func:`llm_module.generate_with_tools` under breaker + deadline.
 
@@ -1760,8 +1761,13 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     if tier is not None:
         tool_kwargs["tier"] = tier
 
+    turn_context = contextvars.copy_context()
+    if escalation_route is not None:
+        from .tools.escalate import ESCALATION_ROUTE
+
+        turn_context.run(ESCALATION_ROUTE.set, escalation_route)
     future = _LLM_EXECUTOR.submit(
-        contextvars.copy_context().run,
+        turn_context.run,
         llm_module.generate_with_tools,
         **tool_kwargs,
     )
@@ -1793,6 +1799,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
                 connector_namespaces=connector_namespaces,
                 forced_operations=forced_operations,
                 endpoint=t1_ep,
+                escalation_route=escalation_route,
             )
         # Empty text counts as a soft failure
         _LLM_CIRCUIT.record_failure()
@@ -1822,6 +1829,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
                 connector_namespaces=connector_namespaces,
                 forced_operations=forced_operations,
                 endpoint=t1_ep,
+                escalation_route=escalation_route,
             )
         _LLM_CIRCUIT.record_failure()
         logger.warning("agentic LLM deadline %.1fs exceeded", effective_deadline)
@@ -1850,6 +1858,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
                 connector_namespaces=connector_namespaces,
                 forced_operations=forced_operations,
                 endpoint=t1_ep,
+                escalation_route=escalation_route,
             )
         _LLM_CIRCUIT.record_failure()
         logger.exception("agentic LLM generation raised")
@@ -2579,6 +2588,18 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 forced_operations=connector_forced or None,
                 endpoint=turn_endpoint,
                 tier=turn_tier,
+                escalation_route=(
+                    model._tool_escalation_route(
+                        message=message,
+                        session_id=session_id,
+                        conversation_id=str(result.get("conversation_id") or conversation_id or ""),
+                        user_id=user_id or "",
+                        tenant_id=tenant_id or "default",
+                        locale=locale,
+                    )
+                    if hasattr(model, "_tool_escalation_route")
+                    else None
+                ),
             ):
                 if event[0] == "_full_reply":
                     full_reply = event[1]
@@ -3070,6 +3091,7 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
     forced_operations: list[str] | None = None,
     endpoint: Any = None,
     tier: Any = None,
+    escalation_route: Callable[..., str] | None = None,
 ) -> "AsyncIterator[tuple[str, Any]]":
     """Run the agentic tool-call loop and stream its events.
 
@@ -3121,6 +3143,8 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
             call_kwargs["endpoint"] = endpoint
         if tier is not None:
             call_kwargs["tier"] = tier
+        if escalation_route is not None:
+            call_kwargs["escalation_route"] = escalation_route
         return await asyncio.to_thread(_call_llm_agentic, **call_kwargs)
 
 
@@ -8370,7 +8394,7 @@ class ChatModel:
         # asks for a human three times opens three tickets, and three
         # officers each start the conversation from the beginning.
         try:
-            existing = db.find_open_ticket(conversation_id)
+            existing = db.find_open_ticket(conversation_id, tenant_id=effective_tenant)
         except Exception:
             logger.exception("open-ticket lookup failed; creating a new ticket")
             existing = None
@@ -8440,6 +8464,7 @@ class ChatModel:
                 locale=eff_locale,
                 modality=modality,
                 user_query_en=user_query_en,
+                tenant_id=effective_tenant,
             )
             ticket_id = ticket.get("id", "")
             if handoff is not None and ticket_id:
@@ -8478,6 +8503,60 @@ class ChatModel:
         except Exception:
             logger.warning("ticket event publish failed", exc_info=True)
         return ticket_id
+
+    def _run_graph(
+        self,
+        graph: Any,
+        graph_state: Any,
+        *,
+        session_id: str | None,
+        conversation_id: str,
+        message: str,
+    ) -> Any:
+        """Run the graph with this turn's route to an officer in scope."""
+        from .tools.escalate import ESCALATION_ROUTE
+
+        token = ESCALATION_ROUTE.set(
+            self._tool_escalation_route(
+                message=message,
+                session_id=session_id,
+                conversation_id=conversation_id,
+                user_id=graph_state.user_id,
+                tenant_id=graph_state.tenant_id,
+                locale=graph_state.locale,
+            )
+        )
+        try:
+            return graph.run(graph_state)
+        finally:
+            ESCALATION_ROUTE.reset(token)
+
+    def _tool_escalation_route(
+        self,
+        *,
+        message: str,
+        session_id: str | None,
+        conversation_id: str,
+        user_id: str,
+        tenant_id: str,
+        locale: str,
+    ) -> Callable[..., str]:
+        """The ``ESCALATION_ROUTE`` for one turn: tickets from tools take the one real path."""
+
+        def route(reason: str, priority: str = "normal", summary: str = "") -> str:
+            return self._maybe_create_ticket(
+                reason=reason,
+                user_query=message,
+                bot_reply=summary,
+                session_id=session_id,
+                conversation_id=conversation_id,
+                priority=priority,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                locale=locale,
+            )
+
+        return route
 
     def _persist_personalization_turn(
         self,
@@ -11826,7 +11905,13 @@ class ChatModel:
                             role=user_role,
                             granted_purposes=granted_purposes or [],
                         )
-                        final_state = graph.run(graph_state)
+                        final_state = self._run_graph(
+                            graph,
+                            graph_state,
+                            session_id=session_id,
+                            conversation_id=thread_id,
+                            message=message,
+                        )
                         usable_outcomes = {
                             GraphOutcome.ANSWERED,
                             GraphOutcome.CLARIFY,
@@ -12320,6 +12405,14 @@ class ChatModel:
                         agentic_call_kwargs["endpoint"] = turn_endpoint
                     if tier_decision is not None:
                         agentic_call_kwargs["tier"] = tier_decision.tier
+                    agentic_call_kwargs["escalation_route"] = self._tool_escalation_route(
+                        message=message,
+                        session_id=session_id,
+                        conversation_id=thread_id,
+                        user_id=user_id or "",
+                        tenant_id=tenant_id or "default",
+                        locale=locale,
+                    )
                     agentic = _call_llm_agentic(**agentic_call_kwargs)
                 agentic_reply = agentic.get("text", "")
                 if agentic.get("tool_calls"):
@@ -13813,7 +13906,13 @@ class ChatModel:
                     role=user_role,
                     granted_purposes=granted_purposes or [],
                 )
-                final_state = graph.run(graph_state)
+                final_state = self._run_graph(
+                    graph,
+                    graph_state,
+                    session_id=session_id,
+                    conversation_id=thread_id,
+                    message=message,
+                )
                 usable_outcomes = {
                     GraphOutcome.ANSWERED,
                     GraphOutcome.CLARIFY,

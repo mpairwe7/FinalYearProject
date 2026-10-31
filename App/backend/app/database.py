@@ -3471,23 +3471,25 @@ def get_active_statutory_precedences() -> list[dict[str, Any]]:
     ]
 
 
-def find_open_ticket(conversation_id: str) -> dict[str, Any] | None:
+def find_open_ticket(conversation_id: str, tenant_id: str | None = None) -> dict[str, Any] | None:
     """Return the newest unresolved ticket for *conversation_id*, if any.
 
     A taxpayer who asks for a human three times in one conversation
     wants one officer, not three tickets. Resolved and wontfix tickets
     are excluded so a genuinely new problem later in the same
-    conversation still opens its own.
+    conversation still opens its own. *tenant_id* keeps one tenant's
+    ticket from being reused for another's.
     """
     if not conversation_id:
         return None
     conn = _get_connection()
-    row = conn.execute(
-        """SELECT * FROM tickets
-           WHERE conversation_id = ? AND status IN ('open', 'assigned')
-           ORDER BY created_at DESC LIMIT 1""",
-        (conversation_id,),
-    ).fetchone()
+    sql = """SELECT * FROM tickets
+           WHERE conversation_id = ? AND status IN ('open', 'assigned')"""
+    params: list[Any] = [conversation_id]
+    if tenant_id is not None:
+        sql += " AND tenant_id = ?"
+        params.append(tenant_id)
+    row = conn.execute(sql + " ORDER BY created_at DESC LIMIT 1", params).fetchone()
     return _hydrate_ticket(row) if row else None
 
 

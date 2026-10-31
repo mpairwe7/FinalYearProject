@@ -38,6 +38,8 @@ _SIMULATED_CONNECTOR_NAMESPACES = frozenset(
 _SIMULATION_NOTICE = (
     "Local simulator result only. No live URA, NIRA, URSB, EFRIS, BWIMS, bank, or payment service was contacted or updated."
 )
+#: Gate outcomes that stop a tool from running.
+_HELD_OUTCOMES = frozenset({"hard_blocked", "proposed_awaiting_officer", "failed_closed"})
 
 
 # ---------------------------------------------------------------------------
@@ -346,56 +348,29 @@ class ToolRegistry:
         resolved_tenant_id = str(tenant_id or arg_dict.get("tenant_id") or "default")
         resolved_session_id = str(arg_dict.get("conversation_id") or "tool_dispatch")
         key_only_params = {"argument_keys": sorted(str(k) for k in arg_dict)}
+        audit_context: dict[str, Any] = {
+            "session_id": resolved_session_id,
+            "tool_or_action_name": name,
+            "intent_detected": name,
+            "intent_confidence": 1.0,
+            "parameters_redacted": key_only_params,
+            "parameters_digest_source": arg_dict,
+            "channel": channel,
+            "user_id": resolved_user_id,
+            "tenant_id": resolved_tenant_id,
+            "caller_confirmed": caller_confirmed,
+            "officer_approved": officer_approved,
+            "approving_officer_id": approving_officer_id,
+            "ticket_id": ticket_id,
+            "declared_risk": tool.schema.risk,
+        }
 
-        # Preventive Autonomy Gate (Phase 34) — evaluate before tool.execute
-        try:
-            from ..flags import flags
+        # Preventive Autonomy Gate (Phase 34): decided before tool.execute.
+        gate_outcome, refusal = cls._autonomy_gate(tool, audit_context, t0)
+        if refusal is not None:
+            return refusal
 
-            if flags.is_enabled("risk_tiered_autonomy_gates", subject=resolved_user_id or None):
-                from ..audit.governance_v3 import append_action_audit_v3, evaluate_autonomy_gate
-
-                gate_outcome, _ = evaluate_autonomy_gate(
-                    name,
-                    intent_confidence=1.0,
-                    caller_confirmed=caller_confirmed,
-                    officer_approved=officer_approved,
-                    approving_officer_id=approving_officer_id,
-                    ticket_id=ticket_id,
-                    subject=resolved_user_id or None,
-                )
-                if gate_outcome in ("hard_blocked", "proposed_awaiting_officer", "failed_closed"):
-                    elapsed_ms = (time.perf_counter() - t0) * 1000
-                    rec, receipt = append_action_audit_v3(
-                        session_id=resolved_session_id,
-                        tool_or_action_name=name,
-                        intent_detected=name,
-                        intent_confidence=1.0,
-                        parameters_redacted=key_only_params,
-                        parameters_digest_source=arg_dict,
-                        response_summary_redacted={"ok": False, "autonomy_outcome": gate_outcome},
-                        execution_status="blocked" if gate_outcome != "proposed_awaiting_officer" else "proposed",
-                        execution_latency_ms=elapsed_ms,
-                        channel=channel,
-                        user_id=resolved_user_id,
-                        tenant_id=resolved_tenant_id,
-                        caller_confirmed=caller_confirmed,
-                        officer_approved=officer_approved,
-                        approving_officer_id=approving_officer_id,
-                        ticket_id=ticket_id,
-                    )
-                    gated_res: dict[str, Any] = {
-                        "ok": False,
-                        "autonomy_outcome": gate_outcome,
-                        "error": f"Action '{name}' requires approval or is blocked ({gate_outcome}).",
-                    }
-                    if flags.is_enabled("verifiable_decision_receipts", subject=resolved_user_id or None):
-                        gated_res["decision_receipt"] = receipt.model_dump()
-                    elif rec.audit_event_id:
-                        gated_res["audit_event_id"] = rec.audit_event_id
-                    return gated_res
-        except Exception:
-            logger.debug("Preventive autonomy gate check skipped for %s", name, exc_info=True)
-
+        raised = False
         try:
             exec_kwargs = dict(arg_dict)
             try:
@@ -430,23 +405,27 @@ class ToolRegistry:
                 sorted(arg_dict.keys()),
                 type(e).__name__,
             )
-            return {
+            raised = True
+            result = {
                 "ok": False,
                 "error": f"Invalid arguments for {name}: {e}",
                 "expected": tool.schema.parameters,
             }
         except Exception as e:  # noqa: BLE001 — tools are sandboxed
             logger.exception("Tool %s raised", name)
-            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+            raised = True
+            result = {"ok": False, "error": f"{type(e).__name__}: {e}"}
         finally:
             elapsed_ms = (time.perf_counter() - t0) * 1000
             logger.debug("Tool %s executed in %.1fms", name, elapsed_ms)
 
-        if tool.schema.namespace in _SIMULATED_CONNECTOR_NAMESPACES:
+        if not raised and tool.schema.namespace in _SIMULATED_CONNECTOR_NAMESPACES:
             result.setdefault("mode", "simulation")
             result.setdefault("live", False)
             result.setdefault("simulation_notice", _SIMULATION_NOTICE)
 
+        # A call that failed is evidence too: the return paths above used to skip
+        # this, so the actions an auditor most wants to see left no record.
         try:
             from ..flags import flags
 
@@ -456,31 +435,110 @@ class ToolRegistry:
                 from ..audit.governance_v3 import append_action_audit_v3
 
                 rec, receipt = append_action_audit_v3(
-                    session_id=resolved_session_id,
-                    tool_or_action_name=name,
-                    intent_detected=name,
-                    intent_confidence=1.0,
-                    parameters_redacted=key_only_params,
-                    parameters_digest_source=arg_dict,
+                    **audit_context,
                     response_summary_redacted={"ok": bool(result.get("ok", True))},
                     execution_status="success" if result.get("ok", True) else "error",
                     execution_latency_ms=elapsed_ms,
-                    channel=channel,
-                    user_id=resolved_user_id,
-                    tenant_id=resolved_tenant_id,
-                    caller_confirmed=caller_confirmed,
-                    officer_approved=officer_approved,
-                    approving_officer_id=approving_officer_id,
-                    ticket_id=ticket_id,
+                    decided_outcome=gate_outcome or "autonomous_executed",
                 )
                 if flags.is_enabled("verifiable_decision_receipts", subject=resolved_user_id or None):
                     result["decision_receipt"] = receipt.model_dump()
                 elif rec.audit_event_id:
                     result["audit_event_id"] = rec.audit_event_id
         except Exception:
-            logger.debug("Phase 34 tool audit enrichment skipped for %s", name, exc_info=True)
+            logger.warning("Tool audit record not written for %s", name, exc_info=True)
 
         return result
+
+    @classmethod
+    def _autonomy_gate(
+        cls, tool: Tool, audit_context: dict[str, Any], started: float
+    ) -> tuple[str, dict[str, Any] | None]:
+        """Decide whether *tool* may run: ``(outcome, refusal)``, ``refusal`` None to proceed.
+
+        The decision and its record are kept apart on purpose. They shared one
+        ``try`` that logged at debug level, so an audit write that failed while
+        refusing a critical action fell through and **ran the action**. A gate
+        that cannot decide has not said yes (ASI02), and a block does not depend
+        on being able to write it down. A pure read has nothing to stop, so it
+        alone survives a gate fault: a calculator should outlive the policy store.
+        """
+        name = str(audit_context["tool_or_action_name"])
+        subject = str(audit_context["user_id"]) or None
+        schema = tool.schema
+        try:
+            from ..flags import flags
+
+            if not flags.is_enabled("risk_tiered_autonomy_gates", subject=subject):
+                return "", None
+            from ..audit import governance_v3
+
+            outcome, _ = governance_v3.evaluate_autonomy_gate(
+                name,
+                intent_confidence=1.0,
+                caller_confirmed=bool(audit_context["caller_confirmed"]),
+                officer_approved=bool(audit_context["officer_approved"]),
+                approving_officer_id=str(audit_context["approving_officer_id"]),
+                ticket_id=audit_context["ticket_id"],
+                subject=subject,
+                declared_risk=schema.risk,
+            )
+        except Exception:
+            logger.exception("Autonomy gate could not decide for %s", name)
+            cls._gate_fault("evaluate")
+            if schema.read_only and schema.risk == "low":
+                return "", None
+            outcome = "failed_closed"
+
+        if outcome not in _HELD_OUTCOMES:
+            return outcome, None
+
+        refusal: dict[str, Any] = {
+            "ok": False,
+            "autonomy_outcome": outcome,
+            "error": f"Action '{name}' requires approval or is blocked ({outcome}).",
+        }
+        context = dict(audit_context)
+        if outcome == "proposed_awaiting_officer":
+            # "Awaiting an officer" is only true once an officer has it.
+            from .escalate import refer_to_officer
+
+            referred = refer_to_officer(f"Officer approval needed before running {name}")
+            if referred:
+                refusal["ticket_id"] = referred
+                refusal["message"] = (
+                    "This needs a URA officer's approval, so it has not been done. "
+                    "It has been passed to an officer."
+                )
+                context["ticket_id"] = referred
+        try:
+            from ..audit import governance_v3
+            from ..flags import flags
+
+            record, receipt = governance_v3.append_action_audit_v3(
+                **context,
+                response_summary_redacted={"ok": False, "autonomy_outcome": outcome},
+                execution_status="blocked" if outcome != "proposed_awaiting_officer" else "proposed",
+                execution_latency_ms=(time.perf_counter() - started) * 1000,
+                decided_outcome=outcome,
+            )
+            if flags.is_enabled("verifiable_decision_receipts", subject=subject):
+                refusal["decision_receipt"] = receipt.model_dump()
+            elif record.audit_event_id:
+                refusal["audit_event_id"] = record.audit_event_id
+        except Exception:
+            logger.exception("Refused action %s could not be recorded", name)
+            cls._gate_fault("audit")
+        return outcome, refusal
+
+    @staticmethod
+    def _gate_fault(stage: str) -> None:
+        try:
+            from ..analytics import metrics
+
+            metrics.inc("autonomy_gate_faults_total", labels={"stage": stage})
+        except Exception:
+            logger.debug("gate fault not counted", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
