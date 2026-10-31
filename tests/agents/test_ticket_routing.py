@@ -107,14 +107,7 @@ class TestQueueFiltering:
 
 
 class TestRoutingIsAppliedAtEscalation:
-    """Enabled via the env var, not the flag singleton.
-
-    ``test_integration.py`` calls ``importlib.reload(app.flags)``, which
-    replaces the singleton — so a ``flags.set()`` here lands on a
-    different object from the one ``service.py`` bound at import time,
-    and the flag reads False. The env var is read on every call and is
-    immune to that.
-    """
+    """Enabled via the env var, which is read on every call."""
 
     def test_the_service_routes_on_the_classified_topic(self, tmp_db, monkeypatch):
         from app.service import ChatModel

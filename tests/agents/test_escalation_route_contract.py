@@ -18,7 +18,10 @@ from app.audit import governance_v3 as gov
 from app.flags import flags
 from app.service import ChatModel
 from app.tools import Tool, ToolRegistry, ToolSchema
-from app.tools.escalate import ESCALATION_ROUTE
+
+# The module, not the name: ``fresh_registry`` reloads it, which makes a new ContextVar,
+# so a name bound at collection would set one the tool no longer reads.
+from app.tools import escalate as escalate_tool
 
 
 @pytest.fixture
@@ -45,11 +48,11 @@ def _route(model: ChatModel, conversation: str, *, tenant: str = "tenant-a", use
 class TestTheToolReachesAnOfficer:
     def test_the_ticket_can_be_traced_back_to_the_taxpayer(self, queue) -> None:
         conversation = f"c-{uuid.uuid4().hex[:8]}"
-        token = ESCALATION_ROUTE.set(_route(_model(), conversation))
+        token = escalate_tool.ESCALATION_ROUTE.set(_route(_model(), conversation))
         try:
             result = ToolRegistry.call("escalate_to_human", {"reason": "needs review"}, user_id="u1")
         finally:
-            ESCALATION_ROUTE.reset(token)
+            escalate_tool.ESCALATION_ROUTE.reset(token)
         assert result["ok"] is True
         ticket = queue.get_ticket(result["ticket_id"])
         assert ticket["conversation_id"] == conversation
@@ -60,30 +63,30 @@ class TestTheToolReachesAnOfficer:
 
     def test_one_conversation_gets_one_officer(self, queue) -> None:
         conversation = f"c-{uuid.uuid4().hex[:8]}"
-        token = ESCALATION_ROUTE.set(_route(_model(), conversation))
+        token = escalate_tool.ESCALATION_ROUTE.set(_route(_model(), conversation))
         try:
             first = ToolRegistry.call("escalate_to_human", {"reason": "one"}, user_id="u1")
             second = ToolRegistry.call("escalate_to_human", {"reason": "two"}, user_id="u1")
         finally:
-            ESCALATION_ROUTE.reset(token)
+            escalate_tool.ESCALATION_ROUTE.reset(token)
         assert first["ticket_id"] == second["ticket_id"]
 
     def test_staff_are_told(self, queue) -> None:
         conversation = f"c-{uuid.uuid4().hex[:8]}"
-        token = ESCALATION_ROUTE.set(_route(_model(), conversation))
+        token = escalate_tool.ESCALATION_ROUTE.set(_route(_model(), conversation))
         try:
             with mock.patch("app.service.notify_ticket_created") as notify:
                 ToolRegistry.call("escalate_to_human", {"reason": "needs review"}, user_id="u1")
         finally:
-            ESCALATION_ROUTE.reset(token)
+            escalate_tool.ESCALATION_ROUTE.reset(token)
         notify.assert_called_once()
 
     def test_a_failed_handoff_is_not_reported_as_a_handoff(self, queue) -> None:
-        token = ESCALATION_ROUTE.set(lambda **_kwargs: "")
+        token = escalate_tool.ESCALATION_ROUTE.set(lambda **_kwargs: "")
         try:
             result = ToolRegistry.call("escalate_to_human", {"reason": "needs review"}, user_id="u1")
         finally:
-            ESCALATION_ROUTE.reset(token)
+            escalate_tool.ESCALATION_ROUTE.reset(token)
         assert result["ok"] is False
         assert "ticket_id" not in result
 
@@ -91,11 +94,11 @@ class TestTheToolReachesAnOfficer:
         def _down(**_kwargs):
             raise ConnectionError("queue unreachable")
 
-        token = ESCALATION_ROUTE.set(_down)
+        token = escalate_tool.ESCALATION_ROUTE.set(_down)
         try:
             result = ToolRegistry.call("escalate_to_human", {"reason": "needs review"}, user_id="u1")
         finally:
-            ESCALATION_ROUTE.reset(token)
+            escalate_tool.ESCALATION_ROUTE.reset(token)
         assert result["ok"] is False
 
     def test_outside_a_turn_the_ticket_still_names_its_owner(self, queue) -> None:
@@ -152,11 +155,11 @@ class TestAwaitingAnOfficerIsTrue:
         flags.set("risk_tiered_autonomy_gates", True)
         gov.quality_circuit_breaker.reset()
         conversation = f"c-{uuid.uuid4().hex[:8]}"
-        token = ESCALATION_ROUTE.set(_route(_model(), conversation))
+        token = escalate_tool.ESCALATION_ROUTE.set(_route(_model(), conversation))
         try:
             result = ToolRegistry.call(write_tool, {}, user_id="u1", caller_confirmed=True)
         finally:
-            ESCALATION_ROUTE.reset(token)
+            escalate_tool.ESCALATION_ROUTE.reset(token)
         assert result["ok"] is False
         assert result["autonomy_outcome"] == "proposed_awaiting_officer"
         ticket = queue.get_ticket(result["ticket_id"])

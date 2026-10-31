@@ -91,8 +91,26 @@ class TestEscalationRoundTrip:
 # ---------------------------------------------------------------------------
 # Full FastAPI app still assembles with the flags on
 # ---------------------------------------------------------------------------
+@pytest.fixture
+def restored_modules():
+    """Put ``app.flags`` and ``app.main`` back after a test reloads them.
+
+    A reload replaces the flag singleton, while ``service.py`` keeps the one it bound
+    at import. Left that way, ``clean_flags`` clears an object nothing reads, so a flag
+    one test sets stays on for every test after it, in another file, for no visible
+    reason.
+    """
+    import app.flags
+    import app.main
+
+    saved = [(vars(module), dict(vars(module))) for module in (app.flags, app.main)]
+    yield
+    for namespace, contents in saved:
+        namespace.update(contents)
+
+
 class TestAppAssembly:
-    def test_app_loads_with_all_agentic_flags_on(self, monkeypatch):
+    def test_app_loads_with_all_agentic_flags_on(self, monkeypatch, restored_modules):
         """The FastAPI app must still construct under every flag combo."""
         for flag in ("TOOL_USE", "AGENTIC_MODE", "TICKET_QUEUE"):
             monkeypatch.setenv(f"FLAG_{flag}", "true")
