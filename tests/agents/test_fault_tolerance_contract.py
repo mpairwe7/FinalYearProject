@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import contextvars
+import itertools
 import threading
 import time
 from typing import Any
@@ -455,6 +456,75 @@ class TestParallelToolCalls:
         real.generate_with_tools("VAT on 1,000,000?", tool_names=["calculate_vat"])
 
         assert dispatched == ["calculate_vat"]
+
+    def test_a_duplicate_of_a_failed_action_does_not_report_success(self, tool_loop, monkeypatch) -> None:
+        # Side effects run one at a time, and the round is recorded after both, so the
+        # duplicate is admitted before anyone knows how the original went.
+        from app.mcp import get_client
+
+        same = {"name": "escalate_to_human", "arguments": {"reason": "a"}}
+        tool_loop([[same, dict(same)], []])
+        monkeypatch.setattr(
+            get_client(), "call_tool", lambda *_a, **_k: mock.Mock(result={"ok": False, "error": "queue down"}, ok=False)
+        )
+        events: list[dict[str, Any]] = []
+
+        result = llm.generate_with_tools(
+            "I need a person",
+            tool_names=["escalate_to_human"],
+            user_id="u1",
+            user_role="verified_taxpayer",
+            event_callback=events.append,
+        )
+
+        outcomes = [call["result"] for call in result["tool_calls"]]
+        assert [outcome["ok"] for outcome in outcomes] == [False, False]
+        assert [event["ok"] for event in events if event["type"] == "tool_call.completed"] == [False, False]
+        assert outcomes[1]["error"] == "queue down"
+        assert outcomes[1]["repeated_call"] is True
+
+    def test_a_duplicate_that_was_admitted_first_still_gets_the_result(self, tool_loop, monkeypatch) -> None:
+        # In a parallel round, the second identical call can reach the budget first.
+        from app.mcp import get_client
+
+        tool_loop([[VAT, dict(VAT)], []])
+        monkeypatch.setattr(
+            get_client(), "call_tool", lambda *_a, **_k: mock.Mock(result={"ok": False, "error": "offline"}, ok=False)
+        )
+        real_admit = ToolCallBudget.admit
+        order = itertools.count()
+        second_admitted = threading.Event()
+
+        def first_caller_admitted_last(self, name, arguments=None, *, iteration=0):
+            if next(order) == 0:
+                second_admitted.wait(1.0)
+                return real_admit(self, name, arguments, iteration=iteration)
+            decision = real_admit(self, name, arguments, iteration=iteration)
+            second_admitted.set()
+            return decision
+
+        monkeypatch.setattr(ToolCallBudget, "admit", first_caller_admitted_last)
+
+        result = llm.generate_with_tools("VAT on 1,000,000?", tool_names=["calculate_vat"])
+
+        assert [call["result"]["error"] for call in result["tool_calls"]] == ["offline", "offline"]
+
+    def test_a_duplicate_is_not_a_success_before_the_original_returns(self) -> None:
+        budget = ToolCallBudget()
+        budget.admit("lookup", {"tin": "1"}, iteration=0)
+
+        duplicate = budget.admit("lookup", {"tin": "1"}, iteration=0)
+
+        assert duplicate.result["ok"] is False
+        assert duplicate.result["repeated_call"] is True
+
+    def test_a_duplicate_keeps_its_note_if_the_original_left_no_result(self) -> None:
+        budget = ToolCallBudget()
+        budget.admit("lookup", {"tin": "1"}, iteration=0)
+        duplicate = budget.admit("lookup", {"tin": "1"}, iteration=0)
+        budget.record("lookup", {"tin": "1"}, "not a dict")
+
+        assert budget.settle("lookup", {"tin": "1"}, duplicate.result) == duplicate.result
 
     def test_tools_with_side_effects_never_overlap(self, tool_loop, monkeypatch) -> None:
         from app.mcp import get_client

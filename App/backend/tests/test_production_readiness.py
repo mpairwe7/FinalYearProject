@@ -207,7 +207,7 @@ def test_live_notification_production_gate(monkeypatch: pytest.MonkeyPatch) -> N
     assert errors_with_provider == []
 
 
-@pytest.mark.parametrize("value", ["0", "-1", "soon"])
+@pytest.mark.parametrize("value", ["0", "-1", "soon", "nan", "inf", "-inf", "Infinity"])
 def test_production_refuses_a_turn_with_no_working_deadline(monkeypatch, value):
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("AGENTIC_TURN_DEADLINE_S", value)

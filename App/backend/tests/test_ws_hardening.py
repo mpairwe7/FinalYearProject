@@ -109,6 +109,16 @@ class DeadlineResolutionTest(unittest.TestCase):
         finally:
             os.environ.pop("AGENTIC_TURN_DEADLINE_S", None)
 
+    def test_a_value_that_can_never_fire_uses_the_default(self) -> None:
+        from app.service import _resolve_turn_deadline
+
+        for raw in ("nan", "inf", "-inf", "Infinity"):
+            os.environ["AGENTIC_TURN_DEADLINE_S"] = raw
+            try:
+                self.assertEqual(_resolve_turn_deadline(), 120.0, raw)
+            finally:
+                os.environ.pop("AGENTIC_TURN_DEADLINE_S", None)
+
     def test_disabled_with_zero(self) -> None:
         os.environ["AGENTIC_TURN_DEADLINE_S"] = "0"
         try:

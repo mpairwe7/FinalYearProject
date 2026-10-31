@@ -9,10 +9,10 @@ Baseline: `4f26cf21` (`dev`, after #676). Scope: the orchestrator, reasoner, fau
 tolerance and responsible-AI controls, from a question to its audit row. This is a
 targeted engineering review, not a penetration test or a legal compliance certification.
 
-Method: each finding below was reproduced against unmodified code before it was fixed,
-and has a regression test. Reproduction scripts printed observed behaviour rather than
-asserting it, because a test that fails on a missing function proves nothing about the
-defect. Suspicions that did not reproduce were dropped; see [Dropped](#dropped).
+Method: findings were reproduced against unmodified code, phase by phase, before they were
+fixed, and each fix has a regression test. Reproduction scripts printed observed behaviour
+rather than asserting it, because a test that fails on a missing function proves nothing
+about the defect. Suspicions that did not reproduce were dropped; see [Dropped](#dropped).
 
 ## The pattern
 
@@ -132,10 +132,48 @@ Recorded because a reader should know how far to trust the process.
 * Self-review found that a fallback was being cached, so it would outlive its outage with no
   disclosure on a cache hit, and that a graph fallback was not disclosed on the stream. A healthy
   control test then showed the first version of the caching test passing for the wrong reason.
-
-* The first sweep below reported 58 of 59 caught, but it counted any non-zero exit as a kill,
+* The first mutation sweep reported 58 of 59 caught, but it counted any non-zero exit as a kill,
   so a mutant that merely broke the file would have counted. It was rerun requiring a compiling
   mutant and a real test failure.
+* **My runs were not CI's.** The shards split `tests/agents` and ran the root tests separately,
+  so nothing ran `pytest tests/` as one process. CI then failed 12 tests that had passed here.
+  `test_integration.py` reloaded `app.flags`, so `clean_flags` cleared an object nothing reads
+  and a flag set by a new test stayed on for every later test. `fresh_registry` reloads the tool
+  modules, so a test set an `ESCALATION_ROUTE` the tool had stopped reading. Production imports
+  both at use and is unaffected. The reload now restores what it replaced, and `clean_flags` fails
+  at once if the singleton is replaced again.
+* **The pull request claimed more than had been checked.** It said every gate passed, when
+  `app.freshness --check` had not been run and cannot run here. It said a failing test could not
+  reach changed code, without the test having been read; it does call `app.llm`. Both statements
+  were withdrawn from the pull request when caught.
+* **Parallel shards shared one database.** That was the failing test above. Three receptionist
+  files in other shards delete `voice_call_turns` in their setup. Repeating the test beside a
+  concurrent delete failed 8 of 8 with the same `IndexError`; without one it passed 8 of 8.
+
+## What review of this change found
+
+Automated review of the pull request raised 12 findings against code written here. Eleven were
+real, and two of those contradicted a claim above: that an enforced control holds, and that
+duplicates are handled. Each was confirmed by a test that failed on the unfixed code.
+
+| Finding | Gap | Outcome |
+| --- | --- | --- |
+| An enforced figure lock served the reply unchecked when the check itself raised. | G354 | Fixed: it removes every figure, or withholds the reply if it cannot. REST was not affected: there the turn fails and nothing is shown. |
+| A duplicate in a round reported `ok: true` before its original finished, so a failed action issued twice read as one failure and one success. | G347 | Fixed: a duplicate reports its original's result. The suggested fix, waiting in admission, would have deadlocked, because a round is recorded only once all of it has returned. |
+| The audit row named Gemini when Gemini returned nothing. | G359 | Fixed: a provider is named only for text that was served. |
+| A graph answer's row named no generator. | G359 | Fixed. |
+| A graph turn's row dropped the figure lock result. | G359 | Fixed. |
+| The fallback notice said "official" of a passage that can be web commentary. | G358 | Fixed the wording. Whether to serve commentary at all is G369. |
+| `nan` and `inf` passed the deadline gate, and neither ever fires. | G345 | Fixed in the gate and at runtime. |
+| A stuck classifier pool queued without limit, and abandoned jobs ran later. | G357 | Fixed: bounded, and queued jobs are cancelled. |
+| An officer approval on the decided path lost its time. | G336 | Fixed. |
+| The shadow reject ratio recorded nothing until the first reject. | G360 | Fixed. |
+| `CircuitBreakerOpen` can fire on an idle worker after the back-off has passed. | G348 | Alert and runbook now say what the gauge can show. |
+| A probe that reports after its lease was reclaimed still changes the breaker. | G341 | Declined; see [Design decisions](#design-decisions-worth-challenging). |
+
+Semgrep also flagged three log lines as personal data. All three were false positives: its rule
+matches `tin` inside "testing" and "starting". They were reworded rather than suppressed, so the
+rule still covers those lines.
 
 ## Test evidence
 
@@ -181,6 +219,10 @@ carries the time of the check.
   G366 asks whether high-risk actions should need a write-ahead record.
 * **The deadline stops new work, not work in flight.** A thread cannot be interrupted, so a
   call already started completes after the turn ends.
+* **A late probe report still counts.** A probe that outlives its lease and reports after its
+  replacement was taken changes the breaker. Binding reports to a lease would change every call
+  site. At worst it allows one extra probe, or closes the breaker on a true but late success,
+  and failures trip it again.
 
 ## What this review did not do
 
@@ -189,9 +231,11 @@ carries the time of the check.
   behaviour is inferred from code and the earlier review's logs.
 * **Postgres paths were not exercised.** `find_open_ticket` and the retention list changed in
   both backends; the tests run on SQLite.
-* **`promtool` was not run.** It is not installed here. The new alert and recording-rule cases
-  are parsed as YAML and checked by `tests/test_monitoring_config.py`, and run for the first
-  time in the CI "Monitoring config" job.
+* **`promtool` was not run locally.** It is not installed here. CI's monitoring job runs the
+  alert and recording-rule cases.
+* **`app.freshness --check` could not run.** It compares the corpus with the search index, and
+  this checkout has no snapshot, so it exits 2 here and on clean `dev`. It says nothing about
+  this change.
 * **Disclosure wording has not been reviewed** by a language lead or URA communications. It is
   translated by machine like every other reply.
 * **Tax rules were not reviewed.** Slot meanings come from the tool schemas and general tax
@@ -210,6 +254,8 @@ carries the time of the check.
 | G366 | No write-ahead record for high-risk actions: a crash between execution and audit loses the row. | Backend, audit |
 | G367 | Supervisor confidences are constants, not calibrated probabilities. Tier selection reads them. | Backend, evaluation |
 | G368 | After a reasoner timeout, T1 can repeat a tool call that was in flight. Tickets dedupe; other side-effecting tools rely on their idempotency key. | Backend |
+| G369 | With every model down and only web commentary found, the commentary is served, labelled as a fallback. Serving it or abstaining is a product decision. | Service owner |
+| G370 | A `verify_claims` error is logged at debug and the reply continues, so a claim check that is down is silent. Closing it means deciding whether a verifier outage withholds answers. | Backend, service owner |
 
 Also open from the previous review: G326 to G329 and G331.
 

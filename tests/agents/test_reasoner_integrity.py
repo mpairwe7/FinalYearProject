@@ -26,6 +26,7 @@ from app.agents.evaluator import verify_figure_lock
 from app.agents.graphs import main_graph
 from app.agents.graphs.state import AgentGraphState
 from app.agents.state import AgentRoute, RouteDecision
+from app.agents import tiebreak
 from app.agents.tiebreak import _READ_ONLY_TOOLS, cache_clear, refine
 from app.analytics import metrics
 from app.flags import flags
@@ -291,6 +292,10 @@ class TestAnUnverifiedFigureIsNeverShown:
         assert "25%" not in ever_shown(events)
 
 
+def _raises(*_args: Any, **_kwargs: Any) -> Any:
+    raise RuntimeError("the check itself broke")
+
+
 class TestTheFigureLockRunsOnEveryTransport:
     def _guards(self, reply: str, message: str = "What is the VAT rate?", **kwargs: Any) -> dict[str, Any]:
         return service_module._apply_output_guards(
@@ -332,6 +337,37 @@ class TestTheFigureLockRunsOnEveryTransport:
         assert guard["figure_lock"]["mode"] == "shadow"
         assert guard["figure_lock"]["ok"] is False
         assert metrics.snapshot()["counters"].get(key, 0) - before == 1
+
+    def test_an_enforced_lock_that_cannot_run_shows_no_figure(self, monkeypatch) -> None:
+        monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
+        monkeypatch.setattr("app.agents.evaluator.verify_figure_lock", _raises)
+
+        guard = self._guards(
+            "The penalty is UGX 7,777,777 [1]. You can register online [1].", model_tier=ModelTier.T3.value
+        )
+
+        assert "7,777,777" not in guard["reply"]
+        assert "register online" in guard["reply"]
+        assert guard["revised"] is True
+        assert guard["figure_lock"]["ok"] is None
+
+    def test_if_figures_cannot_even_be_removed_the_reply_is_withheld(self, monkeypatch) -> None:
+        monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
+        monkeypatch.setattr("app.agents.evaluator.verify_figure_lock", _raises)
+        monkeypatch.setattr("app.agents.evaluator.strip_unverified_figure_sentences", _raises)
+
+        guard = self._guards("The penalty is UGX 7,777,777 [1].", model_tier=ModelTier.T3.value)
+
+        assert guard["reply"] == service_module.FIGURES_WITHHELD_REPLY
+
+    def test_a_lock_that_only_measures_changes_nothing_if_it_cannot_run(self, monkeypatch, clean_flags) -> None:
+        monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
+        monkeypatch.setattr("app.agents.evaluator.verify_figure_lock", _raises)
+
+        guard = self._guards("The penalty is UGX 7,777,777 [1].")
+
+        assert "7,777,777" in guard["reply"]
+        assert guard["figure_lock"] == {"mode": "shadow", "ok": None, "rejected": 0}
 
     def test_a_figure_a_calculator_returned_is_not_invented(self, monkeypatch) -> None:
         monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
@@ -507,3 +543,42 @@ class TestAModelCannotWidenItsOwnTools:
         release.set()
         assert time.perf_counter() - started < 1.0
         assert decision is base
+
+    def test_an_abandoned_job_does_not_run_later(self) -> None:
+        release = threading.Event()
+        ran: list[str] = []
+
+        def stuck(_prompt: str) -> str:
+            ran.append("ran")
+            release.wait(5.0)
+            return ""
+
+        base = RouteDecision(route=AgentRoute.RAG, reason="default", confidence=0.6)
+        try:
+            with mock.patch("app.agents.tiebreak.CLASSIFIER_TIMEOUT_S", 0.05):
+                refine("the first worker", base, classifier=stuck)
+                refine("the second worker", base, classifier=stuck)
+                refine("this one can only queue", base, classifier=stuck)
+        finally:
+            release.set()
+        drained = [tiebreak._CLASSIFIER_POOL.submit(lambda: None) for _ in range(2)]
+        for future in drained:
+            future.result(timeout=5.0)
+        assert len(ran) <= 2
+
+    def test_a_saturated_pool_keeps_the_rule_decision_without_waiting(self) -> None:
+        asked: list[str] = []
+        base = RouteDecision(route=AgentRoute.RAG, reason="default", confidence=0.6)
+
+        with mock.patch("app.agents.tiebreak._CLASSIFIER_SLOTS", threading.BoundedSemaphore(1)) as slots:
+            slots.acquire()
+            decision = refine("a third question", base, classifier=lambda prompt: asked.append(prompt) or "")
+
+        assert decision is base
+        assert asked == []
+
+    def test_a_slot_comes_back_when_a_job_ends(self) -> None:
+        base = RouteDecision(route=AgentRoute.RAG, reason="default", confidence=0.6)
+        for index in range(12):
+            decision = refine(f"question {index}", base, classifier=lambda _prompt: '{"route": "clarify"}')
+            assert decision is not base

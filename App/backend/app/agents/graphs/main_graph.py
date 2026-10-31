@@ -756,7 +756,11 @@ def node_synthesize(state: AgentGraphState) -> NodeResult:
                     personalization_context=state.live_check_notice,
                 )
                 if llm_reply and llm_reply.strip():
+                    from ...service import _endpoint_model, _note_generation
+
                     state.reply = llm_reply.strip()
+                    # No endpoint was passed above, so this is the configured model.
+                    _note_generation(backend="local", model=_endpoint_model(None))
                     if state.locale in ("", "en") or not _llm_module.can_generate_in_locale(state.locale):
                         from ...service import _answer_in_english
 

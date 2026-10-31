@@ -198,23 +198,20 @@ class ToolCallBudget:
             self._per_iteration[iteration] += 1
             self.repeats += 1
             logger.info("tool budget: repeat of %s served from memo", name)
-            memo = dict(self._memo[fingerprint])
-            memo["repeated_call"] = True
-            memo["budget_note"] = (
-                "You already called this tool with these arguments this turn. "
-                "This is the earlier result — do not call it again."
-            )
-            return BudgetDecision(Admission.REPEAT, reason="duplicate call", result=memo)
+            return BudgetDecision(Admission.REPEAT, reason="duplicate call", result=self._replay(fingerprint))
 
         if fingerprint in self._in_flight:
             self._per_iteration[iteration] += 1
             self.repeats += 1
             logger.info("tool budget: duplicate of %s in this round not dispatched", name)
+            # Not a success: nothing ran here, and the original may yet fail. Waiting
+            # for it here would deadlock, because the loop records a round only once
+            # all of it has returned. settle() replaces this with the real result.
             return BudgetDecision(
                 Admission.REPEAT,
                 reason="duplicate call",
                 result={
-                    "ok": True,
+                    "ok": False,
                     "repeated_call": True,
                     "budget_note": (
                         "This is the same call as another in this round, so it was not run "
@@ -243,6 +240,16 @@ class ToolCallBudget:
         self._in_flight.add(fingerprint)
         return BudgetDecision(Admission.ADMIT)
 
+    def _replay(self, fingerprint: str) -> dict[str, Any]:
+        """The earlier result, marked so the model does not ask again. Caller holds the lock."""
+        memo = dict(self._memo[fingerprint])
+        memo["repeated_call"] = True
+        memo["budget_note"] = (
+            "You already called this tool with these arguments this turn. "
+            "This is the earlier result — do not call it again."
+        )
+        return memo
+
     def _deny(self, name: str, reason: str) -> BudgetDecision:
         self.denied += 1
         logger.warning("tool budget: denied %s — %s", name, reason)
@@ -269,6 +276,21 @@ class ToolCallBudget:
             self._in_flight.discard(fingerprint)
             if isinstance(result, dict):
                 self._memo[fingerprint] = dict(result)
+
+    def settle(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None,
+        provisional: dict[str, Any],
+    ) -> dict[str, Any]:
+        """What a duplicate reports, now its round is recorded.
+
+        *provisional* stands when the original left nothing to replay, which
+        :meth:`record` does for a result that is not a dict.
+        """
+        fingerprint = call_fingerprint(name, arguments)
+        with self._lock:
+            return self._replay(fingerprint) if fingerprint in self._memo else provisional
 
     # -- Observation budget --------------------------------------------
     def observation_allowance(self) -> int:

@@ -13,6 +13,7 @@ evidence is in the [assurance review](../plans/agentic-orchestrator-resilience-a
 | Every model down | The closest passage is served | The passage, and a sentence saying it is a fallback |
 | Tool loop out of steps | The last text is served | The text, and a sentence saying it may be incomplete |
 | Stream breaks part-way | Text so far is kept; no second answer is appended | The text, and a sentence saying it was cut off |
+| Figure check fails while enforcing | Every figure is removed, or the reply is withheld if that fails too | The rest of the answer and a note to confirm with URA |
 | Turn reaches its deadline | Generation stops | What was verified so far, and a notice to try again |
 | Client leaves | The tool loop stops at its next check; no cloud call is made | Nothing |
 | Audit ledger down | Refused actions stay refused | Nothing; see below |
@@ -33,7 +34,10 @@ counts the changes.
 3. A breaker retries by itself after its back-off (up to 300 s), so there is nothing to
    reset. Restarting a worker clears its state but does not fix the dependency.
 
-Breakers are per worker, so one worker can show open while others do not.
+Breakers are per worker, so one worker can show open while others do not. The state moves
+only when a call reaches the breaker, so on a worker with no traffic it stays at 2 after the
+back-off has passed, and this alert can fire while nothing is being refused. Check that
+worker's traffic before treating it as an outage.
 
 ## Half-open probe lost
 
@@ -100,6 +104,10 @@ right to reject. A rejection on a correct answer removes that sentence, adds a n
 confirm with URA, and costs the taxpayer the figure. A miss shows them a wrong one. There
 is no stored corpus of generated answers to size this offline, which is why it is measured
 in production first.
+
+If the check itself breaks, `ura_figure_lock_checks_total{outcome="error"}` rises. While
+enforcing, replies lose their figures rather than show them unchecked. While measuring,
+replies are unchanged and nothing is measured. A sustained rise is a defect in either case.
 
 ## Streaming and the release gate
 

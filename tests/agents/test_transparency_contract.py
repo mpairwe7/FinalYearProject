@@ -16,6 +16,8 @@ from typing import Any
 
 import pytest
 from app import service as service_module
+from app.agents.graphs.main_graph import node_synthesize
+from app.agents.graphs.state import AgentGraphState
 from app.audit import turns
 from app.flags import flags
 from app.guardrails import OutputGuard
@@ -98,6 +100,10 @@ def stream(monkeypatch):
 
 
 class TestAFallbackSaysSo:
+    def test_it_does_not_call_the_passage_official(self) -> None:
+        # With nothing official found, the closest passage can be web commentary.
+        assert "official" not in UNAVAILABLE.lower()
+
     def test_on_the_stream(self, stream) -> None:
         stream()
         model = Model()
@@ -291,6 +297,44 @@ class TestTheRowNamesWhatAnswered:
 
         assert record["backend"] == "gemini"
         assert record["model"] == "gemini_flash"
+
+    def _gemini_says(self, monkeypatch, text: str) -> None:
+        monkeypatch.setenv("LLM_FALLBACK_BACKEND", "gemini")
+        monkeypatch.setattr(flags, "is_enabled", lambda name, **_kw: name == "cloudflare_fallback")
+        monkeypatch.setattr("app.production_readiness.is_sovereign_mode", lambda: False)
+        monkeypatch.setattr("app.providers.gateway.gemini_allowed_for", lambda _l: True)
+        monkeypatch.setattr("app.providers.config.is_gemini_configured", lambda: True)
+        monkeypatch.setattr("app.providers.config.is_cloudflare_configured", lambda: False)
+        monkeypatch.setattr("app.providers.budget.try_consume_gemini_call", lambda: True)
+        monkeypatch.setattr("app.providers.gateway.gemini_generate", lambda *_a, **_k: text)
+        breakers.GEMINI_BREAKER.record_success()
+
+    def test_a_provider_that_returned_nothing_is_not_named(self, record, monkeypatch) -> None:
+        self._gemini_says(monkeypatch, "")
+
+        assert service_module._llm_cloud_fallback("q", [], None, "en") == ""
+
+        assert record["backend"] == ""
+        assert record["model"] == ""
+
+    def test_a_truncated_answer_served_anyway_names_who_wrote_it(self, record, monkeypatch) -> None:
+        self._gemini_says(monkeypatch, "The penalty is calculated on the")
+
+        served = service_module._llm_cloud_fallback("q", [], None, "en")
+
+        assert served == "The penalty is calculated on the"
+        assert record["backend"] == "gemini"
+        assert record["model"] == "gemini_flash"
+
+    def test_a_graph_answer(self, record, monkeypatch) -> None:
+        monkeypatch.setattr(service_module.llm_module, "is_available", lambda: True)
+        monkeypatch.setattr(service_module.llm_module, "generate", lambda **_kw: "A complete answer.")
+
+        node_synthesize(AgentGraphState(query="q", hits=[HIT], locale="en"))
+
+        assert record["backend"] == "local"
+        assert record["model"] == service_module.llm_module.LLM_MODEL
+        assert record["degraded"] == []
 
     def test_a_local_answer(self, record, monkeypatch) -> None:
         monkeypatch.setattr(service_module.llm_module, "generate", lambda **_kw: "A complete answer.")

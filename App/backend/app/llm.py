@@ -3875,17 +3875,30 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
         else:
             executed_calls = [_execute_single_call(idx, pc) for idx, pc in enumerate(parsed_calls)]
 
+        # The round has returned. Record all of it before reading any of it, so a
+        # duplicate reports what its original did: the budget only learns the result
+        # here, and the pool does not say which of two identical calls got there first.
+        for exec_info in executed_calls:
+            pc = exec_info["pc"]
+            if pc["name"] in connector_descriptors:
+                exec_info["result"], scrubbed = _sanitize_connector_tool_result(exec_info["result"])
+                if scrubbed:
+                    logger.warning(
+                        "Connector tool result was scrubbed or withheld before agent reuse"
+                    )
+            if not exec_info["skipped"]:
+                budget.record(pc["name"], pc.get("arguments", {}), exec_info["result"])
+        for exec_info in executed_calls:
+            if exec_info["decision"].admission is Admission.REPEAT:
+                pc = exec_info["pc"]
+                exec_info["result"] = budget.settle(pc["name"], pc.get("arguments", {}), exec_info["result"])
+                exec_info["ok"] = bool(exec_info["result"].get("ok", True))
+
         for exec_info in executed_calls:
             idx = exec_info["idx"]
             pc = exec_info["pc"]
             call_id = exec_info["call_id"]
             result = exec_info["result"]
-            if pc["name"] in connector_descriptors:
-                result, scrubbed = _sanitize_connector_tool_result(result)
-                if scrubbed:
-                    logger.warning(
-                        "Connector tool result was scrubbed or withheld before agent reuse"
-                    )
             ok = exec_info["ok"]
             elapsed_ms = exec_info["elapsed_ms"]
             decision = exec_info["decision"]
@@ -3923,7 +3936,6 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                             "elapsed_ms": elapsed_ms,
                         }
                     )
-                budget.record(pc["name"], pc.get("arguments", {}), result)
             # Phase 4: HITL hook — tools with requires_confirmation=True
             # return ``submitted=False`` plus a ``proposal`` struct on the
             # first invocation.  Surface this so the client can elicit

@@ -529,8 +529,8 @@ groups:
           severity: warning
           team: backend
         annotations:
-          summary: "A dependency has been refused for 10 minutes"
-          description: "Turns are falling back or degrading. Check the dependency the breaker names."
+          summary: "A circuit breaker has not closed for 10 minutes"
+          description: "No call has shown the dependency is back, so turns may be falling back or degrading. The state only moves when a call arrives, so on a quiet worker this can mean nothing has tried since the back-off ended. Check the dependency the breaker names."
           runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/agent-fault-tolerance.md#circuit-breaker-open"
 
       - alert: CircuitBreakerProbeLost

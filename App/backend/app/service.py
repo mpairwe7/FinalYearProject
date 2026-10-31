@@ -32,6 +32,7 @@ import functools
 import inspect
 import json
 import logging
+import math
 import os
 import re
 import threading
@@ -853,6 +854,13 @@ def _llm_cloud_fallback(
         return deadline is not None and time.monotonic() >= deadline
 
     best = ""
+    best_writer: dict[str, str] = {}
+
+    def _served_best() -> str:
+        """The truncated draft the chain settled for, named now that it is the answer."""
+        if best:
+            _note_generation(**best_writer)
+        return best
 
     if _budget_exhausted():
         logger.warning("LLM fallback chain total budget exhausted before Gemini attempt")
@@ -886,18 +894,19 @@ def _llm_cloud_fallback(
             )
             breakers.GEMINI_BREAKER.record_success()
             routing.log_model_use("llm", "gemini_flash")
-            _note_generation(backend="gemini", model="gemini_flash")
             # "[1, 3]" -> "[1][3]" before anything downstream reads citations.
             text = normalise_citation_markers(text)
             if text and text.strip() and not _looks_truncated(text):
                 logger.info("LLM fallback via Gemini succeeded")
+                _note_generation(backend="gemini", model="gemini_flash")
                 return text
             if text and text.strip():
                 logger.warning(
                     "LLM fallback via Gemini looks truncated (%d chars) — trying Workers AI",
                     len(text.strip()),
                 )
-                best = best or text
+                if not best:
+                    best, best_writer = text, {"backend": "gemini", "model": "gemini_flash"}
         except Exception:
             breakers.GEMINI_BREAKER.record_failure()
             logger.warning("LLM Gemini fallback failed", exc_info=True)
@@ -931,7 +940,7 @@ def _llm_cloud_fallback(
     # is not a guard.
     if not gw.cloud_generation_allowed_for(locale):
         logger.info("Cloud generation skipped for locale %r — Sunbird tier owns it", locale)
-        return best
+        return _served_best()
     # Strip the Qwen-only /no_think directive — a no-op token for Llama/Mistral.
     if messages and messages[0].get("role") == "system":
         sys_content = messages[0]["content"]
@@ -957,10 +966,10 @@ def _llm_cloud_fallback(
             text = gw.workers_ai_chat(messages, model=model, max_tokens=512, temperature=0.2)
             breakers.CF_LLM_BREAKER.record_success()
             routing.log_model_use("llm", model)
-            _note_generation(backend="workers_ai", model=str(model))
             text = normalise_citation_markers(text)
             if text and text.strip() and not _looks_truncated(text):
                 logger.info("LLM via Workers AI (%s) succeeded", model)
+                _note_generation(backend="workers_ai", model=str(model))
                 return text
             if text and text.strip():
                 logger.warning(
@@ -968,11 +977,12 @@ def _llm_cloud_fallback(
                     model,
                     len(text.strip()),
                 )
-                best = best or text
+                if not best:
+                    best, best_writer = text, {"backend": "workers_ai", "model": str(model)}
         except Exception:
             breakers.CF_LLM_BREAKER.record_failure()
             logger.warning("LLM Workers AI failed (model=%s)", model, exc_info=True)
-    return best
+    return _served_best()
 
 
 def _stream_cloud_fallback(
@@ -1159,9 +1169,8 @@ _TURN_GENERATION: contextvars.ContextVar[dict[str, Any] | None] = contextvars.Co
 #: the sentence is never judged as a claim, and before localization.
 DEGRADED_DISCLOSURES: dict[str, str] = {
     "generation_unavailable": (
-        "I could not write a tailored answer just now, so this is the closest official "
-        "guidance I found. It may not fit your exact situation. Please confirm with URA "
-        "on 0800 117 000."
+        "I could not write a tailored answer just now, so this is the closest passage I "
+        "found. It may not fit your exact situation. Please confirm with URA on 0800 117 000."
     ),
     "tool_loop_truncated": (
         "This answer may not be complete, because I ran out of steps while checking it. "
@@ -1172,6 +1181,13 @@ DEGRADED_DISCLOSURES: dict[str, str] = {
         "again, or confirm with URA on 0800 117 000."
     ),
 }
+
+
+#: Served when an enforced figure lock can neither check a reply nor take its figures out.
+FIGURES_WITHHELD_REPLY = (
+    "I could not verify the figures for this answer, so I have not shown it. "
+    "Please confirm with URA on 0800 117 000."
+)
 
 
 def _new_generation_record() -> dict[str, Any]:
@@ -1410,7 +1426,7 @@ def _local_llm_then_cloud(
     own_deadline = effective_deadline
     effective_deadline = remaining_turn_seconds(own_deadline)
     if effective_deadline <= 0:
-        logger.warning("Turn deadline reached; not starting a generation")
+        logger.warning("Turn deadline reached; skipping generation")
         metrics.inc("turn_deadline_exceeded_total", labels={"stage": "generation"})
         return ""
 
@@ -1913,7 +1929,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     own_deadline = effective_deadline
     effective_deadline = remaining_turn_seconds(own_deadline)
     if effective_deadline <= 0:
-        logger.warning("Turn deadline reached; not starting the agentic loop")
+        logger.warning("Turn deadline reached; skipping the agentic loop")
         metrics.inc("turn_deadline_exceeded_total", labels={"stage": "agentic"})
         return empty
 
@@ -2039,10 +2055,14 @@ def _resolve_turn_deadline() -> float:
     if raw is None:
         return _TURN_DEADLINE_DEFAULT_S
     try:
-        return max(0.0, float(raw))
+        seconds = float(raw)
     except ValueError:
-        logger.warning("AGENTIC_TURN_DEADLINE_S=%r is not numeric; using default", raw)
+        seconds = math.nan
+    # "nan" and "inf" parse, and a deadline of either never fires.
+    if not math.isfinite(seconds):
+        logger.warning("AGENTIC_TURN_DEADLINE_S=%r is not a finite number; using default", raw)
         return _TURN_DEADLINE_DEFAULT_S
+    return max(0.0, seconds)
 
 
 # ---------------------------------------------------------------------------
@@ -2052,6 +2072,22 @@ def _resolve_turn_deadline() -> float:
 # Bounded queue for streamed tokens.  Unbounded queues are an OOM hazard
 # when a slow client lets the LLM pump out faster than tokens are drained.
 _STREAM_QUEUE_MAX = 256
+
+
+def _without_figures(reply: str) -> str:
+    """*reply* with every figure gone, for an enforced lock that could not check any.
+
+    Offering the whole reply as the offending text strips each sentence with a figure
+    in it and keeps the rest. The fault that stopped the check can stop that too, and
+    then nothing says the reply is free of figures, so none of it is shown.
+    """
+    from .agents.evaluator import strip_unverified_figure_sentences
+
+    try:
+        return strip_unverified_figure_sentences(reply, [reply])
+    except Exception:
+        logger.warning("Figures could not be removed; withholding the reply", exc_info=True)
+        return FIGURES_WITHHELD_REPLY
 
 
 def _figure_lock(
@@ -2084,7 +2120,7 @@ def _figure_lock(
     except Exception:
         logger.warning("Figure lock could not run", exc_info=True)
         metrics.inc("figure_lock_checks_total", labels={"mode": mode, "outcome": "error"})
-        return reply, {"mode": mode, "ok": None, "rejected": 0}
+        return (_without_figures(reply) if enforce else reply), {"mode": mode, "ok": None, "rejected": 0}
     outcome = "skipped" if detail.get("skipped") else ("pass" if passed else "reject")
     metrics.inc("figure_lock_checks_total", labels={"mode": mode, "outcome": outcome})
     summary = {"mode": mode, "ok": passed, "rejected": len(offending)}
@@ -8931,6 +8967,7 @@ class ChatModel:
         faithfulness = final_state.faithfulness
         handoff = None
         response_judge = None
+        figure_lock: dict[str, Any] = {}
         if final_state.outcome == GraphOutcome.ANSWERED:
             guard = _apply_output_guards(
                 self,
@@ -8965,6 +9002,7 @@ class ChatModel:
             handoff = guard["handoff"]
             response_judge = guard["response_judge"]
             ticket_id = guard["ticket_id"]
+            figure_lock = guard.get("figure_lock") or {}
         else:
             graph_reply = _with_live_check_disclosure(
                 graph_reply, disclosure if final_state.outcome == GraphOutcome.ABSTAINED else ""
@@ -8984,6 +9022,7 @@ class ChatModel:
         return {
             # Here as well as in _audit_turn: the stream never reaches that.
             "reply": _with_degraded_disclosure(graph_reply, _turn_degradations()),
+            "_figure_lock": figure_lock,
             "sources": final_state.sources,
             "citations": final_state.citations,
             "faithfulness_score": faithfulness,

@@ -66,10 +66,11 @@ groups:
       - record: ura:chat_turns:escalation_ratio_1h
         expr: sum(rate(ura_chat_turns_total{outcome="escalated"}[1h])) / sum(rate(ura_chat_turns_total{outcome!~"error|cancelled"}[1h]))
       # Share of checked replies the figure lock would strip. The evidence for
-      # enforcing it beyond the reasoning tier (G360).
+      # enforcing it beyond the reasoning tier (G360). The reject series does not
+      # exist until the first reject, and a clean record must read as 0, not as no data.
       - record: ura:figure_lock:shadow_reject_ratio_1d
         expr: >
-          sum(rate(ura_figure_lock_checks_total{mode="shadow",outcome="reject"}[1d]))
+          (sum(rate(ura_figure_lock_checks_total{mode="shadow",outcome="reject"}[1d])) or vector(0))
           / sum(rate(ura_figure_lock_checks_total{mode="shadow",outcome=~"pass|reject"}[1d]))
       - record: ura:chat_turns:error_ratio_1h
         expr: sum(rate(ura_chat_turns_total{outcome="error"}[1h])) / sum(rate(ura_chat_turns_total[1h]))

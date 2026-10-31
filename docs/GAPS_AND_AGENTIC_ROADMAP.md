@@ -696,6 +696,8 @@ Reviewed on branch `fix/agentic-orchestrator-resilience-assurance-2026-10-31`; [
 | G366 ⚪ | No write-ahead record for high-risk actions. | Open: backend and audit. |
 | G367 ⚪ | Supervisor confidences are uncalibrated constants that tier selection reads. | Open: backend and evaluation. |
 | G368 ⚪ | After a reasoner timeout, T1 can repeat a tool call that was in flight. | Open: tickets dedupe; other tools rely on idempotency keys. |
+| G369 ⚪ | With every model down and only web commentary found, the commentary is served, labelled as a fallback. | Open: service owner, to choose between serving it and abstaining. |
+| G370 ⚪ | A `verify_claims` error is logged at debug and the reply continues. | Open: needs a decision on whether a verifier outage withholds answers. |
 
 **Open follow-ups.**
 

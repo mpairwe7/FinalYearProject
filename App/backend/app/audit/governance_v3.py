@@ -676,6 +676,9 @@ def append_action_audit_v3(
                 if approving_officer_id
                 else ""
             ),
+            approval_timestamp_utc=(
+                now_utc_dt.isoformat() if outcome == "officer_approved_executed" else None
+            ),
             ticket_id=ticket_id,
         )
     rev_contract = get_reversibility_contract(

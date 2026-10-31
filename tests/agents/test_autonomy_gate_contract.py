@@ -200,6 +200,35 @@ class TestTheRecordSaysWhatHappened:
         assert row["autonomy_outcome"] == "autonomous_executed"
         assert row["resolution_status"] == "resolved"
 
+    def test_a_decided_officer_approval_keeps_its_time(self, clean_flags, tmp_db) -> None:
+        record, _receipt = gov.append_action_audit_v3(
+            session_id="c1",
+            tool_or_action_name="tin_registration_submit",
+            intent_detected="tin_registration",
+            intent_confidence=0.96,
+            agent_role="tax_specialist",
+            decision_trace=["gate:officer_approved"],
+            caller_confirmed=True,
+            officer_approved=True,
+            approving_officer_id="officer-1",
+            decided_outcome="officer_approved_executed",
+        )
+
+        assert record.approval_gate.approval_timestamp_utc
+
+    def test_no_approval_time_is_invented(self, clean_flags, tmp_db) -> None:
+        record, _receipt = gov.append_action_audit_v3(
+            session_id="c1",
+            tool_or_action_name="calculate_vat",
+            intent_detected="vat",
+            intent_confidence=0.96,
+            agent_role="tax_specialist",
+            decision_trace=["gate:low_risk"],
+            decided_outcome="autonomous_executed",
+        )
+
+        assert record.approval_gate.approval_timestamp_utc is None
+
     def test_a_high_tier_call_that_ran_is_recorded_as_having_run(self, clean_flags, tmp_db, probe_name) -> None:
         # The human route is exempt from the gate, so it cannot show this: a second
         # opinion on a high-tier tool would file a call that ran as awaiting an officer.

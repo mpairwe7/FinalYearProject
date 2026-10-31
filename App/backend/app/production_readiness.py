@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import math
 import os
 import re
 from typing import Any
@@ -366,8 +367,9 @@ def _turn_deadline_errors() -> list[str]:
         seconds = float(raw)
     except ValueError:
         return ["AGENTIC_TURN_DEADLINE_S must be a number of seconds."]
-    if seconds <= 0:
-        return ["AGENTIC_TURN_DEADLINE_S must be above 0 in production."]
+    # "nan" and "inf" parse, and neither ever fires.
+    if not math.isfinite(seconds) or seconds <= 0:
+        return ["AGENTIC_TURN_DEADLINE_S must be a finite number above 0 in production."]
     return []
 
 

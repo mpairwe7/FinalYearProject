@@ -81,7 +81,7 @@ class CircuitBreaker:
         ):
             self._state = CircuitState.HALF_OPEN
             self._half_open_probe_in_flight = False
-            logger.info("Circuit breaker %s → HALF_OPEN (testing)", self.name)
+            logger.info("Circuit breaker %s → HALF_OPEN (probing)", self.name)
             return True
         return False
 

@@ -99,6 +99,9 @@ _READ_ONLY_TOOLS = (
 #: A second opinion is not worth a stalled turn.
 CLASSIFIER_TIMEOUT_S = float(os.getenv("SUPERVISOR_LLM_TIMEOUT_S", "3"))
 _CLASSIFIER_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="tiebreak")
+#: Jobs running or waiting. A pool of two with this many is stuck, and a turn that
+#: joined the queue would only spend its timeout behind calls that are not returning.
+_CLASSIFIER_SLOTS = threading.BoundedSemaphore(4)
 
 _PROMPT = """You classify Uganda Revenue Authority taxpayer questions.
 
@@ -204,14 +207,25 @@ def refine(
         route = _SELECTABLE.get(cached)
         return _apply(decision, route, cached_hit=True)
 
+    slots = _CLASSIFIER_SLOTS
+    if not slots.acquire(blocking=False):
+        logger.warning("supervisor tiebreak saturated; keeping rule decision")
+        return decision
+    future = None
     try:
         future = _CLASSIFIER_POOL.submit(
             contextvars.copy_context().run, classifier or _default_classifier, _PROMPT.format(query=query)
         )
+        future.add_done_callback(lambda _done: slots.release())
         raw = future.result(timeout=max(0.0, remaining_turn_seconds(CLASSIFIER_TIMEOUT_S)))
     except Exception as exc:
         # Fail open. The rules already produced a usable decision.
         logger.warning("supervisor tiebreak unavailable (%s); keeping rule decision", type(exc).__name__)
+        if future is None:
+            slots.release()
+        else:
+            # Still queued, it would run later for nobody. Running, it keeps its slot.
+            future.cancel()
         return decision
 
     route = _parse_route(raw or "")

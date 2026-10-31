@@ -95,6 +95,11 @@ class TestAGraphAnswerIsCheckedLikeAnyOther:
         result = chat_model.generate("What is the VAT rate?", session_id=uuid.uuid4().hex)
         assert result["response_judge"] is not None
 
+    def test_the_audit_row_says_how_the_figure_lock_went(self, chat_model, on_graph) -> None:
+        on_graph(_final("The standard VAT rate in Uganda is 18 percent [1]."))
+        result = chat_model.generate("What is the VAT rate?", session_id=uuid.uuid4().hex)
+        assert result["_figure_lock"]["mode"] in ("shadow", "enforced")
+
     def test_the_turn_attests_with_a_real_guard(self, chat_model, on_graph) -> None:
         on_graph(_final("The standard VAT rate in Uganda is 18 percent [1]."))
         result = chat_model.generate("What is the VAT rate?", session_id=uuid.uuid4().hex)

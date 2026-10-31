@@ -193,6 +193,18 @@ tests:
           - labels: '{}'
             value: 10
 
+  # Every checked reply passed, so no reject series exists: the ratio is 0, not missing.
+  - interval: 1m
+    input_series:
+      - series: 'ura_figure_lock_checks_total{mode="shadow",outcome="pass"}'
+        values: '0+10x1500'
+    promql_expr_test:
+      - expr: sum(ura:figure_lock:shadow_reject_ratio_1d)
+        eval_time: 1441m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
   # A breaker open past its window names itself; one that recovers does not fire.
   - interval: 1m
     input_series:
@@ -209,8 +221,8 @@ tests:
               team: backend
               breaker: llm
             exp_annotations:
-              summary: "A dependency has been refused for 10 minutes"
-              description: "Turns are falling back or degrading. Check the dependency the breaker names."
+              summary: "A circuit breaker has not closed for 10 minutes"
+              description: "No call has shown the dependency is back, so turns may be falling back or degrading. The state only moves when a call arrives, so on a quiet worker this can mean nothing has tried since the back-off ended. Check the dependency the breaker names."
               runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/agent-fault-tolerance.md#circuit-breaker-open"
 
   # One fault is enough: a gate that cannot decide is failing closed for writes.

@@ -51,8 +51,8 @@ that looked present and reported success, while what it protected went unprotect
 * **Adopt a durable execution engine.** Rejected for now: turns are single-request, and
   nothing suspends in production. The runtime is hardened instead, and the service keeps
   passing no `thread_id`.
-* **Refuse to answer when a model fails.** Rejected: the closest official passage is
-  useful if it is labelled as what it is.
+* **Refuse to answer when a model fails.** Rejected: the closest passage is useful if it
+  is labelled as what it is. Whether that holds for web commentary is G369.
 
 ## Decision Outcome
 
@@ -111,7 +111,13 @@ generation failed, a truncated tool loop and a broken-off stream each say so to 
 * **Bad:** a stricter figure lock can strip a correct sentence on T3, where a sentence
   states a figure that a passage does not contain. The note it leaves tells the taxpayer
   to confirm with URA.
+* **Bad:** an enforced figure lock that cannot run removes every figure from the reply, or
+  withholds it if it cannot do that either. A fault in the check costs the taxpayer the
+  figures, rather than showing them unchecked.
 * **Neutral:** `cancelled` is a new `chat_turns_total` outcome, and containment excludes it.
+* **Neutral:** a probe that reports after its lease was reclaimed still changes the breaker.
+  Binding reports to a lease would change every call site. At worst it allows one extra
+  probe, or closes the breaker on a true but late success, and failures trip it again.
 
 ## Confirmation
 
