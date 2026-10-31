@@ -4,6 +4,8 @@
 
 Accepted — 2026-10-22
 
+Partly superseded by [ADR-0021](0021-planner-bound-web-evidence-and-honest-live-checks.md): the trigger set, the source policy (commercial FX sites are no longer Tier 1), the search provider and FX precedence. The sandbox and corpus sync stand.
+
 ## Context and Problem Statement
 
 While ADR-0007 established a code-owned tax scenario planner (`scenario_planner.py`), deterministic figure lock (`verify_figure_lock`), and two-tier local reasoning (`Qwen/Qwen3.8-27B-FP8` + `Sunbird/Sunflower-Qwen3.5-9B`), live testing on complex expatriate and cross-border scenarios (`docs/plans/live-web-research-and-self-updating-qdrant-plan.md`) revealed four operational gaps:

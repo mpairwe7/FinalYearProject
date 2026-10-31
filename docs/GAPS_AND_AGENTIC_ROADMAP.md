@@ -618,6 +618,37 @@ Reviewed on branch `fix/receptionist-assurance-2026-10-30`; [evidence, sources a
 | G307 ⚪ | Five-language live speech, impaired-network/load and accessibility acceptance. | Open: QA/speech/service owners; measured tail latency, figure fidelity, handoff and timing/caption acceptance. |
 | G308 🟢 | ~~CPU/receptionist dependency profiles could not resolve together: Pipecat 1.12.0 required Pillow<13, backend requires Pillow>=13.~~ | Fixed: Pipecat 1.15.0, combined profile resolution and optional pipeline/LiveKit regressions. |
 
+### Planner and live web assurance — 2026-10-31
+
+Reviewed on branch `fix/agentic-planner-web-assurance-2026-10-31`; [evidence, sources and phased acceptance](plans/agentic-planner-web-assurance-2026-10-31.md), ADR-0021. Every finding was reproduced before it was fixed. Fixed means implemented with local regressions; production acceptance needs the live probes in the runbook.
+
+| Gap | Finding | Status |
+| --- | --- | --- |
+| G309 🟢 | ~~The supervisor's route was ignored on REST since #599: an explicit request for a person got a retrieval answer and no ticket, and `agentic_mode` off with tiering on crashed.~~ | Fixed: the route binds whichever branch produced it; tests retrieve a passage so an empty index cannot mask it. |
+| G310 🟢 | ~~Search snippets reached the system prompt or the tool ground truth, unscanned.~~ | Fixed: the prompt notice holds no external text; web text is scanned, spotlighted passages only. |
+| G311 🟢 | ~~A number in a snippet disabled the claim verifier's contradiction check.~~ | Fixed: web text never enters `verified_facts`. Edition metadata now counts as known context, which the old block had been hiding. |
+| G312 🟢 | ~~Commentary and unopened snippets were labelled verified official sources.~~ | Fixed: headers state authority, evidence and age; `live_web_verified` needs a document read this turn. |
+| G313 🟢 | ~~Position-zipped snippets attributed Kenyan text to a ura.go.ug link.~~ | Fixed: a snippet belongs to the anchor before it. |
+| G314 🟢 | ~~"ura" matched inside "insurance", and xe.com/google.com were Tier 1.~~ | Fixed: whole-word scope; commercial rate sites are not official sources. |
+| G315 🟢 | ~~Lower-case names left the deployment in search queries and reached ledger keys.~~ | Fixed: closed search vocabulary. |
+| G316 🟢 | ~~"Connect me to a supervisor now" routed to today's date.~~ | Fixed: handoff phrasing escalates first. |
+| G317 🟢 | ~~One backend with no API contract; a bot challenge parsed as "no results".~~ | Fixed: Tavily, Brave, SearXNG with failover and breakers; the HTML path cannot run in production. Adapters proven against documented contracts, not live APIs (G326). |
+| G318 🟢 | ~~A failed search left no log, metric, event or disclosure.~~ | Fixed: `status`, metrics, event and a disclosure on REST, SSE and graph. |
+| G319 🟢 | ~~One trigger could spend the whole search allowance; no turn deadline; unbounded cache; years hard-coded.~~ | Fixed: fair share, concurrent searches under a deadline, bulkhead, bounded LRU, dates from the clock. |
+| G320 🟢 | ~~10 of 11 time-sensitive questions fired nothing; an RRF-only hit sent every question to the web; definitions fired the stale-edition trigger.~~ | Fixed: `recency_intent` with a precision set, calibrated relevance, edition only when it matters. |
+| G321 🟢 | ~~A 2019 waiver was presented as current.~~ | Fixed: established dates, age labels, `stale_only`. |
+| G322 🟢 | ~~Time-sensitive answers were cached for an hour.~~ | Fixed: such turns neither read nor write the semantic cache. |
+| G323 🟢 | ~~FX: disagreeing sources served, stale mirror accepted, a constant labelled as a BoU rate, forged consent cookie, redirects unchecked.~~ | Fixed: fail closed, BoU precedence, market quotes labelled estimates. |
+| G324 🟢 | ~~Planner: failed steps vanished, one render error lost every figure, the plan ran twice per turn with no budget or deadline.~~ | Fixed: `PlanRunReport`, "Not calculated" lines, one budgeted run, plan digest in the audit row. |
+| G325 🟡 | The ASI10 "every turn" claim ran only in tests. | Part fixed: `attest_turn` covers REST with real timings. Open: SSE records no stage timings, so it is not attested. |
+| G326 ⚪ | No sanctioned search provider is configured or funded, and no transfer assessment exists. | Open: service owner and DPO. Until then production reports a disclosed `unavailable`. |
+| G327 ⚪ | No verified Bank of Uganda rate is available; ITA s.57 text unconfirmed (both sites unreachable from review). | Open: tax policy and data owner. |
+| G328 ⚪ | Recency cues are English; other locales depend on translation. | Open: reviewed vernacular vocabulary, not invented terms. |
+| G329 ⚪ | Notices published as HTML stay `unconfirmed`: pages are not opened. | Open: backend, after confirming the listing structure. |
+| G330 🟢 | ~~Threat T43 claimed a pre-connect DNS check that did not exist.~~ | Fixed and reworded: it narrows rebinding, it does not close it. |
+| G331 ⚪ | `auto_qdrant_web_sync` can change the corpus from a user turn (ASI06). The key is set on the Space, value unreadable. | Open: confirm it is off before adding a search provider; needs human approval before production use. |
+| G332 ⚪ | Graph: no `thread_id` so checkpoints never run, and `node_synthesize` skips the claim verifier. | Open: keep `langgraph` off until resolved. |
+
 Two probe bugs were found and corrected rather than reported as defects: `invoic`
 and `regist` were asserted as stems against a token-boundary matcher, so
 "Invoicing" and "registered" could never satisfy them. The service was right both

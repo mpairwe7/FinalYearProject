@@ -49,4 +49,6 @@ PYTHONPATH=App/backend python3 -m app.seed_prototype   # development only
 - Flag PATCH persists to `flag_overrides` on **this replica**. Cluster-wide still needs `FLAG_*`.
 - Metrics go through `analytics.metrics` only (never `prometheus_client` directly): label values must be bounded (route templates, enums), and a rule or dashboard panel may only name series the code emits — `tests/test_monitoring_config.py` fails otherwise.
 - A new chat transport calls `record_chat_turn` once per turn and audits through `ChatModel.record_turn_audit` (or goes through `run_chat_turn`, which does both). Audit the text that was served, after localization.
+- Live research goes through `_live_research_for_turn`, so REST, SSE and the graph cannot drift. A new search backend implements `web_search_providers.SearchProvider` and stops at `RawResult`: authority, screening and recency are decided once, in `web_research.admit_results`. New words in `_SEARCH_VOCABULARY` must be generic tax terms, never drawn from a query.
+- A planned step that does not complete must end in a `PlanRunReport` outcome and show in the block. A market FX rate is an estimate: only `official_bou_rate` may be called a Bank of Uganda rate.
 - A new model client wraps its HTTP call in `tracing.llm_call(...)` and reports the provider's `usage`; never estimate tokens from words.

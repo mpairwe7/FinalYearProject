@@ -408,7 +408,8 @@ App/backend/app/
 ├── faq_corpus.py        # ura_*_faqs.csv + teacher-QA → validated JSONL → vector docs
 ├── pdf_corpus.py        # Statutory & 10-MDA PDF harvester + hierarchical chunk JSONL (186 PDFs → 5,639 chunks)
 ├── crawl_corpus.py      # Crawl pages → chunk JSONL (newest capture per URL, above floor)
-├── web_research.py      # 8-trigger live web research planner & Tier-1/2/3 source authority (ADR-0008)
+├── web_research.py      # 9-trigger live check, source authority & evidence labelling (ADR-0008, ADR-0021)
+├── web_search_providers.py # Search backends with failover and breakers (ADR-0021)
 ├── ephemeral_pdf_sandbox.py # Ephemeral tmpfs PDF/XLSX sandbox + GPU micro-reranking (ADR-0008)
 ├── corpus_sync.py       # Self-updating Qdrant comparator, hot-swap & web_sync_ledger (ADR-0008)
 ├── scenario_planner.py  # Deterministic multi-tool planner & Verified Statutory Facts injection
@@ -771,7 +772,7 @@ All major subsystems are behind feature flags for progressive rollout:
 | `workflow_emotional_offramp` | off | Phase 39: a guided flow pauses (answers kept) instead of answering distress or enforcement news with a validation error, offering an officer, the instalments question, "Continue the steps" and "Cancel"; after repeated invalid answers it offers a way out (`WorkflowTurn.failed_attempts`) |
 | `wellbeing_checkin` | off | Phase 39: hopelessness said amid hardship or enforcement (this or the last two messages) gets a check-in with the crisis lines before the tax answer, once per conversation, on REST and stream alike |
 | `cxp_business_hours` (`FLAG_CXP_BUSINESS_HOURS`) | off | Phase 40 (G174): timezone-aware URA CXP operating schedule (`07:00–23:00 EAT`, closing at 11:00 PM EAT). Escalations after 11:00 PM when no live officer is online queue for priority morning review/callback with SLA pause/resume (`business_hours_elapsed_seconds`) and transparent 5-locale after-hours disclosure |
-| `live_web_research` (`FLAG_LIVE_WEB_RESEARCH`) | off | Phase 41: live FX lookup (`web_fx.py` via `XE.com` / Google Currency / Open ER mirror, wired into `convert_currency` and `scenario_planner.py`), 8-trigger web research planner and 3-tier source authority filter (`web_research.py`), and ephemeral `tmpfs` PDF/XLSX document sandbox (`ephemeral_pdf_sandbox.py`), wired end-to-end into `_generate_en` and `generate_retrieval_only` / `_run_chat_turn_events` |
+| `live_web_research` (`FLAG_LIVE_WEB_RESEARCH`) | off | Phase 41, ADR-0021: a deterministic 9-trigger check over the question (`web_research.py`), failover across Tavily, Brave and SearXNG (`web_search_providers.py`), 3-tier source authority, closed-vocabulary queries and the ephemeral document sandbox. Web text stays labelled evidence and never enters `verified_facts`; every check ends in a `status`, and a failed one is disclosed. Market FX (`web_fx.py`) is an indicative estimate; a verified Bank of Uganda snapshot takes precedence. Time-sensitive turns bypass the semantic cache. |
 | `auto_qdrant_web_sync` (`FLAG_AUTO_QDRANT_WEB_SYNC`) | off | Phase 41: self-updating Qdrant comparator (`corpus_sync.py`) that compares `ura.go.ug` / `ulii.org` PDFs against Qdrant, tombstones/deletes superseded documents, upserts newer editions, archives replaced `.jsonl` files, and records 7-day state in `web_sync_ledger` |
 | `portal_copilot` (`FLAG_PORTAL_COPILOT`) | on | Phase 42: 4-tier URA portal task execution (`portal_copilot.py`), Claude-style HITL Allow/Disallow confirmation cards (`POST /v1/portal/tasks/execute`), inline chat form elicitation, step-up login auto-return (`returnTo`), screenshot-to-co-pilot handoff, and inbuilt stuck-user DOM co-pilot (`/portal/[portalKey]`) |
 
