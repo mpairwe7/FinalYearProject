@@ -200,6 +200,20 @@ class TestTheRecordSaysWhatHappened:
         assert row["autonomy_outcome"] == "autonomous_executed"
         assert row["resolution_status"] == "resolved"
 
+    def test_a_high_tier_call_that_ran_is_recorded_as_having_run(self, clean_flags, tmp_db, probe_name) -> None:
+        # The human route is exempt from the gate, so it cannot show this: a second
+        # opinion on a high-tier tool would file a call that ran as awaiting an officer.
+        flags.set("action_level_audit_v3", True)
+        ran: list[str] = []
+        _tool(probe_name, risk="high", ran=ran)
+
+        ToolRegistry.call(probe_name, {}, user_id="u1")
+
+        assert ran == [probe_name]
+        row = _ledger_rows(tmp_db)[-1]
+        assert row["execution_status"] == "success"
+        assert row["autonomy_outcome"] == "autonomous_executed"
+
     def test_the_record_carries_the_declared_tier(self, clean_flags, tmp_db, probe_name) -> None:
         flags.set("action_level_audit_v3", True)
         _tool(probe_name, risk="high")

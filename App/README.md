@@ -659,6 +659,9 @@ URA account/action tools.
 
 #### Memory System Flow
 
+Streamed answers (ADR-0022, `FLAG_STREAM_FIGURE_HOLD`, default on): prose streams, and text
+from the sentence with the first figure is held until the output guards have read it.
+
 Consent-gated personalization (Phase 16, `FLAG_MEMORY_ENABLED`):
 
 ```

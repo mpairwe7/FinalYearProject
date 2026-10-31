@@ -16,6 +16,7 @@ holds ≥ 0.95 (`agentic_mode_gate`, currently `36/36`).
 | `FLAG_AGENTIC_MODE` | Route every request through the supervisor classifier before retrieval. |
 | `FLAG_TICKET_QUEUE` | Persist supervisor-driven escalations to the `tickets` table. |
 | `FLAG_AUDIT_LEDGER` | Write hash-chained audit events on every `service.generate()` return path. |
+| `FLAG_STREAM_FIGURE_HOLD` | Default **on**. Hold streamed text from the first figure until the output guards have read it. |
 
 Flags can be set per-process via env (`FLAG_TOOL_USE=true …`) or
 per-request in tests via `flags.set("tool_use", True)`.

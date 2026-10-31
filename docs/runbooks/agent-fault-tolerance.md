@@ -65,8 +65,9 @@ control instead of fixing what it depends on.
 `ura_turn_degraded_total{reason}`:
 
 * `generation_unavailable`: no model answered. Check the breakers and, on the Space, the
-  three cloud gates in the LLM serving notes (`FLAG_CLOUDFLARE_FALLBACK`,
-  `LLM_FALLBACK_BACKEND`, the Gemini key).
+  three settings the cloud chain needs: `FLAG_CLOUDFLARE_FALLBACK`, `LLM_FALLBACK_BACKEND`
+  and the Gemini key. Each fails silently when unset, so a healthy-looking Space can be
+  serving passages.
 * `tool_loop_truncated`: the loop ran out of iterations or budget. A sustained rise usually
   means a model or prompt change. Look at `ura_tool_calls_total`.
 * `stream_interrupted`: a worker failed part-way through a stream.

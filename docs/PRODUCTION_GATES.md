@@ -25,6 +25,7 @@ python3 scripts/validate_env.py --env production
 | G29 DPO | `DPO_RUN` without `EVAL_GATE_OK` is refused. | A measured eval, then a trainer. The job still exits 2 with no trainer wired. |
 | G30 tenancy | `MULTI_TENANT_RLS_APPLIED=true` when multi-tenant is on. | Apply `infra/postgres/rls.sql` yourself. The app predicate is not RLS. |
 | G31 CMS / seed | `SEED_PROTOTYPE` must be false. Overrides stay exact-match. | A git-backed FAQ editor later. |
+| G345 turn deadline | `AGENTIC_TURN_DEADLINE_S`, when set, must be a number above 0. | Unset uses the 120 s default. See `docs/runbooks/agent-fault-tolerance.md`. |
 | G33 HPA/KEDA | Not a start blocker. | Measured p95: `docs/runbooks/capacity-slo.md` (2026-08-19). Apply `infra/k8s/` only after the hybrid vs blended SLI is agreed — do not invent replica counts. |
 | G34 chaos | Not a start blocker. | Cluster game day. `tests/chaos/` is in-process only. |
 
