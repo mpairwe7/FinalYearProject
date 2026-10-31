@@ -32,6 +32,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
 from collections import Counter
 from dataclasses import dataclass, field
 from enum import Enum
@@ -157,6 +158,12 @@ class ToolCallBudget:
     _per_tool: Counter[str] = field(default_factory=Counter)
     _per_iteration: Counter[int] = field(default_factory=Counter)
     _memo: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: Admitted and not yet recorded. The memo only fills when a call returns, so
+    #: without this two identical calls in one round both ran: for a tool with a
+    #: side effect, that is the side effect twice.
+    _in_flight: set[str] = field(default_factory=set)
+    #: The loop admits parallel calls from a thread pool.
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     # -- Admission -----------------------------------------------------
     def admit(
@@ -174,6 +181,10 @@ class ToolCallBudget:
         costs no execution, so refusing it for lack of budget would be
         charging for work nobody does.
         """
+        with self._lock:
+            return self._admit(name, arguments, iteration)
+
+    def _admit(self, name: str, arguments: dict[str, Any] | None, iteration: int) -> BudgetDecision:
         if self._per_iteration[iteration] >= self.max_calls_per_iteration:
             return self._deny(
                 name,
@@ -195,6 +206,23 @@ class ToolCallBudget:
             )
             return BudgetDecision(Admission.REPEAT, reason="duplicate call", result=memo)
 
+        if fingerprint in self._in_flight:
+            self._per_iteration[iteration] += 1
+            self.repeats += 1
+            logger.info("tool budget: duplicate of %s in this round not dispatched", name)
+            return BudgetDecision(
+                Admission.REPEAT,
+                reason="duplicate call",
+                result={
+                    "ok": True,
+                    "repeated_call": True,
+                    "budget_note": (
+                        "This is the same call as another in this round, so it was not run "
+                        "twice. Use that call's result."
+                    ),
+                },
+            )
+
         if self.dispatched >= self.max_total_calls:
             return self._deny(
                 name,
@@ -212,6 +240,7 @@ class ToolCallBudget:
         self._per_iteration[iteration] += 1
         self._per_tool[name] += 1
         self.dispatched += 1
+        self._in_flight.add(fingerprint)
         return BudgetDecision(Admission.ADMIT)
 
     def _deny(self, name: str, reason: str) -> BudgetDecision:
@@ -235,9 +264,11 @@ class ToolCallBudget:
         shape to annotate with the repeat marker, and re-running it is
         cheaper than guessing.
         """
-        if not isinstance(result, dict):
-            return
-        self._memo[call_fingerprint(name, arguments)] = dict(result)
+        fingerprint = call_fingerprint(name, arguments)
+        with self._lock:
+            self._in_flight.discard(fingerprint)
+            if isinstance(result, dict):
+                self._memo[fingerprint] = dict(result)
 
     # -- Observation budget --------------------------------------------
     def observation_allowance(self) -> int:

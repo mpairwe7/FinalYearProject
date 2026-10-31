@@ -58,7 +58,7 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from .providers.scope import cloud_models_allowed
-from .resilience import CircuitBreaker
+from .resilience import CircuitBreaker, admit
 
 logger = logging.getLogger(__name__)
 
@@ -1272,8 +1272,7 @@ class SpeechModel:
             return ""
         if not (
             cfg.is_cloudflare_configured()
-            and breakers.CF_STT_BREAKER.allow_request()
-            and budget.try_consume_neurons(5)
+            and admit(breakers.CF_STT_BREAKER, lambda: budget.try_consume_neurons(5))
         ):
             return ""
         try:
@@ -2815,8 +2814,7 @@ class SpeechModel:
             return ""
         if not (
             cfg.is_gemini_configured()
-            and breakers.GEMINI_BREAKER.allow_request()
-            and budget.try_consume_gemini_call()
+            and admit(breakers.GEMINI_BREAKER, budget.try_consume_gemini_call)
         ):
             return ""
         names = {
@@ -2861,8 +2859,7 @@ class SpeechModel:
             return ""
         if not (
             cfg.is_cloudflare_configured()
-            and breakers.CF_LLM_BREAKER.allow_request()
-            and budget.try_consume_neurons(5)
+            and admit(breakers.CF_LLM_BREAKER, lambda: budget.try_consume_neurons(5))
         ):
             return ""
         names = {

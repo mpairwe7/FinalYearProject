@@ -38,7 +38,7 @@ import threading
 import time
 import uuid
 from collections import Counter
-from collections.abc import AsyncIterator, Generator, Iterable
+from collections.abc import AsyncIterator, Awaitable, Generator, Iterable
 from pathlib import Path
 from typing import Any, Callable, Final
 
@@ -172,7 +172,14 @@ from .query import (
     normalize as normalize_query,
     rewrite as rewrite_query,
 )
-from .resilience import CircuitBreaker
+from .resilience import (
+    CancelScope,
+    CircuitBreaker,
+    admit,
+    remaining_turn_seconds,
+    set_turn_deadline,
+    turn_deadline,
+)
 from .retriever import HybridRetriever, active_retrieval_mode
 from .text_signals import (
     ABSTENTION_REPLY,
@@ -720,6 +727,26 @@ _LLM_CIRCUIT = CircuitBreaker(
     reset_timeout=15.0,
     max_timeout=300.0,
 )
+#: The reasoner is a separate server on a separate GPU. Sharing the T1 breaker
+#: meant a down reasoner tripped nothing, so every turn routed to it spent its
+#: whole deadline (90 s by default) before falling back, and a reasoner that took
+#: the shared half-open probe left T1 unable to run at all.
+_REASONER_CIRCUIT = CircuitBreaker(
+    name="llm_reasoner",
+    failure_threshold=3,
+    reset_timeout=30.0,
+    max_timeout=300.0,
+)
+
+
+def _circuit_for(endpoint: Any) -> CircuitBreaker:
+    """The breaker for the server *endpoint* names."""
+    return _REASONER_CIRCUIT if _is_non_t1_endpoint(endpoint) else _LLM_CIRCUIT
+
+
+def _chain_deadline() -> float:
+    """Absolute deadline for a walk down the cloud chain, within what the turn has left."""
+    return time.monotonic() + remaining_turn_seconds(LLM_TOTAL_BUDGET_SECONDS)
 
 
 def _build_fallback_prompt(
@@ -830,8 +857,7 @@ def _llm_cloud_fallback(
         # FAILURE and, after enough Luganda turns, open the circuit for English.
         and gw.gemini_allowed_for(locale)
         and cfg.is_gemini_configured()
-        and breakers.GEMINI_BREAKER.allow_request()
-        and budget.try_consume_gemini_call()
+        and admit(breakers.GEMINI_BREAKER, budget.try_consume_gemini_call)
     ):
         system, user = _build_fallback_prompt(query, passages, locale, tone_hint)
         try:
@@ -915,8 +941,7 @@ def _llm_cloud_fallback(
             break
         if not (
             cfg.is_cloudflare_configured()
-            and breakers.CF_LLM_BREAKER.allow_request()
-            and budget.try_consume_neurons(5)
+            and admit(breakers.CF_LLM_BREAKER, lambda: budget.try_consume_neurons(5))
         ):
             break
         try:
@@ -956,7 +981,7 @@ def _stream_cloud_fallback(
         locale,
         personalization_context,
         tone_hint,
-        deadline=time.monotonic() + LLM_TOTAL_BUDGET_SECONDS,
+        deadline=_chain_deadline(),
     )
     if not text:
         return
@@ -1219,7 +1244,7 @@ def _call_llm_with_deadline(
             locale,
             personalization_context,
             tone_hint,
-            deadline=time.monotonic() + LLM_TOTAL_BUDGET_SECONDS,
+            deadline=_chain_deadline(),
         )
         if text and text.strip():
             return strip_thought(text)
@@ -1278,8 +1303,9 @@ def _local_llm_then_cloud(
     # local generation that runs close to its own deadline_s leaves
     # correspondingly less time for the cloud chain rather than the two
     # budgets stacking on top of each other.
-    chain_deadline = time.monotonic() + LLM_TOTAL_BUDGET_SECONDS
+    chain_deadline = _chain_deadline()
     is_reasoner = _is_non_t1_endpoint(endpoint)
+    circuit = _circuit_for(endpoint)
     effective_deadline = deadline_s
     if is_reasoner:
         try:
@@ -1288,6 +1314,11 @@ def _local_llm_then_cloud(
             )
         except ValueError:
             effective_deadline = deadline_s
+    own_deadline = effective_deadline
+    effective_deadline = remaining_turn_seconds(own_deadline)
+    if effective_deadline <= 0:
+        logger.warning("Turn deadline reached; not starting a generation")
+        return ""
 
     def _fallback_to_t1(reason: str) -> str:
         log_tier_fallback(reason=reason)
@@ -1325,7 +1356,9 @@ def _local_llm_then_cloud(
             deadline=chain_deadline,
         )
 
-    if not _LLM_CIRCUIT.allow_request():
+    if not circuit.allow_request():
+        if is_reasoner:
+            return _fallback_to_t1("circuit_open")
         logger.warning("LLM circuit breaker OPEN — trying cloud fallback")
         return _cloud()
 
@@ -1371,7 +1404,7 @@ def _local_llm_then_cloud(
             reply, gen_meta = str(raw_res or ""), {}
         llm_module.set_last_generation_meta(gen_meta)
         if reply and reply.strip():
-            _LLM_CIRCUIT.record_success()
+            circuit.record_success()
             from .production_readiness import is_sovereign_mode
 
             finish_reason = gen_meta.get("finish_reason")
@@ -1392,27 +1425,31 @@ def _local_llm_then_cloud(
             )
             cloud_reply = _cloud()
             return cloud_reply if (cloud_reply and cloud_reply.strip()) else reply
-        if is_reasoner:
-            return _fallback_to_t1("empty")
         # Empty reply — llm_module.generate logs+swallows its own errors and
         # returns "" (e.g. _vllm_generate on HTTP failure), so an empty string
         # is our only failure signal here. Mirror the streaming path: record a
         # failure and try the cloud fallback before the caller drops to the
         # extractive best-hit answer.
-        _LLM_CIRCUIT.record_failure()
+        circuit.record_failure()
+        if is_reasoner:
+            return _fallback_to_t1("empty")
         logger.warning("LLM returned empty — trying cloud fallback")
         return _cloud()
     except concurrent.futures.TimeoutError:
         future.cancel()  # best-effort; transformers generate may ignore
+        # Cut short by the turn, this says nothing about the model.
+        if effective_deadline < own_deadline:
+            circuit.release()
+        else:
+            circuit.record_failure()
         if is_reasoner:
             return _fallback_to_t1("deadline")
-        _LLM_CIRCUIT.record_failure()
         logger.warning("LLM deadline %.1fs exceeded", effective_deadline)
         return _cloud()
     except Exception:
+        circuit.record_failure()
         if is_reasoner:
             return _fallback_to_t1("error")
-        _LLM_CIRCUIT.record_failure()
         logger.exception("LLM generation raised")
         return _cloud()
 
@@ -1522,15 +1559,35 @@ def _stream_local_then_cloud(
                 query, passages, conversation_history, locale, personalization_context, tone_hint
             )
 
+    def _t1_stream(reason: str) -> Generator[str, None, None]:
+        log_tier_fallback(reason=reason)
+        yield from _stream_local_then_cloud(
+            query,
+            passages,
+            conversation_history,
+            locale,
+            personalization_context,
+            cancel_event,
+            allow_cloud_fallback=False,
+            tone_hint=tone_hint,
+            context_summary=context_summary,
+            endpoint=get_endpoint(ModelTier.T1),
+            tier=ModelTier.T1,
+        )
+
     if not llm_module.is_available():
         yield from _cloud_stream()
         return
-    if not _LLM_CIRCUIT.allow_request():
+    is_reasoner = _is_non_t1_endpoint(endpoint)
+    circuit = _circuit_for(endpoint)
+    if not circuit.allow_request():
+        if is_reasoner:
+            yield from _t1_stream("circuit_open")
+            return
         logger.warning("LLM circuit breaker OPEN — streaming via cloud fallback")
         yield from _cloud_stream()
         return
 
-    is_reasoner = _is_non_t1_endpoint(endpoint)
     stream_kwargs: dict[str, Any] = {
         "query": query,
         "passages": passages,
@@ -1546,6 +1603,8 @@ def _stream_local_then_cloud(
         stream_kwargs["tier"] = tier
 
     saw_tokens = False
+    reported = False
+    fall_back = ""
     try:
         for token in llm_module.generate_stream(**stream_kwargs):
             if cancel_event is not None and cancel_event.is_set():
@@ -1556,51 +1615,37 @@ def _stream_local_then_cloud(
             saw_tokens = True
             yield token
 
+        reported = True
         if saw_tokens:
-            _LLM_CIRCUIT.record_success()
-        elif is_reasoner:
-            log_tier_fallback(reason="empty")
-            t1_ep = get_endpoint(ModelTier.T1)
-            yield from _stream_local_then_cloud(
-                query,
-                passages,
-                conversation_history,
-                locale,
-                personalization_context,
-                cancel_event,
-                allow_cloud_fallback=False,
-                tone_hint=tone_hint,
-                context_summary=context_summary,
-                endpoint=t1_ep,
-                tier=ModelTier.T1,
-            )
+            circuit.record_success()
+        elif cancel_event is not None and cancel_event.is_set():
+            # Nothing was asked of the model, and nobody is waiting for an
+            # answer: neither a failure to count nor a cloud call to pay for.
+            circuit.release()
         else:
             # Empty stream counts as a soft failure — the breaker tracks
             # it so a continually empty worker eventually trips.
-            _LLM_CIRCUIT.record_failure()
-            yield from _cloud_stream()
+            circuit.record_failure()
+            fall_back = "empty"
     except Exception:
-        if is_reasoner and not saw_tokens:
-            log_tier_fallback(reason="error")
-            t1_ep = get_endpoint(ModelTier.T1)
-            yield from _stream_local_then_cloud(
-                query,
-                passages,
-                conversation_history,
-                locale,
-                personalization_context,
-                cancel_event,
-                allow_cloud_fallback=False,
-                tone_hint=tone_hint,
-                context_summary=context_summary,
-                endpoint=t1_ep,
-                tier=ModelTier.T1,
-            )
-            return
-        _LLM_CIRCUIT.record_failure()
+        reported = True
+        circuit.record_failure()
         logger.exception("LLM streaming raised")
-        yield from _cloud_stream()
+        # After tokens have gone out, a second answer would be appended to the
+        # first half of this one.
+        fall_back = "" if saw_tokens else "error"
+    finally:
+        # A generator closed mid-yield (GeneratorExit, a client leaving) reaches
+        # neither branch above, and that used to strand a half-open probe.
+        if not reported:
+            circuit.release()
+
+    if not fall_back:
         return
+    if is_reasoner:
+        yield from _t1_stream(fall_back)
+    else:
+        yield from _cloud_stream()
 
 
 def _connectors_used(tool_calls: list[dict[str, Any]] | None) -> list[dict[str, str]]:
@@ -1700,6 +1745,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     endpoint: Any = None,
     tier: Any = None,
     escalation_route: Callable[..., str] | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     """Run :func:`llm_module.generate_with_tools` under breaker + deadline.
 
@@ -1711,19 +1757,50 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     Deadline is doubled by default because the tool-call loop runs
     multiple generations — a typical 2-hop call takes ~2x a single
     generate().
+
+    A timed-out future keeps running: ``future.cancel()`` cannot stop a started
+    thread, so an abandoned loop went on dispatching tools for a turn nobody was
+    waiting on. The run gets a :class:`CancelScope` it checks before every model
+    round and every dispatch. It stops on its own timeout, or when the turn
+    (*cancel_event*) is cancelled, and a call already in flight still completes.
     """
     empty = {"text": "", "tool_calls": [], "iterations": 0, "truncated": False}
+    base_personalization = personalization_context
     calc_context = _evaluate_calculation_context(query)
     if calc_context:
         personalization_context = (personalization_context + "\n\n" + calc_context).strip()
-    if not _LLM_CIRCUIT.allow_request():
-        logger.warning("LLM circuit breaker OPEN — skipping agentic path")
-        return empty
 
+    is_reasoner = _is_non_t1_endpoint(endpoint)
+    circuit = _circuit_for(endpoint)
     if max_iterations is None:
         max_iterations = _resolve_tool_max_iterations()
 
-    is_reasoner = _is_non_t1_endpoint(endpoint)
+    def _on_t1(reason: str) -> dict[str, Any]:
+        log_tier_fallback(reason=reason)
+        return _call_llm_agentic(
+            query,
+            passages,
+            conversation_history,
+            locale,
+            tool_names=tool_names,
+            max_iterations=max_iterations,
+            personalization_context=base_personalization,
+            tone_hint=tone_hint,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            user_role=user_role,
+            granted_purposes=granted_purposes,
+            deadline_s=deadline_s,
+            event_callback=event_callback,
+            agent_role=agent_role,
+            context_summary=context_summary,
+            connector_namespaces=connector_namespaces,
+            forced_operations=forced_operations,
+            endpoint=get_endpoint(ModelTier.T1),
+            escalation_route=escalation_route,
+            cancel_event=cancel_event,
+        )
+
     effective_deadline = deadline_s
     if is_reasoner:
         try:
@@ -1732,7 +1809,19 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
             )
         except ValueError:
             effective_deadline = deadline_s
+    own_deadline = effective_deadline
+    effective_deadline = remaining_turn_seconds(own_deadline)
+    if effective_deadline <= 0:
+        logger.warning("Turn deadline reached; not starting the agentic loop")
+        return empty
 
+    if not circuit.allow_request():
+        if is_reasoner:
+            return _on_t1("circuit_open")
+        logger.warning("LLM circuit breaker OPEN — skipping agentic path")
+        return empty
+
+    run_cancel = CancelScope(cancel_event)
     tool_kwargs: dict[str, Any] = {
         "query": query,
         "passages": passages or None,
@@ -1755,6 +1844,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
         # than summarised by a model that, asked in Luganda or Swahili, writes
         # claims the record does not make.
         "summarise_records": not (connector_namespaces and locale not in ("", "en")),
+        "cancel_event": run_cancel,
     }
     if endpoint is not None:
         tool_kwargs["endpoint"] = endpoint
@@ -1774,93 +1864,31 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     try:
         result = _with_connector_outcomes(future.result(timeout=effective_deadline))
         if result and result.get("text"):
-            _LLM_CIRCUIT.record_success()
+            circuit.record_success()
             return result
-        if is_reasoner:
-            log_tier_fallback(reason="empty")
-            t1_ep = get_endpoint(ModelTier.T1)
-            return _call_llm_agentic(
-                query,
-                passages,
-                conversation_history,
-                locale,
-                tool_names=tool_names,
-                max_iterations=max_iterations,
-                personalization_context=personalization_context,
-                tone_hint=tone_hint,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                user_role=user_role,
-                granted_purposes=granted_purposes,
-                deadline_s=deadline_s,
-                event_callback=event_callback,
-                agent_role=agent_role,
-                context_summary=context_summary,
-                connector_namespaces=connector_namespaces,
-                forced_operations=forced_operations,
-                endpoint=t1_ep,
-                escalation_route=escalation_route,
-            )
+        if run_cancel.is_set():
+            circuit.release()
+            return result or empty
         # Empty text counts as a soft failure
-        _LLM_CIRCUIT.record_failure()
+        circuit.record_failure()
+        if is_reasoner:
+            return _on_t1("empty")
         return result or empty
     except concurrent.futures.TimeoutError:
         future.cancel()
+        run_cancel.set()
+        if effective_deadline < own_deadline:
+            circuit.release()
+        else:
+            circuit.record_failure()
         if is_reasoner:
-            log_tier_fallback(reason="deadline")
-            t1_ep = get_endpoint(ModelTier.T1)
-            return _call_llm_agentic(
-                query,
-                passages,
-                conversation_history,
-                locale,
-                tool_names=tool_names,
-                max_iterations=max_iterations,
-                personalization_context=personalization_context,
-                tone_hint=tone_hint,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                user_role=user_role,
-                granted_purposes=granted_purposes,
-                deadline_s=deadline_s,
-                event_callback=event_callback,
-                agent_role=agent_role,
-                context_summary=context_summary,
-                connector_namespaces=connector_namespaces,
-                forced_operations=forced_operations,
-                endpoint=t1_ep,
-                escalation_route=escalation_route,
-            )
-        _LLM_CIRCUIT.record_failure()
+            return _on_t1("deadline")
         logger.warning("agentic LLM deadline %.1fs exceeded", effective_deadline)
         return empty
     except Exception:
+        circuit.record_failure()
         if is_reasoner:
-            log_tier_fallback(reason="error")
-            t1_ep = get_endpoint(ModelTier.T1)
-            return _call_llm_agentic(
-                query,
-                passages,
-                conversation_history,
-                locale,
-                tool_names=tool_names,
-                max_iterations=max_iterations,
-                personalization_context=personalization_context,
-                tone_hint=tone_hint,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                user_role=user_role,
-                granted_purposes=granted_purposes,
-                deadline_s=deadline_s,
-                event_callback=event_callback,
-                agent_role=agent_role,
-                context_summary=context_summary,
-                connector_namespaces=connector_namespaces,
-                forced_operations=forced_operations,
-                endpoint=t1_ep,
-                escalation_route=escalation_route,
-            )
-        _LLM_CIRCUIT.record_failure()
+            return _on_t1("error")
         logger.exception("agentic LLM generation raised")
         return empty
 
@@ -1891,6 +1919,16 @@ def _resolve_tool_max_iterations() -> int:
 # A turn that exceeds the deadline is cancelled cooperatively at the
 # next token / await boundary.  Set to 0 to disable.
 _TURN_DEADLINE_DEFAULT_S = 120
+
+#: Said when a turn is stopped at its deadline. Translated if there is time.
+TURN_DEADLINE_MESSAGE = (
+    "This is taking longer than it should, so I have stopped rather than give you a "
+    "partial answer. Please try again, or contact URA on 0800 117 000."
+)
+
+
+class _TurnDeadlineExceeded(Exception):
+    """A streamed turn reached its deadline; unwinds to the one place that says so."""
 
 
 def _resolve_turn_deadline() -> float:
@@ -2134,6 +2172,18 @@ def _apply_output_guards(
     }
 
 
+def _localize_turn_payloads(result: dict[str, Any], locale: str) -> None:
+    """Translate what travels with the reply. Off the event loop: every label is a call."""
+    if result.get("resources"):
+        result["resources"] = [ChatModel._localize_resource(r, locale) for r in result["resources"]]
+    if result.get("next_actions"):
+        result["next_actions"] = ChatModel._localize_next_actions(result["next_actions"], locale)
+    if result.get("workflow"):
+        result["workflow"] = ChatModel._localize_workflow(result["workflow"], locale)
+    if isinstance(result.get("portal_copilot"), dict):
+        result["portal_copilot"] = ChatModel._localize_portal_copilot(result["portal_copilot"], locale)
+
+
 def _recent_turns_for_guidance(
     result: dict[str, Any], user_id: str | None, tenant_id: str = "default"
 ) -> list[dict[str, str]]:
@@ -2343,14 +2393,14 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
         return localize_reply(text, locale)
     cancel_event = cancel_event or threading.Event()
     deadline_s = turn_deadline_s if turn_deadline_s is not None else _resolve_turn_deadline()
+    set_turn_deadline(deadline_s if deadline_s > 0 else None)
 
     async def _should_stop() -> bool:
         if cancel_event.is_set():
             return True
         if deadline_s > 0 and (time.perf_counter() - t0) > deadline_s:
-            logger.warning("run_chat_turn deadline %.1fs exceeded", deadline_s)
             cancel_event.set()
-            return True
+            raise _TurnDeadlineExceeded
         if should_continue is None:
             return False
         outcome = should_continue()
@@ -2365,7 +2415,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
         )
 
         turn_out: dict[str, str] = {}
-        result = await asyncio.to_thread(
+        retrieval = asyncio.to_thread(
             model.generate_retrieval_only,
             message=message,
             conversation_id=conversation_id,
@@ -2385,6 +2435,14 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             portal_task_submission=portal_task_submission,
             turn_out=turn_out,
         )
+        try:
+            # The deadline only used to be read at token boundaries, so a hung
+            # retrieval or a slow reranker held the turn for as long as it liked.
+            result = await asyncio.wait_for(retrieval, timeout=deadline_s if deadline_s > 0 else None)
+        except TimeoutError:
+            raise _TurnDeadlineExceeded from None
+        if await _should_stop():
+            return
         if result.get("_case_facts") is not None:
             _ACTIVE_CASE_FACTS.set(result["_case_facts"])
         if turn_out.get("source"):
@@ -2450,14 +2508,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     cur_actions.insert(0, cont_act)
                     result["next_actions"] = cur_actions
         if locale not in ("", "en"):
-            if result.get("resources"):
-                result["resources"] = [ChatModel._localize_resource(r, locale) for r in result["resources"]]
-            if result.get("next_actions"):
-                result["next_actions"] = ChatModel._localize_next_actions(result["next_actions"], locale)
-            if result.get("workflow"):
-                result["workflow"] = ChatModel._localize_workflow(result["workflow"], locale)
-            if isinstance(result.get("portal_copilot"), dict):
-                result["portal_copilot"] = ChatModel._localize_portal_copilot(result["portal_copilot"], locale)
+            await asyncio.to_thread(_localize_turn_payloads, result, locale)
 
         live_check = _TURN_LIVE_CHECK.get() or {}
         if live_check.get("audit"):
@@ -2498,7 +2549,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             # localized before it is sent rather than corrected afterwards.
             if locale not in ("", "en"):
                 yield ("translation.started", {"locale": locale})
-            full_reply = _localized(_disclosed_reply(result))
+            full_reply = await asyncio.to_thread(_localized, _disclosed_reply(result))
             if locale not in ("", "en"):
                 yield ("translation.completed", {"locale": locale})
             result["reply"] = full_reply
@@ -2588,6 +2639,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 forced_operations=connector_forced or None,
                 endpoint=turn_endpoint,
                 tier=turn_tier,
+                should_stop=_should_stop,
                 escalation_route=(
                     model._tool_escalation_route(
                         message=message,
@@ -2612,6 +2664,9 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     continue
                 yield event
 
+            if await _should_stop():
+                return
+
             if full_reply:
                 # Decided English, but the model wrote Luganda or Swahili: put
                 # it in English first, so the guards verify the reply that is
@@ -2625,7 +2680,8 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 # token-streaming branch uses (judge + claim verification +
                 # grounded revision + escalation/handoff/ticket), not just a
                 # bare faithfulness score.
-                guard = _apply_output_guards(
+                guard = await asyncio.to_thread(
+                    _apply_output_guards,
                     model,
                     message=message,
                     reply=full_reply,
@@ -2653,7 +2709,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 # every non-English conversation back into an English one.
                 if locale not in ("", "en"):
                     yield ("translation.started", {"locale": locale})
-                    localized = _localized(full_reply)
+                    localized = await asyncio.to_thread(_localized, full_reply)
                     yield ("translation.completed", {"locale": locale})
                     if localized != full_reply:
                         full_reply = localized
@@ -2712,13 +2768,15 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 "confidence_band": "low",
             }
             if flags.is_enabled("handoff_summaries") and escalate:
-                handoff = model._build_handoff_packet(
+                handoff = await asyncio.to_thread(
+                    model._build_handoff_packet,
                     message=message,
                     reason=esc_reason,
                     conversation_history=conversation_history or None,
                     hits=hits,
                 )
-            ticket_id = model._maybe_create_ticket(
+            ticket_id = await asyncio.to_thread(
+                model._maybe_create_ticket,
                 reason=esc_reason,
                 user_query=message,
                 bot_reply=abstained_reply,
@@ -2740,10 +2798,11 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             finalize_turn_actions(result, escalated=escalate)
             if locale not in ("", "en"):
                 yield ("translation.started", {"locale": locale})
-            full_reply = _localized(
+            full_reply = await asyncio.to_thread(
+                _localized,
                 _with_live_check_disclosure(
                     abstained_reply, str(result.get("_live_check_disclosure") or "")
-                )
+                ),
             )
             if locale not in ("", "en"):
                 yield ("translation.completed", {"locale": locale})
@@ -2889,7 +2948,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 # with the English extractive fallback.
                 if locale not in ("", "en"):
                     yield ("translation.started", {"locale": locale})
-                full_reply = _localized(full_reply)
+                full_reply = await asyncio.to_thread(_localized, full_reply)
                 if locale not in ("", "en"):
                     yield ("translation.completed", {"locale": locale})
                 yield ("token", full_reply)
@@ -2911,7 +2970,8 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     full_reply = english_only
                     yield ("revision", full_reply)
 
-            guard = _apply_output_guards(
+            guard = await asyncio.to_thread(
+                _apply_output_guards,
                 model,
                 message=message,
                 reply=full_reply,
@@ -2952,7 +3012,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 # having answered in the wrong language and then changing its
                 # mind — which is exactly how it was reported.
                 yield ("translation.started", {"locale": locale})
-                localized = _localized(full_reply)
+                localized = await asyncio.to_thread(_localized, full_reply)
                 yield ("translation.completed", {"locale": locale})
                 if localized != full_reply:
                     full_reply = localized
@@ -3029,7 +3089,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             # One frame, so localize before sending rather than revising after.
             if locale not in ("", "en"):
                 yield ("translation.started", {"locale": locale})
-            full_reply = _localized(full_reply)
+            full_reply = await asyncio.to_thread(_localized, full_reply)
             if locale not in ("", "en"):
                 yield ("translation.completed", {"locale": locale})
             yield ("token", full_reply)
@@ -3060,6 +3120,19 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             {"result": result, "full_reply": full_reply, "english_reply": english_reply, "elapsed_ms": (time.perf_counter() - t0) * 1000},
         )
 
+    except _TurnDeadlineExceeded:
+        logger.warning("chat turn stopped at its %.1fs deadline", deadline_s)
+        cancel_event.set()
+        try:
+            notice = await asyncio.wait_for(asyncio.to_thread(localize_reply, TURN_DEADLINE_MESSAGE, locale), timeout=3)
+        except Exception:  # noqa: BLE001 - out of time already; English beats silence
+            notice = TURN_DEADLINE_MESSAGE
+        yield ("error", {"code": "deadline_exceeded", "message": notice})
+        yield ("done", "")
+        yield (
+            "_log",
+            {"result": result, "full_reply": full_reply, "english_reply": english_reply, "elapsed_ms": (time.perf_counter() - t0) * 1000},
+        )
     except Exception:
         logger.exception("run_chat_turn error")
         yield ("error", {"code": "internal", "message": "Internal server error"})
@@ -3092,6 +3165,7 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
     endpoint: Any = None,
     tier: Any = None,
     escalation_route: Callable[..., str] | None = None,
+    should_stop: Callable[[], Awaitable[bool]] | None = None,
 ) -> "AsyncIterator[tuple[str, Any]]":
     """Run the agentic tool-call loop and stream its events.
 
@@ -3138,6 +3212,7 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
             "context_summary": context_summary,
             "connector_namespaces": connector_namespaces,
             "forced_operations": forced_operations,
+            "cancel_event": cancel_event,
         }
         if endpoint is not None:
             call_kwargs["endpoint"] = endpoint
@@ -3155,7 +3230,10 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
             try:
                 ev = await asyncio.wait_for(event_queue.get(), timeout=0.25)
             except asyncio.TimeoutError:
-                if cancel_event.is_set():
+                # This loop can run for minutes, and nothing else on this path
+                # asks whether the client is still there or the turn out of time.
+                if (should_stop is not None and await should_stop()) or cancel_event.is_set():
+                    cancel_event.set()
                     agentic_task.cancel()
                     return
                 continue
@@ -3167,6 +3245,9 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
             yield (ev.get("type", "tool_event"), ev)
 
         agentic = agentic_task.result()
+    except _TurnDeadlineExceeded:
+        agentic_task.cancel()
+        raise
     except Exception:
         logger.exception("agentic stream failed")
         yield ("error", {"code": "agentic_failed", "message": "Tool loop error"})
@@ -10841,9 +10922,15 @@ class ChatModel:
         transcript).
         """
         _PENDING_TURN_AUDIT.set(None)
+        deadline_s = _resolve_turn_deadline()
         # A call turn stays on local models, whatever this deployment allows
         # chat (G122; see providers.scope).
-        with turn_usage_scope() as usage, turn_attributes_scope(), local_models_only(channel == "call"):
+        with (
+            turn_usage_scope() as usage,
+            turn_attributes_scope(),
+            local_models_only(channel == "call"),
+            turn_deadline(deadline_s if deadline_s > 0 else None),
+        ):
             return self._generate_localized(
                 message=message,
                 conversation_id=conversation_id,

@@ -65,7 +65,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final
 
-from .agents.loop_control import ToolCallBudget
+from .agents.loop_control import Admission, BudgetDecision, ToolCallBudget
 from .agents.prompts import specialist_prompt
 from .guardrails import scan_external_tool_text, scan_retrieved_text
 from .tracing import llm_call
@@ -3357,6 +3357,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
     summarise_records: bool = True,
     endpoint: Any = None,
     tier: Any = None,
+    cancel_event: Any = None,
 ) -> dict[str, Any]:
     """Run a bounded tool-calling loop with the local Qwen3 model.
 
@@ -3393,6 +3394,10 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
         translated. A model asked a Luganda question writes Luganda, and in
         testing added a claim the record did not make and citation debris
         (``[[4]``) to it.
+    cancel_event:
+        Anything with ``is_set()``, checked before every model round and every
+        dispatch, so a turn that has ended stops spending and stops acting. A
+        call already in flight completes; a thread cannot be interrupted.
 
     Returns
     -------
@@ -3403,6 +3408,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
         ``iterations``  – how many generation rounds were used
         ``truncated``   – True if max_iterations was hit before the
                           model stopped emitting tool calls
+        ``cancelled``   – present and True if *cancel_event* ended the loop
     """
     if LLM_BACKEND == "vllm":
         if not _vllm_ready():
@@ -3576,7 +3582,32 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
         except Exception:
             logger.debug("event_callback raised; suppressing", exc_info=True)
 
+    def _stopped() -> bool:
+        return cancel_event is not None and cancel_event.is_set()
+
+    def _may_overlap(name: str) -> bool:
+        """Only a repeatable read may run beside another call.
+
+        A connector's hints come from a server the operator configured. They
+        only widen this to running at once, never what the policy allows.
+        """
+        tool = ToolRegistry.get(name)
+        if tool is not None:
+            return tool.schema.read_only and tool.schema.idempotent
+        annotations = (connector_descriptors.get(name) or {}).get("annotations") or {}
+        return annotations.get("readOnlyHint") is True and annotations.get("idempotentHint") is True
+
     for iteration in range(max_iterations):
+        if _stopped():
+            logger.info("tool loop stopped by cancellation before round %d", iteration)
+            return {
+                "text": "",
+                "tool_calls": tool_calls_made,
+                "iterations": iteration,
+                "truncated": False,
+                "cancelled": True,
+                "tool_budget": budget.stats(),
+            }
         _emit({"type": "iteration.started", "iteration": iteration})
         forced_name = forced_queue[0] if forced_queue else ""
         if LLM_BACKEND == "vllm":
@@ -3731,7 +3762,15 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
         def _execute_single_call(idx: int, pc: dict[str, Any]) -> dict[str, Any]:
             call_id = pc.get("id") or f"call_{iteration}_{idx}"
             call_t0 = time.perf_counter()
-            decision = budget.admit(pc["name"], pc.get("arguments", {}), iteration=iteration)
+            decision = (
+                BudgetDecision(
+                    Admission.DENIED,
+                    reason="turn cancelled",
+                    result={"ok": False, "error": "This turn was cancelled, so nothing was run."},
+                )
+                if _stopped()
+                else budget.admit(pc["name"], pc.get("arguments", {}), iteration=iteration)
+            )
             if not decision.should_dispatch:
                 res = decision.result or {}
                 return {
@@ -3820,15 +3859,21 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                 "elapsed_ms": (time.perf_counter() - call_t0) * 1000,
             }
 
-        if len(parsed_calls) > 1:
+        # Calls with an effect run one at a time, in the order the model gave.
+        if len(parsed_calls) > 1 and all(_may_overlap(pc["name"]) for pc in parsed_calls):
             from concurrent.futures import ThreadPoolExecutor
 
+            # One context per call: a pool thread starts empty, which lost this
+            # turn's trace and its route to an officer, and one Context cannot
+            # be entered by two threads at once.
             with ThreadPoolExecutor(max_workers=min(len(parsed_calls), 8)) as executor:
-                executed_calls = list(
-                    executor.map(lambda item: _execute_single_call(item[0], item[1]), enumerate(parsed_calls))
-                )
+                futures = [
+                    executor.submit(contextvars.copy_context().run, _execute_single_call, idx, pc)
+                    for idx, pc in enumerate(parsed_calls)
+                ]
+                executed_calls = [future.result() for future in futures]
         else:
-            executed_calls = [_execute_single_call(0, parsed_calls[0])]
+            executed_calls = [_execute_single_call(idx, pc) for idx, pc in enumerate(parsed_calls)]
 
         for exec_info in executed_calls:
             idx = exec_info["idx"]
