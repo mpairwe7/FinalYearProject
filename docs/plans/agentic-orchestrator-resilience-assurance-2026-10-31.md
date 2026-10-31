@@ -150,6 +150,17 @@ Recorded because a reader should know how far to trust the process.
   files in other shards delete `voice_call_turns` in their setup. Repeating the test beside a
   concurrent delete failed 8 of 8 with the same `IndexError`; without one it passed 8 of 8.
 
+* **Production was not what this review assumed.** It said `risk_tiered_autonomy_gates` affects
+  the `gpu-salt` profile and that the figure lock measures outside T3, and neither was checked
+  against the Space. The Space sets `FLAG_RISK_TIERED_AUTONOMY_GATES` and
+  `FLAG_EVALUATOR_OPTIMIZER` as secrets. Their values cannot be read back, but the layer written
+  alongside them set both to `true`. If they are on, the gate applies to the live service and the
+  lock enforces on every tier there, which is the unmeasured risk G360 exists to avoid.
+* **The API was down when this merged, and that was not noticed.** Verifying the deployment found
+  every API route returning 502 since about 14:48 UTC, from a roll that came before this change
+  (G371). The review's own question, whether a healthy status proves anything, applied to its own
+  deployment.
+
 ## What review of this change found
 
 Automated review of the pull request raised 16 findings against code written here, over two
@@ -223,7 +234,8 @@ carries the time of the check.
   to one sentence later. Half a sentence frozen on screen read as a fault.
 * **The lock measures before it enforces.** T1 and cloud answers can still show an untraceable
   figure that does not contradict a passage. Enforcing blind risks stripping correct answers,
-  with no way to tell how often. This is G360, and it needs a decision.
+  with no way to tell how often. This is G360, and it needs a decision. It holds only while
+  `evaluator_optimizer` is off, and on the Space that flag is probably on.
 * **`high` tools need an officer once gates are on.** That is the flag's stated contract, but
   it removes a path the misclassification had left open. No officer approval endpoint exists,
   so such an action is completed by the officer who picks up the ticket.
@@ -268,6 +280,11 @@ carries the time of the check.
 | G368 | After a reasoner timeout, T1 can repeat a tool call that was in flight. Tickets dedupe; other side-effecting tools rely on their idempotency key. | Backend |
 | G369 | With every model down and only web commentary found, the commentary is served, labelled as a fallback. Serving it or abstaining is a product decision. | Service owner |
 | G370 | A `verify_claims` error is logged at debug and the reply continues, so a claim check that is down is silent. Closing it means deciding whether a verifier outage withholds answers. | Backend, service owner |
+| G372 | A change made directly on the Space is still deleted by the next roll, without warning. | Platform |
+| G373 | One optional feature that cannot start stops the whole API. | Backend |
+| G374 | Nothing raises an alarm when the Space is down: the keepalive passes on a 502, and a failed roll leaves the broken image live. | Platform |
+| G375 | The Space layer's speech fallback posts recordings to Google with no locale policy, budget or breaker. | Service owner |
+| G376 | The Space layer's edits to app source are a base64 blob that reviews and CI do not see. | Backend |
 
 Also open from the previous review: G326 to G329 and G331.
 

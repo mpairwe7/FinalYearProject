@@ -698,6 +698,12 @@ Reviewed on branch `fix/agentic-orchestrator-resilience-assurance-2026-10-31`; [
 | G368 ⚪ | After a reasoner timeout, T1 can repeat a tool call that was in flight. | Open: tickets dedupe; other tools rely on idempotency keys. |
 | G369 ⚪ | With every model down and only web commentary found, the commentary is served, labelled as a fallback. | Open: service owner, to choose between serving it and abstaining. |
 | G370 ⚪ | A `verify_claims` error is logged at debug and the reply continues. | Open: needs a decision on whether a verifier outage withholds answers. |
+| G371 🟢 | ~~The Space's CPU layer existed only on the Space, so a roll deleted it and left its flags on, and the API failed to start for about 8 hours.~~ | Fixed: the layer is in `App/deploy/hf-space/Dockerfile`, and `tests/test_hf_space_layer.py` pins it and every line it edits. |
+| G372 ⚪ | A change made directly on the Space is still deleted by the next roll, without warning. | Open: platform, to refuse a roll when the Space has diverged. |
+| G373 ⚪ | One optional feature that cannot start stops the whole API: `main.py` re-raises for the receptionist. | Open: backend, to choose between failing loud and degrading. |
+| G374 ⚪ | Nothing raises an alarm when the Space is down. The keepalive passes on a 502, and a failed roll leaves the broken image live. | Open: platform. |
+| G375 ⚪ | The layer's speech fallback posts recordings to Google with no locale policy, budget or breaker. | Open: service owner, on DPPA 2019 s.19. Restored as it was. |
+| G376 ⚪ | The layer's edits to app source are a base64 blob, so they do not appear in a review and CI does not run them. | Open: backend, to move them into the source. |
 
 **Open follow-ups.**
 
