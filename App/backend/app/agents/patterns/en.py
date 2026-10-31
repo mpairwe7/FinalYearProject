@@ -218,7 +218,9 @@ _ESCALATE = (
     (
         re.compile(
             r"^(?!.*" + CONTACT_PERSON_QUERY_RE.pattern + r")"
-            r".*\b(?:(?:speak\s+to|talk\s+to|call)\s+(?:a|an|the)?\s*(?:human|person|officer|agent|someone)"
+            r".*\b(?:(?:speak\s+to|talk\s+to|call|connect\s+me\s+(?:to|with)|transfer\s+me\s+to"
+            r"|put\s+me\s+through\s+to)\s+(?:a|an|the|your)?\s*"
+            r"(?:human|person|officer|agent|someone|supervisor|manager|representative)"
             r"|contact\s+(?:a|an|the)\s+(?:human|person|officer|agent|someone)|contact\s+someone)\b",
             re.IGNORECASE | re.DOTALL,
         ),

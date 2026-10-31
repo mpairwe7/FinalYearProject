@@ -11522,6 +11522,10 @@ class ChatModel:
                     trace_ctx["endpoint_model"] = turn_endpoint.model
                 log_tier("chat", tier_decision)
 
+            # The route binds whichever branch above produced it. Nesting this
+            # under ``elif tiering_enabled`` made it unreachable with
+            # agentic_mode on and a None dereference with it off (G309).
+            if route_decision is not None:
                 # Early returns — CLARIFY and ESCALATE don't need retrieval.
                 if route_decision.route == AgentRoute.GREET:
                     greeted = {
