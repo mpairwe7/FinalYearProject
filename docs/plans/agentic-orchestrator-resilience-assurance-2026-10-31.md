@@ -129,10 +129,29 @@ Recorded because a reader should know how far to trust the process.
 * Attestation's new rule would have paged someone for every graph clarification on the
   stream, on a critical alert with no `for:` window. Found by reading the alert, then fixed
   and tested.
+* Self-review found that a fallback was being cached, so it would outlive its outage with no
+  disclosure on a cache hit, and that a graph fallback was not disclosed on the stream. A healthy
+  control test then showed the first version of the caching test passing for the wrong reason.
+
+* The first sweep below reported 58 of 59 caught, but it counted any non-zero exit as a kill,
+  so a mutant that merely broke the file would have counted. It was rerun requiring a compiling
+  mutant and a real test failure.
 
 ## Test evidence
 
-Full suite (`App/backend/tests`, `tests/agents`, `tests/chaos`), four shards, on Python 3.11.
+**Mutation sweep.** Each of 59 critical controls was disabled in turn in an isolated worktree,
+and its contract tests had to fail: 59 of 59 caught, with every mutant compiling and pytest
+reporting a test failure rather than an error. The first run left one survivor, the fix for
+G336: its test used the human route, which the gate now always allows, so removing the fix
+changed nothing. A test with a high-tier tool closed that. This shows the tests detect these
+controls being removed. It does not show the controls are sufficient.
+
+**Full suite** (`App/backend/tests`, `tests/agents`, `tests/chaos`), four shards, Python 3.11:
+5,533 passed, 8 failed, 29 skipped. Seven of the eight fail the same way on clean `dev`
+(below). The eighth, `test_late_payment_penalty_preserves_2_percent`, failed once under shard
+load, then passed 3 of 3 alone and 22 of 22 with its file on both trees. It mocks the chat model,
+so it does not reach code changed here. Timing is the likely cause, but that is unconfirmed.
+The root `tests/*.py` integration tests: 620 passed, 4 skipped.
 Three modules cannot be collected here because `opentelemetry`, `requests` and `soundfile`
 are not installed, so `test_tracing_genai.py`, `test_speech_streaming.py` and
 `test_cx_500_complex_ngrok_schema.py` did not run locally. CI runs them.
