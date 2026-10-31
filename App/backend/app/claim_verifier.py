@@ -200,13 +200,27 @@ def _cited_hits(
     citations: list[dict[str, Any]],
     hits: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """The hits a claim cites, or every hit when it cites none."""
+    """The hits a claim cites. Every hit when it cites none; none when a marker matches nothing.
+
+    A citation is matched by its passage first, because citations can be filtered
+    after retrieval and a position then points at the wrong hit.
+    """
+    if not refs:
+        return list(hits or [])
+
+    def hit_for(citation: dict[str, Any], index: int) -> dict[str, Any] | None:
+        passage = str(citation.get("passage") or "").strip()[:200]
+        if passage:
+            for hit in hits or []:
+                if str(hit.get("text") or hit.get("answer") or "").strip().startswith(passage):
+                    return hit
+        return hits[index] if index < len(hits or []) else None
+
     by_ref = {
-        str(citation.get("ref") or f"[{idx}]").strip("[]"): hits[idx - 1]
-        for idx, citation in enumerate(citations or [], 1)
-        if idx - 1 < len(hits or [])
+        str(citation.get("ref") or f"[{index + 1}]").strip("[]"): hit_for(citation, index)
+        for index, citation in enumerate(citations or [])
     }
-    return [by_ref[ref] for ref in refs if ref in by_ref] or list(hits or [])
+    return [by_ref[ref] for ref in refs if by_ref.get(ref) is not None]
 
 
 def verify_claims(

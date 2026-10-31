@@ -369,14 +369,22 @@ def trace_plan() -> Generator[Callable[[str, int], None], None, None]:
         except Exception:  # noqa: BLE001 - as above
             logger.debug("plan span not annotated", exc_info=True)
 
+    def close(*exc_info: Any) -> None:
+        if span_cm is None:
+            return
+        try:
+            span_cm.__exit__(*exc_info)
+        except Exception:  # noqa: BLE001 - as above
+            logger.debug("plan span not closed", exc_info=True)
+
     try:
         yield annotate
-    finally:
-        if span_cm is not None:
-            try:
-                span_cm.__exit__(None, None, None)
-            except Exception:  # noqa: BLE001 - as above
-                logger.debug("plan span not closed", exc_info=True)
+    except BaseException as exc:
+        # Handing the exception over is what marks the span as failed.
+        close(type(exc), exc, exc.__traceback__)
+        raise
+    else:
+        close(None, None, None)
 
 
 class LLMCall:

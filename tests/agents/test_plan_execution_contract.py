@@ -223,7 +223,7 @@ class TestAuditRow:
             channel="rest",
         )
 
-        assert payload["plan"]["sha256"] == "abc"
+        assert payload["plan"] == {"sha256": "abc", "steps": {"ok": 2}, "not_computed": []}
 
 
 class TestPlanReachesTheLedger:
@@ -373,7 +373,8 @@ class TestPlanSpan:
         def __enter__(self):
             return self
 
-        def __exit__(self, *_exc):
+        def __exit__(self, *exc):
+            self.exit_info = exc
             return False
 
     def test_planning_is_one_span_named_by_the_conventions(self, monkeypatch):
@@ -396,6 +397,24 @@ class TestPlanSpan:
         assert plan.attributes["gen_ai.operation.name"] == "plan"
         assert plan.attributes["ura.plan.sha256"] == plan_digest(plan_tools(PAYE_AND_VAT))
         assert plan.attributes["ura.plan.step_count"] == 2
+
+    def test_a_planning_failure_marks_the_span_failed(self, monkeypatch):
+        from app import tracing
+
+        spans: list = []
+
+        class Tracer:
+            def start_as_current_span(_self, name, attributes=None, **_kw):
+                span = TestPlanSpan._Span(name, attributes or {})
+                spans.append(span)
+                return span
+
+        monkeypatch.setattr(tracing, "_tracer", Tracer())
+
+        with pytest.raises(ValueError, match="planner broke"), tracing.trace_plan():
+            raise ValueError("planner broke")
+
+        assert spans[0].exit_info[0] is ValueError
 
     def test_a_tracing_fault_does_not_cost_the_verified_figures(self, monkeypatch):
         from app import tracing

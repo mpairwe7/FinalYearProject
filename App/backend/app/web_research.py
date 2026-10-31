@@ -153,6 +153,20 @@ LIVE_DISCLOSURES: dict[str, str] = {
     ),
 }
 
+
+def split_live_disclosures(text: str) -> tuple[str, list[str]]:
+    """*text* without its live-check sentences, and those sentences in order."""
+    found = [
+        sentence
+        for sentence in (*LIVE_DISCLOSURES.values(), LIVE_PARTIAL_DISCLOSURE)
+        if sentence in text
+    ]
+    body = text
+    for sentence in found:
+        body = body.replace(sentence, "")
+    return body.strip(), found
+
+
 # Tier 1: Official Ugandan statutory & market primary sources (Trust = 1.0)
 TIER1_DOMAINS: frozenset[str] = frozenset(
     {
@@ -1597,11 +1611,13 @@ def _concluded(
     # whatever another topic in the same question found.
     answered = {a.spec.trigger_category for a in attempts or () if a.status != "unavailable"}
     failed = {a.spec.trigger_category for a in attempts or ()} - answered
-    unchecked = sorted({*(unsearched or ()), *failed}) if outcome.web_hits else sorted(unsearched or ())
+    unchecked = sorted({*(unsearched or ()), *failed})
     outcome.status = status
+    # "Could not check" already covers every part of the question.
+    partial = bool(unchecked) and status != LIVE_UNAVAILABLE
     outcome.disclosure = " ".join(
         sentence
-        for sentence in (LIVE_DISCLOSURES.get(status, ""), LIVE_PARTIAL_DISCLOSURE if unchecked else "")
+        for sentence in (LIVE_DISCLOSURES.get(status, ""), LIVE_PARTIAL_DISCLOSURE if partial else "")
         if sentence
     )
     # A topic the ledger verified recently is simply current corpus: there is no

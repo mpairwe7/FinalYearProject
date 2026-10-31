@@ -174,6 +174,19 @@ class TestBudgets:
         assert wr.TRIGGER_BILL_ASSENT in outcome.audit["unchecked_triggers"]
         assert wr.LIVE_PARTIAL_DISCLOSURE in outcome.disclosure
 
+    def test_a_failed_search_is_on_record_even_when_nothing_was_admitted(self):
+        def partly_down(query: str) -> str:
+            if query.startswith("site:ulii.org"):
+                raise RuntimeError("HTTP 503")
+            return ""
+
+        outcome = wr.run_web_research(self.QUESTION, search_http_fetcher=partly_down, persist_files=False)
+
+        assert outcome.status == wr.LIVE_UNAVAILABLE
+        assert wr.TRIGGER_BILL_ASSENT in outcome.audit["unchecked_triggers"]
+        # "Could not check" already covers it; a second sentence would only repeat it.
+        assert wr.LIVE_PARTIAL_DISCLOSURE not in outcome.disclosure
+
     def test_a_complete_check_says_nothing_about_parts(self):
         outcome = wr.run_web_research(
             "Is there a penalty waiver public notice?",
@@ -535,31 +548,79 @@ class TestEveryExit:
 
         assert UNAVAILABLE in "".join(str(data) for name, data in events if name in ("token", "revision"))
 
-    def test_a_clarifying_question_makes_no_claim_but_is_still_audited(self, model):
-        result: dict = {"reply": "Which return do you mean?", "retrieval_mode": "clarification"}
+    @staticmethod
+    def _audited(model, result: dict) -> dict:
+        from app import service
 
-        model._audit_turn(
-            message="q",
-            result=result,
-            session_id="s",
-            trace_ctx={"live_check": {"status": "unavailable"}, "live_check_disclosure": UNAVAILABLE},
-        )
+        token = service._TURN_LIVE_CHECK.set({"audit": {"status": "unavailable"}, "disclosure": UNAVAILABLE})
+        try:
+            model._audit_turn(message="q", result=result, session_id="s", trace_ctx={})
+        finally:
+            service._TURN_LIVE_CHECK.reset(token)
+        return result
+
+    def test_a_clarifying_question_makes_no_claim_but_is_still_audited(self, model):
+        result = self._audited(model, {"reply": "Which return do you mean?", "retrieval_mode": "clarification"})
 
         assert result["reply"] == "Which return do you mean?"
         assert result["_live_check"] == {"status": "unavailable"}
 
     @pytest.mark.parametrize("mode", ["hybrid", "calculator", "false_premise_rejected", "abstained"])
     def test_every_answering_exit_carries_it(self, model, mode):
-        result: dict = {"reply": "An answer.", "retrieval_mode": mode}
-
-        model._audit_turn(
-            message="q",
-            result=result,
-            session_id="s",
-            trace_ctx={"live_check": {"status": "unavailable"}, "live_check_disclosure": UNAVAILABLE},
-        )
+        result = self._audited(model, {"reply": "An answer.", "retrieval_mode": mode})
 
         assert result["reply"].endswith(UNAVAILABLE)
+
+    def test_a_graph_turn_on_rest_reaches_the_audit_row(self, model, monkeypatch):
+        # The check ran inside the graph, out of sight of the REST code around it.
+        from app.audit.turns import build_turn_payload
+
+        monkeypatch.setenv("FLAG_LANGGRAPH", "true")
+        monkeypatch.setattr("app.retriever.get_shared_retriever", lambda **_k: _Retriever())
+
+        result = model.generate(QUESTION)  # nosemgrep: ura-llm01-raw-user-input-to-llm
+
+        assert build_turn_payload(message=QUESTION, result=result, channel="rest")["live_check"]["status"] == (
+            wr.LIVE_UNAVAILABLE
+        )
+
+
+class TestEveryLanguage:
+    BODY = "Hakuna taarifa mpya kuhusu msamaha wa adhabu."
+
+    def _localize(self, monkeypatch, text: str) -> str:
+        from app import service
+
+        real = service.localize_reply
+
+        def stub(reply, locale, **kwargs):
+            if reply == self.BODY:
+                return reply  # already in the locale, so localize_reply leaves it alone
+            if reply in wr.LIVE_DISCLOSURES.values() or reply == wr.LIVE_PARTIAL_DISCLOSURE:
+                return "[sw] " + reply
+            return real(reply, locale, **kwargs)
+
+        monkeypatch.setattr(service, "localize_reply", stub)
+        return real(text, "sw")
+
+    def test_a_body_already_in_the_locale_does_not_strand_the_english_sentence(self, monkeypatch):
+        served = self._localize(monkeypatch, f"{self.BODY}\n\n{UNAVAILABLE}")
+
+        assert served == f"{self.BODY}\n\n[sw] {UNAVAILABLE}"
+
+    def test_a_partial_check_is_translated_sentence_by_sentence(self, monkeypatch):
+        unconfirmed = wr.LIVE_DISCLOSURES[wr.LIVE_UNCONFIRMED]
+
+        served = self._localize(monkeypatch, f"{self.BODY}\n\n{unconfirmed} {wr.LIVE_PARTIAL_DISCLOSURE}")
+
+        assert served == f"{self.BODY}\n\n[sw] {unconfirmed}\n\n[sw] {wr.LIVE_PARTIAL_DISCLOSURE}"
+
+    def test_english_is_untouched(self):
+        from app.service import localize_reply
+
+        text = f"An answer.\n\n{UNAVAILABLE}"
+
+        assert localize_reply(text, "en") == text
 
 
 class TestCorpusSyncApproval:

@@ -182,6 +182,29 @@ class TestEditionMetadata:
 
         assert report["decision"] != "approve"
 
+    def test_a_marker_matching_no_citation_earns_no_edition_credit(self):
+        from app.claim_verifier import _cited_hits
+
+        hits = [{"text": "a", "fiscal_year": "FY2026-27"}]
+
+        assert _cited_hits(["9"], [{"ref": "[1]", "passage": "a"}], hits) == []
+
+    def test_a_filtered_citation_list_still_finds_its_own_passage(self):
+        # Filtering citations after retrieval leaves [1] pointing at the second hit.
+        from app.claim_verifier import _cited_hits
+
+        first = {"text": "First passage about VAT.", "fiscal_year": "FY2024-25"}
+        second = {"text": "Second passage about PAYE.", "fiscal_year": "FY2026-27"}
+
+        assert _cited_hits(["1"], [{"ref": "[1]", "passage": second["text"]}], [first, second]) == [second]
+
+    def test_a_claim_citing_nothing_may_draw_on_every_hit(self):
+        from app.claim_verifier import _cited_hits
+
+        hits = [{"text": "a"}, {"text": "b"}]
+
+        assert _cited_hits([], [], hits) == hits
+
     def test_an_edition_nothing_supports_is_still_refused(self):
         reply = (
             "For FY2031-32, individual rental income tax is 12% of gross rental "

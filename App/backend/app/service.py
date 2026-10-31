@@ -294,9 +294,12 @@ def _scoped_conversation_state(method: Callable[..., Any]) -> Callable[..., Any]
         # A streamed turn opened this scope already, and its guards run after
         # this wrapper returns, so they must see the same plans.
         plans_reset = _TURN_PLANS.set({}) if _TURN_PLANS.get() is None else None
+        live_check_reset = _TURN_LIVE_CHECK.set({}) if _TURN_LIVE_CHECK.get() is None else None
         try:
             return method(*bound.args, **bound.kwargs)
         finally:
+            if live_check_reset is not None:
+                _TURN_LIVE_CHECK.reset(live_check_reset)
             if plans_reset is not None:
                 _TURN_PLANS.reset(plans_reset)
             _ACTIVE_CASE_FACTS.reset(facts_ctx_reset)
@@ -4220,6 +4223,20 @@ def localize_reply(reply: str, locale: str, *, tone_register: str = "") -> str:
     text = str(reply or "").strip()
     if not text or locale in ("", "en"):
         return reply
+
+    # A live-check sentence is written in English and added to the finished
+    # answer, so a body already in the locale would otherwise carry it through
+    # untranslated: the guarantee has to hold in every language.
+    from .web_research import split_live_disclosures
+
+    body_text, disclosures = split_live_disclosures(text)
+    if disclosures and body_text:
+        loc_body = (
+            localize_reply(body_text, locale, tone_register=tone_register)
+            if tone_register
+            else localize_reply(body_text, locale)
+        )
+        return "\n\n".join([loc_body, *(localize_reply(sentence, locale) for sentence in disclosures)])
 
     # If the reply was already generated natively in the target locale (e.g. by
     # Sunflower-14B), do not re-translate it under source_lang="en", which would
@@ -12004,8 +12021,6 @@ class ChatModel:
                 if live_mode:
                     retrieval_mode = live_mode
                 live_check_notice = web_outcome.live_check_notice
-                trace_ctx["live_check"] = web_outcome.audit
-                trace_ctx["live_check_disclosure"] = web_outcome.disclosure
                 if web_outcome.triggered:
                     cache_allowed = False
 
@@ -13032,9 +13047,10 @@ class ChatModel:
         # Every exit comes through here, so none can lose the check. After every
         # verifier, so the sentence is never judged as a claim, and before
         # localization, so the taxpayer reads it in their language.
-        if trace_ctx.get("live_check"):
-            result["_live_check"] = trace_ctx["live_check"]
-            result["_live_check_disclosure"] = str(trace_ctx.get("live_check_disclosure") or "")
+        live_check = _TURN_LIVE_CHECK.get() or {}
+        if live_check.get("audit"):
+            result["_live_check"] = live_check["audit"]
+            result["_live_check_disclosure"] = str(live_check.get("disclosure") or "")
             result["reply"] = _disclosed_reply(result)
         if trace_ctx.get("connectors_used"):
             result.setdefault("connectors_used", list(trace_ctx["connectors_used"]))
