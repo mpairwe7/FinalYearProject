@@ -1,4 +1,4 @@
-"""Deterministic evaluation gate for evals/web_research_scenarios/scenarios.jsonl (15 scenarios)."""
+"""Deterministic evaluation gate for evals/web_research_scenarios/scenarios.jsonl (one row or more per trigger)."""
 
 from __future__ import annotations
 
@@ -78,7 +78,7 @@ def _make_pdf_bytes(pages_text: list[str]) -> bytes:
 def test_web_research_scenarios_schema_and_coverage() -> None:
     """Verify scenarios.jsonl contains exactly 15 well-formed scenarios covering all 8 trigger categories."""
     rows = _load_scenarios()
-    assert len(rows) == 15
+    assert len(rows) == 17
     seen_ids: set[str] = set()
     categories: set[str] = set()
     fx_currencies: set[str] = set()

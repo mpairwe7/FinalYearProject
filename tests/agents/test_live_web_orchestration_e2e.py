@@ -319,7 +319,9 @@ def test_turn1_outdated_guide_replacement_and_turn2_zero_network_skip(
     assert len(outcome_t1.web_hits) >= 1
     assert outcome_t1.web_hits[0]["fiscal_year"] == "FY2026-27"
     assert outcome_t1.web_hits[0]["source_url"] == new_pdf_url
-    assert "## Live Web & Official Portal Verification" in outcome_t1.verified_facts_addition
+    assert outcome_t1.status == wr.LIVE_CONFIRMED
+    assert outcome_t1.disclosure == ""
+    assert "## Live source check" in outcome_t1.live_check_notice
 
     # Verify SSE events emitted in order: web_research.started, pdf_sandbox.extracting, qdrant_sync.updated
     event_names = [e[0] for e in outcome_t1.events]
@@ -333,7 +335,8 @@ def test_turn1_outdated_guide_replacement_and_turn2_zero_network_skip(
     assert (jsonl_dir / "TAXATION-OF-THE-REAL-ESTATE-SECTOR-FY-2026-27.jsonl").is_file()
     assert any(t["source_uri"] == old_source for t in db.get_active_corpus_tombstones())
 
-    # Verify verify_figure_lock and verify_claims approve an answer citing the new PDF's 12% and UGX 2,820,000
+    # Verify verify_figure_lock and verify_claims approve an answer citing the new PDF's 12% and UGX 2,820,000.
+    # The passages are the only grounding: web text never enters verified_facts.
     combined_hits = list(outcome_t1.web_hits)
     citations_t1 = svc.HybridRetriever.build_citations(combined_hits)
     reply_t1 = (
@@ -344,7 +347,6 @@ def test_turn1_outdated_guide_replacement_and_turn2_zero_network_skip(
         reply_t1,
         query=query_t1,
         passages=[h["text"] for h in combined_hits],
-        verified_facts=outcome_t1.verified_facts_addition,
     )
     assert ok_lock is True, f"Unexpected figure lock failure: {offending}"
     claim_rep_t1 = verify_claims(
@@ -353,9 +355,8 @@ def test_turn1_outdated_guide_replacement_and_turn2_zero_network_skip(
         combined_hits,
         query=query_t1,
         locale="en",
-        verified_facts=outcome_t1.verified_facts_addition,
     )
-    assert claim_rep_t1["decision"] == "approve"
+    assert claim_rep_t1["decision"] == "approve", claim_rep_t1
 
     # --- TURN 2: Same document family skips web search completely (0 HTTP calls) ---
     search_calls.clear()

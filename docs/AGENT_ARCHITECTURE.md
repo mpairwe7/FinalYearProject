@@ -631,6 +631,27 @@ and `backend/app/scheduler/` so follow-up PRs have clear landing spots.
 
 ---
 
+## Planning and live checks (ADR-0021)
+
+Every turn has one deterministic plan, derived from the taxpayer's question before any
+retrieved text is read, so nothing on a web page can add a step.
+
+| Stage | Module | What it decides |
+| --- | --- | --- |
+| Route | `agents/supervisor.py` | Escalate, specialist, tools or retrieval. The route binds REST and SSE alike. |
+| Tool plan | `scenario_planner.py` | Which calculators run. Once per turn, under `ToolCallBudget` and a deadline. |
+| Live check | `web_research.py` | Whether the answer needs the present. Nine triggers over the question and retrieval. |
+| Search | `web_search_providers.py` | Tavily, Brave, SearXNG with failover. Closed vocabulary only. |
+
+The model has no search tool. A query written by a model that has read untrusted text is
+an exfiltration channel, so whether to search and what to search for stay in code, which
+also keeps the budget and vocabulary controls out of the model's reach.
+
+Web text is evidence: labelled passages only, never `verified_facts`. A step or check that
+does not complete says so: "Not calculated" in the facts block, or a sentence to the
+taxpayer. The audit row holds the plan digest, the live-check status and its sources, and
+the pipeline attestation (REST only, G325).
+
 ## 13. Change log (feat/agentic-workflows branch)
 
 **Phase A-D (original in-process agent runtime):**

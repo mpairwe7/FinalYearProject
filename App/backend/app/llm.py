@@ -584,6 +584,20 @@ def _passage_header(index: int, passage: dict[str, Any]) -> str:
     effective = str(passage.get("effective_date") or "").strip()
     if effective and effective not in (edition, str(passage.get("crawled_at") or "").strip()):
         header += f", Effective: {effective}"
+    # Live evidence says what it is, from fields this system wrote: the model is
+    # told an adviser's blog is commentary rather than left to guess from a URL.
+    retrieved = str(passage.get("live_retrieved_at") or "").strip()
+    if retrieved:
+        header += (
+            f", Live web retrieved {retrieved}"
+            f", Authority: {passage.get('live_authority') or 'unknown'}"
+            f", Evidence: {passage.get('live_evidence') or 'unknown'}"
+        )
+        published = str(passage.get("live_published") or "").strip()
+        if published:
+            header += f", Published: {published}"
+        if passage.get("live_stale"):
+            header += ", May be out of date"
     return header
 
 

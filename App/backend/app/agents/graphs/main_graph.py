@@ -204,10 +204,11 @@ def node_retrieve(state: AgentGraphState) -> NodeResult:
     # retrieval is down or empty, so always consult it while its flags are on.
     hits = _fuse_graph_leg(query, hits)
     graph_fused = any(hit.get("doc_type") == "graph" for hit in hits)
+    hits, live_mode = _apply_live_research(state, query, hits, retriever)
     if hits:
         hits = _apply_faq_gates(query, hits)
         state.hits = hits
-        state.retrieval_mode = (
+        state.retrieval_mode = live_mode or (
             "graph_corrected" if graph_fused and was_corrected
             else "graph" if graph_fused
             else "hybrid_corrected" if was_corrected
@@ -216,6 +217,43 @@ def node_retrieve(state: AgentGraphState) -> NodeResult:
         state.sources = list(dict.fromkeys(h.get("source", "") for h in hits if h.get("source")))
         state.citations = HybridRetriever.build_citations(hits)
     return NodeResult(next_node="synthesize")
+
+
+def _apply_live_research(
+    state: AgentGraphState,
+    query: str,
+    hits: list,
+    retriever: Any,
+) -> tuple[list, str]:
+    """The research step REST and SSE run, once per turn on this path too.
+
+    The graph answered without it, so turning ``langgraph`` on quietly removed
+    the live check and its disclosure. Reflection re-enters retrieval, hence the
+    once-per-turn guard: a second pass would pay for the same searches. Its
+    evidence is kept and merged back, or the retry would drop what the notice
+    and citations still describe.
+    """
+    from ...flags import flags
+    from ...web_research import merge_web_hits
+
+    if state.live_checked:
+        return merge_web_hits(state.live_web_hits, hits), state.live_mode
+    if not flags.is_enabled("live_web_research", subject=state.user_id or None):
+        return hits, ""
+    from ...service import _live_research_for_turn
+
+    state.live_checked = True
+    merged, mode, outcome = _live_research_for_turn(
+        query,
+        hits=hits,
+        retriever=retriever if getattr(retriever, "is_ready", False) else None,
+        turn_id=state.current_goal_id or "graph",
+    )
+    state.live_check_notice = outcome.live_check_notice
+    state.live_check_disclosure = outcome.disclosure
+    state.live_web_hits = list(outcome.web_hits)
+    state.live_mode = mode
+    return merged, mode
 
 
 def _apply_faq_gates(query: str, hits: list) -> list:
@@ -315,17 +353,14 @@ def bind_arguments(tool_name: str, state: AgentGraphState) -> dict[str, object] 
         "calculate_presumptive_tax",
     ):
         try:
-            import re
-            from ...tax.money import parse_money_amount
+            from ...calculator_router import extract_amounts
 
-            match = re.search(
-                r"\b(\d[\d,]*(?:\.\d+)?\s*(?:m|k|bn|million|billion|thousand|bukadde|mitwalo)?)\b",
-                query,
-                re.I,
-            )
-            if match:
-                parsed = parse_money_amount(match.group(1))
-                if parsed is not None and parsed > 0:
+            # Only an unambiguous figure binds. The first number in the question
+            # was once taken, so "In 2026, VAT on 500,000" computed VAT on 2026.
+            amounts = extract_amounts(query)
+            if len(amounts) == 1:
+                parsed = amounts[0][0]
+                if parsed > 0:
                     params: dict[str, Any] = {}
                     for p in required:
                         if p in ("amount", "net_amount", "gross_amount", "value", "payment"):
@@ -699,6 +734,7 @@ def node_synthesize(state: AgentGraphState) -> NodeResult:
                     passages=state.hits,
                     conversation_history=state.conversation_history or None,
                     locale=state.locale,
+                    personalization_context=state.live_check_notice,
                 )
                 if llm_reply and llm_reply.strip():
                     state.reply = llm_reply.strip()
@@ -806,9 +842,17 @@ def _is_reasoning_miss(state: AgentGraphState) -> bool:
 
 def node_respond(state: AgentGraphState) -> NodeResult:
     """Ensure every controlled terminal route has a safe, non-empty reply."""
-    if state.reply and state.reply.strip():
-        return NodeResult(next_node=END, outcome=state.outcome)
+    if not (state.reply and state.reply.strip()):
+        _fill_terminal_reply(state)
+    if state.live_check_disclosure and state.outcome in (GraphOutcome.ANSWERED, GraphOutcome.ABSTAINED):
+        from ...service import _with_live_check_disclosure
 
+        state.reply = _with_live_check_disclosure(state.reply, state.live_check_disclosure)
+    return NodeResult(next_node=END, outcome=state.outcome)
+
+
+def _fill_terminal_reply(state: AgentGraphState) -> None:
+    """The safe reply for a route that reached the end without one."""
     if state.outcome == GraphOutcome.CLARIFY:
         state.reply = state.clarification_question.strip() or CLARIFICATION_PROMPT
     elif state.outcome == GraphOutcome.ESCALATED:
@@ -820,7 +864,6 @@ def node_respond(state: AgentGraphState) -> NodeResult:
         state.reply = ABSTENTION_REPLY
     else:
         state.reply = ABSTENTION_REPLY
-    return NodeResult(next_node=END, outcome=state.outcome)
 
 
 # ---------------------------------------------------------------------------

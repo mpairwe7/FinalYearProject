@@ -47,7 +47,7 @@ defaults are unchanged by this addendum.
 | **VAD** | Energy-based (numpy) | N/A | Voice Activity Detection with hysteresis |
 | **Accent Detector** | Prosodic features + SVM | ~1M | Ugandan accent classification (5 profiles) |
 | **Offline Retriever** | FAISS + ONNX bge-m3 | ~80M bundle | Offline RAG when Qdrant is unavailable |
-| **Live Web Research & Self-Updating Qdrant** | `web_fx.py` + `web_research.py` + `ephemeral_pdf_sandbox.py` + `corpus_sync.py` + `pdf_corpus.py` | N/A | Live `XE.com` / Google FX lookup, 8-trigger Tier-1/2/3 portal verification, ephemeral `tmpfs` PDF/XLSX sandbox (`pdf_guards` + GPU 2 micro-reranking), self-updating Qdrant hot-swap with `web_sync_ledger` 7-day memory (`ADR-0008`), and Statutory/10-MDA PDF Harvester (`186` PDFs → `5,639` chunks, `7,251` Qdrant hybrid vectors; `ADR-0009`) |
+| **Live Web Research & Self-Updating Qdrant** | `web_fx.py` + `web_research.py` + `web_search_providers.py` + `ephemeral_pdf_sandbox.py` + `corpus_sync.py` + `pdf_corpus.py` | N/A | Live `XE.com` / Google FX lookup, 8-trigger Tier-1/2/3 portal verification, ephemeral `tmpfs` PDF/XLSX sandbox (`pdf_guards` + GPU 2 micro-reranking), self-updating Qdrant hot-swap with `web_sync_ledger` 7-day memory (`ADR-0008`), and Statutory/10-MDA PDF Harvester (`186` PDFs → `5,639` chunks, `7,251` Qdrant hybrid vectors; `ADR-0009`) |
 
 ---
 

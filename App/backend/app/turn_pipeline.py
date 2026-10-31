@@ -3,20 +3,27 @@
 Addresses ``MOD-GAP-01`` in line with:
 - **ISO/IEC 25010:2023 §4.2.8.1 (Modularity & Analysability)**
 - **AgentSLA (arXiv:2511.02885)**: Per-stage QoS latency budgets and machine-verifiable receipts
-- **OWASP Top 10 for Agentic Applications 2026 (`ASI10` — Rogue Agent Behavioral Integrity)**:
-  Cryptographically hashed behavioral manifest verifying that every turn traverses the declared
-  7-stage pipeline order without skipping input/output guardrails or audit logging.
+- **OWASP Top 10 for Agentic Applications 2026 (`ASI10` — Rogue Agents)**:
+  A hashed behavioral manifest of the declared 7-stage order.
+
+:func:`attest_turn` holds each REST turn to that manifest, from the stage timings
+the turn actually recorded, and the verdict goes into its audit row. The streaming
+path records no stage timings yet, so it is not attested (G325): the manifest is a
+claim about the REST path until then.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class TurnStage(str, Enum):
@@ -75,6 +82,33 @@ class BehavioralManifest:
 
 
 CANONICAL_BEHAVIORAL_MANIFEST = BehavioralManifest()
+
+#: ``trace_stage`` names, by the pipeline stage each belongs to. Abstention is
+#: synthesis: on a tool turn it runs after the agentic model call.
+_TRACE_STAGES: dict[str, TurnStage] = {
+    "query_rewrite": TurnStage.STAGE_0_CONTEXT_AND_LOCALE,
+    "lang_detect": TurnStage.STAGE_0_CONTEXT_AND_LOCALE,
+    "router_translate": TurnStage.STAGE_0_CONTEXT_AND_LOCALE,
+    "input_guard": TurnStage.STAGE_1_INPUT_GUARD,
+    "workflow_router": TurnStage.STAGE_2_WORKFLOW_AND_FAST_PATH,
+    "calculator_router": TurnStage.STAGE_2_WORKFLOW_AND_FAST_PATH,
+    "cache_lookup": TurnStage.STAGE_2_WORKFLOW_AND_FAST_PATH,
+    "supervisor": TurnStage.STAGE_3_SUPERVISOR_AND_PLANNER,
+    "hybrid_search": TurnStage.STAGE_4_HYBRID_RETRIEVAL_AND_WEB,
+    "keyword_search_fallback": TurnStage.STAGE_4_HYBRID_RETRIEVAL_AND_WEB,
+    "corrective_rag": TurnStage.STAGE_4_HYBRID_RETRIEVAL_AND_WEB,
+    "faq_blend": TurnStage.STAGE_4_HYBRID_RETRIEVAL_AND_WEB,
+    "langgraph_execution": TurnStage.STAGE_5_SYNTHESIS_AND_LOCALIZATION,
+    "llm_agentic": TurnStage.STAGE_5_SYNTHESIS_AND_LOCALIZATION,
+    "abstention_check": TurnStage.STAGE_5_SYNTHESIS_AND_LOCALIZATION,
+    "llm_generate": TurnStage.STAGE_5_SYNTHESIS_AND_LOCALIZATION,
+    "output_guard": TurnStage.STAGE_6_OUTPUT_GUARD_AND_AUDIT,
+    "grounding": TurnStage.STAGE_6_OUTPUT_GUARD_AND_AUDIT,
+    "claim_verification": TurnStage.STAGE_6_OUTPUT_GUARD_AND_AUDIT,
+    "numeric_verification": TurnStage.STAGE_6_OUTPUT_GUARD_AND_AUDIT,
+    "numeric_revision": TurnStage.STAGE_6_OUTPUT_GUARD_AND_AUDIT,
+    "self_reflect": TurnStage.STAGE_6_OUTPUT_GUARD_AND_AUDIT,
+}
 
 
 @dataclass
@@ -147,6 +181,45 @@ class TurnPipelineTrace:
             "stage_count": len(self.receipts),
             "total_duration_ms": round(sum(r.duration_ms for r in self.receipts), 3),
         }
+
+
+def attest_turn(timings: Mapping[str, float], *, transport: str = "rest") -> dict[str, Any]:
+    """Hold one finished turn to the manifest, from the stages it really ran.
+
+    *timings* is ``trace_stage``'s record, in completion order. Runs of the same
+    stage are summed, so a stage that reappears after a later one shows up as an
+    order violation rather than being tidied away. Reaching this function is
+    itself the audit half of Stage 6, on every exit. Live research is left out of
+    Stage 4's SLA: it has its own wall-clock budget, and that is what bounds it.
+    """
+    trace = TurnPipelineTrace(transport=transport)
+    grouped: list[tuple[TurnStage, float]] = []
+    for name, duration_ms in timings.items():
+        stage = _TRACE_STAGES.get(name)
+        if stage is None:
+            continue
+        if grouped and grouped[-1][0] is stage:
+            grouped[-1] = (stage, grouped[-1][1] + float(duration_ms))
+        else:
+            grouped.append((stage, float(duration_ms)))
+    for stage, duration_ms in grouped:
+        trace.record_stage(stage, duration_ms)
+    if TurnStage.STAGE_6_OUTPUT_GUARD_AND_AUDIT not in {stage for stage, _ in grouped}:
+        trace.record_stage(TurnStage.STAGE_6_OUTPUT_GUARD_AND_AUDIT, 0.0, metadata={"audit_only": True})
+
+    verdict = trace.verify_behavioral_integrity()
+    try:
+        from .analytics import metrics
+
+        metrics.inc(
+            "turn_pipeline_attestations_total",
+            labels={"transport": transport, "ok": str(verdict["ok"]).lower()},
+        )
+        for stage in verdict["sla_breaches"]:
+            metrics.inc("turn_stage_sla_breaches_total", labels={"stage": stage})
+    except Exception:  # noqa: BLE001 - telemetry must never fail a turn
+        logger.debug("pipeline attestation metrics not recorded", exc_info=True)
+    return verdict
 
 
 class TurnPipelineOrchestrator:

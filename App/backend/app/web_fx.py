@@ -1,12 +1,21 @@
-"""Live global exchange-rate lookup engine for Ugandan Shillings (UGX).
+"""Indicative exchange rates for Ugandan Shillings (UGX).
 
-Fetches real-time mid-market exchange rates from:
+The rate that counts for a return is the Bank of Uganda mid-exchange rate for
+the transaction date (``fx_conversion_rule`` in the statutory tables). This
+module's market quotes are a convenience for estimating before that rate is to
+hand, and everything that shows one says so. :func:`official_bou_rate` is the
+only source this module treats as official, and it takes precedence.
+
+Quotes come from:
 1. XE.com Universal Currency Converter
 2. Google Currency / Google Finance
-3. Open Exchange Rates JSON mirror (fallback when HTML endpoints rate-limit)
+3. Open Exchange Rates JSON mirror (when the HTML endpoints give nothing)
 
-All fetched rates are validated against plausible 2026 UGX bounds from
-``BOU_mid_rates_2026.json`` and cached for 30 minutes in L1 memory + Redis.
+A quote must clear three checks before anyone sees it: inside the plausibility
+band, not older than the provider's own timestamp allows, and, when two sources
+answered, in agreement. Two sources that disagree are a reason to ask the
+taxpayer for the rate, not to pick one. Accepted quotes are cached for 30 minutes
+in L1 memory + Redis.
 """
 
 from __future__ import annotations
@@ -32,7 +41,13 @@ logger = logging.getLogger(__name__)
 
 FX_CACHE_TTL_SECONDS = int(os.getenv("FX_CACHE_TTL_SECONDS", "1800"))
 FX_NEGATIVE_CACHE_TTL_SECONDS = int(os.getenv("FX_NEGATIVE_CACHE_TTL_SECONDS", "90"))
-FX_HTTP_TIMEOUT_SECONDS = float(os.getenv("FX_HTTP_TIMEOUT_SECONDS", "4.0"))
+FX_HTTP_TIMEOUT_SECONDS = float(os.getenv("FX_HTTP_TIMEOUT_SECONDS", "3.0"))
+#: Wall clock for one lookup across every source.
+FX_LOOKUP_BUDGET_SECONDS = float(os.getenv("FX_LOOKUP_BUDGET_SECONDS", "6.0"))
+#: Beyond this relative gap two sources are not describing the same market.
+FX_MAX_SOURCE_DIVERGENCE = float(os.getenv("FX_MAX_SOURCE_DIVERGENCE", "0.02"))
+#: A daily-updated mirror can be a long weekend old, and no older.
+FX_MAX_PROVIDER_AGE_SECONDS = int(os.getenv("FX_MAX_PROVIDER_AGE_SECONDS", str(96 * 3600)))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 FX_REDIS_PREFIX = "ura:fx:live:"
 
@@ -84,10 +99,7 @@ _DEFAULT_REFERENCE_RATES_UGX: dict[str, float] = {
     "UGX": 1.0,
 }
 
-_USER_AGENT = (
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
-)
+_USER_AGENT = "ura-chatbot-fx/1.0"
 
 
 @dataclass(frozen=True)
@@ -99,6 +111,8 @@ class LiveFXQuote:
     source: str
     fetched_at_utc: str
     is_live: bool
+    #: Two independent sources agreed. False means one source answered alone.
+    corroborated: bool = False
 
 
 _CACHE_LOCK = threading.Lock()
@@ -154,8 +168,40 @@ def _load_bou_fx_file() -> dict[str, Any]:
         return {}
 
 
+def _count_quote(outcome: str) -> None:
+    try:
+        from .analytics import metrics
+
+        metrics.inc("fx_quotes_total", labels={"outcome": outcome})
+    except Exception:  # noqa: BLE001 - telemetry must never fail a conversion
+        logger.debug("fx_quotes_total not recorded", exc_info=True)
+
+
+def official_bou_rate(currency: str, date: str | None = None) -> float | None:
+    """The Bank of Uganda mid-rate for *currency*, when an operator has loaded one.
+
+    Only a snapshot whose ``status`` is ``verified`` qualifies: the file ships
+    empty and ``unverified``, and a number nobody confirmed is not official
+    because of the file it sits in. A dated transaction needs its own month's
+    entry: an undated or default rate is no evidence of what applied on that day.
+    """
+    data = _load_bou_fx_file()
+    if str(data.get("status") or "").lower() != "verified":
+        return None
+    rates = data.get("rates")
+    entry = rates.get((currency or "").strip().upper()) if isinstance(rates, dict) else None
+    if isinstance(entry, dict):
+        month = (date or _utc_now_iso())[:7]
+        entry = entry[month] if month in entry else (None if date else entry.get("default"))
+    elif date:
+        entry = None
+    if isinstance(entry, int | float) and not isinstance(entry, bool) and float(entry) > 0:
+        return float(entry)
+    return None
+
+
 def _reference_rate_for(currency: str) -> float | None:
-    """Return the 2026 reference UGX mid-rate for bounds checking."""
+    """The plausibility anchor for *currency*. A sanity bound, never a rate to quote."""
     cur = (currency or "").strip().upper()
     if cur == "UGX":
         return 1.0
@@ -310,7 +356,18 @@ def _parse_open_er_api_rate(payload: str | dict[str, Any], currency: str, target
     """Extract the UGX rate from Open Exchange Rate API JSON response."""
     try:
         data = json.loads(payload) if isinstance(payload, str) else payload
-        if not isinstance(data, dict):
+        if not isinstance(data, dict) or data.get("result", "success") != "success":
+            return None
+        # "Live" describes when it was fetched, not how old the figure is, and a
+        # figure that cannot say how old it is cannot pass this check.
+        updated = data.get("time_last_update_unix")
+        if (
+            isinstance(updated, bool)
+            or not isinstance(updated, int | float)
+            or time.time() - float(updated) > FX_MAX_PROVIDER_AGE_SECONDS
+        ):
+            logger.warning("Rejected a stale or undated FX mirror payload for %s", currency)
+            _count_quote("stale_provider")
             return None
         rates = data.get("rates") or {}
         raw = rates.get(target.strip().upper())
@@ -324,20 +381,29 @@ def _parse_open_er_api_rate(payload: str | dict[str, Any], currency: str, target
 
 
 def _default_http_fetcher(url: str) -> str:
-    """Fetch an allowlisted HTTPS FX endpoint with strict timeout and hostname checks."""
-    parsed = urlparse(url)
-    if parsed.scheme != "https" or (parsed.hostname or "").lower() not in _ALLOWED_FX_HOSTS:
-        raise ValueError(f"Disallowed FX URL: {url}")
+    """Fetch an allowlisted HTTPS FX endpoint, re-checking every redirect hop.
+
+    Sent as what it is. No browser User-Agent and no pre-accepted consent
+    cookie: a government service does not forge a person's consent to a third
+    party's terms, and a source that refuses this request simply does not count.
+    """
     headers = {
         "User-Agent": _USER_AGENT,
         "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
-        "Cookie": "CONSENT=YES+cb.20230531-04-p0.en+FX+999",
     }
-    with httpx.Client(timeout=FX_HTTP_TIMEOUT_SECONDS, follow_redirects=True) as client:
-        resp = client.get(url, headers=headers)
-        resp.raise_for_status()
-        return resp.text
+    current = url
+    with httpx.Client(timeout=FX_HTTP_TIMEOUT_SECONDS, follow_redirects=False) as client:
+        for _hop in range(3):
+            parsed = urlparse(current)
+            if parsed.scheme != "https" or (parsed.hostname or "").lower() not in _ALLOWED_FX_HOSTS:
+                raise ValueError(f"Disallowed FX URL: {current}")
+            resp = client.get(current, headers=headers)
+            if not resp.is_redirect:
+                resp.raise_for_status()
+                return resp.text
+            current = str(resp.url.join(resp.headers.get("Location", "")))
+    raise ValueError("Too many FX redirects")
 
 
 def _check_cached_quote(cache_key: str) -> tuple[bool, LiveFXQuote | None]:
@@ -367,6 +433,7 @@ def _check_cached_quote(cache_key: str) -> tuple[bool, LiveFXQuote | None]:
                     source=str(obj["source"]),
                     fetched_at_utc=str(obj["fetched_at_utc"]),
                     is_live=bool(obj.get("is_live", True)),
+                    corroborated=bool(obj.get("corroborated", False)),
                 )
                 with _CACHE_LOCK:
                     _L1_FX_CACHE[cache_key] = (now + FX_CACHE_TTL_SECONDS, quote)
@@ -409,7 +476,12 @@ def lookup_live_exchange_rate(
     http_fetcher: Callable[[str], str] | None = None,
     allow_offline_fallback: bool = True,
 ) -> LiveFXQuote | None:
-    """Fetch and cross-verify a live exchange rate to UGX from XE.com and Google Currency."""
+    """An indicative rate to UGX, cross-checked when more than one source answers.
+
+    ``None`` means no quote cleared the checks, and the caller asks the taxpayer.
+    A *date* outside the current month gets no market quote at all: today's rate
+    is not evidence of an earlier one.
+    """
     cur = (currency or "").strip().upper()
     tgt = (target or "UGX").strip().upper()
     if not cur or cur not in SUPPORTED_FX_CURRENCIES or tgt != "UGX":
@@ -424,8 +496,8 @@ def lookup_live_exchange_rate(
         )
 
     cache_key = f"{cur}:{tgt}"
-    skip_network = False
-    if http_fetcher is None:
+    skip_network = bool(date) and str(date).strip()[:7] != _utc_now_iso()[:7]
+    if http_fetcher is None and not skip_network:
         hit, cached = _check_cached_quote(cache_key)
         if hit:
             if cached is not None:
@@ -439,41 +511,41 @@ def lookup_live_exchange_rate(
 
     xe_rate: float | None = None
     google_rate: float | None = None
+    deadline = time.monotonic() + FX_LOOKUP_BUDGET_SECONDS
+    diverged = False
 
     if not skip_network:
         try:
             xe_html = fetch(xe_url)
             xe_rate = _parse_xe_rate(xe_html, cur, tgt)
-        except Exception:
-            logger.debug("XE.com rate fetch failed for %s", cur, exc_info=True)
+        except Exception as exc:  # noqa: BLE001 - one source down is an expected state
+            logger.info("XE.com rate unavailable for %s: %s", cur, type(exc).__name__)
 
-        try:
-            google_html = fetch(google_url)
-            google_rate = _parse_google_finance_rate(google_html, cur, tgt)
-        except Exception:
-            logger.debug("Google Finance rate fetch failed for %s", cur, exc_info=True)
+        if time.monotonic() < deadline:
+            try:
+                google_html = fetch(google_url)
+                google_rate = _parse_google_finance_rate(google_html, cur, tgt)
+            except Exception as exc:  # noqa: BLE001 - one source down is an expected state
+                logger.info("Google rate unavailable for %s: %s", cur, type(exc).__name__)
 
     now_iso = _utc_now_iso()
     quote: LiveFXQuote | None = None
 
     if xe_rate is not None and google_rate is not None:
         rel_diff = abs(xe_rate - google_rate) / max(xe_rate, 1e-9)
-        if rel_diff <= 0.02:
+        if rel_diff <= FX_MAX_SOURCE_DIVERGENCE:
             quote = LiveFXQuote(
                 currency=cur,
                 rate_ugx=xe_rate,
                 source=f"XE.com / Google Currency ({xe_url})",
                 fetched_at_utc=now_iso,
                 is_live=True,
+                corroborated=True,
             )
         else:
-            quote = LiveFXQuote(
-                currency=cur,
-                rate_ugx=xe_rate,
-                source=f"XE.com ({xe_url})",
-                fetched_at_utc=now_iso,
-                is_live=True,
-            )
+            # Picking a side would present a guess as a measurement.
+            diverged = True
+            logger.warning("FX sources disagree on %s by %.1f%%; no quote served", cur, rel_diff * 100)
     elif xe_rate is not None:
         quote = LiveFXQuote(
             currency=cur,
@@ -490,7 +562,7 @@ def lookup_live_exchange_rate(
             fetched_at_utc=now_iso,
             is_live=True,
         )
-    elif not skip_network:
+    elif not skip_network and time.monotonic() < deadline:
         try:
             er_body = fetch(er_url)
             er_rate = _parse_open_er_api_rate(er_body, cur, tgt)
@@ -502,13 +574,16 @@ def lookup_live_exchange_rate(
                     fetched_at_utc=now_iso,
                     is_live=True,
                 )
-        except Exception:
-            logger.debug("Open ER fallback fetch failed for %s", cur, exc_info=True)
+        except Exception as exc:  # noqa: BLE001 - one source down is an expected state
+            logger.info("Open ER rate unavailable for %s: %s", cur, type(exc).__name__)
 
     if quote is not None:
+        _count_quote("corroborated" if quote.corroborated else "single_source")
         if http_fetcher is None:
             _set_cached_quote(cache_key, quote)
         return quote
+
+    _count_quote("diverged" if diverged else "unavailable")
 
     if http_fetcher is None and not skip_network:
         _set_cached_quote(cache_key, None)
@@ -516,26 +591,15 @@ def lookup_live_exchange_rate(
     if not allow_offline_fallback:
         return None
 
-    # Offline fallback to BOU_mid_rates_2026.json
-    fx_data = _load_bou_fx_file()
-    rates_map = (fx_data.get("rates") or {}).get(cur)
-    snap_val: float | None = None
-    if isinstance(rates_map, int | float) and float(rates_map) > 0:
-        snap_val = float(rates_map)
-    elif isinstance(rates_map, dict) and rates_map:
-        month_key = (date or "")[:7]
-        v = rates_map.get(month_key) or rates_map.get("default")
-        if isinstance(v, int | float) and float(v) > 0:
-            snap_val = float(v)
-    if snap_val is None:
-        snap_val = _reference_rate_for(cur)
-
-    if snap_val is not None and snap_val > 0:
-        return LiveFXQuote(
-            currency=cur,
-            rate_ugx=float(snap_val),
-            source="BOU_mid_rates_2026.json (offline reference snapshot)",
-            fetched_at_utc=now_iso,
-            is_live=False,
-        )
-    return None
+    # The plausibility anchor is deliberately not a fallback here: it is a sanity
+    # bound, and serving it would put an invented figure under the BoU's name.
+    official = official_bou_rate(cur, date)
+    if official is None:
+        return None
+    return LiveFXQuote(
+        currency=cur,
+        rate_ugx=official,
+        source="BOU_mid_rates_2026.json (verified Bank of Uganda snapshot)",
+        fetched_at_utc=now_iso,
+        is_live=False,
+    )

@@ -63,7 +63,7 @@ FinalYearProject/
 │   │       ├── retriever.py   # Qdrant hybrid retriever (dense+BM25+RRF+circuit breaker)
 │   │       ├── indexer.py     # Document indexing pipeline (PDF+CSV→Qdrant, 7,251 hybrid vectors)
 │   │       ├── pdf_corpus.py  # Statutory & 10-MDA PDF harvester (186 PDFs → 5,639 chunks, ADR-0009)
-│   │       ├── web_research.py # 8-trigger live web research planner & Tier-1/2/3 source authority (ADR-0008)
+│   │       ├── web_research.py # 9-trigger live check, source authority & evidence labelling (ADR-0008, ADR-0021)
 │   │       ├── ephemeral_pdf_sandbox.py # Ephemeral tmpfs PDF/XLSX sandbox + GPU micro-reranking (ADR-0008)
 │   │       ├── corpus_sync.py # Self-updating Qdrant comparator, hot-swap & web_sync_ledger (ADR-0008)
 │   │       ├── scenario_planner.py # Deterministic multi-tool planner & Verified Statutory Facts block

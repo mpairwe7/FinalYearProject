@@ -46,6 +46,7 @@ from .web_research import (
     classify_source_authority,
     extract_fiscal_year,
     infer_doc_family,
+    resolves_to_public_address,
     validate_outbound_research_url,
 )
 
@@ -173,6 +174,8 @@ def _default_stream_downloader(url: str, max_bytes: int) -> bytes:
     current = url
     with httpx.Client(timeout=SANDBOX_DOWNLOAD_TIMEOUT_SECONDS, follow_redirects=False) as client:
         for _hop in range(5):
+            if not resolves_to_public_address(urlparse(current).hostname or ""):
+                raise SandboxDownloadRejected(f"Host does not resolve to a public address: {current}")
             with client.stream("GET", current, headers=headers) as resp:
                 if resp.is_redirect:
                     loc = resp.headers.get("Location", "").strip()
