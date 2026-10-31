@@ -236,6 +236,9 @@ def verify_claims(
         str(h.get("doc_type") or "") == "model_welfare_context" for h in (hits or [])
     )
     verified_numbers = _numbers(verified_facts) if verified_facts else set()
+    # Rule 8 tells the model to name the edition, and the passage header shows
+    # it, so a fiscal year from metadata is not a figure the model introduced.
+    edition_numbers = _numbers(" ".join(str(h.get("fiscal_year") or "") for h in hits or []))
     query_pcts = percentages(query) if query else set()
     query_numbers = (_numbers(query) - query_pcts) if query else set()
     for claim in claims:
@@ -297,7 +300,9 @@ def verify_claims(
         claim_numbers = _numbers(clean_claim)
         context_numbers = _numbers(context_text)
         model_introduced_numbers = claim_numbers - query_numbers
-        if model_introduced_numbers and not model_introduced_numbers <= (context_numbers | verified_numbers):
+        if model_introduced_numbers and not model_introduced_numbers <= (
+            context_numbers | verified_numbers | edition_numbers
+        ):
             overlap = min(overlap, 0.25)
 
         # P1-8: a claim whose percentage conflicts with the cited context is a

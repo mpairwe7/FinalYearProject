@@ -162,6 +162,10 @@ class AgentGraphState:
     agent_role: str = "graph_agent"
     sub_routes: list[str] = field(default_factory=list)
     specialist_handoffs: list[dict[str, Any]] = field(default_factory=list)
+    # -- Live check (once per turn, however often reflection retrieves) --
+    live_checked: bool = False
+    live_check_notice: str = ""
+    live_check_disclosure: str = ""
 
     # -- Telemetry --
     trace: list[dict[str, Any]] = field(default_factory=list)  # (node, duration_ms)
@@ -237,6 +241,9 @@ class AgentGraphState:
             "agent_role": self.agent_role,
             "sub_routes": list(self.sub_routes),
             "specialist_handoffs": list(self.specialist_handoffs),
+            "live_checked": self.live_checked,
+            "live_check_notice": self.live_check_notice,
+            "live_check_disclosure": self.live_check_disclosure,
         }
 
     @classmethod
@@ -304,5 +311,8 @@ class AgentGraphState:
             agent_role=str(data.get("agent_role", "graph_agent")),
             sub_routes=list(data.get("sub_routes", [])),
             specialist_handoffs=list(data.get("specialist_handoffs", [])),
+            live_checked=bool(data.get("live_checked", False)),
+            live_check_notice=str(data.get("live_check_notice", "")),
+            live_check_disclosure=str(data.get("live_check_disclosure", "")),
         )
         return state

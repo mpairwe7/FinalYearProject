@@ -204,10 +204,11 @@ def node_retrieve(state: AgentGraphState) -> NodeResult:
     # retrieval is down or empty, so always consult it while its flags are on.
     hits = _fuse_graph_leg(query, hits)
     graph_fused = any(hit.get("doc_type") == "graph" for hit in hits)
+    hits, live_mode = _apply_live_research(state, query, hits, retriever)
     if hits:
         hits = _apply_faq_gates(query, hits)
         state.hits = hits
-        state.retrieval_mode = (
+        state.retrieval_mode = live_mode or (
             "graph_corrected" if graph_fused and was_corrected
             else "graph" if graph_fused
             else "hybrid_corrected" if was_corrected
@@ -216,6 +217,36 @@ def node_retrieve(state: AgentGraphState) -> NodeResult:
         state.sources = list(dict.fromkeys(h.get("source", "") for h in hits if h.get("source")))
         state.citations = HybridRetriever.build_citations(hits)
     return NodeResult(next_node="synthesize")
+
+
+def _apply_live_research(
+    state: AgentGraphState,
+    query: str,
+    hits: list,
+    retriever: Any,
+) -> tuple[list, str]:
+    """The research step REST and SSE run, once per turn on this path too.
+
+    The graph answered without it, so turning ``langgraph`` on quietly removed
+    the live check and its disclosure. Reflection re-enters retrieval, hence the
+    once-per-turn guard: a second pass would pay for the same searches.
+    """
+    from ...flags import flags
+
+    if state.live_checked or not flags.is_enabled("live_web_research", subject=state.user_id or None):
+        return hits, ""
+    from ...service import _live_research_for_turn
+
+    state.live_checked = True
+    merged, mode, outcome = _live_research_for_turn(
+        query,
+        hits=hits,
+        retriever=retriever if getattr(retriever, "is_ready", False) else None,
+        turn_id=state.current_goal_id or "graph",
+    )
+    state.live_check_notice = outcome.live_check_notice
+    state.live_check_disclosure = outcome.disclosure
+    return merged, mode
 
 
 def _apply_faq_gates(query: str, hits: list) -> list:
@@ -699,6 +730,7 @@ def node_synthesize(state: AgentGraphState) -> NodeResult:
                     passages=state.hits,
                     conversation_history=state.conversation_history or None,
                     locale=state.locale,
+                    personalization_context=state.live_check_notice,
                 )
                 if llm_reply and llm_reply.strip():
                     state.reply = llm_reply.strip()
@@ -807,6 +839,10 @@ def _is_reasoning_miss(state: AgentGraphState) -> bool:
 def node_respond(state: AgentGraphState) -> NodeResult:
     """Ensure every controlled terminal route has a safe, non-empty reply."""
     if state.reply and state.reply.strip():
+        if state.live_check_disclosure and state.outcome == GraphOutcome.ANSWERED:
+            from ...service import _with_live_check_disclosure
+
+            state.reply = _with_live_check_disclosure(state.reply, state.live_check_disclosure)
         return NodeResult(next_node=END, outcome=state.outcome)
 
     if state.outcome == GraphOutcome.CLARIFY:

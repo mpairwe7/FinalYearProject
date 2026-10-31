@@ -295,6 +295,9 @@ def build_turn_payload(
         "tool_iterations": int(tool_iterations or 0),
         "agent_route": agent_route or "",
         "ticket_id": result.get("ticket_id", ""),
+        # URLs, hashes and a status: the provenance of any live claim, and the
+        # proof that a failed check was disclosed rather than hidden.
+        "live_check": result.get("_live_check") or {},
         "flag_variants_sha256": _sha256(flag_variants) if flag_variants else "",
         "provenance": provenance(),
     }

@@ -1021,6 +1021,52 @@ _ACTIVE_CASE_FACTS: contextvars.ContextVar[Any] = contextvars.ContextVar(
 )
 
 
+def _live_research_for_turn(
+    query: str,
+    *,
+    hits: list[dict[str, Any]],
+    retriever: Any,
+    turn_id: str,
+) -> tuple[list[dict[str, Any]], str, Any]:
+    """Run the turn's live research: ``(hits, retrieval mode, outcome)``.
+
+    One implementation for REST, SSE and the graph, because the three drifted
+    once already. A crash is reported as a failed check when the question needed
+    one: going quiet is how a stale answer comes to look current.
+    """
+    from .web_research import (
+        WebResearchTurnOutcome,
+        merge_into_hits,
+        query_is_time_sensitive,
+        run_web_research,
+        unavailable_outcome,
+    )
+
+    facts = _ACTIVE_CASE_FACTS.get()
+    try:
+        outcome = run_web_research(
+            query,
+            case_facts=facts,
+            hits=hits,
+            retriever=retriever,
+            turn_id=turn_id,
+        )
+        merged, mode = merge_into_hits(outcome, hits)
+        return merged, mode, outcome
+    except Exception:
+        logger.warning("Live web research step failed", exc_info=True)
+        if query_is_time_sensitive(query, facts):
+            return hits, "", unavailable_outcome()
+        return hits, "", WebResearchTurnOutcome()
+
+
+def _with_live_check_disclosure(reply: str, disclosure: str) -> str:
+    """*reply* with the live-check sentence owed to the taxpayer, once."""
+    if not disclosure or not reply or disclosure in reply:
+        return reply
+    return f"{reply.rstrip()}\n\n{disclosure}"
+
+
 def _evaluate_calculation_context(query: str, facts: Any = None) -> str:
     """Build the verified statutory facts & calculations block via :mod:`app.scenario_planner`."""
     from .scenario_planner import build_verified_facts
@@ -1817,6 +1863,7 @@ def _apply_output_guards(
     tool_grounded: bool = False,
     verified_facts: str = "",
     calculation_message: str | None = None,
+    live_check_disclosure: str = "",
 ) -> dict[str, Any]:
     """Run the full post-generation guard pipeline for a streamed turn.
 
@@ -1999,6 +2046,11 @@ def _apply_output_guards(
             user_id=user_id,
             tenant_id=tenant_id or "default",
         )
+
+    # Added after every verifier, so the sentence is never judged as a claim.
+    disclosed = _with_live_check_disclosure(reply, live_check_disclosure)
+    if disclosed != reply:
+        reply, revised = disclosed, True
 
     return {
         "reply": reply,
@@ -2503,6 +2555,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     tool_grounded=bool(connector_forced and agentic_used_tools),
                     verified_facts=str(result.get("_web_verified_facts") or ""),
                     calculation_message=str(result.get("_english_message") or message),
+                    live_check_disclosure=str(result.get("_live_check_disclosure") or ""),
                 )
                 full_reply = guard["reply"]
                 if guard["revised"]:
@@ -2783,6 +2836,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 locale=locale,
                 verified_facts=str(result.get("_web_verified_facts") or ""),
                 calculation_message=str(result.get("_english_message") or message),
+                live_check_disclosure=str(result.get("_live_check_disclosure") or ""),
             )
             full_reply = guard["reply"]
             faith = guard["faithfulness"]
@@ -2877,7 +2931,9 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     logger.debug("Stream cache store failed", exc_info=True)
         else:
             # No LLM tier at all — extractive reply, same EI parity as above.
-            full_reply = result.get("reply", "")
+            full_reply = _with_live_check_disclosure(
+                result.get("reply", ""), str(result.get("_live_check_disclosure") or "")
+            )
             if turn_ack and full_reply:
                 full_reply = f"{turn_ack}\n\n{full_reply}"
             # One frame, so localize before sending rather than revising after.
@@ -11414,7 +11470,14 @@ class ChatModel:
                 )
                 return contact_result
 
-            # 1b. Semantic cache check AFTER guardrails (Phase 5)
+            # 1b. Semantic cache check AFTER guardrails (Phase 5). An answer about
+            #     the present is neither served from the cache nor stored in it.
+            if cache_allowed and flags.is_enabled("live_web_research", subject=user_id or None):
+                from .web_research import query_is_time_sensitive
+
+                cache_allowed = not query_is_time_sensitive(
+                    router_rewritten or rewritten, _ACTIVE_CASE_FACTS.get()
+                )
             if cache_allowed and flags.is_enabled("semantic_cache"):
                 with trace_stage("cache_lookup", timings=timings):
                     cached = self._cache.get(rewritten, locale=locale, tenant_id=tenant_id or "default")
@@ -11861,32 +11924,24 @@ class ChatModel:
                         )
 
             # 3b1. Live Web Research + Ephemeral PDF Sandbox + Self-Updating Qdrant (Phase 41)
+            live_check_notice = ""
             if not welfare_cats and flags.is_enabled("live_web_research", subject=user_id or None):
                 with trace_stage("live_web_research", timings=timings):
-                    try:
-                        from .web_research import run_web_research
-
-                        web_outcome = run_web_research(
-                            retrieval_query,
-                            case_facts=_ACTIVE_CASE_FACTS.get(),
-                            hits=hits,
-                            retriever=self._retriever if self._retriever_ready else None,
-                            turn_id=request_id or thread_id,
-                        )
-                        if web_outcome.superseded_sources:
-                            sup_set = {s.strip().lower() for s in web_outcome.superseded_sources if s}
-                            hits = [
-                                h
-                                for h in hits
-                                if str(h.get("source") or "").strip().lower() not in sup_set
-                            ]
-                        if web_outcome.web_hits:
-                            hits = list(web_outcome.web_hits) + hits
-                            retrieval_mode = "live_web_verified"
-                        if web_outcome.verified_facts_addition:
-                            web_verified_facts = web_outcome.verified_facts_addition
-                    except Exception:
-                        logger.warning("Live web research step failed in _generate_en", exc_info=True)
+                    # The English router form: the triggers and the search
+                    # vocabulary read English, whatever language was asked in.
+                    hits, live_mode, web_outcome = _live_research_for_turn(
+                        router_rewritten or retrieval_query,
+                        hits=hits,
+                        retriever=self._retriever if self._retriever_ready else None,
+                        turn_id=request_id or thread_id,
+                    )
+                if live_mode:
+                    retrieval_mode = live_mode
+                live_check_notice = web_outcome.live_check_notice
+                trace_ctx["live_check"] = web_outcome.audit
+                trace_ctx["live_check_disclosure"] = web_outcome.disclosure
+                if web_outcome.triggered:
+                    cache_allowed = False
 
             # 3b2. G131 fix: removed buggy substring-matching language boost that
             #      matched 'sw' inside 'Answer' and corrupted reranker ordering with
@@ -12120,6 +12175,8 @@ class ChatModel:
                     )
                     if web_verified_facts:
                         base_pers_ctx = f"{base_pers_ctx}\n\n{web_verified_facts}".strip()
+                    if live_check_notice:
+                        base_pers_ctx = f"{base_pers_ctx}\n\n{live_check_notice}".strip()
                     if connector_namespaces:
                         from .mcp.connector_accounts import (
                             format_linked_accounts_prompt_context,
@@ -12308,6 +12365,8 @@ class ChatModel:
                         )
                         if web_verified_facts:
                             gen_pers_ctx = f"{gen_pers_ctx}\n\n{web_verified_facts}".strip()
+                        if live_check_notice:
+                            gen_pers_ctx = f"{gen_pers_ctx}\n\n{live_check_notice}".strip()
                         gen_call_kwargs: dict[str, Any] = {
                             "query": llm_query,
                             "passages": hits,
@@ -12776,6 +12835,12 @@ class ChatModel:
         reply = self._add_conversational_frame(
             reply, query=message, hits=hits, retrieval_mode=retrieval_mode
         )
+        # After every verifier, so the sentence is never judged as a claim, and
+        # before localization, so the taxpayer reads it in their language.
+        if retrieval_mode not in ("abstained", "blocked"):
+            reply = _with_live_check_disclosure(
+                reply, str(trace_ctx.get("live_check_disclosure") or "")
+            )
 
         elapsed_ms = (time.perf_counter() - t0) * 1000
         logger.info(
@@ -12791,6 +12856,7 @@ class ChatModel:
 
         result = {
             "reply": reply,
+            "_live_check": trace_ctx.get("live_check"),
             "sources": sources,
             "citations": citations,
             "faithfulness_score": faithfulness_score,
@@ -13459,7 +13525,14 @@ class ChatModel:
                 "_short_circuit": True,
             }
 
-        # Semantic cache check (Phase 5)
+        # Semantic cache check (Phase 5). An answer about the present is neither
+        # served from the cache nor stored in it.
+        if cache_allowed and flags.is_enabled("live_web_research", subject=user_id or None):
+            from .web_research import query_is_time_sensitive
+
+            cache_allowed = not query_is_time_sensitive(
+                router_rewritten or rewritten, _ACTIVE_CASE_FACTS.get()
+            )
         if cache_allowed and flags.is_enabled("semantic_cache"):
             cached = self._cache.get(rewritten, locale=locale, tenant_id=tenant_id or "default")
             if cached:
@@ -13751,6 +13824,9 @@ class ChatModel:
         retrieval_mode = "keyword"
         web_verified_facts = ""
         web_research_events: list[tuple[str, dict[str, Any]]] = []
+        live_check_notice = ""
+        live_check_disclosure = ""
+        live_check_audit: dict[str, Any] | None = None
 
         if welfare_cats_s:
             hits = build_welfare_grounding_hits(router_message or message, welfare_cats_s)
@@ -13805,31 +13881,20 @@ class ChatModel:
 
         # Live Web Research + Ephemeral PDF Sandbox + Self-Updating Qdrant (Phase 41)
         if not welfare_cats_s and flags.is_enabled("live_web_research", subject=user_id or None):
-            try:
-                from .web_research import run_web_research
-
-                web_outcome = run_web_research(
-                    retrieval_query,
-                    case_facts=_ACTIVE_CASE_FACTS.get(),
-                    hits=hits,
-                    retriever=self._retriever if self._retriever_ready else None,
-                    turn_id=request_id or thread_id,
-                )
-                web_research_events = list(web_outcome.events)
-                if web_outcome.superseded_sources:
-                    sup_set = {s.strip().lower() for s in web_outcome.superseded_sources if s}
-                    hits = [
-                        h
-                        for h in hits
-                        if str(h.get("source") or "").strip().lower() not in sup_set
-                    ]
-                if web_outcome.web_hits:
-                    hits = list(web_outcome.web_hits) + hits
-                    retrieval_mode = "live_web_verified"
-                if web_outcome.verified_facts_addition:
-                    web_verified_facts = web_outcome.verified_facts_addition
-            except Exception:
-                logger.warning("Live web research step failed in generate_retrieval_only", exc_info=True)
+            hits, live_mode, web_outcome = _live_research_for_turn(
+                router_rewritten or retrieval_query,
+                hits=hits,
+                retriever=self._retriever if self._retriever_ready else None,
+                turn_id=request_id or thread_id,
+            )
+            if live_mode:
+                retrieval_mode = live_mode
+            web_research_events = list(web_outcome.events)
+            live_check_notice = web_outcome.live_check_notice
+            live_check_disclosure = web_outcome.disclosure
+            live_check_audit = web_outcome.audit
+            if web_outcome.triggered:
+                cache_allowed = False
 
         # G131 fix: removed buggy substring-matching language boost that
         # matched 'sw' inside 'Answer' and corrupted reranker ordering with
@@ -14120,6 +14185,8 @@ class ChatModel:
         )
         if web_verified_facts:
             eff_pers_ctx = f"{eff_pers_ctx}\n\n{web_verified_facts}".strip()
+        if live_check_notice:
+            eff_pers_ctx = f"{eff_pers_ctx}\n\n{live_check_notice}".strip()
         stream_rewritten = (
             router_rewritten
             if (
@@ -14195,6 +14262,8 @@ class ChatModel:
             "_personalization_context": eff_pers_ctx,
             "_web_verified_facts": web_verified_facts,
             "_web_research_events": web_research_events,
+            "_live_check": live_check_audit,
+            "_live_check_disclosure": live_check_disclosure,
             "_tone_hint": tone_hint,
             "_distress": distress,
             "_force_agentic": force_agentic,

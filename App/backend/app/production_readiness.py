@@ -28,6 +28,8 @@ COMMERCIAL_KEY_ENV_VARS: tuple[str, ...] = (
     "CLOUDFLARE_API_TOKEN",
     "GROQ_API_KEY",
     "OPENROUTER_API_KEY",
+    "TAVILY_API_KEY",
+    "BRAVE_SEARCH_API_KEY",
 )
 
 _COMPOSE_SERVICE_HOST_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$", re.IGNORECASE)
@@ -93,7 +95,7 @@ def sovereign_mode_errors() -> list[str]:
     if llm_backend not in {"", "local", "vllm"}:
         errors.append("SOVEREIGN_MODE: LLM_BACKEND must be local ('local' or 'vllm').")
 
-    for url_var in ("VLLM_BASE_URL", "REASONER_BASE_URL"):
+    for url_var in ("VLLM_BASE_URL", "REASONER_BASE_URL", "SEARXNG_URL"):
         raw_url = (os.getenv(url_var) or "").strip()
         if not raw_url:
             continue
@@ -308,6 +310,12 @@ def _external_processor_names() -> list[str]:
         and vllm_url.hostname not in {None, "localhost", "127.0.0.1", "::1"}
     ):
         providers.append("remote vLLM")
+    # A search query leaves the deployment too. It is built from a closed
+    # vocabulary, but that is a reason to approve the transfer, not to skip it.
+    from .web_search_providers import hosted_provider_names
+
+    if _truthy("FLAG_LIVE_WEB_RESEARCH"):
+        providers.extend(f"web search ({name})" for name in hosted_provider_names())
     return providers
 
 
@@ -414,6 +422,23 @@ def evaluate_gate(gap: str) -> dict[str, Any]:
     }
 
 
+def _live_research_status() -> dict[str, Any]:
+    """Whether live research can do anything here, for the readiness report.
+
+    Deliberately not a boot gate. No provider degrades to a disclosed "could not
+    check", which is safe; refusing to start would turn a missing key into an
+    outage of every other answer.
+    """
+    from .flags import flags
+    from .web_search_providers import active_providers, sanctioned_provider_configured
+
+    return {
+        "enabled": flags.is_enabled("live_web_research"),
+        "providers": [provider.name for provider in active_providers()],
+        "sanctioned_provider": sanctioned_provider_configured(),
+    }
+
+
 def architecture_integrity_status() -> dict[str, Any]:
     """Verify October 2026 architectural invariants (ADR-0012): storage parity, ASI10 manifest, portal pack, and ExpRAG."""
     from .flags import flags
@@ -432,6 +457,7 @@ def architecture_integrity_status() -> dict[str, Any]:
         "behavioral_manifest_sha256": CANONICAL_BEHAVIORAL_MANIFEST.digest_sha256(),
         "portal_knowledge_sha256": portal_prov.get("sha256", ""),
         "procedural_exemplar_count": len(pm.list_exemplars()),
+        "live_research": _live_research_status(),
         "flag_lifecycle_counts": {k: len(v) for k, v in lifecycle.items()},
     }
 
