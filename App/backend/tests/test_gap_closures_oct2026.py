@@ -241,7 +241,7 @@ class MultilingualAndSpeechHardeningTests(unittest.TestCase):
 
         flags.set("call_drop_resume", True)
         try:
-            with mock.patch.dict(os.environ, {"CALL_RESUME_SECRET": "test-resume-secret-key-32-bytes!!"}):
+            with mock.patch.dict(os.environ, {"RECEPTIONIST_RESUME_SECRET": "test-resume-secret-key-32-bytes!!"}):
                 ticket = mint_call_resume_ticket("call_1", "conv_1", user_id="user_auth_1", tenant_id="default")
                 self.assertTrue(ticket)
                 # Anonymous caller attempts to present authenticated user's ticket
