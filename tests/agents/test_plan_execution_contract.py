@@ -303,7 +303,13 @@ class TestRuntimeAttestation:
         # llm_agentic runs before abstention_check, both inside synthesis.
         from app.turn_pipeline import attest_turn
 
-        timings = {"input_guard": 1.0, "hybrid_search": 1.0, "llm_agentic": 1.0, "abstention_check": 1.0}
+        timings = {
+            "input_guard": 1.0,
+            "hybrid_search": 1.0,
+            "llm_agentic": 1.0,
+            "abstention_check": 1.0,
+            "output_guard": 1.0,
+        }
 
         assert attest_turn(timings)["ok"] is True
 
@@ -313,7 +319,7 @@ class TestRuntimeAttestation:
         verdict = attest_turn({"query_rewrite": 1.0, "hybrid_search": 1.0, "llm_generate": 1.0})
 
         assert verdict["ok"] is False
-        assert verdict["missing_mandatory_guards"] == ["stage_1_input_guard"]
+        assert "stage_1_input_guard" in verdict["missing_mandatory_guards"]
 
     def test_a_guard_after_generation_is_an_order_violation(self):
         from app.turn_pipeline import attest_turn

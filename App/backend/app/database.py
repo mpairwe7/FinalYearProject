@@ -1094,6 +1094,8 @@ def cleanup_expired_data() -> dict[str, int]:
         ("sessions", _SESSION_TTL_DAYS),
         ("workflow_sessions", _WORKFLOW_SESSION_TTL_DAYS),
         ("conversation_topics", _CONVERSATION_TTL_DAYS),
+        # A checkpoint holds the question and history, so it goes when they do.
+        ("agent_checkpoints", _CONVERSATION_TTL_DAYS),
         ("ticket_presence", 1),
         ("tickets", _TICKET_TTL_DAYS),
     ]
@@ -1105,6 +1107,7 @@ def cleanup_expired_data() -> dict[str, int]:
         "sessions": "last_active_at",
         "workflow_sessions": "updated_at",
         "conversation_topics": "updated_at",
+        "agent_checkpoints": "created_at",
         "ticket_presence": "updated_at",
         "tickets": "resolved_at",
     }
@@ -4282,6 +4285,16 @@ def delete_user_cascade(
                 )
         except Exception:
             logger.exception("delete_user_cascade: conversation_topics")
+        try:
+            if conv_ids:
+                ph = ",".join("?" * len(conv_ids))
+                counts["agent_checkpoints"] = execute(
+                    f"DELETE FROM agent_checkpoints WHERE thread_id IN ({ph})",  # nosec B608 # noqa: S608
+                    tuple(conv_ids),
+                )
+        except Exception:
+            logger.exception("delete_user_cascade: agent_checkpoints")
+            counts["agent_checkpoints"] = -1
         try:
             workflow_deleted = execute(
                 "DELETE FROM workflow_sessions WHERE tenant_id = ? AND user_id = ?",

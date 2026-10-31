@@ -60,11 +60,11 @@ groups:
       # Containment: turns the assistant answered itself, out of all turns
       # that did not fail. Abstention and escalation are the two ways out.
       - record: ura:chat_turns:containment_ratio_1h
-        expr: sum(rate(ura_chat_turns_total{outcome="answered"}[1h])) / sum(rate(ura_chat_turns_total{outcome!="error"}[1h]))
+        expr: sum(rate(ura_chat_turns_total{outcome="answered"}[1h])) / sum(rate(ura_chat_turns_total{outcome!~"error|cancelled"}[1h]))
       - record: ura:chat_turns:abstention_ratio_1h
-        expr: sum(rate(ura_chat_turns_total{outcome="abstained"}[1h])) / sum(rate(ura_chat_turns_total{outcome!="error"}[1h]))
+        expr: sum(rate(ura_chat_turns_total{outcome="abstained"}[1h])) / sum(rate(ura_chat_turns_total{outcome!~"error|cancelled"}[1h]))
       - record: ura:chat_turns:escalation_ratio_1h
-        expr: sum(rate(ura_chat_turns_total{outcome="escalated"}[1h])) / sum(rate(ura_chat_turns_total{outcome!="error"}[1h]))
+        expr: sum(rate(ura_chat_turns_total{outcome="escalated"}[1h])) / sum(rate(ura_chat_turns_total{outcome!~"error|cancelled"}[1h]))
       - record: ura:chat_turns:error_ratio_1h
         expr: sum(rate(ura_chat_turns_total{outcome="error"}[1h])) / sum(rate(ura_chat_turns_total[1h]))
       - record: ura:retrieval_keyword_fallback:ratio_rate10m

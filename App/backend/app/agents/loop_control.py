@@ -294,6 +294,30 @@ class ToolCallBudget:
     def exhausted(self) -> bool:
         return self.dispatched >= self.max_total_calls
 
+    def to_dict(self) -> dict[str, Any]:
+        """What was spent, for a checkpoint. A resumed turn must not get a fresh budget."""
+        with self._lock:
+            return {
+                "dispatched": self.dispatched,
+                "repeats": self.repeats,
+                "denied": self.denied,
+                "observation_chars_spent": self.observation_chars_spent,
+                "per_tool": dict(self._per_tool),
+                "memo": dict(self._memo),
+            }
+
+    def restore(self, data: dict[str, Any] | None) -> None:
+        """Take up a checkpoint's spend; the ceilings stay as constructed."""
+        if not data:
+            return
+        with self._lock:
+            self.dispatched = int(data.get("dispatched", 0))
+            self.repeats = int(data.get("repeats", 0))
+            self.denied = int(data.get("denied", 0))
+            self.observation_chars_spent = int(data.get("observation_chars_spent", 0))
+            self._per_tool = Counter({str(k): int(v) for k, v in (data.get("per_tool") or {}).items()})
+            self._memo = {str(k): dict(v) for k, v in (data.get("memo") or {}).items() if isinstance(v, dict)}
+
     def stats(self) -> dict[str, Any]:
         """Trace-shaped summary — safe to log, no argument values."""
         return {

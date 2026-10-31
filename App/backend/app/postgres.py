@@ -529,6 +529,7 @@ def cleanup_expired_data() -> dict[str, int]:
         ("feedback", _FEEDBACK_TTL_DAYS, "created_at"),
         ("sessions", _SESSION_TTL_DAYS, "last_active_at"),
         ("conversation_topics", _CONVERSATION_TTL_DAYS, "updated_at"),
+        ("agent_checkpoints", _CONVERSATION_TTL_DAYS, "created_at"),
         ("ticket_presence", 1, "updated_at"),
         ("workflow_sessions", _WORKFLOW_SESSION_TTL_DAYS, "updated_at"),
     ]

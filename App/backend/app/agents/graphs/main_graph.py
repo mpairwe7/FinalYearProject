@@ -10,9 +10,10 @@ Structure:
 
 Nodes mutate a request-scoped ``AgentGraphState``. Retrieval and synthesis
 are bounded; ``node_act`` may invoke external tools and is therefore a side
-effect boundary. This runtime does not replay/checkpoint nodes. A future
-durable LangGraph migration must make those tool effects idempotent before
-enabling retries or resume.
+effect boundary. The graph drafts an answer and the service checks it: the reply
+goes through ``_apply_output_guards`` like any other. This runtime does not replay
+nodes. A future durable LangGraph migration must make those tool effects
+idempotent before enabling retries or resume.
 """
 
 from __future__ import annotations
@@ -138,7 +139,12 @@ def node_tool_rag_select(state: AgentGraphState) -> NodeResult:
 
 
 def node_human_gate(state: AgentGraphState) -> NodeResult:
-    """Human-in-the-loop gate: interrupts or pauses execution if action requires taxpayer consent."""
+    """Pause when ``pending_action`` needs the taxpayer's consent.
+
+    Nothing sets ``pending_action`` in production. Confirmation is enforced in the
+    MCP client, which answers a ``requires_confirmation`` tool with a proposal
+    until it is told ``confirmed``, on every path including this one.
+    """
     if state.pending_action and state.pending_action.requires_consent and not state.pending_action.authorized:
         state.outcome = GraphOutcome.WAITING_USER
         state.reply = (

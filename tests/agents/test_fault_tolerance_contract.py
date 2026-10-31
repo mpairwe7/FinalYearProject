@@ -612,9 +612,7 @@ class TestAWholeTurnHasADeadline:
 
         events, elapsed = asyncio.run(run())
         assert elapsed < 0.8
-        errors = [payload for kind, payload in events if kind == "error"]
-        assert errors
-        assert errors[0]["code"] == "deadline_exceeded"
+        assert any(kind == "deadline_exceeded" for kind, _ in events)
         assert [kind for kind, _ in events][-2:] == ["done", "_log"]
 
     def test_a_generation_only_gets_what_is_left_of_the_turn(self, monkeypatch) -> None:

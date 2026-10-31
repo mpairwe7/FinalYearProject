@@ -151,7 +151,7 @@ def test_rest_turn_is_audited_with_the_served_reply(client, pipeline):
     assert len(rows) == 1, rows
     assert rows[0]["channel"] == "rest"
     assert rows[0]["reply_sha256"] == _sha(resp.json()["reply"])
-    assert rows[0]["schema"] == 2
+    assert rows[0]["schema"] == 3
 
 
 def test_streamed_turn_is_audited_and_counted(client, pipeline):

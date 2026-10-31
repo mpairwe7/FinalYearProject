@@ -539,6 +539,9 @@ _OUTCOME_BY_MODE = {
 
 def turn_outcome(result: Mapping[str, Any]) -> str:
     """How a chat turn ended, for the containment and abstention SLIs."""
+    # The client left: nothing about the answer can be concluded either way.
+    if result.get("_disposition") == "cancelled":
+        return "cancelled"
     mode = str(result.get("retrieval_mode") or "")
     outcome = _OUTCOME_BY_MODE.get(mode)
     if outcome and outcome != "escalated":
