@@ -302,9 +302,88 @@ The table below establishes the 2026 market replacement cost required to enginee
 \textbf{Total Replacement Value} & \textbf{Full-Stack Sovereign GovTech AI Platform} & \textbf{\$1,400,000} & \textbf{UGX 5.18B} \\
 \end{longtable}\endgroup
 
+\SecHead{2.2}{Government Rate Benchmarks \& Methodology for Determining System Price}{PPDA / NITA-U / SWEBOK §15.8}
+To ensure full transparency for PPDA, NITA-U, and MoFPED (\textbf{Vote 141}) value-for-money audits, system pricing is derived by bounding the commercial fee between the \textbf{3-method converged engineering cost floor} (\textbf{193 Engineer-Months [EM]}: Decomposition \code{178 EM}, COCOMO II Post-Architecture \code{222 EM}, and Merged-PR Analogy \code{179 EM}) and the \textbf{public-sector value ceiling}, using official government and market rate schedules:
+
+\needspace{20mm}
+\begingroup\tbl
+\begin{longtable}{>{\RaggedRight\arraybackslash}p{36mm}>{\RaggedRight\arraybackslash}p{34mm}>{\RaggedRight\arraybackslash}p{69.6mm}}
+\toprule
+\tblhead{GOVERNMENT / MARKET RATE BENCHMARK} & \tblhead{STANDARD RATE / PARAMETER} & \tblhead{ROLE IN DETERMINING SYSTEM PRICE} \\
+\midrule\endfirsthead
+\toprule
+\tblhead{GOVERNMENT / MARKET RATE BENCHMARK} & \tblhead{STANDARD RATE / PARAMETER} & \tblhead{ROLE IN DETERMINING SYSTEM PRICE} \\
+\midrule\endhead
+\bottomrule\endfoot
+\bottomrule\endlastfoot
+\textbf{1. GoU / URA Officer Equivalence (\code{U4--U1E} Scale)} & \textbf{UGX 3.33M / mo} (\textbf{UGX 40M / yr} \ensuremath{\approx} \$10,810/yr; \textbf{UGX 4,500--5,333 / contact}) & Establishes the human-service cost baseline (\swref{§15.4.2}). Above \textbf{557 contacts/day}, the AI system is strictly more cost-effective per taxpayer served than adding headcount, generating \textbf{UGX 11.25B/yr} in released officer capacity at 2.5M contacts/yr. \\
+\addlinespace[0.4mm]
+\textbf{2. PPDA Local Corporate Engineering Rate (Uganda)} & \textbf{USD 3,500 / EM} (\textbf{UGX 12.95M / EM}; fully loaded with 30\% CIT, 10\% NSSF, 6\% WHT) & Applied to the converged \textbf{193 EM} effort yields a local standalone rebuild cost of \textbf{USD 675,500 (UGX 2.50B)}. The Tier-3 base sovereign license (\textbf{USD 480,000}) is priced at \textbf{71\%} of local rebuild cost (\textbf{USD 2,487/EM}) because Cloake Tech retains non-competing regional IP. \\
+\addlinespace[0.4mm]
+\textbf{3. NITA-U / PPDA Embedded Specialist Rate Card} & \textbf{USD 3,200 / \$4,500 / \$6,500 per person-month} (Assoc.\ / Mid / Senior AI Architect) & Prices the mandatory 24-month capability-transfer engagement (\docref{§F4}): \textbf{4 Mid AI/Systems Engineers $\times$ 24 months $\times$ USD 4,500/mo = USD 432,000 (UGX 1.60B)}, transitioning full operations to URA FTEs by Year 3. \\
+\addlinespace[0.4mm]
+\textbf{4. EAC Regional Specialist Vendor Rate} & \textbf{USD 7,000 / EM} (\textbf{UGX 25.90M / EM}) & Yields a regional replacement benchmark of \textbf{USD 1,351,000 (UGX 5.00B)} for 193 EM, corroborating the 4-subsystem replacement valuation of \textbf{USD 1,400,000 (UGX 5.18B)}. \\
+\addlinespace[0.4mm]
+\textbf{5. International Tier-1 Integrator Rate} & \textbf{USD 15,000 / EM} (\textbf{UGX 55.50M / EM}) & Yields a global integrator replacement benchmark of \textbf{USD 2,895,000 (UGX 10.71B)}; the local turnkey price represents an \textbf{83.4\% sovereign discount} vs.\ foreign integrators. \\
+\addlinespace[0.4mm]
+\textbf{6. NITA-U Vote Allocation \& Per-TIN Ceilings} & \textbf{< 1.0\% of Agency Vote} \textperiodcentered{} \textbf{USD 0.11 (UGX 422) / TIN / yr} & Turnkey Year-1 price is \textbf{0.47\%} of Vote 141 (\code{UGX 917.3B}) and \textbf{0.011\%} of the \code{UGX 40.09T} revenue target; SaaS Tier 2 costs \textbf{UGX 422 per registered taxpayer/year} across 5.7M TINs. \\
+\addlinespace[0.4mm]
+\textbf{7. Government AMC \& MoFPED Discount / Tax Rates} & \textbf{20\% p.a.\ AMC} \textperiodcentered{} \textbf{10\% Social Discount Rate} \textperiodcentered{} \textbf{6\% Resident WHT vs.\ 15\% Non-Res.\ WHT + 5\% DST} & Annual statutory/model maintenance is capped at the standard GoU \textbf{20\% AMC} (\textbf{USD 190k/yr}). Contracting a resident Ugandan entity retains \textbf{18\% VAT} and \textbf{6\% WHT} (\emph{ITA s.119}) domestically, avoiding the \textbf{15\% non-resident WHT} (\emph{s.85}) and \textbf{5\% Digital Services Tax} (\emph{s.86A}) gross-up on foreign cloud SaaS. \\
+\end{longtable}\endgroup
+
+\SecHead{2.3}{Statutory FY 2026/27 Valuation \& Pricing Rules Embedded in Subsystem 2}{FY2026-27.json}
+A core driver of Subsystem 2's \textbf{USD 380,000 (UGX 1.41B)} valuation is its deterministic, code-owned execution of Uganda's \textbf{FY 2026/27 statutory valuation and pricing rules} (\code{App/backend/app/tax/data/FY2026-27.json}), eliminating LLM arithmetic hallucination across customs, vehicle, and employment assessments:
+
+\needspace{18mm}
+\begingroup\tbl
+\begin{longtable}{>{\RaggedRight\arraybackslash}p{36mm}>{\RaggedRight\arraybackslash}p{42mm}>{\RaggedRight\arraybackslash}p{61.6mm}}
+\toprule
+\tblhead{STATUTORY VALUATION DOMAIN} & \tblhead{FY 2026/27 LEGAL BASIS \& PARAMETER} & \tblhead{DETERMINISTIC VALUATION \& PRICING LOGIC} \\
+\midrule\endfirsthead
+\toprule
+\tblhead{STATUTORY VALUATION DOMAIN} & \tblhead{FY 2026/27 LEGAL BASIS \& PARAMETER} & \tblhead{DETERMINISTIC VALUATION \& PRICING LOGIC} \\
+\midrule\endhead
+\bottomrule\endfoot
+\bottomrule\endlastfoot
+\textbf{1. Customs CIF Valuation Hierarchy} & \emph{EAC CMA Fourth Schedule} (\code{customs\_valuation\_hierarchy = 6}); \code{bou\_mid\_rate} & Enforces the sequential \textbf{6-method WTO/EAC CIF hierarchy} (1.\ Transaction Value \ensuremath{\rightarrow} 2.\ Identical \ensuremath{\rightarrow} 3.\ Similar \ensuremath{\rightarrow} 4.\ Deductive \ensuremath{\rightarrow} 5.\ Computed \ensuremath{\rightarrow} 6.\ Fall-back / URA Used MV CMV Schedule) at the first EAC point of entry, converted at the Bank of Uganda mid-rate. \\
+\addlinespace[0.4mm]
+\textbf{2. Compounded Import Tax \& CIF Levy Stack} & \emph{EAC CET} (\code{0\%/10\%/25\%/35\%}), \emph{Excise Duty Act Sch.\ 2 item 14}, \emph{ITA s.119}, \emph{UNBS PVoC 2025/26} & Computes \textbf{Import Duty} on CIF, \textbf{Excise Duty} on \code{(CIF + ID)}, and \textbf{18\% VAT} on \code{(CIF + ID + ED)}, plus non-compounded CIF levies: \textbf{6\% Import WHT}, \textbf{1.5\% Infrastructure Levy}, \textbf{35\%} (5--8 yrs) or \textbf{50\%} ($>8$--15 yrs) \textbf{Used Vehicle Environmental Levy}, and \textbf{15\% UNBS PVoC surcharge} above USD 2,000 FOB. \\
+\addlinespace[0.4mm]
+\textbf{3. FY 2026/27 Statutory Amendments} & \emph{Stamp Duty}, \emph{Excise Duty}, \emph{VAT}, \emph{TPC} \& \emph{Income Tax (Amendment) Acts 2026} & Enforces flat \textbf{UGX 200,000} motor vehicle (\textbf{UGX 30,000} motorcycle) transfer stamp duty (\emph{Act 16 of 2026 s.4}), \textbf{UGX 500,000} motorcycle first-registration excise (\emph{Act 22 of 2026}), raised \textbf{UGX 300M} annual VAT registration threshold, and \textbf{UGX 2M} (\textbf{5\%}) 30-day e-receipt VAT refund threshold. \\
+\addlinespace[0.4mm]
+\textbf{4. Employment Benefits-in-Kind (BIK) Valuation} & \emph{ITA Cap 338} \& \emph{URA Taxation Handbook s.12.2.3} (\code{0.20}, \code{0.35}, \code{0.15}) & Values employer-provided vehicles via $(20\% \times A \times B / 365) - D$ where market value $A$ is depreciated on a \textbf{35\% p.a.\ reducing-balance basis} for subsequent years; caps housing BIK at the lesser of market rent or \textbf{15\%} of total employment income; excludes benefits below \textbf{UGX 10,000/mo} (\code{bik\_de\_minimis\_monthly\_ugx}). \\
+\end{longtable}\endgroup
+
+\SecHead{2.4}{Government of Uganda \& NITA-U 6-Stage ICT Valuation \& Clearance Pipeline}{NITA-U Cap.\ 97 / PFMA / PPDA}
+Under the \textbf{NITA-U Act (Cap.\ 97, s.\ 5)}, the \textbf{Public Finance Management Act (PFMA, Cap.\ 171)}, and the \textbf{PPDA Act (Cap.\ 205)}, the Government of Uganda determines the allowable value and contract price of an MDA IT system through a 6-stage statutory appraisal pipeline before releasing \textbf{Vote 141} funds:
+
+\needspace{20mm}
+\begingroup\tbl
+\begin{longtable}{>{\RaggedRight\arraybackslash}p{35mm}>{\RaggedRight\arraybackslash}p{41mm}>{\RaggedRight\arraybackslash}p{63.6mm}}
+\toprule
+\tblhead{STATUTORY STAGE \& AUTHORITY} & \tblhead{GOU / NITA-U VALUATION TEST} & \tblhead{SYSTEM COMPLIANCE \& PRICE VERIFICATION} \\
+\midrule\endfirsthead
+\toprule
+\tblhead{STATUTORY STAGE \& AUTHORITY} & \tblhead{GOU / NITA-U VALUATION TEST} & \tblhead{SYSTEM COMPLIANCE \& PRICE VERIFICATION} \\
+\midrule\endhead
+\bottomrule\endfoot
+\bottomrule\endlastfoot
+\textbf{Stage 1: NITA-U IT Clearance \& Rationalisation Gate} (\emph{NITA-U Act Cap.\ 97 s.\ 5; Strategic Plan FY 2025/26--2029/30}) & \textbf{(a) Non-Duplication (\code{UGhub}):} Deducts value for modules duplicating national shared services (\code{NIRA}, \code{URSB}, \code{e-GP}, \code{UESW}). \textbf{(b) Sovereign Hosting:} NITA-U Cloud or URA Nakawa Data Centre. \textbf{(c) Security:} \code{ISO 27001/27701/20000} \& \code{UDPA 2019}. & Zero duplication: integrates with \code{NIRA}, \code{URSB}, \code{EFRIS}, \code{DTS}, \code{BWIMS}, and \code{UESW} via zero-trust MCP connectors (\code{ADR-0009}), so 100\% of the \textbf{193 EM} effort is net-new tax/voice AI. On-prem/NITA-U hosting saves \textbf{USD 165,755 (UGX 605M)} over 5 yrs vs.\ foreign cloud (16-mo break-even). Pre-verified STRIDE/PDPO/NIN-DLP compliance anchors Subsystem 4 (\textbf{\$250k}). \\
+\addlinespace[0.4mm]
+\textbf{Stage 2: MoFPED Public Investment (PIM / PIP) Gate} (\emph{PFMA Cap.\ 171; Project 1904 Vote 141}) & Discounts 5-yr cash flows at Uganda's \textbf{10\% social discount rate}; requires \textbf{BCR $\ge 1.0$}, single-system outlay \textbf{$< 1.0\%$} of Agency Vote, and competitive cost per citizen served. & At 5-yr TCO Present Worth \textbf{USD 1.127M (UGX 4.11B)} (\code{UGX 1,085M/yr} annual equivalent), \textbf{BCR = 1.0} requires converting just \textbf{0.079\% (2,170)} of dormant taxpayers or deflecting \textbf{849 contacts/day}; expected \textbf{BCR = 2.47} and \textbf{4.4\ensuremath{\times}--9.0\ensuremath{\times} Year-1 Net ROI} (\textbf{$< 2.5$ mos payback}). Turnkey is \textbf{0.47\%} of Vote 141; SaaS is \textbf{USD 0.11 (UGX 422)/TIN/yr}. \\
+\addlinespace[0.4mm]
+\textbf{Stage 3: PPDA Engineer's Estimate \& \code{e-GP} Benchmarks} (\emph{PPDA Act Cap.\ 205; World Bank UDAP \code{IDA-68980}}) & Establishes PDE Reserve Estimate via \textbf{(a) Input Method} (\code{Effort EM $\times$ Rate Card}) and \textbf{(b) Analogy Method} against FY 2025/26--2026/27 national ICT contracts on \code{egpuganda.go.ug}. & \textbf{Input:} \code{193 EM $\times$ \$3,500 = \$675,500} local rebuild floor (+ \code{\$432,000} for 4 embedded specialists $\times$ 24 mos at \code{\$4,500/mo}). \textbf{Analogy:} Matches live NITA-U/UDAP \code{e-GP} contracts (\code{UG-NITA-U-562756-CS-QCBS} at \textbf{\$500k}; \code{UG-NITA-U-495485-GO-DIR} CERT.UG upgrade at \textbf{\$600k}). The \textbf{\$480,000} Tier-3 base license sits at \textbf{71\%} of local rebuild cost. \\
+\addlinespace[0.4mm]
+\textbf{Stage 4: PPDA QCBS (80/20) \& BUBU Tax Netback} (\emph{PPDA Evaluation Regs; BUBU Policy; \code{FY2026-27.json}}) & Evaluates complex ICT tenders via \textbf{Quality \& Cost-Based Selection (80\% Tech / 20\% Fin)} with \emph{Buy Uganda, Build Uganda (BUBU)} preference and domestic tax netback. & Sovereign Option \textbf{A4} scores \textbf{4.81/5.00} technically vs.\ \textbf{1.98/5.00} for foreign SaaS \textbf{A2}. Contracting a resident Ugandan company retains \textbf{18\% VAT} and \textbf{6\% WHT} (\emph{ITA s.119}) in Uganda, avoiding the \textbf{15\% non-resident WHT} (\emph{s.85}), \textbf{5\% DST} (\emph{s.86A}), and \textbf{18\% unclaimable reverse-charge VAT} (\emph{VAT Act s.28}) that add a \textbf{20\%--38\% tax gross-up} to foreign SaaS. \\
+\addlinespace[0.4mm]
+\textbf{Stage 5: 5-Year TCO, Zero Lock-In \& 20\% AMC Cap} (\emph{NITA-U e-Gov Interoperability \& OAG Audit}) & Audits 5-yr TCO, perpetual IP ownership, exit cost, and caps post-warranty Annual Maintenance Contracts (AMC) at \textbf{15\%--22\% p.a.} & Full source code, fine-tuned weights, 10,779-chunk Qdrant corpus, and 28 \code{Decimal} calculators transfer perpetually with \textbf{USD 0 exit cost}. AMC is capped at \textbf{20\% p.a.} (\code{\$96k/yr} base; \code{\$190k/yr} turnkey), and embedded transfer shifts Y3--Y5 operations to URA FTEs (\code{\$77.6k/yr}). \\
+\addlinespace[0.4mm]
+\textbf{Stage 6: Milestone-Gated IFMS Payment \& OAG Audit} (\emph{PFMA s.\ 45; PPDA Contract Management}) & Prohibits upfront lump-sum payment; requires \code{e-GP} registration, URA \code{TCC}, \code{EFRIS FDN} e-invoice, and verified acceptance gates before MoFPED \code{IFMS} release. & Enforced by 5 verifiable gates \textbf{M0--M4} (\docref{§F3}): \textbf{30\%} on full artefact custody delivery (\code{M0}), and \textbf{70\% at risk} across faithfulness $\ge 0.90$ (\code{M1}), $p_{50} < 500\,\mathrm{ms}$ + 100\% guardrail soak (\code{M2}), $\ge 3$ live URA channels (\code{M3}), and 60-day unaided URA team operation (\code{M4}). \\
+\end{longtable}\endgroup
+
 \pricebox{Recommended Option A — Sovereign Perpetual Turnkey Contract (Year 1)}{USD 1,170,000 \quad (UGX 4.33 Billion)}{Includes Enterprise Sovereign Platform Bundle (\textbf{USD 950,000 / UGX 3.515B}: \docref{§F2} Tier 3 base license \textbf{USD 480k} + \docref{§F4} 24-month 4-engineer embedded capability transfer \textbf{USD 432k} + 5-locale voice/vision IP expansion \textbf{USD 38k}) + Production e-Tax/EFRIS/SIP Integration (\textbf{USD 220,000 / UGX 814M}) --- \textbf{0.47\%} of Vote 141 (\textbf{< 2.5 months payback}).}
 
-\SecHead{2.2}{Option A: Sovereign On-Premise / NITA-U Cloud Perpetual License (Recommended)}{PPDA / Vote 141}
+\SecHead{2.5}{Option A: Sovereign On-Premise / NITA-U Cloud Perpetual License (Recommended)}{PPDA / Vote 141}
 Best aligned with URA data sovereignty (\textbf{TPCA Cap.\ 343 s.\ 75 Official Secrecy} and \textbf{Uganda DPPA 2019}), zero per-token foreign cloud dependency, and Vote 141 capital development budgeting (\emph{Project 1904: Institutional Development of URA}):
 
 \needspace{20mm}
@@ -330,8 +409,7 @@ Best aligned with URA data sovereignty (\textbf{TPCA Cap.\ 343 s.\ 75 Official S
 \textbf{Total Year-1 Turnkey (With Dedicated GPU Node)} & \textbf{\$1,315,000} & \textbf{UGX 4.87B} & \textbf{3-Year TCO: USD 1.695M (UGX 6.27 Billion).} \\
 \end{longtable}\endgroup
 
-\clearpage
-\SecHead{2.3}{Option B: Managed Sovereign SaaS Subscription (OpEx Model)}{NITA-U Cloud}
+\SecHead{2.6}{Option B: Managed Sovereign SaaS Subscription (OpEx Model)}{NITA-U Cloud}
 For zero upfront capital expenditure, hosted in the NITA-U National Cloud or URA's Virtual Private Cloud (effective cost of \textbf{USD 0.11 / UGX 422 per registered taxpayer per year} across 5.7M TINs):
 
 \needspace{18mm}
@@ -350,7 +428,7 @@ For zero upfront capital expenditure, hosted in the NITA-U National Cloud or URA
 \textbf{Tier 2 — Full Multimodal + AI Call Receptionist} & All Tier 1 features + 5-Locale Voice (\code{STT}/\code{TTS}), Live WebSocket/SIP Call Receptionist, Call Desk, 6 MDA Connectors, and Dedicated GPU Serving. & \textbf{\$650,000/yr} & \textbf{UGX 2.41B/yr} \\
 \end{longtable}\endgroup
 
-\SecHead{2.4}{Option C: Base + Outcome-Indexed Public-Sector Model}{SWEBOK §15.2.7}
+\SecHead{2.7}{Option C: Base + Outcome-Indexed Public-Sector Model}{SWEBOK §15.2.7}
 Designed to de-risk MoFPED / Vote 141 procurement approval by tying vendor upside directly to verified FY 2026/27 KPIs:
 \begin{itemize}[leftmargin=4.5mm,itemsep=0.6mm,topsep=0.5mm]
   \item \textbf{Base Platform \& Deployment Fee}: \textbf{USD 600,000 (UGX 2.22 Billion)} in Year 1.
@@ -361,7 +439,7 @@ Designed to de-risk MoFPED / Vote 141 procurement approval by tying vendor upsid
   \end{enumerate}
 \end{itemize}
 
-\SecHead{2.5}{Executive Procurement Summary \& ROI Verification}{Board Summary}
+\SecHead{2.8}{Executive Procurement Summary \& ROI Verification}{Board Summary}
 \needspace{22mm}
 \begingroup\tbl
 \begin{longtable}{>{\RaggedRight\arraybackslash}p{67mm}>{\RaggedRight\arraybackslash}p{77.8mm}}

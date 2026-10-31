@@ -41,6 +41,15 @@ describe('applyTurnMeta', () => {
     expect(out.resources).toEqual([]);
     expect(out.objectiveHypothesis).toBeNull();
   });
+
+  it('rejects corrupt workflow and portal_copilot cards at ingress (G274)', () => {
+    const bad = applyTurnMeta(turn(), {
+      workflow: { id: 123, name: null, status: 'bogus', options: 'not-an-array' },
+      portal_copilot: { card_type: '', fields: 'not-an-array' },
+    });
+    expect(bad.workflow).toBeUndefined();
+    expect(bad.portalCopilot).toBeNull();
+  });
   it('carries the suggested actions a metadata line brings', () => {
     const line = {
       retrieval_mode: 'workflow',

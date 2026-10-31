@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -322,16 +323,39 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
             tenant_id=tenant_id or "default",
         )
 
-        # 6. Create room & DB record
+        # 6. Create room & DB record (with optional G188 call-drop resume restoration)
+        resumed_snapshot: dict[str, Any] | None = None
+        resume_ticket_raw = str(init_msg.get("resume_ticket") or "").strip()
+        if resume_ticket_raw and flags.is_enabled("call_drop_resume", subject=user_id or None):
+            from .low_bandwidth import restore_call_drop_state, verify_call_resume_ticket
+
+            verified_claims = verify_call_resume_ticket(
+                resume_ticket_raw,
+                expected_user_id=user_id or "",
+                expected_tenant_id=tenant_id or "default",
+            )
+            if isinstance(verified_claims, dict):
+                prior_cid = str(verified_claims.get("cid") or "")
+                resumed_snapshot = restore_call_drop_state(prior_cid, tenant_id=tenant_id or "default")
+                if isinstance(resumed_snapshot, dict) and resumed_snapshot.get("locale") in SUPPORTED_LOCALES:
+                    locale = str(resumed_snapshot["locale"])
+
         room = await registry.create(
             call_id=call_id,
-            conversation_id=f"conv_{call_id}",
+            conversation_id=str((resumed_snapshot or {}).get("conversation_id") or f"conv_{call_id}"),
             user_id=user_id or "",
             tenant_id=tenant_id or "default",
             locale=locale,
             caller_ws=websocket,
         )
         room.state.preferred_locale = preferred_locale
+        if isinstance(resumed_snapshot, dict):
+            if resumed_snapshot.get("topic"):
+                room.state.topic = str(resumed_snapshot["topic"])
+            if resumed_snapshot.get("ticket_id"):
+                room.state.ticket_id = str(resumed_snapshot["ticket_id"])
+            if resumed_snapshot.get("caller_affect"):
+                room.state.caller_affect = str(resumed_snapshot["caller_affect"])
         # The chat the caller rang from (G122): its task and a coarse English
         # account of it travel into the call — for follow-ups and for the
         # officer's brief — when the caller owns that chat.
@@ -523,12 +547,25 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
 
                 room.pipeline_runner_task = asyncio.create_task(runner.run(task))
                 max_call_s = get_max_call_s()
+                duration_warned = False
                 # A dropped control socket raises out of receive_text(), and
                 # CallRoom.end() does not own the Pipecat runner: without this
                 # finally the runner outlived the call.
                 try:
                     while room.state.mode != "ended":
-                        if time.time() - room.state.started_at >= max_call_s:
+                        elapsed_s = time.time() - room.state.started_at
+                        if (
+                            not duration_warned
+                            and max_call_s >= 120.0
+                            and elapsed_s >= max_call_s - 60.0
+                        ):
+                            duration_warned = True
+                            rem_s = max(1, int(round(max_call_s - elapsed_s)))
+                            warn_payload = {"type": "duration_warning", "seconds_remaining": rem_s}
+                            with contextlib.suppress(Exception):
+                                await websocket.send_text(json.dumps(warn_payload))
+                                hub.publish_call(call_id, "duration_warning", warn_payload)
+                        if elapsed_s >= max_call_s:
                             await room.end("max_call_duration")
                             await task.cancel()
                             break

@@ -702,7 +702,13 @@ def length_plausible(source: str, translated: str) -> bool:
 #: kozesa kozesa…"; a phone number rendered "0[[[[((((…", 328 characters, on a
 #: call on 2026-09-30), and no other guard sees them: ``figures`` ignores phone
 #: numbers, and a loop only makes the text longer.
-_LOOP_RE = re.compile(r"([^\w\s])\1{7,}|[\[\](){}]{8,}|\b(\w{1,30})(?:\s+\2\b){5,}")
+_LOOP_RE = re.compile(
+    r"([^\w\s])\1{7,}"
+    r"|[\[\](){}]{8,}"
+    r"|\b(\w{1,30})(?:\s+\2\b){5,}"
+    r"|(\b\w{1,24})\s*\[\d{1,3}\](?:\s*\3\s*\[\d{1,3}\]){3,}"
+    r"|(?:\b\w{1,20}\s*\[\d{1,3}\]\s*){6,}"
+)
 
 
 def looped(source: str, translated: str) -> bool:

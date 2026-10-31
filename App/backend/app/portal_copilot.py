@@ -2626,6 +2626,10 @@ def handle_portal_task_decision(
             raise PortalTaskValidationError(
                 "WYSIWYS displayed_fields_sha256 mismatch (OWASP ASI09): displayed fields do not match signed request_state."
             )
+    elif os.getenv("PORTAL_COPILOT_REQUIRE_DISPLAY_DIGEST", "false").lower() in ("1", "true", "yes", "on"):
+        raise PortalTaskValidationError(
+            "WYSIWYS displayed_fields_sha256 is required to confirm a portal task (OWASP ASI09)."
+        )
 
     # Server-enforced high-value statutory liability cognitive friction gate (OWASP ASI09 / WCAG 2.2 SC 3.3.4)
     if state_high_value_ack and high_value_acknowledged is not True:

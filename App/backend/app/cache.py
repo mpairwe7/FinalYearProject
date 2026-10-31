@@ -499,6 +499,15 @@ class SemanticCache:
                 )
             )
 
+    def clear(self) -> int:
+        """Clear all in-memory exact and semantic cache entries and reset the index stamp."""
+        with self._lock:
+            removed = len(self._entries) + len(self._exact)
+            self._entries.clear()
+            self._exact.clear()
+        reset_index_stamp()
+        return removed
+
     @property
     def stats(self) -> dict[str, int]:
         return {**self._stats, "size": len(self._entries) + len(self._exact)}
@@ -710,6 +719,17 @@ class RedisSemanticCache:
             pipe.execute()
         except Exception:
             logger.debug("Redis cache put failed", exc_info=True)
+
+    def clear(self) -> int:
+        """Delete all Redis response-cache keys under ``CACHE_REDIS_PREFIX`` (leaving rate-limit DB 1 untouched)."""
+        removed = 0
+        if self._client is not None:
+            with contextlib.suppress(Exception):
+                keys = list(self._client.scan_iter(match=f"{CACHE_REDIS_PREFIX}*", count=200))
+                if keys:
+                    removed = int(self._client.delete(*keys) or 0)
+        reset_index_stamp()
+        return removed
 
     @property
     def stats(self) -> dict[str, int]:

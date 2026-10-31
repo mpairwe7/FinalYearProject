@@ -451,6 +451,34 @@ def canonical_amounts(text: str) -> set[float]:
     return amounts
 
 
+_RATE_CLAIM_CUE_RE = re.compile(
+    r"\b(?:rate|rates|vat|withholding|wht|paye|duty|levy|excise|tax\s+is|charged\s+at|taxed\s+at|subject\s+to"
+    r"|omusolo|musolo|ebitundu|bitundu|kodi|ushuru|asilimia|kiwango|omushoro|ebicweka|bicweka|mucoro|dul)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_negated_percentage_in_claim(claim: str, pct_str: str) -> bool:
+    """Return True when *pct_str* appears in *claim* only under explicit pre- or post-negation (5 locales)."""
+    esc = re.escape(pct_str)
+    pre_neg = re.search(
+        rf"\b(?:not|never|no|isn['’]?t|is\s+not|are\s+not|aren['’]?t|was\s+not|wasn['’]?t|rather\s+than|instead\s+of|unlikely\s+to\s+be"
+        rf"|si|siyo|hapana|bila|ssi|si\s+ku|tewali|nedda|ti|tituri|pe|kuwaco)\s+"
+        rf"(?:at\s+|a\s+|an\s+|ku\s+|kwa\s+|aha\s+|i\s+)?(?:ebitundu\s+|bitundu\s+|asilimia\s+|ebicweka\s+|bicweka\s+|dul\s+)?{esc}\b",
+        claim,
+        re.IGNORECASE,
+    )
+    if pre_neg:
+        return True
+    post_neg = re.search(
+        rf"\b{esc}\s*(?:%|percent|per\s+cent|ku\s+buli\s+kikumi|aha\s+(?:buli\s+)?(?:kikumi|e?igana)|i\s+kom\s+miya)?\s+"
+        rf"(?:is\s+not|isn['’]?t|is\s+(?:incorrect|wrong|false|inaccurate)|does\s+not\s+apply|si\s+sahihi|siyo\s+sahihi|si\s+kituufu|ssi\s+kituufu)\b",
+        claim,
+        re.IGNORECASE,
+    )
+    return bool(post_neg)
+
+
 def numeric_contradiction(claim: str, context: str, user_query: str = "") -> bool:
     """True when a claim's figures conflict with the cited context's.
 
@@ -458,7 +486,9 @@ def numeric_contradiction(claim: str, context: str, user_query: str = "") -> boo
 
     *Percentages* — fires when both sides state percentages and the
     claim's are entirely absent from the context ("VAT is 20%" against a
-    passage saying 18%).
+    passage saying 18%), or when the claim repeats an un-negated
+    false-premise percentage from the user's question that conflicts
+    with the context's percentage (G288).
 
     *Money* — fires only for rule-shaped sentences (a threshold, band or
     registration limit), where a figure the passage does not state is a
@@ -471,8 +501,11 @@ def numeric_contradiction(claim: str, context: str, user_query: str = "") -> boo
     cp = percentages(claim)
     xp = percentages(context)
     qp = percentages(user_query) if user_query else set()
-    model_pct = cp - qp
-    if model_pct and xp and model_pct.isdisjoint(xp):
+    negated_query_pcts = {p for p in qp if _is_negated_percentage_in_claim(claim, p)}
+    is_rate_claim = bool(_RATE_CLAIM_CUE_RE.search(claim)) or bool(xp)
+    model_pct = (cp - negated_query_pcts) if is_rate_claim else (cp - qp)
+    unnegated_false_premise_pcts = ((cp & qp) - negated_query_pcts - xp) if (is_rate_claim and xp) else set()
+    if model_pct and xp and (model_pct.isdisjoint(xp) or bool(unnegated_false_premise_pcts)):
         # A claim stating Uganda's official statutory 18% VAT rate does not contradict a withholding or income tax passage
         if model_pct == {"18"} and ("vat" in claim.lower() or "value added" in claim.lower()):
             pass

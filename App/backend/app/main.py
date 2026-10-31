@@ -2868,6 +2868,17 @@ def trigger_indexing(
 
     # Re-initialise the retriever so it picks up the new collection
     model._retriever_ready = model._retriever.initialize()
+    # Retire cached answers across Redis / in-memory caches and MT cache immediately
+    from .cache import reset_index_stamp
+    from . import mt as _mt
+
+    reset_index_stamp()
+    cache_obj = getattr(model, "_cache", None)
+    if cache_obj is not None and hasattr(cache_obj, "clear"):
+        with contextlib.suppress(Exception):
+            cache_obj.clear()
+    with contextlib.suppress(Exception):
+        _mt.cache.clear()
     # Same resolver as /ready and the chat path: a reindex that leaves the
     # retriever sparse-only must not report "hybrid" either.
     stats["retrieval_mode"] = active_retrieval_mode(
@@ -3863,6 +3874,13 @@ def put_override_endpoint(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    from .cache import reset_index_stamp
+
+    reset_index_stamp()
+    cache_obj = getattr(getattr(app.state, "model", None), "_cache", None)
+    if cache_obj is not None and hasattr(cache_obj, "clear"):
+        with contextlib.suppress(Exception):
+            cache_obj.clear()
     _audit_staff_action(
         ctx,
         "staff.override_saved",
@@ -3881,6 +3899,13 @@ def delete_override_endpoint(
     ok = db.delete_answer_override(override_id)
     if not ok:
         raise HTTPException(status_code=404, detail="override not found")
+    from .cache import reset_index_stamp
+
+    reset_index_stamp()
+    cache_obj = getattr(getattr(app.state, "model", None), "_cache", None)
+    if cache_obj is not None and hasattr(cache_obj, "clear"):
+        with contextlib.suppress(Exception):
+            cache_obj.clear()
     _audit_staff_action(ctx, "staff.override_deleted", {"override_id": override_id})
     return {"ok": True, "id": override_id}
 
@@ -3941,7 +3966,24 @@ def verify_discrepancy_endpoint(
     if body.get("create_override"):
         from . import cms
 
-        override_query = str(body.get("override_query") or report.get("user_correction") or "").strip()
+        override_query = str(body.get("override_query") or "").strip()
+        if not override_query and report.get("conversation_id"):
+            with contextlib.suppress(Exception):
+                msgs = db.get_conversation_messages(str(report["conversation_id"]))
+                bot_stmt = str(report.get("bot_statement") or "").strip()
+                last_user = ""
+                for m in msgs or []:
+                    role = str(m.get("role") or "")
+                    content = str(m.get("content") or "").strip()
+                    if role == "user" and content:
+                        last_user = content
+                    elif role == "assistant" and bot_stmt and bot_stmt[:80] in content and last_user:
+                        override_query = last_user
+                        break
+                if not override_query and last_user:
+                    override_query = last_user
+        if not override_query:
+            override_query = str(report.get("user_correction") or "").strip()
         override_reply = str(body.get("override_reply") or "").strip()
         source_url = str(body.get("source_url") or "staff-verified-discrepancy").strip()
         if override_query and override_reply:

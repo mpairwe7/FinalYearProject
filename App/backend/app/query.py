@@ -10,6 +10,7 @@ Transforms raw user queries into optimized retrieval queries:
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import json
 import logging
@@ -1629,6 +1630,53 @@ def _normalize_fy(start: str, end: str) -> str:
     return f"FY{start}-{end}"
 
 
+_AS_OF_ISO_RE = re.compile(
+    r"\b(?:as\s+(?:of|at)|effective(?:\s+on)?|in\s+force(?:\s+on)?)\s+(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])\b",
+    re.IGNORECASE,
+)
+_MONTH_MAP: dict[str, int] = {
+    "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
+    "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6,
+    "jul": 7, "july": 7, "aug": 8, "august": 8, "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10, "nov": 11, "november": 11, "dec": 12, "december": 12,
+}
+_AS_OF_DMY_RE = re.compile(
+    r"\b(?:as\s+(?:of|at)|effective(?:\s+on)?|in\s+force(?:\s+on)?)\s+"
+    r"(?:(\d{1,2})(?:st|nd|rd|th)?\s+)?"
+    r"(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+    r"(?:\s+(\d{1,2})(?:st|nd|rd|th)?,?)?\s+((?:19|20)\d{2})\b",
+    re.IGNORECASE,
+)
+
+
+def extract_as_of_date(query: str) -> str | None:
+    """Extract an explicit point-in-time ISO date (``YYYY-MM-DD``) from an 'as of' query (G294)."""
+    text = query or ""
+    m_iso = _AS_OF_ISO_RE.search(text)
+    if m_iso:
+        return f"{m_iso.group(1)}-{m_iso.group(2)}-{m_iso.group(3)}"
+    m_dmy = _AS_OF_DMY_RE.search(text)
+    if m_dmy:
+        day_raw = m_dmy.group(1) or m_dmy.group(3) or "01"
+        month_num = _MONTH_MAP.get(m_dmy.group(2).lower(), 1)
+        year_num = int(m_dmy.group(4))
+        day_num = max(1, min(31, int(day_raw)))
+        return f"{year_num:04d}-{month_num:02d}-{day_num:02d}"
+    return None
+
+
+def fiscal_year_for_iso_date(iso_date: str) -> str:
+    """Resolve an ISO date (``YYYY-MM-DD``) to its Ugandan fiscal year (1 July – 30 June)."""
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", str(iso_date or "").strip())
+    if not m:
+        return ""
+    year = int(m.group(1))
+    month = int(m.group(2))
+    start_year = year if month >= 7 else year - 1
+    end_short = str(start_year + 1)[-2:]
+    return f"FY{start_year}-{end_short}"
+
+
 def extract_retrieval_filters(query: str) -> dict[str, Any]:
     """Hard Qdrant payload filters for *explicit* metadata in the query.
 
@@ -1655,7 +1703,13 @@ def extract_retrieval_preferences(
     """Soft ranking hints: mentioned tax type, 'current' fiscal year, sector-guide demotion, topic sections, and EQ relief terms."""
     prefer: dict[str, Any] = {}
     text = query or ""
-    if _CURRENT_FY_RE.search(text) and not extract_retrieval_filters(text):
+    as_of = extract_as_of_date(text)
+    if as_of:
+        prefer["as_of_date"] = as_of
+        fy_from_date = fiscal_year_for_iso_date(as_of)
+        if fy_from_date:
+            prefer["fiscal_year"] = fy_from_date
+    if _CURRENT_FY_RE.search(text) and not extract_retrieval_filters(text) and "fiscal_year" not in prefer:
         prefer["fiscal_year"] = current_fiscal_year()
     types = [name for pattern, name in _TAX_TYPE_PATTERNS if pattern.search(text)]
     if len(types) == 1:
@@ -1805,24 +1859,37 @@ def translate_query_for_retrieval(query: str, locale: str) -> str | None:
     if cached is not None:
         return cached
 
+    query_for_mt = text
+    loc_norm = (locale or "").strip().lower().split("-")[0]
+    if loc_norm == "sw":
+        with contextlib.suppress(Exception):
+            from .receptionist.lexicon import normalize_swahili_tax_query
+
+            query_for_mt = normalize_swahili_tax_query(text) or text
+    elif loc_norm == "lg":
+        with contextlib.suppress(Exception):
+            from .receptionist.lexicon import normalize_luganda_tax_query
+
+            query_for_mt = normalize_luganda_tax_query(text) or text
+
     def _local() -> str | None:
         from . import llm as llm_module
 
-        return llm_module.translate_text(query, source_lang=locale, target_lang="en")
+        return llm_module.translate_text(query_for_mt, source_lang=locale, target_lang="en")
 
     def _cloud() -> str | None:
         from . import sunbird
 
-        return sunbird.translate_to_english(query, locale)
+        return sunbird.translate_to_english(query_for_mt, locale)
 
     def _fast_fallback() -> str | None:
         try:
             from .speech_service import SpeechModel
 
-            out = SpeechModel._gemini_translate(query, locale, "en")
+            out = SpeechModel._gemini_translate(query_for_mt, locale, "en")
             if out and out.strip():
                 return out.strip()
-            out = SpeechModel._cf_llama_translate(query, locale, "en")
+            out = SpeechModel._cf_llama_translate(query_for_mt, locale, "en")
             if out and out.strip():
                 return out.strip()
         except Exception:

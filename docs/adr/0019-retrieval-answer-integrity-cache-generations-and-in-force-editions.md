@@ -1,9 +1,9 @@
 # ADR-0019: Retrieval answer integrity — cache generations, in-force editions and decisions on calibrated evidence
 
 - **Date:** 2026-10-30
-- **Scope:** Backend retrieval and caching (`cache.py`, `retriever.py`, `query.py`,
-  `corrective_rag.py`, `guardrails.py`, `indexer.py`, `llm.py`, `main.py` `/v1/index`).
-- **Gaps:** G277–G287 and G296 fixed; G288–G295 opened (`docs/GAPS_AND_AGENTIC_ROADMAP.md`).
+- **Scope:** Backend retrieval, answer verification, and caching (`cache.py`, `retriever.py`, `query.py`,
+  `corrective_rag.py`, `guardrails.py`, `indexer.py`, `llm.py`, `entailment.py`, `claim_verifier.py`, `cms.py`, `main.py` `/v1/index`).
+- **Gaps:** G277–G290, G292–G294, G296–G297 fixed; G291 and G295 open (`docs/GAPS_AND_AGENTIC_ROADMAP.md`).
 
 ## Status
 
@@ -123,20 +123,17 @@ corpus mounted: the lifecycle reads every source, and the canary retrieval gate
 must pass.
 
 Still open:
-- **Answer verification (claim verifier and response judge):**
-  - user-typed figures are exempt from contradiction (G288);
-  - any money amount approves unsupported claims (G289).
 - **Calibration and evaluation:**
   - vernacular abstention thresholds (G291);
   - per-language gold sets (G295).
-- **Retriever lifecycle:**
-  - BM25 reload after an alias swap;
-  - the RAG tool's private retriever (G292).
-- **Effective-date retrieval:** valid-from/valid-to fields in the index are not
-  modelled (G294).
+
+Closed in the 2026-10-31 follow-up pass (`App/backend/tests/test_gap_closures_oct2026.py`):
+- **Answer verification & overrides (G288, G289, G290, G293):** False-premise rate percentages in the user's question are no longer exempted by `numeric_contradiction` unless negated; `has_money_amount(message)` only approves unsupported claims whose figures derive from `verified_facts` or user scenario amounts; `cms.lookup` normalizes punctuation and runs on both REST and streaming transports; and claim support is verified per passage rather than across a concatenated bag-of-words union.
+- **Retriever lifecycle & effective dates (G292, G294, G297):** Shared `get_shared_retriever()` singleton across `service.py`, `rag_tool.py`, and `main_graph.py`; RLock-serialized `initialize()` and periodic `_maybe_refresh_alias_binding()` that reloads BM25 state and recovers `_sparse_ok = True` after an alias swap; `SemanticCache.clear()` and `RedisSemanticCache.clear()` wired into `POST /v1/index`; ISO `valid_from`/`valid_to`/`superseded_by` metadata populated by `annotate_fiscal_year`; and root `Dockerfile` aligned to `cu126`.
 
 ## Confirmation
 
+- `App/backend/tests/test_gap_closures_oct2026.py`
 - `App/backend/tests/test_cache_generation_and_guard.py`
 - `App/backend/tests/test_retrieval_temporal_and_tombstones.py`
 - `App/backend/tests/test_query_spelling_corpus_guard.py`

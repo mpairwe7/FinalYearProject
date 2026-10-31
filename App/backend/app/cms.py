@@ -9,11 +9,13 @@ from __future__ import annotations
 import re
 from typing import Any
 
+_PUNCT = re.compile(r"[^\w\s]+")
 _WS = re.compile(r"\s+")
 
 
 def normalize_query(text: str) -> str:
-    return _WS.sub(" ", str(text or "").strip().lower())
+    cleaned = _PUNCT.sub(" ", str(text or "").casefold())
+    return _WS.sub(" ", cleaned).strip()
 
 
 def lookup(query: str) -> dict[str, Any] | None:
@@ -22,7 +24,13 @@ def lookup(query: str) -> dict[str, Any] | None:
     key = normalize_query(query)
     if not key:
         return None
-    return db.get_answer_override(key)
+    row = db.get_answer_override(key)
+    if row is not None:
+        return row
+    legacy_key = _WS.sub(" ", str(query or "").strip().lower())
+    if legacy_key and legacy_key != key:
+        return db.get_answer_override(legacy_key)
+    return None
 
 
 def upsert(

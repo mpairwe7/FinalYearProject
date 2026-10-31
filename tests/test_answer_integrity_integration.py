@@ -598,3 +598,57 @@ class TestStatutoryGapFixes:
         assert "Local Service Tax" in body["reply"]
         assert "Local Governments (Amendment) Act 2008" in body["reply"]
         assert "URA does not assess, collect, or enforce" in body["reply"]
+
+
+class TestOctober2026GapClosuresIntegration:
+    """End-to-end integration tests for G288, G290, G293, G294 across REST and SSE."""
+
+    def test_g290_staff_answer_override_serves_on_both_rest_and_sse_with_punctuation_variance(self, client):
+        from app import cms
+
+        cms.upsert(
+            "What is the special URA test override question",
+            "Verified Staff Override Answer: URA toll-free helpline is 0800 117 000.",
+            source_url="https://ura.go.ug/override-test",
+            created_by="ura_admin",
+            enabled=True,
+        )
+        flags.set("answer_overrides", True)
+        try:
+            # REST with trailing question mark and mixed case
+            rest = client.post(
+                "/v1/chat",
+                json={"message": "What is the special URA test override question?!"},
+            )
+            assert rest.status_code == 200
+            body = rest.json()
+            assert body["retrieval_mode"] == "answer_override"
+            assert "Verified Staff Override Answer" in body["reply"]
+
+            # SSE streaming transport parity
+            stream_res = client.post(
+                "/v1/chat/stream",
+                json={"message": "what is the special ura test override question?"},
+            )
+            assert stream_res.status_code == 200
+            assert "Verified Staff Override Answer" in stream_res.text
+            assert '"retrieval_mode": "answer_override"' in stream_res.text
+        finally:
+            flags.clear("answer_overrides")
+
+    def test_g288_and_g294_false_premise_contradiction_and_fiscal_validity_bounds(self):
+        from app import entailment, indexer
+
+        passage = "The standard rate of Value Added Tax (VAT) in Uganda is 18%."
+        assert entailment.numeric_contradiction(
+            "Yes, the standard VAT rate in Uganda is 20% [1].",
+            passage,
+            user_query="Is the standard VAT rate 20%?",
+        )
+        assert not entailment.numeric_contradiction(
+            "No, the standard VAT rate in Uganda is 18%, not 20% [1].",
+            passage,
+            user_query="Is the standard VAT rate 20%?",
+        )
+        assert indexer.fiscal_year_validity_bounds("FY2026-27") == ("2026-07-01", "2027-06-30")
+

@@ -23,13 +23,14 @@ import re
 from .number_words import ach_words, decimal_words, en_words, en_year, lg_words, nyn_words, sw_words
 
 # Citation markers: [1], [1, 2], [1; 3], ignoring markdown links [1](url)
-_CITATION_RE = re.compile(r"\s*\[\d+(?:\s*[,;]\s*\d+)*\](?!\()")
+# Bounded leading space to guarantee O(n) linear time on pathological inputs (G87).
+_CITATION_RE = re.compile(r"[ \t]?\[\d{1,4}(?:[ \t]{0,4}[,;][ \t]{0,4}\d{1,4}){0,10}\](?!\()")
 
 # Markdown links: [Title](url) -> Title
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^\)]+\)")
 # A model sometimes emits the link without the opening bracket:
 # "www.ura.go.ug](http://www.ura.go.ug/)". Keep the visible label, drop the target.
-_BROKEN_MD_LINK_RE = re.compile(r"([^\s\]]+)\]\((?:https?://|www\.)[^)\s]*\)")
+_BROKEN_MD_LINK_RE = re.compile(r"(?<!\S)([^\s\]]{1,120})\]\((?:https?://|www\.)[^)\s]{0,500}\)")
 _DANGLING_URL_TAIL_RE = re.compile(r"\]\((?:https?://|www\.)[^)\s]*\)?")
 _BARE_URL_RE = re.compile(r"\b(?:https?://|www\.)\S+", re.IGNORECASE)
 # "…the URA portal at https://ura.go.ug." -> "…the URA portal." The address is
@@ -92,12 +93,13 @@ _CODE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
 _INLINE_CODE_RE = re.compile(r"`([^`]+)`")
 
 # Markdown tables (lines starting with | or containing multiple |)
-_TABLE_ROW_RE = re.compile(r"^\s*\|.*\|\s*$", re.MULTILINE)
-_TABLE_PIPE_RE = re.compile(r"\s*\|\s*")
+# Bounded horizontal whitespace only (never \s* under MULTILINE, which spans newlines in O(n^2) time — G87).
+_TABLE_ROW_RE = re.compile(r"^[ \t]{0,16}\|[^\n]*\|[ \t]{0,16}$", re.MULTILINE)
+_TABLE_PIPE_RE = re.compile(r"[ \t]?\|[ \t]?")
 
 # Headers and list bullets
-_HEADER_RE = re.compile(r"^\s*#{1,6}\s+", re.MULTILINE)
-_BULLET_RE = re.compile(r"^\s*[-*+]\s+", re.MULTILINE)
+_HEADER_RE = re.compile(r"^[ \t]{0,16}#{1,6}[ \t]+", re.MULTILINE)
+_BULLET_RE = re.compile(r"^[ \t]{0,16}[-*+][ \t]+", re.MULTILINE)
 _SECTION_EMOJI_RE = re.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]\ufe0f?[ \t]*")
 
 # Markdown bold / italics
@@ -183,7 +185,7 @@ _GENERAL_TOLLFREE_RE = re.compile(r"\b0800[ \t-]*(\d{3})[ \t-]*(\d{3})\b")
 _TOLLFREE_PAIRS_RE = re.compile(r"\b0800[ \t-]+(\d{2})[ \t-]+(\d{2})[ \t-]+(\d{2})\b")
 
 # Numbered steps for cadence and pacing
-_NUMBERED_STEP_RE = re.compile(r"^\s*(\d{1,2})[.)]\s+", re.MULTILINE)
+_NUMBERED_STEP_RE = re.compile(r"^[ \t]{0,16}(\d{1,2})[.)][ \t]+", re.MULTILINE)
 _INLINE_STEP_AFTER_PUNCT_RE = re.compile(r"([:;.!?])[ \t]+(\d{1,2})[.)][ \t]+(?=[A-Z*])")
 _INLINE_STEP_CONT_RE = re.compile(r"(?<![.!?:;\n])[ \t]+([2-9]|1[0-2])[.)][ \t]+(?=[A-Z*])")
 _BREADCRUMB_ARROW_RE = re.compile(

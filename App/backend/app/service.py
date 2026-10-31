@@ -3937,7 +3937,11 @@ def _translate_by_paragraph(text: str, locale: str) -> tuple[str | None, str]:
     paragraphs = [(i, piece) for i, piece in enumerate(pieces) if i % 2 == 0 and piece.strip()]
     if len(paragraphs) <= 1:
         out = _translate_reply(text, locale)
-        return (out, "ok") if out is not None else (None, "mt_failed")
+        if out is None or not out.strip():
+            return None, "mt_failed"
+        if mt.looped(text, out):
+            return None, "looped"
+        return out, "ok"
     # One copied context per task (a context cannot be entered by two threads
     # at once), taken here so each translation keeps the turn's span and usage.
     contexts = [contextvars.copy_context() for _ in paragraphs]
@@ -3953,6 +3957,8 @@ def _translate_by_paragraph(text: str, locale: str) -> tuple[str | None, str]:
             return None, "mt_failed"
         if not mt.length_plausible(source, out):
             return None, "collapsed"
+        if mt.looped(source, out):
+            return None, "looped"
         translated[index] = out.strip()
     return "".join(translated), "ok"
 
@@ -4565,8 +4571,15 @@ def _retrieval_degraded(retriever: Any) -> bool:
 def _faq_hits_to_retrieval_hits(
     entries: list[dict[str, str]],
     locale: str = "en",
+    *,
+    query: str = "",
 ) -> list[dict[str, Any]]:
     """Convert FAQ index rows into the retrieval-hit shape used downstream."""
+    from .indexer import fiscal_year_validity_bounds
+    from .pdf_corpus import fiscal_year_from_name
+    from .query import extract_retrieval_filters
+
+    explicit_fy = str((extract_retrieval_filters(query) if query else {}).get("fiscal_year") or "")
     hits: list[dict[str, Any]] = []
     for entry in entries:
         tag = str(entry.get("tag") or "")
@@ -4581,21 +4594,31 @@ def _faq_hits_to_retrieval_hits(
             if loc and loc != "en" and entry.get(f"answer_{loc}")
             else entry["answer"]
         )
+        src = str(entry.get("source") or "")
+        fy = str(entry.get("fiscal_year") or fiscal_year_from_name(Path(src).stem) or "")
+        v_from, v_to = fiscal_year_validity_bounds(fy)
         hits.append(
             {
                 "text": f"Question: {q}\nAnswer: {a}",
                 "answer": a,
                 "question": q,
-                "source": entry["source"],
+                "source": src,
                 "chunk_id": "",
                 "page": "",
                 "section": tag,
                 "doc_type": "csv",
-                "url": _canonical_faq_url(entry.get("source", "")),
+                "fiscal_year": fy,
+                "valid_from": v_from,
+                "valid_to": v_to,
+                "url": _canonical_faq_url(src),
                 "score_rrf": float(entry.get("_overlap", 0.0) or 0.0),
                 "faq_match_score": float(entry.get("_faq_match_score", 0.0) or 0.0),
             }
         )
+    if explicit_fy and hits:
+        compatible = [h for h in hits if not h.get("fiscal_year") or h.get("fiscal_year") == explicit_fy]
+        if compatible:
+            return compatible
     return hits
 
 
@@ -4792,8 +4815,11 @@ class ChatModel:
         )
 
         # Hybrid retriever (graceful degradation)
+        from .retriever import set_shared_retriever
+
         self._retriever = HybridRetriever()
         self._retriever_ready = self._retriever.initialize()
+        set_shared_retriever(self._retriever)
 
         # OWASP LLM Top 10 guardrails
         self._input_guard = InputGuard()
@@ -7552,17 +7578,31 @@ class ChatModel:
                 from .claim_verifier import _numbers as _claim_nums
 
                 unsupported_items = claim_report.get("unsupported_claims") or []
-                vf_nums = _claim_nums(verified_facts) | _claim_nums(message) if verified_facts else set()
+                ctx_nums = _claim_nums(" ".join(str(h.get("text") or h.get("answer") or "") for h in (hits or []) if h))
+                msg_nums = _claim_nums(message)
+                vf_nums = (_claim_nums(verified_facts) | msg_nums | ctx_nums) if (verified_facts or msg_nums) else set()
+                # Also allow monthly/annual conversions (x12, /12) and pairwise sums/differences/products of user amounts
+                derived_nums = set(vf_nums)
+                for n_str in list(msg_nums):
+                    try:
+                        nv = float(n_str)
+                        for derived in (nv * 12.0, nv / 12.0, nv * 0.18, nv * 0.30, nv * 0.06, nv * 0.15):
+                            derived_nums.add(f"{int(round(derived))}" if abs(derived - round(derived)) < 1e-6 else f"{derived:g}")
+                    except ValueError:
+                        pass
                 unsupported_backed_by_vf = bool(
-                    vf_nums
+                    derived_nums
                     and unsupported_items
                     and all(
-                        (cn := _claim_nums(str(item.get("text", "") if isinstance(item, dict) else item)))
-                        and cn <= vf_nums
+                        bool(cn := _claim_nums(str(item.get("text", "") if isinstance(item, dict) else item)))
+                        and cn <= derived_nums
                         for item in unsupported_items
                     )
                 )
-                if (has_money_amount(message) or unsupported_backed_by_vf) and not contradicted_list:
+                if (
+                    (unsupported_backed_by_vf and (has_money_amount(message) or bool(verified_facts)))
+                    and not contradicted_list
+                ):
                     decision = "approve"
                     reasons.append("approved user-scenario calculation draft")
                 elif unsupported_items:
@@ -10866,25 +10906,6 @@ class ChatModel:
                 else:
                     rewritten = normalize_query(message)
 
-            if flags.is_enabled("answer_overrides"):
-                from . import cms as _cms
-
-                override = _cms.lookup(rewritten)
-                if override:
-                    return _with_discrepancy(
-                        self._deterministic_result(
-                            reply=str(override.get("reply") or ""),
-                            curated=True,
-                            hits=[],
-                            sources=[str(override.get("source_url") or "staff-override")],
-                            citations=[],
-                            retrieval_mode="answer_override",
-                            thread_id=thread_id,
-                            locale=locale,
-                            agent_role="staff_override",
-                        )
-                    )
-
             # 0c. The answer language is conversation state, not a per-message
             #     guess (app.language_state). The profile's saved language is
             #     consent-gated personalization, so that loads first.
@@ -10909,6 +10930,29 @@ class ChatModel:
                     router_message, router_rewritten = self._english_router_form(message, rewritten, locale)
             if turn_out is not None and router_message != message:
                 turn_out["english_message"] = router_message
+
+            if flags.is_enabled("answer_overrides"):
+                from . import cms as _cms
+
+                override = (
+                    _cms.lookup(message)
+                    or _cms.lookup(rewritten)
+                    or (_cms.lookup(router_message) if router_message != message else None)
+                )
+                if override:
+                    return _with_discrepancy(
+                        self._deterministic_result(
+                            reply=str(override.get("reply") or ""),
+                            curated=True,
+                            hits=[],
+                            sources=[str(override.get("source_url") or "staff-override")],
+                            citations=[],
+                            retrieval_mode="answer_override",
+                            thread_id=thread_id,
+                            locale=locale,
+                            agent_role="staff_override",
+                        )
+                    )
             self._update_turn_case_facts(
                 thread_id=thread_id,
                 message=router_message or message,
@@ -11768,7 +11812,7 @@ class ChatModel:
                         binding_query=binding_query,
                         locale=locale,
                     )
-                    hits = _faq_hits_to_retrieval_hits(kw_hits, locale=locale)
+                    hits = _faq_hits_to_retrieval_hits(kw_hits, locale=locale, query=retrieval_query)
                 # An answer built from these hits during an outage is not the
                 # corpus's answer; cached, it would keep being served for the
                 # cache TTL after Qdrant recovers. Curated templates, which do
@@ -12582,7 +12626,10 @@ class ChatModel:
                         "unsupported_count": len(claim_report.get("unsupported_claims") or []),
                         "uncited_count": len(claim_report.get("uncited_claims") or []),
                     }
-            if agentic_used_tools or connector_intent is not None:
+            has_tool_contradiction = bool(
+                claim_report and (claim_report.get("contradicted_claims") or claim_report.get("decision") == "escalate")
+            )
+            if (agentic_used_tools or connector_intent is not None) and not has_tool_contradiction:
                 response_judge = {
                     "decision": "approve",
                     "final_decision": "approve",
@@ -13010,6 +13057,32 @@ class ChatModel:
         router_message, router_rewritten = self._english_router_form(message, rewritten, locale)
         if turn_out is not None and router_message != message:
             turn_out["english_message"] = router_message
+
+        if flags.is_enabled("answer_overrides"):
+            from . import cms as _cms
+
+            override_s = (
+                _cms.lookup(message)
+                or _cms.lookup(rewritten)
+                or (_cms.lookup(router_message) if router_message != message else None)
+            )
+            if override_s:
+                return {
+                    **self._deterministic_result(
+                        reply=str(override_s.get("reply") or ""),
+                        curated=True,
+                        hits=[],
+                        sources=[str(override_s.get("source_url") or "staff-override")],
+                        citations=[],
+                        retrieval_mode="answer_override",
+                        thread_id=thread_id,
+                        locale=locale,
+                        agent_role="staff_override",
+                    ),
+                    "_hits": [],
+                    "_history": [],
+                    "_short_circuit": True,
+                }
         self._update_turn_case_facts(
             thread_id=thread_id,
             message=router_message or message,

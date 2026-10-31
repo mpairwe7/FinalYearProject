@@ -12,12 +12,31 @@ no re-plumbing — while making it available to tool-using agents.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from . import Tool, ToolRegistry, ToolSchema
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 logger = logging.getLogger(__name__)
+
+_PROMPT_CITATION_OFFSET: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "_PROMPT_CITATION_OFFSET", default=0
+)
+
+
+@contextlib.contextmanager
+def prompt_citation_offset_scope(offset: int) -> Iterator[None]:
+    """Set the starting citation offset so tool results do not collide with prompt passages [1]..[k] (G293)."""
+    token = _PROMPT_CITATION_OFFSET.set(max(0, int(offset or 0)))
+    try:
+        yield
+    finally:
+        _PROMPT_CITATION_OFFSET.reset(token)
 
 # Module-level singleton holding a shared HybridRetriever instance.
 # We lazily construct one on first call so importing this module
@@ -27,27 +46,16 @@ _retriever_ready: bool = False
 
 
 def _get_retriever() -> Any:
-    """Lazy-init a shared HybridRetriever.
-
-    We deliberately do NOT share ``ChatModel._retriever`` — the
-    tools package must be usable from contexts that don't hold a
-    ChatModel (e.g. the evaluation harness, offline workers).
-    The retriever is cheap-ish to instantiate once per process.
-    """
+    """Return the shared process-wide HybridRetriever (G292)."""
     global _retriever, _retriever_ready
     if _retriever is not None:
         return _retriever
     try:
-        from ..retriever import HybridRetriever
+        from ..retriever import get_shared_retriever
 
-        _retriever = HybridRetriever()
-        _retriever_ready = _retriever.initialize()
-        if _retriever_ready:
-            logger.info("RAG tool: HybridRetriever initialised")
-        else:
-            logger.warning(
-                "RAG tool: HybridRetriever initialisation failed — returning empty results"
-            )
+        shared = get_shared_retriever(auto_init=True)
+        _retriever_ready = bool(getattr(shared, "is_ready", False))
+        return shared
     except Exception:
         logger.exception("RAG tool: HybridRetriever import/init error")
         _retriever = None
@@ -125,6 +133,7 @@ class SearchKnowledgeBaseTool(Tool):
         top_k: int = 4,
         filter_doc_type: str = "any",
         filter_tag: str | None = None,
+        citation_offset: int | None = None,
     ) -> dict[str, Any]:
         retriever = _get_retriever()
         if retriever is None or not _retriever_ready:
@@ -135,6 +144,7 @@ class SearchKnowledgeBaseTool(Tool):
             }
 
         top_k = max(1, min(int(top_k), 10))
+        base_offset = max(0, int(_PROMPT_CITATION_OFFSET.get() if citation_offset is None else citation_offset))
         filters: dict[str, Any] = {}
         if filter_doc_type and filter_doc_type != "any":
             filters["doc_type"] = filter_doc_type
@@ -160,7 +170,7 @@ class SearchKnowledgeBaseTool(Tool):
             return {"ok": False, "error": f"search failed: {e}", "results": []}
 
         results: list[dict[str, Any]] = []
-        for i, h in enumerate(hits, 1):
+        for i, h in enumerate(hits, base_offset + 1):
             text = (h.get("text") or h.get("answer") or "")[:800]
             results.append(
                 {

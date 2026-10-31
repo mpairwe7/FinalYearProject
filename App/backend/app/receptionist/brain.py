@@ -1722,6 +1722,15 @@ class UraReceptionistBrain(LLMService):
             latencies={"brain_ms": gen_latency_ms},
             speak=speak_allowed,
         )
+        if not speak_allowed and self.room.state.mode == "ai":
+            _screen_pointers = {
+                "en": "I have placed the exact figures on your screen so you can read them clearly.",
+                "lg": "Nkutaddeko emiwendo emituufu ku lutimbe lwo osobole okugisoma obulungi.",
+                "sw": "Nimeweka tarakimu kamili kwenye skrini yako ili uweze kuzisoma vizuri.",
+                "nyn": "Entego z'emirimo nzigitsire aha sikirini yaawe reeba gye.",
+                "ach": "Aketo wel ma atir i kom kio ma megi wek ikwan maber.",
+            }
+            await self._say(_screen_pointers.get(self.language, _screen_pointers["en"]))
 
     def _call_at_risk(self) -> bool:
         """True once per call, when the risk monitor has marked it ``at_risk``.

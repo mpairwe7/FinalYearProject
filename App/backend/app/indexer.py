@@ -32,6 +32,7 @@ import base64
 import json
 import logging
 import os
+import re
 import zlib
 from pathlib import Path
 from typing import Any
@@ -136,8 +137,29 @@ def _embedding_text(doc: dict[str, Any]) -> str:
     return (prefix + doc["text"]).strip() if prefix else doc["text"]
 
 
+_FY_BOUNDS_RE = re.compile(r"^FY(\d{4})-(\d{2,4})$", re.IGNORECASE)
+
+
+def fiscal_year_validity_bounds(fiscal_year: str) -> tuple[str, str]:
+    """Return ISO-8601 ``(valid_from, valid_to)`` bounds for a Ugandan fiscal year (1 July – 30 June).
+
+    Models explicit effective-date validity in the index payload (G294) so
+    point-in-time ('as of') queries can filter or rank by statutory validity
+    window rather than relying on string labels alone.
+    """
+    m = _FY_BOUNDS_RE.match(str(fiscal_year or "").strip())
+    if not m:
+        return "", ""
+    start_year = int(m.group(1))
+    end_part = m.group(2)
+    end_year = int(f"{str(start_year)[:2]}{end_part}") if len(end_part) == 2 else int(end_part)
+    if end_year < start_year:
+        end_year = start_year + 1
+    return f"{start_year:04d}-07-01", f"{end_year:04d}-06-30"
+
+
 def annotate_fiscal_year(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Ensure every vector document carries a ``fiscal_year``, in place.
+    """Ensure every vector document carries ``fiscal_year`` and effective-date bounds (G294), in place.
 
     PDF chunks already record the edition their source PDF declares. FAQ and
     teacher-QA rows do not, so it is derived from the source filename here —
@@ -152,6 +174,14 @@ def annotate_fiscal_year(documents: list[dict[str, Any]]) -> list[dict[str, Any]
     for doc in documents:
         if not doc.get("fiscal_year"):
             doc["fiscal_year"] = fiscal_year_from_name(Path(doc.get("source", "")).stem)
+        fy = str(doc.get("fiscal_year") or "")
+        v_from, v_to = fiscal_year_validity_bounds(fy)
+        if not doc.get("valid_from"):
+            doc["valid_from"] = v_from
+        if not doc.get("valid_to"):
+            doc["valid_to"] = v_to
+        if "superseded_by" not in doc:
+            doc["superseded_by"] = ""
     return documents
 
 
