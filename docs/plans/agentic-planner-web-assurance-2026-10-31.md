@@ -49,7 +49,7 @@ Secret values are not readable, so a flag's state comes from which stages the
 | Observation | Evidence | Meaning |
 | --- | --- | --- |
 | Live research is on | `live_web_research` appears in `stages=` | The defects below were serving taxpayers, not sitting behind a flag |
-| The check fails silently | `'live_web_research': 12122.73` ms on a waiver question, then an ordinary answer with `retrieval_mode=sparse` and no disclosure | Two 6 s search timeouts. G318 and G319 live: about 12 s spent for nothing on a time-sensitive question |
+| The check fails silently | `'live_web_research': 12122.73` ms on the one time-sensitive question probed, then an ordinary answer with `retrieval_mode=sparse` and no disclosure. Turns with no trigger took under 30 ms | Consistent with two 6 s search timeouts, though the cause is inferred because that path logged only at debug level. G318 and G319 live |
 | Routes are ignored | `supervisor: route=tools`, then `agent_role=rag_answerer` | G309 live |
 | The graph is not running | No `langgraph_execution` stage, though `FLAG_LANGGRAPH` is set | G332 is latent |
 | No provider exists | No `TAVILY_API_KEY`, `BRAVE_SEARCH_API_KEY` or `SEARXNG_URL` | G326: the check cannot succeed until one is added |
