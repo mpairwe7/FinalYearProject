@@ -709,12 +709,16 @@ class TestAWholeTurnHasADeadline:
 
     def test_a_generation_only_gets_what_is_left_of_the_turn(self, monkeypatch) -> None:
         seen: list[float] = []
+        wait_for_it = concurrent.futures.Future.result
 
-        def fake_result(self, timeout=None):
+        def spying_result(self, timeout=None):
             seen.append(timeout)
-            return ("An answer.", {"finish_reason": "stop"})
+            # Really waits. A stub here left the job queued, and it found the next
+            # test's mock of generate when it ran, failing that test at random.
+            return wait_for_it(self, timeout)
 
-        monkeypatch.setattr(concurrent.futures.Future, "result", fake_result)
+        monkeypatch.setattr(concurrent.futures.Future, "result", spying_result)
+        monkeypatch.setattr(service_module.llm_module, "generate", lambda **_kwargs: "An answer.")
         with service_module.turn_deadline(5.0):
             service_module._local_llm_then_cloud("q", [], None, "en", deadline_s=45.0)
 
