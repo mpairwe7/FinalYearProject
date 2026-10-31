@@ -93,12 +93,14 @@ class StreamAgenticTurnTest(unittest.IsolatedAsyncioTestCase):
                 yielded.append(evt)
 
         types = [t for t, _ in yielded]
-        # Order: forwarded callback events, then token, then _full_reply.
+        # Order: forwarded callback events, then _full_reply. No token: the reply
+        # arrives whole, so it stays unseen until the output guards have read it,
+        # and the caller sends it.
         self.assertEqual(types[0], "iteration.started")
         self.assertIn("tool_call.started", types)
         self.assertIn("tool_call.completed", types)
         self.assertIn("iteration.final", types)
-        self.assertIn("token", types)
+        self.assertNotIn("token", types)
         self.assertIn("_full_reply", types)
 
 

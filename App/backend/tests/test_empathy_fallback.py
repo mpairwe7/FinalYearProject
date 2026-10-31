@@ -139,8 +139,9 @@ class ExtractiveFallbackEmpathyRestTest(unittest.TestCase):
         self.assertTrue(
             result["reply"].startswith(empathy_ack("urgency")), result["reply"][:80]
         )
-        cached = cache_put.call_args.args[1]
-        self.assertFalse(any(cached["reply"].startswith(a) for a in _ALL_ACKS))
+        # A fallback is not cached at all: it would outlive the outage that caused
+        # it, and a cache hit carries neither the acknowledgment nor the disclosure.
+        cache_put.assert_not_called()
 
 
 class _ExtractiveFakeModel:

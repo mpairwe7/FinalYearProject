@@ -778,7 +778,7 @@ All major subsystems are behind feature flags for progressive rollout:
 | `portal_copilot` (`FLAG_PORTAL_COPILOT`) | on | Phase 42: 4-tier URA portal task execution (`portal_copilot.py`), Claude-style HITL Allow/Disallow confirmation cards (`POST /v1/portal/tasks/execute`), inline chat form elicitation, step-up login auto-return (`returnTo`), screenshot-to-co-pilot handoff, and inbuilt stuck-user DOM co-pilot (`/portal/[portalKey]`) |
 
 The table above lists the flags that gate a subsystem; `flags.py` holds
-**86** in total, including the per-phase switches for voice, offline and
+**87** in total, including the per-phase switches for voice, offline and
 quantization. `flags.all()` is the authoritative list. Production also
 forces `auth_required`, `multi_tenant`, `audit_ledger`, `ticket_queue`,
 and `voice_consent` unless explicitly disabled (startup then refuses).
