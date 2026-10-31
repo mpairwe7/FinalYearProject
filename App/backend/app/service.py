@@ -13022,7 +13022,11 @@ class ChatModel:
 
         trace_ctx = trace_ctx or {}
         result["current_topic"] = str(trace_ctx.get("current_topic") or "")
-        result["_attestation"] = attest_turn(trace_ctx.get("timings") or {}, transport="rest")
+        # Runs on every exit of every turn, so a fault here must not cost the answer.
+        try:
+            result["_attestation"] = attest_turn(trace_ctx.get("timings") or {}, transport="rest")
+        except Exception as exc:  # noqa: BLE001 - telemetry must never fail a turn
+            logger.warning("Pipeline attestation failed: %s", type(exc).__name__)
         # Taken here because the plan scope closes before the ledger row is written.
         result["_plan"] = _turn_plan_summary()
         # Every exit comes through here, so none can lose the check. After every

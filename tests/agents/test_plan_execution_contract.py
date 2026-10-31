@@ -334,6 +334,21 @@ class TestRuntimeAttestation:
 
         assert verdict["sla_breaches"] == []
 
+    def test_a_fault_in_attestation_does_not_cost_the_answer(self, tmp_db, fresh_registry, monkeypatch):
+        # It runs on every exit of every turn.
+        from app import turn_pipeline
+        from app.service import ChatModel
+
+        def explode(*_a, **_k):
+            raise RuntimeError("attestation broke")
+
+        monkeypatch.setattr(turn_pipeline, "attest_turn", explode)
+
+        result = ChatModel().generate("How do I evade tax?")  # nosemgrep: ura-llm01-raw-user-input-to-llm
+
+        assert result["reply"]
+        assert "_attestation" not in result
+
     def test_a_real_turn_reaches_the_audit_row(self, tmp_db, fresh_registry):
         from app.audit.turns import build_turn_payload
         from app.service import ChatModel

@@ -249,6 +249,8 @@ def test_redirect_to_disallowed_target_and_isolated_worker(
         return orig_client(*args, **kwargs)
 
     monkeypatch.setattr(sbx.httpx, "Client", _patched_client)
+    # The transport is mocked, so the pre-connect DNS check must not need a real resolver.
+    monkeypatch.setattr(sbx, "resolves_to_public_address", lambda _host: True)
     with pytest.raises(sbx.SandboxDownloadRejected, match="Disallowed sandbox redirect target"):
         sbx._default_stream_downloader("https://ura.go.ug/redirect-doc.pdf", 1024 * 1024)
 
