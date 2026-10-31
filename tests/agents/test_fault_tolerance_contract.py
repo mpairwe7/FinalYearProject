@@ -483,6 +483,28 @@ class TestParallelToolCalls:
         assert outcomes[1]["error"] == "queue down"
         assert outcomes[1]["repeated_call"] is True
 
+    def test_a_duplicate_of_a_success_is_not_reported_as_a_failure(self, tool_loop, monkeypatch) -> None:
+        from app.mcp import get_client
+
+        same = {"name": "escalate_to_human", "arguments": {"reason": "a"}}
+        tool_loop([[same, dict(same)], []])
+        monkeypatch.setattr(
+            get_client(), "call_tool", lambda *_a, **_k: mock.Mock(result={"ok": True, "ticket_id": "T-1"}, ok=True)
+        )
+        events: list[dict[str, Any]] = []
+
+        result = llm.generate_with_tools(
+            "I need a person",
+            tool_names=["escalate_to_human"],
+            user_id="u1",
+            user_role="verified_taxpayer",
+            event_callback=events.append,
+        )
+
+        assert [call["result"]["ok"] for call in result["tool_calls"]] == [True, True]
+        assert result["tool_calls"][1]["result"]["ticket_id"] == "T-1"
+        assert [event["ok"] for event in events if event["type"] == "tool_call.completed"] == [True, True]
+
     def test_a_duplicate_that_was_admitted_first_still_gets_the_result(self, tool_loop, monkeypatch) -> None:
         # In a parallel round, the second identical call can reach the budget first.
         from app.mcp import get_client
