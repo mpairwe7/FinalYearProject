@@ -105,10 +105,14 @@ class AnswerVerificationGapClosureTests(unittest.TestCase):
         self.assertNotIn("approved user-scenario calculation draft", judge_numberless["reasons"])
 
     def test_g290_cms_normalize_query_strips_punctuation_and_preserves_legacy_lookup(self) -> None:
-        """G290: Punctuation differences between cms.upsert and rewritten lookup must resolve to the same key."""
+        """G290: Punctuation differences resolve to the same key while keeping 1.5 and 1-5 distinct."""
         self.assertEqual(
             cms.normalize_query("What is the standard VAT rate?"),
             cms.normalize_query("what is the standard vat rate"),
+        )
+        self.assertNotEqual(
+            cms.normalize_query("Is the rate 1.5%?"),
+            cms.normalize_query("Is the rate 1-5%?"),
         )
         with mock.patch("app.database.get_answer_override") as mock_get:
             mock_get.side_effect = lambda k: {"id": "ov1", "reply": "18%"} if k == "what is vat" else None
@@ -174,6 +178,8 @@ class RetrieverLifecycleAndTemporalTests(unittest.TestCase):
         # Point-in-time 'as of' date extraction & candidate filtering (G294)
         self.assertEqual(query.extract_as_of_date("What was the VAT threshold as of 2024-10-15?"), "2024-10-15")
         self.assertEqual(query.extract_as_of_date("What was the rule as at 15 October 2024?"), "2024-10-15")
+        self.assertIsNone(query.extract_as_of_date("What was the rule as of 2024-02-31?"))
+        self.assertIsNone(query.extract_as_of_date("What was the rule as of 31 February 2024?"))
         self.assertEqual(query.fiscal_year_for_iso_date("2024-10-15"), "FY2024-25")
         cands = [
             {"text": "FY2024-25 threshold 150M", "fiscal_year": "FY2024-25", "valid_from": "2024-07-01", "valid_to": "2025-06-30"},
@@ -220,10 +226,34 @@ class RetrieverLifecycleAndTemporalTests(unittest.TestCase):
 
 class MultilingualAndSpeechHardeningTests(unittest.TestCase):
     def test_g125_citation_repetition_loop_detected(self) -> None:
-        """G125: Translation degeneration like 'We[1]We[2]We[3]We[4]We[5]' is caught by mt.looped."""
+        """G125: Translation degeneration like 'We[1]We[2]We[3]We[4]We[5]' is caught by mt.looped, while 6 distinct cited items pass."""
         src = "Taxpayers must register for a TIN and file returns on time [1]."
         degenerate = "Olina okwewandiisa We[1]We[2]We[3]We[4]We[5]We[6]We[7]"
         self.assertTrue(mt.looped(src, degenerate))
+        distinct_list = "Items: alpha[1] beta[2] gamma[3] delta[4] epsilon[5] zeta[6]"
+        self.assertFalse(mt.looped(src, distinct_list))
+
+    def test_g188_resume_ticket_enforces_anonymous_vs_authenticated_owner(self) -> None:
+        """G188: An anonymous caller (expected_user_id='') must not consume a ticket issued to an authenticated user."""
+        import os
+        from app.flags import flags
+        from app.receptionist.low_bandwidth import mint_call_resume_ticket, verify_call_resume_ticket
+
+        flags.set("call_drop_resume", True)
+        try:
+            with mock.patch.dict(os.environ, {"CALL_RESUME_SECRET": "test-resume-secret-key-32-bytes!!"}):
+                ticket = mint_call_resume_ticket("call_1", "conv_1", user_id="user_auth_1", tenant_id="default")
+                self.assertTrue(ticket)
+                # Anonymous caller attempts to present authenticated user's ticket
+                self.assertIsNone(
+                    verify_call_resume_ticket(ticket, expected_user_id="", expected_tenant_id="default")
+                )
+                # Legitimate owner still succeeds because the failed check did not burn the nonce
+                claims = verify_call_resume_ticket(ticket, expected_user_id="user_auth_1", expected_tenant_id="default")
+                self.assertIsNotNone(claims)
+                self.assertEqual(claims["uid"], "user_auth_1")
+        finally:
+            flags.clear("call_drop_resume")
 
     def test_g87_speech_normalizer_regexes_run_in_linear_time(self) -> None:
         """G87: Pathological 50,000-char strings of spaces/newlines/zeros complete in < 0.25s."""

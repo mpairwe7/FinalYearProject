@@ -1650,18 +1650,27 @@ _AS_OF_DMY_RE = re.compile(
 
 
 def extract_as_of_date(query: str) -> str | None:
-    """Extract an explicit point-in-time ISO date (``YYYY-MM-DD``) from an 'as of' query (G294)."""
+    """Extract a validated point-in-time ISO date (``YYYY-MM-DD``) from an 'as of' query (G294)."""
+    import datetime as _dt
+
     text = query or ""
     m_iso = _AS_OF_ISO_RE.search(text)
     if m_iso:
-        return f"{m_iso.group(1)}-{m_iso.group(2)}-{m_iso.group(3)}"
+        try:
+            d = _dt.date(int(m_iso.group(1)), int(m_iso.group(2)), int(m_iso.group(3)))
+            return d.isoformat()
+        except ValueError:
+            return None
     m_dmy = _AS_OF_DMY_RE.search(text)
     if m_dmy:
         day_raw = m_dmy.group(1) or m_dmy.group(3) or "01"
         month_num = _MONTH_MAP.get(m_dmy.group(2).lower(), 1)
         year_num = int(m_dmy.group(4))
-        day_num = max(1, min(31, int(day_raw)))
-        return f"{year_num:04d}-{month_num:02d}-{day_num:02d}"
+        try:
+            d = _dt.date(year_num, month_num, int(day_raw))
+            return d.isoformat()
+        except ValueError:
+            return None
     return None
 
 
@@ -1861,16 +1870,23 @@ def translate_query_for_retrieval(query: str, locale: str) -> str | None:
 
     query_for_mt = text
     loc_norm = (locale or "").strip().lower().split("-")[0]
-    if loc_norm == "sw":
-        with contextlib.suppress(Exception):
+    with contextlib.suppress(Exception):
+        if loc_norm == "sw":
             from .receptionist.lexicon import normalize_swahili_tax_query
 
             query_for_mt = normalize_swahili_tax_query(text) or text
-    elif loc_norm == "lg":
-        with contextlib.suppress(Exception):
+        elif loc_norm == "lg":
             from .receptionist.lexicon import normalize_luganda_tax_query
 
             query_for_mt = normalize_luganda_tax_query(text) or text
+        elif loc_norm == "nyn":
+            from .receptionist.lexicon import normalize_runyankole_tax_query
+
+            query_for_mt = normalize_runyankole_tax_query(text) or text
+        elif loc_norm == "ach":
+            from .receptionist.lexicon import normalize_acholi_tax_query
+
+            query_for_mt = normalize_acholi_tax_query(text) or text
 
     def _local() -> str | None:
         from . import llm as llm_module
@@ -1960,22 +1976,6 @@ def english_retrieval_query(query: str, locale: str | None) -> str:
     cached_raw = mt.cache.get(loc, "en", text)
     if cached_raw is not None:
         return cached_raw
-    if loc == "sw":
-        from .receptionist.lexicon import normalize_swahili_tax_query
-
-        text = normalize_swahili_tax_query(text)
-    elif loc == "lg":
-        from .receptionist.lexicon import normalize_luganda_tax_query
-
-        text = normalize_luganda_tax_query(text)
-    elif loc == "nyn":
-        from .receptionist.lexicon import normalize_runyankole_tax_query
-
-        text = normalize_runyankole_tax_query(text)
-    elif loc == "ach":
-        from .receptionist.lexicon import normalize_acholi_tax_query
-
-        text = normalize_acholi_tax_query(text)
     english = translate_query_for_retrieval(text, loc)
     if not english or english.casefold() == text.casefold():
         return text

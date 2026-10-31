@@ -633,6 +633,27 @@ class TestOctober2026GapClosuresIntegration:
             assert stream_res.status_code == 200
             assert "Verified Staff Override Answer" in stream_res.text
             assert '"retrieval_mode": "answer_override"' in stream_res.text
+
+            # Crisis detection must take precedence over a matching override key on both paths
+            cms.upsert(
+                "I want to end my life right now",
+                "This override must never mask crisis support.",
+                created_by="ura_admin",
+                enabled=True,
+            )
+            crisis_rest = client.post(
+                "/v1/chat",
+                json={"message": "I want to end my life right now"},
+            )
+            assert crisis_rest.status_code == 200
+            assert crisis_rest.json()["retrieval_mode"] == "crisis_support"
+
+            crisis_stream = client.post(
+                "/v1/chat/stream",
+                json={"message": "I want to end my life right now"},
+            )
+            assert crisis_stream.status_code == 200
+            assert '"retrieval_mode": "crisis_support"' in crisis_stream.text
         finally:
             flags.clear("answer_overrides")
 

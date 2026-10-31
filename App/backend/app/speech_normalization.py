@@ -24,7 +24,7 @@ from .number_words import ach_words, decimal_words, en_words, en_year, lg_words,
 
 # Citation markers: [1], [1, 2], [1; 3], ignoring markdown links [1](url)
 # Bounded leading space to guarantee O(n) linear time on pathological inputs (G87).
-_CITATION_RE = re.compile(r"[ \t]?\[\d{1,4}(?:[ \t]{0,4}[,;][ \t]{0,4}\d{1,4}){0,10}\](?!\()")
+_CITATION_RE = re.compile(r"[ \t]?\[\d+(?:[ \t]*[,;][ \t]*\d+)*\](?!\()")
 
 # Markdown links: [Title](url) -> Title
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^\)]+\)")
@@ -94,12 +94,12 @@ _INLINE_CODE_RE = re.compile(r"`([^`]+)`")
 
 # Markdown tables (lines starting with | or containing multiple |)
 # Bounded horizontal whitespace only (never \s* under MULTILINE, which spans newlines in O(n^2) time — G87).
-_TABLE_ROW_RE = re.compile(r"^[ \t]{0,16}\|[^\n]*\|[ \t]{0,16}$", re.MULTILINE)
+_TABLE_ROW_RE = re.compile(r"^[ \t]*\|[^\n]*\|[ \t]*$", re.MULTILINE)
 _TABLE_PIPE_RE = re.compile(r"[ \t]?\|[ \t]?")
 
 # Headers and list bullets
-_HEADER_RE = re.compile(r"^[ \t]{0,16}#{1,6}[ \t]+", re.MULTILINE)
-_BULLET_RE = re.compile(r"^[ \t]{0,16}[-*+][ \t]+", re.MULTILINE)
+_HEADER_RE = re.compile(r"^[ \t]*#{1,6}[ \t]+", re.MULTILINE)
+_BULLET_RE = re.compile(r"^[ \t]*[-*+][ \t]+", re.MULTILINE)
 _SECTION_EMOJI_RE = re.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]\ufe0f?[ \t]*")
 
 # Markdown bold / italics
@@ -185,7 +185,7 @@ _GENERAL_TOLLFREE_RE = re.compile(r"\b0800[ \t-]*(\d{3})[ \t-]*(\d{3})\b")
 _TOLLFREE_PAIRS_RE = re.compile(r"\b0800[ \t-]+(\d{2})[ \t-]+(\d{2})[ \t-]+(\d{2})\b")
 
 # Numbered steps for cadence and pacing
-_NUMBERED_STEP_RE = re.compile(r"^[ \t]{0,16}(\d{1,2})[.)][ \t]+", re.MULTILINE)
+_NUMBERED_STEP_RE = re.compile(r"^[ \t]*(\d{1,2})[.)][ \t]+", re.MULTILINE)
 _INLINE_STEP_AFTER_PUNCT_RE = re.compile(r"([:;.!?])[ \t]+(\d{1,2})[.)][ \t]+(?=[A-Z*])")
 _INLINE_STEP_CONT_RE = re.compile(r"(?<![.!?:;\n])[ \t]+([2-9]|1[0-2])[.)][ \t]+(?=[A-Z*])")
 _BREADCRUMB_ARROW_RE = re.compile(

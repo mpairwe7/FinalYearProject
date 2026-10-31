@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-_PUNCT = re.compile(r"[^\w\s]+")
+_PUNCT = re.compile(r"(?!(?<=\d)[.-](?=\d))[^\w\s]+")
 _WS = re.compile(r"\s+")
 
 

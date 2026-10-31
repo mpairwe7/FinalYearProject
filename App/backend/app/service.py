@@ -7575,29 +7575,43 @@ class ChatModel:
             elif claim_decision in ("escalate", "revise") and decision != "escalate":
                 # User-scenario mathematical calculations: intermediate and resulting figures
                 # computed from user amounts are valid arithmetic applications, not unsupported statutory claims.
-                from .claim_verifier import _numbers as _claim_nums
+                from .claim_verifier import _citation_contexts, _numbers as _claim_nums
 
                 unsupported_items = claim_report.get("unsupported_claims") or []
-                ctx_nums = _claim_nums(" ".join(str(h.get("text") or h.get("answer") or "") for h in (hits or []) if h))
                 msg_nums = _claim_nums(message)
-                vf_nums = (_claim_nums(verified_facts) | msg_nums | ctx_nums) if (verified_facts or msg_nums) else set()
-                # Also allow monthly/annual conversions (x12, /12) and pairwise sums/differences/products of user amounts
-                derived_nums = set(vf_nums)
+                vf_base_nums = _claim_nums(verified_facts) | msg_nums if (verified_facts or msg_nums) else set()
+                # Also allow monthly/annual conversions (x12, /12) and standard tax rate products of user amounts,
+                # formatted to 2 decimal places to match _claim_nums() keys (e.g. "60000000.00").
+                derived_base_nums = set(vf_base_nums)
                 for n_str in list(msg_nums):
                     try:
                         nv = float(n_str)
                         for derived in (nv * 12.0, nv / 12.0, nv * 0.18, nv * 0.30, nv * 0.06, nv * 0.15):
-                            derived_nums.add(f"{int(round(derived))}" if abs(derived - round(derived)) < 1e-6 else f"{derived:g}")
+                            derived_base_nums.add(f"{derived:.2f}")
                     except ValueError:
                         pass
+
+                def _item_backed_by_cited_or_vf(item: Any) -> bool:
+                    text_val = str(item.get("text", "") if isinstance(item, dict) else item)
+                    cn = _claim_nums(text_val)
+                    if not cn:
+                        return False
+                    refs = [
+                        str(r).strip("[]")
+                        for r in (item.get("refs") or [] if isinstance(item, dict) else [])
+                        if str(r).strip("[]")
+                    ]
+                    cited_nums: set[str] = set()
+                    if refs:
+                        cited_txts = _citation_contexts(refs, citations or [], hits or [])
+                        cited_nums = _claim_nums(" ".join(cited_txts))
+                    allowed_nums = derived_base_nums | cited_nums
+                    return bool(allowed_nums) and cn <= allowed_nums and bool(cn & derived_base_nums)
+
                 unsupported_backed_by_vf = bool(
-                    derived_nums
+                    derived_base_nums
                     and unsupported_items
-                    and all(
-                        bool(cn := _claim_nums(str(item.get("text", "") if isinstance(item, dict) else item)))
-                        and cn <= derived_nums
-                        for item in unsupported_items
-                    )
+                    and all(_item_backed_by_cited_or_vf(item) for item in unsupported_items)
                 )
                 if (
                     (unsupported_backed_by_vf and (has_money_amount(message) or bool(verified_facts)))
@@ -10930,29 +10944,6 @@ class ChatModel:
                     router_message, router_rewritten = self._english_router_form(message, rewritten, locale)
             if turn_out is not None and router_message != message:
                 turn_out["english_message"] = router_message
-
-            if flags.is_enabled("answer_overrides"):
-                from . import cms as _cms
-
-                override = (
-                    _cms.lookup(message)
-                    or _cms.lookup(rewritten)
-                    or (_cms.lookup(router_message) if router_message != message else None)
-                )
-                if override:
-                    return _with_discrepancy(
-                        self._deterministic_result(
-                            reply=str(override.get("reply") or ""),
-                            curated=True,
-                            hits=[],
-                            sources=[str(override.get("source_url") or "staff-override")],
-                            citations=[],
-                            retrieval_mode="answer_override",
-                            thread_id=thread_id,
-                            locale=locale,
-                            agent_role="staff_override",
-                        )
-                    )
             self._update_turn_case_facts(
                 thread_id=thread_id,
                 message=router_message or message,
@@ -11083,6 +11074,29 @@ class ChatModel:
                     message=message, result=crisis, session_id=session_id, trace_ctx=trace_ctx
                 )
                 return crisis
+
+            if flags.is_enabled("answer_overrides"):
+                from . import cms as _cms
+
+                override = (
+                    _cms.lookup(message)
+                    or _cms.lookup(rewritten)
+                    or (_cms.lookup(router_message) if router_message != message else None)
+                )
+                if override:
+                    return _with_discrepancy(
+                        self._deterministic_result(
+                            reply=str(override.get("reply") or ""),
+                            curated=True,
+                            hits=[],
+                            sources=[str(override.get("source_url") or "staff-override")],
+                            citations=[],
+                            retrieval_mode="answer_override",
+                            thread_id=thread_id,
+                            locale=locale,
+                            agent_role="staff_override",
+                        )
+                    )
 
             if self._needs_wellbeing_checkin(message, (router_message,), conversation_history, user_id=user_id):
                 checkin = _with_discrepancy(
@@ -13057,32 +13071,6 @@ class ChatModel:
         router_message, router_rewritten = self._english_router_form(message, rewritten, locale)
         if turn_out is not None and router_message != message:
             turn_out["english_message"] = router_message
-
-        if flags.is_enabled("answer_overrides"):
-            from . import cms as _cms
-
-            override_s = (
-                _cms.lookup(message)
-                or _cms.lookup(rewritten)
-                or (_cms.lookup(router_message) if router_message != message else None)
-            )
-            if override_s:
-                return {
-                    **self._deterministic_result(
-                        reply=str(override_s.get("reply") or ""),
-                        curated=True,
-                        hits=[],
-                        sources=[str(override_s.get("source_url") or "staff-override")],
-                        citations=[],
-                        retrieval_mode="answer_override",
-                        thread_id=thread_id,
-                        locale=locale,
-                        agent_role="staff_override",
-                    ),
-                    "_hits": [],
-                    "_history": [],
-                    "_short_circuit": True,
-                }
         self._update_turn_case_facts(
             thread_id=thread_id,
             message=router_message or message,
@@ -13169,6 +13157,32 @@ class ChatModel:
                 "_history": [],
                 "_short_circuit": True,
             }
+
+        if flags.is_enabled("answer_overrides"):
+            from . import cms as _cms
+
+            override_s = (
+                _cms.lookup(message)
+                or _cms.lookup(rewritten)
+                or (_cms.lookup(router_message) if router_message != message else None)
+            )
+            if override_s:
+                return {
+                    **self._deterministic_result(
+                        reply=str(override_s.get("reply") or ""),
+                        curated=True,
+                        hits=[],
+                        sources=[str(override_s.get("source_url") or "staff-override")],
+                        citations=[],
+                        retrieval_mode="answer_override",
+                        thread_id=thread_id,
+                        locale=locale,
+                        agent_role="staff_override",
+                    ),
+                    "_hits": [],
+                    "_history": [],
+                    "_short_circuit": True,
+                }
 
         if self._needs_wellbeing_checkin(message, (rewritten, router_message), conversation_history, user_id=user_id):
             return {
@@ -13765,7 +13779,7 @@ class ChatModel:
                 binding_query=binding_query,
                 locale=locale,
             )
-            hits = _faq_hits_to_retrieval_hits(kw_hits, locale=locale)
+            hits = _faq_hits_to_retrieval_hits(kw_hits, locale=locale, query=retrieval_query)
             # Parity with generate(): never cache an answer built during an outage.
             degraded_retrieval = _retrieval_degraded(self._retriever)
 

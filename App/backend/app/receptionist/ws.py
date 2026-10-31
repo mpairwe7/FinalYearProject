@@ -564,6 +564,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                             warn_payload = {"type": "duration_warning", "seconds_remaining": rem_s}
                             with contextlib.suppress(Exception):
                                 await websocket.send_text(json.dumps(warn_payload))
+                            with contextlib.suppress(Exception):
                                 hub.publish_call(call_id, "duration_warning", warn_payload)
                         if elapsed_s >= max_call_s:
                             await room.end("max_call_duration")
