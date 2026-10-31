@@ -1058,6 +1058,35 @@ def prune_context(
     return kept
 
 
+def filter_candidates_as_of(
+    candidates: list[dict[str, Any]],
+    as_of_date: str | None,
+) -> list[dict[str, Any]]:
+    """Filter candidates to those in force on *as_of_date* (ISO ``YYYY-MM-DD``) or timeless (G294).
+
+    Never empties a non-empty candidate list: if no candidate matches the date
+    window, the original list is returned so retrieval does not silently drop
+    to zero hits.
+    """
+    if not candidates or not as_of_date:
+        return candidates
+    from .indexer import fiscal_year_validity_bounds
+
+    filtered: list[dict[str, Any]] = []
+    for hit in candidates:
+        v_from = str(hit.get("valid_from") or "")
+        v_to = str(hit.get("valid_to") or "")
+        if (not v_from or not v_to) and hit.get("fiscal_year"):
+            v_from, v_to = fiscal_year_validity_bounds(str(hit.get("fiscal_year") or ""))
+            hit.setdefault("valid_from", v_from)
+            hit.setdefault("valid_to", v_to)
+        if not v_from and not v_to:
+            filtered.append(hit)
+        elif (not v_from or v_from <= as_of_date) and (not v_to or as_of_date <= v_to):
+            filtered.append(hit)
+    return filtered or candidates
+
+
 # ---------------------------------------------------------------------------
 # BM25 sparse encoder
 # ---------------------------------------------------------------------------
@@ -1258,6 +1287,37 @@ class BM25SparseEncoder:
 # ---------------------------------------------------------------------------
 # Hybrid retriever
 # ---------------------------------------------------------------------------
+_SHARED_RETRIEVER: Any = None
+_SHARED_RETRIEVER_LOCK = threading.RLock()
+_BINDING_REFRESH_TTL_SECONDS = 30.0
+
+
+def set_shared_retriever(retriever: Any) -> None:
+    """Register the process-wide shared :class:`HybridRetriever` instance (G292)."""
+    global _SHARED_RETRIEVER
+    with _SHARED_RETRIEVER_LOCK:
+        _SHARED_RETRIEVER = retriever
+
+
+def get_shared_retriever(*, auto_init: bool = True) -> Any:
+    """Return the shared process-wide :class:`HybridRetriever`, initializing once if needed (G292)."""
+    global _SHARED_RETRIEVER
+    with _SHARED_RETRIEVER_LOCK:
+        # If HybridRetriever was monkeypatched in a test, honour the patched callable without polluting the singleton
+        if HybridRetriever is not _ORIGINAL_HYBRID_RETRIEVER_CLS:
+            inst = HybridRetriever()
+            if auto_init and hasattr(inst, "initialize"):
+                inst.initialize()
+            return inst
+        if _SHARED_RETRIEVER is None:
+            _SHARED_RETRIEVER = HybridRetriever()
+            if auto_init:
+                _SHARED_RETRIEVER.initialize()
+        elif auto_init and not getattr(_SHARED_RETRIEVER, "is_ready", False):
+            _SHARED_RETRIEVER.initialize()
+        return _SHARED_RETRIEVER
+
+
 class HybridRetriever:
     """Production hybrid retriever: dense + sparse RRF + cross-encoder rerank.
 
@@ -1272,6 +1332,9 @@ class HybridRetriever:
         self._sparse_encoder = BM25SparseEncoder()
         self._query_vec_cache: OrderedDict[str, list[float]] = OrderedDict()
         self._query_vec_lock = threading.Lock()
+        self._init_lock = threading.RLock()
+        self._bound_corpus_hash: str = ""
+        self._binding_checked_at: float = 0.0
         #: Whether the loaded reranker emits logits; ``None`` until known (G281).
         self._rerank_logit_scale: bool | None = None
         self._ready = False
@@ -1325,7 +1388,9 @@ class HybridRetriever:
         ``_init_qdrant`` was (wrongly) treated as always the richest case.
         """
         if QDRANT_ENABLED:
-            if self._init_qdrant():
+            with self._init_lock:
+                q_ok = self._init_qdrant()
+            if q_ok:
                 if not self._sparse_only:
                     return True
                 logger.info(
@@ -1422,9 +1487,10 @@ class HybridRetriever:
             from .query import register_corpus_vocabulary
 
             register_corpus_vocabulary(self._sparse_encoder._vocab)
-            register_index_binding(
-                str((binding or {}).get("source_corpus_hash") or (binding or {}).get("corpus_hash") or "")
-            )
+            bound_hash = str((binding or {}).get("source_corpus_hash") or (binding or {}).get("corpus_hash") or "")
+            register_index_binding(bound_hash)
+            self._bound_corpus_hash = bound_hash
+            self._binding_checked_at = time.monotonic()
             self._verify_bm25_binding(binding)
             if not self._verify_embedder_binding():
                 # Both halves of hybrid search are untrustworthy against this
@@ -1686,12 +1752,39 @@ class HybridRetriever:
             raw = zlib.decompress(base64.b64decode(packed.encode("ascii")))
             state = json.loads(raw)
             self._sparse_encoder = BM25SparseEncoder.from_dict(state)
+            self._sparse_ok = True
             logger.info("Loaded BM25 state from Qdrant binding sentinel")
             return True
         except Exception:
             logger.error("Qdrant binding contains an invalid BM25 state", exc_info=True)
             self._sparse_ok = False
             return False
+
+    def _maybe_refresh_alias_binding(self) -> None:
+        """Reload BM25 state when the serving Qdrant alias swaps to a new collection (G292)."""
+        if self._client is None or not hasattr(self._client, "retrieve"):
+            return
+        now = time.monotonic()
+        if self._sparse_ok and (now - getattr(self, "_binding_checked_at", 0.0)) < _BINDING_REFRESH_TTL_SECONDS:
+            return
+        with getattr(self, "_init_lock", threading.RLock()):
+            now = time.monotonic()
+            if self._sparse_ok and (now - getattr(self, "_binding_checked_at", 0.0)) < _BINDING_REFRESH_TTL_SECONDS:
+                return
+            self._binding_checked_at = now
+            binding = self._binding_payload()
+            if not binding:
+                return
+            remote_hash = str(binding.get("source_corpus_hash") or binding.get("corpus_hash") or "")
+            if remote_hash and (remote_hash != getattr(self, "_bound_corpus_hash", "") or not self._sparse_ok):
+                if self._load_sparse_state_from_binding(binding):
+                    from .cache import register_index_binding
+                    from .query import register_corpus_vocabulary
+
+                    register_corpus_vocabulary(self._sparse_encoder._vocab)
+                    register_index_binding(remote_hash)
+                    self._bound_corpus_hash = remote_hash
+                self._verify_bm25_binding(binding)
 
     def _verify_bm25_binding(self, payload: dict[str, Any] | None = None) -> None:
         """Disable sparse retrieval if the loaded bm25_state's corpus hash does
@@ -1721,6 +1814,8 @@ class HybridRetriever:
                 local[:12],
                 remote[:12],
             )
+        else:
+            self._sparse_ok = True
 
     def _verify_embedder_binding(self) -> bool:
         """Return ``False`` when the collection was built by a different encoder.
@@ -1986,6 +2081,7 @@ class HybridRetriever:
         try:
             from .hyde import dense_query_text
 
+            self._maybe_refresh_alias_binding()
             # HyDE (when flagged) rewrites only the dense embedding. BM25
             # and the cross-encoder stay on the taxpayer's own words so a
             # hallucinated hypothetical cannot change lexical matching.
@@ -2007,6 +2103,11 @@ class HybridRetriever:
                     if isinstance(value, list):
                         must_conditions.append(
                             models.FieldCondition(key=field, match=models.MatchAny(any=value))
+                        )
+                    elif field == "fiscal_year" and isinstance(value, str) and value:
+                        # Include undated timeless FAQ rows ("") alongside the explicit edition (G293)
+                        must_conditions.append(
+                            models.FieldCondition(key=field, match=models.MatchAny(any=[value, ""]))
                         )
                     else:
                         must_conditions.append(
@@ -2078,6 +2179,9 @@ class HybridRetriever:
                         # Edition of the source document, used to prefer current
                         # guidance over a superseded restatement of it.
                         "fiscal_year": p.get("fiscal_year", ""),
+                        "valid_from": p.get("valid_from", ""),
+                        "valid_to": p.get("valid_to", ""),
+                        "superseded_by": p.get("superseded_by", ""),
                         "tax_type": p.get("tax_type", ""),
                         "tag": p.get("tag", ""),
                         **_provenance_fields(p),
@@ -2236,6 +2340,9 @@ class HybridRetriever:
                 locale=locale,
             )
         hits = apply_preference_boost(hits, plan["prefer"])
+        as_of_date = str(plan["prefer"].get("as_of_date") or "")
+        if as_of_date:
+            hits = filter_candidates_as_of(hits, as_of_date)
         if demote_sector and len(hits) > top_k:
             non_sector = [h for h in hits if not is_sector_guide_source(str(h.get("source") or ""))]
             sector = [h for h in hits if is_sector_guide_source(str(h.get("source") or ""))]
@@ -2405,3 +2512,6 @@ class HybridRetriever:
             cit["passage"] = passage[:500]
             citations.append(cit)
         return citations
+
+
+_ORIGINAL_HYBRID_RETRIEVER_CLS = HybridRetriever

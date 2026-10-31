@@ -235,6 +235,9 @@ def verify_claims(
     welfare_turn = any(
         str(h.get("doc_type") or "") == "model_welfare_context" for h in (hits or [])
     )
+    verified_numbers = _numbers(verified_facts) if verified_facts else set()
+    query_pcts = percentages(query) if query else set()
+    query_numbers = (_numbers(query) - query_pcts) if query else set()
     for claim in claims:
         refs = _CITATION_RE.findall(claim)
         clean_claim = _CITATION_RE.sub("", claim)
@@ -252,16 +255,24 @@ def verify_claims(
                 refs = ["1"]
 
         # If overlap is below threshold against the specifically cited passage,
-        # verify if the claim is supported across any of the other retrieved hits
+        # verify if the claim is supported by any individual retrieved hit (or hit + verified_facts)
+        # rather than a bag-of-words union across unrelated passages (G293).
         if overlap < threshold and hits:
-            all_contexts = [str(h.get("text") or h.get("answer") or "") for h in hits]
-            if verified_facts:
-                all_contexts.append(verified_facts)
-            all_tokens = _tokens(" ".join(all_contexts))
-            all_overlap = len(claim_tokens & all_tokens) / max(1, len(claim_tokens))
-            if all_overlap >= threshold:
-                overlap = all_overlap
-                contexts = all_contexts
+            best_hit_overlap = overlap
+            best_hit_contexts = contexts
+            for h in hits:
+                h_txt = str(h.get("text") or h.get("answer") or "").strip()
+                if not h_txt:
+                    continue
+                cand_contexts = [h_txt, verified_facts] if verified_facts else [h_txt]
+                cand_tokens = _tokens(" ".join(cand_contexts))
+                cand_overlap = len(claim_tokens & cand_tokens) / max(1, len(claim_tokens))
+                if cand_overlap > best_hit_overlap:
+                    best_hit_overlap = cand_overlap
+                    best_hit_contexts = cand_contexts
+            if best_hit_overlap >= threshold:
+                overlap = best_hit_overlap
+                contexts = best_hit_contexts
 
         # Cross-lingual claim support: when the reply is generated in a local
         # language (e.g. Swahili or Luganda) against English retrieved context passages,
@@ -285,8 +296,6 @@ def verify_claims(
 
         claim_numbers = _numbers(clean_claim)
         context_numbers = _numbers(context_text)
-        verified_numbers = _numbers(verified_facts) if verified_facts else set()
-        query_numbers = _numbers(query) if query else set()
         model_introduced_numbers = claim_numbers - query_numbers
         if model_introduced_numbers and not model_introduced_numbers <= (context_numbers | verified_numbers):
             overlap = min(overlap, 0.25)

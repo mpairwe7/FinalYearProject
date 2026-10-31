@@ -161,7 +161,7 @@ def verify_call_resume_ticket(
     resume_ticket: str,
     *,
     expected_call_id: str = "",
-    expected_user_id: str = "",
+    expected_user_id: str | None = None,
     expected_tenant_id: str = "default",
 ) -> dict[str, object] | None:
     """Verify and consume a single-use caller resume ticket; returns claims or ``None``."""
@@ -187,7 +187,7 @@ def verify_call_resume_ticket(
         return None
     if expected_call_id and payload.get("cid") != expected_call_id:
         return None
-    if expected_user_id and payload.get("uid") != expected_user_id:
+    if expected_user_id is not None and str(payload.get("uid") or "") != expected_user_id:
         return None
     if expected_tenant_id and payload.get("tid") != expected_tenant_id:
         return None

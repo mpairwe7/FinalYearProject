@@ -154,7 +154,7 @@ def node_retrieve(state: AgentGraphState) -> NodeResult:
     # Deferred import to avoid the heavy retriever at module load
     from ...corrective_rag import corrective_retrieve
     from ...model_welfare import build_welfare_grounding_hits, match_welfare_categories
-    from ...retriever import HybridRetriever
+    from ...retriever import HybridRetriever, get_shared_retriever
 
     query = state.rewritten_query or state.query
     welfare_cats = match_welfare_categories(query)
@@ -167,10 +167,10 @@ def node_retrieve(state: AgentGraphState) -> NodeResult:
         state.citations = HybridRetriever.build_citations(hits)
         return NodeResult(next_node="synthesize")
 
-    retriever = HybridRetriever()
+    retriever = get_shared_retriever(auto_init=False)
     hits: list[dict[str, Any]] = []
     was_corrected = False
-    if retriever.initialize():
+    if getattr(retriever, "is_ready", False) or retriever.initialize():
         search = getattr(retriever, "search_planned", retriever.search)
         subject = state.user_id or None
         user_hist = [

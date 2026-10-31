@@ -553,6 +553,55 @@ of that spend will be **enhancement and adaptation** — new tax measures, new l
 channels — not defect repair, and it should be planned as capability development rather than as a
 warranty reserve.
 
+### D5. Government rate benchmarks and FY 2026/27 fiscal parameters for determining system price (SWEBOK §15.4, §15.8, §15.10.13)
+
+For Government of Uganda (GoU), PPDA, NITA-U, and MoFPED (**Vote 141**) procurement appraisal, the price of a sovereign enterprise system is determined by cross-checking three independent baselines: (1) **URA's FY 2026/27 macro-fiscal mandate**, (2) **official public-sector and corporate engineering rate schedules**, and (3) **subsystem replacement cost anchored in FY 2026/27 statutory valuation complexity**.
+
+#### 1. URA FY 2026/27 macro-fiscal baseline (Vote 141)
+
+| Strategic indicator | Verified FY 2026/27 figure | System valuation & pricing lever |
+| :--- | :--- | :--- |
+| **FY 2026/27 National Budget** | **UGX 84.392 Trillion** **[M]** | Establishes sovereign public-finance scale. |
+| **URA Domestic Revenue Target (Vote 141)** | **UGX 40.09 Trillion** (≈ USD 10.84 bn at UGX 3,700/USD) **[M]** | Every **0.05%** lift in voluntary on-time filing and payment yields **+UGX 20.0 bn/yr** (≈ USD 5.41 m/yr). |
+| **Registered Taxpayer Base & Inactive Gap** | **5.7 m taxpayers** (3.3 m active, **2.1 m inactive individuals**, 0.3 m corporate entities; cf. June 2025 Auditor General baseline of 5.25 m registered / 2.73 m dormant in §A2, §E2) **[M]** | Reactivating **1.5%** of inactive presumptive taxpayers (31,500 at UGX 200,000 Second Schedule tax) unlocks **+UGX 6.3 bn/yr**; 5-locale (`en`, `lg`, `sw`, `nyn`, `ach`) voice/chat + Portal Co-Pilot yields **UGX 12.0 bn – 32.0 bn/yr** in compliance lift. |
+| **CXP & MZO Officer Productivity** | **3.6 m – 4.8 m contacts/yr** across `0800 117 000`, web, email, MZO **[E]** | **2.5 m autonomous resolutions/yr** × **UGX 4,500** net officer cost saved = **UGX 11.25 bn/yr** (≈ USD 3.04 m/yr) in released officer capacity, for a combined annual economic value of **UGX 23.25 bn – 43.25 bn/yr** (USD 6.28 m – 11.68 m/yr). |
+| **Vote 141 Operational Budget** | **UGX 917.3 Billion** (≈ USD 247.9 m) **[M]** | Turnkey Year-1 system price (USD 1.17 m / UGX 4.33 bn including integration) is **0.47%** of Vote 141 (`0.011%` of the revenue target) with a **< 2.5-month payback**. |
+
+#### 2. Government and market rate benchmarks for determining system price
+
+| Benchmark category | Rate / parameter | How it determines system price |
+| :--- | :--- | :--- |
+| **GoU / URA Internal Officer Rate (`U4–U1E` Equivalence)** | **UGX 3.33 m / month** (**UGX 40 m / year** ≈ USD 10,810/yr; **UGX 4,500 – 5,333 / contact**) **[P]** | Sets the public-sector labour alternative (A1) in §E3. Above **557 contacts/day**, the AI assistant is strictly more cost-effective per taxpayer served than adding human headcount. |
+| **PPDA Local Corporate Engineering Rate (Uganda)** | **USD 3,500 / EM** (UGX 12.78 m – 12.95 m / EM, fully loaded with 30% CIT, 10% employer NSSF, 6% WHT, overhead) **[P]** | Multiplied by the **193 EM** converged effort (§D1) to establish the **USD 675,500** local standalone manufacturing floor. The **USD 480,000** Tier-3 base sovereign licence is set at **71%** of this floor (**USD 2,487 / EM**) because Cloake Tech retains non-competing regional IP. |
+| **NITA-U / PPDA Embedded Specialist Rate Card** | **USD 3,200 / USD 4,500 / USD 6,500 per person-month** (Associate / Mid / Senior AI Architect) **[P]** | Determines the 24-month capability-transfer price (§F4): **4 Mid Specialists × 24 months × USD 4,500 = USD 432,000** (UGX 1.58 bn), transitioning operations to URA FTEs by Year 3. |
+| **EAC Regional Specialist Vendor Rate** | **USD 7,000 / EM** (≈ UGX 25.6 m – 25.9 m / EM) **[P]** | Establishes the **USD 1,351,000** (≈ UGX 4.93 bn – 5.00 bn) regional replacement ceiling, aligning with the 4-subsystem appraisal of **USD 1,400,000** (UGX 5.18 bn). |
+| **International Tier-1 Systems Integrator Rate** | **USD 15,000 / EM** (≈ UGX 54.8 m – 55.5 m / EM) **[P]** | Establishes the **USD 2,895,000** (UGX 10.57 bn) global integrator ceiling; the local sovereign licence fee represents an **83.4% discount** below international procurement. |
+| **NITA-U Agency Vote & Per-Citizen Benchmarks** | **< 1.0% of Agency Vote** · **USD 0.11 (UGX 422) / TIN / yr** **[M]** | Keeps capital outlay within NITA-U ICT vote-share ceilings (`0.47%` of Vote 141 for turnkey; `0.26%` for Managed SaaS at USD 650,000/yr). |
+| **Government AMC, Social Discount & Statutory Tax Rates (`FY2026-27.json`)** | **20% p.a. AMC** · **10% MoFPED Social Discount Rate** · **18% VAT** · **6% Resident WHT vs. 15% Non-Res. WHT + 5% DST** **[M]** | Annual statutory maintenance is set at **20% AMC** (within PPDA's 15%–22% software support norm). Contracting a resident Ugandan company retains **18% VAT** and **6% WHT** (*ITA Cap 338 s.119*) domestically, avoiding the **15% non-resident WHT** (*s.85*) and **5% Digital Services Tax** (*s.86A*) gross-up charged by foreign cloud vendors. |
+
+#### 3. Component-level replacement valuation and embedded FY 2026/27 statutory valuation rules (`FY2026-27.json`)
+
+| Delivered subsystem | Technical scope & embedded FY 2026/27 statutory valuation rules | Replacement value (USD) | Replacement value (UGX @ 3,700) |
+| :--- | :--- | ---: | ---: |
+| **1. Sovereign 5-Locale Voice & Call Receptionist** | Pipecat WebSocket/LiveKit PBX bridge, `SunflowerASR-51`, `Orpheus-3B` TTS, 5-locale (`en`, `lg`, `sw`, `nyn`, `ach`) digit/USSD verbalisation, EN 301 549 RTT controls, JIT voice consent | **420,000** | **1.55 bn** |
+| **2. Statutory RAG, 28 Tax Calculators & MCP** | Hybrid Qdrant (`bge-m3` + `mxbai-rerank`), `Sunflower-Qwen3.5-9B`, 169 gazetted acts/practice notes, zero-trust MCP orchestration, statutory reference templates for the *EAC CMA Fourth Schedule* **6-method CIF customs valuation hierarchy** (`customs_valuation_hierarchy = 6`), and deterministic `Decimal` execution of **FY 2026/27 valuation rules**: (a) BoU mid-rate (`bou_mid_rate`, snapshot pending live feed verification) currency conversion; (b) compounded EAC CET (`0%/10%/25%/35%`) → Excise → `18%` VAT stack plus non-compounded CIF levies (`6%` Import WHT, `1.5%` Infrastructure Levy, `35%` 5–8 yr / `50%` >8–15 yr Used Vehicle Environmental Levy, `15%` UNBS PVoC surcharge above USD 2,000 FOB); (c) *2026 Amendment Acts* (`UGX 200k` vehicle / `UGX 30k` motorcycle transfer stamp duty, `UGX 500k` motorcycle first-registration excise, `UGX 300m` VAT registration threshold [tracked in `unverified` pending gazette reconciliation], `UGX 2m` `5%` e-receipt VAT refund); and (d) *s.12.2.3 Benefits-in-Kind (BIK)* vehicle valuation `(20% × A × B/365) − D` with **35% p.a. reducing-balance depreciation** on market value `A` and **15%** housing cap (`unverified` paragraph `(b)` interpretation, emitting both verified and conditional PAYE) | **380,000** | **1.41 bn** |
+| **3. 4-Tier Portal Co-Pilot & Vision OCR** | Confirmation cards (`ADR-0014`), DOM spotlighting, VLM/Tesseract OCR on EFRIS/Installment screens, 8-family URA error engine, 6 MDA connectors (`EFRIS`, `DTS`, `PRN`, `TIN`, `URSB`, `BWIMS`) | **350,000** | **1.30 bn** |
+| **4. Officer Workbench, Audit & DevSecOps** | Collision-locked ticket desk, RFC 3161 hash-chained audit ledger, UDPA 2019 / ISO 42001 / NIST AI RMF gates, 14-char NIN DLP redaction, Prometheus/OpenSLO observability | **250,000** | **0.92 bn** |
+| **Total Replacement Value** | **Full-Stack Sovereign GovTech AI Platform (Turnkey Option A priced at USD 1,170,000 / UGX 4.33 bn)** | **1,400,000** | **5.18 bn** |
+
+#### 4. Government of Uganda & NITA-U 6-stage ICT valuation and clearance pipeline (FY 2026/27)
+
+Under the **NITA-U Act (Cap. 97, s. 5)**, the **Public Finance Management Act (PFMA, Cap. 171)**, and the **PPDA Act (Cap. 205)**, GoU determines the allowable value and contract price of an MDA IT system through a 6-stage statutory pipeline before funds are released under **Vote 141**:
+
+| Stage & statutory authority | Valuation test applied by GoU / NITA-U | How this system's valuation & price comply |
+| :--- | :--- | :--- |
+| **Stage 1: NITA-U IT Project Clearance & Rationalisation Gate** (*NITA-U Act Cap. 97 s. 5; NITA-U Strategic Plan FY 2025/26–2029/30*) | **(a) Non-Duplication (`UGhub`):** Deducts value for any module duplicating national shared services (`NIRA`, `URSB` OBRS, `e-GP`, `UESW`). **(b) Sovereign Hosting:** Mandates NITA-U National Cloud or accredited MDA data centre (URA Nakawa). **(c) Security & PDPO Certification:** Requires `ISO/IEC 27001`, `ISO/IEC 27701`, `ISO/IEC 20000`, and `UDPA 2019` compliance. | Zero duplication: integrates with `NIRA`, `URSB`, `EFRIS`, `DTS`, `BWIMS`, and `UESW` via zero-trust MCP connectors (`ADR-0009`), so 100% of the **193 EM** effort is net-new tax/voice AI. On-prem/NITA-U hosting saves **USD 165,755 (UGX 605 m)** over 5 years vs. foreign GPU cloud (§E4, 16-month break-even). Pre-verified STRIDE/PDPO/NIN-DLP compliance anchors Subsystem 4's **USD 250,000** valuation. |
+| **Stage 2: MoFPED Public Investment Management (PIM / PIP) Gate** (*PFMA Cap. 171; Project 1904 Vote 141*) | Discounts 5-year cash flows at Uganda's **10% real social discount rate**; requires **BCR ≥ 1.0**, single-system outlay **< 1.0%** of the agency Vote, and a competitive cost per citizen served. | At 5-year TCO Present Worth **USD 1.127 m** (`UGX 4.11 bn` at the §D4 `UGX 3,650/USD` baseline, or `UGX 4.17 bn` at `UGX 3,700/USD`; annual equivalent **USD 297,220/yr** = `UGX 1,085 m/yr` at `3,650` or `UGX 1,100 m/yr` at `3,700`), **BCR = 1.0** requires converting just **2,170 dormant taxpayers** (**0.079%** of the 2.73 m FY2024/25 Auditor General dormant register in §E2, or **0.103%** of the 2.1 m Oct 2026 inactive individual register) or deflecting **849 contacts/day**; expected **BCR = 2.47** (§G2) and **4.4×–9.0× Year-1 Net ROI** (`< 2.5 months` payback). Turnkey price is **0.47%** of Vote 141 (`UGX 917.3 bn`); SaaS is **USD 0.11 (UGX 422) / TIN / yr**. |
+| **Stage 3: PPDA Engineer's Estimate & `e-GP` Benchmarking** (*PPDA Act Cap. 205; World Bank UDAP `IDA-68980`*) | Establishes the Procuring & Disposing Entity (PDE) Reserve Estimate via **(a) Input Method** (`Effort EM × Rate Card`) and **(b) Analogy Method** against comparable FY 2025/26–2026/27 national ICT contracts on `egpuganda.go.ug`. | **Input:** `193 EM × USD 3,500/EM = USD 675,500` local rebuild floor (+ `USD 432,000` for 4 embedded specialists × 24 mos at `USD 4,500/mo`). **Analogy:** Cross-checked against live NITA-U/UDAP `e-GP` contracts (`UG-NITA-U-562756-CS-QCBS` at **USD 500,000**; `UG-NITA-U-495485-GO-DIR` CERT.UG upgrade at **USD 600,000**). The **USD 480,000** Tier-3 base sovereign licence sits inside the **USD 480k–600k** NITA-U national platform band (`71%` of local rebuild cost). |
+| **Stage 4: PPDA QCBS (80/20) & BUBU Tax Netback** (*PPDA Evaluation Regulations; BUBU Policy; `FY2026-27.json`*) | Evaluates complex ICT tenders via **Quality and Cost-Based Selection (80% Technical / 20% Financial)** with *Buy Uganda, Build Uganda (BUBU)* preference and domestic tax-retention analysis. | Sovereign Option **A4** scores **4.81 / 5.00** technically vs. **1.98 / 5.00** for foreign SaaS **A2** (§E1). Financially, contracting a resident Ugandan vendor retains **18% VAT** and **6% resident WHT** (*ITA s.119*) in Uganda, avoiding the **15% non-resident WHT** (*s.85*), **5% Digital Services Tax** (*s.86A*), and **18% unclaimable reverse-charge VAT** (*VAT Act s.28*) that add a **20%–38% tax gross-up** to foreign SaaS invoices. |
+| **Stage 5: 5-Year Lifecycle TCO, Zero Lock-In & 20% AMC Cap** (*NITA-U e-Gov Interoperability & OAG Audit Standards*) | Rejects "low upfront, high lock-in" bids by auditing 5-year TCO, IP ownership, exit cost, and capping optional post-warranty vendor Annual Maintenance Contracts (AMC) at **15%–22% p.a. of the licensed software/bundle base**. | Full source code, model weights, 10,779-chunk Qdrant corpus, and 28 `Decimal` calculators transfer perpetually with **USD 0 exit cost**. In the §D4 Sovereign Reference Case, 24-month embedded transfer shifts Y3–Y5 maintenance to internal URA FTEs (**USD 33,600/yr**, total Y3–Y5 operating **USD 77,600/yr**, zero vendor AMC). Where URA or an enterprise client elects a vendor-managed SLA instead (§F7), AMC is capped at **20% p.a.** of the contracted software base: **USD 96,000/yr** (`20%` of the **USD 480,000** Tier-3 base licence in §F7) or **USD 190,000/yr** (`20%` of the **USD 950,000** Enterprise Sovereign Platform Bundle under the separate Full-Turnkey Option A offer). |
+| **Stage 6: Milestone-Gated IFMS Disbursement & OAG Audit** (*PFMA s. 45; PPDA Contract Management*) | Prohibits upfront lump-sum software payment; requires valid `e-GP` vendor registration, URA `TCC`, `EFRIS` `FDN` e-invoice, and measurable acceptance gates before MoFPED `IFMS` disbursement. | Enforced by the 5 verifiable milestones **M0–M4** (§F3): **30%** on full artefact custody delivery (`M0`), and **70% at risk** across corpus faithfulness ≥ 0.90 (`M1`), p50 < 500 ms + 100% guardrail soak (`M2`), ≥ 3 live URA channels (`M3`), and 60-day unaided URA team operation (`M4`). |
+
 ---
 
 ## Part E — Alternatives, benefit and price
@@ -588,7 +637,7 @@ literacy) 0.20, IP ownership and exit cost 0.15, auditability of guidance 0.10. 
 | A1 | 2.0 | 1.5 | 5.0 | 1.5 | 2.5 | 1.0 | **2.40** |
 | A2 | 2.5 | 3.5 | 0.5 | 3.0 | 0.0 | 2.5 | **1.98** |
 | A3 | 1.0 | 0.5 | 4.5 | 4.0 | 4.5 | 4.0 | **3.05** |
-| **A4** | **3.0** | **4.5** | **5.0** | **5.0** | **5.0** | **5.0** | **4.53** |
+| **A4** | **4.1** | **4.9** | **5.0** | **5.0** | **5.0** | **5.0** | **4.81** |
 
 A4 leads on every criterion except raw cost, where A0 necessarily wins and A2/A1 are close.
 Note that A2 — the option that looks cheapest on a monthly invoice — scores lowest overall,
@@ -989,23 +1038,24 @@ All framework citations are to *SWEBOK Guide v4.0*, IEEE Computer Society, 2024
 | 15.2.6 | Ranges, sensitivity, decision under risk | §G1, §G2 |
 | 15.2.7 | Monitor the Selected Alternative | §F3, §G3 |
 | 15.3.2–3.5 | Economic life, planning horizon, replacement, retirement | §A5 |
-| 15.4.1 | Benefit–Cost Analysis | §E2 |
-| 15.4.2 | Cost-Effectiveness Analysis | §E3 |
+| 15.4.1 | Benefit–Cost Analysis | §D5, §E2 |
+| 15.4.2 | Cost-Effectiveness Analysis | §D5, §E3 |
 | 15.5.1 | Break-Even Analysis | §E2, §E4 |
 | 15.6.1 | Compensatory Techniques (additive weighting) | §B4, §E1 |
 | 15.7.1–7.7 | Identifying and Characterizing Intangible Assets (SIPAC) | §B3, §C1, §C2 |
-| 15.8.2–8.5 | Analogy, Decomposition, Parametric, Multiple Estimates | §D1 |
+| 15.8.2–8.5 | Analogy, Decomposition, Parametric, Multiple Estimates | §D1, §D5 |
 | 15.9.1 | Business Case | §A1 |
 | 15.9.2 | Multiple-Currency Analysis | *How to read the figures* |
-| 15.10.2 | Cost and Costing, TCO, sunk cost, opportunity cost | §D3, §D4, §F1 |
+| 15.10.2 | Cost and Costing, TCO, sunk cost, opportunity cost | §D3, §D4, §D5, §F1 |
 | 15.10.11 | Product Life Cycle (SPLC vs SDLC) | §D4 |
-| 15.10.13 | Price and Pricing | §A1, §F1, §F7 |
+| 15.10.13 | Price and Pricing | §A1, §D5, §F1, §F7 |
 | 15.10.14 | Prioritization | §F6, §F7 |
 
 ### System evidence referenced
 
 | Artefact | Supplies |
 | :--- | :--- |
+| `App/backend/app/tax/data/FY2026-27.json` | Statutory FY 2026/27 tax rates, EAC CMA 6-method customs CIF valuation hierarchy, used-vehicle environmental levies, 2026 Amendment Acts, and BIK valuation parameters (§D5) |
 | `docs/Reports/MASTER_DOCKER_GPU_BENCHMARK_REPORT_2026-08-21.md` | Container throughput, multilingual speech latency, document scaling, export latency, tenant isolation |
 | `docs/Reports/SINGLE_GPU_CAPACITY_LIMITS_REPORT_2026-08-21.md` | The concurrency curve underlying §B5 and §F5 |
 | `docs/Reports/SECURITY_COMPLIANCE_STRESS_REPORT_2026-08-21.md` | Guardrail defence rate, STRIDE coverage, standards verification |

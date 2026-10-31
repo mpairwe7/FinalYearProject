@@ -41,6 +41,54 @@ function objectiveFrom(value: unknown): ObjectiveHypothesis | null {
   return { ...value, confidence: score(value.confidence) ?? undefined } as unknown as ObjectiveHypothesis;
 }
 
+function workflowFrom(value: unknown): WorkflowState | undefined {
+  if (!record(value)) return undefined;
+  if (typeof value.id !== 'string' || typeof value.name !== 'string' || typeof value.status !== 'string') {
+    return undefined;
+  }
+  if (!['active', 'completed', 'cancelled'].includes(value.status)) {
+    return undefined;
+  }
+  if (value.options !== undefined && !Array.isArray(value.options)) return undefined;
+  if (value.all_steps !== undefined && !Array.isArray(value.all_steps)) return undefined;
+  return {
+    ...value,
+    options: Array.isArray(value.options)
+      ? value.options.filter((o): o is string => typeof o === 'string').slice(0, 64)
+      : undefined,
+    all_steps: Array.isArray(value.all_steps)
+      ? value.all_steps.filter(
+          (s): s is NonNullable<WorkflowState['all_steps']>[number] =>
+            record(s) && typeof s.id === 'string' && typeof s.title === 'string' && typeof s.status === 'string',
+        )
+      : undefined,
+  } as unknown as WorkflowState;
+}
+
+function portalCopilotFrom(value: unknown): PortalCopilotPayload | null {
+  if (!record(value)) return null;
+  if (typeof value.card_type !== 'string' || !value.card_type.trim() || value.card_type.length > 128) {
+    return null;
+  }
+  if (value.fields !== undefined && !Array.isArray(value.fields)) return null;
+  if (value.display_fields !== undefined && !Array.isArray(value.display_fields)) return null;
+  return {
+    ...value,
+    fields: Array.isArray(value.fields)
+      ? value.fields.filter(
+          (f): f is NonNullable<PortalCopilotPayload['fields']>[number] =>
+            record(f) && typeof f.name === 'string' && typeof f.label === 'string',
+        )
+      : undefined,
+    display_fields: Array.isArray(value.display_fields)
+      ? value.display_fields.filter(
+          (f): f is NonNullable<PortalCopilotPayload['display_fields']>[number] =>
+            record(f) && typeof f.name === 'string' && typeof f.label === 'string' && typeof f.value === 'string',
+        )
+      : undefined,
+  } as unknown as PortalCopilotPayload;
+}
+
 /** Whether officers were on duty when a handoff was queued (`app.officer_hours.status`). */
 export interface OfficerHours {
   onDuty: boolean;
@@ -115,7 +163,7 @@ function discrepancyFrom(value: unknown, fallback: ChatTurn['discrepancyReport']
 export function applyTurnMeta(turn: ChatTurn, meta: TurnMeta, notices: ConnectorNotice[] = []): ChatTurn {
   if (!record(meta)) return turn;
   const workflow = 'workflow' in meta
-    ? (record(meta.workflow) ? meta.workflow as unknown as WorkflowState : undefined) : turn.workflow;
+    ? workflowFrom(meta.workflow) : turn.workflow;
   const nextActions = Array.isArray(meta.next_actions)
     ? meta.next_actions.filter((action): action is string => typeof action === 'string')
     : ('next_actions' in meta ? [] : turn.nextActions);
@@ -138,6 +186,6 @@ export function applyTurnMeta(turn: ChatTurn, meta: TurnMeta, notices: Connector
         (record(meta.workflow) && 'resources' in meta.workflow ? resourcesFrom(meta.workflow.resources) : turn.resources),
     discrepancyReport: discrepancyFrom(meta.discrepancy_report ?? meta.discrepancyReport, turn.discrepancyReport),
     portalCopilot: 'portal_copilot' in meta || 'portalCopilot' in meta
-      ? ((meta.portal_copilot ?? meta.portalCopilot) as PortalCopilotPayload | null | undefined) : turn.portalCopilot,
+      ? portalCopilotFrom(meta.portal_copilot ?? meta.portalCopilot) : turn.portalCopilot,
   };
 }
