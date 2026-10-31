@@ -49,10 +49,12 @@ class _RetrieverWithHits:
 
 
 @pytest.fixture
-def model(tmp_db, clean_flags, fresh_registry):
+def model(tmp_db, fresh_registry, monkeypatch):
+    # Flags go through the environment: test_integration.py reloads app.flags,
+    # so flags.set() can land on a different object from the one service.py holds.
     from app.service import ChatModel
 
-    clean_flags.set("ticket_queue", True)
+    monkeypatch.setenv("FLAG_TICKET_QUEUE", "true")
     instance = ChatModel()
     instance._retriever = _RetrieverWithHits()
     instance._retriever_ready = True
@@ -75,18 +77,19 @@ def test_rest_honours_the_escalate_route_when_passages_exist(model, message):
     assert result["ticket_id"], "a taxpayer who asked for a person must get a ticket"
 
 
-def test_tiering_without_agentic_mode_does_not_dereference_a_missing_route(
-    model, clean_flags
-):
-    clean_flags.set("agentic_mode", False)
-    clean_flags.set("model_tiering", True)
+def test_tiering_without_agentic_mode_does_not_dereference_a_missing_route(model, monkeypatch):
+    from app.service import flags as service_flags
+
+    monkeypatch.setenv("FLAG_AGENTIC_MODE", "false")
+    monkeypatch.setenv("FLAG_MODEL_TIERING", "true")
+    assert service_flags.is_enabled("agentic_mode") is False
 
     result = model.generate("What should a new importer know?")  # nosemgrep: ura-llm01-raw-user-input-to-llm
 
     assert result["reply"]
 
 
-def test_a_tool_route_reaches_the_agentic_path_with_its_whitelist(model, clean_flags, monkeypatch):
+def test_a_tool_route_reaches_the_agentic_path_with_its_whitelist(model, monkeypatch):
     from app import service
     from app.agents.state import AgentRoute, RouteDecision
     from app.agents.supervisor import supervisor

@@ -76,10 +76,10 @@ class TestFailureIsNamed:
         assert "Not calculated" not in block
         assert report.outcomes["needs_input"] == 1
 
-    def test_a_failed_conversion_asks_for_the_rate_when_live_fx_is_on(self, clean_flags):
+    def test_a_failed_conversion_asks_for_the_rate_when_live_fx_is_on(self, monkeypatch):
         # Planning sees live FX enabled and lists nothing as missing, so when the
         # network then failed the block said nothing about the rate at all.
-        clean_flags.set("live_web_research", True)
+        monkeypatch.setenv("FLAG_LIVE_WEB_RESEARCH", "true")
 
         def fx_down(tool: str, params: dict) -> dict:
             return {"ok": False, "error": "network"} if tool == "convert_currency" else _ok(tool, params)
@@ -206,7 +206,7 @@ class TestOncePerTurn:
 
 
 class TestAuditRow:
-    def test_the_turn_records_its_plan(self, tmp_db, clean_flags, fresh_registry):
+    def test_the_turn_records_its_plan(self, tmp_db, fresh_registry):
         from app.audit.turns import build_turn_payload
 
         payload = build_turn_payload(
@@ -219,7 +219,7 @@ class TestAuditRow:
 
 
 class TestPlanReachesTheLedger:
-    def test_a_real_turn_writes_its_plan_digest(self, tmp_db, clean_flags, fresh_registry, monkeypatch):
+    def test_a_real_turn_writes_its_plan_digest(self, tmp_db, fresh_registry, monkeypatch):
         from app import audit
         from app.service import ChatModel
 
@@ -326,7 +326,7 @@ class TestRuntimeAttestation:
 
         assert verdict["sla_breaches"] == []
 
-    def test_a_real_turn_reaches_the_audit_row(self, tmp_db, clean_flags, fresh_registry):
+    def test_a_real_turn_reaches_the_audit_row(self, tmp_db, fresh_registry):
         from app.audit.turns import build_turn_payload
         from app.service import ChatModel
 

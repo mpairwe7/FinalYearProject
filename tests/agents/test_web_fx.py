@@ -268,7 +268,7 @@ class TestQuoteIntegrity:
         return f'<div data-last-price="{rate}" data-source="USD" data-target="UGX"></div>'
 
     def _fetch(self, url: str, google: float) -> str:
-        return self.XE if "xe.com" in url else self._google(google)
+        return self.XE if urlparse(url).hostname == "www.xe.com" else self._google(google)
 
     def test_sources_that_disagree_produce_no_rate(self) -> None:
         # XE's figure used to win, flagged live, with a 16% gap on a tax estimate.
@@ -286,7 +286,7 @@ class TestQuoteIntegrity:
 
     def test_a_lone_source_is_not_called_corroborated(self) -> None:
         def only_xe(url: str) -> str:
-            if "xe.com" in url:
+            if urlparse(url).hostname == "www.xe.com":
                 return self.XE
             raise RuntimeError("down")
 
@@ -297,7 +297,7 @@ class TestQuoteIntegrity:
 
     def test_a_stale_mirror_is_refused_even_though_it_was_fetched_now(self) -> None:
         def mirror(url: str) -> str:
-            if "er-api" in url:
+            if urlparse(url).hostname == "open.er-api.com":
                 return json.dumps(
                     {"result": "success", "time_last_update_unix": 1_600_000_000, "rates": {"UGX": 3700.0}}
                 )
@@ -378,12 +378,8 @@ class TestOfficialRate:
     def test_the_shipped_snapshot_claims_nothing(self) -> None:
         assert web_fx.official_bou_rate("USD") is None
 
-    def test_the_official_rate_outranks_a_fresh_market_quote(
-        self, monkeypatch: pytest.MonkeyPatch, clean_flags
-    ) -> None:
-        from app.tools import ToolRegistry
-
-        clean_flags.set("live_web_research", True)
+    def test_the_official_rate_outranks_a_fresh_market_quote(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("FLAG_LIVE_WEB_RESEARCH", "true")
         monkeypatch.setattr(web_fx, "_load_bou_fx_file", lambda: self.SNAPSHOT)
         monkeypatch.setattr(
             web_fx,
@@ -397,12 +393,8 @@ class TestOfficialRate:
         assert result["ugx_amount"] == pytest.approx(440_000.0)
         assert result["verified"] is True
 
-    def test_a_market_quote_is_described_as_an_estimate(
-        self, monkeypatch: pytest.MonkeyPatch, clean_flags
-    ) -> None:
-        from app.tools import ToolRegistry
-
-        clean_flags.set("live_web_research", True)
+    def test_a_market_quote_is_described_as_an_estimate(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("FLAG_LIVE_WEB_RESEARCH", "true")
         monkeypatch.setattr(
             web_fx,
             "lookup_live_exchange_rate",

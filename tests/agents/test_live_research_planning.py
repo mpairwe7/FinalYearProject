@@ -133,8 +133,8 @@ class TestBudgets:
         wr.run_web_research(self.QUESTION, search_http_fetcher=fetch, persist_files=False)
 
         assert len(seen) == wr.WEB_RESEARCH_MAX_QUERIES
-        assert any("ulii.org" in q for q in seen), "the Bill was never asked about"
-        assert any("eac.int" in q for q in seen), "the tariff was never asked about"
+        assert any(q.startswith("site:ulii.org") for q in seen), "the Bill was never asked about"
+        assert any("site:eac.int" in q for q in seen), "the tariff was never asked about"
 
     def test_a_trigger_over_the_allowance_is_recorded(self, monkeypatch):
         monkeypatch.setattr(wr, "WEB_RESEARCH_MAX_QUERIES", 1)
@@ -305,11 +305,13 @@ UNAVAILABLE = wr.LIVE_DISCLOSURES[wr.LIVE_UNAVAILABLE]
 
 
 @pytest.fixture
-def model(clean_flags, fresh_registry, monkeypatch):
+def model(fresh_registry, monkeypatch):
+    # Flags go through the environment: test_integration.py reloads app.flags,
+    # so flags.set() can land on a different object from the one service.py holds.
     from app.service import ChatModel
 
-    clean_flags.set("live_web_research", True)
-    clean_flags.set("semantic_cache", True)
+    monkeypatch.setenv("FLAG_LIVE_WEB_RESEARCH", "true")
+    monkeypatch.setenv("FLAG_SEMANTIC_CACHE", "true")
     monkeypatch.setattr(wr, "search_with_failover", lambda *_a, **_k: ChainResult("unavailable"))
     instance = ChatModel()
     instance._retriever = _Retriever()
@@ -440,12 +442,10 @@ class TestGraphParity:
 
         return AgentGraphState(query=query, rewritten_query=query, locale="en", top_k=3)
 
-    def test_the_graph_runs_the_check_once_however_often_it_retrieves(
-        self, clean_flags, monkeypatch
-    ):
+    def test_the_graph_runs_the_check_once_however_often_it_retrieves(self, monkeypatch):
         from app.agents.graphs import main_graph
 
-        clean_flags.set("live_web_research", True)
+        monkeypatch.setenv("FLAG_LIVE_WEB_RESEARCH", "true")
         calls: list[str] = []
 
         def spy(*_a, **_k):
