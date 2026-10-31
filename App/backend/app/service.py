@@ -32,13 +32,14 @@ import functools
 import inspect
 import json
 import logging
+import math
 import os
 import re
 import threading
 import time
 import uuid
 from collections import Counter
-from collections.abc import AsyncIterator, Generator, Iterable
+from collections.abc import AsyncIterator, Awaitable, Generator, Iterable
 from pathlib import Path
 from typing import Any, Callable, Final
 
@@ -172,7 +173,14 @@ from .query import (
     normalize as normalize_query,
     rewrite as rewrite_query,
 )
-from .resilience import CircuitBreaker
+from .resilience import (
+    CancelScope,
+    CircuitBreaker,
+    admit,
+    remaining_turn_seconds,
+    set_turn_deadline,
+    turn_deadline,
+)
 from .retriever import HybridRetriever, active_retrieval_mode
 from .text_signals import (
     ABSTENTION_REPLY,
@@ -720,6 +728,34 @@ _LLM_CIRCUIT = CircuitBreaker(
     reset_timeout=15.0,
     max_timeout=300.0,
 )
+#: The reasoner is a separate server on a separate GPU. Sharing the T1 breaker
+#: meant a down reasoner tripped nothing, so every turn routed to it spent its
+#: whole REASONER_DEADLINE_S before falling back, and a reasoner that took the
+#: shared half-open probe left T1 unable to run at all.
+_REASONER_CIRCUIT = CircuitBreaker(
+    name="llm_reasoner",
+    failure_threshold=3,
+    reset_timeout=30.0,
+    max_timeout=300.0,
+)
+
+
+def _circuit_for(endpoint: Any) -> CircuitBreaker:
+    """The breaker for the server *endpoint* names."""
+    return _REASONER_CIRCUIT if _is_non_t1_endpoint(endpoint) else _LLM_CIRCUIT
+
+
+def _endpoint_model(endpoint: Any) -> str:
+    return str(getattr(endpoint, "model", "") or llm_module.LLM_MODEL)
+
+
+def _tier_name(tier: Any) -> str:
+    return str(getattr(tier, "value", tier) or "")
+
+
+def _chain_deadline() -> float:
+    """Absolute deadline for a walk down the cloud chain, within what the turn has left."""
+    return time.monotonic() + remaining_turn_seconds(LLM_TOTAL_BUDGET_SECONDS)
 
 
 def _build_fallback_prompt(
@@ -818,6 +854,13 @@ def _llm_cloud_fallback(
         return deadline is not None and time.monotonic() >= deadline
 
     best = ""
+    best_writer: dict[str, str] = {}
+
+    def _served_best() -> str:
+        """The truncated draft the chain settled for, named now that it is the answer."""
+        if best:
+            _note_generation(**best_writer)
+        return best
 
     if _budget_exhausted():
         logger.warning("LLM fallback chain total budget exhausted before Gemini attempt")
@@ -830,8 +873,7 @@ def _llm_cloud_fallback(
         # FAILURE and, after enough Luganda turns, open the circuit for English.
         and gw.gemini_allowed_for(locale)
         and cfg.is_gemini_configured()
-        and breakers.GEMINI_BREAKER.allow_request()
-        and budget.try_consume_gemini_call()
+        and admit(breakers.GEMINI_BREAKER, budget.try_consume_gemini_call)
     ):
         system, user = _build_fallback_prompt(query, passages, locale, tone_hint)
         try:
@@ -856,13 +898,15 @@ def _llm_cloud_fallback(
             text = normalise_citation_markers(text)
             if text and text.strip() and not _looks_truncated(text):
                 logger.info("LLM fallback via Gemini succeeded")
+                _note_generation(backend="gemini", model="gemini_flash")
                 return text
             if text and text.strip():
                 logger.warning(
                     "LLM fallback via Gemini looks truncated (%d chars) — trying Workers AI",
                     len(text.strip()),
                 )
-                best = best or text
+                if not best:
+                    best, best_writer = text, {"backend": "gemini", "model": "gemini_flash"}
         except Exception:
             breakers.GEMINI_BREAKER.record_failure()
             logger.warning("LLM Gemini fallback failed", exc_info=True)
@@ -896,7 +940,7 @@ def _llm_cloud_fallback(
     # is not a guard.
     if not gw.cloud_generation_allowed_for(locale):
         logger.info("Cloud generation skipped for locale %r — Sunbird tier owns it", locale)
-        return best
+        return _served_best()
     # Strip the Qwen-only /no_think directive — a no-op token for Llama/Mistral.
     if messages and messages[0].get("role") == "system":
         sys_content = messages[0]["content"]
@@ -915,8 +959,7 @@ def _llm_cloud_fallback(
             break
         if not (
             cfg.is_cloudflare_configured()
-            and breakers.CF_LLM_BREAKER.allow_request()
-            and budget.try_consume_neurons(5)
+            and admit(breakers.CF_LLM_BREAKER, lambda: budget.try_consume_neurons(5))
         ):
             break
         try:
@@ -926,6 +969,7 @@ def _llm_cloud_fallback(
             text = normalise_citation_markers(text)
             if text and text.strip() and not _looks_truncated(text):
                 logger.info("LLM via Workers AI (%s) succeeded", model)
+                _note_generation(backend="workers_ai", model=str(model))
                 return text
             if text and text.strip():
                 logger.warning(
@@ -933,11 +977,12 @@ def _llm_cloud_fallback(
                     model,
                     len(text.strip()),
                 )
-                best = best or text
+                if not best:
+                    best, best_writer = text, {"backend": "workers_ai", "model": str(model)}
         except Exception:
             breakers.CF_LLM_BREAKER.record_failure()
             logger.warning("LLM Workers AI failed (model=%s)", model, exc_info=True)
-    return best
+    return _served_best()
 
 
 def _stream_cloud_fallback(
@@ -956,7 +1001,7 @@ def _stream_cloud_fallback(
         locale,
         personalization_context,
         tone_hint,
-        deadline=time.monotonic() + LLM_TOTAL_BUDGET_SECONDS,
+        deadline=_chain_deadline(),
     )
     if not text:
         return
@@ -1099,10 +1144,112 @@ def _disclosed_reply(result: dict[str, Any]) -> str:
 _TURN_LIVE_CHECK: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
     "_turn_live_check", default=None
 )
+#: A streamed turn's stage timings, in completion order, for ``attest_turn``. The
+#: dict is shared by reference with the threads the turn runs in.
+_TURN_STAGES: contextvars.ContextVar[dict[str, float] | None] = contextvars.ContextVar(
+    "_turn_stages", default=None
+)
 #: A turn's executed plans, so prompt building and verification share one run.
 _TURN_PLANS: contextvars.ContextVar[dict[str, tuple[str, dict[str, Any]]] | None] = contextvars.ContextVar(
     "_turn_plans", default=None
 )
+
+
+#: What produced this turn's words, for the audit row. A deployment can answer from
+#: a local model, a reasoner, Gemini or Workers AI, or fall back to a raw passage,
+#: and ``result["model"]`` names the configured model whichever of those ran, so the
+#: ledger could not say who wrote an answer or whether it left the country (DPPA
+#: 2019 s.19). The dict is shared by reference with the turn's threads.
+_TURN_GENERATION: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "_turn_generation", default=None
+)
+
+#: Owed to the taxpayer when a turn could not do all it should have (OWASP ASI09:
+#: an answer must not look more certain than it is). Added after every verifier, so
+#: the sentence is never judged as a claim, and before localization.
+#: A retrieved passage served in place of an answer a model wrote.
+_PASSAGE_DISCLOSURE = (
+    "I could not write a tailored answer just now, so this is the closest passage I "
+    "found. It may not fit your exact situation. Please confirm with URA on 0800 117 000."
+)
+
+DEGRADED_DISCLOSURES: dict[str, str] = {
+    "generation_unavailable": _PASSAGE_DISCLOSURE,
+    # The model answered, but not from its sources, so a passage replaced its draft.
+    "draft_unsupported": _PASSAGE_DISCLOSURE,
+    "tool_loop_truncated": (
+        "This answer may not be complete, because I ran out of steps while checking it. "
+        "Please confirm the details with URA on 0800 117 000."
+    ),
+    "stream_interrupted": (
+        "My answer was cut off before it finished, so it may not be complete. Please try "
+        "again, or confirm with URA on 0800 117 000."
+    ),
+}
+
+
+#: Served when an enforced figure lock can neither check a reply nor take its figures out.
+FIGURES_WITHHELD_REPLY = (
+    "I could not verify the figures for this answer, so I have not shown it. "
+    "Please confirm with URA on 0800 117 000."
+)
+
+
+def _new_generation_record() -> dict[str, Any]:
+    return {"backend": "", "model": "", "tier": "", "fallbacks": [], "degraded": []}
+
+
+def _note_generation(
+    *,
+    backend: str = "",
+    model: str = "",
+    tier: str = "",
+    fallback: str = "",
+    degraded: str = "",
+) -> None:
+    """Record what served this turn. Does nothing outside a turn."""
+    record = _TURN_GENERATION.get()
+    if record is None:
+        return
+    if backend:
+        record["backend"] = backend
+    if model:
+        record["model"] = model
+    if tier:
+        record["tier"] = tier
+    if fallback and fallback not in record["fallbacks"]:
+        record["fallbacks"].append(fallback)
+    if degraded and degraded not in record["degraded"]:
+        record["degraded"].append(degraded)
+        metrics.inc("turn_degraded_total", labels={"reason": degraded})
+
+
+def _note_passage_served(reason: str) -> None:
+    """The reply is a retrieved passage, so no model wrote it, whichever one was tried."""
+    record = _TURN_GENERATION.get()
+    if record is not None:
+        record.update(backend="passage", model="", tier="")
+    _note_generation(degraded=reason)
+
+
+def _turn_degradations() -> list[str]:
+    return list((_TURN_GENERATION.get() or {}).get("degraded") or [])
+
+
+def _with_degraded_disclosure(reply: str, reasons: Iterable[str]) -> str:
+    """*reply* with the sentence each of *reasons* owes the taxpayer, once."""
+    for reason in reasons:
+        sentence = DEGRADED_DISCLOSURES.get(reason, "")
+        if sentence and reply and sentence not in reply:
+            reply = f"{reply.rstrip()}\n\n{sentence}"
+    return reply
+
+
+def _mark_stage(name: str, started: float) -> None:
+    """Record a streamed stage. REST turns do this through ``trace_stage`` timings."""
+    stages = _TURN_STAGES.get()
+    if stages is not None:
+        stages[name] = round((time.perf_counter() - started) * 1000, 2)
 
 
 def _turn_plan_summary() -> dict[str, Any]:
@@ -1219,7 +1366,7 @@ def _call_llm_with_deadline(
             locale,
             personalization_context,
             tone_hint,
-            deadline=time.monotonic() + LLM_TOTAL_BUDGET_SECONDS,
+            deadline=_chain_deadline(),
         )
         if text and text.strip():
             return strip_thought(text)
@@ -1278,8 +1425,9 @@ def _local_llm_then_cloud(
     # local generation that runs close to its own deadline_s leaves
     # correspondingly less time for the cloud chain rather than the two
     # budgets stacking on top of each other.
-    chain_deadline = time.monotonic() + LLM_TOTAL_BUDGET_SECONDS
+    chain_deadline = _chain_deadline()
     is_reasoner = _is_non_t1_endpoint(endpoint)
+    circuit = _circuit_for(endpoint)
     effective_deadline = deadline_s
     if is_reasoner:
         try:
@@ -1288,9 +1436,16 @@ def _local_llm_then_cloud(
             )
         except ValueError:
             effective_deadline = deadline_s
+    own_deadline = effective_deadline
+    effective_deadline = remaining_turn_seconds(own_deadline)
+    if effective_deadline <= 0:
+        logger.warning("Turn deadline reached; skipping generation")
+        metrics.inc("turn_deadline_exceeded_total", labels={"stage": "generation"})
+        return ""
 
     def _fallback_to_t1(reason: str) -> str:
         log_tier_fallback(reason=reason)
+        _note_generation(fallback=f"reasoner_{reason}")
         t1_ep = get_endpoint(ModelTier.T1)
         logger.warning(
             "Reasoner endpoint (%s) failed (%s) — falling back to local T1 (%s) with verified-facts context",
@@ -1325,7 +1480,9 @@ def _local_llm_then_cloud(
             deadline=chain_deadline,
         )
 
-    if not _LLM_CIRCUIT.allow_request():
+    if not circuit.allow_request():
+        if is_reasoner:
+            return _fallback_to_t1("circuit_open")
         logger.warning("LLM circuit breaker OPEN — trying cloud fallback")
         return _cloud()
 
@@ -1371,7 +1528,8 @@ def _local_llm_then_cloud(
             reply, gen_meta = str(raw_res or ""), {}
         llm_module.set_last_generation_meta(gen_meta)
         if reply and reply.strip():
-            _LLM_CIRCUIT.record_success()
+            circuit.record_success()
+            _note_generation(backend="local", model=_endpoint_model(endpoint), tier=_tier_name(tier))
             from .production_readiness import is_sovereign_mode
 
             finish_reason = gen_meta.get("finish_reason")
@@ -1392,27 +1550,31 @@ def _local_llm_then_cloud(
             )
             cloud_reply = _cloud()
             return cloud_reply if (cloud_reply and cloud_reply.strip()) else reply
-        if is_reasoner:
-            return _fallback_to_t1("empty")
         # Empty reply — llm_module.generate logs+swallows its own errors and
         # returns "" (e.g. _vllm_generate on HTTP failure), so an empty string
         # is our only failure signal here. Mirror the streaming path: record a
         # failure and try the cloud fallback before the caller drops to the
         # extractive best-hit answer.
-        _LLM_CIRCUIT.record_failure()
+        circuit.record_failure()
+        if is_reasoner:
+            return _fallback_to_t1("empty")
         logger.warning("LLM returned empty — trying cloud fallback")
         return _cloud()
     except concurrent.futures.TimeoutError:
         future.cancel()  # best-effort; transformers generate may ignore
+        # Cut short by the turn, this says nothing about the model.
+        if effective_deadline < own_deadline:
+            circuit.release()
+        else:
+            circuit.record_failure()
         if is_reasoner:
             return _fallback_to_t1("deadline")
-        _LLM_CIRCUIT.record_failure()
         logger.warning("LLM deadline %.1fs exceeded", effective_deadline)
         return _cloud()
     except Exception:
+        circuit.record_failure()
         if is_reasoner:
             return _fallback_to_t1("error")
-        _LLM_CIRCUIT.record_failure()
         logger.exception("LLM generation raised")
         return _cloud()
 
@@ -1522,15 +1684,36 @@ def _stream_local_then_cloud(
                 query, passages, conversation_history, locale, personalization_context, tone_hint
             )
 
+    def _t1_stream(reason: str) -> Generator[str, None, None]:
+        log_tier_fallback(reason=reason)
+        _note_generation(fallback=f"reasoner_{reason}")
+        yield from _stream_local_then_cloud(
+            query,
+            passages,
+            conversation_history,
+            locale,
+            personalization_context,
+            cancel_event,
+            allow_cloud_fallback=False,
+            tone_hint=tone_hint,
+            context_summary=context_summary,
+            endpoint=get_endpoint(ModelTier.T1),
+            tier=ModelTier.T1,
+        )
+
     if not llm_module.is_available():
         yield from _cloud_stream()
         return
-    if not _LLM_CIRCUIT.allow_request():
+    is_reasoner = _is_non_t1_endpoint(endpoint)
+    circuit = _circuit_for(endpoint)
+    if not circuit.allow_request():
+        if is_reasoner:
+            yield from _t1_stream("circuit_open")
+            return
         logger.warning("LLM circuit breaker OPEN — streaming via cloud fallback")
         yield from _cloud_stream()
         return
 
-    is_reasoner = _is_non_t1_endpoint(endpoint)
     stream_kwargs: dict[str, Any] = {
         "query": query,
         "passages": passages,
@@ -1546,6 +1729,8 @@ def _stream_local_then_cloud(
         stream_kwargs["tier"] = tier
 
     saw_tokens = False
+    reported = False
+    fall_back = ""
     try:
         for token in llm_module.generate_stream(**stream_kwargs):
             if cancel_event is not None and cancel_event.is_set():
@@ -1556,51 +1741,40 @@ def _stream_local_then_cloud(
             saw_tokens = True
             yield token
 
+        reported = True
         if saw_tokens:
-            _LLM_CIRCUIT.record_success()
-        elif is_reasoner:
-            log_tier_fallback(reason="empty")
-            t1_ep = get_endpoint(ModelTier.T1)
-            yield from _stream_local_then_cloud(
-                query,
-                passages,
-                conversation_history,
-                locale,
-                personalization_context,
-                cancel_event,
-                allow_cloud_fallback=False,
-                tone_hint=tone_hint,
-                context_summary=context_summary,
-                endpoint=t1_ep,
-                tier=ModelTier.T1,
-            )
+            circuit.record_success()
+            _note_generation(backend="local", model=_endpoint_model(endpoint), tier=_tier_name(tier))
+        elif cancel_event is not None and cancel_event.is_set():
+            # Nothing was asked of the model, and nobody is waiting for an
+            # answer: neither a failure to count nor a cloud call to pay for.
+            circuit.release()
         else:
             # Empty stream counts as a soft failure — the breaker tracks
             # it so a continually empty worker eventually trips.
-            _LLM_CIRCUIT.record_failure()
-            yield from _cloud_stream()
+            circuit.record_failure()
+            fall_back = "empty"
     except Exception:
-        if is_reasoner and not saw_tokens:
-            log_tier_fallback(reason="error")
-            t1_ep = get_endpoint(ModelTier.T1)
-            yield from _stream_local_then_cloud(
-                query,
-                passages,
-                conversation_history,
-                locale,
-                personalization_context,
-                cancel_event,
-                allow_cloud_fallback=False,
-                tone_hint=tone_hint,
-                context_summary=context_summary,
-                endpoint=t1_ep,
-                tier=ModelTier.T1,
-            )
-            return
-        _LLM_CIRCUIT.record_failure()
+        reported = True
+        circuit.record_failure()
         logger.exception("LLM streaming raised")
-        yield from _cloud_stream()
+        # After tokens have gone out, a second answer would be appended to the
+        # first half of this one.
+        fall_back = "" if saw_tokens else "error"
+        if saw_tokens:
+            _note_generation(degraded="stream_interrupted")
+    finally:
+        # A generator closed mid-yield (GeneratorExit, a client leaving) reaches
+        # neither branch above, and that used to strand a half-open probe.
+        if not reported:
+            circuit.release()
+
+    if not fall_back:
         return
+    if is_reasoner:
+        yield from _t1_stream(fall_back)
+    else:
+        yield from _cloud_stream()
 
 
 def _connectors_used(tool_calls: list[dict[str, Any]] | None) -> list[dict[str, str]]:
@@ -1699,6 +1873,8 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     forced_operations: list[str] | None = None,
     endpoint: Any = None,
     tier: Any = None,
+    escalation_route: Callable[..., str] | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     """Run :func:`llm_module.generate_with_tools` under breaker + deadline.
 
@@ -1710,19 +1886,51 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     Deadline is doubled by default because the tool-call loop runs
     multiple generations — a typical 2-hop call takes ~2x a single
     generate().
+
+    A timed-out future keeps running: ``future.cancel()`` cannot stop a started
+    thread, so an abandoned loop went on dispatching tools for a turn nobody was
+    waiting on. The run gets a :class:`CancelScope` it checks before every model
+    round and every dispatch. It stops on its own timeout, or when the turn
+    (*cancel_event*) is cancelled, and a call already in flight still completes.
     """
     empty = {"text": "", "tool_calls": [], "iterations": 0, "truncated": False}
+    base_personalization = personalization_context
     calc_context = _evaluate_calculation_context(query)
     if calc_context:
         personalization_context = (personalization_context + "\n\n" + calc_context).strip()
-    if not _LLM_CIRCUIT.allow_request():
-        logger.warning("LLM circuit breaker OPEN — skipping agentic path")
-        return empty
 
+    is_reasoner = _is_non_t1_endpoint(endpoint)
+    circuit = _circuit_for(endpoint)
     if max_iterations is None:
         max_iterations = _resolve_tool_max_iterations()
 
-    is_reasoner = _is_non_t1_endpoint(endpoint)
+    def _on_t1(reason: str) -> dict[str, Any]:
+        log_tier_fallback(reason=reason)
+        _note_generation(fallback=f"reasoner_{reason}")
+        return _call_llm_agentic(
+            query,
+            passages,
+            conversation_history,
+            locale,
+            tool_names=tool_names,
+            max_iterations=max_iterations,
+            personalization_context=base_personalization,
+            tone_hint=tone_hint,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            user_role=user_role,
+            granted_purposes=granted_purposes,
+            deadline_s=deadline_s,
+            event_callback=event_callback,
+            agent_role=agent_role,
+            context_summary=context_summary,
+            connector_namespaces=connector_namespaces,
+            forced_operations=forced_operations,
+            endpoint=get_endpoint(ModelTier.T1),
+            escalation_route=escalation_route,
+            cancel_event=cancel_event,
+        )
+
     effective_deadline = deadline_s
     if is_reasoner:
         try:
@@ -1731,7 +1939,20 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
             )
         except ValueError:
             effective_deadline = deadline_s
+    own_deadline = effective_deadline
+    effective_deadline = remaining_turn_seconds(own_deadline)
+    if effective_deadline <= 0:
+        logger.warning("Turn deadline reached; skipping the agentic loop")
+        metrics.inc("turn_deadline_exceeded_total", labels={"stage": "agentic"})
+        return empty
 
+    if not circuit.allow_request():
+        if is_reasoner:
+            return _on_t1("circuit_open")
+        logger.warning("LLM circuit breaker OPEN — skipping agentic path")
+        return empty
+
+    run_cancel = CancelScope(cancel_event)
     tool_kwargs: dict[str, Any] = {
         "query": query,
         "passages": passages or None,
@@ -1754,104 +1975,52 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
         # than summarised by a model that, asked in Luganda or Swahili, writes
         # claims the record does not make.
         "summarise_records": not (connector_namespaces and locale not in ("", "en")),
+        "cancel_event": run_cancel,
     }
     if endpoint is not None:
         tool_kwargs["endpoint"] = endpoint
     if tier is not None:
         tool_kwargs["tier"] = tier
 
+    turn_context = contextvars.copy_context()
+    if escalation_route is not None:
+        from .tools.escalate import ESCALATION_ROUTE
+
+        turn_context.run(ESCALATION_ROUTE.set, escalation_route)
     future = _LLM_EXECUTOR.submit(
-        contextvars.copy_context().run,
+        turn_context.run,
         llm_module.generate_with_tools,
         **tool_kwargs,
     )
     try:
         result = _with_connector_outcomes(future.result(timeout=effective_deadline))
         if result and result.get("text"):
-            _LLM_CIRCUIT.record_success()
+            circuit.record_success()
+            _note_generation(backend="local", model=_endpoint_model(endpoint), tier=_tier_name(tier))
             return result
-        if is_reasoner:
-            log_tier_fallback(reason="empty")
-            t1_ep = get_endpoint(ModelTier.T1)
-            return _call_llm_agentic(
-                query,
-                passages,
-                conversation_history,
-                locale,
-                tool_names=tool_names,
-                max_iterations=max_iterations,
-                personalization_context=personalization_context,
-                tone_hint=tone_hint,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                user_role=user_role,
-                granted_purposes=granted_purposes,
-                deadline_s=deadline_s,
-                event_callback=event_callback,
-                agent_role=agent_role,
-                context_summary=context_summary,
-                connector_namespaces=connector_namespaces,
-                forced_operations=forced_operations,
-                endpoint=t1_ep,
-            )
+        if run_cancel.is_set():
+            circuit.release()
+            return result or empty
         # Empty text counts as a soft failure
-        _LLM_CIRCUIT.record_failure()
+        circuit.record_failure()
+        if is_reasoner:
+            return _on_t1("empty")
         return result or empty
     except concurrent.futures.TimeoutError:
         future.cancel()
+        run_cancel.set()
+        if effective_deadline < own_deadline:
+            circuit.release()
+        else:
+            circuit.record_failure()
         if is_reasoner:
-            log_tier_fallback(reason="deadline")
-            t1_ep = get_endpoint(ModelTier.T1)
-            return _call_llm_agentic(
-                query,
-                passages,
-                conversation_history,
-                locale,
-                tool_names=tool_names,
-                max_iterations=max_iterations,
-                personalization_context=personalization_context,
-                tone_hint=tone_hint,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                user_role=user_role,
-                granted_purposes=granted_purposes,
-                deadline_s=deadline_s,
-                event_callback=event_callback,
-                agent_role=agent_role,
-                context_summary=context_summary,
-                connector_namespaces=connector_namespaces,
-                forced_operations=forced_operations,
-                endpoint=t1_ep,
-            )
-        _LLM_CIRCUIT.record_failure()
+            return _on_t1("deadline")
         logger.warning("agentic LLM deadline %.1fs exceeded", effective_deadline)
         return empty
     except Exception:
+        circuit.record_failure()
         if is_reasoner:
-            log_tier_fallback(reason="error")
-            t1_ep = get_endpoint(ModelTier.T1)
-            return _call_llm_agentic(
-                query,
-                passages,
-                conversation_history,
-                locale,
-                tool_names=tool_names,
-                max_iterations=max_iterations,
-                personalization_context=personalization_context,
-                tone_hint=tone_hint,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                user_role=user_role,
-                granted_purposes=granted_purposes,
-                deadline_s=deadline_s,
-                event_callback=event_callback,
-                agent_role=agent_role,
-                context_summary=context_summary,
-                connector_namespaces=connector_namespaces,
-                forced_operations=forced_operations,
-                endpoint=t1_ep,
-            )
-        _LLM_CIRCUIT.record_failure()
+            return _on_t1("error")
         logger.exception("agentic LLM generation raised")
         return empty
 
@@ -1883,16 +2052,30 @@ def _resolve_tool_max_iterations() -> int:
 # next token / await boundary.  Set to 0 to disable.
 _TURN_DEADLINE_DEFAULT_S = 120
 
+#: Said when a turn is stopped at its deadline. Translated if there is time.
+TURN_DEADLINE_MESSAGE = (
+    "This is taking longer than it should, so I have stopped rather than give you a "
+    "partial answer. Please try again, or contact URA on 0800 117 000."
+)
+
+
+class _TurnDeadlineExceeded(Exception):
+    """A streamed turn reached its deadline; unwinds to the one place that says so."""
+
 
 def _resolve_turn_deadline() -> float:
     raw = os.getenv("AGENTIC_TURN_DEADLINE_S")
     if raw is None:
         return _TURN_DEADLINE_DEFAULT_S
     try:
-        return max(0.0, float(raw))
+        seconds = float(raw)
     except ValueError:
-        logger.warning("AGENTIC_TURN_DEADLINE_S=%r is not numeric; using default", raw)
+        seconds = math.nan
+    # "nan" and "inf" parse, and a deadline of either never fires.
+    if not math.isfinite(seconds):
+        logger.warning("AGENTIC_TURN_DEADLINE_S=%r is not a finite number; using default", raw)
         return _TURN_DEADLINE_DEFAULT_S
+    return max(0.0, seconds)
 
 
 # ---------------------------------------------------------------------------
@@ -1902,6 +2085,61 @@ def _resolve_turn_deadline() -> float:
 # Bounded queue for streamed tokens.  Unbounded queues are an OOM hazard
 # when a slow client lets the LLM pump out faster than tokens are drained.
 _STREAM_QUEUE_MAX = 256
+
+
+def _without_figures(reply: str) -> str:
+    """*reply* with every figure gone, for an enforced lock that could not check any.
+
+    Offering the whole reply as the offending text strips each sentence with a figure
+    in it and keeps the rest. The fault that stopped the check can stop that too, and
+    then nothing says the reply is free of figures, so none of it is shown.
+    """
+    from .agents.evaluator import strip_unverified_figure_sentences
+
+    try:
+        return strip_unverified_figure_sentences(reply, [reply])
+    except Exception:
+        logger.warning("Figures could not be removed; withholding the reply", exc_info=True)
+        return FIGURES_WITHHELD_REPLY
+
+
+def _figure_lock(
+    reply: str,
+    *,
+    query: str,
+    verified_facts: str,
+    contexts: list[str],
+    tool_outputs: list[dict[str, Any]] | None,
+    enforce: bool,
+) -> tuple[str, dict[str, Any]]:
+    """Trace every figure in *reply* to a source: strip what fails, or only measure.
+
+    Enforced for the reasoning tier and under ``evaluator_optimizer``, as on REST.
+    Everywhere else it measures, because a blocking control with an unknown false
+    positive rate should not be switched on for live taxpayers blind:
+    ``figure_lock_checks_total{mode="shadow"}`` is the evidence for enforcing it.
+    """
+    from .agents.evaluator import strip_unverified_figure_sentences, verify_figure_lock
+
+    mode = "enforced" if enforce else "shadow"
+    try:
+        passed, offending, detail = verify_figure_lock(
+            reply,
+            query=query,
+            verified_facts=verified_facts,
+            passages=contexts,
+            tool_outputs=tool_outputs,
+        )
+    except Exception:
+        logger.warning("Figure lock could not run", exc_info=True)
+        metrics.inc("figure_lock_checks_total", labels={"mode": mode, "outcome": "error"})
+        return (_without_figures(reply) if enforce else reply), {"mode": mode, "ok": None, "rejected": 0}
+    outcome = "skipped" if detail.get("skipped") else ("pass" if passed else "reject")
+    metrics.inc("figure_lock_checks_total", labels={"mode": mode, "outcome": outcome})
+    summary = {"mode": mode, "ok": passed, "rejected": len(offending)}
+    if passed or not enforce:
+        return reply, summary
+    return strip_unverified_figure_sentences(reply, offending), summary
 
 
 def _apply_output_guards(
@@ -1924,6 +2162,8 @@ def _apply_output_guards(
     verified_facts: str = "",
     calculation_message: str | None = None,
     live_check_disclosure: str = "",
+    model_tier: str = "",
+    tool_outputs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run the full post-generation guard pipeline for a streamed turn.
 
@@ -1944,6 +2184,7 @@ def _apply_output_guards(
     citation rules) would measure it against evidence it was never built on —
     and escalate a correct answer. The sync path makes the same exception.
     """
+    guard_started = time.perf_counter()
     if tool_grounded:
         hits, citations = [], []
     contexts = [h.get("text") or h.get("answer", "") for h in hits]
@@ -2074,6 +2315,21 @@ def _apply_output_guards(
         response_judge["withheld_contradicted"] = True
         faith = None
 
+    # Deterministic, so it needs no model and cannot be out of service. The REST
+    # path alone used to run this; the stream is what the web client uses.
+    figure_lock: dict[str, Any] = {}
+    if not withheld and reply:
+        locked, figure_lock = _figure_lock(
+            reply,
+            query=f"{message}\n{calculation_message or ''}",
+            verified_facts=verified_facts_block,
+            contexts=contexts,
+            tool_outputs=tool_outputs,
+            enforce=flags.is_enabled("evaluator_optimizer") or model_tier == ModelTier.T3.value,
+        )
+        if locked != reply:
+            reply, revised = locked, True
+
     # "claim_verification" is the draft's — the report the judge acted on.
     # When a revision was substituted, the re-verification of that replacement
     # is carried alongside it rather than in its place.
@@ -2112,6 +2368,7 @@ def _apply_output_guards(
     if disclosed != reply:
         reply, revised = disclosed, True
 
+    _mark_stage("output_guard", guard_started)
     return {
         "reply": reply,
         "faithfulness": faith,
@@ -2122,7 +2379,20 @@ def _apply_output_guards(
         "ticket_id": ticket_id,
         "revised": revised,
         "claim_report": claim_report,
+        "figure_lock": figure_lock,
     }
+
+
+def _localize_turn_payloads(result: dict[str, Any], locale: str) -> None:
+    """Translate what travels with the reply. Off the event loop: every label is a call."""
+    if result.get("resources"):
+        result["resources"] = [ChatModel._localize_resource(r, locale) for r in result["resources"]]
+    if result.get("next_actions"):
+        result["next_actions"] = ChatModel._localize_next_actions(result["next_actions"], locale)
+    if result.get("workflow"):
+        result["workflow"] = ChatModel._localize_workflow(result["workflow"], locale)
+    if isinstance(result.get("portal_copilot"), dict):
+        result["portal_copilot"] = ChatModel._localize_portal_copilot(result["portal_copilot"], locale)
 
 
 def _recent_turns_for_guidance(
@@ -2164,6 +2434,19 @@ async def run_chat_turn(
     both streamed paths before.
     """
     failed = False
+    finished = False
+    started = time.perf_counter()
+    # What the taxpayer has actually been sent, for a turn that never finishes.
+    sent = ""
+    progress: dict[str, Any] = {}
+    usage = None
+    closing = {
+        "channel": channel,
+        "message": str(kwargs.get("message") or ""),
+        "session_id": kwargs.get("session_id"),
+        "user_id": kwargs.get("user_id"),
+        "tenant_id": kwargs.get("tenant_id"),
+    }
     # Set here, in the request's own context, so every step of the turn sees
     # it — the threads (asyncio.to_thread copies this context) and the agentic
     # stream alike. Set only inside the retrieval thread, it never reached the
@@ -2172,24 +2455,56 @@ async def run_chat_turn(
     _ACTIVE_USER_STATED_IDS.set(user_stated_identifiers(str(kwargs.get("message") or "")))
     _TURN_PLANS.set({})
     _TURN_LIVE_CHECK.set({})
-    with turn_usage_scope() as usage, turn_attributes_scope():
-        async for event_type, payload in _run_chat_turn_events(model, **kwargs):
-            if event_type == "error":
-                failed = True
-            elif event_type == "_log" and isinstance(payload, dict):
-                await asyncio.to_thread(
+    _TURN_STAGES.set({})
+    _TURN_GENERATION.set(_new_generation_record())
+    try:
+        with turn_usage_scope() as usage, turn_attributes_scope():
+            async for event_type, payload in _run_chat_turn_events(model, progress=progress, **kwargs):
+                if event_type == "error":
+                    failed = True
+                elif event_type == "token" and isinstance(payload, str):
+                    sent += payload
+                elif event_type == "revision" and isinstance(payload, str):
+                    sent = payload
+                elif event_type == "_log" and isinstance(payload, dict):
+                    finished = True
+                    await asyncio.to_thread(
+                        _finish_streamed_turn,
+                        model,
+                        payload,
+                        failed=failed,
+                        disposition=str(
+                            payload.get("disposition") or ("failed" if failed else "completed")
+                        ),
+                        usage=usage_summary(usage),
+                        **closing,
+                    )
+                yield event_type, payload
+    finally:
+        # No final frame: the client left, or the transport closed this generator.
+        # The turn still happened, and may have served part of an answer. Not
+        # awaited: a task being cancelled gets cancelled again by any await here,
+        # so the record would be lost in exactly the case it exists for.
+        if not finished:
+            threading.Thread(
+                target=contextvars.copy_context().run,
+                args=(
                     _finish_streamed_turn,
                     model,
-                    payload,
-                    channel=channel,
-                    failed=failed,
-                    message=str(kwargs.get("message") or ""),
-                    session_id=kwargs.get("session_id"),
-                    user_id=kwargs.get("user_id"),
-                    tenant_id=kwargs.get("tenant_id"),
-                    usage=usage_summary(usage),
-                )
-            yield event_type, payload
+                    {
+                        "result": progress.get("result") or {},
+                        "full_reply": sent,
+                        "elapsed_ms": (time.perf_counter() - started) * 1000,
+                    },
+                ),
+                kwargs={
+                    "failed": False,
+                    "disposition": "cancelled",
+                    "usage": usage_summary(usage) if usage is not None else None,
+                    **closing,
+                },
+                daemon=True,
+            ).start()
 
 
 def _finish_streamed_turn(
@@ -2203,12 +2518,32 @@ def _finish_streamed_turn(
     user_id: str | None,
     tenant_id: str | None,
     usage: dict[str, Any] | None = None,
+    disposition: str = "completed",
 ) -> None:
-    """Metrics and the audit row for a streamed turn (runs off the event loop)."""
+    """Metrics and the audit row for a streamed turn (runs off the event loop).
+
+    Every turn gets a row, however it ended. A turn that failed or was cut short
+    can already have served text, opened a ticket or run a tool, so "one row per
+    answer" left out exactly the turns an auditor needs. ``disposition`` says how
+    it ended. Only a completed turn writes to memory or a case, and only a
+    completed turn is attested, because the others did not finish the pipeline.
+    """
     from .analytics import record_chat_turn
+    from .turn_pipeline import attest_turn
 
     result = log_payload.get("result") or {}
-    served = {**result, "reply": str(log_payload.get("full_reply") or "")}
+    served = {
+        **result,
+        "reply": str(log_payload.get("full_reply") or ""),
+        "_disposition": disposition,
+        "_generation": dict(_TURN_GENERATION.get() or {}),
+    }
+    completed = disposition == "completed"
+    if completed:
+        try:
+            served["_attestation"] = attest_turn(_TURN_STAGES.get() or {}, transport=channel)
+        except Exception as exc:  # noqa: BLE001 - telemetry must never fail a turn
+            logger.warning("Pipeline attestation failed: %s", type(exc).__name__)
     if log_payload.get("english_reply"):
         # The answer before localisation, for checks written in English.
         served["_english_reply"] = str(log_payload["english_reply"])
@@ -2217,11 +2552,11 @@ def _finish_streamed_turn(
             served,
             elapsed_ms=float(log_payload.get("elapsed_ms") or 0.0),
             channel=channel,
-            error=failed,
+            error=failed or disposition == "deadline_exceeded",
         )
     except Exception:
         logger.debug("Streamed turn metrics failed", exc_info=True)
-    if not failed and result.get("_memory_consent") and not result.get("_memory_absorbed"):
+    if completed and result.get("_memory_consent") and not result.get("_memory_absorbed"):
         # The streamed path never wrote to long-term memory: only its LangGraph
         # branch (off by default) did, so a consented web user's facts and
         # episodes were never kept. Written here, once the reply is final.
@@ -2238,10 +2573,10 @@ def _finish_streamed_turn(
                 personalization={"consent_granted": True},
                 workflow=result.get("workflow") if isinstance(result.get("workflow"), dict) else None,
             )
-    if not failed:
+    if completed:
         _record_turn_case(message, result, user_id=user_id, tenant_id=tenant_id, channel=channel)
     record = getattr(model, "record_turn_audit", None)
-    if failed or not callable(record):
+    if not callable(record):
         return
     record(
         message=message,
@@ -2281,6 +2616,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
     connector_namespaces: list[str] | None = None,
     portal_context: dict[str, Any] | None = None,
     portal_task_submission: dict[str, Any] | None = None,
+    progress: dict[str, Any] | None = None,
 ) -> "AsyncIterator[tuple[str, Any]]":
     """Run a single chat turn and stream event tuples to the caller.
 
@@ -2294,8 +2630,13 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
     * ``("grounding", dict)``— faithfulness, escalation, handoff, judge.
     * ``("done", "")``       — terminal frame for a turn.
     * ``("error", dict)``    — payload has ``code`` and ``message``.
+    * ``("deadline_exceeded", dict)`` — the turn was stopped at its deadline. The
+                               taxpayer's notice has already gone out as a
+                               ``token``: the web client discards an error
+                               frame's message and shows a generic failure.
     * ``("_log", dict)``     — internal final frame for adapter logging.
-                               Payload: ``{"result", "full_reply", "elapsed_ms"}``.
+                               Payload: ``{"result", "full_reply", "elapsed_ms"}``
+                               and ``disposition`` if it did not simply finish.
                                Adapters consume this and do not forward it.
 
     Parameters
@@ -2315,10 +2656,13 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
         the next decoded token.  Created internally if absent.
     event_callback:
         Phase 2 hook; ignored in Phase 1.
+    progress:
+        Filled with the retrieval ``result`` as soon as there is one, so a turn
+        that ends without a final frame can still be recorded.
     """
     import inspect
 
-    from .guardrails import OutputGuard
+    from .guardrails import FigureReleaseGate, OutputGuard
 
     _output_guard = OutputGuard()
     t0 = time.perf_counter()
@@ -2334,14 +2678,14 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
         return localize_reply(text, locale)
     cancel_event = cancel_event or threading.Event()
     deadline_s = turn_deadline_s if turn_deadline_s is not None else _resolve_turn_deadline()
+    set_turn_deadline(deadline_s if deadline_s > 0 else None)
 
     async def _should_stop() -> bool:
         if cancel_event.is_set():
             return True
         if deadline_s > 0 and (time.perf_counter() - t0) > deadline_s:
-            logger.warning("run_chat_turn deadline %.1fs exceeded", deadline_s)
             cancel_event.set()
-            return True
+            raise _TurnDeadlineExceeded
         if should_continue is None:
             return False
         outcome = should_continue()
@@ -2356,7 +2700,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
         )
 
         turn_out: dict[str, str] = {}
-        result = await asyncio.to_thread(
+        retrieval = asyncio.to_thread(
             model.generate_retrieval_only,
             message=message,
             conversation_id=conversation_id,
@@ -2376,6 +2720,16 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             portal_task_submission=portal_task_submission,
             turn_out=turn_out,
         )
+        try:
+            # The deadline only used to be read at token boundaries, so a hung
+            # retrieval or a slow reranker held the turn for as long as it liked.
+            result = await asyncio.wait_for(retrieval, timeout=deadline_s if deadline_s > 0 else None)
+        except TimeoutError:
+            raise _TurnDeadlineExceeded from None
+        if progress is not None:
+            progress["result"] = result
+        if await _should_stop():
+            return
         if result.get("_case_facts") is not None:
             _ACTIVE_CASE_FACTS.set(result["_case_facts"])
         if turn_out.get("source"):
@@ -2441,14 +2795,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     cur_actions.insert(0, cont_act)
                     result["next_actions"] = cur_actions
         if locale not in ("", "en"):
-            if result.get("resources"):
-                result["resources"] = [ChatModel._localize_resource(r, locale) for r in result["resources"]]
-            if result.get("next_actions"):
-                result["next_actions"] = ChatModel._localize_next_actions(result["next_actions"], locale)
-            if result.get("workflow"):
-                result["workflow"] = ChatModel._localize_workflow(result["workflow"], locale)
-            if isinstance(result.get("portal_copilot"), dict):
-                result["portal_copilot"] = ChatModel._localize_portal_copilot(result["portal_copilot"], locale)
+            await asyncio.to_thread(_localize_turn_payloads, result, locale)
 
         live_check = _TURN_LIVE_CHECK.get() or {}
         if live_check.get("audit"):
@@ -2489,7 +2836,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             # localized before it is sent rather than corrected afterwards.
             if locale not in ("", "en"):
                 yield ("translation.started", {"locale": locale})
-            full_reply = _localized(_disclosed_reply(result))
+            full_reply = await asyncio.to_thread(_localized, _disclosed_reply(result))
             if locale not in ("", "en"):
                 yield ("translation.completed", {"locale": locale})
             result["reply"] = full_reply
@@ -2557,7 +2904,11 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             and result.get("retrieval_mode") != "model_welfare"
         )
         agentic_used_tools = False
+        agentic_tool_outputs: list[dict[str, Any]] = []
+        # What the taxpayer's screen holds. Everything else in full_reply is unseen.
+        on_screen = ""
         if use_agentic:
+            agentic_started = time.perf_counter()
             async for event in _stream_agentic_turn(
                 rewritten_query=rewritten_query,
                 # A lookup is answered from the service, not from passages.
@@ -2579,6 +2930,19 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 forced_operations=connector_forced or None,
                 endpoint=turn_endpoint,
                 tier=turn_tier,
+                should_stop=_should_stop,
+                escalation_route=(
+                    model._tool_escalation_route(
+                        message=message,
+                        session_id=session_id,
+                        conversation_id=str(result.get("conversation_id") or conversation_id or ""),
+                        user_id=user_id or "",
+                        tenant_id=tenant_id or "default",
+                        locale=locale,
+                    )
+                    if hasattr(model, "_tool_escalation_route")
+                    else None
+                ),
             ):
                 if event[0] == "_full_reply":
                     full_reply = event[1]
@@ -2586,12 +2950,24 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 if event[0] == "_used_tools":
                     agentic_used_tools = bool(event[1])
                     continue
+                if event[0] == "_tool_outputs":
+                    agentic_tool_outputs = list(event[1])
+                    continue
+                if event[0] == "_truncated":
+                    _note_generation(degraded="tool_loop_truncated")
+                    continue
                 if event[0] == "_connectors_used":
                     result["connectors_used"] = list(event[1])
                     continue
+                if event[0] == "token":
+                    on_screen += str(event[1])
                 yield event
 
+            if await _should_stop():
+                return
+
             if full_reply:
+                _mark_stage("llm_agentic", agentic_started)
                 # Decided English, but the model wrote Luganda or Swahili: put
                 # it in English first, so the guards verify the reply that is
                 # served (see _answer_in_english).
@@ -2599,12 +2975,15 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     english_only = await asyncio.to_thread(_answer_in_english, full_reply)
                     if english_only != full_reply:
                         full_reply = english_only
-                        yield ("revision", full_reply)
+                        if on_screen:
+                            yield ("revision", full_reply)
+                            on_screen = full_reply
                 # P0-3: run the SAME post-generation guard pipeline the
                 # token-streaming branch uses (judge + claim verification +
                 # grounded revision + escalation/handoff/ticket), not just a
                 # bare faithfulness score.
-                guard = _apply_output_guards(
+                guard = await asyncio.to_thread(
+                    _apply_output_guards,
                     model,
                     message=message,
                     reply=full_reply,
@@ -2623,20 +3002,28 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     verified_facts=str(result.get("_web_verified_facts") or ""),
                     calculation_message=str(result.get("_english_message") or message),
                     live_check_disclosure=str(result.get("_live_check_disclosure") or ""),
+                    model_tier=turn_tier.value,
+                    tool_outputs=agentic_tool_outputs,
                 )
-                full_reply = guard["reply"]
-                if guard["revised"]:
+                full_reply = _with_degraded_disclosure(guard["reply"], _turn_degradations())
+                result["_figure_lock"] = guard.get("figure_lock") or {}
+                if (guard["revised"] or full_reply != guard["reply"]) and on_screen:
                     yield ("revision", full_reply)
+                    on_screen = full_reply
                 # Same localization the token branch does below. The agentic
                 # path had none at all, so enabling `tool_use` silently turned
                 # every non-English conversation back into an English one.
                 if locale not in ("", "en"):
                     yield ("translation.started", {"locale": locale})
-                    localized = _localized(full_reply)
+                    localized = await asyncio.to_thread(_localized, full_reply)
                     yield ("translation.completed", {"locale": locale})
                     if localized != full_reply:
                         full_reply = localized
-                        yield ("revision", full_reply)
+                        if on_screen:
+                            yield ("revision", full_reply)
+                            on_screen = full_reply
+                if not on_screen:
+                    yield ("token", full_reply)
                 result["handoff"] = guard["handoff"]
                 result["response_judge"] = guard["response_judge"]
                 result["ticket_id"] = guard["ticket_id"]
@@ -2691,13 +3078,15 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 "confidence_band": "low",
             }
             if flags.is_enabled("handoff_summaries") and escalate:
-                handoff = model._build_handoff_packet(
+                handoff = await asyncio.to_thread(
+                    model._build_handoff_packet,
                     message=message,
                     reason=esc_reason,
                     conversation_history=conversation_history or None,
                     hits=hits,
                 )
-            ticket_id = model._maybe_create_ticket(
+            ticket_id = await asyncio.to_thread(
+                model._maybe_create_ticket,
                 reason=esc_reason,
                 user_query=message,
                 bot_reply=abstained_reply,
@@ -2719,10 +3108,11 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             finalize_turn_actions(result, escalated=escalate)
             if locale not in ("", "en"):
                 yield ("translation.started", {"locale": locale})
-            full_reply = _localized(
+            full_reply = await asyncio.to_thread(
+                _localized,
                 _with_live_check_disclosure(
                     abstained_reply, str(result.get("_live_check_disclosure") or "")
-                )
+                ),
             )
             if locale not in ("", "en"):
                 yield ("translation.completed", {"locale": locale})
@@ -2776,22 +3166,20 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                         # Bounded queue: if the consumer is slow, block here
                         # rather than balloon memory.  call_soon_threadsafe
                         # schedules an awaitable put on the event loop.
-                        future = asyncio.run_coroutine_threadsafe(
-                            token_queue.put(("token", token)), loop
-                        )
+                        put = token_queue.put(("token", token))
                         try:
-                            future.result(timeout=30)
+                            asyncio.run_coroutine_threadsafe(put, loop).result(timeout=30)
                         except Exception:
                             # Consumer gone / loop closed / queue full beyond
                             # backpressure window — stop pumping.
+                            put.close()
                             return
                 finally:
+                    done = token_queue.put(("done", None))
                     try:
-                        asyncio.run_coroutine_threadsafe(
-                            token_queue.put(("done", None)), loop
-                        ).result(timeout=5)
+                        asyncio.run_coroutine_threadsafe(done, loop).result(timeout=5)
                     except Exception:
-                        pass
+                        done.close()
 
             # copy_context for the same reason as the executor submits: the
             # streamed generation must count toward this turn's usage and sit
@@ -2802,6 +3190,10 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
 
             saw_streamed_token = False
             pending_stream_chunk = ""
+            stream_started = time.perf_counter()
+            release_gate = FigureReleaseGate(
+                enabled=flags.is_enabled("stream_figure_hold", subject=user_id or None)
+            )
 
             def _flush_stream_chunk(*, force: bool = False) -> str:
                 nonlocal pending_stream_chunk, full_reply, saw_streamed_token
@@ -2842,11 +3234,20 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                         yield ("token", final_chunk)
                     break
 
-                pending_stream_chunk += payload or ""
+                pending_stream_chunk += release_gate.feed(payload or "")
                 sanitized = _flush_stream_chunk()
                 if not sanitized:
                     continue
                 yield ("token", sanitized)
+
+            # The tail of the stream is unseen until the guards have read it. It
+            # still counts as output: a reply held from its first word is an
+            # answer, not a model that said nothing.
+            on_screen = full_reply
+            held_text = _output_guard.sanitize(release_gate.drain())
+            if held_text:
+                full_reply += held_text
+                saw_streamed_token = True
 
             if not saw_streamed_token:
                 # Pump produced nothing (breaker open or empty stream) — the
@@ -2860,6 +3261,8 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     finalized = model._finalize_reply(full_reply, attachments=attachments)
                     if isinstance(finalized, str):
                         full_reply = finalized
+                _note_generation(degraded="generation_unavailable")
+                full_reply = _with_degraded_disclosure(full_reply, _turn_degradations())
                 if turn_ack and full_reply:
                     full_reply = f"{turn_ack}\n\n{full_reply}"
                 # One frame, so localize before sending rather than revising
@@ -2868,7 +3271,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 # with the English extractive fallback.
                 if locale not in ("", "en"):
                     yield ("translation.started", {"locale": locale})
-                full_reply = _localized(full_reply)
+                full_reply = await asyncio.to_thread(_localized, full_reply)
                 if locale not in ("", "en"):
                     yield ("translation.completed", {"locale": locale})
                 yield ("token", full_reply)
@@ -2879,6 +3282,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 )
                 return
 
+            _mark_stage("llm_stream", stream_started)
             full_reply = _output_guard.redact_pii(full_reply)
 
             # Decided English, but the model wrote Luganda or Swahili: put it
@@ -2888,9 +3292,13 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 english_only = await asyncio.to_thread(_answer_in_english, full_reply)
                 if english_only != full_reply:
                     full_reply = english_only
-                    yield ("revision", full_reply)
+                    # With text held, this is not checked yet and must not be shown.
+                    if not held_text:
+                        yield ("revision", full_reply)
+                        on_screen = full_reply
 
-            guard = _apply_output_guards(
+            guard = await asyncio.to_thread(
+                _apply_output_guards,
                 model,
                 message=message,
                 reply=full_reply,
@@ -2908,16 +3316,19 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 verified_facts=str(result.get("_web_verified_facts") or ""),
                 calculation_message=str(result.get("_english_message") or message),
                 live_check_disclosure=str(result.get("_live_check_disclosure") or ""),
+                model_tier=turn_tier.value,
             )
-            full_reply = guard["reply"]
+            full_reply = _with_degraded_disclosure(guard["reply"], _turn_degradations())
+            result["_figure_lock"] = guard.get("figure_lock") or {}
             faith = guard["faithfulness"]
             escalate = guard["escalate"]
             esc_reason = guard["escalation_reason"]
             response_judge = guard["response_judge"]
             handoff = guard["handoff"]
             ticket_id = guard["ticket_id"]
-            if guard["revised"]:
+            if guard["revised"] or full_reply != guard["reply"]:
                 yield ("revision", full_reply)
+                on_screen = full_reply
 
             # Tokens streamed in English (the model has no adapter for these
             # languages — see llm.can_generate_in_locale), so the localized
@@ -2931,11 +3342,12 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 # having answered in the wrong language and then changing its
                 # mind — which is exactly how it was reported.
                 yield ("translation.started", {"locale": locale})
-                localized = _localized(full_reply)
+                localized = await asyncio.to_thread(_localized, full_reply)
                 yield ("translation.completed", {"locale": locale})
                 if localized != full_reply:
                     full_reply = localized
                     yield ("revision", full_reply)
+                    on_screen = full_reply
 
             if ticket_id and flags.is_enabled("cxp_business_hours", subject=user_id or None):
                 from .escalation_policy import (
@@ -2949,6 +3361,15 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     if notice.strip() not in full_reply:
                         full_reply = f"{full_reply.rstrip()}{notice}"
                         yield ("revision", full_reply)
+                        on_screen = full_reply
+
+            # Cleared now: release what was held, unless a revision already did.
+            if held_text and full_reply != on_screen:
+                if full_reply.startswith(on_screen):
+                    yield ("token", full_reply[len(on_screen):])
+                else:
+                    yield ("revision", full_reply)
+                on_screen = full_reply
 
             result["handoff"] = handoff
             result["response_judge"] = response_judge
@@ -2975,6 +3396,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 and result.get("retrieval_mode") not in ("blocked", "abstained", "model_welfare")
                 and not escalate
                 and not ticket_id
+                and not _turn_degradations()
             ):
                 try:
                     model._cache.put(
@@ -3008,7 +3430,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             # One frame, so localize before sending rather than revising after.
             if locale not in ("", "en"):
                 yield ("translation.started", {"locale": locale})
-            full_reply = _localized(full_reply)
+            full_reply = await asyncio.to_thread(_localized, full_reply)
             if locale not in ("", "en"):
                 yield ("translation.completed", {"locale": locale})
             yield ("token", full_reply)
@@ -3039,6 +3461,29 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             {"result": result, "full_reply": full_reply, "english_reply": english_reply, "elapsed_ms": (time.perf_counter() - t0) * 1000},
         )
 
+    except _TurnDeadlineExceeded:
+        logger.warning("chat turn stopped at its %.1fs deadline", deadline_s)
+        metrics.inc("turn_deadline_exceeded_total", labels={"stage": "stream"})
+        cancel_event.set()
+        try:
+            notice = await asyncio.wait_for(asyncio.to_thread(localize_reply, TURN_DEADLINE_MESSAGE, locale), timeout=3)
+        except Exception:  # noqa: BLE001 - out of time already; English beats silence
+            notice = TURN_DEADLINE_MESSAGE
+        closing_text = f"\n\n{notice}" if full_reply else notice
+        full_reply += closing_text
+        yield ("token", closing_text)
+        yield ("deadline_exceeded", {"code": "deadline_exceeded"})
+        yield ("done", "")
+        yield (
+            "_log",
+            {
+                "result": result,
+                "full_reply": full_reply,
+                "english_reply": english_reply,
+                "elapsed_ms": (time.perf_counter() - t0) * 1000,
+                "disposition": "deadline_exceeded",
+            },
+        )
     except Exception:
         logger.exception("run_chat_turn error")
         yield ("error", {"code": "internal", "message": "Internal server error"})
@@ -3070,6 +3515,8 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
     forced_operations: list[str] | None = None,
     endpoint: Any = None,
     tier: Any = None,
+    escalation_route: Callable[..., str] | None = None,
+    should_stop: Callable[[], Awaitable[bool]] | None = None,
 ) -> "AsyncIterator[tuple[str, Any]]":
     """Run the agentic tool-call loop and stream its events.
 
@@ -3116,11 +3563,14 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
             "context_summary": context_summary,
             "connector_namespaces": connector_namespaces,
             "forced_operations": forced_operations,
+            "cancel_event": cancel_event,
         }
         if endpoint is not None:
             call_kwargs["endpoint"] = endpoint
         if tier is not None:
             call_kwargs["tier"] = tier
+        if escalation_route is not None:
+            call_kwargs["escalation_route"] = escalation_route
         return await asyncio.to_thread(_call_llm_agentic, **call_kwargs)
 
 
@@ -3131,7 +3581,10 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
             try:
                 ev = await asyncio.wait_for(event_queue.get(), timeout=0.25)
             except asyncio.TimeoutError:
-                if cancel_event.is_set():
+                # This loop can run for minutes, and nothing else on this path
+                # asks whether the client is still there or the turn out of time.
+                if (should_stop is not None and await should_stop()) or cancel_event.is_set():
+                    cancel_event.set()
                     agentic_task.cancel()
                     return
                 continue
@@ -3143,6 +3596,9 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
             yield (ev.get("type", "tool_event"), ev)
 
         agentic = agentic_task.result()
+    except _TurnDeadlineExceeded:
+        agentic_task.cancel()
+        raise
     except Exception:
         logger.exception("agentic stream failed")
         yield ("error", {"code": "agentic_failed", "message": "Tool loop error"})
@@ -3156,13 +3612,20 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
 
     sanitized = _output_guard.sanitize(_output_guard.redact_pii(text))
     if sanitized:
-        yield ("token", sanitized)
+        # Not shown yet. The loop's reply arrives whole, so checking it first costs
+        # no latency, and sending it first showed what the guards then withheld.
         yield ("_full_reply", sanitized)
         if (agentic or {}).get("tool_calls"):
             yield ("_used_tools", True)
+            yield (
+                "_tool_outputs",
+                [call["result"] for call in agentic["tool_calls"] if isinstance(call.get("result"), dict)],
+            )
             used = _connectors_used(agentic["tool_calls"])
             if used:
                 yield ("_connectors_used", used)
+        if (agentic or {}).get("truncated"):
+            yield ("_truncated", True)
 
 
 def _metadata_payload(result: dict[str, Any], *, include_short_circuit: bool) -> dict[str, Any]:
@@ -8370,7 +8833,7 @@ class ChatModel:
         # asks for a human three times opens three tickets, and three
         # officers each start the conversation from the beginning.
         try:
-            existing = db.find_open_ticket(conversation_id)
+            existing = db.find_open_ticket(conversation_id, tenant_id=effective_tenant)
         except Exception:
             logger.exception("open-ticket lookup failed; creating a new ticket")
             existing = None
@@ -8440,6 +8903,7 @@ class ChatModel:
                 locale=eff_locale,
                 modality=modality,
                 user_query_en=user_query_en,
+                tenant_id=effective_tenant,
             )
             ticket_id = ticket.get("id", "")
             if handoff is not None and ticket_id:
@@ -8478,6 +8942,175 @@ class ChatModel:
         except Exception:
             logger.warning("ticket event publish failed", exc_info=True)
         return ticket_id
+
+    def _graph_turn_result(
+        self,
+        final_state: Any,
+        *,
+        message: str,
+        thread_id: str,
+        session_id: str | None,
+        user_id: str,
+        tenant_id: str,
+        locale: str,
+        conversation_history: list[dict[str, Any]] | None,
+        calculation_message: str,
+        model_tier: str = "",
+    ) -> dict[str, Any]:
+        """A finished graph turn, held to the pipeline every other model answer meets.
+
+        The graph drafts; it does not get to decide its draft is fit to serve. This
+        path used to end at ``_finalize_reply``, with no claim verification, judge
+        or contradiction withholding, and ``attest_turn`` reported it clean. A
+        clarification or an abstention is canned text with no claim to check.
+        """
+        from .agents.graphs.main_graph import assumed_inputs_notice
+        from .agents.graphs.state import GraphOutcome
+
+        disclosure = final_state.live_check_disclosure or ""
+        notice = assumed_inputs_notice(final_state)
+        # Added back after the verifiers, so neither sentence is judged as a claim.
+        draft = final_state.reply
+        for sentence in (disclosure, notice):
+            if sentence:
+                draft = draft.replace(sentence, "").rstrip()
+        graph_reply = self._finalize_reply(draft)
+        escalate = final_state.outcome == GraphOutcome.ESCALATED
+        esc_reason = final_state.escalation_reason
+        ticket_id = final_state.ticket_id
+        faithfulness = final_state.faithfulness
+        handoff = None
+        response_judge = None
+        figure_lock: dict[str, Any] = {}
+        if final_state.outcome == GraphOutcome.ANSWERED:
+            guard = _apply_output_guards(
+                self,
+                message=message,
+                reply=graph_reply,
+                hits=final_state.hits,
+                citations=final_state.citations,
+                conversation_history=conversation_history,
+                session_id=session_id,
+                conversation_id=thread_id,
+                output_guard=self._output_guard,
+                existing_ticket_id=ticket_id,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                locale=locale,
+                # A tool answer is grounded in its computation, not in passages.
+                tool_grounded=bool(final_state.tool_calls) and not final_state.hits,
+                calculation_message=calculation_message,
+                live_check_disclosure=disclosure,
+                model_tier=model_tier,
+                tool_outputs=[
+                    call["result"]
+                    for call in final_state.tool_calls
+                    if isinstance(call, dict) and isinstance(call.get("result"), dict)
+                ],
+            )
+            graph_reply = guard["reply"]
+            if notice and notice not in graph_reply:
+                graph_reply = f"{graph_reply.rstrip()}\n\n{notice}"
+            faithfulness = guard["faithfulness"]
+            escalate = guard["escalate"]
+            esc_reason = guard["escalation_reason"]
+            handoff = guard["handoff"]
+            response_judge = guard["response_judge"]
+            ticket_id = guard["ticket_id"]
+            figure_lock = guard.get("figure_lock") or {}
+        else:
+            graph_reply = _with_live_check_disclosure(
+                graph_reply, disclosure if final_state.outcome == GraphOutcome.ABSTAINED else ""
+            )
+            if escalate and not ticket_id:
+                ticket_id = self._maybe_create_ticket(
+                    reason=esc_reason or "graph_escalated",
+                    user_query=message,
+                    bot_reply=graph_reply,
+                    session_id=session_id,
+                    conversation_id=thread_id,
+                    user_id=user_id,
+                    tenant_id=tenant_id,
+                )
+
+        role_label = getattr(final_state, "agent_role", "graph_agent") or "graph_agent"
+        return {
+            # Here as well as in _audit_turn: the stream never reaches that.
+            "reply": _with_degraded_disclosure(graph_reply, _turn_degradations()),
+            "_figure_lock": figure_lock,
+            "sources": final_state.sources,
+            "citations": final_state.citations,
+            "faithfulness_score": faithfulness,
+            "retrieval_mode": f"graph_{final_state.retrieval_mode}",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": escalate,
+            "escalation_reason": esc_reason,
+            "agent_role": role_label,
+            "handoff": handoff,
+            "response_judge": response_judge,
+            "next_actions": self._default_next_actions(
+                agent_role=role_label,
+                escalation_required=escalate,
+                suspended_workflow=self._get_suspended_workflow_name(thread_id),
+            ),
+            "ticket_id": ticket_id,
+        }
+
+    def _run_graph(
+        self,
+        graph: Any,
+        graph_state: Any,
+        *,
+        session_id: str | None,
+        conversation_id: str,
+        message: str,
+    ) -> Any:
+        """Run the graph with this turn's route to an officer in scope."""
+        from .tools.escalate import ESCALATION_ROUTE
+
+        token = ESCALATION_ROUTE.set(
+            self._tool_escalation_route(
+                message=message,
+                session_id=session_id,
+                conversation_id=conversation_id,
+                user_id=graph_state.user_id,
+                tenant_id=graph_state.tenant_id,
+                locale=graph_state.locale,
+            )
+        )
+        try:
+            return graph.run(graph_state)
+        finally:
+            ESCALATION_ROUTE.reset(token)
+
+    def _tool_escalation_route(
+        self,
+        *,
+        message: str,
+        session_id: str | None,
+        conversation_id: str,
+        user_id: str,
+        tenant_id: str,
+        locale: str,
+    ) -> Callable[..., str]:
+        """The ``ESCALATION_ROUTE`` for one turn: tickets from tools take the one real path."""
+
+        def route(reason: str, priority: str = "normal", summary: str = "") -> str:
+            return self._maybe_create_ticket(
+                reason=reason,
+                user_query=message,
+                bot_reply=summary,
+                session_id=session_id,
+                conversation_id=conversation_id,
+                priority=priority,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                locale=locale,
+            )
+
+        return route
 
     def _persist_personalization_turn(
         self,
@@ -10762,9 +11395,16 @@ class ChatModel:
         transcript).
         """
         _PENDING_TURN_AUDIT.set(None)
+        _TURN_GENERATION.set(_new_generation_record())
+        deadline_s = _resolve_turn_deadline()
         # A call turn stays on local models, whatever this deployment allows
         # chat (G122; see providers.scope).
-        with turn_usage_scope() as usage, turn_attributes_scope(), local_models_only(channel == "call"):
+        with (
+            turn_usage_scope() as usage,
+            turn_attributes_scope(),
+            local_models_only(channel == "call"),
+            turn_deadline(deadline_s if deadline_s > 0 else None),
+        ):
             return self._generate_localized(
                 message=message,
                 conversation_id=conversation_id,
@@ -11826,88 +12466,74 @@ class ChatModel:
                             role=user_role,
                             granted_purposes=granted_purposes or [],
                         )
-                        final_state = graph.run(graph_state)
-                        usable_outcomes = {
-                            GraphOutcome.ANSWERED,
-                            GraphOutcome.CLARIFY,
-                            GraphOutcome.ESCALATED,
-                            GraphOutcome.ABSTAINED,
-                        }
+                        final_state = self._run_graph(
+                            graph,
+                            graph_state,
+                            session_id=session_id,
+                            conversation_id=thread_id,
+                            message=message,
+                        )
+                    usable_outcomes = {
+                        GraphOutcome.ANSWERED,
+                        GraphOutcome.CLARIFY,
+                        GraphOutcome.ESCALATED,
+                        GraphOutcome.ABSTAINED,
+                    }
+                    if (
+                        final_state.outcome not in usable_outcomes
+                        or not (final_state.reply or "").strip()
+                    ):
+                        logger.warning(
+                            "LangGraph did not produce a usable terminal reply; falling back to standard retrieval"
+                        )
+                        # A failed specialist graph may already have crossed
+                        # the tool side-effect boundary. Do not dispatch the
+                        # same work again through the legacy agentic loop.
                         if (
-                            final_state.outcome not in usable_outcomes
-                            or not (final_state.reply or "").strip()
+                            force_agentic
+                            or graph_state.plan
+                            or graph_state.tool_calls
+                            or final_state.plan
+                            or final_state.tool_calls
                         ):
-                            logger.warning(
-                                "LangGraph did not produce a usable terminal reply; falling back to standard retrieval"
-                            )
-                            # A failed specialist graph may already have crossed
-                            # the tool side-effect boundary. Do not dispatch the
-                            # same work again through the legacy agentic loop.
-                            if (
-                                force_agentic
-                                or graph_state.plan
-                                or graph_state.tool_calls
-                                or final_state.plan
-                                or final_state.tool_calls
-                            ):
-                                suppress_agentic_fallback = True
-                                force_agentic = False
-                                force_tool_whitelist = None
-                        else:
-                            graph_reply = self._finalize_reply(final_state.reply)
-                            escalate = final_state.outcome == GraphOutcome.ESCALATED
-                            esc_reason = final_state.escalation_reason
-                            ticket_id = final_state.ticket_id
-                            if escalate and not ticket_id:
-                                ticket_id = self._maybe_create_ticket(
-                                    reason=esc_reason or "graph_escalated",
-                                    user_query=message,
-                                    bot_reply=graph_reply,
-                                    session_id=session_id,
-                                    conversation_id=thread_id,
-                                    user_id=user_id or "",
-                                )
-
-                            role_label = getattr(final_state, "agent_role", "graph_agent") or "graph_agent"
-                            graph_result = {
-                                "reply": graph_reply,
-                                "sources": final_state.sources,
-                                "citations": final_state.citations,
-                                "faithfulness_score": final_state.faithfulness,
-                                "retrieval_mode": f"graph_{final_state.retrieval_mode}",
-                                "model": self.name,
-                                "conversation_id": thread_id,
-                                "locale": locale,
-                                "escalation_required": escalate,
-                                "escalation_reason": esc_reason,
-                                "agent_role": role_label,
-                                "handoff": None,
-                                "response_judge": None,
-                                "next_actions": self._default_next_actions(
-                                    agent_role=role_label,
-                                    escalation_required=escalate,
-                                    suspended_workflow=self._get_suspended_workflow_name(thread_id),
-                                ),
-                                "ticket_id": ticket_id,
-                            }
-                            self._persist_personalization_turn(
-                                user_id=user_id,
-                                tenant_id=tenant_id or "default",
-                                conversation_id=thread_id,
+                            suppress_agentic_fallback = True
+                            force_agentic = False
+                            force_tool_whitelist = None
+                    else:
+                        # Outside the block above: stages are read in completion
+                        # order, so a guard inside it would finish "before" the
+                        # generation it checks.
+                        with trace_stage("output_guard", timings=timings):
+                            graph_result = self._graph_turn_result(
+                                final_state,
                                 message=message,
-                                reply=graph_reply,
-                                agent_role=role_label,
-                                personalization=personalization,
-                                message_en=router_message if router_message != message else "",
-                                allowed=memory_write,
-                            )
-                            self._audit_turn(
-                                message=message,
-                                result=graph_result,
+                                thread_id=thread_id,
                                 session_id=session_id,
-                                trace_ctx=trace_ctx,
+                                user_id=user_id or "",
+                                tenant_id=tenant_id or "default",
+                                locale=locale,
+                                conversation_history=conversation_history,
+                                calculation_message=router_message or message,
+                                model_tier=str(trace_ctx.get("model_tier") or ""),
                             )
-                            return graph_result
+                        self._persist_personalization_turn(
+                            user_id=user_id,
+                            tenant_id=tenant_id or "default",
+                            conversation_id=thread_id,
+                            message=message,
+                            reply=graph_result["reply"],
+                            agent_role=graph_result["agent_role"],
+                            personalization=personalization,
+                            message_en=router_message if router_message != message else "",
+                            allowed=memory_write,
+                        )
+                        self._audit_turn(
+                            message=message,
+                            result=graph_result,
+                            session_id=session_id,
+                            trace_ctx=trace_ctx,
+                        )
+                        return graph_result
                 except Exception:
                     logger.warning("LangGraph orchestrator failed, failing over to standard retrieval", exc_info=True)
                     if force_agentic or (graph_state and (graph_state.plan or graph_state.tool_calls)):
@@ -12224,6 +12850,8 @@ class ChatModel:
 
             agentic_used_tools = False
             agentic_reply = ""
+            agentic_tool_outputs: list[dict[str, Any]] = []
+            figure_lock_summary: dict[str, Any] = {}
             if use_agentic:
                 agentic_query = (
                     router_rewritten
@@ -12320,10 +12948,23 @@ class ChatModel:
                         agentic_call_kwargs["endpoint"] = turn_endpoint
                     if tier_decision is not None:
                         agentic_call_kwargs["tier"] = tier_decision.tier
+                    agentic_call_kwargs["escalation_route"] = self._tool_escalation_route(
+                        message=message,
+                        session_id=session_id,
+                        conversation_id=thread_id,
+                        user_id=user_id or "",
+                        tenant_id=tenant_id or "default",
+                        locale=locale,
+                    )
                     agentic = _call_llm_agentic(**agentic_call_kwargs)
                 agentic_reply = agentic.get("text", "")
+                if agentic.get("truncated"):
+                    _note_generation(degraded="tool_loop_truncated")
                 if agentic.get("tool_calls"):
                     agentic_used_tools = True
+                    agentic_tool_outputs = [
+                        call["result"] for call in agentic["tool_calls"] if isinstance(call.get("result"), dict)
+                    ]
                     retrieval_mode = "agentic"
                     trace_ctx["tool_calls"] = [
                         tc.get("name") for tc in agentic["tool_calls"]
@@ -12479,6 +13120,7 @@ class ChatModel:
                     if not reply:
                         # Fallback to best-hit answer if LLM fails, times out,
                         # or the circuit breaker is open
+                        _note_generation(degraded="generation_unavailable")
                         if attachments:
                             reply = self._format_attachment_fallback_reply(attachments)
                         else:
@@ -12621,7 +13263,14 @@ class ChatModel:
                         faithfulness=faithfulness_score,
                         verified_facts=verified_facts_block,
                         passages=contexts,
+                        # Without these a correct calculator figure reads as invented.
+                        tool_outputs=agentic_tool_outputs,
                     )
+                figure_lock_summary = {
+                    "mode": "enforced",
+                    "ok": verdict.numerically_consistent,
+                    "rejected": len(verdict.detail.get("offending_figures") or []),
+                }
                 trace_ctx["numeric_verification"] = {
                     "accepted": verdict.accepted,
                     "failures": verdict.failures(),
@@ -12704,6 +13353,7 @@ class ChatModel:
                                 faithfulness=faithfulness_score,
                                 verified_facts=verified_facts_block,
                                 passages=contexts,
+                                tool_outputs=agentic_tool_outputs,
                             )
                             trace_ctx["numeric_revision"] = {
                                 "attempted": True,
@@ -12740,6 +13390,15 @@ class ChatModel:
                             from .agents.evaluator import strip_unverified_figure_sentences
 
                             reply = strip_unverified_figure_sentences(reply, offending_figs)
+            elif reply:
+                _, figure_lock_summary = _figure_lock(
+                    reply,
+                    query=f"{message}\n{router_message or ''}",
+                    verified_facts=verified_facts_block,
+                    contexts=contexts,
+                    tool_outputs=agentic_tool_outputs,
+                    enforce=False,
+                )
 
             # 8. Escalation check
             if connector_intent is not None or (agentic_used_tools and not hits):
@@ -12951,6 +13610,8 @@ class ChatModel:
             ),
             "ticket_id": ticket_id,
         }
+        if figure_lock_summary:
+            result["_figure_lock"] = figure_lock_summary
         if connector_intent is not None:
             # Read by resources_for_turn: no form links under a service's record.
             result["connector_lookup"] = True
@@ -12983,6 +13644,9 @@ class ChatModel:
             and not escalate
             and not withheld_contradicted
             and not ticket_id
+            # A fallback cached here would outlive the outage it came from, and a
+            # cache hit carries no disclosure.
+            and not _turn_degradations()
         ):
             self._cache.put(rewritten, dict(result), tenant_id=tenant_id or "default")
 
@@ -13039,11 +13703,22 @@ class ChatModel:
         result["current_topic"] = str(trace_ctx.get("current_topic") or "")
         # Runs on every exit of every turn, so a fault here must not cost the answer.
         try:
-            result["_attestation"] = attest_turn(trace_ctx.get("timings") or {}, transport="rest")
+            result["_attestation"] = attest_turn(
+                trace_ctx.get("timings") or {},
+                transport="rest",
+                # Abstained after a model call: the tool loop ran, its text did not.
+                served_model_text=False if result.get("retrieval_mode") == "abstained" else None,
+            )
         except Exception as exc:  # noqa: BLE001 - telemetry must never fail a turn
             logger.warning("Pipeline attestation failed: %s", type(exc).__name__)
         # Taken here because the plan scope closes before the ledger row is written.
         result["_plan"] = _turn_plan_summary()
+        # Every exit comes through here, and before localization, so whatever this
+        # turn could not do is said in the taxpayer's language on every path.
+        generation = _TURN_GENERATION.get()
+        if generation is not None:
+            result["_generation"] = dict(generation)
+            result["reply"] = _with_degraded_disclosure(str(result.get("reply") or ""), generation["degraded"])
         # Every exit comes through here, so none can lose the check. After every
         # verifier, so the sentence is never judged as a claim, and before
         # localization, so the taxpayer reads it in their language.
@@ -13293,7 +13968,9 @@ class ChatModel:
         )
 
         # Input guardrails (OWASP LLM01), on both forms as in generate()
+        guard_started = time.perf_counter()
         guard = self._guard_both_forms(message, router_message)
+        _mark_stage("input_guard", guard_started)
         if not guard.allowed:
             return {
                 "reply": guard.reason,
@@ -13626,7 +14303,9 @@ class ChatModel:
                 router_rewritten or rewritten, _ACTIVE_CASE_FACTS.get()
             )
         if cache_allowed and flags.is_enabled("semantic_cache"):
+            cache_started = time.perf_counter()
             cached = self._cache.get(rewritten, locale=locale, tenant_id=tenant_id or "default")
+            _mark_stage("cache_lookup", cache_started)
             if cached:
                 return self._finalize_result({
                     **cached,
@@ -13655,11 +14334,13 @@ class ChatModel:
             planned_specs_s = plan_tools(router_rewritten or rewritten, active_cf_s)
             has_premise_contra_s = bool(check_fact_contradictions(active_cf_s))
         if flags.is_enabled("agentic_mode"):
+            supervisor_started = time.perf_counter()
             route_decision = supervisor.classify(
                 rewritten,
                 has_conversation_history=bool(conversation_history),
                 locale=locale,
             )
+            _mark_stage("supervisor", supervisor_started)
             eff_route_conf_s = (
                 1.0
                 if (
@@ -13813,7 +14494,15 @@ class ChatModel:
                     role=user_role,
                     granted_purposes=granted_purposes or [],
                 )
-                final_state = graph.run(graph_state)
+                graph_started = time.perf_counter()
+                final_state = self._run_graph(
+                    graph,
+                    graph_state,
+                    session_id=session_id,
+                    conversation_id=thread_id,
+                    message=message,
+                )
+                _mark_stage("langgraph_execution", graph_started)
                 usable_outcomes = {
                     GraphOutcome.ANSWERED,
                     GraphOutcome.CLARIFY,
@@ -13824,53 +14513,37 @@ class ChatModel:
                     final_state.outcome in usable_outcomes
                     and (final_state.reply or "").strip()
                 ):
-                    graph_reply = self._finalize_reply(final_state.reply)
-                    escalate = final_state.outcome == GraphOutcome.ESCALATED
-                    esc_reason = final_state.escalation_reason
-                    ticket_id = final_state.ticket_id
-                    if escalate and not ticket_id:
-                        ticket_id = self._maybe_create_ticket(
-                            reason=esc_reason or "graph_escalated",
-                            user_query=message,
-                            bot_reply=graph_reply,
-                            session_id=session_id,
-                            conversation_id=thread_id,
-                            user_id=user_id or "",
-                        )
-
-                    role_label = getattr(final_state, "agent_role", "graph_agent") or "graph_agent"
-                    graph_result = {
-                        "reply": graph_reply,
-                        "sources": final_state.sources,
-                        "citations": final_state.citations,
-                        "faithfulness_score": final_state.faithfulness,
-                        "retrieval_mode": f"graph_{final_state.retrieval_mode}",
-                        "model": self.name,
-                        "conversation_id": thread_id,
-                        "locale": locale,
-                        "escalation_required": escalate,
-                        "escalation_reason": esc_reason,
-                        "agent_role": role_label,
-                        "handoff": None,
-                        "response_judge": None,
-                        "next_actions": self._default_next_actions(
-                            agent_role=role_label,
-                            escalation_required=escalate,
-                            suspended_workflow=self._get_suspended_workflow_name(thread_id),
-                        ),
-                        "ticket_id": ticket_id,
-                        "_hits": final_state.hits,
-                        "_history": conversation_history,
-                        "_rewritten": rewritten,
-                        "_short_circuit": True,
-                    }
+                    # Recorded whichever outcome this is: a clarification is canned
+                    # text with nothing to verify, not a guard that was skipped.
+                    graph_guard_started = time.perf_counter()
+                    graph_result = self._graph_turn_result(
+                        final_state,
+                        message=message,
+                        thread_id=thread_id,
+                        session_id=session_id,
+                        user_id=user_id or "",
+                        tenant_id=tenant_id or "default",
+                        locale=locale,
+                        conversation_history=conversation_history,
+                        calculation_message=router_message or message,
+                        model_tier=stream_tier_decision.tier.value if stream_tier_decision is not None else "",
+                    )
+                    _mark_stage("output_guard", graph_guard_started)
+                    graph_result.update(
+                        {
+                            "_hits": final_state.hits,
+                            "_history": conversation_history,
+                            "_rewritten": rewritten,
+                            "_short_circuit": True,
+                        }
+                    )
                     self._persist_personalization_turn(
                         user_id=user_id,
                         tenant_id=tenant_id or "default",
                         conversation_id=thread_id,
                         message=message,
-                        reply=graph_reply,
-                        agent_role=role_label,
+                        reply=graph_result["reply"],
+                        agent_role=graph_result["agent_role"],
                         personalization=personalization,
                         message_en=router_message if router_message != message else "",
                         allowed=memory_write,

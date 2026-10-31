@@ -1094,6 +1094,8 @@ def cleanup_expired_data() -> dict[str, int]:
         ("sessions", _SESSION_TTL_DAYS),
         ("workflow_sessions", _WORKFLOW_SESSION_TTL_DAYS),
         ("conversation_topics", _CONVERSATION_TTL_DAYS),
+        # A checkpoint holds the question and history, so it goes when they do.
+        ("agent_checkpoints", _CONVERSATION_TTL_DAYS),
         ("ticket_presence", 1),
         ("tickets", _TICKET_TTL_DAYS),
     ]
@@ -1105,6 +1107,7 @@ def cleanup_expired_data() -> dict[str, int]:
         "sessions": "last_active_at",
         "workflow_sessions": "updated_at",
         "conversation_topics": "updated_at",
+        "agent_checkpoints": "created_at",
         "ticket_presence": "updated_at",
         "tickets": "resolved_at",
     }
@@ -3471,23 +3474,25 @@ def get_active_statutory_precedences() -> list[dict[str, Any]]:
     ]
 
 
-def find_open_ticket(conversation_id: str) -> dict[str, Any] | None:
+def find_open_ticket(conversation_id: str, tenant_id: str | None = None) -> dict[str, Any] | None:
     """Return the newest unresolved ticket for *conversation_id*, if any.
 
     A taxpayer who asks for a human three times in one conversation
     wants one officer, not three tickets. Resolved and wontfix tickets
     are excluded so a genuinely new problem later in the same
-    conversation still opens its own.
+    conversation still opens its own. *tenant_id* keeps one tenant's
+    ticket from being reused for another's.
     """
     if not conversation_id:
         return None
     conn = _get_connection()
-    row = conn.execute(
-        """SELECT * FROM tickets
-           WHERE conversation_id = ? AND status IN ('open', 'assigned')
-           ORDER BY created_at DESC LIMIT 1""",
-        (conversation_id,),
-    ).fetchone()
+    sql = """SELECT * FROM tickets
+           WHERE conversation_id = ? AND status IN ('open', 'assigned')"""
+    params: list[Any] = [conversation_id]
+    if tenant_id is not None:
+        sql += " AND tenant_id = ?"
+        params.append(tenant_id)
+    row = conn.execute(sql + " ORDER BY created_at DESC LIMIT 1", params).fetchone()
     return _hydrate_ticket(row) if row else None
 
 
@@ -4280,6 +4285,16 @@ def delete_user_cascade(
                 )
         except Exception:
             logger.exception("delete_user_cascade: conversation_topics")
+        try:
+            if conv_ids:
+                ph = ",".join("?" * len(conv_ids))
+                counts["agent_checkpoints"] = execute(
+                    f"DELETE FROM agent_checkpoints WHERE thread_id IN ({ph})",  # nosec B608 # noqa: S608
+                    tuple(conv_ids),
+                )
+        except Exception:
+            logger.exception("delete_user_cascade: agent_checkpoints")
+            counts["agent_checkpoints"] = -1
         try:
             workflow_deleted = execute(
                 "DELETE FROM workflow_sessions WHERE tenant_id = ? AND user_id = ?",

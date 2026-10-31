@@ -695,7 +695,7 @@ FinalYearProject/
 │   │   │   ├── voice_consent.py # Voice consent, audit log, retention policy
 │   │   │   ├── offline_rag.py # FAISS offline retrieval fallback
 │   │   │   ├── accent_detector.py # Prosodic accent classifier
-│   │   │   ├── flags.py    # Feature flag registry (45 flags, env-backed)
+│   │   │   ├── flags.py    # Feature flag registry (87 flags, env-backed)
 │   │   │   ├── resilience.py # Circuit breaker (exponential backoff)
 │   │   │   ├── pdf_export.py # Branded PDF conversation/tax export
 │   │   │   ├── evaluation.py # RAG evaluation harness (8 metrics)

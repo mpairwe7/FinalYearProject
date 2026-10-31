@@ -92,7 +92,10 @@ One `generate` row per answered turn, written once the reply is final — after
 translation, so `reply_sha256` is the digest of the text the taxpayer
 actually received (it used to be taken on the English draft). Before
 2026-10-06 only `/v1/chat` wrote these rows; the streamed answers the web
-client uses by default left no record (gap G104). Payload (`schema: 2`):
+client uses by default left no record (gap G104). Every turn writes a row, however it
+ended: `disposition` is `completed`, `cancelled`, `deadline_exceeded` or `failed`, and the
+reply digest is of what was served. `generation` names the backend, model, tier, fallbacks
+and degradations, and `figure_lock` the mode and verdict. Payload (`schema: 3`):
 
 | Field | What it pins |
 | --- | --- |
@@ -106,7 +109,8 @@ client uses by default left no record (gap G104). Payload (`schema: 2`):
 | `flag_variants_sha256` | The experiment arms the turn ran under |
 | `provenance` | `app_version`, `build_sha` (the image's git commit), `prompt_template_sha256`, `index_corpus_hash` |
 
-Rows with `schema` absent are the older layout (no channel or provenance).
+Rows keep the layout they were written with: `schema: 2` has no `disposition`, because only
+finished turns wrote a row, and rows with `schema` absent have no channel or provenance.
 
 ## Read it
 

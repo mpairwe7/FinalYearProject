@@ -421,7 +421,7 @@ App/backend/app/
 ├── analytics.py         # Prometheus-compatible metrics middleware
 ├── database.py          # SQLite WAL store (11 tables, retention TTLs, migrations)
 ├── postgres.py          # PostgreSQL backend (opt-in, drop-in substitute for database.py)
-├── flags.py             # Feature flag registry (85 flags, env-backed, cohort rollout)
+├── flags.py             # Feature flag registry (87 flags, env-backed, cohort rollout)
 ├── resilience.py        # Circuit breaker (exponential backoff, CLOSED→OPEN→HALF_OPEN)
 ├── pdf_export.py        # Branded PDF conversation/tax summary export
 ├── evaluation.py        # RAG evaluation harness (8 metrics)
@@ -736,7 +736,8 @@ All major subsystems are behind feature flags for progressive rollout:
 | `supervisor_llm_tiebreak` | off | Small-model second opinion on low-confidence routing |
 | `model_tiering` | off | Per-turn local model tier (T0 none / T1 Sunflower-Qwen3.5-9B / T2-T3 Qwen3.8-27B-FP8) from the route decision |
 | `reasoner_for_translated_locales` | off | Allow lg/sw/nyn/ach turns to use the T2/T3 reasoning endpoint for English draft synthesis before Sunflower localization |
-| `evaluator_optimizer` | off | Deterministic recomputation of money answers |
+| `evaluator_optimizer` | off | Deterministic recomputation of money answers, and enforcing the figure lock on every tier and transport. Off, the lock enforces on T3 only and measures elsewhere (`figure_lock_checks_total{mode="shadow"}`) |
+| `stream_figure_hold` | on | Hold streamed text from the first figure until the output guards have read it (`guardrails.FigureReleaseGate`, ADR-0022). Prose still streams. Off restores token-by-token text that is corrected afterwards |
 | `tax_graph` | off | Load the statutory knowledge graph + `tax_graph` namespace |
 | `graph_fusion` | off | Fuse the graph leg into RRF (requires `tax_graph`) |
 | `langgraph` | off | Route agentic requests through the graph orchestrator |
@@ -777,7 +778,7 @@ All major subsystems are behind feature flags for progressive rollout:
 | `portal_copilot` (`FLAG_PORTAL_COPILOT`) | on | Phase 42: 4-tier URA portal task execution (`portal_copilot.py`), Claude-style HITL Allow/Disallow confirmation cards (`POST /v1/portal/tasks/execute`), inline chat form elicitation, step-up login auto-return (`returnTo`), screenshot-to-co-pilot handoff, and inbuilt stuck-user DOM co-pilot (`/portal/[portalKey]`) |
 
 The table above lists the flags that gate a subsystem; `flags.py` holds
-**86** in total, including the per-phase switches for voice, offline and
+**87** in total, including the per-phase switches for voice, offline and
 quantization. `flags.all()` is the authoritative list. Production also
 forces `auth_required`, `multi_tenant`, `audit_ledger`, `ticket_queue`,
 and `voice_consent` unless explicitly disabled (startup then refuses).

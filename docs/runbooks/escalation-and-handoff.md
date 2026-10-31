@@ -110,6 +110,19 @@ upset taxpayer to today's date. To confirm after a change, ask for a person **on
 that returns passages**: an empty index abstains and opens a ticket by another path,
 which is how G309 stayed hidden.
 
+## Tools and held actions (ADR-0022)
+
+`escalate_to_human` goes through `_maybe_create_ticket` by way of `ESCALATION_ROUTE`, so a
+ticket from the model has the conversation, transcript and team, dedupes against an open
+ticket, and is announced. Outside a turn, such as an MCP server, it records the owner and
+tenant but has no conversation. If the route fails the tool reports failure, and the model
+cannot promise a handoff.
+
+No tier, throttle or guardrail can hold this tool. With `risk_tiered_autonomy_gates` on, a
+`high` action is held and opens a ticket whose reason names the action. There is no approval
+endpoint: the officer completes the action in their own system or declines it, and
+`critical` actions are refused outright.
+
 ## Privacy and limits
 
 * The envelope carries slot **names** (`tax type`, `filing period`, `tin`) and

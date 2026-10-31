@@ -32,6 +32,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
 from collections import Counter
 from dataclasses import dataclass, field
 from enum import Enum
@@ -157,6 +158,12 @@ class ToolCallBudget:
     _per_tool: Counter[str] = field(default_factory=Counter)
     _per_iteration: Counter[int] = field(default_factory=Counter)
     _memo: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: Admitted and not yet recorded. The memo only fills when a call returns, so
+    #: without this two identical calls in one round both ran: for a tool with a
+    #: side effect, that is the side effect twice.
+    _in_flight: set[str] = field(default_factory=set)
+    #: The loop admits parallel calls from a thread pool.
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     # -- Admission -----------------------------------------------------
     def admit(
@@ -174,6 +181,10 @@ class ToolCallBudget:
         costs no execution, so refusing it for lack of budget would be
         charging for work nobody does.
         """
+        with self._lock:
+            return self._admit(name, arguments, iteration)
+
+    def _admit(self, name: str, arguments: dict[str, Any] | None, iteration: int) -> BudgetDecision:
         if self._per_iteration[iteration] >= self.max_calls_per_iteration:
             return self._deny(
                 name,
@@ -187,13 +198,27 @@ class ToolCallBudget:
             self._per_iteration[iteration] += 1
             self.repeats += 1
             logger.info("tool budget: repeat of %s served from memo", name)
-            memo = dict(self._memo[fingerprint])
-            memo["repeated_call"] = True
-            memo["budget_note"] = (
-                "You already called this tool with these arguments this turn. "
-                "This is the earlier result — do not call it again."
+            return BudgetDecision(Admission.REPEAT, reason="duplicate call", result=self._replay(fingerprint))
+
+        if fingerprint in self._in_flight:
+            self._per_iteration[iteration] += 1
+            self.repeats += 1
+            logger.info("tool budget: duplicate of %s in this round not dispatched", name)
+            # Not a success: nothing ran here, and the original may yet fail. Waiting
+            # for it here would deadlock, because the loop records a round only once
+            # all of it has returned. settle() replaces this with the real result.
+            return BudgetDecision(
+                Admission.REPEAT,
+                reason="duplicate call",
+                result={
+                    "ok": False,
+                    "repeated_call": True,
+                    "budget_note": (
+                        "This is the same call as another in this round, so it was not run "
+                        "twice. Use that call's result."
+                    ),
+                },
             )
-            return BudgetDecision(Admission.REPEAT, reason="duplicate call", result=memo)
 
         if self.dispatched >= self.max_total_calls:
             return self._deny(
@@ -212,7 +237,18 @@ class ToolCallBudget:
         self._per_iteration[iteration] += 1
         self._per_tool[name] += 1
         self.dispatched += 1
+        self._in_flight.add(fingerprint)
         return BudgetDecision(Admission.ADMIT)
+
+    def _replay(self, fingerprint: str) -> dict[str, Any]:
+        """The earlier result, marked so the model does not ask again. Caller holds the lock."""
+        memo = dict(self._memo[fingerprint])
+        memo["repeated_call"] = True
+        memo["budget_note"] = (
+            "You already called this tool with these arguments this turn. "
+            "This is the earlier result — do not call it again."
+        )
+        return memo
 
     def _deny(self, name: str, reason: str) -> BudgetDecision:
         self.denied += 1
@@ -235,9 +271,26 @@ class ToolCallBudget:
         shape to annotate with the repeat marker, and re-running it is
         cheaper than guessing.
         """
-        if not isinstance(result, dict):
-            return
-        self._memo[call_fingerprint(name, arguments)] = dict(result)
+        fingerprint = call_fingerprint(name, arguments)
+        with self._lock:
+            self._in_flight.discard(fingerprint)
+            if isinstance(result, dict):
+                self._memo[fingerprint] = dict(result)
+
+    def settle(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None,
+        provisional: dict[str, Any],
+    ) -> dict[str, Any]:
+        """What a duplicate reports, now its round is recorded.
+
+        *provisional* stands when the original left nothing to replay, which
+        :meth:`record` does for a result that is not a dict.
+        """
+        fingerprint = call_fingerprint(name, arguments)
+        with self._lock:
+            return self._replay(fingerprint) if fingerprint in self._memo else provisional
 
     # -- Observation budget --------------------------------------------
     def observation_allowance(self) -> int:
@@ -262,6 +315,30 @@ class ToolCallBudget:
     # -- Telemetry -----------------------------------------------------
     def exhausted(self) -> bool:
         return self.dispatched >= self.max_total_calls
+
+    def to_dict(self) -> dict[str, Any]:
+        """What was spent, for a checkpoint. A resumed turn must not get a fresh budget."""
+        with self._lock:
+            return {
+                "dispatched": self.dispatched,
+                "repeats": self.repeats,
+                "denied": self.denied,
+                "observation_chars_spent": self.observation_chars_spent,
+                "per_tool": dict(self._per_tool),
+                "memo": dict(self._memo),
+            }
+
+    def restore(self, data: dict[str, Any] | None) -> None:
+        """Take up a checkpoint's spend; the ceilings stay as constructed."""
+        if not data:
+            return
+        with self._lock:
+            self.dispatched = int(data.get("dispatched", 0))
+            self.repeats = int(data.get("repeats", 0))
+            self.denied = int(data.get("denied", 0))
+            self.observation_chars_spent = int(data.get("observation_chars_spent", 0))
+            self._per_tool = Counter({str(k): int(v) for k, v in (data.get("per_tool") or {}).items()})
+            self._memo = {str(k): dict(v) for k, v in (data.get("memo") or {}).items() if isinstance(v, dict)}
 
     def stats(self) -> dict[str, Any]:
         """Trace-shaped summary — safe to log, no argument values."""

@@ -170,7 +170,10 @@ class EmptyStreamFallbackTest(unittest.TestCase):
                 )
             )
         tokens = [payload for kind, payload in events if kind == "token"]
-        self.assertEqual(tokens, ["[lg] VAT is 18%."])
+        self.assertEqual(len(tokens), 1)
+        self.assertTrue(tokens[0].startswith("[lg] VAT is 18%."))
+        # The sentence saying this is a fallback is localized with the answer.
+        self.assertIn(service.DEGRADED_DISCLOSURES["generation_unavailable"], tokens[0])
 
 
 class FigureFidelityTest(unittest.TestCase):

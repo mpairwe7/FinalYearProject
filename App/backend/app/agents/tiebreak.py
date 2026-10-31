@@ -35,13 +35,17 @@ Feature flag: ``FLAG_SUPERVISOR_LLM_TIEBREAK``, default off.
 
 from __future__ import annotations
 
+import concurrent.futures
+import contextvars
 import json
 import logging
 import os
 import re
+import threading
 from collections import OrderedDict
 from typing import Any
 
+from ..resilience import remaining_turn_seconds
 from .state import AgentRoute, RouteDecision
 
 logger = logging.getLogger(__name__)
@@ -78,6 +82,27 @@ _SELECTABLE: dict[str, AgentRoute] = {
 #: belt-and-braces guard on a safety-relevant decision.
 _UNCHALLENGEABLE = frozenset({AgentRoute.ESCALATE, AgentRoute.GREET, AgentRoute.BLOCKED})
 
+#: Routes that run the tool loop.
+_TOOL_ROUTES = frozenset({AgentRoute.TOOLS, AgentRoute.TAX_SPECIALIST, AgentRoute.CUSTOMS_SPECIALIST})
+
+#: All a model-chosen tool route may use. The choice is made from the taxpayer's
+#: text, which may have been written to steer it, and an empty whitelist means
+#: "every eligible tool". Control flow chosen by a model reading untrusted input
+#: gets repeatable reads and nothing else.
+_READ_ONLY_TOOLS = (
+    "search_ura_knowledge_base",
+    "lookup_rate",
+    "get_current_date",
+    "get_next_deadlines",
+)
+
+#: A second opinion is not worth a stalled turn.
+CLASSIFIER_TIMEOUT_S = float(os.getenv("SUPERVISOR_LLM_TIMEOUT_S", "3"))
+_CLASSIFIER_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="tiebreak")
+#: Jobs running or waiting. A pool of two with this many is stuck, and a turn that
+#: joined the queue would only spend its timeout behind calls that are not returning.
+_CLASSIFIER_SLOTS = threading.BoundedSemaphore(4)
+
 _PROMPT = """You classify Uganda Revenue Authority taxpayer questions.
 
 Choose exactly one route:
@@ -95,6 +120,7 @@ Question: {query}"""
 #: this is the one path in the supervisor that costs a model call.
 _CACHE: OrderedDict[str, str] = OrderedDict()
 _CACHE_MAX = 512
+_CACHE_LOCK = threading.Lock()
 
 _JSON_RE = re.compile(r"\{[^{}]*\}")
 _WS_RE = re.compile(r"\s+")
@@ -173,17 +199,33 @@ def refine(
     if not key:
         return decision
 
-    cached = _CACHE.get(key)
+    with _CACHE_LOCK:
+        cached = _CACHE.get(key)
+        if cached is not None:
+            _CACHE.move_to_end(key)
     if cached is not None:
-        _CACHE.move_to_end(key)
         route = _SELECTABLE.get(cached)
         return _apply(decision, route, cached_hit=True)
 
+    slots = _CLASSIFIER_SLOTS
+    if not slots.acquire(blocking=False):
+        logger.warning("supervisor tiebreak saturated; keeping rule decision")
+        return decision
+    future = None
     try:
-        raw = (classifier or _default_classifier)(_PROMPT.format(query=query))
+        future = _CLASSIFIER_POOL.submit(
+            contextvars.copy_context().run, classifier or _default_classifier, _PROMPT.format(query=query)
+        )
+        future.add_done_callback(lambda _done: slots.release())
+        raw = future.result(timeout=max(0.0, remaining_turn_seconds(CLASSIFIER_TIMEOUT_S)))
     except Exception as exc:
         # Fail open. The rules already produced a usable decision.
-        logger.warning("supervisor tiebreak unavailable (%s); keeping rule decision", exc)
+        logger.warning("supervisor tiebreak unavailable (%s); keeping rule decision", type(exc).__name__)
+        if future is None:
+            slots.release()
+        else:
+            # Still queued, it would run later for nobody. Running, it keeps its slot.
+            future.cancel()
         return decision
 
     route = _parse_route(raw or "")
@@ -191,10 +233,11 @@ def refine(
         logger.info("supervisor tiebreak returned no usable route; keeping rule decision")
         return decision
 
-    _CACHE[key] = route.value
-    _CACHE.move_to_end(key)
-    while len(_CACHE) > _CACHE_MAX:
-        _CACHE.popitem(last=False)
+    with _CACHE_LOCK:
+        _CACHE[key] = route.value
+        _CACHE.move_to_end(key)
+        while len(_CACHE) > _CACHE_MAX:
+            _CACHE.popitem(last=False)
 
     return _apply(decision, route, cached_hit=False)
 
@@ -214,10 +257,11 @@ def _apply(
         route=route,
         reason=f"LLM tiebreak on low rule confidence ({decision.confidence:.2f})",
         confidence=TIEBREAK_CONFIDENCE,
-        # The rules matched nothing specific, so they suggested nothing
-        # specific. Carrying an empty whitelist lets Tool RAG select for
-        # the new route instead of constraining it to the old one's.
-        suggested_tools=list(decision.suggested_tools),
+        suggested_tools=(
+            list(decision.suggested_tools or _READ_ONLY_TOOLS)
+            if route in _TOOL_ROUTES
+            else list(decision.suggested_tools)
+        ),
         clarification_question=decision.clarification_question,
     )
 

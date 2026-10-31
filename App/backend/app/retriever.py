@@ -36,7 +36,7 @@ from typing import Any
 
 from ._root import APP_DATA_ROOT as _APP_DATA_ROOT
 from .analytics import metrics
-from .resilience import CircuitBreaker, CircuitState  # re-export for backcompat
+from .resilience import CircuitBreaker, CircuitState, admit  # re-export for backcompat
 from .text_signals import content_tokens, is_courtesy_sentence, split_sentences
 
 logger = logging.getLogger(__name__)
@@ -1634,11 +1634,8 @@ class HybridRetriever:
         if not cloud_models_allowed():
             # A call turn stays on local models (providers.scope).
             return []
-        if not breakers.VECTORIZE_BREAKER.allow_request():
-            logger.warning("Vectorize circuit OPEN — skipping dense fallback")
-            return []
-        if not budget.try_consume_neurons(1):
-            logger.info("Workers AI neuron budget exhausted — skipping dense fallback")
+        if not admit(breakers.VECTORIZE_BREAKER, lambda: budget.try_consume_neurons(1)):
+            logger.info("Vectorize circuit open or neuron budget spent — skipping dense fallback")
             return []
         try:
             from .hyde import dense_query_text

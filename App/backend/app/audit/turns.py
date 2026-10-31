@@ -33,9 +33,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 #: Version of the ``generate`` payload layout. 1 had no channel, provenance
-#: or citation digests and kept tool calls raw; rows keep the layout they
-#: were written with.
-TURN_PAYLOAD_SCHEMA = 2
+#: or citation digests and kept tool calls raw; 2 had no ``disposition``, because
+#: only a finished turn wrote a row. Rows keep the layout they were written with.
+TURN_PAYLOAD_SCHEMA = 3
 
 _MAX_LISTED = 10
 _PROVENANCE_TTL_S = 60.0
@@ -275,6 +275,10 @@ def build_turn_payload(
         "schema": TURN_PAYLOAD_SCHEMA,
         "channel": channel,
         "outcome": turn_outcome(result),
+        # How the turn ended, which "outcome" cannot say: completed, cancelled
+        # (the client left), deadline_exceeded or failed. Anything but completed
+        # may have served part of an answer; the reply digest is of that part.
+        "disposition": str(result.get("_disposition") or "completed"),
         "query_sha256": _sha256(message),
         "reply_sha256": _sha256(reply),
         "reply_locale": str(result.get("reply_locale") or result.get("locale") or "en"),
@@ -300,6 +304,9 @@ def build_turn_payload(
         "live_check": result.get("_live_check") or {},
         "plan": result.get("_plan") or {},
         "pipeline_attestation": result.get("_attestation") or {},
+        # What produced the words, and whether the lock could vouch for the figures.
+        "generation": result.get("_generation") or {},
+        "figure_lock": result.get("_figure_lock") or {},
         "flag_variants_sha256": _sha256(flag_variants) if flag_variants else "",
         "provenance": provenance(),
     }

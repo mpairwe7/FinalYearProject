@@ -168,12 +168,14 @@ class StreamedTurnTest(unittest.TestCase):
         after = metrics.snapshot()["counters"].get('chat_turns_total{channel="sse",outcome="answered"}', 0)
         self.assertEqual(after - before, 1)
 
-    def test_failed_turn_is_counted_not_audited(self) -> None:
+    def test_failed_turn_is_counted_and_audited_as_failed(self) -> None:
+        # It can already have served text, opened a ticket or run a tool.
         model = mock.Mock()
         log = {"result": {}, "full_reply": "", "elapsed_ms": 10.0}
         before = metrics.snapshot()["counters"].get('chat_turns_total{channel="ws",outcome="error"}', 0)
         self._run("ws", [("error", {"code": "internal"}), ("done", ""), ("_log", log)], model)
-        model.record_turn_audit.assert_not_called()
+        model.record_turn_audit.assert_called_once()
+        self.assertEqual(model.record_turn_audit.call_args.kwargs["result"]["_disposition"], "failed")
         after = metrics.snapshot()["counters"].get('chat_turns_total{channel="ws",outcome="error"}', 0)
         self.assertEqual(after - before, 1)
 

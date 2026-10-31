@@ -759,6 +759,77 @@ class StreamingDLPFilter:
         return remaining
 
 
+#: A figure as far as the release gate is concerned: any digit, or a number in
+#: words. "one" is left out because it is everywhere in ordinary prose. Holding on
+#: a false match costs latency; missing a figure shows it unverified.
+_RELEASE_FIGURE_RE = re.compile(
+    r"\d|\b(?:percent|per\s+cent|hundred|thousand|million|billion|trillion|"
+    r"two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|"
+    r"fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|"
+    r"seventy|eighty|ninety)\b",
+    re.IGNORECASE,
+)
+_RELEASE_CITATION_RE = re.compile(r"\[\d{1,3}\]")
+_RELEASE_SENTENCE_END_RE = re.compile(r"[.!?][\"')\]]*\s+|\n+")
+
+
+class FigureReleaseGate:
+    """Stream prose as it arrives; hold everything from the first figure on.
+
+    Verification needs the whole reply, so a stream that sends text as it is
+    written shows a contradicted figure and corrects it afterwards, by which time
+    it has been read. Amazon Bedrock Guardrails makes the same choice explicit: its
+    default streaming mode buffers chunks until they are scanned, and its
+    asynchronous mode warns that unsafe content can reach the user first. Here a
+    reply is released up to the sentence holding its first figure, and the rest
+    waits for the output guards. Prose keeps its speed, and a figure is never on
+    screen before it has been checked.
+
+    Only whole sentences go out: half a sentence left frozen on screen while the
+    guards run reads as a fault. Number words in Ugandan languages are not covered,
+    though digits are; see G364 in the gap register.
+    """
+
+    def __init__(self, enabled: bool = True) -> None:
+        self._enabled = enabled
+        self._tail = ""
+        self._held = ""
+        self.holding = False
+
+    def feed(self, chunk: str) -> str:
+        """Take the next chunk and return whatever is clear to send now."""
+        if not self._enabled:
+            return chunk
+        if self.holding:
+            self._held += chunk
+            return ""
+        self._tail += chunk
+        sentence_end = 0
+        for match in _RELEASE_SENTENCE_END_RE.finditer(self._tail):
+            sentence_end = match.end()
+        if not sentence_end:
+            return ""
+        ready, self._tail = self._tail[:sentence_end], self._tail[sentence_end:]
+        masked = _RELEASE_CITATION_RE.sub(lambda m: " " * len(m.group()), ready)
+        figure = _RELEASE_FIGURE_RE.search(masked)
+        if figure is None:
+            return ready
+        start = 0
+        for match in _RELEASE_SENTENCE_END_RE.finditer(masked, 0, figure.start()):
+            start = match.end()
+        self.holding = True
+        self._held = ready[start:] + self._tail
+        self._tail = ""
+        return ready[:start]
+
+    def drain(self) -> str:
+        """Everything not yet released, leaving the gate empty."""
+        rest = self._held + self._tail
+        self._held = ""
+        self._tail = ""
+        return rest
+
+
 _LISTISH_VERB_RE = re.compile(
     r"\b(?:is|are|was|were|must|should|will|shall|means|applies)\b",
     re.IGNORECASE,

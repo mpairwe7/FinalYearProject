@@ -136,8 +136,13 @@ def fresh_registry():
 @pytest.fixture
 def clean_flags():
     """Clear all in-memory flag overrides, yield the registry, then clear again."""
+    from app import service
     from app.flags import flags, _REGISTRY
 
+    assert flags is service.flags, (
+        "A test replaced the flag singleton, so clearing it would not reach the service. "
+        "Reload app.flags only with test_integration.restored_modules."
+    )
     for name in list(_REGISTRY.keys()):
         flags.clear(name)
     yield flags

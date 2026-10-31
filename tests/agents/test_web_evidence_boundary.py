@@ -8,6 +8,8 @@ section and was handed to the claim verifier as deterministic.
 
 from __future__ import annotations
 
+import re
+
 from datetime import date
 
 import pytest
@@ -69,7 +71,8 @@ class TestTrustBoundary:
             verified_facts=outcome.live_check_notice,
         )
 
-        assert "16" not in outcome.live_check_notice
+        # The notice carries the time of the check, which can itself contain "16".
+        assert "16" not in re.sub(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC", "", outcome.live_check_notice)
         assert report["decision"] != "approve"
 
     def test_injected_results_are_dropped_whole_and_counted(self):

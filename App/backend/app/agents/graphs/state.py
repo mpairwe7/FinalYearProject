@@ -89,10 +89,12 @@ class TaxpayerActionRequest:
 class AgentGraphState:
     """State dict threaded through every node in the graph.
 
-    This mutable dataclass is request-scoped and is not checkpointed or
-    snapshotted into the audit ledger. ``trace`` records only node names,
-    durations, and bounded status metadata; the surrounding service writes a
-    separate privacy-minimized turn audit record.
+    Request-scoped in production: ``to_dict`` exists for the checkpoint store,
+    and the service passes no ``thread_id``, so nothing is persisted today. A
+    checkpoint holds the question and history, so the store is swept by retention
+    and erasure anyway. Nothing here reaches the audit ledger: ``trace`` records
+    only node names, durations, and bounded status metadata, and the surrounding
+    service writes a separate privacy-minimized turn audit record.
 
     Keep the field set small — it's logged on every transition.
     """
@@ -121,6 +123,9 @@ class AgentGraphState:
     #: Tools the plan named but ``node_act`` did not dispatch, with why —
     #: unfillable arguments, or a spend ceiling.
     skipped_tools: list[dict[str, Any]] = field(default_factory=list)
+    #: Calculator inputs filled from memory or an earlier result, not from this
+    #: turn: which tool, which inputs, where from. The reply has to say so.
+    assumed_inputs: list[dict[str, Any]] = field(default_factory=list)
     #: Per-turn tool spend ceilings and duplicate-call memo.  Excluded
     #: from ``repr`` because state is logged on every graph transition.
     budget: ToolCallBudget = field(default_factory=ToolCallBudget, repr=False)
@@ -222,6 +227,7 @@ class AgentGraphState:
             "tool_calls": list(self.tool_calls),
             "observations": list(self.observations),
             "skipped_tools": list(self.skipped_tools),
+            "assumed_inputs": list(self.assumed_inputs),
             "iterations": self.iterations,
             "max_iterations": self.max_iterations,
             "hits": list(self.hits),
@@ -234,6 +240,9 @@ class AgentGraphState:
             "max_reflections": self.max_reflections,
             "handoff_count": self.handoff_count,
             "max_handoffs": self.max_handoffs,
+            "handoff_from": self.handoff_from,
+            "handoff_reason": self.handoff_reason,
+            "budget": self.budget.to_dict(),
             "reply": self.reply,
             "outcome": self.outcome.value,
             "error": self.error,
@@ -257,7 +266,8 @@ class AgentGraphState:
         try:
             outcome = GraphOutcome(outcome_val)
         except ValueError:
-            outcome = GraphOutcome.ANSWERED
+            # A checkpoint that cannot be read is not a finished answer.
+            outcome = GraphOutcome.ERRORED
 
         goals_raw = data.get("active_goals", {})
         active_goals = {
@@ -294,6 +304,7 @@ class AgentGraphState:
             tool_calls=list(data.get("tool_calls", [])),
             observations=list(data.get("observations", [])),
             skipped_tools=list(data.get("skipped_tools", [])),
+            assumed_inputs=list(data.get("assumed_inputs", [])),
             iterations=int(data.get("iterations", 0)),
             max_iterations=int(data.get("max_iterations", 3)),
             hits=list(data.get("hits", [])),
@@ -306,6 +317,8 @@ class AgentGraphState:
             max_reflections=int(data.get("max_reflections", 1)),
             handoff_count=int(data.get("handoff_count", 0)),
             max_handoffs=int(data.get("max_handoffs", 1)),
+            handoff_from=str(data.get("handoff_from", "")),
+            handoff_reason=str(data.get("handoff_reason", "")),
             reply=str(data.get("reply", "")),
             outcome=outcome,
             error=str(data.get("error", "")),
@@ -321,4 +334,5 @@ class AgentGraphState:
             live_web_hits=list(data.get("live_web_hits", [])),
             live_mode=str(data.get("live_mode", "")),
         )
+        state.budget.restore(data.get("budget"))
         return state

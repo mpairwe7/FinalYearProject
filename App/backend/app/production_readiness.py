@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import math
 import os
 import re
 from typing import Any
@@ -357,6 +358,21 @@ def _mcp_security_errors() -> list[str]:
     return errors
 
 
+def _turn_deadline_errors() -> list[str]:
+    """Every turn has a deadline: 0 lets one hung dependency hold a worker (G345)."""
+    raw = (os.getenv("AGENTIC_TURN_DEADLINE_S") or "").strip()
+    if not raw:
+        return []
+    try:
+        seconds = float(raw)
+    except ValueError:
+        return ["AGENTIC_TURN_DEADLINE_S must be a number of seconds."]
+    # "nan" and "inf" parse, and neither ever fires.
+    if not math.isfinite(seconds) or seconds <= 0:
+        return ["AGENTIC_TURN_DEADLINE_S must be a finite number above 0 in production."]
+    return []
+
+
 def gap_gate_errors() -> list[str]:
     """Production-only errors for remaining prototype features, plus sovereign-mode errors when SOVEREIGN_MODE=true."""
     errors: list[str] = []
@@ -377,6 +393,7 @@ def gap_gate_errors() -> list[str]:
     errors.extend(_privacy_governance_errors())
     errors.extend(_cross_border_errors())
     errors.extend(_mcp_security_errors())
+    errors.extend(_turn_deadline_errors())
     return errors
 
 

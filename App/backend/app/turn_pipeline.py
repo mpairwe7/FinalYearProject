@@ -6,10 +6,11 @@ Addresses ``MOD-GAP-01`` in line with:
 - **OWASP Top 10 for Agentic Applications 2026 (`ASI10` — Rogue Agents)**:
   A hashed behavioral manifest of the declared 7-stage order.
 
-:func:`attest_turn` holds each REST turn to that manifest, from the stage timings
-the turn actually recorded, and the verdict goes into its audit row. The streaming
-path records no stage timings yet, so it is not attested (G325): the manifest is a
-claim about the REST path until then.
+:func:`attest_turn` holds each turn, on every transport, to that manifest from the
+stage timings it actually recorded, and the verdict goes into its audit row. Stage 6
+is evidence, not an assumption: a turn that served model text must show a guard that
+ran. Only a turn that served none (a calculator, a canned refusal) may be attested on
+the strength of its audit row.
 """
 
 from __future__ import annotations
@@ -102,6 +103,7 @@ _TRACE_STAGES: dict[str, TurnStage] = {
     "llm_agentic": TurnStage.STAGE_5_SYNTHESIS_AND_LOCALIZATION,
     "abstention_check": TurnStage.STAGE_5_SYNTHESIS_AND_LOCALIZATION,
     "llm_generate": TurnStage.STAGE_5_SYNTHESIS_AND_LOCALIZATION,
+    "llm_stream": TurnStage.STAGE_5_SYNTHESIS_AND_LOCALIZATION,
     "output_guard": TurnStage.STAGE_6_OUTPUT_GUARD_AND_AUDIT,
     "grounding": TurnStage.STAGE_6_OUTPUT_GUARD_AND_AUDIT,
     "claim_verification": TurnStage.STAGE_6_OUTPUT_GUARD_AND_AUDIT,
@@ -109,6 +111,10 @@ _TRACE_STAGES: dict[str, TurnStage] = {
     "numeric_revision": TurnStage.STAGE_6_OUTPUT_GUARD_AND_AUDIT,
     "self_reflect": TurnStage.STAGE_6_OUTPUT_GUARD_AND_AUDIT,
 }
+
+
+#: Stages that put model text in front of a taxpayer unless something stops it.
+_GENERATION_STAGES = frozenset({"llm_generate", "llm_agentic", "llm_stream", "langgraph_execution"})
 
 
 @dataclass
@@ -183,14 +189,25 @@ class TurnPipelineTrace:
         }
 
 
-def attest_turn(timings: Mapping[str, float], *, transport: str = "rest") -> dict[str, Any]:
+def attest_turn(
+    timings: Mapping[str, float],
+    *,
+    transport: str = "rest",
+    served_model_text: bool | None = None,
+) -> dict[str, Any]:
     """Hold one finished turn to the manifest, from the stages it really ran.
 
     *timings* is ``trace_stage``'s record, in completion order. Runs of the same
     stage are summed, so a stage that reappears after a later one shows up as an
-    order violation rather than being tidied away. Reaching this function is
-    itself the audit half of Stage 6, on every exit. Live research is left out of
+    order violation rather than being tidied away. Live research is left out of
     Stage 4's SLA: it has its own wall-clock budget, and that is what bounds it.
+
+    Reaching this function is the audit half of Stage 6 and nothing more. It used
+    to add Stage 6 for any turn that recorded none, so a mandatory guard could not
+    be reported missing and the graph path, which ran no output guard at all,
+    attested ``ok``. A turn that served model text now needs a guard stage to show
+    for it. *served_model_text* overrides the inference from *timings*, for a model
+    call whose output was discarded (the tool loop ran, then the turn abstained).
     """
     trace = TurnPipelineTrace(transport=transport)
     grouped: list[tuple[TurnStage, float]] = []
@@ -204,10 +221,17 @@ def attest_turn(timings: Mapping[str, float], *, transport: str = "rest") -> dic
             grouped.append((stage, float(duration_ms)))
     for stage, duration_ms in grouped:
         trace.record_stage(stage, duration_ms)
-    if TurnStage.STAGE_6_OUTPUT_GUARD_AND_AUDIT not in {stage for stage, _ in grouped}:
+    generated = (
+        any(name in timings for name in _GENERATION_STAGES)
+        if served_model_text is None
+        else served_model_text
+    )
+    guarded = TurnStage.STAGE_6_OUTPUT_GUARD_AND_AUDIT in {stage for stage, _ in grouped}
+    if not guarded and not generated:
         trace.record_stage(TurnStage.STAGE_6_OUTPUT_GUARD_AND_AUDIT, 0.0, metadata={"audit_only": True})
 
     verdict = trace.verify_behavioral_integrity()
+    verdict["guard_basis"] = "verified" if guarded else "no_model_text"
     try:
         from .analytics import metrics
 

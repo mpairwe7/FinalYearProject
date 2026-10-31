@@ -192,3 +192,70 @@ tests:
         exp_samples:
           - labels: '{}'
             value: 10
+
+  # Every checked reply passed, so no reject series exists: the ratio is 0, not missing.
+  - interval: 1m
+    input_series:
+      - series: 'ura_figure_lock_checks_total{mode="shadow",outcome="pass"}'
+        values: '0+10x1500'
+    promql_expr_test:
+      - expr: sum(ura:figure_lock:shadow_reject_ratio_1d)
+        eval_time: 1441m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  # A breaker open past its window names itself; one that recovers does not fire.
+  - interval: 1m
+    input_series:
+      - series: 'ura_circuit_breaker_state{breaker="llm"}'
+        values: '2x30'
+      - series: 'ura_circuit_breaker_state{breaker="gemini_flash"}'
+        values: '2 2 2 0x27'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: CircuitBreakerOpen
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: backend
+              breaker: llm
+            exp_annotations:
+              summary: "A circuit breaker has not closed for 10 minutes"
+              description: "No call has shown the dependency is back, so turns may be falling back or degrading. The state only moves when a call arrives, so on a quiet worker this can mean nothing has tried since the back-off ended. Check the dependency the breaker names."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/agent-fault-tolerance.md#circuit-breaker-open"
+
+  # One fault is enough: a gate that cannot decide is failing closed for writes.
+  - interval: 1m
+    input_series:
+      - series: 'ura_autonomy_gate_faults_total{stage="audit"}'
+        values: '0 0 0 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: AutonomyGateFaulting
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: security
+            exp_annotations:
+              summary: "The autonomy gate could not decide, or could not record a refusal"
+              description: "Writes are failing closed. Reads continue. Refusals may be missing from the ledger."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/agent-fault-tolerance.md#autonomy-gate-faulting"
+
+  # Containment is measured over turns that reached an end: a cancelled turn says
+  # nothing about the answer, so closing a tab must not read as worse containment.
+  - interval: 1m
+    input_series:
+      - series: 'ura_chat_turns_total{channel="sse",outcome="answered"}'
+        values: '0+80x90'
+      - series: 'ura_chat_turns_total{channel="sse",outcome="escalated"}'
+        values: '0+20x90'
+      - series: 'ura_chat_turns_total{channel="sse",outcome="cancelled"}'
+        values: '0+100x90'
+    promql_expr_test:
+      - expr: round(ura:chat_turns:containment_ratio_1h * 100)
+        eval_time: 80m
+        exp_samples:
+          - labels: '{}'
+            value: 80
+

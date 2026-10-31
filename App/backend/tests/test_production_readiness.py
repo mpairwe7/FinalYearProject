@@ -205,3 +205,25 @@ def test_live_notification_production_gate(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setenv("RESEND_API_KEY", "re_live_key_999")  # pragma: allowlist secret
     errors_with_provider = [e for e in gap_gate_errors() if e.startswith("G14:")]
     assert errors_with_provider == []
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "soon", "nan", "inf", "-inf", "Infinity"])
+def test_production_refuses_a_turn_with_no_working_deadline(monkeypatch, value):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("AGENTIC_TURN_DEADLINE_S", value)
+
+    assert any("AGENTIC_TURN_DEADLINE_S" in error for error in gap_gate_errors())
+
+
+def test_an_unset_deadline_uses_the_default(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.delenv("AGENTIC_TURN_DEADLINE_S", raising=False)
+
+    assert not any("AGENTIC_TURN_DEADLINE_S" in error for error in gap_gate_errors())
+
+
+def test_a_deadline_only_gates_production(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("AGENTIC_TURN_DEADLINE_S", "0")
+
+    assert not any("AGENTIC_TURN_DEADLINE_S" in error for error in gap_gate_errors())

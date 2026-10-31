@@ -10,8 +10,7 @@ Through the real service code and a real (in-memory) analytics database:
   what was already given as names only;
 * in the conversation, a person is offered first when it is urgent.
 
-Flags are set through the environment: it is read on every call, unlike the
-flag singleton, which another suite reloads.
+Flags are set through the environment, which is read on every call.
 """
 
 from __future__ import annotations

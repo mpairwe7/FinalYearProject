@@ -529,6 +529,7 @@ def cleanup_expired_data() -> dict[str, int]:
         ("feedback", _FEEDBACK_TTL_DAYS, "created_at"),
         ("sessions", _SESSION_TTL_DAYS, "last_active_at"),
         ("conversation_topics", _CONVERSATION_TTL_DAYS, "updated_at"),
+        ("agent_checkpoints", _CONVERSATION_TTL_DAYS, "created_at"),
         ("ticket_presence", 1, "updated_at"),
         ("workflow_sessions", _WORKFLOW_SESSION_TTL_DAYS, "updated_at"),
     ]
@@ -1432,17 +1433,19 @@ def append_taxpayer_reply(ticket_id: str, message: str) -> dict[str, Any] | None
     return get_ticket(ticket_id)
 
 
-def find_open_ticket(conversation_id: str) -> dict[str, Any] | None:
+def find_open_ticket(conversation_id: str, tenant_id: str | None = None) -> dict[str, Any] | None:
     """Postgres mirror of :func:`database.find_open_ticket`."""
     pool = _get_pool()
     if pool is None or not conversation_id:
         return None
+    tenant_clause = " AND tenant_id = %s" if tenant_id is not None else ""
+    params: tuple[Any, ...] = (conversation_id, tenant_id) if tenant_id is not None else (conversation_id,)
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             f"""SELECT {_TICKET_COLUMNS_FULL} FROM tickets
-                WHERE conversation_id = %s AND status IN ('open','assigned')
+                WHERE conversation_id = %s AND status IN ('open','assigned'){tenant_clause}
                 ORDER BY created_at DESC LIMIT 1""",  # nosec B608 # noqa: S608
-            (conversation_id,),
+            params,
         )
         row = cur.fetchone()
     return _row_to_ticket(row, _TICKET_COLUMNS_FULL) if row else None
