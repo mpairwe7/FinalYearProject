@@ -1,0 +1,45 @@
+{
+  "url": "https://ura.go.ug/en/opportunities/careers/experiential-hiring/external-shortlist-for-officers-november-2024/",
+  "title": "External shortlist for officers - November 2024 - Uganda Revenue Authority",
+  "text": "\n| Oct | NOV | Dec |\n| --- | --- | --- |\n|  | 27 |  |\n| 2023 | 2024 | 2025 |\n\n| Job Title | Application ID Number | Candidate Name |\n| --- | --- | --- |\n| Job Title | Application ID Number | Candidate Name |\n",
+  "content_hash": "46570aa3f7332a95",
+  "timestamp": "2026-10-31T10:22:14Z",
+  "discovered_pdfs": [],
+  "tables": [
+    {
+      "headers": [
+        "Oct",
+        "NOV",
+        "Dec"
+      ],
+      "rows": [
+        [
+          "",
+          "27",
+          ""
+        ],
+        [
+          "2023",
+          "2024",
+          "2025"
+        ]
+      ],
+      "row_count": 2
+    },
+    {
+      "headers": [
+        "Job Title",
+        "Application ID Number",
+        "Candidate Name"
+      ],
+      "rows": [
+        [
+          "Job Title",
+          "Application ID Number",
+          "Candidate Name"
+        ]
+      ],
+      "row_count": 1
+    }
+  ]
+}

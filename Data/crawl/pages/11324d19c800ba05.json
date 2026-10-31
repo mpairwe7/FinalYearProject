@@ -1,0 +1,30 @@
+{
+  "url": "https://ura.go.ug/en/opportunities/tenders/procurement-management-system/isupplier-portal/",
+  "title": "Isupplier Portal - Uganda Revenue Authority",
+  "text": "\n| Apr | MAY | Jun |\n| --- | --- | --- |\n|  | 23 |  |\n| 2025 | 2026 | 2027 |\n",
+  "content_hash": "11324d19c800ba05",
+  "timestamp": "2026-10-31T10:22:01Z",
+  "discovered_pdfs": [],
+  "tables": [
+    {
+      "headers": [
+        "Apr",
+        "MAY",
+        "Jun"
+      ],
+      "rows": [
+        [
+          "",
+          "23",
+          ""
+        ],
+        [
+          "2025",
+          "2026",
+          "2027"
+        ]
+      ],
+      "row_count": 2
+    }
+  ]
+}
