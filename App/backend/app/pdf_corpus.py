@@ -74,8 +74,8 @@ DEFAULT_STATUTORY_PDF_SOURCE_URLS: tuple[str, ...] = (
     "https://ura.go.ug/download-category/laws-and-acts/",
 )
 
-#: Top 10 Ugandan Government Bodies (MDAs) with high URA NTR/PRN, TIN, TCC,
-#: Stamp Duty, and ASYCUDA/UESW dependency driving URA CXP inquiry volume (October 2026):
+#: Top 11 Ugandan Government Bodies (MDAs) with high URA NTR/PRN, TIN, TCC,
+#: Stamp Duty, and ASYCUDA/UESW/UGhub dependency driving URA CXP inquiry volume (October 2026):
 MDA_STATUTORY_PDF_REGISTRY: tuple[dict[str, str], ...] = (
     {
         "mda_code": "MDA1_MoWT",
@@ -182,6 +182,20 @@ MDA_STATUTORY_PDF_REGISTRY: tuple[dict[str, str], ...] = (
         "title": "NEMA Technical Guide on How to Generate PRN for 30% EIA Submission & 70% Approval Fees on URA Portal",
         "url": "https://nema.go.ug/sites/all/themes/nema/docs/TECHNICAL%20GUIDE.pdf",
     },
+    {
+        "mda_code": "MDA11_NITA_U",
+        "mda_name": "National Information Technology Authority-Uganda (NITA-U — IT Certification, UGhub & e-GP)",
+        "filename": "NITA-U-National-Information-Technology-Authority-Uganda-Act-2009.pdf",
+        "title": "National Information Technology Authority, Uganda Act, 2009 (Cap. 97) — IT Certification, NTR Fees & e-Government Interoperability (UGhub)",
+        "url": "https://media.ulii.org/media/legislation/18138/source_file/2009-4.pdf",
+    },
+    {
+        "mda_code": "MDA11_NITA_U",
+        "mda_name": "National Information Technology Authority-Uganda (NITA-U) & Personal Data Protection Office (PDPO)",
+        "filename": "NITA-U-PDPO-Data-Protection-and-Privacy-Act-2019.pdf",
+        "title": "Data Protection and Privacy Act, 2019 — PDPO Registration Fees, Compliance & URA NTR Collection",
+        "url": "https://media.ulii.org/media/legislation/18049/source_file/2019-9.pdf",
+    },
 )
 
 MDA_DIRECT_PDF_BY_URL: dict[str, dict[str, str]] = {
@@ -243,6 +257,12 @@ ALLOWED_STATUTORY_PDF_HOSTS: frozenset[str] = frozenset(
         "www.ugandacoffee.go.ug",
         "singlewindow.go.ug",
         "www.singlewindow.go.ug",
+        "nita.go.ug",
+        "www.nita.go.ug",
+        "pdpo.go.ug",
+        "www.pdpo.go.ug",
+        "egpuganda.go.ug",
+        "www.egpuganda.go.ug",
     }
 )
 
@@ -253,6 +273,12 @@ _UG_GOV_INTERMEDIATE_TLS_HOSTS: frozenset[str] = frozenset(
         "www.nira.go.ug",
         "nema.go.ug",
         "www.nema.go.ug",
+        "nita.go.ug",
+        "www.nita.go.ug",
+        "pdpo.go.ug",
+        "www.pdpo.go.ug",
+        "egpuganda.go.ug",
+        "www.egpuganda.go.ug",
     }
 )
 
@@ -1086,6 +1112,79 @@ def pdf_document_date(data: bytes) -> str:
     return max(found, default="")
 
 
+import functools
+
+
+@functools.lru_cache(maxsize=128)
+def _resolve_host_ips(host: str) -> tuple[str, ...]:
+    import socket
+
+    try:
+        infos = socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+    except OSError:
+        return ()
+    return tuple(sorted({str(info[4][0]).split("%", 1)[0] for info in infos}))
+
+
+def _assert_public_host(url: str) -> None:
+    """Reject any allowlisted host whose DNS resolves to a non-global IP (SSRF / DNS rebinding guard).
+
+    Offline unit tests using ``httpx.MockTransport`` may run without DNS resolution;
+    an ``OSError`` from ``getaddrinfo`` is left to the transport, whereas any
+    resolved loopback, private, link-local, or cloud-metadata address is refused.
+    """
+    import ipaddress
+
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").strip().lower().rstrip(".")
+    if not host:
+        raise CorpusValidationError(f"Missing hostname in {url!r}")
+    for addr_str in _resolve_host_ips(host):
+        try:
+            ip_obj = ipaddress.ip_address(addr_str)
+        except ValueError as exc:
+            raise CorpusValidationError(f"Invalid IP resolution for {host}: {addr_str}") from exc
+        if not ip_obj.is_global:
+            raise CorpusValidationError(
+                f"Refused non-public IP resolution for {host} ({addr_str})"
+            )
+
+
+def inspect_pdf_for_prompt_injection(raw_bytes: bytes) -> None:
+    """Reject PDFs carrying embedded prompt-injection directives in metadata or text streams (OWASP ASI06)."""
+    from .guardrails import injection_present
+
+    sample = b"\n".join(re.findall(rb"[\x20-\x7e]{16,}", raw_bytes[:524288]))
+    if not sample:
+        return
+    text_sample = sample.decode("ascii", errors="ignore")
+    if injection_present(text_sample):
+        raise PdfRejected("PDF contains embedded prompt-injection directive (OWASP ASI06)")
+
+
+def _pdf_response_opts_out(headers: dict[str, str]) -> str:
+    """Return ``'noindex'`` or ``'ai_usage_denied'`` when response headers opt out of indexing/AI use."""
+    x_robots = (headers.get("x-robots-tag") or "").lower()
+    if x_robots:
+        current_agent = "*"
+        for raw_part in x_robots.split(","):
+            part = raw_part.strip()
+            if not part:
+                continue
+            if ":" in part:
+                agent, directive = part.split(":", 1)
+                current_agent = agent.strip()
+                part = directive.strip()
+            if current_agent in ("*", "ura-taxpayer-assistant-crawler") and re.search(
+                r"\b(?:noindex|none|noai)\b", part
+            ):
+                return "noindex"
+    content_usage = (headers.get("content-usage") or "").lower()
+    if re.search(r"\bai-use\s*=\s*n\b", content_usage):
+        return "ai_usage_denied"
+    return ""
+
+
 def _validated_redirect(resp: Any, current: str) -> str:
     """The next hop of a redirect, or a refusal if it leaves the allowlist.
 
@@ -1100,6 +1199,7 @@ def _validated_redirect(resp: Any, current: str) -> str:
     host = (parsed.hostname or "").strip().lower().rstrip(".")
     if parsed.scheme != "https" or host not in ALLOWED_STATUTORY_PDF_HOSTS:
         raise CorpusValidationError(f"Disallowed redirect target: {target}")
+    _assert_public_host(target)
     return target
 
 
@@ -1114,6 +1214,7 @@ def _default_page_fetcher(url: str, timeout: float = 30.0) -> str:
     current = url
     with httpx.Client(timeout=timeout, follow_redirects=False, headers=headers) as client:
         for _hop in range(21):
+            _assert_public_host(current)
             resp = client.get(current)
             if resp.is_redirect:
                 current = _validated_redirect(resp, current)
@@ -1143,6 +1244,7 @@ def _stream_pdf_with_tls_fallback(
     current = url
     with httpx.Client(timeout=timeout, follow_redirects=False, headers=headers) as client:
         for _hop in range(21):
+            _assert_public_host(current)
             with client.stream("GET", current) as resp:
                 if resp.is_redirect:
                     current = _validated_redirect(resp, current)
@@ -1205,7 +1307,9 @@ def harvest_remote_pdfs(
     source_urls: str | Iterable[str] | None = None,
     include_mda_sources: bool = False,
     mirror_dirs: Iterable[Path] = (),
+    crawl_state_path: Path | None = None,
     max_pages_per_source: int = 5,
+    max_pdf_downloads: int | None = None,
     timeout: float = 30.0,
     page_fetcher: Callable[[str], str] | None = None,
     pdf_fetcher: Callable[[str], tuple[bytes, dict[str, str]]] | None = None,
@@ -1215,7 +1319,7 @@ def harvest_remote_pdfs(
     Supports:
     * ``https://www.parliament.go.ug/page/tax-bills-2026``
     * ``https://ura.go.ug/download-category/laws-and-acts/`` (including WPDM ``?wpdmdl=`` & ``?cp=`` pagination)
-    * Direct PDF URLs across the 10 high-dependency Ugandan MDAs (:data:`MDA_STATUTORY_PDF_REGISTRY`).
+    * Direct PDF URLs across the 11 high-dependency Ugandan MDAs (:data:`MDA_STATUTORY_PDF_REGISTRY`).
     """
     urls = parse_pdf_source_urls(source_urls)
     if include_mda_sources:
@@ -1317,6 +1421,8 @@ def harvest_remote_pdfs(
 
     from concurrent.futures import ThreadPoolExecutor
 
+    if max_pdf_downloads is not None and max_pdf_downloads >= 0:
+        discovered_items = discovered_items[:max_pdf_downloads]
     max_workers = min(6, max(1, len(discovered_items)))
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = [(item, pool.submit(_probe_or_fetch_item, item)) for item in discovered_items]
@@ -1366,9 +1472,15 @@ def harvest_remote_pdfs(
                 content_disposition=cd_header,
                 source_page=source_page,
             )
+            opt_out = _pdf_response_opts_out(headers)
+            if opt_out:
+                logger.warning("Skipped PDF %s (%s): %s", filename, pdf_url, opt_out)
+                rejected.append({"url": pdf_url, "pdf": filename, "reason": opt_out})
+                continue
             try:
                 validate_pdf_header(raw_bytes)
                 inspect_pdf_bytes(raw_bytes, limits=CORPUS_PDF_LIMITS)
+                inspect_pdf_for_prompt_injection(raw_bytes)
                 scan_bytes(raw_bytes, filename=filename)
             except (PdfRejected, MalwareRejected) as exc:
                 logger.warning("Rejected downloaded PDF %s (%s): %s", filename, pdf_url, exc)
@@ -1422,6 +1534,9 @@ def harvest_remote_pdfs(
                     shutil.copy2(src_pdf, dest_pdf)
                     mirrored_count += 1
 
+    if crawl_state_path is not None:
+        _record_harvest_in_crawl_state(Path(crawl_state_path), downloaded=downloaded, verified_existing=verified_existing)
+
     return {
         "source_urls": urls,
         "pages_scanned": visited_pages,
@@ -1435,4 +1550,138 @@ def harvest_remote_pdfs(
         "rejected": rejected,
         "page_errors": page_errors,
     }
+
+
+def _record_harvest_in_crawl_state(
+    crawl_state_path: Path,
+    *,
+    downloaded: list[dict[str, Any]],
+    verified_existing: list[dict[str, Any]],
+) -> None:
+    """Record newly downloaded PDFs in ``crawl_state.json['pdf_hashes']`` and update ``visited``."""
+    from datetime import datetime, timezone
+
+    if not downloaded and not verified_existing:
+        return
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    state: dict[str, Any] = {}
+    if crawl_state_path.is_file():
+        try:
+            loaded = json.loads(crawl_state_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                state = loaded
+        except (OSError, ValueError):
+            logger.warning("Could not parse %s when recording harvested PDFs", crawl_state_path, exc_info=True)
+            return
+    state.setdefault("schema_version", 2)
+    state.setdefault("runs", [])
+    pdf_hashes = state.setdefault("pdf_hashes", {})
+    visited = state.setdefault("visited", {})
+    for item in downloaded:
+        digest = str(item.get("sha256") or "")[:32]
+        if not digest:
+            continue
+        # Evict any prior digest that pointed to the same filename or URL so
+        # replaced editions never leave orphaned hashes in crawl_state.json.
+        stale_digests = [
+            old_digest
+            for old_digest, meta in list(pdf_hashes.items())
+            if old_digest != digest
+            and isinstance(meta, dict)
+            and (meta.get("filename") == item["pdf"] or meta.get("url") == item["url"])
+        ]
+        for old_digest in stale_digests:
+            pdf_hashes.pop(old_digest, None)
+        pdf_hashes[digest] = {
+            "url": item["url"],
+            "filename": item["pdf"],
+            "size_bytes": item["bytes"],
+            "timestamp": now_iso,
+            "source_kind": "live",
+        }
+        entry = visited.setdefault(item["url"], {"first_seen": now_iso})
+        entry.update(
+            kind="document",
+            status="live",
+            last_checked_at=now_iso,
+            last_verified_at=now_iso,
+            last_status=200,
+            last_outcome="ok",
+            content_hash=digest,
+        )
+    for item in verified_existing:
+        digest = str(item.get("sha256") or "")[:32]
+        entry = visited.setdefault(item["url"], {"first_seen": now_iso})
+        entry.update(
+            kind="document",
+            status="live",
+            last_checked_at=now_iso,
+            last_verified_at=now_iso,
+            last_status=200,
+            last_outcome="ok",
+        )
+        if digest:
+            entry["content_hash"] = digest
+    state["last_pdf_harvest"] = {
+        "timestamp": now_iso,
+        "downloaded_count": len(downloaded),
+        "verified_existing_count": len(verified_existing),
+    }
+    crawl_state_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_state = crawl_state_path.with_name(f".{crawl_state_path.name}.tmp")
+    tmp_state.write_text(json.dumps(state, indent=1, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp_state.replace(crawl_state_path)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entrypoint for statutory & MDA PDF harvesting into Data/pdfs."""
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(description="Harvest statutory and 11-MDA PDFs into Data/pdfs")
+    parser.add_argument("--harvest", action="store_true", help="Run remote statutory & MDA PDF harvest")
+    parser.add_argument("--include-mda-sources", action="store_true", help="Include the 11-MDA statutory PDF registry")
+    parser.add_argument("--source-urls", type=str, default=None, help="Comma-separated HTTPS statutory source URLs")
+    parser.add_argument("--pdf-dir", type=Path, default=Path("Data/pdfs"))
+    parser.add_argument("--crawl-state", type=Path, default=None, help="Optional crawl_state.json to record new PDFs")
+    parser.add_argument("--max-pages-per-source", type=int, default=5)
+    parser.add_argument("--max-pdf-downloads", type=int, default=None, help="Cap total PDF downloads per run")
+    parser.add_argument("--timeout", type=float, default=30.0)
+    args = parser.parse_args(argv)
+
+    logging.basicConfig(level=os.getenv("CRAWL_LOG_LEVEL", "INFO"), format="%(levelname)s %(message)s")
+    if not args.harvest:
+        parser.error("--harvest is required when running app.pdf_corpus as a script")
+
+    stats = harvest_remote_pdfs(
+        args.pdf_dir,
+        source_urls=args.source_urls,
+        include_mda_sources=args.include_mda_sources,
+        crawl_state_path=args.crawl_state,
+        max_pages_per_source=args.max_pages_per_source,
+        max_pdf_downloads=args.max_pdf_downloads,
+        timeout=args.timeout,
+    )
+    summary = {
+        "discovered_count": stats["discovered_count"],
+        "downloaded_count": stats["downloaded_count"],
+        "verified_existing_count": stats["verified_existing_count"],
+        "rejected_count": stats["rejected_count"],
+        "page_errors_count": len(stats["page_errors"]),
+        "downloaded_files": [d["pdf"] for d in stats["downloaded"]],
+        "rejected": stats["rejected"],
+        "page_errors": stats["page_errors"],
+    }
+    sys.stdout.write(json.dumps(summary, indent=2) + "\n")
+    if (
+        stats["downloaded_count"] == 0
+        and stats["verified_existing_count"] == 0
+        and (stats["page_errors"] or stats["rejected"])
+    ):
+        return 2
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())
 

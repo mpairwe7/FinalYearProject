@@ -128,6 +128,30 @@ FULL_HUBS = (
     "https://www.parliament.go.ug/page/tax-bills-2026",
 )
 
+#: Direct statutory & fee PDF URLs across the 11 high-dependency Ugandan MDAs
+#: (mirrored from ``app.pdf_corpus.MDA_STATUTORY_PDF_REGISTRY`` because ``ml/``
+#: may not import ``app.*``). Queued when ``CrawlConfig.include_mda_pdfs`` is set.
+MDA_CANONICAL_FILENAMES: dict[str, str] = {
+    "https://media.ulii.org/media/legislation/18258/source_file/5b5c2f1ce136c1a3/1998-15.pdf": "MoWT-Traffic-and-Road-Safety-Act-Cap-361.pdf",
+    "https://media.ulii.org/media/legislation/18262/source_file/8e4f495a61b25d69/1999-3.pdf": "DCIC-Uganda-Citizenship-and-Immigration-Control-Act-Cap-313.pdf",
+    "https://media.ulii.org/media/legislation/107108/source_file/uganda-citizenship-and-immigration-control-fees-regulations-2021.pdf": "DCIC-Uganda-Citizenship-and-Immigration-Control-Fees-Regulations-2021.pdf",
+    "https://www.nira.go.ug/media/2024/10/SUMMARY-OF-THE-REGISTRATION-OF-PERSONS-FEES.pdf": "NIRA-Summary-of-Registration-of-Persons-Fees-2024-FY2024-25.pdf",
+    "https://media.ulii.org/media/legislation/17871/source_file/9715a09ebcdf6785/2015-4.pdf": "NIRA-Registration-of-Persons-Act-2015.pdf",
+    "https://media.ulii.org/media/legislation/18276/source_file/40a9202d41ec69ad/2003-1.pdf": "PPDA-Public-Procurement-and-Disposal-of-Public-Assets-Act.pdf",
+    "https://media.ulii.org/media/legislation/73988/source_file/259e194e1d73cc25/1983-1.pdf": "UNBS-Uganda-National-Bureau-of-Standards-Act.pdf",
+    "https://mlhud.go.ug/wp-content/uploads/2019/03/Registration-of-Titles-Act-Chapter_230.pdf": "MLHUD-Registration-of-Titles-Act-Cap-230.pdf",
+    "https://media.ulii.org/media/legislation/18578/source_file/177d6b9459ffc6af/1969-14.pdf": "KCCA-Trade-Licensing-Act-Cap-79.pdf",
+    "https://media.ulii.org/media/legislation/18245/source_file/5461811597227ca8/1997-5.pdf": "MOLG-Local-Governments-Act-Cap-243.pdf",
+    "https://media.ulii.org/media/legislation/131751/source_file/f969ab7100677e30/ug-act-si-2026-50-publication-document.pdf": "UPF-Traffic-and-Road-Safety-Speed-of-Motor-Vehicles-Order-2026-FY2026-27.pdf",
+    "https://media.ulii.org/media/legislation/18052/source_file/2019-16.pdf": "MoWT-UPF-Roads-Act-2019-Express-Penalty.pdf",
+    "https://media.ulii.org/media/legislation/17888/source_file/7e53dcc2c056a04d/2012-1.pdf": "URSB-Companies-Act-2012.pdf",
+    "https://media.ulii.org/media/legislation/121926/source_file/3d9e9752a5995226/1993-13.pdf": "NDA-National-Drug-Policy-and-Authority-Act.pdf",
+    "https://nema.go.ug/sites/all/themes/nema/docs/TECHNICAL%20GUIDE.pdf": "NEMA-Technical-Guide-URA-PRN-EIA-Fees.pdf",
+    "https://media.ulii.org/media/legislation/18138/source_file/2009-4.pdf": "NITA-U-National-Information-Technology-Authority-Uganda-Act-2009.pdf",
+    "https://media.ulii.org/media/legislation/18049/source_file/2019-9.pdf": "NITA-U-PDPO-Data-Protection-and-Privacy-Act-2019.pdf",
+}
+MDA_STATUTORY_PDF_URLS: tuple[str, ...] = tuple(MDA_CANONICAL_FILENAMES.keys())
+
 #: A retried or redirected fetch of these is a transient fault, not an answer.
 _RETRYABLE = frozenset({"network_error", "server_error", "rate_limited"})
 _RETRY_AFTER_CAP_S = 120.0
@@ -227,6 +251,7 @@ class CrawlConfig:
     pdf_output_dir: Path = Path("Data/pdfs")
     crawl_output_dir: Path = Path("Data/crawl")
     state_file: Path | None = None
+    include_mda_pdfs: bool = False
 
     def __post_init__(self) -> None:
         if self.tier not in ("full", "changes"):
@@ -1060,6 +1085,11 @@ class _CrawlRun:
         hubs = FULL_HUBS if self.config.tier == "full" else NOTICE_HUBS
         for url in hubs:
             self._enqueue(url, priority=0)
+        if self.config.include_mda_pdfs:
+            for mda_pdf_url in MDA_STATUTORY_PDF_URLS:
+                norm_pdf = canonical_url(mda_pdf_url, allowed_hosts=self.config.allowed_hosts)
+                if norm_pdf and self._staleness(norm_pdf):
+                    self.pdf_queue.append((norm_pdf, norm_pdf))
         self._read_sitemaps()
         candidates = set(self.sitemap)
         candidates |= {url for url, entry in self.ledger.items() if self._was_delisted(url, entry)}
@@ -1442,16 +1472,20 @@ class _CrawlRun:
         if digest in self.state["pdf_hashes"] or digest in self._hashes_on_disk():
             return False
 
-        disposition = _DISPOSITION_NAME.search(result.headers.get("content-disposition", ""))
-        if disposition:
-            slug = disposition.group(1).strip()
+        if url in MDA_CANONICAL_FILENAMES:
+            name = MDA_CANONICAL_FILENAMES[url]
+            stem = name[:-4]
         else:
-            parts = [part for part in urlsplit(url).path.split("/") if part and part not in ("en", "download")]
-            slug = parts[-1] if parts else "page.pdf"
-        if slug.lower().endswith(".pdf"):
-            slug = slug[:-4]
-        stem = re.sub(r"[^\w\-.]", "_", f"{urlsplit(url).hostname}-{slug}")[:146]
-        name = f"{stem}.pdf"
+            disposition = _DISPOSITION_NAME.search(result.headers.get("content-disposition", ""))
+            if disposition:
+                slug = disposition.group(1).strip()
+            else:
+                parts = [part for part in urlsplit(url).path.split("/") if part and part not in ("en", "download")]
+                slug = parts[-1] if parts else "page.pdf"
+            if slug.lower().endswith(".pdf"):
+                slug = slug[:-4]
+            stem = re.sub(r"[^\w\-.]", "_", f"{urlsplit(url).hostname}-{slug}")[:146]
+            name = f"{stem}.pdf"
         self.config.pdf_output_dir.mkdir(parents=True, exist_ok=True)
         same_url_recorded = any(
             isinstance(meta, dict) and meta.get("filename") == name and meta.get("url") == url
@@ -1718,10 +1752,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-seconds", type=float, default=None)
     parser.add_argument("--crawl-dir", type=Path, default=Path("Data/crawl"))
     parser.add_argument("--pdf-dir", type=Path, default=Path("Data/pdfs"))
+    parser.add_argument("--include-mda-pdfs", action="store_true", help="Also queue the 11-MDA statutory PDF URLs")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=os.getenv("CRAWL_LOG_LEVEL", "INFO"), format="%(levelname)s %(message)s")
-    config = CrawlConfig(tier=args.tier, crawl_output_dir=args.crawl_dir, pdf_output_dir=args.pdf_dir)
+    config = CrawlConfig(
+        tier=args.tier,
+        crawl_output_dir=args.crawl_dir,
+        pdf_output_dir=args.pdf_dir,
+        include_mda_pdfs=args.include_mda_pdfs,
+    )
     if args.max_fetches is not None:
         config.max_fetches = args.max_fetches
     if args.max_seconds is not None:

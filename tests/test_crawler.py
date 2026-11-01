@@ -947,6 +947,23 @@ class TestDocuments:
         assert len(stored) == 1
         assert stored[0].parent == config.pdf_output_dir
 
+    def test_include_mda_pdfs_queues_mda_statutory_sources(self, tmp_path: Path):
+        from ml.scripts.data_aug.crawler import MDA_CANONICAL_FILENAMES, MDA_STATUTORY_PDF_URLS
+
+        mda_url = MDA_STATUTORY_PDF_URLS[-1]
+        cfg = CrawlConfig(
+            tier="full",
+            crawl_output_dir=tmp_path / "crawl",
+            pdf_output_dir=tmp_path / "pdfs",
+            min_delay_s=0.0,
+            include_mda_pdfs=True,
+        )
+        site = Site({mda_url: self._pdf()}, urls=())
+        run(site, cfg)
+        assert mda_url in site.urls
+        expected_pdf = cfg.pdf_output_dir / MDA_CANONICAL_FILENAMES[mda_url]
+        assert expected_pdf.is_file()
+
 
 class TestRunRecord:
     def test_a_clean_run_is_complete_and_says_so(self, config: CrawlConfig):

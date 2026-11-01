@@ -170,6 +170,25 @@ MDA_SERVICE_CATALOG: dict[str, dict[str, Any]] = {
         "statutory_basis": "National Environment Act & NEMA Technical Guide on How to Generate 30% & 70% EIA PRNs on URA Portal",
         "webhook_target": "NEMA Environmental Licensing Portal & Uganda Electronic Single Window (UESW)",
     },
+    "nita_u_pdpo_registration": {
+        "mda_code": "MDA11_NITA_U",
+        "mda_name": "National Information Technology Authority-Uganda (NITA-U) & Personal Data Protection Office (PDPO)",
+        "ura_tax_head": "NTR (NITA-U IT Certification / PDPO Data Collector, Processor & Controller Registration Fee)",
+        "wrong_head_warning": (
+            "Under s.29 of the Data Protection and Privacy Act 2019 and Regs 13 & 15(1) of the 2021 Regulations, "
+            "registration and annual renewal (filed at least 3 months before expiry with an annual compliance report "
+            "and DPO designation) is UGX 100,000 via a URA PRN (certified register extract copy is UGX 25,000). "
+            "Do NOT confuse this UGX 100,000 NTR PRN with the 6% domestic Withholding Tax (or 15% non-resident WHT) "
+            "deducted on IT software/consultancy contracts."
+        ),
+        "statutory_fee_ugx": 100_000.0,
+        "certified_extract_fee_ugx": 25_000.0,
+        "statutory_basis": (
+            "Data Protection and Privacy Act 2019 (s.29), Data Protection and Privacy Regulations 2021 "
+            "(Regs 13 & 15(1)), & National Information Technology Authority, Uganda Act 2009 (Cap. 97)"
+        ),
+        "webhook_target": "PDPO Portal (pdpo.go.ug) & NITA-U UGhub / e-GP Certification Registry (nita.go.ug)",
+    },
 }
 
 

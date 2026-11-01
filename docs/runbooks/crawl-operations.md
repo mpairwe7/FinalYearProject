@@ -5,8 +5,14 @@ Decision record: [ADR-0023](../adr/0023-stale-driven-crawl-and-reviewed-corpus-r
 Findings behind it: [assurance review](../plans/agentic-crawl-assurance-2026-11-01.md).
 
 The crawler identifies itself as `URA-Taxpayer-Assistant-Crawler/2.0`, with a link to
-this page. It reads only `ura.go.ug`, `www.ura.go.ug`, `uramedia.ura.go.ug` and
-`parliament.go.ug` over https, and it never reads an archive.
+this page. It reads `ura.go.ug`, `www.ura.go.ug`, `uramedia.ura.go.ug`,
+`parliament.go.ug`, `ulii.org`, and the allowlisted Ugandan MDA statutory hosts
+(`nita.go.ug`, `pdpo.go.ug`, `egpuganda.go.ug`, `nira.go.ug`, `ursb.go.ug`, `unbs.go.ug`,
+`ppda.go.ug`, `finance.go.ug`, `works.go.ug`, `immigration.go.ug`, `mlhud.go.ug`,
+`kcca.go.ug`, `upf.go.ug`, `nda.or.ug`, `nema.go.ug`, `singlewindow.go.ug`) over https,
+and it never reads an archive. Each scheduled crawl also runs the statutory and 11-MDA PDF
+harvester (`python -m app.pdf_corpus --harvest --include-mda-sources`) before `crawl_gate`
+judges the candidate.
 
 **On URA's hosts, robots.txt is read last, on purpose.** Requesting it gets the caller's
 address dropped for at least six minutes, so reading it first ends the crawl before a

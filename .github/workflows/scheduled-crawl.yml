@@ -147,6 +147,35 @@ jobs:
           fi
           python -m ml.scripts.data_aug.crawler --tier "$TIER" --max-seconds 9000 "${args[@]}"
 
+      - name: Harvest statutory and MDA PDFs
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          PYTHONPATH: App/backend:.
+          TIER: ${{ needs.plan.outputs.tier }}
+          MAX_FETCHES: ${{ inputs.max_fetches }}
+        run: |
+          # Harvest Parliament, URA laws-and-acts, and the 11 high-dependency MDA
+          # statutory/fee PDF registries (MoWT, DCIC, NIRA, PPDA/MoFPED, UNBS, MLHUD,
+          # KCCA/MoLG, UPF, URSB, NDA/NEMA/UESW, NITA-U/PDPO) into Data/pdfs and
+          # record any new document hashes in Data/crawl/crawl_state.json for crawl_gate.
+          max_pages=5
+          harvest_args=()
+          if [ "$TIER" = "changes" ]; then max_pages=2; fi
+          if [ -n "$MAX_FETCHES" ]; then
+            [[ "$MAX_FETCHES" =~ ^[0-9]{1,5}$ ]] || { echo "::error::max_fetches must be a number"; exit 1; }
+            if [ "$MAX_FETCHES" -lt 20 ]; then max_pages=1; fi
+            harvest_args+=(--max-pdf-downloads "$MAX_FETCHES")
+          fi
+          python -m app.pdf_corpus \
+            --harvest \
+            --include-mda-sources \
+            --max-pages-per-source "$max_pages" \
+            --timeout 25 \
+            --pdf-dir Data/pdfs \
+            --crawl-state Data/crawl/crawl_state.json \
+            "${harvest_args[@]}"
+
       - name: Judge the crawl
         id: judge
         # Also after a failed crawl: a run that stopped short still needs a verdict.

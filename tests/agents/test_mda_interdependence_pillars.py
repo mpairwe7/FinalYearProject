@@ -283,10 +283,42 @@ def test_calculator_router_bypass_and_full_10_mda_planner_coverage_and_latency()
     assert "6,000,000" in block_surcharge
 
     # 3. Verify web_research doc_family classification and non-replacing family safeguard for MDA / B2G / UESW
+    from app.web_research import can_persist_to_qdrant, classify_source_authority
+
     assert infer_doc_family("UDLS driving permit and DCIC e-passport NTR fees") == "mda_ntr_schedule"
+    assert infer_doc_family("NITA-U PDPO data protection and privacy registration fee") == "mda_ntr_schedule"
     assert infer_doc_family("PPDA e-GP and IFMS deemed VAT compliance") == "b2g_ppda_ifms_compliance"
     assert infer_doc_family("UNBS PVoC and NDAMIS single window UESW clearance") == "unbs_nda_uesw_clearance"
     assert {"mda_ntr_schedule", "b2g_ppda_ifms_compliance", "unbs_nda_uesw_clearance"}.issubset(_NON_REPLACING_FAMILIES)
+    from app.corpus_sync import validate_qdrant_sync_origin
+
+    for nita_url in (
+        "https://nita.go.ug/publications/it-certification-guidelines.pdf",
+        "https://www.pdpo.go.ug/fees-schedule.pdf",
+        "https://egpuganda.go.ug/supplier-guide.pdf",
+    ):
+        auth = classify_source_authority(nita_url)
+        assert auth.tier == 1 and auth.trust == 1.0
+        assert can_persist_to_qdrant(nita_url) is True
+        validate_qdrant_sync_origin(nita_url)
+    block_nita_ntr = build_verified_facts(
+        "I paid the UGX 100,000 PDPO data protection registration fee PRN, how does it reflect?"
+    )
+    assert "MDA11_NITA_U" in block_nita_ntr
+    assert "s.29" in block_nita_ntr
+    assert "25,000" in block_nita_ntr
+
+    from app.web_research import build_search_queries, detect_research_triggers
+
+    nita_trigs = detect_research_triggers(
+        "What is the latest NITA-U PDPO data protection registration fee schedule?",
+        hits=[],
+    )
+    nita_specs = build_search_queries(
+        "What is the latest NITA-U PDPO data protection registration fee schedule?",
+        nita_trigs,
+    )
+    assert any("pdpo.go.ug" in s.target_domains and "nita.go.ug" in s.target_domains for s in nita_specs)
 
     # 4. Verify planner sets missing_inputs when amount-dependent MDA/relief prompts omit figures
     specs_missing_relief = plan_tools("How do I apply for Voluntary Disclosure on Form DT-10307?")

@@ -967,6 +967,17 @@ def _rule_mda_interdependence(facts: CaseFacts, question: str) -> list[ToolCallS
                 missing_inputs=["transaction value (UGX)"] if missing_amount else [],
             )
         )
+    elif re.search(
+        r"\b(pdpo|data\s+protection\s+(?:office|registration|renewal|fee|prn)|nita[-\s]?u\s+(?:ntr|prn|registration\s+fee|certification\s+fee))\b",
+        q,
+        re.IGNORECASE,
+    ):
+        specs.append(
+            ToolCallSpec(
+                "resolve_mda_ntr_payment",
+                params={"service_type": "nita_u_pdpo_registration", "prn_status": prn_state},
+            )
+        )
 
     # 2. Pillar 2: Life-Event Tax-Base Onboarding & NIRA NIN-to-TIN Pre-Flight
     if re.search(r"\b(kcca|e[-\s]?citie|\biras\b|trading\s+licen[cs]e)\b", q, re.IGNORECASE):

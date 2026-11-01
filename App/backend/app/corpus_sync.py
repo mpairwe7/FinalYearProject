@@ -45,7 +45,7 @@ from .freshness import SNAPSHOT_PATH, write_snapshot
 from .indexer import PDF_JSONL_DIR, QDRANT_COLLECTION, _embedding_text
 from .pdf_corpus import PDF_JSONL_SCHEMA_VERSION, PDF_MANIFEST_NAME, _stable_id
 from .retriever import deterministic_point_id, fiscal_year_rank
-from .web_research import extract_fiscal_year, infer_doc_family
+from .web_research import QDRANT_SYNC_ALLOWED_HOSTS, extract_fiscal_year, infer_doc_family
 
 logger = logging.getLogger(__name__)
 
@@ -55,42 +55,7 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 _SYNC_LOCK_PREFIX = "ura:web_sync_lock:"
 
 #: Only official Ugandan statutory/tax/MDA authority hosts may ever persist to Qdrant.
-_QDRANT_SYNC_ALLOWED_HOSTS: frozenset[str] = frozenset(
-    {
-        "ura.go.ug",
-        "www.ura.go.ug",
-        "ulii.org",
-        "www.ulii.org",
-        "media.ulii.org",
-        "parliament.go.ug",
-        "www.parliament.go.ug",
-        "bills.parliament.ug",
-        "works.go.ug",
-        "www.works.go.ug",
-        "immigration.go.ug",
-        "www.immigration.go.ug",
-        "nira.go.ug",
-        "www.nira.go.ug",
-        "ppda.go.ug",
-        "www.ppda.go.ug",
-        "finance.go.ug",
-        "www.finance.go.ug",
-        "unbs.go.ug",
-        "www.unbs.go.ug",
-        "mlhud.go.ug",
-        "www.mlhud.go.ug",
-        "kcca.go.ug",
-        "www.kcca.go.ug",
-        "upf.go.ug",
-        "www.upf.go.ug",
-        "ursb.go.ug",
-        "www.ursb.go.ug",
-        "nda.or.ug",
-        "www.nda.or.ug",
-        "nema.go.ug",
-        "www.nema.go.ug",
-    }
-)
+_QDRANT_SYNC_ALLOWED_HOSTS: frozenset[str] = QDRANT_SYNC_ALLOWED_HOSTS
 
 #: Families that represent additive or generic documents rather than single-edition handbooks.
 _NON_REPLACING_FAMILIES: frozenset[str] = frozenset(

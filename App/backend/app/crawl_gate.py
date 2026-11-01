@@ -250,6 +250,7 @@ def vet_new_pdfs(
     candidate and forgotten by the ledger, so the next run looks at it afresh.
     """
     from .malware_scan import MalwareRejected, scan_bytes
+    from .pdf_corpus import inspect_pdf_for_prompt_injection
     from .pdf_guards import CORPUS_PDF_LIMITS, PdfRejected, inspect_pdf_bytes, validate_pdf_header
 
     known = before_state.get("pdf_hashes") or {}
@@ -265,6 +266,7 @@ def vet_new_pdfs(
         try:
             validate_pdf_header(data)
             inspection = inspect_pdf_bytes(data, limits=CORPUS_PDF_LIMITS)
+            inspect_pdf_for_prompt_injection(data)
             scan = scan_bytes(data, filename=name)
         except (PdfRejected, MalwareRejected) as exc:
             path.unlink()
