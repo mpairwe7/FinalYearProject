@@ -119,7 +119,7 @@ measured the stand-in, not the product.
 **What format the audio is in.** Sunbird returns a real RIFF WAV; edge-tts
 returns MP3 — in a field `SynthesizeResponse` documents as "Base64-encoded WAV
 bytes". `soundfile` (`libsndfile`) is shipped in `requirements-cranecloud.txt`,
-`requirements-receptionist.txt`, `App/backend/requirements.txt`, and the HF Space
+`requirements-receptionist.txt`, `requirements.txt`, and the HF Space
 layer, and `speech_service._decode_container` resamples via pure-NumPy
 `SpeechModel._resample` so 24 kHz edge-tts MP3 and OGG/FLAC containers decode cleanly
 into 16 kHz PCM16 for `UraSpeechTTS` without requiring `scipy` or `ffmpeg`.
