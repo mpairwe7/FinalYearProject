@@ -356,7 +356,7 @@ _TRAILING_ABBREVIATION_RE = re.compile(
     re.IGNORECASE,
 )
 _UNPUNCTUATED_BULLET_OR_HEADING_RE = re.compile(
-    r"^([ \t]*(?:[-*+•][ \t]+[^\n]+|#{1,6}[ \t]+[^\n]+|\*\*[^*\n]+\*\*(?:[ \t]*\([^\n)]+\))?|\d{1,2}[.)][ \t]+(?![^\n]*[ \t]\d{1,2}[.)][ \t])[^\n]+))[ \t]*$",
+    r"^([ \t]*(?:[-*+•][ \t]+[^\n]+|#{1,6}[ \t]+[^\n]+|\*\*[^*\n]+\*\*(?:[ \t]*\([^\n)]+\))?|\d{1,2}[.)][ \t]+(?![^\n]*[ \t]\d{1,2}[.)][ \t])[^\n]+))[ \t]*(?=\n[ \t]*(?:$|\d{1,2}[.)][ \t]|[-*+•][ \t]|#{1,6}[ \t]|\*\*)|$)",
     re.MULTILINE,
 )
 _STEP_OR_BULLET_START_RE = re.compile(

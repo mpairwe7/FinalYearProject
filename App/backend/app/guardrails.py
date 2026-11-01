@@ -1371,13 +1371,7 @@ class OutputGuard:
             if "**" not in text and not re.search(r"\d+\.\s|\n-\s", text):
                 text = re.sub(r"^([A-Z][a-zA-Z0-9 \'\-]{3,35}?)([:,\.][ \t]+)", r"**\1**\2", text)
 
-        # Bold numbered list headers if followed by a colon on the same line (e.g. '\n1. Tax Administration:' -> '\n1. **Tax Administration**:')
-        text = re.sub(
-            r"(?:^|\n)(\s*\d{1,2}\.\s+)(?!\*\*)([A-Za-z0-9 /&,'’()-]{1,45}?):([ \t]+)",
-            r"\n\1**\2**:\3",
-            text,
-        )
-        # Separate smashed bullet items and inline continuation steps on the same line
+        # Bold numbered list headers, separate smashed bullet items, and unsmash inline continuation steps
         # while skipping pipe-table rows and fenced code blocks.
         unsmashed_lines: list[str] = []
         in_fence = False
@@ -1388,6 +1382,11 @@ class OutputGuard:
                 continue
             if not in_fence and "|" not in line:
                 line = re.sub(
+                    r"^(\s*\d{1,2}\.\s+)(?!\*\*)([A-Za-z0-9 /&,'’()-]{1,45}?):([ \t]+)",
+                    r"\1**\2**:\3",
+                    line,
+                )
+                line = re.sub(
                     r"([;:])[ \t]*([*\-•])(?!\*)[ \t]*(\*{0,2}[A-Za-z])",
                     r"\1\n\n- \3",
                     line,
@@ -1397,15 +1396,27 @@ class OutputGuard:
                     r"\1.\n\n- \3",
                     line,
                 )
-                line = re.sub(
+                code_spans: list[str] = []
+
+                def _mask_code(m: re.Match[str]) -> str:
+                    code_spans.append(m.group(0))
+                    return f"\x00CODE{len(code_spans) - 1}\x00"
+
+                masked_line = re.sub(r"`[^`]+`", _mask_code, line)
+                masked_line = re.sub(
                     r"(?<=\S)[ \t]+[►▪▫•][ \t]+(\*{0,2}[A-Za-z0-9])",
                     r"\n\n- \1",
-                    line,
+                    masked_line,
                 )
-                if re.match(r"^\s*1\.\s+", line):
+                for idx, span in enumerate(code_spans):
+                    masked_line = masked_line.replace(f"\x00CODE{idx}\x00", span)
+                line = masked_line
+                lead_m = re.match(r"^(\s*)1\.\s+", line)
+                if lead_m:
+                    lead_indent = lead_m.group(1)
                     line = re.sub(
-                        r"(?i)(?<!\bsection)(?<!\bsec\.)(?<!\barticle)(?<!\bart\.)(?<!\bcap\.)(?<!\bschedule)(?<!\bform)(?<!\bpart)(?<!\brule)(?<!\btable)(?<!\bband)(?<!\bmethod)(?<!\btier)(?<!\bpage)(?<!\bitem)(?<!\bugx)(?<!\busd)(?<!\bshs)(?<!\bto)(?<!\band)(?<!\bor)[ \t]+([2-9]|1[0-2])[\.\)][ \t]+(\*{0,2}[A-Z])",
-                        r"\n\n\1. \2",
+                        r"(?i)(?<!\bsection)(?<!\bsec\.)(?<!\barticle)(?<!\bart\.)(?<!\bcap\.)(?<!\bschedule)(?<!\bform)(?<!\bpart)(?<!\brule)(?<!\btable)(?<!\bband)(?<!\bmethod)(?<!\btier)(?<!\bpage)(?<!\bitem)(?<!\bugx)(?<!\busd)(?<!\bshs)(?<!\bto)(?<!\band)(?<!\bor)[ \t]+([2-9]|1[0-2])[\.\)][ \t]+(?!Jan(?:uary)?\b|Feb(?:ruary)?\b|Mar(?:ch)?\b|Apr(?:il)?\b|May\b|Jun(?:e)?\b|Jul(?:y)?\b|Aug(?:ust)?\b|Sep(?:t(?:ember)?)?\b|Oct(?:ober)?\b|Nov(?:ember)?\b|Dec(?:ember)?\b)(\*{0,2}[A-Z])",
+                        rf"\n\n{lead_indent}\1. \2",
                         line,
                     )
             unsmashed_lines.append(line)

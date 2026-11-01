@@ -271,7 +271,7 @@ export function cleanMarkdownForSpeech(text: string, locale: string = 'en'): str
   cleaned = cleaned.replace(/\bSec(?:tion)?\.?\s*(\d+[A-Za-z]?)\b/gi, 'Section $1');
   // Ensure multi-line headings, bullet items, and numbered steps end with terminal punctuation for sentence prosody
   cleaned = cleaned.replace(
-    /^([ \t]*(?:#{1,6}[ \t]+[^\n]+|[-*+•][ \t]+[^\n]+|\d{1,2}[.)][ \t]+(?![^\n]*[ \t]\d{1,2}[.)][ \t])[^\n]+))[ \t]*$/gm,
+    /^([ \t]*(?:#{1,6}[ \t]+[^\n]+|[-*+•][ \t]+[^\n]+|\d{1,2}[.)][ \t]+(?![^\n]*[ \t]\d{1,2}[.)][ \t])[^\n]+))[ \t]*(?=\n[ \t]*(?:$|#{1,6}[ \t]|[-*+•][ \t]|\d{1,2}[.)][ \t]|\|)|$)/gm,
     (_: string, line: string) => {
       const trimmed = line.trimEnd();
       const core = trimmed.replace(/[*_]+$/g, '');
@@ -284,7 +284,7 @@ export function cleanMarkdownForSpeech(text: string, locale: string = 'en'): str
     /(?<!\bSec)(?<!\bCap)(?<!\bArt)(?<!\bNo)(?<!\bPara)(?<!\bReg)(?<!\bPt)(?<!\bs)(?<!\bss)([:;.!?])[ \t]+(1)[.)][ \t]+(?=[A-Z*])/gi,
     `$1 ${stepWord} $2: `,
   );
-  if (cleaned.includes(`${stepWord} 1: `)) {
+  if (new RegExp(`\\b${stepWord}\\s+1\\b`, 'i').test(cleaned)) {
     cleaned = cleaned.replace(
       /(?<!\bSec)(?<!\bCap)(?<!\bArt)(?<!\bNo)(?<!\bPara)(?<!\bReg)(?<!\bPt)(?<!\bs)(?<!\bss)([:;.!?])[ \t]+([2-9]|1[0-2])[.)][ \t]+(?=[A-Z*])/gi,
       `$1 ${stepWord} $2: `,
@@ -318,7 +318,7 @@ export function cleanMarkdownForSpeech(text: string, locale: string = 'en'): str
 }
 
 const CALL_STEP_BREAK_RE =
-  /([:.!?])[ \t]+(?=(?:Step|Odaala|Omutendera|Hatua(?:\s+ya)?|Idaara(?:\s+rya)?|Rwom(?:\s+me)?)[ \t]+(?:[a-z0-9'’]+(?:[ \t]+[a-z0-9'’]+){0,2}):[ \t])/gi;
+  /([:.!?])[ \t]+(?=(?:Step|Odaala|Omutendera|Hatua(?:\s+ya)?|Idaara(?:\s+rya)?|Rwom(?:\s+me)?)[ \t]+(?:\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|emu|bbiri|ssatu|nnya|ttaano|mukaaga|musanvu|munaana|mwenda|kkumi(?:\s+n[a'’]\s*[a-z]+)?|moja|mbili|tatu|nne|tano|sita|saba|nane|tisa|kumi(?:\s+na\s+[a-z]+)?|emwe|ibiri|ishatu|ina|itaano|mushanju|acel|aryo|adek|angwen|abic|abicel|abiro|aboro|abongwen|apar(?:\s+wi\s+[a-z]+)?):[ \t])/gi;
 
 const CALL_TRAILING_OFFER_RE =
   /([.!?])[ \t]+(?=(?:Would you like more detail\?|Would you like to speak to an officer about this\?|Oyagala okumanya ebisingawo\?|Oyagala okwogera n'omukozi wa URA ku nsonga eno\?|Je, ungependa maelezo zaidi\?|Je, ungependa (?:kuongea|kuzungumza) na afisa kuhusu hili\?|Nooyenda kumanya ebindi ebikukiraho\?|Nooyenda kugamba n'omukozi ahari enshonga egi\?|Imito ngec mukene\?|Imito loko ki latic me URA i kom lok man\?)$)/i;

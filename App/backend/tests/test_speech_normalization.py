@@ -581,6 +581,9 @@ def test_sec_citation_and_unicode_bullets_are_not_misread_as_steps():
     assert "•" not in res
     assert "National ID" in res
 
+    dash_step = clean_text_for_speech("Step 1 — Open the portal. 2. Submit the form.", locale="en")
+    assert "Step 2: Submit the form." in dash_step
+
 
 
 

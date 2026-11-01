@@ -607,7 +607,7 @@ def _format_numbered_steps(text: str, locale: str) -> str:
     step_word = _STEP_WORD.get(locale, "Step")
     out = _NUMBERED_STEP_RE.sub(rf"{step_word} \1: ", text)
     out = _INLINE_STEP_ONE_AFTER_PUNCT_RE.sub(rf"\1 {step_word} \2: ", out)
-    if f"{step_word} 1: " in out:
+    if re.search(rf"\b{re.escape(step_word)}\s+1\b", out, re.IGNORECASE):
         out = _INLINE_STEP_AFTER_PUNCT_RE.sub(rf"\1 {step_word} \2: ", out)
         out = _INLINE_STEP_CONT_RE.sub(rf". {step_word} \1: ", out)
     return out

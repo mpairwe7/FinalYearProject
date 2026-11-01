@@ -236,7 +236,7 @@ function splitLongParagraph(text: string): string[] {
  * paragraph.
  */
 function asEnumeration(text: string): { lead: string; items: string[] } | null {
-  if (text.includes("•")) {
+  if (text.includes("•") && !text.includes("`")) {
     const bulletParts = text
       .split("•")
       .map((p) => p.trim())
@@ -490,6 +490,7 @@ function parseBlocks(src: string): Block[] {
 
     // Unordered list
     if (isUnorderedListItem(line)) {
+      const firstUlIndent = line.length - line.trimStart().length;
       const items: string[] = [];
       while (i < lines.length) {
         if (isUnorderedListItem(lines[i])) {
@@ -507,9 +508,16 @@ function parseBlocks(src: string): Block[] {
           break;
         }
       }
-      const followsOl = blocks.length > 0 && blocks[blocks.length - 1].type === "ol";
+      const prevBlock = blocks.length > 0 ? blocks[blocks.length - 1] : undefined;
+      const lastOlItem =
+        prevBlock?.type === "ol" && prevBlock.items?.length
+          ? prevBlock.items[prevBlock.items.length - 1]
+          : "";
+      const isSubordinateUl =
+        prevBlock?.type === "ol" &&
+        (firstUlIndent > 0 || lastOlItem.trim().replace(/[*_]+$/g, "").endsWith(":"));
       blocks.push({ type: "ul", items });
-      if (followsOl) {
+      if (isSubordinateUl) {
         prevBlockWasSublist = true;
       } else {
         nextOrderedStep = 1;
