@@ -1,8 +1,9 @@
 """URA publication ingest — hash-diff a configured https URL (G15 slice).
 
 Never auto-reindexes. On change it writes a crawl JSONL stub and calls
-``freshness.enqueue_reindex_request`` so ops still run
-``python -m app.indexer --recreate``.
+``freshness.enqueue_reindex_request`` so ops still run the staged rebuild,
+``python -m app.index_lifecycle --rebuild``. The crawl's weekday change check is
+what keeps notices current (ADR-0023); this watches one operator-chosen URL.
 """
 
 from __future__ import annotations
@@ -16,12 +17,31 @@ from pathlib import Path
 from typing import Any
 from urllib.error import URLError
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from ._root import APP_DATA_ROOT, PROJECT_ROOT
 from .freshness import FreshnessReport, enqueue_reindex_request
+from .pdf_corpus import ALLOWED_STATUTORY_PDF_HOSTS, CORPUS_FETCH_USER_AGENT
 
 logger = logging.getLogger(__name__)
+
+PUBLICATIONS_MAX_BYTES = int(os.getenv("PUBLICATIONS_MAX_BYTES", str(10 * 1024 * 1024)))
+REINDEX_HINT = "python -m app.index_lifecycle --rebuild"
+
+
+class _AllowlistedRedirects(HTTPRedirectHandler):
+    """Refuse a redirect that leaves https or the official hosts.
+
+    ``urlopen`` follows redirects silently, so the operator's https check on the
+    configured URL said nothing about where the bytes really came from.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        target = urlparse(newurl)
+        host = (target.hostname or "").lower().rstrip(".")
+        if target.scheme != "https" or host not in ALLOWED_STATUTORY_PDF_HOSTS:
+            raise URLError(f"redirect to a host that is not allowed: {host or newurl}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 SNAPSHOT_PATH = Path(
     os.getenv(
@@ -117,10 +137,14 @@ def fetch_publications(url: str | None = None) -> tuple[bytes, str]:
     if not targets or targets == ["fixture://ura-publications"]:
         raise ValueError("URA_PUBLICATIONS_URL must be an https URL")
     chunks: list[bytes] = []
+    opener = build_opener(_AllowlistedRedirects)
     for target in targets:
-        req = Request(target, headers={"User-Agent": "ura-chatbot-freshness/1.0"})
-        with urlopen(req, timeout=20) as resp:  # nosec B310 # noqa: S310 — https-only above
-            chunks.append(resp.read())
+        req = Request(target, headers={"User-Agent": CORPUS_FETCH_USER_AGENT})
+        with opener.open(req, timeout=20) as resp:  # nosec B310 # noqa: S310 — https-only above
+            data = resp.read(PUBLICATIONS_MAX_BYTES + 1)
+        if len(data) > PUBLICATIONS_MAX_BYTES:
+            raise ValueError(f"publication larger than {PUBLICATIONS_MAX_BYTES} bytes: {target}")
+        chunks.append(data)
     body = b"\n".join(chunks)
     return body, _digest(body)
 
@@ -204,7 +228,7 @@ def ingest_publications(
         "sha256": digest,
         "written": str(written) if written else None,
         "reindex_requested": enqueued,
-        "reindex_hint": "python -m app.indexer --recreate",
+        "reindex_hint": REINDEX_HINT,
     }
     if pdf_harvest is not None:
         out["pdf_harvest"] = pdf_harvest

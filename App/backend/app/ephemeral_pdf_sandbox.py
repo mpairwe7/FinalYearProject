@@ -41,6 +41,7 @@ from .document_worker import try_isolated
 from .guardrails import scan_retrieved_text
 from .malware_scan import MalwareRejected, scan_bytes
 from .mcp.validation import screen_tool_result
+from .pdf_corpus import CORPUS_FETCH_USER_AGENT
 from .pdf_guards import QUERY_PDF_LIMITS, PdfRejected, inspect_pdf_bytes
 from .web_research import (
     classify_source_authority,
@@ -165,10 +166,7 @@ def _safe_filename_from_url(url: str, *, default_ext: str = ".pdf") -> str:
 def _default_stream_downloader(url: str, max_bytes: int) -> bytes:
     """Stream *url* over HTTPS while enforcing *max_bytes* mid-stream and validating redirect hops."""
     headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
-        ),
+        "User-Agent": CORPUS_FETCH_USER_AGENT,
         "Accept": "application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,*/*;q=0.8",
     }
     current = url

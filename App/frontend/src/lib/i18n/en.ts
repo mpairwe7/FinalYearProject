@@ -261,6 +261,7 @@ export const en = {
   'resource.action.statute': 'View Statute',
   'resource.action.guide': 'Access Guide',
   'sources.label': 'Sources',
+  'sources.published': 'Published {date}',
   'sources.groupForms': 'Forms & services',
   'sources.groupReferences': 'References',
 

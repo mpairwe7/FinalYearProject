@@ -185,7 +185,13 @@ def canonical_source_url(source: str, existing: str = "") -> str:
 
 
 def _provenance_fields(payload: dict[str, Any]) -> dict[str, str]:
-    """Canonical URL + effective date copied from the index payload (G19)."""
+    """Canonical URL + effective date copied from the index payload (G19).
+
+    ``crawled_at`` used to be the last resort for ``effective_date``, so the
+    sources panel showed a 2019 article with the date of last month's crawl and
+    the page looked current. When we read a page says nothing about when its
+    statement was true: ``published_at`` is the publisher's own date.
+    """
     url = canonical_source_url(
         str(payload.get("source") or ""),
         str(payload.get("url") or payload.get("source_url") or ""),
@@ -194,13 +200,13 @@ def _provenance_fields(payload: dict[str, Any]) -> dict[str, str]:
         payload.get("effective_from")
         or payload.get("effective_date")
         or payload.get("fiscal_year")
-        or payload.get("crawled_at")
         or ""
     ).strip()
     return {
         "url": url,
         "title": str(payload.get("title") or "").strip(),
         "effective_date": effective,
+        "published_at": str(payload.get("published_at") or "").strip(),
         "crawled_at": str(payload.get("crawled_at") or "").strip(),
     }
 
@@ -431,13 +437,19 @@ def _filter_tombstoned_candidates(candidates: list[dict[str, Any]]) -> list[dict
 
     survived = []
     for c in candidates:
-        src = str(c.get("source") or "")
         chunk = str(c.get("chunk_id") or c.get("id") or "").strip()
         if chunk and chunk in bad_chunks:
             logger.debug("Corpus tombstone dropped chunk: %s", chunk)
             continue
-        if src and any(tombstone_names_source(uri, src) for uri in withdrawn_sources):
-            logger.debug("Corpus tombstone dropped source: %s", src)
+        # A crawled page's ``source`` is a content hash, which changes whenever
+        # the page does, so a tombstone naming it lapsed at the next crawl and
+        # one naming the page's address never matched. The URL is the identity.
+        identities = [str(c.get(key) or "") for key in ("source", "url", "source_url")]
+        if any(
+            identity and any(tombstone_names_source(uri, identity) for uri in withdrawn_sources)
+            for identity in identities
+        ):
+            logger.debug("Corpus tombstone dropped source: %s", identities[0])
             continue
         survived.append(c)
     return survived
@@ -2503,6 +2515,8 @@ class HybridRetriever:
                 cit["url"] = url
             if hit.get("effective_date"):
                 cit["effective_date"] = str(hit["effective_date"])
+            if hit.get("published_at"):
+                cit["published_at"] = str(hit["published_at"])
             if hit.get("title"):
                 cit["title"] = str(hit["title"])
             passage = hit.get("text") or hit.get("answer") or ""

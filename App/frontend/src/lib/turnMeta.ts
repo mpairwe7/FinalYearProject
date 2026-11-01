@@ -23,7 +23,7 @@ function score(value: unknown): number | null {
 function citationsFrom(value: unknown): Citation[] {
   if (!Array.isArray(value)) return [];
   return value.filter((c): c is Citation => record(c) && typeof c.ref === 'string' &&
-    typeof c.source === 'string' && ['page', 'section', 'passage', 'url', 'effective_date', 'title']
+    typeof c.source === 'string' && ['page', 'section', 'passage', 'url', 'effective_date', 'published_at', 'title']
       .every((key) => c[key] === undefined || typeof c[key] === 'string'));
 }
 
