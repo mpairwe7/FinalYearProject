@@ -2481,13 +2481,11 @@ class SpeechModel:
             if data.ndim > 1:
                 data = data.mean(axis=1)
             if sr != target_sr:
-                from scipy import signal
-                num_target_samples = int(len(data) * target_sr / sr)
-                data = signal.resample(data, num_target_samples).astype(np.float32)
+                data = self._resample(data, sr, target_sr)
             if len(data) > 0:
                 return data
         except Exception:
-            pass
+            logger.debug("soundfile container decode failed", exc_info=True)
 
         # 2. Try ffmpeg (subprocess — for WebM/Opus when ffmpeg is available)
         try:

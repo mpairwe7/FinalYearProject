@@ -102,6 +102,7 @@ export class PCMPlayer {
   private isClosed = false;
   private sampleRate: number;
   private levelHandler: ((level: number) => void) | null = null;
+  private blockedHandler: ((blocked: boolean) => void) | null = null;
   private pendingChunks: ArrayBuffer[] = [];
   private useFallbackBufferQueue = false;
   private nextStartTime = 0;
@@ -121,6 +122,10 @@ export class PCMPlayer {
     this.bindPort();
   }
 
+  onBlockedChange(handler: ((blocked: boolean) => void) | null): void {
+    this.blockedHandler = handler;
+  }
+
   private bindPort(): void {
     if (!this.workletNode) return;
     this.workletNode.port.onmessage = (event: MessageEvent) => {
@@ -132,7 +137,18 @@ export class PCMPlayer {
 
   async resume(): Promise<void> {
     if (this.ctx && this.ctx.state === 'suspended') {
-      await this.ctx.resume().catch(() => {});
+      await this.ctx
+        .resume()
+        .then(() => {
+          if (this.ctx?.state === 'running') {
+            this.blockedHandler?.(false);
+          }
+        })
+        .catch(() => {
+          this.blockedHandler?.(true);
+        });
+    } else if (this.ctx?.state === 'running') {
+      this.blockedHandler?.(false);
     }
   }
 
@@ -245,7 +261,16 @@ export class PCMPlayer {
   private _dispatchChunk(pcmChunk: ArrayBuffer): void {
     if (this.isClosed) return;
     if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume().catch(() => {});
+      this.ctx
+        .resume()
+        .then(() => {
+          if (this.ctx?.state === 'running') {
+            this.blockedHandler?.(false);
+          }
+        })
+        .catch(() => {
+          this.blockedHandler?.(true);
+        });
     }
     if (this.workletNode) {
       this.workletNode.port.postMessage({ pcm: pcmChunk });

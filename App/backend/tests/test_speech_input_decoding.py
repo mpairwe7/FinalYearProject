@@ -93,6 +93,18 @@ class DeclaredEncoding(unittest.TestCase):
             with self.subTest(encoding=encoding), self.assertRaises(ValueError):
                 raw_pcm_to_wav(data, encoding, 16000)
 
+    def test_container_decode_resamples_24khz_without_scipy(self):
+        """Verify _decode_container resamples 24 kHz edge-tts audio to 16 kHz via SpeechModel._resample."""
+        import sys
+        import types
+
+        fake_24k = np.sin(np.linspace(0, 2 * np.pi * 10, 2400, dtype=np.float32))
+        fake_sf = types.SimpleNamespace(read=lambda _bio, dtype="float32": (fake_24k, 24000))
+        with patch.dict(sys.modules, {"soundfile": fake_sf, "scipy": None, "scipy.signal": None}):
+            out = SpeechModel.__new__(SpeechModel)._decode_container(b"ID3\x04\x00\x00\x00\x00\x00\x00", target_sr=16000)
+        self.assertEqual(len(out), 1600)
+        self.assertTrue(np.isfinite(out).all())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -118,12 +118,13 @@ measured the stand-in, not the product.
 
 **What format the audio is in.** Sunbird returns a real RIFF WAV; edge-tts
 returns MP3 — in a field `SynthesizeResponse` documents as "Base64-encoded WAV
-bytes". The runtime image has no ffmpeg, pydub, PyAV or soundfile, so
-`speech_service._decode_container` cannot decode MP3, WebM or OGG and logs
-"Could not decode container audio — treating as raw PCM". Anything that
-arrives compressed therefore transcribes to noise, including the browser's own
-`audio/webm;codecs=opus` recordings. Measured: a Common Voice clip that
-transcribes correctly as WAV returns `"."` when posted as WebM/Opus.
+bytes". `soundfile` (`libsndfile`) is shipped in `requirements-cranecloud.txt`,
+`requirements-receptionist.txt`, `App/backend/requirements.txt`, and the HF Space
+layer, and `speech_service._decode_container` resamples via pure-NumPy
+`SpeechModel._resample` so 24 kHz edge-tts MP3 and OGG/FLAC containers decode cleanly
+into 16 kHz PCM16 for `UraSpeechTTS` without requiring `scipy` or `ffmpeg`.
+Browser `audio/webm;codecs=opus` recordings still require `ffmpeg` if posted raw
+instead of WAV/PCM.
 
 ## Bringing up a local GPU stack to run the api/voice modes
 
