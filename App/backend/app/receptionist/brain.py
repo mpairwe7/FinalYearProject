@@ -174,6 +174,7 @@ QUERY_EXTRACT_SYSTEM = (
 GREETING_TEXT = phrase("greeting", get_default_language())
 FILLER_POOL: tuple[str, ...] = fillers("en")
 FILLER_TEXT = FILLER_POOL[-1]
+_VLLM_BRIDGE_DOWN_UNTIL: float = 0.0
 
 
 @lru_cache(maxsize=1)
@@ -355,12 +356,20 @@ _TRAILING_ABBREVIATION_RE = re.compile(
     re.IGNORECASE,
 )
 _UNPUNCTUATED_BULLET_OR_HEADING_RE = re.compile(
-    r"^([ \t]*(?:[-*+•][ \t]+[^\n]+|#{1,6}[ \t]+[^\n]+|\*\*[^*\n]+\*\*))[ \t]*$",
+    r"^([ \t]*(?:[-*+•][ \t]+[^\n]+|#{1,6}[ \t]+[^\n]+|\*\*[^*\n]+\*\*(?:[ \t]*\([^\n)]+\))?))[ \t]*$",
     re.MULTILINE,
 )
 _STEP_OR_BULLET_START_RE = re.compile(
     r"^\s*(?:\d{1,2}[.)]\s+|(?:Step|Odaala|Hatua|Idaara|Rwom)\s+\d+|[-*+•]\s+)",
     re.IGNORECASE,
+)
+_WRITTEN_FOOTER_STRIP_RE = re.compile(
+    r"(?:\n+\s*---\s*\n+\*(?:Note|Okulabula|Tahadhari|Okurabura|Cik):.*"
+    r"|\n+\s*(?:\*\*)?(?:You might also want to know|Oyinz['’]okwagala okumanya|Unaweza pia kutaka kujua|"
+    r"Noobaasa n['’]okwenda kumanya|Itwero bene mito ngeyo|"
+    r"If you get stuck at any step, URA is happy to help|Bw['’]oba ng['’]osanze obuzibu|"
+    r"Ikiwa utakabiliwa na changamoto|Ku oraashangye obuzibu|Ka inongo peko)\b.*)",
+    re.IGNORECASE | re.DOTALL,
 )
 
 
@@ -406,10 +415,9 @@ def _split_into_sentences(text: str) -> list[str]:
     """
     def _punctuate_line(m: re.Match[str]) -> str:
         line = m.group(1).rstrip()
-        if line.endswith((".", "!", "?", ":", ";")):
+        core = line.rstrip("*_")
+        if core.endswith((".", "!", "?", ":", ";")):
             return line
-        if line.endswith(("_", "*")) and len(line) >= 2 and line[-2] in ".!?:;":
-            return line[:-1] + "."
         return f"{line}."
 
     prepared = _UNPUNCTUATED_BULLET_OR_HEADING_RE.sub(_punctuate_line, text.strip())
@@ -1156,40 +1164,67 @@ class UraReceptionistBrain(LLMService):
 
         # Local Sunflower only: the call receptionist runs on local models
         # (decided 2026-09-30); with vLLM down the Luganda words are searched.
+        global _VLLM_BRIDGE_DOWN_UNTIL
         try:
+            from .. import llm
             from ..llm import _vllm_generate
 
-            messages = [
-                {"role": "system", "content": QUERY_EXTRACT_SYSTEM},
-                {"role": "user", "content": prompt},
-            ]
-            res = _vllm_generate(messages, max_tokens=64, temperature=0.0).strip().strip('"')
-            if res and len(res) > 2:
-                if not earlier:
-                    mt.cache.put("lg", "en", normalized, res)
-                return res
+            is_unmocked = getattr(llm, "_vllm_generate", None) is getattr(llm, "_ORIGINAL_VLLM_GENERATE", None)
+            if not is_unmocked or (
+                getattr(llm, "LLM_BACKEND", "local") == "vllm" and time.monotonic() >= _VLLM_BRIDGE_DOWN_UNTIL
+            ):
+                messages = [
+                    {"role": "system", "content": QUERY_EXTRACT_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ]
+                res = (
+                    _vllm_generate(messages, max_tokens=64, temperature=0.0, timeout=3.5)
+                    if is_unmocked
+                    else _vllm_generate(messages, max_tokens=64, temperature=0.0)
+                ).strip().strip('"')
+                if res and len(res) > 2:
+                    if not earlier:
+                        mt.cache.put("lg", "en", normalized, res)
+                    return res
+                if is_unmocked:
+                    _VLLM_BRIDGE_DOWN_UNTIL = time.monotonic() + 15.0
         except Exception:
+            _VLLM_BRIDGE_DOWN_UNTIL = time.monotonic() + 15.0
             logger.debug("Luganda query extraction failed", exc_info=True)
 
         return normalized or luganda_query
 
     def _synthesize_luganda_reply(self, context_text: str, question: str) -> str:
         """Single-pass synthesis from English statutory context directly into Luganda."""
+        global _VLLM_BRIDGE_DOWN_UNTIL
         prompt = LUGANDA_RAG_PROMPT_TEMPLATE.format(passages=context_text, luganda_query=question)
 
         # Local Sunflower only (decided 2026-09-30). With vLLM down the caller
         # gets the English answer translated, or the transfer phrase.
         try:
+            from .. import llm
             from ..llm import _vllm_generate
 
+            is_unmocked = getattr(llm, "_vllm_generate", None) is getattr(llm, "_ORIGINAL_VLLM_GENERATE", None)
+            if is_unmocked and (
+                getattr(llm, "LLM_BACKEND", "local") != "vllm" or time.monotonic() < _VLLM_BRIDGE_DOWN_UNTIL
+            ):
+                return ""
             messages = [
                 {"role": "system", "content": LUGANDA_RAG_SYSTEM},
                 {"role": "user", "content": prompt},
             ]
-            res = _vllm_generate(messages, max_tokens=256, temperature=0.1).strip()
+            res = (
+                _vllm_generate(messages, max_tokens=256, temperature=0.1, timeout=5.0)
+                if is_unmocked
+                else _vllm_generate(messages, max_tokens=256, temperature=0.1)
+            ).strip()
             if res and len(res) > 3:
                 return res
+            if is_unmocked:
+                _VLLM_BRIDGE_DOWN_UNTIL = time.monotonic() + 15.0
         except Exception:
+            _VLLM_BRIDGE_DOWN_UNTIL = time.monotonic() + 15.0
             logger.debug("Luganda answer synthesis failed", exc_info=True)
         return ""
 
@@ -1642,8 +1677,9 @@ class UraReceptionistBrain(LLMService):
             if empathy_prefix and not reply_for_speech.startswith(empathy_prefix.strip()[:12]):
                 reply_for_speech = f"{empathy_prefix}{reply_for_speech}"
 
+        raw_spoken = self._spoken_answer(reply_for_speech, offer_officer=uncertain or at_risk, at_risk=at_risk)
         spoken_text = clean_text_for_speech(
-            self._spoken_answer(reply_for_speech, offer_officer=uncertain or at_risk, at_risk=at_risk),
+            raw_spoken,
             locale=self.language,
         )
 
@@ -1655,7 +1691,7 @@ class UraReceptionistBrain(LLMService):
 
                 paused_text = inject_dictation_pauses(spoken_text)
                 ver = verify_spoken_figures(
-                    bot_reply,
+                    raw_spoken,
                     paused_text,
                     locale=self.language,
                     subject=self.room.state.user_id or "",
@@ -1663,12 +1699,13 @@ class UraReceptionistBrain(LLMService):
                 if ver.ok:
                     spoken_text = paused_text
                 else:
+                    raw_spoken_en = self._spoken_answer(bot_reply, offer_officer=uncertain or at_risk, at_risk=at_risk)
                     fallback_spoken = clean_text_for_speech(
-                        self._spoken_answer(bot_reply, offer_officer=uncertain or at_risk, at_risk=at_risk),
+                        raw_spoken_en,
                         locale="en",
                     )
                     ver_en = verify_spoken_figures(
-                        bot_reply,
+                        raw_spoken_en,
                         fallback_spoken,
                         locale="en",
                         subject=self.room.state.user_id or "",
@@ -1758,16 +1795,19 @@ class UraReceptionistBrain(LLMService):
         offer takes the place of "Would you like more detail?". Whichever is
         asked becomes the pending offer the caller's next turn may answer.
         """
-        cleaned_reply = re.sub(
-            r"\n+\s*(?:\*\*)?(?:You might also want to know|If you get stuck at any step, URA is happy to help)\b.*",
-            "",
-            reply,
-            flags=re.IGNORECASE | re.DOTALL,
-        ).strip() or reply
+        cleaned_reply = _WRITTEN_FOOTER_STRIP_RE.sub("", reply).strip() or reply
         sentences = _split_into_sentences(cleaned_reply)
         max_sentences = get_max_spoken_sentences()
+        bullet_count = sum(1 for s in sentences if _STEP_OR_BULLET_START_RE.match(s))
+        if bullet_count >= 2 and len(cleaned_reply.split()) <= 75 and len(sentences) <= 8:
+            max_sentences = max(max_sentences, len(sentences))
         rest = sentences[max_sentences:]
-        spoken = _join_structured_sentences(sentences[:max_sentences]) if rest else cleaned_reply
+        if rest:
+            spoken = _join_structured_sentences(sentences[:max_sentences])
+        elif _UNPUNCTUATED_BULLET_OR_HEADING_RE.search(cleaned_reply):
+            spoken = _join_structured_sentences(sentences)
+        else:
+            spoken = cleaned_reply
         more_joined = _join_structured_sentences(rest) if rest else ""
         self.room.state.last_more_detail = more_joined if (rest and not offer_officer) else ""
         if offer_officer:

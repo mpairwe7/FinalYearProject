@@ -70,4 +70,32 @@ describe("Markdown", () => {
     expect(items[1]).toHaveTextContent("Customs Services: clears goods");
     expect(items[2]).toHaveTextContent("Digital Solutions: EFRIS");
   });
+
+  it("renders underscore italics from calculator outputs without touching snake_case identifiers", () => {
+    const raw = "_Assumptions: gross monthly salary._ Field name is tax_head.";
+    const { container } = render(<Markdown content={raw} />);
+    const em = container.querySelector("em");
+    expect(em).not.toBeNull();
+    expect(em?.textContent).toBe("Assumptions: gross monthly salary.");
+    expect(container.textContent).toContain("tax_head");
+  });
+
+  it("renders bolded callout labels and nested inline code inside bold text", () => {
+    const raw = "**Important:** Submit form **`DT-2001`** before the 15th.";
+    const { container } = render(<Markdown content={raw} />);
+    expect(container.querySelector(".md-callout-important")).toBeInTheDocument();
+    const code = container.querySelector("strong code.md-inline-code");
+    expect(code).not.toBeNull();
+    expect(code?.textContent).toBe("DT-2001");
+  });
+
+  it("does not split long paragraphs across statutory abbreviations like Sec. or Cap.", () => {
+    const raw =
+      "Every registered taxpayer in Uganda must maintain accurate accounting records for at least five years from the end of the tax period to which they relate, pursuant to Sec. 15 of the Tax Procedures Code Act, Cap. 343, and produce them upon inspection.";
+    const { container } = render(<Markdown content={raw} />);
+    const paras = Array.from(container.querySelectorAll("p")).map((p) => p.textContent ?? "");
+    expect(paras.some((p) => p.endsWith("Sec."))).toBe(false);
+    expect(paras.some((p) => p.endsWith("Cap."))).toBe(false);
+    expect(container.textContent).toContain("Sec. 15 of the Tax Procedures Code Act, Cap. 343");
+  });
 });

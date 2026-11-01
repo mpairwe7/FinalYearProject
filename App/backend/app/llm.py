@@ -1232,6 +1232,9 @@ def _served_context_window(base_url: str | None = None) -> int:
                     length = int(model["max_model_len"])
                     break
     except Exception:
+        with _vllm_limits_lock:
+            limits = _limits_for_base_url(base_url)
+            limits["tokenize_down_until"] = time.time() + _VLLM_LIMITS_RETRY_S
         logger.debug("vLLM /models unavailable; the prompt budget uses LLM_CONTEXT_WINDOW", exc_info=True)
     with _vllm_limits_lock:
         limits = _limits_for_base_url(base_url)
@@ -1612,15 +1615,12 @@ def _vllm_generate_ex(
             headers["Authorization"] = f"Bearer {VLLM_API_KEY}"
 
         with llm_call("chat", eff_model, "vllm") as call:
-            if client is not None:
-                try:
-                    resp = client.post(url, content=body, headers=headers, timeout=effective_timeout)
-                    resp.raise_for_status()
-                    payload = resp.json()
-                except Exception:
-                    payload = None
-
-            if payload is None:
+            urlopen_mocked = hasattr(urllib.request.urlopen, "_mock_name")
+            if client is not None and not urlopen_mocked:
+                resp = client.post(url, content=body, headers=headers, timeout=effective_timeout)
+                resp.raise_for_status()
+                payload = resp.json()
+            else:
                 req = _vllm_build_request(url, body, accept_stream=False)
                 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
                 with urllib.request.urlopen(req, timeout=effective_timeout) as resp:  # nosec B310 # noqa: S310

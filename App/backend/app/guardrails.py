@@ -867,14 +867,55 @@ _GLUED_STEP_RE = re.compile(
 )
 
 
+_PROSE_ABBR_END_RE = re.compile(
+    r"(?:^|[\s(])(?:e\.g|i\.e|etc|sec|cap|art|sch|reg|para|pt|vol|ed|ltd|inc|co|corp|"
+    r"shs|ushs|ugx|min|max|approx|cf|al|vs|no|mr|mrs|ms|dr|st|p\.o|s|ss)\.$",
+    re.IGNORECASE,
+)
+_PROSE_BARE_INT_END_RE = re.compile(r"(?:^|\s)\d+\.$")
+_LEADING_CITE_RE = re.compile(r"^(\[\d+(?:\s*[,;]\s*\d+)*\]\.?)\s+(.*)$", re.DOTALL)
+_STARTS_SENTENCE_RE = re.compile(r"^(?:\*{1,2}|`|['\"(\[])*[A-Z]")
+_PROSE_CANDIDATE_SPLIT_RE = re.compile(
+    r"(?<=[.!?])\s+|(?<=[.!?][*'\"”’)\]`])\s+|(?<=[.!?]\*\*)\s+"
+)
+
+
+def _split_prose_sentences(prose: str) -> list[str]:
+    """Split *prose* into sentences, preserving abbreviations, bare section numbers, and inline citations."""
+    pieces = [p.strip() for p in _PROSE_CANDIDATE_SPLIT_RE.split(prose.strip()) if p.strip()]
+    if len(pieces) <= 1:
+        return pieces
+    sentences: list[str] = []
+    for piece in pieces:
+        if sentences:
+            cite_m = _LEADING_CITE_RE.match(piece)
+            if cite_m:
+                sentences[-1] = f"{sentences[-1]} {cite_m.group(1)}"
+                piece = cite_m.group(2).strip()
+                if not piece:
+                    continue
+        if sentences and (
+            not _STARTS_SENTENCE_RE.match(piece)
+            or _PROSE_ABBR_END_RE.search(sentences[-1])
+            or _PROSE_BARE_INT_END_RE.search(sentences[-1])
+        ):
+            sentences[-1] = f"{sentences[-1]} {piece}"
+        else:
+            sentences.append(piece)
+    return sentences
+
+
 def _items_are_a_list(parts: list[str], *, word_limit: int) -> bool:
     """True when every piece is a short label, not a clause."""
     return all(1 <= len(part.split()) <= word_limit and "." not in part[:-1] for part in parts)
 
 
+_STRUCTURAL_LINE_RE = re.compile(r"^\s*(?:\d{1,2}[.)]|[-*•]\s|#{1,6}\s|\||>|```)", re.MULTILINE)
+
+
 def _split_marked_list(line: str, separator: str, *, word_limit: int) -> list[str] | None:
-    """Turn a colon-led or short label run into bullets. Leave prose alone."""
-    if line.strip().startswith(("-", "*", "1.", "2.")):
+    """Turn a colon-led or short label run into bullets. Leave prose and structural lines alone."""
+    if _STRUCTURAL_LINE_RE.match(line) or "|" in line:
         return None
     parts = [part.strip() for part in line.split(separator) if part.strip()]
     if len(parts) < 3:
@@ -893,14 +934,13 @@ def _split_marked_list(line: str, separator: str, *, word_limit: int) -> list[st
     return [f"- {part}" for part in parts]
 
 
-_STRUCTURAL_LINE_RE = re.compile(r"^\s*(?:\d{1,2}[.)]|[-*]\s|#{1,4}\s|\||>|```)")
-
-
 def _paragraph_prose_text(prose: str) -> str:
     stripped = prose.strip()
     if not stripped:
         return ""
-    sentences = [part.strip() for part in _SENTENCE_BREAK_RE.split(stripped) if part.strip()]
+    sentences = _split_prose_sentences(stripped)
+    if len(sentences) == 3 and len(stripped) >= 350:
+        return f"{sentences[0]} {sentences[1]}\n\n{sentences[2]}"
     if len(sentences) < 4:
         return stripped
     chunks = [" ".join(sentences[i : i + 3]) for i in range(0, len(sentences), 3)]
@@ -1262,7 +1302,7 @@ class OutputGuard:
             lines = text.split("\n")
             formatted_lines = []
             for line in lines:
-                if arrow in line and not line.strip().startswith(("-", "*", "1.", "2.")):
+                if arrow in line and not _STRUCTURAL_LINE_RE.match(line) and "|" not in line:
                     parts = [part.strip() for part in line.split(arrow) if part.strip()]
                     if len(parts) >= 3 and not _LISTISH_VERB_RE.search(line):
                         formatted_lines.extend(
@@ -1323,15 +1363,15 @@ class OutputGuard:
 
         # Bold numbered list headers if followed by a colon on the same line (e.g. '\n1. Tax Administration:' -> '\n1. **Tax Administration**:')
         text = re.sub(r"(?:^|\n)(\s*\d{1,2}\.\s+)(?!\*\*)([A-Za-z0-9 /&,-]+?):([ \t]+)", r"\n\1**\2**:\3", text)
-        # Separate smashed bullet items on the same line (e.g. 'including:* Item' or 'laws.- Item')
+        # Separate smashed bullet items on the same line (e.g. 'including:* Item' or 'laws.- **Item**')
         # Using [ \t]* instead of \s* preserves indentation on sub-bullets that are already on the next line.
         text = re.sub(
-            r"([;:])[ \t]*([*\-•])(?!\*)[ \t]*([A-Za-z])",
+            r"([;:])[ \t]*([*\-•])(?!\*)[ \t]*(\*{0,2}[A-Za-z])",
             r"\1\n\n\2 \3",
             text,
         )
         text = re.sub(
-            r"([a-z0-9\)])\.[ \t]*([*\-•])(?!\*)[ \t]*([A-Za-z])",
+            r"([a-z0-9\)])\.[ \t]*([*\-•])(?!\*)[ \t]*(\*{0,2}[A-Za-z])",
             r"\1.\n\n\2 \3",
             text,
         )

@@ -245,8 +245,21 @@ export function cleanMarkdownForSpeech(text: string, locale: string = 'en'): str
   // Strip code blocks
   cleaned = cleaned.replace(/```[\s\S]*?```/g, ' ');
   cleaned = cleaned.replace(/`([^`]+)`/g, '$1');
-  // Strip table rows
-  cleaned = cleaned.replace(/^\s*\|.*\|\s*$/gm, ' ');
+  // Strip table separator and horizontal rule lines; convert pipe table rows into spoken sentences
+  cleaned = cleaned.replace(
+    /^[ \t]*\|?[ \t]*:?-{2,}:?(?:[ \t]*\|[ \t]*:?-{2,}:?)+[ \t]*\|?[ \t]*(?:\n|$)/gm,
+    '',
+  );
+  cleaned = cleaned.replace(/^[ \t]*-{3,}[ \t]*(?:\n|$)/gm, '');
+  cleaned = cleaned.replace(/^[ \t]*\|([^\n]*)\|[ \t]*$/gm, (_: string, row: string) => {
+    const cells = row
+      .split('|')
+      .map((c) => c.trim())
+      .filter(Boolean);
+    if (!cells.length || cells.every((c) => /^:?-{2,}:?$/.test(c))) return '';
+    const joined = cells.length >= 2 ? `${cells[0]}: ${cells.slice(1).join(', ')}` : cells[0];
+    return /[.!?;:]$/.test(joined.replace(/[*_]+$/g, '')) ? joined : `${joined}.`;
+  });
   cleaned = cleaned.replace(/\s*\|\s*/g, ', ');
   cleaned = cleaned.replace(/[ \t]*>[ \t]*(?=(?:UGX|USD|Shs)?[ \t]*\d)/gi, gtWord);
   cleaned = cleaned.replace(/[ \t]*<[ \t]*(?=(?:UGX|USD|Shs)?[ \t]*\d)/gi, ltWord);
@@ -283,4 +296,23 @@ export function cleanMarkdownForSpeech(text: string, locale: string = 'en'): str
   cleaned = cleaned.replace(/[ \t]+/g, ' ');
   cleaned = cleaned.replace(/\n\s*\n+/g, '\n\n');
   return cleaned.trim();
+}
+
+const CALL_STEP_BREAK_RE =
+  /([:.!?])[ \t]+(?=(?:Step|Odaala|Hatua|Idaara|Rwom)[ \t]+(?:\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|emu|bbiri|ssatu|nnya|ttaano|mukaaga|musanvu|munaana|mwenda|kkumi|moja|mbili|tatu|nne|tano|sita|saba|nane|tisa|kumi|emwe|ibiri|ishatu|ina|itaano|mushanju|acel|aryo|adek|angwen|abic|abicel|abiro|aboro|abongwen):[ \t])/gi;
+
+const CALL_TRAILING_OFFER_RE =
+  /([.!?])[ \t]+(?=(?:Would you like more detail\?|Would you like to speak to an officer about this\?|Oyagala okumanya ebisingawo\?|Oyagala okwogera n'omukozi wa URA ku nsonga eno\?|Je, ungependa maelezo zaidi\?|Je, ungependa kuongea na afisa kuhusu hili\?)$)/i;
+
+/**
+ * Format a spoken call caption or transcript turn for visual scannability:
+ * places inline paced steps onto their own lines and separates a trailing
+ * yes/no offer prompt from the answer body, while leaving single-sentence
+ * captions untouched.
+ */
+export function formatCallCaptionText(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(CALL_STEP_BREAK_RE, '$1\n')
+    .replace(CALL_TRAILING_OFFER_RE, '$1\n\n');
 }

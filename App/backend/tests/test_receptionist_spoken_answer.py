@@ -47,6 +47,13 @@ class SentenceSplitTests(unittest.TestCase):
             ["Pay by e.g. mobile money under Sec. 12.", "Keep the receipt."],
         )
 
+    def test_italic_assumptions_line_retains_closing_underscore(self):
+        sentences = _split_into_sentences("- Gross salary: UGX 2,000,000\n- _Assumptions: gross monthly salary._")
+        self.assertEqual(
+            sentences,
+            ["- Gross salary: UGX 2,000,000.", "- _Assumptions: gross monthly salary._"],
+        )
+
 
 class SpokenAnswerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
@@ -67,6 +74,30 @@ class SpokenAnswerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Are you registering as an individual", spoken)
         self.assertNotIn("portal at", spoken)  # the address is dropped with its "at"
         self.assertNotIn("more detail", spoken)  # nothing was cut
+
+    async def test_compact_calculator_breakdown_speaks_payable_tax_in_full(self):
+        calc_reply = (
+            "**Capital gains calculation (FY2026-27)**\n\n"
+            "- Sale price: UGX 100,000,000\n"
+            "- Cost base: UGX 60,000,000\n"
+            "- Gain: UGX 40,000,000\n"
+            "- Tax at 30%: **UGX 12,000,000**\n"
+            "- Statutory Basis: Income Tax Act"
+        )
+        spoken = self.brain._spoken_answer(calc_reply, offer_officer=False)
+        self.assertIn("Tax at 30%: **UGX 12,000,000**.", spoken)
+        self.assertNotIn("Would you like more detail?", spoken)
+
+    async def test_vernacular_written_footers_are_stripped_from_spoken_answer(self):
+        sw_reply = (
+            "Kiwango cha VAT nchini Uganda ni 18%.\n\n"
+            "Ikiwa utakabiliwa na changamoto katika hatua yoyote, URA iko tayari kukusaidia: piga 0800 117 000.\n\n"
+            "Unaweza pia kutaka kujua: Ninawezaje kuwasilisha marejesho ya VAT?"
+        )
+        spoken = self.brain._spoken_answer(sw_reply, offer_officer=False)
+        self.assertNotIn("Ikiwa utakabiliwa", spoken)
+        self.assertNotIn("Unaweza pia kutaka kujua", spoken)
+        self.assertIn("18%", spoken)
 
 
 if __name__ == "__main__":

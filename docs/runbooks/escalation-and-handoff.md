@@ -5,7 +5,11 @@ before saving the outcome (409 when unavailable; 400 for an unknown action).
 Created tickets retain the call's tenant, conversation and locale. Reconnect
 expiry revokes old media before requeueing; failed revocation terminates the
 call. [Assurance review](../plans/receptionist-assurance-2026-10-30.md) records
-the remaining ownership, atomic-write and production media gates.
+the remaining ownership, atomic-write and production media gates. Direct local
+model calls in `receptionist/brain.py`, `brief.py` and `summary.py` enforce
+bounded timeouts and share a fail-fast cooldown (`_VLLM_BRIDGE_DOWN_UNTIL`,
+`G365`) so a vLLM/DNS outage never exhausts the 25 s call turn budget before
+falling back to localized retrieval or deterministic brief/summary templates.
 
 How the text chat decides to offer an officer, how the ticket it raises is
 prioritised and briefed, and how to roll the two Phase 38 flags out and back.

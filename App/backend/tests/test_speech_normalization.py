@@ -564,4 +564,14 @@ def test_verbalize_digits_for_tts_and_inline_step_structuring_across_5_locales()
     assert "star acel abicel abic star angwen star acel hash" in ach_voiced
 
 
+def test_markdown_table_rows_and_separators_are_spoken_cleanly():
+    raw = "| Band | Rate |\n| --- | --- |\n| Standard | 18% |\n| Zero-rated | 0% |"
+    res = clean_text_for_speech(raw, locale="en")
+    assert "---" not in res
+    assert "Band: Rate." in res
+    assert "Standard: 18 percent." in res
+    assert "Zero-rated: 0 percent." in res
+
+
+
 

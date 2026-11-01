@@ -354,9 +354,10 @@ upstream (`502`) until it is brought up again.
 1. Caller asks: *"How do I register for an instant TIN?"*
 2. Filler plays after 1 second if retrieval takes longer: *"Let me check that for you."*
 3. Assistant speaks the verified URA statutory guidance within ~3-4 seconds.
-4. Spoken text is trimmed to 4 sentences and acronyms are pronounced cleanly ("T-I-N", "U-R-A").
+4. Spoken text is trimmed to `RECEPTIONIST_MAX_SPOKEN_SENTENCES` (3 sentences for prose; complete compact calculator breakdowns up to 8 bullets / 75 words are spoken in full so the payable tax or net take-home is never cut off, `G415`), 5-locale written footers/follow-up prompts are stripped before sentence counting, `spoken_figure_guard` verifies figures against the spoken slice, and acronyms are pronounced cleanly ("TIN", "U R A", "Payee", "Efris").
 5. The call screen keeps a running chat transcript of both sides — nothing scrolls away,
    and it auto-follows the newest line unless the caller has scrolled back to read.
+   Inline paced steps (`Step 1:`, `Odaala emu:`, `Hatua moja:`, `Idaara emwe:`, `Rwom acel:`) and trailing yes/no offer questions are formatted onto their own lines (`formatCallCaptionText` in `CallScreen.tsx` and `CallTranscript.tsx`, `G415`).
    The whole thread sits in an `aria-live` log region for screen-reader assistance.
 6. The caller's own words appear **while they are still speaking**: Whisper-SALT is a
    segmented recognizer, so `LivePartialTranscriptTap` re-decodes the growing utterance

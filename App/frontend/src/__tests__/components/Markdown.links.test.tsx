@@ -75,4 +75,18 @@ describe("Markdown autolinking", () => {
     render(<Markdown content={"You owe UGX 1,000,000 by 2025 (TIN 1014567890)."} />);
     expect(screen.queryByRole("link")).toBeNull();
   });
+
+  it("autolinks scheme-less ura.go.ug subdomains and links inside bold text", () => {
+    render(
+      <Markdown
+        content={"Log in at **efris.ura.go.ug** or call **0800 117 000** via [**URA Portal**](https://ura.go.ug)."}
+      />,
+    );
+    expect(screen.getByRole("link", { name: "efris.ura.go.ug" })).toHaveAttribute(
+      "href",
+      "https://efris.ura.go.ug",
+    );
+    expect(screen.getByRole("link", { name: "0800 117 000" })).toHaveAttribute("href", "tel:0800117000");
+    expect(screen.getByRole("link", { name: "URA Portal" })).toHaveAttribute("href", "https://ura.go.ug");
+  });
 });

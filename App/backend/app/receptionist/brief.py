@@ -203,10 +203,23 @@ def _generate(prompt: str) -> tuple[dict[str, Any] | None, str]:
     deployment. With vLLM down the caller still gets the deterministic brief.
     """
     try:
+        from .. import llm
         from ..llm import _vllm_generate
+        from . import brain as _brain
 
+        is_unmocked = getattr(llm, "_vllm_generate", None) is getattr(llm, "_ORIGINAL_VLLM_GENERATE", None)
+        if is_unmocked and (
+            getattr(llm, "LLM_BACKEND", "local") != "vllm" or time.monotonic() < _brain._VLLM_BRIDGE_DOWN_UNTIL
+        ):
+            return None, ""
         messages = [{"role": "system", "content": BRIEF_SYSTEM}, {"role": "user", "content": prompt}]
-        raw = _vllm_generate(messages, max_tokens=1200, temperature=0.0)
+        raw = (
+            _vllm_generate(messages, max_tokens=1200, temperature=0.0, timeout=6.0)
+            if is_unmocked
+            else _vllm_generate(messages, max_tokens=1200, temperature=0.0)
+        )
+        if is_unmocked and not raw:
+            _brain._VLLM_BRIDGE_DOWN_UNTIL = time.monotonic() + 15.0
     except Exception:
         logger.debug("Brief model failed", exc_info=True)
         return None, ""

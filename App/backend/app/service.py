@@ -698,17 +698,29 @@ def _trim_excerpt(text: str, limit: int = 700) -> str:
 def _structure_excerpt(text: str) -> str:
     """Put an inline numbered list (``...: 1. X; 2. Y``) onto its own lines so it
     renders as a Markdown list instead of a run-on."""
-    t = re.sub(r":\s+(?=\d{1,2}\.\s)", ":\n\n", text, count=1)  # blank line before the list
-    t = re.sub(r"\s*;\s+(?=\d{1,2}\.\s)", "\n", t)
+    t = re.sub(r":\s+(?=\d{1,2}[.)]\s)", ":\n\n", text, count=1)  # blank line before the list
+    t = re.sub(r"\s*;\s+(?=\d{1,2}[.)]\s)", "\n", t)
     # Format inline semicolon-separated lists after 'include:' or 'includes:' into clean bullets
-    m = re.search(r"(?:include|includes):\s*([^;]+(?:;\s*[^;]+){2,})", t, re.IGNORECASE)
+    m = re.search(r"(?:include|includes):\s*([^;\n]+(?:;\s*[^;\n]+){2,})", t, re.IGNORECASE)
     if m:
         prefix = t[: m.start()] + m.group(0).split(":")[0] + ":"
         items_str = m.group(1)
         suffix = t[m.end() :]
+        parts = [p.strip() for p in items_str.split(";") if p.strip()]
+        if parts:
+            last_part = parts[-1]
+            sent_split = re.search(
+                r"(?<!\be\.g)(?<!\bi\.e)(?<!\bsec)(?<!\bcap)(?<!\bno)\.\s+([A-Z].*)$",
+                last_part,
+                re.IGNORECASE | re.DOTALL,
+            )
+            if sent_split:
+                parts[-1] = last_part[: sent_split.start()].strip()
+                trailing = sent_split.group(1).strip()
+                suffix = f"\n\n{trailing}{suffix}"
         raw_items = [
             re.sub(r"^(?:and\s+|or\s+)", "", item.strip()).strip(" .;")
-            for item in items_str.split(";")
+            for item in parts
         ]
         items = [item for item in raw_items if item]
         if len(items) >= 2:

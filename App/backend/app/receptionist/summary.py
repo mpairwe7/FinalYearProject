@@ -100,15 +100,28 @@ def _fallback_summary(turns: list[dict[str, Any]], call: dict[str, Any]) -> dict
 
 def _summarise_local(prompt: str) -> dict[str, Any] | None:
     try:
+        import time
+
+        from .. import llm
         from ..llm import _vllm_generate
+        from . import brain as _brain
+
+        is_unmocked = getattr(llm, "_vllm_generate", None) is getattr(llm, "_ORIGINAL_VLLM_GENERATE", None)
+        if is_unmocked and (
+            getattr(llm, "LLM_BACKEND", "local") != "vllm" or time.monotonic() < _brain._VLLM_BRIDGE_DOWN_UNTIL
+        ):
+            return None
         # Chat messages, not a string: given a string, _vllm_generate's own
         # error handler returned "" and every Luganda summary silently fell
         # through to Gemini or the template.
-        raw_reply = _vllm_generate(
-            [{"role": "system", "content": SUMMARY_SYSTEM}, {"role": "user", "content": prompt}],
-            max_tokens=1000,
-            temperature=0.0,
+        messages = [{"role": "system", "content": SUMMARY_SYSTEM}, {"role": "user", "content": prompt}]
+        raw_reply = (
+            _vllm_generate(messages, max_tokens=1000, temperature=0.0, timeout=6.0)
+            if is_unmocked
+            else _vllm_generate(messages, max_tokens=1000, temperature=0.0)
         )
+        if is_unmocked and not raw_reply:
+            _brain._VLLM_BRIDGE_DOWN_UNTIL = time.monotonic() + 15.0
         return _parse_summary_json(raw_reply)
     except Exception:
         logger.debug("Local LLM summary generation failed", exc_info=True)

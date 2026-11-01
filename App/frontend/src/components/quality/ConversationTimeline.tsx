@@ -15,6 +15,7 @@ import { EmptyState, ErrorState, SkeletonRows } from "../ops/States";
 import { useSkeletonVisible } from "../../hooks/useLoadingPhase";
 import { useAiChatTimeline } from "../../hooks/useQualityAudit";
 import type { AiChatTimelineAnswer } from "../../services/analyticsApi";
+import Markdown from "../Markdown";
 import { RatingStrip } from "./RatingStrip";
 
 function when(ts: number | null): string {
@@ -91,7 +92,7 @@ export function ConversationTimeline({ conversationId }: { conversationId: strin
               </p>
               <div className="qa-answer-a">
                 <span className="qa-answer-who">Assistant answered</span>
-                <p>{a.reply || "—"}</p>
+                {a.reply ? <Markdown content={a.reply} /> : <p>—</p>}
               </div>
               {a.comment ? (
                 <p className="qa-answer-comment">
