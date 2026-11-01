@@ -516,6 +516,16 @@ def _bind_from_memory_or_dag(
 
 
 
+def _is_parallel_safe_tool(tool_name: str) -> bool:
+    """True when *tool_name* is declared both read_only and idempotent (MO-3)."""
+    from ...tools import ToolRegistry
+
+    tool = ToolRegistry.get(tool_name)
+    if tool is None:
+        return False
+    return bool(getattr(tool.schema, "read_only", False) and getattr(tool.schema, "idempotent", False))
+
+
 def node_act(state: AgentGraphState) -> NodeResult:
     """Dispatch the plan's tool calls under the turn's spend budget.
 
@@ -526,9 +536,18 @@ def node_act(state: AgentGraphState) -> NodeResult:
     it must not let a long plan turn into a tool storm: every dispatch
     goes through :class:`ToolCallBudget`, which caps the turn, caps any
     one tool, and serves a repeat from its memo instead of re-executing.
+
+    When multiple admitted tools in ``state.plan`` are all ``read_only`` and
+    ``idempotent``, they execute concurrently via ``ThreadPoolExecutor`` while
+    preserving deterministic plan order (MO-3 / Kim et al. 2026).
     """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from .state import TaxpayerActionRequest
+
     client = get_client()
     state.iterations += 1
+    admitted_calls: list[tuple[str, dict[str, object]]] = []
     for tool_name in state.plan:
         arguments = bind_arguments(tool_name, state)
         if arguments is None:
@@ -545,15 +564,35 @@ def node_act(state: AgentGraphState) -> NodeResult:
                 state.observations.append(decision.result)
             continue
 
-        result = client.call_tool(
-            tool_name,
-            arguments,
+        admitted_calls.append((tool_name, dict(arguments)))
+
+    def _invoke(item: tuple[str, dict[str, object]]) -> Any:
+        t_name, t_args = item
+        return client.call_tool(
+            t_name,
+            t_args,
             tenant_id=state.tenant_id,
             user_id=state.user_id,
             user_role=state.role,
             granted_purposes=state.granted_purposes,
             iteration=state.iterations,
         )
+
+    if len(admitted_calls) >= 2 and all(_is_parallel_safe_tool(t) for t, _ in admitted_calls):
+        import contextvars
+
+        contexts = [contextvars.copy_context() for _ in admitted_calls]
+        with ThreadPoolExecutor(max_workers=min(len(admitted_calls), 4)) as pool:
+            results = list(
+                pool.map(
+                    lambda pair: pair[0].run(_invoke, pair[1]),
+                    zip(contexts, admitted_calls, strict=True),
+                )
+            )
+    else:
+        results = [_invoke(item) for item in admitted_calls]
+
+    for (tool_name, arguments), result in zip(admitted_calls, results, strict=True):
         state.budget.record(tool_name, arguments, result.result)
         verified_ok = bool(
             result.ok and isinstance(result.result, dict) and result.result.get("ok", True)
@@ -570,6 +609,32 @@ def node_act(state: AgentGraphState) -> NodeResult:
             }
         )
         state.observations.append(result.result)
+        if isinstance(result.result, dict) and (
+            result.result.get("requires_confirmation") or result.result.get("input_required")
+        ):
+            desc = str(
+                result.result.get("message")
+                or result.result.get("description")
+                or f"Confirm execution of {tool_name}"
+            )
+            state.pending_action = TaxpayerActionRequest(
+                action_type=tool_name,
+                description=desc,
+                payload=dict(arguments),
+                requires_consent=True,
+                authorized=False,
+            )
+            state.outcome = GraphOutcome.WAITING_USER
+            state.reply = (
+                f"Action requires taxpayer authorization: {desc}. Please confirm to proceed."
+                if not result.result.get("message")
+                else str(result.result["message"])
+            )
+            return NodeResult(
+                next_node="respond",
+                outcome=GraphOutcome.WAITING_USER,
+                note="awaiting taxpayer confirmation",
+            )
 
     return NodeResult(next_node="observe")
 
@@ -642,6 +707,8 @@ def node_observe(state: AgentGraphState) -> NodeResult:
         state.sub_routes = list(state.sub_routes[1:])
         state.agent_role = target_spec
         state.handoff_reason = f"multi_agent_dag_chain:{state.handoff_from}->{target_spec}"
+        # Isolate downstream specialist state from failed upstream observations (MO-3).
+        state.observations = list(usable)
         try:
             from ...memory.handoff import HandoffEnvelope, HandoffGoal
 
@@ -821,10 +888,15 @@ def node_reflect(state: AgentGraphState) -> NodeResult:
         and state.reflect_count <= state.max_reflections
         and (weak_grounding or reasoning_miss)
     ):
-        from ...corrective_rag import _expand_query
+        from ...corrective_rag import build_reflection_query
 
         query = state.rewritten_query or state.query
-        expanded = _expand_query(query)
+        expanded = build_reflection_query(
+            query,
+            draft_reply=state.reply,
+            hits=state.hits,
+            locale=state.locale,
+        )
         if expanded != query:
             state.rewritten_query = expanded
         why = (

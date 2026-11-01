@@ -662,12 +662,26 @@ class HttpTransport:
         if request_state is not None:
             params["requestState"] = request_state
         descriptor = next((t for t in self._tools or [] if t.get("name") == tool_name), None)
+        extra_headers = _parameter_headers(descriptor.get("inputSchema"), arguments) if descriptor else {}
+        if self._token and len(self._token) >= MIN_SHARED_TOKEN_CHARS and isinstance(meta, dict):
+            from .auth import mint_obo_actor_assertion
+
+            obo = mint_obo_actor_assertion(
+                subject=str(meta.get("ug.go.ura.chatbot/userId") or "public"),
+                tenant_id=str(meta.get("ug.go.ura.chatbot/tenantId") or "default"),
+                actor_agent=str(meta.get("ug.go.ura.chatbot/userRole") or "orchestrator"),
+                resource=self.base_url,
+                scopes=(f"mcp:tool:{tool_name}",),
+                secret=self._token,
+            )
+            if obo:
+                extra_headers["Mcp-Actor-Assertion"] = obo
         result = self._request(
             "tools/call",
             params,
             tool_name=tool_name,
             timeout_s=timeout_s,
-            extra_headers=_parameter_headers(descriptor.get("inputSchema"), arguments) if descriptor else None,
+            extra_headers=extra_headers or None,
         )
         from .mrtr import parse_input_required
 

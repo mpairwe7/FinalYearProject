@@ -19,6 +19,7 @@ from __future__ import annotations
 import inspect
 import logging
 import os
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -98,6 +99,28 @@ def _avg_relevance(hits: list[dict[str, Any]]) -> float | None:
     return sum(scores) / len(scores)
 
 
+#: Statutory bridge concepts for reflection and corrective retrieval (AR-2 / BRIGHT).
+#: Ordered most-specific first ("non-resident" before "resident") and matched with
+#: word boundaries so "non-resident" or "president" never triggers "resident".
+_STATUTORY_BRIDGE_EXPANSIONS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bimported\s+services?\b", re.I), "reverse charge VAT section 16"),
+    (re.compile(r"\breverse\s+charge\b", re.I), "imported services VAT section 16"),
+    (re.compile(r"\bnon[-\s]?residents?\b", re.I), "non-resident income tax withholding section 83"),
+    (re.compile(r"(?<!non-)(?<!non\s)\bresidents?\b", re.I), "resident individual 183 days section 9"),
+    (re.compile(r"\bresidency\b", re.I), "resident individual 183 days section 9"),
+    (re.compile(r"\bexempt(?:ed|ions?)?\b", re.I), "exempt supply Second Schedule"),
+    (re.compile(r"\bzero[-\s]?rated\b", re.I), "zero rated supply Third Schedule"),
+    (re.compile(r"\bthresholds?\b", re.I), "registration threshold annual turnover"),
+    (re.compile(r"\bwithholding\b", re.I), "withholding tax rate section 119"),
+    (re.compile(r"\bpenalt(?:y|ies)\b", re.I), "penal tax late filing interest section 48"),
+    (re.compile(r"\blate\s+filing\b", re.I), "penal tax late filing section 48"),
+    (re.compile(r"\brental\b", re.I), "rental income tax chargeable rent threshold"),
+    (re.compile(r"\bpresumptive\b", re.I), "presumptive tax small business turnover schedule"),
+    (re.compile(r"\bcapital\s+gains?\b", re.I), "capital gains business asset disposal cost base"),
+    (re.compile(r"\bcustoms\b", re.I), "customs duty CIF value import declaration"),
+)
+
+
 def _expand_query(query: str, locale: str | None = None) -> str:
     """Simple query expansion for re-retrieval.
 
@@ -112,6 +135,59 @@ def _expand_query(query: str, locale: str | None = None) -> str:
     # Add "Uganda Revenue Authority" context if not present
     if "ura" not in expanded.lower() and "uganda" not in expanded.lower():
         expanded = f"{expanded} Uganda Revenue Authority"
+    return expanded
+
+
+def build_reflection_query(
+    query: str,
+    *,
+    draft_reply: str = "",
+    hits: list[dict[str, Any]] | None = None,
+    locale: str | None = None,
+) -> str:
+    """Build a targeted missing-premise query for reflection / corrective retry (AR-2).
+
+    Static ``_expand_query`` is a no-op whenever the taxpayer already named
+    ``URA`` or ``Uganda``, causing ``node_reflect`` to re-run the exact same
+    query string. This function identifies uncovered question content tokens and
+    statutory bridge concepts so retry retrieval targets the missing premise.
+    """
+    from .text_signals import content_tokens
+
+    expanded = _expand_query(query, locale=locale)
+    q_lower = expanded.lower()
+
+    # 1. Identify uncovered question terms missing from the draft or passages
+    asked = content_tokens(query)
+    covered_in_draft = content_tokens(draft_reply) if draft_reply else set()
+    passage_blob = " ".join(
+        str(h.get("text") or h.get("answer") or "") for h in (hits or []) if isinstance(h, dict)
+    )
+    covered_in_hits = content_tokens(passage_blob) if passage_blob else set()
+    missing_terms = [
+        tok
+        for tok in sorted(asked - (covered_in_draft & covered_in_hits))
+        if len(tok) > 2 and tok not in {"ura", "uganda", "tax", "taxes"}
+    ]
+
+    # 2. Match statutory bridge concepts not yet present in the query
+    bridge_additions: list[str] = []
+    for cue_re, bridge in _STATUTORY_BRIDGE_EXPANSIONS:
+        if cue_re.search(expanded):
+            for word in bridge.split():
+                if word.lower() not in q_lower and word not in bridge_additions:
+                    bridge_additions.append(word)
+            break
+
+    suffix_tokens: list[str] = []
+    for tok in bridge_additions[:5] + missing_terms[:4]:
+        if tok.lower() not in expanded.lower() and tok not in suffix_tokens:
+            suffix_tokens.append(tok)
+
+    if suffix_tokens:
+        return f"{expanded} {' '.join(suffix_tokens)}".strip()
+    if expanded == query:
+        return f"{expanded} statutory rules and rates".strip()
     return expanded
 
 
@@ -171,7 +247,7 @@ def corrective_retrieve(
         CORRECTIVE_THRESHOLD_NORM,
     )
 
-    expanded = _expand_query(query, locale)
+    expanded = build_reflection_query(query, hits=initial_hits, locale=locale)
     search = getattr(retriever, "search_planned", None) or retriever.search
     kwargs: dict[str, Any] = {"top_k": top_k + 2, "prefetch_limit": 30, "filters": filters, "subject": subject}
     # Read from the signature, not from a TypeError: a retriever that predates

@@ -248,6 +248,16 @@ def _provision_of(store: InMemoryGraphStore, node: Node) -> str:
     return str(node.props.get("legal_basis", ""))
 
 
+def cross_referenced_provisions(store: InMemoryGraphStore, node: Node) -> list[str]:
+    """Return labels of statutory provisions cross-referenced by *node*'s provision (AR-3)."""
+    refs: list[str] = []
+    for _edge, prov in store.neighbours(node.id, (EdgeKind.IMPOSED_BY,)):
+        for _ref_edge, target_prov in store.neighbours(prov.id, (EdgeKind.CROSS_REFERENCES,)):
+            if target_prov.label and target_prov.label not in refs:
+                refs.append(target_prov.label)
+    return refs
+
+
 def _best_subtype(subtypes: set[str], nodes: list[Node]) -> str:
     """The most specific matched subtype present among *nodes*.
 
@@ -380,6 +390,8 @@ def resolve(
 
         for node in chosen:
             answer.claims.append(_claim(store, node))
+            if cross_referenced_provisions(store, node) and "cross_references" not in answer.hops:
+                answer.hops.append("cross_references")
             for _edge, gate in store.neighbours(node.id, (EdgeKind.GATES,), outgoing=False):
                 answer.claims.append(_claim(store, gate))
                 answer.hops.append("gates")

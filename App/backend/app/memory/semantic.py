@@ -38,10 +38,21 @@ logger = logging.getLogger(__name__)
 SEMANTIC_TTL_DAYS = int(os.getenv("SEMANTIC_TTL_DAYS", "365"))
 
 #: Categories that hold one value at a time: a new value supersedes the old.
-#: Industries and registrations can be several at once, so they accumulate.
+#: Industries and general tax registrations can be several at once, whereas
+#: ``registered_vat`` is a single boolean/status state per taxpayer (MS-3).
 SINGLE_VALUED_CATEGORIES: frozenset[str] = frozenset(
-    {"taxpayer_type", "fiscal_year", "primary_language", "detail_level"}
+    {"taxpayer_type", "fiscal_year", "primary_language", "detail_level", "registered_vat"}
 )
+
+
+def _fy_start_year(value: str | None) -> int | None:
+    """Extract the 4-digit start year from a fiscal-year label (e.g. 'FY2024-25' -> 2024)."""
+    if not value:
+        return None
+    import re
+
+    m = re.search(r"(20\d{2})", str(value))
+    return int(m.group(1)) if m else None
 
 
 @dataclass
@@ -59,6 +70,8 @@ class UserFact:
     turn_id: str = ""
     extractor_model: str = ""
     superseded_by: str | None = None
+    valid_from_fy: str = ""
+    valid_to_fy: str = ""
 
     def to_row(self) -> tuple[Any, ...]:
         return (
@@ -75,6 +88,8 @@ class UserFact:
             self.turn_id,
             self.extractor_model,
             self.superseded_by,
+            self.valid_from_fy,
+            self.valid_to_fy,
         )
 
 
@@ -107,7 +122,9 @@ class SemanticMemory:
                 turn_id          TEXT DEFAULT '',
                 extractor_model  TEXT DEFAULT '',
                 superseded_by    TEXT,
-                invalidated_at   DOUBLE PRECISION
+                invalidated_at   DOUBLE PRECISION,
+                valid_from_fy    TEXT DEFAULT '',
+                valid_to_fy      TEXT DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_facts_user
                 ON user_facts(user_id);
@@ -152,6 +169,18 @@ class SemanticMemory:
                ON user_facts(tenant_id, user_id, category, subject, predicate, object_value)"""
         )
 
+    def _ensure_bitemporal_columns(self) -> None:
+        import contextlib
+
+        from .. import database as db
+
+        for col_ddl in (
+            "ALTER TABLE user_facts ADD COLUMN valid_from_fy TEXT DEFAULT ''",
+            "ALTER TABLE user_facts ADD COLUMN valid_to_fy TEXT DEFAULT ''",
+        ):
+            with contextlib.suppress(Exception):
+                db.execute(col_ddl)
+
     # -- Writes --------------------------------------------------------
     def write(self, fact: UserFact) -> str:
         from .. import database as db
@@ -161,24 +190,48 @@ class SemanticMemory:
         if fact.extracted_at == 0:
             fact.extracted_at = time.time()
         try:
-            db.execute(
-                """INSERT INTO user_facts
-                   (fact_id, user_id, tenant_id, category, subject,
-                    predicate, object_value, confidence, extracted_at,
-                    conversation_id, turn_id, extractor_model, superseded_by)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(tenant_id, user_id, category, subject, predicate, object_value)
-                   DO UPDATE SET
-                       confidence = CASE WHEN excluded.confidence > user_facts.confidence
-                                         THEN excluded.confidence ELSE user_facts.confidence END,
-                       extracted_at = excluded.extracted_at,
-                       conversation_id = excluded.conversation_id,
-                       turn_id = excluded.turn_id,
-                       extractor_model = excluded.extractor_model,
-                       superseded_by = NULL,
-                       invalidated_at = NULL""",
-                tuple(fact.to_row()),
-            )
+            if fact.valid_from_fy or fact.valid_to_fy:
+                self._ensure_bitemporal_columns()
+                db.execute(
+                    """INSERT INTO user_facts
+                       (fact_id, user_id, tenant_id, category, subject,
+                        predicate, object_value, confidence, extracted_at,
+                        conversation_id, turn_id, extractor_model, superseded_by,
+                        valid_from_fy, valid_to_fy)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(tenant_id, user_id, category, subject, predicate, object_value)
+                       DO UPDATE SET
+                           confidence = CASE WHEN excluded.confidence > user_facts.confidence
+                                             THEN excluded.confidence ELSE user_facts.confidence END,
+                           extracted_at = excluded.extracted_at,
+                           conversation_id = excluded.conversation_id,
+                           turn_id = excluded.turn_id,
+                           extractor_model = excluded.extractor_model,
+                           superseded_by = NULL,
+                           invalidated_at = NULL,
+                           valid_from_fy = CASE WHEN excluded.valid_from_fy != '' THEN excluded.valid_from_fy ELSE user_facts.valid_from_fy END,
+                           valid_to_fy = excluded.valid_to_fy""",
+                    tuple(fact.to_row()),
+                )
+            else:
+                db.execute(
+                    """INSERT INTO user_facts
+                       (fact_id, user_id, tenant_id, category, subject,
+                        predicate, object_value, confidence, extracted_at,
+                        conversation_id, turn_id, extractor_model, superseded_by)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(tenant_id, user_id, category, subject, predicate, object_value)
+                       DO UPDATE SET
+                           confidence = CASE WHEN excluded.confidence > user_facts.confidence
+                                             THEN excluded.confidence ELSE user_facts.confidence END,
+                           extracted_at = excluded.extracted_at,
+                           conversation_id = excluded.conversation_id,
+                           turn_id = excluded.turn_id,
+                           extractor_model = excluded.extractor_model,
+                           superseded_by = NULL,
+                           invalidated_at = NULL""",
+                    tuple(fact.to_row()[:13]),
+                )
             stored = db.query_one(
                 """SELECT fact_id FROM user_facts
                    WHERE tenant_id = ? AND user_id = ? AND category = ? AND subject = ?
@@ -239,8 +292,9 @@ class SemanticMemory:
         decay_floor: float = 0.3,
         include_superseded: bool = False,
         limit: int = 20,
+        as_of_fy: str | None = None,
     ) -> list[UserFact]:
-        """Return active facts above the decay floor."""
+        """Return active facts above the decay floor (with optional bi-temporal FY filter, MS-3)."""
         from .. import database as db
 
         sql = "SELECT * FROM user_facts WHERE tenant_id = ? AND user_id = ?"
@@ -248,7 +302,7 @@ class SemanticMemory:
         if category:
             sql += " AND category = ?"
             params.append(category)
-        if not include_superseded:
+        if not include_superseded and not as_of_fy:
             sql += " AND superseded_by IS NULL"
         sql += " ORDER BY extracted_at DESC LIMIT ?"
         params.append(max(1, limit * 3))  # overfetch, we'll filter by decay
@@ -256,7 +310,25 @@ class SemanticMemory:
         rows = db.query_all(sql, tuple(params))
         now = time.time()
         results: list[UserFact] = []
+        target_fy_year = _fy_start_year(as_of_fy) if as_of_fy else None
         for row in rows:
+            valid_from = str(row.get("valid_from_fy") or "")
+            valid_to = str(row.get("valid_to_fy") or "")
+            if as_of_fy:
+                if row.get("superseded_by") and not (valid_from or valid_to):
+                    continue
+                from_year = _fy_start_year(valid_from)
+                to_year = _fy_start_year(valid_to)
+                if target_fy_year is not None:
+                    if from_year is not None and from_year > target_fy_year:
+                        continue
+                    if to_year is not None and to_year < target_fy_year:
+                        continue
+                else:
+                    if valid_from and valid_from.upper() > as_of_fy.upper():
+                        continue
+                    if valid_to and valid_to.upper() < as_of_fy.upper():
+                        continue
             decayed = compute_decayed_confidence(
                 original_confidence=row["confidence"],
                 category=row["category"],
@@ -282,6 +354,8 @@ class SemanticMemory:
                     turn_id=row["turn_id"],
                     extractor_model=row["extractor_model"],
                     superseded_by=row["superseded_by"],
+                    valid_from_fy=valid_from,
+                    valid_to_fy=valid_to,
                 )
             )
             if len(results) >= limit:

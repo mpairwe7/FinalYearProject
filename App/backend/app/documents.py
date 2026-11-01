@@ -207,9 +207,25 @@ def _validate_zip_container(data: bytes, kind: str) -> None:
 
 
 def _validate_document_content(data: bytes, kind: str) -> list[str]:
-    """Perform cheap, content-based validation before third-party parsers run."""
+    """Perform cheap, content-based validation before third-party parsers run.
+
+    When ``DOCUMENT_PARSE_ISOLATED=true``, the parent API worker performs only
+    pure-Python byte-stream header and active-token checks on PDFs so native C
+    PDF engines (``pypdfium2`` / ``PyMuPDF``) are opened exclusively inside the
+    isolated child process (CS-1).
+    """
     if kind == "pdf":
+        from .document_worker import isolated_enabled
+        from .pdf_guards import scan_pdf_object_text, validate_pdf_header
+
         try:
+            validate_pdf_header(data)
+            if QUERY_PDF_LIMITS.reject_active_content:
+                findings = scan_pdf_object_text(data.decode("latin-1", errors="ignore"))
+                if findings:
+                    raise PdfRejected(findings[0])
+            if isolated_enabled():
+                return []
             inspection = inspect_pdf_bytes(data, QUERY_PDF_LIMITS)
         except PdfRejected as err:
             raise UnsupportedDocumentError(str(err)) from err

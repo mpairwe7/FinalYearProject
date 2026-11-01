@@ -9046,7 +9046,7 @@ class ChatModel:
                 )
 
         role_label = getattr(final_state, "agent_role", "graph_agent") or "graph_agent"
-        return {
+        out: dict[str, Any] = {
             # Here as well as in _audit_turn: the stream never reaches that.
             "reply": _with_degraded_disclosure(graph_reply, _turn_degradations()),
             "_figure_lock": figure_lock,
@@ -9069,6 +9069,9 @@ class ChatModel:
             ),
             "ticket_id": ticket_id,
         }
+        if getattr(final_state, "pending_action", None) is not None:
+            out["pending_action"] = final_state.pending_action.to_dict()
+        return out
 
     def _run_graph(
         self,
@@ -9093,7 +9096,10 @@ class ChatModel:
             )
         )
         try:
-            return graph.run(graph_state)
+            try:
+                return graph.run(graph_state, thread_id=conversation_id or "")
+            except TypeError:
+                return graph.run(graph_state)
         finally:
             ESCALATION_ROUTE.reset(token)
 
@@ -12490,6 +12496,7 @@ class ChatModel:
                         GraphOutcome.CLARIFY,
                         GraphOutcome.ESCALATED,
                         GraphOutcome.ABSTAINED,
+                        GraphOutcome.WAITING_USER,
                     }
                     if (
                         final_state.outcome not in usable_outcomes
@@ -14520,6 +14527,7 @@ class ChatModel:
                     GraphOutcome.CLARIFY,
                     GraphOutcome.ESCALATED,
                     GraphOutcome.ABSTAINED,
+                    GraphOutcome.WAITING_USER,
                 }
                 if (
                     final_state.outcome in usable_outcomes
