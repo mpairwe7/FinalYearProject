@@ -1040,7 +1040,8 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | `RETRIEVER_CONTEXT_FLOOR` | Calibrated relevance below which a passage is not passed to the model. Must stay below `ABSTENTION_THRESHOLD_NORM` — this trims a result set, it does not decide whether to answer | `0.20` |
 | `RETRIEVER_CONTEXT_RELATIVE_DROP` | Also drop passages this far below the best hit | `0.45` |
 | `RETRIEVER_DEDUPE_THRESHOLD` | Shingle-Jaccard above which two candidates are near-duplicates | `0.9` |
-| `RETRIEVER_RERANK_CHARS` | Passage characters fed to the cross-encoder | `1200` |
+| `RETRIEVER_RERANK_CHARS` | Passage characters fed to the cross-encoder (`ADR-0024`) | `4000` |
+| `RETRIEVER_DBSF_PREFETCH_MIN` | Minimum per-leg candidate pool for Qdrant server-side DBSF (`ADR-0024`) | `48` |
 | `RETRIEVER_QUERY_CACHE_SIZE` | Query embeddings kept for reuse | `256` |
 | **Observability** | | |
 | `OTEL_ENABLED` | Enable OpenTelemetry tracing | `false` |

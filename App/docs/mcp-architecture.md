@@ -174,7 +174,7 @@ on them without understanding our tool names.
 
 | Namespace | Tools | Risk | Deployment |
 |---|---|---|---|
-| `tax_calculator` | 28 calculators & statutory/MDA/relief tools (incl. PAYE, VAT, customs, excise, BIK, residency, FX, stamp duty, DST, gaming, advance vehicle, presumptive/startup, plus 6 Cross-MDA, New-Taxpayer Shield, Voluntary Disclosure/Instalment & EFRIS/Account-Recovery tools: `resolve_mda_ntr_payment`, `assess_life_event_tax_onboarding`, `evaluate_b2g_and_uesw_clearance`, `build_new_taxpayer_compliance_shield`, `simulate_tax_relief_and_instalments`, `resolve_efris_and_account_recovery`) | low | 🟢 standalone server available |
+| `tax_calculator` | 28 calculators, document-audit & statutory/MDA/relief tools (incl. PAYE, VAT, customs, excise, BIK, residency, FX, stamp duty, DST, gaming, advance vehicle, presumptive/startup, `audit_tax_document`, plus 6 Cross-MDA, New-Taxpayer Shield, Voluntary Disclosure/Instalment & EFRIS/Account-Recovery tools: `resolve_mda_ntr_payment`, `assess_life_event_tax_onboarding`, `evaluate_b2g_and_uesw_clearance`, `build_new_taxpayer_compliance_shield`, `simulate_tax_relief_and_instalments`, `resolve_efris_and_account_recovery`) | low | 🟢 standalone server available |
 | `education` | `explain_tax_concept` | low | in-process |
 | `rates` | `lookup_rate`, `list_available_rates`, `compare_tax_years` | low | in-process |
 | `rag` | `search_ura_knowledge_base` | low | in-process |
@@ -182,8 +182,7 @@ on them without understanding our tool names.
 | `empathy` | `assess_emotional_tone` | low | in-process |
 | `tax_graph` | `graph_resolve_rate`, `graph_rate_history`, `graph_effective_on` | low | in-process (embedded) |
 | `portal_navigator` | `navigate_external_portal` | low | in-process |
-| `document_audit` | `audit_tax_document` | low | in-process / standalone |
-| `core` | `escalate_to_human` | medium | in-process |
+| `core` | `escalate_to_human`, `memory_recall`, `memory_store`, `memory_discard` | low–medium | in-process |
 | `tasks` | `task_create`, `task_get`, `task_cancel` | medium | in-process, Postgres/SQLite-backed |
 | `efris` | `efris_fiscal_invoice`, `efris_taxpayer_status`, `efris_stock_management`, `efris_credit_note` | low–critical | 🟢 standalone server available (`mcp_efris` :8933) / in-process |
 | `digital_tax_stamps`| `dts_verify_stamp`, `dts_order_stamps`, `dts_activate_stamps`, `dts_taxpayer_status` | low–critical | 🟢 standalone server available (`mcp_dts` :8934) / in-process |
