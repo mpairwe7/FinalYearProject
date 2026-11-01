@@ -188,6 +188,20 @@ class TestDiscovery:
         assert set(captures(config)) == {NOTICE}
         assert state(config)["last_changes_run_at"]
 
+    def test_a_sitemap_advertised_in_robots_is_read(self, config: CrawlConfig):
+        """RFC 9309 leaves sitemaps to the robots file; a site can move its index."""
+        other = "https://ura.go.ug/news-sitemap.xml"
+        site = Site({other: Page(sitemap(VAT), headers={"content-type": "application/xml"}), VAT: article("VAT")})
+        site.pages[ROBOTS] = Page(f"User-agent: *\nDisallow: /wp-admin/\nSitemap: {other}\n", headers={"content-type": "text/plain"})
+        run(site, config)
+        assert VAT in captures(config)
+
+    def test_an_advertised_sitemap_on_another_host_is_ignored(self, config: CrawlConfig):
+        site = Site()
+        site.pages[ROBOTS] = Page("Sitemap: https://evil.example/s.xml\n", headers={"content-type": "text/plain"})
+        run(site, config)
+        assert "https://evil.example/s.xml" not in site.urls
+
     def test_sitemaps_outside_the_guidance_families_are_not_read(self, config: CrawlConfig):
         tags = "https://ura.go.ug/post_tag-sitemap.xml"
         site = Site({INDEX: Page(sitemap_index(POSTS, tags), headers={"content-type": "application/xml"})}, urls=())
@@ -420,6 +434,21 @@ class TestOlderNeverReplacesNewer:
         site.pages[PAYE] = self.dated(self.OLD + "Amended again.", "2023-08-23T00:00:00+00:00", "2026-10-01T00:00:00+00:00")
         assert [page.change for page in run(site, config)] == ["changed"]
         assert state(config)["visited"][PAYE]["modified_at"] == "2026-10-01"
+
+    def test_a_revision_missing_its_modified_date_is_not_mistaken_for_an_older_page(self, config: CrawlConfig):
+        """URA omits article:modified_time on some pages. A 2023 publication date set
+        against a held 2026 revision would have refused a page that is really newer."""
+        site = self._hold_new(config)
+        site.pages[PAYE] = self.dated(self.OLD + "Revised again.", "2023-08-23T00:00:00+00:00")
+        assert [page.change for page in run(site, config)] == ["changed"]
+
+    def test_an_earlier_publication_date_alone_is_enough_when_that_is_all_either_side_has(self, config: CrawlConfig):
+        site = Site({PAYE: self.dated(self.NEW, "2026-09-01T00:00:00+00:00")}, urls=(PAYE,))
+        run(site, config)
+        due(config, PAYE)
+        site.pages[PAYE] = self.dated(self.OLD, "2024-01-01T00:00:00+00:00")
+        assert run(site, config) == []
+        assert state(config)["runs"][-1]["outcomes"]["older_than_held"] == 1
 
     def test_with_no_date_to_compare_the_change_goes_to_the_gate(self, config: CrawlConfig):
         """Unknown is not old: refusing here would freeze every undated page."""

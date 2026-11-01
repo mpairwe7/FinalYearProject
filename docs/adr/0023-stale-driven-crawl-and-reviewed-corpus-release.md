@@ -83,8 +83,8 @@ found unchanged writes nothing. Weekdays run `changes`; the last day of the mont
 `full`.
 
 **Older never replaces newer.** If the publisher's date on a response is earlier than
-the date held and the text differs, the held capture stands, unverified. PDFs compare
-their stated dates, in the crawler and the harvester. Many such responses hold the run,
+the same kind of date held and the text differs, the held capture stands, unverified.
+PDFs compare their stated dates, in the crawler and the harvester. Many such responses hold the run,
 because that is what a restored backup looks like. A name match no longer counts as
 verification, and a size match no longer counts as identity.
 

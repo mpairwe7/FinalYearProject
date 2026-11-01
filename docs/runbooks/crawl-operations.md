@@ -35,9 +35,11 @@ turns out unchanged writes no new capture.
 
 **Older never replaces newer.** If the publisher's own date on what came back is
 earlier than the date on what we hold, the held capture stands, the response counts as
-`older_than_held`, and the page is **not** marked verified. PDFs compare the dates they
-state about themselves. If either side has no date there is no evidence of age, so the
-change goes to the reviewer like any other.
+`older_than_held`, and the page is **not** marked verified. Like is compared with like:
+modified date with modified date, otherwise published with published, because URA does
+not always emit a modified date. PDFs compare the dates they state about themselves. With
+nothing comparable there is no evidence of age, so the change goes to the reviewer like
+any other.
 
 A page leaves the corpus when it is gone, moved, disallowed, marked `noindex`, opted out
 of AI use, emptied, quarantined, or unverified for 45 days

@@ -913,7 +913,8 @@ class _CrawlRun:
         heapq.heappush(self.frontier, (priority, order, self.sequence, url, depth))
 
     def _read_sitemaps(self) -> None:
-        indexes = [canonical_url(url, allowed_hosts=self.config.allowed_hosts) for url in SITEMAP_INDEX_URLS]
+        advertised = self._robots_for(PRIMARY_HOST).sitemaps
+        indexes = [canonical_url(url, allowed_hosts=self.config.allowed_hosts) for url in (*SITEMAP_INDEX_URLS, *advertised)]
         pending = [url for url in indexes if url]
         read: set[str] = set()
         while pending and not self._budget_spent():
@@ -1157,17 +1158,22 @@ class _CrawlRun:
     def _is_older_than_held(entry: dict[str, Any], page: ParsedPage) -> bool:
         """Whether *page* is an earlier version of what the ledger already holds.
 
-        Decided on the publisher's own dates, and only when both sides have one
-        and the text differs. No date means no evidence, and the change goes to
-        the gate like any other. A content hash cannot answer this: it says two
-        versions differ, not which is newer.
+        Decided on the publisher's own dates, and only when the text differs.
+        Like is compared with like: URA does not always emit a modified date, so
+        a revised page can arrive with only its original 2023 publication date,
+        and setting that against a held 2026 revision would refuse the newer
+        page. With nothing comparable there is no evidence, and the change goes
+        to the gate like any other. A content hash cannot answer this: it says
+        two versions differ, not which is newer.
         """
         held_hash = entry.get("content_hash")
         if not held_hash or held_hash == content_digest(page.text):
             return False
-        held = max(str(entry.get("published_at") or ""), str(entry.get("modified_at") or ""))
-        fetched = max(page.published_at, page.modified_at)
-        return bool(held and fetched and fetched < held)
+        held_modified = str(entry.get("modified_at") or "")
+        if held_modified and page.modified_at:
+            return page.modified_at < held_modified
+        held_published = str(entry.get("published_at") or "")
+        return bool(held_published and page.published_at and page.published_at < held_published)
 
     def _accept_html(
         self, url: str, requested: str, entry: dict[str, Any], result: FetchResult, depth: int
