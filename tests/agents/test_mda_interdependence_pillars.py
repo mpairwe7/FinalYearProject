@@ -290,6 +290,8 @@ def test_calculator_router_bypass_and_full_10_mda_planner_coverage_and_latency()
     assert infer_doc_family("PPDA e-GP and IFMS deemed VAT compliance") == "b2g_ppda_ifms_compliance"
     assert infer_doc_family("UNBS PVoC and NDAMIS single window UESW clearance") == "unbs_nda_uesw_clearance"
     assert {"mda_ntr_schedule", "b2g_ppda_ifms_compliance", "unbs_nda_uesw_clearance"}.issubset(_NON_REPLACING_FAMILIES)
+    from app.corpus_sync import validate_qdrant_sync_origin
+
     for nita_url in (
         "https://nita.go.ug/publications/it-certification-guidelines.pdf",
         "https://www.pdpo.go.ug/fees-schedule.pdf",
@@ -298,6 +300,7 @@ def test_calculator_router_bypass_and_full_10_mda_planner_coverage_and_latency()
         auth = classify_source_authority(nita_url)
         assert auth.tier == 1 and auth.trust == 1.0
         assert can_persist_to_qdrant(nita_url) is True
+        validate_qdrant_sync_origin(nita_url)
     block_nita_ntr = build_verified_facts(
         "I paid the UGX 100,000 PDPO data protection registration fee PRN, how does it reflect?"
     )

@@ -1301,6 +1301,7 @@ def harvest_remote_pdfs(
     mirror_dirs: Iterable[Path] = (),
     crawl_state_path: Path | None = None,
     max_pages_per_source: int = 5,
+    max_pdf_downloads: int | None = None,
     timeout: float = 30.0,
     page_fetcher: Callable[[str], str] | None = None,
     pdf_fetcher: Callable[[str], tuple[bytes, dict[str, str]]] | None = None,
@@ -1412,6 +1413,8 @@ def harvest_remote_pdfs(
 
     from concurrent.futures import ThreadPoolExecutor
 
+    if max_pdf_downloads is not None and max_pdf_downloads >= 0:
+        discovered_items = discovered_items[:max_pdf_downloads]
     max_workers = min(6, max(1, len(discovered_items)))
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = [(item, pool.submit(_probe_or_fetch_item, item)) for item in discovered_items]
@@ -1634,6 +1637,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--pdf-dir", type=Path, default=Path("Data/pdfs"))
     parser.add_argument("--crawl-state", type=Path, default=None, help="Optional crawl_state.json to record new PDFs")
     parser.add_argument("--max-pages-per-source", type=int, default=5)
+    parser.add_argument("--max-pdf-downloads", type=int, default=None, help="Cap total PDF downloads per run")
     parser.add_argument("--timeout", type=float, default=30.0)
     args = parser.parse_args(argv)
 
@@ -1647,6 +1651,7 @@ def main(argv: list[str] | None = None) -> int:
         include_mda_sources=args.include_mda_sources,
         crawl_state_path=args.crawl_state,
         max_pages_per_source=args.max_pages_per_source,
+        max_pdf_downloads=args.max_pdf_downloads,
         timeout=args.timeout,
     )
     summary = {
@@ -1656,8 +1661,16 @@ def main(argv: list[str] | None = None) -> int:
         "rejected_count": stats["rejected_count"],
         "page_errors_count": len(stats["page_errors"]),
         "downloaded_files": [d["pdf"] for d in stats["downloaded"]],
+        "rejected": stats["rejected"],
+        "page_errors": stats["page_errors"],
     }
     sys.stdout.write(json.dumps(summary, indent=2) + "\n")
+    if (
+        stats["downloaded_count"] == 0
+        and stats["verified_existing_count"] == 0
+        and (stats["page_errors"] or stats["rejected"])
+    ):
+        return 2
     return 0
 
 
