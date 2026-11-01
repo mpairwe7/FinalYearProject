@@ -499,6 +499,7 @@ owasp_agentic_2026:
     - id: "ASI06"
       name: "Memory & Context Poisoning"
       status: "mitigated"
+      crawl_write_path: "ADR-0023: every crawl write to the corpus is validated before commit and merged by a person. Only the publisher's live https site qualifies; hidden markup is stripped and instruction-bearing pages quarantined; a mass rewrite, removal or rollback holds the run; a page unverified for 45 days expires, measured from the last complete crawl; and older never replaces newer. G331, the live-sync path, stays off in production because it would bypass this gate."
       live_web_assurance: "ADR-0021: time-sensitive turns neither read nor write the semantic cache. auto_qdrant_web_sync can change the corpus from a user turn, and a compose overlay defaults it on, so production also requires WEB_SYNC_PRODUCTION_APPROVED. Outside production the flag alone suffices. A human review step for each change remains open (G331)."
       evidence: "App/backend/app/web_research.py, App/backend/app/memory/service.py, App/backend/app/officer_handoff.py, App/backend/app/memory/procedural.py"
       controls: "Tenant- and user-scoped 4-tier cognitive memory, low-ASR-confidence memory write suppression, and _-prefixed internal workflow state exclusion (G171); procedural memory reaches prompts only through reviewed curated triggers, as an operating sequence with no legal citations, and recorded or imported trajectories are validated, PII-redacted, bounded and barred from curated ids (G245)"
@@ -507,6 +508,9 @@ owasp_agentic_2026:
         - "App/backend/tests/test_memory_lifecycle.py"
         - "App/backend/tests/test_mcp_2026_october_audit_and_corpus.py"
         - "tests/agents/test_procedural_memory_safety.py"
+        - "tests/test_crawler.py"
+        - "tests/test_crawl_gate.py"
+        - "App/backend/tests/test_crawl_corpus.py"
     - id: "ASI07"
       name: "Insecure Inter-Agent Communication"
       status: "mitigated"
@@ -564,6 +568,14 @@ owasp_agentic_2026:
 
 aibom_inventory:
   schema: "CycloneDX-AIBOM-1.6"
+  datasets:
+    - id: "ura-website-crawl"
+      role: "Crawled ura.go.ug and parliament.go.ug pages in the retrieval corpus"
+      source: "Publisher's live https site only, per ml/scripts/data_aug/crawl_policy.py; never an archive"
+      provenance: "Each capture records final URL, HTTP status, raw SHA-256, fetch time and the publisher's dates. Data/crawl/crawl_state.json is the per-URL ledger and run record"
+      release_control: "app.crawl_gate verdict plus a reviewed pull request (ADR-0023)"
+      freshness_objective: "A complete crawl merged within 38 days (ura_crawl_last_full_run_timestamp_seconds); a page expires after 45 days unverified"
+      pending: "Pages captured before ADR-0023 carry no provenance (source_kind unverified) until the first full crawl re-reads them"
   speech_frameworks:
     - id: "pipecat-ai"
       version: "1.15.0"

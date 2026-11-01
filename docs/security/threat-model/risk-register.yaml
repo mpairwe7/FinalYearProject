@@ -577,3 +577,63 @@ risks:
     cwe: "CWE-306"
     owasp_llm: "LLM06"
     mitre_atlas: "AML.T0052"
+
+  - id: T-CRW-01
+    element: Crawl Pipeline
+    framework: STRIDE
+    stride_category: T
+    threat: A compromised or defaced publisher page, or instructions hidden in its markup, poisons the shared retrieval corpus (OWASP ASI06).
+    severity: Critical
+    cvss: "9.0"
+    existing_controls: Hidden markup stripped and kept as evidence; instruction-bearing pages quarantined; run held on mass rewrite or removal; a person merges every crawl (ADR-0023).
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: ml-team
+    cwe: "CWE-1039"
+    owasp_llm: "LLM04"
+    mitre_atlas: "AML.T0070"
+
+  - id: T-CRW-02
+    element: Crawl Pipeline
+    framework: STRIDE
+    stride_category: S
+    threat: Content from another host, or an archive copy of a withdrawn page, is filed under a URA address and treated as current.
+    severity: Critical
+    cvss: "8.6"
+    existing_controls: Exact-host https allowlist on every redirect hop; archives removed from the crawler; capture records final URL, status and digest (ADR-0023).
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: ml-team
+    cwe: "CWE-345"
+    owasp_llm: "LLM08"
+    mitre_atlas: "AML.T0070"
+
+  - id: T-CRW-03
+    element: Crawl Pipeline
+    framework: STRIDE
+    stride_category: T
+    threat: An older version replaces a newer one through a restored backup, a stale cache or a re-upload, and superseded guidance is served as current.
+    severity: High
+    cvss: "7.5"
+    existing_controls: Publisher dates compared before a capture is replaced; stated PDF dates compared; many older responses hold the run; crawled pages carry an edition so the newer passage wins (ADR-0023).
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: ml-team
+    cwe: "CWE-672"
+    owasp_llm: "LLM04"
+    mitre_atlas: "AML.T0020"
+
+  - id: T-CRW-04
+    element: Crawl Workflow
+    framework: STRIDE
+    stride_category: E
+    threat: A parser or dependency exploit in the crawl job reaches the repository write token, and so a production deploy.
+    severity: High
+    cvss: "8.1"
+    existing_controls: Read-only crawl job with no persisted credentials and a hash-locked install; the job with the token executes nothing from the crawl and can only open a pull request (ADR-0023).
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: devsecops-team
+    cwe: "CWE-829"
+    owasp_llm: "LLM03"
+

@@ -705,6 +705,47 @@ Reviewed on branch `fix/agentic-orchestrator-resilience-assurance-2026-10-31`; [
 | G375 🟡 | ~~The layer's speech fallback posted recordings to Google with no locale policy, budget or breaker.~~ | Fixed, and now opt-in through `STT_FALLBACK_BACKEND=gemini`. Open: service owner, on DPPA 2019 s.19, before anyone turns it on. |
 | G376 ⚪ | The layer's edits to app source are a base64 blob, so they do not appear in a review and CI does not run them. | Open: backend, to move them into the source. |
 
+**Agentic crawl assurance, 2026-11-01** ([review](plans/agentic-crawl-assurance-2026-11-01.md), [ADR-0023](adr/0023-stale-driven-crawl-and-reviewed-corpus-release.md)). Code fixed with regressions. Production acceptance needs the first full crawl from a runner (G406). Owner requirement: the crawl updates what became stale and never replaces what is current.
+
+| Gap | Finding | Status |
+| --- | --- | --- |
+| G377 🟢 | ~~archive.org's home page was stored as `https://ura.go.ug/en/tax-types` and selected for the index, and two Wayback pages were committed as PDFs under the names of URA guides.~~ | Fixed: redirects checked hop by hop, files removed, exporter refuses non-PDF bytes. |
+| G378 🟢 | ~~A failed fetch fell back to the oldest archived copy of a page and stamped today's date on it.~~ | Fixed: the crawler never fetches an archive. Scale unmeasurable, because source was never recorded. |
+| G379 🟢 | ~~The crawl had captured 265 of 2,021 site URLs and missed 81 of 90 changed since July, including URA's VAT, withholding and rental pages and the 2026 commencement notice.~~ | Fixed in code: sitemap discovery, link following, and a content root that no longer matches `justify-content-between`. |
+| G380 🟢 | ~~Unreviewed web text was pushed straight to `dev`, no build ran on it, and it shipped with the next unrelated PR.~~ | Fixed: a pull request a person merges. |
+| G381 🟢 | ~~`respect_robots=True` was read by nothing.~~ | Fixed: RFC 9309 applied. |
+| G382 🟢 | ~~The crawler and corpus fetchers presented browser User-Agents.~~ | Fixed: one honest identity. |
+| G383 🟢 | ~~The crawl had no idea of staleness: it re-read what had not changed and left the revised PAYE page unread.~~ | Fixed: stale-driven by `lastmod`, delisting, first sight and age. |
+| G384 🟢 | ~~An older version could replace a newer one.~~ | Fixed: publisher dates and stated PDF dates compared; the held copy stands. |
+| G385 🟢 | ~~Crawled pages had no edition, so an old page could outrank the one in force.~~ | Fixed: a page carries the fiscal year of its last revision. |
+| G386 🟢 | ~~The sources panel dated pages with the crawl, and the model saw no date.~~ | Fixed: `published_at`. A crawl date is never an effective date. |
+| G387 🟢 | ~~A page cut to a stub fell back to older text, and tombstones could not follow a crawled page.~~ | Fixed: ledger-driven selection; tombstones match the address. |
+| G388 🟢 | ~~A changed PDF kept its old bytes while the state recorded new ones.~~ | Fixed. |
+| G389 🟢 | ~~The harvester reported a revised statute as verified after no request, and filed a same-sized document as a copy of another.~~ | Fixed. |
+| G390 🟢 | ~~Counters and author archives spent the budget and churned captures.~~ | Fixed. |
+| G391 🟢 | ~~Hidden markup reached extraction.~~ | Fixed for inline concealment. Stylesheet hiding is G410. |
+| G392 🟢 | ~~Nothing screened a page before it entered the index.~~ | Fixed: quarantine at selection. |
+| G393 🟢 | ~~Merged table cells were dropped and tables moved away from their headings, in 46 tables holding figures.~~ | Fixed. |
+| G394 🟢 | ~~683 TINs and a personal mailbox were indexed.~~ | Fixed narrowly: URA's helpline stays. G411 for the DPO. |
+| G395 🟢 | ~~A line reading `18%` was dropped, `div` text was lost, truncation was silent and UTF-8 was guessed at.~~ | Fixed. |
+| G396 🟢 | ~~No gate stood between a defaced site and the corpus.~~ | Fixed: `app.crawl_gate`. |
+| G397 🟢 | ~~The job parsing hostile HTML held the write token, on an unpinned install.~~ | Fixed: split jobs, hash lock, policy tests. |
+| G398 🟢 | ~~Crawled PDFs skipped the upload guards.~~ | Fixed: vetted by the gate. |
+| G399 🟢 | ~~The harvester's page fetch and publications ingest followed redirects freely.~~ | Fixed. |
+| G400 🟢 | ~~The nightly freshness job could not fail, and `/v1/index/freshness` proved only self-consistency.~~ | Fixed: a real objective, a `crawl` block, metrics and alerts. |
+| G401 🟢 | ~~A crash lost the run, requests were concurrent and unbounded, and pages were fetched in cleartext.~~ | Fixed. |
+| G402 🟢 | ~~The offline fallback invented URA URLs.~~ | Removed. |
+| G403 🟢 | ~~`crawler.py` had no tests and was excluded from coverage.~~ | Fixed. |
+| G404 🟢 | ~~Training read every capture, superseded rates included.~~ | Fixed. |
+| G405 🟢 | ~~Crawl and corpus host lists disagreed.~~ | Fixed: held together by a test. |
+| G406 ⚪ | Nothing here has run against the live site: `ura.go.ug` refuses the review host. | Open: backend, by the runbook's acceptance probes. |
+| G407 ⚪ | `dev` has no branch protection, so the crawl review can be bypassed. | Open: repository owner. |
+| G408 ⚪ | Validity is per document, not per fact, and no check compares crawled figures with the rate tables. | Open: backend, tax policy. |
+| G409 ⚪ | Web Bot Auth not adopted; AIPREF handling rests on drafts. | Open: revisit when they stabilise. |
+| G410 ⚪ | Stylesheet-hidden text is not detected, and a plausible edit passes content checks by design. | Open: the merge is the control. |
+| G411 ⚪ | Company TINs on URA's list, a DPIA for crawled personal data, and the NISP's in-force status. | Open: DPO. |
+| G412 ⚪ | The first crawl grows the corpus about tenfold with no answer-quality baseline at that size. | Open: ML, on that pull request. |
+
 **Open follow-ups.**
 
 - `Data/eval/coverage_bank.jsonl` (105 taxpayer-voice probes) is entirely
@@ -1123,6 +1164,7 @@ full agent chain is locked.
 
 ---
 
+*Document version 2.7 — updated 2026-11-01: added the agentic crawl assurance review, G377-G412 (ADR-0023). Code fixes shipped with regressions; production acceptance open (G406).*
 *Document version 2.6 — updated 2026-10-30: closed G269 and G270 across 5-locale conversational intelligence (`conversational.py`: FY2026-27 UGX 300,000,000 VAT threshold alignment, English capability locale preservation, and Luganda/Swahili polite address particles), emotional intelligence (`text_signals.py`, `tools/empathy.py`, `audit/governance_v3.py`: 5-locale hopelessness, phrasal self-harm crisis detection with windowed indirect-negation guard `_CRISIS_NEGATION_PREFIX_RE`, enforcement/deadline-today/Bantu-scale high-stakes detection, server-gated `wellbeing_checkin`, and crisis scorecard exemption), ISO 24495-1 structuring/paragraphing/numbering & duplex TN/ITN figure normalization (`guardrails.py`, `number_words.py`, `speech_normalization.py`, `entailment.py`, `mt.py`: mixed prose+table paragraphing, nested parenthesized step indentation, word-bounded/comma-safe 5-locale ordinal unsmashing, descending multi-scale compound vernacular amount folding via `parse_vernacular_scale_amount_at` / `normalize_vernacular_amount_words`, Runyankole `eigana`/`igana`/`kikumi` + Whisper-SALT `aha kikuru` ASR repair, negative zero-whole decimal words, and zero-cent `.00` stripping), and MCP `SEP-2106` tool validation & identifier grounding (`mcp/validation.py`, `connector_intent.py`, `calculator_router.py`, `models.py`: external `$ref` SSRF guard, Bantu scale-prefix & integer TIN/PRN coercion/grounding, word-bounded currency matching, TIN/PRN/BRN/NIN/FDN/EFD exclusion from UGX amount extraction, and `ChatResponse.connectors_used` parity), pinned in `tests/agents/test_conversational_intelligence.py` and `tests/agents/test_cx_99000_multimodal_ngrok.py` (`99,000 / 99,000` TTT+STT+TTS scenarios + live ngrok suites).*
 *Document version 2.5 — updated 2026-09-17: closed G59 (vernacular numeral & idiom disambiguation: Luganda verb 'saba' vs Swahili numeral '7', 'mtu wa tatu', 'ekiwandiiko 1.2', currency qualifiers 'milioni'/'obukadde'/'emitwalo'), G60 (W3C SSE multiline event-buffered reader loop in page.tsx and list unsmashing normalizers resolving chat UI procedural step collapse), and G61 (multiline sentence splitting in text_signals.py and cross-passage corroboration in claim_verifier.py eliminating false low-faithfulness escalations on URA service catalogs). Verified 100% accuracy on 1,000 FAQs, 300 FAQs, and 100 FAQs multimodal benchmarks.*
 *Document version 2.4 — updated 2026-09-16: resolved G59 closing the 100-FAQ multimodal benchmark accuracy gap. Wired missing statutory heads (mobile money withdrawal excise 0.5%, presumptive threshold 10m-150m, TPCA late-filing penalty 200k/2%) into FY2026-27 rate table and calculator router fast lookups; added local government tax out-of-scope handler; improved small-business FAQ priority routing; added stale PDF chunk discounting; and corrected leaky benchmark gold labels.*

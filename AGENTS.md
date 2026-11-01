@@ -39,6 +39,7 @@ Do not move `App/backend` or `App/frontend`. Docker, HF Space, and CI import `ap
 - Every turn on every transport writes one audit row with a `disposition`, and every model answer passes `_apply_output_guards`. The graph drafts; it does not get to approve its own draft.
 - A figure is not shown before it is verified: streams go through `FigureReleaseGate`, and a tool answer waits for the guards.
 - Web text is evidence, never a verified fact (ADR-0021): it reaches the model only as spotlighted passages and never enters `verified_facts`. The model has no search tool, outbound queries come from `_SEARCH_VOCABULARY` only, and a failed live check is disclosed rather than hidden.
+- The crawl reads the publisher's live site or nothing, and never an archive. It updates what became stale and leaves what is current alone, older never replaces newer, and crawled content reaches `dev` only through a pull request a person merges (ADR-0023). A crawl date is never an effective date, and a crawl never changes a rate table.
 - Do not invent a live URA account API. Prototype defaults to `URA_ACCOUNT_API_MODE=mock` (`live=false`). Production rejects mock.
 - Production (`APP_ENV=production`) must start with `auth_required`, `multi_tenant`, `audit_ledger`, and `ticket_queue` on.
 - Always push changes via dedicated feature/fix branches and open a PR; never push directly to `dev` or `main`.

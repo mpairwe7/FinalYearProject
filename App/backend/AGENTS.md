@@ -46,6 +46,7 @@ PYTHONPATH=App/backend python3 -m app.seed_prototype   # development only
 - `URA_ACCOUNT_API_MODE=mock` is sandbox only (`live=false`). Production rejects it.
 - Production gap gates: `app/production_readiness.py` (malware isolated parse, https publications, RLS ack, no seed, no live notify). See `docs/PRODUCTION_GATES.md`.
 - Publications ingest hashes `URA_PUBLICATIONS_URL` and enqueues reindex. Never auto-`--recreate`.
+- `crawl_corpus.review_pages` decides what a crawl may contribute, from the ledger in `Data/crawl/crawl_state.json`, and must stay free of the clock so export and ingest agree. `crawl_gate` is what a crawl must pass before a person sees it. A corpus fetch uses `CORPUS_FETCH_USER_AGENT`, checks each redirect hop and never treats a name or a size as proof of identity (ADR-0023).
 - Flag PATCH persists to `flag_overrides` on **this replica**. Cluster-wide still needs `FLAG_*`.
 - Metrics go through `analytics.metrics` only (never `prometheus_client` directly): label values must be bounded (route templates, enums), and a rule or dashboard panel may only name series the code emits — `tests/test_monitoring_config.py` fails otherwise.
 - A new chat transport calls `record_chat_turn` once per turn and audits through `ChatModel.record_turn_audit` (or goes through `run_chat_turn`, which does both). Audit the text that was served, after localization.

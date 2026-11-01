@@ -378,6 +378,43 @@ curl -X POST http://localhost:8887/v1/index \
 
 ---
 
+### Index and Corpus Freshness
+
+```http
+GET /v1/index/freshness
+```
+
+Two different questions. `ok` says the index matches the corpus shipped in this image,
+which a baked image satisfies by construction. `crawl` says how old that corpus is
+against URA's site, and is `null` when no crawl manifest shipped. Read `crawl` to judge
+whether answers may be out of date (ADR-0023).
+
+**Response Example**
+```json
+{
+  "ok": true,
+  "corpus_hash": "4870de5c...",
+  "index_drift": false,
+  "drift_count": 0,
+  "crawl": {
+    "last_full_run_at": "2026-11-30T05:12:09Z",
+    "last_changes_run_at": "2026-11-27T04:41:33Z",
+    "oldest_verified_at": "2026-11-02T04:58:12Z",
+    "pages_live": 1412,
+    "pages_unverified": 0,
+    "pages_undated": 31,
+    "excluded": {"below_floor": 287, "gone": 4},
+    "quarantined": []
+  }
+}
+```
+
+Citations in chat responses carry `published_at` when the source is a web page: the
+publisher's own date, `YYYY-MM-DD`. `effective_date` is a fiscal year or an effective-from
+date, and is never the date a page was crawled.
+
+---
+
 ### Ask for a Human Officer
 
 Hand the conversation to a URA officer because the **taxpayer asked**.
