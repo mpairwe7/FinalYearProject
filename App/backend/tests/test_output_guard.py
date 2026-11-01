@@ -220,6 +220,27 @@ class OutputGuardSanitizerTests(unittest.TestCase):
         table_norm = OutputGuard.normalize_structure(table_with_bold_bullet)
         self.assertIn("| ID | Note: - **National ID (NIN)** required |", table_norm)
 
+    def test_numbering_and_bulleting_unsmashing_and_subbullet_continuity(self) -> None:
+        """Verify inline bullets, inline continuation steps, and colon-step sub-bullet renumbering."""
+        inline_bullets = "Required documents: • National ID (NIN) • Active phone number • Email address"
+        bullet_norm = OutputGuard.normalize_structure(inline_bullets)
+        self.assertIn("- National ID (NIN)", bullet_norm)
+        self.assertIn("- Active phone number", bullet_norm)
+        self.assertIn("- Email address", bullet_norm)
+
+        inline_steps = "To register: 1. Visit https://ura.go.ug 2. Navigate to **eServices** 3. Submit the form"
+        step_norm = OutputGuard.normalize_structure(inline_steps)
+        self.assertIn("1. Visit https://ura.go.ug\n\n2. Navigate to **eServices**\n\n3. Submit the form", step_norm)
+
+        colon_step_sublist = (
+            "1. Open the URA portal:\n\n"
+            "- Enter your TIN\n"
+            "- Enter your password\n\n"
+            "1. Submit the return"
+        )
+        colon_norm = OutputGuard.normalize_structure(colon_step_sublist)
+        self.assertIn("2. Submit the return", colon_norm)
+
 
 if __name__ == "__main__":
     unittest.main()

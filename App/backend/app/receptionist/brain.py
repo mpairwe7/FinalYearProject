@@ -356,7 +356,7 @@ _TRAILING_ABBREVIATION_RE = re.compile(
     re.IGNORECASE,
 )
 _UNPUNCTUATED_BULLET_OR_HEADING_RE = re.compile(
-    r"^([ \t]*(?:[-*+•][ \t]+[^\n]+|#{1,6}[ \t]+[^\n]+|\*\*[^*\n]+\*\*(?:[ \t]*\([^\n)]+\))?))[ \t]*$",
+    r"^([ \t]*(?:[-*+•][ \t]+[^\n]+|#{1,6}[ \t]+[^\n]+|\*\*[^*\n]+\*\*(?:[ \t]*\([^\n)]+\))?|\d{1,2}[.)][ \t]+(?![^\n]*[ \t]\d{1,2}[.)][ \t])[^\n]+))[ \t]*$",
     re.MULTILINE,
 )
 _STEP_OR_BULLET_START_RE = re.compile(
@@ -1801,7 +1801,9 @@ class UraReceptionistBrain(LLMService):
         cleaned_reply = _WRITTEN_FOOTER_STRIP_RE.sub("", reply).strip() or reply
         sentences = _split_into_sentences(cleaned_reply)
         max_sentences = get_max_spoken_sentences()
-        bullet_count = sum(1 for s in sentences if _STEP_OR_BULLET_START_RE.match(s))
+        bullet_count = sum(
+            1 for s in sentences if _STEP_OR_BULLET_START_RE.match(s) or re.search(r":\s+\d{1,2}[.)]\s+", s)
+        )
         if (
             bullet_count >= 2
             and len(cleaned_reply.split()) <= 75

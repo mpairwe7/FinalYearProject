@@ -121,7 +121,8 @@ def _format_table_row_for_speech(match: re.Match[str]) -> str:
 
 # Headers and list bullets
 _HEADER_RE = re.compile(r"^[ \t]*#{1,6}[ \t]+", re.MULTILINE)
-_BULLET_RE = re.compile(r"^[ \t]*[-*+][ \t]+", re.MULTILINE)
+_BULLET_RE = re.compile(r"^[ \t]*[-*+•][ \t]+", re.MULTILINE)
+_INLINE_BULLET_GLYPH_RE = re.compile(r"[ \t]*[•►▪▫][ \t]+")
 _SECTION_EMOJI_RE = re.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]\ufe0f?[ \t]*")
 
 # Markdown bold / italics
@@ -208,7 +209,14 @@ _TOLLFREE_PAIRS_RE = re.compile(r"\b0800[ \t-]+(\d{2})[ \t-]+(\d{2})[ \t-]+(\d{2
 
 # Numbered steps for cadence and pacing
 _NUMBERED_STEP_RE = re.compile(r"^[ \t]*(\d{1,2})[.)][ \t]+", re.MULTILINE)
-_INLINE_STEP_AFTER_PUNCT_RE = re.compile(r"([:;.!?])[ \t]+(\d{1,2})[.)][ \t]+(?=[A-Z*])")
+_INLINE_STEP_ONE_AFTER_PUNCT_RE = re.compile(
+    r"(?<!\bSec)(?<!\bCap)(?<!\bArt)(?<!\bNo)(?<!\bPara)(?<!\bReg)(?<!\bPt)(?<!\bs)(?<!\bss)([:;.!?])[ \t]+(1)[.)][ \t]+(?=[A-Z*])",
+    re.IGNORECASE,
+)
+_INLINE_STEP_AFTER_PUNCT_RE = re.compile(
+    r"(?<!\bSec)(?<!\bCap)(?<!\bArt)(?<!\bNo)(?<!\bPara)(?<!\bReg)(?<!\bPt)(?<!\bs)(?<!\bss)([:;.!?])[ \t]+([2-9]|1[0-2])[.)][ \t]+(?=[A-Z*])",
+    re.IGNORECASE,
+)
 _INLINE_STEP_CONT_RE = re.compile(r"(?<![.!?:;\n])[ \t]+([2-9]|1[0-2])[.)][ \t]+(?=[A-Z*])")
 _BREADCRUMB_ARROW_RE = re.compile(
     r"(?<=[A-Za-z0-9*_)\]])[ \t]*(?:->|→)[ \t]*(?=[A-Za-z0-9*_(\[])"
@@ -598,8 +606,9 @@ def _format_numbered_steps(text: str, locale: str) -> str:
     """Convert both line-start and inline numbered steps (1., 2., 3.) into paced locale step headers."""
     step_word = _STEP_WORD.get(locale, "Step")
     out = _NUMBERED_STEP_RE.sub(rf"{step_word} \1: ", text)
-    out = _INLINE_STEP_AFTER_PUNCT_RE.sub(rf"\1 {step_word} \2: ", out)
+    out = _INLINE_STEP_ONE_AFTER_PUNCT_RE.sub(rf"\1 {step_word} \2: ", out)
     if f"{step_word} 1: " in out:
+        out = _INLINE_STEP_AFTER_PUNCT_RE.sub(rf"\1 {step_word} \2: ", out)
         out = _INLINE_STEP_CONT_RE.sub(rf". {step_word} \1: ", out)
     return out
 
@@ -771,6 +780,7 @@ def clean_text_for_speech(text: str, locale: str = "en", *, verbalize_digits: bo
     # 5. Strip Markdown headers, bullet points, and decorative section emojis
     t = _HEADER_RE.sub("", t)
     t = _BULLET_RE.sub("", t)
+    t = _INLINE_BULLET_GLYPH_RE.sub(", ", t)
     t = _SECTION_EMOJI_RE.sub("", t)
 
     # 6. Strip bold / italic markers
@@ -840,10 +850,13 @@ def clean_text_for_speech(text: str, locale: str = "en", *, verbalize_digits: bo
     t = _GENERAL_TOLLFREE_RE.sub(r"0 800, \1, \2", t)
     t = _TOLLFREE_PAIRS_RE.sub(r"0 800, \1, \2, \3", t)
 
+    # 7d2. Legal section references: Sec. 118A -> Section 118A (before step pacing so "Sec. 12. Every" is never read as Step 12)
+    t = _SEC_RE.sub(r"Section \1", t)
+
     # 7e. Paced numbered steps for structured guidance (both line-start and inline)
     t = _format_numbered_steps(t, locale)
 
-    # 7e. A range's dash is a "to"
+    # 7f. A range's dash is a "to"
     t = _RANGE_RE.sub(lambda m: f"{m.group(1)} {_RANGE_WORD.get(locale, 'to')} ", t)
 
     # 8. Currency amounts (UGX and USD)
@@ -861,9 +874,6 @@ def clean_text_for_speech(text: str, locale: str = "en", *, verbalize_digits: bo
         t = _ACH_PCT_RE.sub(_ach_percent, t)
     else:
         t = _PCT_RE.sub(r"\1 percent", t)
-
-    # 10. Legal section references: Sec. 118A -> Section 118A
-    t = _SEC_RE.sub(r"Section \1", t)
 
     # 11. Domain acronym expansion for phonetics
     for pattern, replacement in _ACRONYMS:

@@ -236,6 +236,20 @@ function splitLongParagraph(text: string): string[] {
  * paragraph.
  */
 function asEnumeration(text: string): { lead: string; items: string[] } | null {
+  if (text.includes("•")) {
+    const bulletParts = text
+      .split("•")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    const hasLead = !text.trimStart().startsWith("•");
+    const lead = hasLead ? (bulletParts.shift() ?? "").trim() : "";
+    const items = bulletParts
+      .map((p) => p.replace(/[.;]+$/, "").trim())
+      .filter(Boolean);
+    if (items.length >= 2 && items.every((p) => p.length <= 220)) {
+      return { lead, items };
+    }
+  }
   // A lead-in is the common shape ("Core services include: a; b; c") but not a
   // required one — the corpus also stores bare lists that open straight into
   // the first item ("Pension; employer-paid medical expenses; …", "6%
@@ -307,12 +321,13 @@ function asNumberedProcedure(text: string): { lead: string; items: string[] } | 
       end: m.index + m[0].length,
     });
   }
-  if (found.length < 3) return null;
+  if (found.length < 2) return null;
   if (found[0].n !== 1) return null;
   for (let i = 1; i < found.length; i++) {
     if (found[i].n !== found[i - 1].n + 1) return null;
   }
   const lead = text.slice(0, found[0].start).trim();
+  if (found.length === 2 && lead && !lead.endsWith(":")) return null;
 
   const items: string[] = [];
   for (let i = 0; i < found.length; i++) {
@@ -322,6 +337,7 @@ function asNumberedProcedure(text: string): { lead: string; items: string[] } | 
       item = item.replace(/[.;,]+$/, "").trim();
     }
     if (!item) return null;
+    if (found.length === 2 && item.length > 220) return null;
     items.push(item);
   }
   return { lead, items };
@@ -389,6 +405,8 @@ function parseBlocks(src: string): Block[] {
   const lines = stripCitationMarkers(src).split("\n");
   const blocks: Block[] = [];
   let i = 0;
+  let nextOrderedStep = 1;
+  let prevBlockWasSublist = false;
 
   while (i < lines.length) {
     const line = lines[i];
@@ -404,6 +422,8 @@ function parseBlocks(src: string): Block[] {
       }
       const blockType = DIAGRAM_LANGS.has(lang.toLowerCase()) ? "diagram" : "code";
       blocks.push({ type: blockType, text: codeLines.join("\n"), lang });
+      nextOrderedStep = 1;
+      prevBlockWasSublist = false;
       i++;
       continue;
     }
@@ -411,6 +431,8 @@ function parseBlocks(src: string): Block[] {
     // HR
     if (/^-{3,}$/.test(line.trim())) {
       blocks.push({ type: "hr" });
+      nextOrderedStep = 1;
+      prevBlockWasSublist = false;
       i++;
       continue;
     }
@@ -424,6 +446,8 @@ function parseBlocks(src: string): Block[] {
         i++;
       }
       blocks.push({ type: "table", rows });
+      nextOrderedStep = 1;
+      prevBlockWasSublist = false;
       continue;
     }
 
@@ -431,6 +455,8 @@ function parseBlocks(src: string): Block[] {
     const hMatch = line.match(/^(#{1,4})\s+(.+)/);
     if (hMatch) {
       blocks.push({ type: "heading", level: hMatch[1].length, text: hMatch[2] });
+      nextOrderedStep = 1;
+      prevBlockWasSublist = false;
       i++;
       continue;
     }
@@ -443,6 +469,8 @@ function parseBlocks(src: string): Block[] {
         calloutKind: calloutMatch[1].toLowerCase(),
         text: calloutMatch[2].replace(/(?:\*{1,2}|_)$/, "").trim(),
       });
+      nextOrderedStep = 1;
+      prevBlockWasSublist = false;
       i++;
       continue;
     }
@@ -455,6 +483,8 @@ function parseBlocks(src: string): Block[] {
         i++;
       }
       blocks.push({ type: "blockquote", text: qLines.join("\n") });
+      nextOrderedStep = 1;
+      prevBlockWasSublist = false;
       continue;
     }
 
@@ -477,7 +507,14 @@ function parseBlocks(src: string): Block[] {
           break;
         }
       }
+      const followsOl = blocks.length > 0 && blocks[blocks.length - 1].type === "ol";
       blocks.push({ type: "ul", items });
+      if (followsOl) {
+        prevBlockWasSublist = true;
+      } else {
+        nextOrderedStep = 1;
+        prevBlockWasSublist = false;
+      }
       continue;
     }
 
@@ -501,13 +538,18 @@ function parseBlocks(src: string): Block[] {
         }
       }
       const firstNumMatch = items[0]?.match(/^(\d+)[.)]\s+/);
-      const startNum = firstNumMatch ? Number(firstNumMatch[1]) : 1;
+      const rawStartNum = firstNumMatch ? Number(firstNumMatch[1]) : 1;
+      const effectiveStart =
+        rawStartNum > 1 ? rawStartNum : prevBlockWasSublist && nextOrderedStep > 1 ? nextOrderedStep : 1;
       const expanded = items.flatMap((it) => asNumberedProcedure(it)?.items ?? [it]);
+      const cleanedItems = expanded.map((it) => it.replace(/^\d+[.)]\s+/, ""));
       blocks.push({
         type: "ol",
-        start: startNum > 1 ? startNum : undefined,
-        items: expanded.map((it) => it.replace(/^\d+[.)]\s+/, "")),
+        start: effectiveStart > 1 ? effectiveStart : undefined,
+        items: cleanedItems,
       });
+      nextOrderedStep = effectiveStart + cleanedItems.length;
+      prevBlockWasSublist = false;
       continue;
     }
 
@@ -546,14 +588,20 @@ function parseBlocks(src: string): Block[] {
       if (procedure) {
         if (procedure.lead) blocks.push({ type: "paragraph", text: procedure.lead });
         blocks.push({ type: "ol", items: procedure.items });
+        nextOrderedStep = procedure.items.length + 1;
+        prevBlockWasSublist = false;
         continue;
       }
       const enumerated = asEnumeration(chunk);
       if (enumerated) {
         if (enumerated.lead) blocks.push({ type: "paragraph", text: enumerated.lead });
         blocks.push({ type: "ul", items: enumerated.items });
+        nextOrderedStep = 1;
+        prevBlockWasSublist = false;
       } else {
         blocks.push({ type: "paragraph", text: chunk });
+        nextOrderedStep = 1;
+        prevBlockWasSublist = false;
       }
     }
   }

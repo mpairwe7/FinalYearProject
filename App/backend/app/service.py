@@ -5937,7 +5937,7 @@ class ChatModel:
         ``"{lead} {text}"`` so non-procedural text is left untouched.
         """
         clean = " ".join((text or "").split())
-        parts = [p.strip(" .;") for p in clean.split(";")]
+        parts = [re.sub(r"^\(?(\d{1,2})[.)]\s*", "", p.strip(" .;")).strip() for p in clean.split(";")]
         parts = [p for p in parts if p]
         if len(parts) < 2:
             return f"{lead} {clean}".strip()

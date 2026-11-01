@@ -573,5 +573,15 @@ def test_markdown_table_rows_and_separators_are_spoken_cleanly():
     assert "Zero-rated: 0 percent." in res
 
 
+def test_sec_citation_and_unicode_bullets_are_not_misread_as_steps():
+    raw = "Under Sec. 12. Every taxpayer must provide:\n• National ID\n• TIN certificate"
+    res = clean_text_for_speech(raw, locale="en")
+    assert "Step 12" not in res
+    assert "Section 12. Every taxpayer" in res
+    assert "•" not in res
+    assert "National ID" in res
+
+
+
 
 

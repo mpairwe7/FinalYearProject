@@ -992,14 +992,16 @@ def _renumber_ordered_lines(lines: list[str]) -> list[str]:
 
     A jump such as step 2 followed by "18. The Act" ends the list. A deeper
     indent is its own list, so a nested "1." does not become the parent's 3.
-    Indented bullet sub-items or continuation lines under an active step stay
-    inside that step without resetting the parent ordered list counter, while
-    an unindented top-level bullet list separated by a blank line starts a new
-    section and resets the ordered list counter.
+    Indented bullet sub-items, bullet lists under a colon-introduced step, or
+    indented continuation lines under an active step stay inside that step
+    without resetting the parent ordered list counter, while an unindented
+    top-level bullet list separated by a blank line after a non-colon step
+    starts a new section and resets the ordered list counter.
     """
     stacks: list[list[int]] = []
     new_lines: list[str] = []
     saw_blank = False
+    step_expects_subitems = False
     for line in lines:
         matched = re.match(r"^(\s*)(\d{1,2})([.)])(\s+.*)$", line)
         if matched is None:
@@ -1008,17 +1010,24 @@ def _renumber_ordered_lines(lines: list[str]) -> list[str]:
                 saw_blank = True
             else:
                 line_indent = len(line[: len(line) - len(line.lstrip())].replace("\t", "    "))
-                is_bullet_subitem = bool(re.match(r"^[-*+]\s+", stripped_line))
-                if stacks and (line_indent > stacks[0][0] or (is_bullet_subitem and line_indent > 0 and not saw_blank)):
+                is_bullet_subitem = bool(re.match(r"^[-*+•]\s+", stripped_line))
+                if stacks and (
+                    line_indent > stacks[0][0]
+                    or (is_bullet_subitem and (line_indent > 0 or step_expects_subitems or not saw_blank))
+                ):
                     while len(stacks) > 1 and stacks[-1][0] >= line_indent:
                         stacks.pop()
+                    if not is_bullet_subitem and not stripped_line.rstrip("*_").endswith(":"):
+                        step_expects_subitems = False
                 else:
                     stacks.clear()
+                    step_expects_subitems = False
                 saw_blank = False
             new_lines.append(line)
             continue
         saw_blank = False
         indent, num_s, delim, rest = matched.groups()
+        step_expects_subitems = rest.rstrip().rstrip("*_").endswith(":")
         indent_len = len(indent.replace("\t", "    "))
         raw = int(num_s)
         while stacks and stacks[-1][0] > indent_len:
@@ -1363,8 +1372,12 @@ class OutputGuard:
                 text = re.sub(r"^([A-Z][a-zA-Z0-9 \'\-]{3,35}?)([:,\.][ \t]+)", r"**\1**\2", text)
 
         # Bold numbered list headers if followed by a colon on the same line (e.g. '\n1. Tax Administration:' -> '\n1. **Tax Administration**:')
-        text = re.sub(r"(?:^|\n)(\s*\d{1,2}\.\s+)(?!\*\*)([A-Za-z0-9 /&,-]+?):([ \t]+)", r"\n\1**\2**:\3", text)
-        # Separate smashed bullet items on the same line (e.g. 'including:* Item' or 'laws.- **Item**')
+        text = re.sub(
+            r"(?:^|\n)(\s*\d{1,2}\.\s+)(?!\*\*)([A-Za-z0-9 /&,'’()-]{1,45}?):([ \t]+)",
+            r"\n\1**\2**:\3",
+            text,
+        )
+        # Separate smashed bullet items and inline continuation steps on the same line
         # while skipping pipe-table rows and fenced code blocks.
         unsmashed_lines: list[str] = []
         in_fence = False
@@ -1376,14 +1389,25 @@ class OutputGuard:
             if not in_fence and "|" not in line:
                 line = re.sub(
                     r"([;:])[ \t]*([*\-•])(?!\*)[ \t]*(\*{0,2}[A-Za-z])",
-                    r"\1\n\n\2 \3",
+                    r"\1\n\n- \3",
                     line,
                 )
                 line = re.sub(
                     r"([a-z0-9\)])\.[ \t]*([*\-•])(?!\*)[ \t]*(\*{0,2}[A-Za-z])",
-                    r"\1.\n\n\2 \3",
+                    r"\1.\n\n- \3",
                     line,
                 )
+                line = re.sub(
+                    r"(?<=\S)[ \t]+[►▪▫•][ \t]+(\*{0,2}[A-Za-z0-9])",
+                    r"\n\n- \1",
+                    line,
+                )
+                if re.match(r"^\s*1\.\s+", line):
+                    line = re.sub(
+                        r"(?i)(?<!\bsection)(?<!\bsec\.)(?<!\barticle)(?<!\bart\.)(?<!\bcap\.)(?<!\bschedule)(?<!\bform)(?<!\bpart)(?<!\brule)(?<!\btable)(?<!\bband)(?<!\bmethod)(?<!\btier)(?<!\bpage)(?<!\bitem)(?<!\bugx)(?<!\busd)(?<!\bshs)(?<!\bto)(?<!\band)(?<!\bor)[ \t]+([2-9]|1[0-2])[\.\)][ \t]+(\*{0,2}[A-Z])",
+                        r"\n\n\1. \2",
+                        line,
+                    )
             unsmashed_lines.append(line)
         text = "\n".join(unsmashed_lines)
         # Ensure blank line before and after markdown headings

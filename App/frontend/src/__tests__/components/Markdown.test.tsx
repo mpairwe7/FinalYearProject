@@ -98,4 +98,25 @@ describe("Markdown", () => {
     expect(paras.some((p) => p.endsWith("Cap."))).toBe(false);
     expect(container.textContent).toContain("Sec. 15 of the Tax Procedures Code Act, Cap. 343");
   });
+
+  it("renders inline bullet glyphs and 2-step colon-led procedures as semantic lists, and continues ol numbering across sub-lists", () => {
+    const { container: c1 } = render(
+      <Markdown content={"Required documents: • National ID (NIN) • Active phone number • Email address"} />,
+    );
+    expect(c1.querySelectorAll("ul li")).toHaveLength(3);
+
+    const { container: c2 } = render(
+      <Markdown content={"To apply online: 1. Visit the URA web portal. 2. Submit the application form."} />,
+    );
+    expect(c2.querySelectorAll("ol li")).toHaveLength(2);
+
+    const { container: c3 } = render(
+      <Markdown
+        content={"1. Open the URA portal:\n- Enter your TIN\n- Enter your password\n1. Submit the return"}
+      />,
+    );
+    const ols = c3.querySelectorAll("ol");
+    expect(ols).toHaveLength(2);
+    expect(ols[1]).toHaveAttribute("start", "2");
+  });
 });
