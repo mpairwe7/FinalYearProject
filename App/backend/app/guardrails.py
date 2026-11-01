@@ -1278,14 +1278,12 @@ class OutputGuard:
         text = re.sub(r"([;:\.!?])[ \t]*(?:Me\s+angwen|Rwom\s+me\s+angwen)\b[:\.,]?[ \t]*", r"\1\n\n4. **Me angwen**: ", text, flags=re.IGNORECASE)
         text = re.sub(r"([;:\.!?])[ \t]*(?:Me\s+abic|Rwom\s+me\s+abic)\b[:\.,]?[ \t]*", r"\1\n\n5. **Me abic**: ", text, flags=re.IGNORECASE)
 
-        # Clean stray comma before citation+period or before period (e.g. 'portal, [1].' -> 'portal [1].', 'portal,.' -> 'portal.')
+        # Clean stray comma before citation+period (e.g. 'portal, [1].' -> 'portal [1].')
         text = re.sub(r",(\s*\[\d+(?:\s*[,;]\s*\d+)*\])\.", r"\1.", text)
-        text = re.sub(r",\.(?=\s|$|[A-Z\"'\)\]])", ".", text)
         # Unsmash web domain names glued to capitalized words (e.g. '.ugThese' -> '.ug\n\nThese')
         text = re.sub(r"(\.(?:ug|go\.ug|com|org|net))([A-Z])", r"\1\n\n\2", text)
-        # Unsmash sentence punctuation (. ! ?) glued to capital words (e.g. 'Hello!Uganda' -> 'Hello! Uganda', '(TIN).Please' -> '(TIN). Please')
-        text = re.sub(r"([a-zA-Z\)\]])([!?])([A-Z])", r"\1\2 \3", text)
-        text = re.sub(r"([a-z\)\]])\.([A-Z][a-z])", r"\1. \2", text)
+        # Unsmash sentence punctuation glued to capital words (e.g. 'Uganda.Here' -> 'Uganda. Here')
+        text = re.sub(r"([a-z])\.([A-Z])", r"\1. \2", text)
 
         # Separate lead-in from first numbered item if smashed on same line (e.g. 'offered:1.Tax' or 'services:1.**')
         # Requires (?<!\d) and statutory abbreviation lookbehinds before punctuation so decimal numbers (1.5%),
@@ -1351,6 +1349,28 @@ class OutputGuard:
                 unsmashed_lines.append(line)
                 continue
             if not in_fence and "|" not in line:
+                protected_spans: list[str] = []
+
+                def _mask_protected(m: re.Match[str]) -> str:
+                    protected_spans.append(m.group(0))
+                    return f"\x00PROT{len(protected_spans) - 1}\x00"
+
+                masked_line = re.sub(
+                    r"`[^`]+`|\[[^\]]+\]\([^)]+\)|(?:https?://|www\.)\S+",
+                    _mask_protected,
+                    line,
+                )
+                masked_line = re.sub(r",\.(?=\s|$|[A-Z\"'\)\]])", ".", masked_line)
+                masked_line = re.sub(r"([a-zA-Z\)\]])([!?])([A-Z])", r"\1\2 \3", masked_line)
+                masked_line = re.sub(r"([a-z\)\]])\.([A-Z][a-z])", r"\1. \2", masked_line)
+                masked_line = re.sub(
+                    r"(?<=\S)[ \t]+[►▪▫•][ \t]+(\*{0,2}[A-Za-z0-9])",
+                    r"\n\n- \1",
+                    masked_line,
+                )
+                for idx, span in enumerate(protected_spans):
+                    masked_line = masked_line.replace(f"\x00PROT{idx}\x00", span)
+                line = masked_line
                 if (
                     not re.match(r"^\s*(?:[-*+•]|\d{1,2}[.)]|#{1,6})\s+", line)
                     and re.match(
@@ -1371,21 +1391,6 @@ class OutputGuard:
                     r"\1.\n\n- \3",
                     line,
                 )
-                code_spans: list[str] = []
-
-                def _mask_code(m: re.Match[str]) -> str:
-                    code_spans.append(m.group(0))
-                    return f"\x00CODE{len(code_spans) - 1}\x00"
-
-                masked_line = re.sub(r"`[^`]+`", _mask_code, line)
-                masked_line = re.sub(
-                    r"(?<=\S)[ \t]+[►▪▫•][ \t]+(\*{0,2}[A-Za-z0-9])",
-                    r"\n\n- \1",
-                    masked_line,
-                )
-                for idx, span in enumerate(code_spans):
-                    masked_line = masked_line.replace(f"\x00CODE{idx}\x00", span)
-                line = masked_line
                 lead_m = re.match(r"^(\s*)1\.\s+", line)
                 if lead_m:
                     lead_indent = lead_m.group(1)
@@ -1413,8 +1418,12 @@ class OutputGuard:
                 flags=re.IGNORECASE,
             ):
                 prev_non_empty = next((split_lines[p].strip() for p in range(idx - 1, -1, -1) if split_lines[p].strip()), "")
-                next_non_empty = next((split_lines[n].strip() for n in range(idx + 1, len(split_lines)) if split_lines[n].strip()), "")
-                if prev_non_empty.endswith(":") and re.match(r"^[-*+•]\s+", next_non_empty):
+                next_line = split_lines[idx + 1].strip() if idx + 1 < len(split_lines) else ""
+                if (
+                    prev_non_empty.endswith(":")
+                    and not re.match(r"^(?:[-*+•]|\d{1,2}[.)])\s+", prev_non_empty)
+                    and re.match(r"^[-*+•]\s+", next_line)
+                ):
                     line = "- " + line.lstrip()
             line = re.sub(
                 r"^(\s*\d{1,2}\.\s+)(?!\*\*)(?!(?:https?|mailto|tel):)([A-Za-z0-9 /&,'’()-]{1,45}?):([ \t]+)",

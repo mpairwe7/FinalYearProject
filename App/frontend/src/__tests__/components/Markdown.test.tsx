@@ -136,5 +136,14 @@ describe("Markdown", () => {
     expect(paras[paras.length - 1]).toBe(
       "Please feel free to reach out if you need further assistance with any of these services!",
     );
+
+    const { container: cConclusion } = render(
+      <Markdown
+        content={"Services:\n\nConclusion: Registration is complete.\n\n- Contact support via [Pay](https://ura.go.ug/pay?TIN=123)"}
+      />,
+    );
+    const conclusionParas = Array.from(cConclusion.querySelectorAll("p")).map((p) => p.textContent ?? "");
+    expect(conclusionParas).toContain("Conclusion: Registration is complete.");
+    expect(cConclusion.querySelector("a")?.getAttribute("href")).toBe("https://ura.go.ug/pay?TIN=123");
   });
 });

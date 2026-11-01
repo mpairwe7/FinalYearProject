@@ -413,9 +413,18 @@ function normalizeMarkdownSource(src: string): string {
       continue;
     }
     if (!inFence && !line.includes("|") && !line.includes("`")) {
-      line = line.replace(/,\.(?=\s|$|[A-Z"')\]])/g, ".");
-      line = line.replace(/([a-zA-Z)\]])([!?])([A-Z])/g, "$1$2 $3");
-      line = line.replace(/([a-z)\]])\.([A-Z][a-z])/g, "$1. $2");
+      const protectedSpans: string[] = [];
+      let masked = line.replace(/\[([^\]]+)\]\(([^)]+)\)|(?:https?:\/\/|www\.)\S+/g, (m) => {
+        protectedSpans.push(m);
+        return `\x00LINK${protectedSpans.length - 1}\x00`;
+      });
+      masked = masked.replace(/,\.(?=\s|$|[A-Z"')\]])/g, ".");
+      masked = masked.replace(/([a-zA-Z)\]])([!?])([A-Z])/g, "$1$2 $3");
+      masked = masked.replace(/([a-z)\]])\.([A-Z][a-z])/g, "$1. $2");
+      for (let sIdx = 0; sIdx < protectedSpans.length; sIdx++) {
+        masked = masked.replace(`\x00LINK${sIdx}\x00`, protectedSpans[sIdx]);
+      }
+      line = masked;
       if (
         !/^\s*(?:[-*+•]|\d{1,2}[.)]|#{1,6})\s+/.test(line) &&
         /^\s*(?!(?:note|important|tip|warning|caution|summary|disclaimer)\b)\*{0,2}[A-Z][A-Za-z0-9 /&,'’()-]{1,45}?\*{0,2}:[ \t]+\S/i.test(
@@ -453,14 +462,8 @@ function normalizeMarkdownSource(src: string): string {
           break;
         }
       }
-      let next = "";
-      for (let n = idx + 1; n < unsmashed.length; n++) {
-        if (unsmashed[n].trim()) {
-          next = unsmashed[n].trim();
-          break;
-        }
-      }
-      if (prev.endsWith(":") && /^[-*+•]\s+/.test(next)) {
+      const next = idx + 1 < unsmashed.length ? unsmashed[idx + 1].trim() : "";
+      if (prev.endsWith(":") && !/^(?:[-*+•]|\d{1,2}[.)])\s+/.test(prev) && /^[-*+•]\s+/.test(next)) {
         line = `- ${line.trimStart()}`;
       }
     }

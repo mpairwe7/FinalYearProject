@@ -275,6 +275,15 @@ class OutputGuardSanitizerTests(unittest.TestCase):
         self.assertNotIn("portal,.", norm)
         self.assertNotIn("Hello!Uganda", norm)
 
+        url_and_fence = (
+            "Visit https://ura.go.ug?Tax=VAT for details.\n"
+            "```\nHello!World\nfoo().ToString()\n```"
+        )
+        uf_norm = OutputGuard.normalize_structure(url_and_fence)
+        self.assertIn("https://ura.go.ug?Tax=VAT", uf_norm)
+        self.assertIn("Hello!World", uf_norm)
+        self.assertIn("foo().ToString()", uf_norm)
+
 
 if __name__ == "__main__":
     unittest.main()
