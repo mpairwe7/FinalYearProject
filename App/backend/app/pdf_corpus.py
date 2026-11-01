@@ -398,12 +398,63 @@ def fiscal_year_from_name(name: str) -> str:
     return ""
 
 
+_PDF_LOCALE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"(?:^|[-_\s])(luganda)(?:$|[-_\s.])", re.I), "lg"),
+    (re.compile(r"(?:^|[-_\s])(runyakole|runyankole|runyankore|rukiga)(?:$|[-_\s.])", re.I), "nyn"),
+    (re.compile(r"(?:^|[-_\s])(swahili|kiswahili)(?:$|[-_\s.])", re.I), "sw"),
+    (re.compile(r"(?:^|[-_\s])(acholi|luo)(?:$|[-_\s.])", re.I), "ach"),
+    (re.compile(r"(?:^|[-_\s])(english)(?:$|[-_\s.])", re.I), "en"),
+)
+
+_PDF_TAX_TYPE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\befris\b|\bfiscalization\b", re.I), "efris"),
+    (re.compile(r"\bvalue[-\s]+added[-\s]+tax\b|\bvat\b", re.I), "vat"),
+    (re.compile(r"\bwithholding\b|\bwht\b", re.I), "withholding"),
+    (re.compile(r"\bemployment[-\s]+income\b|\bpaye\b", re.I), "paye"),
+    (re.compile(r"\bstamp[-\s]+duty\b", re.I), "stamp_duty"),
+    (re.compile(r"\bexcise[-\s]+duty\b|\bdigital[-\s]+tax[-\s]+stamps?\b|\bdts\b", re.I), "excise"),
+    (re.compile(r"\bcustoms\b|\basycuda\b|\bcet\b|\bduty[-\s]+remission\b|\bgroupage\b", re.I), "customs"),
+    (re.compile(r"\bincome[-\s]+tax\b", re.I), "income_tax"),
+    (re.compile(r"\brental\b", re.I), "rental"),
+)
+
+# Mid-word CP1252 apostrophe corruption in URA vernacular handbooks (e.g. "ng?eno" -> "ng'eno", "z?omusolo" -> "z'omusolo")
+_MIDWORD_QMARK_APOSTROPHE_RE = re.compile(r"(?<=[A-Za-z])\?(?=[A-Za-z])")
+# Paired CP1252 smart-quote corruption (e.g. "?Electronic Fiscal Receipting and Invoicing Solution?" -> "\"Electronic...\"")
+_PAIRED_QMARK_QUOTE_RE = re.compile(
+    r"(?:(?<=^)|(?<=[\s(\[«]))\?([A-Za-z0-9][^\n?]{1,160}?)\?(?=$|[\s.,;:!?)»\]])",
+    re.MULTILINE,
+)
+_LEADING_QMARK_QUOTE_RE = re.compile(r"(?:(?<=^)|(?<=[\s(\[«]))\?(?=[A-Z0-9])", re.MULTILINE)
+_STANDALONE_QMARK_LINE_RE = re.compile(r"^\s*\?\s*$", re.MULTILINE)
+_BULLET_QMARK_LINE_RE = re.compile(r"^(\s*)\?\s+(?=[A-Za-z0-9\"'])", re.MULTILINE)
+
+
+def language_from_pdf_name(name: str) -> str:
+    """Infer ISO language code ('en', 'lg', 'nyn', 'sw', 'ach') from a PDF filename/stem."""
+    stem = _clean(name)
+    for pat, code in _PDF_LOCALE_PATTERNS:
+        if pat.search(stem):
+            return code
+    return "en"
+
+
+def tax_type_from_pdf_name(name: str) -> str:
+    """Infer canonical tax/domain tag ('efris', 'vat', 'paye', etc.) from a PDF filename/stem."""
+    stem = _clean(name).replace("_", " ")
+    for pat, tax in _PDF_TAX_TYPE_PATTERNS:
+        if pat.search(stem):
+            return tax
+    return ""
+
+
 def normalise_extracted_text(text: str) -> str:
     """Repair the extraction artefacts URA's PDFs introduce.
 
     Decimal points are restored, table-of-contents leader runs collapse to a
-    single space, and any remaining undecodable glyph is dropped. Newlines are
-    preserved because markdown tables depend on them.
+    single space, CP1252 question-mark apostrophe/quote/bullet corruptions in
+    multilingual EFRIS handbooks are repaired, and any remaining undecodable
+    glyph is dropped. Newlines are preserved because markdown tables depend on them.
     """
     if not text:
         return ""
@@ -415,6 +466,11 @@ def normalise_extracted_text(text: str) -> str:
     text = _DIGIT_DOT_RE.sub(".", text)
     text = _LEADER_RUN_RE.sub(" ", text)
     text = _FIGURE_PLACEHOLDER_RE.sub(" ", text)
+    text = _STANDALONE_QMARK_LINE_RE.sub("", text)
+    text = _BULLET_QMARK_LINE_RE.sub(r"\1- ", text)
+    text = _PAIRED_QMARK_QUOTE_RE.sub(r'"\1"', text)
+    text = _MIDWORD_QMARK_APOSTROPHE_RE.sub("'", text)
+    text = _LEADING_QMARK_QUOTE_RE.sub('"', text)
     text = text.replace("\ufffd", "")
     lines = [_MULTI_SPACE_RE.sub(" ", line).rstrip() for line in text.split("\n")]
     return "\n".join(lines).strip()
@@ -468,6 +524,8 @@ def _chunk_pdf_records(pdf_path: Path, source_sha256: str) -> Iterator[dict[str,
 
     source = pdf_path.name
     fiscal_year = fiscal_year_from_name(pdf_path.stem)
+    language = language_from_pdf_name(pdf_path.stem)
+    tax_type = tax_type_from_pdf_name(pdf_path.stem)
     kept = 0
     for chunk in chunk_pdf(
         pdf_path,
@@ -499,6 +557,8 @@ def _chunk_pdf_records(pdf_path: Path, source_sha256: str) -> Iterator[dict[str,
             "source": source,
             "source_sha256": source_sha256,
             "fiscal_year": fiscal_year,
+            "language": language,
+            "tax_type": tax_type,
             "chunk_index": int(chunk.chunk_id),
             "char_count": len(text),
         }
@@ -811,6 +871,8 @@ def ingest_pdf_jsonls(pdf_dir: Path, jsonl_dir: Path) -> list[dict[str, Any]]:
 
             heading_trail = [_clean(part) for part in record["heading_trail"] if _clean(part)]
             prefix = _clean(record.get("contextual_prefix"))
+            doc_lang = _clean(record.get("language")) or language_from_pdf_name(pdf_path.stem)
+            doc_tax_type = _clean(record.get("tax_type")) or tax_type_from_pdf_name(pdf_path.stem)
             documents.append(
                 {
                     # Displayed and cited verbatim.
@@ -832,6 +894,9 @@ def ingest_pdf_jsonls(pdf_dir: Path, jsonl_dir: Path) -> list[dict[str, Any]]:
                     "heading_trail": heading_trail,
                     "contextual_prefix": prefix,
                     "fiscal_year": expected_fiscal_year,
+                    "language": doc_lang,
+                    "tax_type": doc_tax_type,
+                    "tag": doc_tax_type,
                     "chunk_index": int(record["chunk_index"]),
                     "source_sha256": source_sha256,
                     "corpus_file": jsonl_path.name,

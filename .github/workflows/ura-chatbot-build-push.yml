@@ -122,7 +122,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0  # zizmor: ignore[cache-poisoning]
         with:
           path: App/Data/pdf_jsonl
-          key: pdf-jsonl-v1-${{ hashFiles('Data/pdfs/**') }}
+          key: pdf-jsonl-v2-${{ hashFiles('Data/pdfs/**', 'App/backend/app/pdf_corpus.py', 'ml/scripts/data_aug/chunkers.py') }}
 
       - name: Export corpora
         working-directory: App/backend
