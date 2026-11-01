@@ -576,6 +576,7 @@ aibom_inventory:
       release_control: "app.crawl_gate verdict plus a reviewed pull request (ADR-0023)"
       freshness_objective: "A complete crawl merged within 38 days (ura_crawl_last_full_run_timestamp_seconds); a page expires after 45 days unverified"
       pending: "Pages captured before ADR-0023 carry no provenance (source_kind unverified) until the first full crawl re-reads them"
+      known_deviation: "robots.txt is read last on URA's hosts and cached beyond RFC 9309's 24-hour SHOULD, because requesting it first gets the caller's address dropped (G413, G414)"
   speech_frameworks:
     - id: "pipecat-ai"
       version: "1.15.0"

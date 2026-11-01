@@ -73,8 +73,14 @@ that is up to date.**
 ## Decision Outcome
 
 **The crawler reads the live publisher or nothing.** Exact-host https allowlist, checked
-on every redirect hop. One honest identity. RFC 9309 applied, including complete
-disallow when robots.txt is unreachable. No archive is ever requested.
+on every redirect hop. One honest identity. No archive is ever requested. RFC 9309 is
+applied, including complete disallow when robots.txt is unreachable, with one recorded
+deviation: on URA's hosts robots.txt is read at the end of a full pass, because
+requesting it gets the caller's address dropped for at least six minutes. That was
+measured from GitHub runners, and it is not specific to this identity. The file does
+not exist there, the server answers 200 with its HTML error page, and real rules found
+at the end of a pass bind every later run. So a cached copy can outlive the RFC's
+24-hour SHOULD. The fix belongs to URA ICT (G414).
 
 **Crawling is stale-driven.** A URL is read when the sitemap says it changed, when the
 publisher stopped listing it, when it has never been verified, or on the monthly pass
@@ -122,6 +128,8 @@ and alerts follow it, and the nightly job fails on an old crawl or a stalled pro
 * Bad: a site restored from backup leaves us holding text the site no longer shows, and
   a page edited with no date change gets through to review rather than being stopped.
 * Bad: without the archive, a site outage means no updates at all. Accepted.
+* Bad: each full pass trips URA's robots rule once, on a runner's address, and that may
+  show in URA's monitoring. The identity in the request says who it was and links here.
 * Neutral: the first crawl rewrites every capture and grows the corpus from about 220
   pages toward 2,000, which is a retrieval change. It lands as a reviewed pull request
   with the ranking gate in CI, with `baseline` waiving only the mass-change limits.

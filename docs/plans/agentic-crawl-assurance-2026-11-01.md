@@ -77,12 +77,33 @@ Read on 2026-11-01. Space image `sha-5017060`, `/health` and `/ready` healthy.
 | Injection in stored pages | **None**: 0 flagged by `scan_retrieved_text` and `screen_tool_result` on 1,141 captures |
 | Commencement date | The app's `effective_from: 2026-07-01` **matches** URA's notice |
 
-**A hypothesis that did not survive.** The review expected most of the corpus to be archive
-copies. A sample of 25 pages stamped 2026-10-31, compared against their oldest and newest
-archive captures, did not support that: 17 matched both and so prove nothing, 5 matched only
-the newest, 2 matched neither, and 1 matched only the oldest. That one
-(`/en/bwg_gallery/talk-show/`) was last archived in September 2024. The mechanism is proven,
-its scale is not, because the crawler never recorded where a page came from.
+**What the archive contributed is still not measurable.** A sample of 25 pages stamped
+2026-10-31, compared against their oldest and newest archive captures, could not settle it: 17
+matched both and so prove nothing, 5 matched only the newest, 2 matched neither, and 1 matched
+only the oldest (`/en/bwg_gallery/talk-show/`, last archived in September 2024). The run's own
+log points the other way: 45 URLs yielded 40 pages, then the next 211 yielded 10, which is what
+losing direct access looks like. The cause of that collapse is inferred. The mechanism is proven
+and its scale is not, because the crawler never recorded where a page came from.
+
+## Tested against the live site from GitHub runners
+
+`ura.go.ug` refuses the review host, so the crawl and a small diagnostic were run from GitHub
+runners on 2026-11-01. Fresh runners give fresh addresses, so each job below is independent.
+
+| Job, identity `URA-Taxpayer-Assistant-Crawler/2.0` | Result |
+| --- | --- |
+| 8 core pages, 2 s apart | 8 of 8 answered 200 with full pages, about 2.5 s each |
+| 5 sitemaps, then a page | 6 of 6 answered 200, with real XML |
+| A missing page, then pages | A true 404, and the pages still answered |
+| The same page, 90 s and 240 s apart | 3 of 3 answered 200 |
+| `/robots.txt` first, then anything | Every later request dropped, for at least six minutes |
+| As above, with a browser identity | Dropped the same way, so identity is not the cause |
+
+**Requesting `/robots.txt` gets the caller's address dropped.** The first crawl of the new code
+found this: it read robots.txt, as the RFC expects, then lost the host and was held by the gate,
+which is the gate doing its job. The response, when one comes, is `200` with the HTML
+"404 - Page Not Found" page and `Connection: close`. This is why a first-request `HEAD` reported
+"direct access: YES" while later requests could fail. See G413.
 
 ## Findings and phases
 
@@ -141,6 +162,7 @@ Severity is the consequence for a taxpayer, not the difficulty of the fix.
 | G403 | Medium | `crawler.py` had no tests and was excluded from coverage. | Tests added and the exclusion removed. |
 | G404 | Medium | The training loader used every capture ever made, superseded rates included. | Current captures only, honouring `train-ai=n`. |
 | G405 | Low | Crawl hosts and corpus hosts were separate lists, and `uramedia.ura.go.ug` was in one only. | Held together by a test. |
+| G413 | High | Found by the first live run: requesting `/robots.txt` on URA's perimeter drops the caller's address, so a compliant crawler could never read a page. | On URA's hosts it is read after a full pass, and real rules found then bind later runs. Other hosts read it first. Failures record their type, and `X-Robots-Tag: noindex` is honoured. **A deviation: see below.** |
 
 ## Design decisions worth challenging
 
@@ -150,6 +172,13 @@ Severity is the consequence for a taxpayer, not the difficulty of the fix.
   alert says so. Stale and honest was preferred to fresh-looking and unverifiable.
 * **No date means no evidence.** An undated page can still replace a dated one, through
   review. The alternative freezes every undated page.
+* **robots.txt is read last on URA's hosts.** RFC 9309 expects it first, and says a cached copy
+  SHOULD NOT be used beyond 24 hours. Here it is read at most monthly, after the crawl. The
+  alternatives were worse: reading it first ends every crawl, and not reading it would miss a
+  real file if URA ever publishes one. No published rule is being ignored, since the file does
+  not exist, the pages are public, their own `robots` meta says `index, follow`, and URA lists
+  them in its sitemaps. The honest identity stays, so URA can see exactly what this is, and the
+  fix belongs to URA ICT. This is a recorded deviation, not compliance.
 * **The held page is not re-verified** when the site serves something older, so it ages
   toward expiry and forces a decision rather than standing forever.
 * **Hidden instructions condemn the whole page**, though the crawler had already removed
@@ -161,7 +190,8 @@ Severity is the consequence for a taxpayer, not the difficulty of the fix.
 
 | Gap | Open item | Owner |
 | --- | --- | --- |
-| G406 | **Nothing here has run against the live site.** `ura.go.ug` refuses the review host, and every test uses scripted responses or archived markup. The honest identity could be blocked in a way the old browser strings were not. Run the [acceptance probes](../runbooks/crawl-operations.md#acceptance-probes). | Backend |
+| G406 | Live acceptance is partial. Runners reach the site with the honest identity, and a capped run is recorded on PR #679, but **a sustained full crawl has not run**, and URA's perimeter may have rate rules this did not reach. Run the [acceptance probes](../runbooks/crawl-operations.md#acceptance-probes). | Backend |
+| G414 | Ask URA ICT to serve a real `robots.txt`, or stop dropping callers who request it, and to allow this crawler's identity. Until then G413's deviation stands, and each full pass trips that rule once on a runner's address, which URA's monitoring may notice. | Service owner, URA ICT |
 | G407 | `dev` has no branch protection, so the review this design depends on can be bypassed by a direct push. | Repository owner |
 | G408 | Validity is document-level. A page revised for one reason keeps a stale figure with a new date, and no check compares crawled figures with the rate tables. StaleBench also suggests a fresh corpus does not guarantee a fresh answer. | Backend, tax policy |
 | G409 | Web Bot Auth not adopted, and AIPREF handling rests on drafts and our reading of `ai-use`. Revisit when they stabilise. | Backend |

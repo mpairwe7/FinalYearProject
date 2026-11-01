@@ -8,6 +8,13 @@ The crawler identifies itself as `URA-Taxpayer-Assistant-Crawler/2.0`, with a li
 this page. It reads only `ura.go.ug`, `www.ura.go.ug`, `uramedia.ura.go.ug` and
 `parliament.go.ug` over https, and it never reads an archive.
 
+**On URA's hosts, robots.txt is read last, on purpose.** Requesting it gets the caller's
+address dropped for at least six minutes, so reading it first ends the crawl before a
+single page. It is read after a full pass, and real rules found then bind every later
+run. This departs from RFC 9309's 24-hour SHOULD on a cached copy (ADR-0023, G413). Do
+not move it back to the start, and do not "fix" a failed read at the end of a run: the
+work is already done by then.
+
 ## What runs and when
 
 | When | Tier | What it reads | What it publishes |
@@ -150,14 +157,17 @@ the next crawl capture the new one.
 
 ## URA blocks the crawler
 
-`ura.go.ug` refuses connections from some networks: this was true of the host this
-review ran on, for browser and crawler identities alike. GitHub's runners were reaching
-it on 2026-10-31.
+`ura.go.ug` refuses connections from some networks, for browser and crawler identities
+alike, and it drops any address that requests `/robots.txt`. Requests fail with an empty
+reply, recorded as `network_error_RemoteProtocolError` or similar in the run's outcomes.
+GitHub's runners reached pages and sitemaps with this identity on 2026-11-01.
 
 If runners get blocked, do **not** add a browser User-Agent or route through an archive.
-Both were removed deliberately. Ask URA ICT to allow `URA-Taxpayer-Assistant-Crawler`, or
-to expose the sitemaps and pages to it. Until then the corpus ages, the alert stays on,
-and the bot keeps serving the last verified copy with its date.
+Both were removed deliberately, and a browser identity was dropped just the same. If a
+run stops early with `network_error_*` while `ok` was climbing, the perimeter may have
+rate rules: raise `min_delay_s`, and resume with the next run. Ask URA ICT to allow
+`URA-Taxpayer-Assistant-Crawler`. Until then the corpus ages, the alert stays on, and
+the bot keeps serving the last verified copy with its date.
 
 ## Withdraw a page now
 
@@ -178,7 +188,7 @@ Production acceptance needs these, asserted from the run record and the served A
 
 | Check | Pass |
 | --- | --- |
-| Runner reaches the site with the honest identity | `outcomes.ok` dominates; `robots` is not `unreachable` |
+| Runner reaches the site with the honest identity | `outcomes.ok` dominates, and `robots_read_last` is 1 on a finished full pass |
 | Discovery works | `sitemap_urls` is around 2,000 |
 | Coverage | The run's `ledger_status.live` is near `sitemap_urls` |
 | Stale-driven | A second run the next day has `fresh_skipped` near the total and few fetches |

@@ -738,13 +738,15 @@ Reviewed on branch `fix/agentic-orchestrator-resilience-assurance-2026-10-31`; [
 | G403 🟢 | ~~`crawler.py` had no tests and was excluded from coverage.~~ | Fixed. |
 | G404 🟢 | ~~Training read every capture, superseded rates included.~~ | Fixed. |
 | G405 🟢 | ~~Crawl and corpus host lists disagreed.~~ | Fixed: held together by a test. |
-| G406 ⚪ | Nothing here has run against the live site: `ura.go.ug` refuses the review host. | Open: backend, by the runbook's acceptance probes. |
+| G406 🟡 | A capped crawl ran from a GitHub runner against the live site. A sustained full crawl has not, and URA's perimeter may have rate rules. | Partial: backend, by the runbook's acceptance probes. |
 | G407 ⚪ | `dev` has no branch protection, so the crawl review can be bypassed. | Open: repository owner. |
 | G408 ⚪ | Validity is per document, not per fact, and no check compares crawled figures with the rate tables. | Open: backend, tax policy. |
 | G409 ⚪ | Web Bot Auth not adopted; AIPREF handling rests on drafts. | Open: revisit when they stabilise. |
 | G410 ⚪ | Stylesheet-hidden text is not detected, and a plausible edit passes content checks by design. | Open: the merge is the control. |
 | G411 ⚪ | Company TINs on URA's list, a DPIA for crawled personal data, and the NISP's in-force status. | Open: DPO. |
 | G412 ⚪ | The first crawl grows the corpus about tenfold with no answer-quality baseline at that size. | Open: ML, on that pull request. |
+| G413 🟡 | ~~Requesting `/robots.txt` on URA's perimeter drops the caller's address, so a compliant crawler could never read a page.~~ | Worked around: read after a full pass, and real rules bind later runs. A recorded deviation from RFC 9309's 24-hour SHOULD. |
+| G414 ⚪ | URA ICT should serve a real `robots.txt` or stop dropping callers who request it. | Open: service owner, URA ICT. |
 
 **Open follow-ups.**
 
@@ -1164,7 +1166,7 @@ full agent chain is locked.
 
 ---
 
-*Document version 2.7 — updated 2026-11-01: added the agentic crawl assurance review, G377-G412 (ADR-0023). Code fixes shipped with regressions; production acceptance open (G406).*
+*Document version 2.7 — updated 2026-11-01: added the agentic crawl assurance review, G377-G414 (ADR-0023). Code fixes shipped with regressions; acceptance partial (G406).*
 *Document version 2.6 — updated 2026-10-30: closed G269 and G270 across 5-locale conversational intelligence (`conversational.py`: FY2026-27 UGX 300,000,000 VAT threshold alignment, English capability locale preservation, and Luganda/Swahili polite address particles), emotional intelligence (`text_signals.py`, `tools/empathy.py`, `audit/governance_v3.py`: 5-locale hopelessness, phrasal self-harm crisis detection with windowed indirect-negation guard `_CRISIS_NEGATION_PREFIX_RE`, enforcement/deadline-today/Bantu-scale high-stakes detection, server-gated `wellbeing_checkin`, and crisis scorecard exemption), ISO 24495-1 structuring/paragraphing/numbering & duplex TN/ITN figure normalization (`guardrails.py`, `number_words.py`, `speech_normalization.py`, `entailment.py`, `mt.py`: mixed prose+table paragraphing, nested parenthesized step indentation, word-bounded/comma-safe 5-locale ordinal unsmashing, descending multi-scale compound vernacular amount folding via `parse_vernacular_scale_amount_at` / `normalize_vernacular_amount_words`, Runyankole `eigana`/`igana`/`kikumi` + Whisper-SALT `aha kikuru` ASR repair, negative zero-whole decimal words, and zero-cent `.00` stripping), and MCP `SEP-2106` tool validation & identifier grounding (`mcp/validation.py`, `connector_intent.py`, `calculator_router.py`, `models.py`: external `$ref` SSRF guard, Bantu scale-prefix & integer TIN/PRN coercion/grounding, word-bounded currency matching, TIN/PRN/BRN/NIN/FDN/EFD exclusion from UGX amount extraction, and `ChatResponse.connectors_used` parity), pinned in `tests/agents/test_conversational_intelligence.py` and `tests/agents/test_cx_99000_multimodal_ngrok.py` (`99,000 / 99,000` TTT+STT+TTS scenarios + live ngrok suites).*
 *Document version 2.5 — updated 2026-09-17: closed G59 (vernacular numeral & idiom disambiguation: Luganda verb 'saba' vs Swahili numeral '7', 'mtu wa tatu', 'ekiwandiiko 1.2', currency qualifiers 'milioni'/'obukadde'/'emitwalo'), G60 (W3C SSE multiline event-buffered reader loop in page.tsx and list unsmashing normalizers resolving chat UI procedural step collapse), and G61 (multiline sentence splitting in text_signals.py and cross-passage corroboration in claim_verifier.py eliminating false low-faithfulness escalations on URA service catalogs). Verified 100% accuracy on 1,000 FAQs, 300 FAQs, and 100 FAQs multimodal benchmarks.*
 *Document version 2.4 — updated 2026-09-16: resolved G59 closing the 100-FAQ multimodal benchmark accuracy gap. Wired missing statutory heads (mobile money withdrawal excise 0.5%, presumptive threshold 10m-150m, TPCA late-filing penalty 200k/2%) into FY2026-27 rate table and calculator router fast lookups; added local government tax out-of-scope handler; improved small-business FAQ priority routing; added stale PDF chunk discounting; and corrected leaky benchmark gold labels.*
