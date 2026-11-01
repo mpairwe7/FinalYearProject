@@ -84,7 +84,14 @@ def _post_json(url: str, headers: dict[str, str], payload: dict) -> dict[str, An
     """POST JSON and return the parsed response (raises on non-2xx)."""
     # Log shape only — never headers or bodies (they carry secrets / PII).
     logger.debug("gateway POST %s (payload keys=%s)", url.rsplit("/", 1)[-1], list(payload))
-    resp = _get_client().post(url, headers=headers, json=payload)
+    client = _get_client()
+    if isinstance(client, httpx.Client):
+        from ..resilience import remaining_turn_seconds
+
+        eff_timeout = max(1.0, min(_HTTP_TIMEOUT, remaining_turn_seconds(_HTTP_TIMEOUT)))
+        resp = client.post(url, headers=headers, json=payload, timeout=eff_timeout)
+    else:
+        resp = client.post(url, headers=headers, json=payload)
     resp.raise_for_status()
     return resp.json()
 

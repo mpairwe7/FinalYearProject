@@ -11460,6 +11460,8 @@ class ChatModel:
         local_only_call = channel == "call" and os.getenv(
             "RECEPTIONIST_ALLOW_CLOUD_LLM", "false"
         ).strip().lower() not in ("1", "true", "yes", "on")
+        if channel == "call" and not local_only_call:
+            deadline_s = min(deadline_s, 20.0) if deadline_s > 0 else 20.0
         with (
             turn_usage_scope() as usage,
             turn_attributes_scope(),

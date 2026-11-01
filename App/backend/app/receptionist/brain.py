@@ -1806,9 +1806,7 @@ class UraReceptionistBrain(LLMService):
         )
         has_structured_items = (
             bullet_count >= 1
-            or "\n- " in cleaned_reply
-            or "\n1. " in cleaned_reply
-            or "**" in cleaned_reply
+            or bool(re.search(r"(?:^|\n)\s*(?:[-*+•]|\d{1,2}[.)])\s+", cleaned_reply))
         )
         if (
             has_structured_items
