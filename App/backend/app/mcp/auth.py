@@ -433,3 +433,84 @@ def client_credentials_from_env(
         resource=resource,
         scope=source.get(f"MCP_OAUTH_SCOPE_{suffix}", "").strip(),
     )
+
+
+def mint_obo_actor_assertion(
+    *,
+    subject: str,
+    tenant_id: str,
+    actor_agent: str,
+    resource: str,
+    scopes: tuple[str, ...] = (),
+    secret: str = "",
+    ttl_s: int = 60,
+    now: float | None = None,
+) -> str:
+    """Mint a short-lived RFC 8693 OBO + RFC 8707 audience-bound assertion token (MO-4 / OWASP ASI03).
+
+    Produces a compact ``<base64url-payload>.<base64url-hmac-sha256>`` token that
+    binds ``sub`` (taxpayer/user), ``tid`` (tenant), ``act`` (delegating agent role),
+    ``aud`` (canonical MCP server resource URI), and ``scope`` (narrowed tool scope).
+    """
+    import json
+
+    signing_key = (secret or os.getenv("MCP_OBO_SIGNING_SECRET") or "").encode("utf-8")
+    if len(signing_key) < MIN_SHARED_TOKEN_CHARS:
+        return ""
+    ts = int(time.time() if now is None else now)
+    actor_id = actor_agent if str(actor_agent).startswith("agent:") else f"agent:{actor_agent or 'orchestrator'}"
+    payload = {
+        "sub": str(subject or "public"),
+        "tid": str(tenant_id or "default"),
+        "act": {"sub": actor_id},
+        "aud": str(resource or "").rstrip("/"),
+        "scope": " ".join(s for s in scopes if s),
+        "iat": ts,
+        "exp": ts + max(5, int(ttl_s)),
+    }
+    raw_json = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    b64_payload = base64.urlsafe_b64encode(raw_json).rstrip(b"=").decode("ascii")
+    sig = hmac.new(signing_key, b64_payload.encode("ascii"), hashlib.sha256).digest()
+    b64_sig = base64.urlsafe_b64encode(sig).rstrip(b"=").decode("ascii")
+    return f"{b64_payload}.{b64_sig}"
+
+
+def verify_obo_actor_assertion(
+    assertion: str,
+    *,
+    expected_resource: str,
+    secret: str,
+    required_scope: str = "",
+    now: float | None = None,
+) -> dict[str, Any] | None:
+    """Verify an RFC 8693 OBO + RFC 8707 actor assertion token; returns claims or ``None``."""
+    import json
+
+    signing_key = (secret or "").encode("utf-8")
+    if not assertion or "." not in assertion or len(signing_key) < MIN_SHARED_TOKEN_CHARS:
+        return None
+    b64_payload, _, b64_sig = assertion.partition(".")
+    if not b64_payload or not b64_sig:
+        return None
+    expected_sig = hmac.new(signing_key, b64_payload.encode("ascii"), hashlib.sha256).digest()
+    expected_b64 = base64.urlsafe_b64encode(expected_sig).rstrip(b"=").decode("ascii")
+    if not hmac.compare_digest(b64_sig, expected_b64):
+        return None
+    try:
+        pad = "=" * (-len(b64_payload) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(b64_payload + pad).decode("utf-8"))
+    except Exception:
+        return None
+    if not isinstance(claims, dict):
+        return None
+    ts = int(time.time() if now is None else now)
+    exp = claims.get("exp")
+    if not isinstance(exp, int) or ts >= exp:
+        return None
+    if str(claims.get("aud") or "").rstrip("/") != str(expected_resource or "").rstrip("/"):
+        return None
+    if required_scope:
+        granted = set(str(claims.get("scope") or "").split())
+        if required_scope not in granted:
+            return None
+    return claims

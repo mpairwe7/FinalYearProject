@@ -143,10 +143,11 @@ class MemoryService:
         turns: list[dict[str, str]],
         tenant_id: str = "default",
         extractor_model: str = "rules-v1",
+        outcomes: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Extract facts and write an episodic summary from a conversation.
 
-        Called by the offline worker after a conversation ends.
+        Called after a turn or by the sleep-time consolidation worker.
         Writes are consent-gated at the storage boundary. The caller also
         checks consent so revoked consent cannot be bypassed by another agent.
 
@@ -188,9 +189,9 @@ class MemoryService:
         # 2. One episode per conversation, derived from the whole conversation
         # so far — its stored turns plus these — so every turn writes the same
         # row with more in it, rather than replacing it with its own topic.
-        # Only coarse topic labels: raw user text can contain identifiers,
-        # financial details, or prompt injection and does not belong in
-        # long-lived personalization memory.
+        # Only coarse topic labels + sanitized outcome metadata (MS-1): raw user
+        # text can contain identifiers, financial details, or prompt injection
+        # and does not belong in long-lived personalization memory.
         new_user_texts = [text for text in (_user_text(t) for t in turns) if text]
         stored_turn_count = self._stored_turn_count(user_id, conversation_id, tenant_id)
         prior_user_texts = self._stored_user_texts(
@@ -203,6 +204,9 @@ class MemoryService:
             summary_text = "Discussed general tax questions."
         else:
             summary_text = "Conversation topic unavailable."
+        outcome_clause = _format_episodic_outcomes(outcomes)
+        if outcome_clause:
+            summary_text = f"{summary_text[:-1]} ({outcome_clause})."
         episodic = EpisodicSummary(
             summary_id=str(uuid.uuid4()),
             user_id=user_id,
@@ -225,6 +229,69 @@ class MemoryService:
             "fact_ids": written_fact_ids,
             "episodic_id": episodic_id,
             "episodic_written": bool(episodic_id),
+        }
+
+    def consolidate_user_memory(
+        self,
+        user_id: str,
+        *,
+        tenant_id: str = "default",
+        decay_floor: float = 0.3,
+    ) -> dict[str, Any]:
+        """Sleep-time memory consolidation & contradiction reconciliation (MS-2 / Letta & Mem0).
+
+        Reconciles active semantic facts by superseding older lower-confidence
+        duplicates within single-valued/registration categories and pruning
+        decayed facts below *decay_floor*.
+        """
+        if not user_id or not self._has_consent(user_id, tenant_id=tenant_id):
+            return {"consolidated_facts": 0, "superseded_count": 0, "pruned_decayed": 0}
+        from .. import database as db
+        from .decay import compute_decayed_confidence
+        from .semantic import SINGLE_VALUED_CATEGORIES
+
+        rows = db.query_all(
+            """SELECT * FROM user_facts
+               WHERE tenant_id = ? AND user_id = ? AND superseded_by IS NULL
+               ORDER BY extracted_at DESC""",
+            (tenant_id or "default", user_id),
+        )
+        now = time.time()
+        seen_single: dict[tuple[str, str, str], str] = {}
+        superseded_count = 0
+        pruned_decayed = 0
+        active_count = 0
+        for row in rows:
+            fid = str(row["fact_id"])
+            cat = str(row["category"] or "")
+            subj = str(row["subject"] or "user")
+            pred = str(row["predicate"] or "")
+            decayed = compute_decayed_confidence(
+                original_confidence=float(row["confidence"]),
+                category=cat,
+                extracted_at=float(row["extracted_at"]),
+                now=now,
+            )
+            if decayed < decay_floor:
+                db.execute(
+                    "UPDATE user_facts SET invalidated_at = COALESCE(invalidated_at, ?) WHERE fact_id = ?",
+                    (now, fid),
+                )
+                pruned_decayed += 1
+                continue
+            if cat in SINGLE_VALUED_CATEGORIES:
+                slot_key = (cat, subj, pred)
+                winner_id = seen_single.get(slot_key)
+                if winner_id and winner_id != fid:
+                    if self.semantic.supersede(fid, winner_id):
+                        superseded_count += 1
+                    continue
+                seen_single[slot_key] = fid
+            active_count += 1
+        return {
+            "consolidated_facts": active_count,
+            "superseded_count": superseded_count,
+            "pruned_decayed": pruned_decayed,
         }
 
     @staticmethod
@@ -584,6 +651,31 @@ def _ordered_topic_tags(texts: list[str]) -> list[str]:
                 tags.append(tag)
     specific = [t for t in tags if t != "general_tax"]
     return specific or tags
+
+
+_SAFE_OUTCOME_TOKEN_RE = re.compile(r"^[a-zA-Z0-9_/-]{1,48}$")
+
+
+def _format_episodic_outcomes(outcomes: dict[str, Any] | None) -> str:
+    """Format sanitized tool/workflow/resolution outcomes for episodic memory (MS-1)."""
+    if not outcomes or not isinstance(outcomes, dict):
+        return ""
+    parts: list[str] = []
+    tools = outcomes.get("tools_used") or outcomes.get("tools") or []
+    if isinstance(tools, (list, tuple)):
+        safe_tools = [str(t) for t in tools[:3] if _SAFE_OUTCOME_TOKEN_RE.match(str(t))]
+        if safe_tools:
+            parts.append(f"verified tools: {', '.join(safe_tools)}")
+    workflow = str(outcomes.get("workflow") or outcomes.get("workflow_id") or "").strip()
+    if workflow and _SAFE_OUTCOME_TOKEN_RE.match(workflow):
+        parts.append(f"workflow: {workflow}")
+    status = str(outcomes.get("resolution_status") or outcomes.get("status") or "").strip()
+    if status and _SAFE_OUTCOME_TOKEN_RE.match(status):
+        parts.append(f"status: {status}")
+    fy = str(outcomes.get("fiscal_year") or "").strip()
+    if fy and _SAFE_OUTCOME_TOKEN_RE.match(fy):
+        parts.append(f"FY: {fy}")
+    return "; ".join(parts)
 
 
 def _join_labels(labels: list[str]) -> str:

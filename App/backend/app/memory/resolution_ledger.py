@@ -533,14 +533,26 @@ class ResolutionLedger:
                 logger.debug("resolution_ledger: proactive reminder creation skipped", exc_info=True)
         return case
 
+    _SLOT_SOURCE_TIER_RANK: dict[str, int] = {
+        "user_asserted": 1,
+        "tool_verified": 2,
+        "jwt_claim": 3,
+    }
+
     def store_verified_slots(
         self,
         user_id: str,
         slots: dict[str, Any],
         *,
         tenant_id: str = "default",
+        source_tier: str = "user_asserted",
     ) -> bool:
-        """Persist validated workflow/calculator slots in shared working memory for zero-effort prefill."""
+        """Persist validated workflow/calculator slots in shared working memory for zero-effort prefill.
+
+        Enforces provenance tier hierarchy (``jwt_claim`` > ``tool_verified`` > ``user_asserted``)
+        so unverified conversational assertions cannot overwrite tool-verified or JWT-authenticated
+        slots (OWASP ASI06:2026 / MS-4).
+        """
         if not user_id or not slots:
             return False
         try:
@@ -551,14 +563,24 @@ class ResolutionLedger:
                 return False
             existing = db.get_working_memory(user_id, tenant_id=tenant) or {}
             bank = dict(existing.get("verified_slot_bank") or {})
+            provenance = dict(existing.get("verified_slot_provenance") or {})
+            incoming_tier = source_tier if source_tier in self._SLOT_SOURCE_TIER_RANK else "user_asserted"
+            incoming_rank = self._SLOT_SOURCE_TIER_RANK[incoming_tier]
             for k, v in slots.items():
                 # "_"-prefixed keys are workflow-engine state, not something the taxpayer gave.
-                if k and v not in ("", None) and not str(k).startswith("_"):
-                    bank[str(k)] = v
+                key = str(k) if k else ""
+                if not key or v in ("", None) or key.startswith("_"):
+                    continue
+                existing_tier = str(provenance.get(key) or "user_asserted")
+                existing_rank = self._SLOT_SOURCE_TIER_RANK.get(existing_tier, 1)
+                if key in bank and incoming_rank < existing_rank:
+                    continue
+                bank[key] = v
+                provenance[key] = incoming_tier
             return db.upsert_working_memory(
                 user_id,
                 tenant,
-                {"verified_slot_bank": bank},
+                {"verified_slot_bank": bank, "verified_slot_provenance": provenance},
                 ttl_seconds=get_resolution_case_ttl_seconds(),
             )
         except Exception:

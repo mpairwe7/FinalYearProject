@@ -540,19 +540,33 @@ class ProceduralMemory:
         faithfulness_score: float = 1.0,
         demonstration_turn: dict[str, Any] | None = None,
         min_faithfulness: float = 0.85,
+        evaluator_passed: bool = True,
     ) -> TrajectoryExemplar | None:
         """Promote a verified high-faithfulness or officer-approved turn into the ExpRAG trajectory bank.
 
         Returns ``None`` — nothing stored — unless the score is a finite number
-        in [0, 1] at or above *min_faithfulness*, and the intent, domain and
-        every tool are snake_case identifiers. Text is PII-redacted and
-        length-bounded before it is stored.
+        in [0, 1] at or above *min_faithfulness*, *evaluator_passed* is True,
+        the query/plan passes indirect prompt-injection screening (OWASP ASI06 / MINJA),
+        and the intent, domain and every tool are snake_case identifiers. Text is
+        PII-redacted and length-bounded before it is stored.
         """
         import hashlib
 
+        from ..guardrails import scan_retrieved_text
+
+        if not evaluator_passed:
+            return None
         score = _valid_faithfulness(faithfulness_score)
         tools = [_valid_identifier(t) for t in tool_sequence or []]
-        query = _redact((user_query or "").strip())[:_MAX_QUERY_CHARS]
+        raw_query = (user_query or "").strip()
+        _, query_injected = scan_retrieved_text(raw_query)
+        if query_injected:
+            return None
+        for step_str in plan or []:
+            _, step_injected = scan_retrieved_text(str(step_str))
+            if step_injected:
+                return None
+        query = _redact(raw_query)[:_MAX_QUERY_CHARS]
         if score is None or score < min_faithfulness or not query or not tools or not all(tools):
             return None
         clean_intent = _valid_identifier(intent) or tools[0]

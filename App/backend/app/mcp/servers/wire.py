@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import sys
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -458,6 +459,49 @@ class StatelessMCPServer:
             raise ProtocolError(
                 HEADER_MISMATCH, "Header mismatch: required MCP-Protocol-Version header is missing"
             )
+
+        actor_assertion = normalized.get("mcp-actor-assertion")
+        if actor_assertion is not None and method == "tools/call":
+            b64_payload, sep, b64_sig = actor_assertion.partition(".")
+            if not b64_payload or not sep or not b64_sig:
+                raise ProtocolError(HEADER_MISMATCH, "Header mismatch: malformed Mcp-Actor-Assertion")
+            try:
+                pad = "=" * (-len(b64_payload) % 4)
+                claims = json.loads(base64.urlsafe_b64decode(b64_payload + pad).decode("utf-8"))
+            except Exception as exc:
+                raise ProtocolError(HEADER_MISMATCH, "Header mismatch: unreadable Mcp-Actor-Assertion") from exc
+            if not isinstance(claims, dict):
+                raise ProtocolError(HEADER_MISMATCH, "Header mismatch: invalid Mcp-Actor-Assertion payload")
+            exp = claims.get("exp")
+            if not isinstance(exp, (int, float)) or time.time() >= exp:
+                raise ProtocolError(HEADER_MISMATCH, "Header mismatch: Mcp-Actor-Assertion has expired")
+            signing_secret = (os.getenv("MCP_OBO_SIGNING_SECRET") or "").strip()
+            if len(signing_secret) >= 32:
+                import hashlib
+                import hmac
+
+                expected_sig = hmac.new(
+                    signing_secret.encode("utf-8"), b64_payload.encode("ascii"), hashlib.sha256
+                ).digest()
+                expected_b64 = base64.urlsafe_b64encode(expected_sig).rstrip(b"=").decode("ascii")
+                if not hmac.compare_digest(b64_sig, expected_b64):
+                    raise ProtocolError(
+                        HEADER_MISMATCH, "Header mismatch: invalid Mcp-Actor-Assertion signature"
+                    )
+            body_user = str(meta.get("ug.go.ura.chatbot/userId") or "public")
+            body_tenant = str(meta.get("ug.go.ura.chatbot/tenantId") or "default")
+            body_tool = str(params.get("name") or "")
+            if str(claims.get("sub") or "public") != body_user or str(claims.get("tid") or "default") != body_tenant:
+                raise ProtocolError(
+                    HEADER_MISMATCH,
+                    "Header mismatch: Mcp-Actor-Assertion subject/tenant does not match _meta",
+                )
+            scopes = set(str(claims.get("scope") or "").split())
+            if body_tool and f"mcp:tool:{body_tool}" not in scopes:
+                raise ProtocolError(
+                    HEADER_MISMATCH,
+                    f"Header mismatch: Mcp-Actor-Assertion scope does not authorize '{body_tool}'",
+                )
 
     def _dispatch(
         self, method: str, params: dict[str, Any], *, trusted_identity: bool, oauth: bool

@@ -129,15 +129,64 @@ def _embedding_text(doc: dict[str, Any]) -> str:
     Anthropic Contextual Retrieval standard (2026):
     Prepend a situational contextual prefix (document, domain, fiscal year)
     to the body for embedding and BM25 indexing, while keeping doc["text"] clean
-    for display and citation generation.
+    for display and citation generation. When multilingual FAQ fields
+    (``question_lg``, ``question_sw``, ``question_nyn``, ``question_ach``) are
+    present on *doc*, they are appended to the embedding input so ``BAAI/bge-m3``
+    and ``BM25SparseEncoder`` index native vernacular phrasing directly (HS-4).
     """
     if doc.get("embed_text"):
         return doc["embed_text"]
     prefix = _build_contextual_prefix(doc)
-    return (prefix + doc["text"]).strip() if prefix else doc["text"]
+    base = (prefix + doc["text"]).strip() if prefix else doc["text"]
+    vernacular_lines: list[str] = []
+    for field_name, label in (
+        ("question_lg", "Luganda"),
+        ("question_sw", "Swahili"),
+        ("question_nyn", "Runyankole"),
+        ("question_ach", "Acholi"),
+    ):
+        val = str(doc.get(field_name) or "").strip()
+        if val:
+            vernacular_lines.append(f"{label}: {val}")
+    if vernacular_lines:
+        return f"{base}\n" + "\n".join(vernacular_lines)
+    return base
 
 
 _FY_BOUNDS_RE = re.compile(r"^FY(\d{4})-(\d{2,4})$", re.IGNORECASE)
+_MONTH_MAP: dict[str, int] = {
+    "january": 1, "jan": 1, "february": 2, "feb": 2, "march": 3, "mar": 3,
+    "april": 4, "apr": 4, "may": 5, "june": 6, "jun": 6, "july": 7, "jul": 7,
+    "august": 8, "aug": 8, "september": 9, "sep": 9, "october": 10, "oct": 10,
+    "november": 11, "nov": 11, "december": 12, "dec": 12,
+}
+_PROVISION_EFFECTIVE_DATE_RE = re.compile(
+    r"\b(?:with\s+effect\s+from|effective(?:\s+from|\s+on)?|commencing(?:\s+on)?)\s+"
+    r"(?:(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\s+(20\d{2})|(20\d{2}-\d{2}-\d{2}))\b",
+    re.IGNORECASE,
+)
+
+
+def extract_provision_effective_date(text: str) -> str:
+    """Extract a validated ISO-8601 calendar effective date from statutory prose if stated (HS-5)."""
+    import datetime as _dt
+
+    match = _PROVISION_EFFECTIVE_DATE_RE.search(text or "")
+    if not match:
+        return ""
+    if match.group(4):
+        try:
+            return _dt.date.fromisoformat(match.group(4)).isoformat()
+        except ValueError:
+            return ""
+    day_s, month_s, year_s = match.group(1), match.group(2), match.group(3)
+    month_num = _MONTH_MAP.get((month_s or "").lower())
+    if not month_num or not day_s or not year_s:
+        return ""
+    try:
+        return _dt.date(int(year_s), month_num, int(day_s)).isoformat()
+    except ValueError:
+        return ""
 
 
 def fiscal_year_validity_bounds(fiscal_year: str) -> tuple[str, str]:
@@ -177,7 +226,8 @@ def annotate_fiscal_year(documents: list[dict[str, Any]]) -> list[dict[str, Any]
         fy = str(doc.get("fiscal_year") or "")
         v_from, v_to = fiscal_year_validity_bounds(fy)
         if not doc.get("valid_from"):
-            doc["valid_from"] = v_from
+            prov_from = extract_provision_effective_date(str(doc.get("text") or ""))
+            doc["valid_from"] = prov_from or v_from
         if not doc.get("valid_to"):
             doc["valid_to"] = v_to
         if "superseded_by" not in doc:

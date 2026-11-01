@@ -57,6 +57,10 @@ class EdgeKind(str, Enum):
     #: it as an edge is the point: it currently lives as a sentence in
     #: a prompt the model may or may not honour.
     COMPUTED_ON = "computed_on"
+    #: Provision → Provision. A Schedule or sub-section cross-references
+    #: its parent Act's primary charging section (HippoRAG 2 / LazyGraphRAG
+    #: statutory citation topology, AR-3).
+    CROSS_REFERENCES = "cross_references"
 
 
 @dataclass(frozen=True)

@@ -151,9 +151,13 @@ def normalize_rerank_score(logit: float) -> float:
 
 #: Recent query embeddings kept for reuse within and across turns.
 _QUERY_CACHE_SIZE = int(os.getenv("RETRIEVER_QUERY_CACHE_SIZE", "256"))
-#: Characters of a passage handed to the cross-encoder.  Its own input
-#: window is shorter than this; the cap bounds the quadratic term.
-_RERANK_CHARS = int(os.getenv("RETRIEVER_RERANK_CHARS", "1200"))
+#: Characters of a passage handed to the cross-encoder. Matches chunkers.py
+#: hard_max_chars (4000) so mxbai-rerank-base-v2 (8k token window) evaluates
+#: complete statutory chunks and Markdown tables without bottom-70% truncation (HS-3).
+_RERANK_CHARS = int(os.getenv("RETRIEVER_RERANK_CHARS", "4000"))
+#: Minimum per-leg candidate pool for server-side DBSF so empirical mean/std
+#: normalization is not compressed by small-sample BM25 outliers (HS-2).
+_DBSF_PREFETCH_MIN = int(os.getenv("RETRIEVER_DBSF_PREFETCH_MIN", "48"))
 #: Jaccard overlap above which two candidates are treated as duplicates.
 _DEDUPE_THRESHOLD = float(os.getenv("RETRIEVER_DEDUPE_THRESHOLD", "0.9"))
 #: RRF constant shared by Qdrant, the Vectorize client, and the graph leg.
@@ -2125,26 +2129,24 @@ class HybridRetriever:
                 if must_conditions:
                     query_filter = models.Filter(must=must_conditions)
 
+            use_dbsf = HYBRID_FUSION == "dbsf" and hasattr(models.Fusion, "DBSF")
+            leg_limit = max(prefetch_limit, _DBSF_PREFETCH_MIN) if use_dbsf else prefetch_limit
             prefetch = []
             if dense_vec is not None:
                 prefetch.append(
-                    models.Prefetch(query=dense_vec, using="dense", limit=prefetch_limit)
+                    models.Prefetch(query=dense_vec, using="dense", limit=leg_limit)
                 )
             if sparse_idx and self._sparse_ok:
                 prefetch.append(
                     models.Prefetch(
                         query=models.SparseVector(indices=sparse_idx, values=sparse_val),
                         using="sparse",
-                        limit=prefetch_limit,
+                        limit=leg_limit,
                     )
                 )
 
             query_started = time.perf_counter()
-            fusion_mode = (
-                models.Fusion.DBSF
-                if HYBRID_FUSION == "dbsf" and hasattr(models.Fusion, "DBSF")
-                else models.Fusion.RRF
-            )
+            fusion_mode = models.Fusion.DBSF if use_dbsf else models.Fusion.RRF
             results = self._client.query_points(
                 collection_name=QDRANT_COLLECTION,
                 prefetch=prefetch,

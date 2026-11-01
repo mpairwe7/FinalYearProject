@@ -279,6 +279,7 @@ def build_graph(fiscal_years: list[str] | None = None) -> InMemoryGraphStore:
     _wire_supersedes(store, by_key)
     _wire_gates(store, by_key)
     _wire_computed_on(store, by_key)
+    _wire_provision_cross_references(store)
     logger.info("graph: built %s", store.stats())
     return store
 
@@ -345,6 +346,52 @@ def _wire_computed_on(store: InMemoryGraphStore, by_key: dict[str, list[tuple[st
             if base_id:
                 store.add_edge(
                     Edge(dep_id, EdgeKind.COMPUTED_ON, base_id, props={"fiscal_year": fy})
+                )
+
+
+def _wire_provision_cross_references(store: InMemoryGraphStore) -> None:
+    """Link Schedule / composite provisions to their parent Act's charging sections (AR-3).
+
+    Statutory provisions such as ``Value Added Tax Act, s. 24(4) & Third Schedule Part I``
+    or ``Income Tax Act, s. 6(1) & Third Schedule Part I`` combine a charging section
+    with a rate schedule. Linking schedule-bearing provisions to core section provisions
+    within the same Act enables multi-hop traversal across statutory cross-references.
+    """
+    by_act: dict[str, list[Node]] = {}
+    for node in store.by_kind(NodeKind.PROVISION):
+        act = str(node.props.get("act") or "").strip()
+        if act:
+            by_act.setdefault(act, []).append(node)
+
+    for act, provisions in by_act.items():
+        ordered = sorted(provisions, key=lambda n: n.id)
+        schedule_nodes = [
+            n for n in ordered if "schedule" in str(n.props.get("section") or n.label).lower()
+        ]
+        section_nodes = [
+            n for n in ordered if n not in schedule_nodes and str(n.props.get("section") or "")
+        ]
+        if schedule_nodes and section_nodes:
+            anchor = section_nodes[0]
+            for sched in schedule_nodes:
+                store.add_edge(
+                    Edge(
+                        sched.id,
+                        EdgeKind.CROSS_REFERENCES,
+                        anchor.id,
+                        props={"act": act, "relation": "schedule_to_charging_section"},
+                    )
+                )
+        elif len(schedule_nodes) >= 2:
+            anchor = schedule_nodes[0]
+            for sched in schedule_nodes[1:]:
+                store.add_edge(
+                    Edge(
+                        sched.id,
+                        EdgeKind.CROSS_REFERENCES,
+                        anchor.id,
+                        props={"act": act, "relation": "same_act_schedule"},
+                    )
                 )
 
 
