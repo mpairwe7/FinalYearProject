@@ -536,7 +536,11 @@ def _chunk_pdf_records(pdf_path: Path, source_sha256: str) -> Iterator[dict[str,
         text = normalise_extracted_text(_clean(chunk.text))
         # Cleaning collapses table-of-contents pages to almost nothing, which is
         # exactly what should not be indexed — re-apply the floor afterwards.
-        if len(text) < PDF_CHUNK_MIN_CHARS:
+        # Concise Q&A sections (ending with '?') use an 80-char floor so short
+        # statutory Q&A pairs in handbooks are not dropped.
+        is_qa_section = bool(chunk.heading_trail and str(chunk.heading_trail[-1]).strip().endswith("?"))
+        eff_min_chars = min(PDF_CHUNK_MIN_CHARS, 80) if is_qa_section else PDF_CHUNK_MIN_CHARS
+        if len(text) < eff_min_chars:
             continue
         # Assigning the cleaned trail back lets ``contextual_prefix`` recompute
         # from clean headings instead of duplicating its formatting here.
