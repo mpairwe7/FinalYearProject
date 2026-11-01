@@ -2320,6 +2320,9 @@ main {
   line-height: 1.6;
   text-transform: uppercase;
 }
+.md-callout-text {
+  margin: 0;
+}
 .md-callout-warning,
 .md-callout-caution,
 .md-callout-important {

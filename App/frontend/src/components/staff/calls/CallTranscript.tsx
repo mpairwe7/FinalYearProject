@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { CallTurn } from '@/services/callsApi';
 import { formatClock } from '@/hooks/useNow';
+import { formatCallCaptionText } from '@/lib/answerText';
 
 interface CallTranscriptProps {
   turns: CallTurn[];
@@ -130,7 +131,10 @@ export function CallTranscript({ turns, interimCaption, startedAt, flashSeq = nu
                 )}
               </div>
               <div className={`st-bubble ${bubbleClass}`}>
-                {renderTextWithConfidenceMarks(turn.text, turn.low_conf_words)}
+                {renderTextWithConfidenceMarks(
+                  isAssistant ? formatCallCaptionText(turn.text) : turn.text,
+                  turn.low_conf_words,
+                )}
               </div>
             </div>
           );

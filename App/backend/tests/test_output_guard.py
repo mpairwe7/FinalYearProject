@@ -179,6 +179,47 @@ class OutputGuardSanitizerTests(unittest.TestCase):
         mixed_norm = OutputGuard.normalize_structure(mixed_block)
         self.assertIn("\n\nKeep the acknowledgement for five years.\n| Band | Rate |", mixed_norm)
 
+    def test_paragraphs_split_across_citations_percentages_and_bold_starts(self) -> None:
+        raw = (
+            "The standard VAT rate in Uganda is **18%** [1]. "
+            "Businesses with taxable turnover above UGX 150,000,000 must register (VAT) [2]. "
+            "**Monthly returns** are due by the 15th of the following month [3]. "
+            "Keep your fiscalised EFRIS receipts for five years [4]."
+        )
+        norm = OutputGuard.normalize_structure(raw)
+        self.assertEqual(norm.count("\n\n"), 1)
+        self.assertIn("following month [3].\n\nKeep your fiscalised", norm)
+
+    def test_structural_lines_and_tables_are_not_shredded_by_list_splitters(self) -> None:
+        raw = (
+            "### Tax Heads: PAYE - VAT - Customs\n\n"
+            "| Category | Taxes |\n"
+            "| --- | --- |\n"
+            "| Domestic | PAYE; VAT; WHT |\n\n"
+            "1. Register online\n"
+            "2. Verify details\n"
+            "3. Upload documents: NIN; TIN; BRN"
+        )
+        norm = OutputGuard.normalize_structure(raw)
+        self.assertIn("### Tax Heads: PAYE - VAT - Customs", norm)
+        self.assertIn("| Domestic | PAYE; VAT; WHT |", norm)
+        self.assertIn("3. **Upload documents**: NIN; TIN; BRN", norm)
+
+    def test_smashed_bullets_starting_with_bold_are_separated(self) -> None:
+        """Verify smashed bullets starting with bold text split on prose lines but not inside pipe tables."""
+        raw = "Requirements include: - **National ID (NIN)**: Required for individuals. - **TIN**: Required for companies."
+        norm = OutputGuard.normalize_structure(raw)
+        self.assertIn("include:\n\n- **National ID (NIN)**:", norm)
+        self.assertIn("individuals.\n\n- **TIN**:", norm)
+
+        table_with_bold_bullet = (
+            "| Field | Requirement |\n"
+            "| --- | --- |\n"
+            "| ID | Note: - **National ID (NIN)** required |"
+        )
+        table_norm = OutputGuard.normalize_structure(table_with_bold_bullet)
+        self.assertIn("| ID | Note: - **National ID (NIN)** required |", table_norm)
+
 
 if __name__ == "__main__":
     unittest.main()

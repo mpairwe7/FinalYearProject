@@ -5,6 +5,7 @@ import { useTranslation } from '@/lib/i18n';
 import { useChatStore } from '@/store/useChatStore';
 import type { CallLanguage, CallLanguageSource, CaptionEntry } from '@/store/useCallStore';
 import { useCall } from '@/hooks/useCall';
+import { formatCallCaptionText } from '@/lib/answerText';
 import { ticketRef as caseReference } from '@/lib/ticketUi';
 import { CallOrb } from '@/components/call/CallOrb';
 import {
@@ -360,7 +361,7 @@ export function CallScreen() {
                     <span className="call-speaker-chip">{speakerLabel(caption.speaker)}</span>
                   )}
                   <div className={`call-say${interim ? ' call-say--interim' : ''}`}>
-                    {caption.text}
+                    {formatCallCaptionText(caption.text)}
                   </div>
                 </div>
               );

@@ -692,7 +692,7 @@ Reviewed on branch `fix/agentic-orchestrator-resilience-assurance-2026-10-31`; [
 | G362 ⚪ | Ticket APIs apply no tenant filter; `same_tenant` has no callers. | Open: tenancy decision first, since filtering could hide tickets. |
 | G363 ⚪ | Confirmation exists only on the WebSocket. | Open: on SSE and REST a proposal cannot be approved. Nothing runs. |
 | G364 ⚪ | The release gate reads digits and English number words only. | Open: reviewed vernacular vocabulary. |
-| G365 ⚪ | The receptionist's direct model call has no breaker; a DNS outage can spend its 25 s budget. | Open: backend. |
+| G365 🟢 | ~~The receptionist's direct model call has no breaker; a DNS outage can spend its 25 s budget.~~ | Fixed 2026-11-01 (`receptionist/brain.py`, `receptionist/brief.py`, `receptionist/summary.py`, `llm.py`): bounded timeouts, `_VLLM_BRIDGE_DOWN_UNTIL` cooldown on unmocked vLLM failures, and no duplicate `urllib.request.urlopen` retry after an `httpx` failure. |
 | G366 ⚪ | No write-ahead record for high-risk actions. | Open: backend and audit. |
 | G367 ⚪ | Supervisor confidences are uncalibrated constants that tier selection reads. | Open: backend and evaluation. |
 | G368 ⚪ | After a reasoner timeout, T1 can repeat a tool call that was in flight. | Open: tickets dedupe; other tools rely on idempotency keys. |
@@ -747,6 +747,7 @@ Reviewed on branch `fix/agentic-orchestrator-resilience-assurance-2026-10-31`; [
 | G412 ⚪ | The first crawl grows the corpus about tenfold with no answer-quality baseline at that size. | Open: ML, on that pull request. |
 | G413 🟡 | ~~Requesting `/robots.txt` on URA's perimeter drops the caller's address, so a compliant crawler could never read a page.~~ | Worked around: read after a full pass, and real rules bind later runs. A recorded deviation from RFC 9309's 24-hour SHOULD. |
 | G414 ⚪ | URA ICT should serve a real `robots.txt` or stop dropping callers who request it. | Open: service owner, URA ICT. |
+| G415 🟢 | ~~Structuring, paragraphing, and dual-modality formatting gaps in main chat and call receptionist (`guardrails.py`, `service.py`, `receptionist/brain.py`, `speech_normalization.py`, `Markdown.tsx`, `answerText.ts`, `CallScreen.tsx`, `CallTranscript.tsx`, `ConversationTimeline.tsx`).~~ | Fixed 2026-11-01: (1) `OutputGuard.normalize_structure` splits multi-sentence walls across citations/percentages/bold markers, preserves pipe tables/headings/steps 3+ in `_split_marked_list` and multiline `_STRUCTURAL_LINE_RE`, and unsmashes bold-led bullets; (2) `brain._spoken_answer` strips 5-locale written footers/follow-ups, speaks complete compact calculator breakdowns without cutting off the payable tax line, and verifies `spoken_figure_guard` against the spoken slice; (3) `clean_text_for_speech` and `cleanMarkdownForSpeech` strip table separator rows (`\| --- \|`) and voice table rows as sentences; (4) `Markdown.tsx` supports `_italic_`/`__bold__`/`***bold italic***`, recursive inline links/code inside bold, scheme-less `*.ura.go.ug` subdomains, bolded callouts, abbreviation-safe `splitLongParagraph`, and decimal-safe `asNumberedProcedure`; (5) `CallScreen.tsx` and `CallTranscript.tsx` format inline steps/offers onto separate lines (`formatCallCaptionText`) and `ConversationTimeline.tsx` renders audited replies via `Markdown`. |
 
 **Open follow-ups.**
 

@@ -92,10 +92,32 @@ _PO_BOX_RE = re.compile(
 _CODE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
 _INLINE_CODE_RE = re.compile(r"`([^`]+)`")
 
-# Markdown tables (lines starting with | or containing multiple |)
+# Markdown tables (lines starting with | or containing multiple |) and horizontal rules
 # Bounded horizontal whitespace only (never \s* under MULTILINE, which spans newlines in O(n^2) time — G87).
-_TABLE_ROW_RE = re.compile(r"^[ \t]*\|[^\n]*\|[ \t]*$", re.MULTILINE)
+_TABLE_SEPARATOR_RE = re.compile(
+    r"^[ \t]*\|?[ \t]*:?-{2,}:?(?:[ \t]*\|[ \t]*:?-{2,}:?)+[ \t]*\|?[ \t]*(?:\n|$)",
+    re.MULTILINE,
+)
+_HR_RE = re.compile(r"^[ \t]*-{3,}[ \t]*(?:\n|$)", re.MULTILINE)
+_TABLE_ROW_RE = re.compile(r"^[ \t]*\|([^\n]*)\|[ \t]*$", re.MULTILINE)
 _TABLE_PIPE_RE = re.compile(r"[ \t]?\|[ \t]?")
+
+
+def _format_table_row_for_speech(match: re.Match[str]) -> str:
+    """Convert a Markdown pipe-table row into a spoken sentence, respecting escaped pipes."""
+    cells = [
+        c.replace(r"\|", "|").strip()
+        for c in re.split(r"(?<!\\)\|", match.group(1))
+        if c.replace(r"\|", "|").strip()
+    ]
+    if not cells:
+        return ""
+    if all(re.fullmatch(r":?-{2,}:?", c) for c in cells):
+        return ""
+    joined = f"{cells[0]}: {', '.join(cells[1:])}" if len(cells) >= 2 else cells[0]
+    if not joined.rstrip("*_").endswith((".", "!", "?", ";", ":")):
+        joined = f"{joined}."
+    return joined
 
 # Headers and list bullets
 _HEADER_RE = re.compile(r"^[ \t]*#{1,6}[ \t]+", re.MULTILINE)
@@ -736,7 +758,11 @@ def clean_text_for_speech(text: str, locale: str = "en", *, verbalize_digits: bo
     t = _CODE_BLOCK_RE.sub(" ", t)
     t = _INLINE_CODE_RE.sub(r"\1", t)
 
-    # 4. Handle table rows: replace pipes with commas/spaces, and convert comparisons/breadcrumb arrows
+    # 4. Handle table rows: strip separator/HR lines, format pipe rows into spoken sentences,
+    #    replace remaining pipes with commas/spaces, and convert comparisons/breadcrumb arrows
+    t = _TABLE_SEPARATOR_RE.sub("", t)
+    t = _HR_RE.sub("", t)
+    t = _TABLE_ROW_RE.sub(_format_table_row_for_speech, t)
     t = _TABLE_PIPE_RE.sub(", ", t)
     t = _COMPARISON_GT_RE.sub(_COMPARISON_GT_WORD.get(locale, " greater than "), t)
     t = _COMPARISON_LT_RE.sub(_COMPARISON_LT_WORD.get(locale, " less than "), t)

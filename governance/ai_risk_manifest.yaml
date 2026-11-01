@@ -182,6 +182,9 @@ owasp_llm:
     verified_by:
       - "App/frontend/src/__tests__/lib/safeUrl.test.ts"
       - "App/frontend/src/__tests__/lib/turnMeta.test.ts"
+      - "App/frontend/src/__tests__/components/Markdown.test.tsx"
+      - "App/frontend/src/__tests__/components/Markdown.links.test.tsx"
+      - "App/backend/tests/test_output_guard.py"
   - id: "LLM06"
     name: "Excessive Agency"
     status: "mitigated"

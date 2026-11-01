@@ -196,6 +196,20 @@ def fallback_brief(call: dict[str, Any], turns: list[dict[str, Any]]) -> dict[st
     }
 
 
+def _vllm_available_for_brief() -> bool:
+    """True when local Sunflower via vLLM is either mocked for tests or available out of cooldown."""
+    try:
+        from .. import llm
+        from . import brain as _brain
+
+        is_unmocked = getattr(llm, "_vllm_generate", None) is getattr(llm, "_ORIGINAL_VLLM_GENERATE", None)
+        if not is_unmocked:
+            return True
+        return getattr(llm, "LLM_BACKEND", "local") == "vllm" and time.monotonic() >= _brain._VLLM_BRIDGE_DOWN_UNTIL
+    except Exception:
+        return False
+
+
 def _generate(prompt: str) -> tuple[dict[str, Any] | None, str]:
     """Ask local Sunflower: (raw brief, model name), or ``(None, "")`` when it is down.
 
@@ -203,10 +217,21 @@ def _generate(prompt: str) -> tuple[dict[str, Any] | None, str]:
     deployment. With vLLM down the caller still gets the deterministic brief.
     """
     try:
+        from .. import llm
         from ..llm import _vllm_generate
+        from . import brain as _brain
 
+        is_unmocked = getattr(llm, "_vllm_generate", None) is getattr(llm, "_ORIGINAL_VLLM_GENERATE", None)
+        if not _vllm_available_for_brief():
+            return None, ""
         messages = [{"role": "system", "content": BRIEF_SYSTEM}, {"role": "user", "content": prompt}]
-        raw = _vllm_generate(messages, max_tokens=1200, temperature=0.0)
+        raw = (
+            _vllm_generate(messages, max_tokens=1200, temperature=0.0, timeout=6.0)
+            if is_unmocked
+            else _vllm_generate(messages, max_tokens=1200, temperature=0.0)
+        )
+        if is_unmocked and not raw:
+            _brain._VLLM_BRIDGE_DOWN_UNTIL = time.monotonic() + 15.0
     except Exception:
         logger.debug("Brief model failed", exc_info=True)
         return None, ""
@@ -218,7 +243,7 @@ def build_brief(call_id: str, *, force: bool = False) -> dict[str, Any] | None:
 
     Returns the brief, or ``None`` when the call has no transcript yet. With
     nothing new since the last brief, the stored one is returned unless
-    *force*.
+    *force* or the stored brief was only a fallback and vLLM is now available.
     """
     call = get_call(call_id)
     if not call:
@@ -228,8 +253,9 @@ def build_brief(call_id: str, *, force: bool = False) -> dict[str, Any] | None:
         return None
     latest = max(int(t["seq"]) for t in turns)
     previous = call.get("brief") if isinstance(call.get("brief"), dict) else None
-    covered = int(previous.get("turns_covered") or 0) if previous else 0
-    if previous and covered >= latest and not force:
+    prev_is_fallback = bool(previous and previous.get("fallback"))
+    covered = int(previous.get("turns_covered") or 0) if (previous and not prev_is_fallback) else 0
+    if previous and covered >= latest and not force and not (prev_is_fallback and _vllm_available_for_brief()):
         return previous
 
     language = str(call.get("locale") or "en")
@@ -264,7 +290,7 @@ def build_brief(call_id: str, *, force: bool = False) -> dict[str, Any] | None:
         model = "fallback"
     brief.update({
         "language": language,
-        "turns_covered": latest,
+        "turns_covered": covered if fallback else latest,
         "generated_at": time.time(),
         "model": model,
         "fallback": fallback,

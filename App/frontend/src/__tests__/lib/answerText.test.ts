@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanMarkdownForSpeech, stripCitationMarkers } from "../../lib/answerText";
+import { cleanMarkdownForSpeech, formatCallCaptionText, stripCitationMarkers } from "../../lib/answerText";
 
 describe("answerText", () => {
   it("strips citation markers cleanly", () => {
@@ -105,5 +105,23 @@ describe("answerText", () => {
     expect(speech).not.toContain("wpdmdl");
     expect(speech).not.toContain("8443");
     expect(speech).toContain("P O Box 7 2 7 9");
+  });
+
+  it("reads pipe table rows as spoken sentences while stripping separator rows", () => {
+    const raw = "| Band | Rate |\n| --- | --- |\n| Standard | 18% |";
+    const speech = cleanMarkdownForSpeech(raw);
+    expect(speech).not.toContain("---");
+    expect(speech).toContain("Band: Rate.");
+    expect(speech).toContain("Standard: 18%.");
+  });
+
+  it("formats inline call steps and trailing offer prompts onto their own lines", () => {
+    const raw =
+      "To register: Step 1: Visit the portal. Step 2: Submit the form. Would you like more detail?";
+    const formatted = formatCallCaptionText(raw);
+    expect(formatted).toBe(
+      "To register:\nStep 1: Visit the portal.\nStep 2: Submit the form.\n\nWould you like more detail?",
+    );
+    expect(formatCallCaptionText("VAT is 18%.")).toBe("VAT is 18%.");
   });
 });

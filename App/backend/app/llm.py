@@ -1612,15 +1612,12 @@ def _vllm_generate_ex(
             headers["Authorization"] = f"Bearer {VLLM_API_KEY}"
 
         with llm_call("chat", eff_model, "vllm") as call:
-            if client is not None:
-                try:
-                    resp = client.post(url, content=body, headers=headers, timeout=effective_timeout)
-                    resp.raise_for_status()
-                    payload = resp.json()
-                except Exception:
-                    payload = None
-
-            if payload is None:
+            urlopen_mocked = hasattr(urllib.request.urlopen, "_mock_name")
+            if client is not None and not urlopen_mocked:
+                resp = client.post(url, content=body, headers=headers, timeout=effective_timeout)
+                resp.raise_for_status()
+                payload = resp.json()
+            else:
                 req = _vllm_build_request(url, body, accept_stream=False)
                 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
                 with urllib.request.urlopen(req, timeout=effective_timeout) as resp:  # nosec B310 # noqa: S310

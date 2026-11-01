@@ -37,35 +37,41 @@ function safeHref(href: string): string | null {
 
 /** Peel trailing sentence punctuation off an autolinked URL so it stays as text. */
 function splitTrail(s: string): [string, string] {
-  const m = s.match(/[.,;:!?)\]]+$/);
+  const m = s.match(/[.,;:!?)\]*]+$/);
   return m ? [s.slice(0, s.length - m[0].length), m[0]] : [s, ""];
 }
 
-// Inline matcher: bold, italic, code, [text](url), [n] citation, bare URL,
-// email, phone, and the scheme-less ura.go.ug domain — tried left-to-right at
-// each position, so `[text](url)` beats `[n]` (numeric link text stays a link)
-// and a URL inside `(...)` is consumed as a unit (never double-linked).
-const INLINE_RE = new RegExp(
-  [
-    /(\*\*(.+?)\*\*)/.source, //                              1,2  **bold**
-    /(\*(.+?)\*)/.source, //                                  3,4  *italic*
-    /(`([^`]+)`)/.source, //                                  5,6  `code`
-    /(\[([^\]]+)\]\(([^)]+)\))/.source, //                    7,8,9  [text](url)
-    /(\[(\d+)\])/.source, //                                  10,11  [n] citation
-    /((?:https?:\/\/|www\.)[^\s<]+)/.source, //               12   bare URL / www.
-    /([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})/.source, // 13  email
-    `((?<!\\d)(?:${PHONE_SRC})(?!\\d))`, //                    14   phone
-    /(\bura\.go\.ug(?:\/[^\s<]*)?)/.source, //                15   scheme-less ura.go.ug
-  ].join("|"),
-  "gi",
-);
+// Inline matcher: bold+italic, bold (** or __), italic (* or _), code,
+// [text](url), [n] citation, bare URL, email, phone, and scheme-less
+// (*.?)ura.go.ug domains — tried left-to-right at each position, so
+// `[text](url)` beats `[n]` (numeric link text stays a link) and a URL inside
+// `(...)` is consumed as a unit (never double-linked).
+const INLINE_SOURCE = [
+  /(\*\*\*(.+?)\*\*\*)/.source, //                                        1,2    ***bold italic***
+  /(\*\*(.+?)\*\*)/.source, //                                            3,4    **bold**
+  /((?<![A-Za-z0-9])__([^_\n]+?)__(?![A-Za-z0-9]))/.source, //            5,6    __bold__
+  /(\*(.+?)\*)/.source, //                                                7,8    *italic*
+  /((?<![A-Za-z0-9])_([^_\n]+?)_(?![A-Za-z0-9]))/.source, //              9,10   _italic_
+  /(`([^`]+)`)/.source, //                                                11,12  `code`
+  /(\[([^\]]+)\]\(([^)]+)\))/.source, //                                  13,14,15 [text](url)
+  /(\[(\d+)\])/.source, //                                                16,17  [n] citation
+  /((?:https?:\/\/|www\.)[^\s<]+)/.source, //                             18     bare URL / www.
+  /([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})/.source, //       19     email
+  `((?<!\\d)(?:${PHONE_SRC})(?!\\d))`, //                                  20     phone
+  /(\b(?:[a-z0-9-]+\.)*ura\.go\.ug(?:\/[^\s<]*)?)/.source, //             21     scheme-less (*.?)ura.go.ug
+].join("|");
 
-function renderInline(text: string): React.ReactNode[] {
+/**
+ * Parse inline Markdown formatting (emphasis, inline code, links, citations,
+ * URLs, emails, and URA phone numbers) into React nodes.
+ */
+function renderInline(text: string, depth = 0, inLink = false): React.ReactNode[] {
+  if (!text || depth > 3) return [text];
   const nodes: React.ReactNode[] = [];
   let lastIdx = 0;
   let match: RegExpExecArray | null;
   let key = 0;
-  INLINE_RE.lastIndex = 0;
+  const inlineRe = new RegExp(INLINE_SOURCE, "gi");
 
   const pushLink = (href: string, label: React.ReactNode, external: boolean) => {
     nodes.push(
@@ -80,42 +86,53 @@ function renderInline(text: string): React.ReactNode[] {
     );
   };
 
-  while ((match = INLINE_RE.exec(text)) !== null) {
+  while ((match = inlineRe.exec(text)) !== null) {
     if (match.index > lastIdx) {
       nodes.push(text.slice(lastIdx, match.index));
     }
     if (match[2]) {
-      nodes.push(<strong key={key++}>{match[2]}</strong>);
-    } else if (match[4]) {
-      nodes.push(<em key={key++}>{match[4]}</em>);
-    } else if (match[6]) {
+      nodes.push(
+        <strong key={key++}>
+          <em>{renderInline(match[2], depth + 1, inLink)}</em>
+        </strong>,
+      );
+    } else if (match[4] || match[6]) {
+      const inner = (match[4] ?? match[6])!;
+      nodes.push(<strong key={key++}>{renderInline(inner, depth + 1, inLink)}</strong>);
+    } else if (match[8] || match[10]) {
+      const inner = (match[8] ?? match[10])!;
+      nodes.push(<em key={key++}>{renderInline(inner, depth + 1, inLink)}</em>);
+    } else if (match[12]) {
       nodes.push(
         <code key={key++} className="md-inline-code">
-          {match[6]}
+          {match[12]}
         </code>
       );
-    } else if (match[8] && match[9]) {
+    } else if (match[14] && match[15]) {
       // [text](url) — sanitized; unsafe schemes degrade to plain styled text
-      const href = safeHref(match[9]);
-      if (href) pushLink(href, match[8], isExternalHttp(href));
-      else nodes.push(<span key={key++} className="md-link">{match[8]}</span>);
-    } else if (match[11]) {
+      const href = safeHref(match[15]);
+      const labelNodes = renderInline(match[14], depth + 1, Boolean(href) || inLink);
+      if (href && !inLink) pushLink(href, labelNodes, isExternalHttp(href));
+      else nodes.push(<span key={key++} className="md-link">{labelNodes}</span>);
+    } else if (match[17]) {
       nodes.push(
         <sup key={key++} className="md-cite-ref">
-          {match[11]}
+          {match[17]}
         </sup>
       );
-    } else if (match[12]) {
-      const [url, trail] = splitTrail(match[12]);
+    } else if (inLink && (match[18] || match[19] || match[20] || match[21])) {
+      nodes.push(match[0]);
+    } else if (match[18]) {
+      const [url, trail] = splitTrail(match[18]);
       const href = /^www\./i.test(url) ? `https://${url}` : url;
       pushLink(href, url, true);
       if (trail) nodes.push(trail);
-    } else if (match[13]) {
-      pushLink(`mailto:${match[13]}`, match[13], false);
-    } else if (match[14]) {
-      pushLink(`tel:${match[14].replace(/[\s-]/g, "")}`, match[14], false);
-    } else if (match[15]) {
-      const [dom, trail] = splitTrail(match[15]);
+    } else if (match[19]) {
+      pushLink(`mailto:${match[19]}`, match[19], false);
+    } else if (match[20]) {
+      pushLink(`tel:${match[20].replace(/[\s-]/g, "")}`, match[20], false);
+    } else if (match[21]) {
+      const [dom, trail] = splitTrail(match[21]);
       pushLink(`https://${dom}`, dom, true);
       if (trail) nodes.push(trail);
     }
@@ -132,11 +149,30 @@ const DIAGRAM_LANGS = new Set(["mermaid"]);
 interface Block {
   type: "paragraph" | "heading" | "ul" | "ol" | "code" | "diagram" | "blockquote" | "hr" | "table" | "callout";
   level?: number;
+  start?: number;
   items?: string[];
   lang?: string;
   text?: string;
   rows?: string[][];
   calloutKind?: string;
+}
+
+const TRAILING_ABBR_RE =
+  /(?:^|[\s(])(?:e\.g|i\.e|etc|no|sec|art|cap|sch|para|reg|vol|ch|pt|shs|ushs|ugx|mr|mrs|ms|dr|st|ltd|inc|co|corp|vs|p\.o|s|ss)\.$/i;
+
+/** Split prose into sentences without breaking after statutory or common abbreviations. */
+function splitSentencesSafe(text: string): string[] {
+  const rawParts = text.split(/(?<=[.!?])\s+/);
+  const out: string[] = [];
+  for (const part of rawParts) {
+    if (!part) continue;
+    if (out.length > 0 && TRAILING_ABBR_RE.test(out[out.length - 1])) {
+      out[out.length - 1] += " " + part;
+    } else {
+      out.push(part);
+    }
+  }
+  return out;
 }
 
 /**
@@ -148,12 +184,14 @@ interface Block {
  * while breaking up LLM walls-of-text.
  */
 function splitLongParagraph(text: string): string[] {
-  if (text.length < 200 || asNumberedProcedure(text) !== null) return [text];
+  if (text.length < 200 || asNumberedProcedure(text) !== null) {
+    return [text];
+  }
 
-  // Split on sentence boundaries: period/question/exclamation followed by space + capital
+  // Split on sentence boundaries while keeping statutory/common abbreviations intact
   const sentences: string[] = [];
   let buf = '';
-  const parts = text.split(/(?<=[.!?])\s+/);
+  const parts = splitSentencesSafe(text);
 
   for (const part of parts) {
     if (!buf) {
@@ -257,7 +295,7 @@ function asEnumeration(text: string): { lead: string; items: string[] } | null {
  * alone rather than silently renumbered.
  */
 function asNumberedProcedure(text: string): { lead: string; items: string[] } | null {
-  const marker = /(?:^|[\s:;.,!?])(\d{1,2})[).]\s*/g;
+  const marker = /(?:^|[\s:;.,!?])(\d{1,2})[).](?:\s+|(?=\*{1,2}[A-Za-z]|[A-Z]))/g;
   const found: { n: number; start: number; end: number }[] = [];
   let m: RegExpExecArray | null;
   while ((m = marker.exec(text)) !== null) {
@@ -303,30 +341,40 @@ function tidyTypography(text: string): string {
     .replace(/\bCustomary Services\b/g, "Customs Services");
 }
 
+/** True when a line opens with an ATX heading marker (`#`..`####`). */
 function isHeading(line: string) {
   return /^(#{1,4})\s+(.+)/.test(line);
 }
 
+const CALLOUT_LINE_RE =
+  /^(?:\*{1,2}|_)?(note|important|tip|warning|caution|summary)(?:\*{1,2}|_)?:\s*(?:\*{1,2}|_)?\s*(.+)/i;
+
+/** True when a line starts with a callout label such as `Note:` or `**Important:**`. */
 function isCallout(line: string) {
-  return /^(note|important|tip|warning|caution|summary):\s+.+/i.test(line.trim());
+  return CALLOUT_LINE_RE.test(line.trim());
 }
 
+/** True when a line starts with an unordered list marker (`-`, `*`, `+`, or `•`). */
 function isUnorderedListItem(line: string) {
   return /^[-*+]\s+/.test(line.trimStart()) || /^\u2022\s+/.test(line.trimStart());
 }
 
+/** True when a line starts with an ordered list marker (`1.` or `1)`). */
 function isOrderedListItem(line: string) {
   return /^\d+[\.)]\s+/.test(line.trimStart());
 }
 
+/** True when a line is a Markdown pipe-table separator row (`| --- | --- |`). */
 function isTableSeparator(line: string) {
   return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
 }
 
+/** True when a line is a Markdown pipe-table data or header row. */
 function isTableRow(line: string) {
   return line.includes("|") && !isTableSeparator(line);
 }
 
+/** Split a pipe-table row into trimmed cell strings. */
 function parseTableRow(line: string) {
   return line
     .trim()
@@ -336,6 +384,7 @@ function parseTableRow(line: string) {
     .map((cell) => cell.trim());
 }
 
+/** Parse a Markdown string into structured block descriptors. */
 function parseBlocks(src: string): Block[] {
   const lines = stripCitationMarkers(src).split("\n");
   const blocks: Block[] = [];
@@ -386,13 +435,13 @@ function parseBlocks(src: string): Block[] {
       continue;
     }
 
-    // Callout labels commonly produced by LLMs
-    const calloutMatch = line.trim().match(/^(note|important|tip|warning|caution|summary):\s+(.+)/i);
+    // Callout labels commonly produced by LLMs (plain or bolded, e.g. Note: or **Important:**)
+    const calloutMatch = line.trim().match(CALLOUT_LINE_RE);
     if (calloutMatch) {
       blocks.push({
         type: "callout",
         calloutKind: calloutMatch[1].toLowerCase(),
-        text: calloutMatch[2],
+        text: calloutMatch[2].replace(/(?:\*{1,2}|_)$/, "").trim(),
       });
       i++;
       continue;
@@ -451,9 +500,12 @@ function parseBlocks(src: string): Block[] {
           break;
         }
       }
+      const firstNumMatch = items[0]?.match(/^(\d+)[.)]\s+/);
+      const startNum = firstNumMatch ? Number(firstNumMatch[1]) : 1;
       const expanded = items.flatMap((it) => asNumberedProcedure(it)?.items ?? [it]);
       blocks.push({
         type: "ol",
+        start: startNum > 1 ? startNum : undefined,
         items: expanded.map((it) => it.replace(/^\d+[.)]\s+/, "")),
       });
       continue;
@@ -509,6 +561,7 @@ function parseBlocks(src: string): Block[] {
   return blocks;
 }
 
+/** Render parsed Markdown blocks into React elements. */
 function renderBlocks(blocks: Block[]): React.ReactNode[] {
   return blocks.map((block, i) => {
     switch (block.type) {
@@ -553,7 +606,7 @@ function renderBlocks(blocks: Block[]): React.ReactNode[] {
         return (
           <aside key={i} className={`md-callout md-callout-${block.calloutKind}`}>
             <strong>{block.calloutKind}</strong>
-            <span>{renderInline(block.text!)}</span>
+            <p className="md-callout-text">{renderInline(block.text!)}</p>
           </aside>
         );
 
@@ -594,7 +647,7 @@ function renderBlocks(blocks: Block[]): React.ReactNode[] {
 
       case "ol":
         return (
-          <ol key={i} className="md-list md-ol">
+          <ol key={i} className="md-list md-ol" start={block.start}>
             {block.items!.map((item, j) => (
               <li key={j}>{renderInline(item)}</li>
             ))}

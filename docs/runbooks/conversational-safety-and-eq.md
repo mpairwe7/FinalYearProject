@@ -78,7 +78,11 @@ ever showed — G173).
 
 The composer footer (`composer.disclaimer`) and the greeting (`text_signals.GREETING_REPLY*`)
 say it is an AI in all five languages; the voice greeting already did ("I'm your AI
-assistant").
+assistant"). On voice calls (`receptionist/brain.py`), 5-locale written contact footers and
+follow-up suggestions (`You might also want to know`, `Oyinz'okwagala okumanya`, `Unaweza pia kutaka kujua`,
+`Noobaasa n'okwenda kumanya`, `Itwero bene mito ngeyo`) are stripped in `_spoken_answer` before
+sentence splitting so written-only footers never trigger a false *"Would you like more detail?"*
+offer (`G415`).
 
 ## Ramp and watch
 
