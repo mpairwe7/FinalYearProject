@@ -66,6 +66,8 @@ from bs4.element import NavigableString, Tag
 
 from ml.scripts.data_aug.crawl_policy import (
     CRAWL_ALLOWED_HOSTS,
+    CRAWLER_TOKEN,
+    HELD_ROBOTS_MAX_AGE_DAYS,
     PRIMARY_HOST,
     ROBOTS_MAX_BYTES,
     ROBOTS_MAX_REDIRECTS,
@@ -791,16 +793,29 @@ class _CrawlRun:
         policy = self.robots.get(host)
         if policy is None:
             if host in ROBOTS_READ_LAST_HOSTS:
-                policy = self._held_robots()
+                policy = self._held_robots(host)
             else:
                 policy = self._read_robots(host)
             self.robots[host] = policy
             self.outcomes[f"robots_{policy.state}"] += 1
         return policy
 
-    def _held_robots(self) -> RobotsPolicy:
-        """The rules the last full pass found, without touching the file now."""
-        held = parse_robots(str(self.state.get("robots_rules") or ""))
+    def _held_robots(self, host: str = PRIMARY_HOST) -> RobotsPolicy:
+        """The rules the last full pass found for *host*, without touching the file now."""
+        checked = _parse_moment(self.state.get("robots_checked_at"))
+        if (
+            self.config.tier == "changes"
+            and checked is not None
+            and (datetime.now(timezone.utc) - checked).total_seconds() > HELD_ROBOTS_MAX_AGE_DAYS * 86400
+        ):
+            self.stopped_by = "robots_expired"
+            return RobotsPolicy(state="unreachable")
+        by_host = self.state.get("robots_rules_by_host")
+        if isinstance(by_host, dict) and host in by_host:
+            raw_rules = str(by_host.get(host) or "")
+        else:
+            raw_rules = str(self.state.get("robots_rules") or "") if host == PRIMARY_HOST else ""
+        held = parse_robots(raw_rules)
         held.state = "read_last"
         return held
 
@@ -811,13 +826,25 @@ class _CrawlRun:
         over. An HTML error page parses to no rules, and clears any held ones,
         which is right: the file has gone. A failed read changes nothing.
         """
-        self.outcomes["robots_read_last"] += 1
-        policy = self._read_robots(PRIMARY_HOST)
-        self.state["robots_checked_at"] = _now()
-        self.state["robots_last_state"] = policy.state
-        if policy.state != "unreachable":
-            has_rules = bool(policy.rules or policy.usage or policy.sitemaps or policy.crawl_delay)
-            self.state["robots_rules"] = self.robots_text if has_rules else ""
+        hosts_to_read = [h for h in (PRIMARY_HOST, *sorted(ROBOTS_READ_LAST_HOSTS - {PRIMARY_HOST})) if h in self.robots]
+        if not hosts_to_read:
+            hosts_to_read = [PRIMARY_HOST]
+        by_host = dict(self.state.get("robots_rules_by_host") or {})
+        for host in hosts_to_read:
+            if self.fetches >= self.config.max_fetches:
+                break
+            self.outcomes["robots_read_last"] += 1
+            policy = self._read_robots(host)
+            self.state["robots_checked_at"] = _now()
+            if host == PRIMARY_HOST:
+                self.state["robots_last_state"] = policy.state
+            if policy.state != "unreachable":
+                has_rules = bool(policy.rules or policy.usage or policy.sitemaps or policy.crawl_delay)
+                rule_text = self.robots_text if has_rules else ""
+                by_host[host] = rule_text
+                if host == PRIMARY_HOST:
+                    self.state["robots_rules"] = rule_text
+        self.state["robots_rules_by_host"] = by_host
 
     def _read_robots(self, host: str) -> RobotsPolicy:
         """Sections 2.3.1.2 to 2.3.1.4, with redirects held to the allowed hosts."""
@@ -1221,6 +1248,25 @@ class _CrawlRun:
         held_published = str(entry.get("published_at") or "")
         return bool(held_published and page.published_at and page.published_at < held_published)
 
+    @staticmethod
+    def _x_robots_noindex(header: str) -> bool:
+        """True if *header* carries an unprefixed or our-crawler-prefixed noindex directive."""
+        if not header:
+            return False
+        token_lower = CRAWLER_TOKEN.lower()
+        current_agent = "*"
+        for raw_part in header.split(","):
+            part = raw_part.strip().lower()
+            if not part:
+                continue
+            if ":" in part:
+                agent, directive = part.split(":", 1)
+                current_agent = agent.strip()
+                part = directive.strip()
+            if current_agent in ("*", token_lower) and re.search(r"\b(?:noindex|none)\b", part):
+                return True
+        return False
+
     def _accept_html(
         self,
         url: str,
@@ -1251,7 +1297,7 @@ class _CrawlRun:
                 entry["status"] = "blocked"
                 self.governor.record(urlsplit(url).hostname or "", ok=False)
             return None
-        if page.noindex or "noindex" in result.headers.get("x-robots-tag", "").lower():
+        if page.noindex or self._x_robots_noindex(result.headers.get("x-robots-tag", "")):
             self._clear_delisted_marker(url, entry)
             self.outcomes["noindex"] += 1
             entry["status"] = "noindex"
@@ -1271,7 +1317,6 @@ class _CrawlRun:
         if self._is_older_than_held(entry, page):
             # Not verified either: the site did not confirm what is held. If the
             # older version stays, the held page ages out and a person decides.
-            self._clear_delisted_marker(url, entry)
             self.outcomes["older_than_held"] += 1
             entry.update(last_outcome="older_than_held", older_response_at=_now())
             return None
@@ -1282,9 +1327,8 @@ class _CrawlRun:
         if enqueue_links and depth < self.config.link_depth:
             for link in page.links:
                 self._enqueue(link, priority=2, order="1", depth=depth + 1)
-        if enqueue_links:
-            for document in page.pdfs:
-                self.pdf_queue.append((document, url))
+        for document in page.pdfs:
+            self.pdf_queue.append((document, url))
         if page.kind == "hub":
             entry["kind"] = "hub"
             self.outcomes["hub"] += 1
@@ -1322,12 +1366,17 @@ class _CrawlRun:
                     entry.pop("last_modified", None)
                     self.outcomes["moved"] += 1
                     kind = classify_url(final)
-                    if kind in ("skip", "document"):
+                    if kind == "skip":
+                        continue
+                    if kind == "document":
+                        self.pdf_queue.append((final, url))
                         continue
                     entry = self._entry(final, kind)
                     entry.update(last_checked_at=_now(), last_status=result.status, last_outcome=result.outcome)
                 content_type = result.headers.get("content-type", "").lower()
                 if "pdf" in content_type or result.body.startswith(_PDF_MAGIC):
+                    self._clear_delisted_marker(final, entry)
+                    self.pdf_queue.append((final, url))
                     continue
                 if content_type and "html" not in content_type:
                     continue
@@ -1403,15 +1452,19 @@ class _CrawlRun:
             slug = slug[:-4]
         stem = re.sub(r"[^\w\-.]", "_", f"{urlsplit(url).hostname}-{slug}")[:146]
         name = f"{stem}.pdf"
+        self.config.pdf_output_dir.mkdir(parents=True, exist_ok=True)
+        same_url_recorded = any(
+            isinstance(meta, dict) and meta.get("filename") == name and meta.get("url") == url
+            for meta in self.state["pdf_hashes"].values()
+        )
         claimed_by_other = any(
             isinstance(meta, dict) and meta.get("filename") == name and meta.get("url") and meta.get("url") != url
             for meta in self.state["pdf_hashes"].values()
         )
-        if claimed_by_other:
+        if claimed_by_other or ((self.config.pdf_output_dir / name).exists() and not same_url_recorded):
             url_tag = hashlib.sha256(url.encode("utf-8")).hexdigest()[:8]
             name = f"{stem[:137]}-{url_tag}.pdf"
 
-        self.config.pdf_output_dir.mkdir(parents=True, exist_ok=True)
         target = self.config.pdf_output_dir / name
         if target.exists():
             held_date, new_date = pdf_document_date(target.read_bytes()), pdf_document_date(data)
@@ -1458,11 +1511,16 @@ class _CrawlRun:
             self._checkpoint()
             if page is not None:
                 yield page
-        self._fetch_documents()
         yield from self._confirm_suspects()
+        self._fetch_documents()
         self.ran_to_completion = True
         # Last of all: reading it can cost the host for several minutes.
-        if self.config.tier == "full" and not self.stopped_by and PRIMARY_HOST in self.robots:
+        if (
+            self.config.tier == "full"
+            and not self.stopped_by
+            and self.fetches < self.config.max_fetches
+            and any(host in self.robots for host in ROBOTS_READ_LAST_HOSTS)
+        ):
             self._read_robots_last()
 
     def finish(self) -> dict[str, Any]:

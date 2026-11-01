@@ -1113,7 +1113,7 @@ def _default_page_fetcher(url: str, timeout: float = 30.0) -> str:
     }
     current = url
     with httpx.Client(timeout=timeout, follow_redirects=False, headers=headers) as client:
-        for _hop in range(20):
+        for _hop in range(21):
             resp = client.get(current)
             if resp.is_redirect:
                 current = _validated_redirect(resp, current)
@@ -1142,7 +1142,7 @@ def _stream_pdf_with_tls_fallback(
 
     current = url
     with httpx.Client(timeout=timeout, follow_redirects=False, headers=headers) as client:
-        for _hop in range(20):
+        for _hop in range(21):
             with client.stream("GET", current) as resp:
                 if resp.is_redirect:
                     current = _validated_redirect(resp, current)

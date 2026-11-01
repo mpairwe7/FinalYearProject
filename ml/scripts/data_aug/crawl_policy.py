@@ -225,6 +225,8 @@ def pdf_document_date(data: bytes) -> str:
 ROBOTS_MAX_BYTES = 500 * 1024
 #: Section 2.3.1.2: follow at least five consecutive redirects.
 ROBOTS_MAX_REDIRECTS = 5
+#: Maximum age (days) for held robots.txt rules before a changes-tier run must stop until a full pass refreshes them.
+HELD_ROBOTS_MAX_AGE_DAYS = 38
 _MAX_CRAWL_DELAY_S = 30.0
 _PERCENT = re.compile(r"%[0-9a-fA-F]{2}")
 _TOKEN = re.compile(r"^[A-Za-z_-]+")
