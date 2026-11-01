@@ -199,6 +199,7 @@ ALLOWED_STATUTORY_PDF_HOSTS: frozenset[str] = frozenset(
     {
         "ura.go.ug",
         "www.ura.go.ug",
+        "uramedia.ura.go.ug",
         "parliament.go.ug",
         "www.parliament.go.ug",
         "bills.parliament.ug",
@@ -265,6 +266,15 @@ _UG_GOV_INTERMEDIATE_TLS_HOSTS: frozenset[str] = frozenset(
 #: still rejected. Only the source-hash comparison is skipped, and skipping it
 #: is logged.
 TRUST_MANIFEST = os.getenv("CORPUS_TRUST_MANIFEST", "false").lower() in ("1", "true", "yes", "on")
+
+#: One honest identity for every fetch that feeds the corpus, equal to
+#: ``ml.scripts.data_aug.crawl_policy.USER_AGENT`` (the runtime may not import it,
+#: so tests/test_crawl_policy.py holds the two together). A browser string here
+#: would be a public service impersonating a person (ADR-0023).
+CORPUS_FETCH_USER_AGENT = (
+    "URA-Taxpayer-Assistant-Crawler/2.0 "
+    "(+https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/crawl-operations.md)"
+)
 
 # Chunk sizing. The defaults mirror ``ml.scripts.data_aug.chunkers.chunk_pdf``
 # so the retrieval corpus and the training corpus are cut the same way.
@@ -398,6 +408,16 @@ def _chunker_params() -> dict[str, int]:
     }
 
 
+def _has_pdf_header(path: Path) -> bool:
+    with path.open("rb") as handle:
+        head = handle.read(64)
+    try:
+        validate_pdf_header(head)
+    except PdfRejected:
+        return False
+    return True
+
+
 def _chunk_pdf_records(pdf_path: Path, source_sha256: str) -> Iterator[dict[str, Any]]:
     """Yield canonical JSONL records for one PDF.
 
@@ -525,6 +545,24 @@ def export_pdf_chunks_to_jsonl(
             logger.info("skipped %s — byte-identical to %s", pdf_path.name, canonical)
             continue
         canonical_by_hash[source_sha256] = pdf_path.name
+
+        # PyMuPDF opens HTML happily, so a saved error page under a .pdf name
+        # became "the employment income guide": two Wayback pages yielded 10,000
+        # characters of Internet Archive fundraising text this way (ADR-0023).
+        if not _has_pdf_header(pdf_path):
+            logger.warning("refused %s: not a PDF", pdf_path.name)
+            manifest_sources.append(
+                {
+                    "pdf": pdf_path.name,
+                    "jsonl": "",
+                    "sha256": source_sha256,
+                    "records": 0,
+                    "fiscal_year": "",
+                    "chars": 0,
+                    "refused": "not a PDF",
+                }
+            )
+            continue
 
         output_path = jsonl_dir / f"{pdf_path.stem}.jsonl"
         cached_entry = existing_by_pdf.get(pdf_path.name)
@@ -698,7 +736,7 @@ def ingest_pdf_jsonls(pdf_dir: Path, jsonl_dir: Path) -> list[dict[str, Any]]:
         # indexed under the canonical name, so there is no JSONL to read. The
         # hash check above still ran, so the claim is verified rather than
         # trusted.
-        if _clean(entry.get("duplicate_of")):
+        if _clean(entry.get("duplicate_of")) or _clean(entry.get("refused")):
             continue
 
         jsonl_name = _clean(entry.get("jsonl"))
@@ -1016,21 +1054,73 @@ def canonical_statutory_pdf_filename(
     return f"{stem[:110]}.pdf"
 
 
+#: Document dates a PDF states about itself. ``crawl_policy.pdf_document_date``
+#: is the same reading for the crawler, which may not import this module.
+_PDF_INFO_DATE = re.compile(rb"/(?:ModDate|CreationDate)\s*\(D:(\d{4})(\d{2})(\d{2})")
+_PDF_XMP_DATE = re.compile(rb"xmp:(?:ModifyDate|CreateDate)(?:>|=[\"'])\s*(\d{4})-(\d{2})-(\d{2})")
+
+
+def pdf_document_date(data: bytes) -> str:
+    """The latest valid non-future calendar date a PDF states about itself, ``YYYY-MM-DD``, or ``""``.
+
+    Invalid calendar dates (such as February 30) and dates later than the fetch
+    time are rejected so a malformed or future-stamped file cannot block
+    legitimate replacements.
+    """
+    from datetime import date, datetime, timezone
+
+    today = datetime.now(timezone.utc).date()
+    found: list[str] = []
+    for pattern in (_PDF_INFO_DATE, _PDF_XMP_DATE):
+        for match in pattern.finditer(data):
+            try:
+                candidate = date(
+                    int(match.group(1)),
+                    int(match.group(2)),
+                    int(match.group(3)),
+                )
+            except ValueError:
+                continue
+            if candidate <= today:
+                found.append(candidate.isoformat())
+    return max(found, default="")
+
+
+def _validated_redirect(resp: Any, current: str) -> str:
+    """The next hop of a redirect, or a refusal if it leaves the allowlist.
+
+    Checked hop by hop, because ``follow_redirects=True`` would let a page on an
+    allowed host hand the harvester to any other host.
+    """
+    location = resp.headers.get("Location", "").strip()
+    if not location:
+        raise CorpusValidationError(f"Redirect missing Location header for {current}")
+    target = str(resp.url.join(location))
+    parsed = urlparse(target)
+    host = (parsed.hostname or "").strip().lower().rstrip(".")
+    if parsed.scheme != "https" or host not in ALLOWED_STATUTORY_PDF_HOSTS:
+        raise CorpusValidationError(f"Disallowed redirect target: {target}")
+    return target
+
+
 def _default_page_fetcher(url: str, timeout: float = 30.0) -> str:
     """Fetch HTML from a validated HTTPS statutory portal page."""
     import httpx
 
     headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
-        ),
+        "User-Agent": CORPUS_FETCH_USER_AGENT,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     }
-    with httpx.Client(timeout=timeout, follow_redirects=True, headers=headers) as client:
-        resp = client.get(url)
-        resp.raise_for_status()
-        return resp.text
+    current = url
+    with httpx.Client(timeout=timeout, follow_redirects=False, headers=headers) as client:
+        for _hop in range(21):
+            resp = client.get(current)
+            if resp.is_redirect:
+                current = _validated_redirect(resp, current)
+                continue
+            resp.raise_for_status()
+            return resp.text
+    raise CorpusValidationError(f"Too many redirects fetching {url}")
 
 
 def _stream_pdf_with_tls_fallback(
@@ -1039,60 +1129,26 @@ def _stream_pdf_with_tls_fallback(
     timeout: float,
     headers: dict[str, str],
     existing_by_name: dict[str, tuple[str, int, str]] | None = None,
-    existing_by_size: dict[int, tuple[str, str]] | None = None,
     title: str = "",
     source_page: str = "",
 ) -> dict[str, Any]:
-    """Stream *url* over HTTPS with strict TLS verification and redirect allowlist validation."""
+    """Stream *url* over HTTPS with strict TLS verification and redirect allowlist validation.
+
+    A file already held is marked existing only when the downloaded body's
+    SHA-256 matches the held digest (a matching name and Content-Length alone
+    cannot prove byte identity).
+    """
     import httpx
 
     current = url
     with httpx.Client(timeout=timeout, follow_redirects=False, headers=headers) as client:
-        for _hop in range(6):
+        for _hop in range(21):
             with client.stream("GET", current) as resp:
                 if resp.is_redirect:
-                    loc = resp.headers.get("Location", "").strip()
-                    if not loc:
-                        raise CorpusValidationError(f"Redirect missing Location header for {current}")
-                    nxt = str(resp.url.join(loc))
-                    parsed = urlparse(nxt)
-                    host = (parsed.hostname or "").strip().lower().rstrip(".")
-                    if parsed.scheme != "https" or host not in ALLOWED_STATUTORY_PDF_HOSTS:
-                        raise CorpusValidationError(f"Disallowed PDF redirect target: {nxt}")
-                    current = nxt
+                    current = _validated_redirect(resp, current)
                     continue
                 resp.raise_for_status()
                 resp_headers = {str(k).lower(): str(v) for k, v in resp.headers.items()}
-                if existing_by_name is not None:
-                    cd_header = resp_headers.get("content-disposition", "")
-                    cand_name = canonical_statutory_pdf_filename(
-                        current,
-                        title=title,
-                        content_disposition=cd_header,
-                        source_page=source_page,
-                    )
-                    if cand_name.lower() in existing_by_name:
-                        ex_name, ex_sz, ex_sha = existing_by_name[cand_name.lower()]
-                        return {
-                            "status": "existing",
-                            "pdf": ex_name,
-                            "url": url,
-                            "title": title,
-                            "sha256": ex_sha,
-                            "bytes": ex_sz,
-                        }
-                if existing_by_size is not None:
-                    cl_str = resp_headers.get("content-length", "")
-                    if cl_str.isdigit() and int(cl_str) in existing_by_size:
-                        ex_name, ex_sha = existing_by_size[int(cl_str)]
-                        return {
-                            "status": "existing",
-                            "pdf": ex_name,
-                            "url": url,
-                            "title": title,
-                            "sha256": ex_sha,
-                            "bytes": int(cl_str),
-                        }
                 buf = bytearray()
                 for chunk in resp.iter_bytes(chunk_size=65536):
                     if not chunk:
@@ -1102,12 +1158,35 @@ def _stream_pdf_with_tls_fallback(
                         raise CorpusValidationError(
                             f"Remote PDF {url} exceeded corpus max_bytes ({PDF_CORPUS_MAX_BYTES})."
                         )
+                raw_bytes = bytes(buf)
+                if existing_by_name is not None:
+                    cd_header = resp_headers.get("content-disposition", "")
+                    cand_name = canonical_statutory_pdf_filename(
+                        current,
+                        title=title,
+                        content_disposition=cd_header,
+                        source_page=source_page,
+                    )
+                    held = existing_by_name.get(cand_name.lower())
+                    if (
+                        held is not None
+                        and len(raw_bytes) == held[1]
+                        and hashlib.sha256(raw_bytes).hexdigest() == held[2]
+                    ):
+                        return {
+                            "status": "existing",
+                            "pdf": held[0],
+                            "url": url,
+                            "title": title,
+                            "sha256": held[2],
+                            "bytes": held[1],
+                        }
                 return {
                     "status": "fetched",
                     "url": url,
                     "title": title,
                     "source_page": source_page,
-                    "raw_bytes": bytes(buf),
+                    "raw_bytes": raw_bytes,
                     "headers": resp_headers,
                 }
         raise CorpusValidationError(f"Too many redirects fetching PDF {url}")
@@ -1115,13 +1194,7 @@ def _stream_pdf_with_tls_fallback(
 
 def _default_pdf_fetcher(url: str, timeout: float = 45.0) -> tuple[bytes, dict[str, str]]:
     """Stream a statutory PDF over HTTPS while enforcing host allowlists and ``PDF_CORPUS_MAX_BYTES``."""
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
-        ),
-        "Accept": "application/pdf,*/*;q=0.8",
-    }
+    headers = {"User-Agent": CORPUS_FETCH_USER_AGENT, "Accept": "application/pdf,*/*;q=0.8"}
     res = _stream_pdf_with_tls_fallback(url, timeout=timeout, headers=headers)
     return res["raw_bytes"], res["headers"]
 
@@ -1157,17 +1230,15 @@ def harvest_remote_pdfs(
     fetch_page = page_fetcher or (lambda u: _default_page_fetcher(u, timeout=timeout))
     fetch_pdf = pdf_fetcher or (lambda u: _default_pdf_fetcher(u, timeout=max(timeout, 45.0)))
 
-    # Map existing PDFs by SHA-256, lowercase filename, and byte size for zero-waste pre-stream & post-stream dedup
+    # Existing PDFs by SHA-256 (the only proof two files are one document) and by name.
     existing_by_sha: dict[str, str] = {}
     existing_by_name: dict[str, tuple[str, int, str]] = {}
-    existing_by_size: dict[int, tuple[str, str]] = {}
     for existing_pdf in sorted(pdf_dir.glob("*.pdf")):
         try:
             sha = _sha256_file(existing_pdf)
             sz = existing_pdf.stat().st_size
             existing_by_sha.setdefault(sha, existing_pdf.name)
             existing_by_name[existing_pdf.name.lower()] = (existing_pdf.name, sz, sha)
-            existing_by_size.setdefault(sz, (existing_pdf.name, sha))
         except Exception:
             logger.debug("Failed hashing existing PDF %s", existing_pdf, exc_info=True)
 
@@ -1223,31 +1294,13 @@ def harvest_remote_pdfs(
         pdf_url = item["url"]
         title = item.get("title", "")
         source_page = item.get("source_page", "")
-        guessed_name = canonical_statutory_pdf_filename(pdf_url, title=title, source_page=source_page)
-        if pdf_fetcher is None and guessed_name.lower() in existing_by_name:
-            ex_name, ex_sz, ex_sha = existing_by_name[guessed_name.lower()]
-            return {
-                "status": "existing",
-                "pdf": ex_name,
-                "url": pdf_url,
-                "title": title,
-                "sha256": ex_sha,
-                "bytes": ex_sz,
-            }
         if pdf_fetcher is None:
-            headers_req = {
-                "User-Agent": (
-                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
-                ),
-                "Accept": "application/pdf,*/*;q=0.8",
-            }
+            headers_req = {"User-Agent": CORPUS_FETCH_USER_AGENT, "Accept": "application/pdf,*/*;q=0.8"}
             return _stream_pdf_with_tls_fallback(
                 pdf_url,
                 timeout=max(timeout, 45.0),
                 headers=headers_req,
                 existing_by_name=existing_by_name,
-                existing_by_size=existing_by_size,
                 title=title,
                 source_page=source_page,
             )
@@ -1323,6 +1376,23 @@ def harvest_remote_pdfs(
                 continue
 
             target_path = pdf_dir / filename
+            replaced = target_path.is_file()
+            if replaced:
+                # Older never replaces newer: a re-upload of last year's edition
+                # at the same address is reported, not installed. An oversized
+                # held file is not read into memory (treated as undated so a
+                # valid replacement within PDF_CORPUS_MAX_BYTES may overwrite it).
+                held_size = target_path.stat().st_size
+                held_date = (
+                    pdf_document_date(target_path.read_bytes())
+                    if held_size <= PDF_CORPUS_MAX_BYTES
+                    else ""
+                )
+                new_date = pdf_document_date(raw_bytes)
+                if held_date and new_date and new_date < held_date:
+                    logger.warning("Kept %s: the remote file dated %s is older than the %s copy", filename, new_date, held_date)
+                    rejected.append({"url": pdf_url, "pdf": filename, "reason": f"older_than_held: {new_date} < {held_date}"})
+                    continue
             tmp_path = target_path.with_suffix(".pdf.tmp")
             tmp_path.write_bytes(raw_bytes)
             tmp_path.replace(target_path)
@@ -1337,6 +1407,7 @@ def harvest_remote_pdfs(
                     "sha256": sha256_hex,
                     "bytes": len(raw_bytes),
                     "fiscal_year": fiscal_year_from_name(Path(filename).stem),
+                    "replaced_earlier_edition": replaced,
                 }
             )
             logger.info("Downloaded statutory PDF %s (%d bytes) from %s", filename, len(raw_bytes), pdf_url)

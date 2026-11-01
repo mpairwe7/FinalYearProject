@@ -576,3 +576,40 @@ groups:
           summary: "Turns are running out of time"
           description: "Generation is being skipped or streams stopped at AGENTIC_TURN_DEADLINE_S."
           runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/agent-fault-tolerance.md#turns-hitting-the-deadline"
+
+  # A corpus can match its own index perfectly and still be months behind the
+  # site. These watch the gap that taxpayers actually live with (ADR-0023).
+  - name: ura_crawl_freshness
+    rules:
+      - alert: UraCrawlCorpusStale
+        expr: time() - ura_crawl_last_full_run_timestamp_seconds > 38 * 86400
+        for: 1h
+        labels:
+          severity: warning
+          team: ml
+        annotations:
+          summary: "The corpus in production has not been checked against ura.go.ug for over 38 days"
+          description: "The crawl is failing, a proposal is waiting for a person, or no release has shipped one. Taxpayers may be getting superseded guidance."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/crawl-operations.md#the-corpus-is-stale"
+
+      - alert: UraCrawlPagesUnverified
+        expr: ura_crawl_unverified_pages > 0 and time() - ura_crawl_last_full_run_timestamp_seconds < 38 * 86400
+        for: 1h
+        labels:
+          severity: warning
+          team: ml
+        annotations:
+          summary: "The corpus holds pages no crawl has confirmed against the live site"
+          description: "A complete crawl ran, yet some served pages carry no live verification. They should have been re-read or expired."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/crawl-operations.md#pages-are-unverified"
+
+      - alert: UraCrawlPagesQuarantined
+        expr: ura_crawl_quarantined_pages > 0
+        for: 5m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "A crawled page held instructions aimed at a model"
+          description: "The page was kept out of the corpus. Someone needs to find out whether ura.go.ug was tampered with."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/crawl-operations.md#a-page-was-quarantined"

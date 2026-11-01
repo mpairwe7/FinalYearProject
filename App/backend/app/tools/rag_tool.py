@@ -181,6 +181,7 @@ class SearchKnowledgeBaseTool(Tool):
                     "doc_type": h.get("doc_type", ""),
                     "url": h.get("url", ""),
                     "effective_date": h.get("effective_date", ""),
+                    "published_at": h.get("published_at", ""),
                     "score": round(
                         float(h.get("score_rerank") or h.get("score_rrf") or 0.0),
                         4,

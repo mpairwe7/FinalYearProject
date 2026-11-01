@@ -12,10 +12,16 @@ import tempfile
 import unittest
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 from unittest import mock
+
+import httpx
 
 from app.faq_corpus import CorpusValidationError
 from app.pdf_corpus import (
+    CORPUS_FETCH_USER_AGENT,
+    _default_page_fetcher,
+    pdf_document_date,
     DEFAULT_STATUTORY_PDF_SOURCES_CSV,
     MDA_STATUTORY_PDF_REGISTRY,
     PDF_MANIFEST_NAME,
@@ -419,6 +425,33 @@ class PdfCorpusExportIngestTests(unittest.TestCase):
                 export_pdf_chunks_to_jsonl(root / "pdfs", root / "pdf_jsonl")
 
 
+class NotAPdfTests(unittest.TestCase):
+    def test_a_web_page_under_a_pdf_name_is_refused_and_says_so(self) -> None:
+        """Two saved Wayback pages passed as URA's employment income and education guides."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pdf_dir = root / "pdfs"
+            pdf_dir.mkdir()
+            (pdf_dir / "www.ura.go.ug-Employment_20Income_20English.pdf").write_bytes(
+                b"<!DOCTYPE html><html><title>Wayback Machine</title><p>Ask the publishers.</p></html>"
+            )
+            (pdf_dir / "real.pdf").write_bytes(b"%PDF-1.7\nguide")
+            stem_calls: list[str] = []
+
+            def records(path: Path, _sha: str):
+                stem_calls.append(path.name)
+                return iter(())
+
+            with mock.patch("app.pdf_corpus._chunk_pdf_records", records):
+                export_pdf_chunks_to_jsonl(pdf_dir, root / "jsonl")
+            self.assertEqual(stem_calls, ["real.pdf"])
+            manifest = json.loads((root / "jsonl" / PDF_MANIFEST_NAME).read_text(encoding="utf-8"))
+            refused = [entry for entry in manifest["sources"] if entry.get("refused")]
+            self.assertEqual([entry["pdf"] for entry in refused], ["www.ura.go.ug-Employment_20Income_20English.pdf"])
+            # The manifest must still ingest: the source is on disk, and accounted for.
+            self.assertEqual(ingest_pdf_jsonls(pdf_dir, root / "jsonl"), [])
+
+
 class StatutoryPortalHarvestTests(unittest.TestCase):
     def test_parse_pdf_source_urls_accepts_parliament_and_ura_csv(self) -> None:
         urls = parse_pdf_source_urls(
@@ -573,6 +606,142 @@ class StatutoryPortalHarvestTests(unittest.TestCase):
             )
             self.assertEqual(stats_second["downloaded_count"], 0)
             self.assertEqual(stats_second["verified_existing_count"], 3)
+
+    def _serve(self, body: bytes, *, headers: dict[str, str] | None = None) -> tuple[Any, list[str]]:
+        """Patch httpx.Client so the harvester's real streaming path meets a scripted server."""
+        seen: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(str(request.url))
+            sent = {"content-type": "application/pdf", "content-length": str(len(body)), **(headers or {})}
+            return httpx.Response(200, content=body, headers=sent)
+
+        real = httpx.Client
+
+        def make(*_args: Any, **kwargs: Any) -> httpx.Client:
+            kwargs.pop("timeout", None)
+            kwargs.pop("follow_redirects", None)
+            return real(transport=httpx.MockTransport(handler), headers=kwargs.get("headers"))
+
+        return mock.patch("httpx.Client", make), seen
+
+    URL = "https://ura.go.ug/download/Income-Tax-Act.pdf"
+    OLD = b"%PDF-1.7\nold edition\n" + b"a" * 900
+
+    def test_a_matching_name_is_not_verification(self) -> None:
+        """A revised statute was reported as verified after no request at all."""
+        new = b"%PDF-1.7\nnew edition\n" + b"b" * 1400
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / "Income-Tax-Act.pdf").write_bytes(self.OLD)
+            patcher, seen = self._serve(new)
+            with patcher, mock.patch("app.pdf_corpus.inspect_pdf_bytes"):
+                stats = harvest_remote_pdfs(directory, source_urls=[self.URL])
+            self.assertEqual(seen, [self.URL])
+            self.assertEqual(stats["downloaded_count"], 1)
+            self.assertTrue(stats["downloaded"][0]["replaced_earlier_edition"])
+            self.assertEqual((directory / "Income-Tax-Act.pdf").read_bytes(), new)
+
+    def test_a_matching_size_is_not_identity(self) -> None:
+        """A different statute of the same length was filed as a copy of another one."""
+        other = b"%PDF-1.7\nunrelated\n" + b"c" * (len(self.OLD) - 19)
+        self.assertEqual(len(other), len(self.OLD))
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / "Income-Tax-Act.pdf").write_bytes(self.OLD)
+            patcher, _seen = self._serve(other)
+            with patcher, mock.patch("app.pdf_corpus.inspect_pdf_bytes"):
+                stats = harvest_remote_pdfs(directory, source_urls=["https://ura.go.ug/download/Stamp-Duty-2026.pdf"])
+            self.assertEqual(stats["verified_existing_count"], 0)
+            self.assertTrue((directory / "Stamp-Duty-2026.pdf").is_file())
+
+    def test_the_same_name_and_length_is_left_unread(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / "Income-Tax-Act.pdf").write_bytes(self.OLD)
+            patcher, seen = self._serve(self.OLD)
+            with patcher:
+                stats = harvest_remote_pdfs(directory, source_urls=[self.URL])
+            self.assertEqual(seen, [self.URL])
+            self.assertEqual(stats["verified_existing_count"], 1)
+
+    def test_same_name_and_length_with_different_bytes_is_replaced(self) -> None:
+        revised_same_len = b"%PDF-1.7\nrevised!\n" + b"r" * (len(self.OLD) - 18)
+        self.assertEqual(len(revised_same_len), len(self.OLD))
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / "Income-Tax-Act.pdf").write_bytes(self.OLD)
+            patcher, _seen = self._serve(revised_same_len)
+            with patcher, mock.patch("app.pdf_corpus.inspect_pdf_bytes"):
+                stats = harvest_remote_pdfs(directory, source_urls=[self.URL])
+            self.assertEqual(stats["verified_existing_count"], 0)
+            self.assertEqual(stats["downloaded_count"], 1)
+            self.assertEqual((directory / "Income-Tax-Act.pdf").read_bytes(), revised_same_len)
+
+    def test_an_older_file_does_not_replace_a_newer_one(self) -> None:
+        """A re-upload of last year's edition at the same address is reported, not installed."""
+        current = b"%PDF-1.7\n/ModDate (D:20260801000000)\n" + b"b" * 900
+        older = b"%PDF-1.7\n/ModDate (D:20240801000000)\n" + b"c" * 1400
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / "Income-Tax-Act.pdf").write_bytes(current)
+            patcher, _seen = self._serve(older)
+            with patcher, mock.patch("app.pdf_corpus.inspect_pdf_bytes"):
+                stats = harvest_remote_pdfs(directory, source_urls=[self.URL])
+            self.assertEqual((directory / "Income-Tax-Act.pdf").read_bytes(), current)
+            self.assertEqual(stats["downloaded_count"], 0)
+            self.assertIn("older_than_held", stats["rejected"][0]["reason"])
+
+    def test_a_file_with_no_stated_date_can_replace(self) -> None:
+        """No date is no evidence of age, so it is treated as any other new edition."""
+        current = b"%PDF-1.7\n/ModDate (D:20260801000000)\n" + b"b" * 900
+        undated = b"%PDF-1.7\nno metadata\n" + b"c" * 1400
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / "Income-Tax-Act.pdf").write_bytes(current)
+            patcher, _seen = self._serve(undated)
+            with patcher, mock.patch("app.pdf_corpus.inspect_pdf_bytes"):
+                stats = harvest_remote_pdfs(directory, source_urls=[self.URL])
+            self.assertEqual(stats["downloaded_count"], 1)
+
+    def test_a_portal_page_cannot_redirect_the_harvester_off_the_allowlist(self) -> None:
+        """Pages followed redirects freely while PDFs were checked hop by hop."""
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(302, headers={"location": "https://evil.example/fake-statutes"})
+
+        real = httpx.Client
+
+        def make(*_args: Any, **kwargs: Any) -> httpx.Client:
+            kwargs.pop("timeout", None)
+            kwargs.pop("follow_redirects", None)
+            return real(transport=httpx.MockTransport(handler), headers=kwargs.get("headers"))
+
+        with mock.patch("httpx.Client", make), self.assertRaisesRegex(CorpusValidationError, "Disallowed redirect"):
+            _default_page_fetcher("https://ura.go.ug/download-category/laws-and-acts/")
+
+    def test_every_corpus_fetch_says_who_it_is(self) -> None:
+        patcher, _seen = self._serve(self.OLD)
+        captured: list[str] = []
+        real_handler_client = httpx.Client
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured.append(request.headers["user-agent"])
+            return httpx.Response(200, content=b"<html></html>")
+
+        def make(*_args: Any, **kwargs: Any) -> httpx.Client:
+            kwargs.pop("timeout", None)
+            kwargs.pop("follow_redirects", None)
+            return real_handler_client(transport=httpx.MockTransport(handler), headers=kwargs.get("headers"))
+
+        with mock.patch("httpx.Client", make):
+            _default_page_fetcher("https://ura.go.ug/x")
+        self.assertEqual(captured, [CORPUS_FETCH_USER_AGENT])
+        self.assertNotIn("Mozilla", CORPUS_FETCH_USER_AGENT)
+
+    def test_a_pdf_states_its_own_date(self) -> None:
+        self.assertEqual(pdf_document_date(b"/CreationDate (D:20230102) /ModDate (D:20260814120000)"), "2026-08-14")
+        self.assertEqual(pdf_document_date(b"no metadata"), "")
 
     def test_mda_statutory_pdf_registry_covers_all_10_mda_groups(self) -> None:
         codes = {entry["mda_code"] for entry in MDA_STATUTORY_PDF_REGISTRY}

@@ -1,123 +1,258 @@
-# Monthly URA website crawl for new content and PDFs, run on the last day of
-# the month. Lightweight — no GPU. Commits new data to Data/crawl/ and
-# Data/pdfs/.
+# Keeps the crawled corpus current without letting anything older or unreviewed
+# replace it (ADR-0023, docs/runbooks/crawl-operations.md).
+#
+#   Weekdays         `changes`: read the sitemaps and notice listings, then fetch
+#                    only what the publisher changed, added or stopped listing.
+#   Last of month    `full`: the same, and re-verify anything not confirmed for
+#                    30 days, which is how a quiet withdrawal gets noticed.
+#
+# Three things this workflow used to do, and now must not:
+#
+#   * Parse a website with a write token on disk. `crawl` is read-only. `publish`
+#     holds the token and runs nothing from the crawl's output: it copies named
+#     data files, so a parser exploit in `crawl` can at worst propose a PR.
+#   * Push to dev. Unreviewed web text went straight to the integration branch,
+#     and a GITHUB_TOKEN push starts no workflow, so the build never ran on it:
+#     the corpus shipped with whichever unrelated PR merged next. Every crawl is
+#     now a pull request a person merges, and that merge is what builds and rolls.
+#   * Install unpinned packages. Dependencies come from a hash-locked file.
 name: Scheduled URA Crawl
 
+# checkov:skip=CKV_GHA_7:The dispatch inputs only select the crawl tier (full/changes), fetch budget, baseline flag, and whether to open a candidate PR. This workflow builds no binary or container artifact.
 on:
   schedule:
+    - cron: '30 4 * * 1-5'
     # GitHub Actions cron has no "last day of month" token, so this fires on
-    # every date that could be the last day and the `guard` job drops the runs
-    # that are not. Keeps one crawl per month without hardcoding month lengths.
+    # every date that could be the last day and `plan` drops the runs that are not.
     - cron: '0 4 28-31 * *'
   workflow_dispatch:
     inputs:
-      max_pages:
-        description: 'Maximum pages to crawl'
-        default: '200'
+      tier:
+        description: 'changes = what the publisher changed; full = also re-verify what is due'
+        type: choice
+        options: [full, changes]
+        default: full
+      max_fetches:
+        description: 'Most HTTP requests this run may make'
+        default: '4000'
         type: string
+      baseline:
+        description: 'Waive the mass-change limits, for a deliberate rebuild. Never waives planted content.'
+        type: boolean
+        default: false
+      publish:
+        description: 'Open or update the pull request. Off runs the crawl and the gate only.'
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
+# A crawl is slow on purpose. Cancelling one for the next would throw that away.
 concurrency:
   group: scheduled-crawl
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   PYTHON_VERSION: '3.11'
+  CANDIDATE_BRANCH: data/crawl-candidate
 
 jobs:
-  guard:
-    name: Last day of month?
+  plan:
+    name: What should run?
     runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
       proceed: ${{ steps.check.outputs.proceed }}
+      tier: ${{ steps.check.outputs.tier }}
     steps:
-      - name: Check whether today ends the month
+      - name: Decide the tier
         id: check
+        env:
+          EVENT: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          TIER_INPUT: ${{ inputs.tier }}
         run: |
-          # Tomorrow being the 1st is the only portable "last day" test.
-          if [ "$(date -u -d tomorrow +%d)" = "01" ]; then
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-            echo "$(date -u +%Y-%m-%d) ends the month — crawling."
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            tier="$TIER_INPUT"
+            proceed=true
+          elif [ "$SCHEDULE" = "30 4 * * 1-5" ]; then
+            tier=changes
+            proceed=true
           else
-            echo "proceed=false" >> "$GITHUB_OUTPUT"
-            echo "$(date -u +%Y-%m-%d) is not the last day of the month — skipping."
+            tier=full
+            # Tomorrow being the 1st is the only portable "last day" test.
+            if [ "$(date -u -d tomorrow +%d)" = "01" ]; then proceed=true; else proceed=false; fi
           fi
+          echo "tier=$tier" >> "$GITHUB_OUTPUT"
+          echo "proceed=$proceed" >> "$GITHUB_OUTPUT"
+          echo "tier=$tier proceed=$proceed"
 
   crawl:
-    name: Crawl ura.go.ug
+    name: Crawl and judge (read-only)
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-    needs: guard
-    # A manual run is always intentional, so it bypasses the calendar guard.
-    if: github.event_name == 'workflow_dispatch' || needs.guard.outputs.proceed == 'true'
-    timeout-minutes: 30
+      contents: read
+      pull-requests: read
+    needs: plan
+    if: needs.plan.outputs.proceed == 'true'
+    # URA takes about 2.5 seconds a page, so a full first pass is near two hours.
+    # The crawler stops itself before this, and a later run resumes where it left off.
+    timeout-minutes: 170
+    outputs:
+      verdict: ${{ steps.judge.outputs.verdict }}
+      publish: ${{ steps.judge.outputs.publish }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          persist-credentials: true  # this job pushes a commit back
-          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install crawler deps
-        run: pip install requests beautifulsoup4 pydantic ftfy
+      - name: Install locked crawl dependencies
+        run: python -m pip install --require-hashes -r ml/requirements-crawl.txt
 
-      - name: Run crawler
+      # The report compares with dev, because that is what a merge would change.
+      # The crawl continues from any open proposal, so an unmerged monthly pass
+      # is built on rather than repeated or lost.
+      - name: Keep the baseline and pick up any open proposal
         env:
-          MAX_PAGES: ${{ inputs.max_pages || '200' }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          [[ "$MAX_PAGES" =~ ^[0-9]{1,5}$ ]] || { echo "::error::max_pages must be a number"; exit 1; }
-          python -c "
-          from ml.scripts.data_aug.crawler import CrawlConfig, crawl_ura
-          from pathlib import Path
-          import logging, os
-          logging.basicConfig(level=logging.INFO)
-          cfg = CrawlConfig(
-              max_pages=int(os.environ['MAX_PAGES']),
-              rate_limit_s=2.0,
-              pdf_output_dir=Path('Data/pdfs'),
-              crawl_output_dir=Path('Data/crawl'),
-          )
-          pages = list(crawl_ura(cfg))
-          print(f'Crawled {len(pages)} pages')
-          "
+          git fetch --depth=1 origin dev
+          git checkout FETCH_HEAD -- Data/crawl Data/pdfs
+          cp -r Data/crawl "$RUNNER_TEMP/crawl-before"
+          open=$(gh pr list --head "$CANDIDATE_BRANCH" --base dev --state open --json number --jq 'length')
+          if [ "$open" != "0" ]; then
+            git fetch --depth=1 origin "$CANDIDATE_BRANCH"
+            git checkout FETCH_HEAD -- Data/crawl Data/pdfs
+            echo "Continuing from the open proposal."
+          fi
 
-      - name: Check for new content
-        id: check
+      - name: Crawl
+        env:
+          TIER: ${{ needs.plan.outputs.tier }}
+          MAX_FETCHES: ${{ inputs.max_fetches }}
         run: |
-          NEW_FILES=$(git status --porcelain Data/crawl/ Data/pdfs/ | wc -l)
-          echo "new_files=$NEW_FILES" >> "$GITHUB_OUTPUT"
-          echo "Found $NEW_FILES new/modified files"
+          # A scheduled run has no input, and takes the tier's own budget.
+          args=()
+          if [ -n "$MAX_FETCHES" ]; then
+            [[ "$MAX_FETCHES" =~ ^[0-9]{1,5}$ ]] || { echo "::error::max_fetches must be a number"; exit 1; }
+            args+=(--max-fetches "$MAX_FETCHES")
+          fi
+          python -m ml.scripts.data_aug.crawler --tier "$TIER" --max-seconds 9000 "${args[@]}"
 
-      - name: Commit new content
-        if: steps.check.outputs.new_files != '0'
+      - name: Judge the crawl
+        id: judge
+        # Also after a failed crawl: a run that stopped short still needs a verdict.
+        if: ${{ !cancelled() }}
+        env:
+          PYTHONPATH: App/backend:.
+          BASELINE: ${{ inputs.baseline }}
+          TIER: ${{ needs.plan.outputs.tier }}
+          PUBLISH_INPUT: ${{ inputs.publish }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          args=()
+          [ "$BASELINE" = "true" ] && args+=(--baseline)
+          python -m app.crawl_gate evaluate \
+            --before "$RUNNER_TEMP/crawl-before" --after Data/crawl --pdf-dir Data/pdfs \
+            --out "$RUNNER_TEMP/candidate" "${args[@]}"
+          report="$RUNNER_TEMP/candidate/report.json"
+          verdict=$(jq -r .verdict "$report")
+          changed=$(jq -r .has_content_changes "$report")
+          publish=false
+          # The monthly ledger always ships, because it proves what was verified.
+          # A change check with nothing to change opens no pull request.
+          if [ "$verdict" != "hold" ] && { [ "$TIER" = "full" ] || [ "$changed" = "true" ]; }; then publish=true; fi
+          if [ "$EVENT" = "workflow_dispatch" ] && [ "$PUBLISH_INPUT" != "true" ]; then publish=false; fi
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/candidate/report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the candidate
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: crawl-candidate
+          path: ${{ runner.temp }}/candidate
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Stop on hold
+        if: steps.judge.outputs.verdict == 'hold'
+        run: |
+          echo "::error::The crawl gate held this run. Read the job summary, then docs/runbooks/crawl-operations.md."
+          exit 1
+
+  publish:
+    name: Propose the update
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    needs: crawl
+    if: needs.crawl.outputs.publish == 'true'
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Always dev: a manual run from a feature branch must not carry its code
+          # into a data proposal.
+          ref: dev
+          persist-credentials: true  # this job pushes the proposal branch
+
+      - name: Fetch the candidate
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: crawl-candidate
+          path: ${{ runner.temp }}/candidate
+
+      # The artifact came from a job that parsed hostile input, so it is treated
+      # as hostile too: names are checked, nothing in it is executed, and only
+      # these two kinds of file can reach the branch.
+      - name: Accept data files only
+        run: |
+          candidate="$RUNNER_TEMP/candidate"
+          if [ -n "$(find "$candidate" -type l)" ]; then echo "::error::Symlink in the candidate"; exit 1; fi
+          bad=$(find "$candidate/crawl/pages" -type f ! -regex '.*/[0-9a-z_-]+\.json$')
+          if [ -n "$bad" ]; then echo "::error::Unexpected page file: $bad"; exit 1; fi
+          jq empty "$candidate/crawl/crawl_state.json"
+          git checkout -B "$CANDIDATE_BRANCH"
+          cp "$candidate"/crawl/pages/*.json Data/crawl/pages/
+          cp "$candidate/crawl/crawl_state.json" Data/crawl/crawl_state.json
+          if [ -d "$candidate/pdfs" ]; then
+            bad=$(find "$candidate/pdfs" -type f ! -regex '.*/[A-Za-z0-9._-]+\.pdf$')
+            if [ -n "$bad" ]; then echo "::error::Unexpected document name: $bad"; exit 1; fi
+            cp "$candidate"/pdfs/*.pdf Data/pdfs/
+          fi
+
+      - name: Open or update the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "URA Crawler Bot"
           git config user.email "crawler@ura-chatbot.example"
-          git add Data/crawl/ Data/pdfs/
-          git commit -m "chore(data): crawl ura.go.ug $(date +%Y-%m-%d)
-
-          New pages: $(git diff --cached --name-only Data/crawl/pages/ | wc -l)
-          New PDFs: $(git diff --cached --name-only Data/pdfs/ | wc -l)"
-          git push
-
-      - name: Step summary
-        if: always()
-        run: |
-          echo "## URA Crawl Results" >> "$GITHUB_STEP_SUMMARY"
-          echo "- New files: ${{ steps.check.outputs.new_files }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Crawl state: Data/crawl/crawl_state.json" >> "$GITHUB_STEP_SUMMARY"
-          if [ "${{ steps.check.outputs.new_files }}" != "0" ]; then
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "New source documents were committed. The Crane image-build workflow is triggered by Data/pdfs and Data/crawl changes; it regenerates the validated JSONL corpus and bakes a new alias-backed embedded Qdrant index." >> "$GITHUB_STEP_SUMMARY"
-            echo "The external Vectorize deployment remains a separate managed-index release step." >> "$GITHUB_STEP_SUMMARY"
+          git add Data/crawl Data/pdfs
+          if git diff --cached --quiet; then
+            echo "Nothing differs from dev."
+            exit 0
+          fi
+          git commit -m "chore(data): crawl proposal $(date -u +%Y-%m-%d)"
+          # Only this bot writes this branch, and each run rebuilds it on dev.
+          git push --force origin "$CANDIDATE_BRANCH"
+          body="$RUNNER_TEMP/candidate/report.md"
+          verdict=$(jq -r .verdict "$RUNNER_TEMP/candidate/report.json")
+          title="chore(data): crawl proposal ($verdict)"
+          number=$(gh pr list --head "$CANDIDATE_BRANCH" --base dev --state open --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then
+            gh pr edit "$number" --title "$title" --body-file "$body"
+          else
+            gh pr create --base dev --head "$CANDIDATE_BRANCH" --title "$title" --body-file "$body"
           fi

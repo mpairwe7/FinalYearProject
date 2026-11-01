@@ -135,6 +135,26 @@ describe("SourcesPill", () => {
     expect(screen.getByText("Odd link").closest("a")).toBeNull();
   });
 
+  it("dates a web page by its publisher, never by when it was crawled", () => {
+    const page: Citation = {
+      ref: "[1]",
+      source: "6ec19a6e4bbeaec9.json",
+      url: "https://ura.go.ug/en/domestic-taxes/paye-rates/",
+      title: "PAYE rates",
+      published_at: "2023-08-23",
+    };
+    render(<SourcesPill citations={[page]} />);
+    fireEvent.click(screen.getByRole("button", { name: /sources/i }));
+    expect(screen.getByText(/Published 2023-08-23/)).toBeInTheDocument();
+  });
+
+  it("shows no date at all for a page with none", () => {
+    const page: Citation = { ref: "[1]", source: "abc.json", url: "https://ura.go.ug/en/x/", title: "A page" };
+    render(<SourcesPill citations={[page]} />);
+    fireEvent.click(screen.getByRole("button", { name: /sources/i }));
+    expect(screen.queryByText(/Published/)).not.toBeInTheDocument();
+  });
+
   it("speaks the reader's language", () => {
     useChatStore.setState({ locale: "sw" });
     render(<SourcesPill resources={[onlineForm, statute]} />);

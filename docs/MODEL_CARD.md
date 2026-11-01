@@ -78,11 +78,13 @@ defaults are unchanged by this addendum.
 |---------|--------|------|---------|
 | URA FAQ CSV files | ura.go.ug (public) | 45 files | Public domain |
 | URA PDF handbooks, parliamentary bills & 10-MDA statutory acts (2018–2027) | ura.go.ug, parliament.go.ug, bills.parliament.ug, ulii.org, plus 10 Ugandan MDAs (`MoWT`, `DCIC`, `NIRA`, `PPDA/MoFPED`, `UNBS`, `MLHUD`, `KCCA/MoLG`, `UPF`, `URSB`, `NDA/NEMA/UESW`) | 186 PDFs (175 unique, 5,639 verified JSONL chunks; 7,251 Qdrant hybrid vectors — `ADR-0009`) | Public domain |
+| URA website pages, for retrieval only | ura.go.ug live site, per `docs/adr/0023-stale-driven-crawl-and-reviewed-corpus-release.md` | 223 pages selected at 2026-11-01; about 2,000 expected after the first full crawl | Public; `ai-use=n` honoured |
 | Luganda academic corpus | Makerere University | ~50K sentences | CC-BY-4.0 |
 | Teacher-generated QA pairs | Domain experts | ~2K pairs | Apache-2.0 |
 
 ### Data Processing
-- PII redaction applied during ingestion (UG TIN, NID, phone, email patterns)
+- PII redaction applied during ingestion (UG TIN, NID, phone, email patterns). Crawled pages take a narrower set, TIN, NID and personal mailboxes, because URA's helpline has the phone shape
+- Crawled pages are read from the live publisher only, screened before indexing, and merged by a person
 - Deduplication via MinHash LSH (threshold 0.8)
 - Quality gates: groundedness >= 0.3, relevance >= 0.2, answer length >= 5 words
 - Stratified splitting: 80/10/10 (train/val/test) with source-based stratification
@@ -191,7 +193,13 @@ Evaluated across 16 Ugandan tax heads (`paye`, `vat`, `withholding`, `rental`, `
    validation, mandatory portal API digest enforcement, reviewed translations and
    authenticated staging acceptance remain open in the
    [UI integration audit](plans/intelligent-ui-integration-audit-2026-10.md).
-7. **Figure verification (2026-10-31)**: every figure in a reply is traced to the question,
+7. **Crawled pages (2026-11-01)**: a page is checked when URA changes it and at least every
+   30 days, and a person merges each update, so the corpus can lag the site by days, and by
+   more if a proposal waits. Dates are the publisher's, and a page's edition is the fiscal
+   year of its last revision, so a page revised for one reason can keep a stale figure
+   under a new date (G408). Rate tables are not changed by a crawl. The crawl has not yet
+   run against the live site since this change (G406).
+8. **Figure verification (2026-10-31)**: every figure in a reply is traced to the question,
    verified facts, passages or a tool result on every transport, and a streamed figure is
    held until checked (`stream_figure_hold`, on). The lock enforces on the reasoning tier
    and under `evaluator_optimizer`. On other tiers it only measures, so a figure that does

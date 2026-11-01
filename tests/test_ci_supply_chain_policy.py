@@ -424,7 +424,82 @@ def test_each_requirements_file_is_audited_on_the_python_it_ships_on():
     pairs = {entry["requirements"]: str(entry["python"]) for entry in audit["strategy"]["matrix"]["include"]}
     ci_python = str(_load(ROOT / ".github" / "workflows" / "ci-ml-pipeline.yml")["env"]["PYTHON_VERSION"])
     api_python = set(re.findall(r"^FROM\s+python:(\d+\.\d+)", (ROOT / "Dockerfile").read_text(encoding="utf-8"), re.M))
-    assert pairs == {"requirements.txt": ci_python, "App/backend/requirements.txt": api_python.pop()}
+    assert pairs == {
+        "requirements.txt": ci_python,
+        "App/backend/requirements.txt": api_python.pop(),
+        "ml/requirements-crawl.txt": str(_load(ROOT / ".github" / "workflows" / "scheduled-crawl.yml")["env"]["PYTHON_VERSION"]),
+    }
+
+
+CRAWL_WORKFLOW = ROOT / ".github" / "workflows" / "scheduled-crawl.yml"
+
+
+def _crawl_job(name: str) -> dict[str, Any]:
+    return _load(CRAWL_WORKFLOW)["jobs"][name]
+
+
+def test_the_job_that_parses_the_web_cannot_write():
+    """A parser exploit in the crawl job must have nothing to steal (ADR-0023)."""
+    job = _crawl_job("crawl")
+    assert job["permissions"]["contents"] == "read"
+    assert "pull-requests" not in job["permissions"] or job["permissions"]["pull-requests"] == "read"
+    checkout = next(step for step in job["steps"] if "actions/checkout@" in str(step.get("uses", "")))
+    assert checkout["with"]["persist-credentials"] is False
+    assert "git push" not in json.dumps(job)
+
+
+def test_the_job_that_can_write_executes_nothing_from_the_crawl():
+    """It copies named data files. It must never run a parser, or anything it downloaded."""
+    job = _crawl_job("publish")
+    assert job["permissions"]["contents"] == "write"
+    body = "\n".join(str(step.get("run", "")) for step in job["steps"])
+    ran = re.findall(r"\b(python3?|pip|bash|sh|source|npm|bun|node)\b\s", body)
+    assert not ran, f"publish must not run {ran}"
+    assert "actions/setup-python@" not in json.dumps(job)
+
+
+def test_the_artifact_is_checked_before_it_is_copied():
+    body = "\n".join(str(step.get("run", "")) for step in _crawl_job("publish")["steps"])
+    assert "-type l" in body, "a symlink in the artifact could point anywhere"
+    assert "-regex" in body, "file names are checked before they reach the branch"
+
+
+def test_crawled_content_reaches_dev_only_through_a_pull_request():
+    """AGENTS.md: never push directly to dev. A crawl is not an exception."""
+    text = CRAWL_WORKFLOW.read_text(encoding="utf-8")
+    pushes = [line.strip() for line in text.splitlines() if line.strip().startswith("git push")]
+    assert pushes == ['git push --force origin "$CANDIDATE_BRANCH"']
+    assert _load(CRAWL_WORKFLOW)["env"]["CANDIDATE_BRANCH"] == "data/crawl-candidate"
+    assert "gh pr create --base dev" in text
+    assert "gh pr merge" not in text, "a person merges: that merge is what builds and rolls"
+
+
+def test_crawl_dependencies_are_installed_from_a_hash_lock():
+    """The old job ran an unpinned pip install with a write token on disk."""
+    steps = json.dumps(_crawl_job("crawl"))
+    assert "--require-hashes -r ml/requirements-crawl.txt" in steps
+    lock = (ROOT / "ml" / "requirements-crawl.txt").read_text(encoding="utf-8")
+    pinned = re.findall(r"^([a-z0-9][a-z0-9._-]*)==", lock, re.M)
+    assert pinned, "the lock names its packages"
+    for block in re.split(r"\n(?=[a-z0-9])", lock):
+        if re.match(r"^[a-z0-9][a-z0-9._-]*==", block):
+            assert "--hash=sha256:" in block, f"unhashed requirement: {block.splitlines()[0]}"
+
+
+def test_a_crawl_is_never_cancelled_by_the_next_one():
+    assert _load(CRAWL_WORKFLOW)["concurrency"]["cancel-in-progress"] is False
+
+
+def test_the_crawl_lock_is_watched_by_dependabot():
+    config = _load(ROOT / ".github" / "dependabot.yml")
+    assert "/ml" in {update.get("directory") for update in config["updates"] if update["package-ecosystem"] == "pip"}
+
+
+def test_the_freshness_check_can_fail():
+    """It compared files no checkout holds, took "missing" as a pass, and was always green."""
+    text = (ROOT / ".github" / "workflows" / "index-freshness.yml").read_text(encoding="utf-8")
+    assert "app.crawl_gate slo" in text
+    assert "exit 0\n" not in text.split("app.crawl_gate slo")[0]
 
 
 def test_blog_nextjs_stays_in_step_with_frontend():

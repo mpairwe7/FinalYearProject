@@ -274,6 +274,8 @@ jobs:
             python: "3.11"          # ci-ml-pipeline.yml PYTHON_VERSION
           - requirements: App/backend/requirements.txt
             python: "3.14"          # Dockerfile / Dockerfile.gpu base image
+          - requirements: ml/requirements-crawl.txt
+            python: "3.11"          # scheduled-crawl.yml PYTHON_VERSION
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

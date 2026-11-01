@@ -407,7 +407,8 @@ App/backend/app/
 ├── indexer.py           # JSONL → Qdrant indexing (Qdrant → Vectorize → keyword tiers)
 ├── faq_corpus.py        # ura_*_faqs.csv + teacher-QA → validated JSONL → vector docs
 ├── pdf_corpus.py        # Statutory & 10-MDA PDF harvester + hierarchical chunk JSONL (186 PDFs → 5,639 chunks)
-├── crawl_corpus.py      # Crawl pages → chunk JSONL (newest capture per URL, above floor)
+├── crawl_corpus.py      # Crawl ledger + pages → chunk JSONL: current capture, quarantine, editions (ADR-0023)
+├── crawl_gate.py        # pass / review / hold on a crawl before a person sees it; freshness objective
 ├── web_research.py      # 9-trigger live check, source authority & evidence labelling (ADR-0008, ADR-0021)
 ├── web_search_providers.py # Search backends with failover and breakers (ADR-0021)
 ├── ephemeral_pdf_sandbox.py # Ephemeral tmpfs PDF/XLSX sandbox + GPU micro-reranking (ADR-0008)
@@ -845,8 +846,11 @@ The corpus is English. Non-English questions take a merged English
 translation pass (`FLAG_TRANSLATE_RETRIEVE`, default on). Generation is
 **English too** unless a locale LoRA adapter is loaded (`llm.can_generate_in_locale`),
 and the reply is translated on the way out — see *Answer language* below.
-Citations carry `url` / `effective_date` when the index stored them (crawl
-chunks do).
+Citations carry `url` / `effective_date` when the index stored them, and crawl chunks
+add `published_at`, the publisher's date. A crawl time is never an effective date. A
+crawled page's `fiscal_year` is the year of its last revision, so edition handling
+applies to it: among near-identical passages the newer wins, and an edition four or
+more years old is demoted. Undated pages stay unknown, which is not old (ADR-0023).
 
 | Control | Default | Effect |
 |---------|---------|--------|

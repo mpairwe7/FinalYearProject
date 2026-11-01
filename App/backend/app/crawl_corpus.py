@@ -1,9 +1,9 @@
 """Validated crawl-page corpus builder for the vector store.
 
-The monthly ``ura.go.ug`` crawl already lands 1,000+ normalised pages under
-``Data/crawl/pages``, and they were feeding the training pipeline only. They are
-fresher than the PDF corpus — a rate change appears on the website before the
-next handbook edition — so they belong in retrieval.
+The ``ura.go.ug`` crawl lands normalised pages under ``Data/crawl/pages``, and they
+were feeding the training pipeline only. They can be fresher than the PDF corpus
+— a rate change appears on the website before the next handbook edition — so
+they belong in retrieval, provided they are read when they change.
 
 Same two-stage split as :mod:`app.pdf_corpus`: an offline export that needs the
 ``ml`` chunker, and an ingest that validates the result without re-chunking.
@@ -20,6 +20,14 @@ real corpus rather than assumed:
   per content hash, so one page can appear several times with slightly
   different bodies. Only the newest capture per URL is exported; the rest would
   be near-duplicates competing for the same ``top_k``.
+
+Selection is also where a page can be refused (ADR-0023). OWASP ASI06 asks for
+writes to shared context to be validated before commit, for authenticated
+sources, and for unverified entries to expire. So the crawl ledger decides which
+capture is current and whether the page still exists, nothing from outside the
+publisher's live site qualifies, and a page holding an instruction aimed at a
+model is quarantined rather than scrubbed and served. The check at prompt
+assembly stays: this one means a poisoned page never enters the index at all.
 """
 
 from __future__ import annotations
@@ -30,10 +38,13 @@ import logging
 import os
 import re
 from collections import Counter
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .faq_corpus import CorpusValidationError
+from .guardrails import injection_present, redact_pii_text
 from .pdf_corpus import TRUST_MANIFEST, normalise_extracted_text, normalise_heading
 
 if TYPE_CHECKING:
@@ -41,8 +52,32 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-CRAWL_JSONL_SCHEMA_VERSION = 1
+CRAWL_JSONL_SCHEMA_VERSION = 2
 CRAWL_MANIFEST_NAME = "crawl_corpus_manifest.json"
+CRAWL_STATE_NAME = "crawl_state.json"
+
+#: A page the live site has not confirmed for this long leaves the corpus
+#: (ASI06: "expire unverified memory"). Measured from the last complete crawl,
+#: never from the clock, so a crawler outage cannot silently empty the corpus,
+#: and so the same inputs always select the same pages.
+CRAWL_MAX_UNVERIFIED_DAYS = int(os.getenv("CRAWL_MAX_UNVERIFIED_DAYS", "45"))
+
+#: Ledger statuses that take a URL out of the corpus.
+_WITHDRAWN_STATUSES = frozenset({"gone", "moved", "disallowed", "noindex", "usage_denied"})
+
+#: Written by the crawler before ADR-0023, when an archive redirect could be
+#: stored under a URA address.
+_FOREIGN_TITLES = frozenset({"wayback machine", "internet archive"})
+_FOREIGN_BODY = re.compile(r"internet archive", re.IGNORECASE)
+
+#: Identifiers that a taxpayer asking about tax never needs back. The helpline
+#: has the ``ug_phone`` shape, so phones stay; ``kinds`` keeps them out of this.
+_CORPUS_REDACTED_KINDS = frozenset({"ug_tin", "ug_nid"})
+#: Official partner addresses (``sct@kra.go.ke``) stay; a personal mailbox does not.
+_PERSONAL_WEBMAIL = re.compile(
+    r"\b[A-Za-z0-9._%+-]+@(?:gmail|googlemail|yahoo|hotmail|outlook|live|icloud|proton|protonmail)\.[a-z]{2,}(?:\.[a-z]{2,})?\b",
+    re.IGNORECASE,
+)
 
 #: Pages shorter than this are navigation furniture, not guidance.
 CRAWL_MIN_PAGE_CHARS = int(os.getenv("CRAWL_MIN_PAGE_CHARS", "400"))
@@ -78,6 +113,7 @@ def _chunker_params() -> dict[str, int]:
         "hard_max_chars": CRAWL_CHUNK_HARD_MAX_CHARS,
         "min_chars": CRAWL_CHUNK_MIN_CHARS,
         "min_page_chars": CRAWL_MIN_PAGE_CHARS,
+        "max_unverified_days": CRAWL_MAX_UNVERIFIED_DAYS,
     }
 
 
@@ -91,18 +127,111 @@ def _read_page(path: Path) -> dict[str, Any]:
     return page
 
 
-def select_pages(pages_dir: Path) -> list[tuple[Path, dict[str, Any]]]:
-    """Return the pages worth indexing: newest capture per URL, above the floor.
+def load_crawl_state(pages_dir: Path) -> dict[str, Any]:
+    """The crawl ledger beside *pages_dir*. Absent means no capture has a verdict yet."""
+    path = pages_dir.parent / CRAWL_STATE_NAME
+    if not path.is_file():
+        return {}
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise CorpusValidationError(f"{path}: invalid crawl state ({exc.msg})") from exc
+    if not isinstance(state, dict):
+        raise CorpusValidationError(f"{path}: crawl state must be an object")
+    return state
+
+
+@dataclass
+class CorpusSelection:
+    """What a crawl may contribute to the corpus, and what it may not, with reasons."""
+
+    selected: list[tuple[Path, dict[str, Any]]] = field(default_factory=list)
+    excluded: Counter[str] = field(default_factory=Counter)
+    quarantined: list[dict[str, str]] = field(default_factory=list)
+
+
+def _parse_time(value: object) -> datetime | None:
+    text = _clean(value)
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _last_verified(entry: dict[str, Any], page: dict[str, Any]) -> str:
+    """When the live site last confirmed this text. A capture time is a claim, not proof."""
+    return _clean(entry.get("last_verified_at")) or _clean(page.get("timestamp"))
+
+
+def _expired(entry: dict[str, Any], page: dict[str, Any], complete_run_at: datetime | None) -> bool:
+    if complete_run_at is None:
+        return False
+    verified = _parse_time(_last_verified(entry, page))
+    return verified is None or verified < complete_run_at - timedelta(days=CRAWL_MAX_UNVERIFIED_DAYS)
+
+
+def _looks_foreign(page: dict[str, Any]) -> bool:
+    if _clean(page.get("title")).lower() in _FOREIGN_TITLES:
+        return True
+    return bool(_FOREIGN_BODY.search(_clean(page.get("text"))[:400]) and "uganda" not in _clean(page.get("text"))[:400].lower())
+
+
+def _quarantine_reason(page: dict[str, Any]) -> str:
+    """Why a page must be held for a person to read, or ``""``.
+
+    Text a reader cannot see is judged too. The crawler removes it, but an
+    instruction hidden on a government page is evidence the site was tampered
+    with, so the rest of that page is not to be trusted either.
+    """
+    if injection_present(_clean(page.get("hidden_excerpt"))):
+        return "hidden_instruction"
+    if injection_present(f"{_clean(page.get('title'))}\n{_clean(page.get('text'))}"):
+        return "instruction_in_text"
+    return ""
+
+
+def _exclusion_reason(page: dict[str, Any], entry: dict[str, Any], complete_run_at: datetime | None) -> str:
+    status = _clean(entry.get("status"))
+    if status in _WITHDRAWN_STATUSES:
+        return status
+    if entry.get("kind") == "hub":
+        return "listing"
+    if _clean(page.get("source_kind")) not in ("", "live") or _looks_foreign(page):
+        return "foreign"
+    if len(_clean(page.get("text"))) < CRAWL_MIN_PAGE_CHARS:
+        return "below_floor"
+    if _expired(entry, page, complete_run_at):
+        return "unverified"
+    return ""
+
+
+def review_pages(pages_dir: Path) -> CorpusSelection:
+    """Decide every URL: which capture is current, and whether it may be served.
+
+    The capture is chosen *before* the floor is applied. It used to be the other
+    way round, so a page cut down to a short "withdrawn" stub fell back to its
+    longer, older text. The ledger names the current capture when it has one,
+    which also gets a page that reverted to earlier wording right, and a capture
+    with no ledger entry is judged by its own timestamp.
 
     Sorted by URL so the export is deterministic regardless of filesystem order.
     """
+    state = load_crawl_state(pages_dir)
+    ledger: dict[str, Any] = state.get("visited") or {}
+    complete_run_at = _parse_time(state.get("last_full_run_at"))
+
+    selection = CorpusSelection()
     newest: dict[str, tuple[str, Path, dict[str, Any]]] = {}
     for path in sorted(pages_dir.glob("*.json")):
         page = _read_page(path)
         url = _clean(page.get("url"))
         if not url:
             continue
-        if len(_clean(page.get("text"))) < CRAWL_MIN_PAGE_CHARS:
+        current_hash = (ledger.get(url) or {}).get("content_hash")
+        if current_hash is not None and _clean(current_hash) != _clean(page.get("content_hash")):
             continue
         timestamp = _clean(page.get("timestamp"))
         current = newest.get(url)
@@ -110,7 +239,55 @@ def select_pages(pages_dir: Path) -> list[tuple[Path, dict[str, Any]]]:
         # so two captures with the same timestamp still resolve deterministically.
         if current is None or (timestamp, path.name) > (current[0], current[1].name):
             newest[url] = (timestamp, path, page)
-    return [(path, page) for _url, (_ts, path, page) in sorted(newest.items())]
+
+    for url, (_timestamp, path, page) in sorted(newest.items()):
+        entry = ledger.get(url) or {}
+        reason = _exclusion_reason(page, entry, complete_run_at)
+        if reason:
+            selection.excluded[reason] += 1
+            continue
+        held = _quarantine_reason(page)
+        if held:
+            selection.excluded["quarantined"] += 1
+            selection.quarantined.append({"url": url, "source": path.name, "reason": held})
+            logger.warning("%s (%s): %s", "crawl page quarantined", held, url.split("?", 1)[0])
+            continue
+        selection.selected.append((path, page))
+    return selection
+
+
+def select_pages(pages_dir: Path) -> list[tuple[Path, dict[str, Any]]]:
+    """Return the pages worth indexing. See :func:`review_pages` for why not the rest."""
+    return review_pages(pages_dir).selected
+
+
+def fiscal_year_of(*dates: str) -> str:
+    """``FY2023-24`` for the latest of *dates*, on Uganda's July to June year, or ``""``.
+
+    This puts a crawled page into the same edition logic as a handbook, so an
+    older page cannot displace a newer statement: among near-identical passages
+    the newer edition wins, an edition years out of date is demoted, and the
+    model sees which edition it is reading. An undated page stays unknown, and
+    unknown is never treated as old.
+    """
+    moments = [_parse_time(value) for value in dates]
+    latest = max((moment for moment in moments if moment), default=None)
+    if latest is None:
+        return ""
+    start = latest.year if latest.month >= 7 else latest.year - 1
+    return f"FY{start}-{(start + 1) % 100:02d}"
+
+
+def minimise_identifiers(text: str) -> str:
+    """Take personal identifiers out of a public page before it is indexed.
+
+    URA publishes these, but a corpus need not keep what no answer requires
+    (ASI06: "minimize retention by data sensitivity"; DPPA 2019). The reply guard
+    would hide them on the way out anyway. Deliberately not ``redact_pii_text``
+    whole: that also removes ``0772140000``, URA's own WhatsApp helpline.
+    """
+    redacted = redact_pii_text(text, kinds=_CORPUS_REDACTED_KINDS)
+    return _PERSONAL_WEBMAIL.sub("[REDACTED_EMAIL]", redacted)
 
 
 def split_qa_digest(body: str) -> list[tuple[str, str]]:
@@ -174,10 +351,20 @@ def _chunk_page_records(page: Path, payload: dict[str, Any]) -> Iterator[dict[st
     url = _clean(payload.get("url"))
     title = normalise_heading(_clean(payload.get("title")))
     content_hash = _clean(payload.get("content_hash"))
-    crawled_at = _clean(payload.get("timestamp"))
     # The crawler stores the page body as markdown, so the heading hierarchy is
     # already there to be recovered.
-    body = normalise_extracted_text(_clean(payload.get("text")))
+    body = minimise_identifiers(normalise_extracted_text(_clean(payload.get("text"))))
+    # Every chunk of a page shares its evidence.
+    evidence = {
+        "content_hash": content_hash,
+        "url": url,
+        "title": title,
+        "crawled_at": _clean(payload.get("_verified_at")) or _clean(payload.get("timestamp")),
+        "published_at": _clean(payload.get("published_at")),
+        "modified_at": _clean(payload.get("modified_at")),
+        "fiscal_year": fiscal_year_of(_clean(payload.get("published_at")), _clean(payload.get("modified_at"))),
+        "source_kind": _clean(payload.get("source_kind")) or "unverified",
+    }
 
     kept = 0
 
@@ -202,10 +389,7 @@ def _chunk_page_records(page: Path, payload: dict[str, Any]) -> Iterator[dict[st
             "contextual_prefix": f"[Document: {title or url} — {heading}]" if heading else "",
             "heading_trail": trail,
             "source": page.name,
-            "content_hash": content_hash,
-            "url": url,
-            "title": title,
-            "crawled_at": crawled_at,
+            **evidence,
             "chunk_index": chunk_index,
             "char_count": len(text),
         }
@@ -236,10 +420,7 @@ def _chunk_page_records(page: Path, payload: dict[str, Any]) -> Iterator[dict[st
             "contextual_prefix": chunk.contextual_prefix,
             "heading_trail": list(chunk.heading_trail),
             "source": page.name,
-            "content_hash": content_hash,
-            "url": url,
-            "title": title,
-            "crawled_at": crawled_at,
+            **evidence,
             "chunk_index": kept - 1,
             "char_count": len(text),
         }
@@ -254,24 +435,31 @@ def export_crawl_pages_to_jsonl(pages_dir: Path, jsonl_dir: Path) -> dict[str, A
     """
     if not pages_dir.is_dir():
         raise CorpusValidationError(f"No crawl pages directory at {pages_dir}")
-    selected = select_pages(pages_dir)
+    review = review_pages(pages_dir)
+    selected = review.selected
     if not selected:
         raise CorpusValidationError(
             f"No crawl pages in {pages_dir} reach {CRAWL_MIN_PAGE_CHARS} characters"
         )
+    state = load_crawl_state(pages_dir)
+    ledger: dict[str, Any] = state.get("visited") or {}
 
     jsonl_dir.mkdir(parents=True, exist_ok=True)
     records: list[dict[str, Any]] = []
     sources: list[dict[str, Any]] = []
     for path, payload in selected:
-        page_records = list(_chunk_page_records(path, payload))
+        entry = ledger.get(_clean(payload.get("url"))) or {}
+        evidence = {**payload, "_verified_at": _last_verified(entry, payload)}
+        page_records = list(_chunk_page_records(path, evidence))
         records.extend(page_records)
         sources.append(
             {
                 "source": path.name,
                 "url": _clean(payload.get("url")),
                 "content_hash": _clean(payload.get("content_hash")),
-                "crawled_at": _clean(payload.get("timestamp")),
+                "crawled_at": evidence["_verified_at"],
+                "source_kind": _clean(payload.get("source_kind")) or "unverified",
+                "published_at": _clean(payload.get("published_at")),
                 "records": len(page_records),
             }
         )
@@ -293,6 +481,7 @@ def export_crawl_pages_to_jsonl(pages_dir: Path, jsonl_dir: Path) -> dict[str, A
         "record_count": len(records),
         "empty_sources": sorted(s["source"] for s in sources if not s["records"]),
         "sources": sources,
+        "crawl": _crawl_summary(state, sources, review),
     }
     manifest_path = jsonl_dir / CRAWL_MANIFEST_NAME
     temporary_manifest = manifest_path.with_suffix(".json.tmp")
@@ -309,6 +498,34 @@ def export_crawl_pages_to_jsonl(pages_dir: Path, jsonl_dir: Path) -> dict[str, A
         "pages_selected": len(selected),
         "records": len(records),
         "dropped_below_floor": total_pages - len(selected),
+    }
+
+
+def _crawl_summary(
+    state: dict[str, Any],
+    sources: list[dict[str, Any]],
+    review: CorpusSelection,
+) -> dict[str, Any]:
+    """How old and how well-evidenced this corpus is, read by /v1/index/freshness.
+
+    The index freshness check proves the index matches the shipped corpus, which
+    is true by construction in a baked image. Nothing said how the corpus
+    compared with the site, which is the question a taxpayer's answer rests on.
+    """
+    verified = sorted(
+        entry["crawled_at"]
+        for entry in sources
+        if entry["crawled_at"] and entry.get("source_kind") == "live"
+    )
+    return {
+        "last_full_run_at": _clean(state.get("last_full_run_at")),
+        "last_changes_run_at": _clean(state.get("last_changes_run_at")),
+        "oldest_verified_at": verified[0] if verified else "",
+        "pages_live": sum(1 for entry in sources if entry["source_kind"] == "live"),
+        "pages_unverified": sum(1 for entry in sources if entry["source_kind"] != "live"),
+        "pages_undated": sum(1 for entry in sources if not entry["published_at"]),
+        "excluded": dict(sorted(review.excluded.items())),
+        "quarantined": review.quarantined,
     }
 
 
@@ -440,6 +657,10 @@ def ingest_crawl_jsonls(pages_dir: Path, jsonl_dir: Path) -> list[dict[str, Any]
                     "url": _clean(record.get("url")),
                     "title": _clean(record.get("title")),
                     "crawled_at": _clean(record.get("crawled_at")),
+                    "published_at": _clean(record.get("published_at")),
+                    "modified_at": _clean(record.get("modified_at")),
+                    "fiscal_year": _clean(record.get("fiscal_year")),
+                    "source_kind": _clean(record.get("source_kind")),
                     "content_hash": _clean(record.get("content_hash")),
                     "chunk_index": int(record["chunk_index"]),
                     "corpus_file": jsonl_path.name,

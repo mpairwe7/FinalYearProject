@@ -38,6 +38,131 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # =============================================================================
 THREAT_REGISTRY: list[dict] = [
     {
+        "id": "T53",
+        "category": "Tampering",
+        "description": (
+            "A defaced or compromised publisher page, or instructions hidden in its markup, enters the "
+            "shared retrieval corpus and misleads every later session (OWASP ASI06)"
+        ),
+        "owasp_llm": "LLM04",
+        "mitre_atlas": "AML.T0070",
+        "mitigation": (
+            "Hidden markup is stripped at extraction and kept as evidence; a page holding an instruction aimed at "
+            "a model is quarantined rather than scrubbed; a mass rewrite or removal holds the run; a person merges "
+            "every crawl. Prompt-time scanning and spotlighting remain. A stylesheet-hidden class and a change "
+            "worded to look like ordinary guidance are not detected, which is why the merge is a person's"
+        ),
+        "evidence": [
+            "ml/scripts/data_aug/crawler.py",
+            "App/backend/app/crawl_corpus.py",
+            "App/backend/app/crawl_gate.py",
+            "tests/test_crawl_gate.py",
+        ],
+        "status": "mitigated",
+    },
+    {
+        "id": "T54",
+        "category": "Spoofing",
+        "description": (
+            "Content from another host is filed under a URA address: a redirect, or an archive copy of a page "
+            "that was withdrawn, carries URA's authority and a current date"
+        ),
+        "owasp_llm": "LLM08",
+        "mitre_atlas": "AML.T0070",
+        "mitigation": (
+            "Exact-host https allowlist checked on every redirect hop; no archive is ever fetched; a capture "
+            "records its final URL, status and digest; foreign captures are refused at selection"
+        ),
+        "evidence": [
+            "ml/scripts/data_aug/crawl_policy.py",
+            "ml/scripts/data_aug/crawler.py",
+            "tests/test_crawler.py",
+        ],
+        "status": "mitigated",
+    },
+    {
+        "id": "T55",
+        "category": "Tampering",
+        "description": (
+            "An older version displaces a newer one: a restored backup, a stale cache or a re-upload of last "
+            "year's guide serves a valid 200, and an unlabelled old page outranks the edition in force"
+        ),
+        "owasp_llm": "LLM04",
+        "mitre_atlas": "AML.T0020",
+        "mitigation": (
+            "The publisher's own dates are compared and the held capture stands; PDFs compare their stated dates; "
+            "many older responses hold the run; crawled pages carry an edition, so the newer of two near-identical "
+            "passages wins and the model is told how old each is. With no date on one side the change goes to review"
+        ),
+        "evidence": [
+            "ml/scripts/data_aug/crawler.py",
+            "App/backend/app/pdf_corpus.py",
+            "App/backend/app/crawl_corpus.py",
+            "tests/test_crawler.py",
+        ],
+        "status": "mitigated",
+    },
+    {
+        "id": "T56",
+        "category": "Elevation of Privilege",
+        "description": (
+            "A parser or dependency exploit in the crawl job takes the repository write token, and with it a "
+            "path to production, because merging to dev deploys"
+        ),
+        "owasp_llm": "LLM03",
+        "mitre_atlas": "AML.T0010",
+        "mitigation": (
+            "The job that parses the web is read-only with no persisted credentials and installs from a hash lock. "
+            "The job with the token executes nothing from the crawl, checks the artifact's file names and refuses "
+            "symlinks, and can only open a pull request. Enforced by tests/test_ci_supply_chain_policy.py"
+        ),
+        "evidence": [
+            ".github/workflows/scheduled-crawl.yml",
+            "ml/requirements-crawl.txt",
+            "tests/test_ci_supply_chain_policy.py",
+        ],
+        "status": "mitigated",
+    },
+    {
+        "id": "T57",
+        "category": "Denial of Service",
+        "description": (
+            "The crawler overloads a government site, or a hostile response exhausts the runner: twelve "
+            "concurrent requests, no Retry-After, unbounded bodies"
+        ),
+        "owasp_llm": "LLM10",
+        "mitre_atlas": None,
+        "mitigation": (
+            "One request at a time per host with spacing, Retry-After and Crawl-delay honoured, a host breaker, "
+            "request and time budgets, bodies capped mid-stream, RFC 9309 complete disallow when robots.txt is unreachable"
+        ),
+        "evidence": [
+            "ml/scripts/data_aug/crawl_policy.py",
+            "ml/scripts/data_aug/crawler.py",
+            "tests/test_crawl_policy.py",
+        ],
+        "status": "mitigated",
+    },
+    {
+        "id": "T58",
+        "category": "Information Disclosure",
+        "description": (
+            "Identifiers published on public pages are copied into the corpus and repeated: 683 TINs on the "
+            "licensed-agents list and a personal webmail address were in the index"
+        ),
+        "owasp_llm": "LLM02",
+        "mitre_atlas": None,
+        "mitigation": (
+            "TINs, national IDs and personal mailboxes are removed at ingest, narrowly enough that URA's helpline and "
+            "official addresses stay. The reply guard remains the second layer. DPO review of company TINs is open"
+        ),
+        "evidence": [
+            "App/backend/app/crawl_corpus.py",
+            "App/backend/tests/test_crawl_corpus.py",
+        ],
+        "status": "mitigated",
+    },
+    {
         "id": "T01",
         "category": "Spoofing",
         "description": "Attacker impersonates legitimate API client",

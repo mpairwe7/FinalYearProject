@@ -173,6 +173,7 @@ translation and retried unmasked when the tier mangles the sentinels.
 | `ura_retention_runs_total`, `ura_retention_last_success_timestamp_seconds` | `status` | Personal-data retention job |
 | `ura_storage_world_writable` | — | 1 when `ANALYTICS_DB_DIR` is world-writable |
 | `ura_build_info` | `version`, `revision`, `environment` | Which build is answering |
+| `ura_crawl_last_full_run_timestamp_seconds`, `ura_crawl_oldest_verified_timestamp_seconds`, `ura_crawl_unverified_pages`, `ura_crawl_quarantined_pages` | — | How old the crawled corpus in this image is, read from its manifest. `ura_qdrant_index_fresh` only says the index matches the image |
 | `ura_qdrant_index_*`, `ura_qdrant_backup_*`, `ura_qdrant_restore_drill_*` | — | Index lifecycle (read from status files at scrape time) |
 
 ## 4. SLOs and alerting
@@ -415,6 +416,13 @@ the edge if it continues.
 `ura_plan_steps_total{outcome}`, `ura_turn_pipeline_attestations_total{transport,ok}` and
 `ura_turn_stage_sla_breaches_total{stage}`. See
 [Operating the live check](runbooks/live-web-research-and-qdrant-sync.md#6-operating-the-live-check).
+
+### Crawl freshness
+
+`UraCrawlCorpusStale`, `UraCrawlPagesUnverified` and `UraCrawlPagesQuarantined`. See the
+[crawl runbook](runbooks/crawl-operations.md). A page held out of the corpus is safe for
+taxpayers, but a government page holding instructions for a model means someone should
+find out why.
 
 ### Agent resilience
 

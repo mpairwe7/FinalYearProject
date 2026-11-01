@@ -83,7 +83,8 @@ class Citation(BaseModel):
     section: str = Field("", description="Section or heading title")
     passage: str = Field("", max_length=500, description="Relevant passage excerpt")
     url: str = Field("", description="Canonical source URL when the index stored one")
-    effective_date: str = Field("", description="Fiscal year, effective-from, or crawl date")
+    effective_date: str = Field("", description="Fiscal year or effective-from date. Never a crawl date.")
+    published_at: str = Field("", description="The publisher's own date for a web page (YYYY-MM-DD)")
     title: str = Field("", description="Document title when present")
 
 

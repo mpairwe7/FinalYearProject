@@ -20,6 +20,7 @@ export interface Citation {
   passage?: string;
   url?: string;
   effective_date?: string;
+  published_at?: string;
   title?: string;
 }
 

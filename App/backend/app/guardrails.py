@@ -452,6 +452,11 @@ def _injection_present(text: str) -> bool:
     return any(pattern.search(text) or pattern.search(canonical) for pattern in _INJECTION_PATTERNS)
 
 
+def injection_present(text: str) -> bool:
+    """Whether *text* holds an injection phrase. No side effects, for ingest time."""
+    return _injection_present(text)
+
+
 def scan_retrieved_text(text: str) -> tuple[str, bool]:
     """Neutralise injection patterns embedded in retrieved passages.
 
@@ -585,7 +590,12 @@ def _is_valid_ug_nid_match(val: str) -> bool:
     return True
 
 
-def redact_pii_text(text: str, allowed_values: Iterable[str] | None = None) -> str:
+def redact_pii_text(
+    text: str,
+    allowed_values: Iterable[str] | None = None,
+    *,
+    kinds: frozenset[str] | None = None,
+) -> str:
     """Replace detected PII with redaction markers.
 
     Shared utility used by both OutputGuard (response side) and
@@ -594,12 +604,16 @@ def redact_pii_text(text: str, allowed_values: Iterable[str] | None = None) -> s
     info@ura.go.ug) are exempt so taxpayers receive valid contact channels.
     Taxpayer-stated identifiers (in *allowed_values*) are exempted from
     output redaction so the assistant does not redact the user's own input back to them (G143).
+    *kinds* limits redaction to those pattern names, for callers that must keep
+    the rest: a crawled URA page carries the helpline in the ``ug_phone`` shape.
     """
     if not text:
         return text
     allowed_set = {str(v).strip() for v in (allowed_values or []) if str(v).strip()}
     result = _strip_hidden_pii_evasion(text)
     for pii_type, pattern in _PII_PATTERNS:
+        if kinds is not None and pii_type not in kinds:
+            continue
         if pii_type == "email":
             def _replace_email(m: re.Match[str]) -> str:
                 addr = m.group(0)

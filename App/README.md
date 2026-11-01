@@ -2073,18 +2073,19 @@ uv run python -m ml.scripts.data_augmentation \
 
 ### Web Crawler Pipeline
 
-Automated via `ml/scripts/data_aug/crawler.py` and scheduled daily at
-04:00 UTC (`.github/workflows/scheduled-crawl.yml`):
+`ml/scripts/data_aug/crawler.py`, run by `.github/workflows/scheduled-crawl.yml` on
+weekdays for what changed and on the last day of the month for everything due. It reads
+only the publisher's live site, and it proposes rather than publishes (ADR-0023):
 
 ```
-1. CDX Discovery     — query Wayback Machine CDX API for all archived ura.go.ug URLs
-2. Direct Fetch      — live HTTP requests to ura.go.ug pages
-3. Wayback Fetch     — exact-timestamp snapshots (fallback if direct fails)
-4. Content Extract   — BeautifulSoup parsing + table extraction (structured + markdown)
-5. Deduplication     — content-hash dedup to skip already-crawled pages
-6. Deep-Link BFS     — follow PDFs and internal links discovered in page content
-7. PDF Download      — new PDFs saved to Data/pdfs/
-8. State Persist     — crawl_state.json updated and committed (max 200 pages/run)
+1. Discovery     — Yoast sitemaps and notice listings, then links from those listings
+2. Staleness     — read only what changed, is new, left the sitemap, or is 30 days unverified
+3. Live fetch    — honest identity, robots.txt, one request per host, every redirect checked
+4. Extraction    — hidden text removed, tables kept in place with merged cells, publisher dates
+5. No regression — a response older than what is held does not replace it
+6. Ledger        — Data/crawl/crawl_state.json: status, current capture and run record
+7. Gate          — app.crawl_gate: pass, review or hold, with the figures that moved
+8. Proposal      — a pull request a person merges; that merge builds and rolls
 ```
 
 ### Model Fine-Tuning

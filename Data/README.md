@@ -2,6 +2,10 @@
 
 Canonical datasets live in `Data/` (capital D) for historical CI paths.
 Point new eval and crawl jobs at `Data/eval` and `Data/crawl_jsonl`.
+`Data/crawl/pages/*.json` are content-addressed captures of URA's live site, and
+`Data/crawl/crawl_state.json` is the ledger that says which capture each URL stands on,
+when the site last confirmed it, and what each run did. Neither is edited by hand:
+changes arrive as a reviewed pull request (ADR-0023, `docs/runbooks/crawl-operations.md`).
 `Data/eval/prototype_seed.json` is the local demo fixture (`SEED_PROTOTYPE`, never production).
 
 ## Statutory & 10-MDA PDF Corpus Traceability (`Data/pdfs/` → `App/Data/pdf_jsonl/`)

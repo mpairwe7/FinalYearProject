@@ -82,7 +82,7 @@ function present(parts: Array<string | undefined | null>): string[] {
 export function collectSources(
   citations: Citation[] | undefined,
   resources: ContextResource[] | undefined,
-  label: (key: TranslationKey) => string,
+  label: (key: TranslationKey, vars?: Record<string, string | number>) => string,
 ): SourceItem[] {
   const items: SourceItem[] = [];
   const seen = new Set<string>();
@@ -118,7 +118,13 @@ export function collectSources(
       kind: 'passage',
       title: c.title?.trim() || sourceLabel(c.source),
       href: citationHref(c),
-      meta: present([c.effective_date, c.page ? `p. ${c.page}` : '', c.section]),
+      meta: present([
+        c.effective_date,
+        // The publisher's date. A crawl date is never shown: it made old pages look current.
+        c.published_at ? label('sources.published', { date: c.published_at }) : '',
+        c.page ? `p. ${c.page}` : '',
+        c.section,
+      ]),
       detail: passage ? (passage.length > 160 ? `${passage.slice(0, 160)}…` : passage) : undefined,
       tooltip: explicit || `${c.source} — official URA documents`,
     });
