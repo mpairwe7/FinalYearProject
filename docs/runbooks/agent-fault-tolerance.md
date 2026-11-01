@@ -88,6 +88,28 @@ transport. `0` turns it off, and production should not run that way.
 The usual cause is a slow dependency, so check model latency first. Raise the deadline
 only with evidence. A stopped turn's text and its time are in the audit row.
 
+## Space running, API down
+
+Hugging Face's `RUNNING` means the container is up, and nginx serves the frontend from `/`, so
+the page loads while every API route returns 502. Check `/health`, not the stage or the page:
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' https://landwind22-ura-chatbot.hf.space/health
+hf spaces logs landwind22/ura-chatbot --tail 400
+```
+
+Repeating `Application startup failed` lines mean the API cannot start, so read the exception
+above them. A flag that needs something the image lacks does this: `FLAG_VOICE_RECEPTIONIST`
+without Pipecat stopped the API for about 8 hours on 2026-10-31 (G371). Setting a secret
+restarts the Space in about two minutes, which is far quicker than a rebuild:
+
+```bash
+hf spaces secrets add landwind22/ura-chatbot -s FLAG_VOICE_RECEPTIONIST=false
+```
+
+Do not edit the Space's Dockerfile directly. The roll pushes
+`App/deploy/hf-space/Dockerfile` over it whole.
+
 ## Reading a blocked or wedged turn
 
 No taxpayer text is logged. To reconstruct a turn, read its `generate` row: `disposition`,

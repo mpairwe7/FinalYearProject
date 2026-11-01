@@ -107,7 +107,8 @@ generation failed, a truncated tool loop and a broken-off stream each say so to 
 * **Bad:** with `risk_tiered_autonomy_gates` on, `high` and `critical` tools can no longer
   run on a taxpayer's confirmation alone, which the old gate allowed by misclassifying
   them. `ura_action_proposal` and `payment_checkout_settle` are affected. That is the
-  flag's stated contract, but it changes behaviour in the `gpu-salt` profile.
+  flag's stated contract, but it changes behaviour in the `gpu-salt` profile, and on the
+  Space if its `FLAG_RISK_TIERED_AUTONOMY_GATES` secret is on, which cannot be read back.
 * **Bad:** a stricter figure lock can strip a correct sentence on T3, where a sentence
   states a figure that a passage does not contain. The note it leaves tells the taxpayer
   to confirm with URA.

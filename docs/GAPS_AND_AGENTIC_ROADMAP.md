@@ -687,7 +687,7 @@ Reviewed on branch `fix/agentic-orchestrator-resilience-assurance-2026-10-31`; [
 | G357 🟢 | ~~A model-chosen tool route opened every eligible tool, with no time limit.~~ | Fixed: closed read-only list and a timeout. |
 | G358 🟢 | ~~A raw passage served because generation failed carried no notice.~~ | Fixed. |
 | G359 🟢 | ~~The ledger could not say what wrote an answer or whether it left Uganda.~~ | Fixed: a `generation` block. |
-| G360 ⚪ | Enforcing the figure lock on T1 and cloud answers. | Open: service owner and tax policy, on `ura:figure_lock:shadow_reject_ratio_1d` plus a reviewed sample. |
+| G360 ⚪ | Enforcing the figure lock on T1 and cloud answers. | Open: service owner and tax policy, on `ura:figure_lock:shadow_reject_ratio_1d` plus a reviewed sample. The Space already enforces it through `evaluator_optimizer`, so there the decision is whether to keep that. |
 | G361 ⚪ | `intent_confidence` is a constant, so the gate's 0.80 floor is inert. | Open: needs calibrated confidence (G367). |
 | G362 ⚪ | Ticket APIs apply no tenant filter; `same_tenant` has no callers. | Open: tenancy decision first, since filtering could hide tickets. |
 | G363 ⚪ | Confirmation exists only on the WebSocket. | Open: on SSE and REST a proposal cannot be approved. Nothing runs. |
@@ -698,6 +698,12 @@ Reviewed on branch `fix/agentic-orchestrator-resilience-assurance-2026-10-31`; [
 | G368 ⚪ | After a reasoner timeout, T1 can repeat a tool call that was in flight. | Open: tickets dedupe; other tools rely on idempotency keys. |
 | G369 ⚪ | With every model down and only web commentary found, the commentary is served, labelled as a fallback. | Open: service owner, to choose between serving it and abstaining. |
 | G370 ⚪ | A `verify_claims` error is logged at debug and the reply continues. | Open: needs a decision on whether a verifier outage withholds answers. |
+| G371 🟢 | ~~The Space's CPU layer existed only on the Space, so a roll deleted it and left its flags on, and the API failed to start for about 8 hours.~~ | Fixed: the layer is in `App/deploy/hf-space/Dockerfile`, and `tests/test_hf_space_layer.py` pins it and every line it edits. |
+| G372 ⚪ | A change made directly on the Space is still deleted by the next roll, without warning. | Open: platform, to refuse a roll when the Space has diverged. |
+| G373 ⚪ | One optional feature that cannot start stops the whole API: `main.py` re-raises for the receptionist. | Open: backend, to choose between failing loud and degrading. |
+| G374 ⚪ | Nothing raises an alarm when the Space is down. The keepalive passes on a 502, and a failed roll leaves the broken image live. | Open: platform. |
+| G375 🟡 | ~~The layer's speech fallback posted recordings to Google with no locale policy, budget or breaker.~~ | Fixed, and now opt-in through `STT_FALLBACK_BACKEND=gemini`. Open: service owner, on DPPA 2019 s.19, before anyone turns it on. |
+| G376 ⚪ | The layer's edits to app source are a base64 blob, so they do not appear in a review and CI does not run them. | Open: backend, to move them into the source. |
 
 **Open follow-ups.**
 

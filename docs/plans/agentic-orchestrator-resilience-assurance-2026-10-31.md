@@ -150,6 +150,18 @@ Recorded because a reader should know how far to trust the process.
   files in other shards delete `voice_call_turns` in their setup. Repeating the test beside a
   concurrent delete failed 8 of 8 with the same `IndexError`; without one it passed 8 of 8.
 
+* **Production was not what this review assumed.** It said `risk_tiered_autonomy_gates` affects
+  the `gpu-salt` profile and that the figure lock measures outside T3, and neither was checked
+  against the Space, which sets both flags as secrets that cannot be read back.
+  `evaluator_optimizer` is on: `numeric_verification` ran on a T1 turn on the Space, and below T3
+  that stage needs the flag. So the lock enforces on every tier there, which is the unmeasured
+  risk G360 exists to avoid. The layer written alongside them also sets
+  `risk_tiered_autonomy_gates` to `true`, so the gate probably applies to the live service.
+* **The API was down when this merged, and that was not noticed.** Verifying the deployment found
+  every API route returning 502 since about 14:48 UTC, from a roll that came before this change
+  (G371). The review's own question, whether a healthy status proves anything, applied to its own
+  deployment.
+
 ## What review of this change found
 
 Automated review of the pull request raised 16 findings against code written here, over two
@@ -223,7 +235,8 @@ carries the time of the check.
   to one sentence later. Half a sentence frozen on screen read as a fault.
 * **The lock measures before it enforces.** T1 and cloud answers can still show an untraceable
   figure that does not contradict a passage. Enforcing blind risks stripping correct answers,
-  with no way to tell how often. This is G360, and it needs a decision.
+  with no way to tell how often. This is G360, and it needs a decision. It holds only while
+  `evaluator_optimizer` is off, and on the Space that flag is on.
 * **`high` tools need an officer once gates are on.** That is the flag's stated contract, but
   it removes a path the misclassification had left open. No officer approval endpoint exists,
   so such an action is completed by the officer who picks up the ticket.
@@ -238,9 +251,9 @@ carries the time of the check.
 
 ## What this review did not do
 
-* **Nothing ran against a live model, the deployed Space or a live connector.** A low-faithfulness
-  probe can open a real ticket for a real officer, so production was not probed. Production
-  behaviour is inferred from code and the earlier review's logs.
+* **Nothing ran against a live model or a live connector before deployment.** A low-faithfulness
+  probe can open a real ticket for a real officer, so production was not probed then. See
+  [Deployment check](#deployment-check) for what has run since.
 * **Postgres paths were not exercised.** `find_open_ticket` and the retention list changed in
   both backends; the tests run on SQLite.
 * **`promtool` was not run locally.** It is not installed here. CI's monitoring job runs the
@@ -252,6 +265,25 @@ carries the time of the check.
   translated by machine like every other reply.
 * **Tax rules were not reviewed.** Slot meanings come from the tool schemas and general tax
   concepts, and need a tax specialist's eye.
+
+## Deployment check
+
+On `sha-5017060`, 31 October, 23:13 to 23:17 UTC, after the outage in G371 was cleared. The Space's
+running revision matched the roll, and both workers started cleanly. Three well-grounded questions
+were sent, which opened no ticket:
+
+| Question | Path | Result |
+| --- | --- | --- |
+| VAT rate, REST and stream | Rate table, no model | "18%" |
+| VAT return due date, REST | Gemini through the guards | "15 days", 7 citations, faithfulness 1.00 |
+| Record keeping, fresh stream | Gemini through the guards | "five years", 2 of 2 claims supported, no revision |
+
+The fresh stream arrived in two token frames, as the figure hold should make it. The same question
+sent twice is served from the cache, so only a fresh one tests the stream.
+
+This covers the normal path only. The graph orchestrator, a turn reaching its deadline and an open
+breaker were not exercised on the Space, and audit rows need staff access, so the acceptance list
+below is still open.
 
 ## Residual risk
 
@@ -268,6 +300,11 @@ carries the time of the check.
 | G368 | After a reasoner timeout, T1 can repeat a tool call that was in flight. Tickets dedupe; other side-effecting tools rely on their idempotency key. | Backend |
 | G369 | With every model down and only web commentary found, the commentary is served, labelled as a fallback. Serving it or abstaining is a product decision. | Service owner |
 | G370 | A `verify_claims` error is logged at debug and the reply continues, so a claim check that is down is silent. Closing it means deciding whether a verifier outage withholds answers. | Backend, service owner |
+| G372 | A change made directly on the Space is still deleted by the next roll, without warning. | Platform |
+| G373 | One optional feature that cannot start stops the whole API. | Backend |
+| G374 | Nothing raises an alarm when the Space is down: the keepalive passes on a 502, and a failed roll leaves the broken image live. | Platform |
+| G375 | The Space layer's speech fallback is off until `STT_FALLBACK_BACKEND=gemini`. Turning it on sends English recordings to Google when every other tier has failed, which needs a decision under DPPA 2019 s.19. | Service owner |
+| G376 | The Space layer's edits to app source are a base64 blob that reviews and CI do not see. | Backend |
 
 Also open from the previous review: G326 to G329 and G331.
 
