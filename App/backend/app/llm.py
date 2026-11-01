@@ -1232,9 +1232,6 @@ def _served_context_window(base_url: str | None = None) -> int:
                     length = int(model["max_model_len"])
                     break
     except Exception:
-        with _vllm_limits_lock:
-            limits = _limits_for_base_url(base_url)
-            limits["tokenize_down_until"] = time.time() + _VLLM_LIMITS_RETRY_S
         logger.debug("vLLM /models unavailable; the prompt budget uses LLM_CONTEXT_WINDOW", exc_info=True)
     with _vllm_limits_lock:
         limits = _limits_for_base_url(base_url)

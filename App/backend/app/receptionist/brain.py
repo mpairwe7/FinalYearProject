@@ -414,9 +414,12 @@ def _split_into_sentences(text: str) -> list[str]:
     period first so calculator/checklist items split into discrete sentences.
     """
     def _punctuate_line(m: re.Match[str]) -> str:
+        """Append a full stop to unpunctuated bullet/heading lines and bold-colon labels."""
         line = m.group(1).rstrip()
+        if line.endswith((".", "!", "?", ":", ";")):
+            return line
         core = line.rstrip("*_")
-        if core.endswith((".", "!", "?", ":", ";")):
+        if core.endswith((".", "!", "?", ";")):
             return line
         return f"{line}."
 
@@ -1799,7 +1802,12 @@ class UraReceptionistBrain(LLMService):
         sentences = _split_into_sentences(cleaned_reply)
         max_sentences = get_max_spoken_sentences()
         bullet_count = sum(1 for s in sentences if _STEP_OR_BULLET_START_RE.match(s))
-        if bullet_count >= 2 and len(cleaned_reply.split()) <= 75 and len(sentences) <= 8:
+        if (
+            bullet_count >= 2
+            and len(cleaned_reply.split()) <= 75
+            and len(sentences) <= 8
+            and not any(s.endswith("?") for s in sentences)
+        ):
             max_sentences = max(max_sentences, len(sentences))
         rest = sentences[max_sentences:]
         if rest:

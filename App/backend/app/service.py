@@ -710,7 +710,7 @@ def _structure_excerpt(text: str) -> str:
         if parts:
             last_part = parts[-1]
             sent_split = re.search(
-                r"(?<!\be\.g)(?<!\bi\.e)(?<!\bsec)(?<!\bcap)(?<!\bno)\.\s+([A-Z].*)$",
+                r"(?<!\be\.g)(?<!\bi\.e)(?<!\bsec)(?<!\bcap)(?<!\bno)(?<!\bdr)(?<!\bmr)(?<!\bmrs)(?<!\bms)(?<!\bprof)\.\s+([A-Z].*)$",
                 last_part,
                 re.IGNORECASE | re.DOTALL,
             )

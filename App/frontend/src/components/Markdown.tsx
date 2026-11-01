@@ -37,7 +37,7 @@ function safeHref(href: string): string | null {
 
 /** Peel trailing sentence punctuation off an autolinked URL so it stays as text. */
 function splitTrail(s: string): [string, string] {
-  const m = s.match(/[.,;:!?)\]_*]+$/);
+  const m = s.match(/[.,;:!?)\]*]+$/);
   return m ? [s.slice(0, s.length - m[0].length), m[0]] : [s, ""];
 }
 
@@ -61,7 +61,11 @@ const INLINE_SOURCE = [
   /(\b(?:[a-z0-9-]+\.)*ura\.go\.ug(?:\/[^\s<]*)?)/.source, //             21     scheme-less (*.?)ura.go.ug
 ].join("|");
 
-function renderInline(text: string, depth = 0): React.ReactNode[] {
+/**
+ * Parse inline Markdown formatting (emphasis, inline code, links, citations,
+ * URLs, emails, and URA phone numbers) into React nodes.
+ */
+function renderInline(text: string, depth = 0, inLink = false): React.ReactNode[] {
   if (!text || depth > 3) return [text];
   const nodes: React.ReactNode[] = [];
   let lastIdx = 0;
@@ -89,15 +93,15 @@ function renderInline(text: string, depth = 0): React.ReactNode[] {
     if (match[2]) {
       nodes.push(
         <strong key={key++}>
-          <em>{renderInline(match[2], depth + 1)}</em>
+          <em>{renderInline(match[2], depth + 1, inLink)}</em>
         </strong>,
       );
     } else if (match[4] || match[6]) {
       const inner = (match[4] ?? match[6])!;
-      nodes.push(<strong key={key++}>{renderInline(inner, depth + 1)}</strong>);
+      nodes.push(<strong key={key++}>{renderInline(inner, depth + 1, inLink)}</strong>);
     } else if (match[8] || match[10]) {
       const inner = (match[8] ?? match[10])!;
-      nodes.push(<em key={key++}>{renderInline(inner, depth + 1)}</em>);
+      nodes.push(<em key={key++}>{renderInline(inner, depth + 1, inLink)}</em>);
     } else if (match[12]) {
       nodes.push(
         <code key={key++} className="md-inline-code">
@@ -107,8 +111,8 @@ function renderInline(text: string, depth = 0): React.ReactNode[] {
     } else if (match[14] && match[15]) {
       // [text](url) — sanitized; unsafe schemes degrade to plain styled text
       const href = safeHref(match[15]);
-      const labelNodes = renderInline(match[14], depth + 1);
-      if (href) pushLink(href, labelNodes, isExternalHttp(href));
+      const labelNodes = renderInline(match[14], depth + 1, Boolean(href) || inLink);
+      if (href && !inLink) pushLink(href, labelNodes, isExternalHttp(href));
       else nodes.push(<span key={key++} className="md-link">{labelNodes}</span>);
     } else if (match[17]) {
       nodes.push(
@@ -116,6 +120,8 @@ function renderInline(text: string, depth = 0): React.ReactNode[] {
           {match[17]}
         </sup>
       );
+    } else if (inLink && (match[18] || match[19] || match[20] || match[21])) {
+      nodes.push(match[0]);
     } else if (match[18]) {
       const [url, trail] = splitTrail(match[18]);
       const href = /^www\./i.test(url) ? `https://${url}` : url;
@@ -154,6 +160,7 @@ interface Block {
 const TRAILING_ABBR_RE =
   /(?:^|[\s(])(?:e\.g|i\.e|etc|no|sec|art|cap|sch|para|reg|vol|ch|pt|shs|ushs|ugx|mr|mrs|ms|dr|st|ltd|inc|co|corp|vs|p\.o|s|ss)\.$/i;
 
+/** Split prose into sentences without breaking after statutory or common abbreviations. */
 function splitSentencesSafe(text: string): string[] {
   const rawParts = text.split(/(?<=[.!?])\s+/);
   const out: string[] = [];
@@ -314,7 +321,7 @@ function asNumberedProcedure(text: string): { lead: string; items: string[] } | 
     if (i + 1 < found.length) {
       item = item.replace(/[.;,]+$/, "").trim();
     }
-    if (!item || item.length > 220) return null;
+    if (!item) return null;
     items.push(item);
   }
   return { lead, items };
@@ -334,6 +341,7 @@ function tidyTypography(text: string): string {
     .replace(/\bCustomary Services\b/g, "Customs Services");
 }
 
+/** True when a line opens with an ATX heading marker (`#`..`####`). */
 function isHeading(line: string) {
   return /^(#{1,4})\s+(.+)/.test(line);
 }
@@ -341,26 +349,32 @@ function isHeading(line: string) {
 const CALLOUT_LINE_RE =
   /^(?:\*{1,2}|_)?(note|important|tip|warning|caution|summary)(?:\*{1,2}|_)?:\s*(?:\*{1,2}|_)?\s*(.+)/i;
 
+/** True when a line starts with a callout label such as `Note:` or `**Important:**`. */
 function isCallout(line: string) {
   return CALLOUT_LINE_RE.test(line.trim());
 }
 
+/** True when a line starts with an unordered list marker (`-`, `*`, `+`, or `•`). */
 function isUnorderedListItem(line: string) {
   return /^[-*+]\s+/.test(line.trimStart()) || /^\u2022\s+/.test(line.trimStart());
 }
 
+/** True when a line starts with an ordered list marker (`1.` or `1)`). */
 function isOrderedListItem(line: string) {
   return /^\d+[\.)]\s+/.test(line.trimStart());
 }
 
+/** True when a line is a Markdown pipe-table separator row (`| --- | --- |`). */
 function isTableSeparator(line: string) {
   return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
 }
 
+/** True when a line is a Markdown pipe-table data or header row. */
 function isTableRow(line: string) {
   return line.includes("|") && !isTableSeparator(line);
 }
 
+/** Split a pipe-table row into trimmed cell strings. */
 function parseTableRow(line: string) {
   return line
     .trim()
@@ -370,6 +384,7 @@ function parseTableRow(line: string) {
     .map((cell) => cell.trim());
 }
 
+/** Parse a Markdown string into structured block descriptors. */
 function parseBlocks(src: string): Block[] {
   const lines = stripCitationMarkers(src).split("\n");
   const blocks: Block[] = [];
@@ -546,6 +561,7 @@ function parseBlocks(src: string): Block[] {
   return blocks;
 }
 
+/** Render parsed Markdown blocks into React elements. */
 function renderBlocks(blocks: Block[]): React.ReactNode[] {
   return blocks.map((block, i) => {
     switch (block.type) {

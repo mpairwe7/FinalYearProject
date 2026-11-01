@@ -104,7 +104,12 @@ _TABLE_PIPE_RE = re.compile(r"[ \t]?\|[ \t]?")
 
 
 def _format_table_row_for_speech(match: re.Match[str]) -> str:
-    cells = [c.strip() for c in match.group(1).split("|") if c.strip()]
+    """Convert a Markdown pipe-table row into a spoken sentence, respecting escaped pipes."""
+    cells = [
+        c.replace(r"\|", "|").strip()
+        for c in re.split(r"(?<!\\)\|", match.group(1))
+        if c.replace(r"\|", "|").strip()
+    ]
     if not cells:
         return ""
     if all(re.fullmatch(r":?-{2,}:?", c) for c in cells):

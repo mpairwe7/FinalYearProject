@@ -253,8 +253,8 @@ export function cleanMarkdownForSpeech(text: string, locale: string = 'en'): str
   cleaned = cleaned.replace(/^[ \t]*-{3,}[ \t]*(?:\n|$)/gm, '');
   cleaned = cleaned.replace(/^[ \t]*\|([^\n]*)\|[ \t]*$/gm, (_: string, row: string) => {
     const cells = row
-      .split('|')
-      .map((c) => c.trim())
+      .split(/(?<!\\)\|/)
+      .map((c) => c.replace(/\\\|/g, '|').trim())
       .filter(Boolean);
     if (!cells.length || cells.every((c) => /^:?-{2,}:?$/.test(c))) return '';
     const joined = cells.length >= 2 ? `${cells[0]}: ${cells.slice(1).join(', ')}` : cells[0];
@@ -302,7 +302,7 @@ const CALL_STEP_BREAK_RE =
   /([:.!?])[ \t]+(?=(?:Step|Odaala|Hatua|Idaara|Rwom)[ \t]+(?:\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|emu|bbiri|ssatu|nnya|ttaano|mukaaga|musanvu|munaana|mwenda|kkumi|moja|mbili|tatu|nne|tano|sita|saba|nane|tisa|kumi|emwe|ibiri|ishatu|ina|itaano|mushanju|acel|aryo|adek|angwen|abic|abicel|abiro|aboro|abongwen):[ \t])/gi;
 
 const CALL_TRAILING_OFFER_RE =
-  /([.!?])[ \t]+(?=(?:Would you like more detail\?|Would you like to speak to an officer about this\?|Oyagala okumanya ebisingawo\?|Oyagala okwogera n'omukozi wa URA ku nsonga eno\?|Je, ungependa maelezo zaidi\?|Je, ungependa kuongea na afisa kuhusu hili\?)$)/i;
+  /([.!?])[ \t]+(?=(?:Would you like more detail\?|Would you like to speak to an officer about this\?|Oyagala okumanya ebisingawo\?|Oyagala okwogera n'omukozi wa URA ku nsonga eno\?|Je, ungependa maelezo zaidi\?|Je, ungependa (?:kuongea|kuzungumza) na afisa kuhusu hili\?|Nooyenda kumanya ebindi ebikukiraho\?|Nooyenda kugamba n'omukozi ahari enshonga egi\?|Imito ngec mukene\?|Imito loko ki latic me URA i kom lok man\?)$)/i;
 
 /**
  * Format a spoken call caption or transcript turn for visual scannability:

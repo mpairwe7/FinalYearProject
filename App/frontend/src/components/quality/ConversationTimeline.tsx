@@ -93,6 +93,12 @@ export function ConversationTimeline({ conversationId }: { conversationId: strin
               <div className="qa-answer-a">
                 <span className="qa-answer-who">Assistant answered</span>
                 {a.reply ? <Markdown content={a.reply} /> : <p>—</p>}
+                {a.reply ? (
+                  <details>
+                    <summary>Recorded text</summary>
+                    <p>{a.reply}</p>
+                  </details>
+                ) : null}
               </div>
               {a.comment ? (
                 <p className="qa-answer-comment">

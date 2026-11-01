@@ -935,6 +935,7 @@ def _split_marked_list(line: str, separator: str, *, word_limit: int) -> list[st
 
 
 def _paragraph_prose_text(prose: str) -> str:
+    """Break a long prose run into readable multi-sentence paragraphs."""
     stripped = prose.strip()
     if not stripped:
         return ""
@@ -1364,17 +1365,27 @@ class OutputGuard:
         # Bold numbered list headers if followed by a colon on the same line (e.g. '\n1. Tax Administration:' -> '\n1. **Tax Administration**:')
         text = re.sub(r"(?:^|\n)(\s*\d{1,2}\.\s+)(?!\*\*)([A-Za-z0-9 /&,-]+?):([ \t]+)", r"\n\1**\2**:\3", text)
         # Separate smashed bullet items on the same line (e.g. 'including:* Item' or 'laws.- **Item**')
-        # Using [ \t]* instead of \s* preserves indentation on sub-bullets that are already on the next line.
-        text = re.sub(
-            r"([;:])[ \t]*([*\-•])(?!\*)[ \t]*(\*{0,2}[A-Za-z])",
-            r"\1\n\n\2 \3",
-            text,
-        )
-        text = re.sub(
-            r"([a-z0-9\)])\.[ \t]*([*\-•])(?!\*)[ \t]*(\*{0,2}[A-Za-z])",
-            r"\1.\n\n\2 \3",
-            text,
-        )
+        # while skipping pipe-table rows and fenced code blocks.
+        unsmashed_lines: list[str] = []
+        in_fence = False
+        for line in text.split("\n"):
+            if line.lstrip().startswith("```"):
+                in_fence = not in_fence
+                unsmashed_lines.append(line)
+                continue
+            if not in_fence and "|" not in line:
+                line = re.sub(
+                    r"([;:])[ \t]*([*\-•])(?!\*)[ \t]*(\*{0,2}[A-Za-z])",
+                    r"\1\n\n\2 \3",
+                    line,
+                )
+                line = re.sub(
+                    r"([a-z0-9\)])\.[ \t]*([*\-•])(?!\*)[ \t]*(\*{0,2}[A-Za-z])",
+                    r"\1.\n\n\2 \3",
+                    line,
+                )
+            unsmashed_lines.append(line)
+        text = "\n".join(unsmashed_lines)
         # Ensure blank line before and after markdown headings
         text = re.sub(r"([^\n])\n(#{1,4}\s+)", r"\1\n\n\2", text)
         text = re.sub(r"(#{1,4}\s+[^\n]+)\n([^\n#])", r"\1\n\n\2", text)

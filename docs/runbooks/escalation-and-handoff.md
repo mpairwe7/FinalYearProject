@@ -8,8 +8,9 @@ call. [Assurance review](../plans/receptionist-assurance-2026-10-30.md) records
 the remaining ownership, atomic-write and production media gates. Direct local
 model calls in `receptionist/brain.py`, `brief.py` and `summary.py` enforce
 bounded timeouts and share a fail-fast cooldown (`_VLLM_BRIDGE_DOWN_UNTIL`,
-`G365`) so a vLLM/DNS outage never exhausts the 25 s call turn budget before
-falling back to localized retrieval or deterministic brief/summary templates.
+`G365`). The English call path in `brain.py` does not use that cooldown. A
+stalled vLLM response on that path can hold the call turn for the full 25 s
+before the timeout transfer runs.
 
 How the text chat decides to offer an officer, how the ticket it raises is
 prioritised and briefed, and how to roll the two Phase 38 flags out and back.

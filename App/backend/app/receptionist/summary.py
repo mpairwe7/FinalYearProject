@@ -99,6 +99,7 @@ def _fallback_summary(turns: list[dict[str, Any]], call: dict[str, Any]) -> dict
 
 
 def _summarise_local(prompt: str) -> dict[str, Any] | None:
+    """Generate a structured call summary using the local Sunflower vLLM model when available."""
     try:
         import time
 

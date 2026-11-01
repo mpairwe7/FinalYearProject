@@ -206,10 +206,19 @@ class OutputGuardSanitizerTests(unittest.TestCase):
         self.assertIn("3. **Upload documents**: NIN; TIN; BRN", norm)
 
     def test_smashed_bullets_starting_with_bold_are_separated(self) -> None:
+        """Verify smashed bullets starting with bold text split on prose lines but not inside pipe tables."""
         raw = "Requirements include: - **National ID (NIN)**: Required for individuals. - **TIN**: Required for companies."
         norm = OutputGuard.normalize_structure(raw)
         self.assertIn("include:\n\n- **National ID (NIN)**:", norm)
         self.assertIn("individuals.\n\n- **TIN**:", norm)
+
+        table_with_bold_bullet = (
+            "| Field | Requirement |\n"
+            "| --- | --- |\n"
+            "| ID | Note: - **National ID (NIN)** required |"
+        )
+        table_norm = OutputGuard.normalize_structure(table_with_bold_bullet)
+        self.assertIn("| ID | Note: - **National ID (NIN)** required |", table_norm)
 
 
 if __name__ == "__main__":
