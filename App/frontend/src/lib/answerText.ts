@@ -34,6 +34,7 @@ export function stripCitationMarkers(text: string): string {
     .replace(/\s*\[\d+(?:\s*[,;]\s*\d+)*\](?!\()/g, '') // the marker + leading space
     .replace(/[ \t]{2,}/g, ' ') //         seams left by the removal
     .replace(/[ \t]+([.,;:!?])/g, '$1') // space pushed onto punctuation
+    .replace(/,([.!?])/g, '$1') //         stray comma before terminal punctuation after marker removal
     .replace(/[ \t]+$/gm, ''); //          trailing space on a line
 }
 

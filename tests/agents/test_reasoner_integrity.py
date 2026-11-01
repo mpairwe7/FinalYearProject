@@ -272,6 +272,25 @@ class TestAnUnverifiedFigureIsNeverShown:
 
         assert "25%" in [payload for kind, payload in events if kind == "token"][0]
 
+    def test_streamed_greeting_and_bullet_list_preserve_newlines_and_bold_headers(self, stream, monkeypatch) -> None:
+        stream(
+            "Hello!\n\n",
+            "Uganda Revenue Authority (URA) provides core services, including:\n",
+            "- Taxpayer Registration: Instant TIN issuance.\n",
+            "- Customs Services: Import and export clearance, [1].\n\n",
+            "Please feel free to reach out if you need further assistance with any of these services!",
+        )
+        monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
+
+        events = run_turn(Model())
+        shown = visible(events)
+
+        assert "Hello!Uganda" not in shown
+        assert ".- " not in shown
+        assert "- **Taxpayer Registration**: Instant TIN issuance." in shown
+        assert "- **Customs Services**: Import and export clearance" in shown
+        assert "\n\nPlease feel free to reach out" in shown
+
     def test_a_tool_answer_is_checked_before_any_of_it_is_shown(self, monkeypatch) -> None:
         # The tool loop produces its reply whole, so waiting costs nothing.
         monkeypatch.setattr(service_module.llm_module, "is_available", lambda: True)

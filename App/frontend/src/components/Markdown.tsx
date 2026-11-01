@@ -400,9 +400,89 @@ function parseTableRow(line: string) {
     .map((cell) => cell.trim());
 }
 
+/** Normalize smashed greetings, inline bullet runs, orphan first list items, and trailing sign-offs. */
+function normalizeMarkdownSource(src: string): string {
+  const rawLines = stripCitationMarkers(src).split("\n");
+  const unsmashed: string[] = [];
+  let inFence = false;
+
+  for (let line of rawLines) {
+    if (line.trimStart().startsWith("```")) {
+      inFence = !inFence;
+      unsmashed.push(line);
+      continue;
+    }
+    if (!inFence && !line.includes("|") && !line.includes("`")) {
+      line = line.replace(/,\.(?=\s|$|[A-Z"')\]])/g, ".");
+      line = line.replace(/([a-zA-Z)\]])([!?])([A-Z])/g, "$1$2 $3");
+      line = line.replace(/([a-z)\]])\.([A-Z][a-z])/g, "$1. $2");
+      if (
+        !/^\s*(?:[-*+•]|\d{1,2}[.)]|#{1,6})\s+/.test(line) &&
+        /^\s*(?!(?:note|important|tip|warning|caution|summary|disclaimer)\b)\*{0,2}[A-Z][A-Za-z0-9 /&,'’()-]{1,45}?\*{0,2}:[ \t]+\S/i.test(
+          line,
+        ) &&
+        /[a-z0-9\)]\.[ \t]*[-*•](?!\*)[ \t]*\*{0,2}[A-Z]/.test(line)
+      ) {
+        line = `- ${line.trimStart()}`;
+      }
+      line = line.replace(/([;:])[ \t]*[-*•](?!\*)[ \t]*(\*{0,2}[A-Za-z])/g, "$1\n- $2");
+      line = line.replace(/([a-z0-9\)])\.[ \t]*[-*•](?!\*)[ \t]*(\*{0,2}[A-Za-z])/g, "$1.\n- $2");
+      line = line.replace(/(?<=\S)[ \t]+•[ \t]+(\*{0,2}[A-Za-z0-9])/g, "\n- $1");
+    }
+    unsmashed.push(...line.split("\n"));
+  }
+
+  inFence = false;
+  for (let idx = 0; idx < unsmashed.length; idx++) {
+    let line = unsmashed[idx];
+    if (line.trimStart().startsWith("```")) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence || line.includes("|") || !line.trim()) continue;
+    if (
+      !/^\s*(?:[-*+•]|\d{1,2}[.)]|#{1,6})\s+/.test(line) &&
+      /^\s*(?!(?:note|important|tip|warning|caution|summary|disclaimer)\b)\*{0,2}[A-Z][A-Za-z0-9 /&,'’()-]{1,45}?\*{0,2}:[ \t]+\S/i.test(
+        line,
+      )
+    ) {
+      let prev = "";
+      for (let p = idx - 1; p >= 0; p--) {
+        if (unsmashed[p].trim()) {
+          prev = unsmashed[p].trim();
+          break;
+        }
+      }
+      let next = "";
+      for (let n = idx + 1; n < unsmashed.length; n++) {
+        if (unsmashed[n].trim()) {
+          next = unsmashed[n].trim();
+          break;
+        }
+      }
+      if (prev.endsWith(":") && /^[-*+•]\s+/.test(next)) {
+        line = `- ${line.trimStart()}`;
+      }
+    }
+    line = line.replace(
+      /^(\s*[-*+•]\s+)(?!\*\*)(?!(?:https?|mailto|tel):)([A-Z][A-Za-z0-9 /&,'’()-]{1,45}?):([ \t]+)/,
+      "$1**$2**:$3",
+    );
+    if (/^\s*(?:[-*+•]|\d{1,2}[.)])\s+/.test(line)) {
+      line = line.replace(
+        /([.!?])\s+((?:Please\s+feel\s+free|Feel\s+free\s+to|Please\s+let\s+me\s+know|Let\s+me\s+know\s+if|If\s+you\s+need\s+(?:any\s+)?(?:further|more|additional)\s+(?:assistance|help|information|clarification)|If\s+you\s+have\s+any\s+(?:further|other|more)\s+questions|Do\s+not\s+hesitate\s+to\s+reach\s+out|Don['’]t\s+hesitate\s+to\s+reach\s+out|Should\s+you\s+need\s+any\s+further|Would\s+you\s+like\s+more\s+detail)\b.*)$/i,
+        "$1\n\n$2",
+      );
+    }
+    unsmashed[idx] = line;
+  }
+
+  return unsmashed.join("\n");
+}
+
 /** Parse a Markdown string into structured block descriptors. */
 function parseBlocks(src: string): Block[] {
-  const lines = stripCitationMarkers(src).split("\n");
+  const lines = normalizeMarkdownSource(src).split("\n");
   const blocks: Block[] = [];
   let i = 0;
   let nextOrderedStep = 1;
