@@ -18,7 +18,7 @@ defaults are unchanged by this addendum.
 |-------|-------|
 | **Name** | URA Chatbot RAG Pipeline |
 | **Version** | 2.0.0 |
-| **Date** | 2026-10-23 |
+| **Date** | 2026-11-01 |
 | **Type** | Retrieval-Augmented Generation (RAG) with agentic tool-calling |
 | **Task** | Tax domain question answering (Uganda Revenue Authority) |
 | **Languages** | English (`en`, primary), Luganda (`lg`), Kiswahili (`sw`), Runyankole (`nyn`), Acholi (`ach`), plus Ateso (LLM natively supports 31 Ugandan languages; 5 locales active across UI, TTT, TTS, STT & Call Receptionist) |
@@ -34,7 +34,7 @@ defaults are unchanged by this addendum.
 | **LLM (mobile)** | google/gemma-2-2b-it GGUF Q4_K_M | 2B (quantised) | Offline mobile inference |
 | **Dense Retriever** | BAAI/bge-m3 | 568M | 1024-dim multilingual embeddings (MTEB 63.0) |
 | **Sparse Retriever** | BM25 | N/A | Keyword matching with learnt IDF weights |
-| **Reranker** | mixedbread-ai/mxbai-rerank-base-v2 | 500M | Passage reranking (BEIR 55.6, Apache-2.0) |
+| **Reranker** | mixedbread-ai/mxbai-rerank-base-v2 | 500M | Passage reranking (BEIR 55.6, Apache-2.0, `RETRIEVER_RERANK_CHARS=4000` passage window — `ADR-0024`) |
 | **ASR (server)** | Sunbird/SunflowerASR-51-african-languages (`whisper_salt`) | 1.5B | Speech-to-text across `en`, `lg`, `sw`, `nyn`, `ach` (on by default — see docs/runbooks/salt-speech-backends.md); Whisper Small + LoRA adapters is the fallback tier |
 | **TTS (server)** | Sunbird/orpheus-3b-tts-multilingual (primary FP8 sidecar) + Sunbird/spark-tts-salt / Piper / edge-tts (fallbacks) | 3B (FP8) + 0.5B | Text-to-speech across `en`, `lg`, `sw`, `nyn`, `ach` with catalog speaker selection (`orpheus_tts.speaker_for`) |
 | **MT (server)** | Sunflower-Qwen3.5-9B prompted local MT (`#NMBR...#` sentinel figure guard) | varies | Machine translation (`en` ↔ `lg`/`sw`/`nyn`/`ach`) with `mt.protect_figures` and `mt.figures_survived` |
@@ -43,7 +43,7 @@ defaults are unchanged by this addendum.
 | **TTS (mobile)** | MMS-TTS VITS | ~40M per locale | On-device speech synthesis |
 | **Supervisor** | Rule-based + LLM fallback | N/A | Query routing (7 routes) |
 | **Tool Registry** | 72 tools across 18 namespaces | N/A | Tax calculators (28 tools incl. Cross-MDA NTR/PRN, life-event onboarding, B2G/UESW clearance, Nil-Return Shield, Voluntary Disclosure/Instalment simulator & EFRIS 5% refund/account recovery), rates, deadlines, KB search, memory operations, DMZ system connectors |
-| **Memory** | 4-Tier Cognitive Hierarchy | N/A | Working (entities/session), Episodic, Semantic (fact triplets), Procedural (curated SOP outlines matched by reviewed triggers; procedure only, no legal citations — G245) |
+| **Memory** | 4-Tier Cognitive Hierarchy | N/A | Working (entities/session + provenance-tiered `verified_slot_bank`), Episodic (topic + sanitized tool/workflow outcome summaries), Semantic (bi-temporal `valid_from_fy`/`valid_to_fy` fact triplets + sleep-time consolidation — `ADR-0024`), Procedural (curated SOP outlines matched by reviewed triggers; procedure only, no legal citations — G245) |
 | **VAD** | Energy-based (numpy) | N/A | Voice Activity Detection with hysteresis |
 | **Accent Detector** | Prosodic features + SVM | ~1M | Ugandan accent classification (5 profiles) |
 | **Offline Retriever** | FAISS + ONNX bge-m3 | ~80M bundle | Offline RAG when Qdrant is unavailable |

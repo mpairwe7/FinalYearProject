@@ -58,7 +58,7 @@ OWASP ZAP DAST, AI red teaming (50 NIST AI 600-1 prompts)
 bias audit, carbon tracking, incident response simulation
 - **Auth system** — JWT (HS256/RS256), RBAC with 5 roles, consent
 management (UDPA 2019), user profiles (`auth/` directory)
-- **Tool-calling framework** — 54 registered tools across 18 namespaces, ToolRegistry,
+- **Tool-calling framework** — 72 registered tools across 18 namespaces, ToolRegistry,
 generate_with_tools loop (`tools/` directory)
 - **Supervisor routing** — 7 routes with per-specialist tool
 whitelists and multi-specialist DAG planning (`agents/` directory)
