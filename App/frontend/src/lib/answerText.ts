@@ -332,7 +332,18 @@ const CALL_TRAILING_OFFER_RE =
  */
 export function formatCallCaptionText(text: string): string {
   if (!text) return '';
-  return text
+  let out = text
+    .replace(/\bU R A\b/g, 'URA')
+    .replace(/\bPayee\b/g, 'PAYE')
+    .replace(/\bEfris\b/g, 'EFRIS')
+    .replace(/\bU R S B\b/g, 'URSB')
+    .replace(/\bK C C A\b/g, 'KCCA')
+    .replace(/\bU N B S\b/g, 'UNBS')
     .replace(CALL_STEP_BREAK_RE, '$1\n')
     .replace(CALL_TRAILING_OFFER_RE, '$1\n\n');
+  const labelMatches = out.match(/(?:[:.])[ \t]+[A-Z][A-Za-z0-9 /&,'’()-]{2,42}:[ \t]+/g);
+  if (labelMatches && labelMatches.length >= 2) {
+    out = out.replace(/([:.])[ \t]+(?=[A-Z][A-Za-z0-9 /&,'’()-]{2,42}:[ \t]+)/g, '$1\n• ');
+  }
+  return out;
 }

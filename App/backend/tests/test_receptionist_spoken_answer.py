@@ -110,6 +110,23 @@ class SpokenAnswerTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Unaweza pia kutaka kujua", spoken)
         self.assertIn("18%", spoken)
 
+    async def test_seven_item_ura_services_list_is_spoken_in_full_without_truncating_after_two_items(self):
+        services_reply = (
+            "Uganda Revenue Authority (URA) serves as the country's central tax and customs authority. "
+            "Based on our provided information, our core services include:\n\n"
+            "- **Taxpayer Registration**: Providing instant Tax Identification Numbers (TIN).\n"
+            "- **Domestic Tax Administration**: Managing VAT, PAYE, corporation tax, rental income tax, and withholding tax.\n"
+            "- **Customs Services**: Handling import and export clearance, valuation, and baggage processing.\n"
+            "- **E-Services & Solutions**: Implementing EFRIS e-invoicing and Digital Tax Stamps.\n"
+            "- **Exemption & Compliance Support**: Offering tax exemption and compliance guidance.\n"
+            "- **Taxpayer Education & Guidance**: Providing the Taxpayer Starter Pack and Taxation Handbook.\n"
+            "- **Online Account Management**: Enabling online payments and tax account management via the URA web portal."
+        )
+        spoken = self.brain._spoken_answer(services_reply, offer_officer=False)
+        self.assertIn("Taxpayer Registration", spoken)
+        self.assertIn("Online Account Management", spoken)
+        self.assertNotIn("Would you like more detail?", spoken)
+
 
 if __name__ == "__main__":
     unittest.main()
