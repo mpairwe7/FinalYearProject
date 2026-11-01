@@ -1112,6 +1112,20 @@ def pdf_document_date(data: bytes) -> str:
     return max(found, default="")
 
 
+import functools
+
+
+@functools.lru_cache(maxsize=128)
+def _resolve_host_ips(host: str) -> tuple[str, ...]:
+    import socket
+
+    try:
+        infos = socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+    except OSError:
+        return ()
+    return tuple(sorted({str(info[4][0]).split("%", 1)[0] for info in infos}))
+
+
 def _assert_public_host(url: str) -> None:
     """Reject any allowlisted host whose DNS resolves to a non-global IP (SSRF / DNS rebinding guard).
 
@@ -1120,18 +1134,12 @@ def _assert_public_host(url: str) -> None:
     resolved loopback, private, link-local, or cloud-metadata address is refused.
     """
     import ipaddress
-    import socket
 
     parsed = urlparse(url)
     host = (parsed.hostname or "").strip().lower().rstrip(".")
     if not host:
         raise CorpusValidationError(f"Missing hostname in {url!r}")
-    try:
-        infos = socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
-    except OSError:
-        return
-    for info in infos:
-        addr_str = str(info[4][0]).split("%", 1)[0]
+    for addr_str in _resolve_host_ips(host):
         try:
             ip_obj = ipaddress.ip_address(addr_str)
         except ValueError as exc:

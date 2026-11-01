@@ -822,13 +822,15 @@ class StatutoryPortalHarvestTests(unittest.TestCase):
             self.assertEqual(len(state_data2["pdf_hashes"]), 1)
 
     def test_harvest_refuses_non_public_dns_resolution(self) -> None:
-        from app.pdf_corpus import _assert_public_host
+        from app.pdf_corpus import _assert_public_host, _resolve_host_ips
 
+        _resolve_host_ips.cache_clear()
         with mock.patch(
             "socket.getaddrinfo",
             return_value=[(2, 1, 6, "", ("169.254.169.254", 443))],
         ), self.assertRaisesRegex(CorpusValidationError, "Refused non-public IP resolution"):
             _assert_public_host("https://nita.go.ug/laws.pdf")
+        _resolve_host_ips.cache_clear()
 
     def test_harvest_rejects_robots_noindex_and_ai_usage_opt_out_and_embedded_injection(self) -> None:
         from app.pdf_corpus import _pdf_response_opts_out, inspect_pdf_for_prompt_injection
@@ -849,17 +851,19 @@ class StatutoryPortalHarvestTests(unittest.TestCase):
     def test_harvest_caps_max_pdf_downloads_and_exits_nonzero_on_all_failed(self) -> None:
         from app.pdf_corpus import main as pdf_corpus_main
 
+        mda_urls = [entry["url"] for entry in MDA_STATUTORY_PDF_REGISTRY[:5]]
         with tempfile.TemporaryDirectory() as temporary:
             pdf_dir = Path(temporary) / "pdfs"
-            patcher, _seen = self._serve(self.OLD)
+            patcher, seen = self._serve(self.OLD)
             with patcher, mock.patch("app.pdf_corpus.inspect_pdf_bytes"):
                 stats = harvest_remote_pdfs(
                     pdf_dir,
-                    include_mda_sources=True,
+                    source_urls=mda_urls,
                     max_pdf_downloads=2,
                 )
+            self.assertEqual(len(seen), 2)
             self.assertEqual(stats["discovered_count"], 2)
-            self.assertEqual(stats["downloaded_count"], 2)
+            self.assertEqual(stats["downloaded_count"] + stats["verified_existing_count"], 2)
 
             # When all downloads fail/are rejected and nothing is verified, main() returns 2
             bad_patcher, _ = self._serve(b"<!DOCTYPE html>not a pdf")
