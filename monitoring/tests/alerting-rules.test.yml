@@ -259,3 +259,47 @@ tests:
           - labels: '{}'
             value: 80
 
+  # A corpus last read 39 days ago is stale, whatever its own index says.
+  - interval: 1h
+    input_series:
+      - series: 'ura_crawl_last_full_run_timestamp_seconds'
+        values: '-3369600x72'   # 39 days before the epoch this test starts from
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: UraCrawlCorpusStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: ml
+            exp_annotations:
+              summary: "The corpus in production has not been checked against ura.go.ug for over 38 days"
+              description: "The crawl is failing, a proposal is waiting for a person, or no release has shipped one. Taxpayers may be getting superseded guidance."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/crawl-operations.md#the-corpus-is-stale"
+
+  # A crawl from 30 days ago is on time: the alert must stay quiet.
+  - interval: 1h
+    input_series:
+      - series: 'ura_crawl_last_full_run_timestamp_seconds'
+        values: '-2592000x72'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: UraCrawlCorpusStale
+        exp_alerts: []
+
+  # Pages kept for a person to read raise a flag even though taxpayers are safe.
+  - interval: 1m
+    input_series:
+      - series: 'ura_crawl_quarantined_pages'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: UraCrawlPagesQuarantined
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: security
+            exp_annotations:
+              summary: "A crawled page held instructions aimed at a model"
+              description: "The page was kept out of the corpus. Someone needs to find out whether ura.go.ug was tampered with."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/crawl-operations.md#a-page-was-quarantined"
+

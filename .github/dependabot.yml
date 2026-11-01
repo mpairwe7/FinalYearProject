@@ -11,6 +11,35 @@
 version: 2
 updates:
   # =============================================================================
+  # CRAWLER - hash-locked, read-only job (ml/requirements-crawl.txt) -> Sunday 01:00 UTC
+  # =============================================================================
+  - package-ecosystem: "pip"
+    directory: "/ml"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+      day: "sunday"
+      time: "01:00"
+      timezone: "Etc/UTC"
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+    open-pull-requests-limit: 1
+    labels:
+      - "dependencies"
+      - "python"
+      - "automated"
+    commit-message:
+      prefix: "deps(crawl)"
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # =============================================================================
   # BACKEND - Python 3.11 / FastAPI (App/backend) -> Sunday 02:00 UTC
   # =============================================================================
   - package-ecosystem: "pip"

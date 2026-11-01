@@ -388,6 +388,19 @@ def load_backup_status(path: Path | None = None) -> dict[str, Any] | None:
     return _load_operational_status(path or BACKUP_STATUS_PATH)
 
 
+def load_crawl_status(path: Path | None = None) -> dict[str, Any] | None:
+    """How old the crawled part of the corpus is, from the manifest in this image.
+
+    ``load_status`` answers whether the index matches the shipped corpus, which
+    a baked image satisfies by construction. This answers how the corpus
+    compares with the site, which nothing reported.
+    """
+    target = path or (Path(os.getenv("CRAWL_JSONL_DIR", str(APP_DATA_ROOT / "crawl_jsonl"))) / "crawl_corpus_manifest.json")
+    manifest = _load_operational_status(target)
+    crawl = (manifest or {}).get("crawl")
+    return crawl if isinstance(crawl, dict) else None
+
+
 def slack_webhook_url(raw: str | None = None) -> str:
     """Return an https Slack webhook, or empty if unset / not https."""
     url = (raw if raw is not None else os.getenv("FRESHNESS_SLACK_WEBHOOK") or "").strip()

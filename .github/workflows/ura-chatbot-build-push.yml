@@ -103,7 +103,7 @@ jobs:
       #
       # The PDF stage is the expensive one (markdown extraction over ~500 MB), so
       # it is cached on the corpus contents: it only re-runs when a PDF actually
-      # changes, which is at most monthly after the scheduled crawl.
+      # changes, which is when a crawl proposal carrying a new document is merged.
       - name: Set up Python for corpus export
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:

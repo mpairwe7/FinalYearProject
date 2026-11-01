@@ -433,6 +433,10 @@ _LIFECYCLE_HELP = {
     "ura_qdrant_backup_timestamp_seconds": "When the last snapshot backup was attempted",
     "ura_qdrant_restore_drill_failed": "1 when the last restore drill failed",
     "ura_qdrant_restore_drill_timestamp_seconds": "When the last restore drill ran",
+    "ura_crawl_last_full_run_timestamp_seconds": "When URA's site was last read end to end for this corpus",
+    "ura_crawl_oldest_verified_timestamp_seconds": "When the least recently verified corpus page was confirmed live",
+    "ura_crawl_unverified_pages": "Corpus pages with no recorded live verification",
+    "ura_crawl_quarantined_pages": "Crawled pages held out of the corpus for a person to read",
 }
 
 
@@ -445,14 +449,15 @@ def _index_lifecycle_prometheus_metrics() -> list[str]:
     without adding a separate exporter or exposing the Qdrant management API.
     """
     try:
-        from .freshness import load_backup_status, load_lifecycle_status, load_status
+        from .freshness import load_backup_status, load_crawl_status, load_lifecycle_status, load_status
 
         freshness = load_status()
         lifecycle = load_lifecycle_status()
         backup = load_backup_status()
+        crawl = load_crawl_status()
     except Exception:
         logger.warning("Could not read Qdrant lifecycle status for /metrics", exc_info=True)
-        freshness = lifecycle = backup = None
+        freshness = lifecycle = backup = crawl = None
 
     source_drift = bool(
         freshness
@@ -486,6 +491,10 @@ def _index_lifecycle_prometheus_metrics() -> list[str]:
             backup,
             "last_restore_drill_at",
         ),
+        "ura_crawl_last_full_run_timestamp_seconds": _status_timestamp(crawl, "last_full_run_at"),
+        "ura_crawl_oldest_verified_timestamp_seconds": _status_timestamp(crawl, "oldest_verified_at"),
+        "ura_crawl_unverified_pages": int((crawl or {}).get("pages_unverified") or 0),
+        "ura_crawl_quarantined_pages": len((crawl or {}).get("quarantined") or []),
     }
     lines: list[str] = []
     for name, value in gauges.items():

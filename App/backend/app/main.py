@@ -1210,13 +1210,16 @@ def index_freshness() -> dict[str, Any]:
 
     Cron writes the status file: ``python -m app.freshness --check --write-status``.
     Missing file means the check has not run yet — not that the index is fresh.
+    ``ok`` says the index matches the shipped corpus. ``crawl`` says how old that
+    corpus is against URA's site, and is ``null`` when no manifest shipped.
     """
-    from .freshness import load_status
+    from .freshness import load_crawl_status, load_status
 
     status = load_status()
+    crawl = load_crawl_status()
     if status is None:
-        return {"ok": None, "snapshot_missing": True, "checked_at": None}
-    return status
+        return {"ok": None, "snapshot_missing": True, "checked_at": None, "crawl": crawl}
+    return {**status, "crawl": crawl}
 
 
 # ---------------------------------------------------------------------------

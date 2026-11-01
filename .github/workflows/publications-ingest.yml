@@ -30,9 +30,11 @@ jobs:
         env:
           URA_PUBLICATIONS_URL: ${{ vars.URA_PUBLICATIONS_URL }}
         run: |
+          # A green run that did nothing must say so. The crawl's weekday change
+          # check is what keeps notices current (ADR-0023).
           if [ -z "$URA_PUBLICATIONS_URL" ]; then
-            echo "URA_PUBLICATIONS_URL unset — skip ingest."
+            echo "::warning::URA_PUBLICATIONS_URL is unset, so this run checked nothing."
             exit 0
           fi
           python -m app.publications
-          echo "Re-index remains manual: python -m app.indexer --recreate"
+          echo "Re-index remains manual: python -m app.index_lifecycle --rebuild"

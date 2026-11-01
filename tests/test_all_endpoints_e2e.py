@@ -545,9 +545,13 @@ def test_index_freshness():
     r = c.get("/v1/index/freshness")
     assert r.status_code == 200
     body = r.json()
-    assert {"ok", "snapshot_missing", "checked_at"} <= set(body)
+    assert {"ok", "snapshot_missing", "checked_at", "crawl"} <= set(body)
     if body["snapshot_missing"]:
-        assert body == {"ok": None, "snapshot_missing": True, "checked_at": None}
+        assert {key: value for key, value in body.items() if key != "crawl"} == {
+            "ok": None,
+            "snapshot_missing": True,
+            "checked_at": None,
+        }
     else:
         assert isinstance(body["ok"], bool)
         assert isinstance(body["checked_at"], str) and body["checked_at"]
