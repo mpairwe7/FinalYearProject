@@ -178,7 +178,7 @@ _STYLE_BACKGROUND = re.compile(r"background(?:-color)?\s*:\s*([^;!]+)", re.IGNOR
 _HIDDEN_CLASSES = frozenset({"sr-only", "screen-reader-text", "visually-hidden", "hidden", "invisible"})
 _RESPONSIVE_DISPLAY = re.compile(r"^d-(?:sm|md|lg|xl|xxl)-(?:block|flex|inline|table|grid)")
 #: Bidi, zero-width and tag characters: invisible to a reader, legible to a model.
-_INVISIBLE_CHARS = re.compile("[­​-‏‪-‮⁠-⁤﻿\U000e0000-\U000e007f]")
+_INVISIBLE_CHARS = re.compile("[\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff\U000e0000-\U000e007f]")
 
 _ISO_DATE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})")
 _VISIBLE_CREATED = re.compile(r"^Create Date\s+(.+)$", re.IGNORECASE | re.MULTILINE)

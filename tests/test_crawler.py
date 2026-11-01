@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 import pytest
@@ -20,7 +21,7 @@ import pytest
 pytest.importorskip("bs4", reason="the crawler needs beautifulsoup4")
 
 from ml.scripts.data_aug import crawler  # noqa: E402
-from ml.scripts.data_aug.crawl_policy import USER_AGENT, HostGovernor  # noqa: E402
+from ml.scripts.data_aug.crawl_policy import CRAWL_ALLOWED_HOSTS, USER_AGENT, HostGovernor  # noqa: E402
 from ml.scripts.data_aug.crawler import (  # noqa: E402
     FULL_HUBS,
     NOTICE_HUBS,
@@ -102,6 +103,10 @@ class Site:
         return self.urls.count(url)
 
 
+def hosts(site: Site) -> set[str]:
+    return {urlsplit(url).hostname or "" for url in site.urls}
+
+
 def redirect(location: str, status: int = 301) -> Page:
     return Page("", status=status, headers={"location": location})
 
@@ -144,7 +149,7 @@ class TestDiscovery:
     def test_no_request_ever_goes_to_an_archive(self, config: CrawlConfig):
         site = Site({VAT: Page("", status=500)}, urls=(VAT,))
         run(site, config)
-        assert not [url for url in site.urls if "archive.org" in url]
+        assert hosts(site) <= CRAWL_ALLOWED_HOSTS
 
     def test_listings_find_links_but_are_never_stored_as_content(self, config: CrawlConfig):
         """Listings kept one card's headline: the median capture was 142 characters."""
@@ -491,7 +496,7 @@ class TestLiveOnly:
         run(site, config)
         assert captures(config) == {}
         assert state(config)["runs"][-1]["outcomes"]["redirect_rejected"] == 1
-        assert not [url for url in site.urls if "archive.org" in url]
+        assert "web.archive.org" not in hosts(site)
 
     def test_a_redirect_downgrade_to_http_is_upgraded_not_followed_in_cleartext(self, config: CrawlConfig):
         moved = "https://ura.go.ug/en/vat/"
