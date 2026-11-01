@@ -34,8 +34,15 @@ def isolated_enabled() -> bool:
     return (os.getenv("DOCUMENT_PARSE_ISOLATED") or "").lower() in ("1", "true", "yes", "on")
 
 
-def _apply_child_sandbox_limits() -> None:
-    """Scrub inherited secrets, bound thread arenas, and enforce POSIX RLIMIT caps inside the child worker (CS-2)."""
+def _apply_child_sandbox_limits(*, apply_rlimits: bool | None = None) -> None:
+    """Scrub inherited secrets, bound thread arenas, and enforce POSIX RLIMIT caps inside the child worker (CS-2).
+
+    ``resource.setrlimit`` is only applied when running inside a spawned child
+    process (``mp.current_process().name != "MainProcess"``) unless
+    *apply_rlimits* is explicitly ``True``, preventing an in-process unit test
+    call from lowering ``RLIMIT_CPU`` or ``RLIMIT_FSIZE`` on the host/pytest
+    runner process.
+    """
     for key in list(os.environ.keys()):
         if _SENSITIVE_ENV_RE.search(key) and key != "DOCUMENT_PARSE_ISOLATED":
             os.environ.pop(key, None)
@@ -43,6 +50,13 @@ def _apply_child_sandbox_limits() -> None:
     os.environ["OMP_NUM_THREADS"] = "1"
     os.environ["OPENBLAS_NUM_THREADS"] = "1"
     os.environ["MALLOC_ARENA_MAX"] = "2"
+    should_set_rlimits = (
+        apply_rlimits
+        if apply_rlimits is not None
+        else (mp.current_process().name != "MainProcess")
+    )
+    if not should_set_rlimits:
+        return
     try:
         import resource
 
@@ -65,7 +79,7 @@ def _apply_child_sandbox_limits() -> None:
 
 def _child(kind: str, data: bytes, conn: Any) -> None:
     try:
-        _apply_child_sandbox_limits()
+        _apply_child_sandbox_limits(apply_rlimits=True)
         if kind == "sandbox_pdf":
             from .ephemeral_pdf_sandbox import _extract_pdf_pages
 
