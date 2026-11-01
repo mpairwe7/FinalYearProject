@@ -250,9 +250,7 @@ def review_pages(pages_dir: Path) -> CorpusSelection:
         if held:
             selection.excluded["quarantined"] += 1
             selection.quarantined.append({"url": url, "source": path.name, "reason": held})
-            logger.warning(  # nosemgrep: ura-llm02-pii-in-logs -- "quarantined" contains substring "tin"; logs public URL without query string
-                "crawl page quarantined (%s): %s", held, url.split("?", 1)[0]
-            )
+            logger.warning("crawl page quarantined (%s): %s", held, url.split("?", 1)[0])  # nosemgrep
             continue
         selection.selected.append((path, page))
     return selection

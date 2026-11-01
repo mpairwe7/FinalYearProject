@@ -142,7 +142,8 @@ def fetch_publications(url: str | None = None, *, download_pdfs: bool = False) -
         req = Request(target, headers={"User-Agent": CORPUS_FETCH_USER_AGENT})
         is_direct_pdf = urlparse(target).path.lower().endswith(".pdf")
         with opener.open(req, timeout=20) as resp:  # nosec B310 # noqa: S310 — https-only above
-            ctype = (resp.headers.get("Content-Type") or "").lower()
+            resp_headers = getattr(resp, "headers", None)
+            ctype = (resp_headers.get("Content-Type") if resp_headers is not None else "" or "").lower()
             cap = (
                 PDF_CORPUS_MAX_BYTES
                 if download_pdfs and (is_direct_pdf or "application/pdf" in ctype)
