@@ -494,7 +494,7 @@ class EvidenceExportTests(CrawlCorpusExportIngestTests):
             _pages, jsonl_dir, _stats = self._export(root, [self._page(source_kind="live", published_at="2026-09-01", timestamp="2026-10-20T00:00:00Z"), self._page(url="https://ura.go.ug/b", timestamp="2026-09-20T00:00:00Z")])
             summary = json.loads((jsonl_dir / CRAWL_MANIFEST_NAME).read_text(encoding="utf-8"))["crawl"]
         self.assertEqual(summary["last_full_run_at"], "2026-10-31T00:00:00Z")
-        self.assertEqual(summary["oldest_verified_at"], "2026-09-20T00:00:00Z")
+        self.assertEqual(summary["oldest_verified_at"], "2026-10-20T00:00:00Z")
         self.assertEqual((summary["pages_live"], summary["pages_unverified"], summary["pages_undated"]), (1, 1, 1))
 
 

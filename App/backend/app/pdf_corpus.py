@@ -1061,12 +1061,28 @@ _PDF_XMP_DATE = re.compile(rb"xmp:(?:ModifyDate|CreateDate)(?:>|=[\"'])\s*(\d{4}
 
 
 def pdf_document_date(data: bytes) -> str:
-    """The latest date a PDF states about itself, ``YYYY-MM-DD``, or ``""`` when unreadable."""
-    found = [
-        f"{match.group(1).decode()}-{match.group(2).decode()}-{match.group(3).decode()}"
-        for pattern in (_PDF_INFO_DATE, _PDF_XMP_DATE)
-        for match in pattern.finditer(data)
-    ]
+    """The latest valid non-future calendar date a PDF states about itself, ``YYYY-MM-DD``, or ``""``.
+
+    Invalid calendar dates (such as February 30) and dates later than the fetch
+    time are rejected so a malformed or future-stamped file cannot block
+    legitimate replacements.
+    """
+    from datetime import date, datetime, timezone
+
+    today = datetime.now(timezone.utc).date()
+    found: list[str] = []
+    for pattern in (_PDF_INFO_DATE, _PDF_XMP_DATE):
+        for match in pattern.finditer(data):
+            try:
+                candidate = date(
+                    int(match.group(1)),
+                    int(match.group(2)),
+                    int(match.group(3)),
+                )
+            except ValueError:
+                continue
+            if candidate <= today:
+                found.append(candidate.isoformat())
     return max(found, default="")
 
 
@@ -1097,7 +1113,7 @@ def _default_page_fetcher(url: str, timeout: float = 30.0) -> str:
     }
     current = url
     with httpx.Client(timeout=timeout, follow_redirects=False, headers=headers) as client:
-        for _hop in range(6):
+        for _hop in range(20):
             resp = client.get(current)
             if resp.is_redirect:
                 current = _validated_redirect(resp, current)
@@ -1118,41 +1134,21 @@ def _stream_pdf_with_tls_fallback(
 ) -> dict[str, Any]:
     """Stream *url* over HTTPS with strict TLS verification and redirect allowlist validation.
 
-    A file already held is left unread only when the server confirms both its
-    name and its length. Either alone proved nothing: a name match skipped the
-    request altogether, so a revised statute at the same URL was reported as
-    verified, and a length match filed a different statute as a duplicate.
+    A file already held is marked existing only when the downloaded body's
+    SHA-256 matches the held digest (a matching name and Content-Length alone
+    cannot prove byte identity).
     """
     import httpx
 
     current = url
     with httpx.Client(timeout=timeout, follow_redirects=False, headers=headers) as client:
-        for _hop in range(6):
+        for _hop in range(20):
             with client.stream("GET", current) as resp:
                 if resp.is_redirect:
                     current = _validated_redirect(resp, current)
                     continue
                 resp.raise_for_status()
                 resp_headers = {str(k).lower(): str(v) for k, v in resp.headers.items()}
-                if existing_by_name is not None:
-                    cd_header = resp_headers.get("content-disposition", "")
-                    cand_name = canonical_statutory_pdf_filename(
-                        current,
-                        title=title,
-                        content_disposition=cd_header,
-                        source_page=source_page,
-                    )
-                    held = existing_by_name.get(cand_name.lower())
-                    length = resp_headers.get("content-length", "")
-                    if held is not None and length.isdigit() and int(length) == held[1]:
-                        return {
-                            "status": "existing",
-                            "pdf": held[0],
-                            "url": url,
-                            "title": title,
-                            "sha256": held[2],
-                            "bytes": held[1],
-                        }
                 buf = bytearray()
                 for chunk in resp.iter_bytes(chunk_size=65536):
                     if not chunk:
@@ -1162,12 +1158,35 @@ def _stream_pdf_with_tls_fallback(
                         raise CorpusValidationError(
                             f"Remote PDF {url} exceeded corpus max_bytes ({PDF_CORPUS_MAX_BYTES})."
                         )
+                raw_bytes = bytes(buf)
+                if existing_by_name is not None:
+                    cd_header = resp_headers.get("content-disposition", "")
+                    cand_name = canonical_statutory_pdf_filename(
+                        current,
+                        title=title,
+                        content_disposition=cd_header,
+                        source_page=source_page,
+                    )
+                    held = existing_by_name.get(cand_name.lower())
+                    if (
+                        held is not None
+                        and len(raw_bytes) == held[1]
+                        and hashlib.sha256(raw_bytes).hexdigest() == held[2]
+                    ):
+                        return {
+                            "status": "existing",
+                            "pdf": held[0],
+                            "url": url,
+                            "title": title,
+                            "sha256": held[2],
+                            "bytes": held[1],
+                        }
                 return {
                     "status": "fetched",
                     "url": url,
                     "title": title,
                     "source_page": source_page,
-                    "raw_bytes": bytes(buf),
+                    "raw_bytes": raw_bytes,
                     "headers": resp_headers,
                 }
         raise CorpusValidationError(f"Too many redirects fetching PDF {url}")
@@ -1360,8 +1379,16 @@ def harvest_remote_pdfs(
             replaced = target_path.is_file()
             if replaced:
                 # Older never replaces newer: a re-upload of last year's edition
-                # at the same address is reported, not installed.
-                held_date, new_date = pdf_document_date(target_path.read_bytes()), pdf_document_date(raw_bytes)
+                # at the same address is reported, not installed. An oversized
+                # held file is not read into memory (treated as undated so a
+                # valid replacement within PDF_CORPUS_MAX_BYTES may overwrite it).
+                held_size = target_path.stat().st_size
+                held_date = (
+                    pdf_document_date(target_path.read_bytes())
+                    if held_size <= PDF_CORPUS_MAX_BYTES
+                    else ""
+                )
+                new_date = pdf_document_date(raw_bytes)
                 if held_date and new_date and new_date < held_date:
                     logger.warning("Kept %s: the remote file dated %s is older than the %s copy", filename, new_date, held_date)
                     rejected.append({"url": pdf_url, "pdf": filename, "reason": f"older_than_held: {new_date} < {held_date}"})

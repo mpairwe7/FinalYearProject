@@ -665,6 +665,19 @@ class StatutoryPortalHarvestTests(unittest.TestCase):
             self.assertEqual(seen, [self.URL])
             self.assertEqual(stats["verified_existing_count"], 1)
 
+    def test_same_name_and_length_with_different_bytes_is_replaced(self) -> None:
+        revised_same_len = b"%PDF-1.7\nrevised!\n" + b"r" * (len(self.OLD) - 18)
+        self.assertEqual(len(revised_same_len), len(self.OLD))
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / "Income-Tax-Act.pdf").write_bytes(self.OLD)
+            patcher, _seen = self._serve(revised_same_len)
+            with patcher, mock.patch("app.pdf_corpus.inspect_pdf_bytes"):
+                stats = harvest_remote_pdfs(directory, source_urls=[self.URL])
+            self.assertEqual(stats["verified_existing_count"], 0)
+            self.assertEqual(stats["downloaded_count"], 1)
+            self.assertEqual((directory / "Income-Tax-Act.pdf").read_bytes(), revised_same_len)
+
     def test_an_older_file_does_not_replace_a_newer_one(self) -> None:
         """A re-upload of last year's edition at the same address is reported, not installed."""
         current = b"%PDF-1.7\n/ModDate (D:20260801000000)\n" + b"b" * 900

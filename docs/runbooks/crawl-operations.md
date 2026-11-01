@@ -104,7 +104,7 @@ is in the job summary and the `crawl-candidate` artifact for 14 days.
 | Many pages would leave | URL restructure, outage, or an unwanted mass unpublish | Open a sample of the listed URLs in a browser |
 | Many pages changed | Defacement, or an extraction regression | Compare a page with its capture. Compromise: call URA ICT **and do not re-run with `baseline`** |
 | Pages came back older | The site was restored from a backup | Keep what we hold, and ask URA when the site will be current |
-| Several pages hold instructions | The site may be compromised | [A page was quarantined](#a-page-was-quarantined) |
+| Several pages hold instructions | The site may be compromised | Held-run quarantines appear only in the failed job and its report (never in the shipped manifest or `UraCrawlPagesQuarantined`); see [A page was quarantined](#a-page-was-quarantined) |
 
 Thresholds are `CRAWL_GATE_MAX_REMOVED_SHARE`, `CRAWL_GATE_MAX_CHANGED_SHARE`,
 `CRAWL_GATE_MAX_QUARANTINED`, `CRAWL_GATE_MAX_OLDER_RESPONSES` and
@@ -135,9 +135,10 @@ if the count stays above zero read `excluded` in the manifest's `crawl` block.
 
 ## A page was quarantined
 
-`UraCrawlPagesQuarantined`, or a Quarantined section in a proposal. A page held an
-instruction aimed at a model, in its text or in markup a reader cannot see. It is out of
-the corpus, and taxpayers are not affected.
+`UraCrawlPagesQuarantined` (scoped to quarantines in the shipped manifest), or a
+Quarantined section in a proposal or held-run report. A page held an instruction aimed at
+a model, in its text or in markup a reader cannot see. It is out of the corpus, and
+taxpayers are not affected.
 
 An instruction on a government page is evidence of tampering, not a data quality issue.
 

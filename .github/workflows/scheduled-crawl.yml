@@ -18,6 +18,7 @@
 #   * Install unpinned packages. Dependencies come from a hash-locked file.
 name: Scheduled URA Crawl
 
+# checkov:skip=CKV_GHA_7:The dispatch inputs only select the crawl tier (full/changes), fetch budget, baseline flag, and whether to open a candidate PR. This workflow builds no binary or container artifact.
 on:
   schedule:
     - cron: '30 4 * * 1-5'
@@ -123,6 +124,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          git fetch --depth=1 origin dev
+          git checkout FETCH_HEAD -- Data/crawl Data/pdfs
           cp -r Data/crawl "$RUNNER_TEMP/crawl-before"
           open=$(gh pr list --head "$CANDIDATE_BRANCH" --base dev --state open --json number --jq 'length')
           if [ "$open" != "0" ]; then

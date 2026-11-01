@@ -107,7 +107,10 @@ def canonical_url(
     value = str(raw or "").strip()
     if not value or value.lower().startswith(("javascript:", "mailto:", "tel:", "data:", "#")):
         return ""
-    parts = urlsplit(urljoin(base, value) if base else value)
+    try:
+        parts = urlsplit(urljoin(base, value) if base else value)
+    except ValueError:
+        return ""
     if parts.scheme.lower() not in ("http", "https") or parts.username or parts.password:
         return ""
     host = (parts.hostname or "").lower().rstrip(".")
@@ -189,16 +192,28 @@ _PDF_XMP_DATE = re.compile(rb"xmp:(?:ModifyDate|CreateDate)(?:>|=[\"'])\s*(\d{4}
 
 
 def pdf_document_date(data: bytes) -> str:
-    """The latest date a PDF states about itself, ``YYYY-MM-DD``, or ``""``.
+    """The latest valid non-future calendar date a PDF states about itself, ``YYYY-MM-DD``, or ``""``.
 
     Read straight from the bytes, so a compressed metadata stream gives ``""``:
-    no evidence, rather than a wrong answer.
+    no evidence, rather than a wrong answer. Invalid calendar dates and dates
+    later than the fetch time are rejected.
     """
-    found = [
-        f"{match.group(1).decode()}-{match.group(2).decode()}-{match.group(3).decode()}"
-        for pattern in (_PDF_INFO_DATE, _PDF_XMP_DATE)
-        for match in pattern.finditer(data)
-    ]
+    from datetime import date, datetime, timezone
+
+    today = datetime.now(timezone.utc).date()
+    found: list[str] = []
+    for pattern in (_PDF_INFO_DATE, _PDF_XMP_DATE):
+        for match in pattern.finditer(data):
+            try:
+                candidate = date(
+                    int(match.group(1)),
+                    int(match.group(2)),
+                    int(match.group(3)),
+                )
+            except ValueError:
+                continue
+            if candidate <= today:
+                found.append(candidate.isoformat())
     return max(found, default="")
 
 
@@ -213,12 +228,23 @@ ROBOTS_MAX_REDIRECTS = 5
 _MAX_CRAWL_DELAY_S = 30.0
 _PERCENT = re.compile(r"%[0-9a-fA-F]{2}")
 _TOKEN = re.compile(r"^[A-Za-z_-]+")
+_UNRESERVED_OCTETS = frozenset(
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+)
+
+
+def _normalise_escape(match: re.Match[str]) -> str:
+    esc = match.group(0)
+    byte_val = int(esc[1:], 16)
+    if byte_val in _UNRESERVED_OCTETS:
+        return chr(byte_val)
+    return esc.upper()
 
 
 def _encode_for_match(path: str) -> str:
-    """Section 2.2.2: compare percent-encoded, with escapes in one letter case."""
+    """Section 2.2.2: decode unreserved escapes; keep reserved escapes in uppercase."""
     encoded = quote(path, safe="/:@!$&'()*+,;=-._~?%#[]")
-    return _PERCENT.sub(lambda match: match.group(0).upper(), encoded)
+    return _PERCENT.sub(_normalise_escape, encoded)
 
 
 def _match_target(url: str) -> str:

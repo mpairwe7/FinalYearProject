@@ -250,7 +250,9 @@ def review_pages(pages_dir: Path) -> CorpusSelection:
         if held:
             selection.excluded["quarantined"] += 1
             selection.quarantined.append({"url": url, "source": path.name, "reason": held})
-            logger.warning("crawl page quarantined (%s): %s", held, path.name)
+            logger.warning(  # nosemgrep: ura-llm02-pii-in-logs -- "quarantined" contains substring "tin"; logs public URL without query string
+                "crawl page quarantined (%s): %s", held, url.split("?", 1)[0]
+            )
             continue
         selection.selected.append((path, page))
     return selection
@@ -512,7 +514,11 @@ def _crawl_summary(
     is true by construction in a baked image. Nothing said how the corpus
     compared with the site, which is the question a taxpayer's answer rests on.
     """
-    verified = sorted(entry["crawled_at"] for entry in sources if entry["crawled_at"])
+    verified = sorted(
+        entry["crawled_at"]
+        for entry in sources
+        if entry["crawled_at"] and entry.get("source_kind") == "live"
+    )
     return {
         "last_full_run_at": _clean(state.get("last_full_run_at")),
         "last_changes_run_at": _clean(state.get("last_changes_run_at")),

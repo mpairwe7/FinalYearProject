@@ -21,7 +21,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from ._root import APP_DATA_ROOT, PROJECT_ROOT
 from .freshness import FreshnessReport, enqueue_reindex_request
-from .pdf_corpus import ALLOWED_STATUTORY_PDF_HOSTS, CORPUS_FETCH_USER_AGENT
+from .pdf_corpus import ALLOWED_STATUTORY_PDF_HOSTS, CORPUS_FETCH_USER_AGENT, PDF_CORPUS_MAX_BYTES
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +132,7 @@ def _write_snapshot(payload: dict[str, Any], path: Path | None = None) -> Path:
     return target
 
 
-def fetch_publications(url: str | None = None) -> tuple[bytes, str]:
+def fetch_publications(url: str | None = None, *, download_pdfs: bool = False) -> tuple[bytes, str]:
     targets = publications_urls(url)
     if not targets or targets == ["fixture://ura-publications"]:
         raise ValueError("URA_PUBLICATIONS_URL must be an https URL")
@@ -140,10 +140,17 @@ def fetch_publications(url: str | None = None) -> tuple[bytes, str]:
     opener = build_opener(_AllowlistedRedirects)
     for target in targets:
         req = Request(target, headers={"User-Agent": CORPUS_FETCH_USER_AGENT})
+        is_direct_pdf = urlparse(target).path.lower().endswith(".pdf")
         with opener.open(req, timeout=20) as resp:  # nosec B310 # noqa: S310 — https-only above
-            data = resp.read(PUBLICATIONS_MAX_BYTES + 1)
-        if len(data) > PUBLICATIONS_MAX_BYTES:
-            raise ValueError(f"publication larger than {PUBLICATIONS_MAX_BYTES} bytes: {target}")
+            ctype = (resp.headers.get("Content-Type") or "").lower()
+            cap = (
+                PDF_CORPUS_MAX_BYTES
+                if download_pdfs and (is_direct_pdf or "application/pdf" in ctype)
+                else PUBLICATIONS_MAX_BYTES
+            )
+            data = resp.read(cap + 1)
+        if len(data) > cap:
+            raise ValueError(f"publication larger than {cap} bytes: {target}")
         chunks.append(data)
     body = b"\n".join(chunks)
     return body, _digest(body)
@@ -171,7 +178,7 @@ def ingest_publications(
         else:
             source = ",".join(publications_urls(source))
             try:
-                body, digest = fetch_publications(source)
+                body, digest = fetch_publications(source, download_pdfs=download_pdfs)
             except (URLError, TimeoutError, OSError, ValueError) as exc:
                 logger.warning("publication fetch failed: %s", type(exc).__name__)
                 return {"ok": False, "error": type(exc).__name__}

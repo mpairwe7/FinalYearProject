@@ -396,7 +396,11 @@ def load_crawl_status(path: Path | None = None) -> dict[str, Any] | None:
     compares with the site, which nothing reported.
     """
     target = path or (Path(os.getenv("CRAWL_JSONL_DIR", str(APP_DATA_ROOT / "crawl_jsonl"))) / "crawl_corpus_manifest.json")
-    manifest = _load_operational_status(target)
+    try:
+        manifest = _load_operational_status(target)
+    except (OSError, ValueError):
+        logger.warning("Failed to read crawl corpus manifest at %s", target, exc_info=True)
+        return None
     crawl = (manifest or {}).get("crawl")
     return crawl if isinstance(crawl, dict) else None
 

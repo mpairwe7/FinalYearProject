@@ -832,7 +832,7 @@ class _CrawlRun:
                             response.headers.get("location", ""), current, allowed_hosts=self.config.allowed_hosts
                         )
                         if not target:
-                            return RobotsPolicy(state="unavailable")
+                            return RobotsPolicy(state="unreachable")
                         current = target
                         continue
                     implied = robots_from_status(response.status_code)
@@ -881,7 +881,11 @@ class _CrawlRun:
                         )
                         if not target:
                             return FetchResult(
-                                "redirect_rejected", url, status=status, detail=response.headers.get("location", "")[:200]
+                                "redirect_rejected",
+                                url,
+                                final_url=current,
+                                status=status,
+                                detail=response.headers.get("location", "")[:200],
                             )
                         current = target
                         continue
@@ -909,29 +913,33 @@ class _CrawlRun:
                             result.outcome, result.body = "too_large", b""
                     return result
             except httpx.TimeoutException as exc:
-                return FetchResult("network_error", url, detail=type(exc).__name__)
+                return FetchResult("network_error", url, final_url=current, detail=type(exc).__name__)
             except httpx.HTTPError as exc:
-                return FetchResult("network_error", url, detail=type(exc).__name__)
-        return FetchResult("redirect_rejected", url, detail="too many redirects")
+                return FetchResult("network_error", url, final_url=current, detail=type(exc).__name__)
+        return FetchResult("redirect_rejected", url, final_url=current, detail="too many redirects")
 
     def fetch(self, url: str, *, etag: str = "", last_modified: str = "", max_bytes: int | None = None) -> FetchResult:
         """Fetch with retries. Failures are reported per host, and a bad host is dropped."""
-        host = urlsplit(url).hostname or ""
+        orig_host = urlsplit(url).hostname or ""
         limit = max_bytes or self.config.max_page_bytes
-        result = FetchResult("network_error", url)
+        result = FetchResult("network_error", url, final_url=url)
         for attempt in range(_MAX_ATTEMPTS):
             result = self._fetch_once(url, etag=etag, last_modified=last_modified, max_bytes=limit)
+            attempt_host = urlsplit(result.final_url or url).hostname or orig_host
             if result.outcome == "network_error" and result.detail:
                 self.outcomes[f"network_error_{result.detail}"] += 1
             if result.outcome not in _RETRYABLE:
-                self.governor.record(host, ok=result.outcome not in _HOST_FAILURE_OUTCOMES)
+                self.governor.record(attempt_host, ok=result.outcome not in _HOST_FAILURE_OUTCOMES)
                 return result
-            self.governor.record(host, ok=False)
+            self.governor.record(attempt_host, ok=False)
             if result.retry_after is not None and result.retry_after > _RETRY_AFTER_CAP_S:
-                self.governor.trip(host)
-            if self.governor.tripped(host) or attempt == _MAX_ATTEMPTS - 1 or self._budget_spent():
+                self.governor.trip(attempt_host)
+            if self.governor.tripped(attempt_host) or attempt == _MAX_ATTEMPTS - 1 or self._budget_spent():
                 return result
-            self.governor.defer(host, result.retry_after if result.retry_after is not None else 2.0 ** (attempt + 1))
+            self.governor.defer(
+                attempt_host,
+                result.retry_after if result.retry_after is not None else 2.0 ** (attempt + 1),
+            )
         return result
 
     # -- frontier ----------------------------------------------------------
@@ -1056,9 +1064,11 @@ class _CrawlRun:
             if held is not None and listed is not None and listed < held:
                 self.outcomes["lastmod_went_backwards"] += 1
             entry["sitemap_lastmod"] = self.sitemap[url]
-        elif self._was_delisted(url, entry):
-            entry.pop("sitemap_lastmod")  # Now checked, so not stale on this ground again.
         return entry
+
+    def _clear_delisted_marker(self, url: str, entry: dict[str, Any]) -> None:
+        if self._was_delisted(url, entry):
+            entry.pop("sitemap_lastmod", None)
 
     @staticmethod
     def _verified(entry: dict[str, Any], result: FetchResult) -> None:
@@ -1141,6 +1151,7 @@ class _CrawlRun:
 
         final = result.final_url or url
         if final != url and result.outcome in ("ok", "not_modified"):
+            self._clear_delisted_marker(url, entry)
             entry.update(status="moved", moved_to=final)
             entry.pop("etag", None)
             entry.pop("last_modified", None)
@@ -1158,15 +1169,18 @@ class _CrawlRun:
             entry.update(last_checked_at=_now(), last_status=result.status, last_outcome=result.outcome)
 
         if result.outcome == "not_modified":
+            self._clear_delisted_marker(final, entry)
             self._verified(entry, result)
             return None
         if result.outcome == "not_found":
             self.suspects.append(url)
             return None
         if result.outcome == "gone":
+            self._clear_delisted_marker(url, entry)
             self._mark_gone(url)
             return None
         if result.outcome == "disallowed":
+            self._clear_delisted_marker(final, entry)
             entry["status"] = "disallowed"
             return None
         if result.outcome == "blocked":
@@ -1177,6 +1191,7 @@ class _CrawlRun:
 
         content_type = result.headers.get("content-type", "").lower()
         if "pdf" in content_type or result.body.startswith(_PDF_MAGIC):
+            self._clear_delisted_marker(final, entry)
             self.pdf_queue.append((final, url))
             return None
         if content_type and "html" not in content_type:
@@ -1207,7 +1222,15 @@ class _CrawlRun:
         return bool(held_published and page.published_at and page.published_at < held_published)
 
     def _accept_html(
-        self, url: str, requested: str, entry: dict[str, Any], result: FetchResult, depth: int
+        self,
+        url: str,
+        requested: str,
+        entry: dict[str, Any],
+        result: FetchResult,
+        depth: int,
+        *,
+        enqueue_links: bool = True,
+        confirm_suspect: bool = False,
     ) -> CrawledPage | None:
         page = parse_page(
             result.body,
@@ -1219,12 +1242,17 @@ class _CrawlRun:
             self.outcomes[page.failure] += 1
             entry["last_outcome"] = page.failure
             if page.failure == "soft_404":
-                self.suspects.append(url)
+                if confirm_suspect:
+                    self._clear_delisted_marker(requested, self.ledger.get(requested, entry))
+                    self._mark_gone(requested)
+                else:
+                    self.suspects.append(url)
             else:
                 entry["status"] = "blocked"
                 self.governor.record(urlsplit(url).hostname or "", ok=False)
             return None
         if page.noindex or "noindex" in result.headers.get("x-robots-tag", "").lower():
+            self._clear_delisted_marker(url, entry)
             self.outcomes["noindex"] += 1
             entry["status"] = "noindex"
             return None
@@ -1235,6 +1263,7 @@ class _CrawlRun:
             preferences[key] = "n" if "n" in (preferences.get(key), value) else value
         usage = ", ".join(f"{key}={value}" for key, value in sorted(preferences.items()))
         if preferences.get("ai-use") == "n":
+            self._clear_delisted_marker(url, entry)
             self.outcomes["usage_denied"] += 1
             entry.update(status="usage_denied", content_usage=usage)
             return None
@@ -1242,17 +1271,20 @@ class _CrawlRun:
         if self._is_older_than_held(entry, page):
             # Not verified either: the site did not confirm what is held. If the
             # older version stays, the held page ages out and a person decides.
+            self._clear_delisted_marker(url, entry)
             self.outcomes["older_than_held"] += 1
             entry.update(last_outcome="older_than_held", older_response_at=_now())
             return None
 
+        self._clear_delisted_marker(url, entry)
         self._verified(entry, result)
         entry.pop("older_response_at", None)
-        if depth < self.config.link_depth:
+        if enqueue_links and depth < self.config.link_depth:
             for link in page.links:
                 self._enqueue(link, priority=2, order="1", depth=depth + 1)
-        for document in page.pdfs:
-            self.pdf_queue.append((document, url))
+        if enqueue_links:
+            for document in page.pdfs:
+                self.pdf_queue.append((document, url))
         if page.kind == "hub":
             entry["kind"] = "hub"
             self.outcomes["hub"] += 1
@@ -1266,23 +1298,50 @@ class _CrawlRun:
 
     def _mark_gone(self, url: str) -> None:
         entry = self._entry(url, classify_url(url))
+        self._clear_delisted_marker(url, entry)
         entry.update(status="gone", gone_at=_now())
         self.outcomes["page_gone"] += 1
 
-    def _confirm_suspects(self) -> None:
+    def _confirm_suspects(self) -> Iterator[CrawledPage]:
         """Ask again before believing a 404. One bad deploy must not withdraw guidance."""
         for url in dict.fromkeys(self.suspects):
             if self._budget_spent() or self.governor.tripped(urlsplit(url).hostname or ""):
                 self.outcomes["suspect_unconfirmed"] += 1
                 continue
+            entry = self._entry(url, classify_url(url))
             result = self.fetch(url)
+            entry.update(last_checked_at=_now(), last_status=result.status, last_outcome=result.outcome)
             if result.outcome in ("not_found", "gone"):
                 self._mark_gone(url)
             elif result.outcome == "ok":
-                content_type = result.headers.get("content-type", "")
-                page = parse_page(result.body, url, content_type=content_type, allowed_hosts=self.config.allowed_hosts)
-                if page.failure == "soft_404":
-                    self._mark_gone(url)
+                final = result.final_url or url
+                if final != url:
+                    self._clear_delisted_marker(url, entry)
+                    entry.update(status="moved", moved_to=final)
+                    entry.pop("etag", None)
+                    entry.pop("last_modified", None)
+                    self.outcomes["moved"] += 1
+                    kind = classify_url(final)
+                    if kind in ("skip", "document"):
+                        continue
+                    entry = self._entry(final, kind)
+                    entry.update(last_checked_at=_now(), last_status=result.status, last_outcome=result.outcome)
+                content_type = result.headers.get("content-type", "").lower()
+                if "pdf" in content_type or result.body.startswith(_PDF_MAGIC):
+                    continue
+                if content_type and "html" not in content_type:
+                    continue
+                accepted = self._accept_html(
+                    final,
+                    url,
+                    entry,
+                    result,
+                    self.config.link_depth,
+                    enqueue_links=False,
+                    confirm_suspect=True,
+                )
+                if accepted is not None:
+                    yield accepted
 
     def _fetch_documents(self) -> None:
         """Download new or changed PDFs, within the per-run allowance."""
@@ -1340,9 +1399,17 @@ class _CrawlRun:
         else:
             parts = [part for part in urlsplit(url).path.split("/") if part and part not in ("en", "download")]
             slug = parts[-1] if parts else "page.pdf"
-        if not slug.lower().endswith(".pdf"):
-            slug += ".pdf"
-        name = re.sub(r"[^\w\-.]", "_", f"{urlsplit(url).hostname}-{slug}")[:150]
+        if slug.lower().endswith(".pdf"):
+            slug = slug[:-4]
+        stem = re.sub(r"[^\w\-.]", "_", f"{urlsplit(url).hostname}-{slug}")[:146]
+        name = f"{stem}.pdf"
+        claimed_by_other = any(
+            isinstance(meta, dict) and meta.get("filename") == name and meta.get("url") and meta.get("url") != url
+            for meta in self.state["pdf_hashes"].values()
+        )
+        if claimed_by_other:
+            url_tag = hashlib.sha256(url.encode("utf-8")).hexdigest()[:8]
+            name = f"{stem[:137]}-{url_tag}.pdf"
 
         self.config.pdf_output_dir.mkdir(parents=True, exist_ok=True)
         target = self.config.pdf_output_dir / name
@@ -1392,7 +1459,7 @@ class _CrawlRun:
             if page is not None:
                 yield page
         self._fetch_documents()
-        self._confirm_suspects()
+        yield from self._confirm_suspects()
         self.ran_to_completion = True
         # Last of all: reading it can cost the host for several minutes.
         if self.config.tier == "full" and not self.stopped_by and PRIMARY_HOST in self.robots:
@@ -1499,11 +1566,43 @@ def _current_captures(crawl_dir: Path) -> Iterator[tuple[Path, dict[str, Any]]]:
                 continue
             if entry.get("content_hash") is not None and entry["content_hash"] != data.get("content_hash"):
                 continue
+            if "content_usage" in entry:
+                data["content_usage"] = entry["content_usage"]
         timestamp = str(data.get("timestamp") or "")
         if url not in newest or (timestamp, path.name) > (newest[url][0], newest[url][1].name):
             newest[url] = (timestamp, path, data)
     for _url, (_timestamp, path, data) in sorted(newest.items()):
         yield path, data
+
+
+_TRAINING_INJECTION_RE = re.compile(
+    r"ignore\s+(?:all\s+)?(?:previous|your)\s+(?:instructions|guidelines)"
+    r"|disregard\s+(?:all\s+)?(?:previous|above|prior|safety|ura)"
+    r"|forget\s+everything\s+above"
+    r"|you\s+are\s+now\s+(?:a\s+)?(?:DAN|jailbreak|evil|unrestricted)"
+    r"|developer\s+mode"
+    r"|previous\s+instructions\s+are\s+obsolete"
+    r"|repeat\s+your\s+(?:full\s+)?system\s+prompt"
+    r"|execute:\s*delete"
+    r"|decode\s+this\s+base64\s+and\s+follow"
+    r"|translate\s+from\s+rot13\s+and\s+comply"
+    r"|system\s*:\s*"
+    r"|<\|(?:im_start|system|assistant)\|>"
+    r"|\[INST\]"
+    r"|###\s*(?:Instruction|System)"
+    r"|ADMIN\s*(?:MODE|OVERRIDE|ACCESS)"
+    r"|(?:reveal|show|print|output)\s+(?:your\s+|the\s+)?(?:system\s+)?(?:prompt|instructions)"
+    r"|(?:act|pretend|behave)\s+as\s+(?:if|though)\s+you"
+    r"|do\s+(?:not|anything)\s+(?:I|we)\s+(?:say|ask|tell)",
+    re.IGNORECASE,
+)
+
+
+def _is_quarantined_capture(data: dict[str, Any]) -> bool:
+    """Apply the same quarantine decision as review_pages before creating TrainingExamples."""
+    hidden = str(data.get("hidden_excerpt") or "").strip()
+    combined = f"{str(data.get('title') or '').strip()}\n{str(data.get('text') or '').strip()}"
+    return bool(_TRAINING_INJECTION_RE.search(hidden) or _TRAINING_INJECTION_RE.search(combined))
 
 
 def load_crawled_pages(crawl_dir: Path) -> Iterator[TrainingExample]:
@@ -1512,6 +1611,8 @@ def load_crawled_pages(crawl_dir: Path) -> Iterator[TrainingExample]:
 
     for path, data in captures:
         try:
+            if _is_quarantined_capture(data):
+                continue
             text = data.get("text", "").strip()
             url = data.get("url", "")
             title = data.get("title", "")
