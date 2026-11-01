@@ -473,7 +473,7 @@ function normalizeMarkdownSource(src: string): string {
     );
     if (/^\s*(?:[-*+•]|\d{1,2}[.)])\s+/.test(line)) {
       line = line.replace(
-        /([.!?])\s+((?:Please\s+feel\s+free|Feel\s+free\s+to|Please\s+let\s+me\s+know|Let\s+me\s+know\s+if|If\s+you\s+need\s+(?:any\s+)?(?:further|more|additional)\s+(?:assistance|help|information|clarification)|If\s+you\s+have\s+any\s+(?:further|other|more)\s+questions|Do\s+not\s+hesitate\s+to\s+reach\s+out|Don['’]t\s+hesitate\s+to\s+reach\s+out|Should\s+you\s+need\s+any\s+further|Would\s+you\s+like\s+more\s+detail)\b.*)$/i,
+        /([.!?])\s+((?:Please\s+feel\s+free|Feel\s+free\s+to|Please\s+let\s+me\s+know|Let\s+me\s+know\s+if|If\s+you\s+need\s+(?:any\s+)?(?:further|more|additional)\s+(?:assistance|help|information|clarification)|If\s+you\s+have\s+any\s+(?:further|other|more)\s+questions|Do\s+not\s+hesitate\s+to\s+reach\s+out|Don['’]t\s+hesitate\s+to\s+reach\s+out|Should\s+you\s+need\s+any\s+further|Would\s+you\s+like\s+more\s+detail|Tafadhali\s+jisikie\s+huru|Jisikie\s+huru\s+kuuliza|Usisite\s+kuwasiliana|Bw['’]oba\s+weetaaga\s+obuyambi|Tukusanyukira\s+okukuyamba|Ku\s+oraabe\s+nooyenda\s+obuhwezi|Ka\s+imito\s+kony\s+mukene)\b.*)$/i,
         "$1\n\n$2",
       );
     }

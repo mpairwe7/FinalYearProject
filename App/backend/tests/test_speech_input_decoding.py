@@ -94,16 +94,24 @@ class DeclaredEncoding(unittest.TestCase):
                 raw_pcm_to_wav(data, encoding, 16000)
 
     def test_container_decode_resamples_24khz_without_scipy(self):
-        """Verify _decode_container resamples 24 kHz edge-tts audio to 16 kHz via SpeechModel._resample."""
+        """Verify _decode_container band-limits 24 kHz edge-tts audio to 16 kHz and bounds duration."""
         import sys
         import types
 
-        fake_24k = np.sin(np.linspace(0, 2 * np.pi * 10, 2400, dtype=np.float32))
-        fake_sf = types.SimpleNamespace(read=lambda _bio, dtype="float32": (fake_24k, 24000))
+        t = np.arange(2400, dtype=np.float32) / 24000.0
+        # 400 Hz speech-band tone + 10 kHz tone above 8 kHz Nyquist
+        fake_24k = (0.5 * np.sin(2 * np.pi * 400 * t) + 0.5 * np.sin(2 * np.pi * 10000 * t)).astype(np.float32)
+        fake_info = lambda _bio: types.SimpleNamespace(samplerate=24000, frames=2400)
+        fake_sf = types.SimpleNamespace(
+            info=fake_info,
+            read=lambda _bio, dtype="float32": (fake_24k, 24000),
+        )
         with patch.dict(sys.modules, {"soundfile": fake_sf, "scipy": None, "scipy.signal": None}):
             out = SpeechModel.__new__(SpeechModel)._decode_container(b"ID3\x04\x00\x00\x00\x00\x00\x00", target_sr=16000)
         self.assertEqual(len(out), 1600)
         self.assertTrue(np.isfinite(out).all())
+        # The 10 kHz component above the 8 kHz Nyquist is attenuated, leaving the 0.5-peak 400 Hz tone
+        self.assertLess(float(np.abs(out).max()), 0.6)
 
 
 if __name__ == "__main__":

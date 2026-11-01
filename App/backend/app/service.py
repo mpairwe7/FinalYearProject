@@ -3231,18 +3231,25 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 trail_len = len(raw_chunk) - len(raw_chunk.rstrip())
                 lead_raw = raw_chunk[:lead_len]
                 trail_raw = raw_chunk[len(raw_chunk) - trail_len :] if trail_len else ""
+                indent_m = re.match(r"^(?:[ \t]*\n)*([ \t]{2,})(?=[-*+•]\s|\d{1,2}[.)]\s)", raw_chunk)
+                if indent_m and not sanitized.startswith((" ", "\t")):
+                    sanitized = f"{indent_m.group(1)}{sanitized}"
                 lead_ws = (
                     "\n\n"
                     if "\n\n" in lead_raw
-                    else ("\n" if "\n" in lead_raw else (" " if lead_raw else ""))
+                    else ("\n" if "\n" in lead_raw else (" " if lead_raw and not indent_m else ""))
                 )
                 trail_ws = (
                     "\n\n"
                     if "\n\n" in trail_raw
                     else ("\n" if "\n" in trail_raw else (" " if trail_raw else ""))
                 )
-                if lead_ws and full_reply and not full_reply[-1].isspace():
-                    sanitized = f"{lead_ws}{sanitized}"
+                if lead_ws and full_reply:
+                    if "\n" in lead_ws and not full_reply.endswith("\n"):
+                        full_reply = full_reply.rstrip(" \t")
+                        sanitized = f"{lead_ws}{sanitized}"
+                    elif not full_reply[-1].isspace():
+                        sanitized = f"{lead_ws}{sanitized}"
                 if trail_ws and not sanitized[-1].isspace():
                     sanitized = f"{sanitized}{trail_ws}"
                 saw_streamed_token = True

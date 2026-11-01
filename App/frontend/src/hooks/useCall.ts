@@ -174,6 +174,7 @@ export function useCall() {
       cleanupAudio();
       store.setStatus('dialing');
       store.setError(null);
+      store.setAudioBlocked(false);
       if (getAuthToken()) {
         void accountApi.grantConsents(['voice_recording']).catch(() => {});
       }

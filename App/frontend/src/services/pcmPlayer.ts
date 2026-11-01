@@ -173,13 +173,29 @@ export class PCMPlayer {
 
     try {
       if (!this.ctx || this.ctx.state === 'closed') {
-        this.ctx = new AudioContext({ sampleRate: this.sampleRate });
+        try {
+          this.ctx = new AudioContext({ sampleRate: this.sampleRate });
+        } catch {
+          this.ctx = new AudioContext();
+        }
+        this.ctx.onstatechange = () => {
+          if (this.isClosed || !this.ctx) return;
+          if (this.ctx.state === 'running') {
+            this.blockedHandler?.(false);
+          } else if (this.ctx.state === 'suspended') {
+            this.blockedHandler?.(true);
+          }
+        };
       }
       if (this.ctx.state === 'suspended') {
-        void this.ctx.resume().catch(() => {});
+        void this.ctx.resume().catch(() => {
+          this.blockedHandler?.(true);
+        });
       }
 
-      if (this.ctx.audioWorklet && typeof this.ctx.audioWorklet.addModule === 'function') {
+      const sampleRateMatched =
+        !this.ctx.sampleRate || Math.abs(this.ctx.sampleRate - this.sampleRate) < 100;
+      if (sampleRateMatched && this.ctx.audioWorklet && typeof this.ctx.audioWorklet.addModule === 'function') {
         let workletLoaded = false;
         try {
           await this.ctx.audioWorklet.addModule('/pcm-player-worklet.js');
@@ -313,12 +329,14 @@ export class PCMPlayer {
     this.isClosed = true;
     this.flush();
     this.levelHandler = null;
+    this.blockedHandler = null;
     if (this.workletNode) {
       this.workletNode.port.onmessage = null;
       this.workletNode.disconnect();
       this.workletNode = null;
     }
     if (this.ctx && this.ctx.state !== 'closed') {
+      this.ctx.onstatechange = null;
       this.ctx.close().catch(() => {});
       this.ctx = null;
     }
