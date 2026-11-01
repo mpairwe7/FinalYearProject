@@ -50,6 +50,20 @@ CRAWL_ALLOWED_HOSTS: frozenset[str] = frozenset(
 #: site is down, RFC 9309 stops us crawling Parliament, not URA.
 PRIMARY_HOST = "ura.go.ug"
 
+#: Hosts behind URA's perimeter, where robots.txt is read last rather than first.
+#:
+#: Requesting /robots.txt there gets the caller's address dropped for at least
+#: six minutes (measured from GitHub runners, 2026-11-01): every run that opened
+#: with it lost the host, while 22 requests for pages and sitemaps from runs that
+#: did not all succeeded, for this identity and a browser's alike. The file does
+#: not exist either: the server answers 200 with its HTML "404 - Page Not Found"
+#: page, which RFC 9309 treats as no rules. So reading it first would end every
+#: crawl to learn nothing. It is read at the end of a full pass instead, and any
+#: real rules found then bind every later run. That keeps a new robots.txt
+#: effective, at the cost of the RFC's 24-hour SHOULD on a cached copy: a
+#: deviation recorded in ADR-0023, which URA ICT can remove by fixing the rule.
+ROBOTS_READ_LAST_HOSTS = frozenset({"ura.go.ug", "www.ura.go.ug", "uramedia.ura.go.ug"})
+
 #: Query keys that name different content. ``wpdmdl`` selects a download, ``cp``
 #: a Download Manager page and ``agent_type`` a licensed-agent list. Everything
 #: else is tracking or session noise, and would make one page look like many.
@@ -273,8 +287,9 @@ class _Group:
 class RobotsPolicy:
     """The rules that apply to this crawler on one host.
 
-    ``state`` is ``"parsed"``, ``"unavailable"`` (no file, so no rules) or
-    ``"unreachable"`` (the server failed, so nothing is allowed).
+    ``state`` is ``"parsed"``, ``"unavailable"`` (no file, so no rules),
+    ``"unreachable"`` (the server failed, so nothing is allowed) or ``"read_last"``
+    (rules held from an earlier pass, for :data:`ROBOTS_READ_LAST_HOSTS`).
     """
 
     state: str = "parsed"

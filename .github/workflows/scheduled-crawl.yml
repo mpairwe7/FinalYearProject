@@ -96,9 +96,9 @@ jobs:
       pull-requests: read
     needs: plan
     if: needs.plan.outputs.proceed == 'true'
-    # At one request a second the whole site takes under an hour; the crawler
-    # stops itself before this, and a stopped crawl resumes where it left off.
-    timeout-minutes: 150
+    # URA takes about 2.5 seconds a page, so a full first pass is near two hours.
+    # The crawler stops itself before this, and a later run resumes where it left off.
+    timeout-minutes: 170
     outputs:
       verdict: ${{ steps.judge.outputs.verdict }}
       publish: ${{ steps.judge.outputs.publish }}
@@ -142,7 +142,7 @@ jobs:
             [[ "$MAX_FETCHES" =~ ^[0-9]{1,5}$ ]] || { echo "::error::max_fetches must be a number"; exit 1; }
             args+=(--max-fetches "$MAX_FETCHES")
           fi
-          python -m ml.scripts.data_aug.crawler --tier "$TIER" --max-seconds 7200 "${args[@]}"
+          python -m ml.scripts.data_aug.crawler --tier "$TIER" --max-seconds 9000 "${args[@]}"
 
       - name: Judge the crawl
         id: judge

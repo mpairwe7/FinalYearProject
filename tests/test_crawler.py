@@ -191,14 +191,18 @@ class TestDiscovery:
     def test_a_sitemap_advertised_in_robots_is_read(self, config: CrawlConfig):
         """RFC 9309 leaves sitemaps to the robots file; a site can move its index."""
         other = "https://ura.go.ug/news-sitemap.xml"
+        assert config.state_file is not None
+        config.state_file.parent.mkdir(parents=True)
+        config.state_file.write_text(json.dumps({"robots_rules": f"Sitemap: {other}\n"}), encoding="utf-8")
         site = Site({other: Page(sitemap(VAT), headers={"content-type": "application/xml"}), VAT: article("VAT")})
-        site.pages[ROBOTS] = Page(f"User-agent: *\nDisallow: /wp-admin/\nSitemap: {other}\n", headers={"content-type": "text/plain"})
         run(site, config)
         assert VAT in captures(config)
 
     def test_an_advertised_sitemap_on_another_host_is_ignored(self, config: CrawlConfig):
+        assert config.state_file is not None
+        config.state_file.parent.mkdir(parents=True)
+        config.state_file.write_text(json.dumps({"robots_rules": "Sitemap: https://evil.example/s.xml\n"}), encoding="utf-8")
         site = Site()
-        site.pages[ROBOTS] = Page("Sitemap: https://evil.example/s.xml\n", headers={"content-type": "text/plain"})
         run(site, config)
         assert "https://evil.example/s.xml" not in site.urls
 
@@ -605,50 +609,110 @@ class TestWithdrawal:
 
 
 class TestRobotsInTheRun:
-    def test_a_disallowed_page_is_not_fetched_and_leaves_the_corpus(self, config: CrawlConfig):
+    PARLIAMENT = "https://www.parliament.go.ug/page/tax-bills-2026"
+    PARLIAMENT_ROBOTS = "https://www.parliament.go.ug/robots.txt"
+
+    def _held(self, config: CrawlConfig, rules: str) -> None:
+        assert config.state_file is not None
+        config.state_file.parent.mkdir(parents=True, exist_ok=True)
+        config.state_file.write_text(json.dumps({"robots_rules": rules}), encoding="utf-8")
+
+    def test_robots_on_ura_is_read_last_because_reading_it_first_loses_the_host(self, config: CrawlConfig):
+        """Every live run that opened with /robots.txt had its address dropped.
+
+        Reading it first would end every crawl before a single page, to learn
+        that the file does not exist.
+        """
+        site = Site({VAT: article("VAT"), PAYE: article("PAYE")}, urls=(VAT, PAYE))
+        run(site, config)
+        assert site.urls[-1] == ROBOTS
+        assert site.count(ROBOTS) == 1
+
+    def test_the_change_check_never_touches_it(self, config: CrawlConfig):
+        changes = CrawlConfig(tier="changes", crawl_output_dir=config.crawl_output_dir, pdf_output_dir=config.pdf_output_dir, min_delay_s=0.0)
+        site = Site({VAT: article("VAT")}, urls=(VAT,))
+        run(site, changes)
+        assert ROBOTS not in site.urls
+
+    def test_rules_found_at_the_end_of_a_pass_bind_the_next_run(self, config: CrawlConfig):
+        """Reading it last must not mean ignoring it: a real file takes effect."""
         site = Site({VAT: article("VAT")}, urls=(VAT,))
         site.pages[ROBOTS] = Page("User-agent: *\nDisallow: /en/value\n", headers={"content-type": "text/plain"})
+        run(site, config)
+        assert state(config)["robots_rules"]
+        due(config, VAT)
+        site.requests.clear()
         run(site, config)
         assert VAT not in site.urls
         assert state(config)["visited"][VAT]["status"] == "disallowed"
 
-    def test_robots_is_read_once_per_host(self, config: CrawlConfig):
-        site = Site({VAT: article("VAT"), PAYE: article("PAYE")}, urls=(VAT, PAYE))
-        run(site, config)
-        assert site.count(ROBOTS) == 1
-
-    def test_an_unreachable_robots_stops_the_host_entirely(self, config: CrawlConfig):
-        """RFC 9309 2.3.1.4: "the crawler MUST assume complete disallow"."""
-        site = Site({ROBOTS: Page("down", status=503), VAT: article("VAT")}, urls=(VAT,))
-        run(site, config)
+    def test_held_rules_apply_to_the_change_check_too(self, config: CrawlConfig, tmp_path: Path):
+        changes = CrawlConfig(tier="changes", crawl_output_dir=config.crawl_output_dir, pdf_output_dir=config.pdf_output_dir, min_delay_s=0.0)
+        self._held(config, "User-agent: *\nDisallow: /en/value\n")
+        site = Site({VAT: article("VAT")}, urls=(VAT,))
+        run(site, changes)
         assert VAT not in site.urls
-        last = state(config)["runs"][-1]
-        assert last["robots"]["ura.go.ug"] == "unreachable"
-        assert last["complete"] is False
 
-    def test_a_missing_robots_allows_the_crawl(self, config: CrawlConfig):
-        site = Site({ROBOTS: Page("nope", status=404), VAT: article("VAT")}, urls=(VAT,))
+    def test_uras_html_error_page_clears_held_rules(self, config: CrawlConfig):
+        """The file went away, so its rules did too."""
+        self._held(config, "User-agent: *\nDisallow: /en/value\n")
+        html = "<!DOCTYPE html><html><head><title>404 - Page Not Found</title></head></html>"
+        site = Site({ROBOTS: Page(html), VAT: article("VAT")}, urls=(VAT,))
         run(site, config)
+        assert state(config)["robots_rules"] == ""
+
+    def test_losing_the_connection_on_that_last_read_costs_nothing(self, config: CrawlConfig):
+        """The perimeter drops the request. The run has already finished its work."""
+
+        def dropped(request: httpx.Request) -> Page:
+            raise httpx.RemoteProtocolError("Server disconnected", request=request)
+
+        self._held(config, "User-agent: *\nDisallow: /wp-admin/\n")
+        site = Site({ROBOTS: dropped, VAT: article("VAT")}, urls=(VAT,))
+        run(site, config)
+        saved = state(config)
+        assert saved["runs"][-1]["complete"] is True
+        assert saved["robots_last_state"] == "unreachable"
+        assert saved["robots_rules"] == "User-agent: *\nDisallow: /wp-admin/\n", "a failed read changes nothing"
         assert VAT in captures(config)
 
-    def test_a_secondary_host_being_down_does_not_fail_the_run(self, config: CrawlConfig):
-        """Parliament's certificate failed from one network tested. URA's pages must still count."""
-        parliament = "https://www.parliament.go.ug/robots.txt"
-
-        def boom(request: httpx.Request) -> Page:
-            raise httpx.ConnectError("certificate verify failed", request=request)
-
-        site = Site({parliament: boom, VAT: article("VAT")}, urls=(VAT,))
+    def test_a_run_cut_short_does_not_read_it(self, config: CrawlConfig):
+        """An unfinished pass still has work to do on that host."""
+        config.max_fetches = 3
+        urls = tuple(f"https://ura.go.ug/en/p{n}/" for n in range(9))
+        site = Site({url: article(url) for url in urls}, urls=urls)
         run(site, config)
-        last = state(config)["runs"][-1]
-        assert last["robots"]["www.parliament.go.ug"] == "unreachable"
-        assert last["complete"] is True
-        assert state(config)["last_full_run_at"]
+        assert ROBOTS not in site.urls
+
+    def test_another_host_is_read_first_as_the_rfc_expects(self, config: CrawlConfig):
+        site = Site({self.PARLIAMENT_ROBOTS: Page("nope", status=404), self.PARLIAMENT: article("Bills")})
+        run(site, config)
+        assert site.urls.index(self.PARLIAMENT_ROBOTS) < site.urls.index(self.PARLIAMENT)
+        assert site.count(self.PARLIAMENT_ROBOTS) == 1
+
+    def test_a_disallowed_page_on_another_host_is_not_fetched(self, config: CrawlConfig):
+        rules = Page("User-agent: *\nDisallow: /page/\n", headers={"content-type": "text/plain"})
+        site = Site({self.PARLIAMENT_ROBOTS: rules, self.PARLIAMENT: article("Bills")})
+        run(site, config)
+        assert self.PARLIAMENT not in site.urls
+        assert state(config)["visited"][self.PARLIAMENT]["status"] == "disallowed"
+
+    def test_an_unreachable_robots_stops_that_host_entirely(self, config: CrawlConfig):
+        """RFC 9309 2.3.1.4: "the crawler MUST assume complete disallow"."""
+        site = Site({self.PARLIAMENT_ROBOTS: Page("down", status=503), self.PARLIAMENT: article("Bills")})
+        run(site, config)
+        assert self.PARLIAMENT not in site.urls
+        assert state(config)["runs"][-1]["robots"]["www.parliament.go.ug"] == "unreachable"
+
+    def test_a_missing_robots_allows_the_crawl(self, config: CrawlConfig):
+        site = Site({self.PARLIAMENT_ROBOTS: Page("nope", status=404), self.PARLIAMENT: article("Bills")})
+        run(site, config)
+        assert self.PARLIAMENT in captures(config)
 
     def test_a_redirect_target_is_held_to_its_own_robots(self, config: CrawlConfig):
-        target = "https://ura.go.ug/en/private/x/"
-        site = Site({VAT: redirect(target), target: article("Private")}, urls=(VAT,))
-        site.pages[ROBOTS] = Page("User-agent: *\nDisallow: /en/private/\n", headers={"content-type": "text/plain"})
+        target = "https://www.parliament.go.ug/private/x/"
+        rules = Page("User-agent: *\nDisallow: /private/\n", headers={"content-type": "text/plain"})
+        site = Site({self.PARLIAMENT_ROBOTS: rules, VAT: redirect(target), target: article("Private")}, urls=(VAT,))
         run(site, config)
         assert target not in site.urls
 
@@ -664,6 +728,37 @@ class TestRobotsInTheRun:
         run(site, config)
         assert captures(config) == {}
         assert state(config)["visited"][VAT]["status"] == "noindex"
+
+    def test_a_noindex_header_is_respected(self, config: CrawlConfig):
+        """In-band signals matter more where robots.txt can only be read last."""
+        site = Site({VAT: Page(article("VAT"), headers={"x-robots-tag": "noindex"})}, urls=(VAT,))
+        run(site, config)
+        assert captures(config) == {}
+        assert state(config)["visited"][VAT]["status"] == "noindex"
+
+    def test_the_failure_type_is_recorded(self, config: CrawlConfig):
+        """"network_error" alone told the operator nothing about a dropped connection."""
+
+        def dropped(request: httpx.Request) -> Page:
+            raise httpx.RemoteProtocolError("Server disconnected", request=request)
+
+        site = Site({VAT: dropped}, urls=(VAT,))
+        run(site, config)
+        assert state(config)["runs"][-1]["outcomes"]["network_error_RemoteProtocolError"] == 3
+
+    def test_a_secondary_host_being_down_does_not_fail_the_run(self, config: CrawlConfig):
+        """Parliament's certificate failed from one network tested. URA's pages must still count."""
+        parliament = "https://www.parliament.go.ug/robots.txt"
+
+        def boom(request: httpx.Request) -> Page:
+            raise httpx.ConnectError("certificate verify failed", request=request)
+
+        site = Site({parliament: boom, VAT: article("VAT")}, urls=(VAT,))
+        run(site, config)
+        last = state(config)["runs"][-1]
+        assert last["robots"]["www.parliament.go.ug"] == "unreachable"
+        assert last["complete"] is True
+        assert state(config)["last_full_run_at"]
 
 
 class TestGoodBehaviour:

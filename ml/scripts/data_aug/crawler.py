@@ -69,6 +69,7 @@ from ml.scripts.data_aug.crawl_policy import (
     PRIMARY_HOST,
     ROBOTS_MAX_BYTES,
     ROBOTS_MAX_REDIRECTS,
+    ROBOTS_READ_LAST_HOSTS,
     USER_AGENT,
     HostGovernor,
     RobotsPolicy,
@@ -759,6 +760,7 @@ class _CrawlRun:
         self.pages_dir = config.crawl_output_dir / "pages"
         self.outcomes: Counter[str] = Counter()
         self.robots: dict[str, RobotsPolicy] = {}
+        self.robots_text = ""
         self.sitemap: dict[str, str] = {}
         self.sitemap_failed = False
         self.frontier: list[tuple[int, str, int, str, int]] = []
@@ -788,9 +790,34 @@ class _CrawlRun:
     def _robots_for(self, host: str) -> RobotsPolicy:
         policy = self.robots.get(host)
         if policy is None:
-            policy = self.robots[host] = self._read_robots(host)
+            if host in ROBOTS_READ_LAST_HOSTS:
+                policy = self._held_robots()
+            else:
+                policy = self._read_robots(host)
+            self.robots[host] = policy
             self.outcomes[f"robots_{policy.state}"] += 1
         return policy
+
+    def _held_robots(self) -> RobotsPolicy:
+        """The rules the last full pass found, without touching the file now."""
+        held = parse_robots(str(self.state.get("robots_rules") or ""))
+        held.state = "read_last"
+        return held
+
+    def _read_robots_last(self) -> None:
+        """Read robots.txt once the work is done, so any ban lands on a finished run.
+
+        The rules bind from the next run, because the requests in this one are
+        over. An HTML error page parses to no rules, and clears any held ones,
+        which is right: the file has gone. A failed read changes nothing.
+        """
+        self.outcomes["robots_read_last"] += 1
+        policy = self._read_robots(PRIMARY_HOST)
+        self.state["robots_checked_at"] = _now()
+        self.state["robots_last_state"] = policy.state
+        if policy.state != "unreachable":
+            has_rules = bool(policy.rules or policy.usage or policy.sitemaps or policy.crawl_delay)
+            self.state["robots_rules"] = self.robots_text if has_rules else ""
 
     def _read_robots(self, host: str) -> RobotsPolicy:
         """Sections 2.3.1.2 to 2.3.1.4, with redirects held to the allowed hosts."""
@@ -812,8 +839,10 @@ class _CrawlRun:
                     if implied is not None:
                         return implied
                     body = self._read_capped(response, ROBOTS_MAX_BYTES, truncate=True)
-                    return parse_robots(body.decode("utf-8", errors="replace"))
-            except httpx.HTTPError:
+                    self.robots_text = body.decode("utf-8", errors="replace")
+                    return parse_robots(self.robots_text)
+            except httpx.HTTPError as exc:
+                self.outcomes[f"robots_error_{type(exc).__name__}"] += 1
                 return RobotsPolicy(state="unreachable")
         return RobotsPolicy(state="unavailable")  # Section 2.3.1.2: MAY assume unavailable.
 
@@ -892,6 +921,8 @@ class _CrawlRun:
         result = FetchResult("network_error", url)
         for attempt in range(_MAX_ATTEMPTS):
             result = self._fetch_once(url, etag=etag, last_modified=last_modified, max_bytes=limit)
+            if result.outcome == "network_error" and result.detail:
+                self.outcomes[f"network_error_{result.detail}"] += 1
             if result.outcome not in _RETRYABLE:
                 self.governor.record(host, ok=result.outcome not in _HOST_FAILURE_OUTCOMES)
                 return result
@@ -1193,7 +1224,7 @@ class _CrawlRun:
                 entry["status"] = "blocked"
                 self.governor.record(urlsplit(url).hostname or "", ok=False)
             return None
-        if page.noindex:
+        if page.noindex or "noindex" in result.headers.get("x-robots-tag", "").lower():
             self.outcomes["noindex"] += 1
             entry["status"] = "noindex"
             return None
@@ -1363,6 +1394,9 @@ class _CrawlRun:
         self._fetch_documents()
         self._confirm_suspects()
         self.ran_to_completion = True
+        # Last of all: reading it can cost the host for several minutes.
+        if self.config.tier == "full" and not self.stopped_by and PRIMARY_HOST in self.robots:
+            self._read_robots_last()
 
     def finish(self) -> dict[str, Any]:
         """Record the run. It is complete only if nothing stopped it short."""
