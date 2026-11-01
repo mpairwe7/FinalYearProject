@@ -178,11 +178,23 @@ export function useCall() {
         void accountApi.grantConsents(['voice_recording']).catch(() => {});
       }
 
-      // Play dialing ring tone
+      // Play dialing ring tone and pre-initialize PCM playback AudioContext
+      // synchronously inside the user's click gesture so cross-origin iframes
+      // (HF Space) and mobile browsers do not suspend assistant speech playback.
       try {
         const toneCtx = new AudioContext();
         dialToneCtxRef.current = toneCtx;
         dialToneCleanupRef.current = playDialTone(toneCtx);
+      } catch {}
+
+      try {
+        const player = new PCMPlayer(16000);
+        playerRef.current = player;
+        player.onLevel((level) => setOutputLevel(level));
+        if (typeof player.onBlockedChange === 'function') {
+          player.onBlockedChange((blocked) => store.setAudioBlocked(blocked));
+        }
+        void player.init().catch(() => {});
       } catch {}
 
       const startLegacyAudio = async () => {
@@ -191,8 +203,11 @@ export function useCall() {
           const player = new PCMPlayer(16000);
           playerRef.current = player;
           player.onLevel((level) => setOutputLevel(level));
+          if (typeof player.onBlockedChange === 'function') {
+            player.onBlockedChange((blocked) => store.setAudioBlocked(blocked));
+          }
           void player.init().catch(() => {});
-        } else {
+        } else if (typeof playerRef.current.resume === 'function') {
           void playerRef.current.resume();
         }
         try {
@@ -271,6 +286,10 @@ export function useCall() {
               {
                 const media = msg.media as LiveKitCallCredentials | undefined;
                 if (media?.transport === 'livekit') {
+                  if (playerRef.current) {
+                    playerRef.current.close();
+                    playerRef.current = null;
+                  }
                   const session: LiveKitCallSession = new LiveKitCallSession({
                     onMessage: (message) => socket.dispatchMessage(message),
                     onReconnecting: () => {

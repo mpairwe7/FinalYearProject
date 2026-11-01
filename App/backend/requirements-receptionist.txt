@@ -3,4 +3,5 @@
 pipecat-ai[silero,websocket,livekit]==1.15.0
 jellyfish
 onnxruntime>=1.20.0
+soundfile>=0.12.0
 

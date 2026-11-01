@@ -98,3 +98,6 @@ dnspython>=2.9.0
 # falls through to Sunbird's non-English voice for English (poor quality). The
 # English voice is configurable via SPEECH_EN_EDGE_VOICE (default en-US-AriaNeural).
 edge-tts>=7.3.1,<8
+# Native libsndfile container decoder (MP3/OGG/WAV/FLAC) so Call Receptionist
+# UraSpeechTTS can decode 24 kHz edge-tts MP3 into 16 kHz PCM16 frames without ffmpeg/scipy.
+soundfile>=0.12.0
