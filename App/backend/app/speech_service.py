@@ -2477,7 +2477,24 @@ class SpeechModel:
             import io
 
             import soundfile as sf
-            data, sr = sf.read(io.BytesIO(audio_bytes), dtype="float32")
+            bio = io.BytesIO(audio_bytes)
+            read_frames: int = -1
+            if hasattr(sf, "info"):
+                info = sf.info(bio)
+                max_frames = int(getattr(info, "samplerate", 0) or 0) * 300
+                if max_frames > 0 and int(getattr(info, "frames", 0) or 0) > max_frames:
+                    logger.warning(
+                        "Container audio frames (%s) exceed 300s cap (%s); bounding decode",
+                        getattr(info, "frames", 0),
+                        max_frames,
+                    )
+                    read_frames = max_frames
+                bio.seek(0)
+            data, sr = (
+                sf.read(bio, frames=read_frames, dtype="float32")
+                if read_frames > 0
+                else sf.read(bio, dtype="float32")
+            )
             if data.ndim > 1:
                 data = data.mean(axis=1)
             if sr != target_sr:
@@ -2564,15 +2581,34 @@ class SpeechModel:
 
     @staticmethod
     def _resample(audio, orig_sr: int, target_sr: int):
-        """Simple linear resampling (no dependency on librosa)."""
+        """Band-limited anti-aliased resampling when downsampling; linear interpolation otherwise."""
         import numpy as np
 
-        if orig_sr == target_sr:
-            return audio
+        arr = np.asarray(audio, dtype=np.float32)
+        if orig_sr == target_sr or len(arr) == 0:
+            return arr
         ratio = target_sr / orig_sr
-        new_len = int(len(audio) * ratio)
-        indices = np.linspace(0, len(audio) - 1, new_len)
-        return np.interp(indices, np.arange(len(audio)), audio).astype(np.float32)
+        new_len = int(len(arr) * ratio)
+        if new_len <= 0:
+            return np.zeros(0, dtype=np.float32)
+        if target_sr < orig_sr and len(arr) > 31:
+            # O(N) 31-tap Hamming-windowed sinc low-pass filter at target Nyquist (ratio / 2)
+            # avoids O(N^2) prime-length FFT stalls and Gibbs boundary ringing.
+            num_taps = 31
+            cutoff = 0.475 * ratio
+            n = np.arange(num_taps, dtype=np.float32) - (num_taps - 1) / 2.0
+            window = 0.54 - 0.46 * np.cos(
+                2.0 * np.pi * np.arange(num_taps, dtype=np.float32) / (num_taps - 1)
+            )
+            h = (np.sinc(2.0 * cutoff * n) * window).astype(np.float32)
+            h /= h.sum()
+            arr = np.convolve(arr, h, mode="same").astype(np.float32)
+        elif target_sr < orig_sr and len(arr) >= 4:
+            spec = np.fft.rfft(arr)
+            cutoff_idx = new_len // 2 + 1
+            return (np.fft.irfft(spec[:cutoff_idx], n=new_len) * (new_len / len(arr))).astype(np.float32)
+        indices = np.linspace(0, len(arr) - 1, new_len)
+        return np.interp(indices, np.arange(len(arr)), arr).astype(np.float32)
 
     def _do_transcribe(self, audio_bytes: bytes, sample_rate: int) -> TranscribeResult:
         samples = self._decode_audio_bytes(audio_bytes, target_sr=sample_rate)
