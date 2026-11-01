@@ -1937,6 +1937,7 @@ def translate_query_for_retrieval(query: str, locale: str) -> str | None:
             continue
         result = english.strip()
         mt.cache.put(locale, "en", text, result)
+        mt.cache.put(locale, "en", result, result)
         return result
     return None
 

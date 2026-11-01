@@ -319,7 +319,7 @@ def gemini_generate(
     *,
     system: str | None = None,
     model: str | None = None,
-    max_tokens: int = 512,
+    max_tokens: int = 2048,
     temperature: float = 0.2,
     locale: str | None = None,
     _allow_model_fallback: bool = True,

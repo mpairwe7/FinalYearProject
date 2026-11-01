@@ -676,3 +676,51 @@ def test_efris_handbooks_en_lg_nyn_sw_chunking_and_vernacular_normalization(tmp_
     boosted_en = apply_preference_boost([dict(h) for h in sample_hits], {"tax_type": "efris"}, locale="en")
     assert boosted_en[0]["id"] == "en-1"
 
+
+def test_qa_audit_gemini_translate_budget_fixed_point_mt_cache_and_midparagraph_qa_split() -> None:
+    """Verify QA audit fixes: 2048-token Gemini translate budget, fixed-point MT cache, and mid-paragraph Q&A splitting."""
+    import inspect
+
+    from app import mt
+    from app.providers import gateway as gw
+    from app.query import translate_query_for_retrieval
+
+    from ml.scripts.data_aug.chunkers import chunk_markdown
+
+    # 1. gateway.gemini_generate default max_tokens >= 2048 so thinking tokens do not truncate Swahili/EN
+    sig = inspect.signature(gw.gemini_generate)
+    assert sig.parameters["max_tokens"].default >= 2048
+
+    # 2. translate_query_for_retrieval memoizes both (locale -> en) and fixed-point (en -> en)
+    mt.cache.clear()
+    with (
+        mock.patch(
+            "app.sunbird.translate_to_english",
+            return_value="Can I use EFRIS without internet in Uganda?",
+        ) as tr_mock,
+        mock.patch("app.query.RETRIEVAL_MT_BACKEND", "sunbird"),
+    ):
+        en_out = translate_query_for_retrieval(
+            "Nsobola okukozesa enkola ya EFRIS nga sirina yintaneeti mu Uganda?", "lg"
+        )
+        assert en_out == "Can I use EFRIS without internet in Uganda?"
+        assert tr_mock.call_count == 1
+        # Calling again with the already-translated English string must hit mt.cache (0 network calls)
+        en_again = translate_query_for_retrieval(en_out, "lg")
+        assert en_again == en_out
+        assert tr_mock.call_count == 1
+
+    # 3. Mid-paragraph numbered Q&A lines from pymupdf4llm are split and retain the question in chunk.text
+    mashed_md = (
+        "# LUGANDA\n\n"
+        "Weetegereze: URA weeri okuyamba abo bonna abalina okukozesa enkola ya EFRIS. "
+        "5. Nsobola okukozesa enkola ya EFRIS nga sirina yintaneeti? "
+        "Yee, osobola okugaba e-receipts ne e-invoices nga tekuli yintaneeti okumala ennaku ttaano. "
+        "Kyokka, ennaku ttaano bwe zisukka, oteekeddwa okweyunga ku yintaneeti olwo osse bye wakoze ku mutimbagano."
+    )
+    chunks = list(chunk_markdown(mashed_md, doc_id="URA-EFRIS-Luganda", source="URA-EFRIS-Luganda.pdf", min_chars=80))
+    offline_chunks = [c for c in chunks if "5. Nsobola okukozesa" in c.text]
+    assert len(offline_chunks) == 1
+    assert offline_chunks[0].text.startswith("5. Nsobola okukozesa enkola ya EFRIS nga sirina yintaneeti?")
+    assert "5. Nsobola okukozesa enkola ya EFRIS nga sirina yintaneeti?" in offline_chunks[0].heading_trail
+

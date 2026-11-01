@@ -82,10 +82,11 @@ _QA_HEADING_RE = re.compile(
     r"^\s*\*{0,2}((?:\d{1,2}\s*[.)]\s*)?[A-Z][^\n?*]{4,100}\?)\*{0,2}\s*$"
 )
 # When pymupdf4llm joins a numbered Q&A heading and its answer onto one line
-# (e.g. "4. Nkozesa ntya EFRIS? Okukozesa EFRIS..." or "EFRIS kye ki? EFRIS kiggwaayo..."),
+# or mid-paragraph (e.g. "...enkola ya EFRIS. 5. Nsobola okukozesa enkola ya EFRIS? Yee..."),
 # split the question onto its own line before heading promotion.
 _INLINE_QA_SPLIT_RE = re.compile(
-    r"(?m)^(\s*\*{0,2}(?:\d{1,2}\s*[.)]\s*[^\n?*]{4,95}\?|(?:EFRIS|Ani|Nani|Namna|Biashara)\s+[^\n?*]{3,85}\?)\*{0,2})[ \t]+(?=[A-Z\"'*])"
+    r"(?:(?<=^)|(?<=[.!?:;\n])\s*)(\*{0,2}(?:\d{1,2}\s*[.)]\s*[A-Z][^\n?*]{4,95}\?|(?:EFRIS|Ani|Nani|Namna|Biashara)\s+[^\n?*]{3,85}\?)\*{0,2})(?=\s+[A-Z\"'*]|\s*$)",
+    re.MULTILINE,
 )
 # A paragraph is a maximal run of non-blank lines. Tables are treated as a
 # single paragraph so they survive as one chunk.
@@ -95,7 +96,7 @@ _TABLE_LINE_RE = re.compile(r"^\s*\|.+\|\s*$")
 
 def _inject_statutory_headings(text: str) -> str:
     """Promote plain-text statutory Part/Schedule/Section/Clause and Q&A lines to markdown headings."""
-    text = _INLINE_QA_SPLIT_RE.sub(r"\1\n\n", text)
+    text = _INLINE_QA_SPLIT_RE.sub(r"\n\n\1\n\n", text)
     out_lines: list[str] = []
     for line in text.splitlines():
         stripped = line.strip()
@@ -133,6 +134,8 @@ def _split_headings(markdown: str) -> list[tuple[list[str], str]]:
         if current_body:
             body = "\n".join(current_body).strip()
             if body:
+                if trail and trail[-1][1].endswith("?") and not body.startswith(trail[-1][1]):
+                    body = f"{trail[-1][1]}\n{body}"
                 sections.append(([t for _, t in trail], body))
             current_body.clear()
 
@@ -384,7 +387,8 @@ def chunk_markdown(
     for trail, body in sections:
         # Light cleaning inside the section (preserve newlines for tables)
         body = clean_text(body, preserve_newlines=True)
-        if len(body) < min_chars:
+        eff_min = min(min_chars, 80) if (trail and str(trail[-1]).endswith("?")) else min_chars
+        if len(body) < eff_min:
             continue
 
         paragraphs = _split_paragraphs_keep_tables(body)
@@ -394,7 +398,7 @@ def chunk_markdown(
             hard_max_chars=hard_max_chars,
         )
         for text in chunk_texts:
-            if len(text) < min_chars:
+            if len(text) < eff_min:
                 continue
             yield Chunk(
                 text=text,

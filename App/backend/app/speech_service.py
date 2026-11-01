@@ -2830,7 +2830,10 @@ class SpeechModel:
                     f"from {src} to {tgt}. Output ONLY the translation — no notes, "
                     f"quotes, or transliteration."
                 ),
-                max_tokens=512,
+                # gemini-3.x flash are thinking models: reasoning tokens are billed
+                # against maxOutputTokens before output tokens, so 512 truncated
+                # multi-sentence Swahili translations mid-word.
+                max_tokens=2048,
                 temperature=0.1,
             )
             breakers.GEMINI_BREAKER.record_success()

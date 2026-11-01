@@ -2341,11 +2341,16 @@ class HybridRetriever:
                     native_vernacular = [
                         h for h in vernacular_hits if str(h.get("language") or "").strip().lower() == loc
                     ]
-                    combined_en = (
-                        merge_retrieval_hits([en_hits, native_vernacular], top_k=fetch_top_k_en, per_intent=False)
-                        if native_vernacular
-                        else en_hits
-                    )
+                    if native_vernacular:
+                        native_vernacular = apply_preference_boost(
+                            native_vernacular, plan_en["prefer"], locale=locale
+                        )
+                        en_hits = apply_preference_boost(en_hits, plan_en["prefer"], locale=locale)
+                        combined_en = merge_retrieval_hits(
+                            [native_vernacular, en_hits], top_k=fetch_top_k_en, per_intent=False
+                        )
+                    else:
+                        combined_en = en_hits
                     boosted_en = apply_preference_boost(combined_en, plan_en["prefer"], locale=locale)
                     return boosted_en[:top_k]
 
@@ -2454,13 +2459,17 @@ class HybridRetriever:
         # contamination. For Swahili, merge both legs.
         if loc in ("lg", "nyn", "ach") and en_hits:
             native_hits = [h for h in hits if str(h.get("language") or "").strip().lower() == loc]
-            merged = (
-                merge_retrieval_hits([en_hits, native_hits], top_k=fetch_top_k_en, per_intent=False)
-                if native_hits
-                else en_hits[:fetch_top_k_en]
-            )
+            if native_hits:
+                native_hits = apply_preference_boost(native_hits, en_prefer, locale=locale)
+                en_hits = apply_preference_boost(en_hits, en_prefer, locale=locale)
+                merged = merge_retrieval_hits([native_hits, en_hits], top_k=fetch_top_k_en, per_intent=False)
+            else:
+                merged = en_hits[:fetch_top_k_en]
         else:
-            # One question asked two ways, not two intents: a single cut (G128).
+            # Boost both legs for locale before merging so a native Swahili handbook
+            # hit is not cut off before apply_preference_boost runs (G128 / ADR-0024).
+            hits = apply_preference_boost(hits, en_prefer, locale=locale)
+            en_hits = apply_preference_boost(en_hits, en_prefer, locale=locale)
             merged = merge_retrieval_hits([en_hits, hits], top_k=fetch_top_k_en, per_intent=False)
         merged = apply_preference_boost(merged, en_prefer, locale=locale)[:top_k]
 
