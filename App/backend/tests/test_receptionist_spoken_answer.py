@@ -54,6 +54,17 @@ class SentenceSplitTests(unittest.TestCase):
             ["- Gross salary: UGX 2,000,000.", "- _Assumptions: gross monthly salary._"],
         )
 
+    def test_unpunctuated_multiline_numbered_steps_split_into_discrete_sentences(self):
+        raw = "1. Visit the URA web portal\n2. Select eServices and TIN Registration\n3. Submit the online form"
+        self.assertEqual(
+            _split_into_sentences(raw),
+            [
+                "1. Visit the URA web portal.",
+                "2. Select eServices and TIN Registration.",
+                "3. Submit the online form.",
+            ],
+        )
+
 
 class SpokenAnswerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:

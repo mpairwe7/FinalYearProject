@@ -124,4 +124,14 @@ describe("answerText", () => {
     );
     expect(formatCallCaptionText("VAT is 18%.")).toBe("VAT is 18%.");
   });
+
+  it("punctuates multi-line bullets and headings for speech and does not turn Sec. 12. into Step 12", () => {
+    const raw = "### Required Documents\n- National ID\n- Active phone\nUnder Sec. 12. Every taxpayer must file.";
+    const speech = cleanMarkdownForSpeech(raw);
+    expect(speech).toContain("Required Documents.");
+    expect(speech).toContain("National ID.");
+    expect(speech).toContain("Active phone.");
+    expect(speech).toContain("Section 12. Every taxpayer must file.");
+    expect(speech).not.toContain("Step 12");
+  });
 });
