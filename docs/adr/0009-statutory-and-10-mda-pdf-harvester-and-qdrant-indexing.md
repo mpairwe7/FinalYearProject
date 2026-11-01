@@ -66,6 +66,8 @@ We implemented a unified, October 2026 standard **Statutory & 10-MDA PDF Harvest
 | **MDA 9 (`URSB`)** | `URSB-Companies-Act-2012.pdf` | `https://media.ulii.org/media/legislation/17888/source_file/7e53dcc2c056a04d/2012-1.pdf` | `e2ef686be57e` | `269` |
 | **MDA 10 (`NDA/UESW`)** | `NDA-National-Drug-Policy-and-Authority-Act.pdf` | `https://media.ulii.org/media/legislation/121926/source_file/3d9e9752a5995226/1993-13.pdf` | `ee41b57e9f95` | `84` |
 | **MDA 10 (`NEMA/URA`)** | `NEMA-Technical-Guide-URA-PRN-EIA-Fees.pdf` | `https://nema.go.ug/sites/all/themes/nema/docs/TECHNICAL%20GUIDE.pdf` | `5fe412f6c05f` | `2` |
+| **MDA 11 (`NITA-U`)** | `NITA-U-National-Information-Technology-Authority-Uganda-Act-2009.pdf` | `https://media.ulii.org/media/legislation/18138/source_file/2009-4.pdf` | `ulii-2009-4` | `harvester` |
+| **MDA 11 (`NITA-U/PDPO`)** | `NITA-U-PDPO-Data-Protection-and-Privacy-Act-2019.pdf` | `https://media.ulii.org/media/legislation/18049/source_file/2019-9.pdf` | `ulii-2019-9` | `harvester` |
 
 ## Consequences
 

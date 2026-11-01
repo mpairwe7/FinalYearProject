@@ -1112,6 +1112,71 @@ def pdf_document_date(data: bytes) -> str:
     return max(found, default="")
 
 
+def _assert_public_host(url: str) -> None:
+    """Reject any allowlisted host whose DNS resolves to a non-global IP (SSRF / DNS rebinding guard).
+
+    Offline unit tests using ``httpx.MockTransport`` may run without DNS resolution;
+    an ``OSError`` from ``getaddrinfo`` is left to the transport, whereas any
+    resolved loopback, private, link-local, or cloud-metadata address is refused.
+    """
+    import ipaddress
+    import socket
+
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").strip().lower().rstrip(".")
+    if not host:
+        raise CorpusValidationError(f"Missing hostname in {url!r}")
+    try:
+        infos = socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+    except OSError:
+        return
+    for info in infos:
+        addr_str = str(info[4][0]).split("%", 1)[0]
+        try:
+            ip_obj = ipaddress.ip_address(addr_str)
+        except ValueError as exc:
+            raise CorpusValidationError(f"Invalid IP resolution for {host}: {addr_str}") from exc
+        if not ip_obj.is_global:
+            raise CorpusValidationError(
+                f"Refused non-public IP resolution for {host} ({addr_str})"
+            )
+
+
+def inspect_pdf_for_prompt_injection(raw_bytes: bytes) -> None:
+    """Reject PDFs carrying embedded prompt-injection directives in metadata or text streams (OWASP ASI06)."""
+    from .guardrails import injection_present
+
+    sample = b"\n".join(re.findall(rb"[\x20-\x7e]{16,}", raw_bytes[:524288]))
+    if not sample:
+        return
+    text_sample = sample.decode("ascii", errors="ignore")
+    if injection_present(text_sample):
+        raise PdfRejected("PDF contains embedded prompt-injection directive (OWASP ASI06)")
+
+
+def _pdf_response_opts_out(headers: dict[str, str]) -> str:
+    """Return ``'noindex'`` or ``'ai_usage_denied'`` when response headers opt out of indexing/AI use."""
+    x_robots = (headers.get("x-robots-tag") or "").lower()
+    if x_robots:
+        current_agent = "*"
+        for raw_part in x_robots.split(","):
+            part = raw_part.strip()
+            if not part:
+                continue
+            if ":" in part:
+                agent, directive = part.split(":", 1)
+                current_agent = agent.strip()
+                part = directive.strip()
+            if current_agent in ("*", "ura-taxpayer-assistant-crawler") and re.search(
+                r"\b(?:noindex|none|noai)\b", part
+            ):
+                return "noindex"
+    content_usage = (headers.get("content-usage") or "").lower()
+    if re.search(r"\bai-use\s*=\s*n\b", content_usage):
+        return "ai_usage_denied"
+    return ""
+
+
 def _validated_redirect(resp: Any, current: str) -> str:
     """The next hop of a redirect, or a refusal if it leaves the allowlist.
 
@@ -1126,6 +1191,7 @@ def _validated_redirect(resp: Any, current: str) -> str:
     host = (parsed.hostname or "").strip().lower().rstrip(".")
     if parsed.scheme != "https" or host not in ALLOWED_STATUTORY_PDF_HOSTS:
         raise CorpusValidationError(f"Disallowed redirect target: {target}")
+    _assert_public_host(target)
     return target
 
 
@@ -1140,6 +1206,7 @@ def _default_page_fetcher(url: str, timeout: float = 30.0) -> str:
     current = url
     with httpx.Client(timeout=timeout, follow_redirects=False, headers=headers) as client:
         for _hop in range(21):
+            _assert_public_host(current)
             resp = client.get(current)
             if resp.is_redirect:
                 current = _validated_redirect(resp, current)
@@ -1169,6 +1236,7 @@ def _stream_pdf_with_tls_fallback(
     current = url
     with httpx.Client(timeout=timeout, follow_redirects=False, headers=headers) as client:
         for _hop in range(21):
+            _assert_public_host(current)
             with client.stream("GET", current) as resp:
                 if resp.is_redirect:
                     current = _validated_redirect(resp, current)
@@ -1393,9 +1461,15 @@ def harvest_remote_pdfs(
                 content_disposition=cd_header,
                 source_page=source_page,
             )
+            opt_out = _pdf_response_opts_out(headers)
+            if opt_out:
+                logger.warning("Skipped PDF %s (%s): %s", filename, pdf_url, opt_out)
+                rejected.append({"url": pdf_url, "pdf": filename, "reason": opt_out})
+                continue
             try:
                 validate_pdf_header(raw_bytes)
                 inspect_pdf_bytes(raw_bytes, limits=CORPUS_PDF_LIMITS)
+                inspect_pdf_for_prompt_injection(raw_bytes)
                 scan_bytes(raw_bytes, filename=filename)
             except (PdfRejected, MalwareRejected) as exc:
                 logger.warning("Rejected downloaded PDF %s (%s): %s", filename, pdf_url, exc)
@@ -1488,12 +1562,25 @@ def _record_harvest_in_crawl_state(
         except (OSError, ValueError):
             logger.warning("Could not parse %s when recording harvested PDFs", crawl_state_path, exc_info=True)
             return
+    state.setdefault("schema_version", 2)
+    state.setdefault("runs", [])
     pdf_hashes = state.setdefault("pdf_hashes", {})
     visited = state.setdefault("visited", {})
     for item in downloaded:
         digest = str(item.get("sha256") or "")[:32]
         if not digest:
             continue
+        # Evict any prior digest that pointed to the same filename or URL so
+        # replaced editions never leave orphaned hashes in crawl_state.json.
+        stale_digests = [
+            old_digest
+            for old_digest, meta in list(pdf_hashes.items())
+            if old_digest != digest
+            and isinstance(meta, dict)
+            and (meta.get("filename") == item["pdf"] or meta.get("url") == item["url"])
+        ]
+        for old_digest in stale_digests:
+            pdf_hashes.pop(old_digest, None)
         pdf_hashes[digest] = {
             "url": item["url"],
             "filename": item["pdf"],
@@ -1524,6 +1611,11 @@ def _record_harvest_in_crawl_state(
         )
         if digest:
             entry["content_hash"] = digest
+    state["last_pdf_harvest"] = {
+        "timestamp": now_iso,
+        "downloaded_count": len(downloaded),
+        "verified_existing_count": len(verified_existing),
+    }
     crawl_state_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_state = crawl_state_path.with_name(f".{crawl_state_path.name}.tmp")
     tmp_state.write_text(json.dumps(state, indent=1, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")

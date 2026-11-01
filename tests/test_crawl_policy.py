@@ -279,11 +279,18 @@ class TestOneIdentityAndOneAllowlist:
 
     def test_every_crawl_host_is_one_the_corpus_will_accept(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "App" / "backend"))
-        from app.pdf_corpus import ALLOWED_STATUTORY_PDF_HOSTS, DEFAULT_MDA_PDF_SOURCE_URLS
-        from ml.scripts.data_aug.crawler import MDA_STATUTORY_PDF_URLS
+        from app.pdf_corpus import (
+            ALLOWED_STATUTORY_PDF_HOSTS,
+            DEFAULT_MDA_PDF_SOURCE_URLS,
+            MDA_STATUTORY_PDF_REGISTRY,
+        )
+        from ml.scripts.data_aug.crawler import MDA_CANONICAL_FILENAMES, MDA_STATUTORY_PDF_URLS
 
         assert CRAWL_ALLOWED_HOSTS <= ALLOWED_STATUTORY_PDF_HOSTS
         assert MDA_STATUTORY_PDF_URLS == DEFAULT_MDA_PDF_SOURCE_URLS
+        assert MDA_CANONICAL_FILENAMES == {
+            entry["url"]: entry["filename"] for entry in MDA_STATUTORY_PDF_REGISTRY
+        }
         for mda_host in (
             "nita.go.ug",
             "pdpo.go.ug",

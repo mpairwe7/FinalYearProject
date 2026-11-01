@@ -149,6 +149,7 @@ jobs:
 
       - name: Harvest statutory and MDA PDFs
         if: ${{ !cancelled() }}
+        continue-on-error: true
         env:
           PYTHONPATH: App/backend:.
           TIER: ${{ needs.plan.outputs.tier }}
@@ -165,6 +166,7 @@ jobs:
             --harvest \
             --include-mda-sources \
             --max-pages-per-source "$max_pages" \
+            --timeout 25 \
             --pdf-dir Data/pdfs \
             --crawl-state Data/crawl/crawl_state.json
 

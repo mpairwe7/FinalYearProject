@@ -1140,6 +1140,21 @@ def build_search_queries(query: str, triggers: list[ResearchTrigger]) -> list[Se
             )
         else:
             fam = trig.doc_family or infer_doc_family(query)
+            secondary_domains = (
+                (
+                    "ura.go.ug",
+                    "ulii.org",
+                    "nita.go.ug",
+                    "pdpo.go.ug",
+                    "egpuganda.go.ug",
+                    "ppda.go.ug",
+                    "nira.go.ug",
+                    "ursb.go.ug",
+                    "unbs.go.ug",
+                )
+                if fam in ("mda_ntr_schedule", "b2g_ppda_ifms_compliance", "unbs_nda_uesw_clearance")
+                else ("ura.go.ug",)
+            )
             specs.append(
                 SearchSpec(
                     trigger_category=trig.category,
@@ -1158,7 +1173,7 @@ def build_search_queries(query: str, triggers: list[ResearchTrigger]) -> list[Se
                     topic_key=trig.topic_key,
                     doc_family=fam,
                     query=f"site:ura.go.ug {terms} {year}",
-                    target_domains=("ura.go.ug",),
+                    target_domains=secondary_domains,
                     keywords=f"{terms} {year}",
                     freshness_days=horizon,
                     volatile=volatile,

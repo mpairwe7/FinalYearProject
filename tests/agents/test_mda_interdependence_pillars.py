@@ -302,6 +302,20 @@ def test_calculator_router_bypass_and_full_10_mda_planner_coverage_and_latency()
         "I paid the UGX 100,000 PDPO data protection registration fee PRN, how does it reflect?"
     )
     assert "MDA11_NITA_U" in block_nita_ntr
+    assert "s.29" in block_nita_ntr
+    assert "25,000" in block_nita_ntr
+
+    from app.web_research import build_search_queries, detect_research_triggers
+
+    nita_trigs = detect_research_triggers(
+        "What is the latest NITA-U PDPO data protection registration fee schedule?",
+        hits=[],
+    )
+    nita_specs = build_search_queries(
+        "What is the latest NITA-U PDPO data protection registration fee schedule?",
+        nita_trigs,
+    )
+    assert any("pdpo.go.ug" in s.target_domains and "nita.go.ug" in s.target_domains for s in nita_specs)
 
     # 4. Verify planner sets missing_inputs when amount-dependent MDA/relief prompts omit figures
     specs_missing_relief = plan_tools("How do I apply for Voluntary Disclosure on Form DT-10307?")
