@@ -24,4 +24,5 @@ changes arrive as a reviewed pull request (ADR-0023, `docs/runbooks/crawl-operat
   8. `UPF` (`UPF-Traffic-and-Road-Safety-Speed-of-Motor-Vehicles-Order-2026-FY2026-27.pdf`, `MoWT-UPF-Roads-Act-2019-Express-Penalty.pdf`)
   9. `URSB` (`URSB-Companies-Act-2012.pdf`, `URSB-Business-Names-Registration-Amendment-Rules-2024-FY2024-25.pdf`, `URSB-Trademarks-Schedule-Fees-2025-FY2025-26.pdf`, `URSB-Client-Charter-2025-2030-FY2025-26.pdf`)
   10. `NDA / NEMA / UESW` (`NDA-National-Drug-Policy-and-Authority-Act.pdf`, `NEMA-Technical-Guide-URA-PRN-EIA-Fees.pdf`)
+  11. `NITA-U / PDPO` (`NITA-U-National-Information-Technology-Authority-Uganda-Act-2009.pdf`, `NITA-U-PDPO-Data-Protection-and-Privacy-Act-2019.pdf`)
 

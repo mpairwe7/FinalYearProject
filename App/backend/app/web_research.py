@@ -217,6 +217,12 @@ TIER1_DOMAINS: frozenset[str] = frozenset(
         "www.ugandacoffee.go.ug",
         "singlewindow.go.ug",
         "www.singlewindow.go.ug",
+        "nita.go.ug",
+        "www.nita.go.ug",
+        "pdpo.go.ug",
+        "www.pdpo.go.ug",
+        "egpuganda.go.ug",
+        "www.egpuganda.go.ug",
         "eac.int",
         "www.eac.int",
     }
@@ -257,6 +263,12 @@ QDRANT_SYNC_ALLOWED_HOSTS: frozenset[str] = frozenset(
         "www.nda.or.ug",
         "nema.go.ug",
         "www.nema.go.ug",
+        "nita.go.ug",
+        "www.nita.go.ug",
+        "pdpo.go.ug",
+        "www.pdpo.go.ug",
+        "egpuganda.go.ug",
+        "www.egpuganda.go.ug",
     }
 )
 
@@ -353,8 +365,8 @@ _DOC_FAMILY_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("statutory_act_gazette", re.compile(r"\b(amendment\s+(?:bill|act)|finance\s+bill|assented|gazetted)\b", re.I)),
     ("public_notice", re.compile(r"\b(public\s+notice|practice\s+note|circular|penalty\s+waiver|tax\s+amnesty|filing\s+extension)\b", re.I)),
     ("taxation_handbook", re.compile(r"\b(taxation\s+handbook|tax\s+handbook)\b", re.I)),
-    ("mda_ntr_schedule", re.compile(r"\b(driving\s+permit|udls\b|e[-\s]?passport|dcic\b|nira\b|registration\s+of\s+persons|express\s+penalty|\beps\b|nema\s+eia)\b", re.I)),
-    ("b2g_ppda_ifms_compliance", re.compile(r"\b(ppda\b|e[-\s]?gp\b|ifms\b|deemed\s+vat|public\s+procurement)\b", re.I)),
+    ("mda_ntr_schedule", re.compile(r"\b(driving\s+permit|udls\b|e[-\s]?passport|dcic\b|nira\b|registration\s+of\s+persons|express\s+penalty|\beps\b|nema\s+eia|nita[-\s]?u\b|pdpo\b|data\s+protection\s+and\s+privacy)\b", re.I)),
+    ("b2g_ppda_ifms_compliance", re.compile(r"\b(ppda\b|e[-\s]?gp\b|egpuganda\b|ughub\b|ifms\b|deemed\s+vat|public\s+procurement)\b", re.I)),
     ("unbs_nda_uesw_clearance", re.compile(r"\b(unbs\b|pvoc\b|ndamis\b|irims\b|single\s+window|uesw\b)\b", re.I)),
 )
 
@@ -405,6 +417,7 @@ _SEARCH_VOCABULARY: frozenset[str] = (
         oil gas construction manufacturing insurance banking telecom common external cet eac
         stay application hs bank central cbr discount exchange commissioner general minister
         portal eportal website outage maintenance downtime ppda unbs nda nira ursb nema kcca
+        nita pdpo ughub egp
         ifms irims uesw pvoc ndamis permit passport udls dcic registration licence license
         changes announcement announcements update updates latest new
         """.split()
@@ -620,6 +633,11 @@ def classify_source_authority(
             "bou.or.ug",
             "ursb.go.ug",
             "unbs.go.ug",
+            "nita.go.ug",
+            "pdpo.go.ug",
+            "egpuganda.go.ug",
+            "nira.go.ug",
+            "ppda.go.ug",
             "eac.int",
         )
     ):
@@ -629,6 +647,9 @@ def classify_source_authority(
             or _hostname_matches_root(host, "ulii.org")
             or _hostname_matches_root(host, "parliament.go.ug")
             or _hostname_matches_root(host, "bills.parliament.ug")
+            or _hostname_matches_root(host, "nita.go.ug")
+            or _hostname_matches_root(host, "pdpo.go.ug")
+            or _hostname_matches_root(host, "egpuganda.go.ug")
         )
         return SourceAuthority(1, 1.0, host, can_qdrant, "Tier 1 official primary source")
 

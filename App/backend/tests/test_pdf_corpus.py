@@ -19,6 +19,7 @@ import httpx
 
 from app.faq_corpus import CorpusValidationError
 from app.pdf_corpus import (
+    ALLOWED_STATUTORY_PDF_HOSTS,
     CORPUS_FETCH_USER_AGENT,
     _default_page_fetcher,
     pdf_document_date,
@@ -758,13 +759,46 @@ class StatutoryPortalHarvestTests(unittest.TestCase):
                 "MDA8_UPF",
                 "MDA9_URSB",
                 "MDA10_NDA_NEMA_UESW",
+                "MDA11_NITA_U",
             },
         )
+        for host in ("nita.go.ug", "www.nita.go.ug", "pdpo.go.ug", "www.pdpo.go.ug", "egpuganda.go.ug", "www.egpuganda.go.ug"):
+            self.assertIn(host, ALLOWED_STATUTORY_PDF_HOSTS)
         for entry in MDA_STATUTORY_PDF_REGISTRY:
             self.assertEqual(
                 canonical_statutory_pdf_filename(entry["url"], title=entry["title"]),
                 entry["filename"],
             )
+
+    def test_harvest_records_new_pdfs_in_crawl_state_for_crawl_gate(self) -> None:
+        from app.pdf_corpus import main as pdf_corpus_main
+
+        nita_url = "https://media.ulii.org/media/legislation/18138/source_file/2009-4.pdf"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pdf_dir = root / "pdfs"
+            crawl_state = root / "crawl" / "crawl_state.json"
+            patcher, _seen = self._serve(self.OLD)
+            with patcher, mock.patch("app.pdf_corpus.inspect_pdf_bytes"):
+                rc = pdf_corpus_main(
+                    [
+                        "--harvest",
+                        "--source-urls",
+                        nita_url,
+                        "--pdf-dir",
+                        str(pdf_dir),
+                        "--crawl-state",
+                        str(crawl_state),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            self.assertTrue((pdf_dir / "NITA-U-National-Information-Technology-Authority-Uganda-Act-2009.pdf").is_file())
+            state_data = json.loads(crawl_state.read_text(encoding="utf-8"))
+            self.assertEqual(len(state_data["pdf_hashes"]), 1)
+            meta = next(iter(state_data["pdf_hashes"].values()))
+            self.assertEqual(meta["filename"], "NITA-U-National-Information-Technology-Authority-Uganda-Act-2009.pdf")
+            self.assertEqual(meta["url"], nita_url)
+            self.assertEqual(state_data["visited"][nita_url]["status"], "live")
 
 
 if __name__ == "__main__":

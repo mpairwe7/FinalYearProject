@@ -74,8 +74,8 @@ DEFAULT_STATUTORY_PDF_SOURCE_URLS: tuple[str, ...] = (
     "https://ura.go.ug/download-category/laws-and-acts/",
 )
 
-#: Top 10 Ugandan Government Bodies (MDAs) with high URA NTR/PRN, TIN, TCC,
-#: Stamp Duty, and ASYCUDA/UESW dependency driving URA CXP inquiry volume (October 2026):
+#: Top 11 Ugandan Government Bodies (MDAs) with high URA NTR/PRN, TIN, TCC,
+#: Stamp Duty, and ASYCUDA/UESW/UGhub dependency driving URA CXP inquiry volume (October 2026):
 MDA_STATUTORY_PDF_REGISTRY: tuple[dict[str, str], ...] = (
     {
         "mda_code": "MDA1_MoWT",
@@ -182,6 +182,20 @@ MDA_STATUTORY_PDF_REGISTRY: tuple[dict[str, str], ...] = (
         "title": "NEMA Technical Guide on How to Generate PRN for 30% EIA Submission & 70% Approval Fees on URA Portal",
         "url": "https://nema.go.ug/sites/all/themes/nema/docs/TECHNICAL%20GUIDE.pdf",
     },
+    {
+        "mda_code": "MDA11_NITA_U",
+        "mda_name": "National Information Technology Authority-Uganda (NITA-U — IT Certification, UGhub & e-GP)",
+        "filename": "NITA-U-National-Information-Technology-Authority-Uganda-Act-2009.pdf",
+        "title": "National Information Technology Authority, Uganda Act, 2009 (Cap. 97) — IT Certification, NTR Fees & e-Government Interoperability (UGhub)",
+        "url": "https://media.ulii.org/media/legislation/18138/source_file/2009-4.pdf",
+    },
+    {
+        "mda_code": "MDA11_NITA_U",
+        "mda_name": "National Information Technology Authority-Uganda (NITA-U) & Personal Data Protection Office (PDPO)",
+        "filename": "NITA-U-PDPO-Data-Protection-and-Privacy-Act-2019.pdf",
+        "title": "Data Protection and Privacy Act, 2019 — PDPO Registration Fees, Compliance & URA NTR Collection",
+        "url": "https://media.ulii.org/media/legislation/18049/source_file/2019-9.pdf",
+    },
 )
 
 MDA_DIRECT_PDF_BY_URL: dict[str, dict[str, str]] = {
@@ -243,6 +257,12 @@ ALLOWED_STATUTORY_PDF_HOSTS: frozenset[str] = frozenset(
         "www.ugandacoffee.go.ug",
         "singlewindow.go.ug",
         "www.singlewindow.go.ug",
+        "nita.go.ug",
+        "www.nita.go.ug",
+        "pdpo.go.ug",
+        "www.pdpo.go.ug",
+        "egpuganda.go.ug",
+        "www.egpuganda.go.ug",
     }
 )
 
@@ -253,6 +273,12 @@ _UG_GOV_INTERMEDIATE_TLS_HOSTS: frozenset[str] = frozenset(
         "www.nira.go.ug",
         "nema.go.ug",
         "www.nema.go.ug",
+        "nita.go.ug",
+        "www.nita.go.ug",
+        "pdpo.go.ug",
+        "www.pdpo.go.ug",
+        "egpuganda.go.ug",
+        "www.egpuganda.go.ug",
     }
 )
 
@@ -1205,6 +1231,7 @@ def harvest_remote_pdfs(
     source_urls: str | Iterable[str] | None = None,
     include_mda_sources: bool = False,
     mirror_dirs: Iterable[Path] = (),
+    crawl_state_path: Path | None = None,
     max_pages_per_source: int = 5,
     timeout: float = 30.0,
     page_fetcher: Callable[[str], str] | None = None,
@@ -1215,7 +1242,7 @@ def harvest_remote_pdfs(
     Supports:
     * ``https://www.parliament.go.ug/page/tax-bills-2026``
     * ``https://ura.go.ug/download-category/laws-and-acts/`` (including WPDM ``?wpdmdl=`` & ``?cp=`` pagination)
-    * Direct PDF URLs across the 10 high-dependency Ugandan MDAs (:data:`MDA_STATUTORY_PDF_REGISTRY`).
+    * Direct PDF URLs across the 11 high-dependency Ugandan MDAs (:data:`MDA_STATUTORY_PDF_REGISTRY`).
     """
     urls = parse_pdf_source_urls(source_urls)
     if include_mda_sources:
@@ -1422,6 +1449,9 @@ def harvest_remote_pdfs(
                     shutil.copy2(src_pdf, dest_pdf)
                     mirrored_count += 1
 
+    if crawl_state_path is not None:
+        _record_harvest_in_crawl_state(Path(crawl_state_path), downloaded=downloaded, verified_existing=verified_existing)
+
     return {
         "source_urls": urls,
         "pages_scanned": visited_pages,
@@ -1435,4 +1465,110 @@ def harvest_remote_pdfs(
         "rejected": rejected,
         "page_errors": page_errors,
     }
+
+
+def _record_harvest_in_crawl_state(
+    crawl_state_path: Path,
+    *,
+    downloaded: list[dict[str, Any]],
+    verified_existing: list[dict[str, Any]],
+) -> None:
+    """Record newly downloaded PDFs in ``crawl_state.json['pdf_hashes']`` and update ``visited``."""
+    from datetime import datetime, timezone
+
+    if not downloaded and not verified_existing:
+        return
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    state: dict[str, Any] = {}
+    if crawl_state_path.is_file():
+        try:
+            loaded = json.loads(crawl_state_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                state = loaded
+        except (OSError, ValueError):
+            logger.warning("Could not parse %s when recording harvested PDFs", crawl_state_path, exc_info=True)
+            return
+    pdf_hashes = state.setdefault("pdf_hashes", {})
+    visited = state.setdefault("visited", {})
+    for item in downloaded:
+        digest = str(item.get("sha256") or "")[:32]
+        if not digest:
+            continue
+        pdf_hashes[digest] = {
+            "url": item["url"],
+            "filename": item["pdf"],
+            "size_bytes": item["bytes"],
+            "timestamp": now_iso,
+            "source_kind": "live",
+        }
+        entry = visited.setdefault(item["url"], {"first_seen": now_iso})
+        entry.update(
+            kind="document",
+            status="live",
+            last_checked_at=now_iso,
+            last_verified_at=now_iso,
+            last_status=200,
+            last_outcome="ok",
+            content_hash=digest,
+        )
+    for item in verified_existing:
+        digest = str(item.get("sha256") or "")[:32]
+        entry = visited.setdefault(item["url"], {"first_seen": now_iso})
+        entry.update(
+            kind="document",
+            status="live",
+            last_checked_at=now_iso,
+            last_verified_at=now_iso,
+            last_status=200,
+            last_outcome="ok",
+        )
+        if digest:
+            entry["content_hash"] = digest
+    crawl_state_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_state = crawl_state_path.with_name(f".{crawl_state_path.name}.tmp")
+    tmp_state.write_text(json.dumps(state, indent=1, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp_state.replace(crawl_state_path)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entrypoint for statutory & MDA PDF harvesting into Data/pdfs."""
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(description="Harvest statutory and 11-MDA PDFs into Data/pdfs")
+    parser.add_argument("--harvest", action="store_true", help="Run remote statutory & MDA PDF harvest")
+    parser.add_argument("--include-mda-sources", action="store_true", help="Include the 11-MDA statutory PDF registry")
+    parser.add_argument("--source-urls", type=str, default=None, help="Comma-separated HTTPS statutory source URLs")
+    parser.add_argument("--pdf-dir", type=Path, default=Path("Data/pdfs"))
+    parser.add_argument("--crawl-state", type=Path, default=None, help="Optional crawl_state.json to record new PDFs")
+    parser.add_argument("--max-pages-per-source", type=int, default=5)
+    parser.add_argument("--timeout", type=float, default=30.0)
+    args = parser.parse_args(argv)
+
+    logging.basicConfig(level=os.getenv("CRAWL_LOG_LEVEL", "INFO"), format="%(levelname)s %(message)s")
+    if not args.harvest:
+        parser.error("--harvest is required when running app.pdf_corpus as a script")
+
+    stats = harvest_remote_pdfs(
+        args.pdf_dir,
+        source_urls=args.source_urls,
+        include_mda_sources=args.include_mda_sources,
+        crawl_state_path=args.crawl_state,
+        max_pages_per_source=args.max_pages_per_source,
+        timeout=args.timeout,
+    )
+    summary = {
+        "discovered_count": stats["discovered_count"],
+        "downloaded_count": stats["downloaded_count"],
+        "verified_existing_count": stats["verified_existing_count"],
+        "rejected_count": stats["rejected_count"],
+        "page_errors_count": len(stats["page_errors"]),
+        "downloaded_files": [d["pdf"] for d in stats["downloaded"]],
+    }
+    sys.stdout.write(json.dumps(summary, indent=2) + "\n")
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())
 

@@ -147,6 +147,27 @@ jobs:
           fi
           python -m ml.scripts.data_aug.crawler --tier "$TIER" --max-seconds 9000 "${args[@]}"
 
+      - name: Harvest statutory and MDA PDFs
+        if: ${{ !cancelled() }}
+        env:
+          PYTHONPATH: App/backend:.
+          TIER: ${{ needs.plan.outputs.tier }}
+          MAX_FETCHES: ${{ inputs.max_fetches }}
+        run: |
+          # Harvest Parliament, URA laws-and-acts, and the 11 high-dependency MDA
+          # statutory/fee PDF registries (MoWT, DCIC, NIRA, PPDA/MoFPED, UNBS, MLHUD,
+          # KCCA/MoLG, UPF, URSB, NDA/NEMA/UESW, NITA-U/PDPO) into Data/pdfs and
+          # record any new document hashes in Data/crawl/crawl_state.json for crawl_gate.
+          max_pages=5
+          if [ "$TIER" = "changes" ]; then max_pages=2; fi
+          if [ -n "$MAX_FETCHES" ] && [ "$MAX_FETCHES" -lt 20 ]; then max_pages=1; fi
+          python -m app.pdf_corpus \
+            --harvest \
+            --include-mda-sources \
+            --max-pages-per-source "$max_pages" \
+            --pdf-dir Data/pdfs \
+            --crawl-state Data/crawl/crawl_state.json
+
       - name: Judge the crawl
         id: judge
         # Also after a failed crawl: a run that stopped short still needs a verdict.
