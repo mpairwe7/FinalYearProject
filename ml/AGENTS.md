@@ -8,6 +8,7 @@ Owns offline corpus construction, RAG evaluation gates, and local on-device ASR/
 | --- | --- |
 | `ml/pipelines/` | Offline RAG evaluation (`evaluate_rag.py`), corpus coverage gate (`corpus_coverage.py`), data validation (`validate_data.py`), and quality gates (`quality_gates.py`) |
 | `ml/scripts/data_aug/` | Corpus loaders, chunkers, deduplication, and provenance |
+| `ml/scripts/data_aug/crawler.py`, `crawl_policy.py` | The live crawler and its pure rules: identity, scope, RFC 9309, host limits (ADR-0023). Run by `.github/workflows/scheduled-crawl.yml` from the hash lock in `requirements-crawl.txt` |
 | `ml/scripts/lang_id.py` | Lingua-backed language detection (`en`, `lg`, `sw`, `nyn`, `ach`) |
 | `ml/scripts/asr/` | Local Whisper / Whisper-SALT inference wrappers |
 | `ml/scripts/mt/` | Local machine translation wrappers |

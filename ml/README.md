@@ -61,7 +61,8 @@ ml/
   `App/backend/app/pdf_corpus.py` and `crawl_corpus.py` for offline corpus
   export (`python -m app.indexer --export-pdf-jsonl --export-crawl-jsonl`).
   `data_aug/crawler.py` is the live crawler `.github/workflows/scheduled-crawl.yml`
-  runs daily — not training tooling either.
+  runs: weekdays for what changed, the last day of the month for everything due. It
+  is not training tooling either. See `docs/runbooks/crawl-operations.md`.
 - **`eval_retrieval.py`**, **`corpus_coverage.py`**, and
   **`evaluate_rag_offline.py`** run in CI (`.github/workflows/ci-ml-pipeline.yml`,
   `lint-and-test` job) as regression gates against `App/backend`'s retriever.

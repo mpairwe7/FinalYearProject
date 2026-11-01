@@ -41,7 +41,6 @@ source = ["ml", "App/backend"]
 omit = [
     "*/tests/*",
     "*/__pycache__/*",
-    "ml/scripts/data_aug/crawler.py",
     "ml/pipelines/evaluate_rag.py",
     "ml/pipelines/evaluate_rag_offline.py",
     "ml/pipelines/validate_data.py",
