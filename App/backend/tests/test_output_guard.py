@@ -241,6 +241,49 @@ class OutputGuardSanitizerTests(unittest.TestCase):
         colon_norm = OutputGuard.normalize_structure(colon_step_sublist)
         self.assertIn("2. Submit the return", colon_norm)
 
+    def test_hf_ura_services_smashed_greeting_bullets_and_signoff(self) -> None:
+        """Verify exact HF Space 'What services does URA provide?' smashed greeting, bullets, comma-period, and sign-off."""
+        raw = (
+            "Hello!Uganda Revenue Authority (URA) serves as the country's central tax and customs authority "
+            "and provides a variety of core services, including:\n\n"
+            "Taxpayer Registration: Provision of instant Taxpayer Identification Numbers (TIN).- "
+            "Domestic Tax Administration: Management of taxes such as VAT, PAYE and employment income, "
+            "corporation tax, rental income tax, capital gains tax, withholding tax, stamp duty, and "
+            "small-business taxes.- Customs Services: Import and export clearance, valuation, and passenger "
+            "baggage and cargo processing.- Digital Invoicing & Tax Stamps: EFRIS e-invoicing and Digital Tax "
+            "Stamps.- Tax Exemption and Compliance Support: Support for taxpayers, including NGOs and religious "
+            "institutions, as well as onboarding sessions, taxpayer support centers, and guidance for new "
+            "taxpayers.- Taxpayer Education: Provision of materials such as the Taxpayer Starter Pack, the "
+            "annual Taxation Handbook, online educational literature, and weekly training sessions on domestic "
+            "taxes and customs.- Online Payments and Account Management: Filing, making payments, and managing "
+            "accounts easily through the URA web portal,.Please feel free to reach out if you need further "
+            "assistance with any of these services!"
+        )
+        norm = OutputGuard.normalize_structure(raw)
+        self.assertTrue(norm.startswith("Hello! Uganda Revenue Authority (URA)"))
+        self.assertIn("- **Taxpayer Registration**: Provision of instant", norm)
+        self.assertIn("- **Domestic Tax Administration**: Management of taxes", norm)
+        self.assertIn("- **Customs Services**: Import and export clearance", norm)
+        self.assertIn("- **Digital Invoicing & Tax Stamps**: EFRIS e-invoicing", norm)
+        self.assertIn("- **Tax Exemption and Compliance Support**: Support for taxpayers", norm)
+        self.assertIn("- **Taxpayer Education**: Provision of materials", norm)
+        self.assertIn(
+            "- **Online Payments and Account Management**: Filing, making payments, and managing accounts easily through the URA web portal.\n\n"
+            "Please feel free to reach out if you need further assistance with any of these services!",
+            norm,
+        )
+        self.assertNotIn("portal,.", norm)
+        self.assertNotIn("Hello!Uganda", norm)
+
+        url_and_fence = (
+            "Visit https://ura.go.ug?Tax=VAT for details.\n"
+            "```\nHello!World\nfoo().ToString()\n```"
+        )
+        uf_norm = OutputGuard.normalize_structure(url_and_fence)
+        self.assertIn("https://ura.go.ug?Tax=VAT", uf_norm)
+        self.assertIn("Hello!World", uf_norm)
+        self.assertIn("foo().ToString()", uf_norm)
+
 
 if __name__ == "__main__":
     unittest.main()

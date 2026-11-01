@@ -31,6 +31,7 @@
 export function stripCitationMarkers(text: string): string {
   if (!text) return text;
   return text
+    .replace(/,(\s*\[\d+(?:\s*[,;]\s*\d+)*\])(?=(?:\s*\[\d+(?:\s*[,;]\s*\d+)*\])*[.!?])/g, '$1') // comma before citation at sentence end
     .replace(/\s*\[\d+(?:\s*[,;]\s*\d+)*\](?!\()/g, '') // the marker + leading space
     .replace(/[ \t]{2,}/g, ' ') //         seams left by the removal
     .replace(/[ \t]+([.,;:!?])/g, '$1') // space pushed onto punctuation

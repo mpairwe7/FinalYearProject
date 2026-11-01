@@ -119,4 +119,31 @@ describe("Markdown", () => {
     expect(ols).toHaveLength(2);
     expect(ols[1]).toHaveAttribute("start", "2");
   });
+
+  it("unsmashes the HF URA services reply into an intro paragraph, 7 bold-headed bullets, and a closing paragraph", () => {
+    const raw =
+      "Hello!Uganda Revenue Authority (URA) serves as the country's central tax and customs authority and provides a variety of core services, including:\n\n" +
+      "Taxpayer Registration: Provision of instant Taxpayer Identification Numbers (TIN).- Domestic Tax Administration: Management of taxes such as VAT, PAYE and employment income, corporation tax, rental income tax, capital gains tax, withholding tax, stamp duty, and small-business taxes.- Customs Services: Import and export clearance, valuation, and passenger baggage and cargo processing.- Digital Invoicing & Tax Stamps: EFRIS e-invoicing and Digital Tax Stamps.- Tax Exemption and Compliance Support: Support for taxpayers, including NGOs and religious institutions, as well as onboarding sessions, taxpayer support centers, and guidance for new taxpayers.- Taxpayer Education: Provision of materials such as the Taxpayer Starter Pack, the annual Taxation Handbook, online educational literature, and weekly training sessions on domestic taxes and customs.- Online Payments and Account Management: Filing, making payments, and managing accounts easily through the URA web portal,.Please feel free to reach out if you need further assistance with any of these services!";
+    const { container } = render(<Markdown content={raw} />);
+    const paras = Array.from(container.querySelectorAll("p")).map((p) => p.textContent ?? "");
+    const lis = Array.from(container.querySelectorAll("ul li"));
+    expect(paras[0]).toContain("Hello! Uganda Revenue Authority (URA)");
+    expect(lis).toHaveLength(7);
+    expect(lis[0]?.querySelector("strong")?.textContent).toBe("Taxpayer Registration");
+    expect(lis[6]?.querySelector("strong")?.textContent).toBe("Online Payments and Account Management");
+    expect(lis[6]?.textContent).not.toContain("Please feel free");
+    expect(lis[6]?.textContent).not.toContain(",.");
+    expect(paras[paras.length - 1]).toBe(
+      "Please feel free to reach out if you need further assistance with any of these services!",
+    );
+
+    const { container: cConclusion } = render(
+      <Markdown
+        content={"Services:\n\nConclusion: Registration is complete.\n\n- Contact support via [Pay](https://ura.go.ug/pay?TIN=123)"}
+      />,
+    );
+    const conclusionParas = Array.from(cConclusion.querySelectorAll("p")).map((p) => p.textContent ?? "");
+    expect(conclusionParas).toContain("Conclusion: Registration is complete.");
+    expect(cConclusion.querySelector("a")?.getAttribute("href")).toBe("https://ura.go.ug/pay?TIN=123");
+  });
 });

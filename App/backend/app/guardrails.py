@@ -1278,6 +1278,10 @@ class OutputGuard:
         text = re.sub(r"([;:\.!?])[ \t]*(?:Me\s+angwen|Rwom\s+me\s+angwen)\b[:\.,]?[ \t]*", r"\1\n\n4. **Me angwen**: ", text, flags=re.IGNORECASE)
         text = re.sub(r"([;:\.!?])[ \t]*(?:Me\s+abic|Rwom\s+me\s+abic)\b[:\.,]?[ \t]*", r"\1\n\n5. **Me abic**: ", text, flags=re.IGNORECASE)
 
+        # Clean stray comma before citation+period (e.g. 'portal, [1].' -> 'portal [1].')
+        text = re.sub(r",(\s*\[\d+(?:\s*[,;]\s*\d+)*\])\.", r"\1.", text)
+        # Unsmash web domain names glued to capitalized words (e.g. '.ugThese' -> '.ug\n\nThese')
+        text = re.sub(r"(\.(?:ug|go\.ug|com|org|net))([A-Z])", r"\1\n\n\2", text)
         # Unsmash sentence punctuation glued to capital words (e.g. 'Uganda.Here' -> 'Uganda. Here')
         text = re.sub(r"([a-z])\.([A-Z])", r"\1. \2", text)
 
@@ -1292,8 +1296,6 @@ class OutputGuard:
         # A word glued to a step ('template2. Enable'). A rate or a section
         # ('VAT 18. File', 'Section5. The Act') does not match.
         text = _GLUED_STEP_RE.sub(r"\1.\n\n\2. \3", text)
-        # Unsmash web domain names glued to capitalized words (e.g. '.ugThese' -> '.ug\n\nThese')
-        text = re.sub(r"(\.(?:ug|go\.ug|com|org|net))([A-Z])", r"\1\n\n\2", text)
 
         # Hyphen and semicolon runs become bullets only when they are labels.
         # "PAYE - the tax on employment - is deducted monthly" stays a sentence.
@@ -1337,6 +1339,112 @@ class OutputGuard:
         text = re.sub(r"^(Yes|No|Yee|Nedda|Ndiyo|Hapana|Ego|Eego|Ngaaha|Eyo|Eeyo|Pe)[,\.][ \t]*", r"**\1**: ", text)
         text = re.sub(r"(\n\n)(Yes|No|Yee|Nedda|Ndiyo|Hapana|Ego|Eego|Ngaaha|Eyo|Eeyo|Pe)[,\.][ \t]*", r"\1**\2**: ", text)
 
+        # Bold numbered/bulleted list headers, separate smashed bullet items, and unsmash inline continuation steps
+        # while skipping pipe-table rows and fenced code blocks.
+        unsmashed_lines: list[str] = []
+        in_fence = False
+        for line in text.split("\n"):
+            if line.lstrip().startswith("```"):
+                in_fence = not in_fence
+                unsmashed_lines.append(line)
+                continue
+            if not in_fence and "|" not in line:
+                protected_spans: list[str] = []
+
+                def _mask_protected(m: re.Match[str]) -> str:
+                    protected_spans.append(m.group(0))
+                    return f"\x00PROT{len(protected_spans) - 1}\x00"
+
+                masked_line = re.sub(
+                    r"`[^`]+`|\[[^\]]+\]\([^)]+\)|(?:https?://|www\.)\S+",
+                    _mask_protected,
+                    line,
+                )
+                masked_line = re.sub(r",\.(?=\s|$|[A-Z\"'\)\]])", ".", masked_line)
+                masked_line = re.sub(r"([a-zA-Z\)\]])([!?])([A-Z])", r"\1\2 \3", masked_line)
+                masked_line = re.sub(r"([a-z\)\]])\.([A-Z][a-z])", r"\1. \2", masked_line)
+                masked_line = re.sub(
+                    r"(?<=\S)[ \t]+[►▪▫•][ \t]+(\*{0,2}[A-Za-z0-9])",
+                    r"\n\n- \1",
+                    masked_line,
+                )
+                for idx, span in enumerate(protected_spans):
+                    masked_line = masked_line.replace(f"\x00PROT{idx}\x00", span)
+                line = masked_line
+                if (
+                    not re.match(r"^\s*(?:[-*+•]|\d{1,2}[.)]|#{1,6})\s+", line)
+                    and re.match(
+                        r"^\s*(?!(?:Note|Important|Tip|Warning|Caution|Summary|Disclaimer)\b)\*{0,2}[A-Z][A-Za-z0-9 /&,'’()-]{1,45}?\*{0,2}:[ \t]+\S",
+                        line,
+                        flags=re.IGNORECASE,
+                    )
+                    and re.search(r"[a-z0-9\)]\.[ \t]*[*•\-](?!\*)[ \t]*\*{0,2}[A-Z]", line)
+                ):
+                    line = "- " + line.lstrip()
+                line = re.sub(
+                    r"([;:])[ \t]*([*\-•])(?!\*)[ \t]*(\*{0,2}[A-Za-z])",
+                    r"\1\n\n- \3",
+                    line,
+                )
+                line = re.sub(
+                    r"([a-z0-9\)])\.[ \t]*([*\-•])(?!\*)[ \t]*(\*{0,2}[A-Za-z])",
+                    r"\1.\n\n- \3",
+                    line,
+                )
+                lead_m = re.match(r"^(\s*)1\.\s+", line)
+                if lead_m:
+                    lead_indent = lead_m.group(1)
+                    line = re.sub(
+                        r"(?i)(?<!\bsection)(?<!\bsec\.)(?<!\barticle)(?<!\bart\.)(?<!\bcap\.)(?<!\bschedule)(?<!\bform)(?<!\bpart)(?<!\brule)(?<!\btable)(?<!\bband)(?<!\bmethod)(?<!\btier)(?<!\bpage)(?<!\bitem)(?<!\bugx)(?<!\busd)(?<!\bshs)(?<!\bto)(?<!\band)(?<!\bor)[ \t]+([2-9]|1[0-2])[\.\)][ \t]+(?!Jan(?:uary)?\b|Feb(?:ruary)?\b|Mar(?:ch)?\b|Apr(?:il)?\b|May\b|Jun(?:e)?\b|Jul(?:y)?\b|Aug(?:ust)?\b|Sep(?:t(?:ember)?)?\b|Oct(?:ober)?\b|Nov(?:ember)?\b|Dec(?:ember)?\b)(\*{0,2}[A-Z])",
+                        rf"\n\n{lead_indent}\1. \2",
+                        line,
+                    )
+            unsmashed_lines.append(line)
+        text = "\n".join(unsmashed_lines)
+
+        # Promote an unbulleted 'Label: Description' line sandwiched between a colon-ended lead-in
+        # and a bulleted list, then bold list item headers and separate trailing closing sign-offs.
+        split_lines = text.split("\n")
+        in_fence = False
+        for idx, line in enumerate(split_lines):
+            if line.lstrip().startswith("```"):
+                in_fence = not in_fence
+                continue
+            if in_fence or "|" in line or not line.strip():
+                continue
+            if not re.match(r"^\s*(?:[-*+•]|\d{1,2}[.)]|#{1,6})\s+", line) and re.match(
+                r"^\s*(?!(?:Note|Important|Tip|Warning|Caution|Summary|Disclaimer)\b)\*{0,2}[A-Z][A-Za-z0-9 /&,'’()-]{1,45}?\*{0,2}:[ \t]+\S",
+                line,
+                flags=re.IGNORECASE,
+            ):
+                prev_non_empty = next((split_lines[p].strip() for p in range(idx - 1, -1, -1) if split_lines[p].strip()), "")
+                next_line = split_lines[idx + 1].strip() if idx + 1 < len(split_lines) else ""
+                if (
+                    prev_non_empty.endswith(":")
+                    and not re.match(r"^(?:[-*+•]|\d{1,2}[.)])\s+", prev_non_empty)
+                    and re.match(r"^[-*+•]\s+", next_line)
+                ):
+                    line = "- " + line.lstrip()
+            line = re.sub(
+                r"^(\s*\d{1,2}\.\s+)(?!\*\*)(?!(?:https?|mailto|tel):)([A-Za-z0-9 /&,'’()-]{1,45}?):([ \t]+)",
+                r"\1**\2**:\3",
+                line,
+            )
+            line = re.sub(
+                r"^(\s*-\s+)(?!\*\*)(?!(?:https?|mailto|tel):)([A-Z][A-Za-z0-9 /&,'’()-]{1,45}?):([ \t]+)",
+                r"\1**\2**:\3",
+                line,
+            )
+            if re.match(r"^\s*(?:[-*+•]|\d{1,2}[.)])\s+", line):
+                line = re.sub(
+                    r"([.!?](?:\s*\[\d+(?:\s*[,;]\s*\d+)*\]\.?)?)\s+((?:Please\s+feel\s+free|Feel\s+free\s+to|Please\s+let\s+me\s+know|Let\s+me\s+know\s+if|If\s+you\s+need\s+(?:any\s+)?(?:further|more|additional)\s+(?:assistance|help|information|clarification)|If\s+you\s+have\s+any\s+(?:further|other|more)\s+questions|Do\s+not\s+hesitate\s+to\s+reach\s+out|Don['’]t\s+hesitate\s+to\s+reach\s+out|Should\s+you\s+need\s+any\s+further|Would\s+you\s+like\s+more\s+detail)\b.*)$",
+                    r"\1\n\n\2",
+                    line,
+                    flags=re.IGNORECASE,
+                )
+            split_lines[idx] = line
+        text = "\n".join(split_lines)
+
         # For substantive unstructured replies (>= 35 words), ensure key statutory anchors or headings are bolded
         if len(text.split()) >= 35 and not ("**" in text or re.search(r"\d+\.\s|\n-\s", text)):
             text = re.sub(r"\b(Section\s+\d+[A-Za-z]?|Ekitundu\s+\d+|Kifungu\s+cha\s+\d+|Ekicweka\s+\d+|Dul\s+\d+)\b", r"**\1**", text, flags=re.IGNORECASE)
@@ -1370,57 +1478,6 @@ class OutputGuard:
                 )
             if "**" not in text and not re.search(r"\d+\.\s|\n-\s", text):
                 text = re.sub(r"^([A-Z][a-zA-Z0-9 \'\-]{3,35}?)([:,\.][ \t]+)", r"**\1**\2", text)
-
-        # Bold numbered list headers, separate smashed bullet items, and unsmash inline continuation steps
-        # while skipping pipe-table rows and fenced code blocks.
-        unsmashed_lines: list[str] = []
-        in_fence = False
-        for line in text.split("\n"):
-            if line.lstrip().startswith("```"):
-                in_fence = not in_fence
-                unsmashed_lines.append(line)
-                continue
-            if not in_fence and "|" not in line:
-                line = re.sub(
-                    r"^(\s*\d{1,2}\.\s+)(?!\*\*)([A-Za-z0-9 /&,'’()-]{1,45}?):([ \t]+)",
-                    r"\1**\2**:\3",
-                    line,
-                )
-                line = re.sub(
-                    r"([;:])[ \t]*([*\-•])(?!\*)[ \t]*(\*{0,2}[A-Za-z])",
-                    r"\1\n\n- \3",
-                    line,
-                )
-                line = re.sub(
-                    r"([a-z0-9\)])\.[ \t]*([*\-•])(?!\*)[ \t]*(\*{0,2}[A-Za-z])",
-                    r"\1.\n\n- \3",
-                    line,
-                )
-                code_spans: list[str] = []
-
-                def _mask_code(m: re.Match[str]) -> str:
-                    code_spans.append(m.group(0))
-                    return f"\x00CODE{len(code_spans) - 1}\x00"
-
-                masked_line = re.sub(r"`[^`]+`", _mask_code, line)
-                masked_line = re.sub(
-                    r"(?<=\S)[ \t]+[►▪▫•][ \t]+(\*{0,2}[A-Za-z0-9])",
-                    r"\n\n- \1",
-                    masked_line,
-                )
-                for idx, span in enumerate(code_spans):
-                    masked_line = masked_line.replace(f"\x00CODE{idx}\x00", span)
-                line = masked_line
-                lead_m = re.match(r"^(\s*)1\.\s+", line)
-                if lead_m:
-                    lead_indent = lead_m.group(1)
-                    line = re.sub(
-                        r"(?i)(?<!\bsection)(?<!\bsec\.)(?<!\barticle)(?<!\bart\.)(?<!\bcap\.)(?<!\bschedule)(?<!\bform)(?<!\bpart)(?<!\brule)(?<!\btable)(?<!\bband)(?<!\bmethod)(?<!\btier)(?<!\bpage)(?<!\bitem)(?<!\bugx)(?<!\busd)(?<!\bshs)(?<!\bto)(?<!\band)(?<!\bor)[ \t]+([2-9]|1[0-2])[\.\)][ \t]+(?!Jan(?:uary)?\b|Feb(?:ruary)?\b|Mar(?:ch)?\b|Apr(?:il)?\b|May\b|Jun(?:e)?\b|Jul(?:y)?\b|Aug(?:ust)?\b|Sep(?:t(?:ember)?)?\b|Oct(?:ober)?\b|Nov(?:ember)?\b|Dec(?:ember)?\b)(\*{0,2}[A-Z])",
-                        rf"\n\n{lead_indent}\1. \2",
-                        line,
-                    )
-            unsmashed_lines.append(line)
-        text = "\n".join(unsmashed_lines)
         # Ensure blank line before and after markdown headings
         text = re.sub(r"([^\n])\n(#{1,4}\s+)", r"\1\n\n\2", text)
         text = re.sub(r"(#{1,4}\s+[^\n]+)\n([^\n#])", r"\1\n\n\2", text)

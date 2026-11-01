@@ -2215,11 +2215,15 @@ def _apply_output_guards(
     escalate, esc_reason = output_guard.should_escalate(faith, hits) if hits else (False, "")
 
     claim_report: dict[str, Any] | None = None
+    structure_revised = False
+    if reply and isinstance(reply, str):
+        norm = output_guard.normalize_structure(reply)
+        if isinstance(norm, str):
+            if norm.strip() != reply.strip():
+                structure_revised = True
+            reply = norm
     if reply and hits and citations:
         if isinstance(reply, str):
-            norm = output_guard.normalize_structure(reply)
-            if isinstance(norm, str):
-                reply = norm
             if not ChatModel._has_inline_citations(reply):
                 contact_idx = reply.find("If you get stuck at any step")
                 if contact_idx != -1:
@@ -2390,6 +2394,7 @@ def _apply_output_guards(
         "handoff": handoff,
         "ticket_id": ticket_id,
         "revised": revised,
+        "structure_revised": structure_revised,
         "claim_report": claim_report,
         "figure_lock": figure_lock,
     }
@@ -3217,10 +3222,29 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     and not re.search(r"(?:\n\s*\n|[.!?](?:\s|$))", pending_stream_chunk)
                 ):
                     return ""
-                sanitized = _output_guard.sanitize(pending_stream_chunk)
+                raw_chunk = pending_stream_chunk
                 pending_stream_chunk = ""
+                sanitized = _output_guard.sanitize(raw_chunk)
                 if not sanitized:
                     return ""
+                lead_len = len(raw_chunk) - len(raw_chunk.lstrip())
+                trail_len = len(raw_chunk) - len(raw_chunk.rstrip())
+                lead_raw = raw_chunk[:lead_len]
+                trail_raw = raw_chunk[len(raw_chunk) - trail_len :] if trail_len else ""
+                lead_ws = (
+                    "\n\n"
+                    if "\n\n" in lead_raw
+                    else ("\n" if "\n" in lead_raw else (" " if lead_raw else ""))
+                )
+                trail_ws = (
+                    "\n\n"
+                    if "\n\n" in trail_raw
+                    else ("\n" if "\n" in trail_raw else (" " if trail_raw else ""))
+                )
+                if lead_ws and full_reply and not full_reply[-1].isspace():
+                    sanitized = f"{lead_ws}{sanitized}"
+                if trail_ws and not sanitized[-1].isspace():
+                    sanitized = f"{sanitized}{trail_ws}"
                 saw_streamed_token = True
                 full_reply += sanitized
                 return sanitized
@@ -3256,8 +3280,13 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             # still counts as output: a reply held from its first word is an
             # answer, not a model that said nothing.
             on_screen = full_reply
-            held_text = _output_guard.sanitize(release_gate.drain())
+            raw_held = release_gate.drain()
+            held_text = _output_guard.sanitize(raw_held)
             if held_text:
+                if full_reply and not full_reply[-1].isspace() and not held_text[0].isspace():
+                    lead_held = raw_held[: len(raw_held) - len(raw_held.lstrip())]
+                    sep = "\n\n" if "\n\n" in lead_held else ("\n" if "\n" in lead_held else " ")
+                    held_text = f"{sep}{held_text}"
                 full_reply += held_text
                 saw_streamed_token = True
 
@@ -3375,8 +3404,8 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                         yield ("revision", full_reply)
                         on_screen = full_reply
 
-            # Cleared now: release what was held, unless a revision already did.
-            if held_text and full_reply != on_screen:
+            # Cleared now: release what was held, or sync cross-chunk structural normalization.
+            if (held_text or guard.get("structure_revised")) and full_reply != on_screen:
                 if full_reply.startswith(on_screen):
                     yield ("token", full_reply[len(on_screen):])
                 else:
