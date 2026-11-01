@@ -260,10 +260,10 @@ tests:
             value: 80
 
   # A corpus last read 39 days ago is stale, whatever its own index says.
-  - interval: 1h
+  - interval: 1m
     input_series:
       - series: 'ura_crawl_last_full_run_timestamp_seconds'
-        values: '-3369600x72'   # 39 days before the epoch this test starts from
+        values: '-3369600x180'   # 39 days before the epoch this test starts from
     alert_rule_test:
       - eval_time: 2h
         alertname: UraCrawlCorpusStale
@@ -277,10 +277,10 @@ tests:
               runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/crawl-operations.md#the-corpus-is-stale"
 
   # A crawl from 30 days ago is on time: the alert must stay quiet.
-  - interval: 1h
+  - interval: 1m
     input_series:
       - series: 'ura_crawl_last_full_run_timestamp_seconds'
-        values: '-2592000x72'
+        values: '-2592000x180'
     alert_rule_test:
       - eval_time: 2h
         alertname: UraCrawlCorpusStale
