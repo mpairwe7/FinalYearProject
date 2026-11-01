@@ -65,7 +65,8 @@ _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
 _STATUTORY_PART_RE = re.compile(
     r"^\s*((?:PART|CHAPTER)\s+[IVXLCDM0-9]+[^\n]{0,90}|MEMORANDUM\b[^\n]{0,60}|"
     r"(?:FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH)?\s*SCHEDULE(?:\s+[0-9IVX]+)?\b[^\n]{0,80}|"
-    r"ARRANGEMENT\s+OF\s+(?:SECTIONS|CLAUSES|REGULATIONS|ARTICLES)\b[^\n]{0,60})\s*$",
+    r"ARRANGEMENT\s+OF\s+(?:SECTIONS|CLAUSES|REGULATIONS|ARTICLES)\b[^\n]{0,60}|"
+    r"(?:LUGANDA|RUNYANKORE|RUNYANKOLE|KISWAHILI|SWAHILI|ENGLISH|ACHOLI))\s*$",
     re.IGNORECASE,
 )
 _STATUTORY_CLAUSE_RE = re.compile(
@@ -74,6 +75,12 @@ _STATUTORY_CLAUSE_RE = re.compile(
     r"Application|Imposition|Exemption|Rate|Duty|Tax|Offences?|Penalt\w+|Regulations?)\b[^\n]{0,90})\s*$",
     re.IGNORECASE,
 )
+# Standalone numbered or unnumbered Q&A headings in URA taxpayer handbooks
+# across English, Luganda, Runyankole, and Swahili (e.g. "1. What is EFRIS?",
+# "**1. What is EFRIS?**", "EFRIS kye ki?", "1. EFRIS Nenki?", "1.EFRIS ni nini?").
+_QA_HEADING_RE = re.compile(
+    r"^\s*\*{0,2}((?:\d{1,2}\s*[.)]\s*)?[A-Z][^\n?*]{4,100}\?)\*{0,2}\s*$"
+)
 # A paragraph is a maximal run of non-blank lines. Tables are treated as a
 # single paragraph so they survive as one chunk.
 _PARAGRAPH_SPLIT = re.compile(r"\n[ \t]*\n+")
@@ -81,16 +88,22 @@ _TABLE_LINE_RE = re.compile(r"^\s*\|.+\|\s*$")
 
 
 def _inject_statutory_headings(text: str) -> str:
-    """Promote plain-text statutory Part/Schedule/Section/Clause lines to markdown headings."""
+    """Promote plain-text statutory Part/Schedule/Section/Clause and Q&A lines to markdown headings."""
     out_lines: list[str] = []
     for line in text.splitlines():
         stripped = line.strip()
-        if stripped and len(stripped) <= 110 and not _TABLE_LINE_RE.match(stripped):
-            if _STATUTORY_PART_RE.match(stripped):
-                out_lines.append(f"# {stripped}")
+        if (
+            stripped
+            and not stripped.startswith("#")
+            and len(stripped) <= 115
+            and not _TABLE_LINE_RE.match(stripped)
+        ):
+            unbolded = stripped.strip("*").strip()
+            if _STATUTORY_PART_RE.match(unbolded):
+                out_lines.append(f"# {unbolded}")
                 continue
-            if _STATUTORY_CLAUSE_RE.match(stripped):
-                out_lines.append(f"## {stripped}")
+            if _STATUTORY_CLAUSE_RE.match(unbolded) or _QA_HEADING_RE.match(stripped):
+                out_lines.append(f"## {unbolded}")
                 continue
         out_lines.append(line)
     return "\n".join(out_lines)
@@ -103,17 +116,17 @@ def _split_headings(markdown: str) -> list[tuple[list[str], str]]:
     section, e.g. ``["Taxation Handbook", "Part A", "1.2 Origin of Taxation"]``.
     This is what powers the contextual prefix.
     """
-    if markdown and not _HEADING_RE.search(markdown):
+    if markdown:
         markdown = _inject_statutory_headings(markdown)
     sections: list[tuple[list[str], str]] = []
-    trail: list[str] = []
+    trail: list[tuple[int, str]] = []
     current_body: list[str] = []
 
     def _flush():
         if current_body:
             body = "\n".join(current_body).strip()
             if body:
-                sections.append((trail.copy(), body))
+                sections.append(([t for _, t in trail], body))
             current_body.clear()
 
     pos = 0
@@ -126,10 +139,10 @@ def _split_headings(markdown: str) -> list[tuple[list[str], str]]:
         level = len(m.group(1))
         title = m.group(2).strip()
 
-        # Pop deeper levels off the trail.
-        while len(trail) >= level:
+        # Pop headings at the same or deeper level off the trail.
+        while trail and trail[-1][0] >= level:
             trail.pop()
-        trail.append(title)
+        trail.append((level, title))
         pos = m.end()
 
     # Tail after last heading.
@@ -257,7 +270,7 @@ def extract_markdown(pdf_path: Path) -> str | None:
                     for row in table[1:]:
                         cols = [str(c or "").replace("\n", " ") for c in row]
                         table_md_parts.append("| " + " | ".join(cols) + " |")
-                
+
                 content_parts = [text.strip()] if text.strip() else []
                 if table_md_parts:
                     content_parts.append("\n".join(table_md_parts))
@@ -305,9 +318,29 @@ def extract_markdown(pdf_path: Path) -> str | None:
             show_progress=False,
             table_strategy="lines_strict",
         )
-        return str(md) if md else None
+        if md and str(md).strip():
+            return str(md)
+    except Exception:
+        pass
+
+    # 4. Fallback: pymupdf (fitz) direct page text extraction
+    try:
+        import pymupdf  # type: ignore[import-untyped]
+
+        doc = pymupdf.open(str(pdf_path))
+        try:
+            pages_md = [
+                page.get_text("text").strip()
+                for page in doc
+                if page.get_text("text").strip()
+            ]
+            if pages_md:
+                return "\n\n---\n\n".join(pages_md)
+        finally:
+            doc.close()
     except Exception:
         return None
+    return None
 
 
 def chunk_markdown(

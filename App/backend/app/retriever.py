@@ -771,34 +771,46 @@ def _hint_matches_blob(hint: str, blob: str) -> bool:
 def apply_preference_boost(
     hits: list[dict[str, Any]],
     prefer: dict[str, Any] | None,
+    *,
+    locale: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Soft-boost hits that match query-time metadata preferences (G17, §9.G.3).
+    """Soft-boost hits that match query-time metadata preferences (G17, §9.G.3) and locale (Stage 3b2).
 
     Hard filters can empty the result set when the preferred edition is
     missing from the collection. A small additive boost keeps recall and
     still surfaces the current FY / mentioned tax type / preferred section
     first, while soft-demoting sector-specific guides (-0.06) when the query
-    does not mention a sector.
+    does not mention a sector, and boosting native vernacular PDF/FAQ hits
+    (+0.08) when their ``language`` matches a non-English *locale*.
 
     Idempotent across repeated invocations on the same hit dicts (e.g. when
     ``_merge_translated_leg`` re-applies preferences after merging legs) by
     anchoring adjustments to ``_raw_score_norm`` and ``_raw_score_rrf``.
     """
-    if not hits or not prefer:
+    if not hits:
         return hits
+    prefer = prefer or {}
     want_fy = str(prefer.get("fiscal_year") or "").strip()
     want_tax = str(prefer.get("tax_type") or "").strip().lower()
     demote_sector = bool(prefer.get("demote_sector_guides"))
     preferred_sections: list[str] = [
         str(s).lower() for s in (prefer.get("preferred_sections") or []) if s
     ]
-    if not want_fy and not want_tax and not demote_sector and not preferred_sections:
+    loc = (locale or "").strip().lower().split("-")[0]
+    has_locale_pref = loc in ("lg", "nyn", "sw", "ach", "en")
+    if not want_fy and not want_tax and not demote_sector and not preferred_sections and not has_locale_pref:
         return hits
 
     any_adjusted = False
     for hit in hits:
         boost = 0.0
         source_str = str(hit.get("source") or "")
+        hit_lang = str(hit.get("language") or "").strip().lower()
+        if loc in ("lg", "nyn", "sw", "ach") and hit_lang == loc:
+            boost += 0.08
+        elif loc in ("", "en") and hit_lang in ("lg", "nyn", "sw", "ach"):
+            boost -= 0.08
+
         is_demoted_guide = demote_sector and is_sector_guide_source(source_str)
         if is_demoted_guide:
             boost += SECTOR_GUIDE_DEMOTION
@@ -2193,6 +2205,7 @@ class HybridRetriever:
                         "valid_from": p.get("valid_from", ""),
                         "valid_to": p.get("valid_to", ""),
                         "superseded_by": p.get("superseded_by", ""),
+                        "language": p.get("language", ""),
                         "tax_type": p.get("tax_type", ""),
                         "tag": p.get("tag", ""),
                         **_provenance_fields(p),
@@ -2317,7 +2330,23 @@ class HybridRetriever:
                         locale=locale,
                     )
                 if en_hits:
-                    boosted_en = apply_preference_boost(en_hits, plan_en["prefer"])
+                    vernacular_hits = self.search(
+                        query,
+                        top_k=top_k,
+                        prefetch_limit=prefetch_limit,
+                        filters=merged_filters_en or None,
+                        subject=subject,
+                        locale=locale,
+                    )
+                    native_vernacular = [
+                        h for h in vernacular_hits if str(h.get("language") or "").strip().lower() == loc
+                    ]
+                    combined_en = (
+                        merge_retrieval_hits([en_hits, native_vernacular], top_k=fetch_top_k_en, per_intent=False)
+                        if native_vernacular
+                        else en_hits
+                    )
+                    boosted_en = apply_preference_boost(combined_en, plan_en["prefer"], locale=locale)
                     return boosted_en[:top_k]
 
         plan = plan_retrieval(query, history=history)
@@ -2350,7 +2379,7 @@ class HybridRetriever:
                 subject=subject,
                 locale=locale,
             )
-        hits = apply_preference_boost(hits, plan["prefer"])
+        hits = apply_preference_boost(hits, plan["prefer"], locale=locale)
         as_of_date = str(plan["prefer"].get("as_of_date") or "")
         if as_of_date:
             hits = filter_candidates_as_of(hits, as_of_date)
@@ -2424,11 +2453,16 @@ class HybridRetriever:
         # yields 0% relevant top hits; using en_hits directly prevents context
         # contamination. For Swahili, merge both legs.
         if loc in ("lg", "nyn", "ach") and en_hits:
-            merged = en_hits[:fetch_top_k_en]
+            native_hits = [h for h in hits if str(h.get("language") or "").strip().lower() == loc]
+            merged = (
+                merge_retrieval_hits([en_hits, native_hits], top_k=fetch_top_k_en, per_intent=False)
+                if native_hits
+                else en_hits[:fetch_top_k_en]
+            )
         else:
             # One question asked two ways, not two intents: a single cut (G128).
             merged = merge_retrieval_hits([en_hits, hits], top_k=fetch_top_k_en, per_intent=False)
-        merged = apply_preference_boost(merged, en_prefer)[:top_k]
+        merged = apply_preference_boost(merged, en_prefer, locale=locale)[:top_k]
 
         def _best(rows: list[dict[str, Any]]) -> float:
             vals = [r for h in rows if (r := hit_relevance(h)) is not None]

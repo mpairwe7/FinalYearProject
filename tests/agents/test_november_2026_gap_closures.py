@@ -602,3 +602,77 @@ def test_graph_waiting_user_surfaces_pending_action_in_turn_result() -> None:
     assert res["pending_action"]["action_type"] == "submit_vat_return"
     assert res["pending_action"]["authorized"] is False
 
+
+def test_efris_handbooks_en_lg_nyn_sw_chunking_and_vernacular_normalization(tmp_path) -> None:
+    """Verify URA EFRIS Handbook PDFs in en, lg, nyn, and sw chunk into JSONL with clean headings and language tags."""
+    import shutil
+    from pathlib import Path
+
+    from app.pdf_corpus import (
+        _chunk_pdf_records,
+        _sha256_file,
+        export_pdf_chunks_to_jsonl,
+        ingest_pdf_jsonls,
+        language_from_pdf_name,
+        tax_type_from_pdf_name,
+    )
+    from app.retriever import apply_preference_boost
+
+    expected_handbooks = {
+        "URA-EFRIS-Handbook-FY2026-27-English.pdf": ("en", "1. What is EFRIS?"),
+        "URA-EFRIS-Handbook-FY2026-27-Luganda.pdf": ("lg", "EFRIS kye ki?"),
+        "URA-EFRIS-Handbook-FY2026-27-Runyakole.pdf": ("nyn", "1. EFRIS Nenki?"),
+        "URA-EFRIS-Handbook-FY2026-27-Swahili.pdf": ("sw", "1.EFRIS ni nini?"),
+    }
+    repo_pdf_dir = Path(__file__).resolve().parents[2] / "Data" / "pdfs"
+    sub_pdf_dir = tmp_path / "pdfs"
+    sub_jsonl_dir = tmp_path / "pdf_jsonl"
+    sub_pdf_dir.mkdir()
+
+    for filename, (expected_lang, expected_heading) in expected_handbooks.items():
+        stem = Path(filename).stem
+        assert language_from_pdf_name(stem) == expected_lang
+        assert tax_type_from_pdf_name(stem) == "efris"
+        src_pdf = repo_pdf_dir / filename
+        assert src_pdf.is_file(), f"Missing {src_pdf}"
+        shutil.copy2(src_pdf, sub_pdf_dir / filename)
+
+        recs = list(_chunk_pdf_records(src_pdf, _sha256_file(src_pdf)))
+        assert len(recs) >= 15, f"{filename} produced only {len(recs)} chunks"
+        assert recs[0]["fiscal_year"] == "FY2026-27"
+        assert recs[0]["language"] == expected_lang
+        assert recs[0]["tax_type"] == "efris"
+        assert expected_heading in recs[0]["contextual_prefix"]
+        # Ensure sibling Q&A headings do not nest under the first question
+        if len(recs) > 1 and recs[1]["heading_trail"]:
+            assert not (
+                expected_heading in recs[1]["heading_trail"] and len(recs[1]["heading_trail"]) > 2
+            )
+        # Ensure CP1252 '?' apostrophe/quote corruption is repaired
+        assert "ng?eno" not in recs[0]["text"]
+        assert "o?kuyamba" not in recs[0]["text"]
+        assert "?Electronic" not in recs[0]["text"]
+        assert "?Kifaa" not in recs[0]["text"]
+
+    stats = export_pdf_chunks_to_jsonl(sub_pdf_dir, sub_jsonl_dir)
+    assert stats["sources"] == 4
+    assert stats["empty_sources"] == 0
+    assert stats["records"] >= 80
+
+    docs = ingest_pdf_jsonls(sub_pdf_dir, sub_jsonl_dir)
+    assert len(docs) == stats["records"]
+    assert {d["language"] for d in docs} == {"en", "lg", "nyn", "sw"}
+    assert {d["tax_type"] for d in docs} == {"efris"}
+    assert {d["tag"] for d in docs} == {"efris"}
+
+    # Verify locale-aware preference boosting elevates matching vernacular handbook chunks
+    sample_hits = [
+        {"id": "en-1", "source": "URA-EFRIS-Handbook-FY2026-27-English.pdf", "language": "en", "tax_type": "efris", "score_norm": 0.75},
+        {"id": "nyn-1", "source": "URA-EFRIS-Handbook-FY2026-27-Runyakole.pdf", "language": "nyn", "tax_type": "efris", "score_norm": 0.72},
+    ]
+    boosted_nyn = apply_preference_boost([dict(h) for h in sample_hits], {"tax_type": "efris"}, locale="nyn")
+    assert boosted_nyn[0]["id"] == "nyn-1"
+
+    boosted_en = apply_preference_boost([dict(h) for h in sample_hits], {"tax_type": "efris"}, locale="en")
+    assert boosted_en[0]["id"] == "en-1"
+
