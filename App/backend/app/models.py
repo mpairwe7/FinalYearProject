@@ -3,7 +3,7 @@
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +54,19 @@ class ChatRequest(BaseModel):
             "counts as a choice and en as a default (see app.language_state)."
         ),
     )
+
+    @field_validator("locale", mode="before")
+    @classmethod
+    def _normalize_optional_locale(cls, v: Any) -> str | None:
+        if v is None:
+            return None
+        s = str(v).strip().replace("_", "-")
+        if not s or s.lower() == "auto":
+            return None
+        parts = s.split("-", 1)
+        if len(parts) == 2 and parts[1]:
+            return f"{parts[0].lower()}-{parts[1].upper()}"
+        return parts[0].lower()
     attachment_ids: list[Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")]] = Field(
         default_factory=list,
         max_length=3,

@@ -220,6 +220,14 @@ class TestRecordingsReachGeminiOnlyThroughItsPolicy:
         monkeypatch.setattr("httpx.post", lambda *_a, **_k: _Answer(text=""))
         assert _transcribe(built_speech, "en") == ""
 
+    def test_multilingual_gemini_opt_in_allows_sunbird_locales_and_autodetect(
+        self, built_speech, gemini_audio, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("STT_ALLOW_MULTILINGUAL_GEMINI", "true")
+        assert _transcribe(built_speech, "lg") == "what is the vat rate"
+        assert _transcribe(built_speech, None) == "what is the vat rate"
+        assert len(gemini_audio) == 2
+
 
 class _EveryTierDown:
     """A SpeechModel with nothing to reach, shaped as in ``test_asr_no_speech.py``."""

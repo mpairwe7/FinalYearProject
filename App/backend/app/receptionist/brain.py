@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import json
 import logging
+import os
 import re
 import time
 from functools import lru_cache
@@ -590,10 +591,19 @@ class UraReceptionistBrain(LLMService):
             self.room.state.offer_interrupted = False
             self._bot_speaking = False
             await self.push_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
-            if self.room.state.language_source in ("default", "auto"):
-                from ..query import detect_language
-                from .router import announce_language
+            from ..query import detect_language
+            from .language import detect_explicit_request
+            from .router import announce_language
 
+            explicit_lang = detect_explicit_request(frame.text, KNOWN_LANGUAGES)
+            if explicit_lang in KNOWN_LANGUAGES and explicit_lang != self.language:
+                self.room.state.locale = explicit_lang
+                self.room.state.language_switches += 1
+                lang_msg = announce_language(self.room, explicit_lang, "explicit")
+                await self.push_frame(
+                    OutputTransportMessageUrgentFrame(lang_msg), FrameDirection.DOWNSTREAM
+                )
+            elif self.room.state.language_source in ("default", "auto"):
                 det_lang = detect_language(frame.text, default_lang=self.language)
                 if det_lang in KNOWN_LANGUAGES and det_lang != self.language:
                     self.room.state.locale = det_lang
@@ -1195,6 +1205,16 @@ class UraReceptionistBrain(LLMService):
             _VLLM_BRIDGE_DOWN_UNTIL = time.monotonic() + 15.0
             logger.debug("Luganda query extraction failed", exc_info=True)
 
+        if os.getenv("RECEPTIONIST_ALLOW_CLOUD_LLM", "false").strip().lower() in ("1", "true", "yes", "on"):
+            try:
+                from ..query import english_retrieval_query
+
+                translated_en = english_retrieval_query(normalized or luganda_query, "lg")
+                if translated_en and translated_en.strip():
+                    return translated_en.strip()
+            except Exception:
+                logger.debug("Cloud fallback Luganda query extraction failed", exc_info=True)
+
         return normalized or luganda_query
 
     def _synthesize_luganda_reply(self, context_text: str, question: str) -> str:
@@ -1271,7 +1291,7 @@ class UraReceptionistBrain(LLMService):
             message=english_query,
             conversation_id=self.room.state.conversation_id,
             session_id=self.room.call_id,
-            top_k=4,
+            top_k=6,
             locale="en",
             # The English pivot of a Luganda question: answer it in English,
             # never in the language the call's earlier turns were stored in.

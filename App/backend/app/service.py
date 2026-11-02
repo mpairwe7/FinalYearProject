@@ -3165,11 +3165,21 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
 
             def _pump_tokens() -> None:
                 try:
+                    stream_gen_locale = (
+                        "en"
+                        if (
+                            locale not in ("", "en")
+                            and not llm_module.is_available()
+                            and _cloud_llm_ready()
+                            and not llm_module.can_generate_in_locale(locale)
+                        )
+                        else locale
+                    )
                     stream_call_kwargs: dict[str, Any] = {
                         "query": rewritten_query,
                         "passages": hits,
                         "conversation_history": conversation_history or None,
-                        "locale": locale,
+                        "locale": stream_gen_locale,
                         "personalization_context": str(personalization_context or ""),
                         "cancel_event": cancel_event,
                         "tone_hint": tone_hint,
@@ -13153,11 +13163,21 @@ class ChatModel:
                             gen_pers_ctx = f"{gen_pers_ctx}\n\n{web_verified_facts}".strip()
                         if live_check_notice:
                             gen_pers_ctx = f"{gen_pers_ctx}\n\n{live_check_notice}".strip()
+                        draft_gen_locale = (
+                            "en"
+                            if (
+                                locale not in ("", "en")
+                                and not self._llm_available
+                                and _cloud_llm_ready()
+                                and not llm_module.can_generate_in_locale(locale)
+                            )
+                            else locale
+                        )
                         gen_call_kwargs: dict[str, Any] = {
                             "query": llm_query,
                             "passages": hits,
                             "conversation_history": conversation_history or None,
-                            "locale": locale,
+                            "locale": draft_gen_locale,
                             "personalization_context": gen_pers_ctx,
                             "tone_hint": tone_hint,
                             "context_summary": context_summary,

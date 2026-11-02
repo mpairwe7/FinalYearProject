@@ -1051,6 +1051,20 @@ class SpeechModel:
         """
         t_start = time.perf_counter()
         result = self._transcribe_chain(audio_bytes, sample_rate, language, with_words=with_words)
+        if result.text and result.text.strip():
+            try:
+                from .language_state import normalize_locale_tag
+                from .query import detect_language
+                from .receptionist.language import lexical_hits
+
+                norm_lang = normalize_locale_tag(result.language or language or "") or (language or "en")
+                det_lang = detect_language(result.text, default_lang=norm_lang)
+                if not language or det_lang == norm_lang or lexical_hits(result.text).get(det_lang, 0) >= 2:
+                    result.language = det_lang
+                else:
+                    result.language = norm_lang
+            except Exception:
+                pass
         if result.duration_s is None:
             result.duration_s = _input_duration_s(audio_bytes, sample_rate)
         if result.latency_s is None:

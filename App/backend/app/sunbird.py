@@ -155,6 +155,25 @@ _SUNBIRD_TO_LOCALE: dict[str, str] = {
 # One client per account token (lazily built, reused). A call that fails on the
 # primary account is retried on the fallback account for resilience.
 _clients: dict[str, httpx.Client] = {}
+_quota_cooldown_until: dict[str, float] = {}
+
+
+def _is_quota_exhausted_429(response: httpx.Response | None) -> bool:
+    """True when a 429 indicates a multi-minute/daily quota exhaustion rather than a brief burst."""
+    if response is None or response.status_code != 429:
+        return False
+    retry_after = response.headers.get("Retry-After", "")
+    if retry_after:
+        try:
+            if float(retry_after) > 15.0:
+                return True
+        except ValueError:
+            pass
+    try:
+        body_lower = (response.text or "").lower()
+    except Exception:
+        body_lower = ""
+    return "daily quota" in body_lower or "quota exceeded" in body_lower or "retry_after_seconds" in body_lower
 
 
 def _account_tokens() -> list[str]:
@@ -238,8 +257,14 @@ def _post(path: str, **kwargs: Any) -> httpx.Response:
     tokens = _account_tokens()
     if not tokens:
         raise RuntimeError("no Sunbird token configured")
+    if not _clients:
+        _quota_cooldown_until.clear()
+    now = time.monotonic()
+    active_tokens = [t for t in tokens if _quota_cooldown_until.get(t, 0.0) <= now]
+    if not active_tokens:
+        raise RuntimeError("all Sunbird accounts are in quota cooldown")
     last_exc: Exception | None = None
-    for idx, token in enumerate(tokens):
+    for idx, token in enumerate(active_tokens):
         for attempt in range(1, SUNBIRD_RETRIES + 1):
             _rewind_uploads(kwargs)
             try:
@@ -256,6 +281,13 @@ def _post(path: str, **kwargs: Any) -> httpx.Response:
                         "Sunbird auth failed (%d) on account #%d for %s", status, idx + 1, path
                     )
                     break  # retrying the same credentials cannot help
+                if status == 429 and _is_quota_exhausted_429(e.response):
+                    _quota_cooldown_until[token] = time.monotonic() + 900.0
+                    logger.warning(
+                        "Sunbird daily quota exhausted on account #%d for %s; cooling down token for 900s",
+                        idx + 1, path,
+                    )
+                    break
                 if status in _RETRYABLE_STATUSES and attempt < SUNBIRD_RETRIES:
                     delay = _retry_delay(attempt, e.response.headers.get("Retry-After", ""))
                     logger.warning(
@@ -385,7 +417,9 @@ def speech_to_text(
             or result.get("audio_transcription", "")
         )
         logger.info("Sunbird STT completed (language=%s, chars=%d)", language, len(transcription))
-        return {"text": transcription, "language": result.get("language", language)}
+        raw_lang = str(result.get("language") or language or "eng").strip().lower()
+        norm_lang = _SUNBIRD_TO_LOCALE.get(raw_lang, raw_lang) if transcription else result.get("language", language)
+        return {"text": transcription, "language": norm_lang}
     except httpx.HTTPStatusError as e:
         body = ""
         try:

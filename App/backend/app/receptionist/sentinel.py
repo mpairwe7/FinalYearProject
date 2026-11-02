@@ -302,7 +302,7 @@ class LanguageSentinel(FrameProcessor):  # type: ignore[misc,valid-type]
                 decoded = (text, lang)
 
         vote = LanguageVote(probs, top, speech_s, decoded[0] if decoded else "")
-        if self.method == "fusion":
+        if self.method == "fusion" or not probs:
             vote = fuse(vote)
         return vote, decoded
 
