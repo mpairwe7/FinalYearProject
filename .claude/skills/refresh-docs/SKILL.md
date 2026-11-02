@@ -112,3 +112,9 @@ List each file changed and the claim that was wrong, e.g.
 `App/docs/mcp-architecture.md — namespace table said 8 tools, registry has 19`.
 If a doc was checked and needed nothing, say so; silence reads as "not
 checked".
+
+## 6. Open-PR CI & CodeRabbit Review Gate
+
+Before merging any PR that updates code or documentation:
+1. Poll `gh pr checks <PR>` until all required checks pass (`0` failures).
+2. Query `gh api repos/<owner>/<repo>/pulls/<PR>/comments` for `coderabbitai[bot]` inline review comments, resolve every valid finding in code/docs, push to the PR branch, and re-verify CI.

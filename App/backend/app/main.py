@@ -2345,11 +2345,13 @@ async def voice_chat(
 
     transcript = repair_asr_entities(asr_result.text)
     base_lang = normalize_locale_tag(asr_result.language or language or "en") or (language or "en")
+    # A language sent by the caller, other than the default "en", is the caller's explicit choice.
+    caller_choice = language if "language" in request.query_params and language not in (None, "en") else None
     detected_lang = (
         resolve_turn_locale(
             transcript,
-            requested_locale=base_lang,
-            locale_explicit=False,
+            requested_locale=caller_choice or base_lang,
+            locale_explicit=caller_choice is not None,
         ).locale
         if transcript.strip()
         else base_lang

@@ -1054,13 +1054,13 @@ class SpeechModel:
         if result.text and result.text.strip():
             try:
                 from .language_state import normalize_locale_tag
-                from .query import detect_language
                 from .receptionist.language import lexical_hits
 
                 norm_lang = normalize_locale_tag(result.language or language or "") or (language or "en")
-                det_lang = detect_language(result.text, default_lang=norm_lang)
-                if not language or det_lang == norm_lang or lexical_hits(result.text).get(det_lang, 0) >= 2:
-                    result.language = det_lang
+                hits = lexical_hits(result.text)
+                ranked = sorted(((n, loc) for loc, n in hits.items() if n > 0), reverse=True)
+                if ranked and (not language or ranked[0][0] >= 2):
+                    result.language = ranked[0][1]
                 else:
                     result.language = norm_lang
             except Exception:

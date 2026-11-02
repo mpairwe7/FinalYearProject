@@ -1721,7 +1721,7 @@ export default function Page() {
               setDictationNotice(t('voice.didNotCatch'));
               return;
             }
-            const r = await transcribe(pcm16, localeExplicit ? locale : undefined, undefined, { domain: 'tax' });
+            const r = await transcribe(pcm16, locale, undefined, { domain: 'tax' });
             // Stopped, or voice mode left, while it was being transcribed.
             if (turn !== voiceTurnRef.current) return;
             heard = r.text?.trim() ?? '';
@@ -1746,17 +1746,12 @@ export default function Page() {
           // is one the app speaks. A code it does not ("unknown", a language
           // the picker does not offer) would be refused by /v1/chat, so the
           // reader's own language stands instead.
-          const matchedHeardLocale = LOCALE_OPTIONS.find((option) => option.value === heardLanguage)?.value;
-          const heardLocale = matchedHeardLocale ?? locale;
+          const heardLocale = LOCALE_OPTIONS.find((option) => option.value === heardLanguage)?.value ?? locale;
           // Held for one render, so it is sent by the effect that sees the
           // attachments as they are now (see below).
           queuedVoiceTurnRef.current = {
             text: heard,
-            options: {
-              locale: heardLocale,
-              localeExplicit: Boolean(matchedHeardLocale) || localeExplicit,
-              spoken: true,
-            },
+            options: { locale: heardLocale, localeExplicit: true, spoken: true },
           };
           setVoiceStage('queued');
         } else {
@@ -1930,7 +1925,7 @@ export default function Page() {
     } finally {
       setIsTransitioning(false);
     }
-  }, [isTransitioning, voiceMode, hasMediaRecorder, isRecording, locale, localeExplicit, speechState, setSpeechState, setMessage, stopReading, armMic, disarmMic, t]);
+  }, [isTransitioning, voiceMode, hasMediaRecorder, isRecording, locale, speechState, setSpeechState, setMessage, stopReading, armMic, disarmMic, t]);
 
   const handleCancelRecording = useCallback(() => {
     if (recorderRef.current) {

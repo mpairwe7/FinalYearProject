@@ -158,22 +158,37 @@ _clients: dict[str, httpx.Client] = {}
 _quota_cooldown_until: dict[str, float] = {}
 
 
-def _is_quota_exhausted_429(response: httpx.Response | None) -> bool:
-    """True when a 429 indicates a multi-minute/daily quota exhaustion rather than a brief burst."""
+def _quota_cooldown_seconds(response: httpx.Response | None) -> float:
+    """Cooldown duration (up to 900s) when a 429 indicates multi-minute/daily quota exhaustion, else 0.0."""
     if response is None or response.status_code != 429:
-        return False
+        return 0.0
     retry_after = response.headers.get("Retry-After", "")
     if retry_after:
         try:
-            if float(retry_after) > 15.0:
-                return True
+            val = float(retry_after)
+            if val >= 60.0:
+                return min(val, 900.0)
         except ValueError:
             pass
     try:
-        body_lower = (response.text or "").lower()
+        body_text = response.text or ""
+        body_lower = body_text.lower()
     except Exception:
+        body_text = ""
         body_lower = ""
-    return "daily quota" in body_lower or "quota exceeded" in body_lower or "retry_after_seconds" in body_lower
+    if "daily quota" in body_lower or "quota exceeded" in body_lower:
+        return 900.0
+    if "retry_after_seconds" in body_lower:
+        try:
+            data = response.json()
+            details = data.get("details") or []
+            if details and isinstance(details[0], dict):
+                sec = float(details[0].get("retry_after_seconds") or 0.0)
+                if sec >= 60.0:
+                    return min(sec, 900.0)
+        except Exception:
+            return 900.0
+    return 0.0
 
 
 def _account_tokens() -> list[str]:
@@ -281,13 +296,15 @@ def _post(path: str, **kwargs: Any) -> httpx.Response:
                         "Sunbird auth failed (%d) on account #%d for %s", status, idx + 1, path
                     )
                     break  # retrying the same credentials cannot help
-                if status == 429 and _is_quota_exhausted_429(e.response):
-                    _quota_cooldown_until[token] = time.monotonic() + 900.0
-                    logger.warning(
-                        "Sunbird daily quota exhausted on account #%d for %s; cooling down token for 900s",
-                        idx + 1, path,
-                    )
-                    break
+                if status == 429:
+                    cooldown_s = _quota_cooldown_seconds(e.response)
+                    if cooldown_s > 0.0:
+                        _quota_cooldown_until[token] = time.monotonic() + cooldown_s
+                        logger.warning(
+                            "Sunbird quota exhausted on account #%d for %s; cooling down token for %.0fs",
+                            idx + 1, path, cooldown_s,
+                        )
+                        break
                 if status in _RETRYABLE_STATUSES and attempt < SUNBIRD_RETRIES:
                     delay = _retry_delay(attempt, e.response.headers.get("Retry-After", ""))
                     logger.warning(
