@@ -443,14 +443,13 @@ export function formatCallCaptionText(text: string): string {
           .replace(/[ \t]+underscore[ \t]+/gi, '_')
           .replace(/[ \t]+dash[ \t]+/gi, '-')
           .replace(/[ \t]+plus[ \t]+/gi, '+')
-          .replace(/\s+/g, '')
-          .toLowerCase();
+          .replace(/\s+/g, '');
         return `${local}@${domain.toLowerCase()}`;
       },
     )
     .replace(
       /\b(services|info|support|help|helpdesk|customs|complaints|feedback|enquiries|inquiries|contact|admin|office|taxpayer|(?<=\b(?:e-?mail|mail|write[ \t]+to)[ \t]+)[A-Za-z0-9._%+-]+)[ \t]+at[ \t]+([a-z0-9-]+(?:\.[a-z0-9-]+)+\b)/gi,
-      (_m: string, local: string, domain: string) => `${local.toLowerCase()}@${domain.toLowerCase()}`,
+      (_m: string, local: string, domain: string) => `${local}@${domain.toLowerCase()}`,
     );
 
   // 4. Restore USSD codes, phone numbers, P.O. Box, TIN/PRN/NIN digit runs, and percentages
@@ -462,6 +461,10 @@ export function formatCallCaptionText(text: string): string {
           .split(/[ \t]+star[ \t]+/i)
           .map((seg) => seg.replace(/\s+/g, ''))
           .join('*')}#`,
+    )
+    .replace(
+      /\b0[ \t]+800,[ \t]*(\d{2,3}),[ \t]*(\d{2,3}),[ \t]*(\d{2,3})\b/g,
+      (_m: string, g1: string, g2: string, g3: string) => `0800 ${g1} ${g2} ${g3}`,
     )
     .replace(
       /\b0[ \t]+800,[ \t]*(\d{2,3}),[ \t]*([\d ]+)\b/g,
@@ -482,7 +485,11 @@ export function formatCallCaptionText(text: string): string {
       (_m: string, box: string) => `P.O. Box ${box.replace(/\s+/g, '')}`,
     )
     .replace(
-      /\b(TIN|PRN)[ \t]+(\d(?:[ \t,]+\d){8,14})\b/g,
+      /\b(TIN)[ \t]+(\d(?:[ \t,]+\d){8,9})\b/g,
+      (_m: string, label: string, digits: string) => `${label} ${digits.replace(/[\s,]+/g, '')}`,
+    )
+    .replace(
+      /\b(PRN)[ \t]+(\d(?:[ \t,]+\d){9,14})\b/g,
       (_m: string, label: string, digits: string) => `${label} ${digits.replace(/[\s,]+/g, '')}`,
     )
     .replace(
