@@ -513,23 +513,34 @@ class MCPClient:
             "tin": "tin_registration",
         }
         ns_key = scheme_to_ns.get(scheme, scheme)
-        transport = self._transports.get(
-            ns_key,
-            self._transports.get(scheme, self._transports.get("core", next(iter(self._transports.values())))),
-        )
-        if hasattr(transport, "read_resource"):
-            res = transport.read_resource(uri)
-            violations = screen_tool_result(res)
-            if violations:
-                hard = [
-                    v
-                    for v in violations
-                    if not v.startswith("indirect_prompt_injection:prompt_override_directive@")
-                ]
-                if hard:
-                    raise ValueError(f"Resource '{uri}' blocked by output safety screen: {hard[:3]}")
-                res = scrub_prompt_overrides_in_result(res)
-            return res
+        candidates: list[Any] = []
+        if uri == "payments://prn/status":
+            for k in (ns_key, scheme, "core"):
+                if k in self._transports and self._transports[k] not in candidates:
+                    candidates.append(self._transports[k])
+        else:
+            for k in (scheme, ns_key, "core"):
+                if k in self._transports and self._transports[k] not in candidates:
+                    candidates.append(self._transports[k])
+        if not candidates and self._transports:
+            candidates.append(next(iter(self._transports.values())))
+        for transport in candidates:
+            if hasattr(transport, "read_resource"):
+                try:
+                    res = transport.read_resource(uri)
+                except KeyError:
+                    continue
+                violations = screen_tool_result(res)
+                if violations:
+                    hard = [
+                        v
+                        for v in violations
+                        if not v.startswith("indirect_prompt_injection:prompt_override_directive@")
+                    ]
+                    if hard:
+                        raise ValueError(f"Resource '{uri}' blocked by output safety screen: {hard[:3]}")
+                    res = scrub_prompt_overrides_in_result(res)
+                return res
         raise LookupError(f"No transport supports reading resource URI '{uri}'")
 
     def list_prompts(self, namespace: str | None = None) -> list[dict[str, Any]]:

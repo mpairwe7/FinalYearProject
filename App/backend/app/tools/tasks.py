@@ -198,7 +198,8 @@ class TaskGetTool(Tool):
         from ..database import get_task
 
         task = get_task(task_id, tenant_id=tenant_id or "default")
-        if task is None or (user_id and task.get("user_id") and task.get("user_id") != user_id):
+        task_owner = str((task or {}).get("user_id") or "")
+        if task is None or (task_owner and task_owner != str(user_id or "")):
             # Not found and not-yours are deliberately the same answer:
             # distinguishing them would confirm a task id exists on
             # another tenant or user.
@@ -262,7 +263,8 @@ class TaskCancelTool(Tool):
 
         eff_tenant = tenant_id or "default"
         before = get_task(task_id, tenant_id=eff_tenant)
-        if before is None or (user_id and before.get("user_id") and before.get("user_id") != user_id):
+        before_owner = str((before or {}).get("user_id") or "")
+        if before is None or (before_owner and before_owner != str(user_id or "")):
             return {"ok": False, "error": "no such task"}
         after = cancel_task(task_id, tenant_id=eff_tenant) or before
         is_cancelled = after["status"] == "cancelled" and before["status"] != after["status"]

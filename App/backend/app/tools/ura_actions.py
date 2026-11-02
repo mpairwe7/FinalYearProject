@@ -144,11 +144,12 @@ class UraActionProposalTool(Tool):
                 raw = resp.read(_MAX_URA_API_RESPONSE_BYTES + 1)
                 if len(raw) > _MAX_URA_API_RESPONSE_BYTES:
                     return {
-                        "ok": False,
-                        "submitted": False,
+                        "ok": True,
+                        "submitted": True,
+                        "outcome": "unknown",
                         "configured": True,
                         "proposal": proposal,
-                        "error": "URA action API response exceeded byte cap",
+                        "result": {"warning": "URA action API response exceeded byte cap; request was transmitted."},
                     }
                 result = json.loads(raw.decode("utf-8"))
         except urllib.error.HTTPError as exc:

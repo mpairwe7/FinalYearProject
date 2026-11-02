@@ -38,6 +38,7 @@ Every HTTP request to a connector server must present a bearer credential. With 
 | Mode | Server reads | API (client) reads | Use |
 | --- | --- | --- | --- |
 | Shared token | `MCP_SERVER_TOKEN_<NAMESPACE>` | `MCP_SERVER_TOKEN_<NAMESPACE>` (the same name) | Prototype, internal link |
+| OBO Actor Assertion | `MCP_OBO_SIGNING_SECRET` (falls back to `MCP_SERVER_TOKEN_<NAMESPACE>`) | `MCP_OBO_SIGNING_SECRET` (falls back to `MCP_SERVER_TOKEN_<NAMESPACE>`) | Signs `Mcp-Actor-Assertion` (`sub`, `tid`, `scope`); **Rollout order**: set `MCP_OBO_SIGNING_SECRET` on all target MCP servers *first* (which accept both `MCP_OBO_SIGNING_SECRET` and `MCP_SERVER_TOKEN_<NAMESPACE>`), and set it on the API client *second* so in-flight `tools/call` requests never fail with `HEADER_MISMATCH` (`-32020`). |
 | OAuth 2.1 | `MCP_SERVER_OAUTH_ISSUER`, `MCP_SERVER_OAUTH_JWKS_URL`, `MCP_SERVER_RESOURCE`, optional `MCP_SERVER_OAUTH_SCOPES`, `MCP_SERVER_OAUTH_AUTHORIZATION_SERVERS` | `MCP_OAUTH_TOKEN_URL_<NAMESPACE>`, `MCP_OAUTH_CLIENT_ID_<NAMESPACE>`, `MCP_OAUTH_CLIENT_SECRET_<NAMESPACE>`, optional `MCP_OAUTH_SCOPE_<NAMESPACE>` | Production |
 | Anonymous | `MCP_SERVER_ALLOW_ANONYMOUS=true` | — | Local development only; refused in production; every caller is `public` |
 

@@ -416,7 +416,7 @@ class AssessLifeEventTaxOnboardingTool(Tool):
                 "nin": {
                     "type": "string",
                     "maxLength": 32,
-                    "description": "Optional 14-character Uganda National Identification Number (CM/CF...) for pre-flight check",
+                    "description": "Optional 14-character Uganda National Identification Number (CM/CF/CR...) for pre-flight check",
                 },
                 "stated_full_name": {
                     "type": "string",
@@ -563,7 +563,7 @@ class AssessLifeEventTaxOnboardingTool(Tool):
             rec_head = "Instant Individual TIN (NIRA NIN Pre-Flight Verification)"
             basis = "Registration of Persons Act 2015 (Cap. 332) & Tax Procedures Code Act s.135"
             steps = [
-                "1. Check your physical NIRA National ID card: copy the 14-character NIN (starts with CM for male or CF for female).",
+                "1. Check your physical NIRA National ID card: copy the 14-character NIN (starts with CM, CF, or CR).",
                 "2. Enter SURNAME and GIVEN NAME in the exact order printed on the NIRA card (do not swap them) and use the exact NIRA date of birth.",
                 "3. If NIRA's record has a spelling or DOB error, apply for a NIRA Change of Particulars before re-submitting on URA e-Tax.",
             ]

@@ -203,6 +203,8 @@ class MemoryStoreTool(Tool):
         clean_val, val_flagged = scan_retrieved_text(strip_hidden_control_and_bidi(str(value)))
         if key_flagged or val_flagged:
             return {"ok": False, "error": "rejected: prompt injection or control payload detected in memory fact"}
+        if not clean_key.strip():
+            return {"ok": False, "error": "key required after removing hidden control characters"}
 
         fact = UserFact(
             fact_id=str(uuid.uuid4()),

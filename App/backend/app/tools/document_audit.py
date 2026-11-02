@@ -76,6 +76,8 @@ class AuditTaxDocumentTool(Tool):
         text: str,
         doc_type: str = "invoice",
         document_id: str = "",
+        user_id: str = "",
+        session_id: str = "",
         **kwargs: Any,
     ) -> dict[str, Any]:
         from ..documents import get_document, reconcile_tax_document
@@ -94,9 +96,13 @@ class AuditTaxDocumentTool(Tool):
 
         clean_text, _ = scan_retrieved_text(strip_hidden_control_and_bidi(str(text or "")[:200_000]))
         doc_tables: list[Any] = []
-        if document_id:
+        if document_id and (user_id or session_id):
             try:
-                rec = get_document(str(document_id).strip())
+                rec = get_document(
+                    str(document_id).strip(),
+                    session_id=session_id or None,
+                    user_id=user_id or None,
+                )
                 if rec is not None and getattr(rec, "tables", None):
                     doc_tables = list(rec.tables)
             except Exception:

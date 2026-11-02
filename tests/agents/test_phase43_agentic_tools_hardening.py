@@ -84,6 +84,10 @@ def test_phase1_search_tools_scrubbing_4000_chars_education_threshold_and_mda_au
     # G419: SearxngProvider blocks cloud metadata & embedded credentials; all 28 MDA domains match subdomains
     monkeypatch.setenv("SEARXNG_URL", "http://169.254.169.254/latest/meta-data")
     assert SearxngProvider().configured() is False
+    monkeypatch.setenv("SEARXNG_URL", "http://metadata.google.internal./search")
+    assert SearxngProvider().configured() is False
+    monkeypatch.setenv("SEARXNG_URL", "https://[::1")
+    assert SearxngProvider().configured() is False
     monkeypatch.setenv("SEARXNG_URL", "https://user:secret@search.example.com")
     assert SearxngProvider().configured() is False
 
@@ -302,6 +306,15 @@ def test_phase4_memory_recall_consent_tasks_idor_and_workflow_side_questions() -
         )
         assert poisoned["ok"] is False
         assert "prompt injection" in poisoned["error"]
+
+        empty_key = MemoryStoreTool().execute(
+            key="\u200b\u202e",
+            value="standard",
+            confidence=0.95,
+            user_id="u-1",
+        )
+        assert empty_key["ok"] is False
+        assert "key required" in empty_key["error"]
 
     # G431: UraAccountProfileTool refuses horizontal TIN lookup when session user_id is bound to a different 10-digit TIN
     idor_res = UraAccountProfileTool().execute(taxpayer_id="1000000002", user_id="tin:1000000001")

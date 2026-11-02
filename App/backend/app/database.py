@@ -3655,6 +3655,7 @@ def _task_row(row: dict[str, Any], *, replayed: bool = False) -> dict[str, Any]:
         return {}
     out = {
         "task_id": row.get("id", ""),
+        "user_id": row.get("user_id", ""),
         "kind": row.get("kind", ""),
         "status": row.get("status", "pending"),
         "progress": float(row.get("progress") or 0.0),

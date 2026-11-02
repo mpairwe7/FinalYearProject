@@ -88,16 +88,19 @@ _RECURRING_DEADLINES: list[tuple[int, int, str, str, str]] = [
 ]
 
 
+_BUILTIN_DATE_TODAY = _dt.date.today
+
+
 def _kampala_today() -> _dt.date:
     """Return today's date in Africa/Kampala (EAT, UTC+3), unless _dt.date.today is monkeypatched (G427)."""
-    if getattr(_dt.date.today, "__module__", "datetime") not in ("datetime", "_datetime"):
+    if _dt.date.today != _BUILTIN_DATE_TODAY:
         return _dt.date.today()
     try:
         from zoneinfo import ZoneInfo
 
         return _dt.datetime.now(ZoneInfo("Africa/Kampala")).date()
     except Exception:
-        return _dt.date.today()
+        return _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=3))).date()
 
 
 class CurrentDateTool(Tool):

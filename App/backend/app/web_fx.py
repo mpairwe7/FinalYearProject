@@ -407,13 +407,20 @@ def _default_http_fetcher(url: str) -> str:
                 or parsed.password
             ):
                 raise ValueError(f"Disallowed FX URL: {current}")
-            resp = client.get(current, headers=headers)
-            if not resp.is_redirect:
+            with client.stream("GET", current, headers=headers) as resp:
+                if resp.is_redirect:
+                    current = str(resp.url.join(resp.headers.get("Location", "")))
+                    continue
                 resp.raise_for_status()
-                if len(resp.content) > _MAX_FX_RESPONSE_BYTES:
-                    raise ValueError("FX response exceeded byte cap")
-                return resp.text
-            current = str(resp.url.join(resp.headers.get("Location", "")))
+                chunks: list[bytes] = []
+                total = 0
+                for chunk in resp.iter_bytes():
+                    total += len(chunk)
+                    if total > _MAX_FX_RESPONSE_BYTES:
+                        raise ValueError("FX response exceeded byte cap")
+                    chunks.append(chunk)
+                encoding = resp.encoding or "utf-8"
+                return b"".join(chunks).decode(encoding, errors="replace")
     raise ValueError("Too many FX redirects")
 
 
