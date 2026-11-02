@@ -159,7 +159,7 @@ _quota_cooldown_until: dict[str, float] = {}
 
 
 def _quota_cooldown_seconds(response: httpx.Response | None) -> float:
-    """Cooldown duration (up to 900s) when a 429 indicates multi-minute/daily quota exhaustion, else 0.0."""
+    """Cooldown duration (up to 86400s) until Sunbird quota resets on a 429, else 0.0."""
     if response is None or response.status_code != 429:
         return 0.0
     retry_after = response.headers.get("Retry-After", "")
@@ -167,7 +167,7 @@ def _quota_cooldown_seconds(response: httpx.Response | None) -> float:
         try:
             val = float(retry_after)
             if val >= 60.0:
-                return min(val, 900.0)
+                return min(val, 86400.0)
         except ValueError:
             pass
     try:
@@ -176,8 +176,6 @@ def _quota_cooldown_seconds(response: httpx.Response | None) -> float:
     except Exception:
         body_text = ""
         body_lower = ""
-    if "daily quota" in body_lower or "quota exceeded" in body_lower:
-        return 900.0
     if "retry_after_seconds" in body_lower:
         try:
             data = response.json()
@@ -185,10 +183,21 @@ def _quota_cooldown_seconds(response: httpx.Response | None) -> float:
             if details and isinstance(details[0], dict):
                 sec = float(details[0].get("retry_after_seconds") or 0.0)
                 if sec >= 60.0:
-                    return min(sec, 900.0)
+                    return min(sec, 86400.0)
         except Exception:
-            return 900.0
+            return 3600.0
+    if "daily quota" in body_lower or "quota exceeded" in body_lower:
+        return 3600.0
     return 0.0
+
+
+def both_accounts_quota_exhausted() -> bool:
+    """True when all configured Sunbird accounts are currently in quota cooldown (until reset)."""
+    tokens = _account_tokens()
+    if not tokens or not _quota_cooldown_until:
+        return False
+    now = time.monotonic()
+    return all(_quota_cooldown_until.get(t, 0.0) > now for t in tokens)
 
 
 def _account_tokens() -> list[str]:
