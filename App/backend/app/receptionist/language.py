@@ -93,13 +93,14 @@ _ACHOLI_FUNCTION_WORDS: frozenset[str] = frozenset({
     "ningo", "nining", "kwene", "awene", "kopango", "apwoyo", "matek", "walok",
     "alok", "acoli", "kombedi", "tye", "pe", "eyo", "ku", "pud", "itye", "alworo",
     "cwinya", "banya", "cim", "kabedo", "ngec", "mukene", "pingo", "waculo", "culo",
+    "miyo", "tic", "kony", "medo", "wel",
 })
 
 _LG_ALL = _LUGANDA_WORDS | _LUGANDA_FUNCTION_WORDS
 _SW_ALL = _SWAHILI_WORDS | _SWAHILI_FUNCTION_WORDS
 _NYN_ALL = _RUNYANKOLE_WORDS | _RUNYANKOLE_FUNCTION_WORDS
 _ACH_ALL = _ACHOLI_WORDS | _ACHOLI_FUNCTION_WORDS
-_AMBIGUOUS_PARTICLES: frozenset[str] = frozenset({"an", "in", "ki", "ku"})
+_AMBIGUOUS_PARTICLES: frozenset[str] = frozenset({"an", "in", "ki", "ku", "i"})
 _LG_CORE = _LG_ALL - _AMBIGUOUS_PARTICLES
 _SW_CORE = _SW_ALL - _AMBIGUOUS_PARTICLES
 _NYN_CORE = _NYN_ALL - _AMBIGUOUS_PARTICLES
@@ -288,7 +289,8 @@ def fuse(vote: LanguageVote, text_confidence: float = 0.8) -> LanguageVote:
     if not vote.text or vote.confidence >= 0.8:
         return vote
     hits = lexical_hits(vote.text)
-    ranked = sorted(((n, lang) for lang, n in hits.items() if lang in vote.probs), reverse=True)
+    candidates = tuple(vote.probs) if vote.probs else SUPPORTED
+    ranked = sorted(((n, lang) for lang, n in hits.items() if lang in candidates), reverse=True)
     if not ranked:
         return vote
     best_n, best_lang = ranked[0]
@@ -296,7 +298,7 @@ def fuse(vote: LanguageVote, text_confidence: float = 0.8) -> LanguageVote:
     if best_n < 2 or best_n <= runner_up or best_lang == vote.top:
         return vote
     rest = max(0.0, 1.0 - text_confidence)
-    others = [lang for lang in vote.probs if lang != best_lang]
+    others = [lang for lang in candidates if lang != best_lang]
     probs = {lang: round(rest / max(len(others), 1), 4) for lang in others}
     probs[best_lang] = text_confidence
     return LanguageVote(probs, best_lang, vote.speech_s, vote.text, vote.latency_ms)

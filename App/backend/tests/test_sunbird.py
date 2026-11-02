@@ -104,6 +104,63 @@ class SunbirdFallbackTest(unittest.TestCase):
             out = sunbird.translate("VAT rate", "eng", "lug")
         self.assertEqual(out, "Omusolo")
 
+    def test_daily_quota_429_cools_down_account_without_sleeping(self):
+        import httpx
+
+        req = httpx.Request("POST", "https://api.sunbird.ai/tasks/translate")
+        quota_resp = httpx.Response(
+            429,
+            request=req,
+            content=b'{"error_code":"RATE_LIMIT_ERROR","message":"Daily quota exceeded","details":[{"retry_after_seconds":76310}]}',
+        )
+
+        def primary(path, **kw):
+            raise httpx.HTTPStatusError("429", request=req, response=quota_resp)
+
+        def fallback(path, **kw):
+            return _Resp({"output": {"translated_text": "Omusolo"}})
+
+        cf, seen = _fake_client_factory({"primary": primary, "fallback": fallback})
+        sunbird._clients["primary"] = mock.Mock()
+        sunbird._quota_cooldown_until.clear()
+        with mock.patch.object(sunbird, "SUNBIRD_API_TOKEN", "primary"), \
+             mock.patch.object(sunbird, "SUNBIRD_FALLBACK_API_TOKEN", "fallback"), \
+             mock.patch.object(sunbird, "_client_for", side_effect=cf), \
+             mock.patch.object(sunbird.time, "sleep") as slept:
+            out1 = sunbird.translate("VAT rate", "eng", "lug")
+            out2 = sunbird.translate("VAT rate", "eng", "lug")
+        self.assertEqual(out1, "Omusolo")
+        self.assertEqual(out2, "Omusolo")
+        slept.assert_not_called()
+        self.assertEqual(seen, ["primary", "fallback", "fallback"])
+
+    def test_both_accounts_quota_exhausted_and_auto_resumes_after_reset(self):
+        import httpx
+
+        req = httpx.Request("POST", "https://api.sunbird.ai/tasks/translate")
+        quota_resp = httpx.Response(
+            429,
+            request=req,
+            content=b'{"error_code":"RATE_LIMIT_ERROR","message":"Daily quota exceeded","details":[{"retry_after_seconds":120}]}',
+        )
+
+        def fail_429(path, **kw):
+            raise httpx.HTTPStatusError("429", request=req, response=quota_resp)
+
+        cf, _ = _fake_client_factory({"primary": fail_429, "fallback": fail_429})
+        sunbird._quota_cooldown_until.clear()
+        with mock.patch.object(sunbird, "SUNBIRD_API_TOKEN", "primary"), \
+             mock.patch.object(sunbird, "SUNBIRD_FALLBACK_API_TOKEN", "fallback"), \
+             mock.patch.object(sunbird, "_client_for", side_effect=cf):
+            self.assertFalse(sunbird.both_accounts_quota_exhausted())
+            with self.assertRaises(httpx.HTTPStatusError):
+                sunbird._post("/tasks/translate", json={})
+            self.assertTrue(sunbird.both_accounts_quota_exhausted())
+            # Simulate quota window reset by advancing monotonic clock past cooldown
+            future_now = max(sunbird._quota_cooldown_until.values()) + 1.0
+            with mock.patch.object(sunbird.time, "monotonic", return_value=future_now):
+                self.assertFalse(sunbird.both_accounts_quota_exhausted())
+
 
 if __name__ == "__main__":
     unittest.main()

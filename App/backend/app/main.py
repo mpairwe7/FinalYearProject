@@ -1728,6 +1728,8 @@ async def transcribe_audio(
     if not 8000 <= sample_rate <= 48000:
         raise HTTPException(status_code=400, detail="sample_rate must be in [8000, 48000]")
     language = request.query_params.get("language")
+    if language in ("", "auto"):
+        language = None
     # 639-1 OR 639-3: two of the five locales the picker offers (nyn, ach) have
     # no two-letter code, so a {2}-only rule rejected Runyankole and Acholi
     # speech outright. Every request model in models.py already allows {2,3}.
@@ -2277,8 +2279,9 @@ async def voice_chat(
     t_start = time.perf_counter()
 
     # --- Input validation (mirrors /v1/asr strictness) -----------------------
-    language = request.query_params.get("language", "en")
-    if not re.match(r"^[a-z]{2,3}$", language):
+    raw_language = request.query_params.get("language", "en")
+    language: str | None = None if raw_language in ("", "auto") else raw_language
+    if language is not None and not re.match(r"^[a-z]{2,3}$", language):
         raise HTTPException(
             status_code=400,
             detail="language must be an ISO 639-1/639-3 code (e.g. en, lg, nyn, ach)",
@@ -2337,10 +2340,22 @@ async def voice_chat(
             asr_backend=asr_result.backend,
             total_latency_s=round(time.perf_counter() - t_start, 3),
         )
+    from .language_state import normalize_locale_tag, resolve_turn_locale
     from .receptionist.lexicon import normalize_luganda_tax_query, normalize_swahili_tax_query, repair_asr_entities
 
     transcript = repair_asr_entities(asr_result.text)
-    detected_lang = asr_result.language or language
+    base_lang = normalize_locale_tag(asr_result.language or language or "en") or (language or "en")
+    # A language sent by the caller, other than the default "en", is the caller's explicit choice.
+    caller_choice = language if "language" in request.query_params and language not in (None, "en") else None
+    detected_lang = (
+        resolve_turn_locale(
+            transcript,
+            requested_locale=caller_choice or base_lang,
+            locale_explicit=caller_choice is not None,
+        ).locale
+        if transcript.strip()
+        else base_lang
+    )
 
     # Guard: empty transcript (user said nothing / noise)
     if not transcript.strip():

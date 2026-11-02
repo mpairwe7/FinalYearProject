@@ -43,6 +43,8 @@ Do not move `App/backend` or `App/frontend`. Docker, HF Space, and CI import `ap
 - Do not invent a live URA account API. Prototype defaults to `URA_ACCOUNT_API_MODE=mock` (`live=false`). Production rejects mock.
 - Production (`APP_ENV=production`) must start with `auth_required`, `multi_tenant`, `audit_ledger`, and `ticket_queue` on.
 - Always push changes via dedicated feature/fix branches and open a PR; never push directly to `dev` or `main`.
+- Every open PR must resolve all CI check failures and all CodeRabbit AI review comments (`coderabbitai[bot]`) before merging (`gh pr checks` green + inline review findings addressed).
+- Every code, config, model, flag, route, or infrastructure change must update living documentation in the same PR per 2026 industry standards (ISO/IEC 42001 Clause 7.5, NIST AI RMF 1.0 `GOVERN 1.4` & `MAP 4.2`, EU AI Act Art. 11/12/50/53, MADR 4.0 ADRs in `docs/adr/`, Diátaxis runbooks in `docs/runbooks/`, Model Cards in `docs/MODEL_CARD.md`, and CycloneDX 1.6 AIBOM in `governance/ai_risk_manifest.yaml`; see `.claude/skills/living-docs-adr-runbooks-traceability/SKILL.md` and `.claude/skills/refresh-docs/SKILL.md`).
 - New FastAPI routes must land in `tests/test_all_endpoints_e2e.py` (`EXPECTED_ENDPOINTS` + `COVERAGE`).
 - A new flag lands in `flags.py`, `docs/RAG_ARCHITECTURE.md`, and `.env.example`.
 - On sign-in, a guided workflow is adopted only from the anonymous session the request itself proves (`db.adopt_workflow_session`, ADR-0013). Never add candidate keys a caller could derive from a conversation id alone; "signed in" is decided per request, never read back from stored slots.

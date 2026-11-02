@@ -1051,6 +1051,20 @@ class SpeechModel:
         """
         t_start = time.perf_counter()
         result = self._transcribe_chain(audio_bytes, sample_rate, language, with_words=with_words)
+        if result.text and result.text.strip():
+            try:
+                from .language_state import normalize_locale_tag
+                from .receptionist.language import lexical_hits
+
+                norm_lang = normalize_locale_tag(result.language or language or "") or (language or "en")
+                hits = lexical_hits(result.text)
+                ranked = sorted(((n, loc) for loc, n in hits.items() if n > 0), reverse=True)
+                if ranked and (not language or ranked[0][0] >= 2):
+                    result.language = ranked[0][1]
+                else:
+                    result.language = norm_lang
+            except Exception:
+                pass
         if result.duration_s is None:
             result.duration_s = _input_duration_s(audio_bytes, sample_rate)
         if result.latency_s is None:
@@ -1342,6 +1356,106 @@ class SpeechModel:
                 breakers.CF_TTS_BREAKER.record_failure()
                 logger.warning("Workers AI TTS failed (model=%s)", model, exc_info=True)
                 continue
+        return None
+
+    def _synthesize_gemini_tts(
+        self, text: str, language: str, voice: str | None = None
+    ) -> SynthesizeResult | None:
+        """Synthesize speech via Cloudflare AI Gateway -> Google Gemini TTS (gemini-3.8-flash-tts / gemini-3.8-flash-lite-tts).
+
+        Activates when both Sunbird accounts are in quota cooldown (``sunbird.both_accounts_quota_exhausted()``)
+        or ``TTS_FALLBACK_BACKEND=gemini`` is configured. Automatically yields back to Sunbird
+        once the Sunbird quota cooldown expires.
+        """
+        from . import sunbird
+        from .flags import flags
+
+        tts_fb = os.getenv("TTS_FALLBACK_BACKEND", "").strip().lower()
+        if tts_fb != "gemini" and not sunbird.both_accounts_quota_exhausted():
+            return None
+        if not flags.is_enabled("cloudflare_fallback") or not cloud_models_allowed():
+            return None
+        try:
+            from .providers import breakers, budget
+            from .providers import config as cfg
+            from .providers import gateway as gw
+        except Exception:
+            return None
+        if not (
+            cfg.is_gemini_configured()
+            and admit(breakers.GEMINI_BREAKER, budget.try_consume_gemini_call)
+        ):
+            return None
+
+        import base64 as _b64
+        import httpx as _httpx
+
+        t0 = time.perf_counter()
+        s = cfg.get_cloud_settings()
+        primary_model = os.getenv("GEMINI_TTS_MODEL", "gemini-3.8-flash-tts").strip() or "gemini-3.8-flash-tts"
+        fallback_model = (
+            os.getenv("GEMINI_TTS_FALLBACK_MODEL", "gemini-3.8-flash-lite-tts").strip()
+            or "gemini-3.8-flash-lite-tts"
+        )
+        gemini_voice = voice if voice in ("Kore", "Aoede", "Puck", "Charon", "Fenrir") else "Kore"
+        payload = {
+            "contents": [{"parts": [{"text": text[:3000]}]}],
+            "generationConfig": {
+                "responseModalities": ["AUDIO"],
+                "speechConfig": {
+                    "voiceConfig": {
+                        "prebuiltVoiceConfig": {"voiceName": gemini_voice},
+                    },
+                },
+            },
+        }
+        direct_headers = {
+            "x-goog-api-key": s.gemini_api_key.get_secret_value().strip(),
+            "Content-Type": "application/json",
+        }
+        direct_first = os.getenv("GEMINI_DIRECT_FIRST", "false").lower() in ("1", "true", "yes", "on")
+
+        for model in (primary_model, fallback_model):
+            targets: list[tuple[str, dict[str, str]]] = [
+                (
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                    direct_headers,
+                ),
+            ]
+            if cfg.is_cloudflare_configured():
+                gw_target = (
+                    f"{s.google_ai_studio_base}/v1beta/models/{model}:generateContent",
+                    gw._gemini_headers(),
+                )
+                targets = [*targets, gw_target] if direct_first else [gw_target, *targets]
+            for url, headers in targets:
+                try:
+                    resp = _httpx.post(url, headers=headers, json=payload, timeout=18.0)
+                    resp.raise_for_status()
+                    cands = resp.json().get("candidates") or []
+                    parts = (cands[0].get("content") or {}).get("parts") or [] if cands else []
+                    inline = parts[0].get("inlineData") or {} if parts else {}
+                    b64_data = inline.get("data") or ""
+                    if not b64_data:
+                        continue
+                    audio_bytes = _b64.b64decode(b64_data)
+                    if not _looks_like_audio(audio_bytes):
+                        audio_bytes = pcm16_to_wav(audio_bytes, 24000)
+                    breakers.GEMINI_BREAKER.record_success()
+                    rate, samples, duration = _audio_metadata(audio_bytes, 24000)
+                    return SynthesizeResult(
+                        audio=audio_bytes,
+                        sample_rate=rate,
+                        num_samples=samples,
+                        duration_s=duration,
+                        latency_s=round(time.perf_counter() - t0, 3),
+                        backend="gemini_tts",
+                        voice=gemini_voice,
+                    )
+                except Exception:
+                    logger.debug("Gemini TTS attempt failed on %s (%s)", model, url.split("/")[2], exc_info=True)
+                    continue
+        breakers.GEMINI_BREAKER.record_failure()
         return None
 
     def _transcribe_whisper_peft(
@@ -2125,6 +2239,12 @@ class SpeechModel:
             result = _try_sunbird()
             if result:
                 return result
+            try:
+                result = _cloud_call("Gemini TTS", self._synthesize_gemini_tts, text, language, voice)
+                if result and result.audio:
+                    return result
+            except Exception:
+                logger.debug("Gemini TTS fallback skipped", exc_info=True)
             logger.info(
                 "No native voice reachable for %s (local or cloud); "
                 "degrading to the generic chain rather than returning silence",
@@ -2181,6 +2301,12 @@ class SpeechModel:
             result = _try_sunbird()
             if result:
                 return result
+            try:
+                result = _cloud_call("Gemini TTS", self._synthesize_gemini_tts, text, language, voice)
+                if result and result.audio:
+                    return result
+            except Exception:
+                logger.debug("Gemini TTS fallback skipped", exc_info=True)
 
         # ② edge-tts (Microsoft neural voices — needs internet, no API key)
         #    `voice` is forwarded so an English caller's pick is honoured here

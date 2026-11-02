@@ -155,6 +155,49 @@ _SUNBIRD_TO_LOCALE: dict[str, str] = {
 # One client per account token (lazily built, reused). A call that fails on the
 # primary account is retried on the fallback account for resilience.
 _clients: dict[str, httpx.Client] = {}
+_quota_cooldown_until: dict[str, float] = {}
+
+
+def _quota_cooldown_seconds(response: httpx.Response | None) -> float:
+    """Cooldown duration (up to 86400s) until Sunbird quota resets on a 429, else 0.0."""
+    if response is None or response.status_code != 429:
+        return 0.0
+    retry_after = response.headers.get("Retry-After", "")
+    if retry_after:
+        try:
+            val = float(retry_after)
+            if val >= 60.0:
+                return min(val, 86400.0)
+        except ValueError:
+            pass
+    try:
+        body_text = response.text or ""
+        body_lower = body_text.lower()
+    except Exception:
+        body_text = ""
+        body_lower = ""
+    if "retry_after_seconds" in body_lower:
+        try:
+            data = response.json()
+            details = data.get("details") or []
+            if details and isinstance(details[0], dict):
+                sec = float(details[0].get("retry_after_seconds") or 0.0)
+                if sec >= 60.0:
+                    return min(sec, 86400.0)
+        except Exception:
+            return 3600.0
+    if "daily quota" in body_lower or "quota exceeded" in body_lower:
+        return 3600.0
+    return 0.0
+
+
+def both_accounts_quota_exhausted() -> bool:
+    """True when all configured Sunbird accounts are currently in quota cooldown (until reset)."""
+    tokens = _account_tokens()
+    if not tokens or not _quota_cooldown_until:
+        return False
+    now = time.monotonic()
+    return all(_quota_cooldown_until.get(t, 0.0) > now for t in tokens)
 
 
 def _account_tokens() -> list[str]:
@@ -238,8 +281,14 @@ def _post(path: str, **kwargs: Any) -> httpx.Response:
     tokens = _account_tokens()
     if not tokens:
         raise RuntimeError("no Sunbird token configured")
+    if not _clients:
+        _quota_cooldown_until.clear()
+    now = time.monotonic()
+    active_tokens = [t for t in tokens if _quota_cooldown_until.get(t, 0.0) <= now]
+    if not active_tokens:
+        raise RuntimeError("all Sunbird accounts are in quota cooldown")
     last_exc: Exception | None = None
-    for idx, token in enumerate(tokens):
+    for idx, token in enumerate(active_tokens):
         for attempt in range(1, SUNBIRD_RETRIES + 1):
             _rewind_uploads(kwargs)
             try:
@@ -256,6 +305,15 @@ def _post(path: str, **kwargs: Any) -> httpx.Response:
                         "Sunbird auth failed (%d) on account #%d for %s", status, idx + 1, path
                     )
                     break  # retrying the same credentials cannot help
+                if status == 429:
+                    cooldown_s = _quota_cooldown_seconds(e.response)
+                    if cooldown_s > 0.0:
+                        _quota_cooldown_until[token] = time.monotonic() + cooldown_s
+                        logger.warning(
+                            "Sunbird quota exhausted on account #%d for %s; cooling down token for %.0fs",
+                            idx + 1, path, cooldown_s,
+                        )
+                        break
                 if status in _RETRYABLE_STATUSES and attempt < SUNBIRD_RETRIES:
                     delay = _retry_delay(attempt, e.response.headers.get("Retry-After", ""))
                     logger.warning(
@@ -385,7 +443,9 @@ def speech_to_text(
             or result.get("audio_transcription", "")
         )
         logger.info("Sunbird STT completed (language=%s, chars=%d)", language, len(transcription))
-        return {"text": transcription, "language": result.get("language", language)}
+        raw_lang = str(result.get("language") or language or "eng").strip().lower()
+        norm_lang = _SUNBIRD_TO_LOCALE.get(raw_lang, raw_lang) if transcription else result.get("language", language)
+        return {"text": transcription, "language": norm_lang}
     except httpx.HTTPStatusError as e:
         body = ""
         try:

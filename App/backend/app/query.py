@@ -664,6 +664,7 @@ _ACHOLI_WORDS: frozenset[str] = frozenset({
     "mega", "megi", "itwero", "watwero", "amito", "imito", "tim", "ber",
     "kwene", "awene", "pud", "itye", "pe", "eyo", "alworo", "cwinya", "banya",
     "cim", "kabedo", "ngec", "mukene", "pingo", "waculo", "culo",
+    "miyo", "tic", "kony", "medo", "wel",
     # Number words, scale nouns, currency & financial context vocabulary
     "miya", "tutemia", "lim", "acel", "aryo", "adek", "angwen", "abic",
     "abicel", "abiro", "aboro", "abongwen", "apar", "wiye",
@@ -1268,7 +1269,7 @@ def detect_language(text: str, default_lang: str = "en") -> str:
     lg_hits = lg_core + (ki_ku_hits if (lg_core > 0 or (nyn_core == 0 and ach_core == 0)) else 0)
     nyn_hits = nyn_core + (len(raw_words & {"ki"}) if (nyn_core > 0 and lg_core == 0 and ach_core == 0) else 0)
     ach_hits = ach_core + (ki_ku_hits if (ach_core > 0 and lg_core == 0 and nyn_core == 0) else 0)
-    en_common = len(raw_words & _COMMON_ENGLISH_WORDS)
+    en_common = len((raw_words - ({"an", "in", "i"} if ach_core > 0 else set())) & _COMMON_ENGLISH_WORDS)
 
     # 2. Check for noisy or misspelled English ONLY when vernacular markers are absent.
     if lg_hits == 0 and sw_hits == 0 and nyn_hits == 0 and ach_hits == 0:

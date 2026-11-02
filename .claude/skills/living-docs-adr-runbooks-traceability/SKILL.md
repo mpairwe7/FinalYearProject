@@ -47,3 +47,15 @@ Whenever you modify any file in the repository, update the corresponding living 
    ```bash
    PYTHONPATH=App/backend python3 -m app.freshness --check
    ```
+
+---
+
+## 3. 2026 Industry Documentation Standards & Open-PR CI / CodeRabbit Gate
+
+1. **Industry Documentation Standards**:
+   - **Diátaxis Structure**: Separate operational how-to runbooks (`docs/runbooks/`), technical reference (`docs/RAG_ARCHITECTURE.md`, `docs/API_REFERENCE.md`), architecture explanations (`docs/AGENT_ARCHITECTURE.md`), and gap/release ledgers (`docs/GAPS_AND_AGENTIC_ROADMAP.md`).
+   - **MADR 4.0 ADRs (`docs/adr/`)**: Every architectural decision record must include `## Context and Problem Statement`, `## Decision Outcome`, `## Consequences`, and `## Confirmation`, and be registered in `docs/adr/README.md`.
+   - **AI Governance & Traceability (ISO/IEC 42001 Clause 7.5, NIST AI RMF `GOVERN 1.4` & `MAP 4.2`, EU AI Act Art. 11/12/50/53, CycloneDX 1.6 AIBOM)**: Keep `docs/MODEL_CARD.md` and `governance/ai_risk_manifest.yaml` (`verified_by` test pointers and `aibom_inventory`) synchronized with runtime behaviour.
+2. **Mandatory Open-PR CI & CodeRabbit AI Review Resolution**:
+   - Never merge a PR with failing or pending required CI checks (`gh pr checks <PR>`).
+   - Always inspect CodeRabbit AI review comments on every open PR (`gh api repos/<owner>/<repo>/pulls/<PR>/comments`), verify each finding against current code, commit fixes for all valid issues, and re-verify CI before merging.
