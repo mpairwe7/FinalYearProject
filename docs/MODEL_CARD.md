@@ -18,7 +18,7 @@ defaults are unchanged by this addendum.
 |-------|-------|
 | **Name** | URA Chatbot RAG Pipeline |
 | **Version** | 2.0.0 |
-| **Date** | 2026-11-01 |
+| **Date** | 2026-11-02 |
 | **Type** | Retrieval-Augmented Generation (RAG) with agentic tool-calling |
 | **Task** | Tax domain question answering (Uganda Revenue Authority) |
 | **Languages** | English (`en`, primary), Luganda (`lg`), Kiswahili (`sw`), Runyankole (`nyn`), Acholi (`ach`), plus Ateso (LLM natively supports 31 Ugandan languages; 5 locales active across UI, TTT, TTS, STT & Call Receptionist) |
@@ -36,7 +36,7 @@ defaults are unchanged by this addendum.
 | **Sparse Retriever** | BM25 | N/A | Keyword matching with learnt IDF weights |
 | **Reranker** | mixedbread-ai/mxbai-rerank-base-v2 | 500M | Passage reranking (BEIR 55.6, Apache-2.0, `RETRIEVER_RERANK_CHARS=4000` passage window — `ADR-0024`) |
 | **ASR (server)** | Sunbird/SunflowerASR-51-african-languages (`whisper_salt`) | 1.5B | Speech-to-text across `en`, `lg`, `sw`, `nyn`, `ach` (on by default — see docs/runbooks/salt-speech-backends.md); Whisper Small + LoRA adapters is the fallback tier |
-| **TTS (server)** | Sunbird/orpheus-3b-tts-multilingual (primary FP8 sidecar) + Sunbird/spark-tts-salt / Piper / edge-tts (fallbacks) | 3B (FP8) + 0.5B | Text-to-speech across `en`, `lg`, `sw`, `nyn`, `ach` with catalog speaker selection (`orpheus_tts.speaker_for`) |
+| **TTS (server)** | Sunbird/orpheus-3b-tts-multilingual (primary FP8 sidecar) + Sunbird/spark-tts-salt / Piper / edge-tts (fallbacks) | 3B (FP8) + 0.5B | Text-to-speech across `en`, `lg`, `sw`, `nyn`, `ach` with catalog speaker selection (`orpheus_tts.speaker_for`), 24 kHz → 16 kHz 31-tap FIR anti-aliased MP3/container decoding (`soundfile` / `libsndfile1`), and Ugandan tax acronym phonetics (`Vat`, `Payee`, `Efris`, `G415`) |
 | **MT (server)** | Sunflower-Qwen3.5-9B prompted local MT (`#NMBR...#` sentinel figure guard) | varies | Machine translation (`en` ↔ `lg`/`sw`/`nyn`/`ach`) with `mt.protect_figures` and `mt.figures_survived` |
 | **Speech cloud** | Sunbird AI API | N/A (cloud) | Fallback ASR/TTS/MT for Ugandan languages |
 | **ASR (mobile)** | Whisper Small INT8 | 244M (quantised) | On-device speech recognition |

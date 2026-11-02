@@ -1,4 +1,4 @@
-# Runbook — Sunbird SALT speech backends (Updated 2026-10-15)
+# Runbook — Sunbird SALT speech backends (Updated 2026-11-02)
 
 Operator guide for the Sunbird V2 speech models wired into
 `App/backend/app/speech_service.py` and `App/backend/app/orpheus_tts.py`:
@@ -267,11 +267,18 @@ docker run --gpus all -p 8000:8000 --env-file .env ura-chatbot-api:gpu
 
 It is a separate Dockerfile rather than folded into the base one because
 the base image's actual target (CPU-only / CraneCloud-style deployment) has
-no use for the extra ~3,800 lines of third-party code or its dependency
-stack (torchaudio, einx, einops, omegaconf, soundfile, soxr) — real image
-weight and supply-chain surface a non-GPU deployment shouldn't carry. See
-the file's own header comment for the driver-compatibility caveat that
-applies to any GPU Dockerfile in this project, not just this one.
+no use for the extra ~3,800 lines of third-party Spark-TTS code or its heavier
+GPU dependency stack (`torchaudio`, `einx`, `einops`, `omegaconf`, `soxr`). Note
+that lightweight `soundfile>=0.12.0` (`libsndfile1`) *does* ship in the base
+CPU/CraneCloud/HF-Space images (`requirements-cranecloud.txt`,
+`requirements-receptionist.txt`, `App/deploy/hf-space/Dockerfile`) so
+`speech_service._decode_container` decodes 24 kHz `edge-tts` MP3 into 16 kHz
+PCM16 with 31-tap FIR anti-aliasing (`_resample`) and a 300s duration cap
+(`sf.info`), while `speech_normalization.py` normalizes `VAT`/`V.A.T.`/`V-A-T`
+to Title-case `"Vat"` so neural TTS pronounces it as `"vat"`/`"vati"` rather
+than spelling out `"V A T"` (`G415`). See the file's own header comment for the
+driver-compatibility caveat that applies to any GPU Dockerfile in this project,
+not just this one.
 
 **Manual (non-Docker, or a Dockerfile of your own):**
 

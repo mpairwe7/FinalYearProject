@@ -119,9 +119,10 @@ engine — see **§6 Multilingual calls**. The Gemini Live speech-to-speech engi
 removed on 2026-09-30. Since G122 (2026-10) **no hosted model is used anywhere on a
 call**. The officer brief, the call summary, the Luganda query bridge and the Luganda
 answer run on Sunflower only, with deterministic fallbacks when vLLM is down. A call
-turn's English or Swahili answer comes from the chat service, which is held to local
-models for that turn whatever chat is configured to use: no Gemini, Workers AI or
-Sunbird API, and no FAQ judge (`app/providers/scope.py`).
+turn's English or Swahili answer comes from the chat service (`top_k=6`), which is held
+to local models by default (`app/providers/scope.py`); on CPU-only deployments such as
+the Hugging Face Space, `RECEPTIONIST_ALLOW_CLOUD_LLM=true` opts Call Receptionist into
+the same Gemini LLM as Main Chat under a 20.0s turn deadline (`G415`).
 
 ---
 
@@ -154,7 +155,8 @@ All switches and thresholds are configured via environment variables:
 | `RECEPTIONIST_MAX_CALL_S` | `900` | Hard ceiling for one call connection (15 minutes). A value that is set but not a positive number stops startup and fails the G36 gate instead of falling back |
 | `RECEPTIONIST_FILLER_AFTER_MS` | `450` | Latency threshold before playing filler token (pool of short tokens) |
 | `RECEPTIONIST_MEMORY_MIN_ASR_CONF` | `0.6` | A call turn heard below this mean word probability is answered but not written to long-term memory (a mishearing must not become a fact about the caller; needs `FLAG_MEMORY_ENABLED` and personalization consent to matter) |
-| `RECEPTIONIST_MAX_SPOKEN_SENTENCES` | `3` | Spoken truncation limit before prompting *"Would you like more detail?"* (yes reads on; an officer offer takes its place, one question a turn) |
+| `RECEPTIONIST_MAX_SPOKEN_SENTENCES` | `3` | Spoken truncation limit for plain prose before prompting *"Would you like more detail?"* (yes reads on; an officer offer takes its place, one question a turn). Structured multi-bullet/multi-step answers (`has_structured_items`) expand up to 15 sentences / 260 words so complete lists and procedures are spoken in full on the first turn (`G415`) |
+| `RECEPTIONIST_ALLOW_CLOUD_LLM` | `false` (`true` on HF Space) | Allows Call Receptionist turns (`channel="call"`) to use the configured cloud LLM (Gemini) under a 20.0s turn deadline on CPU-only deployments (`G415`) |
 | `RECEPTIONIST_TTS_VOICE` | `en-KE-AsiliaNeural` | edge-tts speaker for English when Orpheus does not voice it (a fallback) |
 | `ORPHEUS_TTS_URL` | unset (`http://orpheus-tts:8100` in compose) | The local Orpheus voice sidecar |
 | `ORPHEUS_TTS_LANGUAGES` | `lg` (`lg,sw,en` in the GPU overlay) | Languages Orpheus voices; the rest fall to Spark-TTS-SALT (sw, lg), then edge-tts |
