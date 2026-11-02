@@ -155,5 +155,8 @@ describe("answerText", () => {
     expect(formatCallCaptionText("Ask in Runyankole or Akyoli for your Tin and Nin.")).toBe(
       "Ask in Runyankole or Acholi for your TIN and NIN.",
     );
+    expect(formatCallCaptionText("Tin is used to coat steel.")).toBe(
+      "Tin is used to coat steel.",
+    );
   });
 });

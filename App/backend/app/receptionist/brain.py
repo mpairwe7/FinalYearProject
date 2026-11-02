@@ -1511,7 +1511,6 @@ class UraReceptionistBrain(LLMService):
             if hybrid_dec.mode == "s2s_fast":
                 fast_reply = build_s2s_fast_reply(question, locale=self.language)
                 if fast_reply:
-                    fast_spoken = clean_text_for_speech(fast_reply, locale=self.language) or fast_reply
                     fast_ms = round((time.perf_counter() - t0) * 1000, 1)
                     fast_result = {
                         "reply": fast_reply,
@@ -1539,7 +1538,7 @@ class UraReceptionistBrain(LLMService):
                     self.room.state.ai_answers_count += 1
                     self.room.state.latencies.append({"brain_ms": fast_ms})
                     await self._say_and_record(
-                        fast_spoken,
+                        fast_reply,
                         kind="answer",
                         faithfulness=1.0,
                         latencies={"brain_ms": fast_ms},

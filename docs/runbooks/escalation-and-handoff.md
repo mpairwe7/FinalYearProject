@@ -157,6 +157,9 @@ endpoint: the officer completes the action in their own system or declines it, a
   fast path, only after the input guard and the crisis check.
 * A ticket search (`list_tickets(q=…)`, the staff queue's search box) escapes
   `%` and `_`, so a search for either matches that character, not every row.
+* Voice call transfer and hold notices spoken through `UraSpeechTTS` (`receptionist/tts.py`)
+  share `clean_text_for_speech` and `apply_tts_engine_phonetics` (`Tin`, `Nin`, `Vat`, `Payee`,
+  `Efris`, `U R A`, `P R N`, `Runyankole`, `Akyoli`) with Main Chat (`G439`).
 
 ## Verify after a change
 
