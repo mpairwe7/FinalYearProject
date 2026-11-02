@@ -84,7 +84,7 @@ follow-up suggestions (`You might also want to know`, `Oyinz'okwagala okumanya`,
 sentence splitting so written-only footers never trigger a false *"Would you like more detail?"*
 offer (`G415`), and `UraSpeechTTS` (`receptionist/tts.py`) applies `clean_text_for_speech` and
 `apply_tts_engine_phonetics` so major tax acronyms (`Tin`, `Nin`, `Vat`, `Payee`, `Efris`, `U R A`, `P R N`)
-and Ugandan language names (`Runyankole`, `Akyoli`) are pronounced identically to Main Chat (`G439`).
+and Ugandan language names (`Runyankole`, `Acholi`) are pronounced identically to Main Chat (`G439`, `G440`).
 
 ## Ramp and watch
 

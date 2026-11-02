@@ -201,13 +201,13 @@ class UraSpeechTTS(TTSService):
 
         # Chunk into 20ms frames (640 bytes = 320 samples @ 16-bit mono 16kHz)
         chunk_size = 640
-        for i in range(0, len(pcm_bytes), chunk_size):
+        for idx, i in enumerate(range(0, len(pcm_bytes), chunk_size)):
             chunk = pcm_bytes[i : i + chunk_size]
             yield TTSAudioRawFrame(
                 audio=chunk, sample_rate=16000, num_channels=1, context_id=context_id or None
             )
-            # Yield control to event loop
-            await asyncio.sleep(0.001)
+            if idx % 16 == 15:
+                await asyncio.sleep(0)
 
     def _should_stream(self, text: str, language: str) -> bool:
         if not orpheus_tts.speaker_for(language, voice=self.voice) or orpheus_tts.in_cooldown():

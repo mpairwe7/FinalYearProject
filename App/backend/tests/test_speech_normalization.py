@@ -595,18 +595,33 @@ def test_call_receptionist_and_main_chat_acronym_and_language_pronunciation_pari
     )
     cleaned = clean_text_for_speech(greeting, locale="en")
     assert "Runyankole" in cleaned
-    assert "Akyoli" in cleaned
-    assert "Acholi" not in cleaned
+    assert "Acholi" in cleaned
     voiced = apply_tts_engine_phonetics(cleaned, locale="en")
     assert "U R A" in voiced
     assert "Runyankole" in voiced
-    assert "Akyoli" in voiced
+    assert "Acholi" in voiced
     assert "Tin" in voiced
     assert "Nin" in voiced
     assert "Vat" in voiced
     assert "Payee" in voiced
     assert "Efris" in voiced
     assert "P R N" in voiced
+
+
+def test_alternate_acholi_spellings_normalize_through_both_helpers():
+    from app.speech_normalization import apply_tts_engine_phonetics
+
+    raw = "Ask in Akyoli or Lwakyoli about TIN."
+    cleaned = clean_text_for_speech(raw, locale="en")
+    assert "Akyoli" not in cleaned
+    assert "Lwakyoli" not in cleaned
+    assert "Acholi" in cleaned
+    assert "Lwacholi" in cleaned
+    voiced = apply_tts_engine_phonetics(cleaned, locale="en")
+    assert "Akyoli" not in voiced
+    assert "Lwakyoli" not in voiced
+    assert "Acholi" in voiced
+    assert "Lwacholi" in voiced
 
 
 

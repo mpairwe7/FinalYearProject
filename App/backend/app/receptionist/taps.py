@@ -348,7 +348,15 @@ class LivePartialTranscriptTap(FrameProcessor):
     @property
     def enabled(self) -> bool:
         """Partials need a local recognizer and the feature left on."""
-        return self.speech_model is not None and live_partial_transcripts_enabled()
+        if self.speech_model is None or not live_partial_transcripts_enabled():
+            return False
+        if (
+            hasattr(self.speech_model, "_whisper_salt")
+            and getattr(self.speech_model, "_whisper_salt", None) is None
+            and getattr(self.speech_model, "_asr_pipeline", None) is None
+        ):
+            return False
+        return True
 
     async def process_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM) -> None:
         if self.enabled:

@@ -33,6 +33,8 @@ export function useCall() {
   const liveKitSessionRef = useRef<LiveKitCallSession | null>(null);
   const playerRef = useRef<PCMPlayer | null>(null);
   const micCleanupRef = useRef<(() => void) | null>(null);
+  const micFailedRef = useRef(false);
+  const startLegacyAudioRef = useRef<(() => Promise<boolean>) | null>(null);
   const dialToneCleanupRef = useRef<(() => void) | null>(null);
   const dialToneCtxRef = useRef<AudioContext | null>(null);
   const holdToneCleanupRef = useRef<(() => void) | null>(null);
@@ -78,6 +80,8 @@ export function useCall() {
       micCleanupRef.current();
       micCleanupRef.current = null;
     }
+    micFailedRef.current = false;
+    startLegacyAudioRef.current = null;
     if (liveKitSessionRef.current) {
       void liveKitSessionRef.current.close();
       liveKitSessionRef.current = null;
@@ -129,6 +133,21 @@ export function useCall() {
   }, []);
 
   const toggleMute = useCallback(() => {
+    if (
+      useCallStore.getState().isMuted &&
+      micFailedRef.current &&
+      !liveKitSessionRef.current &&
+      !micCleanupRef.current &&
+      startLegacyAudioRef.current
+    ) {
+      void startLegacyAudioRef.current().then((ok) => {
+        if (ok) {
+          store.setError(null);
+          store.setMuted(false);
+        }
+      });
+      return;
+    }
     store.setMuted((prev) => {
       const next = !prev;
       if (liveKitSessionRef.current) {
@@ -198,8 +217,8 @@ export function useCall() {
         void player.init().catch(() => {});
       } catch {}
 
-      const startLegacyAudio = async () => {
-        if (liveKitSessionRef.current) return;
+      const startLegacyAudio = async (): Promise<boolean> => {
+        if (liveKitSessionRef.current) return true;
         if (!playerRef.current) {
           const player = new PCMPlayer(16000);
           playerRef.current = player;
@@ -236,15 +255,26 @@ export function useCall() {
             },
             { echoCancellation: true, noiseSuppression: true },
           );
+          micFailedRef.current = false;
           micCleanupRef.current = () => {
             if (silenceTimer) clearTimeout(silenceTimer);
             cleanup();
           };
+          // Re-resume playback context in case getUserMedia switched OS audio profile
+          if (typeof playerRef.current?.resume === 'function') {
+            void playerRef.current.resume();
+          }
+          return true;
         } catch (err: unknown) {
-          store.setError((err as Error)?.message || 'Microphone access denied');
-          hangup();
+          // Keep the call active so the caller still hears the AI receptionist
+          // and can use the in-call text input ("Type instead") or officer handoff.
+          micFailedRef.current = true;
+          store.setMuted(true);
+          store.setError((err as Error)?.message || t('call.micFallback'));
+          return false;
         }
       };
+      startLegacyAudioRef.current = startLegacyAudio;
 
       // Create WebSocket
       const socket = new CallSocket({

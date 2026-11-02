@@ -292,7 +292,13 @@ class LanguageSentinel(FrameProcessor):  # type: ignore[misc,valid-type]
         confidence = probs.get(top, 0.0)
         switch_confidence = self.router.policy.config.switch_confidence
         decoded: tuple[str, str] | None = None
-        if speech_s <= TEXT_DECODE_MAX_S or confidence < switch_confidence:
+        no_local_asr = (
+            self.method != "keyword"
+            and hasattr(self.speech_model, "_whisper_salt")
+            and getattr(self.speech_model, "_whisper_salt", None) is None
+            and getattr(self.speech_model, "_asr_pipeline", None) is None
+        )
+        if not no_local_asr and (speech_s <= TEXT_DECODE_MAX_S or confidence < switch_confidence):
             lang = top or self.room.state.locale or "en"
             result = await asyncio.to_thread(
                 self.speech_model.transcribe, pcm16_to_wav(pcm, 16000), 16000, lang, False

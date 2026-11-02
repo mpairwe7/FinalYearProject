@@ -143,8 +143,8 @@ const URA_SPEECH_TERMS: Array<[RegExp, string | ((match: string, ...args: string
   [/\bMTN\b|\bM\.T\.N\.?|\bM-T-N\b/gi, 'M T N'],
   [/\bDT-(\d{3,5})\b/gi, 'D-T $1'],
   [/\bRunyanko[lr]e\b/gi, 'Runyankole'],
-  [/\bAcholi\b/gi, 'Akyoli'],
-  [/\bLwacholi\b/gi, 'Lwakyoli'],
+  [/\b(?:Acholi|Akyoli)\b/gi, 'Acholi'],
+  [/\b(?:Lwacholi|Lwakyoli)\b/gi, 'Lwacholi'],
 ];
 
 /**

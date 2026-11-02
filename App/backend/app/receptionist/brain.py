@@ -473,10 +473,14 @@ class UraReceptionistBrain(LLMService):
         # is the caller talking over it (see CallState.offer_interrupted).
         self._bot_speaking = False
         self._active_gen_task: asyncio.Task[Any] | None = None
+        self._prewarm_task: asyncio.Task[Any] | None = None
 
     def _cancel_active_generation(self) -> None:
         if self._active_gen_task is not None and not self._active_gen_task.done():
             self._active_gen_task.cancel()
+        if self._prewarm_task is not None and not self._prewarm_task.done():
+            self._prewarm_task.cancel()
+            self._prewarm_task = None
 
     @property
     def language(self) -> str:
@@ -724,6 +728,35 @@ class UraReceptionistBrain(LLMService):
             logger.info("Dropping the clarification the old-language transcript opened on call %s", self.room.call_id)
             self.room.state.clarify = None
         words = list(words or [])
+        no_local_asr = (
+            reask_window is None
+            and self.speech_model is not None
+            and hasattr(self.speech_model, "_whisper_salt")
+            and getattr(self.speech_model, "_whisper_salt", None) is None
+            and getattr(self.speech_model, "_asr_pipeline", None) is None
+        )
+        if no_local_asr:
+            from ..query import detect_language
+            from .language import detect_explicit_request
+            from .router import announce_language
+
+            explicit_lang = detect_explicit_request(user_text, KNOWN_LANGUAGES)
+            if explicit_lang in KNOWN_LANGUAGES and explicit_lang != self.language:
+                self.room.state.locale = explicit_lang
+                self.room.state.language_switches += 1
+                lang_msg = announce_language(self.room, explicit_lang, "explicit")
+                await self.push_frame(
+                    OutputTransportMessageUrgentFrame(lang_msg), FrameDirection.DOWNSTREAM
+                )
+            elif getattr(self.room.state, "language_source", "default") in ("default", "auto"):
+                det_lang = detect_language(user_text, default_lang=self.language)
+                if det_lang in KNOWN_LANGUAGES and det_lang != self.language:
+                    self.room.state.locale = det_lang
+                    self.room.state.language_switches += 1
+                    lang_msg = announce_language(self.room, det_lang, "auto")
+                    await self.push_frame(
+                        OutputTransportMessageUrgentFrame(lang_msg), FrameDirection.DOWNSTREAM
+                    )
         language = self.language
         self.room.state.idle_prompts = 0
 
@@ -1936,6 +1969,45 @@ class UraReceptionistBrain(LLMService):
         await self._publish_call_state("speaking" if speak else "listening")
         if not speak:
             return
+
+        if self._prewarm_task is not None and not self._prewarm_task.done():
+            self._prewarm_task.cancel()
+            self._prewarm_task = None
+
+        if isinstance(getattr(self.speech_model, "_tts_cache", None), dict):
+            tts_pieces = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()]
+            if len(tts_pieces) > 1:
+                from .config import get_tts_voice
+
+                with_voice = get_tts_voice()
+                lang_now = self.language
+                prewarm_gen_id = self.room.state.generation_id
+                speech_ref = self.speech_model
+
+                async def _prewarm_remaining(pieces_to_warm: list[str]) -> None:
+                    for piece in pieces_to_warm:
+                        if (
+                            self.room.state.mode != "ai"
+                            or self.room.state.generation_id != prewarm_gen_id
+                        ):
+                            return
+                        try:
+                            await asyncio.to_thread(
+                                speech_ref.synthesize,
+                                piece,
+                                voice=with_voice,
+                                language=lang_now,
+                            )
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception:
+                            logger.debug("Sentence prewarm failed", exc_info=True)
+                            return
+
+                try:
+                    self._prewarm_task = asyncio.create_task(_prewarm_remaining(tts_pieces[1:]))
+                except Exception:
+                    logger.debug("Background sentence prewarm skipped", exc_info=True)
 
         # One text frame: the TTS service's aggregator splits it into sentences
         # and voices the first while the rest wait, so nothing is gained by

@@ -407,6 +407,7 @@ export const ach: Partial<Dictionary> = {
   'call.listening': 'Watye ka winyo… peny lapeny ni me mucoro.',
   'call.listeningHint': 'Lok ni nen kany ka itye ka loko.',
   'call.mutedHint': 'Maikrofoni olore — yabi me mede ki loko.',
+  'call.micFallback': 'Maikrofoni pe oye — pud itwero winyo ki coyo lok piny kany.',
   'call.languageAuto': '{language} · auto',
   'call.languageChosen': '{language}',
   'call.languageMenu': 'Leb me cim',
