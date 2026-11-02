@@ -433,10 +433,10 @@ _ACRONYMS = [
     (re.compile(r"\bmygov\b", re.IGNORECASE), "my gov"),
     (re.compile(r"(?:\bM\.T\.N\b\.?|\bM-T-N\b|\bMTN\b)", re.IGNORECASE), "M T N"),
     (re.compile(r"\bDT-([0-9]{3,5})\b", re.IGNORECASE), r"D-T \1"),
-    # Ugandan language names spoken with natural Ugandan phonetics ("Runyankole", "Akyoli" for Acholi):
+    # Ugandan language names spoken with natural Ugandan phonetics ("Runyankole", "Acholi"):
     (re.compile(r"\bRunyanko[lr]e\b", re.IGNORECASE), "Runyankole"),
-    (re.compile(r"\bAcholi\b", re.IGNORECASE), "Akyoli"),
-    (re.compile(r"\bLwacholi\b", re.IGNORECASE), "Lwakyoli"),
+    (re.compile(r"\b(?:Acholi|Akyoli)\b", re.IGNORECASE), "Acholi"),
+    (re.compile(r"\b(?:Lwacholi|Lwakyoli)\b", re.IGNORECASE), "Lwacholi"),
 ]
 
 
@@ -684,8 +684,8 @@ def verbalize_digits_for_tts(text: str, locale: str = "en") -> str:
     )
     out = re.sub(r"(?:\bV\.A\.T\b\.?|\bV-A-T\b|\bVAT\b)", "Vat", out, flags=re.IGNORECASE)
     out = re.sub(r"\bRunyanko[lr]e\b", "Runyankole", out, flags=re.IGNORECASE)
-    out = re.sub(r"\bAcholi\b", "Akyoli", out, flags=re.IGNORECASE)
-    out = re.sub(r"\bLwacholi\b", "Lwakyoli", out, flags=re.IGNORECASE)
+    out = re.sub(r"\b(?:Acholi|Akyoli)\b", "Acholi", out, flags=re.IGNORECASE)
+    out = re.sub(r"\b(?:Lwacholi|Lwakyoli)\b", "Lwacholi", out, flags=re.IGNORECASE)
     return out
 
 
@@ -919,8 +919,8 @@ _BANTU_ACRONYM_PHONETICS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bE-?F-?R-?I-?S\b", re.IGNORECASE), "Efris"),
     (re.compile(r"(?:\bU\.R\.A\b\.?|\bU-R-A\b|\bURA\b)", re.IGNORECASE), "U R A"),
     (re.compile(r"\bRunyanko[lr]e\b", re.IGNORECASE), "Runyankole"),
-    (re.compile(r"\bAcholi\b", re.IGNORECASE), "Akyoli"),
-    (re.compile(r"\bLwacholi\b", re.IGNORECASE), "Lwakyoli"),
+    (re.compile(r"\b(?:Acholi|Akyoli)\b", re.IGNORECASE), "Acholi"),
+    (re.compile(r"\b(?:Lwacholi|Lwakyoli)\b", re.IGNORECASE), "Lwacholi"),
 )
 
 
@@ -935,13 +935,13 @@ _TTS_ENGINE_WORD_ACRONYMS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(?:\bU\.R\.A\b\.?|\bU-R-A\b|\bURA\b)", re.IGNORECASE), "U R A"),
     (re.compile(r"(?:\bP\.R\.N\b\.?|\bP-R-N\b|\bPRN\b)", re.IGNORECASE), "P R N"),
     (re.compile(r"\bRunyanko[lr]e\b", re.IGNORECASE), "Runyankole"),
-    (re.compile(r"\bAcholi\b", re.IGNORECASE), "Akyoli"),
-    (re.compile(r"\bLwacholi\b", re.IGNORECASE), "Lwakyoli"),
+    (re.compile(r"\b(?:Acholi|Akyoli)\b", re.IGNORECASE), "Acholi"),
+    (re.compile(r"\b(?:Lwacholi|Lwakyoli)\b", re.IGNORECASE), "Lwacholi"),
 )
 
 
 def apply_tts_engine_phonetics(text: str, locale: str = "en") -> str:
-    """Apply final Title-case phonetic word forms (Tin, Nin, Vat, Payee, Efris, U R A, P R N, Runyankole, Akyoli) right before TTS synthesis.
+    """Apply final Title-case phonetic word forms (Tin, Nin, Vat, Payee, Efris, U R A, P R N, Runyankole, Acholi) right before TTS synthesis.
 
     Shared by both Main Chat speech/voice flows (``/v1/tts``, ``/v1/tts/stream``)
     and Call Receptionist flows (``UraSpeechTTS``, ``synthesize_pcm16``) so

@@ -240,9 +240,15 @@ export function useCall() {
             if (silenceTimer) clearTimeout(silenceTimer);
             cleanup();
           };
+          // Re-resume playback context in case getUserMedia switched OS audio profile
+          if (typeof playerRef.current?.resume === 'function') {
+            void playerRef.current.resume();
+          }
         } catch (err: unknown) {
-          store.setError((err as Error)?.message || 'Microphone access denied');
-          hangup();
+          // Keep the call active so the caller still hears the AI receptionist
+          // and can use the in-call text input ("Type instead") or officer handoff.
+          store.setMuted(true);
+          store.setError((err as Error)?.message || 'Microphone access denied — you can still listen and type below.');
         }
       };
 

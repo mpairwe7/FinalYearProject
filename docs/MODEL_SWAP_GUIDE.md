@@ -16,7 +16,7 @@ LLM_MODEL=Sunbird/Sunflower-Qwen3.5-9B  # llm.py — Sunflower v2 (67 African la
                                          # Also supports Sunbird/Sunflower-Qwen3.8-27B.
 LLM_MAX_CONCURRENCY=12                   # service.py — 8-16 bounded LLM thread-pool size for vLLM continuous batching
 WHISPER_SALT_MODEL=Sunbird/SunflowerASR-51-african-languages  # 51 African languages (SFT + GRPO)
-ORPHEUS_MODEL=Sunbird/orpheus-3b-tts-multilingual             # Primary streaming TTS (lg, sw, en; uses apply_tts_engine_phonetics for Tin/Nin/Vat/Payee/Efris/Runyankole/Akyoli, G439)
+ORPHEUS_MODEL=Sunbird/orpheus-3b-tts-multilingual             # Primary streaming TTS (lg, sw, en; uses apply_tts_engine_phonetics for Tin/Nin/Vat/Payee/Efris/Runyankole/Acholi, G439/G440)
 DENSE_MODEL=BAAI/bge-m3            # retriever.py / indexer.py — dense embeddings
 DENSE_DIM=1024                     # must match DENSE_MODEL output dimension
 RERANKER_MODEL=mixedbread-ai/mxbai-rerank-base-v2  # retriever.py — cross-encoder reranking

@@ -46,7 +46,18 @@ def apply_dynamic_turn_timeout(strategy: Any, room: Any = None) -> float:
 
 def build_cascaded_turn_strategies(room: Any = None) -> Any:
     """``UserTurnStrategies`` for the cascaded engine. Needs Pipecat."""
-    from pipecat.frames.frames import BotStartedSpeakingFrame, BotStoppedSpeakingFrame, Frame
+    import re
+
+    from pipecat.frames.frames import (
+        BotStartedSpeakingFrame,
+        BotStoppedSpeakingFrame,
+        Frame,
+        InterimTranscriptionFrame,
+        InterruptionFrame,
+        TranscriptionFrame,
+        VADUserStartedSpeakingFrame,
+        VADUserStoppedSpeakingFrame,
+    )
     from pipecat.turns.types import ProcessFrameResult
     from pipecat.turns.user_start.min_words_user_turn_start_strategy import (
         MinWordsUserTurnStartStrategy,
@@ -57,20 +68,49 @@ def build_cascaded_turn_strategies(room: Any = None) -> Any:
     )
     from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
+    _ONE_WORD_BARGE_IN_RE = re.compile(
+        r"^\W*(?:yes|yeah|yep|no|nope|officer|agent|human|help|stop|wait|repeat|slower|"
+        r"english|luganda|oluganda|swahili|kiswahili|runyankole|runyankore|acholi|lwacholi|"
+        r"yee|nedda|ndiyo|hapana|ego|ngaaha|eyo|pe)\W*$",
+        re.IGNORECASE,
+    )
+
     class VADWhileBotQuietStartStrategy(VADUserTurnStartStrategy):
         """VAD starts a turn only while the assistant is not speaking."""
 
         def __init__(self, **kwargs: Any) -> None:
+            kwargs.setdefault("enable_interruptions", False)
             super().__init__(**kwargs)
             self._bot_speaking = False
+            self._caller_speaking = False
 
         async def process_frame(self, frame: Frame) -> ProcessFrameResult:
-            if isinstance(frame, BotStartedSpeakingFrame):
+            if isinstance(frame, VADUserStartedSpeakingFrame):
+                self._caller_speaking = True
+            elif isinstance(frame, VADUserStoppedSpeakingFrame):
+                self._caller_speaking = False
+            elif isinstance(frame, BotStartedSpeakingFrame):
                 self._bot_speaking = True
-            elif isinstance(frame, BotStoppedSpeakingFrame):
+            elif isinstance(frame, (BotStoppedSpeakingFrame, InterruptionFrame)):
+                was_speaking = self._bot_speaking
                 self._bot_speaking = False
+                if was_speaking and self._caller_speaking:
+                    return await super().process_frame(VADUserStartedSpeakingFrame())
             if self._bot_speaking:
                 return ProcessFrameResult.CONTINUE
+            return await super().process_frame(frame)
+
+    class BargeInTurnStartStrategy(MinWordsUserTurnStartStrategy):
+        """Starts a turn on 2+ words, or a recognized 1-word command on a final transcript."""
+
+        async def process_frame(self, frame: Frame) -> ProcessFrameResult:
+            if (
+                isinstance(frame, TranscriptionFrame)
+                and not isinstance(frame, InterimTranscriptionFrame)
+                and _ONE_WORD_BARGE_IN_RE.match(getattr(frame, "text", "") or "")
+            ):
+                await self.trigger_user_turn_started()
+                return ProcessFrameResult.STOP
             return await super().process_frame(frame)
 
     class DynamicSpeechTimeoutTurnStopStrategy(SpeechTimeoutUserTurnStopStrategy):
@@ -90,7 +130,7 @@ def build_cascaded_turn_strategies(room: Any = None) -> Any:
     return UserTurnStrategies(
         start=[
             VADWhileBotQuietStartStrategy(),
-            MinWordsUserTurnStartStrategy(min_words=BARGE_IN_MIN_WORDS),
+            BargeInTurnStartStrategy(min_words=BARGE_IN_MIN_WORDS),
         ],
         stop=[DynamicSpeechTimeoutTurnStopStrategy(room_ref=room)],
     )

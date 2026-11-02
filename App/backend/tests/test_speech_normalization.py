@@ -595,12 +595,11 @@ def test_call_receptionist_and_main_chat_acronym_and_language_pronunciation_pari
     )
     cleaned = clean_text_for_speech(greeting, locale="en")
     assert "Runyankole" in cleaned
-    assert "Akyoli" in cleaned
-    assert "Acholi" not in cleaned
+    assert "Acholi" in cleaned
     voiced = apply_tts_engine_phonetics(cleaned, locale="en")
     assert "U R A" in voiced
     assert "Runyankole" in voiced
-    assert "Akyoli" in voiced
+    assert "Acholi" in voiced
     assert "Tin" in voiced
     assert "Nin" in voiced
     assert "Vat" in voiced

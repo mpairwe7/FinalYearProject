@@ -1110,7 +1110,7 @@ async def security_headers(request: Request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
     response.headers["X-Request-ID"] = request_id
-    response.headers["Permissions-Policy"] = "camera=(), microphone=(self), geolocation=()"
+    response.headers["Permissions-Policy"] = 'camera=(), microphone=(self "https://huggingface.co"), geolocation=()'
     response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
     response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
     if request.url.path.startswith(("/v1/", "/api/v1/")):

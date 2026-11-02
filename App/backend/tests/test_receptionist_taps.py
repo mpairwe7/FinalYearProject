@@ -207,6 +207,10 @@ class TestLivePartialTranscriptTap(unittest.IsolatedAsyncioTestCase, CaptureMixi
         self.assertEqual(len(pushed), 2)
         self.assertEqual([f for f in pushed if isinstance(f, OutputTransportMessageUrgentFrame)], [])
 
+        cloud_only_speech = SimpleNamespace(_whisper_salt=None, _asr_pipeline=None)
+        cloud_tap = LivePartialTranscriptTap(room=room, speech_model=cloud_only_speech, language="en")
+        self.assertFalse(cloud_tap.enabled)
+
     async def test_transcription_failure_is_swallowed(self):
         room = make_room()
 

@@ -6,13 +6,16 @@
 class PCMPlayerProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    // Pre-allocated 60-second circular buffer at 16kHz so streamed TTS sentences never overwrite unspoken audio
-    this.buffer = new Float32Array(16000 * 60);
+    const outRate = typeof sampleRate === 'number' && sampleRate > 0 ? sampleRate : 16000;
+    this.outputSampleRate = outRate;
+    this.inputSampleRate = 16000;
+    // Pre-allocated 60-second circular buffer at output sampleRate so streamed TTS sentences never overwrite unspoken audio
+    this.buffer = new Float32Array(outRate * 60);
     this.readIndex = 0;
     this.writeIndex = 0;
     this.bufferedSamples = 0;
     this.isPlaying = false;
-    this.minBufferSamples = 16000 * 0.06; // 60ms initial jitter buffer
+    this.minBufferSamples = Math.floor(outRate * 0.14); // 140ms jitter buffer for cloud/HF Space WebSockets
     // Level reporting for the call orb. Measured here rather than where chunks
     // are enqueued, because the jitter buffer means audio is handed over well
     // before it is heard — an orb driven by enqueue time pulses ahead of the
@@ -24,6 +27,11 @@ class PCMPlayerProcessor extends AudioWorkletProcessor {
     this.port.onmessage = (event) => {
       const data = event.data;
       if (!data) return;
+
+      if (data.type === 'config' && typeof data.inputSampleRate === 'number' && data.inputSampleRate > 0) {
+        this.inputSampleRate = data.inputSampleRate;
+        return;
+      }
 
       if (data.type === 'flush') {
         this.readIndex = 0;
@@ -48,14 +56,31 @@ class PCMPlayerProcessor extends AudioWorkletProcessor {
   _enqueuePCM16(arrayBuffer) {
     const int16 = new Int16Array(arrayBuffer);
     const len = int16.length;
+    if (len === 0) return;
 
-    for (let i = 0; i < len; i++) {
-      const floatVal = int16[i] / 32768.0;
-      this.buffer[this.writeIndex] = floatVal;
-      this.writeIndex = (this.writeIndex + 1) % this.buffer.length;
+    const inRate = this.inputSampleRate || 16000;
+    const outRate = this.outputSampleRate || 16000;
+    if (Math.abs(outRate - inRate) < 100) {
+      for (let i = 0; i < len; i++) {
+        this.buffer[this.writeIndex] = int16[i] / 32768.0;
+        this.writeIndex = (this.writeIndex + 1) % this.buffer.length;
+      }
+      this.bufferedSamples = Math.min(this.bufferedSamples + len, this.buffer.length);
+    } else {
+      const outLen = Math.max(1, Math.round((len * outRate) / inRate));
+      const ratio = (len - 1) / Math.max(1, outLen - 1);
+      for (let i = 0; i < outLen; i++) {
+        const srcPos = i * ratio;
+        const idx = Math.floor(srcPos);
+        const frac = srcPos - idx;
+        const s0 = int16[idx] / 32768.0;
+        const s1 = idx + 1 < len ? int16[idx + 1] / 32768.0 : s0;
+        this.buffer[this.writeIndex] = s0 + (s1 - s0) * frac;
+        this.writeIndex = (this.writeIndex + 1) % this.buffer.length;
+      }
+      this.bufferedSamples = Math.min(this.bufferedSamples + outLen, this.buffer.length);
     }
 
-    this.bufferedSamples = Math.min(this.bufferedSamples + len, this.buffer.length);
     if (!this.isPlaying && this.bufferedSamples >= this.minBufferSamples) {
       this.isPlaying = true;
     }

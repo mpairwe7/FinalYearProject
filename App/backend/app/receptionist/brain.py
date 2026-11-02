@@ -724,6 +724,35 @@ class UraReceptionistBrain(LLMService):
             logger.info("Dropping the clarification the old-language transcript opened on call %s", self.room.call_id)
             self.room.state.clarify = None
         words = list(words or [])
+        no_local_asr = (
+            reask_window is None
+            and self.speech_model is not None
+            and hasattr(self.speech_model, "_whisper_salt")
+            and getattr(self.speech_model, "_whisper_salt", None) is None
+            and getattr(self.speech_model, "_asr_pipeline", None) is None
+        )
+        if no_local_asr:
+            from ..query import detect_language
+            from .language import detect_explicit_request
+            from .router import announce_language
+
+            explicit_lang = detect_explicit_request(user_text, KNOWN_LANGUAGES)
+            if explicit_lang in KNOWN_LANGUAGES and explicit_lang != self.language:
+                self.room.state.locale = explicit_lang
+                self.room.state.language_switches += 1
+                lang_msg = announce_language(self.room, explicit_lang, "explicit")
+                await self.push_frame(
+                    OutputTransportMessageUrgentFrame(lang_msg), FrameDirection.DOWNSTREAM
+                )
+            elif getattr(self.room.state, "language_source", "default") in ("default", "auto"):
+                det_lang = detect_language(user_text, default_lang=self.language)
+                if det_lang in KNOWN_LANGUAGES and det_lang != self.language:
+                    self.room.state.locale = det_lang
+                    self.room.state.language_switches += 1
+                    lang_msg = announce_language(self.room, det_lang, "auto")
+                    await self.push_frame(
+                        OutputTransportMessageUrgentFrame(lang_msg), FrameDirection.DOWNSTREAM
+                    )
         language = self.language
         self.room.state.idle_prompts = 0
 
@@ -1936,6 +1965,21 @@ class UraReceptionistBrain(LLMService):
         await self._publish_call_state("speaking" if speak else "listening")
         if not speak:
             return
+
+        if isinstance(getattr(self.speech_model, "_tts_cache", None), dict):
+            tts_pieces = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()]
+            if len(tts_pieces) > 1:
+                from .config import get_tts_voice
+
+                with_voice = get_tts_voice()
+                lang_now = self.language
+                try:
+                    asyncio.get_running_loop().run_in_executor(
+                        None,
+                        lambda: self.speech_model.prewarm_phrases(lang_now, tts_pieces[1:], voice=with_voice),
+                    )
+                except Exception:
+                    logger.debug("Background sentence prewarm skipped", exc_info=True)
 
         # One text frame: the TTS service's aggregator splits it into sentences
         # and voices the first while the rest wait, so nothing is gained by

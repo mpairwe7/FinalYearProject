@@ -287,22 +287,50 @@ export class AudioRecorder {
     onChunk: (pcm16: ArrayBuffer) => void,
     options?: { echoCancellation?: boolean; noiseSuppression?: boolean },
   ): Promise<() => void> {
-    const ctx = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
-    if (ctx.state === 'suspended') {
-      await ctx.resume().catch(() => {});
-    }
-
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         sampleRate: { ideal: TARGET_SAMPLE_RATE },
         channelCount: 1,
         echoCancellation: options?.echoCancellation ?? true,
         noiseSuppression: options?.noiseSuppression ?? true,
+        autoGainControl: true,
       },
     });
 
+    let ctx = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
+    if (ctx.state === 'suspended') {
+      await ctx.resume().catch(() => {});
+    }
+    let source: MediaStreamAudioSourceNode;
     try {
-      const source = ctx.createMediaStreamSource(this.stream);
+      source = ctx.createMediaStreamSource(this.stream);
+    } catch {
+      // Firefox throws NotSupportedError if the AudioContext sampleRate (16kHz)
+      // differs from the hardware MediaStream sampleRate (48kHz/44.1kHz).
+      ctx.close().catch(() => {});
+      ctx = new AudioContext();
+      if (ctx.state === 'suspended') {
+        await ctx.resume().catch(() => {});
+      }
+      source = ctx.createMediaStreamSource(this.stream);
+    }
+
+    const connectSilentSink = (node: AudioNode) => {
+      if (typeof ctx.createGain === 'function') {
+        try {
+          const silentGain = ctx.createGain();
+          if (silentGain.gain) silentGain.gain.value = 0;
+          node.connect(silentGain);
+          silentGain.connect(ctx.destination);
+          return;
+        } catch {
+          // Fall through to direct destination connect
+        }
+      }
+      node.connect(ctx.destination);
+    };
+
+    try {
       // Prefer AudioWorklet (modern browsers), with inline Blob fallback if external script fails
       try {
         await ctx.audioWorklet.addModule('/audio-worklet-processor.js');
@@ -311,15 +339,32 @@ export class AudioRecorder {
 class PCM16Processor extends AudioWorkletProcessor {
   constructor() {
     super();
+    this._targetRate = 16000;
+    this._inRate = typeof sampleRate === 'number' && sampleRate > 0 ? sampleRate : 16000;
+    this._chunkSize = 320;
     this._buffer = [];
-    this._chunkSize = Math.floor(sampleRate * 0.02);
+    this._srcPos = 0;
   }
   process(inputs) {
     const input = inputs[0];
     if (!input || !input[0]) return true;
     const samples = input[0];
-    for (let i = 0; i < samples.length; i++) {
-      this._buffer.push(samples[i]);
+    if (samples.length === 0) return true;
+    if (Math.abs(this._inRate - this._targetRate) < 100) {
+      for (let i = 0; i < samples.length; i++) {
+        this._buffer.push(samples[i]);
+      }
+    } else {
+      const step = this._inRate / this._targetRate;
+      while (this._srcPos < samples.length) {
+        const start = Math.floor(this._srcPos);
+        const end = Math.min(samples.length, Math.max(start + 1, Math.floor(this._srcPos + step)));
+        let sum = 0;
+        for (let i = start; i < end; i++) sum += samples[i];
+        this._buffer.push(sum / (end - start));
+        this._srcPos += step;
+      }
+      this._srcPos -= samples.length;
     }
     while (this._buffer.length >= this._chunkSize) {
       const chunk = this._buffer.splice(0, this._chunkSize);
@@ -351,7 +396,7 @@ registerProcessor('pcm16-processor', PCM16Processor);
         }
       };
       source.connect(workletNode);
-      workletNode.connect(ctx.destination);
+      connectSilentSink(workletNode);
 
       this._recording = true;
 
@@ -364,7 +409,6 @@ registerProcessor('pcm16-processor', PCM16Processor);
       };
     } catch {
       // Fallback: ScriptProcessorNode with 16kHz downsampling and 20ms (640-byte) framing for SileroVAD
-      const source = ctx.createMediaStreamSource(this.stream);
       const bufSize = 1024;
       const processor = ctx.createScriptProcessor(bufSize, 1, 1);
       processor.onaudioprocess = (e: AudioProcessingEvent) => {
@@ -385,7 +429,7 @@ registerProcessor('pcm16-processor', PCM16Processor);
         }
       };
       source.connect(processor);
-      processor.connect(ctx.destination);
+      connectSilentSink(processor);
 
       this._recording = true;
 

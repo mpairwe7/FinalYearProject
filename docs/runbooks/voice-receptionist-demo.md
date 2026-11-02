@@ -60,7 +60,7 @@ FastAPI (one worker and one replica; process-local call actor)
                               SpeechModel.synthesize → PCM16 16k; streams from the local Orpheus
                               sidecar for the languages in ORPHEUS_TTS_LANGUAGES, applies
                               clean_text_for_speech + apply_tts_engine_phonetics for Tin/Nin/Vat/
-                              Payee/Efris/Runyankole/Akyoli parity with Main Chat (G439), and emits
+                              Payee/Efris/Runyankole/Acholi parity with Main Chat (G439/G440), and emits
                               TTSStartedFrame/TTSStoppedFrame so BotStoppedSpeakingFrame fires
                               immediately without the 3.0s BOT_VAD_STOP_FALLBACK_SECS delay, G249)
      → LiveKit audio/data output
