@@ -142,6 +142,9 @@ const URA_SPEECH_TERMS: Array<[RegExp, string | ((match: string, ...args: string
   [/\bBRN\b|\bB\.R\.N\.?|\bB-R-N\b/gi, 'B-R-N'],
   [/\bMTN\b|\bM\.T\.N\.?|\bM-T-N\b/gi, 'M T N'],
   [/\bDT-(\d{3,5})\b/gi, 'D-T $1'],
+  [/\bRunyanko[lr]e\b/gi, 'Runyankole'],
+  [/\bAcholi\b/gi, 'Akyoli'],
+  [/\bLwacholi\b/gi, 'Lwakyoli'],
 ];
 
 /**
@@ -328,6 +331,13 @@ const CALL_TRAILING_OFFER_RE =
 const CALL_DISPLAY_ACRONYM_PAIRS: ReadonlyArray< readonly [RegExp, string]> = [
   [/\bAsk U R A\b/gi, 'AskURA'],
   [/\bNita U\b|\bN I T A[ \t]*-[ \t]*U\b/gi, 'NITA-U'],
+  [/\bAkyoli\b/gi, 'Acholi'],
+  [/\bLwakyoli\b/gi, 'Lwacholi'],
+  [/\bRunyankore\b/gi, 'Runyankole'],
+  [/\bTin\b/g, 'TIN'],
+  [/\bTins\b/g, 'TINs'],
+  [/\bNin\b/g, 'NIN'],
+  [/\bNins\b/g, 'NINs'],
   [/\bU R A\b/g, 'URA'],
   [/\bK C C A\b/g, 'KCCA'],
   [/\bU R S B\b/g, 'URSB'],

@@ -219,9 +219,17 @@ class UraSpeechTTS(TTSService):
     async def _stream_orpheus(
         self, text: str, language: str, context_id: str, t0: float
     ) -> AsyncGenerator[Frame, None]:
-        from ..speech_normalization import verbalize_digits_for_tts
+        from ..speech_normalization import (
+            apply_tts_engine_phonetics,
+            clean_text_for_speech,
+            verbalize_digits_for_tts,
+        )
 
-        voiced_text = verbalize_digits_for_tts(text, locale=language)
+        normalized = clean_text_for_speech(text, locale=language)
+        voiced_text = apply_tts_engine_phonetics(
+            verbalize_digits_for_tts(normalized, locale=language),
+            locale=language,
+        )
         pieces: list[bytes] = []
         complete = True
 
