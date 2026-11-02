@@ -9,7 +9,7 @@ def test_strip_citations():
     res = clean_text_for_speech(raw, locale="en")
     assert "[1]" not in res
     assert "[2, 3]" not in res
-    assert "Section 15 of the VAT Act, the standard rate is 18 percent." in res
+    assert "Section 15 of the Vat Act, the standard rate is 18 percent." in res
 
 
 def test_markdown_stripping():
@@ -198,7 +198,8 @@ def test_ura_specific_terms_and_dotted_acronyms():
     res = clean_text_for_speech(raw, locale="en")
     assert "NIN" in res
     assert "TIN" in res
-    assert "VAT" in res
+    assert "Vat" in res
+    assert "V A T" not in res
     assert "T-C-C" in res
     assert "Asycuda" in res
     assert "E-Tax" in res
@@ -244,11 +245,11 @@ def test_the_calculator_s_asides_are_spoken_once_and_plainly():
         "(FY2026-27). That comes from the official URA FY2026-27 rate table."
     )
     assert clean_text_for_speech(raw, locale="en") == (
-        "The standard rate of Value Added Tax (VAT) is 18 percent, for the 2026 to 2027 financial year. "
+        "The standard rate of Value Added Tax (Vat) is 18 percent, for the 2026 to 2027 financial year. "
         "That comes from the official U R A 2026 to 2027 rate table."
     )
     assert clean_text_for_speech(raw, locale="lg") == (
-        "The standard rate of Value Added Tax (VAT) is ebitundu kkumi na munaana ku buli kikumi. "
+        "The standard rate of Value Added Tax (Vat) is ebitundu kkumi na munaana ku buli kikumi. "
         "That comes from the official U R A twenty twenty-six okutuuka ku twenty twenty-seven rate table."
     )
 
@@ -304,7 +305,7 @@ def test_the_luganda_answer_s_figures_are_said_once_and_in_words():
         "(FY2026-27). Guwoozebwa ku bitundu 18% ku bintu."
     )
     assert clean_text_for_speech(raw, locale="lg") == (
-        "Omusolo ogw'omuwendo ogwongerwako (VAT) guli ebitundu kkumi na munaana ku buli kikumi. "
+        "Omusolo ogw'omuwendo ogwongerwako (Vat) guli ebitundu kkumi na munaana ku buli kikumi. "
         "Guwoozebwa ku bitundu kkumi na munaana ku buli kikumi ku bintu."
     )
 
@@ -326,7 +327,7 @@ def test_a_band_is_read_from_one_amount_to_the_other(locale, spoken):
 
 def test_an_expanded_name_is_not_said_twice():
     raw = "Heads include Withholding Tax (**WHT**) and Value Added Tax (**VAT**)."
-    assert clean_text_for_speech(raw, locale="en") == "Heads include Withholding Tax and Value Added Tax (VAT)."
+    assert clean_text_for_speech(raw, locale="en") == "Heads include Withholding Tax and Value Added Tax (Vat)."
 
 
 @pytest.mark.parametrize(

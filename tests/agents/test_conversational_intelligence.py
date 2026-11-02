@@ -434,10 +434,10 @@ class TestConversationalIntelligenceEngine:
         from app.speech_normalization import clean_text_for_speech
 
         assert clean_text_for_speech("Omushoro gwa VAT guri ebicweka 18% aha eigana.", locale="nyn") == (
-            "Omushoro gwa VAT guri ebicweka ikumi na munaana aha eigana."
+            "Omushoro gwa Vat guri ebicweka ikumi na munaana aha eigana."
         )
         assert clean_text_for_speech("Omushoro gwa VAT guri ebicweka 18% aha kikumi.", locale="nyn") == (
-            "Omushoro gwa VAT guri ebicweka ikumi na munaana aha kikumi."
+            "Omushoro gwa Vat guri ebicweka ikumi na munaana aha kikumi."
         )
         assert "18" in percentages("Omushoro gwa VAT guri ebicweka ikumi na munaana aha eigana.")
         assert "18" in percentages("Omushoro gwa VAT guri ebicweka 18 aha igana.")

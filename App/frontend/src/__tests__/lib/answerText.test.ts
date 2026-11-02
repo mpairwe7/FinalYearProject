@@ -15,7 +15,8 @@ describe("answerText", () => {
     expect(speech).toContain("Efris");
     expect(speech).toContain("U R A");
     expect(speech).toContain("Payee");
-    expect(speech).toContain("VAT");
+    expect(speech).toContain("Vat");
+    expect(speech).not.toContain("V A T");
     expect(speech).toContain("Withholding Tax");
     expect(speech).toContain("K C C A");
     expect(speech).toContain("U R S B");
@@ -135,12 +136,16 @@ describe("answerText", () => {
     expect(speech).not.toContain("Step 12");
   });
 
-  it("restores URA/PAYE/EFRIS acronyms and formats multi-item labelled call captions as bullets", () => {
+  it("restores URA/PAYE/EFRIS/VAT acronyms, ura.go.ug domains, emails, USSD, phones, and formats multi-item labelled call captions as bullets", () => {
     const raw =
-      "U R A provides: Taxpayer Registration: Instant TIN issuance. Domestic Tax Administration: Managing VAT and Payee. E-Invoicing: Efris receipts.";
+      "U R A provides: Taxpayer Registration: Instant TIN 1 0 0 0 1 2 3 4 5 6 issuance at U R A dot go dot u g. Domestic Tax Administration: Managing Vat (18 percent) and Payee due (26.3 percent effective) with N-S-S-F. E-Invoicing: Efris receipts via O B R S dot U R S B dot go dot u g or email services at U R A dot go dot u g or dial star 1 6 5 hash or call 0 800, 117, 0 0 0.";
     const formatted = formatCallCaptionText(raw);
-    expect(formatted).toContain("URA provides:\n• Taxpayer Registration:");
-    expect(formatted).toContain("\n• Domestic Tax Administration: Managing VAT and PAYE.");
-    expect(formatted).toContain("\n• E-Invoicing: EFRIS receipts.");
+    expect(formatted).toContain("URA provides:\n• Taxpayer Registration: Instant TIN 1000123456 issuance at ura.go.ug."); // gitleaks:allow
+    expect(formatted).toContain(
+      "\n• Domestic Tax Administration: Managing VAT (18%) and PAYE due (26.3% effective) with NSSF.",
+    );
+    expect(formatted).toContain(
+      "\n• E-Invoicing: EFRIS receipts via obrs.ursb.go.ug or email services@ura.go.ug or dial *165# or call 0800 117 000.",
+    );
   });
 });

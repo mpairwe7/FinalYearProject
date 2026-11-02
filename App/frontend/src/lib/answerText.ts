@@ -59,7 +59,8 @@ const URA_SPEECH_TERMS: Array<[RegExp, string | ((match: string, ...args: string
   [/\bWHT\b|\bW\.H\.T\.?\b/gi, 'Withholding Tax'],
   [/\bT\.I\.N\.?|\bT-I-N\b/gi, 'TIN'],
   [/\bN\.I\.N\.?|\bN-I-N\b/gi, 'NIN'],
-  [/\bV\.A\.T\.?|\bV-A-T\b/gi, 'VAT'],
+  [/\bV-?A-?T-?A\b/g, 'Vat Act'],
+  [/\bV\.A\.T\.?|\bV-A-T\b|\bVAT\b/gi, 'Vat'],
   [/\bCIT\b|\bC\.I\.T\.?|\bC-I-T\b/gi, 'C-I-T'],
   [/\bPIT\b|\bP\.I\.T\.?|\bP-I-T\b/g, 'P-I-T'],
   [/\bLED\b|\bL\.E\.D\.?\b/g, 'Local Excise Duty'],
@@ -324,31 +325,186 @@ const CALL_STEP_BREAK_RE =
 const CALL_TRAILING_OFFER_RE =
   /([.!?])[ \t]+(?=(?:Would you like more detail\?|Would you like to speak to an officer about this\?|Oyagala okumanya ebisingawo\?|Oyagala okwogera n'omukozi wa URA ku nsonga eno\?|Je, ungependa maelezo zaidi\?|Je, ungependa (?:kuongea|kuzungumza) na afisa kuhusu hili\?|Nooyenda kumanya ebindi ebikukiraho\?|Nooyenda kugamba n'omukozi ahari enshonga egi\?|Imito ngec mukene\?|Imito loko ki latic me URA i kom lok man\?)$)/i;
 
+const CALL_DISPLAY_ACRONYM_PAIRS: ReadonlyArray< readonly [RegExp, string]> = [
+  [/\bAsk U R A\b/gi, 'AskURA'],
+  [/\bNita U\b|\bN I T A[ \t]*-[ \t]*U\b/gi, 'NITA-U'],
+  [/\bU R A\b/g, 'URA'],
+  [/\bK C C A\b/g, 'KCCA'],
+  [/\bU R S B\b/g, 'URSB'],
+  [/\bU N B S\b/g, 'UNBS'],
+  [/\bD C I C\b/g, 'DCIC'],
+  [/\bU D L S\b/g, 'UDLS'],
+  [/\bM L H U D\b/g, 'MLHUD'],
+  [/\bU G N L I S\b/g, 'UgNLIS'],
+  [/\bU P F\b/g, 'UPF'],
+  [/\bE P S\b/g, 'EPS'],
+  [/\bN D A M I S\b/g, 'NDAMIS'],
+  [/\bN D A\b/g, 'NDA'],
+  [/\bP P D A\b/g, 'PPDA'],
+  [/\bI F M S\b/g, 'IFMS'],
+  [/\bO B R S\b/g, 'OBRS'],
+  [/\bU E S W\b/g, 'UESW'],
+  [/\bO N T R\b/g, 'ONTR'],
+  [/\bN T R\b/g, 'NTR'],
+  [/\bM O W T\b/g, 'MoWT'],
+  [/\bM O F P E D\b/g, 'MoFPED'],
+  [/\bM O L G\b/g, 'MoLG'],
+  [/\bM O I A\b/g, 'MoIA'],
+  [/\bM A A I F\b/g, 'MAAIF'],
+  [/\bU C D A\b/g, 'UCDA'],
+  [/\bU I A\b/g, 'UIA'],
+  [/\bU F Z A\b/g, 'UFZA'],
+  [/\bU C C\b/g, 'UCC'],
+  [/\bN P A\b/g, 'NPA'],
+  [/\bN W S C\b/g, 'NWSC'],
+  [/\bU N R A\b/g, 'UNRA'],
+  [/\bP V O C\b/g, 'PVoC'],
+  [/\bC O C\b/g, 'CoC'],
+  [/\bC G V\b/g, 'CGV'],
+  [/\bM Z O\b/g, 'MZO'],
+  [/\bE I A\b/g, 'EIA'],
+  [/\bF D N\b/g, 'FDN'],
+  [/\bE F D\b/g, 'EFD'],
+  [/\bE D C\b/g, 'EDC'],
+  [/\bO T P\b/g, 'OTP'],
+  [/\bE A C\b/g, 'EAC'],
+  [/\bC G T\b/g, 'CGT'],
+  [/\bD S T\b/g, 'DST'],
+  [/\bF O B\b/g, 'FOB'],
+  [/\bC I F\b/g, 'CIF'],
+  [/\bC X P\b/g, 'CXP'],
+  [/\bM D As\b/g, 'MDAs'],
+  [/\bM D A\b/g, 'MDA'],
+  [/\bB 2 G\b/g, 'B2G'],
+  [/\bB 2 B\b/g, 'B2B'],
+  [/\bB 2 C\b/g, 'B2C'],
+  [/\bE G P\b/g, 'e-GP'],
+  [/\bM T N\b/g, 'MTN'],
+  [/\bP R N\b/g, 'PRN'],
+  [/\bN-S-S-F\b/gi, 'NSSF'],
+  [/\bC-I-T\b/gi, 'CIT'],
+  [/\bP-I-T\b/g, 'PIT'],
+  [/\bT-C-C\b/gi, 'TCC'],
+  [/\bB-R-N\b/gi, 'BRN'],
+  [/\bA-E-O\b/gi, 'AEO'],
+  [/\bC-E-T\b/gi, 'CET'],
+  [/\bD-T (\d{3,5})\b/gi, 'DT-$1'],
+  [/\bEfris\b/g, 'EFRIS'],
+  [/\b(?:Vat|Vati)\b/g, 'VAT'],
+  [/\b(?<!(?:a|the|each|every|named)\s)Payee\b/g, 'PAYE'],
+  [/\bNema\b/g, 'NEMA'],
+  [/\bNira\b/g, 'NIRA'],
+  [/\bIras\b/g, 'IRAS'],
+  [/\bBwims\b/g, 'BWIMS'],
+  [/\bComesa\b/g, 'COMESA'],
+  [/\bUlii\b/g, 'ULII'],
+  [/\bIrims\b/g, 'IRIMS'],
+  [/\bNita\b/g, 'NITA'],
+  [/\bAsycuda\b/g, 'ASYCUDA'],
+  [/\bTrep\b/g, 'TREP'],
+];
+
 /**
  * Format a spoken call caption or transcript turn for visual scannability:
- * places inline paced steps onto their own lines and separates a trailing
- * yes/no offer prompt from the answer body, while leaving single-sentence
- * captions untouched.
+ * restores spoken web domains (e.g. "URA dot go dot u g" -> "ura.go.ug"),
+ * emails, USSD shortcodes, phone numbers, TIN/PRN/NIN identifiers, percentages,
+ * and Ugandan tax/MDA acronyms, places inline paced steps onto their own lines,
+ * and separates a trailing yes/no offer prompt from the answer body.
  */
 export function formatCallCaptionText(text: string): string {
   if (!text) return '';
-  let out = text
-    .replace(/\bU R A\b/g, 'URA')
+  let out = text;
+
+  // 1. Restore spaced/phonetic tax & government acronyms
+  for (const [pattern, replacement] of CALL_DISPLAY_ACRONYM_PAIRS) {
+    out = out.replace(pattern, replacement);
+  }
+
+  // 2. Restore spoken Ugandan (.go.ug, .co.ug, .or.ug, .ac.ug, .sc.ug) and generic web domains
+  out = out
     .replace(
-      /\bPayee(?=\s+(?:and\s+employment|tax|return|rate|registration|deduction|threshold|calculation)\b|[,.);:])|\b(?<=VAT\s+and\s+|VAT,\s+)Payee\b/g,
-      'PAYE',
+      /\b([A-Za-z0-9-]+(?:[ \t]+dot[ \t]+[A-Za-z0-9-]+)*)[ \t]+dot[ \t]+(go|co|or|ac|sc)[ \t]+dot[ \t]+u[ \t]*g\b/gi,
+      (_m: string, host: string, sld: string) =>
+        `${host.replace(/[ \t]+dot[ \t]+/gi, '.').toLowerCase()}.${sld.toLowerCase()}.ug`,
     )
-    .replace(/\bEfris\b/g, 'EFRIS')
-    .replace(/\bU R S B\b/g, 'URSB')
-    .replace(/\bK C C A\b/g, 'KCCA')
-    .replace(/\bU N B S\b/g, 'UNBS')
-    .replace(CALL_STEP_BREAK_RE, '$1\n')
-    .replace(CALL_TRAILING_OFFER_RE, '$1\n\n');
-  const labelMatches = out.match(/(?:^|[:.][ \t]+)[A-Z][A-Za-z0-9 /&,'’()%-]{2,42}:[ \t]+/g);
+    .replace(
+      /\b([A-Za-z0-9-]+(?:[ \t]+dot[ \t]+[A-Za-z0-9-]+)*)[ \t]+dot[ \t]+(com|org|net|int|edu|gov|africa|ug)\b/gi,
+      (_m: string, host: string, tld: string) =>
+        `${host.replace(/[ \t]+dot[ \t]+/gi, '.').toLowerCase()}.${tld.toLowerCase()}`,
+    );
+
+  // 3. Restore spoken email addresses before restored domains
+  out = out
+    .replace(
+      /\b([A-Za-z0-9]+(?:[ \t]+(?:dot|underscore|dash|plus)[ \t]+[A-Za-z0-9]+)+)[ \t]+at[ \t]+([a-z0-9-]+(?:\.[a-z0-9-]+)+\b)/gi,
+      (_m: string, localRaw: string, domain: string) => {
+        const local = localRaw
+          .replace(/[ \t]+dot[ \t]+/gi, '.')
+          .replace(/[ \t]+underscore[ \t]+/gi, '_')
+          .replace(/[ \t]+dash[ \t]+/gi, '-')
+          .replace(/[ \t]+plus[ \t]+/gi, '+')
+          .replace(/\s+/g, '');
+        return `${local}@${domain.toLowerCase()}`;
+      },
+    )
+    .replace(
+      /\b(services|info|support|help|helpdesk|customs|complaints|feedback|enquiries|inquiries|contact|admin|office|taxpayer|(?<=\b(?:e-?mail|mail|write[ \t]+to)[ \t]+)[A-Za-z0-9._%+-]+)[ \t]+at[ \t]+([a-z0-9-]+(?:\.[a-z0-9-]+)+\b)/gi,
+      (_m: string, local: string, domain: string) => `${local}@${domain.toLowerCase()}`,
+    );
+
+  // 4. Restore USSD codes, phone numbers, P.O. Box, TIN/PRN/NIN digit runs, and percentages
+  out = out
+    .replace(
+      /\bstar[ \t]+((?:\d(?:[ \t]+\d)*)(?:[ \t]+star[ \t]+\d(?:[ \t]+\d)*)*)[ \t]+hash\b/gi,
+      (_m: string, body: string) =>
+        `*${body
+          .split(/[ \t]+star[ \t]+/i)
+          .map((seg) => seg.replace(/\s+/g, ''))
+          .join('*')}#`,
+    )
+    .replace(
+      /\b0[ \t]+800,[ \t]*(\d{2,3}),[ \t]*(\d{2,3}),[ \t]*(\d{2,3})\b/g,
+      (_m: string, g1: string, g2: string, g3: string) => `0800 ${g1} ${g2} ${g3}`,
+    )
+    .replace(
+      /\b0[ \t]+800,[ \t]*(\d{2,3}),[ \t]*([\d ]+)\b/g,
+      (_m: string, g1: string, g2: string) => `0800 ${g1.replace(/\s+/g, '')} ${g2.replace(/\s+/g, '')}`,
+    )
+    .replace(
+      /\bplus[ \t]+2[ \t]+5[ \t]+6,[ \t]*(?:0,[ \t]*)?(\d[ \t]+\d[ \t]+\d),[ \t]*(\d[ \t]+\d[ \t]+\d),[ \t]*(\d[ \t]+\d[ \t]+\d)\b/gi,
+      (_m: string, g1: string, g2: string, g3: string) =>
+        `+256 ${g1.replace(/\s+/g, '')} ${g2.replace(/\s+/g, '')} ${g3.replace(/\s+/g, '')}`,
+    )
+    .replace(
+      /\b(0[ \t]+[2347][ \t]+\d[ \t]+\d),[ \t]*(\d[ \t]+\d[ \t]+\d),[ \t]*(\d[ \t]+\d[ \t]+\d)\b/g,
+      (_m: string, g1: string, g2: string, g3: string) =>
+        `${g1.replace(/\s+/g, '')} ${g2.replace(/\s+/g, '')} ${g3.replace(/\s+/g, '')}`,
+    )
+    .replace(
+      /\bP[ \t]+O[ \t]+Box[ \t]+(\d(?:[ \t]+\d)*)\b/gi,
+      (_m: string, box: string) => `P.O. Box ${box.replace(/\s+/g, '')}`,
+    )
+    .replace(
+      /\b(TIN)[ \t]+(\d(?:[ \t,]+\d){8,9})\b/g,
+      (_m: string, label: string, digits: string) => `${label} ${digits.replace(/[\s,]+/g, '')}`,
+    )
+    .replace(
+      /\b(PRN)[ \t]+(\d(?:[ \t,]+\d){9,14})\b/g,
+      (_m: string, label: string, digits: string) => `${label} ${digits.replace(/[\s,]+/g, '')}`,
+    )
+    .replace(
+      /\bNIN[ \t]+(C[ \t]+[MFR](?:[ \t,]+[0-9A-Za-z]){11,13})\b/g,
+      (_m: string, chars: string) => `NIN ${chars.replace(/[\s,]+/g, '')}`,
+    )
+    .replace(/\b(\d+(?:\.\d+)?)[ \t]+percent\b/gi, '$1%');
+
+  // 5. Line breaks for steps, trailing offers, and multi-item labelled lists
+  out = out.replace(CALL_STEP_BREAK_RE, '$1\n').replace(CALL_TRAILING_OFFER_RE, '$1\n\n');
+  const labelMatches = out.match(/(?:^|[:.][ \t]+)[A-Z](?:[A-Za-z0-9 /&,'’()%-]|\.(?=\d)){2,42}:[ \t]+/g);
   if (labelMatches && labelMatches.length >= 2) {
     out = out
-      .replace(/^([A-Z][A-Za-z0-9 /&,'’()%-]{2,42}:[ \t]+)/, '• $1')
-      .replace(/([:.])[ \t]+(?=[A-Z][A-Za-z0-9 /&,'’()%-]{2,42}:[ \t]+)/g, '$1\n• ');
+      .replace(/^([A-Z](?:[A-Za-z0-9 /&,'’()%-]|\.(?=\d)){2,42}:[ \t]+)/, '• $1')
+      .replace(/([:.])[ \t]+(?=[A-Z](?:[A-Za-z0-9 /&,'’()%-]|\.(?=\d)){2,42}:[ \t]+)/g, '$1\n• ');
   }
   return out;
 }
