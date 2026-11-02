@@ -407,6 +407,7 @@ export const nyn: Partial<Dictionary> = {
   'call.listening': 'Tuhurikiize… buuza ekibuuzo kyawe ky’omushoro.',
   'call.listeningHint': 'Ebi orikugamba nibireebeka aha waaba noogamba.',
   'call.mutedHint': 'Eiraka risiriziibwe — rigarureho kugumizamu kugamba.',
+  'call.micFallback': 'Akazindaaro tikikiriziibwe — nookiine kuhurikiza kandi ohandiikye ahansi.',
   'call.languageAuto': '{language} · auto',
   'call.languageChosen': '{language}',
   'call.languageMenu': 'Orurimi rw’esimu',

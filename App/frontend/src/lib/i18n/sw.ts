@@ -416,6 +416,7 @@ export const sw: Partial<Dictionary> = {
   'call.listening': 'Tunasikiliza… uliza swali lako la kodi.',
   'call.listeningHint': 'Maneno yako yanaonekana hapa unapoongea.',
   'call.mutedHint': 'Maikrofoni imezimwa — iwashe ili uendelee kuongea.',
+  'call.micFallback': 'Ruhusa ya maikrofoni imekataliwa — bado unaweza kusikiliza na kuandika hapa chini.',
   'call.languageAuto': '{language} · otomatiki',
   'call.languageChosen': '{language}',
   'call.languageMenu': 'Lugha ya simu',

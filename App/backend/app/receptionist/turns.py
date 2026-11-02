@@ -101,14 +101,24 @@ def build_cascaded_turn_strategies(room: Any = None) -> Any:
             return await super().process_frame(frame)
 
     class BargeInTurnStartStrategy(MinWordsUserTurnStartStrategy):
-        """Starts a turn on 2+ words, or a recognized 1-word command on a final transcript."""
+        """Starts a turn on 2+ words, or a recognized 1-word command after caller speech."""
+
+        def __init__(self, **kwargs: Any) -> None:
+            super().__init__(**kwargs)
+            self._caller_spoke_since_bot_started = False
 
         async def process_frame(self, frame: Frame) -> ProcessFrameResult:
-            if (
-                isinstance(frame, TranscriptionFrame)
+            if isinstance(frame, VADUserStartedSpeakingFrame):
+                self._caller_spoke_since_bot_started = True
+            elif isinstance(frame, (BotStartedSpeakingFrame, BotStoppedSpeakingFrame, InterruptionFrame)):
+                self._caller_spoke_since_bot_started = False
+            elif (
+                self._caller_spoke_since_bot_started
+                and isinstance(frame, TranscriptionFrame)
                 and not isinstance(frame, InterimTranscriptionFrame)
                 and _ONE_WORD_BARGE_IN_RE.match(getattr(frame, "text", "") or "")
             ):
+                self._caller_spoke_since_bot_started = False
                 await self.trigger_user_turn_started()
                 return ProcessFrameResult.STOP
             return await super().process_frame(frame)

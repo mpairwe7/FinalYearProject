@@ -473,10 +473,14 @@ class UraReceptionistBrain(LLMService):
         # is the caller talking over it (see CallState.offer_interrupted).
         self._bot_speaking = False
         self._active_gen_task: asyncio.Task[Any] | None = None
+        self._prewarm_task: asyncio.Task[Any] | None = None
 
     def _cancel_active_generation(self) -> None:
         if self._active_gen_task is not None and not self._active_gen_task.done():
             self._active_gen_task.cancel()
+        if self._prewarm_task is not None and not self._prewarm_task.done():
+            self._prewarm_task.cancel()
+            self._prewarm_task = None
 
     @property
     def language(self) -> str:
@@ -1966,6 +1970,10 @@ class UraReceptionistBrain(LLMService):
         if not speak:
             return
 
+        if self._prewarm_task is not None and not self._prewarm_task.done():
+            self._prewarm_task.cancel()
+            self._prewarm_task = None
+
         if isinstance(getattr(self.speech_model, "_tts_cache", None), dict):
             tts_pieces = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()]
             if len(tts_pieces) > 1:
@@ -1973,11 +1981,31 @@ class UraReceptionistBrain(LLMService):
 
                 with_voice = get_tts_voice()
                 lang_now = self.language
+                prewarm_gen_id = self.room.state.generation_id
+                speech_ref = self.speech_model
+
+                async def _prewarm_remaining(pieces_to_warm: list[str]) -> None:
+                    for piece in pieces_to_warm:
+                        if (
+                            self.room.state.mode != "ai"
+                            or self.room.state.generation_id != prewarm_gen_id
+                        ):
+                            return
+                        try:
+                            await asyncio.to_thread(
+                                speech_ref.synthesize,
+                                piece,
+                                voice=with_voice,
+                                language=lang_now,
+                            )
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception:
+                            logger.debug("Sentence prewarm failed", exc_info=True)
+                            return
+
                 try:
-                    asyncio.get_running_loop().run_in_executor(
-                        None,
-                        lambda: self.speech_model.prewarm_phrases(lang_now, tts_pieces[1:], voice=with_voice),
-                    )
+                    self._prewarm_task = asyncio.create_task(_prewarm_remaining(tts_pieces[1:]))
                 except Exception:
                     logger.debug("Background sentence prewarm skipped", exc_info=True)
 

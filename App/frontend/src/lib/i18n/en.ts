@@ -442,6 +442,7 @@ export const en = {
   'call.listening': 'Listening… speak your tax question naturally.',
   'call.listeningHint': 'Your words appear here as you speak.',
   'call.mutedHint': 'Microphone muted — unmute to keep talking.',
+  'call.micFallback': 'Microphone access denied — you can still listen and type below.',
   'call.languageAuto': '{language} · auto',
   'call.languageChosen': '{language}',
   'call.languageMenu': 'Call language',

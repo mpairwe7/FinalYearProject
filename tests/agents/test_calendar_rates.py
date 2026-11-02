@@ -7,9 +7,11 @@ import datetime as _dt
 
 class TestCurrentDate:
     def test_returns_today(self, fresh_registry):
+        from app.tools.calendar import _kampala_today
+
         r = fresh_registry.call("get_current_date", {})
         assert r["ok"] is True
-        today = _dt.date.today()
+        today = _kampala_today()
         assert r["today"] == today.isoformat()
         assert r["day_of_week"] == today.strftime("%A")
 
@@ -70,8 +72,10 @@ class TestNextDeadlines:
         assert dates == sorted(dates)
 
     def test_deadlines_are_in_future(self, fresh_registry):
+        from app.tools.calendar import _kampala_today
+
         r = fresh_registry.call("get_next_deadlines", {"limit": 5})
-        today = _dt.date.today().isoformat()
+        today = _kampala_today().isoformat()
         for d in r["deadlines"]:
             assert d["date"] >= today
             assert d["days_away"] >= 0
