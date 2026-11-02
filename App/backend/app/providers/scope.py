@@ -1,12 +1,15 @@
 """Requests that must not reach a cloud model.
 
-The call receptionist runs on local models only (decided 2026-09-30): a call
+The call receptionist runs on local models by default (decided 2026-09-30): a call
 turn never reaches a hosted model (Gemini, Workers AI or Sunbird's API),
-whatever this deployment configures for chat. The receptionist's own model
-calls are local. Its English and Swahili turns, though, go through the chat
-service, whose fallbacks (the LLM chain, the FAQ judge, the reply-translation
-and speech translation tiers, the dense-retrieval fallback) can be switched on
-by environment. Until G122 only the GPU stack's settings kept them off.
+whatever this deployment configures for chat, unless ``RECEPTIONIST_ALLOW_CLOUD_LLM=true``
+is explicitly set on a CPU-only deployment (such as the Hugging Face Space) so Call
+Receptionist shares the configured Gemini LLM with Main Chat under a 20s turn
+deadline (G415). The receptionist's own model calls are local. Its English and
+Swahili turns go through the chat service, whose fallbacks (the LLM chain, the
+FAQ judge, the reply-translation and speech translation tiers, the dense-retrieval
+fallback) can be switched on by environment. Until G122 only the GPU stack's
+settings kept them off.
 
 The scope travels with the request as a context variable, so those decision
 points read it without every function taking a channel argument.

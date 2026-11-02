@@ -208,8 +208,8 @@ input guard, and delivers an officer's reply before the bot answers (G114). The
 supervisor's ESCALATE and specialist routes run on streaming turns too (G115).
 
 **Security in streaming path:**
-- Each token is XSS-sanitized via `OutputGuard.sanitize()`
-- Full accumulated reply is PII-redacted via `OutputGuard.redact_pii()`
+- Each token is XSS-sanitized via `OutputGuard.sanitize()` while `_flush_stream_chunk` preserves leading/trailing whitespace, newlines, and nested list indentation across chunk boundaries (`G415`)
+- Full accumulated reply is PII-redacted via `OutputGuard.redact_pii()` and normalized via `OutputGuard.normalize_structure()`, emitting a `structure_revised` SSE event when cross-chunk lists or paragraphs are reshaped (`G415`)
 - Blocking retrieval and LLM calls wrapped in `asyncio.to_thread()`
 - Conversation logged in `finally` block (runs even on client disconnect)
 
