@@ -376,7 +376,7 @@ _ASR_ENTITY_FIXES: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
     (re.compile(r"\bteam\s+yange\b", re.IGNORECASE), "TIN yange"),
     # VAT acoustic variants (including Acholi/Runyankole Whisper-SALT hearings: viati, veya ti, and Orpheus round-trip vetereite — G259)
     (re.compile(r"\b(?:vetereite|vete\s*reite|vatereite|vate\s*reite|veterinary\s+rate)\b", re.IGNORECASE), "VAT rate"),
-    (re.compile(r"\b(?:vee\s*ay\s*tee|v-a-t|v\s+a\s+t|v\.a\.t\.|vatt|vaat|veti|vaati|viati|veyati|veya\s+ti|baati|bbaati)\b", re.IGNORECASE), "VAT"),
+    (re.compile(r"\b(?:vee\s*ay\s*tee|v-a-t|v\s+a\s+t|v\.a\.t\.|vati|vatt|vaat|veti|vaati|viati|veyati|veya\s+ti|bati|baati|bbaati)\b", re.IGNORECASE), "VAT"),
     (re.compile(r"\b(standard|pay|file|for|about|on|claim|input|output|monthly)\s+vet\b", re.IGNORECASE), r"\1 VAT"),
     (re.compile(r"\bvet\s+(rate|rates|return|returns|threshold|registration|tax|refund|refunds|invoice|invoices|exemption|exemptions|number|compliance|audit|liability|credit)\b", re.IGNORECASE), r"VAT \1"),
     # Acholi / Runyankole / Swahili / Luganda Whisper-SALT hearings of tax & percentage idioms

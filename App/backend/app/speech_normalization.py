@@ -337,13 +337,15 @@ _ACRONYMS = [
     (re.compile(r"\bTREP\b", re.IGNORECASE), "Trep"),
     # PAYE is universally spoken in Uganda as "payee" (/peɪˈiː/), rather than spelled letter-by-letter.
     (re.compile(r"(?:\bP\.A\.Y\.E\b\.?|\bP-A-Y-E\b|\bPAYE\b|\bpaye\b)", re.IGNORECASE), "Payee"),
-    # TIN, NIN, VAT are acronyms naturally pronounced as words ("tin"/"teen", "nin", "vat")
+    # TIN, NIN, VAT are acronyms naturally pronounced as words ("tin"/"teen", "nin", "vat"/"vati")
     # in everyday Ugandan tax speech, rather than reading each as a separate letter.
-    # Keep TIN/tin as TIN/tin and NIN/nin as NIN/nin (convert dotted/hyphenated T-I-N / N-I-N to TIN / NIN).
+    # Keep TIN/tin as TIN/tin and NIN/nin as NIN/nin; convert VAT/V.A.T./V-A-T to Title-case
+    # "Vat" (like "Efris", "Nema", "Nira") because English neural TTS engines (edge-tts,
+    # browser SpeechSynthesis) hardcode all-caps "VAT" as letter-by-letter "V A T".
     (re.compile(r"(?:\bT\.I\.N\b\.?|\bT-I-N\b)", re.IGNORECASE), "TIN"),
     (re.compile(r"(?:\bN\.I\.N\b\.?|\bN-I-N\b)", re.IGNORECASE), "NIN"),
-    (re.compile(r"(?:\bV\.A\.T\b\.?|\bV-A-T\b)", re.IGNORECASE), "VAT"),
-    (re.compile(r"\bV-?A-?T-?A\b"), "VAT Act"),
+    (re.compile(r"\bV-?A-?T-?A\b"), "Vat Act"),
+    (re.compile(r"(?:\bV\.A\.T\b\.?|\bV-A-T\b|\bVAT\b)", re.IGNORECASE), "Vat"),
     # URA and Ugandan government/MDA initialisms pronounced letter-by-letter with spaces:
     (re.compile(r"(?:\bU\.R\.A\b\.?|\bU-R-A\b|\bURA\b|\bura\b)", re.IGNORECASE), "U R A"),
     (re.compile(r"(?:\bK\.C\.C\.A\b\.?|\bK-C-C-A\b|\bKCCA\b)", re.IGNORECASE), "K C C A"),
@@ -676,6 +678,7 @@ def verbalize_digits_for_tts(text: str, locale: str = "en") -> str:
         lambda m: f"{m.group(1)} {dmap.get(m.group(2), m.group(2))}",
         out,
     )
+    out = re.sub(r"(?:\bV\.A\.T\b\.?|\bV-A-T\b|\bVAT\b)", "Vat", out, flags=re.IGNORECASE)
     return out
 
 
@@ -903,6 +906,7 @@ def clean_text_for_speech(text: str, locale: str = "en", *, verbalize_digits: bo
 _BANTU_ACRONYM_PHONETICS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(?:\bT\.I\.N\b\.?|\bT-I-N\b)", re.IGNORECASE), "TIN"),
     (re.compile(r"(?:\bN\.I\.N\b\.?|\bN-I-N\b)", re.IGNORECASE), "NIN"),
+    (re.compile(r"(?:\bV\.A\.T\b\.?|\bV-A-T\b|\bVAT\b)", re.IGNORECASE), "Vat"),
     (re.compile(r"(?:\bP\.R\.N\b\.?|\bP-R-N\b|\bPRN\b)", re.IGNORECASE), "P R N"),
 )
 
