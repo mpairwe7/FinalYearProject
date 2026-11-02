@@ -147,5 +147,16 @@ describe("answerText", () => {
     expect(formatted).toContain(
       "\n• E-Invoicing: EFRIS receipts via obrs.ursb.go.ug or email services@ura.go.ug or dial *165# or call 0800 117 000.",
     );
+
+    const langSpeech = cleanMarkdownForSpeech("Ask in Runyankole, Runyankore, Acholi, or Lwacholi.");
+    expect(langSpeech).toContain("Runyankole");
+    expect(langSpeech).toContain("Akyoli");
+    expect(langSpeech).toContain("Lwakyoli");
+    expect(formatCallCaptionText("Ask in Runyankole or Akyoli for your Tin and Nin.")).toBe(
+      "Ask in Runyankole or Acholi for your TIN and NIN.",
+    );
+    expect(formatCallCaptionText("Tin is used to coat steel.")).toBe(
+      "Tin is used to coat steel.",
+    );
   });
 });

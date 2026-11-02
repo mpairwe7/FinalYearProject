@@ -2080,6 +2080,10 @@ class SpeechModel:
         if SPEECH_TTS_BACKEND == "mock":
             return self._synthesize_mock(text, voice, language)
 
+        from .speech_normalization import apply_tts_engine_phonetics
+
+        text = apply_tts_engine_phonetics(text, locale=language)
+
         # ⓪.5 Orpheus-3B, for the languages it is configured to voice (opt-in
         #     by ORPHEUS_TTS_URL; Luganda by default). First, ahead of even a
         #     local Piper voice: it is the only native voice here fast enough

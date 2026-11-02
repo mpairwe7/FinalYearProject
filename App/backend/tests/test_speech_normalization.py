@@ -586,6 +586,29 @@ def test_sec_citation_and_unicode_bullets_are_not_misread_as_steps():
     assert "Step 2: Submit the form." in dash_step
 
 
+def test_call_receptionist_and_main_chat_acronym_and_language_pronunciation_parity():
+    from app.speech_normalization import apply_tts_engine_phonetics
+
+    greeting = (
+        "Hi, thanks for contacting URA. Ask your question in English, Luganda, "
+        "Swahili, Runyankole or Acholi about TIN, NIN, VAT, PAYE, EFRIS, or PRN."
+    )
+    cleaned = clean_text_for_speech(greeting, locale="en")
+    assert "Runyankole" in cleaned
+    assert "Akyoli" in cleaned
+    assert "Acholi" not in cleaned
+    voiced = apply_tts_engine_phonetics(cleaned, locale="en")
+    assert "U R A" in voiced
+    assert "Runyankole" in voiced
+    assert "Akyoli" in voiced
+    assert "Tin" in voiced
+    assert "Nin" in voiced
+    assert "Vat" in voiced
+    assert "Payee" in voiced
+    assert "Efris" in voiced
+    assert "P R N" in voiced
+
+
 
 
 

@@ -606,7 +606,7 @@ aibom_inventory:
       locales: ["en"]
       runtime: "vLLM (pre-quantized FP8 weights + FP8 KV cache, GPU 7, enable_thinking=False)"
     - id: "Sunbird/orpheus-3b-tts-multilingual"
-      role: "Primary neural text-to-speech synthesis sidecar"
+      role: "Primary neural text-to-speech synthesis sidecar (with apply_tts_engine_phonetics for Tin, Nin, Vat, Payee, Efris, Runyankole, Akyoli — G439)"
       locales: ["en", "lg", "sw", "nyn", "ach"]
       runtime: "Orpheus vLLM sidecar (FP8)"
     - id: "Sunbird/SunflowerASR-51-african-languages"
