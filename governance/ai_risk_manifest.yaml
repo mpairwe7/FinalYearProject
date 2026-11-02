@@ -500,6 +500,7 @@ owasp_agentic_2026:
         - "App/backend/tests/test_pdf_guards.py"
         - "tests/agents/test_ephemeral_pdf_sandbox.py"
         - "tests/agents/test_november_2026_gap_closures.py"
+        - "tests/agents/test_phase43_agentic_tools_hardening.py"
     - id: "ASI06"
       name: "Memory & Context Poisoning"
       status: "mitigated"
@@ -523,6 +524,7 @@ owasp_agentic_2026:
       verified_by:
         - "tests/agents/test_phase38_cx.py"
         - "tests/agents/test_november_2026_gap_closures.py"
+        - "tests/agents/test_phase43_agentic_tools_hardening.py"
     - id: "ASI08"
       name: "Cascading Failures"
       status: "mitigated"

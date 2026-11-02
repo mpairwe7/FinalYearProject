@@ -119,6 +119,8 @@ class TaskCreateTool(Tool):
         kind: str,
         args: dict[str, Any] | None = None,
         idempotency_key: str = "",
+        user_id: str = "",
+        tenant_id: str = "default",
     ) -> dict[str, Any]:
         if not _enabled():
             return dict(_DISABLED)
@@ -130,7 +132,13 @@ class TaskCreateTool(Tool):
             }
         from ..database import create_task
 
-        task_data = create_task(kind, args or {}, idempotency_key=idempotency_key)
+        task_data = create_task(
+            kind,
+            args or {},
+            tenant_id=tenant_id or "default",
+            user_id=user_id or "",
+            idempotency_key=idempotency_key,
+        )
         action = "Replayed existing background task" if task_data.get("replayed") else "Created background task"
         explanation = f"{action} '{kind}' (ID: {task_data.get('task_id', '')}) with status '{task_data.get('status', 'pending')}'."
         return {"ok": True, **task_data, "explanation": explanation}
@@ -179,16 +187,21 @@ class TaskGetTool(Tool):
             },
         )
 
-    def execute(self, task_id: str) -> dict[str, Any]:
+    def execute(
+        self,
+        task_id: str,
+        user_id: str = "",
+        tenant_id: str = "default",
+    ) -> dict[str, Any]:
         if not _enabled():
             return dict(_DISABLED)
         from ..database import get_task
 
-        task = get_task(task_id)
-        if task is None:
+        task = get_task(task_id, tenant_id=tenant_id or "default")
+        if task is None or (user_id and task.get("user_id") and task.get("user_id") != user_id):
             # Not found and not-yours are deliberately the same answer:
             # distinguishing them would confirm a task id exists on
-            # another tenant.
+            # another tenant or user.
             return {"ok": False, "error": "no such task"}
         progress_pct = int(float(task.get("progress", 0.0)) * 100)
         status = str(task.get("status", ""))
@@ -237,15 +250,21 @@ class TaskCancelTool(Tool):
             },
         )
 
-    def execute(self, task_id: str) -> dict[str, Any]:
+    def execute(
+        self,
+        task_id: str,
+        user_id: str = "",
+        tenant_id: str = "default",
+    ) -> dict[str, Any]:
         if not _enabled():
             return dict(_DISABLED)
         from ..database import cancel_task, get_task
 
-        before = get_task(task_id)
-        if before is None:
+        eff_tenant = tenant_id or "default"
+        before = get_task(task_id, tenant_id=eff_tenant)
+        if before is None or (user_id and before.get("user_id") and before.get("user_id") != user_id):
             return {"ok": False, "error": "no such task"}
-        after = cancel_task(task_id) or before
+        after = cancel_task(task_id, tenant_id=eff_tenant) or before
         is_cancelled = after["status"] == "cancelled" and before["status"] != after["status"]
         explanation = f"Task '{task_id}' was cancelled." if is_cancelled else f"Task '{task_id}' status is '{after['status']}'."
         return {

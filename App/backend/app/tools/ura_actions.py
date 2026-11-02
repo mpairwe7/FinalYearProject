@@ -115,7 +115,8 @@ class UraActionProposalTool(Tool):
 
         base_url = os.getenv("URA_ACTION_API_BASE", "").rstrip("/")
         token = os.getenv("URA_ACTION_API_TOKEN", "")
-        if not base_url or not token:
+        parsed = urllib.parse.urlparse(base_url)
+        if not base_url or parsed.scheme != "https" or not parsed.netloc or not token:
             return {
                 "ok": False,
                 "submitted": False,
@@ -135,9 +136,21 @@ class UraActionProposalTool(Tool):
                 "Idempotency-Key": idempotency_key,
             },
         )
+        from .ura_account import _MAX_URA_API_RESPONSE_BYTES, _NoRedirectHandler
+
+        opener = urllib.request.build_opener(_NoRedirectHandler)
         try:
-            with urllib.request.urlopen(req, timeout=8) as resp:  # nosec B310 # noqa: S310 - configured URL only
-                result = json.loads(resp.read().decode("utf-8"))
+            with opener.open(req, timeout=8) as resp:  # nosec B310 # noqa: S310 - configured HTTPS URL without redirects
+                raw = resp.read(_MAX_URA_API_RESPONSE_BYTES + 1)
+                if len(raw) > _MAX_URA_API_RESPONSE_BYTES:
+                    return {
+                        "ok": False,
+                        "submitted": False,
+                        "configured": True,
+                        "proposal": proposal,
+                        "error": "URA action API response exceeded byte cap",
+                    }
+                result = json.loads(raw.decode("utf-8"))
         except urllib.error.HTTPError as exc:
             return {
                 "ok": False,

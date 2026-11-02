@@ -411,7 +411,12 @@ class StatelessMCPServer:
     # -- envelope ------------------------------------------------------
     @staticmethod
     def _check_headers(
-        method: str, params: dict[str, Any], headers: dict[str, str], *, strict: bool
+        method: str,
+        params: dict[str, Any],
+        headers: dict[str, str],
+        *,
+        strict: bool,
+        namespace: str = "",
     ) -> None:
         """Refuse a request whose routing headers disagree with its body.
 
@@ -475,16 +480,33 @@ class StatelessMCPServer:
             exp = claims.get("exp")
             if not isinstance(exp, (int, float)) or time.time() >= exp:
                 raise ProtocolError(HEADER_MISMATCH, "Header mismatch: Mcp-Actor-Assertion has expired")
-            signing_secret = (os.getenv("MCP_OBO_SIGNING_SECRET") or "").strip()
-            if len(signing_secret) >= 32:
+            candidate_secrets: list[str] = []
+            for raw_sec in (
+                os.getenv("MCP_OBO_SIGNING_SECRET"),
+                os.getenv(f"MCP_SERVER_TOKEN_{namespace.upper()}") if namespace else None,
+            ):
+                sec = (raw_sec or "").strip()
+                if len(sec) >= 32 and sec not in candidate_secrets:
+                    candidate_secrets.append(sec)
+            auth_hdr = normalized.get("authorization", "")
+            if auth_hdr.lower().startswith("bearer "):
+                bearer_tok = auth_hdr[7:].strip()
+                if len(bearer_tok) >= 32 and bearer_tok.count(".") < 2 and bearer_tok not in candidate_secrets:
+                    candidate_secrets.append(bearer_tok)
+            if candidate_secrets:
                 import hashlib
                 import hmac
 
-                expected_sig = hmac.new(
-                    signing_secret.encode("utf-8"), b64_payload.encode("ascii"), hashlib.sha256
-                ).digest()
-                expected_b64 = base64.urlsafe_b64encode(expected_sig).rstrip(b"=").decode("ascii")
-                if not hmac.compare_digest(b64_sig, expected_b64):
+                sig_ok = False
+                for sec in candidate_secrets:
+                    expected_sig = hmac.new(
+                        sec.encode("utf-8"), b64_payload.encode("ascii"), hashlib.sha256
+                    ).digest()
+                    expected_b64 = base64.urlsafe_b64encode(expected_sig).rstrip(b"=").decode("ascii")
+                    if hmac.compare_digest(b64_sig, expected_b64):
+                        sig_ok = True
+                        break
+                if not sig_ok:
                     raise ProtocolError(
                         HEADER_MISMATCH, "Header mismatch: invalid Mcp-Actor-Assertion signature"
                     )
@@ -573,7 +595,9 @@ class StatelessMCPServer:
 
         try:
             if headers is not None:
-                self._check_headers(method, params, headers, strict=strict_headers)
+                self._check_headers(
+                    method, params, headers, strict=strict_headers, namespace=self.namespace
+                )
 
             if request_id is None and method.startswith("notifications/"):
                 return None

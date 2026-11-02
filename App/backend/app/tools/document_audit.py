@@ -28,12 +28,17 @@ class AuditTaxDocumentTool(Tool):
                 "properties": {
                     "text": {
                         "type": "string",
+                        "maxLength": 200000,
                         "description": "Text content, OCR extract, or line-item breakdown of the document.",
                     },
                     "doc_type": {
                         "type": "string",
                         "description": "Type of document: 'invoice', 'receipt', 'assessment', or 'generic'.",
                         "enum": ["invoice", "receipt", "assessment", "generic"],
+                    },
+                    "document_id": {
+                        "type": "string",
+                        "description": "Optional uploaded document ID to include extracted table summaries in reconciliation.",
                     },
                 },
                 "required": ["text"],
@@ -44,8 +49,10 @@ class AuditTaxDocumentTool(Tool):
                 "properties": {
                     "ok": {"type": "boolean"},
                     "status": {"type": "string"},
+                    "currency": {"type": "string"},
                     "subtotal_ugx": {"type": ["number", "null"]},
                     "tax_ugx": {"type": ["number", "null"]},
+                    "wht_ugx": {"type": ["number", "null"]},
                     "total_ugx": {"type": ["number", "null"]},
                     "effective_rate": {"type": ["number", "null"]},
                     "variance_ugx": {"type": ["number", "null"]},
@@ -64,8 +71,15 @@ class AuditTaxDocumentTool(Tool):
             title="Audit tax document",
         )
 
-    def execute(self, text: str, doc_type: str = "invoice", **kwargs: Any) -> dict[str, Any]:
-        from ..documents import reconcile_tax_document
+    def execute(
+        self,
+        text: str,
+        doc_type: str = "invoice",
+        document_id: str = "",
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        from ..documents import get_document, reconcile_tax_document
+        from ..guardrails import scan_retrieved_text
         from ..vision.ocr import (
             extract_dates,
             extract_efris_invoice_numbers,
@@ -75,20 +89,31 @@ class AuditTaxDocumentTool(Tool):
             extract_tax_heads,
             extract_tin_numbers,
             extract_ugx_amounts,
+            strip_hidden_control_and_bidi,
         )
 
+        clean_text, _ = scan_retrieved_text(strip_hidden_control_and_bidi(str(text or "")[:200_000]))
+        doc_tables: list[Any] = []
+        if document_id:
+            try:
+                rec = get_document(str(document_id).strip())
+                if rec is not None and getattr(rec, "tables", None):
+                    doc_tables = list(rec.tables)
+            except Exception:
+                doc_tables = []
+
         fields = {
-            "tins": extract_tin_numbers(text),
-            "nins": extract_nin_numbers(text),
-            "prns": extract_prn_numbers(text),
-            "efris_invoices": extract_efris_invoice_numbers(text),
-            "amounts": extract_ugx_amounts(text),
-            "dates": extract_dates(text),
-            "references": extract_reference_numbers(text),
-            "tax_heads": extract_tax_heads(text),
+            "tins": extract_tin_numbers(clean_text),
+            "nins": extract_nin_numbers(clean_text),
+            "prns": extract_prn_numbers(clean_text),
+            "efris_invoices": extract_efris_invoice_numbers(clean_text),
+            "amounts": extract_ugx_amounts(clean_text),
+            "dates": extract_dates(clean_text),
+            "references": extract_reference_numbers(clean_text),
+            "tax_heads": extract_tax_heads(clean_text),
         }
 
-        recon = reconcile_tax_document(text=text, doc_type=doc_type, fields=fields, tables=[])
+        recon = reconcile_tax_document(text=clean_text, doc_type=doc_type, fields=fields, tables=doc_tables)
         notes = list(recon.get("notes", []) or [])
         if len(notes) > 1:
             explanation = "\n".join(f"{i}. {note}" for i, note in enumerate(notes, 1))
@@ -97,8 +122,10 @@ class AuditTaxDocumentTool(Tool):
         return {
             "ok": True,
             "status": recon["status"],
+            "currency": recon.get("currency", "UGX"),
             "subtotal_ugx": recon.get("subtotal_ugx"),
             "tax_ugx": recon.get("tax_ugx"),
+            "wht_ugx": recon.get("wht_ugx"),
             "total_ugx": recon.get("total_ugx"),
             "effective_rate": recon.get("effective_rate"),
             "variance_ugx": recon.get("variance_ugx"),

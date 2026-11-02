@@ -429,10 +429,14 @@ class CompareFiscalYearsTool(Tool):
                     "from_fiscal_year": {"type": "string"},
                     "to_fiscal_year": {"type": "string"},
                     "changed": {"type": "array", "items": {"type": "object"}},
+                    "introduced": {"type": "array", "items": {"type": "object"}},
+                    "withdrawn": {"type": "array", "items": {"type": "object"}},
                     "added": {"type": "array", "items": {"type": "object"}},
                     "removed": {"type": "array", "items": {"type": "object"}},
+                    "change_count": {"type": "integer"},
                     "unchanged_count": {"type": "integer"},
                     "explanation": {"type": "string"},
+                    "rate_basis": {"type": "object"},
                     "authority": {"type": "object"},
                 },
                 "required": ["ok"],
@@ -456,9 +460,11 @@ class CompareFiscalYearsTool(Tool):
         changed: list[dict[str, Any]] = []
         introduced: list[dict[str, Any]] = []
         withdrawn: list[dict[str, Any]] = []
+        unchanged_count = 0
         for key in sorted(set(older.rates) | set(newer.rates)):
             before, after = older.get(key), newer.get(key)
             if before == after:
+                unchanged_count += 1
                 continue
             entry = {
                 "tax_type": key,
@@ -474,15 +480,22 @@ class CompareFiscalYearsTool(Tool):
             else:
                 changed.append(entry)
 
+        def _fmt_val(v: Any) -> str:
+            if isinstance(v, list):
+                return f"{len(v)} progressive bands"
+            return str(v)
+
         lines = [f"Comparison of URA statutory rates from {older.fiscal_year} to {newer.fiscal_year}:"]
         if changed:
             lines.append(f"\n**Changed rates ({len(changed)}):**")
             for c in changed:
-                lines.append(f"- **{c['display_name']}**: revised from {c['before']} to {c['after']}")
+                lines.append(
+                    f"- **{c['display_name']}**: revised from {_fmt_val(c['before'])} to {_fmt_val(c['after'])}"
+                )
         if introduced:
             lines.append(f"\n**Newly introduced taxes ({len(introduced)}):**")
             for i in introduced:
-                lines.append(f"- **{i['display_name']}**: {i['after']}")
+                lines.append(f"- **{i['display_name']}**: {_fmt_val(i['after'])}")
         if withdrawn:
             lines.append(f"\n**Withdrawn taxes ({len(withdrawn)}):**")
             for w in withdrawn:
@@ -498,7 +511,10 @@ class CompareFiscalYearsTool(Tool):
             "changed": changed,
             "introduced": introduced,
             "withdrawn": withdrawn,
+            "added": introduced,
+            "removed": withdrawn,
             "change_count": len(changed) + len(introduced) + len(withdrawn),
+            "unchanged_count": unchanged_count,
             "explanation": explanation,
             "rate_basis": newer.provenance(*(e["tax_type"] for e in changed + introduced)),
             "authority": authority,

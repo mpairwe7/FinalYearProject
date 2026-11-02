@@ -271,7 +271,21 @@ class SearxngProvider:
 
     @staticmethod
     def _base() -> str:
-        return (os.getenv("SEARXNG_URL") or "").strip().rstrip("/")
+        import urllib.parse
+
+        raw = (os.getenv("SEARXNG_URL") or "").strip().rstrip("/")
+        if not raw:
+            return ""
+        parsed = urllib.parse.urlparse(raw)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            return ""
+        if parsed.username or parsed.password:
+            return ""
+        host = parsed.hostname.lower().strip("[]")
+        # Never allow link-local cloud metadata endpoints (169.254.0.0/16, fe80::/10)
+        if host.startswith("169.254.") or host == "metadata.google.internal" or host.startswith("fe80:"):
+            return ""
+        return raw
 
     def configured(self) -> bool:
         return bool(self._base())

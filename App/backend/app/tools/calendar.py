@@ -88,6 +88,18 @@ _RECURRING_DEADLINES: list[tuple[int, int, str, str, str]] = [
 ]
 
 
+def _kampala_today() -> _dt.date:
+    """Return today's date in Africa/Kampala (EAT, UTC+3), unless _dt.date.today is monkeypatched (G427)."""
+    if getattr(_dt.date.today, "__module__", "datetime") not in ("datetime", "_datetime"):
+        return _dt.date.today()
+    try:
+        from zoneinfo import ZoneInfo
+
+        return _dt.datetime.now(ZoneInfo("Africa/Kampala")).date()
+    except Exception:
+        return _dt.date.today()
+
+
 class CurrentDateTool(Tool):
     """Returns today's date and the current Ugandan fiscal year."""
 
@@ -113,7 +125,13 @@ class CurrentDateTool(Tool):
                 "properties": {
                     "ok": {"type": "boolean"},
                     "today": {"type": "string"},
+                    "day_of_week": {"type": "string"},
                     "fiscal_year": {"type": "string"},
+                    "fiscal_year_start": {"type": "string"},
+                    "fiscal_year_end": {"type": "string"},
+                    "days_into_fy": {"type": "integer"},
+                    "days_remaining_in_fy": {"type": "integer"},
+                    "explanation": {"type": "string"},
                     "error": {"type": "string"},
                 },
                 "required": ["ok"],
@@ -123,7 +141,7 @@ class CurrentDateTool(Tool):
         )
 
     def execute(self) -> dict[str, Any]:
-        today = _dt.date.today()
+        today = _kampala_today()
         fy = _fiscal_year_for(today)
         fy_start = _dt.date(int(fy[2:6]), 7, 1)
         fy_end = _dt.date(int(fy[2:6]) + 1, 6, 30)
@@ -188,8 +206,11 @@ class NextDeadlineTool(Tool):
                 "properties": {
                     "ok": {"type": "boolean"},
                     "today": {"type": "string"},
+                    "horizon": {"type": "string"},
+                    "scope": {"type": "string"},
                     "count": {"type": "integer"},
                     "deadlines": {"type": "array"},
+                    "explanation": {"type": "string"},
                     "error": {"type": "string"},
                 },
                 "required": ["ok"],
@@ -206,7 +227,7 @@ class NextDeadlineTool(Tool):
     ) -> dict[str, Any]:
         limit = max(1, min(int(limit), 10))
         within_days = max(1, min(int(within_days), 365))
-        today = _dt.date.today()
+        today = _kampala_today()
         unique = upcoming_deadlines(within_days=within_days, scope=scope, today=today)
         kept_deadlines = unique[:limit]
         if kept_deadlines:
@@ -244,7 +265,7 @@ def upcoming_deadlines(
     ``date.today()``, which made every date-dependent assertion about it
     depend on the day the suite happened to run.
     """
-    today = today or _dt.date.today()
+    today = today or _kampala_today()
     within_days = max(1, min(int(within_days), 365))
     horizon = today + _dt.timedelta(days=within_days)
 

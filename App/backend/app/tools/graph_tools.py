@@ -98,11 +98,15 @@ class GraphResolveRateTool(Tool):
                     "ok": {"type": "boolean"},
                     "error": {"type": "string"},
                     "found": {"type": "boolean"},
+                    "question": {"type": "string"},
+                    "fiscal_year": {"type": ["string", "null"]},
+                    "rates": {"type": "array", "items": {"type": "object"}},
+                    "provisions": {"type": "array", "items": {"type": "object"}},
+                    "explanation": {"type": "string"},
                     "rate_key": {"type": "string"},
                     "display_name": {"type": "string"},
-                    "value": {"type": "number"},
+                    "value": {"type": ["number", "array", "object", "string", "null"]},
                     "unit": {"type": "string"},
-                    "fiscal_year": {"type": "string"},
                     "act": {"type": "string"},
                     "section": {"type": "string"},
                 },
@@ -116,7 +120,14 @@ class GraphResolveRateTool(Tool):
         from ..graph.query import resolve
 
         answer = resolve(question, default_fiscal_year=fiscal_year)
-        return {"ok": True, **answer.to_dict()}
+        payload = answer.to_dict()
+        rates_list = payload.get("rates") or []
+        provisions_list = payload.get("provisions") or []
+        return {
+            "ok": True,
+            "found": bool(rates_list or provisions_list),
+            **payload,
+        }
 
 
 class GraphRateHistoryTool(Tool):
@@ -214,8 +225,8 @@ class GraphEffectiveOnTool(Tool):
                     "error": {"type": "string"},
                     "rate_key": {"type": "string"},
                     "date": {"type": "string"},
-                    "value": {"type": "number"},
-                    "fiscal_year": {"type": "string"},
+                    "value": {"type": ["number", "array", "object", "string", "null"]},
+                    "fiscal_year": {"type": ["string", "null"]},
                 },
                 "required": ["ok"],
             },

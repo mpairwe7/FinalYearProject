@@ -364,10 +364,16 @@ def fuse_multimodal_affect(
             acoustic_score = 0.52
         if rms >= 0.18 and (e_var >= 0.08 or wps >= 3.8):
             acoustic_score = max(acoustic_score, 0.85)
-        if not kind and p_affect in ("frustrated", "urgent_distress"):
+        acoustic_only_ok = os.getenv("PROSODY_ACOUSTIC_ONLY_AFFECT", "false").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+        if not kind and acoustic_only_ok and p_affect in ("frustrated", "urgent_distress"):
             kind = "frustration"
             intensity = "high" if p_affect == "urgent_distress" else "moderate"
-        elif not kind and p_affect == "confused":
+        elif not kind and acoustic_only_ok and p_affect == "confused":
             kind = "confusion"
             intensity = "moderate"
 

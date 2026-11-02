@@ -637,8 +637,8 @@ _CONCEPTS: tuple[Concept, ...] = (
         check=(
             "Does every small non-VAT registered retail kiosk need an EFRIS machine?",
             "No. EFRIS is mandatory for VAT-registered taxpayers and businesses in a designated sector with "
-            "gross turnover above UGX 10 million. Other non-VAT small businesses below the 150m VAT "
-            "threshold are not mandated to use EFRIS, though they may opt to use it voluntarily.",
+            "gross turnover above the statutory threshold. Other non-VAT small businesses below the compulsory VAT "
+            "registration threshold are not mandated to use EFRIS, though they may opt to use it voluntarily.",
         ),
         transfer_question=(
             "A VAT-registered supplier gives you a manual paper receipt without an EFRIS QR code. "

@@ -410,7 +410,7 @@ def _strip_hidden(soup: BeautifulSoup) -> tuple[int, str]:
         # A preloader commonly sets opacity:0 on <body> until scripts finish.
         if element.decomposed or element.name in ("html", "body") or not _is_hidden(element):
             continue
-        text = element.get_text(" ", strip=True)
+        text = _INVISIBLE_CHARS.sub("", element.get_text(" ", strip=True))
         removed += len(text)
         if text:
             samples.append(text[:400])

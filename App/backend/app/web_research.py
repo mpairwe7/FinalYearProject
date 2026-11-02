@@ -621,35 +621,11 @@ def classify_source_authority(
                 f"blocked foreign tax authority ({blocked})",
             )
 
-    # Check Tier 1 official statutory & market primary domains
-    if host in TIER1_DOMAINS or any(
-        _hostname_matches_root(host, d)
-        for d in (
-            "ura.go.ug",
-            "ulii.org",
-            "parliament.go.ug",
-            "bills.parliament.ug",
-            "finance.go.ug",
-            "bou.or.ug",
-            "ursb.go.ug",
-            "unbs.go.ug",
-            "nita.go.ug",
-            "pdpo.go.ug",
-            "egpuganda.go.ug",
-            "nira.go.ug",
-            "ppda.go.ug",
-            "eac.int",
-        )
-    ):
+    # Check Tier 1 official statutory & market primary domains (all 28 Ugandan MDA & statutory roots)
+    if host in TIER1_DOMAINS or any(_hostname_matches_root(host, d) for d in TIER1_DOMAINS):
         can_qdrant = parsed.scheme == "https" and (
             host in QDRANT_SYNC_ALLOWED_HOSTS
-            or _hostname_matches_root(host, "ura.go.ug")
-            or _hostname_matches_root(host, "ulii.org")
-            or _hostname_matches_root(host, "parliament.go.ug")
-            or _hostname_matches_root(host, "bills.parliament.ug")
-            or _hostname_matches_root(host, "nita.go.ug")
-            or _hostname_matches_root(host, "pdpo.go.ug")
-            or _hostname_matches_root(host, "egpuganda.go.ug")
+            or any(_hostname_matches_root(host, d) for d in QDRANT_SYNC_ALLOWED_HOSTS)
         )
         return SourceAuthority(1, 1.0, host, can_qdrant, "Tier 1 official primary source")
 

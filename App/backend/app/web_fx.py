@@ -380,8 +380,11 @@ def _parse_open_er_api_rate(payload: str | dict[str, Any], currency: str, target
     return None
 
 
+_MAX_FX_RESPONSE_BYTES = 2_097_152
+
+
 def _default_http_fetcher(url: str) -> str:
-    """Fetch an allowlisted HTTPS FX endpoint, re-checking every redirect hop.
+    """Fetch an allowlisted HTTPS FX endpoint, re-checking every redirect hop (G438).
 
     Sent as what it is. No browser User-Agent and no pre-accepted consent
     cookie: a government service does not forge a person's consent to a third
@@ -396,11 +399,19 @@ def _default_http_fetcher(url: str) -> str:
     with httpx.Client(timeout=FX_HTTP_TIMEOUT_SECONDS, follow_redirects=False) as client:
         for _hop in range(3):
             parsed = urlparse(current)
-            if parsed.scheme != "https" or (parsed.hostname or "").lower() not in _ALLOWED_FX_HOSTS:
+            host = (parsed.hostname or "").lower()
+            if (
+                parsed.scheme != "https"
+                or host not in _ALLOWED_FX_HOSTS
+                or parsed.username
+                or parsed.password
+            ):
                 raise ValueError(f"Disallowed FX URL: {current}")
             resp = client.get(current, headers=headers)
             if not resp.is_redirect:
                 resp.raise_for_status()
+                if len(resp.content) > _MAX_FX_RESPONSE_BYTES:
+                    raise ValueError("FX response exceeded byte cap")
                 return resp.text
             current = str(resp.url.join(resp.headers.get("Location", "")))
     raise ValueError("Too many FX redirects")

@@ -77,14 +77,19 @@ class MemoryRecallTool(Tool):
                 facts = memsvc.read_facts(user_id=user_id, purpose="personalization", tenant_id=tenant_id)
                 q_lower = query.lower()
                 for f in facts:
-                    if f.confidence >= confidence_floor and (q_lower in f.key.lower() or q_lower in str(f.value).lower()):
+                    fact_key = str(getattr(f, "predicate", None) or getattr(f, "key", "") or "")
+                    fact_val = str(getattr(f, "object_value", None) or getattr(f, "value", "") or "")
+                    fact_src = str(getattr(f, "extractor_model", None) or getattr(f, "source", "") or "")
+                    if f.confidence >= confidence_floor and (
+                        q_lower in fact_key.lower() or q_lower in fact_val.lower()
+                    ):
                         results.append({
                             "fact_id": f.fact_id,
                             "category": f.category,
-                            "key": f.key,
-                            "value": f.value,
+                            "key": fact_key,
+                            "value": fact_val,
                             "confidence": f.confidence,
-                            "source": f.source,
+                            "source": fact_src,
                         })
         elif memory_type == "episodic":
             if user_id:
@@ -186,17 +191,27 @@ class MemoryStoreTool(Tool):
         import time
         import uuid
 
+        from ..guardrails import scan_retrieved_text
         from ..memory import UserFact, get_memory_service
+        from ..vision.ocr import strip_hidden_control_and_bidi
 
         memsvc = get_memory_service()
+        if not memsvc._has_consent(user_id, purpose="personalization", tenant_id=tenant_id):
+            return {"ok": False, "error": "personalization consent required under UDPA 2019"}
+
+        clean_key, key_flagged = scan_retrieved_text(strip_hidden_control_and_bidi(str(key)))
+        clean_val, val_flagged = scan_retrieved_text(strip_hidden_control_and_bidi(str(value)))
+        if key_flagged or val_flagged:
+            return {"ok": False, "error": "rejected: prompt injection or control payload detected in memory fact"}
+
         fact = UserFact(
             fact_id=str(uuid.uuid4()),
             user_id=user_id,
             tenant_id=tenant_id or "default",
             category="taxpayer_fact",
             subject="user",
-            predicate=key,
-            object_value=str(value),
+            predicate=clean_key,
+            object_value=clean_val,
             confidence=confidence,
             extracted_at=time.time(),
             extractor_model=source_citation,
@@ -205,10 +220,10 @@ class MemoryStoreTool(Tool):
         return {
             "ok": bool(fact_id),
             "fact_id": fact_id,
-            "key": key,
-            "value": value,
+            "key": clean_key,
+            "value": clean_val,
             "status": "stored",
-            "explanation": f"Persisted factual attribute '{key}' in semantic memory.",
+            "explanation": f"Persisted factual attribute '{clean_key}' in semantic memory.",
         }
 
 

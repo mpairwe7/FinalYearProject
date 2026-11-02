@@ -626,12 +626,17 @@ def screen_tool_result(result: Any) -> list[str]:
 
 
 def scrub_prompt_overrides_in_result(value: Any) -> Any:
-    """Replace natural-language prompt override phrases with ``[REDACTED_INSTRUCTION]``."""
+    """Replace natural-language prompt override phrases with ``[REDACTED_INSTRUCTION]`` (G423)."""
     override_pattern = _TOOL_POISONING_PATTERNS[0][1]
     if isinstance(value, str):
-        return override_pattern.sub("[REDACTED_INSTRUCTION]", value)
+        cleaned = _UNICODE_CONTROL_RE.sub("", value)
+        if override_pattern.search(cleaned):
+            return override_pattern.sub("[REDACTED_INSTRUCTION]", cleaned)
+        return value
     if isinstance(value, dict):
         return {k: scrub_prompt_overrides_in_result(v) for k, v in value.items()}
     if isinstance(value, list):
         return [scrub_prompt_overrides_in_result(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(scrub_prompt_overrides_in_result(item) for item in value)
     return value

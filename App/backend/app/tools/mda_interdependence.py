@@ -283,7 +283,7 @@ class ResolveMdaNtrPaymentTool(Tool):
                 "explanation": "",
             }
         info = MDA_SERVICE_CATALOG[service_type]
-        tbl = get_table("FY2026-27")
+        tbl = get_table()
         val = max(0.0, float(transaction_value_ugx or 0.0))
 
         payable_ugx = float(info.get("statutory_fee_ugx", 0.0))
@@ -467,8 +467,8 @@ class AssessLifeEventTaxOnboardingTool(Tool):
         stated_full_name: str = "",
     ) -> dict[str, Any]:
         turnover = max(0.0, float(annual_turnover_ugx or 0.0))
-        nin_clean = re.sub(r"\s+", "", str(nin or "")).upper()
-        nin_valid = bool(re.match(r"^(?:CM|CF)[A-Z0-9]{12}$", nin_clean)) if nin_clean else True
+        nin_clean = re.sub(r"[\s\-]+", "", str(nin or "")).upper()
+        nin_valid = bool(re.match(r"^(?:CM|CF|CR)[A-Z0-9]{12}$", nin_clean)) if nin_clean else True
         safe_name = re.sub(r"[^A-Za-z' -]+", " ", str(stated_full_name or "")).strip()[:80]
         name_parts = [p for p in safe_name.split() if p]
 
@@ -540,7 +540,7 @@ class AssessLifeEventTaxOnboardingTool(Tool):
                 "3. Pay Motor Vehicle Transfer Stamp Duty (UGX 200,000 vehicle / UGX 30,000 motorcycle) and Advance Transport Tax for commercial PSV/goods vehicles before MoWT logbook issuance.",
             ]
         elif life_event == "land_or_property_transfer":
-            sd_rate = float(get_table("FY2026-27").get("stamp_duty_property_transfer") or 0.01)
+            sd_rate = float(get_table().get("stamp_duty_property_transfer") or 0.01)
             est_tax = 0.0
             rec_head = f"Stamp Duty ({sd_rate:.1%} of CGV value) & Rental Income Tax (if leased/commercial property)"
             basis = "Tax Procedures Code Act s.135, Stamp Duty Act 2014, & Income Tax Act s.5 (12% individual rental tax above UGX 2,820,000)"
@@ -671,7 +671,7 @@ class EvaluateB2gAndUeswClearanceTool(Tool):
         fob_value_usd: float = 0.0,
         has_valid_certificate: bool = False,
     ) -> dict[str, Any]:
-        tbl = get_table("FY2026-27")
+        tbl = get_table()
         amt = max(0.0, float(amount_ugx or 0.0))
         fob_usd = max(0.0, float(fob_value_usd or 0.0))
 
@@ -834,7 +834,7 @@ class BuildNewTaxpayerComplianceShieldTool(Tool):
         annual_turnover_ugx: float = 0.0,
         unfiled_months: int = 0,
     ) -> dict[str, Any]:
-        tbl = get_table("FY2026-27")
+        tbl = get_table()
         min_pen = float(tbl.get("penal_tax_late_filing_minimum_ugx") or 200_000.0)
         vat_thresh = float(tbl.get("vat_registration_threshold_annual") or 300_000_000.0)
         months = max(0, int(unfiled_months or 0))
@@ -1000,7 +1000,7 @@ class SimulateTaxReliefAndInstalmentsTool(Tool):
         voluntary_before_audit_notice: bool = True,
         instalment_months: int = 6,
     ) -> dict[str, Any]:
-        tbl = get_table("FY2026-27")
+        tbl = get_table()
         principal = max(0.0, float(principal_tax_ugx or 0.0))
         months = max(1, int(months_late or 1))
         inst_m = max(1, min(12, int(instalment_months or 6)))
@@ -1146,7 +1146,7 @@ class ResolveEfrisAndAccountRecoveryTool(Tool):
         scenario: str,
         thirty_day_ereceipt_purchases_ugx: float = 0.0,
     ) -> dict[str, Any]:
-        tbl = get_table("FY2026-27")
+        tbl = get_table()
         thresh = float(tbl.get("efris_e_receipt_refund_qualifying_threshold_ugx") or 2_000_000.0)
         ref_rate = float(tbl.get("efris_e_receipt_refund_rate") or 0.05)
         min_pen = float(tbl.get("efris_penal_tax_minimum_ugx") or 200_000.0)

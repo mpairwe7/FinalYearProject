@@ -348,7 +348,7 @@ def resolve_workflow_side_question(user_input: str) -> str:
         from ..tools import ToolRegistry
 
         if any(w in q.lower() for w in ("deadline", "due date", "when is", "filing date")):
-            dl_tool = ToolRegistry.get("get_filing_deadlines")
+            dl_tool = ToolRegistry.get("get_next_deadlines") or ToolRegistry.get("get_filing_deadlines")
             if dl_tool is not None:
                 dl_out = dl_tool.execute()
                 if isinstance(dl_out, dict) and dl_out.get("ok") and isinstance(dl_out.get("deadlines"), list):
@@ -363,7 +363,10 @@ def resolve_workflow_side_question(user_input: str) -> str:
         if edu is not None:
             for concept in ("vat", "paye", "tin", "withholding", "efris", "presumptive", "rental", "customs", "chargeable income"):
                 if concept in q.lower():
-                    out = edu.execute(concept=concept)
+                    try:
+                        out = edu.execute(topic=concept)
+                    except TypeError:
+                        out = edu.execute(concept=concept)
                     if isinstance(out, dict) and out.get("ok") and out.get("explanation"):
                         return f"Regarding your question: {str(out['explanation']).strip()}"
     except Exception:
@@ -682,7 +685,8 @@ class WorkflowRegistry:
 
         if step.slot and step.validator:
             is_valid, normalised, error = validate_slot(user_input, step.validator, resolver)
-            if not is_valid and step.validator in ("currency", "amount", "number"):
+            val_prefix = step.validator.split("[", 1)[0].strip().lower()
+            if not is_valid and val_prefix in ("currency", "amount", "number"):
                 bridged_val, _receipt = delegate_workflow_slot_calculation(
                     session, user_input, slot_name=step.slot
                 )

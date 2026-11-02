@@ -663,19 +663,22 @@ class HttpTransport:
             params["requestState"] = request_state
         descriptor = next((t for t in self._tools or [] if t.get("name") == tool_name), None)
         extra_headers = _parameter_headers(descriptor.get("inputSchema"), arguments) if descriptor else {}
-        if self._token and len(self._token) >= MIN_SHARED_TOKEN_CHARS and isinstance(meta, dict):
-            from .auth import mint_obo_actor_assertion
+        if isinstance(meta, dict):
+            obo_secret = (os.getenv("MCP_OBO_SIGNING_SECRET") or "").strip()
+            signing_key = obo_secret if len(obo_secret) >= MIN_SHARED_TOKEN_CHARS else (self._token or "")
+            if len(signing_key) >= MIN_SHARED_TOKEN_CHARS:
+                from .auth import mint_obo_actor_assertion
 
-            obo = mint_obo_actor_assertion(
-                subject=str(meta.get("ug.go.ura.chatbot/userId") or "public"),
-                tenant_id=str(meta.get("ug.go.ura.chatbot/tenantId") or "default"),
-                actor_agent=str(meta.get("ug.go.ura.chatbot/userRole") or "orchestrator"),
-                resource=self.base_url,
-                scopes=(f"mcp:tool:{tool_name}",),
-                secret=self._token,
-            )
-            if obo:
-                extra_headers["Mcp-Actor-Assertion"] = obo
+                obo = mint_obo_actor_assertion(
+                    subject=str(meta.get("ug.go.ura.chatbot/userId") or "public"),
+                    tenant_id=str(meta.get("ug.go.ura.chatbot/tenantId") or "default"),
+                    actor_agent=str(meta.get("ug.go.ura.chatbot/userRole") or "orchestrator"),
+                    resource=self.base_url,
+                    scopes=(f"mcp:tool:{tool_name}",),
+                    secret=signing_key,
+                )
+                if obo:
+                    extra_headers["Mcp-Actor-Assertion"] = obo
         result = self._request(
             "tools/call",
             params,

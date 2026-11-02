@@ -18,6 +18,16 @@ from typing import Any
 from . import Tool, ToolRegistry, ToolSchema
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Never follow HTTP redirects when carrying a URA API Bearer token (G431)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, f"Redirect refused ({code})", headers, fp)
+
+
+_MAX_URA_API_RESPONSE_BYTES = 65_536
+
+
 class UraAccountProfileTool(Tool):
     @property
     def schema(self) -> ToolSchema:
@@ -62,10 +72,23 @@ class UraAccountProfileTool(Tool):
 
         )
 
-    def execute(self, taxpayer_id: str = "") -> dict[str, Any]:
+    def execute(self, taxpayer_id: str = "", user_id: str = "", tenant_id: str = "default") -> dict[str, Any]:
         taxpayer_id = str(taxpayer_id or "").strip()
         if not taxpayer_id:
             return {"ok": False, "error": "taxpayer_id is required"}
+
+        if user_id:
+            import re as _re
+
+            m_tin = _re.search(r"\b(\d{10})\b", str(user_id))
+            if m_tin and m_tin.group(1) != taxpayer_id:
+                return {
+                    "ok": False,
+                    "error": (
+                        f"Access refused under Section 75 of the Tax Procedures Code Act (TPCA) Cap. 343 "
+                        f"(Official Secrecy): session bound to TIN {m_tin.group(1)} cannot read TIN {taxpayer_id}."
+                    ),
+                }
 
         from ..ura_account_mock import account_mode, lookup_mock
 
@@ -88,9 +111,13 @@ class UraAccountProfileTool(Tool):
 
         url = f"{base_url}/taxpayers/{urllib.parse.quote(taxpayer_id)}/profile"
         req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+        opener = urllib.request.build_opener(_NoRedirectHandler)
         try:
-            with urllib.request.urlopen(req, timeout=5) as resp:  # nosec B310 # noqa: S310 - configured URL only
-                payload = json.loads(resp.read().decode("utf-8"))
+            with opener.open(req, timeout=5) as resp:  # nosec B310 # noqa: S310 - configured HTTPS URL without redirects
+                raw = resp.read(_MAX_URA_API_RESPONSE_BYTES + 1)
+                if len(raw) > _MAX_URA_API_RESPONSE_BYTES:
+                    return {"ok": False, "configured": True, "error": "URA API response exceeded byte cap"}
+                payload = json.loads(raw.decode("utf-8"))
         except urllib.error.HTTPError as exc:
             return {"ok": False, "configured": True, "status": exc.code, "error": "URA API error"}
         except Exception as exc:  # noqa: BLE001 - fail closed and structured

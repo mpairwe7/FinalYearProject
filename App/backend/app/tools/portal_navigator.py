@@ -224,24 +224,33 @@ class NavigateExternalPortalTool(Tool):
         portal_key = normalized_portal if normalized_portal != "auto" else self._detect_portal_key(text_lower, err_msg)
         portal_info = EXTERNAL_URA_PORTALS.get(portal_key, EXTERNAL_URA_PORTALS["e_services"])
 
-        # 2. Extract structured data from external screen
+        # 2. Extract structured data from external screen (scrubbed of bidi/injection payloads)
+        from ..guardrails import scan_retrieved_text
+        from ..vision.ocr import (
+            extract_dates,
+            extract_efris_invoice_numbers,
+            extract_nin_numbers,
+            extract_prn_numbers,
+            extract_reference_numbers,
+            extract_tax_heads,
+            extract_tin_numbers,
+            extract_ugx_amounts,
+            strip_hidden_control_and_bidi,
+        )
+
+        text, _ = scan_retrieved_text(strip_hidden_control_and_bidi(text))
+        err_msg, _ = scan_retrieved_text(strip_hidden_control_and_bidi(err_msg))
+        text_lower = f"{text} {err_msg}".lower()
         collected_data = {}
         if collect_entities:
-            from ..vision.ocr import (
-                extract_dates,
-                extract_efris_invoice_numbers,
-                extract_prn_numbers,
-                extract_tax_heads,
-                extract_tin_numbers,
-                extract_ugx_amounts,
-            )
-
             collected_data = {
                 "tins": extract_tin_numbers(text)[:5],
+                "nins": extract_nin_numbers(text)[:5],
                 "prns": extract_prn_numbers(text)[:5],
                 "efris_invoices": extract_efris_invoice_numbers(text)[:5],
                 "amounts": extract_ugx_amounts(text)[:5],
                 "dates": extract_dates(text)[:5],
+                "references": extract_reference_numbers(text)[:5],
                 "tax_heads": extract_tax_heads(text)[:5],
             }
 
