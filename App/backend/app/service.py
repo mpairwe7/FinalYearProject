@@ -11454,12 +11454,18 @@ class ChatModel:
         _PENDING_TURN_AUDIT.set(None)
         _TURN_GENERATION.set(_new_generation_record())
         deadline_s = _resolve_turn_deadline()
-        # A call turn stays on local models, whatever this deployment allows
-        # chat (G122; see providers.scope).
+        # A call turn stays on local models unless RECEPTIONIST_ALLOW_CLOUD_LLM=true
+        # (used on CPU-only deployments like the HF Space so Call Receptionist
+        # shares the exact same Gemini LLM as Main Chat; G122/G415).
+        local_only_call = channel == "call" and os.getenv(
+            "RECEPTIONIST_ALLOW_CLOUD_LLM", "false"
+        ).strip().lower() not in ("1", "true", "yes", "on")
+        if channel == "call" and not local_only_call:
+            deadline_s = min(deadline_s, 20.0) if deadline_s > 0 else 20.0
         with (
             turn_usage_scope() as usage,
             turn_attributes_scope(),
-            local_models_only(channel == "call"),
+            local_models_only(local_only_call),
             turn_deadline(deadline_s if deadline_s > 0 else None),
         ):
             return self._generate_localized(

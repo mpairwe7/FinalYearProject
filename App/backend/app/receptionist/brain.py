@@ -1537,7 +1537,7 @@ class UraReceptionistBrain(LLMService):
                     message=normalize_call_query(question, self.room.state.locale),
                     conversation_id=self.room.state.conversation_id,
                     session_id=self.room.call_id,
-                    top_k=4,
+                    top_k=6,
                     locale=self.room.state.locale,
                     # The call's LanguagePolicy decided this language.
                     locale_explicit=True,
@@ -1804,10 +1804,14 @@ class UraReceptionistBrain(LLMService):
         bullet_count = sum(
             1 for s in sentences if _STEP_OR_BULLET_START_RE.match(s) or re.search(r":\s+\d{1,2}[.)]\s+", s)
         )
+        has_structured_items = (
+            bullet_count >= 1
+            or bool(re.search(r"(?:^|\n)\s*(?:[-*+•]|\d{1,2}[.)])\s+", cleaned_reply))
+        )
         if (
-            bullet_count >= 2
-            and len(cleaned_reply.split()) <= 75
-            and len(sentences) <= 8
+            has_structured_items
+            and len(cleaned_reply.split()) <= 260
+            and len(sentences) <= 15
             and not any(s.endswith("?") for s in sentences)
         ):
             max_sentences = max(max_sentences, len(sentences))

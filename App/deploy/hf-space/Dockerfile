@@ -786,7 +786,8 @@
 # speed" / "Found in URA documents".
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
-# image.
+# image. RECEPTIONIST_ALLOW_CLOUD_LLM (final-stage ENV) takes effect in the base
+# image once this pin moves to an image built with the call-scope gate.
 FROM landwind/ura-chatbot:sha-ad8ec0b
 
 # Gate the pin on the two embedded stores this Space depends on: a Qdrant
@@ -868,6 +869,7 @@ ENV QDRANT_ENABLED=true \
     DENSE_FALLBACK_BACKEND=none \
     TTS_FALLBACK_BACKEND=none \
     STT_FALLBACK_BACKEND=none \
+    RECEPTIONIST_ALLOW_CLOUD_LLM=true \
     GEMINI_DIRECT_FIRST=true \
     SPARSE_CPU_RERANKER=true \
     OFFLINE_RAG_CPU_HASH_FALLBACK=true \

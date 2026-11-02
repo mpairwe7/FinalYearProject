@@ -134,4 +134,13 @@ describe("answerText", () => {
     expect(speech).toContain("Section 12. Every taxpayer must file.");
     expect(speech).not.toContain("Step 12");
   });
+
+  it("restores URA/PAYE/EFRIS acronyms and formats multi-item labelled call captions as bullets", () => {
+    const raw =
+      "U R A provides: Taxpayer Registration: Instant TIN issuance. Domestic Tax Administration: Managing VAT and Payee. E-Invoicing: Efris receipts.";
+    const formatted = formatCallCaptionText(raw);
+    expect(formatted).toContain("URA provides:\n• Taxpayer Registration:");
+    expect(formatted).toContain("\n• Domestic Tax Administration: Managing VAT and PAYE.");
+    expect(formatted).toContain("\n• E-Invoicing: EFRIS receipts.");
+  });
 });
