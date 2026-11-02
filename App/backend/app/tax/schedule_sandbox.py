@@ -195,6 +195,15 @@ _NON_ADDITIVE_KEYS: frozenset[str] = frozenset(
         "period",
         "band_count",
         "units",
+        "threshold",
+        "exchange_rate",
+        "rate_used",
+        "rate_per_seat",
+        "rate_per_tonne",
+        "minimum_penalty_ugx",
+        "months_late",
+        "vehicle_age_years",
+        "de_minimis_threshold_monthly",
     }
 )
 _NON_ADDITIVE_SUFFIXES: tuple[str, ...] = (
@@ -206,6 +215,8 @@ _NON_ADDITIVE_SUFFIXES: tuple[str, ...] = (
     "_days",
     "_id",
     "_year",
+    "_threshold",
+    "_cap",
 )
 
 
@@ -213,13 +224,15 @@ def evaluate_multi_period_tax_schedule(
     tool_name: str,
     rows: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    """Execute a verified read-only calculator across multiple periods/items deterministically (CS-4).
+    """Execute a verified read-only calculator across multiple periods/items deterministically (CS-4, G425).
 
     Enforces:
     - ``1 <= len(rows) <= MAX_SCHEDULE_ROWS`` (60 rows max, e.g., 5 years of monthly returns)
-    - Target tool must exist in :class:`~app.tools.ToolRegistry` and be ``read_only=True``
+    - Target tool must exist in :class:`~app.tools.ToolRegistry`, belong to an unprivileged
+      calculator namespace (``tax_calculator`` or ``rates``), have ``read_only=True``,
+      ``risk="low"``, and ``not required_scopes``
     - Aggregates additive monetary output fields using exact ``Decimal`` arithmetic while
-      excluding rate/percentage/count metadata fields from summation.
+      excluding rate/percentage/threshold/count metadata fields from summation.
     """
     from ..tools import ToolRegistry
 
@@ -231,8 +244,15 @@ def evaluate_multi_period_tax_schedule(
     tool = ToolRegistry.get(tool_name)
     if tool is None:
         raise SandboxViolationError(f"Unknown calculator tool: {tool_name!r}")
-    if not getattr(tool.schema, "read_only", False):
-        raise SandboxViolationError(f"Tool {tool_name!r} is not read-only and cannot run in a schedule batch.")
+    if (
+        not getattr(tool.schema, "read_only", False)
+        or getattr(tool.schema, "risk", "low") != "low"
+        or bool(getattr(tool.schema, "required_scopes", ()))
+        or getattr(tool.schema, "namespace", "") not in ("tax_calculator", "rates")
+    ):
+        raise SandboxViolationError(
+            f"Tool {tool_name!r} is not an unprivileged read-only calculator and cannot run in a schedule batch."
+        )
 
     row_results: list[dict[str, Any]] = []
     totals: dict[str, Decimal] = {}

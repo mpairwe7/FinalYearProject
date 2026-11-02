@@ -163,14 +163,16 @@ ENTITY_TYPE_OPTIONS: tuple[dict[str, str], ...] = (
 )
 
 _DTS_PRODUCT_CATALOG: tuple[tuple[str, str, float], ...] = (
-    ("BOTTLED_WATER", "Bottled Water (UGX 13 / stamp)", 13.0),
-    ("SODA", "Non-Alcoholic Soda / Beverage (UGX 17 / stamp)", 17.0),
-    ("BEER", "Beer (UGX 36 / stamp)", 36.0),
-    ("WINES", "Wine (UGX 55 / stamp)", 55.0),
-    ("SPIRITS", "Spirits (UGX 55 / stamp)", 55.0),
-    ("TOBACCO", "Tobacco / Cigarettes (UGX 75 / stamp)", 75.0),
+    ("BOTTLED_WATER", "Bottled Water (UGX 15 / stamp)", 15.0),
+    ("SODA", "Non-Alcoholic Soda / Beverage (UGX 30 / stamp)", 30.0),
+    ("JUICES", "Fruit / Vegetable Juices (UGX 30 / stamp)", 30.0),
+    ("BEER", "Beer (UGX 35 / stamp)", 35.0),
+    ("WINE", "Wine (UGX 100 / stamp)", 100.0),
+    ("WINES", "Wine (UGX 100 / stamp)", 100.0),
+    ("SPIRITS", "Spirits (UGX 110 / stamp)", 110.0),
+    ("TOBACCO", "Tobacco / Cigarettes (UGX 50 / stamp)", 50.0),
     ("CEMENT", "Cement (UGX 135 / stamp)", 135.0),
-    ("SUGAR", "Sugar (UGX 100 / stamp)", 100.0),
+    ("SUGAR", "Sugar (UGX 35 / stamp)", 35.0),
     ("COOKING_OIL", "Cooking Oil (UGX 30 / stamp)", 30.0),
 )
 
@@ -1202,6 +1204,14 @@ def sanitize_portal_context(portal_context: Mapping[str, Any] | None) -> dict[st
             return True
         return any(sel.lower() in k_str.lower() for sel in prohibited_selectors)
 
+    from .guardrails import scan_retrieved_text
+    from .vision.ocr import strip_hidden_control_and_bidi
+
+    def _scrub_dom_text(val: Any, max_len: int) -> str:
+        raw_str = strip_hidden_control_and_bidi(str(val or ""))[:max_len]
+        cleaned, _ = scan_retrieved_text(raw_str)
+        return cleaned
+
     raw_visible = portal_context.get("visible_fields")
     clean_visible: dict[str, str] = {}
     scrubbed_keys: list[str] = []
@@ -1210,14 +1220,14 @@ def sanitize_portal_context(portal_context: Mapping[str, Any] | None) -> dict[st
             if _is_secret_key(str(k)):
                 scrubbed_keys.append(str(k))
                 continue
-            clean_visible[str(k)] = str(v or "")[:240]
+            clean_visible[str(k)] = _scrub_dom_text(v, 240)
 
     raw_empty = portal_context.get("empty_required_fields")
     clean_empty: list[str] = []
     if isinstance(raw_empty, Sequence) and not isinstance(raw_empty, str | bytes):
         for item in raw_empty:
             if not _is_secret_key(str(item)):
-                clean_empty.append(str(item))
+                clean_empty.append(_scrub_dom_text(item, 80))
 
     raw_errors = portal_context.get("validation_errors")
     clean_errors: list[dict[str, str]] = []
@@ -1230,23 +1240,23 @@ def sanitize_portal_context(portal_context: Mapping[str, Any] | None) -> dict[st
                     continue
                 clean_errors.append(
                     {
-                        "field": f_name,
-                        "message": str(err.get("message") or ""),
-                        "selector": sel,
+                        "field": _scrub_dom_text(f_name, 80),
+                        "message": _scrub_dom_text(err.get("message"), 240),
+                        "selector": _scrub_dom_text(sel, 120),
                     }
                 )
 
     return {
         "portal_id": str(portal_context.get("portal_id") or "e_services").strip().lower(),
-        "current_route": str(portal_context.get("current_route") or "")[:240],
-        "active_step": str(portal_context.get("active_step") or "")[:160],
-        "form_id": str(portal_context.get("form_id") or "")[:64],
+        "current_route": _scrub_dom_text(portal_context.get("current_route"), 240),
+        "active_step": _scrub_dom_text(portal_context.get("active_step"), 160),
+        "form_id": _scrub_dom_text(portal_context.get("form_id"), 64),
         "visible_fields": clean_visible,
         "empty_required_fields": clean_empty,
         "validation_errors": clean_errors,
-        "error_banner": str(portal_context.get("error_banner") or "")[:400],
+        "error_banner": _scrub_dom_text(portal_context.get("error_banner"), 400),
         "stalled_duration_ms": int(portal_context.get("stalled_duration_ms") or 0),
-        "last_user_action": str(portal_context.get("last_user_action") or "")[:120],
+        "last_user_action": _scrub_dom_text(portal_context.get("last_user_action"), 120),
         "scrubbed_secret_fields": scrubbed_keys,
     }
 
@@ -2030,9 +2040,11 @@ def execute_portal_task(
             "email": str(p.get("email") or "info@company.co.ug"),
         }
     elif spec.task_id == "dts_order_stamps":
+        raw_cat = str(p.get("product_category") or "BOTTLED_WATER").strip().upper()
+        norm_cat = "WINE" if raw_cat == "WINES" else raw_cat
         tool_args = {
             "taxpayer_tin": str(p.get("tin") or ""),
-            "product_category": str(p.get("product_category") or "BOTTLED_WATER"),
+            "product_category": norm_cat,
             "quantity": int(float(p.get("quantity") or 1000)),
         }
     elif spec.task_id == "dts_activate_stamps":
@@ -3220,10 +3232,12 @@ def evaluate_turn(
             f"**Guided Recovery Steps**:\n{action_lines}"
         )
         grounding = (
+            f"<untrusted_portal_dom_telemetry>\n"
             f"[LIVE URA PORTAL DOM TELEMETRY — {assistance['portal_name']}]\n"
             f"Active Step: {assistance['active_step']}\n"
             f"Diagnosis: {diag}{err_diag_block}\n"
-            f"Recommended DOM Actions: {len(assistance['dom_actions'])} interactive step(s) ready."
+            f"Recommended DOM Actions: {len(assistance['dom_actions'])} interactive step(s) ready.\n"
+            f"</untrusted_portal_dom_telemetry>"
         )
         return PortalCopilotOutcome(
             card_type="stuck_portal_assistance",

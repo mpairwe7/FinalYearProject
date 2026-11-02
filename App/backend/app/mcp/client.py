@@ -507,20 +507,40 @@ class MCPClient:
                 raise LookupError(f"No transport supports reading resource URI '{uri}'")
             raise ValueError(f"Invalid resource URI '{uri}': {uri_err}")
         scheme = uri.split("://")[0].lower() if "://" in uri else ""
-        transport = self._transports.get(scheme, self._transports.get("core", next(iter(self._transports.values()))))
-        if hasattr(transport, "read_resource"):
-            res = transport.read_resource(uri)
-            violations = screen_tool_result(res)
-            if violations:
-                hard = [
-                    v
-                    for v in violations
-                    if not v.startswith("indirect_prompt_injection:prompt_override_directive@")
-                ]
-                if hard:
-                    raise ValueError(f"Resource '{uri}' blocked by output safety screen: {hard[:3]}")
-                res = scrub_prompt_overrides_in_result(res)
-            return res
+        scheme_to_ns = {
+            "payments": "payment_system",
+            "dts": "digital_tax_stamps",
+            "tin": "tin_registration",
+        }
+        ns_key = scheme_to_ns.get(scheme, scheme)
+        candidates: list[Any] = []
+        if uri == "payments://prn/status":
+            for k in (ns_key, scheme, "core"):
+                if k in self._transports and self._transports[k] not in candidates:
+                    candidates.append(self._transports[k])
+        else:
+            for k in (scheme, ns_key, "core"):
+                if k in self._transports and self._transports[k] not in candidates:
+                    candidates.append(self._transports[k])
+        if not candidates and self._transports:
+            candidates.append(next(iter(self._transports.values())))
+        for transport in candidates:
+            if hasattr(transport, "read_resource"):
+                try:
+                    res = transport.read_resource(uri)
+                except KeyError:
+                    continue
+                violations = screen_tool_result(res)
+                if violations:
+                    hard = [
+                        v
+                        for v in violations
+                        if not v.startswith("indirect_prompt_injection:prompt_override_directive@")
+                    ]
+                    if hard:
+                        raise ValueError(f"Resource '{uri}' blocked by output safety screen: {hard[:3]}")
+                    res = scrub_prompt_overrides_in_result(res)
+                return res
         raise LookupError(f"No transport supports reading resource URI '{uri}'")
 
     def list_prompts(self, namespace: str | None = None) -> list[dict[str, Any]]:
@@ -742,6 +762,7 @@ class MCPClient:
             scope_exempt_roles=tuple(_meta_of(descriptor, "scopeExemptRoles", ()) or ()),
             requires_confirmation=requires_confirmation and confirmed,
             arguments=coerced_args,
+            record_velocity=False,
         )
         if not policy["allowed"]:
             return finish(
@@ -826,6 +847,19 @@ class MCPClient:
                 logger.info("MCP replayed %s for idempotency key (no re-execution)", name)
                 return finish(
                     cached, ok=bool(cached.get("ok", True)), risk=risk, namespace=namespace, replayed=True
+                )
+
+        if requires_confirmation and confirmed and user_id:
+            from .policy import _check_and_record_velocity
+
+            if not _check_and_record_velocity(user_id, record=True):
+                policy["allowed"] = False
+                policy["reasons"] = ["critical action velocity limit exceeded"]
+                return finish(
+                    {"ok": False, "error": "policy_denied", "policy": policy},
+                    ok=False,
+                    risk=risk,
+                    namespace=namespace,
                 )
 
         meta = request_meta(

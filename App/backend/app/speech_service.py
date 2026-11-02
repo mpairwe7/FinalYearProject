@@ -1424,7 +1424,7 @@ class SpeechModel:
             ]
             if cfg.is_cloudflare_configured():
                 gw_target = (
-                    f"{s.google_ai_studio_base}/v1beta/models/{model}:generateContent",
+                    f"{gw._gateway_url('google-ai-studio')}/v1beta/models/{model}:generateContent",
                     gw._gemini_headers(),
                 )
                 targets = [*targets, gw_target] if direct_first else [gw_target, *targets]

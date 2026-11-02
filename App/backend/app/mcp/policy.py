@@ -71,7 +71,13 @@ def reset_velocity_tracker() -> None:
             pass
 
 
-def _check_and_record_velocity(user_id: str, limit: int = MCP_MAX_CRITICAL_ACTIONS_PER_HOUR, window_s: float = 3600.0) -> bool:
+def _check_and_record_velocity(
+    user_id: str,
+    limit: int = MCP_MAX_CRITICAL_ACTIONS_PER_HOUR,
+    window_s: float = 3600.0,
+    *,
+    record: bool = True,
+) -> bool:
     if not user_id or user_id == "discovery-probe" or limit <= 0:
         return True
     now = time.time()
@@ -90,10 +96,11 @@ def _check_and_record_velocity(user_id: str, limit: int = MCP_MAX_CRITICAL_ACTIO
             count = results[1]
             if count >= limit:
                 return False
-            pipe = r.pipeline()
-            pipe.zadd(key, {f"{now}:{uuid.uuid4().hex[:6]}": now})
-            pipe.expire(key, int(window_s) + 60)
-            pipe.execute()
+            if record:
+                pipe = r.pipeline()
+                pipe.zadd(key, {f"{now}:{uuid.uuid4().hex[:6]}": now})
+                pipe.expire(key, int(window_s) + 60)
+                pipe.execute()
             return True
         except Exception as exc:
             logger.debug("Redis velocity check failed, falling back to in-process tracker: %s", exc)
@@ -104,30 +111,78 @@ def _check_and_record_velocity(user_id: str, limit: int = MCP_MAX_CRITICAL_ACTIO
         if len(history) >= limit:
             _user_action_history[user_id] = history
             return False
-        history.append(now)
+        if record:
+            history.append(now)
         _user_action_history[user_id] = history
         return True
 
 
+def _coerce_positive_float(val: Any) -> float | None:
+    if isinstance(val, bool) or val is None:
+        return None
+    try:
+        if isinstance(val, (int, float)):
+            f = float(val)
+            return f if f > 0 else None
+    except (OverflowError, ValueError):
+        return None
+    if isinstance(val, str):
+        clean = val.replace(",", "").replace("UGX", "").replace("ugx", "").strip()
+        try:
+            f = float(clean)
+            return f if f > 0 else None
+        except (ValueError, OverflowError):
+            return None
+    return None
+
+
 def _extract_amount_from_args(arguments: dict[str, Any] | None) -> float | None:
-    """Extract financial transaction amounts from tool argument payload."""
+    """Extract financial transaction amounts from tool argument payload (G421)."""
     if not arguments or not isinstance(arguments, dict):
         return None
-    for key in ("amount_ugx", "amount", "total_ugx", "total", "payment_amount", "gross_amount"):
-        val = arguments.get(key)
-        try:
-            if isinstance(val, (int, float)) and val > 0:
-                return float(val)
-        except (OverflowError, ValueError):
-            return None
-        if isinstance(val, str):
-            clean = val.replace(",", "").replace("UGX", "").replace("ugx", "").strip()
-            try:
-                parsed = float(clean)
-                if parsed > 0:
-                    return parsed
-            except (ValueError, OverflowError):
-                pass
+    for key in (
+        "amount_ugx",
+        "amount",
+        "total_ugx",
+        "total",
+        "payment_amount",
+        "gross_amount",
+        "amount_paid_ugx",
+        "adjusted_amount",
+    ):
+        parsed = _coerce_positive_float(arguments.get(key))
+        if parsed is not None:
+            return parsed
+
+    # Line-item array (e.g., efris_fiscal_invoice items=[{quantity, unit_price}])
+    items = arguments.get("items")
+    if isinstance(items, list) and items:
+        items_total = 0.0
+        for item in items:
+            if isinstance(item, dict):
+                qty = _coerce_positive_float(item.get("quantity")) or 1.0
+                uprice = (
+                    _coerce_positive_float(item.get("unit_price"))
+                    or _coerce_positive_float(item.get("unit_cost"))
+                    or _coerce_positive_float(item.get("amount"))
+                )
+                if uprice is not None:
+                    items_total += qty * uprice
+        if items_total > 0:
+            return items_total
+
+    # Quantity * unit cost/fee (e.g., efris_stock_management, dts_order_stamps)
+    qty = _coerce_positive_float(arguments.get("quantity"))
+    if qty is not None:
+        for unit_key in ("unit_cost", "unit_stamp_fee", "unit_price"):
+            unit_val = _coerce_positive_float(arguments.get(unit_key))
+            if unit_val is not None:
+                return qty * unit_val
+
+    # Nested payload dict (e.g., ura_action_proposal payload={...})
+    nested = arguments.get("payload")
+    if isinstance(nested, dict):
+        return _extract_amount_from_args(nested)
     return None
 
 #: Fallback requirements for a tool that declares no roles of its own.
@@ -156,6 +211,7 @@ def authorize_tool_call(
     scope_exempt_roles: tuple[str, ...] = (),
     requires_confirmation: bool | None = None,
     arguments: dict[str, Any] | None = None,
+    record_velocity: bool = True,
 ) -> dict[str, Any]:
     """Authorize a tool call, returning a serialisable policy decision.
 
@@ -210,7 +266,7 @@ def authorize_tool_call(
         if not idempotency_key:
             reasons.append("idempotency_key required")
         if confirmed and user_id:
-            if not _check_and_record_velocity(user_id):
+            if not _check_and_record_velocity(user_id, record=record_velocity):
                 reasons.append(
                     f"critical action velocity limit exceeded (max {MCP_MAX_CRITICAL_ACTIONS_PER_HOUR} per hour)"
                 )

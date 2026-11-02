@@ -302,7 +302,7 @@ class DtsTaxpayerStatusTool(Tool):
                     "ok": {"type": "boolean"},
                     "tin": {"type": "string"},
                     "registered": {"type": "boolean"},
-                    "profile": {"type": "object"},
+                    "profile": {"type": ["object", "null"]},
                     "error": {"type": ["string", "null"]},
                 },
             },

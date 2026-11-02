@@ -92,7 +92,10 @@ def _decode_image(data: bytes) -> np.ndarray:
                     status_code=413,
                     detail=f"Image exceeds the {MAX_IMAGE_PIXELS:,}-pixel OCR limit",
                 )
-            image = opened.convert("RGB")
+            from PIL import ImageOps
+
+            transposed = ImageOps.exif_transpose(opened)
+            image = transposed.convert("RGB")
             image.load()
             return np.asarray(image)
     except HTTPException:

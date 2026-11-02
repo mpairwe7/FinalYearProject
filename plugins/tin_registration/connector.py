@@ -247,7 +247,7 @@ class TinTaxObligationsTool(Tool):
             name="tin_tax_obligations",
             description=(
                 "Register additional tax head obligations for an existing TIN (e.g. VAT_STANDARD when turnover "
-                "exceeds UGX 150M threshold, PAYE for employees, or LOCAL_EXCISE)."
+                "exceeds UGX 300M threshold, PAYE for employees, or LOCAL_EXCISE)."
             ),
             parameters={
                 "type": "object",

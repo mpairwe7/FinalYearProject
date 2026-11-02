@@ -1003,8 +1003,13 @@ def _extract_xlsx(data: bytes) -> _Extraction:
 def _extract_csv(data: bytes) -> _Extraction:
     out = _Extraction()
     raw = data.decode("utf-8", errors="replace")
+    rows: list[list[str]] = []
     try:
-        rows = [row for row in csv.reader(io.StringIO(raw)) if any(c.strip() for c in row)]
+        for row in csv.reader(io.StringIO(raw)):
+            if any(c.strip() for c in row):
+                rows.append(row[:_MAX_TABLE_COLS])
+                if len(rows) > _MAX_TABLE_ROWS + 1:
+                    break
     except csv.Error:
         logger.warning("CSV parse failed", exc_info=True)
         out.warnings.append("The CSV file could not be parsed.")

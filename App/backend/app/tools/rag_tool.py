@@ -43,12 +43,14 @@ def prompt_citation_offset_scope(offset: int) -> Iterator[None]:
 # doesn't force a connection to Qdrant or load sentence-transformers.
 _retriever: Any = None
 _retriever_ready: bool = False
+_TOOL_PASSAGE_MAX_CHARS: int = 4000
 
 
 def _get_retriever() -> Any:
-    """Return the shared process-wide HybridRetriever (G292)."""
+    """Return the shared process-wide HybridRetriever (G292, G416)."""
     global _retriever, _retriever_ready
     if _retriever is not None:
+        _retriever_ready = bool(getattr(_retriever, "is_ready", True))
         return _retriever
     try:
         from ..retriever import get_shared_retriever
@@ -155,7 +157,7 @@ class SearchKnowledgeBaseTool(Tool):
             from ..query import detect_language
 
             locale = detect_language(query)
-            search = getattr(retriever, "search_planned", retriever.search)
+            search = getattr(retriever, "search_planned", None) or getattr(retriever, "search")
             try:
                 hits = search(
                     query,
@@ -169,24 +171,36 @@ class SearchKnowledgeBaseTool(Tool):
             logger.exception("RAG tool: search failed")
             return {"ok": False, "error": f"search failed: {e}", "results": []}
 
+        from ..guardrails import scan_retrieved_text
+        from ..vision.ocr import strip_hidden_control_and_bidi
+
         results: list[dict[str, Any]] = []
         for i, h in enumerate(hits, base_offset + 1):
-            text = (h.get("text") or h.get("answer") or "")[:800]
+            raw_text = (h.get("text") or h.get("answer") or "")[:_TOOL_PASSAGE_MAX_CHARS]
+            clean_text, _ = scan_retrieved_text(strip_hidden_control_and_bidi(raw_text))
+            raw_score = None
+            for k in ("score_calibrated", "score_norm", "score_rerank", "score_rrf"):
+                val = h.get(k)
+                if val is not None:
+                    raw_score = float(val)
+                    break
+            score_val = round(max(0.0, raw_score if raw_score is not None else 0.0), 4)
             results.append(
                 {
                     "ref": f"[{i}]",
                     "source": h.get("source", "unknown"),
+                    "title": h.get("title", ""),
                     "section": h.get("section", ""),
                     "page": h.get("page", ""),
                     "doc_type": h.get("doc_type", ""),
                     "url": h.get("url", ""),
+                    "fiscal_year": h.get("fiscal_year", ""),
                     "effective_date": h.get("effective_date", ""),
+                    "valid_from": h.get("valid_from", ""),
+                    "valid_to": h.get("valid_to", ""),
                     "published_at": h.get("published_at", ""),
-                    "score": round(
-                        float(h.get("score_rerank") or h.get("score_rrf") or 0.0),
-                        4,
-                    ),
-                    "passage": text,
+                    "score": score_val,
+                    "passage": clean_text,
                 }
             )
 

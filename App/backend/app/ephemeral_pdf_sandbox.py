@@ -85,6 +85,7 @@ class SandboxDocument:
 
 _CACHE_LOCK = threading.Lock()
 _L1_CHUNK_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_L1_MAX_ENTRIES = 64
 _redis_client: Any = None
 _redis_init_attempted = False
 
@@ -319,10 +320,39 @@ def _extract_pdf_pages(raw_bytes: bytes) -> list[tuple[int, str]]:
         raise PdfRejected(f"Failed to extract text from PDF: {exc}") from exc
 
 
+def _validate_xlsx_zip_container(raw_bytes: bytes) -> None:
+    """Validate .xlsx ZIP archive against zip-bomb, path traversal, and macro payloads (G434)."""
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw_bytes)) as zf:
+            infos = zf.infolist()
+            if len(infos) > 2500:
+                raise PdfRejected(f"XLSX archive has too many entries ({len(infos)} > 2500)")
+            total_uncompressed = 0
+            for info in infos:
+                fname = info.filename or ""
+                if ".." in fname or fname.startswith(("/", "\\")):
+                    raise PdfRejected(f"XLSX archive contains unsafe path: {fname!r}")
+                if fname.lower().endswith(("vbaproject.bin", ".xlsm", ".bin")):
+                    raise PdfRejected(f"XLSX archive contains macro/binary payload: {fname!r}")
+                total_uncompressed += max(0, int(info.file_size))
+                if total_uncompressed > 100 * 1024 * 1024:
+                    raise PdfRejected("XLSX uncompressed size exceeds 100 MiB zip-bomb limit")
+                comp_size = max(1, int(info.compress_size))
+                if info.file_size > 1024 * 1024 and (info.file_size / comp_size) > 100.0:
+                    raise PdfRejected("XLSX entry compression ratio exceeds 100:1 zip-bomb limit")
+    except PdfRejected:
+        raise
+    except zipfile.BadZipFile as exc:
+        raise PdfRejected("Invalid XLSX ZIP container") from exc
+
+
 def _extract_xlsx_pages(raw_bytes: bytes) -> list[tuple[int, str]]:
     """Extract sanitized text rows per worksheet from an ``.xlsx`` workbook."""
     import openpyxl  # type: ignore[import-untyped]
 
+    _validate_xlsx_zip_container(raw_bytes)
     wb = openpyxl.load_workbook(io.BytesIO(raw_bytes), read_only=True, data_only=True)
     pages: list[tuple[int, str]] = []
     try:
@@ -429,9 +459,16 @@ def _get_cached_doc_payload(sha256_hex: str) -> dict[str, Any] | None:
 
 
 def _set_cached_doc_payload(sha256_hex: str, payload: dict[str, Any]) -> None:
-    """Store extracted chunks and metadata for *sha256_hex* in L1 and Redis (24h TTL)."""
+    """Store extracted chunks and metadata for *sha256_hex* in bounded L1 and Redis (24h TTL)."""
     now = time.time()
     with _CACHE_LOCK:
+        if len(_L1_CHUNK_CACHE) >= _L1_MAX_ENTRIES and sha256_hex not in _L1_CHUNK_CACHE:
+            expired = [k for k, (exp, _) in _L1_CHUNK_CACHE.items() if exp <= now]
+            for k in expired:
+                _L1_CHUNK_CACHE.pop(k, None)
+            while len(_L1_CHUNK_CACHE) >= _L1_MAX_ENTRIES:
+                oldest_key = next(iter(_L1_CHUNK_CACHE))
+                _L1_CHUNK_CACHE.pop(oldest_key, None)
         _L1_CHUNK_CACHE[sha256_hex] = (now + SANDBOX_CACHE_TTL_SECONDS, payload)
     r_client = _get_redis()
     if r_client is not None:
