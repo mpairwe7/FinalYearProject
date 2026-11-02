@@ -228,6 +228,45 @@ class TestRecordingsReachGeminiOnlyThroughItsPolicy:
         assert _transcribe(built_speech, None) == "what is the vat rate"
         assert len(gemini_audio) == 2
 
+    def test_gemini_35_transcribe_audio_transcription_part_and_prompt_feedback_fallback(
+        self, built_speech, gemini_audio, monkeypatch
+    ) -> None:
+        calls: list[str] = []
+
+        class _TranscribeResp:
+            def __init__(self, payload: dict[str, Any]) -> None:
+                self._payload = payload
+
+            def raise_for_status(self) -> None:
+                pass
+
+            def json(self) -> dict[str, Any]:
+                return self._payload
+
+        def _fake_post(url: str, **_kw: Any) -> _TranscribeResp:
+            calls.append(url)
+            if len(calls) == 1:
+                return _TranscribeResp({"promptFeedback": {"blockReason": "OTHER"}})
+            return _TranscribeResp(
+                {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {"audioTranscription": {"text": "Omusolo gwa VAT guli ebitundu 18 ku buli kikumi."}}
+                                ]
+                            }
+                        }
+                    ]
+                }
+            )
+
+        monkeypatch.setattr("httpx.post", _fake_post)
+        assert _transcribe(built_speech, "en") == "Omusolo gwa VAT guli ebitundu 18 ku buli kikumi."
+        assert len(calls) == 2
+        assert "gemini-3.5-transcribe" in calls[0]
+        assert "gemini-2.5-flash" in calls[1]
+
 
 class _EveryTierDown:
     """A SpeechModel with nothing to reach, shaped as in ``test_asr_no_speech.py``."""
