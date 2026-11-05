@@ -82,14 +82,28 @@ def assess_document_for_human_review(
         detail = recon_notes[-1] if recon_notes else "Arithmetic or statutory tax rate variance detected"
         reasons.append(f"Tax reconciliation discrepancy: {detail}")
 
+    # 6. Check vector-vs-OCR glyph fusion shadow discrepancies (G450)
+    glyph_discrepancies = meta.get("glyph_ocr_discrepancies") or []
+    if glyph_discrepancies:
+        reasons.append(
+            f"Vector-vs-OCR text layer discrepancy detected on {len(glyph_discrepancies)} region(s) "
+            "(possible font remapping or document tampering)"
+        )
+
     requires_review = len(reasons) > 0
     is_urgent = any(
-        k in r for r in reasons for k in ("TIN", "rejected", "Tax reconciliation discrepancy")
+        k in r
+        for r in reasons
+        for k in ("TIN", "rejected", "Tax reconciliation discrepancy", "Vector-vs-OCR text layer discrepancy")
     )
     priority = "high" if is_urgent else ("medium" if requires_review else "low")
     action = (
         "urgent_audit"
-        if any("Tax reconciliation discrepancy" in r for r in reasons)
+        if any(
+            k in r
+            for r in reasons
+            for k in ("Tax reconciliation discrepancy", "Vector-vs-OCR text layer discrepancy")
+        )
         else ("officer_review" if requires_review else "auto_approve")
     )
 

@@ -122,12 +122,12 @@ def _open_pdfium(source: bytes | Path) -> Any:
 
 def _open_fitz(source: bytes | Path) -> Any:
     try:
-        import fitz  # type: ignore[import-untyped]
+        import pymupdf  # type: ignore[import-untyped]
     except ImportError as err:
         raise PdfUnavailable("PyMuPDF is not installed.") from err
     if isinstance(source, Path):
-        return fitz.open(source)
-    return fitz.open(stream=source, filetype="pdf")
+        return pymupdf.open(source)
+    return pymupdf.open(stream=source, filetype="pdf")
 
 
 def _open_document(source: bytes | Path) -> tuple[Any, str]:

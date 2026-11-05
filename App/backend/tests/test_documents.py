@@ -234,12 +234,12 @@ class DocxAnalysisTest(_RegistryIsolation):
         self.assertGreaterEqual(record.meta.get("paragraph_count", 0), 2)
 
 
-@unittest.skipUnless(_has("pypdfium2") or _has("fitz"), "PDF library not installed")
+@unittest.skipUnless(_has("pypdfium2") or _has("pymupdf"), "PDF library not installed")
 class PdfAnalysisTest(_RegistryIsolation):
     def test_pdf_text_layer_extraction(self):
-        import fitz
+        import pymupdf
 
-        doc = fitz.open()
+        doc = pymupdf.open()
         page = doc.new_page()
         page.insert_text(
             (72, 72), "Notice of Assessment — Uganda Revenue Authority"
@@ -255,10 +255,10 @@ class PdfAnalysisTest(_RegistryIsolation):
         self.assertIn("1005556667", record.fields["tins"])
 
     def test_scanned_pdf_retains_ocr_field_evidence(self):
-        import fitz
+        import pymupdf
         from app.vision.ocr import OCRResult
 
-        doc = fitz.open()
+        doc = pymupdf.open()
         doc.new_page()
         data = doc.tobytes()
         doc.close()
@@ -284,10 +284,10 @@ class PdfAnalysisTest(_RegistryIsolation):
         self.assertEqual(evidence["box"], [[1.0, 2.0], [30.0, 2.0], [30.0, 12.0], [1.0, 12.0]])
 
     def test_spatial_fusion_mode_extracts_both_layers(self):
-        import fitz
+        import pymupdf
         from app.vision.ocr import OCRResult
 
-        doc = fitz.open()
+        doc = pymupdf.open()
         page = doc.new_page()
         page.insert_text((72, 72), "Digital Assessment Header — Official Notice")
         page.insert_text((72, 96), "This is a full digital text paragraph with sufficient chars.")
@@ -344,10 +344,10 @@ class PdfAnalysisTest(_RegistryIsolation):
         assert "EFRIS FISCAL SEAL #991823" in texts
 
     def test_configurable_ocr_pdf_pages_budget(self):
-        import fitz
+        import pymupdf
         from app.vision.ocr import OCRResult
 
-        doc = fitz.open()
+        doc = pymupdf.open()
         for _ in range(5):
             doc.new_page()
         data = doc.tobytes()
@@ -618,7 +618,7 @@ class ReportPdfTest(_RegistryIsolation):
             }
         )
         self.assertTrue(summary_pdf.startswith(b"%PDF"))
-        if _has("pypdfium2") or _has("fitz"):
+        if _has("pypdfium2") or _has("pymupdf"):
             summary_record = documents.analyze_document(
                 summary_pdf, "summary.pdf", "application/pdf", session_id="s-pdf"
             )

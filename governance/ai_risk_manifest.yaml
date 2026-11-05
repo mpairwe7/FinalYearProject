@@ -702,9 +702,10 @@ csa_aicm_maestro_2026:
       name: "Data Operations"
       aicm_domains: ["DSP", "STA"]
       status: "mitigated"
-      controls: "Structural PDF guards (pdf_guards.py), SHA-256 corpus/freshness manifests, and tenant/consent-scoped 4-tier cognitive memory"
+      controls: "Structural PDF guards (pdf_guards.py), Docling Document Intelligence IR & table/page provenance (docling_intelligence.py, ADR-0026, G441-G450), SHA-256 corpus/freshness manifests, and tenant/consent-scoped 4-tier cognitive memory"
       verified_by:
         - "App/backend/tests/test_mcp_2026_october_audit_and_corpus.py"
+        - "tests/agents/test_docling_rag_document_intelligence_2026.py"
     - id: "MAESTRO-L3"
       name: "Agent Frameworks"
       aicm_domains: ["AA", "AIS"]

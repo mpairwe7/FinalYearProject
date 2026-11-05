@@ -38,6 +38,19 @@ class Chunk:
     chunk_id: int
     heading_trail: list[str] = field(default_factory=list)
     token_count: int | None = None
+    page_numbers: list[int] = field(default_factory=list)
+
+    @property
+    def page_range(self) -> str:
+        """Compact 1-based page locator (e.g. ``'4'`` or ``'4-5'``), or ``''`` if unknown."""
+        if not self.page_numbers:
+            return ""
+        pages = sorted({int(p) for p in self.page_numbers if int(p) > 0})
+        if not pages:
+            return ""
+        if len(pages) == 1 or pages[0] == pages[-1]:
+            return str(pages[0])
+        return f"{pages[0]}-{pages[-1]}"
 
     @property
     def contextual_prefix(self) -> str:
@@ -92,6 +105,130 @@ _INLINE_QA_SPLIT_RE = re.compile(
 # single paragraph so they survive as one chunk.
 _PARAGRAPH_SPLIT = re.compile(r"\n[ \t]*\n+")
 _TABLE_LINE_RE = re.compile(r"^\s*\|.+\|\s*$")
+_TABLE_SEP_LINE_RE = re.compile(r"^\s*\|\s*[:\-]+(?:\s*\|\s*[:\-]+)*\s*\|\s*$")
+_PAGE_MARKER_RE = re.compile(r"<!--\s*page:(\d+)\s*-->")
+_FURNITURE_LINE_RE = re.compile(
+    r"^\s*(?:(?:DOMESTIC\s+TAX\s+LAWS\s+OF\s+UGANDA\s*)?\d+\s*\|\s*P\s*a\s*g\s*e|"
+    r"P\s*a\s*g\s*e\s*\|\s*\d+|Page\s+\d+\s+(?:of|/)\s+\d+|"
+    r"THE\s+UGANDA\s+GAZETTE)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _is_markdown_table_block(para: str) -> bool:
+    """Return True when *para* is a multi-line pipe-delimited Markdown table block."""
+    lines = [ln.strip() for ln in (para or "").strip().splitlines() if ln.strip()]
+    if len(lines) < 2:
+        return False
+    return all(_TABLE_LINE_RE.match(ln) for ln in lines)
+
+
+def _split_markdown_table_rows(
+    table_para: str,
+    *,
+    target_chars: int,
+    hard_max_chars: int,
+) -> list[str]:
+    """Split an oversized Markdown table strictly on row boundaries, repeating the header in every chunk (G446)."""
+    lines = [ln.strip() for ln in (table_para or "").strip().splitlines() if ln.strip()]
+    if not lines:
+        return []
+    if len(table_para) <= hard_max_chars:
+        return ["\n".join(lines)]
+
+    if len(lines) >= 2 and _TABLE_SEP_LINE_RE.match(lines[1]):
+        header_lines = lines[:2]
+        data_lines = lines[2:]
+    else:
+        num_cols = max(1, lines[0].count("|") - 1)
+        sep = "| " + " | ".join(["---"] * num_cols) + " |"
+        header_lines = [lines[0], sep]
+        data_lines = lines[1:]
+
+    if not data_lines:
+        return ["\n".join(header_lines)]
+
+    header_block = "\n".join(header_lines)
+    header_len = len(header_block) + 1
+    eff_budget = max(header_len + 120, min(target_chars, hard_max_chars))
+    hard_budget = max(eff_budget, hard_max_chars)
+
+    chunks: list[str] = []
+    cur_rows: list[str] = []
+    cur_len = header_len
+
+    for row in data_lines:
+        row_len = len(row) + 1
+        if cur_rows and (cur_len + row_len > eff_budget):
+            chunks.append(header_block + "\n" + "\n".join(cur_rows))
+            cur_rows = []
+            cur_len = header_len
+        if header_len + row_len > hard_budget:
+            clipped = row[: max(80, hard_budget - header_len)]
+            chunks.append(header_block + "\n" + clipped)
+            continue
+        cur_rows.append(row)
+        cur_len += row_len
+
+    if cur_rows:
+        chunks.append(header_block + "\n" + "\n".join(cur_rows))
+    return chunks
+
+
+def _stitch_cross_page_tables(markdown: str) -> str:
+    """Stitch Markdown tables split across page breaks (`---` or `<!-- page:N -->`) when columns match (G446)."""
+    if not markdown or "|" not in markdown:
+        return markdown
+
+    lines = markdown.splitlines()
+    out: list[str] = []
+    i = 0
+    n = len(lines)
+
+    while i < n:
+        line = lines[i]
+        if _FURNITURE_LINE_RE.match(line.strip()):
+            i += 1
+            continue
+        out.append(line)
+        if _TABLE_LINE_RE.match(line):
+            j = i + 1
+            saw_break = False
+            while j < n:
+                cand = lines[j].strip()
+                if not cand or _FURNITURE_LINE_RE.match(cand):
+                    j += 1
+                    continue
+                if cand == "---" or _PAGE_MARKER_RE.fullmatch(cand):
+                    saw_break = True
+                    j += 1
+                    continue
+                break
+
+            if saw_break and j < n and _TABLE_LINE_RE.match(lines[j]):
+                prev_cols = line.count("|") - 1
+                next_cols = lines[j].count("|") - 1
+                if prev_cols >= 2 and prev_cols == next_cols:
+                    k = len(out) - 1
+                    while k >= 0 and _TABLE_LINE_RE.match(out[k]):
+                        k -= 1
+                    table_start_idx = k + 1
+                    first_header_norm = re.sub(r"\s+", " ", out[table_start_idx].strip().lower())
+                    next_first_norm = re.sub(r"\s+", " ", lines[j].strip().lower())
+
+                    if first_header_norm == next_first_norm:
+                        j += 1
+                        if j < n and _TABLE_SEP_LINE_RE.match(lines[j]):
+                            j += 1
+                        i = j
+                        continue
+                    if not (j + 1 < n and _TABLE_SEP_LINE_RE.match(lines[j + 1])):
+                        # Continuation rows without a new header/separator
+                        i = j
+                        continue
+        i += 1
+
+    return "\n".join(out)
 
 
 def _inject_statutory_headings(text: str) -> str:
@@ -221,6 +358,15 @@ def _recursive_chunk(
         plen = len(para)
         if plen > hard_max_chars:
             _flush()
+            if _is_markdown_table_block(para):
+                chunks.extend(
+                    _split_markdown_table_rows(
+                        para,
+                        target_chars=target_chars,
+                        hard_max_chars=hard_max_chars,
+                    )
+                )
+                continue
             # sentence split
             sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9])", para)
             inner: list[str] = []
@@ -255,37 +401,117 @@ def _recursive_chunk(
 # ---------------------------------------------------------------------------
 
 
+def _char_outside_bboxes(char_obj: dict, bboxes: list[tuple[float, float, float, float]]) -> bool:
+    """Return True if a pdfplumber char dict's center lies outside all table bounding boxes (G441)."""
+    try:
+        cx = (float(char_obj.get("x0", 0.0)) + float(char_obj.get("x1", 0.0))) / 2.0
+        cy = (float(char_obj.get("top", 0.0)) + float(char_obj.get("bottom", 0.0))) / 2.0
+        for x0, top, x1, bottom in bboxes:
+            if (x0 - 1.0) <= cx <= (x1 + 1.0) and (top - 1.0) <= cy <= (bottom + 1.0):
+                return False
+    except Exception:
+        return True
+    return True
+
+
+def _format_table_matrix_md(table: list[list[object]]) -> list[str]:
+    """Render a 2D table matrix as Markdown, forward-filling horizontal merged header cells (G448)."""
+    if not table or len(table) < 1:
+        return []
+    raw_header = table[0]
+    header: list[str] = []
+    last_h = ""
+    span_idx = 1
+    for c in raw_header:
+        if c is None and last_h:
+            span_idx += 1
+            header.append(f"{last_h} ({span_idx})")
+        else:
+            val = str(c or "").replace("\n", " ").replace("|", "\\|").strip()
+            last_h = val
+            span_idx = 1
+            header.append(val)
+    if not any(header):
+        return []
+    md_lines = [
+        "| " + " | ".join(header) + " |",
+        "| " + " | ".join(["---"] * len(header)) + " |",
+    ]
+    for row in table[1:]:
+        cols = [str(c or "").replace("\n", " ").replace("|", "\\|").strip() for c in row]
+        if any(cols):
+            if len(cols) < len(header):
+                cols.extend([""] * (len(header) - len(cols)))
+            md_lines.append("| " + " | ".join(cols[: len(header)]) + " |")
+    return md_lines if len(md_lines) > 2 else []
+
+
 def extract_markdown(pdf_path: Path) -> str | None:
     """Extract PDF as markdown with table preservation using permissive MIT/Apache-2.0 engines.
 
     Returns None if extraction fails. Never raises — callers must be able
     to process thousands of PDFs without a single bad file killing the run.
     """
-    # 1. Primary: pdfplumber (MIT) with table markdown formatting
+    import os
+
+    # 0. Optional: IBM Docling converter when installed and enabled
+    if os.getenv("DOCLING_CORPUS_ENABLED", "true").lower() not in ("0", "false", "no", "off"):
+        try:
+            from docling.document_converter import (
+                DocumentConverter,  # type: ignore[import-not-found]
+            )
+
+            converter = DocumentConverter()
+            res = converter.convert(str(pdf_path))
+            md = res.document.export_to_markdown()
+            if md and str(md).strip():
+                return str(md)
+        except Exception:
+            pass
+
+    # 1. Primary: pdfplumber (MIT) with table bbox deduplication (G441) and page markers (G444)
     try:
         import pdfplumber
 
         with pdfplumber.open(str(pdf_path)) as pdf:
             pages_md: list[str] = []
-            for page in pdf.pages:
-                text = page.extract_text() or ""
+            for p_idx, page in enumerate(pdf.pages, start=1):
+                table_bboxes: list[tuple[float, float, float, float]] = []
+                try:
+                    found_tables = page.find_tables() or []
+                    for ft in found_tables:
+                        if getattr(ft, "bbox", None) and len(ft.bbox) == 4:
+                            table_bboxes.append(
+                                (float(ft.bbox[0]), float(ft.bbox[1]), float(ft.bbox[2]), float(ft.bbox[3]))
+                            )
+                except Exception:
+                    table_bboxes = []
+
+                if table_bboxes and hasattr(page, "filter"):
+                    try:
+                        non_table_page = page.filter(
+                            lambda obj, _b=table_bboxes: (
+                                _char_outside_bboxes(obj, _b) if obj.get("object_type") == "char" else True
+                            )
+                        )
+                        text = non_table_page.extract_text() or ""
+                    except Exception:
+                        text = page.extract_text() or ""
+                else:
+                    text = page.extract_text() or ""
+
                 tables = page.extract_tables() or []
                 table_md_parts: list[str] = []
                 for table in tables:
-                    if not table or len(table) < 1:
-                        continue
-                    header = [str(c or "").replace("\n", " ") for c in table[0]]
-                    table_md_parts.append("| " + " | ".join(header) + " |")
-                    table_md_parts.append("| " + " | ".join(["---"] * len(header)) + " |")
-                    for row in table[1:]:
-                        cols = [str(c or "").replace("\n", " ") for c in row]
-                        table_md_parts.append("| " + " | ".join(cols) + " |")
+                    md_rows = _format_table_matrix_md(table)
+                    if md_rows:
+                        table_md_parts.append("\n".join(md_rows))
 
                 content_parts = [text.strip()] if text.strip() else []
                 if table_md_parts:
-                    content_parts.append("\n".join(table_md_parts))
+                    content_parts.append("\n\n".join(table_md_parts))
                 if content_parts:
-                    pages_md.append("\n\n".join(content_parts))
+                    pages_md.append(f"<!-- page:{p_idx} -->\n" + "\n\n".join(content_parts))
 
             if pages_md:
                 return "\n\n---\n\n".join(pages_md)
@@ -310,7 +536,7 @@ def extract_markdown(pdf_path: Path) -> str | None:
                 finally:
                     page.close()
                 if page_text.strip():
-                    pages_md.append(page_text.strip())
+                    pages_md.append(f"<!-- page:{i + 1} -->\n{page_text.strip()}")
             if pages_md:
                 return "\n\n---\n\n".join(pages_md)
         finally:
@@ -340,8 +566,8 @@ def extract_markdown(pdf_path: Path) -> str | None:
         doc = pymupdf.open(str(pdf_path))
         try:
             pages_md = [
-                page.get_text("text").strip()
-                for page in doc
+                f"<!-- page:{idx + 1} -->\n{page.get_text('text').strip()}"
+                for idx, page in enumerate(doc)
                 if page.get_text("text").strip()
             ]
             if pages_md:
@@ -351,6 +577,78 @@ def extract_markdown(pdf_path: Path) -> str | None:
     except Exception:
         return None
     return None
+
+
+def _extract_page_spans_and_strip_markers(markdown: str) -> tuple[str, list[tuple[int, int, int]]]:
+    """Strip ``<!-- page:N -->`` markers from *markdown* and return ``(clean_md, [(start, end, page_no)])`` (G444)."""
+    if not _PAGE_MARKER_RE.search(markdown):
+        return markdown, []
+
+    out_parts: list[str] = []
+    spans: list[tuple[int, int, int]] = []
+    cur_pos = 0
+    last_idx = 0
+    cur_page: int | None = None
+    seg_start = 0
+
+    for m in _PAGE_MARKER_RE.finditer(markdown):
+        piece = markdown[last_idx : m.start()]
+        out_parts.append(piece)
+        cur_pos += len(piece)
+        if cur_page is not None and cur_pos > seg_start:
+            spans.append((seg_start, cur_pos, cur_page))
+        cur_page = int(m.group(1))
+        seg_start = cur_pos
+        last_idx = m.end()
+        if last_idx < len(markdown) and markdown[last_idx] == "\n":
+            last_idx += 1
+
+    tail = markdown[last_idx:]
+    out_parts.append(tail)
+    cur_pos += len(tail)
+    if cur_page is not None and cur_pos > seg_start:
+        spans.append((seg_start, cur_pos, cur_page))
+
+    return "".join(out_parts), spans
+
+
+def _resolve_chunk_pages(
+    chunk_text: str,
+    clean_md: str,
+    page_spans: list[tuple[int, int, int]],
+    search_cursor: int,
+) -> tuple[list[int], int]:
+    """Resolve 1-based page numbers for *chunk_text* from *page_spans*."""
+    if not page_spans:
+        return [], search_cursor
+
+    probe_lines = [
+        ln.strip()
+        for ln in chunk_text.splitlines()
+        if ln.strip() and not _TABLE_SEP_LINE_RE.match(ln.strip())
+    ]
+    if not probe_lines:
+        return [], search_cursor
+
+    first_probe = probe_lines[0][:60]
+    last_probe = probe_lines[-1][:60]
+
+    start_pos = clean_md.find(first_probe, search_cursor)
+    if start_pos < 0:
+        start_pos = clean_md.find(first_probe)
+    if start_pos < 0:
+        # Fallback: match any span overlapping search_cursor
+        matched = [pg for s, e, pg in page_spans if s <= search_cursor <= e]
+        return sorted(set(matched)), search_cursor
+
+    end_pos = clean_md.find(last_probe, start_pos)
+    if end_pos < 0:
+        end_pos = start_pos + len(first_probe)
+    else:
+        end_pos += len(last_probe)
+
+    matched_pages = sorted({pg for s, e, pg in page_spans if max(s, start_pos) <= min(e, end_pos)})
+    return matched_pages, max(search_cursor, start_pos)
 
 
 def chunk_markdown(
@@ -379,11 +677,15 @@ def chunk_markdown(
     if not markdown:
         return
 
-    sections = _split_headings(markdown)
+    clean_md, page_spans = _extract_page_spans_and_strip_markers(markdown)
+    clean_md = _stitch_cross_page_tables(clean_md)
+
+    sections = _split_headings(clean_md)
     if not sections:
-        sections = [([], markdown)]
+        sections = [([], clean_md)]
 
     chunk_idx = 0
+    search_cursor = 0
     for trail, body in sections:
         # Light cleaning inside the section (preserve newlines for tables)
         body = clean_text(body, preserve_newlines=True)
@@ -400,12 +702,14 @@ def chunk_markdown(
         for text in chunk_texts:
             if len(text) < eff_min:
                 continue
+            pages, search_cursor = _resolve_chunk_pages(text, clean_md, page_spans, search_cursor)
             yield Chunk(
                 text=text,
                 doc_id=doc_id,
                 source=source,
                 chunk_id=chunk_idx,
                 heading_trail=list(trail),
+                page_numbers=pages,
             )
             chunk_idx += 1
 

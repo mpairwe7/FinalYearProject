@@ -55,21 +55,41 @@ class StructuredTable:
     warnings: list[str] = field(default_factory=list)
 
     def to_markdown(self) -> str:
-        """Render table as GitHub-flavored Markdown table."""
+        """Render table as GitHub-flavored Markdown table with sanitized cells and pipe escaping (G448, G449)."""
         if not self.matrix:
             return ""
+        from app.docling_intelligence import (
+            propagate_merged_table_headers,
+            sanitize_table_cell_text,
+        )
+
+        norm_matrix, _ = propagate_merged_table_headers(self.matrix)
+        if not norm_matrix:
+            return ""
         lines: list[str] = []
-        header = self.matrix[0]
-        cleaned_header = [re.sub(r"\s+", " ", str(c or "")).strip() for c in header]
+        header = norm_matrix[0]
+        cleaned_header = [sanitize_table_cell_text(c) for c in header]
         lines.append("| " + " | ".join(cleaned_header) + " |")
         lines.append("| " + " | ".join(["---"] * len(header)) + " |")
-        for row in self.matrix[1:]:
-            cleaned_row = [re.sub(r"\s+", " ", str(c or "")).strip() for c in row]
+        for row in norm_matrix[1:]:
+            cleaned_row = [sanitize_table_cell_text(c) for c in row]
             # Ensure row length matches header
             if len(cleaned_row) < len(header):
                 cleaned_row.extend([""] * (len(header) - len(cleaned_row)))
             lines.append("| " + " | ".join(cleaned_row[:len(header)]) + " |")
         return "\n".join(lines)
+
+    def to_triplets(self, *, max_triplets: int = 80) -> list[str]:
+        """Serialize table into Docling TripletTableSerializer semantic triplets (G448)."""
+        if not self.matrix:
+            return []
+        from app.docling_intelligence import serialize_table_to_triplets
+
+        return serialize_table_to_triplets(
+            f"Page {self.page_number} {self.table_id}",
+            self.matrix,
+            max_triplets=max_triplets,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -88,12 +108,20 @@ def detect_pdf_vector_table_grid(
     try:
         import pdfplumber
 
+        from app.docling_intelligence import propagate_merged_table_headers
+
         with pdfplumber.open(io.BytesIO(pdf_data)) as pdf:
             if page_index < 0 or page_index >= len(pdf.pages):
                 return []
             page = pdf.pages[page_index]
 
-            # Detect explicit vector tables
+            # Detect explicit vector tables and optional bounding-box geometry
+            found_tables: list[Any] = []
+            try:
+                found_tables = page.find_tables() or []
+            except Exception:
+                found_tables = []
+
             raw_tables = page.extract_tables() or []
             if not raw_tables:
                 return []
@@ -105,27 +133,46 @@ def detect_pdf_vector_table_grid(
             for idx, raw_t in enumerate(raw_tables):
                 if not raw_t or len(raw_t) < 1:
                     continue
-                num_rows = len(raw_t)
-                num_cols = max(len(r) for r in raw_t)
-                matrix: list[list[str]] = []
+                norm_matrix, spans = propagate_merged_table_headers(raw_t)
+                if not norm_matrix:
+                    continue
+                span_map = {(r_i, c_i): (rs, cs) for r_i, c_i, rs, cs in spans}
+                num_rows = len(norm_matrix)
+                num_cols = max(len(r) for r in norm_matrix)
                 cells: list[TableCell] = []
 
-                for r_i, row in enumerate(raw_t):
-                    row_vals: list[str] = []
-                    for c_i, cell_val in enumerate(row):
-                        text_val = str(cell_val or "").strip()
-                        row_vals.append(text_val)
+                # Recover table or cell bbox from pdfplumber find_tables() when available (G448)
+                ft_obj = found_tables[idx] if idx < len(found_tables) else None
+                table_bbox = [0.0, 0.0, 0.0, 0.0]
+                ft_cells: list[Any] = []
+                if ft_obj is not None:
+                    raw_tb = getattr(ft_obj, "bbox", None)
+                    if isinstance(raw_tb, (list, tuple)) and len(raw_tb) >= 4:
+                        table_bbox = [float(raw_tb[0]), float(raw_tb[1]), float(raw_tb[2]), float(raw_tb[3])]
+                    ft_cells = list(getattr(ft_obj, "cells", None) or [])
+
+                cell_seq = 0
+                for r_i, row in enumerate(norm_matrix):
+                    for c_i, text_val in enumerate(row):
+                        rs, cs = span_map.get((r_i, c_i), (1, 1))
+                        c_bbox = list(table_bbox)
+                        if cell_seq < len(ft_cells):
+                            cand_b = ft_cells[cell_seq]
+                            if isinstance(cand_b, (list, tuple)) and len(cand_b) >= 4:
+                                c_bbox = [float(cand_b[0]), float(cand_b[1]), float(cand_b[2]), float(cand_b[3])]
+                        cell_seq += 1
                         cells.append(
                             TableCell(
                                 row_idx=r_i,
                                 col_idx=c_i,
                                 text=text_val,
-                                bbox=[0.0, 0.0, 0.0, 0.0],
+                                bbox=c_bbox,
+                                row_span=rs,
+                                col_span=cs,
                                 confidence=confidence,
                                 bbox_source="pdf_vector",
                             )
                         )
-                    matrix.append(row_vals)
 
                 status = "ok" if confidence >= min_confidence else "needs_review"
                 action = "auto_use" if status == "ok" else "use_with_warning"
@@ -136,7 +183,7 @@ def detect_pdf_vector_table_grid(
                         rows=num_rows,
                         cols=num_cols,
                         cells=cells,
-                        matrix=matrix,
+                        matrix=norm_matrix,
                         source="pdf_vector",
                         status=status,
                         downstream_action=action,

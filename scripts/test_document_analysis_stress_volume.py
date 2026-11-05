@@ -36,7 +36,7 @@ os.environ["ANALYTICS_BACKEND"] = "sqlite"
 os.environ["OTEL_ENABLED"] = "false"
 os.environ["DOCUMENT_MAX_BYTES"] = str(40 * 1024 * 1024)
 
-import fitz  # PyMuPDF
+import pymupdf as fitz  # PyMuPDF
 from docx import Document
 from openpyxl import Workbook
 

@@ -251,6 +251,34 @@ def _sanitize_page_text(raw_text: str) -> str:
     return re.sub(r"[ \t]+", " ", cleaned).strip()
 
 
+def _finalize_extracted_pdf_pages(raw_bytes: bytes, raw_pages: list[tuple[int, str]]) -> list[tuple[int, str]]:
+    """Strip ContentLayer.FURNITURE and enrich pages with structured Markdown tables (G443, G447)."""
+    if not raw_pages:
+        return []
+    from .docling_intelligence import strip_document_furniture
+    from .vision.table_structuring import structure_document_tables
+
+    page_nums = [p_num for p_num, _ in raw_pages]
+    cleaned_texts, _ = strip_document_furniture([txt for _, txt in raw_pages])
+    final_pages: list[tuple[int, str]] = []
+
+    for p_num, cleaned_txt in zip(page_nums, cleaned_texts, strict=False):
+        combined = cleaned_txt
+        try:
+            tables = structure_document_tables(raw_bytes, raw_text=cleaned_txt, page_number=p_num)
+            md_tables = [t.to_markdown() for t in tables if t.matrix and len(t.matrix) > 1 and t.source == "pdf_vector"]
+            if md_tables:
+                table_block = "\n\n".join(m for m in md_tables if m)
+                if table_block and table_block not in combined:
+                    combined = f"{combined}\n\n{table_block}".strip()
+        except Exception:
+            logger.debug("Sandbox table structuring skipped on page %d", p_num, exc_info=True)
+        sanitized = _sanitize_page_text(combined)
+        if sanitized:
+            final_pages.append((p_num, sanitized))
+    return final_pages
+
+
 def _extract_pdf_pages(raw_bytes: bytes) -> list[tuple[int, str]]:
     """Inspect PDF bytes with ``pdf_guards`` and extract sanitized text per page."""
     inspect_pdf_bytes(raw_bytes, limits=QUERY_PDF_LIMITS)
@@ -272,17 +300,17 @@ def _extract_pdf_pages(raw_bytes: bytes) -> list[tuple[int, str]]:
                         textpage.close()
                 finally:
                     page.close()
-                sanitized = _sanitize_page_text(txt)
-                if sanitized:
-                    pages.append((idx + 1, sanitized))
-            if pages:
-                return pages
+                if txt and txt.strip():
+                    pages.append((idx + 1, txt))
+            final_pages = _finalize_extracted_pdf_pages(raw_bytes, pages)
+            if final_pages:
+                return final_pages
         finally:
             pdf.close()
     except PdfRejected:
         raise
     except Exception:
-        logger.debug("pypdfium2 extraction failed; trying pdfplumber/fitz fallback", exc_info=True)
+        logger.debug("pypdfium2 extraction failed; trying pdfplumber/pymupdf fallback", exc_info=True)
 
     # 2. Secondary: pdfplumber
     pages = []
@@ -292,28 +320,27 @@ def _extract_pdf_pages(raw_bytes: bytes) -> list[tuple[int, str]]:
         with pdfplumber.open(io.BytesIO(raw_bytes)) as pdf_plumb:
             for idx, page in enumerate(pdf_plumb.pages):
                 txt = page.extract_text() or ""
-                sanitized = _sanitize_page_text(txt)
-                if sanitized:
-                    pages.append((idx + 1, sanitized))
-        if pages:
-            return pages
+                if txt and txt.strip():
+                    pages.append((idx + 1, txt))
+        final_pages = _finalize_extracted_pdf_pages(raw_bytes, pages)
+        if final_pages:
+            return final_pages
     except PdfRejected:
         raise
     except Exception:
         logger.debug("pdfplumber extraction failed; trying PyMuPDF fallback", exc_info=True)
 
-    # 3. Tertiary: PyMuPDF (fitz)
+    # 3. Tertiary: PyMuPDF (pymupdf)
     pages = []
     try:
-        import fitz  # type: ignore[import-untyped]
+        import pymupdf  # type: ignore[import-untyped]
 
-        with fitz.open(stream=raw_bytes, filetype="pdf") as doc:
+        with pymupdf.open(stream=raw_bytes, filetype="pdf") as doc:
             for idx in range(len(doc)):
                 txt = doc[idx].get_text("text") or ""
-                sanitized = _sanitize_page_text(txt)
-                if sanitized:
-                    pages.append((idx + 1, sanitized))
-        return pages
+                if txt and txt.strip():
+                    pages.append((idx + 1, txt))
+        return _finalize_extracted_pdf_pages(raw_bytes, pages)
     except PdfRejected:
         raise
     except Exception as exc:
@@ -373,6 +400,111 @@ def _extract_xlsx_pages(raw_bytes: bytes) -> list[tuple[int, str]]:
     return pages
 
 
+def _split_page_text_structure_aware(page_text: str, *, target_chars: int = _CHUNK_TARGET_CHARS) -> list[str]:
+    """Split a page into structure-aware chunks without slicing mid-word, mid-number, or mid-table row (G447)."""
+    if len(page_text) <= target_chars:
+        return [page_text] if page_text.strip() else []
+
+    from .docling_intelligence import split_markdown_table_preserving_headers
+
+    # Separate paragraphs and Markdown table blocks
+    blocks: list[tuple[str, bool]] = []
+    cur_lines: list[str] = []
+    in_table = False
+
+    for ln in page_text.splitlines():
+        is_tbl = bool(re.match(r"^\s*\|.+\|\s*$", ln))
+        if is_tbl:
+            if not in_table and cur_lines:
+                blocks.append(("\n".join(cur_lines).strip(), False))
+                cur_lines = []
+            in_table = True
+            cur_lines.append(ln)
+        else:
+            if in_table:
+                blocks.append(("\n".join(cur_lines).strip(), True))
+                cur_lines = []
+                in_table = False
+            if ln.strip():
+                cur_lines.append(ln)
+            elif cur_lines:
+                blocks.append(("\n".join(cur_lines).strip(), False))
+                cur_lines = []
+    if cur_lines:
+        blocks.append(("\n".join(cur_lines).strip(), in_table))
+
+    out_chunks: list[str] = []
+    buf: list[str] = []
+    buf_len = 0
+
+    def _flush_buf() -> None:
+        nonlocal buf, buf_len
+        if buf:
+            out_chunks.append("\n\n".join(buf).strip())
+            buf, buf_len = [], 0
+
+    for blk, is_tbl in blocks:
+        if not blk:
+            continue
+        if is_tbl:
+            if len(blk) > target_chars:
+                _flush_buf()
+                out_chunks.extend(
+                    split_markdown_table_preserving_headers(
+                        blk, target_chars=target_chars, hard_max_chars=target_chars
+                    )
+                )
+                continue
+            if buf_len + len(blk) + 2 > target_chars and buf:
+                _flush_buf()
+            buf.append(blk)
+            buf_len += len(blk) + 2
+            continue
+
+        if len(blk) > target_chars:
+            _flush_buf()
+            # Split on sentence or word boundaries — never mid-word or mid-number
+            sentences = re.split(r"(?<=[.!?])\s+|\n+", blk)
+            s_buf: list[str] = []
+            s_len = 0
+            for sent in sentences:
+                sent = sent.strip()
+                if not sent:
+                    continue
+                if len(sent) > target_chars:
+                    if s_buf:
+                        out_chunks.append(" ".join(s_buf).strip())
+                        s_buf, s_len = [], 0
+                    words = sent.split()
+                    w_buf: list[str] = []
+                    w_len = 0
+                    for w in words:
+                        if w_buf and w_len + len(w) + 1 > target_chars:
+                            out_chunks.append(" ".join(w_buf).strip())
+                            w_buf, w_len = [], 0
+                        w_buf.append(w)
+                        w_len += len(w) + 1
+                    if w_buf:
+                        out_chunks.append(" ".join(w_buf).strip())
+                    continue
+                if s_buf and s_len + len(sent) + 1 > target_chars:
+                    out_chunks.append(" ".join(s_buf).strip())
+                    s_buf, s_len = [], 0
+                s_buf.append(sent)
+                s_len += len(sent) + 1
+            if s_buf:
+                out_chunks.append(" ".join(s_buf).strip())
+            continue
+
+        if buf_len + len(blk) + 2 > target_chars and buf:
+            _flush_buf()
+        buf.append(blk)
+        buf_len += len(blk) + 2
+
+    _flush_buf()
+    return [c for c in out_chunks if c]
+
+
 def _chunk_pages(
     pages: list[tuple[int, str]],
     *,
@@ -381,30 +513,13 @@ def _chunk_pages(
     fiscal_year: str,
     doc_type: str = "pdf",
 ) -> list[dict[str, Any]]:
-    """Split extracted pages into overlapping retrieval chunks with full provenance."""
+    """Split extracted pages into structure-aware retrieval chunks with full provenance (G447)."""
     chunks: list[dict[str, Any]] = []
     for page_num, page_text in pages:
         heading_match = re.search(r"^(?:SECTION|PART|CHAPTER|TABLE|\d+\.\d*)\s+[^\n]{3,90}", page_text, re.I | re.M)
         section = heading_match.group(0).strip() if heading_match else f"Page {page_num}"
 
-        if len(page_text) <= _CHUNK_TARGET_CHARS:
-            chunks.append(
-                {
-                    "text": page_text,
-                    "source": filename,
-                    "source_url": url,
-                    "fiscal_year": fiscal_year,
-                    "doc_type": doc_type,
-                    "section": section,
-                    "page": page_num,
-                }
-            )
-            continue
-
-        start = 0
-        step = max(200, _CHUNK_TARGET_CHARS - _CHUNK_OVERLAP_CHARS)
-        while start < len(page_text):
-            slice_text = page_text[start : start + _CHUNK_TARGET_CHARS].strip()
+        for slice_text in _split_page_text_structure_aware(page_text, target_chars=_CHUNK_TARGET_CHARS):
             if slice_text:
                 chunks.append(
                     {
@@ -417,9 +532,6 @@ def _chunk_pages(
                         "page": page_num,
                     }
                 )
-            if start + _CHUNK_TARGET_CHARS >= len(page_text):
-                break
-            start += step
     return chunks
 
 

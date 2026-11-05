@@ -19,7 +19,7 @@ from __future__ import annotations
 import io
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -78,11 +78,11 @@ def extract_page_vector_glyphs(
     glyphs: list[VectorGlyph] = []
     scale = dpi / 72.0
 
-    # 1. Try PyMuPDF (fitz) for word-level bounding boxes
+    # 1. Try PyMuPDF (pymupdf) for word-level bounding boxes
     try:
-        import fitz
+        import pymupdf
 
-        with fitz.open(stream=pdf_data, filetype="pdf") as doc:
+        with pymupdf.open(stream=pdf_data, filetype="pdf") as doc:
             if 0 <= page_index < len(doc):
                 page = doc[page_index]
                 words = page.get_text("words") or []
@@ -261,4 +261,40 @@ def fuse_page_glyphs_and_ocr(
                 )
             )
 
-    return fused_tokens
+    return sort_tokens_reading_order(fused_tokens)
+
+
+def sort_tokens_reading_order(tokens: list[FusedTextToken]) -> list[FusedTextToken]:
+    """Sort fused vector and OCR tokens into 2D multi-column reading order (G442)."""
+    if len(tokens) <= 1:
+        return list(tokens)
+    try:
+        from app.docling_intelligence import sort_spatial_reading_order
+
+        return sort_spatial_reading_order(tokens)
+    except Exception:
+        return list(tokens)
+
+
+def summarize_fusion_discrepancies(tokens: list[FusedTextToken]) -> list[dict[str, Any]]:
+    """Return overlapping vector-vs-OCR tokens where ``consistent is False`` (G449, G450).
+
+    Detects PDF text-layer shadow / font-remapping discrepancies where the embedded
+    PDF text stream disagrees with the visual OCR rendering on the same bounding box.
+    """
+    discrepancies: list[dict[str, Any]] = []
+    for tok in tokens:
+        if tok.consistent is False and tok.alt_text:
+            vec_digits = re.sub(r"\D+", "", tok.text)
+            ocr_digits = re.sub(r"\D+", "", tok.alt_text)
+            is_numeric_mismatch = bool((vec_digits or ocr_digits) and vec_digits != ocr_digits)
+            discrepancies.append(
+                {
+                    "page": tok.page,
+                    "vector_text": tok.text[:120],
+                    "ocr_text": tok.alt_text[:120],
+                    "bbox": list(tok.bbox[:4]) if len(tok.bbox) >= 4 else [0.0, 0.0, 0.0, 0.0],
+                    "numeric_mismatch": is_numeric_mismatch,
+                }
+            )
+    return discrepancies

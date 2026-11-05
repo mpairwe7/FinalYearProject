@@ -129,12 +129,12 @@ class PdfInspectOpenTests(unittest.TestCase):
         self.assertTrue(any("dimension" in item for item in inspection.findings))
 
 
-@unittest.skipUnless(_has("pypdfium2") or _has("fitz"), "PDF library not installed")
+@unittest.skipUnless(_has("pypdfium2") or _has("pymupdf"), "PDF library not installed")
 class PdfBytesGuardTests(unittest.TestCase):
     def test_clean_text_pdf_is_accepted(self) -> None:
-        import fitz
+        import pymupdf
 
-        doc = fitz.open()
+        doc = pymupdf.open()
         page = doc.new_page()
         page.insert_text((72, 72), "Notice of Assessment")
         data = doc.tobytes()
@@ -145,9 +145,9 @@ class PdfBytesGuardTests(unittest.TestCase):
         self.assertGreaterEqual(inspection.page_count, 1)
 
     def test_polyglot_html_prefix_is_rejected(self) -> None:
-        import fitz
+        import pymupdf
 
-        doc = fitz.open()
+        doc = pymupdf.open()
         doc.new_page()
         data = b"<html>x</html>\n" + doc.tobytes()
         doc.close()
@@ -163,13 +163,13 @@ class PdfBytesGuardTests(unittest.TestCase):
         self.assertIn("active or embedded", str(ctx.exception).lower())
 
     def test_encrypted_pdf_is_rejected(self) -> None:
-        import fitz
+        import pymupdf
 
-        doc = fitz.open()
+        doc = pymupdf.open()
         doc.new_page()
         try:
             data = doc.tobytes(
-                encryption=fitz.PDF_ENCRYPT_AES_256,
+                encryption=pymupdf.PDF_ENCRYPT_AES_256,
                 user_pw="secret",
                 owner_pw="owner-secret",
             )

@@ -269,6 +269,7 @@ class TableSummary:
     status: str = "ok"
     downstream_action: str = "auto_use"
     warnings: list[str] = field(default_factory=list)
+    triplets: list[str] = field(default_factory=list)
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -281,6 +282,7 @@ class TableSummary:
             "status": self.status,
             "downstream_action": self.downstream_action,
             "warnings": list(self.warnings),
+            "triplets": list(self.triplets),
         }
 
 
@@ -445,13 +447,24 @@ class DocumentRecord:
                 lines.append(f"Tax Reconciliation ({recon_status}): {recon_notes[0]}")
         for table in self.tables[:3]:
             headers = ", ".join(table.headers[:8]) or "no headers"
+            tot_bits = (
+                " | totals: " + ", ".join(f"{k}={v:,.2f}" for k, v in list(table.numeric_totals.items())[:4])
+                if table.numeric_totals
+                else ""
+            )
             lines.append(
                 f"Table '{table.name}': {table.rows} rows × {table.cols} cols "
-                f"(columns: {headers})"
+                f"(columns: {headers}{tot_bits})"
             )
+            for trip in (table.triplets or [])[:4]:
+                lines.append(f"  - {trip}")
         header = escape_untrusted_document_markers("\n".join(lines))
         remaining = max(200, char_budget - len(header) - 80)
-        cleaned_text = re.sub(r"(?:DOMESTIC TAX LAWS OF UGANDA\s+)?\d+\s*\|\s*P\s*a\s*g\s*e", "", self.text)
+        from .docling_intelligence import strip_document_furniture
+
+        cleaned_pages, _ = strip_document_furniture([self.text])
+        cleaned_text = cleaned_pages[0] if cleaned_pages else self.text
+        cleaned_text = re.sub(r"(?:DOMESTIC TAX LAWS OF UGANDA\s+)?\d+\s*\|\s*P\s*a\s*g\s*e", "", cleaned_text)
         cleaned_text = escape_untrusted_document_markers(re.sub(r"\n{3,}", "\n\n", cleaned_text).strip())
         body = cleaned_text[:remaining]
         if not body:
@@ -520,17 +533,21 @@ def _summarize_table(name: str, rows: list[list[Any]]) -> tuple[TableSummary, st
             header = headers[col].strip() or f"column_{col + 1}"
             numeric_totals[header] = round(sum(parsed), 2)
 
+    from .docling_intelligence import serialize_table_to_triplets
+
+    triplets = serialize_table_to_triplets(safe_name, rows, max_triplets=30)
     summary = TableSummary(
         name=safe_name,
         rows=len(data_rows),
         cols=n_cols,
         headers=[h for h in headers if h.strip()][:_MAX_TABLE_COLS],
         numeric_totals=numeric_totals,
+        triplets=triplets,
     )
 
     text_lines = [f"[Table: {safe_name}]"]
     for row in rows[: _MAX_TEXT_ROWS_PER_TABLE + 1]:
-        cells = ["" if c is None else str(c).strip() for c in row]
+        cells = [_sanitize_table_label(c) for c in row]
         if any(cells):
             text_lines.append(" | ".join(cells))
     if len(rows) > _MAX_TEXT_ROWS_PER_TABLE + 1:
@@ -601,12 +618,12 @@ def _extract_pdf(data: bytes) -> _Extraction:
         except Exception as plumber_err:
             logger.debug("pdfplumber parse failed, trying PyMuPDF fallback: %s", plumber_err)
 
-    # 3. Defensive fallback: PyMuPDF (fitz)
+    # 3. Defensive fallback: PyMuPDF (pymupdf)
     if not doc_parsed:
         try:
-            import fitz  # type: ignore[import-untyped]
+            import pymupdf  # type: ignore[import-untyped]
 
-            doc = fitz.open(stream=data, filetype="pdf")
+            doc = pymupdf.open(stream=data, filetype="pdf")
             try:
                 page_count = doc.page_count
                 out.meta["page_count"] = page_count
@@ -624,6 +641,11 @@ def _extract_pdf(data: bytes) -> _Extraction:
             out.warnings.append("The PDF could not be parsed (corrupt or password-protected).")
             return out
 
+    from .docling_intelligence import strip_document_furniture
+
+    parts, furniture_removed = strip_document_furniture(parts)
+    if furniture_removed:
+        out.meta["furniture_removed_count"] = furniture_removed
     text = "\n".join(parts).strip()
     out.meta["extraction_method"] = "pdf_text"
 
@@ -650,12 +672,17 @@ def _extract_pdf(data: bytes) -> _Extraction:
                     "little or no text could be extracted."
                 )
     elif _ENABLE_SPATIAL_OCR and page_count > 0:
-        from app.vision.glyph_fusion import extract_page_vector_glyphs, fuse_page_glyphs_and_ocr
+        from app.vision.glyph_fusion import (
+            extract_page_vector_glyphs,
+            fuse_page_glyphs_and_ocr,
+            summarize_fusion_discrepancies,
+        )
 
         ocr_text, ocr_meta, ocr_warnings = _ocr_pdf_pages(data, page_count=page_count)
         raw_evidence = ocr_meta.get("ocr_evidence", [])
 
         page_sections: list[str] = []
+        all_discrepancies: list[dict[str, Any]] = []
         for p_idx in range(min(page_count, _MAX_PDF_PAGES)):
             page_glyphs = extract_page_vector_glyphs(data, p_idx)
             page_ocr_items = [
@@ -669,8 +696,16 @@ def _extract_pdf(data: bytes) -> _Extraction:
                 if ev.get("page") == p_idx + 1
             ]
             fused_tokens = fuse_page_glyphs_and_ocr(page_glyphs, page_ocr_items, page_number=p_idx + 1)
+            all_discrepancies.extend(summarize_fusion_discrepancies(fused_tokens))
             if fused_tokens:
                 page_sections.append(" ".join(t.text for t in fused_tokens))
+
+        if all_discrepancies:
+            out.meta["glyph_ocr_discrepancies"] = all_discrepancies[:25]
+            out.warnings.append(
+                "Visual OCR text disagrees with the embedded PDF text layer — "
+                "possible font encoding issue or document tampering."
+            )
 
         if page_sections:
             text = "\n\n".join(page_sections).strip()
@@ -685,43 +720,61 @@ def _extract_pdf(data: bytes) -> _Extraction:
             out.meta["extraction_method"] = "pdf_spatial_fusion"
             out.warnings.extend(ocr_warnings)
 
-    # Extract structured tables deterministically across pages
+    # Extract structured tables deterministically across pages (including OCR fallback on scanned PDFs, G448)
     try:
         from app.vision.table_structuring import structure_document_tables
 
+        raw_ocr_ev = out.meta.get("ocr_evidence") or []
+        table_text_blocks: list[str] = []
         for p_idx in range(min(page_count, _MAX_PDF_PAGES)):
-            page_text_i = parts[p_idx] if p_idx < len(parts) else ""
+            page_text_i = parts[p_idx] if p_idx < len(parts) and parts[p_idx].strip() else ""
+            page_ocr_ev = [
+                ev for ev in raw_ocr_ev if isinstance(ev, dict) and ev.get("page") == p_idx + 1
+            ]
+            if not page_text_i and page_ocr_ev:
+                page_text_i = "\n".join(str(ev.get("text", "")) for ev in page_ocr_ev if ev.get("text"))
             t_candidates = structure_document_tables(
-                data, raw_text=page_text_i, page_number=p_idx + 1
+                data,
+                raw_text=page_text_i,
+                page_number=p_idx + 1,
+                ocr_items=page_ocr_ev or None,
             )
             for st in t_candidates:
                 if st.matrix and len(st.matrix) > 1:
-                    summary, _ = _summarize_table(f"Page {p_idx + 1} {st.table_id}", st.matrix)
+                    summary, table_txt = _summarize_table(f"Page {p_idx + 1} {st.table_id}", st.matrix)
                     summary.source = st.source
                     summary.status = st.status
                     summary.downstream_action = st.downstream_action
                     summary.warnings = list(st.warnings)
                     out.tables.append(summary)
+                    if table_txt and f"[Table: {summary.name}]" not in text:
+                        table_text_blocks.append(table_txt)
+        if table_text_blocks and not text:
+            text = "\n\n".join(table_text_blocks)
     except Exception:
         pass
 
-    # Collect bounded vector glyph evidence on digital PDFs so _field_evidence
-    # attaches page numbers and bounding boxes even when OCR was not required.
+    # Collect bounded vector glyph evidence across all processed PDF pages (up to _MAX_PDF_PAGES, G445)
+    # so _field_evidence attaches page numbers and bounding boxes even on pages 6+.
     if not out.meta.get("ocr_evidence") and page_count > 0:
         try:
             from app.vision.glyph_fusion import extract_page_vector_glyphs
 
             vec_evidence: list[dict[str, Any]] = []
-            for p_idx in range(min(page_count, 5)):
+            for p_idx in range(min(page_count, _MAX_PDF_PAGES)):
                 glyphs = extract_page_vector_glyphs(data, p_idx)
                 for g in glyphs:
                     if len(vec_evidence) >= _MAX_OCR_EVIDENCE_REGIONS:
                         break
+                    g_txt = str(g.text)[:200]
+                    # On pages > 5, prioritize tokens containing digits/identifiers so the cap isn't exhausted by prose
+                    if p_idx >= 5 and not any(ch.isdigit() for ch in g_txt):
+                        continue
                     b = g.bbox if len(g.bbox) >= 4 else [0.0, 0.0, 0.0, 0.0]
                     vec_evidence.append(
                         {
                             "page": p_idx + 1,
-                            "text": str(g.text)[:200],
+                            "text": g_txt,
                             "box": [
                                 [round(b[0], 1), round(b[1], 1)],
                                 [round(b[2], 1), round(b[1], 1)],
@@ -852,11 +905,11 @@ def _ocr_pdf_pages(doc_or_data: Any, *, page_count: int | None = None) -> tuple[
 
     # 2. PyMuPDF fallback
     try:
-        import fitz  # type: ignore[import-untyped]
         import numpy as np
+        import pymupdf  # type: ignore[import-untyped]
         from PIL import Image  # type: ignore[import-untyped]
 
-        doc = doc_or_data if hasattr(doc_or_data, "page_count") else fitz.open(stream=raw_data, filetype="pdf")
+        doc = doc_or_data if hasattr(doc_or_data, "page_count") else pymupdf.open(stream=raw_data, filetype="pdf")
         total_pages = doc.page_count
         pages_to_process = min(total_pages, max(1, min(_OCR_PDF_PAGES, _MAX_OCR_PDF_PAGES)))
 
@@ -873,7 +926,7 @@ def _ocr_pdf_pages(doc_or_data: Any, *, page_count: int | None = None) -> tuple[
                 if page_area * scale * scale > _MAX_PDF_RENDER_PIXELS:
                     scale = (_MAX_PDF_RENDER_PIXELS / page_area) ** 0.5
                     warnings.append(f"OCR page {i + 1} was downscaled to stay within the pixel limit.")
-                pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+                pix = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
                 if pix.width * pix.height > _MAX_PDF_RENDER_PIXELS:
                     warnings.append(f"OCR skipped page {i + 1}: rendered image exceeds the pixel limit.")
                     continue
@@ -2761,6 +2814,19 @@ def resolve_attachments(
     return records
 
 
+def _attachment_page_locator(record: DocumentRecord) -> str:
+    """Derive a compact 1-based page locator from a DocumentRecord's metadata (G445)."""
+    pc = int(record.meta.get("page_count") or 0)
+    if pc == 1:
+        return "1"
+    if pc > 1:
+        return f"1-{pc}"
+    ocr_pages = [int(p) for p in (record.meta.get("ocr_page_numbers") or []) if isinstance(p, int) and p > 0]
+    if ocr_pages:
+        return str(ocr_pages[0]) if len(ocr_pages) == 1 else f"{min(ocr_pages)}-{max(ocr_pages)}"
+    return ""
+
+
 def attachment_passages(records: list[DocumentRecord]) -> list[dict[str, Any]]:
     """Build retrieval-hit dicts for attached documents.
 
@@ -2781,7 +2847,7 @@ def attachment_passages(records: list[DocumentRecord]) -> list[dict[str, Any]]:
             "question": "",
             "source": f"attached:{record.filename}",
             "chunk_id": record.doc_id,
-            "page": "",
+            "page": _attachment_page_locator(record),
             "section": record.doc_type,
             "doc_type": "attachment",
             "score_rrf": 1.0,

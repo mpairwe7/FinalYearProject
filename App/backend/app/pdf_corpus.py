@@ -551,7 +551,8 @@ def _chunk_pdf_records(pdf_path: Path, source_sha256: str) -> Iterator[dict[str,
         # ``chunk_id`` and the ingest-side re-derivation both key on them.
         chunk.chunk_id = kept
         kept += 1
-        yield {
+        page_locator = _clean(getattr(chunk, "page_range", "")) or _clean(getattr(chunk, "page", ""))
+        rec_out: dict[str, Any] = {
             "schema_version": PDF_JSONL_SCHEMA_VERSION,
             "record_type": "pdf_chunk",
             "chunk_id": _stable_id(source, chunk.chunk_id, text),
@@ -566,6 +567,9 @@ def _chunk_pdf_records(pdf_path: Path, source_sha256: str) -> Iterator[dict[str,
             "chunk_index": int(chunk.chunk_id),
             "char_count": len(text),
         }
+        if page_locator:
+            rec_out["page"] = page_locator
+        yield rec_out
 
 
 def export_pdf_chunks_to_jsonl(
@@ -887,10 +891,9 @@ def ingest_pdf_jsonls(pdf_dir: Path, jsonl_dir: Path) -> list[dict[str, Any]]:
                     "embed_text": f"{prefix}\n\n{text}" if prefix else text,
                     "source": pdf_path.name,
                     "chunk_id": chunk_id,
-                    "page": "",
-                    # Section-level citation locator. PDF page numbers are lost
-                    # by whole-document markdown extraction, so the heading
-                    # trail is the addressable location.
+                    "page": _clean(record.get("page")),
+                    # Section-level citation locator; page is preserved when
+                    # page markers were recorded during PDF markdown extraction (G444).
                     "section": " > ".join(heading_trail),
                     "doc_type": "pdf_chunk",
                     "question": "",

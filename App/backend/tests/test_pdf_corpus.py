@@ -558,10 +558,10 @@ class StatutoryPortalHarvestTests(unittest.TestCase):
                 """,
             }
 
-            import fitz
+            import pymupdf
 
             def _make_clean_pdf(text: str) -> bytes:
-                doc = fitz.open()
+                doc = pymupdf.open()
                 page = doc.new_page()
                 page.insert_text((72, 72), text)
                 raw = doc.tobytes()
