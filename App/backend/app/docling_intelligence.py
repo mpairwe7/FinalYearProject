@@ -217,18 +217,18 @@ def strip_document_furniture(pages: list[str]) -> tuple[list[str], int]:
     if not pages:
         return [], 0
 
-    # Identify top/bottom margin signatures that repeat across >= 3 pages
+    # Identify top/bottom margin signatures that repeat across >= 3 multi-line pages
     top_sigs: Counter[str] = Counter()
     bottom_sigs: Counter[str] = Counter()
     if len(pages) >= 3:
         for page_text in pages:
             non_empty = [ln.strip() for ln in (page_text or "").splitlines() if ln.strip()]
-            if not non_empty:
+            if len(non_empty) < 2:
                 continue
             top_cand = non_empty[0]
             if not top_cand.startswith(("#", "|")) and len(top_cand) <= 100:
                 top_sigs[_normalize_margin_signature(top_cand)] += 1
-            if len(non_empty) > 1:
+            if len(non_empty) >= 3:
                 bot_cand = non_empty[-1]
                 if not bot_cand.startswith(("#", "|")) and len(bot_cand) <= 100:
                     bottom_sigs[_normalize_margin_signature(bot_cand)] += 1
@@ -247,8 +247,8 @@ def strip_document_furniture(pages: list[str]) -> tuple[list[str], int]:
             margin_indices.update(non_empty_indices[:2])
             margin_indices.update(non_empty_indices[-2:])
 
-        first_idx = non_empty_indices[0] if non_empty_indices else -1
-        last_idx = non_empty_indices[-1] if len(non_empty_indices) > 1 else -1
+        first_idx = non_empty_indices[0] if len(non_empty_indices) >= 2 else -1
+        last_idx = non_empty_indices[-1] if len(non_empty_indices) >= 3 else -1
 
         kept_lines: list[str] = []
         for idx, ln in enumerate(raw_lines):
