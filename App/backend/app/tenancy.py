@@ -39,6 +39,17 @@ def same_tenant(row_tenant: str | None, ctx: Any | None = None) -> bool:
     return (row_tenant or DEFAULT_TENANT) == active_tenant_id(ctx)
 
 
+def scoped_tenant_id(ctx: Any | None = None) -> str | None:
+    """Tenant a staff read must filter by, or None when multi-tenant is off.
+
+    Callers pass this to list and aggregate queries. A missing row tenant
+    is the default tenant, matching :func:`same_tenant` (G362, ADR-0028).
+    """
+    if not tenant_enabled():
+        return None
+    return active_tenant_id(ctx)
+
+
 def qdrant_payload_filter(tenant_id: str | None = None) -> dict[str, Any] | None:
     """Mandatory payload predicate when multi-tenant is on. Not a collection split."""
     if not tenant_enabled():

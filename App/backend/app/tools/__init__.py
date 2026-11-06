@@ -369,6 +369,11 @@ class ToolRegistry:
         gate_outcome, refusal = cls._autonomy_gate(tool, audit_context, t0)
         if refusal is not None:
             return refusal
+        # High-risk actions are recorded before they run. A crash between
+        # execution and the later audit row used to leave no trace (G366).
+        held = cls._write_ahead(tool, audit_context, gate_outcome)
+        if held is not None:
+            return held
 
         raised = False
         try:
@@ -449,6 +454,58 @@ class ToolRegistry:
             logger.warning("Tool audit record not written for %s", name, exc_info=True)
 
         return result
+
+    @classmethod
+    def _write_ahead(
+        cls,
+        tool: Tool,
+        audit_context: dict[str, Any],
+        gate_outcome: str,
+    ) -> dict[str, Any] | None:
+        """Append an intent row before a high-risk action, or refuse it.
+
+        ``escalate_to_human`` is not held back by a failed audit write
+        (ADR-0022). When the action audit is off there is no ledger to
+        write, and the action runs as it does today. Returns a refusal
+        when the write was required and failed.
+        """
+        from ..audit.governance_v3 import HUMAN_OVERSIGHT_ACTIONS
+
+        name = str(audit_context.get("tool_or_action_name") or "")
+        if tool.schema.risk not in ("high", "critical") or name in HUMAN_OVERSIGHT_ACTIONS:
+            return None
+        subject = str(audit_context.get("user_id") or "") or None
+        from ..flags import flags
+
+        if not (
+            flags.is_enabled("action_level_audit_v3", subject=subject)
+            or flags.is_enabled("verifiable_decision_receipts", subject=subject)
+        ):
+            return None
+        try:
+            from ..audit.governance_v3 import append_action_audit_v3
+
+            append_action_audit_v3(
+                **audit_context,
+                response_summary_redacted={"phase": "write_ahead"},
+                execution_status="intent",
+                execution_latency_ms=0.0,
+                decided_outcome=gate_outcome or "autonomous_executed",
+            )
+        except Exception:
+            logger.warning(
+                "Write-ahead record failed for %s; the action was not run",
+                name,
+                exc_info=True,
+            )
+            return {
+                "ok": False,
+                "autonomy_outcome": "failed_closed",
+                "error": (
+                    f"Action '{name}' was not run because it could not be recorded first."
+                ),
+            }
+        return None
 
     @classmethod
     def _autonomy_gate(

@@ -1,4 +1,4 @@
-"""QA & Audit Verification Suite for RAG Document Intelligence via Docling (November 2026, G441–G450).
+"""QA & Audit Verification Suite for RAG Document Intelligence via Docling (November 2026, G441–G457).
 
 Verifies all 5 phases of the high-stakes government RAG Document Intelligence remediation:
 - Phase 1 (G441, G442, G443): Docling unified IR (`DoclingDocumentIR`), duplicate table-text
@@ -27,6 +27,9 @@ from unittest import mock
 from app import documents
 from app import ephemeral_pdf_sandbox as sbx
 from app.docling_intelligence import (
+    _convert_via_docling_library,
+    _glyph_in_table_bboxes,
+    _vector_glyph_lines_with_paragraphs,
     convert_document_bytes,
     docling_intelligence_status,
     hybrid_chunk_markdown,
@@ -189,7 +192,10 @@ def test_convert_via_mocked_docling_library_and_hybrid_chunk_table_splitting() -
             ]
 
     class _FakeConverter:
-        def convert(self, _stream):
+        last_kwargs = None
+
+        def convert(self, _stream, **kwargs):
+            _FakeConverter.last_kwargs = kwargs
             return type("Res", (), {"document": _FakeDoclingDoc()})()
 
     fake_docling_base = type("Mod", (), {"DocumentStream": lambda **kw: kw})
@@ -206,11 +212,15 @@ def test_convert_via_mocked_docling_library_and_hybrid_chunk_table_splitting() -
     ):
         ir = convert_document_bytes(b"%PDF-1.7 fake", "Excise-Duty-Act.pdf")
         assert ir.backend_used == "docling"
+        assert _FakeConverter.last_kwargs == {"max_num_pages": 40, "max_file_size": 40 * 1024 * 1024}
         assert ir.furniture_removed_count == 1
         md = ir.export_to_markdown(include_furniture=False, include_page_markers=True)
         assert "THE UGANDA GAZETTE" not in md
         assert "Cement" in md
         assert "<!-- page:2 -->" in md
+        triplets = ir.export_tables_to_triplets()
+        assert len(triplets) == 2
+        assert any("Cement" in t and "UGX 500 per 50kg" in t for t in triplets)
 
     # Also test hybrid_chunk_markdown splitting an oversized table while preserving headers and page provenance
     big_table_md = (
@@ -519,6 +529,135 @@ def test_vector_vs_ocr_shadow_discrepancy_triggers_hitl_urgent_audit() -> None:
     assert assessment.priority == "high"
     assert assessment.suggested_action == "urgent_audit"
     assert any("Vector-vs-OCR text layer discrepancy" in r for r in assessment.reasons)
+
+
+def test_escaped_pipes_in_cells_do_not_break_column_counting_or_stitching() -> None:
+    """Verify escaped pipes `\\|` inside cells do not break column counts or cross-page stitching (G451, G452)."""
+    md = (
+        "<!-- page:1 -->\n"
+        "# Schedule — Customs & Excise Rates\n\n"
+        "| Item Code | Description | Rate |\n"
+        "| --- | --- | --- |\n"
+        "| 2203.00 | Beer \\| Malt beverages | 60% |\n"
+        "\n---\n"
+        "<!-- page:2 -->\n"
+        "| Item Code | Description | Rate |\n"
+        "| --- | --- | --- |\n"
+        "| 2204.10 | Wine \\| Sparkling wine | 80% |\n\n"
+        + ("Trailing statutory note on page 2 after the stitched table is over two hundred characters long. " * 4)
+    )
+    chunks = list(
+        chunk_markdown(
+            md,
+            doc_id="Excise-Schedule",
+            source="Excise-Schedule.pdf",
+            target_chars=1500,
+            hard_max_chars=3000,
+            min_chars=40,
+        )
+    )
+    assert len(chunks) >= 1
+    # Stitched table spans pages 1 and 2 -> page_numbers == [1, 2], page_range == "1-2"
+    assert chunks[0].page_numbers == [1, 2]
+    assert chunks[0].page_range == "1-2"
+    assert "Beer \\| Malt beverages" in chunks[0].text
+    assert "Wine \\| Sparkling wine" in chunks[0].text
+
+    # Also verify hybrid_chunk_markdown preserves page="1-2" on stitched cross-page tables
+    h_chunks = hybrid_chunk_markdown(
+        md,
+        doc_id="Excise-Schedule",
+        source="Excise-Schedule.pdf",
+        target_chars=400,
+        hard_max_chars=800,
+        min_chars=40,
+    )
+    assert len(h_chunks) >= 2
+    assert h_chunks[0]["page"] == "1-2"
+    assert h_chunks[0]["page_numbers"] == [1, 2]
+    assert h_chunks[1]["page"] == "2"
+
+
+def test_docling_without_resource_cap_api_falls_back_instead_of_running_unbounded(monkeypatch) -> None:
+    class LegacyConverter:
+        def convert(self, _stream):
+            raise AssertionError("legacy converter must not be retried without caps")
+
+    fake_base = type("Mod", (), {"DocumentStream": lambda **kw: kw})
+    fake_converter = type("Mod", (), {"DocumentConverter": LegacyConverter})
+    monkeypatch.setattr("app.docling_intelligence.DOCLING_BACKEND", "auto")
+    with mock.patch.dict(
+        "sys.modules",
+        {
+            "docling": mock.MagicMock(),
+            "docling.datamodel": mock.MagicMock(),
+            "docling.datamodel.base_models": fake_base,
+            "docling.document_converter": fake_converter,
+        },
+    ):
+        assert _convert_via_docling_library(b"%PDF-1.7 fake", "legacy.pdf", max_pages=2) is None
+
+
+def test_table_glyphs_are_excluded_and_vertical_gaps_split_prose_paragraphs() -> None:
+    table_bbox = [[100.0, 100.0, 300.0, 300.0]]
+    assert _glyph_in_table_bboxes([120.0, 140.0, 150.0, 160.0], table_bbox)
+    assert not _glyph_in_table_bboxes([20.0, 140.0, 60.0, 160.0], table_bbox)
+
+    glyphs = [
+        VectorGlyph("First", [20.0, 20.0, 60.0, 30.0], page=1),
+        VectorGlyph("line.", [65.0, 20.0, 95.0, 30.0], page=1),
+        VectorGlyph("Second", [20.0, 80.0, 70.0, 90.0], page=1),
+        VectorGlyph("paragraph.", [75.0, 80.0, 130.0, 90.0], page=1),
+    ]
+    assert _vector_glyph_lines_with_paragraphs(glyphs) == [
+        "First line.",
+        "",
+        "Second paragraph.",
+    ]
+
+
+def test_compound_two_row_headers_and_vertical_row_span_forward_fill() -> None:
+    """Verify 2-row compound headers and vertical `row_span` category cells normalize cleanly (G454)."""
+    compound_matrix = [
+        ["Service Category", "Withholding Tax Rate", None],
+        [None, "Resident", "Non-Resident"],
+        ["Professional Fees", "6%", "15%"],
+        [None, "6% ( above UGX 1M )", "15%"],
+    ]
+    norm, spans = propagate_merged_table_headers(compound_matrix)
+    # Row 0 and Row 1 fused into a single composite header row
+    assert norm[0] == [
+        "Service Category",
+        "Withholding Tax Rate — Resident",
+        "Withholding Tax Rate — Non-Resident",
+    ]
+    # Vertical merged cell in row 2 col 0 ("Professional Fees") forward-filled into row 3 col 0
+    assert len(norm) == 3
+    assert norm[1][0] == "Professional Fees"
+    assert norm[2][0] == "Professional Fees"
+    assert any(rs == 2 and c_i == 0 for _, c_i, rs, _ in spans)
+
+
+def test_multiword_line_vector_vs_ocr_shadow_discrepancy_detected() -> None:
+    """Verify multi-word vector lines (`Total:` + `UGX` + `100,000`) detect numeric OCR shadow tampering (G455)."""
+    glyphs = [
+        VectorGlyph(text="Total:", bbox=[40.0, 100.0, 80.0, 120.0], page=1),
+        VectorGlyph(text="UGX", bbox=[85.0, 100.0, 115.0, 120.0], page=1),
+        VectorGlyph(text="100,000", bbox=[120.0, 100.0, 180.0, 120.0], page=1),
+    ]
+    ocr_items = [
+        {
+            "text": "Total: UGX 9,100,000",
+            "box": [[40.0, 100.0], [180.0, 100.0], [180.0, 120.0], [40.0, 120.0]],
+            "confidence": 0.98,
+        }
+    ]
+    fused = fuse_page_glyphs_and_ocr(glyphs, ocr_items, page_number=1)
+    discrepancies = summarize_fusion_discrepancies(fused)
+    assert len(discrepancies) == 1
+    assert discrepancies[0]["numeric_mismatch"] is True
+    assert discrepancies[0]["vector_text"] == "100,000"
+    assert discrepancies[0]["ocr_text"] == "Total: UGX 9,100,000"
 
 
 def test_no_deprecated_import_fitz_in_codebase() -> None:

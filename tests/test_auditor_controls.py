@@ -23,6 +23,7 @@ tamper never leaves the shared analytics database broken for the next run.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 import types
@@ -110,6 +111,52 @@ def test_an_administrator_audits_a_ticket_but_does_not_work_it(client, tenant):
     assert (ticket["status"], ticket["assignee"], ticket["officer_reply"]) == ("open", "", "")
     assert client.post(f"/v1/admin/tickets/{ticket_id}/presence", headers=admin).status_code == 403
     assert client.get(f"/v1/admin/tickets/{ticket_id}", headers=admin).status_code == 200
+
+
+def test_staff_ticket_reads_writes_lists_and_aggregates_are_tenant_scoped():
+    """G362: staff can work only their tenant's tickets when multi-tenancy is enabled."""
+    before = flags.is_enabled("multi_tenant")
+    flags.set("multi_tenant", True)
+    tenant_a, tenant_b = f"desk-{uuid.uuid4().hex[:8]}", f"desk-{uuid.uuid4().hex[:8]}"
+    ticket_a = db.create_ticket("Tenant A", tenant_id=tenant_a)["id"]
+    ticket_b = db.create_ticket("Tenant B", tenant_id=tenant_b)["id"]
+    from App.backend.app.auth.dependencies import AuthContext
+    from App.backend.app.auth.models import AuthUser
+
+    officer_a = AuthContext(
+        authenticated=True,
+        user=AuthUser(user_id="off-a", role="ura_staff", tenant_id=tenant_a),
+    )
+    officer_b = AuthContext(
+        authenticated=True,
+        user=AuthUser(user_id="off-b", role="ura_staff", tenant_id=tenant_b),
+    )
+    try:
+        from fastapi import HTTPException
+
+        for read_or_write in (
+            lambda: main_module._staff_ticket(ticket_b, officer_a),
+            lambda: main_module.get_ticket_endpoint(request=None, ticket_id=ticket_b, ctx=officer_a),
+            lambda: main_module.ticket_presence_endpoint(request=None, ticket_id=ticket_b, ctx=officer_a),
+            lambda: asyncio.run(
+                main_module.update_ticket_endpoint(request=object(), ticket_id=ticket_b, ctx=officer_a)
+            ),
+        ):
+            with pytest.raises(HTTPException) as exc:
+                read_or_write()
+            assert exc.value.status_code == 404
+        assert main_module._staff_ticket(ticket_a, officer_a)["id"] == ticket_a
+        assert db.get_ticket(ticket_b)["status"] == "open"
+
+        listed_a = main_module.list_tickets_endpoint(request=None, ctx=officer_a)["tickets"]
+        listed_b = main_module.list_tickets_endpoint(request=None, ctx=officer_b)["tickets"]
+        assert {row["id"] for row in listed_a} == {ticket_a}
+        assert {row["id"] for row in listed_b} == {ticket_b}
+        assert main_module.ticket_stats_endpoint(request=None, _ctx=officer_a)["total"] == 1
+        assert main_module.ticket_stats_endpoint(request=None, _ctx=officer_b)["total"] == 1
+        assert main_module.ticket_sla_endpoint(request=None, _ctx=officer_a)["awaiting_first_response"] == 1
+    finally:
+        flags.set("multi_tenant", before)
 
 
 def test_staff_actions_and_transcript_reads_are_recorded_without_content(client, tenant, ledger_on):

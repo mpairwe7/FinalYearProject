@@ -113,9 +113,12 @@ passages, each with the citation index of the passages that state it, and tells
 the model not to state a figure absent from the list.
 
 **It reads the prepared passage text, never the raw retrieval payload.**
-`_build_messages` scrubs each passage with `scan_retrieved_text` (LLM01) and
-trims it to the token budget before wrapping it in a hash-bound `<passage>`
-spotlight marker. The first version of this function re-read `p["text"]` after
+`_build_messages` scrubs each passage with `scan_retrieved_text` (LLM01),
+fences it with `fence_spotlight_body` so the body cannot contain `</passage>`
+or an assembler heading (ADR-0027), and trims it to the token budget before
+wrapping it in a hash-bound `<passage>` spotlight marker. Header fields sit
+outside that marker and are forced onto one line. The tool-calling prompt
+and the cloud fallback use the same helper. The first version of this function re-read `p["text"]` after
 all of that, which put it behind both defences: a figure planted inside an
 injected span was mined for the prompt after the passage body carrying it had
 been redacted, and a figure trimmed away for budget was projected with no

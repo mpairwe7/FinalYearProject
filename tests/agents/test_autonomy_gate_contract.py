@@ -269,6 +269,35 @@ class TestTheRecordSaysWhatHappened:
         assert row["execution_status"] == "success"
         assert row["autonomy_outcome"] == "autonomous_executed"
 
+    def test_write_ahead_record_is_written_before_a_high_risk_call(self, clean_flags, tmp_db, probe_name) -> None:
+        flags.set("action_level_audit_v3", True)
+        ran: list[str] = []
+        _tool(probe_name, risk="high", ran=ran)
+
+        ToolRegistry.call(probe_name, {}, user_id="u1")
+
+        rows = _ledger_rows(tmp_db)
+        assert [row["execution_status"] for row in rows] == ["intent", "success"]
+        assert rows[0]["resolution_status"] == "awaiting_user_action"
+        assert ran == [probe_name]
+
+    def test_failed_write_ahead_record_prevents_high_risk_execution(
+        self, clean_flags, probe_name, monkeypatch
+    ) -> None:
+        flags.set("action_level_audit_v3", True)
+        ran: list[str] = []
+        _tool(probe_name, risk="high", ran=ran)
+
+        def fail_before_action(**_kwargs):
+            raise OSError("audit store unavailable")
+
+        monkeypatch.setattr(gov, "append_action_audit_v3", fail_before_action)
+        result = ToolRegistry.call(probe_name, {}, user_id="u1")
+
+        assert result["ok"] is False
+        assert result["autonomy_outcome"] == "failed_closed"
+        assert ran == []
+
     def test_the_record_carries_the_declared_tier(self, clean_flags, tmp_db, probe_name) -> None:
         flags.set("action_level_audit_v3", True)
         _tool(probe_name, risk="high")

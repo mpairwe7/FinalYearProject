@@ -35,7 +35,9 @@ Do not move `App/backend` or `App/frontend`. Docker, HF Space, and CI import `ap
 - Do not default-on `hyde`, `graph_fusion`, `tool_rag`, or `tool_use`.
 - Only officers (`ura_staff`) handle taxpayers live — claim or reply to a ticket, hold its collision lock, take or end a call. Administrators audit the service and auditors read it; the API refuses both (`_require_live_officer`, `_desk_writer`), not just the console.
 - Human oversight uses `ticket_queue` (registry default on). Every route into it — `escalate_to_human`, the supervisor's ESCALATE route, and the taxpayer's own `POST /v1/escalate` — must honour that flag rather than promise a handoff.
+- With `multi_tenant` on, every staff ticket read, write, aggregate, and live event is scoped to the authenticated tenant; a ticket's internal tenant routing key is never sent to the browser (ADR-0028).
 - A tool's tier is its `ToolSchema.risk`. The autonomy gate may raise it, never lower it. `escalate_to_human` cannot be gated, and a refusal never depends on its audit write (ADR-0022).
+- When action-level audit is enabled, high/critical tool effects require a durable intent row first. Reasoner-to-T1 fallback shares the original turn's tool budget, and a claim-verifier outage is recorded and disclosed rather than read as a pass (ADR-0028).
 - Every turn on every transport writes one audit row with a `disposition`, and every model answer passes `_apply_output_guards`. The graph drafts; it does not get to approve its own draft.
 - A figure is not shown before it is verified: streams go through `FigureReleaseGate`, and a tool answer waits for the guards.
 - Web text is evidence, never a verified fact (ADR-0021): it reaches the model only as spotlighted passages and never enters `verified_facts`. The model has no search tool, outbound queries come from `_SEARCH_VOCABULARY` only, and a failed live check is disclosed rather than hidden.

@@ -48,6 +48,7 @@ defaults are unchanged by this addendum.
 | **Accent Detector** | Prosodic features + SVM | ~1M | Ugandan accent classification (5 profiles) |
 | **Offline Retriever** | FAISS + ONNX bge-m3 | ~80M bundle | Offline RAG when Qdrant is unavailable |
 | **Live Web Research & Self-Updating Qdrant** | `web_fx.py` + `web_research.py` + `web_search_providers.py` + `ephemeral_pdf_sandbox.py` + `corpus_sync.py` + `pdf_corpus.py` | N/A | Live `XE.com` / Google FX lookup, 8-trigger Tier-1/2/3 portal verification, ephemeral `tmpfs` PDF/XLSX sandbox (`pdf_guards` + GPU 2 micro-reranking), self-updating Qdrant hot-swap with `web_sync_ledger` 7-day memory (`ADR-0008`), and Statutory/10-MDA PDF Harvester (`186` PDFs → `5,639` chunks, `7,251` Qdrant hybrid vectors; `ADR-0009`) |
+| **Docling Document Intelligence** | `docling_intelligence.py` + `vision/table_structuring.py` + `vision/glyph_fusion.py` + `documents.py` | N/A | Dual-backend `DoclingDocumentIR` (`docling` + `native_structural`), `ContentLayer.FURNITURE` running header/footer segregation, 2D XY-Cut multi-column reading order, row-safe Markdown table splitting with header propagation, cross-page continuation stitching, 2-row compound header fusion, `TripletTableSerializer` semantic triplets, 1-based page provenance, and vector-vs-OCR shadow tamper escalation (`ADR-0026`, `G441`–`G457`) |
 
 ---
 
@@ -173,6 +174,10 @@ Evaluated across 16 Ugandan tax heads (`paye`, `vat`, `withholding`, `rental`, `
 - OWASP LLM Top 10 (2025/2026 crosswalk) + OWASP Top 10 for Agentic Applications 2026 (`ASI01`–`ASI10`) controls implemented (`governance/ai_risk_manifest.yaml`)
 - Input guardrails: 11 prompt injection patterns + harmful intent detection
 - Output guardrails: PII redaction (7 Uganda-specific patterns), HTML sanitization, system prompt leakage detection, indirect injection scanning
+- Spotlight fence (ADR-0027): retrieved text, header fields, and system-prompt asides cannot close a `<passage>` marker or open an assembler heading. The cloud fallback uses the same fence.
+- Claim verification (ADR-0028): a verifier exception is recorded as `unavailable`, lowers a high confidence assessment, and is disclosed to the taxpayer; the answer is not withheld solely because the checker is down (G370).
+- Staff ticket access (ADR-0028): detail, updates, presence, chat termination, live events, lists, and aggregates are scoped to the authenticated tenant when `multi_tenant` is enabled (G362).
+- Tool execution (ADR-0028): enabled action-level auditing writes an intent receipt before high-risk effects, and reasoner/T1 fallback share one tool-call budget (G366, G368).
 - Supply chain: `trust_remote_code=False`, SHA-pinned GitHub Actions, Trivy scanning, model revision pinning
 - Auth: JWT verification, RBAC (public/verified_taxpayer/ura_staff/ura_admin/ura_auditor)
 - Consent: Purpose-based (UDPA 2019), append-only receipts, right-to-erasure

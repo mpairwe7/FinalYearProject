@@ -62,6 +62,7 @@ FinalYearProject/
 │   │       ├── guardrails.py  # OWASP LLM Top 10 input/output guards
 │   │       ├── retriever.py   # Qdrant hybrid retriever (dense+BM25+RRF+circuit breaker)
 │   │       ├── indexer.py     # Document indexing pipeline (PDF+CSV→Qdrant, 7,251 hybrid vectors)
+│   │       ├── docling_intelligence.py # Docling DocumentIR, XY-Cut reading order, furniture stripping & TripletTableSerializer (ADR-0026)
 │   │       ├── pdf_corpus.py  # Statutory & 10-MDA PDF harvester (186 PDFs → 5,639 chunks, ADR-0009)
 │   │       ├── web_research.py # 9-trigger live check, source authority & evidence labelling (ADR-0008, ADR-0021)
 │   │       ├── ephemeral_pdf_sandbox.py # Ephemeral tmpfs PDF/XLSX sandbox + GPU micro-reranking (ADR-0008)

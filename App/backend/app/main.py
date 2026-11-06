@@ -3672,6 +3672,21 @@ def run_eval(request: Request, sample_size: int = 50, days: int = 30) -> dict:
 # ---------------------------------------------------------------------------
 # Phase 14-D — ticket queue (admin-only)
 # ---------------------------------------------------------------------------
+def _staff_ticket(ticket_id: str, ctx: AuthContext) -> dict[str, Any]:
+    """One ticket for this staff caller, or 404 when it is another tenant's.
+
+    The public case routes keep the ticket id as the taxpayer's capability.
+    Staff list, read, and write routes use this when ``multi_tenant`` is on
+    (G362, ADR-0028). With the flag off, :func:`same_tenant` allows the row.
+    """
+    from .tenancy import same_tenant
+
+    ticket = db.get_ticket(ticket_id)
+    if ticket is None or not same_tenant(ticket.get("tenant_id"), ctx):
+        raise HTTPException(status_code=404, detail="ticket not found")
+    return ticket
+
+
 @app.get("/v1/admin/tickets", tags=["admin"])
 def list_tickets_endpoint(
     request: Request,
@@ -3705,8 +3720,18 @@ def list_tickets_endpoint(
     if priority and priority not in ("low", "normal", "high", "urgent"):
         raise HTTPException(status_code=400, detail="invalid priority")
 
+    from .tenancy import scoped_tenant_id
+
     rows = db.list_tickets(
-        status=status, limit=limit, offset=offset, priority=priority, team=team, locale=locale, modality=modality, q=q
+        status=status,
+        limit=limit,
+        offset=offset,
+        priority=priority,
+        team=team,
+        locale=locale,
+        modality=modality,
+        q=q,
+        tenant_id=scoped_tenant_id(ctx),
     )
     return {
         "count": len(rows),
@@ -3732,7 +3757,9 @@ def ticket_stats_endpoint(
     """Aggregate ticket statistics for the admin dashboard."""
     if days < 1 or days > 365:
         raise HTTPException(status_code=400, detail="days must be 1..365")
-    return db.ticket_stats(days=days)
+    from .tenancy import scoped_tenant_id
+
+    return db.ticket_stats(days=days, tenant_id=scoped_tenant_id(_ctx))
 
 
 @app.get("/v1/admin/tickets/sla", tags=["admin"])
@@ -3748,7 +3775,9 @@ def ticket_sla_endpoint(
     """
     if days < 1 or days > 365:
         raise HTTPException(status_code=400, detail="days must be 1..365")
-    return db.sla_stats(days=days)
+    from .tenancy import scoped_tenant_id
+
+    return db.sla_stats(days=days, tenant_id=scoped_tenant_id(_ctx))
 
 
 @app.post("/v1/admin/tickets/{ticket_id}/presence", tags=["admin"])
@@ -3764,9 +3793,7 @@ def ticket_presence_endpoint(
     either and the API refuses one.
     """
     _require_live_officer(ctx)
-    ticket = db.get_ticket(ticket_id)
-    if ticket is None:
-        raise HTTPException(status_code=404, detail="ticket not found")
+    ticket = _staff_ticket(ticket_id, ctx)
     viewer = ""
     if ctx.user:
         viewer = (ctx.user.email or ctx.user.user_id or "").strip()
@@ -4487,9 +4514,7 @@ def get_ticket_endpoint(
     """
     from . import officer_chat, service_ratings
 
-    ticket = db.get_ticket(ticket_id)
-    if ticket is None:
-        raise HTTPException(status_code=404, detail="ticket not found")
+    ticket = _staff_ticket(ticket_id, ctx)
     ticket["viewers"] = db.list_ticket_viewers(ticket_id)
     # The live chat with the taxpayer, in order, and how it ended and was rated.
     chat = officer_chat.get_chat(ticket_id)
@@ -4536,6 +4561,7 @@ async def update_ticket_endpoint(
     its length).
     """
     _require_live_officer(ctx)
+    _staff_ticket(ticket_id, ctx)
     if request.headers.get("content-type", "").startswith("application/json"):
         try:
             body = await request.json()
@@ -4684,9 +4710,7 @@ async def end_ticket_chat(
     _require_live_officer(ctx)
     from . import officer_chat
 
-    ticket = await asyncio.to_thread(db.get_ticket, ticket_id)
-    if ticket is None:
-        raise HTTPException(status_code=404, detail="ticket not found")
+    ticket = await asyncio.to_thread(_staff_ticket, ticket_id, ctx)
     if not officer_chat.is_text(ticket):
         raise HTTPException(status_code=409, detail="This case is a call, not a chat")
     if officer_chat.chat_state(ticket) == "ended":
