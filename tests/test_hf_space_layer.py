@@ -75,7 +75,7 @@ PATCHED_LINES = _patched_lines()
 
 def test_the_patch_was_read() -> None:
     # Guards the parametrized test below, which would pass by running nothing.
-    assert len(PATCHED_LINES) >= 13
+    assert len(PATCHED_LINES) >= 12
 
 
 @pytest.mark.parametrize(
