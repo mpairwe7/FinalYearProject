@@ -363,11 +363,11 @@ def normalize_document(
     except (ImportError, Exception) as plumber_err:
         logger.debug("pdfplumber normalization failed: %s", plumber_err)
 
-    # 3. Defensive fallback to PyMuPDF (fitz) only if present
+    # 3. Defensive fallback to PyMuPDF (pymupdf) only if present
     try:
-        import fitz  # type: ignore[import-untyped]
+        import pymupdf  # type: ignore[import-untyped]
 
-        doc = fitz.open(stream=data, filetype="pdf")
+        doc = pymupdf.open(stream=data, filetype="pdf")
         page_count = doc.page_count
         pages = []
         warnings = []
@@ -392,7 +392,7 @@ def normalize_document(
                     if page_area * scale * scale > spec.max_pixels:
                         scale = (spec.max_pixels / page_area) ** 0.5
                         page_warnings.append(f"Page {idx + 1} was downscaled to meet pixel limits")
-                    pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+                    pix = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
                     img_bytes = pix.tobytes("png")
                 except Exception:
                     page_warnings.append(f"Failed to render image for page {idx + 1}")

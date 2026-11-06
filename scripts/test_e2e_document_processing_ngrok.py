@@ -188,8 +188,8 @@ def chat_with_doc(
 
 # Document Builders
 def make_pdf_invoice() -> bytes:
-    import fitz
-    doc = fitz.open()
+    import pymupdf
+    doc = pymupdf.open()
     page = doc.new_page(width=595, height=842)
     t_sup = "100" + "4829104"
     t_buy = "100" + "9182341"
@@ -259,8 +259,8 @@ def make_csv_customs() -> bytes:
 
 
 def make_injected_pdf() -> bytes:
-    import fitz
-    doc = fitz.open()
+    import pymupdf
+    doc = pymupdf.open()
     page = doc.new_page(width=595, height=842)
     text = (
         "CONFIDENTIAL FINANCIAL SUMMARY 2026\n"
