@@ -735,3 +735,55 @@ class TestAWholeTurnHasADeadline:
 
     def test_outside_a_turn_nothing_is_clamped(self) -> None:
         assert service_module.remaining_turn_seconds(45.0) == 45.0
+
+
+class TestReasonerFallbackSharesItsToolBudget:
+    def test_t1_fallback_reuses_budget_from_timed_out_reasoner(self, monkeypatch) -> None:
+        seen_budgets: list[ToolCallBudget] = []
+
+        class ResultFuture:
+            def __init__(self, timeout: bool) -> None:
+                self.timeout = timeout
+
+            def result(self, timeout=None):
+                if self.timeout:
+                    raise concurrent.futures.TimeoutError()
+                return {"text": "T1 answer", "tool_calls": [], "iterations": 1, "truncated": False}
+
+            def cancel(self):
+                return False
+
+        class Executor:
+            calls = 0
+
+            def submit(self, _fn, _callable, **kwargs):
+                self.calls += 1
+                seen_budgets.append(kwargs["tool_call_budget"])
+                return ResultFuture(timeout=self.calls == 1)
+
+        class Circuit:
+            def allow_request(self):
+                return True
+
+            def record_success(self):
+                pass
+
+            def record_failure(self):
+                pass
+
+            def release(self):
+                pass
+
+        executor = Executor()
+        monkeypatch.setattr(service_module, "_LLM_EXECUTOR", executor)
+        monkeypatch.setattr(service_module, "_is_non_t1_endpoint", lambda endpoint: endpoint == "reasoner")
+        monkeypatch.setattr(service_module, "get_endpoint", lambda _tier: "t1")
+        monkeypatch.setattr(service_module, "_circuit_for", lambda _endpoint: Circuit())
+
+        result = service_module._call_llm_agentic(
+            "VAT?", [], None, "en", endpoint="reasoner", deadline_s=2.0
+        )
+
+        assert result["text"] == "T1 answer"
+        assert len(seen_budgets) == 2
+        assert seen_budgets[0] is seen_budgets[1]

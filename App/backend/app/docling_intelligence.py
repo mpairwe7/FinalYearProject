@@ -433,7 +433,7 @@ def sanitize_table_cell_text(raw: Any) -> str:
 
 
 def propagate_merged_table_headers(matrix: list[list[Any]]) -> tuple[list[list[str]], list[tuple[int, int, int, int]]]:
-    """Normalize a raw table matrix, forward-filling horizontal merged header cells (None) and tracking spans.
+    """Normalize a raw table matrix, forward-filling horizontal/vertical merged cells and fusing compound headers (G448, G454).
 
     Returns ``(normalized_matrix, spans)`` where each span is ``(row_idx, col_idx, row_span, col_span)``.
     """
@@ -446,6 +446,7 @@ def propagate_merged_table_headers(matrix: list[list[Any]]) -> tuple[list[list[s
 
     norm: list[list[str]] = [["" for _ in range(num_cols)] for _ in range(num_rows)]
     spans: list[tuple[int, int, int, int]] = []
+    row0_spanned_cols: dict[int, str] = {}
 
     for r_idx, row in enumerate(matrix):
         c_idx = 0
@@ -461,13 +462,55 @@ def propagate_merged_table_headers(matrix: list[list[Any]]) -> tuple[list[list[s
                 look = c_idx + 1
                 while look < len(row) and row[look] is None:
                     col_span += 1
-                    # In the header row (row 0), propagate the group header label so no column is headerless
                     if r_idx == 0:
                         norm[r_idx][look] = f"{val} ({look - c_idx + 1})"
+                        row0_spanned_cols[c_idx] = val
+                        row0_spanned_cols[look] = val
                     look += 1
             if col_span > 1:
                 spans.append((r_idx, c_idx, 1, col_span))
             c_idx += col_span
+
+    # G454: Detect 2-row compound header when row 0 has horizontal spans and row 1 is a sub-header row
+    # (row 1 col 0 is None/empty while spanned columns in row 1 carry sub-labels like "Resident" / "Non-Resident")
+    raw_rows = list(matrix)
+    if (
+        len(norm) >= 3
+        and row0_spanned_cols
+        and (matrix[1][0] is None or not sanitize_table_cell_text(matrix[1][0]))
+        and any(c_i in row0_spanned_cols and norm[1][c_i] for c_i in range(1, num_cols))
+    ):
+        fused_header: list[str] = []
+        for c_i in range(num_cols):
+            sub_lbl = norm[1][c_i]
+            parent_lbl = row0_spanned_cols.get(c_i) or norm[0][c_i]
+            if c_i in row0_spanned_cols and sub_lbl:
+                fused_header.append(f"{parent_lbl} — {sub_lbl}")
+            else:
+                fused_header.append(norm[0][c_i] or sub_lbl)
+        norm = [fused_header] + norm[2:]
+        raw_rows = [matrix[0]] + list(matrix[2:])
+
+    # G454: Forward-fill vertical merged category cells (row_span) in column 0 across data rows
+    r_i = 1
+    while r_i < len(norm):
+        if norm[r_i][0]:
+            r_span = 1
+            look_r = r_i + 1
+            while (
+                look_r < len(norm)
+                and not norm[look_r][0]
+                and any(norm[look_r][1:])
+                and (look_r >= len(raw_rows) or not raw_rows[look_r] or raw_rows[look_r][0] is None)
+            ):
+                norm[look_r][0] = norm[r_i][0]
+                r_span += 1
+                look_r += 1
+            if r_span > 1:
+                spans.append((r_i, 0, r_span, 1))
+            r_i = look_r
+        else:
+            r_i += 1
 
     return norm, spans
 
@@ -512,6 +555,12 @@ def serialize_table_to_triplets(
 
 _MD_TABLE_LINE_RE = re.compile(r"^\s*\|.+\|\s*$")
 _MD_TABLE_SEP_RE = re.compile(r"^\s*\|\s*[:\-]+(?:\s*\|\s*[:\-]+)*\s*\|\s*$")
+_UNESCAPED_PIPE_RE = re.compile(r"(?<!\\)\|")
+
+
+def _count_markdown_table_cols(line: str) -> int:
+    """Count table columns by counting unescaped pipe delimiters (ignoring ``\\|``, G451)."""
+    return max(0, len(_UNESCAPED_PIPE_RE.findall(line or "")) - 1)
 
 
 def split_markdown_table_preserving_headers(
@@ -532,7 +581,7 @@ def split_markdown_table_preserving_headers(
         header_lines = lines[:2]
         data_lines = lines[2:]
     else:
-        num_cols = max(1, lines[0].count("|") - 1)
+        num_cols = max(1, _count_markdown_table_cols(lines[0]))
         sep = "| " + " | ".join(["---"] * num_cols) + " |"
         header_lines = [lines[0], sep]
         data_lines = lines[1:]
@@ -617,14 +666,22 @@ def stitch_cross_page_markdown_tables(markdown: str) -> tuple[str, int]:
                 break
 
             if saw_break and j < n and _MD_TABLE_LINE_RE.match(lines[j]):
-                prev_cols = line.count("|") - 1
-                next_cols = lines[j].count("|") - 1
+                prev_cols = _count_markdown_table_cols(line)
+                next_cols = _count_markdown_table_cols(lines[j])
                 if prev_cols >= 2 and prev_cols == next_cols:
                     # Find the current table's header row in `out`
                     k = len(out) - 1
-                    while k >= 0 and _MD_TABLE_LINE_RE.match(out[k]):
+                    while k >= 0 and (
+                        _MD_TABLE_LINE_RE.match(out[k])
+                        or (out[k].strip().startswith("<!-- page:") and out[k].strip().endswith("-->"))
+                    ):
                         k -= 1
                     table_start_idx = k + 1
+                    while (
+                        table_start_idx < len(out)
+                        and out[table_start_idx].strip().startswith("<!-- page:")
+                    ):
+                        table_start_idx += 1
                     first_header_norm = re.sub(r"\s+", " ", out[table_start_idx].strip().lower())
                     next_first_norm = re.sub(r"\s+", " ", lines[j].strip().lower())
 
@@ -640,7 +697,9 @@ def stitch_cross_page_markdown_tables(markdown: str) -> tuple[str, int]:
                         i += 1
                         continue
 
-                    # Insert page markers right before table_start_idx or keep track
+                    # Preserve page markers across the stitched continuation boundary (G452)
+                    for pm in page_markers:
+                        out.append(pm)
                     stitched_count += 1
                     i = j
                     continue
@@ -843,8 +902,27 @@ def docling_intelligence_status() -> dict[str, Any]:
     }
 
 
-def _convert_via_docling_library(data: bytes, filename: str) -> DoclingDocumentIR | None:
-    """Convert *data* via IBM ``docling`` library if installed and enabled."""
+def _parse_markdown_table_matrix(md_table: str) -> list[list[str]]:
+    """Parse a Markdown table string back into a 2D matrix of cell values (G453)."""
+    matrix: list[list[str]] = []
+    for raw_ln in (md_table or "").splitlines():
+        ln = raw_ln.strip()
+        if not ln or not _MD_TABLE_LINE_RE.match(ln) or _MD_TABLE_SEP_RE.match(ln):
+            continue
+        inner = ln.strip("|")
+        cells = [c.replace("\\|", "|").strip() for c in _UNESCAPED_PIPE_RE.split(inner)]
+        if cells:
+            matrix.append(cells)
+    return matrix
+
+
+def _convert_via_docling_library(
+    data: bytes,
+    filename: str,
+    *,
+    max_pages: int = 40,
+) -> DoclingDocumentIR | None:
+    """Convert *data* via IBM ``docling`` library if installed and enabled (G441, G453)."""
     if DOCLING_BACKEND not in {"auto", "docling"}:
         return None
     try:
@@ -853,7 +931,14 @@ def _convert_via_docling_library(data: bytes, filename: str) -> DoclingDocumentI
 
         converter = DocumentConverter()
         stream = DocumentStream(name=filename or "document.pdf", stream=io.BytesIO(data))
-        conv_res = converter.convert(stream)
+        max_bytes = int(os.getenv("DOCUMENT_MAX_BYTES", str(40 * 1024 * 1024)))
+        try:
+            conv_res = converter.convert(stream, max_num_pages=max_pages, max_file_size=max_bytes)
+        except TypeError:
+            # Older Docling versions do not accept both resource caps. Do not
+            # retry unbounded; let the bounded native parser handle the file.
+            logger.warning("Docling API lacks required page/file caps; using bounded native parser")
+            return None
         dl_doc = conv_res.document
 
         ir = DoclingDocumentIR(
@@ -875,6 +960,8 @@ def _convert_via_docling_library(data: bytes, filename: str) -> DoclingDocumentI
             provs: list[DoclingProvenance] = []
             for p in getattr(item, "prov", []) or []:
                 page_no = int(getattr(p, "page_no", 1) or 1)
+                if page_no > max_pages:
+                    continue
                 bbox_obj = getattr(p, "bbox", None)
                 if bbox_obj is not None and hasattr(bbox_obj, "as_tuple"):
                     bbox = [float(x) for x in bbox_obj.as_tuple()[:4]]
@@ -882,25 +969,38 @@ def _convert_via_docling_library(data: bytes, filename: str) -> DoclingDocumentI
                     bbox = [0.0, 0.0, 0.0, 0.0]
                 provs.append(DoclingProvenance(page_no=page_no, bbox=bbox, source="docling"))
 
+            if getattr(item, "prov", None) and not provs:
+                continue
+
             if "table" in label and hasattr(item, "export_to_markdown"):
                 try:
                     t_md = item.export_to_markdown(dl_doc)
                 except TypeError:
                     t_md = item.export_to_markdown()
+                clean_t_md = strip_hidden_control_and_bidi(str(t_md or "").strip())
+                clean_t_md, _ = scan_retrieved_text(clean_t_md)
+                clean_t_md = escape_untrusted_document_markers(clean_t_md)
+                t_matrix = _parse_markdown_table_matrix(clean_t_md)
+                pg_num = provs[0].page_no if provs else 1
+                t_triplets = serialize_table_to_triplets(f"Page {pg_num} dl_{idx}", t_matrix) if t_matrix else []
                 ir.items.append(
                     DoclingItem(
                         item_id=f"dl_{idx}",
                         label="table",
-                        text=str(t_md or "").strip(),
+                        text=clean_t_md,
                         content_layer=layer,
                         heading_trail=list(trail),
                         prov=provs,
+                        table_matrix=t_matrix,
+                        table_triplets=t_triplets,
                         level=max(1, int(level or 1)),
                     )
                 )
                 continue
 
-            text_val = str(getattr(item, "text", "") or "").strip()
+            raw_text_val = strip_hidden_control_and_bidi(str(getattr(item, "text", "") or "").strip())
+            text_val, _ = scan_retrieved_text(raw_text_val)
+            text_val = escape_untrusted_document_markers(text_val).strip()
             if not text_val:
                 continue
             if "header" in label and not is_furn:
@@ -937,6 +1037,50 @@ def _convert_via_docling_library(data: bytes, filename: str) -> DoclingDocumentI
     return None
 
 
+def _glyph_in_table_bboxes(glyph_bbox: list[float], table_bboxes: list[list[float]]) -> bool:
+    """Return True if a glyph's center lies inside any table bounding box on the page (G456)."""
+    if len(glyph_bbox) < 4 or not table_bboxes:
+        return False
+    cx = (glyph_bbox[0] + glyph_bbox[2]) / 2.0
+    cy = (glyph_bbox[1] + glyph_bbox[3]) / 2.0
+    for tb in table_bboxes:
+        if (
+            len(tb) >= 4
+            and tb[2] > tb[0]
+            and tb[3] > tb[1]
+            and (tb[0] - 2.0) <= cx <= (tb[2] + 2.0)
+            and (tb[1] - 2.0) <= cy <= (tb[3] + 2.0)
+        ):
+            return True
+    return False
+
+
+def _vector_glyph_lines_with_paragraphs(glyphs: list[Any]) -> list[str]:
+    """Group spatially ordered words into lines and preserve large vertical gaps."""
+    ordered = sort_spatial_reading_order(glyphs)
+    lines_out: list[str] = []
+    cur_words: list[str] = []
+    cur_y: float | None = None
+    cur_h = 10.0
+    for glyph in ordered:
+        cy = (glyph.bbox[1] + glyph.bbox[3]) / 2.0 if len(glyph.bbox) >= 4 else 0.0
+        height = max(4.0, (glyph.bbox[3] - glyph.bbox[1]) if len(glyph.bbox) >= 4 else 10.0)
+        if cur_y is None or abs(cy - cur_y) <= max(6.0, height * 0.5):
+            cur_words.append(glyph.text)
+            cur_y = cy if cur_y is None else (cur_y + cy) / 2.0
+            cur_h = height
+            continue
+        lines_out.append(" ".join(cur_words))
+        if (cy - cur_y) > max(12.0, cur_h * 1.4):
+            lines_out.append("")
+        cur_words = [glyph.text]
+        cur_y = cy
+        cur_h = height
+    if cur_words:
+        lines_out.append(" ".join(cur_words))
+    return lines_out
+
+
 def convert_document_bytes(
     data: bytes,
     filename: str = "document.pdf",
@@ -944,7 +1088,7 @@ def convert_document_bytes(
     max_pages: int = 40,
 ) -> DoclingDocumentIR:
     """Convert PDF bytes into a structured :class:`DoclingDocumentIR` with layout, table & provenance intelligence."""
-    dl_ir = _convert_via_docling_library(data, filename)
+    dl_ir = _convert_via_docling_library(data, filename, max_pages=max_pages)
     if dl_ir is not None:
         return dl_ir
 
@@ -954,6 +1098,7 @@ def convert_document_bytes(
     ir = DoclingDocumentIR(filename=filename, backend_used="native_structural")
     raw_pages: list[str] = []
     page_bboxes: dict[int, list[float]] = {}
+    page_tables_map: dict[int, list[Any]] = {}
 
     # Extract per-page vector glyphs and sort via 2D XY-Cut reading order
     page_count = 0
@@ -976,34 +1121,35 @@ def convert_document_bytes(
 
     ir.page_count = page_count
     effective_pages = min(page_count, max_pages)
+    dpi_scale = 150.0 / 72.0
 
     for p_idx in range(effective_pages):
+        page_no = p_idx + 1
+        # Detect vector tables first so we can exclude their cell bounding boxes from prose paragraphs (G456)
+        t_bboxes_px: list[list[float]] = []
+        try:
+            st_list = structure_document_tables(data, raw_text="", page_number=page_no)
+            page_tables_map[page_no] = st_list
+            for st in st_list:
+                for c in st.cells:
+                    if len(c.bbox) >= 4 and c.bbox[2] > c.bbox[0]:
+                        t_bboxes_px.append([v * dpi_scale for v in c.bbox[:4]])
+        except Exception:
+            page_tables_map[page_no] = []
+
         glyphs = extract_page_vector_glyphs(data, p_idx)
         if glyphs:
-            ordered = sort_spatial_reading_order(glyphs)
+            non_table_glyphs = [g for g in glyphs if not _glyph_in_table_bboxes(g.bbox, t_bboxes_px)]
+            ordered = sort_spatial_reading_order(non_table_glyphs)
             xs = [g.bbox[0] for g in ordered if len(g.bbox) >= 4]
             ys = [g.bbox[1] for g in ordered if len(g.bbox) >= 4]
             x2s = [g.bbox[2] for g in ordered if len(g.bbox) >= 4]
             y2s = [g.bbox[3] for g in ordered if len(g.bbox) >= 4]
             if xs and ys:
-                page_bboxes[p_idx + 1] = [min(xs), min(ys), max(x2s), max(y2s)]
+                page_bboxes[page_no] = [min(xs), min(ys), max(x2s), max(y2s)]
 
-            # Group ordered glyphs into lines by vertical proximity
-            lines_out: list[str] = []
-            cur_words: list[str] = []
-            cur_y: float | None = None
-            for g in ordered:
-                cy = (g.bbox[1] + g.bbox[3]) / 2.0 if len(g.bbox) >= 4 else 0.0
-                h = max(4.0, (g.bbox[3] - g.bbox[1]) if len(g.bbox) >= 4 else 10.0)
-                if cur_y is None or abs(cy - cur_y) <= max(6.0, h * 0.5):
-                    cur_words.append(g.text)
-                    cur_y = cy if cur_y is None else (cur_y + cy) / 2.0
-                else:
-                    lines_out.append(" ".join(cur_words))
-                    cur_words = [g.text]
-                    cur_y = cy
-            if cur_words:
-                lines_out.append(" ".join(cur_words))
+            # Group ordered glyphs into lines and paragraphs by vertical spacing (G456)
+            lines_out = _vector_glyph_lines_with_paragraphs(ordered)
             raw_pages.append("\n".join(lines_out))
         else:
             raw_pages.append("")
@@ -1048,10 +1194,12 @@ def convert_document_bytes(
                         )
                     )
 
-        # Extract structured tables on this page
+        # Attach structured tables on this page
         try:
-            tables = structure_document_tables(data, raw_text=p_text, page_number=page_no)
-            for st in tables:
+            tables = page_tables_map.get(page_no)
+            if not tables and p_text.strip():
+                tables = structure_document_tables(data, raw_text=p_text, page_number=page_no)
+            for st in tables or []:
                 if st.matrix and len(st.matrix) > 1:
                     item_seq += 1
                     triplets = serialize_table_to_triplets(f"Page {page_no} {st.table_id}", st.matrix)

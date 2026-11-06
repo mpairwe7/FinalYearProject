@@ -119,7 +119,7 @@ class ActionAuditRecord(BaseModel):
     response_summary_redacted: dict[str, Any] = Field(default_factory=dict)
     response_sha256: str
     execution_status: Literal[
-        "success", "error", "timeout", "blocked", "simulated_sandbox", "proposed"
+        "success", "error", "timeout", "blocked", "simulated_sandbox", "proposed", "intent"
     ] = "success"
     execution_latency_ms: float = Field(default=0.0, ge=0.0)
 
@@ -617,7 +617,7 @@ def append_action_audit_v3(
     parameters_digest_source: dict[str, Any] | None = None,
     response_summary_redacted: dict[str, Any] | None = None,
     execution_status: Literal[
-        "success", "error", "timeout", "blocked", "simulated_sandbox", "proposed"
+        "success", "error", "timeout", "blocked", "simulated_sandbox", "proposed", "intent"
     ] = "success",
     execution_latency_ms: float = 0.0,
     channel: str = "rest",
@@ -702,8 +702,13 @@ def append_action_audit_v3(
             "resolved", "awaiting_user_action", "escalated_to_officer", "abstained"
         ] = "escalated_to_officer" if outcome == "proposed_awaiting_officer" else "abstained"
     else:
-        # An action that errored or timed out resolved nothing.
-        res_status = "resolved" if execution_status not in ("error", "timeout") else "abstained"
+        # An action that errored or timed out resolved nothing. An intent
+        # row is the write-ahead: the action has been recorded and has not
+        # run yet (G366, ADR-0028).
+        if execution_status == "intent":
+            res_status = "awaiting_user_action"
+        else:
+            res_status = "resolved" if execution_status not in ("error", "timeout") else "abstained"
 
     statutes = list(statutory_basis or ["Income Tax Act Cap 340 / Tax Procedures Code Act (FY2026-27)"])
     explanation = (

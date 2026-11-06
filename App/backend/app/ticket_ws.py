@@ -56,13 +56,26 @@ def _start_cross_replica_listener() -> None:
     threading.Thread(target=_run, name="ticket-event-listener", daemon=True).start()
 
 
+def filter_ticket_event(
+    event: dict[str, object], *, tenant_id: str | None, team: str = ""
+) -> dict[str, object] | None:
+    """Apply tenant/team scope and strip internal routing metadata."""
+    if tenant_id is not None and str(event.get("tenant_id") or "default") != tenant_id:
+        return None
+    if team and str(event.get("team") or "") != team:
+        return None
+    public_event = dict(event)
+    public_event.pop("tenant_id", None)
+    return public_event
+
+
 async def ticket_stream_ws(websocket: WebSocket) -> None:
     """Serve one staff subscriber."""
     from .chat_ws_v2 import _resolve_ws_principal
     from .auth import JWTAuthError
 
     try:
-        _user_id, _tenant_id, role, _purposes = _resolve_ws_principal(websocket, required=True)
+        _user_id, tenant_id, role, _purposes = _resolve_ws_principal(websocket, required=True)
     except JWTAuthError:
         await websocket.close(code=4401, reason="authentication required")
         return
@@ -85,6 +98,9 @@ async def ticket_stream_ws(websocket: WebSocket) -> None:
         return
 
     team = websocket.query_params.get("team", "").strip()
+    from .tenancy import tenant_enabled
+
+    tenant_scope = (tenant_id or "default") if tenant_enabled() else None
 
     await websocket.accept()
     _start_cross_replica_listener()
@@ -99,11 +115,14 @@ async def ticket_stream_ws(websocket: WebSocket) -> None:
             except TimeoutError:
                 await websocket.send_json({"type": "ping"})
                 continue
-            # An officer watching one team should not be interrupted by
-            # another's queue.
-            if team and str(event.get("team", "")) != team:
+            # Scope before delivery and remove the routing key from the
+            # browser-visible payload.
+            public_event = filter_ticket_event(event, tenant_id=tenant_scope, team=team)
+            if public_event is None:
                 continue
-            await websocket.send_json({"type": event.get("event", "escalation.created"), **event})
+            await websocket.send_json(
+                {"type": public_event.get("event", "escalation.created"), **public_event}
+            )
     except WebSocketDisconnect:
         pass
     except Exception:

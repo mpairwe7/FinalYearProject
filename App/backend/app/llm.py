@@ -28,6 +28,7 @@ air-gapped or privacy-sensitive deployments.
     - Tokenizer-aware context budgeting (no char-slicing guesswork)
     - Spotlighted passages with hash-derived markers (LLM01 indirect injection)
     - scan_retrieved_text() on every passage before prompt assembly
+    - fence_spotlight_body() so a passage cannot close its own marker (ADR-0027)
 
 Model swap guide: see docs/MODEL_SWAP_GUIDE.md for tested alternatives.
 
@@ -67,8 +68,22 @@ from typing import TYPE_CHECKING, Any, Final
 
 from .agents.loop_control import Admission, BudgetDecision, ToolCallBudget
 from .agents.prompts import specialist_prompt
-from .guardrails import scan_external_tool_text, scan_retrieved_text
+from .guardrails import (
+    fence_prompt_header_field,
+    fence_spotlight_body,
+    scan_external_tool_text,
+    scan_retrieved_text,
+)
 from .tracing import llm_call
+
+
+def new_tool_call_budget() -> ToolCallBudget:
+    """Create one bounded budget to share across the model paths of a turn."""
+    return ToolCallBudget(
+        max_total_calls=TOOL_MAX_CALLS_PER_TURN,
+        max_calls_per_iteration=TOOL_MAX_CALLS_PER_ITERATION,
+        max_calls_per_tool=TOOL_MAX_CALLS_PER_TOOL,
+    )
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
@@ -370,11 +385,13 @@ def _is_t3_endpoint(endpoint: Any, tier: Any = None) -> bool:
 def _passage_marker(source: str, idx: int) -> str:
     """Derive a short, per-passage hash marker so the model cannot forge it.
 
-    The marker mixes the source filename and passage index, giving a unique
-    ID that an attacker-controlled passage body cannot replicate without
-    knowing both inputs at retrieval time.
+    The marker mixes the fenced source label and passage index, giving a
+    unique ID that an attacker-controlled passage body cannot replicate
+    without knowing both inputs at retrieval time. Header and hash share
+    that same fenced label (ADR-0027).
     """
-    digest = hashlib.sha256(f"{source}:{idx}".encode()).hexdigest()[:8]
+    safe = fence_prompt_header_field(source) or "unknown"
+    digest = hashlib.sha256(f"{safe}:{idx}".encode()).hexdigest()[:8]
     return f"p{idx}-{digest}"
 
 
@@ -549,8 +566,12 @@ def _inject_statutory_precedences(system_content: str) -> str:
 
         rules = []
         for p in precedences:
-            ref = f" (Statutory Ref: {p['statute_reference']})" if p.get("statute_reference") else ""
-            rules.append(f"- **{p['topic']}**: {p['rule_statement']}{ref}")
+            topic = fence_prompt_header_field(p.get("topic") or "", limit=120)
+            statement = fence_spotlight_body(str(p.get("rule_statement") or ""))
+            ref_raw = fence_prompt_header_field(p.get("statute_reference") or "", limit=160)
+            ref = f" (Statutory Ref: {ref_raw})" if ref_raw else ""
+            if topic or statement:
+                rules.append(f"- **{topic or 'precedence'}**: {statement}{ref}")
 
         rules_text = "\n".join(rules)
         return (
@@ -580,15 +601,17 @@ def _passage_header(index: int, passage: dict[str, Any]) -> str:
     the header outside the spotlight markers. A crawl time is not an effective
     date and is never shown as one.
     """
-    header = f"[{index}] Source: {passage.get('source', 'unknown')}"
-    page = passage.get("page", "")
+    source = fence_prompt_header_field(passage.get("source") or "unknown") or "unknown"
+    header = f"[{index}] Source: {source}"
+    page = fence_prompt_header_field(passage.get("page", ""))
     if page:
         header += f", Page {page}"
-    edition = str(passage.get("fiscal_year") or "").strip()
+    edition = fence_prompt_header_field(passage.get("fiscal_year") or "")
     if edition:
         header += f", Edition: {edition}"
-    effective = str(passage.get("effective_date") or "").strip()
-    if effective and effective not in (edition, str(passage.get("crawled_at") or "").strip()):
+    crawled = fence_prompt_header_field(passage.get("crawled_at") or "")
+    effective = fence_prompt_header_field(passage.get("effective_date") or "")
+    if effective and effective not in (edition, crawled):
         header += f", Effective: {effective}"
     # Only a validated date reaches a line outside the spotlight markers.
     published = str(passage.get("published_at") or "").strip()
@@ -596,19 +619,59 @@ def _passage_header(index: int, passage: dict[str, Any]) -> str:
         header += f", Published: {published}"
     # Live evidence says what it is, from fields this system wrote: the model is
     # told an adviser's blog is commentary rather than left to guess from a URL.
-    retrieved = str(passage.get("live_retrieved_at") or "").strip()
+    retrieved = fence_prompt_header_field(passage.get("live_retrieved_at") or "")
     if retrieved:
+        authority = fence_prompt_header_field(passage.get("live_authority") or "unknown") or "unknown"
+        evidence = fence_prompt_header_field(passage.get("live_evidence") or "unknown") or "unknown"
         header += (
             f", Live web retrieved {retrieved}"
-            f", Authority: {passage.get('live_authority') or 'unknown'}"
-            f", Evidence: {passage.get('live_evidence') or 'unknown'}"
+            f", Authority: {authority}"
+            f", Evidence: {evidence}"
         )
-        published = str(passage.get("live_published") or "").strip()
-        if published:
-            header += f", Published: {published}"
+        live_published = fence_prompt_header_field(passage.get("live_published") or "")
+        if live_published:
+            header += f", Published: {live_published}"
         if passage.get("live_stale"):
             header += ", May be out of date"
     return header
+
+
+def _spotlight_passage(
+    index: int,
+    passage: dict[str, Any],
+    *,
+    tokenizer: Any = None,
+    max_tokens: int = 0,
+    max_chars: int = 0,
+) -> tuple[str, str]:
+    """Scrub, fence, and wrap one passage. The body cannot close the fence.
+
+    Used by the standard prompt, the tool-calling prompt, and the cloud
+    fallback. The tool path used to emit predictable ``p1`` ids; it now uses
+    the same hash marker as retrieval (ADR-0027).
+    """
+    raw_text = passage.get("text") or passage.get("answer") or passage.get("question") or ""
+    scrubbed, _was_scrubbed = scan_retrieved_text(str(raw_text))
+    body = fence_spotlight_body(scrubbed)
+    if tokenizer is not None and max_tokens > 0:
+        body = fence_spotlight_body(_trim_to_tokens(tokenizer, body, max_tokens))
+    elif max_chars > 0:
+        body = fence_spotlight_body(body[:max_chars])
+    source = fence_prompt_header_field(passage.get("source") or "unknown") or "unknown"
+    marker = _passage_marker(source, index)
+    header = _passage_header(index, passage)
+    return f"{header}\n<passage id=\"{marker}\">{body}</passage>", body
+
+
+def _fence_system_aside(text: str) -> str:
+    """Scrub and fence text that is appended to the system prompt.
+
+    Personalization and tone hints sit above the passage fence. A heading or
+    an instruction phrase there is read as a system rule (OWASP LLM08:2026
+    hidden context), so it is scrubbed and fenced before it is appended.
+    """
+    scrubbed, _was_scrubbed = scan_retrieved_text(text)
+    return fence_spotlight_body(scrubbed)
 
 
 def _build_messages(
@@ -641,7 +704,7 @@ def _build_messages(
             "\n\n## Consent-granted personalization context\n"
             "Use this only to tailor explanation depth, examples, and workflow defaults. "
             "Do not treat it as live URA account data.\n"
-            f"{other_personalization}"
+            f"{_fence_system_aside(other_personalization)}"
         )
     if context_summary:
         system_content += (
@@ -653,7 +716,7 @@ def _build_messages(
             "</prior-conversation-context>"
         )
     if tone_hint:
-        system_content += f"\n\n## This turn\n{tone_hint.strip()}"
+        system_content += f"\n\n## This turn\n{_fence_system_aside(tone_hint.strip())}"
     if calc_ground_truth or _is_t3_endpoint(endpoint, tier=tier):
         system_content += f"\n\n{COMPLEX_ANSWER_CONTRACT}"
 
@@ -721,23 +784,14 @@ def _build_messages(
     # this and never the raw retrieval payload.
     prepared_passages: list[tuple[int, str]] = []
     for i, p in enumerate(passages, 1):
-        source = p.get("source", "unknown")
-        raw_text = p.get("text") or p.get("answer", "")
-
-        # LLM01 indirect injection scrub
-        scrubbed, _was_scrubbed = scan_retrieved_text(raw_text)
-
-        # Tokenizer-aware trim
-        trimmed = _trim_to_tokens(tokenizer, scrubbed, per_passage)
-
-        # Spotlight marker: per-passage hash the model cannot forge
-        marker = _passage_marker(source, i)
-        parts.append(_passage_header(i, p))
-        parts.append(f'<passage id="{marker}">{trimmed}</passage>')
+        block, trimmed = _spotlight_passage(
+            i, p, tokenizer=tokenizer, max_tokens=per_passage
+        )
+        parts.append(block)
         parts.append("")
         prepared_passages.append((i, trimmed))
 
-    parts.append(f"## User question\n{query}")
+    parts.append(f"## User question\n{fence_spotlight_body(query)}")
     parts.append("")
 
     if calc_ground_truth:
@@ -3080,7 +3134,7 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
             "\n\n## Consent-granted personalization context\n"
             "Use this only to tailor the explanation style and defaults. "
             "Do not treat it as live URA account data.\n"
-            f"{other_personalization}"
+            f"{_fence_system_aside(other_personalization)}"
         )
     if context_summary:
         system_content += (
@@ -3092,7 +3146,7 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
             "</prior-conversation-context>"
         )
     if tone_hint:
-        system_content += f"\n\n## This turn\n{tone_hint.strip()}"
+        system_content += f"\n\n## This turn\n{_fence_system_aside(tone_hint.strip())}"
     if calc_ground_truth or _is_t3_endpoint(endpoint, tier=tier):
         system_content += f"\n\n{COMPLEX_ANSWER_CONTRACT}"
     system_content = _inject_statutory_precedences(system_content)
@@ -3117,13 +3171,12 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
             "## Pre-fetched passages (you may use these OR call search_ura_knowledge_base for more)"
         ]
         for i, p in enumerate(passages, 1):
-            raw_text = p.get("text") or p.get("answer", "")
-            scrubbed, _ = scan_retrieved_text(raw_text)
-            trimmed = _trim_to_tokens(_tokenizer, scrubbed, 250)
-            parts.append(_passage_header(i, p))
-            parts.append(f'<passage id="p{i}">{trimmed}</passage>')
+            block, _trimmed = _spotlight_passage(
+                i, p, tokenizer=_tokenizer, max_tokens=250
+            )
+            parts.append(block)
             parts.append("")
-        parts.append(f"## User question\n{query}")
+        parts.append(f"## User question\n{fence_spotlight_body(query)}")
         if calc_ground_truth:
             parts.append("\n" + _format_verified_scenario_ground_truth(calc_ground_truth))
         if locale != "en" and can_generate_in_locale(locale):
@@ -3150,7 +3203,7 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
         messages.append(
             {
                 "role": "user",
-                "content": f"{locale_hint}{query}{calc_note}",
+                "content": f"{locale_hint}{fence_spotlight_body(query)}{calc_note}",
             }
         )
 
@@ -3267,7 +3320,11 @@ def _connector_turn_note(connector_tools: list[tuple[str, dict[str, Any]]]) -> s
     by_namespace: dict[str, list[str]] = {}
     for namespace, descriptor in connector_tools:
         by_namespace.setdefault(namespace, []).append(str(descriptor.get("name", "")))
-    listing = "\n".join(f"- {namespace}: {', '.join(names)}" for namespace, names in by_namespace.items())
+    listing = "\n".join(
+        f"- {fence_prompt_header_field(namespace, limit=80) or 'service'}: "
+        f"{', '.join(fence_prompt_header_field(name, limit=80) for name in names)}"
+        for namespace, names in by_namespace.items()
+    )
     return (
         "## Services the taxpayer chose for this chat\n"
         "They asked to use these services, so when a question is about something one of them looks up, "
@@ -3365,6 +3422,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
     endpoint: Any = None,
     tier: Any = None,
     cancel_event: Any = None,
+    tool_call_budget: ToolCallBudget | None = None,
 ) -> dict[str, Any]:
     """Run a bounded tool-calling loop with the local Qwen3 model.
 
@@ -3575,11 +3633,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
     tool_calls_made: list[dict[str, Any]] = []
     last_response = ""
     truncated = False
-    budget = ToolCallBudget(
-        max_total_calls=TOOL_MAX_CALLS_PER_TURN,
-        max_calls_per_iteration=TOOL_MAX_CALLS_PER_ITERATION,
-        max_calls_per_tool=TOOL_MAX_CALLS_PER_TOOL,
-    )
+    budget = tool_call_budget or new_tool_call_budget()
 
     def _emit(event: dict[str, Any]) -> None:
         if event_callback is None:

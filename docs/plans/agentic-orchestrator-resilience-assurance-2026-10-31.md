@@ -299,7 +299,7 @@ below is still open.
 | G367 | Supervisor confidences are constants, not calibrated probabilities. Tier selection reads them. | Backend, evaluation |
 | G368 | After a reasoner timeout, T1 can repeat a tool call that was in flight. Tickets dedupe; other side-effecting tools rely on their idempotency key. | Backend |
 | G369 | With every model down and only web commentary found, the commentary is served, labelled as a fallback. Serving it or abstaining is a product decision. | Service owner |
-| G370 | A `verify_claims` error is logged at debug and the reply continues, so a claim check that is down is silent. Closing it means deciding whether a verifier outage withholds answers. | Backend, service owner |
+| G370 | A `verify_claims` error was logged at debug and the reply continued, so a claim check that was down was silent. | Closed 2026-11-06 (ADR-0028): record `unavailable`, lower a high confidence assessment, and disclose the missing check. Keep the otherwise usable answer because checker failure does not establish that its claims are false. |
 | G372 | A change made directly on the Space is still deleted by the next roll, without warning. | Platform |
 | G373 | One optional feature that cannot start stops the whole API. | Backend |
 | G374 | Nothing raises an alarm when the Space is down: the keepalive passes on a 502, and a failed roll leaves the broken image live. | Platform |

@@ -132,7 +132,9 @@ def publish(event: dict[str, Any]) -> None:
     try:
         payload = json.dumps(event)
         if len(payload) > 7000:  # NOTIFY payloads are capped at 8000 bytes
-            payload = json.dumps({k: event[k] for k in ("event", "id", "priority") if k in event})
+            payload = json.dumps(
+                {k: event[k] for k in ("event", "id", "tenant_id", "priority") if k in event}
+            )
         with pool.connection() as conn:
             with conn.cursor() as cur:
                 # pg_notify(), not NOTIFY: the latter is a utility
@@ -182,6 +184,9 @@ def build_event(ticket: dict[str, Any], event_type: str = "escalation.created") 
     event = {
         "event": event_type,
         "id": ticket.get("id", ""),
+        # Internal routing metadata. ticket_ws removes this before a matched
+        # event is sent to the browser (G362, ADR-0028).
+        "tenant_id": ticket.get("tenant_id") or "default",
         "priority": ticket.get("priority", "normal"),
         "status": ticket.get("status", "open"),
         "team": ticket.get("team", ""),

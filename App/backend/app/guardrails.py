@@ -526,6 +526,80 @@ def scan_replayed_text(text: str) -> tuple[str, bool]:
     return scrubbed, True
 
 
+# Spotlight delimiters are a boundary only when the untrusted body cannot
+# write them. Microsoft spotlighting and OWASP LLM01:2026 treat a closing
+# tag inside retrieved text as a breakout: the instructions that follow sit
+# outside the data region the system prompt told the model to ignore.
+_PASSAGE_TAG_RE = re.compile(
+    # Keep whitespace on the two sides of an optional slash separate: the
+    # literal slash makes those runs unambiguous to the regex engine. Two
+    # adjacent ``\s*`` quantifiers backtrack quadratically on long tab runs.
+    r"<(?:[ \t]*/[ \t]*|[ \t]*)passage\b[^>\n]{0,120}>?",
+    re.IGNORECASE,
+)
+_PROMPT_SECTION_HEADING_RE = re.compile(
+    r"(?im)^[ \t]{0,3}#{1,6}[ \t]*("
+    r"user question[^\n]*"
+    r"|retrieved passages[^\n]*"
+    r"|pre-fetched passages[^\n]*"
+    r"|answer language[^\n]*"
+    r"|verified scenario ground truth[^\n]*"
+    r"|verified statutory[^\n]*"
+    r"|critical instructions for this turn[^\n]*"
+    r"|consent-granted personalization context[^\n]*"
+    r"|prior conversation context[^\n]*"
+    r"|this turn[ \t]*$"
+    r"|rules[ \t]*$"
+    r")"
+)
+_PASSAGE_MARKER_REMOVED = "[passage-marker removed]"
+
+
+def fence_spotlight_body(text: str) -> str:
+    """Keep untrusted text from closing or forging a ``<passage>`` fence.
+
+    Invisible characters are removed first, so a zero-width break cannot hide
+    the tag from this check while the model still reads it. Fullwidth
+    brackets are folded only when one is present. A prompt section heading
+    the assembler itself emits (``## User question``, ``## Rules``) is
+    demoted; a statutory heading such as ``## Rules of origin`` is left as
+    written. Returns the fenced text. Records one indirect-injection event
+    when a tag or section heading was rewritten.
+    """
+    if not text:
+        return ""
+    cleaned = _strip_invisible_chars(text)
+    if "\uff1c" in cleaned or "\uff1e" in cleaned:
+        cleaned = _strip_invisible_chars(unicodedata.normalize("NFKC", cleaned))
+    before = cleaned
+    cleaned = _PASSAGE_TAG_RE.sub(_PASSAGE_MARKER_REMOVED, cleaned)
+    cleaned = _PROMPT_SECTION_HEADING_RE.sub(r"[section] \1", cleaned)
+    if cleaned != before:
+        _record_guardrail_security_event(
+            "guardrail_indirect_injection",
+            reason="spotlight_breakout",
+        )
+    return cleaned
+
+
+def fence_prompt_header_field(value: object, *, limit: int = 180) -> str:
+    """One single-line header field that cannot open a new prompt section.
+
+    Passage headers sit outside the spotlight. A source, title, or tool name
+    with a newline, a ``#`` heading, or a passage tag would be read as
+    structure rather than as a label.
+    """
+    text = _strip_invisible_chars(str(value or ""))
+    if "\uff1c" in text or "\uff1e" in text:
+        text = _strip_invisible_chars(unicodedata.normalize("NFKC", text))
+    text = text.replace("\r", " ").replace("\n", " ").replace("#", "")
+    text = _PASSAGE_TAG_RE.sub(" ", text)
+    text = " ".join(text.split())
+    if len(text) > limit:
+        text = text[:limit].rstrip()
+    return text
+
+
 def is_official_ura_email(email: str) -> bool:
     """Return True if email is an official public contact address for URA or Uganda gov."""
     addr = email.strip().strip(".,;:\"'").lower()

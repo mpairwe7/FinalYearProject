@@ -34,6 +34,7 @@ App/
 │   │   ├── workflows/       # 21 YAML-driven guided journeys (TIN, filing, PRN, Cross-MDA NTR, New-Taxpayer Relief, TCC, objections, customs) + Journey Copilot
 │   │   ├── scenario_planner.py # Deterministic multi-tool planner & Verified Statutory Facts injection
 │   │   ├── calculator_router.py # Single-calculator fast path & multi-turn figure carryover
+│   │   ├── docling_intelligence.py # Docling DocumentIR, XY-Cut reading order, furniture stripping & TripletTableSerializer (ADR-0026)
 │   │   ├── pdf_corpus.py    # Statutory & 10-MDA PDF harvester (186 PDFs → 5,639 chunks, ADR-0009)
 │   │   ├── web_research.py  # 9-trigger live check, source authority & evidence labelling (ADR-0008, ADR-0021)
 │   │   ├── ephemeral_pdf_sandbox.py # Ephemeral tmpfs PDF/XLSX sandbox + GPU micro-reranking (ADR-0008)

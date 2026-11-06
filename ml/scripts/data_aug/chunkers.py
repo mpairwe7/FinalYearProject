@@ -106,6 +106,7 @@ _INLINE_QA_SPLIT_RE = re.compile(
 _PARAGRAPH_SPLIT = re.compile(r"\n[ \t]*\n+")
 _TABLE_LINE_RE = re.compile(r"^\s*\|.+\|\s*$")
 _TABLE_SEP_LINE_RE = re.compile(r"^\s*\|\s*[:\-]+(?:\s*\|\s*[:\-]+)*\s*\|\s*$")
+_UNESCAPED_PIPE_RE = re.compile(r"(?<!\\)\|")
 _PAGE_MARKER_RE = re.compile(r"<!--\s*page:(\d+)\s*-->")
 _FURNITURE_LINE_RE = re.compile(
     r"^\s*(?:(?:DOMESTIC\s+TAX\s+LAWS\s+OF\s+UGANDA\s*)?\d+\s*\|\s*P\s*a\s*g\s*e|"
@@ -113,6 +114,11 @@ _FURNITURE_LINE_RE = re.compile(
     r"THE\s+UGANDA\s+GAZETTE)\s*$",
     re.IGNORECASE,
 )
+
+
+def _count_md_cols(line: str) -> int:
+    """Count Markdown table columns using unescaped pipes (ignoring ``\\|``, G451)."""
+    return max(0, len(_UNESCAPED_PIPE_RE.findall(line or "")) - 1)
 
 
 def _is_markdown_table_block(para: str) -> bool:
@@ -140,7 +146,7 @@ def _split_markdown_table_rows(
         header_lines = lines[:2]
         data_lines = lines[2:]
     else:
-        num_cols = max(1, lines[0].count("|") - 1)
+        num_cols = max(1, _count_md_cols(lines[0]))
         sep = "| " + " | ".join(["---"] * num_cols) + " |"
         header_lines = [lines[0], sep]
         data_lines = lines[1:]
@@ -176,7 +182,7 @@ def _split_markdown_table_rows(
 
 
 def _stitch_cross_page_tables(markdown: str) -> str:
-    """Stitch Markdown tables split across page breaks (`---` or `<!-- page:N -->`) when columns match (G446)."""
+    """Stitch Markdown tables split across page breaks (`---` or `<!-- page:N -->`) when columns match (G446, G451, G452)."""
     if not markdown or "|" not in markdown:
         return markdown
 
@@ -194,25 +200,33 @@ def _stitch_cross_page_tables(markdown: str) -> str:
         if _TABLE_LINE_RE.match(line):
             j = i + 1
             saw_break = False
+            page_markers: list[str] = []
             while j < n:
                 cand = lines[j].strip()
                 if not cand or _FURNITURE_LINE_RE.match(cand):
                     j += 1
                     continue
-                if cand == "---" or _PAGE_MARKER_RE.fullmatch(cand):
+                if cand == "---":
                     saw_break = True
+                    j += 1
+                    continue
+                if _PAGE_MARKER_RE.fullmatch(cand):
+                    saw_break = True
+                    page_markers.append(cand)
                     j += 1
                     continue
                 break
 
             if saw_break and j < n and _TABLE_LINE_RE.match(lines[j]):
-                prev_cols = line.count("|") - 1
-                next_cols = lines[j].count("|") - 1
+                prev_cols = _count_md_cols(line)
+                next_cols = _count_md_cols(lines[j])
                 if prev_cols >= 2 and prev_cols == next_cols:
                     k = len(out) - 1
-                    while k >= 0 and _TABLE_LINE_RE.match(out[k]):
+                    while k >= 0 and (_TABLE_LINE_RE.match(out[k]) or _PAGE_MARKER_RE.fullmatch(out[k].strip())):
                         k -= 1
                     table_start_idx = k + 1
+                    while table_start_idx < len(out) and _PAGE_MARKER_RE.fullmatch(out[table_start_idx].strip()):
+                        table_start_idx += 1
                     first_header_norm = re.sub(r"\s+", " ", out[table_start_idx].strip().lower())
                     next_first_norm = re.sub(r"\s+", " ", lines[j].strip().lower())
 
@@ -220,10 +234,14 @@ def _stitch_cross_page_tables(markdown: str) -> str:
                         j += 1
                         if j < n and _TABLE_SEP_LINE_RE.match(lines[j]):
                             j += 1
+                        for pm in page_markers:
+                            out.append(pm)
                         i = j
                         continue
                     if not (j + 1 < n and _TABLE_SEP_LINE_RE.match(lines[j + 1])):
                         # Continuation rows without a new header/separator
+                        for pm in page_markers:
+                            out.append(pm)
                         i = j
                         continue
         i += 1
@@ -677,8 +695,8 @@ def chunk_markdown(
     if not markdown:
         return
 
-    clean_md, page_spans = _extract_page_spans_and_strip_markers(markdown)
-    clean_md = _stitch_cross_page_tables(clean_md)
+    stitched_md = _stitch_cross_page_tables(markdown)
+    clean_md, page_spans = _extract_page_spans_and_strip_markers(stitched_md)
 
     sections = _split_headings(clean_md)
     if not sections:

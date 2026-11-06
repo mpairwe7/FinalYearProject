@@ -2436,22 +2436,30 @@ def compose_sla_stats(
     return out_stats
 
 
-def sla_stats(days: int = 30) -> dict[str, Any]:
+def sla_stats(days: int = 30, tenant_id: str | None = None) -> dict[str, Any]:
     """Time-to-first-response, next-reply, and live breach counts."""
     conn = _get_connection()
     now = time.time()
     cutoff = now - (days * 86400)
-    period = conn.execute(
-        """SELECT created_at, first_response_at, resolved_at, reply_at
-           FROM tickets WHERE created_at >= ?""",
-        (cutoff,),
-    ).fetchall()
-    opened = conn.execute(
+    period_sql = (
+        "SELECT created_at, first_response_at, resolved_at, reply_at "
+        "FROM tickets WHERE created_at >= ?"
+    )
+    open_sql = (
         # assignee last: compose_sla_stats reads the first four positionally
         # for the Postgres tuples, so a new column has to go on the end.
-        """SELECT created_at, first_response_at, reply_at, status, assignee
-           FROM tickets WHERE status IN ('open', 'assigned')""",
-    ).fetchall()
+        "SELECT created_at, first_response_at, reply_at, status, assignee "
+        "FROM tickets WHERE status IN ('open', 'assigned')"
+    )
+    period_params: list[Any] = [cutoff]
+    open_params: list[Any] = []
+    if tenant_id:
+        period_sql += " AND tenant_id = ?"
+        open_sql += " AND tenant_id = ?"
+        period_params.append(tenant_id)
+        open_params.append(tenant_id)
+    period = conn.execute(period_sql, period_params).fetchall()
+    opened = conn.execute(open_sql, open_params).fetchall()
     return compose_sla_stats(period_rows=period, open_rows=opened, days=days, now=now)
 
 
@@ -4333,27 +4341,34 @@ def delete_user_cascade(
     return counts
 
 
-def ticket_stats(days: int = 30) -> dict[str, Any]:
+def ticket_stats(days: int = 30, tenant_id: str | None = None) -> dict[str, Any]:
     """Aggregate ticket statistics for the admin dashboard."""
     conn = _get_connection()
     cutoff = time.time() - (days * 86400)
-    row = conn.execute(
-        """SELECT
-             COUNT(*) as total,
-             COALESCE(SUM(CASE WHEN status='open'     THEN 1 ELSE 0 END), 0) as open_count,
-             COALESCE(SUM(CASE WHEN status='assigned' THEN 1 ELSE 0 END), 0) as assigned_count,
-             COALESCE(SUM(CASE WHEN status='resolved' THEN 1 ELSE 0 END), 0) as resolved_count,
-             COALESCE(SUM(CASE WHEN status='wontfix'  THEN 1 ELSE 0 END), 0) as wontfix_count
-           FROM tickets
-           WHERE created_at >= ?""",
-        (cutoff,),
-    ).fetchone()
-    by_priority = conn.execute(
-        """SELECT priority, COUNT(*) as cnt FROM tickets
-           WHERE created_at >= ?
-           GROUP BY priority ORDER BY cnt DESC""",
-        (cutoff,),
-    ).fetchall()
+    totals_sql = (
+        "SELECT "
+        "COUNT(*) as total, "
+        "COALESCE(SUM(CASE WHEN status='open'     THEN 1 ELSE 0 END), 0) as open_count, "
+        "COALESCE(SUM(CASE WHEN status='assigned' THEN 1 ELSE 0 END), 0) as assigned_count, "
+        "COALESCE(SUM(CASE WHEN status='resolved' THEN 1 ELSE 0 END), 0) as resolved_count, "
+        "COALESCE(SUM(CASE WHEN status='wontfix'  THEN 1 ELSE 0 END), 0) as wontfix_count "
+        "FROM tickets WHERE created_at >= ?"
+    )
+    priority_sql = (
+        "SELECT priority, COUNT(*) as cnt FROM tickets "
+        "WHERE created_at >= ? GROUP BY priority ORDER BY cnt DESC"
+    )
+    params: list[Any] = [cutoff]
+    if tenant_id:
+        totals_sql += " AND tenant_id = ?"
+        priority_sql = (
+            "SELECT priority, COUNT(*) as cnt FROM tickets "
+            "WHERE created_at >= ? AND tenant_id = ? "
+            "GROUP BY priority ORDER BY cnt DESC"
+        )
+        params.append(tenant_id)
+    row = conn.execute(totals_sql, params).fetchone()
+    by_priority = conn.execute(priority_sql, params).fetchall()
     return {
         "period_days": days,
         "total": row["total"] or 0,

@@ -1530,7 +1530,7 @@ def update_ticket(
     return touched
 
 
-def ticket_stats(days: int = 30) -> dict[str, Any]:
+def ticket_stats(days: int = 30, tenant_id: str | None = None) -> dict[str, Any]:
     """Same shape and signature as :func:`database.ticket_stats`."""
     pool = _get_pool()
     empty = {
@@ -1546,17 +1546,28 @@ def ticket_stats(days: int = 30) -> dict[str, Any]:
         return empty
     cutoff = time.time() - (days * 86400)
     with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            """SELECT status, COUNT(*) FROM tickets
-               WHERE created_at >= %s GROUP BY status""",
-            (cutoff,),
+        status_sql = (
+            "SELECT status, COUNT(*) FROM tickets WHERE created_at >= %s GROUP BY status"
         )
+        priority_sql = (
+            "SELECT priority, COUNT(*) FROM tickets WHERE created_at >= %s "
+            "GROUP BY priority ORDER BY COUNT(*) DESC"
+        )
+        params: list[Any] = [cutoff]
+        if tenant_id:
+            status_sql = (
+                "SELECT status, COUNT(*) FROM tickets "
+                "WHERE created_at >= %s AND tenant_id = %s GROUP BY status"
+            )
+            priority_sql = (
+                "SELECT priority, COUNT(*) FROM tickets "
+                "WHERE created_at >= %s AND tenant_id = %s "
+                "GROUP BY priority ORDER BY COUNT(*) DESC"
+            )
+            params.append(tenant_id)
+        cur.execute(status_sql, params)
         by_status = {r[0]: r[1] for r in cur.fetchall()}
-        cur.execute(
-            """SELECT priority, COUNT(*) FROM tickets
-               WHERE created_at >= %s GROUP BY priority ORDER BY COUNT(*) DESC""",
-            (cutoff,),
-        )
+        cur.execute(priority_sql, params)
         by_priority = {r[0]: r[1] for r in cur.fetchall()}
     return {
         "period_days": days,
@@ -1658,7 +1669,7 @@ def mark_reply_delivered(ticket_id: str) -> bool:
     return touched
 
 
-def sla_stats(days: int = 30) -> dict[str, Any]:
+def sla_stats(days: int = 30, tenant_id: str | None = None) -> dict[str, Any]:
     """Postgres mirror of :func:`database.sla_stats`."""
     from .database import compose_sla_stats
 
@@ -1668,18 +1679,26 @@ def sla_stats(days: int = 30) -> dict[str, Any]:
         return compose_sla_stats(period_rows=[], open_rows=[], days=days, now=now)
     cutoff = now - (days * 86400)
     with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
+        period_sql = (
             "SELECT created_at, first_response_at, resolved_at, reply_at "
-            "FROM tickets WHERE created_at >= %s",
-            (cutoff,),
+            "FROM tickets WHERE created_at >= %s"
         )
-        period = cur.fetchall()
-        cur.execute(
+        open_sql = (
             # assignee last — compose_sla_stats reads these tuples
             # positionally, so a new column has to go on the end.
             "SELECT created_at, first_response_at, reply_at, status, assignee "
-            "FROM tickets WHERE status IN ('open', 'assigned')",
+            "FROM tickets WHERE status IN ('open', 'assigned')"
         )
+        period_params: list[Any] = [cutoff]
+        open_params: list[Any] = []
+        if tenant_id:
+            period_sql += " AND tenant_id = %s"
+            open_sql += " AND tenant_id = %s"
+            period_params.append(tenant_id)
+            open_params.append(tenant_id)
+        cur.execute(period_sql, period_params)
+        period = cur.fetchall()
+        cur.execute(open_sql, open_params)
         opened = cur.fetchall()
     return compose_sla_stats(period_rows=period, open_rows=opened, days=days, now=now)
 

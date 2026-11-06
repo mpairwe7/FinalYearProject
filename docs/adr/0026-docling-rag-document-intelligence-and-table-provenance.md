@@ -1,14 +1,14 @@
-# ADR-0026: Docling RAG Document Intelligence, Multi-Column Reading Order, Table Triplet Serialization & Page/Shadow Provenance (G441–G450)
+# ADR-0026: Docling RAG Document Intelligence, Multi-Column Reading Order, Table Triplet Serialization & Page/Shadow Provenance (G441–G457)
 
 ## Status
 
-Accepted — 2026-11-06
+Accepted (amended with second-pass QA hardening G451–G457) — 2026-11-06
 
 ## Context and Problem Statement
 
 As a high-stakes government tax administration platform serving the Uganda Revenue Authority (URA), the assistant ingests statutory Acts, Parliamentary Tax Bills, Uganda Gazette notices, 10-MDA fee schedules (`Data/pdfs/`), live-researched URA Public Notices (`ephemeral_pdf_sandbox.py`), and taxpayer-uploaded receipts, invoices, and assessment notices (`documents.py`).
 
-A November 2026 QA and audit review benchmarked against **IBM Docling** (Livathinos et al. 2025; Heron Layout Model `arXiv:2509.11720`; Granite-Docling; `DoclingDocument`; `HybridChunker`; `TableFormer`; `TripletTableSerializer`), **Citation-Enforced Fiscal RAG (`arXiv:2603.14170`)**, and **HierFinRAG (2026)** identified 10 concrete document-intelligence gaps (`G441`–`G450`) plus a `PyMuPDF` `import fitz` deprecation across the codebase:
+A November 2026 two-pass QA and audit review benchmarked against **IBM Docling** (Livathinos et al. 2025; Heron Layout Model `arXiv:2509.11720`; Granite-Docling; `DoclingDocument`; `HybridChunker`; `TableFormer`; `TripletTableSerializer`), **Citation-Enforced Fiscal RAG (`arXiv:2603.14170`)**, and **HierFinRAG (2026)** identified 17 concrete document-intelligence and container supply-chain gaps (`G441`–`G457`) plus a `PyMuPDF` `import fitz` deprecation across the codebase:
 
 1. **`G441` — Missing Unified Docling IR & Duplicate Table-Text Emission in Corpus Extraction**: `ml/scripts/data_aug/chunkers.py` (`extract_markdown`) called `page.extract_text()` (which extracted unformatted table cell text inline) and then appended `page.extract_tables()` at the bottom of the page, duplicating every table twice per page. Runtime and offline pipelines also lacked a unified `DoclingDocument` adapter (`docling_intelligence.py`).
 2. **`G442` — Multi-Column Reading-Order Corruption**: `glyph_fusion.py` (`fuse_page_glyphs_and_ocr`) concatenated tokens in raw stream order and appended `ocr_inset` tokens at the end of the page, causing horizontal cross-gutter line interleaving on two-column Uganda Gazette notices and statutory bills.
@@ -20,6 +20,13 @@ A November 2026 QA and audit review benchmarked against **IBM Docling** (Livathi
 8. **`G448` — Missing Merged-Cell (`col_span`) Header Propagation, Cell Bounding Boxes, Scanned-PDF Table Structuring & Docling `TripletTableSerializer`**: `detect_pdf_vector_table_grid` hardcoded cell `bbox=[0,0,0,0]` and turned horizontal merged header cells (`None`) into empty strings `""`; `StructuredTable` and `TableSummary` lacked Docling `TripletTableSerializer` semantic triplets (`[Table | RowKey] ColHeader = Value`); and scanned PDFs (`ocr_used=True`) passed empty `raw_text` to `structure_document_tables`.
 9. **`G449` — Table Cell Pipe-Spoofing & Prompt-Injection Sanitization**: `StructuredTable.to_markdown()` and `documents._summarize_table()` did not escape internal `|` pipes or scrub bidi/control characters and prompt-injection payloads inside table cells.
 10. **`G450` — Unaudited Vector-vs-OCR Shadow Discrepancies in HITL Routing**: `fuse_page_glyphs_and_ocr` flagged `consistent=False` when embedded PDF vector text disagreed with visual OCR on the same bounding box (a classic font-remapping or PDF shadow-layer forgery vector), but `documents.py` and `hitl_routing.py` never escalated the discrepancy.
+11. **`G451` — Escaped Pipe (`\|`) Column-Count Drift in Table Splitting & Cross-Page Stitching**: Naive `line.count("|") - 1` counted escaped `\|` pipes inside cells as column delimiters, breaking column-count matching during cross-page table stitching and separator generation.
+12. **`G452` — Page Marker Loss & Offset Drift Across Stitched Multi-Page Tables**: Dropping `<!-- page:N -->` markers during cross-page table stitching caused stitched tables to report only their starting page (`"1"` instead of `"1-2"`), and running `_stitch_cross_page_tables` after `_extract_page_spans_and_strip_markers` in `chunkers.py` shifted post-table character offsets.
+13. **`G453` — Unbounded `max_num_pages` / `max_file_size`, Unscrubbed Items & Missing Table Triplets in `_convert_via_docling_library`**: The native `docling` converter bridge did not enforce `max_pages` / `max_file_size`, did not scrub extracted items through `scan_retrieved_text`, and left `table_matrix` / `table_triplets` empty on `DoclingItem(label="table")`.
+14. **`G454` — Two-Row Compound Header Fusion & Vertical Merged Category (`row_span`) Forward-Fill**: `propagate_merged_table_headers` handled horizontal `col_span` in row 0 but did not fuse 2-row compound headers (`["Withholding Tax Rate", None]` + `[None, "Resident", "Non-Resident"]`) or forward-fill vertically merged category cells (`None` in column 0 across sub-rows).
+15. **`G455` — Multi-Word Vector Line Masking in `fuse_page_glyphs_and_ocr`**: Matching an OCR line box (`"Total: UGX 9,100,000"`) against only the single first overlapping vector word (`"Total:"`) allowed `"total" in "totalugx9100000"` to evaluate `consistent=True`, masking a tampered numeric glyph (`"100,000"` vs `"9,100,000"`) on the same line.
+16. **`G456` — Table-Glyph Deduplication & Vertical Paragraph Segmentation in `convert_document_bytes`**: `convert_document_bytes` included vector glyphs inside table bounding boxes in prose items and joined all page lines with single `\n` without vertical-gap paragraph segmentation.
+17. **`G457` — Debian Bookworm `apt` / `libapt-pkg6.0` `CVE-2026-109518` Hardening in `Dockerfile`**: Upgraded `apt` and `libapt-pkg6.0` (`2.6.1 -> 2.6.2`) in both `builder` and `runtime` stages of `Dockerfile`.
 
 ## Decision Outcome
 

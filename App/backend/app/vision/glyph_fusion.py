@@ -220,6 +220,7 @@ def fuse_page_glyphs_and_ocr(
             ocr_bbox = [0.0, 0.0, 0.0, 0.0]
 
         ocr_area = _bbox_area(ocr_bbox)
+        overlapping_glyphs: list[VectorGlyph] = []
         matched_glyph: VectorGlyph | None = None
         max_overlap = 0.0
 
@@ -230,19 +231,32 @@ def fuse_page_glyphs_and_ocr(
                     continue
                 intersection = _bbox_intersection(ocr_bbox, glyph.bbox)
                 overlap = intersection / min(ocr_area, glyph_area)
-                if overlap > max_overlap and overlap >= min_overlap_ratio:
-                    max_overlap = overlap
-                    matched_glyph = glyph
+                if overlap >= min_overlap_ratio:
+                    overlapping_glyphs.append(glyph)
+                    if overlap > max_overlap:
+                        max_overlap = overlap
+                        matched_glyph = glyph
 
         if matched_glyph is not None:
-            # Overlapping region: Vector glyph is already present. Record consistency note.
+            # G455: Compare OCR line against ALL overlapping vector glyphs on the line
+            # (prevents a prefix word like "Total:" from masking a numeric discrepancy on "100,000" vs "9,100,000").
+            ordered_overlaps = sorted(overlapping_glyphs, key=lambda g: (g.bbox[0] if len(g.bbox) >= 4 else 0.0))
+            combined_vec_text = " ".join(g.text for g in ordered_overlaps)
             norm_ocr = re.sub(r"[^a-zA-Z0-9]+", "", ocr_text).lower()
-            norm_vec = re.sub(r"[^a-zA-Z0-9]+", "", matched_glyph.text).lower()
+            norm_vec = re.sub(r"[^a-zA-Z0-9]+", "", combined_vec_text).lower()
             consistent = norm_ocr in norm_vec or norm_vec in norm_ocr
+            ocr_digits = re.sub(r"\D+", "", ocr_text)
+            vec_digits = re.sub(r"\D+", "", combined_vec_text)
+            if (ocr_digits or vec_digits) and ocr_digits != vec_digits:
+                consistent = False
 
-            # Find matching fused token and annotate
+            # Annotate the primary (or numeric-bearing) overlapping token
+            target_glyph = next(
+                (g for g in ordered_overlaps if any(ch.isdigit() for ch in g.text)),
+                matched_glyph,
+            )
             for token in fused_tokens:
-                if token.source == "vector_glyph" and token.text == matched_glyph.text and token.bbox == matched_glyph.bbox:
+                if token.source == "vector_glyph" and token.text == target_glyph.text and token.bbox == target_glyph.bbox:
                     token.alt_text = ocr_text
                     token.consistent = consistent
                     token.polygon = polygon

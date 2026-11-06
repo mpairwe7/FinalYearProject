@@ -31,9 +31,11 @@ from app.ticket_events import (
     build_event,
     hub,
 )
+from app.ticket_ws import filter_ticket_event
 
 TICKET = {
     "id": "tkt-1",
+    "tenant_id": "tenant-a",
     "priority": "urgent",
     "status": "open",
     "team": "customs",
@@ -71,6 +73,7 @@ class TestEventPayload:
         assert event["topic"] == "objection_or_dispute"
         assert event["sentiment"] == "frustration"
         assert event["transfer_style"] == "warm"
+        assert event["tenant_id"] == "tenant-a"
 
     def test_it_is_a_named_event(self):
         assert build_event(TICKET)["event"] == "escalation.created"
@@ -83,6 +86,19 @@ class TestEventPayload:
 
     def test_a_bare_ticket_does_not_break_it(self):
         assert build_event({"id": "x"})["id"] == "x"
+
+    def test_staff_socket_filter_scopes_tenant_and_removes_internal_tenant_id(self):
+        event = build_event(TICKET)
+        assert filter_ticket_event(event, tenant_id="tenant-b") is None
+        delivered = filter_ticket_event(event, tenant_id="tenant-a")
+        assert delivered is not None
+        assert delivered["id"] == "tkt-1"
+        assert "tenant_id" not in delivered
+
+    def test_team_filter_still_applies_after_tenant_filter(self):
+        event = build_event(TICKET)
+        assert filter_ticket_event(event, tenant_id="tenant-a", team="domestic") is None
+        assert filter_ticket_event(event, tenant_id=None, team="customs")["id"] == "tkt-1"
 
 
 class TestHubFanOut:
