@@ -275,7 +275,7 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("GET", "/v1/admin/tickets/sla"): "test_escalation_roundtrip.TestSLA",
     ("WS", "/v1/admin/tickets/stream"): "test_ticket_events.TestStaffOnlyAccess",
     ("GET", "/v1/admin/tickets/{ticket_id}"): "this:test_patch_ticket_updates_status",
-    ("PATCH", "/v1/admin/tickets/{ticket_id}"): "this:test_patch_ticket_updates_status + test_patch_ticket_noop_400",
+    ("PATCH", "/v1/admin/tickets/{ticket_id}"): "this:test_patch_ticket_updates_status + test_patch_ticket_unknown_id_is_hidden_404",
     ("POST", "/v1/admin/tickets/{ticket_id}/presence"): "test_api_endpoints.AdminEndpoints.test_presence_heartbeats_the_viewer",
     ("POST", "/v1/admin/tickets/{ticket_id}/end-chat"): "App/backend/tests/test_officer_chat.py:EndChatTests",
     ("GET", "/v1/admin/flags"): "test_api_endpoints.AdminEndpoints.test_flags_list_includes_protection",
@@ -807,13 +807,13 @@ def test_patch_ticket_updates_status():
     assert got.json()["assignee"] == "agent-007"
 
 
-def test_patch_ticket_noop_400():
-    """A valid-shaped but unknown ticket id touches no row → 400."""
+def test_patch_ticket_unknown_id_is_hidden_404():
+    """A missing ticket is hidden with 404, like a ticket in another tenant."""
     unknown = "0" * 36  # matches ^[a-f0-9-]{1,64}$
     r = _client().patch(
         f"/v1/admin/tickets/{unknown}?status=assigned", headers=_bearer(STAFF)
     )
-    assert r.status_code == 400
+    assert r.status_code == 404
 
 
 # ---------------------------------------------------------------------------

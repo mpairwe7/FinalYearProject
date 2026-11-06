@@ -58,6 +58,13 @@ def test_zero_width_and_fullwidth_tags_are_fenced() -> None:
     assert "[passage-marker removed]" in fence_spotlight_body(wide)
 
 
+def test_passage_tag_with_long_whitespace_runs_is_fenced() -> None:
+    malformed = "<" + ("\t" * 20_000) + "/\tpassage>"
+
+    assert "</passage>" not in fence_spotlight_body(malformed)
+    assert "[passage-marker removed]" in fence_spotlight_body(malformed)
+
+
 def test_header_fields_stay_on_one_line() -> None:
     header = _passage_header(
         1,

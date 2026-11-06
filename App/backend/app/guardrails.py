@@ -531,7 +531,10 @@ def scan_replayed_text(text: str) -> tuple[str, bool]:
 # tag inside retrieved text as a breakout: the instructions that follow sit
 # outside the data region the system prompt told the model to ignore.
 _PASSAGE_TAG_RE = re.compile(
-    r"<\s*/?\s*passage\b[^>\n]{0,120}>?",
+    # Keep whitespace on the two sides of an optional slash separate: the
+    # literal slash makes those runs unambiguous to the regex engine. Two
+    # adjacent ``\s*`` quantifiers backtrack quadratically on long tab runs.
+    r"<(?:[ \t]*/[ \t]*|[ \t]*)passage\b[^>\n]{0,120}>?",
     re.IGNORECASE,
 )
 _PROMPT_SECTION_HEADING_RE = re.compile(

@@ -27,6 +27,7 @@ Every prompt path — standard, tool-calling, and cloud fallback — builds pass
 - Header fields are single-line and cannot contain `#` or a passage tag.
 - Text appended to the system prompt (personalization, tone hint) is scrubbed and fenced the same way.
 - A rewritten tag or heading records `guardrail_indirect_injection` with reason `spotlight_breakout`.
+- The delimiter matcher keeps whitespace around the optional closing slash in disjoint regex branches, so attacker-controlled tab runs cannot cause polynomial backtracking (CodeQL `py/polynomial-redos`).
 
 The user question is fenced so it cannot forge a passage tag. Verified calculator facts stay outside this fence; they are produced by code.
 
@@ -39,4 +40,4 @@ The user question is fenced so it cannot forge a passage tag. Verified calculato
 
 ## Confirmation
 
-Verified by `tests/agents/test_spotlight_fence.py`. Threat T46 and ASI01 in `governance/ai_risk_manifest.yaml` cite the same fence.
+Verified by `tests/agents/test_spotlight_fence.py`, including a long-tab delimiter case. Threat T46 and ASI01 in `governance/ai_risk_manifest.yaml` cite the same fence.
