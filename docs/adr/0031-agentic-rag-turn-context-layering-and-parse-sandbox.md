@@ -47,10 +47,14 @@ the next upward import (G485).
 1. **Allowlisted child environment (G478).** `document_worker.child_environment` keeps only locale and
    runtime plumbing, `FLAG_*`, and the settings the extractors read (`DOCUMENT_*`, `OCR_*`, `VISION_*`,
    `DOCLING_*`, `SANDBOX_*` and a few more). It then drops anything secret-shaped by name and any value
-   carrying `user:password@`. A test derives the extractors' `os.getenv` names from their source, so an
-   extractor setting cannot be starved.
+   carrying `user:password@`. CA-bundle paths and proxy settings without credentials pass, so an OCR
+   service behind a private CA or a proxy still works. A test derives the extractors' `os.getenv`
+   names (single- or double-quoted literals) from their source, so a setting named that way cannot be
+   starved. One built from a variable is not seen.
 2. **1 GiB address-space cap by default (G479).** Every corpus PDF up to 50 MB parsed identically under
-   512 MiB, and a 1.5 GiB flate bomb was contained. Production refuses an explicit `0`.
+   512 MiB, and a 1.5 GiB flate bomb was contained. The worker and the production gate read the setting
+   the same way (`parse_mem_cap`). Production refuses zero, negative and unreadable values, and an
+   unreadable value falls back to the default rather than failing the import.
 3. **A fenced, scrubbed rewriter prompt (G480).** `REWRITE_SYSTEM` says the conversation and the
    follow-up are data. They sit in `<conversation>` and `<follow_up>`, each line spotlight-fenced and
    angle brackets escaped. A turn that carried an injection is left out whole, not scrubbed, because a
@@ -71,10 +75,27 @@ the next upward import (G485).
    retrieval, query, context and tool modules never do. And the graph may take no `service` private
    beyond the eight it takes today, whose extraction is tracked as G486.
 
+### Review amendments (PR #703)
+
+CodeRabbit's review produced 11 findings, and all were fixed:
+
+- CA bundles and credential-free proxies pass to the child.
+- The memory cap is parsed once, the same way in the worker and the production gate.
+- Both stored forms of a replayed turn are checked for injection.
+- A rewrite's identifiers must each be ones the taxpayer typed (`guardrails.pii_values`), not merely
+  any identifier when the conversation holds one.
+- The residual address exposure is stated here and in T66.
+- Two test defects were fixed: a TIN assertion that checked a number not in the input, and a layering
+  scan that skipped `memory/service.py` by name. The default-off flag test is isolated from
+  environment and in-memory overrides.
+
 ## Consequences
 
-- Positive: a compromised parser sees no secret and no internal service address, and cannot take the
-  host's memory.
+- Positive: a compromised parser sees no secret, no database, cache, vector store or model address, and no
+  webhook, and cannot take the host's memory.
+- Negative: the addresses the extractors themselves call stay visible to the child: `OCR_SERVICE_URL`,
+  `TRITON_OCR_URL` and the vision settings, when credential-free, plus any proxy. A compromised parser
+  can reach those services as the extractor would. Network isolation is the control for that (below).
 - Positive: the agentic retrieval step cannot be steered by an earlier turn, and cannot retrieve with a
   refusal or an answer. When it is turned on, it will do what it was written to do.
 - Positive: the lowest layer no longer depends on the highest, and new upward imports fail CI.

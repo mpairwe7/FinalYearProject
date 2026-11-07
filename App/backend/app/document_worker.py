@@ -27,7 +27,26 @@ _MAX_CHILD_FSIZE_BYTES = int(os.getenv("DOCUMENT_PARSE_MAX_FSIZE_BYTES", str(64 
 #: 50 MB parsed identically under 512 MiB on 2026-11-07, and a 1.5 GiB flate bomb
 #: was contained. Unset (0), one hostile upload could take the host's memory,
 #: four at a time (ADR-0031, G479).
-_MAX_CHILD_MEM_BYTES = int(os.getenv("DOCUMENT_PARSE_MAX_MEM_BYTES", str(1024 * 1024 * 1024)))
+_DEFAULT_CHILD_MEM_BYTES = 1024 * 1024 * 1024
+
+
+def parse_mem_cap(raw: str | None) -> int | None:
+    """``DOCUMENT_PARSE_MAX_MEM_BYTES`` as the worker reads it: unset is the default,
+    a whole number is that many bytes (zero or negative means no cap), anything
+    else is ``None``. Production refuses no cap and ``None`` (CodeRabbit on #703)."""
+    value = (raw or "").strip()
+    if not value:
+        return _DEFAULT_CHILD_MEM_BYTES
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+_parsed_cap = parse_mem_cap(os.getenv("DOCUMENT_PARSE_MAX_MEM_BYTES"))
+if _parsed_cap is None:
+    logger.warning("DOCUMENT_PARSE_MAX_MEM_BYTES is not a whole number; using the 1 GiB default")
+_MAX_CHILD_MEM_BYTES = _DEFAULT_CHILD_MEM_BYTES if _parsed_cap is None else _parsed_cap
 _PARSE_SEMAPHORE = threading.BoundedSemaphore(_MAX_CONCURRENT_PARSES)
 
 _SENSITIVE_ENV_RE = re.compile(
@@ -42,6 +61,7 @@ _SENSITIVE_ENV_RE = re.compile(
 _CHILD_ENV_ALLOW = re.compile(
     r"^(?:PATH|HOME|USER|LANG|LANGUAGE|LC_[A-Z]+|TZ|TMPDIR|TEMP|TMP|PWD|SHELL"
     r"|PYTHON[A-Z_]*|VIRTUAL_ENV|LD_LIBRARY_PATH|SSL_CERT_FILE|SSL_CERT_DIR|REQUESTS_CA_BUNDLE"
+    r"|HTTP_PROXY|HTTPS_PROXY|NO_PROXY|http_proxy|https_proxy|no_proxy"
     r"|OMP_[A-Z_]+|OPENBLAS_[A-Z_]+|MKL_[A-Z_]+|MALLOC_[A-Z_]+|NUMEXPR_[A-Z_]+"
     r"|APP_ENV|FLAG_[A-Z0-9_]+"
     r"|DOCUMENT_[A-Z0-9_]+|OCR_[A-Z0-9_]+|VISION_[A-Z0-9_]+|DOCLING_[A-Z0-9_]+|TRITON_OCR_URL"
@@ -49,6 +69,9 @@ _CHILD_ENV_ALLOW = re.compile(
     r"|HF_HOME|HF_HUB_OFFLINE|HF_HUB_CACHE|TRANSFORMERS_OFFLINE|TRANSFORMERS_CACHE|TORCH_HOME"
     r"|XDG_[A-Z_]+|TESSDATA_PREFIX)$"
 )
+#: Paths to CA bundles: certificates are public, and an OCR service behind a
+#: private CA needs them. The ``CERT`` rule below is for keys and client certs.
+_CHILD_ENV_PUBLIC = frozenset({"SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE"})
 #: A URL value carrying ``user:password@`` is a credential whatever its name.
 _CREDENTIAL_URL_RE = re.compile(r"://[^/\s:@]+:[^/\s@]+@")
 
@@ -59,7 +82,7 @@ def child_environment(environ: dict[str, str] | os._Environ[str]) -> dict[str, s
         name: value
         for name, value in environ.items()
         if _CHILD_ENV_ALLOW.match(name)
-        and not _SENSITIVE_ENV_RE.search(name)
+        and (name in _CHILD_ENV_PUBLIC or not _SENSITIVE_ENV_RE.search(name))
         and not _CREDENTIAL_URL_RE.search(value or "")
     }
 

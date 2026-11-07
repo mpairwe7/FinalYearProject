@@ -213,11 +213,13 @@ def _document_errors() -> list[str]:
         errors.append("G13: MALWARE_SCAN_REQUIRED must be true in production.")
     if not _truthy("DOCUMENT_PARSE_ISOLATED"):
         errors.append("G13: DOCUMENT_PARSE_ISOLATED must be true in production.")
-    raw_cap = (os.getenv("DOCUMENT_PARSE_MAX_MEM_BYTES") or "").strip()
-    if raw_cap and raw_cap.isdigit() and int(raw_cap) == 0:
+    from .document_worker import parse_mem_cap
+
+    cap = parse_mem_cap(os.getenv("DOCUMENT_PARSE_MAX_MEM_BYTES"))
+    if cap is None or cap <= 0:
         errors.append(
-            "G479: DOCUMENT_PARSE_MAX_MEM_BYTES=0 lets one upload take the host's memory; "
-            "leave it unset (1 GiB) or set a cap in production."
+            "G479: DOCUMENT_PARSE_MAX_MEM_BYTES must be a positive whole number of bytes in production; "
+            "unset is 1 GiB, and zero, negative or unreadable values leave an upload uncapped."
         )
     return errors
 

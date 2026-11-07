@@ -324,7 +324,11 @@ THREAT_REGISTRY: list[dict] = [
         ),
         "owasp_llm": "LLM03",
         "mitre_atlas": None,
-        "mitigation": "The parse child keeps an allowlisted environment, minus secret-shaped names and credential URLs",
+        "mitigation": (
+            "The parse child keeps an allowlisted environment, minus secret-shaped names and credential URLs. "
+            "Residual: the OCR, Triton and vision addresses the extractors call, and any proxy, stay visible "
+            "when credential-free; network isolation (gVisor, microVM or a dedicated pool) is the open control"
+        ),
         "evidence": ["App/backend/app/document_worker.py", "tests/agents/test_agentic_rag_context_sandbox_2026_11.py"],
         "status": "mitigated",
     },

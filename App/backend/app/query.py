@@ -1015,8 +1015,9 @@ def _rewrite_history_block(history: list[dict[str, Any]]) -> str:
     lines: list[str] = []
     for raw, turn in list(zip(history, english_view(history), strict=False))[-3:]:
         for speaker, key, limit in (("Taxpayer", "user_message", 300), ("Assistant", "bot_reply", 160)):
-            original = str(raw.get(key) or raw.get(f"{key}_en") or "")
-            if injection_present(original):
+            # Both stored forms: a benign original with an injected English form
+            # still puts the instruction in this prompt (CodeRabbit on #703).
+            if any(injection_present(str(raw.get(field) or "")) for field in (key, f"{key}_en")):
                 continue
             text = " ".join(str(turn.get(key) or "").split())[:limit]
             if text:
@@ -1031,7 +1032,7 @@ def accept_rewrite(candidate: str, query: str, history_text: str) -> str | None:
     citations or links), free of injection, and carrying no identifier the
     taxpayer did not type: the rewrite reaches retrieval and its logs.
     """
-    from .guardrails import InputGuard, contains_pii, injection_present
+    from .guardrails import InputGuard, injection_present, pii_values
 
     out = (candidate or "").strip().split("\n")[0].strip()
     if out.lower().startswith("rewritten:"):
@@ -1043,7 +1044,9 @@ def accept_rewrite(candidate: str, query: str, history_text: str) -> str | None:
         return None
     if injection_present(out) or not InputGuard().check(out).allowed:
         return None
-    if contains_pii(out) and not contains_pii(f"{query}\n{history_text}"):
+    # Every identifier in the rewrite must be one the taxpayer typed: a different
+    # TIN than the one in the conversation is as unsafe as an invented one.
+    if not pii_values(out) <= pii_values(f"{query}\n{history_text}"):
         return None
     return out
 
