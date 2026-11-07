@@ -13,7 +13,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from app.guardrails import InputGuard, injection_present
+from app.guardrails import InputGuard, OutputGuard, injection_present
 
 _DATA = Path(__file__).resolve().parents[3] / "Data" / "eval"
 _CORPUS = _DATA / "redteam_corpus.jsonl"
@@ -91,6 +91,9 @@ def test_benign_controls_are_not_blocked() -> None:
         text = str(row["text"])
         if row["channel"] == "passage":
             flagged = injection_present(text)
+        elif row["channel"] == "output":
+            # Text the prompts tell the model to say must not read as a prompt leak.
+            flagged = bool(OutputGuard.check_prompt_leakage(text).flags)
         else:
             flagged = not guard.check(text).allowed
         if flagged:

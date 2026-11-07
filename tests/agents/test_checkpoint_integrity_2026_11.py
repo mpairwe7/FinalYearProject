@@ -131,7 +131,8 @@ def test_a_later_shorter_turn_on_the_thread_supersedes_an_earlier_one() -> None:
     one_node = GraphRuntime(nodes={"reply": reply}, entry="reply", checkpointer=store)
     one_node.run(AgentGraphState(query="thanks", user_id="u1", tenant_id="t1"), thread_id=thread_id)
 
-    assert [row["step"] for row in list_agent_checkpoints(thread_id)] == [0, 1, 2]
+    # prepare, gate (the suspend), the later turn's retirement of it, its reply
+    assert [row["step"] for row in list_agent_checkpoints(thread_id)] == [0, 1, 2, 3]
     assert store.load_checkpoint(thread_id)["query"] == "thanks"
 
 
@@ -404,8 +405,8 @@ def test_a_concurrent_run_cannot_overwrite_a_suspend(store) -> None:
     thread_id = _thread("overlap")
     first = _suspend(runtime, thread_id, amount=100)
     # A second turn that read the thread before the first suspend landed.
-    real = runtime._start_position
-    runtime._start_position = lambda tid: (0, False)
+    real = runtime._open
+    runtime._open = lambda _state, _tid: [0]
     second = runtime.run(
         AgentGraphState(
             query="pay",
@@ -415,7 +416,7 @@ def test_a_concurrent_run_cannot_overwrite_a_suspend(store) -> None:
         ),
         thread_id=thread_id,
     )
-    runtime._start_position = real
+    runtime._open = real
 
     assert second.outcome == GraphOutcome.ERRORED
     runtime.resume(thread_id, _approval(first), expected_user_id="u1", expected_tenant_id="t1")
@@ -488,3 +489,102 @@ def test_routine_persistence_is_a_registry_flag(monkeypatch: pytest.MonkeyPatch)
     assert store.persist_routine is False
     monkeypatch.setenv("FLAG_GRAPH_CHECKPOINT_ROUTINE", "true")
     assert store.persist_routine is True
+
+
+
+# --------------------------------------------------------------------------- PR #702 review, round 2
+
+
+def test_a_corrupt_latest_row_fails_a_suspend_closed() -> None:
+    from app.database import execute
+
+    store = DurableCheckpointStore()
+    effects: list[int] = []
+    runtime = _graph(store, effects)
+    thread_id = _thread("corrupt")
+    execute(
+        "INSERT INTO agent_checkpoints (thread_id, step, node_name, state_json, created_at) VALUES (?, ?, ?, ?, ?)",
+        (thread_id, 7, "gate", "{not json", time.time()),
+    )
+    state = AgentGraphState(
+        query="pay",
+        user_id="u1",
+        tenant_id="t1",
+        pending_action=TaxpayerActionRequest(action_type="generate_prn", description="PRN", payload={"amount": 1}),
+    )
+
+    assert runtime.run(state, thread_id=thread_id).outcome == GraphOutcome.ERRORED
+    assert [row["step"] for row in list_agent_checkpoints(thread_id)] == [7]
+
+
+def test_a_turn_that_cannot_retire_a_pending_approval_does_not_proceed(store, monkeypatch) -> None:
+    effects: list[int] = []
+    runtime = _graph(store, effects)
+    thread_id = _thread("unretired")
+    paused = _suspend(runtime, thread_id)
+    monkeypatch.setattr(runtime, "_write_marker", lambda *_args, **_kwargs: False)
+
+    later = runtime.run(AgentGraphState(query="What is VAT?", user_id="u1", tenant_id="t1"), thread_id=thread_id)
+
+    assert later.outcome == GraphOutcome.ERRORED
+    monkeypatch.undo()
+    runtime.resume(thread_id, _approval(paused), expected_user_id="u1", expected_tenant_id="t1")
+    assert effects == [500_000]  # still the taxpayer's to approve: nothing retired it
+
+
+def test_a_resume_that_read_before_a_retirement_cannot_claim(store) -> None:
+    effects: list[int] = []
+    runtime = _graph(store, effects)
+    thread_id = _thread("stale-resume")
+    paused = _suspend(runtime, thread_id)
+    stale = store.latest_checkpoint(thread_id)
+    runtime.run(AgentGraphState(query="What is VAT?", user_id="u1", tenant_id="t1"), thread_id=thread_id)
+    store.latest_checkpoint = lambda _tid: stale  # the resume read the suspend before the turn retired it
+
+    with pytest.raises(PermissionError, match="already been resumed or moved on"):
+        runtime.resume(thread_id, _approval(paused), expected_user_id="u1", expected_tenant_id="t1")
+    assert effects == []
+
+
+def test_two_runs_from_one_position_cannot_both_suspend(store) -> None:
+    effects: list[int] = []
+    runtime = _graph(store, effects)
+    thread_id = _thread("same-position")
+
+    def pending(amount: int) -> AgentGraphState:
+        return AgentGraphState(
+            query="pay",
+            user_id="u1",
+            tenant_id="t1",
+            pending_action=TaxpayerActionRequest(
+                action_type="generate_prn", description=f"PRN {amount}", payload={"amount": amount}
+            ),
+        )
+
+    position = runtime._open(pending(0), thread_id)
+    runtime._open = lambda _state, _tid: list(position)
+    first = runtime.run(pending(1), thread_id=thread_id)
+    second = runtime.run(pending(2), thread_id=thread_id)
+
+    assert first.outcome == GraphOutcome.WAITING_USER
+    assert second.outcome == GraphOutcome.ERRORED
+
+
+def test_a_late_end_marker_cannot_answer_for_a_newer_claim(store) -> None:
+    from app.agents.graphs.runtime import RESUME_DONE_NODE, resume_status
+
+    effects: list[int] = []
+    runtime = _graph(store, effects)
+    thread_id = _thread("late-marker")
+    first = _suspend(runtime, thread_id, amount=1)
+    real_done = runtime._resume_done
+    runtime._resume_done = lambda *_args, **_kwargs: None
+    runtime.resume(thread_id, _approval(first), expected_user_id="u1", expected_tenant_id="t1")
+    first_claim = max(step for step, name in store.history(thread_id) if name == "__resume__")
+    second = _suspend(runtime, thread_id, amount=2)
+    runtime.resume(thread_id, _approval(second), expected_user_id="u1", expected_tenant_id="t1")
+    runtime._resume_done = real_done
+    latest_step = store.latest_checkpoint(thread_id)[0]
+    store.claim(thread_id, latest_step + 1, f"{RESUME_DONE_NODE}:{first_claim}", {"outcome": "resume_completed"})
+
+    assert resume_status(store, thread_id) == "claimed_incomplete"

@@ -98,6 +98,21 @@ CodeRabbit's review produced 13 findings. Twelve were fixed, each with a regress
 - The cloud prompt's contact instruction is sanctioned whole, so an abstention that repeats it is not
   read as a leak.
 
+A second review round on the fixes found that concurrency was still settled piecemeal. It is now one
+rule, **dense append**: every write (suspend, routine row, marker, claim) goes exactly one past the last
+row its writer saw, as insert-if-absent. Any two writers that saw the same thread contend for the same
+primary key, and exactly one wins. Consequences:
+
+- A new turn on a thread whose latest row is a pending approval retires it **first**, at the very step
+  a resume would claim, and does not proceed if it can neither retire it nor see it retired. So a resume
+  that read the suspend just before the retirement finds its claim step taken.
+- Two runs from one position cannot both suspend, and a run whose position went stale stops writing.
+- An unreadable latest row raises in both backends instead of reading as empty.
+- An end marker names its claim's step (`__resume_done__:<step>`), so a late marker from an older
+  resume cannot answer for a newer one.
+- Text the prompts tell the model to say has an `output` channel in
+  `guardrail_benign_controls.jsonl`, and the gate checks it against the leak detector.
+
 Declined: switching the Workers AI branch to `CLOUD_SYSTEM_PROMPT`. It already sends the full
 `SYSTEM_PROMPT`, a superset of the cloud rules, and output guards enforce link provenance on both. The
 backend `AGENTS.md` rule was reworded to say so.

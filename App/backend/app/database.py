@@ -3765,8 +3765,10 @@ def get_latest_agent_checkpoint(thread_id: str) -> tuple[int, dict[str, Any]] | 
         return None
     try:
         return int(row["step"]), json.loads(row["state_json"])
-    except (json.JSONDecodeError, TypeError, ValueError):
-        return None
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        # Unreadable is not empty: read as empty, a run would write a suspend
+        # beneath this row, where no resume would ever find it (ADR-0030).
+        raise ValueError(f"latest checkpoint on {thread_id!r} is unreadable") from exc
 
 
 def get_agent_checkpoint(thread_id: str) -> dict[str, Any] | None:

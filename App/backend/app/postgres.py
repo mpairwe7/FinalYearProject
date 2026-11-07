@@ -3337,8 +3337,8 @@ def get_latest_agent_checkpoint(thread_id: str) -> tuple[int, dict[str, Any]] | 
         return None
     try:
         return int(row[0]), json.loads(row[1])
-    except (json.JSONDecodeError, TypeError, ValueError):
-        return None
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise ValueError(f"latest checkpoint on {thread_id!r} is unreadable") from exc
 
 
 def get_agent_checkpoint(thread_id: str) -> dict[str, Any] | None:
