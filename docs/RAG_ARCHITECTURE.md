@@ -746,7 +746,7 @@ All major subsystems are behind feature flags for progressive rollout:
 | `stream_figure_hold` | on | Hold streamed text from the first figure until the output guards have read it (`guardrails.FigureReleaseGate`, ADR-0022). Prose still streams. Off restores token-by-token text that is corrected afterwards |
 | `tax_graph` | off | Load the statutory knowledge graph + `tax_graph` namespace |
 | `graph_fusion` | off | Fuse the graph leg into RRF (requires `tax_graph`) |
-| `langgraph` | off | Route agentic requests through the graph orchestrator |
+| `langgraph` | off | Route agentic requests through the graph orchestrator. The conversation id is the checkpoint thread; only a suspended approval and its resume claim are written unless `GRAPH_CHECKPOINT_ROUTINE=true`, and an approval is digest-bound, HMAC-sealed and expires after `GRAPH_APPROVAL_TTL_S` (ADR-0030) |
 | `mcp_tasks` | off | `tasks` MCP namespace for long-running work |
 | `voice_receptionist` | off | Simulated phone receptionist and staff Calls page; production media uses self-hosted LiveKit WebRTC (see the receptionist runbook) |
 | `receptionist_language_detection` | off | Receptionist follows caller language (en, sw and lg all on the local engine: Whisper-SALT, Sunflower, Orpheus); caller/officer WebRTC media uses self-hosted LiveKit in production. See `docs/runbooks/voice-receptionist-demo.md` |

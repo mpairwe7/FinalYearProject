@@ -192,6 +192,7 @@ _SANCTIONED_PROMPT_OUTPUT: tuple[str, ...] = (
     "toll-free 0800 117 000 / 0800 217 000, WhatsApp 0772 140 000, email services@ura.go.ug, "
     "or the web portal https://ura.go.ug.",
     "direct the user to https://ura.go.ug or the URA Contact Centre.",
+    "point the taxpayer to https://ura.go.ug or the URA Contact Centre (toll-free 0800 117 000).",
     "You might also want to know about",
     # The persona's public description, which the assistant uses about itself.
     "an official, helpful, and conversational AI assistant for the Uganda Revenue Authority.",
@@ -1696,14 +1697,17 @@ def _system_prompt_shingles() -> frozenset[tuple[str, ...]]:
     cannot be imported; the signature phrases still apply.
     """
     try:
-        from .llm import SYSTEM_PROMPT
+        from .llm import CLOUD_SYSTEM_PROMPT, SYSTEM_PROMPT
     except Exception:  # pragma: no cover - import guard for partial installs
         logger.debug("System prompt unavailable for leakage fingerprint", exc_info=True)
         return frozenset()
     sanctioned: set[tuple[str, ...]] = set()
     for phrase in _SANCTIONED_PROMPT_OUTPUT:
         sanctioned |= _shingles(_leak_words(phrase))
-    return frozenset(_shingles(_leak_words(SYSTEM_PROMPT)) - sanctioned)
+    # Both prompts that answer taxpayers: the local one and the governed cloud
+    # one that serves every answer where no local model runs (ADR-0030).
+    prompts = _shingles(_leak_words(SYSTEM_PROMPT)) | _shingles(_leak_words(CLOUD_SYSTEM_PROMPT))
+    return frozenset(prompts - sanctioned)
 
 
 def _prompt_shingle_hits(text: str) -> set[tuple[str, ...]]:

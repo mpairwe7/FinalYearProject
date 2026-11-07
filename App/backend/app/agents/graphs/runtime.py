@@ -7,15 +7,32 @@ node (or ``END`` to terminate).  This covers ReAct / Plan-and-
 Execute / Reflexion without pulling in LangGraph.
 
 This deliberately small dispatcher is not upstream LangGraph and does not replay
-nodes. Checkpoints and ``resume`` exist for a suspended approval, and the service
-passes no ``thread_id``, so production turns are bounded and single-request. A
-durable workflow migration must account for tool side effects and idempotency
-before enabling node replay.
+nodes. The service passes the conversation id as ``thread_id``, so every graph
+turn of a conversation shares one thread. What a checkpoint is for here is a
+suspended approval and its resume (ADR-0030):
+
+* Step numbers continue across runs on a thread, so the latest row is the
+  latest state. A resume that restarted at 0 left its own suspend as "latest",
+  and the same approval could be replayed (G468).
+* A resume claims the suspend by inserting the next step. The primary key is
+  the lock: of two concurrent resumes one inserts and the other is refused,
+  so the action runs once (G469; LangGraph's durable-execution guidance asks
+  for the same exactly-once property from side effects).
+* The approval carries the digest of the action the taxpayer was shown, and
+  the suspended row carries an HMAC over that action, its owner and its time,
+  so neither a different action nor an edited row can be approved (G470, G472;
+  OWASP ASI09). An approval older than ``GRAPH_APPROVAL_TTL_S`` is refused (G471).
+* Routine node transitions are persisted only when the store asks for it.
+  Nothing reads them, and each held the question, history and passages (G473).
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import logging
+import os
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -29,6 +46,35 @@ logger = logging.getLogger(__name__)
 END = "__end__"
 
 GraphNode = Callable[[AgentGraphState], "NodeResult"]
+
+#: How long a suspended approval may be acted on.
+APPROVAL_TTL_SECONDS = float(os.getenv("GRAPH_APPROVAL_TTL_S", "600"))
+#: The node name recorded for a resume's claim on a suspend.
+RESUME_CLAIM_NODE = "__resume__"
+_RESUMED = "resumed"
+
+
+def _approval_key() -> bytes:
+    """The HMAC key for suspended approvals: the confirmation-token secret."""
+    from ...confirm_tokens import _secret
+
+    return _secret()
+
+
+def _approval_mac(thread_id: str, snapshot: Mapping[str, Any]) -> str:
+    """HMAC over what an approval acts on: the thread, owner, time and action."""
+    key = _approval_key()
+    if not key:
+        return ""
+    bound = {
+        "thread_id": thread_id,
+        "user_id": snapshot.get("user_id", ""),
+        "tenant_id": snapshot.get("tenant_id", ""),
+        "suspended_at": snapshot.get("suspended_at"),
+        "pending_action": snapshot.get("pending_action"),
+    }
+    message = json.dumps(bound, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    return hmac.new(key, message, hashlib.sha256).hexdigest()
 
 
 @dataclass
@@ -46,12 +92,27 @@ class NodeResult:
 
 
 class CheckpointStore:
-    """Base class for durable graph state checkpointers."""
+    """Base class for durable graph state checkpointers.
+
+    ``persist_routine`` says whether a node transition that neither suspends
+    nor resumes is written. A suspend and a resume claim always are.
+    """
+
+    persist_routine: bool = True
 
     def save_checkpoint(self, thread_id: str, step: int, node_name: str, state_dict: dict[str, Any]) -> None:
         raise NotImplementedError
 
     def load_checkpoint(self, thread_id: str) -> dict[str, Any] | None:
+        latest = self.latest_checkpoint(thread_id)
+        return latest[1] if latest else None
+
+    def latest_checkpoint(self, thread_id: str) -> tuple[int, dict[str, Any]] | None:
+        """``(step, state)`` of the highest step on *thread_id*, or ``None``."""
+        raise NotImplementedError
+
+    def claim(self, thread_id: str, step: int, node_name: str, state_dict: dict[str, Any]) -> bool:
+        """Write *step* only if no row holds it. False means another run got there first."""
         raise NotImplementedError
 
 
@@ -59,23 +120,45 @@ class InMemoryCheckpointStore(CheckpointStore):
     """Process-local checkpoint store for tests and lightweight executions."""
 
     def __init__(self) -> None:
-        self._checkpoints: dict[str, list[dict[str, Any]]] = {}
+        import threading
+
+        self._checkpoints: dict[str, dict[int, dict[str, Any]]] = {}
+        self._lock = threading.Lock()
 
     def save_checkpoint(self, thread_id: str, step: int, node_name: str, state_dict: dict[str, Any]) -> None:
         entry = {"thread_id": thread_id, "step": step, "node": node_name, "state": dict(state_dict), "ts": time.time()}
-        self._checkpoints.setdefault(thread_id, []).append(entry)
+        with self._lock:
+            self._checkpoints.setdefault(thread_id, {})[step] = entry
 
-    def load_checkpoint(self, thread_id: str) -> dict[str, Any] | None:
-        entries = self._checkpoints.get(thread_id)
-        return entries[-1]["state"] if entries else None
+    def latest_checkpoint(self, thread_id: str) -> tuple[int, dict[str, Any]] | None:
+        with self._lock:
+            entries = self._checkpoints.get(thread_id)
+            if not entries:
+                return None
+            step = max(entries)
+            return step, entries[step]["state"]
+
+    def claim(self, thread_id: str, step: int, node_name: str, state_dict: dict[str, Any]) -> bool:
+        with self._lock:
+            entries = self._checkpoints.setdefault(thread_id, {})
+            if step in entries:
+                return False
+            entries[step] = {"thread_id": thread_id, "step": step, "node": node_name, "state": dict(state_dict), "ts": time.time()}
+            return True
 
 
 class DurableCheckpointStore(CheckpointStore):
     """Database-backed durable checkpointer for agent graph execution states.
 
     A failed save is raised, not swallowed: only the runtime knows whether this
-    was a routine step or a suspend that nothing else can resume.
+    was a routine step or a suspend that nothing else can resume. Routine
+    transitions are written only with ``GRAPH_CHECKPOINT_ROUTINE=true``: nothing
+    reads them, each held the question, history and retrieved passages (DPPA
+    2019 data minimisation), and each cost a synchronous write per node.
     """
+
+    def __init__(self) -> None:
+        self.persist_routine = os.getenv("GRAPH_CHECKPOINT_ROUTINE", "false").strip().lower() in ("1", "true", "yes")
 
     def save_checkpoint(self, thread_id: str, step: int, node_name: str, state_dict: dict[str, Any]) -> None:
         from ...database import save_agent_checkpoint
@@ -87,14 +170,19 @@ class DurableCheckpointStore(CheckpointStore):
 
         await asyncio.to_thread(self.save_checkpoint, thread_id, step, node_name, state_dict)
 
-    def load_checkpoint(self, thread_id: str) -> dict[str, Any] | None:
+    def latest_checkpoint(self, thread_id: str) -> tuple[int, dict[str, Any]] | None:
         try:
-            from ...database import get_agent_checkpoint
+            from ...database import get_latest_agent_checkpoint
 
-            return get_agent_checkpoint(thread_id)
+            return get_latest_agent_checkpoint(thread_id)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Checkpoint could not be read: %s", type(exc).__name__)
             return None
+
+    def claim(self, thread_id: str, step: int, node_name: str, state_dict: dict[str, Any]) -> bool:
+        from ...database import insert_agent_checkpoint_if_absent
+
+        return insert_agent_checkpoint_if_absent(thread_id, step, node_name, state_dict)
 
     async def async_load_checkpoint(self, thread_id: str) -> dict[str, Any] | None:
         import asyncio
@@ -211,16 +299,68 @@ class GraphRuntime:
             return END
         return result.next_node
 
-    def _checkpoint_state(self, state: AgentGraphState, result: NodeResult) -> dict[str, Any]:
+    def _checkpoint_state(
+        self, state: AgentGraphState, result: NodeResult, thread_id: str = ""
+    ) -> dict[str, Any]:
         """State as of this transition. A node's outcome is applied after the save,
-        so without this a checkpoint could record the outcome before it."""
+        so without this a checkpoint could record the outcome before it. A
+        suspend is stamped with its time and sealed with an HMAC over what an
+        approval would act on."""
         snapshot = state.to_dict()
         if result.outcome is not None:
             snapshot["outcome"] = result.outcome.value
+        if snapshot.get("outcome") == GraphOutcome.WAITING_USER.value:
+            snapshot["suspended_at"] = time.time()
+            mac = _approval_mac(thread_id, snapshot)
+            if not mac:
+                raise RuntimeError("no approval signing key is configured")
+            snapshot["approval_mac"] = mac
         return snapshot
 
-    def run(self, state: AgentGraphState, thread_id: str = "", entry: str | None = None) -> AgentGraphState:
+    def _start_step(self, thread_id: str) -> int | None:
+        """The step this run's first save takes: one past the thread's latest.
+
+        ``None`` when the latest step cannot be read: then nothing is saved, and
+        a suspend fails closed rather than overwrite rows it cannot see.
+        """
+        if not (self._checkpointer and thread_id):
+            return 0
+        try:
+            latest = self._checkpointer.latest_checkpoint(thread_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("GraphRuntime: latest checkpoint unreadable: %s", type(exc).__name__)
+            return None
+        return 0 if latest is None else latest[0] + 1
+
+    def _should_save(self, state: AgentGraphState, result: NodeResult) -> bool:
+        suspending = result.outcome == GraphOutcome.WAITING_USER or state.outcome == GraphOutcome.WAITING_USER
+        return suspending or bool(getattr(self._checkpointer, "persist_routine", True))
+
+    def _save(
+        self, state: AgentGraphState, result: NodeResult, thread_id: str, step: int | None, node: str
+    ) -> None:
+        """Persist this transition when it must be; a failed suspend save ends the run."""
+        if not (self._checkpointer and thread_id) or not self._should_save(state, result):
+            return
+        try:
+            if step is None:
+                raise RuntimeError("thread position unknown")
+            self._checkpointer.save_checkpoint(
+                thread_id, step, node, self._checkpoint_state(state, result, thread_id)
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._checkpoint_failed(state, result, exc)
+
+    def run(
+        self,
+        state: AgentGraphState,
+        thread_id: str = "",
+        entry: str | None = None,
+        *,
+        start_step: int | None = None,
+    ) -> AgentGraphState:
         current = entry or self._entry
+        base = start_step if start_step is not None else self._start_step(thread_id)
         steps = 0
         while current != END:
             node = self._next_node(state, current, steps)
@@ -234,24 +374,29 @@ class GraphRuntime:
                 break
             if not self._accepted(state, current, result, (time.perf_counter() - t0) * 1000):
                 break
-            if self._checkpointer and thread_id:
-                try:
-                    self._checkpointer.save_checkpoint(
-                        thread_id, steps, current, self._checkpoint_state(state, result)
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    self._checkpoint_failed(state, result, exc)
+            self._save(state, result, thread_id, None if base is None else base + steps, current)
             current = self._advance(state, result)
             steps += 1
 
         return state
 
-    async def arun(self, state: AgentGraphState, thread_id: str = "", entry: str | None = None) -> AgentGraphState:
+    async def arun(
+        self,
+        state: AgentGraphState,
+        thread_id: str = "",
+        entry: str | None = None,
+        *,
+        start_step: int | None = None,
+    ) -> AgentGraphState:
         """Asynchronously dispatch nodes without blocking the asyncio event loop."""
         import asyncio
         import inspect
 
         current = entry or self._entry
+        if start_step is not None:
+            base: int | None = start_step
+        else:
+            base = await asyncio.to_thread(self._start_step, thread_id)
         steps = 0
         while current != END:
             node = self._next_node(state, current, steps)
@@ -266,17 +411,9 @@ class GraphRuntime:
                 break
             if not self._accepted(state, current, result, (time.perf_counter() - t0) * 1000):
                 break
-            if self._checkpointer and thread_id:
-                try:
-                    await asyncio.to_thread(
-                        self._checkpointer.save_checkpoint,
-                        thread_id,
-                        steps,
-                        current,
-                        self._checkpoint_state(state, result),
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    self._checkpoint_failed(state, result, exc)
+            await asyncio.to_thread(
+                self._save, state, result, thread_id, None if base is None else base + steps, current
+            )
             current = self._advance(state, result)
             steps += 1
 
@@ -284,33 +421,51 @@ class GraphRuntime:
 
     def _prepare_resume(
         self,
-        data: dict[str, Any] | None,
+        latest: tuple[int, dict[str, Any]] | None,
         thread_id: str,
         resume_payload: dict[str, Any] | None,
         start_node: str | None,
         expected_user_id: str,
         expected_tenant_id: str,
-    ) -> tuple[AgentGraphState, str]:
+    ) -> tuple[AgentGraphState, str, int]:
         """Rebuild a suspended thread, or refuse. Shared by both resume paths.
 
         The approval is the taxpayer's, so it must come from the taxpayer: the
         thread id was the only thing asked for, and anyone holding it could approve
         an action on someone else's account. Naming a start node cannot step past
         the gate either, and a thread with an owner refuses a caller who names none.
+
+        It must also be for this action, now: an approval names the digest of the
+        action it was shown, the suspended row's HMAC must still match what it
+        binds, and the suspend must be younger than ``APPROVAL_TTL_SECONDS``.
+        Returns the state, the entry node and the step of the suspend.
         """
-        if not data:
+        if not latest:
             raise ValueError(f"No checkpoint found for thread {thread_id!r}")
+        step, data = latest
+        if data.get("outcome") != GraphOutcome.WAITING_USER.value:
+            raise ValueError(
+                f"Thread {thread_id!r} is not waiting for user consent (current outcome: {data.get('outcome')})"
+            )
 
         state = AgentGraphState.from_dict(data)
-        if state.outcome != GraphOutcome.WAITING_USER:
-            raise ValueError(f"Thread {thread_id!r} is not waiting for user consent (current outcome: {state.outcome})")
         if state.user_id and state.user_id != expected_user_id:
             raise PermissionError(f"Thread {thread_id!r} belongs to another taxpayer")
         if state.user_id and expected_tenant_id and state.tenant_id != expected_tenant_id:
             raise PermissionError(f"Thread {thread_id!r} belongs to another tenant")
 
+        expected_mac = _approval_mac(thread_id, data)
+        if not expected_mac or not hmac.compare_digest(str(data.get("approval_mac") or ""), expected_mac):
+            raise PermissionError(f"Thread {thread_id!r} failed its integrity check")
+        suspended_at = float(data.get("suspended_at") or 0.0)
+        if time.time() - suspended_at > APPROVAL_TTL_SECONDS:
+            raise PermissionError(f"Thread {thread_id!r}: the approval window has closed")
+
         if resume_payload and resume_payload.get("approved"):
             if state.pending_action:
+                presented = str(resume_payload.get("action_digest") or "")
+                if not hmac.compare_digest(presented, state.pending_action.digest()):
+                    raise PermissionError(f"Thread {thread_id!r}: the approval does not match the action shown")
                 state.pending_action.authorized = True
             state.outcome = GraphOutcome.ANSWERED
         elif resume_payload:
@@ -327,7 +482,23 @@ class GraphRuntime:
         entry = start_node or ("act" if state.pending_action and state.pending_action.authorized else "respond")
         if entry not in self._nodes:
             entry = self._entry
-        return state, entry
+        return state, entry, step
+
+    def _claim(self, thread_id: str, suspended_step: int, state: AgentGraphState) -> int:
+        """Take the suspend for this resume, or refuse; returns the next free step.
+
+        The claim is the row one past the suspend. Its primary key is the lock:
+        a second resume, concurrent or later, finds it taken.
+        """
+        claim = {
+            "outcome": _RESUMED,
+            "user_id": state.user_id,
+            "tenant_id": state.tenant_id,
+            "resumed_at": time.time(),
+        }
+        if not self._checkpointer.claim(thread_id, suspended_step + 1, RESUME_CLAIM_NODE, claim):
+            raise PermissionError(f"Thread {thread_id!r} has already been resumed")
+        return suspended_step + 2
 
     def resume(
         self,
@@ -338,14 +509,15 @@ class GraphRuntime:
         expected_user_id: str = "",
         expected_tenant_id: str = "",
     ) -> AgentGraphState:
-        """Resume a suspended graph execution for the taxpayer who owns it."""
+        """Resume a suspended graph execution for the taxpayer who owns it, once."""
         if not self._checkpointer:
             raise RuntimeError("Cannot resume execution without a configured checkpointer")
-        data = self._checkpointer.load_checkpoint(thread_id)
-        state, entry = self._prepare_resume(
-            data, thread_id, resume_payload, start_node, expected_user_id, expected_tenant_id
+        latest = self._checkpointer.latest_checkpoint(thread_id)
+        state, entry, step = self._prepare_resume(
+            latest, thread_id, resume_payload, start_node, expected_user_id, expected_tenant_id
         )
-        return self.run(state, thread_id=thread_id, entry=entry)
+        next_step = self._claim(thread_id, step, state)
+        return self.run(state, thread_id=thread_id, entry=entry, start_step=next_step)
 
     async def aresume(
         self,
@@ -356,13 +528,14 @@ class GraphRuntime:
         expected_user_id: str = "",
         expected_tenant_id: str = "",
     ) -> AgentGraphState:
-        """Asynchronously resume a suspended execution for the taxpayer who owns it."""
+        """Asynchronously resume a suspended execution for the taxpayer who owns it, once."""
         if not self._checkpointer:
             raise RuntimeError("Cannot resume execution without a configured checkpointer")
         import asyncio
 
-        data = await asyncio.to_thread(self._checkpointer.load_checkpoint, thread_id)
-        state, entry = self._prepare_resume(
-            data, thread_id, resume_payload, start_node, expected_user_id, expected_tenant_id
+        latest = await asyncio.to_thread(self._checkpointer.latest_checkpoint, thread_id)
+        state, entry, step = self._prepare_resume(
+            latest, thread_id, resume_payload, start_node, expected_user_id, expected_tenant_id
         )
-        return await self.arun(state, thread_id=thread_id, entry=entry)
+        next_step = await asyncio.to_thread(self._claim, thread_id, step, state)
+        return await self.arun(state, thread_id=thread_id, entry=entry, start_step=next_step)
