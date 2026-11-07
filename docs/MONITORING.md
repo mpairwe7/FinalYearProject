@@ -287,6 +287,13 @@ library's records share one format. JSON lines (production, compose) carry:
 `excess_rate_limit_exceeded`. Records name the route, status and authenticated
 actor; never the token or client IP.
 
+The AI guardrails count into the same series (ADR-0029):
+`guardrail_prompt_injection`, `guardrail_harmful_intent`,
+`guardrail_indirect_injection` (reason `retrieved_passage`, `external_tool`,
+`spotlight_breakout`, `document_breakout`), `guardrail_untrusted_link`,
+`guardrail_prompt_leakage` and `guardrail_strike_cooldown`. Their log records
+never carry the message.
+
 ## 7. Real-user monitoring
 
 The browser measures Core Web Vitals with Google's `web-vitals` library (v6,
@@ -408,6 +415,9 @@ store=…`); fix the store and the next run catches up.
 `security_reason` repeated by everyone is an IdP or key problem; many
 attempts against one route is an attack — rate limits already apply, block at
 the edge if it continues.
+
+`GuardrailProbingCampaign` / `IndirectInjectionOrUntrustedLinkSpike`: see
+[the AI security guardrails runbook](runbooks/ai-security-guardrails.md#a-probing-campaign).
 
 ### Live web research and planner
 

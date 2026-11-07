@@ -117,6 +117,8 @@ The live English eval file is now **30** rows (`Data/eval/rag_eval.jsonl`), incl
 - Categories: prompt injection, jailbreak, info extraction, PII, harmful content
 - Target: >= 90% block rate per category
 - Tool: `scripts/ai_red_team.py`
+- CI gate (2026-11-07, ADR-0029): `Data/eval/redteam_corpus.jsonl` (69 rows: direct, role-play, reframing, paraphrase, obfuscation, encoding, extraction, Kiswahili/Luganda, and retrieved-channel indirect directives) must all be refused, and `Data/eval/guardrail_benign_controls.jsonl` (24 lawful questions and statutory sentences that resemble attacks) must all pass. Measured on the repository's benign sets: 0 of 1,811 taxpayer questions and 0 of 2,285 corpus texts refused or flagged
+- Limitation: the input and indirect layers recognise attacks, and adaptive attacks defeat recognition (Nasr et al., arXiv:2510.09023). The spotlight fences, output guards, link provenance, figure verification and tool risk tiers are the controls that hold when it is bypassed. No injection-classifier model is deployed (G466)
 
 ### Sovereign Complex Tax Scenario Benchmark (2026-10-20 — `evals/complex_scenarios/`)
 Evaluated across 16 Ugandan tax heads (`paye`, `vat`, `withholding`, `rental`, `corporation`, `capital_gains`, `customs`, `excise`, `stamp_duty`, `objections`, `penalties`, `digital_services`, `gaming_betting`, `advance_tax`, `procedures`, `jurisdiction`) under `SOVEREIGN_MODE=true` (`HF_HUB_OFFLINE=1`, zero external API egress; full report in [`docs/Reports/opus-level-accuracy-results-2026-10.md`](Reports/opus-level-accuracy-results-2026-10.md)):
@@ -172,8 +174,9 @@ Evaluated across 16 Ugandan tax heads (`paye`, `vat`, `withholding`, `rental`, `
 
 ### Security
 - OWASP LLM Top 10 (2025/2026 crosswalk) + OWASP Top 10 for Agentic Applications 2026 (`ASI01`–`ASI10`) controls implemented (`governance/ai_risk_manifest.yaml`)
-- Input guardrails: 11 prompt injection patterns + harmful intent detection
-- Output guardrails: PII redaction (7 Uganda-specific patterns), HTML sanitization, system prompt leakage detection, indirect injection scanning
+- Input guardrails (ADR-0029): prompt-injection, persona-swap and prompt-extraction rules plus harmful-intent detection, matched on raw, canonical, de-obfuscated (leetspeak, spaced letters, typoglycemia) and decoded (Base64, hex, ROT13) views (G460). A user, session or conversation refused 5 times in 10 minutes is paused for 5 minutes without a model call (`guardrail_strike_friction`, G464)
+- Output guardrails: PII redaction (7 Uganda-specific patterns), HTML sanitization, link provenance (an answer links only to `*.go.ug`, Tier-1 research hosts, corpus hosts or `OUTPUT_LINK_ALLOWED_HOSTS`; identifiers never ride in a link query, G462), system prompt leakage detection by signature and by a fingerprint of the live prompt (G465), and indirect injection scanning that also removes directives addressed to an AI from passages, tool output and uploads (G461)
+- Upload fence (ADR-0029): a taxpayer's document cannot close `<untrusted_user_document>` with an obfuscated tag or forge `<passage>` markers (G463)
 - Spotlight fence (ADR-0027): retrieved text, header fields, and system-prompt asides cannot close a `<passage>` marker or open an assembler heading. The cloud fallback uses the same fence.
 - Claim verification (ADR-0028): a verifier exception is recorded as `unavailable`, lowers a high confidence assessment, and is disclosed to the taxpayer; the answer is not withheld solely because the checker is down (G370).
 - Staff ticket access (ADR-0028): detail, updates, presence, chat termination, live events, lists, and aggregates are scoped to the authenticated tenant when `multi_tenant` is enabled (G362).

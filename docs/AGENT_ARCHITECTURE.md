@@ -5,7 +5,7 @@
 > `feat/agentic-workflows` branch actually *ships* (Phases A-D of
 > the broader Phase 14 work).
 
-Most capabilities below are **gated behind a feature flag** (`flags.py`, 87 flags total).
+Most capabilities below are **gated behind a feature flag** (`flags.py`, 88 flags total).
 `FLAG_TOOL_USE` defaults OFF; `FLAG_TICKET_QUEUE` defaults ON (`true`).
 `FLAG_AGENTIC_MODE` defaults ON after the English routing golden set
 holds ≥ 0.95 (`agentic_mode_gate`, currently `36/36`).
@@ -666,7 +666,10 @@ pipeline attestation, how the turn ended and what generated it.
 | A dependency fails | `resilience.CircuitBreaker` | The half-open probe is a lease, so no caller can wedge it. Each tier has its own breaker |
 | A turn runs long | `resilience.turn_deadline` | One deadline across every stage and transport. The tool loop stops at its next check |
 | A figure is wrong | `guardrails.FigureReleaseGate`, `_apply_output_guards` | Streams hold from the first figure. The lock runs on every transport |
-| Retrieved text leaves the data region | `guardrails.fence_spotlight_body`, `llm._spotlight_passage` | Every prompt path fences the body and the header. The tool path uses the same hash id as retrieval (ADR-0027) |
+| Retrieved text leaves the data region | `guardrails.fence_spotlight_body`, `llm._spotlight_passage` | Every prompt path fences the body and the header. The tool path uses the same hash id as retrieval (ADR-0027). Uploads share the normalization (`fence_untrusted_document_body`, ADR-0029) |
+| Third-party text speaks to the model | `guardrails.scan_retrieved_text`, `scan_external_tool_text`, `injection_present` | Injection phrases and directives addressed to an AI are removed with their sentence; ingest quarantines them (ADR-0029) |
+| An answer links off-government | `guardrails.neutralize_untrusted_links`, `_apply_output_guards` | Only `*.go.ug` and listed hosts stay linked; the final reply is re-checked and a removal is a revision (ADR-0029) |
+| Someone probes the input guard | `guard_friction.strike_tracker`, `service._guard_both_forms` | Five refusals in ten minutes pause the principal without a model call (`guardrail_strike_friction`, on) |
 | A control faults | `ToolRegistry._autonomy_gate` | Writes fail closed. A refusal does not depend on its record |
 | A person is needed | `tools/escalate.ESCALATION_ROUTE` | Cannot be gated. Goes through `_maybe_create_ticket` |
 | Something degrades | `DEGRADED_DISCLOSURES` | The taxpayer is told, and the row records it |

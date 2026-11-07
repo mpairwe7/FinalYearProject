@@ -46,6 +46,7 @@ Complete documentation for the URA Chatbot MLOps project.
 | [Qdrant staged corpus rebuild & 10-MDA harvester runbook](runbooks/qdrant-staged-rebuild.md) | ADR-0009 statutory (`parliament.go.ug`, `ura.go.ug`) & 10-MDA PDF harvester (`--download-pdfs --export-pdf-jsonl`) and zero-downtime Qdrant alias cutover (`7,251` hybrid vectors) |
 | [Enterprise connectors & MCP runbook](runbooks/enterprise-connectors-and-mcp.md) | MCP `2026-07-28` wire protocol, OAuth 2.1 / mTLS DMZ bindings, `72` registered tools across `18` namespaces, and monetary transaction ceilings |
 | [Escalation & handoff runbook](runbooks/escalation-and-handoff.md) | Phase 38–40 emotion/stakes escalation, `HandoffEnvelope` v2.1, CXP operating hours (`07:00–23:00 EAT`), and business-hours SLA clock |
+| [AI security guardrails runbook](runbooks/ai-security-guardrails.md) | ADR-0029 input, indirect-injection, link-provenance and leak guards; strike friction; the probing and injected-content alerts; extending the link allowlist; fixing a false refusal; adding a red-team row |
 | [Conversational safety & EQ runbook](runbooks/conversational-safety-and-eq.md) | Phase 39 mid-workflow emotional off-ramp, wellbeing check-in, and voice affect consent |
 | [Voice receptionist demo runbook](runbooks/voice-receptionist-demo.md) | 5-locale WebSocket/LiveKit receptionist, queue position, callback, and officer desk operations |
 | **Security** |

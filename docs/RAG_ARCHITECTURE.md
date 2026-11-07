@@ -357,13 +357,15 @@ chat's owner (`receptionist/carryover.py`).
 
 | Control | Implementation | Module |
 |---------|---------------|--------|
-| LLM01 Prompt Injection | 11 regex patterns + max length + system prompt isolation; replayed history neutralised (`scan_replayed_text`, G123 / OWASP ASI06) | `guardrails.py` → `InputGuard`, `context_manager.english_view` |
+| LLM01 Prompt Injection | Literal patterns plus verb×target override, persona-swap and prompt-extraction rules, matched on raw, canonical (NFKD, confusables, Unicode tags, bidi), de-obfuscated (leetspeak, spaced letters, typoglycemia) and decoded (Base64, hex, ROT13) views (G460, ADR-0029); max length; spotlight fences (ADR-0027); replayed history neutralised (`scan_replayed_text`, G123 / OWASP ASI06); a principal that keeps tripping the guard is paused (`guard_friction.py`, G464) | `guardrails.py` → `InputGuard`, `context_manager.english_view`, `service._guard_both_forms` |
+| LLM01 Indirect (ASI01) | Third-party text (passages, tool output, uploads, crawl, PDFs) is also checked for directives addressed to an AI, removed with their sentence (G461); uploaded documents share the passage fence normalization (`fence_untrusted_document_body`, G463) | `guardrails.py` → `scan_retrieved_text`, `scan_external_tool_text`, `injection_present` |
 | LLM02 Sensitive Info Disclosure | Uganda-specific PII redaction (TIN, NID, phone, email, cards, passport; official @ura.go.ug emails preserved) | `guardrails.py` → `OutputGuard.redact_pii()` |
 | LLM03 Supply Chain | Pinned deps, Trivy scanning, SBOM, SHA-256 integrity | `requirements.txt`, CI/CD |
 | LLM04 Data Poisoning | Provenance tracking, quality gates, local inference | `governance/`, `ml/pipelines/` |
-| LLM05 Improper Output | XSS strip, HTML sanitize, suspicious link removal | `guardrails.py` → `OutputGuard.sanitize()` |
+| LLM05 Improper Output | XSS strip, HTML sanitize, unsafe schemes; link provenance: every inline, reference, image, autolink, bare or scheme-less URL whose host is not `*.go.ug`, a Tier-1 research host, a corpus host or `OUTPUT_LINK_ALLOWED_HOSTS` is de-linked, and an identifier in a trusted link's query is dropped, per chunk and again on the final reply (G462) | `guardrails.py` → `OutputGuard.sanitize()`, `neutralize_untrusted_links`; `service._apply_output_guards` |
+| LLM07 System Prompt Leakage | Signature phrases synced to the live prompts by test, plus a word 8-gram fingerprint of `llm.SYSTEM_PROMPT` (two shared n-grams = leak; sanctioned refusal/contact text excluded) (G465) | `guardrails.py` → `OutputGuard.check_prompt_leakage()` |
 | LLM09 Misinformation | Runtime faithfulness scoring, grounding disclaimer, calibrated abstention | `guardrails.py` → `OutputGuard.check_grounding()` |
-| LLM10 Unbounded Consumption | Rate limiting, bearer auth on indexing, semantic cache | `main.py` (slowapi), `cache.py` |
+| LLM10 Unbounded Consumption | Rate limiting, bearer auth on indexing, semantic cache, per-principal guard-strike cool-down (G464) | `main.py` (slowapi), `cache.py`, `guard_friction.py` |
 
 **Corrective RAG** (`corrective_rag.py`):
 - Triggers when average calibrated relevance (`gating_relevance`) < `CORRECTIVE_RAG_THRESHOLD_NORM` (default: 0.50); `CORRECTIVE_RAG_THRESHOLD` is logged only
@@ -425,7 +427,7 @@ App/backend/app/
 ├── analytics.py         # Prometheus-compatible metrics middleware
 ├── database.py          # SQLite WAL store (11 tables, retention TTLs, migrations)
 ├── postgres.py          # PostgreSQL backend (opt-in, drop-in substitute for database.py)
-├── flags.py             # Feature flag registry (87 flags, env-backed, cohort rollout)
+├── flags.py             # Feature flag registry (88 flags, env-backed, cohort rollout)
 ├── resilience.py        # Circuit breaker (exponential backoff, CLOSED→OPEN→HALF_OPEN)
 ├── pdf_export.py        # Branded PDF conversation/tax summary export
 ├── evaluation.py        # RAG evaluation harness (8 metrics)
@@ -780,9 +782,10 @@ All major subsystems are behind feature flags for progressive rollout:
 | `live_web_research` (`FLAG_LIVE_WEB_RESEARCH`) | off | Phase 41, ADR-0021: a deterministic 9-trigger check over the question (`web_research.py`), failover across Tavily, Brave and SearXNG (`web_search_providers.py`), 3-tier source authority, closed-vocabulary queries and the ephemeral document sandbox. Web text stays labelled evidence and never enters `verified_facts`; every check ends in a `status`, and a failed one is disclosed. Market FX (`web_fx.py`) is an indicative estimate; a verified Bank of Uganda snapshot takes precedence. Time-sensitive turns bypass the semantic cache. |
 | `auto_qdrant_web_sync` (`FLAG_AUTO_QDRANT_WEB_SYNC`) | off | Phase 41: self-updating Qdrant comparator (`corpus_sync.py`) that compares `ura.go.ug` / `ulii.org` PDFs against Qdrant, tombstones/deletes superseded documents, upserts newer editions, archives replaced `.jsonl` files, and records 7-day state in `web_sync_ledger` |
 | `portal_copilot` (`FLAG_PORTAL_COPILOT`) | on | Phase 42/43 (`ADR-0014`, `ADR-0025`): 4-tier URA portal task execution (`portal_copilot.py`), Claude-style HITL Allow/Disallow confirmation cards (`POST /v1/portal/tasks/execute`), inline chat form elicitation, step-up login auto-return (`returnTo`), screenshot-to-co-pilot handoff, inbuilt stuck-user DOM co-pilot (`/portal/[portalKey]`) with `<untrusted_portal_dom_telemetry>` spotlighting, and unified DTS stamp catalog/fees. Other `G416`–`G438` fixes are not gated by this flag; see `docs/GAPS_AND_AGENTIC_ROADMAP.md` |
+| `guardrail_strike_friction` (`FLAG_GUARDRAIL_STRIKE_FRICTION`) | on | G464 (`ADR-0029`): a user, session or conversation that trips the input guard `GUARD_STRIKE_THRESHOLD` times (default 5) inside `GUARD_STRIKE_WINDOW_S` (600) is answered with a fixed notice and URA contacts for `GUARD_STRIKE_COOLDOWN_S` (300) without a model call, and a `guardrail_strike_cooldown` security event is recorded (`guard_friction.py`). Per replica; the IP rate limit stays in front |
 
 The table above lists the flags that gate a subsystem; `flags.py` holds
-**87** in total, including the per-phase switches for voice, offline and
+**88** in total, including the per-phase switches for voice, offline and
 quantization. `flags.all()` is the authoritative list. Production also
 forces `auth_required`, `multi_tenant`, `audit_ledger`, `ticket_queue`,
 and `voice_consent` unless explicitly disabled (startup then refuses).

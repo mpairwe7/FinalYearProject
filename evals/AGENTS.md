@@ -6,7 +6,7 @@ Deterministic gates. Do not call a hosted LLM from these jobs.
 | --- | --- | --- |
 | RAG golden set | `Data/eval/rag_eval.jsonl` | retrieval regression |
 | Coverage bank | `Data/eval/coverage_bank.jsonl` + `coverage_domains.yaml` | `ml.pipelines.corpus_coverage --fail-under-floor` — per-domain floor (#303) |
-| Red-team corpus | `Data/eval/redteam_corpus.jsonl` | `test_redteam_corpus.py` — refuse / partial_refuse |
+| Red-team corpus | `Data/eval/redteam_corpus.jsonl` (+ `guardrail_benign_controls.jsonl`) | `test_redteam_corpus.py` — every row refused (`channel: retrieved` rows by `injection_present`), a malformed row fails, each attack class has a floor, and no benign control may be refused (ADR-0029) |
 | Routing golden sets | `app.agents.eval_routing` | EN ≥ 0.95 before `agentic_mode` |
 | Preference export | `evals/export_preferences.py` | thumbs-down + `officer_reply`; no fine-tune |
 | DPO scaffold | `evals/dpo_job.py` | refuses train unless `EVAL_GATE_OK` |
