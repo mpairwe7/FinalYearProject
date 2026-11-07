@@ -66,8 +66,11 @@ def test_refuse_rows_are_blocked() -> None:
     guard = InputGuard()
     missed: list[str] = []
     for row in _rows():
-        if row.get("expected") not in ("refuse", "partial_refuse"):
-            continue
+        # An attack row with a missing or misspelt expectation must not count
+        # towards its category floor while escaping the check (CodeRabbit #701).
+        assert row.get("expected") in ("refuse", "partial_refuse"), (
+            f"invalid expected for {row.get('id')}: {row.get('expected')!r}"
+        )
         prompt = str(row.get("prompt") or "")
         if row.get("channel") == "retrieved":
             caught = injection_present(prompt)

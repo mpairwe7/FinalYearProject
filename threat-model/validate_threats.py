@@ -175,7 +175,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": (
             "Patterns run on raw, canonical, de-obfuscated and decoded views; override, persona-swap and "
             "extraction rules require an assistant-addressed target; third-party text is also checked for "
-            "directives addressed to an AI and loses the whole sentence. A benign-control set fails CI on "
+            "directives addressed to an AI and loses it to the end of its line. A benign-control set fails CI on "
             "over-refusal. Recognition stays bypassable by an adaptive attacker (arXiv:2510.09023), so the "
             "fences, output guards and tool tiers remain the controls that hold"
         ),

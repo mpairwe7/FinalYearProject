@@ -283,8 +283,8 @@ groups:
           severity: warning
           team: security
         annotations:
-          summary: "Several principals paused for repeated guardrail refusals"
-          description: "Three or more users, sessions or conversations reached the guard-strike cool-down within 15 minutes. Someone is iterating against the input guard; read the guardrail_prompt_injection and guardrail_strike_cooldown log events."
+          summary: "Repeated guardrail cool-downs"
+          description: "Three or more guard-strike cool-downs started within 15 minutes. One principal can start several; group the guardrail_strike_cooldown log events by their hashed principal to tell one prober from many."
           runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/ai-security-guardrails.md#a-probing-campaign"
 
       # ADR-0029 (G461, G462): third-party text speaking to the model, or answers carrying untrusted links.

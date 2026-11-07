@@ -21,6 +21,7 @@ which is why the IP rate limit stays in front of this (OWASP LLM10).
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import threading
 import time
@@ -29,6 +30,10 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from .guardrails import GuardResult
+
+logger = logging.getLogger(__name__)
 
 STRIKE_THRESHOLD = int(os.getenv("GUARD_STRIKE_THRESHOLD", "5"))
 STRIKE_WINDOW_S = float(os.getenv("GUARD_STRIKE_WINDOW_S", "600"))
@@ -51,14 +56,22 @@ def principal_key(
     session_id: str | None = None,
     conversation_id: str | None = None,
     tenant_id: str | None = None,
+    client_address: str | None = None,
 ) -> str:
-    """A stable, hashed key for whoever sent the turn, or ``""`` when nothing identifies them."""
+    """A stable, hashed key for whoever sent the turn, or ``""`` when nothing identifies them.
+
+    *client_address* is the last resort, for a route with no session or
+    conversation (the chat title). It is hashed like the rest and only ever
+    held in memory.
+    """
     if user_id:
         raw = f"user:{tenant_id or 'default'}:{user_id}"
     elif session_id:
         raw = f"session:{session_id}"
     elif conversation_id:
         raw = f"conversation:{conversation_id}"
+    elif client_address:
+        raw = f"client:{client_address}"
     else:
         return ""
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
@@ -83,7 +96,8 @@ class StrikeTracker:
         self._clock = clock
         self._lock = threading.Lock()
         self._strikes: OrderedDict[str, deque[float]] = OrderedDict()
-        self._cooldown_until: dict[str, float] = {}
+        #: Insertion order is expiry order, because every cool-down lasts the same time.
+        self._cooldown_until: OrderedDict[str, float] = OrderedDict()
 
     def cooldown_remaining(self, key: str) -> float:
         """Seconds left in *key*'s cool-down, ``0.0`` when there is none."""
@@ -108,6 +122,7 @@ class StrikeTracker:
                 strikes.popleft()
             strikes.append(now)
             if len(strikes) >= self._threshold:
+                self._cooldown_until.pop(key, None)
                 self._cooldown_until[key] = now + self._cooldown_s
                 strikes.clear()
                 started = True
@@ -117,9 +132,14 @@ class StrikeTracker:
                 self._strikes[key] = strikes
             while len(self._strikes) > self._max_tracked:
                 self._strikes.popitem(last=False)
-            if len(self._cooldown_until) > self._max_tracked:
-                for stale in [k for k, until in self._cooldown_until.items() if until <= now]:
-                    del self._cooldown_until[stale]
+            # Expired cool-downs leave from the front. Past capacity the one
+            # closest to expiry goes first: that principal loses at most the
+            # remainder of its pause, and the per-IP limit still applies.
+            while self._cooldown_until and (
+                next(iter(self._cooldown_until.values())) <= now
+                or len(self._cooldown_until) > self._max_tracked
+            ):
+                self._cooldown_until.popitem(last=False)
             return started
 
     def reset(self) -> None:
@@ -131,3 +151,45 @@ class StrikeTracker:
 
 #: The process-wide tracker the chat service consults.
 strike_tracker = StrikeTracker()
+
+
+def _friction_enabled() -> bool:
+    from .flags import flags
+
+    return flags.is_enabled("guardrail_strike_friction")
+
+
+def paused(principal: str, *, crisis: bool = False) -> GuardResult | None:
+    """The fixed refusal while *principal* cools down, else ``None``.
+
+    A message that reads as a crisis is never paused: the caller's
+    crisis-support reply, with its emergency numbers, has to reach them.
+    """
+    if not principal or crisis or not _friction_enabled():
+        return None
+    if strike_tracker.cooldown_remaining(principal) <= 0:
+        return None
+    from .guardrails import GuardResult
+
+    return GuardResult(allowed=False, reason=COOLDOWN_REPLY, flags=["guardrail_cooldown"])
+
+
+def note_refusal(principal: str, guard: GuardResult) -> None:
+    """Count *guard* as a strike when it refused an attack, and record a pause it starts.
+
+    The event carries the hashed principal so an operator can tell one
+    principal paused repeatedly from many. A failure to record it never
+    changes the refusal the caller returns.
+    """
+    if not principal or guard.allowed or not STRIKE_FLAGS.intersection(guard.flags):
+        return
+    if not _friction_enabled() or not strike_tracker.record_strike(principal):
+        return
+    try:
+        from .security_events import record_security_event
+
+        record_security_event(
+            "guardrail_strike_cooldown", reason="repeated_guard_blocks", principal=principal
+        )
+    except Exception:  # noqa: BLE001 - telemetry must not turn a refusal into an error
+        logger.warning("guardrail_strike_cooldown event not recorded", exc_info=True)

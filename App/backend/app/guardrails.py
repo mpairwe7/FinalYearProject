@@ -193,6 +193,9 @@ _SANCTIONED_PROMPT_OUTPUT: tuple[str, ...] = (
     "or the web portal https://ura.go.ug.",
     "direct the user to https://ura.go.ug or the URA Contact Centre.",
     "You might also want to know about",
+    # The persona's public description, which the assistant uses about itself.
+    "an official, helpful, and conversational AI assistant for the Uganda Revenue Authority.",
+    "provide accurate, helpful, and friendly answers about URA services, tax obligations, customs, and procedures.",
 )
 _LEAK_WORD_RE = re.compile(r"[a-z0-9']+")
 _REASONING_PREFIX_REGEX = re.compile(
@@ -387,7 +390,7 @@ _HARMFUL_INTENT_PATTERNS: list[re.Pattern[str]] = [
         r"(?:fake|counterfeit)\s+(?:a|an|the|my|some|our)\s+(?:tax\s+clearance\s+)?"
         r"(?:receipt|invoice|EFRIS|document|TIN|certificate|return|declaration)",
         r"\b(?:make|making|create|creating|produce|producing|print|printing|generate|generating|issue|issuing|"
-        r"structure|structuring|buy|buying|sell|selling|use|using|need|want|get)\s+(?:a\s+|an\s+|some\s+|the\s+)?"
+        r"structure|structuring|buy|buying|sell|selling|use|using|need|want)\s+(?:a\s+|an\s+|some\s+|the\s+)?"
         r"(?:fake|counterfeit|forged|false|fraudulent)\s+(?:tax\s+clearance\s+)?(?:EFRIS\s+)?"
         r"(?:receipt|invoice|document|TIN|certificate|return|declaration)",
         r"\bso\s+(?:that\s+)?(?:URA|the\s+tax\s+(?:man|authority)|auditors?|the\s+auditor)\s+"
@@ -418,9 +421,15 @@ _HARMFUL_INTENT_PATTERNS: list[re.Pattern[str]] = [
         r"\bI\s+AM\s+JAILBROKEN\b",
         # Fraud guidance under reframing (novel, research, compliance training)
         r"(?:for\s+(?:a\s+)?(?:novel|story|fiction|book)|as\s+(?:a\s+|an\s+)?(?:exercise|scenario))\b.*(?:under[\-\s]?report|evade|forge|hide\s+income|fraud)",
-        # Undeclared income is the concealment. "Offshore income" alone is the
-        # subject of a foreign tax credit question, which this blocked (G460).
-        r"\bundeclared\s+(?:offshore\s+|foreign\s+)?income",
+        # Concealing undeclared income is the request to refuse. "Offshore
+        # income" is a foreign tax credit question, and "how do I disclose
+        # undeclared income?" or its penalty is voluntary disclosure (G460).
+        r"\b(?:hide|hiding|conceal\w*|stash\w*|launder\w*|shield\w*|park|parking|speciali[sz]\w*)\b"
+        r"[^.?!\n]{0,40}?\bundeclared\s+(?:offshore\s+|foreign\s+)?(?:income|money|earnings|assets?|accounts?|cash)",
+        r"\bkeep(?:ing)?\b[^.?!\n]{0,40}?\bundeclared\b[^.?!\n]{0,40}?"
+        r"\b(?:hidden|secret|off\s+the\s+books|from\s+(?:URA|the\s+tax))",
+        r"\bundeclared\s+(?:offshore\s+|foreign\s+)?(?:income|money|earnings|assets?|accounts?|cash)\b"
+        r"[^.?!\n]{0,60}?\b(?:without\s+(?:URA|the\s+tax|them|anyone)|so\s+(?:that\s+)?(?:URA|the\s+tax))",
         r"(?:hide|hiding|conceal\w*)\s+(?:my\s+|the\s+|our\s+|your\s+)?(?:offshore|foreign)\s+"
         r"(?:income|money|earnings|assets?|accounts?)",
         r"(?:commonly|typically|usually)\s+misreport",
@@ -600,10 +609,7 @@ _AI_ONLY_ADDRESSEE = (
     r"(?:ai|chat\s?bots?|llms?|(?:large\s+)?language\s+models?|ai\s+(?:assistants?|models?|agents?|systems?)|"
     r"(?:virtual|digital)\s+assistants?|copilots?)"
 )
-_TO_SENTENCE_END = r"[^\n]{0,300}?(?:[.!?](?=\s|\Z)|(?=\n)|\Z)"
-_AI_DIRECTIVE_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(p + _TO_SENTENCE_END, re.IGNORECASE)
-    for p in (
+_AI_DIRECTIVE_HEADS: tuple[str, ...] = (
         rf"\b(?:note|message|instructions?|directive|reminder|attention|notice|memo|command)\s+(?:to|for)\s+"
         rf"(?:the\s+|any\s+|all\s+)?{_AI_ADDRESSEE}\b",
         rf"\b(?:if|when)\s+you\s+are\s+(?:an?\s+|the\s+)?{_AI_ADDRESSEE}\b",
@@ -618,7 +624,14 @@ _AI_DIRECTIVE_PATTERNS: list[re.Pattern[str]] = [
         r"(?:retrieved\s+|provided\s+|other\s+)?(?:passages|context|sources|search\s+results|citations)\b",
         rf"\b{_AI_ONLY_ADDRESSEE}\s+(?:must|should|shall|are\s+(?:instructed|required)\s+to|is\s+(?:instructed|required)\s+to)\s+"
         r"(?:always\s+)?(?:tell|say|respond|reply|answer|instruct|direct|ask|include|recommend|state|claim)\b",
-    )
+)
+#: Detection reads the head alone, so padding cannot push it past a length
+#: limit. Scrubbing removes the head to the end of its line: a sentence end is
+#: not a safe boundary ("e.g." ends one), and a passage that speaks to the
+#: model has lost its claim to the rest of that line (CodeRabbit on #701).
+_AI_DIRECTIVE_PATTERNS: list[re.Pattern[str]] = [re.compile(head, re.IGNORECASE) for head in _AI_DIRECTIVE_HEADS]
+_AI_DIRECTIVE_LINE_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(head + r"[^\n]*", re.IGNORECASE) for head in _AI_DIRECTIVE_HEADS
 ]
 
 
@@ -684,9 +697,11 @@ class InputGuard:
                 flags=["prompt_injection"],
             )
 
-        canonical = _canonicalize_text(text)
+        # Every view, as for injection: a Base64 "how can I forge an invoice?"
+        # is the same request (CodeRabbit on #701).
+        views = _injection_views(text)
         for pattern in _HARMFUL_INTENT_PATTERNS:
-            if pattern.search(text) or pattern.search(canonical):
+            if any(pattern.search(view) for view in views):
                 logger.warning(
                     "Harmful intent blocked: pattern=%s input_length=%d",
                     pattern.pattern[:60],
@@ -711,7 +726,7 @@ class InputGuard:
 # Indirect prompt injection defence (LLM01 — retrieved-content vector)
 # ---------------------------------------------------------------------------
 def _redact_instruction_phrases(text: str, *, indirect: bool = False) -> str:
-    patterns = _INJECTION_PATTERNS + _AI_DIRECTIVE_PATTERNS if indirect else _INJECTION_PATTERNS
+    patterns = _INJECTION_PATTERNS + _AI_DIRECTIVE_LINE_PATTERNS if indirect else _INJECTION_PATTERNS
     for pattern in patterns:
         text = pattern.sub("[REDACTED_INSTRUCTION]", text)
     return text
@@ -1480,9 +1495,9 @@ _DEFAULT_EXTRA_LINK_HOSTS = frozenset(
         "bou.or.ug",
         "nda.or.ug",
         "eac.int",
-        # Linked from the reviewed corpus (Data/dataset, Data/crawl).
+        # Linked from the reviewed corpus (Data/dataset, Data/crawl). doi.org is
+        # left out: the resolver redirects to whatever a registrant names.
         "wto.org",
-        "doi.org",
         "wcoeacaeo-tpf.net",
         # The FX source the calculator names in its disclosure (web_fx).
         "xe.com",
@@ -1507,9 +1522,33 @@ _LINK_TOKEN_RE = re.compile(
     r"|(?P<auto><(?:https?://|www\.)[^\s<>]+>)"
     r"|(?P<bare>\b(?:https?://|www\.)[^\s<>\"'`]+)"
     r"|(?P<domain>(?<![@\w.\-/])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
-    r"(?:com|net|org|info|biz|io|co|xyz|online|site|top|app|me|ug)\b(?:/[^\s<>\"'`]*)?)",
+    r"[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?\b(?:/[^\s<>\"'`]*)?)",
     re.IGNORECASE,
 )
+#: Last labels that make a dotted word a host a reader could type. Any other
+#: two-letter label counts too when a longer label precedes it; "guide.pdf",
+#: "DT-2001.xlsx" and "e.g." do not.
+_HOST_TLDS = frozenset(
+    {
+        "com", "net", "org", "info", "biz", "io", "co", "xyz", "online", "site", "top", "app", "me",
+        "africa", "shop", "store", "tech", "dev", "ai", "cloud", "live", "link", "click", "news",
+        "world", "pro", "club", "vip", "icu", "buzz", "gov", "edu", "int", "mil", "website", "space",
+        "today", "help", "support", "services", "finance", "money", "pay", "tax", "bank",
+    }
+)
+
+
+def _reads_as_host(host: str) -> bool:
+    """Whether a dotted word in prose is a hostname rather than a file name or abbreviation."""
+    labels = host.lower().rstrip(".").split(".")
+    if len(labels) < 2:
+        return False
+    last = labels[-1]
+    if last in _HOST_TLDS:
+        return True
+    if "go.ug" in host.lower() or "ura" in labels[:-1]:
+        return True  # a trusted name with something after it is a look-alike
+    return len(last) == 2 and last.isalpha() and any(len(label) >= 3 for label in labels[:-1])
 
 
 def _allowed_link_hosts() -> frozenset[str]:
@@ -1526,15 +1565,22 @@ def is_trusted_link_target(target: str) -> bool:
     ``https://ura.go.ug.evil.example`` are refused. Site-relative paths and
     ``tel:`` stay; ``mailto:`` only to an official address.
     """
-    value = (target or "").strip().strip("<>")
+    # Read the target the way a browser will: it drops tabs and newlines inside
+    # a URL and treats a backslash as a slash, so "/\\evil.example" and
+    # "/\t/evil.example" are protocol-relative links off the site.
+    value = re.sub(r"[\t\n\r]", "", (target or "").strip().strip("<>")).replace("\\", "/")
     if not value:
         return False
     lowered = value.lower()
-    if lowered.startswith("tel:") or (value.startswith(("/", "#")) and not value.startswith("//")):
+    if lowered.startswith("tel:"):
         return True
-    if lowered.startswith("mailto:"):
+    if value.startswith("//"):
+        value = f"https:{value}"
+    elif value.startswith(("/", "#")):
+        return True
+    elif lowered.startswith("mailto:"):
         return is_official_ura_email(value[7:].split("?", 1)[0])
-    if "://" not in value:  # www.host, a bare host, or //host (which then has none)
+    elif "://" not in value:  # www.host or a bare host
         value = f"https://{value}"
     try:
         parts = urllib.parse.urlsplit(value)
@@ -1610,6 +1656,8 @@ def neutralize_untrusted_links(text: str) -> tuple[str, int]:
             removed += 1
             return f"{label} ({_EXTERNAL_LINK_REMOVED})"
         raw = match.group("auto") or match.group("bare") or match.group("domain") or ""
+        if match.group("domain") is not None and not _reads_as_host(raw.split("/", 1)[0].rstrip(".,;:!?)")):
+            return raw
         url = raw.strip("<>")
         trail = ""
         if match.group("auto") is None:

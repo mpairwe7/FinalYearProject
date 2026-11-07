@@ -149,8 +149,9 @@ from .calculator_router import (
 from .claim_verifier import verify_claims
 from .corrective_rag import corrective_retrieve, needs_clarification
 from .flags import flags
-from .guard_friction import COOLDOWN_REPLY as GUARD_COOLDOWN_REPLY
-from .guard_friction import STRIKE_FLAGS, principal_key, strike_tracker
+from .guard_friction import note_refusal as note_guard_refusal
+from .guard_friction import paused as paused_turn
+from .guard_friction import principal_key
 from .guardrails import (
     STORE_RAW_PROMPTS,
     GuardResult,
@@ -2268,8 +2269,9 @@ def _apply_output_guards(
     # replaces what it showed (G462).
     links_revised = False
     if reply and isinstance(reply, str):
-        delinked, links_removed = neutralize_untrusted_links(reply)
-        if links_removed:
+        delinked, _ = neutralize_untrusted_links(reply)
+        # A trusted link that lost an identifier query is a change too.
+        if delinked != reply:
             reply, links_revised = delinked, True
     if reply and isinstance(reply, str):
         norm = output_guard.normalize_structure(reply)
@@ -5932,28 +5934,39 @@ class ChatModel:
         *principal* (:func:`guard_friction.principal_key`) is who sent the
         turn. One who keeps tripping the guard is paused (G464): the turn is
         refused before any check or model call, so a probing loop stops
-        learning from refusals.
+        learning from refusals. A message that reads as a crisis is never
+        paused, so its crisis-support reply still reaches the caller.
         """
-        friction = bool(principal) and flags.is_enabled("guardrail_strike_friction")
-        if friction and strike_tracker.cooldown_remaining(principal) > 0:
-            return GuardResult(
-                allowed=False, reason=GUARD_COOLDOWN_REPLY, flags=["guardrail_cooldown"]
-            )
+        crisis = detect_crisis(message) or bool(english_form and detect_crisis(english_form))
+        held = paused_turn(principal, crisis=crisis)
+        if held is not None:
+            return held
         guard = self._input_guard.check(message)
         if guard.allowed and english_form and english_form != message:
             english_guard = self._input_guard.check(english_form)
             if not english_guard.allowed:
                 guard = english_guard
-        if (
-            friction
-            and not guard.allowed
-            and STRIKE_FLAGS.intersection(guard.flags)
-            and strike_tracker.record_strike(principal)
-        ):
-            from .security_events import record_security_event
-
-            record_security_event("guardrail_strike_cooldown", reason="repeated_guard_blocks")
+        note_guard_refusal(principal, guard)
         return guard
+
+    def _guard_blocked_result(
+        self, guard: GuardResult, *, thread_id: str, locale: str
+    ) -> dict[str, Any]:
+        """The reply for a turn the input guard (or a pause) refused."""
+        return {
+            "reply": guard.reason,
+            "sources": [],
+            "citations": [],
+            "faithfulness_score": None,
+            "retrieval_mode": "blocked",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": "safety_guard",
+            "next_actions": [],
+        }
 
     def _bind_conversation_topic(
         self,
@@ -11764,6 +11777,24 @@ class ChatModel:
             trace_ctx["user_id"] = user_id or ""
             trace_ctx["tenant_id"] = tenant_id or "default"
 
+            # A paused principal is answered before anything reads, writes or
+            # translates on its behalf (G464).
+            held = paused_turn(
+                principal_key(
+                    user_id=user_id,
+                    session_id=session_id,
+                    conversation_id=thread_id,
+                    tenant_id=tenant_id,
+                ),
+                crisis=detect_crisis(message),
+            )
+            if held is not None:
+                blocked = self._guard_blocked_result(held, thread_id=thread_id, locale=locale)
+                self._audit_turn(
+                    message=message, result=blocked, session_id=session_id, trace_ctx=trace_ctx
+                )
+                return blocked
+
             # 0. Multi-turn memory — fetch rolling conversation context
             conversation_history: list[dict[str, str]] = []
             context_summary = ""
@@ -14009,6 +14040,24 @@ class ChatModel:
         # query.SUPPORTED_LOCALES for why.
         requested_locale = normalize_locale_tag(locale)
         locale = gate_locale(requested_locale or "en")
+
+        # A paused principal is answered before anything reads, writes or
+        # translates on its behalf (G464).
+        held = paused_turn(
+            principal_key(
+                user_id=user_id,
+                session_id=session_id,
+                conversation_id=thread_id,
+                tenant_id=tenant_id,
+            ),
+            crisis=detect_crisis(message),
+        )
+        if held is not None:
+            return {
+                **self._guard_blocked_result(held, thread_id=thread_id, locale=locale),
+                "_hits": [],
+                "_history": [],
+            }
 
         # Multi-turn memory (Phase 4 -> overridable in Phase 29)
         conversation_history: list[dict[str, str]] = []

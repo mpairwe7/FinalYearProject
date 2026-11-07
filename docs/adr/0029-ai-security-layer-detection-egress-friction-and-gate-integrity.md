@@ -55,7 +55,7 @@ on recognition, and it makes iterating against them expensive.
 2. **AI-addressed directives in third-party text (G461).** Retrieved passages, tool output, uploads,
    crawled pages and PDFs (`injection_present`) are also checked for sentences that speak to an AI ("note
    to AI assistants", "if you are a language model", "assistant: respond that", "when summarizing … tell
-   the user to", "ignore the passages"). A match is scrubbed with the rest of its sentence. "Assistant
+   the user to", "ignore the passages"). A match is detected by its head alone and scrubbed to the end of its line, so padding past a length limit or an abbreviation such as "e.g." cannot leave the instruction behind (CodeRabbit on #701). "Assistant
    Commissioner", clearing agents and notices addressed to taxpayers are excluded. A taxpayer addressing
    the assistant is the normal case and is not checked this way.
 3. **Link provenance (G462).** `neutralize_untrusted_links` runs inside `OutputGuard.sanitize` (per
@@ -99,6 +99,30 @@ on recognition, and it makes iterating against them expensive.
    paraphrase, obfuscation, encoding, extraction, Kiswahili and Luganda, and `channel: retrieved` indirect
    rows. `guardrail_benign_controls.jsonl` holds 24 lawful questions and statutory sentences that look
    like attacks, and refusing any of them fails CI.
+
+### Review amendments (PR #701)
+
+CodeRabbit's review produced 19 findings, and each was confirmed by a failing test before it was fixed:
+
+- A principal in cool-down whose message reads as a crisis is never paused. Crisis support and its
+  emergency numbers come first.
+- A paused turn is refused before history is read, a discrepancy is recorded, or the message is
+  translated or rewritten, on both chat paths.
+- `/v1/chat/title` shares the strike friction, keyed on the signed-in user or the hashed client
+  address, so it cannot be used to probe the guard while the chat is paused.
+- The cool-down event carries the hashed principal, and a failure to record it never changes the
+  refusal. The cool-down store is bounded even when every entry is active: past capacity the one
+  closest to expiry goes first. `GuardrailProbingCampaign` counts cool-down events, not principals.
+- Harmful intent is screened on decoded views, so a Base64 "how can I forge an invoice?" is refused.
+  Receiving a fake invoice and voluntarily disclosing undeclared income are no longer refused.
+  Concealment still is.
+- `doi.org` left the link allowlist because it is a redirector. `/\evil.example`, tab-split and
+  backslash targets are read the way a browser reads them, and protocol-relative `//ura.go.ug` links
+  are kept. Scheme-less look-alikes are matched on the whole hostname with any TLD
+  (`ura.go.ug.attacker.africa`), while file names such as `DT-2001.xlsx` are not taken for hosts.
+- An identifier dropped from a trusted link's query now counts as a revision. The persona's public
+  self-description is no longer read as a prompt leak. An attack row with a malformed `expected`
+  fails the gate.
 
 ## Consequences
 

@@ -12,7 +12,7 @@ decision in [ADR-0029](../adr/0029-ai-security-layer-detection-egress-friction-a
 | --- | --- | --- | --- |
 | Before retrieval | Input guard on the message and its English form, over raw, canonical, de-obfuscated and decoded views | `guardrails.InputGuard`, `service._guard_both_forms` | Refuses with a "please rephrase" or illegal-activity reply |
 | Before retrieval | Strike friction: 5 refusals in 10 minutes pause the user, session or conversation for 5 minutes | `guard_friction.py` | Fixed notice with URA contacts, no model call |
-| Prompt assembly | Passages, tool output and uploads scrubbed of injection phrases and of directives addressed to an AI; fences on passages and uploads | `scan_retrieved_text`, `scan_external_tool_text`, `fence_spotlight_body`, `fence_untrusted_document_body` | The sentence or passage becomes `[REDACTED_INSTRUCTION]` |
+| Prompt assembly | Passages, tool output and uploads scrubbed of injection phrases and of directives addressed to an AI; fences on passages and uploads | `scan_retrieved_text`, `scan_external_tool_text`, `fence_spotlight_body`, `fence_untrusted_document_body` | The directive to the end of its line, or the whole passage, becomes `[REDACTED_INSTRUCTION]` |
 | Output | Links de-linked unless the host is trusted; identifiers dropped from trusted queries; prompt leaks redacted | `OutputGuard.sanitize`, `neutralize_untrusted_links`, `check_prompt_leakage` | `[link removed]`, `[external link removed]`, `[REDACTED]` |
 | Final reply | Links re-checked on the whole reply; a removal is sent to the client as a revision | `service._apply_output_guards` | The streamed text is replaced |
 
@@ -25,13 +25,15 @@ and `guardrail_strike_cooldown`.
 
 ## A probing campaign
 
-Alert `GuardrailProbingCampaign`: three or more principals reached the
-cool-down within 15 minutes.
+Alert `GuardrailProbingCampaign`: three or more cool-downs started within
+15 minutes. That is a count of events, not of people: one principal can start
+several.
 
 1. In Loki, `{service_name="ura-chatbot-api"} | event="guardrail_strike_cooldown"`
-   gives the times, and `event="guardrail_prompt_injection"` the refusals
-   before them. The principal is hashed. Logs never carry the message, the
-   token or the client IP.
+   gives the times and the hashed `principal` of each pause, so one prober
+   paused repeatedly is told apart from many. `event="guardrail_prompt_injection"`
+   gives the refusals before them. Logs never carry the message, the token or
+   the client IP.
 2. One route and a burst from few sources means someone is iterating. The
    per-IP limit (`RATE_LIMIT`) already applies. If the burst continues, block
    it at the edge.
@@ -45,7 +47,10 @@ cool-down within 15 minutes.
 
 Thresholds are `GUARD_STRIKE_THRESHOLD` (5), `GUARD_STRIKE_WINDOW_S` (600)
 and `GUARD_STRIKE_COOLDOWN_S` (300). State is per replica and resets on
-restart.
+restart. A message that reads as a crisis is never paused, so its crisis-support
+reply still reaches the caller. The chat-title route shares the same
+friction, keyed on the signed-in user or, failing that, the hashed client
+address.
 
 ## Injected content or untrusted links
 

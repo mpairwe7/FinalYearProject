@@ -155,7 +155,7 @@ owasp_llm:
     name: "Prompt Injection"
     status: "mitigated"
     evidence: "App/backend/app/guardrails.py:InputGuard, App/backend/app/guardrails.py:scan_retrieved_text, App/backend/app/guard_friction.py, App/backend/app/service.py:_guard_both_forms"
-    controls: "Patterns matched on raw, canonical, de-obfuscated (leetspeak, spaced letters, typoglycemia) and decoded (Base64, hex, ROT13) views; verb-by-target override, persona-swap and prompt-extraction rules that require an assistant-addressed target (G460); directives addressed to an AI in third-party text removed with their sentence (G461); upload fence shares the passage-fence normalization (G463); a principal tripping the guard 5 times in 10 minutes is paused (G464); input length limits. ADR-0029."
+    controls: "Patterns matched on raw, canonical, de-obfuscated (leetspeak, spaced letters, typoglycemia) and decoded (Base64, hex, ROT13) views; verb-by-target override, persona-swap and prompt-extraction rules that require an assistant-addressed target (G460); directives addressed to an AI in third-party text removed to the end of their line (G461); upload fence shares the passage-fence normalization (G463); a principal tripping the guard 5 times in 10 minutes is paused (G464); input length limits. ADR-0029."
     limitations: "Recognition is bypassable by an adaptive attacker (arXiv:2510.09023); the spotlight fences, output guards and tool tiers are the controls that hold. No prompt-injection classifier model is deployed. Strike state is per replica."
     verified_by:
       - "tests/agents/test_ai_security_layer_2026_11.py"
