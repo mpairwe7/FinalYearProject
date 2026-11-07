@@ -102,7 +102,7 @@ CodeRabbit's review produced 11 findings, and all were fixed:
 - Negative: an extractor that comes to need a new kind of setting must have its name added to the
   allowlist. The source-derived test fails until it is.
 - Negative: the 1 GiB cap may be too tight for a future model-backed extractor in the child. Raise it
-  with `DOCUMENT_PARSE_MAX_MEM_BYTES`, and production refuses only `0`.
+  with `DOCUMENT_PARSE_MAX_MEM_BYTES`. Production refuses only zero, negative and unreadable values.
 - Negative: the child still shares the parent's network and filesystem view. Network and filesystem
   isolation (gVisor, a microVM, or a dedicated pool) remains the follow-up named in `production_readiness`.
 - Neutral: `service.py` is unchanged in size. Extracting the graph's eight helpers is G486.
