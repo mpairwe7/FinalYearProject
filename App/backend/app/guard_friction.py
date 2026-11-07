@@ -21,6 +21,7 @@ which is why the IP rate limit stays in front of this (OWASP LLM10).
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import threading
@@ -64,16 +65,20 @@ def principal_key(
     conversation (the chat title). It is hashed like the rest and only ever
     held in memory.
     """
+    tenant = tenant_id or "default"
+    # JSON keeps the parts unambiguous: a tenant or id containing ":" cannot
+    # make two principals collide, and one tenant's strikes cannot pause another's.
     if user_id:
-        raw = f"user:{tenant_id or 'default'}:{user_id}"
+        parts = ["user", tenant, user_id]
     elif session_id:
-        raw = f"session:{session_id}"
+        parts = ["session", tenant, session_id]
     elif conversation_id:
-        raw = f"conversation:{conversation_id}"
+        parts = ["conversation", tenant, conversation_id]
     elif client_address:
-        raw = f"client:{client_address}"
+        parts = ["client", client_address]
     else:
         return ""
+    raw = json.dumps(parts, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 
 

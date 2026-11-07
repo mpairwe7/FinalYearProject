@@ -45,6 +45,26 @@ MCP_SECURITY_EVENT_KINDS: frozenset[str] = frozenset(
 )
 
 
+#: Guardrail events (ADR-0029); the reason carries the channel.
+GUARDRAIL_SECURITY_EVENTS: frozenset[str] = frozenset(
+    {
+        "guardrail_prompt_injection",
+        "guardrail_harmful_intent",
+        "guardrail_indirect_injection",
+        "guardrail_untrusted_link",
+        "guardrail_prompt_leakage",
+        "guardrail_strike_cooldown",
+    }
+)
+
+#: Every event name this module is given: a closed vocabulary, reserved at the
+#: metrics series cap so no alert on one of them can be folded into silence.
+SECURITY_EVENT_NAMES: frozenset[str] = (
+    frozenset(EVENT_BY_STATUS.values()) | MCP_SECURITY_EVENT_KINDS | GUARDRAIL_SECURITY_EVENTS
+)
+_reserved = False
+
+
 def record_mcp_security_event(
     kind: str,
     *,
@@ -66,8 +86,12 @@ def record_mcp_security_event(
 
 def record_security_event(event: str, *, reason: str = "", **fields: Any) -> None:
     """Log and count one security event."""
+    global _reserved
     from .analytics import metrics
 
+    if not _reserved:
+        metrics.reserve("security_events_total", "event", SECURITY_EVENT_NAMES)
+        _reserved = True
     metrics.inc("security_events_total", labels={"event": event})
     logger.warning(
         "security event %s%s",

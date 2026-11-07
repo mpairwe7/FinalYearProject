@@ -630,3 +630,29 @@ def test_a_paused_turn_does_no_work_before_it_is_refused(monkeypatch: pytest.Mon
         assert out["reply"] == COOLDOWN_REPLY
     finally:
         strike_tracker.reset()
+
+
+def test_anonymous_principals_are_scoped_to_their_tenant() -> None:
+    assert principal_key(session_id="s1", tenant_id="a") != principal_key(session_id="s1", tenant_id="b")
+    assert principal_key(conversation_id="c1", tenant_id="a") != principal_key(conversation_id="c1", tenant_id="b")
+    assert principal_key(session_id="x:y", tenant_id="t") != principal_key(session_id="y", tenant_id="t:x")
+
+
+def test_alerted_security_events_stay_distinct_at_the_series_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """At the minimum series cap a guardrail event must not fold into __other__ and mute its alert."""
+    import app.analytics as analytics
+    from app.security_events import SECURITY_EVENT_NAMES, record_security_event
+
+    monkeypatch.setattr(analytics, "_MAX_SERIES_PER_METRIC", 10)
+    name = "test_reserved_security_events_total"
+    analytics.metrics.reserve(name, "event", {"guardrail_strike_cooldown"})
+    for i in range(12):
+        analytics.metrics.inc(name, labels={"event": f"noise_{i}"})
+    analytics.metrics.inc(name, labels={"event": "guardrail_strike_cooldown"})
+    family = analytics.metrics._families[analytics.exported_name(name)]
+
+    assert ("guardrail_strike_cooldown",) in family.seen
+    assert ("__other__",) in family.seen
+    record_security_event("guardrail_untrusted_link", reason="output")
+    reserved = analytics.metrics._reserved[analytics.exported_name("security_events_total")]["event"]
+    assert reserved >= SECURITY_EVENT_NAMES
