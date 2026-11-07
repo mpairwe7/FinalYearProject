@@ -468,6 +468,7 @@ owasp_agentic_2026:
         - "tests/agents/test_spotlight_fence.py"
         - "tests/agents/test_grok_pending_gap_closures.py"
         - "tests/agents/test_ai_security_layer_2026_11.py"
+        - "tests/agents/test_web_research_integrity_2026_11.py"
         - "tests/agents/test_harness_prompt_contract.py"
     - id: "ASI02"
       name: "Tool Misuse and Exploitation"
@@ -529,6 +530,7 @@ owasp_agentic_2026:
       controls: "Tenant- and user-scoped 4-tier cognitive memory, low-ASR-confidence memory write suppression, and _-prefixed internal workflow state exclusion (G171); procedural memory reaches prompts only through reviewed curated triggers, as an operating sequence with no legal citations, and recorded or imported trajectories are validated, PII-redacted, bounded and barred from curated ids (G245)"
       verified_by:
         - "tests/agents/test_live_research_planning.py"
+        - "tests/agents/test_web_research_integrity_2026_11.py"
         - "App/backend/tests/test_memory_lifecycle.py"
         - "App/backend/tests/test_mcp_2026_october_audit_and_corpus.py"
         - "tests/agents/test_procedural_memory_safety.py"
@@ -556,6 +558,7 @@ owasp_agentic_2026:
       verified_by:
         - "tests/agents/test_fault_tolerance_contract.py"
         - "tests/chaos/test_failure_modes.py"
+        - "tests/agents/test_web_research_integrity_2026_11.py"
         - "tests/agents/test_web_search_providers.py"
         - "App/backend/tests/test_resilience.py"
         - "App/backend/tests/test_receptionist_assurance.py"

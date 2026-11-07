@@ -66,3 +66,5 @@ PYTHONPATH=App/backend python3 -m app.seed_prototype   # development only
 - When `multi_tenant` is on, scope every staff ticket detail/write/list/aggregate and live queue event to the authenticated tenant; keep public ticket-capability routes unchanged (ADR-0028).
 - When action-level audit is enabled, persist an intent record before high/critical tool effects and fail closed if that required write fails. Share the same `ToolCallBudget` across reasoner fallback, and represent claim-verifier errors as unavailable with a taxpayer disclosure (ADR-0028).
 - A calculator slot in `_SLOT_CANDIDATE_KEYS` lists only keys with the same meaning, and an identifier never binds from a tool's output.
+- Third-party text that carries an injection is rejected whole, never scrubbed and kept: search results, live documents (cached copies too) and replayed turns. Keep `ephemeral_pdf_sandbox.TAINTED_DOCUMENT_MARKER` in the rejection; the isolated child passes only the message.
+- Live document reads go to `web_research._DOCUMENT_POOL` behind `_DOCUMENT_SLOTS`, never to the search pool, and every download checks `SANDBOX_DOWNLOAD_DEADLINE_SECONDS` per chunk, read as it arrives.

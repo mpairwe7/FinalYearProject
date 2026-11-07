@@ -22,6 +22,10 @@ import unicodedata
 import urllib.parse
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 logger = logging.getLogger(__name__)
 
@@ -497,12 +501,31 @@ _PII_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 # that hold when it is bypassed.
 _LEET_MAP = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"})
 _LEET_TOKEN_RE = re.compile(r"[a-z0-9@$]+")
-_SPACED_LETTERS_RE = re.compile(r"\b[a-z](?:[ .\-_*][a-z]){3,}\b")
+#: A run of single letters. One separator joins letters of a word; 2-4 spaces
+#: or tabs are a gap between words (G488: "i g n o r e  a l l  p r e v i o u s"
+#: left "a l l" spaced because a three-letter word was below the run minimum).
+_SPACED_LETTERS_RE = re.compile(r"\b[a-z](?:(?:[ .\-_*]|[ \t]{2,4})[a-z]){3,}\b")
+_SPACED_WORD_GAP_RE = re.compile(r"[ \t]{2,4}")
+_SPACED_SEPARATOR_RE = re.compile(r"[ .\-_*]")
 _TYPO_KEYWORDS: tuple[str, ...] = (
     "ignore", "disregard", "forget", "override", "bypass", "instructions", "instruction",
     "previous", "prompt", "system", "reveal", "guidelines", "directives", "restrictions",
     "developer", "jailbreak", "unrestricted",
 )
+#: Words an injection is built from. A spaced run with no word gaps joins into
+#: one blob ("ignoreallpreviousinstructions"), which no word-boundary pattern
+#: matches; the blob is re-split on these, longest first (G488). Detection-only.
+_BLOB_WORDS: tuple[str, ...] = tuple(
+    sorted(
+        {
+            *_TYPO_KEYWORDS, "all", "any", "the", "your", "my", "above", "prior", "earlier", "rules",
+            "you", "are", "now", "and", "show", "print", "act", "as", "do", "not", "tell", "say",
+        },
+        key=len,
+        reverse=True,
+    )
+)
+_BLOB_WORD_RE = re.compile("|".join(_BLOB_WORDS))
 _TYPO_INDEX: dict[tuple[str, str, str], str] = {
     (word[0], word[-1], "".join(sorted(word))): word for word in _TYPO_KEYWORDS
 }
@@ -521,6 +544,13 @@ def _fix_typoglycemia(text: str) -> str:
     return _WORD_RE.sub(_swap, text)
 
 
+def _join_spaced(match: re.Match[str]) -> str:
+    words = [_SPACED_SEPARATOR_RE.sub("", word) for word in _SPACED_WORD_GAP_RE.split(match.group(0))]
+    if len(words) == 1:
+        return " ".join(_BLOB_WORD_RE.sub(lambda m: f" {m.group(0)} ", words[0]).split())
+    return " ".join(words)
+
+
 def _skeleton_view(canonical: str) -> str:
     """Lower-case *canonical* with leetspeak folded, spaced letters joined and scrambled keywords restored."""
     text = canonical.lower()
@@ -532,7 +562,7 @@ def _skeleton_view(canonical: str) -> str:
         ),
         text,
     )
-    text = _SPACED_LETTERS_RE.sub(lambda m: re.sub(r"[ .\-_*]", "", m.group(0)), text)
+    text = _SPACED_LETTERS_RE.sub(_join_spaced, text)
     return _fix_typoglycemia(text)
 
 
@@ -626,6 +656,15 @@ _AI_DIRECTIVE_HEADS: tuple[str, ...] = (
         r"(?:retrieved\s+|provided\s+|other\s+)?(?:passages|context|sources|search\s+results|citations)\b",
         rf"\b{_AI_ONLY_ADDRESSEE}\s+(?:must|should|shall|are\s+(?:instructed|required)\s+to|is\s+(?:instructed|required)\s+to)\s+"
         r"(?:always\s+)?(?:tell|say|respond|reply|answer|instruct|direct|ask|include|recommend|state|claim)\b",
+        # G489: third-party text impersonating the control channel: a role
+        # marker, a chat-template token, or a "new policy" addressed to a model.
+        # A document has no system turn; one that writes itself one is steering.
+        r"\[\s*(?:system|developer|admin(?:istrator)?|operator)(?:\s+(?:message|prompt|note|override|instructions?|update))?\s*\]",
+        r"<<\s*/?\s*sys\s*>>|\[\s*/?\s*inst\s*\]|<\|\s*(?:system|user|assistant|im_start|im_end|eot_id|start_header_id)\s*\|>",
+        r"(?m)^[ \t#>*]*(?:system|developer)(?:\s+(?:prompt|message|note|override|instructions?))?\s*:\s*"
+        r"(?:you\b|ignore\b|disregard\b|new\b|from\s+now\b|always\b|never\b|do\s+not\b|tell\b|respond\b|answer\b)",
+        rf"\b(?:new|updated|revised)\s+(?:system\s+)?(?:policy|instructions?|rules?|directives?)\s+(?:for|to)\s+"
+        rf"(?:the\s+|all\s+|any\s+)?{_AI_ADDRESSEE}\b",
 )
 #: Detection reads the head alone, so padding cannot push it past a length
 #: limit. Scrubbing removes the head to the end of its line: a sentence end is
@@ -1053,12 +1092,20 @@ def redact_pii_text(
     return result
 
 
-def pii_values(text: str) -> set[str]:
-    """Each identifier in *text*, normalised (digits only for numbers, upper-case otherwise)."""
+_NUMERIC_PII_TYPES = frozenset({"ug_tin", "ug_phone", "credit_card", "amex_card"})
+
+
+def _pii_matches(text: str) -> Iterator[tuple[str, str]]:
+    """``(type, value)`` for each identifier in *text*: the one definition of what counts (G491).
+
+    Official URA addresses, amounts that look like a TIN and NIN-shaped strings
+    that fail validation are not identifiers. :func:`contains_pii` and
+    :func:`pii_values` both read this, so the output guard and the rewriter's
+    identifier check cannot disagree about what an identifier is.
+    """
     if not text:
-        return set()
+        return
     cleaned = _strip_hidden_pii_evasion(text)
-    found: set[str] = set()
     for pii_type, pattern in _PII_PATTERNS:
         for match in pattern.finditer(cleaned):
             value = match.group(0)
@@ -1068,33 +1115,20 @@ def pii_values(text: str) -> set[str]:
                 continue
             if pii_type == "ug_nid" and not _is_valid_ug_nid_match(value):
                 continue
-            digits = re.sub(r"\D", "", value)
-            found.add(digits if pii_type in ("ug_tin", "ug_phone", "credit_card", "amex_card") else
-                      re.sub(r"[\s-]", "", value).upper())
-    return found
+            yield pii_type, value
+
+
+def pii_values(text: str) -> set[str]:
+    """Each identifier in *text*, normalised (digits only for numbers, upper-case otherwise)."""
+    return {
+        re.sub(r"\D", "", value) if pii_type in _NUMERIC_PII_TYPES else re.sub(r"[\s-]", "", value).upper()
+        for pii_type, value in _pii_matches(text)
+    }
 
 
 def contains_pii(text: str) -> bool:
     """Return True if *text* contains any PII pattern (excluding official public URA emails)."""
-    if not text:
-        return False
-    cleaned = _strip_hidden_pii_evasion(text)
-    for pii_type, pattern in _PII_PATTERNS:
-        if pii_type == "email":
-            for m in pattern.finditer(cleaned):
-                if not is_official_ura_email(m.group(0)):
-                    return True
-        elif pii_type == "ug_tin":
-            for m in pattern.finditer(cleaned):
-                if not _is_currency_boundary(m, cleaned):
-                    return True
-        elif pii_type == "ug_nid":
-            for m in pattern.finditer(cleaned):
-                if _is_valid_ug_nid_match(m.group(0)):
-                    return True
-        elif pattern.search(cleaned):
-            return True
-    return False
+    return next(_pii_matches(text), None) is not None
 
 
 #: A TIN (10 digits from 1) or a PRN (12-14 digits from 2) typed by the taxpayer.

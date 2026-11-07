@@ -360,6 +360,58 @@ THREAT_REGISTRY: list[dict] = [
         "status": "mitigated",
     },
     {
+        "id": "T69",
+        "category": "Tampering",
+        "description": (
+            "A live official document carrying an injection is scrubbed and kept: its payload is quoted as an "
+            "official document read this turn and can be synced into the corpus (G487; OWASP ASI06)"
+        ),
+        "owasp_llm": "LLM01",
+        "mitre_atlas": "AML.T0051",
+        "mitigation": (
+            "Any page that trips the injection or tool-result screen rejects the whole document, cached copies "
+            "included; its search summary is not quoted and nothing is synced"
+        ),
+        "evidence": ["App/backend/app/ephemeral_pdf_sandbox.py", "tests/agents/test_web_research_integrity_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
+        "id": "T70",
+        "category": "Denial of Service",
+        "description": (
+            "A slow or drip-feeding host holds research workers past the turn deadline, starving every later "
+            "turn's searches (G490; OWASP ASI08)"
+        ),
+        "owasp_llm": "LLM10",
+        "mitre_atlas": None,
+        "mitigation": (
+            "A wall-clock download deadline; document reads on their own pool behind non-blocking admission, "
+            "degrading to disclosed search summaries"
+        ),
+        "evidence": [
+            "App/backend/app/ephemeral_pdf_sandbox.py",
+            "App/backend/app/web_research.py",
+            "tests/agents/test_web_research_integrity_2026_11.py",
+        ],
+        "status": "mitigated",
+    },
+    {
+        "id": "T71",
+        "category": "Tampering",
+        "description": (
+            "Third-party text evades the injection screen by spacing letters across word gaps or by impersonating "
+            "the control channel ([SYSTEM], chat-template tokens) (G488, G489)"
+        ),
+        "owasp_llm": "LLM01",
+        "mitre_atlas": "AML.T0051",
+        "mitigation": (
+            "Spaced runs read as words; control-signal markers are indirect injections. Residual: static "
+            "detectors lose to adaptive attacks, so the fence, verified-facts boundary and link allowlist hold"
+        ),
+        "evidence": ["App/backend/app/guardrails.py", "tests/agents/test_web_research_integrity_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
         "id": "T01",
         "category": "Spoofing",
         "description": "Attacker impersonates legitimate API client",

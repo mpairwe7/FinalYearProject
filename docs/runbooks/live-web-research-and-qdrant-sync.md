@@ -34,6 +34,8 @@ When enabled, the Phase 41 Live Web Research and Self-Updating Qdrant subsystem 
 | `PLANNER_MAX_TOOL_CALLS`, `PLANNER_DEADLINE_SECONDS` | `12`, `10.0` | Bounds on one plan. |
 | `WEB_SYNC_PRODUCTION_APPROVED` | unset | Required **as well as** `FLAG_AUTO_QDRANT_WEB_SYNC` before a turn may change the corpus in production. |
 | `MAX_SANDBOX_PDF_BYTES` | `26214400` | Maximum streamed download size (25 MB) for any PDF/XLSX in the ephemeral sandbox. |
+| `SANDBOX_DOWNLOAD_DEADLINE_SECONDS` | `15.0` | Wall clock for one download, redirect hops included (ADR-0032). The per-read `SANDBOX_DOWNLOAD_TIMEOUT_SECONDS` alone does not stop a drip-fed body. |
+| `WEB_RESEARCH_DOCUMENT_WORKERS` | `4` | Concurrent live document reads, on their own pool. When all are busy a turn uses search summaries and emits `pdf_sandbox.skipped` (`document_workers_busy`). |
 | `URA_WEB_SANDBOX_DIR` | `/dev/shm/ura-web-sandbox` | Base directory on a RAM-backed `tmpfs` mount for turn-scoped ephemeral sandboxes. |
 | `PDF_ARCHIVE_DIR` | `App/Data/archive` | Archive directory where superseded `.jsonl` files are moved on `replaced_outdated`. |
 | `WEB_SYNC_TTL_SECONDS` | `604800` | TTL (7 days) for verified/synced entries in `web_sync_ledger` before re-checking `ura.go.ug`. |
@@ -158,6 +160,22 @@ this fires: answers still carry the disclosure.
 the logged hostname. On an official domain it may mean a compromised page or a court record
 quoting one, so tell the site's owner and the security contact. The result never reached
 the model, so no answer needs correcting, but a regex only catches what it was written for.
+
+A live **document** that reads like an instruction is rejected whole (ADR-0032, G487): the
+turn emits `pdf_sandbox.rejected` and records `guardrail_indirect_injection` with reason
+`live_document`, and neither the document nor its search summary is quoted or synced. The
+official corpus trips this on no page, so treat every occurrence as real. Fetch the URL from
+the log in an isolated environment: a court record or petition that *quotes* an attack is
+expected to keep failing and needs no action; anything else on an official host means the
+page or its host is compromised. Tell the site's owner and the security contact.
+
+### Document reads skipped as busy
+
+`pdf_sandbox.skipped` with `document_workers_busy` means all `WEB_RESEARCH_DOCUMENT_WORKERS`
+reads were in use, so the turn answered from summaries and said so. Occasional events under a
+filing-deadline peak are expected. Sustained ones mean an official host is slow: each read is
+bounded by `SANDBOX_DOWNLOAD_DEADLINE_SECONDS`, so raise the worker count only once the host is
+known to be healthy.
 
 ### FX sources disagreeing
 
