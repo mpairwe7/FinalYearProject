@@ -65,6 +65,24 @@ class TaxpayerActionRequest:
     requires_consent: bool = True
     authorized: bool = False
 
+    def digest(self) -> str:
+        """SHA-256 of what the taxpayer is asked to approve (G470, OWASP ASI09).
+
+        An approval names this digest, so it approves the action it was shown and
+        no other: a changed amount, payload or description is a different digest.
+        """
+        import hashlib
+        import json
+
+        shown = {
+            "action_type": self.action_type,
+            "description": self.description,
+            "payload": self.payload,
+            "requires_consent": self.requires_consent,
+        }
+        canonical = json.dumps(shown, sort_keys=True, separators=(",", ":"), default=str)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "action_type": self.action_type,
@@ -72,6 +90,7 @@ class TaxpayerActionRequest:
             "payload": dict(self.payload),
             "requires_consent": self.requires_consent,
             "authorized": self.authorized,
+            "action_digest": self.digest(),
         }
 
     @classmethod
@@ -89,10 +108,10 @@ class TaxpayerActionRequest:
 class AgentGraphState:
     """State dict threaded through every node in the graph.
 
-    Request-scoped in production: ``to_dict`` exists for the checkpoint store,
-    and the service passes no ``thread_id``, so nothing is persisted today. A
-    checkpoint holds the question and history, so the store is swept by retention
-    and erasure anyway. Nothing here reaches the audit ledger: ``trace`` records
+    The service passes the conversation id as ``thread_id``. By default only a
+    suspend for an approval and a resume's claim are written (ADR-0030); a
+    checkpoint holds the question and history, so the store is swept by
+    retention and erasure. Nothing here reaches the audit ledger: ``trace`` records
     only node names, durations, and bounded status metadata, and the surrounding
     service writes a separate privacy-minimized turn audit record.
 

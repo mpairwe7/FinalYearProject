@@ -69,7 +69,8 @@ _SPECIALIST_PROMPTS: dict[str, str] = {
         "## Your speciality: document audit and tax reconciliation\n"
         "You are assisting URA staff with auditing taxpayer documents (invoices, receipts, payroll schedules).\n"
         "- Verify seller and buyer TINs, invoice numbers, and transaction dates.\n"
-        "- Validate VAT calculations against the 18% standard rate and verify arithmetic across line items.\n"
+        "- Validate VAT against the standard rate the rate tool returns for the invoice date, and verify "
+        "arithmetic across line items.\n"
         "- Cross-reference employee PAYE schedules against Income Tax Act brackets and thresholds.\n"
         "- Flag missing EFRIS fiscal device numbers, unverified inputs, or calculation anomalies clearly.\n"
         "- Provide objective, evidence-grounded findings citing the relevant statutory rules."
@@ -77,16 +78,19 @@ _SPECIALIST_PROMPTS: dict[str, str] = {
     "dispute_specialist": (
         "## Your speciality: tax objections and assessment disputes\n"
         "You are assisting URA appeals officers reviewing notices of objection under Section 24 of the Tax Procedures Code Act.\n"
-        "- Check the statutory 45-day limitation window from assessment notice issuance.\n"
+        "- Check the objection was lodged within the statutory window from the assessment notice, as the "
+        "retrieved Tax Procedures Code Act passage states it.\n"
         "- Evaluate objection grounds against statutory tax law provisions and established tribunal precedents.\n"
         "- Verify whether necessary supporting records (invoices, bank statements, audited accounts) are attached.\n"
-        "- Note the statutory 90-day decision deadline and requirements for Tax Appeals Tribunal (TAT) referral."
+        "- Note the statutory decision deadline and the requirements for a Tax Appeals Tribunal (TAT) "
+        "referral, as the retrieved passages state them."
     ),
     "compliance_specialist": (
         "## Your speciality: tax clearance and compliance verification\n"
         "You are assisting URA compliance officers auditing filing histories and Tax Clearance Certificates (TCC).\n"
         "- Audit compliance across all registered tax heads (Income Tax, VAT, PAYE, WHT) for arrears.\n"
-        "- Verify Withholding Tax (WHT) credits (6% professional fees) against official payment registration numbers.\n"
+        "- Verify Withholding Tax (WHT) credits, at the rate the rate tool returns, against official payment "
+        "registration numbers.\n"
         "- Explain specific rectification requirements if outstanding returns or payment arrears are detected."
     ),
 }
@@ -132,24 +136,32 @@ def detail_level_prompt(level: str | None) -> str:
     return _DETAIL_LEVEL_PROMPTS.get((level or "").strip().lower(), "")
 
 
+#: The fiscal year is filled in when the prompt is built. A literal here went
+#: stale on the next 1 July, and told the model the wrong year (G477).
 _GOVERNANCE_V3_PROMPT: str = (
     "## Enterprise Safety, Risk-Tiered Autonomy & Auditability Rules (Phase 34)\n"
     "- Never recall or interpolate tax rates, thresholds, or bands from memory; "
-    "always invoke the deterministic calculator or rate tool and state the Fiscal Year (FY2026-27) "
-    "and statutory basis (Income Tax Act, VAT Act, or Tax Procedures Code Act).\n"
-    "- Enforce Risk-Tiered Autonomy: Low-risk lookups/calculators execute autonomously; "
-    "Medium-risk status checks/prefills require confidence >= 0.80 or soft confirmation; "
-    "High-risk account/EFRIS/objection/remission actions require caller confirmation and "
-    "live officer approval (`escalate_to_human`); Critical ledger/disbursement actions are hard-blocked.\n"
+    "always invoke the deterministic calculator or rate tool and state the fiscal year ({fiscal_year} "
+    "unless the question names another) and statutory basis (Income Tax Act, VAT Act, or Tax Procedures Code Act).\n"
+    "- Respect Risk-Tiered Autonomy: lookups, calculators and read-only status checks run directly and are "
+    "recorded; high-risk account, EFRIS, objection and remission actions need the caller's confirmation "
+    "and live officer approval (`escalate_to_human`); critical ledger and disbursement actions are refused.\n"
     "- Include a concise, taxpayer-readable explanation of the rule applied, the verified inputs used, "
     "and the statutory reversal or amendment procedure where applicable."
 )
 
 
 def governance_prompt(*, subject: str | None = None) -> str:
-    """Return the Phase 34 Enterprise Governance prompt fragment when ``risk_tiered_autonomy_gates`` is active."""
+    """Return the Phase 34 Enterprise Governance prompt fragment when ``risk_tiered_autonomy_gates`` is active.
+
+    It describes only what the tool tiers enforce: the medium-risk confidence
+    floor it used to cite is inert (G361), so the model was told of a control
+    that does not run.
+    """
     from ..flags import flags
 
     if flags.is_enabled("risk_tiered_autonomy_gates", subject=subject):
-        return _GOVERNANCE_V3_PROMPT
+        from ..query import current_fiscal_year
+
+        return _GOVERNANCE_V3_PROMPT.format(fiscal_year=current_fiscal_year())
     return ""
