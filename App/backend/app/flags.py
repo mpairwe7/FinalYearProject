@@ -679,6 +679,14 @@ _REGISTRY: dict[str, Flag] = {
             owner="agentic_runtime",
         ),
         Flag(
+            "graph_checkpoint_routine",
+            False,
+            "ADR-0030: also persist routine graph transitions (full state: question, history, "
+            "passages) to agent_checkpoints. Off, only a suspended approval, its resume claim and "
+            "its markers are written. Nothing reads routine rows; turn on for a debugging window only.",
+            owner="agentic_runtime",
+        ),
+        Flag(
             "guardrail_strike_friction",
             True,
             "G464 (ADR-0029): after GUARD_STRIKE_THRESHOLD input-guard blocks inside "

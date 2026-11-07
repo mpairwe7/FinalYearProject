@@ -134,6 +134,25 @@ If the check itself breaks, `ura_figure_lock_checks_total{outcome="error"}` rise
 enforcing, replies lose their figures rather than show them unchecked. While measuring,
 replies are unchanged and nothing is measured. A sustained rise is a defect in either case.
 
+## Checkpoints and approvals (ADR-0030)
+
+A graph turn uses the conversation id as its checkpoint thread. Only a suspend
+for an approval and a resume's claim on it are written by default; set
+`FLAG_GRAPH_CHECKPOINT_ROUTINE=true` only for a debugging window, because each
+routine row holds the question, history and retrieved passages.
+
+| Resume refusal | Meaning | What to do |
+| --- | --- | --- |
+| `has already been resumed` | A second resume, concurrent or later, found the claim row | Check `resume_status(store, thread_id)`. `completed` or `failed`: the first resume finished, and a client retry is the usual cause. `claimed_incomplete`: the first resume stopped after claiming and before recording an end, so the action may or may not have run. Reconcile against the downstream system (for example, look the PRN up) and never re-run it from here |
+| `is not waiting for user consent (current outcome: superseded)` or `has already been resumed or moved on` | A later turn on the conversation started after the approval was offered, and retired it before doing anything else | Ask the taxpayer to start the action again; the earlier offer is retired |
+| A turn ends `errored` with `a pending approval on this conversation could not be retired` | The store refused or failed the retirement write, so the turn did not proceed with a live approval behind it | Check the store; the taxpayer can still approve the earlier action within its window or ask again |
+| `the approval does not match the action shown` | The approval's `action_digest` is not the digest of the stored action | The client must send `pending_action.action_digest` from the reply it showed |
+| `the approval window has closed` | The suspend is older than `GRAPH_APPROVAL_TTL_S` (600 s) | Ask the taxpayer to start the action again |
+| `failed its integrity check` | The row's `approval_mac` does not match, or no signing key is set | Treat an unexpected one as tampering. Signing uses `WS_CONFIRM_HMAC_SECRET` (else `MCP_REQUEST_STATE_SECRET`); rotating it voids suspends in flight |
+
+On Postgres, checkpoint writes use `ON CONFLICT`. Before ADR-0030 every save
+there was a syntax error, logged as `GraphRuntime: checkpoint not saved`.
+
 ## Streaming and the release gate
 
 `stream_figure_hold` holds a reply from the sentence with its first figure until the guards

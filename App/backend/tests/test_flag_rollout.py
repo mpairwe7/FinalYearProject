@@ -322,6 +322,15 @@ class RegistryIntegrityTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"FLAG_GUARDRAIL_STRIKE_FRICTION": "false"}):
             self.assertFalse(FeatureFlags().is_enabled("guardrail_strike_friction"))
 
+    def test_graph_checkpoint_routine_is_off_by_default(self) -> None:
+        """ADR-0030: routine graph rows hold the question, history and passages; off unless asked for."""
+        flag = _REGISTRY["graph_checkpoint_routine"]
+        self.assertFalse(flag.default)
+        self.assertIsNone(flag.rollout)
+        self.assertFalse(FeatureFlags().is_enabled("graph_checkpoint_routine"))
+        with mock.patch.dict(os.environ, {"FLAG_GRAPH_CHECKPOINT_ROUTINE": "true"}):
+            self.assertTrue(FeatureFlags().is_enabled("graph_checkpoint_routine"))
+
     def test_no_registered_flag_ships_a_live_rollout(self) -> None:
         """Rollouts are an operational decision, not a code default."""
         for name, flag in _REGISTRY.items():

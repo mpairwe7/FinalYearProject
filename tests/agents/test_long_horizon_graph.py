@@ -185,9 +185,10 @@ class TestLongHorizonResumption(unittest.TestCase):
         self.assertFalse(saved["pending_action"]["authorized"])
 
         # Resume with taxpayer approval payload
+        # The approval names the action it was shown (ADR-0030, G470).
         resumed_state = runtime.resume(
             thread_id=thread_id,
-            resume_payload={"approved": True},
+            resume_payload={"approved": True, "action_digest": action.digest()},
             start_node="act",
         )
         self.assertEqual(resumed_state.outcome, GraphOutcome.ANSWERED)
@@ -351,7 +352,7 @@ def test_async_runtime_interruption_and_aresume():
 
         resumed = await runtime.aresume(
             thread_id=thread_id,
-            resume_payload={"approved": True},
+            resume_payload={"approved": True, "action_digest": action.digest()},
             start_node="act",
         )
         assert resumed.outcome == GraphOutcome.ANSWERED

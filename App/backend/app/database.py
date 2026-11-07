@@ -3686,31 +3686,77 @@ def _task_row(row: dict[str, Any], *, replayed: bool = False) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Agent Graph Checkpoint Persistence (LangGraph 2026 Durable Execution)
 # ---------------------------------------------------------------------------
+def _require_checkpoint_backend() -> None:
+    """Refuse a checkpoint operation that would land on local SQLite by accident.
+
+    With Postgres configured but its pool down, ``_pg_module()`` is ``None`` and
+    every query falls back to this replica's SQLite file, where a resume claim
+    is unique to one replica only (ADR-0030, CodeRabbit on #702).
+    """
+    if ANALYTICS_BACKEND == "postgres" and _pg_module() is None:
+        raise RuntimeError("Postgres is configured but unavailable; checkpoint refused")
+
+
 def save_agent_checkpoint(
     thread_id: str,
     step: int,
     node_name: str,
     state_data: dict[str, Any],
 ) -> None:
-    """Save an agent graph execution step snapshot."""
+    """Save an agent graph execution step snapshot.
+
+    Portable upsert: the SQLite-only replace form used before was a syntax error
+    on Postgres, which the runtime logged and dropped on every save (G473).
+    """
     if not thread_id:
         return
+    _require_checkpoint_backend()
     now = time.time()
     state_json = json.dumps(state_data, default=str)
     execute(
-        """INSERT OR REPLACE INTO agent_checkpoints
+        """INSERT INTO agent_checkpoints
            (thread_id, step, node_name, state_json, created_at)
-           VALUES (?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT (thread_id, step) DO UPDATE SET
+               node_name = excluded.node_name,
+               state_json = excluded.state_json,
+               created_at = excluded.created_at""",
         (thread_id, step, node_name, state_json, now),
     )
 
 
-def get_agent_checkpoint(thread_id: str) -> dict[str, Any] | None:
-    """Load the latest checkpoint state for a thread."""
+def insert_agent_checkpoint_if_absent(
+    thread_id: str,
+    step: int,
+    node_name: str,
+    state_data: dict[str, Any],
+) -> bool:
+    """Write *step* only if no row holds it; True when this call wrote it.
+
+    The primary key is the lock a resume takes on a suspend (G469): of two
+    concurrent resumes exactly one inserts.
+    """
+    if not thread_id:
+        return False
+    _require_checkpoint_backend()
+    state_json = json.dumps(state_data, default=str)
+    written = execute(
+        """INSERT INTO agent_checkpoints
+           (thread_id, step, node_name, state_json, created_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT (thread_id, step) DO NOTHING""",
+        (thread_id, step, node_name, state_json, time.time()),
+    )
+    return written == 1
+
+
+def get_latest_agent_checkpoint(thread_id: str) -> tuple[int, dict[str, Any]] | None:
+    """``(step, state)`` of the highest step on *thread_id*, or ``None``."""
     if not thread_id:
         return None
+    _require_checkpoint_backend()
     row = query_one(
-        """SELECT state_json FROM agent_checkpoints
+        """SELECT step, state_json FROM agent_checkpoints
            WHERE thread_id = ?
            ORDER BY step DESC LIMIT 1""",
         (thread_id,),
@@ -3718,9 +3764,17 @@ def get_agent_checkpoint(thread_id: str) -> dict[str, Any] | None:
     if not row or not row.get("state_json"):
         return None
     try:
-        return json.loads(row["state_json"])
-    except (json.JSONDecodeError, TypeError):
-        return None
+        return int(row["step"]), json.loads(row["state_json"])
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        # Unreadable is not empty: read as empty, a run would write a suspend
+        # beneath this row, where no resume would ever find it (ADR-0030).
+        raise ValueError(f"latest checkpoint on {thread_id!r} is unreadable") from exc
+
+
+def get_agent_checkpoint(thread_id: str) -> dict[str, Any] | None:
+    """Load the latest checkpoint state for a thread."""
+    latest = get_latest_agent_checkpoint(thread_id)
+    return latest[1] if latest else None
 
 
 def list_agent_checkpoints(thread_id: str) -> list[dict[str, Any]]:

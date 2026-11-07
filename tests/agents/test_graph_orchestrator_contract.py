@@ -248,7 +248,11 @@ class TestASuspendedThreadBelongsToItsOwner:
 
     def test_the_owner_can_approve(self) -> None:
         graph, seen = self._suspended()
-        graph.resume("t1", {"approved": True}, expected_user_id="taxpayer-1", expected_tenant_id="tenant-a")
+        shown = TaxpayerActionRequest(action_type="file", description="file a return").digest()
+        graph.resume(
+            "t1", {"approved": True, "action_digest": shown},
+            expected_user_id="taxpayer-1", expected_tenant_id="tenant-a",
+        )
         assert "act" in seen
 
     def test_someone_else_cannot(self) -> None:

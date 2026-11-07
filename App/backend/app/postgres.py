@@ -3272,7 +3272,9 @@ def save_agent_checkpoint(
     state_json = json.dumps(state_data, default=str)
     pool = _get_pool()
     if pool is None:
-        return
+        # Raised, not swallowed: a suspend nothing saved can never be resumed,
+        # and only the runtime knows whether this save was one (ADR-0030).
+        raise RuntimeError("Postgres pool unavailable; checkpoint not saved")
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -3286,6 +3288,57 @@ def save_agent_checkpoint(
                 (thread_id, step, node_name, state_json, now),
             )
         conn.commit()
+
+
+def insert_agent_checkpoint_if_absent(
+    thread_id: str,
+    step: int,
+    node_name: str,
+    state_data: dict[str, Any],
+) -> bool:
+    """Write *step* only if no row holds it; True when this call wrote it (ADR-0030, G469)."""
+    if not thread_id:
+        return False
+    pool = _get_pool()
+    if pool is None:
+        raise RuntimeError("Postgres pool unavailable; checkpoint not claimed")
+    state_json = json.dumps(state_data, default=str)
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO agent_checkpoints
+                   (thread_id, step, node_name, state_json, created_at)
+                   VALUES (%s, %s, %s, %s, %s)
+                   ON CONFLICT (thread_id, step) DO NOTHING""",
+                (thread_id, step, node_name, state_json, time.time()),
+            )
+            written = cur.rowcount
+        conn.commit()
+    return written == 1
+
+
+def get_latest_agent_checkpoint(thread_id: str) -> tuple[int, dict[str, Any]] | None:
+    """``(step, state)`` of the highest step on *thread_id*, or ``None``."""
+    if not thread_id:
+        return None
+    pool = _get_pool()
+    if pool is None:
+        return None
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT step, state_json FROM agent_checkpoints
+                   WHERE thread_id = %s
+                   ORDER BY step DESC LIMIT 1""",
+                (thread_id,),
+            )
+            row = cur.fetchone()
+    if not row or not row[1]:
+        return None
+    try:
+        return int(row[0]), json.loads(row[1])
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise ValueError(f"latest checkpoint on {thread_id!r} is unreadable") from exc
 
 
 def get_agent_checkpoint(thread_id: str) -> dict[str, Any] | None:
