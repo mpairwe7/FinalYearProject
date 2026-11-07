@@ -149,11 +149,15 @@ from .calculator_router import (
 from .claim_verifier import verify_claims
 from .corrective_rag import corrective_retrieve, needs_clarification
 from .flags import flags
+from .guard_friction import note_refusal as note_guard_refusal
+from .guard_friction import paused as paused_turn
+from .guard_friction import principal_key
 from .guardrails import (
     STORE_RAW_PROMPTS,
     GuardResult,
     InputGuard,
     OutputGuard,
+    neutralize_untrusted_links,
     redact_pii_text,
     user_stated_identifiers,
 )
@@ -2260,6 +2264,15 @@ def _apply_output_guards(
 
     claim_report: dict[str, Any] | None = None
     structure_revised = False
+    # Per-chunk sanitizing sees one sentence at a time; a link split across
+    # chunks is only whole here. Removing it is a revision, so the client
+    # replaces what it showed (G462).
+    links_revised = False
+    if reply and isinstance(reply, str):
+        delinked, _ = neutralize_untrusted_links(reply)
+        # A trusted link that lost an identifier query is a change too.
+        if delinked != reply:
+            reply, links_revised = delinked, True
     if reply and isinstance(reply, str):
         norm = output_guard.normalize_structure(reply)
         if isinstance(norm, str):
@@ -2308,7 +2321,7 @@ def _apply_output_guards(
             verified_facts=verified_facts_block,
         )
 
-    revised = False
+    revised = links_revised
     # The report that DROVE the decision is the draft's. Re-verification below
     # overwrites `claim_report` with one describing the replacement text, so
     # without this the surfaced "claim_verification" explains a reply nobody
@@ -5908,20 +5921,52 @@ class ChatModel:
             p_ctx = f"{p_ctx}\n\n{proc_guide}".strip() if p_ctx else proc_guide
         return p_ctx
 
-    def _guard_both_forms(self, message: str, english_form: str) -> GuardResult:
+    def _guard_both_forms(
+        self, message: str, english_form: str, *, principal: str = ""
+    ) -> GuardResult:
         """Input guard on *message* and, when it differs, on its English form.
 
         The guard's patterns are English. A Luganda or Kiswahili injection
         reads as harmless words to them, while its translation does not, and
         multi-turn attacks in low-resource languages get through commercial
         models' own safety training far more often than English ones.
+
+        *principal* (:func:`guard_friction.principal_key`) is who sent the
+        turn. One who keeps tripping the guard is paused (G464): the turn is
+        refused before any check or model call, so a probing loop stops
+        learning from refusals. A message that reads as a crisis is never
+        paused, so its crisis-support reply still reaches the caller.
         """
+        crisis = detect_crisis(message) or bool(english_form and detect_crisis(english_form))
+        held = paused_turn(principal, crisis=crisis)
+        if held is not None:
+            return held
         guard = self._input_guard.check(message)
         if guard.allowed and english_form and english_form != message:
             english_guard = self._input_guard.check(english_form)
             if not english_guard.allowed:
-                return english_guard
+                guard = english_guard
+        note_guard_refusal(principal, guard)
         return guard
+
+    def _guard_blocked_result(
+        self, guard: GuardResult, *, thread_id: str, locale: str
+    ) -> dict[str, Any]:
+        """The reply for a turn the input guard (or a pause) refused."""
+        return {
+            "reply": guard.reason,
+            "sources": [],
+            "citations": [],
+            "faithfulness_score": None,
+            "retrieval_mode": "blocked",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": "safety_guard",
+            "next_actions": [],
+        }
 
     def _bind_conversation_topic(
         self,
@@ -11732,6 +11777,24 @@ class ChatModel:
             trace_ctx["user_id"] = user_id or ""
             trace_ctx["tenant_id"] = tenant_id or "default"
 
+            # A paused principal is answered before anything reads, writes or
+            # translates on its behalf (G464).
+            held = paused_turn(
+                principal_key(
+                    user_id=user_id,
+                    session_id=session_id,
+                    conversation_id=thread_id,
+                    tenant_id=tenant_id,
+                ),
+                crisis=detect_crisis(message),
+            )
+            if held is not None:
+                blocked = self._guard_blocked_result(held, thread_id=thread_id, locale=locale)
+                self._audit_turn(
+                    message=message, result=blocked, session_id=session_id, trace_ctx=trace_ctx
+                )
+                return blocked
+
             # 0. Multi-turn memory — fetch rolling conversation context
             conversation_history: list[dict[str, str]] = []
             context_summary = ""
@@ -11948,7 +12011,16 @@ class ChatModel:
             #    and, for a Luganda or Swahili turn, on its English form too:
             #    the guard's patterns are English.
             with trace_stage("input_guard", timings=timings):
-                guard = self._guard_both_forms(message, router_message)
+                guard = self._guard_both_forms(
+                    message,
+                    router_message,
+                    principal=principal_key(
+                        user_id=user_id,
+                        session_id=session_id,
+                        conversation_id=thread_id,
+                        tenant_id=tenant_id,
+                    ),
+                )
             if not guard.allowed:
                 blocked = {
                     "reply": guard.reason,
@@ -13969,6 +14041,24 @@ class ChatModel:
         requested_locale = normalize_locale_tag(locale)
         locale = gate_locale(requested_locale or "en")
 
+        # A paused principal is answered before anything reads, writes or
+        # translates on its behalf (G464).
+        held = paused_turn(
+            principal_key(
+                user_id=user_id,
+                session_id=session_id,
+                conversation_id=thread_id,
+                tenant_id=tenant_id,
+            ),
+            crisis=detect_crisis(message),
+        )
+        if held is not None:
+            return {
+                **self._guard_blocked_result(held, thread_id=thread_id, locale=locale),
+                "_hits": [],
+                "_history": [],
+            }
+
         # Multi-turn memory (Phase 4 -> overridable in Phase 29)
         conversation_history: list[dict[str, str]] = []
         context_summary = ""
@@ -14108,7 +14198,16 @@ class ChatModel:
 
         # Input guardrails (OWASP LLM01), on both forms as in generate()
         guard_started = time.perf_counter()
-        guard = self._guard_both_forms(message, router_message)
+        guard = self._guard_both_forms(
+            message,
+            router_message,
+            principal=principal_key(
+                user_id=user_id,
+                session_id=session_id,
+                conversation_id=thread_id,
+                tenant_id=tenant_id,
+            ),
+        )
         _mark_stage("input_guard", guard_started)
         if not guard.allowed:
             return {

@@ -1674,10 +1674,20 @@ async def chat_title(
     one came back; the client keeps the provisional title it already shows.
     """
     from .chat_title import generate_title
+    from .guard_friction import principal_key
 
     user_text = next(message.content for message in body.messages if message.role == "user")
     assistant_text = next((message.content for message in body.messages if message.role == "assistant"), "")
-    title, source = await asyncio.to_thread(generate_title, user_text, assistant_text, gate_locale(body.locale))
+    # No session or conversation reaches this route, so an anonymous caller is
+    # keyed on the client address for strike friction (G464), hashed and in memory only.
+    principal = principal_key(
+        user_id=_ctx.user_id if _ctx.authenticated else None,
+        tenant_id=_ctx.tenant_id,
+        client_address=request.client.host if request.client else None,
+    )
+    title, source = await asyncio.to_thread(
+        generate_title, user_text, assistant_text, gate_locale(body.locale), principal=principal
+    )
     metrics.inc("chat_title_total", labels={"source": source})
     return ChatTitleResponse(title=title, source=source)
 

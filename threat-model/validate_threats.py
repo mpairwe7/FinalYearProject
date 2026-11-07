@@ -163,6 +163,97 @@ THREAT_REGISTRY: list[dict] = [
         "status": "mitigated",
     },
     {
+        "id": "T59",
+        "category": "Elevation of Privilege",
+        "description": (
+            "A taxpayer, or text a model reads, rewords an instruction override so the keyword guard misses it: "
+            "'prior' for 'previous', leetspeak, spaced letters, scrambled letters, Base64 or hex. 5 of 35 such "
+            "prompts were blocked on 2026-11-07 (G460, G461)"
+        ),
+        "owasp_llm": "LLM01",
+        "mitre_atlas": "AML.T0051",
+        "mitigation": (
+            "Patterns run on raw, canonical, de-obfuscated and decoded views; override, persona-swap and "
+            "extraction rules require an assistant-addressed target; third-party text is also checked for "
+            "directives addressed to an AI and loses it to the end of its line. A benign-control set fails CI on "
+            "over-refusal. Recognition stays bypassable by an adaptive attacker (arXiv:2510.09023), so the "
+            "fences, output guards and tool tiers remain the controls that hold"
+        ),
+        "evidence": [
+            "App/backend/app/guardrails.py",
+            "Data/eval/redteam_corpus.jsonl",
+            "Data/eval/guardrail_benign_controls.jsonl",
+            "App/backend/tests/test_redteam_corpus.py",
+            "tests/agents/test_ai_security_layer_2026_11.py",
+        ],
+        "status": "mitigated",
+    },
+    {
+        "id": "T60",
+        "category": "Information Disclosure",
+        "description": (
+            "An injected or hallucinated answer links a taxpayer to a host URA does not run: a phishing refund "
+            "page, or a URL whose query carries their TIN (EchoLeak CVE-2025-32711 class, one click). 8 of 9 such "
+            "links survived output sanitizing (G462)"
+        ),
+        "owasp_llm": "LLM05",
+        "mitre_atlas": "AML.T0057",
+        "mitigation": (
+            "Every inline, reference, image, autolink, bare or scheme-less URL is de-linked unless its parsed host "
+            "is *.go.ug, a Tier-1 research host, a corpus host or operator-listed; redirectors such as google.com "
+            "are excluded; identifiers are stripped from trusted queries; the final reply is re-checked and a "
+            "removal is sent as a revision"
+        ),
+        "evidence": [
+            "App/backend/app/guardrails.py",
+            "App/backend/app/service.py",
+            "tests/agents/test_ai_security_layer_2026_11.py",
+        ],
+        "status": "mitigated",
+    },
+    {
+        "id": "T61",
+        "category": "Tampering",
+        "description": (
+            "An uploaded document closes its <untrusted_user_document> fence with a zero-width, fullwidth, spaced "
+            "or attributed tag, or forges <passage> markers and prompt headings, so its text reads as "
+            "instructions or as a cited source (G463)"
+        ),
+        "owasp_llm": "LLM01",
+        "mitre_atlas": "AML.T0051",
+        "mitigation": (
+            "Uploads pass fence_spotlight_body (ADR-0027) and a tolerant document-tag matcher before they are "
+            "wrapped, on every path that builds the fence"
+        ),
+        "evidence": [
+            "App/backend/app/guardrails.py",
+            "App/backend/app/vision/ocr.py",
+            "tests/agents/test_ai_security_layer_2026_11.py",
+        ],
+        "status": "mitigated",
+    },
+    {
+        "id": "T62",
+        "category": "Denial of Service",
+        "description": (
+            "An attacker iterates against the input guard until a phrasing passes, at the per-IP rate limit, and "
+            "the refusals read as noise rather than as a campaign (G464)"
+        ),
+        "owasp_llm": "LLM10",
+        "mitre_atlas": "AML.T0043",
+        "mitigation": (
+            "Five guard refusals for one hashed principal inside ten minutes pause it for five minutes without a "
+            "model call and raise guardrail_strike_cooldown for the GuardrailProbingCampaign alert. Per replica, and a "
+            "client that discards its session starts over, so the IP limit stays in front: mitigated in part"
+        ),
+        "evidence": [
+            "App/backend/app/guard_friction.py",
+            "App/backend/app/service.py",
+            "tests/agents/test_ai_security_layer_2026_11.py",
+        ],
+        "status": "in_progress",
+    },
+    {
         "id": "T01",
         "category": "Spoofing",
         "description": "Attacker impersonates legitimate API client",
@@ -348,9 +439,10 @@ THREAT_REGISTRY: list[dict] = [
         "description": "System prompt extraction via crafted queries",
         "owasp_llm": "LLM07",
         "mitre_atlas": "AML.T0051.001",
-        "mitigation": "InputGuard blocks reveal-prompt probes and OutputGuard scrubs signature phrases; prompt confidentiality is not treated as a security boundary (OWASP LLM08:2026)",
+        "mitigation": "InputGuard blocks reveal-prompt and extraction probes ('what is your system prompt', 'text above starting with'); OutputGuard scrubs signature phrases kept in sync with the live prompts by test, and a word 8-gram fingerprint of SYSTEM_PROMPT catches a rule repeated without them (G465); prompt confidentiality is not treated as a security boundary (OWASP LLM08:2026)",
         "evidence": [
             "App/backend/app/guardrails.py",
+            "tests/agents/test_ai_security_layer_2026_11.py",
         ],
         "status": "mitigated",
     },

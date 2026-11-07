@@ -275,6 +275,30 @@ groups:
           description: "Someone keeps calling endpoints their role does not allow. Read the authz_fail log events for the actor."
           runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#security-events"
 
+      # ADR-0029 (G464): principals paused after repeated input-guard refusals.
+      - alert: GuardrailProbingCampaign
+        expr: sum(increase(ura_security_events_total{event="guardrail_strike_cooldown"}[15m])) >= 3
+        for: 5m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "Repeated guardrail cool-downs"
+          description: "Three or more guard-strike cool-downs started within 15 minutes. One principal can start several; group the guardrail_strike_cooldown log events by their hashed principal to tell one prober from many."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/ai-security-guardrails.md#a-probing-campaign"
+
+      # ADR-0029 (G461, G462): third-party text speaking to the model, or answers carrying untrusted links.
+      - alert: IndirectInjectionOrUntrustedLinkSpike
+        expr: sum(increase(ura_security_events_total{event=~"guardrail_indirect_injection|guardrail_untrusted_link"}[1h])) > 20
+        for: 10m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "Injected instructions or untrusted links are reaching the model"
+          description: "More than 20 scrubbed passages, tool results, uploads or de-linked answer URLs in an hour. A poisoned source or a prompt-injection campaign is likely; read the guardrail_indirect_injection and guardrail_untrusted_link log events for their reason."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/ai-security-guardrails.md#injected-content-or-untrusted-links"
+
   - name: ura-dependencies
     rules:
       - alert: QdrantDown

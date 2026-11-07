@@ -28,7 +28,7 @@ App/
 │   │   ├── speech_service.py # SpeechModel (ASR/Whisper + TTS/Piper + MT + Sunbird fallback)
 │   │   ├── service.py       # ChatModel (RAG orchestrator + agentic routing)
 │   │   ├── llm.py           # Qwen3-8B vLLM + local generation + tool-calling
-│   │   ├── flags.py         # Feature flag registry (87 flags, cohort rollout)
+│   │   ├── flags.py         # Feature flag registry (88 flags, cohort rollout)
 │   │   ├── agents/          # Supervisor router + agent graph runtime
 │   │   ├── tools/           # 72 MCP tools across 18 namespaces (calculators, 10-MDA NTR/PRN, onboarding, B2G/UESW, relief, EFRIS, rates, calendar, RAG, education, empathy, escalate, connectors)
 │   │   ├── workflows/       # 21 YAML-driven guided journeys (TIN, filing, PRN, Cross-MDA NTR, New-Taxpayer Relief, TCC, objections, customs) + Journey Copilot
@@ -40,7 +40,8 @@ App/
 │   │   ├── ephemeral_pdf_sandbox.py # Ephemeral tmpfs PDF/XLSX sandbox + GPU micro-reranking (ADR-0008)
 │   │   ├── corpus_sync.py   # Self-updating Qdrant comparator, hot-swap & web_sync_ledger (ADR-0008)
 │   │   ├── memory/          # Episodic + semantic + working + procedural memory + ResolutionLedger
-│   │   ├── guardrails.py    # OWASP LLM Top 10 guards + abstention
+│   │   ├── guardrails.py    # OWASP LLM Top 10 guards + abstention, link provenance (ADR-0029)
+│   │   ├── guard_friction.py # Per-principal cool-down after repeated guard refusals (G464)
 │   │   ├── retriever.py     # Hybrid retriever (Qdrant + BM25 + reranking)
 │   │   ├── native_voice/    # Phase 28: streaming ASR/TTS, speculative prefetch, query planner
 │   │   ├── vision/          # Phase 28: Qwen2-VL encoder, OCR, document classifier
@@ -1206,8 +1207,12 @@ changed and why.
 - `trust_remote_code=False` by default in `backend/app/llm.py` (LLM03).
 - New env `LLM_MODEL_REVISION` pins the HF commit SHA for reproducible
   builds and SLSA provenance.
-- Retrieved passages are scrubbed for injection phrases before being
-  handed to the LLM (`guardrails.scan_retrieved_text`, LLM01 indirect).
+- Retrieved passages are scrubbed for injection phrases, and for directives
+  addressed to an AI, before being handed to the LLM
+  (`guardrails.scan_retrieved_text`, LLM01 indirect, ADR-0029).
+- Answers link only to `*.go.ug` and listed hosts (`neutralize_untrusted_links`);
+  a principal refused five times in ten minutes is paused
+  (`FLAG_GUARDRAIL_STRIKE_FRICTION`, on).
 - Passages are wrapped in hash-derived spotlight markers
   `<passage id="p1-<sha8>">…</passage>` so the model cannot be tricked
   into treating passage text as instructions.

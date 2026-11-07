@@ -156,6 +156,47 @@ tests:
               description: "Possible credential stuffing or an expired IdP signing key. Read the authn_login_fail log events."
               runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#security-events"
 
+  - interval: 1m
+    input_series:
+      - series: 'ura_security_events_total{event="guardrail_strike_cooldown"}'
+        values: '0+1x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: GuardrailProbingCampaign
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: security
+            exp_annotations:
+              summary: "Repeated guardrail cool-downs"
+              description: "Three or more guard-strike cool-downs started within 15 minutes. One principal can start several; group the guardrail_strike_cooldown log events by their hashed principal to tell one prober from many."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/ai-security-guardrails.md#a-probing-campaign"
+
+  - interval: 1m
+    input_series:
+      - series: 'ura_security_events_total{event="guardrail_strike_cooldown"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: GuardrailProbingCampaign
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'ura_security_events_total{event="guardrail_untrusted_link"}'
+        values: '0+2x60'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: IndirectInjectionOrUntrustedLinkSpike
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: security
+            exp_annotations:
+              summary: "Injected instructions or untrusted links are reaching the model"
+              description: "More than 20 scrubbed passages, tool results, uploads or de-linked answer URLs in an hour. A poisoned source or a prompt-injection campaign is likely; read the guardrail_indirect_injection and guardrail_untrusted_link log events for their reason."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/ai-security-guardrails.md#injected-content-or-untrusted-links"
+
   - interval: 5m
     input_series:
       - series: 'ura_retention_last_success_timestamp_seconds'

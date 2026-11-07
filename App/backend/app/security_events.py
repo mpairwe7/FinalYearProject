@@ -4,8 +4,12 @@ Authentication failures, authorisation denials and rate-limit hits used to
 reach the logs, if at all, as free-text INFO lines ("JWT rejected: …") that
 no alert could select. Each is now one structured WARNING record with a fixed
 ``event`` name from the OWASP Logging Vocabulary and one increment of
-``ura_security_events_total{event}``, which the ``SecurityEventSpike`` alert
-watches (OWASP ASVS 5.0 V16).
+``ura_security_events_total{event}`` (OWASP ASVS 5.0 V16). The alerts that
+watch it are in ``monitoring/alerting-rules.yml`` (group ``ura-security``):
+``AuthenticationFailureSpike``, ``AuthorizationFailureSpike``,
+``GuardrailProbingCampaign`` and ``IndirectInjectionOrUntrustedLinkSpike``.
+An event no rule selects still reaches the dashboard and the logs, but pages
+no one.
 
 Records carry the request id (added by the logging filter), the method, the
 route template, the status and the authenticated actor when there is one.
@@ -41,6 +45,26 @@ MCP_SECURITY_EVENT_KINDS: frozenset[str] = frozenset(
 )
 
 
+#: Guardrail events (ADR-0029); the reason carries the channel.
+GUARDRAIL_SECURITY_EVENTS: frozenset[str] = frozenset(
+    {
+        "guardrail_prompt_injection",
+        "guardrail_harmful_intent",
+        "guardrail_indirect_injection",
+        "guardrail_untrusted_link",
+        "guardrail_prompt_leakage",
+        "guardrail_strike_cooldown",
+    }
+)
+
+#: Every event name this module is given: a closed vocabulary, reserved at the
+#: metrics series cap so no alert on one of them can be folded into silence.
+SECURITY_EVENT_NAMES: frozenset[str] = (
+    frozenset(EVENT_BY_STATUS.values()) | MCP_SECURITY_EVENT_KINDS | GUARDRAIL_SECURITY_EVENTS
+)
+_reserved = False
+
+
 def record_mcp_security_event(
     kind: str,
     *,
@@ -62,8 +86,12 @@ def record_mcp_security_event(
 
 def record_security_event(event: str, *, reason: str = "", **fields: Any) -> None:
     """Log and count one security event."""
+    global _reserved
     from .analytics import metrics
 
+    if not _reserved:
+        metrics.reserve("security_events_total", "event", SECURITY_EVENT_NAMES)
+        _reserved = True
     metrics.inc("security_events_total", labels={"event": event})
     logger.warning(
         "security event %s%s",

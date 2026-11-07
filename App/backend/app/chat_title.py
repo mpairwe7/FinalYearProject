@@ -20,6 +20,7 @@ from __future__ import annotations
 import re
 
 from . import llm
+from .guard_friction import note_refusal, paused
 from .guardrails import InputGuard, contains_pii, redact_pii_text
 
 MAX_WORDS = 6
@@ -97,14 +98,23 @@ def _excerpt(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()[:_EXCERPT_CHARS]
 
 
-def generate_title(user_text: str, assistant_text: str = "", locale: str = "en") -> tuple[str | None, str]:
+def generate_title(
+    user_text: str, assistant_text: str = "", locale: str = "en", *, principal: str = ""
+) -> tuple[str | None, str]:
     """``(title, source)`` for a conversation's opening exchange.
 
     ``source`` is ``"model"`` when the title came from the model, ``"blocked"``
-    when the input guard refused the opening message, and ``"unavailable"``
-    when no usable title came back (model off, failed, or its reply rejected).
+    when the input guard refused the opening message (or *principal* is paused
+    for repeated refusals, G464), and ``"unavailable"`` when no usable title
+    came back (model off, failed, or its reply rejected). The title route
+    shares the chat's strike friction, so it cannot be used to probe the guard
+    after the chat has paused.
     """
-    if not InputGuard().check(user_text or "").allowed:
+    if paused(principal) is not None:
+        return None, "blocked"
+    guard = InputGuard().check(user_text or "")
+    note_refusal(principal, guard)
+    if not guard.allowed:
         return None, "blocked"
 
     user = _excerpt(user_text)

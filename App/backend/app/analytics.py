@@ -165,7 +165,21 @@ class MetricsStore:
         self._registry = CollectorRegistry(auto_describe=True)
         self._families: dict[str, _Family] = {}
         self._warned: set[str] = set()
+        #: Per family, label values a caller declared closed: they never fold.
+        self._reserved: dict[str, dict[str, set[str]]] = {}
         self._start_time = time.time()
+
+    def reserve(self, name: str, label: str, values: Iterable[str]) -> None:
+        """Keep these *values* of *label* on *name* distinct at the series cap.
+
+        For a closed vocabulary an alert selects by value, such as the security
+        events: folding one into ``__other__`` would silence its alert. Only for
+        code constants. A reserved value never counts against the cap, and the
+        cap still bounds everything else.
+        """
+        with self._lock:
+            labels = self._reserved.setdefault(exported_name(name), {})
+            labels.setdefault(label, set()).update(_clean_label_value(value) for value in values)
 
     # -- recording ---------------------------------------------------------
     def inc(self, name: str, value: float = 1, labels: Mapping[str, Any] | None = None) -> None:
@@ -283,7 +297,11 @@ class MetricsStore:
         with self._lock:
             if values in family.seen:
                 return values
-            if len(family.seen) >= _MAX_SERIES_PER_METRIC:
+            reserved = self._reserved.get(exported_name(name), {})
+            closed = bool(reserved) and all(
+                value in reserved.get(label, ()) for label, value in zip(family.label_names, values, strict=True)
+            )
+            if not closed and len(family.seen) >= _MAX_SERIES_PER_METRIC:
                 self._warn_once(
                     f"cap:{name}",
                     "Metric %s reached %d label sets; folding new ones into %s",
