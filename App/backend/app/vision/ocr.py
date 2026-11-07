@@ -361,10 +361,6 @@ _HIDDEN_CONTROL_AND_BIDI_RE = re.compile(
     r"[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f"
     r"\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]"
 )
-_UNTRUSTED_DOC_BOUNDARY_RE = re.compile(
-    r"</?\s*untrusted_user_document\s*>",
-    re.IGNORECASE,
-)
 
 
 def strip_hidden_control_and_bidi(text: str) -> str:
@@ -383,11 +379,16 @@ def escape_untrusted_document_markers(text: str) -> str:
     """Strip or escape `<untrusted_user_document>` boundary tags inside document text.
 
     Prevents an attacker from embedding `</untrusted_user_document>` inside an
-    uploaded file or image to close the spotlighting wrapper early.
+    uploaded file or image to close the spotlighting wrapper early. Delegates
+    to :func:`app.guardrails.fence_untrusted_document_body`, which also folds
+    zero-width and fullwidth spellings of the tag and neutralises forged
+    ``<passage>`` markers and prompt headings (G463).
     """
     if not text:
         return ""
-    return _UNTRUSTED_DOC_BOUNDARY_RE.sub("[REDACTED_BOUNDARY_TAG]", text)
+    from ..guardrails import fence_untrusted_document_body
+
+    return fence_untrusted_document_body(text)
 
 
 def extract_tin_numbers(text: str) -> list[str]:

@@ -417,7 +417,9 @@ class October2026GuardrailHardeningTests(unittest.TestCase):
         from app.guardrails import StreamingDLPFilter
 
         # Zero-width / Cyrillic homoglyph obfuscated system prompt leakage is caught & redacted (SG-07)
-        obfuscated_leak = "Y\u200bou are the URA Digital Assistant and off\u0456cial AI helper."
+        # The persona the live SYSTEM_PROMPT uses; the former "URA Digital
+        # Assistant" signature had drifted out of the prompt (G465).
+        obfuscated_leak = "Y\u200bou are the **URA Intell\u0456gent Assistant**, an official assistant."
         leak_res = OutputGuard.check_prompt_leakage(obfuscated_leak)
         self.assertIn("prompt_leakage", leak_res.flags)
         self.assertIn("[REDACTED]", leak_res.sanitized_text)

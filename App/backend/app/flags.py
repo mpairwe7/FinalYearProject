@@ -678,6 +678,17 @@ _REGISTRY: dict[str, Flag] = {
             category="kill_switch",
             owner="agentic_runtime",
         ),
+        Flag(
+            "guardrail_strike_friction",
+            True,
+            "G464 (ADR-0029): after GUARD_STRIKE_THRESHOLD input-guard blocks inside "
+            "GUARD_STRIKE_WINDOW_S, answer that user, session or conversation with a fixed "
+            "notice and URA contacts for GUARD_STRIKE_COOLDOWN_S without calling a model, and "
+            "record a guardrail_strike_cooldown security event. Per replica; the IP rate limit "
+            "stays in front of it.",
+            category="kill_switch",
+            owner="ai_security",
+        ),
     ]
 }
 

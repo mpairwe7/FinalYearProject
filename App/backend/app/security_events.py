@@ -4,8 +4,12 @@ Authentication failures, authorisation denials and rate-limit hits used to
 reach the logs, if at all, as free-text INFO lines ("JWT rejected: …") that
 no alert could select. Each is now one structured WARNING record with a fixed
 ``event`` name from the OWASP Logging Vocabulary and one increment of
-``ura_security_events_total{event}``, which the ``SecurityEventSpike`` alert
-watches (OWASP ASVS 5.0 V16).
+``ura_security_events_total{event}`` (OWASP ASVS 5.0 V16). The alerts that
+watch it are in ``monitoring/alerting-rules.yml`` (group ``ura-security``):
+``AuthenticationFailureSpike``, ``AuthorizationFailureSpike``,
+``GuardrailProbingCampaign`` and ``IndirectInjectionOrUntrustedLinkSpike``.
+An event no rule selects still reaches the dashboard and the logs, but pages
+no one.
 
 Records carry the request id (added by the logging filter), the method, the
 route template, the status and the authenticated actor when there is one.

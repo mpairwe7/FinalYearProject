@@ -149,11 +149,14 @@ from .calculator_router import (
 from .claim_verifier import verify_claims
 from .corrective_rag import corrective_retrieve, needs_clarification
 from .flags import flags
+from .guard_friction import COOLDOWN_REPLY as GUARD_COOLDOWN_REPLY
+from .guard_friction import STRIKE_FLAGS, principal_key, strike_tracker
 from .guardrails import (
     STORE_RAW_PROMPTS,
     GuardResult,
     InputGuard,
     OutputGuard,
+    neutralize_untrusted_links,
     redact_pii_text,
     user_stated_identifiers,
 )
@@ -2260,6 +2263,14 @@ def _apply_output_guards(
 
     claim_report: dict[str, Any] | None = None
     structure_revised = False
+    # Per-chunk sanitizing sees one sentence at a time; a link split across
+    # chunks is only whole here. Removing it is a revision, so the client
+    # replaces what it showed (G462).
+    links_revised = False
+    if reply and isinstance(reply, str):
+        delinked, links_removed = neutralize_untrusted_links(reply)
+        if links_removed:
+            reply, links_revised = delinked, True
     if reply and isinstance(reply, str):
         norm = output_guard.normalize_structure(reply)
         if isinstance(norm, str):
@@ -2308,7 +2319,7 @@ def _apply_output_guards(
             verified_facts=verified_facts_block,
         )
 
-    revised = False
+    revised = links_revised
     # The report that DROVE the decision is the draft's. Re-verification below
     # overwrites `claim_report` with one describing the replacement text, so
     # without this the surfaced "claim_verification" explains a reply nobody
@@ -5908,19 +5919,40 @@ class ChatModel:
             p_ctx = f"{p_ctx}\n\n{proc_guide}".strip() if p_ctx else proc_guide
         return p_ctx
 
-    def _guard_both_forms(self, message: str, english_form: str) -> GuardResult:
+    def _guard_both_forms(
+        self, message: str, english_form: str, *, principal: str = ""
+    ) -> GuardResult:
         """Input guard on *message* and, when it differs, on its English form.
 
         The guard's patterns are English. A Luganda or Kiswahili injection
         reads as harmless words to them, while its translation does not, and
         multi-turn attacks in low-resource languages get through commercial
         models' own safety training far more often than English ones.
+
+        *principal* (:func:`guard_friction.principal_key`) is who sent the
+        turn. One who keeps tripping the guard is paused (G464): the turn is
+        refused before any check or model call, so a probing loop stops
+        learning from refusals.
         """
+        friction = bool(principal) and flags.is_enabled("guardrail_strike_friction")
+        if friction and strike_tracker.cooldown_remaining(principal) > 0:
+            return GuardResult(
+                allowed=False, reason=GUARD_COOLDOWN_REPLY, flags=["guardrail_cooldown"]
+            )
         guard = self._input_guard.check(message)
         if guard.allowed and english_form and english_form != message:
             english_guard = self._input_guard.check(english_form)
             if not english_guard.allowed:
-                return english_guard
+                guard = english_guard
+        if (
+            friction
+            and not guard.allowed
+            and STRIKE_FLAGS.intersection(guard.flags)
+            and strike_tracker.record_strike(principal)
+        ):
+            from .security_events import record_security_event
+
+            record_security_event("guardrail_strike_cooldown", reason="repeated_guard_blocks")
         return guard
 
     def _bind_conversation_topic(
@@ -11948,7 +11980,16 @@ class ChatModel:
             #    and, for a Luganda or Swahili turn, on its English form too:
             #    the guard's patterns are English.
             with trace_stage("input_guard", timings=timings):
-                guard = self._guard_both_forms(message, router_message)
+                guard = self._guard_both_forms(
+                    message,
+                    router_message,
+                    principal=principal_key(
+                        user_id=user_id,
+                        session_id=session_id,
+                        conversation_id=thread_id,
+                        tenant_id=tenant_id,
+                    ),
+                )
             if not guard.allowed:
                 blocked = {
                     "reply": guard.reason,
@@ -14108,7 +14149,16 @@ class ChatModel:
 
         # Input guardrails (OWASP LLM01), on both forms as in generate()
         guard_started = time.perf_counter()
-        guard = self._guard_both_forms(message, router_message)
+        guard = self._guard_both_forms(
+            message,
+            router_message,
+            principal=principal_key(
+                user_id=user_id,
+                session_id=session_id,
+                conversation_id=thread_id,
+                tenant_id=tenant_id,
+            ),
+        )
         _mark_stage("input_guard", guard_started)
         if not guard.allowed:
             return {

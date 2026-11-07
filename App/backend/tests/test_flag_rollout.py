@@ -312,6 +312,16 @@ class RegistryIntegrityTests(unittest.TestCase):
         self.assertIn("eq_stakes_escalation", variants)
         self.assertIn("structured_text_handoff", variants)
 
+    def test_guardrail_strike_friction_is_a_default_on_kill_switch(self) -> None:
+        """G464: on for everyone (no percentage), and FLAG_* switches it off for the replica."""
+        flag = _REGISTRY["guardrail_strike_friction"]
+        self.assertTrue(flag.default)
+        self.assertEqual(flag.effective_category, "kill_switch")
+        self.assertIsNone(flag.rollout)
+        self.assertTrue(FeatureFlags().is_enabled("guardrail_strike_friction"))
+        with mock.patch.dict(os.environ, {"FLAG_GUARDRAIL_STRIKE_FRICTION": "false"}):
+            self.assertFalse(FeatureFlags().is_enabled("guardrail_strike_friction"))
+
     def test_no_registered_flag_ships_a_live_rollout(self) -> None:
         """Rollouts are an operational decision, not a code default."""
         for name, flag in _REGISTRY.items():
