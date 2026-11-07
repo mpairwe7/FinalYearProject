@@ -254,6 +254,68 @@ THREAT_REGISTRY: list[dict] = [
         "status": "in_progress",
     },
     {
+        "id": "T63",
+        "category": "Tampering",
+        "description": (
+            "A suspended graph approval is acted on twice: a resumed run left its own suspend as the latest "
+            "checkpoint, and nothing claimed a suspend, so a replayed or concurrent resume re-ran the action "
+            "(G468, G469)"
+        ),
+        "owasp_llm": "LLM06",
+        "mitre_atlas": None,
+        "mitigation": (
+            "Checkpoint steps continue across runs on a thread; a resume inserts the row after the suspend and "
+            "the primary key admits exactly one; the claim row ends the thread's waiting state"
+        ),
+        "evidence": [
+            "App/backend/app/agents/graphs/runtime.py",
+            "App/backend/app/database.py",
+            "tests/agents/test_checkpoint_integrity_2026_11.py",
+        ],
+        "status": "mitigated",
+    },
+    {
+        "id": "T64",
+        "category": "Elevation of Privilege",
+        "description": (
+            "A taxpayer approves an action other than the one shown, or a stale or edited suspended row is "
+            "approved: the approval named only the thread (G470, G471, G472; OWASP ASI09)"
+        ),
+        "owasp_llm": "LLM06",
+        "mitre_atlas": None,
+        "mitigation": (
+            "The approval must echo the SHA-256 digest of the action shown; the suspend carries an HMAC over "
+            "thread, owner, tenant, time and action and expires after GRAPH_APPROVAL_TTL_S"
+        ),
+        "evidence": [
+            "App/backend/app/agents/graphs/runtime.py",
+            "App/backend/app/agents/graphs/state.py",
+            "tests/agents/test_checkpoint_integrity_2026_11.py",
+        ],
+        "status": "mitigated",
+    },
+    {
+        "id": "T65",
+        "category": "Tampering",
+        "description": (
+            "Production answers are generated under weaker instructions than the system is reviewed against: "
+            "the cloud path that serves every answer where no local model runs had a five-rule prompt and no "
+            "conversation (G475, G476)"
+        ),
+        "owasp_llm": "LLM09",
+        "mitre_atlas": None,
+        "mitigation": (
+            "CLOUD_SYSTEM_PROMPT carries the sixteen guarding rules of the local prompt, held by a contract test; "
+            "history is replayed withheld-if-injected and fenced; the leak fingerprint covers both prompts"
+        ),
+        "evidence": [
+            "App/backend/app/llm.py",
+            "App/backend/app/service.py",
+            "tests/agents/test_harness_prompt_contract.py",
+        ],
+        "status": "mitigated",
+    },
+    {
         "id": "T01",
         "category": "Spoofing",
         "description": "Attacker impersonates legitimate API client",

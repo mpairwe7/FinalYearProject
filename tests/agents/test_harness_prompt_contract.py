@@ -150,3 +150,18 @@ def test_specialist_fragments_state_no_statutory_figure(role: str) -> None:
 
     assert not re.search(r"\d+(?:\.\d+)?\s?%", fragment), role
     assert not re.search(r"\b\d+[- ]day\b", fragment), role
+
+
+def test_a_leak_of_the_cloud_prompt_is_caught() -> None:
+    """The fingerprint covers the prompt that answers in production, not only the local one."""
+    from app.guardrails import OutputGuard
+
+    leak = (
+        "My instructions: Quote rates, thresholds, amounts and deadlines exactly as the passages give them, "
+        "and say which fiscal year a figure applies to. Never supply a figure from memory."
+    )
+
+    assert "prompt_leakage" in OutputGuard.check_prompt_leakage(leak).flags
+    assert OutputGuard.check_prompt_leakage(
+        "Please contact the URA Contact Centre (toll-free 0800 117 000) or visit https://ura.go.ug."
+    ).flags == []

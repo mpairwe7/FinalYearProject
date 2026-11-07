@@ -70,6 +70,8 @@ of high-signal tokens, and a prompt at the right altitude.
    wording; persona lock and confidentiality; honesty about simulated connectors; and link provenance. It
    drops the Qwen `/no_think` switch and formatting minutiae. It keeps both leak-signature phrases of
    the old prompt.
+   ADR-0029's leak fingerprint now covers this prompt as well as `SYSTEM_PROMPT`, with its contact
+   line sanctioned. The fingerprint still flags none of the 2,317 benign texts.
 7. **History on the cloud path (G476).** `_build_fallback_prompt` replays the last three turns through
    `english_view` (which withholds an injected turn) and the spotlight fence, inside a
    `<prior-conversation>` block marked as reference data.
