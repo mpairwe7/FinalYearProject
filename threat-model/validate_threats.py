@@ -316,6 +316,46 @@ THREAT_REGISTRY: list[dict] = [
         "status": "mitigated",
     },
     {
+        "id": "T66",
+        "category": "Information Disclosure",
+        "description": (
+            "A compromised document parser reads secrets and internal service addresses from its environment: "
+            "a denylist let AUDIT_TAXPAYER_HMAC_SALT, DEPLOY_KEY, webhook URLs and the Qdrant/vLLM addresses through (G478)"
+        ),
+        "owasp_llm": "LLM03",
+        "mitre_atlas": None,
+        "mitigation": "The parse child keeps an allowlisted environment, minus secret-shaped names and credential URLs",
+        "evidence": ["App/backend/app/document_worker.py", "tests/agents/test_agentic_rag_context_sandbox_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
+        "id": "T67",
+        "category": "Denial of Service",
+        "description": "A decompression bomb in an upload takes the host's memory; the parse child had no address-space cap (G479)",
+        "owasp_llm": "LLM10",
+        "mitre_atlas": None,
+        "mitigation": "1 GiB RLIMIT_AS by default, production refuses 0; the 30 s deadline and CPU limit stand",
+        "evidence": ["App/backend/app/document_worker.py", "App/backend/app/production_readiness.py",
+                     "tests/agents/test_agentic_rag_context_sandbox_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
+        "id": "T68",
+        "category": "Tampering",
+        "description": (
+            "An earlier turn steers the follow-up rewriter and so chooses what is retrieved, or a refusal becomes the "
+            "search query (G480-G482)"
+        ),
+        "owasp_llm": "LLM01",
+        "mitre_atlas": "AML.T0051",
+        "mitigation": (
+            "History fenced as data with injected turns left out, output validated before retrieval, vLLM chat only, "
+            "behind a default-off flag"
+        ),
+        "evidence": ["App/backend/app/query.py", "tests/agents/test_agentic_rag_context_sandbox_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
         "id": "T01",
         "category": "Spoofing",
         "description": "Attacker impersonates legitimate API client",

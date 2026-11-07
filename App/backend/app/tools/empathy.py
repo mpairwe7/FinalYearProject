@@ -97,7 +97,8 @@ def _wellbeing_checkin_allowed(*, user_id: str | None = None) -> bool:
 
     try:
         from .. import database as db
-        from ..service import _ACTIVE_CONVERSATION_STATE, _ACTIVE_TENANT_ID
+        from ..turn_context import ACTIVE_CONVERSATION_STATE as _ACTIVE_CONVERSATION_STATE
+        from ..turn_context import ACTIVE_TENANT_ID as _ACTIVE_TENANT_ID
 
         active_conv = _ACTIVE_CONVERSATION_STATE.get()
         if active_conv:

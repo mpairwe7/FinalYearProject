@@ -331,6 +331,13 @@ class RegistryIntegrityTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"FLAG_GRAPH_CHECKPOINT_ROUTINE": "true"}):
             self.assertTrue(FeatureFlags().is_enabled("graph_checkpoint_routine"))
 
+    def test_llm_query_rewrite_is_off_until_measured(self) -> None:
+        """ADR-0031: a retrieval change that never ran stays off until the benchmark measures it."""
+        flag = _REGISTRY["llm_query_rewrite"]
+        self.assertFalse(flag.default)
+        self.assertIsNone(flag.rollout)
+        self.assertFalse(FeatureFlags().is_enabled("llm_query_rewrite"))
+
     def test_no_registered_flag_ships_a_live_rollout(self) -> None:
         """Rollouts are an operational decision, not a code default."""
         for name, flag in _REGISTRY.items():

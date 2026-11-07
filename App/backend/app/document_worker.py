@@ -2,8 +2,10 @@
 
 Default: in-process extractors (same as before). When
 ``DOCUMENT_PARSE_ISOLATED=true``, extractors run in a spawned subprocess
-so a hostile PDF cannot share the API worker's address space. Still not
-a dedicated pool or gVisor sandbox.
+so a hostile PDF cannot share the API worker's address space. The child
+sees only an allowlisted environment and is capped in CPU, file size and
+address space (ADR-0031). Still not a dedicated pool or gVisor sandbox: it has
+the parent's network and filesystem view.
 """
 
 from __future__ import annotations
@@ -21,13 +23,45 @@ logger = logging.getLogger(__name__)
 _TIMEOUT_S = int(os.getenv("DOCUMENT_PARSE_TIMEOUT_S", "30"))
 _MAX_CONCURRENT_PARSES = max(1, int(os.getenv("DOCUMENT_PARSE_MAX_CONCURRENT", "4")))
 _MAX_CHILD_FSIZE_BYTES = int(os.getenv("DOCUMENT_PARSE_MAX_FSIZE_BYTES", str(64 * 1024 * 1024)))
-_MAX_CHILD_MEM_BYTES = int(os.getenv("DOCUMENT_PARSE_MAX_MEM_BYTES", "0"))
+#: Address-space cap per parse child (RLIMIT_AS). 1 GiB: every corpus PDF up to
+#: 50 MB parsed identically under 512 MiB on 2026-11-07, and a 1.5 GiB flate bomb
+#: was contained. Unset (0), one hostile upload could take the host's memory,
+#: four at a time (ADR-0031, G479).
+_MAX_CHILD_MEM_BYTES = int(os.getenv("DOCUMENT_PARSE_MAX_MEM_BYTES", str(1024 * 1024 * 1024)))
 _PARSE_SEMAPHORE = threading.BoundedSemaphore(_MAX_CONCURRENT_PARSES)
 
 _SENSITIVE_ENV_RE = re.compile(
-    r"(?:SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE_KEY|API_KEY|DSN|DATABASE_URL|CREDENTIAL|AUTH)",
+    r"(?:SECRET|TOKEN|PASSWORD|PASSWD|PASS\b|PRIVATE|_KEY\b|KEY$|API_KEY|DSN|DATABASE_URL|CREDENTIAL|AUTH|SALT|HMAC|SIGNING|CERT)",
     re.IGNORECASE,
 )
+#: What a parse child may see of the environment: locale and runtime plumbing,
+#: and the settings its extractors read. Everything else is removed, so a secret
+#: or an internal service address no one thought to list stays in the parent
+#: (CWE-526). A denylist kept AUDIT_TAXPAYER_HMAC_SALT, DEPLOY_KEY, webhook URLs
+#: and the Qdrant/vLLM addresses (ADR-0031, G478).
+_CHILD_ENV_ALLOW = re.compile(
+    r"^(?:PATH|HOME|USER|LANG|LANGUAGE|LC_[A-Z]+|TZ|TMPDIR|TEMP|TMP|PWD|SHELL"
+    r"|PYTHON[A-Z_]*|VIRTUAL_ENV|LD_LIBRARY_PATH|SSL_CERT_FILE|SSL_CERT_DIR|REQUESTS_CA_BUNDLE"
+    r"|OMP_[A-Z_]+|OPENBLAS_[A-Z_]+|MKL_[A-Z_]+|MALLOC_[A-Z_]+|NUMEXPR_[A-Z_]+"
+    r"|APP_ENV|FLAG_[A-Z0-9_]+"
+    r"|DOCUMENT_[A-Z0-9_]+|OCR_[A-Z0-9_]+|VISION_[A-Z0-9_]+|DOCLING_[A-Z0-9_]+|TRITON_OCR_URL"
+    r"|SANDBOX_[A-Z0-9_]+|MAX_SANDBOX_[A-Z0-9_]+|PDF_CORPUS_[A-Z0-9_]+|URA_WEB_SANDBOX_DIR"
+    r"|HF_HOME|HF_HUB_OFFLINE|HF_HUB_CACHE|TRANSFORMERS_OFFLINE|TRANSFORMERS_CACHE|TORCH_HOME"
+    r"|XDG_[A-Z_]+|TESSDATA_PREFIX)$"
+)
+#: A URL value carrying ``user:password@`` is a credential whatever its name.
+_CREDENTIAL_URL_RE = re.compile(r"://[^/\s:@]+:[^/\s@]+@")
+
+
+def child_environment(environ: dict[str, str] | os._Environ[str]) -> dict[str, str]:
+    """The environment a parse child keeps: allowlisted names, no secret-shaped names, no credential URLs."""
+    return {
+        name: value
+        for name, value in environ.items()
+        if _CHILD_ENV_ALLOW.match(name)
+        and not _SENSITIVE_ENV_RE.search(name)
+        and not _CREDENTIAL_URL_RE.search(value or "")
+    }
 
 
 def isolated_enabled() -> bool:
@@ -43,9 +77,9 @@ def _apply_child_sandbox_limits(*, apply_rlimits: bool | None = None) -> None:
     call from lowering ``RLIMIT_CPU`` or ``RLIMIT_FSIZE`` on the host/pytest
     runner process.
     """
-    for key in list(os.environ.keys()):
-        if _SENSITIVE_ENV_RE.search(key) and key != "DOCUMENT_PARSE_ISOLATED":
-            os.environ.pop(key, None)
+    kept = child_environment(os.environ)
+    os.environ.clear()
+    os.environ.update(kept)
     # Prevent OpenBLAS / OpenMP / glibc from pre-allocating multi-GB virtual arenas in short-lived parse workers
     os.environ["OMP_NUM_THREADS"] = "1"
     os.environ["OPENBLAS_NUM_THREADS"] = "1"

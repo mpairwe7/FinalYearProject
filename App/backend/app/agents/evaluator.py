@@ -353,7 +353,7 @@ def verify_figure_lock(
 
     # 1b. Conversation-scoped CaseFacts (so Turn 1 amounts like $6,000 are allowed on Turn 2)
     try:
-        from ..service import _ACTIVE_CASE_FACTS
+        from ..turn_context import ACTIVE_CASE_FACTS as _ACTIVE_CASE_FACTS
 
         active_facts = _ACTIVE_CASE_FACTS.get()
         if active_facts is not None:

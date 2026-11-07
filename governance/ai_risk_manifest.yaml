@@ -517,6 +517,7 @@ owasp_agentic_2026:
       verified_by:
         - "App/backend/tests/test_pdf_guards.py"
         - "tests/agents/test_ephemeral_pdf_sandbox.py"
+        - "tests/agents/test_agentic_rag_context_sandbox_2026_11.py"
         - "tests/agents/test_november_2026_gap_closures.py"
         - "tests/agents/test_phase43_agentic_tools_hardening.py"
     - id: "ASI06"

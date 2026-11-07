@@ -1762,12 +1762,11 @@ class OutputGuard:
     def redact_pii(text: str, allowed_values: Iterable[str] | None = None) -> str:
         """Replace detected PII with redaction markers (LLM02), preserving user-stated identifiers."""
         if allowed_values is None:
-            try:
-                from .service import _ACTIVE_USER_STATED_IDS
+            # From the leaf module, not the orchestrator: the security layer must
+            # not depend on service.py, and must not fail silently (ADR-0031).
+            from .turn_context import ACTIVE_USER_STATED_IDS
 
-                allowed_values = _ACTIVE_USER_STATED_IDS.get()
-            except Exception:
-                allowed_values = ()
+            allowed_values = ACTIVE_USER_STATED_IDS.get()
         return redact_pii_text(text, allowed_values=allowed_values)
 
     @staticmethod
