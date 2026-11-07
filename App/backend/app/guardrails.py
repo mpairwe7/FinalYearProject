@@ -1053,6 +1053,27 @@ def redact_pii_text(
     return result
 
 
+def pii_values(text: str) -> set[str]:
+    """Each identifier in *text*, normalised (digits only for numbers, upper-case otherwise)."""
+    if not text:
+        return set()
+    cleaned = _strip_hidden_pii_evasion(text)
+    found: set[str] = set()
+    for pii_type, pattern in _PII_PATTERNS:
+        for match in pattern.finditer(cleaned):
+            value = match.group(0)
+            if pii_type == "email" and is_official_ura_email(value):
+                continue
+            if pii_type == "ug_tin" and _is_currency_boundary(match, cleaned):
+                continue
+            if pii_type == "ug_nid" and not _is_valid_ug_nid_match(value):
+                continue
+            digits = re.sub(r"\D", "", value)
+            found.add(digits if pii_type in ("ug_tin", "ug_phone", "credit_card", "amex_card") else
+                      re.sub(r"[\s-]", "", value).upper())
+    return found
+
+
 def contains_pii(text: str) -> bool:
     """Return True if *text* contains any PII pattern (excluding official public URA emails)."""
     if not text:
@@ -1762,12 +1783,11 @@ class OutputGuard:
     def redact_pii(text: str, allowed_values: Iterable[str] | None = None) -> str:
         """Replace detected PII with redaction markers (LLM02), preserving user-stated identifiers."""
         if allowed_values is None:
-            try:
-                from .service import _ACTIVE_USER_STATED_IDS
+            # From the leaf module, not the orchestrator: the security layer must
+            # not depend on service.py, and must not fail silently (ADR-0031).
+            from .turn_context import ACTIVE_USER_STATED_IDS
 
-                allowed_values = _ACTIVE_USER_STATED_IDS.get()
-            except Exception:
-                allowed_values = ()
+            allowed_values = ACTIVE_USER_STATED_IDS.get()
         return redact_pii_text(text, allowed_values=allowed_values)
 
     @staticmethod

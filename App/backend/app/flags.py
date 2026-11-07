@@ -687,6 +687,14 @@ _REGISTRY: dict[str, Flag] = {
             owner="agentic_runtime",
         ),
         Flag(
+            "llm_query_rewrite",
+            False,
+            "ADR-0031 (G483): rewrite a follow-up into a standalone retrieval query with the vLLM chat "
+            "model (fenced, injection-scrubbed history; validated output). It never ran before: an "
+            "import error was swallowed. Off until measured on the multilingual retrieval benchmark.",
+            owner="retrieval",
+        ),
+        Flag(
             "guardrail_strike_friction",
             True,
             "G464 (ADR-0029): after GUARD_STRIKE_THRESHOLD input-guard blocks inside "

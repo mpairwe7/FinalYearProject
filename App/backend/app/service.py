@@ -249,21 +249,19 @@ from .workflows.slots import validate_slot
 
 logger = logging.getLogger(__name__)
 
-_ACTIVE_CONVERSATION_STATE: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "active_conversation_state", default=""
-)
+# Turn context lives in the leaf module turn_context (ADR-0031); these are the
+# same ContextVar objects under their historical names.
+from .turn_context import ACTIVE_CASE_FACTS as _ACTIVE_CASE_FACTS  # noqa: E402
+from .turn_context import ACTIVE_CONVERSATION_STATE as _ACTIVE_CONVERSATION_STATE  # noqa: E402
+from .turn_context import ACTIVE_TENANT_ID as _ACTIVE_TENANT_ID  # noqa: E402
+from .turn_context import ACTIVE_USER_STATED_IDS as _ACTIVE_USER_STATED_IDS  # noqa: E402
+
 # The audit row for a ``generate`` turn is written by :meth:`ChatModel.generate`
 # after the reply has been localized, so its digest matches the text that was
 # served. ``_generate_en`` has a dozen exits; each one records the trace
 # context it knows here and ``generate`` writes the row once, at the end.
 _PENDING_TURN_AUDIT: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
     "pending_turn_audit", default=None
-)
-_ACTIVE_TENANT_ID: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "active_conversation_tenant", default=""
-)
-_ACTIVE_USER_STATED_IDS: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar(
-    "active_user_stated_ids", default=()
 )
 
 
@@ -1127,11 +1125,6 @@ def _prefer_cloud_primary(locale: str) -> bool:
     if (locale or "en").strip().lower() in LOCAL_PRIMARY_LOCALES:
         return False
     return _cloud_llm_ready()
-
-
-_ACTIVE_CASE_FACTS: contextvars.ContextVar[Any] = contextvars.ContextVar(
-    "_active_case_facts", default=None
-)
 
 
 def _live_research_for_turn(
