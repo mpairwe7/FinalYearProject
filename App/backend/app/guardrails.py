@@ -192,7 +192,8 @@ _SANCTIONED_PROMPT_OUTPUT: tuple[str, ...] = (
     "toll-free 0800 117 000 / 0800 217 000, WhatsApp 0772 140 000, email services@ura.go.ug, "
     "or the web portal https://ura.go.ug.",
     "direct the user to https://ura.go.ug or the URA Contact Centre.",
-    "point the taxpayer to https://ura.go.ug or the URA Contact Centre (toll-free 0800 117 000).",
+    "you don't have enough information and point the taxpayer to https://ura.go.ug or the URA Contact Centre "
+    "(toll-free 0800 117 000).",
     "You might also want to know about",
     # The persona's public description, which the assistant uses about itself.
     "an official, helpful, and conversational AI assistant for the Uganda Revenue Authority.",

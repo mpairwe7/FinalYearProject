@@ -427,7 +427,7 @@ App/backend/app/
 ├── analytics.py         # Prometheus-compatible metrics middleware
 ├── database.py          # SQLite WAL store (11 tables, retention TTLs, migrations)
 ├── postgres.py          # PostgreSQL backend (opt-in, drop-in substitute for database.py)
-├── flags.py             # Feature flag registry (88 flags, env-backed, cohort rollout)
+├── flags.py             # Feature flag registry (89 flags, env-backed, cohort rollout)
 ├── resilience.py        # Circuit breaker (exponential backoff, CLOSED→OPEN→HALF_OPEN)
 ├── pdf_export.py        # Branded PDF conversation/tax summary export
 ├── evaluation.py        # RAG evaluation harness (8 metrics)
@@ -746,7 +746,7 @@ All major subsystems are behind feature flags for progressive rollout:
 | `stream_figure_hold` | on | Hold streamed text from the first figure until the output guards have read it (`guardrails.FigureReleaseGate`, ADR-0022). Prose still streams. Off restores token-by-token text that is corrected afterwards |
 | `tax_graph` | off | Load the statutory knowledge graph + `tax_graph` namespace |
 | `graph_fusion` | off | Fuse the graph leg into RRF (requires `tax_graph`) |
-| `langgraph` | off | Route agentic requests through the graph orchestrator. The conversation id is the checkpoint thread; only a suspended approval and its resume claim are written unless `GRAPH_CHECKPOINT_ROUTINE=true`, and an approval is digest-bound, HMAC-sealed and expires after `GRAPH_APPROVAL_TTL_S` (ADR-0030) |
+| `langgraph` | off | Route agentic requests through the graph orchestrator. The conversation id is the checkpoint thread; only a suspended approval and its resume claim are written unless `FLAG_GRAPH_CHECKPOINT_ROUTINE=true`, and an approval is digest-bound, HMAC-sealed and expires after `GRAPH_APPROVAL_TTL_S` (ADR-0030) |
 | `mcp_tasks` | off | `tasks` MCP namespace for long-running work |
 | `voice_receptionist` | off | Simulated phone receptionist and staff Calls page; production media uses self-hosted LiveKit WebRTC (see the receptionist runbook) |
 | `receptionist_language_detection` | off | Receptionist follows caller language (en, sw and lg all on the local engine: Whisper-SALT, Sunflower, Orpheus); caller/officer WebRTC media uses self-hosted LiveKit in production. See `docs/runbooks/voice-receptionist-demo.md` |
@@ -783,9 +783,10 @@ All major subsystems are behind feature flags for progressive rollout:
 | `auto_qdrant_web_sync` (`FLAG_AUTO_QDRANT_WEB_SYNC`) | off | Phase 41: self-updating Qdrant comparator (`corpus_sync.py`) that compares `ura.go.ug` / `ulii.org` PDFs against Qdrant, tombstones/deletes superseded documents, upserts newer editions, archives replaced `.jsonl` files, and records 7-day state in `web_sync_ledger` |
 | `portal_copilot` (`FLAG_PORTAL_COPILOT`) | on | Phase 42/43 (`ADR-0014`, `ADR-0025`): 4-tier URA portal task execution (`portal_copilot.py`), Claude-style HITL Allow/Disallow confirmation cards (`POST /v1/portal/tasks/execute`), inline chat form elicitation, step-up login auto-return (`returnTo`), screenshot-to-co-pilot handoff, inbuilt stuck-user DOM co-pilot (`/portal/[portalKey]`) with `<untrusted_portal_dom_telemetry>` spotlighting, and unified DTS stamp catalog/fees. Other `G416`–`G438` fixes are not gated by this flag; see `docs/GAPS_AND_AGENTIC_ROADMAP.md` |
 | `guardrail_strike_friction` (`FLAG_GUARDRAIL_STRIKE_FRICTION`) | on | G464 (`ADR-0029`): a user, session or conversation that trips the input guard `GUARD_STRIKE_THRESHOLD` times (default 5) inside `GUARD_STRIKE_WINDOW_S` (600) is answered with a fixed notice and URA contacts for `GUARD_STRIKE_COOLDOWN_S` (300) without a model call, and a `guardrail_strike_cooldown` security event is recorded (`guard_friction.py`). Per replica; the IP rate limit stays in front |
+| `graph_checkpoint_routine` (`FLAG_GRAPH_CHECKPOINT_ROUTINE`) | off | ADR-0030: also persist routine graph transitions (full state: question, history, passages) to `agent_checkpoints`. Off, only a suspended approval, its resume claim and its markers are written. Nothing reads routine rows; turn on for a debugging window only |
 
 The table above lists the flags that gate a subsystem; `flags.py` holds
-**88** in total, including the per-phase switches for voice, offline and
+**89** in total, including the per-phase switches for voice, offline and
 quantization. `flags.all()` is the authoritative list. Production also
 forces `auth_required`, `multi_tenant`, `audit_ledger`, `ticket_queue`,
 and `voice_consent` unless explicitly disabled (startup then refuses).

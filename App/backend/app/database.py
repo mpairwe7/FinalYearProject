@@ -3686,6 +3686,17 @@ def _task_row(row: dict[str, Any], *, replayed: bool = False) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Agent Graph Checkpoint Persistence (LangGraph 2026 Durable Execution)
 # ---------------------------------------------------------------------------
+def _require_checkpoint_backend() -> None:
+    """Refuse a checkpoint operation that would land on local SQLite by accident.
+
+    With Postgres configured but its pool down, ``_pg_module()`` is ``None`` and
+    every query falls back to this replica's SQLite file, where a resume claim
+    is unique to one replica only (ADR-0030, CodeRabbit on #702).
+    """
+    if ANALYTICS_BACKEND == "postgres" and _pg_module() is None:
+        raise RuntimeError("Postgres is configured but unavailable; checkpoint refused")
+
+
 def save_agent_checkpoint(
     thread_id: str,
     step: int,
@@ -3699,6 +3710,7 @@ def save_agent_checkpoint(
     """
     if not thread_id:
         return
+    _require_checkpoint_backend()
     now = time.time()
     state_json = json.dumps(state_data, default=str)
     execute(
@@ -3726,6 +3738,7 @@ def insert_agent_checkpoint_if_absent(
     """
     if not thread_id:
         return False
+    _require_checkpoint_backend()
     state_json = json.dumps(state_data, default=str)
     written = execute(
         """INSERT INTO agent_checkpoints
@@ -3741,6 +3754,7 @@ def get_latest_agent_checkpoint(thread_id: str) -> tuple[int, dict[str, Any]] | 
     """``(step, state)`` of the highest step on *thread_id*, or ``None``."""
     if not thread_id:
         return None
+    _require_checkpoint_backend()
     row = query_one(
         """SELECT step, state_json FROM agent_checkpoints
            WHERE thread_id = ?

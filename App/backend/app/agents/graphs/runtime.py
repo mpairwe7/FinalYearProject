@@ -61,20 +61,55 @@ def _approval_key() -> bytes:
     return _secret()
 
 
-def _approval_mac(thread_id: str, snapshot: Mapping[str, Any]) -> str:
-    """HMAC over what an approval acts on: the thread, owner, time and action."""
+def _approval_mac(thread_id: str, step: int, snapshot: Mapping[str, Any]) -> str:
+    """HMAC over everything a resume trusts: the whole state, its thread and its step.
+
+    The whole state, because a resumed run acts with its role, purposes and
+    plan as well as its pending action. The step, because a signed suspend
+    copied to a higher step would otherwise be resumable a second time.
+    Computed on the JSON form, so it survives the store's round trip.
+    """
     key = _approval_key()
     if not key:
         return ""
-    bound = {
-        "thread_id": thread_id,
-        "user_id": snapshot.get("user_id", ""),
-        "tenant_id": snapshot.get("tenant_id", ""),
-        "suspended_at": snapshot.get("suspended_at"),
-        "pending_action": snapshot.get("pending_action"),
-    }
-    message = json.dumps(bound, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    state = {k: v for k, v in snapshot.items() if k != "approval_mac"}
+    canonical = json.loads(json.dumps(state, default=str))
+    bound = {"thread_id": thread_id, "step": int(step), "state": canonical}
+    message = json.dumps(bound, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hmac.new(key, message, hashlib.sha256).hexdigest()
+
+
+#: Marker rows. None carries the question or history: only who, and what happened.
+SUPERSEDED_NODE = "__superseded__"
+RESUME_DONE_NODE = "__resume_done__"
+RESUME_FAILED_NODE = "__resume_failed__"
+
+
+def resume_status(store: CheckpointStore, thread_id: str) -> str:
+    """Where a thread's approval stands, for reconciliation (ADR-0030).
+
+    ``awaiting_approval``; ``claimed_incomplete`` — a resume claimed the suspend
+    and never recorded an end, so the process stopped and the action may or may
+    not have run (reconcile with the downstream system; never re-run it);
+    ``completed``; ``failed``; ``superseded`` by a later turn; or ``none``.
+    """
+    rows = sorted(store.history(thread_id))
+    if not rows:
+        return "none"
+    latest = store.latest_checkpoint(thread_id)
+    if latest is not None and latest[1].get("outcome") == GraphOutcome.WAITING_USER.value:
+        return "awaiting_approval"
+    names = [name for _, name in rows]
+    if names[-1] == SUPERSEDED_NODE:
+        return "superseded"
+    if RESUME_CLAIM_NODE not in names:
+        return "none"
+    after_claim = names[len(names) - names[::-1].index(RESUME_CLAIM_NODE):]
+    if RESUME_DONE_NODE in after_claim:
+        return "completed"
+    if RESUME_FAILED_NODE in after_claim:
+        return "failed"
+    return "claimed_incomplete"
 
 
 @dataclass
@@ -115,6 +150,10 @@ class CheckpointStore:
         """Write *step* only if no row holds it. False means another run got there first."""
         raise NotImplementedError
 
+    def history(self, thread_id: str) -> list[tuple[int, str]]:
+        """``(step, node)`` for every row on *thread_id*."""
+        raise NotImplementedError
+
 
 class InMemoryCheckpointStore(CheckpointStore):
     """Process-local checkpoint store for tests and lightweight executions."""
@@ -123,7 +162,7 @@ class InMemoryCheckpointStore(CheckpointStore):
         import threading
 
         self._checkpoints: dict[str, dict[int, dict[str, Any]]] = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def save_checkpoint(self, thread_id: str, step: int, node_name: str, state_dict: dict[str, Any]) -> None:
         entry = {"thread_id": thread_id, "step": step, "node": node_name, "state": dict(state_dict), "ts": time.time()}
@@ -139,12 +178,17 @@ class InMemoryCheckpointStore(CheckpointStore):
             return step, entries[step]["state"]
 
     def claim(self, thread_id: str, step: int, node_name: str, state_dict: dict[str, Any]) -> bool:
+        # Through save_checkpoint, so a store that overrides only the save still
+        # fails a claim the same way.
         with self._lock:
-            entries = self._checkpoints.setdefault(thread_id, {})
-            if step in entries:
+            if step in self._checkpoints.get(thread_id, {}):
                 return False
-            entries[step] = {"thread_id": thread_id, "step": step, "node": node_name, "state": dict(state_dict), "ts": time.time()}
+            self.save_checkpoint(thread_id, step, node_name, state_dict)
             return True
+
+    def history(self, thread_id: str) -> list[tuple[int, str]]:
+        with self._lock:
+            return [(step, entry["node"]) for step, entry in self._checkpoints.get(thread_id, {}).items()]
 
 
 class DurableCheckpointStore(CheckpointStore):
@@ -152,13 +196,26 @@ class DurableCheckpointStore(CheckpointStore):
 
     A failed save is raised, not swallowed: only the runtime knows whether this
     was a routine step or a suspend that nothing else can resume. Routine
-    transitions are written only with ``GRAPH_CHECKPOINT_ROUTINE=true``: nothing
+    transitions are written only with the ``graph_checkpoint_routine`` flag: nothing
     reads them, each held the question, history and retrieved passages (DPPA
     2019 data minimisation), and each cost a synchronous write per node.
     """
 
     def __init__(self) -> None:
-        self.persist_routine = os.getenv("GRAPH_CHECKPOINT_ROUTINE", "false").strip().lower() in ("1", "true", "yes")
+        self._persist_routine: bool | None = None
+
+    @property
+    def persist_routine(self) -> bool:
+        """The ``graph_checkpoint_routine`` flag, unless set on this store."""
+        if self._persist_routine is not None:
+            return self._persist_routine
+        from ...flags import flags
+
+        return flags.is_enabled("graph_checkpoint_routine")
+
+    @persist_routine.setter
+    def persist_routine(self, value: bool) -> None:
+        self._persist_routine = bool(value)
 
     def save_checkpoint(self, thread_id: str, step: int, node_name: str, state_dict: dict[str, Any]) -> None:
         from ...database import save_agent_checkpoint
@@ -171,18 +228,24 @@ class DurableCheckpointStore(CheckpointStore):
         await asyncio.to_thread(self.save_checkpoint, thread_id, step, node_name, state_dict)
 
     def latest_checkpoint(self, thread_id: str) -> tuple[int, dict[str, Any]] | None:
-        try:
-            from ...database import get_latest_agent_checkpoint
+        """Raises when the store cannot be read: "unreadable" is not "empty".
 
-            return get_latest_agent_checkpoint(thread_id)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Checkpoint could not be read: %s", type(exc).__name__)
-            return None
+        Read as empty, a run would start at step 0 and could write a suspend
+        beneath the thread's latest row, where no resume would ever find it.
+        """
+        from ...database import get_latest_agent_checkpoint
+
+        return get_latest_agent_checkpoint(thread_id)
 
     def claim(self, thread_id: str, step: int, node_name: str, state_dict: dict[str, Any]) -> bool:
         from ...database import insert_agent_checkpoint_if_absent
 
         return insert_agent_checkpoint_if_absent(thread_id, step, node_name, state_dict)
+
+    def history(self, thread_id: str) -> list[tuple[int, str]]:
+        from ...database import list_agent_checkpoints
+
+        return [(int(row["step"]), str(row["node_name"])) for row in list_agent_checkpoints(thread_id)]
 
     async def async_load_checkpoint(self, thread_id: str) -> dict[str, Any] | None:
         import asyncio
@@ -300,37 +363,40 @@ class GraphRuntime:
         return result.next_node
 
     def _checkpoint_state(
-        self, state: AgentGraphState, result: NodeResult, thread_id: str = ""
+        self, state: AgentGraphState, result: NodeResult, thread_id: str = "", step: int = 0
     ) -> dict[str, Any]:
         """State as of this transition. A node's outcome is applied after the save,
         so without this a checkpoint could record the outcome before it. A
-        suspend is stamped with its time and sealed with an HMAC over what an
-        approval would act on."""
+        suspend is stamped with its time and sealed with an HMAC over the whole
+        state, its thread and its step."""
         snapshot = state.to_dict()
         if result.outcome is not None:
             snapshot["outcome"] = result.outcome.value
         if snapshot.get("outcome") == GraphOutcome.WAITING_USER.value:
             snapshot["suspended_at"] = time.time()
-            mac = _approval_mac(thread_id, snapshot)
+            mac = _approval_mac(thread_id, step, snapshot)
             if not mac:
                 raise RuntimeError("no approval signing key is configured")
             snapshot["approval_mac"] = mac
         return snapshot
 
-    def _start_step(self, thread_id: str) -> int | None:
-        """The step this run's first save takes: one past the thread's latest.
+    def _start_position(self, thread_id: str) -> tuple[int | None, bool]:
+        """``(first step, latest is a pending approval)`` for a run on *thread_id*.
 
-        ``None`` when the latest step cannot be read: then nothing is saved, and
-        a suspend fails closed rather than overwrite rows it cannot see.
+        The step is one past the thread's latest. ``None`` when the latest
+        cannot be read: then nothing is saved and a suspend fails closed rather
+        than write beneath rows it cannot see.
         """
         if not (self._checkpointer and thread_id):
-            return 0
+            return 0, False
         try:
             latest = self._checkpointer.latest_checkpoint(thread_id)
         except Exception as exc:  # noqa: BLE001
             logger.warning("GraphRuntime: latest checkpoint unreadable: %s", type(exc).__name__)
-            return None
-        return 0 if latest is None else latest[0] + 1
+            return None, False
+        if latest is None:
+            return 0, False
+        return latest[0] + 1, latest[1].get("outcome") == GraphOutcome.WAITING_USER.value
 
     def _should_save(self, state: AgentGraphState, result: NodeResult) -> bool:
         suspending = result.outcome == GraphOutcome.WAITING_USER or state.outcome == GraphOutcome.WAITING_USER
@@ -338,30 +404,62 @@ class GraphRuntime:
 
     def _save(
         self, state: AgentGraphState, result: NodeResult, thread_id: str, step: int | None, node: str
-    ) -> None:
-        """Persist this transition when it must be; a failed suspend save ends the run."""
+    ) -> bool:
+        """Persist this transition when it must be; True when a row was written.
+
+        Every write is insert-if-absent: a concurrent run on the thread that
+        reached the same step is refused rather than overwriting a suspend, and
+        a refused suspend ends its own run.
+        """
         if not (self._checkpointer and thread_id) or not self._should_save(state, result):
-            return
+            return False
         try:
             if step is None:
                 raise RuntimeError("thread position unknown")
-            self._checkpointer.save_checkpoint(
-                thread_id, step, node, self._checkpoint_state(state, result, thread_id)
-            )
+            snapshot = self._checkpoint_state(state, result, thread_id, step)
+            if not self._checkpointer.claim(thread_id, step, node, snapshot):
+                raise RuntimeError(f"step {step} already written by another run on this thread")
+            return True
         except Exception as exc:  # noqa: BLE001
             self._checkpoint_failed(state, result, exc)
+            return False
 
-    def run(
-        self,
-        state: AgentGraphState,
-        thread_id: str = "",
-        entry: str | None = None,
-        *,
-        start_step: int | None = None,
-    ) -> AgentGraphState:
+    def _marker(self, state: AgentGraphState, thread_id: str, step: int | None, node: str, outcome: str) -> None:
+        """A minimal row that ends a thread's waiting state: who, and what happened."""
+        if step is None or not (self._checkpointer and thread_id):
+            return
+        marker = {
+            "outcome": outcome,
+            "final_outcome": state.outcome.value if state.outcome else "",
+            "user_id": state.user_id,
+            "tenant_id": state.tenant_id,
+            "at": time.time(),
+        }
+        try:
+            if not self._checkpointer.claim(thread_id, step, node, marker):
+                logger.warning("GraphRuntime: %s marker lost to a concurrent run", node)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("GraphRuntime: %s marker not saved: %s", node, type(exc).__name__)
+
+    def _finish(
+        self, state: AgentGraphState, thread_id: str, base: int | None, steps: int, saved: bool, pending_before: bool
+    ) -> None:
+        """Retire an earlier approval this run moved past (CodeRabbit on #702).
+
+        A later turn that completes without suspending means the conversation
+        moved on; the earlier pending action is no longer the one the taxpayer
+        is deciding, so it can no longer be approved.
+        """
+        if pending_before and not saved and state.outcome != GraphOutcome.WAITING_USER and base is not None:
+            self._marker(state, thread_id, base + steps, SUPERSEDED_NODE, "superseded")
+
+    def _dispatch(
+        self, state: AgentGraphState, thread_id: str, entry: str | None, base: int | None
+    ) -> tuple[int, bool]:
+        """Run the nodes; returns ``(steps taken, whether any row was written)``."""
         current = entry or self._entry
-        base = start_step if start_step is not None else self._start_step(thread_id)
         steps = 0
+        saved = False
         while current != END:
             node = self._next_node(state, current, steps)
             if node is None:
@@ -374,30 +472,20 @@ class GraphRuntime:
                 break
             if not self._accepted(state, current, result, (time.perf_counter() - t0) * 1000):
                 break
-            self._save(state, result, thread_id, None if base is None else base + steps, current)
+            saved = self._save(state, result, thread_id, None if base is None else base + steps, current) or saved
             current = self._advance(state, result)
             steps += 1
+        return steps, saved
 
-        return state
-
-    async def arun(
-        self,
-        state: AgentGraphState,
-        thread_id: str = "",
-        entry: str | None = None,
-        *,
-        start_step: int | None = None,
-    ) -> AgentGraphState:
-        """Asynchronously dispatch nodes without blocking the asyncio event loop."""
+    async def _adispatch(
+        self, state: AgentGraphState, thread_id: str, entry: str | None, base: int | None
+    ) -> tuple[int, bool]:
         import asyncio
         import inspect
 
         current = entry or self._entry
-        if start_step is not None:
-            base: int | None = start_step
-        else:
-            base = await asyncio.to_thread(self._start_step, thread_id)
         steps = 0
+        saved = False
         while current != END:
             node = self._next_node(state, current, steps)
             if node is None:
@@ -411,12 +499,27 @@ class GraphRuntime:
                 break
             if not self._accepted(state, current, result, (time.perf_counter() - t0) * 1000):
                 break
-            await asyncio.to_thread(
+            wrote = await asyncio.to_thread(
                 self._save, state, result, thread_id, None if base is None else base + steps, current
             )
+            saved = wrote or saved
             current = self._advance(state, result)
             steps += 1
+        return steps, saved
 
+    def run(self, state: AgentGraphState, thread_id: str = "", entry: str | None = None) -> AgentGraphState:
+        base, pending_before = self._start_position(thread_id)
+        steps, saved = self._dispatch(state, thread_id, entry, base)
+        self._finish(state, thread_id, base, steps, saved, pending_before)
+        return state
+
+    async def arun(self, state: AgentGraphState, thread_id: str = "", entry: str | None = None) -> AgentGraphState:
+        """Asynchronously dispatch nodes without blocking the asyncio event loop."""
+        import asyncio
+
+        base, pending_before = await asyncio.to_thread(self._start_position, thread_id)
+        steps, saved = await self._adispatch(state, thread_id, entry, base)
+        await asyncio.to_thread(self._finish, state, thread_id, base, steps, saved, pending_before)
         return state
 
     def _prepare_resume(
@@ -435,10 +538,10 @@ class GraphRuntime:
         an action on someone else's account. Naming a start node cannot step past
         the gate either, and a thread with an owner refuses a caller who names none.
 
-        It must also be for this action, now: an approval names the digest of the
-        action it was shown, the suspended row's HMAC must still match what it
-        binds, and the suspend must be younger than ``APPROVAL_TTL_SECONDS``.
-        Returns the state, the entry node and the step of the suspend.
+        It must also be for this action, now, from this row: an approval names the
+        digest of the action it was shown, the suspended row's HMAC must match its
+        whole state, thread and step, and the suspend must be younger than
+        ``APPROVAL_TTL_SECONDS``. Returns the state, the entry node and the step.
         """
         if not latest:
             raise ValueError(f"No checkpoint found for thread {thread_id!r}")
@@ -454,7 +557,7 @@ class GraphRuntime:
         if state.user_id and expected_tenant_id and state.tenant_id != expected_tenant_id:
             raise PermissionError(f"Thread {thread_id!r} belongs to another tenant")
 
-        expected_mac = _approval_mac(thread_id, data)
+        expected_mac = _approval_mac(thread_id, step, data)
         if not expected_mac or not hmac.compare_digest(str(data.get("approval_mac") or ""), expected_mac):
             raise PermissionError(f"Thread {thread_id!r} failed its integrity check")
         suspended_at = float(data.get("suspended_at") or 0.0)
@@ -500,6 +603,20 @@ class GraphRuntime:
             raise PermissionError(f"Thread {thread_id!r} has already been resumed")
         return suspended_step + 2
 
+    def _resume_done(self, state: AgentGraphState, thread_id: str, step: int) -> None:
+        """Record how a claimed resume ended. A claim with no end is a resume to reconcile.
+
+        A resumed run that asked for another approval has its own suspend as the
+        latest row, and that must stay the latest.
+        """
+        if state.outcome == GraphOutcome.WAITING_USER:
+            return
+        failed = state.outcome in (GraphOutcome.ERRORED, GraphOutcome.TRUNCATED)
+        if failed:
+            self._marker(state, thread_id, step, RESUME_FAILED_NODE, "resume_failed")
+        else:
+            self._marker(state, thread_id, step, RESUME_DONE_NODE, "resume_completed")
+
     def resume(
         self,
         thread_id: str,
@@ -516,8 +633,10 @@ class GraphRuntime:
         state, entry, step = self._prepare_resume(
             latest, thread_id, resume_payload, start_node, expected_user_id, expected_tenant_id
         )
-        next_step = self._claim(thread_id, step, state)
-        return self.run(state, thread_id=thread_id, entry=entry, start_step=next_step)
+        base = self._claim(thread_id, step, state)
+        steps, _ = self._dispatch(state, thread_id, entry, base)
+        self._resume_done(state, thread_id, base + steps)
+        return state
 
     async def aresume(
         self,
@@ -537,5 +656,7 @@ class GraphRuntime:
         state, entry, step = self._prepare_resume(
             latest, thread_id, resume_payload, start_node, expected_user_id, expected_tenant_id
         )
-        next_step = await asyncio.to_thread(self._claim, thread_id, step, state)
-        return await self.arun(state, thread_id=thread_id, entry=entry, start_step=next_step)
+        base = await asyncio.to_thread(self._claim, thread_id, step, state)
+        steps, _ = await self._adispatch(state, thread_id, entry, base)
+        await asyncio.to_thread(self._resume_done, state, thread_id, base + steps)
+        return state

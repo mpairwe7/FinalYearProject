@@ -70,7 +70,7 @@ TTS (`Sunbird/orpheus-3b-tts-multilingual` streaming sidecar + `Spark-TTS-SALT` 
 - **Memory system** — 4-tier cognitive memory (working, episodic, semantic, procedural) + multi-case `ResolutionLedger` and `HandoffEnvelope` v2.1 (`memory/` directory)
 - **Audit ledger** — hash-chained, Merkle tree proofs, and `ActionAuditRecord` v3 with `InteractionQualityScorecard` (`audit/`
 directory)
-- **Feature flags** — 88 flags via `flags.py`, with percentage / cohort / allowlist rollout
+- **Feature flags** — 89 flags via `flags.py`, with percentage / cohort / allowlist rollout
 - **MCP 2026-07-28** — spec `_meta`, `Mcp-Name` check, MRTR `inputRequests`,
   shared idempotency. Decision log:
   `App/docs/traceability/mcp-hardening-2026-08-17.md`.
@@ -787,7 +787,7 @@ Reviewed on branch `fix/agentic-orchestrator-resilience-assurance-2026-10-31`; [
 | G470 🟢 | ~~A graph approval was `{"approved": true}`; nothing tied it to the action the taxpayer was shown (OWASP ASI09).~~ | Fixed 2026-11-07 (`TaxpayerActionRequest.digest`, ADR-0030): the approval must echo the action's SHA-256 digest, offered in `pending_action.action_digest`. |
 | G471 🟢 | ~~A suspended approval never expired.~~ | Fixed 2026-11-07 (ADR-0030): `GRAPH_APPROVAL_TTL_S` (600 s). |
 | G472 🟢 | ~~The checkpoint a resume trusts was unauthenticated, so an edited `state_json` would be approved as shown.~~ | Fixed 2026-11-07 (ADR-0030): a suspend is sealed with an HMAC over thread, owner, tenant, time and action; no signing key, no suspend. |
-| G473 🟢 | ~~Checkpoints were written with SQLite-only `INSERT OR REPLACE` (a syntax error on Postgres, logged and dropped on every save), and every node of every graph turn persisted the full question, history and passages although nothing reads a routine row.~~ | Fixed 2026-11-07 (`database.save_agent_checkpoint`, `DurableCheckpointStore`, ADR-0030): portable `ON CONFLICT`; only suspends and resume claims are written unless `GRAPH_CHECKPOINT_ROUTINE=true`. |
+| G473 🟢 | ~~Checkpoints were written with SQLite-only `INSERT OR REPLACE` (a syntax error on Postgres, logged and dropped on every save), and every node of every graph turn persisted the full question, history and passages although nothing reads a routine row.~~ | Fixed 2026-11-07 (`database.save_agent_checkpoint`, `DurableCheckpointStore`, ADR-0030): portable `ON CONFLICT`; only suspends and resume claims are written unless `FLAG_GRAPH_CHECKPOINT_ROUTINE=true`. |
 | G474 🟢 | ~~The runtime and state docstrings said the service passes no `thread_id`, so nothing was persisted; `service._run_graph` passes the conversation id.~~ | Fixed 2026-11-07 (ADR-0030): docstrings describe the shared thread and what is written. |
 | G475 🟢 | ~~On a deployment with no local model every answer comes from the cloud path, whose Gemini branch sent a one-paragraph system prompt (5 rules): no refusal wording, persona lock, confidentiality, exact-figure or fiscal-year rule, or upload and connector honesty.~~ | Fixed 2026-11-07 (`llm.CLOUD_SYSTEM_PROMPT`, ADR-0030): 16 guarding rules in ~377 tokens, held by `test_harness_prompt_contract.py`; the leak fingerprint covers it. |
 | G476 🟢 | ~~The cloud path dropped the conversation, so a follow-up reached the model without its subject.~~ | Fixed 2026-11-07 (`service._fallback_history_block`, ADR-0030): the last three turns, withheld if injected and spotlight-fenced, as reference data. |

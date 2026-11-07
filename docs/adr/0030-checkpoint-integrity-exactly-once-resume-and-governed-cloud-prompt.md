@@ -63,7 +63,7 @@ of high-signal tokens, and a prompt at the right altitude.
    closed.
 5. **Portable, minimal persistence (G473).** Checkpoint writes use `ON CONFLICT (thread_id, step)`,
    which works on SQLite ≥ 3.24 and Postgres. `DurableCheckpointStore` persists only suspends and resume
-   claims unless `GRAPH_CHECKPOINT_ROUTINE=true`. The in-memory store keeps every transition for tests.
+   claims unless `FLAG_GRAPH_CHECKPOINT_ROUTINE=true`. The in-memory store keeps every transition for tests.
 6. **Governed cloud prompt (G475).** `llm.CLOUD_SYSTEM_PROMPT` carries 16 guarding rules of the local
    prompt in about 377 tokens: grounding, citation, abstention and contact route; exact figures, fiscal
    year and no figures from memory; passages, uploads and history as data; the refusal and its exact
@@ -78,6 +78,29 @@ of high-signal tokens, and a prompt at the right altitude.
 8. **Prompts state only what is true and current (G477).** The governance fragment fills the fiscal year
    from `current_fiscal_year()` and describes the tiers as the gate enforces them. Specialist fragments
    take rates and statutory windows from the rate tool and the retrieved passages.
+
+### Review amendments (PR #702)
+
+CodeRabbit's review produced 13 findings. Twelve were fixed, each with a regression test:
+
+- The approval MAC covers the **whole** suspended state, its thread and its **step**. An edited
+  `role`, `granted_purposes` or `plan` is refused, and so is a signed suspend copied to a higher step.
+- Every durable write is insert-if-absent, so a concurrent turn that reached the same step cannot
+  overwrite a suspend, and a refused suspend ends its own run. A store read error propagates, and the
+  suspend fails closed. With Postgres configured but its pool down, checkpoint operations refuse rather
+  than fall back to this replica's SQLite file, where a claim would be unique to one replica.
+- A later turn that completes on the thread retires an earlier pending approval with a minimal
+  `__superseded__` row. A resume records how it ended (`__resume_done__` or `__resume_failed__`), so a
+  claim with no end (`resume_status` = `claimed_incomplete`) is visible for reconciliation and never
+  re-run. Marker rows carry only owner, tenant, outcome and time.
+- Routine persistence is the registry flag `graph_checkpoint_routine` (default off), not a bare
+  environment variable.
+- The cloud prompt's contact instruction is sanctioned whole, so an abstention that repeats it is not
+  read as a leak.
+
+Declined: switching the Workers AI branch to `CLOUD_SYSTEM_PROMPT`. It already sends the full
+`SYSTEM_PROMPT`, a superset of the cloud rules, and output guards enforce link provenance on both. The
+backend `AGENTS.md` rule was reworded to say so.
 
 ## Consequences
 

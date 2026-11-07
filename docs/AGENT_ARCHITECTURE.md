@@ -5,7 +5,7 @@
 > `feat/agentic-workflows` branch actually *ships* (Phases A-D of
 > the broader Phase 14 work).
 
-Most capabilities below are **gated behind a feature flag** (`flags.py`, 88 flags total).
+Most capabilities below are **gated behind a feature flag** (`flags.py`, 89 flags total).
 `FLAG_TOOL_USE` defaults OFF; `FLAG_TICKET_QUEUE` defaults ON (`true`).
 `FLAG_AGENTIC_MODE` defaults ON after the English routing golden set
 holds ≥ 0.95 (`agentic_mode_gate`, currently `36/36`).

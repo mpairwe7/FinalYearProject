@@ -165,3 +165,15 @@ def test_a_leak_of_the_cloud_prompt_is_caught() -> None:
     assert OutputGuard.check_prompt_leakage(
         "Please contact the URA Contact Centre (toll-free 0800 117 000) or visit https://ura.go.ug."
     ).flags == []
+
+
+
+def test_abstaining_with_the_contact_route_is_not_a_leak() -> None:
+    from app.guardrails import OutputGuard
+
+    answer = (
+        "I'm sorry, I don't have enough information and point the taxpayer to https://ura.go.ug or the "
+        "URA Contact Centre (toll-free 0800 117 000)."
+    )
+
+    assert OutputGuard.check_prompt_leakage(answer).flags == []
