@@ -19,8 +19,10 @@ idempotent before enabling retries or resume.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
+from ...graph.schema import NodeKind
 from ...mcp import get_client
 from ...mcp.tool_rag import ToolRAGSelector
 from ...text_signals import ABSTENTION_REPLY, CLARIFICATION_PROMPT, NO_HITS_REPLY
@@ -270,7 +272,10 @@ def _apply_faq_gates(query: str, hits: list) -> list:
         logger.debug("graph: FAQ gates unavailable", exc_info=True)
         return hits
     hits = filter_unbound_faq_hits(query, hits)
-    return promote_equivalent_faq_hits(query, hits)
+    # Promotion can put a FAQ contradicting the kernel first; order by precedence again.
+    from ...kernel.precedence import reorder_after_promotion
+
+    return reorder_after_promotion(promote_equivalent_faq_hits(query, hits))
 
 
 def _fuse_graph_leg(query: str, hits: list) -> list:
@@ -289,11 +294,96 @@ def _fuse_graph_leg(query: str, hits: list) -> list:
         return hits
     if not hit:
         return hits
-    return rrf_fuse_ranked_lists(hits, [hit])
+    from ...kernel.precedence import apply_precedence
+
+    return rrf_fuse_ranked_lists(apply_precedence(hit, hits), [hit])
 
 
 #: Parameter names a free-text query can legitimately be bound to.
 _QUERY_ARG_NAMES = frozenset({"query", "question", "text", "message"})
+
+
+_SECTION_RE = re.compile(r"\b(?:s\.|sec\.|section)\s*(\d+[A-Z]?(?:\(\d+\))?)", re.IGNORECASE)
+_MONTHS_RE = re.compile(r"\b(\d{1,3})\s*(?:months?|mo\.?)\b", re.IGNORECASE)
+_PENALTY_RULE_CUES = (
+    ("late_filing_penal_tax", re.compile(r"\b(?:late\s+fil\w*|fil\w*(?:\s+\w+){0,3}\s+late)\b", re.I)),
+    ("late_payment_interest", re.compile(r"\b(?:late\s+payment|paid\s+late|interest\s+on\s+(?:unpaid|late))", re.I)),
+    ("efris_penal_tax", re.compile(r"\b(?:efris|e-?invoice|e-?receipt|fiscal\s+device)\b", re.I)),
+    ("dts_unstamped_penal_tax", re.compile(r"\b(?:unstamped|tax\s+stamps?|digital\s+tax\s+stamp)\b", re.I)),
+)
+
+
+_TAX_DUE_RE = re.compile(
+    r"\b(?:tax(?:\s+(?:due|payable|unpaid|of))?|vat|excise(?:\s+duty)?|duty|unpaid\s+tax)\b[^.?!]{0,40}"
+    r"(?:ugx|shs)|(?:ugx|shs)\s?[\d,.]+\s*(?:m(?:illion)?\s+)?(?:of\s+)?(?:tax|vat|excise|duty)\b",
+    re.IGNORECASE,
+)
+
+
+def _requested_period_start(text: str) -> str | bool | None:
+    """The start date of a fiscal year the question names; ``False`` if no table holds it."""
+    from ...query import extract_retrieval_filters
+    from ...tax.tables import get_table, list_fiscal_years
+
+    fiscal_year = str(extract_retrieval_filters(text).get("fiscal_year") or "")
+    if not fiscal_year:
+        return None
+    if fiscal_year not in list_fiscal_years():
+        return False
+    return get_table(fiscal_year).effective_from.isoformat()
+
+
+def _bind_kernel_tool(tool_name: str, query: str, original: str) -> dict[str, object] | None:
+    """Arguments for a kernel tool from the question, or ``None`` when it does not state them.
+
+    Nothing is guessed: a figure key comes from the rate-lookup parser and must be
+    declared; a provision must be cited by section and match exactly one provision;
+    a penalty needs one cue, exactly one amount and, for the time-dependent rules,
+    a stated number of months.
+    """
+    from ...calculator_router import extract_amounts, plan_rate_lookup
+    from ...kernel import functions
+
+    texts = [q for q in (query, original) if q]
+    if tool_name == "kernel_fact":
+        for text in texts:
+            plan = plan_rate_lookup(text)
+            if plan and plan.tax_type and plan.tax_type in functions.declared_keys():
+                return {"key": plan.tax_type}
+        return None
+    if tool_name == "kernel_explain":
+        for text in texts:
+            match = _SECTION_RE.search(text)
+            if not match:
+                continue
+            cited = f"s.{match.group(1)}"
+            store = functions.kernel_store()
+            hits = [n.id for n in store.by_kind(NodeKind.PROVISION)
+                    if re.search(rf"{re.escape(cited)}(?![\dA-Za-z(])", str(n.props.get("citation") or n.label))]
+            if len(hits) == 1:
+                return {"provision": hits[0]}
+        return None
+    for text in texts:  # kernel_compute_penalty
+        rules = [rule for rule, cue in _PENALTY_RULE_CUES if cue.search(text)]
+        amounts = extract_amounts(text)
+        if len(rules) != 1 or len(amounts) != 1 or amounts[0][0] <= 0:
+            continue
+        if not _TAX_DUE_RE.search(text):
+            # The tool takes the tax due; a sale or turnover amount is not it.
+            continue
+        args: dict[str, object] = {"rule": rules[0], "amount": amounts[0][0]}
+        period = _requested_period_start(text)
+        if period is False:
+            continue  # a period with no table: decline rather than use today's rules
+        if period:
+            args["date"] = period
+        if rules[0] in ("late_filing_penal_tax", "late_payment_interest"):
+            months = _MONTHS_RE.search(text)
+            if not months:
+                continue
+            args["months"] = int(months.group(1))
+        return args
+    return None
 
 
 def bind_arguments(tool_name: str, state: AgentGraphState) -> dict[str, object] | None:
@@ -349,6 +439,12 @@ def bind_arguments(tool_name: str, state: AgentGraphState) -> dict[str, object] 
                 return {"tax_type": rate_plan.tax_type}
         except Exception:
             logger.debug("graph: plan_rate_lookup binding failed", exc_info=True)
+
+    # 3b. Kernel tools (ADR-0033): bound only when the question states what they need.
+    if tool_name in ("kernel_fact", "kernel_explain", "kernel_compute_penalty"):
+        bound = _bind_kernel_tool(tool_name, query, state.query)
+        if bound is not None:
+            return bound
 
     # 4. Heuristic parameter recovery for calculation tools
     if tool_name in (
@@ -548,7 +644,15 @@ def node_act(state: AgentGraphState) -> NodeResult:
     client = get_client()
     state.iterations += 1
     admitted_calls: list[tuple[str, dict[str, object]]] = []
+    from ...kernel.contract import UNDECLARED_TOOL
+    from ...tools import ToolRegistry
+
     for tool_name in state.plan:
+        if ToolRegistry.get(tool_name) is None:
+            # The action contract (ADR-0033): a plan may only name declared tools.
+            state.skipped_tools.append({"name": tool_name, "reason": UNDECLARED_TOOL})
+            logger.warning("graph: plan named an undeclared tool %r", tool_name)
+            continue
         arguments = bind_arguments(tool_name, state)
         if arguments is None:
             state.skipped_tools.append(

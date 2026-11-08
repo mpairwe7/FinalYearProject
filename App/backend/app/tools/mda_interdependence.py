@@ -115,7 +115,6 @@ MDA_SERVICE_CATALOG: dict[str, dict[str, Any]] = {
             "UGX 10,000,000. Always generate the Stamp Duty PRN against the joint CGV valuation assessment "
             "reference rather than as an unlinked general payment."
         ),
-        "stamp_duty_rate": 0.01,
         "tpc_tin_threshold_ugx": 10_000_000.0,
         "statutory_basis": "Registration of Titles Act (Cap. 230), Stamp Duty Act Schedule 2 (property_transfer), & TPC Act s.135",
         "webhook_target": "MLHUD Uganda National Land Information System (UgNLIS)",
@@ -195,6 +194,22 @@ MDA_SERVICE_CATALOG: dict[str, dict[str, Any]] = {
 # ---------------------------------------------------------------------------
 # Tool 1 (Pillar 1): Cross-MDA PRN & NTR Fee-Head Validator + 3-Hop Diagnostics
 # ---------------------------------------------------------------------------
+
+def _success_or_error(required: list[str], properties: dict[str, Any]) -> dict[str, Any]:
+    """An output schema whose fields are required on success; an error needs ``ok`` and ``error``.
+
+    A missing-rate error has no payable amount to report, and an MCP host replaces a
+    result that misses a required field with a generic schema error, losing the message.
+    """
+    return {
+        "type": "object",
+        "required": ["ok"],
+        "properties": {**properties, "error": {"type": "string"}},
+        "if": {"properties": {"ok": {"const": True}}},
+        "then": {"required": required},
+        "else": {"required": ["ok", "error"]},
+    }
+
 class ResolveMdaNtrPaymentTool(Tool):
     _schema = ToolSchema(
         name="resolve_mda_ntr_payment",
@@ -230,20 +245,10 @@ class ResolveMdaNtrPaymentTool(Tool):
             "required": ["service_type"],
             "additionalProperties": False,
         },
-        output_schema={
-            "type": "object",
-            "required": [
-                "ok",
-                "mda_code",
-                "mda_name",
-                "ura_tax_head",
-                "payable_ugx",
-                "wrong_head_warning",
-                "reconciliation_steps",
-                "statutory_basis",
-                "explanation",
-            ],
-            "properties": {
+        output_schema=_success_or_error(
+            ["ok", "mda_code", "mda_name", "ura_tax_head", "payable_ugx", "wrong_head_warning",
+             "reconciliation_steps", "statutory_basis", "explanation"],
+            {
                 "ok": {"type": "boolean"},
                 "mda_code": {"type": "string"},
                 "mda_name": {"type": "string"},
@@ -255,7 +260,7 @@ class ResolveMdaNtrPaymentTool(Tool):
                 "statutory_basis": {"type": "string"},
                 "explanation": {"type": "string"},
             },
-        },
+        ),
     )
 
     @property
@@ -290,7 +295,12 @@ class ResolveMdaNtrPaymentTool(Tool):
         split_prns: dict[str, float] = {}
 
         if service_type == "mlhud_land_transfer":
-            rate = float(tbl.get("stamp_duty_property_transfer") or info.get("stamp_duty_rate") or 0.01)
+            # The year's table is the only source of the rate; no literal fallback (it served the
+            # Stamp Duty Act 2014's 1% after the schedule moved to 1.5%).
+            if tbl.get("stamp_duty_property_transfer") is None:
+                return {"ok": False, "error": "No stamp duty rate on property transfer is published for this year; "
+                                              "the payable amount cannot be computed."}
+            rate = float(tbl.get("stamp_duty_property_transfer"))
             thresh = float(info.get("tpc_tin_threshold_ugx") or 10_000_000.0)
             payable_ugx = round(val * rate, 2) if val > 0 else 0.0
         elif service_type == "mowt_vehicle_transfer":
@@ -427,20 +437,10 @@ class AssessLifeEventTaxOnboardingTool(Tool):
             "required": ["life_event"],
             "additionalProperties": False,
         },
-        output_schema={
-            "type": "object",
-            "required": [
-                "ok",
-                "life_event",
-                "tpc_s135_tin_mandatory",
-                "recommended_tax_head",
-                "estimated_annual_tax_ugx",
-                "nira_preflight",
-                "onboarding_steps",
-                "statutory_basis",
-                "explanation",
-            ],
-            "properties": {
+        output_schema=_success_or_error(
+            ["ok", "life_event", "tpc_s135_tin_mandatory", "recommended_tax_head", "estimated_annual_tax_ugx",
+             "nira_preflight", "onboarding_steps", "statutory_basis", "explanation"],
+            {
                 "ok": {"type": "boolean"},
                 "life_event": {"type": "string"},
                 "tpc_s135_tin_mandatory": {"type": "boolean"},
@@ -451,7 +451,7 @@ class AssessLifeEventTaxOnboardingTool(Tool):
                 "statutory_basis": {"type": "string"},
                 "explanation": {"type": "string"},
             },
-        },
+        ),
     )
 
     @property
@@ -540,7 +540,10 @@ class AssessLifeEventTaxOnboardingTool(Tool):
                 "3. Pay Motor Vehicle Transfer Stamp Duty (UGX 200,000 vehicle / UGX 30,000 motorcycle) and Advance Transport Tax for commercial PSV/goods vehicles before MoWT logbook issuance.",
             ]
         elif life_event == "land_or_property_transfer":
-            sd_rate = float(get_table().get("stamp_duty_property_transfer") or 0.01)
+            sd_raw = get_table().get("stamp_duty_property_transfer")
+            if sd_raw is None:
+                return {"ok": False, "error": "No stamp duty rate on property transfer is published for this year."}
+            sd_rate = float(sd_raw)
             est_tax = 0.0
             rec_head = f"Stamp Duty ({sd_rate:.1%} of CGV value) & Rental Income Tax (if leased/commercial property)"
             basis = "Tax Procedures Code Act s.135, Stamp Duty Act 2014, & Income Tax Act s.5 (12% individual rental tax above UGX 2,820,000)"

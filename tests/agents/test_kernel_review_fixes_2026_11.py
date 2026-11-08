@@ -1,0 +1,974 @@
+"""Fixes from the CodeRabbit review of PR 706 (ADR-0033), each pinned by a test.
+
+Grouped by area: the review queue and audit, precedence, rules and tools, the
+legal-change pipeline, the graph and Neo4j stores, the semantic layer, the
+provenance export and the benchmark harness.
+"""
+
+from __future__ import annotations
+
+import datetime as _dt
+import importlib.util
+import json
+import sqlite3
+import sys
+import threading
+from pathlib import Path
+
+import pytest
+from app.graph import neo4j_store
+from app.graph.schema import Node, NodeKind
+from app.graph.store import InMemoryGraphStore
+from app.kernel import functions, legal_change, precedence, refine, rules
+from app.kernel.validate import check
+
+ROOT = Path(__file__).resolve().parents[2]
+AUG = _dt.date(2026, 8, 15)
+
+
+# --------------------------------------------------------------------------- review queue and audit
+
+OLD_DISCREPANCY_DDL = """CREATE TABLE knowledge_discrepancies (id TEXT PRIMARY KEY, conversation_id TEXT DEFAULT '',
+ session_id TEXT DEFAULT '', user_id TEXT DEFAULT '',
+ status TEXT NOT NULL CHECK(status IN ('pending','verified','dismissed','resolved')) DEFAULT 'pending',
+ priority TEXT NOT NULL CHECK(priority IN ('low','normal','high','urgent')) DEFAULT 'normal',
+ discrepancy_type TEXT NOT NULL CHECK(discrepancy_type IN ('outdated_law','incorrect_rate','hallucination',
+   'procedure_changed','citation_mismatch','general')) DEFAULT 'outdated_law',
+ bot_statement TEXT NOT NULL, user_correction TEXT NOT NULL, cited_sources_json TEXT DEFAULT '[]',
+ frequency_count INTEGER NOT NULL DEFAULT 1, dedup_key TEXT DEFAULT '', admin_note TEXT DEFAULT '',
+ verified_override_id TEXT DEFAULT '', created_at REAL NOT NULL, updated_at REAL NOT NULL)"""
+
+
+def test_an_old_sqlite_queue_is_rebuilt_to_accept_evidence_conflicts() -> None:
+    from app import database
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(OLD_DISCREPANCY_DDL + "; INSERT INTO knowledge_discrepancies (id, bot_statement, "  # noqa: S608
+                       "user_correction, created_at, updated_at) VALUES ('kept', 'a', 'b', 1, 1);")
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO knowledge_discrepancies (id, discrepancy_type, bot_statement, user_correction, "
+                     "created_at, updated_at) VALUES ('x', 'evidence_conflict', 'a', 'b', 1, 1)")
+    database._refresh_discrepancy_type_check(conn)
+    conn.execute("INSERT INTO knowledge_discrepancies (id, discrepancy_type, bot_statement, user_correction, "
+                 "created_at, updated_at) VALUES ('x', 'evidence_conflict', 'a', 'b', 1, 1)")
+    assert {r[0] for r in conn.execute("SELECT id FROM knowledge_discrepancies")} == {"kept", "x"}
+
+
+def test_init_db_migrates_an_old_queue(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import database
+
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.executescript(OLD_DISCREPANCY_DDL)
+    monkeypatch.setattr(database, "_get_connection", lambda: conn)
+    database.init_db()
+    conn.execute("INSERT INTO knowledge_discrepancies (id, discrepancy_type, bot_statement, user_correction, "
+                 "created_at, updated_at) VALUES ('x', 'evidence_conflict', 'a', 'b', 1, 1)")
+
+
+def test_a_conflict_reaches_the_real_review_queue() -> None:
+    from app import database
+
+    database.init_db()
+    conflict = precedence.Conflict(key="passenger_baggage_allowance_usd", display_name="Passenger baggage allowance",
+                                   kernel_value="2000 USD", evidence_value="500 USD",
+                                   evidence_source="review-fix-test.pdf", evidence_class="official_document",
+                                   excerpt="allowance is US$500 (review fix test)", provision="EACCMA")
+    assert precedence.record_conflicts([conflict], kernel_version="test") == 1
+    rows = [r for r in database.list_discrepancies(limit=200) if "review fix test" in r["bot_statement"]]
+    assert rows
+    assert rows[0]["discrepancy_type"] == "evidence_conflict"
+
+
+class _Cursor:
+    def __init__(self, definition: str | None, fail: bool = False) -> None:
+        self.definition, self.fail, self.sql = definition, fail, []
+
+    def execute(self, sql: str, params=None) -> None:
+        self.sql.append(sql)
+        if self.fail and sql.startswith("ALTER TABLE"):
+            raise RuntimeError("concurrent replica")
+
+    def fetchone(self):
+        return (self.definition,) if self.definition is not None else None
+
+
+@pytest.mark.parametrize(("definition", "altered"), [
+    ("CHECK ((discrepancy_type = ANY (ARRAY['outdated_law'::text, 'general'::text])))", True),
+    (None, True),
+    ("CHECK (discrepancy_type IN ('outdated_law', 'incorrect_rate', 'hallucination', 'procedure_changed', "
+     "'citation_mismatch', 'general', 'evidence_conflict'))", False),
+])
+def test_postgres_adds_the_type_only_when_missing(definition, altered: bool) -> None:
+    from app import postgres
+
+    cur = _Cursor(definition)
+    postgres._refresh_discrepancy_type_check(cur)
+    assert any(s.startswith("ALTER TABLE") for s in cur.sql) is altered
+
+
+def test_a_failed_postgres_alter_does_not_abort_the_migration() -> None:
+    from app import postgres
+
+    cur = _Cursor("CHECK (discrepancy_type IN ('general'))", fail=True)
+    postgres._refresh_discrepancy_type_check(cur)
+    assert cur.sql[-1] == "ROLLBACK TO SAVEPOINT discrepancy_type_check"
+
+
+def test_the_rest_loops_tool_names_reach_the_ledger() -> None:
+    from app.audit import turns
+
+    assert [d["name"] for d in turns._tool_call_digests(["lookup_rate", {"name": "kernel_fact", "arguments": {"key": "x"}}])] \
+        == ["lookup_rate", "kernel_fact"]
+
+
+# --------------------------------------------------------------------------- precedence
+
+VAT = {"key": "vat_standard", "display_name": "VAT standard rate", "value": 0.18, "unit": "ratio",
+       "provision": "VAT Act", "fiscal_year": "FY2026-27"}
+
+
+def test_a_passage_stating_the_figure_beside_another_rate_is_not_a_conflict() -> None:
+    hit = {"text": "The VAT standard rate is 18%, while exports are zero-rated at 0%.", "doc_type": "pdf_chunk"}
+    assert precedence.find_conflicts([VAT], [hit]) == []
+
+
+def test_faq_promotion_cannot_put_a_contradicting_faq_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    recorded: list = []
+    monkeypatch.setattr(precedence, "record_conflicts", lambda conflicts, **_: recorded.extend(conflicts) or len(conflicts))
+    monkeypatch.setattr(precedence, "facts_from_claims", lambda _claims: [VAT])
+    stale = {"text": "The VAT standard rate is 17% on taxable supplies.", "doc_type": "csv", "id": "stale"}
+    graph = {"doc_type": "graph", "graph_claims": [{"subject": "VAT standard rate"}], "id": "graph"}
+    other = {"text": "Register for VAT on the URA portal.", "doc_type": "csv", "id": "other"}
+    ordered = precedence.reorder_after_promotion([stale, graph, other])
+    assert [h["id"] for h in ordered] == ["graph", "other", "stale"]
+    assert precedence.reorder_after_promotion([stale, other]) == [stale, other], "no graph hit, no change"
+    # Found after blending, so queued now, and only once however often the order is rebuilt.
+    precedence.reorder_after_promotion([stale, graph, other])
+    assert [c.evidence_value for c in recorded] == ["17%"]
+
+
+def _baggage_graph_hit() -> dict:
+    return {"doc_type": "graph", "text": "Passenger baggage duty-free allowance: USD 2,000",
+            "graph_claims": [{"subject": "Passenger baggage duty-free allowance (USD)", "fiscal_year": "FY2026-27"}]}
+
+
+def test_the_rest_fusion_path_ranks_a_contradicting_passage_last(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.service import ChatModel
+
+    monkeypatch.setattr(precedence, "record_conflicts", lambda conflicts, **_: len(conflicts))
+    monkeypatch.setattr(ChatModel, "_graph_hits", staticmethod(lambda _q: [_baggage_graph_hit()]))
+    stale = {"text": "The passenger baggage duty-free allowance is US$500 per traveller.", "doc_type": "pdf_chunk",
+             "id": "stale"}
+    fine = {"text": "Declare goods to customs at Entebbe.", "doc_type": "pdf_chunk", "id": "fine"}
+    fused, used = ChatModel._fuse_graph_leg("baggage allowance", [stale, fine])
+    assert used
+    assert [h.get("id") for h in fused if h.get("id")] == ["fine", "stale"]
+
+
+def test_the_graph_fusion_path_ranks_a_contradicting_passage_last(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.agents.graphs import main_graph
+    from app.graph import shadow
+
+    monkeypatch.setenv("FLAG_TAX_GRAPH", "true")
+    monkeypatch.setenv("FLAG_GRAPH_FUSION", "true")
+    monkeypatch.setattr(precedence, "record_conflicts", lambda conflicts, **_: len(conflicts))
+    monkeypatch.setattr(shadow, "graph_hit_for", lambda _q: _baggage_graph_hit())
+    stale = {"text": "The passenger baggage duty-free allowance is US$500 per traveller.", "doc_type": "pdf_chunk",
+             "id": "stale"}
+    fine = {"text": "Declare goods to customs at Entebbe.", "doc_type": "pdf_chunk", "id": "fine"}
+    fused = main_graph._fuse_graph_leg("baggage allowance", [stale, fine])
+    assert [h.get("id") for h in fused if h.get("id")] == ["fine", "stale"]
+
+
+# --------------------------------------------------------------------------- rules and tools
+
+
+@pytest.mark.parametrize("bad", ["nan", float("nan"), "inf", float("-inf")])
+def test_a_non_finite_amount_is_an_input_error(bad) -> None:
+    with pytest.raises(rules.RuleInputError):
+        rules.late_filing_penal_tax(bad, 2, as_of=AUG)
+
+
+def test_a_time_dependent_rule_needs_a_stated_duration(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.tools import ToolRegistry
+
+    monkeypatch.setenv("FLAG_TAX_GRAPH", "true")
+    tool = ToolRegistry.get("kernel_compute_penalty")
+    for rule in ("late_filing_penal_tax", "late_payment_interest"):
+        assert "needs months" in tool.execute(rule=rule, amount=1_000_000, date="2026-08-15")["error"]
+    assert tool.execute(rule="late_filing_penal_tax", amount=1_000_000, months=0, date="2026-08-15")["amount"] == 0.0
+    assert tool.execute(rule="efris_penal_tax", amount=50_000, date="2026-08-15")["amount"] == 200_000.0
+
+
+@pytest.mark.parametrize(("tool", "question", "expected"), [
+    ("kernel_fact", "What is the stamp duty rate on transfer of land?", {"key": "stamp_duty_property_transfer"}),
+    ("kernel_explain", "What does section 49(1) of the Tax Procedures Code impose?",
+     {"provision": "prov:tax-procedures-code-act-cap-343-s-49-1"}),
+    ("kernel_compute_penalty", "I filed my return late by 3 months with UGX 5,000,000 tax payable",
+     {"rule": "late_filing_penal_tax", "amount": 5_000_000.0, "months": 3}),
+    ("kernel_compute_penalty", "I filed my return late with UGX 5,000,000 tax payable", None),
+    ("kernel_compute_penalty", "I failed to issue an EFRIS e-invoice on a sale with UGX 50,000 VAT",
+     {"rule": "efris_penal_tax", "amount": 50_000.0}),
+])
+def test_the_graph_binds_kernel_tools_only_from_what_the_question_states(tool, question, expected) -> None:
+    from app.agents.graphs.main_graph import _bind_kernel_tool
+
+    assert _bind_kernel_tool(tool, question, "") == expected
+
+
+def test_an_unverified_figure_keeps_its_warning_in_lookups_and_workflows(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import calculator_router
+    from app.tools import ToolRegistry
+    from app.workflows import registry
+
+    explanation = ToolRegistry.call("lookup_rate", {"tax_type": "motor_vehicle_duplicate_logbook_fee"})["explanation"]
+    assert "not been confirmed" in explanation
+    assert "official" not in explanation
+    monkeypatch.setattr(calculator_router, "plan_rate_lookup",
+                        lambda _q: calculator_router.RatePlan(tax_type="motor_vehicle_duplicate_logbook_fee"))
+    reply = registry.resolve_workflow_side_question("How much is a duplicate logbook?")
+    assert "not been confirmed" in reply
+
+
+# --------------------------------------------------------------------------- legal change and refinement
+
+
+def _draft(tmp_path: Path, value: float = 0.19) -> Path:
+    data = json.loads((ROOT / "App/backend/app/tax/data/FY2026-27.json").read_text(encoding="utf-8"))
+    data.update(fiscal_year="FY2027-28")
+    data["rates"]["vat_standard"] = value
+    path = tmp_path / "FY2027-28.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+def test_a_stale_proposal_can_still_be_rejected(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("KERNEL_REVIEW_DIR", str(tmp_path / "review"))
+    draft = _draft(tmp_path)
+    proposal = legal_change.propose(draft, [])
+    draft.unlink()
+    done = legal_change.decide(proposal["id"], approve=False, reviewer="A. Officer", role="Tax Policy",
+                               reason="superseded by a new draft")
+    assert done["status"] == legal_change.REJECTED
+
+
+def test_proposing_the_same_draft_again_keeps_the_decision(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("KERNEL_REVIEW_DIR", str(tmp_path / "review"))
+    draft = _draft(tmp_path)
+    first = legal_change.propose(draft, [])
+    legal_change.decide(first["id"], approve=True, reviewer="A. Officer", role="Tax Policy")
+    again = legal_change.propose(draft, [])
+    assert again["status"] == legal_change.APPROVED
+    assert again["decision"]["reviewer"] == "A. Officer"
+
+
+def test_two_concurrent_decisions_cannot_both_succeed(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("KERNEL_REVIEW_DIR", str(tmp_path / "review"))
+    proposal = legal_change.propose(_draft(tmp_path), [])
+    outcomes: list[str] = []
+
+    def decide(approve: bool) -> None:
+        try:
+            legal_change.decide(proposal["id"], approve=approve, reviewer="A. Officer", role="Tax Policy",
+                                reason="" if approve else "no")
+            outcomes.append("ok")
+        except ValueError:
+            outcomes.append("refused")
+
+    threads = [threading.Thread(target=decide, args=(i % 2 == 0,)) for i in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert outcomes.count("ok") == 1
+
+
+def test_a_value_matching_a_better_named_rival_does_not_corroborate() -> None:
+    candidates = legal_change.extract_candidates("The VAT refund limit on registration is UGX 5,000,000 a claim.")
+    assert legal_change.corroborate("vat_registration_threshold_annual", 5_000_000, candidates,
+                                    rivals=["vat_refund_limit_on_registration"]) == []
+    assert legal_change.corroborate("vat_registration_threshold_annual", 5_000_000, candidates) != []
+
+
+def test_an_uncited_key_counts_once_per_turn_across_years() -> None:
+    trace = {"misses": [], "uncited_served": [{"key": "fee_x", "fiscal_year": "FY2025-26"},
+                                              {"key": "fee_x", "fiscal_year": "FY2026-27"}]}
+    rows = [{"event_type": "generate", "payload": {"kernel_trace": trace}}] * 2
+    assert refine.suggestions(rows) == [], "two turns, not four"
+    found = refine.suggestions(rows * 2)[0]
+    assert (found["turns"], found["fiscal_years"]) == (4, ["FY2025-26", "FY2026-27"])
+
+
+# --------------------------------------------------------------------------- graph and stores
+
+
+def test_history_covers_every_fact_kind() -> None:
+    from app.graph.query import effective_on, history
+
+    answer = history("penal_tax_late_filing_monthly_rate", store=functions.kernel_store())
+    assert answer.matched
+    assert answer.claims[0].predicate == "penalty"
+    assert effective_on("paye_due_date_monthly", AUG, store=functions.kernel_store()).matched
+
+
+def test_a_memory_walk_never_exceeds_its_limit() -> None:
+    store = functions.kernel_store()
+    seeds = [n.id for n in store.by_kind(NodeKind.RATE)][:30]
+    assert len(store.walk(seeds, hops=0, limit=10)) == 10, "more seeds than the limit"
+    for limit in (1, 7, 50, 200):
+        assert len(store.walk(["tax:vat"], hops=3, limit=limit)) <= limit
+
+
+def test_replay_finds_a_key_stored_under_its_old_kind() -> None:
+    raw = functions.kernel_store().to_dict()
+    for node in raw["nodes"]:
+        if node["id"] == "rate:vat_standard@FY2026-27":
+            node["id"], node["kind"] = "threshold:vat_standard@FY2026-27", "threshold"
+    past = InMemoryGraphStore.from_dict({"nodes": raw["nodes"], "edges": []})
+    assert functions.fact("vat_standard", AUG, store=past, version="0.1.0").value == 0.18
+
+
+def test_a_property_of_the_wrong_type_is_a_violation() -> None:
+    store = InMemoryGraphStore()
+    store.add_node(Node(id="tax:x", kind=NodeKind.TAX_TYPE, label="x", props={"name": 42}))
+    assert "type" in {v.code for v in check(store, against_tables=False)}
+
+
+def test_a_table_reload_refreshes_the_kernel(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.tax import tables
+
+    calls = []
+    monkeypatch.setattr(functions, "refresh", lambda: calls.append("kernel"))
+    tables.reload_tables()
+    assert calls == ["kernel"]
+
+
+@pytest.fixture
+def fake():
+    spec = importlib.util.spec_from_file_location("adv_fake", ROOT / "tests/agents/test_kernel_advanced_2026_11.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["adv_fake"] = module
+    spec.loader.exec_module(module)
+    return module.FakeNeo4j()
+
+
+def test_neo4j_keeps_the_first_write_like_memory(fake) -> None:
+    store = neo4j_store.Neo4jGraphStore(fake, release="r1")
+    store.add_node(Node(id="tax:a", kind=NodeKind.TAX_TYPE, label="first", props={"name": "a"}))
+    store.add_node(Node(id="tax:a", kind=NodeKind.TAX_TYPE, label="second", props={"name": "a"}))
+    assert store.get("tax:a").label == "first"
+
+
+def test_neo4j_releases_are_isolated_and_published_once(fake) -> None:
+    built = functions.kernel_store()
+    first = neo4j_store.Neo4jGraphStore(fake, release="r1")
+    first.sync_from(built)
+    merges = sum(1 for q, _ in fake.calls if q in neo4j_store.Q_MERGE_NODE.values())
+    first.sync_from(built)
+    assert sum(1 for q, _ in fake.calls if q in neo4j_store.Q_MERGE_NODE.values()) == merges, "published: not rewritten"
+    assert first.published() == {"nodes": built.stats()["nodes"], "edges": built.stats()["edges"]}
+    other = neo4j_store.Neo4jGraphStore(fake, release="r2")
+    assert other.get("tax:vat") is None
+    assert other.published() is None
+
+
+def test_neo4j_seeds_respect_the_limit(fake) -> None:
+    store = neo4j_store.Neo4jGraphStore(fake, release="r1")
+    store.sync_from(functions.kernel_store())
+    seeds = [n.id for n in functions.kernel_store().by_kind(NodeKind.RATE)][:30]
+    assert len(store.walk(seeds, hops=0, limit=10)) == 10
+
+
+def test_a_failed_neo4j_read_falls_back_to_memory(fake) -> None:
+    built = functions.kernel_store()
+
+    class Broken:
+        def execute_query(self, *_a, **_k):
+            raise ConnectionError("down")
+
+        def close(self):
+            pass
+
+    wrapped = neo4j_store.FallbackGraphStore(neo4j_store.Neo4jGraphStore(Broken()), built)
+    assert wrapped.get("tax:vat") is not None
+    assert wrapped.active_name() == "memory (neo4j read failed)"
+
+
+def test_a_failed_sync_closes_the_driver(monkeypatch: pytest.MonkeyPatch, fake) -> None:
+    monkeypatch.setenv("GRAPH_STORE_BACKEND", "neo4j")
+
+    def failing_sync(self, _store, **_k):
+        raise ConnectionError("down")
+
+    store = neo4j_store.Neo4jGraphStore(fake)
+    monkeypatch.setattr(neo4j_store.Neo4jGraphStore, "from_env", classmethod(lambda cls, **_k: store))
+    monkeypatch.setattr(neo4j_store.Neo4jGraphStore, "sync_from", failing_sync)
+    built = functions.kernel_store()
+    assert neo4j_store.select(built) is built
+    assert fake.closed
+
+
+def test_readiness_reports_the_store_actually_serving() -> None:
+    import app.graph as graph
+    from app.kernel.status import readiness_capabilities
+
+    graph.reset_graph()
+    assert graph.active_store_name() == "not loaded"
+    assert readiness_capabilities()["graph_store_active"] == "not loaded"
+    graph.get_graph()
+    assert readiness_capabilities()["graph_store_active"] == "memory"
+
+
+# --------------------------------------------------------------------------- semantic layer
+
+
+def test_parameters_are_translated_outside_literals_only() -> None:
+    from app.semantic_layer.adapter import to_pyformat
+
+    sql = "SELECT x FROM t WHERE a = :p AND b LIKE 'VAT%' AND c = 'urn:sector' AND d::date = :d"
+    assert to_pyformat(sql) == ("SELECT x FROM t WHERE a = %(p)s AND b LIKE 'VAT%%' AND c = 'urn:sector' "
+                                "AND d::date = %(d)s")
+
+
+def test_an_impossible_date_is_a_parameter_error(tmp_path: Path) -> None:
+    from app.semantic_layer import catalogue
+
+    metric = catalogue.Metric(id="m", title="", description="", owner="", sql="", sources=frozenset(),
+                              parameters={"day": {"type": "date"}}, min_group_size=10)
+    with pytest.raises(catalogue.MetricError, match="calendar date"):
+        metric.bind({"day": "2026-02-31"})
+
+
+def test_a_null_certifier_cannot_certify(tmp_path: Path) -> None:
+    from app.semantic_layer import catalogue
+
+    path = tmp_path / "m.json"
+    path.write_text(json.dumps({"metrics": [{
+        "id": "m", "sql": "SELECT a AS group_size FROM certified.t WHERE p = :p", "sources": ["certified.t"],
+        "parameters": {"p": {"type": "code"}}, "status": "certified", "certified_by": None, "certified_at": None}]}))
+    assert catalogue.certified(path) == {}
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT 1 AS group_size FROM certified.filing_compliance, taxpayers.registry",
+    "SELECT 1 AS group_size FROM certified.filing_compliance AS c, taxpayers.registry r WHERE c.x = r.x",
+    'SELECT "pg_read_file"(\'/etc/passwd\') AS group_size FROM certified.filing_compliance',
+    'SELECT "dblink"(\'h\', \'q\') AS group_size FROM certified.filing_compliance',
+])
+def test_the_guard_reads_every_relation_and_quoted_name(sql: str) -> None:
+    from app.semantic_layer import guard
+
+    with pytest.raises(guard.SqlRejected):
+        guard.check(sql, sources=frozenset({"certified.filing_compliance"}))
+
+
+def test_metric_rows_are_json_and_connections_are_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    from decimal import Decimal
+
+    from app.semantic_layer import adapter
+
+    assert json.dumps([adapter._jsonable(Decimal("0.81")), adapter._jsonable(_dt.date(2026, 7, 1))])
+    seen = {}
+
+    class FakePsycopg:
+        @staticmethod
+        def connect(dsn, **kwargs):
+            seen.update(kwargs, dsn=dsn)
+            raise ConnectionError("stop here")
+
+    monkeypatch.setitem(sys.modules, "psycopg", FakePsycopg)
+    monkeypatch.setattr(adapter, "vault_secret", lambda _path: {"dsn": "postgresql://reader@db/analytics"})
+    monkeypatch.setenv("SEMANTIC_LAYER_VAULT_PATH", "kv/data/reader")
+    monkeypatch.delenv("SEMANTIC_LAYER_DSN", raising=False)
+    adapter.set_layer(None)
+    try:
+        layer = adapter.get_layer()
+        with pytest.raises(ConnectionError):
+            layer.executor.run("SELECT 1 AS group_size", {}, max_rows=1, timeout_s=1)
+    finally:
+        adapter.set_layer(None)
+    assert seen["connect_timeout"] == adapter.CONNECT_TIMEOUT_S
+
+
+# --------------------------------------------------------------------------- provenance, RDF and benchmark
+
+
+def test_each_turn_keeps_its_own_date_and_the_agent_keeps_every_tool() -> None:
+    from app.audit.provenance import export
+
+    def row(event_id: str, as_of: str, tool: str) -> dict:
+        return {"event_type": "generate", "event_id": event_id, "seq": 1, "ts": 1794000000.0, "user_id": "u",
+                "payload": {"channel": "rest", "tool_calls": [{"name": tool}],
+                            "kernel_pin": {"kernel_version": "1.2.2", "as_of": as_of}}}
+
+    doc = export([row("a", "2026-08-01", "kernel_fact"), row("b", "2026-09-01", "lookup_rate")])
+    dates = sorted(n["ura:asOf"] for n in doc["@graph"] if "prov:Activity" in n["@type"])
+    assert dates == ["2026-08-01", "2026-09-01"]
+    agent = next(n for n in doc["@graph"] if "agento:Agent" in n["@type"])
+    assert agent["agento:usesTool"] == ["urn:ura-tool:kernel_fact", "urn:ura-tool:lookup_rate"]
+
+
+def test_decimal_literals_have_no_exponent() -> None:
+    from app.kernel.schema_export import _literal
+
+    assert _literal(0.00001) == '"0.00001"^^xsd:decimal'
+
+
+def test_the_kernel_runs_on_python_3_10_clocks() -> None:
+    for name in ("kernel/legal_change.py", "kernel/refine.py", "kernel/release.py", "audit/provenance.py"):
+        text = (ROOT / "App/backend/app" / name).read_text(encoding="utf-8")
+        assert "_dt.UTC" not in text
+        assert "import UTC" not in text, name
+
+
+def _bench():
+    spec = importlib.util.spec_from_file_location("bench_rf", ROOT / "scripts/bench_llm_concurrency.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["bench_rf"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_p95_is_the_nearest_rank() -> None:
+    bench = _bench()
+    assert bench.percentile([1.0] * 19 + [10.0], 95) == 1.0
+    assert bench.percentile([1.0] * 18 + [10.0, 10.0], 95) == 10.0
+
+
+def test_a_zero_concurrency_level_is_refused() -> None:
+    import asyncio
+
+    bench = _bench()
+
+    async def send(_prompt: str) -> None:
+        return None
+
+    with pytest.raises(ValueError, match="at least 1"):
+        asyncio.run(bench.run_level(send, concurrency=0, requests=2))
+
+
+def test_the_mda_resolver_uses_the_tables_rate(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.tools import mda_interdependence
+
+    class Table(dict):
+        pass
+
+    monkeypatch.setattr(mda_interdependence, "get_table", lambda *a, **k: Table(stamp_duty_property_transfer=0.02))
+    tool = mda_interdependence.ResolveMdaNtrPaymentTool()
+    result = tool.execute(service_type="mlhud_land_transfer", transaction_value_ugx=100_000_000)
+    assert result["payable_ugx"] == 2_000_000.0
+
+
+# --------------------------------------------------------------------------- second review batch
+
+
+def test_the_semantic_layer_gate_sees_overrides_and_rollouts(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.flags import flags
+    from app.semantic_layer import config
+
+    for name in ("FLAG_SEMANTIC_LAYER", "FLAG_SEMANTIC_LAYER_COHORTS", "FLAG_SEMANTIC_LAYER_PERCENT",
+                 "FLAG_SEMANTIC_LAYER_ALLOWLIST", "VAULT_ADDR"):
+        monkeypatch.delenv(name, raising=False)
+    assert config.production_errors() == []
+    monkeypatch.setenv("FLAG_SEMANTIC_LAYER_COHORTS", "ura_staff")
+    assert any("G507" in e for e in config.production_errors()), "a cohort rollout is on"
+    monkeypatch.delenv("FLAG_SEMANTIC_LAYER_COHORTS")
+    flags.set("semantic_layer", True)
+    try:
+        assert any("G507" in e for e in config.production_errors()), "an admin override is on"
+    finally:
+        flags.clear("semantic_layer")
+
+
+def test_the_tools_refuse_an_uncleared_layer_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.flags import flags
+    from app.tools import ToolRegistry
+
+    for name in ("VAULT_ADDR", "SEMANTIC_LAYER_VAULT_PATH", "SEMANTIC_LAYER_DSA_REF", "SEMANTIC_LAYER_DPIA_REF"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("SEMANTIC_LAYER_DSN", "sqlite:///dev.db")
+    flags.set("semantic_layer", True)  # turned on after start-up, past the start-up gate
+    try:
+        result = ToolRegistry.get("semantic_metric_catalogue").execute()
+    finally:
+        flags.clear("semantic_layer")
+    assert result["ok"] is False
+    assert "G507" in result["hint"]
+
+
+def _rate_model():
+    from app.guardrails import OutputGuard
+    from app.service import ChatModel
+
+    model = ChatModel.__new__(ChatModel)
+    model._output_guard = OutputGuard()
+    model.name = "test"
+    return model
+
+
+def test_a_question_naming_a_year_is_answered_from_that_years_table(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import calculator_router as cr
+    from app.tax import tables
+
+    reply, _ = cr.format_rate_reply(cr.RatePlan(tax_type="vat_registration_threshold_annual"),
+                                    tables.get_table("FY2025-26"), requested_fiscal_year="FY2025-26")
+    assert "150,000,000" in reply
+    monkeypatch.setattr("app.tools.rates._authority_payload", lambda: (True, {}))
+    result = _rate_model()._maybe_handle_rate_lookup(
+        message="What was the VAT registration threshold in FY2025-26?", rewritten="", thread_id="fy", locale="en")
+    assert result is not None
+    assert "150,000,000" in result["reply"]
+    assert "FY2025-26" in result["reply"]
+
+
+def test_a_named_year_gets_no_rollover_caveat(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import calculator_router as cr
+    from app.tax import tables
+
+    monkeypatch.setattr(tables, "kampala_today", lambda now=None: _dt.date(2027, 7, 2))
+    plan = cr.RatePlan(tax_type="vat_standard")
+    asked, _ = cr.format_rate_reply(plan, tables.get_table("FY2026-27"), requested_fiscal_year="FY2026-27")
+    today, _ = cr.format_rate_reply(plan, tables.get_table())
+    assert "No rate table has been published" not in asked
+    assert "No rate table has been published" in today
+    footer = cr._rate_table_footer({"fiscal_year": "FY2026-27", "period_requested": True})
+    assert not any("No rate table has been published" in line for line in footer)
+
+
+def test_no_literal_rate_stands_in_for_a_missing_entry() -> None:
+    from app import calculator_router as cr
+    from app.tax import tables
+
+    reply, _ = cr.format_rate_reply(cr.RatePlan(tax_type="commercial_import_withholding_tax"), tables.get_table("FY2025-26"))
+    assert "6%" not in reply
+
+
+@pytest.mark.parametrize(("tool_name", "args"), [
+    ("ResolveMdaNtrPaymentTool", {"service_type": "mlhud_land_transfer", "transaction_value_ugx": 100_000_000}),
+])
+def test_a_missing_stamp_duty_rate_is_an_error_not_zero(monkeypatch: pytest.MonkeyPatch, tool_name: str, args: dict) -> None:
+    from app.tools import mda_interdependence
+
+    monkeypatch.setattr(mda_interdependence, "get_table", lambda *a, **k: {})
+    result = getattr(mda_interdependence, tool_name)().execute(**args)
+    assert result["ok"] is False
+    assert "stamp duty" in result["error"]
+
+
+# --------------------------------------------------------------------------- round two
+
+
+def test_a_section_does_not_match_its_lettered_sibling() -> None:
+    from app.agents.graphs.main_graph import _bind_kernel_tool
+
+    bound = _bind_kernel_tool("kernel_explain", "What does section 135 of the Income Tax Act impose?", "")
+    assert bound is None or "135b" not in str(bound["provision"]).lower()
+
+
+@pytest.mark.parametrize(("question", "expected"), [
+    ("In FY2025-26 I failed to issue an EFRIS e-invoice with UGX 50,000 VAT",
+     {"rule": "efris_penal_tax", "amount": 50_000.0, "date": "2025-07-01"}),
+    ("In FY2027-28 I failed to issue an EFRIS e-invoice with UGX 50,000 VAT", None),
+    ("I failed to issue an EFRIS e-invoice on a sale of UGX 1,000,000", None),
+])
+def test_the_penalty_binder_respects_period_and_tax_due(question: str, expected) -> None:
+    from app.agents.graphs.main_graph import _bind_kernel_tool
+
+    assert _bind_kernel_tool("kernel_compute_penalty", question, "") == expected
+
+
+def test_an_interrupted_rebuild_is_recovered() -> None:
+    from app import database
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(OLD_DISCREPANCY_DDL + "; INSERT INTO knowledge_discrepancies (id, bot_statement, "  # noqa: S608
+                       "user_correction, created_at, updated_at) VALUES ('kept', 'a', 'b', 1, 1);"
+                       "CREATE TABLE knowledge_discrepancies__new (id TEXT);")
+    database._refresh_discrepancy_type_check(conn)
+    assert [r[0] for r in conn.execute("SELECT id FROM knowledge_discrepancies")] == ["kept"]
+    conn.execute("INSERT INTO knowledge_discrepancies (id, discrepancy_type, bot_statement, user_correction, "
+                 "created_at, updated_at) VALUES ('x', 'evidence_conflict', 'a', 'b', 1, 1)")
+
+
+def test_a_stated_change_is_a_conflict_beside_the_old_figure() -> None:
+    hit = {"text": "The VAT standard rate was 18% and is now 20%.", "doc_type": "pdf_chunk"}
+    assert [c.evidence_value for c in precedence.find_conflicts([VAT], [hit])] == ["20%"]
+
+
+def test_the_langgraph_faq_gate_orders_by_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import faq_binding
+    from app.agents.graphs import main_graph
+
+    stale = {"text": "The VAT standard rate is 17%.", "doc_type": "csv", "id": "stale"}
+    graph = {"doc_type": "graph", "graph_claims": [{"subject": "VAT standard rate"}], "id": "graph"}
+    monkeypatch.setattr(precedence, "record_conflicts", lambda conflicts, **_: len(conflicts))
+    monkeypatch.setattr(precedence, "facts_from_claims", lambda _claims: [VAT])
+    monkeypatch.setattr(faq_binding, "filter_unbound_faq_hits", lambda _q, hits: hits)
+    monkeypatch.setattr(faq_binding, "promote_equivalent_faq_hits", lambda _q, hits: [stale] + [h for h in hits if h is not stale])
+    assert [h["id"] for h in main_graph._apply_faq_gates("vat rate", [graph, stale])] == ["graph", "stale"]
+
+
+def test_the_postgres_lookup_is_scoped_to_the_altered_table() -> None:
+    from app import postgres
+
+    cur = _Cursor(None)
+    postgres._refresh_discrepancy_type_check(cur)
+    assert "to_regclass('knowledge_discrepancies')" in cur.sql[0]
+
+
+def test_quoted_identifiers_are_not_rewritten() -> None:
+    from app.semantic_layer.adapter import to_pyformat
+
+    assert to_pyformat('SELECT "col:x" AS group_size FROM t WHERE a = :p') == \
+        'SELECT "col:x" AS group_size FROM t WHERE a = %(p)s'
+
+
+def test_the_schedule_names_its_unverified_figures() -> None:
+    from app.tools import ToolRegistry
+
+    text = ToolRegistry.call("list_available_rates", {"fiscal_year": "FY2026-27"})["explanation"]
+    assert "All rates are verified" not in text
+    assert "not yet confirmed" in text
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT 1 AS group_size FROM certified.filing_compliance, (SELECT 1) x, secret.users",
+    "SELECT 1 AS group_size FROM (certified.filing_compliance JOIN other.t ON true), secret.users",
+])
+def test_a_parenthesised_from_item_is_refused(sql: str) -> None:
+    from app.semantic_layer import guard
+
+    with pytest.raises(guard.SqlRejected):
+        guard.check(sql, sources=frozenset({"certified.filing_compliance"}))
+
+
+def test_a_cte_is_still_accepted() -> None:
+    from app.semantic_layer import guard
+
+    sql = ("WITH recent AS (SELECT tax_head, ratio, returns_due FROM certified.filing_compliance WHERE period = :p) "
+           "SELECT tax_head, ratio, returns_due AS group_size FROM recent")
+    assert guard.check(sql, sources=frozenset({"certified.filing_compliance"})) == {"p"}
+
+
+def test_an_outer_trace_is_read_live_by_the_audit() -> None:
+    from app.audit import turns
+    from app.kernel import trace
+    from app.service import _scoped_conversation_state
+
+    class Probe:
+        @_scoped_conversation_state
+        def answer(self, message: str, conversation_id: str | None = None, session_id: str | None = None,
+                   user_id: str | None = None, tenant_id: str | None = None):
+            return {"reply": "r"}
+
+    token = trace.start()  # a streamed turn opens it for the whole turn
+    try:
+        result = Probe().answer("q", session_id="s-trace")
+        assert "_kernel_trace" not in result, "the wrapper did not open it, so it must not freeze a copy"
+        functions.fact("carbon_border_levy", AUG)  # an agentic call after retrieval
+        payload = turns.build_turn_payload(message="q", result=result, channel="sse")
+    finally:
+        trace.TURN_KERNEL_TRACE.reset(token)
+    assert payload["kernel_trace"]["misses"][0]["concept"] == "carbon_border_levy"
+    service = (ROOT / "App/backend/app/service.py").read_text(encoding="utf-8")
+    assert "_stream_kernel_trace.open_turn()" in service
+
+
+# --------------------------------------------------------------------------- round three
+
+
+@pytest.mark.parametrize("text", [
+    "The VAT standard rate is 18%; the export rate increased to 5%.",
+    "The VAT standard rate is 18%, but the export rate increased to 5%.",
+    "The VAT standard rate is 18% and the export rate is now 0%.",
+    "The VAT standard rate is 18%. Excise on spirits increased to 20%.",
+])
+def test_a_change_to_another_figure_is_not_a_conflict(text: str) -> None:
+    assert precedence.find_conflicts([VAT], [{"text": text, "doc_type": "pdf_chunk"}]) == []
+
+
+def test_a_past_mention_does_not_hide_the_current_claim() -> None:
+    hit = {"text": "The VAT standard rate is 20%; previously it was 18%.", "doc_type": "pdf_chunk"}
+    assert [c.evidence_value for c in precedence.find_conflicts([VAT], [hit])] == ["20%"]
+    went = {"text": "The VAT standard rate went from 18% to 20%.", "doc_type": "pdf_chunk"}
+    assert precedence.find_conflicts([dict(VAT, value=0.20)], [went]) == [], "the old figure is history"
+    assert [c.evidence_value for c in precedence.find_conflicts([VAT], [went])] == ["20%"]
+
+
+def test_a_failed_write_is_tried_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts: list[int] = []
+
+    def flaky(conflicts, **_):
+        attempts.append(len(conflicts))
+        return 0 if len(attempts) == 1 else len(conflicts)
+
+    monkeypatch.setattr(precedence, "record_conflicts", flaky)
+    monkeypatch.setattr(precedence, "facts_from_claims", lambda _claims: [VAT])
+    stale = {"text": "The VAT standard rate is 17%.", "doc_type": "csv"}
+    graph = {"doc_type": "graph", "graph_claims": [{"subject": "VAT standard rate"}]}
+    precedence.apply_precedence(graph, [graph, stale])
+    assert graph["_kernel_conflicts_recorded"] == [], "the failed write is not marked as done"
+    precedence.apply_precedence(graph, [graph, stale])
+    precedence.apply_precedence(graph, [graph, stale])
+    assert attempts == [1, 1], "retried once, then recorded and not written again"
+
+
+def test_a_refused_postgres_write_is_not_counted(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import database
+
+    monkeypatch.setattr(database, "create_or_increment_discrepancy", lambda **_: {"id": "", "status": "failed"})
+    conflict = precedence.find_conflicts([VAT], [{"text": "The VAT standard rate is 17%.", "doc_type": "csv"}])
+    assert precedence.record_conflicts(conflict, kernel_version="1.2.2") == 0
+
+
+@pytest.mark.parametrize("sql", [
+    "WITH x AS (SELECT 1 AS group_size FROM certified.filing_compliance, (SELECT 1) y, secret.users) "
+    "SELECT group_size FROM x",
+    "SELECT ratio AS group_size FROM certified.filing_compliance "
+    "WHERE period IN (SELECT period FROM certified.filing_compliance, secret.users)",
+])
+def test_nested_from_lists_are_checked(sql: str) -> None:
+    from app.semantic_layer import guard
+
+    with pytest.raises(guard.SqlRejected):
+        guard.check(sql, sources=frozenset({"certified.filing_compliance"}))
+
+
+def test_the_certified_templates_still_pass() -> None:
+    from app.semantic_layer import guard
+
+    for metric in json.loads((ROOT / "App/backend/app/semantic_layer/metrics.json").read_text())["metrics"]:
+        guard.check(metric["sql"], sources=frozenset(metric["sources"]))
+
+
+def test_each_streamed_turn_has_its_own_pin_and_trace(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    from app import service
+    from app.kernel import trace
+
+    seen: list[tuple] = []
+    turn = {"n": 0}
+
+    async def events(_model, *, progress, **_kwargs):
+        turn["n"] += 1
+        if turn["n"] == 1:
+            functions.fact("carbon_border_levy", AUG)  # a kernel miss in the first turn only
+        yield "_log", {"result": {}, "full_reply": "r", "elapsed_ms": 1.0}
+
+    def finish(_model, _payload, **_kwargs):
+        seen.append((trace.snapshot(), service._ACTIVE_KERNEL_PIN.get()))
+
+    monkeypatch.setattr(service, "_run_chat_turn_events", events)
+    monkeypatch.setattr(service, "_finish_streamed_turn", finish)
+    pins = iter([{"as_of": "2026-11-08"}, {"as_of": "2026-11-09"}])
+    monkeypatch.setattr(service, "_kernel_pin_for_turn", lambda: next(pins))
+
+    stale_pin = {"as_of": "2026-01-01"}
+    stale_trace = {"misses": [{"concept": "from_an_earlier_turn"}], "uncited_served": []}
+    after: list = []
+
+    async def session() -> None:  # one WebSocket session: every turn in one context
+        service._ACTIVE_KERNEL_PIN.set(stale_pin)  # what the context holds before these turns
+        trace.TURN_KERNEL_TRACE.set(stale_trace)
+        for _ in range(2):
+            async for _event in service.run_chat_turn(object(), channel="ws", message="q", session_id="s"):
+                pass
+        after.append((service._ACTIVE_KERNEL_PIN.get(), trace.TURN_KERNEL_TRACE.get()))
+
+    asyncio.run(session())
+    (first_trace, first_pin), (second_trace, second_pin) = seen
+    assert [m["concept"] for m in first_trace["misses"]] == ["carbon_border_levy"], "a fresh trace per turn"
+    assert second_trace is None, "the first turn's misses are not counted again"
+    assert (first_pin["as_of"], second_pin["as_of"]) == ("2026-11-08", "2026-11-09"), "a fresh pin per turn"
+    assert after == [(stale_pin, stale_trace)], "the context is restored once the turn is audited"
+
+
+def test_an_unheld_fiscal_year_is_declined(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.tools.rates._authority_payload", lambda: (True, {}))
+    result = _rate_model()._maybe_handle_rate_lookup(message="What is the rate of the motor vehicle transfer fee in FY2027-28?",
+                                             rewritten="", thread_id="fy-guard", locale="en")
+    assert result is not None
+    assert result["retrieval_mode"] == "abstained"
+    assert "FY2027-28" in result["reply"]
+    assert "84,000" not in result["reply"]
+
+
+def _with(table, **changes):
+    import dataclasses
+
+    return dataclasses.replace(table, **changes)
+
+
+def test_summaries_and_aliases_name_unverified_figures() -> None:
+    from app import calculator_router as cr
+    from app.tax import tables
+
+    fy27 = tables.get_table("FY2026-27")
+    reply, _ = cr.format_rate_reply(cr.RatePlan(summary="withholding"), fy27, requested_fiscal_year="FY2026-27")
+    assert "not been confirmed against a gazetted schedule" in reply
+    assert "oyalt" in reply
+    paye = _with(fy27, unverified=("paye_bands_resident",))
+    reply, _ = cr.format_rate_reply(cr.RatePlan(summary="paye"), paye, requested_fiscal_year="FY2026-27")
+    assert "not been confirmed against a gazetted schedule" in reply
+    wht = _with(fy27, unverified=("customs_import_wht",))
+    reply, _ = cr.format_rate_reply(cr.RatePlan(tax_type="commercial_import_withholding_tax"), wht,
+                                    requested_fiscal_year="FY2026-27")
+    assert cr.UNVERIFIED_CAVEAT in reply
+    reply, _ = cr.format_rate_reply(cr.RatePlan(summary="withholding"), tables.get_table("FY2025-26"),
+                                    requested_fiscal_year="FY2025-26")
+    assert "not been confirmed" not in reply, "nothing unverified, no caveat"
+
+
+def test_rate_tools_warn_after_the_latest_table(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.tax import tables
+    from app.tools import ToolRegistry
+
+    monkeypatch.setattr(tables, "kampala_today", lambda now=None: _dt.date(2027, 7, 2))
+    text = ToolRegistry.call("lookup_rate", {"tax_type": "vat_standard"})["explanation"]
+    assert "No rate table has been published yet" in text
+    text = ToolRegistry.call("list_available_rates", {})["explanation"]
+    assert "No rate table has been published yet" in text
+    asked = ToolRegistry.call("lookup_rate", {"tax_type": "vat_standard", "fiscal_year": "FY2026-27"})
+    assert "No rate table has been published yet" not in asked["explanation"], "a named year is not stale"
+
+
+def test_the_schedule_names_uncited_figures(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.tax import tables
+    from app.tools import ToolRegistry
+
+    fy26 = tables.get_table("FY2025-26")
+    basis = {k: v for k, v in fy26.legal_basis.items() if k != "vat_standard"}
+    monkeypatch.setattr("app.tools.rates._resolve", lambda *_a, **_k: _with(fy26, unverified=(), legal_basis=basis))
+    text = ToolRegistry.call("list_available_rates", {"fiscal_year": "FY2025-26"})["explanation"]
+    assert "Every figure in this table cites" not in text
+    assert "no statutory source recorded: VAT (standard rate)" in text
+
+
+@pytest.mark.parametrize(("tool", "args"), [
+    ("resolve_mda_ntr_payment", {"service_type": "mlhud_land_transfer", "transaction_value_ugx": 50_000_000}),
+    ("assess_life_event_tax_onboarding", {"life_event": "land_or_property_transfer"}),
+])
+def test_a_missing_rate_error_survives_schema_validation(monkeypatch: pytest.MonkeyPatch, tool: str, args) -> None:
+    from app.mcp.validation import result_matches_schema
+    from app.tax import tables
+    from app.tools import ToolRegistry
+    from app.tools import mda_interdependence as mda
+
+    fy27 = tables.get_table("FY2026-27")
+    schema = ToolRegistry.get(tool).schema.output_schema
+    ok = ToolRegistry.call(tool, args)
+    assert ok["ok"] is True
+    assert result_matches_schema(schema, ok) == []
+    assert result_matches_schema(schema, {k: v for k, v in ok.items() if k != "explanation"}), \
+        "a success still needs every field"
+    rates = {k: v for k, v in fy27.rates.items() if k != "stamp_duty_property_transfer"}
+    monkeypatch.setattr(mda, "get_table", lambda *_a, **_k: _with(fy27, rates=rates))
+    failed = ToolRegistry.call(tool, args)
+    assert failed["ok"] is False
+    assert "stamp duty" in failed["error"].lower()
+    assert result_matches_schema(schema, failed) == []

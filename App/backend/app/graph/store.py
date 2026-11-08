@@ -71,6 +71,10 @@ class GraphStore(Protocol):
         self, node_id: str, kinds: tuple[EdgeKind, ...] = (), outgoing: bool = True
     ) -> list[tuple[Edge, Node]]: ...
 
+    def walk(
+        self, seeds: list[str], *, hops: int = 2, kinds: tuple[EdgeKind, ...] = (), limit: int = ...
+    ) -> list[Node]: ...
+
     def stats(self) -> dict[str, int]: ...
 
 
@@ -154,6 +158,8 @@ class InMemoryGraphStore:
         found: list[Node] = []
         queue: deque[tuple[str, int]] = deque()
         for seed in seeds:
+            if len(found) >= limit:
+                break  # more seeds than the limit: the bound holds for seeds too
             if seed in self._nodes and seed not in seen:
                 seen.add(seed)
                 queue.append((seed, 0))
@@ -173,7 +179,7 @@ class InMemoryGraphStore:
                     found.append(other)
                     queue.append((other.id, depth + 1))
                     if len(found) >= limit:
-                        break
+                        return found  # not break: the incoming pass would add one more
         return found
 
     def stats(self) -> dict[str, int]:

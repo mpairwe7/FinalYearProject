@@ -422,6 +422,14 @@ _REGISTRY: dict[str, Flag] = {
             "until graph_fusion is also on.",
         ),
         Flag(
+            "semantic_layer",
+            False,
+            "ADR-0033 phase 3 (FLAG_SEMANTIC_LAYER): staff-only semantic_layer MCP namespace running certified, "
+            "aggregate metrics over certified views, read-only with row and time caps and small-group "
+            "suppression. Production refuses it without Vault, a data-sharing agreement, a DPIA and a "
+            "certified metric.",
+        ),
+        Flag(
             "graph_fusion",
             False,
             "Fuse the graph retrieval leg into RRF alongside dense and BM25. "

@@ -3,9 +3,9 @@
 Tests 15 complex, multi-layered Ugandan statutory edge cases across:
 1. Income Tax Act (Cap 340 / 338) - PAYE Secondary vs Primary, Agro-processing Holiday, Mining Ring-fencing, Estate liability
 2. Value Added Tax Act (Cap 349) - Mixed supply input tax apportionment, 150M/37.5M thresholds, Zero-rated vs Exempt
-3. Tax Procedures Code Act (TPCA 2014) - Section 24 45-day objection + 30% deposit rule, EFRIS s.19B UGX 6M penalty
+3. Tax Procedures Code Act (TPCA 2014) - Section 24 45-day objection + 30% deposit rule, EFRIS s.93(2) penalty (double the tax or UGX 200,000 from FY2026-27)
 4. Excise Duty Act 2014 - Raw material credit offset mechanism, Environmental levy age bands (35%/50% & 15-yr ban)
-5. EAC Customs Management Act (EAC-CMA) - Valuation hierarchy (Methods 1-6), $500 passenger concession limits
+5. EAC Customs Management Act (EAC-CMA) - Valuation hierarchy (Methods 1-6), $2,000 passenger concession limits
 6. Withholding VAT (6%) vs Income Tax WHT (6%) dual deduction interaction
 7. Non-resident Digital Services Tax (5% B2C under s.86A)
 8. Rental Tax: Individual (12% > 2.82M gross) vs Corporate (30% net with 50% expense cap)
@@ -17,12 +17,30 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import os
 import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
 import httpx
+
+
+def concept_present(concept: str, reply: str) -> bool:
+    """Whether *reply* states *concept*, in any of its ``|`` forms ("5 days|120 hours").
+
+    Whitespace is normalised ("ennaku  5" is "ennaku 5"). Words and numbers must be
+    whole: "5 days" is not in "15 days", and "2,000" is not in "USD 2,000,000".
+    """
+    text = " ".join(reply.lower().split())
+    for form in concept.split("|"):
+        words = form.lower().split()
+        if not words:
+            continue
+        pattern = r"\s+".join(re.escape(w) for w in words)
+        if re.search(rf"(?<!\w)(?<!\d[.,]){pattern}(?!\w)(?![.,]\d)", text):
+            return True
+    return False
 
 GATEWAY_URL = os.getenv(
     "LIVE_GATEWAY_URL",
@@ -97,14 +115,14 @@ EDGE_CASES = [
     },
     {
         "id": "SEC-006",
-        "title": "EFRIS Non-Issuance Penalty under TPCA Section 19B",
+        "title": "EFRIS Non-Issuance Penalty under TPCA section 93(2)",
         "locale": "en",
         "domain": "EFRIS Compliance",
-        "statute": "Tax Procedures Code Act, Section 19B",
+        "statute": "Tax Procedures Code Act, section 93(2)",
         "query": (
             "What specific statutory penalty does a VAT-registered business face if they fail to issue an EFRIS fiscal receipt or invoice?"
         ),
-        "required_concepts": ["6,000,000", "penalty", "double"],
+        "required_concepts": ["200,000", "penalty", "double"],
         "forbidden_hallucinations": ["100,000 shillings", "warning only"],
     },
     {
@@ -170,7 +188,7 @@ EDGE_CASES = [
     },
     {
         "id": "SEC-012",
-        "title": "Passenger Baggage Concession vs Commercial Goods ($500 limit)",
+        "title": "Passenger Baggage Concession vs Commercial Goods ($2,000 limit)",
         "locale": "en",
         "domain": "Customs Baggage",
         "statute": "EAC-CMA, Fifth Schedule",
@@ -178,7 +196,7 @@ EDGE_CASES = [
             "I arrived at Entebbe Airport with personal effects and 5 brand-new boxed iPhones intended for resale in my shop. "
             "Can the iPhones be cleared under the duty-free passenger baggage concession?"
         ),
-        "required_concepts": ["500", "passenger baggage", "commercial", "customs duty"],
+        "required_concepts": ["2,000", "passenger baggage", "commercial", "customs duty"],
         "forbidden_hallucinations": ["all goods free", "commercial phones exempt"],
     },
     {
@@ -247,7 +265,7 @@ EDGE_CASES = [
         "domain": "Value Added Tax",
         "statute": "VAT Act, Section 7",
         "query": "What is the mandatory VAT registration threshold for turnover in three consecutive calendar months?",
-        "required_concepts": ["37,500,000", "consecutive", "vat"],
+        "required_concepts": ["75,000,000", "consecutive", "vat"],
         "forbidden_hallucinations": ["1 billion quarterly"],
     },
     {
@@ -307,7 +325,7 @@ EDGE_CASES = [
         "domain": "EFRIS Compliance",
         "statute": "Tax Procedures Code Regulations (EFRIS)",
         "query": "If an EFRIS fiscal device loses internet connectivity, within how many hours must offline invoices be synchronized to URA?",
-        "required_concepts": ["24", "offline", "sync"],
+        "required_concepts": ["5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano", "offline"],
         "forbidden_hallucinations": ["30 days offline permitted"],
     },
     {
@@ -427,7 +445,7 @@ EDGE_CASES = [
         "domain": "Stamp Duty",
         "statute": "Stamp Duty Act",
         "query": "What is the stamp duty percentage on the transfer of real property (land and buildings) in Uganda?",
-        "required_concepts": ["1%", "stamp duty", "transfer"],
+        "required_concepts": ["1.5%", "stamp duty", "transfer"],
         "forbidden_hallucinations": ["18% stamp duty"],
     },
     {
@@ -477,7 +495,7 @@ EDGE_CASES = [
         "domain": "Excise Duty (Energy)",
         "statute": "Excise Duty Act, Schedule 2",
         "query": "What are the specific excise duty rates per litre on petrol, diesel, and kerosene in Uganda?",
-        "required_concepts": ["1,450", "1,130", "petrol", "diesel"],
+        "required_concepts": ["1,750", "1,430", "petrol", "diesel"],
         "forbidden_hallucinations": ["10,000 per litre"],
     },
     {
@@ -657,7 +675,7 @@ EDGE_CASES = [
         "domain": "EFRIS (Luganda)",
         "statute": "TPCA Regulations",
         "query": "Bwe mba nga sirina yintaneti mu dduuka lyange, nnina essaawa mmeka okusindika invoice za EFRIS eri URA?",
-        "required_concepts": ["24", "efris", "invoice"],
+        "required_concepts": ["5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano", "efris", "invoice"],
         "forbidden_hallucinations": ["omwaka mulamba"],
     },
     {
@@ -697,7 +715,7 @@ EDGE_CASES = [
         "domain": "Value Added Tax (Swahili)",
         "statute": "VAT Act, Section 7",
         "query": "Kikomo cha usajili wa lazima wa VAT kwa biashara inayopata mapato katika miezi mitatu mfululizo ni shilingi ngapi?",
-        "required_concepts": ["37,500,000", "vat", "miezi"],
+        "required_concepts": ["75,000,000", "vat", "miezi"],
         "forbidden_hallucinations": ["trilioni moja"],
     },
     {
@@ -785,8 +803,7 @@ async def run_edge_case(client: httpx.AsyncClient, case: dict[str, Any]) -> Edge
         matched = []
         missing = []
         for c in case["required_concepts"]:
-            c_low = c.lower()
-            if c_low in reply_lower:
+            if concept_present(c, reply):
                 matched.append(c)
             else:
                 missing.append(c)
@@ -799,7 +816,10 @@ async def run_edge_case(client: httpx.AsyncClient, case: dict[str, Any]) -> Edge
                 break
 
         concept_score = len(matched) / len(case["required_concepts"]) if case["required_concepts"] else 1.0
-        is_passed = (concept_score >= 0.60) and not hallucination
+        # A concept with a figure in it is the answer itself: it must be present, whatever
+        # the share of the other concepts ("efris" alone is not an EFRIS deadline).
+        figures_present = not any(any(ch.isdigit() for ch in c) for c in missing)
+        is_passed = (concept_score >= 0.60) and figures_present and not hallucination
 
         return EdgeCaseResult(
             case_id=cid,

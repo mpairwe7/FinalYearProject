@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import string
 import threading
 import time
 from dataclasses import dataclass, field
@@ -1266,6 +1267,76 @@ def _ugx(value: object) -> str:
 #: amendment Acts", which would have kept claiming 2026 provenance under
 #: FY2027-28 figures.  The table's own ``verification_note`` carries the
 #: year-specific detail and travels in ``rate_basis`` for the audit trail.
+#: After the last published table ends, answers still use it, and say so.
+ROLLOVER_CAVEAT = (
+    "_No rate table has been published yet for the fiscal year that began on 1 July; these are {fy} "
+    "figures. A new Finance Act may have changed them, so check URA's notices before relying on them._"
+)
+#: A figure the table marks unverified must say so in the reply, not only in a tool payload.
+UNVERIFIED_CAVEAT = (
+    "_This figure has not been confirmed against a gazetted schedule. Confirm it with URA or the "
+    "responsible agency before paying or filing._"
+)
+
+
+#: Template placeholders and the table keys each one reads (``_table_figures``, ``format_rate_reply``).
+_PLACEHOLDER_KEYS: dict[str, tuple[str, ...]] = {
+    "baggage_usd": ("passenger_baggage_allowance_usd",),
+    "mv_transfer_commercial": ("motor_vehicle_commercial_transfer_fee",),
+    "mv_transfer_motorcycle": ("motor_vehicle_motorcycle_transfer_fee",),
+    "sd_vehicle": ("stamp_duty_motor_vehicle_transfer_ugx",),
+    "sd_motorcycle": ("stamp_duty_motorcycle_transfer_ugx",),
+    "efris_rule": ("efris_penal_tax_minimum_ugx", "efris_penalty_failure_to_issue_invoice"),
+    "offline_window": ("efris_offline_sync_window_hours",),
+    "fuel_lines": ("excise_duty_fuel_petrol_per_litre", "excise_duty_fuel_diesel_per_litre",
+                   "excise_duty_fuel_kerosene_per_litre"),
+    "paye_free_monthly": ("paye_bands_resident",),
+    "threshold": ("rental_tax_individual_threshold",),
+    "threshold_vat": ("vat_registration_threshold_annual",),
+    "cap": ("rental_company_expense_cap",),
+    "presumptive_min": ("presumptive_tax_lower_threshold",),
+    "presumptive_max": ("presumptive_tax_upper_threshold",),
+    "late_min": ("penal_tax_late_filing_minimum_ugx",),
+    "petrol": ("excise_duty_fuel_petrol_per_litre",),
+    "diesel": ("excise_duty_fuel_diesel_per_litre",),
+    "kerosene": ("excise_duty_fuel_kerosene_per_litre",),
+}
+#: Questions answered from a differently named table entry.
+_RATE_ALIASES = {
+    "presumptive_tax_threshold": "presumptive_tax_upper_threshold",
+    "penal_tax_late_filing": "penal_tax_late_filing_monthly_rate",
+    "passenger_baggage_allowance": "passenger_baggage_allowance_usd",
+    "commercial_import_withholding_tax": "customs_import_wht",
+}
+
+
+def _unverified_note(table: RateTable, keys: list[str], *, main: str = "") -> str:
+    """The caveat for every unverified figure a reply shows; empty when all are confirmed.
+
+    A one-figure answer about *main* gets the plain caveat; anything else names the
+    figures, so a list or a template quoting other entries does not pass them as official.
+    """
+    unverified = [k for k in dict.fromkeys(keys) if k and k in table.unverified and k in table.rates]
+    if not unverified:
+        return ""
+    if unverified == [main]:
+        return "\n\n" + UNVERIFIED_CAVEAT
+    from .tools.rates import display_name
+
+    return ("\n\n_These figures have not been confirmed against a gazetted schedule: "
+            + "; ".join(display_name(k) for k in unverified)
+            + ". Confirm them with URA or the responsible agency before paying or filing._")
+
+
+def _after_latest_table(fy: str) -> bool:
+    from .tax import tables
+
+    try:
+        return fy == tables.latest_fiscal_year() and tables.coverage() == "after_latest"
+    except Exception:
+        return False
+
+
 PROVISIONAL_CAVEAT = (
     "_{fy} figures are provisional — compiled from the amendment Acts as reported "
     "and not yet reconciled against a URA-published rate card. Please confirm with "
@@ -1286,6 +1357,8 @@ def _rate_table_footer(result: dict[str, object]) -> list[str]:
     lines = ["", f"Figures use the official URA {fy} rate table."]
     if status == "provisional":
         lines.append(PROVISIONAL_CAVEAT.format(fy=fy))
+    if not result.get("period_requested") and _after_latest_table(str(fy)):
+        lines.append(ROLLOVER_CAVEAT.format(fy=fy))
     return lines
 
 
@@ -2140,7 +2213,7 @@ def _pct(rate: object) -> str:
     return f"{val:.1f}%"
 
 
-def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]:
+def format_rate_reply(plan: RatePlan, table: RateTable, *, requested_fiscal_year: str = "") -> tuple[str, list[str]]:
     """Render a rate answer from a resolved rate table; returns (reply, next_actions).
 
     Takes the :class:`~app.tax.tables.RateTable` rather than a bare dict so
@@ -2151,6 +2224,9 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
     footer = f"\n\nThat comes from the official URA {fy} rate table."
     if not table.confirmed:
         footer += "\n\n" + PROVISIONAL_CAVEAT.format(fy=fy)
+    if requested_fiscal_year != fy and _after_latest_table(fy):
+        # Not when the question named this year: a historical answer is not a stale one.
+        footer += "\n\n" + ROLLOVER_CAVEAT.format(fy=fy)
     if plan.summary == "paye":
         bands = rates["paye_bands_resident"]
         lines = [f"**PAYE rates for resident employees ({fy}, monthly income):**", ""]
@@ -2171,7 +2247,8 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
                 f"Non-resident employees are taxed from {_pct(non_resident[0][2])} "
                 "on the first band."
             )
-        return "\n".join(lines) + footer, [
+        shown = ["paye_bands_resident"] + (["paye_bands_non_resident"] if non_resident else [])
+        return "\n".join(lines) + footer + _unverified_note(table, shown), [
             "Calculate PAYE for a salary",
             "Ask how PAYE bands work",
         ]
@@ -2183,7 +2260,9 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             f"- Companies: **{_pct(rates['rental_tax_company'])}** of chargeable rental income "
             f"(expenses deductible up to {_pct(rates['rental_company_expense_cap'])} of gross rent)"
         )
-        return reply + footer, ["Calculate rental tax", "Ask how rental tax is declared"]
+        shown = ["rental_tax_individual", "rental_tax_individual_threshold", "rental_tax_company",
+                 "rental_company_expense_cap"]
+        return reply + footer + _unverified_note(table, shown), ["Calculate rental tax", "Ask how rental tax is declared"]
     if plan.summary == "withholding":
         # Driven off the table so a category the year does not define is
         # simply absent from the list rather than reported at some other
@@ -2202,7 +2281,8 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             f"- {label}: **{_pct(rates[key])}**" for key, label in labels if rates.get(key) is not None
         ]
         reply = f"**Withholding tax (WHT) rates ({fy}):**\n\n" + "\n".join(rows)
-        return reply + footer, ["Calculate WHT on a payment", "Ask when WHT applies"]
+        shown = [key for key, _label in labels if rates.get(key) is not None]
+        return reply + footer + _unverified_note(table, shown), ["Calculate WHT on a payment", "Ask when WHT applies"]
 
     descriptions = {
         "vat_standard": (
@@ -2255,7 +2335,7 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
         ),
         "vat_registration_threshold_annual": (
             "**VAT registration is compulsory once annual taxable turnover reaches "
-            "{threshold_vat} (or UGX 150,000,000 under Section 7 baseline)** ({fy}). Below that, registration is voluntary.\n\n"
+            "{threshold_vat}** ({fy}), or one quarter of it in any three consecutive calendar months. Below that, registration is voluntary.\n\n"
             "- Statutory Basis: Value Added Tax Act"
         ),
         "vat_mixed_supplies_apportionment": (
@@ -2290,15 +2370,19 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "value ({fy}).\n\n- Statutory Basis: East African Community Customs Management Act (EACCMA)"
         ),
         "motor_vehicle_transfer_fee": (
-            "**The official URA fee for transfer of motor vehicle ownership is UGX 100,000** ({fy}), "
-            "in addition to statutory stamp duty of UGX 15,000."
+            "**The fee to transfer ownership of a private motor car is {value_ugx}** ({fy}); commercial vehicles, "
+            "trailers and engineering plant {mv_transfer_commercial}, motorcycles {mv_transfer_motorcycle}. Stamp duty on "
+            "the transfer is separate: {sd_vehicle} for a motor vehicle and {sd_motorcycle} for a motorcycle. Vehicle "
+            "registration is administered by the Ministry of Works and Transport; confirm the current fee with its Licensing Office."
         ),
         "motor_vehicle_duplicate_logbook_fee": (
-            "**The statutory fee for a duplicate or replacement motor vehicle logbook is UGX 50,000** ({fy}) "
-            "following a police report and gazetted notice."
+            "**The duplicate logbook fee recorded for {fy} is {value_ugx}, but it is not confirmed by a current schedule.** "
+            "Vehicle registration is administered by the Ministry of Works and Transport; confirm the fee with its "
+            "Licensing Office before paying."
         ),
         "motor_vehicle_personalized_plate_fee": (
-            "**The official fee for personalized (customized) motor vehicle registration number plates is UGX 20,000,000** ({fy})."
+            "**The registration fee for a personalised number plate for a motor vehicle is {value_ugx}** ({fy}), "
+            "under the fees revised by the Finance Act 2016 for the Traffic and Road Safety Act."
         ),
         "nssf_employee_contribution": (
             "**The standard employee NSSF contribution rate is 5%** of gross wages ({fy}), while the employer "
@@ -2311,16 +2395,14 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
         ),
         "excise_duty_fuel_summary": (
             "**Excise duty rates on petroleum fuels ({fy}):**\n\n"
-            "- Petrol: **UGX 1,450 per litre**\n"
-            "- Diesel: **UGX 1,130 per litre**\n"
-            "- Kerosene: **UGX 200 per litre**\n\n"
+            "{fuel_lines}\n\n"
             "- Statutory Basis: Excise Duty Act 2014, Schedule 2"
         ),
         "presumptive_tax_threshold": (
             "**The turnover threshold for small businesses using presumptive tax is between "
             "{presumptive_min} and {presumptive_max}** annual gross turnover ({fy}). "
-            "Businesses below UGX 10,000,000 are exempt, while those with turnover exceeding "
-            "UGX 150,000,000 must file standard income tax returns."
+            "Businesses below {presumptive_min} are exempt, while those with turnover exceeding "
+            "{presumptive_max} must file standard income tax returns."
         ),
         "penal_tax_late_filing": (
             "**The penalty for late filing of a tax return is {late_min} or "
@@ -2332,18 +2414,18 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "under Section 39 of the Tax Procedures Code Act ({fy})."
         ),
         "efris_penalty_failure_to_issue_invoice": (
-            "**The statutory penalty for failure to issue an EFRIS fiscal receipt or invoice is UGX 6,000,000 "
-            "or double the tax evaded**, whichever is higher, per invoice under Section 19B of the Tax Procedures Code Act ({fy})."
+            "**Failing to issue an EFRIS e-invoice or e-receipt attracts penal tax of {efris_rule}** ({fy}), "
+            "under section 93(2) of the Tax Procedures Code Act."
         ),
         "efris_offline_sync_window_hours": (
-            "**Under URA EFRIS regulations, offline transactions must be synchronized within 24 hours** ({fy}) "
-            "once network connectivity is restored. Businesses operating in areas without internet may generate "
-            "offline fiscal receipts but must upload them to URA within this mandatory 24-hour window."
+            "**EFRIS e-invoices and e-receipts can be issued offline for up to {offline_window}** ({fy}) on the EFRIS app, "
+            "desktop software or system-to-system integration (not the web portal). Beyond that, the device must "
+            "reconnect so the offline documents upload to URA."
         ),
         "efris_invoicing_mandate": (
             "**Under the Tax Procedures Code Act, all VAT-registered businesses must issue an EFRIS e-invoice (ankara ya kielektroniki) "
-            "or fiscal receipt (risiti ya fedha)** for every taxable sale made ({fy}). Failure to issue an EFRIS receipt attracts a statutory "
-            "penalty of UGX 6,000,000 or double the tax evaded under Section 19B."
+            "or fiscal receipt (risiti ya fedha)** for every taxable sale made ({fy}). Failing to issue one attracts penal tax "
+            "of {efris_rule}, under section 93(2) of the Tax Procedures Code Act."
         ),
         "prn_payment_procedures": (
             "**To pay taxes using a Payment Registration Number (PRN)**, generate the PRN on the URA portal (ura.go.ug). "
@@ -2352,7 +2434,7 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
         ),
         "paye_secondary_employment_rate": (
             "**Secondary employment is taxed at a flat rate of {pct}** ({fy}) from the first shilling "
-            "under the Third Schedule of the Income Tax Act. The statutory tax-free threshold (first UGX 235,000/335,000) "
+            "under the Third Schedule of the Income Tax Act. The tax-free threshold (the first {paye_free_monthly} a month) "
             "can only be claimed once by the primary employer."
         ),
         "agro_processing_local_raw_material_ratio": (
@@ -2362,15 +2444,15 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
         ),
         "disability_income_tax_threshold_monthly": (
             "**Under Section 21(1)(v) of the Income Tax Act, the employment income of a Person with Disability (PWD / abaliko obulemu / watu wenye ulemavu) is exempt "
-            "from income tax (omusolo / msamaha wa kodi) up to UGX 1,460,000 per month (omusaala gwa buli mwezi)** ({fy}). Employment income earned above this threshold is subject to progressive PAYE."
+            "from income tax (omusolo / msamaha wa kodi) up to {value_ugx} per month (omusaala gwa buli mwezi)** ({fy}). Employment income earned above this threshold is subject to progressive PAYE."
         ),
         "branch_repatriation_tax_rate": (
             "**A tax of {pct} is charged on the repatriated income of a non-resident company branch** in Uganda under Section 82 "
             "of the Income Tax Act ({fy}), payable in addition to standard 30% corporate income tax."
         ),
         "vat_quarterly_registration_threshold": (
-            "**VAT registration is mandatory once taxable turnover exceeds UGX 37,500,000 in three consecutive calendar months (miezi mitatu mfululizo)**, "
-            "or UGX 150,000,000 annually, under Section 7 of the Value Added Tax Act ({fy})."
+            "**VAT registration is mandatory once taxable turnover exceeds {value_ugx} in three consecutive calendar months (miezi mitatu mfululizo)**, "
+            "one quarter of the annual threshold of {threshold_vat}, under Section 7 of the Value Added Tax Act ({fy})."
         ),
         "tax_appeals_tribunal_deadline_days": (
             "**A taxpayer has 30 days from the date of service of an objection decision to lodge an appeal with the Tax Appeals Tribunal (TAT)** "
@@ -2402,8 +2484,8 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "**2 years** have elapsed from the date of supply and the debtor has become legally insolvent or bankrupt."
         ),
         "efris_tampering_penalty": (
-            "**Under the Tax Procedures Code Act, tampering with or altering an EFRIS electronic fiscal device or fiscal records attracts "
-            "a penalty fine not exceeding UGX 10,000,000 or imprisonment not exceeding 5 years**, or both, in addition to paying the full tax evaded."
+            "**Tampering with an EFRIS electronic fiscal device attracts penal tax of {efris_rule}** ({fy}), under "
+            "section 93(2) of the Tax Procedures Code Act, in addition to the tax due."
         ),
         "eac_cet_tariff_bands": (
             "**The East African Community Common External Tariff (EAC CET) has 4 primary tariff bands ({fy}):**\n\n"
@@ -2468,7 +2550,8 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "under the Tax Procedures Code Act and Income Tax Act ({fy})."
         ),
         "passenger_baggage_allowance": (
-            "**The passenger baggage duty-free allowance is USD 500** for accompanying personal effects "
+            "**The passenger baggage duty-free allowance is {baggage_usd}** per traveller who has been outside Uganda for more "
+            "than 24 hours, for goods in accompanied baggage that are declared "
             "under the East African Community Customs Management Act ({fy}). Goods imported for commercial resale, "
             "trade, or in commercial quantities do not qualify for this passenger concession and are subject to full customs duty."
         ),
@@ -2499,7 +2582,7 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "value ({fy}).\n\n- Statutory Basis: East African Community Customs Management Act"
         ),
         "commercial_import_withholding_tax": (
-            "**The commercial import withholding tax (WHT) is {pct} (6%) of the customs CIF value** ({fy}) under Section 119 "
+            "**The commercial import withholding tax (WHT) is {pct} of the customs CIF value** ({fy}) under Section 119 "
             "of the Income Tax Act. It is due on commercial imports unless the importer holds a valid WHT exemption certificate."
         ),
         "excise_duty_telecom_data": (
@@ -2511,11 +2594,11 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "under the Excise Duty Act 2014."
         ),
         "excise_duty_fuel_petrol_per_litre": (
-            "**The excise duty on petrol is UGX {petrol:,.0f} per litre** ({fy}, revised from UGX 1,450 per litre) "
+            "**The excise duty on petrol is UGX {petrol:,.0f} per litre** ({fy}) "
             "under the Excise Duty Act (Schedule 2)."
         ),
         "excise_duty_fuel_diesel_per_litre": (
-            "**The excise duty on diesel (gas oil) is UGX {diesel:,.0f} per litre** ({fy}, revised from UGX 1,130 per litre) "
+            "**The excise duty on diesel (gas oil) is UGX {diesel:,.0f} per litre** ({fy}) "
             "under the Excise Duty Act (Schedule 2)."
         ),
         "excise_duty_fuel_kerosene_per_litre": (
@@ -2539,9 +2622,10 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
         elif plan.tax_type == "paye_due_date_monthly":
             rate = rates.get("paye_due_date_monthly", 15)
         elif plan.tax_type == "passenger_baggage_allowance":
-            rate = rates.get("passenger_baggage_allowance_usd", 500)
+            rate = rates.get("passenger_baggage_allowance_usd")
         elif plan.tax_type == "commercial_import_withholding_tax":
-            rate = rates.get("customs_import_wht", 0.06)
+            # No literal fallback: a year without the entry has no answer, not an invented 6%.
+            rate = rates.get("customs_import_wht")
         elif plan.tax_type in (
             "excise_duty_fuel_summary",
             "voluntary_disclosure_programme",
@@ -2576,6 +2660,7 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
     if template is None or rate is None:
         return "", []
     reply = template.format(
+        **_table_figures(plan.tax_type, rates),
         pct=_pct(rate),
         fy=fy,
         threshold=f"UGX {float(rates.get('rental_tax_individual_threshold', 0)):,.0f}",
@@ -2614,8 +2699,52 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
         }.get(plan.tax_type, "calculate_withholding"),
         [],
     )
-    return reply + footer, actions
+    # The entry the figure was read from, and every entry the template quotes.
+    rate_key = plan.tax_type if plan.tax_type in rates else _RATE_ALIASES.get(plan.tax_type, plan.tax_type)
+    quoted = [key for _text, field, _spec, _conv in string.Formatter().parse(template) if field
+              for key in _PLACEHOLDER_KEYS.get(field, ())]
+    return reply + footer + _unverified_note(table, [rate_key, *quoted], main=rate_key), actions
 
+
+
+def _ugx_or_unset(value: Any) -> str:
+    return f"UGX {float(value):,.0f}" if isinstance(value, int | float) and not isinstance(value, bool) else "not set for this year"
+
+
+def _table_figures(key: str, rates: dict[str, Any]) -> dict[str, str]:
+    """Template figures read from the year's table, so no template states a figure the table does not.
+
+    A template that wrote its own figure kept serving it after the table was corrected
+    (the UGX 6,000,000 EFRIS floor, USD 500 baggage, UGX 37,500,000 VAT quarter).
+    ``test_rate_table_verification`` fails if a template hard-codes a table figure again.
+    """
+    value = rates.get(key)
+    bands = rates.get("paye_bands_resident") or []
+    hours = rates.get("efris_offline_sync_window_hours")
+    if "efris_penal_tax_minimum_ugx" in rates:
+        # The Tax Procedures Code (Amendment) Act 2026 doubled the multiple of tax due.
+        efris_rule = f"double the tax due or {_ugx_or_unset(rates['efris_penal_tax_minimum_ugx'])}, whichever is higher"
+    elif "efris_penalty_failure_to_issue_invoice" in rates:
+        efris_rule = f"the tax due or {_ugx_or_unset(rates['efris_penalty_failure_to_issue_invoice'])}, whichever is higher"
+    else:
+        efris_rule = "the amount set by section 93(2) of the Tax Procedures Code Act"
+    fuel = [(label, rates.get(f"excise_duty_fuel_{name}_per_litre"))
+            for label, name in (("Petrol", "petrol"), ("Diesel (gas oil)", "diesel"), ("Kerosene", "kerosene"))]
+    return {
+        "value_ugx": _ugx_or_unset(value),
+        "baggage_usd": (f"USD {float(rates['passenger_baggage_allowance_usd']):,.0f}"
+                        if "passenger_baggage_allowance_usd" in rates else "not set for this year"),
+        "mv_transfer_commercial": _ugx_or_unset(rates.get("motor_vehicle_commercial_transfer_fee")),
+        "mv_transfer_motorcycle": _ugx_or_unset(rates.get("motor_vehicle_motorcycle_transfer_fee")),
+        "sd_vehicle": _ugx_or_unset(rates.get("stamp_duty_motor_vehicle_transfer_ugx")),
+        "sd_motorcycle": _ugx_or_unset(rates.get("stamp_duty_motorcycle_transfer_ugx")),
+        "efris_rule": efris_rule,
+        "offline_window": (f"{float(hours) / 24:g} days" if isinstance(hours, int | float) and hours >= 24
+                           else f"{hours} hours" if hours is not None else "the period URA sets"),
+        "fuel_lines": "\n".join(f"- {label}: **UGX {float(v):,.0f} per litre**" for label, v in fuel if v is not None)
+                      or "- No fuel excise figures are recorded for this year.",
+        "paye_free_monthly": (_ugx_or_unset(bands[0][1]) if bands and bands[0][2] == 0 else "first band"),
+    }
 
 NEXT_ACTIONS_BY_TOOL: dict[str, list[str]] = {
     "calculate_paye": ["Calculate PAYE for a different salary", "Ask how PAYE bands work"],

@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .schema import (
+    FACT_KINDS,
     EdgeKind,
     Node,
     NodeKind,
@@ -291,7 +292,7 @@ def _claim(store: InMemoryGraphStore, node: Node) -> Claim:
         # and quoted to a taxpayer, and neither can say
         # "environmental_levy_used_clothing" back to anyone.
         subject=str(node.props.get("display_name") or node.props.get("key") or node.label),
-        predicate="threshold" if node.kind is NodeKind.THRESHOLD else "rate",
+        predicate=node.kind.value if node.kind in FACT_KINDS else "rate",
         value=node.props.get("value"),
         fiscal_year=str(node.props.get("fiscal_year", "")),
         provision=_provision_of(store, node),
@@ -435,11 +436,9 @@ def history(key: str, *, store: InMemoryGraphStore | None = None) -> GraphAnswer
     from . import get_graph
 
     store = store or get_graph()
-    nodes = [
-        node
-        for node in store.by_kind(NodeKind.RATE) + store.by_kind(NodeKind.THRESHOLD)
-        if node.props.get("key") == key
-    ]
+    # Every fact kind, not only rates and thresholds: penalties, deadlines, fees and
+    # parameters have histories too (ADR-0033).
+    nodes = [node for kind in FACT_KINDS for node in store.by_kind(kind) if node.props.get("key") == key]
     if not nodes:
         return GraphAnswer(reason=f"unknown rate key {key!r}")
 

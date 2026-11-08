@@ -185,11 +185,14 @@ class ProvenanceTests(unittest.TestCase):
     def test_unverified_keys_are_flagged_per_figure(self) -> None:
         # The table is confirmed as a whole; individual figures sourced
         # from secondary reporting are still called out.
+        # (The VAT threshold was the example until URA's FY2026-27 amendments booklet
+        # confirmed it on 2026-11-08; withholding on royalties is still unreconciled.)
         table = tables.get_table("FY2026-27")
-        basis = table.provenance("vat_registration_threshold_annual")
+        basis = table.provenance("withholding_royalty")
         self.assertEqual(basis["status"], "confirmed")
-        self.assertEqual(basis["unverified"], ["vat_registration_threshold_annual"])
+        self.assertEqual(basis["unverified"], ["withholding_royalty"])
         self.assertIn("not yet reconciled", basis["unverified_note"])
+        self.assertNotIn("unverified", table.provenance("vat_registration_threshold_annual"))
 
     def test_a_verified_key_carries_no_unverified_flag(self) -> None:
         basis = tables.get_table("FY2026-27").provenance("paye_bands_resident")

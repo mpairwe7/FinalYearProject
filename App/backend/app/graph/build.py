@@ -32,17 +32,17 @@ import re
 from typing import Any
 
 from .schema import (
+    FACT_KINDS,
     Edge,
     EdgeKind,
     Node,
     NodeKind,
     class_id,
+    fact_id,
     fiscal_year_id,
     parse_fiscal_year_start,
     provision_id,
-    rate_id,
     tax_type_id,
-    threshold_id,
 )
 from .store import InMemoryGraphStore
 
@@ -63,6 +63,49 @@ _TAX_PREFIXES: tuple[tuple[str, str], ...] = (
     ("customs_duty", "customs"),
     ("environmental_levy", "customs"),
     ("nssf", "nssf"),
+)
+
+#: Prefixes for the keys the graph used to drop (ADR-0033): 66 of 98 keys,
+#: every deadline, penalty rule and fee among them. Tried only after the
+#: prefixes above, so no key that already had a tax changes its tax.
+_KERNEL_TAX_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("excise_", "excise"),
+    ("efris_", "efris"),
+    ("dts_", "dts"),
+    ("bik_", "benefits_in_kind"),
+    ("paye_", "paye"),
+    ("disability_income_tax", "paye"),
+    ("customs_", "customs"),
+    ("passenger_baggage", "customs"),
+    ("unbs_pvoc", "customs"),
+    ("gaming_and_betting", "gaming"),
+    ("digital_services_tax", "digital_services"),
+    ("branch_repatriation", "income_tax"),
+    ("agro_processing", "income_tax"),
+    ("residency_", "income_tax"),
+    ("startup_citizen_exemption", "income_tax"),
+    ("presumptive_tax", "presumptive"),
+    ("stamp_duty", "stamp_duty"),
+    ("motor_vehicle_", "motor_vehicle"),
+    ("ursb_", "business_registration"),
+    ("objection_", "tax_procedures"),
+    ("tax_appeals_tribunal", "tax_procedures"),
+    ("penal_tax_late_filing", "tax_procedures"),
+    ("late_payment_interest", "tax_procedures"),
+    ("year_of_income", "income_tax"),
+    ("fx_conversion", "income_tax"),
+)
+
+#: Fact kind by key shape, for the keys above. First match wins; a key that
+#: matches none is a rate, or a threshold by the long-standing markers.
+_KERNEL_KIND_RULES: tuple[tuple[NodeKind, re.Pattern[str]], ...] = (
+    (NodeKind.OBLIGATION, re.compile(r"_due_date|_timeline_days|_deadline_days|_window_hours")),
+    (NodeKind.PENALTY, re.compile(r"penal_tax|_penalty|late_payment_interest|evasion_surcharge")),
+    (NodeKind.FEE, re.compile(r"_fee(?:_ugx)?$")),
+    (NodeKind.PARAMETER, re.compile(
+        r"_days_in_year|_valuation_hierarchy|_exemption_years|_raw_material_ratio|^year_of_income|_conversion_rule$"
+    )),
+    (NodeKind.THRESHOLD, re.compile(r"threshold|_cap(?:_ugx)?$|de_minimis|_allowance_usd$|_exemption_fob_usd$")),
 )
 
 #: Key suffix → taxpayer class. This is the join the golden set is
@@ -90,6 +133,18 @@ _TAX_LABELS = {
     "withholding": "Withholding tax",
     "customs": "Customs and import charges",
     "nssf": "NSSF contribution",
+    "excise": "Excise duty",
+    "efris": "EFRIS electronic invoicing",
+    "dts": "Digital tax stamps",
+    "benefits_in_kind": "Benefits in kind (employment income)",
+    "gaming": "Gaming and betting tax",
+    "digital_services": "Digital services tax",
+    "income_tax": "Income tax",
+    "presumptive": "Presumptive tax (small businesses)",
+    "stamp_duty": "Stamp duty",
+    "motor_vehicle": "Motor vehicle charges",
+    "business_registration": "Business registration fees (URSB)",
+    "tax_procedures": "Tax procedures: penalties, interest and objections",
 }
 
 _CLASS_LABELS = {
@@ -143,12 +198,78 @@ def display_name(key: str) -> str:
     return key.replace("_", " ")
 
 
-def tax_for_key(key: str) -> str:
-    """Which tax a rate key belongs to, or ``""``."""
+def _legacy_tax_for_key(key: str) -> str:
     for prefix, tax in _TAX_PREFIXES:
         if key.startswith(prefix):
             return tax
     return ""
+
+
+def tax_for_key(key: str) -> str:
+    """Which tax a rate key belongs to, or ``""``."""
+    legacy = _legacy_tax_for_key(key)
+    if legacy:
+        return legacy
+    for prefix, tax in _KERNEL_TAX_PREFIXES:
+        if key.startswith(prefix):
+            return tax
+    return ""
+
+
+def kind_for_key(key: str) -> NodeKind:
+    """The fact kind of a rate-table key.
+
+    A key the graph already projected keeps exactly the kind it had (rate or
+    threshold), so no existing answer changes shape. The others are read from
+    the key, as the tables were named consistently.
+    """
+    if _legacy_tax_for_key(key):
+        return NodeKind.THRESHOLD if is_threshold(key) else NodeKind.RATE
+    for kind, pattern in _KERNEL_KIND_RULES:
+        if pattern.search(key):
+            return kind
+    return NodeKind.RATE
+
+
+def unit_for_key(key: str, value: Any) -> str:
+    """The unit a figure is stated in, or ``""`` when the key does not say."""
+    if isinstance(value, list):
+        return "bands"
+    if key.endswith("_currency_points"):
+        return "currency_points"
+    if key.endswith("_usd"):
+        return "USD"
+    if "due_date_monthly" in key:
+        return "day_of_following_month"
+    if "_days" in key:
+        return "days"
+    if key.endswith("_hours"):
+        return "hours"
+    if key.endswith("_years"):
+        return "years"
+    if key.endswith(("_ugx", "_fee")) or "_per_" in key:
+        return "UGX"
+    if isinstance(value, float) and 0 <= value <= 1:
+        return "ratio"
+    if isinstance(value, int) and value >= 1000 and ("threshold" in key or "_cap" in key or "penalty" in key):
+        return "UGX"
+    return ""
+
+
+def all_table_keys() -> list[str]:
+    """Every key in every loaded rate table, whatever its value type.
+
+    ``tables.known_rate_keys`` lists numeric scalars only, so band lists and rule
+    strings ("bou_mid_rate") were invisible to a coverage check built on it.
+    """
+    from ..tax import tables as rate_tables
+
+    return sorted({k for fy in rate_tables.list_fiscal_years() for k in rate_tables.get_table(fy).rates})
+
+
+def unclassified_keys(keys: list[str] | None = None) -> list[str]:
+    """Rate-table keys that would reach no tax: each one is a figure the kernel drops."""
+    return sorted(k for k in (all_table_keys() if keys is None else keys) if not tax_for_key(k))
 
 
 def class_for_key(key: str) -> str:
@@ -228,24 +349,29 @@ def build_graph(fiscal_years: list[str] | None = None) -> InMemoryGraphStore:
             )
             store.add_node(tax_node)
 
-            threshold = is_threshold(key)
-            node_id = (threshold_id if threshold else rate_id)(key, fy)
+            kind = kind_for_key(key)
+            assert kind in FACT_KINDS
+            node_id = fact_id(kind, key, fy)
             citation = table.legal_basis.get(key, "")
             node = Node(
                 id=node_id,
-                kind=NodeKind.THRESHOLD if threshold else NodeKind.RATE,
+                kind=kind,
                 label=f"{key} ({fy})",
                 props={
                     "key": key,
                     "display_name": display_name(key),
                     "fiscal_year": fy,
                     "value": value,
+                    "unit": unit_for_key(key, value),
                     "currency": table.currency,
                     "note": table.notes.get(key, ""),
                     "legal_basis": citation,
+                    # A figure with no recorded legal basis cannot say why it is
+                    # true, so it is never served as verified (ADR-0033).
+                    "uncited": not citation,
                 },
                 source=fy,
-                unverified=key in table.unverified,
+                unverified=key in table.unverified or not citation,
             )
             store.add_node(node)
             store.add_edge(Edge(node.id, EdgeKind.RATED_FOR, tax_node.id))

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextlib
 import contextvars
 import csv
 import functools
@@ -252,6 +253,7 @@ logger = logging.getLogger(__name__)
 # Turn context lives in the leaf module turn_context (ADR-0031); these are the
 # same ContextVar objects under their historical names.
 from .turn_context import ACTIVE_CASE_FACTS as _ACTIVE_CASE_FACTS  # noqa: E402
+from .turn_context import ACTIVE_KERNEL_PIN as _ACTIVE_KERNEL_PIN  # noqa: E402
 from .turn_context import ACTIVE_CONVERSATION_STATE as _ACTIVE_CONVERSATION_STATE  # noqa: E402
 from .turn_context import ACTIVE_TENANT_ID as _ACTIVE_TENANT_ID  # noqa: E402
 from .turn_context import ACTIVE_USER_STATED_IDS as _ACTIVE_USER_STATED_IDS  # noqa: E402
@@ -279,6 +281,7 @@ from .faq_binding import faq_question_equivalence  # noqa: E402, F401
 from .faq_binding import install_faq_acronyms  # noqa: E402, F401
 from .faq_binding import filter_unbound_faq_hits as _filter_unbound_faq_hits  # noqa: E402, F401
 from .faq_binding import promote_equivalent_faq_hits as _promote_equivalent_faq_hits  # noqa: E402, F401
+from .kernel.precedence import reorder_after_promotion as _reorder_after_promotion  # noqa: E402
 from .english_rendering import _PARAGRAPH_BREAK_RE  # noqa: E402, F401
 
 # The audit row for a ``generate`` turn is written by :meth:`ChatModel.generate`
@@ -306,6 +309,21 @@ def _workflow_past_retention(row: dict[str, Any] | None) -> bool:
     return updated_at is not None and float(updated_at) < time.time() - db.conversation_ttl_seconds()
 
 
+def _kernel_pin_for_turn() -> dict[str, Any] | None:
+    """The kernel release this turn answers under (ADR-0033); ``None`` if unavailable.
+
+    Never raises: a turn must still answer when the kernel cannot be read, and
+    its audit row then records no pin rather than a wrong one.
+    """
+    try:
+        from .kernel.pin import pin_for_turn
+
+        return pin_for_turn().to_dict()
+    except Exception:
+        logger.warning("kernel pin unavailable for this turn", exc_info=True)
+        return None
+
+
 def _scoped_conversation_state(method: Callable[..., Any]) -> Callable[..., Any]:
     """Bind durable topic/workflow state to this request's verified owner."""
     signature = inspect.signature(method)
@@ -330,9 +348,27 @@ def _scoped_conversation_state(method: Callable[..., Any]) -> Callable[..., Any]
         # this wrapper returns, so they must see the same plans.
         plans_reset = _TURN_PLANS.set({}) if _TURN_PLANS.get() is None else None
         live_check_reset = _TURN_LIVE_CHECK.set({}) if _TURN_LIVE_CHECK.get() is None else None
+        kernel_pin_reset = _ACTIVE_KERNEL_PIN.set(_kernel_pin_for_turn()) if _ACTIVE_KERNEL_PIN.get() is None else None
+        from .kernel import trace as _kernel_trace
+
+        kernel_trace_reset = _kernel_trace.start()
         try:
-            return method(*bound.args, **bound.kwargs)
+            result = method(*bound.args, **bound.kwargs)
+            if isinstance(result, dict):
+                # The audit row is written after this scope closes: by generate() for a
+                # REST turn, and off the event loop for a streamed one. Carry the turn's
+                # kernel pin on the result, as _audit_turn carries the plan, and the trace
+                # only when this scope opened it: a streamed turn's trace stays open after
+                # retrieval, and the audit reads the live one with the agentic entries.
+                result.setdefault("_kernel_pin", _ACTIVE_KERNEL_PIN.get())
+                if kernel_trace_reset is not None:
+                    result["_kernel_trace"] = _kernel_trace.snapshot()
+            return result
         finally:
+            if kernel_trace_reset is not None:
+                _kernel_trace.TURN_KERNEL_TRACE.reset(kernel_trace_reset)
+            if kernel_pin_reset is not None:
+                _ACTIVE_KERNEL_PIN.reset(kernel_pin_reset)
             if live_check_reset is not None:
                 _TURN_LIVE_CHECK.reset(live_check_reset)
             if plans_reset is not None:
@@ -2489,6 +2525,15 @@ async def run_chat_turn(
     _TURN_LIVE_CHECK.set({})
     _TURN_STAGES.set({})
     _TURN_GENERATION.set(_new_generation_record())
+    # The kernel pin and trace for the whole streamed turn, set here for the same
+    # reason: the agentic stream runs after the retrieval scope has closed, and its
+    # kernel calls belong in this turn's audit row (ADR-0033).
+    # Fresh for every turn: a WebSocket session runs its turns in one context, and a
+    # reused pin or trace carried the first turn's date and misses into later rows.
+    kernel_pin_token = _ACTIVE_KERNEL_PIN.set(_kernel_pin_for_turn())
+    from .kernel import trace as _stream_kernel_trace
+
+    kernel_trace_token = _stream_kernel_trace.open_turn()
     try:
         with turn_usage_scope() as usage, turn_attributes_scope():
             async for event_type, payload in _run_chat_turn_events(model, progress=progress, **kwargs):
@@ -2537,6 +2582,11 @@ async def run_chat_turn(
                 },
                 daemon=True,
             ).start()
+        # The audit has been written, or its thread holds a copy of this context.
+        for var, token in ((_stream_kernel_trace.TURN_KERNEL_TRACE, kernel_trace_token),
+                           (_ACTIVE_KERNEL_PIN, kernel_pin_token)):
+            with contextlib.suppress(ValueError):  # closed from another context (garbage collection)
+                var.reset(token)
 
 
 def _finish_streamed_turn(
@@ -7033,6 +7083,9 @@ class ChatModel:
         graph_hits = ChatModel._graph_hits(query)
         if not graph_hits:
             return hits, False
+        from .kernel.precedence import apply_precedence
+
+        hits = apply_precedence(graph_hits[0], hits)
         return rrf_fuse_ranked_lists(hits, graph_hits), True
 
     def _priority_faq_hits(self, query: str, *, top_k: int) -> list[dict[str, Any]]:
@@ -9210,12 +9263,22 @@ class ChatModel:
             unsupported_years = sorted(
                 year for year in requested_years if year < covered_from or year > covered_to
             )
-            if unsupported_years:
+            # A fiscal year named outright is checked on its own: the calendar-year guard
+            # skips vehicle questions, and "the FY2027-28 transfer fee" must not get FY2026-27's.
+            from .query import extract_retrieval_filters  # noqa: PLC0415
+
+            requested_fy = str(
+                extract_retrieval_filters(message).get("fiscal_year")
+                or extract_retrieval_filters(rewritten).get("fiscal_year")
+                or ""
+            )
+            unheld_fy = requested_fy if requested_fy and requested_fy not in list_fiscal_years() else ""
+            if unsupported_years or unheld_fy:
                 latest = max(
                     all_tables,
                     key=lambda table: table.effective_to or table.effective_from,
                 )
-                requested = ", ".join(str(year) for year in unsupported_years)
+                requested = unheld_fy or ", ".join(str(year) for year in unsupported_years)
                 last_covered_day = latest.effective_to or latest.effective_from
                 latest_date = f"{last_covered_day.day} {last_covered_day:%B %Y}"
                 reply_text = (
@@ -9248,7 +9311,10 @@ class ChatModel:
                     "ticket_id": "",
                 }
 
-            reply_text, next_actions = format_rate_reply(rate_plan, get_table())
+            # A question naming a fiscal year we hold is answered from that year's table,
+            # not today's: "the FY2025-26 VAT threshold" is UGX 150,000,000, not 300,000,000.
+            table = get_table(requested_fy) if requested_fy else get_table()
+            reply_text, next_actions = format_rate_reply(rate_plan, table, requested_fiscal_year=requested_fy)
         except Exception:
             logger.exception("rate lookup fast path failed")
             return None
@@ -12307,6 +12373,8 @@ class ChatModel:
                 # they can be used as LLM context or as an extractive fallback.
                 hits = _filter_unbound_faq_hits(binding_query, hits)
                 hits = _promote_equivalent_faq_hits(binding_query, hits)
+                # Promotion runs after the graph leg; the kernel's figure must still lead.
+                hits = _reorder_after_promotion(hits)
 
             # 3d. Attached documents — prepend as top-priority grounding hits.
             if attachments:
@@ -12566,6 +12634,14 @@ class ChatModel:
                     retrieval_mode = "agentic"
                     trace_ctx["tool_calls"] = [
                         tc.get("name") for tc in agentic["tool_calls"]
+                    ]
+                    # The audit row needs the calls, not only their names: the ledger
+                    # keeps the name, iteration and an arguments digest (never the raw
+                    # arguments), and the scorecard reads whether each call failed.
+                    trace_ctx["tool_call_records"] = [
+                        {"name": tc.get("name"), "iteration": tc.get("iteration") or 0,
+                         "arguments": tc.get("arguments") or {}, "result": tc.get("result")}
+                        for tc in agentic["tool_calls"] if isinstance(tc, dict)
                     ]
                     trace_ctx["tool_iterations"] = agentic.get("iterations", 0)
                     trace_ctx["connectors_used"] = _connectors_used(agentic["tool_calls"])
@@ -13352,7 +13428,7 @@ class ChatModel:
                 "session_id": session_id,
                 "user_id": str(trace_ctx.get("user_id") or ""),
                 "tenant_id": str(trace_ctx.get("tenant_id") or "default"),
-                "tool_calls": list(trace_ctx.get("tool_calls") or []),
+                "tool_calls": list(trace_ctx.get("tool_call_records") or trace_ctx.get("tool_calls") or []),
                 "tool_iterations": int(trace_ctx.get("tool_iterations") or 0),
                 "agent_route": str(trace_ctx.get("agent_route") or ""),
             }
@@ -14363,6 +14439,8 @@ class ChatModel:
             # A chunk can outrank the FAQ row that answers the question
             # verbatim; put an exact FAQ counterpart back in front.
             hits = _promote_equivalent_faq_hits(binding_query, hits)
+            # Promotion runs after the graph leg; the kernel's figure must still lead.
+            hits = _reorder_after_promotion(hits)
 
         # Attached documents — prepend as top-priority grounding hits
         # (parity with generate(); see the comment there).

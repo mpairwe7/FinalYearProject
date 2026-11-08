@@ -114,7 +114,7 @@ def test_paye_with_verified_car_and_unverified_housing_splits_verified_vs_condit
         (
             "I am buying a plot of land valued at UGX 150,000,000 and also transferring a motor car into my name. How is stamp duty calculated on the land transfer and on the motor vehicle transfer in FY2026-27?",
             "calculate_stamp_duty",
-            "1,500,000",
+            "2,250,000",  # 1.5% of UGX 150,000,000 (Stamp Duty Act Schedule 2 item 62(a))
         ),
         (
             "URA just served us an administrative default assessment of UGX 50 million for withholding tax that we strongly dispute. How many days do we have to lodge a formal objection, and how does the 30% payment rule on disputed tax work?",

@@ -402,7 +402,16 @@ def gap_gate_errors() -> list[str]:
     errors.extend(_cross_border_errors())
     errors.extend(_mcp_security_errors())
     errors.extend(_turn_deadline_errors())
+    errors.extend(_kernel_layer_errors())
     return errors
+
+
+def _kernel_layer_errors() -> list[str]:
+    """ADR-0033 phase 3: the Neo4j graph backend (G506) and the semantic layer (G507)."""
+    from .graph.neo4j_store import production_errors as graph_backend_errors
+    from .semantic_layer.config import production_errors as semantic_layer_errors
+
+    return graph_backend_errors() + semantic_layer_errors()
 
 
 def evaluate_gate(gap: str) -> dict[str, Any]:

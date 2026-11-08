@@ -412,6 +412,153 @@ THREAT_REGISTRY: list[dict] = [
         "status": "mitigated",
     },
     {
+        "id": "T72",
+        "category": "Elevation of Privilege",
+        "description": (
+            "A suspended approval resumes under a different kernel release, so the action runs on figures the "
+            "taxpayer was never shown (G497)"
+        ),
+        "owasp_llm": "LLM06",
+        "mitre_atlas": None,
+        "mitigation": "The kernel version is part of the HMAC-sealed graph state; a resume under another release is refused",
+        "evidence": ["App/backend/app/agents/graphs/runtime.py", "tests/agents/test_statutory_kernel_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
+        "id": "T73",
+        "category": "Tampering",
+        "description": (
+            "A figure with no legal basis, or an unreleased edit to the rate tables, is served as a verified fact "
+            "(G494, G496)"
+        ),
+        "owasp_llm": "LLM09",
+        "mitre_atlas": None,
+        "mitigation": (
+            "Uncited figures are unverified; releases are content-addressed and CI fails on an unreleased change; "
+            "every turn records the release it answered under"
+        ),
+        "evidence": ["App/backend/app/graph/build.py", "App/backend/app/kernel/release.py", "tests/agents/test_statutory_kernel_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
+        "id": "T74",
+        "category": "Tampering",
+        "description": (
+            "A stale or poisoned passage states a different figure from the kernel and the contradiction goes "
+            "unnoticed (G499)"
+        ),
+        "owasp_llm": "LLM09",
+        "mitre_atlas": "AML.T0070",
+        "mitigation": (
+            "Fixed source precedence; a fused graph hit records conflicting passages and sends them to the human "
+            "discrepancy queue. Residual: detection needs the figure's name beside a different number"
+        ),
+        "evidence": ["App/backend/app/kernel/precedence.py", "tests/agents/test_statutory_kernel_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
+        "id": "T75",
+        "category": "Tampering",
+        "description": (
+            "A Finance Act change, or an engineer's edit marking a penalty rule approved, reaches answers as verified "
+            "without a named reviewer (G500, G502)"
+        ),
+        "owasp_llm": "LLM09",
+        "mitre_atlas": None,
+        "mitigation": (
+            "Rule results are unverified unless the rule is marked approved and the running release names a "
+            "reviewer; table changes are diffed and corroborated against the Act and queued for a named reviewer; "
+            "a draft edited after proposal cannot be approved"
+        ),
+        "evidence": ["App/backend/app/kernel/rules.py", "App/backend/app/kernel/legal_change.py",
+                     "tests/agents/test_kernel_core_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
+        "id": "T76",
+        "category": "Information Disclosure",
+        "description": "The provenance export of the audit ledger names the taxpayers whose turns it records (G504)",
+        "owasp_llm": "LLM02",
+        "mitre_atlas": None,
+        "mitigation": (
+            "Questions and answers are digests in the ledger; user ids are pseudonymised. Residual: the pseudonym "
+            "is unsalted, so the export is an internal record and is not published"
+        ),
+        "evidence": ["App/backend/app/audit/provenance.py", "tests/agents/test_kernel_core_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
+        "id": "T77",
+        "category": "Tampering",
+        "description": (
+            "A node id or key reaching the Neo4j backend from a tool argument is interpreted as Cypher, reading "
+            "or deleting the graph (G506)"
+        ),
+        "owasp_llm": "LLM05",
+        "mitre_atlas": None,
+        "mitigation": (
+            "Only module-constant statements run (anything else raises); values are parameters; labels and "
+            "relationship types come from enums; walks are bounded; production requires verified TLS"
+        ),
+        "evidence": ["App/backend/app/graph/neo4j_store.py", "tests/agents/test_kernel_advanced_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
+        "id": "T78",
+        "category": "Information Disclosure",
+        "description": (
+            "The semantic layer is used to extract taxpayer-level data, by a non-staff caller, by model-written "
+            "SQL or through a small group (G507)"
+        ),
+        "owasp_llm": "LLM02",
+        "mitre_atlas": "AML.T0024",
+        "mitigation": (
+            "Staff-only tools (high risk, ura_staff/ura_admin); certified templates only, SELECT-only guard over "
+            "declared sources; read-only, row and time caps; groups below 10 suppressed; production needs Vault, "
+            "a DSA and a DPIA, and refuses plaintext credentials"
+        ),
+        "evidence": ["App/backend/app/semantic_layer/guard.py", "App/backend/app/semantic_layer/adapter.py",
+                     "App/backend/app/tools/semantic_layer_tools.py", "tests/agents/test_kernel_advanced_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
+        "id": "T79",
+        "category": "Tampering",
+        "description": (
+            "A stale figure reaches taxpayers: an outdated rate-table entry, a template that writes its own copy "
+            "of a figure, or a passage from an older edition outranking the figure in force (G510-G516)"
+        ),
+        "owasp_llm": "LLM09",
+        "mitre_atlas": None,
+        "mitigation": (
+            "Figures cite a document and page, with an evidence ledger re-checked against the PDFs in CI; "
+            "templates render from the table; derived-figure invariants; one Kampala clock and an explicit "
+            "caveat after the last table; edition-aware precedence ranks contradicting passages last. "
+            "Residual: one figure (duplicate logbook fee) is unconfirmed and says so"
+        ),
+        "evidence": ["App/backend/app/tax/evidence/rate_evidence.json", "App/backend/app/kernel/precedence.py",
+                     "tests/agents/test_rate_table_verification_2026_11.py",
+                     "tests/agents/test_kernel_freshness_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
+        "id": "T80",
+        "category": "Tampering",
+        "description": (
+            "A deployed image answers from rate tables that are not a recorded kernel release, because the "
+            "image was built from a commit CI never checked (G517)"
+        ),
+        "owasp_llm": "LLM03",
+        "mitre_atlas": None,
+        "mitigation": (
+            "The HF Space build runs the kernel release check and fails on an unrecorded release; /ready "
+            "reports the release answering"
+        ),
+        "evidence": ["App/deploy/hf-space/Dockerfile", "App/backend/app/kernel/status.py",
+                     "tests/agents/test_kernel_freshness_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
         "id": "T01",
         "category": "Spoofing",
         "description": "Attacker impersonates legitimate API client",

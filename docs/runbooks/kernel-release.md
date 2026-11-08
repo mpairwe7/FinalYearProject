@@ -1,0 +1,161 @@
+# Runbook: Releasing the Statutory Knowledge Kernel
+
+How to change a rate, a deadline, a penalty or a rule and get it to production (ADR-0033). The
+reference is [../KNOWLEDGE_KERNEL.md](../KNOWLEDGE_KERNEL.md).
+
+## When you need a release
+
+You need one whenever any of these change:
+
+- the rate tables (`App/backend/app/tax/data/FY*.json`);
+- the graph build (`app/graph/build.py`);
+- the kernel model (`app/kernel/model.py`);
+- the rules (`app/kernel/rules.py`).
+
+CI tells you. `test_the_running_kernel_is_a_recorded_release` fails, and so does:
+
+```bash
+cd App/backend && PYTHONPATH=. python -m app.kernel.release check
+```
+
+## Steps
+
+1. **Make the change and validate it.**
+
+   ```bash
+   cd App/backend
+   PYTHONPATH=. python -m pytest ../../tests/agents/test_statutory_kernel_2026_11.py -q
+   PYTHONPATH=. python -c "from app.graph.build import build_graph; from app.kernel.validate import check; print(check(build_graph()))"
+   ```
+
+   Every rate-table key must still be classified. A new key with an unfamiliar shape needs a prefix in
+   `_KERNEL_TAX_PREFIXES` and, if it is not a rate, a rule in `_KERNEL_KIND_RULES`. Give every figure a
+   `legal_basis`. One without a basis is served as unverified.
+
+2. **Choose a version.**
+   - A new fiscal year, a new node kind or a rule change is a minor version.
+   - A corrected figure or citation is a patch version.
+   - A change to the model's meaning is a major version.
+
+3. **Record the release.** An engineer records an `engineering_baseline`:
+
+   ```bash
+   PYTHONPATH=. python -m app.kernel.release record --version 1.2.0 --notes "FY2027-28 tables (Finance Acts 2027)"
+   ```
+
+   A release becomes `approved` only when the URA tax-policy reviewer is named:
+
+   ```bash
+   PYTHONPATH=. python -m app.kernel.release record --version 1.2.1 --notes "Reviewed" \
+     --reviewer "Name Surname" --role "Commissioner, Tax Policy"
+   ```
+
+   Recording a release also writes its snapshot, `app/kernel/snapshots/<hash prefix>.json.gz`. If
+   only the rules changed, the snapshot already exists and is unchanged.
+
+4. **Commit `app/kernel/releases.json` and any new snapshot with the change**, in the same pull request.
+
+## A new fiscal year from a Finance Act
+
+1. Draft `FY<next>.json` in the format of the current table, with a `legal_basis` for every figure.
+2. Propose it with the Acts' text:
+
+   ```bash
+   PYTHONPATH=. python -m app.kernel.legal_change propose --table FY2027-28.json \
+     --act finance-act-2027.pdf --act vat-amendment-2027.pdf
+   ```
+
+   The summary counts changes, corroborated, uncorroborated, removed and uncited. Treat each
+   uncorroborated change as unconfirmed: find its sentence in the Act, or correct the draft and
+   propose again.
+3. The reviewer decides:
+
+   ```bash
+   PYTHONPATH=. python -m app.kernel.legal_change approve --id FY2027-28-<hash> \
+     --reviewer "Name Surname" --role "Commissioner, Tax Policy"
+   ```
+
+4. Commit the table and release it as above, naming the same reviewer.
+
+## Approving the penalty and interest rules
+
+The rules in `app/kernel/rules.py` are `pending_tax_team_review`. To approve them:
+
+1. The reviewer checks each rule and its cited provision, using
+   `tests/agents/test_kernel_core_2026_11.py` and `app/kernel/scenarios.py` as the worked examples.
+2. Set the reviewed rules' entries in `REVIEW_STATUS` to `"approved"`. This changes the ruleset hash.
+3. Record a release naming the reviewer. Results from approved rules are no longer marked unverified,
+   unless a parameter they read is.
+
+## Replaying an audited turn
+
+Read the turn's `kernel_pin` from its audit row, then:
+
+```bash
+PYTHONPATH=. python -c "
+import datetime as dt
+from app.kernel import functions, release
+store = release.load_snapshot('1.1.0')
+print(functions.fact('vat_standard', dt.date(2026, 8, 15), store=store, version='1.1.0'))"
+```
+
+A snapshot whose hash does not match its release is refused. Do not edit it: restore it from git.
+
+## Verifying a figure against its source
+
+1. Find the figure in the law or URA's published guidance. Prefer, in order:
+   - the Act or amendment Act;
+   - URA's amendments booklet or Taxation Handbook for the year;
+   - a URA notice.
+
+   An FAQ page is not a gazetted schedule; a figure resting on one stays in `unverified`.
+2. Write the `legal_basis`: the provision, then the document and page.
+3. Add an entry to `app/tax/evidence/rate_evidence.json`:
+   - a document entry: fiscal years, key, value, `Data/pdfs/...`, page, the words that state the
+     figure (`needle`) and a verbatim `quote` around them;
+   - or a web entry: URL, `checked_on` and the quote.
+
+   Whitespace in quotes is collapsed.
+4. If the figure is defined from another (a quarter of, equal to), add it to
+   `kernel.validate.DERIVED`.
+5. Run `tests/agents/test_rate_table_verification_2026_11.py`, then record a release.
+
+A figure no current source confirms stays in `unverified`, with a note saying what was found and who
+can confirm it, and is listed under `open` in the evidence file.
+
+## Refining the kernel from use
+
+Each audit row (payload schema 5) carries `kernel_trace`: the concepts the kernel lacked and the
+uncited figures it served that turn, by key only. Monthly, or before a release:
+
+```bash
+PYTHONPATH=. python -m app.kernel.refine --tenant default --min-turns 3
+PYTHONPATH=. python -m app.kernel.legal_change list
+```
+
+The proposal lists, busiest first:
+
+- `kernel_miss`: a concept asked for in at least 3 turns that the kernel lacks. Declare it in the next
+  table, with its `legal_basis`, or reject it with a reason (for example, not a Ugandan tax).
+- `uncited_figure`: a figure served without a legal basis. Find and add its citation.
+- `evidence_conflict`: documents keep contradicting a figure. Check it against the statute, then
+  correct either the document or the table.
+
+Decide it with `legal_change approve` or `reject`. Approval records the decision only. The change
+still reaches the kernel through a table edit and a release.
+
+## What a release changes at runtime
+
+- New turns pin to the new version. Each audit row's `kernel_pin` shows which release answered it.
+- A graph approval suspended under the old release is refused on resume ("the kernel release changed
+  since the approval was asked"), and the taxpayer is asked again. That is deliberate. Expect a short
+  rise in re-asked approvals right after a deploy.
+
+## Investigating an evidence conflict
+
+The discrepancy queue receives items of type `evidence_conflict` when a document, FAQ or web
+passage states a different figure from the kernel's. The kernel's figure was served. Decide which is
+right:
+
+- **The passage is stale:** correct or tombstone it at its source.
+- **The kernel is wrong:** fix the rate table, then release (above).

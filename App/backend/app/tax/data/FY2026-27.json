@@ -95,13 +95,13 @@
     "penal_tax_late_filing_monthly_rate": 0.02,
     "penal_tax_late_filing_minimum_ugx": 200000,
     "late_payment_interest_monthly_rate": 0.02,
-    "stamp_duty_property_transfer": 0.01,
+    "stamp_duty_property_transfer": 0.015,
     "objection_timeline_days": 45,
     "paye_due_date_monthly": 15,
-    "passenger_baggage_allowance_usd": 500,
-    "efris_penalty_failure_to_issue_invoice": 6000000,
-    "efris_offline_sync_window_hours": 24,
-    "motor_vehicle_transfer_fee": 100000,
+    "passenger_baggage_allowance_usd": 2000,
+    "efris_penalty_failure_to_issue_invoice": 200000,
+    "efris_offline_sync_window_hours": 120,
+    "motor_vehicle_transfer_fee": 84000,
     "motor_vehicle_duplicate_logbook_fee": 50000,
     "motor_vehicle_personalized_plate_fee": 20000000,
     "motor_vehicle_advance_tax_passenger_per_seat": 20000,
@@ -112,7 +112,7 @@
     "agro_processing_local_raw_material_ratio": 0.8,
     "disability_income_tax_threshold_monthly": 1460000,
     "branch_repatriation_tax_rate": 0.15,
-    "vat_quarterly_registration_threshold": 37500000,
+    "vat_quarterly_registration_threshold": 75000000,
     "tax_appeals_tribunal_deadline_days": 30,
     "withholding_insurance_agent_commission": 0.1,
     "withholding_payment_service_provider_commission": 0.1,
@@ -153,19 +153,24 @@
     "tax_appeals_tribunal_deposit_rate": 0.3,
     "vat_input_efris_einvoice_required": 1,
     "vat_imported_services_reverse_charge_input_credit_allowed": 0,
-    "withholding_non_resident_service_contract": 0.15
+    "withholding_non_resident_service_contract": 0.15,
+    "motor_vehicle_commercial_transfer_fee": 104000,
+    "motor_vehicle_motorcycle_transfer_fee": 74000
   },
   "unverified": [
-    "vat_registration_threshold_annual",
     "environmental_levy_used_clothing",
     "withholding_royalty",
     "bik_housing_employment_income_rate",
     "bik_loan_statutory_interest_rate",
-    "fx_conversion_rule"
+    "fx_conversion_rule",
+    "motor_vehicle_transfer_fee",
+    "motor_vehicle_commercial_transfer_fee",
+    "motor_vehicle_motorcycle_transfer_fee",
+    "motor_vehicle_duplicate_logbook_fee"
   ],
   "legal_basis": {
     "vat_standard": "VAT Act (Cap 349), s.78 and Schedule 3",
-    "vat_registration_threshold_annual": "VAT (Amendment) Act 2026 - threshold raised to UGX 300,000,000",
+    "vat_registration_threshold_annual": "VAT (Amendment) Act 2026: annual registration threshold raised from UGX 150,000,000 to UGX 300,000,000 from 1 July 2026 (URA Tax Amendments FY2026-27, pp.4 and 13).",
     "paye_bands_resident": "Income Tax (Amendment) Act 2026, s.20(a) substituting Schedule 4 Part I",
     "paye_bands_non_resident": "Income Tax Act (Cap 338), Schedule 4 Part II - not amended in 2026",
     "corporation_tax": "Income Tax Act (Cap 338), s.6 and Schedule 4",
@@ -213,7 +218,7 @@
     "agro_processing_local_raw_material_ratio": "Income Tax Act (Cap 338), s.21(1)(y)",
     "disability_income_tax_threshold_monthly": "Income Tax Act (Cap 338), s.21(1)(v)",
     "branch_repatriation_tax_rate": "Income Tax Act (Cap 338), s.82",
-    "vat_quarterly_registration_threshold": "Value Added Tax Act (Cap 349), s.7",
+    "vat_quarterly_registration_threshold": "Value Added Tax Act (Cap 349), s.7(1)(a): register within twenty days after any three calendar months whose taxable supplies exceeded one quarter of the annual registration threshold (Domestic Tax Laws of Uganda (URA, July 2021), p.418); the annual threshold is UGX 300,000,000 from 1 July 2026 (VAT (Amendment) Act 2026; URA Tax Amendments FY2026-27, p.13).",
     "tax_appeals_tribunal_deadline_days": "Tax Appeals Tribunal Act (Cap 345), s.16",
     "withholding_insurance_agent_commission": "Income Tax (Amendment) Act 2026 (Act 21 of 2026), s.17 amending s.139 - 10% WHT under s.134 made a final tax",
     "withholding_payment_service_provider_commission": "Income Tax (Amendment) Act 2024, s.10 inserting s.118I and Schedule 4 Part XIV - 10% WHT on banking and payment service provider commissions",
@@ -228,8 +233,8 @@
     "efris_penal_tax_minimum_ugx": "Tax Procedures Code (Amendment) Act 2026, s.4 substituting s.93(1)-(2) - 10 currency points (UGX 200,000) or double the tax due, whichever is higher",
     "dts_unstamped_goods_penal_tax_minimum_currency_points": "Tax Procedures Code (Amendment) Act 2026, s.2 amending s.21(3) - double tax due or 100 currency points, whichever is higher",
     "dts_unstamped_goods_penal_tax_minimum_ugx": "Tax Procedures Code (Amendment) Act 2026, s.2 amending s.21(3) - 100 currency points (UGX 2,000,000) or double the tax due, whichever is higher",
-    "stamp_duty_motor_vehicle_transfer_ugx": "Stamp Duty (Amendment) Act 2026 (Act 16 of 2026), s.4 amending Schedule 2 - UGX 200,000 on registration or transfer of a motor vehicle",
-    "stamp_duty_motorcycle_transfer_ugx": "Stamp Duty (Amendment) Act 2026 (Act 16 of 2026), s.4 amending Schedule 2 - UGX 30,000 on registration or transfer of a motorcycle, tricycle or quadricycle",
+    "stamp_duty_motor_vehicle_transfer_ugx": "Stamp Duty (Amendment) Act 2026, s.4 inserting item 67 in Schedule 2: registration or transfer of a motor vehicle other than a motorcycle, tricycle or quadricycle, UGX 200,000 (URA Tax Amendments FY2026-27, p.17; URA, Ask the Commissioner General 34, 8 September 2026).",
+    "stamp_duty_motorcycle_transfer_ugx": "Stamp Duty (Amendment) Act 2026, s.4 inserting item 67 in Schedule 2: registration or transfer of a motorcycle, tricycle or quadricycle, UGX 30,000 (URA Tax Amendments FY2026-27, p.17).",
     "gaming_and_betting_tax_rate": "Lotteries and Gaming (Amendment) Act 2026 (Act 12 of 2026), s.2 substituting Schedule 4 - 30% of total money staked less payouts",
     "startup_citizen_exemption_capital_cap_ugx": "Income Tax (Amendment) Act 2025 (Act 13 of 2025), s.2(b) inserting s.21(1)(za) - 3-year income tax holiday for citizen startups with investment capital up to UGX 500,000,000",
     "startup_citizen_exemption_years": "Income Tax (Amendment) Act 2025 (Act 13 of 2025), s.2(b) inserting s.21(1)(za)",
@@ -255,7 +260,18 @@
     "tax_appeals_tribunal_deposit_rate": "Tax Appeals Tribunals Act (Cap 345), s.15; Data/dataset/ura_objections_and_appeals_faqs.csv - mandatory payment of 30% of tax assessed or part not in dispute, whichever is greater",
     "vat_input_efris_einvoice_required": "Value Added Tax Act (Cap 349), s.28 & Value Added Tax (Amendment) Act 2023, s.24; Data/dataset/ura_wholesale_and_retail_sector_faqs.csv - input tax credit requires valid EFRIS e-invoice/e-receipt",
     "vat_imported_services_reverse_charge_input_credit_allowed": "Value Added Tax Act (Cap 349), s.28; TAXATION-HANDBOOK-FY-2025-26-1 - reverse-charge VAT on imported services is not claimable as input tax credit",
-    "withholding_non_resident_service_contract": "Withholding-Tax-FY-2024-25-1.pdf; Income Tax Act (Cap 338), s.85 - 15% WHT on non-resident Ugandan-sourced service contracts (excludes employment contracts)"
+    "withholding_non_resident_service_contract": "Withholding-Tax-FY-2024-25-1.pdf; Income Tax Act (Cap 338), s.85 - 15% WHT on non-resident Ugandan-sourced service contracts (excludes employment contracts)",
+    "paye_due_date_monthly": "Income Tax Act, s.123(1) (2021 compilation numbering): tax withheld is paid within fifteen days after the end of the month (Domestic Tax Laws of Uganda (URA, July 2021), p.104); PAYE returns by the 15th day of the following month (URA Taxation Handbook FY2025-26 (8th ed.), p.34).",
+    "passenger_baggage_allowance_usd": "East African Community Customs Management Act 2004, Fifth Schedule Part B item 5, as amended: goods up to USD 2,000 per traveller outside Uganda for more than 24 hours, in accompanied baggage and declared (URA Taxation Handbook FY2025-26 (8th ed.), pp.64 and 80; URA Passenger Baggage and Personal Effects leaflet FY2024-25, p.2). Raised from USD 500 with effect from 1 July 2024.",
+    "stamp_duty_property_transfer": "Stamp Duty Act (Cap 339), Schedule 2 item 62(a) (63(a) in the revised edition): transfer, 1.5% of the total value (Domestic Tax Laws of Uganda (URA, July 2021), p.672). The 3% proposed by the Stamp Duty (Amendment) Bill 2026 is not among the enacted amendments (URA Tax Amendments FY2026-27, p.17).",
+    "efris_penalty_failure_to_issue_invoice": "Tax Procedures Code (Amendment) Act 2026, s.4 substituting s.93(2): failure to issue an e-invoice or e-receipt, or tampering with an electronic fiscal device, attracts penal tax of double the tax due or ten currency points (UGX 200,000), whichever is higher (URA Tax Amendments FY2026-27, p.16; Tax Procedures Code (Amendment) Bill 2026, p.3).",
+    "efris_offline_sync_window_hours": "URA EFRIS Handbook FY2026-27, pp.6-7 and 12: e-invoices and e-receipts may be issued offline for up to five days; beyond five days the device must connect and upload. Administrative guidance, not a statutory period.",
+    "motor_vehicle_transfer_fee": "Traffic and Road Safety Act (Cap 361) fees as published by URA: transfer of ownership UGX 84,000 for motor cars and dual-purpose vehicles, UGX 104,000 for commercial vehicles, trailers, tractors and engineering plant, UGX 74,000 for motorcycles (URA, Ask the Commissioner General 34, 8 September 2026; URA The Taxman, 24 October 2022).",
+    "motor_vehicle_commercial_transfer_fee": "Traffic and Road Safety Act (Cap 361) fees as published by URA: transfer of ownership UGX 84,000 for motor cars and dual-purpose vehicles, UGX 104,000 for commercial vehicles, trailers, tractors and engineering plant, UGX 74,000 for motorcycles (URA, Ask the Commissioner General 34, 8 September 2026; URA The Taxman, 24 October 2022).",
+    "motor_vehicle_motorcycle_transfer_fee": "Traffic and Road Safety Act (Cap 361) fees as published by URA: transfer of ownership UGX 84,000 for motor cars and dual-purpose vehicles, UGX 104,000 for commercial vehicles, trailers, tractors and engineering plant, UGX 74,000 for motorcycles (URA, Ask the Commissioner General 34, 8 September 2026; URA The Taxman, 24 October 2022).",
+    "motor_vehicle_personalized_plate_fee": "Finance Act 2016, s.4 and Schedule item 1, revising fees under the Traffic and Road Safety Act (Cap 361): registration of a personalised number plate for a motor vehicle UGX 20,000,000 (Domestic Tax Laws of Uganda (URA, July 2021), p.1059).",
+    "motor_vehicle_advance_tax_passenger_per_seat": "Income Tax Act, s.123A and the rates schedule (2021 compilation numbering) for advance tax: goods vehicles UGX 50,000 per tonne of load capacity per year; passenger service vehicles UGX 20,000 per seat per year (Domestic Tax Laws of Uganda (URA, July 2021), p.115; URA Advance Tax on the Transport Sector FY2024-25, p.2).",
+    "motor_vehicle_advance_tax_goods_per_tonne": "Income Tax Act, s.123A and the rates schedule (2021 compilation numbering) for advance tax: goods vehicles UGX 50,000 per tonne of load capacity per year; passenger service vehicles UGX 20,000 per seat per year (Domestic Tax Laws of Uganda (URA, July 2021), p.115; URA Advance Tax on the Transport Sector FY2024-25, p.2)."
   },
   "notes": {
     "residency_days_threshold": "A resident individual is a person who has a permanent home in Uganda; or is present in Uganda: for a period of 183 days or more in any twelve (12) months period that commences or ends during the year of income; or during the year of income and in each of the two preceding years of income, for periods averaging 122 days in each such year of income; or is an employee or official of the government of Uganda posted abroad during the year of income.",
@@ -272,7 +288,11 @@
     "withholding_telecom_commission": "Commission paid by a telecommunications service provider for telecom retail services, mobile network services or mobile money services.",
     "rental_tax_individual": "The 2026 Act (s.12, inserting s.124(1a)) lets an individual liable to rental tax file a provisional return monthly. The rate and annual threshold are unchanged.",
     "vat_registration_threshold_annual": "Businesses below UGX 300,000,000 annual turnover are no longer required to register; voluntary registration remains available.",
-    "customs_duty_common": "Indicative EAC CET band for finished consumer goods. The binding rate is the tariff line for the specific HS code."
+    "customs_duty_common": "Indicative EAC CET band for finished consumer goods. The binding rate is the tariff line for the specific HS code.",
+    "efris_penalty_failure_to_issue_invoice": "The minimum only; the penal tax is the higher of this and double the tax due. Until 30 June 2026 the floor was UGX 6,000,000 (300 currency points) with the tax due, not double.",
+    "motor_vehicle_transfer_fee": "Private cars. Commercial vehicles UGX 104,000; motorcycles UGX 74,000. Stamp duty on the transfer is separate (UGX 200,000 vehicle, UGX 30,000 motorcycle from 1 July 2026). Registration is now administered by the Ministry of Works and Transport.",
+    "motor_vehicle_duplicate_logbook_fee": "No current source found. The last gazetted schedule found, Traffic and Road Safety (Fees), lists a duplicate registration book at UGX 10,000 (Domestic Tax Laws of Uganda, July 2021, p.966), but that schedule's transfer fees were later raised, so it is likely out of date too. Registration is administered by the Ministry of Works and Transport; confirm with its Licensing Office before relying on this figure.",
+    "stamp_duty_motorcycle_transfer_ugx": "The Bill (p.3) proposed UGX 50,000; URA's summary of the enacted Act gives UGX 30,000, which is used."
   },
   "sources": [
     {
@@ -322,6 +342,36 @@
       "title": "UNBS Imports E-Portal Integrated with URA ASYCUDA World & Legal Notice No. 14 of 2025 (Compulsory Uganda Standards Effective 1 January 2026)",
       "publisher": "Uganda National Bureau of Standards (UNBS)",
       "url": "https://eportal.unbs.go.ug/"
+    },
+    {
+      "id": "dtl-july-2021",
+      "title": "Domestic Tax Laws of Uganda (compilation, July 2021)",
+      "publisher": "Uganda Revenue Authority",
+      "url": "Data/pdfs/10580_DT_LAWS_JULY_2021.pdf"
+    },
+    {
+      "id": "ura-handbook-fy2025-26",
+      "title": "A Guide to Taxation in Uganda, Eighth Edition (FY2025-26)",
+      "publisher": "Uganda Revenue Authority",
+      "url": "Data/pdfs/TAXATION-HANDBOOK-FY-2025-26-1.pdf"
+    },
+    {
+      "id": "ura-amendments-fy2026-27-pdf",
+      "title": "Tax Amendments FY2026-27 (booklet)",
+      "publisher": "Uganda Revenue Authority",
+      "url": "Data/pdfs/Taxes-Amendments-2026-27.pdf"
+    },
+    {
+      "id": "ura-efris-handbook-fy2026-27",
+      "title": "EFRIS Handbook FY2026-27 (English)",
+      "publisher": "Uganda Revenue Authority",
+      "url": "Data/pdfs/URA-EFRIS-Handbook-FY2026-27-English.pdf"
+    },
+    {
+      "id": "ura-ask-cg-34",
+      "title": "Ask URA Commissioner General 34 (8 September 2026)",
+      "publisher": "Uganda Revenue Authority",
+      "url": "https://ura.go.ug/en/ask-ura-commissioner-general-34/"
     }
   ]
 }

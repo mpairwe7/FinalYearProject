@@ -139,12 +139,15 @@ class UnverifiedFigureTests(unittest.TestCase):
 
     def test_an_unverified_figure_is_caveated(self) -> None:
         result = ToolRegistry.call(
-            "check_vat_registration",
-            {"annual_turnover": 400_000_000, "fiscal_year": FY26},
+            "calculate_withholding",
+            {"payment_type": "royalty", "amount": 1_000_000, "fiscal_year": FY26},
         )
         self.assertTrue(result["ok"])
-        self.assertIn("vat_registration_threshold_annual", result["rate_basis"]["unverified"])
+        self.assertIn("withholding_royalty", result["rate_basis"]["unverified"])
         self.assertIn("not yet reconciled", result["verification_warning"])
+        # Confirmed from URA's FY2026-27 amendments booklet on 2026-11-08: no caveat.
+        vat = ToolRegistry.call("check_vat_registration", {"annual_turnover": 400_000_000, "fiscal_year": FY26})
+        self.assertNotIn("verification_warning", vat)
 
     def test_a_verified_figure_in_the_same_table_is_not_caveated(self) -> None:
         result = ToolRegistry.call(

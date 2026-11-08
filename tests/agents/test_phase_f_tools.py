@@ -21,7 +21,7 @@ def test_additional_per_head_calculators_fy2026() -> None:
         {"instrument_type": "property_transfer", "value_ugx": 150_000_000, "fiscal_year": "FY2026-27"},
     )
     assert sd_land["ok"] is True
-    assert sd_land["stamp_duty"] == 1_500_000.0
+    assert sd_land["stamp_duty"] == 2_250_000.0  # 1.5% (Stamp Duty Act Schedule 2 item 62(a))
 
     sd_mv = ToolRegistry.call(
         "calculate_stamp_duty",

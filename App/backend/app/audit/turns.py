@@ -34,8 +34,9 @@ logger = logging.getLogger(__name__)
 
 #: Version of the ``generate`` payload layout. 1 had no channel, provenance
 #: or citation digests and kept tool calls raw; 2 had no ``disposition``, because
-#: only a finished turn wrote a row. Rows keep the layout they were written with.
-TURN_PAYLOAD_SCHEMA = 3
+#: only a finished turn wrote a row; 3 had no ``kernel_pin`` and 4 no
+#: ``kernel_trace`` (ADR-0033). Rows keep the layout they were written with.
+TURN_PAYLOAD_SCHEMA = 5
 
 _MAX_LISTED = 10
 _PROVENANCE_TTL_S = 60.0
@@ -66,6 +67,25 @@ def _prompt_template_sha256() -> str:
     return _sha256(SYSTEM_PROMPT)
 
 
+def _kernel_pin() -> dict[str, Any] | None:
+    try:
+        from ..kernel.pin import active_pin
+
+        pin = active_pin()
+    except Exception:
+        return None
+    return dict(pin) if pin else None
+
+
+def _kernel_trace() -> dict[str, Any] | None:
+    try:
+        from ..kernel.trace import snapshot
+
+        return snapshot()
+    except Exception:
+        return None
+
+
 def provenance() -> dict[str, Any]:
     """Build, prompt and corpus identity, cached briefly (read on every turn)."""
     global _provenance_cache
@@ -88,6 +108,9 @@ def provenance() -> dict[str, Any]:
     return dict(value)
 
 
+_TOOL_NAME_RE = re.compile(r"[A-Za-z][A-Za-z0-9_.:-]{0,79}")
+
+
 def _tool_call_digests(tool_calls: Iterable[Any]) -> list[dict[str, Any]]:
     """Tool name, iteration and an arguments digest — never raw arguments or results.
 
@@ -97,6 +120,10 @@ def _tool_call_digests(tool_calls: Iterable[Any]) -> list[dict[str, Any]]:
     """
     entries: list[dict[str, Any]] = []
     for call in list(tool_calls or [])[:_MAX_LISTED]:
+        if isinstance(call, str) and _TOOL_NAME_RE.fullmatch(call):
+            # A path that recorded only the name still names the tool (the REST loop did);
+            # a string that is not a tool name is junk and is dropped, as before.
+            call = {"name": call}
         if not isinstance(call, dict):
             continue
         arguments = call.get("arguments")
@@ -309,6 +336,12 @@ def build_turn_payload(
         "figure_lock": result.get("_figure_lock") or {},
         "flag_variants_sha256": _sha256(flag_variants) if flag_variants else "",
         "provenance": provenance(),
+        # The kernel release, ruleset and as-of date the turn answered under,
+        # so the answer can be replayed against the same knowledge (ADR-0033).
+        # Carried on the result by the turn's scope, which closes before this row is
+        # built; the live context is the fallback for callers inside the scope.
+        "kernel_pin": result.get("_kernel_pin") or _kernel_pin(),
+        "kernel_trace": result.get("_kernel_trace") or _kernel_trace(),
     }
     try:
         from ..flags import flags

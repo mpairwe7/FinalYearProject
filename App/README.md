@@ -28,9 +28,9 @@ App/
 │   │   ├── speech_service.py # SpeechModel (ASR/Whisper + TTS/Piper + MT + Sunbird fallback)
 │   │   ├── service.py       # ChatModel (RAG orchestrator + agentic routing)
 │   │   ├── llm.py           # Qwen3-8B vLLM + local generation + tool-calling
-│   │   ├── flags.py         # Feature flag registry (90 flags, cohort rollout)
+│   │   ├── flags.py         # Feature flag registry (91 flags, cohort rollout)
 │   │   ├── agents/          # Supervisor router + agent graph runtime
-│   │   ├── tools/           # 72 MCP tools across 18 namespaces (calculators, 10-MDA NTR/PRN, onboarding, B2G/UESW, relief, EFRIS, rates, calendar, RAG, education, empathy, escalate, connectors)
+│   │   ├── tools/           # 79 MCP tools across 19 namespaces in dev, 56/13 in prod (calculators, 10-MDA NTR/PRN, onboarding, B2G/UESW, relief, EFRIS, rates, calendar, RAG, education, empathy, escalate, connectors)
 │   │   ├── workflows/       # 21 YAML-driven guided journeys (TIN, filing, PRN, Cross-MDA NTR, New-Taxpayer Relief, TCC, objections, customs) + Journey Copilot
 │   │   ├── scenario_planner.py # Deterministic multi-tool planner & Verified Statutory Facts injection
 │   │   ├── calculator_router.py # Single-calculator fast path & multi-turn figure carryover
@@ -1090,6 +1090,8 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | `FLAG_WORKFLOWS` | YAML-driven durable multi-step workflow guides | `true` |
 | `FLAG_HANDOFF_SUMMARIES` | Structured human handoff packets + escalation metadata | `true` |
 | `FLAG_MEMORY_ENABLED` | Inject consented personal memory facts into prompts | `false` |
+| `FLAG_SEMANTIC_LAYER` | Staff-only certified aggregate metrics (`semantic_layer` namespace); production needs Vault, a data-sharing agreement, a DPIA and a certified metric (ADR-0033) | `false` |
+| `GRAPH_STORE_BACKEND` | `memory`, or `neo4j` (needs `NEO4J_URI` with `neo4j+s://`/`bolt+s://`, `NEO4J_USER`, `NEO4J_PASSWORD`) for the graph the tools read (ADR-0033) | `memory` |
 | `deadline_reminders` consent | Proactive contact is a separate consent purpose from personalization — see [`docs/deadline-reminders.md`](docs/deadline-reminders.md) | opt-in |
 | **Voice-first flags (Phase 23)** | | |
 | `FLAG_VOICE_STREAMING` | Enable WebSocket streaming voice chat (VAD + barge-in) | `false` |

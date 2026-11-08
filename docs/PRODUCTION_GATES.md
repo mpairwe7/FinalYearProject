@@ -25,6 +25,9 @@ python3 scripts/validate_env.py --env production
 | G29 DPO | `DPO_RUN` without `EVAL_GATE_OK` is refused. | A measured eval, then a trainer. The job still exits 2 with no trainer wired. |
 | G30 tenancy | `MULTI_TENANT_RLS_APPLIED=true` when multi-tenant is on. | Apply `infra/postgres/rls.sql` yourself. The app predicate is not RLS. |
 | G31 CMS / seed | `SEED_PROTOTYPE` must be false. Overrides stay exact-match. | A git-backed FAQ editor later. |
+| G517 kernel release (HF Space build) | The Space build runs `python -m app.kernel.release check`; an image whose rate tables, graph build or rules are not a recorded release fails the build. | Nothing further: CI checks the same on every commit. |
+| G506 graph backend | `GRAPH_STORE_BACKEND` is `memory` or `neo4j`; `neo4j` needs `NEO4J_URI` with `neo4j+s://` or `bolt+s://`, `NEO4J_USER` and `NEO4J_PASSWORD`. | A threshold from ADR-0033 met (`python -m app.graph.neo4j_store`). None is today. |
+| G507 semantic layer | When `FLAG_SEMANTIC_LAYER` is on: https `VAULT_ADDR`, `SEMANTIC_LAYER_VAULT_PATH`, `SEMANTIC_LAYER_DSA_REF`, `SEMANTIC_LAYER_DPIA_REF`, at least one certified metric, and no `SEMANTIC_LAYER_DSN`. | A data-sharing agreement, a DPIA, Vault, a read-only analytical database and a data owner certifying metrics. See `docs/runbooks/graph-backend-and-semantic-layer.md`. |
 | G345 turn deadline | `AGENTIC_TURN_DEADLINE_S`, when set, must be a number above 0. | Unset uses the 120 s default. See `docs/runbooks/agent-fault-tolerance.md`. |
 | G33 HPA/KEDA | Not a start blocker. | Measured p95: `docs/runbooks/capacity-slo.md` (2026-08-19). Apply `infra/k8s/` only after the hybrid vs blended SLI is agreed — do not invent replica counts. |
 | G34 chaos | Not a start blocker. | Cluster game day. `tests/chaos/` is in-process only. |

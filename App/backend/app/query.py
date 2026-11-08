@@ -1529,7 +1529,8 @@ def current_fiscal_year() -> str:
         return "FY2026-27"
 
 
-CURRENT_FISCAL_YEAR = current_fiscal_year()
+# No module-level ``CURRENT_FISCAL_YEAR``: computed once at import, it kept the old
+# year in a process running across 1 July. Call current_fiscal_year().
 
 _FY_EXPLICIT_RE = re.compile(
     r"\bFY\s*(20\d{2})\s*[-/]\s*(?:20)?(\d{2})\b",

@@ -93,13 +93,13 @@
   },
   {
     "id": "REL-EN-007",
-    "title": "EN Statutory Case #7: 37,500,000",
+    "title": "EN Statutory Case #7: 75,000,000",
     "locale": "en",
     "domain": "Domestic Taxes (PAYE & PWD)",
     "statute": "VAT Act s.7",
     "query": "Could you clarify: What is the mandatory quarterly VAT registration threshold in 3 consecutive months?",
     "required_concepts": [
-      "37,500,000",
+      "75,000,000",
       "consecutive"
     ],
     "forbidden_hallucinations": [
@@ -108,13 +108,13 @@
   },
   {
     "id": "REL-EN-008",
-    "title": "EN Statutory Case #8: 150,000,000",
+    "title": "EN Statutory Case #8: 300,000,000",
     "locale": "en",
     "domain": "Value Added Tax (VAT & Thresholds)",
     "statute": "VAT Act s.7",
     "query": "I need to know: What is the annual mandatory VAT registration threshold?",
     "required_concepts": [
-      "150,000,000",
+      "300,000,000",
       "annual"
     ],
     "forbidden_hallucinations": [
@@ -170,13 +170,13 @@
   },
   {
     "id": "REL-EN-012",
-    "title": "EN Statutory Case #12: 6,000,000",
+    "title": "EN Statutory Case #12: 200,000",
     "locale": "en",
     "domain": "International Taxation & Corporate",
-    "statute": "TPCA s.19B",
+    "statute": "TPCA s.93(2)",
     "query": "Could you clarify: What is the penalty under TPCA s.19B for failing to issue an EFRIS receipt?",
     "required_concepts": [
-      "6,000,000",
+      "200,000",
       "penalty",
       "double"
     ],
@@ -186,13 +186,13 @@
   },
   {
     "id": "REL-EN-013",
-    "title": "EN Statutory Case #13: 24",
+    "title": "EN Statutory Case #13: 5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano",
     "locale": "en",
     "domain": "Natural Conversational & Civic Intelligence",
-    "statute": "TPCA EFRIS Regs",
+    "statute": "URA EFRIS Handbook",
     "query": "I need to know: Within how many hours must offline EFRIS transactions be synchronized?",
     "required_concepts": [
-      "24",
+      "5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano",
       "offline"
     ],
     "forbidden_hallucinations": [
@@ -248,13 +248,13 @@
   },
   {
     "id": "REL-EN-017",
-    "title": "EN Statutory Case #17: 500",
+    "title": "EN Statutory Case #17: 2,000",
     "locale": "en",
     "domain": "Excise Duty & Specific Rates",
     "statute": "EAC-CMA 5th Sch",
     "query": "Could you clarify: What is the passenger baggage duty-free allowance for returning travelers?",
     "required_concepts": [
-      "500",
+      "2,000",
       "passenger baggage"
     ],
     "forbidden_hallucinations": [
@@ -325,14 +325,14 @@
   },
   {
     "id": "REL-EN-022",
-    "title": "EN Statutory Case #22: 1,450",
+    "title": "EN Statutory Case #22: 1,750",
     "locale": "en",
     "domain": "Value Added Tax (VAT & Thresholds)",
     "statute": "Excise Duty Act",
     "query": "Could you clarify: What are the specific excise duty rates per litre on petrol and diesel?",
     "required_concepts": [
-      "1,450",
-      "1,130",
+      "1,750",
+      "1,430",
       "petrol",
       "diesel"
     ],
@@ -762,13 +762,13 @@
   },
   {
     "id": "REL-EN-050",
-    "title": "EN Statutory Case #50: 37,500,000",
+    "title": "EN Statutory Case #50: 75,000,000",
     "locale": "en",
     "domain": "Value Added Tax (VAT & Thresholds)",
     "statute": "VAT Act s.7",
     "query": "What is the mandatory quarterly VAT registration threshold in 3 consecutive months?",
     "required_concepts": [
-      "37,500,000",
+      "75,000,000",
       "consecutive"
     ],
     "forbidden_hallucinations": [
@@ -777,13 +777,13 @@
   },
   {
     "id": "REL-EN-051",
-    "title": "EN Statutory Case #51: 150,000,000",
+    "title": "EN Statutory Case #51: 300,000,000",
     "locale": "en",
     "domain": "Customs & EAC Common External Tariff",
     "statute": "VAT Act s.7",
     "query": "Please tell me: What is the annual mandatory VAT registration threshold?",
     "required_concepts": [
-      "150,000,000",
+      "300,000,000",
       "annual"
     ],
     "forbidden_hallucinations": [
@@ -839,13 +839,13 @@
   },
   {
     "id": "REL-EN-055",
-    "title": "EN Statutory Case #55: 6,000,000",
+    "title": "EN Statutory Case #55: 200,000",
     "locale": "en",
     "domain": "Natural Conversational & Civic Intelligence",
-    "statute": "TPCA s.19B",
+    "statute": "TPCA s.93(2)",
     "query": "What is the penalty under TPCA s.19B for failing to issue an EFRIS receipt?",
     "required_concepts": [
-      "6,000,000",
+      "200,000",
       "penalty",
       "double"
     ],
@@ -855,13 +855,13 @@
   },
   {
     "id": "REL-EN-056",
-    "title": "EN Statutory Case #56: 24",
+    "title": "EN Statutory Case #56: 5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano",
     "locale": "en",
     "domain": "Domestic Taxes (PAYE & PWD)",
-    "statute": "TPCA EFRIS Regs",
+    "statute": "URA EFRIS Handbook",
     "query": "Please tell me: Within how many hours must offline EFRIS transactions be synchronized?",
     "required_concepts": [
-      "24",
+      "5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano",
       "offline"
     ],
     "forbidden_hallucinations": [
@@ -917,13 +917,13 @@
   },
   {
     "id": "REL-EN-060",
-    "title": "EN Statutory Case #60: 500",
+    "title": "EN Statutory Case #60: 2,000",
     "locale": "en",
     "domain": "Tax Procedures & Disputes (TPCA)",
     "statute": "EAC-CMA 5th Sch",
     "query": "What is the passenger baggage duty-free allowance for returning travelers?",
     "required_concepts": [
-      "500",
+      "2,000",
       "passenger baggage"
     ],
     "forbidden_hallucinations": [
@@ -994,14 +994,14 @@
   },
   {
     "id": "REL-EN-065",
-    "title": "EN Statutory Case #65: 1,450",
+    "title": "EN Statutory Case #65: 1,750",
     "locale": "en",
     "domain": "Customs & EAC Common External Tariff",
     "statute": "Excise Duty Act",
     "query": "What are the specific excise duty rates per litre on petrol and diesel?",
     "required_concepts": [
-      "1,450",
-      "1,130",
+      "1,750",
+      "1,430",
       "petrol",
       "diesel"
     ],
@@ -1431,13 +1431,13 @@
   },
   {
     "id": "REL-EN-093",
-    "title": "EN Statutory Case #93: 37,500,000",
+    "title": "EN Statutory Case #93: 75,000,000",
     "locale": "en",
     "domain": "Customs & EAC Common External Tariff",
     "statute": "VAT Act s.7",
     "query": "I need to know: What is the mandatory quarterly VAT registration threshold in 3 consecutive months?",
     "required_concepts": [
-      "37,500,000",
+      "75,000,000",
       "consecutive"
     ],
     "forbidden_hallucinations": [
@@ -1446,13 +1446,13 @@
   },
   {
     "id": "REL-EN-094",
-    "title": "EN Statutory Case #94: 150,000,000",
+    "title": "EN Statutory Case #94: 300,000,000",
     "locale": "en",
     "domain": "Excise Duty & Specific Rates",
     "statute": "VAT Act s.7",
     "query": "As a taxpayer: What is the annual mandatory VAT registration threshold?",
     "required_concepts": [
-      "150,000,000",
+      "300,000,000",
       "annual"
     ],
     "forbidden_hallucinations": [
@@ -1508,13 +1508,13 @@
   },
   {
     "id": "REL-EN-098",
-    "title": "EN Statutory Case #98: 6,000,000",
+    "title": "EN Statutory Case #98: 200,000",
     "locale": "en",
     "domain": "Domestic Taxes (PAYE & PWD)",
-    "statute": "TPCA s.19B",
+    "statute": "TPCA s.93(2)",
     "query": "I need to know: What is the penalty under TPCA s.19B for failing to issue an EFRIS receipt?",
     "required_concepts": [
-      "6,000,000",
+      "200,000",
       "penalty",
       "double"
     ],
@@ -1524,13 +1524,13 @@
   },
   {
     "id": "REL-EN-099",
-    "title": "EN Statutory Case #99: 24",
+    "title": "EN Statutory Case #99: 5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano",
     "locale": "en",
     "domain": "Value Added Tax (VAT & Thresholds)",
-    "statute": "TPCA EFRIS Regs",
+    "statute": "URA EFRIS Handbook",
     "query": "As a taxpayer: Within how many hours must offline EFRIS transactions be synchronized?",
     "required_concepts": [
-      "24",
+      "5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano",
       "offline"
     ],
     "forbidden_hallucinations": [
@@ -1586,13 +1586,13 @@
   },
   {
     "id": "REL-EN-103",
-    "title": "EN Statutory Case #103: 500",
+    "title": "EN Statutory Case #103: 2,000",
     "locale": "en",
     "domain": "International Taxation & Corporate",
     "statute": "EAC-CMA 5th Sch",
     "query": "I need to know: What is the passenger baggage duty-free allowance for returning travelers?",
     "required_concepts": [
-      "500",
+      "2,000",
       "passenger baggage"
     ],
     "forbidden_hallucinations": [
@@ -1663,14 +1663,14 @@
   },
   {
     "id": "REL-EN-108",
-    "title": "EN Statutory Case #108: 1,450",
+    "title": "EN Statutory Case #108: 1,750",
     "locale": "en",
     "domain": "Excise Duty & Specific Rates",
     "statute": "Excise Duty Act",
     "query": "I need to know: What are the specific excise duty rates per litre on petrol and diesel?",
     "required_concepts": [
-      "1,450",
-      "1,130",
+      "1,750",
+      "1,430",
       "petrol",
       "diesel"
     ],
@@ -2100,13 +2100,13 @@
   },
   {
     "id": "REL-EN-136",
-    "title": "EN Statutory Case #136: 37,500,000",
+    "title": "EN Statutory Case #136: 75,000,000",
     "locale": "en",
     "domain": "Excise Duty & Specific Rates",
     "statute": "VAT Act s.7",
     "query": "Please tell me: What is the mandatory quarterly VAT registration threshold in 3 consecutive months?",
     "required_concepts": [
-      "37,500,000",
+      "75,000,000",
       "consecutive"
     ],
     "forbidden_hallucinations": [
@@ -2115,13 +2115,13 @@
   },
   {
     "id": "REL-EN-137",
-    "title": "EN Statutory Case #137: 150,000,000",
+    "title": "EN Statutory Case #137: 300,000,000",
     "locale": "en",
     "domain": "Tax Procedures & Disputes (TPCA)",
     "statute": "VAT Act s.7",
     "query": "Could you clarify: What is the annual mandatory VAT registration threshold?",
     "required_concepts": [
-      "150,000,000",
+      "300,000,000",
       "annual"
     ],
     "forbidden_hallucinations": [
@@ -2177,13 +2177,13 @@
   },
   {
     "id": "REL-EN-141",
-    "title": "EN Statutory Case #141: 6,000,000",
+    "title": "EN Statutory Case #141: 200,000",
     "locale": "en",
     "domain": "Value Added Tax (VAT & Thresholds)",
-    "statute": "TPCA s.19B",
+    "statute": "TPCA s.93(2)",
     "query": "Please tell me: What is the penalty under TPCA s.19B for failing to issue an EFRIS receipt?",
     "required_concepts": [
-      "6,000,000",
+      "200,000",
       "penalty",
       "double"
     ],
@@ -2193,13 +2193,13 @@
   },
   {
     "id": "REL-EN-142",
-    "title": "EN Statutory Case #142: 24",
+    "title": "EN Statutory Case #142: 5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano",
     "locale": "en",
     "domain": "Customs & EAC Common External Tariff",
-    "statute": "TPCA EFRIS Regs",
+    "statute": "URA EFRIS Handbook",
     "query": "Could you clarify: Within how many hours must offline EFRIS transactions be synchronized?",
     "required_concepts": [
-      "24",
+      "5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano",
       "offline"
     ],
     "forbidden_hallucinations": [
@@ -2255,13 +2255,13 @@
   },
   {
     "id": "REL-EN-146",
-    "title": "EN Statutory Case #146: 500",
+    "title": "EN Statutory Case #146: 2,000",
     "locale": "en",
     "domain": "Natural Conversational & Civic Intelligence",
     "statute": "EAC-CMA 5th Sch",
     "query": "Please tell me: What is the passenger baggage duty-free allowance for returning travelers?",
     "required_concepts": [
-      "500",
+      "2,000",
       "passenger baggage"
     ],
     "forbidden_hallucinations": [
@@ -2332,14 +2332,14 @@
   },
   {
     "id": "REL-EN-151",
-    "title": "EN Statutory Case #151: 1,450",
+    "title": "EN Statutory Case #151: 1,750",
     "locale": "en",
     "domain": "Tax Procedures & Disputes (TPCA)",
     "statute": "Excise Duty Act",
     "query": "Please tell me: What are the specific excise duty rates per litre on petrol and diesel?",
     "required_concepts": [
-      "1,450",
-      "1,130",
+      "1,750",
+      "1,430",
       "petrol",
       "diesel"
     ],
@@ -2910,13 +2910,13 @@
   },
   {
     "id": "REL-LG-018",
-    "title": "LG Vernacular Case #18: 24",
+    "title": "LG Vernacular Case #18: 5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano",
     "locale": "lg",
     "domain": "Tax Procedures & Disputes (TPCA)",
     "statute": "EFRIS",
     "query": "Nsaba onnyonnyole: Bwe mba nga sirina yintaneti, nnina essaawa mmeka okusindika invoice za EFRIS?",
     "required_concepts": [
-      "24",
+      "5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano",
       "efris"
     ],
     "forbidden_hallucinations": [
@@ -3032,13 +3032,13 @@
   },
   {
     "id": "REL-LG-026",
-    "title": "LG Vernacular Case #26: 1%",
+    "title": "LG Vernacular Case #26: 1.5%",
     "locale": "lg",
     "domain": "International Taxation & Corporate",
     "statute": "Stamp Duty",
     "query": "Bambi \u014b\u014bamba: Bwe mba ng'enda okugula ettaka nsasula bitundu bimeka ebya stamp duty?",
     "required_concepts": [
-      "1%",
+      "1.5%",
       "stamp duty"
     ],
     "forbidden_hallucinations": [
@@ -3311,13 +3311,13 @@
   },
   {
     "id": "REL-LG-044",
-    "title": "LG Vernacular Case #44: 24",
+    "title": "LG Vernacular Case #44: 5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano",
     "locale": "lg",
     "domain": "Customs & EAC Common External Tariff",
     "statute": "EFRIS",
     "query": "Mwattu: Bwe mba nga sirina yintaneti, nnina essaawa mmeka okusindika invoice za EFRIS?",
     "required_concepts": [
-      "24",
+      "5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano",
       "efris"
     ],
     "forbidden_hallucinations": [
@@ -3433,13 +3433,13 @@
   },
   {
     "id": "REL-LG-052",
-    "title": "LG Vernacular Case #52: 1%",
+    "title": "LG Vernacular Case #52: 1.5%",
     "locale": "lg",
     "domain": "Excise Duty & Specific Rates",
     "statute": "Stamp Duty",
     "query": "Njagala kumanya: Bwe mba ng'enda okugula ettaka nsasula bitundu bimeka ebya stamp duty?",
     "required_concepts": [
-      "1%",
+      "1.5%",
       "stamp duty"
     ],
     "forbidden_hallucinations": [
@@ -3712,13 +3712,13 @@
   },
   {
     "id": "REL-LG-070",
-    "title": "LG Vernacular Case #70: 24",
+    "title": "LG Vernacular Case #70: 5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano",
     "locale": "lg",
     "domain": "Domestic Taxes (PAYE & PWD)",
     "statute": "EFRIS",
     "query": "Bwe mba nga sirina yintaneti, nnina essaawa mmeka okusindika invoice za EFRIS?",
     "required_concepts": [
-      "24",
+      "5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano",
       "efris"
     ],
     "forbidden_hallucinations": [
@@ -3834,13 +3834,13 @@
   },
   {
     "id": "REL-LG-078",
-    "title": "LG Vernacular Case #78: 1%",
+    "title": "LG Vernacular Case #78: 1.5%",
     "locale": "lg",
     "domain": "Value Added Tax (VAT & Thresholds)",
     "statute": "Stamp Duty",
     "query": "Nsaba onnyonnyole: Bwe mba ng'enda okugula ettaka nsasula bitundu bimeka ebya stamp duty?",
     "required_concepts": [
-      "1%",
+      "1.5%",
       "stamp duty"
     ],
     "forbidden_hallucinations": [
@@ -4113,13 +4113,13 @@
   },
   {
     "id": "REL-LG-096",
-    "title": "LG Vernacular Case #96: 24",
+    "title": "LG Vernacular Case #96: 5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano",
     "locale": "lg",
     "domain": "International Taxation & Corporate",
     "statute": "EFRIS",
     "query": "Bambi \u014b\u014bamba: Bwe mba nga sirina yintaneti, nnina essaawa mmeka okusindika invoice za EFRIS?",
     "required_concepts": [
-      "24",
+      "5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano",
       "efris"
     ],
     "forbidden_hallucinations": [
@@ -4235,13 +4235,13 @@
   },
   {
     "id": "REL-LG-104",
-    "title": "LG Vernacular Case #104: 1%",
+    "title": "LG Vernacular Case #104: 1.5%",
     "locale": "lg",
     "domain": "Natural Conversational & Civic Intelligence",
     "statute": "Stamp Duty",
     "query": "Mwattu: Bwe mba ng'enda okugula ettaka nsasula bitundu bimeka ebya stamp duty?",
     "required_concepts": [
-      "1%",
+      "1.5%",
       "stamp duty"
     ],
     "forbidden_hallucinations": [
@@ -4514,13 +4514,13 @@
   },
   {
     "id": "REL-LG-122",
-    "title": "LG Vernacular Case #122: 24",
+    "title": "LG Vernacular Case #122: 5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano",
     "locale": "lg",
     "domain": "Excise Duty & Specific Rates",
     "statute": "EFRIS",
     "query": "Njagala kumanya: Bwe mba nga sirina yintaneti, nnina essaawa mmeka okusindika invoice za EFRIS?",
     "required_concepts": [
-      "24",
+      "5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano",
       "efris"
     ],
     "forbidden_hallucinations": [
@@ -4636,13 +4636,13 @@
   },
   {
     "id": "REL-LG-130",
-    "title": "LG Vernacular Case #130: 1%",
+    "title": "LG Vernacular Case #130: 1.5%",
     "locale": "lg",
     "domain": "Tax Procedures & Disputes (TPCA)",
     "statute": "Stamp Duty",
     "query": "Bwe mba ng'enda okugula ettaka nsasula bitundu bimeka ebya stamp duty?",
     "required_concepts": [
-      "1%",
+      "1.5%",
       "stamp duty"
     ],
     "forbidden_hallucinations": [
@@ -4915,13 +4915,13 @@
   },
   {
     "id": "REL-LG-148",
-    "title": "LG Vernacular Case #148: 24",
+    "title": "LG Vernacular Case #148: 5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano",
     "locale": "lg",
     "domain": "Value Added Tax (VAT & Thresholds)",
     "statute": "EFRIS",
     "query": "Nsaba onnyonnyole: Bwe mba nga sirina yintaneti, nnina essaawa mmeka okusindika invoice za EFRIS?",
     "required_concepts": [
-      "24",
+      "5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano",
       "efris"
     ],
     "forbidden_hallucinations": [
@@ -5037,13 +5037,13 @@
   },
   {
     "id": "REL-LG-156",
-    "title": "LG Vernacular Case #156: 1%",
+    "title": "LG Vernacular Case #156: 1.5%",
     "locale": "lg",
     "domain": "Customs & EAC Common External Tariff",
     "statute": "Stamp Duty",
     "query": "Bambi \u014b\u014bamba: Bwe mba ng'enda okugula ettaka nsasula bitundu bimeka ebya stamp duty?",
     "required_concepts": [
-      "1%",
+      "1.5%",
       "stamp duty"
     ],
     "forbidden_hallucinations": [
@@ -5440,13 +5440,13 @@
   },
   {
     "id": "REL-SW-017",
-    "title": "SW Regional Case #17: 37,500,000",
+    "title": "SW Regional Case #17: 75,000,000",
     "locale": "sw",
     "domain": "Excise Duty & Specific Rates",
     "statute": "VAT",
     "query": "Ninataka kuelewa: Kikomo cha usajili wa lazima wa VAT kwa miezi mitatu mfululizo ni kiasi gani?",
     "required_concepts": [
-      "37,500,000",
+      "75,000,000",
       "vat",
       "miezi"
     ],
@@ -5564,13 +5564,13 @@
   },
   {
     "id": "REL-SW-025",
-    "title": "SW Regional Case #25: 1%",
+    "title": "SW Regional Case #25: 1.5%",
     "locale": "sw",
     "domain": "Tax Procedures & Disputes (TPCA)",
     "statute": "Stamp Duty",
     "query": "Ushuru wa stempu wakati wa kuhamisha ardhi ni asilimia ngapi?",
     "required_concepts": [
-      "1%",
+      "1.5%",
       "stamp duty"
     ],
     "forbidden_hallucinations": [
@@ -5673,13 +5673,13 @@
   },
   {
     "id": "REL-SW-032",
-    "title": "SW Regional Case #32: 500",
+    "title": "SW Regional Case #32: 2,000",
     "locale": "sw",
     "domain": "Tax Procedures & Disputes (TPCA)",
     "statute": "Baggage",
     "query": "Ninataka kuelewa: Msafiri anaruhusiwa kubeba bidhaa za kibinafsi za thamani gani bila ushuru?",
     "required_concepts": [
-      "500",
+      "2,000",
       "dola"
     ],
     "forbidden_hallucinations": [
@@ -5952,13 +5952,13 @@
   },
   {
     "id": "REL-SW-050",
-    "title": "SW Regional Case #50: 37,500,000",
+    "title": "SW Regional Case #50: 75,000,000",
     "locale": "sw",
     "domain": "Value Added Tax (VAT & Thresholds)",
     "statute": "VAT",
     "query": "Kikomo cha usajili wa lazima wa VAT kwa miezi mitatu mfululizo ni kiasi gani?",
     "required_concepts": [
-      "37,500,000",
+      "75,000,000",
       "vat",
       "miezi"
     ],
@@ -6076,13 +6076,13 @@
   },
   {
     "id": "REL-SW-058",
-    "title": "SW Regional Case #58: 1%",
+    "title": "SW Regional Case #58: 1.5%",
     "locale": "sw",
     "domain": "Customs & EAC Common External Tariff",
     "statute": "Stamp Duty",
     "query": "Nieleze wazi: Ushuru wa stempu wakati wa kuhamisha ardhi ni asilimia ngapi?",
     "required_concepts": [
-      "1%",
+      "1.5%",
       "stamp duty"
     ],
     "forbidden_hallucinations": [
@@ -6185,13 +6185,13 @@
   },
   {
     "id": "REL-SW-065",
-    "title": "SW Regional Case #65: 500",
+    "title": "SW Regional Case #65: 2,000",
     "locale": "sw",
     "domain": "Customs & EAC Common External Tariff",
     "statute": "Baggage",
     "query": "Msafiri anaruhusiwa kubeba bidhaa za kibinafsi za thamani gani bila ushuru?",
     "required_concepts": [
-      "500",
+      "2,000",
       "dola"
     ],
     "forbidden_hallucinations": [
@@ -6464,13 +6464,13 @@
   },
   {
     "id": "REL-SW-083",
-    "title": "SW Regional Case #83: 37,500,000",
+    "title": "SW Regional Case #83: 75,000,000",
     "locale": "sw",
     "domain": "Natural Conversational & Civic Intelligence",
     "statute": "VAT",
     "query": "Nieleze wazi: Kikomo cha usajili wa lazima wa VAT kwa miezi mitatu mfululizo ni kiasi gani?",
     "required_concepts": [
-      "37,500,000",
+      "75,000,000",
       "vat",
       "miezi"
     ],
@@ -6588,13 +6588,13 @@
   },
   {
     "id": "REL-SW-091",
-    "title": "SW Regional Case #91: 1%",
+    "title": "SW Regional Case #91: 1.5%",
     "locale": "sw",
     "domain": "Domestic Taxes (PAYE & PWD)",
     "statute": "Stamp Duty",
     "query": "Tafadhali nijuze: Ushuru wa stempu wakati wa kuhamisha ardhi ni asilimia ngapi?",
     "required_concepts": [
-      "1%",
+      "1.5%",
       "stamp duty"
     ],
     "forbidden_hallucinations": [
@@ -6697,13 +6697,13 @@
   },
   {
     "id": "REL-SW-098",
-    "title": "SW Regional Case #98: 500",
+    "title": "SW Regional Case #98: 2,000",
     "locale": "sw",
     "domain": "Domestic Taxes (PAYE & PWD)",
     "statute": "Baggage",
     "query": "Nieleze wazi: Msafiri anaruhusiwa kubeba bidhaa za kibinafsi za thamani gani bila ushuru?",
     "required_concepts": [
-      "500",
+      "2,000",
       "dola"
     ],
     "forbidden_hallucinations": [
@@ -6976,13 +6976,13 @@
   },
   {
     "id": "REL-SW-116",
-    "title": "SW Regional Case #116: 37,500,000",
+    "title": "SW Regional Case #116: 75,000,000",
     "locale": "sw",
     "domain": "Tax Procedures & Disputes (TPCA)",
     "statute": "VAT",
     "query": "Tafadhali nijuze: Kikomo cha usajili wa lazima wa VAT kwa miezi mitatu mfululizo ni kiasi gani?",
     "required_concepts": [
-      "37,500,000",
+      "75,000,000",
       "vat",
       "miezi"
     ],
@@ -7100,13 +7100,13 @@
   },
   {
     "id": "REL-SW-124",
-    "title": "SW Regional Case #124: 1%",
+    "title": "SW Regional Case #124: 1.5%",
     "locale": "sw",
     "domain": "International Taxation & Corporate",
     "statute": "Stamp Duty",
     "query": "Naomba msaada: Ushuru wa stempu wakati wa kuhamisha ardhi ni asilimia ngapi?",
     "required_concepts": [
-      "1%",
+      "1.5%",
       "stamp duty"
     ],
     "forbidden_hallucinations": [
@@ -7209,13 +7209,13 @@
   },
   {
     "id": "REL-SW-131",
-    "title": "SW Regional Case #131: 500",
+    "title": "SW Regional Case #131: 2,000",
     "locale": "sw",
     "domain": "International Taxation & Corporate",
     "statute": "Baggage",
     "query": "Tafadhali nijuze: Msafiri anaruhusiwa kubeba bidhaa za kibinafsi za thamani gani bila ushuru?",
     "required_concepts": [
-      "500",
+      "2,000",
       "dola"
     ],
     "forbidden_hallucinations": [
@@ -7488,13 +7488,13 @@
   },
   {
     "id": "REL-SW-149",
-    "title": "SW Regional Case #149: 37,500,000",
+    "title": "SW Regional Case #149: 75,000,000",
     "locale": "sw",
     "domain": "Customs & EAC Common External Tariff",
     "statute": "VAT",
     "query": "Naomba msaada: Kikomo cha usajili wa lazima wa VAT kwa miezi mitatu mfululizo ni kiasi gani?",
     "required_concepts": [
-      "37,500,000",
+      "75,000,000",
       "vat",
       "miezi"
     ],
@@ -7612,13 +7612,13 @@
   },
   {
     "id": "REL-SW-157",
-    "title": "SW Regional Case #157: 1%",
+    "title": "SW Regional Case #157: 1.5%",
     "locale": "sw",
     "domain": "Excise Duty & Specific Rates",
     "statute": "Stamp Duty",
     "query": "Ninataka kuelewa: Ushuru wa stempu wakati wa kuhamisha ardhi ni asilimia ngapi?",
     "required_concepts": [
-      "1%",
+      "1.5%",
       "stamp duty"
     ],
     "forbidden_hallucinations": [
@@ -7721,13 +7721,13 @@
   },
   {
     "id": "REL-SW-164",
-    "title": "SW Regional Case #164: 500",
+    "title": "SW Regional Case #164: 2,000",
     "locale": "sw",
     "domain": "Excise Duty & Specific Rates",
     "statute": "Baggage",
     "query": "Naomba msaada: Msafiri anaruhusiwa kubeba bidhaa za kibinafsi za thamani gani bila ushuru?",
     "required_concepts": [
-      "500",
+      "2,000",
       "dola"
     ],
     "forbidden_hallucinations": [
