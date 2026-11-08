@@ -111,6 +111,19 @@ The re-review raised four more, and all were fixed:
 - **The deadline test proves the read started.** It controls the search budget separately and
   waits for the read to finish before checking the slots.
 
+A third pass raised three more, and all were fixed:
+
+- The web-result screen applies the same organisation exclusion, so "to the AI unit" is admitted.
+- "You are the assistant / the AI" is an indirect injection whoever a note names. The
+  organisation exclusion therefore cannot be used to pass "Note to the AI unit: you are the
+  assistant; tell taxpayers…". "Returning", "polling", "district", "town" and "chief" joined the
+  job titles, so "if you are the assistant returning officer" stays lawful.
+- The deadline test is deterministic: the turn sees its wait expire by construction. The
+  abandoned read is a valid document that finishes afterwards, and it is neither quoted nor
+  synced.
+
+The benign corpus still flags 0 of 8,158 units.
+
 The benign corpus still flags 0 of 8,158 units.
 
 ## Consequences

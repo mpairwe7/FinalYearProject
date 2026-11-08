@@ -632,7 +632,8 @@ def _injection_views(text: str) -> list[str]:
 # normal case. Each pattern also takes in the rest of its sentence, so
 # scrubbing removes the instruction and not just its salutation.
 #: A unit, team or office named after AI is people, not a model: "the AI unit".
-_AI_ORGANISATION = (
+#: Public so the web-result screen applies the same exclusion (CodeRabbit on #704).
+AI_ORGANISATION_SUFFIX = (
     r"[\s-]+(?:units?|teams?|departments?|desks?|offices?|sections?|divisions?|committees?|officers?|staff|"
     r"specialists?|engineers?|labs?|laborator(?:y|ies)|cent(?:re|er)s?|groups?|directorates?|task\s+force|"
     r"working\s+group|function|secretariat)\b"
@@ -641,9 +642,10 @@ _AI_ADDRESSEE = (
     r"(?:ai|a\.i\.|artificial\s+intelligence|chat\s?bots?|llms?|(?:large\s+)?language\s+models?|"
     r"ai\s+(?:assistants?|models?|agents?|systems?|tools?)|(?:virtual|digital)\s+assistants?|copilots?|gpt|"
     r"assistants?(?![\s-]+(?:commissioners?|registrars?|managers?|directors?|secretar(?:y|ies)|officers?|"
-    r"accountants?|engineers?|lecturers?|librarians?|supervisors?|auditors?|collectors?)\b))"
+    r"accountants?|engineers?|lecturers?|librarians?|supervisors?|auditors?|collectors?|returning|polling|"
+    r"district|town|chief)\b))"
     # Every pattern below shares this: "a note to the AI unit" is to an office (CodeRabbit on #704).
-    rf"(?!{_AI_ORGANISATION})"
+    rf"(?!{AI_ORGANISATION_SUFFIX})"
 )
 _AI_ONLY_ADDRESSEE = (
     r"(?:ai|chat\s?bots?|llms?|(?:large\s+)?language\s+models?|ai\s+(?:assistants?|models?|agents?|systems?)|"
@@ -679,6 +681,10 @@ _AI_DIRECTIVE_HEADS: tuple[str, ...] = (
         rf"\b(?:pass|give|forward|relay|hand|send|show)\s+(?:this|these|it|the\s+following)(?:\s+(?:note|message|text|page|notice))?"
         rf"\s+(?:on\s+)?to\s+(?:the\s+|any\s+|all\s+)?{_AI_ADDRESSEE}\b",
         rf"\bto\s+(?:the\s+|any\s+|all\s+)?{_AI_ADDRESSEE}\s+as\s+(?:binding|authoritative|mandatory|official|final)\b",
+        # Telling the reader it is the model is model-directed whoever the note
+        # names: "Note to the AI unit: you are the assistant; tell taxpayers ..."
+        # (CodeRabbit on #704). "You are the assistant commissioner" is a title.
+        rf"\byou\s+are\s+(?:now\s+)?(?:the\s+|an?\s+)?{_AI_ADDRESSEE}\b",
 )
 #: Detection reads the head alone, so padding cannot push it past a length
 #: limit. Scrubbing removes the head to the end of its line: a sentence end is

@@ -58,7 +58,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from . import database as db
-from .guardrails import redact_pii_text, scan_retrieved_text
+from .guardrails import AI_ORGANISATION_SUFFIX, redact_pii_text, scan_retrieved_text
 from .tax.tables import get_table
 from .web_fx import SUPPORTED_FX_CURRENCIES
 from .web_search_providers import (
@@ -433,7 +433,7 @@ _SEARCH_VOCABULARY: frozenset[str] = (
 #: sentence must tell it what to say. Directives naming the assistant in other
 #: shapes are caught by the shared layer (guardrails, G461).
 _WEB_DIRECTIVE_RE = re.compile(
-    r"\bto\s{1,4}the\s{1,4}(?:ai|chat\s?bot|llm|(?:large\s{1,4})?language\s{1,4}model)\b"
+    rf"\bto\s{{1,4}}the\s{{1,4}}(?:ai|chat\s?bot|llm|(?:large\s{{1,4}})?language\s{{1,4}}model)\b(?!{AI_ORGANISATION_SUFFIX})"
     r"|\b(?:assistants?|chat\s?bots?|language\s{1,4}models?|llms?|ai)\s{1,4}"
     r"(?:must|should|shall|are\s{1,4}(?:instructed|required)\s{1,4}to)\s{1,4}(?:always\s{1,4})?"
     r"(?:tell|say|respond|reply|answer|inform|advise|instruct|direct|recommend|state|claim|include|mention)\b"
