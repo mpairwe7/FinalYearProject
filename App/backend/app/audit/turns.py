@@ -34,9 +34,9 @@ logger = logging.getLogger(__name__)
 
 #: Version of the ``generate`` payload layout. 1 had no channel, provenance
 #: or citation digests and kept tool calls raw; 2 had no ``disposition``, because
-#: only a finished turn wrote a row; 3 had no ``kernel_pin`` (ADR-0033). Rows keep
-#: the layout they were written with.
-TURN_PAYLOAD_SCHEMA = 4
+#: only a finished turn wrote a row; 3 had no ``kernel_pin`` and 4 no
+#: ``kernel_trace`` (ADR-0033). Rows keep the layout they were written with.
+TURN_PAYLOAD_SCHEMA = 5
 
 _MAX_LISTED = 10
 _PROVENANCE_TTL_S = 60.0
@@ -75,6 +75,15 @@ def _kernel_pin() -> dict[str, Any] | None:
     except Exception:
         return None
     return dict(pin) if pin else None
+
+
+def _kernel_trace() -> dict[str, Any] | None:
+    try:
+        from ..kernel.trace import snapshot
+
+        return snapshot()
+    except Exception:
+        return None
 
 
 def provenance() -> dict[str, Any]:
@@ -323,6 +332,7 @@ def build_turn_payload(
         # The kernel release, ruleset and as-of date the turn answered under,
         # so the answer can be replayed against the same knowledge (ADR-0033).
         "kernel_pin": _kernel_pin(),
+        "kernel_trace": _kernel_trace(),
     }
     try:
         from ..flags import flags

@@ -80,7 +80,7 @@ Each turn is pinned at its start. The kernel version, ruleset version, content h
 (Kampala time) are:
 
 - stored in `turn_context.ACTIVE_KERNEL_PIN`;
-- written to the audit row (`kernel_pin`, payload schema 4);
+- written to the audit row (`kernel_pin`, since payload schema 4);
 - stamped on the graph state.
 
 Because the approval HMAC (ADR-0030) covers the whole state, a suspended approval cannot resume
@@ -173,5 +173,50 @@ internal record.
 
 | Layer | Status | Becomes appropriate when |
 | --- | --- | --- |
-| Neo4j backend behind `GraphStore` | Phase 3 | Over 50,000 nodes, traversal p99 over 5 ms, or a staff need for ad-hoc Cypher |
-| Data semantic layer (Auto Ontology or equivalent) | Phase 3, staff-only, gated | A data-sharing agreement, a DPIA, Vault, certified metrics |
+| Neo4j backend behind `GraphStore` | Built, off (`GRAPH_STORE_BACKEND=neo4j`) | Over 50,000 nodes, traversal p99 over 5 ms, or a staff need for ad-hoc Cypher |
+| Data semantic layer (Auto Ontology or equivalent) | Built, off, staff-only (`FLAG_SEMANTIC_LAYER`) | A data-sharing agreement, a DPIA, Vault, certified metrics |
+
+See `docs/runbooks/graph-backend-and-semantic-layer.md`.
+
+### Neo4j backend
+
+`app/graph/neo4j_store.py` implements `GraphStore` over a Neo4j driver, for the graph that tools and
+fusion read.
+
+- **Release integrity:** the kernel's own store, whose hash is the release, stays in memory. Neo4j
+  holds a copy synced from it.
+- **Fixed statements:** every statement is a constant in `QUERIES`, with values passed as parameters.
+  Labels and relationship types come from the `NodeKind` and `EdgeKind` enums.
+- **Bounded walks:** walks use the in-memory bounds (`MAX_HOPS` 3, `MAX_NODES` 200).
+- **Round-trip:** properties are stored as JSON, so a tuple comes back as a list.
+- **Production gate:** a connection needs `neo4j+s://` or `bolt+s://` and credentials. If Neo4j is
+  unreachable, the in-memory graph is served.
+
+### Semantic layer
+
+`app/semantic_layer/` answers what URA's data shows, for staff only. It runs certified aggregate
+metrics and never free SQL.
+
+- **Templates:** each metric's SQL is a reviewed template that passes the SELECT-only guard over its
+  declared sources.
+- **Execution:** read-only, at most 500 rows and 10 s.
+- **Small groups:** groups under the metric's minimum size, at least 10, are suppressed.
+- **Access:** the tools are `high` risk for `ura_staff` and `ura_admin`.
+
+## Refinement
+
+Kernel functions record two things in the turn's trace (`app/kernel/trace.py`), by key only:
+
+- concepts the agent asked for that the kernel lacked;
+- uncited figures it served.
+
+Text the taxpayer typed is dropped. The audit row carries the trace (payload schema 5), and replays
+are not traced. `python -m app.kernel.refine` queues what recurs in at least 3 turns, with recurring
+evidence conflicts, as one review proposal. Nothing is applied without a reviewer and a release.
+
+## Agreement with the calculator
+
+`rules.late_filing_penal_tax` and `rules.late_payment_interest` agree with the `penalty_late_filing`
+calculator, and a parity test enforces it. Both cite the interest cap as TPCA s.39(5). With penal tax
+and interest for the same months at the same 2%, the cap cannot bind. It binds only when interest
+runs longer than the late-filing period, for example a return filed on time and left unpaid.

@@ -215,9 +215,12 @@ def decide(proposal_id: str, *, approve: bool, reviewer: str, role: str, reason:
     proposal = json.loads(path.read_text(encoding="utf-8"))
     if proposal["status"] != PENDING:
         raise ValueError(f"proposal {proposal_id} is already {proposal['status']}")
-    draft = Path(proposal["draft"])
-    if draft.exists() and hashlib.sha256(draft.read_bytes()).hexdigest() != proposal["draft_sha256"]:
-        raise ValueError("the draft table changed after it was proposed; propose it again")
+    # A refinement proposal (app.kernel.refine) has no draft table.
+    draft = Path(proposal["draft"]) if proposal.get("draft") else None
+    if draft is not None and (
+        not draft.exists() or hashlib.sha256(draft.read_bytes()).hexdigest() != proposal["draft_sha256"]
+    ):
+        raise ValueError("the draft table changed after it was proposed, or is missing; propose it again")
     proposal["status"] = APPROVED if approve else REJECTED
     proposal["decision"] = {
         "reviewer": reviewer.strip(),

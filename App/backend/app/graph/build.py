@@ -247,7 +247,7 @@ def unit_for_key(key: str, value: Any) -> str:
         return "hours"
     if key.endswith("_years"):
         return "years"
-    if key.endswith("_ugx") or "_per_" in key or key.endswith("_fee"):
+    if key.endswith(("_ugx", "_fee")) or "_per_" in key:
         return "UGX"
     if isinstance(value, float) and 0 < value <= 1:
         return "ratio"

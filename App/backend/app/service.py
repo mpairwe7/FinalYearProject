@@ -347,9 +347,14 @@ def _scoped_conversation_state(method: Callable[..., Any]) -> Callable[..., Any]
         plans_reset = _TURN_PLANS.set({}) if _TURN_PLANS.get() is None else None
         live_check_reset = _TURN_LIVE_CHECK.set({}) if _TURN_LIVE_CHECK.get() is None else None
         kernel_pin_reset = _ACTIVE_KERNEL_PIN.set(_kernel_pin_for_turn()) if _ACTIVE_KERNEL_PIN.get() is None else None
+        from .kernel import trace as _kernel_trace
+
+        kernel_trace_reset = _kernel_trace.start()
         try:
             return method(*bound.args, **bound.kwargs)
         finally:
+            if kernel_trace_reset is not None:
+                _kernel_trace.TURN_KERNEL_TRACE.reset(kernel_trace_reset)
             if kernel_pin_reset is not None:
                 _ACTIVE_KERNEL_PIN.reset(kernel_pin_reset)
             if live_check_reset is not None:

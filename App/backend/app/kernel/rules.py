@@ -50,9 +50,12 @@ REVIEW_STATUS: dict[str, str] = {
     "dts_unstamped_penal_tax": REVIEW_PENDING,
 }
 
+#: The cap is cited as the calculator ``penalty_late_filing`` cites it (TPCA s.39(5));
+#: the wording was checked against the 2021 text, the latest available here.
 _INTEREST_CAP_SOURCE = (
-    "Income Tax Act s.136(5) and (7), Domestic Tax Laws of Uganda (July 2021), p.108: simple interest; interest "
-    "above the principal tax and penal tax is waived. Pending confirmation against the revised Cap 343 text."
+    "Tax Procedures Code Act (Cap 343), s.39(5): simple interest; interest above the principal tax and penal tax "
+    "is waived. Wording checked against Income Tax Act s.136(5) and (7), Domestic Tax Laws of Uganda (July 2021), "
+    "p.108; pending confirmation against the revised Cap 343 text."
 )
 
 

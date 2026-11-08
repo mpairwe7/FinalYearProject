@@ -119,5 +119,28 @@ Filled in per phase; see "Implementation record" below.
   PROV-O and AgentO export of the audit ledger (`app/audit/provenance.py`); the concurrency benchmark
   harness (`scripts/bench_llm_concurrency.py`), not yet run on the A6000. Building replay showed that
   serialising the graph returned live property dictionaries, so a caller editing the copy changed the
-  cached kernel; `Node`/`Edge` now copy them. `tests/agents/test_kernel_core_2026_11.py` (44 tests).
-  Each of 18 controls was disabled in turn and the suite failed.
+  cached kernel; `Node`/`Edge` now copy them. Rule results are verified only under an approved
+  release, so marking a rule approved in code is not enough. `tests/agents/test_kernel_core_2026_11.py`
+  (47 tests). Each of 19 controls was disabled in turn and the suite failed.
+- Phase 3 (advanced), built behind closed gates:
+  - **Neo4j backend** (`app/graph/neo4j_store.py`, `GRAPH_STORE_BACKEND=neo4j`, off). It matches the
+    in-memory store on every node kind, neighbour and walk. Every statement is a fixed, parameterised
+    constant; labels and relationship types come from the enums; walks keep the in-memory bounds.
+    Production refuses it without verified TLS and credentials (G506). If Neo4j is unreachable, the
+    in-memory graph is served. The kernel's hashed store stays in memory, and the Neo4j copy is
+    synced from it. The advisor reports 322 nodes; the thresholds are not met, so it stays off.
+  - **Staff-only semantic layer** (`app/semantic_layer/`, `FLAG_SEMANTIC_LAYER`, off). Two tools in a
+    new `semantic_layer` namespace (79 tools, 19 namespaces), declared `high` risk for `ura_staff` and
+    `ura_admin` only. Certified aggregate metrics only, never free SQL. A SELECT-only guard checks
+    each template against its declared sources. Execution is read-only, with 500 rows and 10 s at
+    most, and groups below 10 are suppressed. Production refuses it without https Vault, a Vault path,
+    a data-sharing agreement and a DPIA reference, and a certified metric, and with any plaintext DSN
+    (G507). The catalogue ships two drafts and certifies nothing.
+  - **Offline refinement** (`app/kernel/refine.py`). Each turn records the concepts the kernel lacked
+    and the uncited figures it served, by key only, in the audit row (payload schema 5). Recurring
+    ones, and recurring evidence conflicts, become proposals in the review queue. Nothing is applied.
+  - **Consistency:** the new rules match the existing `penalty_late_filing` calculator on penal tax and
+    capped interest, and a parity test holds them together. The ruleset now cites the interest cap
+    as the calculator does, which is release 1.1.1.
+  - `tests/agents/test_kernel_advanced_2026_11.py` (58 tests). Each of 30 controls was disabled in
+    turn and the suite failed.

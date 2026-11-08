@@ -54,6 +54,12 @@ ACTIVE_KERNEL_PIN: contextvars.ContextVar[dict[str, Any] | None] = contextvars.C
     "active_kernel_pin", default=None
 )
 
+#: Concepts the kernel was asked for and lacked, and uncited figures it served,
+#: this turn (``app.kernel.trace``). Keys only, never text the taxpayer typed.
+TURN_KERNEL_TRACE: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "turn_kernel_trace", default=None
+)
+
 __all__ = [
     "ACTIVE_CASE_FACTS",
     "ACTIVE_KERNEL_PIN",
@@ -61,5 +67,6 @@ __all__ = [
     "ACTIVE_TENANT_ID",
     "ACTIVE_USER_STATED_IDS",
     "TURN_GENERATION",
+    "TURN_KERNEL_TRACE",
     "TURN_LIVE_CHECK",
 ]

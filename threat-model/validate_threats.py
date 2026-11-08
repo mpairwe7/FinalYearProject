@@ -488,6 +488,40 @@ THREAT_REGISTRY: list[dict] = [
         "status": "mitigated",
     },
     {
+        "id": "T77",
+        "category": "Tampering",
+        "description": (
+            "A node id or key reaching the Neo4j backend from a tool argument is interpreted as Cypher, reading "
+            "or deleting the graph (G506)"
+        ),
+        "owasp_llm": "LLM05",
+        "mitre_atlas": None,
+        "mitigation": (
+            "Only module-constant statements run (anything else raises); values are parameters; labels and "
+            "relationship types come from enums; walks are bounded; production requires verified TLS"
+        ),
+        "evidence": ["App/backend/app/graph/neo4j_store.py", "tests/agents/test_kernel_advanced_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
+        "id": "T78",
+        "category": "Information Disclosure",
+        "description": (
+            "The semantic layer is used to extract taxpayer-level data, by a non-staff caller, by model-written "
+            "SQL or through a small group (G507)"
+        ),
+        "owasp_llm": "LLM02",
+        "mitre_atlas": "AML.T0024",
+        "mitigation": (
+            "Staff-only tools (high risk, ura_staff/ura_admin); certified templates only, SELECT-only guard over "
+            "declared sources; read-only, row and time caps; groups below 10 suppressed; production needs Vault, "
+            "a DSA and a DPIA, and refuses plaintext credentials"
+        ),
+        "evidence": ["App/backend/app/semantic_layer/guard.py", "App/backend/app/semantic_layer/adapter.py",
+                     "App/backend/app/tools/semantic_layer_tools.py", "tests/agents/test_kernel_advanced_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
         "id": "T01",
         "category": "Spoofing",
         "description": "Attacker impersonates legitimate API client",

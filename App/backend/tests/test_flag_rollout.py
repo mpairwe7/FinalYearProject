@@ -338,6 +338,17 @@ class RegistryIntegrityTests(unittest.TestCase):
         self.assertIsNone(flag.rollout)
         self.assertFalse(FeatureFlags().is_enabled("llm_query_rewrite"))
 
+    def test_semantic_layer_is_off_and_gated_until_its_conditions_are_met(self) -> None:
+        """ADR-0033 phase 3: staff-only, and production refuses it without Vault, a DSA, a DPIA and a metric."""
+        flag = _REGISTRY["semantic_layer"]
+        self.assertFalse(flag.default)
+        self.assertIsNone(flag.rollout)
+        self.assertFalse(FeatureFlags().is_enabled("semantic_layer"))
+        from app.semantic_layer.config import production_errors
+
+        with mock.patch.dict(os.environ, {"FLAG_SEMANTIC_LAYER": "true"}):
+            self.assertTrue(any("G507" in error for error in production_errors()))
+
     def test_no_registered_flag_ships_a_live_rollout(self) -> None:
         """Rollouts are an operational decision, not a code default."""
         for name, flag in _REGISTRY.items():

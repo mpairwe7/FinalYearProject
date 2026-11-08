@@ -134,6 +134,17 @@ def _fact(store: InMemoryGraphStore, node: Node, version: str) -> KernelFact:
     )
 
 
+def _note(result: KernelFact | NotInKernel | list[KernelFact]) -> None:
+    """Record a live lookup in the turn's kernel trace (never a replay)."""
+    from . import trace
+
+    if isinstance(result, NotInKernel):
+        trace.note_miss(result.concept, result.reason)
+        return
+    for item in result if isinstance(result, list) else [result]:
+        trace.note_served(item.key, item.fiscal_year, item.uncited)
+
+
 def fact(key: str, as_of: _dt.date, *, store: InMemoryGraphStore | None = None,
          version: str | None = None) -> KernelFact | NotInKernel:
     """The figure for *key* in force on *as_of*.
@@ -141,6 +152,14 @@ def fact(key: str, as_of: _dt.date, *, store: InMemoryGraphStore | None = None,
     *store* and *version* replay a past release from its snapshot
     (:func:`app.kernel.release.load_snapshot`); by default, the running kernel.
     """
+    result = _lookup(key, as_of, store, version)
+    if store is None:
+        _note(result)
+    return result
+
+
+def _lookup(key: str, as_of: _dt.date, store: InMemoryGraphStore | None,
+            version: str | None) -> KernelFact | NotInKernel:
     from ..graph.build import kind_for_key
 
     store = store or kernel_store()
@@ -159,6 +178,14 @@ def fact(key: str, as_of: _dt.date, *, store: InMemoryGraphStore | None = None,
 def facts(*, as_of: _dt.date, kind: NodeKind | None = None, tax: str = "",
           store: InMemoryGraphStore | None = None, version: str | None = None) -> list[KernelFact] | NotInKernel:
     """Every figure of *kind* (and *tax*) in force on *as_of*, sorted by key."""
+    result = _list(as_of, kind, tax, store, version)
+    if store is None:
+        _note(result)
+    return result
+
+
+def _list(as_of: _dt.date, kind: NodeKind | None, tax: str, store: InMemoryGraphStore | None,
+          version: str | None) -> list[KernelFact] | NotInKernel:
     store = store or kernel_store()
     version = _version(version)
     if tax and tax not in declared_taxes(store):

@@ -1,0 +1,32 @@
+{
+  "version": "1.0.0",
+  "note": "Drafts only: no URA analytical database is connected. A data owner certifies an entry by setting status to certified and filling certified_by and certified_at (ADR-0033).",
+  "metrics": [
+    {
+      "id": "filing_on_time_rate",
+      "title": "Returns filed on time, by tax head and period",
+      "description": "Share of returns due in each period that were filed by the due date, for each tax head.",
+      "owner": "URA Domestic Taxes, Data Office",
+      "sql": "SELECT tax_head, period, filed_on_time_ratio, returns_due AS group_size FROM certified.filing_compliance WHERE period BETWEEN :period_from AND :period_to ORDER BY tax_head, period",
+      "sources": ["certified.filing_compliance"],
+      "parameters": {"period_from": {"type": "period"}, "period_to": {"type": "period"}},
+      "min_group_size": 10,
+      "status": "draft",
+      "certified_by": "",
+      "certified_at": ""
+    },
+    {
+      "id": "efris_adoption_by_sector",
+      "title": "EFRIS e-invoicing adoption, by sector",
+      "description": "Share of VAT-registered businesses in each sector issuing e-invoices through EFRIS in a period.",
+      "owner": "URA Domestic Taxes, Data Office",
+      "sql": "SELECT sector, efris_active_ratio, vat_registered AS group_size FROM certified.efris_adoption WHERE period = :period ORDER BY sector",
+      "sources": ["certified.efris_adoption"],
+      "parameters": {"period": {"type": "period"}},
+      "min_group_size": 10,
+      "status": "draft",
+      "certified_by": "",
+      "certified_at": ""
+    }
+  ]
+}

@@ -40,13 +40,13 @@ cd App/backend && PYTHONPATH=. python -m app.kernel.release check
 3. **Record the release.** An engineer records an `engineering_baseline`:
 
    ```bash
-   PYTHONPATH=. python -m app.kernel.release record --version 1.1.0 --notes "FY2027-28 tables (Finance Acts 2027)"
+   PYTHONPATH=. python -m app.kernel.release record --version 1.2.0 --notes "FY2027-28 tables (Finance Acts 2027)"
    ```
 
    A release becomes `approved` only when the URA tax-policy reviewer is named:
 
    ```bash
-   PYTHONPATH=. python -m app.kernel.release record --version 1.1.1 --notes "Reviewed" \
+   PYTHONPATH=. python -m app.kernel.release record --version 1.2.1 --notes "Reviewed" \
      --reviewer "Name Surname" --role "Commissioner, Tax Policy"
    ```
 
@@ -100,6 +100,27 @@ print(functions.fact('vat_standard', dt.date(2026, 8, 15), store=store, version=
 ```
 
 A snapshot whose hash does not match its release is refused. Do not edit it: restore it from git.
+
+## Refining the kernel from use
+
+Each audit row (payload schema 5) carries `kernel_trace`: the concepts the kernel lacked and the
+uncited figures it served that turn, by key only. Monthly, or before a release:
+
+```bash
+PYTHONPATH=. python -m app.kernel.refine --tenant default --min-turns 3
+PYTHONPATH=. python -m app.kernel.legal_change list
+```
+
+The proposal lists, busiest first:
+
+- `kernel_miss`: a concept asked for in at least 3 turns that the kernel lacks. Declare it in the next
+  table, with its `legal_basis`, or reject it with a reason (for example, not a Ugandan tax).
+- `uncited_figure`: a figure served without a legal basis. Find and add its citation.
+- `evidence_conflict`: documents keep contradicting a figure. Check it against the statute, then
+  correct either the document or the table.
+
+Decide it with `legal_change approve` or `reject`. Approval records the decision only. The change
+still reaches the kernel through a table edit and a release.
 
 ## What a release changes at runtime
 

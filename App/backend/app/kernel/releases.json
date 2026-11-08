@@ -65,6 +65,39 @@
         "approved_at": ""
       },
       "notes": "Rules as code (ruleset 1.0.0): late-filing penal tax, late-payment interest, EFRIS and unstamped-goods penal tax, all pending URA tax-team review. Graph content unchanged from 1.0.0."
+    },
+    {
+      "version": "1.1.1",
+      "released": "2026-11-08",
+      "content_sha256": "4000ac2fa0f6fb2f71cc7082142a19563baacdcc2a367e7564a70f3364ff088d",
+      "rules_sha256": "af0b2f260787026fdf2764a264a58d0d537eb556fecb0b33970e906932d8954a",
+      "model_version": "1.0.0",
+      "ruleset_version": "1.0.0",
+      "fiscal_years": [
+        "FY2025-26",
+        "FY2026-27"
+      ],
+      "stats": {
+        "nodes_fiscal_year": 2,
+        "nodes_tax_type": 20,
+        "nodes_rate": 96,
+        "nodes_provision": 128,
+        "nodes_threshold": 28,
+        "nodes_taxpayer_class": 4,
+        "nodes_penalty": 13,
+        "nodes_obligation": 10,
+        "nodes_parameter": 10,
+        "nodes_fee": 11,
+        "nodes": 322,
+        "edges": 593
+      },
+      "review": {
+        "status": "engineering_baseline",
+        "reviewer": "",
+        "role": "",
+        "approved_at": ""
+      },
+      "notes": "Ruleset citation: the interest cap is cited as TPCA (Cap 343) s.39(5), as the penalty_late_filing calculator cites it, with the 2021 ITA s.136(5),(7) wording it was checked against. Results unchanged; still pending URA tax-team review."
     }
   ]
 }

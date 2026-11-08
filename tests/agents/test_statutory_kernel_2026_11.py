@@ -294,7 +294,7 @@ def test_a_turn_records_the_kernel_it_answered_under() -> None:
         payload = turns.build_turn_payload(message="What is VAT?", result={"reply": "18%"}, channel="rest")
     finally:
         ACTIVE_KERNEL_PIN.reset(token)
-    assert payload["schema"] == 4
+    assert payload["schema"] == turns.TURN_PAYLOAD_SCHEMA
     assert payload["kernel_pin"]["kernel_version"] == release.current().version
     assert payload["kernel_pin"]["as_of"] == "2026-08-15"
 

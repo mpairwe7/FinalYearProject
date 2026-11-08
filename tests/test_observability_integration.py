@@ -39,6 +39,7 @@ from app import database  # noqa: E402
 from app import service as service_module  # noqa: E402
 from app import tracing  # noqa: E402
 from app.analytics import metrics  # noqa: E402
+from app.audit.turns import TURN_PAYLOAD_SCHEMA  # noqa: E402
 from app.main import app  # noqa: E402
 
 REPLY = "The standard VAT rate in Uganda is 18% [1]."
@@ -151,7 +152,8 @@ def test_rest_turn_is_audited_with_the_served_reply(client, pipeline):
     assert len(rows) == 1, rows
     assert rows[0]["channel"] == "rest"
     assert rows[0]["reply_sha256"] == _sha(resp.json()["reply"])
-    assert rows[0]["schema"] == 3
+    assert rows[0]["schema"] == TURN_PAYLOAD_SCHEMA
+    assert {"kernel_pin", "kernel_trace"} <= set(rows[0]), "schema 4 and 5 fields (ADR-0033)"
 
 
 def test_streamed_turn_is_audited_and_counted(client, pipeline):
