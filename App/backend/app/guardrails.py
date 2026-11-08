@@ -631,11 +631,19 @@ def _injection_views(text: str) -> list[str]:
 # Applied to third-party text only. A taxpayer addressing the assistant is the
 # normal case. Each pattern also takes in the rest of its sentence, so
 # scrubbing removes the instruction and not just its salutation.
+#: A unit, team or office named after AI is people, not a model: "the AI unit".
+_AI_ORGANISATION = (
+    r"[\s-]+(?:units?|teams?|departments?|desks?|offices?|sections?|divisions?|committees?|officers?|staff|"
+    r"specialists?|engineers?|labs?|laborator(?:y|ies)|cent(?:re|er)s?|groups?|directorates?|task\s+force|"
+    r"working\s+group|function|secretariat)\b"
+)
 _AI_ADDRESSEE = (
     r"(?:ai|a\.i\.|artificial\s+intelligence|chat\s?bots?|llms?|(?:large\s+)?language\s+models?|"
     r"ai\s+(?:assistants?|models?|agents?|systems?|tools?)|(?:virtual|digital)\s+assistants?|copilots?|gpt|"
     r"assistants?(?![\s-]+(?:commissioners?|registrars?|managers?|directors?|secretar(?:y|ies)|officers?|"
     r"accountants?|engineers?|lecturers?|librarians?|supervisors?|auditors?|collectors?)\b))"
+    # Every pattern below shares this: "a note to the AI unit" is to an office (CodeRabbit on #704).
+    rf"(?!{_AI_ORGANISATION})"
 )
 _AI_ONLY_ADDRESSEE = (
     r"(?:ai|chat\s?bots?|llms?|(?:large\s+)?language\s+models?|ai\s+(?:assistants?|models?|agents?|systems?)|"

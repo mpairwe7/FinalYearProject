@@ -98,6 +98,19 @@ CodeRabbit's review produced eight findings, and all were fixed:
 - The new attacks and the lawful near misses are in the red-team and benign corpora, and the
   runbook names the four stages of a read and which of them has a deadline.
 
+The re-review raised four more, and all were fixed:
+
+- **Organisations are not models.** The shared addressee excludes a unit, team, office or task
+  force named after AI ("send it to the AI unit"). Every pattern built on it inherits this,
+  including round 1's "note to the AI" heading, which had the same false positive.
+- **A failed read is an incomplete check.** A document that was found but could not be read
+  (download deadline, network or parse failure) leaves the status `unavailable` when nothing
+  else was found. A tainted document still counts as "nothing admissible".
+- **No PII-shaped logging.** The re-extraction log names the cache entry by a hash prefix, not by
+  file name (Semgrep `ura-llm02-pii-in-logs`).
+- **The deadline test proves the read started.** It controls the search budget separately and
+  waits for the read to finish before checking the slots.
+
 The benign corpus still flags 0 of 8,158 units.
 
 ## Consequences

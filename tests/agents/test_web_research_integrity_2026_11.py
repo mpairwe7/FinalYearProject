@@ -196,6 +196,8 @@ def test_text_impersonating_the_control_channel_is_an_injection(payload: str):
         "System requirements: a computer with internet access.",
         "[System generated document] Payment registration slip",
         "The new policy for taxpayers in the transport sector applies from 1 July.",
+        "Send it to the AI unit at the Ministry for review before the deadline.",
+        "Forward this note to the AI task force secretariat for comment.",
     ],
 )
 def test_official_wording_about_systems_and_policies_is_not(benign: str):
@@ -269,20 +271,47 @@ def test_a_failed_sandbox_import_gives_its_slot_back(monkeypatch):
 )
 def test_a_read_that_misses_the_deadline_is_not_quoted_meanwhile(monkeypatch, body, status):
     """CodeRabbit on #704: its screen may still reject it after the turn answered."""
-    hold = threading.Event()
-    monkeypatch.setattr(wr, "WEB_RESEARCH_TURN_BUDGET_SECONDS", 0.5)
-    monkeypatch.setattr(sbx, "fetch_and_extract_sandbox_document", lambda *a, **k: hold.wait(5))
+    started, hold, finished = threading.Event(), threading.Event(), threading.Event()
+
+    def slow_read(*_a, **_k):
+        started.set()
+        try:
+            hold.wait(10)
+        finally:
+            finished.set()
+
+    # Searches get their own generous budget; only the read can miss the turn's.
+    monkeypatch.setattr(wr, "WEB_RESEARCH_SEARCH_BUDGET_SECONDS", 5.0)
+    monkeypatch.setattr(wr, "WEB_RESEARCH_TURN_BUDGET_SECONDS", 1.0)
+    monkeypatch.setattr(sbx, "fetch_and_extract_sandbox_document", slow_read)
     try:
         outcome = _research(body, pdf=None)
     finally:
         hold.set()
 
+    assert started.is_set(), "the document read must have started for this path to be exercised"
     assert all(h["url"] != PDF_URL for h in outcome.web_hits)
     assert outcome.status == status, "a result that could not be read in time is not 'no result'"
-    deadline = time.monotonic() + 5
+    assert finished.wait(10)
+    deadline = time.monotonic() + 10
     while not _all_slots_free() and time.monotonic() < deadline:
         time.sleep(0.05)
     assert _all_slots_free()
+
+
+def test_a_read_that_fails_is_unavailable_not_no_result(monkeypatch):
+    """CodeRabbit on #704: a lone PDF whose download hit its deadline was reported as 'no result'."""
+    bare_pdf = f'<a class="result__a" href="{PDF_URL}"></a><a class="result__snippet"></a>'
+
+    def deadline_hit(*_a, **_k):
+        raise sbx.SandboxDownloadRejected("Download exceeded its 15 s deadline after 10 bytes.")
+
+    monkeypatch.setattr(sbx, "fetch_and_extract_sandbox_document", deadline_hit)
+
+    outcome = _research(bare_pdf, pdf=None)
+
+    assert outcome.web_hits == []
+    assert outcome.status == wr.LIVE_UNAVAILABLE
 
 
 def test_document_reads_cannot_starve_searches():

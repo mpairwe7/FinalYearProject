@@ -1923,6 +1923,9 @@ def run_web_research(
                 tainted.add(top_doc.url)
                 events.append(("pdf_sandbox.rejected", {"url": top_doc.url, "reason": "instruction_like_text"}))
             else:
+                # Found but not read (deadline, network, parse): with nothing else
+                # found the check is unavailable, not "no result" (CodeRabbit on #704).
+                read_incomplete = True
                 logger.warning("Ephemeral sandbox extraction or Qdrant sync failed for %s", top_doc.url, exc_info=True)
 
     # 2. Fall back to search summaries when no document text was read.

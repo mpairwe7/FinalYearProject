@@ -715,7 +715,7 @@ def fetch_and_extract_sandbox_document(
 
         cached = _get_cached_doc_payload(sha256_hex)
         if cached is not None and cached.get("screen_version") != _CACHE_SCREEN_VERSION:
-            logger.info("Sandbox cache entry from an older page screen; re-extracting %s", filename)
+            logger.info("Sandbox cache entry %s is from an older page screen; re-extracting", sha256_hex[:12])
             cached = None
         if cached is not None:
             chunks = list(cached.get("chunks") or [])
