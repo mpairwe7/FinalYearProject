@@ -7057,9 +7057,9 @@ class ChatModel:
         graph_hits = ChatModel._graph_hits(query)
         if not graph_hits:
             return hits, False
-        from .kernel.precedence import check_fused
+        from .kernel.precedence import apply_precedence
 
-        check_fused(graph_hits[0], hits)
+        hits = apply_precedence(graph_hits[0], hits)
         return rrf_fuse_ranked_lists(hits, graph_hits), True
 
     def _priority_faq_hits(self, query: str, *, top_k: int) -> list[dict[str, Any]]:

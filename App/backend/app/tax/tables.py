@@ -348,17 +348,42 @@ def latest_fiscal_year() -> str:
     return list_fiscal_years()[-1]
 
 
+#: Uganda's fiscal year turns at midnight in Kampala (EAT, UTC+3, no daylight saving).
+KAMPALA = _dt.timezone(_dt.timedelta(hours=3), "EAT")
+
+
+def kampala_today(now: _dt.datetime | None = None) -> _dt.date:
+    """Today's date in Kampala; the one clock the tables and the kernel read (ADR-0033).
+
+    The tables used to read the UTC date, so from 21:00 UTC on 30 June the
+    calculators answered from the old year while the kernel had moved on.
+    """
+    return (now or _dt.datetime.now(_dt.timezone.utc)).astimezone(KAMPALA).date()  # noqa: UP017
+
+
+def coverage(as_of: _dt.date | None = None) -> str:
+    """``in_force``, ``before_first`` or ``after_latest``: whether a table covers *as_of*.
+
+    :func:`resolve_fiscal_year` still answers with the nearest table; this says
+    when that table is not the one in force, so an answer can say so.
+    """
+    day = as_of or kampala_today()
+    tables = _all_tables()
+    ordered = [tables[fy] for fy in list_fiscal_years()]
+    if any(table.covers(day) for table in ordered):
+        return "in_force"
+    return "before_first" if day < ordered[0].effective_from else "after_latest"
+
+
 def resolve_fiscal_year(as_of: _dt.date | None = None) -> str:
-    """The fiscal year in force on *as_of* (default: today, UTC).
+    """The fiscal year in force on *as_of* (default: today in Kampala).
 
     Dates before the earliest table resolve to that earliest table and
     dates after the latest resolve to the latest — a question about a
     period we have no table for is answered with the nearest one we do
-    have, and the caller sees the mismatch via ``effective_from``.
+    have, and :func:`coverage` tells the caller so.
     """
-    # timezone.utc rather than datetime.UTC: the dev container still
-    # runs 3.10, and this is the only clock read in the module.
-    day = as_of or _dt.datetime.now(_dt.timezone.utc).date()  # noqa: UP017
+    day = as_of or kampala_today()
     tables = _all_tables()
     ordered = [tables[fy] for fy in list_fiscal_years()]
     for table in ordered:

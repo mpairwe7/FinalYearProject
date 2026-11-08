@@ -101,6 +101,28 @@ print(functions.fact('vat_standard', dt.date(2026, 8, 15), store=store, version=
 
 A snapshot whose hash does not match its release is refused. Do not edit it: restore it from git.
 
+## Verifying a figure against its source
+
+1. Find the figure in the law or URA's published guidance. Prefer, in order:
+   - the Act or amendment Act;
+   - URA's amendments booklet or Taxation Handbook for the year;
+   - a URA notice.
+
+   An FAQ page is not a gazetted schedule; a figure resting on one stays in `unverified`.
+2. Write the `legal_basis`: the provision, then the document and page.
+3. Add an entry to `app/tax/evidence/rate_evidence.json`:
+   - a document entry: fiscal years, key, value, `Data/pdfs/...`, page, the words that state the
+     figure (`needle`) and a verbatim `quote` around them;
+   - or a web entry: URL, `checked_on` and the quote.
+
+   Whitespace in quotes is collapsed.
+4. If the figure is defined from another (a quarter of, equal to), add it to
+   `kernel.validate.DERIVED`.
+5. Run `tests/agents/test_rate_table_verification_2026_11.py`, then record a release.
+
+A figure no current source confirms stays in `unverified`, with a note saying what was found and who
+can confirm it, and is listed under `open` in the evidence file.
+
 ## Refining the kernel from use
 
 Each audit row (payload schema 5) carries `kernel_trace`: the concepts the kernel lacked and the

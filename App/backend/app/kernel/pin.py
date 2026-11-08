@@ -27,8 +27,11 @@ class KernelPin:
         return asdict(self)
 
 
-def today() -> _dt.date:
-    return _dt.datetime.now(KAMPALA).date()
+def today(now: _dt.datetime | None = None) -> _dt.date:
+    """Today in Kampala: the same clock as the rate tables."""
+    from ..tax.tables import kampala_today
+
+    return kampala_today(now)
 
 
 def pin_for_turn(as_of: _dt.date | None = None) -> KernelPin:

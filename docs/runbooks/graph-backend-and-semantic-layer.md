@@ -33,6 +33,13 @@ cd App/backend && PYTHONPATH=. python -m app.graph.neo4j_store            # add 
 5. If Neo4j is unreachable, the log says "Neo4j graph backend unavailable; serving in memory", and
    answers continue from memory.
 
+### On the HF Space
+
+The Space sets `GRAPH_STORE_BACKEND=memory` and `FLAG_SEMANTIC_LAYER=false` explicitly in
+`App/deploy/hf-space/Dockerfile`, and its build runs `python -m app.kernel.release check`. Check a
+deploy with `GET /ready`: `capabilities.graph_store` and `capabilities.semantic_layer` must read
+`memory` and `off`, and `capabilities.kernel` must say `released`.
+
 ### Ad-hoc Cypher
 
 Staff query Neo4j directly, with their own read-only database role, not through the agent. The agent

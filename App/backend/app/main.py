@@ -1186,6 +1186,11 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
         "dense_device": dense_dev,
         "procedural_memory": "active",
     }
+    # The statutory kernel's state (ADR-0033): release, graph backend, semantic layer,
+    # tables. Never fails the probe.
+    from .kernel.status import readiness_capabilities
+
+    capabilities.update(readiness_capabilities())
     return HealthResponse(
         status="ready" if qdrant_healthy else "degraded",
         version=app.version,

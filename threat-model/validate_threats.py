@@ -522,6 +522,43 @@ THREAT_REGISTRY: list[dict] = [
         "status": "mitigated",
     },
     {
+        "id": "T79",
+        "category": "Tampering",
+        "description": (
+            "A stale figure reaches taxpayers: an outdated rate-table entry, a template that writes its own copy "
+            "of a figure, or a passage from an older edition outranking the figure in force (G510-G516)"
+        ),
+        "owasp_llm": "LLM09",
+        "mitre_atlas": None,
+        "mitigation": (
+            "Figures cite a document and page, with an evidence ledger re-checked against the PDFs in CI; "
+            "templates render from the table; derived-figure invariants; one Kampala clock and an explicit "
+            "caveat after the last table; edition-aware precedence ranks contradicting passages last. "
+            "Residual: one figure (duplicate logbook fee) is unconfirmed and says so"
+        ),
+        "evidence": ["App/backend/app/tax/evidence/rate_evidence.json", "App/backend/app/kernel/precedence.py",
+                     "tests/agents/test_rate_table_verification_2026_11.py",
+                     "tests/agents/test_kernel_freshness_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
+        "id": "T80",
+        "category": "Tampering",
+        "description": (
+            "A deployed image answers from rate tables that are not a recorded kernel release, because the "
+            "image was built from a commit CI never checked (G517)"
+        ),
+        "owasp_llm": "LLM03",
+        "mitre_atlas": None,
+        "mitigation": (
+            "The HF Space build runs the kernel release check and fails on an unrecorded release; /ready "
+            "reports the release answering"
+        ),
+        "evidence": ["App/deploy/hf-space/Dockerfile", "App/backend/app/kernel/status.py",
+                     "tests/agents/test_kernel_freshness_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
         "id": "T01",
         "category": "Spoofing",
         "description": "Attacker impersonates legitimate API client",

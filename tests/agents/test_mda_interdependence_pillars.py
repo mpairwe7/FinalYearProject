@@ -451,7 +451,7 @@ def test_novel_queue_reduction_and_new_taxpayer_onboarding_tools() -> None:
     )
     assert res_land.ok is True
     assert "1.5%" in res_land.result["recommended_tax_head"]
-    assert "1.5%" not in res_land.result["explanation"]
+    assert "1.0%" not in res_land.result["explanation"], "the Stamp Duty Act 2014 rate, superseded"
 
     # 5. EFRIS 5% Consumer E-Receipt Refund on UGX 2,360,000 VAT-inclusive purchases (>= UGX 2,000,000 FY2026-27 threshold)
     # Embedded VAT = 2,360,000 * (18/118) = 360,000; 5% refund = 18,000 UGX

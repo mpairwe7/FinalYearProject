@@ -822,6 +822,21 @@ RUN set -eux; \
         echo "structural checks passed: qdrant binary, baked storage, FAQ corpus, redis-server, both supervised"; \
     fi
 
+# Gate the pin on the statutory kernel (ADR-0033). The image's rate tables, graph
+# build and penalty rules must be a recorded kernel release (app/kernel/releases.json).
+# CI checks this on every commit; checking it here as well means a pin built from a
+# commit that skipped CI fails the Space build instead of answering from unreleased
+# figures. The kernel needs nothing beyond the base image on CPU: the Neo4j backend
+# and the staff semantic layer are off below, and their drivers are not installed.
+# A base older than the kernel has no release module and skips the gate, so a
+# rollback to it still builds.
+RUN set -eux; \
+    if [ -f /app/backend/app/kernel/release.py ]; then \
+        cd /app/backend && /opt/venv/bin/python -m app.kernel.release check; \
+    else \
+        echo "NOTE: this base predates the statutory kernel (ADR-0033); no kernel release gate."; \
+    fi
+
 # The base sets these already; repeated here so the Space's configuration is
 # readable without pulling the base image apart, and so a pin whose defaults
 # drift cannot quietly point retrieval or the cache somewhere else.
@@ -906,6 +921,8 @@ ENV QDRANT_ENABLED=true \
     FLAG_EVALUATOR_OPTIMIZER=true \
     FLAG_TAX_GRAPH=true \
     FLAG_GRAPH_FUSION=true \
+    GRAPH_STORE_BACKEND=memory \
+    FLAG_SEMANTIC_LAYER=false \
     FLAG_TOOL_RAG=true \
     FLAG_TOOL_USE=false \
     FLAG_LANGGRAPH=false \

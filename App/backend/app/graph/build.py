@@ -249,9 +249,9 @@ def unit_for_key(key: str, value: Any) -> str:
         return "years"
     if key.endswith(("_ugx", "_fee")) or "_per_" in key:
         return "UGX"
-    if isinstance(value, float) and 0 < value <= 1:
+    if isinstance(value, float) and 0 <= value <= 1:
         return "ratio"
-    if isinstance(value, int) and value >= 1000 and ("threshold" in key or "_cap" in key):
+    if isinstance(value, int) and value >= 1000 and ("threshold" in key or "_cap" in key or "penalty" in key):
         return "UGX"
     return ""
 

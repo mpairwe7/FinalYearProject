@@ -131,6 +131,39 @@
         "approved_at": ""
       },
       "notes": "Rate tables verified against original documents (2026-11-08): baggage allowance USD 2,000; land transfer stamp duty 1.5%; FY2026-27 EFRIS floor UGX 200,000 (FY2025-26 UGX 6,000,000); EFRIS offline window 5 days; quarterly VAT test UGX 75,000,000; vehicle transfer fees and 2026 vehicle stamp duty added; 13 of 14 uncited figures now cited; derived-figure invariants."
+    },
+    {
+      "version": "1.2.1",
+      "released": "2026-11-08",
+      "content_sha256": "663a6cfa690344a6357756b4d4a8fd6cb8a1f6532c56b37f6d1e8a7339531081",
+      "rules_sha256": "af0b2f260787026fdf2764a264a58d0d537eb556fecb0b33970e906932d8954a",
+      "model_version": "1.0.0",
+      "ruleset_version": "1.0.0",
+      "fiscal_years": [
+        "FY2025-26",
+        "FY2026-27"
+      ],
+      "stats": {
+        "nodes_fiscal_year": 2,
+        "nodes_tax_type": 20,
+        "nodes_rate": 96,
+        "nodes_provision": 138,
+        "nodes_threshold": 28,
+        "nodes_taxpayer_class": 4,
+        "nodes_penalty": 14,
+        "nodes_obligation": 10,
+        "nodes_parameter": 10,
+        "nodes_fee": 13,
+        "nodes": 335,
+        "edges": 618
+      },
+      "review": {
+        "status": "engineering_baseline",
+        "reviewer": "",
+        "role": "",
+        "approved_at": ""
+      },
+      "notes": "Units: penalty amounts are UGX and a zero rate is a ratio, so the precedence check compares them (ADR-0033 audit, phase B). Figures unchanged from 1.2.0."
     }
   ]
 }

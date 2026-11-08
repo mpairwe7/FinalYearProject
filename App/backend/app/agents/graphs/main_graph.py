@@ -289,10 +289,9 @@ def _fuse_graph_leg(query: str, hits: list) -> list:
         return hits
     if not hit:
         return hits
-    from ...kernel.precedence import check_fused
+    from ...kernel.precedence import apply_precedence
 
-    check_fused(hit, hits)
-    return rrf_fuse_ranked_lists(hits, [hit])
+    return rrf_fuse_ranked_lists(apply_precedence(hit, hits), [hit])
 
 
 #: Parameter names a free-text query can legitimately be bound to.

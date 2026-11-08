@@ -144,3 +144,28 @@ Filled in per phase; see "Implementation record" below.
     as the calculator does, which is release 1.1.1.
   - `tests/agents/test_kernel_advanced_2026_11.py` (58 tests). Each of 30 controls was disabled in
     turn and the suite failed.
+- Audit, 2026-11-08 (QA review of phases 0-3, three phases):
+  - **A, figures verified against original documents** (release 1.2.0). Of the 14 figures with no
+    legal basis, 13 now cite a document and page. Six of the 14 were wrong or stale and are corrected:
+    baggage USD 500 to 2,000, land transfer stamp duty 1% to 1.5%, the FY2026-27 EFRIS floor UGX
+    6,000,000 to double the tax or 200,000, the EFRIS offline window 24 hours to 5 days, the vehicle
+    transfer fee, and the quarterly VAT test, UGX 37,500,000 to 75,000,000 (not one of the 14, but
+    stale against the new annual threshold). The 2026 vehicle stamp duty was missing and is added. The
+    duplicate logbook fee cannot be confirmed and says so. `app/tax/evidence/rate_evidence.json` quotes
+    every page, and `tests/agents/test_rate_table_verification_2026_11.py` re-reads the PDFs. Answer
+    templates had their own copies of these figures, so a table fix did not reach answers; they now
+    read the table, and a test forbids a literal amount in a template for a table figure. The kernel
+    checks figures the law derives from each other (`validate.DERIVED`).
+  - **B, freshness** (release 1.2.1). One clock: the tables read the Kampala date, as the kernel pin
+    does (they read UTC, three hours behind at the 1 July turn). After the last published table
+    ends, answers say no newer table exists rather than rolling over silently. An unconfirmed figure
+    says so in the answer. The frozen `query.CURRENT_FISCAL_YEAR` constant is gone. Precedence is
+    edition-aware: a passage contradicting the figure in force ranks below the others; an older
+    edition is *superseded* and not sent to reviewers, while an unlabelled or current one is a
+    *conflict*. USD amounts and UGX penalties are now compared, and values print as reviewers read
+    them (`6000000`, not `6e+06`). `tests/agents/test_kernel_freshness_2026_11.py`; 17 controls
+    disabled in turn, each failed it.
+  - **C, the HF Space CPU image.** The Space build is gated on a recorded kernel release
+    (`python -m app.kernel.release check`; a base older than the kernel skips it). The Phase 3
+    settings are explicit there (`GRAPH_STORE_BACKEND=memory`, `FLAG_SEMANTIC_LAYER=false`), and
+    `/ready` reports the kernel release, graph store, semantic layer and tables in force.

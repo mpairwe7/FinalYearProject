@@ -58,6 +58,7 @@ User Query
   │     ├── Sparse: BM25 on the taxpayer's original words (never HyDE)
   │     ├── Fusion: Qdrant server-side DBSF (`HYBRID_FUSION=dbsf`, G127; `rrf` uses Qdrant's default k=2 — RRF_K=60 applies only to the graph leg)
   │     ├── Graph leg: statutory rate claims fused by rank, not prepended  [FLAG_GRAPH_FUSION + FLAG_TAX_GRAPH]
+  │     │     └── Edition-aware precedence: passages contradicting the kernel figure rank last (ADR-0033)
   │     ├── Reranking: mxbai-rerank-base-v2 (500M, BEIR 55.6) — scores the raw query
   │     │     (and, for lg/sw, its English form; keeps the higher). On only when RERANK_ENABLED=true
   │     └── Circuit breaker: thread-safe, exponential backoff (10s→300s)

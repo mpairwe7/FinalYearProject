@@ -9,7 +9,15 @@ corrected at its source rather than argued with at every turn.
 
 Detection is deliberately narrow, to keep false alarms rare: a passage must
 name the figure (every content word of its display name, within one window)
-next to a different percentage or UGX amount.
+next to a different percentage, UGX amount or USD amount.
+
+Editions (ADR-0033 audit). A passage from an edition older than the figure's
+fiscal year states the figure of its own time: that is *superseded*, expected,
+and not sent to reviewers. A passage that is unlabelled, or as new as the
+figure, is a *conflict*. :func:`apply_precedence` ranks both below the
+passages that agree, so the figure in force is what the answer rests on; it
+judges by the figure the passage states, so it works for the two thirds of
+URA documents whose filenames carry no fiscal year.
 """
 
 from __future__ import annotations
@@ -35,6 +43,7 @@ _WINDOW = 160
 _STOP = frozenset({"the", "of", "on", "for", "and", "a", "an", "to", "in", "tax", "rate", "standard", "ugx"})
 _PERCENT_RE = re.compile(r"(\d{1,3}(?:\.\d{1,3})?)\s?(?:%|per\s?cent(?:um)?)", re.I)
 _UGX_RE = re.compile(r"(?:UGX|Shs\.?|USh)\s?([\d,]{4,}(?:\.\d+)?)", re.I)
+_USD_RE = re.compile(r"(?:USD|US\s?\$|US Dollars?)\s?([\d,]{2,}(?:\.\d+)?)", re.I)
 
 
 def source_class(hit: dict[str, Any]) -> str:
@@ -61,6 +70,12 @@ class Conflict:
     evidence_class: str
     excerpt: str
     provision: str
+    #: The fiscal year of the kernel figure.
+    fiscal_year: str = ""
+    #: The edition the passage came from, when labelled (``FY2024-25``).
+    evidence_edition: str = ""
+    #: ``superseded`` (an older edition) or ``conflict`` (unlabelled, or as new as the figure).
+    status: str = "conflict"
 
     def to_dict(self) -> dict[str, str]:
         return dict(self.__dict__)
@@ -70,15 +85,40 @@ def _terms(display_name: str) -> list[str]:
     return [w for w in re.findall(r"[a-z]+", display_name.lower()) if w not in _STOP and len(w) > 2]
 
 
-def _kernel_numbers(value: Any, unit: str) -> tuple[set[float], set[float]]:
-    """``(percents, amounts)`` the kernel value states."""
+def _kernel_numbers(value: Any, unit: str) -> dict[str, set[float]]:
+    """The numbers the kernel value states, by the pattern that finds them in text."""
     if isinstance(value, bool) or not isinstance(value, int | float):
-        return set(), set()
+        return {}
     if unit == "ratio":
-        return {round(float(value) * 100, 3)}, set()
-    if unit == "UGX":
-        return set(), {float(value)}
-    return set(), set()
+        return {"percent": {round(float(value) * 100, 3)}}
+    if unit in ("UGX", "USD"):
+        return {unit: {float(value)}}
+    return {}
+
+
+_PATTERNS = {"percent": _PERCENT_RE, "UGX": _UGX_RE, "USD": _USD_RE}
+_SUFFIX = {"percent": "%", "UGX": " UGX", "USD": " USD"}
+
+
+def _edition(hit: dict[str, Any]) -> tuple[int | None, str]:
+    """``(start year, label)`` of the edition *hit* came from, or ``(None, "")`` when unlabelled."""
+    try:
+        from ..retriever import edition_start_year
+
+        start = edition_start_year(hit)
+    except Exception:
+        start = None
+    return (start, f"FY{start}-{(start + 1) % 100:02d}") if start is not None else (None, "")
+
+
+def _num(value: float) -> str:
+    """A figure as a reviewer reads it: ``6000000``, ``1.5``; never ``6e+06``."""
+    return str(int(value)) if float(value).is_integer() else f"{value:.6g}"
+
+
+def _fy_start(fiscal_year: str) -> int | None:
+    match = re.fullmatch(r"FY(\d{4})-\d{2}", fiscal_year or "")
+    return int(match.group(1)) if match else None
 
 
 def find_conflicts(facts: list[dict[str, Any]], passages: list[dict[str, Any]]) -> list[Conflict]:
@@ -90,36 +130,43 @@ def find_conflicts(facts: list[dict[str, Any]], passages: list[dict[str, Any]]) 
     found: list[Conflict] = []
     for fact in facts:
         terms = _terms(str(fact.get("display_name") or ""))
-        percents, amounts = _kernel_numbers(fact.get("value"), str(fact.get("unit") or ""))
-        if not terms or not (percents or amounts):
+        numbers = _kernel_numbers(fact.get("value"), str(fact.get("unit") or ""))
+        if not terms or not numbers:
             continue
+        fiscal_year = str(fact.get("fiscal_year") or "")
+        fact_start = _fy_start(fiscal_year)
         for hit in passages:
             klass = source_class(hit)
             if SOURCE_RANK.get(klass, 99) <= SOURCE_RANK["kernel"]:
                 continue
             text = str(hit.get("text") or hit.get("answer") or "")
             low = text.lower()
-            for match in list(_PERCENT_RE.finditer(text)) + list(_UGX_RE.finditer(text)):
+            matches = [(kind, m) for kind in numbers for m in _PATTERNS[kind].finditer(text)]
+            for kind, match in sorted(matches, key=lambda km: km[1].start()):
                 window = low[max(0, match.start() - _WINDOW):match.end() + _WINDOW]
                 if not all(term in window for term in terms):
                     continue
-                is_percent = match.re is _PERCENT_RE
                 try:
                     number = float(match.group(1).replace(",", ""))
                 except ValueError:
                     continue
-                expected = percents if is_percent else amounts
-                if not expected or any(abs(number - e) < 1e-6 for e in expected):
+                expected = numbers[kind]
+                if any(abs(number - e) < 1e-6 for e in expected):
                     continue
+                start, label = _edition(hit)
+                older = start is not None and fact_start is not None and start < fact_start
                 found.append(Conflict(
                     key=str(fact.get("key") or ""),
                     display_name=str(fact.get("display_name") or ""),
-                    kernel_value=f"{sorted(expected)[0]:g}{'%' if is_percent else ' UGX'}",
-                    evidence_value=f"{number:g}{'%' if is_percent else ' UGX'}",
+                    kernel_value=f"{_num(sorted(expected)[0])}{_SUFFIX[kind]}",
+                    evidence_value=f"{_num(number)}{_SUFFIX[kind]}",
                     evidence_source=str(hit.get("source") or hit.get("url") or ""),
                     evidence_class=klass,
                     excerpt=" ".join(text[max(0, match.start() - 80):match.end() + 80].split()),
                     provision=str(fact.get("provision") or ""),
+                    fiscal_year=fiscal_year,
+                    evidence_edition=label,
+                    status="superseded" if older else "conflict",
                 ))
                 break
     return found
@@ -146,6 +193,7 @@ def facts_from_claims(claims: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "value": node.props.get("value"),
             "unit": node.props.get("unit"),
             "provision": claim.get("provision") or node.props.get("legal_basis") or "",
+            "fiscal_year": node.props.get("fiscal_year") or "",
         })
     return out
 
@@ -155,21 +203,65 @@ def check_fused(graph_hit: dict[str, Any], hits: list[dict[str, Any]]) -> list[C
 
     Never raises: a precedence check must not take down retrieval.
     """
+    return _check(graph_hit, hits)[0]
+
+
+def _check(graph_hit: dict[str, Any], hits: list[dict[str, Any]]) -> tuple[list[Conflict], dict[int, Conflict]]:
+    """Conflicts, and the first one per contradicting hit (by ``id()``). Records only true conflicts."""
     try:
         facts = facts_from_claims(list(graph_hit.get("graph_claims") or []))
-        conflicts = find_conflicts(facts, [h for h in hits if h is not graph_hit])
+        by_hit: dict[int, Conflict] = {}
+        conflicts: list[Conflict] = []
+        for hit in hits:
+            if hit is graph_hit:
+                continue
+            found = find_conflicts(facts, [hit])
+            if found:
+                by_hit[id(hit)] = found[0]
+                conflicts.extend(found)
         if conflicts:
             from .pin import active_pin
 
             pin = active_pin() or {}
             graph_hit["kernel_conflicts"] = [c.to_dict() for c in conflicts]
-            logger.warning("kernel: %d evidence conflict(s) with the kernel: %s",
-                           len(conflicts), ", ".join(sorted({c.key for c in conflicts})))
-            record_conflicts(conflicts, kernel_version=str(pin.get("kernel_version") or ""))
-        return conflicts
+            reportable = [c for c in conflicts if c.status == "conflict"]
+            logger.warning("kernel: %d passage(s) disagree with the kernel (%d superseded editions): %s",
+                           len(conflicts), len(conflicts) - len(reportable),
+                           ", ".join(sorted({c.key for c in conflicts})))
+            if reportable:
+                record_conflicts(reportable, kernel_version=str(pin.get("kernel_version") or ""))
+        return conflicts, by_hit
     except Exception:
         logger.warning("kernel: precedence check skipped", exc_info=True)
-        return []
+        return [], {}
+
+
+def apply_precedence(graph_hit: dict[str, Any], hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """*hits* with each passage that contradicts the kernel moved below the rest.
+
+    Order is otherwise kept. A moved passage is annotated ``kernel_precedence``
+    (status, key, kernel and stated values, edition). Never raises: on any error
+    *hits* comes back unchanged.
+    """
+    try:
+        _conflicts, by_hit = _check(graph_hit, hits)
+        if not by_hit:
+            return hits
+        agree, disagree = [], []
+        for hit in hits:
+            conflict = by_hit.get(id(hit))
+            if conflict is None:
+                agree.append(hit)
+                continue
+            hit["kernel_precedence"] = {"status": conflict.status, "key": conflict.key,
+                                        "kernel_value": conflict.kernel_value,
+                                        "stated_value": conflict.evidence_value,
+                                        "edition": conflict.evidence_edition, "fiscal_year": conflict.fiscal_year}
+            disagree.append(hit)
+        return agree + disagree
+    except Exception:
+        logger.warning("kernel: precedence ordering skipped", exc_info=True)
+        return hits
 
 
 def record_conflicts(conflicts: list[Conflict], *, kernel_version: str) -> int:

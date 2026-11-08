@@ -1266,6 +1266,27 @@ def _ugx(value: object) -> str:
 #: amendment Acts", which would have kept claiming 2026 provenance under
 #: FY2027-28 figures.  The table's own ``verification_note`` carries the
 #: year-specific detail and travels in ``rate_basis`` for the audit trail.
+#: After the last published table ends, answers still use it, and say so.
+ROLLOVER_CAVEAT = (
+    "_No rate table has been published yet for the fiscal year that began on 1 July; these are {fy} "
+    "figures. A new Finance Act may have changed them, so check URA's notices before relying on them._"
+)
+#: A figure the table marks unverified must say so in the reply, not only in a tool payload.
+UNVERIFIED_CAVEAT = (
+    "_This figure has not been confirmed against a gazetted schedule. Confirm it with URA or the "
+    "responsible agency before paying or filing._"
+)
+
+
+def _after_latest_table(fy: str) -> bool:
+    from .tax import tables
+
+    try:
+        return fy == tables.latest_fiscal_year() and tables.coverage() == "after_latest"
+    except Exception:
+        return False
+
+
 PROVISIONAL_CAVEAT = (
     "_{fy} figures are provisional — compiled from the amendment Acts as reported "
     "and not yet reconciled against a URA-published rate card. Please confirm with "
@@ -1286,6 +1307,8 @@ def _rate_table_footer(result: dict[str, object]) -> list[str]:
     lines = ["", f"Figures use the official URA {fy} rate table."]
     if status == "provisional":
         lines.append(PROVISIONAL_CAVEAT.format(fy=fy))
+    if _after_latest_table(str(fy)):
+        lines.append(ROLLOVER_CAVEAT.format(fy=fy))
     return lines
 
 
@@ -2151,6 +2174,10 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
     footer = f"\n\nThat comes from the official URA {fy} rate table."
     if not table.confirmed:
         footer += "\n\n" + PROVISIONAL_CAVEAT.format(fy=fy)
+    if _after_latest_table(fy):
+        footer += "\n\n" + ROLLOVER_CAVEAT.format(fy=fy)
+    if plan.tax_type in table.unverified:
+        footer += "\n\n" + UNVERIFIED_CAVEAT
     if plan.summary == "paye":
         bands = rates["paye_bands_resident"]
         lines = [f"**PAYE rates for resident employees ({fy}, monthly income):**", ""]

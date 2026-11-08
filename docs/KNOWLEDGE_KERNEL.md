@@ -43,8 +43,8 @@ Structure nodes are `tax_type`, `taxpayer_class`, `provision` and `fiscal_year`.
 classified, and `test_every_rate_table_key_reaches_the_kernel` fails if a new key is not.
 
 **A figure with no recorded legal basis is never served as verified.** It is marked `unverified`
-and `uncited`. Release 1.0.0 has 14 such figures. Among them are `paye_due_date_monthly` and
-`efris_penalty_failure_to_issue_invoice`, which need a citation in the rate tables.
+and `uncited`. Release 1.0.0 had 14 such figures. Since release 1.2.0 one remains,
+`motor_vehicle_duplicate_logbook_fee`, which no current source confirms (see "Verified figures").
 
 ## Functions
 
@@ -73,6 +73,44 @@ live web, in that order. A lower source can explain a higher one but never overr
 When graph fusion is on (`FLAG_GRAPH_FUSION` with `FLAG_TAX_GRAPH`), a fused graph hit is compared
 with the passages beside it. A passage stating a different figure is attached to the hit as
 `kernel_conflicts` and sent to the discrepancy review queue as an `evidence_conflict`.
+
+## Verified figures
+
+On 2026-11-08 the figures with no legal basis were checked against URA's published law and guidance
+(`Data/pdfs`, URA's site). Six were wrong or stale and were corrected, and 13 of 14 now cite a
+document and page. The rest of the year's figures were checked against URA's FY2026-27
+amendments booklet, which also corrected the quarterly VAT test.
+
+- **Evidence:** `app/tax/evidence/rate_evidence.json` holds, for each verified figure, the value,
+  document, page and a verbatim quote, plus web sources and open items.
+- **Re-check:** `tests/agents/test_rate_table_verification_2026_11.py` re-opens each PDF page in CI
+  and checks the quote and the table value. An FAQ web page is not a gazetted schedule, so a figure
+  that rests on one stays unverified.
+- **Templates:** answer templates read the year's table (`calculator_router._table_figures`). A
+  template for a table figure may not write its own amount.
+- **Derived figures:** `validate.DERIVED` checks figures the law defines from others, for example
+  the quarterly VAT test as a quarter of the annual threshold (VAT Act s.7(1)(a)).
+
+## Freshness
+
+- **One clock.** The tables, the kernel pin and the calculators read the date in Kampala
+  (`tables.kampala_today()`).
+- **No silent rollover.** `tables.coverage()` returns `in_force`, `before_first` or `after_latest`.
+  After the last table ends, answers use it and say that no newer table has been published.
+- **Unconfirmed figures say so** in the answer itself.
+- **Editions.** `precedence.apply_precedence` ranks a passage that contradicts the figure in force
+  below the others:
+  - from an older edition, it is *superseded*: expected, and not reported;
+  - unlabelled or current, it is a *conflict*, and goes to the discrepancy queue.
+
+  It judges by the figure the passage states, not only by labels, because about two thirds of URA
+  filenames carry no fiscal year. Retrieval separately demotes editions four or more years old.
+
+## Readiness
+
+`GET /ready` includes `capabilities.kernel` (release, review status, ruleset),
+`capabilities.graph_store`, `capabilities.semantic_layer` and `capabilities.rate_tables` (years held,
+year in force, coverage), so a deploy can be checked from outside.
 
 ## Pinning
 
