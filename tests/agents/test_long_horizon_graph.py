@@ -362,29 +362,31 @@ def test_async_runtime_interruption_and_aresume():
 
 
 def test_a_synchronous_node_does_not_stall_the_event_loop():
-    """CodeRabbit on #705: arun ran synchronous nodes on the caller's loop."""
-    import asyncio
-    import time as _time
+    """CodeRabbit on #705: arun ran synchronous nodes on the caller's loop.
 
-    def slow_node(state):
-        _time.sleep(0.4)
+    A handshake, not a tick count: the node waits for a coroutine that can only
+    answer if the loop is free while the node runs.
+    """
+    import asyncio
+    import threading
+
+    node_started, loop_answered = threading.Event(), threading.Event()
+
+    def node(state):
+        node_started.set()
+        state.reply = "loop free" if loop_answered.wait(5) else "loop blocked"
         return NodeResult(next_node=END)
 
-    async def scenario() -> int:
-        ticks = 0
-        done = asyncio.Event()
+    async def scenario() -> str:
+        async def answer() -> None:
+            while not node_started.is_set():
+                await asyncio.sleep(0.005)
+            loop_answered.set()
 
-        async def ticker() -> None:
-            nonlocal ticks
-            while not done.is_set():
-                ticks += 1
-                await asyncio.sleep(0.02)
+        answering = asyncio.create_task(answer())
+        state = AgentGraphState(query="Is VAT charged on exports?")
+        await GraphRuntime(nodes={"respond": node}, entry="respond").arun(state)
+        await asyncio.wait_for(answering, 5)
+        return state.reply
 
-        tick_task = asyncio.create_task(ticker())
-        runtime = GraphRuntime(nodes={"respond": slow_node}, entry="respond")
-        await runtime.arun(AgentGraphState(query="Is VAT charged on exports?"))
-        done.set()
-        await tick_task
-        return ticks
-
-    assert asyncio.run(scenario()) >= 10, "the loop kept running while the node slept"
+    assert asyncio.run(scenario()) == "loop free"

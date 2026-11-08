@@ -17,7 +17,9 @@ def test_every_alias_names_a_final_term() -> None:
     assert chained == {}
 
 
-@pytest.mark.parametrize(("vernacular", "english"), [("magari", "vehicles"), ("pikipiki", "motorcycle")])
+@pytest.mark.parametrize(
+    ("vernacular", "english"), [("magari", "vehicles"), ("pikipiki", "motorcycle"), ("nambari", "number plate")]
+)
 def test_a_vernacular_word_reaches_the_same_term_as_its_english(vernacular: str, english: str) -> None:
     assert fb.faq_terms(vernacular) == fb.faq_terms(english)
 
@@ -39,7 +41,11 @@ def test_an_explicit_date_is_timing_evidence(answer: str) -> None:
 
 @pytest.mark.parametrize(
     "answer",
-    ["PAYE is tax deducted from employment income.", "Employers may register for PAYE online."],
+    [
+        "PAYE is tax deducted from employment income.",
+        "Employers may register for PAYE online.",
+        "PAYE is charged on employment income earned each year.",
+    ],
 )
 def test_a_topic_without_a_timing_rule_is_still_refused(answer: str) -> None:
     assert fb.faq_match_score(DEADLINE, {"question": "What is PAYE?", "answer": answer}) == 0.0
@@ -54,6 +60,8 @@ def test_a_topic_without_a_timing_rule_is_still_refused(answer: str) -> None:
         ("How long does a refund take?", "timing"),
         ("Who should register for VAT?", "party"),
         ("What is PAYE?", ""),
+        ("When filing income tax returns, how is the advance tax treated?", "procedure"),
+        ("If I sell land, when is capital gains tax due?", "timing"),
     ],
 )
 def test_question_intent(question: str, intent: str) -> None:

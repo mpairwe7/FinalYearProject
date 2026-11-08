@@ -202,17 +202,59 @@ def _resolve(target: str, package: list[str]) -> str:
     return ".".join([*base, *filter(None, target.lstrip(".").split("."))])
 
 
+def _argument(call: ast.Call, position: int, keyword: str) -> object:
+    node = call.args[position] if len(call.args) > position else next(
+        (kw.value for kw in call.keywords if kw.arg == keyword), None
+    )
+    return node.value if isinstance(node, ast.Constant) else None
+
+
+def _dynamic_import(call: ast.Call, importlib_names: set[str], import_module_names: set[str], package: list[str]) -> str:
+    """The module a real ``importlib.import_module`` or ``__import__`` call names, else ``""``.
+
+    Only the actual bindings count, so ``registry.import_module(...)`` is not an
+    import; ``name=``, ``package=`` and ``level=`` are read (CodeRabbit on #705).
+    """
+    func = call.func
+    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id in importlib_names:
+        kind = func.attr
+    elif isinstance(func, ast.Name) and func.id in import_module_names:
+        kind = "import_module"
+    elif isinstance(func, ast.Name) and func.id == "__import__":
+        kind = "__import__"
+    else:
+        return ""
+    target = _argument(call, 0, "name")
+    if not isinstance(target, str):
+        return ""
+    if kind == "import_module":
+        anchor = _argument(call, 1, "package")
+        if target.startswith(".") and isinstance(anchor, str):
+            return _resolve(target, anchor.split("."))
+        return _resolve(target, package)
+    if kind == "__import__":
+        level = _argument(call, 4, "level")
+        return _resolve("." * level + target, package) if isinstance(level, int) and level > 0 else target
+    return ""
+
+
 def _imports_of_source(source: str, package: list[str]) -> list[tuple[str, list[str]]]:
-    """Import statements, and ``importlib.import_module`` / ``__import__`` calls with a literal
-    target: a dynamic import of the orchestrator is still an import (CodeRabbit on #705)."""
+    """Import statements, and real ``importlib.import_module`` / ``__import__`` calls with a
+    literal target: a dynamic import of the orchestrator is still an import (CodeRabbit on #705)."""
+    tree = ast.parse(source)
+    importlib_names: set[str] = set()
+    import_module_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            importlib_names |= {alias.asname or alias.name for alias in node.names if alias.name == "importlib"}
+        elif isinstance(node, ast.ImportFrom) and node.module == "importlib":
+            import_module_names |= {alias.asname or alias.name for alias in node.names if alias.name == "import_module"}
     found: list[tuple[str, list[str]]] = []
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(tree):
         if isinstance(node, ast.Call):
-            func = node.func
-            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
-            first = node.args[0] if node.args else None
-            if name in ("import_module", "__import__") and isinstance(first, ast.Constant) and isinstance(first.value, str):
-                found.append((_resolve(first.value, package), []))
+            module = _dynamic_import(node, importlib_names, import_module_names, package)
+            if module:
+                found.append((module, []))
             continue
         if isinstance(node, ast.ImportFrom):
             base = package[: len(package) - (node.level - 1)] if node.level else []
@@ -286,11 +328,19 @@ def _reaches_the_graph(imports: list[tuple[str, list[str]]]) -> list[str]:
         ('import importlib\nimportlib.import_module("app.service")\n', ["app", "agents", "graphs"], ("app.service", [])),
         ('from importlib import import_module\nimport_module("...service")\n', ["app", "agents", "graphs"], ("app.service", [])),
         ('__import__("app.service")\n', ["app"], ("app.service", [])),
+        ('import importlib\nimportlib.import_module(name="app.service")\n', ["app"], ("app.service", [])),
+        ('from importlib import import_module as load\nload(".service", package="app")\n', ["app", "agents"], ("app.service", [])),
+        ('__import__("service", globals(), locals(), [], 3)\n', ["app", "agents", "graphs"], ("app.service", [])),
+        ('__import__(name="service", level=1)\n', ["app"], ("app.service", [])),
         ("from . import service\n", ["app"], ("app", ["service"])),
     ],
 )
 def test_the_scanner_sees_dynamic_and_package_imports(source: str, package: list[str], expected: tuple) -> None:
     assert expected in _imports_of_source(source, package)
+
+
+def test_an_application_method_named_import_module_is_not_an_import() -> None:
+    assert _imports_of_source('registry.import_module("app.agents")\n', ["app"]) == []
 
 
 def test_a_package_import_of_the_graph_is_caught() -> None:

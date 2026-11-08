@@ -135,17 +135,24 @@ defects in what it decides. Five were fixed with tests, each of which fails when
   its English FAQ ended on different terms. Aliases now resolve to their final term in place, for
   every consumer.
 - **Timing evidence.** "By the 15th of the following month" is a timing rule, but no
-  timing-evidence word was in it. Explicit dates and periods now count. "May" does not, because it
-  is usually the modal verb.
+  timing-evidence word was in it. A deadline-shaped date or period now counts: "by", "before",
+  "on or before" or "not later than" plus a date, "within N days", or "the 15th of the following
+  month". A bare "each year" or month name does not, so a definition is not taken for a deadline
+  (the re-review caught the first, looser version). "May" is not a month here, because it is
+  usually the modal verb.
 - **Question intent.** "When are capital gains taxed?" and "How are capital gains taxed?" had the
-  same terms and were both promoted. Questions whose interrogatives differ (when, how, how much,
-  who, where, why) are no longer equivalent.
+  same terms and were both promoted. Questions whose main interrogatives differ (when, how, how
+  much, who, where, why) are no longer equivalent. A leading subordinate clause ("When filing
+  returns, how is…") is context, not the question.
+- **Multi-word aliases.** "nambari" named "number plate", and that phrase stayed one term while
+  the English text gave two. Alias targets now split into words.
 - **Self-reflection.** A revision replaced the English-checked draft without the check. It now
   gets the check before the guards read it.
 - **Async dispatch.** `GraphRuntime.arun` ran synchronous nodes on the caller's event loop. They
   now run in a worker thread, which copies the context; no node sets a ContextVar.
 
-The layering scanner also reads `importlib.import_module` and `__import__` calls, and catches
+The layering scanner also reads real `importlib.import_module` and `__import__` calls (not a
+method of the same name), including the `name=`, `package=` and `level=` arguments, and catches
 `from . import agents`.
 
 One finding was answered with evidence: acronym folding when no local FAQ corpus exists. The

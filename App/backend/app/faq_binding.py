@@ -303,7 +303,11 @@ def faq_terms(text: str) -> set[str]:
     for raw in re.findall(r"[a-z0-9]+", (text or "").lower()):
         if raw in _FAQ_QUERY_STOP_WORDS:
             continue
-        terms.add(_FAQ_TERM_ALIASES.get(raw, raw))
+        # A multi-word target ("nambari" -> "number plate") becomes the words the
+        # English text would yield, so the two compare (CodeRabbit on #705).
+        terms.update(
+            word for word in _FAQ_TERM_ALIASES.get(raw, raw).split() if word not in _FAQ_QUERY_STOP_WORDS
+        )
     return terms
 
 
@@ -437,15 +441,19 @@ def faq_match_score(query: str, entry: dict[str, Any], locale: str | None = None
     return round(score, 4)
 
 
-#: An explicit date or period states a timing rule as surely as the word
-#: "deadline" does: "by the 15th of the following month" (CodeRabbit on #705).
-#: "May" is left out of the month names: it is usually the modal verb.
+#: A deadline written as a date or a period states a timing rule as surely as
+#: the word "deadline" does: "by the 15th of the following month" (CodeRabbit on
+#: #705). It must be shaped like a deadline: "each year" in a definition is not
+#: one, and a bare month name or ordinal is not either. "May" is left out of the
+#: month names: it is usually the modal verb.
+_MONTH = r"(?:january|february|march|april|june|july|august|september|october|november|december)"
+_DAY = r"\d{1,2}(?:st|nd|rd|th)?"
 _TIMING_EXPRESSION_RE = re.compile(
-    r"\b\d{1,2}(?:st|nd|rd|th)\b"
-    r"|\b(?:january|february|march|april|june|july|august|september|october|november|december)\b"
-    r"|\b(?:following|next|each|every|end\s+of\s+the)\s+(?:month|year|quarter|week)\b"
-    r"|\bwithin\s+\d+\s+(?:working\s+)?(?:days|weeks|months)\b"
-    r"|\bon\s+or\s+before\b",
+    rf"\b(?:by|before|on\s+or\s+before|not\s+later\s+than|no\s+later\s+than|due\s+(?:on|by))\s+(?:the\s+)?"
+    rf"(?:{_DAY}\s+(?:day\s+)?(?:of\s+)?(?:{_MONTH}|the\s+(?:following|next|end\s+of\s+the)\s+(?:month|year|quarter))"
+    rf"|{_MONTH}\s+\d{{1,2}}|end\s+of\s+(?:the\s+)?(?:month|year|quarter|financial\s+year)|last\s+(?:working\s+)?day)\b"
+    rf"|\b{_DAY}\s+(?:day\s+)?of\s+(?:the\s+)?(?:following|next)\s+(?:month|year|quarter)\b"
+    r"|\bwithin\s+\d+\s+(?:working\s+)?(?:days|weeks|months)\b",
     re.IGNORECASE,
 )
 
@@ -463,12 +471,18 @@ _QUESTION_INTENTS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 
+#: A leading subordinate clause is context, not the question: in "When filing
+#: returns, how is advance tax treated?" the question is "how" (CodeRabbit on #705).
+_LEADING_CLAUSE_RE = re.compile(r"^\s*(?:when|while|if|before|after|once|whenever)\b[^,?]{0,120},\s*", re.IGNORECASE)
+
+
 def question_intent(text: str) -> str:
-    """The intent of the first interrogative in *text*, or ``""`` when it has none."""
+    """The intent of the main question's first interrogative, or ``""`` when it has none."""
+    main = _LEADING_CLAUSE_RE.sub("", text or "", count=1)
     found = [
         (match.start(), rank, intent)
         for rank, (intent, pattern) in enumerate(_QUESTION_INTENTS)
-        if (match := pattern.search(text or ""))
+        if (match := pattern.search(main))
     ]
     return min(found)[2] if found else ""
 
