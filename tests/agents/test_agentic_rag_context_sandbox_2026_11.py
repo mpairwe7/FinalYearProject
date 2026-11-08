@@ -191,9 +191,29 @@ def test_a_chat_backend_rewrite_is_validated(monkeypatch: pytest.MonkeyPatch) ->
 
 def _imports_of(path: Path) -> list[tuple[str, list[str]]]:
     """``(module, names)`` for every import in *path*, relative imports resolved within ``app``."""
-    package = ["app", *path.relative_to(APP).parts[:-1]]
+    return _imports_of_source(path.read_text(encoding="utf-8"), ["app", *path.relative_to(APP).parts[:-1]])
+
+
+def _resolve(target: str, package: list[str]) -> str:
+    level = len(target) - len(target.lstrip("."))
+    if not level:
+        return target
+    base = package[: len(package) - (level - 1)]
+    return ".".join([*base, *filter(None, target.lstrip(".").split("."))])
+
+
+def _imports_of_source(source: str, package: list[str]) -> list[tuple[str, list[str]]]:
+    """Import statements, and ``importlib.import_module`` / ``__import__`` calls with a literal
+    target: a dynamic import of the orchestrator is still an import (CodeRabbit on #705)."""
     found: list[tuple[str, list[str]]] = []
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call):
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+            first = node.args[0] if node.args else None
+            if name in ("import_module", "__import__") and isinstance(first, ast.Constant) and isinstance(first.value, str):
+                found.append((_resolve(first.value, package), []))
+            continue
         if isinstance(node, ast.ImportFrom):
             base = package[: len(package) - (node.level - 1)] if node.level else []
             module = ".".join([*base, *(node.module.split(".") if node.module else [])])
@@ -249,8 +269,32 @@ def test_the_graph_does_not_import_the_orchestrator() -> None:
 
 def test_the_extracted_modules_do_not_import_the_graph() -> None:
     for name in _EXTRACTED:
-        modules = [module for module, _ in _imports_of(APP / name)]
-        assert not [m for m in modules if m.startswith("app.agents")], name
+        assert not _reaches_the_graph(_imports_of(APP / name)), name
+
+
+def _reaches_the_graph(imports: list[tuple[str, list[str]]]) -> list[str]:
+    """``from . import agents`` names the package, not a module under it (CodeRabbit on #705)."""
+    return [
+        module for module, names in imports
+        if module.startswith("app.agents") or (module == "app" and "agents" in names)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("source", "package", "expected"),
+    [
+        ('import importlib\nimportlib.import_module("app.service")\n', ["app", "agents", "graphs"], ("app.service", [])),
+        ('from importlib import import_module\nimport_module("...service")\n', ["app", "agents", "graphs"], ("app.service", [])),
+        ('__import__("app.service")\n', ["app"], ("app.service", [])),
+        ("from . import service\n", ["app"], ("app", ["service"])),
+    ],
+)
+def test_the_scanner_sees_dynamic_and_package_imports(source: str, package: list[str], expected: tuple) -> None:
+    assert expected in _imports_of_source(source, package)
+
+
+def test_a_package_import_of_the_graph_is_caught() -> None:
+    assert _reaches_the_graph(_imports_of_source("from . import agents\n", ["app"])) == ["app"]
 
 
 def test_service_reexports_the_same_turn_context() -> None:

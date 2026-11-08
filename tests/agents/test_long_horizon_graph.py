@@ -359,3 +359,32 @@ def test_async_runtime_interruption_and_aresume():
         assert "REC-7766" in resumed.reply
 
     asyncio.run(_run())
+
+
+def test_a_synchronous_node_does_not_stall_the_event_loop():
+    """CodeRabbit on #705: arun ran synchronous nodes on the caller's loop."""
+    import asyncio
+    import time as _time
+
+    def slow_node(state):
+        _time.sleep(0.4)
+        return NodeResult(next_node=END)
+
+    async def scenario() -> int:
+        ticks = 0
+        done = asyncio.Event()
+
+        async def ticker() -> None:
+            nonlocal ticks
+            while not done.is_set():
+                ticks += 1
+                await asyncio.sleep(0.02)
+
+        tick_task = asyncio.create_task(ticker())
+        runtime = GraphRuntime(nodes={"respond": slow_node}, entry="respond")
+        await runtime.arun(AgentGraphState(query="Is VAT charged on exports?"))
+        done.set()
+        await tick_task
+        return ticks
+
+    assert asyncio.run(scenario()) >= 10, "the loop kept running while the node slept"

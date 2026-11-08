@@ -199,6 +199,17 @@ class EnglishDecidedReplySafetyNetTest(unittest.TestCase):
         with mock.patch.object(english_rendering, "translate_query_for_retrieval", return_value=None):
             self.assertEqual(english_rendering.answer_in_english(self.LG_ANSWER), self.LG_ANSWER)
 
+    def test_a_later_failed_translation_serves_the_original_reply(self) -> None:
+        from app import english_rendering
+
+        with mock.patch.object(
+            english_rendering,
+            "translate_query_for_retrieval",
+            side_effect=["To register for a TIN, bring these documents to a URA office now.", None],
+        ) as mt:
+            self.assertEqual(english_rendering.answer_in_english(self.LG_ANSWER), self.LG_ANSWER)
+        self.assertEqual(mt.call_count, 2)
+
 
 class WebSocketResumeRestoresEnglishFormsTest(unittest.TestCase):
     """CodeRabbit on #543: a resumed session replays the English forms too."""

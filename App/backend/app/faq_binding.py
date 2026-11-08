@@ -202,6 +202,24 @@ _FAQ_TERM_ALIASES = {
 }
 
 
+def _resolve_alias_chains(aliases: dict[str, str]) -> None:
+    """Point every alias at its final term, in place (CodeRabbit on #705).
+
+    ``magari`` named ``vehicles``, itself an alias, so a Luganda or Swahili
+    query and its English FAQ ended on different terms and the row scored zero.
+    """
+    for key in list(aliases):
+        seen = {key}
+        target = aliases[key]
+        while target in aliases and aliases[target] != target and target not in seen:
+            seen.add(target)
+            target = aliases[target]
+        aliases[key] = target
+
+
+_resolve_alias_chains(_FAQ_TERM_ALIASES)
+
+
 #: expansion phrase -> acronym, mined from the loaded corpus by
 #: :func:`mine_faq_acronyms` and installed by :func:`install_faq_acronyms`.
 #: Empty until a FAQ index is loaded, which leaves :func:`faq_subject_terms`
@@ -373,7 +391,9 @@ def faq_match_score(query: str, entry: dict[str, Any], locale: str | None = None
         "obudde", "olunaku", "ekkomo", "mwezi",
         "tarehe", "muda", "kipindi",
     }
-    if query_terms & timing_terms and not (timing_evidence & body_terms):
+    if query_terms & timing_terms and not (
+        timing_evidence & body_terms or _TIMING_EXPRESSION_RE.search(f"{q_raw} {a_raw}")
+    ):
         return 0.0
 
     body_coverage = len(asked_terms & body_terms) / len(asked_terms)
@@ -417,6 +437,42 @@ def faq_match_score(query: str, entry: dict[str, Any], locale: str | None = None
     return round(score, 4)
 
 
+#: An explicit date or period states a timing rule as surely as the word
+#: "deadline" does: "by the 15th of the following month" (CodeRabbit on #705).
+#: "May" is left out of the month names: it is usually the modal verb.
+_TIMING_EXPRESSION_RE = re.compile(
+    r"\b\d{1,2}(?:st|nd|rd|th)\b"
+    r"|\b(?:january|february|march|april|june|july|august|september|october|november|december)\b"
+    r"|\b(?:following|next|each|every|end\s+of\s+the)\s+(?:month|year|quarter|week)\b"
+    r"|\bwithin\s+\d+\s+(?:working\s+)?(?:days|weeks|months)\b"
+    r"|\bon\s+or\s+before\b",
+    re.IGNORECASE,
+)
+
+#: What a question asks for, from its interrogative. Stop words drop "when" and
+#: "how", so "When are capital gains taxed?" and "How are capital gains taxed?"
+#: had the same terms and were both promoted (CodeRabbit on #705). At the same
+#: position the longer form wins: "how much" is an amount, not a procedure.
+_QUESTION_INTENTS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("amount", re.compile(r"\bhow\s+(?:much|many)\b", re.IGNORECASE)),
+    ("timing", re.compile(r"\b(?:when|how\s+long|how\s+soon)\b", re.IGNORECASE)),
+    ("procedure", re.compile(r"\bhow\b", re.IGNORECASE)),
+    ("party", re.compile(r"\bwho(?:m|se)?\b", re.IGNORECASE)),
+    ("place", re.compile(r"\bwhere\b", re.IGNORECASE)),
+    ("reason", re.compile(r"\bwhy\b", re.IGNORECASE)),
+)
+
+
+def question_intent(text: str) -> str:
+    """The intent of the first interrogative in *text*, or ``""`` when it has none."""
+    found = [
+        (match.start(), rank, intent)
+        for rank, (intent, pattern) in enumerate(_QUESTION_INTENTS)
+        if (match := pattern.search(text or ""))
+    ]
+    return min(found)[2] if found else ""
+
+
 def faq_question_equivalence(query: str, entry: dict[str, Any]) -> float:
     """F1 over content terms between *query* and an FAQ row's own question.
 
@@ -430,6 +486,10 @@ def faq_question_equivalence(query: str, entry: dict[str, Any]) -> float:
     asked = faq_subject_terms(query)
     faq = faq_subject_terms(str(entry.get("question") or ""))
     if not asked or not faq:
+        return 0.0
+    # Same subject, different question: "when" is not answered by "how".
+    asked_intent, faq_intent = question_intent(query), question_intent(str(entry.get("question") or ""))
+    if asked_intent and faq_intent and asked_intent != faq_intent:
         return 0.0
     overlap = len(asked & faq)
     if not overlap:

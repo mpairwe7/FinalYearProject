@@ -12838,6 +12838,10 @@ class ChatModel:
                             revise_kwargs["tier"] = rev_decision.tier
                         revised = _call_llm_with_deadline(**revise_kwargs)
                     if revised:
+                        # The revision is a new draft: it gets the same English check as the
+                        # first, before the guards read it (CodeRabbit on #705).
+                        if locale in ("", "en") or not llm_module.can_generate_in_locale(locale):
+                            revised = _english_rendering.answer_in_english(revised)
                         reply = self._output_guard.sanitize(self._output_guard.redact_pii(revised))
                         leakage = self._output_guard.check_prompt_leakage(reply)
                         reply = leakage.sanitized_text

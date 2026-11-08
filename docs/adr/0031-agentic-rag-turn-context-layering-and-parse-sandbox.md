@@ -128,6 +128,32 @@ The layering test now holds the end state:
 `service.py` is 14,809 lines. The HF Space build patches five lines in it, and none is in
 the moved code.
 
+**Review of the move (PR #705).** CodeRabbit read the moved code as new and found pre-existing
+defects in what it decides. Five were fixed with tests, each of which fails when its fix is removed:
+
+- **Alias chains.** `magari` named `vehicles`, itself an alias, so a Luganda or Swahili query and
+  its English FAQ ended on different terms. Aliases now resolve to their final term in place, for
+  every consumer.
+- **Timing evidence.** "By the 15th of the following month" is a timing rule, but no
+  timing-evidence word was in it. Explicit dates and periods now count. "May" does not, because it
+  is usually the modal verb.
+- **Question intent.** "When are capital gains taxed?" and "How are capital gains taxed?" had the
+  same terms and were both promoted. Questions whose interrogatives differ (when, how, how much,
+  who, where, why) are no longer equivalent.
+- **Self-reflection.** A revision replaced the English-checked draft without the check. It now
+  gets the check before the guards read it.
+- **Async dispatch.** `GraphRuntime.arun` ran synchronous nodes on the caller's event loop. They
+  now run in a worker thread, which copies the context; no node sets a ContextVar.
+
+The layering scanner also reads `importlib.import_module` and `__import__` calls, and catches
+`from . import agents`.
+
+One finding was answered with evidence: acronym folding when no local FAQ corpus exists. The
+deployed Space installs 135 acronym expansions from the corpus it ships, and a deployment without
+that corpus has no FAQ index for them to serve.
+
+The FAQ promotion, match-gate, acronym, grounding and retrieval-regression suites pass (113 tests).
+
 ## Consequences
 
 - Positive: a compromised parser sees no secret, no database, cache, vector store or model address, and no
