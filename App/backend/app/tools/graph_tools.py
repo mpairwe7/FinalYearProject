@@ -397,6 +397,80 @@ class KernelExplainTool(_KernelTool):
         return _kernel_result(explain(provision.strip()))
 
 
+class KernelComputePenaltyTool(Tool):
+    """Rules as code: penal taxes and interest from kernel parameters (ADR-0033 phase 2)."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="kernel_compute_penalty",
+            description=(
+                "Compute a late-filing penal tax, late-payment interest, an EFRIS penal tax or an unstamped-goods "
+                "penal tax from the statutory knowledge kernel, step by step with the provision for each step. "
+                "Results stay marked unverified until URA's tax team approves the ruleset; say so to the taxpayer."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "rule": {"type": "string", "enum": ["late_filing_penal_tax", "late_payment_interest",
+                                                         "efris_penal_tax", "dts_unstamped_penal_tax"]},
+                    "amount": {"type": "number", "minimum": 0,
+                               "description": "Tax payable (late filing), amount unpaid (interest) or tax due (penal taxes), in UGX."},
+                    "months": {"type": "integer", "minimum": 0,
+                               "description": "Months late (late filing: each month or part-month) or months unpaid (interest)."},
+                    "penal_tax": {"type": "number", "minimum": 0,
+                                  "description": "Penal tax already charged, for the interest cap. Interest only."},
+                    "date": _DATE_PARAM,
+                },
+                "required": ["rule", "amount"],
+                "additionalProperties": False,
+            },
+            risk="low",
+            namespace=GRAPH_NAMESPACE,
+            read_only=True,
+            idempotent=True,
+            open_world=False,
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "error": {"type": "string"},
+                    "not_in_kernel": {"type": "boolean"},
+                    "rule": {"type": "string"},
+                    "amount": {"type": "number"},
+                    "steps": {"type": "array", "items": {"type": "object"}},
+                    "unverified": {"type": "boolean"},
+                    "review_status": {"type": "string"},
+                    "kernel_version": {"type": "string"},
+                },
+                "required": ["ok"],
+            },
+        )
+
+    def execute(self, rule: str, amount: float, months: int = 0, penal_tax: float = 0,
+                date: str = "") -> dict[str, Any]:
+        if not _enabled():
+            return dict(_DISABLED)
+        day = _as_of(date)
+        if isinstance(day, dict):
+            return day
+        from ..kernel import rules
+
+        calls = {
+            "late_filing_penal_tax": lambda: rules.late_filing_penal_tax(amount, months, as_of=day),
+            "late_payment_interest": lambda: rules.late_payment_interest(amount, months, penal_tax=penal_tax, as_of=day),
+            "efris_penal_tax": lambda: rules.efris_penal_tax(amount, as_of=day),
+            "dts_unstamped_penal_tax": lambda: rules.dts_unstamped_penal_tax(amount, as_of=day),
+        }
+        if rule not in calls:
+            return {"ok": False, "error": f"unknown rule {rule!r}"}
+        try:
+            result = calls[rule]()
+        except rules.RuleInputError as exc:
+            return {"ok": False, "error": str(exc)}
+        return result.to_dict()
+
+
 ToolRegistry.register(GraphResolveRateTool())
 ToolRegistry.register(GraphRateHistoryTool())
 ToolRegistry.register(GraphEffectiveOnTool())
@@ -404,3 +478,4 @@ ToolRegistry.register(KernelFactTool())
 ToolRegistry.register(KernelObligationsTool())
 ToolRegistry.register(KernelPenaltiesTool())
 ToolRegistry.register(KernelExplainTool())
+ToolRegistry.register(KernelComputePenaltyTool())

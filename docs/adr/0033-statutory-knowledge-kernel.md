@@ -109,3 +109,15 @@ Filled in per phase; see "Implementation record" below.
   `tests/agents/test_statutory_kernel_2026_11.py` (43 tests). Each of nine controls was disabled in turn and the suite failed:
   coverage, uncited-as-unverified, the resume seal, the act contract, the precedence rank filter, table
   parity, the SHACL provenance rule, release matching and the audit pin.
+- Phase 2 (core): rules as code in `app/kernel/rules.py` (ruleset 1.0.0, every rule
+  `pending_tax_team_review`, every result unverified until approved), reached through the
+  `kernel_compute_penalty` tool (77 tools in all); release 1.1.0 recorded for the ruleset, graph
+  content unchanged; a hash-verified snapshot per released content hash, so a past turn's facts replay
+  exactly; the legal-change pipeline (`app/kernel/legal_change.py`: diff, corroboration against the
+  Act's text, a review queue needing a named reviewer); eight golden scenarios with asserted traces,
+  including both sides of the 1 July boundary, a contradicting passage and replay;
+  PROV-O and AgentO export of the audit ledger (`app/audit/provenance.py`); the concurrency benchmark
+  harness (`scripts/bench_llm_concurrency.py`), not yet run on the A6000. Building replay showed that
+  serialising the graph returned live property dictionaries, so a caller editing the copy changed the
+  cached kernel; `Node`/`Edge` now copy them. `tests/agents/test_kernel_core_2026_11.py` (44 tests).
+  Each of 18 controls was disabled in turn and the suite failed.

@@ -457,6 +457,37 @@ THREAT_REGISTRY: list[dict] = [
         "status": "mitigated",
     },
     {
+        "id": "T75",
+        "category": "Tampering",
+        "description": (
+            "A Finance Act change, or an engineer's edit marking a penalty rule approved, reaches answers as verified "
+            "without a named reviewer (G500, G502)"
+        ),
+        "owasp_llm": "LLM09",
+        "mitre_atlas": None,
+        "mitigation": (
+            "Rule results are unverified unless the rule is marked approved and the running release names a "
+            "reviewer; table changes are diffed and corroborated against the Act and queued for a named reviewer; "
+            "a draft edited after proposal cannot be approved"
+        ),
+        "evidence": ["App/backend/app/kernel/rules.py", "App/backend/app/kernel/legal_change.py",
+                     "tests/agents/test_kernel_core_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
+        "id": "T76",
+        "category": "Information Disclosure",
+        "description": "The provenance export of the audit ledger names the taxpayers whose turns it records (G504)",
+        "owasp_llm": "LLM02",
+        "mitre_atlas": None,
+        "mitigation": (
+            "Questions and answers are digests in the ledger; user ids are pseudonymised. Residual: the pseudonym "
+            "is unsalted, so the export is an internal record and is not published"
+        ),
+        "evidence": ["App/backend/app/audit/provenance.py", "tests/agents/test_kernel_core_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
         "id": "T01",
         "category": "Spoofing",
         "description": "Attacker impersonates legitimate API client",

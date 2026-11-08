@@ -447,8 +447,8 @@ App/backend/app/
 │   ├── state.py         #   AgentRoute enum, RouteDecision dataclass
 │   └── graphs/          #   LangGraph orchestration (scaffolded for Phase 15)
 │
-├── tools/               # LLM & deterministic tool-calling framework (76 tools across 18 namespaces)
-├── kernel/              # Statutory Knowledge Kernel: schema, releases, functions, precedence (ADR-0033)
+├── tools/               # LLM & deterministic tool-calling framework (77 tools across 18 namespaces)
+├── kernel/              # Statutory Knowledge Kernel: schema, releases, snapshots, functions, rules, precedence, legal change (ADR-0033)
 │   ├── __init__.py      #   Tool base class + ToolRegistry (auto-registration)
 │   ├── calculators.py   #   VAT, PAYE, capital gains, corporation tax, customs duty,
 │   │                    #   rental income tax, withholding tax (FY-versioned rates)

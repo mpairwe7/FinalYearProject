@@ -50,7 +50,56 @@ cd App/backend && PYTHONPATH=. python -m app.kernel.release check
      --reviewer "Name Surname" --role "Commissioner, Tax Policy"
    ```
 
-4. **Commit `app/kernel/releases.json` with the change**, in the same pull request.
+   Recording a release also writes its snapshot, `app/kernel/snapshots/<hash prefix>.json.gz`. If
+   only the rules changed, the snapshot already exists and is unchanged.
+
+4. **Commit `app/kernel/releases.json` and any new snapshot with the change**, in the same pull request.
+
+## A new fiscal year from a Finance Act
+
+1. Draft `FY<next>.json` in the format of the current table, with a `legal_basis` for every figure.
+2. Propose it with the Acts' text:
+
+   ```bash
+   PYTHONPATH=. python -m app.kernel.legal_change propose --table FY2027-28.json \
+     --act finance-act-2027.pdf --act vat-amendment-2027.pdf
+   ```
+
+   The summary counts changes, corroborated, uncorroborated, removed and uncited. Treat each
+   uncorroborated change as unconfirmed: find its sentence in the Act, or correct the draft and
+   propose again.
+3. The reviewer decides:
+
+   ```bash
+   PYTHONPATH=. python -m app.kernel.legal_change approve --id FY2027-28-<hash> \
+     --reviewer "Name Surname" --role "Commissioner, Tax Policy"
+   ```
+
+4. Commit the table and release it as above, naming the same reviewer.
+
+## Approving the penalty and interest rules
+
+The rules in `app/kernel/rules.py` are `pending_tax_team_review`. To approve them:
+
+1. The reviewer checks each rule and its cited provision, using
+   `tests/agents/test_kernel_core_2026_11.py` and `app/kernel/scenarios.py` as the worked examples.
+2. Set the reviewed rules' entries in `REVIEW_STATUS` to `"approved"`. This changes the ruleset hash.
+3. Record a release naming the reviewer. Results from approved rules are no longer marked unverified,
+   unless a parameter they read is.
+
+## Replaying an audited turn
+
+Read the turn's `kernel_pin` from its audit row, then:
+
+```bash
+PYTHONPATH=. python -c "
+import datetime as dt
+from app.kernel import functions, release
+store = release.load_snapshot('1.1.0')
+print(functions.fact('vat_standard', dt.date(2026, 8, 15), store=store, version='1.1.0'))"
+```
+
+A snapshot whose hash does not match its release is refused. Do not edit it: restore it from git.
 
 ## What a release changes at runtime
 

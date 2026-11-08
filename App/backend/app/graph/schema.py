@@ -12,6 +12,7 @@ category nobody reviewed.
 
 from __future__ import annotations
 
+import copy
 import datetime as _dt
 from dataclasses import dataclass, field
 from enum import Enum
@@ -105,7 +106,7 @@ class Node:
             "id": self.id,
             "kind": self.kind.value,
             "label": self.label,
-            "props": self.props,
+            "props": copy.deepcopy(self.props),
             "source": self.source,
             "unverified": self.unverified,
         }
@@ -116,7 +117,7 @@ class Node:
             id=raw["id"],
             kind=NodeKind(raw["kind"]),
             label=raw["label"],
-            props=raw.get("props", {}),
+            props=copy.deepcopy(raw.get("props", {})),
             source=raw.get("source", ""),
             unverified=bool(raw.get("unverified", False)),
         )
@@ -132,7 +133,7 @@ class Edge:
     props: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"src": self.src, "kind": self.kind.value, "dst": self.dst, "props": self.props}
+        return {"src": self.src, "kind": self.kind.value, "dst": self.dst, "props": copy.deepcopy(self.props)}
 
     @staticmethod
     def from_dict(raw: dict[str, Any]) -> Edge:
@@ -140,7 +141,7 @@ class Edge:
             src=raw["src"],
             kind=EdgeKind(raw["kind"]),
             dst=raw["dst"],
-            props=raw.get("props", {}),
+            props=copy.deepcopy(raw.get("props", {})),
         )
 
 

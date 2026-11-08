@@ -17,6 +17,7 @@ Commands::
 from __future__ import annotations
 
 import datetime as _dt
+import gzip
 import hashlib
 import json
 import threading
@@ -28,6 +29,9 @@ from .model import MODEL_VERSION
 
 REGISTRY = Path(__file__).with_name("releases.json")
 RULES_SOURCE = Path(__file__).with_name("rules.py")
+#: One gzipped canonical graph per released content hash, so a past turn can be
+#: replayed against exactly the knowledge it answered under.
+SNAPSHOT_DIR = Path(__file__).with_name("snapshots")
 
 REVIEW_BASELINE = "engineering_baseline"
 REVIEW_APPROVED = "approved"
@@ -131,6 +135,36 @@ def clear_cache() -> None:
         _current = None
 
 
+def snapshot_path(content: str) -> Path:
+    return SNAPSHOT_DIR / f"{content[:16]}.json.gz"
+
+
+def write_snapshot(store: Any) -> Path:
+    """Write the canonical graph for *store*'s content hash; byte-stable (mtime 0)."""
+    content = content_sha256(store)
+    path = snapshot_path(content)
+    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    data = gzip.compress(canonical_json(store).encode("utf-8"), compresslevel=9, mtime=0)
+    if not path.exists() or path.read_bytes() != data:
+        path.write_bytes(data)
+    return path
+
+
+def load_snapshot(version: str) -> Any:
+    """The graph of a recorded release, verified against its content hash."""
+    from ..graph.store import InMemoryGraphStore
+
+    entry = next((e for e in load_registry() if e.get("version") == version), None)
+    if entry is None:
+        raise KeyError(f"no kernel release {version!r}")
+    path = snapshot_path(str(entry["content_sha256"]))
+    raw = json.loads(gzip.decompress(path.read_bytes()).decode("utf-8"))
+    store = InMemoryGraphStore.from_dict(raw)
+    if content_sha256(store) != entry["content_sha256"]:
+        raise ValueError(f"snapshot for {version} does not match its recorded content hash")
+    return store
+
+
 def proposed_entry(version: str, notes: str, *, reviewer: str = "", role: str = "") -> dict[str, Any]:
     """The registry entry for the current content, ready to append."""
     from ..graph.schema import NodeKind
@@ -172,6 +206,9 @@ def record(version: str, notes: str, *, reviewer: str = "", role: str = "") -> d
     entry = proposed_entry(version, notes, reviewer=reviewer, role=role)
     if releases and _matches(releases[-1], entry["content_sha256"], entry["rules_sha256"]):
         raise ValueError("the current content is already released as " + str(releases[-1]["version"]))
+    from .functions import kernel_store
+
+    write_snapshot(kernel_store())
     releases.append(entry)
     REGISTRY.write_text(json.dumps({"releases": releases}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     clear_cache()
@@ -184,6 +221,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI
     parser = argparse.ArgumentParser(description="Kernel releases (ADR-0033).")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("check")
+    sub.add_parser("snapshot")
     p_prop = sub.add_parser("propose")
     p_prop.add_argument("--version", required=True)
     p_prop.add_argument("--notes", default="")
@@ -202,6 +240,11 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI
                 "(python -m app.kernel.release record ...)."
             )
             return 1
+        return 0
+    if args.cmd == "snapshot":
+        from .functions import kernel_store
+
+        print(write_snapshot(kernel_store()))  # noqa: T201 - CLI output
         return 0
     if args.cmd == "propose":
         print(json.dumps(proposed_entry(args.version, args.notes), indent=2))  # noqa: T201 - CLI output

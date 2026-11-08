@@ -82,25 +82,27 @@ def refresh() -> None:
     clear_cache()
 
 
-def _version() -> str:
+def _version(version: str | None = None) -> str:
+    if version:
+        return version
     from .release import current
 
     return current().version
 
 
-def declared_keys() -> frozenset[str]:
+def declared_keys(store: InMemoryGraphStore | None = None) -> frozenset[str]:
     """Every rate-table key the kernel declares."""
-    store = kernel_store()
+    store = store or kernel_store()
     return frozenset(str(n.props.get("key")) for kind in FACT_KINDS for n in store.by_kind(kind))
 
 
-def declared_taxes() -> frozenset[str]:
-    return frozenset(str(n.props.get("name")) for n in kernel_store().by_kind(NodeKind.TAX_TYPE))
+def declared_taxes(store: InMemoryGraphStore | None = None) -> frozenset[str]:
+    return frozenset(str(n.props.get("name")) for n in (store or kernel_store()).by_kind(NodeKind.TAX_TYPE))
 
 
-def fiscal_year_on(as_of: _dt.date) -> str:
+def fiscal_year_on(as_of: _dt.date, store: InMemoryGraphStore | None = None) -> str:
     """The fiscal year whose effective range contains *as_of*, or ``""``."""
-    for node in kernel_store().by_kind(NodeKind.FISCAL_YEAR):
+    for node in (store or kernel_store()).by_kind(NodeKind.FISCAL_YEAR):
         start = _dt.date.fromisoformat(str(node.props["effective_from"]))
         end_raw = str(node.props.get("effective_to") or "")
         end = _dt.date.fromisoformat(end_raw) if end_raw else _dt.date.max
@@ -132,33 +134,39 @@ def _fact(store: InMemoryGraphStore, node: Node, version: str) -> KernelFact:
     )
 
 
-def fact(key: str, as_of: _dt.date) -> KernelFact | NotInKernel:
-    """The figure for *key* in force on *as_of*."""
+def fact(key: str, as_of: _dt.date, *, store: InMemoryGraphStore | None = None,
+         version: str | None = None) -> KernelFact | NotInKernel:
+    """The figure for *key* in force on *as_of*.
+
+    *store* and *version* replay a past release from its snapshot
+    (:func:`app.kernel.release.load_snapshot`); by default, the running kernel.
+    """
     from ..graph.build import kind_for_key
 
-    version = _version()
-    if key not in declared_keys():
+    store = store or kernel_store()
+    version = _version(version)
+    if key not in declared_keys(store):
         return NotInKernel(key, "undeclared", "the kernel declares no such figure", version)
-    fy = fiscal_year_on(as_of)
+    fy = fiscal_year_on(as_of, store)
     if not fy:
         return NotInKernel(key, "no_fiscal_year", f"no kernel release covers {as_of.isoformat()}", version)
-    store = kernel_store()
     node = store.get(fact_id(kind_for_key(key), key, fy))
     if node is None:
         return NotInKernel(key, "not_in_year", f"{key} is not defined for {fy}", version)
     return _fact(store, node, version)
 
 
-def facts(*, as_of: _dt.date, kind: NodeKind | None = None, tax: str = "") -> list[KernelFact] | NotInKernel:
+def facts(*, as_of: _dt.date, kind: NodeKind | None = None, tax: str = "",
+          store: InMemoryGraphStore | None = None, version: str | None = None) -> list[KernelFact] | NotInKernel:
     """Every figure of *kind* (and *tax*) in force on *as_of*, sorted by key."""
-    version = _version()
-    if tax and tax not in declared_taxes():
+    store = store or kernel_store()
+    version = _version(version)
+    if tax and tax not in declared_taxes(store):
         return NotInKernel(tax, "undeclared", "the kernel declares no such tax", version)
-    fy = fiscal_year_on(as_of)
+    fy = fiscal_year_on(as_of, store)
     if not fy:
         return NotInKernel(tax or (kind.value if kind else "facts"), "no_fiscal_year",
                            f"no kernel release covers {as_of.isoformat()}", version)
-    store = kernel_store()
     kinds = (kind,) if kind else tuple(FACT_KINDS)
     out = []
     for k in kinds:
