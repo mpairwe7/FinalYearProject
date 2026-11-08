@@ -247,6 +247,160 @@ class GraphEffectiveOnTool(Tool):
         return {"ok": True, **effective_on(rate_key, day).to_dict()}
 
 
+# ---------------------------------------------------------------------------
+# Kernel functions (ADR-0033): the typed operations over every rate-table key,
+# deadlines and penalties included. Each accepts only declared concepts and
+# answers "not in kernel" rather than guessing.
+# ---------------------------------------------------------------------------
+
+_DATE_PARAM = {
+    "type": "string",
+    "description": "ISO date the answer must be true for, e.g. '2026-08-15'. Defaults to today in Kampala.",
+}
+_KERNEL_OUTPUT = {
+    "type": "object",
+    "properties": {
+        "ok": {"type": "boolean"},
+        "error": {"type": "string"},
+        "not_in_kernel": {"type": "boolean"},
+        "reason": {"type": "string"},
+        "kernel_version": {"type": "string"},
+        "facts": {"type": "array", "items": {"type": "object"}},
+    },
+    "required": ["ok"],
+}
+
+
+def _as_of(date: str) -> _dt.date | dict[str, Any]:
+    from ..kernel.pin import today
+
+    if not date:
+        return today()
+    try:
+        return _dt.date.fromisoformat(date.strip())
+    except (ValueError, AttributeError):
+        return {"ok": False, "error": f"date must be an ISO date like 2026-08-15, got {date!r}"}
+
+
+def _kernel_result(result: Any) -> dict[str, Any]:
+    from ..kernel.functions import NotInKernel
+
+    if isinstance(result, NotInKernel):
+        return result.to_dict()
+    items = result if isinstance(result, list) else [result]
+    version = items[0].kernel_version if items else ""
+    if not version:
+        from ..kernel.release import current
+
+        version = current().version
+    return {"ok": True, "kernel_version": version, "facts": [f.to_dict() for f in items]}
+
+
+class _KernelTool(Tool):
+    _name = ""
+    _description = ""
+    _properties: dict[str, Any] = {}
+    _required: tuple[str, ...] = ()
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name=self._name,
+            description=self._description,
+            parameters={
+                "type": "object",
+                "properties": dict(self._properties),
+                "required": list(self._required),
+                "additionalProperties": False,
+            },
+            risk="low",
+            namespace=GRAPH_NAMESPACE,
+            read_only=True,
+            idempotent=True,
+            open_world=False,
+            output_schema=_KERNEL_OUTPUT,
+        )
+
+
+class KernelFactTool(_KernelTool):
+    _name = "kernel_fact"
+    _description = (
+        "Return one figure from the statutory knowledge kernel (any rate, threshold, deadline, penalty, fee "
+        "or parameter) in force on a date, with its provision and effective range. Returns not_in_kernel "
+        "for a key the kernel does not declare; never guess a figure instead."
+    )
+    _properties = {"key": {"type": "string", "description": "Rate-table key, e.g. 'penal_tax_late_filing_minimum_ugx'."},
+                   "date": _DATE_PARAM}
+    _required = ("key",)
+
+    def execute(self, key: str, date: str = "") -> dict[str, Any]:
+        if not _enabled():
+            return dict(_DISABLED)
+        day = _as_of(date)
+        if isinstance(day, dict):
+            return day
+        from ..kernel.functions import fact
+
+        return _kernel_result(fact(key.strip(), day))
+
+
+class KernelObligationsTool(_KernelTool):
+    _name = "kernel_obligations"
+    _description = (
+        "List the deadlines and procedural time limits in force on a date (due days, days to object or "
+        "appeal), optionally for one tax, each with its provision."
+    )
+    _properties = {"tax": {"type": "string", "description": "Kernel tax name, e.g. 'paye'. Optional."}, "date": _DATE_PARAM}
+
+    def execute(self, tax: str = "", date: str = "") -> dict[str, Any]:
+        if not _enabled():
+            return dict(_DISABLED)
+        day = _as_of(date)
+        if isinstance(day, dict):
+            return day
+        from ..kernel.functions import obligations
+
+        return _kernel_result(obligations(as_of=day, tax=tax.strip()))
+
+
+class KernelPenaltiesTool(_KernelTool):
+    _name = "kernel_penalties"
+    _description = (
+        "List the penal taxes, penalties and interest rates in force on a date, optionally for one tax, "
+        "each with its provision."
+    )
+    _properties = {"tax": {"type": "string", "description": "Kernel tax name, e.g. 'tax_procedures'. Optional."},
+                   "date": _DATE_PARAM}
+
+    def execute(self, tax: str = "", date: str = "") -> dict[str, Any]:
+        if not _enabled():
+            return dict(_DISABLED)
+        day = _as_of(date)
+        if isinstance(day, dict):
+            return day
+        from ..kernel.functions import penalties
+
+        return _kernel_result(penalties(as_of=day, tax=tax.strip()))
+
+
+class KernelExplainTool(_KernelTool):
+    _name = "kernel_explain"
+    _description = "List every figure a statutory provision imposes, across fiscal years. Takes a provision id or citation."
+    _properties = {"provision": {"type": "string", "description": "Provision id ('prov:...') or citation text."}}
+    _required = ("provision",)
+
+    def execute(self, provision: str) -> dict[str, Any]:
+        if not _enabled():
+            return dict(_DISABLED)
+        from ..kernel.functions import explain
+
+        return _kernel_result(explain(provision.strip()))
+
+
 ToolRegistry.register(GraphResolveRateTool())
 ToolRegistry.register(GraphRateHistoryTool())
 ToolRegistry.register(GraphEffectiveOnTool())
+ToolRegistry.register(KernelFactTool())
+ToolRegistry.register(KernelObligationsTool())
+ToolRegistry.register(KernelPenaltiesTool())
+ToolRegistry.register(KernelExplainTool())

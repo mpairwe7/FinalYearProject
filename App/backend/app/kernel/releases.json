@@ -1,0 +1,37 @@
+{
+  "releases": [
+    {
+      "version": "1.0.0",
+      "released": "2026-11-08",
+      "content_sha256": "4000ac2fa0f6fb2f71cc7082142a19563baacdcc2a367e7564a70f3364ff088d",
+      "rules_sha256": "",
+      "model_version": "1.0.0",
+      "ruleset_version": "none",
+      "fiscal_years": [
+        "FY2025-26",
+        "FY2026-27"
+      ],
+      "stats": {
+        "nodes_fiscal_year": 2,
+        "nodes_tax_type": 20,
+        "nodes_rate": 96,
+        "nodes_provision": 128,
+        "nodes_threshold": 28,
+        "nodes_taxpayer_class": 4,
+        "nodes_penalty": 13,
+        "nodes_obligation": 10,
+        "nodes_parameter": 10,
+        "nodes_fee": 11,
+        "nodes": 322,
+        "edges": 593
+      },
+      "review": {
+        "status": "engineering_baseline",
+        "reviewer": "",
+        "role": "",
+        "approved_at": ""
+      },
+      "notes": "Baseline: every key of the FY2025-26 and FY2026-27 rate tables projected into the kernel (ADR-0033). Not yet reviewed by URA tax policy."
+    }
+  ]
+}

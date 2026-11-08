@@ -136,6 +136,9 @@ def graph_hit_for(question: str) -> dict[str, Any] | None:
         "score_norm": GRAPH_UNVERIFIED_NORM if unverified else GRAPH_AUTHORITY_NORM,
         "graph_hops": list(answer.hops),
         "graph_unverified": unverified,
+        # Structured claims, so the precedence check can compare them with
+        # the passages they are fused with (ADR-0033).
+        "graph_claims": [c.to_dict() for c in answer.claims],
     }
 
 

@@ -60,7 +60,7 @@ per-request in tests via `flags.set("tool_use", True)`.
       │      (262K native context, no YaRN, FP8)        │
       │  - force_agentic → generate_with_tools() loop   │
       │    • parse <tool_call> blocks                   │
-      │    • dispatch via ToolRegistry (72 tools)       │
+      │    • dispatch via ToolRegistry (76 tools)       │
       │    • append `tool` message, regenerate          │
       │    • bounded max_iterations=3                   │
       │  - otherwise → plain generate() (Phase 1-13)    │

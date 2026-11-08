@@ -289,6 +289,9 @@ def _fuse_graph_leg(query: str, hits: list) -> list:
         return hits
     if not hit:
         return hits
+    from ...kernel.precedence import check_fused
+
+    check_fused(hit, hits)
     return rrf_fuse_ranked_lists(hits, [hit])
 
 
@@ -548,7 +551,15 @@ def node_act(state: AgentGraphState) -> NodeResult:
     client = get_client()
     state.iterations += 1
     admitted_calls: list[tuple[str, dict[str, object]]] = []
+    from ...kernel.contract import UNDECLARED_TOOL
+    from ...tools import ToolRegistry
+
     for tool_name in state.plan:
+        if ToolRegistry.get(tool_name) is None:
+            # The action contract (ADR-0033): a plan may only name declared tools.
+            state.skipped_tools.append({"name": tool_name, "reason": UNDECLARED_TOOL})
+            logger.warning("graph: plan named an undeclared tool %r", tool_name)
+            continue
         arguments = bind_arguments(tool_name, state)
         if arguments is None:
             state.skipped_tools.append(

@@ -252,6 +252,7 @@ logger = logging.getLogger(__name__)
 # Turn context lives in the leaf module turn_context (ADR-0031); these are the
 # same ContextVar objects under their historical names.
 from .turn_context import ACTIVE_CASE_FACTS as _ACTIVE_CASE_FACTS  # noqa: E402
+from .turn_context import ACTIVE_KERNEL_PIN as _ACTIVE_KERNEL_PIN  # noqa: E402
 from .turn_context import ACTIVE_CONVERSATION_STATE as _ACTIVE_CONVERSATION_STATE  # noqa: E402
 from .turn_context import ACTIVE_TENANT_ID as _ACTIVE_TENANT_ID  # noqa: E402
 from .turn_context import ACTIVE_USER_STATED_IDS as _ACTIVE_USER_STATED_IDS  # noqa: E402
@@ -306,6 +307,21 @@ def _workflow_past_retention(row: dict[str, Any] | None) -> bool:
     return updated_at is not None and float(updated_at) < time.time() - db.conversation_ttl_seconds()
 
 
+def _kernel_pin_for_turn() -> dict[str, Any] | None:
+    """The kernel release this turn answers under (ADR-0033); ``None`` if unavailable.
+
+    Never raises: a turn must still answer when the kernel cannot be read, and
+    its audit row then records no pin rather than a wrong one.
+    """
+    try:
+        from .kernel.pin import pin_for_turn
+
+        return pin_for_turn().to_dict()
+    except Exception:
+        logger.warning("kernel pin unavailable for this turn", exc_info=True)
+        return None
+
+
 def _scoped_conversation_state(method: Callable[..., Any]) -> Callable[..., Any]:
     """Bind durable topic/workflow state to this request's verified owner."""
     signature = inspect.signature(method)
@@ -330,9 +346,12 @@ def _scoped_conversation_state(method: Callable[..., Any]) -> Callable[..., Any]
         # this wrapper returns, so they must see the same plans.
         plans_reset = _TURN_PLANS.set({}) if _TURN_PLANS.get() is None else None
         live_check_reset = _TURN_LIVE_CHECK.set({}) if _TURN_LIVE_CHECK.get() is None else None
+        kernel_pin_reset = _ACTIVE_KERNEL_PIN.set(_kernel_pin_for_turn()) if _ACTIVE_KERNEL_PIN.get() is None else None
         try:
             return method(*bound.args, **bound.kwargs)
         finally:
+            if kernel_pin_reset is not None:
+                _ACTIVE_KERNEL_PIN.reset(kernel_pin_reset)
             if live_check_reset is not None:
                 _TURN_LIVE_CHECK.reset(live_check_reset)
             if plans_reset is not None:
@@ -7033,6 +7052,9 @@ class ChatModel:
         graph_hits = ChatModel._graph_hits(query)
         if not graph_hits:
             return hits, False
+        from .kernel.precedence import check_fused
+
+        check_fused(graph_hits[0], hits)
         return rrf_fuse_ranked_lists(hits, graph_hits), True
 
     def _priority_faq_hits(self, query: str, *, top_k: int) -> list[dict[str, Any]]:

@@ -173,6 +173,11 @@ class AgentGraphState:
     active_goals: dict[str, GoalSpec] = field(default_factory=dict)
     current_goal_id: str = ""
     pending_action: TaxpayerActionRequest | None = None
+    # -- Kernel pin (ADR-0033). Part of the state, so the approval HMAC seals it:
+    # a suspended approval cannot resume under a different kernel release.
+    kernel_version: str = ""
+    ruleset_version: str = ""
+    as_of: str = ""
     replan_count: int = 0
     max_replans: int = 2
 
@@ -276,6 +281,9 @@ class AgentGraphState:
             "live_check_disclosure": self.live_check_disclosure,
             "live_web_hits": list(self.live_web_hits),
             "live_mode": self.live_mode,
+            "kernel_version": self.kernel_version,
+            "ruleset_version": self.ruleset_version,
+            "as_of": self.as_of,
         }
 
     @classmethod
@@ -352,6 +360,9 @@ class AgentGraphState:
             live_check_disclosure=str(data.get("live_check_disclosure", "")),
             live_web_hits=list(data.get("live_web_hits", [])),
             live_mode=str(data.get("live_mode", "")),
+            kernel_version=str(data.get("kernel_version", "")),
+            ruleset_version=str(data.get("ruleset_version", "")),
+            as_of=str(data.get("as_of", "")),
         )
         state.budget.restore(data.get("budget"))
         return state

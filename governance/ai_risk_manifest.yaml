@@ -225,6 +225,7 @@ owasp_llm:
       - "tests/agents/test_portal_knowledge_pack_integrity.py"
       - "App/backend/tests/test_query_spelling_corpus_guard.py"
       - "App/backend/tests/test_retrieval_temporal_and_tombstones.py"
+      - "tests/agents/test_statutory_kernel_2026_11.py"
   - id: "LLM10"
     name: "Unbounded Consumption"
     status: "mitigated"
@@ -579,6 +580,7 @@ owasp_agentic_2026:
         - "tests/agents/test_transparency_contract.py"
         - "tests/agents/test_web_fx.py"
         - "tests/agents/test_checkpoint_integrity_2026_11.py"
+        - "tests/agents/test_statutory_kernel_2026_11.py"
         - "App/backend/tests/test_receptionist_safety_integrity.py"
         - "App/backend/tests/test_receptionist_assurance.py"
         - "tests/agents/test_plugin_apps_boundary.py"
@@ -600,6 +602,12 @@ owasp_agentic_2026:
 aibom_inventory:
   schema: "CycloneDX-AIBOM-1.6"
   datasets:
+    - id: "ura-statutory-knowledge-kernel"
+      role: "Every figure of URA's effective-dated rate tables as a validated, versioned graph (ADR-0033)"
+      source: "App/backend/app/tax/data/FY*.json, projected by app.graph.build"
+      provenance: "Each figure names its provision and fiscal year; uncited figures are unverified"
+      release_control: "Content-addressed releases in App/backend/app/kernel/releases.json; CI fails on an unreleased change; approval needs a named reviewer"
+      schema: "Neo4j Ontology Graph Specification 1.1.0 + W3C SHACL, generated from app.kernel.model"
     - id: "ura-website-crawl"
       role: "Crawled ura.go.ug and parliament.go.ug pages in the retrieval corpus"
       source: "Publisher's live https site only, per ml/scripts/data_aug/crawl_policy.py; never an archive"

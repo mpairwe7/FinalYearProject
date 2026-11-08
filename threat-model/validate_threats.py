@@ -412,6 +412,51 @@ THREAT_REGISTRY: list[dict] = [
         "status": "mitigated",
     },
     {
+        "id": "T72",
+        "category": "Elevation of Privilege",
+        "description": (
+            "A suspended approval resumes under a different kernel release, so the action runs on figures the "
+            "taxpayer was never shown (G497)"
+        ),
+        "owasp_llm": "LLM06",
+        "mitre_atlas": None,
+        "mitigation": "The kernel version is part of the HMAC-sealed graph state; a resume under another release is refused",
+        "evidence": ["App/backend/app/agents/graphs/runtime.py", "tests/agents/test_statutory_kernel_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
+        "id": "T73",
+        "category": "Tampering",
+        "description": (
+            "A figure with no legal basis, or an unreleased edit to the rate tables, is served as a verified fact "
+            "(G494, G496)"
+        ),
+        "owasp_llm": "LLM09",
+        "mitre_atlas": None,
+        "mitigation": (
+            "Uncited figures are unverified; releases are content-addressed and CI fails on an unreleased change; "
+            "every turn records the release it answered under"
+        ),
+        "evidence": ["App/backend/app/graph/build.py", "App/backend/app/kernel/release.py", "tests/agents/test_statutory_kernel_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
+        "id": "T74",
+        "category": "Tampering",
+        "description": (
+            "A stale or poisoned passage states a different figure from the kernel and the contradiction goes "
+            "unnoticed (G499)"
+        ),
+        "owasp_llm": "LLM09",
+        "mitre_atlas": "AML.T0070",
+        "mitigation": (
+            "Fixed source precedence; a fused graph hit records conflicting passages and sends them to the human "
+            "discrepancy queue. Residual: detection needs the figure's name beside a different number"
+        ),
+        "evidence": ["App/backend/app/kernel/precedence.py", "tests/agents/test_statutory_kernel_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
         "id": "T01",
         "category": "Spoofing",
         "description": "Attacker impersonates legitimate API client",

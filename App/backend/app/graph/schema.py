@@ -33,6 +33,25 @@ class NodeKind(str, Enum):
     PROVISION = "provision"
     #: A fiscal year, so "as at" questions are a traversal.
     FISCAL_YEAR = "fiscal_year"
+    #: A deadline or a procedural time limit: a due day of the month, the
+    #: days allowed to object (ADR-0033). Without these the graph could say
+    #: what a tax costs but never when it is due.
+    OBLIGATION = "obligation"
+    #: A penal tax, a penalty figure or an interest rate charged for a
+    #: failure: late filing, late payment, an unissued e-invoice (ADR-0033).
+    PENALTY = "penalty"
+    #: A fixed fee for a service: a logbook transfer, a business name.
+    FEE = "fee"
+    #: A number a computation needs that is not itself a rate, threshold,
+    #: deadline, penalty or fee: days in a year, years of an exemption.
+    PARAMETER = "parameter"
+
+
+#: Kinds whose nodes are figures from a rate table: each has a key, a fiscal
+#: year, a value and (when cited) a provision. Everything else is structure.
+FACT_KINDS: frozenset[NodeKind] = frozenset(
+    {NodeKind.RATE, NodeKind.THRESHOLD, NodeKind.OBLIGATION, NodeKind.PENALTY, NodeKind.FEE, NodeKind.PARAMETER}
+)
 
 
 class EdgeKind(str, Enum):
@@ -147,6 +166,12 @@ def rate_id(key: str, fiscal_year: str) -> str:
 
 def threshold_id(key: str, fiscal_year: str) -> str:
     return f"threshold:{key}@{fiscal_year}"
+
+
+def fact_id(kind: NodeKind, key: str, fiscal_year: str) -> str:
+    """The id of a rate-table figure of any fact kind; the same as ``rate_id`` and
+    ``threshold_id`` for those two kinds, so existing ids do not change."""
+    return f"{kind.value}:{key}@{fiscal_year}"
 
 
 def provision_id(text: str) -> str:

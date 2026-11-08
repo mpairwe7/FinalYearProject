@@ -65,7 +65,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install --system ruff pytest pytest-cov
+          # pyshacl validates the kernel's SHACL shapes (ADR-0033); a test-only dependency.
+          uv pip install --system ruff pytest pytest-cov pyshacl==0.30.1
           uv pip install --system -r requirements.txt
 
       - name: Run Ruff linter

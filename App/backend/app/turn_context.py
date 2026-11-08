@@ -47,8 +47,16 @@ TURN_GENERATION: contextvars.ContextVar[dict[str, Any] | None] = contextvars.Con
     "_turn_generation", default=None
 )
 
+#: The kernel release, ruleset and as-of date this turn answers under
+#: (ADR-0033), as a plain dict so this module stays a leaf. Set at turn start,
+#: recorded in the audit row and carried into graph state.
+ACTIVE_KERNEL_PIN: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "active_kernel_pin", default=None
+)
+
 __all__ = [
     "ACTIVE_CASE_FACTS",
+    "ACTIVE_KERNEL_PIN",
     "ACTIVE_CONVERSATION_STATE",
     "ACTIVE_TENANT_ID",
     "ACTIVE_USER_STATED_IDS",

@@ -34,8 +34,9 @@ logger = logging.getLogger(__name__)
 
 #: Version of the ``generate`` payload layout. 1 had no channel, provenance
 #: or citation digests and kept tool calls raw; 2 had no ``disposition``, because
-#: only a finished turn wrote a row. Rows keep the layout they were written with.
-TURN_PAYLOAD_SCHEMA = 3
+#: only a finished turn wrote a row; 3 had no ``kernel_pin`` (ADR-0033). Rows keep
+#: the layout they were written with.
+TURN_PAYLOAD_SCHEMA = 4
 
 _MAX_LISTED = 10
 _PROVENANCE_TTL_S = 60.0
@@ -64,6 +65,16 @@ def _prompt_template_sha256() -> str:
     except Exception:
         return ""
     return _sha256(SYSTEM_PROMPT)
+
+
+def _kernel_pin() -> dict[str, Any] | None:
+    try:
+        from ..kernel.pin import active_pin
+
+        pin = active_pin()
+    except Exception:
+        return None
+    return dict(pin) if pin else None
 
 
 def provenance() -> dict[str, Any]:
@@ -309,6 +320,9 @@ def build_turn_payload(
         "figure_lock": result.get("_figure_lock") or {},
         "flag_variants_sha256": _sha256(flag_variants) if flag_variants else "",
         "provenance": provenance(),
+        # The kernel release, ruleset and as-of date the turn answered under,
+        # so the answer can be replayed against the same knowledge (ADR-0033).
+        "kernel_pin": _kernel_pin(),
     }
     try:
         from ..flags import flags

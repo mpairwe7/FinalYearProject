@@ -255,6 +255,32 @@ class DurableCheckpointStore(CheckpointStore):
         return await asyncio.to_thread(self.load_checkpoint, thread_id)
 
 
+def _current_kernel_version() -> str:
+    try:
+        from ...kernel.release import current
+
+        return current().version
+    except Exception:  # noqa: BLE001 - a missing kernel must not break a resume path that predates it
+        logger.warning("GraphRuntime: kernel version unavailable", exc_info=True)
+        return ""
+
+
+def _stamp_kernel(state: AgentGraphState) -> None:
+    """Pin a fresh run to the turn's kernel release (ADR-0033). A resumed state keeps its own."""
+    if state.kernel_version:
+        return
+    try:
+        from ...kernel.pin import active_pin, pin_for_turn
+
+        pin = active_pin() or pin_for_turn().to_dict()
+    except Exception:  # noqa: BLE001
+        logger.warning("GraphRuntime: kernel pin unavailable", exc_info=True)
+        return
+    state.kernel_version = str(pin.get("kernel_version") or "")
+    state.ruleset_version = str(pin.get("ruleset_version") or "")
+    state.as_of = str(pin.get("as_of") or "")
+
+
 class GraphRuntime:
     """Dispatch loop for a list of named nodes.
 
@@ -512,6 +538,7 @@ class GraphRuntime:
             steps += 1
 
     def run(self, state: AgentGraphState, thread_id: str = "", entry: str | None = None) -> AgentGraphState:
+        _stamp_kernel(state)
         cursor = self._open(state, thread_id)
         if cursor is not None:
             self._dispatch(state, thread_id, entry, cursor)
@@ -521,6 +548,7 @@ class GraphRuntime:
         """Asynchronously dispatch nodes without blocking the asyncio event loop."""
         import asyncio
 
+        _stamp_kernel(state)
         cursor = await asyncio.to_thread(self._open, state, thread_id)
         if cursor is not None:
             await self._adispatch(state, thread_id, entry, cursor)
@@ -567,6 +595,14 @@ class GraphRuntime:
         suspended_at = float(data.get("suspended_at") or 0.0)
         if time.time() - suspended_at > APPROVAL_TTL_SECONDS:
             raise PermissionError(f"Thread {thread_id!r}: the approval window has closed")
+        # The figures the taxpayer approved came from one kernel release; a
+        # resume under another would act on figures nobody showed them (ADR-0033).
+        now_version = _current_kernel_version()
+        if state.kernel_version and now_version and state.kernel_version != now_version:
+            raise PermissionError(
+                f"Thread {thread_id!r}: the kernel release changed since the approval was asked "
+                f"({state.kernel_version} -> {now_version}); ask again"
+            )
 
         if resume_payload and resume_payload.get("approved"):
             if state.pending_action:

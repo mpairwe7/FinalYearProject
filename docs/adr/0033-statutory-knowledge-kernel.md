@@ -1,0 +1,111 @@
+# ADR-0033: The Statutory Knowledge Kernel
+
+## Status
+
+Accepted — 2026-11-08
+
+## Context and Problem Statement
+
+An architecture review on 2026-11-08 evaluated a proposed hybrid ontology design against the system
+as it runs. The proposal had three layers: a hand-built OWL 2 ontology in Neo4j, NVIDIA Auto Ontology
+over URA databases, and LangGraph routing between them. The review is published at
+<https://claude.ai/artifact/SEZXbBGLwYRm2oVnCiBviQ>.
+
+What the system had, measured on `dev` at `9e4f3e8`:
+
+- **A statutory graph covering a third of the rate tables.** It had 116 nodes and 211 edges, built
+  from the effective-dated rate tables (`app/tax/data/FY*.json`). `build_graph` dropped any key whose
+  prefix mapped to no known tax. Only **34 of 102** distinct keys reached it, so every deadline,
+  penalty rule, fee and procedural timeline was missing. (A coverage count built on
+  `tables.known_rate_keys` sees only 98 keys: it lists numeric scalars and omits band lists and rule
+  strings.)
+- **Figures with no legal basis that looked verified.** Ten FY2026-27 keys and four FY2025-26 keys
+  had no `legal_basis` and were not marked `unverified`. Among them are `paye_due_date_monthly` and a
+  UGX 6,000,000 EFRIS penalty.
+- **No machine-readable schema, no validation and no version** for the graph. Answers, audit rows
+  and suspended approvals could not say which knowledge they were computed from.
+- **No penalty or interest computation.** `app/tax` held rate tables and money helpers only.
+- **No precedence** between calculator, graph, document, FAQ and web figures, and no record when
+  they disagree.
+- **Shadow agreement of 12 of 12** on the authored multi-hop set. The scorer warns that the set was
+  tuned against.
+- **No URA operational database reachable.** Every URA connector runs in simulation unless declared
+  live, and production offers only live ones.
+- **Latency already over budget.** On one RTX A6000, a 14B FP8 model already exceeds the 3 s p95
+  target at four concurrent turns.
+
+The proposal's formalism did not fit:
+
+- OWL 2 DL assumes an open world and has no arithmetic or rule priority. It cannot conclude that a
+  return was not filed, compute monthly interest, or let an exemption override a general rate.
+- Neo4j would add a JVM service to a 16 GB CPU host for a graph that fits in a few hundred
+  kilobytes. `app/graph/store.py` already records why an embedded graph database was rejected.
+- Auto Ontology targets relational sources, and there was none to describe.
+
+## Decision Outcome
+
+1. **The kernel is the graph, plus a schema, rules, a version and a contract.** It lives in
+   `app/kernel/` over the existing `GraphStore`.
+2. **Every rate-table key is in the kernel.** Four node kinds are added: `obligation`, `penalty`,
+   `fee` and `parameter`. A test fails if any key is unclassified. A fact with no legal basis is
+   marked `unverified` and `uncited`, never served as verified.
+3. **The schema is one model with three outputs.** `app/kernel/model.py` generates a Neo4j Ontology
+   Graph Specification 1.1.0 document (validated against the published JSON Schema), W3C SHACL
+   shapes (validated with pySHACL in CI), and the runtime invariant checks. OWL is not the engine.
+4. **Releases are versioned and content-addressed.** `app/kernel/releases.json` records each release
+   with the SHA-256 of the canonical graph and of the ruleset. CI fails when the tables or rules
+   change without a new release entry. A release starts as `engineering_baseline` and becomes
+   `approved` only with a named reviewer.
+5. **Every turn is pinned.** The kernel version, ruleset version and as-of date are fixed at turn
+   start, recorded in the audit row, and carried in the graph state, which the approval HMAC already
+   seals. A suspended approval cannot resume under a different kernel release.
+6. **The kernel is the agent's action contract.** Kernel functions accept only declared concepts
+   and return `NotInKernel` otherwise. The graph's act node dispatches only registered tools.
+7. **Precedence is fixed:** computed result, then kernel fact, then official document, then FAQ, then
+   live web. A lower source contradicting a higher one is recorded as a conflict and never overrules
+   it.
+8. **Rules as code.** Late-filing penal tax, late-payment interest, EFRIS penal tax and the digital
+   tax stamp penal tax are computed from kernel parameters, with a provision at every step. They are
+   marked `pending_tax_team_review` until a reviewer approves them in a release.
+9. **Thresholds, not defaults, for the heavier layers.**
+   - A Neo4j backend behind `GraphStore` becomes recommended above 50,000 nodes, when traversal p99
+     exceeds 5 ms, or on a staff need for ad-hoc Cypher.
+   - The data semantic layer (Auto Ontology or equivalent) is staff-only. It requires a
+     data-sharing agreement, a DPIA, Vault for credentials, certified metrics and SELECT-only access,
+     and its production gate refuses to start without them.
+10. **No LangGraph migration now.** The in-house runtime meets the current single-session needs and
+    keeps the ADR-0030 guarantees. A migration needs a concrete multi-session durable-workflow
+    requirement, and would use "sync" durability on approval paths.
+11. **The model is decided by measurement.** `scripts/bench_llm_concurrency.py` measures p50 and p95
+    at 1, 4 and 8 concurrent turns. A larger model serves only the turns that need it.
+
+## Consequences
+
+- Positive: all 102 rate-table keys become answerable with a provision and an effective range. The
+  14 uncited figures are visible as such.
+- Positive: an answer, an audit row and an approval each name the knowledge they rest on, and can
+  be replayed against it.
+- Positive: a rate-table edit cannot reach production without a release entry that CI checks.
+- Negative: every rate-table or rules change now needs a release entry, a deliberate step.
+- Negative: the penalty and interest rules stay marked unverified until URA's tax team signs them
+  off. The available statute text for interest is the 2021 Income Tax Act s.136; the tables cite the
+  revised Tax Procedures Code Act (Cap 343) s.39.
+- Neutral: Neo4j and the semantic layer are implemented behind gates that are closed, and stay so
+  until their conditions are met.
+
+## Confirmation
+
+Filled in per phase; see "Implementation record" below.
+
+### Implementation record
+
+- Phase 0 (this record and baselines): shadow agreement 12 of 12; kernel coverage 34 of 102 keys; 14
+  uncited figures. GPU latency not measurable on the build host (no GPU); the benchmark harness is
+  the deliverable.
+- Phase 1 (kernel): every one of 102 rate-table keys in the kernel (322 nodes, 593 edges; was 116 and 211);
+  0 invariant violations; the Ontology Graph Specification document validates against the published
+  1.1.0 schema; the graph conforms to the SHACL shapes under pySHACL 0.30.1; release 1.0.0 recorded as an
+  engineering baseline; shadow agreement unchanged at 12 of 12; four kernel tools (76 tools in all).
+  `tests/agents/test_statutory_kernel_2026_11.py` (43 tests). Each of nine controls was disabled in turn and the suite failed:
+  coverage, uncited-as-unverified, the resume seal, the act contract, the precedence rank filter, table
+  parity, the SHACL provenance rule, release matching and the audit pin.
