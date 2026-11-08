@@ -152,11 +152,18 @@ class TestListAvailableRates:
     def test_provisional_vs_confirmed_explanation(self, fresh_registry, monkeypatch):
         r = fresh_registry.call("list_available_rates", {"fiscal_year": "FY2025-26"})
         assert r["ok"] is True
-        assert "All rates are verified under current statutory instruments." in r["explanation"]
+        # A confirmed table can still hold unverified figures: they are named, never
+        # covered by a blanket "all rates are verified" (PR 706 review).
+        assert "All rates are verified" not in r["explanation"]
+        assert "not yet confirmed against a gazetted schedule" in r["explanation"]
 
         import dataclasses
         from app.tax import tables
         real_table = tables.get_table("FY2025-26")
+        fully_cited = dataclasses.replace(real_table, unverified=())
+        monkeypatch.setattr("app.tools.rates._resolve", lambda *args, **kwargs: fully_cited)
+        r_cited = fresh_registry.call("list_available_rates", {"fiscal_year": "FY2025-26"})
+        assert "Every figure in this table cites its statutory source." in r_cited["explanation"]
         provisional_table = dataclasses.replace(real_table, status="provisional")
         monkeypatch.setattr("app.tools.rates._resolve", lambda *args, **kwargs: provisional_table)
         r_prov = fresh_registry.call("list_available_rates", {"fiscal_year": "FY2025-26"})
