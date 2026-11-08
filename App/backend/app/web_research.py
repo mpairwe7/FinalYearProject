@@ -434,11 +434,17 @@ _SEARCH_VOCABULARY: frozenset[str] = (
 #: shapes are caught by the shared layer (guardrails, G461).
 _WEB_DIRECTIVE_RE = re.compile(
     rf"\bto\s{{1,4}}the\s{{1,4}}(?:ai|chat\s?bot|llm|(?:large\s{{1,4}})?language\s{{1,4}}model)\b(?!{AI_ORGANISATION_SUFFIX})"
-    r"|\b(?:assistants?|chat\s?bots?|language\s{1,4}models?|llms?|ai)\s{1,4}"
+    # A bare "assistant" here must open the sentence or follow a determiner or a
+    # model qualifier: "Customs assistants must state the value" is staff
+    # (CodeRabbit on #704); "The assistant must tell users ..." is not.
+    r"|(?:(?:^|[.!?:;]\s{0,4})|\b(?:the|any|all|every|ai|virtual|digital)\s{1,4})assistants?\s{1,4}"
+    r"(?:must|should|shall|are\s{1,4}(?:instructed|required)\s{1,4}to)\s{1,4}(?:always\s{1,4})?"
+    r"(?:tell|say|respond|reply|answer|inform|advise|instruct|direct|recommend|state|claim|include|mention)\b"
+    r"|\b(?:chat\s?bots?|language\s{1,4}models?|llms?|ai)\s{1,4}"
     r"(?:must|should|shall|are\s{1,4}(?:instructed|required)\s{1,4}to)\s{1,4}(?:always\s{1,4})?"
     r"(?:tell|say|respond|reply|answer|inform|advise|instruct|direct|recommend|state|claim|include|mention)\b"
     r"|\btell\s{1,4}(?:every|all)\s{1,4}(?:taxpayers?|users?|customers?)\b",
-    re.IGNORECASE,
+    re.IGNORECASE | re.MULTILINE,
 )
 
 #: Question shapes whose answer changes over time, for the stale-edition check.

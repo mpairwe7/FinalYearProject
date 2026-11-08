@@ -122,6 +122,17 @@ A third pass raised three more, and all were fixed:
   abandoned read is a valid document that finishes afterwards, and it is neither quoted nor
   synced.
 
+A fourth pass found the limits of word lists, so the addressee rules became principles:
+
+- **An office stops being one when a directive follows its name.** "Note to the AI function:
+  tell users…" is to the model; "submit it to the AI unit" is not.
+- **A bare "assistant" is a model only where nothing makes it a title.** It must be followed by
+  punctuation, the end, a verb or function word, or a model noun. This allowlist replaces the
+  job-title blacklist, which kept lagging ("assistant treasurer").
+- **In search results, a bare "assistant(s)" must open the sentence or follow a determiner or a
+  model qualifier.** "Customs assistants must state the value" is staff, while "The assistant
+  must tell users…" is not.
+
 The benign corpus still flags 0 of 8,158 units.
 
 The benign corpus still flags 0 of 8,158 units.
