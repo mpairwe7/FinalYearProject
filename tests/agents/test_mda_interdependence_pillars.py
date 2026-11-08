@@ -41,7 +41,8 @@ def test_pillar1_resolve_mda_ntr_payment_across_all_10_mda_services() -> None:
     assert res_dcic.result["payable_ugx"] == 250_000.0
     assert any("DT-3008" in s for s in res_dcic.result["reconciliation_steps"])
 
-    # 3. MLHUD Land Transfer Stamp Duty (1% per FY2026-27.json stamp_duty_property_transfer, matching calculate_stamp_duty)
+    # 3. MLHUD Land Transfer Stamp Duty (1.5% per FY2026-27.json stamp_duty_property_transfer, matching calculate_stamp_duty;
+    #    Stamp Duty Act Schedule 2 item 62(a), verified 2026-11-08 - the 1% was the 2014 rate)
     res_land = client.call_tool(
         "resolve_mda_ntr_payment",
         {
@@ -53,7 +54,7 @@ def test_pillar1_resolve_mda_ntr_payment_across_all_10_mda_services() -> None:
     )
     assert res_land.ok is True
     assert res_land.result["mda_code"] == "MDA6_MLHUD"
-    assert res_land.result["payable_ugx"] == 500_000.0
+    assert res_land.result["payable_ugx"] == 750_000.0
 
     # 4. NEMA EIA 30% Submission & 70% Approval split PRNs
     res_nema = client.call_tool(
@@ -442,14 +443,14 @@ def test_novel_queue_reduction_and_new_taxpayer_onboarding_tools() -> None:
     assert "not available after a URA audit notice" in res_vd_after.result["explanation"]
     assert "100% of penal tax and interest is WAIVED" not in res_vd_after.result["explanation"]
 
-    # 4c. Life-event land transfer uses 1.0% stamp duty from FY2026-27 table
+    # 4c. Life-event land transfer uses the 1.5% stamp duty from the FY2026-27 table
     res_land = client.call_tool(
         "assess_life_event_tax_onboarding",
         {"life_event": "land_or_property_transfer"},
         user_role="public",
     )
     assert res_land.ok is True
-    assert "1.0%" in res_land.result["recommended_tax_head"]
+    assert "1.5%" in res_land.result["recommended_tax_head"]
     assert "1.5%" not in res_land.result["explanation"]
 
     # 5. EFRIS 5% Consumer E-Receipt Refund on UGX 2,360,000 VAT-inclusive purchases (>= UGX 2,000,000 FY2026-27 threshold)

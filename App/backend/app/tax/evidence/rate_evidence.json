@@ -1,0 +1,274 @@
+{
+  "about": "Evidence for rate-table figures verified against original documents on 2026-11-08 (ADR-0033). Each document entry quotes the page verbatim (whitespace collapsed); tests/agents/test_rate_table_verification_2026_11.py re-reads the page and checks the quote and the table value.",
+  "documents": [
+    {
+      "fiscal_years": [
+        "FY2025-26"
+      ],
+      "key": "rental_tax_individual_threshold",
+      "value": 2820000,
+      "document": "Data/pdfs/Tax-Amendments-FY-2022-23.pdf",
+      "page": 5,
+      "needle": "Below UGX 2,820,000",
+      "quote": "effect that: INDIVIDUALS ANNUAL GROSS RENTAL INCOME TAX RATE Below UGX 2,820,000 (UGX 235,000 per month) Nil Above UGX 2,820,000 (UGX 235,000"
+    },
+    {
+      "fiscal_years": [
+        "FY2025-26"
+      ],
+      "key": "rental_tax_individual_threshold",
+      "value": 2820000,
+      "document": "Data/pdfs/TAXATION-HANDBOOK-FY-2025-26-1.pdf",
+      "page": 49,
+      "needle": "the threshold for payment of tax is Shs. 2,820,000",
+      "quote": "Income Tax Note: • In determining the tax due for individuals, the threshold for payment of tax is Shs. 2,820,000, and no deductions are allowed. • In determining the tax due"
+    },
+    {
+      "fiscal_years": [
+        "FY2025-26"
+      ],
+      "key": "rental_company_expense_cap",
+      "value": 0.5,
+      "document": "Data/pdfs/TAXATION-HANDBOOK-FY-2025-26-1.pdf",
+      "page": 49,
+      "needle": "capped at 50% of the its annual gross rental income",
+      "quote": "a company, a company‘s allowable expenditures and losses are capped at 50% of the its annual gross rental income. Note that the claimed expenses shall be subject to verification"
+    },
+    {
+      "fiscal_years": [
+        "FY2025-26",
+        "FY2026-27"
+      ],
+      "key": "paye_due_date_monthly",
+      "value": 15,
+      "document": "Data/pdfs/10580_DT_LAWS_JULY_2021.pdf",
+      "page": 104,
+      "needle": "within fifteen days after the end of the month",
+      "quote": "been withheld or that should have been withheld under this Part within fifteen days after the end of the month in which the payment subject to withholding tax was made by"
+    },
+    {
+      "fiscal_years": [
+        "FY2025-26",
+        "FY2026-27"
+      ],
+      "key": "paye_due_date_monthly",
+      "value": 15,
+      "document": "Data/pdfs/TAXATION-HANDBOOK-FY-2025-26-1.pdf",
+      "page": 34,
+      "needle": "Pay As You Earn (PAYE) tax returns for each month by the 15th day of the following month",
+      "quote": "PAYE • All PAYE registered taxpayers are required to submit Pay As You Earn (PAYE) tax returns for each month by the 15th day of the following month. Excise duty • All taxpayers registered for Excise duty are"
+    },
+    {
+      "fiscal_years": [
+        "FY2025-26",
+        "FY2026-27"
+      ],
+      "key": "passenger_baggage_allowance_usd",
+      "value": 2000,
+      "document": "Data/pdfs/TAXATION-HANDBOOK-FY-2025-26-1.pdf",
+      "page": 80,
+      "needle": "Goods up to the value of US$2,000 for each traveler",
+      "quote": "only to passengers who have attained the age of eighteen years. Goods up to the value of US$2,000 for each traveler, other than the goods specified above, are granted exemption",
+      "previous_value": 500
+    },
+    {
+      "fiscal_years": [
+        "FY2025-26",
+        "FY2026-27"
+      ],
+      "key": "passenger_baggage_allowance_usd",
+      "value": 2000,
+      "document": "Data/pdfs/Passenger-baggage-personal-effects-2024-25.pdf",
+      "page": 2,
+      "needle": "Goods for personal use valued at US Dollars two thousand (USD 2,000) for every traveller",
+      "quote": "effects which have been in their personal use or household use. • Goods for personal use valued at US Dollars two thousand (USD 2,000) for every traveller, other than the goods specified above are exempted when imported",
+      "previous_value": 500
+    },
+    {
+      "fiscal_years": [
+        "FY2025-26",
+        "FY2026-27"
+      ],
+      "key": "stamp_duty_property_transfer",
+      "value": 0.015,
+      "document": "Data/pdfs/10580_DT_LAWS_JULY_2021.pdf",
+      "page": 672,
+      "needle": "1.5% 0.5% Nil",
+      "quote": "vehicles for the purpose of issuing asset backed securities 1.5% 0.5% Nil",
+      "previous_value": 0.01
+    },
+    {
+      "fiscal_years": [
+        "FY2025-26"
+      ],
+      "key": "efris_penalty_failure_to_issue_invoice",
+      "value": 6000000,
+      "document": "Data/pdfs/10580_DT_LAWS_JULY_2021.pdf",
+      "page": 736,
+      "needle": "or three hundred currency points, whichever is higher",
+      "quote": "penal tax equivalent to the tax due on the goods or services or three hundred currency points, whichever is higher (2) A person who attempts to acquire or who acquires an electronic"
+    },
+    {
+      "fiscal_years": [
+        "FY2026-27"
+      ],
+      "key": "efris_penalty_failure_to_issue_invoice",
+      "value": 200000,
+      "document": "Data/pdfs/Taxes-Amendments-2026-27.pdf",
+      "page": 16,
+      "needle": "or who tampers with an electronic fiscal device, is liable to pay a penal tax equivalent to double the tax due on the goods or services, or ten currency points",
+      "quote": "does not issue an e-invoice or e-receipt for goods or services, or who tampers with an electronic fiscal device, is liable to pay a penal tax equivalent to double the tax due on the goods or services, or ten currency points, whichever is higher. To ease compliance STAMP DUTY (AMENDMENT)",
+      "previous_value": 6000000
+    },
+    {
+      "fiscal_years": [
+        "FY2026-27"
+      ],
+      "key": "efris_offline_sync_window_hours",
+      "value": 120,
+      "document": "Data/pdfs/URA-EFRIS-Handbook-FY2026-27-English.pdf",
+      "page": 12,
+      "needle": "you must connect to the internet within 5 days",
+      "quote": "when network is down, in what is called offline mode. However, you must connect to the internet within 5 days to upload the generated information to the system. PART III:",
+      "previous_value": 24
+    },
+    {
+      "fiscal_years": [
+        "FY2026-27"
+      ],
+      "key": "motor_vehicle_personalized_plate_fee",
+      "value": 20000000,
+      "document": "Data/pdfs/10580_DT_LAWS_JULY_2021.pdf",
+      "page": 1059,
+      "needle": "Registration fees for personalized number plate for a motor vehicle Shs. 20,000,000",
+      "quote": "Section 6 THE TRAFFIC AND ROAD SAFETY ACT, CAP. 361 Item Fees 1 Registration fees for personalized number plate for a motor vehicle Shs. 20,000,000 2 Driving permit (original) (a) One year Shs. 55,000"
+    },
+    {
+      "fiscal_years": [
+        "FY2026-27"
+      ],
+      "key": "motor_vehicle_advance_tax_goods_per_tonne",
+      "value": 50000,
+      "document": "Data/pdfs/10580_DT_LAWS_JULY_2021.pdf",
+      "page": 115,
+      "needle": "for goods vehicles: fifty thousand shillings per ton per year",
+      "quote": "III The rate of advance tax under section 123A shall be— (a) for goods vehicles: fifty thousand shillings per ton per year; (b) for passenger service vehicles: twenty thousand shillings"
+    },
+    {
+      "fiscal_years": [
+        "FY2026-27"
+      ],
+      "key": "motor_vehicle_advance_tax_passenger_per_seat",
+      "value": 20000,
+      "document": "Data/pdfs/10580_DT_LAWS_JULY_2021.pdf",
+      "page": 115,
+      "needle": "for passenger service vehicles: twenty thousand shillings per seat per year",
+      "quote": "goods vehicles: fifty thousand shillings per ton per year; (b) for passenger service vehicles: twenty thousand shillings per seat per year. THIRD SCHEDULE Sections .6, 7, 8, 83, 84, 85, 86, 117, 118,119"
+    },
+    {
+      "fiscal_years": [
+        "FY2026-27"
+      ],
+      "key": "motor_vehicle_advance_tax_goods_per_tonne",
+      "value": 50000,
+      "document": "Data/pdfs/Advance-Tax-on-the-Transport-Sector-FY-2024-25.pdf",
+      "page": 2,
+      "needle": "Goods vehicles above 2 tonnes 50,000 per tonne",
+      "quote": "of vehicle Amount (in UGX) per tonne or passenger per year 1. Goods vehicles above 2 tonnes 50,000 per tonne 2. Trailers 50,000 per tonne 3. Passenger vehicles (PSVs) 20,000"
+    },
+    {
+      "fiscal_years": [
+        "FY2026-27"
+      ],
+      "key": "stamp_duty_motor_vehicle_transfer_ugx",
+      "value": 200000,
+      "document": "Data/pdfs/Taxes-Amendments-2026-27.pdf",
+      "page": 17,
+      "needle": "b) any other motor vehicle 200,000/=",
+      "quote": "transfer of- a) motorcycle, tricycle or quadricycle 30,000/= b) any other motor vehicle 200,000/= To widen the tax base THE LOTTERIES AND GAMING (AMENDMENT) ACT,"
+    },
+    {
+      "fiscal_years": [
+        "FY2026-27"
+      ],
+      "key": "stamp_duty_motorcycle_transfer_ugx",
+      "value": 30000,
+      "document": "Data/pdfs/Taxes-Amendments-2026-27.pdf",
+      "page": 17,
+      "needle": "a) motorcycle, tricycle or quadricycle 30,000/=",
+      "quote": "the Stamp duty Act to include: Registration or transfer of- a) motorcycle, tricycle or quadricycle 30,000/= b) any other motor vehicle 200,000/= To widen the tax base THE"
+    },
+    {
+      "fiscal_years": [
+        "FY2026-27"
+      ],
+      "key": "vat_registration_threshold_annual",
+      "value": 300000000,
+      "document": "Data/pdfs/Taxes-Amendments-2026-27.pdf",
+      "page": 13,
+      "needle": "increased from One Hundred Fifty Million shillings to Three Hundred Million shillings",
+      "quote": "Threshold for VAT The annual registration threshold has been increased from One Hundred Fifty Million shillings to Three Hundred Million shillings. To reduce compliance costs for SME’s and improve their cash"
+    },
+    {
+      "fiscal_years": [
+        "FY2026-27"
+      ],
+      "key": "vat_quarterly_registration_threshold",
+      "value": 75000000,
+      "document": "Data/pdfs/10580_DT_LAWS_JULY_2021.pdf",
+      "page": 418,
+      "needle": "exceeded one- quarter of the annual registration threshold",
+      "quote": "made taxable supplies, the value of which exclusive of any tax exceeded one- quarter of the annual registration threshold set out in subsection (2); or (b) at the beginning of any period",
+      "previous_value": 37500000
+    }
+  ],
+  "web": [
+    {
+      "fiscal_years": [
+        "FY2026-27"
+      ],
+      "key": "motor_vehicle_transfer_fee",
+      "value": 84000,
+      "previous_value": 100000,
+      "url": "https://ura.go.ug/en/ask-ura-commissioner-general-34/",
+      "checked_on": "2026-11-08",
+      "quote": "Transfer fees; 84,000 private vehicles or 104,000 for commercial vehicles."
+    },
+    {
+      "fiscal_years": [
+        "FY2026-27"
+      ],
+      "key": "motor_vehicle_commercial_transfer_fee",
+      "value": 104000,
+      "url": "https://ura.go.ug/en/ask-ura-commissioner-general-34/",
+      "checked_on": "2026-11-08",
+      "quote": "Transfer fees; 84,000 private vehicles or 104,000 for commercial vehicles."
+    },
+    {
+      "fiscal_years": [
+        "FY2026-27"
+      ],
+      "key": "motor_vehicle_motorcycle_transfer_fee",
+      "value": 74000,
+      "url": "https://thetaxman.ura.go.ug/?p=2891",
+      "checked_on": "2026-11-08",
+      "quote": "Motor cycles: UGX 74,000"
+    }
+  ],
+  "open": [
+    {
+      "fiscal_years": [
+        "FY2026-27"
+      ],
+      "key": "motor_vehicle_duplicate_logbook_fee",
+      "value": 50000,
+      "status": "unconfirmed",
+      "finding": "No current source. The last gazetted schedule found lists a duplicate registration book at UGX 10,000 (Data/pdfs/10580_DT_LAWS_JULY_2021.pdf p.966), and that schedule's transfer fees were later raised. Confirm with the Ministry of Works and Transport Licensing Office.",
+      "contradicting_quote": {
+        "document": "Data/pdfs/10580_DT_LAWS_JULY_2021.pdf",
+        "page": 966,
+        "needle": "14. Duplicate registration book 10,000"
+      }
+    }
+  ]
+}

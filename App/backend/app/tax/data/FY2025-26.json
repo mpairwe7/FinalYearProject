@@ -76,10 +76,10 @@
     "presumptive_tax_upper_threshold": 150000000,
     "penal_tax_late_filing_monthly_rate": 0.02,
     "penal_tax_late_filing_minimum_ugx": 200000,
-    "stamp_duty_property_transfer": 0.01,
+    "stamp_duty_property_transfer": 0.015,
     "objection_timeline_days": 45,
     "paye_due_date_monthly": 15,
-    "passenger_baggage_allowance_usd": 500,
+    "passenger_baggage_allowance_usd": 2000,
     "withholding_payment_service_provider_commission": 0.1,
     "excise_duty_cement_per_50kg": 500,
     "excise_duty_sugar_per_kg": 100,
@@ -117,7 +117,8 @@
     "fx_conversion_rule": "bou_mid_rate",
     "vat_input_efris_einvoice_required": 1,
     "vat_imported_services_reverse_charge_input_credit_allowed": 0,
-    "withholding_non_resident_service_contract": 0.15
+    "withholding_non_resident_service_contract": 0.15,
+    "efris_penalty_failure_to_issue_invoice": 6000000
   },
   "unverified": [
     "bik_housing_employment_income_rate",
@@ -170,7 +171,7 @@
     "digital_services_tax_non_resident": "Income Tax Act (Cap 340), s.86A",
     "motor_vehicle_advance_tax_passenger_per_seat": "Income Tax Act (Cap 340), Third Schedule - UGX 20,000 per passenger seat per year",
     "motor_vehicle_advance_tax_goods_per_tonne": "Income Tax Act (Cap 340), Third Schedule - UGX 50,000 per tonne per year",
-    "stamp_duty_property_transfer": "Stamp Duty Act 2014, Schedule 2 - 1% of property value",
+    "stamp_duty_property_transfer": "Stamp Duty Act (Cap 339), Schedule 2 item 62(a) (63(a) in the revised edition): transfer, 1.5% of the total value (Domestic Tax Laws of Uganda (URA, July 2021), p.672). The 3% proposed by the Stamp Duty (Amendment) Bill 2026 is not among the enacted amendments (URA Tax Amendments FY2026-27, p.17).",
     "stamp_duty_motor_vehicle_transfer_ugx": "Stamp Duty Act 2014, Schedule 2 - motor vehicle transfer fee",
     "stamp_duty_motorcycle_transfer_ugx": "Stamp Duty Act 2014, Schedule 2 - motorcycle transfer fee",
     "residency_days_threshold": "TAXATION-HANDBOOK-FY-2025-26-1 (definitions - resident individual); Income Tax Act (Cap 340), s.9 - present in Uganda for 183 days or more in any 12-month period commencing or ending in the year of income",
@@ -186,7 +187,12 @@
     "fx_conversion_rule": "Income Tax Act (Cap 340) currency conversion rule (Bank of Uganda mid-exchange rate on date of transaction/payment) - citation and snapshot unverified",
     "vat_input_efris_einvoice_required": "Value Added Tax Act (Cap 349), s.28 & Value Added Tax (Amendment) Act 2023, s.24; Data/dataset/ura_wholesale_and_retail_sector_faqs.csv - input tax credit requires valid EFRIS e-invoice/e-receipt",
     "vat_imported_services_reverse_charge_input_credit_allowed": "Value Added Tax Act (Cap 349), s.28; TAXATION-HANDBOOK-FY-2025-26-1 - reverse-charge VAT on imported services is not claimable as input tax credit",
-    "withholding_non_resident_service_contract": "Withholding-Tax-FY-2024-25-1.pdf; Income Tax Act (Cap 340), s.85 - 15% WHT on non-resident Ugandan-sourced service contracts (excludes employment contracts)"
+    "withholding_non_resident_service_contract": "Withholding-Tax-FY-2024-25-1.pdf; Income Tax Act (Cap 340), s.85 - 15% WHT on non-resident Ugandan-sourced service contracts (excludes employment contracts)",
+    "rental_tax_individual_threshold": "Income Tax Act, s.5 and Third Schedule (2021 compilation numbering), as amended by the Income Tax (Amendment) Act 2022: no rental tax on annual gross rent up to UGX 2,820,000, 12% above it with no deductions (URA Tax Amendments FY2022-23, p.5; URA Taxation Handbook FY2025-26 (8th ed.), p.49).",
+    "rental_company_expense_cap": "Income Tax Act, s.5 (2021 compilation numbering), as amended by the Income Tax (Amendment) Act 2022: a company's rental expenditures and losses are capped at 50% of annual gross rental income (URA Tax Amendments FY2022-23, p.5; URA Taxation Handbook FY2025-26 (8th ed.), pp.49-50).",
+    "paye_due_date_monthly": "Income Tax Act, s.123(1) (2021 compilation numbering): tax withheld is paid within fifteen days after the end of the month (Domestic Tax Laws of Uganda (URA, July 2021), p.104); PAYE returns by the 15th day of the following month (URA Taxation Handbook FY2025-26 (8th ed.), p.34).",
+    "passenger_baggage_allowance_usd": "East African Community Customs Management Act 2004, Fifth Schedule Part B item 5, as amended: goods up to USD 2,000 per traveller outside Uganda for more than 24 hours, in accompanied baggage and declared (URA Taxation Handbook FY2025-26 (8th ed.), pp.64 and 80; URA Passenger Baggage and Personal Effects leaflet FY2024-25, p.2). Raised from USD 500 with effect from 1 July 2024.",
+    "efris_penalty_failure_to_issue_invoice": "Tax Procedures Code Act (Cap 343), s.93(2) (formerly s.73B(2)): failure to issue an e-invoice or e-receipt, or tampering with an electronic fiscal device, attracts penal tax equal to the tax due or 300 currency points (UGX 6,000,000), whichever is higher (Domestic Tax Laws of Uganda (URA, July 2021), p.736). Replaced from 1 July 2026."
   },
   "notes": {
     "residency_days_threshold": "A resident individual is a person who has a permanent home in Uganda; or is present in Uganda: for a period of 183 days or more in any twelve (12) months period that commences or ends during the year of income; or during the year of income and in each of the two preceding years of income, for periods averaging 122 days in each such year of income; or is an employee or official of the government of Uganda posted abroad during the year of income.",
@@ -208,6 +214,24 @@
       "title": "URA published tax rates FY2025/26",
       "publisher": "Uganda Revenue Authority",
       "url": "https://ura.go.ug/"
+    },
+    {
+      "id": "dtl-july-2021",
+      "title": "Domestic Tax Laws of Uganda (compilation, July 2021)",
+      "publisher": "Uganda Revenue Authority",
+      "url": "Data/pdfs/10580_DT_LAWS_JULY_2021.pdf"
+    },
+    {
+      "id": "ura-handbook-fy2025-26",
+      "title": "A Guide to Taxation in Uganda, Eighth Edition (FY2025-26)",
+      "publisher": "Uganda Revenue Authority",
+      "url": "Data/pdfs/TAXATION-HANDBOOK-FY-2025-26-1.pdf"
+    },
+    {
+      "id": "ura-amendments-fy2022-23",
+      "title": "Tax Amendments FY2022-23",
+      "publisher": "Uganda Revenue Authority",
+      "url": "Data/pdfs/Tax-Amendments-FY-2022-23.pdf"
     }
   ]
 }

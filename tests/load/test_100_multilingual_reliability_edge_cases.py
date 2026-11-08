@@ -80,12 +80,12 @@ EDGE_CASES: list[dict[str, Any]] = [
     },
     {
         "id": "REL-006",
-        "title": "EFRIS Non-Issuance Statutory Penalty (TPCA s.19B)",
+        "title": "EFRIS Non-Issuance Statutory Penalty (TPCA s.93(2))",
         "locale": "en",
         "domain": "EFRIS Compliance",
-        "statute": "Tax Procedures Code Act, Section 19B",
+        "statute": "Tax Procedures Code Act, section 93(2)",
         "query": "What is the specific statutory penalty for failure to issue an EFRIS fiscal receipt?",
-        "required_concepts": ["6,000,000", "penalty", "double"],
+        "required_concepts": ["200,000", "penalty", "double"],
         "forbidden_hallucinations": ["100,000 shillings"],
     },
     {
@@ -140,12 +140,12 @@ EDGE_CASES: list[dict[str, Any]] = [
     },
     {
         "id": "REL-012",
-        "title": "Passenger Baggage Concession vs Commercial Goods ($500 limit)",
+        "title": "Passenger Baggage Concession vs Commercial Goods ($2,000 limit)",
         "locale": "en",
         "domain": "Customs Baggage",
         "statute": "EAC-CMA, Fifth Schedule",
         "query": "I arrived at Entebbe Airport with 5 brand-new boxed iPhones for resale in my shop. Can they be cleared under the $500 passenger baggage allowance?",
-        "required_concepts": ["500", "commercial", "passenger baggage"],
+        "required_concepts": ["2,000", "commercial", "passenger baggage"],
         "forbidden_hallucinations": ["commercial goods are completely duty free"],
     },
     {
@@ -175,7 +175,7 @@ EDGE_CASES: list[dict[str, Any]] = [
         "domain": "Value Added Tax",
         "statute": "VAT Act, Section 7",
         "query": "What is the mandatory VAT registration threshold for turnover in three consecutive calendar months?",
-        "required_concepts": ["37,500,000", "consecutive", "vat"],
+        "required_concepts": ["75,000,000", "consecutive", "vat"],
         "forbidden_hallucinations": ["10 billion threshold"],
     },
     {
@@ -315,7 +315,7 @@ EDGE_CASES: list[dict[str, Any]] = [
         "domain": "Stamp Duty",
         "statute": "Stamp Duty Act",
         "query": "What is the stamp duty percentage on the transfer of real property (land and buildings) in Uganda?",
-        "required_concepts": ["1%", "stamp duty", "transfer"],
+        "required_concepts": ["1.5%", "stamp duty", "transfer"],
         "forbidden_hallucinations": ["18% stamp duty"],
     },
     {
@@ -629,7 +629,7 @@ EDGE_CASES: list[dict[str, Any]] = [
         "domain": "Stamp Duty (Luganda)",
         "statute": "Stamp Duty Act",
         "query": "Bwe mba ng'enda okugula oba okukyusa ekyapa ky'ettaka, nsasula bitundu bimeka ebya stamp duty?",
-        "required_concepts": ["1%", "stamp duty"],
+        "required_concepts": ["1.5%", "stamp duty"],
         "forbidden_hallucinations": ["18% stamp duty"],
     },
     {
@@ -873,7 +873,7 @@ EDGE_CASES: list[dict[str, Any]] = [
         "domain": "Value Added Tax (Swahili)",
         "statute": "VAT Act, Section 7",
         "query": "Kikomo cha usajili wa lazima wa VAT kwa biashara inayopata mapato katika miezi mitatu mfululizo ni shilingi ngapi?",
-        "required_concepts": ["37,500,000", "vat", "miezi"],
+        "required_concepts": ["75,000,000", "vat", "miezi"],
         "forbidden_hallucinations": ["trilioni moja"],
     },
     {
@@ -953,7 +953,7 @@ EDGE_CASES: list[dict[str, Any]] = [
         "domain": "Stamp Duty (Swahili)",
         "statute": "Stamp Duty Act",
         "query": "Ushuru wa stempu (stamp duty) wakati wa kuhamisha ardhi au majengo ni asilimia ngapi?",
-        "required_concepts": ["1%", "stamp duty"],
+        "required_concepts": ["1.5%", "stamp duty"],
         "forbidden_hallucinations": ["18% stamp duty"],
     },
     {
@@ -991,7 +991,7 @@ EDGE_CASES: list[dict[str, Any]] = [
         "title": "Swahili EFRIS Electronic Invoicing Requirement",
         "locale": "sw",
         "domain": "EFRIS (Swahili)",
-        "statute": "TPCA s.19B",
+        "statute": "TPCA s.93(2)",
         "query": "Mfumo wa EFRIS unawalazimu wafanyabiashara waliosajiliwa kwa VAT kufanya nini wanapouza bidhaa?",
         "required_concepts": ["efris", "ankara", "risiti"],
         "forbidden_hallucinations": ["efris ni ya hiari kwa kila mtu"],
@@ -1018,12 +1018,12 @@ EDGE_CASES: list[dict[str, Any]] = [
     },
     {
         "id": "REL-099",
-        "title": "Swahili Customs Baggage USD 500 Allowance",
+        "title": "Swahili Customs Baggage USD 2,000 Allowance",
         "locale": "sw",
         "domain": "Customs Baggage (Swahili)",
         "statute": "EAC-CMA 5th Schedule",
         "query": "Msafiri anayeingia nchini kupitia Uwanja wa Ndege wa Entebbe anaruhusiwa kubeba bidhaa za kibinafsi za thamani gani bila ushuru?",
-        "required_concepts": ["500", "dola"],
+        "required_concepts": ["2,000", "dola"],
         "forbidden_hallucinations": ["dola milioni moja bure"],
     },
     {

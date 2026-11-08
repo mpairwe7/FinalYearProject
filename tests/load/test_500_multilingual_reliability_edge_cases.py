@@ -52,18 +52,18 @@ def generate_500_edge_cases() -> list[dict[str, Any]]:
         ("What is the top marginal PAYE tax band rate for resident individuals?", "ITA Third Schedule", ["40%", "10,000,000"], ["50% top band"]),
         ("At what monthly salary does a resident employee start paying PAYE?", "ITA Third Schedule", ["335,000", "0%"], ["5,000,000"]),
         # VAT
-        ("What is the mandatory quarterly VAT registration threshold in 3 consecutive months?", "VAT Act s.7", ["37,500,000", "consecutive"], ["1 billion"]),
+        ("What is the mandatory quarterly VAT registration threshold in 3 consecutive months?", "VAT Act s.7", ["75,000,000", "consecutive"], ["1 billion"]),
         ("What is the annual mandatory VAT registration threshold?", "VAT Act s.7", ["150,000,000", "annual"], ["50 million"]),
         ("Can I claim 100% input VAT on overheads for mixed taxable and exempt supplies?", "VAT Act s.28", ["apportion", "exempt"], ["100% without condition"]),
         ("What is the difference between zero-rated and exempt supplies for input VAT?", "VAT Act s.24", ["zero-rated", "exempt", "input tax"], ["both get refund"]),
         ("When can a taxpayer claim a VAT bad debt refund on unpaid invoices?", "VAT Act s.31", ["2 years", "bad debt", "insolven"], ["claim after 1 week"]),
-        ("What is the penalty under TPCA s.19B for failing to issue an EFRIS receipt?", "TPCA s.19B", ["6,000,000", "penalty", "double"], ["100,000 shillings"]),
+        ("What is the penalty under TPCA s.19B for failing to issue an EFRIS receipt?", "TPCA s.93(2)", ["200,000", "penalty", "double"], ["100,000 shillings"]),
         ("Within how many hours must offline EFRIS transactions be synchronized?", "TPCA EFRIS Regs", ["24", "offline"], ["30 days"]),
         # Customs
         ("Can I import an 18-year-old car (2008 model) into Uganda?", "Traffic Act", ["prohibited", "15 years"], ["allowed with no ban"]),
         ("What is the environmental levy on imported used vehicles aged 8 to 15 years?", "EACCMA / Traffic Act", ["50%", "environmental levy"], ["0% levy"]),
         ("What are the 4 primary tariff bands under the EAC Common External Tariff?", "EAC CET 2022", ["0%", "10%", "25%", "35%"], ["flat 50%"]),
-        ("What is the passenger baggage duty-free allowance for returning travelers?", "EAC-CMA 5th Sch", ["500", "passenger baggage"], ["unlimited"]),
+        ("What is the passenger baggage duty-free allowance for returning travelers?", "EAC-CMA 5th Sch", ["2,000", "passenger baggage"], ["unlimited"]),
         ("What is the maximum period goods can remain in a customs bonded warehouse?", "EAC-CMA s.57", ["6 months", "bonded warehouse"], ["10 years"]),
         ("What percentage of local value addition is required under EAC Rules of Origin?", "EAC Rules of Origin", ["35%", "rules of origin"], ["0% required"]),
         ("Can customs jump directly to Method 6 fallback if transaction value is doubted?", "EAC-CMA 4th Sch", ["hierarchy", "sequential", "method 2"], ["jump directly"]),
@@ -141,7 +141,7 @@ def generate_500_edge_cases() -> list[dict[str, Any]]:
         ("Bizinensi entono ezitasobola kukuuma bitabo zisasula zitya presumptive tax?", "Presumptive", ["teebereza", "10"], ["balirizi ba bitabo"]),
         ("Alipoota z'omusolo eza buli mwezi zirina okuwaayo ku lunaku ki?", "Filing", ["15", "omwezi"], ["olunaku olusembayo"]),
         ("Nnamba ki ez'essimu ez'obwereere ze nnyinza okukubako okufuna obuyambi?", "Contact", ["0800 117 000", "0800 217 000"], ["sasula ssente"]),
-        ("Bwe mba ng'enda okugula ettaka nsasula bitundu bimeka ebya stamp duty?", "Stamp Duty", ["1%", "stamp duty"], ["18%"]),
+        ("Bwe mba ng'enda okugula ettaka nsasula bitundu bimeka ebya stamp duty?", "Stamp Duty", ["1.5%", "stamp duty"], ["18%"]),
     ]
 
     idx = 1
@@ -179,7 +179,7 @@ def generate_500_edge_cases() -> list[dict[str, Any]]:
         ("Kiwango cha kodi ya mapato ya shirika (corporate tax) ni ngapi?", "CIT", ["30%", "shirika"], ["0% kwa wote"]),
         ("Watu wenye ulemavu wanasamehewa kiasi gani cha mshahara kabla ya PAYE?", "PWD", ["1,460,000", "msamaha", "kodi"], ["hakuna msamaha"]),
         ("Ushuru wa kutoa pesa kwenye simu (mobile money) ni asilimia ngapi?", "Excise", ["0.5%", "ushuru", "pesa"], ["20%"]),
-        ("Kikomo cha usajili wa lazima wa VAT kwa miezi mitatu mfululizo ni kiasi gani?", "VAT", ["37,500,000", "vat", "miezi"], ["trilioni moja"]),
+        ("Kikomo cha usajili wa lazima wa VAT kwa miezi mitatu mfululizo ni kiasi gani?", "VAT", ["75,000,000", "vat", "miezi"], ["trilioni moja"]),
         ("Mlipa kodi ana siku ngapi kukata rufaa kwenye Mahakama ya Rufaa za Kodi?", "Disputes", ["30", "rufaa", "siku"], ["miaka miwili"]),
         ("Je, inaruhusiwa kuagiza gari lililotengenezwa zaidi ya miaka 15 iliyopita?", "Customs", ["15", "marufuku", "gari"], ["bila kikomo"]),
         ("Ni nyaraka gani zinazohitajika ili kupata namba ya TIN?", "TIN", ["tin", "ura"], ["lipa afisa"]),
@@ -187,14 +187,14 @@ def generate_500_edge_cases() -> list[dict[str, Any]]:
         ("Biashara ndogo ndogo zisizo na vitabu vya mahesabu zinalipaje kodi ya makadirio?", "Presumptive", ["milioni 10", "kodi"], ["wakaguzi lazima"]),
         ("Marejesho ya kodi ya kila mwezi yanapaswa kuwasilishwa kufikia tarehe ngapi?", "Filing", ["15", "mwezi"], ["mwisho wa mwaka"]),
         ("Ni nambari gani za bure za simu za kupiga kupata msaada kutoka URA?", "Contact", ["0800 117 000", "0800 217 000"], ["lipa simu"]),
-        ("Ushuru wa stempu wakati wa kuhamisha ardhi ni asilimia ngapi?", "Stamp Duty", ["1%", "stamp duty"], ["18%"]),
+        ("Ushuru wa stempu wakati wa kuhamisha ardhi ni asilimia ngapi?", "Stamp Duty", ["1.5%", "stamp duty"], ["18%"]),
         ("Mtu anayesambaza bidhaa za zaidi ya milioni moja hukatwa asilimia ngapi ya zuio?", "Withholding", ["6%", "zuio"], ["30%"]),
         ("Je, ushuru wa forodha wa EAC CET una viwango vipi vikuu?", "CET", ["0%", "10%", "25%", "35%"], ["50% tu"]),
         ("Bidhaa za EAC zinahitaji ongezeko la thamani ya asilimia ngapi kwa biashara huru?", "Origin", ["35%", "thamani"], ["0%"]),
         ("Mfumo wa EFRIS unawalazimu wafanyabiashara kufanya nini wanapouza bidhaa?", "EFRIS", ["efris", "ankara", "risiti"], ["hiari"]),
         ("Je, vifaa vya sola vinatozwa ushuru gani wa forodha?", "Renewable Energy", ["jua", "ushuru"], ["50% ushuru"]),
         ("Ninawezaje kulipa kodi ya URA kwa kutumia PRN kwenye benki au simu?", "Payments", ["prn", "benki", "simu"], ["mpe afisa"]),
-        ("Msafiri anaruhusiwa kubeba bidhaa za kibinafsi za thamani gani bila ushuru?", "Baggage", ["500", "dola"], ["dola milioni"]),
+        ("Msafiri anaruhusiwa kubeba bidhaa za kibinafsi za thamani gani bila ushuru?", "Baggage", ["2,000", "dola"], ["dola milioni"]),
         ("Ninawezaje kutoa taarifa kwa siri kuhusu ufisadi kwa URA?", "Whistleblowing", ["0800 117 000", "ura"], ["hakuna njia"]),
     ]
 

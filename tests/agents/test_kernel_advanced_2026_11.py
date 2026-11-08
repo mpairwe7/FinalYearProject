@@ -395,14 +395,14 @@ def test_a_turn_trace_records_misses_and_uncited_figures_by_key_only() -> None:
     try:
         functions.fact("carbon_border_levy", AUG)
         functions.fact("What is VAT?", AUG)
-        functions.fact("paye_due_date_monthly", AUG)
+        functions.fact("motor_vehicle_duplicate_logbook_fee", AUG)
         functions.fact("vat_standard", AUG)
         functions.fact("carbon_border_levy", AUG)
         snap = trace.snapshot()
     finally:
         trace.TURN_KERNEL_TRACE.reset(token)
     assert snap["misses"] == [{"concept": "carbon_border_levy", "reason": "undeclared"}]
-    assert snap["uncited_served"] == [{"key": "paye_due_date_monthly", "fiscal_year": "FY2026-27"}]
+    assert snap["uncited_served"] == [{"key": "motor_vehicle_duplicate_logbook_fee", "fiscal_year": "FY2026-27"}]
     assert trace.snapshot() is None, "no trace outside a turn"
 
 

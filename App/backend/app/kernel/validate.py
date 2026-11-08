@@ -19,7 +19,7 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ..graph.schema import FACT_KINDS, EdgeKind, NodeKind
+from ..graph.schema import FACT_KINDS, EdgeKind, NodeKind, fact_id
 from .model import NODE_SPEC_BY_KIND, relationships_from
 
 if TYPE_CHECKING:
@@ -149,11 +149,39 @@ def _table_parity(store: InMemoryGraphStore) -> list[Violation]:
     return found
 
 
+#: Figures the law defines in terms of each other, per fiscal year:
+#: ``(dependent key, source key, factor, provision)`` means dependent = source * factor.
+#: A table that updates one and not the other fails here, not in an answer.
+DERIVED: tuple[tuple[str, str, float, str], ...] = (
+    ("vat_quarterly_registration_threshold", "vat_registration_threshold_annual", 0.25,
+     "VAT Act s.7(1)(a): one quarter of the annual registration threshold"),
+    ("efris_penalty_failure_to_issue_invoice", "efris_penal_tax_minimum_ugx", 1.0,
+     "TPCA s.93(2): one floor for failing to issue an e-invoice"),
+)
+
+
+def _derived(store: InMemoryGraphStore) -> list[Violation]:
+    from ..graph.build import kind_for_key
+
+    found = []
+    years = [str(n.props.get("name") or n.id.split(":", 1)[-1]) for n in store.by_kind(NodeKind.FISCAL_YEAR)]
+    for dependent, source, factor, provision in DERIVED:
+        for fy in years:
+            dep = store.get(fact_id(kind_for_key(dependent), dependent, fy))
+            src = store.get(fact_id(kind_for_key(source), source, fy))
+            if dep is None or src is None:
+                continue
+            expected = float(src.props.get("value")) * factor
+            if abs(float(dep.props.get("value")) - expected) > 1e-6:
+                found.append(Violation("derived", dep.id, f"{dep.props.get('value')} but {provision} gives {expected:g}"))
+    return found
+
+
 def check(store: InMemoryGraphStore, *, against_tables: bool = True) -> list[Violation]:
     """Every invariant the kernel must hold. Empty means consistent."""
     violations = (
         _required_props(store) + _cardinalities(store) + _provenance(store)
-        + _fiscal_years(store) + _supersedes(store)
+        + _fiscal_years(store) + _supersedes(store) + _derived(store)
     )
     if against_tables:
         violations += _table_parity(store)

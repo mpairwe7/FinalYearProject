@@ -727,7 +727,10 @@ class NewRateLookupsTests(unittest.TestCase):
         self.assertIsNotNone(plan_petrol)
         self.assertEqual(plan_petrol.tax_type, "excise_duty_fuel_petrol_per_litre")
         reply, _ = format_rate_reply(plan_petrol, table)
-        self.assertIn("1,450", reply)
+        # The year's own figure, never another year's ("revised from UGX 1,450" was
+        # wrong whenever the year asked was FY2025-26, when 1,450 was in force).
+        self.assertIn(f"UGX {table.rates['excise_duty_fuel_petrol_per_litre']:,.0f}", reply)
+        self.assertNotIn("revised from", reply)
 
         plan_data = plan_rate_lookup("What is the excise duty rate on internet data?")
         self.assertIsNotNone(plan_data)

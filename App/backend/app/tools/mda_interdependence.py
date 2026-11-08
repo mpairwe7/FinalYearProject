@@ -115,7 +115,6 @@ MDA_SERVICE_CATALOG: dict[str, dict[str, Any]] = {
             "UGX 10,000,000. Always generate the Stamp Duty PRN against the joint CGV valuation assessment "
             "reference rather than as an unlinked general payment."
         ),
-        "stamp_duty_rate": 0.01,
         "tpc_tin_threshold_ugx": 10_000_000.0,
         "statutory_basis": "Registration of Titles Act (Cap. 230), Stamp Duty Act Schedule 2 (property_transfer), & TPC Act s.135",
         "webhook_target": "MLHUD Uganda National Land Information System (UgNLIS)",
@@ -290,7 +289,9 @@ class ResolveMdaNtrPaymentTool(Tool):
         split_prns: dict[str, float] = {}
 
         if service_type == "mlhud_land_transfer":
-            rate = float(tbl.get("stamp_duty_property_transfer") or info.get("stamp_duty_rate") or 0.01)
+            # The year's table is the only source of the rate; no literal fallback (it served the
+            # Stamp Duty Act 2014's 1% after the schedule moved to 1.5%).
+            rate = float(tbl.get("stamp_duty_property_transfer") or 0.0)
             thresh = float(info.get("tpc_tin_threshold_ugx") or 10_000_000.0)
             payable_ugx = round(val * rate, 2) if val > 0 else 0.0
         elif service_type == "mowt_vehicle_transfer":
@@ -540,7 +541,7 @@ class AssessLifeEventTaxOnboardingTool(Tool):
                 "3. Pay Motor Vehicle Transfer Stamp Duty (UGX 200,000 vehicle / UGX 30,000 motorcycle) and Advance Transport Tax for commercial PSV/goods vehicles before MoWT logbook issuance.",
             ]
         elif life_event == "land_or_property_transfer":
-            sd_rate = float(get_table().get("stamp_duty_property_transfer") or 0.01)
+            sd_rate = float(get_table().get("stamp_duty_property_transfer") or 0.0)
             est_tax = 0.0
             rec_head = f"Stamp Duty ({sd_rate:.1%} of CGV value) & Rental Income Tax (if leased/commercial property)"
             basis = "Tax Procedures Code Act s.135, Stamp Duty Act 2014, & Income Tax Act s.5 (12% individual rental tax above UGX 2,820,000)"

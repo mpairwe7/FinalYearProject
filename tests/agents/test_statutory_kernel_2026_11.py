@@ -91,7 +91,8 @@ def test_new_keys_get_the_right_kind(key: str, kind: NodeKind) -> None:
 
 
 def test_a_figure_with_no_legal_basis_is_never_served_as_verified(store: InMemoryGraphStore) -> None:
-    node = store.get(fact_id(NodeKind.OBLIGATION, "paye_due_date_monthly", "FY2026-27"))
+    # The one figure the 2026-11-08 verification could not confirm (rate_evidence.json "open").
+    node = store.get(fact_id(NodeKind.FEE, "motor_vehicle_duplicate_logbook_fee", "FY2026-27"))
     assert node.props["uncited"] is True
     assert node.unverified is True
     for kind in FACT_KINDS:

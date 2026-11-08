@@ -3,9 +3,9 @@
 Tests 15 complex, multi-layered Ugandan statutory edge cases across:
 1. Income Tax Act (Cap 340 / 338) - PAYE Secondary vs Primary, Agro-processing Holiday, Mining Ring-fencing, Estate liability
 2. Value Added Tax Act (Cap 349) - Mixed supply input tax apportionment, 150M/37.5M thresholds, Zero-rated vs Exempt
-3. Tax Procedures Code Act (TPCA 2014) - Section 24 45-day objection + 30% deposit rule, EFRIS s.19B UGX 6M penalty
+3. Tax Procedures Code Act (TPCA 2014) - Section 24 45-day objection + 30% deposit rule, EFRIS s.93(2) penalty (double the tax or UGX 200,000 from FY2026-27)
 4. Excise Duty Act 2014 - Raw material credit offset mechanism, Environmental levy age bands (35%/50% & 15-yr ban)
-5. EAC Customs Management Act (EAC-CMA) - Valuation hierarchy (Methods 1-6), $500 passenger concession limits
+5. EAC Customs Management Act (EAC-CMA) - Valuation hierarchy (Methods 1-6), $2,000 passenger concession limits
 6. Withholding VAT (6%) vs Income Tax WHT (6%) dual deduction interaction
 7. Non-resident Digital Services Tax (5% B2C under s.86A)
 8. Rental Tax: Individual (12% > 2.82M gross) vs Corporate (30% net with 50% expense cap)
@@ -97,14 +97,14 @@ EDGE_CASES = [
     },
     {
         "id": "SEC-006",
-        "title": "EFRIS Non-Issuance Penalty under TPCA Section 19B",
+        "title": "EFRIS Non-Issuance Penalty under TPCA section 93(2)",
         "locale": "en",
         "domain": "EFRIS Compliance",
-        "statute": "Tax Procedures Code Act, Section 19B",
+        "statute": "Tax Procedures Code Act, section 93(2)",
         "query": (
             "What specific statutory penalty does a VAT-registered business face if they fail to issue an EFRIS fiscal receipt or invoice?"
         ),
-        "required_concepts": ["6,000,000", "penalty", "double"],
+        "required_concepts": ["200,000", "penalty", "double"],
         "forbidden_hallucinations": ["100,000 shillings", "warning only"],
     },
     {
@@ -170,7 +170,7 @@ EDGE_CASES = [
     },
     {
         "id": "SEC-012",
-        "title": "Passenger Baggage Concession vs Commercial Goods ($500 limit)",
+        "title": "Passenger Baggage Concession vs Commercial Goods ($2,000 limit)",
         "locale": "en",
         "domain": "Customs Baggage",
         "statute": "EAC-CMA, Fifth Schedule",
@@ -178,7 +178,7 @@ EDGE_CASES = [
             "I arrived at Entebbe Airport with personal effects and 5 brand-new boxed iPhones intended for resale in my shop. "
             "Can the iPhones be cleared under the duty-free passenger baggage concession?"
         ),
-        "required_concepts": ["500", "passenger baggage", "commercial", "customs duty"],
+        "required_concepts": ["2,000", "passenger baggage", "commercial", "customs duty"],
         "forbidden_hallucinations": ["all goods free", "commercial phones exempt"],
     },
     {
@@ -247,7 +247,7 @@ EDGE_CASES = [
         "domain": "Value Added Tax",
         "statute": "VAT Act, Section 7",
         "query": "What is the mandatory VAT registration threshold for turnover in three consecutive calendar months?",
-        "required_concepts": ["37,500,000", "consecutive", "vat"],
+        "required_concepts": ["75,000,000", "consecutive", "vat"],
         "forbidden_hallucinations": ["1 billion quarterly"],
     },
     {
@@ -427,7 +427,7 @@ EDGE_CASES = [
         "domain": "Stamp Duty",
         "statute": "Stamp Duty Act",
         "query": "What is the stamp duty percentage on the transfer of real property (land and buildings) in Uganda?",
-        "required_concepts": ["1%", "stamp duty", "transfer"],
+        "required_concepts": ["1.5%", "stamp duty", "transfer"],
         "forbidden_hallucinations": ["18% stamp duty"],
     },
     {
@@ -697,7 +697,7 @@ EDGE_CASES = [
         "domain": "Value Added Tax (Swahili)",
         "statute": "VAT Act, Section 7",
         "query": "Kikomo cha usajili wa lazima wa VAT kwa biashara inayopata mapato katika miezi mitatu mfululizo ni shilingi ngapi?",
-        "required_concepts": ["37,500,000", "vat", "miezi"],
+        "required_concepts": ["75,000,000", "vat", "miezi"],
         "forbidden_hallucinations": ["trilioni moja"],
     },
     {
