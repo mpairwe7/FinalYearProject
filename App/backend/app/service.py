@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextlib
 import contextvars
 import csv
 import functools
@@ -2527,11 +2528,12 @@ async def run_chat_turn(
     # The kernel pin and trace for the whole streamed turn, set here for the same
     # reason: the agentic stream runs after the retrieval scope has closed, and its
     # kernel calls belong in this turn's audit row (ADR-0033).
-    if _ACTIVE_KERNEL_PIN.get() is None:
-        _ACTIVE_KERNEL_PIN.set(_kernel_pin_for_turn())
+    # Fresh for every turn: a WebSocket session runs its turns in one context, and a
+    # reused pin or trace carried the first turn's date and misses into later rows.
+    kernel_pin_token = _ACTIVE_KERNEL_PIN.set(_kernel_pin_for_turn())
     from .kernel import trace as _stream_kernel_trace
 
-    _stream_kernel_trace.start()
+    kernel_trace_token = _stream_kernel_trace.open_turn()
     try:
         with turn_usage_scope() as usage, turn_attributes_scope():
             async for event_type, payload in _run_chat_turn_events(model, progress=progress, **kwargs):
@@ -2580,6 +2582,11 @@ async def run_chat_turn(
                 },
                 daemon=True,
             ).start()
+        # The audit has been written, or its thread holds a copy of this context.
+        for var, token in ((_stream_kernel_trace.TURN_KERNEL_TRACE, kernel_trace_token),
+                           (_ACTIVE_KERNEL_PIN, kernel_pin_token)):
+            with contextlib.suppress(ValueError):  # closed from another context (garbage collection)
+                var.reset(token)
 
 
 def _finish_streamed_turn(
@@ -9256,12 +9263,22 @@ class ChatModel:
             unsupported_years = sorted(
                 year for year in requested_years if year < covered_from or year > covered_to
             )
-            if unsupported_years:
+            # A fiscal year named outright is checked on its own: the calendar-year guard
+            # skips vehicle questions, and "the FY2027-28 transfer fee" must not get FY2026-27's.
+            from .query import extract_retrieval_filters  # noqa: PLC0415
+
+            requested_fy = str(
+                extract_retrieval_filters(message).get("fiscal_year")
+                or extract_retrieval_filters(rewritten).get("fiscal_year")
+                or ""
+            )
+            unheld_fy = requested_fy if requested_fy and requested_fy not in list_fiscal_years() else ""
+            if unsupported_years or unheld_fy:
                 latest = max(
                     all_tables,
                     key=lambda table: table.effective_to or table.effective_from,
                 )
-                requested = ", ".join(str(year) for year in unsupported_years)
+                requested = unheld_fy or ", ".join(str(year) for year in unsupported_years)
                 last_covered_day = latest.effective_to or latest.effective_from
                 latest_date = f"{last_covered_day.day} {last_covered_day:%B %Y}"
                 reply_text = (
@@ -9296,14 +9313,7 @@ class ChatModel:
 
             # A question naming a fiscal year we hold is answered from that year's table,
             # not today's: "the FY2025-26 VAT threshold" is UGX 150,000,000, not 300,000,000.
-            from .query import extract_retrieval_filters  # noqa: PLC0415
-
-            requested_fy = str(
-                extract_retrieval_filters(message).get("fiscal_year")
-                or extract_retrieval_filters(rewritten).get("fiscal_year")
-                or ""
-            )
-            table = get_table(requested_fy) if requested_fy in list_fiscal_years() else get_table()
+            table = get_table(requested_fy) if requested_fy else get_table()
             reply_text, next_actions = format_rate_reply(rate_plan, table, requested_fiscal_year=requested_fy)
         except Exception:
             logger.exception("rate lookup fast path failed")

@@ -37,43 +37,44 @@ class SqlRejected(ValueError):
     """A template that is not a single, read-only SELECT over its sources."""
 
 
-_FROM_LIST_RE = re.compile(
-    r"\bfrom\s+(.+?)(?=\b(?:where|group|order|limit|having|union|intersect|except|join|inner|left|right|full|cross|"
-    r"natural|on|using|window|offset|fetch)\b|\)|$)",
-    re.I | re.S,
-)
 _RELATION_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)")
+#: Keywords that end a FROM list at its own depth.
+_FROM_LIST_END = frozenset({
+    "where", "group", "order", "limit", "having", "union", "intersect", "except", "join", "inner", "left",
+    "right", "full", "cross", "natural", "on", "using", "window", "offset", "fetch",
+})
 
 
-def _cte_bodies_removed(body: str) -> str:
-    """*body* with each ``name AS ( ... )`` CTE body blanked, so only the main FROM lists remain."""
-    out, i = [], 0
-    for match in re.finditer(r"\bas\s*\(", body, re.I):
-        if match.start() < i:
-            continue
-        out.append(body[i:match.end() - 1])
-        depth, j = 0, match.end() - 1
-        while j < len(body):
-            depth += body[j] == "("
-            depth -= body[j] == ")"
-            j += 1
-            if depth == 0:
-                break
-        out.append(" ")
-        i = j
-    out.append(body[i:])
-    return "".join(out)
+def _from_lists(body: str) -> list[list[str]]:
+    """The items of every FROM list, in the main query, CTE bodies and subqueries alike.
 
-
-def _from_list_relations(body: str) -> set[str]:
-    """Every relation in a FROM list, not only the first: ``FROM a, b`` reads both."""
-    found = set()
-    for clause in _FROM_LIST_RE.findall(body):
-        for item in clause.split(","):
-            match = _RELATION_RE.match(item)
-            if match and not item.strip().startswith("("):
-                found.add(match.group(1).lower())
-    return found
+    Read by parenthesis depth, so a nested ``FROM a, (…) x, b`` is split at its own
+    commas and ``b`` is not lost after the parenthesis.
+    """
+    lists = []
+    for match in re.finditer(r"\bfrom\b", body, re.I):
+        items, depth, i, item_start = [], 0, match.end(), match.end()
+        while i < len(body):
+            char = body[i]
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                if depth == 0:
+                    break
+                depth -= 1
+            elif depth == 0 and char == ",":
+                items.append(body[item_start:i])
+                item_start = i + 1
+            elif depth == 0 and (char.isalpha() or char == "_") and (i == 0 or not (body[i - 1].isalnum() or body[i - 1] in "_$.")):
+                word = _WORD_RE.match(body, i)
+                if word and word.group(0).lower() in _FROM_LIST_END:
+                    break
+                i = word.end() if word else i + 1
+                continue
+            i += 1
+        items.append(body[item_start:i])
+        lists.append(items)
+    return lists
 
 
 def check(sql: str, *, sources: frozenset[str] | set[str]) -> set[str]:
@@ -109,13 +110,20 @@ def check(sql: str, *, sources: frozenset[str] | set[str]) -> set[str]:
         raise SqlRejected(f"function not allowed: {', '.join(bad)}")
     if any(w.startswith("pg_") for w in words):
         raise SqlRejected("system catalogue access is not allowed")
-    if re.search(r"\b(?:from|join)\s*\(|,\s*\(", _cte_bodies_removed(body), re.I):
-        # A parenthesised item in a FROM list hides the relations after it from the
-        # check below; a certified template uses a CTE instead.
+    used = {m.lower() for m in _SOURCE_RE.findall(body)}
+    if re.search(r"\bjoin\s*\(", body, re.I):
         raise SqlRejected("parenthesised FROM or JOIN items are not allowed; use a WITH clause")
+    for items in _from_lists(body):
+        for item in items:
+            if item.strip().startswith("("):
+                # A parenthesised item hides the relations inside and after it from this
+                # check, in a CTE body as much as in the main query; use a CTE instead.
+                raise SqlRejected("parenthesised FROM or JOIN items are not allowed; use a WITH clause")
+            relation = _RELATION_RE.match(item)
+            if relation:
+                used.add(relation.group(1).lower())
     ctes = {m.lower() for m in _CTE_RE.findall(body)}
     allowed = {s.lower() for s in sources} | ctes
-    used = {m.lower() for m in _SOURCE_RE.findall(body)} | _from_list_relations(body)
     outside = sorted(used - allowed)
     if outside:
         raise SqlRejected(f"reads from undeclared sources: {', '.join(outside)}")

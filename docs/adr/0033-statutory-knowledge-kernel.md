@@ -218,3 +218,27 @@ Filled in per phase; see "Implementation record" below.
   - **Load evaluations:** figure concepts are mandatory and matched as whole words, with
     equivalent forms accepted.
   - **Docs:** tool counts give the production inventory (56 tools, 13 namespaces).
+- Third review round (13 findings, all fixed):
+  - **Precedence:**
+    - a change cue counts only when the fact is named before it in the same statement, with no
+      other figure in between ("the export rate increased to 5%" is not about the standard rate);
+    - a past mention ("previously it was 18%", "from 18% to") no longer hides the figure the
+      passage now gives;
+    - a conflict is marked queued only once its write succeeds, including a Postgres write that
+      reports `failed`.
+  - **Streamed turns:** each turn gets a fresh kernel pin and trace, and the outer context is
+    restored after the audit, so a WebSocket session no longer carries one turn's misses or date
+    into the next.
+  - **Rate answers:**
+    - a named fiscal year with no table is declined, vehicle questions included;
+    - summaries, aliased entries and template-quoted figures name every unverified figure they show;
+    - `lookup_rate` and `list_available_rates` warn when no period was asked and today is past
+      the latest table;
+    - the schedule names figures with no statutory source.
+  - **SQL guard:** every FROM list is read by parenthesis depth, in CTE bodies and subqueries too.
+  - **MCP errors:** the two land-transfer tools' output schemas require every field only on
+    success, so a missing-rate error reaches the host intact.
+  - **Load evaluations:** the matcher normalises whitespace and requires whole numbers
+    (`2,000` is not in `2,000,000`), shared by all three runners and tested in
+    `tests/test_load_runner_concept_matching.py`.
+  - Each of 17 fixes was disabled in turn, and a test failed every time.

@@ -177,6 +177,26 @@ def _scalar_row(key: str, value: float) -> dict[str, Any]:
     return row
 
 
+def _rollover_note(table: RateTable, fiscal_year: str | None, as_of: str | None) -> str:
+    """A warning when no period was asked for and today is past the latest table.
+
+    The tools fall back to the latest table then, and a graph reply can show the
+    explanation as is, so it must say the figures may have changed.
+    """
+    if fiscal_year or as_of:
+        return ""
+    from ..tax import tables
+
+    try:
+        stale = table.fiscal_year == tables.latest_fiscal_year() and tables.coverage() == "after_latest"
+    except Exception:
+        return ""
+    if not stale:
+        return ""
+    return (f" No rate table has been published yet for the fiscal year that began on 1 July; these are "
+            f"{table.fiscal_year} figures, and a new Finance Act may have changed them.")
+
+
 def _resolve(fiscal_year: str | None, as_of: str | None) -> RateTable:
     day = _dt.date.fromisoformat(as_of) if as_of else None
     return get_table(fiscal_year, as_of=day)
@@ -299,6 +319,7 @@ class LookupRateTool(Tool):
             # Unconfirmed figures say so wherever they are quoted, not only in rate_basis.
             explanation = (f"The {name} recorded{fy_text} is {row['formatted']}, but it has not been confirmed "
                            "against a gazetted schedule; confirm it with URA or the responsible agency.")
+        explanation += _rollover_note(table, fiscal_year, as_of)
         return {
             "ok": True,
             **row,
@@ -373,14 +394,23 @@ class ListAvailableRatesTool(Tool):
         top_rates_str = "\n".join(f"- **{r['display_name']}**: {r['formatted']}" for r in rows[:8])
         is_confirmed = table.confirmed() if callable(table.confirmed) else bool(table.confirmed)
         unverified = [display_name(k) for k in sorted(table.unverified) if k in table.rates]
+        # A figure with no legal basis recorded has no source to cite, verified or not.
+        uncited = [display_name(r["tax_type"]) for r in rows
+                   if r["tax_type"] not in table.legal_basis and r["tax_type"] not in table.unverified]
         if not is_confirmed:
             verification_statement = "These rates are provisional; verify them with URA before use."
-        elif unverified:
-            # Never a blanket "all verified": name the figures that are not yet confirmed.
-            verification_statement = ("The table is confirmed, but these figures are not yet confirmed against a "
-                                      "gazetted schedule: " + "; ".join(unverified) + ".")
+        elif unverified or uncited:
+            # Never a blanket "all verified": name the figures that are not yet confirmed or cited.
+            parts = []
+            if unverified:
+                parts.append("these figures are not yet confirmed against a gazetted schedule: "
+                             + "; ".join(unverified) + ".")
+            if uncited:
+                parts.append("These figures have no statutory source recorded: " + "; ".join(uncited) + ".")
+            verification_statement = "The table is confirmed, but " + " ".join(parts)
         else:
             verification_statement = "Every figure in this table cites its statutory source."
+        verification_statement += _rollover_note(table, fiscal_year, as_of)
         explanation = (
             f"Official URA statutory rate schedule for {table.fiscal_year} ({len(rows)} rates recorded):\n\n"
             f"{top_rates_str}\n\n"

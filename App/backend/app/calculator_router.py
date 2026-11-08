@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import string
 import threading
 import time
 from dataclasses import dataclass, field
@@ -1278,6 +1279,55 @@ UNVERIFIED_CAVEAT = (
 )
 
 
+#: Template placeholders and the table keys each one reads (``_table_figures``, ``format_rate_reply``).
+_PLACEHOLDER_KEYS: dict[str, tuple[str, ...]] = {
+    "baggage_usd": ("passenger_baggage_allowance_usd",),
+    "mv_transfer_commercial": ("motor_vehicle_commercial_transfer_fee",),
+    "mv_transfer_motorcycle": ("motor_vehicle_motorcycle_transfer_fee",),
+    "sd_vehicle": ("stamp_duty_motor_vehicle_transfer_ugx",),
+    "sd_motorcycle": ("stamp_duty_motorcycle_transfer_ugx",),
+    "efris_rule": ("efris_penal_tax_minimum_ugx", "efris_penalty_failure_to_issue_invoice"),
+    "offline_window": ("efris_offline_sync_window_hours",),
+    "fuel_lines": ("excise_duty_fuel_petrol_per_litre", "excise_duty_fuel_diesel_per_litre",
+                   "excise_duty_fuel_kerosene_per_litre"),
+    "paye_free_monthly": ("paye_bands_resident",),
+    "threshold": ("rental_tax_individual_threshold",),
+    "threshold_vat": ("vat_registration_threshold_annual",),
+    "cap": ("rental_company_expense_cap",),
+    "presumptive_min": ("presumptive_tax_lower_threshold",),
+    "presumptive_max": ("presumptive_tax_upper_threshold",),
+    "late_min": ("penal_tax_late_filing_minimum_ugx",),
+    "petrol": ("excise_duty_fuel_petrol_per_litre",),
+    "diesel": ("excise_duty_fuel_diesel_per_litre",),
+    "kerosene": ("excise_duty_fuel_kerosene_per_litre",),
+}
+#: Questions answered from a differently named table entry.
+_RATE_ALIASES = {
+    "presumptive_tax_threshold": "presumptive_tax_upper_threshold",
+    "penal_tax_late_filing": "penal_tax_late_filing_monthly_rate",
+    "passenger_baggage_allowance": "passenger_baggage_allowance_usd",
+    "commercial_import_withholding_tax": "customs_import_wht",
+}
+
+
+def _unverified_note(table: RateTable, keys: list[str], *, main: str = "") -> str:
+    """The caveat for every unverified figure a reply shows; empty when all are confirmed.
+
+    A one-figure answer about *main* gets the plain caveat; anything else names the
+    figures, so a list or a template quoting other entries does not pass them as official.
+    """
+    unverified = [k for k in dict.fromkeys(keys) if k and k in table.unverified and k in table.rates]
+    if not unverified:
+        return ""
+    if unverified == [main]:
+        return "\n\n" + UNVERIFIED_CAVEAT
+    from .tools.rates import display_name
+
+    return ("\n\n_These figures have not been confirmed against a gazetted schedule: "
+            + "; ".join(display_name(k) for k in unverified)
+            + ". Confirm them with URA or the responsible agency before paying or filing._")
+
+
 def _after_latest_table(fy: str) -> bool:
     from .tax import tables
 
@@ -2177,8 +2227,6 @@ def format_rate_reply(plan: RatePlan, table: RateTable, *, requested_fiscal_year
     if requested_fiscal_year != fy and _after_latest_table(fy):
         # Not when the question named this year: a historical answer is not a stale one.
         footer += "\n\n" + ROLLOVER_CAVEAT.format(fy=fy)
-    if plan.tax_type in table.unverified:
-        footer += "\n\n" + UNVERIFIED_CAVEAT
     if plan.summary == "paye":
         bands = rates["paye_bands_resident"]
         lines = [f"**PAYE rates for resident employees ({fy}, monthly income):**", ""]
@@ -2199,7 +2247,8 @@ def format_rate_reply(plan: RatePlan, table: RateTable, *, requested_fiscal_year
                 f"Non-resident employees are taxed from {_pct(non_resident[0][2])} "
                 "on the first band."
             )
-        return "\n".join(lines) + footer, [
+        shown = ["paye_bands_resident"] + (["paye_bands_non_resident"] if non_resident else [])
+        return "\n".join(lines) + footer + _unverified_note(table, shown), [
             "Calculate PAYE for a salary",
             "Ask how PAYE bands work",
         ]
@@ -2211,7 +2260,9 @@ def format_rate_reply(plan: RatePlan, table: RateTable, *, requested_fiscal_year
             f"- Companies: **{_pct(rates['rental_tax_company'])}** of chargeable rental income "
             f"(expenses deductible up to {_pct(rates['rental_company_expense_cap'])} of gross rent)"
         )
-        return reply + footer, ["Calculate rental tax", "Ask how rental tax is declared"]
+        shown = ["rental_tax_individual", "rental_tax_individual_threshold", "rental_tax_company",
+                 "rental_company_expense_cap"]
+        return reply + footer + _unverified_note(table, shown), ["Calculate rental tax", "Ask how rental tax is declared"]
     if plan.summary == "withholding":
         # Driven off the table so a category the year does not define is
         # simply absent from the list rather than reported at some other
@@ -2230,7 +2281,8 @@ def format_rate_reply(plan: RatePlan, table: RateTable, *, requested_fiscal_year
             f"- {label}: **{_pct(rates[key])}**" for key, label in labels if rates.get(key) is not None
         ]
         reply = f"**Withholding tax (WHT) rates ({fy}):**\n\n" + "\n".join(rows)
-        return reply + footer, ["Calculate WHT on a payment", "Ask when WHT applies"]
+        shown = [key for key, _label in labels if rates.get(key) is not None]
+        return reply + footer + _unverified_note(table, shown), ["Calculate WHT on a payment", "Ask when WHT applies"]
 
     descriptions = {
         "vat_standard": (
@@ -2647,7 +2699,11 @@ def format_rate_reply(plan: RatePlan, table: RateTable, *, requested_fiscal_year
         }.get(plan.tax_type, "calculate_withholding"),
         [],
     )
-    return reply + footer, actions
+    # The entry the figure was read from, and every entry the template quotes.
+    rate_key = plan.tax_type if plan.tax_type in rates else _RATE_ALIASES.get(plan.tax_type, plan.tax_type)
+    quoted = [key for _text, field, _spec, _conv in string.Formatter().parse(template) if field
+              for key in _PLACEHOLDER_KEYS.get(field, ())]
+    return reply + footer + _unverified_note(table, [rate_key, *quoted], main=rate_key), actions
 
 
 

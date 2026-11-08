@@ -599,15 +599,29 @@ def test_the_tools_refuse_an_uncleared_layer_in_production(monkeypatch: pytest.M
     assert "G507" in result["hint"]
 
 
-def test_a_question_naming_a_year_is_answered_from_that_years_table() -> None:
+def _rate_model():
+    from app.guardrails import OutputGuard
+    from app.service import ChatModel
+
+    model = ChatModel.__new__(ChatModel)
+    model._output_guard = OutputGuard()
+    model.name = "test"
+    return model
+
+
+def test_a_question_naming_a_year_is_answered_from_that_years_table(monkeypatch: pytest.MonkeyPatch) -> None:
     from app import calculator_router as cr
     from app.tax import tables
 
     reply, _ = cr.format_rate_reply(cr.RatePlan(tax_type="vat_registration_threshold_annual"),
                                     tables.get_table("FY2025-26"), requested_fiscal_year="FY2025-26")
     assert "150,000,000" in reply
-    service = (ROOT / "App/backend/app/service.py").read_text(encoding="utf-8")
-    assert "get_table(requested_fy) if requested_fy in list_fiscal_years()" in service
+    monkeypatch.setattr("app.tools.rates._authority_payload", lambda: (True, {}))
+    result = _rate_model()._maybe_handle_rate_lookup(
+        message="What was the VAT registration threshold in FY2025-26?", rewritten="", thread_id="fy", locale="en")
+    assert result is not None
+    assert "150,000,000" in result["reply"]
+    assert "FY2025-26" in result["reply"]
 
 
 def test_a_named_year_gets_no_rollover_caveat(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -761,4 +775,200 @@ def test_an_outer_trace_is_read_live_by_the_audit() -> None:
         trace.TURN_KERNEL_TRACE.reset(token)
     assert payload["kernel_trace"]["misses"][0]["concept"] == "carbon_border_levy"
     service = (ROOT / "App/backend/app/service.py").read_text(encoding="utf-8")
-    assert "_stream_kernel_trace.start()" in service
+    assert "_stream_kernel_trace.open_turn()" in service
+
+
+# --------------------------------------------------------------------------- round three
+
+
+@pytest.mark.parametrize("text", [
+    "The VAT standard rate is 18%; the export rate increased to 5%.",
+    "The VAT standard rate is 18%, but the export rate increased to 5%.",
+    "The VAT standard rate is 18% and the export rate is now 0%.",
+    "The VAT standard rate is 18%. Excise on spirits increased to 20%.",
+])
+def test_a_change_to_another_figure_is_not_a_conflict(text: str) -> None:
+    assert precedence.find_conflicts([VAT], [{"text": text, "doc_type": "pdf_chunk"}]) == []
+
+
+def test_a_past_mention_does_not_hide_the_current_claim() -> None:
+    hit = {"text": "The VAT standard rate is 20%; previously it was 18%.", "doc_type": "pdf_chunk"}
+    assert [c.evidence_value for c in precedence.find_conflicts([VAT], [hit])] == ["20%"]
+    went = {"text": "The VAT standard rate went from 18% to 20%.", "doc_type": "pdf_chunk"}
+    assert precedence.find_conflicts([dict(VAT, value=0.20)], [went]) == [], "the old figure is history"
+    assert [c.evidence_value for c in precedence.find_conflicts([VAT], [went])] == ["20%"]
+
+
+def test_a_failed_write_is_tried_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts: list[int] = []
+
+    def flaky(conflicts, **_):
+        attempts.append(len(conflicts))
+        return 0 if len(attempts) == 1 else len(conflicts)
+
+    monkeypatch.setattr(precedence, "record_conflicts", flaky)
+    monkeypatch.setattr(precedence, "facts_from_claims", lambda _claims: [VAT])
+    stale = {"text": "The VAT standard rate is 17%.", "doc_type": "csv"}
+    graph = {"doc_type": "graph", "graph_claims": [{"subject": "VAT standard rate"}]}
+    precedence.apply_precedence(graph, [graph, stale])
+    assert graph["_kernel_conflicts_recorded"] == [], "the failed write is not marked as done"
+    precedence.apply_precedence(graph, [graph, stale])
+    precedence.apply_precedence(graph, [graph, stale])
+    assert attempts == [1, 1], "retried once, then recorded and not written again"
+
+
+def test_a_refused_postgres_write_is_not_counted(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import database
+
+    monkeypatch.setattr(database, "create_or_increment_discrepancy", lambda **_: {"id": "", "status": "failed"})
+    conflict = precedence.find_conflicts([VAT], [{"text": "The VAT standard rate is 17%.", "doc_type": "csv"}])
+    assert precedence.record_conflicts(conflict, kernel_version="1.2.2") == 0
+
+
+@pytest.mark.parametrize("sql", [
+    "WITH x AS (SELECT 1 AS group_size FROM certified.filing_compliance, (SELECT 1) y, secret.users) "
+    "SELECT group_size FROM x",
+    "SELECT ratio AS group_size FROM certified.filing_compliance "
+    "WHERE period IN (SELECT period FROM certified.filing_compliance, secret.users)",
+])
+def test_nested_from_lists_are_checked(sql: str) -> None:
+    from app.semantic_layer import guard
+
+    with pytest.raises(guard.SqlRejected):
+        guard.check(sql, sources=frozenset({"certified.filing_compliance"}))
+
+
+def test_the_certified_templates_still_pass() -> None:
+    from app.semantic_layer import guard
+
+    for metric in json.loads((ROOT / "App/backend/app/semantic_layer/metrics.json").read_text())["metrics"]:
+        guard.check(metric["sql"], sources=frozenset(metric["sources"]))
+
+
+def test_each_streamed_turn_has_its_own_pin_and_trace(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    from app import service
+    from app.kernel import trace
+
+    seen: list[tuple] = []
+    turn = {"n": 0}
+
+    async def events(_model, *, progress, **_kwargs):
+        turn["n"] += 1
+        if turn["n"] == 1:
+            functions.fact("carbon_border_levy", AUG)  # a kernel miss in the first turn only
+        yield "_log", {"result": {}, "full_reply": "r", "elapsed_ms": 1.0}
+
+    def finish(_model, _payload, **_kwargs):
+        seen.append((trace.snapshot(), service._ACTIVE_KERNEL_PIN.get()))
+
+    monkeypatch.setattr(service, "_run_chat_turn_events", events)
+    monkeypatch.setattr(service, "_finish_streamed_turn", finish)
+    pins = iter([{"as_of": "2026-11-08"}, {"as_of": "2026-11-09"}])
+    monkeypatch.setattr(service, "_kernel_pin_for_turn", lambda: next(pins))
+
+    stale_pin = {"as_of": "2026-01-01"}
+    stale_trace = {"misses": [{"concept": "from_an_earlier_turn"}], "uncited_served": []}
+    after: list = []
+
+    async def session() -> None:  # one WebSocket session: every turn in one context
+        service._ACTIVE_KERNEL_PIN.set(stale_pin)  # what the context holds before these turns
+        trace.TURN_KERNEL_TRACE.set(stale_trace)
+        for _ in range(2):
+            async for _event in service.run_chat_turn(object(), channel="ws", message="q", session_id="s"):
+                pass
+        after.append((service._ACTIVE_KERNEL_PIN.get(), trace.TURN_KERNEL_TRACE.get()))
+
+    asyncio.run(session())
+    (first_trace, first_pin), (second_trace, second_pin) = seen
+    assert [m["concept"] for m in first_trace["misses"]] == ["carbon_border_levy"], "a fresh trace per turn"
+    assert second_trace is None, "the first turn's misses are not counted again"
+    assert (first_pin["as_of"], second_pin["as_of"]) == ("2026-11-08", "2026-11-09"), "a fresh pin per turn"
+    assert after == [(stale_pin, stale_trace)], "the context is restored once the turn is audited"
+
+
+def test_an_unheld_fiscal_year_is_declined(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.tools.rates._authority_payload", lambda: (True, {}))
+    result = _rate_model()._maybe_handle_rate_lookup(message="What is the rate of the motor vehicle transfer fee in FY2027-28?",
+                                             rewritten="", thread_id="fy-guard", locale="en")
+    assert result is not None
+    assert result["retrieval_mode"] == "abstained"
+    assert "FY2027-28" in result["reply"]
+    assert "84,000" not in result["reply"]
+
+
+def _with(table, **changes):
+    import dataclasses
+
+    return dataclasses.replace(table, **changes)
+
+
+def test_summaries_and_aliases_name_unverified_figures() -> None:
+    from app import calculator_router as cr
+    from app.tax import tables
+
+    fy27 = tables.get_table("FY2026-27")
+    reply, _ = cr.format_rate_reply(cr.RatePlan(summary="withholding"), fy27, requested_fiscal_year="FY2026-27")
+    assert "not been confirmed against a gazetted schedule" in reply
+    assert "oyalt" in reply
+    paye = _with(fy27, unverified=("paye_bands_resident",))
+    reply, _ = cr.format_rate_reply(cr.RatePlan(summary="paye"), paye, requested_fiscal_year="FY2026-27")
+    assert "not been confirmed against a gazetted schedule" in reply
+    wht = _with(fy27, unverified=("customs_import_wht",))
+    reply, _ = cr.format_rate_reply(cr.RatePlan(tax_type="commercial_import_withholding_tax"), wht,
+                                    requested_fiscal_year="FY2026-27")
+    assert cr.UNVERIFIED_CAVEAT in reply
+    reply, _ = cr.format_rate_reply(cr.RatePlan(summary="withholding"), tables.get_table("FY2025-26"),
+                                    requested_fiscal_year="FY2025-26")
+    assert "not been confirmed" not in reply, "nothing unverified, no caveat"
+
+
+def test_rate_tools_warn_after_the_latest_table(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.tax import tables
+    from app.tools import ToolRegistry
+
+    monkeypatch.setattr(tables, "kampala_today", lambda now=None: _dt.date(2027, 7, 2))
+    text = ToolRegistry.call("lookup_rate", {"tax_type": "vat_standard"})["explanation"]
+    assert "No rate table has been published yet" in text
+    text = ToolRegistry.call("list_available_rates", {})["explanation"]
+    assert "No rate table has been published yet" in text
+    asked = ToolRegistry.call("lookup_rate", {"tax_type": "vat_standard", "fiscal_year": "FY2026-27"})
+    assert "No rate table has been published yet" not in asked["explanation"], "a named year is not stale"
+
+
+def test_the_schedule_names_uncited_figures(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.tax import tables
+    from app.tools import ToolRegistry
+
+    fy26 = tables.get_table("FY2025-26")
+    basis = {k: v for k, v in fy26.legal_basis.items() if k != "vat_standard"}
+    monkeypatch.setattr("app.tools.rates._resolve", lambda *_a, **_k: _with(fy26, unverified=(), legal_basis=basis))
+    text = ToolRegistry.call("list_available_rates", {"fiscal_year": "FY2025-26"})["explanation"]
+    assert "Every figure in this table cites" not in text
+    assert "no statutory source recorded: VAT (standard rate)" in text
+
+
+@pytest.mark.parametrize(("tool", "args"), [
+    ("resolve_mda_ntr_payment", {"service_type": "mlhud_land_transfer", "transaction_value_ugx": 50_000_000}),
+    ("assess_life_event_tax_onboarding", {"life_event": "land_or_property_transfer"}),
+])
+def test_a_missing_rate_error_survives_schema_validation(monkeypatch: pytest.MonkeyPatch, tool: str, args) -> None:
+    from app.mcp.validation import result_matches_schema
+    from app.tax import tables
+    from app.tools import ToolRegistry
+    from app.tools import mda_interdependence as mda
+
+    fy27 = tables.get_table("FY2026-27")
+    schema = ToolRegistry.get(tool).schema.output_schema
+    ok = ToolRegistry.call(tool, args)
+    assert ok["ok"] is True
+    assert result_matches_schema(schema, ok) == []
+    assert result_matches_schema(schema, {k: v for k, v in ok.items() if k != "explanation"}), \
+        "a success still needs every field"
+    rates = {k: v for k, v in fy27.rates.items() if k != "stamp_duty_property_transfer"}
+    monkeypatch.setattr(mda, "get_table", lambda *_a, **_k: _with(fy27, rates=rates))
+    failed = ToolRegistry.call(tool, args)
+    assert failed["ok"] is False
+    assert "stamp duty" in failed["error"].lower()
+    assert result_matches_schema(schema, failed) == []

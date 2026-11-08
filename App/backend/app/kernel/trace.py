@@ -28,6 +28,15 @@ def start() -> Any:
     return TURN_KERNEL_TRACE.set({"misses": [], "uncited_served": []}) if TURN_KERNEL_TRACE.get() is None else None
 
 
+def open_turn() -> Any:
+    """Open a fresh trace for a new turn, even if one is open; returns the token to reset.
+
+    A WebSocket session runs its turns in one context, so :func:`start` would
+    keep the first turn's trace and count its misses again in every later turn.
+    """
+    return TURN_KERNEL_TRACE.set({"misses": [], "uncited_served": []})
+
+
 def _add(field: str, entry: dict[str, str]) -> None:
     trace = TURN_KERNEL_TRACE.get()
     if trace is None:

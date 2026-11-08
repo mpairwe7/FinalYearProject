@@ -22,6 +22,23 @@ from typing import Any
 
 import httpx
 
+
+def concept_present(concept: str, reply: str) -> bool:
+    """Whether *reply* states *concept*, in any of its ``|`` forms ("5 days|120 hours").
+
+    Whitespace is normalised ("ennaku  5" is "ennaku 5"). Words and numbers must be
+    whole: "5 days" is not in "15 days", and "2,000" is not in "USD 2,000,000".
+    """
+    text = " ".join(reply.lower().split())
+    for form in concept.split("|"):
+        words = form.lower().split()
+        if not words:
+            continue
+        pattern = r"\s+".join(re.escape(w) for w in words)
+        if re.search(rf"(?<!\w)(?<!\d[.,]){pattern}(?!\w)(?![.,]\d)", text):
+            return True
+    return False
+
 GATEWAY_URL = os.getenv(
     "LIVE_GATEWAY_URL",
     "https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/chat",
@@ -59,7 +76,7 @@ def generate_500_edge_cases() -> list[dict[str, Any]]:
         ("What is the difference between zero-rated and exempt supplies for input VAT?", "VAT Act s.24", ["zero-rated", "exempt", "input tax"], ["both get refund"]),
         ("When can a taxpayer claim a VAT bad debt refund on unpaid invoices?", "VAT Act s.31", ["2 years", "bad debt", "insolven"], ["claim after 1 week"]),
         ("What is the penalty under TPCA s.19B for failing to issue an EFRIS receipt?", "TPCA s.93(2)", ["200,000", "penalty", "double"], ["100,000 shillings"]),
-        ("Within how many hours must offline EFRIS transactions be synchronized?", "URA EFRIS Handbook", ["5 days|120 hours|five days|ennaku 5|ennaku ttaano|siku 5|siku tano", "offline"], ["30 days"]),
+        ("Within how many hours must offline EFRIS transactions be synchronized?", "URA EFRIS Handbook", ["5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano", "offline"], ["30 days"]),
         # Customs
         ("Can I import an 18-year-old car (2008 model) into Uganda?", "Traffic Act", ["prohibited", "15 years"], ["allowed with no ban"]),
         ("What is the environmental levy on imported used vehicles aged 8 to 15 years?", "EACCMA / Traffic Act", ["50%", "environmental levy"], ["0% levy"]),
@@ -134,7 +151,7 @@ def generate_500_edge_cases() -> list[dict[str, Any]]:
         ("Nnyinza ntya okuwakanya omusolo gwa URA gwe ssikkiriziganya nagwo?", "Disputes", ["ura", "musolo", "kuwakanya"], ["tewali kuwakanya"]),
         ("Omusolo gwa advance tax ku takisi gubalibwa ku ssente mmeka buli ntebe?", "Motor Vehicle", ["20,000", "omusolo"], ["500,000"]),
         ("Bwe ngyako ssente ku mobile money bansalako ebitundu bimeka?", "Excise", ["0.5%", "mobile money", "omusolo"], ["10% ku kuteeka"]),
-        ("Bwe mba nga sirina yintaneti, nnina essaawa mmeka okusindika invoice za EFRIS?", "EFRIS", ["5 days|120 hours|five days|ennaku 5|ennaku ttaano|siku 5|siku tano", "efris"], ["omwaka"]),
+        ("Bwe mba nga sirina yintaneti, nnina essaawa mmeka okusindika invoice za EFRIS?", "EFRIS", ["5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano", "efris"], ["omwaka"]),
         ("Nnyinza okuyingiza mmotoka ekozeseddwaako erina emyaka 16 mu Uganda?", "Customs", ["15", "mmotoka"], ["kikkirizibwa"]),
         ("Omusolo gwa VAT mu Uganda guli ku kigero kya bitundu bimeka?", "VAT", ["18%", "vat", "omusolo"], ["25%"]),
         ("Biwandiiko ki ebyetaagisa okufuna TIN okuva mu URA?", "TIN", ["tin", "ura"], ["sasula ofiisa"]),
@@ -280,9 +297,7 @@ async def run_edge_case(client: httpx.AsyncClient, case: dict[str, Any]) -> Edge
         matched = []
         missing = []
         for c in case["required_concepts"]:
-            # "a|b" lists equivalent forms ("5 days|120 hours"); any one matches.
-            # Whole words: "15 days" must not satisfy "5 days".
-            if any(re.search(rf"(?<!\w){re.escape(alt.strip().lower())}(?!\w)", reply_lower) for alt in c.split("|")):
+            if concept_present(c, reply):
                 matched.append(c)
             else:
                 missing.append(c)

@@ -194,6 +194,22 @@ MDA_SERVICE_CATALOG: dict[str, dict[str, Any]] = {
 # ---------------------------------------------------------------------------
 # Tool 1 (Pillar 1): Cross-MDA PRN & NTR Fee-Head Validator + 3-Hop Diagnostics
 # ---------------------------------------------------------------------------
+
+def _success_or_error(required: list[str], properties: dict[str, Any]) -> dict[str, Any]:
+    """An output schema whose fields are required on success; an error needs ``ok`` and ``error``.
+
+    A missing-rate error has no payable amount to report, and an MCP host replaces a
+    result that misses a required field with a generic schema error, losing the message.
+    """
+    return {
+        "type": "object",
+        "required": ["ok"],
+        "properties": {**properties, "error": {"type": "string"}},
+        "if": {"properties": {"ok": {"const": True}}},
+        "then": {"required": required},
+        "else": {"required": ["ok", "error"]},
+    }
+
 class ResolveMdaNtrPaymentTool(Tool):
     _schema = ToolSchema(
         name="resolve_mda_ntr_payment",
@@ -229,20 +245,10 @@ class ResolveMdaNtrPaymentTool(Tool):
             "required": ["service_type"],
             "additionalProperties": False,
         },
-        output_schema={
-            "type": "object",
-            "required": [
-                "ok",
-                "mda_code",
-                "mda_name",
-                "ura_tax_head",
-                "payable_ugx",
-                "wrong_head_warning",
-                "reconciliation_steps",
-                "statutory_basis",
-                "explanation",
-            ],
-            "properties": {
+        output_schema=_success_or_error(
+            ["ok", "mda_code", "mda_name", "ura_tax_head", "payable_ugx", "wrong_head_warning",
+             "reconciliation_steps", "statutory_basis", "explanation"],
+            {
                 "ok": {"type": "boolean"},
                 "mda_code": {"type": "string"},
                 "mda_name": {"type": "string"},
@@ -254,7 +260,7 @@ class ResolveMdaNtrPaymentTool(Tool):
                 "statutory_basis": {"type": "string"},
                 "explanation": {"type": "string"},
             },
-        },
+        ),
     )
 
     @property
@@ -431,20 +437,10 @@ class AssessLifeEventTaxOnboardingTool(Tool):
             "required": ["life_event"],
             "additionalProperties": False,
         },
-        output_schema={
-            "type": "object",
-            "required": [
-                "ok",
-                "life_event",
-                "tpc_s135_tin_mandatory",
-                "recommended_tax_head",
-                "estimated_annual_tax_ugx",
-                "nira_preflight",
-                "onboarding_steps",
-                "statutory_basis",
-                "explanation",
-            ],
-            "properties": {
+        output_schema=_success_or_error(
+            ["ok", "life_event", "tpc_s135_tin_mandatory", "recommended_tax_head", "estimated_annual_tax_ugx",
+             "nira_preflight", "onboarding_steps", "statutory_basis", "explanation"],
+            {
                 "ok": {"type": "boolean"},
                 "life_event": {"type": "string"},
                 "tpc_s135_tin_mandatory": {"type": "boolean"},
@@ -455,7 +451,7 @@ class AssessLifeEventTaxOnboardingTool(Tool):
                 "statutory_basis": {"type": "string"},
                 "explanation": {"type": "string"},
             },
-        },
+        ),
     )
 
     @property

@@ -103,6 +103,16 @@ _CHANGE_CUE_RE = re.compile(
     r"\b(?:is\s+now|now\s+(?:is|stands\s+at)|increased\s+to|raised\s+to|revised\s+to|changed\s+to|"
     r"reduced\s+to|lowered\s+to|amended\s+to|from\s+\S+\s+to|new\s+rate\s+(?:is|of))\W*$"
 )
+#: Words that make the number after them a past figure, not the passage's claim ("previously it was 18%").
+_HISTORY_CUE_RE = re.compile(
+    r"(?:\b(?:previously|formerly|used\s+to\s+be|was\s+(?:previously|formerly|once)|old\s+rate\s+(?:was|of))"
+    r"\W*(?:\w+\W+){0,2}|\bfrom\W*)$"
+)
+#: Where one statement ends and another begins: a change cue after one names a different figure.
+_CLAUSE_BREAK_RE = re.compile(r";|(?<!\d)\.(?!\d)|\n|,\s*(?:but|while|whereas)\b|\b(?:while|whereas)\b")
+#: "<word> rate", "<word> levy", …: a figure's name; one not built from the fact's words is another figure.
+_SUBJECT_RE = re.compile(r"\b([a-z]+)\s+(?:rate|levy|duty|threshold|fee|allowance)\b")
+_DETERMINERS = frozenset({"the", "a", "an", "this", "that", "its", "new", "current", "same", "which", "is", "was"})
 _SUFFIX = {"percent": "%", "UGX": " UGX", "USD": " USD"}
 
 
@@ -122,9 +132,33 @@ def _num(value: float) -> str:
     return str(int(value)) if float(value).is_integer() else f"{value:.6g}"
 
 
+def _change_names_the_fact(low: str, start: int, terms: list[str], name_words: set[str]) -> bool:
+    """Whether a change cue right before *start* ("is now 20%") is about this fact.
+
+    The fact's words must come before the cue in the same statement, with no other
+    figure named in between: in "the standard rate is 18%; the export rate increased
+    to 5%" the increase is the export rate's.
+    """
+    if not _CHANGE_CUE_RE.search(low[max(0, start - 30):start]):
+        return False
+    positions = [low.rfind(term, 0, start) for term in terms]
+    if min(positions) < 0:
+        return False
+    gap = low[max(positions):start]
+    if _CLAUSE_BREAK_RE.search(gap):
+        return False
+    return not any(word not in name_words and word not in _DETERMINERS for word in _SUBJECT_RE.findall(gap))
+
+
 def _states_the_figure(matches: list, numbers: dict[str, set[float]], terms: list[str], low: str) -> bool:
-    """Whether the passage states one of the kernel's numbers next to the figure's name."""
+    """Whether the passage states one of the kernel's numbers next to the figure's name as current.
+
+    A past mention ("previously it was 18%", "from 18% to 20%") does not count: it
+    must not hide the figure the passage now gives.
+    """
     for kind, match in matches:
+        if _HISTORY_CUE_RE.search(low[max(0, match.start() - 40):match.start()]):
+            continue
         window = low[max(0, match.start() - _WINDOW):match.end() + _WINDOW]
         if not all(term in window for term in terms):
             continue
@@ -151,6 +185,7 @@ def find_conflicts(facts: list[dict[str, Any]], passages: list[dict[str, Any]]) 
     found: list[Conflict] = []
     for fact in facts:
         terms = _terms(str(fact.get("display_name") or ""))
+        name_words = set(re.findall(r"[a-z]+", str(fact.get("display_name") or "").lower()))
         numbers = _kernel_numbers(fact.get("value"), str(fact.get("unit") or ""))
         if not terms or not numbers:
             continue
@@ -165,7 +200,7 @@ def find_conflicts(facts: list[dict[str, Any]], passages: list[dict[str, Any]]) 
             matches = [(kind, m) for kind in numbers for m in _PATTERNS[kind].finditer(text)]
             states_it = _states_the_figure(matches, numbers, terms, low)
             for kind, match in sorted(matches, key=lambda km: km[1].start()):
-                if states_it and not _CHANGE_CUE_RE.search(low[max(0, match.start() - 30):match.start()]):
+                if states_it and not _change_names_the_fact(low, match.start(), terms, name_words):
                     # It states the kernel's figure for this name; a different number nearby
                     # (the 0% export rate beside the 18% standard rate) is about something
                     # else, unless the passage says the figure changed to it ("is now 20%").
@@ -260,9 +295,10 @@ def _check(graph_hit: dict[str, Any], hits: list[dict[str, Any]], *,
             # the graph hit, so ordering again after FAQ blending records only new ones.
             done = graph_hit.setdefault("_kernel_conflicts_recorded", [])
             fresh = [c for c in reportable if _signature(c) not in done]
-            if fresh and record:
-                record_conflicts(fresh, kernel_version=str(pin.get("kernel_version") or ""))
-                done.extend(_signature(c) for c in fresh)
+            for conflict in fresh if record else ():
+                # Marked only once written: a failed write is tried again on the next pass.
+                if record_conflicts([conflict], kernel_version=str(pin.get("kernel_version") or "")) == 1:
+                    done.append(_signature(conflict))
         return conflicts, by_hit
     except Exception:
         logger.warning("kernel: precedence check skipped", exc_info=True)
@@ -310,7 +346,7 @@ def record_conflicts(conflicts: list[Conflict], *, kernel_version: str) -> int:
         try:
             from ..database import create_or_increment_discrepancy
 
-            create_or_increment_discrepancy(
+            outcome = create_or_increment_discrepancy(
                 bot_statement=f"{conflict.evidence_source}: {conflict.excerpt}"[:900],
                 user_correction=(
                     f"Kernel {kernel_version}: {conflict.display_name} = {conflict.kernel_value}"
@@ -319,6 +355,10 @@ def record_conflicts(conflicts: list[Conflict], *, kernel_version: str) -> int:
                 discrepancy_type="evidence_conflict",
                 cited_sources=[conflict.evidence_source] if conflict.evidence_source else [],
             )
+            if isinstance(outcome, dict) and outcome.get("status") == "failed":
+                # The Postgres store reports a failed write instead of raising.
+                logger.warning("kernel: the review queue refused an evidence conflict for %s", conflict.key)
+                continue
             recorded += 1
         except Exception:
             logger.warning("kernel: could not record an evidence conflict for %s", conflict.key, exc_info=True)

@@ -25,6 +25,23 @@ from typing import Any
 
 import httpx
 
+
+def concept_present(concept: str, reply: str) -> bool:
+    """Whether *reply* states *concept*, in any of its ``|`` forms ("5 days|120 hours").
+
+    Whitespace is normalised ("ennaku  5" is "ennaku 5"). Words and numbers must be
+    whole: "5 days" is not in "15 days", and "2,000" is not in "USD 2,000,000".
+    """
+    text = " ".join(reply.lower().split())
+    for form in concept.split("|"):
+        words = form.lower().split()
+        if not words:
+            continue
+        pattern = r"\s+".join(re.escape(w) for w in words)
+        if re.search(rf"(?<!\w)(?<!\d[.,]){pattern}(?!\w)(?![.,]\d)", text):
+            return True
+    return False
+
 GATEWAY_URL = os.getenv(
     "LIVE_GATEWAY_URL",
     "https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/chat",
@@ -308,7 +325,7 @@ EDGE_CASES = [
         "domain": "EFRIS Compliance",
         "statute": "Tax Procedures Code Regulations (EFRIS)",
         "query": "If an EFRIS fiscal device loses internet connectivity, within how many hours must offline invoices be synchronized to URA?",
-        "required_concepts": ["5 days|120 hours|five days|ennaku 5|ennaku ttaano|siku 5|siku tano", "offline"],
+        "required_concepts": ["5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano", "offline"],
         "forbidden_hallucinations": ["30 days offline permitted"],
     },
     {
@@ -658,7 +675,7 @@ EDGE_CASES = [
         "domain": "EFRIS (Luganda)",
         "statute": "TPCA Regulations",
         "query": "Bwe mba nga sirina yintaneti mu dduuka lyange, nnina essaawa mmeka okusindika invoice za EFRIS eri URA?",
-        "required_concepts": ["5 days|120 hours|five days|ennaku 5|ennaku ttaano|siku 5|siku tano", "efris", "invoice"],
+        "required_concepts": ["5 days|five days|5-day|five-day|120 hours|120-hour|ennaku 5|ennaku ttaano|siku 5|siku tano", "efris", "invoice"],
         "forbidden_hallucinations": ["omwaka mulamba"],
     },
     {
@@ -786,9 +803,7 @@ async def run_edge_case(client: httpx.AsyncClient, case: dict[str, Any]) -> Edge
         matched = []
         missing = []
         for c in case["required_concepts"]:
-            # "a|b" lists equivalent forms ("5 days|120 hours"); any one matches.
-            # Whole words: "15 days" must not satisfy "5 days".
-            if any(re.search(rf"(?<!\w){re.escape(alt.strip().lower())}(?!\w)", reply_lower) for alt in c.split("|")):
+            if concept_present(c, reply):
                 matched.append(c)
             else:
                 missing.append(c)
