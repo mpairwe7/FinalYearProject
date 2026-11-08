@@ -1307,7 +1307,7 @@ def _rate_table_footer(result: dict[str, object]) -> list[str]:
     lines = ["", f"Figures use the official URA {fy} rate table."]
     if status == "provisional":
         lines.append(PROVISIONAL_CAVEAT.format(fy=fy))
-    if _after_latest_table(str(fy)):
+    if not result.get("period_requested") and _after_latest_table(str(fy)):
         lines.append(ROLLOVER_CAVEAT.format(fy=fy))
     return lines
 
@@ -2163,7 +2163,7 @@ def _pct(rate: object) -> str:
     return f"{val:.1f}%"
 
 
-def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]:
+def format_rate_reply(plan: RatePlan, table: RateTable, *, requested_fiscal_year: str = "") -> tuple[str, list[str]]:
     """Render a rate answer from a resolved rate table; returns (reply, next_actions).
 
     Takes the :class:`~app.tax.tables.RateTable` rather than a bare dict so
@@ -2174,7 +2174,8 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
     footer = f"\n\nThat comes from the official URA {fy} rate table."
     if not table.confirmed:
         footer += "\n\n" + PROVISIONAL_CAVEAT.format(fy=fy)
-    if _after_latest_table(fy):
+    if requested_fiscal_year != fy and _after_latest_table(fy):
+        # Not when the question named this year: a historical answer is not a stale one.
         footer += "\n\n" + ROLLOVER_CAVEAT.format(fy=fy)
     if plan.tax_type in table.unverified:
         footer += "\n\n" + UNVERIFIED_CAVEAT
@@ -2529,7 +2530,7 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "value ({fy}).\n\n- Statutory Basis: East African Community Customs Management Act"
         ),
         "commercial_import_withholding_tax": (
-            "**The commercial import withholding tax (WHT) is {pct} (6%) of the customs CIF value** ({fy}) under Section 119 "
+            "**The commercial import withholding tax (WHT) is {pct} of the customs CIF value** ({fy}) under Section 119 "
             "of the Income Tax Act. It is due on commercial imports unless the importer holds a valid WHT exemption certificate."
         ),
         "excise_duty_telecom_data": (
@@ -2571,7 +2572,8 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
         elif plan.tax_type == "passenger_baggage_allowance":
             rate = rates.get("passenger_baggage_allowance_usd")
         elif plan.tax_type == "commercial_import_withholding_tax":
-            rate = rates.get("customs_import_wht", 0.06)
+            # No literal fallback: a year without the entry has no answer, not an invented 6%.
+            rate = rates.get("customs_import_wht")
         elif plan.tax_type in (
             "excise_duty_fuel_summary",
             "voluntary_disclosure_programme",

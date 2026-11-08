@@ -411,7 +411,6 @@ def test_a_failed_sync_closes_the_driver(monkeypatch: pytest.MonkeyPatch, fake) 
 
 def test_readiness_reports_the_store_actually_serving() -> None:
     import app.graph as graph
-
     from app.kernel.status import readiness_capabilities
 
     graph.reset_graph()
@@ -559,3 +558,86 @@ def test_the_mda_resolver_uses_the_tables_rate(monkeypatch: pytest.MonkeyPatch) 
     tool = mda_interdependence.ResolveMdaNtrPaymentTool()
     result = tool.execute(service_type="mlhud_land_transfer", transaction_value_ugx=100_000_000)
     assert result["payable_ugx"] == 2_000_000.0
+
+
+# --------------------------------------------------------------------------- second review batch
+
+
+def test_the_semantic_layer_gate_sees_overrides_and_rollouts(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.flags import flags
+    from app.semantic_layer import config
+
+    for name in ("FLAG_SEMANTIC_LAYER", "FLAG_SEMANTIC_LAYER_COHORTS", "FLAG_SEMANTIC_LAYER_PERCENT",
+                 "FLAG_SEMANTIC_LAYER_ALLOWLIST", "VAULT_ADDR"):
+        monkeypatch.delenv(name, raising=False)
+    assert config.production_errors() == []
+    monkeypatch.setenv("FLAG_SEMANTIC_LAYER_COHORTS", "ura_staff")
+    assert any("G507" in e for e in config.production_errors()), "a cohort rollout is on"
+    monkeypatch.delenv("FLAG_SEMANTIC_LAYER_COHORTS")
+    flags.set("semantic_layer", True)
+    try:
+        assert any("G507" in e for e in config.production_errors()), "an admin override is on"
+    finally:
+        flags.clear("semantic_layer")
+
+
+def test_the_tools_refuse_an_uncleared_layer_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.flags import flags
+    from app.tools import ToolRegistry
+
+    for name in ("VAULT_ADDR", "SEMANTIC_LAYER_VAULT_PATH", "SEMANTIC_LAYER_DSA_REF", "SEMANTIC_LAYER_DPIA_REF"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("SEMANTIC_LAYER_DSN", "sqlite:///dev.db")
+    flags.set("semantic_layer", True)  # turned on after start-up, past the start-up gate
+    try:
+        result = ToolRegistry.get("semantic_metric_catalogue").execute()
+    finally:
+        flags.clear("semantic_layer")
+    assert result["ok"] is False
+    assert "G507" in result["hint"]
+
+
+def test_a_question_naming_a_year_is_answered_from_that_years_table() -> None:
+    from app import calculator_router as cr
+    from app.tax import tables
+
+    reply, _ = cr.format_rate_reply(cr.RatePlan(tax_type="vat_registration_threshold_annual"),
+                                    tables.get_table("FY2025-26"), requested_fiscal_year="FY2025-26")
+    assert "150,000,000" in reply
+    service = (ROOT / "App/backend/app/service.py").read_text(encoding="utf-8")
+    assert "get_table(requested_fy) if requested_fy in list_fiscal_years()" in service
+
+
+def test_a_named_year_gets_no_rollover_caveat(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import calculator_router as cr
+    from app.tax import tables
+
+    monkeypatch.setattr(tables, "kampala_today", lambda now=None: _dt.date(2027, 7, 2))
+    plan = cr.RatePlan(tax_type="vat_standard")
+    asked, _ = cr.format_rate_reply(plan, tables.get_table("FY2026-27"), requested_fiscal_year="FY2026-27")
+    today, _ = cr.format_rate_reply(plan, tables.get_table())
+    assert "No rate table has been published" not in asked
+    assert "No rate table has been published" in today
+    footer = cr._rate_table_footer({"fiscal_year": "FY2026-27", "period_requested": True})
+    assert not any("No rate table has been published" in line for line in footer)
+
+
+def test_no_literal_rate_stands_in_for_a_missing_entry() -> None:
+    from app import calculator_router as cr
+    from app.tax import tables
+
+    reply, _ = cr.format_rate_reply(cr.RatePlan(tax_type="commercial_import_withholding_tax"), tables.get_table("FY2025-26"))
+    assert "6%" not in reply
+
+
+@pytest.mark.parametrize(("tool_name", "args"), [
+    ("ResolveMdaNtrPaymentTool", {"service_type": "mlhud_land_transfer", "transaction_value_ugx": 100_000_000}),
+])
+def test_a_missing_stamp_duty_rate_is_an_error_not_zero(monkeypatch: pytest.MonkeyPatch, tool_name: str, args: dict) -> None:
+    from app.tools import mda_interdependence
+
+    monkeypatch.setattr(mda_interdependence, "get_table", lambda *a, **k: {})
+    result = getattr(mda_interdependence, tool_name)().execute(**args)
+    assert result["ok"] is False
+    assert "stamp duty" in result["error"]

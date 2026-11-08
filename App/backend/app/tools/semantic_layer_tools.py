@@ -31,6 +31,18 @@ _NOT_CONNECTED = {"ok": False, "error": "No analytical database is connected to 
 def _layer() -> Any:
     if not flags.is_enabled("semantic_layer"):
         return dict(_DISABLED)
+    import os
+
+    if os.getenv("APP_ENV", "development").lower() == "production":
+        # Checked at every use, not only at start-up: a rollout or an admin override can
+        # turn the layer on later, and it must still have Vault, a DSA, a DPIA and a metric.
+        from ..semantic_layer.config import production_errors
+
+        errors = production_errors(force=True)
+        if errors:
+            logger.warning("semantic layer refused in production: %s", errors[0])
+            return {"ok": False, "error": "The semantic layer is not cleared for production on this deployment.",
+                    "hint": errors[0]}
     from ..semantic_layer.adapter import get_layer
 
     layer = get_layer()

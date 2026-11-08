@@ -221,6 +221,9 @@ class CalculatorTool(Tool):
             return payload
         payload["ok"] = True
         payload["fiscal_year"] = table.fiscal_year
+        # Whether the caller chose the period: an explicitly requested year is answered
+        # as itself, without the "no newer table yet" caveat that applies to today.
+        payload["period_requested"] = bool(fiscal_year or as_of)
         basis = table.provenance(*result.rate_keys)
         payload["rate_basis"] = basis
         if not table.confirmed:

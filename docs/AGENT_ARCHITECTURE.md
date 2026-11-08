@@ -60,7 +60,7 @@ per-request in tests via `flags.set("tool_use", True)`.
       │      (262K native context, no YaRN, FP8)        │
       │  - force_agentic → generate_with_tools() loop   │
       │    • parse <tool_call> blocks                   │
-      │    • dispatch via ToolRegistry (79 tools)       │
+      │    • dispatch via ToolRegistry (79 dev / 56 prod)       │
       │    • append `tool` message, regenerate          │
       │    • bounded max_iterations=3                   │
       │  - otherwise → plain generate() (Phase 1-13)    │
@@ -124,7 +124,7 @@ in the supervisor-specialist graph.
 | `resolve_efris_and_account_recovery` | low | pure fn | **Pillar 6 (`ADR-0009`)**: Zero-cost EFRIS channel matcher (Web Portal, URA App, `*252#` USSD, Client App), FY2026-27 `UGX 2,000,000` (`5%`) consumer e-receipt VAT refund calculator (VAT Amendment Act 2026 s.7), and lost-SIM/email TIN OTP recovery pre-packager |
 | `escalate_to_human` | **medium** | writes to `tickets` | Route the conversation to a URA officer via the ticket queue |
 
-*(Plus specialized statutory calculators in `tools/statutory_2026.py` — `value_benefit_in_kind`, `determine_residency`, `convert_currency`, `calculate_stamp_duty`, `calculate_digital_services_tax`, `calculate_gaming_betting_tax`, `calculate_advance_vehicle_tax`, `calculate_presumptive_tax`, `check_startup_exemption`, `calculate_penalties_and_interest`, `calculate_rental_pooled`, `check_objection_validity`, `audit_tax_document`, `compare_tax_years` — and 6 DMZ connector namespaces in `App/docs/mcp-architecture.md`, bringing `ToolRegistry` to **79 tools across 19 namespaces**, including the five `kernel_*` tools and the two staff-only `semantic_layer` tools of ADR-0033.)*
+*(Plus specialized statutory calculators in `tools/statutory_2026.py` — `value_benefit_in_kind`, `determine_residency`, `convert_currency`, `calculate_stamp_duty`, `calculate_digital_services_tax`, `calculate_gaming_betting_tax`, `calculate_advance_vehicle_tax`, `calculate_presumptive_tax`, `check_startup_exemption`, `calculate_penalties_and_interest`, `calculate_rental_pooled`, `check_objection_validity`, `audit_tax_document`, `compare_tax_years` — and 6 DMZ connector namespaces in `App/docs/mcp-architecture.md`, bringing `ToolRegistry` to **79 tools across 19 namespaces** in development (56 in 13 namespaces in production, where the six simulator connector namespaces are not registered: `bwims`, `digital_tax_stamps`, `efris`, `payment_system`, `tin_registration`, `ursb`), including the five `kernel_*` tools and the two staff-only `semantic_layer` tools of ADR-0033.)*
 
 **Risk tiers** drive per-specialist tool scoping:
 

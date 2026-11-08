@@ -9283,7 +9283,17 @@ class ChatModel:
                     "ticket_id": "",
                 }
 
-            reply_text, next_actions = format_rate_reply(rate_plan, get_table())
+            # A question naming a fiscal year we hold is answered from that year's table,
+            # not today's: "the FY2025-26 VAT threshold" is UGX 150,000,000, not 300,000,000.
+            from .query import extract_retrieval_filters  # noqa: PLC0415
+
+            requested_fy = str(
+                extract_retrieval_filters(message).get("fiscal_year")
+                or extract_retrieval_filters(rewritten).get("fiscal_year")
+                or ""
+            )
+            table = get_table(requested_fy) if requested_fy in list_fiscal_years() else get_table()
+            reply_text, next_actions = format_rate_reply(rate_plan, table, requested_fiscal_year=requested_fy)
         except Exception:
             logger.exception("rate lookup fast path failed")
             return None

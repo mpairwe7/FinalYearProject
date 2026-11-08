@@ -448,7 +448,7 @@ App/backend/app/
 │   ├── state.py         #   AgentRoute enum, RouteDecision dataclass
 │   └── graphs/          #   LangGraph orchestration (scaffolded for Phase 15)
 │
-├── tools/               # LLM & deterministic tool-calling framework (79 tools across 19 namespaces)
+├── tools/               # LLM & deterministic tool-calling framework (79 tools across 19 namespaces in development; 56 in 13 in production)
 ├── kernel/              # Statutory Knowledge Kernel: schema, releases, snapshots, functions, rules, precedence, legal change, refinement (ADR-0033)
 ├── semantic_layer/      # Staff-only certified metrics: SELECT-only guard, caps, production gate (ADR-0033, off)
 │   ├── __init__.py      #   Tool base class + ToolRegistry (auto-registration)

@@ -30,7 +30,7 @@ App/
 │   │   ├── llm.py           # Qwen3-8B vLLM + local generation + tool-calling
 │   │   ├── flags.py         # Feature flag registry (91 flags, cohort rollout)
 │   │   ├── agents/          # Supervisor router + agent graph runtime
-│   │   ├── tools/           # 79 MCP tools across 19 namespaces (calculators, 10-MDA NTR/PRN, onboarding, B2G/UESW, relief, EFRIS, rates, calendar, RAG, education, empathy, escalate, connectors)
+│   │   ├── tools/           # 79 MCP tools across 19 namespaces in dev, 56/13 in prod (calculators, 10-MDA NTR/PRN, onboarding, B2G/UESW, relief, EFRIS, rates, calendar, RAG, education, empathy, escalate, connectors)
 │   │   ├── workflows/       # 21 YAML-driven guided journeys (TIN, filing, PRN, Cross-MDA NTR, New-Taxpayer Relief, TCC, objections, customs) + Journey Copilot
 │   │   ├── scenario_planner.py # Deterministic multi-tool planner & Verified Statutory Facts injection
 │   │   ├── calculator_router.py # Single-calculator fast path & multi-turn figure carryover
