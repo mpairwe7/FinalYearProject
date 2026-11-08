@@ -33,6 +33,7 @@ DEADLINE = "What is the PAYE deadline?"
         "PAYE is paid by the 15th of the following month.",
         "Remit the tax within 30 days of the deduction.",
         "File on or before 30 June each year.",
+        "Remit it by the 15th day of the month following the deduction.",
     ],
 )
 def test_an_explicit_date_is_timing_evidence(answer: str) -> None:
@@ -62,6 +63,7 @@ def test_a_topic_without_a_timing_rule_is_still_refused(answer: str) -> None:
         ("What is PAYE?", ""),
         ("When filing income tax returns, how is the advance tax treated?", "procedure"),
         ("If I sell land, when is capital gains tax due?", "timing"),
+        ("When are capital gains taxed, and how are they taxed?", "timing"),
     ],
 )
 def test_question_intent(question: str, intent: str) -> None:
@@ -76,3 +78,9 @@ def test_when_is_not_answered_by_how() -> None:
     assert fb.faq_question_equivalence("When are capital gains taxed?", how) == 0.0
     promoted = fb.promote_equivalent_faq_hits("When are capital gains taxed?", [dict(how), dict(when)])
     assert promoted[0]["question"] == "When are capital gains taxed?"
+
+
+def test_a_phrase_alias_is_matched_before_splitting_and_keeps_its_subject() -> None:
+    """CodeRabbit on #705: "nambari maalum" never reached "personalized"."""
+    terms = fb.faq_terms("Bei ya nambari maalum ni kiasi gani?")
+    assert {"personalized", "number", "plate"} <= terms

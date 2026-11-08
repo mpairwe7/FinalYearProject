@@ -219,6 +219,14 @@ def _resolve_alias_chains(aliases: dict[str, str]) -> None:
 
 _resolve_alias_chains(_FAQ_TERM_ALIASES)
 
+#: Alias keys of more than one word ("nambari maalum") never match a single
+#: token, so they are matched as phrases before the text is split; the phrase's
+#: own words stay, so its plate subject is kept (CodeRabbit on #705).
+_FAQ_PHRASE_ALIAS_RE = re.compile(
+    r"\b(" + "|".join(re.escape(k) for k in sorted((k for k in _FAQ_TERM_ALIASES if " " in k), key=len, reverse=True))
+    + r")\b"
+) if any(" " in k for k in _FAQ_TERM_ALIASES) else None
+
 
 #: expansion phrase -> acronym, mined from the loaded corpus by
 #: :func:`mine_faq_acronyms` and installed by :func:`install_faq_acronyms`.
@@ -300,7 +308,10 @@ def faq_terms(text: str) -> set[str]:
     the narrower view used to decide what a question is about.
     """
     terms: set[str] = set()
-    for raw in re.findall(r"[a-z0-9]+", (text or "").lower()):
+    lowered = (text or "").lower()
+    if _FAQ_PHRASE_ALIAS_RE is not None:
+        lowered = _FAQ_PHRASE_ALIAS_RE.sub(lambda m: f"{_FAQ_TERM_ALIASES[m.group(1)]} {m.group(1)}", lowered)
+    for raw in re.findall(r"[a-z0-9]+", lowered):
         if raw in _FAQ_QUERY_STOP_WORDS:
             continue
         # A multi-word target ("nambari" -> "number plate") becomes the words the
@@ -453,6 +464,7 @@ _TIMING_EXPRESSION_RE = re.compile(
     rf"(?:{_DAY}\s+(?:day\s+)?(?:of\s+)?(?:{_MONTH}|the\s+(?:following|next|end\s+of\s+the)\s+(?:month|year|quarter))"
     rf"|{_MONTH}\s+\d{{1,2}}|end\s+of\s+(?:the\s+)?(?:month|year|quarter|financial\s+year)|last\s+(?:working\s+)?day)\b"
     rf"|\b{_DAY}\s+(?:day\s+)?of\s+(?:the\s+)?(?:following|next)\s+(?:month|year|quarter)\b"
+    rf"|\b{_DAY}\s+(?:day\s+)?of\s+the\s+(?:month|year|quarter)\s+(?:following|after)\b"
     r"|\bwithin\s+\d+\s+(?:working\s+)?(?:days|weeks|months)\b",
     re.IGNORECASE,
 )
@@ -473,7 +485,14 @@ _QUESTION_INTENTS: tuple[tuple[str, re.Pattern[str]], ...] = (
 
 #: A leading subordinate clause is context, not the question: in "When filing
 #: returns, how is advance tax treated?" the question is "how" (CodeRabbit on #705).
-_LEADING_CLAUSE_RE = re.compile(r"^\s*(?:when|while|if|before|after|once|whenever)\b[^,?]{0,120},\s*", re.IGNORECASE)
+#: "When are capital gains taxed, and how ...?" is a main question: an inverted
+#: auxiliary after the opener marks it, and it is not stripped (CodeRabbit on #705).
+_LEADING_CLAUSE_RE = re.compile(
+    r"^\s*(?:when|while|if|before|after|once|whenever)\b"
+    r"(?!\s+(?:are|is|am|do|does|did|can|could|will|would|should|must|has|have|had|was|were|shall|may|might)\b)"
+    r"[^,?]{0,120},\s*",
+    re.IGNORECASE,
+)
 
 
 def question_intent(text: str) -> str:

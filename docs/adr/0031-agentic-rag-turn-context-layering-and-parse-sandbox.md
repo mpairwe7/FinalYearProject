@@ -137,22 +137,25 @@ defects in what it decides. Five were fixed with tests, each of which fails when
 - **Timing evidence.** "By the 15th of the following month" is a timing rule, but no
   timing-evidence word was in it. A deadline-shaped date or period now counts: "by", "before",
   "on or before" or "not later than" plus a date, "within N days", or "the 15th of the following
-  month". A bare "each year" or month name does not, so a definition is not taken for a deadline
+  month" or "of the month following". A bare "each year" or month name does not, so a definition is not taken for a deadline
   (the re-review caught the first, looser version). "May" is not a month here, because it is
   usually the modal verb.
 - **Question intent.** "When are capital gains taxed?" and "How are capital gains taxed?" had the
   same terms and were both promoted. Questions whose main interrogatives differ (when, how, how
   much, who, where, why) are no longer equivalent. A leading subordinate clause ("When filing
-  returns, how is…") is context, not the question.
+  returns, how is…") is context, not the question. An opener followed by an inverted auxiliary
+  ("When are…, and how…?") is the question.
 - **Multi-word aliases.** "nambari" named "number plate", and that phrase stayed one term while
-  the English text gave two. Alias targets now split into words.
+  the English text gave two. Alias targets now split into words, and multi-word keys
+  ("nambari maalum") are matched as phrases before the text is split.
 - **Self-reflection.** A revision replaced the English-checked draft without the check. It now
   gets the check before the guards read it.
 - **Async dispatch.** `GraphRuntime.arun` ran synchronous nodes on the caller's event loop. They
   now run in a worker thread, which copies the context; no node sets a ContextVar.
 
 The layering scanner also reads real `importlib.import_module` and `__import__` calls (not a
-method of the same name), including the `name=`, `package=` and `level=` arguments, and catches
+method of the same name), including the `name=`, `package=` (with `__package__`), `level=` and
+`fromlist=` arguments. It fails loudly on a relative target it cannot resolve, and it catches
 `from . import agents`.
 
 One finding was answered with evidence: acronym folding when no local FAQ corpus exists. The
