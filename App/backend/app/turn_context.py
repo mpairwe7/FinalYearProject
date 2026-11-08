@@ -32,9 +32,26 @@ ACTIVE_USER_STATED_IDS: contextvars.ContextVar[tuple[str, ...]] = contextvars.Co
 #: The case facts the planner bound for this turn, if any.
 ACTIVE_CASE_FACTS: contextvars.ContextVar[Any] = contextvars.ContextVar("_active_case_facts", default=None)
 
+#: This turn's live check, shared with the threads the streamed turn runs in.
+TURN_LIVE_CHECK: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "_turn_live_check", default=None
+)
+
+
+#: What produced this turn's words, for the audit row. A deployment can answer from
+#: a local model, a reasoner, Gemini or Workers AI, or fall back to a raw passage,
+#: and ``result["model"]`` names the configured model whichever of those ran, so the
+#: ledger could not say who wrote an answer or whether it left the country (DPPA
+#: 2019 s.19). The dict is shared by reference with the turn's threads.
+TURN_GENERATION: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "_turn_generation", default=None
+)
+
 __all__ = [
     "ACTIVE_CASE_FACTS",
     "ACTIVE_CONVERSATION_STATE",
     "ACTIVE_TENANT_ID",
     "ACTIVE_USER_STATED_IDS",
+    "TURN_GENERATION",
+    "TURN_LIVE_CHECK",
 ]

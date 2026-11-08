@@ -494,7 +494,13 @@ class GraphRuntime:
                 break
             t0 = time.perf_counter()
             try:
-                outcome = node(state)
+                # A synchronous node (retrieval, translation, a model call) runs in a
+                # worker thread so it cannot stall the caller's event loop; the thread
+                # copies the context, and no node sets a ContextVar (CodeRabbit on #705).
+                if inspect.iscoroutinefunction(node):
+                    outcome = node(state)
+                else:
+                    outcome = await asyncio.to_thread(node, state)
                 result = await outcome if inspect.isawaitable(outcome) else outcome
             except Exception as e:  # noqa: BLE001
                 self._node_raised(state, current, e, t0)

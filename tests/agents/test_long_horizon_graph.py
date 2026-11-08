@@ -359,3 +359,34 @@ def test_async_runtime_interruption_and_aresume():
         assert "REC-7766" in resumed.reply
 
     asyncio.run(_run())
+
+
+def test_a_synchronous_node_does_not_stall_the_event_loop():
+    """CodeRabbit on #705: arun ran synchronous nodes on the caller's loop.
+
+    A handshake, not a tick count: the node waits for a coroutine that can only
+    answer if the loop is free while the node runs.
+    """
+    import asyncio
+    import threading
+
+    node_started, loop_answered = threading.Event(), threading.Event()
+
+    def node(state):
+        node_started.set()
+        state.reply = "loop free" if loop_answered.wait(5) else "loop blocked"
+        return NodeResult(next_node=END)
+
+    async def scenario() -> str:
+        async def answer() -> None:
+            while not node_started.is_set():
+                await asyncio.sleep(0.005)
+            loop_answered.set()
+
+        answering = asyncio.create_task(answer())
+        state = AgentGraphState(query="Is VAT charged on exports?")
+        await GraphRuntime(nodes={"respond": node}, entry="respond").arun(state)
+        await asyncio.wait_for(answering, 5)
+        return state.reply
+
+    assert asyncio.run(scenario()) == "loop free"

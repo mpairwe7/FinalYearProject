@@ -73,7 +73,8 @@ the next upward import (G485).
 7. **Layering as a fitness function (G485).** An AST test (`test_agentic_rag_context_sandbox_2026_11.py`)
    holds three rules. Only the transports and composition roots may import `service`. The security,
    retrieval, query, context and tool modules never do. And the graph may take no `service` private
-   beyond the eight it takes today, whose extraction is tracked as G486.
+   beyond the eight it takes today, whose extraction is tracked as G486. Closed on 2026-11-08: the
+   graph now imports nothing from `service` (amendment below).
 
 ### Review amendments (PR #703)
 
@@ -88,6 +89,80 @@ CodeRabbit's review produced 11 findings, and all were fixed:
 - Two test defects were fixed: a TIN assertion that checked a number not in the input, and a layering
   scan that skipped `memory/service.py` by name. The default-off flag test is isolated from
   environment and in-memory overrides.
+
+### Amendment 2026-11-08: the graph's eight helpers extracted (G486)
+
+The graph imported eight `service` privates. Their closure is 15 functions and constants, plus the
+FAQ state they read. Its only other `service` dependency was the case-facts variable, which item 6
+had already moved to the leaf. They now live in four modules, none of which imports `service` or
+the graph:
+
+| Module | Holds |
+| --- | --- |
+| `turn_context` | `TURN_GENERATION` and `TURN_LIVE_CHECK`, next to the other turn variables |
+| `turn_record` | `note_generation`, `note_passage_served`, `endpoint_model` |
+| `live_research_turn` | `live_research_for_turn`, `with_live_check_disclosure` |
+| `english_rendering` | `answer_in_english` |
+| `faq_binding` | the FAQ binding and promotion helpers, their constants, and `install_faq_acronyms` |
+
+The move had three hazards, and each is handled:
+
+- **Patch points.** Five tests stubbed `service._answer_in_english`, and `service` passed it to
+  `asyncio.to_thread` as a function object. A re-export would have left the graph's copy
+  unpatched. `service` and the graph now call `english_rendering.answer_in_english` through the
+  module at call time. `service` no longer has the old name, so a stale patch fails loudly
+  instead of silently missing.
+- **Rebound state.** `install_faq_acronyms` rebinds `_FAQ_ACRONYM_RE` with `global`. Left in
+  `service`, it would have rebound `service`'s copy while `faq_binding` read `None`, which the
+  acronym tests caught. The writer moved with the state, and `service` does not re-export the
+  rebound name.
+- **Same objects.** Every other old name is re-exported from `service` as the same object, so
+  the ContextVars, the shared acronym dictionary and the cached functions are one thing each.
+
+The layering test now holds the end state:
+
+- the graph does not import `service`;
+- the extracted modules are lower layers and never import it;
+- none of them imports the graph.
+
+`service.py` is 14,809 lines. The HF Space build patches five lines in it, and none is in
+the moved code.
+
+**Review of the move (PR #705).** CodeRabbit read the moved code as new and found pre-existing
+defects in what it decides. Five were fixed with tests, each of which fails when its fix is removed:
+
+- **Alias chains.** `magari` named `vehicles`, itself an alias, so a Luganda or Swahili query and
+  its English FAQ ended on different terms. Aliases now resolve to their final term in place, for
+  every consumer.
+- **Timing evidence.** "By the 15th of the following month" is a timing rule, but no
+  timing-evidence word was in it. A deadline-shaped date or period now counts: "by", "before",
+  "on or before" or "not later than" plus a date, "within N days", or "the 15th of the following
+  month" or "of the month following". A bare "each year" or month name does not, so a definition is not taken for a deadline
+  (the re-review caught the first, looser version). "May" is not a month here, because it is
+  usually the modal verb.
+- **Question intent.** "When are capital gains taxed?" and "How are capital gains taxed?" had the
+  same terms and were both promoted. Questions whose main interrogatives differ (when, how, how
+  much, who, where, why) are no longer equivalent. A leading subordinate clause ("When filing
+  returns, how is…") is context, not the question. An opener followed by an inverted auxiliary
+  ("When are…, and how…?") is the question.
+- **Multi-word aliases.** "nambari" named "number plate", and that phrase stayed one term while
+  the English text gave two. Alias targets now split into words, and multi-word keys
+  ("nambari maalum") are matched as phrases before the text is split.
+- **Self-reflection.** A revision replaced the English-checked draft without the check. It now
+  gets the check before the guards read it.
+- **Async dispatch.** `GraphRuntime.arun` ran synchronous nodes on the caller's event loop. They
+  now run in a worker thread, which copies the context; no node sets a ContextVar.
+
+The layering scanner also reads real `importlib.import_module` and `__import__` calls (not a
+method of the same name), including the `name=`, `package=` (with `__package__`), `level=` and
+`fromlist=` arguments. It fails loudly on a relative target it cannot resolve, and it catches
+`from . import agents`.
+
+One finding was answered with evidence: acronym folding when no local FAQ corpus exists. The
+deployed Space installs 135 acronym expansions from the corpus it ships, and a deployment without
+that corpus has no FAQ index for them to serve.
+
+The FAQ promotion, match-gate, acronym, grounding and retrieval-regression suites pass (113 tests).
 
 ## Consequences
 
@@ -105,7 +180,7 @@ CodeRabbit's review produced 11 findings, and all were fixed:
   with `DOCUMENT_PARSE_MAX_MEM_BYTES`. Production refuses only zero, negative and unreadable values.
 - Negative: the child still shares the parent's network and filesystem view. Network and filesystem
   isolation (gVisor, a microVM, or a dedicated pool) remains the follow-up named in `production_readiness`.
-- Neutral: `service.py` is unchanged in size. Extracting the graph's eight helpers is G486.
+- Neutral: `service.py` shrank from 15,433 to 14,809 lines when G486 extracted the graph's helpers.
 
 ## Confirmation
 
@@ -115,3 +190,7 @@ CodeRabbit's review produced 11 findings, and all were fixed:
 - `tests/agents/test_november_2026_gap_closures.py` (the existing scrub test) and the journey-copilot
   suites that set the turn context pass unchanged.
 - `App/backend/tests/test_flag_rollout.py::test_llm_query_rewrite_is_off_until_measured`.
+- G486: `test_the_graph_does_not_import_the_orchestrator` and
+  `test_the_extracted_modules_do_not_import_the_graph`. Re-adding a `service` import to the graph,
+  or to an extracted module, fails them. Leaving the acronym writer in `service` fails
+  `test_faq_acronyms.py`.

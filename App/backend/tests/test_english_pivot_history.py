@@ -177,27 +177,38 @@ class EnglishDecidedReplySafetyNetTest(unittest.TestCase):
     )
 
     def test_an_english_reply_is_left_alone(self) -> None:
-        from app import service
+        from app import english_rendering
 
-        with mock.patch.object(service, "translate_query_for_retrieval") as mt:
-            self.assertEqual(service._answer_in_english(EN_REPLY), EN_REPLY)
+        with mock.patch.object(english_rendering, "translate_query_for_retrieval") as mt:
+            self.assertEqual(english_rendering.answer_in_english(EN_REPLY), EN_REPLY)
         mt.assert_not_called()
 
     def test_a_luganda_reply_is_translated_paragraph_by_paragraph(self) -> None:
-        from app import service
+        from app import english_rendering
 
         with mock.patch.object(
-            service, "translate_query_for_retrieval", side_effect=["To register for a TIN, bring these documents to a URA office now.", "Your national ID and phone number on the URA portal."]
+            english_rendering, "translate_query_for_retrieval", side_effect=["To register for a TIN, bring these documents to a URA office now.", "Your national ID and phone number on the URA portal."]
         ) as mt:
-            out = service._answer_in_english(self.LG_ANSWER)
+            out = english_rendering.answer_in_english(self.LG_ANSWER)
         self.assertEqual(mt.call_count, 2)
         self.assertEqual(out, "To register for a TIN, bring these documents to a URA office now.\n\nYour national ID and phone number on the URA portal.")
 
     def test_a_failed_translation_serves_the_reply_as_it_is(self) -> None:
-        from app import service
+        from app import english_rendering
 
-        with mock.patch.object(service, "translate_query_for_retrieval", return_value=None):
-            self.assertEqual(service._answer_in_english(self.LG_ANSWER), self.LG_ANSWER)
+        with mock.patch.object(english_rendering, "translate_query_for_retrieval", return_value=None):
+            self.assertEqual(english_rendering.answer_in_english(self.LG_ANSWER), self.LG_ANSWER)
+
+    def test_a_later_failed_translation_serves_the_original_reply(self) -> None:
+        from app import english_rendering
+
+        with mock.patch.object(
+            english_rendering,
+            "translate_query_for_retrieval",
+            side_effect=["To register for a TIN, bring these documents to a URA office now.", None],
+        ) as mt:
+            self.assertEqual(english_rendering.answer_in_english(self.LG_ANSWER), self.LG_ANSWER)
+        self.assertEqual(mt.call_count, 2)
 
 
 class WebSocketResumeRestoresEnglishFormsTest(unittest.TestCase):

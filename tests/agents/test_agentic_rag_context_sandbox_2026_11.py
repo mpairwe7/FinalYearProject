@@ -191,9 +191,89 @@ def test_a_chat_backend_rewrite_is_validated(monkeypatch: pytest.MonkeyPatch) ->
 
 def _imports_of(path: Path) -> list[tuple[str, list[str]]]:
     """``(module, names)`` for every import in *path*, relative imports resolved within ``app``."""
-    package = ["app", *path.relative_to(APP).parts[:-1]]
+    return _imports_of_source(path.read_text(encoding="utf-8"), ["app", *path.relative_to(APP).parts[:-1]])
+
+
+def _resolve(target: str, package: list[str]) -> str:
+    level = len(target) - len(target.lstrip("."))
+    if not level:
+        return target
+    base = package[: len(package) - (level - 1)]
+    return ".".join([*base, *filter(None, target.lstrip(".").split("."))])
+
+
+def _argument_node(call: ast.Call, position: int, keyword: str) -> ast.expr | None:
+    return call.args[position] if len(call.args) > position else next(
+        (kw.value for kw in call.keywords if kw.arg == keyword), None
+    )
+
+
+def _argument(call: ast.Call, position: int, keyword: str) -> object:
+    node = _argument_node(call, position, keyword)
+    return node.value if isinstance(node, ast.Constant) else None
+
+
+def _dynamic_import(call: ast.Call, importlib_names: set[str], import_module_names: set[str], package: list[str]) -> str:
+    """The module a real ``importlib.import_module`` or ``__import__`` call names, else ``""``.
+
+    Only the actual bindings count, so ``registry.import_module(...)`` is not an
+    import; ``name=``, ``package=`` and ``level=`` are read (CodeRabbit on #705).
+    """
+    func = call.func
+    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id in importlib_names:
+        kind = func.attr
+    elif isinstance(func, ast.Name) and func.id in import_module_names:
+        kind = "import_module"
+    elif isinstance(func, ast.Name) and func.id == "__import__":
+        kind = "__import__"
+    else:
+        return ""
+    target = _argument(call, 0, "name")
+    if not isinstance(target, str):
+        return ""
+    if kind == "import_module":
+        if not target.startswith("."):
+            return target
+        anchor_node = _argument_node(call, 1, "package")
+        if anchor_node is None or (isinstance(anchor_node, ast.Name) and anchor_node.id == "__package__"):
+            # __package__ is the file's own package; with none given, read it the same
+            # way (Python would refuse the call, so treat it as the import it attempts).
+            return _resolve(target, package)
+        anchor = _argument(call, 1, "package")
+        if not isinstance(anchor, str):
+            # Cannot be resolved statically: fail loudly rather than pass (CodeRabbit on #705).
+            raise AssertionError(f"relative import_module({target!r}) needs a literal or __package__ package=")
+        return _resolve(target, anchor.split("."))
+    if kind == "__import__":
+        level = _argument(call, 4, "level")
+        return _resolve("." * level + target, package) if isinstance(level, int) and level > 0 else target
+    return ""
+
+
+def _imports_of_source(source: str, package: list[str]) -> list[tuple[str, list[str]]]:
+    """Import statements, and real ``importlib.import_module`` / ``__import__`` calls with a
+    literal target: a dynamic import of the orchestrator is still an import (CodeRabbit on #705)."""
+    tree = ast.parse(source)
+    importlib_names: set[str] = set()
+    import_module_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            importlib_names |= {alias.asname or alias.name for alias in node.names if alias.name == "importlib"}
+        elif isinstance(node, ast.ImportFrom) and node.module == "importlib":
+            import_module_names |= {alias.asname or alias.name for alias in node.names if alias.name == "import_module"}
     found: list[tuple[str, list[str]]] = []
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            module = _dynamic_import(node, importlib_names, import_module_names, package)
+            if module:
+                # __import__("app", fromlist=["service"]) imports app.service (CodeRabbit on #705).
+                names: list[str] = []
+                if isinstance(node.func, ast.Name) and node.func.id == "__import__":
+                    fromlist = _argument_node(node, 3, "fromlist")
+                    if isinstance(fromlist, (ast.List, ast.Tuple)):
+                        names = [e.value for e in fromlist.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+                found.append((module, names))
+            continue
         if isinstance(node, ast.ImportFrom):
             base = package[: len(package) - (node.level - 1)] if node.level else []
             module = ".".join([*base, *(node.module.split(".") if node.module else [])])
@@ -217,13 +297,11 @@ def _importers_of_service() -> dict[str, set[str]]:
 #: Transports and composition roots that may hold a ChatModel.
 _SERVICE_IMPORTERS = {
     "main.py", "chat_ws_v2.py", "voice_stream.py", "voice_stream_v2.py", "receptionist/brain.py",
-    "officer_chat.py", "chat_title.py", "agents/graphs/main_graph.py",
+    "officer_chat.py", "chat_title.py",
 }
-#: The graph's reach into the orchestrator's privates, frozen until extracted (G486).
-_GRAPH_SERVICE_PRIVATES = {
-    "_live_research_for_turn", "_filter_unbound_faq_hits", "_promote_equivalent_faq_hits", "_endpoint_model",
-    "_note_generation", "_answer_in_english", "_note_passage_served", "_with_live_check_disclosure",
-}
+#: The modules G486 extracted from the orchestrator. Each is shared by the
+#: orchestrator and the graph, so none may reach back up into either.
+_EXTRACTED = ("turn_record.py", "live_research_turn.py", "english_rendering.py", "faq_binding.py")
 
 
 def test_turn_context_is_a_leaf() -> None:
@@ -236,7 +314,7 @@ def test_the_security_layer_and_tools_do_not_reach_into_the_orchestrator() -> No
     importers = _importers_of_service()
 
     for lower in ("guardrails.py", "agents/evaluator.py", "tools/empathy.py", "query.py", "retriever.py",
-                  "context_manager.py", "corrective_rag.py", "turn_context.py"):
+                  "context_manager.py", "corrective_rag.py", "turn_context.py", *_EXTRACTED):
         assert lower not in importers, lower
 
 
@@ -244,10 +322,55 @@ def test_no_new_module_imports_the_orchestrator() -> None:
     assert set(_importers_of_service()) <= _SERVICE_IMPORTERS
 
 
-def test_the_graph_takes_no_new_orchestrator_privates() -> None:
-    names = _importers_of_service().get("agents/graphs/main_graph.py", set())
+def test_the_graph_does_not_import_the_orchestrator() -> None:
+    """G486: the graph took eight service privates; they now live in leaf-ward modules."""
+    assert "agents/graphs/main_graph.py" not in _importers_of_service()
 
-    assert names <= _GRAPH_SERVICE_PRIVATES
+
+def test_the_extracted_modules_do_not_import_the_graph() -> None:
+    for name in _EXTRACTED:
+        assert not _reaches_the_graph(_imports_of(APP / name)), name
+
+
+def _reaches_the_graph(imports: list[tuple[str, list[str]]]) -> list[str]:
+    """``from . import agents`` names the package, not a module under it (CodeRabbit on #705)."""
+    return [
+        module for module, names in imports
+        if module.startswith("app.agents") or (module == "app" and "agents" in names)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("source", "package", "expected"),
+    [
+        ('import importlib\nimportlib.import_module("app.service")\n', ["app", "agents", "graphs"], ("app.service", [])),
+        ('from importlib import import_module\nimport_module("...service")\n', ["app", "agents", "graphs"], ("app.service", [])),
+        ('__import__("app.service")\n', ["app"], ("app.service", [])),
+        ('import importlib\nimportlib.import_module(name="app.service")\n', ["app"], ("app.service", [])),
+        ('from importlib import import_module as load\nload(".service", package="app")\n', ["app", "agents"], ("app.service", [])),
+        ('__import__("service", globals(), locals(), [], 3)\n', ["app", "agents", "graphs"], ("app.service", [])),
+        ('__import__(name="service", level=1)\n', ["app"], ("app.service", [])),
+        ('__import__("app", globals(), locals(), ["service"])\n', ["app"], ("app", ["service"])),
+        ('__import__("app", fromlist=("service",))\n', ["app"], ("app", ["service"])),
+        ('import importlib\nimportlib.import_module("...service", __package__)\n', ["app", "agents", "graphs"], ("app.service", [])),
+        ("from . import service\n", ["app"], ("app", ["service"])),
+    ],
+)
+def test_the_scanner_sees_dynamic_and_package_imports(source: str, package: list[str], expected: tuple) -> None:
+    assert expected in _imports_of_source(source, package)
+
+
+def test_an_unresolvable_relative_import_fails_loudly() -> None:
+    with pytest.raises(AssertionError, match="literal or __package__"):
+        _imports_of_source('import importlib\nimportlib.import_module(".service", package=pkg)\n', ["app"])
+
+
+def test_an_application_method_named_import_module_is_not_an_import() -> None:
+    assert _imports_of_source('registry.import_module("app.agents")\n', ["app"]) == []
+
+
+def test_a_package_import_of_the_graph_is_caught() -> None:
+    assert _reaches_the_graph(_imports_of_source("from . import agents\n", ["app"])) == ["app"]
 
 
 def test_service_reexports_the_same_turn_context() -> None:

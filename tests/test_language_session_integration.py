@@ -180,17 +180,18 @@ def generation_pinned(client):
          mock.patch.object(service_module.ChatModel, "_maybe_handle_fast_paths", return_value=None), \
          mock.patch.object(service_module.flags, "is_enabled", side_effect=flags_on), \
          mock.patch.object(service_module, "translate_query_for_retrieval", return_value=EN_ANSWER), \
+         mock.patch("app.english_rendering.translate_query_for_retrieval", return_value=EN_ANSWER) as reply_translator, \
          mock.patch.object(model._output_guard, "should_abstain", return_value=False), \
          mock.patch.object(model._cache, "get", return_value=None), \
          mock.patch.object(model._cache, "put"):
-        yield model
+        yield model, reply_translator
 
 
 class TestEnglishCorrectionRunsBeforeTheGuards:
     """CodeRabbit on #543: the guards must verify the reply that is served."""
 
     def test_rest(self, client, generation_pinned):
-        model = generation_pinned
+        model, reply_translator = generation_pinned
         seen: list[str] = []
         real_leak = model._output_guard.check_prompt_leakage
 
@@ -208,9 +209,28 @@ class TestEnglishCorrectionRunsBeforeTheGuards:
         assert resp.status_code == 200
         assert seen and seen[0].startswith("To register for a TIN")
         assert "Okusobola" not in resp.json()["reply"]
+        # The extracted renderer did it (G486), with the reply text and its source language.
+        reply_translator.assert_any_call(LG_ANSWER, "lg")
+
+    def test_a_self_reflection_revision_is_checked_too(self, client, generation_pinned):
+        """CodeRabbit on #705: the revision replaced the corrected draft untranslated."""
+        model, reply_translator = generation_pinned
+        english_draft = "Keep books of account, invoices and receipts for five years."
+
+        with mock.patch.object(model, "_llm_available", True), \
+             mock.patch.object(service_module, "SELF_REFLECT_ENABLED", True), \
+             mock.patch.object(service_module, "SELF_REFLECT_THRESHOLD", 2.0), \
+             mock.patch.object(service_module, "_call_llm_with_deadline", side_effect=[english_draft, LG_ANSWER]):
+            resp = client.post(
+                "/v1/chat",
+                json={"message": "Which records should a small business keep for tax purposes?", "locale": "en", "locale_explicit": True},
+            )
+        assert resp.status_code == 200
+        assert "Okusobola" not in resp.json()["reply"]
+        reply_translator.assert_any_call(LG_ANSWER, "lg")
 
     def test_stream(self, client, generation_pinned):
-        model = generation_pinned
+        model, reply_translator = generation_pinned
         guarded: list[str] = []
 
         def guard(_model, **kwargs):
@@ -231,3 +251,4 @@ class TestEnglishCorrectionRunsBeforeTheGuards:
                 assert resp.status_code == 200
                 body = "".join(resp.iter_text())
         assert guarded and guarded[0].startswith("To register for a TIN"), body[:400]
+        reply_translator.assert_any_call(LG_ANSWER, "lg")

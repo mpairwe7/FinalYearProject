@@ -246,10 +246,10 @@ def _apply_live_research(
         return merge_web_hits(state.live_web_hits, hits), state.live_mode
     if not flags.is_enabled("live_web_research", subject=state.user_id or None):
         return hits, ""
-    from ...service import _live_research_for_turn
+    from ...live_research_turn import live_research_for_turn
 
     state.live_checked = True
-    merged, mode, outcome = _live_research_for_turn(
+    merged, mode, outcome = live_research_for_turn(
         query,
         hits=hits,
         retriever=retriever if getattr(retriever, "is_ready", False) else None,
@@ -265,12 +265,12 @@ def _apply_live_research(
 def _apply_faq_gates(query: str, hits: list) -> list:
     """Same unbound-FAQ filter + exact-FAQ promote REST uses after blend."""
     try:
-        from ...service import _filter_unbound_faq_hits, _promote_equivalent_faq_hits
+        from ...faq_binding import filter_unbound_faq_hits, promote_equivalent_faq_hits
     except Exception:
         logger.debug("graph: FAQ gates unavailable", exc_info=True)
         return hits
-    hits = _filter_unbound_faq_hits(query, hits)
-    return _promote_equivalent_faq_hits(query, hits)
+    hits = filter_unbound_faq_hits(query, hits)
+    return promote_equivalent_faq_hits(query, hits)
 
 
 def _fuse_graph_leg(query: str, hits: list) -> list:
@@ -823,21 +823,21 @@ def node_synthesize(state: AgentGraphState) -> NodeResult:
                     personalization_context=state.live_check_notice,
                 )
                 if llm_reply and llm_reply.strip():
-                    from ...service import _endpoint_model, _note_generation
+                    from ...turn_record import endpoint_model, note_generation
 
                     state.reply = llm_reply.strip()
                     # No endpoint was passed above, so this is the configured model.
-                    _note_generation(backend="local", model=_endpoint_model(None))
+                    note_generation(backend="local", model=endpoint_model(None))
                     if state.locale in ("", "en") or not _llm_module.can_generate_in_locale(state.locale):
-                        from ...service import _answer_in_english
+                        from ... import english_rendering
 
-                        state.reply = _answer_in_english(state.reply)
+                        state.reply = english_rendering.answer_in_english(state.reply)
             except Exception:
                 logger.warning("graph: LLM synthesis failed, using best hit", exc_info=True)
         if not state.reply:
-            from ...service import _note_passage_served
+            from ...turn_record import note_passage_served
 
-            _note_passage_served("generation_unavailable")
+            note_passage_served("generation_unavailable")
             best = state.hits[0]
             state.reply = best.get("answer") or best.get("text", "")
         if usable and state.specialist_handoffs:
@@ -912,12 +912,12 @@ def node_reflect(state: AgentGraphState) -> NodeResult:
         best = state.hits[0]
         verified_text = best.get("answer") or best.get("text", "")
         if verified_text:
-            from ...service import _note_passage_served
+            from ...turn_record import note_passage_served
 
             state.reply = verified_text.strip()
             state.reflections.append("grounded revision: aligned synthesis with verified statutory passage")
             state.faithfulness = 1.0
-            _note_passage_served("draft_unsupported")
+            note_passage_served("draft_unsupported")
 
     return NodeResult(next_node="respond")
 
@@ -962,9 +962,9 @@ def node_respond(state: AgentGraphState) -> NodeResult:
     if notice and state.outcome == GraphOutcome.ANSWERED and notice not in state.reply:
         state.reply = f"{state.reply.rstrip()}\n\n{notice}"
     if state.live_check_disclosure and state.outcome in (GraphOutcome.ANSWERED, GraphOutcome.ABSTAINED):
-        from ...service import _with_live_check_disclosure
+        from ...live_research_turn import with_live_check_disclosure
 
-        state.reply = _with_live_check_disclosure(state.reply, state.live_check_disclosure)
+        state.reply = with_live_check_disclosure(state.reply, state.live_check_disclosure)
     return NodeResult(next_node=END, outcome=state.outcome)
 
 
