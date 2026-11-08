@@ -497,7 +497,11 @@ def _refresh_discrepancy_type_check(conn: sqlite3.Connection) -> None:
                "user_correction, cited_sources_json, frequency_count, dedup_key, admin_note, verified_override_id, "
                "created_at, updated_at")
     try:
+        # One transaction: an interruption after the DROP would otherwise leave an
+        # empty queue and the copied rows stranded in the __new table.
         conn.executescript(f"""
+            BEGIN;
+            DROP TABLE IF EXISTS knowledge_discrepancies__new;
             CREATE TABLE knowledge_discrepancies__new (
                 id                   TEXT PRIMARY KEY,
                 conversation_id      TEXT DEFAULT '',
@@ -521,6 +525,7 @@ def _refresh_discrepancy_type_check(conn: sqlite3.Connection) -> None:
             ALTER TABLE knowledge_discrepancies__new RENAME TO knowledge_discrepancies;
             CREATE INDEX IF NOT EXISTS idx_discrepancies_status ON knowledge_discrepancies(status);
             CREATE INDEX IF NOT EXISTS idx_discrepancies_dedup ON knowledge_discrepancies(dedup_key);
+            COMMIT;
         """)  # noqa: S608 - the type list is this module's constant
         conn.commit()
     except Exception:

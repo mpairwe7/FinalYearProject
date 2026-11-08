@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import os
 import time
 from dataclasses import asdict, dataclass
@@ -549,7 +550,7 @@ EDGE_CASES: list[dict[str, Any]] = [
         "domain": "EFRIS (Luganda)",
         "statute": "TPCA Regulations",
         "query": "Bwe mba nga sirina yintaneti mu dduuka lyange, nnina essaawa mmeka okusindika invoice za EFRIS eri URA?",
-        "required_concepts": ["5", "efris"],
+        "required_concepts": ["5 days|120 hours|five days|ennaku 5|ennaku ttaano|siku 5|siku tano", "efris"],
         "forbidden_hallucinations": ["omwezi mulamba"],
     },
     {
@@ -1100,8 +1101,9 @@ async def run_edge_case(client: httpx.AsyncClient, case: dict[str, Any]) -> Edge
         matched = []
         missing = []
         for c in case["required_concepts"]:
-            c_low = c.lower()
-            if c_low in reply_lower:
+            # "a|b" lists equivalent forms ("5 days|120 hours"); any one matches.
+            # Whole words: "15 days" must not satisfy "5 days".
+            if any(re.search(rf"(?<!\w){re.escape(alt.strip().lower())}(?!\w)", reply_lower) for alt in c.split("|")):
                 matched.append(c)
             else:
                 missing.append(c)
@@ -1114,7 +1116,10 @@ async def run_edge_case(client: httpx.AsyncClient, case: dict[str, Any]) -> Edge
                 break
 
         concept_score = len(matched) / len(case["required_concepts"]) if case["required_concepts"] else 1.0
-        is_passed = (concept_score >= 0.50) and not hallucination
+        # A concept with a figure in it is the answer itself: it must be present, whatever
+        # the share of the other concepts ("efris" alone is not an EFRIS deadline).
+        figures_present = not any(any(ch.isdigit() for ch in c) for c in missing)
+        is_passed = (concept_score >= 0.50) and figures_present and not hallucination
 
         return EdgeCaseResult(
             case_id=cid,

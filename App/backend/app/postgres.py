@@ -113,8 +113,9 @@ def _refresh_discrepancy_type_check(cur: Any) -> None:
 
     name = "knowledge_discrepancies_discrepancy_type_check"
     cur.execute(
-        "SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid "
-        "WHERE t.relname = 'knowledge_discrepancies' AND c.conname = %s",
+        # to_regclass resolves the table as the ALTERs do (search path), not any schema's.
+        "SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c "
+        "WHERE c.conrelid = to_regclass('knowledge_discrepancies') AND c.conname = %s",
         (name,),
     )
     row = cur.fetchone()

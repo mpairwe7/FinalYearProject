@@ -45,6 +45,26 @@ _FROM_LIST_RE = re.compile(
 _RELATION_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)")
 
 
+def _cte_bodies_removed(body: str) -> str:
+    """*body* with each ``name AS ( ... )`` CTE body blanked, so only the main FROM lists remain."""
+    out, i = [], 0
+    for match in re.finditer(r"\bas\s*\(", body, re.I):
+        if match.start() < i:
+            continue
+        out.append(body[i:match.end() - 1])
+        depth, j = 0, match.end() - 1
+        while j < len(body):
+            depth += body[j] == "("
+            depth -= body[j] == ")"
+            j += 1
+            if depth == 0:
+                break
+        out.append(" ")
+        i = j
+    out.append(body[i:])
+    return "".join(out)
+
+
 def _from_list_relations(body: str) -> set[str]:
     """Every relation in a FROM list, not only the first: ``FROM a, b`` reads both."""
     found = set()
@@ -89,6 +109,10 @@ def check(sql: str, *, sources: frozenset[str] | set[str]) -> set[str]:
         raise SqlRejected(f"function not allowed: {', '.join(bad)}")
     if any(w.startswith("pg_") for w in words):
         raise SqlRejected("system catalogue access is not allowed")
+    if re.search(r"\b(?:from|join)\s*\(|,\s*\(", _cte_bodies_removed(body), re.I):
+        # A parenthesised item in a FROM list hides the relations after it from the
+        # check below; a certified template uses a CTE instead.
+        raise SqlRejected("parenthesised FROM or JOIN items are not allowed; use a WITH clause")
     ctes = {m.lower() for m in _CTE_RE.findall(body)}
     allowed = {s.lower() for s in sources} | ctes
     used = {m.lower() for m in _SOURCE_RE.findall(body)} | _from_list_relations(body)

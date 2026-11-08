@@ -135,10 +135,8 @@ def test_a_passage_stating_the_figure_beside_another_rate_is_not_a_conflict() ->
 
 
 def test_faq_promotion_cannot_put_a_contradicting_faq_first(monkeypatch: pytest.MonkeyPatch) -> None:
-    def must_not_record(*_a, **_k):
-        raise AssertionError("ordering again must not queue the conflict twice")
-
-    monkeypatch.setattr(precedence, "record_conflicts", must_not_record)
+    recorded: list = []
+    monkeypatch.setattr(precedence, "record_conflicts", lambda conflicts, **_: recorded.extend(conflicts) or len(conflicts))
     monkeypatch.setattr(precedence, "facts_from_claims", lambda _claims: [VAT])
     stale = {"text": "The VAT standard rate is 17% on taxable supplies.", "doc_type": "csv", "id": "stale"}
     graph = {"doc_type": "graph", "graph_claims": [{"subject": "VAT standard rate"}], "id": "graph"}
@@ -146,6 +144,9 @@ def test_faq_promotion_cannot_put_a_contradicting_faq_first(monkeypatch: pytest.
     ordered = precedence.reorder_after_promotion([stale, graph, other])
     assert [h["id"] for h in ordered] == ["graph", "other", "stale"]
     assert precedence.reorder_after_promotion([stale, other]) == [stale, other], "no graph hit, no change"
+    # Found after blending, so queued now, and only once however often the order is rebuilt.
+    precedence.reorder_after_promotion([stale, graph, other])
+    assert [c.evidence_value for c in recorded] == ["17%"]
 
 
 def _baggage_graph_hit() -> dict:
@@ -641,3 +642,123 @@ def test_a_missing_stamp_duty_rate_is_an_error_not_zero(monkeypatch: pytest.Monk
     result = getattr(mda_interdependence, tool_name)().execute(**args)
     assert result["ok"] is False
     assert "stamp duty" in result["error"]
+
+
+# --------------------------------------------------------------------------- round two
+
+
+def test_a_section_does_not_match_its_lettered_sibling() -> None:
+    from app.agents.graphs.main_graph import _bind_kernel_tool
+
+    bound = _bind_kernel_tool("kernel_explain", "What does section 135 of the Income Tax Act impose?", "")
+    assert bound is None or "135b" not in str(bound["provision"]).lower()
+
+
+@pytest.mark.parametrize(("question", "expected"), [
+    ("In FY2025-26 I failed to issue an EFRIS e-invoice with UGX 50,000 VAT",
+     {"rule": "efris_penal_tax", "amount": 50_000.0, "date": "2025-07-01"}),
+    ("In FY2027-28 I failed to issue an EFRIS e-invoice with UGX 50,000 VAT", None),
+    ("I failed to issue an EFRIS e-invoice on a sale of UGX 1,000,000", None),
+])
+def test_the_penalty_binder_respects_period_and_tax_due(question: str, expected) -> None:
+    from app.agents.graphs.main_graph import _bind_kernel_tool
+
+    assert _bind_kernel_tool("kernel_compute_penalty", question, "") == expected
+
+
+def test_an_interrupted_rebuild_is_recovered() -> None:
+    from app import database
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(OLD_DISCREPANCY_DDL + "; INSERT INTO knowledge_discrepancies (id, bot_statement, "  # noqa: S608
+                       "user_correction, created_at, updated_at) VALUES ('kept', 'a', 'b', 1, 1);"
+                       "CREATE TABLE knowledge_discrepancies__new (id TEXT);")
+    database._refresh_discrepancy_type_check(conn)
+    assert [r[0] for r in conn.execute("SELECT id FROM knowledge_discrepancies")] == ["kept"]
+    conn.execute("INSERT INTO knowledge_discrepancies (id, discrepancy_type, bot_statement, user_correction, "
+                 "created_at, updated_at) VALUES ('x', 'evidence_conflict', 'a', 'b', 1, 1)")
+
+
+def test_a_stated_change_is_a_conflict_beside_the_old_figure() -> None:
+    hit = {"text": "The VAT standard rate was 18% and is now 20%.", "doc_type": "pdf_chunk"}
+    assert [c.evidence_value for c in precedence.find_conflicts([VAT], [hit])] == ["20%"]
+
+
+def test_the_langgraph_faq_gate_orders_by_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import faq_binding
+    from app.agents.graphs import main_graph
+
+    stale = {"text": "The VAT standard rate is 17%.", "doc_type": "csv", "id": "stale"}
+    graph = {"doc_type": "graph", "graph_claims": [{"subject": "VAT standard rate"}], "id": "graph"}
+    monkeypatch.setattr(precedence, "record_conflicts", lambda conflicts, **_: len(conflicts))
+    monkeypatch.setattr(precedence, "facts_from_claims", lambda _claims: [VAT])
+    monkeypatch.setattr(faq_binding, "filter_unbound_faq_hits", lambda _q, hits: hits)
+    monkeypatch.setattr(faq_binding, "promote_equivalent_faq_hits", lambda _q, hits: [stale] + [h for h in hits if h is not stale])
+    assert [h["id"] for h in main_graph._apply_faq_gates("vat rate", [graph, stale])] == ["graph", "stale"]
+
+
+def test_the_postgres_lookup_is_scoped_to_the_altered_table() -> None:
+    from app import postgres
+
+    cur = _Cursor(None)
+    postgres._refresh_discrepancy_type_check(cur)
+    assert "to_regclass('knowledge_discrepancies')" in cur.sql[0]
+
+
+def test_quoted_identifiers_are_not_rewritten() -> None:
+    from app.semantic_layer.adapter import to_pyformat
+
+    assert to_pyformat('SELECT "col:x" AS group_size FROM t WHERE a = :p') == \
+        'SELECT "col:x" AS group_size FROM t WHERE a = %(p)s'
+
+
+def test_the_schedule_names_its_unverified_figures() -> None:
+    from app.tools import ToolRegistry
+
+    text = ToolRegistry.call("list_available_rates", {"fiscal_year": "FY2026-27"})["explanation"]
+    assert "All rates are verified" not in text
+    assert "not yet confirmed" in text
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT 1 AS group_size FROM certified.filing_compliance, (SELECT 1) x, secret.users",
+    "SELECT 1 AS group_size FROM (certified.filing_compliance JOIN other.t ON true), secret.users",
+])
+def test_a_parenthesised_from_item_is_refused(sql: str) -> None:
+    from app.semantic_layer import guard
+
+    with pytest.raises(guard.SqlRejected):
+        guard.check(sql, sources=frozenset({"certified.filing_compliance"}))
+
+
+def test_a_cte_is_still_accepted() -> None:
+    from app.semantic_layer import guard
+
+    sql = ("WITH recent AS (SELECT tax_head, ratio, returns_due FROM certified.filing_compliance WHERE period = :p) "
+           "SELECT tax_head, ratio, returns_due AS group_size FROM recent")
+    assert guard.check(sql, sources=frozenset({"certified.filing_compliance"})) == {"p"}
+
+
+def test_an_outer_trace_is_read_live_by_the_audit() -> None:
+    from app.audit import turns
+    from app.kernel import trace
+    from app.service import _scoped_conversation_state
+
+    class Probe:
+        @_scoped_conversation_state
+        def answer(self, message: str, conversation_id: str | None = None, session_id: str | None = None,
+                   user_id: str | None = None, tenant_id: str | None = None):
+            return {"reply": "r"}
+
+    token = trace.start()  # a streamed turn opens it for the whole turn
+    try:
+        result = Probe().answer("q", session_id="s-trace")
+        assert "_kernel_trace" not in result, "the wrapper did not open it, so it must not freeze a copy"
+        functions.fact("carbon_border_levy", AUG)  # an agentic call after retrieval
+        payload = turns.build_turn_payload(message="q", result=result, channel="sse")
+    finally:
+        trace.TURN_KERNEL_TRACE.reset(token)
+    assert payload["kernel_trace"]["misses"][0]["concept"] == "carbon_border_levy"
+    service = (ROOT / "App/backend/app/service.py").read_text(encoding="utf-8")
+    assert "_stream_kernel_trace.start()" in service

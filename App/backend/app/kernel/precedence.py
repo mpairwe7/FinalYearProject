@@ -98,6 +98,11 @@ def _kernel_numbers(value: Any, unit: str) -> dict[str, set[float]]:
 
 
 _PATTERNS = {"percent": _PERCENT_RE, "UGX": _UGX_RE, "USD": _USD_RE}
+#: Words that make the number after them the passage's current claim for the figure.
+_CHANGE_CUE_RE = re.compile(
+    r"\b(?:is\s+now|now\s+(?:is|stands\s+at)|increased\s+to|raised\s+to|revised\s+to|changed\s+to|"
+    r"reduced\s+to|lowered\s+to|amended\s+to|from\s+\S+\s+to|new\s+rate\s+(?:is|of))\W*$"
+)
 _SUFFIX = {"percent": "%", "UGX": " UGX", "USD": " USD"}
 
 
@@ -158,11 +163,13 @@ def find_conflicts(facts: list[dict[str, Any]], passages: list[dict[str, Any]]) 
             text = str(hit.get("text") or hit.get("answer") or "")
             low = text.lower()
             matches = [(kind, m) for kind in numbers for m in _PATTERNS[kind].finditer(text)]
-            if _states_the_figure(matches, numbers, terms, low):
-                # It states the kernel's figure for this name; a different number nearby
-                # (the 0% export rate beside the 18% standard rate) is about something else.
-                continue
+            states_it = _states_the_figure(matches, numbers, terms, low)
             for kind, match in sorted(matches, key=lambda km: km[1].start()):
+                if states_it and not _CHANGE_CUE_RE.search(low[max(0, match.start() - 30):match.start()]):
+                    # It states the kernel's figure for this name; a different number nearby
+                    # (the 0% export rate beside the 18% standard rate) is about something
+                    # else, unless the passage says the figure changed to it ("is now 20%").
+                    continue
                 window = low[max(0, match.start() - _WINDOW):match.end() + _WINDOW]
                 if not all(term in window for term in terms):
                     continue
@@ -249,8 +256,13 @@ def _check(graph_hit: dict[str, Any], hits: list[dict[str, Any]], *,
             logger.warning("kernel: %d passage(s) disagree with the kernel (%d superseded editions): %s",
                            len(conflicts), len(conflicts) - len(reportable),
                            ", ".join(sorted({c.key for c in conflicts})))
-            if reportable and record:
-                record_conflicts(reportable, kernel_version=str(pin.get("kernel_version") or ""))
+            # A conflict is queued once per turn: the signatures already recorded travel on
+            # the graph hit, so ordering again after FAQ blending records only new ones.
+            done = graph_hit.setdefault("_kernel_conflicts_recorded", [])
+            fresh = [c for c in reportable if _signature(c) not in done]
+            if fresh and record:
+                record_conflicts(fresh, kernel_version=str(pin.get("kernel_version") or ""))
+                done.extend(_signature(c) for c in fresh)
         return conflicts, by_hit
     except Exception:
         logger.warning("kernel: precedence check skipped", exc_info=True)
@@ -261,8 +273,8 @@ def apply_precedence(graph_hit: dict[str, Any], hits: list[dict[str, Any]], *,
                      record: bool = True) -> list[dict[str, Any]]:
     """*hits* with each passage that contradicts the kernel moved below the rest.
 
-    Order is otherwise kept. *record* is off when ordering again after later
-    re-ranking (FAQ promotion), so a conflict is queued once per turn.
+    Order is otherwise kept. A conflict is queued once per turn however often
+    this runs (FAQ promotion orders again); *record* off queues nothing.
     A moved passage is annotated ``kernel_precedence``
     (status, key, kernel and stated values, edition). Never raises: on any error
     *hits* comes back unchanged.
@@ -313,6 +325,10 @@ def record_conflicts(conflicts: list[Conflict], *, kernel_version: str) -> int:
     return recorded
 
 
+def _signature(conflict: Conflict) -> str:
+    return f"{conflict.key}|{conflict.evidence_source}|{conflict.evidence_value}"
+
+
 def reorder_after_promotion(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Order *hits* by precedence again once FAQ promotion has run (CodeRabbit, PR 706).
 
@@ -323,4 +339,6 @@ def reorder_after_promotion(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
     graph_hit = next((h for h in hits if str(h.get("doc_type") or "") == "graph"), None)
     if graph_hit is None:
         return hits
-    return apply_precedence(graph_hit, hits, record=False)
+    # Recording on: a FAQ blended in after the first check is queued now, and one
+    # already queued is not queued again (_kernel_conflicts_recorded).
+    return apply_precedence(graph_hit, hits)

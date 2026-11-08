@@ -372,11 +372,15 @@ class ListAvailableRatesTool(Tool):
         ]
         top_rates_str = "\n".join(f"- **{r['display_name']}**: {r['formatted']}" for r in rows[:8])
         is_confirmed = table.confirmed() if callable(table.confirmed) else bool(table.confirmed)
-        verification_statement = (
-            "All rates are verified under current statutory instruments."
-            if is_confirmed
-            else "These rates are provisional; verify them with URA before use."
-        )
+        unverified = [display_name(k) for k in sorted(table.unverified) if k in table.rates]
+        if not is_confirmed:
+            verification_statement = "These rates are provisional; verify them with URA before use."
+        elif unverified:
+            # Never a blanket "all verified": name the figures that are not yet confirmed.
+            verification_statement = ("The table is confirmed, but these figures are not yet confirmed against a "
+                                      "gazetted schedule: " + "; ".join(unverified) + ".")
+        else:
+            verification_statement = "Every figure in this table cites its statutory source."
         explanation = (
             f"Official URA statutory rate schedule for {table.fiscal_year} ({len(rows)} rates recorded):\n\n"
             f"{top_rates_str}\n\n"

@@ -28,7 +28,8 @@ class Executor(Protocol):
     def run(self, sql: str, params: dict[str, Any], *, max_rows: int, timeout_s: float) -> tuple[list[str], list[tuple]]: ...
 
 
-_LITERAL_RE = re.compile(r"'(?:[^']|'')*'")
+#: String literals and double-quoted identifiers: neither holds a parameter.
+_LITERAL_RE = re.compile(r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"")
 
 
 def to_pyformat(sql: str) -> str:

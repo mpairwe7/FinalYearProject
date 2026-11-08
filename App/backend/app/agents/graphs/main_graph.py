@@ -272,7 +272,10 @@ def _apply_faq_gates(query: str, hits: list) -> list:
         logger.debug("graph: FAQ gates unavailable", exc_info=True)
         return hits
     hits = filter_unbound_faq_hits(query, hits)
-    return promote_equivalent_faq_hits(query, hits)
+    # Promotion can put a FAQ contradicting the kernel first; order by precedence again.
+    from ...kernel.precedence import reorder_after_promotion
+
+    return reorder_after_promotion(promote_equivalent_faq_hits(query, hits))
 
 
 def _fuse_graph_leg(query: str, hits: list) -> list:
@@ -310,6 +313,26 @@ _PENALTY_RULE_CUES = (
 )
 
 
+_TAX_DUE_RE = re.compile(
+    r"\b(?:tax(?:\s+(?:due|payable|unpaid|of))?|vat|excise(?:\s+duty)?|duty|unpaid\s+tax)\b[^.?!]{0,40}"
+    r"(?:ugx|shs)|(?:ugx|shs)\s?[\d,.]+\s*(?:m(?:illion)?\s+)?(?:of\s+)?(?:tax|vat|excise|duty)\b",
+    re.IGNORECASE,
+)
+
+
+def _requested_period_start(text: str) -> str | bool | None:
+    """The start date of a fiscal year the question names; ``False`` if no table holds it."""
+    from ...query import extract_retrieval_filters
+    from ...tax.tables import get_table, list_fiscal_years
+
+    fiscal_year = str(extract_retrieval_filters(text).get("fiscal_year") or "")
+    if not fiscal_year:
+        return None
+    if fiscal_year not in list_fiscal_years():
+        return False
+    return get_table(fiscal_year).effective_from.isoformat()
+
+
 def _bind_kernel_tool(tool_name: str, query: str, original: str) -> dict[str, object] | None:
     """Arguments for a kernel tool from the question, or ``None`` when it does not state them.
 
@@ -336,7 +359,7 @@ def _bind_kernel_tool(tool_name: str, query: str, original: str) -> dict[str, ob
             cited = f"s.{match.group(1)}"
             store = functions.kernel_store()
             hits = [n.id for n in store.by_kind(NodeKind.PROVISION)
-                    if re.search(rf"{re.escape(cited)}(?![\d(])", str(n.props.get("citation") or n.label))]
+                    if re.search(rf"{re.escape(cited)}(?![\dA-Za-z(])", str(n.props.get("citation") or n.label))]
             if len(hits) == 1:
                 return {"provision": hits[0]}
         return None
@@ -345,7 +368,15 @@ def _bind_kernel_tool(tool_name: str, query: str, original: str) -> dict[str, ob
         amounts = extract_amounts(text)
         if len(rules) != 1 or len(amounts) != 1 or amounts[0][0] <= 0:
             continue
+        if not _TAX_DUE_RE.search(text):
+            # The tool takes the tax due; a sale or turnover amount is not it.
+            continue
         args: dict[str, object] = {"rule": rules[0], "amount": amounts[0][0]}
+        period = _requested_period_start(text)
+        if period is False:
+            continue  # a period with no table: decline rather than use today's rules
+        if period:
+            args["date"] = period
         if rules[0] in ("late_filing_penal_tax", "late_payment_interest"):
             months = _MONTHS_RE.search(text)
             if not months:

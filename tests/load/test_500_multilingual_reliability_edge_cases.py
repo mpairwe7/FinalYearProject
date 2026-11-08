@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import os
 import random
 import time
@@ -58,7 +59,7 @@ def generate_500_edge_cases() -> list[dict[str, Any]]:
         ("What is the difference between zero-rated and exempt supplies for input VAT?", "VAT Act s.24", ["zero-rated", "exempt", "input tax"], ["both get refund"]),
         ("When can a taxpayer claim a VAT bad debt refund on unpaid invoices?", "VAT Act s.31", ["2 years", "bad debt", "insolven"], ["claim after 1 week"]),
         ("What is the penalty under TPCA s.19B for failing to issue an EFRIS receipt?", "TPCA s.93(2)", ["200,000", "penalty", "double"], ["100,000 shillings"]),
-        ("Within how many hours must offline EFRIS transactions be synchronized?", "URA EFRIS Handbook", ["5 days", "offline"], ["30 days"]),
+        ("Within how many hours must offline EFRIS transactions be synchronized?", "URA EFRIS Handbook", ["5 days|120 hours|five days|ennaku 5|ennaku ttaano|siku 5|siku tano", "offline"], ["30 days"]),
         # Customs
         ("Can I import an 18-year-old car (2008 model) into Uganda?", "Traffic Act", ["prohibited", "15 years"], ["allowed with no ban"]),
         ("What is the environmental levy on imported used vehicles aged 8 to 15 years?", "EACCMA / Traffic Act", ["50%", "environmental levy"], ["0% levy"]),
@@ -133,7 +134,7 @@ def generate_500_edge_cases() -> list[dict[str, Any]]:
         ("Nnyinza ntya okuwakanya omusolo gwa URA gwe ssikkiriziganya nagwo?", "Disputes", ["ura", "musolo", "kuwakanya"], ["tewali kuwakanya"]),
         ("Omusolo gwa advance tax ku takisi gubalibwa ku ssente mmeka buli ntebe?", "Motor Vehicle", ["20,000", "omusolo"], ["500,000"]),
         ("Bwe ngyako ssente ku mobile money bansalako ebitundu bimeka?", "Excise", ["0.5%", "mobile money", "omusolo"], ["10% ku kuteeka"]),
-        ("Bwe mba nga sirina yintaneti, nnina essaawa mmeka okusindika invoice za EFRIS?", "EFRIS", ["5", "efris"], ["omwaka"]),
+        ("Bwe mba nga sirina yintaneti, nnina essaawa mmeka okusindika invoice za EFRIS?", "EFRIS", ["5 days|120 hours|five days|ennaku 5|ennaku ttaano|siku 5|siku tano", "efris"], ["omwaka"]),
         ("Nnyinza okuyingiza mmotoka ekozeseddwaako erina emyaka 16 mu Uganda?", "Customs", ["15", "mmotoka"], ["kikkirizibwa"]),
         ("Omusolo gwa VAT mu Uganda guli ku kigero kya bitundu bimeka?", "VAT", ["18%", "vat", "omusolo"], ["25%"]),
         ("Biwandiiko ki ebyetaagisa okufuna TIN okuva mu URA?", "TIN", ["tin", "ura"], ["sasula ofiisa"]),
@@ -279,8 +280,9 @@ async def run_edge_case(client: httpx.AsyncClient, case: dict[str, Any]) -> Edge
         matched = []
         missing = []
         for c in case["required_concepts"]:
-            c_low = c.lower()
-            if c_low in reply_lower:
+            # "a|b" lists equivalent forms ("5 days|120 hours"); any one matches.
+            # Whole words: "15 days" must not satisfy "5 days".
+            if any(re.search(rf"(?<!\w){re.escape(alt.strip().lower())}(?!\w)", reply_lower) for alt in c.split("|")):
                 matched.append(c)
             else:
                 missing.append(c)
@@ -293,7 +295,10 @@ async def run_edge_case(client: httpx.AsyncClient, case: dict[str, Any]) -> Edge
                 break
 
         concept_score = len(matched) / len(case["required_concepts"]) if case["required_concepts"] else 1.0
-        is_passed = (concept_score >= 0.50) and not hallucination
+        # A concept with a figure in it is the answer itself: it must be present, whatever
+        # the share of the other concepts ("efris" alone is not an EFRIS deadline).
+        figures_present = not any(any(ch.isdigit() for ch in c) for c in missing)
+        is_passed = (concept_score >= 0.50) and figures_present and not hallucination
 
         return EdgeCaseResult(
             case_id=cid,

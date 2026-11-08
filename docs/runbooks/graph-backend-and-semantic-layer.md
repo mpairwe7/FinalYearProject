@@ -22,8 +22,15 @@ cd App/backend && PYTHONPATH=. python -m app.graph.neo4j_store            # add 
 
 ### How
 
-1. Run Neo4j 5 with TLS and a certificate the backend can verify. Create a user that can only write
-   `:Kernel` nodes.
+1. Run Neo4j 5 with TLS and a certificate the backend can verify. Create a dedicated user. It can
+   touch only the kernel's graph, but it needs every privilege synchronisation uses:
+   - `CREATE CONSTRAINT` on the database, to create the `(release, id)` uniqueness constraint on
+     first sync;
+   - read and write on the `:Kernel` and `:KernelRelease` labels, on the node labels synced (`Rate`,
+     `Threshold`, …) and on the relationship types (`RATED_FOR`, `IMPOSED_BY`, …);
+   - name creation for new labels, relationship types and property names.
+
+   Without these the sync fails, the log says so, and answers continue from memory.
 2. Install the driver in the backend image: `pip install neo4j`.
 3. Set `GRAPH_STORE_BACKEND=neo4j`, `NEO4J_URI=neo4j+s://...` (or `bolt+s://`), `NEO4J_USER`,
    `NEO4J_PASSWORD` and optionally `NEO4J_DATABASE`. Production refuses to start with `bolt://`,

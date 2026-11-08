@@ -195,3 +195,26 @@ Filled in per phase; see "Implementation record" below.
   - **Python 3.10:** clocks no longer use `datetime.UTC`.
 
   `tests/agents/test_kernel_review_fixes_2026_11.py`; 29 fixes disabled in turn, each failed it.
+- Second review round (26 more findings, all fixed):
+  - **Queue migration:** the SQLite rebuild is one transaction, and a leftover copy from an
+    interrupted rebuild is dropped. The Postgres lookup is scoped with `to_regclass`.
+  - **Streamed turns:** they hold one kernel trace for the whole turn, so agentic kernel calls reach
+    the audit row.
+  - **Precedence:** a stated change ("is now 20%") is a conflict even beside the old figure;
+    conflicts first found after FAQ blending are queued, once per turn; the LangGraph FAQ gate also
+    re-orders by precedence.
+  - **Graph tool binding:** exact sections only, the requested fiscal year, and an amount stated
+    as the tax due.
+  - **Semantic layer:** the production gate checks the effective flag (overrides, rollouts) and runs
+    again at every use; the SQL guard refuses parenthesised FROM items; quoted identifiers are not
+    rewritten.
+  - **Rate answers:**
+    - a question naming a fiscal year is answered from that year's table, where the FY2025-26 VAT
+      threshold had been answered with FY2026-27's;
+    - a named year, or an explicit calculation period, gets no rollover caveat;
+    - no literal 6% stands in for a missing import WHT entry;
+    - the rate schedule names its unverified figures;
+    - a missing stamp-duty rate is an error, not UGX 0.
+  - **Load evaluations:** figure concepts are mandatory and matched as whole words, with
+    equivalent forms accepted.
+  - **Docs:** tool counts give the production inventory (56 tools, 13 namespaces).

@@ -356,9 +356,12 @@ def _scoped_conversation_state(method: Callable[..., Any]) -> Callable[..., Any]
             if isinstance(result, dict):
                 # The audit row is written after this scope closes: by generate() for a
                 # REST turn, and off the event loop for a streamed one. Carry the turn's
-                # kernel pin and trace on the result, as _audit_turn carries the plan.
+                # kernel pin on the result, as _audit_turn carries the plan, and the trace
+                # only when this scope opened it: a streamed turn's trace stays open after
+                # retrieval, and the audit reads the live one with the agentic entries.
                 result.setdefault("_kernel_pin", _ACTIVE_KERNEL_PIN.get())
-                result["_kernel_trace"] = _kernel_trace.snapshot()
+                if kernel_trace_reset is not None:
+                    result["_kernel_trace"] = _kernel_trace.snapshot()
             return result
         finally:
             if kernel_trace_reset is not None:
@@ -2521,6 +2524,14 @@ async def run_chat_turn(
     _TURN_LIVE_CHECK.set({})
     _TURN_STAGES.set({})
     _TURN_GENERATION.set(_new_generation_record())
+    # The kernel pin and trace for the whole streamed turn, set here for the same
+    # reason: the agentic stream runs after the retrieval scope has closed, and its
+    # kernel calls belong in this turn's audit row (ADR-0033).
+    if _ACTIVE_KERNEL_PIN.get() is None:
+        _ACTIVE_KERNEL_PIN.set(_kernel_pin_for_turn())
+    from .kernel import trace as _stream_kernel_trace
+
+    _stream_kernel_trace.start()
     try:
         with turn_usage_scope() as usage, turn_attributes_scope():
             async for event_type, payload in _run_chat_turn_events(model, progress=progress, **kwargs):
