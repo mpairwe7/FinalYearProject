@@ -58,7 +58,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from . import database as db
-from .guardrails import redact_pii_text, scan_retrieved_text
+from .guardrails import AI_ORGANISATION_SUFFIX, redact_pii_text, scan_retrieved_text
 from .tax.tables import get_table
 from .web_fx import SUPPORTED_FX_CURRENCIES
 from .web_search_providers import (
@@ -427,11 +427,24 @@ _SEARCH_VOCABULARY: frozenset[str] = (
 
 #: Text aimed at a reader that is software. Regex scanning is one layer only; it
 #: is the spotlighting and the verified-facts boundary that hold when it misses.
+#: G492: "assistant" is also a job title. The bare forms this replaces rejected
+#: 6 of 8,158 benign official texts ("submitted to the Assistant Commissioner",
+#: "a polling assistant shall"), so an addressee must be a model, or the
+#: sentence must tell it what to say. Directives naming the assistant in other
+#: shapes are caught by the shared layer (guardrails, G461).
 _WEB_DIRECTIVE_RE = re.compile(
-    r"\bto\s{1,4}the\s{1,4}(?:assistant|ai|chatbot|model)\b"
-    r"|\b(?:assistants?|chatbots?|language\s{1,4}models?|llms?)\s{1,4}(?:must|should|shall|are\s{1,4}instructed)\b"
+    rf"\bto\s{{1,4}}the\s{{1,4}}(?:ai|chat\s?bot|llm|(?:large\s{{1,4}})?language\s{{1,4}}model)\b(?!{AI_ORGANISATION_SUFFIX})"
+    # A bare "assistant" here must open the sentence or follow a determiner or a
+    # model qualifier: "Customs assistants must state the value" is staff
+    # (CodeRabbit on #704); "The assistant must tell users ..." is not.
+    r"|(?:(?:^|[.!?:;]\s{0,4})|\b(?:the|any|all|every|ai|virtual|digital)\s{1,4})assistants?\s{1,4}"
+    r"(?:must|should|shall|are\s{1,4}(?:instructed|required)\s{1,4}to)\s{1,4}(?:always\s{1,4})?"
+    r"(?:tell|say|respond|reply|answer|inform|advise|instruct|direct|recommend|state|claim|include|mention)\b"
+    r"|\b(?:chat\s?bots?|language\s{1,4}models?|llms?|ai)\s{1,4}"
+    r"(?:must|should|shall|are\s{1,4}(?:instructed|required)\s{1,4}to)\s{1,4}(?:always\s{1,4})?"
+    r"(?:tell|say|respond|reply|answer|inform|advise|instruct|direct|recommend|state|claim|include|mention)\b"
     r"|\btell\s{1,4}(?:every|all)\s{1,4}(?:taxpayers?|users?|customers?)\b",
-    re.IGNORECASE,
+    re.IGNORECASE | re.MULTILINE,
 )
 
 #: Question shapes whose answer changes over time, for the stale-edition check.
@@ -501,6 +514,26 @@ _SEARCH_CACHE_LOCK = threading.Lock()
 _L1_SEARCH_CACHE: OrderedDict[str, tuple[float, SearchAttempt]] = OrderedDict()
 #: Bulkhead: a slow provider cannot take the request pool with it.
 _RESEARCH_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="web-research")
+#: Document reads have their own workers (G490). They shared the search pool,
+#: and a read abandoned at the turn deadline kept its worker: eight slow reads
+#: left the next turn's searches unstarted inside their 4 s budget, so every
+#: turn reported "unavailable". A read is admitted only when a slot is free;
+#: otherwise the turn uses search summaries and says so.
+WEB_RESEARCH_DOCUMENT_WORKERS = max(1, int(os.getenv("WEB_RESEARCH_DOCUMENT_WORKERS", "4")))
+#: Prefix of the rejection for a live document that speaks to the assistant
+#: (G487). Defined here, not in the sandbox that raises it, so the handler below
+#: needs no import that could itself fail; it survives the isolated child,
+#: which reports PdfRejected by message.
+TAINTED_DOCUMENT_MARKER = "G487:"
+_DOCUMENT_POOL = ThreadPoolExecutor(max_workers=WEB_RESEARCH_DOCUMENT_WORKERS, thread_name_prefix="web-document")
+_DOCUMENT_SLOTS = threading.BoundedSemaphore(WEB_RESEARCH_DOCUMENT_WORKERS)
+
+
+def _read_in_slot(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    try:
+        return func(*args, **kwargs)
+    finally:
+        _DOCUMENT_SLOTS.release()
 
 
 def clear_web_search_cache() -> None:
@@ -1537,9 +1570,15 @@ def _snippet_hit(result: WebSearchResult, index: int, query: str, retrieved_at: 
     }
 
 
-def _snippet_hits(attempts: list[SearchAttempt], query: str, retrieved_at: str) -> list[dict[str, Any]]:
-    """The best summaries, taking each search's top result before any second."""
-    queues = [list(attempt.results) for attempt in attempts if attempt.results]
+def _snippet_hits(
+    attempts: list[SearchAttempt], query: str, retrieved_at: str, *, exclude: frozenset[str] = frozenset()
+) -> list[dict[str, Any]]:
+    """The best summaries, taking each search's top result before any second.
+
+    *exclude* holds documents rejected this turn for instruction-like text: a
+    page known to be hostile is not quoted through its search summary (G487).
+    """
+    queues = [[r for r in attempt.results if r.url not in exclude] for attempt in attempts if attempt.results]
     hits: list[dict[str, Any]] = []
     seen: set[str] = set()
     while len(hits) < _MAX_SNIPPET_HITS and any(queues):
@@ -1808,7 +1847,15 @@ def run_web_research(
         (r for r in all_results if r.tier == 1 and (r.is_pdf or r.is_spreadsheet)),
         key=lambda r: (r.stale, -_fy_start_year(r.fiscal_year)),
     )
+    tainted: set[str] = set()
+    read_incomplete = False
+    admitted = False
     if doc_candidates and time.monotonic() < turn_deadline:
+        admitted = _DOCUMENT_SLOTS.acquire(blocking=False)
+        if not admitted:
+            logger.warning("Web research: every document worker is busy; using search summaries")
+            events.append(("pdf_sandbox.skipped", {"reason": "document_workers_busy"}))
+    if admitted:
         top_doc = doc_candidates[0]
         events.append(
             (
@@ -1821,19 +1868,25 @@ def run_web_research(
             )
         )
         try:
-            from .ephemeral_pdf_sandbox import fetch_and_extract_sandbox_document
+            try:
+                from .ephemeral_pdf_sandbox import fetch_and_extract_sandbox_document
 
-            sandbox_doc = _RESEARCH_POOL.submit(
-                fetch_and_extract_sandbox_document,
-                top_doc.url,
-                query,
-                turn_id=turn_id or "web_turn",
-                retriever=retriever,
-                top_k=4,
-                byte_fetcher=pdf_byte_fetcher,
-                base_dir=sandbox_base_dir,
-                doc_family_hint=top_doc.doc_family,
-            ).result(timeout=max(0.0, turn_deadline - time.monotonic()))
+                read = _DOCUMENT_POOL.submit(
+                    _read_in_slot,
+                    fetch_and_extract_sandbox_document,
+                    top_doc.url,
+                    query,
+                    turn_id=turn_id or "web_turn",
+                    retriever=retriever,
+                    top_k=4,
+                    byte_fetcher=pdf_byte_fetcher,
+                    base_dir=sandbox_base_dir,
+                    doc_family_hint=top_doc.doc_family,
+                )
+            except BaseException:
+                _DOCUMENT_SLOTS.release()  # the read never started, so it cannot release its slot
+                raise
+            sandbox_doc = read.result(timeout=max(0.0, turn_deadline - time.monotonic()))
             outcome.web_hits.extend(_document_hits(sandbox_doc, top_doc, query, checked_at))
 
             do_sync = (
@@ -1866,14 +1919,25 @@ def run_web_research(
                 if sync_out.action_taken == "replaced_outdated" and sync_out.superseded_source:
                     outcome.superseded_sources.append(sync_out.superseded_source)
         except FutureTimeoutError:
+            # Its screening may still reject it after this turn has answered, so
+            # its summary is not quoted in the meantime (CodeRabbit on #704).
             logger.warning("Document extraction missed the turn deadline: %s", top_doc.doc_family)
-        except Exception:
-            logger.warning("Ephemeral sandbox extraction or Qdrant sync failed for %s", top_doc.url, exc_info=True)
+            tainted.add(top_doc.url)
+            read_incomplete = True
+        except Exception as exc:
+            if TAINTED_DOCUMENT_MARKER in str(exc):
+                tainted.add(top_doc.url)
+                events.append(("pdf_sandbox.rejected", {"url": top_doc.url, "reason": "instruction_like_text"}))
+            else:
+                # Found but not read (deadline, network, parse): with nothing else
+                # found the check is unavailable, not "no result" (CodeRabbit on #704).
+                read_incomplete = True
+                logger.warning("Ephemeral sandbox extraction or Qdrant sync failed for %s", top_doc.url, exc_info=True)
 
     # 2. Fall back to search summaries when no document text was read.
     document_read = bool(outcome.web_hits)
     if not document_read:
-        outcome.web_hits.extend(_snippet_hits(attempts, query, checked_at))
+        outcome.web_hits.extend(_snippet_hits(attempts, query, checked_at, exclude=frozenset(tainted)))
 
     if outcome.web_hits and all(h.get("live_stale") for h in outcome.web_hits):
         status = LIVE_STALE_ONLY
@@ -1881,6 +1945,8 @@ def run_web_research(
         status = LIVE_CONFIRMED
     elif outcome.web_hits:
         status = LIVE_UNCONFIRMED
+    elif read_incomplete:
+        status = LIVE_UNAVAILABLE  # a result was found but could not be read in time: not "none found"
     else:
         status = LIVE_NO_RESULT
     return _concluded(

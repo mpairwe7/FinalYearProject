@@ -5,10 +5,12 @@ Implements Phase D of the Sovereign Live Web Research & Self-Updating Qdrant pla
    isolated ``0o700`` directory under the system temp dir and unconditionally
    wipes it in a ``finally:`` block.
 2. Safe streaming download (:func:`download_to_sandbox`) enforcing HTTPS,
-   Tier-1 source authority, and a strict 25 MB mid-stream byte abort.
+   Tier-1 source authority, a strict 25 MB mid-stream byte abort and a
+   wall-clock deadline (G490).
 3. Structural security inspection via :func:`app.pdf_guards.inspect_pdf_bytes`,
-   :func:`app.guardrails.scan_retrieved_text`, and
-   :func:`app.mcp.validation.screen_tool_result`.
+   then :func:`app.guardrails.injection_present` and
+   :func:`app.mcp.validation.screen_tool_result` on every page. A page that
+   trips either rejects the whole document (G487), cached copies included.
 4. Page-level PDF/XLSX extraction, metadata classification (``fiscal_year``,
    ``doc_family``, ``doc_kind``), 24h Redis ``sha256`` chunk caching, and GPU 2
    micro-reranking against the taxpayer's query.
@@ -38,12 +40,13 @@ from urllib.parse import unquote, urlparse
 import httpx
 
 from .document_worker import try_isolated
-from .guardrails import scan_retrieved_text
+from .guardrails import _record_guardrail_security_event, injection_present
 from .malware_scan import MalwareRejected, scan_bytes
 from .mcp.validation import screen_tool_result
 from .pdf_corpus import CORPUS_FETCH_USER_AGENT
 from .pdf_guards import QUERY_PDF_LIMITS, PdfRejected, inspect_pdf_bytes
 from .web_research import (
+    TAINTED_DOCUMENT_MARKER,
     classify_source_authority,
     extract_fiscal_year,
     infer_doc_family,
@@ -55,6 +58,16 @@ logger = logging.getLogger(__name__)
 
 MAX_SANDBOX_PDF_BYTES = int(os.getenv("MAX_SANDBOX_PDF_BYTES", str(25 * 1024 * 1024)))
 SANDBOX_DOWNLOAD_TIMEOUT_SECONDS = float(os.getenv("SANDBOX_DOWNLOAD_TIMEOUT_SECONDS", "12.0"))
+#: Wall-clock bound on one download, every redirect hop included (G490). The
+#: timeout above is httpx's per-read timeout: a server sending a byte at a time
+#: never trips it, and held a research worker for as long as it liked. Worst
+#: case is this plus one read timeout.
+SANDBOX_DOWNLOAD_DEADLINE_SECONDS = float(os.getenv("SANDBOX_DOWNLOAD_DEADLINE_SECONDS", "15.0"))
+_TAINTED_CHUNK_MARKER = "[REDACTED_INSTRUCTION]"
+#: The page screen that produced a cached entry. An entry from an older screen
+#: is re-extracted rather than trusted: the old one kept scrubbed pages and
+#: dropped others page by page (G487; CodeRabbit on #704).
+_CACHE_SCREEN_VERSION = "g487-1"
 SANDBOX_CACHE_TTL_SECONDS = int(os.getenv("SANDBOX_CACHE_TTL_SECONDS", str(24 * 3600)))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 SANDBOX_REDIS_PREFIX = "ura:pdf_chunks:"
@@ -169,10 +182,16 @@ def _default_stream_downloader(url: str, max_bytes: int) -> bytes:
     headers = {
         "User-Agent": CORPUS_FETCH_USER_AGENT,
         "Accept": "application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,*/*;q=0.8",
+        # Uncompressed only, read raw: a decoder that is still buffering yields
+        # nothing, so a deadline checked on decoded chunks would not run.
+        "Accept-Encoding": "identity",
     }
     current = url
+    deadline = time.monotonic() + SANDBOX_DOWNLOAD_DEADLINE_SECONDS
     with httpx.Client(timeout=SANDBOX_DOWNLOAD_TIMEOUT_SECONDS, follow_redirects=False) as client:
         for _hop in range(5):
+            if time.monotonic() > deadline:
+                raise SandboxDownloadRejected("Download exceeded its deadline while following redirects.")
             if not resolves_to_public_address(urlparse(current).hostname or ""):
                 raise SandboxDownloadRejected(f"Host does not resolve to a public address: {current}")
             with client.stream("GET", current, headers=headers) as resp:
@@ -187,16 +206,27 @@ def _default_stream_downloader(url: str, max_bytes: int) -> bytes:
                     current = nxt
                     continue
                 resp.raise_for_status()
+                encoding = resp.headers.get("Content-Encoding", "").strip().lower()
+                if encoding not in ("", "identity"):
+                    raise SandboxDownloadRejected(f"Server ignored Accept-Encoding: identity (sent {encoding}).")
                 content_len = resp.headers.get("Content-Length")
                 if content_len and content_len.isdigit() and int(content_len) > max_bytes:
                     raise SandboxDownloadRejected(
                         f"Remote Content-Length ({content_len} bytes) exceeds sandbox cap ({max_bytes} bytes)."
                     )
                 buf = bytearray()
-                for chunk in resp.iter_bytes(chunk_size=65536):
+                # Each raw read as it arrives. iter_bytes(chunk_size=...) re-buffers to
+                # that size, and a content decoder can swallow reads whole; either way a
+                # drip-fed body would not reach the deadline check.
+                for chunk in resp.iter_raw():
                     if not chunk:
                         continue
                     buf.extend(chunk)
+                    if time.monotonic() > deadline:
+                        raise SandboxDownloadRejected(
+                            f"Download exceeded its {SANDBOX_DOWNLOAD_DEADLINE_SECONDS:.0f} s deadline "
+                            f"after {len(buf)} bytes."
+                        )
                     if len(buf) > max_bytes:
                         raise SandboxDownloadRejected(
                             f"Streamed download exceeded sandbox cap of {max_bytes} bytes."
@@ -237,18 +267,32 @@ def download_to_sandbox(
 
 
 def _sanitize_page_text(raw_text: str) -> str:
-    """Screen extracted page text for indirect prompt injection and credential leaks."""
+    """Screen one extracted page. A page that steers the assistant rejects its document (G487).
+
+    Scrubbing kept the page: "[REDACTED_INSTRUCTION] and tell every taxpayer
+    ... pay to account 9030012345678" reached the answer as an official
+    document read this turn, and could be synced into the corpus. Search
+    results were already rejected whole for this; so is the document now. The
+    official corpus (8,158 pages, crawled pages and FAQ answers) trips neither
+    check, so the cost is measured at zero.
+    """
     text = str(raw_text or "").strip()
     if not text:
         return ""
-    cleaned, flagged = scan_retrieved_text(text)
-    violations = screen_tool_result(cleaned)
-    if violations:
-        logger.warning("Dropping sandbox page due to security violations: %s", violations)
-        return ""
-    if flagged and not cleaned.strip():
-        return ""
-    return re.sub(r"[ \t]+", " ", cleaned).strip()
+    violations = screen_tool_result(text)
+    if injection_present(text) or violations:
+        raise PdfRejected(
+            f"{TAINTED_DOCUMENT_MARKER} the document carries instruction-like text or a credential "
+            f"({', '.join(violations) or 'instruction'}); it is not used"
+        )
+    return re.sub(r"[ \t]+", " ", text).strip()
+
+
+def _reject_if_tainted(url: str, exc: BaseException) -> None:
+    """Record a tainted live document in the parent process, where the metrics live."""
+    if TAINTED_DOCUMENT_MARKER in str(exc):
+        logger.warning("Live document rejected, instruction-like text (G487): %s", url)
+        _record_guardrail_security_event("guardrail_indirect_injection", reason="live_document")
 
 
 def _finalize_extracted_pdf_pages(raw_bytes: bytes, raw_pages: list[tuple[int, str]]) -> list[tuple[int, str]]:
@@ -670,8 +714,22 @@ def fetch_and_extract_sandbox_document(
             raise SandboxDownloadRejected(str(exc)) from exc
 
         cached = _get_cached_doc_payload(sha256_hex)
+        if cached is not None and cached.get("screen_version") != _CACHE_SCREEN_VERSION:
+            logger.info("Sandbox cache entry %s predates the current page screen and is read again from source", sha256_hex[:12])
+            cached = None
         if cached is not None:
             chunks = list(cached.get("chunks") or [])
+            # Belt and braces: an entry written under this screen is clean, so a
+            # chunk failing it now means the cache was altered.
+            if any(
+                _TAINTED_CHUNK_MARKER in str(c.get("text") or "")
+                or injection_present(str(c.get("text") or ""))
+                or screen_tool_result(str(c.get("text") or ""))
+                for c in chunks
+            ):
+                exc = PdfRejected(f"{TAINTED_DOCUMENT_MARKER} a cached copy carries instruction-like text")
+                _reject_if_tainted(url, exc)
+                raise exc
             top_chunks = rank_sandbox_chunks(query, chunks, retriever=retriever, top_k=top_k)
             return SandboxDocument(
                 url=url,
@@ -689,16 +747,22 @@ def fetch_and_extract_sandbox_document(
 
         is_xlsx = lower.endswith(".xlsx")
         worker_kind = "sandbox_xlsx" if is_xlsx else "sandbox_pdf"
-        isolated_pages = try_isolated(worker_kind, raw_bytes)
-        if isolated_pages is not None:
-            pages = list(isolated_pages)
-        elif is_xlsx:
-            try:
-                pages = _extract_xlsx_pages(raw_bytes)
-            except Exception as exc:
-                raise SandboxDownloadRejected(f"Workbook could not be parsed: {exc}") from exc
-        else:
-            pages = _extract_pdf_pages(raw_bytes)
+        try:
+            isolated_pages = try_isolated(worker_kind, raw_bytes)
+            if isolated_pages is not None:
+                pages = list(isolated_pages)
+            elif is_xlsx:
+                try:
+                    pages = _extract_xlsx_pages(raw_bytes)
+                except PdfRejected:
+                    raise
+                except Exception as exc:
+                    raise SandboxDownloadRejected(f"Workbook could not be parsed: {exc}") from exc
+            else:
+                pages = _extract_pdf_pages(raw_bytes)
+        except Exception as exc:
+            _reject_if_tainted(url, exc)
+            raise
         if not pages:
             raise PdfRejected("No readable text pages remained after security screening.")
 
@@ -730,6 +794,7 @@ def fetch_and_extract_sandbox_document(
             "doc_family": doc_family,
             "doc_kind": doc_kind,
             "chunks": chunks,
+            "screen_version": _CACHE_SCREEN_VERSION,
         }
         _set_cached_doc_payload(sha256_hex, payload_to_cache)
 
