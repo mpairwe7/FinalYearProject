@@ -61,7 +61,9 @@ Chosen: **a pgvector dense leg, fused with BM25 by reciprocal-rank fusion (RRF).
   proves they load and answer an HNSW query.
   - `python -m app.pgvector_dense load` scrolls the baked Qdrant collection and requires its
     point-id set to equal the artifact's exactly. Ids derive from source, page, section, chunk id
-    and text hash, so equal sets mean identical documents.
+    and the text's hash, but not from the title or metadata that the embedded text's contextual
+    prefix is built from. So the manifest also carries a fingerprint of every document as Qdrant
+    stores it, and one changed since it was embedded refuses the load.
   - It then copies Qdrant's own payloads and the vectors into `dense_passages` and builds an HNSW
     index (`m=16`, `ef_construction=64`, cosine).
   - `check` then queries as the serving role.
@@ -78,7 +80,8 @@ Chosen: **a pgvector dense leg, fused with BM25 by reciprocal-rank fusion (RRF).
   - Each search embeds the query and runs a filtered HNSW scan (`hnsw.iterative_scan =
     relaxed_order`, `ef_search` 80) under Qdrant's filter semantics. The result is fused with the
     BM25 list by `rrf_fuse_ranked_lists`, the combinator the statutory graph leg already uses.
-  - A question with no BM25 term is answered from the dense leg alone.
+  - A question with no BM25 term still gets candidates from the dense leg. Whether any of them
+    can be answered from is the lexical gate's decision (below).
   - Behind the CPU lexical reranker, the reranked order is blended with the fused order, so word
     overlap alone does not undo the dense ranking.
   - The leg has its own circuit breaker; its failures never count against Qdrant's. Each search
@@ -89,9 +92,15 @@ Chosen: **a pgvector dense leg, fused with BM25 by reciprocal-rank fusion (RRF).
   - **Corpus binding.** The load records the collection's BM25 binding hash in `dense_meta`, and a
     table without one is refused. When the serving collection's hash differs (a promoted corpus,
     G292), the leg turns itself off, so removed guidance cannot be served from stale vectors.
-  - **Qdrant down.** When Qdrant raises or its circuit is open, the leg serves alone through the
-    same tombstone filter, reranker and gates. The answer is still marked as an outage answer and
-    is not cached.
+  - **Verified against the serving collection.** The table is a snapshot, and a live replacement
+    (corpus sync deletes a superseded guide's points without a tombstone) or a promotion between
+    binding refreshes could leave it holding passages the collection no longer serves. Every
+    dense hit is confirmed with one `retrieve` call and built from the collection's current
+    payload; unconfirmed hits are dropped (`local_dense_stale_hits_total`). When Qdrant is down
+    nothing can be confirmed, so the leg is not served alone and retrieval falls back as before.
+  - **Bounded concurrency.** At most one dense search per pool worker is outstanding; a stalled
+    search keeps its slot until it returns, so expired work never queues ahead of a recovery
+    probe, and the leg counts as unavailable while its breaker is open or half-open.
   - **Artifact integrity.** The manifest carries a SHA-256 over the ordered ids and the vector
     bytes, so a replaced or reordered `vectors.npy` is refused.
 - **Gates read word overlap, never dense similarity.** e5's cosine similarities are compressed
@@ -126,6 +135,10 @@ Chosen: **a pgvector dense leg, fused with BM25 by reciprocal-rank fusion (RRF).
   retrieval is unchanged.
 - **Open:** dense similarity does not take part in abstention (G524). Luganda, Runyankole and
   Acholi still rely on translate-then-retrieve; e5 is not trained on them.
+- **Open (G525):** the serving stack runs as root under supervisord, as every program in the base
+  image does. Peer authentication stops the app's own database connection from writing, but a
+  compromised root process could still switch to the `postgres` OS user. Running uvicorn as an
+  unprivileged user is a change to the whole image, tracked separately.
 
 ## Confirmation
 

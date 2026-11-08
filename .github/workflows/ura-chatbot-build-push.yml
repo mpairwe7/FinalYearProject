@@ -147,8 +147,10 @@ jobs:
       # The local dense leg (ADR-0034): the pinned CPU model and the corpus
       # embedded with it, baked into the image as App/Data/dense. Embedding the
       # whole corpus takes minutes on a runner, so it is cached on the corpus and
-      # on the code that decides what is embedded and under which point id
-      # (point_ids.py, not all of retriever.py); the Space build only loads the
+      # on the code that decides what is embedded and under which point id (the
+      # corpus ingesters, indexer.py and point_ids.py, not all of retriever.py); a
+      # document changed since it was embedded is refused at load anyway, by its
+      # fingerprint in the manifest. The Space build only loads the
       # vectors into pgvector, and refuses them if their point ids do not match
       # the baked Qdrant collection exactly. Same reviewed cache trust boundary
       # as the PDF corpus above.
@@ -157,7 +159,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0  # zizmor: ignore[cache-poisoning]
         with:
           path: App/Data/dense
-          key: dense-e5s-v1-${{ hashFiles('App/Data/faq_jsonl/**', 'App/Data/teacher_qa/**', 'App/Data/pdf_jsonl/**', 'App/Data/crawl_jsonl/**', 'Data/dataset/**', 'App/backend/app/dense_cpu.py', 'App/backend/app/pgvector_dense.py', 'App/backend/app/indexer.py', 'App/backend/app/point_ids.py') }}
+          key: dense-e5s-v1-${{ hashFiles('App/Data/faq_jsonl/**', 'App/Data/teacher_qa/**', 'App/Data/pdf_jsonl/**', 'App/Data/crawl_jsonl/**', 'Data/dataset/**', 'App/backend/app/dense_cpu.py', 'App/backend/app/pgvector_dense.py', 'App/backend/app/indexer.py', 'App/backend/app/point_ids.py', 'App/backend/app/faq_corpus.py', 'App/backend/app/pdf_corpus.py', 'App/backend/app/crawl_corpus.py') }}
       - name: Embed the corpus for the dense leg
         if: steps.dense-cache.outputs.cache-hit != 'true'
         working-directory: App/backend

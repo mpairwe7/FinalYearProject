@@ -152,6 +152,11 @@ To swap it:
 3. Merge. The change to `dense_cpu.py` misses the CI cache, so the build re-embeds the corpus
    (about 15–20 minutes), and the Space loads the new vectors.
 
+pgvector's HNSW index accepts at most 2,000 dimensions for the `vector` type (4,000 for
+`halfvec`). A model wider than that needs a `halfvec` column or a dimension-reduced
+(Matryoshka) output before it can replace e5; otherwise the index build fails and the Space serves
+BM25 alone.
+
 A table built for another model is refused at startup, so a half-done swap serves BM25 alone,
 never mismatched vectors. Operations: `docs/runbooks/local-dense-pgvector.md`.
 

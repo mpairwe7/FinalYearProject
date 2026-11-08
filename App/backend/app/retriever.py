@@ -944,7 +944,12 @@ def _local_dense_pool() -> Any:
 
 
 def _breaker_open(breaker: Any) -> bool:
-    return getattr(getattr(breaker, "state", None), "name", "") == "OPEN"
+    """Whether the breaker is not yet trusted: open, or half-open until a probe succeeds."""
+    return getattr(getattr(breaker, "state", None), "name", "") in ("OPEN", "HALF_OPEN")
+
+
+#: One outstanding dense search per pool worker (ADR-0034).
+_LOCAL_DENSE_SLOTS = threading.BoundedSemaphore(2)
 
 
 def _blend_cpu_lexical(candidates: list[dict[str, Any]], fused_order: list[str]) -> list[dict[str, Any]]:
@@ -1733,7 +1738,7 @@ class HybridRetriever:
         """What ``/ready`` reports for the local dense leg."""
         if self._local_dense is not None:
             if _breaker_open(self._local_dense_circuit):
-                return ("unavailable (circuit open: recent dense queries failed or timed out; "
+                return ("unavailable (circuit open or probing: recent dense queries failed or timed out; "
                         "BM25 alone until a probe succeeds)")
             return self._local_dense.status()
         return self._local_dense_reason if self._local_dense_reason == "off" else f"unavailable ({self._local_dense_reason})"
@@ -1744,25 +1749,68 @@ class HybridRetriever:
         Its own failure domain: an error here must not charge Qdrant's circuit
         and send every request to keyword search while BM25 is healthy.
         """
-        if self._local_dense is None or not self._local_dense_circuit.allow_request():
+        if self._local_dense is None or not self._local_dense_matches_corpus():
             return []
-        if not self._local_dense_matches_corpus():
+        # At most one search per pool worker: a stalled Postgres holds its slot
+        # until the search returns, so expired work never queues ahead of a probe.
+        if not _LOCAL_DENSE_SLOTS.acquire(blocking=False):
+            metrics.inc("local_dense_busy_total")
             return []
+        if not self._local_dense_circuit.allow_request():
+            _LOCAL_DENSE_SLOTS.release()
+            return []
+        future = None
         try:
             started = time.perf_counter()
             # A stalled Postgres costs this query its dense half, never its BM25 half:
             # the search runs on a small pool and is abandoned past the deadline.
             future = _local_dense_pool().submit(self._local_dense.search, query, limit, filters)
+            future.add_done_callback(lambda _f: _LOCAL_DENSE_SLOTS.release())
             rows = future.result(timeout=_LOCAL_DENSE_TIMEOUT_S)
             metrics.observe("local_dense_query_duration_seconds", time.perf_counter() - started)
             self._local_dense_circuit.record_success()
         except Exception:
+            if future is None:
+                _LOCAL_DENSE_SLOTS.release()
+            else:
+                future.cancel()  # a search still queued never runs
             self._local_dense_circuit.record_failure()
             metrics.inc("local_dense_query_errors_total")
             logger.warning("Local dense search failed; serving BM25 alone for this query", exc_info=True)
             return []
+        return self._verified_dense_hits(rows)
+
+    def _verified_dense_hits(self, rows: list[tuple[str, dict[str, Any], float]]) -> list[dict[str, Any]]:
+        """Dense rows the serving collection still holds, built from its current payloads.
+
+        The pgvector table is a snapshot. A promoted alias or a live replacement
+        (corpus sync deletes a superseded guide's points without a tombstone) can
+        leave it holding passages the collection no longer serves. Each hit is
+        confirmed against the collection, in one call, before it is fused; when
+        that cannot be done, the dense half is dropped rather than served unverified.
+        """
+        if not rows:
+            return []
+        if self._client is None or not hasattr(self._client, "retrieve"):
+            return []
+        try:
+            points = self._client.retrieve(
+                collection_name=QDRANT_COLLECTION,
+                ids=[pid for pid, _payload, _similarity in rows],
+                with_payload=True,
+                with_vectors=False,
+            )
+        except Exception:
+            metrics.inc("local_dense_unverified_total")
+            logger.warning("Could not confirm dense hits against the serving collection; dropping them", exc_info=True)
+            return []
+        serving = {str(point.id): (point.payload or {}) for point in points or []}
         hits = []
-        for pid, payload, similarity in rows:
+        for pid, _snapshot, similarity in rows:
+            payload = serving.get(pid)
+            if payload is None or payload.get("_meta"):
+                metrics.inc("local_dense_stale_hits_total")
+                continue
             hit = _candidate_from_payload(pid, payload, 0.0)
             hit["score_dense"] = similarity
             hits.append(hit)
@@ -1829,37 +1877,6 @@ class HybridRetriever:
         served = prune_context(candidates[:top_k])
         observe_search_relevance(served, mode)
         return served
-
-    def _dense_only(
-        self,
-        query: str,
-        top_k: int,
-        prefetch_limit: int,
-        filters: dict[str, Any] | None,
-        subject: str | None,
-        locale: str | None,
-    ) -> list[dict[str, Any]]:
-        """Qdrant failed or its circuit is open: serve the local dense leg alone, through the same gates.
-
-        ``[]`` without the leg, as before; never raises. The caller still sees
-        the outage (``_SEARCH_FAILED``), so the answer is not cached.
-        """
-        if self._local_dense is None:
-            return []
-        try:
-            from .hyde import dense_query_text
-
-            hits = self._local_dense_hits(dense_query_text(query, subject=subject), prefetch_limit, filters)
-            if not hits:
-                return []
-            metrics.inc("local_dense_only_searches_total")
-            return self._serve_candidates(
-                query, hits, top_k=top_k, locale=locale,
-                fused_order=[hit_identity(h) for h in hits], mode="dense_local",
-            )
-        except Exception:
-            logger.warning("Local dense fallback failed", exc_info=True)
-            return []
 
     def _local_dense_matches_corpus(self) -> bool:
         """Whether the pgvector table was loaded against the collection now serving.
@@ -2350,7 +2367,7 @@ class HybridRetriever:
         if not self._circuit.allow_request():
             logger.warning("Circuit breaker OPEN — skipping Qdrant search")
             _SEARCH_FAILED.set(True)
-            return self._dense_only(query, top_k, prefetch_limit, filters, subject, locale)
+            return []
 
         try:
             from qdrant_client import models
@@ -2490,8 +2507,10 @@ class HybridRetriever:
             logger.exception("Hybrid search failed; circuit breaker tracking failure")
             # Do NOT permanently disable _ready — the circuit breaker
             # controls availability via allow_request(). Setting _ready=False
-            # here would prevent auto-recovery when Qdrant comes back.
-            return self._dense_only(query, top_k, prefetch_limit, filters, subject, locale)
+            # here would prevent auto-recovery when Qdrant comes back. The local
+            # dense leg is not served alone here: its hits are confirmed against
+            # the serving collection, which cannot be done while Qdrant is down.
+            return []
 
     def search_planned(
         self,

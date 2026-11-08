@@ -72,6 +72,17 @@ def _id_set_digest(ids: Iterable[str]) -> str:
     return hashlib.sha256("\n".join(sorted(ids)).encode()).hexdigest()
 
 
+def _payload_digest(payload: dict[str, Any]) -> str:
+    """SHA-256 of a document as Qdrant stores it: what its vector was computed from.
+
+    A point id covers source, page, section, chunk id and text, but not the
+    title or metadata the embedded text's contextual prefix is built from; this
+    covers all of it, so a vector for an older version of a document is refused.
+    """
+    canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
 def _vectors_digest(vectors: Any, ids: list[str]) -> str:
     """SHA-256 over the ordered ids and the float16 vector bytes, row by row."""
     import numpy as np
@@ -90,7 +101,7 @@ def build_artifact(out_dir: Path, *, documents: list[dict[str, Any]] | None = No
     """Embed the corpus into *out_dir* (``vectors.npy``, ``manifest.json``); returns the manifest."""
     import numpy as np
 
-    from .indexer import _embedding_text, load_documents
+    from .indexer import _embedding_text, _vector_payload, load_documents
     from .point_ids import deterministic_point_id
 
     docs = load_documents() if documents is None else documents
@@ -117,6 +128,8 @@ def build_artifact(out_dir: Path, *, documents: list[dict[str, Any]] | None = No
         # of the same shape would otherwise pair vectors with the wrong payloads.
         "vectors_sha256": _vectors_digest(stored, ids),
         "ids": ids,
+        # Per id, the digest of the document as Qdrant will store it (_payload_digest).
+        "payload_sha256": [_payload_digest(_vector_payload(by_id[i])) for i in ids],
         "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "embed_seconds": round(time.perf_counter() - started, 1),
     }
@@ -145,6 +158,8 @@ def read_artifact(directory: Path) -> tuple[dict[str, Any], Any]:
         raise ArtifactError("artifact ids are repeated or do not match their digest")
     if manifest.get("vectors_sha256") != _vectors_digest(vectors, ids):
         raise ArtifactError("vectors.npy does not match the manifest (replaced, reordered or corrupted)")
+    if len(manifest.get("payload_sha256") or []) != len(ids):
+        raise ArtifactError("artifact has no document fingerprint for every id")
     return manifest, vectors
 
 
@@ -198,6 +213,12 @@ def load_into_postgres(conn: Any, artifact_dir: Path, points: Iterable[tuple[str
         # equal sets mean the same documents; anything else is another corpus.
         raise LoadRefused(f"artifact and Qdrant disagree: {len(missing)} points without a vector "
                           f"(e.g. {missing[:3]}), {len(extra)} vectors without a point (e.g. {extra[:3]})")
+    fingerprint = dict(zip(manifest["ids"], manifest["payload_sha256"], strict=True))
+    changed = sorted(pid for pid, payload in payloads.items() if _payload_digest(payload) != fingerprint[pid])
+    if changed:
+        # Same ids, different documents (a title or metadata edit): those vectors
+        # were computed from text the collection no longer holds.
+        raise LoadRefused(f"{len(changed)} documents changed since they were embedded (e.g. {changed[:3]})")
     with conn.cursor() as cur:
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
         cur.execute("DROP TABLE IF EXISTS dense_passages")
@@ -236,12 +257,21 @@ _SEARCH_TAIL = " ORDER BY distance LIMIT %s) SELECT id, payload, distance FROM h
 _CONTAINS = "payload @> %s::jsonb"
 
 
+def _nest(key: str, value: Any) -> dict[str, Any]:
+    """A Qdrant payload path as a jsonb containment document: ``a.b`` -> ``{"a": {"b": value}}``."""
+    document: Any = value
+    for part in reversed(key.split(".")):
+        document = {part: document}
+    return document
+
+
 def _filter_sql(filters: dict[str, Any] | None) -> tuple[str, list[Any]]:
     """Qdrant's payload filter semantics as jsonb containment, parameterised.
 
     A list matches any of its values, and an empty list matches nothing;
     ``fiscal_year`` also matches undated rows (``""``), as the Qdrant path does
-    (G293); a value matches the field or an element of an array field.
+    (G293); a value matches the field or an element of an array field; a
+    dotted key (``metadata.tax_type``) is a nested path, as in Qdrant.
     """
     clauses, params = [], []
     for key, value in (filters or {}).items():
@@ -257,12 +287,17 @@ def _filter_sql(filters: dict[str, Any] | None) -> tuple[str, list[Any]]:
         # A value matches the field itself or, as in Qdrant, an element of an array field.
         clauses.append("".join(("(", " OR ".join([_CONTAINS] * (2 * len(options))), ")")))
         for option in options:
-            params.extend((json.dumps({key: option}), json.dumps({key: [option]})))
+            params.extend((json.dumps(_nest(key, option)), json.dumps(_nest(key, [option]))))
     return ("".join((" WHERE ", " AND ".join(clauses))) if clauses else ""), params
 
 
 class LocalDenseStore:
-    """Query-time access to the pgvector table. Never raises from :meth:`search`."""
+    """Query-time access to the pgvector table.
+
+    :meth:`open` never raises; :meth:`search` raises on any failure (a busy
+    connection, a timeout, a database error) so the retriever can count it
+    against the leg's circuit breaker.
+    """
 
     def __init__(self, dsn: str = DSN, *, embedder: Any = None, connect: Any = None) -> None:
         self._dsn = dsn
@@ -320,7 +355,7 @@ class LocalDenseStore:
         return f"pgvector {self.meta.get('model', '?').split('/')[-1]}, {self.meta.get('count', '?')} vectors"
 
     def search(self, query: str, limit: int, filters: dict[str, Any] | None = None) -> list[tuple[str, dict[str, Any], float]]:
-        """``(id, payload, cosine similarity)`` best first; ``[]`` on any failure."""
+        """``(id, payload, cosine similarity)`` best first. Raises on failure (see the class)."""
         vector = _vector_literal(self._embedder.embed_query(query))
         where, params = _filter_sql(filters)
         sql = "".join((_SEARCH_HEAD, where, _SEARCH_TAIL))

@@ -34,7 +34,8 @@ def _artifact(directory: Path, count: int = 60) -> tuple[list[str], np.ndarray]:
     manifest = {"schema": pgvector_dense.ARTIFACT_SCHEMA, "model": dense_cpu.MODEL_REPO,
                 "revision": dense_cpu.MODEL_REVISION, "dim": dense_cpu.DIM, "count": count, "ids": ids,
                 "id_set_sha256": hashlib.sha256("\n".join(sorted(ids)).encode()).hexdigest(),
-                "vectors_sha256": pgvector_dense._vectors_digest(vectors.astype(np.float16), ids)}
+                "vectors_sha256": pgvector_dense._vectors_digest(vectors.astype(np.float16), ids),
+                "payload_sha256": [pgvector_dense._payload_digest(_payload(i)) for i in range(count)]}
     (directory / "manifest.json").write_text(json.dumps(manifest))
     return ids, vectors
 

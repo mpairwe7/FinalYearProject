@@ -171,6 +171,14 @@ class _Scroller:
         return self.pages[index], (index + 1 if index + 1 < len(self.pages) else None)
 
 
+def _doc_points(drop_first: bool = False) -> list[tuple[str, dict[str, Any]]]:
+    """The documents as the baked collection holds them: (point id, payload)."""
+    from app.indexer import _vector_payload
+
+    points = [(deterministic_point_id(d), _vector_payload(d)) for d in _docs()]
+    return points[1:] if drop_first else points
+
+
 def _docs() -> list[dict[str, Any]]:
     return [
         {"source": "vat.csv", "text": "Question: Who registers for VAT?\nAnswer: Turnover above the threshold.",
@@ -266,12 +274,12 @@ def test_qdrant_points_skips_the_binding_sentinel_and_pages() -> None:
 
 def test_the_load_takes_qdrant_payloads_and_builds_hnsw(tmp_path: Path) -> None:
     manifest = pgvector_dense.build_artifact(tmp_path, documents=_docs(), embedder=_FixedEmbedder())
-    points = [(pid, {"text": f"payload {pid}", "doc_type": "faq"}) for pid in manifest["ids"]]
     conn = _Conn()
-    report = pgvector_dense.load_into_postgres(conn, tmp_path, points, binding={"corpus_hash": "c0ffee"})
+    report = pgvector_dense.load_into_postgres(conn, tmp_path, _doc_points(), binding={"corpus_hash": "c0ffee"})
     assert report["loaded"] == 2
     assert conn.committed
-    assert [json.loads(row[1])["text"] for row in conn.copied] == [f"payload {pid}" for pid in manifest["ids"]]
+    assert [json.loads(row[1])["text"] for row in conn.copied] == [d["text"] for d in _docs()]
+    assert [row[0] for row in conn.copied] == manifest["ids"]
     assert all(row[2].startswith("[") and row[2].count(",") == dense_cpu.DIM - 1 for row in conn.copied)
     sql = "\n".join(s for s, _ in conn.sql)
     assert "USING hnsw (embedding vector_cosine_ops)" in sql
@@ -285,8 +293,8 @@ def test_the_load_takes_qdrant_payloads_and_builds_hnsw(tmp_path: Path) -> None:
 @pytest.mark.parametrize("drop", ["point", "vector"])
 def test_a_load_for_another_corpus_is_refused(tmp_path: Path, drop: str) -> None:
     manifest = pgvector_dense.build_artifact(tmp_path, documents=_docs(), embedder=_FixedEmbedder())
-    points = [(pid, {"text": "t"}) for pid in manifest["ids"]]
-    points = points[1:] if drop == "point" else points + [("not-in-artifact", {"text": "t"})]
+    points = _doc_points(drop_first=True) if drop == "point" else _doc_points() + [("not-in-artifact", {"text": "t"})]
+    assert manifest["count"] == 2
     conn = _Conn()
     with pytest.raises(pgvector_dense.LoadRefused, match="disagree"):
         pgvector_dense.load_into_postgres(conn, tmp_path, points, binding={"corpus_hash": "c0ffee"})
@@ -370,12 +378,20 @@ class _FakeStore:
 
 
 class _Qdrant:
-    def __init__(self, points: list[_Point]) -> None:
+    def __init__(self, points: list[_Point], collection: dict[str, dict] | None = None) -> None:
         self.points, self.calls = points, 0
+        #: What the serving collection holds by id; dense hits are confirmed against it.
+        self.collection = dict(collection) if collection is not None else {"vat": VAT, "efris": EFRIS}
+        self.retrieve_error = False
 
     def query_points(self, **_kw: Any) -> Any:
         self.calls += 1
         return type("R", (), {"points": self.points})()
+
+    def retrieve(self, *, collection_name: str, ids: list[str], **_kw: Any) -> list[_Point]:
+        if self.retrieve_error:
+            raise ConnectionError("qdrant unreachable")
+        return [_Point(pid, self.collection[pid]) for pid in ids if pid in self.collection]
 
 
 def _retriever(points: list[_Point], store: _FakeStore | None) -> HybridRetriever:
@@ -588,7 +604,8 @@ def test_an_empty_list_filter_matches_nothing() -> None:
 def test_the_load_binds_the_table_to_the_collection(tmp_path: Path) -> None:
     manifest = pgvector_dense.build_artifact(tmp_path, documents=_docs(), embedder=_FixedEmbedder())
     sentinel = _Point("s", {"_meta": "bm25_binding", "source_corpus_hash": "c0ffee", "corpus_hash": "older"})
-    client = _Scroller([[_Point(pid, {"text": "t"}) for pid in manifest["ids"]] + [sentinel]])
+    client = _Scroller([[_Point(pid, payload) for pid, payload in _doc_points()] + [sentinel]])
+    assert len(manifest["ids"]) == 2
     binding: dict[str, str] = {}
     conn = _Conn()
     pgvector_dense.load_into_postgres(conn, tmp_path, pgvector_dense.qdrant_points(client, "c", binding),
@@ -596,7 +613,7 @@ def test_the_load_binds_the_table_to_the_collection(tmp_path: Path) -> None:
     meta = dict(next(rows for s, rows in conn.sql if s.startswith("INSERT INTO dense_meta")))
     assert meta["qdrant_corpus_hash"] == "c0ffee"
     with pytest.raises(pgvector_dense.LoadRefused, match="binding"):
-        pgvector_dense.load_into_postgres(_Conn(), tmp_path, [(pid, {"text": "t"}) for pid in manifest["ids"]])
+        pgvector_dense.load_into_postgres(_Conn(), tmp_path, _doc_points())
 
 
 def test_a_table_without_a_corpus_binding_is_not_opened() -> None:
@@ -669,25 +686,30 @@ def test_readiness_reports_an_open_dense_breaker() -> None:
     assert r.local_dense_status().startswith("unavailable (circuit open")
 
 
-class _BrokenQdrant:
+class _BrokenQdrant(_Qdrant):
+    def __init__(self) -> None:
+        super().__init__([])
+        self.retrieve_error = True
+
     def query_points(self, **_kw: Any) -> Any:
         raise ConnectionError("qdrant down")
 
 
 @pytest.mark.parametrize("how", ["raises", "circuit_open"])
-def test_qdrant_down_falls_back_to_the_dense_leg(how: str) -> None:
+def test_qdrant_down_serves_no_unconfirmed_dense_hits(how: str) -> None:
+    """The dense snapshot cannot be confirmed against a collection that is down (PR 707 review)."""
     from app import retriever as retriever_module
 
-    r = _retriever([], _FakeStore([("efris", EFRIS, 0.9)]))
+    store = _FakeStore([("efris", EFRIS, 0.9)])
+    r = _retriever([], store)
     r._client = _BrokenQdrant()
     if how == "circuit_open":
         for _ in range(3):
             r._circuit.record_failure()
     token = retriever_module._SEARCH_FAILED.set(False)
     try:  # the flag is per request; restore it so later tests do not inherit an outage
-        hits = r.search("value added tax registration offline invoices", top_k=3)
-        assert [h["id"] for h in hits] == ["efris"]
-        assert retriever_module._SEARCH_FAILED.get() is True, "still an outage answer, never cached"
+        assert r.search("value added tax registration offline invoices", top_k=3) == []
+        assert retriever_module._SEARCH_FAILED.get() is True
     finally:
         retriever_module._SEARCH_FAILED.reset(token)
 
@@ -736,6 +758,8 @@ def test_point_ids_have_their_own_module_and_the_cache_key_sees_it() -> None:
     key = re.search(r"key: dense-[^\n]+", (ROOT / ".github/workflows/ura-chatbot-build-push.yml").read_text()).group(0)
     assert "point_ids.py" in key
     assert "retriever.py" not in key, "every retriever edit would re-embed the corpus"
+    for ingester in ("faq_corpus.py", "pdf_corpus.py", "crawl_corpus.py", "indexer.py"):
+        assert ingester in key, f"{ingester} decides what is embedded and must be in the cache key"
 
 
 def test_the_serving_process_can_only_be_the_reader() -> None:
@@ -759,3 +783,73 @@ def test_sparse_only_builds_have_the_dense_directory() -> None:
     tracked = subprocess.run(["git", "ls-files", "--error-unmatch", "App/Data/dense/.keep"], cwd=ROOT,
                              capture_output=True, text=True)
     assert tracked.returncode == 0, "App/Data/dense/.keep must be tracked"
+
+
+# --------------------------------------------------------------------------- PR 707 review, round two
+
+
+def test_a_document_changed_since_it_was_embedded_refuses_the_load(tmp_path: Path) -> None:
+    pgvector_dense.build_artifact(tmp_path, documents=_docs(), embedder=_FixedEmbedder())
+    points = _doc_points()
+    pid, payload = points[0]
+    points[0] = (pid, {**payload, "title": "Renamed guide"})  # same id: the id ignores the title
+    with pytest.raises(pgvector_dense.LoadRefused, match="changed since they were embedded"):
+        pgvector_dense.load_into_postgres(_Conn(), tmp_path, points, binding={"corpus_hash": "c0ffee"})
+
+
+def test_a_dotted_filter_is_a_nested_path() -> None:
+    _where, params = pgvector_dense._filter_sql({"metadata.tax_type": "vat"})
+    assert [json.loads(p) for p in params] == [{"metadata": {"tax_type": "vat"}}, {"metadata": {"tax_type": ["vat"]}}]
+
+
+def test_a_dense_hit_the_collection_no_longer_holds_is_dropped() -> None:
+    store = _FakeStore([("efris", EFRIS, 0.9), ("deleted-guide", {"text": "superseded figure"}, 0.95)])
+    r = _retriever([_Point("vat", VAT)], store)
+    ids = [h["id"] for h in r.search("value added tax registration offline invoices", top_k=4)]
+    assert "deleted-guide" not in ids
+    assert "efris" in ids
+
+
+def test_dense_hits_carry_the_collection_s_current_payload() -> None:
+    store = _FakeStore([("efris", {"text": "an old snapshot of the guide"}, 0.9)])
+    r = _retriever([], store)
+    hits = r.search("how long can I keep billing while the internet is down", top_k=2)
+    assert [h["text"] for h in hits] == [EFRIS["text"]]
+
+
+def test_unconfirmable_dense_hits_are_dropped() -> None:
+    r = _retriever([_Point("vat", VAT)], _FakeStore([("efris", EFRIS, 0.9)]))
+    r._client.retrieve_error = True
+    assert [h["id"] for h in r.search("value added tax registration offline invoices", top_k=3)] == ["vat"]
+
+
+def test_a_half_open_breaker_is_not_yet_healthy() -> None:
+    from app.retriever import _breaker_open
+
+    class _Breaker:
+        def __init__(self, name: str) -> None:
+            self.state = type("S", (), {"name": name})()
+
+    assert _breaker_open(_Breaker("OPEN"))
+    assert _breaker_open(_Breaker("HALF_OPEN"))
+    assert not _breaker_open(_Breaker("CLOSED"))
+
+
+def test_outstanding_dense_searches_are_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    import threading
+
+    from app import retriever as retriever_module
+
+    slots = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(retriever_module, "_LOCAL_DENSE_SLOTS", slots)
+    r = _retriever([_Point("vat", VAT)], _FakeStore([("efris", EFRIS, 0.9)]))
+    slots.acquire()  # a stalled search holds the only slot
+    try:
+        for _ in range(3):  # three failures would open the breaker
+            hits = r.search("value added tax registration offline invoices", top_k=3)
+            assert [h["id"] for h in hits] == ["vat"], "no dense half while the slot is held"
+        assert r._local_dense_circuit.state.name == "CLOSED", "a busy pool is not a failure"
+    finally:
+        slots.release()
+    hits = r.search("value added tax registration offline invoices", top_k=3)
+    assert "efris" in [h["id"] for h in hits]
