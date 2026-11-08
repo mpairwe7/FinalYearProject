@@ -101,6 +101,38 @@ def close_pool() -> None:
                 _pool = None
 
 
+def _refresh_discrepancy_type_check(cur: Any) -> None:
+    """Add ``evidence_conflict`` to an existing knowledge_discrepancies CHECK (ADR-0033).
+
+    ``CREATE TABLE IF NOT EXISTS`` leaves an older table's constraint in place,
+    and it rejected the type, so every kernel evidence conflict was dropped.
+    Altered only when the stored definition lacks a type; a replica racing to do
+    the same is harmless, so a failure is logged and left to the next start.
+    """
+    from .database import DISCREPANCY_TYPES
+
+    name = "knowledge_discrepancies_discrepancy_type_check"
+    cur.execute(
+        "SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid "
+        "WHERE t.relname = 'knowledge_discrepancies' AND c.conname = %s",
+        (name,),
+    )
+    row = cur.fetchone()
+    definition = str((row[0] if not isinstance(row, dict) else next(iter(row.values()))) if row else "")
+    if row and all(f"'{t}'" in definition for t in DISCREPANCY_TYPES):
+        return
+    types = ", ".join(f"'{t}'" for t in DISCREPANCY_TYPES)
+    # A savepoint, so a failure here does not abort the migration transaction around it.
+    cur.execute("SAVEPOINT discrepancy_type_check")
+    try:
+        cur.execute(f"ALTER TABLE knowledge_discrepancies DROP CONSTRAINT IF EXISTS {name}")
+        cur.execute(f"ALTER TABLE knowledge_discrepancies ADD CONSTRAINT {name} CHECK (discrepancy_type IN ({types}))")
+        cur.execute("RELEASE SAVEPOINT discrepancy_type_check")
+    except Exception:
+        cur.execute("ROLLBACK TO SAVEPOINT discrepancy_type_check")
+        logger.warning("knowledge_discrepancies CHECK refresh failed; retried at next start", exc_info=True)
+
+
 def init_db() -> None:
     """Create tables and indexes if they don't exist."""
     pool = _get_pool()
@@ -321,7 +353,7 @@ def init_db() -> None:
         user_id              TEXT DEFAULT '',
         status               TEXT NOT NULL CHECK(status IN ('pending', 'verified', 'dismissed', 'resolved')) DEFAULT 'pending',
         priority             TEXT NOT NULL CHECK(priority IN ('low', 'normal', 'high', 'urgent')) DEFAULT 'normal',
-        discrepancy_type     TEXT NOT NULL CHECK(discrepancy_type IN ('outdated_law', 'incorrect_rate', 'hallucination', 'procedure_changed', 'citation_mismatch', 'general')) DEFAULT 'outdated_law',
+        discrepancy_type     TEXT NOT NULL CHECK(discrepancy_type IN ('outdated_law', 'incorrect_rate', 'hallucination', 'procedure_changed', 'citation_mismatch', 'general', 'evidence_conflict')) DEFAULT 'outdated_law',
         bot_statement        TEXT NOT NULL,
         user_correction      TEXT NOT NULL,
         cited_sources_json   TEXT DEFAULT '[]',
@@ -428,6 +460,7 @@ def init_db() -> None:
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(ddl)
+            _refresh_discrepancy_type_check(cur)
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS conversation_id TEXT")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS contexts TEXT DEFAULT '[]'")

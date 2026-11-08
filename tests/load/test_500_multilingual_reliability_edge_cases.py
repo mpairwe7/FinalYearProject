@@ -53,12 +53,12 @@ def generate_500_edge_cases() -> list[dict[str, Any]]:
         ("At what monthly salary does a resident employee start paying PAYE?", "ITA Third Schedule", ["335,000", "0%"], ["5,000,000"]),
         # VAT
         ("What is the mandatory quarterly VAT registration threshold in 3 consecutive months?", "VAT Act s.7", ["75,000,000", "consecutive"], ["1 billion"]),
-        ("What is the annual mandatory VAT registration threshold?", "VAT Act s.7", ["150,000,000", "annual"], ["50 million"]),
+        ("What is the annual mandatory VAT registration threshold?", "VAT Act s.7", ["300,000,000", "annual"], ["50 million"]),
         ("Can I claim 100% input VAT on overheads for mixed taxable and exempt supplies?", "VAT Act s.28", ["apportion", "exempt"], ["100% without condition"]),
         ("What is the difference between zero-rated and exempt supplies for input VAT?", "VAT Act s.24", ["zero-rated", "exempt", "input tax"], ["both get refund"]),
         ("When can a taxpayer claim a VAT bad debt refund on unpaid invoices?", "VAT Act s.31", ["2 years", "bad debt", "insolven"], ["claim after 1 week"]),
         ("What is the penalty under TPCA s.19B for failing to issue an EFRIS receipt?", "TPCA s.93(2)", ["200,000", "penalty", "double"], ["100,000 shillings"]),
-        ("Within how many hours must offline EFRIS transactions be synchronized?", "TPCA EFRIS Regs", ["24", "offline"], ["30 days"]),
+        ("Within how many hours must offline EFRIS transactions be synchronized?", "URA EFRIS Handbook", ["5 days", "offline"], ["30 days"]),
         # Customs
         ("Can I import an 18-year-old car (2008 model) into Uganda?", "Traffic Act", ["prohibited", "15 years"], ["allowed with no ban"]),
         ("What is the environmental levy on imported used vehicles aged 8 to 15 years?", "EACCMA / Traffic Act", ["50%", "environmental levy"], ["0% levy"]),
@@ -69,7 +69,7 @@ def generate_500_edge_cases() -> list[dict[str, Any]]:
         ("Can customs jump directly to Method 6 fallback if transaction value is doubted?", "EAC-CMA 4th Sch", ["hierarchy", "sequential", "method 2"], ["jump directly"]),
         # Excise
         ("What is the excise duty rate on mobile money cash withdrawals?", "Excise Duty Act", ["0.5%", "withdrawal", "mobile money"], ["5% on deposits"]),
-        ("What are the specific excise duty rates per litre on petrol and diesel?", "Excise Duty Act", ["1,450", "1,130", "petrol", "diesel"], ["10,000/L"]),
+        ("What are the specific excise duty rates per litre on petrol and diesel?", "Excise Duty Act", ["1,750", "1,430", "petrol", "diesel"], ["10,000/L"]),
         ("What is the excise duty rate on telecommunication airtime and internet data?", "Excise Duty Act", ["12%", "telecom"], ["50%"]),
         ("Can a manufacturer offset excise duty paid on raw materials against finished goods?", "Excise Duty Act s.14", ["offset", "excise", "raw material"], ["double tax mandatory"]),
         ("What is the legal status of manufacturing plastic carrier bags under 30 microns?", "Finance Act", ["banned", "kaveera", "30 microns"], ["allowed"]),
@@ -133,7 +133,7 @@ def generate_500_edge_cases() -> list[dict[str, Any]]:
         ("Nnyinza ntya okuwakanya omusolo gwa URA gwe ssikkiriziganya nagwo?", "Disputes", ["ura", "musolo", "kuwakanya"], ["tewali kuwakanya"]),
         ("Omusolo gwa advance tax ku takisi gubalibwa ku ssente mmeka buli ntebe?", "Motor Vehicle", ["20,000", "omusolo"], ["500,000"]),
         ("Bwe ngyako ssente ku mobile money bansalako ebitundu bimeka?", "Excise", ["0.5%", "mobile money", "omusolo"], ["10% ku kuteeka"]),
-        ("Bwe mba nga sirina yintaneti, nnina essaawa mmeka okusindika invoice za EFRIS?", "EFRIS", ["24", "efris"], ["omwaka"]),
+        ("Bwe mba nga sirina yintaneti, nnina essaawa mmeka okusindika invoice za EFRIS?", "EFRIS", ["5", "efris"], ["omwaka"]),
         ("Nnyinza okuyingiza mmotoka ekozeseddwaako erina emyaka 16 mu Uganda?", "Customs", ["15", "mmotoka"], ["kikkirizibwa"]),
         ("Omusolo gwa VAT mu Uganda guli ku kigero kya bitundu bimeka?", "VAT", ["18%", "vat", "omusolo"], ["25%"]),
         ("Biwandiiko ki ebyetaagisa okufuna TIN okuva mu URA?", "TIN", ["tin", "ura"], ["sasula ofiisa"]),

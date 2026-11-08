@@ -280,6 +280,7 @@ from .faq_binding import faq_question_equivalence  # noqa: E402, F401
 from .faq_binding import install_faq_acronyms  # noqa: E402, F401
 from .faq_binding import filter_unbound_faq_hits as _filter_unbound_faq_hits  # noqa: E402, F401
 from .faq_binding import promote_equivalent_faq_hits as _promote_equivalent_faq_hits  # noqa: E402, F401
+from .kernel.precedence import reorder_after_promotion as _reorder_after_promotion  # noqa: E402
 from .english_rendering import _PARAGRAPH_BREAK_RE  # noqa: E402, F401
 
 # The audit row for a ``generate`` turn is written by :meth:`ChatModel.generate`
@@ -351,7 +352,14 @@ def _scoped_conversation_state(method: Callable[..., Any]) -> Callable[..., Any]
 
         kernel_trace_reset = _kernel_trace.start()
         try:
-            return method(*bound.args, **bound.kwargs)
+            result = method(*bound.args, **bound.kwargs)
+            if isinstance(result, dict):
+                # The audit row is written after this scope closes: by generate() for a
+                # REST turn, and off the event loop for a streamed one. Carry the turn's
+                # kernel pin and trace on the result, as _audit_turn carries the plan.
+                result.setdefault("_kernel_pin", _ACTIVE_KERNEL_PIN.get())
+                result["_kernel_trace"] = _kernel_trace.snapshot()
+            return result
         finally:
             if kernel_trace_reset is not None:
                 _kernel_trace.TURN_KERNEL_TRACE.reset(kernel_trace_reset)
@@ -12334,6 +12342,8 @@ class ChatModel:
                 # they can be used as LLM context or as an extractive fallback.
                 hits = _filter_unbound_faq_hits(binding_query, hits)
                 hits = _promote_equivalent_faq_hits(binding_query, hits)
+                # Promotion runs after the graph leg; the kernel's figure must still lead.
+                hits = _reorder_after_promotion(hits)
 
             # 3d. Attached documents — prepend as top-priority grounding hits.
             if attachments:
@@ -12593,6 +12603,14 @@ class ChatModel:
                     retrieval_mode = "agentic"
                     trace_ctx["tool_calls"] = [
                         tc.get("name") for tc in agentic["tool_calls"]
+                    ]
+                    # The audit row needs the calls, not only their names: the ledger
+                    # keeps the name, iteration and an arguments digest (never the raw
+                    # arguments), and the scorecard reads whether each call failed.
+                    trace_ctx["tool_call_records"] = [
+                        {"name": tc.get("name"), "iteration": tc.get("iteration") or 0,
+                         "arguments": tc.get("arguments") or {}, "result": tc.get("result")}
+                        for tc in agentic["tool_calls"] if isinstance(tc, dict)
                     ]
                     trace_ctx["tool_iterations"] = agentic.get("iterations", 0)
                     trace_ctx["connectors_used"] = _connectors_used(agentic["tool_calls"])
@@ -13379,7 +13397,7 @@ class ChatModel:
                 "session_id": session_id,
                 "user_id": str(trace_ctx.get("user_id") or ""),
                 "tenant_id": str(trace_ctx.get("tenant_id") or "default"),
-                "tool_calls": list(trace_ctx.get("tool_calls") or []),
+                "tool_calls": list(trace_ctx.get("tool_call_records") or trace_ctx.get("tool_calls") or []),
                 "tool_iterations": int(trace_ctx.get("tool_iterations") or 0),
                 "agent_route": str(trace_ctx.get("agent_route") or ""),
             }
@@ -14390,6 +14408,8 @@ class ChatModel:
             # A chunk can outrank the FAQ row that answers the question
             # verbatim; put an exact FAQ counterpart back in front.
             hits = _promote_equivalent_faq_hits(binding_query, hits)
+            # Promotion runs after the graph leg; the kernel's figure must still lead.
+            hits = _reorder_after_promotion(hits)
 
         # Attached documents — prepend as top-priority grounding hits
         # (parity with generate(); see the comment there).

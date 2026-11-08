@@ -37,6 +37,25 @@ class SqlRejected(ValueError):
     """A template that is not a single, read-only SELECT over its sources."""
 
 
+_FROM_LIST_RE = re.compile(
+    r"\bfrom\s+(.+?)(?=\b(?:where|group|order|limit|having|union|intersect|except|join|inner|left|right|full|cross|"
+    r"natural|on|using|window|offset|fetch)\b|\)|$)",
+    re.I | re.S,
+)
+_RELATION_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)")
+
+
+def _from_list_relations(body: str) -> set[str]:
+    """Every relation in a FROM list, not only the first: ``FROM a, b`` reads both."""
+    found = set()
+    for clause in _FROM_LIST_RE.findall(body):
+        for item in clause.split(","):
+            match = _RELATION_RE.match(item)
+            if match and not item.strip().startswith("("):
+                found.add(match.group(1).lower())
+    return found
+
+
 def check(sql: str, *, sources: frozenset[str] | set[str]) -> set[str]:
     """Validate *sql*; returns the named parameters it binds. Raises :class:`SqlRejected`."""
     text = (sql or "").strip()
@@ -46,7 +65,12 @@ def check(sql: str, *, sources: frozenset[str] | set[str]) -> set[str]:
         raise SqlRejected("comments are not allowed")
     if "$$" in text or re.search(r"\$[A-Za-z_]*\$", text):
         raise SqlRejected("dollar quoting is not allowed")
-    masked = _QUOTED_IDENT_RE.sub(" ident ", _STRING_RE.sub(" 'lit' ", text))
+    unstrung = _STRING_RE.sub(" 'lit' ", text)
+    for ident in _QUOTED_IDENT_RE.findall(unstrung):
+        name = ident.strip('"').replace('""', '"').lower()
+        if name in FORBIDDEN_FUNCTIONS or name in FORBIDDEN_WORDS or name.startswith("pg_"):
+            raise SqlRejected(f"quoted identifier not allowed: {name}")
+    masked = _QUOTED_IDENT_RE.sub(" ident ", unstrung)
     if "'" in masked.replace("'lit'", ""):
         raise SqlRejected("unterminated string literal")
     body = masked.rstrip().removesuffix(";")
@@ -67,7 +91,7 @@ def check(sql: str, *, sources: frozenset[str] | set[str]) -> set[str]:
         raise SqlRejected("system catalogue access is not allowed")
     ctes = {m.lower() for m in _CTE_RE.findall(body)}
     allowed = {s.lower() for s in sources} | ctes
-    used = {m.lower() for m in _SOURCE_RE.findall(body)}
+    used = {m.lower() for m in _SOURCE_RE.findall(body)} | _from_list_relations(body)
     outside = sorted(used - allowed)
     if outside:
         raise SqlRejected(f"reads from undeclared sources: {', '.join(outside)}")

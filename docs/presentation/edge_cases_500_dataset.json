@@ -108,13 +108,13 @@
   },
   {
     "id": "REL-EN-008",
-    "title": "EN Statutory Case #8: 150,000,000",
+    "title": "EN Statutory Case #8: 300,000,000",
     "locale": "en",
     "domain": "Value Added Tax (VAT & Thresholds)",
     "statute": "VAT Act s.7",
     "query": "I need to know: What is the annual mandatory VAT registration threshold?",
     "required_concepts": [
-      "150,000,000",
+      "300,000,000",
       "annual"
     ],
     "forbidden_hallucinations": [
@@ -186,13 +186,13 @@
   },
   {
     "id": "REL-EN-013",
-    "title": "EN Statutory Case #13: 24",
+    "title": "EN Statutory Case #13: 5 days",
     "locale": "en",
     "domain": "Natural Conversational & Civic Intelligence",
-    "statute": "TPCA EFRIS Regs",
+    "statute": "URA EFRIS Handbook",
     "query": "I need to know: Within how many hours must offline EFRIS transactions be synchronized?",
     "required_concepts": [
-      "24",
+      "5 days",
       "offline"
     ],
     "forbidden_hallucinations": [
@@ -325,14 +325,14 @@
   },
   {
     "id": "REL-EN-022",
-    "title": "EN Statutory Case #22: 1,450",
+    "title": "EN Statutory Case #22: 1,750",
     "locale": "en",
     "domain": "Value Added Tax (VAT & Thresholds)",
     "statute": "Excise Duty Act",
     "query": "Could you clarify: What are the specific excise duty rates per litre on petrol and diesel?",
     "required_concepts": [
-      "1,450",
-      "1,130",
+      "1,750",
+      "1,430",
       "petrol",
       "diesel"
     ],
@@ -777,13 +777,13 @@
   },
   {
     "id": "REL-EN-051",
-    "title": "EN Statutory Case #51: 150,000,000",
+    "title": "EN Statutory Case #51: 300,000,000",
     "locale": "en",
     "domain": "Customs & EAC Common External Tariff",
     "statute": "VAT Act s.7",
     "query": "Please tell me: What is the annual mandatory VAT registration threshold?",
     "required_concepts": [
-      "150,000,000",
+      "300,000,000",
       "annual"
     ],
     "forbidden_hallucinations": [
@@ -855,13 +855,13 @@
   },
   {
     "id": "REL-EN-056",
-    "title": "EN Statutory Case #56: 24",
+    "title": "EN Statutory Case #56: 5 days",
     "locale": "en",
     "domain": "Domestic Taxes (PAYE & PWD)",
-    "statute": "TPCA EFRIS Regs",
+    "statute": "URA EFRIS Handbook",
     "query": "Please tell me: Within how many hours must offline EFRIS transactions be synchronized?",
     "required_concepts": [
-      "24",
+      "5 days",
       "offline"
     ],
     "forbidden_hallucinations": [
@@ -994,14 +994,14 @@
   },
   {
     "id": "REL-EN-065",
-    "title": "EN Statutory Case #65: 1,450",
+    "title": "EN Statutory Case #65: 1,750",
     "locale": "en",
     "domain": "Customs & EAC Common External Tariff",
     "statute": "Excise Duty Act",
     "query": "What are the specific excise duty rates per litre on petrol and diesel?",
     "required_concepts": [
-      "1,450",
-      "1,130",
+      "1,750",
+      "1,430",
       "petrol",
       "diesel"
     ],
@@ -1446,13 +1446,13 @@
   },
   {
     "id": "REL-EN-094",
-    "title": "EN Statutory Case #94: 150,000,000",
+    "title": "EN Statutory Case #94: 300,000,000",
     "locale": "en",
     "domain": "Excise Duty & Specific Rates",
     "statute": "VAT Act s.7",
     "query": "As a taxpayer: What is the annual mandatory VAT registration threshold?",
     "required_concepts": [
-      "150,000,000",
+      "300,000,000",
       "annual"
     ],
     "forbidden_hallucinations": [
@@ -1524,13 +1524,13 @@
   },
   {
     "id": "REL-EN-099",
-    "title": "EN Statutory Case #99: 24",
+    "title": "EN Statutory Case #99: 5 days",
     "locale": "en",
     "domain": "Value Added Tax (VAT & Thresholds)",
-    "statute": "TPCA EFRIS Regs",
+    "statute": "URA EFRIS Handbook",
     "query": "As a taxpayer: Within how many hours must offline EFRIS transactions be synchronized?",
     "required_concepts": [
-      "24",
+      "5 days",
       "offline"
     ],
     "forbidden_hallucinations": [
@@ -1663,14 +1663,14 @@
   },
   {
     "id": "REL-EN-108",
-    "title": "EN Statutory Case #108: 1,450",
+    "title": "EN Statutory Case #108: 1,750",
     "locale": "en",
     "domain": "Excise Duty & Specific Rates",
     "statute": "Excise Duty Act",
     "query": "I need to know: What are the specific excise duty rates per litre on petrol and diesel?",
     "required_concepts": [
-      "1,450",
-      "1,130",
+      "1,750",
+      "1,430",
       "petrol",
       "diesel"
     ],
@@ -2115,13 +2115,13 @@
   },
   {
     "id": "REL-EN-137",
-    "title": "EN Statutory Case #137: 150,000,000",
+    "title": "EN Statutory Case #137: 300,000,000",
     "locale": "en",
     "domain": "Tax Procedures & Disputes (TPCA)",
     "statute": "VAT Act s.7",
     "query": "Could you clarify: What is the annual mandatory VAT registration threshold?",
     "required_concepts": [
-      "150,000,000",
+      "300,000,000",
       "annual"
     ],
     "forbidden_hallucinations": [
@@ -2193,13 +2193,13 @@
   },
   {
     "id": "REL-EN-142",
-    "title": "EN Statutory Case #142: 24",
+    "title": "EN Statutory Case #142: 5 days",
     "locale": "en",
     "domain": "Customs & EAC Common External Tariff",
-    "statute": "TPCA EFRIS Regs",
+    "statute": "URA EFRIS Handbook",
     "query": "Could you clarify: Within how many hours must offline EFRIS transactions be synchronized?",
     "required_concepts": [
-      "24",
+      "5 days",
       "offline"
     ],
     "forbidden_hallucinations": [
@@ -2332,14 +2332,14 @@
   },
   {
     "id": "REL-EN-151",
-    "title": "EN Statutory Case #151: 1,450",
+    "title": "EN Statutory Case #151: 1,750",
     "locale": "en",
     "domain": "Tax Procedures & Disputes (TPCA)",
     "statute": "Excise Duty Act",
     "query": "Please tell me: What are the specific excise duty rates per litre on petrol and diesel?",
     "required_concepts": [
-      "1,450",
-      "1,130",
+      "1,750",
+      "1,430",
       "petrol",
       "diesel"
     ],
@@ -2910,13 +2910,13 @@
   },
   {
     "id": "REL-LG-018",
-    "title": "LG Vernacular Case #18: 24",
+    "title": "LG Vernacular Case #18: 5",
     "locale": "lg",
     "domain": "Tax Procedures & Disputes (TPCA)",
     "statute": "EFRIS",
     "query": "Nsaba onnyonnyole: Bwe mba nga sirina yintaneti, nnina essaawa mmeka okusindika invoice za EFRIS?",
     "required_concepts": [
-      "24",
+      "5",
       "efris"
     ],
     "forbidden_hallucinations": [
@@ -3311,13 +3311,13 @@
   },
   {
     "id": "REL-LG-044",
-    "title": "LG Vernacular Case #44: 24",
+    "title": "LG Vernacular Case #44: 5",
     "locale": "lg",
     "domain": "Customs & EAC Common External Tariff",
     "statute": "EFRIS",
     "query": "Mwattu: Bwe mba nga sirina yintaneti, nnina essaawa mmeka okusindika invoice za EFRIS?",
     "required_concepts": [
-      "24",
+      "5",
       "efris"
     ],
     "forbidden_hallucinations": [
@@ -3712,13 +3712,13 @@
   },
   {
     "id": "REL-LG-070",
-    "title": "LG Vernacular Case #70: 24",
+    "title": "LG Vernacular Case #70: 5",
     "locale": "lg",
     "domain": "Domestic Taxes (PAYE & PWD)",
     "statute": "EFRIS",
     "query": "Bwe mba nga sirina yintaneti, nnina essaawa mmeka okusindika invoice za EFRIS?",
     "required_concepts": [
-      "24",
+      "5",
       "efris"
     ],
     "forbidden_hallucinations": [
@@ -4113,13 +4113,13 @@
   },
   {
     "id": "REL-LG-096",
-    "title": "LG Vernacular Case #96: 24",
+    "title": "LG Vernacular Case #96: 5",
     "locale": "lg",
     "domain": "International Taxation & Corporate",
     "statute": "EFRIS",
     "query": "Bambi \u014b\u014bamba: Bwe mba nga sirina yintaneti, nnina essaawa mmeka okusindika invoice za EFRIS?",
     "required_concepts": [
-      "24",
+      "5",
       "efris"
     ],
     "forbidden_hallucinations": [
@@ -4514,13 +4514,13 @@
   },
   {
     "id": "REL-LG-122",
-    "title": "LG Vernacular Case #122: 24",
+    "title": "LG Vernacular Case #122: 5",
     "locale": "lg",
     "domain": "Excise Duty & Specific Rates",
     "statute": "EFRIS",
     "query": "Njagala kumanya: Bwe mba nga sirina yintaneti, nnina essaawa mmeka okusindika invoice za EFRIS?",
     "required_concepts": [
-      "24",
+      "5",
       "efris"
     ],
     "forbidden_hallucinations": [
@@ -4915,13 +4915,13 @@
   },
   {
     "id": "REL-LG-148",
-    "title": "LG Vernacular Case #148: 24",
+    "title": "LG Vernacular Case #148: 5",
     "locale": "lg",
     "domain": "Value Added Tax (VAT & Thresholds)",
     "statute": "EFRIS",
     "query": "Nsaba onnyonnyole: Bwe mba nga sirina yintaneti, nnina essaawa mmeka okusindika invoice za EFRIS?",
     "required_concepts": [
-      "24",
+      "5",
       "efris"
     ],
     "forbidden_hallucinations": [

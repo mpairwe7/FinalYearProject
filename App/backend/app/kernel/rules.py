@@ -96,8 +96,9 @@ def _money(value: Any, name: str) -> Decimal:
         amount = Decimal(str(value))
     except Exception as exc:
         raise RuleInputError(f"{name} must be a number") from exc
-    if amount < 0 or not amount.is_finite():
-        raise RuleInputError(f"{name} must be zero or more")
+    # Finiteness first: comparing a NaN Decimal raises InvalidOperation, not a RuleInputError.
+    if not amount.is_finite() or amount < 0:
+        raise RuleInputError(f"{name} must be a finite number, zero or more")
     return amount
 
 

@@ -23,9 +23,12 @@ def readiness_capabilities() -> dict[str, str]:
     except Exception:
         out["kernel"] = "unavailable"
     try:
+        from ..graph import active_store_name
         from ..graph.neo4j_store import backend
 
-        out["graph_store"] = backend()
+        out["graph_store"] = backend()  # configured
+        # What actually serves: a Neo4j that failed at start-up or on a read is memory here.
+        out["graph_store_active"] = active_store_name()
     except Exception:
         out["graph_store"] = "unavailable"
     try:

@@ -467,6 +467,67 @@ def _refresh_consent_purpose_check(conn: sqlite3.Connection) -> None:
         conn.rollback()
 
 
+#: Every ``knowledge_discrepancies.discrepancy_type``. ``evidence_conflict`` is a
+#: passage contradicting a kernel figure (ADR-0033); databases created before it
+#: rejected the type, so ``_refresh_discrepancy_type_check`` rebuilds their CHECK.
+DISCREPANCY_TYPES = (
+    "outdated_law", "incorrect_rate", "hallucination", "procedure_changed", "citation_mismatch", "general",
+    "evidence_conflict",
+)
+
+
+def _refresh_discrepancy_type_check(conn: sqlite3.Connection) -> None:
+    """Rebuild knowledge_discrepancies when its CHECK lacks a type in :data:`DISCREPANCY_TYPES`.
+
+    Same remedy as :func:`_refresh_consent_purpose_check`: SQLite cannot alter a
+    CHECK, so rebuild and copy, only when the stored DDL is stale.
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='knowledge_discrepancies'"
+    ).fetchone()
+    if row is None:
+        return
+    stored = row["sql"] if isinstance(row, sqlite3.Row) else row[0]
+    missing = [t for t in DISCREPANCY_TYPES if f"'{t}'" not in (stored or "")]
+    if not missing:
+        return
+    logger.info("Rebuilding knowledge_discrepancies CHECK for new types: %s", missing)
+    types = ", ".join(f"'{t}'" for t in DISCREPANCY_TYPES)
+    columns = ("id, conversation_id, session_id, user_id, status, priority, discrepancy_type, bot_statement, "
+               "user_correction, cited_sources_json, frequency_count, dedup_key, admin_note, verified_override_id, "
+               "created_at, updated_at")
+    try:
+        conn.executescript(f"""
+            CREATE TABLE knowledge_discrepancies__new (
+                id                   TEXT PRIMARY KEY,
+                conversation_id      TEXT DEFAULT '',
+                session_id           TEXT DEFAULT '',
+                user_id              TEXT DEFAULT '',
+                status               TEXT NOT NULL CHECK(status IN ('pending', 'verified', 'dismissed', 'resolved')) DEFAULT 'pending',
+                priority             TEXT NOT NULL CHECK(priority IN ('low', 'normal', 'high', 'urgent')) DEFAULT 'normal',
+                discrepancy_type     TEXT NOT NULL CHECK(discrepancy_type IN ({types})) DEFAULT 'outdated_law',
+                bot_statement        TEXT NOT NULL,
+                user_correction      TEXT NOT NULL,
+                cited_sources_json   TEXT DEFAULT '[]',
+                frequency_count      INTEGER NOT NULL DEFAULT 1,
+                dedup_key            TEXT DEFAULT '',
+                admin_note           TEXT DEFAULT '',
+                verified_override_id TEXT DEFAULT '',
+                created_at           REAL NOT NULL,
+                updated_at           REAL NOT NULL
+            );
+            INSERT INTO knowledge_discrepancies__new ({columns}) SELECT {columns} FROM knowledge_discrepancies;
+            DROP TABLE knowledge_discrepancies;
+            ALTER TABLE knowledge_discrepancies__new RENAME TO knowledge_discrepancies;
+            CREATE INDEX IF NOT EXISTS idx_discrepancies_status ON knowledge_discrepancies(status);
+            CREATE INDEX IF NOT EXISTS idx_discrepancies_dedup ON knowledge_discrepancies(dedup_key);
+        """)  # noqa: S608 - the type list is this module's constant
+        conn.commit()
+    except Exception:
+        logger.exception("knowledge_discrepancies CHECK rebuild failed")
+        conn.rollback()
+
+
 def init_db() -> None:
     """Create tables if they don't exist."""
     _DB_DIR.mkdir(parents=True, exist_ok=True)
@@ -723,7 +784,7 @@ def init_db() -> None:
             user_id              TEXT DEFAULT '',
             status               TEXT NOT NULL CHECK(status IN ('pending', 'verified', 'dismissed', 'resolved')) DEFAULT 'pending',
             priority             TEXT NOT NULL CHECK(priority IN ('low', 'normal', 'high', 'urgent')) DEFAULT 'normal',
-            discrepancy_type     TEXT NOT NULL CHECK(discrepancy_type IN ('outdated_law', 'incorrect_rate', 'hallucination', 'procedure_changed', 'citation_mismatch', 'general')) DEFAULT 'outdated_law',
+            discrepancy_type     TEXT NOT NULL CHECK(discrepancy_type IN ('outdated_law', 'incorrect_rate', 'hallucination', 'procedure_changed', 'citation_mismatch', 'general', 'evidence_conflict')) DEFAULT 'outdated_law',
             bot_statement        TEXT NOT NULL,
             user_correction      TEXT NOT NULL,
             cited_sources_json   TEXT DEFAULT '[]',
@@ -928,6 +989,7 @@ def init_db() -> None:
 
     # Forward-compatible schema migrations for existing DBs.
     _refresh_consent_purpose_check(conn)
+    _refresh_discrepancy_type_check(conn)
     _ensure_column(conn, "conversations", "conversation_id", "TEXT")
     _ensure_column(conn, "conversations", "tenant_id", "TEXT NOT NULL DEFAULT 'default'")
     conn.execute(

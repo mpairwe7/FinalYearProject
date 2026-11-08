@@ -295,6 +295,16 @@ def reload_tables() -> None:
     global _tables
     with _lock:
         _tables = None
+    # The kernel's graph and release are built from these tables; a reload that
+    # left them cached would answer kernel lookups and pins from the old figures.
+    try:
+        from ..graph import reset_graph
+        from ..kernel.functions import refresh
+
+        refresh()
+        reset_graph()
+    except Exception:  # noqa: BLE001 - a kernel that cannot refresh rebuilds on next use
+        logger.warning("kernel refresh after table reload failed", exc_info=True)
 
 
 # ---------------------------------------------------------------------------

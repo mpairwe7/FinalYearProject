@@ -40,7 +40,8 @@ SOURCE_RANK: dict[str, int] = {
 
 _FAQ_DOC_TYPES = frozenset({"csv", "faq_jsonl", "faq"})
 _WINDOW = 160
-_STOP = frozenset({"the", "of", "on", "for", "and", "a", "an", "to", "in", "tax", "rate", "standard", "ugx"})
+#: Unit words are not part of what a passage must name: "US$500" says USD without the word.
+_STOP = frozenset({"the", "of", "on", "for", "and", "a", "an", "to", "in", "tax", "rate", "standard", "ugx", "usd"})
 _PERCENT_RE = re.compile(r"(\d{1,3}(?:\.\d{1,3})?)\s?(?:%|per\s?cent(?:um)?)", re.I)
 _UGX_RE = re.compile(r"(?:UGX|Shs\.?|USh)\s?([\d,]{4,}(?:\.\d+)?)", re.I)
 _USD_RE = re.compile(r"(?:USD|US\s?\$|US Dollars?)\s?([\d,]{2,}(?:\.\d+)?)", re.I)
@@ -116,6 +117,21 @@ def _num(value: float) -> str:
     return str(int(value)) if float(value).is_integer() else f"{value:.6g}"
 
 
+def _states_the_figure(matches: list, numbers: dict[str, set[float]], terms: list[str], low: str) -> bool:
+    """Whether the passage states one of the kernel's numbers next to the figure's name."""
+    for kind, match in matches:
+        window = low[max(0, match.start() - _WINDOW):match.end() + _WINDOW]
+        if not all(term in window for term in terms):
+            continue
+        try:
+            number = float(match.group(1).replace(",", ""))
+        except ValueError:
+            continue
+        if any(abs(number - e) < 1e-6 for e in numbers[kind]):
+            return True
+    return False
+
+
 def _fy_start(fiscal_year: str) -> int | None:
     match = re.fullmatch(r"FY(\d{4})-\d{2}", fiscal_year or "")
     return int(match.group(1)) if match else None
@@ -142,6 +158,10 @@ def find_conflicts(facts: list[dict[str, Any]], passages: list[dict[str, Any]]) 
             text = str(hit.get("text") or hit.get("answer") or "")
             low = text.lower()
             matches = [(kind, m) for kind in numbers for m in _PATTERNS[kind].finditer(text)]
+            if _states_the_figure(matches, numbers, terms, low):
+                # It states the kernel's figure for this name; a different number nearby
+                # (the 0% export rate beside the 18% standard rate) is about something else.
+                continue
             for kind, match in sorted(matches, key=lambda km: km[1].start()):
                 window = low[max(0, match.start() - _WINDOW):match.end() + _WINDOW]
                 if not all(term in window for term in terms):
@@ -206,7 +226,8 @@ def check_fused(graph_hit: dict[str, Any], hits: list[dict[str, Any]]) -> list[C
     return _check(graph_hit, hits)[0]
 
 
-def _check(graph_hit: dict[str, Any], hits: list[dict[str, Any]]) -> tuple[list[Conflict], dict[int, Conflict]]:
+def _check(graph_hit: dict[str, Any], hits: list[dict[str, Any]], *,
+           record: bool = True) -> tuple[list[Conflict], dict[int, Conflict]]:
     """Conflicts, and the first one per contradicting hit (by ``id()``). Records only true conflicts."""
     try:
         facts = facts_from_claims(list(graph_hit.get("graph_claims") or []))
@@ -228,7 +249,7 @@ def _check(graph_hit: dict[str, Any], hits: list[dict[str, Any]]) -> tuple[list[
             logger.warning("kernel: %d passage(s) disagree with the kernel (%d superseded editions): %s",
                            len(conflicts), len(conflicts) - len(reportable),
                            ", ".join(sorted({c.key for c in conflicts})))
-            if reportable:
+            if reportable and record:
                 record_conflicts(reportable, kernel_version=str(pin.get("kernel_version") or ""))
         return conflicts, by_hit
     except Exception:
@@ -236,15 +257,18 @@ def _check(graph_hit: dict[str, Any], hits: list[dict[str, Any]]) -> tuple[list[
         return [], {}
 
 
-def apply_precedence(graph_hit: dict[str, Any], hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def apply_precedence(graph_hit: dict[str, Any], hits: list[dict[str, Any]], *,
+                     record: bool = True) -> list[dict[str, Any]]:
     """*hits* with each passage that contradicts the kernel moved below the rest.
 
-    Order is otherwise kept. A moved passage is annotated ``kernel_precedence``
+    Order is otherwise kept. *record* is off when ordering again after later
+    re-ranking (FAQ promotion), so a conflict is queued once per turn.
+    A moved passage is annotated ``kernel_precedence``
     (status, key, kernel and stated values, edition). Never raises: on any error
     *hits* comes back unchanged.
     """
     try:
-        _conflicts, by_hit = _check(graph_hit, hits)
+        _conflicts, by_hit = _check(graph_hit, hits, record=record)
         if not by_hit:
             return hits
         agree, disagree = [], []
@@ -287,3 +311,16 @@ def record_conflicts(conflicts: list[Conflict], *, kernel_version: str) -> int:
         except Exception:
             logger.warning("kernel: could not record an evidence conflict for %s", conflict.key, exc_info=True)
     return recorded
+
+
+def reorder_after_promotion(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Order *hits* by precedence again once FAQ promotion has run (CodeRabbit, PR 706).
+
+    Priority and exact-match FAQ rows are put in front after the graph is fused,
+    so a FAQ contradicting the kernel could lead again and feed the extractive
+    fallback. The graph hit is found in *hits*; without one this is a no-op.
+    """
+    graph_hit = next((h for h in hits if str(h.get("doc_type") or "") == "graph"), None)
+    if graph_hit is None:
+        return hits
+    return apply_precedence(graph_hit, hits, record=False)

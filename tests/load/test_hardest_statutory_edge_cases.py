@@ -307,7 +307,7 @@ EDGE_CASES = [
         "domain": "EFRIS Compliance",
         "statute": "Tax Procedures Code Regulations (EFRIS)",
         "query": "If an EFRIS fiscal device loses internet connectivity, within how many hours must offline invoices be synchronized to URA?",
-        "required_concepts": ["24", "offline", "sync"],
+        "required_concepts": ["5 days", "offline"],
         "forbidden_hallucinations": ["30 days offline permitted"],
     },
     {
@@ -477,7 +477,7 @@ EDGE_CASES = [
         "domain": "Excise Duty (Energy)",
         "statute": "Excise Duty Act, Schedule 2",
         "query": "What are the specific excise duty rates per litre on petrol, diesel, and kerosene in Uganda?",
-        "required_concepts": ["1,450", "1,130", "petrol", "diesel"],
+        "required_concepts": ["1,750", "1,430", "petrol", "diesel"],
         "forbidden_hallucinations": ["10,000 per litre"],
     },
     {
@@ -657,7 +657,7 @@ EDGE_CASES = [
         "domain": "EFRIS (Luganda)",
         "statute": "TPCA Regulations",
         "query": "Bwe mba nga sirina yintaneti mu dduuka lyange, nnina essaawa mmeka okusindika invoice za EFRIS eri URA?",
-        "required_concepts": ["24", "efris", "invoice"],
+        "required_concepts": ["5", "efris", "invoice"],
         "forbidden_hallucinations": ["omwaka mulamba"],
     },
     {

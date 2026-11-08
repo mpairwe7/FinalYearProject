@@ -48,7 +48,22 @@ def _required_props(store: InMemoryGraphStore) -> list[Violation]:
                     found.append(Violation("required", node.id, f"missing {prop.name}"))
                 if prop.pattern and value not in (None, "") and not re.fullmatch(prop.pattern, str(value)):
                     found.append(Violation("pattern", node.id, f"{prop.name}={value!r} does not match {prop.pattern}"))
+                if value is not None and not _type_ok(prop.type, value):
+                    found.append(Violation("type", node.id, f"{prop.name}={value!r} is not {prop.type}"))
     return found
+
+
+def _type_ok(declared: str, value: Any) -> bool:
+    """The model's declared type, as the SHACL shapes check it; ``ANY`` accepts anything."""
+    if declared == "STRING":
+        return isinstance(value, str)
+    if declared == "BOOLEAN":
+        return isinstance(value, bool)
+    if declared == "INTEGER":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if declared == "FLOAT":
+        return isinstance(value, int | float) and not isinstance(value, bool)
+    return True
 
 
 def _cardinalities(store: InMemoryGraphStore) -> list[Violation]:

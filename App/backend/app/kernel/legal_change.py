@@ -25,14 +25,19 @@ Commands::
 
 from __future__ import annotations
 
+import contextlib
 import datetime as _dt
+import fcntl
 import hashlib
 import json
 import os
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 PENDING, APPROVED, REJECTED = "pending", "approved", "rejected"
 
@@ -124,16 +129,26 @@ def _terms(key: str) -> list[str]:
     return [w for w in re.findall(r"[a-z]+", display_name(key).lower()) if len(w) > 3 and w not in stop]
 
 
-def corroborate(key: str, value: Any, candidates: list[Candidate]) -> list[Candidate]:
-    """Act sentences that state *value* and name the figure."""
+def corroborate(key: str, value: Any, candidates: list[Candidate], rivals: list[str] | None = None) -> list[Candidate]:
+    """Act sentences that state *value* and name the figure better than any rival figure.
+
+    A sentence naming another figure (one of *rivals*) with more of its words is
+    evidence for that figure, not this one: an ambiguous match is left out, so
+    the change stays uncorroborated for the reviewer.
+    """
     terms = _terms(key)
+    rival_terms = [_terms(r) for r in (rivals or []) if r != key]
     hits = []
     for kind, expected in _expected(key, value):
         for cand in candidates:
             if cand.kind == kind and abs(cand.value - expected) < 1e-6:
                 low = cand.sentence.lower()
-                if not terms or any(t in low for t in terms):
-                    hits.append(cand)
+                mine = sum(t in low for t in terms)
+                if terms and not mine:
+                    continue
+                if any(sum(t in low for t in other) > mine for other in rival_terms):
+                    continue
+                hits.append(cand)
     return hits
 
 
@@ -157,7 +172,7 @@ def diff(draft: dict[str, Any], candidates: list[Candidate]) -> list[Change]:
             kind = "changed"
         else:
             continue
-        hits = corroborate(key, new[key], candidates)
+        hits = corroborate(key, new[key], candidates, rivals=sorted(set(old) | set(new)))
         out.append(Change(key, kind, old.get(key), new[key], basis.get(key, ""), bool(hits),
                           [asdict(h) for h in hits[:3]]))
     return out
@@ -175,7 +190,7 @@ def propose(draft_path: Path, act_paths: list[Path]) -> dict[str, Any]:
     digest = hashlib.sha256(draft_path.read_bytes()).hexdigest()
     proposal = {
         "id": f"{draft.get('fiscal_year', 'draft')}-{digest[:12]}",
-        "created": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
+        "created": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),  # noqa: UP017 - Python 3.10 dev container
         "fiscal_year": draft.get("fiscal_year", ""),
         "draft": str(draft_path),
         "draft_sha256": digest,
@@ -193,9 +208,33 @@ def propose(draft_path: Path, act_paths: list[Path]) -> dict[str, Any]:
     }
     folder = review_dir()
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / f"{proposal['id']}.json").write_text(json.dumps(proposal, indent=2, ensure_ascii=False) + "\n",
-                                                   encoding="utf-8")
+    path = folder / f"{proposal['id']}.json"
+    with _locked(path):
+        if path.exists():
+            existing = json.loads(path.read_text(encoding="utf-8"))
+            if existing.get("status") != PENDING:
+                # The same draft proposed again keeps its decision; a new draft gets a new id.
+                return existing
+        _write(path, proposal)
     return proposal
+
+
+@contextlib.contextmanager
+def _locked(path: Path) -> Iterator[None]:
+    """An exclusive inter-process lock for one proposal, so two decisions cannot race."""
+    lock = path.with_suffix(path.suffix + ".lock")
+    with lock.open("a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _write(path: Path, proposal: dict[str, Any]) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(proposal, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def list_proposals() -> list[dict[str, Any]]:
@@ -212,23 +251,25 @@ def decide(proposal_id: str, *, approve: bool, reviewer: str, role: str, reason:
     if not approve and not reason.strip():
         raise ValueError("a rejection needs a reason")
     path = review_dir() / f"{proposal_id}.json"
-    proposal = json.loads(path.read_text(encoding="utf-8"))
-    if proposal["status"] != PENDING:
-        raise ValueError(f"proposal {proposal_id} is already {proposal['status']}")
-    # A refinement proposal (app.kernel.refine) has no draft table.
-    draft = Path(proposal["draft"]) if proposal.get("draft") else None
-    if draft is not None and (
-        not draft.exists() or hashlib.sha256(draft.read_bytes()).hexdigest() != proposal["draft_sha256"]
-    ):
-        raise ValueError("the draft table changed after it was proposed, or is missing; propose it again")
-    proposal["status"] = APPROVED if approve else REJECTED
-    proposal["decision"] = {
-        "reviewer": reviewer.strip(),
-        "role": role.strip(),
-        "reason": reason.strip(),
-        "decided_at": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
-    }
-    path.write_text(json.dumps(proposal, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    with _locked(path):
+        proposal = json.loads(path.read_text(encoding="utf-8"))
+        if proposal["status"] != PENDING:
+            raise ValueError(f"proposal {proposal_id} is already {proposal['status']}")
+        # Only an approval needs the draft intact; a stale proposal can always be rejected.
+        # A refinement proposal (app.kernel.refine) has no draft table.
+        draft = Path(proposal["draft"]) if proposal.get("draft") else None
+        if approve and draft is not None and (
+            not draft.exists() or hashlib.sha256(draft.read_bytes()).hexdigest() != proposal["draft_sha256"]
+        ):
+            raise ValueError("the draft table changed after it was proposed, or is missing; propose it again")
+        proposal["status"] = APPROVED if approve else REJECTED
+        proposal["decision"] = {
+            "reviewer": reviewer.strip(),
+            "role": role.strip(),
+            "reason": reason.strip(),
+            "decided_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),  # noqa: UP017 - Python 3.10
+        }
+        _write(path, proposal)
     return proposal
 
 

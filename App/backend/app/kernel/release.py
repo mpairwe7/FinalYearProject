@@ -185,7 +185,7 @@ def proposed_entry(version: str, notes: str, *, reviewer: str = "", role: str = 
             "status": REVIEW_APPROVED if approved else REVIEW_BASELINE,
             "reviewer": reviewer,
             "role": role,
-            "approved_at": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds") if approved else "",
+            "approved_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds") if approved else "",  # noqa: UP017 - Python 3.10 dev container
         },
         "notes": notes,
     }
@@ -205,7 +205,12 @@ def record(version: str, notes: str, *, reviewer: str = "", role: str = "") -> d
         raise ValueError(f"{version} is not newer than {releases[-1]['version']}")
     entry = proposed_entry(version, notes, reviewer=reviewer, role=role)
     if releases and _matches(releases[-1], entry["content_sha256"], entry["rules_sha256"]):
-        raise ValueError("the current content is already released as " + str(releases[-1]["version"]))
+        # The same content may be recorded again only to approve it: the documented
+        # step that turns an engineering baseline into a reviewed release.
+        promotes = (entry["review"]["status"] == REVIEW_APPROVED
+                    and (releases[-1].get("review") or {}).get("status") != REVIEW_APPROVED)
+        if not promotes:
+            raise ValueError("the current content is already released as " + str(releases[-1]["version"]))
     from .functions import kernel_store
 
     write_snapshot(kernel_store())

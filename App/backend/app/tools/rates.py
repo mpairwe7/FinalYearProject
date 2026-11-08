@@ -295,6 +295,10 @@ class LookupRateTool(Tool):
         name = display_name(tax_type)
         fy_text = f" for fiscal year {table.fiscal_year}" if table.fiscal_year else ""
         explanation = f"The official {name} rate{fy_text} is {row['formatted']}."
+        if tax_type in table.unverified:
+            # Unconfirmed figures say so wherever they are quoted, not only in rate_basis.
+            explanation = (f"The {name} recorded{fy_text} is {row['formatted']}, but it has not been confirmed "
+                           "against a gazetted schedule; confirm it with URA or the responsible agency.")
         return {
             "ok": True,
             **row,

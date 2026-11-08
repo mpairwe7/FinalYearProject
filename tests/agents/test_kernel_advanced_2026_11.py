@@ -28,53 +28,66 @@ AUG = _dt.date(2026, 8, 15)
 
 
 class FakeNeo4j:
-    """Interprets exactly the module's fixed statements, and records every call."""
+    """Interprets exactly the module's fixed statements, scoped by release, and records every call."""
 
     def __init__(self) -> None:
-        self.nodes: dict[str, dict] = {}
-        self.edges: dict[tuple[str, str, str], dict] = {}
+        self.nodes: dict[tuple[str, str], dict] = {}
+        self.edges: dict[tuple[str, str, str, str], dict] = {}
+        self.published: dict[str, dict] = {}
         self.calls: list[tuple[str, dict]] = []
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+    def _in(self, release: str) -> dict[str, dict]:
+        return {i: n for (r, i), n in self.nodes.items() if r == release}
 
     def execute_query(self, query: str, params: dict, **_kwargs):
         self.calls.append((query, params))
         q = neo4j_store
-        if query in (q.Q_CONSTRAINT,):
+        rel = params.get("release", "")
+        if query == q.Q_CONSTRAINT:
             return [], None, []
-        if query == q.Q_CLEAR:
-            self.nodes.clear()
-            self.edges.clear()
+        if query == q.Q_PUBLISHED:
+            marker = self.published.get(rel)
+            return ([{"complete": True, **marker}] if marker else []), None, []
+        if query == q.Q_PUBLISH:
+            self.published[rel] = {"nodes": params["nodes"], "edges": params["edges"]}
             return [], None, []
         if query in q.Q_MERGE_NODE.values():
             for row in params["rows"]:
-                self.nodes[row["id"]] = dict(row)
+                self.nodes.setdefault((rel, row["id"]), dict(row))  # ON CREATE: the first write wins
             return [], None, []
         if query in q.Q_MERGE_EDGE.values():
             for row in params["rows"]:
-                if row["src"] in self.nodes and row["dst"] in self.nodes:
-                    self.edges[(row["src"], row["kind"], row["dst"])] = {"kind": row["kind"], "props_json": row["props_json"]}
+                if (rel, row["src"]) in self.nodes and (rel, row["dst"]) in self.nodes:
+                    self.edges.setdefault((rel, row["src"], row["kind"], row["dst"]),
+                                          {"kind": row["kind"], "props_json": row["props_json"]})
             return [], None, []
+        nodes = self._in(rel)
         if query == q.Q_GET:
-            node = self.nodes.get(params["id"])
+            node = nodes.get(params["id"])
             return ([{"n": node}] if node else []), None, []
         if query == q.Q_BY_KIND:
-            return [{"n": n} for i, n in sorted(self.nodes.items()) if n["kind"] == params["kind"]], None, []
+            return [{"n": n} for _i, n in sorted(nodes.items()) if n["kind"] == params["kind"]], None, []
         if query in (q.Q_OUT, q.Q_IN):
             out = []
-            for (src, kind, dst), rel in sorted(self.edges.items(), key=lambda e: (e[0][1], e[0][2], e[0][0])):
-                if params["kinds"] and kind not in params["kinds"]:
+            for (r, src, kind, dst), edge in self.edges.items():
+                if r != rel or (params["kinds"] and kind not in params["kinds"]):
                     continue
                 if query == q.Q_OUT and src == params["id"]:
-                    out.append({"r": rel, "src": src, "dst": dst, "b": self.nodes[dst]})
+                    out.append({"r": edge, "src": src, "dst": dst, "b": nodes[dst]})
                 if query == q.Q_IN and dst == params["id"]:
-                    out.append({"r": rel, "src": src, "dst": dst, "b": self.nodes[src]})
+                    out.append({"r": edge, "src": src, "dst": dst, "b": nodes[src]})
             return sorted(out, key=lambda r: (r["r"]["kind"], r["b"]["id"])), None, []
         if query == q.Q_COUNT_NODES:
             counts: dict[str, int] = {}
-            for n in self.nodes.values():
+            for n in nodes.values():
                 counts[n["kind"]] = counts.get(n["kind"], 0) + 1
             return [{"kind": k, "n": v} for k, v in counts.items()], None, []
         if query == q.Q_COUNT_EDGES:
-            return [{"n": len(self.edges)}], None, []
+            return [{"n": sum(1 for k in self.edges if k[0] == rel)}], None, []
         raise AssertionError(f"unexpected statement: {query}")
 
 

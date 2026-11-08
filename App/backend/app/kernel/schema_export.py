@@ -13,6 +13,7 @@ Run ``python -m app.kernel.schema_export --out DIR`` to write all three.
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -107,7 +108,9 @@ def _literal(value: Any) -> str:
     if isinstance(value, int):
         return f'"{value}"^^xsd:integer'
     if isinstance(value, float):
-        return f'"{value!r}"^^xsd:decimal'
+        # xsd:decimal has no exponent form: 0.00001, never 1e-05.
+        text = format(Decimal(repr(value)), "f")
+        return f'"{text}"^^xsd:decimal'
     if not isinstance(value, str):
         value = json.dumps(value, sort_keys=True)
     escaped = (

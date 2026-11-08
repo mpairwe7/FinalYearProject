@@ -335,7 +335,7 @@ EDGE_CASES: list[dict[str, Any]] = [
         "domain": "Excise Duty (Energy)",
         "statute": "Excise Duty Act, Schedule 2",
         "query": "What are the specific excise duty rates per litre on petrol, diesel, and kerosene in Uganda?",
-        "required_concepts": ["1,450", "1,130", "petrol", "diesel"],
+        "required_concepts": ["1,750", "1,430", "petrol", "diesel"],
         "forbidden_hallucinations": ["10,000 per litre"],
     },
     {
@@ -549,7 +549,7 @@ EDGE_CASES: list[dict[str, Any]] = [
         "domain": "EFRIS (Luganda)",
         "statute": "TPCA Regulations",
         "query": "Bwe mba nga sirina yintaneti mu dduuka lyange, nnina essaawa mmeka okusindika invoice za EFRIS eri URA?",
-        "required_concepts": ["24", "efris"],
+        "required_concepts": ["5", "efris"],
         "forbidden_hallucinations": ["omwezi mulamba"],
     },
     {

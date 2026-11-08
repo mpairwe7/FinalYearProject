@@ -169,3 +169,29 @@ Filled in per phase; see "Implementation record" below.
     (`python -m app.kernel.release check`; a base older than the kernel skips it). The Phase 3
     settings are explicit there (`GRAPH_STORE_BACKEND=memory`, `FLAG_SEMANTIC_LAYER=false`), and
     `/ready` reports the kernel release, graph store, semantic layer and tables in force.
+- CodeRabbit review of PR 706 (41 findings, all verified and fixed). Three had disabled earlier work
+  in production:
+  - The discrepancy queue's CHECK rejected `evidence_conflict`, so no conflict was ever queued. Both
+    schemas now allow it, and existing SQLite and Postgres databases are migrated at start-up.
+  - The kernel pin and trace were reset before the audit row was written, so every row recorded
+    `null`. They now travel on the turn's result, as the plan does.
+  - The REST loop's tool calls never reached the ledger. They are now passed as records.
+
+  Also fixed:
+  - **Precedence:** it is re-applied after FAQ promotion, a passage stating the kernel's figure
+    beside another rate is not a conflict, and "usd" is a unit word.
+  - **Neo4j:** publishes by release, keeps the first write, falls back to memory on a failed read,
+    closes its drivers, and keeps walks within their limits.
+  - **Rules and tools:** duration-dependent penalties need a stated number of months, and
+    non-finite amounts are input errors (ruleset release 1.2.2).
+  - **Approval:** an unchanged baseline can be approved, and legal-change decisions are locked, keep
+    any earlier decision, and allow rejecting a stale draft.
+  - **Semantic layer:** literals in parameters, calendar dates, null certifiers, comma-joined
+    relations and quoted function names are now handled.
+  - **Unverified figures** carry their warning in lookups and workflows.
+  - **Graph tools** bind kernel-tool arguments from the question when it states them.
+  - **Provenance export:** per-turn dates.
+  - **Table reload** refreshes the kernel.
+  - **Python 3.10:** clocks no longer use `datetime.UTC`.
+
+  `tests/agents/test_kernel_review_fixes_2026_11.py`; 29 fixes disabled in turn, each failed it.

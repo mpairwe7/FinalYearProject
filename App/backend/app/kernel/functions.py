@@ -169,7 +169,10 @@ def _lookup(key: str, as_of: _dt.date, store: InMemoryGraphStore | None,
     fy = fiscal_year_on(as_of, store)
     if not fy:
         return NotInKernel(key, "no_fiscal_year", f"no kernel release covers {as_of.isoformat()}", version)
-    node = store.get(fact_id(kind_for_key(key), key, fy))
+    # The current classification first, then every other kind: a snapshot made
+    # before a key was reclassified holds it under its old kind.
+    kinds = [kind_for_key(key)] + [k for k in FACT_KINDS if k is not kind_for_key(key)]
+    node = next((n for n in (store.get(fact_id(k, key, fy)) for k in kinds) if n is not None), None)
     if node is None:
         return NotInKernel(key, "not_in_year", f"{key} is not defined for {fy}", version)
     return _fact(store, node, version)

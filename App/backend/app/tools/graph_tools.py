@@ -447,10 +447,13 @@ class KernelComputePenaltyTool(Tool):
             },
         )
 
-    def execute(self, rule: str, amount: float, months: int = 0, penal_tax: float = 0,
+    def execute(self, rule: str, amount: float, months: int | None = None, penal_tax: float = 0,
                 date: str = "") -> dict[str, Any]:
         if not _enabled():
             return dict(_DISABLED)
+        if months is None and rule in ("late_filing_penal_tax", "late_payment_interest"):
+            # A missing duration is not "not late": an explicit 0 is accepted, an omission is not.
+            return {"ok": False, "error": f"{rule} needs months (each month or part-month late, or unpaid)"}
         day = _as_of(date)
         if isinstance(day, dict):
             return day

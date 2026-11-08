@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -52,7 +52,7 @@ def _pseudonym(user_id: str) -> str:
 
 
 def _iso(ts: float) -> str:
-    return datetime.fromtimestamp(float(ts or 0), UTC).isoformat()
+    return datetime.fromtimestamp(float(ts or 0), timezone.utc).isoformat()  # noqa: UP017 - 3.10
 
 
 def turn_nodes(row: dict[str, Any]) -> list[dict[str, Any]]:
@@ -69,7 +69,7 @@ def turn_nodes(row: dict[str, Any]) -> list[dict[str, Any]]:
         used.append(kernel_id)
         nodes.append({"@id": kernel_id, "@type": ["prov:Entity", "agento:KnowledgeBase"],
                       "ura:contentSha256": pin.get("content_sha256", ""),
-                      "ura:rulesetVersion": pin.get("ruleset_version", ""), "ura:asOf": pin.get("as_of", "")})
+                      "ura:rulesetVersion": pin.get("ruleset_version", "")})
     model = str(payload.get("model") or "")
     model_id = f"urn:ura-model:{model}" if model else ""
     if model_id:
@@ -112,6 +112,8 @@ def turn_nodes(row: dict[str, Any]) -> list[dict[str, Any]]:
         "ura:outcome": payload.get("outcome", ""),
         "ura:subject": _pseudonym(str(row.get("user_id") or "")),
         "ura:rowHash": row.get("row_hash", ""),
+        # Per turn, not on the shared release node: turns under one release differ in date.
+        "ura:asOf": (pin or {}).get("as_of", ""),
     }
     nodes.append(activity)
     if payload.get("reply_sha256"):
@@ -127,8 +129,25 @@ def export(rows: list[dict[str, Any]]) -> dict[str, Any]:
         if row.get("event_type") != "generate":
             continue
         for node in turn_nodes(row):
-            graph.setdefault(node["@id"], node)
+            existing = graph.get(node["@id"])
+            if existing is None:
+                graph[node["@id"]] = node
+                continue
+            # A shared node (the agent, a tool, a release) keeps every link any turn gave it.
+            for field in _LINK_FIELDS:
+                if field in node:
+                    merged = set(_as_list(existing.get(field))) | set(_as_list(node[field]))
+                    existing[field] = sorted(merged)
     return {"@context": CONTEXT, "@graph": [graph[k] for k in sorted(graph)]}
+
+
+_LINK_FIELDS = ("agento:usesTool", "agento:useLanguageModel", "agento:hasKnowledge")
+
+
+def _as_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    return [str(v) for v in value] if isinstance(value, list) else [str(value)]
 
 
 def export_ledger(tenant_id: str = "default", *, page: int = 200) -> dict[str, Any]:

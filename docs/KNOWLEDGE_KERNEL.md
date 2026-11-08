@@ -109,7 +109,8 @@ amendments booklet, which also corrected the quarterly VAT test.
 ## Readiness
 
 `GET /ready` includes `capabilities.kernel` (release, review status, ruleset),
-`capabilities.graph_store`, `capabilities.semantic_layer` and `capabilities.rate_tables` (years held,
+`capabilities.graph_store` (configured), `capabilities.graph_store_active` (serving now),
+`capabilities.semantic_layer` and `capabilities.rate_tables` (years held,
 year in force, coverage), so a deploy can be checked from outside.
 
 ## Pinning
@@ -227,6 +228,10 @@ fusion read.
   Labels and relationship types come from the `NodeKind` and `EdgeKind` enums.
 - **Bounded walks:** walks use the in-memory bounds (`MAX_HOPS` 3, `MAX_NODES` 200).
 - **Round-trip:** properties are stored as JSON, so a tuple comes back as a list.
+- **By release:** nodes carry the release's content hash. A sync merges without clearing (the first
+  write wins, as in memory) and then marks the release complete. A release is read only once
+  complete, so workers on different releases never mix. A failed read falls back to the in-memory
+  graph.
 - **Production gate:** a connection needs `neo4j+s://` or `bolt+s://` and credentials. If Neo4j is
   unreachable, the in-memory graph is served.
 

@@ -13,6 +13,7 @@ individual taxpayer's figures leave the database.
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
 import re
@@ -81,6 +82,11 @@ class Metric:
             elif kind in _PARAM_TYPES:
                 if not isinstance(value, str) or not _PARAM_TYPES[kind].match(value):
                     raise MetricError(f"{name} must be a {kind}")
+                if kind == "date":
+                    try:
+                        _dt.date.fromisoformat(value)
+                    except ValueError as exc:
+                        raise MetricError(f"{name} is not a calendar date") from exc
                 allowed = self.allowed_values.get(name)
                 if allowed is not None and value not in allowed:
                     raise MetricError(f"{name} must be one of {', '.join(allowed)}")
@@ -88,6 +94,16 @@ class Metric:
                 raise MetricError(f"{self.id}: parameter {name} has no known type")
             bound[name] = value
         return bound
+
+
+def _text(raw: dict[str, Any], field: str, default: str = "") -> str:
+    """A text field; ``null`` or a non-string is refused, never turned into ``"None"``."""
+    value = raw.get(field, default)
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise MetricError(f"{raw.get('id', '?')}: {field} must be text")
+    return value
 
 
 def _metric(raw: dict[str, Any]) -> Metric:
@@ -100,9 +116,9 @@ def _metric(raw: dict[str, Any]) -> Metric:
         sources=frozenset(raw.get("sources") or ()),
         parameters=dict(raw.get("parameters") or {}),
         min_group_size=int(raw.get("min_group_size", MIN_GROUP_FLOOR)),
-        status=str(raw.get("status", "draft")),
-        certified_by=str(raw.get("certified_by", "")),
-        certified_at=str(raw.get("certified_at", "")),
+        status=_text(raw, "status", "draft"),
+        certified_by=_text(raw, "certified_by"),
+        certified_at=_text(raw, "certified_at"),
         allowed_values={k: list(v) for k, v in (raw.get("allowed_values") or {}).items()},
     )
     bound = check(metric.sql, sources=metric.sources)

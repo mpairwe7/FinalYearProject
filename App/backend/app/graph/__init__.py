@@ -42,9 +42,26 @@ def get_graph() -> GraphStore:
 
 
 def reset_graph() -> None:
-    """Drop the cached graph — for tests and for a rate-table reload."""
+    """Drop the cached graph — for tests and for a rate-table reload.
+
+    A Neo4j-backed store holds a driver connection pool, so it is closed.
+    """
     global _GRAPH
-    _GRAPH = None
+    previous, _GRAPH = _GRAPH, None
+    close = getattr(previous, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:  # noqa: BLE001 - a failed close must not stop the reset
+            logger.warning("graph store close failed", exc_info=True)
+
+
+def active_store_name() -> str:
+    """The store serving now, for readiness: ``not loaded``, ``memory``, ``neo4j`` or a fallback."""
+    if _GRAPH is None:
+        return "not loaded"
+    name = getattr(_GRAPH, "active_name", None)
+    return name() if callable(name) else "memory"
 
 
 __all__ = [

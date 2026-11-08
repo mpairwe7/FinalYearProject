@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 import logging
 import os
 import re
 import sqlite3
 import time
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -18,11 +20,39 @@ logger = logging.getLogger(__name__)
 
 MAX_ROWS = 500
 TIMEOUT_S = 10.0
+CONNECT_TIMEOUT_S = 5
 _NAMED_RE = re.compile(r"(?<!:):([A-Za-z_][A-Za-z0-9_]*)")
 
 
 class Executor(Protocol):
     def run(self, sql: str, params: dict[str, Any], *, max_rows: int, timeout_s: float) -> tuple[list[str], list[tuple]]: ...
+
+
+_LITERAL_RE = re.compile(r"'(?:[^']|'')*'")
+
+
+def to_pyformat(sql: str) -> str:
+    """Named ``:params`` to psycopg's ``%(name)s``, leaving string literals alone.
+
+    Every ``%`` is doubled first, so a literal such as ``'VAT%'`` is not read as a
+    placeholder, and a ``:word`` inside a literal (``'urn:sector'``) is not a parameter.
+    """
+    out, last = [], 0
+    for literal in _LITERAL_RE.finditer(sql):
+        out.append(_NAMED_RE.sub(r"%(\1)s", sql[last:literal.start()].replace("%", "%%")))
+        out.append(literal.group(0).replace("%", "%%"))
+        last = literal.end()
+    out.append(_NAMED_RE.sub(r"%(\1)s", sql[last:].replace("%", "%%")))
+    return "".join(out)
+
+
+def _jsonable(value: Any) -> Any:
+    """A database value as JSON can carry it (NUMERIC arrives as Decimal, DATE as date)."""
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    if isinstance(value, _dt.date | _dt.datetime):
+        return value.isoformat()
+    return value
 
 
 def _capped(sql: str, max_rows: int) -> str:
@@ -61,7 +91,7 @@ class PostgresExecutor:
             cur = conn.cursor()
             cur.execute("SET TRANSACTION READ ONLY")
             cur.execute(f"SET LOCAL statement_timeout = {int(timeout_s * 1000)}")
-            cur.execute(_NAMED_RE.sub(r"%(\1)s", _capped(sql, max_rows)), params)
+            cur.execute(to_pyformat(_capped(sql, max_rows)), params)
             columns = [c[0] for c in cur.description or ()]
             rows = cur.fetchmany(max_rows + 1)
             conn.rollback()
@@ -104,7 +134,8 @@ class SemanticLayer:
         if "group_size" not in columns:
             raise MetricError(f"{metric_id} returned no group_size column")
         at = columns.index("group_size")
-        kept = [dict(zip(columns, r, strict=True)) for r in rows if int(r[at] or 0) >= metric.min_group_size]
+        kept = [{c: _jsonable(v) for c, v in zip(columns, r, strict=True)} for r in rows
+                if int(r[at] or 0) >= metric.min_group_size]
         logger.info("semantic metric %s: %d rows, %d suppressed", metric_id, len(kept), len(rows) - len(kept))
         return {"ok": True, "metric": metric_id, "columns": columns, "rows": kept, "suppressed_rows": len(rows) - len(kept),
                 "truncated": truncated, "min_group_size": metric.min_group_size,
@@ -135,7 +166,8 @@ def get_layer() -> SemanticLayer | None:
             import psycopg  # optional: only a connected deployment needs it
 
             secret = vault_secret(vault_path)
-            return psycopg.connect(secret["dsn"])
+            # A stalled connect must not hold a worker: bounded, and well inside the tool's time.
+            return psycopg.connect(secret["dsn"], connect_timeout=CONNECT_TIMEOUT_S)
 
         executor = PostgresExecutor(connect)
     else:

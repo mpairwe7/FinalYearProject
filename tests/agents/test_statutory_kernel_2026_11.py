@@ -219,6 +219,18 @@ def test_a_release_must_be_newer_and_new(monkeypatch: pytest.MonkeyPatch, tmp_pa
         release.record("99.0.0", "same content")
 
 
+def test_an_unchanged_baseline_can_be_approved_once(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    registry = tmp_path / "releases.json"
+    registry.write_text(release.REGISTRY.read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setattr(release, "REGISTRY", registry)
+    monkeypatch.setattr(release, "SNAPSHOT_DIR", tmp_path / "snapshots")
+    approved = release.record("99.0.0", "reviewed", reviewer="A. Officer", role="Commissioner, Tax Policy")
+    assert approved["review"]["status"] == release.REVIEW_APPROVED
+    with pytest.raises(ValueError, match="already released"):
+        release.record("99.0.1", "approved twice", reviewer="A. Officer", role="Commissioner, Tax Policy")
+    release.clear_cache()
+
+
 def test_an_approval_needs_a_named_reviewer() -> None:
     assert release.proposed_entry("9.9.9", "x")["review"]["status"] == release.REVIEW_BASELINE
     approved = release.proposed_entry("9.9.9", "x", reviewer="A. Officer", role="Commissioner Tax Policy")

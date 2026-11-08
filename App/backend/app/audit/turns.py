@@ -108,6 +108,9 @@ def provenance() -> dict[str, Any]:
     return dict(value)
 
 
+_TOOL_NAME_RE = re.compile(r"[A-Za-z][A-Za-z0-9_.:-]{0,79}")
+
+
 def _tool_call_digests(tool_calls: Iterable[Any]) -> list[dict[str, Any]]:
     """Tool name, iteration and an arguments digest — never raw arguments or results.
 
@@ -117,6 +120,10 @@ def _tool_call_digests(tool_calls: Iterable[Any]) -> list[dict[str, Any]]:
     """
     entries: list[dict[str, Any]] = []
     for call in list(tool_calls or [])[:_MAX_LISTED]:
+        if isinstance(call, str) and _TOOL_NAME_RE.fullmatch(call):
+            # A path that recorded only the name still names the tool (the REST loop did);
+            # a string that is not a tool name is junk and is dropped, as before.
+            call = {"name": call}
         if not isinstance(call, dict):
             continue
         arguments = call.get("arguments")
@@ -331,8 +338,10 @@ def build_turn_payload(
         "provenance": provenance(),
         # The kernel release, ruleset and as-of date the turn answered under,
         # so the answer can be replayed against the same knowledge (ADR-0033).
-        "kernel_pin": _kernel_pin(),
-        "kernel_trace": _kernel_trace(),
+        # Carried on the result by the turn's scope, which closes before this row is
+        # built; the live context is the fallback for callers inside the scope.
+        "kernel_pin": result.get("_kernel_pin") or _kernel_pin(),
+        "kernel_trace": result.get("_kernel_trace") or _kernel_trace(),
     }
     try:
         from ..flags import flags

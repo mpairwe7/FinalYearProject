@@ -340,6 +340,11 @@ def resolve_workflow_side_question(user_input: str) -> str:
             if res.get("ok") and res.get("formatted"):
                 name = res.get("display_name") or res.get("tax_type")
                 fy = f" ({res['fiscal_year']})" if res.get("fiscal_year") else ""
+                basis = res.get("rate_basis") if isinstance(res.get("rate_basis"), dict) else {}
+                if rate_plan.tax_type in (basis.get("unverified") or []):
+                    # An unconfirmed figure keeps its warning inside a workflow too.
+                    return (f"Regarding your question: the {name}{fy} is recorded as {res['formatted']}, but it has "
+                            "not been confirmed against a gazetted schedule; confirm it before paying.")
                 return f"Regarding your question: the official {name} rate{fy} is {res['formatted']}."
     except Exception:
         logger.debug("workflow side-question rate lookup skipped", exc_info=True)

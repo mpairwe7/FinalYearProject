@@ -232,6 +232,7 @@ owasp_llm:
       - "tests/agents/test_kernel_core_2026_11.py"
       - "tests/agents/test_rate_table_verification_2026_11.py"
       - "tests/agents/test_kernel_freshness_2026_11.py"
+      - "tests/agents/test_kernel_review_fixes_2026_11.py"
   - id: "LLM10"
     name: "Unbounded Consumption"
     status: "mitigated"

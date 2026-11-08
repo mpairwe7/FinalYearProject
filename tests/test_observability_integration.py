@@ -139,6 +139,21 @@ def pipeline(client, monkeypatch):
         yield model
 
 
+
+def _assert_kernel_pin(row: dict) -> None:
+    """The row names the kernel release the turn answered under (ADR-0033).
+
+    The turn's scope closes before the row is written, so the pin travels on
+    the result; before that it was reset first and every row recorded null.
+    """
+    from app.kernel.release import current
+
+    pin = row.get("kernel_pin")
+    assert isinstance(pin, dict), f"no kernel pin on the audit row: {pin!r}"
+    assert pin["kernel_version"] == current().version
+    assert pin["as_of"]
+
+
 def test_rest_turn_is_audited_with_the_served_reply(client, pipeline):
     conversation_id = f"obs-rest-{uuid.uuid4().hex[:10]}"
     key = 'chat_turns_total{channel="rest",outcome="answered"}'
@@ -153,7 +168,7 @@ def test_rest_turn_is_audited_with_the_served_reply(client, pipeline):
     assert rows[0]["channel"] == "rest"
     assert rows[0]["reply_sha256"] == _sha(resp.json()["reply"])
     assert rows[0]["schema"] == TURN_PAYLOAD_SCHEMA
-    assert {"kernel_pin", "kernel_trace"} <= set(rows[0]), "schema 4 and 5 fields (ADR-0033)"
+    _assert_kernel_pin(rows[0])
 
 
 def test_streamed_turn_is_audited_and_counted(client, pipeline):
@@ -170,6 +185,7 @@ def test_streamed_turn_is_audited_and_counted(client, pipeline):
     assert len(rows) == 1, f"streamed turn left {len(rows)} audit rows"
     assert rows[0]["channel"] == "sse"
     assert rows[0]["reply_sha256"] != _sha("")
+    _assert_kernel_pin(rows[0])
     # Generated on the token-pump thread: lost unless the thread copies the context.
     assert rows[0]["usage"]["input_tokens"] == STREAM_INPUT_TOKENS
     assert rows[0]["usage"]["source"] == "provider"

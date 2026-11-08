@@ -28,8 +28,12 @@ cd App/backend && PYTHONPATH=. python -m app.graph.neo4j_store            # add 
 3. Set `GRAPH_STORE_BACKEND=neo4j`, `NEO4J_URI=neo4j+s://...` (or `bolt+s://`), `NEO4J_USER`,
    `NEO4J_PASSWORD` and optionally `NEO4J_DATABASE`. Production refuses to start with `bolt://`,
    `neo4j://`, `neo4j+ssc://` or missing credentials.
-4. Restart. On first use, the graph is built in memory and synced to Neo4j, which is cleared and
-   rewritten. The kernel's own hashed store stays in memory, so releases, pins and replay are unchanged.
+4. Restart. On first use, the graph is built in memory and synced to Neo4j as this release (nodes
+   carry the release's content hash). Nothing is cleared. A release another worker has already
+   marked complete is not rewritten, and older releases stay readable for turns pinned to them. The
+   kernel's own hashed store stays in memory, so releases, pins and replay are unchanged.
+   To remove an old release after no turn can be pinned to it, delete its nodes from Neo4j yourself:
+   `MATCH (n:Kernel {release: $old}) DETACH DELETE n`, then remove its `KernelRelease` marker.
 5. If Neo4j is unreachable, the log says "Neo4j graph backend unavailable; serving in memory", and
    answers continue from memory.
 

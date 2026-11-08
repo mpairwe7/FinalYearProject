@@ -55,9 +55,11 @@ def suggestions(rows: list[dict[str, Any]], conflicts: list[dict[str, Any]] | No
     for trace in _turn_traces(rows):
         for item in {(m.get("concept", ""), m.get("reason", "")) for m in trace.get("misses") or []}:
             misses[item] += 1
-        for item in {(u.get("key", ""), u.get("fiscal_year", "")) for u in trace.get("uncited_served") or []}:
-            uncited[item[0]] += 1
-            years[item[0]].add(item[1])
+        served = [(u.get("key", ""), u.get("fiscal_year", "")) for u in trace.get("uncited_served") or []]
+        for key in {k for k, _ in served}:
+            uncited[key] += 1  # once per turn, however many years it was served for
+        for key, fiscal_year in served:
+            years[key].add(fiscal_year)
 
     out: list[dict[str, Any]] = []
     for (concept, reason), turns in misses.most_common():
@@ -88,7 +90,7 @@ def propose(items: list[dict[str, Any]]) -> dict[str, Any] | None:
     proposal = {
         "id": f"refine-{digest[:12]}",
         "type": "refinement",
-        "created": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
+        "created": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),  # noqa: UP017 - Python 3.10 dev container
         "changes": items,
         "summary": {
             "changes": len(items),

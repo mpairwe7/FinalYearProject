@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import statistics
 import time
 from dataclasses import asdict, dataclass
@@ -50,7 +51,7 @@ def percentile(values: list[float], q: float) -> float:
     if not values:
         return 0.0
     ordered = sorted(values)
-    rank = max(1, min(len(ordered), int(round(q / 100 * len(ordered) + 0.5))))
+    rank = max(1, min(len(ordered), math.ceil(q / 100 * len(ordered))))
     return ordered[rank - 1]
 
 
@@ -69,6 +70,8 @@ def summarise(concurrency: int, latencies: list[float], errors: int) -> LevelRep
 
 async def run_level(send: Any, concurrency: int, requests: int) -> LevelReport:
     """Send *requests* prompts with at most *concurrency* in flight; *send* is an async callable."""
+    if concurrency < 1:
+        raise ValueError("concurrency must be at least 1")  # a 0 semaphore would wait forever
     gate = asyncio.Semaphore(concurrency)
     latencies: list[float] = []
     errors = 0
@@ -117,6 +120,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--out", type=Path)
     args = parser.parse_args(argv)
+    if any(level < 1 for level in args.levels) or args.requests < 1:
+        parser.error("--levels and --requests must be positive")
     send = http_sender(args.base_url, args.model, args.max_tokens, args.timeout)
     reports = asyncio.run(bench(send, args.levels, args.requests))
     document = {"model": args.model, "base_url": args.base_url, "p95_target_s": P95_TARGET_S,
