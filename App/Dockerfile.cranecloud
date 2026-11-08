@@ -190,6 +190,12 @@ COPY App/Data/faq_jsonl   /app/Data/faq_jsonl
 COPY App/Data/teacher_qa  /app/Data/teacher_qa
 COPY App/Data/pdf_jsonl   /app/Data/pdf_jsonl
 COPY App/Data/crawl_jsonl /app/Data/crawl_jsonl
+# The local dense leg's model and corpus vectors (ADR-0034), produced by the
+# build workflow's "Embed the corpus for the dense leg" step. The HF Space layer
+# loads them into pgvector; nothing reads them unless LOCAL_DENSE_BACKEND=pgvector.
+# A sparse-only build needs nothing extra: App/Data/dense/.keep is tracked, so the
+# directory is always in the context and the HF layer notes that no vectors shipped.
+COPY App/Data/dense       /app/Data/dense
 
 # Frontend: copy the Next.js standalone output ONLY.
 COPY --from=frontend-builder /build/frontend/.next/standalone /app/frontend

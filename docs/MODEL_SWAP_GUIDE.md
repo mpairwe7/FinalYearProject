@@ -135,6 +135,26 @@ python -m App.backend.app.indexer --recreate
 python -m App.backend.app.indexer
 ```
 
+### CPU deployments: the local dense leg (ADR-0034)
+
+The HF Space does not use `DENSE_MODEL`: its Qdrant collection is sparse-only, and its dense
+signal comes from `intfloat/multilingual-e5-small` in pgvector (`LOCAL_DENSE_BACKEND=pgvector`).
+The model is pinned in `App/backend/app/dense_cpu.py` by revision and by the SHA-256 of
+`onnx/model.onnx` and `tokenizer.json`.
+
+To swap it:
+
+1. Change `MODEL_REPO`, `MODEL_REVISION`, `MODEL_FILES` and `DIM` in `dense_cpu.py`, and the
+   `vector(384)` literal in `pgvector_dense.py`. `test_the_sql_spells_out_the_names_it_is_built_from`
+   fails until they agree.
+2. Keep the query and passage prefixes and the pooling right for the new model; e5 uses
+   `query: ` / `passage: ` and mean pooling.
+3. Merge. The change to `dense_cpu.py` misses the CI cache, so the build re-embeds the corpus
+   (about 15–20 minutes), and the Space loads the new vectors.
+
+A table built for another model is refused at startup, so a half-done swap serves BM25 alone,
+never mismatched vectors. Operations: `docs/runbooks/local-dense-pgvector.md`.
+
 ---
 
 ## 3. Reranker (Cross-Encoder)

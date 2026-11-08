@@ -1184,6 +1184,10 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
         "retrieval": retrieval_mode,
         "reranker": "active" if has_reranker else "disabled",
         "dense_device": dense_dev,
+        # The pgvector dense leg beside a sparse-only collection (ADR-0034): its
+        # model and size, "off", or why it is unavailable. An unavailable leg
+        # degrades to BM25 alone, which only this field shows.
+        "local_dense": _local_dense_status(getattr(model, "_retriever", None)),
         "procedural_memory": "active",
     }
     # The statutory kernel's state (ADR-0033): release, graph backend, semantic layer,
@@ -1199,6 +1203,14 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
         retrieval_mode=retrieval_mode,
         capabilities=capabilities,
     )
+
+
+def _local_dense_status(retriever: Any) -> str:
+    status = getattr(retriever, "local_dense_status", None)
+    try:
+        return str(status()) if callable(status) else "off"
+    except Exception:  # noqa: BLE001 - never fails the probe
+        return "unknown"
 
 
 @app.get("/v1/authority/status", tags=["admin"])

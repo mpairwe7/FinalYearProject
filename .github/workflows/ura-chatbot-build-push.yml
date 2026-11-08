@@ -144,6 +144,36 @@ jobs:
             python -m app.indexer --export-pdf-jsonl
           fi
 
+      # The local dense leg (ADR-0034): the pinned CPU model and the corpus
+      # embedded with it, baked into the image as App/Data/dense. Embedding the
+      # whole corpus takes minutes on a runner, so it is cached on the corpus and
+      # on the code that decides what is embedded and under which point id
+      # (point_ids.py, not all of retriever.py); the Space build only loads the
+      # vectors into pgvector, and refuses them if their point ids do not match
+      # the baked Qdrant collection exactly. Same reviewed cache trust boundary
+      # as the PDF corpus above.
+      - name: Cache the dense leg's model and vectors
+        id: dense-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0  # zizmor: ignore[cache-poisoning]
+        with:
+          path: App/Data/dense
+          key: dense-e5s-v1-${{ hashFiles('App/Data/faq_jsonl/**', 'App/Data/teacher_qa/**', 'App/Data/pdf_jsonl/**', 'App/Data/crawl_jsonl/**', 'Data/dataset/**', 'App/backend/app/dense_cpu.py', 'App/backend/app/pgvector_dense.py', 'App/backend/app/indexer.py', 'App/backend/app/point_ids.py') }}
+      - name: Embed the corpus for the dense leg
+        if: steps.dense-cache.outputs.cache-hit != 'true'
+        working-directory: App/backend
+        env:
+          PYTHONPATH: .:${{ github.workspace }}
+          # Every runner core: the first build after a corpus change embeds it all.
+          LOCAL_DENSE_THREADS: "4"
+        run: |
+          set -euo pipefail
+          # What app.retriever imports (the point ids come from it), at the image's
+          # own constraints, plus the embedder; not the whole image set, which
+          # targets the image's Python rather than this runner's.
+          pip install "fastapi>=0.141.1,<0.142" "numpy>=1.26,<2.5" "python-multipart>=0.0.18" \
+            "prometheus-client>=0.26.0" "onnxruntime==1.23.2" "tokenizers==0.22.2" "huggingface_hub==1.27.0"
+          python -m app.pgvector_dense build-artifact --out ../Data/dense
+
       # Derive tag list:
       #   type=ref      — branch name (dev / main / feature-X)
       #   type=sha      — sha-<short>, always present (used by deploy)
