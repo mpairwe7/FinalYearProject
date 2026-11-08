@@ -217,13 +217,11 @@ def _importers_of_service() -> dict[str, set[str]]:
 #: Transports and composition roots that may hold a ChatModel.
 _SERVICE_IMPORTERS = {
     "main.py", "chat_ws_v2.py", "voice_stream.py", "voice_stream_v2.py", "receptionist/brain.py",
-    "officer_chat.py", "chat_title.py", "agents/graphs/main_graph.py",
+    "officer_chat.py", "chat_title.py",
 }
-#: The graph's reach into the orchestrator's privates, frozen until extracted (G486).
-_GRAPH_SERVICE_PRIVATES = {
-    "_live_research_for_turn", "_filter_unbound_faq_hits", "_promote_equivalent_faq_hits", "_endpoint_model",
-    "_note_generation", "_answer_in_english", "_note_passage_served", "_with_live_check_disclosure",
-}
+#: The modules G486 extracted from the orchestrator. Each is shared by the
+#: orchestrator and the graph, so none may reach back up into either.
+_EXTRACTED = ("turn_record.py", "live_research_turn.py", "english_rendering.py", "faq_binding.py")
 
 
 def test_turn_context_is_a_leaf() -> None:
@@ -236,7 +234,7 @@ def test_the_security_layer_and_tools_do_not_reach_into_the_orchestrator() -> No
     importers = _importers_of_service()
 
     for lower in ("guardrails.py", "agents/evaluator.py", "tools/empathy.py", "query.py", "retriever.py",
-                  "context_manager.py", "corrective_rag.py", "turn_context.py"):
+                  "context_manager.py", "corrective_rag.py", "turn_context.py", *_EXTRACTED):
         assert lower not in importers, lower
 
 
@@ -244,10 +242,15 @@ def test_no_new_module_imports_the_orchestrator() -> None:
     assert set(_importers_of_service()) <= _SERVICE_IMPORTERS
 
 
-def test_the_graph_takes_no_new_orchestrator_privates() -> None:
-    names = _importers_of_service().get("agents/graphs/main_graph.py", set())
+def test_the_graph_does_not_import_the_orchestrator() -> None:
+    """G486: the graph took eight service privates; they now live in leaf-ward modules."""
+    assert "agents/graphs/main_graph.py" not in _importers_of_service()
 
-    assert names <= _GRAPH_SERVICE_PRIVATES
+
+def test_the_extracted_modules_do_not_import_the_graph() -> None:
+    for name in _EXTRACTED:
+        modules = [module for module, _ in _imports_of(APP / name)]
+        assert not [m for m in modules if m.startswith("app.agents")], name
 
 
 def test_service_reexports_the_same_turn_context() -> None:

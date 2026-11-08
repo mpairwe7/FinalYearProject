@@ -404,6 +404,11 @@ App/backend/app/
 ├── topics.py            # G6 conversation topic catalog + persist/follow-up bind
 ├── llm.py               # Qwen3-8B generation (local + vLLM + tool-calling + LoRA)
 ├── query.py             # Query rewriting (abbreviations, spelling, coreference, lang detect)
+├── turn_context.py      # Turn ContextVars: identifiers, case facts, tenant, generation, live check (leaf, ADR-0031)
+├── turn_record.py       # What served the turn: backend, model, degradation (G486)
+├── live_research_turn.py # One live-research step for REST, SSE and the graph (G486)
+├── english_rendering.py # English-decided reply translated back; the one patch point (G486)
+├── faq_binding.py       # FAQ binding, equivalence promotion and acronym folding (G486)
 ├── cache.py             # Semantic response cache (memory or Redis backend)
 ├── corrective_rag.py    # Corrective re-retrieval + clarification detection
 ├── guardrails.py        # InputGuard + OutputGuard (OWASP LLM Top 10 2025)

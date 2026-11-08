@@ -182,7 +182,7 @@ def stream(monkeypatch):
 
     monkeypatch.setattr(service_module.llm_module, "is_available", lambda: True)
     monkeypatch.setattr(service_module.llm_module, "can_generate_in_locale", lambda _locale: True)
-    monkeypatch.setattr(service_module, "_answer_in_english", lambda text: text)
+    monkeypatch.setattr("app.english_rendering.answer_in_english", lambda text: text)
     monkeypatch.setattr(OutputGuard, "should_abstain", lambda _self, _hits, locale="en": False)
     return install
 
@@ -295,7 +295,7 @@ class TestAnUnverifiedFigureIsNeverShown:
         # The tool loop produces its reply whole, so waiting costs nothing.
         monkeypatch.setattr(service_module.llm_module, "is_available", lambda: True)
         monkeypatch.setattr(service_module.llm_module, "can_generate_in_locale", lambda _locale: True)
-        monkeypatch.setattr(service_module, "_answer_in_english", lambda text: text)
+        monkeypatch.setattr("app.english_rendering.answer_in_english", lambda text: text)
         monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: CONTRADICTED)
         monkeypatch.setattr(
             service_module,
@@ -500,7 +500,7 @@ class TestATruncatedLoopIsNotAFinishedAnswer:
     def test_the_stream_says_so_too(self, monkeypatch) -> None:
         monkeypatch.setattr(service_module.llm_module, "is_available", lambda: True)
         monkeypatch.setattr(service_module.llm_module, "can_generate_in_locale", lambda _locale: True)
-        monkeypatch.setattr(service_module, "_answer_in_english", lambda text: text)
+        monkeypatch.setattr("app.english_rendering.answer_in_english", lambda text: text)
         monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
         monkeypatch.setattr(
             service_module,

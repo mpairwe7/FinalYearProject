@@ -180,6 +180,7 @@ def generation_pinned(client):
          mock.patch.object(service_module.ChatModel, "_maybe_handle_fast_paths", return_value=None), \
          mock.patch.object(service_module.flags, "is_enabled", side_effect=flags_on), \
          mock.patch.object(service_module, "translate_query_for_retrieval", return_value=EN_ANSWER), \
+         mock.patch("app.english_rendering.translate_query_for_retrieval", return_value=EN_ANSWER), \
          mock.patch.object(model._output_guard, "should_abstain", return_value=False), \
          mock.patch.object(model._cache, "get", return_value=None), \
          mock.patch.object(model._cache, "put"):
