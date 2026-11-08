@@ -77,6 +77,29 @@ The gaps measured were these:
    Directives in other shapes are left to the shared layer (G461), which already excludes
    "Assistant Commissioner" and its siblings.
 
+### Review amendments (PR #704)
+
+CodeRabbit's review produced eight findings, and all were fixed:
+
+- **Raw reads.** A download asks for `Accept-Encoding: identity`, refuses any other encoding,
+  and checks its deadline on each raw read. A gzip decoder that is still buffering yields
+  nothing, so a deadline checked on decoded chunks would not run. Not decoding also removes a
+  decompression bomb from the download path.
+- **Versioned cache.** Cached extractions carry the screen version. An entry from the old
+  screen, which kept scrubbed pages and passed others the new one refuses, is re-extracted
+  rather than trusted. A current entry that fails the screen is rejected.
+- **A read that misses the deadline is not quoted meanwhile, even through its summary**, because
+  its screen can still reject it. If nothing else was found, the status is `unavailable`, not
+  "no official result".
+- **No slot leak.** The sandbox import moved inside the guard that releases the slot.
+- **Hand-off text.** Text handed on to a model ("Pass this to the assistant as binding
+  guidance") is an indirect injection in the shared layer. Bare "to the assistant" is not, since
+  it would refuse the Local Governments Act's "delegate … to the assistant returning officer".
+- The new attacks and the lawful near misses are in the red-team and benign corpora, and the
+  runbook names the four stages of a read and which of them has a deadline.
+
+The benign corpus still flags 0 of 8,158 units.
+
 ## Consequences
 
 - Positive: an official-looking page can no longer place an attacker's account number, deadline

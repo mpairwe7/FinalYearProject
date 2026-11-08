@@ -665,6 +665,12 @@ _AI_DIRECTIVE_HEADS: tuple[str, ...] = (
         r"(?:you\b|ignore\b|disregard\b|new\b|from\s+now\b|always\b|never\b|do\s+not\b|tell\b|respond\b|answer\b)",
         rf"\b(?:new|updated|revised)\s+(?:system\s+)?(?:policy|instructions?|rules?|directives?)\s+(?:for|to)\s+"
         rf"(?:the\s+|all\s+|any\s+)?{_AI_ADDRESSEE}\b",
+        # Text handed on to a model, or labelled binding for one (CodeRabbit on #704):
+        # "Pass this to the assistant as binding guidance". Bare "to the assistant"
+        # is not enough: "delegate ... to the assistant returning officer" is law.
+        rf"\b(?:pass|give|forward|relay|hand|send|show)\s+(?:this|these|it|the\s+following)(?:\s+(?:note|message|text|page|notice))?"
+        rf"\s+(?:on\s+)?to\s+(?:the\s+|any\s+|all\s+)?{_AI_ADDRESSEE}\b",
+        rf"\bto\s+(?:the\s+|any\s+|all\s+)?{_AI_ADDRESSEE}\s+as\s+(?:binding|authoritative|mandatory|official|final)\b",
 )
 #: Detection reads the head alone, so padding cannot push it past a length
 #: limit. Scrubbing removes the head to the end of its line: a sentence end is

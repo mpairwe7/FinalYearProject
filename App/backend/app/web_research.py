@@ -514,6 +514,11 @@ _RESEARCH_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="web-resea
 #: turn reported "unavailable". A read is admitted only when a slot is free;
 #: otherwise the turn uses search summaries and says so.
 WEB_RESEARCH_DOCUMENT_WORKERS = max(1, int(os.getenv("WEB_RESEARCH_DOCUMENT_WORKERS", "4")))
+#: Prefix of the rejection for a live document that speaks to the assistant
+#: (G487). Defined here, not in the sandbox that raises it, so the handler below
+#: needs no import that could itself fail; it survives the isolated child,
+#: which reports PdfRejected by message.
+TAINTED_DOCUMENT_MARKER = "G487:"
 _DOCUMENT_POOL = ThreadPoolExecutor(max_workers=WEB_RESEARCH_DOCUMENT_WORKERS, thread_name_prefix="web-document")
 _DOCUMENT_SLOTS = threading.BoundedSemaphore(WEB_RESEARCH_DOCUMENT_WORKERS)
 
@@ -1837,6 +1842,7 @@ def run_web_research(
         key=lambda r: (r.stale, -_fy_start_year(r.fiscal_year)),
     )
     tainted: set[str] = set()
+    read_incomplete = False
     admitted = False
     if doc_candidates and time.monotonic() < turn_deadline:
         admitted = _DOCUMENT_SLOTS.acquire(blocking=False)
@@ -1856,9 +1862,9 @@ def run_web_research(
             )
         )
         try:
-            from .ephemeral_pdf_sandbox import fetch_and_extract_sandbox_document
-
             try:
+                from .ephemeral_pdf_sandbox import fetch_and_extract_sandbox_document
+
                 read = _DOCUMENT_POOL.submit(
                     _read_in_slot,
                     fetch_and_extract_sandbox_document,
@@ -1907,10 +1913,12 @@ def run_web_research(
                 if sync_out.action_taken == "replaced_outdated" and sync_out.superseded_source:
                     outcome.superseded_sources.append(sync_out.superseded_source)
         except FutureTimeoutError:
+            # Its screening may still reject it after this turn has answered, so
+            # its summary is not quoted in the meantime (CodeRabbit on #704).
             logger.warning("Document extraction missed the turn deadline: %s", top_doc.doc_family)
+            tainted.add(top_doc.url)
+            read_incomplete = True
         except Exception as exc:
-            from .ephemeral_pdf_sandbox import TAINTED_DOCUMENT_MARKER
-
             if TAINTED_DOCUMENT_MARKER in str(exc):
                 tainted.add(top_doc.url)
                 events.append(("pdf_sandbox.rejected", {"url": top_doc.url, "reason": "instruction_like_text"}))
@@ -1928,6 +1936,8 @@ def run_web_research(
         status = LIVE_CONFIRMED
     elif outcome.web_hits:
         status = LIVE_UNCONFIRMED
+    elif read_incomplete:
+        status = LIVE_UNAVAILABLE  # a result was found but could not be read in time: not "none found"
     else:
         status = LIVE_NO_RESULT
     return _concluded(

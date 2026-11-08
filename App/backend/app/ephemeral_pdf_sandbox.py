@@ -46,6 +46,7 @@ from .mcp.validation import screen_tool_result
 from .pdf_corpus import CORPUS_FETCH_USER_AGENT
 from .pdf_guards import QUERY_PDF_LIMITS, PdfRejected, inspect_pdf_bytes
 from .web_research import (
+    TAINTED_DOCUMENT_MARKER,
     classify_source_authority,
     extract_fiscal_year,
     infer_doc_family,
@@ -62,10 +63,11 @@ SANDBOX_DOWNLOAD_TIMEOUT_SECONDS = float(os.getenv("SANDBOX_DOWNLOAD_TIMEOUT_SEC
 #: never trips it, and held a research worker for as long as it liked. Worst
 #: case is this plus one read timeout.
 SANDBOX_DOWNLOAD_DEADLINE_SECONDS = float(os.getenv("SANDBOX_DOWNLOAD_DEADLINE_SECONDS", "15.0"))
-#: Prefix of the rejection for a document that speaks to the assistant (G487).
-#: It survives the isolated child, which reports PdfRejected by message.
-TAINTED_DOCUMENT_MARKER = "G487:"
 _TAINTED_CHUNK_MARKER = "[REDACTED_INSTRUCTION]"
+#: The page screen that produced a cached entry. An entry from an older screen
+#: is re-extracted rather than trusted: the old one kept scrubbed pages and
+#: dropped others page by page (G487; CodeRabbit on #704).
+_CACHE_SCREEN_VERSION = "g487-1"
 SANDBOX_CACHE_TTL_SECONDS = int(os.getenv("SANDBOX_CACHE_TTL_SECONDS", str(24 * 3600)))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 SANDBOX_REDIS_PREFIX = "ura:pdf_chunks:"
@@ -180,6 +182,9 @@ def _default_stream_downloader(url: str, max_bytes: int) -> bytes:
     headers = {
         "User-Agent": CORPUS_FETCH_USER_AGENT,
         "Accept": "application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,*/*;q=0.8",
+        # Uncompressed only, read raw: a decoder that is still buffering yields
+        # nothing, so a deadline checked on decoded chunks would not run.
+        "Accept-Encoding": "identity",
     }
     current = url
     deadline = time.monotonic() + SANDBOX_DOWNLOAD_DEADLINE_SECONDS
@@ -201,15 +206,19 @@ def _default_stream_downloader(url: str, max_bytes: int) -> bytes:
                     current = nxt
                     continue
                 resp.raise_for_status()
+                encoding = resp.headers.get("Content-Encoding", "").strip().lower()
+                if encoding not in ("", "identity"):
+                    raise SandboxDownloadRejected(f"Server ignored Accept-Encoding: identity (sent {encoding}).")
                 content_len = resp.headers.get("Content-Length")
                 if content_len and content_len.isdigit() and int(content_len) > max_bytes:
                     raise SandboxDownloadRejected(
                         f"Remote Content-Length ({content_len} bytes) exceeds sandbox cap ({max_bytes} bytes)."
                     )
                 buf = bytearray()
-                # Each read as it arrives: iter_bytes(chunk_size=...) re-buffers to that
-                # size, so a drip-fed body would reach the deadline check once per 64 KiB.
-                for chunk in resp.iter_bytes():
+                # Each raw read as it arrives. iter_bytes(chunk_size=...) re-buffers to
+                # that size, and a content decoder can swallow reads whole; either way a
+                # drip-fed body would not reach the deadline check.
+                for chunk in resp.iter_raw():
                     if not chunk:
                         continue
                     buf.extend(chunk)
@@ -705,12 +714,17 @@ def fetch_and_extract_sandbox_document(
             raise SandboxDownloadRejected(str(exc)) from exc
 
         cached = _get_cached_doc_payload(sha256_hex)
+        if cached is not None and cached.get("screen_version") != _CACHE_SCREEN_VERSION:
+            logger.info("Sandbox cache entry from an older page screen; re-extracting %s", filename)
+            cached = None
         if cached is not None:
             chunks = list(cached.get("chunks") or [])
-            # Chunks cached before G487 were scrubbed and kept; they are the
-            # same tainted document and are not served from the cache either.
+            # Belt and braces: an entry written under this screen is clean, so a
+            # chunk failing it now means the cache was altered.
             if any(
-                _TAINTED_CHUNK_MARKER in str(c.get("text") or "") or injection_present(str(c.get("text") or ""))
+                _TAINTED_CHUNK_MARKER in str(c.get("text") or "")
+                or injection_present(str(c.get("text") or ""))
+                or screen_tool_result(str(c.get("text") or ""))
                 for c in chunks
             ):
                 exc = PdfRejected(f"{TAINTED_DOCUMENT_MARKER} a cached copy carries instruction-like text")
@@ -780,6 +794,7 @@ def fetch_and_extract_sandbox_document(
             "doc_family": doc_family,
             "doc_kind": doc_kind,
             "chunks": chunks,
+            "screen_version": _CACHE_SCREEN_VERSION,
         }
         _set_cached_doc_payload(sha256_hex, payload_to_cache)
 

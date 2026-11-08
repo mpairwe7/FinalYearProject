@@ -173,9 +173,24 @@ page or its host is compromised. Tell the site's owner and the security contact.
 
 `pdf_sandbox.skipped` with `document_workers_busy` means all `WEB_RESEARCH_DOCUMENT_WORKERS`
 reads were in use, so the turn answered from summaries and said so. Occasional events under a
-filing-deadline peak are expected. Sustained ones mean an official host is slow: each read is
-bounded by `SANDBOX_DOWNLOAD_DEADLINE_SECONDS`, so raise the worker count only once the host is
-known to be healthy.
+filing-deadline peak are expected. A read has four stages, and only the first has a deadline of
+its own:
+
+1. Download: `SANDBOX_DOWNLOAD_DEADLINE_SECONDS` plus at most one `SANDBOX_DOWNLOAD_TIMEOUT_SECONDS`
+   read.
+2. Malware scan.
+3. Isolated parse: `DOCUMENT_PARSE_TIMEOUT_S`, 30 s.
+4. Ranking the chunks against the question, which uses the reranker when one is loaded.
+
+For sustained events, find the slow stage in the logs before changing anything:
+
+- "Download exceeded its deadline" points at the host.
+- "isolated document parse timed out" points at the document.
+- Neither, with reads still slow, points at ranking or a busy reranker.
+
+Raising the worker count adds load to whichever stage is slow, so it is not a fix for any of them.
+A read whose turn stopped waiting is not quoted, even through its search summary; when nothing else
+was found, the turn reports the check as unavailable rather than "no official result".
 
 ### FX sources disagreeing
 
