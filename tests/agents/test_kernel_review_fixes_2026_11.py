@@ -142,7 +142,7 @@ def test_faq_promotion_cannot_put_a_contradicting_faq_first(monkeypatch: pytest.
     graph = {"doc_type": "graph", "graph_claims": [{"subject": "VAT standard rate"}], "id": "graph"}
     other = {"text": "Register for VAT on the URA portal.", "doc_type": "csv", "id": "other"}
     ordered = precedence.reorder_after_promotion([stale, graph, other])
-    assert [h["id"] for h in ordered] == ["graph", "other", "stale"]
+    assert [h["id"] for h in ordered] == ["graph", "other", "stale"], "an unresolved conflict is kept, labelled, last"
     assert precedence.reorder_after_promotion([stale, other]) == [stale, other], "no graph hit, no change"
     # Found after blending, so queued now, and only once however often the order is rebuilt.
     precedence.reorder_after_promotion([stale, graph, other])

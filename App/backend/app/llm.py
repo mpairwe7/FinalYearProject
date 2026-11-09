@@ -664,6 +664,16 @@ def _passage_header(index: int, passage: dict[str, Any]) -> str:
             header += f", Published: {live_published}"
         if passage.get("live_stale"):
             header += ", May be out of date"
+    # A figure that disagrees with the official rate table, written by code (ADR-0033, G534):
+    # the answer reports both and advises confirming with URA, rather than quoting either alone.
+    precedence = passage.get("kernel_precedence")
+    if isinstance(precedence, dict) and precedence.get("status") == "conflict":
+        stated = fence_prompt_header_field(str(precedence.get("stated_value") or ""))
+        kernel = fence_prompt_header_field(str(precedence.get("kernel_value") or ""))
+        year = fence_prompt_header_field(str(precedence.get("fiscal_year") or ""))
+        subject = fence_prompt_header_field(str(precedence.get("display_name") or precedence.get("key") or ""))
+        header += (f", Conflicts with the official {year} rate table on {subject}: this passage states {stated},"
+                   f" the table states {kernel}; report both and advise confirming with URA")
     return header
 
 

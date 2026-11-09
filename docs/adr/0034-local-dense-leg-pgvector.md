@@ -140,6 +140,12 @@ Chosen: **a pgvector dense leg, fused with BM25 by reciprocal-rank fusion (RRF).
   compromised root process could still switch to the `postgres` OS user. Running uvicorn as an
   unprivileged user is a change to the whole image, tracked separately.
 
+- **Incident (2026-11-09):** within an hour of going live, the leg put an outdated EACCMA passage
+  (baggage allowance USD 500) in front of the model, and the Space quoted it. The leg was switched
+  off with the Space secret `LOCAL_DENSE_BACKEND=none` (all eight live probes passed again) until
+  precedence caught paraphrased and former-value contradictions and stopped sending them to the model
+  (G534, ADR-0033 amendment). Re-enabling is in the runbook.
+
 ## Confirmation
 
 - `App/backend/tests/test_local_dense_leg.py` (unit; Postgres and the model faked) covers:

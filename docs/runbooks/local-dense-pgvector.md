@@ -62,6 +62,19 @@ The build log (`hf spaces logs ... --build`) shows `pgvector selftest passed` an
 | `table records no Qdrant corpus binding` | The table was loaded by an older loader. | Rebuild and roll the image. |
 | `circuit open: recent dense queries failed or timed out` | Dense searches failed or exceeded `LOCAL_DENSE_TIMEOUT_S` (2 s) three times. | It retries by itself. If it persists, check the `postgres` program and `local_dense_query_errors_total`. |
 
+## Turn it back on after the kill switch
+
+The leg was switched off on 2026-11-09 (G534). Turn it back on only when the deployed image
+includes the precedence fix (`kernel_precedence_dropped` in `app/kernel/precedence.py`):
+
+1. `hf spaces secrets delete landwind22/ura-chatbot LOCAL_DENSE_BACKEND`, then wait about two
+   minutes for the restart.
+2. Confirm that `/ready` shows `retrieval: hybrid` and the `local_dense` vector count.
+3. Run the live probes. "What is the passenger baggage duty-free allowance?" must answer
+   USD 2,000, and every probe must pass.
+4. If any probe fails, run `hf spaces secrets add landwind22/ura-chatbot -s LOCAL_DENSE_BACKEND=none`
+   again and investigate with the leg off.
+
 ## Turn it off
 
 Add the Space secret `LOCAL_DENSE_BACKEND=none`. A secret overrides the Dockerfile's `ENV`, and a

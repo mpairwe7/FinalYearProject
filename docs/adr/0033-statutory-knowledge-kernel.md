@@ -242,3 +242,37 @@ Filled in per phase; see "Implementation record" below.
     (`2,000` is not in `2,000,000`), shared by all three runners and tested in
     `tests/test_load_runner_concept_matching.py`.
   - Each of 17 fixes was disabled in turn, and a test failed every time.
+
+### Amendment (2026-11-09): superseded figures stay out of answers (G534)
+
+After the dense leg (ADR-0034) went live, the Space answered "What is the passenger baggage
+duty-free allowance?" with **USD 500** instead of the verified USD 2,000. Two failures combined:
+- **The match was by name.** Precedence matched a passage to a fact only when the fact's name
+  appeared near the figure. Dense retrieval surfaced an EACCMA Fifth Schedule paraphrase
+  ("personal effects … not exceeding USD 500") that never names the allowance.
+- **Detection only reordered.** A detected contradiction was moved down, but nothing told the model
+  so, and the model could still quote it.
+
+The dense leg was switched off on the Space (`LOCAL_DENSE_BACKEND=none`) until the following:
+- **Former values are contradictions on the same subject.** A fact's legal basis can record a
+  replaced value ("raised from USD 500"; also "previously", "formerly", "replacing", "replaced",
+  "was"). A currency or percent sign is required, so a date never counts, and the current value
+  never counts. A passage retrieved with the fact that states such a value is a conflict
+  (`reason="former_value"`) when two of the fact's distinctive words (five letters or more, from
+  its name or legal basis) stand near the value. A paraphrase still shares its Act and schedule;
+  the UGX 150,000,000 presumptive-tax ceiling does not share the VAT threshold's words. Facts now
+  carry the full legal basis, not only the claim's citation.
+  - This does not apply to a passage that also states the current figure, or that frames the old
+    value as history ("formerly USD 500").
+- **Stale passages are left out.** A former-value or older-edition (`superseded`) passage is not
+  sent to the model. It is listed once on the graph hit under `kernel_precedence_dropped` (key,
+  kernel and stated values, edition, reason, source, passage identity), however often the order is
+  rebuilt.
+- **Unresolved disagreements are disclosed, not hidden.** An unlabelled or current passage stating
+  a different figure may be right: after a new Finance Act the kernel can be the stale side. It is
+  kept, ranked last and queued for review as before. Its header, written by code outside the
+  spotlight markers, now says that it conflicts with the official rate table, gives both figures,
+  and tells the model to report both and advise confirming with URA.
+
+`tests/agents/test_kernel_precedence_superseded_2026_11.py` uses the live passage verbatim. Fifteen
+controls were each disabled in turn, and a test failed every time.
