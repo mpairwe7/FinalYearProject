@@ -12,7 +12,7 @@ from time import monotonic
 
 import httpx
 import pytest
-
+from app import egress
 from app import web_search_providers as wsp
 from app.web_search_providers import (
     BraveProvider,
@@ -47,17 +47,14 @@ def _clean(monkeypatch: pytest.MonkeyPatch):
 def _serve(monkeypatch: pytest.MonkeyPatch, handler) -> list[httpx.Request]:
     """Route the module's HTTP clients to *handler*, recording each request."""
     seen: list[httpx.Request] = []
-    real_client = httpx.Client
 
     def recording(request: httpx.Request) -> httpx.Response:
         seen.append(request)
         return handler(request)
 
-    monkeypatch.setattr(
-        wsp.httpx,
-        "Client",
-        lambda **kwargs: real_client(transport=httpx.MockTransport(recording), **kwargs),
-    )
+    # The egress client's transport is the seam (ADR-0035): pinning and recording are
+    # tested in test_web_egress_2026_11; here the providers' wire contracts are.
+    monkeypatch.setattr(egress, "_transport_for", lambda _purpose, _allowed: httpx.MockTransport(recording))
     return seen
 
 

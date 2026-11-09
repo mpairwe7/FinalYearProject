@@ -219,6 +219,26 @@ single bad provider can be dropped with `WEB_SEARCH_PROVIDERS`.
 
 ---
 
+## 6a. Watching what leaves the deployment (ADR-0035)
+
+Every fetch on a turn goes through `app/egress.py`. That covers the PDF sandbox, the search
+providers and the FX engine. Each request is counted, and no path, query or body is recorded:
+
+| Metric | Labels | Read it as |
+| --- | --- | --- |
+| `web_egress_requests_total` | `purpose` (`pdf_sandbox`, `search_tavily`, `search_brave`, `search_searxng`, `search_duckduckgo`, `fx_rate`), `host`, `outcome` (`2xx`…`5xx`, `refused`, or an error class) | Which agent reached which host, and how it ended. |
+| `web_egress_bytes_total` | `purpose`, `host` | Volume per destination. |
+
+Each request also writes one log line: `egress purpose=… host=… outcome=… bytes=… ms=…`.
+
+- **`outcome="refused"`:** the destination resolved to a non-public address. This means DNS
+  rebinding, a hijacked record, or a misconfigured provider. Treat it as a security event, and check
+  the host's DNS before anything else.
+- **A provider failing as `oversized`:** its response passed `WEB_PROVIDER_MAX_RESPONSE_BYTES`
+  (2 MB). A results page is a few kilobytes, so suspect the endpoint, not the cap.
+- **A self-hosted SearXNG on a private network:** this is allowed because its host comes from
+  `SEARXNG_URL`. No address from a page or a search result is ever exempt.
+
 ## 7. Acceptance probes
 
 Unit tests prove the logic, not a deployment. On the deployed Space, with the flag on, check

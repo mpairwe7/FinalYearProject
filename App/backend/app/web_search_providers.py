@@ -34,12 +34,13 @@ import re
 import threading
 import time
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 
+from . import egress
 from .resilience import CircuitBreaker
 
 logger = logging.getLogger(__name__)
@@ -74,7 +75,10 @@ _DDG_SNIPPET_RE = re.compile(
     r'|<div[^>]+class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</div>',
     re.IGNORECASE | re.DOTALL,
 )
-_TAG_RE = re.compile(r"<[^>]+>")
+#: HTML element tags only: a name that starts with a letter. ``<[^>]+>`` also ate
+#: chat-template tokens (``<|im_start|>``, ``<<SYS>>``) and comments, so the
+#: instruction they carried reached the screen looking like prose (ADR-0035, G527).
+_TAG_RE = re.compile(r"(?<!<)</?[A-Za-z][A-Za-z0-9:-]*(?:\s[^<>]*)?/?>(?!>)")
 
 
 class ProviderError(RuntimeError):
@@ -104,6 +108,10 @@ class RawResult:
     url: str
     snippet: str
     published_at: str = ""
+    #: The title and snippet as received, entities decoded but markup kept. The
+    #: safety screen reads it too: stripping markup deletes an instruction hidden
+    #: in an attribute (an image's alt text, a title=) before it could be seen.
+    raw_text: str = field(default="", compare=False, repr=False)
 
 
 class SearchProvider(Protocol):
@@ -115,6 +123,11 @@ class SearchProvider(Protocol):
     def configured(self) -> bool: ...
 
     def search(self, request: SearchRequest, timeout: float) -> list[RawResult]: ...
+
+
+def _as_received(*fields: Any) -> str:
+    """Fields joined as received, entities decoded, markup kept (for :attr:`RawResult.raw_text`)."""
+    return "\n".join(_html.unescape(str(f or "")) for f in fields)[:4000]
 
 
 def strip_markup(text: Any) -> str:
@@ -132,6 +145,25 @@ def _raise_for_status(response: httpx.Response) -> None:
         raise ProviderError("rate_limited")
     if code >= 400:
         raise ProviderError("upstream")
+
+
+#: Headers that describe the body as sent; the rebuilt response holds it decoded.
+_TRANSFER_HEADERS = frozenset({"content-encoding", "content-length", "transfer-encoding"})
+
+
+def _capped(client: httpx.Client, method: str, url: str, **kwargs: Any) -> httpx.Response:
+    """The provider's response, its body read under ``MAX_PROVIDER_RESPONSE_BYTES`` (ADR-0035).
+
+    A results page is a few kilobytes; an unbounded ``.json()`` let a broken or
+    hostile endpoint hold a worker's memory.
+    """
+    with client.stream(method, url, **kwargs) as streamed:
+        try:
+            body = egress.read_capped(streamed, egress.MAX_PROVIDER_RESPONSE_BYTES)
+        except ValueError as exc:
+            raise ProviderError("oversized") from exc
+        headers = [(k, v) for k, v in streamed.headers.items() if k.lower() not in _TRANSFER_HEADERS]
+        return httpx.Response(streamed.status_code, headers=headers, content=body, request=streamed.request)
 
 
 def _json_body(response: httpx.Response) -> dict[str, Any]:
@@ -184,8 +216,8 @@ class TavilyProvider:
             "Authorization": f"Bearer {(os.getenv('TAVILY_API_KEY') or '').strip()}",
             "User-Agent": _USER_AGENT,
         }
-        with httpx.Client(timeout=timeout, follow_redirects=False) as client:
-            response = client.post(self.endpoint, json=body, headers=headers)
+        with egress.client("search_tavily", timeout=timeout) as client:
+            response = _capped(client, "POST", self.endpoint, json=body, headers=headers)
         _raise_for_status(response)
         rows = _json_body(response).get("results")
         if not isinstance(rows, list):
@@ -196,6 +228,7 @@ class TavilyProvider:
                 url=str(row.get("url") or "").strip(),
                 snippet=strip_markup(row.get("content")),
                 published_at=str(row.get("published_date") or "").strip(),
+                raw_text=_as_received(row.get("title"), row.get("content")),
             )
             for row in rows
             if isinstance(row, dict)
@@ -238,8 +271,8 @@ class BraveProvider:
             "Accept": "application/json",
             "User-Agent": _USER_AGENT,
         }
-        with httpx.Client(timeout=timeout, follow_redirects=False) as client:
-            response = client.get(self.endpoint, params=params, headers=headers)
+        with egress.client("search_brave", timeout=timeout) as client:
+            response = _capped(client, "GET", self.endpoint, params=params, headers=headers)
         _raise_for_status(response)
         web = _json_body(response).get("web")
         # Brave omits ``web`` when a query has no web results.
@@ -252,6 +285,7 @@ class BraveProvider:
                 url=str(row.get("url") or "").strip(),
                 snippet=strip_markup(row.get("description")),
                 published_at=str(row.get("page_age") or "").strip(),
+                raw_text=_as_received(row.get("title"), row.get("description")),
             )
             for row in rows
             if isinstance(row, dict)
@@ -308,9 +342,12 @@ class SearxngProvider:
         time_range = self._time_range(request.freshness_days)
         if time_range:
             params["time_range"] = time_range
-        with httpx.Client(timeout=timeout, follow_redirects=False) as client:
-            response = client.get(
-                f"{self._base()}/search",
+        base = self._base()
+        # The operator's own instance may sit on a private network; only its host is exempt.
+        with egress.client("search_searxng", timeout=timeout, allow_private=[urlparse(base).hostname or ""]) as client:
+            response = _capped(
+                client, "GET",
+                f"{base}/search",
                 params=params,
                 headers={"Accept": "application/json", "User-Agent": _USER_AGENT},
             )
@@ -324,6 +361,7 @@ class SearxngProvider:
                 url=str(row.get("url") or "").strip(),
                 snippet=strip_markup(row.get("content")),
                 published_at=str(row.get("publishedDate") or "").strip(),
+                raw_text=_as_received(row.get("title"), row.get("content")),
             )
             for row in rows
             if isinstance(row, dict)
@@ -365,6 +403,7 @@ def parse_ddg_html(html_body: str) -> list[RawResult]:
                 title=strip_markup(anchor.group(2)),
                 url=unwrap_ddg_url(anchor.group(1)),
                 snippet=strip_markup(snippet),
+                raw_text=_as_received(anchor.group(2), snippet),
             )
         )
     return results
@@ -381,8 +420,9 @@ class DuckDuckGoHtmlProvider:
         return unsanctioned_allowed()
 
     def search(self, request: SearchRequest, timeout: float) -> list[RawResult]:
-        with httpx.Client(timeout=timeout, follow_redirects=False) as client:
-            response = client.get(
+        with egress.client("search_duckduckgo", timeout=timeout) as client:
+            response = _capped(
+                client, "GET",
                 self.endpoint,
                 params={"q": request.query},
                 headers={"User-Agent": _USER_AGENT, "Accept": "text/html"},
