@@ -276,3 +276,60 @@ The dense leg was switched off on the Space (`LOCAL_DENSE_BACKEND=none`) until t
 
 `tests/agents/test_kernel_precedence_superseded_2026_11.py` uses the live passage verbatim. Fifteen
 controls were each disabled in turn, and a test failed every time.
+
+### Amendment (2026-11-09, later): replaced figures are screened on every path (G535)
+
+The G534 fix was deployed, and the dense leg was switched back on. A paraphrase probe, "Under the
+EACCMA Fifth Schedule, what value of accompanied goods is exempt for a traveller?", was still
+answered **USD 500**. The kill switch went back on within two minutes. With the leg off, the same
+question still answered USD 500, so the cause was not dense retrieval:
+- **Precedence needs a graph hit.** The graph leg returns a fact only when the question names it,
+  and this one never did.
+- **The corpus itself was stale.** Eleven FAQ rows stated a replaced figure as current: the USD 500
+  baggage allowance, and the UGX 150m annual / 37.5m quarterly VAT threshold. The portal navigator
+  gave the USD 500 allowance as well.
+
+Decision:
+- **A former-value screen on every path.**
+  - `precedence.screen_former_values` runs on everything `HybridRetriever.search_planned` returns
+    (REST, streaming, the RAG tool, LangGraph and voice). It also runs in
+    `reorder_after_promotion`, so FAQ rows blended in later are screened too. Neither needs a graph
+    hit.
+  - It checks only the facts in force whose legal basis records a replaced value, so it is cheap.
+- **Explicit subject cues.** A number alone cannot say which figure it is: UGX 150,000,000 is the
+  replaced VAT threshold and also the presumptive-tax ceiling in force. Each fact with a replaced
+  value has subject cues in `_SUBJECT_CUES`:
+  - baggage: a passenger or traveller word;
+  - VAT threshold: VAT and registration or threshold, and no "presumptive" within 150 characters;
+  - EFRIS refund: refund and a receipt or invoice word.
+
+  A test fails when a rate table records a replaced value that has no cues. UGX amounts written in
+  words ("UGX 150 million", "UGX 37.5M") are read.
+- **The data corrected at source.** Each figure was checked against the PDFs in `Data/pdfs`:
+  - USD 2,000: Taxation Handbook FY2025-26, pp.64 and 80, and the Passenger Baggage leaflet
+    FY2024-25, p.2.
+  - UGX 300m: Taxes Amendments FY2026-27, pp.4 and 13.
+  - UGX 75m in three months: VAT Act s.7(1)(a), one quarter of the annual threshold.
+
+  The 11 FAQ rows and the portal navigator's baggage strings (two pages and the point-of-entry list) were corrected. Rows from edition-labelled files now
+  give the current figure and say what it replaced. Three gold ids in
+  `evals/retrieval_multilingual/gold.jsonl` follow their rows' new content hashes.
+
+- **Review round (PR 710).**
+  - A current figure written in words ("UGX 300 million") counts as current.
+  - The baggage cue also needs an allowance or exemption word, so another per-passenger USD 500
+    charge is kept.
+  - Cached facts are bound to the store object, not its `id()`.
+  - Five navigator strings still gave the replaced VAT threshold (wholesale, entertainment, real
+    estate, registration); they now give UGX 300m and 75m.
+  - The point-of-entry list now says that commercial, dutiable or restricted goods are declared at
+    the Red Channel whatever their value.
+  - A navigator test screens all 2,798 strings and allows "USD 500" only as "from USD 500": the
+    navigator's USD 2,000 TIN rule shares the allowance's number.
+- **Limitation.** A question about a past year is answered from that year's rate table. Passages
+  giving last year's figure are left out of retrieval even then.
+- **Limitation.** The screen fails open. If it raises (the kernel cannot load), passages pass
+  unscreened with a logged warning, and the corrected corpus is the only defence.
+- **Tests.** `tests/agents/test_kernel_former_value_screen_2026_11.py` includes a corpus test: no
+  FAQ row may state a replaced figure as current. Nine controls were each disabled in turn,
+  including putting one stale row back, and a test failed every time.

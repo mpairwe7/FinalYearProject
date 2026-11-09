@@ -142,6 +142,7 @@ Evaluated across 16 Ugandan tax heads (`paye`, `vat`, `withholding`, `rental`, `
 - Luganda deployed with quality warnings (ACM §1.4)
 - Mandatory disclaimers on every response (ACM §1.2)
 - Faithfulness scoring with escalation when confidence is low
+- Replaced figures stay out of answers (ADR-0033, G534/G535). A passage stating a value the rate table records as replaced (the USD 500 baggage allowance, the UGX 150m VAT threshold, the UGX 5m EFRIS refund threshold) is left out on every retrieval path. A passage that disagrees with the table in any other way is kept, and the model is told to report both figures. Limitation: the screen fails open. If it raises (the kernel cannot load), the passages pass unscreened and a warning is logged, so a replaced figure can then reach generation or an extractive answer; the corrected corpus is the second line of defence
 - Bias audit script: `scripts/bias_fairness_audit.py`
 
 ### Risks

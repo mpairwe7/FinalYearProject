@@ -494,9 +494,9 @@ class TestPillarIIIReliability:
         assert res["vat"] == 18000
 
     def test_fzz_070_vat_registration_threshold(self):
-        """FZZ-070: Mandatory VAT threshold is 150m annual / 37.5m quarterly."""
-        annual_threshold = 150_000_000
-        quarterly_threshold = 37_500_000
+        """FZZ-070: Mandatory VAT threshold is 300m annual / 75m quarterly (from 1 July 2026)."""
+        annual_threshold = 300_000_000
+        quarterly_threshold = 75_000_000
         assert annual_threshold / 4 == quarterly_threshold
 
     def test_fzz_071_wht_goods_standard_6_percent(self, fresh_registry: ToolRegistry):

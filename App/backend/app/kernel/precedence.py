@@ -46,6 +46,9 @@ _STOP = frozenset({"the", "of", "on", "for", "and", "a", "an", "to", "in", "tax"
 _PERCENT_RE = re.compile(r"(\d{1,3}(?:\.\d{1,3})?)\s?(?:%|per\s?cent(?:um)?)", re.I)
 _UGX_RE = re.compile(r"(?:UGX|Shs\.?|USh)\s?([\d,]{4,}(?:\.\d+)?)", re.I)
 _USD_RE = re.compile(r"(?:USD|US\s?\$|US Dollars?)\s?([\d,]{2,}(?:\.\d+)?)", re.I)
+#: A UGX amount in words ("UGX 150 million", "UGX 37.5M"): FAQ rows write thresholds this way.
+_UGX_WORDS_RE = re.compile(r"(?:UGX|Shs\.?|USh)\s?(\d{1,4}(?:\.\d+)?)\s?(million|m|billion|bn)\b", re.I)
+_MAGNITUDE = {"million": 1e6, "m": 1e6, "billion": 1e9, "bn": 1e9}
 
 
 def source_class(hit: dict[str, Any]) -> str:
@@ -192,6 +195,52 @@ _GENERIC = frozenset({
 })
 
 
+#: What puts a passage on a fact's subject, by fact key: (groups, excluded). Every group needs one
+#: of its words (a word start: "regist" matches "registered") within 240 characters of the value,
+#: and no excluded word may stand within 150. A number alone cannot say which figure it is:
+#: UGX 150,000,000 is the replaced VAT threshold and also the presumptive-tax ceiling in force (G535).
+#: Every fact whose legal basis records a replaced value needs an entry; a test enforces it.
+_SUBJECT_CUES: dict[str, tuple[tuple[tuple[str, ...], ...], tuple[str, ...]]] = {
+    "passenger_baggage_allowance_usd": (
+        (("baggage", "passenger", "traveller", "traveler", "personal effects", "accompanied"),
+         # The allowance, not another per-passenger charge.
+         ("allowance", "exempt", "duty-free", "duty free", "free of", "exceed", "customs value")), ()),
+    "vat_registration_threshold_annual": ((("vat", "value added tax", "taxable supplies"), ("regist", "threshold")),
+                                          ("presumptive",)),
+    "efris_e_receipt_refund_qualifying_threshold_ugx": ((("refund",), ("receipt", "invoice", "efris")), ()),
+}
+
+
+def _cue(word: str, text: str) -> bool:
+    return re.search(r"\b" + re.escape(word), text) is not None
+
+
+def _on_subject(fact: dict[str, Any], text: str, start: int, end: int) -> bool:
+    """Whether the amount at *start*:*end* of *text* is about *fact*'s subject."""
+    low = text.lower()
+    cues = _SUBJECT_CUES.get(str(fact.get("key") or ""))
+    if cues is not None:
+        groups, excluded = cues
+        near = low[max(0, start - 240):end + 240]
+        close = low[max(0, start - 150):end + 150]
+        return all(any(_cue(w, near) for w in group) for group in groups) and not any(_cue(w, close) for w in excluded)
+    # No cues recorded: two of the fact's distinctive words (its name or legal basis) near the value.
+    near_stems = _stems(text[max(0, start - 240):end + 240])
+    subject = _stems(f"{fact.get('display_name') or ''} {fact.get('legal_basis') or ''}")
+    return len(near_stems & subject) >= 2
+
+
+def _states_current(fact: dict[str, Any], text: str, numbers: dict[str, set[float]]) -> bool:
+    """Whether *text* states *fact*'s current value on its subject, in figures or words ("UGX 300 million")."""
+    for kind, values in numbers.items():
+        if kind not in _PATTERNS:
+            continue
+        for match, number in _amounts(kind, text):
+            if any(abs(number - v) < 1e-6 for v in values) and _on_subject(fact, text, match.start(), match.end()):
+                return True
+    return False
+
+
 def _stems(text: str) -> set[str]:
     """Five-letter stems of the distinctive words in *text* ("registration" and "register" share one).
 
@@ -284,11 +333,26 @@ def find_conflicts(facts: list[dict[str, Any]], passages: list[dict[str, Any]]) 
             else:
                 # A passage that states the current figure is current, even if it also
                 # says what the figure was ("raised from USD 500 to USD 2,000").
-                conflict = None if states_it else _former_value_conflict(
+                current = states_it or _states_current(fact, text, numbers)
+                conflict = None if current else _former_value_conflict(
                     fact, hit, klass, text, numbers, fiscal_year, fact_start)
                 if conflict is not None:
                     found.append(conflict)
     return found
+
+
+def _amounts(kind: str, text: str) -> list[tuple[re.Match[str], float]]:
+    """Every amount of *kind* in *text*, in order, with UGX amounts in words ("150 million") too."""
+    found: list[tuple[re.Match[str], float]] = []
+    for match in _PATTERNS[kind].finditer(text):
+        try:
+            found.append((match, float(match.group(1).replace(",", ""))))
+        except ValueError:
+            continue
+    if kind == "UGX":
+        for match in _UGX_WORDS_RE.finditer(text):
+            found.append((match, float(match.group(1)) * _MAGNITUDE[match.group(2).lower()]))
+    return sorted(found, key=lambda pair: pair[0].start())
 
 
 def _former_value_conflict(fact: dict[str, Any], hit: dict[str, Any], klass: str, text: str,
@@ -300,22 +364,14 @@ def _former_value_conflict(fact: dict[str, Any], hit: dict[str, Any], klass: str
         if kind not in _PATTERNS or kind not in numbers:
             continue  # only the fact's own unit: a former USD value says nothing about a rate
         values = {v for v in values if not any(abs(v - n) < 1e-6 for n in numbers[kind])}  # never the current one
-        for match in _PATTERNS[kind].finditer(text):
-            try:
-                number = float(match.group(1).replace(",", ""))
-            except ValueError:
-                continue
+        for match, number in _amounts(kind, text):
             if not any(abs(number - v) < 1e-6 for v in values):
                 continue
             if _HISTORY_CUE_RE.search(text.lower()[max(0, match.start() - 40):match.start()]):
                 continue  # "previously USD 500": history, not a claim
             # The same subject, not just the same number: UGX 150,000,000 is also the
-            # presumptive-tax ceiling. Two of the fact's distinctive words (its name or its
-            # legal basis) must stand near the value; a paraphrase still shares its Act and
-            # schedule ("Fifth Schedule … Customs Management Act … accompanied").
-            near = _stems(text[max(0, match.start() - 240):match.end() + 240])
-            subject = _stems(f"{fact.get('display_name') or ''} {fact.get('legal_basis') or ''}")
-            if len(near & subject) < 2:
+            # presumptive-tax ceiling in force (_SUBJECT_CUES).
+            if not _on_subject(fact, text, match.start(), match.end()):
                 continue
             start, label = _edition(hit)
             older = start is not None and fact_start is not None and start < fact_start
@@ -458,6 +514,112 @@ def apply_precedence(graph_hit: dict[str, Any], hits: list[dict[str, Any]], *,
         return hits
 
 
+def _facts_with_former_values(fiscal_year: str) -> list[dict[str, Any]]:
+    """The kernel facts in force for *fiscal_year* whose legal basis records a replaced value."""
+    from ..graph.schema import FACT_KINDS
+    from .functions import kernel_store
+
+    store = kernel_store()
+    cached = _FORMER_FACTS_CACHE.get(fiscal_year)
+    if cached is not None and cached[0] is store:
+        return cached[1]  # the same store object: an id() could be reused by a reloaded one
+    facts = []
+    for kind in FACT_KINDS:
+        for node in store.by_kind(kind):
+            props = node.props
+            if str(props.get("fiscal_year") or "") != fiscal_year or not _former_values(str(props.get("legal_basis") or "")):
+                continue
+            facts.append({"key": props.get("key"), "display_name": props.get("display_name"), "value": props.get("value"),
+                          "unit": props.get("unit"), "provision": props.get("legal_basis") or "",
+                          "legal_basis": props.get("legal_basis") or "", "fiscal_year": fiscal_year})
+    _FORMER_FACTS_CACHE.clear()  # one kernel and one year in force at a time
+    _FORMER_FACTS_CACHE[fiscal_year] = (store, facts)
+    return facts
+
+
+#: fiscal year -> (the store the facts came from, the facts). Holding the store keeps the check by
+#: identity sound: a reloaded table is a new object, so its facts are read again.
+_FORMER_FACTS_CACHE: dict[str, tuple[Any, list[dict[str, Any]]]] = {}
+
+
+def _former_value_in(hit: dict[str, Any], facts: list[dict[str, Any]]) -> Conflict | None:
+    """The first in-force fact whose replaced value *hit* states, or ``None``."""
+    klass = source_class(hit)
+    if SOURCE_RANK.get(klass, 99) <= SOURCE_RANK["kernel"] or str(hit.get("doc_type") or "") == "graph":
+        return None
+    text = " ".join(str(hit.get(field) or "") for field in ("text", "answer") if hit.get(field))
+    if not text:
+        return None
+    low = text.lower()
+    for fact in facts:
+        numbers = _kernel_numbers(fact.get("value"), str(fact.get("unit") or ""))
+        terms = _terms(str(fact.get("display_name") or ""))
+        if not numbers or not terms:
+            continue
+        matches = [(kind, m) for kind in numbers for m in _PATTERNS[kind].finditer(text)]
+        if _states_the_figure(matches, numbers, terms, low) or _states_current(fact, text, numbers):
+            continue  # it states the current figure too, in figures or words
+        conflict = _former_value_conflict(fact, hit, klass, text, numbers, str(fact.get("fiscal_year") or ""),
+                                          _fy_start(str(fact.get("fiscal_year") or "")))
+        if conflict is not None:
+            return conflict
+    return None
+
+
+def screen_former_values(hits: list[dict[str, Any]], *, fiscal_year: str | None = None) -> list[dict[str, Any]]:
+    """*hits* without the passages that state a value the kernel in force records as replaced (G535).
+
+    :func:`apply_precedence` needs a graph hit carrying the fact, and the graph
+    leg finds one only when the question names it. "Under the EACCMA Fifth
+    Schedule, what value of accompanied goods is exempt?" got none, and a FAQ
+    row with the replaced USD 500 allowance reached the model whether the dense
+    leg was on or off. This runs on every path, graph hit or not, for the few
+    facts whose legal basis records a replaced value.
+
+    A question about a past year is answered from that year's rate table, not
+    from passages, so a passage giving last year's figure is left out here too.
+    Each dropped passage is logged and, when a graph hit is present, listed under
+    its ``kernel_precedence_dropped``. Never raises: on any error *hits* comes
+    back unchanged.
+    """
+    if not hits:
+        return hits
+    try:
+        if fiscal_year is None:
+            from ..tax import tables
+
+            fiscal_year = tables.resolve_fiscal_year()
+        facts = _facts_with_former_values(fiscal_year)
+        if not facts:
+            return hits
+        kept: list[dict[str, Any]] = []
+        dropped: list[tuple[dict[str, Any], Conflict]] = []
+        for hit in hits:
+            conflict = _former_value_in(hit, facts)
+            if conflict is None:
+                kept.append(hit)
+            else:
+                dropped.append((hit, conflict))
+        if not dropped:
+            return hits
+        graph_hit = next((h for h in kept if str(h.get("doc_type") or "") == "graph"), None)
+        for hit, conflict in dropped:
+            logger.info("precedence: left out a replaced value key=%s stated=%s source=%s",
+                        conflict.key, conflict.evidence_value, conflict.evidence_source)
+            if graph_hit is not None:
+                listed = graph_hit.setdefault("kernel_precedence_dropped", [])
+                entry = {"status": conflict.status, "reason": conflict.reason, "key": conflict.key,
+                         "kernel_value": conflict.kernel_value, "stated_value": conflict.evidence_value,
+                         "edition": conflict.evidence_edition, "fiscal_year": conflict.fiscal_year,
+                         "source": conflict.evidence_source, "passage": _passage_identity(hit)}
+                if not any(d.get("passage") == entry["passage"] and d.get("key") == entry["key"] for d in listed):
+                    listed.append(entry)
+        return kept
+    except Exception:  # noqa: BLE001 - a precedence check must never take retrieval down
+        logger.warning("precedence: former-value screen failed; hits unchanged", exc_info=True)
+        return hits
+
+
 def _passage_identity(hit: dict[str, Any]) -> str:
     """A stable identity for a passage across precedence passes: its id, or its source and text."""
     if hit.get("id"):
@@ -504,8 +666,12 @@ def reorder_after_promotion(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     Priority and exact-match FAQ rows are put in front after the graph is fused,
     so a FAQ contradicting the kernel could lead again and feed the extractive
-    fallback. The graph hit is found in *hits*; without one this is a no-op.
+    fallback. Every hit is first screened for replaced values
+    (:func:`screen_former_values`); the graph hit's checks then need the graph
+    hit, found in *hits*.
     """
+    # FAQ rows blended in after retrieval are screened too, graph hit or not (G535).
+    hits = screen_former_values(hits)
     graph_hit = next((h for h in hits if str(h.get("doc_type") or "") == "graph"), None)
     if graph_hit is None:
         return hits

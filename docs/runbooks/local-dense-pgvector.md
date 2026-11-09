@@ -71,9 +71,15 @@ includes the precedence fix (`kernel_precedence_dropped` in `app/kernel/preceden
    minutes for the restart.
 2. Confirm that `/ready` shows `retrieval: hybrid` and the `local_dense` vector count.
 3. Run the live probes. "What is the passenger baggage duty-free allowance?" must answer
-   USD 2,000, and every probe must pass.
+   USD 2,000, and every probe must pass. Also run the paraphrase probes, which the dense leg is
+   most likely to match: "Under the EACCMA Fifth Schedule, what value of accompanied goods is
+   exempt for a traveller?", "At what annual turnover must a business register for VAT?" and
+   "What is the threshold for an EFRIS e-receipt to qualify for a VAT refund?". No answer may
+   state USD 500, UGX 150,000,000 as the VAT threshold, or UGX 5,000,000 as the refund threshold.
 4. If any probe fails, run `hf spaces secrets add landwind22/ura-chatbot -s LOCAL_DENSE_BACKEND=none`
-   again and investigate with the leg off.
+   again and investigate with the leg off. Run the failing probe with the leg off too: on
+   2026-11-09 the EACCMA paraphrase answered USD 500 either way. The cause was a stale FAQ row and
+   a screen that needed a graph hit (G535), not the dense leg.
 
 ## Turn it off
 

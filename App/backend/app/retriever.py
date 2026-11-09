@@ -2523,6 +2523,29 @@ class HybridRetriever:
         subject: str | None = None,
         history: list[str] | None = None,
     ) -> list[dict[str, Any]]:
+        """:meth:`_search_planned`, without passages stating a figure the kernel records as replaced.
+
+        Every caller (REST, streaming, the RAG tool, LangGraph, voice prefetch)
+        gets the screen, whichever leg found the passage and whether or not the
+        graph leg finds the fact (ADR-0033 amendment, G535).
+        """
+        hits = self._search_planned(query, top_k, prefetch_limit, filters, locale=locale, subject=subject,
+                                    history=history)
+        from .kernel.precedence import screen_former_values
+
+        return screen_former_values(hits)
+
+    def _search_planned(
+        self,
+        query: str,
+        top_k: int = 4,
+        prefetch_limit: int = 20,
+        filters: dict[str, Any] | None = None,
+        *,
+        locale: str | None = None,
+        subject: str | None = None,
+        history: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         """Search with query-time filters, multi-intent split, and soft boosts.
 
         Shared by REST, streaming, the RAG tool, LangGraph, and voice prefetch
