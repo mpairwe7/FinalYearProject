@@ -22,6 +22,7 @@ URA documents whose filenames carry no fiscal year.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from dataclasses import dataclass
@@ -77,6 +78,9 @@ class Conflict:
     evidence_edition: str = ""
     #: ``superseded`` (an older edition) or ``conflict`` (unlabelled, or as new as the figure).
     status: str = "conflict"
+    #: ``stated`` (a different figure next to the fact's name) or ``former_value`` (a value the
+    #: fact's legal basis records as replaced, wherever the passage states it).
+    reason: str = "stated"
 
     def to_dict(self) -> dict[str, str]:
         return dict(self.__dict__)
@@ -176,11 +180,57 @@ def _fy_start(fiscal_year: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+_FORMER_VALUE_RE = re.compile(
+    r"\b(?:from|previously|formerly|replacing|replaced|was)\s+(?:(USD|UGX)\s?([\d,]+(?:\.\d+)?)|([\d.]+)\s?%)",
+    re.IGNORECASE,
+)
+#: Words too common to tell one statutory subject from another.
+_GENERIC = frozenset({
+    "uganda", "taxes", "section", "schedule", "effect", "raised", "amended", "amendment", "goods", "value",
+    "rates", "years", "under", "which", "shall", "their", "above", "below", "about", "other", "there",
+    "these", "those", "where", "while", "every", "first", "second", "third", "fourth", "fifth", "sixth",
+})
+
+
+def _stems(text: str) -> set[str]:
+    """Five-letter stems of the distinctive words in *text* ("registration" and "register" share one).
+
+    Words under five letters ("from", "July", "with") say nothing about a subject.
+    """
+    return {w[:5] for w in re.findall(r"[a-z]+", text.lower()) if len(w) >= 5 and w not in _GENERIC}
+
+
+def _former_values(legal_basis: str) -> dict[str, set[float]]:
+    """Values a fact's legal basis records as replaced ("Raised from USD 500"), by pattern kind.
+
+    "from", "previously", "formerly", "replacing", "replaced" and "was" introduce
+    one. A currency or a percent sign is required, so "with effect from 1 July
+    2024" is a date and not a former value.
+    """
+    out: dict[str, set[float]] = {}
+    for currency, amount, percent in _FORMER_VALUE_RE.findall(legal_basis or ""):
+        try:
+            if percent:
+                out.setdefault("percent", set()).add(round(float(percent), 3))
+            else:
+                out.setdefault(currency.upper(), set()).add(float(amount.replace(",", "")))
+        except ValueError:
+            continue
+    return out
+
+
 def find_conflicts(facts: list[dict[str, Any]], passages: list[dict[str, Any]]) -> list[Conflict]:
     """Kernel facts that a lower-ranked passage contradicts.
 
     *facts* are kernel claims as dicts with ``key``, ``display_name``,
-    ``value``, ``unit`` and ``provision``; *passages* are retrieval hits.
+    ``value``, ``unit``, ``provision`` and ``legal_basis``; *passages* are
+    retrieval hits.
+
+    Two tests, in order. A different figure next to the fact's name. Then, for
+    a fact whose legal basis records a replaced value, that value stated
+    anywhere in a passage retrieved alongside it: a paraphrase ("personal
+    effects … not exceeding USD 500") never names the fact, and dense retrieval
+    finds exactly such paraphrases (ADR-0033 amendment, G534).
     """
     found: list[Conflict] = []
     for fact in facts:
@@ -231,7 +281,59 @@ def find_conflicts(facts: list[dict[str, Any]], passages: list[dict[str, Any]]) 
                     status="superseded" if older else "conflict",
                 ))
                 break
+            else:
+                # A passage that states the current figure is current, even if it also
+                # says what the figure was ("raised from USD 500 to USD 2,000").
+                conflict = None if states_it else _former_value_conflict(
+                    fact, hit, klass, text, numbers, fiscal_year, fact_start)
+                if conflict is not None:
+                    found.append(conflict)
     return found
+
+
+def _former_value_conflict(fact: dict[str, Any], hit: dict[str, Any], klass: str, text: str,
+                           numbers: dict[str, set[float]], fiscal_year: str,
+                           fact_start: int | None) -> Conflict | None:
+    """A passage stating a value the fact's legal basis records as replaced, or ``None``."""
+    former = _former_values(str(fact.get("legal_basis") or fact.get("provision") or ""))
+    for kind, values in former.items():
+        if kind not in _PATTERNS or kind not in numbers:
+            continue  # only the fact's own unit: a former USD value says nothing about a rate
+        values = {v for v in values if not any(abs(v - n) < 1e-6 for n in numbers[kind])}  # never the current one
+        for match in _PATTERNS[kind].finditer(text):
+            try:
+                number = float(match.group(1).replace(",", ""))
+            except ValueError:
+                continue
+            if not any(abs(number - v) < 1e-6 for v in values):
+                continue
+            if _HISTORY_CUE_RE.search(text.lower()[max(0, match.start() - 40):match.start()]):
+                continue  # "previously USD 500": history, not a claim
+            # The same subject, not just the same number: UGX 150,000,000 is also the
+            # presumptive-tax ceiling. Two of the fact's distinctive words (its name or its
+            # legal basis) must stand near the value; a paraphrase still shares its Act and
+            # schedule ("Fifth Schedule … Customs Management Act … accompanied").
+            near = _stems(text[max(0, match.start() - 240):match.end() + 240])
+            subject = _stems(f"{fact.get('display_name') or ''} {fact.get('legal_basis') or ''}")
+            if len(near & subject) < 2:
+                continue
+            start, label = _edition(hit)
+            older = start is not None and fact_start is not None and start < fact_start
+            return Conflict(
+                key=str(fact.get("key") or ""),
+                display_name=str(fact.get("display_name") or ""),
+                kernel_value=f"{_num(sorted(numbers[kind])[0])}{_SUFFIX[kind]}",
+                evidence_value=f"{_num(number)}{_SUFFIX[kind]}",
+                evidence_source=str(hit.get("source") or hit.get("url") or ""),
+                evidence_class=klass,
+                excerpt=" ".join(text[max(0, match.start() - 80):match.end() + 80].split()),
+                provision=str(fact.get("provision") or ""),
+                fiscal_year=fiscal_year,
+                evidence_edition=label,
+                status="superseded" if older else "conflict",
+                reason="former_value",
+            )
+    return None
 
 
 def facts_from_claims(claims: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -255,6 +357,8 @@ def facts_from_claims(claims: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "value": node.props.get("value"),
             "unit": node.props.get("unit"),
             "provision": claim.get("provision") or node.props.get("legal_basis") or "",
+            # The full basis, which records replaced values ("Raised from USD 500").
+            "legal_basis": node.props.get("legal_basis") or "",
             "fiscal_year": node.props.get("fiscal_year") or "",
         })
     return out
@@ -307,33 +411,59 @@ def _check(graph_hit: dict[str, Any], hits: list[dict[str, Any]], *,
 
 def apply_precedence(graph_hit: dict[str, Any], hits: list[dict[str, Any]], *,
                      record: bool = True) -> list[dict[str, Any]]:
-    """*hits* with each passage that contradicts the kernel moved below the rest.
+    """*hits* with stale passages left out and unresolved conflicts labelled last.
 
-    Order is otherwise kept. A conflict is queued once per turn however often
-    this runs (FAQ promotion orders again); *record* off queues nothing.
-    A moved passage is annotated ``kernel_precedence``
-    (status, key, kernel and stated values, edition). Never raises: on any error
-    *hits* comes back unchanged.
+    * **Stale** (an older edition, or a value the fact's legal basis records as
+      replaced): left out of the answer's evidence, and listed once on the graph
+      hit under ``kernel_precedence_dropped`` for the audit. A dense hit stating
+      the replaced USD 500 baggage allowance was quoted before this (G534).
+    * **Unresolved** (an unlabelled or current passage stating a different
+      figure): kept, moved below the rest, and annotated ``kernel_precedence``.
+      The passage header says the figure disagrees with the rate table, so the
+      answer reports both and advises confirming with URA. The kernel can be the
+      stale side after a new Finance Act, and dropping would hide that.
+
+    A conflict is queued once per turn however often this runs (FAQ promotion
+    orders again); *record* off queues nothing. Never raises: on any error *hits*
+    comes back unchanged.
     """
     try:
         _conflicts, by_hit = _check(graph_hit, hits, record=record)
         if not by_hit:
             return hits
-        agree, disagree = [], []
+        agree, unresolved = [], []
+        dropped = graph_hit.setdefault("kernel_precedence_dropped", [])
         for hit in hits:
             conflict = by_hit.get(id(hit))
             if conflict is None:
                 agree.append(hit)
                 continue
+            if conflict.status == "superseded" or conflict.reason == "former_value":
+                entry = {"status": conflict.status, "reason": conflict.reason, "key": conflict.key,
+                         "kernel_value": conflict.kernel_value, "stated_value": conflict.evidence_value,
+                         "edition": conflict.evidence_edition, "fiscal_year": conflict.fiscal_year,
+                         "source": conflict.evidence_source, "passage": _passage_identity(hit)}
+                if not any(d.get("passage") == entry["passage"] and d.get("key") == entry["key"] for d in dropped):
+                    dropped.append(entry)  # once per passage, however often the order is rebuilt
+                continue
             hit["kernel_precedence"] = {"status": conflict.status, "key": conflict.key,
+                                        "display_name": conflict.display_name,
                                         "kernel_value": conflict.kernel_value,
                                         "stated_value": conflict.evidence_value,
                                         "edition": conflict.evidence_edition, "fiscal_year": conflict.fiscal_year}
-            disagree.append(hit)
-        return agree + disagree
+            unresolved.append(hit)
+        return agree + unresolved
     except Exception:
         logger.warning("kernel: precedence ordering skipped", exc_info=True)
         return hits
+
+
+def _passage_identity(hit: dict[str, Any]) -> str:
+    """A stable identity for a passage across precedence passes: its id, or its source and text."""
+    if hit.get("id"):
+        return str(hit["id"])
+    text = str(hit.get("text") or hit.get("answer") or "")
+    return f"{hit.get('source') or ''}|{hashlib.sha256(text.encode('utf-8', 'replace')).hexdigest()[:16]}"
 
 
 def record_conflicts(conflicts: list[Conflict], *, kernel_version: str) -> int:

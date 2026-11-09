@@ -6,10 +6,11 @@
 * No silent rollover. After the last published table ends, answers still use
   it, and say so, until the next Finance Act's table is added.
 * Unconfirmed figures say so in the answer, not only in a tool payload.
-* Edition-aware precedence. A passage that contradicts the figure in force is
-  ranked below the others. If it comes from an older edition, it is
-  *superseded*: expected, not sent to reviewers. If it is unlabelled or as new
-  as the figure, it is a *conflict*, and goes to the discrepancy queue. USD
+* Edition-aware precedence. A passage that contradicts the figure in force
+  from an older edition is *superseded*: left out of the answer's evidence
+  (G534) and not sent to reviewers. One that is unlabelled or as new as the
+  figure is a *conflict*: ranked below the others, labelled in its header, and
+  sent to the discrepancy queue. USD
   amounts and UGX penalty amounts are compared as well as percentages and UGX
   rates.
 * The kernel's state is visible from outside the process on ``/ready``.
@@ -145,7 +146,7 @@ def test_the_previous_years_figure_in_its_own_edition_is_superseded() -> None:
     assert (conflict.status, conflict.evidence_edition) == ("superseded", "FY2025-26")
 
 
-def test_contradicting_passages_rank_below_the_rest_and_only_conflicts_are_reported(monkeypatch) -> None:
+def test_stale_passages_are_left_out_unresolved_ones_labelled_and_only_conflicts_reported(monkeypatch) -> None:
     recorded: list = []
     monkeypatch.setattr(precedence, "record_conflicts", lambda conflicts, **_: recorded.extend(conflicts) or len(conflicts))
     monkeypatch.setattr(precedence, "facts_from_claims", lambda claims: [BAGGAGE])
@@ -155,8 +156,10 @@ def test_contradicting_passages_rank_below_the_rest_and_only_conflicts_are_repor
     current = _hit("The passenger baggage allowance is US$2,000 per traveller.", id="current")
     graph_hit = {"doc_type": "graph", "graph_claims": [{"subject": "x"}]}
     ordered = precedence.apply_precedence(graph_hit, [old, other, unlabelled, current])
-    assert [h["id"] for h in ordered] == ["other", "current", "old", "unlabelled"]
-    assert old["kernel_precedence"]["status"] == "superseded"
+    # An older edition is left out of the answer's evidence and listed for the audit (G534); an
+    # unlabelled disagreement is kept last and labelled, since the kernel may be the stale side.
+    assert [h["id"] for h in ordered] == ["other", "current", "unlabelled"]
+    assert [(d["stated_value"], d["status"]) for d in graph_hit["kernel_precedence_dropped"]] == [("500 USD", "superseded")]
     assert unlabelled["kernel_precedence"]["status"] == "conflict"
     assert [c.evidence_value for c in recorded] == ["1000 USD"], "a superseded edition is expected, not a review item"
     assert "kernel_precedence" not in other
