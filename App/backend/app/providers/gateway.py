@@ -230,9 +230,21 @@ def workers_ai_chat(
         if get_cloud_settings().cf_relay_base_url.strip():
             from . import relay_client
 
-            return relay_client.relay_workers_ai_chat(
-                messages, model, max_tokens=max_tokens, temperature=temperature
-            )
+            try:
+                return relay_client.relay_workers_ai_chat(
+                    messages, model, max_tokens=max_tokens, temperature=temperature
+                )
+            except httpx.HTTPStatusError as exc:
+                # A 4xx is about this request (auth, a bad slot) and would fail directly too.
+                if exc.response.status_code < 500:
+                    raise
+                # The relay answered that ITS call to Cloudflare failed (502 on 2026-11-09,
+                # while Cloudflare itself served this account). Try Cloudflare from here.
+                logger.warning("Workers AI relay returned %d; trying Cloudflare directly",
+                               exc.response.status_code)
+            except httpx.TransportError as exc:
+                logger.warning("Workers AI relay unreachable (%s); trying Cloudflare directly",
+                               type(exc).__name__)
         data = _workers_ai_call(
             model,
             lambda url, h: _post_json(

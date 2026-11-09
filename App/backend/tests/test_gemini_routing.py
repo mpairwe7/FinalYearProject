@@ -162,126 +162,92 @@ class TestModelFallback(unittest.TestCase):
         self.assertEqual(len(calls), 2)
 
 
-class TestTheOutputBudgetFitsAThinkingModel(unittest.TestCase):
-    """512 tokens looks generous for an FAQ answer and is not.
+class TestTheSunbirdOutputBudget(unittest.TestCase):
+    """Sunflower is Qwen3.5-based, a thinking model: reasoning tokens come out of
+    max_tokens before any answer text (the same trap that truncated every Gemini
+    reply at 512)."""
 
-    gemini-3.x flash are thinking models: reasoning tokens are billed against
-    maxOutputTokens BEFORE any answer token is emitted. In production every
-    Gemini reply came back truncated ("truncated (41 chars)", "(84 chars)"),
-    failed _looks_truncated, and sent the chain through all three Workers AI
-    models against a Cloudflare host this deployment cannot reach — so a good
-    answer was thrown away at the cost of a ~25s round trip.
+    def test_the_budget_leaves_room_for_reasoning(self):
+        from app import sunbird
 
-    Measured live on the same prompt: 512 -> 337 chars, truncated; 2048 -> 455
-    chars, complete.
-    """
+        self.assertGreaterEqual(sunbird.SUNBIRD_LLM_MAX_TOKENS, 512)
 
-    def test_the_budget_is_large_enough_for_reasoning_tokens(self):
-        from app import service as svc
+    def test_the_chat_call_sends_the_budget_and_the_model(self):
+        from app import sunbird
 
-        self.assertGreaterEqual(
-            svc.GEMINI_MAX_OUTPUT_TOKENS,
-            1024,
-            "reasoning tokens come out of this budget before any answer text",
-        )
+        class _Resp:
+            def json(self):
+                return {"choices": [{"message": {"content": "  An answer. [1]  "}}]}
 
-    def test_the_chat_call_uses_the_budget_rather_than_a_literal(self):
-        import os
+        with patch.object(sunbird, "_post", return_value=_Resp()) as post:
+            out = sunbird.chat_completion([{"role": "user", "content": "q"}])
+        self.assertEqual(out, "An answer. [1]")
+        path = post.call_args.args[0]
+        body = post.call_args.kwargs["json"]
+        self.assertEqual(path, "/tasks/chat/completions")
+        self.assertEqual(body["model"], sunbird.SUNBIRD_LLM_MODEL)
+        self.assertEqual(body["max_tokens"], sunbird.SUNBIRD_LLM_MAX_TOKENS)
 
-        from app import service as svc
+    def test_an_empty_reply_is_a_failure_the_breaker_sees(self):
+        from app import sunbird
 
-        with patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "gemini"}), patch.object(
-            svc.flags, "is_enabled", return_value=True
-        ), patch("app.providers.config.is_gemini_configured", return_value=True), patch(
-            "app.providers.budget.try_consume_gemini_call", return_value=True
-        ), patch(
-            "app.providers.gateway.gemini_generate", return_value="a complete answer."
-        ) as gen:
-            svc._llm_cloud_fallback("q", [{"text": "p"}], None, "en")
-        self.assertEqual(
-            gen.call_args.kwargs.get("max_tokens"), svc.GEMINI_MAX_OUTPUT_TOKENS
-        )
+        class _Resp:
+            def json(self):
+                return {"choices": [{"message": {"content": "  "}}]}
+
+        with patch.object(sunbird, "_post", return_value=_Resp()), self.assertRaises(RuntimeError):
+            sunbird.chat_completion([{"role": "user", "content": "q"}])
 
 
 class TestTheGuardCoversTheRealChatPath(unittest.TestCase):
-    """The guard defaults `locale` to None, so a call site that forgets to pass
-    it is silently ALLOWED. `_llm_cloud_fallback` is the path that serves
-    production chat, and it forgot — the gateway tests above all passed while
-    Luganda still reached Gemini in the one place it mattered.
-    """
+    """The chat chain is Sunbird then Workers AI (ADR-0036). Sunbird is trained on
+    the Ugandan languages and serves them; Workers AI is a general model and never
+    does; Gemini no longer generates at all."""
 
-    def _run(self, locale: str):
+    def _run(self, locale: str, *, sunbird_reply: str = "generated", backend: str = "sunbird"):
         import os
 
         from app import service as svc
+        from app.providers import breakers
 
-        with patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "gemini"}), patch.object(
+        breakers.SUNBIRD_LLM_BREAKER.record_success()
+        breakers.CF_LLM_BREAKER.record_success()
+        with patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": backend}), patch.object(
             svc.flags, "is_enabled", return_value=True
-        ), patch("app.providers.config.is_gemini_configured", return_value=True), patch(
-            "app.providers.budget.try_consume_gemini_call", return_value=True
-        ) as budget, patch(
-            "app.providers.gateway.gemini_generate", return_value="generated"
-        ) as gen:
-            svc._llm_cloud_fallback(
-                "How do I file a return?", [{"text": "passage"}], None, locale
-            )
-        return gen, budget
-
-    def test_a_luganda_turn_never_reaches_gemini(self):
-        gen, budget = self._run("lg")
-        gen.assert_not_called()
-        budget.assert_not_called()  # and spends none of the free-tier allowance
-
-    def test_a_luganda_turn_never_reaches_workers_ai_either(self):
-        """The policy is about the language, not the vendor.
-
-        Only the Gemini branch was guarded at first; execution fell through to
-        the Cloudflare chain below it, so a Luganda turn still walked all three
-        Workers AI models. That looked harmless purely because this deployment
-        cannot reach Cloudflare — every attempt failed. The moment the host
-        became reachable, Workers AI would have answered Luganda.
-        """
-        import os
-
-        from app import service as svc
-
-        with patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "gemini"}), patch.object(
-            svc.flags, "is_enabled", return_value=True
-        ), patch("app.providers.config.is_gemini_configured", return_value=True), patch(
-            "app.providers.config.is_cloudflare_configured", return_value=True
-        ), patch("app.providers.budget.try_consume_gemini_call", return_value=True), patch(
+        ), patch("app.providers.config.is_cloudflare_configured", return_value=True), patch(
             "app.providers.budget.try_consume_neurons", return_value=True
-        ), patch("app.providers.gateway.gemini_generate", return_value="x") as gem, patch(
-            "app.providers.gateway.workers_ai_chat", return_value="x"
-        ) as cf:
-            svc._llm_cloud_fallback("q", [{"text": "p"}], None, "lg")
-        gem.assert_not_called()
-        cf.assert_not_called()
-
-    def test_english_still_reaches_workers_ai_when_gemini_yields_nothing(self):
-        """The guard must not disable the Cloudflare tier for English."""
-        import os
-
-        from app import service as svc
-
-        with patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "gemini"}), patch.object(
-            svc.flags, "is_enabled", return_value=True
-        ), patch("app.providers.config.is_gemini_configured", return_value=True), patch(
-            "app.providers.config.is_cloudflare_configured", return_value=True
-        ), patch("app.providers.budget.try_consume_gemini_call", return_value=True), patch(
-            "app.providers.budget.try_consume_neurons", return_value=True
-        ), patch("app.providers.gateway.gemini_generate", return_value=""), patch(
+        ), patch("app.sunbird.is_available", return_value=True), patch(
+            "app.sunbird.chat_completion", return_value=sunbird_reply
+        ) as sb, patch(
             "app.providers.gateway.workers_ai_chat", return_value="a full answer."
-        ) as cf:
-            out = svc._llm_cloud_fallback("q", [{"text": "p"}], None, "en")
+        ) as cf, patch("app.providers.gateway.gemini_generate", return_value="x") as gem:
+            out = svc._llm_cloud_fallback("How do I file a return?", [{"text": "passage"}], None, locale)
+        return out, sb, cf, gem
+
+    def test_a_luganda_turn_is_served_by_sunbird(self):
+        out, sb, cf, gem = self._run("lg", sunbird_reply="Okusasula omusolo kwetaagisa TIN. [1]")
+        self.assertEqual(out, "Okusasula omusolo kwetaagisa TIN. [1]")
+        sb.assert_called_once()
+        cf.assert_not_called()
+        gem.assert_not_called()
+
+    def test_a_luganda_turn_never_reaches_workers_ai_even_when_sunbird_fails(self):
+        """The policy is about the language, not the vendor: a general model does not answer Luganda."""
+        out, sb, cf, gem = self._run("lg", sunbird_reply="")
+        sb.assert_called_once()
+        cf.assert_not_called()
+        gem.assert_not_called()
+
+    def test_english_reaches_workers_ai_when_sunbird_yields_nothing(self):
+        out, sb, cf, gem = self._run("en", sunbird_reply="")
         cf.assert_called()
         self.assertEqual(out, "a full answer.")
+        gem.assert_not_called()
 
-    def test_an_english_turn_still_reaches_gemini_with_its_locale(self):
-        gen, _ = self._run("en")
-        gen.assert_called_once()
-        self.assertEqual(gen.call_args.kwargs.get("locale"), "en")
-
+    def test_gemini_never_generates_even_when_still_configured_for_it(self):
+        out, sb, cf, gem = self._run("en", backend="gemini", sunbird_reply="An answer. [1]")
+        self.assertEqual(out, "An answer. [1]")
+        gem.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()

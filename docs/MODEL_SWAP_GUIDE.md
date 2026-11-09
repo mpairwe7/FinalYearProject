@@ -100,6 +100,24 @@ No code changes needed — the `LLM_MODEL` env var controls everything. For
 Sunflower-14B-FP8 specifically, `LLM_BACKEND` also matters — see the
 backend comparison table above.
 
+### Cloud answer generation (deployments without a local model)
+
+Where no local model runs (the HF Space), answers come from the cloud chain in
+`service._llm_cloud_fallback` (ADR-0036):
+
+```bash
+FLAG_CLOUDFLARE_FALLBACK=true
+LLM_FALLBACK_BACKEND=sunbird        # Sunflower via Sunbird's API, then Workers AI
+                                    # (workers_ai = Workers AI only; the retired gemini reads as sunbird)
+SUNBIRD_LLM_MODEL=sunflower-9b      # POST https://api.sunbird.ai/tasks/chat/completions
+SUNBIRD_LLM_MAX_TOKENS=1024         # Sunflower thinks: reasoning tokens come out of this budget
+SUNBIRD_LLM_TIMEOUT=45
+CF_LLM_MODEL=@cf/meta/llama-3.3-70b-instruct-fp8-fast   # then CF_LLM_FALLBACK_MODEL, CF_LLM_FALLBACK_MODEL_2
+```
+
+Sunbird answers every locale. Workers AI never answers the Ugandan languages, and a call turn
+reaches neither tier. Gemini is not an answer generator any more.
+
 ---
 
 ## 2. Embedding Model (Dense Retrieval)

@@ -662,6 +662,32 @@ aibom_inventory:
       hosting: "local"
       locales: ["en", "lg", "sw", "nyn", "ach"]
       runtime: "vLLM (FP8 weights + FP8 KV cache, GPU 4)"
+    - id: "sunbird-api/sunflower-9b"
+      role: "Primary cloud answer generator on CPU deployments (HF Space), Workers AI behind it (ADR-0036, G537)"
+      provider: "Sunbird AI (api.sunbird.ai /tasks/chat/completions, OpenAI-compatible)"
+      hosting: "cloud"
+      locales: ["en", "lg", "sw", "nyn", "ach"]
+      limits: "Both configured accounts answered 403 ACCOUNT_SUSPENDED on 2026-11-09; until restored, Workers AI serves English and the Ugandan languages get retrieval only. Never reached on a call turn."
+      verified_by:
+        - "tests/agents/test_sunbird_primary_llm_2026_11.py"
+        - "App/backend/tests/test_gemini_routing.py"
+    - id: "cloudflare-workers-ai/llama-3.3-70b-instruct-fp8-fast"
+      role: "Second cloud answer tier behind Sunbird (then mistral-small-3.1-24b-instruct, then llama-4-scout-17b-16e-instruct); reached through the Crane Cloud relay, or directly when the relay fails (ADR-0036)"
+      provider: "Cloudflare Workers AI"
+      hosting: "cloud"
+      locales: ["en"]
+      limits: "Never answers lg/nyn/ach/teo/lgg/sw (cloud_generation_allowed_for) or a call turn; reachability from the HF Space is unconfirmed (TLS failures to gateway.ai.cloudflare.com)."
+      verified_by:
+        - "App/backend/tests/test_providers.py"
+        - "tests/agents/test_sunbird_primary_llm_2026_11.py"
+    - id: "google/gemini-flash"
+      role: "No longer an answer generator (ADR-0036). Still backs the FAQ judge (FAQ_JUDGE_MODEL) and the opt-in translation and TTS fallbacks."
+      provider: "Google AI Studio (Generative Language API)"
+      hosting: "cloud"
+      locales: ["en"]
+      limits: "The configured key is IP-restricted (API_KEY_IP_ADDRESS_BLOCKED) and fails from the HF Space, so those features fail there too (G538)."
+      verified_by:
+        - "App/backend/tests/test_gemini_routing.py"
     - id: "Qwen/Qwen3.8-27B-FP8"
       role: "T2/T3 sovereign local reasoning & multi-tool tax legal synthesis LLM (65k context)"
       license: "Apache-2.0"

@@ -243,13 +243,20 @@ def _validate_production_env() -> None:
                 and not _cloud_cfg.is_vectorize_configured()
             ):
                 errors.append("DENSE_FALLBACK_BACKEND=workers_ai requires VECTORIZE_INDEX.")
-            gemini_used = (
-                os.getenv("LLM_FALLBACK_BACKEND", "").strip().lower() == "gemini"
-                or os.getenv("TRANSLATE_FALLBACK_BACKEND", "").strip().lower() == "gemini"
-            )
+            # Gemini no longer generates answers (ADR-0036); LLM_FALLBACK_BACKEND=gemini
+            # is read as sunbird. Translation can still name it.
+            gemini_used = os.getenv("TRANSLATE_FALLBACK_BACKEND", "").strip().lower() == "gemini"
             if gemini_used and not _cloud_cfg.is_gemini_configured():
                 errors.append(
-                    "A *_FALLBACK_BACKEND=gemini is set but GEMINI_API_KEY (+ AI Gateway) is missing."
+                    "TRANSLATE_FALLBACK_BACKEND=gemini is set but GEMINI_API_KEY (+ AI Gateway) is missing."
+                )
+            llm_backend = os.getenv("LLM_FALLBACK_BACKEND", "").strip().lower()
+            if llm_backend in ("sunbird", "gemini") and not (
+                os.getenv("SUNBIRD_API_TOKEN") or os.getenv("SUNBIRD_FALLBACK_API_TOKEN")
+            ) and not _cloud_cfg.is_cloudflare_configured():
+                errors.append(
+                    "LLM_FALLBACK_BACKEND=sunbird needs SUNBIRD_API_TOKEN, or Cloudflare credentials "
+                    "for the Workers AI fallback."
                 )
         except Exception:
             errors.append(

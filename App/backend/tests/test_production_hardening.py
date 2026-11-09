@@ -326,16 +326,28 @@ class ProductionHardeningTests(unittest.TestCase):
             self._validate_with(env)
         self.assertIn("requires VECTORIZE_INDEX", str(raised.exception))
 
-    def test_gemini_fallback_requires_gemini_key(self) -> None:
+    def test_gemini_translation_fallback_requires_gemini_key(self) -> None:
         env = {
             **self.secure_env,
             **self._CF_ENV,
-            "LLM_FALLBACK_BACKEND": "gemini",
+            "TRANSLATE_FALLBACK_BACKEND": "gemini",
             "GEMINI_API_KEY": "",
         }
         with self.assertRaises(SystemExit) as raised:
             self._validate_with(env)
         self.assertIn("GEMINI_API_KEY", str(raised.exception))
+
+    def test_a_sunbird_backend_with_no_way_to_generate_is_named(self) -> None:
+        env = {**self.secure_env, "FLAG_CLOUDFLARE_FALLBACK": "true", "LLM_FALLBACK_BACKEND": "sunbird",
+               "CROSS_BORDER_PROCESSING_APPROVED": "true", "CROSS_BORDER_TRANSFER_ASSESSMENT_ID": "TIA-TEST-001"}
+        with self.assertRaises(SystemExit) as raised:
+            self._validate_with(env)
+        self.assertIn("LLM_FALLBACK_BACKEND=sunbird needs SUNBIRD_API_TOKEN", str(raised.exception))
+
+    def test_answer_generation_no_longer_needs_a_gemini_key(self) -> None:
+        """Gemini no longer generates answers (ADR-0036); the retired value reads as sunbird."""
+        env = {**self.secure_env, **self._CF_ENV, "LLM_FALLBACK_BACKEND": "gemini", "GEMINI_API_KEY": ""}
+        self._validate_with(env)
 
     def test_auth_required_rejects_missing_bearer_token(self) -> None:
         request = Request({"type": "http", "headers": []})

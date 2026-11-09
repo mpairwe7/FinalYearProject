@@ -94,14 +94,13 @@ def client():
 
 @pytest.fixture()
 def cloud_fallback_env():
-    """Configure the Gemini fallback tier with fake creds + fresh budget/breakers."""
+    """Configure the cloud tier (Sunbird, then Workers AI; ADR-0036) with fake creds + fresh breakers."""
     env = {
         "CLOUDFLARE_ACCOUNT_ID": "acct-it",
         "CLOUDFLARE_API_TOKEN": "cf-it-token",
         "CF_AIG_GATEWAY": "ura-gw",
         "CF_AIG_TOKEN": "aig-it-token",
-        "GEMINI_API_KEY": "AIza-it",  # pragma: allowlist secret
-        "LLM_FALLBACK_BACKEND": "gemini",
+        "LLM_FALLBACK_BACKEND": "sunbird",
     }
     os.environ.update(env)
     cloud_config.get_cloud_settings.cache_clear()
@@ -109,7 +108,7 @@ def cloud_fallback_env():
     budget._redis = None
     budget._redis_tried = True  # force in-process counters
     budget._local_gemini.clear()
-    breakers.GEMINI_BREAKER.record_success()
+    breakers.SUNBIRD_LLM_BREAKER.record_success()
     service_module._LLM_CIRCUIT.record_success()
     yield
     flags.clear("cloudflare_fallback")
@@ -147,7 +146,8 @@ class TestChatEndpointFallback:
         model = deterministic_pipeline
         model._llm_available = True
         with mock.patch.object(service_module.llm_module, "generate", return_value=""), \
-             mock.patch.object(gateway, "gemini_generate", return_value=CLOUD_REPLY) as gg:
+             mock.patch("app.sunbird.is_available", return_value=True), \
+                 mock.patch("app.sunbird.chat_completion", return_value=CLOUD_REPLY) as gg:
             resp = client.post("/v1/chat", json={"message": "How is VAT charged on local supplies?"})
 
         assert resp.status_code == 200
@@ -165,7 +165,8 @@ class TestChatEndpointFallback:
             with mock.patch.object(service_module.llm_module, "is_available",
                                    return_value=False), \
                  mock.patch.object(service_module.llm_module, "generate", return_value=""), \
-                 mock.patch.object(gateway, "gemini_generate", return_value=CLOUD_REPLY) as gg:
+                 mock.patch("app.sunbird.is_available", return_value=True), \
+                 mock.patch("app.sunbird.chat_completion", return_value=CLOUD_REPLY) as gg:
                 resp = client.post(
                     "/v1/chat", json={"message": "Which VAT rules apply to imports?"}
                 )
@@ -202,7 +203,8 @@ class TestChatStreamEndpointFallback:
         with mock.patch.object(service_module.llm_module, "is_available", return_value=True), \
              mock.patch.object(service_module.llm_module, "generate_stream",
                                return_value=iter([])), \
-             mock.patch.object(gateway, "gemini_generate", return_value=CLOUD_REPLY) as gg:
+             mock.patch("app.sunbird.is_available", return_value=True), \
+                 mock.patch("app.sunbird.chat_completion", return_value=CLOUD_REPLY) as gg:
             with client.stream(
                 "POST", "/v1/chat/stream", json={"message": "How is VAT charged on local supplies?"}
             ) as resp:

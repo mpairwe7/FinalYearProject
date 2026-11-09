@@ -196,26 +196,22 @@ class TestTheGeneratorActuallyAppliesIt(unittest.TestCase):
 
         from app import service as svc
 
-        target = (
-            "app.providers.gateway.gemini_generate"
-            if which == "gemini"
-            else "app.providers.gateway.workers_ai_chat"
-        )
-        other = "" if which == "gemini" else "x"
-        with patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "gemini"}), patch.object(
+        from app.providers import breakers
+
+        breakers.SUNBIRD_LLM_BREAKER.record_success()
+        breakers.CF_LLM_BREAKER.record_success()
+        sunbird_reply = backend_return if which == "sunbird" else "x"  # "x" is truncated: CF runs next
+        with patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "sunbird"}), patch.object(
             svc.flags, "is_enabled", return_value=True
-        ), patch("app.providers.config.is_gemini_configured", return_value=True), patch(
-            "app.providers.config.is_cloudflare_configured", return_value=True
-        ), patch("app.providers.budget.try_consume_gemini_call", return_value=True), patch(
+        ), patch("app.providers.config.is_cloudflare_configured", return_value=True), patch(
             "app.providers.budget.try_consume_neurons", return_value=True
-        ), patch(target, return_value=backend_return), patch(
-            "app.providers.gateway.gemini_generate" if which != "gemini" else target,
-            return_value=backend_return if which == "gemini" else other,
-        ):
+        ), patch("app.sunbird.is_available", return_value=True), patch(
+            "app.sunbird.chat_completion", return_value=sunbird_reply
+        ), patch("app.providers.gateway.workers_ai_chat", return_value=backend_return):
             return svc._llm_cloud_fallback("q", [{"text": "p"}], None, locale)
 
-    def test_gemini_output_is_normalised_before_it_is_returned(self):
-        out = self._run("A TIN is issued by URA [1, 3].", "gemini")
+    def test_sunbird_output_is_normalised_before_it_is_returned(self):
+        out = self._run("A TIN is issued by URA [1, 3].", "sunbird")
         self.assertEqual(out, "A TIN is issued by URA [1][3].")
 
     def test_workers_ai_output_is_normalised_too(self):

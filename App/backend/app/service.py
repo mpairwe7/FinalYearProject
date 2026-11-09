@@ -408,11 +408,6 @@ LLM_DEADLINE_SECONDS = float(os.getenv("LLM_DEADLINE_SECONDS", "45"))
 # timeout), so the worst case becomes roughly this budget plus one more
 # hop's own timeout instead of the sum of every hop's timeout.
 LLM_TOTAL_BUDGET_SECONDS = float(os.getenv("LLM_TOTAL_BUDGET_SECONDS", "70"))
-# Output budget for the Gemini leg. Sized for THINKING models, where reasoning
-# tokens are consumed from this same budget before any answer token appears —
-# so this is not "answer length", and tuning it down to what an answer needs is
-# how the 512 default silently truncated every production reply.
-GEMINI_MAX_OUTPUT_TOKENS = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "2048"))
 SELF_REFLECT_ENABLED = os.getenv("SELF_REFLECT_ENABLED", "false").lower() == "true"
 SELF_REFLECT_THRESHOLD = float(os.getenv("SELF_REFLECT_THRESHOLD", "0.4"))
 _WORKFLOW_FLOWS_DIR = Path(__file__).resolve().parent / "workflows" / "flows"
@@ -929,12 +924,13 @@ def _llm_cloud_fallback(
     tone_hint: str = "",
     deadline: float | None = None,
 ) -> str:
-    """Generate via Cloudflare Gemini / Workers AI when the primary LLM is down.
+    """Generate in the cloud: Sunflower through Sunbird's API, then Workers AI (ADR-0036).
 
-    Gated by ``cloudflare_fallback`` + ``LLM_FALLBACK_BACKEND`` and each provider's
-    circuit breaker + free-tier budget, so it fires only when the primary is
-    unavailable and the cloud path is configured/under budget. Returns "" to let
-    the caller fall back to the best-hit FAQ answer.
+    Gated by ``cloudflare_fallback`` + ``LLM_FALLBACK_BACKEND`` (``sunbird``: Sunbird
+    then Workers AI; ``workers_ai``: Workers AI only) and each provider's circuit
+    breaker + budget. Gemini is no longer a generator: its API key could not be
+    used from the Space, and a deployment still set to ``gemini`` gets this chain.
+    Returns "" to let the caller fall back to the best-hit FAQ answer.
 
     Each candidate backend that responds but :func:`_looks_truncated` is kept
     as a best-effort ``best`` rather than returned outright — the chain keeps
@@ -954,8 +950,8 @@ def _llm_cloud_fallback(
         return ""
     if not flags.is_enabled("cloudflare_fallback"):
         return ""
-    backend = os.getenv("LLM_FALLBACK_BACKEND", "").strip().lower()
-    if backend not in ("gemini", "workers_ai"):
+    backend = _cloud_llm_backend()
+    if backend not in ("sunbird", "workers_ai"):
         return ""
     try:
         from .providers import breakers, budget
@@ -977,73 +973,53 @@ def _llm_cloud_fallback(
             _note_generation(**best_writer)
         return best
 
-    if _budget_exhausted():
-        logger.warning("LLM fallback chain total budget exhausted before Gemini attempt")
-    elif (
-        backend == "gemini"
-        # Checked BEFORE the budget call, which has a side effect: a locale we
-        # will never send must not spend a call from the free-tier allowance.
-        # Checked here rather than relying on gemini_generate to raise, because
-        # a policy refusal caught by the except below would record a breaker
-        # FAILURE and, after enough Luganda turns, open the circuit for English.
-        and gw.gemini_allowed_for(locale)
-        and cfg.is_gemini_configured()
-        and admit(breakers.GEMINI_BREAKER, budget.try_consume_gemini_call)
-    ):
-        system, user = _build_fallback_prompt(
-            query, passages, locale, tone_hint, conversation_history=conversation_history
-        )
-        try:
-            text = gw.gemini_generate(
-                user,
-                system=system,
-                locale=locale,
-                # gemini-3.x flash are THINKING models: reasoning tokens are
-                # billed against this budget before a single answer token is
-                # emitted, so 512 truncated real answers mid-sentence. The
-                # truncated reply then failed _looks_truncated, and the chain
-                # walked all three Workers AI models against a Cloudflare host
-                # this deployment cannot reach — turning a good Gemini answer
-                # into a ~25s round trip that threw the answer away.
-                # Measured in production: "truncated (41 chars)", "(84 chars)".
-                max_tokens=GEMINI_MAX_OUTPUT_TOKENS,
-                temperature=0.2,
-            )
-            breakers.GEMINI_BREAKER.record_success()
-            routing.log_model_use("llm", "gemini_flash")
-            # "[1, 3]" -> "[1][3]" before anything downstream reads citations.
-            text = normalise_citation_markers(text)
-            if text and text.strip() and not _looks_truncated(text):
-                logger.info("LLM fallback via Gemini succeeded")
-                _note_generation(backend="gemini", model="gemini_flash")
-                return text
-            if text and text.strip():
-                logger.warning(
-                    "LLM fallback via Gemini looks truncated (%d chars) — trying Workers AI",
-                    len(text.strip()),
-                )
-                if not best:
-                    best, best_writer = text, {"backend": "gemini", "model": "gemini_flash"}
-        except Exception:
-            breakers.GEMINI_BREAKER.record_failure()
-            logger.warning("LLM Gemini fallback failed", exc_info=True)
-
-    # Cloudflare Workers AI — the cloud-PRIMARY generator when
-    # LLM_PRIMARY_BACKEND=workers_ai, otherwise the cloud fallback.  Reuse the
-    # canonical message builder so cloud answers carry the FULL governed prompt
-    # (formatting, citation, refusal, multilingual rules) + the LLM01 passage
-    # scrub, matching local quality.  Chain: Llama 3.3 70B → Mistral Small 3.1
-    # → Llama 4 Scout, all sharing CF_LLM_BREAKER + the neuron budget.
+    # The FULL governed prompt (formatting, citation, refusal, multilingual rules) +
+    # the LLM01 passage scrub, as the local Sunflower gets: the Sunbird tier IS
+    # Sunflower, and Workers AI is held to the same rules.
     messages = llm_module._build_messages(
         query=query,
         passages=passages,
         conversation_history=conversation_history,
         locale=locale,
-        tokenizer=None,  # CF models have ≥24k context; skip local-tokenizer trim
+        tokenizer=None,  # hosted models have >=24k context; skip local-tokenizer trim
         structured=llm_module.LLM_STRUCTURED_OUTPUT,
         personalization_context=personalization_context,
         tone_hint=tone_hint,
     )
+
+    # Sunbird first. It is trained on the Ugandan languages, so it serves every
+    # locale (the locale policy below keeps them from Workers AI); a call turn never
+    # reaches it (cloud_models_allowed, app.providers.scope).
+    if _budget_exhausted():
+        logger.warning("LLM fallback chain total budget exhausted before Sunbird attempt")
+    elif backend == "sunbird" and cloud_models_allowed():
+        from . import sunbird
+
+        if sunbird.is_available() and admit(breakers.SUNBIRD_LLM_BREAKER, lambda: True):
+            try:
+                text = llm_module.strip_thought(sunbird.chat_completion(messages, temperature=0.2))
+                breakers.SUNBIRD_LLM_BREAKER.record_success()
+                routing.log_model_use("llm", f"sunbird:{sunbird.SUNBIRD_LLM_MODEL}")
+                # "[1, 3]" -> "[1][3]" before anything downstream reads citations.
+                text = normalise_citation_markers(text)
+                if text and text.strip() and not _looks_truncated(text):
+                    logger.info("LLM via Sunbird (%s) succeeded", sunbird.SUNBIRD_LLM_MODEL)
+                    _note_generation(backend="sunbird", model=sunbird.SUNBIRD_LLM_MODEL)
+                    return text
+                if text and text.strip():
+                    logger.warning(
+                        "LLM via Sunbird looks truncated (%d chars) — trying Workers AI",
+                        len(text.strip()),
+                    )
+                    best, best_writer = text, {"backend": "sunbird", "model": sunbird.SUNBIRD_LLM_MODEL}
+            except Exception:
+                breakers.SUNBIRD_LLM_BREAKER.record_failure()
+                logger.warning("LLM via Sunbird failed", exc_info=True)
+
+    # Cloudflare Workers AI — the cloud-PRIMARY generator when
+    # LLM_PRIMARY_BACKEND=workers_ai, otherwise behind Sunbird. Chain: Llama 3.3
+    # 70B → Mistral Small 3.1 → Llama 4 Scout, all sharing CF_LLM_BREAKER + the
+    # neuron budget.
     # Workers AI is a cloud generator too, so the locale policy applies to it
     # exactly as it does to Gemini: the Ugandan languages are served by the
     # Sunbird tier and the retrieval path, not by a general model.
@@ -1059,6 +1035,7 @@ def _llm_cloud_fallback(
         logger.info("Cloud generation skipped for locale %r — Sunbird tier owns it", locale)
         return _served_best()
     # Strip the Qwen-only /no_think directive — a no-op token for Llama/Mistral.
+    # Sunbird (Qwen-based Sunflower) has already read it with the directive.
     if messages and messages[0].get("role") == "system":
         sys_content = messages[0]["content"]
         if sys_content.startswith("/no_think"):
@@ -1141,16 +1118,37 @@ def _cloud_llm_ready() -> bool:
     """
     if not flags.is_enabled("cloudflare_fallback") or not cloud_models_allowed():
         return False
-    backend = os.getenv("LLM_FALLBACK_BACKEND", "").strip().lower()
-    if backend not in ("gemini", "workers_ai"):
+    backend = _cloud_llm_backend()
+    if backend not in ("sunbird", "workers_ai"):
         return False
+    if backend == "sunbird":
+        from . import sunbird
+
+        if sunbird.is_available():
+            return True
     try:
         from .providers import config as cfg
     except Exception:  # providers optional / deps missing
         return False
-    if backend == "gemini" and cfg.is_gemini_configured():
-        return True
     return cfg.is_cloudflare_configured()
+
+
+_RETIRED_BACKEND_WARNED: set[str] = set()
+
+
+def _cloud_llm_backend() -> str:
+    """``LLM_FALLBACK_BACKEND``, with the retired ``gemini`` read as ``sunbird`` (ADR-0036).
+
+    A deployment still configured for Gemini gets the chain that replaced it,
+    not no generation at all; the warning says so once per process.
+    """
+    backend = os.getenv("LLM_FALLBACK_BACKEND", "").strip().lower()
+    if backend == "gemini":
+        if backend not in _RETIRED_BACKEND_WARNED:
+            _RETIRED_BACKEND_WARNED.add(backend)
+            logger.warning("LLM_FALLBACK_BACKEND=gemini is retired (ADR-0036); serving Sunbird then Workers AI")
+        return "sunbird"
+    return backend
 
 
 # Locales kept on the local Qwen3-8B (+ per-language LoRA adapters): the cloud

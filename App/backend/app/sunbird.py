@@ -39,6 +39,11 @@ SUNBIRD_TRANSLATE_TIMEOUT = float(os.getenv("SUNBIRD_TRANSLATE_TIMEOUT", "12.0")
 # Attempts per account before failing over (1 = no retry). Retries apply to
 # timeouts, transport errors, 429 and 5xx — never to auth failures.
 SUNBIRD_RETRIES = max(1, int(os.getenv("SUNBIRD_RETRIES", "2")))
+#: Sunflower through Sunbird's OpenAI-compatible chat endpoint: the cloud answer
+#: generator, with Workers AI behind it (ADR-0036).
+SUNBIRD_LLM_MODEL = os.getenv("SUNBIRD_LLM_MODEL", "sunflower-9b")
+SUNBIRD_LLM_TIMEOUT = float(os.getenv("SUNBIRD_LLM_TIMEOUT", "45"))
+SUNBIRD_LLM_MAX_TOKENS = max(64, int(os.getenv("SUNBIRD_LLM_MAX_TOKENS", "1024")))
 
 _RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
 _BACKOFF_BASE_S = 0.5
@@ -302,7 +307,8 @@ def _post(path: str, **kwargs: Any) -> httpx.Response:
                 status = e.response.status_code
                 if status in (401, 403):
                     logger.warning(
-                        "Sunbird auth failed (%d) on account #%d for %s", status, idx + 1, path
+                        "Sunbird auth failed (%d %s) on account #%d for %s",
+                        status, _error_code(e.response), idx + 1, path,
                     )
                     break  # retrying the same credentials cannot help
                 if status == 429:
@@ -363,6 +369,44 @@ def _post(path: str, **kwargs: Any) -> httpx.Response:
                 idx + 1, path, last_exc,
             )
     raise last_exc  # type: ignore[misc]
+
+
+def _error_code(response: httpx.Response) -> str:
+    """Sunbird's ``error_code`` (``ACCOUNT_SUSPENDED``), so a log names the cause, not just 403."""
+    try:
+        return str(response.json().get("error_code") or "")
+    except Exception:  # noqa: BLE001 - a non-JSON error body has no code
+        return ""
+
+
+def chat_completion(
+    messages: list[dict[str, str]],
+    *,
+    max_tokens: int | None = None,
+    temperature: float = 0.2,
+    timeout: float | None = None,
+) -> str:
+    """A Sunflower reply from ``POST /tasks/chat/completions`` (OpenAI-compatible).
+
+    Uses :func:`_post`, so the fallback account and the quota cooldown apply as
+    they do to speech and translation. Raises on any failure, including an
+    empty reply, so the caller's circuit breaker sees it.
+    """
+    resp = _post(
+        "/tasks/chat/completions",
+        json={
+            "model": SUNBIRD_LLM_MODEL,
+            "messages": messages,
+            "max_tokens": max_tokens or SUNBIRD_LLM_MAX_TOKENS,
+            "temperature": temperature,
+        },
+        timeout=timeout or SUNBIRD_LLM_TIMEOUT,
+    )
+    choices = resp.json().get("choices") or []
+    content = ((choices[0] if choices else {}).get("message") or {}).get("content") or ""
+    if not content.strip():
+        raise RuntimeError("sunbird chat_completion: empty reply")
+    return content.strip()
 
 
 def _get_client() -> httpx.Client:
