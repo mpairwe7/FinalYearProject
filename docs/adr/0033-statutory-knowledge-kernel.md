@@ -315,8 +315,21 @@ Decision:
   give the current figure and say what it replaced. Three gold ids in
   `evals/retrieval_multilingual/gold.jsonl` follow their rows' new content hashes.
 
+- **Review round (PR 710).**
+  - A current figure written in words ("UGX 300 million") counts as current.
+  - The baggage cue also needs an allowance or exemption word, so another per-passenger USD 500
+    charge is kept.
+  - Cached facts are bound to the store object, not its `id()`.
+  - Five navigator strings still gave the replaced VAT threshold (wholesale, entertainment, real
+    estate, registration); they now give UGX 300m and 75m.
+  - The point-of-entry list now says that commercial, dutiable or restricted goods are declared at
+    the Red Channel whatever their value.
+  - A navigator test screens all 2,798 strings and allows "USD 500" only as "from USD 500": the
+    navigator's USD 2,000 TIN rule shares the allowance's number.
 - **Limitation.** A question about a past year is answered from that year's rate table. Passages
   giving last year's figure are left out of retrieval even then.
+- **Limitation.** The screen fails open. If it raises (the kernel cannot load), passages pass
+  unscreened with a logged warning, and the corrected corpus is the only defence.
 - **Tests.** `tests/agents/test_kernel_former_value_screen_2026_11.py` includes a corpus test: no
   FAQ row may state a replaced figure as current. Nine controls were each disabled in turn,
   including putting one stale row back, and a test failed every time.

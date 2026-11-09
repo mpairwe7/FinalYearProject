@@ -735,9 +735,9 @@ EXTERNAL_URA_PORTALS: dict[str, dict[str, Any]] = {
         "common_issues": {
             "unregistered_vat_presumptive_overlap": {
                 "symptoms": ["vat registration query", "presumptive threshold exceeded", "turnover above 150m"],
-                "cause": "A trader operating under presumptive tax has exceeded UGX 150,000,000 annual turnover or UGX 37.5M quarterly.",
+                "cause": "A trader operating under presumptive tax has passed the UGX 150,000,000 presumptive ceiling. VAT registration is a separate test: compulsory once annual taxable turnover exceeds UGX 300,000,000, or UGX 75,000,000 in three consecutive months (from 1 July 2026).",
                 "steps": [
-                    "Immediately apply for compulsory VAT registration via portal.ura.go.ug within 20 days.",
+                    "If the VAT threshold is crossed, apply for compulsory VAT registration via portal.ura.go.ug within 20 days.",
                     "Begin issuing EFRIS fiscal receipts and file monthly Form DT-1014.",
                 ],
             },
@@ -5379,7 +5379,7 @@ def _diagnose_portal_state(
             "info",
             [
                 "Step 1: Goods Point of Entry Documents: (1) Bill of Lading (B/L) or Airway Bill (AWB); (2) Marine/Cargo Insurance Certificate; (3) Proforma Invoice; (4) Commercial Invoice; (5) Certificate of Origin; (6) Permits for Restricted Goods (Sections 3 & 4 External Trade Act); (7) Purchase Order; (8) Packing List; (9) Sales Contract; (10) Evidence of Payment (bank transfer / SWIFT slip).",
-                "Step 2: International Travelers: Valid passport (>=6 months validity), Ugandan visa/e-Visa, Yellow Fever Vaccination Certificate (mandatory >1 yr old), return/onward ticket, and Passenger Baggage Declaration for goods exceeding the USD 2,000 allowance.",
+                "Step 2: International Travelers: Valid passport (>=6 months validity), Ugandan visa/e-Visa, Yellow Fever Vaccination Certificate (mandatory >1 yr old), return/onward ticket, and a Passenger Baggage Declaration at the Red Channel for goods exceeding the USD 2,000 allowance and for any commercial, dutiable or restricted goods whatever their value.",
                 "Step 3: Foreign Companies Entering Uganda: Certificate of Incorporation, Board resolution to register in Uganda, Memorandum & Articles of Association, list of directors/secretary, registered local office address, audited accounts, URA TIN, trading license, and UIA investment license.",
                 "Step 4: Clearance Channels: Document verification is managed through the Uganda Electronic Single Window (UESW) and Document Processing Centre (DPC) at Nakawa.",
             ],
@@ -5612,7 +5612,7 @@ def _diagnose_portal_state(
             "Comprehensive trade guidelines, presumptive turnover taxation, VAT compulsory vs voluntary rules, and EFRIS/DTS compliance.",
             "info",
             [
-                "Step 1: Trader Categorization: 1) Small Business Presumptive (turnover UGX 10M-150M, daily average UGX 34,700); 2) VAT-Registered Traders (turnover >UGX 37.5M in 3 months or >UGX 150M in 12 months, or voluntary registration); 3) Standard Corporate Entities (30% CIT on net profit).",
+                "Step 1: Trader Categorization: 1) Small Business Presumptive (turnover UGX 10M-150M, daily average UGX 34,700); 2) VAT-Registered Traders (taxable turnover >UGX 75M in 3 months or >UGX 300M in 12 months from 1 July 2026, or voluntary registration); 3) Standard Corporate Entities (30% CIT on net profit).",
                 "Step 2: Presumptive Rules: Businesses under UGX 10M pay Nil tax; UGX 10M-150M pay final presumptive turnover tax based on statutory schedules (with or without books of accounts); tax payment serves as return filing.",
                 "Step 3: VAT Mechanics & Input Tax Credit: 18% standard rate on taxable supplies, 0% on exports/locally milled cereals, exempt on raw foodstuffs/financial services; excess input credit >UGX 5,000,000 qualifies for URA cash refund or future tax offset.",
                 "Step 4: Smart Solutions (EFRIS & DTS): All VAT-registered traders must issue e-invoices with a 20-digit FDN at checkout; wholesalers/retailers of gazetted goods (beers, spirits, wines, sodas, water, cigarettes, cement, sugar) must ensure units bear activated Digital Tax Stamps.",
@@ -5758,7 +5758,7 @@ def _diagnose_portal_state(
             [
                 "Step 1: Regulatory Licensing & Setup: Events companies and promoters require URSB registration, municipal permits (KCCA/local council), and URA TIN; private commercial studios pay 30% CIT on net profit.",
                 "Step 2: Withholding Tax on Performers: Promoters must withhold 15% final WHT on gross payments made to non-resident foreign entertainers; 6% WHT applies to payments made to local resident artistes regardless of payer's agent status.",
-                "Step 3: VAT on Concerts & Gate Audits: 18% inclusive VAT on concert tickets and public event admissions for registered promoters (turnover >UGX 150M); event organizers must notify URA at least 14 days prior for gate ticket revenue verification.",
+                "Step 3: VAT on Concerts & Gate Audits: 18% inclusive VAT on concert tickets and public event admissions for registered promoters (annual taxable turnover >UGX 300M from 1 July 2026); event organizers must notify URA at least 14 days prior for gate ticket revenue verification.",
                 "Step 4: Corporate Sponsorship: Promoters receiving corporate sponsorship funds or goods must issue an EFRIS VAT-inclusive fiscal invoice to the sponsor.",
                 "Step 5: Production Studios: Commercial recording and video production studios claim accelerated depreciation on high-tech studio gear, mixing consoles, and cameras; all contracts must be fiscalized via EFRIS.",
                 "Step 6: Download Official Compendium: Download the 20-page guide (Issue 1 Vol. 1 FY 2025-26) at ura.go.ug/storage/2025/10/TAXATION-OF-THE-ENTERTAINMENT-SECTOR.pdf.",
@@ -5805,7 +5805,7 @@ def _diagnose_portal_state(
             [
                 "Step 1: Market Segments & Players: Raw land, residential, commercial, and industrial properties. Operators comprise land dealers, land developers, property developers, property managers, MLHUD-licensed agents, and landlords.",
                 "Step 2: Land & Property Sales Taxation: Corporate real estate companies pay 30% CIT on net sales profits; sole proprietor dealers pay resident individual graduated income tax up to 40%; real estate dealers are excluded from presumptive tax.",
-                "Step 3: VAT on Real Estate: Sale/lease of unimproved bare land and residential dwelling rentals are 100% VAT exempt; sales/lettings of commercial complexes, shopping malls, arcades, and serviced plots attract standard 18% VAT (threshold UGX 150M).",
+                "Step 3: VAT on Real Estate: Sale/lease of unimproved bare land and residential dwelling rentals are 100% VAT exempt; sales/lettings of commercial complexes, shopping malls, arcades, and serviced plots attract standard 18% VAT (VAT registration threshold UGX 300M a year from 1 July 2026).",
                 "Step 4: Property Managers & Agents: Rent collected by property managers is a pass-through to landlords; management fees and agency commissions attract 18% VAT and 6% WHT on contracts >UGX 1,000,000 via mandatory EFRIS billing.",
                 "Step 5: Stamp Duty & Local Rates: 1.5% stamp duty on land transfers based on Chief Government Valuer (CGV) market valuation; 1% on commercial leases; Nil stamp duty in industrial parks; ground rent and municipal property rates are fully deductible expenses.",
                 "Step 6: Download Official Compendium: Download the 18-page guide (Vol. 1 FY 2025-26) at ura.go.ug/storage/2026/01/REAL-ESTATE-SECTOR-FY-2025-26.pdf.",
@@ -6002,7 +6002,7 @@ def _diagnose_portal_state(
                 "Step 2: Select business entity type (Private Company, Public Company, Partnership, Trust, or NGO).",
                 "Step 3: Enter URSB Registration Number (auto-validates Company Name and Form 20 against business registry).",
                 "Step 4: Enter active 10-digit personal TINs for all Directors, Company Secretary, and Chief Executive.",
-                "Step 5: Upload Certificate of Incorporation and Company Form 20; select tax heads (CIT, PAYE, VAT if turnover >= 150M).",
+                "Step 5: Upload Certificate of Incorporation and Company Form 20; select tax heads (CIT, PAYE, VAT if annual taxable turnover exceeds UGX 300M).",
                 "Step 6: Submit application; URA reviews and issues TIN within 24 to 48 hours.",
             ],
         )

@@ -202,7 +202,9 @@ _GENERIC = frozenset({
 #: Every fact whose legal basis records a replaced value needs an entry; a test enforces it.
 _SUBJECT_CUES: dict[str, tuple[tuple[tuple[str, ...], ...], tuple[str, ...]]] = {
     "passenger_baggage_allowance_usd": (
-        (("baggage", "passenger", "traveller", "traveler", "personal effects", "accompanied"),), ()),
+        (("baggage", "passenger", "traveller", "traveler", "personal effects", "accompanied"),
+         # The allowance, not another per-passenger charge.
+         ("allowance", "exempt", "duty-free", "duty free", "free of", "exceed", "customs value")), ()),
     "vat_registration_threshold_annual": ((("vat", "value added tax", "taxable supplies"), ("regist", "threshold")),
                                           ("presumptive",)),
     "efris_e_receipt_refund_qualifying_threshold_ugx": ((("refund",), ("receipt", "invoice", "efris")), ()),
@@ -226,6 +228,17 @@ def _on_subject(fact: dict[str, Any], text: str, start: int, end: int) -> bool:
     near_stems = _stems(text[max(0, start - 240):end + 240])
     subject = _stems(f"{fact.get('display_name') or ''} {fact.get('legal_basis') or ''}")
     return len(near_stems & subject) >= 2
+
+
+def _states_current(fact: dict[str, Any], text: str, numbers: dict[str, set[float]]) -> bool:
+    """Whether *text* states *fact*'s current value on its subject, in figures or words ("UGX 300 million")."""
+    for kind, values in numbers.items():
+        if kind not in _PATTERNS:
+            continue
+        for match, number in _amounts(kind, text):
+            if any(abs(number - v) < 1e-6 for v in values) and _on_subject(fact, text, match.start(), match.end()):
+                return True
+    return False
 
 
 def _stems(text: str) -> set[str]:
@@ -320,7 +333,8 @@ def find_conflicts(facts: list[dict[str, Any]], passages: list[dict[str, Any]]) 
             else:
                 # A passage that states the current figure is current, even if it also
                 # says what the figure was ("raised from USD 500 to USD 2,000").
-                conflict = None if states_it else _former_value_conflict(
+                current = states_it or _states_current(fact, text, numbers)
+                conflict = None if current else _former_value_conflict(
                     fact, hit, klass, text, numbers, fiscal_year, fact_start)
                 if conflict is not None:
                     found.append(conflict)
@@ -506,10 +520,9 @@ def _facts_with_former_values(fiscal_year: str) -> list[dict[str, Any]]:
     from .functions import kernel_store
 
     store = kernel_store()
-    cache_key = (fiscal_year, id(store))
-    cached = _FORMER_FACTS_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
+    cached = _FORMER_FACTS_CACHE.get(fiscal_year)
+    if cached is not None and cached[0] is store:
+        return cached[1]  # the same store object: an id() could be reused by a reloaded one
     facts = []
     for kind in FACT_KINDS:
         for node in store.by_kind(kind):
@@ -520,11 +533,13 @@ def _facts_with_former_values(fiscal_year: str) -> list[dict[str, Any]]:
                           "unit": props.get("unit"), "provision": props.get("legal_basis") or "",
                           "legal_basis": props.get("legal_basis") or "", "fiscal_year": fiscal_year})
     _FORMER_FACTS_CACHE.clear()  # one kernel and one year in force at a time
-    _FORMER_FACTS_CACHE[cache_key] = facts
+    _FORMER_FACTS_CACHE[fiscal_year] = (store, facts)
     return facts
 
 
-_FORMER_FACTS_CACHE: dict[tuple[str, int], list[dict[str, Any]]] = {}
+#: fiscal year -> (the store the facts came from, the facts). Holding the store keeps the check by
+#: identity sound: a reloaded table is a new object, so its facts are read again.
+_FORMER_FACTS_CACHE: dict[str, tuple[Any, list[dict[str, Any]]]] = {}
 
 
 def _former_value_in(hit: dict[str, Any], facts: list[dict[str, Any]]) -> Conflict | None:
@@ -542,8 +557,8 @@ def _former_value_in(hit: dict[str, Any], facts: list[dict[str, Any]]) -> Confli
         if not numbers or not terms:
             continue
         matches = [(kind, m) for kind in numbers for m in _PATTERNS[kind].finditer(text)]
-        if _states_the_figure(matches, numbers, terms, low):
-            continue  # it states the current figure too
+        if _states_the_figure(matches, numbers, terms, low) or _states_current(fact, text, numbers):
+            continue  # it states the current figure too, in figures or words
         conflict = _former_value_conflict(fact, hit, klass, text, numbers, str(fact.get("fiscal_year") or ""),
                                           _fy_start(str(fact.get("fiscal_year") or "")))
         if conflict is not None:

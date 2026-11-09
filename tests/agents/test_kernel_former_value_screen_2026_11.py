@@ -113,3 +113,62 @@ def test_no_faq_row_states_a_replaced_figure_as_current() -> None:
     kept = precedence.screen_former_values(rows, fiscal_year="FY2026-27")
     stale = [h["source"] for h in rows if h not in kept]
     assert stale == [], f"rows stating a replaced figure: {stale}"
+
+
+# --------------------------------------------------------------------------- review fixes (PR 710)
+
+
+@pytest.mark.parametrize("text", [
+    # The current figure in words, with the replaced number used for something else.
+    "The VAT registration threshold is UGX 300 million a year; a shop with UGX 150 million turnover need not register.",
+    # Another per-passenger charge with the replaced allowance's number.
+    "Passengers chartering a private aircraft pay a USD 500 landing permit fee to the aviation authority.",
+])
+def test_review_cases_are_kept(text: str) -> None:
+    assert precedence.screen_former_values([_faq(text)], fiscal_year="FY2026-27") == [_faq(text)]
+
+
+def test_cached_facts_follow_the_store_object(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A reloaded table is a new store, even if Python reuses the old one's id()."""
+    from app.kernel import functions
+
+    class _Node:
+        def __init__(self, value: float) -> None:
+            self.props = {"key": "passenger_baggage_allowance_usd", "display_name": "Passenger baggage allowance",
+                          "value": value, "unit": "USD", "fiscal_year": "FY2026-27",
+                          "legal_basis": f"Goods up to USD {value:,.0f}. Raised from USD 500."}
+
+    class _Store:
+        def __init__(self, value: float) -> None:
+            self._node = _Node(value)
+
+        def by_kind(self, kind) -> list:
+            from app.graph.schema import NodeKind
+
+            return [self._node] if kind == NodeKind.THRESHOLD else []
+
+    first, second = _Store(2000), _Store(3000)
+    monkeypatch.setattr(precedence, "_FORMER_FACTS_CACHE", {})
+    monkeypatch.setattr(functions, "kernel_store", lambda: first)
+    assert [f["value"] for f in precedence._facts_with_former_values("FY2026-27")] == [2000]
+    monkeypatch.setattr(functions, "kernel_store", lambda: second)
+    assert [f["value"] for f in precedence._facts_with_former_values("FY2026-27")] == [3000]
+
+
+def test_no_portal_navigator_text_states_a_replaced_figure_as_current() -> None:
+    """The navigator's guides gave the replaced allowance and VAT threshold too (G535)."""
+    import ast
+
+    source = (ROOT / "App/backend/app/tools/portal_navigator_data.py").read_text(encoding="utf-8")
+    strings = [node.value for node in ast.walk(ast.parse(source))
+               if isinstance(node, ast.Constant) and isinstance(node.value, str) and len(node.value) > 30]
+    hits = [{"text": s, "doc_type": "portal", "source": "portal_navigator_data.py"} for s in strings]
+    kept = precedence.screen_former_values(hits, fiscal_year="FY2026-27")
+    assert [h["text"][:120] for h in hits if h not in kept] == []
+    # The navigator's "USD 2,000 TIN rule" shares the allowance's number, so a string stating
+    # it looks current to the screen; the replaced allowance may appear only as history.
+    import re
+
+    stale = [s[:120] for s in strings for m in re.finditer(r"USD\s?500(?![\d,])", s)
+             if not s[max(0, m.start() - 5):m.start()].lower().endswith("from ")]
+    assert stale == []

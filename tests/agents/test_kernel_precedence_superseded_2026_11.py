@@ -78,7 +78,8 @@ def test_passages_that_do_not_restate_the_old_figure_are_kept(text: str) -> None
 
 def test_a_past_tense_mention_of_only_the_old_figure_is_left_out() -> None:
     """It offers nothing current, and the kernel holds the current figure."""
-    text = "Travellers could previously bring accompanied baggage worth up to USD 500."
+    # An allowance word is needed: USD 500 per passenger can be another charge (PR 710 review).
+    text = "Travellers could previously bring accompanied baggage worth up to USD 500 duty-free."
     assert [c.evidence_value for c in precedence.find_conflicts([BAGGAGE], [_hit(text)])] == ["500 USD"]
 
 
