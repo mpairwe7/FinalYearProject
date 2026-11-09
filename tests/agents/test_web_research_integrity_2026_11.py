@@ -12,6 +12,7 @@ import time
 
 import httpx
 import pytest
+from app import egress
 from app import ephemeral_pdf_sandbox as sbx
 from app import web_research as wr
 from app.guardrails import contains_pii, injection_present, pii_values, scan_retrieved_text
@@ -220,8 +221,7 @@ def test_a_drip_fed_download_is_cut_off_at_its_deadline(monkeypatch):
                 yield b"x"
 
     transport = httpx.MockTransport(lambda request: httpx.Response(200, stream=_Drip()))
-    real_client = httpx.Client
-    monkeypatch.setattr(sbx.httpx, "Client", lambda **kw: real_client(transport=transport, **kw))
+    monkeypatch.setattr(egress, "_transport_for", lambda _purpose, _allowed: transport)
     monkeypatch.setattr(sbx, "resolves_to_public_address", lambda host: True)
     monkeypatch.setattr(sbx, "SANDBOX_DOWNLOAD_DEADLINE_SECONDS", 0.3)
 
@@ -240,9 +240,7 @@ def test_a_compressed_body_is_refused_rather_than_decoded(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         sent.append(request.headers.get("accept-encoding", ""))
         return httpx.Response(200, headers={"Content-Encoding": "gzip"}, content=gzip.compress(b"%PDF-1.7"))
-
-    real_client = httpx.Client
-    monkeypatch.setattr(sbx.httpx, "Client", lambda **kw: real_client(transport=httpx.MockTransport(handler), **kw))
+    monkeypatch.setattr(egress, "_transport_for", lambda _purpose, _allowed: httpx.MockTransport(handler))
     monkeypatch.setattr(sbx, "resolves_to_public_address", lambda host: True)
 
     with pytest.raises(sbx.SandboxDownloadRejected, match="identity"):

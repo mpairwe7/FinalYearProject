@@ -37,8 +37,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
-import httpx
-
+from . import egress
 from .document_worker import try_isolated
 from .guardrails import _record_guardrail_security_event, injection_present
 from .malware_scan import MalwareRejected, scan_bytes
@@ -188,7 +187,9 @@ def _default_stream_downloader(url: str, max_bytes: int) -> bytes:
     }
     current = url
     deadline = time.monotonic() + SANDBOX_DOWNLOAD_DEADLINE_SECONDS
-    with httpx.Client(timeout=SANDBOX_DOWNLOAD_TIMEOUT_SECONDS, follow_redirects=False) as client:
+    # Pinned (ADR-0035): the address checked below is the one the socket uses,
+    # so a rebinding record cannot pass the check and connect elsewhere.
+    with egress.client("pdf_sandbox", timeout=SANDBOX_DOWNLOAD_TIMEOUT_SECONDS) as client:
         for _hop in range(5):
             if time.monotonic() > deadline:
                 raise SandboxDownloadRejected("Download exceeded its deadline while following redirects.")

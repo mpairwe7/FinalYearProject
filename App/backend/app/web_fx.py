@@ -33,8 +33,7 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 
-import httpx
-
+from . import egress
 from .tax.tables import DATA_DIR
 
 logger = logging.getLogger(__name__)
@@ -396,15 +395,21 @@ def _default_http_fetcher(url: str) -> str:
         "Accept-Language": "en-US,en;q=0.9",
     }
     current = url
-    with httpx.Client(timeout=FX_HTTP_TIMEOUT_SECONDS, follow_redirects=False) as client:
+    # Pinned and recorded (ADR-0035); redirects stay manual, each hop re-checked below.
+    with egress.client("fx_rate", timeout=FX_HTTP_TIMEOUT_SECONDS) as client:
         for _hop in range(3):
             parsed = urlparse(current)
             host = (parsed.hostname or "").lower()
+            try:
+                port = parsed.port
+            except ValueError:
+                port = -1
             if (
                 parsed.scheme != "https"
                 or host not in _ALLOWED_FX_HOSTS
                 or parsed.username
                 or parsed.password
+                or port not in (None, 443)
             ):
                 raise ValueError(f"Disallowed FX URL: {current}")
             with client.stream("GET", current, headers=headers) as resp:

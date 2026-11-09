@@ -219,6 +219,38 @@ single bad provider can be dropped with `WEB_SEARCH_PROVIDERS`.
 
 ---
 
+## 6a. Watching what leaves the deployment (ADR-0035)
+
+Every fetch on a turn goes through `app/egress.py`. That covers the PDF sandbox, the search
+providers and the FX engine. Each request is counted, and no path, query or body is recorded:
+
+| Metric | Labels | Read it as |
+| --- | --- | --- |
+| `web_egress_requests_total` | `purpose` (`pdf_sandbox`, `search_tavily`, `search_brave`, `search_searxng`, `search_duckduckgo`, `fx_rate`), `host` (a bounded group: a known domain such as `ura.go.ug` or `xe.com`, `operator` for a configured endpoint, or `other`), `outcome` (`2xx`…`5xx`, `refused`, `unresolvable`, `oversized`, `unsupported_encoding`, `corrupt`, or an error class) | Which agent reached which host, and how it ended. |
+| `web_egress_sent_bytes_total` | `purpose`, `host` | What left the deployment: the URL, which carries search terms, plus the request body. |
+| `web_egress_received_bytes_total` | `purpose`, `host` | What came back. |
+
+Each request also writes one log line with the full hostname:
+`egress purpose=… host=… outcome=… sent=… received=… ms=…`.
+
+- **`outcome="refused"`:** the destination resolved to a non-public address, or the resolver
+  returned something that is not an IP address. An answer that cannot be shown to be public fails
+  closed. This means DNS rebinding, a hijacked record, a broken resolver or a misconfigured provider.
+  Treat it as a security event, and check the host's DNS before anything else. The egress log line
+  records only `refused`; the `EgressRefused` message says which case it was ("non-public address"
+  or "unparseable address").
+- **`outcome="unresolvable"`:** the name did not resolve, or resolved to nothing. That is a DNS
+  outage or a typo, not an attack; check the resolver.
+- **An error class (for example `ReadError`) after a `2xx` start:** the body failed part-way, and
+  it is recorded as that error, not as a success.
+- **A provider failing as `oversized`:** its response passed `WEB_PROVIDER_MAX_RESPONSE_BYTES`
+  (2 MB). A results page is a few kilobytes, so suspect the endpoint, not the cap.
+- **`unsupported_encoding` or `corrupt`:** the provider answered in a coding other than gzip or
+  deflate, even though clients advertise only those two, or sent a body that does not decode. The
+  chain fails over to the next provider. Check the endpoint, or a proxy in front of it.
+- **A self-hosted SearXNG on a private network:** this is allowed because its host comes from
+  `SEARXNG_URL`. No address from a page or a search result is ever exempt.
+
 ## 7. Acceptance probes
 
 Unit tests prove the logic, not a deployment. On the deployed Space, with the flag on, check

@@ -39,6 +39,7 @@ official sources, Uganda-scoped advisory commentary, and everything else.
 from __future__ import annotations
 
 import hashlib
+import html as _html
 import ipaddress
 import logging
 import os
@@ -698,6 +699,13 @@ def validate_outbound_research_url(url: str) -> str:
         return "missing hostname"
     if parts.username or parts.password:
         return "credentials in URL are forbidden"
+    try:
+        port = parts.port
+    except ValueError:
+        return "invalid port"
+    if port not in (None, 443):
+        # An allowlisted host on another port is a different service (ADR-0035).
+        return "only the default https port is allowed"
     host = parts.hostname.strip().lower().rstrip(".")
     if host == "localhost" or host.endswith(".local") or host.endswith(".internal"):
         return "loopback or internal host is forbidden"
@@ -726,10 +734,11 @@ def validate_outbound_research_url(url: str) -> str:
 def resolves_to_public_address(hostname: str) -> bool:
     """True when every address *hostname* resolves to is publicly routable.
 
-    Checked before connecting, on every redirect hop. An allowlisted name is not
-    proof of a safe destination: a hijacked record could point it at a metadata
-    service. This narrows DNS rebinding but cannot close it, because the HTTP
-    client resolves again when it connects (recorded against T43).
+    Checked before connecting, on every redirect hop, as an early refusal. An
+    allowlisted name is not proof of a safe destination: a hijacked record could
+    point it at a metadata service. The pin that closes DNS rebinding is in
+    :mod:`app.egress`, which validates the very address the socket connects to
+    (T43, ADR-0035); this check alone could not, since it resolves separately.
     """
     try:
         infos = socket.getaddrinfo(hostname, 443, proto=socket.IPPROTO_TCP)
@@ -1267,15 +1276,31 @@ def _established_date(row: RawResult) -> date | None:
     return None
 
 
-def _screened(title: str, snippet: str) -> tuple[str, str, bool]:
+def _screened(title: str, snippet: str, raw_text: str = "") -> tuple[str, str, bool]:
     """Clean a result's text. The flag means it read as an instruction."""
     from .mcp.validation import screen_tool_result
 
     clean_title = strip_markup(title)[:_MAX_RESULT_TEXT_CHARS]
     clean_snippet = strip_markup(snippet)[:_MAX_RESULT_TEXT_CHARS]
     combined = f"{clean_title}\n{clean_snippet}"
-    _, scrubbed = scan_retrieved_text(combined)
-    rejected = scrubbed or bool(screen_tool_result(combined)) or bool(_WEB_DIRECTIVE_RE.search(combined))
+    # Screen the text as received too, markup kept: stripping tags first deletes an
+    # instruction hidden in an attribute (alt=, title=) before the screen sees it
+    # (ADR-0035, G527). Providers carry it in RawResult.raw_text.
+    from .web_search_providers import MAX_RAW_TEXT_CHARS
+
+    raw = raw_text or _html.unescape(f"{title}\n{snippet}")
+    if len(raw) > MAX_RAW_TEXT_CHARS:
+        # Too long to screen whole; third-party text that cannot be cleared is not admitted.
+        return clean_title, clean_snippet, True
+    rejected = False
+    # The stripped fields whole as well: the stored copy is cut to a length, and a
+    # directive after the cut, split by tags in the raw view, is in neither of the others.
+    whole = f"{strip_markup(title)}\n{strip_markup(snippet)}\n{strip_markup(raw)}"
+    for view in (combined, raw, whole):
+        _, scrubbed = scan_retrieved_text(view)
+        if scrubbed or screen_tool_result(view) or _WEB_DIRECTIVE_RE.search(view):
+            rejected = True
+            break
     return clean_title, clean_snippet, rejected
 
 
@@ -1308,7 +1333,7 @@ def admit_results(
         if auth.tier > 2 or auth.trust <= 0.0:
             rejected["authority"] += 1
             continue
-        title, snippet, unsafe = _screened(row.title, row.snippet)
+        title, snippet, unsafe = _screened(row.title, row.snippet, getattr(row, "raw_text", ""))
         if unsafe:
             rejected["injection"] += 1
             logger.warning("Web result from %s rejected: instruction-like text", auth.hostname)

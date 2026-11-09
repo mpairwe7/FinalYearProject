@@ -9,9 +9,8 @@ from urllib.parse import urlparse
 
 import httpx
 import pytest
-
+from app import egress, web_fx
 from app import flags as flags_mod
-from app import web_fx
 from app.case_facts import extract_case_facts
 from app.scenario_planner import build_verified_facts, plan_tools
 from app.tools import ToolRegistry
@@ -335,17 +334,12 @@ class TestQuoteIntegrity:
 
     def test_no_browser_identity_or_forged_consent_is_sent(self, monkeypatch: pytest.MonkeyPatch) -> None:
         seen: list[httpx.Request] = []
-        real_client = httpx.Client
 
         def handler(request: httpx.Request) -> httpx.Response:
             seen.append(request)
             return httpx.Response(200, text="ok")
 
-        monkeypatch.setattr(
-            web_fx.httpx,
-            "Client",
-            lambda **kw: real_client(transport=httpx.MockTransport(handler), **kw),
-        )
+        monkeypatch.setattr(egress, "_transport_for", lambda _purpose, _allowed: httpx.MockTransport(handler))
 
         web_fx._default_http_fetcher("https://www.xe.com/currencyconverter/")
 
@@ -353,15 +347,10 @@ class TestQuoteIntegrity:
         assert "cookie" not in seen[0].headers
 
     def test_a_redirect_off_the_allowlist_is_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        real_client = httpx.Client
         monkeypatch.setattr(
-            web_fx.httpx,
-            "Client",
-            lambda **kw: real_client(
-                transport=httpx.MockTransport(
-                    lambda _r: httpx.Response(302, headers={"Location": "https://attacker.example/"})
-                ),
-                **kw,
+            egress, "_transport_for",
+            lambda _purpose, _allowed: httpx.MockTransport(
+                lambda _r: httpx.Response(302, headers={"Location": "https://attacker.example/"})
             ),
         )
 

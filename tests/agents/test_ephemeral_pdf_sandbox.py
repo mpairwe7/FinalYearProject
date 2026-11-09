@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import pytest
-
+from app import egress
 from app import ephemeral_pdf_sandbox as sbx
 from app.pdf_guards import PdfRejected
 
@@ -241,14 +240,7 @@ def test_redirect_to_disallowed_target_and_isolated_worker(
             request=request,
         )
 
-    orig_client = httpx.Client
-
-    def _patched_client(*args: Any, **kwargs: Any) -> httpx.Client:
-        """Return httpx.Client wired to MockTransport."""
-        kwargs["transport"] = httpx.MockTransport(_mock_handler)
-        return orig_client(*args, **kwargs)
-
-    monkeypatch.setattr(sbx.httpx, "Client", _patched_client)
+    monkeypatch.setattr(egress, "_transport_for", lambda _purpose, _allowed: httpx.MockTransport(_mock_handler))
     # The transport is mocked, so the pre-connect DNS check must not need a real resolver.
     monkeypatch.setattr(sbx, "resolves_to_public_address", lambda _host: True)
     with pytest.raises(sbx.SandboxDownloadRejected, match="Disallowed sandbox redirect target"):

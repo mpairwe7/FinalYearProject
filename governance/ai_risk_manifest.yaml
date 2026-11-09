@@ -478,6 +478,8 @@ owasp_agentic_2026:
         - "tests/agents/test_ai_security_layer_2026_11.py"
         - "tests/agents/test_web_research_integrity_2026_11.py"
         - "tests/agents/test_harness_prompt_contract.py"
+        - "tests/agents/test_web_egress_2026_11.py"
+      egress_assurance: "ADR-0035 (T43): every fetch on a turn (PDF sandbox, search providers, FX engine) goes through app/egress.py, which resolves a host once, requires every DNS answer to be publicly routable and connects to those validated addresses, so DNS rebinding cannot move a fetch to an internal address; default https port only; the one exception is the operator-configured SearXNG (SEARXNG_URL), which may resolve privately and use its own scheme and port, still pinned and counted, and no page- or result-supplied address is ever exempt; provider bodies capped before decompression allocates; markup stripping keeps chat-template tokens and results carry their raw text, both screened; every request counted by purpose, bounded host group and outcome. Scope: the backend web agents; the CI crawler is not yet on it (G533)."
     - id: "ASI02"
       name: "Tool Misuse and Exploitation"
       status: "mitigated"
