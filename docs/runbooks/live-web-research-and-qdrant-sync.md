@@ -233,9 +233,12 @@ providers and the FX engine. Each request is counted, and no path, query or body
 Each request also writes one log line with the full hostname:
 `egress purpose=… host=… outcome=… sent=… received=… ms=…`.
 
-- **`outcome="refused"`:** the destination resolved to a non-public address. This means DNS
-  rebinding, a hijacked record, or a misconfigured provider. Treat it as a security event, and check
-  the host's DNS before anything else.
+- **`outcome="refused"`:** the destination resolved to a non-public address, or the resolver
+  returned something that is not an IP address. An answer that cannot be shown to be public fails
+  closed. This means DNS rebinding, a hijacked record, a broken resolver or a misconfigured provider.
+  Treat it as a security event, and check the host's DNS before anything else. The egress log line
+  records only `refused`; the `EgressRefused` message says which case it was ("non-public address"
+  or "unparseable address").
 - **`outcome="unresolvable"`:** the name did not resolve, or resolved to nothing. That is a DNS
   outage or a typo, not an attack; check the resolver.
 - **An error class (for example `ReadError`) after a `2xx` start:** the body failed part-way, and
