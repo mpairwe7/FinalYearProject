@@ -20,14 +20,16 @@ from app.text_signals import empathy_ack
 _VAT_HIT = {
     "source": "ura_taxation_handbook_faqs.csv",
     "question": "What is the VAT registration threshold?",
+    # The threshold in force (UGX 300 million from 1 July 2026): a passage stating the
+    # replaced UGX 150 million is screened out before the extractive branch (G535).
     "answer": (
         "You must register for VAT when your annual taxable turnover exceeds "
-        "UGX 150 million. Apply on ura.go.ug under e-Services."
+        "UGX 300 million. Apply on ura.go.ug under e-Services."
     ),
     "text": (
         "Question: What is the VAT registration threshold?\n"
         "Answer: You must register for VAT when your annual taxable turnover "
-        "exceeds UGX 150 million. Apply on ura.go.ug under e-Services."
+        "exceeds UGX 300 million. Apply on ura.go.ug under e-Services."
     ),
     "score_rrf": 0.9,
 }

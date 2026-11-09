@@ -479,7 +479,7 @@ EXTERNAL_URA_PORTALS: dict[str, dict[str, Any]] = {
         "category": "customs_and_border",
         "service_scope": [
             "Prohibited & Restricted Goods Schedule (Used Laptops, Chemicals, Section 210)",
-            "Passenger Accompanied Baggage at Entebbe Airport (USD 500 Limit & USD 2000 TIN Rule)",
+            "Passenger Accompanied Baggage at Entebbe Airport (USD 2,000 Duty-Free Allowance & TIN Rule)",
             "Transit Cargo Monitoring & 21 Gazetted Routes (Form C17, 30-Day Window, Security Bond)",
             "Transit Goods License (TGL) vs Road User Charges (RUC) (Form C39, USD 200 Fee)",
             "Regional Electronic Cargo Tracking System (RECTS) (e-Seals, Free Tracking, CMC/RRU)",
@@ -505,8 +505,8 @@ EXTERNAL_URA_PORTALS: dict[str, dict[str, Any]] = {
                 ],
             },
             "baggage_exceeds_allowance": {
-                "symptoms": ["entebbe baggage taxed", "usd 500 exceeded", "red channel referral"],
-                "cause": "Passenger accompanied baggage exceeding USD 500 in value, or goods for commercial resale, attract standard import duty and VAT.",
+                "symptoms": ["entebbe baggage taxed", "usd 2000 exceeded", "usd 500 exceeded", "red channel referral"],
+                "cause": "Passenger accompanied baggage exceeding the USD 2,000 duty-free allowance in value, or goods for commercial resale, attract standard import duty and VAT.",
                 "steps": [
                     "Proceed to the Red Channel at Entebbe Airport and declare all items with purchase receipts.",
                     "If goods exceed USD 2,000, appoint a licensed clearing agent and clear via Asycuda using TIN.",
@@ -4087,18 +4087,18 @@ def _diagnose_portal_state(
                 ],
             )
 
-        # 2. Passenger Accompanied Baggage at Entebbe Airport (USD 500 & USD 2000 Rules)
+        # 2. Passenger Accompanied Baggage at Entebbe Airport (USD 2,000 allowance, raised from USD 500 on 1 July 2024)
         if any(k in combined for k in ("goods handled at entebbe airport", "passenger baggage", "entebbe airport", "entebbe international airport", "usd 500", "500$", "usd 2000", "personal use", "accompanied baggage", "duty free shop", "currency declaration", "1,500 currency points")):
             return (
                 "URA Portal — Customs Enforcements: Entebbe Airport Passenger Baggage Clearance",
-                "Customs clearance rules, USD 500 duty-free personal allowance, and USD 2,000 TIN threshold for arriving passengers.",
+                "Customs clearance rules, the USD 2,000 duty-free personal allowance (raised from USD 500 on 1 July 2024), and the USD 2,000 TIN threshold for arriving passengers.",
                 "info",
                 [
-                    "Step 1: USD 500 Duty-Free Allowance: Arriving passengers enjoy duty exemption on accompanied goods for personal use provided: (1) Total value does not exceed USD 500; (2) Goods are not for commercial resale; (3) Goods are not for distribution; (4) Passenger has been outside Uganda for more than 24 hours; (5) Goods accompany the passenger.",
+                    "Step 1: USD 2,000 Duty-Free Allowance: Arriving passengers enjoy duty exemption on accompanied goods for personal use provided: (1) Total value does not exceed USD 2,000; (2) Goods are not for commercial resale; (3) Goods are not for distribution; (4) Passenger has been outside Uganda for more than 24 hours; (5) Goods accompany the passenger.",
                     "Step 2: Duty-Free Quantities: Up to 1 litre spirits or 2 litres wine, 250ml perfume / 500ml toilet water, and 250g tobacco products (cigarettes/cigars).",
                     "Step 3: Currency Declaration Threshold: Carrying currency in or out of Uganda exceeding 1,500 currency points (approx. UGX 30,000,000 or USD 9,000) requires a mandatory written customs declaration.",
                     "Step 4: TIN & Agent Threshold (USD 2,000 Rule): Passenger accompanied baggage valued up to USD 2,000 does NOT require a TIN or a licensed customs clearing agent. If goods exceed USD 2,000 or are consigned to a corporate entity, a TIN and a licensed customs agent are legally mandatory.",
-                    "Step 5: Red vs. Green Channel: Passengers carrying commercial goods, restricted items, or goods exceeding USD 500 must exit through the Red Channel to declare items to customs.",
+                    "Step 5: Red vs. Green Channel: Passengers carrying commercial goods, restricted items, or goods exceeding USD 2,000 must exit through the Red Channel to declare items to customs.",
                     "Step 6: Penalties: Misdeclaration or smuggling attracts up to 3 years imprisonment or fines up to USD 10,000 under EACCMA.",
                     "Step 7: Official Brochure: Download the complete Passenger Baggage Guide at ura.go.ug/storage/2025/03/Passenger-baggage-personal-effects-2024-25.pdf.",
                 ],
@@ -4187,7 +4187,7 @@ def _diagnose_portal_state(
             [
                 "Step 1: Visit ura.go.ug/en/category/imports-exports/customs-enforcements/ for full enforcement guides, transit procedures, and prohibited goods lists.",
                 "Step 2: Prohibited Goods: Completely banned items (used electronics, used fridges, toxic cosmetics, used tyres) attract forfeiture and fines under EACCMA.",
-                "Step 3: Entebbe Airport Baggage: USD 500 personal duty-free allowance; goods exceeding USD 2,000 require a TIN and licensed customs clearing agent.",
+                "Step 3: Entebbe Airport Baggage: USD 2,000 personal duty-free allowance; goods exceeding USD 2,000 require a TIN and licensed customs clearing agent.",
                 "Step 4: Transit Controls: 30-day window, USD 200 TGL license, 21 approved corridors, and free satellite tracking under RECTS.",
                 "Step 5: NII Scanning: 100% free cargo and baggage inspection completed in under 1 minute under Atomic Energy Council radiation standards.",
                 "Step 6: Contacts: Reach Customs Enforcement directly on 0323 442192 / 0323 442190 or Transit Monitoring Unit on 0323 442500.",
@@ -5379,7 +5379,7 @@ def _diagnose_portal_state(
             "info",
             [
                 "Step 1: Goods Point of Entry Documents: (1) Bill of Lading (B/L) or Airway Bill (AWB); (2) Marine/Cargo Insurance Certificate; (3) Proforma Invoice; (4) Commercial Invoice; (5) Certificate of Origin; (6) Permits for Restricted Goods (Sections 3 & 4 External Trade Act); (7) Purchase Order; (8) Packing List; (9) Sales Contract; (10) Evidence of Payment (bank transfer / SWIFT slip).",
-                "Step 2: International Travelers: Valid passport (>=6 months validity), Ugandan visa/e-Visa, Yellow Fever Vaccination Certificate (mandatory >1 yr old), return/onward ticket, and Passenger Baggage Declaration for goods exceeding USD 500/2,000 allowance.",
+                "Step 2: International Travelers: Valid passport (>=6 months validity), Ugandan visa/e-Visa, Yellow Fever Vaccination Certificate (mandatory >1 yr old), return/onward ticket, and Passenger Baggage Declaration for goods exceeding the USD 2,000 allowance.",
                 "Step 3: Foreign Companies Entering Uganda: Certificate of Incorporation, Board resolution to register in Uganda, Memorandum & Articles of Association, list of directors/secretary, registered local office address, audited accounts, URA TIN, trading license, and UIA investment license.",
                 "Step 4: Clearance Channels: Document verification is managed through the Uganda Electronic Single Window (UESW) and Document Processing Centre (DPC) at Nakawa.",
             ],

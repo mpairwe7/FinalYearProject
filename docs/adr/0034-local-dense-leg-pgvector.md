@@ -144,7 +144,10 @@ Chosen: **a pgvector dense leg, fused with BM25 by reciprocal-rank fusion (RRF).
   (baggage allowance USD 500) in front of the model, and the Space quoted it. The leg was switched
   off with the Space secret `LOCAL_DENSE_BACKEND=none` (all eight live probes passed again) until
   precedence caught paraphrased and former-value contradictions and stopped sending them to the model
-  (G534, ADR-0033 amendment). Re-enabling is in the runbook.
+  (G534, ADR-0033 amendment). Re-enabling is in the runbook. The leg was turned back on at 13:25
+  UTC and off again two minutes later, after a paraphrase probe answered USD 500. With the leg off,
+  the same probe answered USD 500 too: the cause was stale FAQ rows that precedence could not see
+  without a graph hit (G535).
 
 ## Confirmation
 

@@ -1619,7 +1619,7 @@ def test_customs_enforcements_subpaths():
         (
             "Customs enforcements passenger baggage at Entebbe Airport USD 500 personal allowance USD 2000 TIN rule",
             "Entebbe Airport Passenger Baggage Clearance",
-            "USD 500",
+            "USD 2,000 Duty-Free Allowance",  # raised from USD 500 on 1 July 2024 (G535)
         ),
         (
             "Customs enforcements passenger baggage currency declaration 1,500 currency points USD 9000",
