@@ -251,20 +251,28 @@ duty-free allowance?" with **USD 500** instead of the verified USD 2,000. Two fa
   appeared near the figure. Dense retrieval surfaced an EACCMA Fifth Schedule paraphrase
   ("personal effects … not exceeding USD 500") that never names the allowance.
 - **Detection only reordered.** A detected contradiction was moved down, but nothing told the model
-  that its figure was superseded, so the model could still quote it.
+  so, and the model could still quote it.
 
 The dense leg was switched off on the Space (`LOCAL_DENSE_BACKEND=none`) until the following:
-- **Former values are contradictions wherever they are stated.** When a fact's legal basis records
-  a replaced value ("Raised from USD 500"; currency or percent required, so a date never counts), a
-  passage retrieved with that fact that states it is a conflict (`reason="former_value"`). Facts now
+- **Former values are contradictions on the same subject.** A fact's legal basis can record a
+  replaced value ("raised from USD 500"; also "previously", "formerly", "replacing", "replaced",
+  "was"). A currency or percent sign is required, so a date never counts, and the current value
+  never counts. A passage retrieved with the fact that states such a value is a conflict
+  (`reason="former_value"`) when two of the fact's distinctive words (five letters or more, from
+  its name or legal basis) stand near the value. A paraphrase still shares its Act and schedule;
+  the UGX 150,000,000 presumptive-tax ceiling does not share the VAT threshold's words. Facts now
   carry the full legal basis, not only the claim's citation.
   - This does not apply to a passage that also states the current figure, or that frames the old
-    value as history ("from USD 500", "previously").
-  - A passage giving only the old figure, even in the past tense, is still left out.
-- **Contradictions are left out, not moved.** `apply_precedence` returns the hits without the
-  contradicting passages. Each one is listed on the graph hit under `kernel_precedence_dropped`
-  (key, kernel and stated values, edition, reason, source) for the audit. Conflicts are still
-  queued for review once per turn.
+    value as history ("formerly USD 500").
+- **Stale passages are left out.** A former-value or older-edition (`superseded`) passage is not
+  sent to the model. It is listed once on the graph hit under `kernel_precedence_dropped` (key,
+  kernel and stated values, edition, reason, source, passage identity), however often the order is
+  rebuilt.
+- **Unresolved disagreements are disclosed, not hidden.** An unlabelled or current passage stating
+  a different figure may be right: after a new Finance Act the kernel can be the stale side. It is
+  kept, ranked last and queued for review as before. Its header, written by code outside the
+  spotlight markers, now says that it conflicts with the official rate table, gives both figures,
+  and tells the model to report both and advise confirming with URA.
 
-`tests/agents/test_kernel_precedence_superseded_2026_11.py` uses the live passage verbatim; seven
+`tests/agents/test_kernel_precedence_superseded_2026_11.py` uses the live passage verbatim. Fifteen
 controls were each disabled in turn, and a test failed every time.
