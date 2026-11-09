@@ -624,6 +624,12 @@ aibom_inventory:
       backends: "In memory (default); optional Neo4j copy behind GraphStore (GRAPH_STORE_BACKEND=neo4j, verified TLS required in production)"
       verification: "2026-11-08: figures checked against URA's law and guidance; 13 of 14 uncited figures now cited, 6 corrected; evidence ledger App/backend/app/tax/evidence/rate_evidence.json re-checked against Data/pdfs in CI; one figure open (duplicate logbook fee)"
       freshness: "One Kampala clock; explicit caveat after the last table; edition-aware precedence ranks contradicting passages last"
+    - id: "ura-dense-corpus-vectors"
+      role: "The retrieval corpus embedded with multilingual-e5-small for the local pgvector leg (ADR-0034)"
+      source: "app.indexer.load_documents() over the exported corpus JSONL, embedded in CI (ura-chatbot-build-push.yml) and baked into the image as App/Data/dense"
+      provenance: "manifest.json names the model, revision, dimension and every vector's Qdrant point id, with a digest of the id set"
+      release_control: "Loaded at Space build only if its point-id set equals the baked Qdrant collection's; the store opens only for the pinned model, revision and dimension"
+      storage: "PostgreSQL 15 + pgvector 0.8.1 (image digest-pinned), Unix socket only, read-only serving role"
     - id: "ura-semantic-layer-certified-metrics"
       role: "Staff-only certified aggregate metrics over URA analytical views (ADR-0033, FLAG_SEMANTIC_LAYER off)"
       source: "None connected. App/backend/app/semantic_layer/metrics.json holds drafts only"
@@ -671,6 +677,17 @@ aibom_inventory:
       role: "Dense multilingual embedding model for Qdrant hybrid retrieval"
       locales: ["en", "lg", "sw", "nyn", "ach"]
       runtime: "sentence-transformers"
+    - id: "intfloat/multilingual-e5-small"
+      role: "CPU dense embeddings for the local pgvector retrieval leg beside the sparse-only collection on the CPU deployments (ADR-0034, G523)"
+      license: "MIT"
+      sha: "614241f622f53c4eeff9890bdc4f31cfecc418b3"  # pragma: allowlist secret
+      hosting: "local"
+      locales: ["en", "sw"]
+      runtime: "ONNX Runtime fp32 on CPU; onnx/model.onnx and tokenizer.json pinned by SHA-256 in App/backend/app/dense_cpu.py"
+      limits: "Not trained on Luganda, Runyankole or Acholi (those reach retrieval through translate-then-retrieve); similarity is uncalibrated and takes no part in abstention (G524)"
+      verified_by:
+        - "App/backend/tests/test_local_dense_leg.py"
+        - "App/backend/tests/test_local_dense_pgvector_live.py"
     - id: "mixedbread-ai/mxbai-rerank-base-v2"
       role: "Cross-encoder passage reranker"
       locales: ["en", "lg", "sw", "nyn", "ach"]

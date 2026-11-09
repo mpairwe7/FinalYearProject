@@ -27,7 +27,6 @@ import os
 import re
 import threading
 import time
-import uuid
 import zlib
 from collections import Counter, OrderedDict
 from contextlib import suppress
@@ -36,6 +35,14 @@ from typing import Any
 
 from ._root import APP_DATA_ROOT as _APP_DATA_ROOT
 from .analytics import metrics
+
+# Point ids live in their own module (the dense leg's CI cache keys on it);
+# re-exported here for every caller that imports them from the retriever.
+from .point_ids import (  # noqa: F401
+    _POINT_ID_NAMESPACE,
+    bm25_binding_sentinel_id,
+    deterministic_point_id,
+)
 from .resilience import CircuitBreaker, CircuitState, admit  # re-export for backcompat
 from .text_signals import content_tokens, is_courtesy_sentence, split_sentences
 
@@ -75,9 +82,6 @@ BM25_STATE_PATH = Path(
     os.getenv("BM25_STATE_PATH", str(_APP_DATA_ROOT.parent / "Model" / "bm25_state.json"))
 )
 
-# Fixed namespace so re-indexing identical content yields identical point ids
-# (idempotent upserts) and a stable per-collection binding sentinel.
-_POINT_ID_NAMESPACE = uuid.UUID("a3f1c2b4-1e2d-4f5a-8b6c-9d0e1f2a3b4c")
 
 
 def compute_corpus_hash(texts: list[str]) -> str:
@@ -99,25 +103,6 @@ def compute_corpus_hash(texts: list[str]) -> str:
     return h.hexdigest()
 
 
-def deterministic_point_id(doc: dict[str, Any]) -> str:
-    """Content-derived, stable Qdrant point id for idempotent reindexing.
-
-    Re-indexing the same chunk produces the same id, so a non-``--recreate``
-    rebuild overwrites rather than appending a duplicate row.
-    """
-    text = doc.get("text") or doc.get("answer") or ""
-    key = (
-        "::".join(str(doc.get(k, "")) for k in ("source", "page", "section", "chunk_id"))
-        + "::"
-        + hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
-    )
-    return str(uuid.uuid5(_POINT_ID_NAMESPACE, key))
-
-
-def bm25_binding_sentinel_id(collection: str) -> str:
-    """Deterministic id of the per-collection sentinel point holding the corpus
-    hash, used to verify the loaded bm25_state matches the live vectors."""
-    return str(uuid.uuid5(_POINT_ID_NAMESPACE, f"{collection}::__bm25_binding__"))
 
 
 def _reranker_emits_logits(reranker: Any) -> bool | None:
@@ -586,7 +571,12 @@ def active_retrieval_mode(retriever: object | None, *, ready: bool) -> str:
     if getattr(retriever, "_vectorize_mode", False):
         return "vector"
     if getattr(retriever, "_sparse_only", False):
-        return "sparse"
+        # BM25 fused with the local pgvector leg is dense + sparse (ADR-0034);
+        # /ready names the backend under capabilities.local_dense.
+        dense_up = getattr(retriever, "_local_dense", None) is not None and not _breaker_open(
+            getattr(retriever, "_local_dense_circuit", None)
+        )
+        return "hybrid" if dense_up else "sparse"
     if not getattr(retriever, "_sparse_ok", True):
         # BM25 disabled at runtime — an invalid state file, or a corpus-hash
         # mismatch against Qdrant's sentinel, which would make the sparse leg
@@ -901,6 +891,96 @@ def hit_identity(hit: dict[str, Any]) -> str:
         or str(hit.get("chunk_id") or "")
         or (hit.get("text") or "")[:80]
     )
+
+
+def _candidate_from_payload(point_id: str, p: dict[str, Any], score: float) -> dict[str, Any]:
+    """A retrieval candidate from a Qdrant (or pgvector) payload; one shape for every leg."""
+    text = p.get("text", "")
+    q = p.get("question", "")
+    a = p.get("answer", "")
+    if (not q or not a) and text.startswith("Question: ") and "\nAnswer: " in text:
+        parts = text[len("Question: ") :].split("\nAnswer: ", 1)
+        q = q or parts[0].strip()
+        a = a or parts[1].strip()
+    return {
+        "id": point_id,
+        "text": text,
+        "question": q,
+        "answer": a,
+        "source": p.get("source", ""),
+        "chunk_id": p.get("chunk_id", ""),
+        "page": p.get("page", ""),
+        "section": p.get("section", ""),
+        "doc_type": p.get("doc_type", ""),
+        # Edition of the source document, used to prefer current
+        # guidance over a superseded restatement of it.
+        "fiscal_year": p.get("fiscal_year", ""),
+        "valid_from": p.get("valid_from", ""),
+        "valid_to": p.get("valid_to", ""),
+        "superseded_by": p.get("superseded_by", ""),
+        "language": p.get("language", ""),
+        "tax_type": p.get("tax_type", ""),
+        "tag": p.get("tag", ""),
+        **_provenance_fields(p),
+        "score_rrf": score,
+    }
+
+
+#: Ceiling on one local dense search, end to end (ADR-0034).
+_LOCAL_DENSE_TIMEOUT_S = float(os.getenv("LOCAL_DENSE_TIMEOUT_S", "2.0"))
+_LOCAL_DENSE_POOL: Any = None
+_LOCAL_DENSE_POOL_LOCK = threading.Lock()
+
+
+def _local_dense_pool() -> Any:
+    """Two workers for local dense searches; a stalled one is abandoned, not waited for."""
+    global _LOCAL_DENSE_POOL
+    with _LOCAL_DENSE_POOL_LOCK:
+        if _LOCAL_DENSE_POOL is None:
+            from concurrent.futures import ThreadPoolExecutor
+
+            _LOCAL_DENSE_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="local-dense")
+        return _LOCAL_DENSE_POOL
+
+
+def _breaker_open(breaker: Any) -> bool:
+    """Whether the breaker is not yet trusted: open, or half-open until a probe succeeds."""
+    return getattr(getattr(breaker, "state", None), "name", "") in ("OPEN", "HALF_OPEN")
+
+
+#: One outstanding dense search per pool worker (ADR-0034).
+_LOCAL_DENSE_SLOTS = threading.BoundedSemaphore(2)
+
+
+def _blend_cpu_lexical(candidates: list[dict[str, Any]], fused_order: list[str]) -> list[dict[str, Any]]:
+    """CPU-reranked *candidates* ordered by the blend, each gated on its own word-overlap score.
+
+    ``score_calibrated`` (what abstention and pruning read, G284) is the CPU
+    reranker's own bounded score, so a passage sharing no word with the
+    question scores 0 and cannot carry an answer alone. ``score_norm`` (what
+    ordering and preference boosts read) takes the same set of scores
+    reassigned by blended rank, so boosts move hits by the amounts they always
+    did without sorting the list back into word-overlap order.
+    """
+    def bounded(hit: dict[str, Any]) -> float:
+        return min(1.0, max(0.0, float(hit.get("score_rerank") or 0.0)))
+
+    blended = _blend_orders(candidates, fused_order)
+    by_rank = sorted((bounded(h) for h in blended), reverse=True)
+    for hit, ordering in zip(blended, by_rank, strict=True):
+        hit["score_calibrated"] = bounded(hit)
+        hit["score_norm"] = ordering
+    return blended
+
+
+def _blend_orders(candidates: list[dict[str, Any]], fused_order: list[str]) -> list[dict[str, Any]]:
+    """*candidates* (in their reranked order) re-ranked by RRF over that order and *fused_order*."""
+    position = {hid: rank for rank, hid in enumerate(fused_order)}
+    k = RRF_K
+    def score(item: tuple[int, dict[str, Any]]) -> float:
+        rank, hit = item
+        return 1.0 / (k + rank) + 1.0 / (k + position.get(hit_identity(hit), len(fused_order)))
+    return [hit for _rank, hit in sorted(enumerate(candidates), key=score, reverse=True)]
 
 
 def rrf_fuse_ranked_lists(
@@ -1372,6 +1452,9 @@ class HybridRetriever:
         # Set when sentence-transformers is absent: Qdrant serves the corpus on
         # its sparse half alone, since a BM25 query vector needs no model.
         self._sparse_only = False
+        #: pgvector dense leg beside a sparse-only collection (ADR-0034), or None.
+        self._local_dense: Any = None
+        self._local_dense_reason = "off"
         # Set when Qdrant is off but the Workers AI + Vectorize dense fallback
         # is configured — search() then routes to _search_vectorize().
         self._vectorize_mode = False
@@ -1379,6 +1462,14 @@ class HybridRetriever:
             name="qdrant",
             failure_threshold=3,
             reset_timeout=10.0,
+            max_timeout=300.0,
+        )
+        # The local dense leg's own breaker: three failures and BM25 serves alone
+        # for a while, without charging Qdrant's (ADR-0034).
+        self._local_dense_circuit = CircuitBreaker(
+            name="local_dense",
+            failure_threshold=3,
+            reset_timeout=30.0,
             max_timeout=300.0,
         )
 
@@ -1421,6 +1512,10 @@ class HybridRetriever:
             if q_ok:
                 if not self._sparse_only:
                     return True
+                if self._init_local_dense():
+                    # BM25 and a local dense leg, fused by RRF: no egress, so it is
+                    # preferred over Vectorize's remote dense-only fallback.
+                    return True
                 logger.info(
                     "Qdrant is sparse-only (no dense vector); trying Vectorize "
                     "before settling for BM25 alone"
@@ -1458,6 +1553,7 @@ class HybridRetriever:
         """
         self._client = None
         self._dense_model = None
+        self._local_dense = None
         self._reranker = None
         self._ready = False
         self._sparse_ok = True
@@ -1606,6 +1702,201 @@ class HybridRetriever:
             logger.warning("Qdrant init failed", exc_info=True)
             self._ready = False
             return False
+
+    def _init_local_dense(self) -> bool:
+        """Open the pgvector dense leg when ``LOCAL_DENSE_BACKEND=pgvector`` (ADR-0034).
+
+        Only beside a sparse-only collection: a collection with its own dense
+        vector already fuses dense and BM25 inside Qdrant.
+        """
+        from . import pgvector_dense
+
+        if pgvector_dense.BACKEND in ("", "none", "off"):
+            self._local_dense_reason = "off"
+            return False
+        if pgvector_dense.BACKEND != "pgvector":
+            self._local_dense_reason = f"unrecognised LOCAL_DENSE_BACKEND={pgvector_dense.BACKEND!r}"
+            logger.warning("Local dense leg not started: %s", self._local_dense_reason)
+            return False
+        store = pgvector_dense.LocalDenseStore()
+        deadline = time.monotonic() + pgvector_dense.CONNECT_WAIT_S
+        while not store.open():
+            # Postgres starts beside uvicorn: wait for its socket, never for a bad table.
+            if not store.reason.startswith("OperationalError") or time.monotonic() >= deadline:
+                self._local_dense_reason = store.reason
+                logger.warning("Local dense leg unavailable; serving BM25 alone: %s", store.reason)
+                return False
+            time.sleep(1.0)
+        self._local_dense = store
+        if not self._local_dense_matches_corpus():
+            return False
+        self._local_dense_reason = ""
+        logger.info("HybridRetriever ready in SPARSE + LOCAL DENSE mode: %s", store.status())
+        return True
+
+    def local_dense_status(self) -> str:
+        """What ``/ready`` reports for the local dense leg."""
+        if self._local_dense is not None:
+            if _breaker_open(self._local_dense_circuit):
+                return ("unavailable (circuit open or probing: recent dense queries failed or timed out; "
+                        "BM25 alone until a probe succeeds)")
+            return self._local_dense.status()
+        return self._local_dense_reason if self._local_dense_reason == "off" else f"unavailable ({self._local_dense_reason})"
+
+    def _local_dense_hits(self, query: str, limit: int, filters: dict[str, Any] | None) -> list[dict[str, Any]]:
+        """Dense candidates in the Qdrant candidate shape, best first; ``[]`` on any failure.
+
+        Its own failure domain: an error here must not charge Qdrant's circuit
+        and send every request to keyword search while BM25 is healthy.
+        """
+        if self._local_dense is None or not self._local_dense_matches_corpus():
+            return []
+        # At most one search per pool worker: a stalled Postgres holds its slot
+        # until the search returns, so expired work never queues ahead of a probe.
+        if not _LOCAL_DENSE_SLOTS.acquire(blocking=False):
+            metrics.inc("local_dense_busy_total")
+            return []
+        if not self._local_dense_circuit.allow_request():
+            _LOCAL_DENSE_SLOTS.release()
+            return []
+        future = None
+        try:
+            started = time.perf_counter()
+            # A stalled Postgres costs this query its dense half, never its BM25 half:
+            # the search runs on a small pool and is abandoned past the deadline.
+            future = _local_dense_pool().submit(self._local_dense.search, query, limit, filters)
+            future.add_done_callback(lambda _f: _LOCAL_DENSE_SLOTS.release())
+            rows = future.result(timeout=_LOCAL_DENSE_TIMEOUT_S)
+            metrics.observe("local_dense_query_duration_seconds", time.perf_counter() - started)
+            self._local_dense_circuit.record_success()
+        except Exception:
+            if future is None:
+                _LOCAL_DENSE_SLOTS.release()
+            else:
+                future.cancel()  # a search still queued never runs
+            self._local_dense_circuit.record_failure()
+            metrics.inc("local_dense_query_errors_total")
+            logger.warning("Local dense search failed; serving BM25 alone for this query", exc_info=True)
+            return []
+        return self._verified_dense_hits(rows)
+
+    def _verified_dense_hits(self, rows: list[tuple[str, dict[str, Any], float]]) -> list[dict[str, Any]]:
+        """Dense rows the serving collection still holds, built from its current payloads.
+
+        The pgvector table is a snapshot. A promoted alias or a live replacement
+        (corpus sync deletes a superseded guide's points without a tombstone) can
+        leave it holding passages the collection no longer serves. Each hit is
+        confirmed against the collection, in one call, before it is fused; when
+        that cannot be done, the dense half is dropped rather than served unverified.
+        """
+        if not rows:
+            return []
+        if self._client is None or not hasattr(self._client, "retrieve"):
+            return []
+        try:
+            points = self._client.retrieve(
+                collection_name=QDRANT_COLLECTION,
+                ids=[pid for pid, _payload, _similarity in rows],
+                with_payload=True,
+                with_vectors=False,
+            )
+        except Exception:
+            metrics.inc("local_dense_unverified_total")
+            logger.warning("Could not confirm dense hits against the serving collection; dropping them", exc_info=True)
+            return []
+        serving = {str(point.id): (point.payload or {}) for point in points or []}
+        hits = []
+        for pid, _snapshot, similarity in rows:
+            payload = serving.get(pid)
+            if payload is None or payload.get("_meta"):
+                metrics.inc("local_dense_stale_hits_total")
+                continue
+            hit = _candidate_from_payload(pid, payload, 0.0)
+            hit["score_dense"] = similarity
+            hits.append(hit)
+        return hits
+
+    def _serve_candidates(
+        self,
+        query: str,
+        candidates: list[dict[str, Any]],
+        *,
+        top_k: int,
+        locale: str | None,
+        fused_order: list[str],
+        mode: str,
+    ) -> list[dict[str, Any]]:
+        """Filter, dedupe, rerank and prune *candidates*: one tail for every path into search.
+
+        The Qdrant path and the dense-only fallback both end here, so the
+        tombstone filter, the reranker and every relevance gate apply alike.
+        """
+        candidates = _filter_tombstoned_candidates(candidates)
+        # Drop near-duplicate chunks before the expensive step.  The
+        # corpus carries the same guidance across editions, so a
+        # prefetch of 20 routinely contains several copies of one
+        # passage — they cost reranker time and then crowd genuinely
+        # different evidence out of top_k.
+        candidates = _dedupe_candidates(candidates)
+        self._attach_lexical_relevance(query, candidates)
+
+        # Cross-encoder reranking. Its own failure domain: a CUDA OOM or a
+        # translation error used to land in the handler below, which
+        # charges Qdrant's circuit, so three of them sent every request to
+        # keyword search while Qdrant was healthy. Unreranked candidates
+        # are served instead; they carry no calibrated score, so pruning
+        # stands down and abstention falls back to the lexical floor.
+        if self._reranker and candidates:
+            try:
+                from .query import english_retrieval_query
+
+                en_query = english_retrieval_query(query, locale) if locale and locale not in ("en", "") else None
+                self._rerank(query, candidates, english_query=en_query)
+            except Exception:
+                metrics.inc("retrieval_rerank_errors_total")
+                logger.exception("Reranking failed; serving fused order without calibrated scores")
+                for candidate in candidates:
+                    candidate.pop("score_rerank", None)
+                    candidate.pop("score_norm", None)
+                    candidate.pop("score_calibrated", None)
+
+        if (
+            fused_order
+            and getattr(self._reranker, "is_cpu_lexical_reranker", False)
+            and candidates
+            and all("score_rerank" in c for c in candidates)
+        ):
+            # The CPU stand-in for a cross-encoder scores word overlap only.
+            # Ordered by it alone, a paraphrase found by the dense leg sinks; gated
+            # on a squash of it, a passage with no word in common scores 0.5 and
+            # can carry an answer. Order by the blend, gate on the bounded score.
+            candidates = _blend_cpu_lexical(candidates, fused_order)
+
+        # top_k is a ceiling, not a quota: returning four passages
+        # when only one is relevant pads the prompt with noise.
+        served = prune_context(candidates[:top_k])
+        observe_search_relevance(served, mode)
+        return served
+
+    def _local_dense_matches_corpus(self) -> bool:
+        """Whether the pgvector table was loaded against the collection now serving.
+
+        A promoted collection (G292) brings a new corpus hash; vectors and payloads
+        from the old one could serve removed guidance, so the leg turns itself off.
+        """
+        if self._local_dense is None:
+            return False
+        loaded = str(getattr(self._local_dense, "meta", {}).get("qdrant_corpus_hash") or "")
+        serving = str(getattr(self, "_bound_corpus_hash", "") or "")
+        if loaded and serving and loaded != serving:
+            self._local_dense_reason = (
+                f"the Qdrant collection changed since the vectors were loaded "
+                f"(loaded {loaded[:12]}, serving {serving[:12]}); rebuild the image"
+            )
+            logger.warning("Local dense leg off: %s", self._local_dense_reason)
+            self._local_dense = None
+            return False
+        return True
 
     def _init_vectorize_mode(self) -> bool:
         """Dense retrieval via Workers AI bge-m3 + Vectorize (no GPU/torch).
@@ -2114,7 +2405,7 @@ class HybridRetriever:
                 None if self._sparse_only else self._encode_query(dense_query_text(query, subject=subject))
             )
             sparse_idx, sparse_val = self._sparse_encoder.encode_query(query)
-            if self._sparse_only and not sparse_idx:
+            if self._sparse_only and not sparse_idx and self._local_dense is None:
                 # No query term is in the BM25 vocabulary, and there is no dense
                 # half to fall back on.
                 self._circuit.record_success()
@@ -2157,100 +2448,57 @@ class HybridRetriever:
                     )
                 )
 
-            query_started = time.perf_counter()
-            fusion_mode = models.Fusion.DBSF if use_dbsf else models.Fusion.RRF
-            results = self._client.query_points(
-                collection_name=QDRANT_COLLECTION,
-                prefetch=prefetch,
-                query=models.FusionQuery(fusion=fusion_mode),
-                query_filter=query_filter,
-                limit=prefetch_limit,
-            )
-            metrics.observe(
-                "qdrant_query_duration_seconds",
-                time.perf_counter() - query_started,
-                labels={"mode": "sparse" if self._sparse_only else "hybrid"},
+            points: list[Any] = []
+            if prefetch:
+                query_started = time.perf_counter()
+                fusion_mode = models.Fusion.DBSF if use_dbsf else models.Fusion.RRF
+                results = self._client.query_points(
+                    collection_name=QDRANT_COLLECTION,
+                    prefetch=prefetch,
+                    query=models.FusionQuery(fusion=fusion_mode),
+                    query_filter=query_filter,
+                    limit=prefetch_limit,
+                )
+                metrics.observe(
+                    "qdrant_query_duration_seconds",
+                    time.perf_counter() - query_started,
+                    labels={"mode": "sparse" if self._sparse_only else "hybrid"},
+                )
+                points = list(results.points or [])
+            # The local dense leg (ADR-0034), searched with the same filters. It
+            # finds a passage that shares no word with the question.
+            dense_hits = (
+                self._local_dense_hits(dense_query_text(query, subject=subject), prefetch_limit, filters)
+                if self._local_dense is not None
+                else []
             )
 
-            if not results.points:
+            if not points and not dense_hits:
                 self._circuit.record_success()
                 return []
 
             candidates: list[dict[str, Any]] = []
-            for pt in results.points:
+            for pt in points:
                 p = pt.payload or {}
                 if p.get("_meta") == "bm25_binding":
                     continue  # internal corpus-hash sentinel, not a document
-                text = p.get("text", "")
-                q = p.get("question", "")
-                a = p.get("answer", "")
-                if (not q or not a) and text.startswith("Question: ") and "\nAnswer: " in text:
-                    parts = text[len("Question: ") :].split("\nAnswer: ", 1)
-                    q = q or parts[0].strip()
-                    a = a or parts[1].strip()
                 candidates.append(
-                    {
-                        "id": str(pt.id),
-                        "text": text,
-                        "question": q,
-                        "answer": a,
-                        "source": p.get("source", ""),
-                        "chunk_id": p.get("chunk_id", ""),
-                        "page": p.get("page", ""),
-                        "section": p.get("section", ""),
-                        "doc_type": p.get("doc_type", ""),
-                        # Edition of the source document, used to prefer current
-                        # guidance over a superseded restatement of it.
-                        "fiscal_year": p.get("fiscal_year", ""),
-                        "valid_from": p.get("valid_from", ""),
-                        "valid_to": p.get("valid_to", ""),
-                        "superseded_by": p.get("superseded_by", ""),
-                        "language": p.get("language", ""),
-                        "tax_type": p.get("tax_type", ""),
-                        "tag": p.get("tag", ""),
-                        **_provenance_fields(p),
-                        "score_rrf": float(pt.score) if pt.score else 0.0,
-                    }
+                    _candidate_from_payload(str(pt.id), p, float(pt.score) if pt.score else 0.0)
                 )
-
-            candidates = _filter_tombstoned_candidates(candidates)
-            # Drop near-duplicate chunks before the expensive step.  The
-            # corpus carries the same guidance across editions, so a
-            # prefetch of 20 routinely contains several copies of one
-            # passage — they cost reranker time and then crowd genuinely
-            # different evidence out of top_k.
-            candidates = _dedupe_candidates(candidates)
-            self._attach_lexical_relevance(query, candidates)
-
-            # Cross-encoder reranking. Its own failure domain: a CUDA OOM or a
-            # translation error used to land in the handler below, which
-            # charges Qdrant's circuit, so three of them sent every request to
-            # keyword search while Qdrant was healthy. Unreranked candidates
-            # are served instead; they carry no calibrated score, so pruning
-            # stands down and abstention falls back to the lexical floor.
-            if self._reranker and candidates:
-                try:
-                    from .query import english_retrieval_query
-
-                    en_query = english_retrieval_query(query, locale) if locale and locale not in ("en", "") else None
-                    self._rerank(query, candidates, english_query=en_query)
-                except Exception:
-                    metrics.inc("retrieval_rerank_errors_total")
-                    logger.exception("Reranking failed; serving fused order without calibrated scores")
-                    for candidate in candidates:
-                        candidate.pop("score_rerank", None)
-                        candidate.pop("score_norm", None)
-                        candidate.pop("score_calibrated", None)
-
+            if dense_hits:
+                # The same combinator Qdrant uses for its own dense + BM25 legs.
+                candidates = rrf_fuse_ranked_lists(candidates, dense_hits)
+            fused_order = [hit_identity(c) for c in candidates] if dense_hits else []
             self._circuit.record_success()
             self._ready = True  # ensure readiness restored on success
-            # top_k is a ceiling, not a quota: returning four passages
-            # when only one is relevant pads the prompt with noise.
-            served = prune_context(candidates[:top_k])
-            observe_search_relevance(
-                served, "sparse" if self._sparse_only else ("hybrid" if self._sparse_ok else "dense")
+            return self._serve_candidates(
+                query,
+                candidates,
+                top_k=top_k,
+                locale=locale,
+                fused_order=fused_order,
+                mode="sparse" if self._sparse_only else ("hybrid" if self._sparse_ok else "dense"),
             )
-            return served
 
         except Exception:
             metrics.inc("qdrant_query_errors_total")
@@ -2259,7 +2507,9 @@ class HybridRetriever:
             logger.exception("Hybrid search failed; circuit breaker tracking failure")
             # Do NOT permanently disable _ready — the circuit breaker
             # controls availability via allow_request(). Setting _ready=False
-            # here would prevent auto-recovery when Qdrant comes back.
+            # here would prevent auto-recovery when Qdrant comes back. The local
+            # dense leg is not served alone here: its hits are confirmed against
+            # the serving collection, which cannot be done while Qdrant is down.
             return []
 
     def search_planned(

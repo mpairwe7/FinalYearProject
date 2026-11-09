@@ -8,4 +8,8 @@ Data/crawl_jsonl/
 Data/pdfs/
 Data/eval/
 Data/teacher_qa/
+# The dense leg's model and vectors are built in CI (ADR-0034); only the placeholder
+# that keeps sparse-only image builds working is tracked.
+Data/dense/*
+!Data/dense/.keep
 Model/bm25_state.json

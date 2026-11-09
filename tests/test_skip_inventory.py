@@ -46,6 +46,8 @@ KNOWN_SKIPS: dict[str, int] = {
     "App/backend/tests/test_multilingual_routing.py": 2,
     # Live Cloudflare credentials, opt-in via CF_LIVE_TEST=1.
     "App/backend/tests/test_providers.py": 1,
+    # Real PostgreSQL + pgvector, provided by local-dense-pgvector.yml (ADR-0034).
+    "App/backend/tests/test_local_dense_pgvector_live.py": 1,
     # FastAPI TestClient / lifespan smoke covered by the deploy smoke scripts.
     "tests/test_api.py": 5,
     # Agent-parity suites gated on optional backend fixtures.

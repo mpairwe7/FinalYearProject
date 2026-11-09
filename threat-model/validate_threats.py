@@ -559,6 +559,31 @@ THREAT_REGISTRY: list[dict] = [
         "status": "mitigated",
     },
     {
+        "id": "T81",
+        "category": "Tampering",
+        "description": (
+            "The local dense leg serves vectors that do not describe the corpus or model in force: a stale or "
+            "swapped artifact, a model file that differs from the one that embedded the corpus, or a write to "
+            "the vector store from the serving process (G523)"
+        ),
+        "owasp_llm": "LLM08",
+        "mitre_atlas": "AML.T0020",
+        "mitigation": (
+            "Model files pinned by revision and SHA-256 and verified before use; the artifact's point-id set must "
+            "equal the baked Qdrant collection's or the load is refused; the store opens only for the pinned "
+            "model, revision and dimension; the vectors file is bound to its ids by a SHA-256; the table records the "
+            "collection's corpus hash and the leg turns off when the serving collection differs; pgvector image pinned "
+            "by digest; Postgres on a Unix socket only with TCP rejected, and peer authentication maps the serving "
+            "process to a SELECT-only role (the build fails if it can connect as postgres). Each document's fingerprint "
+            "is checked at load, and every dense hit is confirmed against the serving collection before it is fused. A "
+            "refused load leaves BM25 serving and /ready names it. Residual (G525): the serving stack runs as root"
+        ),
+        "evidence": ["App/backend/app/dense_cpu.py", "App/backend/app/pgvector_dense.py",
+                     "App/deploy/hf-space/Dockerfile", "App/backend/tests/test_local_dense_leg.py",
+                     "App/backend/tests/test_local_dense_pgvector_live.py"],
+        "status": "mitigated",
+    },
+    {
         "id": "T01",
         "category": "Spoofing",
         "description": "Attacker impersonates legitimate API client",

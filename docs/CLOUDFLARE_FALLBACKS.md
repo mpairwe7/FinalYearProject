@@ -72,9 +72,15 @@ STT_FALLBACK_BACKEND=workers_ai          # (Phase 4)
 | Tier | Backend | Signals | Corpus |
 | --- | --- | --- | --- |
 | 1 | **Qdrant** (dense + sparse) | dense + BM25 sparse fused by RRF, then cross-encoder rerank | all 7,874 docs |
+| 1a | **Qdrant sparse-only + local pgvector** (`LOCAL_DENSE_BACKEND=pgvector`, ADR-0034) | BM25 sparse + local multilingual-e5-small dense in pgvector, fused by RRF; no egress. `/ready`: `retrieval: hybrid`, `capabilities.local_dense` | all 7,874 docs |
 | 2 | **Cloudflare Vectorize** | dense bge-m3 + client-side lexical re-score (no GPU) | all 7,874 docs |
 | 1b | **Qdrant** (sparse-only sidecar) | BM25 sparse only — no dense, no rerank | all 7,874 docs |
 | 3 | **Keyword** | in-process FAQ search over the CSVs | 486 FAQ rows only |
+
+Tier 1a is tried first whenever the collection is sparse-only and the HF Space layer has loaded the
+pgvector leg: both of its legs are local, it keeps BM25, and it needs no egress, so it outranks
+Vectorize's remote dense-only fallback. When its Postgres is unavailable or its vectors do not
+match the collection, it is skipped and the order below applies unchanged.
 
 Tier 1b sits *below* Vectorize, not above it, despite being a Qdrant tier: a
 sparse-only collection carries no dense signal at all, so it is strictly poorer

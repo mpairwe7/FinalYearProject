@@ -1,0 +1,67 @@
+# The local dense leg's SQL against a real PostgreSQL + pgvector (ADR-0034).
+#
+# The unit tests fake Postgres. This job runs test_local_dense_pgvector_live.py
+# against the same digest-pinned pgvector image the HF Space layer copies the
+# extension from: the load (COPY, HNSW, grants), the read-only serving role,
+# filters and pgvector 0.8's iterative scan. No model is downloaded; the
+# artifact in the test is synthetic.
+name: Local dense leg (pgvector)
+
+on:
+  pull_request:
+    branches: [dev, main]
+    paths:
+      - "App/backend/app/pgvector_dense.py"
+      - "App/backend/app/dense_cpu.py"
+      - "App/backend/tests/test_local_dense_pgvector_live.py"
+      - ".github/workflows/local-dense-pgvector.yml"
+  push:
+    branches: [dev]
+    paths:
+      - "App/backend/app/pgvector_dense.py"
+      - "App/backend/app/dense_cpu.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: local-dense-pgvector-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pgvector:
+    name: pgvector load and search
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.1-pg15-bookworm@sha256:94aee7e88f98125114657cab98e28c5dfa8dd517a6bf83fd98b503439f1e3de6
+        env:
+          POSTGRES_DB: ura_dense
+          POSTGRES_USER: postgres
+          # No credential at all, rather than a placeholder one: the database
+          # lives only for this job on the runner's loopback port.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ura_dense"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: pip install pytest "numpy>=1.26,<2.5" "psycopg[binary]>=3.2.0"
+      - name: Run the live pgvector tests
+        working-directory: App/backend
+        env:
+          LOCAL_DENSE_TEST_DSN: postgresql://postgres@localhost:5432/ura_dense
+          PYTHONPATH: .
+        run: python -m pytest -q -p no:cacheprovider -rs tests/test_local_dense_pgvector_live.py

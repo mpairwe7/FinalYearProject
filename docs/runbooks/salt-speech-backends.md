@@ -5,6 +5,8 @@ Operator guide for the Sunbird V2 speech models wired into
 - **Primary ASR**: `Sunbird/SunflowerASR-51-african-languages` (51 African languages, Whisper large-v3 SFT on 7,412h + GRPO on CER; replaced `Sunbird/asr-whisper-large-v3-salt` in local HF cache on 2026-10-15).
 - **Primary TTS**: `Sunbird/orpheus-3b-tts-multilingual` (`ORPHEUS_TTS_LANGUAGES=lg,sw,en`, speakers `salt_lug_0001`, `waxal_swa_0006`, `salt_eng_0001`, 24 kHz streaming via SNAC decoder; replaced `Sunbird/spark-tts-salt` which is disabled by default via `SPARK_TTS_ENABLED=false` and removed from local HF cache).
 
+Retrieval is not covered here. A voice question is transcribed, then retrieved like a typed one. On the HF Space that means BM25 fused with the local pgvector dense leg when it is up, and BM25 alone when `/ready` reports it unavailable (`docs/runbooks/local-dense-pgvector.md`, ADR-0034). Crane Cloud does not enable the leg and serves BM25 alone. A Luganda, Runyankole or Acholi transcript reaches that leg through translate-then-retrieve, because its e5 model is not trained on them.
+
 ## Warm-up — who pays for the cold path
 
 `SpeechModel.__init__` builds the model objects during startup, but everything

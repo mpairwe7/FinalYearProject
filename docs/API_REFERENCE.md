@@ -46,7 +46,7 @@ GET /health
 
 ### Readiness Probe
 
-Confirms the model is loaded and the service can handle requests. Returns **503** if the model is unavailable. Includes retrieval mode status (`hybrid` when Qdrant is connected with a real dense vector, `vector` for the Cloudflare Vectorize dense fallback, `sparse` for a Qdrant collection with BM25 only, `keyword` for the in-process FAQ fallback).
+Confirms the model is loaded and the service can handle requests. Returns **503** if the model is unavailable. Includes retrieval mode status (`hybrid` when Qdrant is connected with a real dense vector, or when a sparse-only collection is fused with the local pgvector leg, `vector` for the Cloudflare Vectorize dense fallback, `sparse` for a Qdrant collection with BM25 only, `keyword` for the in-process FAQ fallback).
 
 ```http
 GET /ready
@@ -66,7 +66,8 @@ GET /ready
 | Field | Type | Description |
 |-------|------|-------------|
 | `status` | string | `ready` (Qdrant connected) or `degraded` (keyword fallback) |
-| `retrieval_mode` | string | `hybrid` (Qdrant dense+BM25+rerank), `vector` (Cloudflare Vectorize dense fallback), `sparse` (Qdrant BM25 only, no dense), or `keyword` (CSV overlap fallback) |
+| `retrieval_mode` | string | `hybrid` (Qdrant dense+BM25+rerank, or Qdrant BM25 fused with the local pgvector leg), `vector` (Cloudflare Vectorize dense fallback), `sparse` (Qdrant BM25 only, no dense), or `keyword` (CSV overlap fallback) |
+| `capabilities.local_dense` | string | The local dense leg (ADR-0034): `pgvector multilingual-e5-small, N vectors`, `off`, or `unavailable (reason)`; see `docs/runbooks/local-dense-pgvector.md` |
 
 ---
 

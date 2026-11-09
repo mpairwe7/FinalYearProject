@@ -12,6 +12,7 @@ locally generated index state.
 | `pdfs/` | Upstream URA guidance | via `pdf_jsonl/` |
 | `pdf_jsonl/` | Hierarchical PDF chunk JSONL plus coverage manifest | Yes |
 | `crawl_jsonl/` | Chunked crawl pages plus coverage manifest (source: `Data/crawl/pages`) | Yes |
+| `dense/` | The local dense leg's pinned model and corpus vectors (`manifest.json` lists each vector's Qdrant point id), built in CI by `python -m app.pgvector_dense build-artifact`; an empty directory is enough for a local image build (ADR-0034) | Loaded into pgvector on the HF Space |
 | `eval/` | RAG and red-team evaluation fixtures | No |
 
 Every corpus reaches the vector store as **validated JSONL** carrying source

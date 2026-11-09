@@ -21,6 +21,8 @@
 !App/Data/teacher_qa/**
 !App/Data/pdf_jsonl/**
 !App/Data/crawl_jsonl/**
+# The dense leg's pinned model and corpus vectors (ADR-0034).
+!App/Data/dense/**
 
 # query.detect_language() imports ml.scripts.lang_id for the lingua backend and
 # silently falls back to a character heuristic that reads Luganda as English if
