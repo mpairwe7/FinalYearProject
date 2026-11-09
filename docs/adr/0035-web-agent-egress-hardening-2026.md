@@ -76,6 +76,9 @@ the four search providers and the FX engine.
     the log keeps the full hostname.
   - A non-public answer is `refused`, while a DNS outage is `unresolvable`. A body that fails
     part-way records its error class.
+  - A failed connect or TLS handshake records no sent bytes, because no request left.
+  - A body the cap refuses records why (`oversized`, `unsupported_encoding` or `corrupt`), not the
+    status class it started with.
 - **Capped provider bodies (G528).** Providers stream their response and stop at
   `WEB_PROVIDER_MAX_RESPONSE_BYTES` (2 MB), failing as `oversized`. The raw stream is read and
   decompressed with a bounded window, so a small gzip body cannot expand past the cap before its
@@ -136,3 +139,11 @@ Considered and not adopted:
   `tests/agents/test_web_research_adversarial_eval.py`.
 - 15 controls were each disabled in turn, and a test failed every time. The one exception is
   `strip_markup`'s lookbehind, which is redundant with its lookahead for `<<SYS>>`.
+- **Review round 2 (2026-11-09).** These changes were made:
+  - Clients advertise only `gzip, deflate`.
+  - The cap decodes every gzip member, ignoring padding after a complete body, and reads raw as
+    well as zlib-wrapped deflate.
+  - A corrupt compressed body is a provider failure (`corrupt`), so the chain fails over.
+  - `_screened` also screens the whole stripped text: a tag-split directive after the stored
+    500-character cut was in neither of the other views.
+  - Nine more controls were each disabled in turn, and a test failed every time.

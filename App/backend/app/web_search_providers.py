@@ -168,8 +168,9 @@ def _capped(client: httpx.Client, method: str, url: str, **kwargs: Any) -> httpx
     with client.stream(method, url, **kwargs) as streamed:
         try:
             body = egress.read_capped(streamed, egress.MAX_PROVIDER_RESPONSE_BYTES)
-        except ValueError as exc:
-            raise ProviderError("oversized") from exc
+        except egress.BodyRefused as exc:
+            # oversized, unsupported_encoding or corrupt: a provider failure, so the chain fails over.
+            raise ProviderError(exc.outcome) from exc
         headers = [(k, v) for k, v in streamed.headers.items() if k.lower() not in _TRANSFER_HEADERS]
         return httpx.Response(streamed.status_code, headers=headers, content=body, request=streamed.request)
 

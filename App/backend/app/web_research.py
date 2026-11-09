@@ -1293,7 +1293,10 @@ def _screened(title: str, snippet: str, raw_text: str = "") -> tuple[str, str, b
         # Too long to screen whole; third-party text that cannot be cleared is not admitted.
         return clean_title, clean_snippet, True
     rejected = False
-    for view in (combined, raw):
+    # The stripped fields whole as well: the stored copy is cut to a length, and a
+    # directive after the cut, split by tags in the raw view, is in neither of the others.
+    whole = f"{strip_markup(title)}\n{strip_markup(snippet)}\n{strip_markup(raw)}"
+    for view in (combined, raw, whole):
         _, scrubbed = scan_retrieved_text(view)
         if scrubbed or screen_tool_result(view) or _WEB_DIRECTIVE_RE.search(view):
             rejected = True

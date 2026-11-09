@@ -201,7 +201,9 @@ class _EgressTransport(httpx.HTTPTransport):
             record(self._purpose, host, exc.outcome, seconds=time.perf_counter() - started, group=group)
             raise
         except Exception as exc:
-            record(self._purpose, host, type(exc).__name__, sent=sent, seconds=time.perf_counter() - started,
+            # A failed connect or TLS handshake sent no request; anything later may have.
+            left = 0 if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)) else sent
+            record(self._purpose, host, type(exc).__name__, sent=left, seconds=time.perf_counter() - started,
                    group=group)
             raise
         outcome = f"{response.status_code // 100}xx"
@@ -228,17 +230,76 @@ def client(purpose: str, *, timeout: Any, allow_private: Iterable[str] = (), **k
     proxy resolves the destination itself and the pin would not apply.
     """
     allowed = frozenset(h.strip("[]").rstrip(".").lower() for h in allow_private if h)
+    # Advertise only what read_capped decodes: with brotli or zstandard installed, httpx
+    # would offer them too, and a valid reply in one would be refused.
+    headers = httpx.Headers(kwargs.pop("headers", None))
+    headers["Accept-Encoding"] = ACCEPT_ENCODING
     return httpx.Client(
         timeout=timeout,
         follow_redirects=False,
         trust_env=False,
         transport=_transport_for(purpose, allowed),
+        headers=headers,
         **kwargs,
     )
 
 
 #: zlib window bits per content coding; anything else is refused rather than decoded.
 _DECODERS = {"gzip": 31, "x-gzip": 31, "deflate": 15}
+#: The ``Accept-Encoding`` every egress client sends: exactly the codings above.
+ACCEPT_ENCODING = "gzip, deflate"
+
+
+class BodyRefused(ValueError):
+    """A response body :func:`read_capped` would not return. ``outcome`` is a bounded label."""
+
+    def __init__(self, outcome: str, message: str) -> None:
+        super().__init__(message)
+        self.outcome = outcome
+
+
+class _Decoder:
+    """Decodes one response's content coding with bounded output.
+
+    * gzip: every member, as a concatenated stream is one body.
+    * deflate: zlib-wrapped as the RFC says, or raw as some servers send it.
+    """
+
+    def __init__(self, coding: str) -> None:
+        self._coding = coding
+        self._obj: Any = None
+        self._members = 0
+
+    def decode(self, data: bytes, room: int) -> tuple[bytes, bytes]:
+        """Up to *room* decoded bytes from *data*, and the input still to feed."""
+        import zlib
+
+        if self._obj is None:
+            self._obj = zlib.decompressobj(_DECODERS[self._coding])
+            if self._coding == "deflate":
+                try:
+                    out = self._obj.decompress(data, room)
+                except zlib.error:
+                    self._obj = zlib.decompressobj(-zlib.MAX_WBITS)  # raw deflate, no zlib header
+                    out = self._obj.decompress(data, room)
+                return out, self._rest()
+        try:
+            out = self._obj.decompress(data, room)
+        except zlib.error:
+            if self._members and self._coding != "deflate":
+                return b"", b""  # bytes after a complete gzip body (padding): ignored, as urllib3 does
+            raise
+        return out, self._rest()
+
+    def _rest(self) -> bytes:
+        if not self._obj.eof:
+            return self._obj.unconsumed_tail
+        self._members += 1
+        rest = self._obj.unused_data
+        if self._coding == "deflate":
+            return b""  # one deflate stream; trailing bytes are not body
+        self._obj = None  # the next gzip member starts afresh
+        return rest
 
 
 def read_capped(response: httpx.Response, max_bytes: int) -> bytes:
@@ -246,41 +307,55 @@ def read_capped(response: httpx.Response, max_bytes: int) -> bytes:
 
     The cap holds before anything is allocated past it: the raw stream is read
     (``iter_raw``) and decompressed with a bounded window, so a small gzip body
-    cannot expand into worker memory before its size is known.
+    cannot expand into worker memory before its size is known. A refusal raises
+    :class:`BodyRefused` and is recorded as the request's egress outcome.
     """
     import zlib
 
+    try:
+        return _read_capped(response, max_bytes)
+    except BodyRefused as exc:
+        _mark(response, exc.outcome)
+        raise
+    except zlib.error as exc:
+        _mark(response, "corrupt")
+        raise BodyRefused("corrupt", "the compressed body could not be decoded") from exc
+
+
+def _mark(response: httpx.Response, outcome: str) -> None:
+    """Record *outcome*, not the status class, when the response is closed."""
+    stream = getattr(response, "stream", None)
+    for _ in range(4):  # the client wraps the transport's stream (httpx BoundSyncStream)
+        if isinstance(stream, _CountingStream):
+            stream._error = outcome
+            return
+        stream = getattr(stream, "_stream", None)
+
+
+def _read_capped(response: httpx.Response, max_bytes: int) -> bytes:
     declared = response.headers.get("content-length")
     if declared and declared.isdigit() and int(declared) > max_bytes:
-        raise ValueError(f"response declares {declared} bytes, over the {max_bytes}-byte cap")
+        raise BodyRefused("oversized", f"response declares {declared} bytes, over the {max_bytes}-byte cap")
     coding = response.headers.get("content-encoding", "").strip().lower()
-    if coding in ("", "identity"):
-        decoder = None
-    elif coding in _DECODERS:
-        decoder = zlib.decompressobj(_DECODERS[coding])
-    else:
-        raise ValueError(f"unsupported content encoding {coding!r}")
+    if coding not in ("", "identity") and coding not in _DECODERS:
+        raise BodyRefused("unsupported_encoding", f"unsupported content encoding {coding!r}")
     if getattr(response, "_content", None) is not None:
         # Already read whole (a body handed over in memory): nothing left to bound but its size.
         if len(response.content) > max_bytes:
-            raise ValueError(f"response passed the {max_bytes}-byte cap")
+            raise BodyRefused("oversized", f"response passed the {max_bytes}-byte cap")
         return response.content
+    decoder = _Decoder(coding) if coding in _DECODERS else None
     chunks: list[bytes] = []
     total = 0
     for raw in response.iter_raw():
-        pieces = [raw] if decoder is None else []
-        if decoder is not None:
-            data = raw
-            while data:
-                piece = decoder.decompress(data, max_bytes + 1 - total)
-                pieces.append(piece)
-                total_after = total + sum(len(p) for p in pieces)
-                if total_after > max_bytes:
-                    raise ValueError(f"response passed the {max_bytes}-byte cap")
-                data = decoder.unconsumed_tail
-        for piece in pieces:
+        data = raw
+        while data:
+            if decoder is None:
+                piece, data = data, b""
+            else:
+                piece, data = decoder.decode(data, max_bytes + 1 - total)
             total += len(piece)
             if total > max_bytes:
-                raise ValueError(f"response passed the {max_bytes}-byte cap")
+                raise BodyRefused("oversized", f"response passed the {max_bytes}-byte cap")
             chunks.append(piece)
     return b"".join(chunks)

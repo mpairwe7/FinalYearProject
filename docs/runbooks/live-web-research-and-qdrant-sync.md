@@ -226,7 +226,7 @@ providers and the FX engine. Each request is counted, and no path, query or body
 
 | Metric | Labels | Read it as |
 | --- | --- | --- |
-| `web_egress_requests_total` | `purpose` (`pdf_sandbox`, `search_tavily`, `search_brave`, `search_searxng`, `search_duckduckgo`, `fx_rate`), `host` (a bounded group: a known domain such as `ura.go.ug` or `xe.com`, `operator` for a configured endpoint, or `other`), `outcome` (`2xx`…`5xx`, `refused`, `unresolvable`, or an error class) | Which agent reached which host, and how it ended. |
+| `web_egress_requests_total` | `purpose` (`pdf_sandbox`, `search_tavily`, `search_brave`, `search_searxng`, `search_duckduckgo`, `fx_rate`), `host` (a bounded group: a known domain such as `ura.go.ug` or `xe.com`, `operator` for a configured endpoint, or `other`), `outcome` (`2xx`…`5xx`, `refused`, `unresolvable`, `oversized`, `unsupported_encoding`, `corrupt`, or an error class) | Which agent reached which host, and how it ended. |
 | `web_egress_sent_bytes_total` | `purpose`, `host` | What left the deployment: the URL, which carries search terms, plus the request body. |
 | `web_egress_received_bytes_total` | `purpose`, `host` | What came back. |
 
@@ -242,6 +242,9 @@ Each request also writes one log line with the full hostname:
   it is recorded as that error, not as a success.
 - **A provider failing as `oversized`:** its response passed `WEB_PROVIDER_MAX_RESPONSE_BYTES`
   (2 MB). A results page is a few kilobytes, so suspect the endpoint, not the cap.
+- **`unsupported_encoding` or `corrupt`:** the provider answered in a coding other than gzip or
+  deflate, even though clients advertise only those two, or sent a body that does not decode. The
+  chain fails over to the next provider. Check the endpoint, or a proxy in front of it.
 - **A self-hosted SearXNG on a private network:** this is allowed because its host comes from
   `SEARXNG_URL`. No address from a page or a search result is ever exempt.
 
