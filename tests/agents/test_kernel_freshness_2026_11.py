@@ -145,7 +145,7 @@ def test_the_previous_years_figure_in_its_own_edition_is_superseded() -> None:
     assert (conflict.status, conflict.evidence_edition) == ("superseded", "FY2025-26")
 
 
-def test_contradicting_passages_rank_below_the_rest_and_only_conflicts_are_reported(monkeypatch) -> None:
+def test_contradicting_passages_are_left_out_and_only_conflicts_are_reported(monkeypatch) -> None:
     recorded: list = []
     monkeypatch.setattr(precedence, "record_conflicts", lambda conflicts, **_: recorded.extend(conflicts) or len(conflicts))
     monkeypatch.setattr(precedence, "facts_from_claims", lambda claims: [BAGGAGE])
@@ -155,9 +155,10 @@ def test_contradicting_passages_rank_below_the_rest_and_only_conflicts_are_repor
     current = _hit("The passenger baggage allowance is US$2,000 per traveller.", id="current")
     graph_hit = {"doc_type": "graph", "graph_claims": [{"subject": "x"}]}
     ordered = precedence.apply_precedence(graph_hit, [old, other, unlabelled, current])
-    assert [h["id"] for h in ordered] == ["other", "current", "old", "unlabelled"]
-    assert old["kernel_precedence"]["status"] == "superseded"
-    assert unlabelled["kernel_precedence"]["status"] == "conflict"
+    # Left out of the answer's evidence (G534), and listed on the graph hit for the audit.
+    assert [h["id"] for h in ordered] == ["other", "current"]
+    dropped = {d["stated_value"]: d["status"] for d in graph_hit["kernel_precedence_dropped"]}
+    assert dropped == {"500 USD": "superseded", "1000 USD": "conflict"}
     assert [c.evidence_value for c in recorded] == ["1000 USD"], "a superseded edition is expected, not a review item"
     assert "kernel_precedence" not in other
 

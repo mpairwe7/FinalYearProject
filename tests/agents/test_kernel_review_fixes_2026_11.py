@@ -142,7 +142,7 @@ def test_faq_promotion_cannot_put_a_contradicting_faq_first(monkeypatch: pytest.
     graph = {"doc_type": "graph", "graph_claims": [{"subject": "VAT standard rate"}], "id": "graph"}
     other = {"text": "Register for VAT on the URA portal.", "doc_type": "csv", "id": "other"}
     ordered = precedence.reorder_after_promotion([stale, graph, other])
-    assert [h["id"] for h in ordered] == ["graph", "other", "stale"]
+    assert [h["id"] for h in ordered] == ["graph", "other"], "the contradicting FAQ is left out (G534)"
     assert precedence.reorder_after_promotion([stale, other]) == [stale, other], "no graph hit, no change"
     # Found after blending, so queued now, and only once however often the order is rebuilt.
     precedence.reorder_after_promotion([stale, graph, other])
@@ -164,7 +164,7 @@ def test_the_rest_fusion_path_ranks_a_contradicting_passage_last(monkeypatch: py
     fine = {"text": "Declare goods to customs at Entebbe.", "doc_type": "pdf_chunk", "id": "fine"}
     fused, used = ChatModel._fuse_graph_leg("baggage allowance", [stale, fine])
     assert used
-    assert [h.get("id") for h in fused if h.get("id")] == ["fine", "stale"]
+    assert [h.get("id") for h in fused if h.get("id")] == ["fine"], "the contradicting passage is left out (G534)"
 
 
 def test_the_graph_fusion_path_ranks_a_contradicting_passage_last(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -179,7 +179,7 @@ def test_the_graph_fusion_path_ranks_a_contradicting_passage_last(monkeypatch: p
              "id": "stale"}
     fine = {"text": "Declare goods to customs at Entebbe.", "doc_type": "pdf_chunk", "id": "fine"}
     fused = main_graph._fuse_graph_leg("baggage allowance", [stale, fine])
-    assert [h.get("id") for h in fused if h.get("id")] == ["fine", "stale"]
+    assert [h.get("id") for h in fused if h.get("id")] == ["fine"], "the contradicting passage is left out (G534)"
 
 
 # --------------------------------------------------------------------------- rules and tools
@@ -709,7 +709,7 @@ def test_the_langgraph_faq_gate_orders_by_precedence(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(precedence, "facts_from_claims", lambda _claims: [VAT])
     monkeypatch.setattr(faq_binding, "filter_unbound_faq_hits", lambda _q, hits: hits)
     monkeypatch.setattr(faq_binding, "promote_equivalent_faq_hits", lambda _q, hits: [stale] + [h for h in hits if h is not stale])
-    assert [h["id"] for h in main_graph._apply_faq_gates("vat rate", [graph, stale])] == ["graph", "stale"]
+    assert [h["id"] for h in main_graph._apply_faq_gates("vat rate", [graph, stale])] == ["graph"]
 
 
 def test_the_postgres_lookup_is_scoped_to_the_altered_table() -> None:

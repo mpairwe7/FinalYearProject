@@ -242,3 +242,29 @@ Filled in per phase; see "Implementation record" below.
     (`2,000` is not in `2,000,000`), shared by all three runners and tested in
     `tests/test_load_runner_concept_matching.py`.
   - Each of 17 fixes was disabled in turn, and a test failed every time.
+
+### Amendment (2026-11-09): superseded figures stay out of answers (G534)
+
+After the dense leg (ADR-0034) went live, the Space answered "What is the passenger baggage
+duty-free allowance?" with **USD 500** instead of the verified USD 2,000. Two failures combined:
+- **The match was by name.** Precedence matched a passage to a fact only when the fact's name
+  appeared near the figure. Dense retrieval surfaced an EACCMA Fifth Schedule paraphrase
+  ("personal effects … not exceeding USD 500") that never names the allowance.
+- **Detection only reordered.** A detected contradiction was moved down, but nothing told the model
+  that its figure was superseded, so the model could still quote it.
+
+The dense leg was switched off on the Space (`LOCAL_DENSE_BACKEND=none`) until the following:
+- **Former values are contradictions wherever they are stated.** When a fact's legal basis records
+  a replaced value ("Raised from USD 500"; currency or percent required, so a date never counts), a
+  passage retrieved with that fact that states it is a conflict (`reason="former_value"`). Facts now
+  carry the full legal basis, not only the claim's citation.
+  - This does not apply to a passage that also states the current figure, or that frames the old
+    value as history ("from USD 500", "previously").
+  - A passage giving only the old figure, even in the past tense, is still left out.
+- **Contradictions are left out, not moved.** `apply_precedence` returns the hits without the
+  contradicting passages. Each one is listed on the graph hit under `kernel_precedence_dropped`
+  (key, kernel and stated values, edition, reason, source) for the audit. Conflicts are still
+  queued for review once per turn.
+
+`tests/agents/test_kernel_precedence_superseded_2026_11.py` uses the live passage verbatim; seven
+controls were each disabled in turn, and a test failed every time.
