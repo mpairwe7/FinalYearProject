@@ -1286,7 +1286,12 @@ def _screened(title: str, snippet: str, raw_text: str = "") -> tuple[str, str, b
     # Screen the text as received too, markup kept: stripping tags first deletes an
     # instruction hidden in an attribute (alt=, title=) before the screen sees it
     # (ADR-0035, G527). Providers carry it in RawResult.raw_text.
-    raw = (raw_text or _html.unescape(f"{title}\n{snippet}"))[: 2 * _MAX_RESULT_TEXT_CHARS]
+    from .web_search_providers import MAX_RAW_TEXT_CHARS
+
+    raw = raw_text or _html.unescape(f"{title}\n{snippet}")
+    if len(raw) > MAX_RAW_TEXT_CHARS:
+        # Too long to screen whole; third-party text that cannot be cleared is not admitted.
+        return clean_title, clean_snippet, True
     rejected = False
     for view in (combined, raw):
         _, scrubbed = scan_retrieved_text(view)

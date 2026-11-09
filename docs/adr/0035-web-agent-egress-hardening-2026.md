@@ -68,21 +68,29 @@ the four search providers and the FX engine.
   - A record set that mixes a public and a private answer is refused.
   - Only an operator-configured endpoint (a self-hosted SearXNG) may resolve privately.
   - Environment proxies are ignored, because a proxy resolves the destination itself.
-- **Every request recorded (G529).** `web_egress_requests_total{purpose,host,outcome}` and
-  `web_egress_bytes_total{purpose,host}` are recorded, plus one log line per request. No path,
-  query, header or body is recorded. Refusals are counted as `refused`.
+- **Every request recorded (G529).**
+  - `web_egress_requests_total{purpose,host,outcome}`, `web_egress_sent_bytes_total` (the URL plus
+    the request body, which is what leaves the deployment) and `web_egress_received_bytes_total`,
+    plus one log line per request. No path, query, header or body is recorded.
+  - `host` is a bounded group (a known domain, `operator` for a configured endpoint, or `other`);
+    the log keeps the full hostname.
+  - A non-public answer is `refused`, while a DNS outage is `unresolvable`. A body that fails
+    part-way records its error class.
 - **Capped provider bodies (G528).** Providers stream their response and stop at
-  `WEB_PROVIDER_MAX_RESPONSE_BYTES` (2 MB), failing as `oversized`. The rebuilt response drops
-  transfer headers, so a compressed body is decoded once.
+  `WEB_PROVIDER_MAX_RESPONSE_BYTES` (2 MB), failing as `oversized`. The raw stream is read and
+  decompressed with a bounded window, so a small gzip body cannot expand past the cap before its
+  size is known. Unknown encodings are refused.
 - **Default port only (G530).** `validate_outbound_research_url` and the FX hop check refuse any
   explicit port other than 443.
 - **The screen sees what was sent (G527).**
   - `strip_markup` removes only real HTML element tags (a name starting with a letter), so
     chat-template tokens and comments survive into the text that is screened.
-  - Each `RawResult` carries `raw_text`, its fields as received with markup kept, and `_screened`
-    rejects a result if either the stripped or the raw view trips a detector. An instruction in an
-    `alt=` attribute is therefore caught.
-- **Eval coverage (G531).** Eight new adversarial rows:
+  - Each `RawResult` carries `raw_text`, its fields as received with markup kept and never
+    truncated. `_screened` rejects a result if either the stripped or the whole raw view trips a
+    detector, or if the raw text is too long to screen (32,000 characters). An instruction in an
+    `alt=` attribute is therefore caught, however much benign text comes first.
+  - Every validated address is tried in turn when connecting, without resolving again.
+- **Eval coverage (G531).** Nine new adversarial rows:
   - Swahili and Luganda injections;
   - Unicode-tag smuggling;
   - chat-template and `<<SYS>>` blocks;
@@ -90,7 +98,7 @@ the four search providers and the FX engine.
   - attribute injection;
   - a lookalike host and a non-default port.
 
-  All must end in `no_official_result` with the expected rejection.
+  Each new row must end in `no_official_result` with the expected rejection.
 
 Considered and not adopted:
 - **An alignment critic over actions.** These agents take no actions on the web: they read, and a
@@ -124,7 +132,7 @@ Considered and not adopted:
   - the body caps and a compressed body decoded once;
   - the port rules;
   - control tokens kept through markup stripping.
-- `evals/web_research_scenarios/adversarial.jsonl` (20 rows) runs through
+- `evals/web_research_scenarios/adversarial.jsonl` (21 rows: 12 existing, 9 new) runs through
   `tests/agents/test_web_research_adversarial_eval.py`.
 - 15 controls were each disabled in turn, and a test failed every time. The one exception is
   `strip_markup`'s lookbehind, which is redundant with its lookahead for `<<SYS>>`.

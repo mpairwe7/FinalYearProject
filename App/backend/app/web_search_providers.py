@@ -125,9 +125,17 @@ class SearchProvider(Protocol):
     def search(self, request: SearchRequest, timeout: float) -> list[RawResult]: ...
 
 
+#: The longest raw result text that is screened; a longer one is rejected unread,
+#: because an instruction can sit after any amount of benign text (ADR-0035).
+MAX_RAW_TEXT_CHARS = 32_000
+
+
 def _as_received(*fields: Any) -> str:
-    """Fields joined as received, entities decoded, markup kept (for :attr:`RawResult.raw_text`)."""
-    return "\n".join(_html.unescape(str(f or "")) for f in fields)[:4000]
+    """Fields joined as received, entities decoded, markup kept (for :attr:`RawResult.raw_text`).
+
+    Never truncated here: the screen reads all of it, or rejects it as too long.
+    """
+    return "\n".join(_html.unescape(str(f or "")) for f in fields)
 
 
 def strip_markup(text: Any) -> str:
