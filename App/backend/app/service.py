@@ -999,11 +999,15 @@ def _llm_cloud_fallback(
     elif backend == "sunbird" and cloud_models_allowed():
         from . import sunbird
 
-        if sunbird.is_available() and admit(breakers.SUNBIRD_LLM_BREAKER, lambda: True):
+        # Sunbird's failover is bounded by the chain's budget, less a reserve for Workers
+        # AI, so a slow primary account cannot also spend the fallback's time.
+        sunbird_deadline = None if deadline is None else deadline - SUNBIRD_WORKERS_AI_RESERVE_S
+        if sunbird_deadline is not None and sunbird_deadline - time.monotonic() < 1.0:
+            # Too little of the budget is Sunbird's: skip it without touching its breaker,
+            # since running out of time is not the provider failing (sunbird._post's cut-off).
+            logger.info("LLM chain: no time left for Sunbird; going straight to Workers AI")
+        elif sunbird.is_available() and admit(breakers.SUNBIRD_LLM_BREAKER, lambda: True):
             try:
-                # Sunbird's failover is bounded by the chain's budget, less a reserve for
-                # Workers AI, so a slow primary account cannot also spend the fallback's time.
-                sunbird_deadline = None if deadline is None else deadline - SUNBIRD_WORKERS_AI_RESERVE_S
                 reply = sunbird.chat_completion(messages, temperature=0.2, deadline=sunbird_deadline)
                 cut_off = getattr(reply, "finish_reason", "") == "length"
                 text = llm_module.strip_thought(reply)

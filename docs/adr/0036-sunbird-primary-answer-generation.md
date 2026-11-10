@@ -69,6 +69,11 @@ The cloud chain (`service._llm_cloud_fallback`) becomes **Sunbird, then Workers 
   kept as the floor.
 - **Tracing.** Sunbird generation is traced with `tracing.llm_call` and reports the provider's
   token usage.
+  An empty reply is raised inside the traced block, so the metrics record the same failure the
+  breaker does.
+- **A spent budget is not a Sunbird failure.** When less than 1 s of Sunbird's share of the budget
+  remains, the chain goes straight to Workers AI without touching Sunbird's breaker. A turn that
+  ran out of time no longer counts against the provider.
 - **Relay and AI Gateway.**
   - The direct call after a relay failure is skipped once the turn's deadline has passed.
   - A 502, 503 or 504 from the AI Gateway now falls through to `api.cloudflare.com`. A 500 or a

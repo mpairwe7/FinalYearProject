@@ -259,3 +259,45 @@ def test_an_ai_gateway_failure_tries_the_direct_api(monkeypatch: pytest.MonkeyPa
         with pytest.raises(httpx.HTTPStatusError):
             gateway._workers_ai_call("m", send)
         assert hosts == ["gateway.ai.cloudflare.com"]
+
+
+def test_a_spent_budget_skips_sunbird_without_counting_a_failure(chain) -> None:
+    """Running out of time is not the provider failing; three such turns must not open its breaker."""
+    deadline = service.time.monotonic() + service.SUNBIRD_WORKERS_AI_RESERVE_S + 0.5  # under 1 s for Sunbird
+    with mock.patch.object(sunbird, "chat_completion") as sb, \
+         mock.patch.object(breakers.SUNBIRD_LLM_BREAKER, "record_failure") as failure, \
+         mock.patch.object(gateway, "workers_ai_chat", return_value="Served. [1]"):
+        for _ in range(4):
+            assert service._llm_cloud_fallback("q", [{"text": "p"}], None, "en", deadline=deadline) == "Served. [1]"
+    sb.assert_not_called()
+    failure.assert_not_called()
+
+
+def test_an_empty_reply_is_recorded_as_the_traced_calls_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    from contextlib import contextmanager
+
+    from app import tracing
+
+    recorded: dict = {}
+
+    class _Call:
+        def usage(self, *_a):
+            pass
+
+    @contextmanager
+    def fake(*_a, **_k):
+        try:
+            yield _Call()
+        except Exception as exc:
+            recorded["error"] = type(exc).__name__
+            raise
+
+    class _Resp:
+        def json(self):
+            return {"choices": [{"message": {"content": "  "}}]}
+
+    monkeypatch.setattr(tracing, "llm_call", fake)
+    monkeypatch.setattr(sunbird, "_post", lambda *_a, **_k: _Resp())
+    with pytest.raises(RuntimeError):
+        sunbird.chat_completion([{"role": "user", "content": "q"}])
+    assert recorded == {"error": "RuntimeError"}, "the metrics must agree with the breaker"

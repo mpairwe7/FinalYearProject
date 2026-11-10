@@ -434,11 +434,13 @@ def chat_completion(
         data = resp.json()
         usage = data.get("usage") or {}
         call.usage(usage.get("prompt_tokens"), usage.get("completion_tokens"))
-    choices = data.get("choices") or []
-    choice = choices[0] if choices else {}
-    content = (choice.get("message") or {}).get("content") or ""
-    if not content.strip():
-        raise RuntimeError("sunbird chat_completion: empty reply")
+        # Parsed inside the traced block: an empty reply is recorded as the call's error,
+        # matching the breaker, not as a success.
+        choices = data.get("choices") or []
+        choice = choices[0] if choices else {}
+        content = (choice.get("message") or {}).get("content") or ""
+        if not content.strip():
+            raise RuntimeError("sunbird chat_completion: empty reply")
     return ChatReply(content.strip(), str(choice.get("finish_reason") or ""))
 
 

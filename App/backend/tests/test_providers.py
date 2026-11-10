@@ -805,7 +805,9 @@ class LLMFallbackTest(unittest.TestCase):
              mock.patch("app.sunbird.is_available", return_value=True), \
              mock.patch("app.sunbird.chat_completion", return_value="Short") as gg, \
              mock.patch.object(gateway, "workers_ai_chat") as wac, \
-             mock.patch.object(service.time, "monotonic", side_effect=[100.0, 200.0]):
+             mock.patch.object(service.time, "monotonic", side_effect=[100.0, 100.0, 200.0]):
+            # Readings: the chain budget before Sunbird, Sunbird's own share (135 - 100 s left),
+            # then the chain budget before Workers AI, spent by the Sunbird attempt.
             out = service._llm_cloud_fallback(
                 "vat rate?", [{"text": "VAT is 18%"}], None, "en", deadline=150.0
             )
