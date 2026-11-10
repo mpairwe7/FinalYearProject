@@ -29,8 +29,9 @@ tier, fallbacks and degradations.
 The state is 0 closed, 1 half-open, 2 open, and `ura_circuit_breaker_transitions_total`
 counts the changes.
 
-1. Read the `breaker` label: `llm` is T1, `llm_reasoner` the reasoner, `gemini_flash`
-   and `cf_workers_ai_llm` the cloud chain, `mcp:<namespace>` a connector.
+1. Read the `breaker` label: `llm` is T1, `llm_reasoner` the reasoner, `sunbird_llm`
+   and `cf_workers_ai_llm` the cloud answer chain (ADR-0036), `gemini_flash` the FAQ
+   judge and speech fallbacks, `mcp:<namespace>` a connector.
 2. Check that dependency. An open breaker is a symptom: it opened because calls failed.
 3. A breaker retries by itself after its back-off (up to 300 s), so there is nothing to
    reset. Restarting a worker clears its state but does not fix the dependency.
@@ -69,10 +70,18 @@ control instead of fixing what it depends on.
 `AnswersDegraded`: more than 10% of answers carry a disclosure, by
 `ura_turn_degraded_total{reason}`:
 
-* `generation_unavailable`: no model answered. Check the breakers and, on the Space, the
-  three settings the cloud chain needs: `FLAG_CLOUDFLARE_FALLBACK`, `LLM_FALLBACK_BACKEND`
-  and the Gemini key. Each fails silently when unset, so a healthy-looking Space can be
-  serving passages.
+* `generation_unavailable`: no model answered. On the Space the chain is Sunbird, then
+  Workers AI (ADR-0036). Check the settings it needs: `FLAG_CLOUDFLARE_FALLBACK`,
+  `LLM_FALLBACK_BACKEND` (`sunbird`; the retired `gemini` is read as `sunbird`),
+  `SUNBIRD_API_TOKEN`, and the Cloudflare credentials. Each fails silently when unset, so a
+  healthy-looking Space can be serving passages. Then read the Space logs:
+  * `Sunbird auth failed (403 ACCOUNT_SUSPENDED)`: the accounts are suspended. Only Sunbird
+    can lift that (info@sunbird.ai), and until then Workers AI serves English alone.
+  * `Workers AI relay returned 502; trying Cloudflare directly` followed by failures means
+    neither path to Cloudflare works from the Space.
+
+  On 2026-11-09 all three were down at once: Gemini's IP-restricted key, both Sunbird
+  accounts, and the relay.
 * `draft_unsupported`: a graph draft was not supported by its passages, so the closest
   passage replaced it. A sustained rise usually means a model or retrieval change.
 * `tool_loop_truncated`: the loop ran out of iterations or budget. A sustained rise usually

@@ -178,23 +178,42 @@ def _workers_ai_targets(model: str) -> list[tuple[str, dict[str, str]]]:
     return targets
 
 
+#: Statuses that mean the AI Gateway itself failed, not the model: the direct REST
+#: API may still answer. A 500 or a 4xx is the model's or the request's answer.
+_GATEWAY_FAILURE_STATUSES = frozenset({502, 503, 504})
+
+
+def _past(deadline: float | None) -> bool:
+    import time
+
+    return deadline is not None and time.monotonic() >= deadline
+
+
 def _workers_ai_call(model: str, send: Any) -> Any:
     """Run ``send(url, headers)`` against each target, falling through on
-    transport failure only. Raises the last error if every target is
-    unreachable."""
+    transport failure, or a gateway failure (502/503/504) from the AI Gateway.
+    Raises the last error if every target fails."""
     last: Exception | None = None
-    for index, (url, headers) in enumerate(_workers_ai_targets(model)):
+    targets = _workers_ai_targets(model)
+    for index, (url, headers) in enumerate(targets):
+        has_next = index + 1 < len(targets)
         try:
             return send(url, headers)
         except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
             last = exc
-            host = url.split("/")[2]
-            logger.warning(
-                "Workers AI: %s unreachable (%s); %s",
-                host,
-                type(exc).__name__,
-                "trying the direct REST API" if index == 0 else "no targets left",
-            )
+            reason = type(exc).__name__
+        except httpx.HTTPStatusError as exc:
+            if index != 0 or exc.response.status_code not in _GATEWAY_FAILURE_STATUSES or not has_next:
+                raise
+            last = exc
+            reason = str(exc.response.status_code)
+        host = url.split("/")[2]
+        logger.warning(
+            "Workers AI: %s failed (%s); %s",
+            host,
+            reason,
+            "trying the direct REST API" if has_next else "no targets left",
+        )
     raise last if last else RuntimeError("workers_ai: no targets configured")
 
 
@@ -220,6 +239,7 @@ def workers_ai_chat(
     *,
     max_tokens: int = 512,
     temperature: float = 0.2,
+    deadline: float | None = None,
 ) -> str:
     """Chat-completion via a Workers AI text model; returns the reply string."""
     from ..production_readiness import is_sovereign_mode
@@ -230,9 +250,23 @@ def workers_ai_chat(
         if get_cloud_settings().cf_relay_base_url.strip():
             from . import relay_client
 
-            return relay_client.relay_workers_ai_chat(
-                messages, model, max_tokens=max_tokens, temperature=temperature
-            )
+            try:
+                return relay_client.relay_workers_ai_chat(
+                    messages, model, max_tokens=max_tokens, temperature=temperature
+                )
+            except httpx.HTTPStatusError as exc:
+                # A 4xx is about this request (auth, a bad slot) and would fail directly too.
+                if exc.response.status_code < 500 or _past(deadline):
+                    raise
+                # The relay answered that ITS call to Cloudflare failed (502 on 2026-11-09,
+                # while Cloudflare itself served this account). Try Cloudflare from here.
+                logger.warning("Workers AI relay returned %d; trying Cloudflare directly",
+                               exc.response.status_code)
+            except httpx.TransportError as exc:
+                if _past(deadline):
+                    raise  # the turn is over: start no model work for it
+                logger.warning("Workers AI relay unreachable (%s); trying Cloudflare directly",
+                               type(exc).__name__)
         data = _workers_ai_call(
             model,
             lambda url, h: _post_json(

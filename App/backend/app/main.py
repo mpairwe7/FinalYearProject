@@ -233,23 +233,40 @@ def _validate_production_env() -> None:
         try:
             from .providers import config as _cloud_cfg
 
-            if not _cloud_cfg.is_cloudflare_configured():
+            llm_backend = os.getenv("LLM_FALLBACK_BACKEND", "").strip().lower()
+            sunbird_answers = llm_backend in ("sunbird", "gemini") and bool(
+                os.getenv("SUNBIRD_API_TOKEN") or os.getenv("SUNBIRD_FALLBACK_API_TOKEN")
+            )
+            # Cloudflare is required by what uses it, not by the flag alone: a Sunbird-only
+            # deployment answers without it (ADR-0036), and its Workers AI tier is simply skipped.
+            cf_users = [name for name in ("DENSE_FALLBACK_BACKEND", "STT_FALLBACK_BACKEND", "TTS_FALLBACK_BACKEND")
+                        if os.getenv(name, "").strip().lower() == "workers_ai"]
+            if llm_backend == "workers_ai":
+                cf_users.append("LLM_FALLBACK_BACKEND")
+            if not _cloud_cfg.is_cloudflare_configured() and (cf_users or not sunbird_answers):
                 errors.append(
                     "FLAG_CLOUDFLARE_FALLBACK=true but Cloudflare is not fully configured "
-                    "(need CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, CF_AIG_GATEWAY, CF_AIG_TOKEN)."
+                    "(need CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, CF_AIG_GATEWAY, CF_AIG_TOKEN)"
+                    + (f" for {', '.join(cf_users)}." if cf_users else ".")
                 )
             if (
                 os.getenv("DENSE_FALLBACK_BACKEND", "").strip().lower() == "workers_ai"
                 and not _cloud_cfg.is_vectorize_configured()
             ):
                 errors.append("DENSE_FALLBACK_BACKEND=workers_ai requires VECTORIZE_INDEX.")
-            gemini_used = (
-                os.getenv("LLM_FALLBACK_BACKEND", "").strip().lower() == "gemini"
-                or os.getenv("TRANSLATE_FALLBACK_BACKEND", "").strip().lower() == "gemini"
-            )
+            # Gemini no longer generates answers (ADR-0036); LLM_FALLBACK_BACKEND=gemini
+            # is read as sunbird. Translation can still name it.
+            gemini_used = os.getenv("TRANSLATE_FALLBACK_BACKEND", "").strip().lower() == "gemini"
             if gemini_used and not _cloud_cfg.is_gemini_configured():
                 errors.append(
-                    "A *_FALLBACK_BACKEND=gemini is set but GEMINI_API_KEY (+ AI Gateway) is missing."
+                    "TRANSLATE_FALLBACK_BACKEND=gemini is set but GEMINI_API_KEY (+ AI Gateway) is missing."
+                )
+            if llm_backend in ("sunbird", "gemini") and not (
+                os.getenv("SUNBIRD_API_TOKEN") or os.getenv("SUNBIRD_FALLBACK_API_TOKEN")
+            ) and not _cloud_cfg.is_cloudflare_configured():
+                errors.append(
+                    "LLM_FALLBACK_BACKEND=sunbird needs SUNBIRD_API_TOKEN, or Cloudflare credentials "
+                    "for the Workers AI fallback."
                 )
         except Exception:
             errors.append(

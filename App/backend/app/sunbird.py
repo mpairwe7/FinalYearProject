@@ -39,6 +39,11 @@ SUNBIRD_TRANSLATE_TIMEOUT = float(os.getenv("SUNBIRD_TRANSLATE_TIMEOUT", "12.0")
 # Attempts per account before failing over (1 = no retry). Retries apply to
 # timeouts, transport errors, 429 and 5xx — never to auth failures.
 SUNBIRD_RETRIES = max(1, int(os.getenv("SUNBIRD_RETRIES", "2")))
+#: Sunflower through Sunbird's OpenAI-compatible chat endpoint: the cloud answer
+#: generator, with Workers AI behind it (ADR-0036).
+SUNBIRD_LLM_MODEL = os.getenv("SUNBIRD_LLM_MODEL", "sunflower-9b")
+SUNBIRD_LLM_TIMEOUT = float(os.getenv("SUNBIRD_LLM_TIMEOUT", "45"))
+SUNBIRD_LLM_MAX_TOKENS = max(64, int(os.getenv("SUNBIRD_LLM_MAX_TOKENS", "1024")))
 
 _RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
 _BACKOFF_BASE_S = 0.5
@@ -269,7 +274,7 @@ def _retry_delay(attempt: int, retry_after: str = "") -> float:
     return _BACKOFF_BASE_S * (2 ** (attempt - 1))
 
 
-def _post(path: str, **kwargs: Any) -> httpx.Response:
+def _post(path: str, *, deadline: float | None = None, **kwargs: Any) -> httpx.Response:
     """POST to Sunbird with bounded retry, then account failover.
 
     Per account: up to :data:`SUNBIRD_RETRIES` attempts with short
@@ -277,8 +282,13 @@ def _post(path: str, **kwargs: Any) -> httpx.Response:
     statuses (429/5xx — honouring small ``Retry-After`` values). Auth
     failures (401/403) skip straight to the fallback account. Raises the
     last error when every configured account is exhausted.
+
+    *deadline* (``time.monotonic()``) bounds the whole call, failover
+    included: each attempt's timeout is cut to the time left, and no new
+    attempt starts once it has passed (ADR-0036).
     """
     tokens = _account_tokens()
+    base_timeout = kwargs.pop("timeout", None)
     if not tokens:
         raise RuntimeError("no Sunbird token configured")
     if not _clients:
@@ -291,8 +301,15 @@ def _post(path: str, **kwargs: Any) -> httpx.Response:
     for idx, token in enumerate(active_tokens):
         for attempt in range(1, SUNBIRD_RETRIES + 1):
             _rewind_uploads(kwargs)
+            timeout = base_timeout
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining < 1.0:
+                    raise last_exc or httpx.TimeoutException(f"Sunbird {path}: turn budget spent")
+                timeout = min(base_timeout or SUNBIRD_TIMEOUT, remaining)
             try:
-                resp = _client_for(token).post(path, **kwargs)
+                call_kwargs = dict(kwargs, timeout=timeout) if timeout is not None else kwargs
+                resp = _client_for(token).post(path, **call_kwargs)
                 resp.raise_for_status()
                 if idx > 0:
                     logger.info("Sunbird fallback account served %s", path)
@@ -302,7 +319,8 @@ def _post(path: str, **kwargs: Any) -> httpx.Response:
                 status = e.response.status_code
                 if status in (401, 403):
                     logger.warning(
-                        "Sunbird auth failed (%d) on account #%d for %s", status, idx + 1, path
+                        "Sunbird auth failed (%d %s) on account #%d for %s",
+                        status, _error_code(e.response), idx + 1, path,
                     )
                     break  # retrying the same credentials cannot help
                 if status == 429:
@@ -363,6 +381,67 @@ def _post(path: str, **kwargs: Any) -> httpx.Response:
                 idx + 1, path, last_exc,
             )
     raise last_exc  # type: ignore[misc]
+
+
+def _error_code(response: httpx.Response) -> str:
+    """Sunbird's ``error_code`` (``ACCOUNT_SUSPENDED``), so a log names the cause, not just 403."""
+    try:
+        return str(response.json().get("error_code") or "")
+    except Exception:  # noqa: BLE001 - a non-JSON error body has no code
+        return ""
+
+
+class ChatReply(str):
+    """A Sunflower reply that keeps the provider's ``finish_reason`` ("length" = cut off)."""
+
+    finish_reason: str = ""
+
+    def __new__(cls, text: str, finish_reason: str = "") -> ChatReply:
+        reply = super().__new__(cls, text)
+        reply.finish_reason = finish_reason
+        return reply
+
+
+def chat_completion(
+    messages: list[dict[str, str]],
+    *,
+    max_tokens: int | None = None,
+    temperature: float = 0.2,
+    timeout: float | None = None,
+    deadline: float | None = None,
+) -> ChatReply:
+    """A Sunflower reply from ``POST /tasks/chat/completions`` (OpenAI-compatible).
+
+    Uses :func:`_post`, so the fallback account and the quota cooldown apply as
+    they do to speech and translation, all within *deadline*. Traced like every
+    model call, with the provider's token usage. Raises on any failure,
+    including an empty reply, so the caller's circuit breaker sees it.
+    """
+    from .tracing import llm_call
+
+    with llm_call("chat", SUNBIRD_LLM_MODEL, "sunbird") as call:
+        resp = _post(
+            "/tasks/chat/completions",
+            json={
+                "model": SUNBIRD_LLM_MODEL,
+                "messages": messages,
+                "max_tokens": max_tokens or SUNBIRD_LLM_MAX_TOKENS,
+                "temperature": temperature,
+            },
+            timeout=timeout or SUNBIRD_LLM_TIMEOUT,
+            deadline=deadline,
+        )
+        data = resp.json()
+        usage = data.get("usage") or {}
+        call.usage(usage.get("prompt_tokens"), usage.get("completion_tokens"))
+        # Parsed inside the traced block: an empty reply is recorded as the call's error,
+        # matching the breaker, not as a success.
+        choices = data.get("choices") or []
+        choice = choices[0] if choices else {}
+        content = (choice.get("message") or {}).get("content") or ""
+        if not content.strip():
+            raise RuntimeError("sunbird chat_completion: empty reply")
+    return ChatReply(content.strip(), str(choice.get("finish_reason") or ""))
 
 
 def _get_client() -> httpx.Client:

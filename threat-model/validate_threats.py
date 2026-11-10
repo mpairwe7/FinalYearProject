@@ -584,6 +584,29 @@ THREAT_REGISTRY: list[dict] = [
         "status": "mitigated",
     },
     {
+        "id": "T82",
+        "category": "Denial of Service",
+        "description": (
+            "The hosted answer generators are lost at once (on 2026-11-09: an IP-restricted Gemini key, both "
+            "Sunbird accounts suspended, and the Cloudflare relay failing), so every answer degrades to a passage; "
+            "or a general cloud model answers a language it is not trained on (G537-G540)"
+        ),
+        "owasp_llm": "LLM10",
+        "mitre_atlas": "AML.T0029",
+        "mitigation": (
+            "Sunflower through Sunbird's API leads, and Workers AI is behind it, each with its own circuit breaker "
+            "so a refusing account stops costing a round trip per turn. A relay 5xx or transport failure falls back "
+            "to a direct Cloudflare call. Workers AI never answers the Ugandan languages, and a call turn reaches "
+            "neither tier. A turn no model answered serves a passage with the generation_unavailable disclosure, "
+            "never an invented answer. Sunbird refusals log their error code. Residual: a suspended account (G539) "
+            "and the relay (G540) are fixed outside the code"
+        ),
+        "evidence": ["App/backend/app/service.py", "App/backend/app/sunbird.py",
+                     "App/backend/app/providers/gateway.py", "App/backend/app/providers/breakers.py",
+                     "tests/agents/test_sunbird_primary_llm_2026_11.py", "App/backend/tests/test_gemini_routing.py"],
+        "status": "in_progress",
+    },
+    {
         "id": "T01",
         "category": "Spoofing",
         "description": "Attacker impersonates legitimate API client",

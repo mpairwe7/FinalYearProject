@@ -599,7 +599,7 @@ class LLMFallbackTest(unittest.TestCase):
         # LLMRoutingOrderTest, which does the same).
         from app.providers import breakers
 
-        breakers.GEMINI_BREAKER.record_success()
+        breakers.SUNBIRD_LLM_BREAKER.record_success()
         breakers.CF_LLM_BREAKER.record_success()
 
     def tearDown(self):
@@ -607,15 +607,19 @@ class LLMFallbackTest(unittest.TestCase):
         budget._redis_tried = False
         gateway._client = None
 
-    def test_fallback_uses_gemini_when_configured(self):
+    def test_fallback_uses_sunbird_when_configured(self):
+        """Sunflower through Sunbird's API leads the cloud chain (ADR-0036)."""
         from app import service
 
         with mock.patch.object(service.flags, "is_enabled", return_value=True), \
-             mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "gemini"}), \
-             mock.patch.object(gateway, "gemini_generate", return_value="VAT is 18%. [1]") as gg:
+             mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "sunbird"}), \
+             mock.patch("app.sunbird.is_available", return_value=True), \
+             mock.patch("app.sunbird.chat_completion", return_value="VAT is 18%. [1]") as sb, \
+             mock.patch.object(gateway, "gemini_generate") as gg:
             out = service._llm_cloud_fallback("vat rate?", [{"text": "VAT is 18%"}], None, "en")
         self.assertEqual(out, "VAT is 18%. [1]")
-        gg.assert_called_once()
+        sb.assert_called_once()
+        gg.assert_not_called()
 
     def test_fallback_disabled_when_flag_off(self):
         from app import service
@@ -661,22 +665,24 @@ class LLMFallbackTest(unittest.TestCase):
         from app import service
 
         with mock.patch.object(service.flags, "is_enabled", return_value=True), \
-             mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "gemini"}), \
-             mock.patch.object(gateway, "gemini_generate", return_value="VAT is eighteen percent."):
+             mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "sunbird"}), \
+             mock.patch("app.sunbird.is_available", return_value=True), \
+             mock.patch("app.sunbird.chat_completion", return_value="VAT is eighteen percent."):
             chunks = list(service._stream_cloud_fallback("vat?", [{"text": "VAT"}], None, "en"))
         self.assertGreater(len(chunks), 1)
         self.assertEqual("".join(chunks).strip(), "VAT is eighteen percent.")
 
-    def test_gemini_truncated_reply_falls_through_to_workers_ai(self):
-        """A short, punctuation-less Gemini reply (early-stop artifact) must
+    def test_sunbird_truncated_reply_falls_through_to_workers_ai(self):
+        """A short, punctuation-less Sunbird reply (early-stop artifact) must
         not win outright — the chain should still try Workers AI for a
         complete answer (regression test for the Crane Cloud truncation
         bug: '...The Electronic' with nothing after it)."""
         from app import service
 
         with mock.patch.object(service.flags, "is_enabled", return_value=True), \
-             mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "gemini"}), \
-             mock.patch.object(gateway, "gemini_generate", return_value="The Electronic") as gg, \
+             mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "sunbird"}), \
+             mock.patch("app.sunbird.is_available", return_value=True), \
+             mock.patch("app.sunbird.chat_completion", return_value="The Electronic") as gg, \
              mock.patch.object(
                  gateway,
                  "workers_ai_chat",
@@ -773,8 +779,9 @@ class LLMFallbackTest(unittest.TestCase):
         from app import service
 
         with mock.patch.object(service.flags, "is_enabled", return_value=True), \
-             mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "gemini"}), \
-             mock.patch.object(gateway, "gemini_generate") as gg, \
+             mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "sunbird"}), \
+             mock.patch("app.sunbird.is_available", return_value=True), \
+             mock.patch("app.sunbird.chat_completion") as gg, \
              mock.patch.object(gateway, "workers_ai_chat") as wac:
             out = service._llm_cloud_fallback(
                 "vat rate?",
@@ -787,33 +794,37 @@ class LLMFallbackTest(unittest.TestCase):
         gg.assert_not_called()
         wac.assert_not_called()
 
-    def test_deadline_exhausted_between_gemini_and_workers_ai_stops_chain(self):
+    def test_deadline_exhausted_between_sunbird_and_workers_ai_stops_chain(self):
         """Budget is re-checked before each hop, not just once at entry — a
-        Gemini attempt that itself eats the remaining budget must stop the
+        Sunbird attempt that itself eats the remaining budget must stop the
         chain from also trying every Workers AI model afterward."""
         from app import service
 
         with mock.patch.object(service.flags, "is_enabled", return_value=True), \
-             mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "gemini"}), \
-             mock.patch.object(gateway, "gemini_generate", return_value="Short") as gg, \
+             mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "sunbird"}), \
+             mock.patch("app.sunbird.is_available", return_value=True), \
+             mock.patch("app.sunbird.chat_completion", return_value="Short") as gg, \
              mock.patch.object(gateway, "workers_ai_chat") as wac, \
-             mock.patch.object(service.time, "monotonic", side_effect=[100.0, 200.0]):
+             mock.patch.object(service.time, "monotonic", side_effect=[100.0, 100.0, 200.0]):
+            # Readings: the chain budget before Sunbird, Sunbird's own share (135 - 100 s left),
+            # then the chain budget before Workers AI, spent by the Sunbird attempt.
             out = service._llm_cloud_fallback(
                 "vat rate?", [{"text": "VAT is 18%"}], None, "en", deadline=150.0
             )
-        self.assertEqual(out, "Short")  # best-effort floor from the Gemini attempt
+        self.assertEqual(out, "Short")  # best-effort floor from the Sunbird attempt
         gg.assert_called_once()
         wac.assert_not_called()
 
     def test_deadline_not_exhausted_behaves_as_before(self):
         """A generous deadline must not change existing behaviour — same
-        assertion as test_fallback_uses_gemini_when_configured, plus an
+        assertion as test_fallback_uses_sunbird_when_configured, plus an
         explicit far-future deadline."""
         from app import service
 
         with mock.patch.object(service.flags, "is_enabled", return_value=True), \
-             mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "gemini"}), \
-             mock.patch.object(gateway, "gemini_generate", return_value="VAT is 18%. [1]") as gg:
+             mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "sunbird"}), \
+             mock.patch("app.sunbird.is_available", return_value=True), \
+             mock.patch("app.sunbird.chat_completion", return_value="VAT is 18%. [1]") as gg:
             out = service._llm_cloud_fallback(
                 "vat rate?",
                 [{"text": "VAT is 18%"}],
@@ -1121,17 +1132,20 @@ class CloudLlmReadyTest(unittest.TestCase):
         from app import service
 
         _clear_keys()
-        os.environ["LLM_FALLBACK_BACKEND"] = "gemini"
-        with mock.patch.object(service.flags, "is_enabled", return_value=True):
+        os.environ["LLM_FALLBACK_BACKEND"] = "sunbird"
+        with mock.patch.object(service.flags, "is_enabled", return_value=True), \
+             mock.patch("app.sunbird.is_available", return_value=False):
             self.assertFalse(service._cloud_llm_ready())
 
-    def test_true_for_configured_gemini(self):
+    def test_true_for_configured_sunbird_without_cloudflare(self):
         from app import service
 
-        _with_keys()
-        os.environ["LLM_FALLBACK_BACKEND"] = "gemini"
-        with mock.patch.object(service.flags, "is_enabled", return_value=True):
-            self.assertTrue(service._cloud_llm_ready())
+        _clear_keys()
+        for backend in ("sunbird", "gemini"):  # the retired gemini reads as sunbird
+            os.environ["LLM_FALLBACK_BACKEND"] = backend
+            with mock.patch.object(service.flags, "is_enabled", return_value=True), \
+                 mock.patch("app.sunbird.is_available", return_value=True):
+                self.assertTrue(service._cloud_llm_ready(), backend)
 
     def test_true_for_configured_workers_ai(self):
         from app import service
@@ -1453,7 +1467,7 @@ class ModelRoutingPolicyTest(unittest.TestCase):
 
 
 class LLMRoutingOrderTest(unittest.TestCase):
-    """service._llm_cloud_fallback — Gemini -> CF Llama-3.3-70B -> Mistral Small 3.1."""
+    """service._llm_cloud_fallback — Sunbird (Sunflower) -> CF Llama-3.3-70B -> Mistral Small 3.1."""
 
     def setUp(self):
         _with_keys()
@@ -1462,7 +1476,7 @@ class LLMRoutingOrderTest(unittest.TestCase):
         budget._local_gemini.clear()
         budget._local_neurons.clear()
         from app.providers import breakers
-        breakers.GEMINI_BREAKER.record_success()
+        breakers.SUNBIRD_LLM_BREAKER.record_success()
         breakers.CF_LLM_BREAKER.record_success()
 
     def tearDown(self):
@@ -1470,16 +1484,21 @@ class LLMRoutingOrderTest(unittest.TestCase):
         budget._redis_tried = False
         gateway._client = None
 
-    def test_gemini_is_primary(self):
+    def test_sunbird_is_primary_and_gemini_never_generates(self):
+        """The retired LLM_FALLBACK_BACKEND=gemini reads as sunbird (ADR-0036)."""
         from app import service
-        with mock.patch.object(service.flags, "is_enabled", return_value=True), \
-             mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "gemini"}), \
-             mock.patch.object(gateway, "gemini_generate", return_value="ans [1]") as gg, \
-             mock.patch.object(gateway, "workers_ai_chat") as wc:
-            out = service._llm_cloud_fallback("q", [{"text": "ctx"}], None, "en")
-        self.assertEqual(out, "ans [1]")
-        gg.assert_called_once()
-        wc.assert_not_called()  # Gemini served; CF not reached
+        for backend in ("sunbird", "gemini"):
+            with mock.patch.object(service.flags, "is_enabled", return_value=True), \
+                 mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": backend}), \
+                 mock.patch("app.sunbird.is_available", return_value=True), \
+                 mock.patch("app.sunbird.chat_completion", return_value="ans [1]") as sb, \
+                 mock.patch.object(gateway, "gemini_generate") as gg, \
+                 mock.patch.object(gateway, "workers_ai_chat") as wc:
+                out = service._llm_cloud_fallback("q", [{"text": "ctx"}], None, "en")
+            self.assertEqual(out, "ans [1]", backend)
+            sb.assert_called_once()
+            gg.assert_not_called()
+            wc.assert_not_called()  # Sunbird served; CF not reached
 
     def test_cf_llama_70b_then_mistral_fallback(self):
         from app import service
