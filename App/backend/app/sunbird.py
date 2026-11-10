@@ -444,6 +444,45 @@ def chat_completion(
     return ChatReply(content.strip(), str(choice.get("finish_reason") or ""))
 
 
+#: Language names for the Sunflower translation prompt.
+_LANGUAGE_NAMES = {
+    "en": "English", "lg": "Luganda", "nyn": "Runyankole", "ach": "Acholi", "sw": "Swahili",
+    "teo": "Ateso", "lgg": "Lugbara",
+}
+SUNBIRD_TRANSLATE_LLM_TIMEOUT = float(os.getenv("SUNBIRD_TRANSLATE_LLM_TIMEOUT", "30"))
+
+
+def translate_with_sunflower(
+    text: str, source_lang: str, target_lang: str, *, timeout: float | None = None, deadline: float | None = None
+) -> str:
+    """A translation from Sunflower through the chat endpoint (ADR-0037).
+
+    It replaces the Gemini translation tier. Sunflower is trained on the Ugandan
+    languages, and this sits beside ``/tasks/translate``, so a pair that endpoint
+    does not serve still has a Sunbird translator. Thinking text is stripped.
+    *deadline* (``time.monotonic()``) bounds the call, account failover
+    included. Raises on failure, like :func:`chat_completion`.
+    """
+    from .llm import strip_thought
+
+    src = _LANGUAGE_NAMES.get(source_lang, source_lang)
+    tgt = _LANGUAGE_NAMES.get(target_lang, target_lang)
+    messages = [
+        {"role": "system", "content": (
+            f"You are a professional translator. Translate the user's text from {src} to {tgt}. "
+            "Keep every number, amount, date and code exactly as written. "
+            "Output ONLY the translation, with no notes, quotes or transliteration."
+        )},
+        {"role": "user", "content": text},
+    ]
+    reply = chat_completion(messages, temperature=0.1, timeout=timeout or SUNBIRD_TRANSLATE_LLM_TIMEOUT,
+                            deadline=deadline)
+    out = strip_thought(reply).strip()
+    if not out:
+        raise RuntimeError("translate_with_sunflower: empty translation")
+    return out
+
+
 def _get_client() -> httpx.Client:
     """Back-compat shim — the primary account client (prefer ``_post``)."""
     tokens = _account_tokens()

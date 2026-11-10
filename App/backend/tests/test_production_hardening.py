@@ -326,7 +326,8 @@ class ProductionHardeningTests(unittest.TestCase):
             self._validate_with(env)
         self.assertIn("requires VECTORIZE_INDEX", str(raised.exception))
 
-    def test_gemini_translation_fallback_requires_gemini_key(self) -> None:
+    def test_the_retired_gemini_translation_setting_needs_a_sunbird_token(self) -> None:
+        """Translation runs on Sunflower now (ADR-0037); the retired gemini value reads as sunbird."""
         env = {
             **self.secure_env,
             **self._CF_ENV,
@@ -335,7 +336,8 @@ class ProductionHardeningTests(unittest.TestCase):
         }
         with self.assertRaises(SystemExit) as raised:
             self._validate_with(env)
-        self.assertIn("GEMINI_API_KEY", str(raised.exception))
+        self.assertIn("TRANSLATE_FALLBACK_BACKEND=sunbird needs SUNBIRD_API_TOKEN", str(raised.exception))
+        self._validate_with({**env, "SUNBIRD_API_TOKEN": "sb-token"})  # pragma: allowlist secret
 
     def test_a_sunbird_backend_with_no_way_to_generate_is_named(self) -> None:
         env = {**self.secure_env, "FLAG_CLOUDFLARE_FALLBACK": "true", "LLM_FALLBACK_BACKEND": "sunbird",

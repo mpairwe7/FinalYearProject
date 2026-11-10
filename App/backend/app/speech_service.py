@@ -107,6 +107,12 @@ _CLOUD_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
 )
 
 
+def _translate_fallback_backend() -> str:
+    """``TRANSLATE_FALLBACK_BACKEND``, with the retired ``gemini`` read as ``sunbird`` (ADR-0037)."""
+    backend = os.getenv("TRANSLATE_FALLBACK_BACKEND", "").strip().lower()
+    return "sunbird" if backend == "gemini" else backend
+
+
 def _cloud_call(label: str, func, *args, **kwargs):
     """Run one cloud speech-tier call under :data:`SPEECH_CLOUD_DEADLINE_S`.
 
@@ -2831,10 +2837,11 @@ class SpeechModel:
     def _do_translate(self, text: str, source_lang: str, target_lang: str) -> TranslateResult:
         """Translate via the model-routing policy, with a language-aware order.
 
-        For **Luganda** (``lg↔en``) Sunbird's Luganda-native NLLB leads — it is the
-        most accurate for this low-resource language — with Gemini 2.5 Flash as a
-        strong fallback (then Cloudflare Llama → local MT → prompted Qwen3). For all
-        other languages Gemini leads. Every cloud tier self-skips when its
+        For a pair Sunbird's ``/tasks/translate`` serves (the Ugandan languages and
+        Swahili with English), that endpoint leads, with Sunflower through Sunbird's
+        chat endpoint behind it (then Cloudflare Llama → local MT → prompted Qwen3).
+        For any other pair Sunflower leads. Gemini is no longer a translator
+        (ADR-0037). Every cloud tier self-skips when its
         flags/keys are absent, so a local/GPU deploy still reaches the offline tiers.
         """
         from .providers import routing
@@ -2847,9 +2854,9 @@ class SpeechModel:
                 latency_s=round(time.perf_counter() - t0, 3), backend=backend,
             )
 
-        def _gemini():
-            out = self._gemini_translate(text, source_lang, target_lang)
-            return _res(out, "gemini_flash") if out else None
+        def _sunbird_llm():
+            out = self._sunbird_llm_translate(text, source_lang, target_lang)
+            return _res(out, "sunbird_llm") if out else None
 
         def _cf():
             out = self._cf_llama_translate(text, source_lang, target_lang)
@@ -2925,12 +2932,12 @@ class SpeechModel:
 
         if _sunbird_translates(source_lang, target_lang):
             tiers = [
-                ("sunbird_cloud", _sunbird), ("gemini_flash", _gemini),
+                ("sunbird_cloud", _sunbird), ("sunbird_llm", _sunbird_llm),
                 ("cf_workers_ai", _cf), ("local_mt", _local), ("prompted_qwen3", _prompted),
             ]
         else:
             tiers = [
-                ("gemini_flash", _gemini), ("cf_workers_ai", _cf),
+                ("sunbird_llm", _sunbird_llm), ("cf_workers_ai", _cf),
                 ("sunbird_cloud", _sunbird), ("local_mt", _local), ("prompted_qwen3", _prompted),
             ]
         if not cloud_models_allowed():
@@ -2954,69 +2961,54 @@ class SpeechModel:
         return TranslateResult(
             text="", source_lang=source_lang, target_lang=target_lang,
             latency_s=round(time.perf_counter() - t0, 3), backend="error",
-            error="No translation backend available (Sunbird, Gemini, CF Llama, local MT, Qwen3 all failed)",
+            error="No translation backend available (Sunbird, Sunflower, CF Llama, local MT, Qwen3 all failed)",
         )
 
     @staticmethod
-    def _gemini_translate(text: str, source_lang: str, target_lang: str) -> str:
-        """Translate via Gemini 2.5 Flash through the AI Gateway (Luganda-strong).
+    def _sunbird_llm_translate(text: str, source_lang: str, target_lang: str) -> str:
+        """Translate with Sunflower through Sunbird's chat endpoint (ADR-0037).
 
-        Flag/budget/breaker-gated; returns "" when disabled or unavailable so the
-        Sunbird tier still runs.
+        It replaces the Gemini tier, which failed from the Space on an IP-restricted
+        key. Gated as that tier was: the ``cloudflare_fallback`` flag and
+        ``TRANSLATE_FALLBACK_BACKEND`` (``sunbird``; the retired ``gemini`` is read
+        as ``sunbird``). Shares the Sunbird generation breaker. Returns "" when
+        disabled or unavailable, so the next tier still runs.
         """
         from .flags import flags
 
         if not flags.is_enabled("cloudflare_fallback") or not cloud_models_allowed():
             return ""
-        if os.getenv("TRANSLATE_FALLBACK_BACKEND", "").strip().lower() != "gemini":
+        if _translate_fallback_backend() != "sunbird":
             return ""
         try:
-            from .providers import breakers, budget
-            from .providers import config as cfg
-            from .providers import gateway as gw
+            from . import sunbird
+            from .providers import breakers
         except Exception:
             return ""
-        if not (
-            cfg.is_gemini_configured()
-            and admit(breakers.GEMINI_BREAKER, budget.try_consume_gemini_call)
-        ):
+        if not (sunbird.is_available() and admit(breakers.SUNBIRD_LLM_BREAKER, lambda: True)):
             return ""
-        names = {
-            "lg": "Luganda", "en": "English", "nyn": "Runyankole",
-            "ach": "Acholi", "sw": "Swahili",
-        }
-        src, tgt = names.get(source_lang, source_lang), names.get(target_lang, target_lang)
         try:
-            out = gw.gemini_generate(
-                text,
-                system=(
-                    f"You are a professional translator. Translate the user's text "
-                    f"from {src} to {tgt}. Output ONLY the translation — no notes, "
-                    f"quotes, or transliteration."
-                ),
-                # gemini-3.x flash are thinking models: reasoning tokens are billed
-                # against maxOutputTokens before output tokens, so 512 truncated
-                # multi-sentence Swahili translations mid-word.
-                max_tokens=2048,
-                temperature=0.1,
-            )
-            breakers.GEMINI_BREAKER.record_success()
-            return out.strip()
+            # The cloud tier's budget bounds the whole call, account failover included, so a slow
+            # pair of accounts cannot hold a shared speech worker past SPEECH_CLOUD_DEADLINE_S.
+            deadline = time.monotonic() + SPEECH_CLOUD_DEADLINE_S
+            out = sunbird.translate_with_sunflower(text, source_lang, target_lang, deadline=deadline)
+            breakers.SUNBIRD_LLM_BREAKER.record_success()
+            return out
         except Exception:
-            breakers.GEMINI_BREAKER.record_failure()
-            logger.warning("Gemini translation failed", exc_info=True)
+            breakers.SUNBIRD_LLM_BREAKER.record_failure()
+            logger.warning("Sunflower translation failed", exc_info=True)
             return ""
 
     @staticmethod
     def _cf_llama_translate(text: str, source_lang: str, target_lang: str) -> str:
         """Translate via Cloudflare Workers AI Llama (prompted) — the model-routing
-        fallback after Gemini. Flag/budget/breaker-gated; returns "" when disabled
+        fallback after Sunflower. Flag/budget/breaker-gated; returns "" when disabled
         or unavailable so the Sunbird tier still runs."""
         from .flags import flags
 
         if not flags.is_enabled("cloudflare_fallback") or not cloud_models_allowed():
             return ""
-        if os.getenv("TRANSLATE_FALLBACK_BACKEND", "").strip().lower() not in ("gemini", "workers_ai"):
+        if _translate_fallback_backend() not in ("sunbird", "workers_ai"):
             return ""
         try:
             from .providers import breakers, budget, routing

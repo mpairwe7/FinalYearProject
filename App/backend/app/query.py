@@ -1973,7 +1973,7 @@ def translate_query_for_retrieval(query: str, locale: str) -> str | None:
         try:
             from .speech_service import SpeechModel
 
-            out = SpeechModel._gemini_translate(query_for_mt, locale, "en")
+            out = SpeechModel._sunbird_llm_translate(query_for_mt, locale, "en")
             if out and out.strip():
                 return out.strip()
             out = SpeechModel._cf_llama_translate(query_for_mt, locale, "en")
