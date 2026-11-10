@@ -1263,3 +1263,146 @@ class TestOnlyTheProposalOnScreenRuns:
 
         assert held
         assert not any(held), "one slow store write would block every other taxpayer's decision"
+
+
+# G560: the person's words come first, and what came from the page says so
+PAYE_BY_MOBILE_MONEY = "Generate a PAYE PRN for UGX 500,000 for TIN 1000023456 via MTN mobile money"
+
+
+class TestThePersonsWordsComeFirst:
+    def test_what_the_person_typed_beats_what_the_page_shows(self) -> None:
+        page = _telemetry(
+            visible_fields={"tax_head": "VAT_STANDARD", "payment_mode": "COMMERCIAL_BANK", "tin": "1000099999"}
+        )
+        entities = pc.extract_task_entities(PAYE_BY_MOBILE_MONEY, portal_context=page)
+
+        assert entities["tax_head"] == "PAYE"
+        assert entities["payment_mode"] == "MOBILE_MONEY"
+        assert entities["tin"] == "1000023456"
+
+    def test_a_value_only_the_page_supplied_is_marked_on_the_card(self, client: TestClient) -> None:
+        page = _telemetry(visible_fields={"tin": "1000099999", "amount_ugx": "49000000", "taxpayer_name": "ACME"})
+        card = _chat(
+            client,
+            "Generate a VAT PRN via Stanbic Bank",
+            conversation="conv-page-values",
+            headers={"X-Session-ID": "sess-taxpayer"},
+            portal_context=page,
+        )["portal_copilot"]
+
+        assert card["card_type"] == "confirmation_required"
+        by_name = {row["name"]: row for row in card["display_fields"]}
+        assert by_name["tin"]["assumed"] is True
+        assert by_name["amount_ugx"]["assumed"] is True
+        assert by_name["tax_head"]["assumed"] is False
+        assert by_name["payment_mode"]["assumed"] is False
+
+    def test_a_value_the_person_typed_is_not_marked_because_the_page_shows_it_too(self, client: TestClient) -> None:
+        page = _telemetry(visible_fields={"tin": "1000023456", "amount_ugx": "500000"})
+        card = _chat(
+            client,
+            PAYE_BY_MOBILE_MONEY,
+            conversation="conv-typed-values",
+            headers={"X-Session-ID": "sess-taxpayer"},
+            portal_context=page,
+        )["portal_copilot"]
+
+        by_name = {row["name"]: row for row in card["display_fields"]}
+        assert by_name["tin"]["assumed"] is False
+        assert by_name["amount_ugx"]["assumed"] is False
+
+    def test_a_statutory_handoff_stages_only_the_fields_of_its_task(self) -> None:
+        card = pc.build_portal_task_card(
+            "get_refund_claim",
+            extracted_fields={
+                "tin": "1000023456",
+                "amount_ugx": "1000",
+                "bank_account": "0100-ATTACKER",
+                "note": "<img src=x>",
+            },
+            user_id="1000023456",
+            session_id="sess-1",
+            conversation_id="conv-staged",
+        )
+
+        assert card["card_type"] == "statutory_copilot_handoff"
+        assert set(card["staged_fields"]) <= {field.name for field in pc.PORTAL_TASK_CATALOG["get_refund_claim"].fields}
+        assert "ATTACKER" not in json.dumps(card)
+
+
+# G561: a recipe fills in nothing nobody gave, and does not repeat a task that ran
+class TestARecipeInventsNothing:
+    @pytest.mark.parametrize("portal", RECIPE_PORTALS)
+    def test_with_nothing_supplied_no_step_carries_a_value(self, portal: str) -> None:
+        invented = [
+            (step["element"], step["fill_value"])
+            for step in pc.get_portal_dom_recipe(portal)
+            if step.get("fill_value") not in (None, "")
+        ]
+        assert invented == []
+
+    def test_a_step_with_nothing_to_enter_points_at_the_field_instead(self) -> None:
+        kinds = {step["action_type"] for step in pc.get_portal_dom_recipe("prn_payments")}
+
+        assert kinds <= {"spotlight", "click"}
+
+    def test_a_supplied_value_is_still_entered(self) -> None:
+        recipe = pc.get_portal_dom_recipe("prn_payments", entities={"tin": "1000023456", "amount_ugx": "250000"})
+
+        entered = {step["fill_value"] for step in recipe if step["action_type"] == "fill"}
+        assert entered == {"1000023456", "250000"}
+
+    def test_a_task_that_ran_live_does_not_come_back_with_a_recipe_to_run_it_again(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        card = _mint(client, conversation="conv-live-recipe")
+        monkeypatch.setattr(
+            pc.ToolRegistry, "call", lambda *_, **__: {"ok": True, "prn": "226000000001", "live": True}
+        )
+        outcome = _decide(client, card, conversation="conv-live-recipe").json()
+
+        assert outcome["live"] is True
+        assert outcome["dom_actions"] == []
+
+
+# G562: what is signed is what a form could hold, and an expired card says so
+class TestAFormValueIsWhatAFormHolds:
+    @pytest.mark.parametrize("date_of_birth", ["31/02/2190 or so", "2190-01-01", "1990-02-31", "1850-01-01"])
+    def test_a_date_of_birth_that_is_not_a_past_date_is_refused(self, client: TestClient, date_of_birth: str) -> None:
+        fields = {**TIN_APPLICATION, "date_of_birth": date_of_birth}
+        card = _mint(client, conversation="conv-bad-dob", task_id="tin_apply_individual", fields=fields)
+
+        assert card["card_type"] == "inline_form"
+        assert "date_of_birth" in card["field_errors"]
+
+    def test_markup_in_a_name_is_refused(self, client: TestClient) -> None:
+        fields = {**TIN_APPLICATION, "date_of_birth": "1990-05-17", "surname": "<b>x</b>"}
+        card = _mint(client, conversation="conv-markup", task_id="tin_apply_individual", fields=fields)
+
+        assert card["card_type"] == "inline_form"
+        assert "surname" in card["field_errors"]
+
+    def test_a_name_with_an_apostrophe_and_a_hyphen_is_accepted(self, client: TestClient) -> None:
+        fields = {**TIN_APPLICATION, "date_of_birth": "1990-05-17", "surname": "O'Kello-Ssemakula"}
+        card = _mint(client, conversation="conv-name", task_id="tin_apply_individual", fields=fields)
+
+        assert card["card_type"] == "confirmation_required"
+
+    def test_an_expired_confirmation_says_it_expired(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+        card = _mint(client, conversation="conv-expired")
+        later = pc.time.time() + pc.PORTAL_TASK_STATE_TTL_SECONDS + 5
+        monkeypatch.setattr(pc.time, "time", lambda: later)
+        response = _decide(client, card, conversation="conv-expired")
+
+        assert response.status_code == 400
+        assert "expired" in response.json()["detail"].lower()
+        assert "tampered" not in response.json()["detail"].lower()
+
+    def test_only_a_payment_reference_is_said_to_expire_unpaid(self, client: TestClient) -> None:
+        prn = _mint(client, conversation="conv-notice-prn")
+        fields = {**TIN_APPLICATION, "date_of_birth": "1990-05-17"}
+        tin = _mint(client, conversation="conv-notice-tin", task_id="tin_apply_individual", fields=fields)
+
+        assert "PRN" in prn["reversibility_notice"]
+        assert "PRN" not in tin["reversibility_notice"]
+        assert "cannot be undone" in tin["reversibility_notice"]

@@ -597,7 +597,10 @@ export default function PortalCopilotCard({
         )}
 
         <p className="portal-field-helper" data-testid="portal-reversibility-notice">
-          {t("portalCopilot.reversibilityNotice")}
+          {/* Only a payment reference expires unpaid. Every card used to say so. */}
+          {/^payment_(generate|reactivate)_prn$/.test(activeCopilot.task_id ?? "")
+            ? t("portalCopilot.reversibilityNotice")
+            : t("portalCopilot.reversibilityNoticeGeneral")}
         </p>
 
         {execState.status === "error" && execState.summary && (
@@ -622,7 +625,7 @@ export default function PortalCopilotCard({
             <CheckCircleIcon />{" "}
             {execState.status === "busy"
               ? t("portalCopilot.executing")
-              : activeCopilot.allow_label || t("portalCopilot.allowBtn")}
+              : t("portalCopilot.allowBtn")}
           </button>
           <button
             type="button"
@@ -631,7 +634,7 @@ export default function PortalCopilotCard({
             disabled={disabled || execState.status === "busy"}
             onClick={() => setEditing(true)}
           >
-            <PencilIcon /> {copilot.edit_label || t("portalCopilot.editBtn")}
+            <PencilIcon /> {t("portalCopilot.editBtn")}
           </button>
           <button
             type="button"
@@ -640,7 +643,7 @@ export default function PortalCopilotCard({
             disabled={disabled || execState.status === "busy"}
             onClick={() => void handleDecision("disallow")}
           >
-            <BanIcon size={14} /> {copilot.disallow_label || t("portalCopilot.disallowBtn")}
+            <BanIcon size={14} /> {t("portalCopilot.disallowBtn")}
           </button>
         </div>
       </section>

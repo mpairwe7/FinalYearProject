@@ -115,6 +115,7 @@ export const en = {
   'portalCopilot.verificationUnavailable': 'Your browser could not verify the details shown. No approval was sent. Please reload and review the details again.',
   'portalCopilot.resultUnconfirmed': 'The outcome could not be confirmed. Check the task status before trying again.',
   'portalCopilot.assumedBadge': 'Filled in for you — check',
+  'portalCopilot.reversibilityNoticeGeneral': 'You can edit any field before you allow this, or cancel now. Once allowed, it cannot be undone from here.',
   'portalCopilot.assumedNotice': 'The assistant filled in the values marked below because you did not give them. Check each one, and edit any that is wrong, before you allow this.',
   'message.connectorsUsed': 'Looked up in',
   'message.connectorOutcomeFound': 'Record found',

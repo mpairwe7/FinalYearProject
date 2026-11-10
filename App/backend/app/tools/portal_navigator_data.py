@@ -6633,7 +6633,9 @@ def harden_dom_actions(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     - an action of an unknown kind is dropped;
     - nothing targets a credential field;
     - a click waits for the taxpayer, whatever chose it;
-    - only a fill or a select carries a value.
+    - only a fill or a select carries a value, and one with nothing to enter
+      points at the field instead: a recipe used to fill in a tax head, a
+      commodity code or a payment mode nobody gave (G561).
 
     Steps are renumbered in order.
     """
@@ -6650,6 +6652,8 @@ def harden_dom_actions(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if kind == "click" or action.get("security_gate") == "requires_confirmation"
             else "safe"
         )
+        if kind in ("fill", "select") and action.get("fill_value") in (None, ""):
+            kind = step["action_type"] = "spotlight"
         if kind not in ("fill", "select"):
             step["fill_value"] = None
         step["step_number"] = len(hardened) + 1
@@ -6700,9 +6704,7 @@ def _portal_dom_recipe(
     elif entities.get("tax_head"):
         tax_head_val = str(entities["tax_head"])
 
-    payment_mode_val = str(
-        entities.get("payment_mode") or entities.get("payment_channel") or "Bank"
-    )
+    payment_mode_val = str(entities.get("payment_mode") or entities.get("payment_channel") or "")
 
     if "Server Error" in state or "Timeout" in state:
         return [
@@ -6735,7 +6737,7 @@ def _portal_dom_recipe(
                 "element": "Tax Head / NTR MDA Selection",
                 "selector": "select#ddlTaxHead, select[name='taxHead'], select[name='tax_head']",
                 "action_type": "select",
-                "fill_value": tax_head_val or "0010",
+                "fill_value": tax_head_val,
                 "scroll_to": True,
                 "tooltip": "Select the statutory tax regime (e.g. 0010 - VAT, 0011 - Income Tax, or NTR/MDA fee)",
                 "security_gate": "safe",
@@ -6798,7 +6800,7 @@ def _portal_dom_recipe(
                 "element": "Commodity / Service Code",
                 "selector": "input#commodityCode, select#itemClassification, input[name='commodity_code']",
                 "action_type": "fill",
-                "fill_value": str(entities.get("commodity_code") or "50202301"),
+                "fill_value": str(entities.get("commodity_code") or ""),
                 "scroll_to": False,
                 "tooltip": "Enter the harmonized UNSPSC commodity classification code",
                 "security_gate": "safe",
@@ -6825,7 +6827,7 @@ def _portal_dom_recipe(
             },
         ]
     elif portal_key == "tin_registration":
-        entity_type_val = str(entities.get("entity_type") or "individual")
+        entity_type_val = str(entities.get("entity_type") or "")
         nin_or_brn = str(entities.get("nin") or entities.get("ursb_brn") or "")
         recipe = [
             {
@@ -6876,7 +6878,7 @@ def _portal_dom_recipe(
                 "element": "Return Type Selection",
                 "selector": "select#ddlReturnType, select[name='return_type'], select[name='tax_head']",
                 "action_type": "select",
-                "fill_value": tax_head_val or "VAT_STANDARD",
+                "fill_value": tax_head_val,
                 "scroll_to": True,
                 "tooltip": "Select statutory return type (VAT Form DT-1014, PAYE, or Provisional/Final Income Tax)",
                 "security_gate": "safe",
@@ -6929,7 +6931,7 @@ def _portal_dom_recipe(
                 "element": "TCC Statutory Purpose Selection",
                 "selector": "select#ddlTccPurpose, select[name='tcc_purpose']",
                 "action_type": "select",
-                "fill_value": str(entities.get("tcc_purpose") or "BIDDING_TENDER"),
+                "fill_value": str(entities.get("tcc_purpose") or ""),
                 "scroll_to": False,
                 "tooltip": "Select purpose (Public Procurement Bidding, License Renewal, Work Permit, or Vehicle Transfer)",
                 "security_gate": "safe",
@@ -7005,7 +7007,7 @@ def _portal_dom_recipe(
                 "element": "Registration / ITMS Digital Plate Category Selector",
                 "selector": "select#ddlVehicleCategory, select[name='plate_category']",
                 "action_type": "select",
-                "fill_value": str(entities.get("plate_category") or "STANDARD_FIRST_REG"),
+                "fill_value": str(entities.get("plate_category") or ""),
                 "scroll_to": False,
                 "tooltip": "Select first registration, ownership transfer (Form TR VII), or ITMS digital number plate category",
                 "security_gate": "safe",
@@ -7028,7 +7030,7 @@ def _portal_dom_recipe(
                 "element": "Excise Product Category Selector",
                 "selector": "select#ddlDtsCategory, select[name='product_category']",
                 "action_type": "select",
-                "fill_value": str(entities.get("product_category") or "BOTTLED_WATER"),
+                "fill_value": str(entities.get("product_category") or ""),
                 "scroll_to": True,
                 "tooltip": "Select gazetted excise commodity category (Beer, Spirits, Wine, Soda, Water, Cement, Sugar)",
                 "security_gate": "safe",

@@ -1446,13 +1446,14 @@ def extract_task_entities(message: str, portal_context: Mapping[str, Any] | None
     """Extract structured portal task entities from natural-language text and sanitized `portal_context`."""
     text = str(message or "")
     text_lower = text.lower()
-    entities: dict[str, Any] = {}
-
+    # What the person typed is collected on its own and laid over what the
+    # page shows. The page's fields used to go in first, and a tax head or a
+    # payment mode named in the message did not replace them (G560).
+    page_fields: dict[str, Any] = {}
     if portal_context and isinstance(portal_context, Mapping):
         sanitized = sanitize_portal_context(portal_context)
-        for k, v in sanitized.get("visible_fields", {}).items():
-            if v:
-                entities[k] = v
+        page_fields = {k: v for k, v in sanitized.get("visible_fields", {}).items() if v}
+    entities: dict[str, Any] = {}
 
     tin_m = _TIN_RE.search(text)
     if tin_m:
@@ -1560,7 +1561,7 @@ def extract_task_entities(message: str, portal_context: Mapping[str, Any] | None
     if qty_str:
         entities.setdefault("quantity", qty_str)
 
-    return entities
+    return {**page_fields, **entities}
 
 
 def detect_portal_task_intent(
@@ -1912,6 +1913,32 @@ def detect_portal_task_intent(
 MAX_TASK_FIELD_CHARS = 512
 
 
+def _reversibility_notice(spec: PortalTaskSpec) -> str:
+    """What can still be changed, said of this task. Every card used to promise what is true of a PRN."""
+    before = "You can edit any field before allowing this, or cancel now."
+    if spec.task_id in ("payment_generate_prn", "payment_reactivate_prn"):
+        return f"{before} An unpaid PRN expires automatically after 21 days."
+    return f"{before} Once allowed, it cannot be undone from here."
+
+
+_MARKUP_OR_CONTROL_RE = re.compile(r"[<>\x00-\x1f\x7f]")
+
+
+def _date_error(value: str, *, must_be_past: bool) -> str:
+    """Why *value* is not a date a form could hold, or ""."""
+    import datetime
+
+    try:
+        parsed = datetime.date.fromisoformat(value)
+    except ValueError:
+        return "must be a real date written as YYYY-MM-DD."
+    if parsed.year < 1900:
+        return "must be 1900 or later."
+    if must_be_past and parsed >= datetime.date.today():
+        return "must be a date in the past."
+    return ""
+
+
 def _form_echo(value: Any) -> str:
     """A submitted value as the form shows it back for correction: text, and no longer than a field."""
     if isinstance(value, bool) or not isinstance(value, str | int | float):
@@ -1949,6 +1976,14 @@ def validate_task_fields(
         if len(val_str) > MAX_TASK_FIELD_CHARS:
             errors[f_spec.name] = f"{f_spec.label} is too long (maximum {MAX_TASK_FIELD_CHARS} characters)."
             continue
+        if _MARKUP_OR_CONTROL_RE.search(val_str):
+            errors[f_spec.name] = f"{f_spec.label} must not contain < or > or control characters."
+            continue
+        if f_spec.input_type == "date":
+            date_error = _date_error(val_str, must_be_past=f_spec.name == "date_of_birth")
+            if date_error:
+                errors[f_spec.name] = f"{f_spec.label} {date_error}"
+                continue
 
         if f_spec.input_type == "select" and f_spec.options:
             option_map = {str(opt["value"]).upper(): str(opt["value"]) for opt in f_spec.options}
@@ -2275,8 +2310,13 @@ def build_portal_task_card(
     session_id: str | None = None,
     conversation_id: str | None = None,
     tenant_id: str = "default",
+    unconfirmed_fields: Sequence[str] = (),
 ) -> dict[str, Any]:
-    """Evaluate the 4-Tier Policy for *task_id* and build the declarative A2UI card payload."""
+    """Evaluate the 4-Tier Policy for *task_id* and build the declarative A2UI card payload.
+
+    *unconfirmed_fields* names values the person did not give themselves: read
+    off a page or a screenshot. They are marked on the card like a default.
+    """
     spec = classify_portal_task(task_id)
     if spec is None:
         raise KeyError(f"Unknown portal task_id: {task_id}")
@@ -2362,7 +2402,12 @@ def build_portal_task_card(
 
     # ── Gate 2: Tier 4 Statutory Boundary (`STATUTORY_COPILOT_ONLY`) ──
     if spec.tier == PortalTaskTier.STATUTORY_COPILOT_ONLY:
-        dom_actions = get_portal_dom_recipe(spec.portal_key, state=spec.task_id, entities=fields_map)
+        # Only the task's own fields are staged. Every key that reached here,
+        # including whatever a page showed, used to be passed on (G560).
+        staged_fields = {
+            f.name: _form_echo(fields_map[f.name]) for f in spec.fields if _form_echo(fields_map.get(f.name))
+        }
+        dom_actions = get_portal_dom_recipe(spec.portal_key, state=spec.task_id, entities=staged_fields)
         autofill_url = f"{copilot_portal_url}&autofill=1"
         return {
             "card_type": "statutory_copilot_handoff",
@@ -2378,7 +2423,7 @@ def build_portal_task_card(
                 f"personally reviewed and signed by the taxpayer. The URA AI Co-Pilot has staged your fields and "
                 f"DOM auto-fill recipe up to the final confirmation button."
             ),
-            "staged_fields": dict(fields_map),
+            "staged_fields": staged_fields,
             "dom_actions": dom_actions,
             "copilot_portal_url": autofill_url,
             "open_portal_label": f"Open in {portal_info['name']} with AI Auto-Fill Ready",
@@ -2462,10 +2507,12 @@ def build_portal_task_card(
 
     # A value the taxpayer did not give is shown as assumed, so a default
     # never reads as something they said (G543).
+    read_elsewhere = set(unconfirmed_fields)
     assumed_fields = [
         f.name
         for f in spec.fields
-        if f.default_value and f.name in validated_params and fields_map.get(f.name) in (None, "")
+        if f.name in validated_params
+        and ((f.default_value and fields_map.get(f.name) in (None, "")) or f.name in read_elsewhere)
     ]
     display_fields: list[dict[str, Any]] = []
     for f in spec.fields:
@@ -2526,10 +2573,7 @@ def build_portal_task_card(
         "requires_auth": spec.requires_auth,
         "statutory_citation": spec.statutory_citation,
         "verification_prompt": spec.verification_warning,
-        "reversibility_notice": (
-            "Reversibility & Safeguard (WCAG 2.2 SC 3.3.4): You can edit any field before allowing execution, "
-            "or cancel at any time. Unpaid PRNs expire automatically after 21 days."
-        ),
+        "reversibility_notice": _reversibility_notice(spec),
         "display_fields": display_fields,
         "assumed_fields": assumed_fields,
         "displayed_fields_sha256": displayed_fields_sha256,
@@ -2659,6 +2703,15 @@ def handle_portal_task_decision(
     t0_decision = time.perf_counter()
     unwrapped = mrtr.unwrap_request_state(dict(request_state) if isinstance(request_state, Mapping) else None)
     if unwrapped is None:
+        # The unwrap refuses a lapsed state before anything else, so the message
+        # for expiry further down was never reached and an honest taxpayer was
+        # told the card was tampered with. The date read here only picks the wording.
+        payload = request_state.get("payload") if isinstance(request_state, Mapping) else None
+        expires_at = payload.get("expires_at") if isinstance(payload, Mapping) else None
+        if isinstance(expires_at, int | float) and time.time() > float(expires_at):
+            raise PortalTaskValidationError(
+                "This confirmation has expired (15-minute validity window). Please review and confirm again."
+            )
         raise PortalTaskValidationError("Invalid or tampered request_state signature.")
 
     task_id = str(unwrapped.get("task_id") or "").strip()
@@ -2986,7 +3039,13 @@ def handle_portal_task_decision(
         sent = ok
         live = bool(exec_result.get("live", False))
         mode = "live" if live else "simulation"
-        dom_actions = get_portal_dom_recipe(spec.portal_key, state=spec.task_id, entities=dict(params))
+        # After a simulated run the recipe shows how to do it on the real
+        # portal. After a live one it would do it a second time (G561).
+        dom_actions = (
+            []
+            if live
+            else get_portal_dom_recipe(spec.portal_key, state=spec.task_id, entities=dict(params))
+        )
 
         if ok:
             summary_msg = str(
@@ -3478,6 +3537,9 @@ def evaluate_turn(
             )
 
         merged_extracted = {**history_entities, **intent.extracted_fields}
+        # A value on the card that nobody typed, in this message or an earlier
+        # one, came from the page or a screenshot, and the card says so.
+        typed = set(current_turn_entities) | (set(history_entities) - set(attachment_prefill_entities))
         card = build_portal_task_card(
             intent.task_id,
             extracted_fields=merged_extracted,
@@ -3486,6 +3548,7 @@ def evaluate_turn(
             session_id=session_id,
             conversation_id=conv_id,
             tenant_id=tenant_id,
+            unconfirmed_fields=[name for name in merged_extracted if name not in typed],
         )
         return _outcome_from_card(card)
 
