@@ -17,6 +17,7 @@ from app.audit.ledger import get_ledger, reset_ledger
 from app.flags import flags
 from app.main import app, limiter
 from app.service import ChatModel
+from app.tools.portal_navigator_data import harden_dom_actions, selector_targets_a_credential
 from fastapi.testclient import TestClient
 
 EXECUTE = "/v1/portal/tasks/execute"
@@ -607,12 +608,12 @@ class TestThePageDoesNotChooseAClick:
         reaching = [
             step["selector"]
             for step in pc.get_portal_dom_recipe(portal, state=state)
-            if pc.selector_targets_a_credential(step["selector"])
+            if selector_targets_a_credential(step["selector"])
         ]
         assert reaching == []
 
     def test_the_rules_hold_for_any_action_list(self) -> None:
-        hardened = pc.harden_dom_actions(
+        hardened = harden_dom_actions(
             [
                 {"element": "Go", "selector": "a#next", "action_type": "click", "security_gate": "safe"},
                 {"element": "Pw", "selector": "input[type='password']", "action_type": "fill", "fill_value": "x"},

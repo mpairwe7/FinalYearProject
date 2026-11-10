@@ -35,7 +35,6 @@ from .tools.portal_navigator_data import (
     get_portal_dom_recipe,
     harden_dom_actions,
     portal_requires_auth,
-    selector_targets_a_credential,
 )
 
 logger = logging.getLogger(__name__)

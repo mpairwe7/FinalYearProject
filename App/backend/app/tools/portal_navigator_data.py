@@ -6,7 +6,6 @@ import logging
 import re
 import threading
 import urllib.parse
-from collections.abc import Mapping, Sequence
 from typing import Any
 
 from ..verified_resources import get_resource, is_authoritative_ura_url
@@ -6623,7 +6622,7 @@ def selector_targets_a_credential(selector: str) -> bool:
     return bool(_CREDENTIAL_SELECTOR_RE.search(str(selector or "")))
 
 
-def harden_dom_actions(actions: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+def harden_dom_actions(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Apply the rules every DOM action keeps on its way out of the server (ADR-0038).
 
     Recipes are run by code this server does not control: the inbuilt
