@@ -250,6 +250,52 @@ class TestExactlyOnceAcrossWorkers:
         assert retry.json()["status"] == "executed"
         assert len(working.calls) == 1
 
+    def test_a_decline_that_cannot_be_rewritten_does_not_undo_the_decline(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        card = _mint(client, conversation="conv-decline-twice")
+        connector = _Connector(monkeypatch)
+        assert _decide(client, card, conversation="conv-decline-twice", decision="disallow").status_code == 200
+
+        # A second worker hears the same decline while the store refuses writes.
+        _forget_in_process_state()
+        real_upsert = db.upsert_workflow_session
+
+        def store_read_only(*_: Any, **__: Any) -> None:
+            raise RuntimeError("database is read-only")
+
+        monkeypatch.setattr(db, "upsert_workflow_session", store_read_only)
+        again = _decide(client, card, conversation="conv-decline-twice", decision="disallow")
+        monkeypatch.setattr(db, "upsert_workflow_session", real_upsert)
+
+        assert again.status_code == 200
+        assert again.json()["status"] == "declined"
+        _forget_in_process_state()
+        assert _decide(client, card, conversation="conv-decline-twice").status_code == 400, "the decline was undone"
+        assert connector.calls == []
+
+    def test_a_decline_that_cannot_be_recorded_is_not_reported_as_done(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        card = _mint(client, conversation="conv-decline-unrecorded")
+        real_upsert = db.upsert_workflow_session
+        calls = {"n": 0}
+
+        def fail_the_decline_write(*args: Any, **kwargs: Any) -> None:
+            calls["n"] += 1
+            if kwargs.get("status") == "cancelled":
+                raise RuntimeError("database unavailable")
+            return real_upsert(*args, **kwargs)
+
+        monkeypatch.setattr(db, "upsert_workflow_session", fail_the_decline_write)
+        response = _decide(client, card, conversation="conv-decline-unrecorded", decision="disallow")
+        monkeypatch.setattr(db, "upsert_workflow_session", real_upsert)
+
+        assert response.status_code == 503
+        # The lease was given back, so the taxpayer can decide again.
+        _forget_in_process_state()
+        assert _decide(client, card, conversation="conv-decline-unrecorded", decision="disallow").status_code == 200
+
     def test_a_task_being_run_cannot_be_declined(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         card = _mint(client, conversation="conv-decline-late")
         seen: dict[str, Any] = {}
@@ -296,6 +342,26 @@ class TestApprovalIsBoundToASessionAndTheDisplay:
         assert response.status_code == 403
         assert "X-Session-ID" in response.json()["detail"], "refused for want of a session, before any key is derived"
         assert connector.calls == []
+
+    def test_an_edit_is_not_re_signed_for_a_caller_without_a_session(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_db: Any
+    ) -> None:
+        monkeypatch.setenv("MCP_REQUEST_STATE_SECRET", "test-secret-for-browser-agent-assurance-2026")
+        pc.clear_portal_task_cache()
+        owner = db.conversation_state_key("conv-edit", session_id="sess-1", user_id=None)
+        card = pc.build_portal_task_card(
+            "payment_generate_prn", extracted_fields=PRN_FIELDS, session_id="sess-1", conversation_id="conv-edit"
+        )
+        with pytest.raises(pc.PortalTaskOwnershipError):
+            pc.handle_portal_task_decision(
+                "prepare",
+                card["request_state"],
+                card["idempotency_key"],
+                owner_key=owner,
+                session_id=None,
+                conversation_id="conv-edit",
+                edited_fields={"amount_ugx": "300000"},
+            )
 
     def test_a_card_signed_for_a_signed_in_taxpayer_is_not_honoured_signed_out(
         self, monkeypatch: pytest.MonkeyPatch, tmp_db: Any

@@ -2703,7 +2703,7 @@ def handle_portal_task_decision(
                 "copilot_portal_url": copilot_portal_url,
                 "updated_card": updated_card,
             }
-        if card_type == "access_denied":
+        if card_type in ("access_denied", "session_required"):
             raise PortalTaskOwnershipError(str(updated_card.get("error") or "Access denied under TPCA s. 75."))
         # Synchronize conversational entity memory so subsequent turns reflect the inline edit
         with _TASK_CACHE_LOCK:
@@ -2739,18 +2739,22 @@ def handle_portal_task_decision(
         if not already_declined:
             # The decline takes the same lease an approval would, so it cannot
             # report "nothing was sent" over a task another worker is sending.
-            if running or done or not _claim_shared_task(cache_key, user_id):
+            holds_lease = not (running or done) and _claim_shared_task(cache_key, user_id)
+            if holds_lease:
+                try:
+                    _write_shared_task_decision(cache_key, declined=True, user_id=user_id)
+                except Exception as exc:
+                    logger.error("Portal task decline could not be recorded", exc_info=True)
+                    _release_shared_task(cache_key)
+                    raise PortalTaskUnavailableError(_NOT_RECORDED) from exc
+            else:
+                # Someone else holds the row. Only an earlier decline makes this
+                # one true; it is already recorded, and is not written again.
                 shared_state, _ = _read_shared_task_decision(cache_key)
                 if shared_state != "declined":
                     raise PortalTaskConflictError(
                         "This action is being carried out or was already carried out, so it can no longer be cancelled."
                     )
-            try:
-                _write_shared_task_decision(cache_key, declined=True, user_id=user_id)
-            except Exception as exc:
-                logger.error("Portal task decline could not be recorded", exc_info=True)
-                _release_shared_task(cache_key)
-                raise PortalTaskUnavailableError(_NOT_RECORDED) from exc
             with _TASK_CACHE_LOCK:
                 _DECLINED_TASK_CACHE[cache_key] = time.time()
                 while len(_DECLINED_TASK_CACHE) > _MAX_TASK_CACHE_ENTRIES:
