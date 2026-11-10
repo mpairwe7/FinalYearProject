@@ -1902,6 +1902,17 @@ def detect_portal_task_intent(
 # ---------------------------------------------------------------------------
 
 
+#: The longest value a task field takes, on a first submission and on an edit.
+MAX_TASK_FIELD_CHARS = 512
+
+
+def _form_echo(value: Any) -> str:
+    """A submitted value as the form shows it back for correction: text, and no longer than a field."""
+    if isinstance(value, bool) or not isinstance(value, str | int | float):
+        return ""
+    return str(value)[:MAX_TASK_FIELD_CHARS]
+
+
 def validate_task_fields(
     spec: PortalTaskSpec,
     submitted_fields: Mapping[str, Any],
@@ -1918,11 +1929,19 @@ def validate_task_fields(
         raw_val = submitted_fields.get(f_spec.name)
         if raw_val in (None, "") and f_spec.default_value:
             raw_val = f_spec.default_value
+        # A form field holds text or a number. Anything else was not typed into
+        # one, and would be signed and shown as whatever str() makes of it.
+        if isinstance(raw_val, bool) or not isinstance(raw_val, str | int | float | None):
+            errors[f_spec.name] = f"{f_spec.label} must be text or a number."
+            continue
         val_str = str(raw_val or "").strip()
 
         if not val_str:
             if f_spec.required:
                 missing.append(f_spec.name)
+            continue
+        if len(val_str) > MAX_TASK_FIELD_CHARS:
+            errors[f_spec.name] = f"{f_spec.label} is too long (maximum {MAX_TASK_FIELD_CHARS} characters)."
             continue
 
         if f_spec.input_type == "select" and f_spec.options:
@@ -2349,7 +2368,7 @@ def build_portal_task_card(
             "field_errors": field_errors,
             "fields": [
                 f.to_dict(
-                    value=fields_map.get(f.name, ""),
+                    value=_form_echo(fields_map.get(f.name, "")),
                     validation_error=field_errors.get(f.name, ""),
                 )
                 for f in spec.fields
@@ -2676,8 +2695,10 @@ def handle_portal_task_decision(
                 if k_str not in allowed_field_names:
                     raise PortalTaskValidationError(f"Unknown field '{k_str}' for task '{spec.task_id}'.")
                 v_str = str(v if v is not None else "")
-                if len(v_str) > 512:
-                    raise PortalTaskValidationError(f"Field '{k_str}' exceeds maximum length (512 chars).")
+                if len(v_str) > MAX_TASK_FIELD_CHARS:
+                    raise PortalTaskValidationError(
+                        f"Field '{k_str}' exceeds maximum length ({MAX_TASK_FIELD_CHARS} chars)."
+                    )
                 merged_fields[k_str] = v_str
         updated_card = build_portal_task_card(
             spec.task_id,

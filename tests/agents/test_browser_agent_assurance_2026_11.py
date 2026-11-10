@@ -505,6 +505,31 @@ class TestTheConnectorCallSaysWhatHappened:
             assert invented not in sent
 
 
+class TestAFormValueIsBounded:
+    """The first submission keeps the limits an edit already had (G547)."""
+
+    def test_a_value_longer_than_an_edit_may_be_is_refused(self, client: TestClient) -> None:
+        fields = {**TIN_APPLICATION, "date_of_birth": "1990-05-17", "surname": "A" * 513}
+        card = _mint(client, conversation="conv-long-value", task_id="tin_apply_individual", fields=fields)
+
+        assert card["card_type"] == "inline_form"
+        assert "surname" in card["field_errors"]
+        assert "A" * 513 not in json.dumps(card)
+
+    def test_a_value_that_is_not_text_is_refused(self, client: TestClient) -> None:
+        fields = {**TIN_APPLICATION, "date_of_birth": "1990-05-17", "surname": {"nested": ["object"]}}
+        card = _mint(client, conversation="conv-object-value", task_id="tin_apply_individual", fields=fields)
+
+        assert card["card_type"] == "inline_form"
+        assert "surname" in card["field_errors"]
+
+    def test_an_ordinary_application_is_still_confirmed(self, client: TestClient) -> None:
+        fields = {**TIN_APPLICATION, "date_of_birth": "1990-05-17"}
+        card = _mint(client, conversation="conv-ordinary", task_id="tin_apply_individual", fields=fields)
+
+        assert card["card_type"] == "confirmation_required"
+
+
 # ---------------------------------------------------------------------------
 # G541: every decision reaches the ledger, and an approval reaches it first
 # ---------------------------------------------------------------------------
