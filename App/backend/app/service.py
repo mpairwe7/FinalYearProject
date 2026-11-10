@@ -4174,7 +4174,7 @@ def _translate_reply(text: str, locale: str) -> str | None:
         try:
             from .speech_service import SpeechModel
 
-            out = SpeechModel._gemini_translate(text, "en", locale)
+            out = SpeechModel._sunbird_llm_translate(text, "en", locale)
             if out and out.strip():
                 return out.strip()
             out = SpeechModel._cf_llama_translate(text, "en", locale)
@@ -4686,8 +4686,9 @@ def _simple_search(
 # it makes a network call, so it must never fire from a unit test or a
 # deployment without a configured model.
 FAQ_JUDGE_ENABLED = os.getenv("FAQ_JUDGE_ENABLED", "false").lower() == "true"
-FAQ_JUDGE_MODEL = os.getenv("FAQ_JUDGE_MODEL", "gemini-3.5-flash-lite")
 FAQ_JUDGE_CANDIDATES = int(os.getenv("FAQ_JUDGE_CANDIDATES", "6"))
+#: The judge asks Sunflower through Sunbird's chat endpoint (ADR-0037); Gemini no longer judges.
+FAQ_JUDGE_TIMEOUT = float(os.getenv("FAQ_JUDGE_TIMEOUT", "20"))
 
 _JUDGE_PROMPT = """You are ranking candidate FAQ entries for a Uganda Revenue Authority assistant.
 
@@ -4728,17 +4729,19 @@ def _judge_rescue(
     to get a real one. Every failure path returns [] and the caller abstains
     exactly as it does today.
 
-    gemini-3.5-flash-lite is the default after benchmarking four flash variants
-    on this task: all four scored identically, at 1.5s median / 8.7s max versus
-    4.7s / 74.9s for the configured gemini-2.5-flash.
+    The judge is Sunflower through Sunbird's chat endpoint (ADR-0037). It was
+    Gemini flash-lite (1.5 s median) until that key could not be used from the
+    Space; Sunflower takes a few seconds, paid only by questions that would
+    otherwise abstain. It shares the Sunbird generation breaker, so a failing
+    account skips the judge too.
     """
     if not FAQ_JUDGE_ENABLED or not query.strip() or not cloud_models_allowed():
         return []
     try:
-        from .providers import config as _cfg
-        from .providers import gateway as _gw
+        from . import sunbird as _sunbird
+        from .providers import breakers as _breakers
 
-        if not _cfg.is_gemini_configured():
+        if not _sunbird.is_available():
             return []
     except Exception:  # noqa: BLE001 — providers optional
         return []
@@ -4770,20 +4773,24 @@ def _judge_rescue(
 
     if is_sovereign_mode():
         return []
+    if not admit(_breakers.SUNBIRD_LLM_BREAKER, lambda: True):
+        return []
     try:
-        raw = _gw.gemini_generate(
-            _JUDGE_PROMPT.format(question=query, candidates=listing),
-            model=FAQ_JUDGE_MODEL,
-            # gemini-3.x flash are thinking models: reasoning tokens come out of
-            # this budget, and a small cap truncates the answer mid-JSON rather
-            # than returning a short one.
-            max_tokens=2000,
+        raw = _sunbird.chat_completion(
+            [{"role": "user", "content": _JUDGE_PROMPT.format(question=query, candidates=listing)}],
+            # Sunflower is a thinking model: reasoning tokens come out of this budget,
+            # and a small cap truncates the answer mid-JSON rather than returning a short one.
+            max_tokens=1024,
             temperature=0.0,
+            timeout=FAQ_JUDGE_TIMEOUT,
         )
+        _breakers.SUNBIRD_LLM_BREAKER.record_success()
     except Exception:  # noqa: BLE001 — judge is best-effort
+        _breakers.SUNBIRD_LLM_BREAKER.record_failure()
         logger.debug("FAQ judge call failed", exc_info=True)
         return []
 
+    raw = llm_module.strip_thought(raw)
     cleaned = re.sub(r"^```(?:json)?|```$", "", (raw or "").strip(), flags=re.M)
     match = re.search(r"\{.*?\}", cleaned, re.S)
     if not match:
@@ -4809,8 +4816,8 @@ def _judge_rescue(
 
     chosen = candidates[pick - 1]
     logger.info(
-        "Retrieval rescued by judge (%s): %r -> %r",
-        FAQ_JUDGE_MODEL, query[:60], str(chosen.get("question"))[:60],
+        "Retrieval rescued by judge (sunbird:%s): %r -> %r",
+        _sunbird.SUNBIRD_LLM_MODEL, query[:60], str(chosen.get("question"))[:60],
     )
     out = dict(chosen)
     out.pop("_bm25_tf", None)

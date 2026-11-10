@@ -120,27 +120,35 @@ if __name__ == "__main__":
 class TestJudgeRescueIsOffByDefault(unittest.TestCase):
     """The judge makes a network call, so nothing may reach it implicitly.
 
+    The judge is Sunflower through Sunbird's chat endpoint (ADR-0037); Gemini no longer judges.
+
     It sits last in the ladder — after the untranslated pass, the translated
     pass and the coverage gate have all produced nothing — and is disabled
     unless FAQ_JUDGE_ENABLED is set. A unit run or a deployment without a
     configured model must behave exactly as it did before it existed.
     """
 
+    def setUp(self):
+        from app.providers import breakers
+
+        breakers.SUNBIRD_LLM_BREAKER.record_success()
+
     def test_disabled_by_default(self):
         self.assertFalse(service.FAQ_JUDGE_ENABLED)
 
     def test_returns_nothing_and_calls_no_model_when_disabled(self):
-        with patch("app.providers.gateway.gemini_generate") as gen:
+        with patch("app.sunbird.chat_completion") as gen, patch("app.providers.gateway.gemini_generate") as gem:
             self.assertEqual(service._judge_rescue("anything", _index(), 4), [])
             gen.assert_not_called()
+            gem.assert_not_called()
 
     def test_an_unconfident_verdict_is_refused(self):
         """A confidently wrong tax answer costs more than 'I could not find it'."""
         with (
             patch.object(service, "FAQ_JUDGE_ENABLED", True),
-            patch("app.providers.config.is_gemini_configured", return_value=True),
+            patch("app.sunbird.is_available", return_value=True),
             patch(
-                "app.providers.gateway.gemini_generate",
+                "app.sunbird.chat_completion",
                 return_value='{"pick": 1, "confident": false}',
             ),
         ):
@@ -149,9 +157,9 @@ class TestJudgeRescueIsOffByDefault(unittest.TestCase):
     def test_a_confident_verdict_is_accepted(self):
         with (
             patch.object(service, "FAQ_JUDGE_ENABLED", True),
-            patch("app.providers.config.is_gemini_configured", return_value=True),
+            patch("app.sunbird.is_available", return_value=True),
             patch(
-                "app.providers.gateway.gemini_generate",
+                "app.sunbird.chat_completion",
                 return_value='```json\n{"pick": 1, "confident": true}\n```',
             ),
         ):
@@ -164,17 +172,17 @@ class TestJudgeRescueIsOffByDefault(unittest.TestCase):
             with self.subTest(outcome=list(outcome)[0]):
                 with (
                     patch.object(service, "FAQ_JUDGE_ENABLED", True),
-                    patch("app.providers.config.is_gemini_configured", return_value=True),
-                    patch("app.providers.gateway.gemini_generate", **outcome),
+                    patch("app.sunbird.is_available", return_value=True),
+                    patch("app.sunbird.chat_completion", **outcome),
                 ):
                     self.assertEqual(service._judge_rescue("What is VAT?", _index(), 4), [])
 
     def test_an_out_of_range_pick_is_refused(self):
         with (
             patch.object(service, "FAQ_JUDGE_ENABLED", True),
-            patch("app.providers.config.is_gemini_configured", return_value=True),
+            patch("app.sunbird.is_available", return_value=True),
             patch(
-                "app.providers.gateway.gemini_generate",
+                "app.sunbird.chat_completion",
                 return_value='{"pick": 99, "confident": true}',
             ),
         ):

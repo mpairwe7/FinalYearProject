@@ -1596,20 +1596,20 @@ class TranslateRoutingOrderTest(unittest.TestCase):
         sm._mt = None
         return sm
 
-    def test_gemini_first(self):
+    def test_sunflower_first_when_the_translate_endpoint_is_unavailable(self):
         from app.speech_service import SpeechModel
         sm = self._sm()
-        with mock.patch.object(SpeechModel, "_gemini_translate", return_value="Omusolo"), \
+        with mock.patch.object(SpeechModel, "_sunbird_llm_translate", return_value="Omusolo"), \
              mock.patch.object(SpeechModel, "_cf_llama_translate") as cf:
             res = sm._do_translate("VAT?", "en", "lg")
-        self.assertEqual(res.backend, "gemini_flash")
+        self.assertEqual(res.backend, "sunbird_llm")
         self.assertEqual(res.text, "Omusolo")
         cf.assert_not_called()
 
-    def test_cf_llama_when_gemini_empty(self):
+    def test_cf_llama_when_sunflower_empty(self):
         from app.speech_service import SpeechModel
         sm = self._sm()
-        with mock.patch.object(SpeechModel, "_gemini_translate", return_value=""), \
+        with mock.patch.object(SpeechModel, "_sunbird_llm_translate", return_value=""), \
              mock.patch.object(SpeechModel, "_cf_llama_translate", return_value="Omusolo via CF"):
             res = sm._do_translate("VAT?", "en", "lg")
         self.assertEqual(res.backend, "cf_workers_ai")
@@ -1619,7 +1619,7 @@ class TranslateRoutingOrderTest(unittest.TestCase):
         from app import sunbird as real_sunbird
         from app.speech_service import SpeechModel
         sm = self._sm()
-        with mock.patch.object(SpeechModel, "_gemini_translate", return_value=""), \
+        with mock.patch.object(SpeechModel, "_sunbird_llm_translate", return_value=""), \
              mock.patch.object(SpeechModel, "_cf_llama_translate", return_value=""), \
              mock.patch.object(real_sunbird, "is_available", return_value=True), \
              mock.patch.object(real_sunbird, "translate", return_value="Omusolo via Sunbird"):
@@ -1629,35 +1629,34 @@ class TranslateRoutingOrderTest(unittest.TestCase):
 
 
 class TranslationFallbackTest(unittest.TestCase):
-    """SpeechModel._gemini_translate uses Gemini 2.5 Flash for Luganda."""
+    """SpeechModel._sunbird_llm_translate asks Sunflower through Sunbird's chat endpoint (ADR-0037)."""
 
     def setUp(self):
-        _with_keys()
-        budget._redis = None
-        budget._redis_tried = True
-        budget._local_gemini.clear()
+        from app.providers import breakers
 
-    def tearDown(self):
-        _clear_keys()
-        budget._redis_tried = False
-        gateway._client = None
+        breakers.SUNBIRD_LLM_BREAKER.record_success()
 
-    def test_gemini_translate_when_configured(self):
+    def test_sunflower_translates_when_configured(self):
         from app.speech_service import SpeechModel
 
-        with mock.patch("app.flags.flags.is_enabled", return_value=True), \
-             mock.patch.dict(os.environ, {"TRANSLATE_FALLBACK_BACKEND": "gemini"}), \
-             mock.patch.object(gateway, "gemini_generate", return_value="Omusolo gwa VAT") as gg:
-            out = SpeechModel._gemini_translate("VAT tax", "en", "lg")
-        self.assertEqual(out, "Omusolo gwa VAT")
-        gg.assert_called_once()
-        self.assertIn("Luganda", gg.call_args.kwargs.get("system", ""))
+        for backend in ("sunbird", "gemini"):  # the retired gemini reads as sunbird
+            with mock.patch("app.flags.flags.is_enabled", return_value=True), \
+                 mock.patch.dict(os.environ, {"TRANSLATE_FALLBACK_BACKEND": backend}), \
+                 mock.patch("app.sunbird.is_available", return_value=True), \
+                 mock.patch("app.sunbird.chat_completion", return_value="Omusolo gwa VAT") as chat, \
+                 mock.patch.object(gateway, "gemini_generate") as gg:
+                out = SpeechModel._sunbird_llm_translate("VAT tax", "en", "lg")
+            self.assertEqual(out, "Omusolo gwa VAT", backend)
+            self.assertIn("Luganda", chat.call_args.args[0][0]["content"])
+            gg.assert_not_called()
 
-    def test_gemini_translate_disabled_when_flag_off(self):
+    def test_sunflower_translation_disabled_when_flag_off(self):
         from app.speech_service import SpeechModel
 
-        with mock.patch("app.flags.flags.is_enabled", return_value=False):
-            self.assertEqual(SpeechModel._gemini_translate("x", "en", "lg"), "")
+        with mock.patch("app.flags.flags.is_enabled", return_value=False), \
+             mock.patch("app.sunbird.chat_completion") as chat:
+            self.assertEqual(SpeechModel._sunbird_llm_translate("x", "en", "lg"), "")
+        chat.assert_not_called()
 
 
 class DeterministicProcedureReplyFormattingTest(unittest.TestCase):
@@ -1839,11 +1838,11 @@ class LugandaTranslationRoutingTest(unittest.TestCase):
         m._chat_model = None
         return m
 
-    def test_luganda_prefers_sunbird_over_gemini(self):
+    def test_luganda_prefers_the_translate_endpoint_over_sunflower(self):
         from app import speech_service
 
         m = self._bare_model()
-        with mock.patch.object(speech_service.SpeechModel, "_gemini_translate", return_value="GEMINI"), \
+        with mock.patch.object(speech_service.SpeechModel, "_sunbird_llm_translate", return_value="SUNFLOWER"), \
              mock.patch.object(speech_service.SpeechModel, "_cf_llama_translate", return_value=""), \
              mock.patch("app.sunbird.is_available", return_value=True), \
              mock.patch("app.sunbird.translate", return_value="SUNBIRD"):
@@ -1852,27 +1851,27 @@ class LugandaTranslationRoutingTest(unittest.TestCase):
                 self.assertEqual(res.backend, "sunbird_cloud", f"{src}->{tgt}")
                 self.assertEqual(res.text, "SUNBIRD")
 
-    def test_non_luganda_keeps_gemini_first(self):
+    def test_a_pair_the_endpoint_does_not_serve_leads_with_sunflower(self):
         from app import speech_service
 
         m = self._bare_model()
-        with mock.patch.object(speech_service.SpeechModel, "_gemini_translate", return_value="GEMINI"), \
+        with mock.patch.object(speech_service.SpeechModel, "_sunbird_llm_translate", return_value="SUNFLOWER"), \
              mock.patch.object(speech_service.SpeechModel, "_cf_llama_translate", return_value=""), \
              mock.patch("app.sunbird.is_available", return_value=True), \
              mock.patch("app.sunbird.translate", return_value="SUNBIRD"):
             res = m._do_translate("hello", "en", "fr")
-            self.assertEqual(res.backend, "gemini_flash")
+            self.assertEqual(res.backend, "sunbird_llm")
 
-    def test_luganda_falls_back_to_gemini_when_sunbird_unavailable(self):
+    def test_luganda_falls_back_to_sunflower_when_the_endpoint_is_unavailable(self):
         from app import speech_service
 
         m = self._bare_model()
-        with mock.patch.object(speech_service.SpeechModel, "_gemini_translate", return_value="GEMINI"), \
+        with mock.patch.object(speech_service.SpeechModel, "_sunbird_llm_translate", return_value="SUNFLOWER"), \
              mock.patch.object(speech_service.SpeechModel, "_cf_llama_translate", return_value=""), \
              mock.patch("app.sunbird.is_available", return_value=False):
             res = m._do_translate("hello", "lg", "en")
-            self.assertEqual(res.backend, "gemini_flash")
-            self.assertEqual(res.text, "GEMINI")
+            self.assertEqual(res.backend, "sunbird_llm")
+            self.assertEqual(res.text, "SUNFLOWER")
 
 
 if __name__ == "__main__":

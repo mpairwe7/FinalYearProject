@@ -87,13 +87,13 @@ class TestSunbirdLeadsForEveryLanguageItServes(unittest.TestCase):
             order.append("sunbird")
             return "translated"
 
-        def gemini(self_, text, src, tgt):  # bound method signature
-            order.append("gemini")
+        def sunflower(self_, text, src, tgt):  # bound method signature
+            order.append("sunflower")
             return "translated"
 
         with patch.object(sunbird, "translate", side_effect=sunbird_translate), patch.object(
             sunbird, "is_available", return_value=True
-        ), patch.object(SpeechModel, "_gemini_translate", gemini), patch.object(
+        ), patch.object(SpeechModel, "_sunbird_llm_translate", sunflower), patch.object(
             SpeechModel, "_cf_llama_translate", lambda *a, **k: None
         ):
             model._do_translate("Where is the tax office?", source, target)
@@ -117,8 +117,9 @@ class TestSunbirdLeadsForEveryLanguageItServes(unittest.TestCase):
         stale claim, not a real API limitation."""
         self.assertEqual(self._first_backend_called("en", "sw"), "sunbird")
 
-    def test_an_unrelated_language_leads_with_gemini(self):
-        self.assertEqual(self._first_backend_called("en", "fr"), "gemini")
+    def test_an_unrelated_language_leads_with_sunflower(self):
+        """A pair /tasks/translate does not serve goes to Sunflower first (ADR-0037; it was Gemini)."""
+        self.assertEqual(self._first_backend_called("en", "fr"), "sunflower")
 
 
 if __name__ == "__main__":
