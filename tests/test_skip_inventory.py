@@ -52,7 +52,9 @@ KNOWN_SKIPS: dict[str, int] = {
     "tests/test_api.py": 5,
     # Agent-parity suites gated on optional backend fixtures.
     "tests/agents/test_backend_column_parity.py": 1,
-    "tests/agents/test_backend_shim.py": 1,
+    # Two classes need a real Postgres (POSTGRES_DSN): the audit chain, and the
+    # workflow lease that makes an approved portal task run once (ADR-0038).
+    "tests/agents/test_backend_shim.py": 2,
     "tests/agents/test_identity_consent_parity.py": 1,
     "tests/agents/test_ticket_events.py": 1,
     # The superseded-figure sweep diffs the two newest FY*.json rate tables, so

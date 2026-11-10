@@ -216,14 +216,18 @@ def _pg_module() -> Any | None:
 
 
 def _to_pg_placeholders(sql: str) -> str:
-    """Rewrite ``?`` placeholders to ``%s``.
+    """Rewrite ``?`` placeholders to ``%s``, and escape a literal ``%``.
 
     Only bare ``?`` is used as a placeholder in this codebase; a literal
     question mark inside a quoted string would need escaping, and none
     of the call sites have one.  :func:`test_sql_portability` asserts
     that stays true.
+
+    A literal percent sign is doubled first. psycopg reads ``%`` as the
+    start of a placeholder whenever parameters are passed, and the seam
+    always passes them, so ``LIKE 'state_%'`` raised on Postgres (G554).
     """
-    return sql.replace("?", "%s")
+    return sql.replace("%", "%%").replace("?", "%s")
 
 
 def query_all(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
