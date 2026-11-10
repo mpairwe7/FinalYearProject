@@ -2077,12 +2077,40 @@ def extract_authenticated_tin(user_id: str | None, authenticated_tin: str | None
 
     A subject binds a TIN only by being one. A ten-digit run inside a longer
     opaque subject (`google-oauth2|1098765432`) is not a TIN anyone verified,
-    and was read as one (G557).
+    and was read as one (G557). Otherwise the binding is *authenticated_tin*:
+    a TIN established for this caller, today the simulation profile they
+    linked (`linked_account_tin`). It never replaces a subject that is a TIN.
     """
-    if authenticated_tin and re.fullmatch(r"\d{10}", str(authenticated_tin).strip()):
-        return str(authenticated_tin).strip()
     uid = str(user_id or "").strip()
-    return uid if re.fullmatch(r"\d{10}", uid) else ""
+    if re.fullmatch(r"\d{10}", uid):
+        return uid
+    bound = str(authenticated_tin or "").strip()
+    return bound if re.fullmatch(r"\d{10}", bound) else ""
+
+
+def linked_account_tin(*, session_id: str | None, user_id: str | None, tenant_id: str = "default") -> str:
+    """The TIN of the simulation profile this signed-in caller linked in this session, or "".
+
+    Outside production a taxpayer connects a local simulation profile by
+    signing in to it (`mcp.connector_accounts`). That link is the one place
+    this service itself establishes which TIN a caller acts for, so it is what
+    the ownership check compares against when the sign-in's subject is not a
+    TIN. Profiles linked to different TINs bind none. In production the link
+    flow is refused, and the binding has to come from the identity provider (G565).
+    """
+    if not user_id or not session_id:
+        return ""
+    try:
+        from .mcp.connector_accounts import get_all_linked_accounts
+
+        owner = db.conversation_state_key(session_id, user_id=user_id, tenant_id=tenant_id or "default")
+        linked = get_all_linked_accounts(owner)
+    except Exception:
+        logger.warning("Linked simulation profile could not be read; no TIN is bound", exc_info=True)
+        return ""
+    tins = {str(account.get("tin") or "") for account in linked.values()}
+    tins = {tin for tin in tins if re.fullmatch(r"\d{10}", tin)}
+    return tins.pop() if len(tins) == 1 else ""
 
 
 def check_subject_tin_ownership(

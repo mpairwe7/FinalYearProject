@@ -1487,6 +1487,9 @@ def execute_portal_task_decision(
             record_approval=_record_approval if ledger_on else None,
             granted_purposes=tuple(ctx.user.granted_purposes) if ctx.user else (),
             role=ctx.role,
+            authenticated_tin=pc_mod.linked_account_tin(
+                session_id=session_id or None, user_id=ctx.user_id or None, tenant_id=tenant_id
+            ),
         )
     except pc_mod.PortalTaskValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

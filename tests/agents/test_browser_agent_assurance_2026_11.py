@@ -1043,6 +1043,10 @@ class TestAnAccountTaskIsForItsOwner:
         assert pc.extract_authenticated_tin("auth0-7f3a9c") == ""
         assert pc.extract_authenticated_tin("1000023456") == "1000023456"
 
+    def test_a_subject_that_is_a_tin_is_not_rebound_by_a_linked_profile(self) -> None:
+        assert pc.extract_authenticated_tin("1000023456", "1000000001") == "1000023456"
+        assert pc.extract_authenticated_tin("auth0-7f3a9c", "1000000001") == "1000000001"
+
     def test_a_signed_in_write_is_refused_for_another_taxpayers_tin(self, client: TestClient) -> None:
         card = _chat(
             client,
@@ -1406,3 +1410,62 @@ class TestAFormValueIsWhatAFormHolds:
         assert "PRN" in prn["reversibility_notice"]
         assert "PRN" not in tin["reversibility_notice"]
         assert "cannot be undone" in tin["reversibility_notice"]
+
+
+# G557: outside production, the profile a caller signed in to is the TIN they act for
+class TestALinkedProfileBindsItsTin:
+    SUBJECT = "auth0-7f3a9c"
+    SESSION = "sess-linked"
+
+    @pytest.fixture(autouse=True)
+    def _simulation_profiles(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+        # The link store keeps its own file when given a directory, so each test starts with none.
+        monkeypatch.setenv("CONNECTOR_DATA_STORE_DIR", str(tmp_path))
+        monkeypatch.setenv("APP_ENV", "development")
+
+    def _link(self, session: str | None = None) -> str:
+        from app.mcp import connector_accounts
+
+        owner = db.conversation_state_key(session or self.SESSION, user_id=self.SUBJECT, tenant_id="default")
+        tin = connector_accounts.DEMO_CONNECTOR_PRESETS[0]["tin"]
+        connector_accounts.login_connector_account(
+            owner_key=owner, namespace="tin_registration", identifier=tin, password="demo1234"
+        )
+        return tin
+
+    def _profile_card(self, client: TestClient, tin: str, conversation: str) -> dict[str, Any]:
+        return _chat(
+            client,
+            "Submitted the form",
+            conversation=conversation,
+            headers=_signed_in(self.SUBJECT, session=self.SESSION),
+            portal_task_submission={"task_id": "ura_account_profile", "fields": {"tin": tin}},
+        )["portal_copilot"]
+
+    def test_a_caller_who_linked_a_profile_may_act_for_its_tin(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        tin = self._link()
+        card = self._profile_card(client, tin, "conv-linked-own")
+        connector = _Connector(monkeypatch)
+
+        assert card["card_type"] == "confirmation_required"
+        allowed = _allow(
+            client, card, conversation="conv-linked-own", headers=_signed_in(self.SUBJECT, session=self.SESSION)
+        )
+        assert allowed.json()["status"] == "executed"
+        assert len(connector.calls) == 1
+
+    def test_they_may_not_act_for_another_tin(self, client: TestClient) -> None:
+        self._link()
+
+        assert self._profile_card(client, "1000023456", "conv-linked-other")["card_type"] == "access_denied"
+
+    def test_a_profile_linked_in_another_session_binds_nothing_here(self, client: TestClient) -> None:
+        tin = self._link(session="sess-somewhere-else")
+
+        assert self._profile_card(client, tin, "conv-linked-elsewhere")["card_type"] == "access_denied"
+
+    def test_no_link_and_no_tin_subject_binds_nothing(self) -> None:
+        assert pc.linked_account_tin(session_id=self.SESSION, user_id="auth0-nobody", tenant_id="default") == ""
+        assert pc.linked_account_tin(session_id=None, user_id=self.SUBJECT, tenant_id="default") == ""
