@@ -192,6 +192,52 @@ class TestExactlyOnceAcrossWorkers:
         assert response.status_code == 503
         assert connector.calls == []
 
+    def test_nothing_is_decided_when_the_store_cannot_be_read(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        card = _mint(client, conversation="conv-store-unreadable")
+
+        def store_down(*_: Any, **__: Any) -> Any:
+            raise RuntimeError("database unavailable")
+
+        monkeypatch.setattr(db, "get_workflow_session", store_down)
+        response = client.post(
+            EXECUTE,
+            json={
+                "decision": "prepare",
+                "request_state": card["request_state"],
+                "idempotency_key": card["idempotency_key"],
+                "conversation_id": "conv-store-unreadable",
+                "edited_fields": {"amount_ugx": "300000"},
+            },
+            headers={"X-Session-ID": "sess-taxpayer"},
+        )
+
+        assert response.status_code == 503
+
+    def test_a_task_being_run_cannot_be_edited(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+        card = _mint(client, conversation="conv-edit-late")
+        seen: dict[str, Any] = {}
+
+        def taxpayer_edits_on_another_worker() -> None:
+            _forget_in_process_state()
+            seen["prepare"] = client.post(
+                EXECUTE,
+                json={
+                    "decision": "prepare",
+                    "request_state": card["request_state"],
+                    "idempotency_key": card["idempotency_key"],
+                    "conversation_id": "conv-edit-late",
+                    "edited_fields": {"amount_ugx": "300000"},
+                },
+                headers={"X-Session-ID": "sess-taxpayer"},
+            )
+
+        _Connector(monkeypatch, during=taxpayer_edits_on_another_worker)
+        _decide(client, card, conversation="conv-edit-late")
+
+        assert seen["prepare"].status_code == 400
+
     def test_a_refused_task_can_be_tried_again(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         card = _mint(client, conversation="conv-retry")
         failing = _Connector(monkeypatch, ok=False)
@@ -248,6 +294,7 @@ class TestApprovalIsBoundToASessionAndTheDisplay:
         response = _decide(client, card, conversation="conv-drop-session", session=None)
 
         assert response.status_code == 403
+        assert "X-Session-ID" in response.json()["detail"], "refused for want of a session, before any key is derived"
         assert connector.calls == []
 
     def test_a_card_signed_for_a_signed_in_taxpayer_is_not_honoured_signed_out(
@@ -568,6 +615,14 @@ class TestThePageDoesNotChooseTheTarget:
         assert hostile not in card["sanitized_context"]["visible_fields"]
         assert card["sanitized_context"]["empty_required_fields"] == []
         assert card["sanitized_context"]["validation_errors"] == []
+
+    def test_the_steps_sent_back_are_numbered_in_order(self) -> None:
+        errors = [{"field": "tin", "message": "Invalid TIN", "selector": ""}]
+        card = pc.analyze_portal_context(_telemetry(validation_errors=errors, empty_required_fields=["amount_ugx"]))
+
+        numbers = [step["step_number"] for step in card["dom_actions"]]
+        assert numbers == list(range(1, len(numbers) + 1))
+        assert len(numbers) > 2
 
     def test_only_a_fill_or_a_select_carries_a_value(self) -> None:
         errors = [{"field": "tin", "message": "Invalid TIN", "selector": ""}]
