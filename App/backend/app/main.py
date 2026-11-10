@@ -233,10 +233,21 @@ def _validate_production_env() -> None:
         try:
             from .providers import config as _cloud_cfg
 
-            if not _cloud_cfg.is_cloudflare_configured():
+            llm_backend = os.getenv("LLM_FALLBACK_BACKEND", "").strip().lower()
+            sunbird_answers = llm_backend in ("sunbird", "gemini") and bool(
+                os.getenv("SUNBIRD_API_TOKEN") or os.getenv("SUNBIRD_FALLBACK_API_TOKEN")
+            )
+            # Cloudflare is required by what uses it, not by the flag alone: a Sunbird-only
+            # deployment answers without it (ADR-0036), and its Workers AI tier is simply skipped.
+            cf_users = [name for name in ("DENSE_FALLBACK_BACKEND", "STT_FALLBACK_BACKEND", "TTS_FALLBACK_BACKEND")
+                        if os.getenv(name, "").strip().lower() == "workers_ai"]
+            if llm_backend == "workers_ai":
+                cf_users.append("LLM_FALLBACK_BACKEND")
+            if not _cloud_cfg.is_cloudflare_configured() and (cf_users or not sunbird_answers):
                 errors.append(
                     "FLAG_CLOUDFLARE_FALLBACK=true but Cloudflare is not fully configured "
-                    "(need CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, CF_AIG_GATEWAY, CF_AIG_TOKEN)."
+                    "(need CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, CF_AIG_GATEWAY, CF_AIG_TOKEN)"
+                    + (f" for {', '.join(cf_users)}." if cf_users else ".")
                 )
             if (
                 os.getenv("DENSE_FALLBACK_BACKEND", "").strip().lower() == "workers_ai"
@@ -250,7 +261,6 @@ def _validate_production_env() -> None:
                 errors.append(
                     "TRANSLATE_FALLBACK_BACKEND=gemini is set but GEMINI_API_KEY (+ AI Gateway) is missing."
                 )
-            llm_backend = os.getenv("LLM_FALLBACK_BACKEND", "").strip().lower()
             if llm_backend in ("sunbird", "gemini") and not (
                 os.getenv("SUNBIRD_API_TOKEN") or os.getenv("SUNBIRD_FALLBACK_API_TOKEN")
             ) and not _cloud_cfg.is_cloudflare_configured():

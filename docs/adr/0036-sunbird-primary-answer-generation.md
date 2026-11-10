@@ -55,6 +55,28 @@ The cloud chain (`service._llm_cloud_fallback`) becomes **Sunbird, then Workers 
 - `LLM_FALLBACK_BACKEND=gemini` is read as `sunbird`, with a single warning per process. The
   Space, still configured `gemini`, therefore gets the new chain without a secret change.
 
+### Review round (PR 711)
+- **English drafts.** The cloud chain always writes in English. A vernacular draft would be
+  checked against English passages, and the project rule is to localize in one place
+  (`localize_reply`).
+- **Sunbird's time budget.**
+  - Sunbird's account failover is bounded by the chain deadline, less a reserve for Workers AI
+    (`SUNBIRD_WORKERS_AI_RESERVE_S`, 15 s).
+  - `sunbird._post(deadline=…)` cuts each attempt's timeout to the time left and starts no
+    attempt once the time is spent.
+- **Finish reason.** A Sunflower reply stopped at the token limit (`finish_reason="length"`) is
+  treated as truncated, even when it ends in punctuation. Workers AI is tried, and the reply is
+  kept as the floor.
+- **Tracing.** Sunbird generation is traced with `tracing.llm_call` and reports the provider's
+  token usage.
+- **Relay and AI Gateway.**
+  - The direct call after a relay failure is skipped once the turn's deadline has passed.
+  - A 502, 503 or 504 from the AI Gateway now falls through to `api.cloudflare.com`. A 500 or a
+    4xx is still the model's or the request's answer and is raised.
+- **Startup.** Cloudflare credentials are required by the services that use them (Workers AI
+  answers, dense, STT or TTS fallbacks), not by the flag alone. A Sunbird-only deployment starts
+  without them.
+
 ### Settings and diagnosis
 - Startup validation no longer requires a Gemini key for answers. It reports a `sunbird` backend
   that has neither a Sunbird token nor Cloudflare credentials.

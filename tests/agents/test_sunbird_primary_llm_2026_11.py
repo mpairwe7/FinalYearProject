@@ -147,3 +147,115 @@ def test_a_sunbird_refusal_logs_its_error_code(monkeypatch: pytest.MonkeyPatch, 
     with caplog.at_level(logging.WARNING), pytest.raises(httpx.HTTPStatusError):
         sunbird.chat_completion([{"role": "user", "content": "q"}])
     assert "ACCOUNT_SUSPENDED" in caplog.text
+
+
+# --------------------------------------------------------------------------- review fixes (PR 711)
+
+
+def test_the_cloud_draft_is_written_in_english_for_every_locale(chain, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Answers are generated in English and localized in one place (localize_reply)."""
+    seen: list[str] = []
+
+    def build(**kwargs):
+        seen.append(kwargs["locale"])
+        return [{"role": "system", "content": "Rules."}, {"role": "user", "content": "q"}]
+
+    monkeypatch.setattr(service.llm_module, "_build_messages", build)
+    with mock.patch.object(sunbird, "chat_completion", return_value="An answer. [1]"):
+        service._llm_cloud_fallback("q", [{"text": "p"}], None, "lg")
+    assert seen == ["en"]
+
+
+def test_a_reply_cut_at_the_token_limit_tries_workers_ai_and_is_kept_as_a_floor(chain) -> None:
+    cut = sunbird.ChatReply("VAT is 18%. [1]", "length")  # looks complete, but the model was stopped
+    with mock.patch.object(sunbird, "chat_completion", return_value=cut), \
+         mock.patch.object(gateway, "workers_ai_chat", return_value="VAT is charged at 18% on taxable supplies. [1]") as cf:
+        assert service._llm_cloud_fallback("q", [{"text": "p"}], None, "en") == \
+            "VAT is charged at 18% on taxable supplies. [1]"
+    cf.assert_called()
+    with mock.patch.object(sunbird, "chat_completion", return_value=cut), \
+         mock.patch.object(gateway, "workers_ai_chat", side_effect=RuntimeError("down")):
+        assert service._llm_cloud_fallback("q", [{"text": "p"}], None, "en") == "VAT is 18%. [1]"
+
+
+def test_sunbird_is_given_the_chain_budget_less_a_reserve_for_workers_ai(chain) -> None:
+    deadline = service.time.monotonic() + 60.0
+    with mock.patch.object(sunbird, "chat_completion", return_value="An answer. [1]") as sb:
+        service._llm_cloud_fallback("q", [{"text": "p"}], None, "en", deadline=deadline)
+    assert sb.call_args.kwargs["deadline"] == deadline - service.SUNBIRD_WORKERS_AI_RESERVE_S
+
+
+def test_failover_stops_at_the_deadline_and_timeouts_shrink_to_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = {"now": 100.0}
+    monkeypatch.setattr(sunbird.time, "monotonic", lambda: clock["now"])
+    timeouts: list[float] = []
+
+    def slow(request: httpx.Request) -> httpx.Response:
+        timeouts.append(request.extensions["timeout"]["read"])
+        clock["now"] += 30.0  # the primary account hangs for 30 s
+        raise httpx.ReadTimeout("slow", request=request)
+
+    client = httpx.Client(base_url="https://api.sunbird.ai", transport=httpx.MockTransport(slow))
+    monkeypatch.setattr(sunbird, "_account_tokens", lambda: ["primary", "fallback"])
+    monkeypatch.setattr(sunbird, "_client_for", lambda _t: client)
+    monkeypatch.setattr(sunbird, "_quota_cooldown_until", {})
+    with pytest.raises(httpx.TimeoutException):
+        sunbird.chat_completion([{"role": "user", "content": "q"}], deadline=125.0)
+    assert timeouts == [25.0], "one attempt, cut to the 25 s left; the fallback account never starts"
+
+
+def test_chat_completion_is_traced_with_the_providers_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import tracing
+
+    recorded: dict = {}
+
+    class _Call:
+        def usage(self, prompt, completion):
+            recorded["usage"] = (prompt, completion)
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def fake(operation, model, provider, **_kw):
+        recorded["call"] = (operation, model, provider)
+        yield _Call()
+
+    class _Resp:
+        def json(self):
+            return {"choices": [{"message": {"content": "A."}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 120, "completion_tokens": 7}}
+
+    monkeypatch.setattr(tracing, "llm_call", fake)
+    monkeypatch.setattr(sunbird, "_post", lambda *_a, **_k: _Resp())
+    reply = sunbird.chat_completion([{"role": "user", "content": "q"}])
+    assert (str(reply), reply.finish_reason) == ("A.", "stop")
+    assert recorded == {"call": ("chat", sunbird.SUNBIRD_LLM_MODEL, "sunbird"), "usage": (120, 7)}
+
+
+def test_no_direct_retry_once_the_turn_is_over(relay) -> None:
+    with mock.patch.object(relay_client, "relay_workers_ai_chat", side_effect=_relay_status(502)), \
+         mock.patch.object(gateway, "_workers_ai_call") as call, pytest.raises(httpx.HTTPStatusError):
+        gateway.workers_ai_chat([{"role": "user", "content": "q"}], deadline=0.0)
+    call.assert_not_called()
+
+
+@pytest.mark.parametrize(("first", "tries_direct"), [(502, True), (503, True), (504, True), (500, False), (429, False)])
+def test_an_ai_gateway_failure_tries_the_direct_api(monkeypatch: pytest.MonkeyPatch, first: int, tries_direct: bool) -> None:
+    targets = [("https://gateway.ai.cloudflare.com/x", {}), ("https://api.cloudflare.com/client/v4/x", {})]
+    monkeypatch.setattr(gateway, "_workers_ai_targets", lambda _m: targets)
+    hosts: list[str] = []
+
+    def send(url, _headers):
+        hosts.append(url.split("/")[2])
+        if url.startswith("https://gateway"):
+            request = httpx.Request("POST", url)
+            raise httpx.HTTPStatusError(str(first), request=request, response=httpx.Response(first, request=request))
+        return {"result": {"response": "ok"}}
+
+    if tries_direct:
+        assert gateway._workers_ai_call("m", send) == {"result": {"response": "ok"}}
+        assert hosts == ["gateway.ai.cloudflare.com", "api.cloudflare.com"]
+    else:
+        with pytest.raises(httpx.HTTPStatusError):
+            gateway._workers_ai_call("m", send)
+        assert hosts == ["gateway.ai.cloudflare.com"]

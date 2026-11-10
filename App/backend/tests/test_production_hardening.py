@@ -344,6 +344,22 @@ class ProductionHardeningTests(unittest.TestCase):
             self._validate_with(env)
         self.assertIn("LLM_FALLBACK_BACKEND=sunbird needs SUNBIRD_API_TOKEN", str(raised.exception))
 
+    def test_a_sunbird_only_deployment_starts_without_cloudflare(self) -> None:
+        """The flag gates the cloud chain; Cloudflare is required by what uses it (ADR-0036)."""
+        env = {**self.secure_env, "FLAG_CLOUDFLARE_FALLBACK": "true", "LLM_FALLBACK_BACKEND": "sunbird",
+               "SUNBIRD_API_TOKEN": "sb-token",  # pragma: allowlist secret
+               "CROSS_BORDER_PROCESSING_APPROVED": "true", "CROSS_BORDER_TRANSFER_ASSESSMENT_ID": "TIA-TEST-001"}
+        self._validate_with(env)
+
+    def test_a_cloudflare_backed_service_still_needs_cloudflare(self) -> None:
+        env = {**self.secure_env, "FLAG_CLOUDFLARE_FALLBACK": "true", "LLM_FALLBACK_BACKEND": "sunbird",
+               "SUNBIRD_API_TOKEN": "sb-token",  # pragma: allowlist secret
+               "STT_FALLBACK_BACKEND": "workers_ai",
+               "CROSS_BORDER_PROCESSING_APPROVED": "true", "CROSS_BORDER_TRANSFER_ASSESSMENT_ID": "TIA-TEST-001"}
+        with self.assertRaises(SystemExit) as raised:
+            self._validate_with(env)
+        self.assertIn("for STT_FALLBACK_BACKEND", str(raised.exception))
+
     def test_answer_generation_no_longer_needs_a_gemini_key(self) -> None:
         """Gemini no longer generates answers (ADR-0036); the retired value reads as sunbird."""
         env = {**self.secure_env, **self._CF_ENV, "LLM_FALLBACK_BACKEND": "gemini", "GEMINI_API_KEY": ""}

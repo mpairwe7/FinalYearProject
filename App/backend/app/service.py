@@ -408,6 +408,8 @@ LLM_DEADLINE_SECONDS = float(os.getenv("LLM_DEADLINE_SECONDS", "45"))
 # timeout), so the worst case becomes roughly this budget plus one more
 # hop's own timeout instead of the sum of every hop's timeout.
 LLM_TOTAL_BUDGET_SECONDS = float(os.getenv("LLM_TOTAL_BUDGET_SECONDS", "70"))
+#: Seconds of the chain's budget Sunbird leaves for Workers AI behind it (ADR-0036).
+SUNBIRD_WORKERS_AI_RESERVE_S = float(os.getenv("SUNBIRD_WORKERS_AI_RESERVE_S", "15"))
 SELF_REFLECT_ENABLED = os.getenv("SELF_REFLECT_ENABLED", "false").lower() == "true"
 SELF_REFLECT_THRESHOLD = float(os.getenv("SELF_REFLECT_THRESHOLD", "0.4"))
 _WORKFLOW_FLOWS_DIR = Path(__file__).resolve().parent / "workflows" / "flows"
@@ -975,12 +977,14 @@ def _llm_cloud_fallback(
 
     # The FULL governed prompt (formatting, citation, refusal, multilingual rules) +
     # the LLM01 passage scrub, as the local Sunflower gets: the Sunbird tier IS
-    # Sunflower, and Workers AI is held to the same rules.
+    # Sunflower, and Workers AI is held to the same rules. Always in English: answers
+    # are generated in English and localized in one place (localize_reply), so the
+    # guards ground the draft against the English passages it came from.
     messages = llm_module._build_messages(
         query=query,
         passages=passages,
         conversation_history=conversation_history,
-        locale=locale,
+        locale="en",
         tokenizer=None,  # hosted models have >=24k context; skip local-tokenizer trim
         structured=llm_module.LLM_STRUCTURED_OUTPUT,
         personalization_context=personalization_context,
@@ -997,12 +1001,17 @@ def _llm_cloud_fallback(
 
         if sunbird.is_available() and admit(breakers.SUNBIRD_LLM_BREAKER, lambda: True):
             try:
-                text = llm_module.strip_thought(sunbird.chat_completion(messages, temperature=0.2))
+                # Sunbird's failover is bounded by the chain's budget, less a reserve for
+                # Workers AI, so a slow primary account cannot also spend the fallback's time.
+                sunbird_deadline = None if deadline is None else deadline - SUNBIRD_WORKERS_AI_RESERVE_S
+                reply = sunbird.chat_completion(messages, temperature=0.2, deadline=sunbird_deadline)
+                cut_off = getattr(reply, "finish_reason", "") == "length"
+                text = llm_module.strip_thought(reply)
                 breakers.SUNBIRD_LLM_BREAKER.record_success()
                 routing.log_model_use("llm", f"sunbird:{sunbird.SUNBIRD_LLM_MODEL}")
                 # "[1, 3]" -> "[1][3]" before anything downstream reads citations.
                 text = normalise_citation_markers(text)
-                if text and text.strip() and not _looks_truncated(text):
+                if text and text.strip() and not cut_off and not _looks_truncated(text):
                     logger.info("LLM via Sunbird (%s) succeeded", sunbird.SUNBIRD_LLM_MODEL)
                     _note_generation(backend="sunbird", model=sunbird.SUNBIRD_LLM_MODEL)
                     return text
@@ -1057,7 +1066,7 @@ def _llm_cloud_fallback(
         ):
             break
         try:
-            text = gw.workers_ai_chat(messages, model=model, max_tokens=512, temperature=0.2)
+            text = gw.workers_ai_chat(messages, model=model, max_tokens=512, temperature=0.2, deadline=deadline)
             breakers.CF_LLM_BREAKER.record_success()
             routing.log_model_use("llm", model)
             text = normalise_citation_markers(text)
