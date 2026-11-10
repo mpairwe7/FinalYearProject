@@ -707,3 +707,70 @@ class TestTelemetryIsBoundedAndAttributed:
         assert outcome is not None
         assert "The page shows this notice" in outcome.deterministic_reply
         assert "Portal Alert Banner:" not in outcome.deterministic_reply
+
+
+# ---------------------------------------------------------------------------
+# Phase 2, G549: a decision comes from this application's own pages
+# ---------------------------------------------------------------------------
+class TestADecisionComesFromTheAppsOwnPages:
+    def _allow(self, client: TestClient, card: dict[str, Any], conversation: str, **headers: str) -> Any:
+        return client.post(
+            EXECUTE,
+            json={
+                "decision": "allow",
+                "request_state": card["request_state"],
+                "idempotency_key": card["idempotency_key"],
+                "conversation_id": conversation,
+                "displayed_fields_sha256": card["displayed_fields_sha256"],
+            },
+            headers={"X-Session-ID": "sess-taxpayer", **headers},
+        )
+
+    @pytest.mark.parametrize("site", ["cross-site", "same-site"])
+    def test_a_decision_a_browser_says_came_from_elsewhere_is_refused(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch, site: str
+    ) -> None:
+        card = _mint(client, conversation="conv-elsewhere")
+        connector = _Connector(monkeypatch)
+        response = self._allow(
+            client, card, "conv-elsewhere", **{"Sec-Fetch-Site": site, "Origin": "https://evil-space.hf.space"}
+        )
+
+        assert response.status_code == 403
+        assert connector.calls == []
+
+    def test_a_decision_from_the_apps_own_origin_is_taken(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        card = _mint(client, conversation="conv-own-origin")
+        _Connector(monkeypatch)
+        response = self._allow(client, card, "conv-own-origin", **{"Sec-Fetch-Site": "same-origin"})
+
+        assert response.json()["status"] == "executed"
+
+    def test_an_origin_the_deployment_allows_may_decide(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app import main
+
+        card = _mint(client, conversation="conv-allowed-origin")
+        _Connector(monkeypatch)
+        response = self._allow(
+            client,
+            card,
+            "conv-allowed-origin",
+            **{"Sec-Fetch-Site": "same-site", "Origin": main._allowed_origins[0]},
+        )
+
+        assert response.json()["status"] == "executed"
+
+    def test_the_approval_row_says_where_the_browser_said_it_came_from(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        flags.set("audit_ledger", True)
+        card = _mint(client, conversation="conv-fetch-site")
+        _Connector(monkeypatch)
+        self._allow(client, card, "conv-fetch-site", **{"Sec-Fetch-Site": "same-origin"})
+
+        approved = next(row for row in _ledger_rows() if row["event_type"] == "portal_task_approved")
+        assert approved["payload"]["sec_fetch_site"] == "same-origin"

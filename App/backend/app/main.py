@@ -1409,6 +1409,18 @@ def execute_portal_task_decision(
             detail="Administrators and auditors have audit/read-only access and cannot execute or modify live portal tasks.",
         )
 
+    # A browser states where a request came from, and a page cannot forge it
+    # (Fetch Metadata). The confirmation card lives on this application's own
+    # origin, so a decision from any other site, or from a sibling on a shared
+    # host, is refused unless the deployment lists that origin for CORS. A
+    # client that is not a browser sends no such header (G549).
+    fetch_site = request.headers.get("Sec-Fetch-Site", "").strip().lower()[:32]
+    if fetch_site not in ("", "same-origin", "none") and request.headers.get("Origin", "") not in _allowed_origins:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A portal task is decided from this application's own pages.",
+        )
+
     conv_id = body.conversation_id or "default"
     tenant_id = ctx.tenant_id or "default"
     # No fallback to the conversation id: an owner key built from it alone
@@ -1450,7 +1462,12 @@ def execute_portal_task_decision(
         """The approval, written before the portal is reached. Raising stops the task."""
         _ledger(
             "portal_task_approved",
-            {**evidence, "decision": body.decision, "session_bound": session_bound},
+            {
+                **evidence,
+                "decision": body.decision,
+                "session_bound": session_bound,
+                "sec_fetch_site": fetch_site or "absent",
+            },
         )
 
     try:

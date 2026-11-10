@@ -11,6 +11,13 @@ import {
 import { applyTurnMeta } from "../../lib/turnMeta";
 import type { ChatTurn } from "../../store/useChatStore";
 
+// jsdom cannot raise a click the browser calls trusted, so the Allow guard is
+// switched off here. PortalConfirmGuard.test.tsx tests it as it ships.
+vi.mock("../../lib/confirmGuard", () => ({
+  CONFIRM_ARM_DELAY_MS: 0,
+  isBrowserRaisedClick: () => true,
+}));
+
 describe("sanitizeReturnTo (CWE-601 Open Redirect Protection)", () => {
   it("allows safe same-origin relative paths and rejects external URLs", () => {
     expect(sanitizeReturnTo("/?conversation_id=conv-1&auth_resumed=1")).toBe(
@@ -68,6 +75,30 @@ describe("PortalCopilotCard interactive sub-components", () => {
     display_fields: [{ name: 'amount', label: 'Amount', value: '1200' }],
     fields: [{ name: 'amount', label: 'Amount', input_type: 'number', required: true, value: '1200' }],
   };
+
+  it('marks a value the taxpayer did not give as filled in for them', () => {
+    render(
+      <PortalCopilotCard
+        conversationId="c"
+        copilot={{
+          ...confirmation,
+          assumed_fields: ['tax_head'],
+          display_fields: [
+            { name: 'amount', label: 'Amount', value: '1200', assumed: false },
+            { name: 'tax_head', label: 'Tax head', value: 'VAT_STANDARD', assumed: true },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByTestId('portal-confirm-assumed-tax_head')).toHaveTextContent('Filled in for you');
+    expect(screen.queryByTestId('portal-confirm-assumed-amount')).toBeNull();
+    expect(screen.getByTestId('portal-assumed-notice')).toHaveTextContent('you did not give');
+  });
+
+  it('says nothing about assumed values when the taxpayer gave them all', () => {
+    render(<PortalCopilotCard conversationId="c" copilot={confirmation} />);
+    expect(screen.queryByTestId('portal-assumed-notice')).toBeNull();
+  });
 
   it('does not substitute a server digest when local verification is unavailable', async () => {
     vi.stubGlobal('crypto', {});

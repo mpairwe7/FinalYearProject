@@ -185,6 +185,8 @@ export interface PortalDisplayField {
   value: string;
   raw_value?: string;
   sensitive?: boolean;
+  /** The taxpayer did not give this value; the assistant filled in a default. */
+  assumed?: boolean;
 }
 
 export interface PortalCopilotPayload {
@@ -196,6 +198,7 @@ export interface PortalCopilotPayload {
     | 'stuck_portal_assistance'
     | 'executed_result'
     | 'access_denied'
+    | 'session_required'
     | 'copilot_launch_banner'
     | 'screenshot_copilot_handoff'
     | 'error_diagnosis'
@@ -217,6 +220,7 @@ export interface PortalCopilotPayload {
   verification_warning?: string;
   reversibility_notice?: string;
   display_fields?: PortalDisplayField[];
+  assumed_fields?: string[];
   displayed_fields_sha256?: string;
   high_value_requires_ack?: boolean;
   allow_label?: string;

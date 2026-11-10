@@ -101,6 +101,8 @@ test.describe("URA Chatbot Smoke", () => {
     // strict no-embed build (FRAME_ANCESTORS="'none'") is used.
     expect(headers["content-security-policy"]).toContain("frame-ancestors");
     expect(headers["content-security-policy"]).toContain("huggingface.co");
+    // Another party's Space may not frame the app (ADR-0038, G548).
+    expect(headers["content-security-policy"]).not.toContain("hf.space");
     expect(headers["permissions-policy"]).toContain("camera=()");
   });
 });

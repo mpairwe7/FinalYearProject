@@ -114,6 +114,8 @@ export const en = {
   'portalCopilot.prepareFailed': 'Your changes could not be prepared for review. They remain in this form; try reviewing them again.',
   'portalCopilot.verificationUnavailable': 'Your browser could not verify the details shown. No approval was sent. Please reload and review the details again.',
   'portalCopilot.resultUnconfirmed': 'The outcome could not be confirmed. Check the task status before trying again.',
+  'portalCopilot.assumedBadge': 'Filled in for you — check',
+  'portalCopilot.assumedNotice': 'The assistant filled in the values marked below because you did not give them. Check each one, and edit any that is wrong, before you allow this.',
   'message.connectorsUsed': 'Looked up in',
   'message.connectorOutcomeFound': 'Record found',
   'message.connectorOutcomeNoRecord': 'No matching record',
