@@ -1265,14 +1265,18 @@ def _dom_text(value: Any, max_len: int) -> str:
     Text from the DOM is evidence of what the page shows. It is cut to
     length, cleared of hidden characters and instruction phrases, kept from
     closing the telemetry fence, and folded to one line so it cannot open a
-    heading or a list of its own in the reply.
+    heading or a list of its own in the reply. A link is kept only when its
+    host is one an answer may link to: a page that says "sign in again at"
+    somewhere else does not get that address passed on to the taxpayer or to
+    whatever runs the card.
     """
-    from .guardrails import fence_spotlight_body, scan_retrieved_text
+    from .guardrails import fence_spotlight_body, neutralize_untrusted_links, scan_retrieved_text
     from .vision.ocr import strip_hidden_control_and_bidi
 
     raw = strip_hidden_control_and_bidi(str(value or ""))[:max_len]
     cleaned, _ = scan_retrieved_text(raw)
     cleaned = _TELEMETRY_TAG_RE.sub("[boundary removed]", fence_spotlight_body(cleaned))
+    cleaned, _ = neutralize_untrusted_links(cleaned)
     return " ".join(cleaned.split())
 
 
