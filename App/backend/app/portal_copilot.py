@@ -22,7 +22,7 @@ import threading
 import time
 import urllib.parse
 from collections import OrderedDict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -54,6 +54,14 @@ class PortalTaskValidationError(ValueError):
 
 class PortalTaskOwnershipError(PermissionError):
     """Raised when `request_state` belongs to another session/user or violates TPCA s. 75 (HTTP 403)."""
+
+
+class PortalTaskConflictError(RuntimeError):
+    """Raised when a proposal is being carried out, or already was (HTTP 409)."""
+
+
+class PortalTaskUnavailableError(RuntimeError):
+    """Raised when a decision cannot be recorded, so nothing is sent (HTTP 503)."""
 
 
 @dataclass(frozen=True)
@@ -423,7 +431,6 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
                 input_type="date",
                 required=True,
                 placeholder="1992-05-14",
-                default_value="1992-01-01",
                 helper_text="Format: YYYY-MM-DD.",
                 sensitive=True,
             ),
@@ -1064,11 +1071,23 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
 }
 
 
-# Replay-safe bounded LRU idempotency & decline caches for Tier 2 / Tier 3 portal task executions,
-# backed by the shared `workflow_sessions` database table across Uvicorn workers and guarded
-# in-process by `_TASK_CACHE_LOCK` + `_IN_FLIGHT_TASK_KEYS` (OWASP ASI07 / LLM10).
+# One approval runs a task once, whichever worker hears it (ADR-0038).
+#
+# The shared `workflow_sessions` row for a proposal is the arbiter. A worker
+# takes its lease in one statement before it reaches the portal, so a second
+# worker, a double click or a retry finds it held. The in-process caches below
+# only save a round trip; nothing is decided from them alone.
+#
+#   released   active,    step 0   nothing ran, or it failed before any effect
+#   in flight  active,    step 1   a worker holds the lease
+#   executed   completed, step 1   the receipt is in `slots`
+#   declined   cancelled, step 1
 _MAX_TASK_CACHE_ENTRIES = 2048
 PORTAL_TASK_STATE_TTL_SECONDS = max(60, int(os.getenv("PORTAL_TASK_STATE_TTL_SECONDS", "900")))
+_TASK_WORKFLOW_ID = "portal_task_decision"
+_NOT_RECORDED = (
+    "Your decision could not be recorded, so nothing was sent to the URA portal. Please try again shortly."
+)
 _TASK_CACHE_LOCK = threading.Lock()
 _EXECUTED_TASK_CACHE: OrderedDict[tuple[str, str], dict[str, Any]] = OrderedDict()
 _DECLINED_TASK_CACHE: OrderedDict[tuple[str, str], float] = OrderedDict()
@@ -1080,29 +1099,64 @@ _CONVERSATION_ENTITY_MEMORY: OrderedDict[str, dict[str, Any]] = OrderedDict()
 def _durable_task_cache_id(cache_key: tuple[str, str]) -> str:
     """Return a deterministic shared-store key for `(owner_key, idempotency_key)`."""
     digest = hashlib.sha256(f"{cache_key[0]}:{cache_key[1]}".encode()).hexdigest()[:40]
-    return f"portal_task_decision:{digest}"
+    return f"{_TASK_WORKFLOW_ID}:{digest}"
 
 
 def _read_shared_task_decision(
     cache_key: tuple[str, str],
 ) -> tuple[str | None, dict[str, Any] | None]:
-    """Read a previously executed or declined task decision from the shared database store."""
+    """Return a proposal's shared state: `executed`, `declined`, `in_flight` or None.
+
+    Raises `PortalTaskUnavailableError` when the store cannot be read. A
+    decision taken without it could run a task another worker already ran.
+    """
     try:
         row = db.get_workflow_session(_durable_task_cache_id(cache_key))
-        if not row or row.get("workflow_id") != "portal_task_decision":
-            return None, None
-        updated_at = float(row.get("updated_at") or 0.0)
-        if updated_at and (time.time() - updated_at) > PORTAL_TASK_STATE_TTL_SECONDS:
-            return None, None
-        status = str(row.get("status") or "")
-        slots = row.get("slots")
-        if status == "cancelled":
-            return "declined", None
-        if status == "completed" and isinstance(slots, dict) and slots:
-            return "executed", dict(slots)
-    except Exception:
-        logger.debug("Shared portal task decision read skipped", exc_info=True)
+    except Exception as exc:
+        logger.warning("Portal task decision store could not be read", exc_info=True)
+        raise PortalTaskUnavailableError(_NOT_RECORDED) from exc
+    if not row or row.get("workflow_id") != _TASK_WORKFLOW_ID:
+        return None, None
+    updated_at = float(row.get("updated_at") or 0.0)
+    if updated_at and (time.time() - updated_at) > PORTAL_TASK_STATE_TTL_SECONDS:
+        return None, None
+    status = str(row.get("status") or "")
+    slots = row.get("slots")
+    if status == "cancelled":
+        return "declined", None
+    if status == "completed" and isinstance(slots, dict) and slots:
+        return "executed", dict(slots)
+    if status == "active" and int(row.get("current_step_idx") or 0) == 1:
+        return "in_flight", None
     return None, None
+
+
+def _claim_shared_task(cache_key: tuple[str, str], user_id: str | None) -> bool:
+    """Take the proposal's lease in the shared store; False when another caller holds it."""
+    cid = _durable_task_cache_id(cache_key)
+    try:
+        claimed = db.claim_workflow_session(
+            cid,
+            _TASK_WORKFLOW_ID,
+            lease_seconds=PORTAL_TASK_STATE_TTL_SECONDS,
+            user_id=str(user_id or ""),
+        )
+    except Exception as exc:
+        logger.error("Portal task lease could not be taken; the task was not run", exc_info=True)
+        raise PortalTaskUnavailableError(_NOT_RECORDED) from exc
+    if claimed:
+        _SHARED_DECISION_KEYS.add(cid)
+    return claimed
+
+
+def _release_shared_task(cache_key: tuple[str, str]) -> None:
+    """Give the lease back after a run that sent nothing, so it can be tried again."""
+    try:
+        db.upsert_workflow_session(_durable_task_cache_id(cache_key), _TASK_WORKFLOW_ID, 0, {}, status="active")
+    except Exception:
+        # The lease then lapses with the signed state, after which a new
+        # confirmation is needed anyway.
+        logger.error("Portal task lease could not be released", exc_info=True)
 
 
 def _write_shared_task_decision(
@@ -1112,21 +1166,18 @@ def _write_shared_task_decision(
     payload: dict[str, Any] | None = None,
     user_id: str | None = None,
 ) -> None:
-    """Persist an executed or declined task decision in the shared database store across workers."""
-    try:
-        cid = _durable_task_cache_id(cache_key)
-        _SHARED_DECISION_KEYS.add(cid)
-        db.upsert_workflow_session(
-            cid,
-            "portal_task_decision",
-            1,
-            dict(payload or {"declined": True}),
-            status="cancelled" if declined else "completed",
-            last_prompt=cache_key[1],
-            user_id=str(user_id or ""),
-        )
-    except Exception:
-        logger.debug("Shared portal task decision write skipped", exc_info=True)
+    """Settle a proposal in the shared store as executed or declined. Raises when it cannot."""
+    cid = _durable_task_cache_id(cache_key)
+    _SHARED_DECISION_KEYS.add(cid)
+    db.upsert_workflow_session(
+        cid,
+        _TASK_WORKFLOW_ID,
+        1,
+        dict(payload or {"declined": True}),
+        status="cancelled" if declined else "completed",
+        last_prompt=cache_key[1],
+        user_id=str(user_id or ""),
+    )
 
 
 def clear_portal_task_cache() -> None:
@@ -1140,7 +1191,7 @@ def clear_portal_task_cache() -> None:
         _SHARED_DECISION_KEYS.clear()
     for cid in keys_to_reset:
         try:
-            db.upsert_workflow_session(cid, "portal_task_decision", 0, {}, status="active")
+            db.upsert_workflow_session(cid, _TASK_WORKFLOW_ID, 0, {}, status="active")
         except Exception:
             logger.debug("Shared portal task decision cleanup skipped", exc_info=True)
 
@@ -1148,6 +1199,16 @@ def clear_portal_task_cache() -> None:
 def classify_portal_task(task_id: str) -> PortalTaskSpec | None:
     """Return the `PortalTaskSpec` for *task_id*, or None if unknown."""
     return PORTAL_TASK_CATALOG.get(str(task_id or "").strip())
+
+
+def session_is_proven(session_id: str | None, conversation_id: str | None) -> bool:
+    """True when the caller sent a session id of its own.
+
+    A missing id falls back to the conversation id upstream. That value proves
+    nothing: anyone who knows the conversation can derive it (ADR-0013).
+    """
+    session = str(session_id or "").strip()
+    return session not in ("", "default", str(conversation_id or "default"))
 
 
 def mask_sensitive_value(field_name: str, value: Any) -> str:
@@ -1979,8 +2040,16 @@ def execute_portal_task(
     params: Mapping[str, Any],
     *,
     user_id: str | None = None,
+    tenant_id: str = "default",
+    human_confirmed: bool = False,
 ) -> dict[str, Any]:
-    """Execute the underlying registered connector tool for *task_id* with normalized arguments."""
+    """Execute the underlying registered connector tool for *task_id* with normalized arguments.
+
+    *human_confirmed* is True only when a person allowed this proposal. A
+    tier 1 lookup runs without one and is recorded as such. Nothing about the
+    taxpayer is filled in here: a value the params do not carry is sent empty,
+    and the connector refuses it.
+    """
     _ensure_connector_tools_registered()
     spec = classify_portal_task(task_id)
     if spec is None:
@@ -2021,13 +2090,13 @@ def execute_portal_task(
     elif spec.task_id == "tin_apply_individual":
         surname = str(p.get("surname") or "").strip()
         given = str(p.get("given_name") or "").strip()
-        full_name = str(p.get("full_name") or f"{surname} {given}".strip() or "Applicant")
+        full_name = str(p.get("full_name") or f"{surname} {given}".strip())
         tool_args = {
             "nin": str(p.get("nin") or ""),
             "full_name": full_name,
-            "date_of_birth": str(p.get("date_of_birth") or "1992-01-01"),
-            "mobile": str(p.get("mobile_number") or "+256700000000"),
-            "email": str(p.get("email") or "taxpayer@example.ug"),
+            "date_of_birth": str(p.get("date_of_birth") or ""),
+            "mobile": str(p.get("mobile_number") or ""),
+            "email": str(p.get("email") or ""),
             "district": str(p.get("district") or "Kampala"),
         }
     elif spec.task_id == "tin_apply_non_individual":
@@ -2036,8 +2105,8 @@ def execute_portal_task(
             "business_name": str(p.get("legal_name") or ""),
             "category": str(p.get("entity_type") or "NON_INDIVIDUAL_COMPANY"),
             "district": str(p.get("district") or "Kampala"),
-            "mobile": str(p.get("mobile_number") or "+256700000000"),
-            "email": str(p.get("email") or "info@company.co.ug"),
+            "mobile": str(p.get("mobile_number") or ""),
+            "email": str(p.get("email") or ""),
         }
     elif spec.task_id == "dts_order_stamps":
         raw_cat = str(p.get("product_category") or "BOTTLED_WATER").strip().upper()
@@ -2095,7 +2164,8 @@ def execute_portal_task(
         spec.tool_name,
         tool_args,
         user_id=str(user_id or ""),
-        caller_confirmed=True,
+        tenant_id=str(tenant_id or "default"),
+        caller_confirmed=bool(human_confirmed),
     )
 
     result_dict = dict(raw) if isinstance(raw, Mapping) else {"ok": True, "data": raw}
@@ -2260,7 +2330,7 @@ def build_portal_task_card(
 
     # ── Gate 4: Tier 1 Autonomous Execution (`executed_result`) ──
     if spec.tier == PortalTaskTier.AUTONOMOUS_VERIFY:
-        exec_res = execute_portal_task(spec.task_id, validated_params, user_id=user_id)
+        exec_res = execute_portal_task(spec.task_id, validated_params, user_id=user_id, tenant_id=tenant_id)
         dom_actions = get_portal_dom_recipe(spec.portal_key, state=spec.task_id, entities=validated_params)
         err_diag = (
             diagnose_ura_error(str(exec_res.get("error") or exec_res.get("message") or ""))
@@ -2285,6 +2355,31 @@ def build_portal_task_card(
         return card_out
 
     # ── Gate 5: Tier 2 & Tier 3 Claude-Style Confirmation Card (`confirmation_required`) ──
+    # The signed state is honoured for its owner key. Without a signed-in user
+    # or a session id of the caller's own, that key comes from the conversation
+    # id alone and binds the approval to nobody (ADR-0013, G542).
+    if not user_id and not session_is_proven(session_id, conv_id):
+        return {
+            "card_type": "session_required",
+            "task_id": spec.task_id,
+            "portal_key": spec.portal_key,
+            "portal_name": portal_info["name"],
+            "title": spec.title,
+            "tier": spec.tier.value,
+            "error": (
+                "This action needs your confirmation, and a confirmation is tied to your session. "
+                "Send an X-Session-ID header or sign in, then ask again."
+            ),
+            "copilot_portal_url": copilot_portal_url,
+        }
+
+    # A value the taxpayer did not give is shown as assumed, so a default
+    # never reads as something they said (G543).
+    assumed_fields = [
+        f.name
+        for f in spec.fields
+        if f.default_value and f.name in validated_params and fields_map.get(f.name) in (None, "")
+    ]
     display_fields: list[dict[str, Any]] = []
     for f in spec.fields:
         if f.name not in validated_params:
@@ -2297,6 +2392,7 @@ def build_portal_task_card(
                 "value": mask_sensitive_value(f.name, raw_v) if f.sensitive else raw_v,
                 "raw_value": raw_v,
                 "sensitive": f.sensitive,
+                "assumed": f.name in assumed_fields,
             }
         )
 
@@ -2343,6 +2439,7 @@ def build_portal_task_card(
             "or cancel at any time. Unpaid PRNs expire automatically after 21 days."
         ),
         "display_fields": display_fields,
+        "assumed_fields": assumed_fields,
         "displayed_fields_sha256": displayed_fields_sha256,
         "high_value_requires_ack": high_value_requires_ack,
         "fields": [
@@ -2457,8 +2554,14 @@ def handle_portal_task_decision(
     edited_fields: Mapping[str, Any] | None = None,
     displayed_fields_sha256: str | None = None,
     high_value_acknowledged: bool | None = None,
+    record_approval: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
-    """Verify HMAC-signed `request_state`, enforce owner/session binding (`ADR-0013`), and execute, prepare, or decline."""
+    """Verify HMAC-signed `request_state`, enforce owner/session binding (`ADR-0013`), and execute, prepare, or decline.
+
+    An allowed task runs once (ADR-0038): the shared lease is taken, then
+    *record_approval* is called with the evidence of the confirmation, and
+    only then is the portal reached. If either step fails nothing is sent.
+    """
     t0_decision = time.perf_counter()
     unwrapped = mrtr.unwrap_request_state(dict(request_state) if isinstance(request_state, Mapping) else None)
     if unwrapped is None:
@@ -2501,7 +2604,7 @@ def handle_portal_task_decision(
         raise PortalTaskOwnershipError(
             "Cross-session or cross-user request_state replay refused (ADR-0013 owner_key mismatch)."
         )
-    if state_user and user_id and state_user != str(user_id):
+    if state_user and state_user != str(user_id or ""):
         raise PortalTaskOwnershipError(
             "Signed request_state belongs to a different authenticated user."
         )
@@ -2521,16 +2624,18 @@ def handle_portal_task_decision(
 
     decision_clean = str(decision or "").strip().lower()
     if decision_clean == "prepare":
+        shared_state, _ = _read_shared_task_decision(cache_key)
         with _TASK_CACHE_LOCK:
-            shared_state, _ = _read_shared_task_decision(cache_key)
-            if (
+            settled = (
                 cache_key in _DECLINED_TASK_CACHE
                 or cache_key in _EXECUTED_TASK_CACHE
-                or shared_state in ("declined", "executed")
-            ):
-                raise PortalTaskValidationError(
-                    "Cannot modify a proposal that has already been executed or declined."
-                )
+                or cache_key in _IN_FLIGHT_TASK_KEYS
+                or shared_state is not None
+            )
+        if settled:
+            raise PortalTaskValidationError(
+                "Cannot modify a proposal that has already been executed or declined."
+            )
         allowed_field_names = {f.name for f in spec.fields}
         merged_fields: dict[str, Any] = dict(params)
         if edited_fields and isinstance(edited_fields, Mapping):
@@ -2597,13 +2702,29 @@ def handle_portal_task_decision(
         }
 
     if decision_clean in ("disallow", "decline", "cancel"):
-        shared_state, _ = _read_shared_task_decision(cache_key)
         with _TASK_CACHE_LOCK:
-            if cache_key not in _EXECUTED_TASK_CACHE and shared_state != "executed":
+            already_declined = cache_key in _DECLINED_TASK_CACHE
+            running = cache_key in _IN_FLIGHT_TASK_KEYS
+            done = cache_key in _EXECUTED_TASK_CACHE
+        if not already_declined:
+            # The decline takes the same lease an approval would, so it cannot
+            # report "nothing was sent" over a task another worker is sending.
+            if running or done or not _claim_shared_task(cache_key, user_id):
+                shared_state, _ = _read_shared_task_decision(cache_key)
+                if shared_state != "declined":
+                    raise PortalTaskConflictError(
+                        "This action is being carried out or was already carried out, so it can no longer be cancelled."
+                    )
+            try:
+                _write_shared_task_decision(cache_key, declined=True, user_id=user_id)
+            except Exception as exc:
+                logger.error("Portal task decline could not be recorded", exc_info=True)
+                _release_shared_task(cache_key)
+                raise PortalTaskUnavailableError(_NOT_RECORDED) from exc
+            with _TASK_CACHE_LOCK:
                 _DECLINED_TASK_CACHE[cache_key] = time.time()
                 while len(_DECLINED_TASK_CACHE) > _MAX_TASK_CACHE_ENTRIES:
                     _DECLINED_TASK_CACHE.popitem(last=False)
-                _write_shared_task_decision(cache_key, declined=True, user_id=user_id)
         _record_copilot_decision_metric("disallow", "declined", spec.tier.value, (time.perf_counter() - t0_decision) * 1000)
         return {
             "ok": True,
@@ -2621,7 +2742,9 @@ def handle_portal_task_decision(
     if decision_clean not in ("allow", "accept"):
         raise PortalTaskValidationError(f"Unsupported decision: {decision}")
 
-    # WYSIWYS Displayed Fields Digest check (OWASP ASI09 Human-Agent Trust Exploitation defense)
+    # WYSIWYS (OWASP ASI09): the caller proves which fields it showed. The
+    # digest was optional, so an approval could be sent without the card ever
+    # being rendered (G542).
     expected_display_fields = [
         {"name": f.name, "raw_value": str(params[f.name])}
         for f in spec.fields
@@ -2632,15 +2755,15 @@ def handle_portal_task_decision(
         raise PortalTaskValidationError(
             "WYSIWYS displayed_fields_sha256 integrity failure inside request_state."
         )
-    if displayed_fields_sha256:
-        target_hash = (state_displayed_hash or recomputed_displayed_hash).lower()
-        if not hmac_compare(target_hash, str(displayed_fields_sha256).strip().lower()):
-            raise PortalTaskValidationError(
-                "WYSIWYS displayed_fields_sha256 mismatch (OWASP ASI09): displayed fields do not match signed request_state."
-            )
-    elif os.getenv("PORTAL_COPILOT_REQUIRE_DISPLAY_DIGEST", "false").lower() in ("1", "true", "yes", "on"):
+    if not displayed_fields_sha256:
         raise PortalTaskValidationError(
-            "WYSIWYS displayed_fields_sha256 is required to confirm a portal task (OWASP ASI09)."
+            "displayed_fields_sha256 is required to confirm a portal task: send the SHA-256 of the fields shown "
+            "to the taxpayer (OWASP ASI09)."
+        )
+    target_hash = (state_displayed_hash or recomputed_displayed_hash).lower()
+    if not hmac_compare(target_hash, str(displayed_fields_sha256).strip().lower()):
+        raise PortalTaskValidationError(
+            "WYSIWYS displayed_fields_sha256 mismatch (OWASP ASI09): displayed fields do not match signed request_state."
         )
 
     # Server-enforced high-value statutory liability cognitive friction gate (OWASP ASI09 / WCAG 2.2 SC 3.3.4)
@@ -2649,6 +2772,11 @@ def handle_portal_task_decision(
             "High-value statutory transaction (>= UGX 50,000,000) requires explicit high_value_acknowledged=True confirmation."
         )
 
+    def _replay(payload: Mapping[str, Any]) -> dict[str, Any]:
+        cached = dict(payload)
+        cached["idempotent_replay"] = True
+        return cached
+
     with _TASK_CACHE_LOCK:
         if cache_key in _DECLINED_TASK_CACHE:
             raise PortalTaskValidationError(
@@ -2656,25 +2784,31 @@ def handle_portal_task_decision(
             )
         if cache_key in _EXECUTED_TASK_CACHE:
             _EXECUTED_TASK_CACHE.move_to_end(cache_key)
-            cached = dict(_EXECUTED_TASK_CACHE[cache_key])
-            cached["idempotent_replay"] = True
-            return cached
-        shared_state, shared_payload = _read_shared_task_decision(cache_key)
-        if shared_state == "declined":
-            _DECLINED_TASK_CACHE[cache_key] = time.time()
-            raise PortalTaskValidationError(
-                "This action proposal was already declined by the taxpayer and cannot be replayed."
-            )
-        if shared_state == "executed" and shared_payload:
-            _EXECUTED_TASK_CACHE[cache_key] = dict(shared_payload)
-            cached = dict(shared_payload)
-            cached["idempotent_replay"] = True
-            return cached
+            return _replay(_EXECUTED_TASK_CACHE[cache_key])
         if cache_key in _IN_FLIGHT_TASK_KEYS:
-            raise PortalTaskValidationError("This action proposal is already being executed.")
+            raise PortalTaskConflictError("This action proposal is already being carried out.")
         _IN_FLIGHT_TASK_KEYS.add(cache_key)
 
+    claimed = False
+    sent = False
     try:
+        # The shared store decides; this worker's caches may know nothing of
+        # what another worker did with the same proposal.
+        if not _claim_shared_task(cache_key, user_id):
+            shared_state, shared_payload = _read_shared_task_decision(cache_key)
+            if shared_state == "executed" and shared_payload:
+                with _TASK_CACHE_LOCK:
+                    _EXECUTED_TASK_CACHE[cache_key] = dict(shared_payload)
+                return _replay(shared_payload)
+            if shared_state == "declined":
+                with _TASK_CACHE_LOCK:
+                    _DECLINED_TASK_CACHE[cache_key] = time.time()
+                raise PortalTaskValidationError(
+                    "This action proposal was already declined by the taxpayer and cannot be replayed."
+                )
+            raise PortalTaskConflictError("This action proposal is already being carried out.")
+        claimed = True
+
         # Re-verify 4-Tier Policy Gate at execution time
         if spec.requires_auth and not user_id:
             return {
@@ -2699,8 +2833,31 @@ def handle_portal_task_decision(
         if not allowed_tin:
             raise PortalTaskOwnershipError(secrecy_err)
 
-        exec_result = execute_portal_task(spec.task_id, params, user_id=user_id)
+        if record_approval is not None:
+            evidence = {
+                "task_id": spec.task_id,
+                "portal_key": spec.portal_key,
+                "tier": spec.tier.value,
+                "idempotency_key": state_idem,
+                "params_sha256": computed_hash,
+                "displayed_fields_sha256": target_hash,
+                "display_digest_verified": True,
+                "high_value": state_high_value_ack,
+                "high_value_acknowledged": bool(state_high_value_ack and high_value_acknowledged is True),
+                "review_ms": max(0, int((time.time() - issued_at) * 1000)),
+                "authenticated": bool(user_id),
+            }
+            try:
+                record_approval(evidence)
+            except Exception as exc:
+                logger.error("Portal task approval could not be recorded; the task was not run", exc_info=True)
+                raise PortalTaskUnavailableError(_NOT_RECORDED) from exc
+
+        exec_result = execute_portal_task(
+            spec.task_id, params, user_id=user_id, tenant_id=tenant_id, human_confirmed=True
+        )
         ok = bool(exec_result.get("ok", True))
+        sent = ok
         live = bool(exec_result.get("live", False))
         mode = "live" if live else "simulation"
         dom_actions = get_portal_dom_recipe(spec.portal_key, state=spec.task_id, entities=dict(params))
@@ -2757,12 +2914,17 @@ def handle_portal_task_decision(
                 _EXECUTED_TASK_CACHE[cache_key] = dict(response_payload)
                 while len(_EXECUTED_TASK_CACHE) > _MAX_TASK_CACHE_ENTRIES:
                     _EXECUTED_TASK_CACHE.popitem(last=False)
+            try:
                 _write_shared_task_decision(
                     cache_key,
                     declined=False,
                     payload=response_payload,
                     user_id=user_id,
                 )
+            except Exception:
+                # The task ran. The lease stays held until it lapses with the
+                # signed state, so no other worker runs it again.
+                logger.error("Portal task receipt could not be stored in the shared store", exc_info=True)
         _record_copilot_decision_metric(
             "allow",
             "executed" if ok else "error",
@@ -2771,6 +2933,8 @@ def handle_portal_task_decision(
         )
         return response_payload
     finally:
+        if claimed and not sent:
+            _release_shared_task(cache_key)
         with _TASK_CACHE_LOCK:
             _IN_FLIGHT_TASK_KEYS.discard(cache_key)
 
@@ -3064,9 +3228,7 @@ def evaluate_turn(
 ) -> PortalCopilotOutcome | None:
     """Evaluate a chat turn for inline form elicitation, Claude-style confirmation, or live DOM co-pilot help."""
     conv_id = str(conversation_id or "default")
-    has_proven_session = bool(user_id) or (
-        bool(session_id) and str(session_id).strip() not in ("", conv_id, "default")
-    )
+    has_proven_session = bool(user_id) or session_is_proven(session_id, conv_id)
     owner_key = db.conversation_state_key(
         conv_id,
         session_id=session_id or None,
@@ -3080,7 +3242,7 @@ def evaluate_turn(
             user_id=None,
             tenant_id=tenant_id,
         )
-        if bool(session_id) and str(session_id).strip() not in ("", conv_id, "default")
+        if session_is_proven(session_id, conv_id)
         else ""
     )
 
@@ -3362,6 +3524,8 @@ def _outcome_from_card(card: dict[str, Any]) -> PortalCopilotOutcome:
         )
     elif ctype == "access_denied":
         reply = f"### Official Secrecy Protection ({citation})\n\n{card.get('error')}"
+    elif ctype == "session_required":
+        reply = f"### Session Required — {title}\n\n{card.get('error')}"
     elif ctype == "inline_form":
         missing = ", ".join(card.get("missing_fields") or [])
         field_errors = card.get("field_errors")

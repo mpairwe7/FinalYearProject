@@ -160,6 +160,7 @@ def test_3_execute_endpoint_allow_disallow_and_idempotency(client: TestClient) -
             "request_state": req_state_dec,
             "idempotency_key": idem_key_dec,
             "conversation_id": "conv-exec-decline",
+            "displayed_fields_sha256": copilot_dec["displayed_fields_sha256"],
         },
         headers=headers,
     )
@@ -185,6 +186,7 @@ def test_3_execute_endpoint_allow_disallow_and_idempotency(client: TestClient) -
             "request_state": req_state,
             "idempotency_key": idem_key,
             "conversation_id": "conv-exec-3",
+            "displayed_fields_sha256": copilot["displayed_fields_sha256"],
         },
         headers=headers,
     )
@@ -205,6 +207,7 @@ def test_3_execute_endpoint_allow_disallow_and_idempotency(client: TestClient) -
             "request_state": req_state,
             "idempotency_key": idem_key,
             "conversation_id": "conv-exec-3",
+            "displayed_fields_sha256": copilot["displayed_fields_sha256"],
         },
         headers=headers,
     )
@@ -243,6 +246,7 @@ def test_4_security_tampered_request_state_and_cross_session_replay_refused(clie
             "request_state": tampered_state,
             "idempotency_key": idem_key,
             "conversation_id": "conv-sec-4",
+            "displayed_fields_sha256": copilot["displayed_fields_sha256"],
         },
         headers=headers_alice,
     )
@@ -257,6 +261,7 @@ def test_4_security_tampered_request_state_and_cross_session_replay_refused(clie
             "request_state": req_state,
             "idempotency_key": idem_key,
             "conversation_id": "conv-sec-4",
+            "displayed_fields_sha256": copilot["displayed_fields_sha256"],
         },
         headers=headers_mallory,
     )
@@ -271,6 +276,7 @@ def test_4_security_tampered_request_state_and_cross_session_replay_refused(clie
             "request_state": req_state,
             "idempotency_key": idem_key,
             "conversation_id": "conv-sec-4",
+            "displayed_fields_sha256": copilot["displayed_fields_sha256"],
         },
         headers=authed_alice,
     )

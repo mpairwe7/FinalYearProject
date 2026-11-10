@@ -1917,6 +1917,54 @@ def complete_workflow_session(
         return False
 
 
+def claim_workflow_session(
+    conversation_id: str,
+    workflow_id: str,
+    *,
+    lease_seconds: float,
+    user_id: str = "",
+    tenant_id: str = "default",
+) -> bool:
+    """Take the lease on a workflow row; True for the one caller that gets it.
+
+    One statement decides it, so two workers cannot both win. The row is
+    taken when it does not exist, when it was released (``active`` at step
+    0), or when it has not been written for *lease_seconds*. A row at step 1
+    is held: ``active`` while the work runs, ``completed`` or ``cancelled``
+    once it is settled. A row of another tenant or workflow is never taken.
+    """
+    if not conversation_id or not workflow_id:
+        return False
+    now = time.time()
+    taken = execute(
+        """INSERT INTO workflow_sessions
+           (conversation_id, tenant_id, workflow_id, status, current_step_idx, user_id,
+            slots_json, last_prompt, created_at, updated_at)
+           VALUES (?, ?, ?, 'active', 1, ?, '{}', '', ?, ?)
+           ON CONFLICT(conversation_id) DO UPDATE SET
+             status = 'active',
+             current_step_idx = 1,
+             user_id = excluded.user_id,
+             slots_json = '{}',
+             last_prompt = '',
+             updated_at = excluded.updated_at
+           WHERE workflow_sessions.tenant_id = excluded.tenant_id
+             AND workflow_sessions.workflow_id = excluded.workflow_id
+             AND ((workflow_sessions.status = 'active' AND workflow_sessions.current_step_idx = 0)
+                  OR workflow_sessions.updated_at < ?)""",
+        (
+            conversation_id,
+            tenant_id or "default",
+            workflow_id,
+            user_id or "",
+            now,
+            now,
+            now - max(0.0, float(lease_seconds)),
+        ),
+    )
+    return taken == 1
+
+
 def adopt_workflow_session(
     from_conversation_id: str,
     to_conversation_id: str,
@@ -4592,6 +4640,7 @@ if ANALYTICS_BACKEND == "postgres":
         upsert_workflow_session = _pg.upsert_workflow_session  # type: ignore
         complete_workflow_session = _pg.complete_workflow_session  # type: ignore
         adopt_workflow_session = _pg.adopt_workflow_session  # type: ignore
+        claim_workflow_session = _pg.claim_workflow_session  # type: ignore
         logger.info("Analytics backend: postgres")
     except Exception:
         logger.exception("Postgres backend requested but import failed; falling back to sqlite")

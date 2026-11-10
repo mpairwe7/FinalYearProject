@@ -1409,9 +1409,17 @@ def execute_portal_task_decision(
             detail="Administrators and auditors have audit/read-only access and cannot execute or modify live portal tasks.",
         )
 
-    session_id = request.headers.get("X-Session-ID") or body.conversation_id or ""
     conv_id = body.conversation_id or "default"
     tenant_id = ctx.tenant_id or "default"
+    # No fallback to the conversation id: an owner key built from it alone
+    # binds the decision to nobody (ADR-0013, G542).
+    session_id = request.headers.get("X-Session-ID", "").strip()
+    session_bound = pc_mod.session_is_proven(session_id, conv_id)
+    if not ctx.user_id and not session_bound:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="X-Session-ID or an authenticated identity is required to decide a portal task.",
+        )
 
     owner_key = db.conversation_state_key(
         conv_id,
@@ -1420,7 +1428,7 @@ def execute_portal_task_decision(
         tenant_id=tenant_id,
     )
     candidate_owner_keys: list[str] = []
-    if ctx.user_id and session_id:
+    if ctx.user_id and session_bound:
         candidate_owner_keys.append(
             db.conversation_state_key(
                 conv_id,
@@ -1428,6 +1436,21 @@ def execute_portal_task_decision(
                 user_id=None,
                 tenant_id=tenant_id,
             )
+        )
+
+    ledger_on = flags.is_enabled("audit_ledger")
+    actor = str(ctx.user_id or session_id or "anonymous")[:128]
+
+    def _ledger(event_type: str, payload: dict[str, Any]) -> None:
+        from .audit import get_ledger
+
+        get_ledger().append(event_type, payload, tenant_id=tenant_id, user_id=actor)
+
+    def _record_approval(evidence: dict[str, Any]) -> None:
+        """The approval, written before the portal is reached. Raising stops the task."""
+        _ledger(
+            "portal_task_approved",
+            {**evidence, "decision": body.decision, "session_bound": session_bound},
         )
 
     try:
@@ -1444,20 +1467,27 @@ def execute_portal_task_decision(
             edited_fields=body.edited_fields,
             displayed_fields_sha256=body.displayed_fields_sha256,
             high_value_acknowledged=body.high_value_acknowledged,
+            record_approval=_record_approval if ledger_on else None,
         )
     except pc_mod.PortalTaskValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except pc_mod.PortalTaskOwnershipError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except pc_mod.PortalTaskConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except pc_mod.PortalTaskUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
-    if flags.is_enabled("audit_ledger"):
+    # The outcome row. The call this replaces named a function that does not
+    # exist and logged the AttributeError at debug level, so no portal decision
+    # ever reached the ledger (G541). A replayed receipt is not a new event.
+    if ledger_on and not outcome.get("idempotent_replay"):
+        receipt = outcome.get("decision_receipt") or {}
+        event_type = f"portal_task_{outcome.get('status', 'decision')}"
         try:
-            receipt = outcome.get("decision_receipt") or {}
-            db.append_audit_event(
-                event_type=f"portal_task_{outcome.get('status', 'decision')}",
-                actor_id=ctx.user_id or session_id or "anonymous",
-                tenant_id=tenant_id,
-                payload={
+            _ledger(
+                event_type,
+                {
                     "task_id": outcome.get("task_id", ""),
                     "portal_key": outcome.get("portal_key", ""),
                     "decision": body.decision,
@@ -1469,10 +1499,14 @@ def execute_portal_task_decision(
                     "displayed_fields_sha256": outcome.get("displayed_fields_sha256")
                     or receipt.get("displayed_fields_sha256", ""),
                     "receipt_id": receipt.get("receipt_id", ""),
+                    "session_bound": session_bound,
                 },
             )
         except Exception:
-            logger.debug("Portal task audit event logging skipped", exc_info=True)
+            # The decision stands: a refusal never waits on its record (ADR-0022),
+            # and an executed task was recorded as approved before it ran.
+            metrics.inc("audit_append_failed_total", labels={"event_type": event_type})
+            logger.exception("audit append failed for %s", event_type)
 
     return PortalTaskDecisionResponse(**outcome)
 
