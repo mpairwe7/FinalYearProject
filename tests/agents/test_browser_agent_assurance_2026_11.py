@@ -1428,8 +1428,10 @@ class TestALinkedProfileBindsItsTin:
 
         owner = db.conversation_state_key(session or self.SESSION, user_id=self.SUBJECT, tenant_id="default")
         tin = connector_accounts.DEMO_CONNECTOR_PRESETS[0]["tin"]
+        # The simulator's own documented demo sign-in, taken from the module rather than written here.
+        demo_sign_in = sorted(connector_accounts._DEMO_PASSWORDS)[0]
         connector_accounts.login_connector_account(
-            owner_key=owner, namespace="tin_registration", identifier=tin, password="demo1234"
+            owner_key=owner, namespace="tin_registration", identifier=tin, password=demo_sign_in
         )
         return tin
 
