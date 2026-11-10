@@ -55,7 +55,8 @@ def test_the_translation_tier_asks_sunflower_and_never_gemini(translation_on, mo
     with mock.patch.object(sunbird, "translate_with_sunflower", return_value="Omusolo") as tr, \
          mock.patch.object(gateway, "gemini_generate") as gem:
         assert SpeechModel._sunbird_llm_translate("Tax", "en", "lg") == "Omusolo"
-    tr.assert_called_once_with("Tax", "en", "lg")
+    tr.assert_called_once()
+    assert tr.call_args.args == ("Tax", "en", "lg")  # the deadline is checked separately
     gem.assert_not_called()
 
 
@@ -133,3 +134,35 @@ def test_a_failing_judge_opens_the_shared_breaker(judge_on) -> None:
         results = [service._judge_rescue("What is the VAT rate?", _index(), 4) for _ in range(5)]
     assert results == [[]] * 5
     assert chat.call_count == breakers.SUNBIRD_LLM_BREAKER.failure_threshold
+
+
+# --------------------------------------------------------------------------- review fixes (PR 712)
+
+
+def test_the_translation_tier_bounds_failover_by_the_speech_deadline(translation_on) -> None:
+    from app import speech_service
+
+    with mock.patch.object(sunbird, "translate_with_sunflower", return_value="Omusolo") as tr:
+        before = speech_service.time.monotonic()
+        SpeechModel._sunbird_llm_translate("Tax", "en", "lg")
+        after = speech_service.time.monotonic()
+    deadline = tr.call_args.kwargs["deadline"]
+    assert before + speech_service.SPEECH_CLOUD_DEADLINE_S <= deadline <= after + speech_service.SPEECH_CLOUD_DEADLINE_S
+
+
+def test_translate_with_sunflower_hands_the_deadline_to_the_chat_call() -> None:
+    with mock.patch.object(sunbird, "chat_completion", return_value=sunbird.ChatReply("Omusolo.")) as chat:
+        sunbird.translate_with_sunflower("Tax.", "en", "lg", deadline=1234.5)
+    assert chat.call_args.kwargs["deadline"] == 1234.5
+
+
+def test_the_final_translation_error_names_the_current_backends(monkeypatch) -> None:
+    model = SpeechModel.__new__(SpeechModel)
+    model._mt = None
+    model._chat_model = None
+    monkeypatch.setattr(sunbird, "is_available", lambda: False)
+    with mock.patch.object(SpeechModel, "_sunbird_llm_translate", return_value=""), \
+         mock.patch.object(SpeechModel, "_cf_llama_translate", return_value=""):
+        result = model._do_translate("Hello", "en", "lg")
+    assert "Gemini" not in (result.error or "")
+    assert "Sunflower" in (result.error or "")

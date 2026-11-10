@@ -2961,7 +2961,7 @@ class SpeechModel:
         return TranslateResult(
             text="", source_lang=source_lang, target_lang=target_lang,
             latency_s=round(time.perf_counter() - t0, 3), backend="error",
-            error="No translation backend available (Sunbird, Gemini, CF Llama, local MT, Qwen3 all failed)",
+            error="No translation backend available (Sunbird, Sunflower, CF Llama, local MT, Qwen3 all failed)",
         )
 
     @staticmethod
@@ -2988,7 +2988,10 @@ class SpeechModel:
         if not (sunbird.is_available() and admit(breakers.SUNBIRD_LLM_BREAKER, lambda: True)):
             return ""
         try:
-            out = sunbird.translate_with_sunflower(text, source_lang, target_lang)
+            # The cloud tier's budget bounds the whole call, account failover included, so a slow
+            # pair of accounts cannot hold a shared speech worker past SPEECH_CLOUD_DEADLINE_S.
+            deadline = time.monotonic() + SPEECH_CLOUD_DEADLINE_S
+            out = sunbird.translate_with_sunflower(text, source_lang, target_lang, deadline=deadline)
             breakers.SUNBIRD_LLM_BREAKER.record_success()
             return out
         except Exception:
@@ -2999,7 +3002,7 @@ class SpeechModel:
     @staticmethod
     def _cf_llama_translate(text: str, source_lang: str, target_lang: str) -> str:
         """Translate via Cloudflare Workers AI Llama (prompted) — the model-routing
-        fallback after Gemini. Flag/budget/breaker-gated; returns "" when disabled
+        fallback after Sunflower. Flag/budget/breaker-gated; returns "" when disabled
         or unavailable so the Sunbird tier still runs."""
         from .flags import flags
 

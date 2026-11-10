@@ -452,13 +452,16 @@ _LANGUAGE_NAMES = {
 SUNBIRD_TRANSLATE_LLM_TIMEOUT = float(os.getenv("SUNBIRD_TRANSLATE_LLM_TIMEOUT", "30"))
 
 
-def translate_with_sunflower(text: str, source_lang: str, target_lang: str, *, timeout: float | None = None) -> str:
+def translate_with_sunflower(
+    text: str, source_lang: str, target_lang: str, *, timeout: float | None = None, deadline: float | None = None
+) -> str:
     """A translation from Sunflower through the chat endpoint (ADR-0037).
 
     It replaces the Gemini translation tier. Sunflower is trained on the Ugandan
     languages, and this sits beside ``/tasks/translate``, so a pair that endpoint
     does not serve still has a Sunbird translator. Thinking text is stripped.
-    Raises on failure, like :func:`chat_completion`.
+    *deadline* (``time.monotonic()``) bounds the call, account failover
+    included. Raises on failure, like :func:`chat_completion`.
     """
     from .llm import strip_thought
 
@@ -472,7 +475,8 @@ def translate_with_sunflower(text: str, source_lang: str, target_lang: str, *, t
         )},
         {"role": "user", "content": text},
     ]
-    reply = chat_completion(messages, temperature=0.1, timeout=timeout or SUNBIRD_TRANSLATE_LLM_TIMEOUT)
+    reply = chat_completion(messages, temperature=0.1, timeout=timeout or SUNBIRD_TRANSLATE_LLM_TIMEOUT,
+                            deadline=deadline)
     out = strip_thought(reply).strip()
     if not out:
         raise RuntimeError("translate_with_sunflower: empty translation")

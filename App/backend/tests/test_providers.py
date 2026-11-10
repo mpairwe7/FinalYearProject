@@ -1586,7 +1586,7 @@ class HybridCloudPrimaryRoutingTest(unittest.TestCase):
 
 
 class TranslateRoutingOrderTest(unittest.TestCase):
-    """speech_service._do_translate — Gemini -> CF Llama -> Sunbird."""
+    """speech_service._do_translate — when /tasks/translate cannot serve: Sunflower -> CF Llama -> Sunbird (ADR-0037)."""
 
     @staticmethod
     def _sm():
@@ -1826,8 +1826,9 @@ class DeterministicProcedureReplyFormattingTest(unittest.TestCase):
 
 
 class LugandaTranslationRoutingTest(unittest.TestCase):
-    """Luganda (lg↔en) translation must try Sunbird's Luganda-native NLLB BEFORE
-    Gemini; other languages keep Gemini-first. Sunbird remains a fallback for all."""
+    """Luganda (lg↔en) translation must try Sunbird's /tasks/translate BEFORE Sunflower;
+    a pair that endpoint does not serve leads with Sunflower (ADR-0037). The endpoint
+    remains a fallback for all."""
 
     def _bare_model(self):
         # _do_translate only needs _mt / _chat_model; skip the heavy __init__.

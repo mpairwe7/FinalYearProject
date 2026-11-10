@@ -6,7 +6,7 @@ Accepted — 2026-11-10
 
 ## Context and Problem Statement
 
-ADR-0036 moved answer generation from Gemini to Sunflower through Sunbird's API, because the
+ADR-0036 moved answer generation from Gemini to Sunflower through Sunbird's API because the
 Gemini key is IP-restricted (`API_KEY_IP_ADDRESS_BLOCKED`) and fails from the HF Space. Two other
 features still called Gemini on that key, and so failed on the Space on every call:
 
@@ -36,6 +36,8 @@ The project owner asked for both to move to Sunbird.
   - It has the same gating as before (`cloudflare_fallback` and `TRANSLATE_FALLBACK_BACKEND`), and
     the retired value `gemini` is read as `sunbird`.
   - It shares the Sunbird breaker. A call turn never reaches it.
+  - The whole call, account failover included, is bounded by the speech tier's deadline
+    (`SPEECH_CLOUD_DEADLINE_S`, 40 s), so slow accounts cannot hold a shared speech worker past it.
 - **Tier order in `_do_translate`.**
   - Pairs `/tasks/translate` serves: that endpoint, then Sunflower, then Cloudflare Llama, local
     MT and prompted Qwen.
