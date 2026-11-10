@@ -18,6 +18,7 @@ import logging
 import math
 import os
 import re
+import secrets
 import threading
 import time
 import urllib.parse
@@ -715,12 +716,14 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
         task_id="tin_tax_obligations",
         tool_name="tin_tax_obligations",
         portal_key="e_services",
-        title="Check or Register Taxpayer Filing Obligations & Deadlines",
-        tier=PortalTaskTier.AUTHENTICATED_ACCOUNT_READ,
+        # The connector registers a tax head; it has no way to only look. So this
+        # is a write a person confirms, with the tax head they named (G556).
+        title="Register a Tax Head on Your TIN",
+        tier=PortalTaskTier.DELEGATED_CONFIRM,
         requires_auth=True,
         required_consent="ura_account_access",
         statutory_citation="TPCA Cap. 343 s. 75 (Official Secrecy) & s. 16",
-        description="Inspect or update registered tax head obligations on your authenticated TIN profile.",
+        description="Register an additional tax head obligation (for example VAT or PAYE) on your own TIN.",
         fields=(
             PortalFieldSpec(
                 name="tin",
@@ -732,12 +735,11 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
             ),
             PortalFieldSpec(
                 name="tax_head",
-                label="Tax Obligation Head",
+                label="Tax Head to Register",
                 input_type="select",
-                required=False,
+                required=True,
                 options=TAX_HEAD_OPTIONS,
-                default_value="VAT_STANDARD",
-                helper_text="Tax obligation head to check or activate.",
+                helper_text="This adds the tax head to your registered obligations.",
             ),
         ),
     ),
@@ -1739,6 +1741,13 @@ def detect_portal_task_intent(
         return _intent("dts_activate_stamps", "dts", 0.93)
 
     # 7. Tier 3 Authenticated Account Reads (TPCA s. 75)
+    # Registering a tax head is a write, and only wording that asks for one
+    # reaches it. Asking to check, view or query obligations reads the account:
+    # it used to be sent to the same tool, which registered VAT (G556).
+    if "tin_tax_obligations" in low or (
+        "obligation" in low and re.search(r"\b(?:register|add|activate)\b", low) is not None
+    ):
+        return _intent("tin_tax_obligations", "e_services", 0.95)
     if any(
         phrase in low
         for phrase in (
@@ -1746,12 +1755,9 @@ def detect_portal_task_intent(
             "check tax obligations",
             "view my tax obligations",
             "my filing obligations",
-            "tin_tax_obligations",
-            "register vat obligation",
-            "add tax obligation",
         )
     ) or ("obligations" in low and ("my" in low or "tin" in low or "check" in low or "query" in low)):
-        return _intent("tin_tax_obligations", "e_services", 0.95)
+        return _intent("ura_account_profile", "e_services", 0.95)
 
     if any(
         phrase in low
@@ -2032,14 +2038,16 @@ def validate_task_fields(
 
 
 def extract_authenticated_tin(user_id: str | None, authenticated_tin: str | None = None) -> str:
-    """Resolve the 10-digit TIN bound to the authenticated user identity, if any."""
+    """The TIN a sign-in is bound to, or "".
+
+    A subject binds a TIN only by being one. A ten-digit run inside a longer
+    opaque subject (`google-oauth2|1098765432`) is not a TIN anyone verified,
+    and was read as one (G557).
+    """
     if authenticated_tin and re.fullmatch(r"\d{10}", str(authenticated_tin).strip()):
         return str(authenticated_tin).strip()
     uid = str(user_id or "").strip()
-    if not uid:
-        return ""
-    m = re.search(r"\b(\d{10})\b", uid)
-    return m.group(1) if m else ""
+    return uid if re.fullmatch(r"\d{10}", uid) else ""
 
 
 def check_subject_tin_ownership(
@@ -2049,14 +2057,25 @@ def check_subject_tin_ownership(
     user_id: str | None,
     authenticated_tin: str | None = None,
 ) -> tuple[bool, str]:
-    """Enforce TPCA Cap. 343 s. 75 (Official Secrecy): User A cannot query User B's private obligations."""
-    if spec.tier != PortalTaskTier.AUTHENTICATED_ACCOUNT_READ:
+    """Enforce TPCA Cap. 343 s. 75 (Official Secrecy): an account task is for the account's owner.
+
+    It covers every task that needs sign-in and names a TIN, a write as much
+    as a read. A sign-in bound to no TIN is refused: it used to pass for any
+    TIN, because there was nothing to compare (G557).
+    """
+    if not spec.requires_auth:
         return True, ""
     target = str(target_tin or "").strip()
     if not target:
         return True, ""
     owner_tin = extract_authenticated_tin(user_id, authenticated_tin)
-    if owner_tin and target != owner_tin:
+    if not owner_tin:
+        return (
+            False,
+            "Access refused under Section 75 of the Tax Procedures Code Act (TPCA) Cap. 343 (Official Secrecy): "
+            f"your sign-in is not linked to a TIN, so an account task for TIN {target} cannot be confirmed here.",
+        )
+    if target != owner_tin:
         return (
             False,
             f"Access refused under Section 75 of the Tax Procedures Code Act (TPCA) Cap. 343 (Official Secrecy): "
@@ -2064,6 +2083,25 @@ def check_subject_tin_ownership(
             f"account records for a different taxpayer TIN ({target}).",
         )
     return True, ""
+
+
+def check_consent_and_role(spec: PortalTaskSpec, *, granted_purposes: Sequence[str], role: str | None) -> str:
+    """Why this caller may not run *spec*, or "".
+
+    A task that needs sign-in also needs the consent it names and a role its
+    tool allows. Both were declared and neither was read on this path (G557).
+    A task open to anyone is consented to on its confirmation card.
+    """
+    if not spec.requires_auth:
+        return ""
+    if spec.required_consent and spec.required_consent not in set(granted_purposes):
+        return f"{spec.title} needs your consent to '{spec.required_consent}', which this sign-in has not given."
+    _ensure_connector_tools_registered()
+    tool = ToolRegistry.get(spec.tool_name)
+    allowed_roles = tuple(getattr(tool.schema, "allowed_roles", ()) or ()) if tool else ()
+    if allowed_roles and str(role or "") not in allowed_roles:
+        return f"Your account's role may not run {spec.title}."
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -2193,7 +2231,7 @@ def execute_portal_task(
     elif spec.task_id == "tin_tax_obligations":
         tool_args = {
             "tin": str(p.get("tin") or ""),
-            "tax_head": str(p.get("tax_head") or "VAT_STANDARD"),
+            "tax_head": str(p.get("tax_head") or ""),
         }
     elif spec.task_id in ("efris_taxpayer_status", "dts_taxpayer_status"):
         tool_args = {"tin": str(p.get("tin") or "")}
@@ -2448,8 +2486,13 @@ def build_portal_task_card(
     displayed_fields_sha256 = compute_displayed_fields_sha256(display_fields)
     canonical_params = json.dumps(validated_params, sort_keys=True, separators=(",", ":"))
     params_sha256 = hashlib.sha256(canonical_params.encode("utf-8")).hexdigest()
+    # Each proposal put in front of a person is its own. The key was a function
+    # of the details alone, so a taxpayer who declined could not allow the same
+    # details when they asked again, and one who edited back to an earlier value
+    # met the card they had edited away from (G559). The same card pressed twice
+    # still has one key, which is what makes an approval run once.
     idempotency_key = "ura_task_" + hashlib.sha256(
-        f"{owner_key}:{spec.task_id}:{canonical_params}".encode()
+        f"{owner_key}:{spec.task_id}:{canonical_params}:{secrets.token_hex(16)}".encode()
     ).hexdigest()[:32]
 
     high_value_requires_ack = (
@@ -2604,6 +2647,8 @@ def handle_portal_task_decision(
     displayed_fields_sha256: str | None = None,
     high_value_acknowledged: bool | None = None,
     record_approval: Callable[[dict[str, Any]], None] | None = None,
+    granted_purposes: Sequence[str] = (),
+    role: str | None = None,
 ) -> dict[str, Any]:
     """Verify HMAC-signed `request_state`, enforce owner/session binding (`ADR-0013`), and execute, prepare, or decline.
 
@@ -2663,6 +2708,10 @@ def handle_portal_task_decision(
         raise PortalTaskValidationError(f"Unknown portal task_id: {task_id}")
     if state_tier and state_tier != spec.tier.value:
         raise PortalTaskValidationError("Intent capsule policy tier mismatch.")
+    # Only these tiers are ever put on a confirmation card. A state for a
+    # lookup or a statutory declaration was not signed by this path (G559).
+    if spec.tier not in (PortalTaskTier.DELEGATED_CONFIRM, PortalTaskTier.AUTHENTICATED_ACCOUNT_READ):
+        raise PortalTaskValidationError("This task is not one a confirmation can run.")
 
     conv_id = str(conversation_id or "default")
     copilot_portal_url = (
@@ -2726,6 +2775,24 @@ def handle_portal_task_decision(
             }
         if card_type in ("access_denied", "session_required"):
             raise PortalTaskOwnershipError(str(updated_card.get("error") or "Access denied under TPCA s. 75."))
+        # Any edit revokes the approval it replaces: the card edited away from
+        # stayed valid, and allowing both made two PRNs (G559).
+        new_key = str(updated_card.get("idempotency_key") or "")
+        if card_type == "confirmation_required" and new_key and new_key != state_idem:
+            if not _claim_shared_task(cache_key, user_id):
+                raise PortalTaskValidationError(
+                    "Cannot modify a proposal that has already been executed or declined."
+                )
+            try:
+                _write_shared_task_decision(cache_key, declined=True, user_id=user_id)
+            except Exception as exc:
+                logger.error("Superseded portal task proposal could not be retired", exc_info=True)
+                _release_shared_task(cache_key)
+                raise PortalTaskUnavailableError(_NOT_RECORDED) from exc
+            with _TASK_CACHE_LOCK:
+                _DECLINED_TASK_CACHE[cache_key] = time.time()
+                while len(_DECLINED_TASK_CACHE) > _MAX_TASK_CACHE_ENTRIES:
+                    _DECLINED_TASK_CACHE.popitem(last=False)
         # Synchronize conversational entity memory so subsequent turns reflect the inline edit
         with _TASK_CACHE_LOCK:
             mem = dict(_CONVERSATION_ENTITY_MEMORY.get(owner_key) or {})
@@ -2826,6 +2893,10 @@ def handle_portal_task_decision(
         raise PortalTaskValidationError(
             "High-value statutory transaction (>= UGX 50,000,000) requires explicit high_value_acknowledged=True confirmation."
         )
+
+    refusal = check_consent_and_role(spec, granted_purposes=granted_purposes, role=role)
+    if refusal:
+        raise PortalTaskOwnershipError(refusal)
 
     def _replay(payload: Mapping[str, Any]) -> dict[str, Any]:
         cached = dict(payload)

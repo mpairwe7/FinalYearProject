@@ -13,6 +13,11 @@ from .service import TinRegistrationService
 logger = logging.getLogger(__name__)
 
 
+#: What a TIN verification tells anyone who asks: that the TIN exists, whose it
+#: is, and whether it is active.
+_PUBLIC_TAXPAYER_FIELDS = ("tin", "legal_name", "category", "status", "registration_date")
+
+
 class TinSearchVerifyTool(Tool):
     """Tool for searching and verifying Tax Identification Numbers (TINs)."""
 
@@ -55,7 +60,14 @@ class TinSearchVerifyTool(Tool):
         )
 
     def execute(self, query: str = "", **kwargs: Any) -> dict[str, Any]:
-        return self._client.search_taxpayer(query=query)
+        result = self._client.search_taxpayer(query=query)
+        taxpayer = result.get("taxpayer")
+        if isinstance(taxpayer, dict):
+            # Anyone may call this. The record also holds the taxpayer's NIN,
+            # phone, email, office and obligations, which are theirs alone
+            # (TPCA Cap. 343 s. 75); the whole record used to be returned.
+            result = {**result, "taxpayer": {k: taxpayer[k] for k in _PUBLIC_TAXPAYER_FIELDS if k in taxpayer}}
+        return result
 
 
 class TinApplyIndividualTool(Tool):

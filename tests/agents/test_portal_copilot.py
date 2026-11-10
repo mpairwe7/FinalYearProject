@@ -298,7 +298,8 @@ def test_5_tier3_official_secrecy_tpca_s75_and_step_up_login(client: TestClient)
     assert r_anon.status_code == 200
     c_anon = r_anon.json()["portal_copilot"]
     assert c_anon["card_type"] == "step_up_login"
-    assert c_anon["task_id"] == "tin_tax_obligations"
+    # A check reads the account. It used to be routed to the tool that registers a tax head (G556).
+    assert c_anon["task_id"] == "ura_account_profile"
     assert "/signin?continue=signin&returnTo=" in c_anon["signin_chat_href"]
     assert "auth_resumed%3D1" in c_anon["signin_chat_href"]
     assert c_anon["preserved_fields"]["tin"] == "1000023456"
@@ -330,7 +331,7 @@ def test_5_tier3_official_secrecy_tpca_s75_and_step_up_login(client: TestClient)
     assert r_own_tin.status_code == 200
     c_own = r_own_tin.json()["portal_copilot"]
     assert c_own["card_type"] == "confirmation_required"
-    assert c_own["task_id"] == "tin_tax_obligations"
+    assert c_own["task_id"] == "ura_account_profile"
 
 
 def test_6_tier4_statutory_boundary_tpca_s16(client: TestClient) -> None:

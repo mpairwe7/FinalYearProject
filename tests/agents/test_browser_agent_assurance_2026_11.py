@@ -936,3 +936,330 @@ class TestADecisionComesFromTheAppsOwnPages:
 
         approved = next(row for row in _ledger_rows() if row["event_type"] == "portal_task_approved")
         assert approved["payload"]["sec_fetch_site"] == "same-origin"
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: found by running the audit prompt blind against the baseline
+# ---------------------------------------------------------------------------
+def _signed_in(
+    subject: str = "1000023456",
+    *,
+    session: str = "sess-taxpayer",
+    role: str = "verified_taxpayer",
+    purposes: tuple[str, ...] = ("ura_account_access", "ura_actions"),
+) -> dict[str, str]:
+    from app.auth.jwt_auth import make_dev_token
+
+    token = make_dev_token(user_id=subject, role=role, tenant_id="default", granted_purposes=list(purposes))
+    return {"Authorization": f"Bearer {token}", "X-Session-ID": session}
+
+
+def _chat(client: TestClient, message: str, *, conversation: str, headers: dict[str, str], **body: Any) -> dict[str, Any]:
+    response = client.post(
+        "/v1/chat", json={"message": message, "conversation_id": conversation, **body}, headers=headers
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _allow(client: TestClient, card: dict[str, Any], *, conversation: str, headers: dict[str, str]) -> Any:
+    return client.post(
+        EXECUTE,
+        json={
+            "decision": "allow",
+            "request_state": card["request_state"],
+            "idempotency_key": card["idempotency_key"],
+            "conversation_id": conversation,
+            "displayed_fields_sha256": card["displayed_fields_sha256"],
+        },
+        headers=headers,
+    )
+
+
+# G556: asking to check does not register
+class TestAReadIsNotAWrite:
+    def test_checking_obligations_proposes_a_read_not_a_registration(self, client: TestClient) -> None:
+        card = _chat(client, "Check my tax obligations", conversation="conv-check", headers=_signed_in())[
+            "portal_copilot"
+        ]
+
+        assert card["task_id"] != "tin_tax_obligations", "a check was turned into a tax head registration"
+        tool = pc.ToolRegistry.get(pc.PORTAL_TASK_CATALOG[card["task_id"]].tool_name)
+        assert tool is not None
+        assert tool.schema.read_only is True
+
+    def test_asking_to_add_an_obligation_asks_which_tax_head(self, client: TestClient) -> None:
+        card = _chat(client, "Add a tax obligation to my TIN", conversation="conv-register", headers=_signed_in())[
+            "portal_copilot"
+        ]
+
+        assert card["task_id"] == "tin_tax_obligations"
+        assert card["card_type"] == "inline_form"
+        assert "tax_head" in card["missing_fields"]
+
+    def test_a_tax_head_the_taxpayer_named_is_proposed_as_theirs(self, client: TestClient) -> None:
+        card = _chat(
+            client, "Register a VAT obligation on my TIN", conversation="conv-register-vat", headers=_signed_in()
+        )["portal_copilot"]
+
+        assert card["card_type"] == "confirmation_required"
+        by_name = {row["name"]: row for row in card["display_fields"]}
+        assert by_name["tax_head"]["raw_value"] == "VAT_STANDARD"
+        assert by_name["tax_head"]["assumed"] is False
+
+    def test_a_tax_head_is_registered_only_when_the_taxpayer_names_it(self) -> None:
+        spec = pc.PORTAL_TASK_CATALOG["tin_tax_obligations"]
+        tax_head = next(field for field in spec.fields if field.name == "tax_head")
+
+        assert tax_head.required is True
+        assert tax_head.default_value == ""
+
+    def test_a_tier_that_reads_holds_only_tools_that_read(self) -> None:
+        pc._ensure_connector_tools_registered()
+        reading = {pc.PortalTaskTier.AUTONOMOUS_VERIFY, pc.PortalTaskTier.AUTHENTICATED_ACCOUNT_READ}
+        writers = []
+        for spec in pc.PORTAL_TASK_CATALOG.values():
+            tool = pc.ToolRegistry.get(spec.tool_name)
+            if spec.tier in reading and (tool is None or not tool.schema.read_only):
+                writers.append(spec.task_id)
+        assert writers == []
+
+
+# G557: an account task is for the account's owner, who consented
+class TestAnAccountTaskIsForItsOwner:
+    def test_a_sign_in_with_no_tin_is_bound_to_no_account(self, client: TestClient) -> None:
+        card = _chat(
+            client,
+            "Submitted the form",
+            conversation="conv-no-tin",
+            headers=_signed_in("auth0-7f3a9c"),
+            portal_task_submission={"task_id": "ura_account_profile", "fields": {"tin": "1000000001"}},
+        )["portal_copilot"]
+
+        assert card["card_type"] == "access_denied"
+
+    def test_a_number_inside_an_opaque_subject_is_not_a_tin(self) -> None:
+        assert pc.extract_authenticated_tin("google-oauth2|1098765432") == ""
+        assert pc.extract_authenticated_tin("auth0-7f3a9c") == ""
+        assert pc.extract_authenticated_tin("1000023456") == "1000023456"
+
+    def test_a_signed_in_write_is_refused_for_another_taxpayers_tin(self, client: TestClient) -> None:
+        card = _chat(
+            client,
+            "Submitted the form",
+            conversation="conv-other-tin",
+            headers=_signed_in("1000023456"),
+            portal_task_submission={
+                "task_id": "efris_stock_management",
+                "fields": {"tin": "1000000005", "commodity_code": "50202301", "quantity": "10", "unit_cost": "1000"},
+            },
+        )["portal_copilot"]
+
+        assert card["card_type"] == "access_denied"
+
+    def test_the_same_write_is_proposed_for_the_callers_own_tin(self, client: TestClient) -> None:
+        card = _chat(
+            client,
+            "Submitted the form",
+            conversation="conv-own-tin",
+            headers=_signed_in("1000023456"),
+            portal_task_submission={
+                "task_id": "efris_stock_management",
+                "fields": {"tin": "1000023456", "commodity_code": "50202301", "quantity": "10", "unit_cost": "1000"},
+            },
+        )["portal_copilot"]
+
+        assert card["card_type"] == "confirmation_required"
+
+    def test_an_account_task_is_not_run_without_the_consent_it_names(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fields = {"task_id": "ura_account_profile", "fields": {"tin": "1000023456"}}
+        card = _chat(
+            client, "Submitted the form", conversation="conv-consent", headers=_signed_in(), portal_task_submission=fields
+        )["portal_copilot"]
+        connector = _Connector(monkeypatch)
+        without_consent = _signed_in(purposes=())
+        response = _allow(client, card, conversation="conv-consent", headers=without_consent)
+
+        assert response.status_code == 403
+        assert "consent" in response.json()["detail"].lower()
+        assert connector.calls == []
+
+    def test_an_account_task_is_not_run_for_a_role_its_tool_does_not_allow(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fields = {"task_id": "ura_account_profile", "fields": {"tin": "1000023456"}}
+        card = _chat(
+            client, "Submitted the form", conversation="conv-role", headers=_signed_in(), portal_task_submission=fields
+        )["portal_copilot"]
+        connector = _Connector(monkeypatch)
+        response = _allow(client, card, conversation="conv-role", headers=_signed_in(role="taxpayer"))
+
+        assert response.status_code == 403
+        assert connector.calls == []
+
+    def test_a_task_open_to_anyone_still_runs_signed_out(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+        card = _mint(client, conversation="conv-anon-prn")
+        _Connector(monkeypatch)
+
+        assert _decide(client, card, conversation="conv-anon-prn").json()["status"] == "executed"
+
+
+# G558: a public lookup returns what is public
+class TestAPublicLookupReturnsWhatIsPublic:
+    def test_verifying_a_tin_does_not_return_the_taxpayers_identity_documents_or_contacts(
+        self, client: TestClient
+    ) -> None:
+        card = _mint(client, conversation="conv-lookup-pii", task_id="tin_search_verify", fields={"tin": "1000000008"})
+
+        assert card["card_type"] == "executed_result"
+        returned = json.dumps(card["result"])
+        for private in ("nin_or_passport", "mobile", "email", "registered_office", "obligations"):
+            assert private not in returned, private
+
+    def test_it_still_says_who_the_tin_belongs_to(self, client: TestClient) -> None:
+        card = _mint(client, conversation="conv-lookup-name", task_id="tin_search_verify", fields={"tin": "1000000008"})
+
+        taxpayer = card["result"]["taxpayer"]
+        assert taxpayer["tin"] == "1000000008"
+        assert taxpayer["legal_name"]
+        assert taxpayer["status"]
+
+
+# G559: only the proposal on screen can run
+class TestOnlyTheProposalOnScreenRuns:
+    def test_an_edit_retires_the_proposal_it_replaces(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+        old = _mint(client, conversation="conv-superseded")
+        edited = client.post(
+            EXECUTE,
+            json={
+                "decision": "prepare",
+                "request_state": old["request_state"],
+                "idempotency_key": old["idempotency_key"],
+                "conversation_id": "conv-superseded",
+                "edited_fields": {"amount_ugx": "300000"},
+            },
+            headers={"X-Session-ID": "sess-taxpayer"},
+        ).json()["updated_card"]
+        connector = _Connector(monkeypatch)
+
+        assert _decide(client, edited, conversation="conv-superseded").json()["status"] == "executed"
+        _forget_in_process_state()
+        stale = _decide(client, old, conversation="conv-superseded")
+
+        assert stale.status_code == 400
+        assert len(connector.calls) == 1, "the card the taxpayer edited away from still ran"
+
+    def _edit(self, client: TestClient, card: dict[str, Any], conversation: str, **fields: str) -> dict[str, Any]:
+        return client.post(
+            EXECUTE,
+            json={
+                "decision": "prepare",
+                "request_state": card["request_state"],
+                "idempotency_key": card["idempotency_key"],
+                "conversation_id": conversation,
+                "edited_fields": fields,
+            },
+            headers={"X-Session-ID": "sess-taxpayer"},
+        ).json()["updated_card"]
+
+    def test_editing_back_to_the_first_value_gives_a_card_that_runs(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        first = _mint(client, conversation="conv-edit-back")
+        changed = self._edit(client, first, "conv-edit-back", amount_ugx="300000")
+        back = self._edit(client, changed, "conv-edit-back", amount_ugx=PRN_FIELDS["amount_ugx"])
+        connector = _Connector(monkeypatch)
+
+        assert _decide(client, back, conversation="conv-edit-back").json()["status"] == "executed"
+        assert len(connector.calls) == 1
+        assert connector.arguments[0]["amount_ugx"] == 250000.0
+
+    def test_a_taxpayer_who_declined_can_allow_the_same_details_when_they_ask_again(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        first = _mint(client, conversation="conv-ask-again")
+        assert _decide(client, first, conversation="conv-ask-again", decision="disallow").status_code == 200
+        again = _mint(client, conversation="conv-ask-again")
+        connector = _Connector(monkeypatch)
+
+        assert again["idempotency_key"] != first["idempotency_key"]
+        assert _decide(client, again, conversation="conv-ask-again").json()["status"] == "executed"
+        assert _decide(client, first, conversation="conv-ask-again").status_code == 400, "the declined card ran"
+        assert len(connector.calls) == 1
+
+    def test_the_same_card_pressed_twice_still_runs_once(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        card = _mint(client, conversation="conv-twice-same")
+        connector = _Connector(monkeypatch)
+        first = _decide(client, card, conversation="conv-twice-same").json()
+        second = _decide(client, card, conversation="conv-twice-same").json()
+
+        assert len(connector.calls) == 1
+        assert second["idempotent_replay"] is True
+        assert second["result"] == first["result"]
+
+    @pytest.mark.parametrize("task_id", ["payment_checkout_settle", "tin_search_verify"])
+    def test_a_state_for_a_tier_that_is_never_confirmed_is_refused(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_db: Any, task_id: str
+    ) -> None:
+        monkeypatch.setenv("MCP_REQUEST_STATE_SECRET", "test-secret-for-browser-agent-assurance-2026")
+        pc.clear_portal_task_cache()
+        connector = _Connector(monkeypatch)
+        spec = pc.PORTAL_TASK_CATALOG[task_id]
+        owner = db.conversation_state_key("conv-tier", session_id="sess-1", user_id="1000023456")
+        params = {"prn": "2260000012345", "amount_ugx": "1000", "tin": "1000023456"}
+        display = [{"name": f.name, "raw_value": str(params[f.name])} for f in spec.fields if f.name in params]
+        now = int(pc.time.time())
+        state = pc.mrtr.wrap_request_state(
+            {
+                "task_id": task_id,
+                "portal_key": spec.portal_key,
+                "tier": spec.tier.value,
+                "params": params,
+                "owner_key": owner,
+                "user_id": "1000023456",
+                "issued_at": now,
+                "expires_at": now + 900,
+                "idempotency_key": "ura_task_forged_tier",
+            }
+        )
+        with pytest.raises(pc.PortalTaskValidationError):
+            pc.handle_portal_task_decision(
+                "allow",
+                state,
+                "ura_task_forged_tier",
+                owner_key=owner,
+                user_id="1000023456",
+                session_id="sess-1",
+                conversation_id="conv-tier",
+                displayed_fields_sha256=pc.compute_displayed_fields_sha256(display),
+                granted_purposes=("ura_account_access", "ura_actions"),
+                role="verified_taxpayer",
+            )
+        assert connector.calls == []
+
+    def test_no_decision_holds_the_lock_while_it_writes_to_the_store(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        card = _mint(client, conversation="conv-lock")
+        held: list[bool] = []
+        real_upsert, real_claim = db.upsert_workflow_session, db.claim_workflow_session
+
+        def watching_upsert(*args: Any, **kwargs: Any) -> None:
+            held.append(pc._TASK_CACHE_LOCK.locked())
+            return real_upsert(*args, **kwargs)
+
+        def watching_claim(*args: Any, **kwargs: Any) -> bool:
+            held.append(pc._TASK_CACHE_LOCK.locked())
+            return real_claim(*args, **kwargs)
+
+        monkeypatch.setattr(db, "upsert_workflow_session", watching_upsert)
+        monkeypatch.setattr(db, "claim_workflow_session", watching_claim)
+        _Connector(monkeypatch)
+        _decide(client, card, conversation="conv-lock")
+
+        assert held
+        assert not any(held), "one slow store write would block every other taxpayer's decision"
