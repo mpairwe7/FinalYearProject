@@ -33,7 +33,9 @@ from .tools.portal_navigator_data import (
     EXTERNAL_URA_PORTALS,
     export_companion_manifest,
     get_portal_dom_recipe,
+    harden_dom_actions,
     portal_requires_auth,
+    selector_targets_a_credential,
 )
 
 logger = logging.getLogger(__name__)
@@ -1242,13 +1244,45 @@ def mask_sensitive_value(field_name: str, value: Any) -> str:
 # ---------------------------------------------------------------------------
 
 _SENSITIVE_FIELD_PATTERN = re.compile(
-    r"(?:password|passwd|pwd|otp|pin|cvv|cvc|csc|secret|token|passcode|one[-_]?time[-_]?code|cc[-_]?csc)",
+    r"(?:password|passwd|pwd|otp|pin|cvv|cvc|csc|secret|token|passcode|one[-_]?time[-_]?code|cc[-_]?csc"
+    # The same secrets under the names a form or an injected field gives them (G547).
+    r"|mfa|2fa|(?:auth|verification|security|recovery|backup)[-_ ]?(?:code|answer|question|key)"
+    r"|card[-_ ]?(?:number|num|no)\b|api[-_ ]?key|private[-_ ]?key|credential|session[-_ ]?id|cookie)",
+    re.IGNORECASE,
+)
+#: A form field's name. Anything else is not a field this server will name
+#: back to the browser, in a selector or in a sentence.
+_FIELD_NAME_RE = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")
+#: The telemetry fence, in any spelling a model would still read as the tag.
+_TELEMETRY_TAG_RE = re.compile(
+    r"<[ \t]*/?[ \t]*untrusted[ _-]?portal[ _-]?dom[ _-]?telemetry\b[^>\n]{0,120}>?",
     re.IGNORECASE,
 )
 
 
+def _dom_text(value: Any, max_len: int) -> str:
+    """One line of text read off a page, screened and unable to pose as structure.
+
+    Text from the DOM is evidence of what the page shows. It is cut to
+    length, cleared of hidden characters and instruction phrases, kept from
+    closing the telemetry fence, and folded to one line so it cannot open a
+    heading or a list of its own in the reply.
+    """
+    from .guardrails import fence_spotlight_body, scan_retrieved_text
+    from .vision.ocr import strip_hidden_control_and_bidi
+
+    raw = strip_hidden_control_and_bidi(str(value or ""))[:max_len]
+    cleaned, _ = scan_retrieved_text(raw)
+    cleaned = _TELEMETRY_TAG_RE.sub("[boundary removed]", fence_spotlight_body(cleaned))
+    return " ".join(cleaned.split())
+
+
 def sanitize_portal_context(portal_context: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Return a deep-sanitized copy of `portal_context` with all password/OTP/PIN/CVV fields stripped."""
+    """Return a deep-sanitized copy of `portal_context` with all password/OTP/PIN/CVV fields stripped.
+
+    A selector sent by the page is not kept: the server names the element or
+    nobody does (G545). A field whose name is not a plain identifier is dropped.
+    """
     if not portal_context or not isinstance(portal_context, Mapping):
         return {}
 
@@ -1265,30 +1299,28 @@ def sanitize_portal_context(portal_context: Mapping[str, Any] | None) -> dict[st
             return True
         return any(sel.lower() in k_str.lower() for sel in prohibited_selectors)
 
-    from .guardrails import scan_retrieved_text
-    from .vision.ocr import strip_hidden_control_and_bidi
-
-    def _scrub_dom_text(val: Any, max_len: int) -> str:
-        raw_str = strip_hidden_control_and_bidi(str(val or ""))[:max_len]
-        cleaned, _ = scan_retrieved_text(raw_str)
-        return cleaned
+    def _is_field_name(k: str) -> bool:
+        return bool(_FIELD_NAME_RE.fullmatch(k))
 
     raw_visible = portal_context.get("visible_fields")
     clean_visible: dict[str, str] = {}
     scrubbed_keys: list[str] = []
     if isinstance(raw_visible, Mapping):
         for k, v in raw_visible.items():
-            if _is_secret_key(str(k)):
-                scrubbed_keys.append(str(k))
+            name = str(k)
+            if _is_secret_key(name):
+                scrubbed_keys.append(name[:64])
                 continue
-            clean_visible[str(k)] = _scrub_dom_text(v, 240)
+            if _is_field_name(name):
+                clean_visible[name] = _dom_text(v, 240)
 
     raw_empty = portal_context.get("empty_required_fields")
     clean_empty: list[str] = []
     if isinstance(raw_empty, Sequence) and not isinstance(raw_empty, str | bytes):
         for item in raw_empty:
-            if not _is_secret_key(str(item)):
-                clean_empty.append(_scrub_dom_text(item, 80))
+            name = str(item)
+            if _is_field_name(name) and not _is_secret_key(name):
+                clean_empty.append(name)
 
     raw_errors = portal_context.get("validation_errors")
     clean_errors: list[dict[str, str]] = []
@@ -1296,28 +1328,23 @@ def sanitize_portal_context(portal_context: Mapping[str, Any] | None) -> dict[st
         for err in raw_errors:
             if isinstance(err, Mapping):
                 f_name = str(err.get("field") or "")
-                sel = str(err.get("selector") or "")
-                if _is_secret_key(f_name) or _is_secret_key(sel):
+                if not _is_field_name(f_name):
                     continue
-                clean_errors.append(
-                    {
-                        "field": _scrub_dom_text(f_name, 80),
-                        "message": _scrub_dom_text(err.get("message"), 240),
-                        "selector": _scrub_dom_text(sel, 120),
-                    }
-                )
+                if _is_secret_key(f_name) or _is_secret_key(str(err.get("selector") or "")):
+                    continue
+                clean_errors.append({"field": f_name, "message": _dom_text(err.get("message"), 240)})
 
     return {
         "portal_id": str(portal_context.get("portal_id") or "e_services").strip().lower(),
-        "current_route": _scrub_dom_text(portal_context.get("current_route"), 240),
-        "active_step": _scrub_dom_text(portal_context.get("active_step"), 160),
-        "form_id": _scrub_dom_text(portal_context.get("form_id"), 64),
+        "current_route": _dom_text(portal_context.get("current_route"), 240),
+        "active_step": _dom_text(portal_context.get("active_step"), 160),
+        "form_id": _dom_text(portal_context.get("form_id"), 64),
         "visible_fields": clean_visible,
         "empty_required_fields": clean_empty,
         "validation_errors": clean_errors,
-        "error_banner": _scrub_dom_text(portal_context.get("error_banner"), 400),
+        "error_banner": _dom_text(portal_context.get("error_banner"), 400),
         "stalled_duration_ms": int(portal_context.get("stalled_duration_ms") or 0),
-        "last_user_action": _scrub_dom_text(portal_context.get("last_user_action"), 120),
+        "last_user_action": _dom_text(portal_context.get("last_user_action"), 120),
         "scrubbed_secret_fields": scrubbed_keys,
     }
 
@@ -3117,26 +3144,25 @@ def analyze_portal_context(
     base_recipe = get_portal_dom_recipe(portal_key, state=error_banner or active_step, entities=visible_fields)
     dom_actions: list[dict[str, Any]] = []
 
+    # What the page says is quoted as the page's words, never as the diagnosis
+    # itself, and it names no element: a selector comes from the server's own
+    # map, or the step carries none and the field is named in words (G545).
     diagnosis_points: list[str] = []
     if error_banner:
-        diagnosis_points.append(f"Portal Alert Banner: {error_banner}")
+        diagnosis_points.append(f"The page shows this notice: \u201c{error_banner}\u201d")
 
     # Prioritize explicit validation errors so the first failing field is scrolled into view and spotlighted
     for idx, err in enumerate(validation_errors):
         field_name = str(err.get("field") or "").strip()
         err_msg = str(err.get("message") or "Invalid or missing value").strip()
-        selector = (
-            str(err.get("selector") or "").strip()
-            or _FIELD_SELECTOR_MAP.get(field_name.lower(), f"[name='{field_name}'], #{field_name}")
-        )
-        diagnosis_points.append(f"Field '{field_name}': {err_msg}")
+        diagnosis_points.append(f"The page shows for field '{field_name}': \u201c{err_msg}\u201d")
         dom_actions.append(
             {
                 "step_number": idx + 1,
                 "element": f"Fix {field_name}",
-                "selector": selector,
+                "selector": _FIELD_SELECTOR_MAP.get(field_name.lower(), ""),
                 "action_type": "spotlight",
-                "fill_value": visible_fields.get(field_name),
+                "fill_value": None,
                 "scroll_to": True,
                 "tooltip": f"{err_msg} — complete or correct this field first.",
                 "security_gate": "safe",
@@ -3146,7 +3172,7 @@ def analyze_portal_context(
     for req_field in empty_required:
         if any(req_field.lower() in a["element"].lower() for a in dom_actions):
             continue
-        selector = _FIELD_SELECTOR_MAP.get(req_field.lower(), f"[name='{req_field}'], #{req_field}")
+        selector = _FIELD_SELECTOR_MAP.get(req_field.lower(), "")
         diagnosis_points.append(f"Required field '{req_field}' is currently empty.")
         dom_actions.append(
             {
@@ -3164,9 +3190,9 @@ def analyze_portal_context(
     # Append remaining recipe steps with sequential numbering
     for step in base_recipe:
         step_copy = dict(step)
-        step_copy["step_number"] = len(dom_actions) + 1
         step_copy.setdefault("scroll_to", len(dom_actions) == 0)
         dom_actions.append(step_copy)
+    dom_actions = harden_dom_actions(dom_actions)
 
     if not diagnosis_points:
         if stalled_ms >= 15_000:

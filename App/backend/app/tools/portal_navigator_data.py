@@ -6,6 +6,7 @@ import logging
 import re
 import threading
 import urllib.parse
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from ..verified_resources import get_resource, is_authoritative_ura_url
@@ -6608,12 +6609,70 @@ for _pkey, _pinfo in EXTERNAL_URA_PORTALS.items():
     _pinfo.setdefault("requires_auth", portal_requires_auth(_pkey))
 
 
+_DOM_ACTION_TYPES = frozenset({"spotlight", "fill", "select", "click"})
+#: A selector that reaches for a credential. `pin` is matched as a word, so
+#: `#shipping` is not one.
+_CREDENTIAL_SELECTOR_RE = re.compile(
+    r"password|passwd|otp|cvv|cvc|secret|passcode|one-time-code|cc-csc|(?<![a-z])pin(?![a-z])",
+    re.IGNORECASE,
+)
+
+
+def selector_targets_a_credential(selector: str) -> bool:
+    """True when *selector* names a password, one-time code, PIN or card security field."""
+    return bool(_CREDENTIAL_SELECTOR_RE.search(str(selector or "")))
+
+
+def harden_dom_actions(actions: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Apply the rules every DOM action keeps on its way out of the server (ADR-0038).
+
+    Recipes are run by code this server does not control: the inbuilt
+    workspace, a browser companion, an agent reading the navigator tool. So
+    the rules are applied here, to every list, rather than trusted to each
+    recipe's author:
+
+    - an action of an unknown kind is dropped;
+    - nothing targets a credential field;
+    - a click waits for the taxpayer, whatever chose it;
+    - only a fill or a select carries a value.
+
+    Steps are renumbered in order.
+    """
+    hardened: list[dict[str, Any]] = []
+    for action in actions:
+        kind = str(action.get("action_type") or "")
+        selector = str(action.get("selector") or "")
+        if kind not in _DOM_ACTION_TYPES or selector_targets_a_credential(selector):
+            continue
+        step = dict(action)
+        step["selector"] = selector
+        step["security_gate"] = (
+            "requires_confirmation"
+            if kind == "click" or action.get("security_gate") == "requires_confirmation"
+            else "safe"
+        )
+        if kind not in ("fill", "select"):
+            step["fill_value"] = None
+        step["step_number"] = len(hardened) + 1
+        hardened.append(step)
+    return hardened
+
+
 def get_portal_dom_recipe(
     portal_key: str,
     state: str = "",
     entities: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Return sequential DOM actions for an in-browser companion or inbuilt portal co-pilot."""
+    return harden_dom_actions(_portal_dom_recipe(portal_key, state, entities))
+
+
+def _portal_dom_recipe(
+    portal_key: str,
+    state: str = "",
+    entities: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """The recipe as written, before :func:`harden_dom_actions`."""
     entities = entities or {}
 
     tin_val = ""
@@ -6666,7 +6725,7 @@ def get_portal_dom_recipe(
                 "fill_value": None,
                 "scroll_to": True,
                 "tooltip": "Click to return to login or clear expired session state",
-                "security_gate": "safe",
+                "security_gate": "requires_confirmation",
             },
         ]
 

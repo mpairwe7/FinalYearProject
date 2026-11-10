@@ -3,7 +3,15 @@
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -12,7 +20,15 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 class PortalFieldError(BaseModel):
     field: str = Field(..., max_length=64)
     message: str = Field(..., max_length=300)
+    # Accepted so an older client is not refused, and ignored: the server
+    # names the element, never the page (ADR-0038).
     selector: str = Field("", max_length=160)
+
+
+#: Telemetry describes one form. These are well above any URA screen and far
+#: below the 5 MiB body cap, which was the only limit before (G547).
+_PortalFieldName = Annotated[str, StringConstraints(max_length=64)]
+_PortalFieldValue = Annotated[str, StringConstraints(max_length=2000)]
 
 
 class PortalContextInput(BaseModel):
@@ -20,8 +36,8 @@ class PortalContextInput(BaseModel):
     current_route: str = Field("", max_length=240)
     active_step: str = Field("", max_length=160)
     form_id: str = Field("", max_length=64)
-    visible_fields: dict[str, str] = Field(default_factory=dict)
-    empty_required_fields: list[str] = Field(default_factory=list, max_length=25)
+    visible_fields: dict[_PortalFieldName, _PortalFieldValue] = Field(default_factory=dict, max_length=64)
+    empty_required_fields: list[_PortalFieldName] = Field(default_factory=list, max_length=25)
     validation_errors: list[PortalFieldError] = Field(default_factory=list, max_length=15)
     error_banner: str = Field("", max_length=400)
     stalled_duration_ms: int = Field(0, ge=0, le=3_600_000)
