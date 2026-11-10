@@ -95,6 +95,18 @@ browser digest computation without a server-digest fallback. Audit UI-09 tracks
 mandatory API digest enforcement and its compatibility policy. G265 is reopened
 for that remaining portion; the other Amendment 2 controls retain their evidence.
 
+**Closed 2026-11-10 by [ADR-0038](0038-browser-agent-assurance.md).** The digest is
+required to allow and the opt-in variable is gone. The same audit found that the
+"logs only SHA-256 digests to the audit ledger" claim in Amendment 2 item 3 never
+held: the route called a function that does not exist, so no portal decision was
+recorded until ADR-0038 (G541).
+
+ADR-0038 also corrects the catalog in Decision Outcome item 1: `tin_tax_obligations`
+registers a tax head and is a Tier 2 confirmed write, not a Tier 3 read; asking to
+check obligations reads `ura_account_profile` (G556). The Subject-TIN ownership rule
+now covers every sign-in task that names a TIN and fails closed (G557), and
+`idempotency_key` is per proposal, no longer derived from the details alone (G559).
+
 ## Amendment 3 (2026-10-27 — Gap G267): the workspace wears ura.go.ug's frame
 
 The owner asked that the inbuilt portal look like the official one, so that a
