@@ -654,13 +654,13 @@ groups:
           runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#call-receptionist"
 
       - alert: UraCallsRefused
-        expr: sum(increase(ura_receptionist_calls_refused_total[15m])) >= 3
+        expr: sum by (reason) (increase(ura_receptionist_calls_refused_total[15m])) >= 3
         labels:
           severity: warning
           team: backend
         annotations:
           summary: "Callers are being turned away"
-          description: "Calls were refused before they began: the receptionist is unavailable, production is not configured for calls, or every call slot is taken. The reason label says which."
+          description: "Calls were refused before they began, for reason {{ $labels.reason }}: unavailable (the receptionist could not start), not_configured (production is not set up for calls) or capacity (every call slot is taken)."
           runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#call-receptionist"
 
       - alert: UraCallSpeechFailing

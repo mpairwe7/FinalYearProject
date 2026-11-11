@@ -216,14 +216,15 @@ def _validate_production_env() -> None:
         if not _production_flag_enabled(flag_name):
             errors.append(f"FLAG_{flag_name.upper()} must not be disabled in production.")
 
-    # FLAG_VOICE_RECEPTIONIST is gated by G36 inside gap_gate_errors(): LiveKit
-    # media over wss://, production LiveKit credentials, one worker and one
-    # replica, and the explicit single-replica acknowledgement. The runbook's
-    # rollout (docs/runbooks/voice-receptionist-demo.md) enables the flag once
-    # that gate passes, so no second, stricter check lives here.
+    # FLAG_VOICE_RECEPTIONIST's G36 gate (LiveKit media over wss://, production
+    # LiveKit credentials, one worker and one replica, the single-replica
+    # acknowledgement, the local engine) does not stop the API: by the service
+    # owner's decision a receptionist that cannot run makes calls unavailable,
+    # with /ready, the log and an alert saying why (receptionist.start,
+    # ADR-0041). It used to refuse to start the whole API.
     from .production_readiness import gap_gate_errors
 
-    errors.extend(gap_gate_errors())
+    errors.extend(gap_gate_errors(include_receptionist=False))
 
     # Cloudflare/Gemini fallbacks: if the flag is explicitly on, the credentials
     # it needs must be present (otherwise the fallback silently no-ops in prod).
@@ -738,8 +739,8 @@ async def lifespan(app: FastAPI):
     else:
         app.state.offline_rag = None
 
-    # Voice receptionist. In production the flag only gets this far once the
-    # G36 gate in _validate_production_env() has passed.
+    # Voice receptionist. In production its G36 gate is checked here, by
+    # receptionist.start(), not by _validate_production_env().
     if _flags.is_enabled("voice_receptionist"):
         # An optional feature that cannot start does not stop the API (ADR-0041,
         # G373): the chat keeps serving, call sockets are refused, and /ready

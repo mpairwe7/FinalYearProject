@@ -184,7 +184,7 @@ are not repeated here: they are `ura_chat_turns_total{channel="call",outcome="er
 
 | Metric | Labels | Meaning |
 | --- | --- | --- |
-| `ura_receptionist_available` | — | 1 when calls can be taken, 0 when the receptionist is switched on and did not start. Absent while it is switched off |
+| `ura_receptionist_available` | — | 0 while calls are switched on and cannot be taken (the start failed, or never ran because the flag was switched on later); 1 otherwise, switched off included. Recomputed at every scrape |
 | `ura_receptionist_calls_started_total` | — | Calls admitted |
 | `ura_receptionist_calls_ended_total` | `reason` | Why each call ended: `caller_hangup`, `caller_idle`, `officer_hangup`, `max_call_duration`, `speech_failed`, `media_pipeline_stopped`, … (`telemetry.END_REASONS`); anything else is `other` |
 | `ura_receptionist_calls_refused_total` | `reason` (`unavailable`/`not_configured`/`capacity`) | Calls turned away before they began. A switched-off receptionist is not counted |

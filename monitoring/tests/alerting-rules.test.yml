@@ -387,9 +387,10 @@ tests:
           - exp_labels:
               severity: warning
               team: backend
+              reason: capacity
             exp_annotations:
               summary: "Callers are being turned away"
-              description: "Calls were refused before they began: the receptionist is unavailable, production is not configured for calls, or every call slot is taken. The reason label says which."
+              description: "Calls were refused before they began, for reason capacity: unavailable (the receptionist could not start), not_configured (production is not set up for calls) or capacity (every call slot is taken)."
               runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#call-receptionist"
 
   # One refused call is not a pattern.

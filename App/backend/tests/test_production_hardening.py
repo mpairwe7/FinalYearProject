@@ -232,15 +232,30 @@ class ProductionHardeningTests(unittest.TestCase):
             "FLAG_NATIVE_VOICE=true requires FLAG_AUTH_REQUIRED", str(raised.exception)
         )
 
+    def _receptionist_reason(self, env: dict[str, str]) -> str:
+        """What the receptionist's own start says about *env*, with the rest of its stack present."""
+        from app import receptionist
+
+        self.addCleanup(receptionist.reset)
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(receptionist, "is_available", return_value=True),
+            patch("app.receptionist.config.validate"),
+            patch("app.receptionist.store.init_receptionist_schema"),
+            patch("app.receptionist.store.end_stale_calls", return_value=0),
+        ):
+            return receptionist.start(speech_model=object())
+
     def test_receptionist_in_production_needs_the_g36_livekit_gate(self) -> None:
+        # The service owner's decision (ADR-0041): a receptionist that fails
+        # G36 makes calls unavailable; it no longer stops the whole API.
         env = {**self.secure_env, "FLAG_VOICE_RECEPTIONIST": "true"}
         with patch.dict(os.environ, env, clear=True):
-            with self.assertRaises(SystemExit) as raised:
-                _validate_production_env()
-        message = str(raised.exception)
-        self.assertIn("G36: LIVEKIT_URL must be a secure wss:// URL", message)
-        self.assertIn("G36: RECEPTIONIST_MEDIA_TRANSPORT=livekit is required", message)
-        self.assertIn("G36: VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK=true is required", message)
+            _validate_production_env()
+        reason = self._receptionist_reason(env)
+        self.assertIn("G36: LIVEKIT_URL must be a secure wss:// URL", reason)
+        self.assertIn("G36: RECEPTIONIST_MEDIA_TRANSPORT=livekit is required", reason)
+        self.assertIn("G36: VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK=true is required", reason)
 
     def test_receptionist_in_production_starts_once_g36_passes(self) -> None:
         """The runbook's rollout enables the flag after the G36 gate passes; startup must agree."""
@@ -261,7 +276,7 @@ class ProductionHardeningTests(unittest.TestCase):
         with patch.dict(os.environ, env, clear=True):
             _validate_production_env()
 
-    def test_receptionist_in_production_refuses_to_start_without_the_local_voice(self) -> None:
+    def test_receptionist_in_production_refuses_calls_without_the_local_voice(self) -> None:
         env = {
             **self.secure_env,
             "FLAG_VOICE_RECEPTIONIST": "true",
@@ -273,8 +288,9 @@ class ProductionHardeningTests(unittest.TestCase):
             "VOICE_RECEPTIONIST_REPLICAS": "1",
             "VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK": "true",
         }
-        with patch.dict(os.environ, env, clear=True), self.assertRaises(SystemExit):
-            _validate_production_env()
+        with patch.dict(os.environ, env, clear=True):
+            _validate_production_env()  # the chat starts
+        self.assertIn("ORPHEUS_TTS_URL", self._receptionist_reason(env))  # calls do not
 
     # ── Cloudflare/Gemini fallback validation (explicit-on flag) ──────────
     _CF_ENV = {

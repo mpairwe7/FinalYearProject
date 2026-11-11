@@ -43,12 +43,24 @@ calls can run at all, and who finds out when they cannot.
 **A receptionist that cannot start is unavailable, not fatal.** Chosen by the
 service owner over failing loud, for every environment.
 `receptionist.start()` never raises. Whatever stops it (no Pipecat, an unusable
-setting, call tables that cannot be created, no speech model) is recorded,
-logged once at error, and exported as `ura_receptionist_available = 0`. Call
-sockets are refused with the usual 1001 while it lasts, and `GET /ready` says
-why under `capabilities.voice_receptionist` (`off`, `ready`, or
-`unavailable: <why>`). The probe itself stays ready: the chat does not depend
-on calls.
+setting, call tables that cannot be created, no speech model, and in
+production the G36 gate) is recorded, logged once at error, and exported as
+`ura_receptionist_available = 0`. Call sockets are refused with the usual 1001
+while it lasts, and `GET /ready` says why under
+`capabilities.voice_receptionist` (`off`, `ready`, or `unavailable: <why>`).
+The probe itself stays ready: the chat does not depend on calls.
+
+The G36 gate (LiveKit over `wss://`, production credentials, one worker and one
+replica, the acknowledgement, the local engine) used to be part of the checks
+that refuse to start the whole API in production. It is now applied by the
+receptionist's own start, so a production deployment that fails it serves the
+chat and refuses calls. The go-live report
+(`python -m app.production_readiness`) still lists it as a blocker.
+
+`ura_receptionist_available` is recomputed at every scrape from the flag and
+the start (`MetricsStore.on_scrape`): 0 while calls are switched on and cannot
+be taken, 1 otherwise. Set only at start, it went on paging after calls were
+switched off, and had no value for a flag switched on later.
 
 **The worker gate reads every variable an image may start workers from.**
 `WORKERS`, `UVICORN_WORKERS` and `WEB_CONCURRENCY`: at least one must be set,
@@ -86,7 +98,10 @@ started, ended by reason, refused by reason, failures by stage, and rows a
 start found orphaned. Every label is a closed vocabulary of code constants,
 declared at zero when the receptionist starts so that `increase()` sees the
 first failure. Four alert rules read them, each with a promtool case that
-fires and one that must not.
+fires and one that must not; `UraCallsRefused` fires per refusal reason and
+carries it. The receptionist's requirements are audited as resolved on each
+Python an image installs them on (3.11 for the Space, 3.14 for the API image),
+because the two resolve to different versions.
 
 **Rows a dead process left are ended at startup**, before anything else is
 checked, so a restart that cannot take calls (Pipecat missing) still ends its
@@ -123,15 +138,16 @@ only in a language the deployment takes calls in.
 
 ## Consequences
 
-- A deployment with the flag on and a broken receptionist now starts. Nothing
-  fails at deploy time, so the readiness field, the error log and the
-  `UraReceptionistUnavailable` alert are how it is found. A deployment with no
-  alerting learns from a caller.
+- A deployment with the flag on and a broken receptionist now starts, in
+  production too: a G36 failure used to stop the API at deploy time and now
+  refuses calls at run time. Nothing fails at deploy time, so the readiness
+  field, the error log and the `UraReceptionistUnavailable` alert are how it is
+  found. A deployment with no alerting learns from a caller.
 - `SPEECH_ENABLED=false` with the receptionist flag on now means calls are
   unavailable. It used to mean a call that greeted in text and then hung up.
 - A production deployment that set only `WORKERS=1` under the supervisord image
-  was passing the gate with two workers. It now fails the gate until
-  `UVICORN_WORKERS=1` is set, which is the point.
+  was passing the gate with two workers. It now fails the gate, and calls are
+  unavailable there until `UVICORN_WORKERS=1` is set, which is the point.
 - **The production Space is not changed by this decision.** It runs two
   workers and is outside the gate: the base image sets `APP_ENV=production`,
   but the Space overrides it with a secret. Its value cannot be read; calls

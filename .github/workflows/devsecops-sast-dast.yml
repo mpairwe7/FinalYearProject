@@ -281,7 +281,10 @@ jobs:
           # override, because Pipecat's metadata caps Pillow below the patched
           # floor, so it is resolved with the override and audited as installed.
           - requirements: App/backend/requirements-receptionist.txt
-            python: "3.11"          # Dockerfile.cranecloud base image
+            python: "3.11"          # Dockerfile.cranecloud base image (the Space)
+            override: "Pillow>=13.0.0"
+          - requirements: App/backend/requirements-receptionist.txt
+            python: "3.14"          # Dockerfile / Dockerfile.gpu base image
             override: "Pillow>=13.0.0"
     steps:
       - name: Checkout code

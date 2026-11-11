@@ -820,6 +820,9 @@ class ResumeSigningTests(unittest.TestCase):
         with (
             patch.object(flags, "is_enabled", side_effect=enabled),
             patch.dict("os.environ", {"APP_ENV": "production", "RECEPTIONIST_RESUME_SECRET": "", "UVICORN_WORKERS": "1"}),
+            # This test is about the resume warning: the G36 gate passes here.
+            patch("app.receptionist.livekit.production_errors", return_value=[]),
+            patch("app.receptionist.config.local_engine_errors", return_value=[]),
             patch.object(receptionist, "is_available", return_value=True),
             patch("app.receptionist.config.validate"),
             patch("app.receptionist.store.init_receptionist_schema"),
@@ -1179,6 +1182,111 @@ class ResumeReplayTests(unittest.TestCase):
                 lb.verify_call_resume_ticket(other, expected_user_id="u1")
 
             self.assertIsNone(lb.verify_call_resume_ticket(first, expected_user_id="u1"))
+
+
+# ---------------------------------------------------------------------------
+# Found in the second review
+# ---------------------------------------------------------------------------
+
+
+SECURE_PRODUCTION = {
+    "APP_ENV": "production",
+    "FLAG_VOICE_RECEPTIONIST": "true",
+    "RECEPTIONIST_MEDIA_TRANSPORT": "websocket",  # not LiveKit: the G36 gate fails
+}
+
+
+class ProductionDegradeTests(unittest.TestCase):
+    """The service owner's decision: a receptionist that cannot run degrades, in every environment."""
+
+    def setUp(self) -> None:
+        self.addCleanup(receptionist.reset)
+
+    def test_the_production_gate_does_not_stop_the_api_for_calls(self):
+        from app.production_readiness import gap_gate_errors
+
+        with patch.dict("os.environ", SECURE_PRODUCTION):
+            fatal = gap_gate_errors(include_receptionist=False)
+            reported = gap_gate_errors()
+
+        self.assertFalse([e for e in fatal if e.startswith("G36:")])
+        self.assertTrue([e for e in reported if e.startswith("G36:")], "the go-live report still lists it")
+
+    def test_calls_are_unavailable_in_production_for_what_the_gate_found(self):
+        with (
+            patch.dict("os.environ", SECURE_PRODUCTION),
+            patch.object(receptionist, "is_available", return_value=True),
+            patch("app.receptionist.config.validate"),
+            patch("app.receptionist.store.init_receptionist_schema"),
+            patch("app.receptionist.store.end_stale_calls", return_value=0),
+        ):
+            reason = receptionist.start(speech_model=object())
+
+        self.assertIn("G36", reason)
+        self.assertIn("RECEPTIONIST_MEDIA_TRANSPORT", reason)
+
+
+class AvailabilityGaugeTests(unittest.TestCase):
+    """`ura_receptionist_available` follows the flag and the start at every scrape."""
+
+    def setUp(self) -> None:
+        self.addCleanup(receptionist.reset)
+
+    def gauge(self) -> float:
+        from app.analytics import metrics
+
+        text = metrics.to_prometheus()
+        line = next(l for l in text.splitlines() if l.startswith("ura_receptionist_available"))
+        return float(line.split()[-1])
+
+    def test_switching_calls_off_stops_the_page(self):
+        receptionist.mark_unavailable("Pipecat is not installed")
+        with patch("app.flags.flags.is_enabled", return_value=False):
+            self.assertEqual(self.gauge(), 1.0)
+
+    def test_an_unavailable_receptionist_reads_zero(self):
+        receptionist.mark_unavailable("Pipecat is not installed")
+        with patch("app.flags.flags.is_enabled", return_value=True):
+            self.assertEqual(self.gauge(), 0.0)
+
+    def test_calls_switched_on_after_a_skipped_start_read_zero(self):
+        receptionist.reset()
+        with patch("app.flags.flags.is_enabled", return_value=True):
+            self.assertEqual(self.gauge(), 0.0)
+
+
+class CheckpointOrderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_a_slow_older_checkpoint_never_lands_after_a_newer_one(self):
+        import json as _json
+        import threading
+
+        from app.receptionist import serializer as serializer_module
+        from app.receptionist.serializer import BrowserCallSerializer
+        from app.receptionist.state import CallRoom, CallState
+
+        first_may_finish = threading.Event()
+        written: list[str] = []
+
+        def save(snapshot):
+            if not written and snapshot["caption_only_degraded"] is False:
+                first_may_finish.wait(2)
+            written.append("caption_only" if snapshot["caption_only_degraded"] else "audio")
+            return True
+
+        room = CallRoom("call_order", CallState(call_id="call_order", conversation_id="conv_order"))
+        serializer = BrowserCallSerializer(room=room)
+        with (
+            flags_on("low_bandwidth_voice_codec", "call_drop_resume"),
+            patch.dict("os.environ", {"RECEPTIONIST_RESUME_SECRET": "r" * 40}),
+            patch("app.receptionist.low_bandwidth.save_call_drop_snapshot", side_effect=save),
+        ):
+            await serializer.deserialize(_json.dumps(SLOW_NETWORK))
+            await serializer.deserialize(_json.dumps({**SLOW_NETWORK, "effective_type": "slow-2g"}))
+            await asyncio.sleep(0.05)
+            first_may_finish.set()
+            await asyncio.gather(*list(serializer_module._CHECKPOINTS))
+
+        self.assertEqual(written, ["audio", "caption_only"])
 
 
 if __name__ == "__main__":

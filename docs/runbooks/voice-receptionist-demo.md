@@ -207,6 +207,9 @@ since every call now runs on the local engine, that it can: `SPEECH_ENABLED` and
 `LLM_ENABLED` on, `ORPHEUS_TTS_URL` set, and every language in
 `RECEPTIONIST_LANGUAGES` voiced by Orpheus (`ORPHEUS_TTS_LANGUAGES`).
 `python -m app.production_readiness --as-production` reports those G36 checks.
+Since ADR-0041 a production deployment that fails them still starts and serves
+the chat; calls are refused and `GET /ready` names the failed check under
+`capabilities.voice_receptionist`.
 Browser sockets send credentials in their first application message (never in
 the URL), and staff/audio sockets validate browser `Origin` against
 `CORS_ORIGINS`. Neither protects the credential in transit: that is TLS's job,
@@ -259,7 +262,7 @@ All switches and thresholds are configured via environment variables:
 | `CXP_CLOSED_DATES` | unset | `YYYY-MM-DD,…` with no shift (public holidays) |
 | `RECEPTIONIST_BRIEF_EVERY_TURNS` | `3` | Caller turns between rolling rebuilds of the officer's brief (always rebuilt on transfer) |
 | `RECEPTIONIST_CLAIM_TIMEOUT_S` | `20` | How long an officer's "Take call" holds the call before their audio must join |
-| `RECEPTIONIST_MAX_CALL_S` | `900` | Hard ceiling for one call connection (15 minutes). A value that is set but not a positive number stops startup and fails the G36 gate instead of falling back |
+| `RECEPTIONIST_MAX_CALL_S` | `900` | Hard ceiling for one call connection (15 minutes). A value that is set but not a positive number makes calls unavailable (and fails the G36 gate) instead of falling back |
 | `RECEPTIONIST_FILLER_AFTER_MS` | `450` | Latency threshold before playing filler token (pool of short tokens) |
 | `RECEPTIONIST_MEMORY_MIN_ASR_CONF` | `0.6` | A call turn heard below this mean word probability is answered but not written to long-term memory (a mishearing must not become a fact about the caller; needs `FLAG_MEMORY_ENABLED` and personalization consent to matter) |
 | `RECEPTIONIST_MAX_SPOKEN_SENTENCES` | `3` | Spoken truncation limit for plain prose before prompting *"Would you like more detail?"* (yes reads on; an officer offer takes its place, one question a turn). Structured multi-bullet/multi-step answers (`has_structured_items`) expand up to 15 sentences / 260 words so complete lists and procedures are spoken in full on the first turn (`G415`) |
@@ -342,9 +345,10 @@ enabling the feature:
    `VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK=true`. The acknowledgement explicitly
    accepts active-call loss on API process failure; it is not a failover control.
    Run the Orpheus voice sidecar beside the API on its own GPU and set
-   `ORPHEUS_TTS_URL` and `ORPHEUS_TTS_LANGUAGES=lg,sw,en`; the gate refuses a
-   production receptionist without them, because the only other local voice
-   (Spark-TTS-SALT) takes several seconds a sentence.
+   `ORPHEUS_TTS_URL` and `ORPHEUS_TTS_LANGUAGES=lg,sw,en`; without them the gate
+   makes calls unavailable (the chat still starts; `/ready` gives the reason),
+   because the only other local voice (Spark-TTS-SALT) takes several seconds a
+   sentence.
 4. Serve the web app and API over HTTPS only, and make the ingress refuse or
    redirect plain HTTP — including the WebSocket upgrades on
    `/v1/calls/stream`, `/v1/admin/calls/stream` and

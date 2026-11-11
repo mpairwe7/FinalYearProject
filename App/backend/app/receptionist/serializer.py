@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
@@ -120,6 +121,18 @@ _MAX_CONTROL_FRAMES_PER_WINDOW = 15
 _MAX_TELEMETRY_FRAMES_PER_WINDOW = 4
 #: Call-drop checkpoints still being written, held so they are not collected mid-write.
 _CHECKPOINTS: set[asyncio.Task[Any]] = set()
+#: Each call's latest checkpoint write: the next one waits for it, so an older
+#: snapshot can never land after a newer one and overwrite it.
+_LAST_CHECKPOINT: dict[str, asyncio.Task[Any]] = {}
+
+
+async def _write_checkpoint_after(previous: asyncio.Task[Any] | None, snapshot: dict[str, Any]) -> None:
+    from .low_bandwidth import save_call_drop_snapshot
+
+    if previous is not None:
+        with contextlib.suppress(Exception, asyncio.CancelledError):
+            await previous
+    await asyncio.to_thread(save_call_drop_snapshot, snapshot)
 
 
 class BrowserCallSerializer(FrameSerializer):
@@ -201,20 +214,24 @@ class BrowserCallSerializer(FrameSerializer):
                 # in the background, not here on the event loop.
                 if not self._allow_telemetry_frame():
                     return None
-                from .low_bandwidth import (
-                    apply_network_telemetry_to_room,
-                    call_drop_snapshot,
-                    save_call_drop_snapshot,
-                )
+                from .low_bandwidth import apply_network_telemetry_to_room, call_drop_snapshot
 
                 ack = apply_network_telemetry_to_room(self.room, msg, checkpoint=False)
                 snapshot = call_drop_snapshot(self.room) if ack.get("resume_ticket") else None
                 if snapshot:
                     # Not awaited: the room's codec changed above, so the
                     # acknowledgement must not wait behind a database write.
-                    task = asyncio.create_task(asyncio.to_thread(save_call_drop_snapshot, snapshot))
+                    call_id = str(snapshot.get("call_id") or "")
+                    task = asyncio.create_task(_write_checkpoint_after(_LAST_CHECKPOINT.get(call_id), snapshot))
+                    _LAST_CHECKPOINT[call_id] = task
                     _CHECKPOINTS.add(task)
-                    task.add_done_callback(_CHECKPOINTS.discard)
+
+                    def _done(finished: asyncio.Task[Any], key: str = call_id) -> None:
+                        _CHECKPOINTS.discard(finished)
+                        if _LAST_CHECKPOINT.get(key) is finished:
+                            del _LAST_CHECKPOINT[key]
+
+                    task.add_done_callback(_done)
                 return OutputTransportMessageUrgentFrame(ack)
 
             if msg_type == "interrupt":

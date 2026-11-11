@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import os
 import threading
 from typing import Any
 
@@ -21,6 +22,15 @@ _state_lock = threading.Lock()
 _unavailable_reason = ""
 #: :func:`start` has run in this process (whatever it found).
 _started = False
+
+
+def _register_scrape_hook() -> None:
+    try:
+        from ..analytics import metrics
+
+        metrics.on_scrape(refresh_gauge)
+    except Exception:  # noqa: BLE001 - metrics never decide whether calls start
+        logger.debug("Could not register the receptionist gauge refresh", exc_info=True)
 
 
 def is_available() -> bool:
@@ -78,6 +88,18 @@ def status() -> str:
         return "unavailable: switched on after the API started; restart the API to take calls"
     reason = unavailable_reason()
     return f"unavailable: {reason}" if reason else "ready"
+
+
+def refresh_gauge() -> None:
+    """``receptionist_available`` from the flag and the start, as they are now.
+
+    0 while calls are switched on and cannot be taken (the start failed, or
+    never ran because the flag was switched on later); 1 otherwise, the flag
+    switched off included. Set only at start, it went on paging after calls
+    were switched off, and had no value for a flag switched on later. Run at
+    every scrape.
+    """
+    _gauge(0 if status().startswith("unavailable") else 1)
 
 
 def _gauge(value: int) -> None:
@@ -165,6 +187,14 @@ def _start(speech_model: Any) -> str:
         config.validate()
     except config.ReceptionistConfigError as exc:
         return str(exc)
+    if os.getenv("APP_ENV", "development").strip().lower() == "production":
+        # The G36 gate: checked here rather than at API startup, so a
+        # deployment that fails it serves the chat and refuses calls.
+        from .livekit import production_errors
+
+        gate = production_errors(enabled_override=True) + config.local_engine_errors(enabled_override=True)
+        if gate:
+            return "; ".join(gate)
     if speech_model is None:
         # Admitted anyway, a caller was greeted in text, never heard, and
         # hung up on as idle, with the record blaming them (G594).
@@ -178,3 +208,6 @@ def _start(speech_model: Any) -> str:
         )
     _warn_about_resume(workers)
     return ""
+
+
+_register_scrape_hook()

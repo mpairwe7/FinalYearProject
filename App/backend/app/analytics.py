@@ -36,6 +36,7 @@ import re
 import time
 from datetime import datetime
 from threading import Lock
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 logger = logging.getLogger(__name__)
@@ -167,6 +168,7 @@ class MetricsStore:
         self._warned: set[str] = set()
         #: Per family, label values a caller declared closed: they never fold.
         self._reserved: dict[str, dict[str, set[str]]] = {}
+        self._scrape_hooks: list[Callable[[], None]] = []
         self._start_time = time.time()
 
     def reserve(self, name: str, label: str, values: Iterable[str]) -> None:
@@ -330,8 +332,22 @@ class MetricsStore:
     def _collect(self) -> list[Metric]:
         return list(self._collection_registry().collect())
 
+    def on_scrape(self, hook: Callable[[], None]) -> None:
+        """Run *hook* before each exposition, to set gauges that follow state rather than events.
+
+        Registered once per hook; a hook that raises is logged and skipped.
+        """
+        with self._lock:
+            if hook not in self._scrape_hooks:
+                self._scrape_hooks.append(hook)
+
     def to_prometheus(self) -> str:
         """Prometheus text exposition: every worker's samples plus index lifecycle gauges."""
+        for hook in list(self._scrape_hooks):
+            try:
+                hook()
+            except Exception:
+                self._warn_once(f"scrape:{getattr(hook, '__name__', hook)}", "A scrape hook failed", exc_info=True)
         text = generate_latest(self._collection_registry()).decode("utf-8")
         return text + "\n".join(_index_lifecycle_prometheus_metrics()) + "\n"
 
