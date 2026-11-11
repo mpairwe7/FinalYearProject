@@ -50,13 +50,17 @@ supervisord, with Qdrant and Redis sidecars. Today one uvicorn program runs
     with `UVICORN_WORKERS=1` in its own environment.
 
   With the Space's `UVICORN_WORKERS=2` that is one process each: the same two
-  processes as today. Both keep the `wait-for-qdrant.sh` wrapper, the flags and
-  the priority of today's program.
+  processes as today. Both start through one script,
+  `App/deploy/cranecloud/uvicorn-role.sh <role>`, which sets the role's port,
+  worker count and environment and keeps the `wait-for-qdrant.sh` wrapper and
+  today's uvicorn flags. A blank or invalid `UVICORN_WORKERS` counts as 2.
 - **Metrics directory.** Today's command empties `PROMETHEUS_MULTIPROC_DIR`
   before uvicorn starts. With two programs, one restarting would delete the
-  other's live files. A `metrics-reset` program (`autorestart=false`,
-  `startsecs=0`, a priority below both uvicorns) empties it once per container
-  start; neither uvicorn command deletes anything.
+  other's live files. The script empties it once per container start, under
+  `flock` and behind a marker file in the directory: the first program to start
+  clears it, a restart of either program does not. (A separate one-shot
+  supervisord program was considered; supervisord does not wait for it to
+  finish before starting the next program.)
 - **nginx** (`App/deploy/cranecloud/nginx.conf`):
   - upstream `api` = 8081 and 8082 (chat and everything else, as `backend` is
     today);
@@ -146,9 +150,10 @@ unless stated):
   8081 and 8082; samples of every call path, with and without `api/` and `v1/`,
   match it; `/calls`, `/v1/chat`, `/v1/admin/flags` and ticket presence do not;
   it sets the upgrade headers and 3600 s timeouts.
-- `supervisord.conf`: the two uvicorn programs with their ports, roles and
-  worker counts; `metrics-reset` runs once, before both; no uvicorn command
-  deletes the metrics directory.
+- `supervisord.conf`: the two uvicorn programs start `uvicorn-role.sh` with
+  their roles. `uvicorn-role.sh`, run with a dry-run switch: ports, roles and
+  worker counts (including a blank or invalid `UVICORN_WORKERS`), and the
+  metrics directory cleared on the first start only.
 - Chat role: each call route is refused (HTTP 421; WebSocket error frame
   `unavailable` and close 1013) and counted; chat routes are not; the
   receptionist does not start and the gauge is not set; `/ready` mirrors the
