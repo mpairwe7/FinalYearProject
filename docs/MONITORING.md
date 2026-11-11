@@ -190,6 +190,7 @@ are not repeated here: they are `ura_chat_turns_total{channel="call",outcome="er
 | `ura_receptionist_calls_refused_total` | `reason` (`unavailable`/`not_configured`/`capacity`) | Calls turned away before they began. A switched-off receptionist is not counted |
 | `ura_receptionist_call_failures_total` | `stage` (`stt`/`tts`/`media`/`record`) | The recognizer failed on an utterance, a line could not be voiced, or the call's own record could not be written |
 | `ura_receptionist_calls_lost_total` | — | Call rows a start found still live with no process behind them, and ended (`end_reason = process_lost`) |
+| `ura_receptionist_misrouted_total` | `kind` (`http`/`websocket`) | Call requests that reached the chat process and were refused (HTTP 421, or a WebSocket closed 1013). Counted by `app/process_role.py` in the chat process (not by `telemetry.py`), declared at 0 for both kinds from its start, so the first one raises `UraCallMisrouted` |
 
 ## 4. SLOs and alerting
 
@@ -211,7 +212,7 @@ Burn-rate alerts follow the multi-window, multi-burn-rate method (Google SRE
 workbook): page when the 1h **and** 5m windows burn faster than 14.4× the
 budget (or 6h and 30m faster than 6×); ticket on 1d/2h at 3× or 3d/6h at 1×.
 
-`monitoring/alerting-rules.yml` holds 56 rules in 11 groups:
+`monitoring/alerting-rules.yml` holds 57 rules in 11 groups:
 availability, latency, quality, audit-and-compliance, security, dependencies,
 the Qdrant index lifecycle, the agent planner and live research, agent
 resilience, crawl freshness and the call receptionist. Each carries `severity` (`critical` pages,
@@ -457,8 +458,8 @@ and `TurnsHittingDeadline`. See the [fault tolerance runbook](runbooks/agent-fau
 
 ### Call receptionist
 
-`UraReceptionistUnavailable` (page), `UraCallsRefused`, `UraCallSpeechFailing`
-and `UraCallsEndingOnFailure`. The chat does not depend on any of them.
+`UraReceptionistUnavailable` (page), `UraCallsRefused`, `UraCallSpeechFailing`,
+`UraCallsEndingOnFailure` and `UraCallMisrouted`. The chat does not depend on any of them.
 
 1. **Why calls cannot be taken.** `GET /ready` gives it under
    `capabilities.voice_receptionist`: `ready`, `off`, or `unavailable: <why>`.
@@ -483,6 +484,12 @@ and `UraCallsEndingOnFailure`. The chat does not depend on any of them.
 5. **`ura_receptionist_calls_lost_total` rose at a restart**: those calls were
    cut off. The ones that were waiting for or talking to an officer are in the
    console's callback list with reason `service_interrupted`.
+6. **A call request reached the chat process** (`UraCallMisrouted`,
+   `ura_receptionist_misrouted_total` by `kind`): nginx sent an `http` or
+   `websocket` call request to the chat process, which refused it, so that
+   caller or officer saw an error. The routing in `nginx.conf` and the
+   call-path list in `app/process_role.py` have drifted apart (ADR-0043);
+   make the two agree, then roll.
 
 See the [receptionist runbook](runbooks/voice-receptionist-demo.md).
 
