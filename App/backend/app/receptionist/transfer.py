@@ -250,7 +250,7 @@ def create_transfer_ticket(
             tenant_id=state.tenant_id or "default",
         ) or ""
     except Exception:
-        logger.exception("Failed creating ticket during transfer for call %s", state.call_id)
+        logger.exception("Could not open a ticket for the transfer of call %s", state.call_id)
     return tid, packet
 
 

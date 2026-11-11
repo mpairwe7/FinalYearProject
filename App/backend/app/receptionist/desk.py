@@ -217,9 +217,9 @@ def _repair_waiting_row(room: CallRoom) -> bool:
     try:
         update_call(room.call_id, **repair)
     except Exception:
-        logger.warning("Could not repair the row of waiting call %s", room.call_id, exc_info=True)
+        logger.warning("Could not repair the row of queued call %s", room.call_id, exc_info=True)
         return False
-    logger.info("Repaired the row of waiting call %s from its room", room.call_id)
+    logger.info("Repaired the row of queued call %s from its room", room.call_id)
     return True
 
 
@@ -259,7 +259,12 @@ async def _expire_reservation(room: CallRoom, officer_id: str, epoch: int, wait_
         state = room.state
         if state.reserved_for != officer_id or state.mode != "transferring" or state.queue_epoch != epoch:
             return
-        logger.info("Reservation of %s for %s lapsed; open to all officers", room.call_id, officer_id)
+        # The officer's id came from the request that named them: a digest in
+        # the log, never the value itself (control characters, account ids).
+        logger.info(
+            "Reservation of %s for officer %s lapsed; open to all officers",
+            room.call_id, livekit.log_ref(officer_id),
+        )
         _clear_reservation(room)
         try:
             update_call(room.call_id, reserved_for="", reserved_until=None)
@@ -979,7 +984,7 @@ async def _expire_reconnect_grace(room: CallRoom, officer_id: str, grace_s: floa
                 transfer_requested_at=waiting_since,
             )
         except Exception:
-            logger.warning("Could not record call %s as waiting again", room.call_id, exc_info=True)
+            logger.warning("Could not record call %s as back in the queue", room.call_id, exc_info=True)
         # The notice is a record. The requeue below is what reaches an officer,
         # so a failed write must not stop it.
         try:
