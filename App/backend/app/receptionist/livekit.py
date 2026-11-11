@@ -213,6 +213,11 @@ async def revoke_participant(room_name: str, identity: str) -> None:
                         log_ref(identity),
                     )
     except TimeoutError as exc:
+        # Either step may be the one that ran out of time: the participant may
+        # still be connected, with or without media permission.
+        logger.warning(
+            "LiveKit did not confirm revoking participant %s within %gs", log_ref(identity), ADMIN_DEADLINE_S
+        )
         raise RuntimeError(
             f"LiveKit did not confirm the participant's removal within {ADMIN_DEADLINE_S:g}s"
         ) from exc

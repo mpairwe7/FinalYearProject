@@ -115,18 +115,39 @@ export function isJwtExpired(token: string, skewSeconds = 10): boolean {
  * act from the token it verifies, never from this.
  */
 export function getAuthSubject(): string {
-  const token = getAuthToken();
-  if (!looksLikeJwt(token)) return '';
+  // A snapshot for `useSyncExternalStore`, read on every render: it must not
+  // change anything. `getAuthToken` evicts an expired token and notifies
+  // subscribers, which here would be a state update in the middle of a render,
+  // so the token is read directly and an expired one is simply nobody.
+  if (typeof window === 'undefined') return '';
+  let token = '';
   try {
-    const payloadPart = token.split('.')[1];
-    const base64 = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
-    const padded = base64.padEnd(base64.length + (4 - (base64.length % 4)) % 4, '=');
-    const parsed = JSON.parse(atob(padded));
-    return typeof parsed.sub === 'string' ? parsed.sub : '';
+    token = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '';
   } catch {
     return '';
   }
+  if (token !== subjectOf.token) {
+    subjectOf.token = token;
+    subjectOf.sub = '';
+    subjectOf.exp = 0;
+    if (looksLikeJwt(token)) {
+      try {
+        const payloadPart = token.split('.')[1];
+        const base64 = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
+        const padded = base64.padEnd(base64.length + (4 - (base64.length % 4)) % 4, '=');
+        const parsed = JSON.parse(atob(padded));
+        subjectOf.sub = typeof parsed.sub === 'string' ? parsed.sub : '';
+        subjectOf.exp = typeof parsed.exp === 'number' ? parsed.exp * 1000 : 0;
+      } catch {
+        subjectOf.sub = '';
+      }
+    }
+  }
+  return subjectOf.exp && subjectOf.exp <= Date.now() ? '' : subjectOf.sub;
 }
+
+/** The last token decoded by `getAuthSubject`: decoded once, not on every render. */
+const subjectOf = { token: '', sub: '', exp: 0 };
 
 /** Handle 401 Unauthorized by evicting stale credentials across all tabs. */
 export function handleUnauthorized(): void {

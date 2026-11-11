@@ -148,6 +148,11 @@ function blank(call_id: string): LobbyCall {
 
 const NOT_RESERVED = { reserved_for: '', reserved_name: '', reserved_until: null } as const;
 
+/** Held for *myUserId*, who a colleague named to take it, and the hold has not run out. */
+export function reservedForMe(call: LobbyCall, myUserId: string, nowSeconds = Date.now() / 1000): boolean {
+  return Boolean(myUserId) && call.reserved_for === myUserId && (call.reserved_until ?? 0) > nowSeconds;
+}
+
 /** Held for a named officer other than *myUserId*, and the hold has not run out. */
 export function reservedForAnother(call: LobbyCall, myUserId: string, nowSeconds = Date.now() / 1000): boolean {
   return Boolean(call.reserved_for) && call.reserved_for !== myUserId && (call.reserved_until ?? 0) > nowSeconds;

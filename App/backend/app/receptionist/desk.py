@@ -139,7 +139,9 @@ async def claim(call_id: str, officer_id: str, officer_name: str = "") -> dict[s
         if reserved and reserved != officer_id and (room.state.reserved_until or 0.0) > now:
             raise DeskError(409, "This call is reserved for another officer", reserved_for=reserved,
                             officer_name=room.state.reserved_name)
-        if not claim_call(call_id, officer_id, now, now - timeout):
+        if not claim_call(call_id, officer_id, now, now - timeout) and not (
+            _repair_waiting_row(room) and claim_call(call_id, officer_id, now, now - timeout)
+        ):
             holder = str((get_call(call_id) or {}).get("claimed_by") or "")
             raise DeskError(409, "Another officer took this call", claimed_by=holder,
                             officer_name=_holder_name(room, holder))
@@ -189,6 +191,36 @@ async def _expire_claim(room: CallRoom, officer_id: str, timeout: float) -> None
             return
         logger.info("Claim on %s by %s lapsed before their audio joined", room.call_id, officer_id)
         await _release_locked(room, "claim_expired")
+
+
+def _repair_waiting_row(room: CallRoom) -> bool:
+    """Bring a waiting call's row back in line with its room; True when it was out of line.
+
+    A requeue goes ahead even when its row cannot be written (the queue is
+    what reaches an officer). The row then still says ``bridged``, or names a
+    claim the room has dropped, and every claim would be refused as "Another
+    officer took this call". The room is the authority while the call is
+    live, so a refused claim repairs the row from it and tries once more.
+    Called under the desk lock, with the room waiting.
+    """
+    state = room.state
+    if state.mode != "transferring":
+        return False
+    row = get_call(room.call_id) or {}
+    stale_status = row.get("status") not in ("ai", "transferring")
+    stale_claim = bool(row.get("claimed_by")) and not state.claimed_by
+    if not (stale_status or stale_claim):
+        return False
+    repair: dict[str, Any] = {"status": "transferring"}
+    if not state.claimed_by:
+        repair.update(claimed_by="", claimed_at=None, officer_id=None)
+    try:
+        update_call(room.call_id, **repair)
+    except Exception:
+        logger.warning("Could not repair the row of waiting call %s", room.call_id, exc_info=True)
+        return False
+    logger.info("Repaired the row of waiting call %s from its room", room.call_id)
+    return True
 
 
 def _cancel_reservation(room: CallRoom) -> None:

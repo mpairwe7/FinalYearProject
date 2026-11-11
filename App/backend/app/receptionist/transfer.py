@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from . import brief as call_brief
@@ -168,8 +169,40 @@ def queue_position(room: Any) -> int:
     return ahead + 1
 
 
+@dataclass(frozen=True)
+class TicketSubject:
+    """What a transfer's ticket is written from: the call as it stood when the transfer began.
+
+    Taken on the event loop (:meth:`of`) and handed to the worker thread that
+    writes the ticket, so the thread reads nothing from the live room: a
+    caller changing language mid-transfer cannot give the ticket a language
+    the question was not asked in.
+    """
+
+    call_id: str
+    conversation_id: str
+    user_id: str
+    tenant_id: str
+    locale: str
+    ticket_id: str
+    question: str
+
+    @classmethod
+    def of(cls, room: Any) -> TicketSubject:
+        state = room.state
+        return cls(
+            call_id=room.call_id,
+            conversation_id=state.conversation_id,
+            user_id=state.user_id,
+            tenant_id=state.tenant_id or "default",
+            locale=state.locale,
+            ticket_id=state.ticket_id or "",
+            question=state.clarify.original_question if state.clarify else "",
+        )
+
+
 def create_transfer_ticket(
-    room: Any,
+    subject: Any,
     chat_model: Any,
     reason: str,
     *,
@@ -183,17 +216,16 @@ def create_transfer_ticket(
     Reuses the ticket the call already has. Creating one translates the
     caller's question and transcript for the officer, which is slow and
     blocking, so the brain runs this in a thread (:func:`open_transfer` then
-    takes the result) and it changes nothing on the room: the call's state
-    stays with the event loop.
+    takes the result). It reads and changes nothing on the room: *subject* is
+    a :class:`TicketSubject` taken on the event loop (a room is accepted, and
+    snapshotted here, for callers already on the loop).
     """
-    state = room.state
+    state = subject if isinstance(subject, TicketSubject) else TicketSubject.of(subject)
     tid = ticket_id or state.ticket_id or ""
     packet: dict[str, Any] | None = handoff if isinstance(handoff, dict) else None
     if tid or chat_model is None:
         return tid, packet
-    last_q = question or (
-        state.clarify.original_question if state.clarify else "Taxpayer assistance requested on call"
-    )
+    last_q = question or state.question or "Taxpayer assistance requested on call"
     try:
         built = handoff or chat_model._build_handoff_packet(message=last_q, reason=reason)
         if isinstance(built, dict):
@@ -205,7 +237,7 @@ def create_transfer_ticket(
             reason=reason,
             user_query=last_q,
             bot_reply="Connecting to officer...",
-            session_id=room.call_id,
+            session_id=state.call_id,
             conversation_id=state.conversation_id,
             priority=packet.get("priority", "normal") if packet else "normal",
             handoff=packet,
@@ -218,7 +250,7 @@ def create_transfer_ticket(
             tenant_id=state.tenant_id or "default",
         ) or ""
     except Exception:
-        logger.exception("Failed creating ticket during transfer for call %s", room.call_id)
+        logger.exception("Failed creating ticket during transfer for call %s", state.call_id)
     return tid, packet
 
 

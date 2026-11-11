@@ -9,7 +9,7 @@ import { formatClock, useNow } from '@/hooks/useNow';
 import { claimRefusalMessage } from '@/services/callsApi';
 import { playAlertChime } from '@/services/callTones';
 import { takeCall } from '@/services/officerCallSession';
-import { alertCalls, useCallConsoleStore, waitingCalls } from '@/store/useCallConsoleStore';
+import { alertCalls, reservedForMe, useCallConsoleStore, waitingCalls } from '@/store/useCallConsoleStore';
 import { CallAlertToast } from './CallAlertToast';
 
 /** How long "Taken by …" stays on other officers' screens. */
@@ -158,7 +158,7 @@ export function CallAlertStack({
                 key={call.call_id}
                 call={call}
                 canTake={canTake}
-                passedToMe={Boolean(myUserId) && call.reserved_for === myUserId}
+                passedToMe={reservedForMe(call, myUserId, nowSeconds)}
                 busy={busyId === call.call_id}
                 error={errors[call.call_id] || null}
                 onTake={() => take(call.call_id)}

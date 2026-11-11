@@ -109,6 +109,29 @@ class OfficerDropTests(WaitingCallCase):
         self.assertIn(row["officer_id"], (None, ""))
         self.assertEqual(row["transfer_reason"], "officer_disconnected")
 
+    async def test_the_next_officer_can_take_it_even_when_the_requeue_was_not_recorded(self):
+        await self.bridge("okello")
+        with patch.object(desk, "update_call", side_effect=RuntimeError("database is locked")):
+            await self.drop_officer_and_let_the_grace_lapse("okello")
+        self.assertEqual(get_call(self.call_id)["status"], "bridged")  # the row missed the requeue
+
+        result = await desk.claim(self.call_id, "nakato")
+
+        self.assertTrue(result["claimed"])
+        row = get_call(self.call_id)
+        self.assertEqual((row["status"], row["claimed_by"]), ("transferring", "nakato"))
+
+    async def test_a_claim_another_officer_holds_is_still_refused(self):
+        await self.bridge("okello")
+        await self.drop_officer_and_let_the_grace_lapse("okello")
+        await desk.claim(self.call_id, "nakato")
+
+        with self.assertRaises(desk.DeskError) as refused:
+            await desk.claim(self.call_id, "mukasa")
+
+        self.assertEqual(refused.exception.status, 409)
+        self.assertEqual(get_call(self.call_id)["claimed_by"], "nakato")
+
     async def test_the_caller_is_requeued_even_when_the_notice_cannot_be_recorded(self):
         await self.bridge("okello")
         self.room.brain = types.SimpleNamespace(start_queue_countdown=unittest.mock.Mock())
@@ -341,6 +364,78 @@ class CallEndedSignalTests(WaitingCallCase):
 
         event = self.lobby_events("call.wrapped_up")[-1]
         self.assertIs(event["live"], False)
+
+
+class IdleCallerSocketTests(unittest.IsolatedAsyncioTestCase):
+    """A call that ends is finished at once, even when the caller's socket says nothing more."""
+
+    async def test_the_lobby_hears_a_call_ended_while_the_callers_socket_is_idle(self):
+        from types import SimpleNamespace
+
+        from app import ws_concurrency
+        from app.receptionist import ws
+
+        db.init_db()
+        init_receptionist_schema()
+        ws_concurrency.reset()
+        self.addCleanup(ws_concurrency.reset)
+
+        class IdleCaller:
+            """Sends call_start, then never says or closes anything."""
+
+            headers = {"origin": "http://localhost:3300"}
+            client = SimpleNamespace(host="127.0.0.1")
+            query_params: dict = {}
+
+            def __init__(self) -> None:
+                self.sent: list[dict] = []
+
+            async def accept(self) -> None:
+                return None
+
+            async def receive_text(self) -> str:
+                return json.dumps({"type": "call_start", "locale": "en", "voice_consent_accepted": True})
+
+            async def receive(self) -> dict:
+                await asyncio.sleep(3600)
+                return {"type": "websocket.disconnect"}
+
+            async def send_text(self, text: str) -> None:
+                self.sent.append(json.loads(text))
+
+            async def send_bytes(self, _data: bytes) -> None:
+                return None
+
+            async def close(self, code: int = 1000) -> None:
+                return None
+
+        caller = IdleCaller()
+        lobby = patch.object(hub, "publish_lobby").start()
+        self.addCleanup(patch.stopall)
+        with (
+            patch.object(ws, "_voice_receptionist_enabled", return_value=True),
+            patch.object(ws.livekit, "enabled", return_value=False),
+            patch.object(ws, "build_call_pipeline", side_effect=ImportError("pipecat is not installed")),
+            patch.object(ws, "generate_call_summary"),
+        ):
+            call = asyncio.create_task(ws.call_stream_endpoint(caller))
+            for _ in range(100):
+                await asyncio.sleep(0.02)
+                if any(m.get("type") == "call_ready" for m in caller.sent):
+                    break
+            call_id = next(m["call_id"] for m in caller.sent if m.get("type") == "call_ready")
+            room = registry.get(call_id)
+
+            await room.end("officer_hangup")  # ended from the officer's side
+            done, _pending = await asyncio.wait({call}, timeout=3.0)
+            if not done:
+                call.cancel()
+                await asyncio.gather(call, return_exceptions=True)
+
+        self.assertTrue(done, "the caller's handler is still waiting on an idle socket")
+        ended = [c.args[1] for c in lobby.call_args_list if c.args[0] == "call.ended"]
+        self.assertEqual([(e["call_id"], e["reason"]) for e in ended], [(call_id, "officer_hangup")])
+        self.assertIsNone(registry.get(call_id))
 
 
 class CrisisWhileWaitingTests(WaitingCallCase):
@@ -580,6 +675,10 @@ class UnwantedHangUpTests(BrainCase):
         "My supplier said goodbye to VAT registration",
         "disconnect my EFRIS device please",
         "What if I hang up my business licence?",
+        # A question by its punctuation, whatever it opens with.
+        "So I just disconnect?",
+        "Okay, so goodbye?",
+        "Then I end the call?",
     )
     GOODBYES = (
         "goodbye",
@@ -592,6 +691,10 @@ class UnwantedHangUpTests(BrainCase):
         "Kale, weeraba",
         "that's all, thanks",
         "bye",
+        # Asking the assistant to do it is a request, question mark or not.
+        "Can you hang up?",
+        "Could you end the call please?",
+        "Please hang up?",
     )
 
     def test_a_question_is_not_a_goodbye(self):

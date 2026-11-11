@@ -5,7 +5,7 @@ import { callLanguageName } from '@/lib/callLanguage';
 import { callTopicLabel, isRaisedPriority } from '@/lib/callTopic';
 import { useMyUserId } from '@/hooks/useMyUserId';
 import { formatClock, useNow } from '@/hooks/useNow';
-import { type LobbyCall, type SessionState, reservedForAnother } from '@/store/useCallConsoleStore';
+import { type LobbyCall, type SessionState, reservedForAnother, reservedForMe } from '@/store/useCallConsoleStore';
 import { WaitRing } from './console/WaitRing';
 
 export type QueueRole = 'waiting' | 'mine' | 'officer' | 'ai';
@@ -27,7 +27,7 @@ function stateChip(
     if (reservedForAnother(call, myUserId, nowSeconds)) {
       return { label: `Reserved for ${call.reserved_name || 'another officer'}`, tone: 'warn' };
     }
-    if (call.reserved_for && call.reserved_for === myUserId && (call.reserved_until ?? 0) > nowSeconds) {
+    if (reservedForMe(call, myUserId, nowSeconds)) {
       return { label: 'Passed to you', tone: 'bad' };
     }
     return { label: 'Waiting', tone: 'bad' };

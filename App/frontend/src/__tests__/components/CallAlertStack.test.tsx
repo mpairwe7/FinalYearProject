@@ -98,6 +98,18 @@ describe('CallAlertStack', () => {
     expect(screen.getByRole('button', { name: 'Take call' })).toBeInTheDocument();
   });
 
+  it('stops saying a call was passed to me once the reservation has run out', () => {
+    signInAs('nakato');
+    // Its `call.unreserved` event was missed: the hold has lapsed all the same.
+    waiting('c1', {
+      reserved_for: 'nakato', reserved_name: 'Officer Nakato', reserved_until: Date.now() / 1000 - 1,
+      from_officer: 'Officer Okello', attempt: 2,
+    });
+    render(<CallAlertStack canTake onPreview={vi.fn()} />);
+    expect(screen.queryByText('Passed to you by Officer Okello')).not.toBeInTheDocument();
+    expect(screen.getByText(/Passed on by an officer/)).toBeInTheDocument();
+  });
+
   it('says a call is reserved when that is why the claim was refused', async () => {
     vi.spyOn(callsApi, 'claimCall').mockRejectedValue(
       new ClaimConflictError('This call is reserved for another officer', '', 'Officer Nakato', 'nakato'),

@@ -367,6 +367,12 @@ _ASKS_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 
+#: Asking the assistant to end the call is a request, however it is punctuated.
+_ASKS_YOU_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\W*(?:please\b|(?:can|could|will|would)\s+you\b)", re.IGNORECASE
+)
+
+
 def _is_goodbye(text: str) -> bool:
     """The caller is ending the call: "goodbye", "hang up", "that's all, thank you".
 
@@ -379,6 +385,10 @@ def _is_goodbye(text: str) -> bool:
     if _DONE_RE.search(text) is not None:
         return True
     if len(text.split()) > _CONTROL_MAX_WORDS or _ASKS_RE.search(text):
+        return False
+    # "So I just disconnect?" is a question by its punctuation, whatever it
+    # opens with; "Can you hang up?" is the caller asking for exactly that.
+    if "?" in text and not _ASKS_YOU_RE.search(text):
         return False
     return any(
         _AFTER_GOODBYE_RE.match(text, found.end()) is not None
@@ -2171,7 +2181,9 @@ class UraReceptionistBrain(LLMService):
         # loop that froze every live call on the worker while it ran.
         ticket_id, handoff = await asyncio.to_thread(
             call_transfer.create_transfer_ticket,
-            self.room,
+            # The call as it stands now, read here on the loop: the thread
+            # reads nothing from the live room.
+            call_transfer.TicketSubject.of(self.room),
             self.chat_model,
             reason,
             ticket_id=ticket_id,

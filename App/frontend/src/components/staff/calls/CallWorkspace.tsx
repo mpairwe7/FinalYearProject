@@ -12,7 +12,7 @@ import { callTopicLabel, isRaisedPriority } from '@/lib/callTopic';
 import { isLiveOfficer } from '@/lib/roles';
 import { callsApi, claimRefusalMessage } from '@/services/callsApi';
 import { takeCall } from '@/services/officerCallSession';
-import { reservedForAnother, useCallConsoleStore } from '@/store/useCallConsoleStore';
+import { reservedForAnother, reservedForMe, useCallConsoleStore } from '@/store/useCallConsoleStore';
 import { CallBriefCard } from './CallBriefCard';
 import { CallControls } from './CallControls';
 import { CallMetricsCard } from './CallMetricsCard';
@@ -154,8 +154,7 @@ export function CallWorkspace({ callId, role }: { callId: string; role: string }
   // A colleague passed this call to a named officer: theirs to take first. The
   // server refuses anyone else until the hold runs out; this says so up front.
   const heldForAnother = lobby !== undefined && reservedForAnother(lobby, myUserId, now / 1000);
-  const passedToMe =
-    Boolean(myUserId) && lobby?.reserved_for === myUserId && (lobby?.reserved_until ?? 0) > now / 1000;
+  const passedToMe = lobby !== undefined && reservedForMe(lobby, myUserId, now / 1000);
 
   const header = (() => {
     switch (state) {
