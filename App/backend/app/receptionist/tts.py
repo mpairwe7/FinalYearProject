@@ -59,9 +59,10 @@ def decode_to_pcm16(speech_model: Any, audio: bytes) -> bytes:
 def synthesize_line(speech_model: Any, text: str, language: str, voice: str | None = None) -> tuple[bytes, bool]:
     """A line spoken outside the pipeline, as ``(pcm, failed)``. Blocking.
 
-    *failed* is a voice that could not say it (counted here, once). An empty
-    line that is not a failure is the Luganda, Runyankole or Acholi line the
-    English stand-in voice is not allowed to read: the caption still goes out.
+    *failed* is a voice that could not say it (counted here, once). That
+    includes a Luganda, Runyankole or Acholi line that only the English
+    stand-in voice could read, when it is not allowed to: the real voices
+    failed, and the caller hears nothing. The caption still goes out.
     """
     if speech_model is None or not text:
         return b"", False
@@ -76,7 +77,8 @@ def synthesize_line(speech_model: Any, text: str, language: str, voice: str | No
         return b"", True
     backend = str(getattr(res, "backend", "") or "")
     if language in ("lg", "nyn", "ach") and backend.startswith("edge") and not allow_edge_standin_lg():
-        return b"", False
+        telemetry.failure("tts")
+        return b"", True
     try:
         pcm = decode_to_pcm16(speech_model, res.audio)
     except Exception:
@@ -224,6 +226,7 @@ class UraSpeechTTS(TTSService):
             # edge-tts has no Luganda, Runyankole, or Acholi voice; what it returned
             # is an English speaker reading Ugandan text. The caption still reaches the screen.
             logger.warning("Dropping English stand-in voice for a %s line (%s)", language, backend)
+            await self._could_not_voice()
             return
 
         # Decode audio bytes into PCM16 at 16000Hz

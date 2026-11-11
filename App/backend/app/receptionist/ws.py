@@ -71,6 +71,13 @@ def _call_start_locales(init_msg: dict[str, Any]) -> tuple[str, str]:
     return locale, preferred
 
 
+def _resumed_locale(snapshot: dict[str, Any] | None, locale: str) -> str:
+    """The language a resumed call reopens in: the dropped call's, if calls are still held in it."""
+    if not isinstance(snapshot, dict):
+        return locale
+    return call_language(snapshot.get("locale")) or locale
+
+
 def _refusal_reason() -> str:
     """Why a call socket cannot be taken; "" when it can.
 
@@ -465,8 +472,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
             if isinstance(verified_claims, dict):
                 prior_cid = str(verified_claims.get("cid") or "")
                 resumed_snapshot = restore_call_drop_state(prior_cid, tenant_id=tenant_id or "default")
-                if isinstance(resumed_snapshot, dict) and resumed_snapshot.get("locale") in SUPPORTED_LOCALES:
-                    locale = str(resumed_snapshot["locale"])
+                locale = _resumed_locale(resumed_snapshot, locale)
 
         room = await registry.create(
             call_id=call_id,

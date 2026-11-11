@@ -1085,6 +1085,32 @@ class SpeechReviewTests(CallCase):
         self.brain.on_speech_failure.assert_awaited_once_with("tts")
         self.assertEqual(counter("receptionist_call_failures_total", stage="tts") - before, 1)
 
+    async def test_a_luganda_line_only_the_english_stand_in_could_read_is_a_failure_to_speak(self):
+        # The real voices failed; the policy refuses the English reading, so
+        # the caller hears nothing. Two of those in a row is a call that cannot speak.
+        import numpy as np
+
+        from app.receptionist.tts import UraSpeechTTS
+        from app.speech_service import SynthesizeResult
+
+        class StandInOnly:
+            def synthesize(self, *_a, **_k):
+                return SynthesizeResult(
+                    audio=b"wav", sample_rate=16000, num_samples=1600, duration_s=0.1, latency_s=0.0,
+                    backend="edge_tts", voice="en-KE-AsiliaNeural",
+                )
+
+        self.state.locale = "lg"
+        tts = UraSpeechTTS(speech_model=StandInOnly(), room=self.room)
+        with (
+            patch.object(UraSpeechTTS, "_should_stream", return_value=False),
+            patch("app.receptionist.tts.allow_edge_standin_lg", return_value=False),
+            patch("app.receptionist.tts.decode_to_pcm16", return_value=np.zeros(1600, dtype=np.int16).tobytes()),
+        ):
+            self.assertEqual(await self.speak(tts, "Omusolo gwa VAT guli 18%."), [])
+
+        self.brain.on_speech_failure.assert_awaited_once_with("tts")
+
     async def test_telemetry_does_not_use_up_the_callers_controls(self):
         import json as _json
 
@@ -1098,6 +1124,14 @@ class SpeechReviewTests(CallCase):
             question = await serializer.deserialize(_json.dumps({"type": "text_turn", "text": "What is the VAT rate?"}))
 
         self.assertIsNotNone(question)
+
+
+class ResumedLanguageTests(unittest.TestCase):
+    def test_a_resumed_call_opens_only_in_a_language_calls_are_held_in(self):
+        with patch.dict("os.environ", {"RECEPTIONIST_LANGUAGES": "en,sw", "RECEPTIONIST_DEFAULT_LANGUAGE": "en"}):
+            self.assertEqual(ws._resumed_locale({"locale": "lg"}, "en"), "en")
+            self.assertEqual(ws._resumed_locale({"locale": "sw"}, "en"), "sw")
+            self.assertEqual(ws._resumed_locale(None, "en"), "en")
 
 
 class G711Tests(unittest.TestCase):
