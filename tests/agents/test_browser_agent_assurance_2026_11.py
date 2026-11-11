@@ -749,6 +749,26 @@ class TestThePageDoesNotChooseAClick:
 
         assert [a for a in actions if a["action_type"] == "click" and a["security_gate"] == "safe"] == []
 
+    @pytest.mark.parametrize(
+        "where", [{"error_banner": "Server Error. Please sign in again."}, {"active_step": "Session Timeout"}]
+    )
+    def test_page_text_does_not_select_the_recovery_recipe(self, where: dict[str, str]) -> None:
+        card = pc.analyze_portal_context(_telemetry(**where))
+
+        assert [a["element"] for a in card["dom_actions"] if a["action_type"] == "click"] == [
+            "Generate PRN Button"
+        ], "page text chose a click"
+
+    @pytest.mark.parametrize("portal", RECIPE_PORTALS)
+    @pytest.mark.parametrize("state", RECIPE_STATES)
+    def test_no_recipe_reaches_for_any_login_link(self, portal: str, state: str) -> None:
+        reaching = [
+            step["selector"]
+            for step in pc.get_portal_dom_recipe(portal, state=state)
+            if "href*=" in step["selector"].replace(" ", "")
+        ]
+        assert reaching == [], "a substring match on href also matches another site's login page"
+
     @pytest.mark.parametrize("portal", RECIPE_PORTALS)
     @pytest.mark.parametrize("state", RECIPE_STATES)
     def test_no_recipe_reaches_for_a_credential_field(self, portal: str, state: str) -> None:
@@ -790,8 +810,20 @@ class TestTelemetryIsBoundedAndAttributed:
         many = {f"field_{n}": "x" for n in range(65)}
         assert self._chat(client, _telemetry(visible_fields=many)).status_code == 422
 
-    def test_a_field_value_longer_than_a_form_holds_is_refused(self, client: TestClient) -> None:
-        assert self._chat(client, _telemetry(visible_fields={"tin": "9" * 2001})).status_code == 422
+    def test_a_long_value_is_cut_not_refused(self, client: TestClient) -> None:
+        # Objection grounds are free text and can run long; refusing them left the
+        # taxpayer with no co-pilot help at all (CodeRabbit, PR 713).
+        grounds = "The assessment double counts the Q2 invoices. " * 120
+        context = _telemetry(
+            portal_id="objection_appeals",
+            current_route="/portal/objection_appeals",
+            visible_fields={"grounds": grounds, "assessment_ref": "ASMT-2026-00912"},
+        )
+        response = self._chat(client, context)
+
+        assert response.status_code == 200
+        kept = response.json()["portal_copilot"]["sanitized_context"]["visible_fields"]["grounds"]
+        assert 0 < len(kept) <= 240
 
     def test_an_overlong_required_field_name_is_refused(self, client: TestClient) -> None:
         assert self._chat(client, _telemetry(empty_required_fields=["a" * 65])).status_code == 422
@@ -1378,6 +1410,19 @@ class TestAFormValueIsWhatAFormHolds:
 
         assert card["card_type"] == "inline_form"
         assert "date_of_birth" in card["field_errors"]
+
+    def test_a_date_of_birth_is_in_the_past_by_kampalas_calendar(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import datetime
+
+        from app.tax import tables
+
+        monkeypatch.setattr(tables, "kampala_today", lambda *_: datetime.date(1990, 5, 18))
+        spec = pc.PORTAL_TASK_CATALOG["tin_apply_individual"]
+        _, _, before = pc.validate_task_fields(spec, {**TIN_APPLICATION, "date_of_birth": "1990-05-17"})
+        _, _, same_day = pc.validate_task_fields(spec, {**TIN_APPLICATION, "date_of_birth": "1990-05-18"})
+
+        assert "date_of_birth" not in before
+        assert "date_of_birth" in same_day
 
     def test_markup_in_a_name_is_refused(self, client: TestClient) -> None:
         fields = {**TIN_APPLICATION, "date_of_birth": "1990-05-17", "surname": "<b>x</b>"}

@@ -6721,7 +6721,8 @@ def _portal_dom_recipe(
             {
                 "step_number": 2,
                 "element": "Recovery / Back Link",
-                "selector": "a#loginLink, button#btnRefresh, a[href*='login']",
+                # Named elements only: a[href*='login'] also matched another site's login page.
+                "selector": "a#loginLink, button#btnRefresh",
                 "action_type": "click",
                 "fill_value": None,
                 "scroll_to": True,

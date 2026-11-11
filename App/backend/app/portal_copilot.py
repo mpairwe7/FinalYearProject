@@ -1934,7 +1934,10 @@ def _date_error(value: str, *, must_be_past: bool) -> str:
         return "must be a real date written as YYYY-MM-DD."
     if parsed.year < 1900:
         return "must be 1900 or later."
-    if must_be_past and parsed >= datetime.date.today():
+    from .tax.tables import kampala_today
+
+    # Kampala's date: the server's runs a day behind from 00:00 to 03:00 EAT.
+    if must_be_past and parsed >= kampala_today():
         return "must be a date in the past."
     return ""
 
@@ -3326,8 +3329,10 @@ def analyze_portal_context(
     stalled_ms = int(sanitized.get("stalled_duration_ms") or 0)
     active_step = sanitized.get("active_step") or "Form Entry"
 
-    # Build base DOM recipe bound with visible fields
-    base_recipe = get_portal_dom_recipe(portal_key, state=error_banner or active_step, entities=visible_fields)
+    # The recipe is chosen by the portal alone. The banner and the step title
+    # are page text: "Server Error" there used to select the recovery recipe,
+    # whose click on a login link is the shape of a LoginTrap injection.
+    base_recipe = get_portal_dom_recipe(portal_key, entities=visible_fields)
     dom_actions: list[dict[str, Any]] = []
 
     # What the page says is quoted as the page's words, never as the diagnosis

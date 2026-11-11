@@ -365,7 +365,7 @@ CORS list.
 | Field | Notes |
 | --- | --- |
 | `decision` | `allow`/`accept`, `disallow`/`decline`/`cancel`, or `prepare` (re-validate and re-sign after an edit, with `edited_fields`) |
-| `displayed_fields_sha256` | Required to allow. SHA-256 of the JSON array `[{"name","value"}]` of the fields shown, in order, with `value` the unmasked value. The server compares it with the digest it signed. |
+| `displayed_fields_sha256` | Required to allow. Lower-case hex SHA-256 of the UTF-8 bytes of a JSON array with one `{"name": …, "value": …}` object per entry of `display_fields`, in that order. `value` is the entry's `raw_value` as a string (its `value` when there is no `raw_value`). Serialise with sorted keys, no whitespace (`,` and `:` separators) and non-ASCII characters unescaped: in Python, `json.dumps(items, sort_keys=True, separators=(",", ":"), ensure_ascii=False)`. The server compares it with the digest it signed. |
 | `high_value_acknowledged` | Required to be `true` when the card has `high_value_requires_ack` (≥ UGX 50,000,000) |
 
 **Responses**

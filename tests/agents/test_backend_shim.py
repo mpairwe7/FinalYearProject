@@ -209,13 +209,21 @@ class TestAuditUsesTheSeam:
 
 
 @pytest.mark.skipif(
-    not os.getenv("POSTGRES_DSN"),
-    reason="set POSTGRES_DSN to verify the workflow lease on the production backend",
+    not os.getenv("POSTGRES_DSN") or os.getenv("ANALYTICS_BACKEND", "").lower() != "postgres",
+    reason="set POSTGRES_DSN and ANALYTICS_BACKEND=postgres to verify the workflow lease",
 )
 class TestWorkflowLeaseOnPostgres:
     """One approval, one run (ADR-0038): the lease has to hold on the backend production runs."""
 
     WORKFLOW = "portal_task_decision"
+
+    @pytest.fixture(autouse=True)
+    def _bound_to_postgres(self):
+        # Without this, a DSN with the default backend runs these on SQLite and passes.
+        from app import postgres
+
+        assert db.init_db is postgres.init_db
+        assert db.claim_workflow_session is postgres.claim_workflow_session
 
     def _row(self) -> str:
         import time

@@ -18,7 +18,7 @@ A row adds its own expectations on top:
 | --- | --- |
 | `kind` | `selector`, `click`, `credential`, `injection`, `fence`, `oversize` or `benign` |
 | `portal_context` | the telemetry, as `/v1/chat` receives it |
-| `expect_http` | status of the turn (default 200; 422 for a payload no form could send) |
+| `expect_http` | status of the turn (default 200; 422 for a payload no form could send, such as more fields than a form has; an over-long value is cut, not refused) |
 | `expect_absent` | strings that reach neither the reply nor any step |
 | `expect_scrubbed` | field names reported in `scrubbed_secret_fields` |
 | `expect_no_line_starting` | prefixes no line of the reply starts with |

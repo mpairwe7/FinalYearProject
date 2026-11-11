@@ -255,7 +255,7 @@ the mechanisms well and the tasks not at all.
 
 ## Verification
 
-- Backend: `tests/agents/test_browser_agent_assurance_2026_11.py` (96 tests, 484 cases with the recipe and credential-name parameters) and
+- Backend: `tests/agents/test_browser_agent_assurance_2026_11.py` (99 tests, 649 cases with the recipe and credential-name parameters) and
   `tests/agents/test_portal_copilot_adversarial_eval.py` (29).
 - Frontend: `PortalConfirmGuard.test.tsx`, `securityHeaders.test.ts`, four new cases in
   `PortalCopilotCard.test.tsx`; `tsc --noEmit` and ESLint clean.

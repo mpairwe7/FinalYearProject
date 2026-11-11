@@ -211,7 +211,7 @@ Considered and not adopted:
 
 ## Confirmation
 
-- `tests/agents/test_browser_agent_assurance_2026_11.py` (96 tests, 484 cases with the recipe
+- `tests/agents/test_browser_agent_assurance_2026_11.py` (99 tests, 649 cases with the recipe
   and credential-name parameters) covers:
   - the lease going to one caller, lapsing, and not crossing tenants;
   - a second worker, a late decline and a late edit while a task is in flight;
@@ -255,3 +255,14 @@ Considered and not adopted:
   Each now has a test.
 - `governance/compliance_check.py` and `threat-model/validate_threats.py` pass (threats T83–T86
   added).
+- **Review round 1 (CodeRabbit, PR 713).** These changes were made:
+  - A long telemetry value is cut to 2,000 characters instead of refusing the turn: long
+    objection grounds left the taxpayer with no help.
+  - A date of birth is compared with Kampala's date, not the server's.
+  - The recipe is chosen by the portal alone, never by a banner or a step title, and the
+    recovery click names elements instead of matching any `href` containing "login".
+  - The frame-policy test no longer depends on the environment, and the no-embed policy has
+    its own test.
+  - The API reference states the digest's exact serialisation.
+  - The Postgres lease tests run only when both the DSN and the backend select Postgres, and
+    assert that they do.
