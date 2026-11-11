@@ -798,6 +798,13 @@ class TestThePageDoesNotChooseAClick:
             ("button#go, #loginLink", "button#go"),
             ("BUTTON.primary", "BUTTON.primary"),
             ("input[type='submit']", "input[type='submit']"),
+            # The element a selector matches is its last compound (CodeRabbit, PR 713).
+            ("button a#login", None),
+            ("button + a.next", None),
+            ("input ~ a[href]", None),
+            ("form > button#go", "form > button#go"),
+            ("#payment-form input[value='Generate PRN']", "#payment-form input[value='Generate PRN']"),
+            ("button[title='a b'] a", None),
         ],
     )
     def test_a_click_keeps_only_a_button_or_an_input(self, selector: str, kept: str | None) -> None:

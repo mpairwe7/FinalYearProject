@@ -6617,9 +6617,24 @@ _CREDENTIAL_SELECTOR_RE = re.compile(
 )
 
 
-#: A selector that names a button or an input by its element type. Anything
+#: A compound that names a button or an input by its element type. Anything
 #: else, an untyped `#id` or `.class` included, could match a link.
 _CLICK_TARGET_RE = re.compile(r"(?:button|input)(?![\w-])", re.IGNORECASE)
+#: Attribute values and quoted strings, set aside before a selector is split:
+#: `[value='Generate PRN']` holds a space that is not a combinator.
+_SELECTOR_LITERAL_RE = re.compile(r"\[[^\]]*\]|'[^']*'|\"[^\"]*\"")
+_COMBINATOR_RE = re.compile(r"\s*[>+~]\s*|\s+")
+
+
+def _click_subject_is_typed(part: str) -> bool:
+    """True when the element *part* matches is a button or an input.
+
+    That element is the last compound, after the final combinator:
+    `button a#login` matches the link, not the button.
+    """
+    bare = _SELECTOR_LITERAL_RE.sub("[]", part.strip())
+    subject = _COMBINATOR_RE.split(bare)[-1]
+    return bool(_CLICK_TARGET_RE.match(subject))
 
 
 def selector_targets_a_credential(selector: str) -> bool:
@@ -6638,7 +6653,8 @@ def harden_dom_actions(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     - an action of an unknown kind is dropped;
     - nothing targets a credential field;
     - a click waits for the taxpayer, whatever chose it, and keeps only the
-      parts of its selector that name a button or an input by element type. A
+      parts of its selector whose matched element (the last compound) is a
+      button or an input named by element type. A
       link goes wherever the page points it and the server cannot see where,
       and an untyped `#id` could be a link. A click left with no target points
       instead;
@@ -6660,7 +6676,7 @@ def harden_dom_actions(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
             kind = step["action_type"] = "spotlight"
         if kind == "click":
             targets = [part.strip() for part in selector.split(",") if part.strip()]
-            kept = [part for part in targets if _CLICK_TARGET_RE.match(part)]
+            kept = [part for part in targets if _click_subject_is_typed(part)]
             if not kept:
                 kind = step["action_type"] = "spotlight"
             else:

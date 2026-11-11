@@ -80,7 +80,10 @@ Four rules, each enforced in one place.
   - The loser of the lease replays the stored receipt, or gets 409 while the task is in flight.
   - A store that cannot be read or written refuses the decision with 503. Nothing runs on a
     guess.
-  - A run that sent nothing releases the lease, so it can be tried again.
+  - A run whose connector raised or answered `ok: false` releases the lease, so it can be tried
+    again. That is not proof nothing was sent: a call can fail after the far side acted on it.
+    The simulators make no partial effects. A live connector must carry its own idempotency key
+    and say when an outcome is unknown, so a retry cannot repeat what already happened.
   - A decline takes the same lease, so it cannot say "nothing was sent" over a task being sent.
 - With `audit_ledger` on, `portal_task_approved` is appended before the portal is reached. If it
   cannot be appended the task does not run.
@@ -139,7 +142,8 @@ Four rules, each enforced in one place.
   nobody gave. A task that ran live returns no recipe.
 - What the person typed is laid over what the page shows, never under it. A statutory handoff
   stages only its task's fields.
-- Telemetry is bounded (64 fields, 64-character names, 2,000-character values) and screened as
+- Telemetry is bounded (64 fields and 64-character names, refused beyond; values cut to 2,000
+  characters) and screened as
   one line: instruction phrases, the fence tag in any spelling and untrusted links are removed.
   The reply quotes it as what the page shows.
 
@@ -176,7 +180,11 @@ Considered and not adopted:
 
 - **Good:** a double click, a retry or a second worker cannot issue a second PRN or a second
   application.
-- **Good:** every decision is in the ledger, and an approval is there before its effect.
+- **Good:** with `audit_ledger` on, an approval is in the ledger before its effect, and a task
+  whose approval cannot be recorded does not run. Within those limits:
+  - with the flag off, nothing is appended, and decisions are recorded only in the decision store;
+  - an outcome row that cannot be appended after the decision is counted
+    (`audit_append_failed_total`) and logged, and the decision stands.
 - **Good:** nothing a page writes can name an element, buy a click or pass on a link.
 - **Good:** another party's Space can no longer frame the confirmation card.
 - **Good:** the Postgres backend finishes its schema bootstrap. Running the lease on a real
@@ -276,3 +284,8 @@ Considered and not adopted:
   match a link. The rule is now an allowlist: a click keeps only selector parts that name a
   `button` or an `input`. A submit button still posts to its form's action, which the page
   controls; the click waits for the taxpayer for that reason.
+- **Review round 4.** The allowlist checked the start of each selector part, but the element a
+  selector matches is its last compound: `button a#login` matches the link. It now checks the
+  last compound, with attribute values set aside so `input[value='Generate PRN']` is not split.
+  The ADR also no longer overstates two guarantees: a released lease is not proof that nothing
+  was sent, and the ledger records decisions only with `audit_ledger` on.
