@@ -64,6 +64,25 @@ ok()   { echo "verify-embedded-stores: ok   — $*"; }
 command -v redis-server >/dev/null 2>&1 || fail "redis-server is not installed in this image"
 [ -x "$PYTHON" ]             || fail "no Python interpreter at $PYTHON"
 
+# ------------------------------------------------------------ call process ---
+# The API runs as two roles and nginx sends every call path to one of them
+# (G306). Neither half fails loudly on its own: a missing call program leaves
+# nginx proxying calls to a port nothing listens on, and a config nginx rejects
+# only shows when the pod starts. Both are build-time facts, so check them here.
+[ -x /usr/local/bin/uvicorn-role.sh ] || fail "no executable /usr/local/bin/uvicorn-role.sh — supervisord starts both API roles through it"
+command -v flock >/dev/null 2>&1     || fail "flock (util-linux) is not installed; uvicorn-role.sh needs it to reset the metrics directory once"
+SUPERVISORD_CONF=/etc/supervisor/conf.d/supervisord.conf
+[ -f "$SUPERVISORD_CONF" ]           || fail "no supervisord config at $SUPERVISORD_CONF"
+grep -q '^\[program:uvicorn-chat\]' "$SUPERVISORD_CONF" \
+    || fail "supervisord does not start [program:uvicorn-chat] — nothing would serve the chat paths"
+grep -q '^\[program:uvicorn-calls\]' "$SUPERVISORD_CONF" \
+    || fail "supervisord does not start [program:uvicorn-calls] — nothing would serve the call paths"
+# /usr/sbin is not on the image's PATH, so the binary is named as supervisord names it.
+[ -x /usr/sbin/nginx ] || fail "no nginx binary at /usr/sbin/nginx"
+/usr/sbin/nginx -t -q -c /etc/nginx/nginx.conf \
+    || fail "nginx rejects /etc/nginx/nginx.conf (nginx -t -q -c /etc/nginx/nginx.conf)"
+ok "supervisord starts program:uvicorn-chat and program:uvicorn-calls; nginx -t accepts /etc/nginx/nginx.conf"
+
 FAQ_ROWS_ON_DISK=$(cat "$FAQ_JSONL_DIR"/*.jsonl 2>/dev/null | wc -l | tr -d ' ')
 [ "${FAQ_ROWS_ON_DISK:-0}" -gt 0 ] || fail "$FAQ_JSONL_DIR contains no JSONL rows"
 ok "$FAQ_ROWS_ON_DISK FAQ rows on disk in $FAQ_JSONL_DIR"
@@ -231,4 +250,4 @@ else
     ok "Redis verified (an instance was already serving; left running)"
 fi
 
-echo "verify-embedded-stores: PASS — Qdrant seeded with the FAQ corpus, Redis embedded and serving"
+echo "verify-embedded-stores: PASS — Qdrant seeded with the FAQ corpus, Redis embedded and serving, both API roles supervised"

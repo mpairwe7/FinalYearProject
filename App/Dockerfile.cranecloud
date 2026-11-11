@@ -270,6 +270,12 @@ RUN set -eux; \
 COPY App/deploy/cranecloud/wait-for-qdrant.sh /usr/local/bin/wait-for-qdrant.sh
 RUN chmod +x /usr/local/bin/wait-for-qdrant.sh && sh -n /usr/local/bin/wait-for-qdrant.sh
 
+# The API runs as two roles, a chat process and the one call process (G306).
+# supervisord starts each through this script, which sets the role, the port and
+# the worker count and then execs the readiness gate above.
+COPY App/deploy/cranecloud/uvicorn-role.sh /usr/local/bin/uvicorn-role.sh
+RUN chmod +x /usr/local/bin/uvicorn-role.sh && sh -n /usr/local/bin/uvicorn-role.sh
+
 # Build gate for the two embedded stores, run below once the operational ENV is
 # set so it checks the values the image will really use. Also stays in the image
 # so it can be run against a live pod after a roll.

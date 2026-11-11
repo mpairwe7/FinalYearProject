@@ -790,6 +790,12 @@
 # image once this pin moves to an image built with the call-scope gate.
 FROM landwind/ura-chatbot:sha-f5d79b7
 
+# One replica serves the Space. Call rooms live in the memory of the call process,
+# and this is the declaration the receptionist's production gate asks for before it
+# will treat "no room here" as "no live call" (G36, G306). Not a scaling setting:
+# a second replica would split calls across processes that cannot see each other.
+ENV VOICE_RECEPTIONIST_REPLICAS=1
+
 # Gate the pin on the two embedded stores this Space depends on: a Qdrant
 # collection seeded from the FAQ JSONL corpus, and an embedded Redis.
 #
