@@ -51,6 +51,10 @@ _CALL_DESK_COLUMNS: dict[str, str] = {
     # above stay the call's own: the last officer's.
     "handled_by_json": "TEXT NOT NULL DEFAULT '[]'",
     "wrapups_json": "TEXT NOT NULL DEFAULT '[]'",
+    # When the call's time limit falls, once its warning has gone out: a
+    # console that opens the call later, on any worker, is told how long is
+    # left (ADR-0042).
+    "limit_at": "DOUBLE PRECISION",
 }
 
 #: JSON columns read back as a parsed value beside the raw text.

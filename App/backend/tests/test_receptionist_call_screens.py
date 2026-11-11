@@ -247,6 +247,21 @@ class LateViewerTests(unittest.IsolatedAsyncioTestCase):
     async def test_the_snapshot_says_nothing_of_the_limit_before_the_warning(self):
         self.assertNotIn("seconds_remaining", await self.snapshot())
 
+    async def test_a_console_on_a_worker_without_the_call_learns_the_limit_from_its_row(self):
+        await registry.remove(self.call_id)  # the call is held by the other worker
+        update_call(self.call_id, limit_at=time.time() + 42)
+
+        seconds = (await self.snapshot()).get("seconds_remaining")
+
+        self.assertIsNotNone(seconds)
+        self.assertTrue(40 <= seconds <= 42, seconds)
+
+    async def test_an_ended_call_has_no_time_left_to_report(self):
+        await registry.remove(self.call_id)
+        update_call(self.call_id, limit_at=time.time() + 42, status="ended")
+
+        self.assertNotIn("seconds_remaining", await self.snapshot())
+
 
 # ---------------------------------------------------------------------------
 # The time limit is announced on every transport (G602)
@@ -337,8 +352,10 @@ class CallClockTests(unittest.IsolatedAsyncioTestCase):
                                  [{"type": "duration_warning", "seconds_remaining": int(ceiling - warned_at)}])
                 # Then it sleeps to the ceiling, not past it, and ends the call there.
                 self.assertEqual(slept[:2], [warned_at, ceiling - warned_at])
-                # The deadline stays on the room, for a console that opens the call later.
+                # The deadline stays on the room and the call's row, for a
+                # console that opens the call later, on either worker.
                 self.assertEqual(self.room.state.limit_at, 1_000_000.0 + ceiling)
+                self.assertEqual(get_call(self.call_id)["limit_at"], 1_000_000.0 + ceiling)
                 self.assertEqual(self.room.state.mode, "ended")
                 self.assertEqual(get_call(self.call_id)["end_reason"], "max_call_duration")
 

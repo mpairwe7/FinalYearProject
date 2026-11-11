@@ -2040,8 +2040,10 @@ from then, not from the socket opening. The per-call stream also carries
 `{"type": "duration_warning", "call_id": "…", "data": {"seconds_remaining": N}}`
 a minute before the call's time limit (halfway through a limit of a minute or
 less). A `snapshot` sent after that warning, to a console that opened or
-reopened the call late, carries `"seconds_remaining": N` at its top level; a
-snapshot from a worker that does not hold the call leaves it out.
+reopened the call late, carries `"seconds_remaining": N` at its top level, on
+any worker: the deadline is kept on the call's row (`limit_at`) as well as on
+the room. The live events that follow still reach only consoles on the worker
+that holds the call (G306).
 
 #### Call sockets: refusals, errors and the time limit (ADR-0042)
 

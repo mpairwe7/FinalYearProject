@@ -102,7 +102,8 @@ before the caller is told, so their screen hanging up in reply is not recorded
 as the caller's own hang-up, on the time limit and on every `hang_up_caller`;
 the officer's time-limit notice counts down to a deadline in 15-second steps
 (a status region is read out on every change), and a console that opens the
-call after the warning gets the seconds left in its snapshot; a call whose media pipeline
+call after the warning gets the seconds left in its snapshot, on either worker
+(the deadline is on the call's row, `limit_at`, as well as the room); a call whose media pipeline
 cannot start is closed with 1001 after its `unavailable` frame, where the
 server's own close had replaced that message on the caller's screen.
 

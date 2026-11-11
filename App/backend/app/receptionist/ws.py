@@ -414,6 +414,10 @@ async def _call_clock(room: Any) -> None:
         remaining = max(1, int(round(started + ceiling - time.time())))
         payload = {"type": "duration_warning", "seconds_remaining": remaining}
         room.state.limit_at = started + ceiling
+        # On the row too: a console that opens the call later may reach the
+        # worker that does not hold it.
+        with contextlib.suppress(Exception):
+            await asyncio.to_thread(update_call, room.call_id, limit_at=started + ceiling)
         with contextlib.suppress(Exception):
             hub.publish_call(room.call_id, "duration_warning", payload)
         warning = asyncio.create_task(asyncio.wait_for(desk._send_to_caller(room, payload), timeout=5.0))
@@ -987,11 +991,17 @@ async def _staff_calls_stream(websocket: WebSocket, call_id: str | None, slot: _
             )
             frame: dict[str, Any] = {"type": "snapshot", "call": snapshot, "turns": turns}
             # Opened after the time-limit warning: the console is told how long
-            # is left, as a count so the officer's clock cannot skew it.
+            # is left, as a count so the officer's clock cannot skew it. The
+            # room says when this worker holds the call; the row otherwise.
             live_room = registry.get(call_id)
-            limit_at = getattr(getattr(live_room, "state", None), "limit_at", None)
-            if limit_at is not None and live_room.state.mode != "ended":
-                frame["seconds_remaining"] = max(0, int(round(limit_at - time.time())))
+            if live_room is not None:
+                limit_at = live_room.state.limit_at
+                ended = live_room.state.mode == "ended"
+            else:
+                limit_at = snapshot.get("limit_at")
+                ended = snapshot.get("status") == "ended"
+            if limit_at is not None and not ended:
+                frame["seconds_remaining"] = max(0, int(round(float(limit_at) - time.time())))
             await asyncio.wait_for(websocket.send_text(json.dumps(frame)), timeout=5.0)
         except BaseException:
             hub.unsubscribe_call(call_id, queue)
