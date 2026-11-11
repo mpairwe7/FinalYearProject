@@ -788,6 +788,28 @@ class TestThePageDoesNotChooseAClick:
             ("Look", "spotlight", "a.help", "safe"),
         ]
 
+    @pytest.mark.parametrize(
+        ("selector", "kept"),
+        [
+            ("#loginLink", None),
+            ("A#next", None),
+            (".action-link", None),
+            ("[href]", None),
+            ("button#go, #loginLink", "button#go"),
+            ("BUTTON.primary", "BUTTON.primary"),
+            ("input[type='submit']", "input[type='submit']"),
+        ],
+    )
+    def test_a_click_keeps_only_a_button_or_an_input(self, selector: str, kept: str | None) -> None:
+        # An untyped selector can match a link as well as a button (CodeRabbit, PR 713).
+        (step,) = harden_dom_actions([{"element": "Go", "selector": selector, "action_type": "click"}])
+
+        if kept is None:
+            assert step["action_type"] == "spotlight"
+        else:
+            assert step["action_type"] == "click"
+            assert step["selector"] == kept
+
     @pytest.mark.parametrize("portal", RECIPE_PORTALS)
     @pytest.mark.parametrize("state", RECIPE_STATES)
     def test_no_recipe_reaches_for_any_login_link(self, portal: str, state: str) -> None:

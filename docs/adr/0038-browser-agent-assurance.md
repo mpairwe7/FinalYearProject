@@ -129,8 +129,9 @@ Four rules, each enforced in one place.
 - A selector comes from the server's own map. A field the server does not know is named in
   words and carries no selector. The client's `selector` is accepted and ignored.
 - Every action list leaves through `harden_dom_actions`:
-  - a click waits for the taxpayer, whatever chose it, and targets a button or an input, never
-    a link: a link goes wherever the page points it, and the server cannot see where;
+  - a click waits for the taxpayer, whatever chose it, and keeps only selector parts that name a
+    `button` or an `input` by element type: a link goes wherever the page points it, the server
+    cannot see where, and an untyped `#id` could be a link;
   - nothing targets a credential field;
   - an action of an unknown kind is dropped;
   - only a fill or a select carries a value.
@@ -271,3 +272,7 @@ Considered and not adopted:
   named a link whose destination nothing checks. No recipe clicks a link now: the recovery step
   clicks a refresh button, the generic step lost `a.action-link`, and `harden_dom_actions` drops
   a link from any click's selector (a click left with no target becomes a spotlight).
+- **Review round 3.** CodeRabbit noted that an untyped selector such as `#loginLink` could still
+  match a link. The rule is now an allowlist: a click keeps only selector parts that name a
+  `button` or an `input`. A submit button still posts to its form's action, which the page
+  controls; the click waits for the taxpayer for that reason.

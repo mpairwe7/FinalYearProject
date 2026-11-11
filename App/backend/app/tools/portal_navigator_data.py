@@ -6617,8 +6617,9 @@ _CREDENTIAL_SELECTOR_RE = re.compile(
 )
 
 
-#: A selector whose element is a link (`a`, `a#id`, `a.class`, `a[href]`).
-_LINK_SELECTOR_RE = re.compile(r"a(?![\w-])")
+#: A selector that names a button or an input by its element type. Anything
+#: else, an untyped `#id` or `.class` included, could match a link.
+_CLICK_TARGET_RE = re.compile(r"(?:button|input)(?![\w-])", re.IGNORECASE)
 
 
 def selector_targets_a_credential(selector: str) -> bool:
@@ -6636,9 +6637,11 @@ def harden_dom_actions(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     - an action of an unknown kind is dropped;
     - nothing targets a credential field;
-    - a click waits for the taxpayer, whatever chose it, and targets a button
-      or an input, never a link: a link goes wherever the page points it, and
-      the server cannot see where. A click left with no target points instead;
+    - a click waits for the taxpayer, whatever chose it, and keeps only the
+      parts of its selector that name a button or an input by element type. A
+      link goes wherever the page points it and the server cannot see where,
+      and an untyped `#id` could be a link. A click left with no target points
+      instead;
     - only a fill or a select carries a value, and one with nothing to enter
       points at the field instead: a recipe used to fill in a tax head, a
       commodity code or a payment mode nobody gave (G561).
@@ -6657,7 +6660,7 @@ def harden_dom_actions(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
             kind = step["action_type"] = "spotlight"
         if kind == "click":
             targets = [part.strip() for part in selector.split(",") if part.strip()]
-            kept = [part for part in targets if not _LINK_SELECTOR_RE.match(part)]
+            kept = [part for part in targets if _CLICK_TARGET_RE.match(part)]
             if not kept:
                 kind = step["action_type"] = "spotlight"
             else:
