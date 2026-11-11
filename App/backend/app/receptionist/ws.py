@@ -230,7 +230,18 @@ async def _finish_call(room: Any) -> None:
             logger.exception("Call %s finalization failed for %s", operation, call_id)
     if bridged_officer:
         asyncio.create_task(desk._save_draft_wrapup(call_id))
-    asyncio.create_task(asyncio.to_thread(generate_call_summary, call_id))
+    asyncio.create_task(_summarise_when_transcribed(call_id))
+
+
+async def _summarise_when_transcribed(call_id: str) -> None:
+    """Write the call's summary once the officer's last words are in the transcript it is written from."""
+    from .officer import transcriptions_settled
+
+    try:
+        await transcriptions_settled(call_id)
+    except Exception:
+        logger.debug("Waiting for officer transcription on %s failed", call_id, exc_info=True)
+    await asyncio.to_thread(generate_call_summary, call_id)
 
 
 async def _forward_control(task: Any, data: dict[str, Any]) -> None:

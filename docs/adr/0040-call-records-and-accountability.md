@@ -114,9 +114,10 @@ following, each fixed here with a test that failed first:
 - Smaller: the brain switches only into the deployment's call languages; a
   model run reads its language before it is scheduled; the ticket withdrawn
   after a failed link is a system write and a failed withdrawal is logged as
-  an orphan; an outcome that replaces `callback` drops the callback it asked
-  for; an officer's last utterances are transcribed after the leg closes,
-  within 20 s; the schedule's "an officer is online" counts the caller's
+  an orphan, and any ticket write that reports failure stops the wrap-up
+  before it is saved; an outcome that replaces `callback` drops the callback
+  it asked for; an officer's last utterances are transcribed after the leg
+  closes, within 20 s, and the call's summary and wrap-up draft wait for them; the schedule's "an officer is online" counts the caller's
   tenant only; the summary's note is conditional in the UPDATE itself; a
   listener's place is taken before anything is awaited and given up when
   their socket closes during a silence.

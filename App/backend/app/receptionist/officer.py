@@ -16,8 +16,35 @@ logger = logging.getLogger(__name__)
 
 #: How long a closed leg's transcription backlog may take to finish.
 OFFICER_DRAIN_S = 20.0
-#: Backlogs still finishing after their leg closed, held so they are not collected mid-run.
-_DRAINING: set[asyncio.Task[None]] = set()
+#: Backlogs still finishing after their leg closed, by call: held so they are
+#: not collected mid-run, and so a call's final records can wait for them.
+_DRAINING: dict[str, set[asyncio.Task[None]]] = {}
+
+
+async def transcriptions_settled(call_id: str, timeout: float | None = None) -> None:
+    """Wait for officer speech on *call_id* that is still being transcribed, at most *timeout*.
+
+    A call's summary and wrap-up draft are written from its transcript. The
+    officer's last words reach the transcript a moment after their leg
+    closes, so whatever writes those records waits here first. Each backlog
+    is already bounded by ``OFFICER_DRAIN_S``; the default wait is that plus
+    a second. Returns at once when nothing is pending.
+    """
+    pending = [task for task in _DRAINING.get(call_id, ()) if not task.done()]
+    if pending:
+        await asyncio.wait(pending, timeout=OFFICER_DRAIN_S + 1.0 if timeout is None else timeout)
+
+
+def _hold_until_done(call_id: str, drain: asyncio.Task[None]) -> None:
+    held = _DRAINING.setdefault(call_id, set())
+    held.add(drain)
+
+    def release(_task: asyncio.Task[None]) -> None:
+        held.discard(drain)
+        if not held and _DRAINING.get(call_id) is held:
+            del _DRAINING[call_id]
+
+    drain.add_done_callback(release)
 
 
 async def _finish_within(worker: asyncio.Task[None], seconds: float) -> None:
@@ -197,9 +224,7 @@ class OfficerLeg:
             # it stays in the transcript: the backlog is finished rather than
             # cancelled, in the background and within a deadline, so a
             # recognizer that hangs cannot hold the task for good.
-            drain = asyncio.create_task(_finish_within(worker, OFFICER_DRAIN_S))
-            _DRAINING.add(drain)
-            drain.add_done_callback(_DRAINING.discard)
+            _hold_until_done(self.room.call_id, asyncio.create_task(_finish_within(worker, OFFICER_DRAIN_S)))
         try:
             await self.ws.close()
         except Exception:

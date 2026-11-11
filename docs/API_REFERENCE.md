@@ -2078,7 +2078,10 @@ merges, it does not replace). Saving an outcome other than `callback` drops a
 callback an earlier outcome of this call asked for; a callback owed for another
 reason stays owed. **503** means the wrap-up or its ticket action could not be
 saved: save it again. A ticket it opened is linked first and is not opened
-twice, and the message says so when the ticket was already updated.
+twice, and the message says so when the ticket was already updated. A ticket
+write that fails is a 503 before the wrap-up is saved, so a call is never
+recorded `resolved` over a ticket that stayed open; **409** when the call's
+ticket no longer exists (save the wrap-up without a ticket action).
 
 Where the API process has no room for the call (another worker holds it, or
 the process that did has gone), the stored status decides: a call still
@@ -2088,9 +2091,11 @@ and 409 above apply. A row its process left behind is ended first
 
 `POST /v1/admin/calls/{call_id}/end` ends such a row (`end_reason:
 officer_terminated_stale`) only where no other process can be holding the
-call: the deployment declares one worker and one replica (`WORKERS=1`, or
-`UVICORN_WORKERS=1`, with `VOICE_RECEPTIONIST_REPLICAS=1`), or the call began
-longer ago than a call may last. Otherwise it answers **409** ("on another
+call: the deployment declares one worker and one replica, or the call began
+longer ago than a call may last. Declared means `VOICE_RECEPTIONIST_REPLICAS=1`
+and a worker count of 1 in every one of `WORKERS`, `UVICORN_WORKERS` and
+`WEB_CONCURRENCY` that is set, with at least one set (the supervisord image
+defaults `UVICORN_WORKERS` to 2, so `WORKERS=1` alone is not enough there). Otherwise it answers **409** ("on another
 server process"), because a live call on another worker looks the same from
 here.
 

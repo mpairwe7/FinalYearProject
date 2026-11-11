@@ -856,10 +856,11 @@ async def wrapup(
 
         try:
             if ticket_action == "resolve" and ticket_id:
-                db.update_ticket(ticket_id, status="resolved", staff_note=note)
+                _update_ticket(ticket_id, status="resolved", staff_note=note)
                 ticket_changed = True
             elif ticket_action == "keep_open" and ticket_id:
-                db.update_ticket(ticket_id, staff_note=note)
+                _update_ticket(ticket_id, staff_note=note)
+                ticket_changed = True
             elif ticket_action == "create":
                 if not ticket_id:
                     t = db.create_ticket(
@@ -879,7 +880,8 @@ async def wrapup(
                     _link_new_ticket(call_id, str(t["id"]), log_id=stored_id)
                     ticket_changed = True
                 else:
-                    db.update_ticket(ticket_id, staff_note=note)
+                    _update_ticket(ticket_id, staff_note=note)
+                    ticket_changed = True
         except DeskError:
             raise
         except Exception as exc:
@@ -949,6 +951,22 @@ async def wrapup(
             "recorded": satisfaction_recorded,
         }
     return result
+
+
+def _update_ticket(ticket_id: str, **fields: Any) -> None:
+    """An officer's write to a call's ticket at wrap-up, or a :class:`DeskError`.
+
+    ``update_ticket`` reports a write that did not happen by returning False;
+    it does not raise. Read as success, that let a call be recorded
+    ``resolved`` while its ticket stayed open.
+    """
+    from .. import database as db
+
+    if db.update_ticket(ticket_id, **fields):
+        return
+    if db.get_ticket(ticket_id) is None:
+        raise DeskError(409, "This call's ticket no longer exists: save the wrap-up without a ticket action")
+    raise DeskError(503, "Ticket action could not be completed")
 
 
 def _link_new_ticket(call_id: str, ticket_id: str, *, log_id: str) -> None:
@@ -1053,6 +1071,11 @@ def draft_wrapup_note(call_id: str) -> str:
 
 async def _save_draft_wrapup(call_id: str) -> None:
     try:
+        # The draft is written from the transcript, and the officer's last
+        # words may still be on their way into it.
+        from .officer import transcriptions_settled
+
+        await transcriptions_settled(call_id)
         note = draft_wrapup_note(call_id)
         if note:
             save_draft_wrapup_if_empty(call_id, note)

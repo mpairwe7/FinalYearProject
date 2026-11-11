@@ -1587,6 +1587,34 @@ class WrapUpReviewTests(LiveCallCase):
 
         self.assertTrue(any("orphan" in line for line in logs.output))
 
+    async def resolve_with_a_ticket_write_that(self, *, exists: bool) -> desk.DeskError:
+        """Wrap up as resolved while the ticket's own write reports failure (it returns False, it does not raise)."""
+        from app.receptionist.store import update_call
+
+        ticket = db.create_ticket("caller_requested", "I was charged a penalty I do not owe")
+        update_call(self.call_id, ticket_id=ticket["id"])
+        await self.bridge("okello")
+        await self.room.end("caller_hangup")
+        with (
+            patch("app.flags.flags.is_enabled", side_effect=only("ticket_queue")),
+            patch.object(db, "update_ticket", return_value=False),
+            patch.object(db, "get_ticket", return_value=ticket if exists else None),
+        ):
+            return await self.refused("okello", ticket_action="resolve")
+
+    async def test_a_call_is_not_recorded_resolved_when_its_ticket_could_not_be(self):
+        error = await self.resolve_with_a_ticket_write_that(exists=True)
+
+        self.assertEqual(error.status, 503)
+        row = get_call(self.call_id)
+        self.assertEqual((row["outcome"], row["wrapups"]), ("", []))
+
+    async def test_a_ticket_that_no_longer_exists_is_said_to_be_gone(self):
+        error = await self.resolve_with_a_ticket_write_that(exists=False)
+
+        self.assertEqual(error.status, 409)
+        self.assertEqual(get_call(self.call_id)["wrapups"], [])
+
     async def test_a_callback_the_officer_asked_for_is_dropped_when_they_change_the_outcome(self):
         await self.bridge("okello")
         await self.room.end("caller_hangup")
@@ -1708,6 +1736,47 @@ class OfficerLastWordsTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.6)
 
         self.assertEqual(self.officer_turns(), ["Your objection is lodged."] * 2)
+
+    def slow_leg(self):
+        import time as _time
+
+        def transcribe(*_args, **_kwargs):
+            _time.sleep(0.2)
+            return SimpleNamespace(text="Your objection is lodged.", latency_s=0.2)
+
+        leg = self.leg(transcribe)
+        leg.queue_transcription(b"\x00\x01" * 1600)
+        return leg
+
+    async def test_the_wrap_up_draft_waits_for_what_the_officer_last_said(self):
+        leg = self.slow_leg()
+        await asyncio.sleep(0.01)
+        await leg.close()
+        seen: list[list[str]] = []
+
+        with patch.object(desk, "draft_wrapup_note", side_effect=lambda _id: seen.append(self.officer_turns()) or ""):
+            await desk._save_draft_wrapup(self.call_id)
+
+        self.assertEqual(seen, [["Your objection is lodged."]])
+
+    async def test_the_call_summary_waits_for_what_the_officer_last_said(self):
+        leg = self.slow_leg()
+        await asyncio.sleep(0.01)
+        await leg.close()
+        seen: list[list[str]] = []
+
+        with patch.object(ws, "generate_call_summary", side_effect=lambda _id: seen.append(self.officer_turns()) or {}):
+            await ws._summarise_when_transcribed(self.call_id)
+
+        self.assertEqual(seen, [["Your objection is lodged."]])
+
+    async def test_a_call_with_nothing_left_to_transcribe_is_not_made_to_wait(self):
+        from app.receptionist import officer
+
+        started = asyncio.get_running_loop().time()
+        await officer.transcriptions_settled(self.call_id)
+
+        self.assertLess(asyncio.get_running_loop().time() - started, 0.1)
 
     async def test_nothing_more_is_taken_once_the_leg_is_closed(self):
         leg = self.leg(lambda *_a, **_k: SimpleNamespace(text="late", latency_s=0.0))
