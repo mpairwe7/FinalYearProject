@@ -386,8 +386,29 @@ async def _refuse_after_accept(websocket: WebSocket, close_code: int, error_code
 
 #: How long before the ceiling the caller and the officers are told it is coming.
 DURATION_WARNING_S = 60.0
-#: Time-limit warnings on their way to a caller, held so they are not collected mid-send.
+#: The call clock's side work (a warning on its way to a caller, the deadline
+#: on its way to the store), held so it is not collected before it finishes.
 _WARNINGS: set[asyncio.Task[Any]] = set()
+
+
+def _hold(task: asyncio.Task[Any]) -> None:
+    """Keep *task* referenced until it is done, and retrieve its exception so none is reported unread."""
+    _WARNINGS.add(task)
+
+    def _done(finished: asyncio.Task[Any]) -> None:
+        _WARNINGS.discard(finished)
+        if not finished.cancelled():
+            finished.exception()
+
+    task.add_done_callback(_done)
+
+
+async def _record_limit(call_id: str, limit_at: float) -> None:
+    """Write the call's deadline to its row, off the event loop; a failure is logged, not raised."""
+    try:
+        await asyncio.to_thread(update_call, call_id, limit_at=limit_at)
+    except Exception:
+        logger.warning("Could not record the time limit of call %s", call_id, exc_info=True)
 
 
 async def _call_clock(room: Any) -> None:
@@ -414,15 +435,13 @@ async def _call_clock(room: Any) -> None:
         remaining = max(1, int(round(started + ceiling - time.time())))
         payload = {"type": "duration_warning", "seconds_remaining": remaining}
         room.state.limit_at = started + ceiling
-        # On the row too: a console that opens the call later may reach the
-        # worker that does not hold it.
-        with contextlib.suppress(Exception):
-            await asyncio.to_thread(update_call, room.call_id, limit_at=started + ceiling)
+        # On the row too, for a console that opens the call later on the
+        # worker that does not hold it. Written on its own: a slow database
+        # must not delay the warning or the end.
+        _hold(asyncio.create_task(_record_limit(room.call_id, started + ceiling)))
         with contextlib.suppress(Exception):
             hub.publish_call(room.call_id, "duration_warning", payload)
-        warning = asyncio.create_task(asyncio.wait_for(desk._send_to_caller(room, payload), timeout=5.0))
-        _WARNINGS.add(warning)
-        warning.add_done_callback(_WARNINGS.discard)
+        _hold(asyncio.create_task(asyncio.wait_for(desk._send_to_caller(room, payload), timeout=5.0)))
         await asyncio.sleep(max(0.0, started + ceiling - time.time()))
         if room.state.mode != "ended":
             # As desk.hang_up_caller does, but the caller's screen gets one
@@ -1002,7 +1021,11 @@ async def _staff_calls_stream(websocket: WebSocket, call_id: str | None, slot: _
                 ended = snapshot.get("status") == "ended"
             if limit_at is not None and not ended:
                 frame["seconds_remaining"] = max(0, int(round(float(limit_at) - time.time())))
-            await asyncio.wait_for(websocket.send_text(json.dumps(frame)), timeout=5.0)
+            # asyncio.timeout, not wait_for: on Python 3.11 wait_for drops a
+            # cancellation that lands as the send completes, and the stream
+            # then runs on with nothing to stop it.
+            async with asyncio.timeout(5.0):
+                await websocket.send_text(json.dumps(frame))
         except BaseException:
             hub.unsubscribe_call(call_id, queue)
             raise
@@ -1029,8 +1052,12 @@ async def _staff_calls_stream(websocket: WebSocket, call_id: str | None, slot: _
             # Wait for an event from the hub, for the keep-alive (25 s), or
             # for the session to expire, whichever comes first.
             wait = 25.0 if token_exp is None else max(0.0, min(25.0, token_exp - time.time()))
+            # asyncio.timeout rather than wait_for throughout: on Python 3.11
+            # wait_for drops a cancellation that lands as its operation
+            # completes, and the stream would run on after being stopped.
             try:
-                event = await asyncio.wait_for(queue.get(), timeout=wait)
+                async with asyncio.timeout(wait):
+                    event = await queue.get()
                 if _expired(token_exp):
                     await websocket.close(code=4401)
                     break
@@ -1039,14 +1066,13 @@ async def _staff_calls_stream(websocket: WebSocket, call_id: str | None, slot: _
                     and int((event.get("data") or {}).get("seq") or 0) <= snapshot_seq
                 ):
                     continue  # the snapshot already showed it
-                await asyncio.wait_for(websocket.send_text(json.dumps(event)), timeout=5.0)
+                async with asyncio.timeout(5.0):
+                    await websocket.send_text(json.dumps(event))
             except asyncio.TimeoutError:
                 if _expired(token_exp):
                     continue  # closed at the top of the loop
-                await asyncio.wait_for(
-                    websocket.send_text(json.dumps({"type": "ping", "ts": time.time()})),
-                    timeout=5.0,
-                )
+                async with asyncio.timeout(5.0):
+                    await websocket.send_text(json.dumps({"type": "ping", "ts": time.time()}))
     except WebSocketDisconnect:
         pass
     except Exception:

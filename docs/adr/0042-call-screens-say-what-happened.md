@@ -103,7 +103,11 @@ as the caller's own hang-up, on the time limit and on every `hang_up_caller`;
 the officer's time-limit notice counts down to a deadline in 15-second steps
 (a status region is read out on every change), and a console that opens the
 call after the warning gets the seconds left in its snapshot, on either worker
-(the deadline is on the call's row, `limit_at`, as well as the room); a call whose media pipeline
+(the deadline is on the call's row, `limit_at`, as well as the room, written
+on its own so a slow database cannot delay the warning or the end); the staff
+stream waits with `asyncio.timeout` rather than `wait_for`, which on Python
+3.11 drops a cancellation that lands as its operation completes and left a
+stopped stream running; a call whose media pipeline
 cannot start is closed with 1001 after its `unavailable` frame, where the
 server's own close had replaced that message on the caller's screen.
 

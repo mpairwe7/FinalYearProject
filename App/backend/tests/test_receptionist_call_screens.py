@@ -63,6 +63,14 @@ class RecordingSocket:
         return [event[1] for event in self.events if event[0] == "send" and event[1].get("type") == "error"]
 
 
+async def stop(task: asyncio.Task) -> None:
+    """Cancel a stream's task and see it finish: a stream that drops the cancellation fails, not hangs."""
+    task.cancel()
+    done, _pending = await asyncio.wait({task}, timeout=5.0)
+    if not done:
+        raise AssertionError("the stream ran on after it was cancelled")
+
+
 # ---------------------------------------------------------------------------
 # A refusal the browser can read (G605)
 # ---------------------------------------------------------------------------
@@ -186,8 +194,7 @@ class LobbyReadyTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep(0.01)
                 if any(kind == "send" for kind in socket.kinds()):
                     break
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+            await stop(task)
 
         sent = [event[1] for event in socket.events if event[0] == "send"]
         self.assertEqual(sent[:1], [{"type": "ready"}])
@@ -232,8 +239,7 @@ class LateViewerTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep(0.01)
                 if any(e[0] == "send" and e[1].get("type") == "snapshot" for e in socket.events):
                     break
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+            await stop(task)
         return next(e[1] for e in socket.events if e[0] == "send" and e[1].get("type") == "snapshot")
 
     async def test_the_snapshot_says_how_long_is_left_once_the_warning_has_gone_out(self):
@@ -402,6 +408,21 @@ class CallClockTests(unittest.IsolatedAsyncioTestCase):
         await desk.hang_up_caller(self.room, "officer_ended")
 
         self.assertEqual(get_call(self.call_id)["end_reason"], "officer_ended")
+
+    async def test_a_slow_database_cannot_delay_the_warning_or_the_end(self):
+        written = []
+
+        def slow_write(call_id: str, **fields) -> bool:
+            time.sleep(1.5)
+            written.append(fields)
+            return True
+
+        with patch.object(ws, "update_call", side_effect=slow_write):
+            await self.run_clock(ceiling=120.0, elapsed=119.7, wait=1.0)
+
+        self.assertEqual(len(self.warnings_to_caller()), 1)
+        self.assertIn("duration_warning", [kind for kind, _data in self.published])
+        self.assertEqual(self.room.state.mode, "ended")
 
     async def test_a_call_that_ended_first_is_left_as_it_ended(self):
         await self.room.end("caller_hangup")
