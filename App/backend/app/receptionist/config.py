@@ -30,13 +30,68 @@ def _positive_seconds(name: str, default: float) -> float:
     return value
 
 
+#: Durations a call depends on: ``name: (default, lowest, highest)`` in seconds.
+#: Only the call ceiling used to be checked, so a transfer timeout of ``0`` made
+#: every transfer "officers are busy", ``nan`` hung the wait until the ceiling
+#: and ``inf`` held a caller for good (G596).
+_DURATIONS: dict[str, tuple[float, float, float]] = {
+    "RECEPTIONIST_TRANSFER_TIMEOUT_S": (90.0, 5.0, 1800.0),
+    "RECEPTIONIST_CLAIM_TIMEOUT_S": (20.0, 1.0, 300.0),
+    "RECEPTIONIST_OFFICER_RECONNECT_GRACE_S": (30.0, 5.0, 300.0),
+    "RECEPTIONIST_PRESENCE_TTL_S": (60.0, 5.0, 3600.0),
+    "RECEPTIONIST_TURN_TIMEOUT_S": (1.0, 0.05, 10.0),
+    "RECEPTIONIST_HOLD_UPDATE_S": (30.0, 0.0, 600.0),
+    "RECEPTIONIST_IDLE_REPROMPT_S": (12.0, 0.0, 600.0),
+    "RECEPTIONIST_PARTIAL_INTERVAL_S": (0.8, 0.05, 10.0),
+    "RECEPTIONIST_REVIEW_ANSWER_TIMEOUT_S": (10.0, 1.0, 120.0),
+    "RECEPTIONIST_BARGE_IN_MIN_S": (0.4, 0.0, 10.0),
+}
+
+
+def _duration(name: str, *, strict: bool = False) -> float:
+    """The duration setting *name*, in seconds.
+
+    Unset or blank is the default. A value that is set but unusable (not a
+    number, not finite, outside its range) is the default too, so a call that
+    is already running never reads it; with *strict* it raises instead, which
+    is how :func:`validate` stops such a deployment from taking calls.
+    """
+    default, low, high = _DURATIONS[name]
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        value = math.nan
+    if math.isfinite(value) and low <= value <= high:
+        return value
+    if strict:
+        raise ReceptionistConfigError(
+            f"{name} must be a number of seconds from {low:g} to {high:g}, got {raw.strip()!r}"
+        )
+    return default
+
+
 def validate() -> None:
     """Raise :class:`ReceptionistConfigError` for settings that are set but unusable.
 
-    Run at startup (and by the G36 production gate) so a bad value stops the
-    boot instead of failing every call later.
+    Run at startup (and by the G36 production gate) so a bad value keeps the
+    receptionist from taking calls instead of failing every call later.
     """
     get_max_call_s()
+    for name in _DURATIONS:
+        _duration(name, strict=True)
+    raw_attempts = os.getenv("RECEPTIONIST_MAX_CLARIFY_ATTEMPTS", "").strip()
+    if raw_attempts:
+        try:
+            usable = 0 <= int(raw_attempts) <= 10
+        except ValueError:
+            usable = False
+        if not usable:
+            raise ReceptionistConfigError(
+                f"RECEPTIONIST_MAX_CLARIFY_ATTEMPTS must be a whole number from 0 to 10, got {raw_attempts!r}"
+            )
 
 
 def get_clarify_threshold() -> float:
@@ -48,16 +103,15 @@ def get_clarify_threshold() -> float:
 
 def get_max_clarify_attempts() -> int:
     try:
-        return int(os.getenv("RECEPTIONIST_MAX_CLARIFY_ATTEMPTS", "2"))
+        attempts = int(os.getenv("RECEPTIONIST_MAX_CLARIFY_ATTEMPTS", "2"))
     except ValueError:
         return 2
+    return attempts if 0 <= attempts <= 10 else 2
 
 
 def get_transfer_timeout_s() -> float:
-    try:
-        return float(os.getenv("RECEPTIONIST_TRANSFER_TIMEOUT_S", "90"))
-    except ValueError:
-        return 90.0
+    """How long a caller waits for an officer before the wait becomes a callback."""
+    return _duration("RECEPTIONIST_TRANSFER_TIMEOUT_S")
 
 
 def get_max_call_s() -> float:
@@ -104,10 +158,7 @@ def live_partial_transcripts_enabled() -> bool:
 
 def get_partial_transcript_interval_s() -> float:
     """Seconds between interim re-decodes of the utterance in progress."""
-    try:
-        return float(os.getenv("RECEPTIONIST_PARTIAL_INTERVAL_S", "0.8"))
-    except ValueError:
-        return 0.8
+    return _duration("RECEPTIONIST_PARTIAL_INTERVAL_S")
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +269,7 @@ def get_lg_mix_threshold() -> float:
 
 def get_turn_timeout_s() -> float:
     """Silence after the caller's last word before the cascaded turn closes."""
-    return _env_float("RECEPTIONIST_TURN_TIMEOUT_S", 1.0)
+    return _duration("RECEPTIONIST_TURN_TIMEOUT_S")
 
 
 def get_slow_pause_ms() -> int:
@@ -232,7 +283,7 @@ def get_idle_reprompt_s() -> float:
     ``0`` turns silence handling off. The clock starts only when the assistant
     has finished speaking, so a slow answer never counts against the caller.
     """
-    return max(0.0, _env_float("RECEPTIONIST_IDLE_REPROMPT_S", 12.0))
+    return _duration("RECEPTIONIST_IDLE_REPROMPT_S")
 
 
 def get_idle_reprompts() -> int:
@@ -247,7 +298,7 @@ def get_brief_every_turns() -> int:
 
 def get_claim_timeout_s() -> float:
     """How long an officer's claim holds a call before their audio connects."""
-    return max(1.0, _env_float("RECEPTIONIST_CLAIM_TIMEOUT_S", 20.0))
+    return _duration("RECEPTIONIST_CLAIM_TIMEOUT_S")
 
 
 def get_hold_update_s() -> float:
@@ -256,7 +307,7 @@ def get_hold_update_s() -> float:
     ``0`` turns them off. At the default 30 s a caller hears two in the
     ``RECEPTIONIST_TRANSFER_TIMEOUT_S`` (90 s) before the wait becomes a callback.
     """
-    return max(0.0, _env_float("RECEPTIONIST_HOLD_UPDATE_S", 30.0))
+    return _duration("RECEPTIONIST_HOLD_UPDATE_S")
 
 
 def get_call_review_enabled() -> bool:
@@ -270,7 +321,7 @@ def get_call_review_enabled() -> bool:
 
 def get_review_answer_timeout_s() -> float:
     """How long the AI waits for the answer to its goodbye review question before saying goodbye."""
-    return max(1.0, _env_float("RECEPTIONIST_REVIEW_ANSWER_TIMEOUT_S", 10.0))
+    return _duration("RECEPTIONIST_REVIEW_ANSWER_TIMEOUT_S")
 
 
 def local_barge_in_enabled() -> bool:
@@ -286,7 +337,7 @@ def local_barge_in_enabled() -> bool:
 
 def get_barge_in_min_s() -> float:
     """Speech after the VAD's onset (itself 0.2 s) that counts as talking over the assistant."""
-    return max(0.0, _env_float("RECEPTIONIST_BARGE_IN_MIN_S", 0.4))
+    return _duration("RECEPTIONIST_BARGE_IN_MIN_S")
 
 
 def get_clarify_threshold_for(language: str) -> float:
@@ -309,12 +360,12 @@ def clarify_repeat_enabled(language: str) -> bool:
 
 def get_presence_ttl_s() -> float:
     """Seconds after last heartbeat before an officer is considered offline."""
-    return max(5.0, _env_float("RECEPTIONIST_PRESENCE_TTL_S", 60.0))
+    return _duration("RECEPTIONIST_PRESENCE_TTL_S")
 
 
 def get_officer_reconnect_grace_s() -> float:
     """Seconds an officer has to reconnect to a dropped audio call before it re-queues."""
-    return max(5.0, _env_float("RECEPTIONIST_OFFICER_RECONNECT_GRACE_S", 30.0))
+    return _duration("RECEPTIONIST_OFFICER_RECONNECT_GRACE_S")
 
 
 def allow_edge_standin_lg() -> bool:
@@ -322,7 +373,9 @@ def allow_edge_standin_lg() -> bool:
     return _env_bool("RECEPTIONIST_ALLOW_EDGE_STANDIN_LG", False)
 
 
-#: Every variable an image may start its workers from.
+#: Every variable an image may start its workers from. The gate read only
+#: ``WORKERS``; the supervisord image starts uvicorn from ``UVICORN_WORKERS``
+#: (default 2), so ``WORKERS=1`` passed the gate with two workers running (G593).
 WORKER_VARIABLES: tuple[str, ...] = ("WORKERS", "UVICORN_WORKERS", "WEB_CONCURRENCY")
 
 
@@ -349,15 +402,45 @@ def sole_process_declared() -> bool:
     return single_worker_declared() and os.getenv("VOICE_RECEPTIONIST_REPLICAS", "").strip() == "1"
 
 
-def local_engine_errors() -> list[str]:
+def worker_errors() -> list[str]:
+    """Why this deployment is not known to run one worker; empty when it is.
+
+    Call rooms, the staff lobby, claims and admission caps live in the
+    process: with two workers an officer's console and a caller's call land in
+    different ones about half the time.
+    """
+    settings = worker_settings()
+    if not settings:
+        return ["G36: explicitly set WORKERS=1 while active call state remains process-local."]
+    errors: list[str] = []
+    for name, value in settings.items():
+        if value == "1":
+            continue
+        if name == "WORKERS":
+            errors.append("G36: explicitly set WORKERS=1 while active call state remains process-local.")
+        else:
+            errors.append(
+                f"G36: {name}={value} starts more than one worker; set it to 1 while active call "
+                "state remains process-local."
+            )
+    return errors
+
+
+def local_engine_errors(*, enabled_override: bool | None = None) -> list[str]:
     """Why production calls could not run on the local engine; empty when they can.
 
     Every call language is heard by Whisper-SALT, answered by the local LLM
     and voiced by the Orpheus sidecar. Without them a call cannot hear or
     answer at all, or its voice falls to Spark-TTS-SALT (several seconds a
     sentence) or to edge-tts (a cloud service) — fallbacks, not a primary.
+
+    *enabled_override* is for a caller that already knows the flag's state: a
+    flag switched on through the admin API or a persisted override is not in
+    the environment, and reading only that skipped these checks (G597).
     """
-    enabled = os.getenv("FLAG_VOICE_RECEPTIONIST", "false").strip().lower() in {"1", "true", "yes", "on"}
+    enabled = enabled_override if enabled_override is not None else os.getenv(
+        "FLAG_VOICE_RECEPTIONIST", "false"
+    ).strip().lower() in {"1", "true", "yes", "on"}
     if not enabled:
         return []
     errors: list[str] = []

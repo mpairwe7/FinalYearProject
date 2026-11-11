@@ -181,9 +181,21 @@ class BrowserCallSerializer(FrameSerializer):
 
             msg_type = msg.get("type")
             if msg_type in ("network_quality", "network_telemetry") and self.room is not None:
-                from .low_bandwidth import apply_network_telemetry_to_room
+                # Each one mints a ticket and writes a checkpoint: counted like
+                # any other control message, and the write is not made here on
+                # the event loop, where it stalled every call on the worker.
+                if not self._allow_control_frame():
+                    return None
+                from .low_bandwidth import (
+                    apply_network_telemetry_to_room,
+                    call_drop_snapshot,
+                    save_call_drop_snapshot,
+                )
 
-                ack = apply_network_telemetry_to_room(self.room, msg)
+                ack = apply_network_telemetry_to_room(self.room, msg, checkpoint=False)
+                snapshot = call_drop_snapshot(self.room) if ack.get("resume_ticket") else None
+                if snapshot:
+                    await asyncio.to_thread(save_call_drop_snapshot, snapshot)
                 return OutputTransportMessageUrgentFrame(ack)
 
             if msg_type == "interrupt":

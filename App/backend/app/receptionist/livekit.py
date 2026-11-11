@@ -70,16 +70,13 @@ def production_errors(*, enabled_override: bool | None = None) -> list[str]:
         )
     if os.getenv("RECEPTIONIST_MEDIA_TRANSPORT", "").strip().lower() != "livekit":
         errors.append("G36: RECEPTIONIST_MEDIA_TRANSPORT=livekit is required in production.")
-    from .config import ReceptionistConfigError, validate
+    from .config import ReceptionistConfigError, validate, worker_errors
 
     try:
         validate()
     except ReceptionistConfigError as exc:
         errors.append(f"G36: {exc}")
-    if os.getenv("WORKERS", "").strip() != "1":
-        errors.append(
-            "G36: explicitly set WORKERS=1 while active call state remains process-local."
-        )
+    errors.extend(worker_errors())
     if os.getenv("VOICE_RECEPTIONIST_REPLICAS", "").strip() != "1":
         errors.append(
             "G36: VOICE_RECEPTIONIST_REPLICAS=1 is required while calls are process-local."
@@ -135,8 +132,11 @@ def mint_token(
         can_publish_sources=["microphone"] if can_publish else None,
     )
     return (
+        # Trimmed as configured() and the production gate trim them: a
+        # secret pasted with its newline passed both and then signed tokens
+        # the media server refused.
         api.AccessToken(
-            os.environ["LIVEKIT_API_KEY"], os.environ["LIVEKIT_API_SECRET"]
+            os.environ["LIVEKIT_API_KEY"].strip(), os.environ["LIVEKIT_API_SECRET"].strip()
         )
         .with_identity(_identity(identity))
         .with_name(name[:120])

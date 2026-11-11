@@ -1,7 +1,7 @@
 # =============================================================================
 # AI Risk Manifest — NIST AI RMF 1.0 + ISO/IEC 42001:2023 + EU AI Act
 # URA AI Chatbot — Retrieval-Augmented Generation System
-# Updated: 2026-11-11 (call records and accountability addendum, ADR-0040)
+# Updated: 2026-11-11 (receptionist startup and readiness addendum, ADR-0041)
 # =============================================================================
 
 system:
@@ -522,6 +522,7 @@ owasp_agentic_2026:
       receptionist_assurance: "ADR-0020: revoke media before requeue, terminate on revocation failure; preserve tenant on wrap-up tickets. Self-hosted token replay remains G303; session expiry remains G304."
       call_handoff_assurance: "ADR-0039: a call transfer's ticket is created in the caller's tenant (it fell back to 'default', G571); a call passed to a named officer can be claimed only by that officer until the reservation lapses, enforced in the room and in the claim's conditional update (G580)."
       call_records_assurance: "ADR-0040: a call's wrap-up is accepted only from an officer who handled it, once they are off it (G305); officer presence, its board, its staffing count and its lobby event are scoped to the tenant, and a lobby event that names no tenant reaches no tenant-scoped console (G584); staff sockets close when the token that opened them expires and are admitted under per-user caps (G304). Logout or revocation before expiry is not enforced."
+      call_startup_assurance: "ADR-0041: a call-drop resume ticket is signed only with RECEPTIONIST_RESUME_SECRET in production, never the development secret (G599); a receptionist flag switched on at runtime is held to the same production engine checks as one set in the environment (G597); the LiveKit signer uses the credentials as the gate validated them (G600). Resume tickets are single-use within one process only."
       evidence: "App/backend/app/auth.py, App/backend/app/main.py"
       controls: "Strict role separation (_require_live_officer, _desk_writer) ensuring only ura_staff handle live taxpayer queues/calls while admins/auditors are read/audit-only; guided-workflow state adopted on sign-in only from the anonymous session the request proves (compare-and-swap re-key), with signed-in state decided per request (ADR-0013); case facts, calculator memory and workflow lookups bound to the same owner-scoped key, with no bare-conversation-id fallback (ADR-0013 A)"
       verified_by:
@@ -545,6 +546,9 @@ owasp_agentic_2026:
         - "App/backend/tests/test_receptionist_records_accountability.py::test_an_event_that_names_no_tenant_reaches_no_tenants_console"
         - "App/backend/tests/test_receptionist_records_accountability.py::test_a_listener_is_cut_off_when_their_session_expires"
         - "App/backend/tests/test_receptionist_records_accountability.py::test_one_officer_cannot_hold_streams_without_limit"
+        - "App/backend/tests/test_receptionist_startup_readiness.py::test_production_does_not_sign_with_the_development_secret"
+        - "App/backend/tests/test_receptionist_startup_readiness.py::test_the_local_engine_gate_applies_to_a_flag_switched_on_by_override"
+        - "App/backend/tests/test_receptionist_startup_readiness.py::test_the_signer_trims_the_credentials_the_gate_trimmed"
         - "tests/test_answer_integrity_integration.py"
         - "tests/test_auditor_controls.py::test_staff_ticket_reads_writes_lists_and_aggregates_are_tenant_scoped"
     - id: "ASI04"
@@ -599,6 +603,7 @@ owasp_agentic_2026:
       live_web_assurance: "ADR-0021: search providers fail over behind a breaker each, under a turn deadline and a bulkhead pool; one failed planned step costs only that step. Hosted adapters are unproven against live APIs (G326)."
       receptionist_assurance: "ADR-0020: cleanup independent of reporting, current-task-safe timer cancellation, cooperative media shutdown deadlines. Durable reconciliation and process-loss recovery remain G306."
       call_handoff_assurance: "ADR-0039: the lobby event and the waiting caller's countdown never wait on a transcript, row, ticket or presence write, and the officer's End always hangs up (G569, G570, G583); the row follows the room when an officer's connection lapses, so the next claim succeeds (G568); translation, ticket creation and the at-risk scan run off the event loop (G577, G578); LiveKit administration has a 5 s deadline (G579). No call failure metrics or alerts yet (G595); a receptionist that cannot start still stops the API (G373)."
+      call_startup_assurance: "ADR-0041: a receptionist that cannot start is unavailable and reported on /ready instead of stopping the API (G373); the single-worker gate reads every variable an image may start workers from (G593); a recognizer or voice failure on a call reaches the brain, which hands the call to an officer after two in a row, and is never recorded as caller silence (G594); the call path exports counters on closed label vocabularies with four alert rules (G595); every call duration has a validated range (G596); rows a dead process left are ended at startup and owed callbacks flagged (G306). The production Space still runs two workers outside the gate; process-loss recovery beyond the startup sweep remains open."
       evidence: "App/backend/app/web_search_providers.py, App/backend/app/resilience.py, App/backend/app/quality_circuit_breaker.py, App/frontend/src/lib/chatStream.ts, App/frontend/src/app/page.tsx"
       controls: "Provider circuit breakers, bounded ReAct/revision loops, and runtime quality circuit breaker throttling autonomy on grounding degradation. Bounded SSE requires explicit completion; ambiguous stateful chat failures are not automatically replayed; response writes are conversation-bound (ADR-0018)."
       limitations: "Distributed execution and authenticated proxy/staging probes remain UI-10; local browser tests use a mocked backend."
@@ -620,6 +625,21 @@ owasp_agentic_2026:
         - "App/backend/tests/test_receptionist_handoff_safety.py::test_writing_a_turn_does_not_evaluate_risk_on_the_event_loop"
         - "App/backend/tests/test_receptionist_handoff_safety.py::test_a_new_turn_on_a_long_call_is_compared_with_a_bounded_number_of_turns"
         - "App/backend/tests/test_receptionist_handoff_safety.py::test_revoking_a_participant_gives_up_at_its_deadline"
+        - "App/backend/tests/test_receptionist_startup_readiness.py::test_a_missing_pipeline_does_not_raise"
+        - "App/backend/tests/test_receptionist_startup_readiness.py::test_an_unusable_setting_does_not_raise"
+        - "App/backend/tests/test_receptionist_startup_readiness.py::test_the_readiness_probe_reports_it"
+        - "App/backend/tests/test_receptionist_startup_readiness.py::test_calls_are_refused_while_the_receptionist_is_unavailable"
+        - "App/backend/tests/test_receptionist_startup_readiness.py::test_the_gate_reads_the_variable_the_image_starts_uvicorn_with"
+        - "App/backend/tests/test_receptionist_startup_readiness.py::test_no_worker_count_at_all_is_refused"
+        - "App/backend/tests/test_receptionist_startup_readiness.py::test_an_unusable_duration_stops_validation_and_is_never_used"
+        - "App/backend/tests/test_receptionist_startup_readiness.py::test_a_second_failure_in_a_row_goes_to_a_person"
+        - "App/backend/tests/test_receptionist_startup_readiness.py::test_silence_after_an_unheard_utterance_is_not_recorded_as_the_caller_s"
+        - "App/backend/tests/test_receptionist_startup_readiness.py::test_a_recognizer_that_raises_is_counted_and_reported_to_the_brain"
+        - "App/backend/tests/test_receptionist_startup_readiness.py::test_every_ended_call_is_counted_by_its_reason"
+        - "App/backend/tests/test_receptionist_startup_readiness.py::test_a_reason_outside_the_vocabulary_cannot_add_a_series"
+        - "App/backend/tests/test_receptionist_startup_readiness.py::test_a_call_older_than_the_ceiling_cannot_be_live"
+        - "App/backend/tests/test_receptionist_startup_readiness.py::test_one_worker_of_an_unknown_number_of_replicas_does_not"
+        - "App/backend/tests/test_receptionist_startup_readiness.py::test_the_checkpoint_is_written_off_the_event_loop"
         - "App/frontend/src/__tests__/lib/chatStream.test.ts"
         - "App/frontend/e2e/chat-flow.spec.ts"
     - id: "ASI09"

@@ -94,7 +94,7 @@ def test_the_flag_that_needs_pipecat_ships_with_pipecat() -> None:
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
     assert "FLAG_VOICE_RECEPTIONIST=true" in dockerfile
     installed = re.search(r'"(pipecat-ai\[[^"]+)"', dockerfile)
-    assert installed, "the receptionist is switched on here and Pipecat is not installed, which stops the API starting"
+    assert installed, "the receptionist is switched on here and Pipecat is not installed: every call would be refused"
     assert installed.group(1) in RECEPTIONIST_REQUIREMENTS.read_text(encoding="utf-8")
 
 

@@ -42,10 +42,24 @@ def get_caller_reconnect_grace_s() -> int:
 
 
 def _signing_material() -> bytes | None:
-    raw = (os.getenv("RECEPTIONIST_RESUME_SECRET") or os.getenv("AUTH_DEV_SECRET") or "").strip()
+    """The key resume tickets are signed with, or ``None`` when none may be issued.
+
+    ``RECEPTIONIST_RESUME_SECRET``. Outside production the development auth
+    secret stands in for it; in production it does not, because that secret
+    is a documented default and a ticket signed with it could be forged
+    (G599). No key means no ticket is minted and none verifies.
+    """
+    raw = (os.getenv("RECEPTIONIST_RESUME_SECRET") or "").strip()
+    if not raw and os.getenv("APP_ENV", "development").strip().lower() != "production":
+        raw = (os.getenv("AUTH_DEV_SECRET") or "").strip()
     if not raw:
         return None
     return hashlib.sha256(f"ura-call-resume:{raw}".encode()).digest()
+
+
+def resume_can_be_issued() -> bool:
+    """Whether a resume ticket could be signed on this deployment."""
+    return _signing_material() is not None
 
 
 @dataclass(frozen=True)
@@ -81,17 +95,15 @@ def negotiate_low_bandwidth_mode(
         return LowBandwidthProfile()
 
     caption_only = bool(cfg.get("caption_only")) or eff_type == "slow-2g" or rtt_ms > 1500.0
-    preferred_codec = str(cfg.get("audio_codec") or "mulaw_8k").strip().lower()
-    if preferred_codec not in ("mulaw_8k", "opus_12k"):
-        preferred_codec = "mulaw_8k"
-    bitrate = 0 if caption_only else (12 if preferred_codec == "opus_12k" else 64)
-
+    # mu-law is the one low-bitrate framing the serializer can encode and
+    # decode. A client asking for Opus used to be told "opus_12k" and then
+    # sent raw PCM16, which it would decode as noise (G599).
     return LowBandwidthProfile(
         enabled=True,
-        codec=preferred_codec,
-        sample_rate=8000 if preferred_codec == "mulaw_8k" else 16000,
+        codec="mulaw_8k",
+        sample_rate=8000,
         caption_only=caption_only,
-        bitrate_kbps=bitrate,
+        bitrate_kbps=0 if caption_only else 64,
     )
 
 
@@ -215,8 +227,15 @@ def verify_call_resume_ticket(
 def apply_network_telemetry_to_room(
     room: object,
     telemetry: dict[str, object] | None,
+    *,
+    checkpoint: bool = True,
 ) -> dict[str, object]:
-    """Apply client network telemetry to *room.state* and mint a drop-resume ticket when eligible."""
+    """Apply client network telemetry to *room.state* and mint a drop-resume ticket when eligible.
+
+    The checkpoint is a database write. A caller on the event loop passes
+    ``checkpoint=False`` and writes :func:`call_drop_snapshot` in a thread
+    (:func:`save_call_drop_snapshot`) when the reply carries a ticket.
+    """
     state = getattr(room, "state", None)
     if state is None:
         return {"type": "bandwidth_adaptation", "enabled": False, "codec": "pcm16_16k", "caption_only": False}
@@ -225,7 +244,14 @@ def apply_network_telemetry_to_room(
     call_id = str(getattr(room, "call_id", "") or getattr(state, "call_id", "") or "")
     conv_id = str(getattr(state, "conversation_id", "") or call_id)
 
-    prof = negotiate_low_bandwidth_mode(telemetry, subject=uid)
+    # The framing applies to audio this socket carries. On a call whose audio
+    # is in the media room it carries none: agreeing to mu-law or to captions
+    # only would be a promise nothing keeps.
+    prof = (
+        LowBandwidthProfile()
+        if getattr(state, "livekit_room", "")
+        else negotiate_low_bandwidth_mode(telemetry, subject=uid)
+    )
     state.low_bandwidth_mode = prof.enabled
     state.audio_codec = prof.codec
     state.caption_only_degraded = prof.caption_only
@@ -240,7 +266,8 @@ def apply_network_telemetry_to_room(
         )
         if resume_ticket:
             state.resume_ticket_nonce = resume_ticket.split(".", 1)[0][-16:]
-            checkpoint_call_drop_state(room)
+            if checkpoint:
+                checkpoint_call_drop_state(room)
 
     return {
         "type": "bandwidth_adaptation",
@@ -255,39 +282,49 @@ def apply_network_telemetry_to_room(
 
 def checkpoint_call_drop_state(room: object) -> bool:
     """Persist essential CallState fields in shared working memory for cross-replica drop recovery."""
+    snapshot = call_drop_snapshot(room)
+    return save_call_drop_snapshot(snapshot) if snapshot else False
+
+
+def call_drop_snapshot(room: object) -> dict[str, object] | None:
+    """What a dropped call needs to be resumed, read from the live room; ``None`` when resume is off."""
     state = getattr(room, "state", None)
     if state is None:
-        return False
+        return None
     call_id = str(getattr(room, "call_id", "") or getattr(state, "call_id", "") or "")
     if not call_id:
-        return False
+        return None
     uid = str(getattr(state, "user_id", "") or "")
     tid = str(getattr(state, "tenant_id", "default") or "default")
     if not flags.is_enabled("call_drop_resume", subject=uid or None):
-        return False
+        return None
+    return {
+        "call_id": call_id,
+        "conversation_id": str(getattr(state, "conversation_id", "") or ""),
+        "user_id": uid,
+        "tenant_id": tid,
+        "locale": str(getattr(state, "locale", "en") or "en"),
+        "ticket_id": getattr(state, "ticket_id", None),
+        "topic": str(getattr(state, "topic", "") or ""),
+        "caller_affect": str(getattr(state, "caller_affect", "calm") or "calm"),
+        "smoothed_affect_score": float(getattr(state, "smoothed_affect_score", 0.0) or 0.0),
+        "affect_trajectory": list(getattr(state, "affect_trajectory", []) or []),
+        "low_bandwidth_mode": bool(getattr(state, "low_bandwidth_mode", False)),
+        "audio_codec": str(getattr(state, "audio_codec", "pcm16_16k") or "pcm16_16k"),
+        "caption_only_degraded": bool(getattr(state, "caption_only_degraded", False)),
+        "updated_at": time.time(),
+    }
+
+
+def save_call_drop_snapshot(snapshot: dict[str, object]) -> bool:
+    """Write a :func:`call_drop_snapshot`. Blocking: it reads nothing from the live room."""
     try:
         from .. import database as db
 
-        snapshot = {
-            "call_id": call_id,
-            "conversation_id": str(getattr(state, "conversation_id", "") or ""),
-            "user_id": uid,
-            "tenant_id": tid,
-            "locale": str(getattr(state, "locale", "en") or "en"),
-            "ticket_id": getattr(state, "ticket_id", None),
-            "topic": str(getattr(state, "topic", "") or ""),
-            "caller_affect": str(getattr(state, "caller_affect", "calm") or "calm"),
-            "smoothed_affect_score": float(getattr(state, "smoothed_affect_score", 0.0) or 0.0),
-            "affect_trajectory": list(getattr(state, "affect_trajectory", []) or []),
-            "low_bandwidth_mode": bool(getattr(state, "low_bandwidth_mode", False)),
-            "audio_codec": str(getattr(state, "audio_codec", "pcm16_16k") or "pcm16_16k"),
-            "caption_only_degraded": bool(getattr(state, "caption_only_degraded", False)),
-            "updated_at": time.time(),
-        }
         return bool(
             db.upsert_working_memory(
-                f"call_drop:{call_id}",
-                tid,
+                f"call_drop:{snapshot['call_id']}",
+                str(snapshot.get("tenant_id") or "default"),
                 {"call_drop_snapshot": snapshot},
                 ttl_seconds=get_caller_reconnect_grace_s(),
             )

@@ -741,25 +741,14 @@ async def lifespan(app: FastAPI):
     # Voice receptionist. In production the flag only gets this far once the
     # G36 gate in _validate_production_env() has passed.
     if _flags.is_enabled("voice_receptionist"):
-        try:
-            from . import receptionist
-            if not receptionist.is_available():
-                raise RuntimeError("FLAG_VOICE_RECEPTIONIST is on but Pipecat is not installed")
-            from .receptionist.config import validate as validate_receptionist_config
-            from .receptionist.store import init_receptionist_schema
-            validate_receptionist_config()
-            init_receptionist_schema()
-            workers_count = int(os.getenv("WORKERS", "1"))
-            if workers_count > 1:
-                logger.warning(
-                    "FLAG_VOICE_RECEPTIONIST is enabled with WORKERS=%d. "
-                    "Voice receptionist call registry and bridges live in-process — "
-                    "single worker (WORKERS=1) is recommended for demo stability.",
-                    workers_count,
-                )
-        except Exception:
-            logger.exception("Voice receptionist initialization failed")
-            raise
+        # An optional feature that cannot start does not stop the API (ADR-0041,
+        # G373): the chat keeps serving, call sockets are refused, and /ready
+        # and the `receptionist_available` gauge say why. This block used to
+        # re-raise, which took the whole service down for eight hours when an
+        # image lost its Pipecat layer with the flag still on.
+        from . import receptionist
+
+        receptionist.start(speech_model=getattr(app.state, "speech", None))
 
         # Render the receptionist's own fixed lines (fillers, clarify prompts,
         # transfer notices) for every language a call can be held in, so the
@@ -873,6 +862,12 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.warning("SpeechModel close raised", exc_info=True)
         app.state.speech = None
+        # Availability belongs to the application that started: a later start
+        # in the same process decides it afresh.
+        with contextlib.suppress(Exception):
+            from . import receptionist
+
+            receptionist.reset()
         with contextlib.suppress(Exception):
             from .mcp import get_client
 
@@ -1206,6 +1201,10 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
         # degrades to BM25 alone, which only this field shows.
         "local_dense": _local_dense_status(getattr(model, "_retriever", None)),
         "procedural_memory": "active",
+        # Calls: "off", "ready", or "unavailable: <why>" when the receptionist
+        # is switched on and could not start. The probe itself stays ready:
+        # the chat does not depend on it.
+        "voice_receptionist": _receptionist_status(),
     }
     # The statutory kernel's state (ADR-0033): release, graph backend, semantic layer,
     # tables. Never fails the probe.
@@ -1220,6 +1219,15 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
         retrieval_mode=retrieval_mode,
         capabilities=capabilities,
     )
+
+
+def _receptionist_status() -> str:
+    try:
+        from . import receptionist
+
+        return receptionist.status()
+    except Exception:  # noqa: BLE001 - never fails the probe
+        return "unknown"
 
 
 def _local_dense_status(retriever: Any) -> str:

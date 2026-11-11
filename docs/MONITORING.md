@@ -176,6 +176,21 @@ translation and retried unmasked when the tier mangles the sentinels.
 | `ura_crawl_last_full_run_timestamp_seconds`, `ura_crawl_oldest_verified_timestamp_seconds`, `ura_crawl_unverified_pages`, `ura_crawl_quarantined_pages` | — | How old the crawled corpus in this image is, read from its manifest. `ura_qdrant_index_fresh` only says the index matches the image |
 | `ura_qdrant_index_*`, `ura_qdrant_backup_*`, `ura_qdrant_restore_drill_*` | — | Index lifecycle (read from status files at scrape time) |
 
+### Calls
+
+Reported by `app/receptionist/telemetry.py` once the receptionist has started.
+Every label is a closed vocabulary of code constants. Model failures on a call
+are not repeated here: they are `ura_chat_turns_total{channel="call",outcome="error"}`.
+
+| Metric | Labels | Meaning |
+| --- | --- | --- |
+| `ura_receptionist_available` | — | 1 when calls can be taken, 0 when the receptionist is switched on and did not start. Absent while it is switched off |
+| `ura_receptionist_calls_started_total` | — | Calls admitted |
+| `ura_receptionist_calls_ended_total` | `reason` | Why each call ended: `caller_hangup`, `caller_idle`, `officer_hangup`, `max_call_duration`, `speech_failed`, `media_pipeline_stopped`, … (`telemetry.END_REASONS`); anything else is `other` |
+| `ura_receptionist_calls_refused_total` | `reason` (`unavailable`/`not_configured`/`capacity`) | Calls turned away before they began. A switched-off receptionist is not counted |
+| `ura_receptionist_call_failures_total` | `stage` (`stt`/`tts`/`media`/`record`) | The recognizer failed on an utterance, a line could not be voiced, or the call's own record could not be written |
+| `ura_receptionist_calls_lost_total` | — | Call rows a start found still live with no process behind them, and ended (`end_reason = process_lost`) |
+
 ## 4. SLOs and alerting
 
 The SLOs are defined once, in OpenSLO v1:
@@ -196,9 +211,10 @@ Burn-rate alerts follow the multi-window, multi-burn-rate method (Google SRE
 workbook): page when the 1h **and** 5m windows burn faster than 14.4× the
 budget (or 6h and 30m faster than 6×); ticket on 1d/2h at 3× or 3d/6h at 1×.
 
-`monitoring/alerting-rules.yml` holds 37 rules in seven groups:
-availability, latency, quality, audit-and-compliance, security, dependencies
-and the Qdrant index lifecycle. Each carries `severity` (`critical` pages,
+`monitoring/alerting-rules.yml` holds 56 rules in 11 groups:
+availability, latency, quality, audit-and-compliance, security, dependencies,
+the Qdrant index lifecycle, the agent planner and live research, agent
+resilience, crawl freshness and the call receptionist. Each carries `severity` (`critical` pages,
 `warning` tickets), `team` and a `runbook_url` to a heading below or to a
 runbook. Ratios aggregate with `sum()` before dividing — the old rules
 divided each error series by its own request series and saw 100%.
@@ -438,6 +454,37 @@ find out why.
 
 `CircuitBreakerOpen`, `CircuitBreakerProbeLost`, `AutonomyGateFaulting`, `AnswersDegraded`
 and `TurnsHittingDeadline`. See the [fault tolerance runbook](runbooks/agent-fault-tolerance.md).
+
+### Call receptionist
+
+`UraReceptionistUnavailable` (page), `UraCallsRefused`, `UraCallSpeechFailing`
+and `UraCallsEndingOnFailure`. The chat does not depend on any of them.
+
+1. **Why calls cannot be taken.** `GET /ready` gives it under
+   `capabilities.voice_receptionist`: `ready`, `off`, or `unavailable: <why>`.
+   The same reason is in the API log at error, once, at startup.
+   - *Pipecat is not installed*: the image lost its receptionist layer. Roll
+     back, or switch `FLAG_VOICE_RECEPTIONIST` off until the image is rebuilt.
+   - *a setting must be a number of seconds from … to …*: fix the named
+     `RECEPTIONIST_*` variable and restart.
+   - *no speech model*: the speech pipeline failed to load; see
+     [salt-speech-backends](runbooks/salt-speech-backends.md).
+   - *the call tables could not be created*: the database or its volume.
+2. **Calls refused** (`ura_receptionist_calls_refused_total` by `reason`):
+   `capacity` is sixteen calls at once on a process, or five from one user;
+   `not_configured` is production without its media path or local engine
+   (`python -m app.production_readiness` lists what is missing).
+3. **Speech failing** (`…_call_failures_total{stage="stt"|"tts"}`): callers are
+   asked to repeat themselves and, after two failures in a row, handed to an
+   officer, so the officers' queue grows. Check the speech backends.
+4. **Calls ending on failure** (`…_calls_ended_total` by `reason`):
+   `media_pipeline_*` is the Pipecat task or LiveKit; `speech_failed` is a
+   caller the recognizer never heard.
+5. **`ura_receptionist_calls_lost_total` rose at a restart**: those calls were
+   cut off. The ones that were waiting for or talking to an officer are in the
+   console's callback list with reason `service_interrupted`.
+
+See the [receptionist runbook](runbooks/voice-receptionist-demo.md).
 
 ### Dependencies
 

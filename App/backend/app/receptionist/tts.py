@@ -11,7 +11,9 @@ from typing import Any
 import numpy as np
 
 from .. import orpheus_tts
+from . import telemetry
 from .config import allow_edge_standin_lg, get_slow_pause_ms, get_tts_voice
+from .stt import report_speech_failure
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,7 @@ def synthesize_pcm16(speech_model: Any, text: str, language: str, voice: str | N
         res = speech_model.synthesize(text, voice=voice or get_tts_voice(), language=language)
     except Exception:
         logger.exception("Synthesis failed for a line outside the pipeline")
+        telemetry.failure("tts")
         return b""
     if not res or not res.audio:
         return b""
@@ -76,6 +79,7 @@ def synthesize_pcm16(speech_model: Any, text: str, language: str, voice: str | N
         return decode_to_pcm16(speech_model, res.audio)
     except Exception:
         logger.exception("Failed decoding a line outside the pipeline to PCM16")
+        telemetry.failure("tts")
         return b""
 
 
@@ -112,6 +116,16 @@ class UraSpeechTTS(TTSService):
         self._language = language
         self.last_first_chunk_ms: float = 0.0
         self.last_backend: str = ""
+
+    async def _could_not_voice(self) -> None:
+        """A line reached the caller as a caption only; the brain counts how many in a row."""
+        await report_speech_failure(self.room, "tts")
+
+    def _voiced(self) -> None:
+        """A line was spoken: whatever failed before it is over."""
+        state = getattr(self.room, "state", None)
+        if state is not None:
+            state.voice_failures = 0
 
     @property
     def language(self) -> str:
@@ -163,6 +177,7 @@ class UraSpeechTTS(TTSService):
             try:
                 async for frame in self._stream_orpheus(clean_text, language, context_id, t0):
                     yield frame
+                self._voiced()
                 return
             except orpheus_tts.OrpheusUnavailable as exc:
                 logger.info("Orpheus unavailable mid-call (%s); using the synthesis chain", exc)
@@ -176,9 +191,11 @@ class UraSpeechTTS(TTSService):
             )
         except Exception:
             logger.exception("UraSpeechTTS synthesis failed for text: %s", clean_text[:60])
+            await self._could_not_voice()
             return
 
         if not res or not res.audio:
+            await self._could_not_voice()
             return
         backend = str(getattr(res, "backend", "") or "")
         self.last_backend = backend
@@ -190,13 +207,17 @@ class UraSpeechTTS(TTSService):
 
         # Decode audio bytes into PCM16 at 16000Hz
         try:
-            pcm_bytes = decode_to_pcm16(self.speech_model, res.audio)
-            if not pcm_bytes:
-                return
+            # Resampling a sentence takes tens of milliseconds: off the loop,
+            # where it held every other call's audio for that long.
+            pcm_bytes = await asyncio.to_thread(decode_to_pcm16, self.speech_model, res.audio)
         except Exception:
             logger.exception("Failed decoding synthesized audio to PCM16")
+            pcm_bytes = b""
+        if not pcm_bytes:
+            await self._could_not_voice()
             return
 
+        self._voiced()
         self.last_first_chunk_ms = round((time.perf_counter() - t0) * 1000, 1)
 
         # Chunk into 20ms frames (640 bytes = 320 samples @ 16-bit mono 16kHz)

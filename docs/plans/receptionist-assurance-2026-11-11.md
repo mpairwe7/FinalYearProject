@@ -91,15 +91,41 @@ regressions. `DeferredAuditTests` runs the real `ChatModel`: the first version
 of the deferred audit passed every test that used a double and broke every REST
 chat turn, which only the root suite showed.
 
-## Phases 3–4 — opened, not yet fixed
+## Phase 3 — starts safely, fails visibly
+
+[ADR-0041](../adr/0041-receptionist-starts-safely-fails-visibly.md). Tests:
+`App/backend/tests/test_receptionist_startup_readiness.py`.
+
+| Gap | What changed |
+| --- | --- |
+| G373 | `receptionist.start()` never raises: calls are refused, `/ready` gives the reason under `capabilities.voice_receptionist`, an error is logged, `ura_receptionist_available` is 0. The service owner chose to degrade over failing loud. |
+| G593 | The worker gate reads `WORKERS`, `UVICORN_WORKERS` and `WEB_CONCURRENCY`: one must be set, and each that is set must be 1. |
+| G594 | No speech model makes calls unavailable. A recognizer or voice failure reaches the brain: the caller is asked to repeat, and two in a row hand the call to an officer. Silence after an unheard utterance ends as `speech_failed`. |
+| G595 | `receptionist/telemetry.py`: availability, calls started, ended by reason, refused by reason, failures by stage, rows lost to a restart. Four alert rules with promtool cases. |
+| G596 | Every call duration has a range; `validate()` and the production gate refuse a value outside it, and a running call reads the default instead. |
+| G597 | Call sockets run the local-engine checks with the flag's real state. |
+| G598 | A CI job installs the receptionist stack and runs its tests; `pip-audit` audits the file as the images install it. |
+| G306 (mitigated) | A start ends rows older than a call may last, and every live row where one worker and one replica are declared; owed callbacks are flagged `service_interrupted`. |
+| G599 (mitigated) | Low-bandwidth mode agrees to mu-law only and not on a media-room call; its checkpoint is off the event loop; resume tickets are never signed with the development secret in production. |
+| G600 (mitigated) | Router closed with the call; audio decoded in a thread; live-caption buffer bounded; signer trims credentials; a call opens only in a call language. |
+
+Left open by this phase, each for the service owner:
+
+- **The production Space runs two workers** and is outside the gate (a Space
+  secret overrides the base image's `APP_ENV=production`; calls are accepted
+  there with no LiveKit configured, which the gate would refuse). Call handoffs
+  there reach the wrong process about half the time. `UVICORN_WORKERS=1` in `App/deploy/hf-space/Dockerfile`
+  fixes that and halves the chat's worker count.
+- **`low_bandwidth_voice_codec` and `call_drop_resume` are on in the Space
+  image** and no client uses either.
+- **`RECEPTIONIST_TURN_TIMEOUT_S`** does not reach the turn-stop strategy; see
+  "Not in scope".
+
+## Phase 4 — opened, not yet fixed
 
 | Phase | Gaps | Scope |
 | --- | --- | --- |
-| 3. Starts safely, fails visibly | G373, G306, G593–G600 | A receptionist that cannot start degrades and reports instead of stopping the API; the single-worker gate reads the variable the image uses; calls are refused when nothing can hear or speak; durations validated; a stale-row sweep at startup; call metrics and alerts; a CI job that installs the receptionist stack. |
 | 4. Caller and officer screens | G601–G611 | Microphone released on every ending; the time-limit warning on both transports and both clients; a refused microphone keeps the call; close codes that reach a browser; reconnects; focus, target and language of the call dialog. |
-
-Sequencing: the stale-row sweep (G306) ships after the worker gate (G593), or
-each worker's start would end the other's live calls.
 
 ## Not in scope
 
@@ -152,3 +178,27 @@ CI is the authoritative full run.
   because those use a stand-in chat model. The root suite showed it;
   `DeferredAuditTests` now runs the real model.
 - Governance, threat-model, architecture and CI's blocking Ruff selection: passed.
+
+Phase 3, the same day, the laptop still on battery:
+
+- Receptionist, readiness and speech tests in the usual environment
+  (`-k "receptionist or gap_closures or production_readiness or orpheus or
+  tts"`): 818 passed, 20 skipped.
+- The same receptionist tests against **Pipecat 1.15.0**, in a separate
+  environment built for it: 810 passed, none skipped. The first run there
+  found four failures, all in tests CI had never run: three Orpheus doubles
+  that did not take the `voice` argument `stream()` now has, and one sentinel
+  assertion written before keyword mode voted from the transcript. The tests
+  were corrected; the code was right.
+- `tests/test_monitoring_config.py`: 145 passed. The promtool cases could not
+  be run locally (no promtool); the `Monitoring config` CI job runs them.
+- The receptionist requirements, resolved with the images' Pillow override
+  (59 packages) and audited with `pip-audit`: no known vulnerabilities.
+- Root tests for voice, readiness, monitoring, governance and the Space layer
+  (`-k "voice_2026 or agentic_voice or receptionist or hf_space or monitoring
+  or production or readiness or governance or toolathlon"`): 280 passed. The
+  full root and backend suites were left to CI, for the reason above.
+- One root test, `test_phase8_call_receptionist_multiturn_controls_normal_pace_and_text_turn`,
+  wrote call turns without creating the call tables and passed only when an
+  earlier test had; it failed in any run that started with a fresh database.
+  It now creates them (fixed in the phase 2 pull request).
