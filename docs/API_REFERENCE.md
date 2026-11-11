@@ -2038,7 +2038,8 @@ Since ADR-0042: both staff streams send `{"type": "ready"}` once the socket is
 signed in and subscribed, before any event; a console treats the stream as live
 from then, not from the socket opening. The per-call stream also carries
 `{"type": "duration_warning", "call_id": "…", "data": {"seconds_remaining": N}}`
-a minute before the call's time limit.
+a minute before the call's time limit (halfway through a limit of a minute or
+less).
 
 #### Call sockets: refusals, errors and the time limit (ADR-0042)
 
@@ -2061,7 +2062,7 @@ handshake). Every `error` frame to the caller carries a `code`:
 `detail` is English for logs; screens show a translated message chosen by
 `code`. `{"type": "duration_warning", "seconds_remaining": N}` reaches the
 caller a minute before the time limit (`RECEPTIONIST_MAX_CALL_S`), or halfway
-through a limit shorter than two minutes, on every transport, and the call
+through a limit of a minute or less, on every transport, and the call
 ends at the limit with `status: ended`.
 
 ---

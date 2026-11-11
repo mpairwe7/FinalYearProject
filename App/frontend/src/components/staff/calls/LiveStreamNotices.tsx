@@ -32,10 +32,12 @@ export function LiveStreamNotices({
           Live transcript stopped. Sign in again, then reopen this call, to see it update.
         </p>
       )}
-      {/* A minute's notice before the call's time limit ends it (G602). */}
+      {/* Notice before the call's time limit ends it (G602): a minute, or
+          half of a limit of a minute or less. */}
       {secondsRemaining !== null && (
         <p className="cc-notice" role="status">
-          This call reaches its time limit in about a minute and will end then.
+          This call reaches its time limit in about{' '}
+          {secondsRemaining >= 55 ? 'a minute' : `${secondsRemaining} seconds`} and will end then.
         </p>
       )}
     </>

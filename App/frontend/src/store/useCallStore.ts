@@ -42,6 +42,9 @@ export interface CaptionEntry {
   turn_id?: number;
 }
 
+/** What put a call error on screen (see `errorSource`). */
+export type CallErrorSource = 'mic' | null;
+
 interface CallStoreState {
   isOpen: boolean;
   status: CallStatus;
@@ -54,6 +57,12 @@ interface CallStoreState {
   isUserSpeaking: boolean;
   activeAiText: string;
   error: string | null;
+  /**
+   * What put `error` on screen: `mic` for a microphone or mute operation,
+   * which clears it when it recovers; null for anything else (the socket, the
+   * server), which a microphone recovering must not clear.
+   */
+  errorSource: CallErrorSource;
   /** The browser is holding call audio back until the caller taps (autoplay policy). */
   audioBlocked: boolean;
   /**
@@ -82,7 +91,7 @@ interface CallStoreState {
   setUserSpeaking: (speaking: boolean) => void;
   setActiveAiText: (text: string) => void;
   addCaption: (caption: CaptionEntry) => void;
-  setError: (error: string | null) => void;
+  setError: (error: string | null, source?: CallErrorSource) => void;
   setAudioBlocked: (blocked: boolean) => void;
   setLanguageOptions: (detection: boolean, languages: CallLanguage[], language: CallLanguage) => void;
   setLanguage: (language: CallLanguage, source: CallLanguageSource) => void;
@@ -109,6 +118,7 @@ const initialState = {
   isUserSpeaking: false,
   activeAiText: '',
   error: null,
+  errorSource: null as CallErrorSource,
   audioBlocked: false,
   languageDetection: false,
   languages: ['en'] as CallLanguage[],
@@ -130,6 +140,7 @@ export const useCallStore = create<CallStoreState>((set) => ({
       isOpen: true,
       status: 'consent',
       error: null,
+      errorSource: null,
       duration: 0,
       // Nothing from the last call carries over: a caller who ended muted
       // started the next call muted, under the last officer's name (G609).
@@ -194,7 +205,7 @@ export const useCallStore = create<CallStoreState>((set) => ({
         isUserSpeaking: caption.speaker === 'caller' && caption.final === false,
       };
     }),
-  setError: (error) => set({ error }),
+  setError: (error, source = null) => set({ error, errorSource: error === null ? null : source }),
   setAudioBlocked: (audioBlocked) => set({ audioBlocked }),
   setLanguageOptions: (languageDetection, languages, language) =>
     set({ languageDetection, languages, language, languageSource: 'default' }),

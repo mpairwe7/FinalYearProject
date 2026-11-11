@@ -96,21 +96,14 @@ export function useCall() {
   /** The latest mute change asked of LiveKit; an older one's result is stale. */
   const muteRequestRef = useRef(0);
   /**
-   * The message a microphone or mute operation put on screen. It is cleared
-   * when that operation recovers or the call ends normally; an error from
-   * anything else (the socket, the server) is left alone.
+   * A microphone or mute operation's message is marked as its own, and cleared
+   * when that operation recovers or the call ends normally. An error from
+   * anything else (the socket, the server) replaces the mark, so it is left
+   * alone even when it reads the same.
    */
-  const micErrorRef = useRef<string | null>(null);
-  const setMicError = useCallback(
-    (message: string) => {
-      micErrorRef.current = message;
-      store.setError(message);
-    },
-    [store],
-  );
+  const setMicError = useCallback((message: string) => store.setError(message, 'mic'), [store]);
   const clearMicError = useCallback(() => {
-    if (micErrorRef.current !== null && useCallStore.getState().error === micErrorRef.current) store.setError(null);
-    micErrorRef.current = null;
+    if (useCallStore.getState().errorSource === 'mic') store.setError(null);
   }, [store]);
 
   const getToneContext = useCallback((): AudioContext | null => {

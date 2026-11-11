@@ -347,6 +347,18 @@ describe('a failed action', () => {
 // ---------------------------------------------------------------------------
 
 describe('LiveStreamNotices', () => {
+  it('says how long is left before the time limit', async () => {
+    const { LiveStreamNotices } = await import('@/components/staff/calls/LiveStreamNotices');
+    const { rerender } = render(<LiveStreamNotices status="live" secondsRemaining={60} callStatus="bridged" />);
+    expect(screen.getByRole('status').textContent).toBe(
+      'This call reaches its time limit in about a minute and will end then.',
+    );
+    rerender(<LiveStreamNotices status="live" secondsRemaining={15} callStatus="bridged" />);
+    expect(screen.getByRole('status').textContent).toBe(
+      'This call reaches its time limit in about 15 seconds and will end then.',
+    );
+  });
+
   it('says a transcript stopped for good needs the officer to sign in again', async () => {
     const { LiveStreamNotices } = await import('@/components/staff/calls/LiveStreamNotices');
     render(<LiveStreamNotices status="stopped" secondsRemaining={null} callStatus="bridged" />);

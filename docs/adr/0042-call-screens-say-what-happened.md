@@ -59,8 +59,9 @@ normally (the server said `ended`) thanks the caller; any other ending says why
 and offers to call again.
 
 **The time limit is announced on every transport.** One task per call
-(`ws._call_clock`) sends `duration_warning` a minute before the ceiling to the
-caller's screen and the officer's live stream, then ends the call at the
+(`ws._call_clock`) sends `duration_warning` a minute before the ceiling (halfway
+through a ceiling of a minute or less) to the caller's screen and the officer's
+live stream, then ends the call at the
 ceiling. That end was missing on the fallback path. The caller's screen shows
 it in the call thread, which screen readers announce. The officer's workspace
 shows a notice.
@@ -96,11 +97,13 @@ Luganda micFallback string lost a stray leading space.
 **Corrected in a second review:** a claim marks the officer `on_call` on the
 server and its end restores what they were; the time-limit warning is sent on
 its own and the end-of-call message has a one-second deadline, so a stalled
-caller socket cannot hold a call past its limit; a limit shorter than two
-minutes is warned halfway through; the officer's notices sit outside the
-collapsible transcript; the device check gives focus back on closing; a mute
-failure that recovers, or that is still on screen when the call ends normally,
-is cleared.
+caller socket cannot hold a call past its limit; a limit of a minute or less
+is warned halfway through (a longer one exactly a minute before, which is what
+the caller's screen says); the officer's notice says how long is left; the
+officer's notices sit outside the collapsible transcript; the device check
+gives focus back on closing; a mute failure that recovers, or that is still on
+screen when the call ends normally, is cleared, while an error from anything
+else is left on screen even when it reads the same (`errorSource`).
 
 **Corrected in review, before merge:** a mute change overtaken by a newer one
 no longer decides what the screen shows; a caller who listened and typed
@@ -124,7 +127,10 @@ call card stays in the dialog.
   written for this change from the existing strings' vocabulary and have **not
   been reviewed by a first-language speaker**. G607 stays open until they are.
 - The time-limit warning is shown, not spoken: no spoken line exists for it in
-  the five languages yet.
+  the five languages yet. The caller's text says "about a minute"; under a
+  limit of a minute or less (not a realistic setting) it overstates the time
+  left, since a translated "seconds" version would be four more unreviewed
+  strings.
 - An officer whose call ended with an error, rather than a normal end, still
   reports their chosen availability: the console cannot tell from its state
   alone whether a wrap-up is owed.

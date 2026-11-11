@@ -133,7 +133,7 @@ Left open by this phase, each for the service owner:
 | Gap | What changed |
 | --- | --- |
 | G601 | A microphone granted after the call ended is stopped and sends nothing; a late refusal is ignored; caller and officer. |
-| G602 | `duration_warning` a minute before the ceiling on every transport, to the caller and the officer; the call ends at the ceiling everywhere. |
+| G602 | `duration_warning` a minute before the ceiling (halfway through a ceiling of a minute or less) on every transport, to the caller and the officer; the call ends at the ceiling everywhere, even if the caller's socket stalls. |
 | G603 | A refused LiveKit microphone keeps the call, muted, with the translated message; pressing the microphone retries. |
 | G604 | The device check stops an earlier microphone and one granted after it closed. |
 | G605 | Refusals accepted, explained with a code, closed with their code; the caller's screen says why and offers to call again. |

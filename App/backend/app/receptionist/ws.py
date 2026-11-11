@@ -396,8 +396,9 @@ async def _call_clock(room: Any) -> None:
     The warning used to be sent on the LiveKit path only, and the in-browser
     path ended the call at the ceiling without a word. The caller's screen and
     the call's live stream (the officer's console) both get
-    ``duration_warning``, a minute before the ceiling, or halfway through a
-    ceiling shorter than two minutes. The warning is sent on its own, so a
+    ``duration_warning`` a minute before the ceiling, which is what the
+    caller's screen says in every language; a ceiling of a minute or less is
+    warned halfway through. The warning is sent on its own, so a
     caller socket that stalls cannot hold the call past its ceiling.
     """
     try:
@@ -405,7 +406,7 @@ async def _call_clock(room: Any) -> None:
     except Exception:
         ceiling = 900.0
     started = float(room.state.started_at or time.time())
-    lead = min(DURATION_WARNING_S, ceiling / 2)
+    lead = DURATION_WARNING_S if ceiling > DURATION_WARNING_S else ceiling / 2
     try:
         await asyncio.sleep(max(0.0, started + ceiling - lead - time.time()))
         if room.state.mode == "ended":

@@ -19,7 +19,7 @@ ClarifyGate terminology disambiguation, and staff takeover.
   and the API log say which. A socket that stays open waiting for
   `call_start` is taking calls.
 - **The time limit is announced** a minute before it (halfway through a limit
-  shorter than two minutes), on the caller's screen and in the officer's call
+  of a minute or less), on the caller's screen and in the officer's call
   workspace, and the call ends at it on every transport, even if the caller's
   connection stalls.
 - **The console shows when it is not live.** "Live call updates paused —

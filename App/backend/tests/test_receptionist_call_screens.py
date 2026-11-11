@@ -210,10 +210,21 @@ class LobbyReadyTests(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 
 
+real_wait_for = asyncio.wait_for
+
+
 class CallClockTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         db.init_db()
         init_receptionist_schema()
+        self.setUp_room()
+        self.published: list[tuple[str, dict]] = []
+        publish = patch.object(hub, "publish_call", side_effect=lambda cid, kind, data: self.published.append((kind, data)))
+        publish.start()
+        self.addCleanup(publish.stop)
+
+    def setUp_room(self) -> None:
+        """A fresh call in the store and a fresh room for it, its caller recording what it is sent."""
         self.call_id = f"call_clock_{uuid.uuid4().hex[:8]}"
         create_call(self.call_id, conversation_id=f"conv_{self.call_id}", status="ai")
         self.caller = RecordingSocket()
@@ -221,10 +232,6 @@ class CallClockTests(unittest.IsolatedAsyncioTestCase):
             self.call_id, CallState(call_id=self.call_id, conversation_id=f"conv_{self.call_id}", mode="ai"),
             caller_ws=self.caller,
         )
-        self.published: list[tuple[str, dict]] = []
-        publish = patch.object(hub, "publish_call", side_effect=lambda cid, kind, data: self.published.append((kind, data)))
-        publish.start()
-        self.addCleanup(publish.stop)
 
     def warnings_to_caller(self) -> list[dict]:
         return [e[1] for e in self.caller.events if e[0] == "send" and e[1].get("type") == "duration_warning"]
@@ -246,13 +253,49 @@ class CallClockTests(unittest.IsolatedAsyncioTestCase):
         # The caller's screen is told the call ended rather than seeing the socket drop.
         self.assertIn({"type": "status", "status": "ended"}, [e[1] for e in self.caller.events if e[0] == "send"])
 
-    async def test_a_short_ceiling_is_warned_at_half_its_length(self):
-        await self.run_clock(ceiling=90.0, elapsed=89.7)
+    async def run_clock_on_a_controlled_clock(self, ceiling: float) -> tuple[list[float], list[tuple[float, str]]]:
+        """Run the clock from the call's start with time moving only when it sleeps.
 
-        warnings = self.warnings_to_caller()
-        self.assertEqual(len(warnings), 1)
-        self.assertLessEqual(warnings[0]["seconds_remaining"], 45)
-        self.assertEqual(self.room.state.mode, "ended")
+        Returns the delays it slept for and, for each live-stream event, the
+        clock reading (seconds into the call) when it was published.
+        """
+        start = 1_000_000.0
+        now = {"t": start}
+        self.room.state.started_at = start
+        slept: list[float] = []
+        published: list[tuple[float, str]] = []
+        real_sleep = asyncio.sleep
+
+        async def sleep(delay: float, result=None):
+            slept.append(delay)
+            now["t"] += max(0.0, delay)
+            await real_sleep(0)
+            return result
+
+        with patch.object(ws, "get_max_call_s", return_value=ceiling), \
+                patch.object(ws, "time", SimpleNamespace(time=lambda: now["t"])), \
+                patch.object(asyncio, "sleep", sleep), \
+                patch.object(hub, "publish_call",
+                             side_effect=lambda _cid, kind, _data: published.append((now["t"] - start, kind))):
+            await real_wait_for(ws._call_clock(self.room), timeout=2.0)
+        return slept, published
+
+    async def test_the_warning_comes_a_minute_before_or_halfway_through_a_limit_of_a_minute(self):
+        # "About a minute" is what the caller's screen says, in five languages:
+        # every limit over a minute is warned exactly a minute before it.
+        for ceiling, warned_at in ((900.0, 840.0), (120.0, 60.0), (90.0, 30.0), (60.0, 30.0), (30.0, 15.0)):
+            with self.subTest(ceiling=ceiling):
+                self.setUp_room()
+                slept, published = await self.run_clock_on_a_controlled_clock(ceiling)
+
+                # Warned at its moment; the end is published at the ceiling itself.
+                self.assertEqual(published, [(warned_at, "duration_warning"), (ceiling, "status")])
+                self.assertEqual(self.warnings_to_caller(),
+                                 [{"type": "duration_warning", "seconds_remaining": int(ceiling - warned_at)}])
+                # Then it sleeps to the ceiling, not past it, and ends the call there.
+                self.assertEqual(slept[:2], [warned_at, ceiling - warned_at])
+                self.assertEqual(self.room.state.mode, "ended")
+                self.assertEqual(get_call(self.call_id)["end_reason"], "max_call_duration")
 
     async def test_a_caller_socket_that_stalls_cannot_hold_the_call_past_its_limit(self):
         class StalledSocket(RecordingSocket):

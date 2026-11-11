@@ -297,6 +297,32 @@ describe('useCall: the caller screen', () => {
       expect([state().isMuted, state().error]).toEqual([true, null]);
     });
 
+    it('a server error worded like a mute failure outlives the mute recovering', async () => {
+      const { hook, socket } = startCall();
+      await act(async () => {
+        connect(socket, { transport: 'livekit', url: 'wss://rtc.example.test', room: 'r', identity: 'i', token: 't' });
+        await settle();
+      });
+      livekit.failMute = true;
+      await act(async () => {
+        hook.result.current.toggleMute();
+        await settle();
+      });
+      // The server's own error, which reads the same as the mute failure's.
+      act(() => socket.emit({ type: 'error', detail: 'Something internal happened' }));
+      expect(state().error).toBe(en['call.error.generic']);
+
+      livekit.failMute = false;
+      await act(async () => {
+        hook.result.current.toggleMute();
+        await settle();
+      });
+      expect(state().error).toBe(en['call.error.generic']);
+
+      act(() => socket.emit({ type: 'status', status: 'ended' }));
+      expect(state().error).toBe(en['call.error.generic']);
+    });
+
     it('a mute failure still on screen is not why a normal call ended', async () => {
       const { hook, socket } = startCall();
       await act(async () => {
