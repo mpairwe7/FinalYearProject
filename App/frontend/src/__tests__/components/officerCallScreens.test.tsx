@@ -85,6 +85,21 @@ describe('DeviceCheckDialog', () => {
     expect(screen.getByRole('button', { name: 'Test microphone' })).toBeInTheDocument();
   });
 
+  it('gives focus back to what opened it when it closes', async () => {
+    const opener = document.createElement('button');
+    opener.textContent = 'Check mic';
+    document.body.appendChild(opener);
+    opener.focus();
+    const { rerender, DeviceCheckDialog, onClose } = await dialog(false);
+
+    rerender(<DeviceCheckDialog open onClose={onClose} />);
+    expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
+    rerender(<DeviceCheckDialog open={false} onClose={onClose} />);
+
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
+  });
+
   it('stops a microphone granted after the dialog was closed, and does not call it ready', async () => {
     await dialog();
     fireEvent.click(screen.getByRole('button', { name: 'Test microphone' }));
@@ -150,13 +165,14 @@ describe('useCallLive', () => {
     act(() => vi.advanceTimersByTime(60000));
     expect(FakeSocket.all.filter((s) => s.url.includes('call_id=call_waiting_1'))).toHaveLength(1);
 
-    const { unmount } = await live();
+    const second = await live();
     const refused = FakeSocket.find('call_id=call_waiting_1')!;
     act(() => refused.shut(4401));
-    expect(result.current.status).not.toBe('live');
+    expect(second.result.current.status).toBe('stopped');
     act(() => vi.advanceTimersByTime(60000));
     expect(FakeSocket.find('call_id=call_waiting_1')).toBe(refused);
-    unmount();
+    expect(result.current.status).toBe('stopped');
+    second.unmount();
   });
 
   it('drops a half-heard caption when a reconnect brings a fresh snapshot', async () => {

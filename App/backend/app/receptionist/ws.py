@@ -386,6 +386,8 @@ async def _refuse_after_accept(websocket: WebSocket, close_code: int, error_code
 
 #: How long before the ceiling the caller and the officers are told it is coming.
 DURATION_WARNING_S = 60.0
+#: Time-limit warnings on their way to a caller, held so they are not collected mid-send.
+_WARNINGS: set[asyncio.Task[Any]] = set()
 
 
 async def _call_clock(room: Any) -> None:
@@ -394,26 +396,34 @@ async def _call_clock(room: Any) -> None:
     The warning used to be sent on the LiveKit path only, and the in-browser
     path ended the call at the ceiling without a word. The caller's screen and
     the call's live stream (the officer's console) both get
-    ``duration_warning``; a ceiling under two minutes is too short to warn.
+    ``duration_warning``, a minute before the ceiling, or halfway through a
+    ceiling shorter than two minutes. The warning is sent on its own, so a
+    caller socket that stalls cannot hold the call past its ceiling.
     """
     try:
         ceiling = get_max_call_s()
     except Exception:
         ceiling = 900.0
     started = float(room.state.started_at or time.time())
+    lead = min(DURATION_WARNING_S, ceiling / 2)
     try:
-        if ceiling >= 2 * DURATION_WARNING_S:
-            await asyncio.sleep(max(0.0, started + ceiling - DURATION_WARNING_S - time.time()))
-            if room.state.mode == "ended":
-                return
-            remaining = max(1, int(round(started + ceiling - time.time())))
-            payload = {"type": "duration_warning", "seconds_remaining": remaining}
-            await desk._send_to_caller(room, payload)
-            with contextlib.suppress(Exception):
-                hub.publish_call(room.call_id, "duration_warning", payload)
+        await asyncio.sleep(max(0.0, started + ceiling - lead - time.time()))
+        if room.state.mode == "ended":
+            return
+        remaining = max(1, int(round(started + ceiling - time.time())))
+        payload = {"type": "duration_warning", "seconds_remaining": remaining}
+        with contextlib.suppress(Exception):
+            hub.publish_call(room.call_id, "duration_warning", payload)
+        warning = asyncio.create_task(asyncio.wait_for(desk._send_to_caller(room, payload), timeout=5.0))
+        _WARNINGS.add(warning)
+        warning.add_done_callback(_WARNINGS.discard)
         await asyncio.sleep(max(0.0, started + ceiling - time.time()))
         if room.state.mode != "ended":
-            await desk.hang_up_caller(room, "max_call_duration")
+            # As desk.hang_up_caller does, but the caller's screen gets one
+            # second to hear it: a stalled socket must not keep the call open.
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(desk._send_to_caller(room, {"type": "status", "status": "ended"}), timeout=1.0)
+            await room.end("max_call_duration")
     except asyncio.CancelledError:
         return
 

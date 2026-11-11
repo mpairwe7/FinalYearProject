@@ -52,6 +52,7 @@ vi.mock('@/services/accountApi', () => ({ accountApi: { grantConsents: () => Pro
 const livekit = vi.hoisted(() => ({
   setMuted: [] as boolean[],
   failUnmute: false,
+  failMute: false,
   connectError: null as Error | null,
   /** Leave the next setMuted pending; the test settles it through `held`. */
   holdNext: false,
@@ -73,6 +74,7 @@ vi.mock('@/services/liveKitCallSession', () => ({
         return;
       }
       if (!muted && livekit.failUnmute) throw new Error('Permission denied');
+      if (muted && livekit.failMute) throw new Error('Track not found');
     }
     async close() {}
     async resumeAudio() {}
@@ -99,6 +101,7 @@ describe('useCall: the caller screen', () => {
     livekit.connectError = null;
     livekit.holdNext = false;
     livekit.held = [];
+    livekit.failMute = false;
     useCallStore.getState().reset();
     useCallStore.getState().openCall();
   });
@@ -270,6 +273,44 @@ describe('useCall: the caller screen', () => {
       });
 
       expect(state().isMuted).toBe(false);
+      expect(state().error).toBeNull();
+    });
+
+    it('a mute that failed and then worked leaves no message, and the call ends as a normal one', async () => {
+      const { hook, socket } = startCall();
+      await act(async () => {
+        connect(socket, { transport: 'livekit', url: 'wss://rtc.example.test', room: 'r', identity: 'i', token: 't' });
+        await settle();
+      });
+      livekit.failMute = true;
+      await act(async () => {
+        hook.result.current.toggleMute();
+        await settle();
+      });
+      expect(state().error).toBe(en['call.error.generic']);
+
+      livekit.failMute = false;
+      await act(async () => {
+        hook.result.current.toggleMute();
+        await settle();
+      });
+      expect([state().isMuted, state().error]).toEqual([true, null]);
+    });
+
+    it('a mute failure still on screen is not why a normal call ended', async () => {
+      const { hook, socket } = startCall();
+      await act(async () => {
+        connect(socket, { transport: 'livekit', url: 'wss://rtc.example.test', room: 'r', identity: 'i', token: 't' });
+        await settle();
+      });
+      livekit.failMute = true;
+      await act(async () => {
+        hook.result.current.toggleMute();
+        await settle();
+      });
+
+      act(() => socket.emit({ type: 'status', status: 'ended' }));
+
       expect(state().error).toBeNull();
     });
 

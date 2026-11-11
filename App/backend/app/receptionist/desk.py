@@ -178,6 +178,12 @@ async def claim(call_id: str, officer_id: str, officer_name: str = "") -> dict[s
         room.state.claimed_name = name
         room.state.claimed_at = now
         _restart_claim_timer(room, officer_id, timeout)
+        # Holding a claim is being on a call: left as it was, an available
+        # officer could be reserved for a second call meanwhile (G610).
+        try:
+            presence.set_on_call(officer_id, call_id, display_name=name, tenant_id=room.state.tenant_id)
+        except Exception:
+            logger.warning("Could not mark the claiming officer as on a call", exc_info=True)
     hub.publish_lobby("call.claimed", {"call_id": call_id, "officer_id": officer_id, "officer_name": name})
     return {"claimed": True, "call_id": call_id, "officer_name": name, "claim_expires_at": now + timeout}
 
@@ -307,8 +313,14 @@ async def _expire_reservation(room: CallRoom, officer_id: str, epoch: int, wait_
 
 
 async def _release_locked(room: CallRoom, reason: str) -> None:
-    """Drop the claim (call under desk_lock): the call goes back to waiting."""
+    """Drop the claim (call under desk_lock): the call goes back to waiting, and its officer to what they were."""
+    officer_id = room.state.claimed_by
     release_claim(room.call_id)
+    if officer_id:
+        try:
+            presence.finish_wrap_up(officer_id)
+        except Exception:
+            logger.warning("Could not restore the presence of an officer whose claim ended", exc_info=True)
     room.state.claimed_by = ""
     room.state.claimed_name = ""
     room.state.claimed_at = None

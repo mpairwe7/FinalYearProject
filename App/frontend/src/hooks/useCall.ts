@@ -95,6 +95,23 @@ export function useCall() {
   const endedByServerRef = useRef(false);
   /** The latest mute change asked of LiveKit; an older one's result is stale. */
   const muteRequestRef = useRef(0);
+  /**
+   * The message a microphone or mute operation put on screen. It is cleared
+   * when that operation recovers or the call ends normally; an error from
+   * anything else (the socket, the server) is left alone.
+   */
+  const micErrorRef = useRef<string | null>(null);
+  const setMicError = useCallback(
+    (message: string) => {
+      micErrorRef.current = message;
+      store.setError(message);
+    },
+    [store],
+  );
+  const clearMicError = useCallback(() => {
+    if (micErrorRef.current !== null && useCallStore.getState().error === micErrorRef.current) store.setError(null);
+    micErrorRef.current = null;
+  }, [store]);
 
   const getToneContext = useCallback((): AudioContext | null => {
     if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
@@ -166,13 +183,13 @@ export function useCall() {
       socketRef.current.hangup();
       socketRef.current = null;
     }
-    // Listening and typing without a microphone is a call that worked: the
-    // notice is not a reason the call ended. (A real failure set its own error.)
-    if (useCallStore.getState().error === t('call.micFallback')) store.setError(null);
+    // Listening and typing without a microphone, or a mute that did not
+    // take, is not why the call ended. (A real failure set its own error.)
+    clearMicError();
     cleanupAudio();
     store.setAudioBlocked(false);
     store.setStatus('ended');
-  }, [cleanupAudio, store, t]);
+  }, [cleanupAudio, clearMicError, store]);
 
   /** Start call audio the browser held back; wired to a tap on the call screen. */
   const resumeAudio = useCallback(() => {
@@ -210,23 +227,21 @@ export function useCall() {
         if (muted) {
           // Muting failed: the microphone may still be live, and the screen says so.
           store.setMuted(false);
-          store.setError(t('call.error.generic'));
+          setMicError(t('call.error.generic'));
         } else {
           micFailedRef.current = true;
           store.setMuted(true);
           void session.setMuted(true).catch(() => {});
-          store.setError(t('call.micFallback'));
+          setMicError(t('call.micFallback'));
         }
         return false;
       }
       if (stale()) return true;
-      if (!muted && micFailedRef.current) {
-        micFailedRef.current = false;
-        if (useCallStore.getState().error === t('call.micFallback')) store.setError(null);
-      }
+      micFailedRef.current = muted ? micFailedRef.current : false;
+      clearMicError();
       return true;
     },
-    [store, t],
+    [clearMicError, setMicError, store, t],
   );
 
   const toggleMute = useCallback(() => {
@@ -240,7 +255,7 @@ export function useCall() {
     ) {
       void startLegacyAudioRef.current().then((ok) => {
         if (ok) {
-          store.setError(null);
+          clearMicError();
           store.setMuted(false);
         }
       });
@@ -249,7 +264,7 @@ export function useCall() {
     const next = !useCallStore.getState().isMuted;
     store.setMuted(next);
     if (session) void applyLiveKitMute(session, next);
-  }, [applyLiveKitMute, store]);
+  }, [applyLiveKitMute, clearMicError, store]);
 
   /** Pin the call to *language* for the rest of the call (the server confirms). */
   const setLanguage = useCallback(
@@ -380,7 +395,7 @@ export function useCall() {
           // and can use the in-call text input ("Type instead") or officer handoff.
           micFailedRef.current = true;
           store.setMuted(true);
-          store.setError(t('call.micFallback'));
+          setMicError(t('call.micFallback'));
           return false;
         }
       };
@@ -641,7 +656,7 @@ export function useCall() {
           : {}),
       });
     },
-    [applyLiveKitMute, cleanupAudio, getToneContext, hangup, store, t],
+    [applyLiveKitMute, cleanupAudio, getToneContext, hangup, setMicError, store, t],
   );
 
   useEffect(() => {

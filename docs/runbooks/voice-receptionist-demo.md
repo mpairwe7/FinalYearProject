@@ -10,14 +10,18 @@ ClarifyGate terminology disambiguation, and staff takeover.
   busy" or "The call was cut off", in the caller's language, with a button to
   call again. "Thank you for calling URA" appears only when the call ended
   normally.
-- **Checking whether calls are on, from outside.** A call socket is now
+- **Checking whether calls are taken, from outside.** A call socket is now
   accepted before it is refused, so the HTTP status no longer tells: a probe
-  gets 101 either way. Calls are off when the socket then closes with **1001**
-  (after an `error` frame with `code: "unavailable"`); on when it stays open
-  waiting for `call_start`.
-- **The time limit is announced** a minute before it, on the caller's screen
-  and in the officer's call workspace, and the call ends at it on every
-  transport.
+  gets 101 either way. A close with **1001** (after an `error` frame with
+  `code: "unavailable"`) means calls are not being taken: switched off, or
+  switched on and unable to start or not configured. `GET /ready`
+  (`capabilities.voice_receptionist`: `off`, `ready` or `unavailable: <why>`)
+  and the API log say which. A socket that stays open waiting for
+  `call_start` is taking calls.
+- **The time limit is announced** a minute before it (halfway through a limit
+  shorter than two minutes), on the caller's screen and in the officer's call
+  workspace, and the call ends at it on every transport, even if the caller's
+  connection stalls.
 - **The console shows when it is not live.** "Live call updates paused —
   reconnecting" on every staff page while the lobby is down; "Live transcript
   paused — reconnecting…" in a call while its transcript is.

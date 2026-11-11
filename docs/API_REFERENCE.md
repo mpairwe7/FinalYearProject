@@ -2052,7 +2052,7 @@ handshake). Every `error` frame to the caller carries a `code`:
 
 | `code` | Close | Meaning |
 | --- | --- | --- |
-| `unavailable` | 1001 | Calls are off, or the media pipeline could not start |
+| `unavailable` | 1001 | Calls are not being taken: switched off, or switched on and unable to start or not configured (`GET /ready` says which), or the media pipeline could not start |
 | `busy` | 1013 | All lines are busy, or this caller already has five calls |
 | `signin` | 4401 | The call needs a valid sign-in |
 | `consent_required` | 4403 | Voice recording consent was not given |
@@ -2060,8 +2060,9 @@ handshake). Every `error` frame to the caller carries a `code`:
 
 `detail` is English for logs; screens show a translated message chosen by
 `code`. `{"type": "duration_warning", "seconds_remaining": N}` reaches the
-caller a minute before the time limit (`RECEPTIONIST_MAX_CALL_S`) on every
-transport, and the call ends at the limit with `status: ended`.
+caller a minute before the time limit (`RECEPTIONIST_MAX_CALL_S`), or halfway
+through a limit shorter than two minutes, on every transport, and the call
+ends at the limit with `status: ended`.
 
 ---
 

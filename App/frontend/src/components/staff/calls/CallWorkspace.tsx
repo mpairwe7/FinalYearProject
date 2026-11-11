@@ -207,10 +207,7 @@ export function CallWorkspace({ callId, role }: { callId: string; role: string }
   })();
 
   const transcript = (
-    <>
-      <LiveStreamNotices status={live.status} secondsRemaining={live.secondsRemaining} callStatus={call.status} />
-      <CallTranscript turns={turns} interimCaption={live.interimCaption} startedAt={call.started_at} flashSeq={flashSeq} />
-    </>
+    <CallTranscript turns={turns} interimCaption={live.interimCaption} startedAt={call.started_at} flashSeq={flashSeq} />
   );
 
   return (
@@ -227,6 +224,10 @@ export function CallWorkspace({ callId, role }: { callId: string; role: string }
           )}
         </div>
       </header>
+
+      {/* Above everything that can be collapsed: an officer deciding whether
+          to take a waiting call sees a paused stream or a near time limit. */}
+      <LiveStreamNotices status={live.status} secondsRemaining={live.secondsRemaining} callStatus={call.status} />
 
       {safetyConcern && (
         <p className="cw-safety" role="alert" data-testid="call-safety-concern">

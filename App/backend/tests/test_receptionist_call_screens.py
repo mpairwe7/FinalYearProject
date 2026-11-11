@@ -246,11 +246,24 @@ class CallClockTests(unittest.IsolatedAsyncioTestCase):
         # The caller's screen is told the call ended rather than seeing the socket drop.
         self.assertIn({"type": "status", "status": "ended"}, [e[1] for e in self.caller.events if e[0] == "send"])
 
-    async def test_a_ceiling_too_short_to_warn_still_ends_the_call(self):
-        await self.run_clock(ceiling=60.0, elapsed=59.8)
+    async def test_a_short_ceiling_is_warned_at_half_its_length(self):
+        await self.run_clock(ceiling=90.0, elapsed=89.7)
 
-        self.assertEqual(self.warnings_to_caller(), [])
+        warnings = self.warnings_to_caller()
+        self.assertEqual(len(warnings), 1)
+        self.assertLessEqual(warnings[0]["seconds_remaining"], 45)
         self.assertEqual(self.room.state.mode, "ended")
+
+    async def test_a_caller_socket_that_stalls_cannot_hold_the_call_past_its_limit(self):
+        class StalledSocket(RecordingSocket):
+            async def send_text(self, text: str) -> None:
+                await asyncio.sleep(3600)
+
+        self.room.caller_ws = StalledSocket()
+        await self.run_clock(ceiling=120.0, elapsed=119.7, wait=2.0)
+
+        self.assertEqual(self.room.state.mode, "ended")
+        self.assertEqual(get_call(self.call_id)["end_reason"], "max_call_duration")
 
     async def test_a_call_that_ended_first_is_left_as_it_ended(self):
         await self.room.end("caller_hangup")
@@ -309,6 +322,63 @@ class PresenceHeartbeatGuardTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_an_officer_with_no_call_can_say_they_are_available(self):
         self.assertEqual(self.heartbeat("available"), "available")
+
+
+# ---------------------------------------------------------------------------
+# A claim is presence too (review of #717)
+# ---------------------------------------------------------------------------
+
+
+class ClaimPresenceTests(unittest.IsolatedAsyncioTestCase):
+    officer = "okello@ura.go.ug"
+
+    async def asyncSetUp(self) -> None:
+        from app.receptionist import desk, presence
+
+        db.init_db()
+        init_receptionist_schema()
+        self.desk, self.presence = desk, presence
+        self.call_id = f"call_cp_{uuid.uuid4().hex[:8]}"
+        create_call(self.call_id, conversation_id=f"conv_{self.call_id}", status="transferring")
+        self.room = await registry.create(self.call_id, f"conv_{self.call_id}", tenant_id="default")
+        self.room.state.mode = "transferring"
+        lobby = patch.object(hub, "publish_lobby")
+        lobby.start()
+        self.addCleanup(lobby.stop)
+        presence.upsert_presence(self.officer, status="busy")
+        self.addCleanup(presence.upsert_presence, self.officer, status="offline")
+
+    async def asyncTearDown(self) -> None:
+        self.desk._cancel_claim_timer(self.room)
+        await registry.remove(self.call_id)
+
+    def status(self) -> tuple[str, str]:
+        row = self.presence.get_presence(self.officer)
+        return row["raw_status"], row.get("current_call_id") or ""
+
+    async def test_an_officer_holding_a_claim_is_on_a_call(self):
+        await self.desk.claim(self.call_id, self.officer)
+
+        self.assertEqual(self.status(), ("on_call", self.call_id))
+
+    async def test_giving_the_claim_back_restores_what_they_were(self):
+        await self.desk.claim(self.call_id, self.officer)
+        await self.desk.release(self.call_id, self.officer)
+
+        self.assertEqual(self.status(), ("busy", ""))
+
+    async def test_a_claim_that_lapses_restores_what_they_were(self):
+        with patch.object(self.desk, "get_claim_timeout_s", return_value=0.05):
+            await self.desk.claim(self.call_id, self.officer)
+            await asyncio.sleep(0.2)
+
+        self.assertEqual(self.status(), ("busy", ""))
+
+    async def test_joining_the_call_keeps_what_they_were_before_the_claim(self):
+        await self.desk.claim(self.call_id, self.officer)
+        await self.desk.bridge(self.room, None, self.officer, speech_model=None)
+
+        self.assertEqual(self.presence.get_presence(self.officer)["previous_status"], "busy")
 
 
 if __name__ == "__main__":

@@ -93,6 +93,15 @@ Also: the device check stops an earlier microphone and drops one granted after
 the dialog closed; mark-done and the review form show their errors; the
 Luganda micFallback string lost a stray leading space.
 
+**Corrected in a second review:** a claim marks the officer `on_call` on the
+server and its end restores what they were; the time-limit warning is sent on
+its own and the end-of-call message has a one-second deadline, so a stalled
+caller socket cannot hold a call past its limit; a limit shorter than two
+minutes is warned halfway through; the officer's notices sit outside the
+collapsible transcript; the device check gives focus back on closing; a mute
+failure that recovers, or that is still on screen when the call ends normally,
+is cleared.
+
 **Corrected in review, before merge:** a mute change overtaken by a newer one
 no longer decides what the screen shows; a caller who listened and typed
 without a microphone is thanked at the end rather than shown the microphone

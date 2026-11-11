@@ -217,6 +217,11 @@ def set_on_call(user_id: str, call_id: str, display_name: str = "", tenant_id: s
     prev = "available"
     if existing and existing.get("raw_status") in ("available", "busy", "away"):
         prev = existing["raw_status"]
+    elif existing and existing.get("raw_status") == "on_call" and existing.get("previous_status") in (
+        "available", "busy", "away"
+    ):
+        # Already on this call since the claim: keep what they were before it.
+        prev = existing["previous_status"]
     name = display_name or (existing["display_name"] if existing else "")
     upsert_presence(
         user_id, tenant_id=tenant_id, display_name=name or None, status="on_call",

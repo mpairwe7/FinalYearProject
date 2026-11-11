@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import { restoreFocus } from '@/lib/focus';
 import { playJoinChime } from '@/services/callTones';
 import { useCallConsoleStore } from '@/store/useCallConsoleStore';
 
@@ -30,7 +31,16 @@ export function DeviceCheckDialog({ open, onClose }: { open: boolean; onClose: (
   };
 
   useEffect(() => {
-    if (open) dialogRef.current?.focus();
+    if (!open) return undefined;
+    // Focus goes back to whatever opened the dialog when it closes.
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    dialogRef.current?.focus();
+    return () => {
+      restoreFocus(opener);
+    };
+  }, [open]);
+
+  useEffect(() => {
     return () => {
       runRef.current += 1;
       stopMeter();
