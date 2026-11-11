@@ -69,7 +69,7 @@ readable with `METRICS_TOKEN` by any external Prometheus.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `METRICS_TOKEN` | unset | Bearer credential for `/metrics` (≥ 32 chars in production). Unset: only staff/operator auth can read it. |
-| `PROMETHEUS_MULTIPROC_DIR` | `/tmp/ura-prometheus` (set by `entrypoint.sh` / supervisord) | Where each uvicorn worker writes samples; emptied before workers start. |
+| `PROMETHEUS_MULTIPROC_DIR` | `/tmp/ura-prometheus` (set by `entrypoint.sh` / supervisord) | Where each uvicorn worker writes samples. `entrypoint.sh` empties it before its workers start. Under supervisord (`uvicorn-role.sh`, ADR-0043) it is emptied once per container start, because both API programs write there; a program restart only removes the dead process's live-gauge files (`gauge_live*_<pid>.db`), and keeps the counters. |
 | `METRICS_MAX_SERIES_PER_METRIC` | `500` | Label sets per metric before new ones fold into `__other__`. |
 | `OTEL_ENABLED` | `false` | Traces, OTLP logs and GenAI metrics. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://otel-collector:4317` (compose) | Collector address. |
@@ -192,7 +192,7 @@ are not repeated here: they are `ura_chat_turns_total{channel="call",outcome="er
 | `ura_receptionist_calls_refused_total` | `reason` (`unavailable`/`not_configured`/`capacity`) | Calls turned away before they began. A switched-off receptionist is not counted |
 | `ura_receptionist_call_failures_total` | `stage` (`stt`/`tts`/`media`/`record`) | The recognizer failed on an utterance, a line could not be voiced, or the call's own record could not be written |
 | `ura_receptionist_calls_lost_total` | — | Call rows a start found still live with no process behind them, and ended (`end_reason = process_lost`) |
-| `ura_receptionist_misrouted_total` | `kind` (`http`/`websocket`) | Call requests that reached the chat process and were refused (HTTP 421, or a WebSocket closed 1013). Counted by `app/process_role.py` in the chat process (not by `telemetry.py`), declared at 0 for both kinds from its start, so the first one raises `UraCallMisrouted` |
+| `ura_receptionist_misrouted_total` | `kind` (`http`/`websocket`) | Call requests that reached the chat process and were refused (HTTP 421, or a WebSocket closed 1013). Counted by `app/process_role.py` (not by `telemetry.py`): the zero series for both kinds is declared in every process, whatever its role, when the app starts, so the first increment raises `UraCallMisrouted`; the increment itself happens only in the chat process, which refuses the request |
 
 ## 4. SLOs and alerting
 

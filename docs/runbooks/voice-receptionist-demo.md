@@ -41,7 +41,7 @@ the check). What an operator needs to know:
   Until supervisord brings it back nginx answers call paths with 502; callers
   are told the call could not connect or was cut off and can call again, and
   the consoles show "Live call updates paused" and reconnect. On start the
-  process ends the rows its run left and flags the callers owed a callback
+  process ends the rows its previous run left and flags the callers owed a callback
   (`service_interrupted`), as in the ADR-0041 update below. A chat restart
   ends nothing. Chat requests in flight on the call process can fail once.
 - **`GET /ready` shows the call process's own state on the chat process.**
@@ -53,7 +53,9 @@ the check). What an operator needs to know:
   it), and `X-URA-Process` on the response says which one answered.
 - **Every response names its process**: `X-URA-Process: chat` or
   `X-URA-Process: calls`. It is absent on Starlette's own 500 error responses
-  and on a WebSocket closed before it was accepted (a foreign origin).
+  and on a WebSocket closed before it was accepted (a foreign origin). Each
+  process also logs `Process role: chat` or `Process role: calls` once at
+  startup.
 
 **Kill switch: set `FLAG_VOICE_RECEPTIONIST=false` as a Space secret** (change
 the existing value if the Space already has one). It restarts the Space and
@@ -62,9 +64,15 @@ reaches both processes. Do not use the admin API's flag override
 the one process that answered the request and writes a stored row the other
 process reads only when it next starts, so calls can stay on in the call process
 while the console says they are off (G612). A stored override also beats a
-`FLAG_*` secret at start; if one exists for `voice_receptionist`, delete it first
+`FLAG_*` secret at start. To see whether one exists, `GET /v1/admin/flags` lists
+`voice_receptionist` with `overridden` set (it reports the process that answered,
+so ask a few times); if it is overridden, delete it first
 (`DELETE /v1/admin/flags/voice_receptionist`, `ura_admin`). The 1001 close and
 the `off` field show whether the switch took (the ADR-0042 update below).
+
+**Turning calls back on.** The Space image sets `FLAG_VOICE_RECEPTIONIST=true`
+(`App/deploy/hf-space/Dockerfile`), so deleting the secret, or setting it to
+`true`, restarts the Space with calls on.
 
 **Live probes after a roll** (the Space is `https://landwind22-ura-chatbot.hf.space`):
 
@@ -93,14 +101,16 @@ the `off` field show whether the switch took (the ADR-0042 update below).
      -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" -H "Origin: $S" | head -8
    ```
 3. *`/ready`*: `capabilities.voice_receptionist` is `ready` (or `off` if the
-   flag is off). `unavailable: the call process is not answering` for longer
-   than ten seconds after a start means nothing listens on 8082: read the
-   container log for the `uvicorn-calls` program.
-4. *The log*: `Uvicorn running on http://127.0.0.1:8081` and
-   `Uvicorn running on http://127.0.0.1:8082`, and no line beginning
-   `Voice receptionist is on with` (the more-than-one-worker warning; the call
-   process has one worker). Neither program's log lines name its role;
-   the port tells them apart.
+   flag is off). `unavailable: the call process is not answering` once the call
+   process's start has finished means nothing listens on 8082: read the
+   container log for the `uvicorn-calls` program (the troubleshooting row below
+   explains why a cold start is slow).
+4. *The log*: each program logs its role once at startup, at the default
+   `LOG_LEVEL=info`: `Process role: chat` and `Process role: calls`, one of
+   each. There is no line beginning `Voice receptionist is on with` (the
+   more-than-one-worker warning; the call process has one worker). As a second
+   check, uvicorn's own lines name the ports: `Uvicorn running on
+   http://127.0.0.1:8081` and `…:8082`.
 5. *The counter*: `ura_receptionist_misrouted_total` is 0 for both kinds.
 
 A real officer handoff (a caller asks for an officer, an officer takes the
@@ -525,9 +535,10 @@ enabling the feature:
    that turns `FLAG_VOICE_RECEPTIONIST` off.
 
 The current application supports one API process for active calls (under the
-supervisord image that is the call process, ADR-0043; its other workers serve
-chat only). Do not set multiple Kubernetes replicas, multiple ASGI workers, or
-scale-out autoscaling for the receptionist; LiveKit itself can scale independently, but it does not make
+supervisord image that is the call process, which has one worker, ADR-0043; the
+other worker or workers belong to the chat program and serve chat). Do not set
+multiple Kubernetes replicas, multiple ASGI workers, or scale-out autoscaling
+for the receptionist; LiveKit itself can scale independently, but it does not make
 the application's in-memory claims, call state, event hub or timers shared.
 Adding shared actor/event state, restart recovery, and a tested media/session
 reconnect policy is a prerequisite for HA or horizontal API scaling. LiveKit
@@ -953,7 +964,7 @@ check them, and have 3–5 Luganda speakers rate the Orpheus samples blind
 | Assistant cuts itself off mid-sentence | its own voice leaking from speaker to mic: `RECEPTIONIST_LOCAL_BARGE_IN=false`, or raise `RECEPTIONIST_BARGE_IN_MIN_S` |
 | A call or the officer console fails with HTTP 421, or a call socket closes 1013 after an `error` frame with `code: "unavailable"` (and calls are on) | A call request reached the chat process. The chat process logs `misrouted … request for '<path>' reached the chat process` and `UraCallMisrouted` fires. Compare the path with `process_role.CALL_PATH_RE` and the call location in `App/deploy/cranecloud/nginx.conf` (`test_call_process_routing.py` keeps them equal); the call-path probe in the 2026-11-12 update at the top shows which process answers |
 | Call paths answer 502, and the console says live updates are paused | The call process (`uvicorn-calls`, 127.0.0.1:8082) is down or restarting. supervisord restarts it; chat is unaffected. Its calls ended; callers owed a callback are flagged `service_interrupted` |
-| `/ready` says `unavailable: the call process is not answering` | The chat process asked 8082 and got nothing within 1 s (the answer is kept for 10 s). Look at the `uvicorn-calls` log; a chat process that booted first reports it until the call process is up |
+| `/ready` says `unavailable: the call process is not answering` | The chat process asked 8082 and got nothing within 1 s (the answer is kept for 10 s). A cold start of the call process is slow: it waits for Qdrant (up to `QDRANT_WAIT_SECONDS`, 90 s by default) and then loads its models, and a chat process that booted first reports this until the call process is up (within 10 s of it). Look at the `uvicorn-calls` log if it persists after the start has finished |
 | Stale or unjoined call stuck in queue | In `/calls`, an officer (`ura_staff`; administrators are refused desk actions) can click **Terminate call** (`POST /v1/admin/calls/{call_id}/end`). It ends the call through `CallRoom.end()` — countdown cancelled, media room closed, pipeline stopped, row `ended` — releases queue locks (`end_reason="officer_terminated_waiting"` or `officer_terminated_stale`) and refreshes the live lobby board. Before G176 it answered 500 on a call whose officer had dropped off, and skipped that teardown. A row with no call room behind it is ended as stale only where no other process can be holding the call: one worker and one replica are declared, or the call began longer ago than a call may last. Declared means `VOICE_RECEPTIONIST_REPLICAS=1` and a worker count of 1 in every one of `WORKERS`, `UVICORN_WORKERS` and `WEB_CONCURRENCY` that is set, with at least one set. Under the supervisord image `UVICORN_WORKERS` defaults to 2, so `WORKERS=1` alone is not enough there. Otherwise, the button answers 409 "on another server process"; on a deployment that runs several workers, try again (the request may reach the worker that has the call) or wait for the call's time limit to pass |
 | No voice/speech heard in browser, or `The AudioContext encountered an error` in console | Fixed in G249 (`PR #650`): `PCMPlayer` (`App/frontend/src/services/pcmPlayer.ts`) guards initialization with a singleton `initPromise` and `pendingChunks` FIFO queue, expands `pcm-player-worklet.js` to a 60s circular buffer (`16000 * 60`), falls back to an inline `Blob` `AudioWorklet` (and scheduled `AudioBufferSourceNode` queue) when external worklet scripts return `text/html` behind ngrok/proxies (`blob:` permitted in `script-src`/`worker-src` in `next.config.mjs`), and `useCall.ts` separates `dialToneCtxRef` from `audioCtxRef` (`getToneContext()`) |
 | Multi-turn call conversation stalls after greeting/Turn 1 or repeats *"Excuse me, did you say vat?"* | Fixed in G249 (`PR #650`): `UraSpeechTTS` (`tts.py`) enables `push_start_frame=True` and `push_stop_frames=True` so `TTSStoppedFrame` immediately triggers `BotStoppedSpeakingFrame` without the 3.0s `BOT_VAD_STOP_FALLBACK_SECS` window; `ClarifyGate.assess` (`clarify.py`) skips exact lexicon matches (`cand_term == clean_target.lower()`) and context-repaired homophones; and `UraReceptionistBrain` (`brain.py`) supersedes open clarification when the caller asks a complete new question and strips written-chat follow-up footers in `_spoken_answer` |

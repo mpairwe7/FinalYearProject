@@ -303,21 +303,45 @@ def _ready_response(value: str) -> httpx.Response:
     return httpx.Response(200, json={"status": "ready", "capabilities": {"voice_receptionist": value}})
 
 
+class _Recorder(logging.Handler):
+    """The formatted messages a logger emitted while attached."""
+
+    def __init__(self) -> None:
+        super().__init__(logging.DEBUG)
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(record.getMessage())
+
+
 def _lifespan(role: str):
-    """Run the app's lifespan in *role* with the flag on; returns the receptionist hooks it called."""
+    """Run the app's lifespan in *role* with the flag on.
+
+    Returns the receptionist hooks it called and the messages the app logged
+    while it ran.
+    """
     import app.main
     from app import receptionist
 
     gauge_refreshed = threading.Event()
-    with (
-        _env(URA_PROCESS_ROLE=role, FLAG_VOICE_RECEPTIONIST="true"),
-        patch.object(receptionist, "start") as start,
-        patch.object(receptionist, "refresh_gauge", side_effect=gauge_refreshed.set) as refresh,
-        TestClient(app.main.app),
-    ):
-        # The gauge loop is a task on the app's own loop: give it its first turn.
-        gauge_refreshed.wait(timeout=5)
-    return start, refresh
+    recorder = _Recorder()
+    app_logger = logging.getLogger(app.main.__name__)
+    level = app_logger.level
+    app_logger.setLevel(logging.INFO)
+    app_logger.addHandler(recorder)
+    try:
+        with (
+            _env(URA_PROCESS_ROLE=role, FLAG_VOICE_RECEPTIONIST="true"),
+            patch.object(receptionist, "start") as start,
+            patch.object(receptionist, "refresh_gauge", side_effect=gauge_refreshed.set) as refresh,
+            TestClient(app.main.app),
+        ):
+            # The gauge loop is a task on the app's own loop: give it its first turn.
+            gauge_refreshed.wait(timeout=5)
+    finally:
+        app_logger.removeHandler(recorder)
+        app_logger.setLevel(level)
+    return start, refresh, recorder.messages
 
 
 class ChatRoleStartupTests(unittest.TestCase):
@@ -326,9 +350,9 @@ class ChatRoleStartupTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         # One lifespan per role (each loads the app), read by the tests below.
-        cls.chat_start, cls.chat_refresh = _lifespan("chat")
-        cls.calls_start, cls.calls_refresh = _lifespan("calls")
-        cls.unset_start, cls.unset_refresh = _lifespan("")
+        cls.chat_start, cls.chat_refresh, cls.chat_log = _lifespan("chat")
+        cls.calls_start, cls.calls_refresh, cls.calls_log = _lifespan("calls")
+        cls.unset_start, cls.unset_refresh, cls.unset_log = _lifespan("")
 
     def setUp(self) -> None:
         process_role._reset_status_cache()
@@ -344,6 +368,15 @@ class ChatRoleStartupTests(unittest.TestCase):
     def test_the_receptionist_starts_as_before_with_no_role(self) -> None:
         self.unset_start.assert_called_once()
         self.unset_refresh.assert_called()
+
+    def test_a_process_with_a_role_logs_it_once_at_startup(self) -> None:
+        # Neither program's other log lines name its role, and an operator
+        # reading the container log needs to tell the two apart.
+        self.assertEqual(self.calls_log.count("Process role: calls"), 1, self.calls_log)
+        self.assertEqual(self.chat_log.count("Process role: chat"), 1, self.chat_log)
+
+    def test_a_process_with_no_role_logs_none(self) -> None:
+        self.assertEqual([m for m in self.unset_log if m.startswith("Process role")], [])
 
     def test_the_chat_process_leaves_the_availability_gauge_alone(self) -> None:
         self.chat_refresh.assert_not_called()

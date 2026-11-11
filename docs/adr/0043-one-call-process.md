@@ -37,19 +37,44 @@ restarting delete the other's live files.
 
 ## Considered Options
 
-- **One worker** (`UVICORN_WORKERS=1` in the Space image). Every request reaches
-  the one process, so nothing needs routing. It halves the chat's workers, and
-  the service owner chose to keep two ([ADR-0041](0041-receptionist-starts-safely-fails-visibly.md),
-  2026-11-11). Not taken.
-- **Share call state between processes** (durable ownership of a call, an event
-  hub that reaches every process). It is what more than one replica needs, and
-  it is a redesign of the room, the lobby, the claim timers and the audio
-  bridge. Not taken here; it stays open as G613.
-- **One call process, chosen by path.** Two uvicorn programs from the same app,
-  one of them the only owner of call state; nginx sends every call path to it
-  and the rest of the API to both. **Chosen.**
+Chosen by the service owner on 2026-11-12 from these four.
+
+1. **One call process behind nginx.** Two one-worker uvicorn programs from the
+   same app, chat on both, every call path sent to one of them, which is the
+   only owner of call state. **Chosen.**
+2. **A cross-process message bus over the container's Redis.** Call events, desk
+   commands and officer audio relayed between workers, with call ownership held
+   as leases. Rejected: far more code and far more failure modes, and the
+   officer's audio would pass through a cache that evicts and does not persist
+   (supervisord starts Redis with `--save ""`, `--appendonly no` and
+   `--maxmemory-policy allkeys-lru`, `[program:redis]` in
+   `App/deploy/cranecloud/supervisord.conf`, and the app treats it as optional,
+   falling back to in-process memory when it is unreachable). It would also
+   serve more than one replica later, which is why G613 stays open.
+3. **In-app forwarding.** Each worker on its own internal port, proxying the
+   requests and the WebSockets for a call another worker owns. Rejected: it is
+   option 1 rebuilt inside the app, with more moving parts.
+4. **One API worker** (`UVICORN_WORKERS=1` in the Space image). Every request
+   reaches the one process, so nothing needs routing. Ruled out by the owner's
+   decision of 2026-11-11 to keep two workers
+   ([ADR-0041](0041-receptionist-starts-safely-fails-visibly.md)): it halves the
+   chat's worker count.
 
 ## Decision Outcome
+
+**Chosen: option 1, one call process behind nginx**, because it meets the
+drivers with the least new code:
+
+- officer handoffs and live transcripts must work with two API processes on the
+  Space, and sending every call path to one process does that;
+- the container keeps the same memory and the same chat capacity: with
+  `UVICORN_WORKERS=2` it is the same two processes, one of them now the call
+  process, and chat is still answered by both;
+- it adds routing, not a protocol: nothing relays call state between processes,
+  so the room, the lobby, the claim timers and the audio bridge are unchanged;
+- it is the smallest change that can be verified from outside: every response
+  names its process (`X-URA-Process`), so a probe sees which process answered a
+  call path and whether its socket opens, without a staff account.
 
 **Two uvicorn programs replace the one.** `uvicorn-chat` listens on
 127.0.0.1:8081 with `URA_PROCESS_ROLE=chat` and `max(1, UVICORN_WORKERS - 1)`
@@ -118,7 +143,9 @@ app's routes and nginx's location to each other.
   does not depend on calls. No new endpoint.
 - **With either role set, every response carries `X-URA-Process: chat|calls`**,
   so a probe from outside can tell which process answered. It names the role
-  only. With no role set it is never sent.
+  only. With no role set it is never sent. Each process also logs its role once
+  at startup, at INFO (`Process role: calls`), and logs nothing while no role is
+  set, so the two programs can be told apart in one container log.
 
 **The Space declares one replica.** `App/deploy/hf-space/Dockerfile` gains
 `ENV VOICE_RECEPTIONIST_REPLICAS=1`. The call process is then the deployment's
@@ -218,7 +245,8 @@ change:
   no header and no refusal with no role or a mistyped one, and the middleware
   as the outermost layer;
 - the real lifespan: no receptionist start and no gauge in the chat role, the
-  start as before with no role;
+  start as before with no role, and the role logged once at startup (none when
+  unset);
 - `/ready` in the chat role mirroring the call process, saying "not answering"
   and "not ready" (a 503, a body that is not JSON), caching for ten seconds,
   recovering within ten seconds of the call process coming up, and costing one

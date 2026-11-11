@@ -618,6 +618,12 @@ def _log_egress_reachability() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialise and tear down the ChatModel singleton."""
+    # Which process this is, once, so the two programs of the container (G306)
+    # can be told apart in one log. Nothing is logged while no role is set.
+    role = process_role()
+    if role:
+        logger.info("Process role: %s", role)
+
     # DNS-over-HTTPS workaround — must run BEFORE any outbound HTTPS (model
     # init, retriever, Cloudflare fallback, vLLM). On Crane Cloud / RENU the pod
     # has no working upstream DNS; this routes external hostname resolution
