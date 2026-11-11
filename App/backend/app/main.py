@@ -133,7 +133,7 @@ from .speech_service import (
 from .workflows.registry import WorkflowRegistry
 
 from .logging_config import REQUEST_ID, install_logging
-from .process_role import ProcessRoleMiddleware
+from .process_role import ProcessRoleMiddleware, calls_process_status, process_role
 
 logger = logging.getLogger(__name__)
 # One structured handler on the root logger: the API's, uvicorn's and every
@@ -741,8 +741,10 @@ async def lifespan(app: FastAPI):
         app.state.offline_rag = None
 
     # Voice receptionist. In production its G36 gate is checked here, by
-    # receptionist.start(), not by _validate_production_env().
-    if _flags.is_enabled("voice_receptionist"):
+    # receptionist.start(), not by _validate_production_env(). The chat process
+    # leaves it to the call process (G306): its start ends every call row a
+    # previous process left live, which here would end the call process's calls.
+    if _flags.is_enabled("voice_receptionist") and process_role() != "chat":
         # An optional feature that cannot start does not stop the API (ADR-0041,
         # G373): the chat keeps serving, call sockets are refused, and /ready
         # and the `receptionist_available` gauge say why. This block used to
@@ -867,7 +869,13 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 return
 
-    gauge_task = asyncio.create_task(_receptionist_gauge_loop(), name="receptionist-gauge")
+    # The chat process does not set the gauge: its alert reflects the process
+    # that takes calls (G306).
+    gauge_task = (
+        asyncio.create_task(_receptionist_gauge_loop(), name="receptionist-gauge")
+        if process_role() != "chat"
+        else None
+    )
     try:
         yield
     finally:
@@ -1257,6 +1265,10 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
 
 def _receptionist_status() -> str:
     try:
+        if process_role() == "chat":
+            # This process never starts the receptionist; the call process's
+            # own value is the answer (G306).
+            return calls_process_status()
         from . import receptionist
 
         return receptionist.status()

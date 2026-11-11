@@ -14,7 +14,9 @@ import json
 import logging
 import os
 import re
+import time
 
+import httpx
 from starlette.datastructures import MutableHeaders
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -79,6 +81,61 @@ def calls_process_url() -> str:
     """Where the chat process reaches the call process, without a trailing slash."""
     raw = os.getenv(CALLS_URL_ENV, "").strip().rstrip("/")
     return raw or DEFAULT_CALLS_PROCESS_URL
+
+
+#: How long ``/ready`` waits for the call process, and how long it keeps what it heard.
+CALLS_STATUS_TIMEOUT_S = 1.0
+CALLS_STATUS_TTL_S = 10.0
+
+CALLS_NOT_ANSWERING = "unavailable: the call process is not answering"
+CALLS_NOT_READY = "unavailable: the call process is not ready"
+
+#: ``(value, expires_at)`` on the ``time.monotonic()`` clock; ``None`` until the first ask.
+_status_cache: tuple[str, float] | None = None
+
+
+def _reset_status_cache() -> None:
+    """Forget the last answer from the call process (tests)."""
+    global _status_cache
+    _status_cache = None
+
+
+def calls_process_status(*, timeout: float = CALLS_STATUS_TIMEOUT_S, ttl: float = CALLS_STATUS_TTL_S) -> str:
+    """The call process's own ``capabilities.voice_receptionist``, for the chat process's ``/ready``.
+
+    The chat process never starts the receptionist, so what ``/ready`` says about
+    calls is whatever the call process says on its own ``/ready``. The probe is
+    polled often and the call process may be down, so every answer, "not
+    answering" included, is kept for *ttl* seconds: a down call process costs
+    one *timeout* per *ttl*, not one per probe, and a chat process that booted
+    first reports it again within *ttl* of the call process coming up.
+
+    ``unavailable: the call process is not answering`` when nothing answers in
+    time; ``unavailable: the call process is not ready`` when something answers
+    that is not a ``/ready`` body (a 503, HTML from a proxy, no such field).
+    """
+    global _status_cache
+    now = time.monotonic()
+    cached = _status_cache
+    if cached is not None and now < cached[1]:
+        return cached[0]
+    value = _ask_call_process(timeout)
+    _status_cache = (value, now + ttl)
+    return value
+
+
+def _ask_call_process(timeout: float) -> str:
+    try:
+        response = httpx.get(f"{calls_process_url()}/ready", timeout=timeout)
+    except httpx.HTTPError:
+        return CALLS_NOT_ANSWERING
+    if response.status_code != 200:
+        return CALLS_NOT_READY
+    try:
+        value = response.json()["capabilities"]["voice_receptionist"]
+    except (ValueError, KeyError, TypeError):  # not JSON, or not the shape /ready has
+        return CALLS_NOT_READY
+    return value if isinstance(value, str) else CALLS_NOT_READY
 
 
 #: The ways a call request can reach the chat process: the ASGI scope types,

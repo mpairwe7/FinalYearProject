@@ -7,12 +7,17 @@ in-memory call state. These tests cover the vocabulary that routing is built on.
 
 from __future__ import annotations
 
+import http.server
 import logging
 import os
 import re
+import socket
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
+import httpx
 from app import process_role
 from app.analytics import MetricsStore, metrics
 from starlette.routing import Route, WebSocketRoute
@@ -286,6 +291,276 @@ class ChatRoleRefusalTests(unittest.TestCase):
 
         stack = app.main.app.user_middleware
         self.assertIs(stack[0].cls, process_role.ProcessRoleMiddleware)
+
+
+CALLS_READY = "http://127.0.0.1:8082/ready"
+NOT_ANSWERING = "unavailable: the call process is not answering"
+NOT_READY = "unavailable: the call process is not ready"
+
+
+def _ready_response(value: str) -> httpx.Response:
+    """What the call process's ``/ready`` says when it is up and reports *value*."""
+    return httpx.Response(200, json={"status": "ready", "capabilities": {"voice_receptionist": value}})
+
+
+def _lifespan(role: str):
+    """Run the app's lifespan in *role* with the flag on; returns the receptionist hooks it called."""
+    import app.main
+    from app import receptionist
+
+    gauge_refreshed = threading.Event()
+    with (
+        _env(URA_PROCESS_ROLE=role, FLAG_VOICE_RECEPTIONIST="true"),
+        patch.object(receptionist, "start") as start,
+        patch.object(receptionist, "refresh_gauge", side_effect=gauge_refreshed.set) as refresh,
+        TestClient(app.main.app),
+    ):
+        # The gauge loop is a task on the app's own loop: give it its first turn.
+        gauge_refreshed.wait(timeout=5)
+    return start, refresh
+
+
+class ChatRoleStartupTests(unittest.TestCase):
+    """The chat process leaves calls, and their availability, to the call process (G306)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        # One lifespan per role (each loads the app), read by the tests below.
+        cls.chat_start, cls.chat_refresh = _lifespan("chat")
+        cls.calls_start, cls.calls_refresh = _lifespan("calls")
+        cls.unset_start, cls.unset_refresh = _lifespan("")
+
+    def setUp(self) -> None:
+        process_role._reset_status_cache()
+        self.addCleanup(process_role._reset_status_cache)
+
+    # -- startup -----------------------------------------------------------
+    def test_the_chat_process_does_not_start_the_receptionist(self) -> None:
+        # Its start ends every call row a previous process left live: in the chat
+        # process that would end the call process's calls at every chat restart.
+        self.chat_start.assert_not_called()
+        self.calls_start.assert_called_once()
+
+    def test_the_receptionist_starts_as_before_with_no_role(self) -> None:
+        self.unset_start.assert_called_once()
+        self.unset_refresh.assert_called()
+
+    def test_the_chat_process_leaves_the_availability_gauge_alone(self) -> None:
+        self.chat_refresh.assert_not_called()
+        self.calls_refresh.assert_called()
+
+    def test_a_scrape_of_the_chat_process_leaves_the_availability_gauge_alone(self) -> None:
+        # The gauge is also refreshed at every /metrics scrape. This process never
+        # started the receptionist, so it would report "unavailable: switched on
+        # after the API started" and page for calls the call process is taking.
+        from app import receptionist
+
+        with _env(URA_PROCESS_ROLE="chat", FLAG_VOICE_RECEPTIONIST="true"), patch.object(
+            receptionist, "_gauge"
+        ) as gauge:
+            metrics.to_prometheus()
+        gauge.assert_not_called()
+        with _env(URA_PROCESS_ROLE="calls", FLAG_VOICE_RECEPTIONIST="true"), patch.object(
+            receptionist, "_gauge"
+        ) as gauge:
+            metrics.to_prometheus()
+        gauge.assert_called_once()
+
+    # -- /ready ------------------------------------------------------------
+    def test_ready_mirrors_the_call_process(self) -> None:
+        import app.main
+
+        for value in ("ready", "off", "unavailable: LIVEKIT_URL must be a secure wss:// URL"):
+            process_role._reset_status_cache()
+            with (
+                self.subTest(value=value),
+                _env(URA_PROCESS_ROLE="chat"),
+                patch.object(httpx, "get", return_value=_ready_response(value)) as get,
+            ):
+                self.assertEqual(app.main._receptionist_status(), value)
+                get.assert_called_once_with(CALLS_READY, timeout=1.0)
+
+    def test_ready_in_the_calls_role_is_the_receptionists_own_status(self) -> None:
+        import app.main
+
+        for role in ("calls", ""):
+            with (
+                self.subTest(role=role),
+                _env(URA_PROCESS_ROLE=role),
+                patch.object(httpx, "get") as get,
+                patch("app.receptionist.status", return_value="off"),
+            ):
+                self.assertEqual(app.main._receptionist_status(), "off")
+                get.assert_not_called()
+
+    def test_ready_in_the_chat_role_is_not_the_receptionists_status(self) -> None:
+        import app.main
+
+        with (
+            _env(URA_PROCESS_ROLE="chat"),
+            patch.object(httpx, "get", return_value=_ready_response("ready")),
+            patch("app.receptionist.status", return_value="off"),
+        ):
+            self.assertEqual(app.main._receptionist_status(), "ready")
+
+    def test_ready_follows_the_call_process_address(self) -> None:
+        with (
+            _env(URA_PROCESS_ROLE="chat", URA_CALLS_PROCESS_URL="http://calls.internal:9000/"),
+            patch.object(httpx, "get", return_value=_ready_response("ready")) as get,
+        ):
+            process_role.calls_process_status()
+        get.assert_called_once_with("http://calls.internal:9000/ready", timeout=1.0)
+
+    def test_ready_says_when_the_call_process_is_not_answering(self) -> None:
+        for error in (
+            httpx.ConnectError("connection refused"),
+            httpx.ConnectTimeout("timed out"),
+            httpx.ReadTimeout("timed out"),
+            httpx.RemoteProtocolError("server disconnected"),
+        ):
+            process_role._reset_status_cache()
+            with (
+                self.subTest(error=type(error).__name__),
+                patch.object(httpx, "get", side_effect=error) as get,
+            ):
+                self.assertEqual(process_role.calls_process_status(), NOT_ANSWERING)
+                self.assertEqual(get.call_args.kwargs["timeout"], 1.0)
+
+    def test_ready_says_when_the_call_process_is_not_ready(self) -> None:
+        request = httpx.Request("GET", CALLS_READY)
+        for label, response in (
+            ("503", httpx.Response(503, json={"detail": "starting"}, request=request)),
+            ("500", httpx.Response(500, text="boom", request=request)),
+            ("html", httpx.Response(200, text="<html>bad gateway</html>", request=request)),
+            ("empty", httpx.Response(200, content=b"", request=request)),
+            ("list", httpx.Response(200, json=["ready"], request=request)),
+            ("no capabilities", httpx.Response(200, json={"status": "ready"}, request=request)),
+            ("capabilities not a map", httpx.Response(200, json={"capabilities": "ready"}, request=request)),
+            ("no voice field", httpx.Response(200, json={"capabilities": {}}, request=request)),
+            ("voice not text", httpx.Response(200, json={"capabilities": {"voice_receptionist": 1}}, request=request)),
+        ):
+            process_role._reset_status_cache()
+            with self.subTest(label), patch.object(httpx, "get", return_value=response):
+                self.assertEqual(process_role.calls_process_status(), NOT_READY)
+
+    def test_the_answer_is_cached_for_ten_seconds(self) -> None:
+        with (
+            patch.object(process_role.time, "monotonic", return_value=1000.0) as clock,
+            patch.object(httpx, "get", return_value=_ready_response("ready")) as get,
+        ):
+            self.assertEqual(process_role.calls_process_status(), "ready")
+            clock.return_value = 1009.9
+            self.assertEqual(process_role.calls_process_status(), "ready")
+            self.assertEqual(get.call_count, 1)
+            clock.return_value = 1010.0
+            get.return_value = _ready_response("off")
+            self.assertEqual(process_role.calls_process_status(), "off")
+            self.assertEqual(get.call_count, 2)
+
+    def test_the_ttl_and_timeout_can_be_given(self) -> None:
+        with (
+            patch.object(process_role.time, "monotonic", return_value=50.0) as clock,
+            patch.object(httpx, "get", return_value=_ready_response("ready")) as get,
+        ):
+            process_role.calls_process_status(timeout=0.25, ttl=2.0)
+            clock.return_value = 51.9
+            process_role.calls_process_status(timeout=0.25, ttl=2.0)
+            self.assertEqual(get.call_count, 1)
+            clock.return_value = 52.0
+            process_role.calls_process_status(timeout=0.25, ttl=2.0)
+            self.assertEqual(get.call_count, 2)
+            self.assertEqual(get.call_args.kwargs["timeout"], 0.25)
+
+    def test_an_answer_of_not_answering_is_cached_too(self) -> None:
+        # While the call process is down every probe would otherwise wait the full timeout.
+        with (
+            patch.object(process_role.time, "monotonic", return_value=0.0),
+            patch.object(httpx, "get", side_effect=httpx.ConnectError("refused")) as get,
+        ):
+            for _ in range(5):
+                self.assertEqual(process_role.calls_process_status(), NOT_ANSWERING)
+        self.assertEqual(get.call_count, 1)
+
+    def test_the_cache_is_dropped_on_request(self) -> None:
+        with patch.object(httpx, "get", return_value=_ready_response("ready")) as get:
+            process_role.calls_process_status()
+            process_role._reset_status_cache()
+            process_role.calls_process_status()
+        self.assertEqual(get.call_count, 2)
+
+    def test_the_chat_process_booted_before_the_call_process_is_up(self) -> None:
+        # Not answering at boot; answering again within ten seconds of the call
+        # process coming up, and no probe ever waits longer than the timeout.
+        with (
+            patch.object(process_role.time, "monotonic", return_value=0.0) as clock,
+            patch.object(httpx, "get", side_effect=httpx.ConnectError("refused")) as get,
+        ):
+            self.assertEqual(process_role.calls_process_status(), NOT_ANSWERING)
+            clock.return_value = 3.0  # the call process comes up here
+            get.side_effect = None
+            get.return_value = _ready_response("ready")
+            self.assertEqual(process_role.calls_process_status(), NOT_ANSWERING)  # still within the cache
+            clock.return_value = 10.0
+            self.assertEqual(process_role.calls_process_status(), "ready")
+            self.assertEqual({call.kwargs["timeout"] for call in get.call_args_list}, {1.0})
+
+
+class _ReadyHandler(http.server.BaseHTTPRequestHandler):
+    status = 200
+    body = b'{"capabilities": {"voice_receptionist": "ready"}}'
+
+    def do_GET(self) -> None:  # noqa: N802 - the http.server hook
+        self.send_response(self.status)
+        self.send_header("Content-Length", str(len(self.body)))
+        self.end_headers()
+        self.wfile.write(self.body)
+
+    def log_message(self, *args: object) -> None:  # keep the test output quiet
+        pass
+
+
+class CallProcessOverTheWireTests(unittest.TestCase):
+    """``calls_process_status`` against real sockets, not a patched ``httpx``."""
+
+    def setUp(self) -> None:
+        process_role._reset_status_cache()
+        self.addCleanup(process_role._reset_status_cache)
+
+    def _serve(self, **attributes: object) -> str:
+        handler = type("Handler", (_ReadyHandler,), attributes)
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return f"http://127.0.0.1:{server.server_address[1]}"
+
+    def test_a_call_process_that_is_up_is_mirrored(self) -> None:
+        with _env(URA_CALLS_PROCESS_URL=self._serve()):
+            self.assertEqual(process_role.calls_process_status(), "ready")
+
+    def test_a_call_process_that_answers_503_or_not_json_is_not_ready(self) -> None:
+        for attributes in ({"status": 503}, {"body": b"<html>not json</html>"}):
+            process_role._reset_status_cache()
+            with self.subTest(**attributes), _env(URA_CALLS_PROCESS_URL=self._serve(**attributes)):
+                self.assertEqual(process_role.calls_process_status(), NOT_READY)
+
+    def test_nothing_listening_is_not_answering(self) -> None:
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        with _env(URA_CALLS_PROCESS_URL=f"http://127.0.0.1:{port}"):
+            self.assertEqual(process_role.calls_process_status(), NOT_ANSWERING)
+
+    def test_a_call_process_that_accepts_and_never_answers_costs_one_timeout(self) -> None:
+        with socket.socket() as silent:
+            silent.bind(("127.0.0.1", 0))
+            silent.listen(1)  # the kernel completes the handshake; nobody reads
+            with _env(URA_CALLS_PROCESS_URL=f"http://127.0.0.1:{silent.getsockname()[1]}"):
+                started = time.monotonic()
+                status = process_role.calls_process_status(timeout=0.3)
+                elapsed = time.monotonic() - started
+        self.assertEqual(status, NOT_ANSWERING)
+        self.assertLess(elapsed, 1.5)
 
 
 if __name__ == "__main__":
