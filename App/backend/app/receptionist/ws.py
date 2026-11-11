@@ -952,6 +952,9 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
         # A reconnecting LiveKit Room normally restores the same participant
         # without opening a second control socket. The transport event handler
         # re-bridges it; a fresh claimant's first connection is bridged here.
+        # The room keeps this socket so it can say the call ended (CallRoom.end)
+        # before the media room is closed under the officer.
+        room.officer_control = websocket
         try:
             if room.state.mode != "bridged":
                 try:
@@ -988,6 +991,8 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
         except Exception:
             logger.debug("Officer LiveKit control connection closed", exc_info=True)
         finally:
+            if room.officer_control is websocket:
+                room.officer_control = None
             room.state.livekit_officer_route_active = False
             if room.state.mode == "bridged":
                 await desk.handle_officer_disconnect(room, user_id, speech_model)

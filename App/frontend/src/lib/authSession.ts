@@ -108,6 +108,26 @@ export function isJwtExpired(token: string, skewSeconds = 10): boolean {
   return false;
 }
 
+/**
+ * The signed-in account's id (the token's `sub`), or '' for a key that is not a JWT.
+ *
+ * For display only: "this call was passed to you". The server decides who may
+ * act from the token it verifies, never from this.
+ */
+export function getAuthSubject(): string {
+  const token = getAuthToken();
+  if (!looksLikeJwt(token)) return '';
+  try {
+    const payloadPart = token.split('.')[1];
+    const base64 = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(base64.length + (4 - (base64.length % 4)) % 4, '=');
+    const parsed = JSON.parse(atob(padded));
+    return typeof parsed.sub === 'string' ? parsed.sub : '';
+  } catch {
+    return '';
+  }
+}
+
 /** Handle 401 Unauthorized by evicting stale credentials across all tabs. */
 export function handleUnauthorized(): void {
   if (typeof window === 'undefined') return;

@@ -1,5 +1,15 @@
 # Runbook — escalation policy and structured text handoffs
 
+Call handoff update (2026-11-11, ADR-0039): a call transfer's ticket is created
+in the caller's tenant (it went to `default`, G571), and is written off the
+event loop, so a non-English transfer no longer stalls other live calls while
+the question is translated (G577). The call's timeout and error lines no longer
+say an officer is coming; the transfer does, after it has checked `ticket_queue`
+and staffing (G572), and with the queue off the call offers no officer at all.
+A waiting caller in crisis is raised to urgent on the officers' screens even
+when the row cannot be written (G570).
+[Review](../plans/receptionist-assurance-2026-11-11.md).
+
 Call wrap-up update (2026-10-30, ADR-0020): ticket actions honor `ticket_queue`
 before saving the outcome (409 when unavailable; 400 for an unknown action).
 Created tickets retain the call's tenant, conversation and locale. Reconnect

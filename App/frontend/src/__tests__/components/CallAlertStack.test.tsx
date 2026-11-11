@@ -6,6 +6,13 @@ import { transferReasonLabel } from '@/components/staff/calls/console/CallAlertT
 import { callsApi, ClaimConflictError } from '@/services/callsApi';
 import { resetSessionForTests } from '@/services/officerCallSession';
 import { useCallConsoleStore } from '@/store/useCallConsoleStore';
+import { clearAuthToken, setAuthToken } from '@/lib/authSession';
+
+/** A token whose `sub` is *userId*. Unsigned: the console only reads who it says it is. */
+function signInAs(userId: string): void {
+  const part = (value: object) => btoa(JSON.stringify(value)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  setAuthToken(`${part({ alg: 'none' })}.${part({ sub: userId, exp: Math.floor(Date.now() / 1000) + 600 })}.sig`);
+}
 
 const waiting = (id: string, extra: Record<string, unknown> = {}) =>
   useCallConsoleStore.getState().applyLobbyEvent({
@@ -21,6 +28,7 @@ describe('CallAlertStack', () => {
   });
   afterEach(() => {
     resetSessionForTests();
+    clearAuthToken();
     vi.restoreAllMocks();
   });
 
@@ -62,6 +70,44 @@ describe('CallAlertStack', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Take call' }));
     });
     expect(screen.getByText('Taken by Officer Nakato')).toBeInTheDocument();
+  });
+
+  it('does not ring for a call a colleague was named to take', () => {
+    signInAs('mukasa');
+    waiting('c1', {
+      reserved_for: 'nakato', reserved_name: 'Officer Nakato', reserved_until: Date.now() / 1000 + 20,
+      from_officer: 'Officer Okello',
+    });
+    render(<CallAlertStack canTake onPreview={vi.fn()} />);
+    expect(screen.queryByText('Caller waiting for an officer')).not.toBeInTheDocument();
+    // Open to everyone once the named officer has not taken it.
+    act(() =>
+      useCallConsoleStore.getState().applyLobbyEvent({ type: 'call.unreserved', data: { call_id: 'c1', reason: 'not_taken' } }),
+    );
+    expect(screen.getByText('Caller waiting for an officer')).toBeInTheDocument();
+  });
+
+  it('tells the named officer the call was passed to them, and by whom', () => {
+    signInAs('nakato');
+    waiting('c1', {
+      reserved_for: 'nakato', reserved_name: 'Officer Nakato', reserved_until: Date.now() / 1000 + 20,
+      from_officer: 'Officer Okello',
+    });
+    render(<CallAlertStack canTake onPreview={vi.fn()} />);
+    expect(screen.getByText('Passed to you by Officer Okello')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Take call' })).toBeInTheDocument();
+  });
+
+  it('says a call is reserved when that is why the claim was refused', async () => {
+    vi.spyOn(callsApi, 'claimCall').mockRejectedValue(
+      new ClaimConflictError('This call is reserved for another officer', '', 'Officer Nakato', 'nakato'),
+    );
+    waiting('c1');
+    render(<CallAlertStack canTake onPreview={vi.fn()} />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Take call' }));
+    });
+    expect(screen.getByText('Reserved for Officer Nakato')).toBeInTheDocument();
   });
 
   it('turns into "Taken by …" when the lobby says someone claimed it', () => {

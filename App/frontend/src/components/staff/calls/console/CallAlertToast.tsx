@@ -27,6 +27,7 @@ export function CallAlertToast({
   busy,
   error,
   canTake,
+  passedToMe = false,
   onTake,
   onPreview,
   onDismiss,
@@ -35,6 +36,8 @@ export function CallAlertToast({
   busy: boolean;
   error: string | null;
   canTake: boolean;
+  /** A colleague named this officer to take the call: it is theirs first. */
+  passedToMe?: boolean;
   onTake: () => void;
   onPreview: () => void;
   onDismiss: () => void;
@@ -53,8 +56,11 @@ export function CallAlertToast({
       <div className="cc-alert-meta">
         {callLanguageName(call.language)} · {transferReasonLabel(call.reason)}
         {call.ticket_ref && ` · Ticket ${call.ticket_ref.slice(0, 8)}`}
-        {call.attempt > 1 && ` · Passed on by an officer`}
+        {call.attempt > 1 && !passedToMe && ` · Passed on by an officer`}
       </div>
+      {passedToMe && (
+        <div className="cc-alert-meta">Passed to you by {call.from_officer || 'a colleague'}</div>
+      )}
       {error && <div className="cc-alert-error">{error}</div>}
       <div className="cc-alert-actions">
         {canTake && (

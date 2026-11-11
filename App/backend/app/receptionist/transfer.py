@@ -96,11 +96,16 @@ def raise_waiting_priority(room: Any, *, reason: str, priority: str = "urgent") 
         return False
     state.priority = priority
     state.transfer_reason = reason
-    update_call(room.call_id, priority=priority, transfer_reason=reason)
-    if state.ticket_id:
-        _update_ticket_priority(state.ticket_id, priority)
+    # Officers are told first. The row and the ticket are the record of it:
+    # a caller in crisis is not left at normal priority because a write failed.
     hub.publish_lobby("call.priority_raised", {"call_id": room.call_id, "priority": priority, "reason": reason})
     hub.publish_call(room.call_id, "priority", {"priority": priority, "reason": reason})
+    try:
+        update_call(room.call_id, priority=priority, transfer_reason=reason)
+    except Exception:
+        logger.warning("Could not record call %s as %s (%s)", room.call_id, priority, reason, exc_info=True)
+    if state.ticket_id:
+        _update_ticket_priority(state.ticket_id, priority)
     return True
 
 
@@ -163,6 +168,60 @@ def queue_position(room: Any) -> int:
     return ahead + 1
 
 
+def create_transfer_ticket(
+    room: Any,
+    chat_model: Any,
+    reason: str,
+    *,
+    ticket_id: str | None = None,
+    handoff: dict[str, Any] | None = None,
+    question: str | None = None,
+    priority: str = "",
+) -> tuple[str, dict[str, Any] | None]:
+    """The ticket for a transfer and its handoff packet: ``(ticket id or "", packet or None)``.
+
+    Reuses the ticket the call already has. Creating one translates the
+    caller's question and transcript for the officer, which is slow and
+    blocking, so the brain runs this in a thread (:func:`open_transfer` then
+    takes the result) and it changes nothing on the room: the call's state
+    stays with the event loop.
+    """
+    state = room.state
+    tid = ticket_id or state.ticket_id or ""
+    packet: dict[str, Any] | None = handoff if isinstance(handoff, dict) else None
+    if tid or chat_model is None:
+        return tid, packet
+    last_q = question or (
+        state.clarify.original_question if state.clarify else "Taxpayer assistance requested on call"
+    )
+    try:
+        built = handoff or chat_model._build_handoff_packet(message=last_q, reason=reason)
+        if isinstance(built, dict):
+            # Officers see "Luganda caller" before they pick the call up.
+            packet = {**built, "language": state.locale}
+            if priority in PRIORITIES:
+                packet["priority"] = priority
+        tid = chat_model._maybe_create_ticket(
+            reason=reason,
+            user_query=last_q,
+            bot_reply="Connecting to officer...",
+            session_id=room.call_id,
+            conversation_id=state.conversation_id,
+            priority=packet.get("priority", "normal") if packet else "normal",
+            handoff=packet,
+            user_id=state.user_id,
+            locale=state.locale,
+            modality="voice",
+            # A transfer runs outside any chat turn, so there is no active
+            # tenant to fall back on: without this the ticket went to
+            # "default" and the caller's own officers never saw it.
+            tenant_id=state.tenant_id or "default",
+        ) or ""
+    except Exception:
+        logger.exception("Failed creating ticket during transfer for call %s", room.call_id)
+    return tid, packet
+
+
 def open_transfer(
     room: Any,
     chat_model: Any,
@@ -184,33 +243,9 @@ def open_transfer(
     to the caller's socket through its own pipeline.
     """
     state = room.state
-    tid = ticket_id or state.ticket_id or ""
-    packet: dict[str, Any] | None = handoff if isinstance(handoff, dict) else None
-    if not tid and chat_model is not None:
-        last_q = question or (
-            state.clarify.original_question if state.clarify else "Taxpayer assistance requested on call"
-        )
-        try:
-            built = handoff or chat_model._build_handoff_packet(message=last_q, reason=reason)
-            if isinstance(built, dict):
-                # Officers see "Luganda caller" before they pick the call up.
-                packet = {**built, "language": state.locale}
-                if priority in PRIORITIES:
-                    packet["priority"] = priority
-            tid = chat_model._maybe_create_ticket(
-                reason=reason,
-                user_query=last_q,
-                bot_reply="Connecting to officer...",
-                session_id=room.call_id,
-                conversation_id=state.conversation_id,
-                priority=packet.get("priority", "normal") if packet else "normal",
-                handoff=packet,
-                user_id=state.user_id,
-                locale=state.locale,
-                modality="voice",
-            ) or ""
-        except Exception:
-            logger.exception("Failed creating ticket during transfer for call %s", room.call_id)
+    tid, packet = create_transfer_ticket(
+        room, chat_model, reason, ticket_id=ticket_id, handoff=handoff, question=question, priority=priority
+    )
 
     topic, packet_priority = _topic_and_priority(packet)
     # A reused ticket has no packet to carry the override.

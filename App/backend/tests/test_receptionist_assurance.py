@@ -2,6 +2,7 @@
 
 import asyncio
 import unittest
+import uuid
 from unittest.mock import AsyncMock, patch
 
 from app.receptionist import desk
@@ -308,8 +309,10 @@ class AssuranceTests(unittest.IsolatedAsyncioTestCase):
 
         db.init_db()
         init_receptionist_schema()
-        create_call("call_draft_race", status="ended")
-        update_call("call_draft_race", outcome="resolved", wrapup_note="Officer verified note", wrapup_at=100.0)
-        wrote = save_draft_wrapup_if_empty("call_draft_race", "Generated draft note")
+        # A fresh id each run: a fixed one failed on any re-run against the same database.
+        call_id = f"call_draft_race_{uuid.uuid4().hex[:8]}"
+        create_call(call_id, status="ended")
+        update_call(call_id, outcome="resolved", wrapup_note="Officer verified note", wrapup_at=100.0)
+        wrote = save_draft_wrapup_if_empty(call_id, "Generated draft note")
         self.assertFalse(wrote)
-        self.assertEqual(get_call("call_draft_race")["wrapup_note"], "Officer verified note")
+        self.assertEqual(get_call(call_id)["wrapup_note"], "Officer verified note")

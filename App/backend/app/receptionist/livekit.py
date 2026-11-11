@@ -7,6 +7,7 @@ URA authentication/claim checks have succeeded.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import os
@@ -15,6 +16,12 @@ from datetime import timedelta
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+#: How long a room-administration call (revoke a participant, close a room) may
+#: take. These run while a call's desk lock is held, so an unreachable media
+#: service must fail the one action rather than hold claim, hold and end for
+#: that call until the client library's own default expires.
+ADMIN_DEADLINE_S = 5.0
 
 
 def configured() -> bool:
@@ -169,40 +176,46 @@ async def revoke_participant(room_name: str, identity: str) -> None:
     except ImportError as exc:
         raise RuntimeError("Install the receptionist LiveKit dependencies") from exc
 
-    async with api.LiveKitAPI() as client:
-        update_error: Exception | None = None
-        try:
-            await client.room.update_participant(
-                api.UpdateParticipantRequest(
-                    room=room_name,
-                    identity=identity,
-                    permission=api.ParticipantPermission(
-                        can_publish=False,
-                        can_subscribe=False,
-                        can_publish_data=False,
-                    ),
-                ),
-            )
-        except Exception as exc:
-            if _is_participant_absent_error(exc):
-                return
-            update_error = exc
-        try:
-            await client.room.remove_participant(
-                api.RoomParticipantIdentity(room=room_name, identity=identity)
-            )
-        except Exception as remove_exc:
-            if _is_participant_absent_error(remove_exc):
-                return
-            if update_error is not None:
-                raise RuntimeError(
-                    "LiveKit participant permissions and removal both failed"
-                ) from update_error
-            # The successful permission change has already disabled media.
-            logger.warning(
-                "LiveKit participant %s remains connected without media permission",
-                identity,
-            )
+    try:
+        async with asyncio.timeout(ADMIN_DEADLINE_S):
+            async with api.LiveKitAPI() as client:
+                update_error: Exception | None = None
+                try:
+                    await client.room.update_participant(
+                        api.UpdateParticipantRequest(
+                            room=room_name,
+                            identity=identity,
+                            permission=api.ParticipantPermission(
+                                can_publish=False,
+                                can_subscribe=False,
+                                can_publish_data=False,
+                            ),
+                        ),
+                    )
+                except Exception as exc:
+                    if _is_participant_absent_error(exc):
+                        return
+                    update_error = exc
+                try:
+                    await client.room.remove_participant(
+                        api.RoomParticipantIdentity(room=room_name, identity=identity)
+                    )
+                except Exception as remove_exc:
+                    if _is_participant_absent_error(remove_exc):
+                        return
+                    if update_error is not None:
+                        raise RuntimeError(
+                            "LiveKit participant permissions and removal both failed"
+                        ) from update_error
+                    # The successful permission change has already disabled media.
+                    logger.warning(
+                        "LiveKit participant %s remains connected without media permission",
+                        log_ref(identity),
+                    )
+    except TimeoutError as exc:
+        raise RuntimeError(
+            f"LiveKit did not confirm the participant's removal within {ADMIN_DEADLINE_S:g}s"
+        ) from exc
 
 
 async def close_room(room_name: str) -> None:
@@ -214,8 +227,14 @@ async def close_room(room_name: str) -> None:
     except ImportError as exc:
         raise RuntimeError("Install the receptionist LiveKit dependencies") from exc
 
-    async with api.LiveKitAPI() as client:
-        await client.room.delete_room(api.DeleteRoomRequest(room=room_name))
+    try:
+        async with asyncio.timeout(ADMIN_DEADLINE_S):
+            async with api.LiveKitAPI() as client:
+                await client.room.delete_room(api.DeleteRoomRequest(room=room_name))
+    except TimeoutError as exc:
+        raise RuntimeError(
+            f"LiveKit did not confirm the room was closed within {ADMIN_DEADLINE_S:g}s"
+        ) from exc
 
 
 def room_name(call_id: str) -> str:

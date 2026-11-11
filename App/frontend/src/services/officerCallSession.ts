@@ -30,6 +30,8 @@ let liveKitSession: LiveKitCallSession | null = null;
 let transferInProgress = false;
 let mediaDisconnectedDuringTransfer = false;
 let muted = false;
+/** The server said this call ended (the caller hung up, the ceiling was reached). */
+let callEnded = false;
 let current: ActiveCall | null = null;
 
 function publish(next: ActiveCall | null): void {
@@ -89,6 +91,20 @@ function teardownAudio(): void {
   resetAudioLevels();
 }
 
+/**
+ * The call ended under an officer who was on it: they owe a wrap-up.
+ *
+ * A caller hanging up is how most calls end. It used to look like a dropped
+ * connection ("The call ended."), so the wrap-up was never shown and the
+ * outcome, the ticket action and the caller's satisfaction went unrecorded.
+ */
+function wrapUpIfCallEnded(): boolean {
+  if (!callEnded || !current || (current.state !== 'bridged' && current.state !== 'reconnecting')) return false;
+  teardownAudio();
+  update({ state: 'wrap_up', error: null });
+  return true;
+}
+
 function finish(error: string | null = null): void {
   teardownAudio();
   muted = false;
@@ -130,6 +146,7 @@ export async function takeCall(callId: string): Promise<void> {
 }
 
 async function joinCall(callId: string): Promise<void> {
+  callEnded = false;
   update({ state: 'connecting' });
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const socket = new WebSocket(
@@ -147,6 +164,11 @@ async function joinCall(callId: string): Promise<void> {
       try {
         const message = JSON.parse(event.data);
         if (ws !== socket) return;
+        if (message?.type === 'status' && message.status === 'ended') {
+          // Sent before the socket closes and before the media room is deleted.
+          callEnded = true;
+          return;
+        }
         if (message?.type === 'livekit_ready') {
           // One media session per call leg: a repeated `livekit_ready` replaces
           // the old room connection instead of leaving it open alongside.
@@ -177,6 +199,7 @@ async function joinCall(callId: string): Promise<void> {
                   mediaDisconnectedDuringTransfer = true;
                   return;
                 }
+                if (wrapUpIfCallEnded()) return;
                 finish('Call media disconnected.');
               }
             },
@@ -218,6 +241,8 @@ async function joinCall(callId: string): Promise<void> {
       update({ state: 'wrap_up' });
     } else if (current?.state === 'wrap_up') {
       /* already in wrap-up */
+    } else if (wrapUpIfCallEnded()) {
+      /* the caller hung up: the officer wraps up */
     } else if (event.code === 4409) {
       finish('Another officer has this call.');
     } else if (current?.state === 'connecting') {
@@ -301,7 +326,17 @@ export async function endCall(): Promise<void> {
   try {
     await callsApi.endCall(callId);
   } catch (err) {
-    update({ state: 'bridged', error: (err as Error).message || 'Could not end the call' });
+    // The caller may have hung up while End was on its way: the bridge is
+    // closed and the officer is already in wrap-up. Putting them back on a
+    // call with no socket and no audio left End refusing forever.
+    // (Read through sessionState(): the socket's close handler may have moved
+    // the call on while the request was in flight.)
+    if (sessionState() === 'ending' && ws) {
+      update({ state: 'bridged', error: (err as Error).message || 'Could not end the call' });
+    } else if (sessionState() === 'ending') {
+      teardownAudio();
+      update({ state: 'wrap_up' });
+    }
     return;
   }
   // If the server socket closed already:
@@ -338,5 +373,6 @@ export function resetSessionForTests(): void {
   transferInProgress = false;
   mediaDisconnectedDuringTransfer = false;
   muted = false;
+  callEnded = false;
   publish(null);
 }

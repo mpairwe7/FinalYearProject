@@ -269,7 +269,12 @@ class LanguageRouter:
         await self.brain.say_filler()
         text, words = await self._transcribe(pcm, target, decoded)
         if not text:
+            # This turn is the router's: the brain dropped its old-language
+            # transcript when the switch was decided. With nothing to re-ask,
+            # saying nothing left the caller a filler and then silence, so
+            # they are asked to say it again, in the language they moved to.
             logger.info("Nothing to re-ask after the switch to %s", target)
+            await self.brain._say_and_record(phrase("clarify_repeat", target), kind="clarify")
             return
         await self._send({
             "type": "caption", "speaker": "caller", "text": text, "final": True,

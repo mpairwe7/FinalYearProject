@@ -42,6 +42,10 @@ _CALL_DESK_COLUMNS: dict[str, str] = {
     # call carries (receptionist.carryover, G122).
     "parent_conversation_id": "TEXT NOT NULL DEFAULT ''",
     "chat_context": "TEXT NOT NULL DEFAULT ''",
+    # An officer passed the call to a named colleague: theirs to take first,
+    # until `reserved_until` (desk.transfer, ADR-0039).
+    "reserved_for": "TEXT NOT NULL DEFAULT ''",
+    "reserved_until": "DOUBLE PRECISION",
 }
 
 
@@ -238,15 +242,19 @@ def claim_call(call_id: str, officer_id: str, now: float, expired_before: float)
     One conditional UPDATE, so two officers pressing "Take call" at once —
     on this replica or through the database — cannot both succeed. A claim
     older than *expired_before* (audio never connected) no longer counts, and
-    a call already with an officer cannot be claimed at all.
+    a call already with an officer cannot be claimed at all. A call reserved
+    for a named officer is theirs alone until the reservation lapses; taking
+    it ends the reservation.
     """
     affected = db.execute(
         """
-        UPDATE voice_calls SET claimed_by = ?, claimed_at = ?
+        UPDATE voice_calls SET claimed_by = ?, claimed_at = ?, reserved_for = '', reserved_until = NULL
         WHERE call_id = ? AND status IN ('ai', 'transferring')
           AND (claimed_by = '' OR claimed_by IS NULL OR claimed_by = ? OR claimed_at < ?)
+          AND (reserved_for = '' OR reserved_for IS NULL OR reserved_for = ?
+               OR reserved_until IS NULL OR reserved_until <= ?)
         """,
-        (officer_id, now, call_id, officer_id, expired_before),
+        (officer_id, now, call_id, officer_id, expired_before, officer_id, now),
     )
     return affected > 0
 

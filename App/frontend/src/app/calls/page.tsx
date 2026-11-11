@@ -15,12 +15,13 @@ import { CallHistoryTable } from '@/components/staff/calls/CallHistoryTable';
 import SloGaugeCard from '@/components/charts/SloGaugeCard';
 import { ChartNote } from '@/components/charts/chartTheme';
 import { useCall, useCallHistory, useCallMetrics, useCalls } from '@/hooks/useCalls';
+import { useMyUserId } from '@/hooks/useMyUserId';
 import { isLiveOfficer } from '@/lib/roles';
 import { isTypingTarget } from '@/lib/ticketUi';
 import { acquireLobby } from '@/services/callLobbySocket';
 import { takeCall } from '@/services/officerCallSession';
 import type { ListCallsParams } from '@/services/callsApi';
-import { queueSections, useCallConsoleStore } from '@/store/useCallConsoleStore';
+import { queueSections, reservedForAnother, useCallConsoleStore } from '@/store/useCallConsoleStore';
 import '@/styles/call/call.css';
 import './calls.css';
 import '@/app/agent/agent.css';
@@ -67,6 +68,7 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
   const role = who?.role || 'ura_staff';
   // Officers take calls; auditors watch the desk. Administrators do not open it.
   const canTake = isLiveOfficer(role);
+  const myUserId = useMyUserId();
 
   const [tab, setTab] = useState<CallTab>(() => (useCallConsoleStore.getState().deskRequest ? 'desk' : readUrl().tab));
   const [selectedId, setSelectedId] = useState<string | null>(
@@ -144,9 +146,14 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
         const button = document.querySelector<HTMLButtonElement>('.cw [data-action="take"]');
         if (button && !button.disabled) {
           button.click();
-        } else if (sections.waiting[0]) {
-          setSelectedId(sections.waiting[0].call_id);
-          void takeCall(sections.waiting[0].call_id).catch(() => {});
+        } else {
+          // The first caller this officer may take: one reserved for a named
+          // colleague is theirs until the hold runs out.
+          const next = sections.waiting.find((c) => !reservedForAnother(c, myUserId));
+          if (next) {
+            setSelectedId(next.call_id);
+            void takeCall(next.call_id).catch(() => {});
+          }
         }
       } else if (key === 'Enter' && deskCallId) {
         document.querySelector<HTMLElement>('.cw button, .cw a')?.focus();
@@ -154,7 +161,7 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [tab, order, deskCallId, canTake, myCallId, sections.waiting]);
+  }, [tab, order, deskCallId, canTake, myCallId, myUserId, sections.waiting]);
 
   const waitingCount = sections.waiting.length;
   const callbacksCount = callbackCalls.length;

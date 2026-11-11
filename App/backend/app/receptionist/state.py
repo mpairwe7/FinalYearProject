@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from .clarify import ClarifyState
+from .hub import hub
 from .store import update_call
 
 logger = logging.getLogger(__name__)
@@ -88,6 +90,11 @@ class CallState:
     hold_started_at: float | None = None
     hold_total_s: float = 0.0
     target_team: str = ""
+    # An officer passed the call to a named colleague (desk.transfer): only
+    # they may claim it until `reserved_until`; then it is anyone's.
+    reserved_for: str = ""
+    reserved_name: str = ""
+    reserved_until: float | None = None
     reconnecting_officer: str | None = None
     livekit_room: str = ""
     livekit_caller_identity: str = ""
@@ -151,6 +158,9 @@ class CallRoom:
         self.state = state
         self.caller_ws = caller_ws
         self.officer: Any | None = None
+        # The officer's control socket on a LiveKit call (their audio is in the
+        # media room, so there is no OfficerLeg to reach them through).
+        self.officer_control: Any | None = None
         self.transport: Any | None = None
         self.pipeline_task: Any | None = None
         self.pipeline_runner_task: asyncio.Task[Any] | None = None
@@ -167,6 +177,11 @@ class CallRoom:
         self.claim_timer: asyncio.Task[None] | None = None
         # Reassures a caller an officer has put on hold (desk.hold, G187).
         self.hold_timer: asyncio.Task[None] | None = None
+        # Opens a call reserved for a named officer to everyone (desk.transfer).
+        self.reserve_timer: asyncio.Task[None] | None = None
+        # The officer has pressed End and the closing line is playing: a second
+        # End joins this one instead of saying goodbye again (desk.end).
+        self.ending = False
         self.end_event = asyncio.Event()
         self.listeners: list[asyncio.Queue[bytes]] = []
 
@@ -217,7 +232,7 @@ class CallRoom:
 
             for timer in (
                 self.state.transfer_timer_task, self.hold_timer, self.claim_timer,
-                self.state.reconnect_timer, self.caller_reconnect_task,
+                self.reserve_timer, self.state.reconnect_timer, self.caller_reconnect_task,
                 self.state.review_timer_task,
             ):
                 if timer is not None and not timer.done() and timer is not asyncio.current_task():
@@ -249,6 +264,21 @@ class CallRoom:
             )
         except Exception:
             logger.debug("Failed to record call end in DB for %s", self.call_id, exc_info=True)
+
+        # Tell the officers before their sockets and the media room close. A
+        # caller hanging up is how most calls end, and an officer whose screen
+        # only saw a dropped connection was never shown the wrap-up.
+        ended_event = {"type": "status", "status": "ended", "reason": reason}
+        try:
+            hub.publish_call(self.call_id, "status", ended_event)
+        except Exception:
+            logger.debug("Could not publish the end of call %s", self.call_id, exc_info=True)
+        officer_socket = self.officer_control or getattr(self.officer, "ws", None)
+        if officer_socket is not None:
+            try:
+                await asyncio.wait_for(officer_socket.send_text(json.dumps(ended_event)), timeout=2.0)
+            except Exception:
+                logger.debug("Could not tell the officer call %s ended", self.call_id, exc_info=True)
 
         # Notify officer leg if present
         if self.officer is not None:
