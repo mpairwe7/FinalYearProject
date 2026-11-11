@@ -1245,7 +1245,8 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
         "procedural_memory": "active",
         # Calls: "off", "ready", or "unavailable: <why>" when the receptionist
         # is switched on and could not start. The probe itself stays ready:
-        # the chat does not depend on it.
+        # the chat does not depend on it. In the chat role (G306) the value is
+        # the call process's own, read from its /ready, not this process's.
         "voice_receptionist": _receptionist_status(),
     }
     # The statutory kernel's state (ADR-0033): release, graph backend, semantic layer,

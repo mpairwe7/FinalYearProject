@@ -178,13 +178,15 @@ translation and retried unmasked when the tier mangles the sentinels.
 
 ### Calls
 
-Reported by `app/receptionist/telemetry.py` once the receptionist has started.
+Reported by `app/receptionist/telemetry.py` once the receptionist has started,
+except `ura_receptionist_misrouted_total`, which `app/process_role.py` reports
+from the chat process (the receptionist does not start there, ADR-0043).
 Every label is a closed vocabulary of code constants. Model failures on a call
 are not repeated here: they are `ura_chat_turns_total{channel="call",outcome="error"}`.
 
 | Metric | Labels | Meaning |
 | --- | --- | --- |
-| `ura_receptionist_available` | — | 0 while calls are switched on and cannot be taken (the start failed, or never ran because the flag was switched on later); 1 otherwise, switched off included. The lowest live worker's value (`livemin`), refreshed every 30 s in each worker and at every scrape |
+| `ura_receptionist_available` | — | 0 while calls are switched on and cannot be taken (the start failed, or never ran because the flag was switched on later); 1 otherwise, switched off included. The lowest live worker's value (`livemin`), refreshed every 30 s in each worker and at every scrape. The chat process (`URA_PROCESS_ROLE=chat`) never sets it, so in the two-process container it is the call process's value (ADR-0043) |
 | `ura_receptionist_calls_started_total` | — | Calls admitted |
 | `ura_receptionist_calls_ended_total` | `reason` | Why each call ended: `caller_hangup`, `caller_idle`, `officer_hangup`, `max_call_duration`, `speech_failed`, `media_pipeline_stopped`, … (`telemetry.END_REASONS`); anything else is `other` |
 | `ura_receptionist_calls_refused_total` | `reason` (`unavailable`/`not_configured`/`capacity`) | Calls turned away before they began. A switched-off receptionist is not counted |
@@ -489,7 +491,9 @@ and `TurnsHittingDeadline`. See the [fault tolerance runbook](runbooks/agent-fau
    `websocket` call request to the chat process, which refused it, so that
    caller or officer saw an error. The routing in `nginx.conf` and the
    call-path list in `app/process_role.py` have drifted apart (ADR-0043);
-   make the two agree, then roll.
+   make the two agree, then roll. The chat process logs an ERROR for each one,
+   `misrouted … request for … reached the chat process`, and the quoted path is
+   the one that drifted.
 
 See the [receptionist runbook](runbooks/voice-receptionist-demo.md).
 

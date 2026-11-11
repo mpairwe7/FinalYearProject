@@ -1,7 +1,7 @@
 # Call receptionist assurance review — 11 November 2026
 
-Status: phases 1 and 2 implemented; phases 3 and 4 planned, their gaps open.
-Baseline: `dev` at `9a5043db`. Decisions: [ADR-0039](../adr/0039-call-handoff-and-caller-safety.md) (phase 1), [ADR-0040](../adr/0040-call-records-and-accountability.md) (phase 2).
+Status: phases 1 to 4 implemented; phase 5 (G306 for one container) implemented on `fix/receptionist-call-process-2026-11`, deployment pending.
+Baseline: `dev` at `9a5043db`. Decisions: [ADR-0039](../adr/0039-call-handoff-and-caller-safety.md) (phase 1), [ADR-0040](../adr/0040-call-records-and-accountability.md) (phase 2), [ADR-0041](../adr/0041-receptionist-starts-safely-fails-visibly.md) (phase 3), [ADR-0042](../adr/0042-call-screens-say-what-happened.md) (phase 4), [ADR-0043](../adr/0043-one-call-process.md) (phase 5).
 The [30 October review](receptionist-assurance-2026-10-30.md) covered teardown,
 media isolation and draft evidence; this one covers the whole call flow: what the
 AI says, the handoff to an officer, the officer's desk, the two browser clients,
@@ -117,7 +117,8 @@ Left open by this phase, each for the service owner:
   configured, which the gate would refuse). Call handoffs there reach the
   wrong process about half the time until call state is shared (G306);
   `UVICORN_WORKERS=1` in `App/deploy/hf-space/Dockerfile` would fix that at the
-  cost of half the chat's workers.
+  cost of half the chat's workers. (Phase 5 fixes it without changing the
+  worker count: every call request now reaches the call process.)
 - **`low_bandwidth_voice_codec` and `call_drop_resume` are on in the Space
   image** and no client uses either.
 - **`RECEPTIONIST_TURN_TIMEOUT_S`** does not reach the turn-stop strategy; see
@@ -143,6 +144,42 @@ Left open by this phase, each for the service owner:
 | G609 | Failed mute changes are reverted on screen; a new call starts clean. |
 | G610 (mitigated) | Presence is `on_call` from claiming to ending; the server refuses `available` during the reconnect grace and a claim. |
 | G611 | Mark-done and the review form show their failures. |
+
+## Phase 5 — one call process
+
+[ADR-0043](../adr/0043-one-call-process.md); design:
+[receptionist-call-process-2026-11-12](receptionist-call-process-2026-11-12.md).
+Tests: `App/backend/tests/test_call_process_routing.py`,
+`App/backend/tests/test_call_process_container.py`.
+
+The service owner keeps two API processes on the Space (2026-11-11). This phase
+makes officer handoffs and live transcripts work on them without changing that:
+the container's one uvicorn becomes a chat process and a single-worker call
+process, and nginx sends every call path to the call process.
+
+| Gap | What changed |
+| --- | --- |
+| G306 (mitigated for one container) | Two uvicorn programs started by `App/deploy/cranecloud/uvicorn-role.sh` (`uvicorn-chat` on 8081 with `max(1, UVICORN_WORKERS - 1)` workers, `uvicorn-calls` on 8082 with one); nginx's call location (placed first) sends the caller's socket, the staff lobby and per-call streams, the officer's audio socket, the desk endpoints and officer presence to the call process, with 3600 s timeouts; the chat process starts no receptionist, sets no availability gauge and reads the call process's `/ready`; the Space declares `VOICE_RECEPTIONIST_REPLICAS=1`. |
+| G306 (misrouting) | A call request that reaches the chat process is refused (HTTP 421, or a WebSocket accepted, told `unavailable` and closed 1013), logged at ERROR, counted in `receptionist_misrouted_total{kind}` and alerted on by `UraCallMisrouted`. Every response names its process in `X-URA-Process`. |
+| G595 | The call receptionist alert group has five rules; `UraCallMisrouted` is the new one. |
+| G612 (new) | An admin-API flag override reaches only the process that answered it; the calls kill switch is now a `FLAG_VOICE_RECEPTIONIST` Space secret (runbook). |
+| G613 (new) | More than one replica needs durable call ownership: the rest of G306. |
+
+Also changed: `verify-embedded-stores.sh` checks both programs and runs
+`nginx -t`; the metrics directory is emptied once per container start, and a
+start drops the dead processes' live gauge files; a test holds both supervisord
+programs to the settings the single one had; one existing call-screens test no
+longer races the clock's row write.
+
+Left open by this phase:
+
+- **Not seen on the deployed Space.** The live probes (each call path answered
+  with `X-URA-Process: calls`, the call socket opening, `/ready`) run after the
+  roll, and a real officer handoff needs a staff account: the owner is asked to
+  run one test call. Rollback is a roll to `sha-f5d79b7`.
+- **The call process restarting still ends its calls**, as a dead worker did.
+- **G612 and G613**, above.
+- **Crane Cloud** builds from the same files and was not deployed or tested.
 
 ## Not in scope
 
@@ -219,3 +256,17 @@ Phase 3, the same day, the laptop still on battery:
   wrote call turns without creating the call tables and passed only when an
   earlier test had; it failed in any run that started with a fresh database.
   It now creates them (fixed in the phase 2 pull request).
+
+Phase 5, 2026-11-12, Python 3.11, hosted models, Qdrant and speech disabled:
+
+- `test_call_process_routing.py` and `test_call_process_container.py`: 55 passed
+  (123 subtests). The container tests run `uvicorn-role.sh` with its dry-run
+  switch and read `supervisord.conf` and `nginx.conf` as text.
+- Root `tests/test_monitoring_config.py`, `tests/test_monorepo_architecture_governance.py`
+  and `tests/test_governance_evidence.py`: 156 passed.
+- `governance/compliance_check.py`, `threat-model/validate_threats.py`,
+  `app.freshness --check` (drift 0; this worktree has no freshness snapshot) and
+  CI's blocking Ruff selection: passed.
+- Not run here: the promtool cases (no promtool), `nginx -t` on the shipped file
+  (the image build runs it), a container build, and the full root and backend
+  suites, left to CI.

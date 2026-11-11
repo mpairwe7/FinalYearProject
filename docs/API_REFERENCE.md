@@ -68,7 +68,7 @@ GET /ready
 | `status` | string | `ready` (Qdrant connected) or `degraded` (keyword fallback) |
 | `retrieval_mode` | string | `hybrid` (Qdrant dense+BM25+rerank, or Qdrant BM25 fused with the local pgvector leg), `vector` (Cloudflare Vectorize dense fallback), `sparse` (Qdrant BM25 only, no dense), or `keyword` (CSV overlap fallback) |
 | `capabilities.local_dense` | string | The local dense leg (ADR-0034): `pgvector multilingual-e5-small, N vectors`, `off`, or `unavailable (reason)`; see `docs/runbooks/local-dense-pgvector.md` |
-| `capabilities.voice_receptionist` | string | Phone calls (ADR-0041): `off` (the flag is off), `ready`, or `unavailable: <why>` when the receptionist is switched on and could not start (Pipecat missing, an unusable `RECEPTIONIST_*` setting, no speech model, call tables that could not be created). Calls are refused while it is unavailable; `status` is unaffected, because the chat does not depend on calls |
+| `capabilities.voice_receptionist` | string | Phone calls (ADR-0041): `off` (the flag is off), `ready`, or `unavailable: <why>` when the receptionist is switched on and could not start (Pipecat missing, an unusable `RECEPTIONIST_*` setting, no speech model, call tables that could not be created). Calls are refused while it is unavailable; `status` is unaffected, because the chat does not depend on calls. On the chat process of a two-process container (`URA_PROCESS_ROLE=chat`, ADR-0043) the value is the call process's own, read from its `/ready` (1 s timeout, 10 s cache), or `unavailable: the call process is not answering` / `unavailable: the call process is not ready` |
 
 ---
 
@@ -2042,8 +2042,10 @@ a minute before the call's time limit (halfway through a limit of a minute or
 less). A `snapshot` sent after that warning, to a console that opened or
 reopened the call late, carries `"seconds_remaining": N` at its top level, on
 any worker: the deadline is kept on the call's row (`limit_at`) as well as on
-the room. The live events that follow still reach only consoles on the worker
-that holds the call (G306).
+the room. The live events that follow reach only consoles on the process that
+holds the call: behind the container's nginx every console is sent there
+(ADR-0043); a deployment with several workers and no such routing still has the
+limit (G306).
 
 #### Call sockets: refusals, errors and the time limit (ADR-0042)
 
@@ -2068,6 +2070,35 @@ handshake). Every `error` frame to the caller carries a `code`:
 caller a minute before the time limit (`RECEPTIONIST_MAX_CALL_S`), or halfway
 through a limit of a minute or less, on every transport, and the call
 ends at the limit with `status: ended`.
+
+#### Call requests that reach the wrong process (ADR-0043)
+
+In the container image (`Dockerfile.cranecloud`, the HF Space) the API runs as a
+chat process and the call process, and nginx sends every call path to the call
+process: `calls/stream`, `admin/calls` and everything under it, and
+`admin/officers/presence` and `admin/officers/me/presence`, under `/v1/` or
+`/api/v1/`. A call request that reaches the chat process anyway is refused, so
+that a drift in the proxy's routing shows as an error instead of acting on call
+state the process does not hold. It is also logged at ERROR and counted in
+`ura_receptionist_misrouted_total{kind}`.
+
+| Request | Answer |
+| --- | --- |
+| Any HTTP request to a call path, whatever its method, query string or trailing slash | **421 Misdirected Request**, `{"detail": "This request belongs to the call process but reached the chat process; the proxy's routing for call paths has drifted."}` |
+| A WebSocket to a call path (`/v1/calls/stream`, `/v1/admin/calls/stream`, `/v1/admin/calls/{call_id}/audio`) | Accepted, sent `{"type": "error", "code": "unavailable", "recoverable": false}`, then closed **1013** |
+
+The socket's code is `unavailable`, which the table above pairs with 1001 (calls
+off); the close 1013 with that code is sent only by this refusal. A
+single-process deployment (`URA_PROCESS_ROLE` unset) never answers this way.
+
+**`X-URA-Process`**: when `URA_PROCESS_ROLE` is `calls` or `chat`, every response
+carries `X-URA-Process: calls` or `X-URA-Process: chat`, so a probe from outside
+can tell which process answered; it names the role and nothing else. An
+unauthenticated request gets it too. It is never sent when the role is unset. It
+is absent on Starlette's own 500 error responses (sent outside the middleware
+that adds it) and on a WebSocket closed before it was accepted (a foreign
+origin). The 421 carries it, and none of the headers the security and CORS
+middleware add, because it is produced by the outermost layer.
 
 ---
 
@@ -2133,7 +2164,10 @@ call: the deployment declares one worker and one replica, or the call began
 longer ago than a call may last. Declared means `VOICE_RECEPTIONIST_REPLICAS=1`
 and a worker count of 1 in every one of `WORKERS`, `UVICORN_WORKERS` and
 `WEB_CONCURRENCY` that is set, with at least one set (the supervisord image
-defaults `UVICORN_WORKERS` to 2, so `WORKERS=1` alone is not enough there). Otherwise it answers **409** ("on another
+defaults `UVICORN_WORKERS` to 2, so `WORKERS=1` alone is not enough there; its
+call process is started with `UVICORN_WORKERS=1` and the Space Dockerfile sets
+`VOICE_RECEPTIONIST_REPLICAS=1`, so the Space's call process declares it,
+ADR-0043). Otherwise it answers **409** ("on another
 server process"), because a live call on another worker looks the same from
 here.
 
@@ -3092,6 +3126,9 @@ All responses include hardened security headers (OWASP, NIST SSDF):
 | `Referrer-Policy` | `strict-origin-when-cross-origin` |
 | `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` |
 | `X-Request-ID` | Validated or server-generated UUID |
+
+`X-URA-Process` (`chat` or `calls`) is added when the process has a role
+(`URA_PROCESS_ROLE`); see [Call requests that reach the wrong process](#call-requests-that-reach-the-wrong-process-adr-0043).
 
 ---
 

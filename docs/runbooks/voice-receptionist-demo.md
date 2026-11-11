@@ -4,6 +4,117 @@ Operator and deployment runbook for the browser voice receptionist powered by
 Pipecat 1.15, self-hosted LiveKit WebRTC media, Whisper-SALT confidence scoring,
 ClarifyGate terminology disambiguation, and staff takeover.
 
+### Assurance update — 2026-11-12, one call process (ADR-0043)
+
+Phase 5 of [the 11 November review](../plans/receptionist-assurance-2026-11-11.md).
+In this image, officer handoffs and live call transcripts no longer depend on
+which worker answers (deployment to the Space is pending; the probes below are
+the check). What an operator needs to know:
+
+- **The container runs two API programs, one per role.** supervisord starts
+  both through `uvicorn-role.sh` (`App/deploy/cranecloud/`):
+
+  | Program | Port | `URA_PROCESS_ROLE` | Workers | Takes |
+  | --- | --- | --- | --- | --- |
+  | `uvicorn-chat` | 127.0.0.1:8081 | `chat` | `max(1, UVICORN_WORKERS − 1)` | Chat and the rest of the API; refuses a call request |
+  | `uvicorn-calls` | 127.0.0.1:8082 | `calls` | 1 (`UVICORN_WORKERS=1` in its environment) | Every call path, and chat too |
+
+  With the Space's `UVICORN_WORKERS=2` that is one process each, the same two
+  processes as before. A blank, non-numeric or zero `UVICORN_WORKERS` counts as 2.
+  The receptionist starts, sweeps the rows a previous run left and takes calls
+  in the call process only.
+- **nginx sends every call path to the call process**: `/v1/calls/stream`, the
+  staff lobby and everything under `/v1/admin/calls` (the per-call audio
+  socket, claim, release, transfer, end, hold, wrap-up, review, brief,
+  callback-done, caller history, metrics) and `/v1/admin/officers/presence` and
+  `/v1/admin/officers/me/presence`, each with or without the `/api` prefix. All
+  get 3600 s timeouts. `/calls` is the frontend's page, and ticket presence
+  (`/v1/admin/tickets/{id}/presence`) stays with the rest of the API.
+- **A call request that reaches the chat process is refused**: HTTP 421, or a
+  WebSocket accepted, sent `{"type": "error", "code": "unavailable"}` and
+  closed 1013. It is counted in `ura_receptionist_misrouted_total` (alert
+  `UraCallMisrouted`) and logged at ERROR in the chat process:
+  `misrouted http request for '/v1/admin/calls' reached the chat process; nginx
+  should have sent it to the call process`. The quoted path is the one nginx no
+  longer routes. See [MONITORING.md](../MONITORING.md#call-receptionist).
+- **The call process restarting ends its calls**, as a dead worker did before.
+  Until supervisord brings it back nginx answers call paths with 502; callers
+  are told the call could not connect or was cut off and can call again, and
+  the consoles show "Live call updates paused" and reconnect. On start the
+  process ends the rows its run left and flags the callers owed a callback
+  (`service_interrupted`), as in the ADR-0041 update below. A chat restart
+  ends nothing. Chat requests in flight on the call process can fail once.
+- **`GET /ready` shows the call process's own state on the chat process.**
+  `capabilities.voice_receptionist` is read from the call process's `/ready`
+  (1 s timeout, 10 s cache): `ready`, `off`, `unavailable: <why>`, or
+  `unavailable: the call process is not answering` / `… is not ready`. nginx
+  sends `/ready` to either process; the field is the call process's state
+  whichever answers (the call process reports its own, the chat process reads
+  it), and `X-URA-Process` on the response says which one answered.
+- **Every response names its process**: `X-URA-Process: chat` or
+  `X-URA-Process: calls`. It is absent on Starlette's own 500 error responses
+  and on a WebSocket closed before it was accepted (a foreign origin).
+
+**Kill switch: set `FLAG_VOICE_RECEPTIONIST=false` as a Space secret** (change
+the existing value if the Space already has one). It restarts the Space and
+reaches both processes. Do not use the admin API's flag override
+(`PATCH /v1/admin/flags/voice_receptionist`) for this: it changes the registry of
+the one process that answered the request and writes a stored row the other
+process reads only when it next starts, so calls can stay on in the call process
+while the console says they are off (G612). A stored override also beats a
+`FLAG_*` secret at start; if one exists for `voice_receptionist`, delete it first
+(`DELETE /v1/admin/flags/voice_receptionist`, `ura_admin`). The 1001 close and
+the `off` field show whether the switch took (the ADR-0042 update below).
+
+**Live probes after a roll** (the Space is `https://landwind22-ura-chatbot.hf.space`):
+
+1. *Each call path is answered by the call process.* An unauthenticated request
+   still gets the header:
+
+   ```bash
+   S=https://landwind22-ura-chatbot.hf.space
+   for p in api/v1/admin/calls api/v1/admin/calls/metrics api/v1/admin/officers/presence api/v1/admin/calls/probe; do
+     printf '%s  ' "$p"; curl -sS -o /dev/null -D - "$S/$p" | grep -i -E '^x-ura-process' || echo "NO HEADER"
+   done
+   ```
+
+   Every line must read `x-ura-process: calls` (the status behind it is the
+   app's own: 401 or 403 without a login, never 421). `NO HEADER` means the
+   Space is not running this change (or the response was a 500, which carries
+   none); `x-ura-process: chat` on a call path means nginx's call location is
+   not first or not matching.
+2. *The call socket opens.* An upgrade request with the Space's own `Origin`
+   gets `101 Switching Protocols` and `x-ura-process: calls`; calls being off
+   shows as a close with 1001 after the handshake, not as a failed handshake:
+
+   ```bash
+   curl -sS -i --http1.1 --max-time 5 "$S/api/v1/calls/stream" \
+     -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13" \
+     -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" -H "Origin: $S" | head -8
+   ```
+3. *`/ready`*: `capabilities.voice_receptionist` is `ready` (or `off` if the
+   flag is off). `unavailable: the call process is not answering` for longer
+   than ten seconds after a start means nothing listens on 8082: read the
+   container log for the `uvicorn-calls` program.
+4. *The log*: `Uvicorn running on http://127.0.0.1:8081` and
+   `Uvicorn running on http://127.0.0.1:8082`, and no line beginning
+   `Voice receptionist is on with` (the more-than-one-worker warning; the call
+   process has one worker). Neither program's log lines name its role;
+   the port tells them apart.
+5. *The counter*: `ura_receptionist_misrouted_total` is 0 for both kinds.
+
+A real officer handoff (a caller asks for an officer, an officer takes the
+call) needs a staff account: place one test call and take it.
+
+**Rollback.** Roll the Space to the image that runs one two-worker uvicorn and
+needs nothing from this change:
+
+```bash
+gh workflow run ura-chatbot-roll-hf-space.yml -f image_tag=sha-f5d79b7
+```
+
+Handoffs on the Space are then unreliable again, as in the ADR-0041 update below.
+
 ### Assurance update — 2026-11-11, the call screens (ADR-0042)
 
 - **A refused call says why.** "Calls are not available", "All our lines are
@@ -45,7 +156,9 @@ What an operator sees differently after phase 3 of the 11 November review:
   (`Dockerfile.cranecloud`, the HF Space) uvicorn starts from
   `UVICORN_WORKERS`, default 2: set it to 1. With more than one worker an
   officer's console and a caller's call reach different processes about half
-  the time, and the API log says so at every start.
+  the time, and the API log says so at every start. (On that image the call
+  process has its own single worker since 2026-11-12, ADR-0043: see the update
+  above, and leave `UVICORN_WORKERS` at its default there.)
 - **Durations are checked.** A `RECEPTIONIST_*_S` value that is not a finite
   number inside its range makes calls unavailable at startup and names the
   variable. A call already running reads the default instead of the bad value.
@@ -272,12 +385,14 @@ All switches and thresholds are configured via environment variables:
 | `LIVEKIT_URL` | unset | Public `wss://` endpoint for the self-hosted LiveKit deployment |
 | `LIVEKIT_API_KEY` | unset | Server-only LiveKit API key; store in the deployment secret manager |
 | `LIVEKIT_API_SECRET` | unset | Server-only LiveKit API secret; never expose to browser/build args |
-| `VOICE_RECEPTIONIST_REPLICAS` | unset | Must be `1` until shared call actor state is implemented |
+| `VOICE_RECEPTIONIST_REPLICAS` | unset (`1` in the Space Dockerfile) | Must be `1` until shared call actor state is implemented (G613). Declares the call process the deployment's only one, so its start ends every row a previous run left |
+| `URA_PROCESS_ROLE` | unset | `calls` or `chat`, set per program by `uvicorn-role.sh`. Unset keeps one process serving everything; any other value is logged as an error and treated as unset (ADR-0043) |
+| `URA_CALLS_PROCESS_URL` | `http://127.0.0.1:8082` | Where the chat role reads the call process's `/ready` (set by `uvicorn-role.sh` for the chat program) |
 | `VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK` | `false` | Explicitly acknowledge active calls end if the API process is lost |
 | `FLAG_VOICE_CONSENT` | `true` | Enforces explicit voice consent dialog prior to audio processing |
 | `FLAG_TICKET_QUEUE` | `true` | Enforces human queue oversight; transfers fail safely if disabled |
 | `WORKERS` | `4` in the Docker image | Explicitly set `1` for the receptionist — active call state is process-local |
-| `UVICORN_WORKERS` | `2` in the supervisord image (`Dockerfile.cranecloud`, HF Space) | The variable that image starts uvicorn from. Set `1` for the receptionist; `WORKERS=1` alone leaves two workers there (ADR-0041) |
+| `UVICORN_WORKERS` | `2` in the supervisord image (`Dockerfile.cranecloud`, HF Space) | The image's worker budget: the chat program gets `max(1, N − 1)` and the call program always 1 (ADR-0043); leave it at 2 on the Space. Outside the supervisord image, set `1` for the receptionist; `WORKERS=1` alone leaves two workers there (ADR-0041) |
 | `WEB_CONCURRENCY` | unset | Read by the gate as well: if set, it must be `1` |
 | `RECEPTIONIST_CLARIFY_THRESHOLD` | `0.55` | Word acoustic probability below which ClarifyGate assesses candidates |
 | `RECEPTIONIST_MAX_CLARIFY_ATTEMPTS` | `2` | Number of failed clarification attempts before auto-transferring |
@@ -409,9 +524,10 @@ enabling the feature:
    errors, API saturation, and transfer queue outcomes. Keep a tested rollback
    that turns `FLAG_VOICE_RECEPTIONIST` off.
 
-The current application supports one API process for active calls. Do not set
-multiple Kubernetes replicas, multiple ASGI workers, or scale-out autoscaling for
-the receptionist; LiveKit itself can scale independently, but it does not make
+The current application supports one API process for active calls (under the
+supervisord image that is the call process, ADR-0043; its other workers serve
+chat only). Do not set multiple Kubernetes replicas, multiple ASGI workers, or
+scale-out autoscaling for the receptionist; LiveKit itself can scale independently, but it does not make
 the application's in-memory claims, call state, event hub or timers shared.
 Adding shared actor/event state, restart recovery, and a tested media/session
 reconnect policy is a prerequisite for HA or horizontal API scaling. LiveKit
@@ -835,6 +951,9 @@ check them, and have 3–5 Luganda speakers rate the Orpheus samples blind
 | A Swahili or Luganda answer arrives in English | api log `reply localization to sw collapsed the answer; serving English` (or `failed`): the translation came back short or empty, so the English answer was served. Replies are translated one paragraph at a time; a paragraph that still comes back cut short fails the whole reply rather than shipping a fragment |
 | Caller cannot talk over the assistant | api log `Caller talking over the assistant` (the sentinel's VAD stopped it); if absent, the caller's speech never reached the server over the playback: try headphones (the browser's echo canceller can mute a caller while the speaker plays) |
 | Assistant cuts itself off mid-sentence | its own voice leaking from speaker to mic: `RECEPTIONIST_LOCAL_BARGE_IN=false`, or raise `RECEPTIONIST_BARGE_IN_MIN_S` |
+| A call or the officer console fails with HTTP 421, or a call socket closes 1013 after an `error` frame with `code: "unavailable"` (and calls are on) | A call request reached the chat process. The chat process logs `misrouted … request for '<path>' reached the chat process` and `UraCallMisrouted` fires. Compare the path with `process_role.CALL_PATH_RE` and the call location in `App/deploy/cranecloud/nginx.conf` (`test_call_process_routing.py` keeps them equal); the call-path probe in the 2026-11-12 update at the top shows which process answers |
+| Call paths answer 502, and the console says live updates are paused | The call process (`uvicorn-calls`, 127.0.0.1:8082) is down or restarting. supervisord restarts it; chat is unaffected. Its calls ended; callers owed a callback are flagged `service_interrupted` |
+| `/ready` says `unavailable: the call process is not answering` | The chat process asked 8082 and got nothing within 1 s (the answer is kept for 10 s). Look at the `uvicorn-calls` log; a chat process that booted first reports it until the call process is up |
 | Stale or unjoined call stuck in queue | In `/calls`, an officer (`ura_staff`; administrators are refused desk actions) can click **Terminate call** (`POST /v1/admin/calls/{call_id}/end`). It ends the call through `CallRoom.end()` — countdown cancelled, media room closed, pipeline stopped, row `ended` — releases queue locks (`end_reason="officer_terminated_waiting"` or `officer_terminated_stale`) and refreshes the live lobby board. Before G176 it answered 500 on a call whose officer had dropped off, and skipped that teardown. A row with no call room behind it is ended as stale only where no other process can be holding the call: one worker and one replica are declared, or the call began longer ago than a call may last. Declared means `VOICE_RECEPTIONIST_REPLICAS=1` and a worker count of 1 in every one of `WORKERS`, `UVICORN_WORKERS` and `WEB_CONCURRENCY` that is set, with at least one set. Under the supervisord image `UVICORN_WORKERS` defaults to 2, so `WORKERS=1` alone is not enough there. Otherwise, the button answers 409 "on another server process"; on a deployment that runs several workers, try again (the request may reach the worker that has the call) or wait for the call's time limit to pass |
 | No voice/speech heard in browser, or `The AudioContext encountered an error` in console | Fixed in G249 (`PR #650`): `PCMPlayer` (`App/frontend/src/services/pcmPlayer.ts`) guards initialization with a singleton `initPromise` and `pendingChunks` FIFO queue, expands `pcm-player-worklet.js` to a 60s circular buffer (`16000 * 60`), falls back to an inline `Blob` `AudioWorklet` (and scheduled `AudioBufferSourceNode` queue) when external worklet scripts return `text/html` behind ngrok/proxies (`blob:` permitted in `script-src`/`worker-src` in `next.config.mjs`), and `useCall.ts` separates `dialToneCtxRef` from `audioCtxRef` (`getToneContext()`) |
 | Multi-turn call conversation stalls after greeting/Turn 1 or repeats *"Excuse me, did you say vat?"* | Fixed in G249 (`PR #650`): `UraSpeechTTS` (`tts.py`) enables `push_start_frame=True` and `push_stop_frames=True` so `TTSStoppedFrame` immediately triggers `BotStoppedSpeakingFrame` without the 3.0s `BOT_VAD_STOP_FALLBACK_SECS` window; `ClarifyGate.assess` (`clarify.py`) skips exact lexicon matches (`cand_term == clean_target.lower()`) and context-repaired homophones; and `UraReceptionistBrain` (`brain.py`) supersedes open clarification when the caller asks a complete new question and strips written-chat follow-up footers in `_spoken_answer` |
