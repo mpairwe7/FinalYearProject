@@ -74,6 +74,7 @@ def get_presence(user_id: str) -> dict[str, Any] | None:
 def upsert_presence(
     user_id: str,
     *,
+    tenant_id: str | None = None,
     display_name: str | None = None,
     status: str | None = None,
     languages: list[str] | None = None,
@@ -84,7 +85,9 @@ def upsert_presence(
     """Upsert presence for an officer, updating last_seen.
 
     Emits ``officer.presence`` to the lobby ONLY if the effective status or
-    display name changed, avoiding heartbeat spam.
+    display name changed, avoiding heartbeat spam, and only to the consoles of
+    the officer's tenant. *tenant_id* is the officer's tenant when the caller
+    knows it (their own request); otherwise the one already on the row is kept.
     """
     now = time.time()
     existing = get_presence(user_id)
@@ -97,6 +100,7 @@ def upsert_presence(
     target_teams = teams if teams is not None else (existing["teams"] if existing else [])
     target_call_id = current_call_id if current_call_id is not None else (existing.get("current_call_id", "") if existing else "")
     target_prev_status = previous_status if previous_status is not None else (existing.get("previous_status", "available") if existing else "available")
+    target_tenant = tenant_id or (str(existing.get("tenant_id") or "") if existing else "") or "default"
 
     lang_json = json.dumps(target_languages)
     teams_json = json.dumps(target_teams)
@@ -107,20 +111,22 @@ def upsert_presence(
                 """
                 UPDATE officer_presence
                 SET display_name = ?, status = ?, languages_json = ?, teams_json = ?,
-                    current_call_id = ?, previous_status = ?, last_seen = ?, updated_at = ?
+                    current_call_id = ?, previous_status = ?, last_seen = ?, updated_at = ?, tenant_id = ?
                 WHERE user_id = ?
                 """,
-                (target_display, target_status, lang_json, teams_json, target_call_id, target_prev_status, now, now, user_id),
+                (target_display, target_status, lang_json, teams_json, target_call_id, target_prev_status, now, now,
+                 target_tenant, user_id),
             )
         else:
             db.execute(
                 """
                 INSERT INTO officer_presence (
                     user_id, display_name, status, languages_json, teams_json,
-                    current_call_id, previous_status, last_seen, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    current_call_id, previous_status, last_seen, updated_at, tenant_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (user_id, target_display, target_status, lang_json, teams_json, target_call_id, target_prev_status, now, now),
+                (user_id, target_display, target_status, lang_json, teams_json, target_call_id, target_prev_status, now, now,
+                 target_tenant),
             )
 
     try:
@@ -142,10 +148,12 @@ def upsert_presence(
                 "display_name": target_display,
                 "status": current_effective,
             },
+            tenant_id=target_tenant,
         )
 
     return {
         "user_id": user_id,
+        "tenant_id": target_tenant,
         "display_name": target_display,
         "status": current_effective,
         "raw_status": target_status,
@@ -157,9 +165,14 @@ def upsert_presence(
     }
 
 
-def list_officers() -> list[dict[str, Any]]:
-    """List all officers with computed current status."""
-    rows = db.query_all("SELECT * FROM officer_presence ORDER BY updated_at DESC")
+def list_officers(tenant_id: str | None = None) -> list[dict[str, Any]]:
+    """List officers with computed current status: one tenant's, or all when *tenant_id* is None."""
+    if tenant_id is None:
+        rows = db.query_all("SELECT * FROM officer_presence ORDER BY updated_at DESC")
+    else:
+        rows = db.query_all(
+            "SELECT * FROM officer_presence WHERE tenant_id = ? ORDER BY updated_at DESC", (tenant_id,)
+        )
     now = time.time()
     results: list[dict[str, Any]] = []
     for r in rows:
@@ -179,17 +192,17 @@ def list_officers() -> list[dict[str, Any]]:
     return results
 
 
-def get_presence_board() -> dict[str, Any]:
-    """Retrieve full presence board including list of officers and available teams."""
+def get_presence_board(tenant_id: str | None = None) -> dict[str, Any]:
+    """The presence board (officers and the teams a call can be passed to), for one tenant or all."""
     return {
-        "officers": list_officers(),
+        "officers": list_officers(tenant_id),
         "teams": known_teams(),
     }
 
 
-def count_active_officers(target_team: str = "") -> int:
-    """Return count of officers currently marked available, on_call, or busy (online)."""
-    officers = list_officers()
+def count_active_officers(target_team: str = "", tenant_id: str | None = None) -> int:
+    """Officers currently available, on a call, wrapping up or busy: one tenant's, or all."""
+    officers = list_officers(tenant_id)
     active = [
         o for o in officers
         if o.get("status") in ("available", "on_call", "wrap_up", "busy")
@@ -198,14 +211,17 @@ def count_active_officers(target_team: str = "") -> int:
     return len(active)
 
 
-def set_on_call(user_id: str, call_id: str, display_name: str = "") -> None:
+def set_on_call(user_id: str, call_id: str, display_name: str = "", tenant_id: str | None = None) -> None:
     """Transition an officer to 'on_call'."""
     existing = get_presence(user_id)
     prev = "available"
     if existing and existing.get("raw_status") in ("available", "busy", "away"):
         prev = existing["raw_status"]
     name = display_name or (existing["display_name"] if existing else "")
-    upsert_presence(user_id, display_name=name or None, status="on_call", current_call_id=call_id, previous_status=prev)
+    upsert_presence(
+        user_id, tenant_id=tenant_id, display_name=name or None, status="on_call",
+        current_call_id=call_id, previous_status=prev,
+    )
 
 
 def set_wrap_up(user_id: str, call_id: str = "") -> None:

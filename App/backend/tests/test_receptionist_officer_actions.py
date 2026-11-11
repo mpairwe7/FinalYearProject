@@ -223,9 +223,16 @@ class TestOfficerActions(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self._satisfaction("call_csat_4")["score"], 5)
 
     async def test_the_wrapup_route_records_it_under_the_officers_name(self):
-        await self._make_bridged_room("call_csat_route", "officer_route")
+        # The officer who handled the call, wrapping it up after it ended (G305):
+        # this test used to wrap up a call still bridged to a different officer.
+        create_call("call_csat_route", status="ended", user_id="user_taxpayer_1")
+        update_call("call_csat_route", officer_id="nakato@ura.go.ug", handled_by_json=["nakato@ura.go.ug"])
         client = TestClient(app)
         officer = {"Authorization": f"Bearer {make_dev_token('nakato@ura.go.ug', role='ura_staff')}"}
+        stranger = {"Authorization": f"Bearer {make_dev_token('mukasa@ura.go.ug', role='ura_staff')}"}
+        refused = client.post("/v1/admin/calls/call_csat_route/wrapup", headers=stranger,
+                              json={"outcome": "resolved", "note": "not mine"})
+        self.assertEqual(refused.status_code, 403, refused.text)
         bad = client.post("/v1/admin/calls/call_csat_route/wrapup", headers=officer,
                           json={"outcome": "resolved", "note": "ok", "caller_satisfaction": 9})
         self.assertEqual(bad.status_code, 400)

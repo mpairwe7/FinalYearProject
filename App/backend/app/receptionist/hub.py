@@ -39,11 +39,19 @@ class CallEventHub:
         with self._lock:
             self._lobby = [(q, loop, tenant) for q, loop, tenant in self._lobby if q is not queue]
 
-    def publish_lobby(self, event_type: str, payload: dict[str, Any]) -> None:
-        """Publish a metadata-only event to all lobby subscribers. No transcripts."""
+    def publish_lobby(
+        self, event_type: str, payload: dict[str, Any], *, tenant_id: str | None = None
+    ) -> None:
+        """Publish a metadata-only event to the lobby subscribers of its tenant. No transcripts.
+
+        The tenant is *tenant_id* when the publisher knows it (an officer's
+        presence), else the call's. A console scoped to a tenant receives only
+        events of that tenant: one that names neither a call nor a tenant used
+        to reach every tenant's officers and now reaches none of them.
+        Subscribers with no scope (tenancy off) receive everything.
+        """
         call_id = str(payload.get("call_id") or "")
-        tenant_id: str | None = None
-        if call_id:
+        if tenant_id is None and call_id:
             try:
                 from .state import registry
 
@@ -67,8 +75,7 @@ class CallEventHub:
                 (queue, loop)
                 for queue, loop, subscriber_tenant in self._lobby
                 if subscriber_tenant is None
-                or not call_id
-                or tenant_id == subscriber_tenant
+                or (tenant_id is not None and tenant_id == subscriber_tenant)
             ]
 
         for queue, loop in targets:

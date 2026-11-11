@@ -3926,8 +3926,13 @@ def update_ticket(
     officer_reply: str | None = None,
     officer_reply_localized: str | None = None,
     locale: str | None = None,
+    officer_touch: bool = True,
 ) -> bool:
     """Update mutable ticket fields.  Returns True if a row was touched.
+
+    ``officer_touch`` False is for a write the system makes on its own (the
+    end-of-call summary): it never counts as the first response, which is an
+    officer's.
 
     ``officer_reply`` is what the taxpayer will actually be shown when
     they next open the conversation — distinct from ``staff_note``,
@@ -3948,9 +3953,10 @@ def update_ticket(
         return False
     # First officer touch — assignment, a note, a reply, or moving it off
     # 'open'. Whichever happens first is the response time.
-    is_touch = any(
-        v is not None for v in (assignee, staff_note, officer_reply)
-    ) or (status is not None and status != "open")
+    is_touch = officer_touch and (
+        any(v is not None for v in (assignee, staff_note, officer_reply))
+        or (status is not None and status != "open")
+    )
     if is_touch and not existing.get("first_response_at"):
         sets.append("first_response_at = ?")
         params.append(now)

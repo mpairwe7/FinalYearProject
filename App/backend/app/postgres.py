@@ -548,6 +548,14 @@ def init_db() -> None:
 
     _database.init_module_schemas()
     _database.migrate_legacy_conversation_state_keys()
+    # The call tables exist whether or not calls are switched on, as on SQLite:
+    # the retention pass below and every later one deletes from them.
+    try:
+        from .receptionist.store import init_receptionist_schema
+
+        init_receptionist_schema()
+    except Exception:
+        logger.debug("receptionist schema init skipped or deferred", exc_info=True)
     cleanup_expired_data()
 
 
@@ -598,10 +606,12 @@ def cleanup_expired_data() -> dict[str, int]:
             conn.rollback()
             logger.exception("TTL cleanup failed for workflow session content")
             deleted["workflow_session_content"] = 0
+        # Each purge is its own transaction. The ticket purge used to share one
+        # with the voice tables, so wherever those did not exist (a deployment
+        # with calls off) their error rolled the ticket purge back too, on
+        # every pass, and resolved tickets were never removed (G555).
         ticket_cutoff = now - (_TICKET_TTL_DAYS * 86400)
         try:
-            from .voice_consent import retention_policy
-            voice_transcript_cutoff = now - (retention_policy.transcript_ttl_days * 86400)
             with conn.cursor() as cur:
                 cur.execute(
                     "DELETE FROM tickets WHERE status IN ('resolved', 'wontfix') "
@@ -609,27 +619,41 @@ def cleanup_expired_data() -> dict[str, int]:
                     (ticket_cutoff,),
                 )
                 deleted["tickets"] = cur.rowcount
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            logger.exception("TTL cleanup failed for tickets")
+            deleted["tickets"] = 0
 
-                # Voice receptionist tables retention
+        from .voice_consent import retention_policy
+
+        voice_transcript_cutoff = now - (retention_policy.transcript_ttl_days * 86400)
+        try:
+            with conn.cursor() as cur:
                 cur.execute(
                     "DELETE FROM voice_call_turns WHERE created_at < %s",
                     (voice_transcript_cutoff,),
                 )
                 deleted["voice_call_turns"] = cur.rowcount
-
-                conv_cutoff = voice_transcript_cutoff
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            logger.exception("TTL cleanup failed for voice_call_turns")
+            deleted["voice_call_turns"] = 0
+        try:
+            with conn.cursor() as cur:
                 cur.execute(
                     """DELETE FROM voice_calls
                        WHERE ((ticket_id IS NULL OR ticket_id = '') AND started_at < %s)
                           OR (ticket_id IS NOT NULL AND ticket_id != '' AND started_at < %s)""",
-                    (conv_cutoff, ticket_cutoff),
+                    (voice_transcript_cutoff, ticket_cutoff),
                 )
                 deleted["voice_calls"] = cur.rowcount
             conn.commit()
         except Exception:
             conn.rollback()
-            logger.exception("TTL cleanup failed for tickets and voice calls")
-            deleted["tickets"] = 0
+            logger.exception("TTL cleanup failed for voice_calls")
+            deleted["voice_calls"] = 0
     from .database import module_retention
 
     deleted.update(module_retention())
@@ -1504,6 +1528,7 @@ def update_ticket(
     officer_reply: str | None = None,
     officer_reply_localized: str | None = None,
     locale: str | None = None,
+    officer_touch: bool = True,
 ) -> bool:
     pool = _get_pool()
     if pool is None:
@@ -1514,8 +1539,10 @@ def update_ticket(
     existing = get_ticket(ticket_id)
     if existing is None:
         return False
-    is_touch = any(v is not None for v in (assignee, staff_note, officer_reply)) or (
-        status is not None and status != "open"
+    # As on SQLite: a write the system makes on its own is not a first response.
+    is_touch = officer_touch and (
+        any(v is not None for v in (assignee, staff_note, officer_reply))
+        or (status is not None and status != "open")
     )
     if is_touch and not existing.get("first_response_at"):
         sets.append("first_response_at = %s")

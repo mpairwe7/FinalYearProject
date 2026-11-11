@@ -1,5 +1,13 @@
 # Runbook — escalation policy and structured text handoffs
 
+Call records update (2026-11-11, ADR-0040): `update_ticket(officer_touch=False)`
+is how the system writes to a ticket without counting as an officer's first
+response; the end-of-call summary uses it and no longer replaces an officer's
+note (G587). A call wrap-up may resolve a ticket only after the call has ended,
+and is accepted only from an officer who handled the call (G305). With
+`multi_tenant` on, "is an officer on shift" counts the caller's tenant's
+officers only (G584).
+
 Call handoff update (2026-11-11, ADR-0039): a call transfer's ticket is created
 in the caller's tenant (it went to `default`, G571), and is written off the
 event loop, so a non-English transfer no longer stalls other live calls while

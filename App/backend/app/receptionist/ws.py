@@ -81,6 +81,58 @@ def _control_message(raw: str) -> dict[str, Any] | None:
 #: How long teardown waits for the Pipecat runner before cancelling it outright.
 _PIPELINE_STOP_TIMEOUT_S = 5.0
 
+#: How often a listen socket checks that the call it listens to is still bridged.
+_LISTEN_POLL_S = 0.5
+
+# Admission for staff sockets (G304). The caller's socket has had a cap since
+# it shipped; the lobby, the live transcript and the officer's audio socket had
+# none, so one account, or one address before sign-in, could hold any number.
+STAFF_STREAMS_PER_USER = 8  # lobby and live transcripts, across an officer's tabs
+STAFF_STREAMS_TOTAL = 128
+STAFF_AUDIO_PER_USER = 3
+STAFF_AUDIO_TOTAL = 48
+#: Sockets one address may have open that have not signed in yet (5 s each).
+_UNSIGNED_PER_ADDRESS = 32
+#: People who may listen to one call at once.
+LISTENERS_PER_CALL = 5
+
+
+class _StaffSlot:
+    """A staff socket's admission slot: held by the address until sign-in, then by the user."""
+
+    def __init__(self, pool: str, websocket: WebSocket, *, per_user: int, total: int) -> None:
+        self.pool, self.per_user, self.total = pool, per_user, total
+        host = websocket.client.host if websocket.client else "unknown"
+        self.key = f"anon::{host}"
+        self.held = False
+
+    def acquire(self) -> bool:
+        self.held = try_acquire(self.pool, self.key, per_user_cap=_UNSIGNED_PER_ADDRESS, global_cap=self.total)
+        return self.held
+
+    def claim(self, user_id: str) -> bool:
+        """Move the slot to the signed-in user; False when they already hold their share."""
+        if not rekey_slot(self.pool, self.key, user_id, per_user_cap=self.per_user):
+            return False
+        self.key = user_id
+        return True
+
+    def release(self) -> None:
+        if self.held:
+            release(self.pool, self.key)
+            self.held = False
+
+
+def _session_expiry(claims: Any) -> float | None:
+    """When the token that opened a socket expires, or ``None`` when it does not say."""
+    if isinstance(claims, dict) and isinstance(claims.get("exp"), (int, float)):
+        return float(claims["exp"])
+    return None
+
+
+def _expired(expiry: float | None) -> bool:
+    return expiry is not None and time.time() >= expiry
+
 
 async def _stop_pipeline(room: Any, task: Any) -> None:
     """Cancel the call's Pipecat task and wait briefly for its runner to finish."""
@@ -702,6 +754,18 @@ async def staff_calls_stream_endpoint(
         await websocket.close(code=4403)
         return
     await websocket.accept()
+    slot = _StaffSlot("call_staff_stream", websocket, per_user=STAFF_STREAMS_PER_USER, total=STAFF_STREAMS_TOTAL)
+    if not slot.acquire():
+        await websocket.close(code=1013)
+        return
+    try:
+        await _staff_calls_stream(websocket, call_id, slot)
+    finally:
+        slot.release()
+
+
+async def _staff_calls_stream(websocket: WebSocket, call_id: str | None, slot: _StaffSlot) -> None:
+    """The lobby or one call's live transcript, for a socket already admitted."""
     try:
         auth_message = json.loads(await asyncio.wait_for(websocket.receive_text(), timeout=5.0))
         if not isinstance(auth_message, dict) or auth_message.get("type") != "authenticate":
@@ -716,39 +780,47 @@ async def staff_calls_stream_endpoint(
     if role not in ("ura_staff", "ura_admin", "ura_auditor"):
         await websocket.close(code=4403)
         return
+    if not slot.claim(user_id or ""):
+        await websocket.close(code=1013)
+        return
     loop = asyncio.get_running_loop()
     tenant_scope = (tenant_id or "default") if tenant_enabled() else None
 
     queue: asyncio.Queue[dict[str, Any]]
+    #: Turns up to this sequence number are in the snapshot already.
+    snapshot_seq = 0
     if call_id:
-        # Per-call Live mode
-        snapshot = get_call_with_turns(call_id, tenant_id=tenant_scope)
-        if snapshot is None:
-            await websocket.close(code=4404)
-            return
-        log_voice_event(
-            user_id=user_id or "",
-            session_id=call_id,
-            event_type="staff_viewed_call",
-            metadata={"actor_role": role, "view": "live"},
-            tenant_id=tenant_id or "default",
-        )
-        await asyncio.wait_for(
-            websocket.send_text(
-                json.dumps({
-                    "type": "snapshot",
-                    "call": snapshot,
-                    "turns": snapshot.get("turns", []),
-                })
-            ),
-            timeout=5.0,
-        )
+        # Per-call Live mode. Subscribe first, then read: a turn written while
+        # the snapshot was being read and sent used to fall between the two
+        # and never reach the officer's screen.
         queue = hub.subscribe_call(call_id, loop)
+        try:
+            snapshot = await asyncio.to_thread(get_call_with_turns, call_id, tenant_id=tenant_scope)
+            if snapshot is None:
+                hub.unsubscribe_call(call_id, queue)
+                await websocket.close(code=4404)
+                return
+            turns = snapshot.get("turns", [])
+            snapshot_seq = max((int(t.get("seq") or 0) for t in turns), default=0)
+            log_voice_event(
+                user_id=user_id or "",
+                session_id=call_id,
+                event_type="staff_viewed_call",
+                metadata={"actor_role": role, "view": "live"},
+                tenant_id=tenant_id or "default",
+            )
+            await asyncio.wait_for(
+                websocket.send_text(json.dumps({"type": "snapshot", "call": snapshot, "turns": turns})),
+                timeout=5.0,
+            )
+        except BaseException:
+            hub.unsubscribe_call(call_id, queue)
+            raise
     else:
         # Lobby mode (metadata only)
         queue = hub.subscribe_lobby(loop, tenant_id=tenant_scope)
 
-    token_exp = float(claims["exp"]) if isinstance(claims, dict) and isinstance(claims.get("exp"), (int, float)) else None
+    token_exp = _session_expiry(claims)
     try:
         while True:
             if token_exp is not None and time.time() >= token_exp:
@@ -760,6 +832,11 @@ async def staff_calls_stream_endpoint(
                 if token_exp is not None and time.time() >= token_exp:
                     await websocket.close(code=4401)
                     break
+                if (
+                    event.get("type") == "turn"
+                    and int((event.get("data") or {}).get("seq") or 0) <= snapshot_seq
+                ):
+                    continue  # the snapshot already showed it
                 await asyncio.wait_for(websocket.send_text(json.dumps(event)), timeout=5.0)
             except asyncio.TimeoutError:
                 await asyncio.wait_for(
@@ -791,16 +868,39 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
         await websocket.close(code=4403)
         return
     await websocket.accept()
+    slot = _StaffSlot("call_staff_audio", websocket, per_user=STAFF_AUDIO_PER_USER, total=STAFF_AUDIO_TOTAL)
+    if not slot.acquire():
+        await websocket.close(code=1013)
+        return
+    try:
+        await _officer_audio(websocket, call_id, slot)
+    finally:
+        slot.release()
+
+
+async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -> None:
+    """An officer joining a call's audio, or someone listening to it, on a socket already admitted.
+
+    The socket lives no longer than the session that opened it: each loop
+    below closes with 4401 when the token expires. A listener is simply cut
+    off. An officer on the call goes into the reconnect grace, so the caller
+    is told and kept while the officer signs in again, and requeued if they
+    do not.
+    """
     try:
         auth_message = json.loads(await asyncio.wait_for(websocket.receive_text(), timeout=5.0))
         if not isinstance(auth_message, dict) or auth_message.get("type") != "authenticate":
             raise ValueError("missing WebSocket authentication message")
-        user_id, tenant_id, role, _ = _resolve_ws_principal(
+        user_id, tenant_id, role, claims = _resolve_ws_principal(
             websocket, required=True, token_override=str(auth_message.get("access_token") or "")
         )
     except Exception:
         await websocket.close(code=4401)
         return
+    if not slot.claim(user_id or ""):
+        await websocket.close(code=1013)
+        return
+    token_exp = _session_expiry(claims)
 
     listen_mode = websocket.query_params.get("listen", "").lower() in ("true", "1")
     if listen_mode:
@@ -813,6 +913,9 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
             return
         if tenant_enabled() and room.state.tenant_id != (tenant_id or "default"):
             await websocket.close(code=4404)
+            return
+        if len(room.listeners) + len(room.state.livekit_observer_identities) >= LISTENERS_PER_CALL:
+            await websocket.close(code=1013)
             return
         # Listening to a live call is the most sensitive read on the desk:
         # recorded before any audio flows, on either transport.
@@ -848,6 +951,9 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
             }))
             try:
                 while room.state.mode == "bridged":
+                    if _expired(token_exp):
+                        await websocket.close(code=4401)
+                        break
                     try:
                         await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
                     except asyncio.TimeoutError:
@@ -870,13 +976,27 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
         room.add_listener(queue)
         try:
             while room.state.mode == "bridged":
-                chunk = await queue.get()
+                if _expired(token_exp):
+                    await websocket.close(code=4401)
+                    break
+                # Audio stops when the call ends, is held or is passed on, and
+                # nothing more is ever queued: an unbounded get() left this
+                # handler, its socket and the whole room alive for good.
+                try:
+                    chunk = await asyncio.wait_for(queue.get(), timeout=_LISTEN_POLL_S)
+                except asyncio.TimeoutError:
+                    continue
                 await websocket.send_bytes(chunk)
-        except (WebSocketDisconnect, Exception):
+        except WebSocketDisconnect:
             pass
+        except Exception:
+            logger.debug("Listen connection closed", exc_info=True)
         finally:
+            # No `return` here: it would swallow a cancellation.
             room.remove_listener(queue)
-            return
+        with contextlib.suppress(Exception):
+            await websocket.close()
+        return
 
     # Only officers join a caller's audio: auditors listen at most, and
     # administrators audit the service rather than handle callers.
@@ -998,6 +1118,9 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
                 room.state.mode == "transferring"
                 and room.state.reconnecting_officer == user_id
             ):
+                if _expired(token_exp):
+                    await websocket.close(code=4401)
+                    break
                 try:
                     raw = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
                 except asyncio.TimeoutError:
@@ -1047,7 +1170,16 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
 
     try:
         while room.state.mode == "bridged":
-            msg = await websocket.receive()
+            if token_exp is None:
+                msg = await websocket.receive()
+            else:
+                try:
+                    msg = await asyncio.wait_for(websocket.receive(), timeout=max(0.0, token_exp - time.time()))
+                except asyncio.TimeoutError:
+                    await websocket.close(code=4401)
+                    break
+            if msg.get("type") == "websocket.disconnect":
+                break
             if "bytes" in msg and msg["bytes"]:
                 await officer_leg.handle_officer_message(msg["bytes"])
             elif "text" in msg and msg["text"]:

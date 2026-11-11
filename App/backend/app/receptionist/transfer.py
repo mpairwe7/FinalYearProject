@@ -119,17 +119,23 @@ def _update_ticket_priority(ticket_id: str, priority: str) -> None:
         logger.warning("Could not raise ticket %s to %s", ticket_id, priority, exc_info=True)
 
 
-def is_staff_available(target_team: str = "") -> bool:
+def is_staff_available(target_team: str = "", tenant_id: str | None = None) -> bool:
     """Whether any officer is signed in (on shift) for *target_team* — anyone at all when empty.
+
+    With tenancy on, only officers of *tenant_id* count: another tenant's
+    officer cannot take the call, and counting them held the caller for the
+    whole wait for nobody (G584).
 
     Fails open: when presence cannot be read the call is queued as before,
     because telling a caller nobody is there when someone might be is the
     worse mistake.
     """
     try:
+        from ..tenancy import tenant_enabled
         from .presence import count_active_officers
 
-        return count_active_officers(target_team) > 0
+        scope = (tenant_id or "default") if tenant_enabled() else None
+        return count_active_officers(target_team, tenant_id=scope) > 0
     except Exception:
         logger.warning("Officer presence unavailable; queueing the call anyway", exc_info=True)
         return True

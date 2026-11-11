@@ -30,6 +30,8 @@ import re
 import time
 from typing import Any
 
+from ..escalation_notify import known_teams
+from ..tenancy import tenant_enabled
 from . import livekit, presence
 from .config import get_claim_timeout_s, get_hold_update_s, get_officer_reconnect_grace_s
 from .hub import hub
@@ -237,14 +239,21 @@ def _clear_reservation(room: CallRoom) -> None:
     _cancel_reservation(room)
 
 
-def _available_officer_name(officer_id: str) -> str:
+def _available_officer_name(officer_id: str, tenant_id: str = "default") -> str:
     """The display name of *officer_id* when they can take a call now; refused otherwise.
 
     A reservation for an officer who is away, on a call or signed out would
-    hold the caller for the whole window for nobody.
+    hold the caller for the whole window for nobody. With tenancy on, so
+    would one for an officer of another tenant, who cannot see the call; the
+    refusal reads the same, so it does not confirm that such an officer exists.
     """
     record = presence.get_presence(officer_id)
-    if record is None or record.get("status") != "available":
+    other_tenant = (
+        record is not None
+        and tenant_enabled()
+        and str(record.get("tenant_id") or "default") != (tenant_id or "default")
+    )
+    if record is None or other_tenant or record.get("status") != "available":
         raise DeskError(409, "That officer is not available to take the call")
     return str(record.get("display_name") or "").strip() or officer_display_name(officer_id)
 
@@ -320,6 +329,9 @@ async def bridge(room: CallRoom, officer_leg: Any, officer_id: str, speech_model
         room.state.officer_id = officer_id
         room.state.officer_name = name
         room.state.bridged_at = now
+        if officer_id in room.state.handled_by:
+            room.state.handled_by.remove(officer_id)
+        room.state.handled_by.append(officer_id)  # the last one is on the call now
     # The officer came before the caller answered the review asked as the
     # transfer began: it is unanswered (review.py), never left pending.
     if room.state.review_state == "asking_transfer":
@@ -328,8 +340,8 @@ async def bridge(room: CallRoom, officer_leg: Any, officer_id: str, speech_model
         settle(room)
     # Answered: whatever an earlier unanswered transfer left owing is settled.
     update_call(room.call_id, status="bridged", officer_id=officer_id, bridged_at=now,
-                needs_callback=False, callback_reason="")
-    presence.set_on_call(officer_id, room.call_id, display_name=name)
+                needs_callback=False, callback_reason="", handled_by_json=list(room.state.handled_by))
+    presence.set_on_call(officer_id, room.call_id, display_name=name, tenant_id=room.state.tenant_id)
     if room.state.ticket_id:
         try:
             from .. import database as db
@@ -492,11 +504,18 @@ async def transfer(
             raise DeskError(409, "Call is not currently bridged with an officer")
         if room.state.officer_id != officer_id:
             raise DeskError(403, "Another officer is on this call")
+        # Checked before anything changes, like the named officer below: a
+        # team is a queue the consoles filter on, and a note goes into the
+        # transcript, so neither is taken as sent.
+        if team and team not in known_teams():
+            raise DeskError(400, "That is not a team a call can be passed to")
+        if len(note or "") > WRAPUP_NOTE_MAX:
+            raise DeskError(400, f"A transfer note is at most {WRAPUP_NOTE_MAX} characters")
         reserved_name = ""
         if target_officer_id:
             if target_officer_id == officer_id:
                 raise DeskError(400, "You are already on this call")
-            reserved_name = _available_officer_name(target_officer_id)
+            reserved_name = _available_officer_name(target_officer_id, room.state.tenant_id)
         now = time.time()
         previous_identity = room.state.livekit_officer_identity
         if room.state.livekit_room and previous_identity:
@@ -676,6 +695,27 @@ def _caller_satisfaction(score: Any, status: str | None) -> tuple[str, int | Non
     raise DeskError(400, "caller_satisfaction_status must be 'answered' or 'not_said'")
 
 
+#: A wrap-up note is a few sentences. The bound keeps a pasted transcript, or
+#: a client that sends megabytes, out of the row and the ticket.
+WRAPUP_NOTE_MAX = 4000
+
+
+def _handlers(call: dict[str, Any], room: CallRoom | None) -> list[str]:
+    """The officers who have been connected to *call*, in order; the last is the latest.
+
+    From the row, with the live room's list for a call still in progress and
+    the row's own ``officer_id`` for rows written before the list existed.
+    """
+    recorded = call.get("handled_by")
+    handlers = [str(h) for h in recorded if h] if isinstance(recorded, list) else []
+    if room is not None:
+        handlers = [h for h in handlers if h not in room.state.handled_by] + list(room.state.handled_by)
+    latest = str(call.get("officer_id") or "")
+    if latest and latest not in handlers:
+        handlers.append(latest)
+    return handlers
+
+
 async def wrapup(
     call_id: str,
     officer_id: str,
@@ -688,7 +728,18 @@ async def wrapup(
     caller_satisfaction_status: str | None = None,
     officer_name: str = "",
 ) -> dict[str, Any]:
-    """Save call outcome and wrap-up notes, apply ticket action, restore presence.
+    """Save an officer's wrap-up of a call they handled, apply the ticket action, restore presence.
+
+    **Who may.** An officer who was connected to the call, once they are off
+    it: after it ended, or after they passed it on. The officer still on the
+    call ends or transfers it first. A call no officer ever reached (the
+    caller left the queue; a callback) can be wrapped up by any officer.
+    Before, any officer could wrap up any call, a live one included (G305).
+
+    **What is kept.** Each officer's outcome and note, under their id
+    (``wrapups``); saving again replaces that officer's own. The call's
+    ``outcome`` / ``wrapup_note`` are the last handling officer's, whichever
+    of them saves first.
 
     *caller_satisfaction* is what the caller told the officer when asked
     before the call ended, on the same 5-level scale taxpayers rate officer
@@ -702,6 +753,22 @@ async def wrapup(
         raise DeskError(404, "Call not found")
     if ticket_action not in (None, "", "create", "resolve", "keep_open"):
         raise DeskError(400, "Invalid ticket action")
+    valid_outcomes = {"resolved", "follow_up", "callback", "referred", "abandoned", "ai_resolved"}
+    if outcome not in valid_outcomes:
+        raise DeskError(400, f"Invalid outcome '{outcome}'")
+    if len(note or "") > WRAPUP_NOTE_MAX:
+        raise DeskError(400, f"A wrap-up note is at most {WRAPUP_NOTE_MAX} characters")
+    satisfaction = _caller_satisfaction(caller_satisfaction, caller_satisfaction_status)
+
+    room = registry.get(call_id)
+    live = room is not None and room.state.mode != "ended"
+    handlers = _handlers(call, room if live else None)
+    if live and room is not None and room.state.mode == "bridged" and room.state.officer_id == officer_id:
+        raise DeskError(409, "You are still on this call: end it or pass it on before wrapping up")
+    if (live or handlers) and officer_id not in handlers:
+        # Live and never theirs (the AI or the queue still has it), or handled by others.
+        raise DeskError(403, "Only an officer who handled this call can wrap it up")
+
     ticket_id = call.get("ticket_id")
     if ticket_action:
         from ..flags import flags
@@ -710,23 +777,27 @@ async def wrapup(
             raise DeskError(409, "Ticket queue is unavailable")
         if ticket_action in ("resolve", "keep_open") and not ticket_id:
             raise DeskError(409, "Call has no linked ticket")
-    valid_outcomes = {"resolved", "follow_up", "callback", "referred", "abandoned", "ai_resolved"}
-    if outcome not in valid_outcomes:
-        raise DeskError(400, f"Invalid outcome '{outcome}'")
-    satisfaction = _caller_satisfaction(caller_satisfaction, caller_satisfaction_status)
+        if ticket_action == "resolve" and live:
+            # The caller is still on the line, waiting for the next officer.
+            raise DeskError(409, "The call is still in progress: its ticket stays open until it ends")
 
     now = time.time()
-    needs_callback = 1 if outcome == "callback" else 0
-    callback_reason = "officer_outcome" if outcome == "callback" else ""
-
-    update_kwargs: dict[str, Any] = {
+    entry = {
+        "officer_id": officer_id,
+        "officer_name": officer_name,
         "outcome": outcome,
-        "wrapup_note": note,
-        "wrapup_at": now,
+        "note": note,
+        "at": now,
     }
-    if needs_callback:
-        update_kwargs["needs_callback"] = 1
-        update_kwargs["callback_reason"] = callback_reason
+    saved = [w for w in call.get("wrapups") or [] if isinstance(w, dict) and w.get("officer_id") != officer_id]
+    update_kwargs: dict[str, Any] = {"wrapups_json": [*saved, entry]}
+    # The call's own outcome is its last officer's. An earlier officer's
+    # wrap-up stands in for it only until the last officer saves theirs.
+    latest = handlers[-1] if handlers else officer_id
+    if officer_id == latest or not call.get("wrapup_at"):
+        update_kwargs.update(outcome=outcome, wrapup_note=note, wrapup_at=now)
+        if outcome == "callback":
+            update_kwargs.update(needs_callback=1, callback_reason="officer_outcome")
 
     if ticket_action:
         from .. import database as db
@@ -749,14 +820,23 @@ async def wrapup(
                         reason=f"Call wrapup: {outcome}",
                         modality="voice",
                     )
-                    update_kwargs["ticket_id"] = t["id"]
+                    # Linked to the call at once, in its own write: a retry of
+                    # a save that fails further down finds the ticket instead
+                    # of opening a second one.
+                    _link_new_ticket(call_id, str(t["id"]))
                 else:
                     db.update_ticket(ticket_id, staff_note=note)
+        except DeskError:
+            raise
         except Exception as exc:
             logger.warning("Failed applying ticket action '%s' on %s", ticket_action, call_id, exc_info=True)
             raise DeskError(503, "Ticket action could not be completed") from exc
 
-    update_call(call_id, **update_kwargs)
+    try:
+        update_call(call_id, **update_kwargs)
+    except Exception as exc:
+        logger.warning("Could not save the wrap-up of call %s", call_id, exc_info=True)
+        raise DeskError(503, "The wrap-up could not be saved. Nothing was lost: save it again.") from exc
 
     if rating is not None:
         try:
@@ -790,16 +870,18 @@ async def wrapup(
         except Exception:
             logger.warning("Failed recording caller satisfaction on wrapup for %s", call_id, exc_info=True)
 
-    presence.finish_wrap_up(officer_id)
+    try:
+        presence.finish_wrap_up(officer_id)
+    except Exception:
+        logger.warning("Could not restore officer presence after the wrap-up of %s", call_id, exc_info=True)
 
     # An officer who passed the call on wraps up while the caller still waits
     # for the next one: consoles must not take this for the end of the call.
-    live_room = registry.get(call_id)
     hub.publish_lobby("call.wrapped_up", {
         "call_id": call_id,
         "outcome": outcome,
         "officer_id": officer_id,
-        "live": live_room is not None and live_room.state.mode != "ended",
+        "live": live,
     })
     result: dict[str, Any] = {"wrapped_up": True, "call_id": call_id, "outcome": outcome}
     if satisfaction is not None:
@@ -811,14 +893,44 @@ async def wrapup(
     return result
 
 
+def _link_new_ticket(call_id: str, ticket_id: str) -> None:
+    """Record on *call_id* the ticket its wrap-up just opened; withdraw the ticket if that fails.
+
+    An unlinked ticket would be opened again by the officer's next attempt,
+    leaving two for one call.
+    """
+    try:
+        update_call(call_id, ticket_id=ticket_id)
+    except Exception as exc:
+        logger.warning("Ticket %s could not be linked to call %s; withdrawing it", ticket_id, call_id, exc_info=True)
+        try:
+            from .. import database as db
+
+            db.update_ticket(
+                ticket_id,
+                status="wontfix",
+                staff_note="Opened at a call wrap-up that could not be saved; superseded by the officer's retry.",
+            )
+        except Exception:
+            logger.exception("Ticket %s is orphaned: it could be neither linked to call %s nor withdrawn", ticket_id, call_id)
+        raise DeskError(503, "Ticket action could not be completed") from exc
+
+
 async def callback_done(call_id: str, officer_id: str, note: str = "") -> dict[str, Any]:
     """Mark an open callback as completed by an officer."""
     call = get_call(call_id)
     if not call:
         raise DeskError(404, "Call not found")
+    if len(note or "") > WRAPUP_NOTE_MAX:
+        raise DeskError(400, f"A callback note is at most {WRAPUP_NOTE_MAX} characters")
     ok = store_callback_done(call_id, done_by=officer_id, note=note)
     if not ok:
-        raise DeskError(400, "Could not mark callback done")
+        latest = get_call(call_id) or {}
+        done_by = str(latest.get("callback_done_by") or "")
+        if done_by:
+            raise DeskError(409, "This callback was already completed", claimed_by=done_by,
+                            officer_name=officer_display_name(done_by))
+        raise DeskError(409, "This call does not owe a callback")
     return {"ok": True, "call_id": call_id}
 
 

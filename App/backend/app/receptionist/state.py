@@ -80,6 +80,9 @@ class CallState:
     latencies: list[dict[str, float]] = field(default_factory=list)
     officer_name: str | None = None
     officer_id: str | None = None
+    # Every officer who has been connected to this call, in order (desk.bridge).
+    # They, and only they, may save its wrap-up.
+    handled_by: list[str] = field(default_factory=list)
     # Call Desk: the officer holding the call (claimed, not yet connected or
     # connected), and when their audio joined.
     claimed_by: str = ""

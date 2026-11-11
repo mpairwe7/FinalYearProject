@@ -4,6 +4,38 @@ Operator and deployment runbook for the browser voice receptionist powered by
 Pipecat 1.15, self-hosted LiveKit WebRTC media, Whisper-SALT confidence scoring,
 ClarifyGate terminology disambiguation, and staff takeover.
 
+### Assurance update — 2026-11-11, records and accountability (ADR-0040)
+
+Phase 2 of [the 11 November review](../plans/receptionist-assurance-2026-11-11.md).
+What an operator, an officer or an auditor will see differently:
+
+- **Every call turn is in the audit ledger.** With `audit_ledger` on, each
+  caller turn the AI handles writes one `generate` row with `channel: "call"`:
+  crisis turns, requests for an officer, repeats and goodbyes included. The
+  reply digest is of what the caller was told, in the call's language. A turn
+  the caller talked over is `cancelled`, a slow one `deadline_exceeded`, a
+  failed one `failed`. A turn while an officer has the call writes no AI row.
+- **Wrap-up belongs to the officers who handled the call.** An officer who was
+  never on a call gets 403; the officer still on it gets 409 until they end or
+  pass it on. On a transferred call both officers' notes are kept
+  (`wrapups` on the call record) and the call's outcome is the last officer's.
+  A call nobody reached can be wrapped up by any officer.
+- **Officers see their own tenant's colleagues.** The presence board, the
+  "is anyone on shift" check and the presence events are per tenant when
+  `multi_tenant` is on. A transfer to a named officer of another tenant is
+  refused as "not available".
+- **A staff socket ends with the session.** The officer's audio socket and a
+  listener's close with 4401 when the token expires. An officer on a call then
+  shows as reconnecting to the caller and has the reconnect grace to sign in
+  again. Staff sockets are capped per user (`STAFF_STREAMS_PER_USER` 8,
+  `STAFF_AUDIO_PER_USER` 3, in `receptionist/ws.py`); over the cap the socket
+  closes with 1013. A call has at most five listeners.
+- **The call summary no longer touches a ticket's SLA.** It adds its note only
+  when the ticket has none and never stamps a first response.
+- **Retention on Postgres.** Resolved tickets are purged whether or not the
+  call tables exist. If `TTL cleanup failed for voice_call_turns` appears, only
+  that table's purge was skipped.
+
 ### Assurance update — 2026-11-11 (ADR-0039)
 
 Handoff and caller safety, phase 1 of

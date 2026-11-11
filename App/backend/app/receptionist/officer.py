@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 class OfficerLeg:
     """Manages the officer's WebSocket connection and audio bridge to the caller."""
 
+    #: Officer utterances that may wait for transcription. Each one used to
+    #: get a task of its own, unbounded and never cancelled, each parking a
+    #: worker thread for up to the speech deadline (G304).
+    TRANSCRIPTION_BACKLOG = 4
+
     def __init__(
         self,
         ws: Any,
@@ -34,6 +39,10 @@ class OfficerLeg:
         self.vad = EnergyVAD()
         self._caller_audio_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=50)
         self._sender_task: asyncio.Task | None = None
+        # Officer utterances waiting to be transcribed, and the one task that
+        # works through them (queue_transcription).
+        self._utterances: asyncio.Queue[bytes] = asyncio.Queue(maxsize=self.TRANSCRIPTION_BACKLOG)
+        self._transcriber: asyncio.Task | None = None
         self._running = True
         self.on_hold = False
 
@@ -84,7 +93,7 @@ class OfficerLeg:
             if complete and len(self.vad.audio_buffer) > 0:
                 audio_to_transcribe = bytes(self.vad.audio_buffer)
                 self.vad.reset()
-                asyncio.create_task(self._transcribe_officer_turn(audio_to_transcribe))
+                self.queue_transcription(audio_to_transcribe)
 
         elif isinstance(data, str):
             try:
@@ -93,6 +102,36 @@ class OfficerLeg:
                     await self.room.end("officer_hangup")
             except Exception:
                 pass
+
+    def queue_transcription(self, pcm_bytes: bytes) -> None:
+        """Hand one officer utterance to the leg's single transcription worker.
+
+        One at a time, in order. When the backlog is full the oldest waiting
+        utterance is dropped: the caller heard it live, and only its line in
+        the transcript is lost, which is better than a backlog that grows.
+        """
+        if not self._running or self.speech_model is None:
+            return
+        if self._utterances.full():
+            try:
+                self._utterances.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            logger.debug("Officer transcription backlog full on call %s; dropped the oldest", self.room.call_id)
+        try:
+            self._utterances.put_nowait(pcm_bytes)
+        except asyncio.QueueFull:
+            return
+        if self._transcriber is None or self._transcriber.done():
+            self._transcriber = asyncio.create_task(self._transcribe_backlog())
+
+    async def _transcribe_backlog(self) -> None:
+        while self._running:
+            try:
+                pcm_bytes = self._utterances.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+            await self._transcribe_officer_turn(pcm_bytes)
 
     async def _transcribe_officer_turn(self, pcm_bytes: bytes) -> None:
         try:
@@ -133,6 +172,8 @@ class OfficerLeg:
         self._running = False
         if self._sender_task:
             self._sender_task.cancel()
+        if self._transcriber is not None and not self._transcriber.done():
+            self._transcriber.cancel()
         try:
             await self.ws.close()
         except Exception:

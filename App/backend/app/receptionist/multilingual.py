@@ -84,6 +84,7 @@ def build_multilingual_pipeline(
     router.brain = brain
     brain.on_switch_interrupt = router.switch_passed
     brain.turn_claimed = router.claims_turn
+    brain.on_language_change = policy.adopt
 
     sentinel = LanguageSentinel(room, speech_model, router, languages)
     router.interrupt = sentinel.interrupt_for_switch

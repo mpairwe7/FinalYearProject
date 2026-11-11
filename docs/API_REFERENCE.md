@@ -2035,7 +2035,47 @@ The per-call stream and the officer's audio socket both receive
 
 ---
 
+#### Officer presence
+
+```http
+PUT /v1/admin/officers/me/presence
+GET /v1/admin/officers/presence
+```
+
+```json
+{"status": "away", "languages": ["en", "lg"], "teams": ["disputes"]}
+```
+
+Officers only for the PUT. Since ADR-0040 (G584) the body is validated: `status`
+is one of `available`, `busy`, `away`, `on_call`, `wrap_up`, `offline`;
+`languages` are locales the service supports; `teams` are teams a call can be
+passed to; `display_name` is at most 80 characters. Anything else is 422. While
+this server has the officer on a live call, a heartbeat cannot change their
+status to anything but `on_call`. With `multi_tenant` on, the GET returns the
+caller's tenant's officers only, and `officer.presence` lobby events reach that
+tenant's consoles only.
+
+Staff WebSockets (`/v1/admin/calls/stream`, `/v1/admin/calls/{call_id}/audio`)
+close with **4401** when the token that opened them expires and with **1013**
+when the user already holds their share of sockets or the call already has five
+listeners.
+
+---
+
 #### Call wrap-up: the caller's satisfaction
+
+Ownership (2026-11-11, ADR-0040, G305): a wrap-up is accepted from an officer
+who was connected to the call, once they are off it. **403** for an officer who
+never was, or for anyone while the call is still with the AI or the queue;
+**409** for the officer still on the call (end it or pass it on first), and for
+`ticket_action: "resolve"` while the caller is still on the line. A call no
+officer reached can be wrapped up by any officer of the tenant. Each officer's
+outcome and note are kept under `wrapups` on the call record
+(`[{officer_id, officer_name, outcome, note, at}]`); `outcome` and
+`wrapup_note` are the last handling officer's. A note is at most 4,000
+characters. **503** means the wrap-up or its ticket action could not be saved
+and nothing was lost: save it again (a ticket it opened is linked first and is
+not opened twice).
 
 Receptionist assurance update (2026-10-30, ADR-0020): `ticket_action` accepts
 `create`, `resolve`, or `keep_open` (omit it for no ticket action). An unknown
