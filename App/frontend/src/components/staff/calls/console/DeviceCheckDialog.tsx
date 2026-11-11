@@ -17,23 +17,40 @@ export function DeviceCheckDialog({ open, onClose }: { open: boolean; onClose: (
   const meterRef = useRef<HTMLSpanElement>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  /**
+   * Which run of the check is current. A second run, or closing the dialog,
+   * makes an earlier one stale: its microphone, granted later, is stopped at
+   * once instead of being left open with its meter running (G604).
+   */
+  const runRef = useRef(0);
+
+  const stopMeter = () => {
+    cleanupRef.current?.();
+    cleanupRef.current = null;
+  };
 
   useEffect(() => {
     if (open) dialogRef.current?.focus();
     return () => {
-      cleanupRef.current?.();
-      cleanupRef.current = null;
+      runRef.current += 1;
+      stopMeter();
     };
   }, [open]);
 
   if (!open) return null;
 
   const testMic = async () => {
+    const run = ++runRef.current;
+    stopMeter();
     setStatus('asking');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true },
       });
+      if (run !== runRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
       const ctx = new AudioContext();
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 512;
@@ -56,6 +73,7 @@ export function DeviceCheckDialog({ open, onClose }: { open: boolean; onClose: (
       setStatus('ready');
       setMicReady(true);
     } catch {
+      if (run !== runRef.current) return;
       setStatus('denied');
       setMicReady(false);
     }
@@ -77,8 +95,8 @@ export function DeviceCheckDialog({ open, onClose }: { open: boolean; onClose: (
   };
 
   const close = () => {
-    cleanupRef.current?.();
-    cleanupRef.current = null;
+    runRef.current += 1;
+    stopMeter();
     onClose();
   };
 

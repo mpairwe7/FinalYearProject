@@ -16,6 +16,7 @@ const livekit = vi.hoisted(() => ({
   callbacks: null as LiveKitCallbacks | null,
   closed: [] as number[],
   created: 0,
+  failUnmute: false,
 }));
 
 vi.mock('@/services/liveKitCallSession', () => ({
@@ -27,7 +28,9 @@ vi.mock('@/services/liveKitCallSession', () => ({
     }
     async connect() {}
     async close() { livekit.closed.push(this.index); }
-    async setMuted() {}
+    async setMuted(muted: boolean) {
+      if (!muted && livekit.failUnmute) throw new Error('Permission denied');
+    }
   },
 }));
 
@@ -35,6 +38,10 @@ const mic = vi.hoisted(() => ({
   onChunk: null as ((chunk: ArrayBuffer) => void) | null,
   stop: vi.fn(),
   fail: false,
+  /** Leave the permission prompt open until the test answers it. */
+  hold: false,
+  answer: null as null | { allow: () => void; deny: () => void },
+  started: 0,
 }));
 
 vi.mock('@/services/pcmPlayer', () => ({
@@ -49,6 +56,12 @@ vi.mock('@/services/pcmPlayer', () => ({
 vi.mock('@/services/voiceService', () => ({
   AudioRecorder: class {
     async startStreaming(onChunk: (chunk: ArrayBuffer) => void) {
+      mic.started += 1;
+      if (mic.hold) {
+        await new Promise<void>((resolve, reject) => {
+          mic.answer = { allow: resolve, deny: () => reject(new Error('NotAllowedError')) };
+        });
+      }
       if (mic.fail) throw new Error('NotAllowedError');
       mic.onChunk = onChunk;
       return mic.stop;
@@ -75,6 +88,11 @@ describe('officerCallSession', () => {
     vi.stubGlobal('WebSocket', FakeSocket);
     mic.fail = false;
     mic.onChunk = null;
+    mic.hold = false;
+    mic.answer = null;
+    mic.started = 0;
+    mic.stop.mockClear();
+    livekit.failUnmute = false;
     livekit.callbacks = null;
     livekit.closed = [];
     livekit.created = 0;
@@ -261,6 +279,11 @@ describe('officerCallSession', () => {
     const audio = FakeSocket.find('/audio')!;
     audio.open();
     audio.emit({ type: 'authenticated' });
+    // The microphone is on before the call ends. (These assertions on
+    // mic.stop used to pass on stops left over from earlier tests.)
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mic.onChunk).not.toBeNull();
     await endCall();
     expect(callsApi.endCall).toHaveBeenCalledWith('c1');
     expect(active()?.state).toBe('ending');
@@ -293,6 +316,9 @@ describe('officerCallSession', () => {
     const audio = FakeSocket.find('/audio')!;
     audio.open();
     audio.emit({ type: 'authenticated' });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mic.onChunk).not.toBeNull();
     await transferCall({ team: 'disputes', note: 'Escalating' });
     expect(callsApi.transferCall).toHaveBeenCalledWith('c1', { team: 'disputes', note: 'Escalating' });
     expect(active()?.state).toBe('wrap_up');
@@ -347,5 +373,70 @@ describe('officerCallSession', () => {
     const add = vi.spyOn(window, 'addEventListener');
     await takeCall('c1');
     expect(add).toHaveBeenCalledWith('beforeunload', expect.any(Function));
+  });
+
+  describe('after the call is over (G601, G609)', () => {
+    async function bridgedLegacyCall(callId = 'c1') {
+      await takeCall(callId);
+      const audio = FakeSocket.find(`/admin/calls/${callId}/audio`)!;
+      audio.open();
+      audio.emit({ type: 'authenticated' });
+      await Promise.resolve();
+      await Promise.resolve();
+      return audio;
+    }
+
+    it('a microphone granted after the call ended is stopped, and the next call gets its own', async () => {
+      mic.hold = true;
+      const audio = await bridgedLegacyCall();
+      expect(mic.started).toBe(1);
+
+      audio.shut(1006); // the call ends while the permission prompt is open
+      const after = active();
+      mic.answer!.allow();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(mic.stop).toHaveBeenCalled();
+      expect(active()).toEqual(after);
+
+      mic.hold = false;
+      finishWrapUp();
+      await bridgedLegacyCall('c2');
+      expect(mic.started).toBe(2);
+    });
+
+    it('a microphone refused after the call ended does not touch the call that is current', async () => {
+      mic.hold = true;
+      const audio = await bridgedLegacyCall();
+      audio.shut(1006);
+      const after = active();
+
+      mic.answer!.deny();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(callsApi.releaseCall).not.toHaveBeenCalled();
+      expect(active()).toEqual(after);
+    });
+
+    it('an un-mute that fails leaves the officer muted, and says so', async () => {
+      await takeCall('c1');
+      const audio = FakeSocket.find('/admin/calls/c1/audio')!;
+      audio.open();
+      audio.emit({ type: 'livekit_ready', url: 'wss://rtc.example.test', room: 'r', identity: 'i', token: 't' });
+      await Promise.resolve();
+      await Promise.resolve();
+      toggleMute();
+      expect(active()?.muted).toBe(true);
+
+      livekit.failUnmute = true;
+      toggleMute();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(active()?.muted).toBe(true);
+      expect(active()?.error).toMatch(/microphone/i);
+    });
   });
 });

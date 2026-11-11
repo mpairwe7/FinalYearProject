@@ -80,7 +80,16 @@ export function useReviewCall() {
 // outside React now — services/callLobbySocket.ts and
 // services/officerCallSession.ts — so they survive page navigation.
 
+/** Closed for good: calls off, session over, not staff, no such call. */
+const LIVE_FINAL_CLOSE_CODES = new Set([1001, 4401, 4403, 4404]);
+const LIVE_MAX_BACKOFF_MS = 15000;
+
+/** The per-call stream: `connecting`, `live`, `reconnecting` after a drop, `stopped` for good. */
+export type CallLiveStatus = 'connecting' | 'live' | 'reconnecting' | 'stopped';
+
 export function useCallLive(callId?: string | null) {
+  const [status, setStatus] = useState<CallLiveStatus>('connecting');
+  const [secondsRemaining, setSecondsRemaining] = useState<number | null>(null);
   const [call, setCall] = useState<CallRecord | null>(null);
   const [turns, setTurns] = useState<CallTurn[]>([]);
   const [interimCaption, setInterimCaption] = useState<{ speaker: string; text: string } | null>(null);
@@ -95,20 +104,55 @@ export function useCallLive(callId?: string | null) {
     const host = window.location.host;
     const url = `${protocol}//${host}/api/v1/admin/calls/stream?call_id=${encodeURIComponent(callId)}`;
 
+    // The transcript used to stop without a sign when its socket dropped, and
+    // never came back (G606). It reconnects with a backoff now, and each
+    // reconnect's snapshot replaces what was shown.
     let ws: WebSocket | null = null;
+    let disposed = false;
+    let retry: ReturnType<typeof setTimeout> | null = null;
+    let backoffMs = 1000;
+    let callEnded = false;
+    setStatus('connecting');
+    setSecondsRemaining(null);
 
-    try {
-      ws = new WebSocket(url);
-      ws.onopen = () => {
-        ws?.send(JSON.stringify({ type: 'authenticate', access_token: getAuthToken() }));
+    const open = () => {
+      if (disposed) return;
+      let socket: WebSocket;
+      try {
+        socket = new WebSocket(url);
+      } catch {
+        scheduleRetry();
+        return;
+      }
+      ws = socket;
+      socket.onopen = () => {
+        socket.send(JSON.stringify({ type: 'authenticate', access_token: getAuthToken() }));
       };
-      ws.onmessage = (event) => {
+      socket.onclose = (event: CloseEvent) => {
+        if (disposed || ws !== socket) return;
+        ws = null;
+        if (callEnded || LIVE_FINAL_CLOSE_CODES.has(event.code)) {
+          setStatus('stopped');
+          return;
+        }
+        setStatus('reconnecting');
+        scheduleRetry();
+      };
+      socket.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
+          if (msg.type === 'ready' || msg.type === 'snapshot') {
+            backoffMs = 1000;
+            setStatus('live');
+          }
           if (msg.type === 'snapshot') {
+            callEnded = msg.call?.status === 'ended';
             setCall(msg.call || null);
             setTurns(msg.turns || []);
             setBrief(msg.call?.brief || null);
+          } else if (msg.type === 'duration_warning') {
+            const seconds = Number(msg.data?.seconds_remaining);
+            setSecondsRemaining(Number.isFinite(seconds) && seconds > 0 ? seconds : 60);
           } else if (msg.type === 'brief') {
             setBrief(msg.data || null);
           } else if (msg.type === 'turn') {
@@ -117,6 +161,7 @@ export function useCallLive(callId?: string | null) {
           } else if (msg.type === 'caption') {
             setInterimCaption({ speaker: msg.data.speaker, text: msg.data.text });
           } else if (msg.type === 'status') {
+            if (msg.data?.status === 'ended') callEnded = true;
             setCall((prev) => (prev ? { ...prev, status: msg.data.status } : null));
           } else if (msg.type === 'language' && typeof msg.data?.language === 'string') {
             setCall((prev) => (prev ? { ...prev, locale: msg.data.language } : null));
@@ -127,22 +172,39 @@ export function useCallLive(callId?: string | null) {
           }
         } catch {}
       };
-    } catch {}
+    };
+
+    function scheduleRetry() {
+      if (disposed || retry) return;
+      retry = setTimeout(() => {
+        retry = null;
+        open();
+      }, backoffMs);
+      backoffMs = Math.min(backoffMs * 2, LIVE_MAX_BACKOFF_MS);
+    }
+
+    open();
 
     return () => {
+      disposed = true;
+      if (retry) clearTimeout(retry);
       setCall(null);
       setTurns([]);
       setInterimCaption(null);
       setBrief(null);
-      if (ws) {
+      const socket = ws;
+      ws = null;
+      if (socket) {
         try {
-          ws.close();
+          socket.close();
         } catch {}
       }
     };
   }, [callId]);
 
   return {
+    status: callId ? status : ('stopped' as CallLiveStatus),
+    secondsRemaining: callId ? secondsRemaining : null,
     call: callId ? call : null,
     turns: callId ? turns : [],
     interimCaption: callId ? interimCaption : null,

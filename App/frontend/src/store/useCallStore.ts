@@ -131,6 +131,11 @@ export const useCallStore = create<CallStoreState>((set) => ({
       status: 'consent',
       error: null,
       duration: 0,
+      // Nothing from the last call carries over: a caller who ended muted
+      // started the next call muted, under the last officer's name (G609).
+      isMuted: false,
+      officerName: null,
+      ticketRef: null,
       captions: [],
       currentCaption: null,
       isUserSpeaking: false,

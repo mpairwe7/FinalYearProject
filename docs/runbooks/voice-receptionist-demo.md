@@ -4,6 +4,29 @@ Operator and deployment runbook for the browser voice receptionist powered by
 Pipecat 1.15, self-hosted LiveKit WebRTC media, Whisper-SALT confidence scoring,
 ClarifyGate terminology disambiguation, and staff takeover.
 
+### Assurance update — 2026-11-11, the call screens (ADR-0042)
+
+- **A refused call says why.** "Calls are not available", "All our lines are
+  busy" or "The call was cut off", in the caller's language, with a button to
+  call again. "Thank you for calling URA" appears only when the call ended
+  normally.
+- **Checking whether calls are on, from outside.** A call socket is now
+  accepted before it is refused, so the HTTP status no longer tells: a probe
+  gets 101 either way. Calls are off when the socket then closes with **1001**
+  (after an `error` frame with `code: "unavailable"`); on when it stays open
+  waiting for `call_start`.
+- **The time limit is announced** a minute before it, on the caller's screen
+  and in the officer's call workspace, and the call ends at it on every
+  transport.
+- **The console shows when it is not live.** "Live call updates paused —
+  reconnecting" on every staff page while the lobby is down; "Live transcript
+  paused — reconnecting…" in a call while its transcript is.
+- **A refused microphone keeps the call**: the caller listens and types, and
+  can press the microphone to try again.
+- **New strings need a first-language check.** The Luganda, Runyankole, Acholi
+  and Swahili call messages and the tone notice added on 11 November were
+  written from the existing strings and have not been reviewed by speakers.
+
 ### Assurance update — 2026-11-11, starts safely and fails visibly (ADR-0041)
 
 What an operator sees differently after phase 3 of the 11 November review:

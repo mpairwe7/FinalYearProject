@@ -360,6 +360,58 @@ async def _forward_control(task: Any, data: dict[str, Any]) -> None:
             await task.queue_frame(CallTextTurnFrame(text=text))
 
 
+async def _refuse_after_accept(websocket: WebSocket, close_code: int, error_code: str | None = None) -> None:
+    """Accept the socket, say why it is refused, then close it with *close_code*.
+
+    A socket closed before it is accepted is answered with HTTP 403 during the
+    handshake, so a browser sees 1006 and never the code: "calls are off" and
+    "all lines are busy" read as a dropped call, and the staff console, which
+    hides its call layer on 1001, retried for good (G605). Only a page from
+    another site is still refused before accepting.
+    """
+    try:
+        await websocket.accept()
+        if error_code:
+            await websocket.send_text(json.dumps({"type": "error", "code": error_code, "recoverable": False}))
+        await websocket.close(code=close_code)
+    except Exception:
+        logger.debug("Could not tell a refused socket why", exc_info=True)
+
+
+#: How long before the ceiling the caller and the officers are told it is coming.
+DURATION_WARNING_S = 60.0
+
+
+async def _call_clock(room: Any) -> None:
+    """Warn a minute before the call's ceiling, then end the call there, on every transport (G602).
+
+    The warning used to be sent on the LiveKit path only, and the in-browser
+    path ended the call at the ceiling without a word. The caller's screen and
+    the call's live stream (the officer's console) both get
+    ``duration_warning``; a ceiling under two minutes is too short to warn.
+    """
+    try:
+        ceiling = get_max_call_s()
+    except Exception:
+        ceiling = 900.0
+    started = float(room.state.started_at or time.time())
+    try:
+        if ceiling >= 2 * DURATION_WARNING_S:
+            await asyncio.sleep(max(0.0, started + ceiling - DURATION_WARNING_S - time.time()))
+            if room.state.mode == "ended":
+                return
+            remaining = max(1, int(round(started + ceiling - time.time())))
+            payload = {"type": "duration_warning", "seconds_remaining": remaining}
+            await desk._send_to_caller(room, payload)
+            with contextlib.suppress(Exception):
+                hub.publish_call(room.call_id, "duration_warning", payload)
+        await asyncio.sleep(max(0.0, started + ceiling - time.time()))
+        if room.state.mode != "ended":
+            await desk.hang_up_caller(room, "max_call_duration")
+    except asyncio.CancelledError:
+        return
+
+
 async def _refuse_officer(websocket: WebSocket, detail: str) -> None:
     """Tell an officer's console why joining stopped, then close with 4409."""
     try:
@@ -381,7 +433,16 @@ class ReviewCallRequest(BaseModel):
 
 async def call_stream_endpoint(websocket: WebSocket) -> None:
     """Taxpayer phone call simulation WebSocket (/v1/calls/stream)."""
-    # 1. The flag, the receptionist's own start, and the production gates
+    # 1. Origin check: a page from another site is refused before anything
+    # is accepted, and told nothing.
+    origin = websocket.headers.get("origin")
+    if not is_ws_origin_allowed(origin):
+        logger.warning("call_stream_endpoint: rejected due to origin not allowed: %r", origin)
+        await websocket.close(code=4403)
+        return
+
+    # 2. The flag, the receptionist's own start, and the production gates.
+    # The caller's own browser is told, after accepting (see _refuse_after_accept).
     if not _voice_receptionist_enabled():
         refusal = _refusal_reason() or "off"
         if refusal != "off":
@@ -389,14 +450,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
             # cannot take the call is, and is counted for the alert.
             telemetry.refused(refusal)
         logger.warning("call_stream_endpoint: refused, calls are %s", refusal)
-        await websocket.close(code=1001)
-        return
-
-    # 2. Origin check
-    origin = websocket.headers.get("origin")
-    if not is_ws_origin_allowed(origin):
-        logger.warning("call_stream_endpoint: rejected due to origin not allowed: %r", origin)
-        await websocket.close(code=4403)
+        await _refuse_after_accept(websocket, 1001, "unavailable")
         return
 
     # 3. Rate-limit before accepting, then authenticate from the first
@@ -406,11 +460,12 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
     key = f"anon::{client_host}"
     if not try_acquire("call", key, per_user_cap=5, global_cap=16):
         telemetry.refused("capacity")
-        await websocket.close(code=1013)
+        await _refuse_after_accept(websocket, 1013, "busy")
         return
 
     call_id = f"call_{uuid.uuid4().hex[:12]}"
     room = None
+    clock: asyncio.Task[None] | None = None
     try:
         await websocket.accept()
         # 5. Read first text frame: call_start
@@ -420,9 +475,9 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
             if not isinstance(init_msg, dict) or init_msg.get("type") != "call_start":
                 raise ValueError("invalid call_start message")
         except Exception:
-            await websocket.send_text(
-                json.dumps({"type": "error", "detail": "Missing call_start handshake", "recoverable": False})
-            )
+            await websocket.send_text(json.dumps(
+                {"type": "error", "code": "bad_request", "detail": "Missing call_start handshake", "recoverable": False}
+            ))
             await websocket.close(code=1003)
             return
 
@@ -433,12 +488,17 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                 token_override=str(init_msg.get("access_token") or ""),
             )
         except Exception:
-            await websocket.send_text(json.dumps({"type": "error", "detail": "Authentication required", "recoverable": False}))
+            await websocket.send_text(json.dumps(
+                {"type": "error", "code": "signin", "detail": "Authentication required", "recoverable": False}
+            ))
             await websocket.close(code=4401)
             return
 
         if user_id:
             if not rekey_slot("call", key, user_id, per_user_cap=5):
+                telemetry.refused("capacity")
+                with contextlib.suppress(Exception):
+                    await websocket.send_text(json.dumps({"type": "error", "code": "busy", "recoverable": False}))
                 await websocket.close(code=1013)
                 return
             key = user_id
@@ -472,6 +532,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                 await websocket.send_text(
                     json.dumps({
                         "type": "error",
+                        "code": "consent_required",
                         "detail": "Voice recording consent required before processing call.",
                         "recoverable": False,
                     })
@@ -595,6 +656,9 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
             })
         )
 
+        # The call's time limit, on every transport.
+        clock = asyncio.create_task(_call_clock(room))
+
         # 8. Run pipeline if Pipecat is present, otherwise fallback loop
         try:
             task, transport, brain = build_call_pipeline(room, websocket)
@@ -708,25 +772,13 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
 
                 room.pipeline_runner_task = asyncio.create_task(runner.run(task))
                 max_call_s = get_max_call_s()
-                duration_warned = False
                 # A dropped control socket raises out of receive_text(), and
                 # CallRoom.end() does not own the Pipecat runner: without this
-                # finally the runner outlived the call.
+                # finally the runner outlived the call. (The warning before the
+                # ceiling is _call_clock's, on every transport.)
                 try:
                     while room.state.mode != "ended":
                         elapsed_s = time.time() - room.state.started_at
-                        if (
-                            not duration_warned
-                            and max_call_s >= 120.0
-                            and elapsed_s >= max_call_s - 60.0
-                        ):
-                            duration_warned = True
-                            rem_s = max(1, int(round(max_call_s - elapsed_s)))
-                            warn_payload = {"type": "duration_warning", "seconds_remaining": rem_s}
-                            with contextlib.suppress(Exception):
-                                await websocket.send_text(json.dumps(warn_payload))
-                            with contextlib.suppress(Exception):
-                                hub.publish_call(call_id, "duration_warning", warn_payload)
                         if elapsed_s >= max_call_s:
                             await room.end("max_call_duration")
                             await task.cancel()
@@ -757,6 +809,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                 try:
                     await websocket.send_text(json.dumps({
                         "type": "error",
+                        "code": "unavailable",
                         "detail": "The production call media pipeline could not start.",
                         "recoverable": False,
                     }))
@@ -818,6 +871,8 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
     except Exception:
         logger.exception("Error in call stream: %s", call_id)
     finally:
+        if clock is not None:
+            clock.cancel()
         try:
             if room:
                 await _finish_call(room)
@@ -839,13 +894,14 @@ async def staff_calls_stream_endpoint(
     call_id: str | None = Query(None),
 ) -> None:
     """Staff WebSocket (/v1/admin/calls/stream): lobby or per-call live mode."""
-    # No phone calls on this deployment: 1001 tells the console to hide its
-    # call layer for the session instead of retrying.
-    if not _voice_receptionist_enabled():
-        await websocket.close(code=1001)
-        return
     if not is_ws_origin_allowed(websocket.headers.get("origin")):
         await websocket.close(code=4403)
+        return
+    # No phone calls on this deployment: 1001 tells the console to hide its
+    # call layer for the session instead of retrying. Sent after accepting, or
+    # the browser sees 1006 and retries for good (G605).
+    if not _voice_receptionist_enabled():
+        await _refuse_after_accept(websocket, 1001)
         return
     await websocket.accept()
     slot = _StaffSlot("call_staff_stream", websocket, per_user=STAFF_STREAMS_PER_USER, total=STAFF_STREAMS_TOTAL)
@@ -914,6 +970,17 @@ async def _staff_calls_stream(websocket: WebSocket, call_id: str | None, slot: _
         # Lobby mode (metadata only)
         queue = hub.subscribe_lobby(loop, tenant_id=tenant_scope)
 
+    # Signed in and subscribed: the console resets its reconnect backoff on
+    # this, not on the socket opening (a refused sign-in also opens it, G606).
+    try:
+        await websocket.send_text(json.dumps({"type": "ready"}))
+    except Exception:
+        if call_id:
+            hub.unsubscribe_call(call_id, queue)
+        else:
+            hub.unsubscribe_lobby(queue)
+        return
+
     try:
         while True:
             if _expired(token_exp):
@@ -958,11 +1025,11 @@ async def _staff_calls_stream(websocket: WebSocket, call_id: str | None, slot: _
 
 async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
     """Officer live audio bridge socket (/v1/admin/calls/{call_id}/audio)."""
-    if not _voice_receptionist_enabled():
-        await websocket.close(code=1001)
-        return
     if not is_ws_origin_allowed(websocket.headers.get("origin")):
         await websocket.close(code=4403)
+        return
+    if not _voice_receptionist_enabled():
+        await _refuse_after_accept(websocket, 1001)
         return
     await websocket.accept()
     slot = _StaffSlot("call_staff_audio", websocket, per_user=STAFF_AUDIO_PER_USER, total=STAFF_AUDIO_TOTAL)

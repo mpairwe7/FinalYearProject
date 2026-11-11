@@ -20,11 +20,18 @@ export function CallReviewForm({
   const [rating, setRating] = useState<number>(initialRating || 5);
   const [note, setNote] = useState<string>(initialNote || '');
   const [submitted, setSubmitted] = useState<boolean>(Boolean(initialRating));
+  const [failure, setFailure] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await onSubmit(rating, note);
-    setSubmitted(true);
+    setFailure(null);
+    try {
+      await onSubmit(rating, note);
+      setSubmitted(true);
+    } catch (err) {
+      // A failed save used to leave the form as if nothing happened (G611).
+      setFailure((err as Error)?.message || 'The review could not be saved. Try again.');
+    }
   };
 
   return (
@@ -75,6 +82,12 @@ export function CallReviewForm({
             fontFamily: 'inherit',
           }}
         />
+
+        {failure && (
+          <p className="cc-error" role="alert" style={{ margin: 0, fontSize: '0.8125rem' }}>
+            {failure}
+          </p>
+        )}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <button

@@ -17,11 +17,12 @@ export function usePresenceHeartbeat(userId?: string): void {
 
     const pulse = () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
-      const effectiveStatus = activeCall && activeCall.state === 'bridged'
-        ? 'on_call'
-        : activeCall && activeCall.state === 'wrap_up'
-          ? 'wrap_up'
-          : availability;
+      // Every state between taking a call and finishing it is on a call: the
+      // claim, the media connecting or reconnecting, the closing line. Only
+      // bridged counted, so an officer in any of the others was offered to
+      // the next caller (G610).
+      const state = activeCall?.state ?? 'idle';
+      const effectiveStatus = state === 'wrap_up' ? 'wrap_up' : state !== 'idle' ? 'on_call' : availability;
       callsApi.updatePresence({ status: effectiveStatus }).catch(() => {});
     };
 

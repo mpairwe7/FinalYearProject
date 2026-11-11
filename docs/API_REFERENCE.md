@@ -2034,6 +2034,35 @@ The per-call stream and the officer's audio socket both receive
 `{"type": "status", "status": "ended", "reason": "…"}` before the socket closes
 (G582); the console opens the wrap-up on it.
 
+Since ADR-0042: both staff streams send `{"type": "ready"}` once the socket is
+signed in and subscribed, before any event; a console treats the stream as live
+from then, not from the socket opening. The per-call stream also carries
+`{"type": "duration_warning", "call_id": "…", "data": {"seconds_remaining": N}}`
+a minute before the call's time limit.
+
+#### Call sockets: refusals, errors and the time limit (ADR-0042)
+
+`WS /v1/calls/stream` (the caller), `/v1/admin/calls/stream` and
+`/v1/admin/calls/{call_id}/audio` accept the socket before refusing it, so the
+browser sees the close code: **1001** calls are off on this deployment, **1013**
+all lines are busy. The caller is first sent
+`{"type": "error", "code": "unavailable" | "busy", "recoverable": false}`. Only
+a page from another site is refused before accepting (an HTTP 403 in the
+handshake). Every `error` frame to the caller carries a `code`:
+
+| `code` | Close | Meaning |
+| --- | --- | --- |
+| `unavailable` | 1001 | Calls are off, or the media pipeline could not start |
+| `busy` | 1013 | All lines are busy, or this caller already has five calls |
+| `signin` | 4401 | The call needs a valid sign-in |
+| `consent_required` | 4403 | Voice recording consent was not given |
+| `bad_request` | 1003 | No valid `call_start` message |
+
+`detail` is English for logs; screens show a translated message chosen by
+`code`. `{"type": "duration_warning", "seconds_remaining": N}` reaches the
+caller a minute before the time limit (`RECEPTIONIST_MAX_CALL_S`) on every
+transport, and the call ends at the limit with `status: ended`.
+
 ---
 
 #### Officer presence
@@ -2052,7 +2081,9 @@ is one of `available`, `busy`, `away`, `on_call`, `wrap_up`, `offline`;
 `languages` are locales the service supports; `teams` are teams a call can be
 passed to; `display_name` is at most 80 characters. Anything else is 422. While
 this server has the officer on a live call, a heartbeat cannot change their
-status to anything but `on_call`. With `multi_tenant` on, the GET returns the
+status to anything but `on_call`; since ADR-0042 (G610) the same holds while
+their media is reconnecting and while they hold a claim on a waiting call.
+With `multi_tenant` on, the GET returns the
 caller's tenant's officers only, and `officer.presence` lobby events reach that
 tenant's consoles only.
 

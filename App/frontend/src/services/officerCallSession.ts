@@ -253,14 +253,26 @@ async function joinCall(callId: string): Promise<void> {
   };
 }
 
+/**
+ * The compatibility transport's player and microphone. ``ws === socket`` is
+ * "this call is still on": the microphone prompt can be answered after the
+ * call ended, and its stream was then kept (and the next call found
+ * ``stopMic`` set and got no audio at all), or a late refusal released and
+ * finished whatever call was current by then (G601).
+ */
 async function startLegacyOfficerMedia(callId: string, socket: WebSocket): Promise<void> {
   if (ws !== socket || player || stopMic) return;
   const nextPlayer = new PCMPlayer(16000);
   nextPlayer.onLevel((level) => setOutputLevel(level));
   await nextPlayer.init().catch(() => {});
+  if (ws !== socket) {
+    nextPlayer.close();
+    return;
+  }
   player = nextPlayer;
+  let stop: () => void;
   try {
-    stopMic = await new AudioRecorder().startStreaming(
+    stop = await new AudioRecorder().startStreaming(
       (chunk: ArrayBuffer) => {
         const samples = new Int16Array(chunk);
         let sum = 0;
@@ -271,17 +283,38 @@ async function startLegacyOfficerMedia(callId: string, socket: WebSocket): Promi
       { echoCancellation: true, noiseSuppression: true },
     );
   } catch {
+    if (ws !== socket) return;
     await callsApi.releaseCall(callId).catch(() => {});
     finish('Microphone access was denied — the call went back to the queue.');
+    return;
   }
+  if (ws !== socket) {
+    stop();
+    return;
+  }
+  stopMic = stop;
 }
 
 export function toggleMute(): void {
   if (!current || current.state !== 'bridged') return;
-  muted = !muted;
-  if (liveKitSession) void liveKitSession.setMuted(muted || Boolean(current.onHold));
-  if (muted) setInputLevel(0);
-  update({ muted });
+  const next = !muted;
+  muted = next;
+  if (next) setInputLevel(0);
+  update({ muted: next });
+  const session = liveKitSession;
+  if (!session) return;
+  // A refused or unplugged microphone used to leave the screen showing the
+  // new state, and the rejection unhandled (G609).
+  void session.setMuted(next || Boolean(current.onHold)).catch(() => {
+    if (liveKitSession !== session || muted !== next) return;
+    muted = !next;
+    update({
+      muted,
+      error: next
+        ? 'Could not mute the microphone. It may still be live.'
+        : 'Could not turn the microphone on. Check the browser’s microphone permission.',
+    });
+  });
 }
 
 export async function toggleHold(targetOn?: boolean): Promise<void> {

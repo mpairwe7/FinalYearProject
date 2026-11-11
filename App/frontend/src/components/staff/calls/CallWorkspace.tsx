@@ -206,7 +206,21 @@ export function CallWorkspace({ callId, role }: { callId: string; role: string }
   })();
 
   const transcript = (
-    <CallTranscript turns={turns} interimCaption={live.interimCaption} startedAt={call.started_at} flashSeq={flashSeq} />
+    <>
+      {/* The transcript used to freeze without a sign when its stream dropped (G606). */}
+      {live.status === 'reconnecting' && call.status !== 'ended' && (
+        <p className="cc-notice" role="status">
+          Live transcript paused — reconnecting…
+        </p>
+      )}
+      {/* A minute's notice before the call's time limit ends it (G602). */}
+      {live.secondsRemaining !== null && call.status !== 'ended' && (
+        <p className="cc-notice" role="status">
+          This call reaches its time limit in about a minute and will end then.
+        </p>
+      )}
+      <CallTranscript turns={turns} interimCaption={live.interimCaption} startedAt={call.started_at} flashSeq={flashSeq} />
+    </>
   );
 
   return (
