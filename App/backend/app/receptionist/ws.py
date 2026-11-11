@@ -85,10 +85,13 @@ def _refusal_reason() -> str:
 
     if receptionist.unavailable_reason():
         return "unavailable"
-    if os.getenv("APP_ENV", "development").strip().lower() == "production" and (
-        livekit.production_errors(enabled_override=True) or local_engine_errors(enabled_override=True)
-    ):
-        return "not_configured"
+    if os.getenv("APP_ENV", "development").strip().lower() == "production":
+        # Switched on after startup: nothing has checked the stack or ended
+        # the rows a previous process left (receptionist.started()).
+        if not receptionist.started():
+            return "unavailable"
+        if livekit.production_errors(enabled_override=True) or local_engine_errors(enabled_override=True):
+            return "not_configured"
     return ""
 
 

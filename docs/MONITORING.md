@@ -475,8 +475,8 @@ and `UraCallsEndingOnFailure`. The chat does not depend on any of them.
    `not_configured` is production without its media path or local engine
    (`python -m app.production_readiness` lists what is missing).
 3. **Speech failing** (`…_call_failures_total{stage="stt"|"tts"}`): callers are
-   asked to repeat themselves and, after two failures in a row, handed to an
-   officer, so the officers' queue grows. Check the speech backends.
+   asked to repeat themselves and, after two failures in a row, transferred
+   (to the officers' queue when it is on), so the queue grows. Check the speech backends.
 4. **Calls ending on failure** (`…_calls_ended_total` by `reason`):
    `media_pipeline_*` is the Pipecat task or LiveKit; `speech_failed` is a
    caller the recognizer never heard.

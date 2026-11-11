@@ -107,28 +107,47 @@ def negotiate_low_bandwidth_mode(
     )
 
 
+#: ITU-T G.711 mu-law constants.
+_G711_BIAS = 0x84
+_G711_CLIP = 32635
+
+
+def _g711_encode(samples: np.ndarray) -> np.ndarray:
+    """PCM16 samples to ITU-T G.711 mu-law bytes (segmented, bits inverted: silence is 0xFF).
+
+    The earlier codec was continuous mu-law companding quantised to 0-255:
+    silence came out as 0x7F/0x80, which a G.711 decoder plays at full scale.
+    """
+    s = samples.astype(np.int32)
+    sign = np.where(s < 0, 0x80, 0x00)
+    magnitude = np.minimum(np.abs(s), _G711_CLIP) + _G711_BIAS
+    exponent = np.clip(np.floor(np.log2(magnitude)).astype(np.int32) - 7, 0, 7)
+    mantissa = (magnitude >> (exponent + 3)) & 0x0F
+    return (~(sign | (exponent << 4) | mantissa) & 0xFF).astype(np.uint8)
+
+
+def _g711_decode(codes: np.ndarray) -> np.ndarray:
+    """ITU-T G.711 mu-law bytes to PCM16 samples."""
+    u = (~codes.astype(np.int32)) & 0xFF
+    exponent = (u >> 4) & 0x07
+    magnitude = ((((u & 0x0F) << 3) + _G711_BIAS) << exponent) - _G711_BIAS
+    return np.where((u & 0x80) != 0, -magnitude, magnitude).astype(np.int16)
+
+
 def pcm16_16k_to_mulaw_8k(pcm16_bytes: bytes) -> bytes:
     """Downsample 16 kHz mono PCM16 to 8 kHz and encode as 8-bit ITU-T G.711 mu-law (4x smaller)."""
     if not pcm16_bytes or len(pcm16_bytes) < 4:
         return b""
     usable = len(pcm16_bytes) - (len(pcm16_bytes) % 2)
     samples_16k = np.frombuffer(pcm16_bytes[:usable], dtype=np.int16)
-    samples_8k = samples_16k[::2].astype(np.float32) / 32768.0
-    mu = 255.0
-    mag = np.minimum(np.abs(samples_8k), 1.0)
-    compressed = np.sign(samples_8k) * np.log1p(mu * mag) / np.log1p(mu)
-    quantized = ((compressed + 1.0) * 0.5 * mu + 0.5).clip(0, 255).astype(np.uint8)
-    return quantized.tobytes()
+    return _g711_encode(samples_16k[::2]).tobytes()
 
 
 def mulaw_8k_to_pcm16_16k(mulaw_bytes: bytes) -> bytes:
     """Decode 8-bit 8 kHz G.711 mu-law and upsample (linear interpolation) to 16 kHz mono PCM16."""
     if not mulaw_bytes:
         return b""
-    quantized = np.frombuffer(mulaw_bytes, dtype=np.uint8).astype(np.float32)
-    mu = 255.0
-    compressed = (quantized / mu) * 2.0 - 1.0
-    samples_8k = np.sign(compressed) * (1.0 / mu) * (np.power(1.0 + mu, np.abs(compressed)) - 1.0)
+    samples_8k = _g711_decode(np.frombuffer(mulaw_bytes, dtype=np.uint8)).astype(np.float32)
     n = samples_8k.size
     if n == 1:
         samples_16k = np.repeat(samples_8k, 2)
@@ -137,8 +156,7 @@ def mulaw_8k_to_pcm16_16k(mulaw_bytes: bytes) -> bytes:
         samples_16k[0::2] = samples_8k
         samples_16k[1:-1:2] = 0.5 * (samples_8k[:-1] + samples_8k[1:])
         samples_16k[-1] = samples_8k[-1]
-    pcm16 = (samples_16k * 32767.0).clip(-32768, 32767).astype(np.int16)
-    return pcm16.tobytes()
+    return np.round(samples_16k).clip(-32768, 32767).astype(np.int16).tobytes()
 
 
 def mint_call_resume_ticket(
@@ -218,8 +236,10 @@ def verify_call_resume_ticket(
         if nonce in _CONSUMED_RESUME_NONCES:
             return None
         if len(_CONSUMED_RESUME_NONCES) >= _MAX_CONSUMED_NONCES:
-            oldest_nonce = min(_CONSUMED_RESUME_NONCES, key=_CONSUMED_RESUME_NONCES.__getitem__)
-            del _CONSUMED_RESUME_NONCES[oldest_nonce]
+            # Full of tickets that have not expired. Evicting one to make room
+            # let it be used again; refusing this resume is the safe failure.
+            logger.warning("Call resume refused: %d unexpired tickets already used", len(_CONSUMED_RESUME_NONCES))
+            return None
         _CONSUMED_RESUME_NONCES[nonce] = exp_ts
     return payload
 

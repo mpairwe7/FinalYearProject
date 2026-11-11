@@ -24,7 +24,7 @@ What an operator sees differently after phase 3 of the 11 November review:
   variable. A call already running reads the default instead of the bad value.
 - **A call that cannot hear or speak goes to an officer.** After a recognizer
   failure the caller is asked to say it again; after two in a row, or two lines
-  the voice could not say, the call is transferred. Expect more transfers
+  the voice could not say, the call is transferred (to the queue when it is on). Expect more transfers
   while a speech backend is failing, and the `UraCallSpeechFailing` alert.
 - **After a restart, look at the callback list.** Calls the previous process
   left live are ended (`end_reason = process_lost`). The ones that were with

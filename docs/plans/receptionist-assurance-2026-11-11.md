@@ -100,7 +100,7 @@ chat turn, which only the root suite showed.
 | --- | --- |
 | G373 | `receptionist.start()` never raises: calls are refused, `/ready` gives the reason under `capabilities.voice_receptionist`, an error is logged, `ura_receptionist_available` is 0. The service owner chose to degrade over failing loud. |
 | G593 | The worker gate reads `WORKERS`, `UVICORN_WORKERS` and `WEB_CONCURRENCY`: one must be set, and each that is set must be 1. |
-| G594 | No speech model makes calls unavailable. A recognizer or voice failure reaches the brain: the caller is asked to repeat, and two in a row hand the call to an officer. Silence after an unheard utterance ends as `speech_failed`. |
+| G594 | No speech model makes calls unavailable. A recognizer or voice failure reaches the brain: the caller is asked to repeat, and two in a row start a transfer (to an officer when the queue is on and staffed, otherwise the toll-free line or a callback). Silence after an unheard utterance ends as `speech_failed`. |
 | G595 | `receptionist/telemetry.py`: availability, calls started, ended by reason, refused by reason, failures by stage, rows lost to a restart. Four alert rules with promtool cases. |
 | G596 | Every call duration has a range; `validate()` and the production gate refuse a value outside it, and a running call reads the default instead. |
 | G597 | Call sockets run the local-engine checks with the flag's real state. |

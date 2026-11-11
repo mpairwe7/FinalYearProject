@@ -56,31 +56,45 @@ def decode_to_pcm16(speech_model: Any, audio: bytes) -> bytes:
     return (np.asarray(samples) * 32767).clip(-32768, 32767).astype(np.int16).tobytes()
 
 
+def synthesize_line(speech_model: Any, text: str, language: str, voice: str | None = None) -> tuple[bytes, bool]:
+    """A line spoken outside the pipeline, as ``(pcm, failed)``. Blocking.
+
+    *failed* is a voice that could not say it (counted here, once). An empty
+    line that is not a failure is the Luganda, Runyankole or Acholi line the
+    English stand-in voice is not allowed to read: the caption still goes out.
+    """
+    if speech_model is None or not text:
+        return b"", False
+    try:
+        res = speech_model.synthesize(text, voice=voice or get_tts_voice(), language=language)
+    except Exception:
+        logger.exception("Synthesis failed for a line outside the pipeline")
+        telemetry.failure("tts")
+        return b"", True
+    if not res or not res.audio:
+        telemetry.failure("tts")
+        return b"", True
+    backend = str(getattr(res, "backend", "") or "")
+    if language in ("lg", "nyn", "ach") and backend.startswith("edge") and not allow_edge_standin_lg():
+        return b"", False
+    try:
+        pcm = decode_to_pcm16(speech_model, res.audio)
+    except Exception:
+        logger.exception("Failed decoding a line outside the pipeline to PCM16")
+        pcm = b""
+    if not pcm:
+        telemetry.failure("tts")
+        return b"", True
+    return pcm, False
+
+
 def synthesize_pcm16(speech_model: Any, text: str, language: str, voice: str | None = None) -> bytes:
     """A line spoken outside the pipeline (an officer joining or closing the call). Blocking.
 
     Empty when synthesis fails, or when the only voice for Luganda is the
     English stand-in and that is not allowed — the caption still goes out.
     """
-    if speech_model is None or not text:
-        return b""
-    try:
-        res = speech_model.synthesize(text, voice=voice or get_tts_voice(), language=language)
-    except Exception:
-        logger.exception("Synthesis failed for a line outside the pipeline")
-        telemetry.failure("tts")
-        return b""
-    if not res or not res.audio:
-        return b""
-    backend = str(getattr(res, "backend", "") or "")
-    if language in ("lg", "nyn", "ach") and backend.startswith("edge") and not allow_edge_standin_lg():
-        return b""
-    try:
-        return decode_to_pcm16(speech_model, res.audio)
-    except Exception:
-        logger.exception("Failed decoding a line outside the pipeline to PCM16")
-        telemetry.failure("tts")
-        return b""
+    return synthesize_line(speech_model, text, language, voice)[0]
 
 
 class UraSpeechTTS(TTSService):
@@ -116,6 +130,8 @@ class UraSpeechTTS(TTSService):
         self._language = language
         self.last_first_chunk_ms: float = 0.0
         self.last_backend: str = ""
+        #: The last Orpheus stream played its whole sentence.
+        self._stream_complete = False
 
     async def _could_not_voice(self) -> None:
         """A line reached the caller as a caption only; the brain counts how many in a row."""
@@ -177,7 +193,12 @@ class UraSpeechTTS(TTSService):
             try:
                 async for frame in self._stream_orpheus(clean_text, language, context_id, t0):
                     yield frame
-                self._voiced()
+                # A sentence cut short, or a stream that produced nothing, is
+                # not a voiced line: it used to clear the failure count.
+                if self._stream_complete:
+                    self._voiced()
+                else:
+                    await self._could_not_voice()
                 return
             except orpheus_tts.OrpheusUnavailable as exc:
                 logger.info("Orpheus unavailable mid-call (%s); using the synthesis chain", exc)
@@ -273,6 +294,7 @@ class UraSpeechTTS(TTSService):
         ):
             yield frame
 
+        self._stream_complete = complete and bool(pieces)
         cache_put = getattr(self.speech_model, "tts_cache_put", None)
         if complete and pieces and callable(cache_put):
             self._remember(cache_put, text, language, b"".join(pieces))

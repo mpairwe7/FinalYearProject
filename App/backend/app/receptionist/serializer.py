@@ -115,6 +115,11 @@ class CallTextTurnFrame(Frame):
 
 _CONTROL_RATE_WINDOW_S = 10.0
 _MAX_CONTROL_FRAMES_PER_WINDOW = 15
+#: Network telemetry has its own budget: a client reporting its connection
+#: used to spend the caller's, and their next question was dropped.
+_MAX_TELEMETRY_FRAMES_PER_WINDOW = 4
+#: Call-drop checkpoints still being written, held so they are not collected mid-write.
+_CHECKPOINTS: set[asyncio.Task[Any]] = set()
 
 
 class BrowserCallSerializer(FrameSerializer):
@@ -123,6 +128,16 @@ class BrowserCallSerializer(FrameSerializer):
     def __init__(self, room: Any = None) -> None:
         self.room = room
         self._control_timestamps: list[float] = []
+        self._telemetry_timestamps: list[float] = []
+
+    def _allow_telemetry_frame(self) -> bool:
+        now = time.monotonic()
+        cutoff = now - _CONTROL_RATE_WINDOW_S
+        self._telemetry_timestamps = [ts for ts in self._telemetry_timestamps if ts >= cutoff]
+        if len(self._telemetry_timestamps) >= _MAX_TELEMETRY_FRAMES_PER_WINDOW:
+            return False
+        self._telemetry_timestamps.append(now)
+        return True
 
     def _allow_control_frame(self) -> bool:
         now = time.monotonic()
@@ -181,10 +196,10 @@ class BrowserCallSerializer(FrameSerializer):
 
             msg_type = msg.get("type")
             if msg_type in ("network_quality", "network_telemetry") and self.room is not None:
-                # Each one mints a ticket and writes a checkpoint: counted like
-                # any other control message, and the write is not made here on
-                # the event loop, where it stalled every call on the worker.
-                if not self._allow_control_frame():
+                # Each one mints a ticket and writes a checkpoint: rate-limited
+                # on a budget of its own, and the write is made in a thread
+                # in the background, not here on the event loop.
+                if not self._allow_telemetry_frame():
                     return None
                 from .low_bandwidth import (
                     apply_network_telemetry_to_room,
@@ -195,7 +210,11 @@ class BrowserCallSerializer(FrameSerializer):
                 ack = apply_network_telemetry_to_room(self.room, msg, checkpoint=False)
                 snapshot = call_drop_snapshot(self.room) if ack.get("resume_ticket") else None
                 if snapshot:
-                    await asyncio.to_thread(save_call_drop_snapshot, snapshot)
+                    # Not awaited: the room's codec changed above, so the
+                    # acknowledgement must not wait behind a database write.
+                    task = asyncio.create_task(asyncio.to_thread(save_call_drop_snapshot, snapshot))
+                    _CHECKPOINTS.add(task)
+                    task.add_done_callback(_CHECKPOINTS.discard)
                 return OutputTransportMessageUrgentFrame(ack)
 
             if msg_type == "interrupt":

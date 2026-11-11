@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 _state_lock = threading.Lock()
 #: Why calls cannot be taken on this process; "" when they can.
 _unavailable_reason = ""
+#: :func:`start` has run in this process (whatever it found).
+_started = False
 
 
 def is_available() -> bool:
@@ -28,24 +30,37 @@ def is_available() -> bool:
 
 def mark_unavailable(reason: str) -> None:
     """Calls cannot be taken, for *reason*; every call socket is refused until :func:`mark_available`."""
-    global _unavailable_reason
+    global _unavailable_reason, _started
     with _state_lock:
         _unavailable_reason = (reason or "unavailable").strip()
+        _started = True
     _gauge(0)
 
 
 def mark_available() -> None:
-    global _unavailable_reason
+    global _unavailable_reason, _started
     with _state_lock:
         _unavailable_reason = ""
+        _started = True
     _gauge(1)
 
 
 def reset() -> None:
     """Forget what the last start found (application shutdown): the next start decides afresh."""
-    global _unavailable_reason
+    global _unavailable_reason, _started
     with _state_lock:
         _unavailable_reason = ""
+        _started = False
+
+
+def started() -> bool:
+    """Whether :func:`start` has run in this process.
+
+    It runs at application startup when calls are switched on. Switched on
+    later, by an admin override, nothing has checked the stack or ended the
+    rows a previous process left, so production refuses calls until a restart.
+    """
+    return _started
 
 
 def unavailable_reason() -> str:
@@ -59,6 +74,8 @@ def status() -> str:
 
     if not flags.is_enabled("voice_receptionist"):
         return "off"
+    if not started():
+        return "unavailable: switched on after the API started; restart the API to take calls"
     reason = unavailable_reason()
     return f"unavailable: {reason}" if reason else "ready"
 
@@ -109,19 +126,45 @@ def _warn_about_resume(workers: dict[str, str]) -> None:
         )
 
 
+def _end_stale_calls() -> None:
+    """End the rows a previous process left live, and count them.
+
+    Every one of them when this process is declared the only worker of the
+    only replica (it has just started, so it owns no calls); otherwise only
+    those older than a call can be, because another process may be carrying
+    the rest. Done whether or not this process can take calls: a restart that
+    lost Pipecat used to leave its predecessor's calls live, and their callers
+    off the callback list.
+    """
+    from . import config, store, telemetry
+
+    try:
+        ended = store.end_stale_calls(everything=config.sole_process_declared())
+    except Exception:  # noqa: BLE001 - the sweep never decides whether calls start
+        logger.warning("Could not end the call rows a previous process left live", exc_info=True)
+        return
+    if ended:
+        telemetry.calls_lost(ended)
+        logger.warning("Ended %d call row(s) a previous process left live", ended)
+
+
 def _start(speech_model: Any) -> str:
     from . import config, store, telemetry
 
+    # Counted from zero whatever this start finds: increase() misses a series
+    # that first appears at 1, and the refusals are what fire the alerts.
+    telemetry.declare()
+    try:
+        store.init_receptionist_schema(strict=True)
+    except Exception as exc:  # noqa: BLE001
+        return f"the call tables could not be created ({type(exc).__name__})"
+    _end_stale_calls()
     if not is_available():
         return "FLAG_VOICE_RECEPTIONIST is on but Pipecat is not installed"
     try:
         config.validate()
     except config.ReceptionistConfigError as exc:
         return str(exc)
-    try:
-        store.init_receptionist_schema(strict=True)
-    except Exception as exc:  # noqa: BLE001
-        return f"the call tables could not be created ({type(exc).__name__})"
     if speech_model is None:
         # Admitted anyway, a caller was greeted in text, never heard, and
         # hung up on as idle, with the record blaming them (G594).
@@ -133,14 +176,5 @@ def _start(speech_model: Any) -> str:
             "process: a handoff reaches the right worker only by chance.",
             ", ".join(f"{name}={value}" for name, value in workers.items()),
         )
-    telemetry.declare()
     _warn_about_resume(workers)
-    # Rows a previous process left live. Every one of them when this process
-    # is declared the only worker of the only replica (it has just started,
-    # so it owns no calls); otherwise only those older than a call can be,
-    # because another process may be carrying the rest.
-    ended = store.end_stale_calls(everything=config.sole_process_declared())
-    if ended:
-        telemetry.calls_lost(ended)
-        logger.warning("Ended %d call row(s) a previous process left live", ended)
     return ""

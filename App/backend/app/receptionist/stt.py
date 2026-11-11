@@ -46,14 +46,15 @@ except ImportError:
     STTSettings = None
 
 
-async def report_speech_failure(room: Any, stage: str) -> None:
+async def report_speech_failure(room: Any, stage: str, *, counted: bool = False) -> None:
     """Count a recognizer (``stt``) or voice (``tts``) failure on a call, and tell its brain.
 
     The services used to log and carry on, so the brain never knew why the
     caller had gone quiet (G594). Reporting can never break the service that
     reports.
     """
-    telemetry.failure(stage)
+    if not counted:
+        telemetry.failure(stage)
     brain = getattr(room, "brain", None)
     if brain is None:
         return
@@ -144,6 +145,13 @@ class UraWhisperSTT(SegmentedSTTService):
             )
         except Exception:
             logger.exception("UraWhisperSTT transcription failed")
+            await report_speech_failure(self.room, "stt")
+            return
+
+        if res is not None and not getattr(res, "text", "") and getattr(res, "error", None):
+            # Every backend failed, and said so in the result rather than by
+            # raising. Hearing nothing at all is not this: it has no error.
+            logger.warning("UraWhisperSTT: no backend could transcribe (%s)", res.backend)
             await report_speech_failure(self.room, "stt")
             return
 

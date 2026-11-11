@@ -39,7 +39,9 @@ _DURATIONS: dict[str, tuple[float, float, float]] = {
     "RECEPTIONIST_CLAIM_TIMEOUT_S": (20.0, 1.0, 300.0),
     "RECEPTIONIST_OFFICER_RECONNECT_GRACE_S": (30.0, 5.0, 300.0),
     "RECEPTIONIST_PRESENCE_TTL_S": (60.0, 5.0, 3600.0),
-    "RECEPTIONIST_TURN_TIMEOUT_S": (1.0, 0.05, 10.0),
+    # Up to Pipecat's own 20 s turn backstop and beyond: values that worked
+    # before validation existed still work.
+    "RECEPTIONIST_TURN_TIMEOUT_S": (1.0, 0.05, 30.0),
     "RECEPTIONIST_HOLD_UPDATE_S": (30.0, 0.0, 600.0),
     "RECEPTIONIST_IDLE_REPROMPT_S": (12.0, 0.0, 600.0),
     "RECEPTIONIST_PARTIAL_INTERVAL_S": (0.8, 0.05, 10.0),

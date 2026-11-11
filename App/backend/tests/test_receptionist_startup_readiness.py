@@ -6,6 +6,7 @@ Regressions from phase 3 of the November 2026 call-receptionist review
 
 from __future__ import annotations
 
+import asyncio
 import time
 import unittest
 import uuid
@@ -769,6 +770,10 @@ class LowBandwidthTests(unittest.IsolatedAsyncioTestCase):
             patch.object(db, "upsert_working_memory", side_effect=record),
         ):
             frame = await BrowserCallSerializer(room=room).deserialize(json.dumps(SLOW_NETWORK))
+            # Written in the background: the acknowledgement does not wait for it.
+            from app.receptionist import serializer as serializer_module
+
+            await asyncio.gather(*serializer_module._CHECKPOINTS)
 
         self.assertTrue(frame.message["resume_ticket"])
         self.assertEqual(written_on_loop, [False])
@@ -786,7 +791,7 @@ class LowBandwidthTests(unittest.IsolatedAsyncioTestCase):
                 for _ in range(serializer_module._MAX_CONTROL_FRAMES_PER_WINDOW + 5)
             ]
 
-        self.assertEqual(sum(f is not None for f in frames), serializer_module._MAX_CONTROL_FRAMES_PER_WINDOW)
+        self.assertEqual(sum(f is not None for f in frames), serializer_module._MAX_TELEMETRY_FRAMES_PER_WINDOW)
 
 
 class ResumeSigningTests(unittest.TestCase):
@@ -933,6 +938,213 @@ class SmallReliabilityTests(unittest.IsolatedAsyncioTestCase):
         await room.end("caller_hangup")
 
         room.language_router.close.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Found in review of this change
+# ---------------------------------------------------------------------------
+
+
+class StartReviewTests(unittest.TestCase):
+    def setUp(self) -> None:
+        receptionist.mark_available()
+        self.addCleanup(receptionist.reset)
+
+    def test_a_restart_without_pipecat_still_ends_the_calls_its_predecessor_left(self):
+        with (
+            patch.object(receptionist, "is_available", return_value=False),
+            patch("app.receptionist.config.validate"),
+            patch("app.receptionist.store.init_receptionist_schema"),
+            patch("app.receptionist.store.end_stale_calls", return_value=2) as sweep,
+        ):
+            reason = receptionist.start(speech_model=object())
+
+        self.assertIn("Pipecat", reason)
+        sweep.assert_called_once()
+
+    def test_the_refusal_counters_exist_even_when_the_start_fails(self):
+        from app.analytics import metrics
+
+        with (
+            patch.object(receptionist, "is_available", return_value=False),
+            patch("app.receptionist.store.init_receptionist_schema"),
+            patch("app.receptionist.store.end_stale_calls", return_value=0),
+            patch.object(metrics, "inc", wraps=metrics.inc) as inc,
+        ):
+            receptionist.start(speech_model=object())
+
+        declared = {c.args[0] for c in inc.call_args_list if len(c.args) > 1 and c.args[1] == 0}
+        self.assertIn("receptionist_calls_refused_total", declared)
+
+    def test_calls_switched_on_after_the_api_started_are_refused_in_production(self):
+        receptionist.reset()  # this process never ran the receptionist's start
+        with (
+            patch.object(ws.flags, "is_enabled", return_value=True),
+            patch.dict("os.environ", {"APP_ENV": "production"}),
+            patch.object(ws.livekit, "production_errors", return_value=[]),
+            patch.object(ws, "local_engine_errors", return_value=[]),
+        ):
+            self.assertEqual(ws._refusal_reason(), "unavailable")
+        with patch("app.flags.flags.is_enabled", return_value=True):
+            self.assertIn("restart", receptionist.status())
+
+    def test_a_long_turn_timeout_that_used_to_work_still_does(self):
+        with patch.dict("os.environ", {"RECEPTIONIST_TURN_TIMEOUT_S": "20"}):
+            config.validate()
+            self.assertEqual(config.get_turn_timeout_s(), 20.0)
+
+
+class EscalationReviewTests(CallCase):
+    async def test_a_handover_that_raised_can_be_tried_again(self):
+        from unittest.mock import AsyncMock
+
+        self.brain._transfer = AsyncMock(side_effect=[RuntimeError("ticket store down"), None])
+        with self.assertRaises(RuntimeError):
+            await self.brain.on_speech_failure("tts")
+            await self.brain.on_speech_failure("tts")
+
+        await self.brain.on_speech_failure("tts")
+
+        self.assertEqual(self.brain._transfer.await_count, 2)
+
+    async def test_a_caller_still_unheard_after_a_handover_that_did_not_take_is_asked_again(self):
+        from app.receptionist.phrases import phrase
+
+        await self.brain.on_speech_failure("stt")
+        await self.brain.on_speech_failure("stt")  # handed over; the queue was off, so the call stays with the AI
+        before = len(self.said())
+
+        await self.brain.on_speech_failure("stt")
+
+        self.assertEqual(self.said()[before:], [phrase("clarify_repeat", "en")])
+        self.brain._transfer.assert_awaited_once()
+
+
+class SpeechReviewTests(CallCase):
+    async def asyncSetUp(self) -> None:
+        from unittest.mock import AsyncMock
+
+        await super().asyncSetUp()
+        self.brain.on_speech_failure = AsyncMock()
+
+    async def transcribe(self, speech) -> list:
+        from app.receptionist.stt import UraWhisperSTT
+
+        stt = UraWhisperSTT(speech_model=speech, room=self.room)
+        return [frame async for frame in stt.run_stt(b"\x01\x00" * 1600)]
+
+    async def speak(self, tts, text: str = "Your return is due on the fifteenth.") -> list:
+        return [frame async for frame in tts._voice(text, "ctx")]
+
+    async def test_a_recognizer_that_answers_with_an_error_has_failed(self):
+        from app.speech_service import TranscribeResult
+
+        class AllBackendsDown:
+            def transcribe(self, *_a, **_k):
+                return TranscribeResult(text="", backend="unavailable", error="All ASR backends failed")
+
+        self.assertEqual(await self.transcribe(AllBackendsDown()), [])
+        self.brain.on_speech_failure.assert_awaited_once_with("stt")
+
+    async def test_a_recognizer_that_heard_nothing_has_not_failed(self):
+        from app.speech_service import TranscribeResult
+
+        class Quiet:
+            def transcribe(self, *_a, **_k):
+                return TranscribeResult(text="", backend="sunbird", error=None)
+
+        self.assertEqual(await self.transcribe(Quiet()), [])
+        self.brain.on_speech_failure.assert_not_awaited()
+
+    @unittest.skipUnless(receptionist.is_available(), "streams through Pipecat's TTSService")
+    async def test_an_orpheus_sentence_cut_short_is_not_a_voiced_line(self):
+        from app import orpheus_tts
+        from app.receptionist.tts import UraSpeechTTS
+
+        async def cut_short(_text, _language, *, voice=None):
+            yield b"\x00\x10" * 2400
+            raise orpheus_tts.OrpheusIncomplete("HTTP 503")
+
+        self.state.voice_failures = 1
+        tts = UraSpeechTTS(speech_model=BrokenSpeech(), room=self.room)
+        tts._sample_rate = 16000  # normally set when the pipeline starts
+        with (
+            patch.object(UraSpeechTTS, "_should_stream", return_value=True),
+            patch.object(orpheus_tts, "stream", cut_short),
+        ):
+            await self.speak(tts)
+
+        self.brain.on_speech_failure.assert_awaited_once_with("tts")
+
+    async def test_a_line_said_outside_the_pipeline_that_cannot_be_voiced_reaches_the_brain(self):
+        from app.receptionist import desk
+
+        before = counter("receptionist_call_failures_total", stage="tts")
+        await desk.say_to_caller(self.room, "Are you still there?", BrokenSpeech())
+
+        self.brain.on_speech_failure.assert_awaited_once_with("tts")
+        self.assertEqual(counter("receptionist_call_failures_total", stage="tts") - before, 1)
+
+    async def test_telemetry_does_not_use_up_the_callers_controls(self):
+        import json as _json
+
+        from app.receptionist import serializer as serializer_module
+        from app.receptionist.serializer import BrowserCallSerializer
+
+        serializer = BrowserCallSerializer(room=self.room)
+        with flags_on("low_bandwidth_voice_codec"):
+            for _ in range(serializer_module._MAX_CONTROL_FRAMES_PER_WINDOW):
+                await serializer.deserialize(_json.dumps(SLOW_NETWORK))
+            question = await serializer.deserialize(_json.dumps({"type": "text_turn", "text": "What is the VAT rate?"}))
+
+        self.assertIsNotNone(question)
+
+
+class G711Tests(unittest.TestCase):
+    """mu-law on the wire is ITU-T G.711, which any telephony decoder reads."""
+
+    def test_silence_is_the_g711_silence_byte(self):
+        from app.receptionist.low_bandwidth import pcm16_16k_to_mulaw_8k
+
+        self.assertEqual(set(pcm16_16k_to_mulaw_8k(b"\x00\x00" * 320)), {0xFF})
+
+    def test_the_g711_reference_points_decode_as_the_standard_says(self):
+        import numpy as np
+
+        from app.receptionist.low_bandwidth import mulaw_8k_to_pcm16_16k
+
+        decoded = np.frombuffer(mulaw_8k_to_pcm16_16k(bytes([0xFF, 0x7F, 0x00, 0x80])), dtype=np.int16)[0::2]
+        self.assertEqual(decoded.tolist(), [0, 0, -32124, 32124])
+
+    def test_a_round_trip_keeps_the_signal(self):
+        import numpy as np
+
+        from app.receptionist.low_bandwidth import mulaw_8k_to_pcm16_16k, pcm16_16k_to_mulaw_8k
+
+        tone = (np.sin(2 * np.pi * 440 * np.arange(16000) / 16000) * 12000).astype(np.int16)
+        back = np.frombuffer(mulaw_8k_to_pcm16_16k(pcm16_16k_to_mulaw_8k(tone.tobytes())), dtype=np.int16)
+        self.assertEqual(back.size, tone.size)
+        error = np.abs(back[0::2].astype(np.int32) - tone[0::2].astype(np.int32))
+        self.assertLess(int(error.max()), 12000 // 16)
+
+
+class ResumeReplayTests(unittest.TestCase):
+    def test_a_ticket_is_not_accepted_twice_even_when_the_used_list_is_full(self):
+        from app.receptionist import low_bandwidth as lb
+
+        with (
+            flags_on("call_drop_resume"),
+            patch.dict("os.environ", {"RECEPTIONIST_RESUME_SECRET": "r" * 40}),
+            patch.object(lb, "_MAX_CONSUMED_NONCES", 2),
+            patch.dict(lb._CONSUMED_RESUME_NONCES, {}, clear=True),
+        ):
+            first = lb.mint_call_resume_ticket("call_1", "conv_1", user_id="u1")
+            self.assertIsNotNone(lb.verify_call_resume_ticket(first, expected_user_id="u1"))
+            for n in range(2):
+                other = lb.mint_call_resume_ticket(f"call_x{n}", "conv", user_id="u1")
+                lb.verify_call_resume_ticket(other, expected_user_id="u1")
+
+            self.assertIsNone(lb.verify_call_resume_ticket(first, expected_user_id="u1"))
 
 
 if __name__ == "__main__":

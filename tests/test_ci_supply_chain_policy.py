@@ -424,10 +424,17 @@ def test_each_requirements_file_is_audited_on_the_python_it_ships_on():
     pairs = {entry["requirements"]: str(entry["python"]) for entry in audit["strategy"]["matrix"]["include"]}
     ci_python = str(_load(ROOT / ".github" / "workflows" / "ci-ml-pipeline.yml")["env"]["PYTHON_VERSION"])
     api_python = set(re.findall(r"^FROM\s+python:(\d+\.\d+)", (ROOT / "Dockerfile").read_text(encoding="utf-8"), re.M))
+    # The call receptionist's stack ships in the production Space, whose base
+    # image is the Crane Cloud one (ADR-0041, G598).
+    space_python = set(
+        re.findall(r"^FROM\s+python:(\d+\.\d+)", (ROOT / "App" / "Dockerfile.cranecloud").read_text(encoding="utf-8"), re.M)
+    )
+    assert len(space_python) == 1, space_python
     assert pairs == {
         "requirements.txt": ci_python,
         "App/backend/requirements.txt": api_python.pop(),
         "ml/requirements-crawl.txt": str(_load(ROOT / ".github" / "workflows" / "scheduled-crawl.yml")["env"]["PYTHON_VERSION"]),
+        "App/backend/requirements-receptionist.txt": space_python.pop(),
     }
 
 

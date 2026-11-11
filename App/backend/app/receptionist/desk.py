@@ -61,7 +61,7 @@ from .store import (
     mark_callback_done as store_callback_done,
 )
 from .transfer import begin_wait, end_wait
-from .tts import synthesize_pcm16
+from .tts import synthesize_line
 
 logger = logging.getLogger(__name__)
 
@@ -1257,11 +1257,18 @@ async def say_to_caller(room: CallRoom, text: str, speech_model: Any) -> float:
     # A missing speech backend is a supported degraded mode: the caption still
     # goes out, but there is no reason to create a default-executor worker for
     # a synthesis function that will immediately return empty audio.
-    pcm = (
-        await asyncio.to_thread(synthesize_pcm16, speech_model, text, room.state.locale)
+    pcm, failed = (
+        await asyncio.to_thread(synthesize_line, speech_model, text, room.state.locale)
         if speech_model is not None and text
-        else b""
+        else (b"", False)
     )
+    if failed:
+        # Counted toward the call's voice failures like a pipeline line: an
+        # "are you still there?" and a goodbye the caller never heard used to
+        # end the call as caller_idle instead of handing it to a person.
+        from .stt import report_speech_failure
+
+        await report_speech_failure(room, "tts", counted=True)
     room.state.turn_seq += 1
     turn = create_turn(call_id=room.call_id, seq=room.state.turn_seq, speaker="assistant", kind="notice", text=text)
     hub.publish_call(room.call_id, "turn", turn)

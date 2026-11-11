@@ -1771,6 +1771,11 @@ class UraReceptionistBrain(LLMService):
             state.voice_failures += 1
             failures = state.voice_failures
         if state.speech_failure_escalated:
+            # Handed over already, and the call is still with the AI: the
+            # queue is off, or nobody could take it. An unheard caller is still
+            # told so rather than left in silence.
+            if stage == "stt":
+                await self._say_and_record(phrase("clarify_repeat", self.language), kind="notice")
             return
         if failures < SPEECH_FAILURE_LIMIT:
             if stage == "stt":
@@ -1780,7 +1785,12 @@ class UraReceptionistBrain(LLMService):
         logger.warning(
             "Call %s cannot %s; handing it to a person", self.room.call_id, "hear" if stage == "stt" else "speak"
         )
-        await self._transfer("system_error")
+        try:
+            await self._transfer("system_error")
+        except Exception:
+            # The handover itself failed: the next failure tries again.
+            state.speech_failure_escalated = False
+            raise
 
     async def on_caller_idle(self) -> None:
         """The caller has said nothing since the assistant stopped speaking.

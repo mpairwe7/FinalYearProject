@@ -61,15 +61,23 @@ A call already running never reads a bad value: the getter falls back to the
 default. Zero still switches hold updates and idle checks off, where zero
 meant that.
 
-**A flag switched on at runtime is held to the same gate.** Every call socket
-checks the local-engine requirements with the flag's real state, not the
-environment variable's.
+**A flag switched on at runtime is held to the same gate.** In production
+(`APP_ENV=production`) every call socket checks the local-engine requirements
+with the flag's real state, not the environment variable's, and a flag
+switched on after the API started is refused until a restart, because nothing
+has checked the stack or ended the rows a previous process left. Outside
+production these checks do not run; the Space is outside them today.
 
 **A call that cannot hear or speak says so and goes to a person.** The
 recognizer and the voice report each failure to the call's brain. An unheard
-caller is asked to say it again; two failures in a row hand the call to an
-officer, once, through the same transfer path as any other (so `ticket_queue`
-is honoured). An officer hears the caller over the media room, not through the
+caller is asked to say it again; two failures in a row start a transfer, once,
+through the same path as any other: an officer takes the call when
+`ticket_queue` is on and someone is on shift, and otherwise the caller is given
+the toll-free line or offered a callback. If the transfer itself raises, the
+next failure tries again; if it did not take, an unheard caller is still asked
+to repeat. A line the voice could not say outside the pipeline (an "are you
+still there?", a goodbye) counts too, and so does an Orpheus sentence cut
+short. An officer hears the caller over the media room, not through the
 recognizer. Silence after an unheard utterance ends the call as
 `speech_failed`, never `caller_idle`.
 
@@ -80,7 +88,9 @@ declared at zero when the receptionist starts so that `increase()` sees the
 first failure. Four alert rules read them, each with a promtool case that
 fires and one that must not.
 
-**Rows a dead process left are ended at startup.** A row older than a call may
+**Rows a dead process left are ended at startup**, before anything else is
+checked, so a restart that cannot take calls (Pipecat missing) still ends its
+predecessor's calls and flags their callbacks. A row older than a call may
 last is ended whichever process asks. Every live row is ended only when the
 deployment declares one worker and one replica, since then the process that
 has just started owns no calls. A caller who was waiting for or talking to an
@@ -98,6 +108,13 @@ agrees to mu-law alone and not at all on a call whose audio is in the media
 room; its checkpoint is written off the event loop and its messages are
 rate-limited. Resume tickets are signed with `RECEPTIONIST_RESUME_SECRET`; the
 development secret stands in only outside production.
+
+Review of this change also found: the mu-law framing was continuous mu-law
+companding quantised to a byte, not ITU-T G.711, so a standard decoder played
+silence at full scale; it is G.711 now. Network telemetry spent the caller's
+own control budget and could drop their next question; it has its own. A full
+list of used resume tickets evicted one that had not expired, which let it be
+used again; it now refuses the resume instead.
 
 Also: the language router is closed with the call; synthesised audio is decoded
 off the event loop; the live-caption buffer stops growing past what it can
@@ -128,6 +145,10 @@ only in a language the deployment takes calls in.
   minutes at the default ceiling).
 - More transfers reach officers: calls the recognizer or the voice fails on
   twice. Before, those callers were dropped.
+- Durations outside their range, accepted before, now make calls unavailable
+  until fixed; `/ready` names the variable. `RECEPTIONIST_TURN_TIMEOUT_S`
+  accepts up to 30 s for that reason. No deployment in this repository sets a
+  value outside the ranges.
 - `RECEPTIONIST_TURN_TIMEOUT_S` still does not reach the turn-stop strategy,
   which reads the semantic endpoint value (500 ms by default); it drives the
   language sentinel's own timer. Changing which one governs changes

@@ -670,7 +670,7 @@ groups:
           team: ml
         annotations:
           summary: "Calls cannot hear or cannot speak"
-          description: "The recognizer or the voice failed on live calls. Callers are asked to repeat themselves and then handed to an officer."
+          description: "The recognizer or the voice failed on live calls. Callers are asked to repeat themselves and then transferred, to the officers' queue when it is on."
           runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#call-receptionist"
 
       - alert: UraCallsEndingOnFailure
