@@ -133,6 +133,7 @@ from .speech_service import (
 from .workflows.registry import WorkflowRegistry
 
 from .logging_config import REQUEST_ID, install_logging
+from .process_role import ProcessRoleMiddleware
 
 logger = logging.getLogger(__name__)
 # One structured handler on the root logger: the API's, uvicorn's and every
@@ -1158,6 +1159,12 @@ async def security_headers(request: Request, call_next):
         # W3C Trace Context Level 2: lets a client quote the trace of this request.
         response.headers["traceresponse"] = traceresponse
     return response
+
+
+# G306: the outermost layer, so the process role is named on every response, a
+# refused call request included. Added after every other middleware (the last
+# one added wraps the rest). It does nothing while URA_PROCESS_ROLE is unset.
+app.add_middleware(ProcessRoleMiddleware)
 
 
 # ---------------------------------------------------------------------------

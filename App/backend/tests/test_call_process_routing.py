@@ -14,7 +14,10 @@ import unittest
 from unittest.mock import patch
 
 from app import process_role
+from app.analytics import metrics
 from starlette.routing import Route, WebSocketRoute
+from starlette.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 
 def _env(**values: str):
@@ -153,6 +156,118 @@ class ProcessRoleTests(unittest.TestCase):
             process_role.CALL_PATH_RE.pattern,
             r"^/(v1/)?(calls/stream|admin/calls(/.*)?|admin/officers/(me/)?presence)$",
         )
+
+
+def _misrouted(kind: str) -> float:
+    """The current value of ``receptionist_misrouted_total{kind=...}`` (0 until it exists)."""
+    key = f'receptionist_misrouted_total{{kind="{kind}"}}'
+    return float(metrics.snapshot()["counters"].get(key, 0))
+
+
+class ChatRoleRefusalTests(unittest.TestCase):
+    """A call request that reaches the chat process is refused, never half-served (G306)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        import app.main
+
+        cls.client = TestClient(app.main.app)
+
+    def test_a_call_request_reaching_the_chat_process_is_refused_421(self) -> None:
+        for method, path in (
+            ("GET", "/v1/admin/calls?status=live"),
+            ("POST", "/v1/admin/calls/c1/claim"),
+            ("GET", "/v1/admin/calls/"),
+            ("GET", "/v1/admin/officers/me/presence"),
+        ):
+            with self.subTest(path=path), _env(URA_PROCESS_ROLE="chat"):
+                before = _misrouted("http")
+                with self.assertLogs("app.process_role", level="ERROR") as logs:
+                    response = self.client.request(method, path)
+                self.assertEqual(response.status_code, 421)
+                self.assertIn("call process", response.json()["detail"])
+                self.assertEqual(response.headers["X-URA-Process"], "chat")
+                self.assertEqual(_misrouted("http"), before + 1)
+                # The path (not the query string) is in the log, so an operator can find the nginx rule.
+                self.assertIn(path.split("?")[0], logs.output[0])
+                self.assertEqual(logs.records[0].levelno, logging.ERROR)
+
+    def test_a_call_socket_reaching_the_chat_process_is_told_and_closed_1013(self) -> None:
+        with _env(URA_PROCESS_ROLE="chat"):
+            before_http, before_socket = _misrouted("http"), _misrouted("websocket")
+            with self.assertLogs("app.process_role", level="ERROR") as logs:
+                with self.client.websocket_connect("/v1/calls/stream") as socket:
+                    frame = socket.receive_json()
+                    with self.assertRaises(WebSocketDisconnect) as closed:
+                        socket.receive_json()
+            self.assertEqual(frame["type"], "error")
+            self.assertEqual(frame["code"], "unavailable")
+            self.assertEqual(closed.exception.code, 1013)
+            self.assertEqual(_misrouted("websocket"), before_socket + 1)
+            self.assertEqual(_misrouted("http"), before_http)
+            self.assertIn("/v1/calls/stream", logs.output[0])
+
+    def test_the_staff_socket_is_refused_the_same_way(self) -> None:
+        with _env(URA_PROCESS_ROLE="chat"):
+            with self.client.websocket_connect("/v1/admin/calls/stream") as socket:
+                frame = socket.receive_json()
+                with self.assertRaises(WebSocketDisconnect) as closed:
+                    socket.receive_json()
+        self.assertEqual(frame["code"], "unavailable")
+        self.assertEqual(closed.exception.code, 1013)
+
+    def test_chat_is_not_refused_in_the_chat_role(self) -> None:
+        with _env(URA_PROCESS_ROLE="chat"):
+            before = _misrouted("http")
+            response = self.client.get("/health")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["X-URA-Process"], "chat")
+        self.assertEqual(_misrouted("http"), before)
+
+    def test_the_calls_role_serves_call_paths(self) -> None:
+        with _env(URA_PROCESS_ROLE="calls"):
+            before = _misrouted("http")
+            response = self.client.get("/v1/admin/calls")
+        self.assertNotEqual(response.status_code, 421)  # 401/403 without a login is the app's own answer
+        self.assertEqual(response.headers["X-URA-Process"], "calls")
+        self.assertEqual(_misrouted("http"), before)
+
+    def test_a_calls_role_socket_is_served_not_refused(self) -> None:
+        with _env(URA_PROCESS_ROLE="calls"):
+            before = _misrouted("websocket")
+            with self.client.websocket_connect("/v1/calls/stream") as socket:
+                self.assertEqual(
+                    dict(socket.extra_headers or []).get(b"x-ura-process"), b"calls"
+                )
+        self.assertEqual(_misrouted("websocket"), before)
+
+    def test_no_header_and_no_refusal_without_a_role(self) -> None:
+        with _env():
+            before = _misrouted("http")
+            calls = self.client.get("/v1/admin/calls")
+            health = self.client.get("/health")
+        self.assertNotEqual(calls.status_code, 421)
+        self.assertNotIn("X-URA-Process", calls.headers)
+        self.assertNotIn("X-URA-Process", health.headers)
+        self.assertEqual(_misrouted("http"), before)
+
+    def test_a_mistyped_role_is_unset_so_no_refusal(self) -> None:
+        process_role._LOGGED_INVALID_ROLES.clear()
+        with _env(URA_PROCESS_ROLE="web"), self.assertLogs("app.process_role", level="ERROR"):
+            response = self.client.get("/v1/admin/calls")
+        self.assertNotEqual(response.status_code, 421)
+        self.assertNotIn("X-URA-Process", response.headers)
+
+    def test_both_kinds_are_exported_at_zero_before_any_refusal(self) -> None:
+        text = metrics.to_prometheus()
+        self.assertIn('ura_receptionist_misrouted_total{kind="http"}', text)
+        self.assertIn('ura_receptionist_misrouted_total{kind="websocket"}', text)
+
+    def test_the_middleware_is_the_outermost_layer(self) -> None:
+        import app.main
+
+        stack = app.main.app.user_middleware
+        self.assertIs(stack[0].cls, process_role.ProcessRoleMiddleware)
 
 
 if __name__ == "__main__":
