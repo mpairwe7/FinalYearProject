@@ -202,7 +202,7 @@ def enrich_handoff(
     history = [h for h in (str(turn.get("user_message") or "") for turn in list(transcript)[:-1]) if h]
     try:
         if flags.is_enabled("cxp_business_hours", subject=subject):
-            schedule = evaluate_cxp_schedule(check_presence=True)
+            schedule = evaluate_cxp_schedule(check_presence=True, tenant_id=tenant_id)
             handoff["cxp_schedule"] = schedule.to_dict()
             handoff["after_hours"] = schedule.after_hours
             handoff["next_open_eat"] = schedule.next_open_label if schedule.after_hours else ""

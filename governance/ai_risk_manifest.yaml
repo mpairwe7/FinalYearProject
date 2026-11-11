@@ -1,7 +1,7 @@
 # =============================================================================
 # AI Risk Manifest — NIST AI RMF 1.0 + ISO/IEC 42001:2023 + EU AI Act
 # URA AI Chatbot — Retrieval-Augmented Generation System
-# Updated: 2026-11-11 (call handoff and caller safety addendum, ADR-0039)
+# Updated: 2026-11-11 (call records and accountability addendum, ADR-0040)
 # =============================================================================
 
 system:
@@ -520,7 +520,8 @@ owasp_agentic_2026:
       browser_agent_assurance: "ADR-0038: a portal account task is refused unless the sign-in is bound to the TIN it names; the check used to pass any sign-in whose subject was not a TIN and was not applied to signed-in writes (G557). The consent a task names and the roles its tool allows are checked before it runs. The public TIN lookup returns public fields only (G558). Limitation: an identity provider's subject carries no verified TIN, so real sign-ins are refused account tasks until it issues one (G565)."
       control_integrity: "ADR-0022: an identifier never binds from a tool's output, a suspended thread can only be resumed by its owner, and tickets keep their tenant (G339, G352, G355). ADR-0028: staff ticket reads, writes, lists, aggregates, and live event delivery are constrained to the authenticated tenant when multi_tenant is enabled (G362)."
       receptionist_assurance: "ADR-0020: revoke media before requeue, terminate on revocation failure; preserve tenant on wrap-up tickets. Self-hosted token replay remains G303; session expiry remains G304."
-      call_handoff_assurance: "ADR-0039: a call transfer's ticket is created in the caller's tenant (it fell back to 'default', G571); a call passed to a named officer can be claimed only by that officer until the reservation lapses, enforced in the room and in the claim's conditional update (G580). Officer presence is not yet tenant-scoped (G584) and any officer of the tenant can still wrap up another's call (G305)."
+      call_handoff_assurance: "ADR-0039: a call transfer's ticket is created in the caller's tenant (it fell back to 'default', G571); a call passed to a named officer can be claimed only by that officer until the reservation lapses, enforced in the room and in the claim's conditional update (G580)."
+      call_records_assurance: "ADR-0040: a call's wrap-up is accepted only from an officer who handled it, once they are off it (G305); officer presence, its board, its staffing count and its lobby event are scoped to the tenant, and a lobby event that names no tenant reaches no tenant-scoped console (G584); staff sockets close when the token that opened them expires and are admitted under per-user caps (G304). Logout or revocation before expiry is not enforced."
       evidence: "App/backend/app/auth.py, App/backend/app/main.py"
       controls: "Strict role separation (_require_live_officer, _desk_writer) ensuring only ura_staff handle live taxpayer queues/calls while admins/auditors are read/audit-only; guided-workflow state adopted on sign-in only from the anonymous session the request proves (compare-and-swap re-key), with signed-in state decided per request (ADR-0013); case facts, calculator memory and workflow lookups bound to the same owner-scoped key, with no bare-conversation-id fallback (ADR-0013 A)"
       verified_by:
@@ -537,6 +538,13 @@ owasp_agentic_2026:
         - "App/backend/tests/test_receptionist_handoff_safety.py::test_the_transfer_ticket_is_in_the_callers_tenant"
         - "App/backend/tests/test_receptionist_handoff_safety.py::test_only_the_named_officer_can_take_it_at_first"
         - "App/backend/tests/test_receptionist_handoff_safety.py::test_the_database_refuses_another_officer_while_it_is_reserved"
+        - "App/backend/tests/test_receptionist_records_accountability.py::test_an_officer_who_was_never_on_the_call_cannot_wrap_it_up"
+        - "App/backend/tests/test_receptionist_records_accountability.py::test_the_officer_on_a_call_ends_it_before_wrapping_up"
+        - "App/backend/tests/test_receptionist_records_accountability.py::test_the_board_shows_only_the_tenants_own_officers"
+        - "App/backend/tests/test_receptionist_records_accountability.py::test_a_presence_change_is_announced_to_the_tenants_own_consoles"
+        - "App/backend/tests/test_receptionist_records_accountability.py::test_an_event_that_names_no_tenant_reaches_no_tenants_console"
+        - "App/backend/tests/test_receptionist_records_accountability.py::test_a_listener_is_cut_off_when_their_session_expires"
+        - "App/backend/tests/test_receptionist_records_accountability.py::test_one_officer_cannot_hold_streams_without_limit"
         - "tests/test_answer_integrity_integration.py"
         - "tests/test_auditor_controls.py::test_staff_ticket_reads_writes_lists_and_aggregates_are_tenant_scoped"
     - id: "ASI04"
@@ -621,7 +629,8 @@ owasp_agentic_2026:
       control_integrity: "ADR-0022: a streamed figure is held until the guards have read it, a fallback or incomplete answer says so, the reply names inputs assumed from memory, and the route to a person cannot be gated (G335, G353, G355, G358). Limitation: the figure lock measures rather than enforces outside the reasoning tier (G360), and vernacular number words are not held (G364)."
       live_web_assurance: "ADR-0021: a failed live check is disclosed on every serving path, commentary and search summaries are labelled as such, and a market rate is described as an estimate. Disclosures reach the audit row."
       receptionist_assurance: "ADR-0020: draft notes explicitly leave resolution and understanding unverified; recorded officer speech does not establish statutory advice. Wrap-up ownership/atomic writes remain G305."
-      call_handoff_assurance: "ADR-0039: the call says an officer is coming only after the transfer has checked the queue flag and staffing, and offers none while handoffs are off (G572); it ends a call only on a goodbye that is not a question, never during a caller's reply to the closing line (G573); an answer finished after the caller went on hold is dropped (G574); an answer the spoken-figure guard withholds is put on screen as written and the caller is told so, instead of the turn crashing (G575). Call turns the brain handles itself still write no audit row (G585)."
+      call_handoff_assurance: "ADR-0039: the call says an officer is coming only after the transfer has checked the queue flag and staffing, and offers none while handoffs are off (G572); it ends a call only on a goodbye that is not a question, never during a caller's reply to the closing line (G573); an answer finished after the caller went on hold is dropped (G574); an answer the spoken-figure guard withholds is put on screen as written and the caller is told so, instead of the turn crashing (G575)."
+      call_records_assurance: "ADR-0040: every call turn the AI handles writes one audit row of what the caller was told, in the call's language, with its disposition, crisis turns and handoffs included (G585); a Luganda answer carries the checked answer's figures and no others (G586, G588); the end-of-call summary no longer stamps a ticket's first response or replaces an officer's note, and does not call a crisis-only call answered (G587)."
       evidence: "App/backend/app/web_fx.py, App/backend/app/service.py, App/backend/app/receptionist/brain.py, App/backend/app/escalation_policy.py, plugins/apps/common_ui.py, App/frontend/src/components/ChatMessage.tsx, App/frontend/src/components/PortalCopilotCard.tsx"
       graph_approval_integrity: "ADR-0030: a graph approval names the SHA-256 digest of the action shown, is HMAC-sealed over thread, owner, tenant, time and action, expires after GRAPH_APPROVAL_TTL_S, and is claimed so it runs once (G468-G472)."
       controls: "Fail-closed spoken action confirmation (G177), explicit AI disclosure (G170), simulation headers (live=false), and transparent 5-locale CXP operating-hours disclosure (G174/G196). Only current completed replies offer workflow/portal actions; interrupted replies retain a warning without a grounding badge. Portal approval requires a local digest; unknown execution outcomes cannot appear successful (ADR-0018)."
@@ -656,6 +665,13 @@ owasp_agentic_2026:
         - "App/backend/tests/test_receptionist_handoff_safety.py::test_an_answer_that_arrives_after_the_transfer_is_dropped"
         - "App/backend/tests/test_receptionist_handoff_safety.py::test_the_caller_is_pointed_to_the_screen"
         - "App/backend/tests/test_receptionist_handoff_safety.py::test_more_detail_is_checked_before_it_is_spoken"
+        - "App/backend/tests/test_receptionist_records_accountability.py::test_a_crisis_turn_is_recorded"
+        - "App/backend/tests/test_receptionist_records_accountability.py::test_an_answered_turn_is_recorded_once_with_what_the_caller_heard"
+        - "App/backend/tests/test_receptionist_records_accountability.py::test_a_turn_the_caller_talked_over_is_recorded_as_cancelled"
+        - "App/backend/tests/test_receptionist_records_accountability.py::test_a_luganda_turn_is_recorded_in_luganda_as_it_was_heard"
+        - "App/backend/tests/test_receptionist_records_accountability.py::test_a_deferred_turn_writes_no_row_and_carries_its_audit_fields"
+        - "App/backend/tests/test_receptionist_records_accountability.py::test_a_synthesis_that_adds_a_figure_is_replaced_by_the_guarded_translation"
+        - "App/backend/tests/test_receptionist_records_accountability.py::test_a_ticket_no_officer_has_touched_is_still_awaiting_its_first_response"
         - "tests/agents/test_plugin_apps_boundary.py"
         - "App/frontend/src/__tests__/components/ChatMessage.test.tsx"
         - "App/frontend/src/__tests__/components/PortalCopilotCard.test.tsx"

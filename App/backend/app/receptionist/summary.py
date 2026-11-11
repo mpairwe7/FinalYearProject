@@ -67,6 +67,14 @@ def _parse_summary_json(raw: str) -> dict[str, Any] | None:
     return None
 
 
+def _is_crisis_line(text: str) -> bool:
+    """Whether *text* is the call's crisis-support line, in any of its languages."""
+    from .config import KNOWN_LANGUAGES
+    from .phrases import phrase
+
+    return any(phrase("crisis_support", language) in (text or "") for language in KNOWN_LANGUAGES)
+
+
 def _fallback_summary(turns: list[dict[str, Any]], call: dict[str, Any]) -> dict[str, Any]:
     """Deterministic fallback summary when LLM generation fails or is offline."""
     caller_queries = [t["text"] for t in turns if t.get("speaker") == "caller"]
@@ -79,7 +87,13 @@ def _fallback_summary(turns: list[dict[str, Any]], call: dict[str, Any]) -> dict
 
     if transferred:
         resolution = "transferred"
-    elif status == "ended" and caller_queries and any(t.get("kind") == "answer" for t in turns):
+    elif status == "ended" and caller_queries and any(
+        # The crisis lines are recorded as an answer so "repeat that" replays
+        # them; they are not a tax answer, and a call that got only them was
+        # not "answered".
+        t.get("kind") == "answer" and not _is_crisis_line(str(t.get("text") or ""))
+        for t in turns
+    ):
         resolution = "answered"
     elif end_reason in ("caller_hangup", "timeout"):
         resolution = "abandoned"
@@ -197,15 +211,20 @@ def generate_call_summary(call_id: str) -> dict[str, Any]:
     # Persist summary on voice_calls row
     update_call(call_id, summary_json=parsed_summary)
 
-    # If linked ticket exists, append note to ticket
+    # A linked ticket gets the summary as its note only while it has none. It
+    # is the system's write, not an officer's: it used to stamp the ticket's
+    # first response (taking an untouched ticket out of the SLA's "awaiting
+    # first response") and replace whatever an officer had written (G587).
     ticket_id = call.get("ticket_id")
     if ticket_id:
+        note_content = (
+            f"Call Summary [{parsed_summary.get('subject', '')}]: "
+            f"{parsed_summary.get('summary', '')}"
+        )
         try:
-            note_content = (
-                f"Call Summary [{parsed_summary.get('subject', '')}]: "
-                f"{parsed_summary.get('summary', '')}"
-            )
-            db.update_ticket(ticket_id, staff_note=note_content)
+            # "Only while it has none" is decided by the UPDATE, not by a read
+            # before it: an officer's note saved in between would be replaced.
+            db.update_ticket(ticket_id, staff_note=note_content, officer_touch=False, only_if_note_blank=True)
         except Exception:
             logger.debug("Failed updating ticket with call summary", exc_info=True)
 

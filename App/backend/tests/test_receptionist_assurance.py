@@ -137,6 +137,8 @@ class AssuranceTests(unittest.IsolatedAsyncioTestCase):
             patch.object(flags, "is_enabled", return_value=True),
             patch.object(db, "create_ticket", return_value={"id": "ticket-b"}) as create,
             patch.object(desk, "update_call"),
+            # The row is a double here, so the store's merge of the wrap-up is too.
+            patch.object(desk, "merge_wrapup"),
             patch.object(desk.presence, "finish_wrap_up"),
             patch.object(desk.hub, "publish_lobby"),
         ):

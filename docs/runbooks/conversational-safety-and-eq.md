@@ -64,6 +64,10 @@ assistant may notice the tone and pace of their voice, together with their words
 sentence has no Luganda, Runyankole or Acholi translation yet and falls back to English
 there (G607, open).
 
+A crisis turn on a call is now in the audit ledger like any other turn, with
+`retrieval_mode: "crisis_support"` and the digest of the lines the caller heard
+(ADR-0040, G585); before, the call's own crisis check answered it and wrote no row.
+
 On a call (ADR-0039, 2026-11-11): a caller who speaks of ending their life during the
 assistant's goodbye line is not hung up on, and their words are never taken for a goodbye
 or for a review answer (G573). With `ticket_queue` off they still hear the crisis lines;

@@ -2035,7 +2035,69 @@ The per-call stream and the officer's audio socket both receive
 
 ---
 
+#### Officer presence
+
+```http
+PUT /v1/admin/officers/me/presence
+GET /v1/admin/officers/presence
+```
+
+```json
+{"status": "away", "languages": ["en", "lg"], "teams": ["disputes"]}
+```
+
+Officers only for the PUT. Since ADR-0040 (G584) the body is validated: `status`
+is one of `available`, `busy`, `away`, `on_call`, `wrap_up`, `offline`;
+`languages` are locales the service supports; `teams` are teams a call can be
+passed to; `display_name` is at most 80 characters. Anything else is 422. While
+this server has the officer on a live call, a heartbeat cannot change their
+status to anything but `on_call`. With `multi_tenant` on, the GET returns the
+caller's tenant's officers only, and `officer.presence` lobby events reach that
+tenant's consoles only.
+
+Staff WebSockets (`/v1/admin/calls/stream`, `/v1/admin/calls/{call_id}/audio`)
+close with **4401** when the token that opened them expires and with **1013**
+when the user already holds their share of sockets or the call already has five
+listeners.
+
+---
+
 #### Call wrap-up: the caller's satisfaction
+
+Ownership (2026-11-11, ADR-0040, G305): a wrap-up is accepted from an officer
+who was connected to the call, once they are off it. **403** for an officer who
+never was, or for anyone while the call is still with the AI or the queue;
+**409** for the officer still on the call (end it or pass it on first), and for
+`ticket_action: "resolve"` while the caller is still on the line. A call no
+officer reached can be wrapped up by any officer of the tenant. Each officer's
+outcome and note are kept under `wrapups` on the call record
+(`[{officer_id, officer_name, outcome, note, at}]`); `outcome` and
+`wrapup_note` are the last handling officer's. A note is at most 4,000
+characters. Two officers saving together both keep their entry (the save
+merges, it does not replace). Saving an outcome other than `callback` drops a
+callback an earlier outcome of this call asked for; a callback owed for another
+reason stays owed. **503** means the wrap-up or its ticket action could not be
+saved: save it again. A ticket it opened is linked first and is not opened
+twice, and the message says so when the ticket was already updated. A ticket
+write that fails is a 503 before the wrap-up is saved, so a call is never
+recorded `resolved` over a ticket that stayed open; **409** when the call's
+ticket no longer exists (save the wrap-up without a ticket action).
+
+Where the API process has no room for the call (another worker holds it, or
+the process that did has gone), the stored status decides: a call still
+recorded as `ai`, `transferring` or `bridged` is treated as live, so the 403
+and 409 above apply. A row its process left behind is ended first
+(`POST .../end`), like any stale call.
+
+`POST /v1/admin/calls/{call_id}/end` ends such a row (`end_reason:
+officer_terminated_stale`) only where no other process can be holding the
+call: the deployment declares one worker and one replica, or the call began
+longer ago than a call may last. Declared means `VOICE_RECEPTIONIST_REPLICAS=1`
+and a worker count of 1 in every one of `WORKERS`, `UVICORN_WORKERS` and
+`WEB_CONCURRENCY` that is set, with at least one set (the supervisord image
+defaults `UVICORN_WORKERS` to 2, so `WORKERS=1` alone is not enough there). Otherwise it answers **409** ("on another
+server process"), because a live call on another worker looks the same from
+here.
 
 Receptionist assurance update (2026-10-30, ADR-0020): `ticket_action` accepts
 `create`, `resolve`, or `keep_open` (omit it for no ticket action). An unknown

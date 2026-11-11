@@ -1,7 +1,7 @@
 # Call receptionist assurance review — 11 November 2026
 
-Status: phase 1 implemented (this change); phases 2–4 planned, their gaps open.
-Baseline: `dev` at `9a5043db`. Decisions: [ADR-0039](../adr/0039-call-handoff-and-caller-safety.md).
+Status: phases 1 and 2 implemented; phases 3 and 4 planned, their gaps open.
+Baseline: `dev` at `9a5043db`. Decisions: [ADR-0039](../adr/0039-call-handoff-and-caller-safety.md) (phase 1), [ADR-0040](../adr/0040-call-records-and-accountability.md) (phase 2).
 The [30 October review](receptionist-assurance-2026-10-30.md) covered teardown,
 media isolation and draft evidence; this one covers the whole call flow: what the
 AI says, the handoff to an officer, the officer's desk, the two browser clients,
@@ -70,11 +70,31 @@ A caller is never stranded, misrouted, misled about an officer, or hung up on.
 `App/backend/tests/test_receptionist_handoff_safety.py` holds the backend
 regressions; the console's are in `App/frontend/src/__tests__/`.
 
-## Phases 2–4 — opened, not yet fixed
+## Phase 2 — records and accountability
+
+What a call leaves behind is true, scoped and owned.
+
+| Gap | What happened | What changed |
+| --- | --- | --- |
+| G585 | Crisis turns, transfers, repeats and goodbyes wrote no audit row. A Luganda row hashed English the caller never heard; a turn talked over or timed out was recorded `completed`. | The brain writes one row per call turn from the lines the caller was told, with a disposition. `generate(defer_audit=True)` hands its row back. |
+| G305 | Any officer of the tenant could wrap up any call, a live one included; a second wrap-up replaced the first; a retried save opened a second ticket. | A wrap-up is accepted from an officer who handled the call, once they are off it. Each officer's note is kept. The ticket is linked before anything else. |
+| G584 | Officer presence had no tenant: the board, the lobby event and the staffing count crossed tenants. `teams: 5` was stored and broke the count. | `officer_presence.tenant_id`, scoped reads and events, a validated update body. |
+| G587 | The end-of-call summary stamped the ticket's SLA first response and replaced an officer's note; crisis-only calls were summarised as answered. | The summary writes a note only when there is none, as the system (`officer_touch=False`). |
+| G304 | The officer's audio socket and a listener's outlived the session; no cap on staff sockets; one transcription task per officer utterance. | Close at token expiry (an officer on a call goes into the reconnect grace), admission caps, one transcription worker per leg. Logout before expiry is still not enforced. |
+| G589, G590 | A listen socket never woke when its call ended. A turn written while the live transcript opened was lost. | The listener polls for the end of the bridge; the transcript subscribes before its snapshot. |
+| G555 | On Postgres, with the voice tables absent, their error rolled back the resolved-ticket purge on every pass. | Each purge is its own transaction; the Postgres bootstrap creates the call tables. |
+| G586, G588 | A Luganda calculator answer was spoken in English; a Luganda synthesis could add a figure unchecked. | Both go through, or fall back to, the guarded translation. |
+| G591, G592 | A burst of turns started a model run each; the brain moved the call's language without telling the language policy. | At most two runs in flight; the policy adopts the brain's move. |
+
+`App/backend/tests/test_receptionist_records_accountability.py` holds the
+regressions. `DeferredAuditTests` runs the real `ChatModel`: the first version
+of the deferred audit passed every test that used a double and broke every REST
+chat turn, which only the root suite showed.
+
+## Phases 3–4 — opened, not yet fixed
 
 | Phase | Gaps | Scope |
 | --- | --- | --- |
-| 2. Records and accountability | G305, G304, G555, G584–G592 | Wrap-up ownership (officers who handled the call; each officer's note kept); presence scoped to a tenant; an audit row for every call turn, with the text served; the Luganda calculator path; the summary's effect on a ticket's SLA and note; the ticket purge that a missing voice table rolls back on Postgres; staff socket lifetime and caps; the listen socket that never wakes; the transcript snapshot race. |
 | 3. Starts safely, fails visibly | G373, G306, G593–G600 | A receptionist that cannot start degrades and reports instead of stopping the API; the single-worker gate reads the variable the image uses; calls are refused when nothing can hear or speak; durations validated; a stale-row sweep at startup; call metrics and alerts; a CI job that installs the receptionist stack. |
 | 4. Caller and officer screens | G601–G611 | Microphone released on every ending; the time-limit warning on both transports and both clients; a refused microphone keeps the call; close codes that reach a browser; reconnects; focus, target and language of the call dialog. |
 
@@ -110,3 +130,25 @@ Qdrant and speech disabled:
 - One existing test, `test_conditional_draft_wrapup_does_not_overwrite_submitted_officer_wrapup`,
   used a fixed call id and failed on any re-run against the same database, on
   `dev` as well. It now uses a fresh id.
+
+Phase 2, measured the same day. The laptop had by then dropped to battery power
+(`powersave`, about 600 MHz of 3,100), so everything ran about five times
+slower and two timing-dependent tests behaved differently; the pull request's
+CI is the authoritative full run.
+
+- Receptionist, presence, escalation and language tests (`-k "receptionist or
+  call_carryover or phase39 or gap_closures or speech_normalization or presence
+  or escalation or language"`): 807 passed, 19 skipped.
+- `pytest tests/` (root step): 4797 passed, 21 skipped, 1 failed.
+  The failure, `test_the_advisor_applies_the_adr_thresholds`, measures store
+  latency and recommends a different backend when the machine is slow; it
+  passes alone and is unrelated to this change.
+- Backend step: the first 3,020 tests passed. The run then reached
+  `test_retrieval_regression_gate.py::TestTheCorpusAnswersItself`, which asks
+  all 1,120 FAQs their own question and needs about nine minutes per test on
+  the throttled laptop (on `dev` as well); the remaining tests were left to CI.
+- The first version of the deferred audit row broke every REST chat turn
+  (a parameter not passed through) while every receptionist test passed,
+  because those use a stand-in chat model. The root suite showed it;
+  `DeferredAuditTests` now runs the real model.
+- Governance, threat-model, architecture and CI's blocking Ruff selection: passed.

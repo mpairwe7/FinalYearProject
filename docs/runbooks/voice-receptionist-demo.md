@@ -4,6 +4,38 @@ Operator and deployment runbook for the browser voice receptionist powered by
 Pipecat 1.15, self-hosted LiveKit WebRTC media, Whisper-SALT confidence scoring,
 ClarifyGate terminology disambiguation, and staff takeover.
 
+### Assurance update — 2026-11-11, records and accountability (ADR-0040)
+
+Phase 2 of [the 11 November review](../plans/receptionist-assurance-2026-11-11.md).
+What an operator, an officer or an auditor will see differently:
+
+- **Every call turn is in the audit ledger.** With `audit_ledger` on, each
+  caller turn the AI handles writes one `generate` row with `channel: "call"`:
+  crisis turns, requests for an officer, repeats and goodbyes included. The
+  reply digest is of what the caller was told, in the call's language. A turn
+  the caller talked over is `cancelled`, a slow one `deadline_exceeded`, a
+  failed one `failed`. A turn while an officer has the call writes no AI row.
+- **Wrap-up belongs to the officers who handled the call.** An officer who was
+  never on a call gets 403; the officer still on it gets 409 until they end or
+  pass it on. On a transferred call both officers' notes are kept
+  (`wrapups` on the call record) and the call's outcome is the last officer's.
+  A call nobody reached can be wrapped up by any officer.
+- **Officers see their own tenant's colleagues.** The presence board, the
+  "is anyone on shift" check and the presence events are per tenant when
+  `multi_tenant` is on. A transfer to a named officer of another tenant is
+  refused as "not available".
+- **A staff socket ends with the session.** The officer's audio socket and a
+  listener's close with 4401 when the token expires. An officer on a call then
+  shows as reconnecting to the caller and has the reconnect grace to sign in
+  again. Staff sockets are capped per user (`STAFF_STREAMS_PER_USER` 8,
+  `STAFF_AUDIO_PER_USER` 3, in `receptionist/ws.py`); over the cap the socket
+  closes with 1013. A call has at most five listeners.
+- **The call summary no longer touches a ticket's SLA.** It adds its note only
+  when the ticket has none and never stamps a first response.
+- **Retention on Postgres.** Resolved tickets are purged whether or not the
+  call tables exist. If `TTL cleanup failed for voice_call_turns` appears, only
+  that table's purge was skipped.
+
 ### Assurance update — 2026-11-11 (ADR-0039)
 
 Handoff and caller safety, phase 1 of
@@ -735,6 +767,6 @@ check them, and have 3–5 Luganda speakers rate the Orpheus samples blind
 | A Swahili or Luganda answer arrives in English | api log `reply localization to sw collapsed the answer; serving English` (or `failed`): the translation came back short or empty, so the English answer was served. Replies are translated one paragraph at a time; a paragraph that still comes back cut short fails the whole reply rather than shipping a fragment |
 | Caller cannot talk over the assistant | api log `Caller talking over the assistant` (the sentinel's VAD stopped it); if absent, the caller's speech never reached the server over the playback: try headphones (the browser's echo canceller can mute a caller while the speaker plays) |
 | Assistant cuts itself off mid-sentence | its own voice leaking from speaker to mic: `RECEPTIONIST_LOCAL_BARGE_IN=false`, or raise `RECEPTIONIST_BARGE_IN_MIN_S` |
-| Stale or unjoined call stuck in queue | In `/calls`, an officer (`ura_staff`; administrators are refused desk actions) can click **Terminate call** (`POST /v1/admin/calls/{call_id}/end`). It ends the call through `CallRoom.end()` — countdown cancelled, media room closed, pipeline stopped, row `ended` — releases queue locks (`end_reason="officer_terminated_waiting"` or `officer_terminated_stale`) and refreshes the live lobby board. Before G176 it answered 500 on a call whose officer had dropped off, and skipped that teardown |
+| Stale or unjoined call stuck in queue | In `/calls`, an officer (`ura_staff`; administrators are refused desk actions) can click **Terminate call** (`POST /v1/admin/calls/{call_id}/end`). It ends the call through `CallRoom.end()` — countdown cancelled, media room closed, pipeline stopped, row `ended` — releases queue locks (`end_reason="officer_terminated_waiting"` or `officer_terminated_stale`) and refreshes the live lobby board. Before G176 it answered 500 on a call whose officer had dropped off, and skipped that teardown. A row with no call room behind it is ended as stale only where no other process can be holding the call: one worker and one replica are declared, or the call began longer ago than a call may last. Declared means `VOICE_RECEPTIONIST_REPLICAS=1` and a worker count of 1 in every one of `WORKERS`, `UVICORN_WORKERS` and `WEB_CONCURRENCY` that is set, with at least one set. Under the supervisord image `UVICORN_WORKERS` defaults to 2, so `WORKERS=1` alone is not enough there. Otherwise, the button answers 409 "on another server process"; on a deployment that runs several workers, try again (the request may reach the worker that has the call) or wait for the call's time limit to pass |
 | No voice/speech heard in browser, or `The AudioContext encountered an error` in console | Fixed in G249 (`PR #650`): `PCMPlayer` (`App/frontend/src/services/pcmPlayer.ts`) guards initialization with a singleton `initPromise` and `pendingChunks` FIFO queue, expands `pcm-player-worklet.js` to a 60s circular buffer (`16000 * 60`), falls back to an inline `Blob` `AudioWorklet` (and scheduled `AudioBufferSourceNode` queue) when external worklet scripts return `text/html` behind ngrok/proxies (`blob:` permitted in `script-src`/`worker-src` in `next.config.mjs`), and `useCall.ts` separates `dialToneCtxRef` from `audioCtxRef` (`getToneContext()`) |
 | Multi-turn call conversation stalls after greeting/Turn 1 or repeats *"Excuse me, did you say vat?"* | Fixed in G249 (`PR #650`): `UraSpeechTTS` (`tts.py`) enables `push_start_frame=True` and `push_stop_frames=True` so `TTSStoppedFrame` immediately triggers `BotStoppedSpeakingFrame` without the 3.0s `BOT_VAD_STOP_FALLBACK_SECS` window; `ClarifyGate.assess` (`clarify.py`) skips exact lexicon matches (`cand_term == clean_target.lower()`) and context-repaired homophones; and `UraReceptionistBrain` (`brain.py`) supersedes open clarification when the caller asks a complete new question and strips written-chat follow-up footers in `_spoken_answer` |

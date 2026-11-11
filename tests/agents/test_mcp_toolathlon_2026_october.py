@@ -751,7 +751,7 @@ def test_phase7_local_simulation_connector_account_signup_login_and_cross_db_pro
     assert "ursb" in get_all_linked_accounts(owner_key)
 
 
-def test_phase8_call_receptionist_multiturn_controls_normal_pace_and_text_turn() -> None:
+def test_phase8_call_receptionist_multiturn_controls_normal_pace_and_text_turn(tmp_db) -> None:
     import asyncio
     import json
     from unittest.mock import AsyncMock, MagicMock
@@ -762,6 +762,10 @@ def test_phase8_call_receptionist_multiturn_controls_normal_pace_and_text_turn()
         CallTextTurnFrame,
     )
     from app.receptionist.state import CallRoom, CallState
+
+    # ``tmp_db``: this test writes call turns. It used no database fixture and
+    # passed only when an earlier test in the same process had created the
+    # call tables; the fixture gives it its own in-memory database.
 
     async def _run() -> None:
         serializer = BrowserCallSerializer()

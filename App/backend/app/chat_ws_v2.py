@@ -126,16 +126,15 @@ def _release_socket_slot(user_key: str) -> None:
             _active_per_user[user_key] = current - 1
 
 
-def _resolve_ws_principal(
+def _verified_ws_claims(
     websocket: WebSocket, *, required: bool = False, token_override: str | None = None
-) -> tuple[str, str, str, list[str]]:
-    """Resolve ``(user_id, tenant_id, user_role, granted_purposes)`` from the socket.
+) -> dict[str, Any] | None:
+    """The verified claims of the token that opened the socket; ``None`` for an anonymous one.
 
-    Role and consent purposes are read **only** from the verified JWT — never
-    from a client frame — so a later ``tool_call.confirm`` re-authorizes the
-    submit against the real authenticated principal (P0-1).  Mirrors
-    :func:`voice_ws_v2._resolve_ws_auth` for token extraction; returns the
-    anonymous ``public`` principal when no token is present and auth is optional.
+    The token is the *token_override* (sent in the first application message)
+    when one is given, else the ``Authorization`` header or the query string.
+    Raises :class:`JWTAuthError` for a token that does not verify, and for no
+    token at all when *required*.
     """
     auth_header = websocket.headers.get("authorization", "")
     token = ""
@@ -149,9 +148,9 @@ def _resolve_ws_principal(
     if not token:
         if required:
             raise JWTAuthError("authentication required")
-        return "", "default", "public", []
+        return None
 
-    from .auth.dependencies import APP_ENV, _get_verifier, resolve_role
+    from .auth.dependencies import APP_ENV, _get_verifier
 
     verifier = _get_verifier()
     try:
@@ -163,7 +162,16 @@ def _resolve_ws_principal(
             claims = _hs256_verify(token, verifier.dev_secret)
         else:
             raise
-    role = resolve_role(claims, verifier.audience)
+    return claims
+
+
+def _principal_of(claims: dict[str, Any] | None) -> tuple[str, str, str, list[str]]:
+    """``(user_id, tenant_id, user_role, granted_purposes)`` of verified *claims*."""
+    if claims is None:
+        return "", "default", "public", []
+    from .auth.dependencies import _get_verifier, resolve_role
+
+    role = resolve_role(claims, _get_verifier().audience)
     granted = claims.get("granted_purposes", [])
     purposes = [str(p) for p in granted] if isinstance(granted, list) else []
     return (
@@ -172,6 +180,36 @@ def _resolve_ws_principal(
         role,
         purposes,
     )
+
+
+def _resolve_ws_principal(
+    websocket: WebSocket, *, required: bool = False, token_override: str | None = None
+) -> tuple[str, str, str, list[str]]:
+    """Resolve ``(user_id, tenant_id, user_role, granted_purposes)`` from the socket.
+
+    Role and consent purposes are read **only** from the verified JWT — never
+    from a client frame — so a later ``tool_call.confirm`` re-authorizes the
+    submit against the real authenticated principal (P0-1).  Mirrors
+    :func:`voice_ws_v2._resolve_ws_auth` for token extraction; returns the
+    anonymous ``public`` principal when no token is present and auth is optional.
+    """
+    return _principal_of(_verified_ws_claims(websocket, required=required, token_override=token_override))
+
+
+def resolve_ws_session(
+    websocket: WebSocket, *, required: bool = False, token_override: str | None = None
+) -> tuple[str, str, str, float | None]:
+    """Resolve ``(user_id, tenant_id, user_role, expiry)`` for a socket that outlives its request.
+
+    *expiry* is the verified token's ``exp`` (epoch seconds), or ``None`` when
+    the token carries none or the socket is anonymous. A long-lived socket
+    closes itself then: the verifier only checks expiry at sign-in.
+    """
+    claims = _verified_ws_claims(websocket, required=required, token_override=token_override)
+    user_id, tenant_id, role, _purposes = _principal_of(claims)
+    exp = claims.get("exp") if claims else None
+    expiry = float(exp) if isinstance(exp, (int, float)) and not isinstance(exp, bool) and exp > 0 else None
+    return user_id, tenant_id, role, expiry
 
 
 @dataclass

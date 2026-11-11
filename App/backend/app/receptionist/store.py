@@ -46,7 +46,38 @@ _CALL_DESK_COLUMNS: dict[str, str] = {
     # until `reserved_until` (desk.transfer, ADR-0039).
     "reserved_for": "TEXT NOT NULL DEFAULT ''",
     "reserved_until": "DOUBLE PRECISION",
+    # Every officer who was connected to the call, in order, and the wrap-up
+    # each of them saved (desk.wrapup, ADR-0040). `outcome` / `wrapup_note`
+    # above stay the call's own: the last officer's.
+    "handled_by_json": "TEXT NOT NULL DEFAULT '[]'",
+    "wrapups_json": "TEXT NOT NULL DEFAULT '[]'",
 }
+
+#: JSON columns read back as a parsed value beside the raw text.
+_JSON_FIELDS: dict[str, tuple[str, Any]] = {
+    "summary_json": ("summary", None),
+    "metrics_json": ("metrics", None),
+    "brief_json": ("brief", None),
+}
+#: JSON list columns: always present on a row that is read back, [] when unset.
+_JSON_LISTS: dict[str, str] = {"handled_by_json": "handled_by", "wrapups_json": "wrapups"}
+
+
+def _decode_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Add the parsed form of *row*'s JSON columns (``summary``, ``brief``, ``handled_by`` …)."""
+    for column, (name, fallback) in _JSON_FIELDS.items():
+        if row.get(column):
+            try:
+                row[name] = json.loads(row[column])
+            except Exception:
+                row[name] = fallback
+    for column, name in _JSON_LISTS.items():
+        try:
+            parsed = json.loads(row.get(column) or "[]")
+        except Exception:
+            parsed = []
+        row[name] = parsed if isinstance(parsed, list) else []
+    return row
 
 
 def _ensure_columns(table: str, columns: dict[str, str]) -> None:
@@ -135,11 +166,15 @@ def init_receptionist_schema() -> None:
             """
         )
         _ensure_columns("voice_calls", _CALL_DESK_COLUMNS)
+        # Presence belongs to a tenant: its board, its staffing count and its
+        # lobby event crossed tenants while the table had no such column (G584).
+        _ensure_columns("officer_presence", {"tenant_id": "TEXT NOT NULL DEFAULT 'default'"})
         db.execute_script(
             """
             CREATE INDEX IF NOT EXISTS idx_voice_calls_callback ON voice_calls(needs_callback, callback_done_at);
             CREATE INDEX IF NOT EXISTS idx_voice_calls_claimed ON voice_calls(claimed_by);
             CREATE INDEX IF NOT EXISTS idx_voice_calls_outcome ON voice_calls(outcome);
+            CREATE INDEX IF NOT EXISTS idx_officer_presence_tenant ON officer_presence(tenant_id, status);
             """
         )
         logger.info("Voice receptionist schema initialized")
@@ -216,24 +251,7 @@ def get_call(call_id: str, *, tenant_id: str | None = None) -> dict[str, Any] | 
         )
     if not rows:
         return None
-    row = dict(rows[0])
-    # Parse json columns if present
-    if row.get("summary_json"):
-        try:
-            row["summary"] = json.loads(row["summary_json"])
-        except Exception:
-            row["summary"] = None
-    if row.get("metrics_json"):
-        try:
-            row["metrics"] = json.loads(row["metrics_json"])
-        except Exception:
-            row["metrics"] = None
-    if row.get("brief_json"):
-        try:
-            row["brief"] = json.loads(row["brief_json"])
-        except Exception:
-            row["brief"] = None
-    return row
+    return _decode_row(dict(rows[0]))
 
 
 def claim_call(call_id: str, officer_id: str, now: float, expired_before: float) -> bool:
@@ -289,11 +307,8 @@ def save_draft_wrapup_if_empty(call_id: str, note: str) -> bool:
     return affected > 0
 
 
-def update_call(call_id: str, **kwargs: Any) -> bool:
-    """Update fields on a call record."""
-    if not kwargs:
-        return False
-
+def _assignments(fields: dict[str, Any]) -> tuple[list[str], list[Any]]:
+    """``column = ?`` clauses and their parameters for the *fields* a call row may be given."""
     allowed_cols = {
         "status", "ended_at", "end_reason", "transferred", "transfer_reason",
         "ticket_id", "officer_id", "summary_json", "metrics_json",
@@ -302,7 +317,7 @@ def update_call(call_id: str, **kwargs: Any) -> bool:
     }
     updates: list[str] = []
     params: list[Any] = []
-    for k, v in kwargs.items():
+    for k, v in fields.items():
         if k in allowed_cols:
             updates.append(f"{k} = ?")
             if k.endswith("_json") and isinstance(v, (dict, list)):
@@ -311,14 +326,60 @@ def update_call(call_id: str, **kwargs: Any) -> bool:
                 params.append(1 if v else 0)
             else:
                 params.append(v)
+    return updates, params
 
+
+def update_call(call_id: str, **kwargs: Any) -> bool:
+    """Update fields on a call record."""
+    if not kwargs:
+        return False
+    updates, params = _assignments(kwargs)
     if not updates:
         return False
 
     params.append(call_id)
-    query = f"UPDATE voice_calls SET {', '.join(updates)} WHERE call_id = ?"
+    query = f"UPDATE voice_calls SET {', '.join(updates)} WHERE call_id = ?"  # nosec B608 # noqa: S608
     db.execute(query, tuple(params))
     return True
+
+
+#: Times a wrap-up is merged again after another officer's save landed first.
+_WRAPUP_MERGE_ATTEMPTS = 6
+
+
+def merge_wrapup(
+    call_id: str,
+    entry: dict[str, Any],
+    fields_for: Callable[[dict[str, Any]], dict[str, Any]],
+) -> dict[str, Any]:
+    """Add *entry* to a call's wrap-ups, replacing the same officer's earlier one.
+
+    *fields_for* is given the row as just read and returns the other columns
+    to set with it (the call's own outcome depends on what is already there).
+    The row is written only if its wrap-ups are still the ones that were
+    read, and read again otherwise: two officers saving together used to
+    each write a list holding only their own, and the later write removed the
+    other's. Works across processes, on either backend. Returns the row the
+    successful attempt read.
+    """
+    for _ in range(_WRAPUP_MERGE_ATTEMPTS):
+        row = get_call(call_id)
+        if row is None:
+            raise LookupError(f"call {call_id} does not exist")
+        as_read = row.get("wrapups_json") or ""
+        kept = [
+            w for w in row.get("wrapups") or []
+            if isinstance(w, dict) and w.get("officer_id") != entry.get("officer_id")
+        ]
+        updates, params = _assignments({**fields_for(row), "wrapups_json": [*kept, entry]})
+        affected = db.execute(
+            f"UPDATE voice_calls SET {', '.join(updates)} "  # nosec B608 # noqa: S608
+            "WHERE call_id = ? AND COALESCE(wrapups_json, '') = ?",
+            (*params, call_id, as_read),
+        )
+        if affected:
+            return row
+    raise RuntimeError(f"the wrap-up of call {call_id} kept changing under this save")
 
 
 def list_calls(
@@ -418,25 +479,7 @@ def list_calls(
     query_params = list(params) + [max(1, limit), max(0, offset)]
     rows = db.query_all(query, tuple(query_params))
 
-    calls: list[dict[str, Any]] = []
-    for r in rows:
-        d = dict(r)
-        if d.get("summary_json"):
-            try:
-                d["summary"] = json.loads(d["summary_json"])
-            except Exception:
-                d["summary"] = None
-        if d.get("metrics_json"):
-            try:
-                d["metrics"] = json.loads(d["metrics_json"])
-            except Exception:
-                d["metrics"] = None
-        if d.get("brief_json"):
-            try:
-                d["brief"] = json.loads(d["brief_json"])
-            except Exception:
-                d["brief"] = None
-        calls.append(d)
+    calls: list[dict[str, Any]] = [_decode_row(dict(r)) for r in rows]
 
     if return_total:
         return calls, total
@@ -444,20 +487,28 @@ def list_calls(
 
 
 def mark_callback_done(call_id: str, done_by: str, note: str = "") -> bool:
-    """Mark a waiting callback as resolved."""
+    """Mark an owed callback as made; False when none is owed (or another officer just did).
+
+    One conditional UPDATE: two officers pressing "Mark done" together cannot
+    both be recorded as the one who rang back, and a call that owes no
+    callback is not given one after the fact.
+    """
     now = time.time()
     call = get_call(call_id)
     if not call:
         return False
     current_note = call.get("officer_note") or ""
     new_note = f"{current_note}\n[Callback completed by {done_by}: {note}]".strip() if note else current_note
-    return update_call(
-        call_id,
-        callback_done_at=now,
-        callback_done_by=done_by,
-        officer_note=new_note,
-        needs_callback=0,
+    affected = db.execute(
+        """
+        UPDATE voice_calls
+        SET callback_done_at = ?, callback_done_by = ?, officer_note = ?, needs_callback = 0
+        WHERE call_id = ? AND needs_callback = 1
+          AND (callback_done_at IS NULL OR callback_done_at = 0)
+        """,
+        (now, done_by, new_note, call_id),
     )
+    return affected > 0
 
 
 def get_caller_history(call_id: str, *, tenant_id: str | None = None) -> dict[str, Any]:

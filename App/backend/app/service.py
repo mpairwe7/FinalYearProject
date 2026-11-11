@@ -3489,7 +3489,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     evaluate_cxp_schedule,
                 )
 
-                sched = evaluate_cxp_schedule(check_presence=True)
+                sched = evaluate_cxp_schedule(check_presence=True, tenant_id=tenant_id)
                 if sched.after_hours:
                     notice = after_hours_escalation_notice(locale or "en", schedule=sched)
                     if notice.strip() not in full_reply:
@@ -8480,7 +8480,7 @@ class ChatModel:
                 if flags.is_enabled("cxp_business_hours", subject=user_id or None):
                     from .escalation_policy import evaluate_cxp_schedule
 
-                    sched = evaluate_cxp_schedule(check_presence=True)
+                    sched = evaluate_cxp_schedule(check_presence=True, tenant_id=effective_tenant)
                     handoff["cxp_schedule"] = sched.to_dict()
                     handoff["after_hours"] = sched.after_hours
                     handoff["next_open_eat"] = sched.next_open_label if sched.after_hours else ""
@@ -11028,6 +11028,7 @@ class ChatModel:
         connector_namespaces: list[str] | None = None,
         portal_context: dict[str, Any] | None = None,
         portal_task_submission: dict[str, Any] | None = None,
+        defer_audit: bool = False,
     ) -> dict[str, Any]:
         """Answer *message*, rendered in *locale*.
 
@@ -11043,7 +11044,11 @@ class ChatModel:
         *locale* is the taxpayer's own choice or only a default; ``None`` keeps
         the older contract (see :mod:`app.language_state`). ``memory_write``
         False keeps this turn out of long-term memory (a low-confidence call
-        transcript).
+        transcript). ``defer_audit`` hands the turn's audit fields back under
+        ``_pending_audit`` instead of writing the row: for a transport that
+        serves something other than this reply (a call speaks its own
+        rendering, in the caller's language, and may drop the answer) and
+        writes the one row itself through :meth:`record_turn_audit`.
         """
         _PENDING_TURN_AUDIT.set(None)
         _TURN_GENERATION.set(_new_generation_record())
@@ -11081,6 +11086,7 @@ class ChatModel:
                 connector_namespaces=connector_namespaces,
                 portal_context=portal_context,
                 portal_task_submission=portal_task_submission,
+                defer_audit=defer_audit,
             )
 
     def _generate_localized(
@@ -11104,6 +11110,7 @@ class ChatModel:
         connector_namespaces: list[str] | None = None,
         portal_context: dict[str, Any] | None = None,
         portal_task_submission: dict[str, Any] | None = None,
+        defer_audit: bool = False,
     ) -> dict[str, Any]:
         """:meth:`generate`'s body: the English answer, localized, then audited."""
         turn_out: dict[str, str] = {}
@@ -11202,7 +11209,7 @@ class ChatModel:
                     evaluate_cxp_schedule,
                 )
 
-                sched = evaluate_cxp_schedule(check_presence=True)
+                sched = evaluate_cxp_schedule(check_presence=True, tenant_id=tenant_id)
                 if sched.after_hours:
                     notice = after_hours_escalation_notice(effective or "en", schedule=sched)
                     cur_reply = str(result.get("reply") or "")
@@ -11212,9 +11219,12 @@ class ChatModel:
         pending = _PENDING_TURN_AUDIT.get()
         _PENDING_TURN_AUDIT.set(None)
         if pending is not None and isinstance(result, dict):
-            self.record_turn_audit(
-                message=message, result=result, channel=channel, usage=usage_summary(usage), **pending
-            )
+            if defer_audit:
+                result["_pending_audit"] = {"usage": usage_summary(usage), **pending}
+            else:
+                self.record_turn_audit(
+                    message=message, result=result, channel=channel, usage=usage_summary(usage), **pending
+                )
         return result
 
     @_scoped_conversation_state

@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import inspect
 import json
 import logging
 import os
 import re
+import threading
 import time
 from functools import lru_cache
+from dataclasses import dataclass, field
 from typing import Any, Final
 
 from .. import database as db
@@ -28,6 +31,7 @@ from .config import (
     get_filler_after_ms,
     get_hold_update_s,
     get_idle_reprompts,
+    get_languages,
     get_max_clarify_attempts,
     get_max_spoken_sentences,
     get_memory_min_asr_confidence,
@@ -61,6 +65,7 @@ from .serializer import (
     OutputTransportMessageUrgentFrame,
     RequestCallbackFrame,
     RequestOfficerFrame,
+    SetLanguageFrame,
 )
 
 try:
@@ -409,6 +414,125 @@ _STEP_OR_BULLET_START_RE = re.compile(
     r"^\s*(?:\d{1,2}[.)]\s+|(?:Step|Odaala|Hatua|Idaara|Rwom)\s+\d+|[-*+•]\s+)",
     re.IGNORECASE,
 )
+#: How long a call turn waits for its answer before apologising and handing over.
+GENERATION_TIMEOUT_S = 25.0
+
+#: Model runs one call may have in flight: the current turn's and the one it
+#: superseded. A caller who types quickly used to start a full run per turn,
+#: every one of them running to completion on the pool that also carries
+#: speech recognition and synthesis for every other call (G591).
+MAX_GENERATIONS_IN_FLIGHT = 2
+
+
+@dataclass
+class _TurnRecord:
+    """What one caller turn was answered with, for its single audit row (G585).
+
+    Every transport writes one row per turn. On a call the row is written
+    here, when the turn is over, from what the caller was actually told: the
+    lines spoken or captioned in reply, in the call's language. ``generate``
+    is asked to hand its row back (``defer_audit``) rather than write it,
+    because it sees neither the Luganda the caller heard nor a turn that was
+    talked over, timed out or handed to an officer.
+    """
+
+    message: str
+    lines: list[str] = field(default_factory=list)
+    #: ``generate``'s result, when the model answered: sources, grounding, usage.
+    result: dict[str, Any] | None = None
+    mode: str = "call_control"
+    disposition: str = "completed"
+    escalated: bool = False
+    counted: bool = False  # record_chat_turn has been called for this turn
+    closed: bool = False
+    started: float = field(default_factory=time.perf_counter)
+
+
+_TURN: contextvars.ContextVar[_TurnRecord | None] = contextvars.ContextVar("call_turn_record", default=None)
+
+
+def _turn() -> _TurnRecord | None:
+    """The caller turn being answered, unless it is over (a countdown it started outlives it)."""
+    record = _TURN.get()
+    return record if record is not None and not record.closed else None
+
+
+class _GenerationSlot:
+    """One of a call's model-run slots (G591), given back once, when its work has really stopped.
+
+    A turn that times out or is replaced stops *waiting* for its model run;
+    the thread it started cannot be stopped and runs on. Giving the slot back
+    when the waiting stopped let a burst of interrupted turns run more model
+    and translation threads than the cap. Releasing only from the thread's
+    own ``finally`` had the opposite fault: a step cancelled while still
+    queued for a thread never ran, so its slot was never given back.
+
+    So the blocking steps of a run go through :meth:`run`, which counts the
+    ones that have actually started, and :meth:`finish` gives the slot back
+    at once if none is running, or when the one still running ends. A thread
+    that gets going only after the slot was given back does not do its work:
+    nobody is waiting for it, and it has no slot to run under. Counting and
+    giving back happen under one lock, so one of the two always sees the other.
+    """
+
+    def __init__(self, semaphore: asyncio.Semaphore, loop: asyncio.AbstractEventLoop) -> None:
+        self._semaphore = semaphore
+        self._loop = loop
+        self._lock = threading.Lock()
+        self._running = 0
+        self._finished = False
+        self._given_back = False
+
+    async def run(self, fn: Any, /, *args: Any, **kwargs: Any) -> Any:
+        """Run blocking *fn* in a thread; the slot is held until it returns, whoever is still waiting."""
+
+        def work() -> Any:
+            with self._lock:
+                if self._given_back:
+                    # The turn gave up before this thread started.
+                    return None
+                self._running += 1
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                with self._lock:
+                    self._running -= 1
+                try:
+                    self._loop.call_soon_threadsafe(self._settle)
+                except RuntimeError:
+                    pass  # the loop has closed: the call, and its semaphore, are gone
+
+        return await asyncio.to_thread(work)
+
+    def finish(self) -> None:
+        """The turn no longer needs the slot: give it back now, or when a step still running ends."""
+        self._finished = True
+        self._settle()
+
+    def _settle(self) -> None:
+        with self._lock:
+            if not self._finished or self._running or self._given_back:
+                return
+            self._given_back = True
+        self._semaphore.release()
+
+
+#: The slot the current model run holds, so its blocking steps are counted against it.
+_SLOT: contextvars.ContextVar[_GenerationSlot | None] = contextvars.ContextVar("call_generation_slot", default=None)
+
+
+async def _blocking(fn: Any, /, *args: Any, **kwargs: Any) -> Any:
+    """Run blocking *fn* off the event loop, under the current model run's slot when there is one."""
+    slot = _SLOT.get()
+    if slot is not None:
+        return await slot.run(fn, *args, **kwargs)
+    return await asyncio.to_thread(fn, *args, **kwargs)
+
+
+class _Superseded(Exception):
+    """A newer turn arrived while this one waited for a model run."""
+
+
 #: Said in place of an answer the spoken-figure guard would not voice (G185):
 #: the written answer is on the caller's screen, figures intact.
 _SCREEN_POINTERS: Final[dict[str, str]] = {
@@ -521,6 +645,9 @@ class UraReceptionistBrain(LLMService):
         # Set by the multilingual builder: True while the language router is
         # re-asking the current turn in the language the caller switched to.
         self.turn_claimed: Any = None
+        # Set by the multilingual builder: told when this brain moves the
+        # call's language itself, so the language policy moves with it.
+        self.on_language_change: Any = None
         # True while an answer is being worked out: the silence is ours then,
         # not the caller's (see on_caller_idle).
         self._answering = False
@@ -536,6 +663,7 @@ class UraReceptionistBrain(LLMService):
         # barge-in) cancels the wait, not the thread, and the next transfer
         # takes this ticket rather than opening a second one.
         self._ticket_creation: asyncio.Future[tuple[str, dict[str, Any] | None]] | None = None
+        self._generation_slots = asyncio.Semaphore(MAX_GENERATIONS_IN_FLIGHT)
         self._prewarm_task: asyncio.Task[Any] | None = None
 
     def _cancel_active_generation(self) -> None:
@@ -662,9 +790,10 @@ class UraReceptionistBrain(LLMService):
             from .language import detect_explicit_request
             from .router import announce_language
 
-            explicit_lang = detect_explicit_request(frame.text, KNOWN_LANGUAGES)
-            if explicit_lang in KNOWN_LANGUAGES and explicit_lang != self.language:
-                self.room.state.locale = explicit_lang
+            languages = get_languages()
+            explicit_lang = detect_explicit_request(frame.text, languages)
+            if explicit_lang in languages and explicit_lang != self.language:
+                self._move_language(explicit_lang)
                 self.room.state.language_switches += 1
                 lang_msg = announce_language(self.room, explicit_lang, "explicit")
                 await self.push_frame(
@@ -672,8 +801,8 @@ class UraReceptionistBrain(LLMService):
                 )
             elif self.room.state.language_source in ("default", "auto"):
                 det_lang = detect_language(frame.text, default_lang=self.language)
-                if det_lang in KNOWN_LANGUAGES and det_lang != self.language:
-                    self.room.state.locale = det_lang
+                if det_lang in languages and det_lang != self.language:
+                    self._move_language(det_lang)
                     self.room.state.language_switches += 1
                     lang_msg = announce_language(self.room, det_lang, "auto")
                     await self.push_frame(
@@ -695,6 +824,13 @@ class UraReceptionistBrain(LLMService):
 
         if isinstance(frame, LLMContextFrame):
             await self._handle_context_frame(frame, direction)
+            return
+
+        if isinstance(frame, SetLanguageFrame) and self.turn_claimed is None:
+            # The caller picked a language on screen and no language router is
+            # attached to act on it (the single-language pipeline): nothing
+            # consumed the frame, so the choice was recorded and then ignored.
+            await self._apply_language_choice(frame.language)
             return
 
         await self.push_frame(frame, direction)
@@ -728,6 +864,34 @@ class UraReceptionistBrain(LLMService):
             await self.handle_external_question("yes", words=None)
         elif action == "decline_offer":
             await self.handle_external_question("no", words=None)
+
+    def _move_language(self, language: str) -> None:
+        """The brain itself moves the call to *language*; the language policy is told.
+
+        Callers offer only this deployment's call languages
+        (``RECEPTIONIST_LANGUAGES``): the policy refuses any other, and the
+        call and its policy would then be in two languages.
+        """
+        self.room.state.locale = language
+        if callable(self.on_language_change):
+            try:
+                self.on_language_change(language)
+            except Exception:
+                logger.debug("Language policy could not adopt %s", language, exc_info=True)
+
+    async def _apply_language_choice(self, language: str) -> None:
+        """The caller's on-screen language, when this brain is the one to honour it."""
+        from .router import announce_language
+
+        if language not in get_languages():
+            return
+        if language != self.room.state.locale:
+            self.room.state.language_switches += 1
+        self.room.state.language_overrides += 1
+        self._move_language(language)
+        message = announce_language(self.room, language, "override", 1.0)
+        await self.push_frame(OutputTransportMessageUrgentFrame(message), FrameDirection.DOWNSTREAM)
+        await self._say_and_record(phrase("switched", language), kind="notice")
 
     async def _handle_context_frame(
         self, frame: LLMContextFrame, direction: FrameDirection
@@ -769,6 +933,79 @@ class UraReceptionistBrain(LLMService):
         *,
         reask_window: tuple[float, float] | None = None,
     ) -> None:
+        """Respond to the caller's turn, then write its audit row (see :class:`_TurnRecord`)."""
+        record = _TurnRecord(message=user_text.strip())
+        token = _TURN.set(record)
+        try:
+            await self._respond_to_turn(user_text, words, reask_window=reask_window)
+        finally:
+            record.closed = True
+            _TURN.reset(token)
+            await self._close_turn(record)
+
+    async def _close_turn(self, record: _TurnRecord) -> None:
+        """One audit row and one turn count for a turn the AI answered, or failed to.
+
+        A turn nothing was said to (an officer has the call, the router took
+        the turn) is not the AI's and writes nothing. Shielded from the turn's
+        own cancellation, and never raises: the caller has had their answer.
+        """
+        if not record.message or not (record.lines or record.disposition != "completed"):
+            return
+        result = {k: v for k, v in (record.result or {}).items() if k != "_pending_audit"}
+        pending = dict((record.result or {}).get("_pending_audit") or {})
+        result["reply"] = " ".join(record.lines)
+        result["locale"] = self.language
+        # The language the reply is in, which is English when a translation
+        # failed: generate reports it, and so does the Luganda path. A turn
+        # answered with the receptionist's own lines is in the call's language.
+        result["reply_locale"] = str(result.get("reply_locale") or self.language)
+        result.setdefault("retrieval_mode", record.mode)
+        if record.escalated:
+            result["escalation_required"] = True
+        if record.disposition != "completed":
+            result["_disposition"] = record.disposition
+        if not record.counted:
+            try:
+                record_chat_turn(
+                    result,
+                    elapsed_ms=(time.perf_counter() - record.started) * 1000,
+                    channel="call",
+                    error=record.disposition == "failed",
+                )
+            except Exception:
+                logger.debug("Call turn metric skipped", exc_info=True)
+        audit = getattr(self.chat_model, "record_turn_audit", None)
+        if not callable(audit):
+            return
+        state = self.room.state
+        fields = {
+            "tool_calls": pending.get("tool_calls") or [],
+            "tool_iterations": int(pending.get("tool_iterations") or 0),
+            "agent_route": str(pending.get("agent_route") or ""),
+            "usage": pending.get("usage"),
+        }
+        try:
+            await asyncio.shield(asyncio.to_thread(
+                audit,
+                message=record.message,
+                result=result,
+                channel="call",
+                session_id=self.room.call_id,
+                user_id=state.user_id or "",
+                tenant_id=state.tenant_id or "default",
+                **fields,
+            ))
+        except Exception:
+            logger.warning("Audit row for a turn on call %s could not be written", self.room.call_id, exc_info=True)
+
+    async def _respond_to_turn(
+        self,
+        user_text: str,
+        words: list[Any] | None = None,
+        *,
+        reask_window: tuple[float, float] | None = None,
+    ) -> None:
         """Record the caller's turn and respond to it.
 
         The context aggregator reaches this through ``_handle_context_frame``;
@@ -803,9 +1040,10 @@ class UraReceptionistBrain(LLMService):
             from .language import detect_explicit_request
             from .router import announce_language
 
-            explicit_lang = detect_explicit_request(user_text, KNOWN_LANGUAGES)
-            if explicit_lang in KNOWN_LANGUAGES and explicit_lang != self.language:
-                self.room.state.locale = explicit_lang
+            languages = get_languages()
+            explicit_lang = detect_explicit_request(user_text, languages)
+            if explicit_lang in languages and explicit_lang != self.language:
+                self._move_language(explicit_lang)
                 self.room.state.language_switches += 1
                 lang_msg = announce_language(self.room, explicit_lang, "explicit")
                 await self.push_frame(
@@ -813,8 +1051,8 @@ class UraReceptionistBrain(LLMService):
                 )
             elif getattr(self.room.state, "language_source", "default") in ("default", "auto"):
                 det_lang = detect_language(user_text, default_lang=self.language)
-                if det_lang in KNOWN_LANGUAGES and det_lang != self.language:
-                    self.room.state.locale = det_lang
+                if det_lang in languages and det_lang != self.language:
+                    self._move_language(det_lang)
                     self.room.state.language_switches += 1
                     lang_msg = announce_language(self.room, det_lang, "auto")
                     await self.push_frame(
@@ -1218,6 +1456,9 @@ class UraReceptionistBrain(LLMService):
     async def _support_crisis_waiting(self) -> None:
         """The crisis lines for a caller already waiting, then the call raised to urgent."""
         language = self.language
+        record = _turn()
+        if record is not None:
+            record.mode = "crisis_support"
         spoken = f"{phrase('crisis_support', language)} {phrase('crisis_waiting', language)}"
         await self._say_and_record(spoken, kind="answer")
         await self._say_and_record(phrase("crisis_screen", language), kind="notice", speak=False)
@@ -1364,7 +1605,7 @@ class UraReceptionistBrain(LLMService):
 
         repaired = repair_asr_entities(question)
         thread_id = self.room.state.conversation_id or self.room.call_id
-        calc = await asyncio.to_thread(
+        calc = await _blocking(
             self.chat_model._maybe_handle_fast_paths,
             message=repaired,
             rewritten=repaired,
@@ -1373,7 +1614,13 @@ class UraReceptionistBrain(LLMService):
         )
         if isinstance(calc, dict) and calc.get("reply"):
             answered = dict(calc)
+            # The fast paths answer in English. Spoken as they came, a Luganda
+            # caller heard English sentences on the Luganda voice (G586). Put
+            # through the guarded translation; if that fails or is refused
+            # (it changed a figure), the English answer stands.
+            answered["reply"] = await self._into_luganda(str(calc["reply"]))
             answered["locale"] = "lg"
+            answered["reply_locale"] = "lg" if answered["reply"] != str(calc["reply"]) else "en"
             answered["english_query"] = repaired
             # A calculator reply has no retrieval passages. Leaving confidence
             # empty made the call treat that as "no knowledge" and transfer.
@@ -1382,10 +1629,10 @@ class UraReceptionistBrain(LLMService):
             return answered
 
         # 1. Clean query extraction
-        english_query = await asyncio.to_thread(self._extract_english_tax_query, question)
+        english_query = await _blocking(self._extract_english_tax_query, question)
 
         # 2. Query official URA tax knowledge in English
-        rag_result = await asyncio.to_thread(
+        rag_result = await _blocking(
             self.chat_model.generate,
             message=english_query,
             conversation_id=self.room.state.conversation_id,
@@ -1399,6 +1646,9 @@ class UraReceptionistBrain(LLMService):
             tenant_id=self.room.state.tenant_id,
             channel="call",
             memory_write=memory_write,
+            # This is the English pivot. The row is of the Luganda the caller
+            # hears, written when the turn is over (_TurnRecord).
+            defer_audit=True,
         )
 
         # Read for a crisis only now that it is in English: the call's crisis
@@ -1435,27 +1685,23 @@ class UraReceptionistBrain(LLMService):
         # 3. Direct Luganda Generation with Figure & Unit Survival Gate
         from .. import mt
 
-        luganda_reply = await asyncio.to_thread(self._synthesize_luganda_reply, context_text, question)
+        luganda_reply = await _blocking(self._synthesize_luganda_reply, context_text, question)
         if luganda_reply and not (
             mt.figures_survived(english_reply, luganda_reply, locale="lg")
             and mt.units_survived(english_reply, luganda_reply)
+            # And none of its own: the synthesis is a second model answer that
+            # no output guard reads, so a rate or amount it adds would be
+            # spoken unchecked (G588).
+            and mt.figures(luganda_reply, locale="lg") <= mt.figures(english_reply, locale="en") | {1.0}
         ):
             logger.info("Direct Luganda call synthesis failed the figure/unit check; using the guarded _localize_reply")
             luganda_reply = ""
         if not luganda_reply:
-            luganda_reply = english_reply
-            loc_fn = getattr(self.chat_model, "_localize_reply", None)
-            if callable(loc_fn):
-                try:
-                    # Machine translation is a network call: on the loop it
-                    # stalled every live call on the worker for its length.
-                    localized = await asyncio.to_thread(loc_fn, english_reply, "lg")
-                    if isinstance(localized, str) and localized.strip():
-                        luganda_reply = localized.strip()
-                except Exception:
-                    logger.debug("Luganda localisation failed; serving English", exc_info=True)
+            luganda_reply = await self._into_luganda(english_reply)
 
         return {
+            # Grounding, usage and the deferred audit fields are the pivot's.
+            **{k: v for k, v in rag_result.items() if k in ("retrieval_mode", "_pending_audit")},
             "reply": str(luganda_reply),
             "sources": sources,
             "citations": rag_result.get("citations", []),
@@ -1467,11 +1713,30 @@ class UraReceptionistBrain(LLMService):
             "ticket_id": rag_result.get("ticket_id"),
             "handoff": rag_result.get("handoff"),
             "locale": "lg",
+            # English when neither the synthesis nor the guarded translation
+            # produced Luganda and the English answer was served as it stood.
+            "reply_locale": "lg" if str(luganda_reply) != english_reply else "en",
             "english_query": english_query,
             # The turn in English, for the call's model-facing history (G119).
             "_english_message": english_query,
             "_english_reply": english_reply,
         }
+
+    async def _into_luganda(self, english: str) -> str:
+        """*english* through the guarded translation, off the event loop; *english* itself if that fails.
+
+        Machine translation is a network call: on the loop it stalled every
+        live call on the worker for its length (G577).
+        """
+        loc_fn = getattr(self.chat_model, "_localize_reply", None)
+        if not callable(loc_fn):
+            return english
+        try:
+            localized = await _blocking(loc_fn, english, "lg")
+        except Exception:
+            logger.debug("Luganda localisation failed; serving English", exc_info=True)
+            return english
+        return localized.strip() if isinstance(localized, str) and localized.strip() else english
 
     async def on_caller_idle(self) -> None:
         """The caller has said nothing since the assistant stopped speaking.
@@ -1568,6 +1833,9 @@ class UraReceptionistBrain(LLMService):
         from .desk import hang_up_caller, say_to_caller
 
         heard = self.room.state.caller_turns_count
+        record = _turn()
+        if record is not None:
+            record.lines.append(goodbye)
 
         async def _goodbye() -> None:
             duration = await say_to_caller(self.room, goodbye, self.speech_model)
@@ -1629,6 +1897,9 @@ class UraReceptionistBrain(LLMService):
                         "sources": [],
                     }
                     record_chat_turn(fast_result, elapsed_ms=fast_ms, channel="call")
+                    turn = _turn()
+                    if turn is not None:
+                        turn.counted, turn.result = True, fast_result
                     try:
                         db.log_conversation(
                             session_id=self.room.call_id,
@@ -1656,26 +1927,50 @@ class UraReceptionistBrain(LLMService):
         except Exception:
             logger.debug("Hybrid speech mode classification skipped", exc_info=True)
 
-        # Start background task for LLM answer
-        if self.language == "lg":
-            gen_task = asyncio.create_task(self._generate_luganda_answer(question, memory_write=memory_write))
+        turn = _turn()
+        # A model run of this call's own may still be going for a turn this one
+        # superseded. At most two at once; the rest wait, and a turn that is
+        # stale by the time it could start is not run at all (G591).
+        await self._generation_slots.acquire()
+        if curr_gen_id != self.room.state.generation_id:
+            self._generation_slots.release()
+            if turn is not None:
+                turn.disposition = "cancelled"
+            logger.info("Skipped a superseded generation for call %s", self.room.call_id)
+            return
+
+        # Start the model run in the background. Its slot is given back when
+        # the work has stopped, not when this turn stops waiting for it
+        # (_GenerationSlot). Everything the run needs is read here, on the
+        # loop: a thread that starts late must answer this question in the
+        # language it was asked in, not in one a newer turn moved the call to.
+        slot = _GenerationSlot(self._generation_slots, asyncio.get_running_loop())
+        run_context = contextvars.copy_context()
+        run_context.run(_SLOT.set, slot)
+        state = self.room.state
+        language = state.locale
+        if language == "lg":
+            run = self._generate_luganda_answer(question, memory_write=memory_write)
         else:
-            gen_task = asyncio.create_task(
-                asyncio.to_thread(
-                    self.chat_model.generate,
-                    message=normalize_call_query(question, self.room.state.locale),
-                    conversation_id=self.room.state.conversation_id,
-                    session_id=self.room.call_id,
-                    top_k=6,
-                    locale=self.room.state.locale,
-                    # The call's LanguagePolicy decided this language.
-                    locale_explicit=True,
-                    user_id=self.room.state.user_id,
-                    tenant_id=self.room.state.tenant_id,
-                    channel="call",
-                    memory_write=memory_write,
-                )
+            run = slot.run(
+                self.chat_model.generate,
+                message=normalize_call_query(question, language),
+                conversation_id=state.conversation_id,
+                session_id=self.room.call_id,
+                top_k=6,
+                locale=language,
+                # The call's LanguagePolicy decided this language.
+                locale_explicit=True,
+                user_id=state.user_id,
+                tenant_id=state.tenant_id,
+                channel="call",
+                memory_write=memory_write,
+                # The row is written when the turn is over, from what
+                # the caller was told (_TurnRecord).
+                defer_audit=True,
             )
+        gen_task = asyncio.create_task(run, context=run_context)
+        gen_task.add_done_callback(lambda _task: slot.finish())
 
         self._active_gen_task = gen_task
 
@@ -1689,17 +1984,21 @@ class UraReceptionistBrain(LLMService):
                 filler = self._pick_filler()
                 await self._say_and_record(filler, kind="filler", skip_log=True)
 
-        # Wait up to 25s for completion
+        # Wait for completion, up to GENERATION_TIMEOUT_S
         try:
-            result = await asyncio.wait_for(gen_task, timeout=25.0)
+            result = await asyncio.wait_for(gen_task, timeout=GENERATION_TIMEOUT_S)
         except asyncio.CancelledError:
             if curr_gen_id != self.room.state.generation_id:
                 logger.info("Cancelled in-flight generation for call %s after barge-in", self.room.call_id)
+                if turn is not None:
+                    turn.disposition = "cancelled"
                 return
             raise
         except asyncio.TimeoutError:
             logger.warning("Generation timed out for call %s", self.room.call_id)
             record_chat_turn({}, elapsed_ms=(time.perf_counter() - t0) * 1000, channel="call", error=True)
+            if turn is not None:
+                turn.counted, turn.disposition = True, "deadline_exceeded"
             if self.room.state.mode == "ai":
                 await self._say_and_record(phrase("timeout_transfer", self.language), kind="notice")
                 await self._transfer("timeout")
@@ -1707,6 +2006,8 @@ class UraReceptionistBrain(LLMService):
         except Exception:
             logger.exception("Generation failed for call %s", self.room.call_id)
             record_chat_turn({}, elapsed_ms=(time.perf_counter() - t0) * 1000, channel="call", error=True)
+            if turn is not None:
+                turn.counted, turn.disposition = True, "failed"
             if self.room.state.mode == "ai":
                 await self._say_and_record(phrase("error_transfer", self.language), kind="notice")
                 await self._transfer("system_error")
@@ -1715,6 +2016,8 @@ class UraReceptionistBrain(LLMService):
         # Check if caller barged in while generate was running
         if curr_gen_id != self.room.state.generation_id:
             logger.info("Dropping late generation for call %s after barge-in", self.room.call_id)
+            if turn is not None:
+                turn.disposition = "cancelled"
             return
         # The caller asked for an officer (or one joined, or the call ended)
         # while this was being written: an answer, and its "would you like an
@@ -1723,7 +2026,12 @@ class UraReceptionistBrain(LLMService):
             logger.info(
                 "Dropping late generation for call %s: it is %s", self.room.call_id, self.room.state.mode
             )
+            if turn is not None:
+                turn.disposition = "cancelled"
             return
+        if turn is not None:
+            # The model answered: its grounding and usage go on the turn's row.
+            turn.counted, turn.result = True, result
         # Once per answered call turn, crisis hand-overs included, in the same
         # families as every other transport.
         record_chat_turn(result, elapsed_ms=(time.perf_counter() - t0) * 1000, channel="call")
@@ -2032,6 +2340,9 @@ class UraReceptionistBrain(LLMService):
         goes as ``safety_concern``, at the front of the queue.
         """
         language = self.language
+        record = _turn()
+        if record is not None:
+            record.mode = "crisis_support"
         spoken = phrase("crisis_support", language)
         offer = not asked_for_person and self._handoffs_open()
         if offer:
@@ -2061,6 +2372,9 @@ class UraReceptionistBrain(LLMService):
         turn_seq = self.room.state.turn_seq
         if kind == "answer" and speak:
             self.room.state.last_assistant_answer = text
+        record = _turn()
+        if record is not None and kind != "filler":
+            record.lines.append(text)  # what this turn's audit row digests
 
         if not skip_log:
             turn = create_turn(
@@ -2163,6 +2477,9 @@ class UraReceptionistBrain(LLMService):
         handoff: dict[str, Any] | None = None,
     ) -> None:
         """The transfer itself; :meth:`_transfer` lets only one run at a time."""
+        record = _turn()
+        if record is not None:
+            record.escalated = True
         # Whatever the AI last asked is settled by the transfer: after a
         # timeout, a "yes" must not answer a question from before it.
         self._take_offer()
@@ -2179,7 +2496,7 @@ class UraReceptionistBrain(LLMService):
 
         # 2-3. Ticket, call state, voice_calls row, staff lobby event. A caller
         # at risk goes to the front of the queue, whatever they called about.
-        staffed = call_transfer.is_staff_available()
+        staffed = call_transfer.is_staff_available(tenant_id=self.room.state.tenant_id)
         priority = "urgent" if reason == "safety_concern" else ""
         # The ticket is written off the loop: for a caller who is not speaking
         # English it translates the question and the transcript, and on the
@@ -2233,7 +2550,7 @@ class UraReceptionistBrain(LLMService):
         if flags.is_enabled("cxp_business_hours", subject=self.room.state.user_id or None):
             from ..escalation_policy import evaluate_cxp_schedule
 
-            sched = evaluate_cxp_schedule(check_presence=True)
+            sched = evaluate_cxp_schedule(check_presence=True, tenant_id=self.room.state.tenant_id)
             if sched.after_hours:
                 after_event = close_transfer_on_timeout(
                     self.room,

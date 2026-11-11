@@ -315,6 +315,22 @@ class LanguagePolicy:
     pending: list[LanguageVote] = field(default_factory=list)
     switch_count: int = 0
 
+    def adopt(self, language: str) -> None:
+        """The call moved to *language* by another road: agree with it.
+
+        The brain reads a typed turn's language itself, and a spoken turn's
+        when there is no local recogniser to vote. It set the call's language
+        without telling this policy, which went on believing the old one: a
+        confident vote for the language the caller had left then read as
+        "same language", and an on-screen choice of it as nothing to do, so
+        the call stayed in the wrong language (G592).
+        """
+        if language not in self.config.languages:
+            return
+        self.active = language
+        self.locked = True
+        self.pending.clear()
+
     def set_override(self, language: str) -> Decision:
         """The caller picked a language on screen: lock it for the call."""
         if language not in self.config.languages:

@@ -53,7 +53,7 @@ class TestOfficerPresence(unittest.TestCase):
 
     def test_lobby_event_emitted_only_on_change(self):
         published = []
-        with patch("app.receptionist.presence.hub.publish_lobby", side_effect=lambda ev, data: published.append((ev, data))):
+        with patch("app.receptionist.presence.hub.publish_lobby", side_effect=lambda ev, data, **_kw: published.append((ev, data))):
             # First insert: creates record -> event emitted
             presence.upsert_presence("user_event_test", display_name="Officer Test", status="available")
             self.assertEqual(len(published), 1)

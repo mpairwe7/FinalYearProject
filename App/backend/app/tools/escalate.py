@@ -194,7 +194,7 @@ class EscalateToHumanTool(Tool):
         if use_cxp_bh:
             from ..escalation_policy import evaluate_cxp_schedule  # noqa: PLC0415
 
-            sched = evaluate_cxp_schedule(check_presence=True)
+            sched = evaluate_cxp_schedule(check_presence=True, tenant_id=tenant_id)
             after_hours = sched.after_hours
             next_open_eat = sched.next_open_label if after_hours else ""
             close_time_eat = sched.close_time_eat if after_hours else ""

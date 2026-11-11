@@ -19,7 +19,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Path, Query, Request, Response, status
@@ -41,7 +41,7 @@ try:
 except ImportError:  # pragma: no cover – uvicorn always present at runtime
     _HAS_PROXY_MIDDLEWARE = False
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from . import database as db
 from . import documents
@@ -5262,36 +5262,73 @@ def caller_history_endpoint(
     return desk.caller_history(call_id, tenant_id=_receptionist_tenant_scope(ctx))
 
 
+class OfficerPresenceUpdate(BaseModel):
+    """What an officer's console may say about the officer (``PUT …/officers/me/presence``).
+
+    The body was a raw dict stored as sent: ``teams: 5`` was saved and then
+    broke the staffing count for every caller (G584).
+    """
+
+    display_name: str | None = Field(default=None, max_length=80)
+    status: Literal["available", "busy", "away", "on_call", "wrap_up", "offline"] | None = None
+    languages: list[str] | None = Field(default=None, max_length=8)
+    teams: list[str] | None = Field(default=None, max_length=16)
+
+    @field_validator("languages")
+    @classmethod
+    def _known_languages(cls, value: list[str] | None) -> list[str] | None:
+        from .query import SUPPORTED_LOCALES
+
+        if value is not None and any(v not in SUPPORTED_LOCALES for v in value):
+            raise ValueError("languages must be locales the service supports")
+        return value
+
+    @field_validator("teams")
+    @classmethod
+    def _known_teams(cls, value: list[str] | None) -> list[str] | None:
+        from .escalation_notify import known_teams
+
+        if value is not None and any(v not in known_teams() for v in value):
+            raise ValueError("teams must be teams a call can be passed to")
+        return value
+
+
 @app.put("/v1/admin/officers/me/presence", tags=["admin"])
 def update_my_presence_endpoint(
-    body: dict = Body(default_factory=dict),
+    body: OfficerPresenceUpdate = Body(default_factory=OfficerPresenceUpdate),
     ctx: AuthContext = Depends(require_admin_access),
 ) -> Any:
     """Update presence state for current officer or heartbeat last_seen."""
     from .receptionist import presence
+    from .receptionist.state import registry
+
     _desk_writer(ctx)
-    display_name = body.get("display_name")
-    if not display_name:
-        display_name = _desk_officer_name(ctx)
-    status = body.get("status")
-    languages = body.get("languages")
-    teams = body.get("teams")
+    status = body.status
+    # The officer is on a live call on this server: the server's own on_call
+    # stands. A heartbeat sent while their media reconnects, or as the call
+    # ends, used to mark them available and offer them to callers.
+    on_a_call = any(
+        room.state.mode == "bridged" and room.state.officer_id == ctx.user_id for room in registry.list_live()
+    )
+    if on_a_call and status != "on_call":
+        status = None
     return presence.upsert_presence(
         ctx.user_id,
-        display_name=display_name,
+        tenant_id=ctx.tenant_id or "default",
+        display_name=body.display_name or _desk_officer_name(ctx),
         status=status,
-        languages=languages,
-        teams=teams,
+        languages=body.languages,
+        teams=body.teams,
     )
 
 
 @app.get("/v1/admin/officers/presence", tags=["admin"])
 def get_officers_presence_endpoint(
-    _ctx: AuthContext = Depends(require_admin_access),
+    ctx: AuthContext = Depends(require_admin_access),
 ) -> Any:
-    """List online and active officers and valid transfer teams."""
+    """Officers of the caller's tenant with their presence, and the teams a call can be passed to."""
     from .receptionist import presence
-    return presence.get_presence_board()
+    return presence.get_presence_board(tenant_id=_receptionist_tenant_scope(ctx))
 
 
 @app.post("/v1/auth/dev-token", tags=["auth"], response_model=DevTokenResponse)

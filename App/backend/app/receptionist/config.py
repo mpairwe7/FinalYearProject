@@ -322,6 +322,33 @@ def allow_edge_standin_lg() -> bool:
     return _env_bool("RECEPTIONIST_ALLOW_EDGE_STANDIN_LG", False)
 
 
+#: Every variable an image may start its workers from.
+WORKER_VARIABLES: tuple[str, ...] = ("WORKERS", "UVICORN_WORKERS", "WEB_CONCURRENCY")
+
+
+def worker_settings() -> dict[str, str]:
+    """The worker-count variables that are set, as written."""
+    return {name: os.environ[name].strip() for name in WORKER_VARIABLES if os.getenv(name, "").strip()}
+
+
+def single_worker_declared() -> bool:
+    """One process owns every call: a worker count is set, and every one that is set says 1."""
+    settings = worker_settings()
+    return bool(settings) and all(value == "1" for value in settings.values())
+
+
+def sole_process_declared() -> bool:
+    """This process is the deployment's only one: one worker, and one replica.
+
+    Call rooms live in the process, so "no room here" means "no live call"
+    only where nothing else can be holding it. An unset worker count proves
+    nothing (an entrypoint may default it without exporting it), so this is
+    true only when the deployment says so: a worker variable of 1 and
+    ``VOICE_RECEPTIONIST_REPLICAS=1``, both of which the production gate requires.
+    """
+    return single_worker_declared() and os.getenv("VOICE_RECEPTIONIST_REPLICAS", "").strip() == "1"
+
+
 def local_engine_errors() -> list[str]:
     """Why production calls could not run on the local engine; empty when they can.
 
