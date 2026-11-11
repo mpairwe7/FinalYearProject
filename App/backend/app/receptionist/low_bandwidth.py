@@ -193,8 +193,14 @@ def verify_call_resume_ticket(
     expected_call_id: str = "",
     expected_user_id: str | None = None,
     expected_tenant_id: str = "default",
+    consume: bool = True,
 ) -> dict[str, object] | None:
-    """Verify and consume a single-use caller resume ticket; returns claims or ``None``."""
+    """Verify, and with *consume* use up, a single-use caller resume ticket; returns claims or ``None``.
+
+    With ``consume=False`` a ticket already used is still refused, but this
+    one stays usable: the caller spends it with :func:`consume_resume_ticket`
+    once the resume has what it needs (its snapshot).
+    """
     if not resume_ticket or "." not in resume_ticket:
         return None
     key = _signing_material()
@@ -226,22 +232,37 @@ def verify_call_resume_ticket(
         return None
     if not flags.is_enabled("call_drop_resume", subject=str(payload.get("uid") or "") or None):
         return None
+    if not consume:
+        with _NONCE_LOCK:
+            return None if nonce in _CONSUMED_RESUME_NONCES else payload
+    return payload if consume_resume_ticket(payload) else None
+
+
+def consume_resume_ticket(claims: dict[str, object]) -> bool:
+    """Use up a verified ticket's nonce; False when it is already used, expired, or cannot be recorded."""
+    nonce = str(claims.get("nonce") or "")
+    try:
+        exp_ts = float(claims.get("exp") or 0.0)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False
+    if not nonce:
+        return False
     with _NONCE_LOCK:
         now = time.time()
         if exp_ts <= now:
-            return None
+            return False
         for n, e in list(_CONSUMED_RESUME_NONCES.items()):
             if e <= now:
                 del _CONSUMED_RESUME_NONCES[n]
         if nonce in _CONSUMED_RESUME_NONCES:
-            return None
+            return False
         if len(_CONSUMED_RESUME_NONCES) >= _MAX_CONSUMED_NONCES:
             # Full of tickets that have not expired. Evicting one to make room
             # let it be used again; refusing this resume is the safe failure.
             logger.warning("Call resume refused: %d unexpired tickets already used", len(_CONSUMED_RESUME_NONCES))
-            return None
+            return False
         _CONSUMED_RESUME_NONCES[nonce] = exp_ts
-    return payload
+    return True
 
 
 def apply_network_telemetry_to_room(

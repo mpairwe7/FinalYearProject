@@ -1269,6 +1269,9 @@ async def say_to_caller(room: CallRoom, text: str, speech_model: Any) -> float:
         from .stt import report_speech_failure
 
         await report_speech_failure(room, "tts", counted=True)
+    elif pcm:
+        # Said aloud: the failures before it are no longer in a row.
+        room.state.voice_failures = 0
     room.state.turn_seq += 1
     turn = create_turn(call_id=room.call_id, seq=room.state.turn_seq, speaker="assistant", kind="notice", text=text)
     hub.publish_call(room.call_id, "turn", turn)

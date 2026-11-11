@@ -189,7 +189,13 @@ def init_receptionist_schema(*, strict: bool = False) -> None:
             raise
 
 
-def end_stale_calls(*, now: float | None = None, ceiling_s: float | None = None, everything: bool = False) -> int:
+def end_stale_calls(
+    *,
+    now: float | None = None,
+    ceiling_s: float | None = None,
+    everything: bool = False,
+    before: float | None = None,
+) -> int:
     """End call rows no live call stands behind; returns how many.
 
     Call rooms live in the process. When it dies its rows stay ``ai``,
@@ -211,6 +217,9 @@ def end_stale_calls(*, now: float | None = None, ceiling_s: float | None = None,
         except Exception:
             ceiling_s = 900.0
     cutoff = now + 1.0 if everything else now - (ceiling_s + 120.0)
+    if before is not None:
+        # Never a call that began after this boundary (the start that runs the sweep).
+        cutoff = min(cutoff, before)
     lost = db.query_all(
         "SELECT call_id, status FROM voice_calls WHERE status IN ('ai', 'transferring', 'bridged') AND started_at < ?",
         (cutoff,),

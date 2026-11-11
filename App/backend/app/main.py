@@ -846,11 +846,37 @@ async def lifespan(app: FastAPI):
         if _ONLINE_EVAL_INTERVAL_SECONDS > 0
         else None
     )
+
+    async def _receptionist_gauge_loop() -> None:
+        """Keep this worker's `receptionist_available` current (ADR-0041).
+
+        The exported value is the lowest live worker's, and a scrape runs the
+        refresh only on the worker that answers it: without this, a worker
+        nobody scraped kept a stale value.
+        """
+        from . import receptionist
+
+        while True:
+            receptionist.refresh_gauge()
+            try:
+                await asyncio.wait_for(retention_stop.wait(), timeout=30.0)
+                return
+            except TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                return
+
+    gauge_task = asyncio.create_task(_receptionist_gauge_loop(), name="receptionist-gauge")
     try:
         yield
     finally:
         retention_stop.set()
-        for task in (retention_task, seal_task, eval_task):
+        # Call-drop checkpoints still being written finish before the database closes.
+        with contextlib.suppress(Exception):
+            from .receptionist.serializer import drain_checkpoints
+
+            await drain_checkpoints(timeout=5.0)
+        for task in (retention_task, seal_task, eval_task, gauge_task):
             if task is None:
                 continue
             task.cancel()

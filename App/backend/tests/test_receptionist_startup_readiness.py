@@ -1289,5 +1289,195 @@ class CheckpointOrderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(written, ["audio", "caption_only"])
 
 
+# ---------------------------------------------------------------------------
+# Found in the third review
+# ---------------------------------------------------------------------------
+
+
+class ThirdReviewStartTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.addCleanup(receptionist.reset)
+
+    def test_the_availability_gauge_keeps_the_worst_worker(self):
+        from app.analytics import metrics
+
+        family = metrics._family("gauge_min", "receptionist_available", (), None)
+
+        self.assertEqual(family.metric._multiprocess_mode, "livemin")
+
+    def test_a_sweep_the_database_refused_is_tried_again_for_calls_from_before_this_start(self):
+        from unittest.mock import MagicMock
+
+        calls: list[dict] = []
+
+        def sweep(**kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                raise RuntimeError("database is locked")
+            return 1
+
+        timers: list = []
+
+        def fake_timer(delay, fn, args=()):
+            timer = MagicMock()
+            timer.start.side_effect = lambda: timers.append((delay, lambda: fn(*args)))
+            return timer
+
+        with (
+            patch.object(receptionist, "is_available", return_value=True),
+            patch("app.receptionist.config.validate"),
+            patch("app.receptionist.store.init_receptionist_schema"),
+            patch("app.receptionist.store.end_stale_calls", side_effect=sweep),
+            patch.object(receptionist.threading, "Timer", side_effect=fake_timer),
+        ):
+            started = time.time()
+            receptionist.start(speech_model=object())
+            self.assertEqual(len(timers), 1)
+            timers[0][1]()  # the retry runs, later
+
+        self.assertEqual(len(calls), 2)
+        # Calls this process started after its start are never the sweep's.
+        self.assertLessEqual(calls[1]["before"], time.time())
+        self.assertGreaterEqual(calls[1]["before"], started - 1)
+        self.assertEqual(calls[0]["before"], calls[1]["before"])
+
+    def test_the_go_live_report_reads_the_effective_flag(self):
+        from app.production_readiness import evaluate_gate
+
+        with (
+            patch.dict("os.environ", {"APP_ENV": "production", "FLAG_VOICE_RECEPTIONIST": ""}),
+            patch("app.flags.flags.is_enabled", side_effect=lambda name, **_kw: name == "voice_receptionist"),
+        ):
+            row = evaluate_gate("G36")
+
+        self.assertNotEqual(row["status"], "disabled")
+        self.assertTrue(row["errors"])
+
+
+class SweepBoundaryTests(unittest.TestCase):
+    setUp = StaleCallTests.setUp
+    call = StaleCallTests.call
+
+    def test_a_call_started_after_the_boundary_is_never_swept(self):
+        young = self.call("bridged", age_s=1)
+
+        from app.receptionist.store import end_stale_calls
+
+        end_stale_calls(now=self.now, ceiling_s=900.0, everything=True, before=self.now - 60)
+
+        self.assertEqual(get_call(young)["status"], "bridged")
+
+
+class StandaloneSpeechTests(CallCase):
+    async def test_a_line_said_outside_the_pipeline_clears_the_voice_failures(self):
+        import numpy as np
+
+        from app.receptionist import desk
+
+        self.state.voice_failures = 1
+        pcm = np.zeros(1600, dtype=np.int16).tobytes()
+        with patch.object(desk, "synthesize_line", return_value=(pcm, False)):
+            await desk.say_to_caller(self.room, "Are you still there?", object())
+
+        self.assertEqual(self.state.voice_failures, 0)
+
+
+class CheckpointShutdownTests(unittest.IsolatedAsyncioTestCase):
+    async def test_a_queued_checkpoint_cancelled_at_shutdown_does_not_jump_the_queue(self):
+        import threading
+
+        from app.receptionist import serializer as serializer_module
+
+        first_may_finish = threading.Event()
+        written: list[str] = []
+
+        def save(snapshot):
+            if snapshot["n"] == 1:
+                first_may_finish.wait(2)
+            written.append(snapshot["n"])
+            return True
+
+        with patch("app.receptionist.low_bandwidth.save_call_drop_snapshot", side_effect=save):
+            first = asyncio.create_task(serializer_module._write_checkpoint_after(None, {"n": 1}))
+            await asyncio.sleep(0.05)
+            second = asyncio.create_task(serializer_module._write_checkpoint_after(first, {"n": 2}))
+            await asyncio.sleep(0.05)
+            second.cancel()
+            await asyncio.sleep(0.05)
+            first_may_finish.set()
+            await asyncio.gather(first, second, return_exceptions=True)
+
+        self.assertEqual(written, [1])
+
+    async def test_shutdown_waits_for_checkpoints_still_being_written(self):
+        import threading
+
+        from app.receptionist import serializer as serializer_module
+
+        written: list[int] = []
+        may_finish = threading.Event()
+
+        def save(snapshot):
+            may_finish.wait(2)
+            written.append(1)
+            return True
+
+        with patch("app.receptionist.low_bandwidth.save_call_drop_snapshot", side_effect=save):
+            task = asyncio.create_task(serializer_module._write_checkpoint_after(None, {"n": 1}))
+            serializer_module._CHECKPOINTS.add(task)
+            task.add_done_callback(serializer_module._CHECKPOINTS.discard)
+            asyncio.get_running_loop().call_later(0.1, may_finish.set)
+            await serializer_module.drain_checkpoints(timeout=2.0)
+
+        self.assertEqual(written, [1])
+
+
+class ResumeRaceTests(unittest.IsolatedAsyncioTestCase):
+    """A ticket handed out before its snapshot was saved is not spent on a resume that finds nothing."""
+
+    async def test_a_resume_waits_for_its_snapshot_still_being_saved(self):
+        from app.receptionist import low_bandwidth as lb
+        from app.receptionist import serializer as serializer_module
+
+        snapshot = {"call_id": "call_r1", "locale": "sw", "conversation_id": "conv_r1"}
+        saved: dict = {}
+
+        async def slow_save():
+            await asyncio.sleep(0.2)
+            saved["snap"] = snapshot
+
+        with (
+            flags_on("call_drop_resume"),
+            patch.dict("os.environ", {"RECEPTIONIST_RESUME_SECRET": "r" * 40}),
+            patch.dict(lb._CONSUMED_RESUME_NONCES, {}, clear=True),
+            patch.object(lb, "restore_call_drop_state", side_effect=lambda cid, **_kw: saved.get("snap")),
+        ):
+            ticket = lb.mint_call_resume_ticket("call_r1", "conv_r1", user_id="u1")
+            pending = asyncio.create_task(slow_save())
+            serializer_module._LAST_CHECKPOINT["call_r1"] = pending
+            self.addCleanup(serializer_module._LAST_CHECKPOINT.pop, "call_r1", None)
+
+            restored = await ws._resume_call(ticket, user_id="u1", tenant_id="default")
+
+        self.assertEqual(restored, snapshot)
+
+    async def test_a_resume_that_finds_no_snapshot_leaves_the_ticket_usable(self):
+        from app.receptionist import low_bandwidth as lb
+
+        with (
+            flags_on("call_drop_resume"),
+            patch.dict("os.environ", {"RECEPTIONIST_RESUME_SECRET": "r" * 40}),
+            patch.dict(lb._CONSUMED_RESUME_NONCES, {}, clear=True),
+        ):
+            ticket = lb.mint_call_resume_ticket("call_r2", "conv_r2", user_id="u1")
+            with patch.object(lb, "restore_call_drop_state", return_value=None):
+                self.assertIsNone(await ws._resume_call(ticket, user_id="u1", tenant_id="default", wait_s=0.05))
+            snap = {"call_id": "call_r2", "locale": "en"}
+            with patch.object(lb, "restore_call_drop_state", return_value=snap):
+                self.assertEqual(await ws._resume_call(ticket, user_id="u1", tenant_id="default"), snap)
+                # And now it is spent.
+                self.assertIsNone(await ws._resume_call(ticket, user_id="u1", tenant_id="default", wait_s=0.05))
+
+
 if __name__ == "__main__":
     unittest.main()

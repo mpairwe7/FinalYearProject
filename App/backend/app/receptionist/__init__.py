@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib.util
 import logging
 import os
+import time
 import threading
 from typing import Any
 
@@ -106,7 +107,9 @@ def _gauge(value: int) -> None:
     try:
         from ..analytics import metrics
 
-        metrics.set_gauge("receptionist_available", float(value))
+        # The lowest live worker's value: with two workers, one that cannot
+        # take calls must not be hidden by the other at the next scrape.
+        metrics.set_gauge_min("receptionist_available", float(value))
     except Exception:  # noqa: BLE001 - a metric never decides whether calls start
         logger.debug("Could not set the receptionist availability gauge", exc_info=True)
 
@@ -148,7 +151,11 @@ def _warn_about_resume(workers: dict[str, str]) -> None:
         )
 
 
-def _end_stale_calls() -> None:
+#: Retries of a stale-call sweep the database refused, and the wait before each.
+_SWEEP_RETRY_DELAYS_S: tuple[float, ...] = (30.0, 60.0, 120.0, 300.0)
+
+
+def _end_stale_calls(before: float, attempt: int = 0) -> None:
     """End the rows a previous process left live, and count them.
 
     Every one of them when this process is declared the only worker of the
@@ -156,14 +163,24 @@ def _end_stale_calls() -> None:
     those older than a call can be, because another process may be carrying
     the rest. Done whether or not this process can take calls: a restart that
     lost Pipecat used to leave its predecessor's calls live, and their callers
-    off the callback list.
+    off the callback list. Only calls that began before *before* (this
+    start) are touched, and a sweep the database refused is tried again.
     """
     from . import config, store, telemetry
 
     try:
-        ended = store.end_stale_calls(everything=config.sole_process_declared())
+        ended = store.end_stale_calls(everything=config.sole_process_declared(), before=before)
     except Exception:  # noqa: BLE001 - the sweep never decides whether calls start
-        logger.warning("Could not end the call rows a previous process left live", exc_info=True)
+        if attempt >= len(_SWEEP_RETRY_DELAYS_S):
+            logger.error("Gave up ending the call rows a previous process left live", exc_info=True)
+            return
+        delay = _SWEEP_RETRY_DELAYS_S[attempt]
+        logger.warning("Could not end the call rows a previous process left live; retrying in %gs", delay, exc_info=True)
+        # Later, with the same boundary: a call this process has started by
+        # then is never the sweep's.
+        retry = threading.Timer(delay, _end_stale_calls, args=(before, attempt + 1))
+        retry.daemon = True
+        retry.start()
         return
     if ended:
         telemetry.calls_lost(ended)
@@ -180,7 +197,7 @@ def _start(speech_model: Any) -> str:
         store.init_receptionist_schema(strict=True)
     except Exception as exc:  # noqa: BLE001
         return f"the call tables could not be created ({type(exc).__name__})"
-    _end_stale_calls()
+    _end_stale_calls(before=time.time())
     if not is_available():
         return "FLAG_VOICE_RECEPTIONIST is on but Pipecat is not installed"
     try:

@@ -71,6 +71,39 @@ def _call_start_locales(init_msg: dict[str, Any]) -> tuple[str, str]:
     return locale, preferred
 
 
+async def _resume_call(
+    resume_ticket: str, *, user_id: str, tenant_id: str, wait_s: float = 2.0
+) -> dict[str, Any] | None:
+    """The dropped call a resume ticket names, or ``None``; the ticket is spent only on success.
+
+    The ticket reaches the client before its snapshot is saved (the write
+    runs in the background, serializer._write_checkpoint_after). A prompt
+    reconnect used to spend the ticket, find nothing, and start a new
+    conversation it could not recover from. Now a write still running on
+    this process is waited for, up to *wait_s*, and a resume that finds no
+    snapshot leaves the ticket for another attempt.
+    """
+    from . import low_bandwidth
+    from . import serializer as call_serializer
+
+    claims = low_bandwidth.verify_call_resume_ticket(
+        resume_ticket, expected_user_id=user_id, expected_tenant_id=tenant_id, consume=False
+    )
+    if not isinstance(claims, dict):
+        return None
+    prior_call = str(claims.get("cid") or "")
+    snapshot = await asyncio.to_thread(low_bandwidth.restore_call_drop_state, prior_call, tenant_id=tenant_id)
+    if not isinstance(snapshot, dict):
+        pending = call_serializer._LAST_CHECKPOINT.get(prior_call)
+        if pending is not None and not pending.done():
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(asyncio.shield(pending), timeout=wait_s)
+            snapshot = await asyncio.to_thread(low_bandwidth.restore_call_drop_state, prior_call, tenant_id=tenant_id)
+    if not isinstance(snapshot, dict):
+        return None
+    return snapshot if low_bandwidth.consume_resume_ticket(claims) else None
+
+
 def _resumed_locale(snapshot: dict[str, Any] | None, locale: str) -> str:
     """The language a resumed call reopens in: the dropped call's, if calls are still held in it."""
     if not isinstance(snapshot, dict):
@@ -462,17 +495,10 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
         resumed_snapshot: dict[str, Any] | None = None
         resume_ticket_raw = str(init_msg.get("resume_ticket") or "").strip()
         if resume_ticket_raw and flags.is_enabled("call_drop_resume", subject=user_id or None):
-            from .low_bandwidth import restore_call_drop_state, verify_call_resume_ticket
-
-            verified_claims = verify_call_resume_ticket(
-                resume_ticket_raw,
-                expected_user_id=user_id or "",
-                expected_tenant_id=tenant_id or "default",
+            resumed_snapshot = await _resume_call(
+                resume_ticket_raw, user_id=user_id or "", tenant_id=tenant_id or "default"
             )
-            if isinstance(verified_claims, dict):
-                prior_cid = str(verified_claims.get("cid") or "")
-                resumed_snapshot = restore_call_drop_state(prior_cid, tenant_id=tenant_id or "default")
-                locale = _resumed_locale(resumed_snapshot, locale)
+            locale = _resumed_locale(resumed_snapshot, locale)
 
         room = await registry.create(
             call_id=call_id,

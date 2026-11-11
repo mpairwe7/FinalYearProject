@@ -57,10 +57,12 @@ receptionist's own start, so a production deployment that fails it serves the
 chat and refuses calls. The go-live report
 (`python -m app.production_readiness`) still lists it as a blocker.
 
-`ura_receptionist_available` is recomputed at every scrape from the flag and
-the start (`MetricsStore.on_scrape`): 0 while calls are switched on and cannot
-be taken, 1 otherwise. Set only at start, it went on paging after calls were
-switched off, and had no value for a flag switched on later.
+`ura_receptionist_available` is recomputed from the flag and the start, at
+every scrape (`MetricsStore.on_scrape`) and every 30 s in each worker: 0 while
+calls are switched on and cannot be taken, 1 otherwise. Its exported value is
+the lowest live worker's (`livemin`), so with two workers one that cannot take
+calls is not hidden by the other. Set only at start, it went on paging after
+calls were switched off, and had no value for a flag switched on later.
 
 **The worker gate reads every variable an image may start workers from.**
 `WORKERS`, `UVICORN_WORKERS` and `WEB_CONCURRENCY`: at least one must be set,
@@ -105,7 +107,10 @@ because the two resolve to different versions.
 
 **Rows a dead process left are ended at startup**, before anything else is
 checked, so a restart that cannot take calls (Pipecat missing) still ends its
-predecessor's calls and flags their callbacks. A row older than a call may
+predecessor's calls and flags their callbacks. Only calls that began before
+this start are touched, and a sweep the database refused is retried four
+times over about eight minutes with the same boundary, so the retry never ends
+a call the new process took. A row older than a call may
 last is ended whichever process asks. Every live row is ended only when the
 deployment declares one worker and one replica, since then the process that
 has just started owns no calls. A caller who was waiting for or talking to an
@@ -123,6 +128,15 @@ agrees to mu-law alone and not at all on a call whose audio is in the media
 room; its checkpoint is written off the event loop and its messages are
 rate-limited. Resume tickets are signed with `RECEPTIONIST_RESUME_SECRET`; the
 development secret stands in only outside production.
+
+Review of this change also found that a resume ticket reached the client
+before its snapshot was saved, so a prompt reconnect could spend the ticket and
+find nothing. A resume now waits for a write still running on this process,
+and a ticket is spent only when its snapshot is found. Checkpoint writes for a
+call stay in order even when one is cancelled, and shutdown lets them finish.
+Standalone lines that are voiced clear the run of voice failures, as pipeline
+lines do. The go-live report reads the receptionist flag as the service does,
+overrides included.
 
 Review of this change also found: the mu-law framing was continuous mu-law
 companding quantised to a byte, not ITU-T G.711, so a standard decoder played
@@ -164,6 +178,13 @@ only in a language the deployment takes calls in.
   minutes at the default ceiling).
 - More transfers reach officers: calls the recognizer or the voice fails on
   twice. Before, those callers were dropped.
+- The dependency audit resolves the receptionist requirements alone, on each
+  Python. It does not see versions a later image step pins. `Dockerfile.gpu`
+  pins `soundfile==0.12.1` and `soxr==0.5.0.post1` after installing Pipecat
+  1.15.0, which requires `soundfile~=0.13.1` and `soxr~=1.0.0`: that image runs
+  versions Pipecat does not support and no audit covers (the container scan
+  covers the API and frontend images). Recorded, not changed here: the pins
+  exist for the CUDA torchaudio build, and need the GPU image's owner.
 - Durations outside their range, accepted before, now make calls unavailable
   until fixed; `/ready` names the variable. `RECEPTIONIST_TURN_TIMEOUT_S`
   accepts up to 30 s for that reason. No deployment in this repository sets a

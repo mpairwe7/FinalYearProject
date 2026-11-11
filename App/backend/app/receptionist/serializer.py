@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 import time
@@ -127,12 +126,29 @@ _LAST_CHECKPOINT: dict[str, asyncio.Task[Any]] = {}
 
 
 async def _write_checkpoint_after(previous: asyncio.Task[Any] | None, snapshot: dict[str, Any]) -> None:
-    from .low_bandwidth import save_call_drop_snapshot
+    """Write *snapshot* once *previous* (the same call's last write) has finished.
 
-    if previous is not None:
-        with contextlib.suppress(Exception, asyncio.CancelledError):
-            await previous
-    await asyncio.to_thread(save_call_drop_snapshot, snapshot)
+    Cancelled while the older write is still running, this one is dropped
+    rather than written ahead of it.
+    """
+    from . import low_bandwidth
+
+    if previous is not None and not previous.done():
+        try:
+            await asyncio.shield(previous)
+        except asyncio.CancelledError:
+            if not previous.done():
+                raise
+        except Exception:  # noqa: BLE001 - an older write that failed does not stop this one
+            pass
+    await asyncio.to_thread(low_bandwidth.save_call_drop_snapshot, snapshot)
+
+
+async def drain_checkpoints(timeout: float = 5.0) -> None:
+    """Let checkpoint writes still running finish, at most *timeout*: at shutdown, before the database closes."""
+    pending = [task for task in _CHECKPOINTS if not task.done()]
+    if pending:
+        await asyncio.wait(pending, timeout=timeout)
 
 
 class BrowserCallSerializer(FrameSerializer):

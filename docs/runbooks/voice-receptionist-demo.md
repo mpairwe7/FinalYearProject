@@ -345,7 +345,8 @@ enabling the feature:
    `VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK=true`. The acknowledgement explicitly
    accepts active-call loss on API process failure; it is not a failover control.
    Run the Orpheus voice sidecar beside the API on its own GPU and set
-   `ORPHEUS_TTS_URL` and `ORPHEUS_TTS_LANGUAGES=lg,sw,en`; without them the gate
+   `ORPHEUS_TTS_URL` and `ORPHEUS_TTS_LANGUAGES=lg,sw,en,nyn,ach` (every language
+   in `RECEPTIONIST_LANGUAGES`, all five by default); without them the gate
    makes calls unavailable (the chat still starts; `/ready` gives the reason),
    because the only other local voice (Spark-TTS-SALT) takes several seconds a
    sentence.

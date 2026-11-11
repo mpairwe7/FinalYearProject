@@ -201,6 +201,10 @@ class MetricsStore:
         """Set a gauge to its latest value (across workers: the most recent write)."""
         self._record("gauge_latest", name, labels, lambda child: child.set(value))
 
+    def set_gauge_min(self, name: str, value: float, labels: Mapping[str, Any] | None = None) -> None:
+        """Set a gauge whose exported value is the lowest of the live workers' (a health flag)."""
+        self._record("gauge_min", name, labels, lambda child: child.set(value))
+
     def add_gauge(self, name: str, delta: float, labels: Mapping[str, Any] | None = None) -> None:
         """Move an up/down gauge such as active connections (summed across live workers)."""
         self._record("gauge_sum", name, labels, lambda child: child.inc(delta))
@@ -277,6 +281,8 @@ class MetricsStore:
                 )
             elif kind == "gauge_latest":
                 metric = Gauge(full, doc, label_names, registry=self._registry, multiprocess_mode="mostrecent")
+            elif kind == "gauge_min":
+                metric = Gauge(full, doc, label_names, registry=self._registry, multiprocess_mode="livemin")
             else:
                 metric = Gauge(full, doc, label_names, registry=self._registry, multiprocess_mode="livesum")
             family = _Family(kind, metric, label_names)
