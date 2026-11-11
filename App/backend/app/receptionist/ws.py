@@ -240,7 +240,7 @@ async def _summarise_when_transcribed(call_id: str) -> None:
     try:
         await transcriptions_settled(call_id)
     except Exception:
-        logger.debug("Waiting for officer transcription on %s failed", call_id, exc_info=True)
+        logger.debug("Could not wait for officer transcription on call %s", call_id, exc_info=True)
     await asyncio.to_thread(generate_call_summary, call_id)
 
 
