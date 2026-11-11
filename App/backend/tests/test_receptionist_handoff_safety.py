@@ -868,6 +868,32 @@ class EventLoopTests(BrainCase):
         self.assertEqual(self.chat_model._maybe_create_ticket.call_count, 1)
         self.assertEqual(len([c for c in lobby.call_args_list if c.args[0] == "call.transfer_requested"]), 1)
 
+    async def test_a_transfer_cut_short_while_its_ticket_is_written_does_not_open_a_second_ticket(self):
+        import threading
+
+        writing = threading.Event()
+        finish = threading.Event()
+
+        def create_ticket(**_kwargs):
+            writing.set()
+            finish.wait(timeout=5)
+            return "TICK-ONE"
+
+        self.chat_model._maybe_create_ticket.side_effect = create_ticket
+        with patch("app.receptionist.brain.flags.is_enabled", side_effect=only("ticket_queue")):
+            first = asyncio.create_task(self.brain._transfer("timeout"))
+            await asyncio.to_thread(writing.wait, 5)
+            first.cancel()  # a language switch interrupts the turn that was transferring
+            await asyncio.gather(first, return_exceptions=True)
+
+            second = asyncio.create_task(self.brain._transfer("caller_requested"))
+            await asyncio.sleep(0.05)
+            finish.set()
+            await second
+
+        self.assertEqual(self.chat_model._maybe_create_ticket.call_count, 1)
+        self.assertEqual((self.state.mode, self.state.ticket_id), ("transferring", "TICK-ONE"))
+
     async def test_a_luganda_answer_is_put_into_luganda_off_the_event_loop(self):
         import threading
 

@@ -531,6 +531,11 @@ class UraReceptionistBrain(LLMService):
         # A transfer whose ticket is still being written (off the loop): a
         # second request meanwhile joins it instead of opening another.
         self._transfer_in_flight = False
+        # The ticket being written for this call's transfer. It outlives the
+        # transfer that started it: a turn cut short (a language switch, a
+        # barge-in) cancels the wait, not the thread, and the next transfer
+        # takes this ticket rather than opening a second one.
+        self._ticket_creation: asyncio.Future[tuple[str, dict[str, Any] | None]] | None = None
         self._prewarm_task: asyncio.Task[Any] | None = None
 
     def _cancel_active_generation(self) -> None:
@@ -2179,17 +2184,36 @@ class UraReceptionistBrain(LLMService):
         # The ticket is written off the loop: for a caller who is not speaking
         # English it translates the question and the transcript, and on the
         # loop that froze every live call on the worker while it ran.
-        ticket_id, handoff = await asyncio.to_thread(
-            call_transfer.create_transfer_ticket,
-            # The call as it stands now, read here on the loop: the thread
-            # reads nothing from the live room.
-            call_transfer.TicketSubject.of(self.room),
-            self.chat_model,
-            reason,
-            ticket_id=ticket_id,
-            handoff=handoff,
-            priority=priority,
-        )
+        def write_ticket() -> asyncio.Future[tuple[str, dict[str, Any] | None]]:
+            return asyncio.ensure_future(asyncio.to_thread(
+                call_transfer.create_transfer_ticket,
+                # The call as it stands now, read here on the loop: the thread
+                # reads nothing from the live room.
+                call_transfer.TicketSubject.of(self.room),
+                self.chat_model,
+                reason,
+                ticket_id=ticket_id,
+                handoff=handoff,
+                priority=priority,
+            ))
+
+        async def ticket_from(creation: asyncio.Future[tuple[str, dict[str, Any] | None]]) -> tuple[str, Any]:
+            self._ticket_creation = creation
+            try:
+                # Shielded: cancelling this turn must not abandon the write and
+                # leave the next transfer to start another.
+                return await asyncio.shield(creation)
+            finally:
+                if creation.done() and self._ticket_creation is creation:
+                    self._ticket_creation = None
+
+        earlier = self._ticket_creation
+        made_id, made_packet = await ticket_from(earlier if earlier is not None else write_ticket())
+        if earlier is not None and not made_id:
+            # The write an interrupted transfer left behind opened nothing: this
+            # transfer makes its own attempt rather than go without a ticket.
+            made_id, made_packet = await ticket_from(write_ticket())
+        ticket_id, handoff = made_id, made_packet
         if self.room.state.mode != "ai":
             # The caller hung up while it was being written. The ticket stays
             # for the officers; there is no call left to put in the queue.
