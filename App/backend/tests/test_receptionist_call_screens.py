@@ -205,6 +205,49 @@ class LobbyReadyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(socket.closed_with(), 4401)
 
 
+class LateViewerTests(unittest.IsolatedAsyncioTestCase):
+    """A console that opens a call after its time-limit warning still learns of it."""
+
+    async def asyncSetUp(self) -> None:
+        from app import ws_concurrency
+
+        db.init_db()
+        init_receptionist_schema()
+        ws_concurrency.reset()
+        self.addCleanup(ws_concurrency.reset)
+        self.call_id = f"call_late_{uuid.uuid4().hex[:8]}"
+        create_call(self.call_id, conversation_id=f"conv_{self.call_id}", status="ai")
+        self.room = await registry.create(self.call_id, f"conv_{self.call_id}", tenant_id="default")
+        self.addAsyncCleanup(registry.remove, self.call_id)
+
+    async def snapshot(self) -> dict:
+        socket = RecordingSocket([json.dumps({"type": "authenticate", "access_token": "t"})])
+        with (
+            patch.object(ws, "_voice_receptionist_enabled", return_value=True),
+            patch.object(ws, "is_ws_origin_allowed", return_value=True),
+            patch.object(ws, "_staff_session", return_value=("okello", "default", "ura_staff", None)),
+        ):
+            task = asyncio.create_task(ws.staff_calls_stream_endpoint(socket, call_id=self.call_id))
+            for _ in range(100):
+                await asyncio.sleep(0.01)
+                if any(e[0] == "send" and e[1].get("type") == "snapshot" for e in socket.events):
+                    break
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        return next(e[1] for e in socket.events if e[0] == "send" and e[1].get("type") == "snapshot")
+
+    async def test_the_snapshot_says_how_long_is_left_once_the_warning_has_gone_out(self):
+        self.room.state.limit_at = time.time() + 42
+
+        seconds = (await self.snapshot()).get("seconds_remaining")
+
+        self.assertIsNotNone(seconds)
+        self.assertTrue(40 <= seconds <= 42, seconds)
+
+    async def test_the_snapshot_says_nothing_of_the_limit_before_the_warning(self):
+        self.assertNotIn("seconds_remaining", await self.snapshot())
+
+
 # ---------------------------------------------------------------------------
 # The time limit is announced on every transport (G602)
 # ---------------------------------------------------------------------------
@@ -294,6 +337,8 @@ class CallClockTests(unittest.IsolatedAsyncioTestCase):
                                  [{"type": "duration_warning", "seconds_remaining": int(ceiling - warned_at)}])
                 # Then it sleeps to the ceiling, not past it, and ends the call there.
                 self.assertEqual(slept[:2], [warned_at, ceiling - warned_at])
+                # The deadline stays on the room, for a console that opens the call later.
+                self.assertEqual(self.room.state.limit_at, 1_000_000.0 + ceiling)
                 self.assertEqual(self.room.state.mode, "ended")
                 self.assertEqual(get_call(self.call_id)["end_reason"], "max_call_duration")
 

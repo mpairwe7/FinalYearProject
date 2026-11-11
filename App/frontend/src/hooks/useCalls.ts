@@ -155,6 +155,14 @@ export function useCallLive(callId?: string | null) {
             // A partial from before a reconnect is no longer being spoken.
             setInterimCaption(null);
             setBrief(msg.call?.brief || null);
+            // Opened, or reopened, after the time-limit warning (G602). A
+            // snapshot without it keeps a deadline already known: it may come
+            // from a worker that does not hold the call.
+            const left = Number(msg.seconds_remaining);
+            if (msg.seconds_remaining !== undefined && Number.isFinite(left) && left >= 0) {
+              setSecondsRemaining(left);
+              setLimitAt(Date.now() + left * 1000);
+            }
           } else if (msg.type === 'duration_warning') {
             const reported = Number(msg.data?.seconds_remaining);
             const seconds = Number.isFinite(reported) && reported > 0 ? reported : 60;

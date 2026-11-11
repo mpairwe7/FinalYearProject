@@ -2039,7 +2039,9 @@ signed in and subscribed, before any event; a console treats the stream as live
 from then, not from the socket opening. The per-call stream also carries
 `{"type": "duration_warning", "call_id": "…", "data": {"seconds_remaining": N}}`
 a minute before the call's time limit (halfway through a limit of a minute or
-less).
+less). A `snapshot` sent after that warning, to a console that opened or
+reopened the call late, carries `"seconds_remaining": N` at its top level; a
+snapshot from a worker that does not hold the call leaves it out.
 
 #### Call sockets: refusals, errors and the time limit (ADR-0042)
 

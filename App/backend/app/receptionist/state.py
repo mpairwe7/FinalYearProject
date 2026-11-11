@@ -34,6 +34,9 @@ class CallState:
     #: screen closes its socket on hearing it, and that hang-up must not be
     #: taken for the reason (ADR-0042).
     ending_reason: str = ""
+    #: When the call's time limit falls (epoch seconds), once the warning has
+    #: gone out: a console that opens the call later is told how long is left.
+    limit_at: float | None = None
     turn_seq: int = 0
     turn_words: list[Any] = field(default_factory=list)
     last_caller_text: str = ""

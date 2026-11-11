@@ -208,6 +208,17 @@ describe('useCallLive', () => {
     // A deadline, so the notice can count down to it rather than keep "57".
     expect(Math.round(((result.current.limitAt ?? 0) - Date.now()) / 1000)).toBe(57);
   });
+
+  it('picks up a time limit announced before the console opened the call', async () => {
+    const { result } = await live();
+    const socket = FakeSocket.find('call_id=call_waiting_1')!;
+    act(() => {
+      socket.open();
+      socket.emit({ type: 'snapshot', call: { call_id: 'call_waiting_1', status: 'ai' }, turns: [], seconds_remaining: 33 });
+    });
+
+    expect(Math.round(((result.current.limitAt ?? 0) - Date.now()) / 1000)).toBe(33);
+  });
 });
 
 describe('the lobby connection', () => {
