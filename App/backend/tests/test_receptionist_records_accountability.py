@@ -1386,6 +1386,59 @@ class GenerationSlotTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual((ran, self.given_back()), ([], 1))
 
+    async def test_a_worker_that_starts_after_its_slot_was_given_back_does_no_work(self):
+        # The executor had taken the job but the thread had not yet counted
+        # itself when the turn gave up: the slot is free, so the work must not
+        # run without one. (Nobody is waiting for it any more either.)
+        slot = self.slot()
+        ran: list[bool] = []
+        handed_to_executor: list = []
+
+        async def thread_not_yet_running(work):
+            handed_to_executor.append(work)
+            await asyncio.sleep(3600)
+
+        with patch("app.receptionist.brain.asyncio.to_thread", thread_not_yet_running):
+            step = asyncio.create_task(slot.run(ran.append, True))
+            await asyncio.sleep(0.01)
+            step.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await step
+        slot.finish()
+        self.assertEqual(self.given_back(), 1)
+
+        await asyncio.to_thread(handed_to_executor[0])  # the thread gets going only now
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(ran, [], "work ran after its slot had been given back")
+        self.assertEqual(self.given_back(), 1)
+
+    async def test_a_job_still_queued_for_a_thread_when_the_turn_gives_up_frees_the_slot(self):
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        loop = asyncio.get_running_loop()
+        only_thread = ThreadPoolExecutor(max_workers=1)
+        loop.set_default_executor(only_thread)
+        busy = threading.Event()
+        self.addCleanup(busy.set)
+        blocker = loop.run_in_executor(None, busy.wait, 5)  # the pool's one thread is taken
+        slot = self.slot()
+        ran: list[bool] = []
+        step = asyncio.create_task(slot.run(ran.append, True))
+        await asyncio.sleep(0.05)  # the job is queued behind the blocker
+
+        step.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await step
+        slot.finish()
+        self.assertEqual(self.given_back(), 1)
+
+        busy.set()
+        await blocker
+        await asyncio.sleep(0.05)
+        self.assertEqual((ran, self.given_back()), ([], 1))
+
     async def test_the_slot_is_given_back_once(self):
         slot = self.slot()
         await slot.run(lambda: None)
@@ -1556,6 +1609,63 @@ class WrapUpReviewTests(LiveCallCase):
 
         row = get_call(self.call_id)
         self.assertEqual((row["needs_callback"], row["callback_reason"]), (1, "transfer_timeout"))
+
+
+class StaleEndTests(LiveCallCase):
+    """A row with no room here is ended as stale only when no other process can be holding the call."""
+
+    WORKERS = ("WORKERS", "UVICORN_WORKERS", "WEB_CONCURRENCY", "VOICE_RECEPTIONIST_REPLICAS")
+
+    def deployment(self, **declared: str):
+        """The worker and replica counts this deployment declares, and no room for the call here."""
+        import os
+
+        stack = contextlib.ExitStack()
+        stack.enter_context(patch.dict("os.environ", declared))
+        for name in self.WORKERS:
+            if name not in declared:
+                os.environ.pop(name, None)
+        stack.enter_context(patch.object(desk.registry, "get", return_value=None))
+        return stack
+
+    async def test_a_call_another_worker_may_hold_is_not_ended_from_here(self):
+        await self.bridge("okello")
+
+        with self.deployment(UVICORN_WORKERS="2"):
+            with self.assertRaises(desk.DeskError) as refused:
+                await desk.end(self.call_id, "okello", speech_model=None)
+
+        self.assertEqual(refused.exception.status, 409)
+        self.assertEqual(get_call(self.call_id)["status"], "bridged")
+
+    async def test_nor_when_the_deployment_does_not_say_how_many_processes_it_runs(self):
+        await self.bridge("okello")
+
+        with self.deployment():
+            with self.assertRaises(desk.DeskError) as refused:
+                await desk.end(self.call_id, "okello", speech_model=None)
+
+        self.assertEqual(refused.exception.status, 409)
+
+    async def test_the_only_process_ends_a_row_no_room_stands_behind(self):
+        await self.bridge("okello")
+
+        with self.deployment(UVICORN_WORKERS="1", VOICE_RECEPTIONIST_REPLICAS="1"):
+            result = await desk.end(self.call_id, "okello", speech_model=None)
+
+        self.assertTrue(result["stale"])
+        self.assertEqual(get_call(self.call_id)["end_reason"], "officer_terminated_stale")
+
+    async def test_a_row_too_old_to_be_a_live_call_is_ended_wherever_it_is_asked(self):
+        import time as _time
+
+        old = f"call_old_{uuid.uuid4().hex[:8]}"
+        create_call(old, conversation_id=f"conv_{old}", status="bridged", started_at=_time.time() - 7200)
+
+        with self.deployment(UVICORN_WORKERS="2"):
+            result = await desk.end(old, "okello", speech_model=None)
+
+        self.assertTrue(result["stale"])
 
 
 class OfficerLastWordsTests(unittest.IsolatedAsyncioTestCase):

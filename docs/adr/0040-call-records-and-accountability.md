@@ -97,12 +97,18 @@ following, each fixed here with a test that failed first:
   is bounded by it.
 - *A wrap-up trusted "no room here".* With the call on another worker, or its
   process gone, the call was read as ended. The stored status now decides.
+  The desk's stale-row "end" had the same fault from the other side: it marked
+  a live-looking row ended whenever this process had no room for it. It now
+  does so only where nothing else can be holding the call (one worker and one
+  replica declared, or a row older than a call may last) and answers 409
+  otherwise.
 - *Two officers saving together lost one wrap-up.* The save is a
   compare-and-write on the stored list (`store.merge_wrapup`), retried on a
   miss, so it holds across processes.
 - *A model-run slot was given back too early, or never.* It is now held until
   the thread that took it has returned, and freed at once when a step was
-  cancelled before its thread started (`_GenerationSlot`).
+  cancelled before its thread started (`_GenerationSlot`). A thread that
+  starts after the slot was given back does no work.
 - *The audit row named the call's language, not the reply's.* `reply_locale`
   is English when a translation failed and the English answer was served.
 - Smaller: the brain switches only into the deployment's call languages; a
@@ -127,6 +133,11 @@ router is attached (G592); a transfer's team and note are validated.
 - One more write per call turn, off the event loop. Rows for call turns now
   digest the spoken form (with the assistant's spoken renderings of figures and
   acronyms), not `generate`'s written reply.
+- A deployment that does not declare one worker and one replica can no longer
+  end a live-looking row from a process that has no room for it until the row
+  is older than a call may last (about 17 minutes at the default ceiling). An
+  officer there sees 409 and tries again. Declaring the single process, which
+  production must do anyway, removes the wait.
 - An officer who was never bridged to a call can no longer wrap it up, which
   the console allowed. A reloaded console that has lost its active call still
   cannot submit a wrap-up (G611 family, phase 4).

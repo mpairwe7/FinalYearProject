@@ -2086,6 +2086,14 @@ recorded as `ai`, `transferring` or `bridged` is treated as live, so the 403
 and 409 above apply. A row its process left behind is ended first
 (`POST .../end`), like any stale call.
 
+`POST /v1/admin/calls/{call_id}/end` ends such a row (`end_reason:
+officer_terminated_stale`) only where no other process can be holding the
+call: the deployment declares one worker and one replica (`WORKERS=1`, or
+`UVICORN_WORKERS=1`, with `VOICE_RECEPTIONIST_REPLICAS=1`), or the call began
+longer ago than a call may last. Otherwise it answers **409** ("on another
+server process"), because a live call on another worker looks the same from
+here.
+
 Receptionist assurance update (2026-10-30, ADR-0020): `ticket_action` accepts
 `create`, `resolve`, or `keep_open` (omit it for no ticket action). An unknown
 action returns 400; a ticket action while `ticket_queue` is disabled returns

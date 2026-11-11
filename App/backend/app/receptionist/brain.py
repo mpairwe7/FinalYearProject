@@ -469,7 +469,10 @@ class _GenerationSlot:
 
     So the blocking steps of a run go through :meth:`run`, which counts the
     ones that have actually started, and :meth:`finish` gives the slot back
-    at once if none is running, or when the one still running ends.
+    at once if none is running, or when the one still running ends. A thread
+    that gets going only after the slot was given back does not do its work:
+    nobody is waiting for it, and it has no slot to run under. Counting and
+    giving back happen under one lock, so one of the two always sees the other.
     """
 
     def __init__(self, semaphore: asyncio.Semaphore, loop: asyncio.AbstractEventLoop) -> None:
@@ -485,6 +488,9 @@ class _GenerationSlot:
 
         def work() -> Any:
             with self._lock:
+                if self._given_back:
+                    # The turn gave up before this thread started.
+                    return None
                 self._running += 1
             try:
                 return fn(*args, **kwargs)

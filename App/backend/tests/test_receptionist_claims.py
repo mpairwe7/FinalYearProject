@@ -209,7 +209,10 @@ class JoinAndEndTests(DeskTestCase):
     async def test_a_stale_row_is_cleared_but_an_ended_call_keeps_its_reason(self):
         stale = f"call_stale_{uuid.uuid4().hex[:8]}"
         create_call(stale, conversation_id=f"conv_{stale}", status="transferring")  # no room: server restarted
-        result = await desk.end(stale, "okello", speech_model=None)
+        # The one process of this deployment: nothing else can be holding the call.
+        declared = {"WORKERS": "1", "VOICE_RECEPTIONIST_REPLICAS": "1"}
+        with patch.dict("os.environ", declared):
+            result = await desk.end(stale, "okello", speech_model=None)
         self.assertTrue(result["stale"])
         self.assertEqual(get_call(stale)["end_reason"], "officer_terminated_stale")
         with self.assertRaises(desk.DeskError) as err:

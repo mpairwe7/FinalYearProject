@@ -33,7 +33,13 @@ from typing import Any
 from ..escalation_notify import known_teams
 from ..tenancy import tenant_enabled
 from . import livekit, presence
-from .config import get_claim_timeout_s, get_hold_update_s, get_officer_reconnect_grace_s
+from .config import (
+    get_claim_timeout_s,
+    get_hold_update_s,
+    get_max_call_s,
+    get_officer_reconnect_grace_s,
+    sole_process_declared,
+)
 from .hub import hub
 from .phrases import phrase
 from .state import CallRoom, registry
@@ -106,6 +112,23 @@ def _holder_name(room: CallRoom, holder: str) -> str:
     if holder and holder == room.state.officer_id and room.state.officer_name:
         return room.state.officer_name
     return officer_display_name(holder) if holder else ""
+
+
+def _no_process_holds(call: dict[str, Any]) -> bool:
+    """Whether a row that says live, with no room on this process, is certainly not a live call.
+
+    Certain when this is the deployment's only process, or when the call
+    began longer ago than a call may last. Otherwise another worker may be
+    carrying it.
+    """
+    if sole_process_declared():
+        return True
+    try:
+        ceiling = get_max_call_s()
+    except Exception:
+        ceiling = 900.0
+    started = float(call.get("started_at") or 0)
+    return started > 0 and time.time() - started > ceiling + 120.0
 
 
 def _live_room(call_id: str) -> CallRoom:
@@ -367,8 +390,11 @@ async def end(call_id: str, officer_id: str, speech_model: Any) -> dict[str, Any
     Two clean-up cases end a call no officer is on, at once and without a
     closing line:
 
-    * **stale** — the row still says live but no call room exists on this
-      server (it restarted mid-call), so no caller is on the line;
+    * **stale** — the row still says live but no call room stands behind it
+      (the server restarted mid-call), so no caller is on the line. Only
+      where that is certain (:func:`_no_process_holds`): with more than one
+      worker, "no room here" is also what a live call on another worker
+      looks like, and ending its row let its ticket be resolved under it;
     * **waiting** — the caller is in the queue and no *other* officer has
       claimed it (``officer_terminated_waiting``). A call the AI is still
       handling is not ended from the desk.
@@ -380,6 +406,8 @@ async def end(call_id: str, officer_id: str, speech_model: Any) -> dict[str, Any
         if exc.status != 404 or registry.get(call_id) is not None or row.get("status") not in _LIVE_STATUSES:
             # An ended call keeps the reason it ended with.
             raise
+        if not _no_process_holds(row):
+            raise DeskError(409, "This call is on another server process. Try again in a moment.") from exc
         now = time.time()
         update_call(call_id, status="ended", end_reason="officer_terminated_stale", ended_at=now)
         hub.publish_lobby("call.ended", {"call_id": call_id, "reason": "officer_terminated_stale"})
