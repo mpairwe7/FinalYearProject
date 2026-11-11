@@ -1847,7 +1847,7 @@ class UraReceptionistBrain(LLMService):
             self._generation_slots.release()
             if turn is not None:
                 turn.disposition = "cancelled"
-            logger.info("Not starting a superseded generation for call %s", self.room.call_id)
+            logger.info("Skipped a superseded generation for call %s", self.room.call_id)
             return
 
         # Start background task for LLM answer

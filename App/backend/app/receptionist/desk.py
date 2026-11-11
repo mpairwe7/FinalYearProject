@@ -751,6 +751,9 @@ async def wrapup(
     call = get_call(call_id)
     if not call:
         raise DeskError(404, "Call not found")
+    # The id this server stored, for the log lines below: never the value a
+    # request sent, which could carry line breaks into the log.
+    stored_id = str(call.get("call_id") or "")
     if ticket_action not in (None, "", "create", "resolve", "keep_open"):
         raise DeskError(400, "Invalid ticket action")
     valid_outcomes = {"resolved", "follow_up", "callback", "referred", "abandoned", "ai_resolved"}
@@ -823,7 +826,7 @@ async def wrapup(
                     # Linked to the call at once, in its own write: a retry of
                     # a save that fails further down finds the ticket instead
                     # of opening a second one.
-                    _link_new_ticket(call_id, str(t["id"]))
+                    _link_new_ticket(call_id, str(t["id"]), log_id=stored_id)
                 else:
                     db.update_ticket(ticket_id, staff_note=note)
         except DeskError:
@@ -835,7 +838,7 @@ async def wrapup(
     try:
         update_call(call_id, **update_kwargs)
     except Exception as exc:
-        logger.warning("Could not save the wrap-up of call %s", call_id, exc_info=True)
+        logger.warning("Could not save the wrap-up of call %s", stored_id, exc_info=True)
         raise DeskError(503, "The wrap-up could not be saved. Nothing was lost: save it again.") from exc
 
     if rating is not None:
@@ -873,7 +876,7 @@ async def wrapup(
     try:
         presence.finish_wrap_up(officer_id)
     except Exception:
-        logger.warning("Could not restore officer presence after the wrap-up of %s", call_id, exc_info=True)
+        logger.warning("Could not restore officer presence after the wrap-up of %s", stored_id, exc_info=True)
 
     # An officer who passed the call on wraps up while the caller still waits
     # for the next one: consoles must not take this for the end of the call.
@@ -893,16 +896,16 @@ async def wrapup(
     return result
 
 
-def _link_new_ticket(call_id: str, ticket_id: str) -> None:
+def _link_new_ticket(call_id: str, ticket_id: str, *, log_id: str) -> None:
     """Record on *call_id* the ticket its wrap-up just opened; withdraw the ticket if that fails.
 
     An unlinked ticket would be opened again by the officer's next attempt,
-    leaving two for one call.
+    leaving two for one call. *log_id* is the call's id as stored, for the log.
     """
     try:
         update_call(call_id, ticket_id=ticket_id)
     except Exception as exc:
-        logger.warning("Ticket %s could not be linked to call %s; withdrawing it", ticket_id, call_id, exc_info=True)
+        logger.warning("Ticket %s could not be linked to call %s; withdrawing it", ticket_id, log_id, exc_info=True)
         try:
             from .. import database as db
 
@@ -912,7 +915,7 @@ def _link_new_ticket(call_id: str, ticket_id: str) -> None:
                 staff_note="Opened at a call wrap-up that could not be saved; superseded by the officer's retry.",
             )
         except Exception:
-            logger.exception("Ticket %s is orphaned: it could be neither linked to call %s nor withdrawn", ticket_id, call_id)
+            logger.exception("Ticket %s is orphaned: it could be neither linked to call %s nor withdrawn", ticket_id, log_id)
         raise DeskError(503, "Ticket action could not be completed") from exc
 
 
