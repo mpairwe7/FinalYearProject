@@ -213,6 +213,43 @@ class RoleScriptTests(unittest.TestCase):
             self.assertEqual(_run_role_script("calls", str(fresh)).returncode, 0)
             self.assertFalse((fresh / "counter_9.db").exists())
 
+    def test_a_program_restart_drops_the_dead_processes_live_gauge_files(self) -> None:
+        # prometheus_client keeps a live gauge's file until mark_process_dead, which the app
+        # never calls: a crashed role's last receptionist_available (livemin) or connection
+        # count (livesum) would be read as current until the container restarted.
+        finished = subprocess.Popen(["true"])
+        finished.wait()
+        dead = finished.pid  # reaped, so no process has it
+        alive = os.getpid()
+        live_modes = ("liveall", "livemin", "livemax", "livesum", "livemostrecent")
+        history = (
+            f"counter_{dead}.db",
+            f"histogram_{dead}.db",
+            f"gauge_all_{dead}.db",
+            f"gauge_mostrecent_{dead}.db",
+            "gauge_livesum_notapid.db",
+        )
+        metrics = Path(self.metrics_dir)
+        metrics.mkdir()
+        (metrics / ".reset").touch()  # this container's one full clear has already happened
+
+        for role in ("calls", "chat"):
+            with self.subTest(role=role):
+                for mode in live_modes:
+                    (metrics / f"gauge_{mode}_{dead}.db").write_text("dead")
+                (metrics / f"gauge_livemin_{alive}.db").write_text("live")
+                for name in history:
+                    (metrics / name).write_text("history")
+
+                result = _run_role_script(role, self.metrics_dir)
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                for mode in live_modes:
+                    self.assertFalse((metrics / f"gauge_{mode}_{dead}.db").exists(), mode)
+                self.assertTrue((metrics / f"gauge_livemin_{alive}.db").exists(), "live pid")
+                for name in history:
+                    self.assertTrue((metrics / name).exists(), name)
+
     def test_the_metrics_directory_is_created_when_it_is_missing(self) -> None:
         self.assertFalse(Path(self.metrics_dir).exists())
         result = _run_role_script("calls", self.metrics_dir)

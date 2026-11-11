@@ -67,9 +67,21 @@ export URA_PROCESS_ROLE="$ROLE"
 # They are cleared once per container start, not once per program start: the
 # other role's workers write here too, and supervisord restarting this program
 # inside a running container must not wipe the samples they have taken since.
-# `.reset` records that this container has done it. Both roles start together, so
-# the check and the clearing run under one lock; the lock is released when
-# flock's child exits, before the server starts, so the server never holds it.
+# `.reset` records that this container has done it.
+#
+# One kind of file is dropped on every start. A live gauge (gauge_livemin_<pid>.db,
+# gauge_livesum_<pid>.db, ...) is meant to describe the processes that are up, and
+# prometheus_client removes a dead process's files only in mark_process_dead(),
+# which nothing here calls. So after a crash the dead process's last
+# receptionist_available (a min) or connection count (a sum) would still be read as
+# current. Counters, histograms and the other gauges stay: they are history.
+# `kill -0` is the liveness test; everything in the container runs as root, so
+# "cannot signal" means "no such process". The pid is whatever follows the last
+# underscore, and a name without one is left alone.
+#
+# Both roles start together, so the check, the clearing and the sweep run under one
+# lock; it is released when flock's child exits, before the server starts, so the
+# server never holds it.
 DIR="${PROMETHEUS_MULTIPROC_DIR:?PROMETHEUS_MULTIPROC_DIR must be set}"
 mkdir -p "$DIR"
 flock "$DIR/.lock" sh -c '
@@ -77,6 +89,15 @@ flock "$DIR/.lock" sh -c '
         find "$1" -maxdepth 1 -type f -name "*.db" -delete
         : > "$1/.reset"
     fi
+    for file in "$1"/gauge_live*_*.db; do
+        [ -f "$file" ] || continue
+        pid="${file##*_}"
+        pid="${pid%.db}"
+        case "$pid" in
+            "" | *[!0-9]*) continue ;;
+        esac
+        kill -0 "$pid" 2>/dev/null || rm -f "$file"
+    done
 ' sh "$DIR"
 
 # Gated on the Qdrant sidecar (wait-for-qdrant.sh is bounded and never fail-closed).
