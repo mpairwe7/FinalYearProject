@@ -205,6 +205,8 @@ describe('useCallLive', () => {
     });
 
     expect(result.current.secondsRemaining).toBe(57);
+    // A deadline, so the notice can count down to it rather than keep "57".
+    expect(Math.round(((result.current.limitAt ?? 0) - Date.now()) / 1000)).toBe(57);
   });
 });
 
@@ -347,28 +349,40 @@ describe('a failed action', () => {
 // ---------------------------------------------------------------------------
 
 describe('LiveStreamNotices', () => {
-  it('says how long is left before the time limit', async () => {
-    const { LiveStreamNotices } = await import('@/components/staff/calls/LiveStreamNotices');
-    const { rerender } = render(<LiveStreamNotices status="live" secondsRemaining={60} callStatus="bridged" />);
-    expect(screen.getByRole('status').textContent).toBe(
-      'This call reaches its time limit in about a minute and will end then.',
-    );
-    rerender(<LiveStreamNotices status="live" secondsRemaining={15} callStatus="bridged" />);
-    expect(screen.getByRole('status').textContent).toBe(
-      'This call reaches its time limit in about 15 seconds and will end then.',
-    );
+  it('counts down to the time limit rather than keeping the estimate it was warned with', async () => {
+    vi.useFakeTimers();
+    try {
+      const { LiveStreamNotices } = await import('@/components/staff/calls/LiveStreamNotices');
+      const limitAt = Date.now() + 61_000;
+      render(<LiveStreamNotices status="live" limitAt={limitAt} callStatus="bridged" />);
+      const notice = () => screen.getByRole('status').textContent;
+
+      act(() => vi.advanceTimersByTime(1_000));
+      expect(notice()).toBe('This call reaches its time limit in about a minute and will end then.');
+      act(() => vi.advanceTimersByTime(30_000));
+      expect(notice()).toBe('This call reaches its time limit in about 30 seconds and will end then.');
+      // In 15-second steps: a screen reader reads the region out on every change.
+      act(() => vi.advanceTimersByTime(3_000));
+      expect(notice()).toBe('This call reaches its time limit in about 30 seconds and will end then.');
+      act(() => vi.advanceTimersByTime(12_000));
+      expect(notice()).toBe('This call reaches its time limit in about 15 seconds and will end then.');
+      act(() => vi.advanceTimersByTime(15_000));
+      expect(notice()).toBe('This call has reached its time limit and is ending.');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('says a transcript stopped for good needs the officer to sign in again', async () => {
     const { LiveStreamNotices } = await import('@/components/staff/calls/LiveStreamNotices');
-    render(<LiveStreamNotices status="stopped" secondsRemaining={null} callStatus="bridged" />);
+    render(<LiveStreamNotices status="stopped" limitAt={null} callStatus="bridged" />);
 
     expect(screen.getByRole('status').textContent).toMatch(/stopped.*sign in again/i);
   });
 
   it('says nothing about a call that has ended', async () => {
     const { LiveStreamNotices } = await import('@/components/staff/calls/LiveStreamNotices');
-    const { container } = render(<LiveStreamNotices status="stopped" secondsRemaining={57} callStatus="ended" />);
+    const { container } = render(<LiveStreamNotices status="stopped" limitAt={Date.now() + 57_000} callStatus="ended" />);
 
     expect(container.textContent).toBe('');
   });

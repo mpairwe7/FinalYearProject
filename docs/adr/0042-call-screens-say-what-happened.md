@@ -94,6 +94,17 @@ Also: the device check stops an earlier microphone and drops one granted after
 the dialog closed; mark-done and the review form show their errors; the
 Luganda micFallback string lost a stray leading space.
 
+**Corrected in a third review:** a claim that ends restores the officer only
+while their presence is still that call's, and moves it to another call they
+are on or have claimed (both can happen: claims are per call), without
+refreshing `last_seen`; why a call is ending (`ending_reason`) is recorded
+before the caller is told, so their screen hanging up in reply is not recorded
+as the caller's own hang-up, on the time limit and on every `hang_up_caller`;
+the officer's time-limit notice counts down to a deadline in 15-second steps
+(a status region is read out on every change); a call whose media pipeline
+cannot start is closed with 1001 after its `unavailable` frame, where the
+server's own close had replaced that message on the caller's screen.
+
 **Corrected in a second review:** a claim marks the officer `on_call` on the
 server and its end restores what they were; the time-limit warning is sent on
 its own and the end-of-call message has a one-second deadline, so a stalled

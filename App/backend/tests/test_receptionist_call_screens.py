@@ -18,7 +18,7 @@ from app import database as db
 from app.receptionist import ws
 from app.receptionist.hub import hub
 from app.receptionist.state import CallRoom, CallState, registry
-from app.receptionist.store import create_call, get_call, init_receptionist_schema
+from app.receptionist.store import create_call, get_call, init_receptionist_schema, update_call
 
 
 class RecordingSocket:
@@ -308,6 +308,39 @@ class CallClockTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.room.state.mode, "ended")
         self.assertEqual(get_call(self.call_id)["end_reason"], "max_call_duration")
 
+    def caller_hanging_up_when_told(self):
+        """A caller socket that hangs up as soon as it is told the call ended.
+
+        The caller endpoint then ends the room as ``caller_hangup`` (its
+        ``_finish_call``), possibly before whoever ended the call has recorded why.
+        """
+        room = self.room
+
+        class HangsUpWhenTold(RecordingSocket):
+            async def send_text(self, text: str) -> None:
+                await super().send_text(text)
+                if json.loads(text) == {"type": "status", "status": "ended"}:
+                    await room.end("caller_hangup")
+
+        return HangsUpWhenTold()
+
+    async def test_a_caller_who_hangs_up_on_hearing_the_limit_is_ended_by_the_limit(self):
+        self.room.caller_ws = self.caller_hanging_up_when_told()
+
+        await self.run_clock(ceiling=120.0, elapsed=119.7)
+
+        self.assertEqual(self.room.state.end_reason, "max_call_duration")
+        self.assertEqual(get_call(self.call_id)["end_reason"], "max_call_duration")
+
+    async def test_a_caller_who_hangs_up_on_being_hung_up_on_keeps_the_reason_they_were(self):
+        from app.receptionist import desk
+
+        self.room.caller_ws = self.caller_hanging_up_when_told()
+
+        await desk.hang_up_caller(self.room, "officer_ended")
+
+        self.assertEqual(get_call(self.call_id)["end_reason"], "officer_ended")
+
     async def test_a_call_that_ended_first_is_left_as_it_ended(self):
         await self.room.end("caller_hangup")
 
@@ -368,16 +401,52 @@ class PresenceHeartbeatGuardTests(unittest.IsolatedAsyncioTestCase):
 
 
 # ---------------------------------------------------------------------------
+# A media pipeline that cannot start is refused like calls that are off
+# ---------------------------------------------------------------------------
+
+
+class PipelineFailureTests(unittest.IsolatedAsyncioTestCase):
+    async def test_a_call_whose_media_cannot_start_is_told_so_and_closed_with_1001(self):
+        from app import ws_concurrency
+
+        db.init_db()
+        init_receptionist_schema()
+        ws_concurrency.reset()
+        self.addCleanup(ws_concurrency.reset)
+        lobby = patch.object(hub, "publish_lobby")
+        lobby.start()
+        self.addCleanup(lobby.stop)
+        caller = RecordingSocket(
+            inbound=[json.dumps({"type": "call_start", "locale": "en", "voice_consent_accepted": True})]
+        )
+        with (
+            patch.object(ws, "_voice_receptionist_enabled", return_value=True),
+            patch.object(ws.livekit, "enabled", return_value=True),
+            patch.object(ws.livekit, "mint_token", return_value="caller-token"),
+            patch.dict("os.environ", {"LIVEKIT_URL": "wss://rtc.example.test"}),
+            patch.object(ws, "build_call_pipeline", side_effect=RuntimeError("no media server")),
+            patch.object(ws, "generate_call_summary"),
+        ):
+            await asyncio.wait_for(ws.call_stream_endpoint(caller), timeout=5.0)
+
+        self.assertEqual([e["code"] for e in caller.errors()], ["unavailable"])
+        # Closed with the code the caller's screen reads as "unavailable", after
+        # the error frame, rather than by the server with whatever it picks.
+        self.assertEqual(caller.closed_with(), 1001)
+        self.assertEqual(caller.kinds()[-1], "close")
+
+
+# ---------------------------------------------------------------------------
 # A claim is presence too (review of #717)
 # ---------------------------------------------------------------------------
 
 
 class ClaimPresenceTests(unittest.IsolatedAsyncioTestCase):
-    officer = "okello@ura.go.ug"
-
     async def asyncSetUp(self) -> None:
         from app.receptionist import desk, presence
 
+        # One officer per test: calls they held in other tests stay in the store.
+        self.officer = f"okello_{uuid.uuid4().hex[:6]}@ura.go.ug"
         db.init_db()
         init_receptionist_schema()
         self.desk, self.presence = desk, presence
@@ -398,6 +467,40 @@ class ClaimPresenceTests(unittest.IsolatedAsyncioTestCase):
     def status(self) -> tuple[str, str]:
         row = self.presence.get_presence(self.officer)
         return row["raw_status"], row.get("current_call_id") or ""
+
+    async def waiting_room(self) -> CallRoom:
+        call_id = f"call_cp_{uuid.uuid4().hex[:8]}"
+        create_call(call_id, conversation_id=f"conv_{call_id}", status="transferring")
+        room = await registry.create(call_id, f"conv_{call_id}", tenant_id="default")
+        room.state.mode = "transferring"
+
+        async def drop() -> None:
+            self.desk._cancel_claim_timer(room)
+            await registry.remove(call_id)
+
+        self.addAsyncCleanup(drop)
+        return room
+
+    async def test_a_claim_ending_on_one_call_leaves_the_officer_on_the_other(self):
+        other = await self.waiting_room()
+        await self.desk.claim(self.call_id, self.officer)
+        await self.desk.claim(other.call_id, self.officer)
+
+        await self.desk.release(self.call_id, self.officer)
+
+        self.assertEqual(self.status(), ("on_call", other.call_id))
+
+    async def test_giving_back_a_second_claim_keeps_an_officer_on_the_call_they_are_on(self):
+        on_call = f"call_cp_{uuid.uuid4().hex[:8]}"
+        create_call(on_call, conversation_id=f"conv_{on_call}", status="bridged")
+        update_call(on_call, officer_id=self.officer)
+        self.presence.set_on_call(self.officer, on_call)
+
+        await self.desk.claim(self.call_id, self.officer)
+        await self.desk.release(self.call_id, self.officer)
+
+        self.assertEqual(self.status(), ("on_call", on_call))
+        self.assertEqual(self.presence.get_presence(self.officer)["previous_status"], "busy")
 
     async def test_an_officer_holding_a_claim_is_on_a_call(self):
         await self.desk.claim(self.call_id, self.officer)

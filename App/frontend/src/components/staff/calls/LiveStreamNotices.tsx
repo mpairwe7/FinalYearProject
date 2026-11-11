@@ -2,6 +2,7 @@
 
 import React from 'react';
 import type { CallLiveStatus } from '@/hooks/useCalls';
+import { useNow } from '@/hooks/useNow';
 
 /**
  * Notices above a live call's transcript (ADR-0042): it stopped updating, for
@@ -10,11 +11,12 @@ import type { CallLiveStatus } from '@/hooks/useCalls';
  */
 export function LiveStreamNotices({
   status,
-  secondsRemaining,
+  limitAt,
   callStatus,
 }: {
   status: CallLiveStatus;
-  secondsRemaining: number | null;
+  /** When the call's time limit falls (ms since the epoch); null until the warning. */
+  limitAt: number | null;
   callStatus: string;
 }) {
   if (callStatus === 'ended') return null;
@@ -32,14 +34,26 @@ export function LiveStreamNotices({
           Live transcript stopped. Sign in again, then reopen this call, to see it update.
         </p>
       )}
-      {/* Notice before the call's time limit ends it (G602): a minute, or
-          half of a limit of a minute or less. */}
-      {secondsRemaining !== null && (
-        <p className="cc-notice" role="status">
-          This call reaches its time limit in about{' '}
-          {secondsRemaining >= 55 ? 'a minute' : `${secondsRemaining} seconds`} and will end then.
-        </p>
-      )}
+      {limitAt !== null && <TimeLimitNotice limitAt={limitAt} />}
     </>
+  );
+}
+
+/**
+ * Notice before the call's time limit ends it (G602): a minute, or half of a
+ * limit of a minute or less. It counts down on the console's shared clock
+ * rather than keeping the estimate it was warned with, in 15-second steps:
+ * a status region is read out each time its text changes, and a screen reader
+ * must not read out every second.
+ */
+function TimeLimitNotice({ limitAt }: { limitAt: number }) {
+  const left = Math.max(0, Math.round((limitAt - useNow()) / 1000));
+  const about = left >= 55 ? 'a minute' : `${Math.ceil(left / 15) * 15} seconds`;
+  return (
+    <p className="cc-notice" role="status">
+      {left === 0
+        ? 'This call has reached its time limit and is ending.'
+        : `This call reaches its time limit in about ${about} and will end then.`}
+    </p>
   );
 }

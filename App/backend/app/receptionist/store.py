@@ -345,6 +345,23 @@ def claim_call(call_id: str, officer_id: str, now: float, expired_before: float)
     return affected > 0
 
 
+def live_call_held_by(officer_id: str, *, excluding: str = "") -> str:
+    """The latest live call *officer_id* is on or holds a claim on, other than *excluding*; "" if none.
+
+    From the store, so a call held through another process counts too.
+    """
+    rows = db.query_all(
+        """
+        SELECT call_id FROM voice_calls
+        WHERE call_id != ?
+          AND ((status = 'bridged' AND officer_id = ?) OR (status = 'transferring' AND claimed_by = ?))
+        ORDER BY started_at DESC LIMIT 1
+        """,
+        (excluding, officer_id, officer_id),
+    )
+    return str(dict(rows[0])["call_id"]) if rows else ""
+
+
 def release_claim(call_id: str, officer_id: str | None = None) -> bool:
     """Drop the claim on *call_id* — only *officer_id*'s, when given."""
     if officer_id is None:

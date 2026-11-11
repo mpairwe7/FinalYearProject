@@ -227,7 +227,7 @@ export function CallWorkspace({ callId, role }: { callId: string; role: string }
 
       {/* Above everything that can be collapsed: an officer deciding whether
           to take a waiting call sees a paused stream or a near time limit. */}
-      <LiveStreamNotices status={live.status} secondsRemaining={live.secondsRemaining} callStatus={call.status} />
+      <LiveStreamNotices status={live.status} limitAt={live.limitAt} callStatus={call.status} />
 
       {safetyConcern && (
         <p className="cw-safety" role="alert" data-testid="call-safety-concern">

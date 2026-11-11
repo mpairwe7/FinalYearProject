@@ -13,6 +13,7 @@ const live = {
   turns: [] as unknown[],
   status: 'reconnecting',
   secondsRemaining: 60 as number | null,
+  limitAt: Date.now() + 60_000 as number | null,
   interimCaption: '',
   brief: null,
 };

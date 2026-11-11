@@ -318,7 +318,7 @@ async def _release_locked(room: CallRoom, reason: str) -> None:
     release_claim(room.call_id)
     if officer_id:
         try:
-            presence.finish_wrap_up(officer_id)
+            presence.end_claim_presence(officer_id, room.call_id)
         except Exception:
             logger.warning("Could not restore the presence of an officer whose claim ended", exc_info=True)
     room.state.claimed_by = ""
@@ -1255,7 +1255,12 @@ async def revoke_media(room: CallRoom, identity: str) -> bool:
 
 
 async def hang_up_caller(room: CallRoom, reason: str) -> None:
-    """End the call and tell the caller's screen, which then closes its socket."""
+    """End the call and tell the caller's screen, which then closes its socket.
+
+    The reason is recorded first: the caller's screen hangs up on hearing it,
+    and its endpoint must not record that as the caller's own hang-up.
+    """
+    room.state.ending_reason = room.state.ending_reason or reason
     await _send_to_caller(room, {"type": "status", "status": "ended"})
     await room.end(reason)
 

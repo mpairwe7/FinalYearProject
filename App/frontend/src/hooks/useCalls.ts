@@ -90,6 +90,8 @@ export type CallLiveStatus = 'connecting' | 'live' | 'reconnecting' | 'stopped';
 export function useCallLive(callId?: string | null) {
   const [status, setStatus] = useState<CallLiveStatus>('connecting');
   const [secondsRemaining, setSecondsRemaining] = useState<number | null>(null);
+  /** When the call's time limit falls (ms since the epoch), from the warning; null before it. */
+  const [limitAt, setLimitAt] = useState<number | null>(null);
   const [call, setCall] = useState<CallRecord | null>(null);
   const [turns, setTurns] = useState<CallTurn[]>([]);
   const [interimCaption, setInterimCaption] = useState<{ speaker: string; text: string } | null>(null);
@@ -114,6 +116,7 @@ export function useCallLive(callId?: string | null) {
     let callEnded = false;
     setStatus('connecting');
     setSecondsRemaining(null);
+    setLimitAt(null);
 
     const open = () => {
       if (disposed) return;
@@ -153,8 +156,10 @@ export function useCallLive(callId?: string | null) {
             setInterimCaption(null);
             setBrief(msg.call?.brief || null);
           } else if (msg.type === 'duration_warning') {
-            const seconds = Number(msg.data?.seconds_remaining);
-            setSecondsRemaining(Number.isFinite(seconds) && seconds > 0 ? seconds : 60);
+            const reported = Number(msg.data?.seconds_remaining);
+            const seconds = Number.isFinite(reported) && reported > 0 ? reported : 60;
+            setSecondsRemaining(seconds);
+            setLimitAt(Date.now() + seconds * 1000);
           } else if (msg.type === 'brief') {
             setBrief(msg.data || null);
           } else if (msg.type === 'turn') {
@@ -207,6 +212,7 @@ export function useCallLive(callId?: string | null) {
   return {
     status: callId ? status : ('stopped' as CallLiveStatus),
     secondsRemaining: callId ? secondsRemaining : null,
+    limitAt: callId ? limitAt : null,
     call: callId ? call : null,
     turns: callId ? turns : [],
     interimCaption: callId ? interimCaption : null,

@@ -422,6 +422,9 @@ async def _call_clock(room: Any) -> None:
         if room.state.mode != "ended":
             # As desk.hang_up_caller does, but the caller's screen gets one
             # second to hear it: a stalled socket must not keep the call open.
+            # The reason is recorded before the caller is told, so their
+            # screen hanging up in reply is not taken for their own hang-up.
+            room.state.ending_reason = room.state.ending_reason or "max_call_duration"
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(desk._send_to_caller(room, {"type": "status", "status": "ended"}), timeout=1.0)
             await room.end("max_call_duration")
@@ -833,6 +836,11 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                 except Exception:
                     pass
                 await room.end("media_pipeline_unavailable")
+                # Closed here with the code the caller's screen reads as
+                # "unavailable": left to the server, the close code replaced
+                # that message with "could not connect" (ADR-0042).
+                with contextlib.suppress(Exception):
+                    await websocket.close(code=1001)
                 return
             from ..main import app
             from .phrases import phrase
