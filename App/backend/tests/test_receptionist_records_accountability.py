@@ -34,6 +34,30 @@ class FakeCallerSocket:
         return None
 
 
+def signed_staff_token(user: str, role: str, *, expires_in: float, tenant: str = "default") -> str:
+    """A token the development verifier accepts: really signed, with a real expiry."""
+    import time as _time
+
+    from app.auth.dependencies import _get_verifier
+    from app.auth.jwt_auth import _b64url_encode, _hs256_sign
+
+    verifier = _get_verifier()
+    now = _time.time()
+    claims = {
+        "sub": user,
+        "tenant_id": tenant,
+        "iss": verifier.issuer or "ura-chatbot-dev",
+        "aud": verifier.audience or "ura-chatbot",
+        "iat": int(now),
+        "nbf": int(now) - 5,
+        "exp": now + expires_in,
+        "realm_access": {"roles": [role]},
+    }
+    header = _b64url_encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+    payload = _b64url_encode(json.dumps(claims).encode())
+    return f"{header}.{payload}.{_hs256_sign(header, payload, verifier.dev_secret)}"
+
+
 class FakeStaffSocket:
     """A staff browser socket: scripted inbound frames, recorded outbound ones."""
 
@@ -106,7 +130,7 @@ class LiveCallCase(unittest.IsolatedAsyncioTestCase):
         stack = contextlib.ExitStack()
         stack.enter_context(patch.object(ws, "_voice_receptionist_enabled", return_value=True))
         stack.enter_context(
-            patch.object(ws, "_resolve_ws_principal", return_value=(user, self.tenant_id, role, claims or {}))
+            patch.object(ws, "_staff_session", return_value=(user, self.tenant_id, role, (claims or {}).get("exp")))
         )
         stack.enter_context(patch.object(ws.livekit, "enabled", return_value=False))
         return stack
@@ -329,25 +353,26 @@ class WrapUpOwnershipTests(LiveCallCase):
         self.assertTrue(result["wrapped_up"])
 
     async def test_a_ticket_made_at_wrap_up_is_made_once_when_the_save_is_retried(self):
-        from app.receptionist.store import update_call as real_update
+        from app.receptionist.store import merge_wrapup as real_merge
 
         await self.bridge("okello")
         await self.end_call()
         calls = {"n": 0}
 
-        def fail_the_wrap_up_once(call_id, **fields):
+        def fail_the_wrap_up_once(*args, **kwargs):
             # The ticket is linked first; the wrap-up itself then fails once.
-            if "wrapup_at" in fields:
-                calls["n"] += 1
-                if calls["n"] == 1:
-                    raise RuntimeError("database is locked")
-            return real_update(call_id, **fields)
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("database is locked")
+            return real_merge(*args, **kwargs)
 
         with patch("app.flags.flags.is_enabled", side_effect=lambda name, **_kw: name == "ticket_queue"):
-            with patch.object(desk, "update_call", side_effect=fail_the_wrap_up_once):
+            with patch.object(desk, "merge_wrapup", side_effect=fail_the_wrap_up_once):
                 with self.assertRaises(desk.DeskError) as failed:
                     await desk.wrapup(self.call_id, "okello", outcome="follow_up", note="Needs a letter", ticket_action="create")
                 self.assertEqual(failed.exception.status, 503)
+                # It says what did happen, rather than that nothing did.
+                self.assertIn("ticket was updated", failed.exception.detail)
                 await desk.wrapup(self.call_id, "okello", outcome="follow_up", note="Needs a letter", ticket_action="create")
 
         row = get_call(self.call_id)
@@ -975,6 +1000,40 @@ class StaffSessionTests(LiveCallCase):
         # The caller is not dropped: the officer has the reconnect grace to sign in again.
         self.assertEqual((self.room.state.mode, self.room.state.reconnecting_officer), ("transferring", "okello"))
 
+    async def test_the_expiry_comes_from_the_token_the_verifier_checked(self):
+        # The doubles in this class hand the endpoint an expiry. What sign-in
+        # really returned in that position was the token's consent purposes,
+        # so no expiry was ever read and no staff socket ever expired. This
+        # one signs a real token and patches nothing about sign-in.
+        await self.bridge()
+        token = signed_staff_token("auditor1", "ura_auditor", expires_in=1.0)
+        socket = FakeStaffSocket(
+            {"listen": "true"}, inbound=[json.dumps({"type": "authenticate", "access_token": token})]
+        )
+        with (
+            patch.object(ws, "_voice_receptionist_enabled", return_value=True),
+            patch.object(ws.livekit, "enabled", return_value=False),
+        ):
+            task = asyncio.create_task(ws.officer_audio_endpoint(socket, self.call_id))
+            done, _pending = await asyncio.wait({task}, timeout=5.0)
+            if not done:
+                task.cancel()
+
+        self.assertTrue(done, "a listen socket opened with a real token outlived that token")
+        self.assertEqual(socket.closed, 4401)
+
+    async def test_the_lobby_closes_when_a_real_token_expires(self):
+        token = signed_staff_token("okello", "ura_staff", expires_in=1.0)
+        socket = FakeStaffSocket(inbound=[json.dumps({"type": "authenticate", "access_token": token})])
+        with patch.object(ws, "_voice_receptionist_enabled", return_value=True):
+            task = asyncio.create_task(ws.staff_calls_stream_endpoint(socket, call_id=None))
+            done, _pending = await asyncio.wait({task}, timeout=5.0)
+            if not done:
+                task.cancel()
+
+        self.assertTrue(done, "the lobby socket outlived its token")
+        self.assertEqual(socket.closed, 4401)
+
     async def test_a_session_with_time_left_keeps_its_socket(self):
         await self.bridge()
         socket = FakeStaffSocket({"listen": "true"})
@@ -1229,6 +1288,445 @@ class RetentionPurgeTests(unittest.TestCase):
 
         self.assertEqual(deleted["tickets"], 0)
         self.assertEqual(deleted["voice_call_turns"], 3)
+
+
+# ---------------------------------------------------------------------------
+# Found in review of this change
+# ---------------------------------------------------------------------------
+
+LUGANDA_QUESTION = "Nyinza ntya okwewandiisa okufuna TIN?"
+
+
+class ConfiguredLanguageTests(BrainCase):
+    """The brain moves a call only into a language this deployment takes calls in."""
+
+    async def test_a_typed_turn_in_a_language_calls_are_not_held_in_leaves_the_call_where_it_is(self):
+        from app.receptionist.serializer import CallTextTurnFrame
+
+        with patch.dict("os.environ", {"RECEPTIONIST_LANGUAGES": "en,sw"}):
+            await self.brain.process_frame(CallTextTurnFrame(text="Nsaba okumanya ku VAT yange"))
+
+        self.assertEqual(self.state.locale, "en")
+
+    async def test_an_on_screen_choice_of_such_a_language_is_not_taken(self):
+        from app.receptionist.serializer import SetLanguageFrame
+
+        with patch.dict("os.environ", {"RECEPTIONIST_LANGUAGES": "en,sw"}):
+            await self.brain.process_frame(SetLanguageFrame(language="lg"))
+
+        self.assertEqual(self.state.locale, "en")
+
+
+class ReplyLanguageTests(BrainCase):
+    """The audit row names the language the reply was in, which is not always the call's."""
+
+    async def test_english_served_on_a_luganda_call_is_recorded_as_english(self):
+        self.state.locale = "lg"
+        self.chat_model._maybe_handle_fast_paths.return_value = None
+        self.chat_model._localize_reply.side_effect = RuntimeError("translation down")
+        with (
+            patch.object(self.brain, "_synthesize_luganda_reply", return_value=""),
+            patch.object(self.brain, "_extract_english_tax_query", return_value="How do I register for a TIN?"),
+        ):
+            await self.hear(LUGANDA_QUESTION)
+
+        row = self.rows()[0]["result"]
+        self.assertEqual((row["locale"], row["reply_locale"]), ("lg", "en"))
+
+    async def test_a_reply_the_service_could_not_translate_keeps_the_language_it_reported(self):
+        self.state.locale = "sw"
+        self.state.language_source = "override"
+        self.chat_model.generate.return_value = {**self.chat_model.generate.return_value, "reply_locale": "en"}
+
+        await self.hear("How do I register for a TIN?")
+
+        row = self.rows()[0]["result"]
+        self.assertEqual((row["locale"], row["reply_locale"]), ("sw", "en"))
+
+
+class GenerationSlotTests(unittest.IsolatedAsyncioTestCase):
+    """A model-run slot is given back once, when the work that took it has really stopped."""
+
+    def slot(self):
+        from app.receptionist.brain import _GenerationSlot
+
+        self.semaphore = asyncio.Semaphore(0)
+        return _GenerationSlot(self.semaphore, asyncio.get_running_loop())
+
+    def given_back(self) -> int:
+        return self.semaphore._value
+
+    async def test_a_step_still_running_holds_the_slot_after_the_turn_stops_waiting(self):
+        import threading
+
+        gate = threading.Event()
+        slot = self.slot()
+        step = asyncio.create_task(slot.run(gate.wait, 5))
+        await asyncio.sleep(0.1)
+
+        step.cancel()  # the turn timed out, or a newer turn replaced it
+        with contextlib.suppress(asyncio.CancelledError):
+            await step
+        slot.finish()
+        self.assertEqual(self.given_back(), 0, "the slot was freed while its thread was still running")
+
+        gate.set()
+        await asyncio.sleep(0.2)
+        self.assertEqual(self.given_back(), 1)
+
+    async def test_a_step_that_never_started_does_not_keep_the_slot(self):
+        slot = self.slot()
+        ran: list[bool] = []
+        step = asyncio.create_task(slot.run(ran.append, True))
+        step.cancel()  # before the coroutine, let alone its thread, has started
+        with contextlib.suppress(asyncio.CancelledError):
+            await step
+
+        slot.finish()
+
+        self.assertEqual((ran, self.given_back()), ([], 1))
+
+    async def test_the_slot_is_given_back_once(self):
+        slot = self.slot()
+        await slot.run(lambda: None)
+
+        slot.finish()
+        slot.finish()
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(self.given_back(), 1)
+
+
+class GenerationSlotUseTests(BrainCase):
+    async def test_an_abandoned_luganda_run_keeps_its_slot_until_its_step_ends(self):
+        import threading
+
+        from app.receptionist.brain import MAX_GENERATIONS_IN_FLIGHT
+
+        gate = threading.Event()
+        self.addCleanup(gate.set)
+        self.state.locale = "lg"
+        self.chat_model._maybe_handle_fast_paths.side_effect = lambda **_kw: gate.wait(5) and None
+        turn = asyncio.create_task(self.hear(LUGANDA_QUESTION))
+        for _ in range(100):
+            await asyncio.sleep(0.01)
+            if self.chat_model._maybe_handle_fast_paths.called:
+                break
+        self.assertTrue(self.chat_model._maybe_handle_fast_paths.called)
+
+        self.state.generation_id += 1  # a newer turn replaced this one
+        self.brain._active_gen_task.cancel()
+        await asyncio.wait({turn}, timeout=3.0)
+
+        self.assertEqual(self.brain._generation_slots._value, MAX_GENERATIONS_IN_FLIGHT - 1)
+        gate.set()
+        await asyncio.sleep(0.3)
+        self.assertEqual(self.brain._generation_slots._value, MAX_GENERATIONS_IN_FLIGHT)
+
+    async def test_a_question_is_answered_in_the_language_it_was_asked_in(self):
+        from app.receptionist import brain as brain_module
+
+        real_run = brain_module._GenerationSlot.run
+
+        async def worker_starts_late(slot, fn, *args, **kwargs):
+            self.state.locale = "sw"  # a newer turn moved the call before this worker started
+            return await real_run(slot, fn, *args, **kwargs)
+
+        with patch.object(brain_module._GenerationSlot, "run", worker_starts_late):
+            await self.hear("How do I register for a TIN?")
+
+        self.assertEqual(self.chat_model.generate.call_args.kwargs["locale"], "en")
+
+
+class WrapUpReviewTests(LiveCallCase):
+    """Wrap-up cases the first version of this change got wrong."""
+
+    def no_room_here(self):
+        """This process has no room for the call: another worker has it, or its process died."""
+        return patch.object(desk.registry, "get", return_value=None)
+
+    async def refused(self, officer: str, **kwargs) -> desk.DeskError:
+        with self.assertRaises(desk.DeskError) as refused:
+            await desk.wrapup(self.call_id, officer, outcome="resolved", note="Closed", **kwargs)
+        return refused.exception
+
+    async def test_the_officer_on_a_call_another_worker_holds_is_still_on_it(self):
+        await self.bridge("okello")
+
+        with self.no_room_here():
+            error = await self.refused("okello")
+
+        self.assertEqual(error.status, 409)
+
+    async def test_a_waiting_call_another_worker_holds_is_not_open_to_any_officer(self):
+        with self.no_room_here():
+            error = await self.refused("mallory")
+
+        self.assertEqual(error.status, 403)
+
+    async def test_its_ticket_is_not_resolved_while_the_caller_waits_on_another_worker(self):
+        from app.receptionist.store import update_call
+
+        ticket = db.create_ticket("caller_requested", "I was charged a penalty I do not owe")
+        update_call(self.call_id, ticket_id=ticket["id"])
+        await self.bridge("okello")
+        await desk.transfer(self.call_id, "okello", team="disputes")
+
+        with self.no_room_here(), patch("app.flags.flags.is_enabled", side_effect=only("ticket_queue")):
+            error = await self.refused("okello", ticket_action="resolve")
+
+        self.assertEqual(error.status, 409)
+        self.assertNotEqual(db.get_ticket(ticket["id"])["status"], "resolved")
+
+    def test_a_wrap_up_saved_between_another_officers_read_and_write_is_kept(self):
+        from app.receptionist import store
+
+        def entry(officer: str) -> dict:
+            return {"officer_id": officer, "officer_name": "", "outcome": "resolved", "note": f"{officer}'s note", "at": 1.0}
+
+        raced = {"done": False}
+
+        def nakato_saves_first(_row: dict) -> dict:
+            # Called after okello's read of the row and before okello's write.
+            if not raced["done"]:
+                raced["done"] = True
+                store.merge_wrapup(self.call_id, entry("nakato"), lambda _r: {})
+            return {}
+
+        store.merge_wrapup(self.call_id, entry("okello"), nakato_saves_first)
+
+        self.assertEqual(sorted(w["officer_id"] for w in get_call(self.call_id)["wrapups"]), ["nakato", "okello"])
+
+    async def link_fails(self, withdrawal: bool | None = None):
+        """Wrap up with a new ticket whose link to the call cannot be written."""
+        from app.receptionist.store import update_call as real_update
+
+        await self.bridge("okello")
+        await self.room.end("caller_hangup")
+
+        def refuse_the_link(call_id, **fields):
+            if "ticket_id" in fields:
+                raise RuntimeError("database is locked")
+            return real_update(call_id, **fields)
+
+        patches = [
+            patch("app.flags.flags.is_enabled", side_effect=only("ticket_queue")),
+            patch.object(desk, "update_call", side_effect=refuse_the_link),
+        ]
+        if withdrawal is not None:
+            patches.append(patch.object(db, "update_ticket", return_value=withdrawal))
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            with self.assertRaises(desk.DeskError):
+                await desk.wrapup(self.call_id, "okello", outcome="follow_up", note="Needs a letter", ticket_action="create")
+        return [t for t in db.list_tickets(limit=200) if t.get("conversation_id") == f"conv_{self.call_id}"]
+
+    async def test_a_ticket_withdrawn_by_the_system_is_not_an_officers_first_response(self):
+        made = await self.link_fails()
+
+        self.assertEqual([t["status"] for t in made], ["wontfix"])
+        self.assertFalse(made[0].get("first_response_at"))
+
+    async def test_a_ticket_that_could_not_be_withdrawn_is_reported_as_an_orphan(self):
+        with self.assertLogs("app.receptionist.desk", level="ERROR") as logs:
+            await self.link_fails(withdrawal=False)
+
+        self.assertTrue(any("orphan" in line for line in logs.output))
+
+    async def test_a_callback_the_officer_asked_for_is_dropped_when_they_change_the_outcome(self):
+        await self.bridge("okello")
+        await self.room.end("caller_hangup")
+        await desk.wrapup(self.call_id, "okello", outcome="callback", note="Will ring back at two")
+        self.assertEqual(get_call(self.call_id)["needs_callback"], 1)
+
+        await desk.wrapup(self.call_id, "okello", outcome="resolved", note="Rang back; settled")
+
+        row = get_call(self.call_id)
+        self.assertEqual((row["needs_callback"], row["callback_reason"]), (0, ""))
+
+    async def test_a_callback_owed_for_another_reason_stays_owed(self):
+        from app.receptionist.store import update_call
+
+        await self.bridge("okello")
+        await self.room.end("caller_hangup")
+        update_call(self.call_id, needs_callback=1, callback_reason="transfer_timeout")
+
+        await desk.wrapup(self.call_id, "okello", outcome="resolved", note="Explained the notice")
+
+        row = get_call(self.call_id)
+        self.assertEqual((row["needs_callback"], row["callback_reason"]), (1, "transfer_timeout"))
+
+
+class OfficerLastWordsTests(unittest.IsolatedAsyncioTestCase):
+    """What an officer said just before leaving a call stays in its transcript."""
+
+    def setUp(self) -> None:
+        db.init_db()
+        init_receptionist_schema()
+        self.call_id = f"call_last_{uuid.uuid4().hex[:8]}"
+        publish = patch.object(hub, "publish_call")
+        publish.start()
+        self.addCleanup(publish.stop)
+
+    def leg(self, transcribe):
+        from app.receptionist.officer import OfficerLeg
+        from app.receptionist.state import CallRoom, CallState
+
+        room = CallRoom(self.call_id, CallState(call_id=self.call_id, conversation_id="conv_last", mode="bridged"))
+        return OfficerLeg(ws=FakeStaffSocket(), officer_id="okello", officer_name="Officer Okello",
+                          room=room, speech_model=SimpleNamespace(transcribe=transcribe))
+
+    def officer_turns(self) -> list[str]:
+        from app.receptionist.store import list_turns
+
+        return [t["text"] for t in list_turns(self.call_id) if t["speaker"] == "officer"]
+
+    async def test_utterances_waiting_when_the_officer_leaves_are_still_transcribed(self):
+        import time as _time
+
+        def transcribe(*_args, **_kwargs):
+            _time.sleep(0.1)
+            return SimpleNamespace(text="Your objection is lodged.", latency_s=0.1)
+
+        leg = self.leg(transcribe)
+        leg.queue_transcription(b"\x00\x01" * 1600)
+        leg.queue_transcription(b"\x00\x01" * 1600)
+        await asyncio.sleep(0.01)
+
+        await leg.close()
+        await asyncio.sleep(0.6)
+
+        self.assertEqual(self.officer_turns(), ["Your objection is lodged."] * 2)
+
+    async def test_nothing_more_is_taken_once_the_leg_is_closed(self):
+        leg = self.leg(lambda *_a, **_k: SimpleNamespace(text="late", latency_s=0.0))
+        await leg.close()
+
+        leg.queue_transcription(b"\x00\x01" * 1600)
+        await asyncio.sleep(0.1)
+
+        self.assertEqual(self.officer_turns(), [])
+
+    async def test_a_transcription_that_hangs_is_given_up_on(self):
+        import time as _time
+
+        from app.receptionist import officer
+
+        leg = self.leg(lambda *_a, **_k: _time.sleep(1.0) or SimpleNamespace(text="too late", latency_s=1.0))
+        leg.queue_transcription(b"\x00\x01" * 1600)
+        await asyncio.sleep(0.01)
+
+        with patch.object(officer, "OFFICER_DRAIN_S", 0.1):
+            await leg.close()
+            await asyncio.sleep(0.4)
+
+        self.assertTrue(leg._transcriber.done())
+        await asyncio.sleep(0.8)  # let the abandoned thread finish before the loop closes
+
+
+class ScheduleTenancyTests(unittest.TestCase):
+    """An officer on shift keeps the desk open for their own tenant's taxpayers only."""
+
+    def setUp(self) -> None:
+        from app.receptionist import presence
+
+        db.init_db()
+        init_receptionist_schema()
+        tag = uuid.uuid4().hex[:6]
+        self.officer, self.own, self.other = f"akello-{tag}", f"tenant-gulu-{tag}", f"tenant-kla-{tag}"
+        presence.upsert_presence(self.officer, tenant_id=self.own, display_name="Officer Akello", status="available")
+        self.addCleanup(presence.upsert_presence, self.officer, status="offline")
+
+    def online(self, tenant_id: str) -> bool:
+        from app.escalation_policy import evaluate_cxp_schedule
+
+        with patch("app.tenancy.tenant_enabled", return_value=True):
+            return evaluate_cxp_schedule(check_presence=True, tenant_id=tenant_id).live_officer_online
+
+    def test_their_own_tenant_sees_them(self):
+        self.assertTrue(self.online(self.own))
+
+    def test_another_tenant_does_not(self):
+        self.assertFalse(self.online(self.other))
+
+
+class SummaryNoteRaceTests(CallSummaryTicketTests):
+    def test_a_note_an_officer_saves_while_the_summary_is_written_is_kept(self):
+        real_get = db.get_ticket
+        raced = {"done": False}
+
+        def officer_writes_after_the_read(ticket_id: str):
+            ticket = real_get(ticket_id)
+            if not raced["done"]:
+                raced["done"] = True
+                db.update_ticket(ticket_id, staff_note="OFFICER NOTE: rang the taxpayer at ten")
+            return ticket  # as read before the officer's save: no note yet
+
+        with patch.object(db, "get_ticket", side_effect=officer_writes_after_the_read):
+            self.summarise()
+
+        self.assertEqual(real_get(self.ticket["id"])["staff_note"], "OFFICER NOTE: rang the taxpayer at ten")
+
+    def test_a_ticket_with_no_note_gets_the_summary(self):
+        self.summarise()
+
+        self.assertIn("Call Summary", db.get_ticket(self.ticket["id"])["staff_note"])
+
+
+class SlowStaffSocket(FakeStaffSocket):
+    """A socket whose sends take a moment, as a real one's do."""
+
+    async def send_text(self, text: str) -> None:
+        await asyncio.sleep(0.05)
+        await super().send_text(text)
+
+
+class LeavingStaffSocket(FakeStaffSocket):
+    """A listener whose browser closes shortly after signing in."""
+
+    async def receive(self) -> dict:
+        await asyncio.sleep(0.1)
+        return {"type": "websocket.disconnect", "code": 1001}
+
+
+class ListenerPlaceTests(LiveCallCase):
+    async def asyncSetUp(self) -> None:
+        from app import ws_concurrency
+
+        await super().asyncSetUp()
+        ws_concurrency.reset()
+        self.addCleanup(ws_concurrency.reset)
+
+    async def test_two_listeners_arriving_together_cannot_both_take_the_last_place(self):
+        await self.bridge()
+        first, second = SlowStaffSocket({"listen": "true"}), SlowStaffSocket({"listen": "true"})
+        with patch.object(ws, "LISTENERS_PER_CALL", 1), self.staff("auditor1", "ura_auditor"):
+            tasks = [asyncio.create_task(ws.officer_audio_endpoint(s, self.call_id)) for s in (first, second)]
+            await asyncio.sleep(0.4)
+            listening = len(self.room.listeners)
+            refused = sorted(str(s.closed) for s in (first, second))
+            await self.room.end("caller_hangup")
+            await asyncio.wait(tasks, timeout=3.0)
+
+        self.assertEqual(listening, 1)
+        self.assertEqual(refused, ["1013", "None"])
+
+    async def test_a_listener_who_leaves_during_a_silence_gives_up_their_place(self):
+        await self.bridge()
+        socket = LeavingStaffSocket({"listen": "true"})
+        with self.staff("auditor1", "ura_auditor"):
+            task = asyncio.create_task(ws.officer_audio_endpoint(socket, self.call_id))
+            done, _pending = await asyncio.wait({task}, timeout=3.0)
+            still_bridged = self.room.state.mode == "bridged"
+            listeners = list(self.room.listeners)
+            if not done:
+                await self.room.end("caller_hangup")
+                await asyncio.wait({task}, timeout=3.0)
+
+        self.assertTrue(still_bridged)
+        self.assertTrue(done, "a listener who had left kept their place until audio resumed")
+        self.assertEqual(listeners, [])
 
 
 if __name__ == "__main__":

@@ -3489,7 +3489,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     evaluate_cxp_schedule,
                 )
 
-                sched = evaluate_cxp_schedule(check_presence=True)
+                sched = evaluate_cxp_schedule(check_presence=True, tenant_id=tenant_id)
                 if sched.after_hours:
                     notice = after_hours_escalation_notice(locale or "en", schedule=sched)
                     if notice.strip() not in full_reply:
@@ -8480,7 +8480,7 @@ class ChatModel:
                 if flags.is_enabled("cxp_business_hours", subject=user_id or None):
                     from .escalation_policy import evaluate_cxp_schedule
 
-                    sched = evaluate_cxp_schedule(check_presence=True)
+                    sched = evaluate_cxp_schedule(check_presence=True, tenant_id=effective_tenant)
                     handoff["cxp_schedule"] = sched.to_dict()
                     handoff["after_hours"] = sched.after_hours
                     handoff["next_open_eat"] = sched.next_open_label if sched.after_hours else ""
@@ -11209,7 +11209,7 @@ class ChatModel:
                     evaluate_cxp_schedule,
                 )
 
-                sched = evaluate_cxp_schedule(check_presence=True)
+                sched = evaluate_cxp_schedule(check_presence=True, tenant_id=tenant_id)
                 if sched.after_hours:
                     notice = after_hours_escalation_notice(effective or "en", schedule=sched)
                     cur_reply = str(result.get("reply") or "")

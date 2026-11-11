@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSock
 from pydantic import BaseModel, Field
 
 from ..auth import AuthContext, require_role
-from ..chat_ws_v2 import _resolve_ws_principal
+from ..chat_ws_v2 import _resolve_ws_principal, resolve_ws_session
 from ..flags import flags
 from ..query import SUPPORTED_LOCALES
 from ..tenancy import tenant_enabled
@@ -123,15 +123,29 @@ class _StaffSlot:
             self.held = False
 
 
-def _session_expiry(claims: Any) -> float | None:
-    """When the token that opened a socket expires, or ``None`` when it does not say."""
-    if isinstance(claims, dict) and isinstance(claims.get("exp"), (int, float)):
-        return float(claims["exp"])
-    return None
+def _staff_session(websocket: WebSocket, token: str) -> tuple[str, str, str, float | None]:
+    """``(user_id, tenant_id, role, expiry)`` of the staff token sent in a socket's first message.
+
+    The expiry is the verified token's own. It used to be read from the
+    fourth value of ``_resolve_ws_principal``, which is the token's consent
+    purposes, so it was never found and no staff socket ever expired.
+    """
+    return resolve_ws_session(websocket, required=True, token_override=token)
 
 
 def _expired(expiry: float | None) -> bool:
     return expiry is not None and time.time() >= expiry
+
+
+async def _until_disconnected(websocket: WebSocket) -> None:
+    """Return when the peer has closed *websocket*. For a socket whose loop only sends."""
+    try:
+        while True:
+            message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                return
+    except Exception:  # noqa: BLE001 - any receive error means the peer is gone
+        return
 
 
 async def _stop_pipeline(room: Any, task: Any) -> None:
@@ -770,8 +784,8 @@ async def _staff_calls_stream(websocket: WebSocket, call_id: str | None, slot: _
         auth_message = json.loads(await asyncio.wait_for(websocket.receive_text(), timeout=5.0))
         if not isinstance(auth_message, dict) or auth_message.get("type") != "authenticate":
             raise ValueError("missing WebSocket authentication message")
-        user_id, tenant_id, role, claims = _resolve_ws_principal(
-            websocket, required=True, token_override=str(auth_message.get("access_token") or "")
+        user_id, tenant_id, role, token_exp = _staff_session(
+            websocket, str(auth_message.get("access_token") or "")
         )
     except Exception:
         await websocket.close(code=4401)
@@ -820,16 +834,17 @@ async def _staff_calls_stream(websocket: WebSocket, call_id: str | None, slot: _
         # Lobby mode (metadata only)
         queue = hub.subscribe_lobby(loop, tenant_id=tenant_scope)
 
-    token_exp = _session_expiry(claims)
     try:
         while True:
-            if token_exp is not None and time.time() >= token_exp:
+            if _expired(token_exp):
                 await websocket.close(code=4401)
                 break
-            # Wait for event from hub or ping timeout (25s)
+            # Wait for an event from the hub, for the keep-alive (25 s), or
+            # for the session to expire, whichever comes first.
+            wait = 25.0 if token_exp is None else max(0.0, min(25.0, token_exp - time.time()))
             try:
-                event = await asyncio.wait_for(queue.get(), timeout=25.0)
-                if token_exp is not None and time.time() >= token_exp:
+                event = await asyncio.wait_for(queue.get(), timeout=wait)
+                if _expired(token_exp):
                     await websocket.close(code=4401)
                     break
                 if (
@@ -839,6 +854,8 @@ async def _staff_calls_stream(websocket: WebSocket, call_id: str | None, slot: _
                     continue  # the snapshot already showed it
                 await asyncio.wait_for(websocket.send_text(json.dumps(event)), timeout=5.0)
             except asyncio.TimeoutError:
+                if _expired(token_exp):
+                    continue  # closed at the top of the loop
                 await asyncio.wait_for(
                     websocket.send_text(json.dumps({"type": "ping", "ts": time.time()})),
                     timeout=5.0,
@@ -891,8 +908,8 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
         auth_message = json.loads(await asyncio.wait_for(websocket.receive_text(), timeout=5.0))
         if not isinstance(auth_message, dict) or auth_message.get("type") != "authenticate":
             raise ValueError("missing WebSocket authentication message")
-        user_id, tenant_id, role, claims = _resolve_ws_principal(
-            websocket, required=True, token_override=str(auth_message.get("access_token") or "")
+        user_id, tenant_id, role, token_exp = _staff_session(
+            websocket, str(auth_message.get("access_token") or "")
         )
     except Exception:
         await websocket.close(code=4401)
@@ -900,7 +917,6 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
     if not slot.claim(user_id or ""):
         await websocket.close(code=1013)
         return
-    token_exp = _session_expiry(claims)
 
     listen_mode = websocket.query_params.get("listen", "").lower() in ("true", "1")
     if listen_mode:
@@ -971,11 +987,18 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
                 except Exception:
                     pass
             return
-        await websocket.send_text(json.dumps({"type": "authenticated"}))
+        # The place is taken before anything is awaited: two listeners
+        # arriving together each passed the cap check above while the other
+        # was still sending its sign-in reply.
         queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=100)
         room.add_listener(queue)
+        # A listener sends nothing after sign-in, so nothing here ever read
+        # the socket: one who left during a silence kept their place, and the
+        # call's listener cap, until audio resumed or the call ended.
+        gone = asyncio.create_task(_until_disconnected(websocket))
         try:
-            while room.state.mode == "bridged":
+            await websocket.send_text(json.dumps({"type": "authenticated"}))
+            while room.state.mode == "bridged" and not gone.done():
                 if _expired(token_exp):
                     await websocket.close(code=4401)
                     break
@@ -994,6 +1017,7 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
         finally:
             # No `return` here: it would swallow a cancellation.
             room.remove_listener(queue)
+            gone.cancel()
         with contextlib.suppress(Exception):
             await websocket.close()
         return

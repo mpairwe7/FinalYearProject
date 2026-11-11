@@ -86,6 +86,35 @@ end of the bridge and no longer returns from a `finally`.
 **Retention.** Each purge is its own transaction, and the Postgres bootstrap
 creates the call tables as SQLite's does.
 
+**Corrected in review, before merge.** Review of this change found the
+following, each fixed here with a test that failed first:
+
+- *Session expiry was never read.* The staff endpoints took the token's expiry
+  from the fourth value of `_resolve_ws_principal`, which is the token's
+  consent purposes. No staff socket had ever expired, on the lobby stream
+  either, where the same line predates this change. The expiry now comes from
+  the verified claims (`chat_ws_v2.resolve_ws_session`), and the lobby's wait
+  is bounded by it.
+- *A wrap-up trusted "no room here".* With the call on another worker, or its
+  process gone, the call was read as ended. The stored status now decides.
+- *Two officers saving together lost one wrap-up.* The save is a
+  compare-and-write on the stored list (`store.merge_wrapup`), retried on a
+  miss, so it holds across processes.
+- *A model-run slot was given back too early, or never.* It is now held until
+  the thread that took it has returned, and freed at once when a step was
+  cancelled before its thread started (`_GenerationSlot`).
+- *The audit row named the call's language, not the reply's.* `reply_locale`
+  is English when a translation failed and the English answer was served.
+- Smaller: the brain switches only into the deployment's call languages; a
+  model run reads its language before it is scheduled; the ticket withdrawn
+  after a failed link is a system write and a failed withdrawal is logged as
+  an orphan; an outcome that replaces `callback` drops the callback it asked
+  for; an officer's last utterances are transcribed after the leg closes,
+  within 20 s; the schedule's "an officer is online" counts the caller's
+  tenant only; the summary's note is conditional in the UPDATE itself; a
+  listener's place is taken before anything is awaited and given up when
+  their socket closes during a silence.
+
 Also in this phase: a Luganda calculator answer goes through the guarded
 translation (G586); a Luganda synthesis that states a figure the checked answer
 does not is replaced by the guarded translation (G588); a call runs at most two
@@ -122,3 +151,11 @@ deferred row is exercised end to end rather than through a double. The wrap-up,
 presence and callback tests use the real SQLite store; the Postgres purge is
 tested against a recording double, not a live database, and the staff-socket
 tests against fake sockets.
+
+The session-expiry defect above passed this file's first version because the
+tests handed the endpoint an expiry through a double of sign-in. Two tests now
+sign a real token and patch nothing about sign-in
+(`test_the_expiry_comes_from_the_token_the_verifier_checked`,
+`test_the_lobby_closes_when_a_real_token_expires`). The conditional ticket
+note and the wrap-up merge are tested on SQLite only; their SQL is the same
+text on Postgres and has not been run against one here.

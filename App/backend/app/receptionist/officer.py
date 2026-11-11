@@ -14,6 +14,23 @@ from .store import create_turn
 
 logger = logging.getLogger(__name__)
 
+#: How long a closed leg's transcription backlog may take to finish.
+OFFICER_DRAIN_S = 20.0
+#: Backlogs still finishing after their leg closed, held so they are not collected mid-run.
+_DRAINING: set[asyncio.Task[None]] = set()
+
+
+async def _finish_within(worker: asyncio.Task[None], seconds: float) -> None:
+    """Let *worker* finish, cancelling it when *seconds* have passed."""
+    try:
+        await asyncio.wait_for(worker, timeout=seconds)
+    except asyncio.TimeoutError:
+        logger.warning("An officer's last utterances were not transcribed within %gs", seconds)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.debug("Officer transcription backlog ended with an error", exc_info=True)
+
 
 class OfficerLeg:
     """Manages the officer's WebSocket connection and audio bridge to the caller."""
@@ -126,7 +143,9 @@ class OfficerLeg:
             self._transcriber = asyncio.create_task(self._transcribe_backlog())
 
     async def _transcribe_backlog(self) -> None:
-        while self._running:
+        # Until the backlog is empty, whether or not the leg is still open:
+        # what was said before it closed is still owed to the transcript.
+        while True:
             try:
                 pcm_bytes = self._utterances.get_nowait()
             except asyncio.QueueEmpty:
@@ -172,8 +191,15 @@ class OfficerLeg:
         self._running = False
         if self._sender_task:
             self._sender_task.cancel()
-        if self._transcriber is not None and not self._transcriber.done():
-            self._transcriber.cancel()
+        worker = self._transcriber
+        if worker is not None and not worker.done():
+            # The caller heard what the officer said just before leaving, so
+            # it stays in the transcript: the backlog is finished rather than
+            # cancelled, in the background and within a deadline, so a
+            # recognizer that hangs cannot hold the task for good.
+            drain = asyncio.create_task(_finish_within(worker, OFFICER_DRAIN_S))
+            _DRAINING.add(drain)
+            drain.add_done_callback(_DRAINING.discard)
         try:
             await self.ws.close()
         except Exception:

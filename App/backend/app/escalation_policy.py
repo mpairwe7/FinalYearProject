@@ -238,13 +238,16 @@ def evaluate_cxp_schedule(
     now_ts: float | None = None,
     *,
     check_presence: bool = False,
+    tenant_id: str | None = None,
 ) -> CxpScheduleStatus:
     """Evaluate URA CXP operating status at *now_ts* (defaults to ``time.time()``).
 
     URA CXP live officer operations run daily until 11:00 PM EAT (``23:00``)
     and reopen at 7:00 AM EAT (``07:00``), while the AI assistant operates 24/7.
     When *check_presence* is True, an actively online officer overrides an
-    off-hours clock unless ``CXP_FORCE_AFTER_HOURS=true`` is set.
+    off-hours clock unless ``CXP_FORCE_AFTER_HOURS=true`` is set. With tenancy
+    on, only an officer of *tenant_id* counts: another tenant's officer cannot
+    serve this taxpayer, and counting them told the taxpayer the desk was open.
     """
     ts = float(now_ts if now_ts is not None else time.time())
     tz_name = cxp_timezone_name()
@@ -262,8 +265,10 @@ def evaluate_cxp_schedule(
     if check_presence:
         try:
             from .receptionist.presence import count_active_officers  # noqa: PLC0415
+            from .tenancy import tenant_enabled  # noqa: PLC0415
 
-            live_online = count_active_officers() > 0
+            scope = (tenant_id or "default") if tenant_enabled() else None
+            live_online = count_active_officers(tenant_id=scope) > 0
         except Exception:
             live_online = False
 

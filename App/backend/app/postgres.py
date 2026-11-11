@@ -1529,6 +1529,7 @@ def update_ticket(
     officer_reply_localized: str | None = None,
     locale: str | None = None,
     officer_touch: bool = True,
+    only_if_note_blank: bool = False,
 ) -> bool:
     pool = _get_pool()
     if pool is None:
@@ -1583,9 +1584,11 @@ def update_ticket(
         return False
     sets.append("updated_at = %s")
     params.extend([now, ticket_id])
+    # As on SQLite: conditional in the UPDATE itself, not on the read above.
+    unless_noted = " AND TRIM(COALESCE(staff_note, '')) = ''" if only_if_note_blank else ""
     with pool.connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(f"UPDATE tickets SET {', '.join(sets)} WHERE id = %s", params)  # nosec B608 # noqa: S608
+            cur.execute(f"UPDATE tickets SET {', '.join(sets)} WHERE id = %s{unless_noted}", params)  # nosec B608 # noqa: S608
             touched = cur.rowcount > 0
         conn.commit()
     return touched

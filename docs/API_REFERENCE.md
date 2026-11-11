@@ -2073,9 +2073,18 @@ officer reached can be wrapped up by any officer of the tenant. Each officer's
 outcome and note are kept under `wrapups` on the call record
 (`[{officer_id, officer_name, outcome, note, at}]`); `outcome` and
 `wrapup_note` are the last handling officer's. A note is at most 4,000
-characters. **503** means the wrap-up or its ticket action could not be saved
-and nothing was lost: save it again (a ticket it opened is linked first and is
-not opened twice).
+characters. Two officers saving together both keep their entry (the save
+merges, it does not replace). Saving an outcome other than `callback` drops a
+callback an earlier outcome of this call asked for; a callback owed for another
+reason stays owed. **503** means the wrap-up or its ticket action could not be
+saved: save it again. A ticket it opened is linked first and is not opened
+twice, and the message says so when the ticket was already updated.
+
+Where the API process has no room for the call (another worker holds it, or
+the process that did has gone), the stored status decides: a call still
+recorded as `ai`, `transferring` or `bridged` is treated as live, so the 403
+and 409 above apply. A row its process left behind is ended first
+(`POST .../end`), like any stale call.
 
 Receptionist assurance update (2026-10-30, ADR-0020): `ticket_action` accepts
 `create`, `resolve`, or `keep_open` (omit it for no ticket action). An unknown

@@ -761,7 +761,12 @@ def test_phase8_call_receptionist_multiturn_controls_normal_pace_and_text_turn()
         CallControlFrame,
         CallTextTurnFrame,
     )
+    from app import database as db
     from app.receptionist.state import CallRoom, CallState
+
+    # The call tables: this test writes turns, and passed only when an earlier
+    # test in the same process had already created them.
+    db.init_db()
 
     async def _run() -> None:
         serializer = BrowserCallSerializer()

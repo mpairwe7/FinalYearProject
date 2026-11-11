@@ -217,14 +217,14 @@ def generate_call_summary(call_id: str) -> dict[str, Any]:
     # first response") and replace whatever an officer had written (G587).
     ticket_id = call.get("ticket_id")
     if ticket_id:
+        note_content = (
+            f"Call Summary [{parsed_summary.get('subject', '')}]: "
+            f"{parsed_summary.get('summary', '')}"
+        )
         try:
-            ticket = db.get_ticket(ticket_id) or {}
-            if not str(ticket.get("staff_note") or "").strip():
-                note_content = (
-                    f"Call Summary [{parsed_summary.get('subject', '')}]: "
-                    f"{parsed_summary.get('summary', '')}"
-                )
-                db.update_ticket(ticket_id, staff_note=note_content, officer_touch=False)
+            # "Only while it has none" is decided by the UPDATE, not by a read
+            # before it: an officer's note saved in between would be replaced.
+            db.update_ticket(ticket_id, staff_note=note_content, officer_touch=False, only_if_note_blank=True)
         except Exception:
             logger.debug("Failed updating ticket with call summary", exc_info=True)
 

@@ -307,11 +307,8 @@ def save_draft_wrapup_if_empty(call_id: str, note: str) -> bool:
     return affected > 0
 
 
-def update_call(call_id: str, **kwargs: Any) -> bool:
-    """Update fields on a call record."""
-    if not kwargs:
-        return False
-
+def _assignments(fields: dict[str, Any]) -> tuple[list[str], list[Any]]:
+    """``column = ?`` clauses and their parameters for the *fields* a call row may be given."""
     allowed_cols = {
         "status", "ended_at", "end_reason", "transferred", "transfer_reason",
         "ticket_id", "officer_id", "summary_json", "metrics_json",
@@ -320,7 +317,7 @@ def update_call(call_id: str, **kwargs: Any) -> bool:
     }
     updates: list[str] = []
     params: list[Any] = []
-    for k, v in kwargs.items():
+    for k, v in fields.items():
         if k in allowed_cols:
             updates.append(f"{k} = ?")
             if k.endswith("_json") and isinstance(v, (dict, list)):
@@ -329,14 +326,60 @@ def update_call(call_id: str, **kwargs: Any) -> bool:
                 params.append(1 if v else 0)
             else:
                 params.append(v)
+    return updates, params
 
+
+def update_call(call_id: str, **kwargs: Any) -> bool:
+    """Update fields on a call record."""
+    if not kwargs:
+        return False
+    updates, params = _assignments(kwargs)
     if not updates:
         return False
 
     params.append(call_id)
-    query = f"UPDATE voice_calls SET {', '.join(updates)} WHERE call_id = ?"
+    query = f"UPDATE voice_calls SET {', '.join(updates)} WHERE call_id = ?"  # nosec B608 # noqa: S608
     db.execute(query, tuple(params))
     return True
+
+
+#: Times a wrap-up is merged again after another officer's save landed first.
+_WRAPUP_MERGE_ATTEMPTS = 6
+
+
+def merge_wrapup(
+    call_id: str,
+    entry: dict[str, Any],
+    fields_for: Callable[[dict[str, Any]], dict[str, Any]],
+) -> dict[str, Any]:
+    """Add *entry* to a call's wrap-ups, replacing the same officer's earlier one.
+
+    *fields_for* is given the row as just read and returns the other columns
+    to set with it (the call's own outcome depends on what is already there).
+    The row is written only if its wrap-ups are still the ones that were
+    read, and read again otherwise: two officers saving together used to
+    each write a list holding only their own, and the later write removed the
+    other's. Works across processes, on either backend. Returns the row the
+    successful attempt read.
+    """
+    for _ in range(_WRAPUP_MERGE_ATTEMPTS):
+        row = get_call(call_id)
+        if row is None:
+            raise LookupError(f"call {call_id} does not exist")
+        as_read = row.get("wrapups_json") or ""
+        kept = [
+            w for w in row.get("wrapups") or []
+            if isinstance(w, dict) and w.get("officer_id") != entry.get("officer_id")
+        ]
+        updates, params = _assignments({**fields_for(row), "wrapups_json": [*kept, entry]})
+        affected = db.execute(
+            f"UPDATE voice_calls SET {', '.join(updates)} "  # nosec B608 # noqa: S608
+            "WHERE call_id = ? AND COALESCE(wrapups_json, '') = ?",
+            (*params, call_id, as_read),
+        )
+        if affected:
+            return row
+    raise RuntimeError(f"the wrap-up of call {call_id} kept changing under this save")
 
 
 def list_calls(

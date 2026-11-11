@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 from functools import lru_cache
 from dataclasses import dataclass, field
@@ -30,6 +31,7 @@ from .config import (
     get_filler_after_ms,
     get_hold_update_s,
     get_idle_reprompts,
+    get_languages,
     get_max_clarify_attempts,
     get_max_spoken_sentences,
     get_memory_min_asr_confidence,
@@ -455,6 +457,72 @@ def _turn() -> _TurnRecord | None:
     return record if record is not None and not record.closed else None
 
 
+class _GenerationSlot:
+    """One of a call's model-run slots (G591), given back once, when its work has really stopped.
+
+    A turn that times out or is replaced stops *waiting* for its model run;
+    the thread it started cannot be stopped and runs on. Giving the slot back
+    when the waiting stopped let a burst of interrupted turns run more model
+    and translation threads than the cap. Releasing only from the thread's
+    own ``finally`` had the opposite fault: a step cancelled while still
+    queued for a thread never ran, so its slot was never given back.
+
+    So the blocking steps of a run go through :meth:`run`, which counts the
+    ones that have actually started, and :meth:`finish` gives the slot back
+    at once if none is running, or when the one still running ends.
+    """
+
+    def __init__(self, semaphore: asyncio.Semaphore, loop: asyncio.AbstractEventLoop) -> None:
+        self._semaphore = semaphore
+        self._loop = loop
+        self._lock = threading.Lock()
+        self._running = 0
+        self._finished = False
+        self._given_back = False
+
+    async def run(self, fn: Any, /, *args: Any, **kwargs: Any) -> Any:
+        """Run blocking *fn* in a thread; the slot is held until it returns, whoever is still waiting."""
+
+        def work() -> Any:
+            with self._lock:
+                self._running += 1
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                with self._lock:
+                    self._running -= 1
+                try:
+                    self._loop.call_soon_threadsafe(self._settle)
+                except RuntimeError:
+                    pass  # the loop has closed: the call, and its semaphore, are gone
+
+        return await asyncio.to_thread(work)
+
+    def finish(self) -> None:
+        """The turn no longer needs the slot: give it back now, or when a step still running ends."""
+        self._finished = True
+        self._settle()
+
+    def _settle(self) -> None:
+        with self._lock:
+            if not self._finished or self._running or self._given_back:
+                return
+            self._given_back = True
+        self._semaphore.release()
+
+
+#: The slot the current model run holds, so its blocking steps are counted against it.
+_SLOT: contextvars.ContextVar[_GenerationSlot | None] = contextvars.ContextVar("call_generation_slot", default=None)
+
+
+async def _blocking(fn: Any, /, *args: Any, **kwargs: Any) -> Any:
+    """Run blocking *fn* off the event loop, under the current model run's slot when there is one."""
+    slot = _SLOT.get()
+    if slot is not None:
+        return await slot.run(fn, *args, **kwargs)
+    return await asyncio.to_thread(fn, *args, **kwargs)
+
+
 class _Superseded(Exception):
     """A newer turn arrived while this one waited for a model run."""
 
@@ -716,8 +784,9 @@ class UraReceptionistBrain(LLMService):
             from .language import detect_explicit_request
             from .router import announce_language
 
-            explicit_lang = detect_explicit_request(frame.text, KNOWN_LANGUAGES)
-            if explicit_lang in KNOWN_LANGUAGES and explicit_lang != self.language:
+            languages = get_languages()
+            explicit_lang = detect_explicit_request(frame.text, languages)
+            if explicit_lang in languages and explicit_lang != self.language:
                 self._move_language(explicit_lang)
                 self.room.state.language_switches += 1
                 lang_msg = announce_language(self.room, explicit_lang, "explicit")
@@ -726,7 +795,7 @@ class UraReceptionistBrain(LLMService):
                 )
             elif self.room.state.language_source in ("default", "auto"):
                 det_lang = detect_language(frame.text, default_lang=self.language)
-                if det_lang in KNOWN_LANGUAGES and det_lang != self.language:
+                if det_lang in languages and det_lang != self.language:
                     self._move_language(det_lang)
                     self.room.state.language_switches += 1
                     lang_msg = announce_language(self.room, det_lang, "auto")
@@ -791,7 +860,12 @@ class UraReceptionistBrain(LLMService):
             await self.handle_external_question("no", words=None)
 
     def _move_language(self, language: str) -> None:
-        """The brain itself moves the call to *language*; the language policy is told."""
+        """The brain itself moves the call to *language*; the language policy is told.
+
+        Callers offer only this deployment's call languages
+        (``RECEPTIONIST_LANGUAGES``): the policy refuses any other, and the
+        call and its policy would then be in two languages.
+        """
         self.room.state.locale = language
         if callable(self.on_language_change):
             try:
@@ -803,7 +877,7 @@ class UraReceptionistBrain(LLMService):
         """The caller's on-screen language, when this brain is the one to honour it."""
         from .router import announce_language
 
-        if language not in KNOWN_LANGUAGES:
+        if language not in get_languages():
             return
         if language != self.room.state.locale:
             self.room.state.language_switches += 1
@@ -875,7 +949,11 @@ class UraReceptionistBrain(LLMService):
         result = {k: v for k, v in (record.result or {}).items() if k != "_pending_audit"}
         pending = dict((record.result or {}).get("_pending_audit") or {})
         result["reply"] = " ".join(record.lines)
-        result["locale"] = result["reply_locale"] = self.language
+        result["locale"] = self.language
+        # The language the reply is in, which is English when a translation
+        # failed: generate reports it, and so does the Luganda path. A turn
+        # answered with the receptionist's own lines is in the call's language.
+        result["reply_locale"] = str(result.get("reply_locale") or self.language)
         result.setdefault("retrieval_mode", record.mode)
         if record.escalated:
             result["escalation_required"] = True
@@ -956,8 +1034,9 @@ class UraReceptionistBrain(LLMService):
             from .language import detect_explicit_request
             from .router import announce_language
 
-            explicit_lang = detect_explicit_request(user_text, KNOWN_LANGUAGES)
-            if explicit_lang in KNOWN_LANGUAGES and explicit_lang != self.language:
+            languages = get_languages()
+            explicit_lang = detect_explicit_request(user_text, languages)
+            if explicit_lang in languages and explicit_lang != self.language:
                 self._move_language(explicit_lang)
                 self.room.state.language_switches += 1
                 lang_msg = announce_language(self.room, explicit_lang, "explicit")
@@ -966,7 +1045,7 @@ class UraReceptionistBrain(LLMService):
                 )
             elif getattr(self.room.state, "language_source", "default") in ("default", "auto"):
                 det_lang = detect_language(user_text, default_lang=self.language)
-                if det_lang in KNOWN_LANGUAGES and det_lang != self.language:
+                if det_lang in languages and det_lang != self.language:
                     self._move_language(det_lang)
                     self.room.state.language_switches += 1
                     lang_msg = announce_language(self.room, det_lang, "auto")
@@ -1520,7 +1599,7 @@ class UraReceptionistBrain(LLMService):
 
         repaired = repair_asr_entities(question)
         thread_id = self.room.state.conversation_id or self.room.call_id
-        calc = await asyncio.to_thread(
+        calc = await _blocking(
             self.chat_model._maybe_handle_fast_paths,
             message=repaired,
             rewritten=repaired,
@@ -1535,6 +1614,7 @@ class UraReceptionistBrain(LLMService):
             # (it changed a figure), the English answer stands.
             answered["reply"] = await self._into_luganda(str(calc["reply"]))
             answered["locale"] = "lg"
+            answered["reply_locale"] = "lg" if answered["reply"] != str(calc["reply"]) else "en"
             answered["english_query"] = repaired
             # A calculator reply has no retrieval passages. Leaving confidence
             # empty made the call treat that as "no knowledge" and transfer.
@@ -1543,10 +1623,10 @@ class UraReceptionistBrain(LLMService):
             return answered
 
         # 1. Clean query extraction
-        english_query = await asyncio.to_thread(self._extract_english_tax_query, question)
+        english_query = await _blocking(self._extract_english_tax_query, question)
 
         # 2. Query official URA tax knowledge in English
-        rag_result = await asyncio.to_thread(
+        rag_result = await _blocking(
             self.chat_model.generate,
             message=english_query,
             conversation_id=self.room.state.conversation_id,
@@ -1599,7 +1679,7 @@ class UraReceptionistBrain(LLMService):
         # 3. Direct Luganda Generation with Figure & Unit Survival Gate
         from .. import mt
 
-        luganda_reply = await asyncio.to_thread(self._synthesize_luganda_reply, context_text, question)
+        luganda_reply = await _blocking(self._synthesize_luganda_reply, context_text, question)
         if luganda_reply and not (
             mt.figures_survived(english_reply, luganda_reply, locale="lg")
             and mt.units_survived(english_reply, luganda_reply)
@@ -1627,6 +1707,9 @@ class UraReceptionistBrain(LLMService):
             "ticket_id": rag_result.get("ticket_id"),
             "handoff": rag_result.get("handoff"),
             "locale": "lg",
+            # English when neither the synthesis nor the guarded translation
+            # produced Luganda and the English answer was served as it stood.
+            "reply_locale": "lg" if str(luganda_reply) != english_reply else "en",
             "english_query": english_query,
             # The turn in English, for the call's model-facing history (G119).
             "_english_message": english_query,
@@ -1643,7 +1726,7 @@ class UraReceptionistBrain(LLMService):
         if not callable(loc_fn):
             return english
         try:
-            localized = await asyncio.to_thread(loc_fn, english, "lg")
+            localized = await _blocking(loc_fn, english, "lg")
         except Exception:
             logger.debug("Luganda localisation failed; serving English", exc_info=True)
             return english
@@ -1850,37 +1933,38 @@ class UraReceptionistBrain(LLMService):
             logger.info("Skipped a superseded generation for call %s", self.room.call_id)
             return
 
-        # Start background task for LLM answer
-        if self.language == "lg":
-            gen_task = asyncio.create_task(self._generate_luganda_answer(question, memory_write=memory_write))
-            gen_task.add_done_callback(lambda _task: self._generation_slots.release())
+        # Start the model run in the background. Its slot is given back when
+        # the work has stopped, not when this turn stops waiting for it
+        # (_GenerationSlot). Everything the run needs is read here, on the
+        # loop: a thread that starts late must answer this question in the
+        # language it was asked in, not in one a newer turn moved the call to.
+        slot = _GenerationSlot(self._generation_slots, asyncio.get_running_loop())
+        run_context = contextvars.copy_context()
+        run_context.run(_SLOT.set, slot)
+        state = self.room.state
+        language = state.locale
+        if language == "lg":
+            run = self._generate_luganda_answer(question, memory_write=memory_write)
         else:
-            loop = asyncio.get_running_loop()
-
-            def run_generate() -> dict[str, Any]:
-                # The slot is given back when the model run itself ends, not when
-                # the turn stops waiting for it: an abandoned run still holds a thread.
-                try:
-                    return self.chat_model.generate(
-                        message=normalize_call_query(question, self.room.state.locale),
-                        conversation_id=self.room.state.conversation_id,
-                        session_id=self.room.call_id,
-                        top_k=6,
-                        locale=self.room.state.locale,
-                        # The call's LanguagePolicy decided this language.
-                        locale_explicit=True,
-                        user_id=self.room.state.user_id,
-                        tenant_id=self.room.state.tenant_id,
-                        channel="call",
-                        memory_write=memory_write,
-                        # The row is written when the turn is over, from what
-                        # the caller was told (_TurnRecord).
-                        defer_audit=True,
-                    )
-                finally:
-                    loop.call_soon_threadsafe(self._generation_slots.release)
-
-            gen_task = asyncio.create_task(asyncio.to_thread(run_generate))
+            run = slot.run(
+                self.chat_model.generate,
+                message=normalize_call_query(question, language),
+                conversation_id=state.conversation_id,
+                session_id=self.room.call_id,
+                top_k=6,
+                locale=language,
+                # The call's LanguagePolicy decided this language.
+                locale_explicit=True,
+                user_id=state.user_id,
+                tenant_id=state.tenant_id,
+                channel="call",
+                memory_write=memory_write,
+                # The row is written when the turn is over, from what
+                # the caller was told (_TurnRecord).
+                defer_audit=True,
+            )
+        gen_task = asyncio.create_task(run, context=run_context)
+        gen_task.add_done_callback(lambda _task: slot.finish())
 
         self._active_gen_task = gen_task
 
@@ -2460,7 +2544,7 @@ class UraReceptionistBrain(LLMService):
         if flags.is_enabled("cxp_business_hours", subject=self.room.state.user_id or None):
             from ..escalation_policy import evaluate_cxp_schedule
 
-            sched = evaluate_cxp_schedule(check_presence=True)
+            sched = evaluate_cxp_schedule(check_presence=True, tenant_id=self.room.state.tenant_id)
             if sched.after_hours:
                 after_event = close_transfer_on_timeout(
                     self.room,

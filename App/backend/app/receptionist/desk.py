@@ -42,6 +42,7 @@ from .store import (
     create_turn,
     get_call,
     list_turns,
+    merge_wrapup,
     release_claim,
     save_call_review,
     save_draft_wrapup_if_empty,
@@ -764,9 +765,20 @@ async def wrapup(
     satisfaction = _caller_satisfaction(caller_satisfaction, caller_satisfaction_status)
 
     room = registry.get(call_id)
-    live = room is not None and room.state.mode != "ended"
+    if room is not None:
+        mode, on_call = room.state.mode, room.state.officer_id
+        live = mode != "ended"
+    else:
+        # No room on this process: another worker holds the call, or the
+        # process that did has gone. The row is what is known here, and a row
+        # still marked live is treated as live. (Reading "no room" as "ended"
+        # let a wrap-up, and its ticket's resolution, through while the
+        # caller was on the line elsewhere.) A row its process left behind is
+        # ended from the desk first, like any stale call.
+        mode, on_call = str(call.get("status") or ""), str(call.get("officer_id") or "")
+        live = mode in _LIVE_STATUSES
     handlers = _handlers(call, room if live else None)
-    if live and room is not None and room.state.mode == "bridged" and room.state.officer_id == officer_id:
+    if live and mode == "bridged" and on_call == officer_id:
         raise DeskError(409, "You are still on this call: end it or pass it on before wrapping up")
     if (live or handlers) and officer_id not in handlers:
         # Live and never theirs (the AI or the queue still has it), or handled by others.
@@ -792,22 +804,32 @@ async def wrapup(
         "note": note,
         "at": now,
     }
-    saved = [w for w in call.get("wrapups") or [] if isinstance(w, dict) and w.get("officer_id") != officer_id]
-    update_kwargs: dict[str, Any] = {"wrapups_json": [*saved, entry]}
-    # The call's own outcome is its last officer's. An earlier officer's
-    # wrap-up stands in for it only until the last officer saves theirs.
     latest = handlers[-1] if handlers else officer_id
-    if officer_id == latest or not call.get("wrapup_at"):
-        update_kwargs.update(outcome=outcome, wrapup_note=note, wrapup_at=now)
-        if outcome == "callback":
-            update_kwargs.update(needs_callback=1, callback_reason="officer_outcome")
 
+    def call_fields(row: dict[str, Any]) -> dict[str, Any]:
+        """What the call's own columns become, given the row as it is when this save lands."""
+        # The call's own outcome is its last officer's. An earlier officer's
+        # wrap-up stands in for it only until the last officer saves theirs.
+        if officer_id != latest and row.get("wrapup_at"):
+            return {}
+        fields: dict[str, Any] = {"outcome": outcome, "wrapup_note": note, "wrapup_at": now}
+        if outcome == "callback":
+            fields.update(needs_callback=1, callback_reason="officer_outcome")
+        elif row.get("callback_reason") == "officer_outcome" and not row.get("callback_done_at"):
+            # The callback was this desk's own request, made by an outcome
+            # that has now been replaced. One owed for another reason (nobody
+            # answered in time; the service was interrupted) stays owed.
+            fields.update(needs_callback=0, callback_reason="")
+        return fields
+
+    ticket_changed = False
     if ticket_action:
         from .. import database as db
 
         try:
             if ticket_action == "resolve" and ticket_id:
                 db.update_ticket(ticket_id, status="resolved", staff_note=note)
+                ticket_changed = True
             elif ticket_action == "keep_open" and ticket_id:
                 db.update_ticket(ticket_id, staff_note=note)
             elif ticket_action == "create":
@@ -827,6 +849,7 @@ async def wrapup(
                     # a save that fails further down finds the ticket instead
                     # of opening a second one.
                     _link_new_ticket(call_id, str(t["id"]), log_id=stored_id)
+                    ticket_changed = True
                 else:
                     db.update_ticket(ticket_id, staff_note=note)
         except DeskError:
@@ -836,10 +859,14 @@ async def wrapup(
             raise DeskError(503, "Ticket action could not be completed") from exc
 
     try:
-        update_call(call_id, **update_kwargs)
+        merge_wrapup(call_id, entry, call_fields)
     except Exception as exc:
         logger.warning("Could not save the wrap-up of call %s", stored_id, exc_info=True)
-        raise DeskError(503, "The wrap-up could not be saved. Nothing was lost: save it again.") from exc
+        detail = "The wrap-up could not be saved. Save it again."
+        if ticket_changed:
+            # Say what did happen: the retry finds the ticket as it now is.
+            detail += " The ticket was updated and will not be changed twice."
+        raise DeskError(503, detail) from exc
 
     if rating is not None:
         try:
@@ -906,16 +933,24 @@ def _link_new_ticket(call_id: str, ticket_id: str, *, log_id: str) -> None:
         update_call(call_id, ticket_id=ticket_id)
     except Exception as exc:
         logger.warning("Ticket %s could not be linked to call %s; withdrawing it", ticket_id, log_id, exc_info=True)
+        withdrawn = False
         try:
             from .. import database as db
 
-            db.update_ticket(
+            # The system's own write: it is never an officer's first response.
+            withdrawn = db.update_ticket(
                 ticket_id,
                 status="wontfix",
                 staff_note="Opened at a call wrap-up that could not be saved; superseded by the officer's retry.",
+                officer_touch=False,
             )
         except Exception:
-            logger.exception("Ticket %s is orphaned: it could be neither linked to call %s nor withdrawn", ticket_id, log_id)
+            logger.debug("Withdrawing ticket %s raised", ticket_id, exc_info=True)
+        if not withdrawn:
+            # update_ticket reports a failed write by returning False.
+            logger.error(
+                "Ticket %s is an orphan: it could be neither linked to call %s nor withdrawn", ticket_id, log_id
+            )
         raise DeskError(503, "Ticket action could not be completed") from exc
 
 

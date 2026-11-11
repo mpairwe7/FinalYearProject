@@ -3927,12 +3927,17 @@ def update_ticket(
     officer_reply_localized: str | None = None,
     locale: str | None = None,
     officer_touch: bool = True,
+    only_if_note_blank: bool = False,
 ) -> bool:
     """Update mutable ticket fields.  Returns True if a row was touched.
 
     ``officer_touch`` False is for a write the system makes on its own (the
     end-of-call summary): it never counts as the first response, which is an
     officer's.
+
+    ``only_if_note_blank`` makes the write conditional, in the UPDATE itself,
+    on the ticket still having no staff note: a system note must not replace
+    one an officer saved between the system's read and its write.
 
     ``officer_reply`` is what the taxpayer will actually be shown when
     they next open the conversation — distinct from ``staff_note``,
@@ -3995,9 +4000,10 @@ def update_ticket(
     sets.append("updated_at = ?")
     params.append(now)
     params.append(ticket_id)
+    unless_noted = " AND TRIM(COALESCE(staff_note, '')) = ''" if only_if_note_blank else ""
     try:
         cursor = conn.execute(
-            f"UPDATE tickets SET {', '.join(sets)} WHERE id = ?",  # nosec B608 # noqa: S608
+            f"UPDATE tickets SET {', '.join(sets)} WHERE id = ?{unless_noted}",  # nosec B608 # noqa: S608
             params,
         )
         conn.commit()
