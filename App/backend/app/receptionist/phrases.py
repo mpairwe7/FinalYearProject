@@ -43,14 +43,11 @@ _PHRASES: dict[str, dict[str, str]] = {
             "How can I help you today?"
         ),
         "more_detail": "Would you like more detail?",
-        "timeout_transfer": (
-            "I'm sorry, checking the database is taking longer than expected. "
-            "Let me connect you to an officer."
-        ),
-        "error_transfer": (
-            "I encountered an error looking up that tax information. "
-            "Let me connect you to an officer."
-        ),
+        # An apology only. What happens next is said by the transfer itself,
+        # once it knows whether an officer can take the call: these lines used
+        # to promise one before the queue or the staffing had been checked.
+        "timeout_transfer": "I'm sorry, checking the database is taking longer than expected.",
+        "error_transfer": "I'm sorry, I encountered an error looking up that tax information.",
         "transfer": "I'm connecting you to a URA officer, please hold.",
         "queue_disabled": (
             "I can't transfer you right now. Please call URA's toll-free line during working hours; "
@@ -148,14 +145,8 @@ _PHRASES: dict[str, dict[str, str]] = {
             "Nnyinza kukuyamba ntya leero?"
         ),
         "more_detail": "Oyagala okumanya ebisingawo?",
-        "timeout_transfer": (
-            "Nsonyiwa, okunoonya kutwala ekiseera kiwanvu okusinga bwe kyandibadde. "
-            "Ka nkukwataganye n'omukozi wa URA."
-        ),
-        "error_transfer": (
-            "Nsonyiwa, waliwo ekizibu mu kunoonya ebikwata ku musolo ogwo. "
-            "Ka nkukwataganye n'omukozi wa URA."
-        ),
+        "timeout_transfer": "Nsonyiwa, okunoonya kutwala ekiseera kiwanvu okusinga bwe kyandibadde.",
+        "error_transfer": "Nsonyiwa, waliwo ekizibu mu kunoonya ebikwata ku musolo ogwo.",
         "transfer": "Nkukwataganya n'omukozi wa URA, nsaba olindeko.",
         "queue_disabled": (
             "Kati sisobola kukukwataganya n'omukozi. Nsaba okube ku layini ya URA ey'obwereere "
@@ -236,14 +227,8 @@ _PHRASES: dict[str, dict[str, str]] = {
             "nitakujibu kwa lugha hiyo. Unaweza kuomba afisa wakati wowote. Nikusaidie vipi leo?"
         ),
         "more_detail": "Ungependa maelezo zaidi?",
-        "timeout_transfer": (
-            "Samahani, kutafuta kunachukua muda mrefu kuliko kawaida. "
-            "Nitakuunganisha na afisa wa URA."
-        ),
-        "error_transfer": (
-            "Samahani, kumetokea hitilafu katika kutafuta taarifa hiyo ya kodi. "
-            "Nitakuunganisha na afisa wa URA."
-        ),
+        "timeout_transfer": "Samahani, kutafuta kunachukua muda mrefu kuliko kawaida.",
+        "error_transfer": "Samahani, kumetokea hitilafu katika kutafuta taarifa hiyo ya kodi.",
         "transfer": "Ninakuunganisha na afisa wa URA, tafadhali subiri.",
         "queue_disabled": (
             "Siwezi kukuunganisha sasa hivi. Tafadhali piga simu ya bure ya URA wakati wa saa za kazi; "
@@ -327,13 +312,9 @@ _PHRASES: dict[str, dict[str, str]] = {
         ),
         "more_detail": "Nooyenda kumanya ebindi ebikukiraho?",
         "timeout_transfer": (
-            "Nsaasira, okusherura nikitutwara obwire buraingwa okukira oku kyabaire kishemereire. "
-            "Ka nkukwatanise n'omukozi wa URA."
+            "Nsaasira, okusherura nikitutwara obwire buraingwa okukira oku kyabaire kishemereire."
         ),
-        "error_transfer": (
-            "Nsaasira, haabaho obuzibu omu kusherura amakuru g'omushoro ogwo. "
-            "Ka nkukwatanise n'omukozi wa URA."
-        ),
+        "error_transfer": "Nsaasira, haabaho obuzibu omu kusherura amakuru g'omushoro ogwo.",
         "transfer": "Ninkukwatanisa n'omukozi wa URA, ninkushaba orindeho.",
         "queue_disabled": (
             "Hati timbaasa kukukwatanisa n'omukozi. Ninkushaba oteere esimu ya URA ey'obusha "
@@ -415,14 +396,8 @@ _PHRASES: dict[str, dict[str, str]] = {
             "Atwero konyi nining tin?"
         ),
         "more_detail": "Imito ngec mukene?",
-        "timeout_transfer": (
-            "Kica, yenyo ngec tye ka tero kare malac loyo kit ma myero obed. "
-            "Wek akubi ki latic me URA."
-        ),
-        "error_transfer": (
-            "Kica, peko obedo tye i yenyo ngec me mucoro meno. "
-            "Wek akubi ki latic me URA."
-        ),
+        "timeout_transfer": "Kica, yenyo ngec tye ka tero kare malac loyo kit ma myero obed.",
+        "error_transfer": "Kica, peko obedo tye i yenyo ngec me mucoro meno.",
         "transfer": "Atye ka kubi ki latic me URA, tim ber ikur.",
         "queue_disabled": (
             "Kombedi pe atwero kubi ki latic. Tim ber igoyo cim me nono me URA "

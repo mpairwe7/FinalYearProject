@@ -4,11 +4,12 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { callLanguageName } from '@/lib/callLanguage';
 import { callTopicLabel } from '@/lib/callTopic';
+import { useMyUserId } from '@/hooks/useMyUserId';
 import { formatClock, useNow } from '@/hooks/useNow';
-import { ClaimConflictError } from '@/services/callsApi';
+import { claimRefusalMessage } from '@/services/callsApi';
 import { playAlertChime } from '@/services/callTones';
 import { takeCall } from '@/services/officerCallSession';
-import { alertCalls, useCallConsoleStore, waitingCalls } from '@/store/useCallConsoleStore';
+import { alertCalls, reservedForMe, useCallConsoleStore, waitingCalls } from '@/store/useCallConsoleStore';
 import { CallAlertToast } from './CallAlertToast';
 
 /** How long "Taken by …" stays on other officers' screens. */
@@ -61,14 +62,18 @@ export function CallAlertStack({
     })),
   );
   const now = useNow();
+  const myUserId = useMyUserId();
+  const nowSeconds = Math.floor(now / 1000);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [announcement, setAnnouncement] = useState('');
   const announced = useRef<Set<string>>(new Set());
 
   const alerts = useMemo(
-    () => (canTake ? alertCalls({ calls, dismissed, availability, activeCall }) : []),
-    [canTake, calls, dismissed, availability, activeCall],
+    // The clock is an input: a reservation that runs out starts ringing for
+    // everyone even if its `call.unreserved` event was missed.
+    () => (canTake ? alertCalls({ calls, dismissed, availability, activeCall, myUserId, nowSeconds }) : []),
+    [canTake, calls, dismissed, availability, activeCall, myUserId, nowSeconds],
   );
   const waitingCount = useMemo(() => waitingCalls(calls).length, [calls]);
 
@@ -104,11 +109,7 @@ export function CallAlertStack({
     try {
       await takeCall(callId);
     } catch (err) {
-      const message =
-        err instanceof ClaimConflictError
-          ? `Taken by ${err.officerName || 'another officer'}`
-          : (err as Error).message || 'Could not take the call';
-      setErrors((e) => ({ ...e, [callId]: message }));
+      setErrors((e) => ({ ...e, [callId]: claimRefusalMessage(err) }));
     } finally {
       setBusyId(null);
     }
@@ -157,6 +158,7 @@ export function CallAlertStack({
                 key={call.call_id}
                 call={call}
                 canTake={canTake}
+                passedToMe={reservedForMe(call, myUserId, nowSeconds)}
                 busy={busyId === call.call_id}
                 error={errors[call.call_id] || null}
                 onTake={() => take(call.call_id)}

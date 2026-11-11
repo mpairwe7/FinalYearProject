@@ -3,19 +3,35 @@
 import React from 'react';
 import { callLanguageName } from '@/lib/callLanguage';
 import { callTopicLabel, isRaisedPriority } from '@/lib/callTopic';
+import { useMyUserId } from '@/hooks/useMyUserId';
 import { formatClock, useNow } from '@/hooks/useNow';
-import type { LobbyCall, SessionState } from '@/store/useCallConsoleStore';
+import { type LobbyCall, type SessionState, reservedForAnother, reservedForMe } from '@/store/useCallConsoleStore';
 import { WaitRing } from './console/WaitRing';
 
 export type QueueRole = 'waiting' | 'mine' | 'officer' | 'ai';
 
-function stateChip(role: QueueRole, call: LobbyCall, mine: SessionState | null): { label: string; tone: string } {
+function stateChip(
+  role: QueueRole,
+  call: LobbyCall,
+  mine: SessionState | null,
+  myUserId: string,
+  nowSeconds: number,
+): { label: string; tone: string } {
   if (role === 'mine') {
     return mine === 'bridged'
       ? { label: 'On call', tone: 'good' }
       : { label: mine === 'ending' ? 'Ending' : 'Connecting', tone: 'warn' };
   }
-  if (role === 'waiting') return { label: 'Waiting', tone: 'bad' };
+  if (role === 'waiting') {
+    // A colleague passed it to a named officer: theirs first, then anyone's.
+    if (reservedForAnother(call, myUserId, nowSeconds)) {
+      return { label: `Reserved for ${call.reserved_name || 'another officer'}`, tone: 'warn' };
+    }
+    if (reservedForMe(call, myUserId, nowSeconds)) {
+      return { label: 'Passed to you', tone: 'bad' };
+    }
+    return { label: 'Waiting', tone: 'bad' };
+  }
   if (role === 'officer') {
     const who = call.officer_name || call.claimed_name || 'an officer';
     return call.status === 'bridged' ? { label: `With ${who}`, tone: 'good' } : { label: `${who} joining`, tone: 'warn' };
@@ -28,16 +44,20 @@ export function CallQueueItem({
   role,
   selected,
   sessionState = null,
+  myUserId,
   onSelect,
 }: {
   call: LobbyCall;
   role: QueueRole;
   selected: boolean;
   sessionState?: SessionState | null;
+  /** The signed-in officer; read from the session when not given. */
+  myUserId?: string;
   onSelect: (callId: string) => void;
 }) {
   const now = useNow();
-  const chip = stateChip(role, call, sessionState);
+  const signedInAs = useMyUserId();
+  const chip = stateChip(role, call, sessionState, myUserId ?? signedInAs, now / 1000);
   const topic = callTopicLabel(call.topic) || (role === 'ai' ? 'Talking to the AI' : 'General tax support');
   return (
     <li>

@@ -104,6 +104,66 @@ describe('officerCallSession', () => {
     expect(active()?.state).toBe('bridged');
   });
 
+  it('goes to wrap-up when the caller hangs up on a bridged call', async () => {
+    await takeCall('c1');
+    const audio = FakeSocket.find('/admin/calls/c1/audio')!;
+    audio.open();
+    audio.emit({ type: 'authenticated' });
+    expect(active()?.state).toBe('bridged');
+    // The server says the call ended, then closes the socket.
+    audio.emit({ type: 'status', status: 'ended', reason: 'caller_hangup' });
+    audio.shut(1000);
+    expect(active()).toMatchObject({ callId: 'c1', state: 'wrap_up', error: null });
+  });
+
+  it('goes to wrap-up when the caller hangs up and LiveKit media drops first', async () => {
+    await takeCall('c1');
+    const audio = FakeSocket.find('/admin/calls/c1/audio')!;
+    audio.open();
+    audio.emit({ type: 'livekit_ready', url: 'wss://rtc.example.test', room: 'r', identity: 'i', token: 't' });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(active()?.state).toBe('bridged');
+    audio.emit({ type: 'status', status: 'ended', reason: 'caller_hangup' });
+    livekit.callbacks!.onDisconnected();
+    expect(active()).toMatchObject({ callId: 'c1', state: 'wrap_up', error: null });
+  });
+
+  it('still reports a dropped connection when the call was not ended', async () => {
+    await takeCall('c1');
+    const audio = FakeSocket.find('/admin/calls/c1/audio')!;
+    audio.open();
+    audio.emit({ type: 'authenticated' });
+    audio.shut(1006);
+    expect(active()).toMatchObject({ state: 'idle', error: 'The call ended.' });
+  });
+
+  it('stays in wrap-up when End is refused because the caller already hung up', async () => {
+    await takeCall('c1');
+    const audio = FakeSocket.find('/admin/calls/c1/audio')!;
+    audio.open();
+    audio.emit({ type: 'authenticated' });
+    let refuse: (reason: Error) => void = () => {};
+    vi.spyOn(callsApi, 'endCall').mockReturnValue(new Promise((_resolve, reject) => { refuse = reject; }));
+    const ending = endCall();
+    expect(active()?.state).toBe('ending');
+    audio.shut(1000); // the caller's hang-up closed the bridge first
+    expect(active()?.state).toBe('wrap_up');
+    refuse(new Error('The call is not live'));
+    await ending;
+    expect(active()?.state).toBe('wrap_up');
+  });
+
+  it('goes back to the call when End is refused and the call is still up', async () => {
+    await takeCall('c1');
+    const audio = FakeSocket.find('/admin/calls/c1/audio')!;
+    audio.open();
+    audio.emit({ type: 'authenticated' });
+    vi.spyOn(callsApi, 'endCall').mockRejectedValue(new Error('Service unavailable'));
+    await endCall();
+    expect(active()).toMatchObject({ state: 'bridged', error: 'Service unavailable' });
+  });
+
   it('keeps a transfer in wrap-up when server revocation closes media during the request', async () => {
     const transferControl: {
       resolve?: (value: { transferred: boolean; call_id: string; target_team: string }) => void;

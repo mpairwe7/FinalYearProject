@@ -4,6 +4,44 @@ Operator and deployment runbook for the browser voice receptionist powered by
 Pipecat 1.15, self-hosted LiveKit WebRTC media, Whisper-SALT confidence scoring,
 ClarifyGate terminology disambiguation, and staff takeover.
 
+### Assurance update — 2026-11-11 (ADR-0039)
+
+Handoff and caller safety, phase 1 of
+[the 11 November review](../plans/receptionist-assurance-2026-11-11.md).
+What an operator will see differently:
+
+- **A dropped officer no longer strands the caller.** When the reconnect grace
+  lapses the call is back in the queue on the row as well as on screen, and the
+  next officer's **Take call** succeeds. Before, it answered "Another officer
+  took this call" until the wait timed out.
+- **Requeue, End and the urgent alert do not depend on the database.** If a
+  transcript notice, the row or presence cannot be written, the lobby event,
+  the caller's countdown and the hang-up still happen. Look for
+  `Could not record …` warnings: each one is a record to reconcile by hand
+  until the startup sweep exists (G306).
+- **Transfer to a named officer is a reservation.** The named officer must be
+  Available; otherwise the transfer is refused and the call stays with the
+  officer who has it. The call is theirs to take for
+  `RECEPTIONIST_CLAIM_TIMEOUT_S` (other consoles show *Reserved for Officer …*
+  and get 409), then `call.unreserved` opens it to everyone.
+- **The AI no longer promises an officer it cannot produce.** After a failed or
+  slow lookup it apologises; the transfer then says "I'm connecting you…",
+  "No officer is available…" or, with `ticket_queue` off, "I can't transfer you
+  right now…". With the queue off no officer is offered at all; a crisis still
+  gets the helplines.
+- **A goodbye is a goodbye.** A hang-up phrase ends the call only at the end of
+  a short turn that is not a question, so "How do I disconnect my EFRIS
+  device?" is answered. A caller who speaks during the closing line is not
+  hung up on.
+- **The officer gets the wrap-up when the caller hangs up first.** The server
+  tells the officer's console the call ended before closing its socket.
+- **The at-risk watch is quieter.** `call.risk` is published when the level or
+  the signals change, not on every turn.
+
+Still required before production: everything under "Phases 2–4" in the review,
+in particular the worker-count gate (G593) before the receptionist is switched
+back on where the image runs more than one uvicorn worker.
+
 ### Assurance update — 2026-10-30 (ADR-0020)
 
 Reconnect expiry revokes the previous officer's media before releasing the
@@ -387,7 +425,9 @@ upstream (`502`) until it is brought up again.
 ### In-call requests the assistant handles itself
 
 Short requests — eight words or fewer, so a question that merely contains one
-of these words is answered, not obeyed — in English, Luganda or Swahili:
+of these words is answered, not obeyed — in English, Luganda or Swahili. A
+goodbye is stricter still (G573): the hang-up words must end the turn (thanks
+or a vocative may follow) and the turn must not open like a question.
 
 | The caller says | The assistant |
 |---|---|
@@ -414,7 +454,7 @@ caller hears the AI first.
 | …and **no officer is signed in** (presence; a lookup error counts as signed in) | No hold for nobody: *"No officer is available to take your call right now, so an officer will call you back…"*, the reference on screen, the ticket kept for the officers. The screen never shows a wait | callback `no_officer_online` |
 | …**outside the officers' working hours** (`CXP_*`, default 07:00–23:00 EAT) with nobody signed in | *"Our officers are off duty at this hour, so an officer will call you back when they are next on duty…"*; the hours and the reference on screen (times are never spoken). An officer working late still takes the call | callback `outside_working_hours` |
 | A dispute, objection, appeal or legal question | Transferred at once | `tax_dispute` (or the chat's reason) |
-| Nothing in the knowledge base, or the lookup fails or takes over 25 s | Transferred at once | `no_knowledge_match`, `system_error`, `timeout` |
+| Nothing in the knowledge base, or the lookup fails or takes over 25 s | Transferred at once. After a failed or slow lookup the AI first apologises (*"I'm sorry, checking the database is taking longer than expected."*); it says an officer is coming only once the transfer has checked that one can (G572) | `no_knowledge_match`, `system_error`, `timeout` |
 | Clarification fails `RECEPTIONIST_MAX_CLARIFY_ATTEMPTS` times | Transferred | `clarification_failed` |
 | A weakly grounded answer — the chat's response judge rates it `low`, or the result's own confidence is 0.35–0.50 — a soft abstain, or the first answer after the risk monitor marks the call **at risk** (distress, repeated question…). How clearly the caller was *heard* is not part of this (the clarify gate and the risk monitor handle that; G181) | Answered, then *"Would you like to speak to an officer about this?"*: yes transfers, no keeps the AI on the call, anything else is a new question and the offer lapses. An at-risk call is offered once | `offer_accepted` |
 | The caller speaks of ending their life (English, *okwetta*, *kujiua*) | Before anything else, and never read as a goodbye: the crisis lines in full, with the emergency numbers in words, the counselling line on screen (0800 21 21 21), then *"Would you like me to connect you to a URA officer as well?"*. On yes, or at once if they also asked for a person, an **urgent** transfer; on no, the numbers stay on screen and the AI stays with them. The ticket carries no crisis text | `safety_concern` |
@@ -485,7 +525,9 @@ could not be completed on the call and offers an officer (G177).
    every line links (`↗7`) to the transcript turn it came from. The brief rebuilds every
    `RECEPTIONIST_BRIEF_EVERY_TURNS` caller turns and on transfer.
 3. **Take call** (or `A`) claims it — first officer wins; a second gets *"Taken by Officer
-   …"*. The claim holds the caller for `RECEPTIONIST_CLAIM_TIMEOUT_S`, the microphone is
+   …"*. A call a colleague passed to a named officer shows *Reserved for Officer …* to
+   everyone else and *Passed to you by Officer …* to that officer, until they take it or
+   the claim window runs out (G580). The claim holds the caller for `RECEPTIONIST_CLAIM_TIMEOUT_S`, the microphone is
    asked for, then the audio joins: the caller's player is cleared and they hear *"You're
    now connected to Officer {Name}."* in the call's language. Officers take the calls the
    AI hands over; a call the AI is still handling cannot be taken.
@@ -502,7 +544,9 @@ could not be completed on the call and offers an officer (G177).
 
 ### Step 6: Hang-up & Performance Evaluation
 1. Either side ends it: the officer's **End call** plays *"Thank you for calling URA.
-   Goodbye."* and then hangs the caller up; the caller can hang up at any time. Before
+   Goodbye."* and then hangs the caller up (it hangs up even if the line cannot be
+   spoken, and a second press joins the first, G569); the caller can hang up at any
+   time, and the officer's console then opens the wrap-up (G582). Before
    ending, the officer asks *"Were you satisfied with the help I gave you today?"* (the
    End-call confirm reminds them).
 2. Background task runs `summary.py`:

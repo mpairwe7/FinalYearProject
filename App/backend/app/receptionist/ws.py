@@ -105,6 +105,21 @@ async def _stop_pipeline(room: Any, task: Any) -> None:
         logger.debug("Pipeline runner for %s ended with an error", room.call_id, exc_info=True)
 
 
+async def _receive_or_end(websocket: WebSocket, room: Any) -> dict[str, Any] | None:
+    """The caller's next message, or ``None`` when the call ends first."""
+    receiving = asyncio.ensure_future(websocket.receive())
+    ending = asyncio.ensure_future(room.end_event.wait())
+    try:
+        await asyncio.wait({receiving, ending}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for pending in (receiving, ending):
+            if not pending.done():
+                pending.cancel()
+    if receiving.done() and not receiving.cancelled():
+        return dict(receiving.result())
+    return None
+
+
 async def _finish_call(room: Any) -> None:
     """Release live resources even when persistence or reporting is unavailable.
 
@@ -625,8 +640,12 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
             await brain.say_greeting()
 
             while room.state.mode != "ended":
-                message = await websocket.receive()
-                if message.get("type") == "websocket.disconnect":
+                # The call can end from the officer's side while this socket is
+                # idle. Waiting on the socket alone left the handler, its slot
+                # and the lobby's `call.ended` until the caller next sent
+                # something, so the wait also watches for the end of the call.
+                message = await _receive_or_end(websocket, room)
+                if message is None or message.get("type") == "websocket.disconnect":
                     break
                 if "bytes" in message and message["bytes"]:
                     pass  # Audio frames in fallback mode
@@ -952,6 +971,9 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
         # A reconnecting LiveKit Room normally restores the same participant
         # without opening a second control socket. The transport event handler
         # re-bridges it; a fresh claimant's first connection is bridged here.
+        # The room keeps this socket so it can say the call ended (CallRoom.end)
+        # before the media room is closed under the officer.
+        room.officer_control = websocket
         try:
             if room.state.mode != "bridged":
                 try:
@@ -988,6 +1010,8 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
         except Exception:
             logger.debug("Officer LiveKit control connection closed", exc_info=True)
         finally:
+            if room.officer_control is websocket:
+                room.officer_control = None
             room.state.livekit_officer_route_active = False
             if room.state.mode == "bridged":
                 await desk.handle_officer_disconnect(room, user_id, speech_model)

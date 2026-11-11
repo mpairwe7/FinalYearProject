@@ -32,6 +32,12 @@ export interface LobbyCall {
   target_team?: string;
   claimed_by: string;
   claimed_name: string;
+  /** Passed to this officer by a colleague: theirs to take first, until `reserved_until`. */
+  reserved_for: string;
+  reserved_name: string;
+  reserved_until: number | null;
+  /** The officer who passed the call on, when one did. */
+  from_officer: string;
   officer_name: string;
   needs_callback: boolean;
   risk_level?: 'none' | 'watch' | 'at_risk';
@@ -131,9 +137,25 @@ function blank(call_id: string): LobbyCall {
     attempt: 0,
     claimed_by: '',
     claimed_name: '',
+    reserved_for: '',
+    reserved_name: '',
+    reserved_until: null,
+    from_officer: '',
     officer_name: '',
     needs_callback: false,
   };
+}
+
+const NOT_RESERVED = { reserved_for: '', reserved_name: '', reserved_until: null } as const;
+
+/** Held for *myUserId*, who a colleague named to take it, and the hold has not run out. */
+export function reservedForMe(call: LobbyCall, myUserId: string, nowSeconds = Date.now() / 1000): boolean {
+  return Boolean(myUserId) && call.reserved_for === myUserId && (call.reserved_until ?? 0) > nowSeconds;
+}
+
+/** Held for a named officer other than *myUserId*, and the hold has not run out. */
+export function reservedForAnother(call: LobbyCall, myUserId: string, nowSeconds = Date.now() / 1000): boolean {
+  return Boolean(call.reserved_for) && call.reserved_for !== myUserId && (call.reserved_until ?? 0) > nowSeconds;
 }
 
 function fromRecord(r: CallRecord): LobbyCall | null {
@@ -150,6 +172,8 @@ function fromRecord(r: CallRecord): LobbyCall | null {
     ticket_ref: r.ticket_id || '',
     target_team: r.target_team || '',
     claimed_by: r.claimed_by || '',
+    reserved_for: r.reserved_for || '',
+    reserved_until: r.reserved_for ? (r.reserved_until ?? null) : null,
     officer_name: r.status === 'bridged' ? r.officer_id || '' : '',
     needs_callback: Boolean(r.needs_callback) && !r.callback_done_at,
     risk_level: r.risk_json ? (JSON.parse(r.risk_json).level || 'none') : 'none',
@@ -207,10 +231,18 @@ export const useCallConsoleStore = create<CallConsoleState>((set) => ({
               attempt: num(data.attempt) ?? current.attempt + 1,
               claimed_by: '',
               claimed_name: '',
+              // Each wait says whether it is reserved; an earlier one's hold never carries over.
+              reserved_for: str(data.reserved_for),
+              reserved_name: str(data.reserved_name),
+              reserved_until: str(data.reserved_for) ? num(data.reserved_until) : null,
+              from_officer: str(data.from_officer),
             }),
             dismissed,
           };
         }
+        case 'call.unreserved':
+          // The named officer did not take it in time: it is anyone's now.
+          return put({ ...NOT_RESERVED });
         case 'call.priority_raised': {
           // A waiting caller needs a person sooner (a crisis said in the queue):
           // new priority and reason, and the alert comes back — but the claim and
@@ -230,7 +262,7 @@ export const useCallConsoleStore = create<CallConsoleState>((set) => ({
         case 'call.claimed': {
           const name = str(data.officer_name);
           return {
-            ...put({ claimed_by: str(data.officer_id), claimed_name: name }),
+            ...put({ claimed_by: str(data.officer_id), claimed_name: name, ...NOT_RESERVED }),
             takenBy: { ...state.takenBy, [id]: { name, at: Date.now() } },
           };
         }
@@ -287,12 +319,15 @@ export const useCallConsoleStore = create<CallConsoleState>((set) => ({
             risk_level: (typeof data.level === 'string' && (data.level === 'at_risk' || data.level === 'watch') ? data.level : 'none'),
             risk_signals: Array.isArray(data.signals) ? (data.signals as string[]) : [],
           });
-        case 'call.wrapped_up':
         case 'call.ended': {
           const calls = { ...state.calls };
           delete calls[id];
           return { calls };
         }
+        // `call.wrapped_up` is not the end of a call. An officer who passed the
+        // call on wraps up while the caller still waits for the next one, and
+        // removing it here took a waiting caller off every officer's queue.
+        // An ended call was already removed by `call.ended`.
         default:
           return state;
       }
@@ -374,12 +409,18 @@ export function alertCalls(
   state: Pick<CallConsoleState, 'calls' | 'dismissed' | 'availability' | 'activeCall'> & {
     myLanguages?: string[];
     myTeams?: string[];
+    /** The signed-in officer, so a call reserved for a colleague does not ring here. */
+    myUserId?: string;
+    /** The time a reservation is judged against (now, when not given). */
+    nowSeconds?: number;
   },
 ): LobbyCall[] {
   const onACall = state.activeCall !== null && state.activeCall.state !== 'idle';
   if (state.availability !== 'available' || onACall) return [];
+  const me = state.myUserId ?? '';
   return waitingCalls(state.calls).filter((c) => {
     if (state.dismissed[c.call_id]) return false;
+    if (state.myUserId !== undefined && reservedForAnother(c, me, state.nowSeconds)) return false;
     if (c.target_team && state.myTeams && state.myTeams.length > 0) {
       if (!state.myTeams.includes(c.target_team)) return false;
     }

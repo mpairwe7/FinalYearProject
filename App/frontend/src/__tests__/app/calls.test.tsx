@@ -97,6 +97,20 @@ describe('The Call Desk (/calls)', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Taken by Officer Nakato');
   });
 
+  it('holds Take while a call is reserved for a named colleague, and says why', async () => {
+    mockCalls([callRecord({ reserved_for: 'nakato', reserved_until: Date.now() / 1000 + 20 })]);
+    renderPage();
+    expect(await screen.findByText(/Reserved for another officer/)).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Take call/ })).toBeDisabled();
+    // The named officer did not take it: it opens to everyone.
+    act(() =>
+      useCallConsoleStore.getState().applyLobbyEvent({
+        type: 'call.unreserved', data: { call_id: 'call_waiting_1', reason: 'not_taken' },
+      }),
+    );
+    expect(screen.getByRole('button', { name: /Take call/ })).toBeEnabled();
+  });
+
   it('lets an auditor read everything and take nothing', async () => {
     renderPage('ura_auditor');
     expect(await screen.findByText(/Object to a tax assessment/)).toBeInTheDocument();

@@ -61,6 +61,9 @@ export interface CallRecord {
   target_team?: string;
   claimed_by?: string;
   claimed_at?: number | null;
+  /** An officer passed the call to this colleague: theirs to take first, until `reserved_until`. */
+  reserved_for?: string;
+  reserved_until?: number | null;
   bridged_at?: number | null;
   hold_started_at?: number | null;
   hold_total_s?: number;
@@ -114,16 +117,26 @@ export interface ClaimResult {
   claim_expires_at: number;
 }
 
-/** Someone else already has the call. */
+/** Someone else already has the call, or it is reserved for a named officer. */
 export class ClaimConflictError extends Error {
   constructor(
     message: string,
     public readonly claimedBy: string,
     public readonly officerName: string,
+    public readonly reservedFor: string = '',
   ) {
     super(message);
     this.name = 'ClaimConflictError';
   }
+}
+
+/** What to tell an officer whose "Take call" was refused. */
+export function claimRefusalMessage(err: unknown): string {
+  if (err instanceof ClaimConflictError) {
+    const who = err.officerName || 'another officer';
+    return err.reservedFor ? `Reserved for ${who}` : `Taken by ${who}`;
+  }
+  return (err as Error)?.message || 'Could not take the call';
 }
 
 export interface CallAggregates {
@@ -243,6 +256,7 @@ async function deskAction<T>(callId: string, action: string, body?: unknown): Pr
       String(resBody.detail || 'Another officer has this call'),
       String(resBody.claimed_by || ''),
       String(resBody.officer_name || ''),
+      String(resBody.reserved_for || ''),
     );
   }
   if (!res.ok) {

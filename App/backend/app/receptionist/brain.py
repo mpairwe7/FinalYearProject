@@ -39,6 +39,7 @@ from .hub import hub
 from .lexicon import normalize_call_query
 from .phrases import fillers, phrase, pick_filler
 from .store import create_turn, get_call, update_call
+from . import risk as call_risk
 from . import transfer as call_transfer
 from .transfer import (
     case_reference,
@@ -346,9 +347,53 @@ def _is_control_request(pattern: re.Pattern[str], text: str) -> bool:
     return len(text.split()) <= _CONTROL_MAX_WORDS and pattern.search(text) is not None
 
 
+#: What may follow a hang-up phrase and leave it a goodbye: thanks, a
+#: vocative, "now". Anything else is the object of a question ("disconnect my
+#: EFRIS device", "end the call centre contract").
+_AFTER_GOODBYE_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:\W+(?:now|please|thanks|thank\s+you|sir|madam|bye|for\s+(?:now|today)"
+    r"|ssebo|nnyabo|bambi|webale(?:\s+nn?yo)?|kale"
+    r"|asante(?:\s+sana)?|tafadhali|sawa"
+    r"|mwebare(?:\s+munonga)?|kare"
+    r"|apwoyo(?:\s+matek)?|ber))*\W*$",
+    re.IGNORECASE,
+)
+
+#: A turn that opens like this is asking about something, whatever it ends on.
+_ASKS_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\W*(?:how|what|why|when|where|which|who|whose|do|does|did|is|are|was|were|should|shall"
+    r"|will|if|(?:can|could|may|would)\s+(?:i|we|my|a|an|the))\b",
+    re.IGNORECASE,
+)
+
+
+#: Asking the assistant to end the call is a request, however it is punctuated.
+_ASKS_YOU_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\W*(?:please\b|(?:can|could|will|would)\s+you\b)", re.IGNORECASE
+)
+
+
 def _is_goodbye(text: str) -> bool:
-    """The caller is ending the call: "goodbye", "hang up", "that's all, thank you"."""
-    return _is_control_request(_HANGUP_VOICE_PATTERNS, text) or _DONE_RE.search(text) is not None
+    """The caller is ending the call: "goodbye", "hang up", "that's all, thank you".
+
+    A hang-up phrase counts only where a goodbye puts it: at the end of a
+    short turn that is not a question. "How do I disconnect my EFRIS device?"
+    and "My supplier said goodbye to VAT registration" are questions; hanging
+    up on one costs the caller the call, while missing a real goodbye costs
+    them nothing (they are asked again, or press End).
+    """
+    if _DONE_RE.search(text) is not None:
+        return True
+    if len(text.split()) > _CONTROL_MAX_WORDS or _ASKS_RE.search(text):
+        return False
+    # "So I just disconnect?" is a question by its punctuation, whatever it
+    # opens with; "Can you hang up?" is the caller asking for exactly that.
+    if "?" in text and not _ASKS_YOU_RE.search(text):
+        return False
+    return any(
+        _AFTER_GOODBYE_RE.match(text, found.end()) is not None
+        for found in _HANGUP_VOICE_PATTERNS.finditer(text)
+    )
 
 
 _TRAILING_LIST_NUMBER_RE = re.compile(r"(?:^|\s)(\d{1,2})\.$")
@@ -364,6 +409,16 @@ _STEP_OR_BULLET_START_RE = re.compile(
     r"^\s*(?:\d{1,2}[.)]\s+|(?:Step|Odaala|Hatua|Idaara|Rwom)\s+\d+|[-*+•]\s+)",
     re.IGNORECASE,
 )
+#: Said in place of an answer the spoken-figure guard would not voice (G185):
+#: the written answer is on the caller's screen, figures intact.
+_SCREEN_POINTERS: Final[dict[str, str]] = {
+    "en": "I have placed the exact figures on your screen so you can read them clearly.",
+    "lg": "Nkutaddeko emiwendo emituufu ku lutimbe lwo osobole okugisoma obulungi.",
+    "sw": "Nimeweka tarakimu kamili kwenye skrini yako ili uweze kuzisoma vizuri.",
+    "nyn": "Entego z'emirimo nzigitsire aha sikirini yaawe reeba gye.",
+    "ach": "Aketo wel ma atir i kom kio ma megi wek ikwan maber.",
+}
+
 _WRITTEN_FOOTER_STRIP_RE = re.compile(
     r"(?:\n+\s*---\s*\n+\*(?:Note|Okulabula|Tahadhari|Okurabura|Cik):.*"
     r"|\n+\s*(?:\*\*)?(?:You might also want to know|Oyinz['’]okwagala okumanya|Unaweza pia kutaka kujua|"
@@ -473,6 +528,14 @@ class UraReceptionistBrain(LLMService):
         # is the caller talking over it (see CallState.offer_interrupted).
         self._bot_speaking = False
         self._active_gen_task: asyncio.Task[Any] | None = None
+        # A transfer whose ticket is still being written (off the loop): a
+        # second request meanwhile joins it instead of opening another.
+        self._transfer_in_flight = False
+        # The ticket being written for this call's transfer. It outlives the
+        # transfer that started it: a turn cut short (a language switch, a
+        # barge-in) cancels the wait, not the thread, and the next transfer
+        # takes this ticket rather than opening a second one.
+        self._ticket_creation: asyncio.Future[tuple[str, dict[str, Any] | None]] | None = None
         self._prewarm_task: asyncio.Task[Any] | None = None
 
     def _cancel_active_generation(self) -> None:
@@ -839,6 +902,9 @@ class UraReceptionistBrain(LLMService):
         review_answer = (
             self.room.state.review_state in call_review.ASKING
             and not detect_crisis(user_text)
+            # Asking for a person is a request, not an opinion of the call: taken
+            # for a review answer it ended the call with "Goodbye".
+            and not is_human_request(user_text)
             and (call_review.is_review_answer(user_text, language) or _is_goodbye(user_text))
         )
         caller_turn = create_turn(
@@ -1381,7 +1447,9 @@ class UraReceptionistBrain(LLMService):
             loc_fn = getattr(self.chat_model, "_localize_reply", None)
             if callable(loc_fn):
                 try:
-                    localized = loc_fn(english_reply, "lg")
+                    # Machine translation is a network call: on the loop it
+                    # stalled every live call on the worker for its length.
+                    localized = await asyncio.to_thread(loc_fn, english_reply, "lg")
                     if isinstance(localized, str) and localized.strip():
                         luganda_reply = localized.strip()
                 except Exception:
@@ -1499,10 +1567,18 @@ class UraReceptionistBrain(LLMService):
         """
         from .desk import hang_up_caller, say_to_caller
 
+        heard = self.room.state.caller_turns_count
+
         async def _goodbye() -> None:
             duration = await say_to_caller(self.room, goodbye, self.speech_model)
             await asyncio.sleep(duration + 0.3)
-            if self.room.state.mode != "ai" or (still_wanted is not None and not still_wanted()):
+            if (
+                self.room.state.mode != "ai"
+                or (still_wanted is not None and not still_wanted())
+                # The caller said something while the line played: a new
+                # question, or a cry for help, is theirs to have answered.
+                or self.room.state.caller_turns_count != heard
+            ):
                 logger.info("Not ending call %s after all (%s)", self.room.call_id, reason)
                 return
             await hang_up_caller(self.room, reason)
@@ -1625,20 +1701,28 @@ class UraReceptionistBrain(LLMService):
             logger.warning("Generation timed out for call %s", self.room.call_id)
             record_chat_turn({}, elapsed_ms=(time.perf_counter() - t0) * 1000, channel="call", error=True)
             if self.room.state.mode == "ai":
-                await self._say_and_record(phrase("timeout_transfer", self.language), kind="answer")
+                await self._say_and_record(phrase("timeout_transfer", self.language), kind="notice")
                 await self._transfer("timeout")
             return
         except Exception:
             logger.exception("Generation failed for call %s", self.room.call_id)
             record_chat_turn({}, elapsed_ms=(time.perf_counter() - t0) * 1000, channel="call", error=True)
             if self.room.state.mode == "ai":
-                await self._say_and_record(phrase("error_transfer", self.language), kind="answer")
+                await self._say_and_record(phrase("error_transfer", self.language), kind="notice")
                 await self._transfer("system_error")
             return
 
         # Check if caller barged in while generate was running
         if curr_gen_id != self.room.state.generation_id:
             logger.info("Dropping late generation for call %s after barge-in", self.room.call_id)
+            return
+        # The caller asked for an officer (or one joined, or the call ended)
+        # while this was being written: an answer, and its "would you like an
+        # officer?", must not be spoken over their wait.
+        if self.room.state.mode != "ai":
+            logger.info(
+                "Dropping late generation for call %s: it is %s", self.room.call_id, self.room.state.mode
+            )
             return
         # Once per answered call turn, crisis hand-overs included, in the same
         # families as every other transport.
@@ -1721,6 +1805,9 @@ class UraReceptionistBrain(LLMService):
             or judge_band == "low"
             or (confidence is not None and 0.35 <= confidence < 0.50)
         )
+        # The at-risk watch evaluates off the loop: let it catch up with this
+        # turn before the offer is decided on it.
+        await call_risk.settled(self.room.call_id)
         at_risk = not uncertain and self._call_at_risk()
         reply_for_speech = bot_reply
         if flags.is_enabled("emotion_aware_prosody", subject=self.room.state.user_id or None):
@@ -1808,22 +1895,17 @@ class UraReceptionistBrain(LLMService):
         except Exception:
             logger.debug("Call CX telemetry / resolution checkpoint skipped", exc_info=True)
 
+        if not speak_allowed:
+            await self._say_withheld(
+                raw_spoken, faithfulness=faithfulness, latencies={"brain_ms": gen_latency_ms}
+            )
+            return
         await self._say_and_record(
             spoken_text,
             kind="answer",
             faithfulness=faithfulness,
             latencies={"brain_ms": gen_latency_ms},
-            speak=speak_allowed,
         )
-        if not speak_allowed and self.room.state.mode == "ai":
-            _screen_pointers = {
-                "en": "I have placed the exact figures on your screen so you can read them clearly.",
-                "lg": "Nkutaddeko emiwendo emituufu ku lutimbe lwo osobole okugisoma obulungi.",
-                "sw": "Nimeweka tarakimu kamili kwenye skrini yako ili uweze kuzisoma vizuri.",
-                "nyn": "Entego z'emirimo nzigitsire aha sikirini yaawe reeba gye.",
-                "ach": "Aketo wel ma atir i kom kio ma megi wek ikwan maber.",
-            }
-            await self._say(_screen_pointers.get(self.language, _screen_pointers["en"]))
 
     def _call_at_risk(self) -> bool:
         """True once per call, when the risk monitor has marked it ``at_risk``.
@@ -1876,6 +1958,8 @@ class UraReceptionistBrain(LLMService):
         else:
             spoken = cleaned_reply
         more_joined = _join_structured_sentences(rest) if rest else ""
+        # An offer the queue cannot honour ends in "I can't transfer you".
+        offer_officer = offer_officer and self._handoffs_open()
         self.room.state.last_more_detail = more_joined if (rest and not offer_officer) else ""
         if offer_officer:
             self._offer("officer", reason="offer_accepted", at_risk=at_risk)
@@ -1885,10 +1969,45 @@ class UraReceptionistBrain(LLMService):
             return f"{spoken} {phrase('more_detail', self.language)}"
         return spoken
 
+    @staticmethod
+    def _handoffs_open() -> bool:
+        """Whether a person can be offered at all (``ticket_queue``, the human-oversight switch)."""
+        return bool(flags.is_enabled("ticket_queue"))
+
     async def _say_more(self, rest: str) -> None:
         """The next part of an answer the caller said yes to hearing more of."""
-        spoken = self._spoken_answer(rest, offer_officer=False)
-        await self._say_and_record(clean_text_for_speech(spoken, locale=self.language), kind="answer")
+        written = self._spoken_answer(rest, offer_officer=False)
+        spoken = clean_text_for_speech(written, locale=self.language)
+        # The rest of an answer carries figures like its first part did, and
+        # is held to the same check before it is voiced.
+        if flags.is_enabled("spoken_figure_guard", subject=self.room.state.user_id or None):
+            try:
+                from .spoken_figure_guard import verify_spoken_figures
+
+                checked = verify_spoken_figures(
+                    written, spoken, locale=self.language, subject=self.room.state.user_id or ""
+                )
+            except Exception:
+                logger.debug("Spoken figure verification skipped", exc_info=True)
+            else:
+                if not checked.ok:
+                    await self._say_withheld(written)
+                    return
+        await self._say_and_record(spoken, kind="answer")
+
+    async def _say_withheld(self, written: str, **record: Any) -> None:
+        """An answer the figure guard would not voice: on screen as written, and the caller told so.
+
+        The caption and the transcript carry the written answer, figures
+        intact. The spoken form that failed the check is neither shown nor
+        kept for "repeat that", which replays this pointer instead.
+        """
+        await self._say_and_record(written, kind="answer", speak=False, **record)
+        if self.room.state.mode != "ai":
+            return
+        pointer = _SCREEN_POINTERS.get(self.language, _SCREEN_POINTERS["en"])
+        await self._say_and_record(pointer, kind="notice")
+        self.room.state.last_assistant_answer = pointer
 
     def _offer(self, kind: str, *, reason: str = "", more: str = "", at_risk: bool = False) -> None:
         """Record the yes/no question this turn ends on (see ``CallState.pending_offer``)."""
@@ -1914,13 +2033,14 @@ class UraReceptionistBrain(LLMService):
         """
         language = self.language
         spoken = phrase("crisis_support", language)
-        if not asked_for_person:
+        offer = not asked_for_person and self._handoffs_open()
+        if offer:
             spoken = f"{spoken} {phrase('crisis_offer', language)}"
         await self._say_and_record(spoken, kind="answer")
         await self._say_and_record(phrase("crisis_screen", language), kind="notice", speak=False)
         if asked_for_person:
             await self._transfer("safety_concern")
-        else:
+        elif offer:
             self._offer("officer", reason="safety_concern")
 
     async def _say_and_record(
@@ -1939,7 +2059,7 @@ class UraReceptionistBrain(LLMService):
         """
         self.room.state.turn_seq += 1
         turn_seq = self.room.state.turn_seq
-        if kind == "answer":
+        if kind == "answer" and speak:
             self.room.state.last_assistant_answer = text
 
         if not skip_log:
@@ -2024,12 +2144,25 @@ class UraReceptionistBrain(LLMService):
         handoff: dict[str, Any] | None = None,
     ) -> None:
         """Transfer caller to human officer, enforcing ticket_queue invariant."""
-        if self.room.state.mode != "ai":
+        if self.room.state.mode != "ai" or self._transfer_in_flight:
             # Already waiting, or an officer has the call, or it ended: a second
             # request (a double tap, a stale screen, a crafted message) must not
             # reopen the transfer under them (G178).
             logger.info("Ignoring a transfer (%s) on call %s: it is %s", reason, self.room.call_id, self.room.state.mode)
             return
+        self._transfer_in_flight = True
+        try:
+            await self._open_transfer(reason, ticket_id=ticket_id, handoff=handoff)
+        finally:
+            self._transfer_in_flight = False
+
+    async def _open_transfer(
+        self,
+        reason: str,
+        ticket_id: str | None = None,
+        handoff: dict[str, Any] | None = None,
+    ) -> None:
+        """The transfer itself; :meth:`_transfer` lets only one run at a time."""
         # Whatever the AI last asked is settled by the transfer: after a
         # timeout, a "yes" must not answer a question from before it.
         self._take_offer()
@@ -2047,13 +2180,52 @@ class UraReceptionistBrain(LLMService):
         # 2-3. Ticket, call state, voice_calls row, staff lobby event. A caller
         # at risk goes to the front of the queue, whatever they called about.
         staffed = call_transfer.is_staff_available()
+        priority = "urgent" if reason == "safety_concern" else ""
+        # The ticket is written off the loop: for a caller who is not speaking
+        # English it translates the question and the transcript, and on the
+        # loop that froze every live call on the worker while it ran.
+        def write_ticket() -> asyncio.Future[tuple[str, dict[str, Any] | None]]:
+            return asyncio.ensure_future(asyncio.to_thread(
+                call_transfer.create_transfer_ticket,
+                # The call as it stands now, read here on the loop: the thread
+                # reads nothing from the live room.
+                call_transfer.TicketSubject.of(self.room),
+                self.chat_model,
+                reason,
+                ticket_id=ticket_id,
+                handoff=handoff,
+                priority=priority,
+            ))
+
+        async def ticket_from(creation: asyncio.Future[tuple[str, dict[str, Any] | None]]) -> tuple[str, Any]:
+            self._ticket_creation = creation
+            try:
+                # Shielded: cancelling this turn must not abandon the write and
+                # leave the next transfer to start another.
+                return await asyncio.shield(creation)
+            finally:
+                if creation.done() and self._ticket_creation is creation:
+                    self._ticket_creation = None
+
+        earlier = self._ticket_creation
+        made_id, made_packet = await ticket_from(earlier if earlier is not None else write_ticket())
+        if earlier is not None and not made_id:
+            # The write an interrupted transfer left behind opened nothing: this
+            # transfer makes its own attempt rather than go without a ticket.
+            made_id, made_packet = await ticket_from(write_ticket())
+        ticket_id, handoff = made_id, made_packet
+        if self.room.state.mode != "ai":
+            # The caller hung up while it was being written. The ticket stays
+            # for the officers; there is no call left to put in the queue.
+            logger.info("Call %s left the AI before its transfer (%s) opened", self.room.call_id, reason)
+            return
         tid, status_event = open_transfer(
             self.room,
-            self.chat_model,
+            None,
             reason,
             ticket_id=ticket_id,
             handoff=handoff,
-            priority="urgent" if reason == "safety_concern" else "",
+            priority=priority,
         )
         # 3b. Phase 40 (G174): After CXP operating hours (after 11:00 PM EAT) when no
         # officer is online, do not place the caller on a dead hold queue — log the

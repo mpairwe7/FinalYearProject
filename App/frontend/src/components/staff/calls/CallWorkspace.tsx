@@ -5,13 +5,14 @@ import Link from 'next/link';
 import { useShallow } from 'zustand/react/shallow';
 import { ErrorState, SkeletonRows } from '@/components/ops/States';
 import { useCall, useCallBrief, useCallLive, useReviewCall } from '@/hooks/useCalls';
+import { useMyUserId } from '@/hooks/useMyUserId';
 import { formatClock, useNow } from '@/hooks/useNow';
 import { callLanguageName } from '@/lib/callLanguage';
 import { callTopicLabel, isRaisedPriority } from '@/lib/callTopic';
 import { isLiveOfficer } from '@/lib/roles';
-import { ClaimConflictError, callsApi } from '@/services/callsApi';
+import { callsApi, claimRefusalMessage } from '@/services/callsApi';
 import { takeCall } from '@/services/officerCallSession';
-import { useCallConsoleStore } from '@/store/useCallConsoleStore';
+import { reservedForAnother, reservedForMe, useCallConsoleStore } from '@/store/useCallConsoleStore';
 import { CallBriefCard } from './CallBriefCard';
 import { CallControls } from './CallControls';
 import { CallMetricsCard } from './CallMetricsCard';
@@ -33,6 +34,7 @@ export function CallWorkspace({ callId, role }: { callId: string; role: string }
   // is still handling, and auditors only watch. The API enforces both.
   const canTake = isLiveOfficer(role);
   const now = useNow();
+  const myUserId = useMyUserId();
   const { data: detail, isLoading, error, refetch } = useCall(callId);
   const live = useCallLive(callId);
   const { brief, loading: briefLoading, refresh, refreshing } = useCallBrief(callId, live.brief);
@@ -137,11 +139,7 @@ export function CallWorkspace({ callId, role }: { callId: string; role: string }
     try {
       await takeCall(callId);
     } catch (err) {
-      setTakeError(
-        err instanceof ClaimConflictError
-          ? `Taken by ${err.officerName || 'another officer'}`
-          : (err as Error).message || 'Could not take the call',
-      );
+      setTakeError(claimRefusalMessage(err));
     } finally {
       setBusy(false);
     }
@@ -153,6 +151,10 @@ export function CallWorkspace({ callId, role }: { callId: string; role: string }
   // A crisis said before an officer was on the line: whoever takes the call must know first.
   const safetyConcern = (lobby?.reason || call.transfer_reason) === 'safety_concern';
   const officerName = lobby?.officer_name || lobby?.claimed_name || call.officer_id || 'an officer';
+  // A colleague passed this call to a named officer: theirs to take first. The
+  // server refuses anyone else until the hold runs out; this says so up front.
+  const heldForAnother = lobby !== undefined && reservedForAnother(lobby, myUserId, now / 1000);
+  const passedToMe = lobby !== undefined && reservedForMe(lobby, myUserId, now / 1000);
 
   const header = (() => {
     switch (state) {
@@ -237,9 +239,25 @@ export function CallWorkspace({ callId, role }: { callId: string; role: string }
             onRefresh={refresh}
             onEvidence={showEvidence}
           />
+          {heldForAnother && (
+            <p className="cc-hint" role="status">
+              Reserved for {lobby?.reserved_name || 'another officer'}. It opens to everyone if they do not take it.
+            </p>
+          )}
+          {passedToMe && (
+            <p className="cc-hint" role="status">
+              Passed to you by {lobby?.from_officer || 'a colleague'}.
+            </p>
+          )}
           <div className="cw-actions">
             {canTake && (
-              <button type="button" className="cc-btn cc-btn--primary" data-action="take" onClick={take} disabled={busy || terminating}>
+              <button
+                type="button"
+                className="cc-btn cc-btn--primary"
+                data-action="take"
+                onClick={take}
+                disabled={busy || terminating || heldForAnother}
+              >
                 {busy ? 'Connecting…' : 'Take call'} <kbd>A</kbd>
               </button>
             )}

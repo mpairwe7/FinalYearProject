@@ -135,10 +135,19 @@ async def claim(call_id: str, officer_id: str, officer_name: str = "") -> dict[s
         if mode == "ai":
             raise DeskError(403, "The AI is handling this call: officers take the calls it hands over")
         now = time.time()
-        if not claim_call(call_id, officer_id, now, now - timeout):
+        reserved = room.state.reserved_for
+        if reserved and reserved != officer_id and (room.state.reserved_until or 0.0) > now:
+            raise DeskError(409, "This call is reserved for another officer", reserved_for=reserved,
+                            officer_name=room.state.reserved_name)
+        if not claim_call(call_id, officer_id, now, now - timeout) and not (
+            _repair_waiting_row(room) and claim_call(call_id, officer_id, now, now - timeout)
+        ):
             holder = str((get_call(call_id) or {}).get("claimed_by") or "")
             raise DeskError(409, "Another officer took this call", claimed_by=holder,
                             officer_name=_holder_name(room, holder))
+        # Taken, by the officer it was reserved for or after it lapsed: the
+        # claim's own update cleared the reservation on the row.
+        _clear_reservation(room)
         room.state.claimed_by = officer_id
         room.state.claimed_name = name
         room.state.claimed_at = now
@@ -182,6 +191,86 @@ async def _expire_claim(room: CallRoom, officer_id: str, timeout: float) -> None
             return
         logger.info("Claim on %s by %s lapsed before their audio joined", room.call_id, officer_id)
         await _release_locked(room, "claim_expired")
+
+
+def _repair_waiting_row(room: CallRoom) -> bool:
+    """Bring a waiting call's row back in line with its room; True when it was out of line.
+
+    A requeue goes ahead even when its row cannot be written (the queue is
+    what reaches an officer). The row then still says ``bridged``, or names a
+    claim the room has dropped, and every claim would be refused as "Another
+    officer took this call". The room is the authority while the call is
+    live, so a refused claim repairs the row from it and tries once more.
+    Called under the desk lock, with the room waiting.
+    """
+    state = room.state
+    if state.mode != "transferring":
+        return False
+    row = get_call(room.call_id) or {}
+    stale_status = row.get("status") not in ("ai", "transferring")
+    stale_claim = bool(row.get("claimed_by")) and not state.claimed_by
+    if not (stale_status or stale_claim):
+        return False
+    repair: dict[str, Any] = {"status": "transferring"}
+    if not state.claimed_by:
+        repair.update(claimed_by="", claimed_at=None, officer_id=None)
+    try:
+        update_call(room.call_id, **repair)
+    except Exception:
+        logger.warning("Could not repair the row of queued call %s", room.call_id, exc_info=True)
+        return False
+    logger.info("Repaired the row of queued call %s from its room", room.call_id)
+    return True
+
+
+def _cancel_reservation(room: CallRoom) -> None:
+    timer, room.reserve_timer = room.reserve_timer, None
+    if timer is not None and not timer.done() and timer is not asyncio.current_task():
+        timer.cancel()
+
+
+def _clear_reservation(room: CallRoom) -> None:
+    """The call is no longer held for a named officer (in the room; the row is the caller's to write)."""
+    room.state.reserved_for = ""
+    room.state.reserved_name = ""
+    room.state.reserved_until = None
+    _cancel_reservation(room)
+
+
+def _available_officer_name(officer_id: str) -> str:
+    """The display name of *officer_id* when they can take a call now; refused otherwise.
+
+    A reservation for an officer who is away, on a call or signed out would
+    hold the caller for the whole window for nobody.
+    """
+    record = presence.get_presence(officer_id)
+    if record is None or record.get("status") != "available":
+        raise DeskError(409, "That officer is not available to take the call")
+    return str(record.get("display_name") or "").strip() or officer_display_name(officer_id)
+
+
+async def _expire_reservation(room: CallRoom, officer_id: str, epoch: int, wait_s: float) -> None:
+    """The named officer did not take the call in time: it opens to every officer."""
+    try:
+        await asyncio.sleep(wait_s)
+    except asyncio.CancelledError:
+        return
+    async with room.desk_lock:
+        state = room.state
+        if state.reserved_for != officer_id or state.mode != "transferring" or state.queue_epoch != epoch:
+            return
+        # The officer's id came from the request that named them: a digest in
+        # the log, never the value itself (control characters, account ids).
+        logger.info(
+            "Reservation of %s for officer %s lapsed; open to all officers",
+            room.call_id, livekit.log_ref(officer_id),
+        )
+        _clear_reservation(room)
+        try:
+            update_call(room.call_id, reserved_for="", reserved_until=None)
+        except Exception:
+            logger.warning("Could not record the lapsed reservation on call %s", room.call_id, exc_info=True)
+        hub.publish_lobby("call.unreserved", {"call_id": room.call_id, "reason": "not_taken"})
 
 
 async def _release_locked(room: CallRoom, reason: str) -> None:
@@ -301,8 +390,24 @@ async def end(call_id: str, officer_id: str, speech_model: Any) -> dict[str, Any
 
     if room.state.officer_id != officer_id:
         raise DeskError(403, "Another officer is on this call")
-    presence.set_wrap_up(officer_id, call_id=call_id)
-    duration = await say_to_caller(room, phrase("officer_closing", room.state.locale), speech_model)
+    async with room.desk_lock:
+        # A second End (a double click, a retry) joins the first: one closing
+        # line, one hang-up, and the same answer.
+        if room.ending or room.state.mode != "bridged":
+            return {"ended": True, "call_id": call_id}
+        room.ending = True
+    # End is the officer's decision. Their presence and the closing line are
+    # courtesies around it: neither a store nor a speech failure may leave
+    # the caller on a line the officer has left.
+    try:
+        presence.set_wrap_up(officer_id, call_id=call_id)
+    except Exception:
+        logger.warning("Could not move officer to wrap-up on call %s", room.call_id, exc_info=True)
+    duration = 0.0
+    try:
+        duration = await say_to_caller(room, phrase("officer_closing", room.state.locale), speech_model)
+    except Exception:
+        logger.warning("The closing line could not be spoken on call %s", room.call_id, exc_info=True)
     # Let the line play out: the caller's screen stops its player on "ended".
     await asyncio.sleep(duration + 0.3)
     await hang_up_caller(room, "officer_ended")
@@ -368,13 +473,30 @@ async def transfer(
     target_officer_id: str = "",
     note: str = "",
 ) -> dict[str, Any]:
-    """Transfer the call to another team or available officer."""
+    """Pass the call on: to a team's queue, or to a named officer first.
+
+    With *target_officer_id* the call is reserved: only that officer may take
+    it for the claim window (``RECEPTIONIST_CLAIM_TIMEOUT_S``), then it opens
+    to everyone. The console offered this before the server honoured it, and
+    the call went to the general queue unannounced. The named officer must be
+    available now; that is checked before anything changes, so a refusal
+    leaves the call with the officer who has it.
+
+    Once the call is back in the queue, the lobby event and the waiting
+    caller's countdown go ahead even if the note or the row cannot be
+    written: those are the record, the queue is what reaches an officer.
+    """
     room = _live_room(call_id)
     async with room.desk_lock:
         if room.state.mode != "bridged":
             raise DeskError(409, "Call is not currently bridged with an officer")
         if room.state.officer_id != officer_id:
             raise DeskError(403, "Another officer is on this call")
+        reserved_name = ""
+        if target_officer_id:
+            if target_officer_id == officer_id:
+                raise DeskError(400, "You are already on this call")
+            reserved_name = _available_officer_name(target_officer_id)
         now = time.time()
         previous_identity = room.state.livekit_officer_identity
         if room.state.livekit_room and previous_identity:
@@ -401,7 +523,7 @@ async def transfer(
             _stop_hold_reassurance(room)
 
         from_officer = room.state.officer_name or officer_display_name(officer_id)
-        begin_wait(room)
+        epoch = begin_wait(room)
         room.state.transfer_reason = "officer_transfer"
         room.state.target_team = team
         room.state.transfer_requested_at = now
@@ -411,33 +533,50 @@ async def transfer(
         room.state.claimed_at = None
         room.state.officer_id = None
         room.state.officer_name = None
+        _clear_reservation(room)
+        reserve_s = get_claim_timeout_s()
+        if target_officer_id:
+            room.state.reserved_for = target_officer_id
+            room.state.reserved_name = reserved_name
+            room.state.reserved_until = now + reserve_s
 
         if note:
-            room.state.turn_seq += 1
-            turn = create_turn(
-                call_id=room.call_id,
-                seq=room.state.turn_seq,
-                speaker="officer",
-                kind="notice",
-                text=f"Transferred by {from_officer}: {note}",
+            try:
+                room.state.turn_seq += 1
+                turn = create_turn(
+                    call_id=room.call_id,
+                    seq=room.state.turn_seq,
+                    speaker="officer",
+                    kind="notice",
+                    text=f"Transferred by {from_officer}: {note}",
+                )
+                hub.publish_call(room.call_id, "turn", turn)
+            except Exception:
+                logger.warning("Could not record the transfer note on call %s", room.call_id, exc_info=True)
+
+        try:
+            update_call(
+                call_id,
+                status="transferring",
+                target_team=team,
+                transfer_requested_at=now,
+                transferred=1,
+                transfer_reason="officer_transfer",
+                claimed_by="",
+                claimed_at=None,
+                officer_id=None,
+                hold_started_at=None,
+                hold_total_s=room.state.hold_total_s,
+                reserved_for=room.state.reserved_for,
+                reserved_until=room.state.reserved_until,
             )
-            hub.publish_call(room.call_id, "turn", turn)
+        except Exception:
+            logger.warning("Could not record call %s as passed on", room.call_id, exc_info=True)
 
-        update_call(
-            call_id,
-            status="transferring",
-            target_team=team,
-            transfer_requested_at=now,
-            transferred=1,
-            transfer_reason="officer_transfer",
-            claimed_by="",
-            claimed_at=None,
-            officer_id=None,
-            hold_started_at=None,
-            hold_total_s=room.state.hold_total_s,
-        )
-
-        presence.set_wrap_up(officer_id, call_id=call_id)
+        try:
+            presence.set_wrap_up(officer_id, call_id=call_id)
+        except Exception:
+            logger.warning("Could not move officer to wrap-up on call %s", room.call_id, exc_info=True)
         asyncio.create_task(_save_draft_wrapup(call_id))
 
         status_event = {"type": "status", "status": "transferring"}
@@ -457,10 +596,23 @@ async def transfer(
                 "target_team": team,
                 "attempt": room.state.transfer_attempts,
                 "from_officer": from_officer,
+                "reserved_for": room.state.reserved_for,
+                "reserved_name": room.state.reserved_name,
+                "reserved_until": room.state.reserved_until,
             },
         )
+        if target_officer_id:
+            room.reserve_timer = asyncio.create_task(
+                _expire_reservation(room, target_officer_id, epoch, reserve_s)
+            )
         _start_countdown(room)
-        return {"transferred": True, "call_id": call_id, "target_team": team}
+        return {
+            "transferred": True,
+            "call_id": call_id,
+            "target_team": team,
+            "reserved_for": room.state.reserved_for,
+            "reserved_until": room.state.reserved_until,
+        }
 
 
 def _start_countdown(room: CallRoom) -> None:
@@ -640,10 +792,14 @@ async def wrapup(
 
     presence.finish_wrap_up(officer_id)
 
+    # An officer who passed the call on wraps up while the caller still waits
+    # for the next one: consoles must not take this for the end of the call.
+    live_room = registry.get(call_id)
     hub.publish_lobby("call.wrapped_up", {
         "call_id": call_id,
         "outcome": outcome,
         "officer_id": officer_id,
+        "live": live_room is not None and live_room.state.mode != "ended",
     })
     result: dict[str, Any] = {"wrapped_up": True, "call_id": call_id, "outcome": outcome}
     if satisfaction is not None:
@@ -800,17 +956,49 @@ async def _expire_reconnect_grace(room: CallRoom, officer_id: str, grace_s: floa
         # The lapsed officer's media identity would otherwise stay on the
         # allowlist and refuse the next officer's audio (4409): the call sat
         # in the queue unanswerable.
-        await _release_locked(room, "officer_disconnected")
+        waiting_since = time.time()
+        try:
+            await _release_locked(room, "officer_disconnected")
+        except Exception:
+            # The claim is gone from the room either way; the row is put right below.
+            logger.warning("Could not release the lapsed claim on call %s", room.call_id, exc_info=True)
+            room.state.claimed_by = ""
+            room.state.claimed_name = ""
+            room.state.claimed_at = None
+            _cancel_claim_timer(room)
         begin_wait(room)
-        room.state.turn_seq += 1
-        turn = create_turn(
-            call_id=room.call_id,
-            seq=room.state.turn_seq,
-            speaker="assistant",
-            kind="notice",
-            text="Previous officer disconnected. Waiting for officer.",
-        )
-        hub.publish_call(room.call_id, "turn", turn)
+        room.state.transfer_reason = "officer_disconnected"
+        room.state.transfer_requested_at = waiting_since
+        # The row said `bridged` since the officer joined. Left that way, the
+        # next officer's claim (a conditional update on a waiting status) is
+        # refused and the caller waits in a queue nobody can answer.
+        try:
+            update_call(
+                room.call_id,
+                status="transferring",
+                officer_id=None,
+                claimed_by="",
+                claimed_at=None,
+                transferred=1,
+                transfer_reason="officer_disconnected",
+                transfer_requested_at=waiting_since,
+            )
+        except Exception:
+            logger.warning("Could not record call %s as back in the queue", room.call_id, exc_info=True)
+        # The notice is a record. The requeue below is what reaches an officer,
+        # so a failed write must not stop it.
+        try:
+            room.state.turn_seq += 1
+            turn = create_turn(
+                call_id=room.call_id,
+                seq=room.state.turn_seq,
+                speaker="assistant",
+                kind="notice",
+                text="Previous officer disconnected. Waiting for officer.",
+            )
+            hub.publish_call(room.call_id, "turn", turn)
+        except Exception:
+            logger.warning("Could not record the officer-disconnected notice on call %s", room.call_id, exc_info=True)
         await _send_to_caller(room, {"type": "status", "status": "transferring"})
         hub.publish_lobby(
             "call.transfer_requested",
@@ -821,7 +1009,7 @@ async def _expire_reconnect_grace(room: CallRoom, officer_id: str, grace_s: floa
                 "priority": room.state.priority or "normal",
                 "language": room.state.locale or "en",
                 "ticket_ref": room.state.ticket_id or "",
-                "waiting_since": time.time(),
+                "waiting_since": waiting_since,
                 "attempt": room.state.transfer_attempts,
             },
         )

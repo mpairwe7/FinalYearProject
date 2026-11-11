@@ -60,7 +60,14 @@ reference standard used here. `PROSODY_ACOUSTIC_ONLY_AFFECT=true` restores acous
 labels, for a validation study only.
 
 Callers are told before the call starts (`call.preConsentTone` on the pre-call screen): the
-assistant may notice the tone and pace of their voice, together with their words.
+assistant may notice the tone and pace of their voice, together with their words. That
+sentence has no Luganda, Runyankole or Acholi translation yet and falls back to English
+there (G607, open).
+
+On a call (ADR-0039, 2026-11-11): a caller who speaks of ending their life during the
+assistant's goodbye line is not hung up on, and their words are never taken for a goodbye
+or for a review answer (G573). With `ticket_queue` off they still hear the crisis lines;
+only the offer of a URA officer is left out, because it could not be honoured (G572).
 
 ## Suggested actions (chips)
 

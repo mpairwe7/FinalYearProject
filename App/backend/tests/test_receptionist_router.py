@@ -103,6 +103,20 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((captions[0]["speaker"], captions[0]["text"]), ("caller", "Nsaba okumanya ku TIN"))
         self.assertEqual(self.sent("language")[0]["language"], "lg")
 
+    async def test_a_switch_that_cannot_hear_the_question_asks_for_it_again(self):
+        # The turn's old-language transcript was dropped when the router claimed
+        # it: a failed re-transcription left the caller a filler, then silence.
+        self.speech.transcribe.side_effect = RuntimeError("speech backend down")
+        await self.turn(vote("lg", 0.9), segments=2)
+        self.brain.handle_external_question.assert_not_awaited()
+        self.brain._say_and_record.assert_awaited_once_with(phrase("clarify_repeat", "lg"), kind="clarify")
+
+    async def test_a_switch_that_hears_nothing_asks_for_the_question_again(self):
+        self.speech.transcribe.return_value = SimpleNamespace(text="  ", words=[])
+        await self.turn(vote("lg", 0.9), segments=2)
+        self.brain.handle_external_question.assert_not_awaited()
+        self.brain._say_and_record.assert_awaited_once_with(phrase("clarify_repeat", "lg"), kind="clarify")
+
     async def test_the_re_ask_says_when_its_turn_began(self):
         # The brain drops a clarification this turn's old-language transcript opened (G92).
         before = time.monotonic()

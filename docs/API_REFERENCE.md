@@ -2000,6 +2000,41 @@ case on the chat events.
 
 ---
 
+#### Passing a call on
+
+```http
+POST /v1/admin/calls/{call_id}/transfer
+```
+
+```json
+{"team": "disputes", "note": "Needs the objections desk"}
+{"officer_id": "auth0|nakato", "note": "She handled this taxpayer last week"}
+```
+
+Officers only, and only the officer on the call. With `team` the call returns
+to the queue for that team. With `officer_id` (ADR-0039, G580) it is reserved
+for that officer: they must be `available` now (409 otherwise, and nothing
+changes; 400 for the officer's own id), only they may claim it for
+`RECEPTIONIST_CLAIM_TIMEOUT_S`, and then it opens to every officer. A claim by
+anyone else in that window answers 409 with `reserved_for` and `officer_name`.
+The response carries `reserved_for` and `reserved_until` (empty and `null` for
+a team transfer).
+
+Lobby events an officer console acts on (`WS /v1/admin/calls/stream`):
+
+| Event | Meaning |
+| --- | --- |
+| `call.transfer_requested` | A caller is waiting. Carries `reserved_for`, `reserved_name`, `reserved_until` and `from_officer` when an officer passed it to a named colleague. |
+| `call.unreserved` | The named officer did not take it in time (`reason: "not_taken"`): it is anyone's. |
+| `call.wrapped_up` | An officer saved a wrap-up. `live` is true when the caller is still on the line waiting for the next officer, so this is not the end of a call. |
+| `call.ended` | The call is over. The only event that removes it from the queue. |
+
+The per-call stream and the officer's audio socket both receive
+`{"type": "status", "status": "ended", "reason": "…"}` before the socket closes
+(G582); the console opens the wrap-up on it.
+
+---
+
 #### Call wrap-up: the caller's satisfaction
 
 Receptionist assurance update (2026-10-30, ADR-0020): `ticket_action` accepts

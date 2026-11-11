@@ -51,6 +51,66 @@ describe('useCallConsoleStore', () => {
     expect(store().calls.c1).toBeUndefined();
   });
 
+  it('keeps a caller who is still waiting when the officer who passed them on wraps up', () => {
+    event('call.transfer_requested', { call_id: 'c1', waiting_since: 1, reason: 'officer_transfer' });
+    event('call.wrapped_up', { call_id: 'c1', outcome: 'referred', officer_id: 'okello', live: true });
+    expect(waitingCalls(store().calls).map((c) => c.call_id)).toEqual(['c1']);
+    expect(alertCalls(store()).map((c) => c.call_id)).toEqual(['c1']);
+  });
+
+  it('a wrap-up after the call ended changes nothing: the ended event already removed it', () => {
+    event('call.transfer_requested', { call_id: 'c1', waiting_since: 1 });
+    event('call.ended', { call_id: 'c1' });
+    event('call.wrapped_up', { call_id: 'c1', outcome: 'resolved', officer_id: 'okello', live: false });
+    expect(store().calls.c1).toBeUndefined();
+  });
+
+  it('a call passed to a named officer is reserved for them, then opens to everyone', () => {
+    const until = Date.now() / 1000 + 20;
+    event('call.transfer_requested', {
+      call_id: 'c1', waiting_since: 1, reason: 'officer_transfer', from_officer: 'Officer Okello',
+      reserved_for: 'nakato', reserved_name: 'Officer Nakato', reserved_until: until,
+    });
+    expect(store().calls.c1).toMatchObject({
+      reserved_for: 'nakato', reserved_name: 'Officer Nakato', reserved_until: until, from_officer: 'Officer Okello',
+    });
+    // Only the named officer is alerted while it is theirs.
+    expect(alertCalls({ ...store(), myUserId: 'mukasa' })).toEqual([]);
+    expect(alertCalls({ ...store(), myUserId: 'nakato' }).map((c) => c.call_id)).toEqual(['c1']);
+    event('call.unreserved', { call_id: 'c1', reason: 'not_taken' });
+    expect(store().calls.c1).toMatchObject({ reserved_for: '', reserved_name: '', reserved_until: null });
+    expect(alertCalls({ ...store(), myUserId: 'mukasa' }).map((c) => c.call_id)).toEqual(['c1']);
+  });
+
+  it('a reservation that has run out no longer hides the call, even if its event was missed', () => {
+    event('call.transfer_requested', {
+      call_id: 'c1', waiting_since: 1, reserved_for: 'nakato', reserved_name: 'Officer Nakato',
+      reserved_until: Date.now() / 1000 - 1,
+    });
+    expect(alertCalls({ ...store(), myUserId: 'mukasa' }).map((c) => c.call_id)).toEqual(['c1']);
+  });
+
+  it('taking a reserved call ends the reservation, and a later wait starts without one', () => {
+    event('call.transfer_requested', {
+      call_id: 'c1', waiting_since: 1, reserved_for: 'nakato', reserved_name: 'Officer Nakato',
+      reserved_until: Date.now() / 1000 + 20,
+    });
+    event('call.claimed', { call_id: 'c1', officer_id: 'nakato', officer_name: 'Officer Nakato' });
+    expect(store().calls.c1.reserved_for).toBe('');
+    event('call.transfer_requested', {
+      call_id: 'c1', waiting_since: 5, reserved_for: 'nakato', reserved_name: 'Officer Nakato',
+      reserved_until: Date.now() / 1000 + 20,
+    });
+    event('call.transfer_requested', { call_id: 'c1', waiting_since: 9, reason: 'officer_disconnected' });
+    expect(store().calls.c1.reserved_for).toBe('');
+  });
+
+  it('reads a reservation back from the row when the console reloads', () => {
+    const until = Date.now() / 1000 + 20;
+    store().resync([callRecord({ call_id: 'c1', status: 'transferring', reserved_for: 'nakato', reserved_until: until })]);
+    expect(store().calls.c1).toMatchObject({ reserved_for: 'nakato', reserved_until: until });
+  });
+
   it('alerts only an available officer who is not on a call, and not for dismissed calls', () => {
     event('call.transfer_requested', { call_id: 'c1', waiting_since: 1 });
     event('call.transfer_requested', { call_id: 'c2', waiting_since: 2 });
