@@ -111,11 +111,13 @@ chat turn, which only the root suite showed.
 
 Left open by this phase, each for the service owner:
 
-- **The production Space runs two workers** and is outside the gate (a Space
-  secret overrides the base image's `APP_ENV=production`; calls are accepted
-  there with no LiveKit configured, which the gate would refuse). Call handoffs
-  there reach the wrong process about half the time. `UVICORN_WORKERS=1` in `App/deploy/hf-space/Dockerfile`
-  fixes that and halves the chat's worker count.
+- **The production Space runs two workers, by the service owner's decision
+  (2026-11-11)**, and is outside the gate (a Space secret overrides the base
+  image's `APP_ENV=production`; calls are accepted there with no LiveKit
+  configured, which the gate would refuse). Call handoffs there reach the
+  wrong process about half the time until call state is shared (G306);
+  `UVICORN_WORKERS=1` in `App/deploy/hf-space/Dockerfile` would fix that at the
+  cost of half the chat's workers.
 - **`low_bandwidth_voice_codec` and `call_drop_resume` are on in the Space
   image** and no client uses either.
 - **`RECEPTIONIST_TURN_TIMEOUT_S`** does not reach the turn-stop strategy; see

@@ -153,9 +153,12 @@ only in a language the deployment takes calls in.
   but the Space overrides it with a secret. Its value cannot be read; calls
   are accepted there with no LiveKit configured, which the gate would refuse,
   so it is not `production`. With this change the Space logs a warning at
-  every start. Setting `UVICORN_WORKERS=1` there fixes call handoffs and
-  halves the chat's worker count; that is the service owner's call and is left
-  open.
+  every start. Setting `UVICORN_WORKERS=1` there would fix call handoffs and
+  halve the chat's worker count; the service owner chose to keep two workers
+  (2026-11-11). Until call state is shared between processes (G306), an
+  officer's console and a caller's call there reach different workers about
+  half the time, so a handoff can fail and the call falls back to the queue's
+  timeout and a callback.
 - A deployment that does not declare one worker and one replica keeps a dead
   process's young rows until they are older than a call may last (about 17
   minutes at the default ceiling).
