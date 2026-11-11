@@ -14,7 +14,7 @@ import unittest
 from unittest.mock import patch
 
 from app import process_role
-from app.analytics import metrics
+from app.analytics import MetricsStore, metrics
 from starlette.routing import Route, WebSocketRoute
 from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
@@ -258,10 +258,28 @@ class ChatRoleRefusalTests(unittest.TestCase):
         self.assertNotEqual(response.status_code, 421)
         self.assertNotIn("X-URA-Process", response.headers)
 
-    def test_both_kinds_are_exported_at_zero_before_any_refusal(self) -> None:
-        text = metrics.to_prometheus()
-        self.assertIn('ura_receptionist_misrouted_total{kind="http"}', text)
-        self.assertIn('ura_receptionist_misrouted_total{kind="websocket"}', text)
+    def test_both_kinds_are_declared_at_zero_when_the_middleware_is_built(self) -> None:
+        # A store of its own, so no refusal made by another test can leak in: what
+        # is read back is what building the middleware recorded, and nothing else.
+        store = MetricsStore()
+        with patch.object(process_role, "metrics", store):
+            process_role.ProcessRoleMiddleware(lambda scope, receive, send: None)
+            process_role.declare_metrics()  # declaring again must not count anything
+
+            counters = store.snapshot()["counters"]
+            for kind in ("http", "websocket"):
+                key = f'receptionist_misrouted_total{{kind="{kind}"}}'
+                self.assertIn(key, counters)
+                self.assertEqual(counters[key], 0)
+            text = store.to_prometheus()
+            self.assertIn('ura_receptionist_misrouted_total{kind="http"} 0.0', text)
+            self.assertIn('ura_receptionist_misrouted_total{kind="websocket"} 0.0', text)
+
+            # The declared series is the one a refusal then raises, from 0 to 1.
+            store.inc("receptionist_misrouted_total", labels={"kind": "http"})
+            counters = store.snapshot()["counters"]
+            self.assertEqual(counters['receptionist_misrouted_total{kind="http"}'], 1)
+            self.assertEqual(counters['receptionist_misrouted_total{kind="websocket"}'], 0)
 
     def test_the_middleware_is_the_outermost_layer(self) -> None:
         import app.main
