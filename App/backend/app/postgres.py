@@ -3248,6 +3248,56 @@ def complete_workflow_session(
     return touched
 
 
+def claim_workflow_session(
+    conversation_id: str,
+    workflow_id: str,
+    *,
+    lease_seconds: float,
+    user_id: str = "",
+    tenant_id: str = "default",
+) -> bool:
+    """Postgres mirror of :func:`app.database.claim_workflow_session`.
+
+    Raises when there is no pool: a caller that cannot take the lease must
+    not go on as if it had.
+    """
+    if not conversation_id or not workflow_id:
+        return False
+    pool = _get_pool()
+    if pool is None:
+        raise RuntimeError("Postgres pool unavailable; the workflow lease cannot be taken")
+    now = time.time()
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""INSERT INTO workflow_sessions ({_WORKFLOW_COLUMNS})
+                    VALUES (%s,%s,%s,'active',1,%s,'{{}}','',%s,%s)
+                    ON CONFLICT (conversation_id) DO UPDATE SET
+                      status = 'active',
+                      current_step_idx = 1,
+                      user_id = EXCLUDED.user_id,
+                      slots_json = '{{}}',
+                      last_prompt = '',
+                      updated_at = EXCLUDED.updated_at
+                    WHERE workflow_sessions.tenant_id = EXCLUDED.tenant_id
+                      AND workflow_sessions.workflow_id = EXCLUDED.workflow_id
+                      AND ((workflow_sessions.status = 'active' AND workflow_sessions.current_step_idx = 0)
+                           OR workflow_sessions.updated_at < %s)""",  # nosec B608 # noqa: S608
+                (
+                    conversation_id,
+                    tenant_id or "default",
+                    workflow_id,
+                    user_id or "",
+                    now,
+                    now,
+                    now - max(0.0, float(lease_seconds)),
+                ),
+            )
+            taken = cur.rowcount
+        conn.commit()
+    return taken == 1
+
+
 def adopt_workflow_session(
     from_conversation_id: str,
     to_conversation_id: str,

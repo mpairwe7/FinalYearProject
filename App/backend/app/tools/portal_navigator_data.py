@@ -6608,12 +6608,106 @@ for _pkey, _pinfo in EXTERNAL_URA_PORTALS.items():
     _pinfo.setdefault("requires_auth", portal_requires_auth(_pkey))
 
 
+_DOM_ACTION_TYPES = frozenset({"spotlight", "fill", "select", "click"})
+#: A selector that reaches for a credential. `pin` is matched as a word, so
+#: `#shipping` is not one.
+_CREDENTIAL_SELECTOR_RE = re.compile(
+    r"password|passwd|otp|cvv|cvc|secret|passcode|one-time-code|cc-csc|(?<![a-z])pin(?![a-z])",
+    re.IGNORECASE,
+)
+
+
+#: A compound that names a button or an input by its element type. Anything
+#: else, an untyped `#id` or `.class` included, could match a link.
+_CLICK_TARGET_RE = re.compile(r"(?:button|input)(?![\w-])", re.IGNORECASE)
+#: Attribute values and quoted strings, set aside before a selector is split:
+#: `[value='Generate PRN']` holds a space that is not a combinator.
+_SELECTOR_LITERAL_RE = re.compile(r"\[[^\]]*\]|'[^']*'|\"[^\"]*\"")
+_COMBINATOR_RE = re.compile(r"\s*[>+~]\s*|\s+")
+
+
+def _click_subject_is_typed(part: str) -> bool:
+    """True when the element *part* matches is a button or an input.
+
+    That element is the last compound, after the final combinator:
+    `button a#login` matches the link, not the button.
+    """
+    bare = _SELECTOR_LITERAL_RE.sub("[]", part.strip())
+    subject = _COMBINATOR_RE.split(bare)[-1]
+    return bool(_CLICK_TARGET_RE.match(subject))
+
+
+def selector_targets_a_credential(selector: str) -> bool:
+    """True when *selector* names a password, one-time code, PIN or card security field."""
+    return bool(_CREDENTIAL_SELECTOR_RE.search(str(selector or "")))
+
+
+def harden_dom_actions(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Apply the rules every DOM action keeps on its way out of the server (ADR-0038).
+
+    Recipes are run by code this server does not control: the inbuilt
+    workspace, a browser companion, an agent reading the navigator tool. So
+    the rules are applied here, to every list, rather than trusted to each
+    recipe's author:
+
+    - an action of an unknown kind is dropped;
+    - nothing targets a credential field;
+    - a click waits for the taxpayer, whatever chose it, and keeps only the
+      parts of its selector whose matched element (the last compound) is a
+      button or an input named by element type. A
+      link goes wherever the page points it and the server cannot see where,
+      and an untyped `#id` could be a link. A click left with no target points
+      instead;
+    - only a fill or a select carries a value, and one with nothing to enter
+      points at the field instead: a recipe used to fill in a tax head, a
+      commodity code or a payment mode nobody gave (G561).
+
+    Steps are renumbered in order.
+    """
+    hardened: list[dict[str, Any]] = []
+    for action in actions:
+        kind = str(action.get("action_type") or "")
+        selector = str(action.get("selector") or "")
+        if kind not in _DOM_ACTION_TYPES or selector_targets_a_credential(selector):
+            continue
+        step = dict(action)
+        step["selector"] = selector
+        if kind in ("fill", "select") and action.get("fill_value") in (None, ""):
+            kind = step["action_type"] = "spotlight"
+        if kind == "click":
+            targets = [part.strip() for part in selector.split(",") if part.strip()]
+            kept = [part for part in targets if _click_subject_is_typed(part)]
+            if not kept:
+                kind = step["action_type"] = "spotlight"
+            else:
+                step["selector"] = ", ".join(kept)
+        step["security_gate"] = (
+            "requires_confirmation"
+            if kind == "click" or action.get("security_gate") == "requires_confirmation"
+            else "safe"
+        )
+        if kind not in ("fill", "select"):
+            step["fill_value"] = None
+        step["step_number"] = len(hardened) + 1
+        hardened.append(step)
+    return hardened
+
+
 def get_portal_dom_recipe(
     portal_key: str,
     state: str = "",
     entities: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Return sequential DOM actions for an in-browser companion or inbuilt portal co-pilot."""
+    return harden_dom_actions(_portal_dom_recipe(portal_key, state, entities))
+
+
+def _portal_dom_recipe(
+    portal_key: str,
+    state: str = "",
+    entities: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """The recipe as written, before :func:`harden_dom_actions`."""
     entities = entities or {}
 
     tin_val = ""
@@ -6642,9 +6736,7 @@ def get_portal_dom_recipe(
     elif entities.get("tax_head"):
         tax_head_val = str(entities["tax_head"])
 
-    payment_mode_val = str(
-        entities.get("payment_mode") or entities.get("payment_channel") or "Bank"
-    )
+    payment_mode_val = str(entities.get("payment_mode") or entities.get("payment_channel") or "")
 
     if "Server Error" in state or "Timeout" in state:
         return [
@@ -6661,12 +6753,14 @@ def get_portal_dom_recipe(
             {
                 "step_number": 2,
                 "element": "Recovery / Back Link",
-                "selector": "a#loginLink, button#btnRefresh, a[href*='login']",
+                # A button only. a[href*='login'] matched another site's login page, and any
+                # link goes wherever the page points it (CodeRabbit, PR 713).
+                "selector": "button#btnRefresh",
                 "action_type": "click",
                 "fill_value": None,
                 "scroll_to": True,
                 "tooltip": "Click to return to login or clear expired session state",
-                "security_gate": "safe",
+                "security_gate": "requires_confirmation",
             },
         ]
 
@@ -6677,7 +6771,7 @@ def get_portal_dom_recipe(
                 "element": "Tax Head / NTR MDA Selection",
                 "selector": "select#ddlTaxHead, select[name='taxHead'], select[name='tax_head']",
                 "action_type": "select",
-                "fill_value": tax_head_val or "0010",
+                "fill_value": tax_head_val,
                 "scroll_to": True,
                 "tooltip": "Select the statutory tax regime (e.g. 0010 - VAT, 0011 - Income Tax, or NTR/MDA fee)",
                 "security_gate": "safe",
@@ -6740,7 +6834,7 @@ def get_portal_dom_recipe(
                 "element": "Commodity / Service Code",
                 "selector": "input#commodityCode, select#itemClassification, input[name='commodity_code']",
                 "action_type": "fill",
-                "fill_value": str(entities.get("commodity_code") or "50202301"),
+                "fill_value": str(entities.get("commodity_code") or ""),
                 "scroll_to": False,
                 "tooltip": "Enter the harmonized UNSPSC commodity classification code",
                 "security_gate": "safe",
@@ -6767,7 +6861,7 @@ def get_portal_dom_recipe(
             },
         ]
     elif portal_key == "tin_registration":
-        entity_type_val = str(entities.get("entity_type") or "individual")
+        entity_type_val = str(entities.get("entity_type") or "")
         nin_or_brn = str(entities.get("nin") or entities.get("ursb_brn") or "")
         recipe = [
             {
@@ -6818,7 +6912,7 @@ def get_portal_dom_recipe(
                 "element": "Return Type Selection",
                 "selector": "select#ddlReturnType, select[name='return_type'], select[name='tax_head']",
                 "action_type": "select",
-                "fill_value": tax_head_val or "VAT_STANDARD",
+                "fill_value": tax_head_val,
                 "scroll_to": True,
                 "tooltip": "Select statutory return type (VAT Form DT-1014, PAYE, or Provisional/Final Income Tax)",
                 "security_gate": "safe",
@@ -6871,7 +6965,7 @@ def get_portal_dom_recipe(
                 "element": "TCC Statutory Purpose Selection",
                 "selector": "select#ddlTccPurpose, select[name='tcc_purpose']",
                 "action_type": "select",
-                "fill_value": str(entities.get("tcc_purpose") or "BIDDING_TENDER"),
+                "fill_value": str(entities.get("tcc_purpose") or ""),
                 "scroll_to": False,
                 "tooltip": "Select purpose (Public Procurement Bidding, License Renewal, Work Permit, or Vehicle Transfer)",
                 "security_gate": "safe",
@@ -6947,7 +7041,7 @@ def get_portal_dom_recipe(
                 "element": "Registration / ITMS Digital Plate Category Selector",
                 "selector": "select#ddlVehicleCategory, select[name='plate_category']",
                 "action_type": "select",
-                "fill_value": str(entities.get("plate_category") or "STANDARD_FIRST_REG"),
+                "fill_value": str(entities.get("plate_category") or ""),
                 "scroll_to": False,
                 "tooltip": "Select first registration, ownership transfer (Form TR VII), or ITMS digital number plate category",
                 "security_gate": "safe",
@@ -6970,7 +7064,7 @@ def get_portal_dom_recipe(
                 "element": "Excise Product Category Selector",
                 "selector": "select#ddlDtsCategory, select[name='product_category']",
                 "action_type": "select",
-                "fill_value": str(entities.get("product_category") or "BOTTLED_WATER"),
+                "fill_value": str(entities.get("product_category") or ""),
                 "scroll_to": True,
                 "tooltip": "Select gazetted excise commodity category (Beer, Spirits, Wine, Soda, Water, Cement, Sugar)",
                 "security_gate": "safe",
@@ -7059,7 +7153,7 @@ def get_portal_dom_recipe(
             {
                 "step_number": 3,
                 "element": "Primary Action Element",
-                "selector": "button.btn-primary, a.action-link, input[type='submit']",
+                "selector": "button.btn-primary, input[type='submit']",
                 "action_type": "click",
                 "fill_value": None,
                 "scroll_to": True,

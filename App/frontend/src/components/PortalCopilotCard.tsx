@@ -4,6 +4,7 @@ import Link from "next/link";
 import React, { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { authHeaders, getAuthToken, getServerAuthToken, subscribeAuthToken } from "../lib/authSession";
 import { getChatSessionId } from "../lib/chatSession";
+import { CONFIRM_ARM_DELAY_MS, isBrowserRaisedClick } from "../lib/confirmGuard";
 import { useTranslation } from "../lib/i18n";
 import { sanitizeReturnTo } from "../lib/oidcFlow";
 import {
@@ -76,6 +77,8 @@ export default function PortalCopilotCard({
   const [activeCopilot, setActiveCopilot] = useState<PortalCopilotPayload>(copilot);
   const [editing, setEditing] = useState(false);
   const [highValueAck, setHighValueAck] = useState(false);
+  // Allow is held back for a moment whenever what it would approve changes.
+  const [armed, setArmed] = useState(CONFIRM_ARM_DELAY_MS <= 0);
   const [copiedRef, setCopiedRef] = useState(false);
   const [revealedFields, setRevealedFields] = useState<Record<string, boolean>>({});
   const [formValues, setFormValues] = useState<Record<string, string>>(() => {
@@ -109,6 +112,13 @@ export default function PortalCopilotCard({
       return next;
     });
   }, [copilot]);
+
+  useEffect(() => {
+    if (CONFIRM_ARM_DELAY_MS <= 0) return;
+    setArmed(false);
+    const timer = window.setTimeout(() => setArmed(true), CONFIRM_ARM_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [activeCopilot.idempotency_key, highValueAck]);
 
   const authToken = useSyncExternalStore(subscribeAuthToken, getAuthToken, getServerAuthToken);
   const isSignedIn = Boolean(authToken);
@@ -524,6 +534,12 @@ export default function PortalCopilotCard({
           <span>{copilot.verification_prompt || t("portalCopilot.verificationPrompt")}</span>
         </p>
 
+        {(activeCopilot.display_fields ?? []).some((df) => df.assumed) && (
+          <p className="portal-verification-banner" role="note" data-testid="portal-assumed-notice">
+            <AlertTriangleIcon size={15} /> <span>{t("portalCopilot.assumedNotice")}</span>
+          </p>
+        )}
+
         <dl className="portal-verification-table">
           {(activeCopilot.display_fields ?? []).map((df) => {
             const isRevealed = Boolean(revealedFields[df.name]);
@@ -533,6 +549,14 @@ export default function PortalCopilotCard({
                 <dt>{df.label}</dt>
                 <dd>
                   <code data-testid={`portal-confirm-value-${df.name}`}>{shownValue}</code>
+                  {df.assumed && (
+                    <span
+                      className="portal-copilot-badge is-amber"
+                      data-testid={`portal-confirm-assumed-${df.name}`}
+                    >
+                      {t("portalCopilot.assumedBadge")}
+                    </span>
+                  )}
                   {df.sensitive && df.raw_value && (
                     <button
                       type="button"
@@ -573,7 +597,10 @@ export default function PortalCopilotCard({
         )}
 
         <p className="portal-field-helper" data-testid="portal-reversibility-notice">
-          {t("portalCopilot.reversibilityNotice")}
+          {/* Only a payment reference expires unpaid. Every card used to say so. */}
+          {/^payment_(generate|reactivate)_prn$/.test(activeCopilot.task_id ?? "")
+            ? t("portalCopilot.reversibilityNotice")
+            : t("portalCopilot.reversibilityNoticeGeneral")}
         </p>
 
         {execState.status === "error" && execState.summary && (
@@ -588,15 +615,17 @@ export default function PortalCopilotCard({
             className="portal-action-btn is-primary"
             data-testid="portal-task-allow-btn"
             disabled={
-              disabled || execState.status === "busy" ||
+              disabled || !armed || execState.status === "busy" ||
               (Boolean(activeCopilot.high_value_requires_ack) && !highValueAck)
             }
-            onClick={() => void handleDecision("allow")}
+            onClick={(event) => {
+              if (isBrowserRaisedClick(event)) void handleDecision("allow");
+            }}
           >
             <CheckCircleIcon />{" "}
             {execState.status === "busy"
               ? t("portalCopilot.executing")
-              : activeCopilot.allow_label || t("portalCopilot.allowBtn")}
+              : t("portalCopilot.allowBtn")}
           </button>
           <button
             type="button"
@@ -605,7 +634,7 @@ export default function PortalCopilotCard({
             disabled={disabled || execState.status === "busy"}
             onClick={() => setEditing(true)}
           >
-            <PencilIcon /> {copilot.edit_label || t("portalCopilot.editBtn")}
+            <PencilIcon /> {t("portalCopilot.editBtn")}
           </button>
           <button
             type="button"
@@ -614,7 +643,7 @@ export default function PortalCopilotCard({
             disabled={disabled || execState.status === "busy"}
             onClick={() => void handleDecision("disallow")}
           >
-            <BanIcon size={14} /> {copilot.disallow_label || t("portalCopilot.disallowBtn")}
+            <BanIcon size={14} /> {t("portalCopilot.disallowBtn")}
           </button>
         </div>
       </section>

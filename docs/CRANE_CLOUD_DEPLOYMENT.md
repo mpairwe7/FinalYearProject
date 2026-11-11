@@ -796,8 +796,10 @@ stdlib-only and print key names only, never values.
 **Frame-embedding fix (§7.4 note):** the frontend originally sent
 `X-Frame-Options: DENY`, which blanked the HF Space *page* (it embeds the app in an
 iframe; the direct `*.hf.space` URL always rendered). `next.config.mjs` now drops
-`X-Frame-Options` and uses CSP `frame-ancestors 'self' https://huggingface.co
-https://*.hf.space` (env `FRAME_ANCESTORS`; `"'none'"` restores strict no-embed).
+`X-Frame-Options` and uses CSP `frame-ancestors 'self' https://huggingface.co`
+(env `FRAME_ANCESTORS`; `"'none'"` restores strict no-embed). It named
+`https://*.hf.space` as well until ADR-0038: `hf.space` is on the Public Suffix
+List, so that let any other Space frame the app (G548).
 Headers are baked at Next.js build time, so this required a rebuild — not a runtime
 env change.
 

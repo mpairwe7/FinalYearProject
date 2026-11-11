@@ -18,11 +18,12 @@ import logging
 import math
 import os
 import re
+import secrets
 import threading
 import time
 import urllib.parse
 from collections import OrderedDict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -33,6 +34,7 @@ from .tools.portal_navigator_data import (
     EXTERNAL_URA_PORTALS,
     export_companion_manifest,
     get_portal_dom_recipe,
+    harden_dom_actions,
     portal_requires_auth,
 )
 
@@ -54,6 +56,14 @@ class PortalTaskValidationError(ValueError):
 
 class PortalTaskOwnershipError(PermissionError):
     """Raised when `request_state` belongs to another session/user or violates TPCA s. 75 (HTTP 403)."""
+
+
+class PortalTaskConflictError(RuntimeError):
+    """Raised when a proposal is being carried out, or already was (HTTP 409)."""
+
+
+class PortalTaskUnavailableError(RuntimeError):
+    """Raised when a decision cannot be recorded, so nothing is sent (HTTP 503)."""
 
 
 @dataclass(frozen=True)
@@ -423,7 +433,6 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
                 input_type="date",
                 required=True,
                 placeholder="1992-05-14",
-                default_value="1992-01-01",
                 helper_text="Format: YYYY-MM-DD.",
                 sensitive=True,
             ),
@@ -707,12 +716,14 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
         task_id="tin_tax_obligations",
         tool_name="tin_tax_obligations",
         portal_key="e_services",
-        title="Check or Register Taxpayer Filing Obligations & Deadlines",
-        tier=PortalTaskTier.AUTHENTICATED_ACCOUNT_READ,
+        # The connector registers a tax head; it has no way to only look. So this
+        # is a write a person confirms, with the tax head they named (G556).
+        title="Register a Tax Head on Your TIN",
+        tier=PortalTaskTier.DELEGATED_CONFIRM,
         requires_auth=True,
         required_consent="ura_account_access",
         statutory_citation="TPCA Cap. 343 s. 75 (Official Secrecy) & s. 16",
-        description="Inspect or update registered tax head obligations on your authenticated TIN profile.",
+        description="Register an additional tax head obligation (for example VAT or PAYE) on your own TIN.",
         fields=(
             PortalFieldSpec(
                 name="tin",
@@ -724,12 +735,11 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
             ),
             PortalFieldSpec(
                 name="tax_head",
-                label="Tax Obligation Head",
+                label="Tax Head to Register",
                 input_type="select",
-                required=False,
+                required=True,
                 options=TAX_HEAD_OPTIONS,
-                default_value="VAT_STANDARD",
-                helper_text="Tax obligation head to check or activate.",
+                helper_text="This adds the tax head to your registered obligations.",
             ),
         ),
     ),
@@ -1064,11 +1074,23 @@ PORTAL_TASK_CATALOG: dict[str, PortalTaskSpec] = {
 }
 
 
-# Replay-safe bounded LRU idempotency & decline caches for Tier 2 / Tier 3 portal task executions,
-# backed by the shared `workflow_sessions` database table across Uvicorn workers and guarded
-# in-process by `_TASK_CACHE_LOCK` + `_IN_FLIGHT_TASK_KEYS` (OWASP ASI07 / LLM10).
+# One approval runs a task once, whichever worker hears it (ADR-0038).
+#
+# The shared `workflow_sessions` row for a proposal is the arbiter. A worker
+# takes its lease in one statement before it reaches the portal, so a second
+# worker, a double click or a retry finds it held. The in-process caches below
+# only save a round trip; nothing is decided from them alone.
+#
+#   released   active,    step 0   nothing ran, or it failed before any effect
+#   in flight  active,    step 1   a worker holds the lease
+#   executed   completed, step 1   the receipt is in `slots`
+#   declined   cancelled, step 1
 _MAX_TASK_CACHE_ENTRIES = 2048
 PORTAL_TASK_STATE_TTL_SECONDS = max(60, int(os.getenv("PORTAL_TASK_STATE_TTL_SECONDS", "900")))
+_TASK_WORKFLOW_ID = "portal_task_decision"
+_NOT_RECORDED = (
+    "Your decision could not be recorded, so nothing was sent to the URA portal. Please try again shortly."
+)
 _TASK_CACHE_LOCK = threading.Lock()
 _EXECUTED_TASK_CACHE: OrderedDict[tuple[str, str], dict[str, Any]] = OrderedDict()
 _DECLINED_TASK_CACHE: OrderedDict[tuple[str, str], float] = OrderedDict()
@@ -1080,29 +1102,64 @@ _CONVERSATION_ENTITY_MEMORY: OrderedDict[str, dict[str, Any]] = OrderedDict()
 def _durable_task_cache_id(cache_key: tuple[str, str]) -> str:
     """Return a deterministic shared-store key for `(owner_key, idempotency_key)`."""
     digest = hashlib.sha256(f"{cache_key[0]}:{cache_key[1]}".encode()).hexdigest()[:40]
-    return f"portal_task_decision:{digest}"
+    return f"{_TASK_WORKFLOW_ID}:{digest}"
 
 
 def _read_shared_task_decision(
     cache_key: tuple[str, str],
 ) -> tuple[str | None, dict[str, Any] | None]:
-    """Read a previously executed or declined task decision from the shared database store."""
+    """Return a proposal's shared state: `executed`, `declined`, `in_flight` or None.
+
+    Raises `PortalTaskUnavailableError` when the store cannot be read. A
+    decision taken without it could run a task another worker already ran.
+    """
     try:
         row = db.get_workflow_session(_durable_task_cache_id(cache_key))
-        if not row or row.get("workflow_id") != "portal_task_decision":
-            return None, None
-        updated_at = float(row.get("updated_at") or 0.0)
-        if updated_at and (time.time() - updated_at) > PORTAL_TASK_STATE_TTL_SECONDS:
-            return None, None
-        status = str(row.get("status") or "")
-        slots = row.get("slots")
-        if status == "cancelled":
-            return "declined", None
-        if status == "completed" and isinstance(slots, dict) and slots:
-            return "executed", dict(slots)
-    except Exception:
-        logger.debug("Shared portal task decision read skipped", exc_info=True)
+    except Exception as exc:
+        logger.warning("Portal task decision store could not be read", exc_info=True)
+        raise PortalTaskUnavailableError(_NOT_RECORDED) from exc
+    if not row or row.get("workflow_id") != _TASK_WORKFLOW_ID:
+        return None, None
+    updated_at = float(row.get("updated_at") or 0.0)
+    if updated_at and (time.time() - updated_at) > PORTAL_TASK_STATE_TTL_SECONDS:
+        return None, None
+    status = str(row.get("status") or "")
+    slots = row.get("slots")
+    if status == "cancelled":
+        return "declined", None
+    if status == "completed" and isinstance(slots, dict) and slots:
+        return "executed", dict(slots)
+    if status == "active" and int(row.get("current_step_idx") or 0) == 1:
+        return "in_flight", None
     return None, None
+
+
+def _claim_shared_task(cache_key: tuple[str, str], user_id: str | None) -> bool:
+    """Take the proposal's lease in the shared store; False when another caller holds it."""
+    cid = _durable_task_cache_id(cache_key)
+    try:
+        claimed = db.claim_workflow_session(
+            cid,
+            _TASK_WORKFLOW_ID,
+            lease_seconds=PORTAL_TASK_STATE_TTL_SECONDS,
+            user_id=str(user_id or ""),
+        )
+    except Exception as exc:
+        logger.error("Portal task lease could not be taken; the task was not run", exc_info=True)
+        raise PortalTaskUnavailableError(_NOT_RECORDED) from exc
+    if claimed:
+        _SHARED_DECISION_KEYS.add(cid)
+    return claimed
+
+
+def _release_shared_task(cache_key: tuple[str, str]) -> None:
+    """Give the lease back after a run that sent nothing, so it can be tried again."""
+    try:
+        db.upsert_workflow_session(_durable_task_cache_id(cache_key), _TASK_WORKFLOW_ID, 0, {}, status="active")
+    except Exception:
+        # The lease then lapses with the signed state, after which a new
+        # confirmation is needed anyway.
+        logger.error("Portal task lease could not be released", exc_info=True)
 
 
 def _write_shared_task_decision(
@@ -1112,21 +1169,18 @@ def _write_shared_task_decision(
     payload: dict[str, Any] | None = None,
     user_id: str | None = None,
 ) -> None:
-    """Persist an executed or declined task decision in the shared database store across workers."""
-    try:
-        cid = _durable_task_cache_id(cache_key)
-        _SHARED_DECISION_KEYS.add(cid)
-        db.upsert_workflow_session(
-            cid,
-            "portal_task_decision",
-            1,
-            dict(payload or {"declined": True}),
-            status="cancelled" if declined else "completed",
-            last_prompt=cache_key[1],
-            user_id=str(user_id or ""),
-        )
-    except Exception:
-        logger.debug("Shared portal task decision write skipped", exc_info=True)
+    """Settle a proposal in the shared store as executed or declined. Raises when it cannot."""
+    cid = _durable_task_cache_id(cache_key)
+    _SHARED_DECISION_KEYS.add(cid)
+    db.upsert_workflow_session(
+        cid,
+        _TASK_WORKFLOW_ID,
+        1,
+        dict(payload or {"declined": True}),
+        status="cancelled" if declined else "completed",
+        last_prompt=cache_key[1],
+        user_id=str(user_id or ""),
+    )
 
 
 def clear_portal_task_cache() -> None:
@@ -1140,7 +1194,7 @@ def clear_portal_task_cache() -> None:
         _SHARED_DECISION_KEYS.clear()
     for cid in keys_to_reset:
         try:
-            db.upsert_workflow_session(cid, "portal_task_decision", 0, {}, status="active")
+            db.upsert_workflow_session(cid, _TASK_WORKFLOW_ID, 0, {}, status="active")
         except Exception:
             logger.debug("Shared portal task decision cleanup skipped", exc_info=True)
 
@@ -1148,6 +1202,16 @@ def clear_portal_task_cache() -> None:
 def classify_portal_task(task_id: str) -> PortalTaskSpec | None:
     """Return the `PortalTaskSpec` for *task_id*, or None if unknown."""
     return PORTAL_TASK_CATALOG.get(str(task_id or "").strip())
+
+
+def session_is_proven(session_id: str | None, conversation_id: str | None) -> bool:
+    """True when the caller sent a session id of its own.
+
+    A missing id falls back to the conversation id upstream. That value proves
+    nothing: anyone who knows the conversation can derive it (ADR-0013).
+    """
+    session = str(session_id or "").strip()
+    return session not in ("", "default", str(conversation_id or "default"))
 
 
 def mask_sensitive_value(field_name: str, value: Any) -> str:
@@ -1181,13 +1245,49 @@ def mask_sensitive_value(field_name: str, value: Any) -> str:
 # ---------------------------------------------------------------------------
 
 _SENSITIVE_FIELD_PATTERN = re.compile(
-    r"(?:password|passwd|pwd|otp|pin|cvv|cvc|csc|secret|token|passcode|one[-_]?time[-_]?code|cc[-_]?csc)",
+    r"(?:password|passwd|pwd|otp|pin|cvv|cvc|csc|secret|token|passcode|one[-_]?time[-_]?code|cc[-_]?csc"
+    # The same secrets under the names a form or an injected field gives them (G547).
+    r"|mfa|2fa|(?:auth|verification|security|recovery|backup)[-_ ]?(?:code|answer|question|key)"
+    r"|card[-_ ]?(?:number|num|no)\b|api[-_ ]?key|private[-_ ]?key|credential|session[-_ ]?id|cookie)",
+    re.IGNORECASE,
+)
+#: A form field's name. Anything else is not a field this server will name
+#: back to the browser, in a selector or in a sentence.
+_FIELD_NAME_RE = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")
+#: The telemetry fence, in any spelling a model would still read as the tag.
+_TELEMETRY_TAG_RE = re.compile(
+    r"<[ \t]*/?[ \t]*untrusted[ _-]?portal[ _-]?dom[ _-]?telemetry\b[^>\n]{0,120}>?",
     re.IGNORECASE,
 )
 
 
+def _dom_text(value: Any, max_len: int) -> str:
+    """One line of text read off a page, screened and unable to pose as structure.
+
+    Text from the DOM is evidence of what the page shows. It is cut to
+    length, cleared of hidden characters and instruction phrases, kept from
+    closing the telemetry fence, and folded to one line so it cannot open a
+    heading or a list of its own in the reply. A link is kept only when its
+    host is one an answer may link to: a page that says "sign in again at"
+    somewhere else does not get that address passed on to the taxpayer or to
+    whatever runs the card.
+    """
+    from .guardrails import fence_spotlight_body, neutralize_untrusted_links, scan_retrieved_text
+    from .vision.ocr import strip_hidden_control_and_bidi
+
+    raw = strip_hidden_control_and_bidi(str(value or ""))[:max_len]
+    cleaned, _ = scan_retrieved_text(raw)
+    cleaned = _TELEMETRY_TAG_RE.sub("[boundary removed]", fence_spotlight_body(cleaned))
+    cleaned, _ = neutralize_untrusted_links(cleaned)
+    return " ".join(cleaned.split())
+
+
 def sanitize_portal_context(portal_context: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Return a deep-sanitized copy of `portal_context` with all password/OTP/PIN/CVV fields stripped."""
+    """Return a deep-sanitized copy of `portal_context` with all password/OTP/PIN/CVV fields stripped.
+
+    A selector sent by the page is not kept: the server names the element or
+    nobody does (G545). A field whose name is not a plain identifier is dropped.
+    """
     if not portal_context or not isinstance(portal_context, Mapping):
         return {}
 
@@ -1204,30 +1304,28 @@ def sanitize_portal_context(portal_context: Mapping[str, Any] | None) -> dict[st
             return True
         return any(sel.lower() in k_str.lower() for sel in prohibited_selectors)
 
-    from .guardrails import scan_retrieved_text
-    from .vision.ocr import strip_hidden_control_and_bidi
-
-    def _scrub_dom_text(val: Any, max_len: int) -> str:
-        raw_str = strip_hidden_control_and_bidi(str(val or ""))[:max_len]
-        cleaned, _ = scan_retrieved_text(raw_str)
-        return cleaned
+    def _is_field_name(k: str) -> bool:
+        return bool(_FIELD_NAME_RE.fullmatch(k))
 
     raw_visible = portal_context.get("visible_fields")
     clean_visible: dict[str, str] = {}
     scrubbed_keys: list[str] = []
     if isinstance(raw_visible, Mapping):
         for k, v in raw_visible.items():
-            if _is_secret_key(str(k)):
-                scrubbed_keys.append(str(k))
+            name = str(k)
+            if _is_secret_key(name):
+                scrubbed_keys.append(name[:64])
                 continue
-            clean_visible[str(k)] = _scrub_dom_text(v, 240)
+            if _is_field_name(name):
+                clean_visible[name] = _dom_text(v, 240)
 
     raw_empty = portal_context.get("empty_required_fields")
     clean_empty: list[str] = []
     if isinstance(raw_empty, Sequence) and not isinstance(raw_empty, str | bytes):
         for item in raw_empty:
-            if not _is_secret_key(str(item)):
-                clean_empty.append(_scrub_dom_text(item, 80))
+            name = str(item)
+            if _is_field_name(name) and not _is_secret_key(name):
+                clean_empty.append(name)
 
     raw_errors = portal_context.get("validation_errors")
     clean_errors: list[dict[str, str]] = []
@@ -1235,28 +1333,23 @@ def sanitize_portal_context(portal_context: Mapping[str, Any] | None) -> dict[st
         for err in raw_errors:
             if isinstance(err, Mapping):
                 f_name = str(err.get("field") or "")
-                sel = str(err.get("selector") or "")
-                if _is_secret_key(f_name) or _is_secret_key(sel):
+                if not _is_field_name(f_name):
                     continue
-                clean_errors.append(
-                    {
-                        "field": _scrub_dom_text(f_name, 80),
-                        "message": _scrub_dom_text(err.get("message"), 240),
-                        "selector": _scrub_dom_text(sel, 120),
-                    }
-                )
+                if _is_secret_key(f_name) or _is_secret_key(str(err.get("selector") or "")):
+                    continue
+                clean_errors.append({"field": f_name, "message": _dom_text(err.get("message"), 240)})
 
     return {
         "portal_id": str(portal_context.get("portal_id") or "e_services").strip().lower(),
-        "current_route": _scrub_dom_text(portal_context.get("current_route"), 240),
-        "active_step": _scrub_dom_text(portal_context.get("active_step"), 160),
-        "form_id": _scrub_dom_text(portal_context.get("form_id"), 64),
+        "current_route": _dom_text(portal_context.get("current_route"), 240),
+        "active_step": _dom_text(portal_context.get("active_step"), 160),
+        "form_id": _dom_text(portal_context.get("form_id"), 64),
         "visible_fields": clean_visible,
         "empty_required_fields": clean_empty,
         "validation_errors": clean_errors,
-        "error_banner": _scrub_dom_text(portal_context.get("error_banner"), 400),
+        "error_banner": _dom_text(portal_context.get("error_banner"), 400),
         "stalled_duration_ms": int(portal_context.get("stalled_duration_ms") or 0),
-        "last_user_action": _scrub_dom_text(portal_context.get("last_user_action"), 120),
+        "last_user_action": _dom_text(portal_context.get("last_user_action"), 120),
         "scrubbed_secret_fields": scrubbed_keys,
     }
 
@@ -1353,13 +1446,14 @@ def extract_task_entities(message: str, portal_context: Mapping[str, Any] | None
     """Extract structured portal task entities from natural-language text and sanitized `portal_context`."""
     text = str(message or "")
     text_lower = text.lower()
-    entities: dict[str, Any] = {}
-
+    # What the person typed is collected on its own and laid over what the
+    # page shows. The page's fields used to go in first, and a tax head or a
+    # payment mode named in the message did not replace them (G560).
+    page_fields: dict[str, Any] = {}
     if portal_context and isinstance(portal_context, Mapping):
         sanitized = sanitize_portal_context(portal_context)
-        for k, v in sanitized.get("visible_fields", {}).items():
-            if v:
-                entities[k] = v
+        page_fields = {k: v for k, v in sanitized.get("visible_fields", {}).items() if v}
+    entities: dict[str, Any] = {}
 
     tin_m = _TIN_RE.search(text)
     if tin_m:
@@ -1467,7 +1561,7 @@ def extract_task_entities(message: str, portal_context: Mapping[str, Any] | None
     if qty_str:
         entities.setdefault("quantity", qty_str)
 
-    return entities
+    return {**page_fields, **entities}
 
 
 def detect_portal_task_intent(
@@ -1648,6 +1742,13 @@ def detect_portal_task_intent(
         return _intent("dts_activate_stamps", "dts", 0.93)
 
     # 7. Tier 3 Authenticated Account Reads (TPCA s. 75)
+    # Registering a tax head is a write, and only wording that asks for one
+    # reaches it. Asking to check, view or query obligations reads the account:
+    # it used to be sent to the same tool, which registered VAT (G556).
+    if "tin_tax_obligations" in low or (
+        "obligation" in low and re.search(r"\b(?:register|add|activate)\b", low) is not None
+    ):
+        return _intent("tin_tax_obligations", "e_services", 0.95)
     if any(
         phrase in low
         for phrase in (
@@ -1655,12 +1756,9 @@ def detect_portal_task_intent(
             "check tax obligations",
             "view my tax obligations",
             "my filing obligations",
-            "tin_tax_obligations",
-            "register vat obligation",
-            "add tax obligation",
         )
     ) or ("obligations" in low and ("my" in low or "tin" in low or "check" in low or "query" in low)):
-        return _intent("tin_tax_obligations", "e_services", 0.95)
+        return _intent("ura_account_profile", "e_services", 0.95)
 
     if any(
         phrase in low
@@ -1811,6 +1909,46 @@ def detect_portal_task_intent(
 # ---------------------------------------------------------------------------
 
 
+#: The longest value a task field takes, on a first submission and on an edit.
+MAX_TASK_FIELD_CHARS = 512
+
+
+def _reversibility_notice(spec: PortalTaskSpec) -> str:
+    """What can still be changed, said of this task. Every card used to promise what is true of a PRN."""
+    before = "You can edit any field before allowing this, or cancel now."
+    if spec.task_id in ("payment_generate_prn", "payment_reactivate_prn"):
+        return f"{before} An unpaid PRN expires automatically after 21 days."
+    return f"{before} Once allowed, it cannot be undone from here."
+
+
+_MARKUP_OR_CONTROL_RE = re.compile(r"[<>\x00-\x1f\x7f]")
+
+
+def _date_error(value: str, *, must_be_past: bool) -> str:
+    """Why *value* is not a date a form could hold, or ""."""
+    import datetime
+
+    try:
+        parsed = datetime.date.fromisoformat(value)
+    except ValueError:
+        return "must be a real date written as YYYY-MM-DD."
+    if parsed.year < 1900:
+        return "must be 1900 or later."
+    from .tax.tables import kampala_today
+
+    # Kampala's date: the server's runs a day behind from 00:00 to 03:00 EAT.
+    if must_be_past and parsed >= kampala_today():
+        return "must be a date in the past."
+    return ""
+
+
+def _form_echo(value: Any) -> str:
+    """A submitted value as the form shows it back for correction: text, and no longer than a field."""
+    if isinstance(value, bool) or not isinstance(value, str | int | float):
+        return ""
+    return str(value)[:MAX_TASK_FIELD_CHARS]
+
+
 def validate_task_fields(
     spec: PortalTaskSpec,
     submitted_fields: Mapping[str, Any],
@@ -1827,12 +1965,28 @@ def validate_task_fields(
         raw_val = submitted_fields.get(f_spec.name)
         if raw_val in (None, "") and f_spec.default_value:
             raw_val = f_spec.default_value
+        # A form field holds text or a number. Anything else was not typed into
+        # one, and would be signed and shown as whatever str() makes of it.
+        if isinstance(raw_val, bool) or not isinstance(raw_val, str | int | float | None):
+            errors[f_spec.name] = f"{f_spec.label} must be text or a number."
+            continue
         val_str = str(raw_val or "").strip()
 
         if not val_str:
             if f_spec.required:
                 missing.append(f_spec.name)
             continue
+        if len(val_str) > MAX_TASK_FIELD_CHARS:
+            errors[f_spec.name] = f"{f_spec.label} is too long (maximum {MAX_TASK_FIELD_CHARS} characters)."
+            continue
+        if _MARKUP_OR_CONTROL_RE.search(val_str):
+            errors[f_spec.name] = f"{f_spec.label} must not contain < or > or control characters."
+            continue
+        if f_spec.input_type == "date":
+            date_error = _date_error(val_str, must_be_past=f_spec.name == "date_of_birth")
+            if date_error:
+                errors[f_spec.name] = f"{f_spec.label} {date_error}"
+                continue
 
         if f_spec.input_type == "select" and f_spec.options:
             option_map = {str(opt["value"]).upper(): str(opt["value"]) for opt in f_spec.options}
@@ -1922,14 +2076,44 @@ def validate_task_fields(
 
 
 def extract_authenticated_tin(user_id: str | None, authenticated_tin: str | None = None) -> str:
-    """Resolve the 10-digit TIN bound to the authenticated user identity, if any."""
-    if authenticated_tin and re.fullmatch(r"\d{10}", str(authenticated_tin).strip()):
-        return str(authenticated_tin).strip()
+    """The TIN a sign-in is bound to, or "".
+
+    A subject binds a TIN only by being one. A ten-digit run inside a longer
+    opaque subject (`google-oauth2|1098765432`) is not a TIN anyone verified,
+    and was read as one (G557). Otherwise the binding is *authenticated_tin*:
+    a TIN established for this caller, today the simulation profile they
+    linked (`linked_account_tin`). It never replaces a subject that is a TIN.
+    """
     uid = str(user_id or "").strip()
-    if not uid:
+    if re.fullmatch(r"\d{10}", uid):
+        return uid
+    bound = str(authenticated_tin or "").strip()
+    return bound if re.fullmatch(r"\d{10}", bound) else ""
+
+
+def linked_account_tin(*, session_id: str | None, user_id: str | None, tenant_id: str = "default") -> str:
+    """The TIN of the simulation profile this signed-in caller linked in this session, or "".
+
+    Outside production a taxpayer connects a local simulation profile by
+    signing in to it (`mcp.connector_accounts`). That link is the one place
+    this service itself establishes which TIN a caller acts for, so it is what
+    the ownership check compares against when the sign-in's subject is not a
+    TIN. Profiles linked to different TINs bind none. In production the link
+    flow is refused, and the binding has to come from the identity provider (G565).
+    """
+    if not user_id or not session_id:
         return ""
-    m = re.search(r"\b(\d{10})\b", uid)
-    return m.group(1) if m else ""
+    try:
+        from .mcp.connector_accounts import get_all_linked_accounts
+
+        owner = db.conversation_state_key(session_id, user_id=user_id, tenant_id=tenant_id or "default")
+        linked = get_all_linked_accounts(owner)
+    except Exception:
+        logger.warning("Linked simulation profile could not be read; no TIN is bound", exc_info=True)
+        return ""
+    tins = {str(account.get("tin") or "") for account in linked.values()}
+    tins = {tin for tin in tins if re.fullmatch(r"\d{10}", tin)}
+    return tins.pop() if len(tins) == 1 else ""
 
 
 def check_subject_tin_ownership(
@@ -1939,14 +2123,25 @@ def check_subject_tin_ownership(
     user_id: str | None,
     authenticated_tin: str | None = None,
 ) -> tuple[bool, str]:
-    """Enforce TPCA Cap. 343 s. 75 (Official Secrecy): User A cannot query User B's private obligations."""
-    if spec.tier != PortalTaskTier.AUTHENTICATED_ACCOUNT_READ:
+    """Enforce TPCA Cap. 343 s. 75 (Official Secrecy): an account task is for the account's owner.
+
+    It covers every task that needs sign-in and names a TIN, a write as much
+    as a read. A sign-in bound to no TIN is refused: it used to pass for any
+    TIN, because there was nothing to compare (G557).
+    """
+    if not spec.requires_auth:
         return True, ""
     target = str(target_tin or "").strip()
     if not target:
         return True, ""
     owner_tin = extract_authenticated_tin(user_id, authenticated_tin)
-    if owner_tin and target != owner_tin:
+    if not owner_tin:
+        return (
+            False,
+            "Access refused under Section 75 of the Tax Procedures Code Act (TPCA) Cap. 343 (Official Secrecy): "
+            f"your sign-in is not linked to a TIN, so an account task for TIN {target} cannot be confirmed here.",
+        )
+    if target != owner_tin:
         return (
             False,
             f"Access refused under Section 75 of the Tax Procedures Code Act (TPCA) Cap. 343 (Official Secrecy): "
@@ -1954,6 +2149,25 @@ def check_subject_tin_ownership(
             f"account records for a different taxpayer TIN ({target}).",
         )
     return True, ""
+
+
+def check_consent_and_role(spec: PortalTaskSpec, *, granted_purposes: Sequence[str], role: str | None) -> str:
+    """Why this caller may not run *spec*, or "".
+
+    A task that needs sign-in also needs the consent it names and a role its
+    tool allows. Both were declared and neither was read on this path (G557).
+    A task open to anyone is consented to on its confirmation card.
+    """
+    if not spec.requires_auth:
+        return ""
+    if spec.required_consent and spec.required_consent not in set(granted_purposes):
+        return f"{spec.title} needs your consent to '{spec.required_consent}', which this sign-in has not given."
+    _ensure_connector_tools_registered()
+    tool = ToolRegistry.get(spec.tool_name)
+    allowed_roles = tuple(getattr(tool.schema, "allowed_roles", ()) or ()) if tool else ()
+    if allowed_roles and str(role or "") not in allowed_roles:
+        return f"Your account's role may not run {spec.title}."
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -1979,8 +2193,16 @@ def execute_portal_task(
     params: Mapping[str, Any],
     *,
     user_id: str | None = None,
+    tenant_id: str = "default",
+    human_confirmed: bool = False,
 ) -> dict[str, Any]:
-    """Execute the underlying registered connector tool for *task_id* with normalized arguments."""
+    """Execute the underlying registered connector tool for *task_id* with normalized arguments.
+
+    *human_confirmed* is True only when a person allowed this proposal. A
+    tier 1 lookup runs without one and is recorded as such. Nothing about the
+    taxpayer is filled in here: a value the params do not carry is sent empty,
+    and the connector refuses it.
+    """
     _ensure_connector_tools_registered()
     spec = classify_portal_task(task_id)
     if spec is None:
@@ -2021,13 +2243,13 @@ def execute_portal_task(
     elif spec.task_id == "tin_apply_individual":
         surname = str(p.get("surname") or "").strip()
         given = str(p.get("given_name") or "").strip()
-        full_name = str(p.get("full_name") or f"{surname} {given}".strip() or "Applicant")
+        full_name = str(p.get("full_name") or f"{surname} {given}".strip())
         tool_args = {
             "nin": str(p.get("nin") or ""),
             "full_name": full_name,
-            "date_of_birth": str(p.get("date_of_birth") or "1992-01-01"),
-            "mobile": str(p.get("mobile_number") or "+256700000000"),
-            "email": str(p.get("email") or "taxpayer@example.ug"),
+            "date_of_birth": str(p.get("date_of_birth") or ""),
+            "mobile": str(p.get("mobile_number") or ""),
+            "email": str(p.get("email") or ""),
             "district": str(p.get("district") or "Kampala"),
         }
     elif spec.task_id == "tin_apply_non_individual":
@@ -2036,8 +2258,8 @@ def execute_portal_task(
             "business_name": str(p.get("legal_name") or ""),
             "category": str(p.get("entity_type") or "NON_INDIVIDUAL_COMPANY"),
             "district": str(p.get("district") or "Kampala"),
-            "mobile": str(p.get("mobile_number") or "+256700000000"),
-            "email": str(p.get("email") or "info@company.co.ug"),
+            "mobile": str(p.get("mobile_number") or ""),
+            "email": str(p.get("email") or ""),
         }
     elif spec.task_id == "dts_order_stamps":
         raw_cat = str(p.get("product_category") or "BOTTLED_WATER").strip().upper()
@@ -2075,7 +2297,7 @@ def execute_portal_task(
     elif spec.task_id == "tin_tax_obligations":
         tool_args = {
             "tin": str(p.get("tin") or ""),
-            "tax_head": str(p.get("tax_head") or "VAT_STANDARD"),
+            "tax_head": str(p.get("tax_head") or ""),
         }
     elif spec.task_id in ("efris_taxpayer_status", "dts_taxpayer_status"):
         tool_args = {"tin": str(p.get("tin") or "")}
@@ -2095,7 +2317,8 @@ def execute_portal_task(
         spec.tool_name,
         tool_args,
         user_id=str(user_id or ""),
-        caller_confirmed=True,
+        tenant_id=str(tenant_id or "default"),
+        caller_confirmed=bool(human_confirmed),
     )
 
     result_dict = dict(raw) if isinstance(raw, Mapping) else {"ok": True, "data": raw}
@@ -2118,8 +2341,13 @@ def build_portal_task_card(
     session_id: str | None = None,
     conversation_id: str | None = None,
     tenant_id: str = "default",
+    unconfirmed_fields: Sequence[str] = (),
 ) -> dict[str, Any]:
-    """Evaluate the 4-Tier Policy for *task_id* and build the declarative A2UI card payload."""
+    """Evaluate the 4-Tier Policy for *task_id* and build the declarative A2UI card payload.
+
+    *unconfirmed_fields* names values the person did not give themselves: read
+    off a page or a screenshot. They are marked on the card like a default.
+    """
     spec = classify_portal_task(task_id)
     if spec is None:
         raise KeyError(f"Unknown portal task_id: {task_id}")
@@ -2205,7 +2433,12 @@ def build_portal_task_card(
 
     # ── Gate 2: Tier 4 Statutory Boundary (`STATUTORY_COPILOT_ONLY`) ──
     if spec.tier == PortalTaskTier.STATUTORY_COPILOT_ONLY:
-        dom_actions = get_portal_dom_recipe(spec.portal_key, state=spec.task_id, entities=fields_map)
+        # Only the task's own fields are staged. Every key that reached here,
+        # including whatever a page showed, used to be passed on (G560).
+        staged_fields = {
+            f.name: _form_echo(fields_map[f.name]) for f in spec.fields if _form_echo(fields_map.get(f.name))
+        }
+        dom_actions = get_portal_dom_recipe(spec.portal_key, state=spec.task_id, entities=staged_fields)
         autofill_url = f"{copilot_portal_url}&autofill=1"
         return {
             "card_type": "statutory_copilot_handoff",
@@ -2221,7 +2454,7 @@ def build_portal_task_card(
                 f"personally reviewed and signed by the taxpayer. The URA AI Co-Pilot has staged your fields and "
                 f"DOM auto-fill recipe up to the final confirmation button."
             ),
-            "staged_fields": dict(fields_map),
+            "staged_fields": staged_fields,
             "dom_actions": dom_actions,
             "copilot_portal_url": autofill_url,
             "open_portal_label": f"Open in {portal_info['name']} with AI Auto-Fill Ready",
@@ -2249,7 +2482,7 @@ def build_portal_task_card(
             "field_errors": field_errors,
             "fields": [
                 f.to_dict(
-                    value=fields_map.get(f.name, ""),
+                    value=_form_echo(fields_map.get(f.name, "")),
                     validation_error=field_errors.get(f.name, ""),
                 )
                 for f in spec.fields
@@ -2260,7 +2493,7 @@ def build_portal_task_card(
 
     # ── Gate 4: Tier 1 Autonomous Execution (`executed_result`) ──
     if spec.tier == PortalTaskTier.AUTONOMOUS_VERIFY:
-        exec_res = execute_portal_task(spec.task_id, validated_params, user_id=user_id)
+        exec_res = execute_portal_task(spec.task_id, validated_params, user_id=user_id, tenant_id=tenant_id)
         dom_actions = get_portal_dom_recipe(spec.portal_key, state=spec.task_id, entities=validated_params)
         err_diag = (
             diagnose_ura_error(str(exec_res.get("error") or exec_res.get("message") or ""))
@@ -2285,6 +2518,33 @@ def build_portal_task_card(
         return card_out
 
     # ── Gate 5: Tier 2 & Tier 3 Claude-Style Confirmation Card (`confirmation_required`) ──
+    # The signed state is honoured for its owner key. Without a signed-in user
+    # or a session id of the caller's own, that key comes from the conversation
+    # id alone and binds the approval to nobody (ADR-0013, G542).
+    if not user_id and not session_is_proven(session_id, conv_id):
+        return {
+            "card_type": "session_required",
+            "task_id": spec.task_id,
+            "portal_key": spec.portal_key,
+            "portal_name": portal_info["name"],
+            "title": spec.title,
+            "tier": spec.tier.value,
+            "error": (
+                "This action needs your confirmation, and a confirmation is tied to your session. "
+                "Send an X-Session-ID header or sign in, then ask again."
+            ),
+            "copilot_portal_url": copilot_portal_url,
+        }
+
+    # A value the taxpayer did not give is shown as assumed, so a default
+    # never reads as something they said (G543).
+    read_elsewhere = set(unconfirmed_fields)
+    assumed_fields = [
+        f.name
+        for f in spec.fields
+        if f.name in validated_params
+        and ((f.default_value and fields_map.get(f.name) in (None, "")) or f.name in read_elsewhere)
+    ]
     display_fields: list[dict[str, Any]] = []
     for f in spec.fields:
         if f.name not in validated_params:
@@ -2297,14 +2557,20 @@ def build_portal_task_card(
                 "value": mask_sensitive_value(f.name, raw_v) if f.sensitive else raw_v,
                 "raw_value": raw_v,
                 "sensitive": f.sensitive,
+                "assumed": f.name in assumed_fields,
             }
         )
 
     displayed_fields_sha256 = compute_displayed_fields_sha256(display_fields)
     canonical_params = json.dumps(validated_params, sort_keys=True, separators=(",", ":"))
     params_sha256 = hashlib.sha256(canonical_params.encode("utf-8")).hexdigest()
+    # Each proposal put in front of a person is its own. The key was a function
+    # of the details alone, so a taxpayer who declined could not allow the same
+    # details when they asked again, and one who edited back to an earlier value
+    # met the card they had edited away from (G559). The same card pressed twice
+    # still has one key, which is what makes an approval run once.
     idempotency_key = "ura_task_" + hashlib.sha256(
-        f"{owner_key}:{spec.task_id}:{canonical_params}".encode()
+        f"{owner_key}:{spec.task_id}:{canonical_params}:{secrets.token_hex(16)}".encode()
     ).hexdigest()[:32]
 
     high_value_requires_ack = (
@@ -2338,11 +2604,9 @@ def build_portal_task_card(
         "requires_auth": spec.requires_auth,
         "statutory_citation": spec.statutory_citation,
         "verification_prompt": spec.verification_warning,
-        "reversibility_notice": (
-            "Reversibility & Safeguard (WCAG 2.2 SC 3.3.4): You can edit any field before allowing execution, "
-            "or cancel at any time. Unpaid PRNs expire automatically after 21 days."
-        ),
+        "reversibility_notice": _reversibility_notice(spec),
         "display_fields": display_fields,
+        "assumed_fields": assumed_fields,
         "displayed_fields_sha256": displayed_fields_sha256,
         "high_value_requires_ack": high_value_requires_ack,
         "fields": [
@@ -2457,11 +2721,28 @@ def handle_portal_task_decision(
     edited_fields: Mapping[str, Any] | None = None,
     displayed_fields_sha256: str | None = None,
     high_value_acknowledged: bool | None = None,
+    record_approval: Callable[[dict[str, Any]], None] | None = None,
+    granted_purposes: Sequence[str] = (),
+    role: str | None = None,
 ) -> dict[str, Any]:
-    """Verify HMAC-signed `request_state`, enforce owner/session binding (`ADR-0013`), and execute, prepare, or decline."""
+    """Verify HMAC-signed `request_state`, enforce owner/session binding (`ADR-0013`), and execute, prepare, or decline.
+
+    An allowed task runs once (ADR-0038): the shared lease is taken, then
+    *record_approval* is called with the evidence of the confirmation, and
+    only then is the portal reached. If either step fails nothing is sent.
+    """
     t0_decision = time.perf_counter()
     unwrapped = mrtr.unwrap_request_state(dict(request_state) if isinstance(request_state, Mapping) else None)
     if unwrapped is None:
+        # The unwrap refuses a lapsed state before anything else, so the message
+        # for expiry further down was never reached and an honest taxpayer was
+        # told the card was tampered with. The date read here only picks the wording.
+        payload = request_state.get("payload") if isinstance(request_state, Mapping) else None
+        expires_at = payload.get("expires_at") if isinstance(payload, Mapping) else None
+        if isinstance(expires_at, int | float) and time.time() > float(expires_at):
+            raise PortalTaskValidationError(
+                "This confirmation has expired (15-minute validity window). Please review and confirm again."
+            )
         raise PortalTaskValidationError("Invalid or tampered request_state signature.")
 
     task_id = str(unwrapped.get("task_id") or "").strip()
@@ -2501,7 +2782,7 @@ def handle_portal_task_decision(
         raise PortalTaskOwnershipError(
             "Cross-session or cross-user request_state replay refused (ADR-0013 owner_key mismatch)."
         )
-    if state_user and user_id and state_user != str(user_id):
+    if state_user and state_user != str(user_id or ""):
         raise PortalTaskOwnershipError(
             "Signed request_state belongs to a different authenticated user."
         )
@@ -2511,6 +2792,10 @@ def handle_portal_task_decision(
         raise PortalTaskValidationError(f"Unknown portal task_id: {task_id}")
     if state_tier and state_tier != spec.tier.value:
         raise PortalTaskValidationError("Intent capsule policy tier mismatch.")
+    # Only these tiers are ever put on a confirmation card. A state for a
+    # lookup or a statutory declaration was not signed by this path (G559).
+    if spec.tier not in (PortalTaskTier.DELEGATED_CONFIRM, PortalTaskTier.AUTHENTICATED_ACCOUNT_READ):
+        raise PortalTaskValidationError("This task is not one a confirmation can run.")
 
     conv_id = str(conversation_id or "default")
     copilot_portal_url = (
@@ -2521,16 +2806,18 @@ def handle_portal_task_decision(
 
     decision_clean = str(decision or "").strip().lower()
     if decision_clean == "prepare":
+        shared_state, _ = _read_shared_task_decision(cache_key)
         with _TASK_CACHE_LOCK:
-            shared_state, _ = _read_shared_task_decision(cache_key)
-            if (
+            settled = (
                 cache_key in _DECLINED_TASK_CACHE
                 or cache_key in _EXECUTED_TASK_CACHE
-                or shared_state in ("declined", "executed")
-            ):
-                raise PortalTaskValidationError(
-                    "Cannot modify a proposal that has already been executed or declined."
-                )
+                or cache_key in _IN_FLIGHT_TASK_KEYS
+                or shared_state is not None
+            )
+        if settled:
+            raise PortalTaskValidationError(
+                "Cannot modify a proposal that has already been executed or declined."
+            )
         allowed_field_names = {f.name for f in spec.fields}
         merged_fields: dict[str, Any] = dict(params)
         if edited_fields and isinstance(edited_fields, Mapping):
@@ -2541,8 +2828,10 @@ def handle_portal_task_decision(
                 if k_str not in allowed_field_names:
                     raise PortalTaskValidationError(f"Unknown field '{k_str}' for task '{spec.task_id}'.")
                 v_str = str(v if v is not None else "")
-                if len(v_str) > 512:
-                    raise PortalTaskValidationError(f"Field '{k_str}' exceeds maximum length (512 chars).")
+                if len(v_str) > MAX_TASK_FIELD_CHARS:
+                    raise PortalTaskValidationError(
+                        f"Field '{k_str}' exceeds maximum length ({MAX_TASK_FIELD_CHARS} chars)."
+                    )
                 merged_fields[k_str] = v_str
         updated_card = build_portal_task_card(
             spec.task_id,
@@ -2568,8 +2857,26 @@ def handle_portal_task_decision(
                 "copilot_portal_url": copilot_portal_url,
                 "updated_card": updated_card,
             }
-        if card_type == "access_denied":
+        if card_type in ("access_denied", "session_required"):
             raise PortalTaskOwnershipError(str(updated_card.get("error") or "Access denied under TPCA s. 75."))
+        # Any edit revokes the approval it replaces: the card edited away from
+        # stayed valid, and allowing both made two PRNs (G559).
+        new_key = str(updated_card.get("idempotency_key") or "")
+        if card_type == "confirmation_required" and new_key and new_key != state_idem:
+            if not _claim_shared_task(cache_key, user_id):
+                raise PortalTaskValidationError(
+                    "Cannot modify a proposal that has already been executed or declined."
+                )
+            try:
+                _write_shared_task_decision(cache_key, declined=True, user_id=user_id)
+            except Exception as exc:
+                logger.error("Superseded portal task proposal could not be retired", exc_info=True)
+                _release_shared_task(cache_key)
+                raise PortalTaskUnavailableError(_NOT_RECORDED) from exc
+            with _TASK_CACHE_LOCK:
+                _DECLINED_TASK_CACHE[cache_key] = time.time()
+                while len(_DECLINED_TASK_CACHE) > _MAX_TASK_CACHE_ENTRIES:
+                    _DECLINED_TASK_CACHE.popitem(last=False)
         # Synchronize conversational entity memory so subsequent turns reflect the inline edit
         with _TASK_CACHE_LOCK:
             mem = dict(_CONVERSATION_ENTITY_MEMORY.get(owner_key) or {})
@@ -2597,13 +2904,33 @@ def handle_portal_task_decision(
         }
 
     if decision_clean in ("disallow", "decline", "cancel"):
-        shared_state, _ = _read_shared_task_decision(cache_key)
         with _TASK_CACHE_LOCK:
-            if cache_key not in _EXECUTED_TASK_CACHE and shared_state != "executed":
+            already_declined = cache_key in _DECLINED_TASK_CACHE
+            running = cache_key in _IN_FLIGHT_TASK_KEYS
+            done = cache_key in _EXECUTED_TASK_CACHE
+        if not already_declined:
+            # The decline takes the same lease an approval would, so it cannot
+            # report "nothing was sent" over a task another worker is sending.
+            holds_lease = not (running or done) and _claim_shared_task(cache_key, user_id)
+            if holds_lease:
+                try:
+                    _write_shared_task_decision(cache_key, declined=True, user_id=user_id)
+                except Exception as exc:
+                    logger.error("Portal task decline could not be recorded", exc_info=True)
+                    _release_shared_task(cache_key)
+                    raise PortalTaskUnavailableError(_NOT_RECORDED) from exc
+            else:
+                # Someone else holds the row. Only an earlier decline makes this
+                # one true; it is already recorded, and is not written again.
+                shared_state, _ = _read_shared_task_decision(cache_key)
+                if shared_state != "declined":
+                    raise PortalTaskConflictError(
+                        "This action is being carried out or was already carried out, so it can no longer be cancelled."
+                    )
+            with _TASK_CACHE_LOCK:
                 _DECLINED_TASK_CACHE[cache_key] = time.time()
                 while len(_DECLINED_TASK_CACHE) > _MAX_TASK_CACHE_ENTRIES:
                     _DECLINED_TASK_CACHE.popitem(last=False)
-                _write_shared_task_decision(cache_key, declined=True, user_id=user_id)
         _record_copilot_decision_metric("disallow", "declined", spec.tier.value, (time.perf_counter() - t0_decision) * 1000)
         return {
             "ok": True,
@@ -2621,7 +2948,9 @@ def handle_portal_task_decision(
     if decision_clean not in ("allow", "accept"):
         raise PortalTaskValidationError(f"Unsupported decision: {decision}")
 
-    # WYSIWYS Displayed Fields Digest check (OWASP ASI09 Human-Agent Trust Exploitation defense)
+    # WYSIWYS (OWASP ASI09): the caller proves which fields it showed. The
+    # digest was optional, so an approval could be sent without the card ever
+    # being rendered (G542).
     expected_display_fields = [
         {"name": f.name, "raw_value": str(params[f.name])}
         for f in spec.fields
@@ -2632,15 +2961,15 @@ def handle_portal_task_decision(
         raise PortalTaskValidationError(
             "WYSIWYS displayed_fields_sha256 integrity failure inside request_state."
         )
-    if displayed_fields_sha256:
-        target_hash = (state_displayed_hash or recomputed_displayed_hash).lower()
-        if not hmac_compare(target_hash, str(displayed_fields_sha256).strip().lower()):
-            raise PortalTaskValidationError(
-                "WYSIWYS displayed_fields_sha256 mismatch (OWASP ASI09): displayed fields do not match signed request_state."
-            )
-    elif os.getenv("PORTAL_COPILOT_REQUIRE_DISPLAY_DIGEST", "false").lower() in ("1", "true", "yes", "on"):
+    if not displayed_fields_sha256:
         raise PortalTaskValidationError(
-            "WYSIWYS displayed_fields_sha256 is required to confirm a portal task (OWASP ASI09)."
+            "displayed_fields_sha256 is required to confirm a portal task: send the SHA-256 of the fields shown "
+            "to the taxpayer (OWASP ASI09)."
+        )
+    target_hash = (state_displayed_hash or recomputed_displayed_hash).lower()
+    if not hmac_compare(target_hash, str(displayed_fields_sha256).strip().lower()):
+        raise PortalTaskValidationError(
+            "WYSIWYS displayed_fields_sha256 mismatch (OWASP ASI09): displayed fields do not match signed request_state."
         )
 
     # Server-enforced high-value statutory liability cognitive friction gate (OWASP ASI09 / WCAG 2.2 SC 3.3.4)
@@ -2649,6 +2978,15 @@ def handle_portal_task_decision(
             "High-value statutory transaction (>= UGX 50,000,000) requires explicit high_value_acknowledged=True confirmation."
         )
 
+    refusal = check_consent_and_role(spec, granted_purposes=granted_purposes, role=role)
+    if refusal:
+        raise PortalTaskOwnershipError(refusal)
+
+    def _replay(payload: Mapping[str, Any]) -> dict[str, Any]:
+        cached = dict(payload)
+        cached["idempotent_replay"] = True
+        return cached
+
     with _TASK_CACHE_LOCK:
         if cache_key in _DECLINED_TASK_CACHE:
             raise PortalTaskValidationError(
@@ -2656,25 +2994,31 @@ def handle_portal_task_decision(
             )
         if cache_key in _EXECUTED_TASK_CACHE:
             _EXECUTED_TASK_CACHE.move_to_end(cache_key)
-            cached = dict(_EXECUTED_TASK_CACHE[cache_key])
-            cached["idempotent_replay"] = True
-            return cached
-        shared_state, shared_payload = _read_shared_task_decision(cache_key)
-        if shared_state == "declined":
-            _DECLINED_TASK_CACHE[cache_key] = time.time()
-            raise PortalTaskValidationError(
-                "This action proposal was already declined by the taxpayer and cannot be replayed."
-            )
-        if shared_state == "executed" and shared_payload:
-            _EXECUTED_TASK_CACHE[cache_key] = dict(shared_payload)
-            cached = dict(shared_payload)
-            cached["idempotent_replay"] = True
-            return cached
+            return _replay(_EXECUTED_TASK_CACHE[cache_key])
         if cache_key in _IN_FLIGHT_TASK_KEYS:
-            raise PortalTaskValidationError("This action proposal is already being executed.")
+            raise PortalTaskConflictError("This action proposal is already being carried out.")
         _IN_FLIGHT_TASK_KEYS.add(cache_key)
 
+    claimed = False
+    sent = False
     try:
+        # The shared store decides; this worker's caches may know nothing of
+        # what another worker did with the same proposal.
+        if not _claim_shared_task(cache_key, user_id):
+            shared_state, shared_payload = _read_shared_task_decision(cache_key)
+            if shared_state == "executed" and shared_payload:
+                with _TASK_CACHE_LOCK:
+                    _EXECUTED_TASK_CACHE[cache_key] = dict(shared_payload)
+                return _replay(shared_payload)
+            if shared_state == "declined":
+                with _TASK_CACHE_LOCK:
+                    _DECLINED_TASK_CACHE[cache_key] = time.time()
+                raise PortalTaskValidationError(
+                    "This action proposal was already declined by the taxpayer and cannot be replayed."
+                )
+            raise PortalTaskConflictError("This action proposal is already being carried out.")
+        claimed = True
+
         # Re-verify 4-Tier Policy Gate at execution time
         if spec.requires_auth and not user_id:
             return {
@@ -2699,11 +3043,40 @@ def handle_portal_task_decision(
         if not allowed_tin:
             raise PortalTaskOwnershipError(secrecy_err)
 
-        exec_result = execute_portal_task(spec.task_id, params, user_id=user_id)
+        if record_approval is not None:
+            evidence = {
+                "task_id": spec.task_id,
+                "portal_key": spec.portal_key,
+                "tier": spec.tier.value,
+                "idempotency_key": state_idem,
+                "params_sha256": computed_hash,
+                "displayed_fields_sha256": target_hash,
+                "display_digest_verified": True,
+                "high_value": state_high_value_ack,
+                "high_value_acknowledged": bool(state_high_value_ack and high_value_acknowledged is True),
+                "review_ms": max(0, int((time.time() - issued_at) * 1000)),
+                "authenticated": bool(user_id),
+            }
+            try:
+                record_approval(evidence)
+            except Exception as exc:
+                logger.error("Portal task approval could not be recorded; the task was not run", exc_info=True)
+                raise PortalTaskUnavailableError(_NOT_RECORDED) from exc
+
+        exec_result = execute_portal_task(
+            spec.task_id, params, user_id=user_id, tenant_id=tenant_id, human_confirmed=True
+        )
         ok = bool(exec_result.get("ok", True))
+        sent = ok
         live = bool(exec_result.get("live", False))
         mode = "live" if live else "simulation"
-        dom_actions = get_portal_dom_recipe(spec.portal_key, state=spec.task_id, entities=dict(params))
+        # After a simulated run the recipe shows how to do it on the real
+        # portal. After a live one it would do it a second time (G561).
+        dom_actions = (
+            []
+            if live
+            else get_portal_dom_recipe(spec.portal_key, state=spec.task_id, entities=dict(params))
+        )
 
         if ok:
             summary_msg = str(
@@ -2757,12 +3130,17 @@ def handle_portal_task_decision(
                 _EXECUTED_TASK_CACHE[cache_key] = dict(response_payload)
                 while len(_EXECUTED_TASK_CACHE) > _MAX_TASK_CACHE_ENTRIES:
                     _EXECUTED_TASK_CACHE.popitem(last=False)
+            try:
                 _write_shared_task_decision(
                     cache_key,
                     declined=False,
                     payload=response_payload,
                     user_id=user_id,
                 )
+            except Exception:
+                # The task ran. The lease stays held until it lapses with the
+                # signed state, so no other worker runs it again.
+                logger.error("Portal task receipt could not be stored in the shared store", exc_info=True)
         _record_copilot_decision_metric(
             "allow",
             "executed" if ok else "error",
@@ -2771,6 +3149,8 @@ def handle_portal_task_decision(
         )
         return response_payload
     finally:
+        if claimed and not sent:
+            _release_shared_task(cache_key)
         with _TASK_CACHE_LOCK:
             _IN_FLIGHT_TASK_KEYS.discard(cache_key)
 
@@ -2949,30 +3329,31 @@ def analyze_portal_context(
     stalled_ms = int(sanitized.get("stalled_duration_ms") or 0)
     active_step = sanitized.get("active_step") or "Form Entry"
 
-    # Build base DOM recipe bound with visible fields
-    base_recipe = get_portal_dom_recipe(portal_key, state=error_banner or active_step, entities=visible_fields)
+    # The recipe is chosen by the portal alone. The banner and the step title
+    # are page text: "Server Error" there used to select the recovery recipe,
+    # whose click on a login link is the shape of a LoginTrap injection.
+    base_recipe = get_portal_dom_recipe(portal_key, entities=visible_fields)
     dom_actions: list[dict[str, Any]] = []
 
+    # What the page says is quoted as the page's words, never as the diagnosis
+    # itself, and it names no element: a selector comes from the server's own
+    # map, or the step carries none and the field is named in words (G545).
     diagnosis_points: list[str] = []
     if error_banner:
-        diagnosis_points.append(f"Portal Alert Banner: {error_banner}")
+        diagnosis_points.append(f"The page shows this notice: \u201c{error_banner}\u201d")
 
     # Prioritize explicit validation errors so the first failing field is scrolled into view and spotlighted
     for idx, err in enumerate(validation_errors):
         field_name = str(err.get("field") or "").strip()
         err_msg = str(err.get("message") or "Invalid or missing value").strip()
-        selector = (
-            str(err.get("selector") or "").strip()
-            or _FIELD_SELECTOR_MAP.get(field_name.lower(), f"[name='{field_name}'], #{field_name}")
-        )
-        diagnosis_points.append(f"Field '{field_name}': {err_msg}")
+        diagnosis_points.append(f"The page shows for field '{field_name}': \u201c{err_msg}\u201d")
         dom_actions.append(
             {
                 "step_number": idx + 1,
                 "element": f"Fix {field_name}",
-                "selector": selector,
+                "selector": _FIELD_SELECTOR_MAP.get(field_name.lower(), ""),
                 "action_type": "spotlight",
-                "fill_value": visible_fields.get(field_name),
+                "fill_value": None,
                 "scroll_to": True,
                 "tooltip": f"{err_msg} — complete or correct this field first.",
                 "security_gate": "safe",
@@ -2982,7 +3363,7 @@ def analyze_portal_context(
     for req_field in empty_required:
         if any(req_field.lower() in a["element"].lower() for a in dom_actions):
             continue
-        selector = _FIELD_SELECTOR_MAP.get(req_field.lower(), f"[name='{req_field}'], #{req_field}")
+        selector = _FIELD_SELECTOR_MAP.get(req_field.lower(), "")
         diagnosis_points.append(f"Required field '{req_field}' is currently empty.")
         dom_actions.append(
             {
@@ -3000,9 +3381,9 @@ def analyze_portal_context(
     # Append remaining recipe steps with sequential numbering
     for step in base_recipe:
         step_copy = dict(step)
-        step_copy["step_number"] = len(dom_actions) + 1
         step_copy.setdefault("scroll_to", len(dom_actions) == 0)
         dom_actions.append(step_copy)
+    dom_actions = harden_dom_actions(dom_actions)
 
     if not diagnosis_points:
         if stalled_ms >= 15_000:
@@ -3064,9 +3445,7 @@ def evaluate_turn(
 ) -> PortalCopilotOutcome | None:
     """Evaluate a chat turn for inline form elicitation, Claude-style confirmation, or live DOM co-pilot help."""
     conv_id = str(conversation_id or "default")
-    has_proven_session = bool(user_id) or (
-        bool(session_id) and str(session_id).strip() not in ("", conv_id, "default")
-    )
+    has_proven_session = bool(user_id) or session_is_proven(session_id, conv_id)
     owner_key = db.conversation_state_key(
         conv_id,
         session_id=session_id or None,
@@ -3080,7 +3459,7 @@ def evaluate_turn(
             user_id=None,
             tenant_id=tenant_id,
         )
-        if bool(session_id) and str(session_id).strip() not in ("", conv_id, "default")
+        if session_is_proven(session_id, conv_id)
         else ""
     )
 
@@ -3191,6 +3570,9 @@ def evaluate_turn(
             )
 
         merged_extracted = {**history_entities, **intent.extracted_fields}
+        # A value on the card that nobody typed, in this message or an earlier
+        # one, came from the page or a screenshot, and the card says so.
+        typed = set(current_turn_entities) | (set(history_entities) - set(attachment_prefill_entities))
         card = build_portal_task_card(
             intent.task_id,
             extracted_fields=merged_extracted,
@@ -3199,6 +3581,7 @@ def evaluate_turn(
             session_id=session_id,
             conversation_id=conv_id,
             tenant_id=tenant_id,
+            unconfirmed_fields=[name for name in merged_extracted if name not in typed],
         )
         return _outcome_from_card(card)
 
@@ -3362,6 +3745,8 @@ def _outcome_from_card(card: dict[str, Any]) -> PortalCopilotOutcome:
         )
     elif ctype == "access_denied":
         reply = f"### Official Secrecy Protection ({citation})\n\n{card.get('error')}"
+    elif ctype == "session_required":
+        reply = f"### Session Required — {title}\n\n{card.get('error')}"
     elif ctype == "inline_form":
         missing = ", ".join(card.get("missing_fields") or [])
         field_errors = card.get("field_errors")

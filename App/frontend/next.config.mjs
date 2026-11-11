@@ -94,12 +94,12 @@ const nextConfig = {
     ];
   },
   async headers() {
-    // Frame embedding: default allows the app itself + Hugging Face, so the UI
-    // renders inside the HF Space iframe. Attackers still cannot frame it (only
-    // the allow-listed origins can), so clickjacking protection is preserved.
+    // Frame embedding: the app itself and huggingface.co, whose Space page is
+    // the one that embeds it. Not https://*.hf.space: hf.space is on the Public
+    // Suffix List, so every Space is another party's site, and that wildcard let
+    // any of them frame the confirmation card (ADR-0038, G548).
     // Set FRAME_ANCESTORS="'none'" at build time for a strict no-embed deploy.
-    const frameAncestors =
-      process.env.FRAME_ANCESTORS || "'self' https://huggingface.co https://*.hf.space";
+    const frameAncestors = process.env.FRAME_ANCESTORS || "'self' https://huggingface.co";
     const strictNoFrame = frameAncestors.trim() === "'none'";
     const securityHeaders = [
       { key: "X-Content-Type-Options", value: "nosniff" },

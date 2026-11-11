@@ -9,7 +9,14 @@ import {
   savePendingPortalContinuation,
 } from "../../lib/portalContinuation";
 import { applyTurnMeta } from "../../lib/turnMeta";
-import type { ChatTurn } from "../../store/useChatStore";
+import { useChatStore, type ChatTurn } from "../../store/useChatStore";
+
+// jsdom cannot raise a click the browser calls trusted, so the Allow guard is
+// switched off here. PortalConfirmGuard.test.tsx tests it as it ships.
+vi.mock("../../lib/confirmGuard", () => ({
+  CONFIRM_ARM_DELAY_MS: 0,
+  isBrowserRaisedClick: () => true,
+}));
 
 describe("sanitizeReturnTo (CWE-601 Open Redirect Protection)", () => {
   it("allows safe same-origin relative paths and rejects external URLs", () => {
@@ -68,6 +75,64 @@ describe("PortalCopilotCard interactive sub-components", () => {
     display_fields: [{ name: 'amount', label: 'Amount', value: '1200' }],
     fields: [{ name: 'amount', label: 'Amount', input_type: 'number', required: true, value: '1200' }],
   };
+
+  it('marks a value the taxpayer did not give as filled in for them', () => {
+    render(
+      <PortalCopilotCard
+        conversationId="c"
+        copilot={{
+          ...confirmation,
+          assumed_fields: ['tax_head'],
+          display_fields: [
+            { name: 'amount', label: 'Amount', value: '1200', assumed: false },
+            { name: 'tax_head', label: 'Tax head', value: 'VAT_STANDARD', assumed: true },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByTestId('portal-confirm-assumed-tax_head')).toHaveTextContent('Filled in for you');
+    expect(screen.queryByTestId('portal-confirm-assumed-amount')).toBeNull();
+    expect(screen.getByTestId('portal-assumed-notice')).toHaveTextContent('you did not give');
+  });
+
+  it('says nothing about assumed values when the taxpayer gave them all', () => {
+    render(<PortalCopilotCard conversationId="c" copilot={confirmation} />);
+    expect(screen.queryByTestId('portal-assumed-notice')).toBeNull();
+  });
+
+  it("labels the consent buttons in the reader's language, whatever the server sent", () => {
+    useChatStore.setState({ locale: 'lg' });
+    try {
+      render(
+        <PortalCopilotCard
+          conversationId="c"
+          copilot={{
+            ...confirmation,
+            allow_label: 'Allow & Execute',
+            edit_label: 'Edit Details',
+            disallow_label: 'Disallow',
+          }}
+        />,
+      );
+      expect(screen.getByTestId('portal-task-allow-btn')).toHaveTextContent('Kkiriza & Kola');
+      expect(screen.getByTestId('portal-task-edit-btn')).toHaveTextContent('Kyusa Ebikwata ku Nsonga');
+      expect(screen.getByTestId('portal-task-disallow-btn')).toHaveTextContent('Gaana');
+    } finally {
+      useChatStore.setState({ locale: 'en' });
+    }
+  });
+
+  it('says a PRN expires unpaid only on a payment reference', () => {
+    const { unmount } = render(<PortalCopilotCard conversationId="c" copilot={confirmation} />);
+    expect(screen.getByTestId('portal-reversibility-notice')).toHaveTextContent('PRN');
+    unmount();
+
+    render(
+      <PortalCopilotCard conversationId="c" copilot={{ ...confirmation, task_id: 'tin_apply_individual' }} />,
+    );
+    expect(screen.getByTestId('portal-reversibility-notice')).not.toHaveTextContent('PRN');
+    expect(screen.getByTestId('portal-reversibility-notice')).toHaveTextContent('cannot be undone');
+  });
 
   it('does not substitute a server digest when local verification is unavailable', async () => {
     vi.stubGlobal('crypto', {});

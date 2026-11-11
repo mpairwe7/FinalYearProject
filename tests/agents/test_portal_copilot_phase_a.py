@@ -136,7 +136,9 @@ def test_four_tier_portal_task_catalog_completeness() -> None:
 
     assert classify_portal_task("tin_search_verify").tier == PortalTaskTier.AUTONOMOUS_VERIFY
     assert classify_portal_task("payment_generate_prn").tier == PortalTaskTier.DELEGATED_CONFIRM
-    assert classify_portal_task("tin_tax_obligations").tier == PortalTaskTier.AUTHENTICATED_ACCOUNT_READ
+    assert classify_portal_task("ura_account_profile").tier == PortalTaskTier.AUTHENTICATED_ACCOUNT_READ
+    # Registering a tax head is a write, so it is not in a tier that reads (G556).
+    assert classify_portal_task("tin_tax_obligations").tier == PortalTaskTier.DELEGATED_CONFIRM
     assert classify_portal_task("return_filing_submit").tier == PortalTaskTier.STATUTORY_COPILOT_ONLY
 
 
@@ -179,7 +181,7 @@ def test_analyze_portal_context_scrubs_secrets_and_spotlights_errors() -> None:
     assert "ddlTaxHead" in first_action["selector"]
 
 
-def test_policy_gates_inline_form_confirmation_step_up_and_execution() -> None:
+def test_policy_gates_inline_form_confirmation_step_up_and_execution(tmp_db) -> None:
     """Verify Gate 1 (Step-Up Login), Gate 2 (Inline Form), Gate 4 (Claude-style Confirmation), and Execution."""
     clear_portal_task_cache()
     # 1. Missing inputs -> Inline Form
@@ -223,6 +225,7 @@ def test_policy_gates_inline_form_confirmation_step_up_and_execution() -> None:
             card_confirm["idempotency_key"],
             owner_key=wrong_owner,
             conversation_id="conv-a",
+            displayed_fields_sha256=card_confirm["displayed_fields_sha256"],
         )
 
     exec_out = handle_portal_task_decision(
@@ -231,6 +234,7 @@ def test_policy_gates_inline_form_confirmation_step_up_and_execution() -> None:
         card_confirm["idempotency_key"],
         owner_key=owner_key,
         conversation_id="conv-a",
+        displayed_fields_sha256=card_confirm["displayed_fields_sha256"],
     )
     assert exec_out["ok"] is True
     assert exec_out["status"] == "executed"
@@ -249,6 +253,7 @@ def test_policy_gates_inline_form_confirmation_step_up_and_execution() -> None:
             card_confirm["idempotency_key"],
             owner_key=owner_key,
             conversation_id="conv-a",
+            displayed_fields_sha256=card_confirm["displayed_fields_sha256"],
         )
 
     # 4. Masking helper & sales-figure exclusion

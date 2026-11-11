@@ -30,6 +30,16 @@ class TestPlaceholderTranslation:
     def test_sql_without_placeholders_is_unchanged(self):
         assert db._to_pg_placeholders("SELECT 1") == "SELECT 1"
 
+    def test_a_literal_percent_is_escaped_for_the_postgres_driver(self):
+        """psycopg reads ``%`` as the start of a placeholder whenever parameters are passed.
+
+        ``LIKE 'state_%'`` went through unescaped, so ``init_db`` raised on
+        Postgres and a production start refused to continue (G554).
+        """
+        assert db._to_pg_placeholders("SELECT 1 FROM t WHERE a NOT LIKE 'state_%' AND b = ?") == (
+            "SELECT 1 FROM t WHERE a NOT LIKE 'state_%%' AND b = %s"
+        )
+
     def test_no_migrated_module_puts_a_question_mark_inside_a_string_literal(self):
         """The translator rewrites every ``?``, including one inside quotes.
 
@@ -196,6 +206,71 @@ class TestAuditUsesTheSeam:
         report = verify_chain()
         assert not report.valid
         assert report.breaks
+
+
+@pytest.mark.skipif(
+    not os.getenv("POSTGRES_DSN") or os.getenv("ANALYTICS_BACKEND", "").lower() != "postgres",
+    reason="set POSTGRES_DSN and ANALYTICS_BACKEND=postgres to verify the workflow lease",
+)
+class TestWorkflowLeaseOnPostgres:
+    """One approval, one run (ADR-0038): the lease has to hold on the backend production runs."""
+
+    WORKFLOW = "portal_task_decision"
+
+    @pytest.fixture(autouse=True)
+    def _bound_to_postgres(self):
+        # Without this, a DSN with the default backend runs these on SQLite and passes.
+        from app import postgres
+
+        assert db.init_db is postgres.init_db
+        assert db.claim_workflow_session is postgres.claim_workflow_session
+
+    def _row(self) -> str:
+        import time
+
+        return f"{self.WORKFLOW}:{os.getpid()}-{time.time_ns()}"
+
+    def test_the_schema_bootstrap_completes(self):
+        # A LIKE pattern in the legacy migration raised here before G554.
+        db.init_db()
+
+    def test_one_caller_takes_the_lease_until_it_is_released(self):
+        db.init_db()
+        row = self._row()
+        assert db.claim_workflow_session(row, self.WORKFLOW, lease_seconds=900)
+        assert not db.claim_workflow_session(row, self.WORKFLOW, lease_seconds=900)
+        assert not db.claim_workflow_session(row, self.WORKFLOW, lease_seconds=900, tenant_id="other")
+        assert not db.claim_workflow_session(row, "another_workflow", lease_seconds=900)
+
+        db.upsert_workflow_session(row, self.WORKFLOW, 1, {"receipt": "r1"}, status="completed")
+        assert not db.claim_workflow_session(row, self.WORKFLOW, lease_seconds=900)
+        assert db.get_workflow_session(row)["slots"] == {"receipt": "r1"}
+
+        db.upsert_workflow_session(row, self.WORKFLOW, 0, {}, status="active")
+        assert db.claim_workflow_session(row, self.WORKFLOW, lease_seconds=900)
+        assert db.claim_workflow_session(row, self.WORKFLOW, lease_seconds=0), "a lapsed lease was not taken"
+
+    def test_concurrent_callers_get_one_winner(self):
+        import threading
+
+        db.init_db()
+        row = self._row()
+        callers = 16
+        barrier = threading.Barrier(callers)
+        wins: list[bool] = []
+
+        def racer() -> None:
+            barrier.wait()
+            wins.append(db.claim_workflow_session(row, self.WORKFLOW, lease_seconds=900))
+
+        threads = [threading.Thread(target=racer) for _ in range(callers)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert len(wins) == callers
+        assert wins.count(True) == 1
 
 
 @pytest.mark.skipif(

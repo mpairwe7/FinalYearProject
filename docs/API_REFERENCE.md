@@ -336,6 +336,57 @@ identifier never becomes a sidebar title. Anonymous callers are allowed
 
 ---
 
+### Decide a Portal Task
+
+`POST /v1/portal/tasks/execute` allows, declines or edits a task the co-pilot proposed on a
+`confirmation_required` card (ADR-0014, ADR-0038). The card comes from `/v1/chat` as
+`portal_copilot`, with a signed `request_state`, an `idempotency_key` and the `display_fields`
+the taxpayer is shown.
+
+**Who may call it**: the taxpayer who was shown the card. `X-Session-ID` or a signed-in user is
+required: the signed state is honoured only for the session or user it was signed for.
+Administrators and auditors are refused (403). A browser request from another site
+(`Sec-Fetch-Site` other than `same-origin` or `none`) is refused unless its origin is on the
+CORS list.
+
+**Request**
+
+```json
+{
+  "decision": "allow",
+  "request_state": {"alg": "hmac-sha256", "sig": "…", "payload": {"…": "…"}},
+  "idempotency_key": "ura_task_3f1c…",
+  "conversation_id": "conv-123",
+  "displayed_fields_sha256": "9b2e…64 hex…",
+  "high_value_acknowledged": true
+}
+```
+
+| Field | Notes |
+| --- | --- |
+| `decision` | `allow`/`accept`, `disallow`/`decline`/`cancel`, or `prepare` (re-validate and re-sign after an edit, with `edited_fields`) |
+| `displayed_fields_sha256` | Required to allow. Lower-case hex SHA-256 of the UTF-8 bytes of a JSON array with one `{"name": …, "value": …}` object per entry of `display_fields`, in that order. `value` is the entry's `raw_value` as a string (its `value` when there is no `raw_value`). Serialise with sorted keys, no whitespace (`,` and `:` separators) and non-ASCII characters unescaped: in Python, `json.dumps(items, sort_keys=True, separators=(",", ":"), ensure_ascii=False)`. The server compares it with the digest it signed. |
+| `high_value_acknowledged` | Required to be `true` when the card has `high_value_requires_ack` (≥ UGX 50,000,000) |
+
+**Responses**
+
+| Status | Meaning |
+| --- | --- |
+| 200 | `status` is `executed`, `declined`, `prepared`, `validation_error`, `requires_auth` or `error`. `idempotent_replay: true` when the stored receipt of an earlier approval is returned. `live` and `mode` say whether a simulator answered. |
+| 400 | Tampered or expired state (15 minutes), a missing or wrong digest, a missing high-value acknowledgement, a proposal already declined, or an edit to a proposal already settled or in flight |
+| 403 | No session, another session or user, an administrator or auditor, a request from another site, a sign-in task without the consent it names or for a role its tool does not allow, or an account task for a TIN the sign-in is not bound to |
+| 409 | The proposal is being carried out by another request, or a decline arrived after it ran |
+| 503 | The decision could not be recorded (the decision store or, with `audit_ledger` on, the ledger). Nothing was sent to the portal; retry. Also returned when `portal_copilot` is off. |
+
+One approval runs the task once: a second `allow` with the same `idempotency_key` returns the
+first receipt. Each card has its own key, so asking again gives a new proposal, and a `prepare`
+that changes the card retires the one it replaces. With `audit_ledger` on, `portal_task_approved` is appended before the task runs
+and the outcome row after it.
+
+**Rate Limiting**: Same limit as `/v1/chat` (`RATE_LIMIT`).
+
+---
+
 ### Trigger Re-Indexing
 
 Rebuild the Qdrant vector index through the staged lifecycle (`app.index_lifecycle`, ADR-0019 / G286). The whole corpus (FAQ, teacher QA, PDF and crawl chunks) is built into a candidate collection, which must pass a canary retrieval gate. One atomic alias swap then promotes it, and the retriever is re-initialised. The serving collection is never rebuilt in place. Requires `Authorization: Bearer <INDEX_API_KEY>` when configured (OWASP LLM10 — unbounded consumption protection).

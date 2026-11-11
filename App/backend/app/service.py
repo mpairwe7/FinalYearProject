@@ -6936,6 +6936,9 @@ class ChatModel:
             portal_task_submission=portal_task_submission,
             conversation_history=eff_history,
             user_id=user_id,
+            authenticated_tin=pc_mod.linked_account_tin(
+                session_id=session_id, user_id=user_id, tenant_id=eff_tenant
+            ),
             session_id=session_id,
             conversation_id=thread_id,
             tenant_id=eff_tenant,

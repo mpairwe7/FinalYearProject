@@ -607,6 +607,108 @@ THREAT_REGISTRY: list[dict] = [
         "status": "in_progress",
     },
     {
+        "id": "T83",
+        "category": "Repudiation",
+        "description": (
+            "A portal task a taxpayer approved once runs twice across workers, or runs with no ledger record "
+            "of the approval; a store or ledger outage is read as 'not run yet' (ADR-0038, G541-G542, "
+            "OWASP ASI02/ASI09)"
+        ),
+        "owasp_llm": "LLM06",
+        "mitre_atlas": "AML.T0053",
+        "mitigation": (
+            "A lease on the proposal's shared row, taken in one statement on SQLite and Postgres, decides which "
+            "worker runs the task; the loser replays the receipt or gets 409. The approval is appended to the "
+            "hash-chained ledger, with the evidence of the confirmation, before the portal is reached, and a "
+            "store or ledger that cannot be written refuses the decision. Residual: a worker that dies between "
+            "the portal call and the receipt write leaves the lease held until it lapses, and the outcome is "
+            "read from the connector, not from this service"
+        ),
+        "evidence": ["App/backend/app/portal_copilot.py", "App/backend/app/database.py",
+                     "App/backend/app/postgres.py", "App/backend/app/main.py",
+                     "tests/agents/test_browser_agent_assurance_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
+        "id": "T84",
+        "category": "Tampering",
+        "description": (
+            "DOM telemetry from a hostile, compromised or injected page steers the co-pilot: it names the "
+            "element to act on, selects a click by its text, passes on a link to another login page, exposes a "
+            "credential field under another name, or poses as the assistant's diagnosis (ADR-0038, G545-G547, "
+            "OWASP ASI01; LoginTrap arXiv:2608.04741, EIA arXiv:2409.11295)"
+        ),
+        "owasp_llm": "LLM01",
+        "mitre_atlas": "AML.T0051",
+        "mitigation": (
+            "A selector comes from the server's own map and the client's is ignored; a field name that is not an "
+            "identifier is dropped. Every action list leaves through harden_dom_actions: a click waits for the "
+            "taxpayer, nothing targets a credential field, an unknown kind is dropped. Telemetry is bounded, "
+            "folded to one line, cleared of the fence tag and untrusted links, and quoted as what the page "
+            "shows. 27 hostile pages run as a gate. Residual: the instruction-phrase screen misses sentences it "
+            "does not know; the structural rules do not depend on it"
+        ),
+        "evidence": ["App/backend/app/portal_copilot.py", "App/backend/app/tools/portal_navigator_data.py",
+                     "App/backend/app/models.py", "evals/portal_copilot_scenarios/adversarial.jsonl",
+                     "tests/agents/test_portal_copilot_adversarial_eval.py",
+                     "tests/agents/test_browser_agent_assurance_2026_11.py"],
+        "status": "mitigated",
+    },
+    {
+        "id": "T85",
+        "category": "Spoofing",
+        "description": (
+            "An approval is given by something other than the taxpayer looking at the card: another site frames "
+            "the app and overlays the Allow button, a page script or extension calls click(), a request comes "
+            "from another origin, or an agent driving the browser approves for them; or the card shows a value "
+            "the taxpayer never gave (ADR-0038, G543-G544, G548-G549, G551, OWASP ASI09)"
+        ),
+        "owasp_llm": "LLM06",
+        "mitre_atlas": "AML.T0048",
+        "mitigation": (
+            "frame-ancestors names only the app and huggingface.co; Allow needs a browser-raised click and is "
+            "held back when what it approves changes; the decision route refuses a request a browser says came "
+            "from another site, needs a session of the caller's own and the SHA-256 of the fields shown; no "
+            "identity field has a default and an assumed value is marked. Not mitigated: nothing in a page "
+            "tells a person from an agent that drives the browser's real input, so a high-value approval needs "
+            "a step-up at the identity provider (G551); inline script on the app's own origin can call the "
+            "route itself (G553)"
+        ),
+        "evidence": ["App/frontend/next.config.mjs", "App/frontend/src/lib/confirmGuard.ts",
+                     "App/frontend/src/components/PortalCopilotCard.tsx", "App/backend/app/main.py",
+                     "App/frontend/src/__tests__/components/PortalConfirmGuard.test.tsx",
+                     "App/frontend/src/__tests__/config/securityHeaders.test.ts",
+                     "tests/agents/test_browser_agent_assurance_2026_11.py"],
+        "status": "in_progress",
+    },
+    {
+        "id": "T86",
+        "category": "Elevation of Privilege",
+        "description": (
+            "A portal task does more, or for someone else, than the person asked: a 'check' of obligations "
+            "registers a tax head; a signed-in caller runs an account task on another taxpayer's TIN or without "
+            "the consent it names; a public lookup returns a taxpayer's NIN and contacts; a card edited away "
+            "from still runs; values a page shows replace the ones the person typed (ADR-0038, G556-G561, "
+            "OWASP ASI02/ASI03/ASI09)"
+        ),
+        "owasp_llm": "LLM06",
+        "mitre_atlas": "AML.T0053",
+        "mitigation": (
+            "A read tier holds only read-only tools and a check reads the account; the TIN ownership check fails "
+            "closed, binds only a subject that is a TIN and covers signed-in writes; consent and role are checked "
+            "before a sign-in task runs; the public lookup returns public fields; an edit retires the proposal it "
+            "replaces and each proposal has its own key; typed values beat the page's and a value nobody typed is "
+            "marked. Residual: a real identity provider's subject carries no verified TIN, so account tasks are "
+            "refused for those sign-ins until it issues one (G565); an unsigned state is accepted outside "
+            "production when no secret is set (G564)"
+        ),
+        "evidence": ["App/backend/app/portal_copilot.py", "App/backend/app/main.py",
+                     "plugins/tin_registration/connector.py",
+                     "App/backend/app/tools/portal_navigator_data.py",
+                     "tests/agents/test_browser_agent_assurance_2026_11.py"],
+        "status": "in_progress",
+    },
+    {
         "id": "T01",
         "category": "Spoofing",
         "description": "Attacker impersonates legitimate API client",
