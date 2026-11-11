@@ -129,7 +129,8 @@ Four rules, each enforced in one place.
 - A selector comes from the server's own map. A field the server does not know is named in
   words and carries no selector. The client's `selector` is accepted and ignored.
 - Every action list leaves through `harden_dom_actions`:
-  - a click waits for the taxpayer, whatever chose it;
+  - a click waits for the taxpayer, whatever chose it, and targets a button or an input, never
+    a link: a link goes wherever the page points it, and the server cannot see where;
   - nothing targets a credential field;
   - an action of an unknown kind is dropped;
   - only a fill or a select carries a value.
@@ -266,3 +267,7 @@ Considered and not adopted:
   - The API reference states the digest's exact serialisation.
   - The Postgres lease tests run only when both the DSN and the backend select Postgres, and
     assert that they do.
+- **Review round 2.** CodeRabbit confirmed the recovery fix and noted that `a#loginLink` still
+  named a link whose destination nothing checks. No recipe clicks a link now: the recovery step
+  clicks a refresh button, the generic step lost `a.action-link`, and `harden_dom_actions` drops
+  a link from any click's selector (a click left with no target becomes a spotlight).

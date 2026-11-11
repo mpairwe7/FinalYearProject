@@ -9,6 +9,7 @@ once a person allows it. Each test here reproduces a gap from the audit
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import pytest
@@ -761,6 +762,34 @@ class TestThePageDoesNotChooseAClick:
 
     @pytest.mark.parametrize("portal", RECIPE_PORTALS)
     @pytest.mark.parametrize("state", RECIPE_STATES)
+    def test_no_recipe_clicks_a_link(self, portal: str, state: str) -> None:
+        # A link goes wherever the page points it, and the server cannot see where
+        # (CodeRabbit, PR 713). A recipe clicks buttons and inputs.
+        links = [
+            (step["element"], step["selector"])
+            for step in pc.get_portal_dom_recipe(portal, state=state)
+            if step["action_type"] == "click"
+            and any(re.match(r"a(?![\w-])", part.strip()) for part in step["selector"].split(","))
+        ]
+        assert links == []
+
+    def test_a_click_on_a_link_is_dropped_on_the_way_out(self) -> None:
+        hardened = harden_dom_actions(
+            [
+                {"element": "Both", "selector": "a#login, button#refresh", "action_type": "click"},
+                {"element": "Link", "selector": "a.next", "action_type": "click"},
+                {"element": "Look", "selector": "a.help", "action_type": "spotlight"},
+            ]
+        )
+
+        assert [(s["element"], s["action_type"], s["selector"], s["security_gate"]) for s in hardened] == [
+            ("Both", "click", "button#refresh", "requires_confirmation"),
+            ("Link", "spotlight", "a.next", "safe"),
+            ("Look", "spotlight", "a.help", "safe"),
+        ]
+
+    @pytest.mark.parametrize("portal", RECIPE_PORTALS)
+    @pytest.mark.parametrize("state", RECIPE_STATES)
     def test_no_recipe_reaches_for_any_login_link(self, portal: str, state: str) -> None:
         reaching = [
             step["selector"]
@@ -782,7 +811,7 @@ class TestThePageDoesNotChooseAClick:
     def test_the_rules_hold_for_any_action_list(self) -> None:
         hardened = harden_dom_actions(
             [
-                {"element": "Go", "selector": "a#next", "action_type": "click", "security_gate": "safe"},
+                {"element": "Go", "selector": "button#next", "action_type": "click", "security_gate": "safe"},
                 {"element": "Pw", "selector": "input[type='password']", "action_type": "fill", "fill_value": "x"},
                 {"element": "Nav", "selector": "body", "action_type": "navigate", "fill_value": "https://x.example"},
                 {"element": "Look", "selector": "#banner", "action_type": "spotlight", "fill_value": "1000123456"},

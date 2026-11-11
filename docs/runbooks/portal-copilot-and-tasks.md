@@ -107,7 +107,7 @@ DOM telemetry (`portal_context`) is evidence of what a page shows. To check the 
 PYTHONPATH=App/backend python3 -m pytest tests/agents/test_portal_copilot_adversarial_eval.py -q
 ```
 
-- A recipe is chosen by the portal alone, never by a banner or a step title on the page; the recovery recipe's click names elements, never a substring of a link.
+- A recipe is chosen by the portal alone, never by a banner or a step title on the page. A click targets a button or an input, never a link: `harden_dom_actions` drops a link from a click's selector, and a click left with no target becomes a spotlight.
 - A selector in `dom_actions` is one the server wrote (`_FIELD_SELECTOR_MAP`, a recipe in `portal_navigator_data.py`) or is empty. To support a new field by selector, add it to the map; never read one from telemetry.
 - A new recipe step needs no gate of its own: `harden_dom_actions` makes every click wait for the taxpayer and drops a step that targets a credential field or has an unknown `action_type`.
 - To add an attack, add a line to `evals/portal_copilot_scenarios/adversarial.jsonl`.

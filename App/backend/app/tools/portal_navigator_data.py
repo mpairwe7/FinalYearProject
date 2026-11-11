@@ -6617,6 +6617,10 @@ _CREDENTIAL_SELECTOR_RE = re.compile(
 )
 
 
+#: A selector whose element is a link (`a`, `a#id`, `a.class`, `a[href]`).
+_LINK_SELECTOR_RE = re.compile(r"a(?![\w-])")
+
+
 def selector_targets_a_credential(selector: str) -> bool:
     """True when *selector* names a password, one-time code, PIN or card security field."""
     return bool(_CREDENTIAL_SELECTOR_RE.search(str(selector or "")))
@@ -6632,7 +6636,9 @@ def harden_dom_actions(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     - an action of an unknown kind is dropped;
     - nothing targets a credential field;
-    - a click waits for the taxpayer, whatever chose it;
+    - a click waits for the taxpayer, whatever chose it, and targets a button
+      or an input, never a link: a link goes wherever the page points it, and
+      the server cannot see where. A click left with no target points instead;
     - only a fill or a select carries a value, and one with nothing to enter
       points at the field instead: a recipe used to fill in a tax head, a
       commodity code or a payment mode nobody gave (G561).
@@ -6647,13 +6653,20 @@ def harden_dom_actions(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         step = dict(action)
         step["selector"] = selector
+        if kind in ("fill", "select") and action.get("fill_value") in (None, ""):
+            kind = step["action_type"] = "spotlight"
+        if kind == "click":
+            targets = [part.strip() for part in selector.split(",") if part.strip()]
+            kept = [part for part in targets if not _LINK_SELECTOR_RE.match(part)]
+            if not kept:
+                kind = step["action_type"] = "spotlight"
+            else:
+                step["selector"] = ", ".join(kept)
         step["security_gate"] = (
             "requires_confirmation"
             if kind == "click" or action.get("security_gate") == "requires_confirmation"
             else "safe"
         )
-        if kind in ("fill", "select") and action.get("fill_value") in (None, ""):
-            kind = step["action_type"] = "spotlight"
         if kind not in ("fill", "select"):
             step["fill_value"] = None
         step["step_number"] = len(hardened) + 1
@@ -6721,8 +6734,9 @@ def _portal_dom_recipe(
             {
                 "step_number": 2,
                 "element": "Recovery / Back Link",
-                # Named elements only: a[href*='login'] also matched another site's login page.
-                "selector": "a#loginLink, button#btnRefresh",
+                # A button only. a[href*='login'] matched another site's login page, and any
+                # link goes wherever the page points it (CodeRabbit, PR 713).
+                "selector": "button#btnRefresh",
                 "action_type": "click",
                 "fill_value": None,
                 "scroll_to": True,
@@ -7120,7 +7134,7 @@ def _portal_dom_recipe(
             {
                 "step_number": 3,
                 "element": "Primary Action Element",
-                "selector": "button.btn-primary, a.action-link, input[type='submit']",
+                "selector": "button.btn-primary, input[type='submit']",
                 "action_type": "click",
                 "fill_value": None,
                 "scroll_to": True,
