@@ -277,11 +277,22 @@ def _seed_errors() -> list[str]:
     return []
 
 
+def _receptionist_flag_on() -> bool:
+    """The receptionist flag as the running service reads it, overrides included."""
+    try:
+        from .flags import flags
+
+        return bool(flags.is_enabled("voice_receptionist"))
+    except Exception:  # noqa: BLE001 - the report falls back to the environment
+        return _truthy("FLAG_VOICE_RECEPTIONIST")
+
+
 def _receptionist_errors() -> list[str]:
     from .receptionist.config import local_engine_errors
     from .receptionist.livekit import production_errors
 
-    return [*production_errors(), *local_engine_errors()]
+    enabled = _receptionist_flag_on()
+    return [*production_errors(enabled_override=enabled), *local_engine_errors(enabled_override=enabled)]
 
 
 def _privacy_governance_errors() -> list[str]:
@@ -381,8 +392,14 @@ def _turn_deadline_errors() -> list[str]:
     return []
 
 
-def gap_gate_errors() -> list[str]:
-    """Production-only errors for remaining prototype features, plus sovereign-mode errors when SOVEREIGN_MODE=true."""
+def gap_gate_errors(*, include_receptionist: bool = True) -> list[str]:
+    """Production-only errors for remaining prototype features, plus sovereign-mode errors when SOVEREIGN_MODE=true.
+
+    *include_receptionist* False leaves out G36, for the startup check that
+    refuses to start the API: a receptionist that cannot run makes calls
+    unavailable instead (``receptionist.start``, ADR-0041). The go-live report
+    keeps it.
+    """
     errors: list[str] = []
     if is_sovereign_mode():
         errors.extend(sovereign_mode_errors())
@@ -397,7 +414,8 @@ def gap_gate_errors() -> list[str]:
     errors.extend(_dpo_errors())
     errors.extend(_tenancy_errors())
     errors.extend(_seed_errors())
-    errors.extend(_receptionist_errors())
+    if include_receptionist:
+        errors.extend(_receptionist_errors())
     errors.extend(_privacy_governance_errors())
     errors.extend(_cross_border_errors())
     errors.extend(_mcp_security_errors())
@@ -438,7 +456,7 @@ def evaluate_gate(gap: str) -> dict[str, Any]:
             "full_delivery": FULL_DELIVERY[gap],
         }
     errors = checkers[gap]()
-    if gap == "G36" and not errors and not _truthy("FLAG_VOICE_RECEPTIONIST"):
+    if gap == "G36" and not errors and not _receptionist_flag_on():
         return {
             "gap": gap,
             "ok": True,

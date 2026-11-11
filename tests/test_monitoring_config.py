@@ -27,12 +27,12 @@ MONITORING = ROOT / "monitoring"
 APP = ROOT / "App" / "backend" / "app"
 REPO_URL = "https://github.com/mpairwe7/FinalYearProject/blob/dev/"
 
-_CALL = re.compile(r"metrics\.(inc|observe|set_gauge|add_gauge)\(\s*\"([a-zA-Z_:][a-zA-Z0-9_:]*)\"")
+_CALL = re.compile(r"metrics\.(inc|observe|set_gauge_min|set_gauge|add_gauge)\(\s*\"([a-zA-Z_:][a-zA-Z0-9_:]*)\"")
 _MAPPED = re.compile(r"\(\"(counter|gauge|histogram)\",\s*\"([a-zA-Z_][a-zA-Z0-9_]*)\"")
 _LIFECYCLE = re.compile(r"\"(ura_(?:qdrant|crawl)_[a-z_]+)\"")
 _URA_SERIES = re.compile(r"\bura_[a-z0-9_]+")
 _RECORDING = re.compile(r"\bura:[a-zA-Z0-9_:]+")
-_KIND = {"inc": "counter", "observe": "histogram", "set_gauge": "gauge", "add_gauge": "gauge"}
+_KIND = {"inc": "counter", "observe": "histogram", "set_gauge": "gauge", "set_gauge_min": "gauge", "add_gauge": "gauge"}
 
 
 def _exported(name: str) -> str:

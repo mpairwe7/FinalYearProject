@@ -341,7 +341,7 @@ class ReceptionistTTS(unittest.IsolatedAsyncioTestCase):
         speech = MagicMock()
         speech.tts_cache_get.return_value = None
 
-        async def fake_stream(text, language):
+        async def fake_stream(text, language, *, voice=None):
             yield b"\x00\x10" * 2400
             yield b"\x00\x10" * 2400
 
@@ -357,7 +357,7 @@ class ReceptionistTTS(unittest.IsolatedAsyncioTestCase):
         speech = MagicMock()
         speech.tts_cache_get.return_value = None
 
-        async def cut_short(text, language):
+        async def cut_short(text, language, *, voice=None):
             yield b"\x00\x10" * 2400
             raise orpheus_tts.OrpheusIncomplete("HTTP 503")
 
@@ -383,7 +383,7 @@ class ReceptionistTTS(unittest.IsolatedAsyncioTestCase):
         speech.synthesize.return_value = MagicMock(audio=b"RIFF", backend="spark_tts_salt")
         speech._decode_audio_bytes.return_value = [0.0] * 320
 
-        async def down(text, language):
+        async def down(text, language, *, voice=None):
             raise orpheus_tts.OrpheusUnavailable("down")
             yield b""  # pragma: no cover — makes this an async generator
 

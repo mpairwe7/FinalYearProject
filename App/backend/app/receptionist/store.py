@@ -103,8 +103,13 @@ def _ensure_columns(table: str, columns: dict[str, str]) -> None:
                 raise
 
 
-def init_receptionist_schema() -> None:
-    """Create the voice_calls and voice_call_turns tables if they do not exist."""
+def init_receptionist_schema(*, strict: bool = False) -> None:
+    """Create the voice_calls and voice_call_turns tables if they do not exist.
+
+    A failure is logged and swallowed for the callers that run this on every
+    database start; with *strict* it is raised, for the receptionist's own
+    startup, which must know that calls cannot be recorded.
+    """
     try:
         db.execute_script(
             """
@@ -180,6 +185,69 @@ def init_receptionist_schema() -> None:
         logger.info("Voice receptionist schema initialized")
     except Exception:
         logger.exception("Failed to initialize voice receptionist schema")
+        if strict:
+            raise
+
+
+def end_stale_calls(
+    *,
+    now: float | None = None,
+    ceiling_s: float | None = None,
+    everything: bool = False,
+    before: float | None = None,
+) -> int:
+    """End call rows no live call stands behind; returns how many.
+
+    Call rooms live in the process. When it dies its rows stay ``ai``,
+    ``transferring`` or ``bridged``: the console lists them as live, and an
+    officer shown as on one of them stays ``on_call``. A row older than the
+    longest a call may run cannot be live whichever process started it, so
+    that is always safe to end. With *everything*, every live row is ended:
+    for a process that is the deployment's only worker and has just started.
+
+    A caller who was waiting for or talking to an officer is owed a callback.
+    The officers named on those rows are taken off them.
+    """
+    from .config import get_max_call_s
+
+    now = time.time() if now is None else now
+    if ceiling_s is None:
+        try:
+            ceiling_s = get_max_call_s()
+        except Exception:
+            ceiling_s = 900.0
+    cutoff = now + 1.0 if everything else now - (ceiling_s + 120.0)
+    if before is not None:
+        # Never a call that began after this boundary (the start that runs the sweep).
+        cutoff = min(cutoff, before)
+    lost = db.query_all(
+        "SELECT call_id, status FROM voice_calls WHERE status IN ('ai', 'transferring', 'bridged') AND started_at < ?",
+        (cutoff,),
+    )
+    ended = 0
+    for row in lost:
+        call_id, status = str(row["call_id"]), str(row["status"])
+        # With or waiting for an officer: they are owed a callback. The WHERE
+        # repeats the status, so a row another process has just ended, or
+        # moved on, is left as that process wrote it.
+        owed = ", needs_callback = 1, callback_reason = 'service_interrupted'" if status != "ai" else ""
+        ended += db.execute(
+            "UPDATE voice_calls SET status = 'ended', ended_at = ?, end_reason = 'process_lost', "  # nosec B608 # noqa: S608
+            f"reserved_for = '', reserved_until = NULL{owed} "
+            "WHERE call_id = ? AND status = ?",
+            (now, call_id, status),
+        )
+        db.execute(
+            """
+            UPDATE officer_presence
+            SET status = CASE WHEN previous_status IN ('available', 'busy', 'away') THEN previous_status
+                              ELSE 'available' END,
+                current_call_id = '', updated_at = ?
+            WHERE current_call_id = ?
+            """,
+            (now, call_id),
+        )
+    return ended
 
 
 # Who wants to hear about a call's new turns (the officer brief's scheduler).

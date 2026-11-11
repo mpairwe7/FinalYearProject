@@ -637,3 +637,48 @@ groups:
           summary: "A crawled page held instructions aimed at a model"
           description: "The page was kept out of the corpus. Someone needs to find out whether ura.go.ug was tampered with."
           runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/crawl-operations.md#a-page-was-quarantined"
+
+  # Phone calls. A call could fail at every stage and export nothing, so the
+  # only signal was a caller who did not ring back (G595, ADR-0041).
+  - name: ura_call_receptionist
+    rules:
+      - alert: UraReceptionistUnavailable
+        expr: ura_receptionist_available == 0
+        for: 5m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "Phone calls are switched on and cannot be taken"
+          description: "The receptionist is enabled and did not start, so every call is refused. The chat is unaffected. /ready gives the reason under capabilities.voice_receptionist."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#call-receptionist"
+
+      - alert: UraCallsRefused
+        expr: sum by (reason) (increase(ura_receptionist_calls_refused_total[15m])) >= 3
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "Callers are being turned away"
+          description: "Calls were refused before they began, for reason {{ $labels.reason }}: unavailable (the receptionist could not start), not_configured (production is not set up for calls) or capacity (every call slot is taken)."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#call-receptionist"
+
+      - alert: UraCallSpeechFailing
+        expr: sum(increase(ura_receptionist_call_failures_total{stage=~"stt|tts"}[15m])) >= 3
+        labels:
+          severity: warning
+          team: ml
+        annotations:
+          summary: "Calls cannot hear or cannot speak"
+          description: "The recognizer or the voice failed on live calls. Callers are asked to repeat themselves and then transferred, to the officers' queue when it is on."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#call-receptionist"
+
+      - alert: UraCallsEndingOnFailure
+        expr: sum(increase(ura_receptionist_calls_ended_total{reason=~"speech_failed|media_pipeline_unavailable|media_pipeline_stopped|media_revocation_failed"}[30m])) >= 2
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "Calls are ending because the service failed"
+          description: "Calls ended on a speech or media failure rather than because the caller or an officer hung up."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#call-receptionist"

@@ -368,15 +368,24 @@ class LivePartialTranscriptTap(FrameProcessor):
             elif isinstance(frame, (VADUserStoppedSpeakingFrame, UserStoppedSpeakingFrame)):
                 self._end_turn()
             elif isinstance(frame, InputAudioRawFrame):
-                if self._speaking:
-                    self._buffer.extend(frame.audio)
-                    self._maybe_decode()
-                else:
-                    self._preroll.extend(frame.audio)
-                    if len(self._preroll) > self._preroll_bytes:
-                        del self._preroll[: len(self._preroll) - self._preroll_bytes]
+                self._keep(frame.audio)
 
         await self.push_frame(frame, direction)
+
+    def _keep(self, audio: bytes) -> None:
+        """Add caller audio to the turn being spoken, or to the pre-roll between turns."""
+        if not self._speaking:
+            self._preroll.extend(audio)
+            if len(self._preroll) > self._preroll_bytes:
+                del self._preroll[: len(self._preroll) - self._preroll_bytes]
+            return
+        # Past what a partial can be decoded from, nothing reads the buffer
+        # again until the turn ends. It used to keep growing for as long as
+        # the caller spoke, or for as long as a VAD that missed the end of
+        # speech said they did: 32 KB a second, per call.
+        if len(self._buffer) <= self._max_bytes:
+            self._buffer.extend(audio)
+            self._maybe_decode()
 
     def _begin_turn(self) -> None:
         if self._speaking:

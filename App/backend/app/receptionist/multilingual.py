@@ -79,6 +79,7 @@ def build_multilingual_pipeline(
     policy = LanguagePolicy(active=default, config=PolicyConfig.from_env())
     outlet = ClientEventOutlet()
     router = LanguageRouter(room, policy, speech_model, outlet=outlet)
+    room.language_router = router  # closed by CallRoom.end()
 
     processors, assistant_aggregator, brain = build_cascaded_branch(room, speech_model, chat_model)
     router.brain = brain

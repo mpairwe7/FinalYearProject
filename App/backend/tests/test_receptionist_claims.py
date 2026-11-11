@@ -226,7 +226,7 @@ class JoinAndEndTests(DeskTestCase):
             return func(*args, **kwargs)
 
         with (
-            patch.object(desk, "synthesize_pcm16", return_value=b"\x01\x00" * 24000),
+            patch.object(desk, "synthesize_line", return_value=(b"\x01\x00" * 24000, False)),
             patch.object(desk.asyncio, "to_thread", new=run_inline),
         ):
             await desk.claim(self.call_id, "okello")

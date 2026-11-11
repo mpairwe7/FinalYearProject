@@ -216,14 +216,15 @@ def _validate_production_env() -> None:
         if not _production_flag_enabled(flag_name):
             errors.append(f"FLAG_{flag_name.upper()} must not be disabled in production.")
 
-    # FLAG_VOICE_RECEPTIONIST is gated by G36 inside gap_gate_errors(): LiveKit
-    # media over wss://, production LiveKit credentials, one worker and one
-    # replica, and the explicit single-replica acknowledgement. The runbook's
-    # rollout (docs/runbooks/voice-receptionist-demo.md) enables the flag once
-    # that gate passes, so no second, stricter check lives here.
+    # FLAG_VOICE_RECEPTIONIST's G36 gate (LiveKit media over wss://, production
+    # LiveKit credentials, one worker and one replica, the single-replica
+    # acknowledgement, the local engine) does not stop the API: by the service
+    # owner's decision a receptionist that cannot run makes calls unavailable,
+    # with /ready, the log and an alert saying why (receptionist.start,
+    # ADR-0041). It used to refuse to start the whole API.
     from .production_readiness import gap_gate_errors
 
-    errors.extend(gap_gate_errors())
+    errors.extend(gap_gate_errors(include_receptionist=False))
 
     # Cloudflare/Gemini fallbacks: if the flag is explicitly on, the credentials
     # it needs must be present (otherwise the fallback silently no-ops in prod).
@@ -738,28 +739,17 @@ async def lifespan(app: FastAPI):
     else:
         app.state.offline_rag = None
 
-    # Voice receptionist. In production the flag only gets this far once the
-    # G36 gate in _validate_production_env() has passed.
+    # Voice receptionist. In production its G36 gate is checked here, by
+    # receptionist.start(), not by _validate_production_env().
     if _flags.is_enabled("voice_receptionist"):
-        try:
-            from . import receptionist
-            if not receptionist.is_available():
-                raise RuntimeError("FLAG_VOICE_RECEPTIONIST is on but Pipecat is not installed")
-            from .receptionist.config import validate as validate_receptionist_config
-            from .receptionist.store import init_receptionist_schema
-            validate_receptionist_config()
-            init_receptionist_schema()
-            workers_count = int(os.getenv("WORKERS", "1"))
-            if workers_count > 1:
-                logger.warning(
-                    "FLAG_VOICE_RECEPTIONIST is enabled with WORKERS=%d. "
-                    "Voice receptionist call registry and bridges live in-process — "
-                    "single worker (WORKERS=1) is recommended for demo stability.",
-                    workers_count,
-                )
-        except Exception:
-            logger.exception("Voice receptionist initialization failed")
-            raise
+        # An optional feature that cannot start does not stop the API (ADR-0041,
+        # G373): the chat keeps serving, call sockets are refused, and /ready
+        # and the `receptionist_available` gauge say why. This block used to
+        # re-raise, which took the whole service down for eight hours when an
+        # image lost its Pipecat layer with the flag still on.
+        from . import receptionist
+
+        receptionist.start(speech_model=getattr(app.state, "speech", None))
 
         # Render the receptionist's own fixed lines (fillers, clarify prompts,
         # transfer notices) for every language a call can be held in, so the
@@ -856,11 +846,37 @@ async def lifespan(app: FastAPI):
         if _ONLINE_EVAL_INTERVAL_SECONDS > 0
         else None
     )
+
+    async def _receptionist_gauge_loop() -> None:
+        """Keep this worker's `receptionist_available` current (ADR-0041).
+
+        The exported value is the lowest live worker's, and a scrape runs the
+        refresh only on the worker that answers it: without this, a worker
+        nobody scraped kept a stale value.
+        """
+        from . import receptionist
+
+        while True:
+            receptionist.refresh_gauge()
+            try:
+                await asyncio.wait_for(retention_stop.wait(), timeout=30.0)
+                return
+            except TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                return
+
+    gauge_task = asyncio.create_task(_receptionist_gauge_loop(), name="receptionist-gauge")
     try:
         yield
     finally:
         retention_stop.set()
-        for task in (retention_task, seal_task, eval_task):
+        # Call-drop checkpoints still being written finish before the database closes.
+        with contextlib.suppress(Exception):
+            from .receptionist.serializer import drain_checkpoints
+
+            await drain_checkpoints(timeout=5.0)
+        for task in (retention_task, seal_task, eval_task, gauge_task):
             if task is None:
                 continue
             task.cancel()
@@ -873,6 +889,12 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.warning("SpeechModel close raised", exc_info=True)
         app.state.speech = None
+        # Availability belongs to the application that started: a later start
+        # in the same process decides it afresh.
+        with contextlib.suppress(Exception):
+            from . import receptionist
+
+            receptionist.reset()
         with contextlib.suppress(Exception):
             from .mcp import get_client
 
@@ -1206,6 +1228,10 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
         # degrades to BM25 alone, which only this field shows.
         "local_dense": _local_dense_status(getattr(model, "_retriever", None)),
         "procedural_memory": "active",
+        # Calls: "off", "ready", or "unavailable: <why>" when the receptionist
+        # is switched on and could not start. The probe itself stays ready:
+        # the chat does not depend on it.
+        "voice_receptionist": _receptionist_status(),
     }
     # The statutory kernel's state (ADR-0033): release, graph backend, semantic layer,
     # tables. Never fails the probe.
@@ -1220,6 +1246,15 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
         retrieval_mode=retrieval_mode,
         capabilities=capabilities,
     )
+
+
+def _receptionist_status() -> str:
+    try:
+        from . import receptionist
+
+        return receptionist.status()
+    except Exception:  # noqa: BLE001 - never fails the probe
+        return "unknown"
 
 
 def _local_dense_status(retriever: Any) -> str:

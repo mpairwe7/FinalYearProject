@@ -64,6 +64,9 @@ KNOWN_SKIPS: dict[str, int] = {
     # which `reviewed_vernacular_probes()` explicitly tolerates the absence of.
     # Every other test in the file runs everywhere.
     "tests/test_benchmark_scoring_integrity.py": 1,
+    # One test streams through Pipecat's TTSService, which the main job does
+    # not install; the receptionist-stack CI job runs it (ADR-0041, G598).
+    "App/backend/tests/test_receptionist_startup_readiness.py": 1,
 }
 
 

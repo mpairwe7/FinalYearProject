@@ -11,7 +11,9 @@ from typing import Any
 import numpy as np
 
 from .. import orpheus_tts
+from . import telemetry
 from .config import allow_edge_standin_lg, get_slow_pause_ms, get_tts_voice
+from .stt import report_speech_failure
 
 logger = logging.getLogger(__name__)
 
@@ -54,29 +56,47 @@ def decode_to_pcm16(speech_model: Any, audio: bytes) -> bytes:
     return (np.asarray(samples) * 32767).clip(-32768, 32767).astype(np.int16).tobytes()
 
 
+def synthesize_line(speech_model: Any, text: str, language: str, voice: str | None = None) -> tuple[bytes, bool]:
+    """A line spoken outside the pipeline, as ``(pcm, failed)``. Blocking.
+
+    *failed* is a voice that could not say it (counted here, once). That
+    includes a Luganda, Runyankole or Acholi line that only the English
+    stand-in voice could read, when it is not allowed to: the real voices
+    failed, and the caller hears nothing. The caption still goes out.
+    """
+    if speech_model is None or not text:
+        return b"", False
+    try:
+        res = speech_model.synthesize(text, voice=voice or get_tts_voice(), language=language)
+    except Exception:
+        logger.exception("Synthesis failed for a line outside the pipeline")
+        telemetry.failure("tts")
+        return b"", True
+    if not res or not res.audio:
+        telemetry.failure("tts")
+        return b"", True
+    backend = str(getattr(res, "backend", "") or "")
+    if language in ("lg", "nyn", "ach") and backend.startswith("edge") and not allow_edge_standin_lg():
+        telemetry.failure("tts")
+        return b"", True
+    try:
+        pcm = decode_to_pcm16(speech_model, res.audio)
+    except Exception:
+        logger.exception("Failed decoding a line outside the pipeline to PCM16")
+        pcm = b""
+    if not pcm:
+        telemetry.failure("tts")
+        return b"", True
+    return pcm, False
+
+
 def synthesize_pcm16(speech_model: Any, text: str, language: str, voice: str | None = None) -> bytes:
     """A line spoken outside the pipeline (an officer joining or closing the call). Blocking.
 
     Empty when synthesis fails, or when the only voice for Luganda is the
     English stand-in and that is not allowed — the caption still goes out.
     """
-    if speech_model is None or not text:
-        return b""
-    try:
-        res = speech_model.synthesize(text, voice=voice or get_tts_voice(), language=language)
-    except Exception:
-        logger.exception("Synthesis failed for a line outside the pipeline")
-        return b""
-    if not res or not res.audio:
-        return b""
-    backend = str(getattr(res, "backend", "") or "")
-    if language in ("lg", "nyn", "ach") and backend.startswith("edge") and not allow_edge_standin_lg():
-        return b""
-    try:
-        return decode_to_pcm16(speech_model, res.audio)
-    except Exception:
-        logger.exception("Failed decoding a line outside the pipeline to PCM16")
-        return b""
+    return synthesize_line(speech_model, text, language, voice)[0]
 
 
 class UraSpeechTTS(TTSService):
@@ -112,6 +132,18 @@ class UraSpeechTTS(TTSService):
         self._language = language
         self.last_first_chunk_ms: float = 0.0
         self.last_backend: str = ""
+        #: The last Orpheus stream played its whole sentence.
+        self._stream_complete = False
+
+    async def _could_not_voice(self) -> None:
+        """A line reached the caller as a caption only; the brain counts how many in a row."""
+        await report_speech_failure(self.room, "tts")
+
+    def _voiced(self) -> None:
+        """A line was spoken: whatever failed before it is over."""
+        state = getattr(self.room, "state", None)
+        if state is not None:
+            state.voice_failures = 0
 
     @property
     def language(self) -> str:
@@ -163,6 +195,12 @@ class UraSpeechTTS(TTSService):
             try:
                 async for frame in self._stream_orpheus(clean_text, language, context_id, t0):
                     yield frame
+                # A sentence cut short, or a stream that produced nothing, is
+                # not a voiced line: it used to clear the failure count.
+                if self._stream_complete:
+                    self._voiced()
+                else:
+                    await self._could_not_voice()
                 return
             except orpheus_tts.OrpheusUnavailable as exc:
                 logger.info("Orpheus unavailable mid-call (%s); using the synthesis chain", exc)
@@ -176,9 +214,11 @@ class UraSpeechTTS(TTSService):
             )
         except Exception:
             logger.exception("UraSpeechTTS synthesis failed for text: %s", clean_text[:60])
+            await self._could_not_voice()
             return
 
         if not res or not res.audio:
+            await self._could_not_voice()
             return
         backend = str(getattr(res, "backend", "") or "")
         self.last_backend = backend
@@ -186,17 +226,22 @@ class UraSpeechTTS(TTSService):
             # edge-tts has no Luganda, Runyankole, or Acholi voice; what it returned
             # is an English speaker reading Ugandan text. The caption still reaches the screen.
             logger.warning("Dropping English stand-in voice for a %s line (%s)", language, backend)
+            await self._could_not_voice()
             return
 
         # Decode audio bytes into PCM16 at 16000Hz
         try:
-            pcm_bytes = decode_to_pcm16(self.speech_model, res.audio)
-            if not pcm_bytes:
-                return
+            # Resampling a sentence takes tens of milliseconds: off the loop,
+            # where it held every other call's audio for that long.
+            pcm_bytes = await asyncio.to_thread(decode_to_pcm16, self.speech_model, res.audio)
         except Exception:
             logger.exception("Failed decoding synthesized audio to PCM16")
+            pcm_bytes = b""
+        if not pcm_bytes:
+            await self._could_not_voice()
             return
 
+        self._voiced()
         self.last_first_chunk_ms = round((time.perf_counter() - t0) * 1000, 1)
 
         # Chunk into 20ms frames (640 bytes = 320 samples @ 16-bit mono 16kHz)
@@ -252,6 +297,7 @@ class UraSpeechTTS(TTSService):
         ):
             yield frame
 
+        self._stream_complete = complete and bool(pieces)
         cache_put = getattr(self.speech_model, "tts_cache_put", None)
         if complete and pieces and callable(cache_put):
             self._remember(cache_put, text, language, b"".join(pieces))

@@ -23,7 +23,7 @@ from ..tenancy import tenant_enabled
 from ..voice_consent import grant_voice_consent, log_voice_event, require_voice_consent
 from ..ws_concurrency import is_ws_origin_allowed, rekey_slot, release, try_acquire
 from . import brief as call_brief
-from . import desk, livekit, risk
+from . import desk, livekit, risk, telemetry
 from .brain import UraReceptionistBrain
 from .carryover import chat_carryover, seed_call_topic
 from .config import (
@@ -31,6 +31,7 @@ from .config import (
     get_default_language,
     get_languages,
     get_max_call_s,
+    local_engine_errors,
 )
 from .hub import hub
 from .metrics import get_aggregate_metrics, record_call_end_metrics
@@ -52,13 +53,91 @@ require_admin_access = require_role("ura_staff", "ura_admin", "ura_auditor")
 logger = logging.getLogger(__name__)
 
 
-def _voice_receptionist_enabled() -> bool:
-    """Fail closed unless the configured production media path is ready."""
+def _call_start_locales(init_msg: dict[str, Any]) -> tuple[str, str]:
+    """``(locale, preferred_locale)`` for a call from its ``call_start`` message.
+
+    *locale* is the language the call is held in, so it must be one this
+    deployment takes calls in (``RECEPTIONIST_LANGUAGES``); anything else
+    opens in the default language. It used to accept any locale the app
+    knows, and a deployment without a Luganda voice then held a silent
+    Luganda call (G600). *preferred_locale* is what the caller's screen was
+    set to, kept as a hint for staff and metrics, so any known locale stands.
+    """
+    asked = str(init_msg.get("locale") or "").strip().lower()
+    locale = call_language(asked) or get_default_language()
+    preferred = str(init_msg.get("preferred_locale") or asked or locale).strip().lower()
+    if preferred not in SUPPORTED_LOCALES:
+        preferred = locale
+    return locale, preferred
+
+
+async def _resume_call(
+    resume_ticket: str, *, user_id: str, tenant_id: str, wait_s: float = 2.0
+) -> dict[str, Any] | None:
+    """The dropped call a resume ticket names, or ``None``; the ticket is spent only on success.
+
+    The ticket reaches the client before its snapshot is saved (the write
+    runs in the background, serializer._write_checkpoint_after). A prompt
+    reconnect used to spend the ticket, find nothing, and start a new
+    conversation it could not recover from. Now a write still running on
+    this process is waited for, up to *wait_s*, and a resume that finds no
+    snapshot leaves the ticket for another attempt.
+    """
+    from . import low_bandwidth
+    from . import serializer as call_serializer
+
+    claims = low_bandwidth.verify_call_resume_ticket(
+        resume_ticket, expected_user_id=user_id, expected_tenant_id=tenant_id, consume=False
+    )
+    if not isinstance(claims, dict):
+        return None
+    prior_call = str(claims.get("cid") or "")
+    snapshot = await asyncio.to_thread(low_bandwidth.restore_call_drop_state, prior_call, tenant_id=tenant_id)
+    if not isinstance(snapshot, dict):
+        pending = call_serializer._LAST_CHECKPOINT.get(prior_call)
+        if pending is not None and not pending.done():
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(asyncio.shield(pending), timeout=wait_s)
+            snapshot = await asyncio.to_thread(low_bandwidth.restore_call_drop_state, prior_call, tenant_id=tenant_id)
+    if not isinstance(snapshot, dict):
+        return None
+    return snapshot if low_bandwidth.consume_resume_ticket(claims) else None
+
+
+def _resumed_locale(snapshot: dict[str, Any] | None, locale: str) -> str:
+    """The language a resumed call reopens in: the dropped call's, if calls are still held in it."""
+    if not isinstance(snapshot, dict):
+        return locale
+    return call_language(snapshot.get("locale")) or locale
+
+
+def _refusal_reason() -> str:
+    """Why a call socket cannot be taken; "" when it can.
+
+    ``off``: the flag is off. ``unavailable``: the receptionist is on and
+    could not start (see ``receptionist.status()``). ``not_configured``: in
+    production, the media path or the local engine is not configured, which
+    is checked on every socket because a flag can be switched on at runtime.
+    """
     if not flags.is_enabled("voice_receptionist"):
-        return False
+        return "off"
+    from .. import receptionist
+
+    if receptionist.unavailable_reason():
+        return "unavailable"
     if os.getenv("APP_ENV", "development").strip().lower() == "production":
-        return not livekit.production_errors(enabled_override=True)
-    return True
+        # Switched on after startup: nothing has checked the stack or ended
+        # the rows a previous process left (receptionist.started()).
+        if not receptionist.started():
+            return "unavailable"
+        if livekit.production_errors(enabled_override=True) or local_engine_errors(enabled_override=True):
+            return "not_configured"
+    return ""
+
+
+def _voice_receptionist_enabled() -> bool:
+    """Whether a call socket may be taken (fail closed); see :func:`_refusal_reason`."""
+    return not _refusal_reason()
 
 
 def _tenant_scope(ctx: AuthContext) -> str | None:
@@ -302,13 +381,14 @@ class ReviewCallRequest(BaseModel):
 
 async def call_stream_endpoint(websocket: WebSocket) -> None:
     """Taxpayer phone call simulation WebSocket (/v1/calls/stream)."""
-    logger.info(
-        "call_stream_endpoint: flag=%s",
-        _voice_receptionist_enabled(),
-    )
-    # 1. Flag check
+    # 1. The flag, the receptionist's own start, and the production gates
     if not _voice_receptionist_enabled():
-        logger.warning("call_stream_endpoint: rejected due to flag voice_receptionist being off")
+        refusal = _refusal_reason() or "off"
+        if refusal != "off":
+            # A switched-off receptionist is not a failure; one that is on and
+            # cannot take the call is, and is counted for the alert.
+            telemetry.refused(refusal)
+        logger.warning("call_stream_endpoint: refused, calls are %s", refusal)
         await websocket.close(code=1001)
         return
 
@@ -325,6 +405,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
     client_host = websocket.client.host if websocket.client else "unknown"
     key = f"anon::{client_host}"
     if not try_acquire("call", key, per_user_cap=5, global_cap=16):
+        telemetry.refused("capacity")
         await websocket.close(code=1013)
         return
 
@@ -365,12 +446,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
         # Both go into the call record and the staff UI: keep them to locales
         # the app knows. (A multilingual call then opens in its default
         # language regardless — see multilingual.py.)
-        locale = str(init_msg.get("locale") or "en").strip().lower()
-        if locale not in SUPPORTED_LOCALES:
-            locale = "en"
-        preferred_locale = str(init_msg.get("preferred_locale") or locale).strip().lower()
-        if preferred_locale not in SUPPORTED_LOCALES:
-            preferred_locale = locale
+        locale, preferred_locale = _call_start_locales(init_msg)
         consent_accepted = init_msg.get("voice_consent_accepted") is True
 
         # Consent check: if an authenticated caller explicitly accepted the pre-call
@@ -419,18 +495,10 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
         resumed_snapshot: dict[str, Any] | None = None
         resume_ticket_raw = str(init_msg.get("resume_ticket") or "").strip()
         if resume_ticket_raw and flags.is_enabled("call_drop_resume", subject=user_id or None):
-            from .low_bandwidth import restore_call_drop_state, verify_call_resume_ticket
-
-            verified_claims = verify_call_resume_ticket(
-                resume_ticket_raw,
-                expected_user_id=user_id or "",
-                expected_tenant_id=tenant_id or "default",
+            resumed_snapshot = await _resume_call(
+                resume_ticket_raw, user_id=user_id or "", tenant_id=tenant_id or "default"
             )
-            if isinstance(verified_claims, dict):
-                prior_cid = str(verified_claims.get("cid") or "")
-                resumed_snapshot = restore_call_drop_state(prior_cid, tenant_id=tenant_id or "default")
-                if isinstance(resumed_snapshot, dict) and resumed_snapshot.get("locale") in SUPPORTED_LOCALES:
-                    locale = str(resumed_snapshot["locale"])
+            locale = _resumed_locale(resumed_snapshot, locale)
 
         room = await registry.create(
             call_id=call_id,
@@ -486,6 +554,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
             status="ai",
             started_at=room.state.started_at,
         )
+        telemetry.call_started()
         if carry is not None:
             update_call(call_id, parent_conversation_id=carry.conversation_id, chat_context=carry.context)
 

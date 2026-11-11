@@ -344,3 +344,123 @@ tests:
               description: "The page was kept out of the corpus. Someone needs to find out whether ura.go.ug was tampered with."
               runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/crawl-operations.md#a-page-was-quarantined"
 
+
+  # The receptionist is switched on and did not start: calls are refused, and
+  # somebody is paged, while the chat keeps answering.
+  - interval: 1m
+    input_series:
+      - series: 'ura_receptionist_available'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: UraReceptionistUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: backend
+            exp_annotations:
+              summary: "Phone calls are switched on and cannot be taken"
+              description: "The receptionist is enabled and did not start, so every call is refused. The chat is unaffected. /ready gives the reason under capabilities.voice_receptionist."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#call-receptionist"
+
+  # A receptionist that started is not an incident.
+  - interval: 1m
+    input_series:
+      - series: 'ura_receptionist_available'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: UraReceptionistUnavailable
+        exp_alerts: []
+
+  # Ten callers turned away in ten minutes, whatever the reason.
+  - interval: 1m
+    input_series:
+      - series: 'ura_receptionist_calls_refused_total{reason="capacity"}'
+        values: '0+1x30'
+      - series: 'ura_receptionist_calls_refused_total{reason="unavailable"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: UraCallsRefused
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: backend
+              reason: capacity
+            exp_annotations:
+              summary: "Callers are being turned away"
+              description: "Calls were refused before they began, for reason capacity: unavailable (the receptionist could not start), not_configured (production is not set up for calls) or capacity (every call slot is taken)."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#call-receptionist"
+
+  # One refused call is not a pattern.
+  - interval: 1m
+    input_series:
+      - series: 'ura_receptionist_calls_refused_total{reason="capacity"}'
+        values: '0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: UraCallsRefused
+        exp_alerts: []
+
+  # The recognizer fails on every utterance for a quarter of an hour.
+  - interval: 1m
+    input_series:
+      - series: 'ura_receptionist_call_failures_total{stage="stt"}'
+        values: '0+1x30'
+      - series: 'ura_receptionist_call_failures_total{stage="record"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: UraCallSpeechFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: ml
+            exp_annotations:
+              summary: "Calls cannot hear or cannot speak"
+              description: "The recognizer or the voice failed on live calls. Callers are asked to repeat themselves and then transferred, to the officers' queue when it is on."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#call-receptionist"
+
+  # A failed record write is counted, and is not a speech failure.
+  - interval: 1m
+    input_series:
+      - series: 'ura_receptionist_call_failures_total{stage="stt"}'
+        values: '0x30'
+      - series: 'ura_receptionist_call_failures_total{stage="record"}'
+        values: '0+1x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: UraCallSpeechFailing
+        exp_alerts: []
+
+  # Calls ending because the media pipeline stopped, not because anyone hung up.
+  - interval: 1m
+    input_series:
+      - series: 'ura_receptionist_calls_ended_total{reason="media_pipeline_stopped"}'
+        values: '0+1x40'
+      - series: 'ura_receptionist_calls_ended_total{reason="caller_hangup"}'
+        values: '0+5x40'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: UraCallsEndingOnFailure
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: backend
+            exp_annotations:
+              summary: "Calls are ending because the service failed"
+              description: "Calls ended on a speech or media failure rather than because the caller or an officer hung up."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#call-receptionist"
+
+  # A busy day of ordinary hang-ups is not a failure.
+  - interval: 1m
+    input_series:
+      - series: 'ura_receptionist_calls_ended_total{reason="media_pipeline_stopped"}'
+        values: '0x40'
+      - series: 'ura_receptionist_calls_ended_total{reason="caller_hangup"}'
+        values: '0+5x40'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: UraCallsEndingOnFailure
+        exp_alerts: []

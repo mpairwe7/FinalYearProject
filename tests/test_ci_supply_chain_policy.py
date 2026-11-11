@@ -421,13 +421,23 @@ def test_crane_cloud_requirements_install_on_the_python_they_ship_with():
 def test_each_requirements_file_is_audited_on_the_python_it_ships_on():
     """On the wrong Python pip-audit cannot resolve the file and scans nothing."""
     audit = _load(ROOT / ".github" / "workflows" / "devsecops-sast-dast.yml")["jobs"]["pip-audit"]
-    pairs = {entry["requirements"]: str(entry["python"]) for entry in audit["strategy"]["matrix"]["include"]}
+    pairs = {(entry["requirements"], str(entry["python"])) for entry in audit["strategy"]["matrix"]["include"]}
     ci_python = str(_load(ROOT / ".github" / "workflows" / "ci-ml-pipeline.yml")["env"]["PYTHON_VERSION"])
     api_python = set(re.findall(r"^FROM\s+python:(\d+\.\d+)", (ROOT / "Dockerfile").read_text(encoding="utf-8"), re.M))
+    # The call receptionist's stack ships in the production Space, whose base
+    # image is the Crane Cloud one (ADR-0041, G598).
+    space_python = set(
+        re.findall(r"^FROM\s+python:(\d+\.\d+)", (ROOT / "App" / "Dockerfile.cranecloud").read_text(encoding="utf-8"), re.M)
+    )
+    assert len(space_python) == 1, space_python
+    api = api_python.pop()
     assert pairs == {
-        "requirements.txt": ci_python,
-        "App/backend/requirements.txt": api_python.pop(),
-        "ml/requirements-crawl.txt": str(_load(ROOT / ".github" / "workflows" / "scheduled-crawl.yml")["env"]["PYTHON_VERSION"]),
+        ("requirements.txt", ci_python),
+        ("App/backend/requirements.txt", api),
+        ("ml/requirements-crawl.txt", str(_load(ROOT / ".github" / "workflows" / "scheduled-crawl.yml")["env"]["PYTHON_VERSION"])),
+        # Installed in every image: audited on each Python it is installed on.
+        ("App/backend/requirements-receptionist.txt", space_python.pop()),
+        ("App/backend/requirements-receptionist.txt", api),
     }
 
 

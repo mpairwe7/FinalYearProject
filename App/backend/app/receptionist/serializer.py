@@ -115,6 +115,40 @@ class CallTextTurnFrame(Frame):
 
 _CONTROL_RATE_WINDOW_S = 10.0
 _MAX_CONTROL_FRAMES_PER_WINDOW = 15
+#: Network telemetry has its own budget: a client reporting its connection
+#: used to spend the caller's, and their next question was dropped.
+_MAX_TELEMETRY_FRAMES_PER_WINDOW = 4
+#: Call-drop checkpoints still being written, held so they are not collected mid-write.
+_CHECKPOINTS: set[asyncio.Task[Any]] = set()
+#: Each call's latest checkpoint write: the next one waits for it, so an older
+#: snapshot can never land after a newer one and overwrite it.
+_LAST_CHECKPOINT: dict[str, asyncio.Task[Any]] = {}
+
+
+async def _write_checkpoint_after(previous: asyncio.Task[Any] | None, snapshot: dict[str, Any]) -> None:
+    """Write *snapshot* once *previous* (the same call's last write) has finished.
+
+    Cancelled while the older write is still running, this one is dropped
+    rather than written ahead of it.
+    """
+    from . import low_bandwidth
+
+    if previous is not None and not previous.done():
+        try:
+            await asyncio.shield(previous)
+        except asyncio.CancelledError:
+            if not previous.done():
+                raise
+        except Exception:  # noqa: BLE001 - an older write that failed does not stop this one
+            pass
+    await asyncio.to_thread(low_bandwidth.save_call_drop_snapshot, snapshot)
+
+
+async def drain_checkpoints(timeout: float = 5.0) -> None:
+    """Let checkpoint writes still running finish, at most *timeout*: at shutdown, before the database closes."""
+    pending = [task for task in _CHECKPOINTS if not task.done()]
+    if pending:
+        await asyncio.wait(pending, timeout=timeout)
 
 
 class BrowserCallSerializer(FrameSerializer):
@@ -123,6 +157,16 @@ class BrowserCallSerializer(FrameSerializer):
     def __init__(self, room: Any = None) -> None:
         self.room = room
         self._control_timestamps: list[float] = []
+        self._telemetry_timestamps: list[float] = []
+
+    def _allow_telemetry_frame(self) -> bool:
+        now = time.monotonic()
+        cutoff = now - _CONTROL_RATE_WINDOW_S
+        self._telemetry_timestamps = [ts for ts in self._telemetry_timestamps if ts >= cutoff]
+        if len(self._telemetry_timestamps) >= _MAX_TELEMETRY_FRAMES_PER_WINDOW:
+            return False
+        self._telemetry_timestamps.append(now)
+        return True
 
     def _allow_control_frame(self) -> bool:
         now = time.monotonic()
@@ -181,9 +225,29 @@ class BrowserCallSerializer(FrameSerializer):
 
             msg_type = msg.get("type")
             if msg_type in ("network_quality", "network_telemetry") and self.room is not None:
-                from .low_bandwidth import apply_network_telemetry_to_room
+                # Each one mints a ticket and writes a checkpoint: rate-limited
+                # on a budget of its own, and the write is made in a thread
+                # in the background, not here on the event loop.
+                if not self._allow_telemetry_frame():
+                    return None
+                from .low_bandwidth import apply_network_telemetry_to_room, call_drop_snapshot
 
-                ack = apply_network_telemetry_to_room(self.room, msg)
+                ack = apply_network_telemetry_to_room(self.room, msg, checkpoint=False)
+                snapshot = call_drop_snapshot(self.room) if ack.get("resume_ticket") else None
+                if snapshot:
+                    # Not awaited: the room's codec changed above, so the
+                    # acknowledgement must not wait behind a database write.
+                    call_id = str(snapshot.get("call_id") or "")
+                    task = asyncio.create_task(_write_checkpoint_after(_LAST_CHECKPOINT.get(call_id), snapshot))
+                    _LAST_CHECKPOINT[call_id] = task
+                    _CHECKPOINTS.add(task)
+
+                    def _done(finished: asyncio.Task[Any], key: str = call_id) -> None:
+                        _CHECKPOINTS.discard(finished)
+                        if _LAST_CHECKPOINT.get(key) is finished:
+                            del _LAST_CHECKPOINT[key]
+
+                    task.add_done_callback(_done)
                 return OutputTransportMessageUrgentFrame(ack)
 
             if msg_type == "interrupt":

@@ -172,7 +172,10 @@ class SentinelTests(unittest.IsolatedAsyncioTestCase):
         await sentinel._stop()
         self.assertEqual(speech.lid_calls, [])
         vote = router.votes[0][0]
-        self.assertEqual((vote.top, vote.text), ("", "Can we speak Luganda?"))
+        # With no acoustic vote the language is read from the transcript
+        # (language.fuse): these are English words. Asking for Luganda by name
+        # is the router's explicit request, not this vote.
+        self.assertEqual((vote.top, vote.text), ("en", "Can we speak Luganda?"))
 
     async def test_a_switch_interruption_is_marked_as_one(self):
         lid = LanguageIdResult({}, "", 0.0, 0.0, error="x")

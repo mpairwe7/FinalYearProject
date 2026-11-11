@@ -9,6 +9,7 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 from ..speech_service import TranscribeResult, pcm16_to_wav
+from . import telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,24 @@ try:
     from pipecat.services.settings import STTSettings
 except ImportError:
     STTSettings = None
+
+
+async def report_speech_failure(room: Any, stage: str, *, counted: bool = False) -> None:
+    """Count a recognizer (``stt``) or voice (``tts``) failure on a call, and tell its brain.
+
+    The services used to log and carry on, so the brain never knew why the
+    caller had gone quiet (G594). Reporting can never break the service that
+    reports.
+    """
+    if not counted:
+        telemetry.failure(stage)
+    brain = getattr(room, "brain", None)
+    if brain is None:
+        return
+    try:
+        await brain.on_speech_failure(stage)
+    except Exception:
+        logger.warning("The call's brain could not act on a %s failure", stage, exc_info=True)
 
 
 def _strip_wav_header(audio_bytes: bytes) -> bytes:
@@ -126,6 +145,14 @@ class UraWhisperSTT(SegmentedSTTService):
             )
         except Exception:
             logger.exception("UraWhisperSTT transcription failed")
+            await report_speech_failure(self.room, "stt")
+            return
+
+        if res is not None and not getattr(res, "text", "") and getattr(res, "error", None):
+            # Every backend failed, and said so in the result rather than by
+            # raising. Hearing nothing at all is not this: it has no error.
+            logger.warning("UraWhisperSTT: no backend could transcribe (%s)", res.backend)
+            await report_speech_failure(self.room, "stt")
             return
 
         self.last_stt_ms = round((time.perf_counter() - t0) * 1000, 1)

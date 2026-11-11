@@ -4,6 +4,39 @@ Operator and deployment runbook for the browser voice receptionist powered by
 Pipecat 1.15, self-hosted LiveKit WebRTC media, Whisper-SALT confidence scoring,
 ClarifyGate terminology disambiguation, and staff takeover.
 
+### Assurance update — 2026-11-11, starts safely and fails visibly (ADR-0041)
+
+What an operator sees differently after phase 3 of the 11 November review:
+
+- **A receptionist that cannot start no longer stops the API.** The chat
+  serves, calls are refused, and `GET /ready` gives the reason under
+  `capabilities.voice_receptionist` (`off`, `ready`, or `unavailable: <why>`).
+  The same reason is in the API log at error, once. Fix it and restart; there
+  is no hot reload of the receptionist.
+- **One worker means every worker variable says 1.** The gate reads `WORKERS`,
+  `UVICORN_WORKERS` and `WEB_CONCURRENCY`. Under the supervisord image
+  (`Dockerfile.cranecloud`, the HF Space) uvicorn starts from
+  `UVICORN_WORKERS`, default 2: set it to 1. With more than one worker an
+  officer's console and a caller's call reach different processes about half
+  the time, and the API log says so at every start.
+- **Durations are checked.** A `RECEPTIONIST_*_S` value that is not a finite
+  number inside its range makes calls unavailable at startup and names the
+  variable. A call already running reads the default instead of the bad value.
+- **A call that cannot hear or speak goes to an officer.** After a recognizer
+  failure the caller is asked to say it again; after two in a row, or two lines
+  the voice could not say, the call is transferred (to the queue when it is on). Expect more transfers
+  while a speech backend is failing, and the `UraCallSpeechFailing` alert.
+- **After a restart, look at the callback list.** Calls the previous process
+  left live are ended (`end_reason = process_lost`). The ones that were with
+  or waiting for an officer are flagged for a callback with reason
+  `service_interrupted`. All live rows are ended only where one worker and one
+  replica are declared; elsewhere only rows older than a call may last.
+- **Alerts and metrics**: see
+  [MONITORING.md, Call receptionist](../MONITORING.md#call-receptionist).
+- **Call-drop resume needs its own secret in production.** With
+  `FLAG_CALL_DROP_RESUME` on and no `RECEPTIONIST_RESUME_SECRET`, no ticket is
+  issued and the API log says so at startup.
+
 ### Assurance update — 2026-11-11, records and accountability (ADR-0040)
 
 Phase 2 of [the 11 November review](../plans/receptionist-assurance-2026-11-11.md).
@@ -174,6 +207,9 @@ since every call now runs on the local engine, that it can: `SPEECH_ENABLED` and
 `LLM_ENABLED` on, `ORPHEUS_TTS_URL` set, and every language in
 `RECEPTIONIST_LANGUAGES` voiced by Orpheus (`ORPHEUS_TTS_LANGUAGES`).
 `python -m app.production_readiness --as-production` reports those G36 checks.
+Since ADR-0041 a production deployment that fails them still starts and serves
+the chat; calls are refused and `GET /ready` names the failed check under
+`capabilities.voice_receptionist`.
 Browser sockets send credentials in their first application message (never in
 the URL), and staff/audio sockets validate browser `Origin` against
 `CORS_ORIGINS`. Neither protects the credential in transit: that is TLS's job,
@@ -214,6 +250,8 @@ All switches and thresholds are configured via environment variables:
 | `FLAG_VOICE_CONSENT` | `true` | Enforces explicit voice consent dialog prior to audio processing |
 | `FLAG_TICKET_QUEUE` | `true` | Enforces human queue oversight; transfers fail safely if disabled |
 | `WORKERS` | `4` in the Docker image | Explicitly set `1` for the receptionist — active call state is process-local |
+| `UVICORN_WORKERS` | `2` in the supervisord image (`Dockerfile.cranecloud`, HF Space) | The variable that image starts uvicorn from. Set `1` for the receptionist; `WORKERS=1` alone leaves two workers there (ADR-0041) |
+| `WEB_CONCURRENCY` | unset | Read by the gate as well: if set, it must be `1` |
 | `RECEPTIONIST_CLARIFY_THRESHOLD` | `0.55` | Word acoustic probability below which ClarifyGate assesses candidates |
 | `RECEPTIONIST_MAX_CLARIFY_ATTEMPTS` | `2` | Number of failed clarification attempts before auto-transferring |
 | `RECEPTIONIST_TRANSFER_TIMEOUT_S` | `90` | Seconds to hold for available officer before promising a callback |
@@ -224,7 +262,7 @@ All switches and thresholds are configured via environment variables:
 | `CXP_CLOSED_DATES` | unset | `YYYY-MM-DD,…` with no shift (public holidays) |
 | `RECEPTIONIST_BRIEF_EVERY_TURNS` | `3` | Caller turns between rolling rebuilds of the officer's brief (always rebuilt on transfer) |
 | `RECEPTIONIST_CLAIM_TIMEOUT_S` | `20` | How long an officer's "Take call" holds the call before their audio must join |
-| `RECEPTIONIST_MAX_CALL_S` | `900` | Hard ceiling for one call connection (15 minutes). A value that is set but not a positive number stops startup and fails the G36 gate instead of falling back |
+| `RECEPTIONIST_MAX_CALL_S` | `900` | Hard ceiling for one call connection (15 minutes). A value that is set but not a positive number makes calls unavailable (and fails the G36 gate) instead of falling back |
 | `RECEPTIONIST_FILLER_AFTER_MS` | `450` | Latency threshold before playing filler token (pool of short tokens) |
 | `RECEPTIONIST_MEMORY_MIN_ASR_CONF` | `0.6` | A call turn heard below this mean word probability is answered but not written to long-term memory (a mishearing must not become a fact about the caller; needs `FLAG_MEMORY_ENABLED` and personalization consent to matter) |
 | `RECEPTIONIST_MAX_SPOKEN_SENTENCES` | `3` | Spoken truncation limit for plain prose before prompting *"Would you like more detail?"* (yes reads on; an officer offer takes its place, one question a turn). Structured multi-bullet/multi-step answers (`has_structured_items`) expand up to 15 sentences / 260 words so complete lists and procedures are spoken in full on the first turn (`G415`) |
@@ -301,14 +339,17 @@ enabling the feature:
    mode, placeholder keys, or an untrusted/self-signed certificate.
 3. Store `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` in the secret manager and
    inject them only into the backend runtime. Configure `LIVEKIT_URL=wss://…`,
-   `RECEPTIONIST_MEDIA_TRANSPORT=livekit`, `WORKERS=1`,
+   `RECEPTIONIST_MEDIA_TRANSPORT=livekit`, `WORKERS=1` (and `UVICORN_WORKERS=1`
+   under the supervisord image, which starts uvicorn from that variable),
    `VOICE_RECEPTIONIST_REPLICAS=1`, and
    `VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK=true`. The acknowledgement explicitly
    accepts active-call loss on API process failure; it is not a failover control.
    Run the Orpheus voice sidecar beside the API on its own GPU and set
-   `ORPHEUS_TTS_URL` and `ORPHEUS_TTS_LANGUAGES=lg,sw,en`; the gate refuses a
-   production receptionist without them, because the only other local voice
-   (Spark-TTS-SALT) takes several seconds a sentence.
+   `ORPHEUS_TTS_URL` and `ORPHEUS_TTS_LANGUAGES=lg,sw,en,nyn,ach` (every language
+   in `RECEPTIONIST_LANGUAGES`, all five by default); without them the gate
+   makes calls unavailable (the chat still starts; `/ready` gives the reason),
+   because the only other local voice (Spark-TTS-SALT) takes several seconds a
+   sentence.
 4. Serve the web app and API over HTTPS only, and make the ingress refuse or
    redirect plain HTTP — including the WebSocket upgrades on
    `/v1/calls/stream`, `/v1/admin/calls/stream` and

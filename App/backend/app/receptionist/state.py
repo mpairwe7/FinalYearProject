@@ -9,6 +9,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import telemetry
 from .clarify import ClarifyState
 from .hub import hub
 from .store import update_call
@@ -70,6 +71,15 @@ class CallState:
     caller_turns_count: int = 0
     # "Are you still there?" checks since the caller last said anything.
     idle_prompts: int = 0
+    # The recognizer failed on something the caller said, and they have not
+    # been heard since: the silence that follows is the service's, not theirs.
+    unheard: bool = False
+    # Utterances in a row the recognizer failed on, and lines the voice did.
+    hearing_failures: int = 0
+    voice_failures: int = 0
+    # This call has already been handed to a person because it could not hear
+    # or speak; it is done once.
+    speech_failure_escalated: bool = False
     ai_answers_count: int = 0
     clarifications_asked: int = 0
     clarified_first_try: int = 0
@@ -170,6 +180,9 @@ class CallRoom:
         # The call's UraReceptionistBrain, so the officer desk can start the
         # waiting caller's countdown when it puts a call back in the queue.
         self.brain: Any | None = None
+        # The multilingual call's LanguageRouter, closed with the call: its
+        # re-ask tasks were never cancelled and outlived the room.
+        self.language_router: Any | None = None
         self.caller_reconnect_task: asyncio.Task[Any] | None = None
         self.participant_joined: dict[str, asyncio.Event] = {}
         self.worker: Any | None = None
@@ -248,6 +261,13 @@ class CallRoom:
             except Exception:
                 logger.debug("Could not settle the review of call %s", self.call_id, exc_info=True)
 
+        router = self.language_router
+        if router is not None:
+            try:
+                await router.close()
+            except Exception:
+                logger.debug("Could not close the language router of call %s", self.call_id, exc_info=True)
+
         # An ended call must not keep its Pipecat pipeline running until the caller's control loop notices. PipelineTask.cancel()
         # only queues a CancelFrame, so it is safe from inside the pipeline too.
         runner = self.pipeline_runner_task
@@ -257,7 +277,10 @@ class CallRoom:
             except Exception:
                 logger.debug("Could not cancel the pipeline for call %s", self.call_id, exc_info=True)
 
-        # Update persistence
+        telemetry.call_ended(reason)
+        # Update persistence. A row this write misses stays live in the
+        # console until the startup sweep ends it (store.end_stale_calls), so
+        # the failure is a warning and a counted one, not a debug line.
         try:
             update_call(
                 self.call_id,
@@ -266,7 +289,8 @@ class CallRoom:
                 end_reason=reason,
             )
         except Exception:
-            logger.debug("Failed to record call end in DB for %s", self.call_id, exc_info=True)
+            telemetry.failure("record")
+            logger.warning("Could not record the end of call %s", self.call_id, exc_info=True)
 
         # Tell the officers before their sockets and the media room close. A
         # caller hanging up is how most calls end, and an officer whose screen

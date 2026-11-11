@@ -416,6 +416,9 @@ _STEP_OR_BULLET_START_RE = re.compile(
 )
 #: How long a call turn waits for its answer before apologising and handing over.
 GENERATION_TIMEOUT_S = 25.0
+#: Utterances in a row the recognizer may fail on, or lines in a row the voice
+#: may, before the call is handed to a person.
+SPEECH_FAILURE_LIMIT = 2
 
 #: Model runs one call may have in flight: the current turn's and the one it
 #: superseded. A caller who types quickly used to start a full run per turn,
@@ -839,7 +842,7 @@ class UraReceptionistBrain(LLMService):
         """Execute an explicit on-screen caller control action."""
         if self.room.state.mode != "ai":
             return
-        self.room.state.idle_prompts = 0
+        self.heard_caller()
         language = self.language
         if action == "repeat":
             await self.handle_external_question("repeat that", words=None)
@@ -1059,7 +1062,7 @@ class UraReceptionistBrain(LLMService):
                         OutputTransportMessageUrgentFrame(lang_msg), FrameDirection.DOWNSTREAM
                     )
         language = self.language
-        self.room.state.idle_prompts = 0
+        self.heard_caller()
 
         # Record caller turn in persistence and pub/sub
         self.room.state.turn_seq += 1
@@ -1738,6 +1741,57 @@ class UraReceptionistBrain(LLMService):
             return english
         return localized.strip() if isinstance(localized, str) and localized.strip() else english
 
+    def heard_caller(self) -> None:
+        """Something the caller said or chose reached the assistant."""
+        state = self.room.state
+        state.idle_prompts = 0
+        state.unheard = False
+        state.hearing_failures = 0
+
+    async def on_speech_failure(self, stage: str) -> None:
+        """The recognizer failed on an utterance (``stt``) or the voice on its lines (``tts``).
+
+        Both used to be logged and dropped. A caller who had spoken then heard
+        "are you still there?" and was hung up on as idle, with the record
+        blaming them (G594). Now an unheard caller is asked to say it again,
+        and a call that fails ``SPEECH_FAILURE_LIMIT`` times in a row goes to
+        a person, once: an officer hears the caller over the media room, not
+        through the recognizer. Never while an officer has the call.
+        """
+        state = self.room.state
+        if state.mode != "ai":
+            return
+        if stage == "stt":
+            state.unheard = True
+            # They spoke: the silence so far was not theirs.
+            state.idle_prompts = 0
+            state.hearing_failures += 1
+            failures = state.hearing_failures
+        else:
+            state.voice_failures += 1
+            failures = state.voice_failures
+        if state.speech_failure_escalated:
+            # Handed over already, and the call is still with the AI: the
+            # queue is off, or nobody could take it. An unheard caller is still
+            # told so rather than left in silence.
+            if stage == "stt":
+                await self._say_and_record(phrase("clarify_repeat", self.language), kind="notice")
+            return
+        if failures < SPEECH_FAILURE_LIMIT:
+            if stage == "stt":
+                await self._say_and_record(phrase("clarify_repeat", self.language), kind="notice")
+            return
+        state.speech_failure_escalated = True
+        logger.warning(
+            "Call %s cannot %s; handing it to a person", self.room.call_id, "hear" if stage == "stt" else "speak"
+        )
+        try:
+            await self._transfer("system_error")
+        except Exception:
+            # The handover itself failed: the next failure tries again.
+            state.speech_failure_escalated = False
+            raise
+
     async def on_caller_idle(self) -> None:
         """The caller has said nothing since the assistant stopped speaking.
 
@@ -1759,10 +1813,13 @@ class UraReceptionistBrain(LLMService):
             self._take_offer()
             await self._say_and_record(phrase("idle_check", self.language), kind="notice")
             return
-        logger.info("Ending call %s: the caller has been silent", self.room.call_id)
+        # A caller the recognizer failed on was not silent: the record says
+        # the service could not hear them, not that they went away.
+        reason = "speech_failed" if state.unheard else "caller_idle"
+        logger.info("Ending call %s: nothing heard from the caller (%s)", self.room.call_id, reason)
         await self._end_call_after(
             phrase("idle_goodbye", self.language),
-            "caller_idle",
+            reason,
             # Speaking during the goodbye (handle_external_question resets the count) keeps the call.
             still_wanted=lambda: state.idle_prompts > get_idle_reprompts(),
         )

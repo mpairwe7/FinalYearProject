@@ -276,6 +276,16 @@ jobs:
             python: "3.14"          # Dockerfile / Dockerfile.gpu base image
           - requirements: ml/requirements-crawl.txt
             python: "3.11"          # scheduled-crawl.yml PYTHON_VERSION
+          # The call receptionist's stack was installed in every image and
+          # audited in none (G598). Every image installs it with this
+          # override, because Pipecat's metadata caps Pillow below the patched
+          # floor, so it is resolved with the override and audited as installed.
+          - requirements: App/backend/requirements-receptionist.txt
+            python: "3.11"          # Dockerfile.cranecloud base image (the Space)
+            override: "Pillow>=13.0.0"
+          - requirements: App/backend/requirements-receptionist.txt
+            python: "3.14"          # Dockerfile / Dockerfile.gpu base image
+            override: "Pillow>=13.0.0"
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -290,11 +300,30 @@ jobs:
       - name: Install pip-audit
         run: pip install pip-audit
 
+      - name: Resolve with the image's override
+        if: matrix.override
+        env:
+          REQUIREMENTS: ${{ matrix.requirements }}
+          OVERRIDE: ${{ matrix.override }}
+          PYTHON: ${{ matrix.python }}
+        run: |
+          pip install uv
+          printf '%s\n' "$OVERRIDE" > /tmp/override.txt
+          uv pip compile "$REQUIREMENTS" --override /tmp/override.txt \
+            --python-version "$PYTHON" -o /tmp/resolved-requirements.txt
+          echo "Resolved $(grep -c '==' /tmp/resolved-requirements.txt) pinned packages"
+
       - name: Run pip-audit
         run: |
           REQ_NAME=$(basename $(dirname ${{ matrix.requirements }}))_$(basename ${{ matrix.requirements }})
+          if [ -f /tmp/resolved-requirements.txt ]; then
+            # Already the full pinned closure: audit it as it stands.
+            SOURCE="-r /tmp/resolved-requirements.txt --no-deps --disable-pip"
+          else
+            SOURCE="-r ${{ matrix.requirements }}"
+          fi
           pip-audit \
-            -r ${{ matrix.requirements }} \
+            $SOURCE \
             --format=json \
             --output=pip-audit-${REQ_NAME}.json \
             --desc \

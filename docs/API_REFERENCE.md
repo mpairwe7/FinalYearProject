@@ -68,6 +68,7 @@ GET /ready
 | `status` | string | `ready` (Qdrant connected) or `degraded` (keyword fallback) |
 | `retrieval_mode` | string | `hybrid` (Qdrant dense+BM25+rerank, or Qdrant BM25 fused with the local pgvector leg), `vector` (Cloudflare Vectorize dense fallback), `sparse` (Qdrant BM25 only, no dense), or `keyword` (CSV overlap fallback) |
 | `capabilities.local_dense` | string | The local dense leg (ADR-0034): `pgvector multilingual-e5-small, N vectors`, `off`, or `unavailable (reason)`; see `docs/runbooks/local-dense-pgvector.md` |
+| `capabilities.voice_receptionist` | string | Phone calls (ADR-0041): `off` (the flag is off), `ready`, or `unavailable: <why>` when the receptionist is switched on and could not start (Pipecat missing, an unusable `RECEPTIONIST_*` setting, no speech model, call tables that could not be created). Calls are refused while it is unavailable; `status` is unaffected, because the chat does not depend on calls |
 
 ---
 
