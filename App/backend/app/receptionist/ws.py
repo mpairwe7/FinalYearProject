@@ -360,6 +360,12 @@ async def _forward_control(task: Any, data: dict[str, Any]) -> None:
             await task.queue_frame(CallTextTurnFrame(text=text))
 
 
+def _log_text(value: object, limit: int = 120) -> str:
+    """A header a browser sent, fit for one log line: no line breaks, bounded."""
+    text = str(value or "")
+    return text.replace("\r", " ").replace("\n", " ")[:limit]
+
+
 async def _refuse_after_accept(websocket: WebSocket, close_code: int, error_code: str | None = None) -> None:
     """Accept the socket, say why it is refused, then close it with *close_code*.
 
@@ -437,7 +443,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
     # is accepted, and told nothing.
     origin = websocket.headers.get("origin")
     if not is_ws_origin_allowed(origin):
-        logger.warning("call_stream_endpoint: rejected due to origin not allowed: %r", origin)
+        logger.warning("call_stream_endpoint: rejected due to origin not allowed: %s", _log_text(origin))
         await websocket.close(code=4403)
         return
 
