@@ -72,6 +72,19 @@ describe('DeviceCheckDialog', () => {
     expect(prompts[1].tracks[0].stop).not.toHaveBeenCalled();
   });
 
+  it('opens fresh after a finished check: no meter is claimed without a microphone', async () => {
+    const { rerender, DeviceCheckDialog, onClose } = await dialog();
+    fireEvent.click(screen.getByRole('button', { name: 'Test microphone' }));
+    await act(async () => prompts[0].resolve());
+    expect(screen.getByRole('button', { name: 'Microphone on' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    rerender(<DeviceCheckDialog open={false} onClose={onClose} />);
+    rerender(<DeviceCheckDialog open onClose={onClose} />);
+
+    expect(screen.getByRole('button', { name: 'Test microphone' })).toBeInTheDocument();
+  });
+
   it('stops a microphone granted after the dialog was closed, and does not call it ready', async () => {
     await dialog();
     fireEvent.click(screen.getByRole('button', { name: 'Test microphone' }));
@@ -146,6 +159,27 @@ describe('useCallLive', () => {
     unmount();
   });
 
+  it('drops a half-heard caption when a reconnect brings a fresh snapshot', async () => {
+    const { result } = await live();
+    const first = FakeSocket.find('call_id=call_waiting_1')!;
+    act(() => {
+      first.open();
+      first.emit({ type: 'snapshot', call: callRecord({ status: 'bridged' }), turns: [] });
+      first.emit({ type: 'caption', data: { speaker: 'caller', text: 'I was charged a pen' } });
+      first.shut(1006);
+    });
+    expect(result.current.interimCaption).not.toBeNull();
+
+    act(() => vi.advanceTimersByTime(1500));
+    const second = FakeSocket.find('call_id=call_waiting_1')!;
+    act(() => {
+      second.open();
+      second.emit({ type: 'snapshot', call: callRecord({ status: 'bridged' }), turns: [] });
+    });
+
+    expect(result.current.interimCaption).toBeNull();
+  });
+
   it('passes on the time-limit warning (G602)', async () => {
     const { result } = await live();
     const socket = FakeSocket.find('call_id=call_waiting_1')!;
@@ -202,6 +236,22 @@ describe('the lobby connection', () => {
       third.emit({ type: 'ready' });
     });
     expect(useCallConsoleStore.getState().lobbyStatus).toBe('open');
+    release();
+  });
+
+  it('stays marked as paused while it reconnects, until the server says it is ready', async () => {
+    const { acquireLobby } = await import('@/services/callLobbySocket');
+    const release = acquireLobby();
+    const first = FakeSocket.find('/admin/calls/stream')!;
+    act(() => {
+      first.open();
+      first.emit({ type: 'ready' });
+      first.shut(1006);
+    });
+    act(() => vi.advanceTimersByTime(1000));
+    expect(FakeSocket.find('/admin/calls/stream')).not.toBe(first);
+
+    expect(useCallConsoleStore.getState().lobbyStatus).toBe('retrying');
     release();
   });
 
@@ -275,3 +325,24 @@ describe('a failed action', () => {
     expect(screen.getByRole('button', { name: 'Submit Review' })).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// G606: a transcript that stopped for good says what to do
+// ---------------------------------------------------------------------------
+
+describe('LiveStreamNotices', () => {
+  it('says a transcript stopped for good needs the officer to sign in again', async () => {
+    const { LiveStreamNotices } = await import('@/components/staff/calls/LiveStreamNotices');
+    render(<LiveStreamNotices status="stopped" secondsRemaining={null} callStatus="bridged" />);
+
+    expect(screen.getByRole('status').textContent).toMatch(/stopped.*sign in again/i);
+  });
+
+  it('says nothing about a call that has ended', async () => {
+    const { LiveStreamNotices } = await import('@/components/staff/calls/LiveStreamNotices');
+    const { container } = render(<LiveStreamNotices status="stopped" secondsRemaining={57} callStatus="ended" />);
+
+    expect(container.textContent).toBe('');
+  });
+});
+

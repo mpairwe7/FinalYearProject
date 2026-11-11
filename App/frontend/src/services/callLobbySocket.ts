@@ -46,7 +46,9 @@ async function resync(): Promise<void> {
 function connect(): void {
   if (socket || disabled || typeof window === 'undefined' || typeof WebSocket === 'undefined') return;
   const store = useCallConsoleStore.getState();
-  store.setLobbyStatus('connecting');
+  // A reconnect stays `retrying`, and the console says updates are paused,
+  // until the server says the stream is ready again.
+  if (store.lobbyStatus !== 'retrying') store.setLobbyStatus('connecting');
   let ws: WebSocket;
   try {
     ws = new WebSocket(lobbyUrl());

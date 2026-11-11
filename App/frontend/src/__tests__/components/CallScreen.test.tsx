@@ -323,6 +323,20 @@ describe('CallScreen component', () => {
       expect(document.activeElement).toBe(last);
     });
 
+    it('keeps Shift+Tab inside from the call card that first has focus', () => {
+      render(<CallScreen />);
+      act(() => useCallStore.getState().openCall());
+      act(() => useCallStore.getState().setStatus('ai'));
+      const dialog = screen.getByRole('dialog');
+      const card = dialog.querySelector<HTMLElement>('[data-dialog-initial-focus]')!;
+      expect(document.activeElement).toBe(card);
+      const buttons = Array.from(dialog.querySelectorAll('button'));
+
+      fireEvent.keyDown(card, { key: 'Tab', shiftKey: true });
+
+      expect(document.activeElement).toBe(buttons[buttons.length - 1]);
+    });
+
     it('keeps focus in the dialog when the call starts and the screen changes', () => {
       render(<CallScreen />);
       act(() => useCallStore.getState().openCall());

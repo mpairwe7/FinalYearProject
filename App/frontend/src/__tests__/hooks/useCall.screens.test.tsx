@@ -53,6 +53,9 @@ const livekit = vi.hoisted(() => ({
   setMuted: [] as boolean[],
   failUnmute: false,
   connectError: null as Error | null,
+  /** Leave the next setMuted pending; the test settles it through `held`. */
+  holdNext: false,
+  held: [] as Array<{ resolve: () => void; reject: (error: Error) => void }>,
 }));
 
 vi.mock('@/services/liveKitCallSession', () => ({
@@ -64,6 +67,11 @@ vi.mock('@/services/liveKitCallSession', () => ({
     }
     async setMuted(muted: boolean) {
       livekit.setMuted.push(muted);
+      if (livekit.holdNext) {
+        livekit.holdNext = false;
+        await new Promise<void>((resolve, reject) => livekit.held.push({ resolve, reject }));
+        return;
+      }
       if (!muted && livekit.failUnmute) throw new Error('Permission denied');
     }
     async close() {}
@@ -89,6 +97,8 @@ describe('useCall: the caller screen', () => {
     livekit.setMuted = [];
     livekit.failUnmute = false;
     livekit.connectError = null;
+    livekit.holdNext = false;
+    livekit.held = [];
     useCallStore.getState().reset();
     useCallStore.getState().openCall();
   });
@@ -235,6 +245,34 @@ describe('useCall: the caller screen', () => {
       expect(state().error).toBe(en['call.micFallback']);
     });
 
+    it('a slow request the caller has since overtaken does not decide what the screen shows', async () => {
+      const { hook, socket } = startCall();
+      await act(async () => {
+        connect(socket, { transport: 'livekit', url: 'wss://rtc.example.test', room: 'r', identity: 'i', token: 't' });
+        await settle();
+      });
+      await act(async () => {
+        hook.result.current.toggleMute(); // mute
+        await settle();
+      });
+      livekit.holdNext = true;
+      await act(async () => {
+        hook.result.current.toggleMute(); // un-mute, still pending
+        hook.result.current.toggleMute(); // mute
+        hook.result.current.toggleMute(); // un-mute again, and it works
+        await settle();
+      });
+      expect(state().isMuted).toBe(false);
+
+      await act(async () => {
+        livekit.held[0].reject(new Error('Permission denied'));
+        await settle();
+      });
+
+      expect(state().isMuted).toBe(false);
+      expect(state().error).toBeNull();
+    });
+
     it('a new call starts unmuted, with no officer and no ticket from the last one', () => {
       useCallStore.setState({ isMuted: true, officerName: 'Okello', ticketRef: 'tkt-1' });
       useCallStore.getState().openCall();
@@ -275,6 +313,21 @@ describe('useCall: the caller screen', () => {
       connect(socket);
       act(() => socket.emit({ type: 'status', status: 'ended' }));
       act(() => socket.shut(1000));
+
+      expect(state().status).toBe('ended');
+      expect(state().error).toBeNull();
+    });
+
+    it('a caller who listened and typed without a microphone is thanked at the end', async () => {
+      const { socket } = startCall();
+      connect(socket);
+      await act(async () => {
+        mic.prompts[0].reject(new Error('Permission denied'));
+        await settle();
+      });
+      expect(state().error).toBe(en['call.micFallback']);
+
+      act(() => socket.emit({ type: 'status', status: 'ended' }));
 
       expect(state().status).toBe('ended');
       expect(state().error).toBeNull();

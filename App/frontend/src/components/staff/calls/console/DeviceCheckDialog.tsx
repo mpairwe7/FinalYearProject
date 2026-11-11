@@ -34,6 +34,10 @@ export function DeviceCheckDialog({ open, onClose }: { open: boolean; onClose: (
     return () => {
       runRef.current += 1;
       stopMeter();
+      // The meter stopped with the dialog: reopened, it must not say
+      // "Microphone on" with no microphone behind it. `micReady` keeps the
+      // result of the check.
+      setStatus('idle');
     };
   }, [open]);
 
@@ -97,6 +101,7 @@ export function DeviceCheckDialog({ open, onClose }: { open: boolean; onClose: (
   const close = () => {
     runRef.current += 1;
     stopMeter();
+    setStatus('idle');
     onClose();
   };
 

@@ -93,6 +93,15 @@ Also: the device check stops an earlier microphone and drops one granted after
 the dialog closed; mark-done and the review form show their errors; the
 Luganda micFallback string lost a stray leading space.
 
+**Corrected in review, before merge:** a mute change overtaken by a newer one
+no longer decides what the screen shows; a caller who listened and typed
+without a microphone is thanked at the end rather than shown the microphone
+notice; the transcript says when it stopped for good (sign in again) as well
+as when it is reconnecting, and a reconnect drops the half-heard caption; the
+lobby stays marked as paused until the server says it is ready again; the
+device check opens fresh after a finished check; Shift+Tab from the focused
+call card stays in the dialog.
+
 ## Consequences
 
 - A browser now sees 101 then a close for "calls off", where it saw an HTTP

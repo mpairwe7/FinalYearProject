@@ -149,6 +149,8 @@ export function useCallLive(callId?: string | null) {
             callEnded = msg.call?.status === 'ended';
             setCall(msg.call || null);
             setTurns(msg.turns || []);
+            // A partial from before a reconnect is no longer being spoken.
+            setInterimCaption(null);
             setBrief(msg.call?.brief || null);
           } else if (msg.type === 'duration_warning') {
             const seconds = Number(msg.data?.seconds_remaining);

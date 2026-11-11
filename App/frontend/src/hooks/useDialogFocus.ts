@@ -61,7 +61,9 @@ export function useDialogFocus(
     const first = items[0];
     const last = items[items.length - 1];
     const active = document.activeElement;
-    if (event.shiftKey && (active === first || !root.contains(active))) {
+    // Focus on the dialog itself (the call card) is before every control.
+    const beforeFirst = active === first || !root.contains(active) || !items.includes(active as HTMLElement);
+    if (event.shiftKey && beforeFirst) {
       event.preventDefault();
       last.focus();
     } else if (!event.shiftKey && (active === last || !root.contains(active))) {

@@ -93,6 +93,8 @@ export function useCall() {
   const connectedRef = useRef(false);
   /** The server said the call ended; the close that follows is not a failure. */
   const endedByServerRef = useRef(false);
+  /** The latest mute change asked of LiveKit; an older one's result is stale. */
+  const muteRequestRef = useRef(0);
 
   const getToneContext = useCallback((): AudioContext | null => {
     if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
@@ -164,10 +166,13 @@ export function useCall() {
       socketRef.current.hangup();
       socketRef.current = null;
     }
+    // Listening and typing without a microphone is a call that worked: the
+    // notice is not a reason the call ended. (A real failure set its own error.)
+    if (useCallStore.getState().error === t('call.micFallback')) store.setError(null);
     cleanupAudio();
     store.setAudioBlocked(false);
     store.setStatus('ended');
-  }, [cleanupAudio, store]);
+  }, [cleanupAudio, store, t]);
 
   /** Start call audio the browser held back; wired to a tap on the call screen. */
   const resumeAudio = useCallback(() => {
@@ -195,10 +200,13 @@ export function useCall() {
    */
   const applyLiveKitMute = useCallback(
     async (session: LiveKitCallSession, muted: boolean): Promise<boolean> => {
+      const request = ++muteRequestRef.current;
+      // A result that a newer request has overtaken is not what the screen shows.
+      const stale = () => liveKitSessionRef.current !== session || muteRequestRef.current !== request;
       try {
         await session.setMuted(muted);
       } catch {
-        if (liveKitSessionRef.current !== session) return false;
+        if (stale()) return false;
         if (muted) {
           // Muting failed: the microphone may still be live, and the screen says so.
           store.setMuted(false);
@@ -211,6 +219,7 @@ export function useCall() {
         }
         return false;
       }
+      if (stale()) return true;
       if (!muted && micFailedRef.current) {
         micFailedRef.current = false;
         if (useCallStore.getState().error === t('call.micFallback')) store.setError(null);
