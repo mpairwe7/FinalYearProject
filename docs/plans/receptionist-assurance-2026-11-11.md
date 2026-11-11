@@ -123,11 +123,26 @@ Left open by this phase, each for the service owner:
 - **`RECEPTIONIST_TURN_TIMEOUT_S`** does not reach the turn-stop strategy; see
   "Not in scope".
 
-## Phase 4 — opened, not yet fixed
+## Phase 4 — caller and officer screens
 
-| Phase | Gaps | Scope |
-| --- | --- | --- |
-| 4. Caller and officer screens | G601–G611 | Microphone released on every ending; the time-limit warning on both transports and both clients; a refused microphone keeps the call; close codes that reach a browser; reconnects; focus, target and language of the call dialog. |
+[ADR-0042](../adr/0042-call-screens-say-what-happened.md). Tests:
+`App/backend/tests/test_receptionist_call_screens.py`,
+`App/frontend/src/__tests__/hooks/useCall.screens.test.tsx`,
+`App/frontend/src/__tests__/components/officerCallScreens.test.tsx`.
+
+| Gap | What changed |
+| --- | --- |
+| G601 | A microphone granted after the call ended is stopped and sends nothing; a late refusal is ignored; caller and officer. |
+| G602 | `duration_warning` a minute before the ceiling (halfway through a ceiling of a minute or less) on every transport, to the caller and the officer; the call ends at the ceiling everywhere, even if the caller's socket stalls. |
+| G603 | A refused LiveKit microphone keeps the call, muted, with the translated message; pressing the microphone retries. |
+| G604 | The device check stops an earlier microphone and one granted after it closed. |
+| G605 | Refusals accepted, explained with a code, closed with their code; the caller's screen says why and offers to call again. |
+| G606 | Staff streams send `ready`; the transcript reconnects and shows when it is down; the lobby outage shows on every staff page. |
+| G607 (mitigated) | The tone notice in all five languages; caller-facing errors translated from codes. Strings await first-language review. |
+| G608 | The call dialog takes, keeps and returns focus. |
+| G609 | Failed mute changes are reverted on screen; a new call starts clean. |
+| G610 (mitigated) | Presence is `on_call` from claiming to ending; the server refuses `available` during the reconnect grace and a claim. |
+| G611 | Mark-done and the review form show their failures. |
 
 ## Not in scope
 

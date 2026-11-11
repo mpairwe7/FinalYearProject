@@ -284,4 +284,78 @@ describe('CallScreen component', () => {
     expect(screen.getAllByText('Thank you for calling URA.').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Close')).toBeDefined();
   });
+
+  describe('the call dialog and the keyboard (G608)', () => {
+    function opener() {
+      const button = document.createElement('button');
+      button.textContent = 'Call URA from the chat';
+      document.body.appendChild(button);
+      button.focus();
+      return button;
+    }
+
+    it('takes focus when it opens and gives it back when it closes', () => {
+      const button = opener();
+      render(<CallScreen />);
+      act(() => useCallStore.getState().openCall());
+
+      expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
+
+      act(() => useCallStore.getState().closeCall());
+      expect(document.activeElement).toBe(button);
+      button.remove();
+    });
+
+    it('keeps Tab inside the dialog', () => {
+      render(<CallScreen />);
+      act(() => useCallStore.getState().openCall());
+      const dialog = screen.getByRole('dialog');
+      const buttons = Array.from(dialog.querySelectorAll('button'));
+      const first = buttons[0];
+      const last = buttons[buttons.length - 1];
+
+      last.focus();
+      fireEvent.keyDown(last, { key: 'Tab' });
+      expect(document.activeElement).toBe(first);
+
+      first.focus();
+      fireEvent.keyDown(first, { key: 'Tab', shiftKey: true });
+      expect(document.activeElement).toBe(last);
+    });
+
+    it('keeps Shift+Tab inside from the call card that first has focus', () => {
+      render(<CallScreen />);
+      act(() => useCallStore.getState().openCall());
+      act(() => useCallStore.getState().setStatus('ai'));
+      const dialog = screen.getByRole('dialog');
+      const card = dialog.querySelector<HTMLElement>('[data-dialog-initial-focus]')!;
+      expect(document.activeElement).toBe(card);
+      const buttons = Array.from(dialog.querySelectorAll('button'));
+
+      fireEvent.keyDown(card, { key: 'Tab', shiftKey: true });
+
+      expect(document.activeElement).toBe(buttons[buttons.length - 1]);
+    });
+
+    it('keeps focus in the dialog when the call starts and the screen changes', () => {
+      render(<CallScreen />);
+      act(() => useCallStore.getState().openCall());
+      screen.getByRole('button', { name: 'Call URA' }).focus();
+
+      act(() => useCallStore.getState().setStatus('ai'));
+
+      expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
+    });
+
+    it('a refused call says why, without thanking the caller, and offers to call again', () => {
+      useCallStore.getState().openCall();
+      useCallStore.getState().setStatus('ended');
+      useCallStore.getState().setError('All our lines are busy. Please try again in a few minutes.');
+
+      render(<CallScreen />);
+
+      expect(screen.queryByText('Thank you for calling URA.')).toBeNull();
+      expect(screen.getByTestId('call-retry-btn')).toBeDefined();
+    });
+  });
 });

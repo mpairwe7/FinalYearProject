@@ -51,6 +51,10 @@ _CALL_DESK_COLUMNS: dict[str, str] = {
     # above stay the call's own: the last officer's.
     "handled_by_json": "TEXT NOT NULL DEFAULT '[]'",
     "wrapups_json": "TEXT NOT NULL DEFAULT '[]'",
+    # When the call's time limit falls, once its warning has gone out: a
+    # console that opens the call later, on any worker, is told how long is
+    # left (ADR-0042).
+    "limit_at": "DOUBLE PRECISION",
 }
 
 #: JSON columns read back as a parsed value beside the raw text.
@@ -343,6 +347,23 @@ def claim_call(call_id: str, officer_id: str, now: float, expired_before: float)
         (officer_id, now, call_id, officer_id, expired_before, officer_id, now),
     )
     return affected > 0
+
+
+def live_call_held_by(officer_id: str, *, excluding: str = "") -> str:
+    """The latest live call *officer_id* is on or holds a claim on, other than *excluding*; "" if none.
+
+    From the store, so a call held through another process counts too.
+    """
+    rows = db.query_all(
+        """
+        SELECT call_id FROM voice_calls
+        WHERE call_id != ?
+          AND ((status = 'bridged' AND officer_id = ?) OR (status = 'transferring' AND claimed_by = ?))
+        ORDER BY started_at DESC LIMIT 1
+        """,
+        (excluding, officer_id, officer_id),
+    )
+    return str(dict(rows[0])["call_id"]) if rows else ""
 
 
 def release_claim(call_id: str, officer_id: str | None = None) -> bool:

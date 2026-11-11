@@ -75,6 +75,31 @@
   padding: 0.1rem 0.6rem;
 }
 
+/* The lobby is down: the queue and its alerts are not live (G606). */
+.cc-state--warning {
+  color: var(--ops-warn-ink);
+  background: var(--ops-warn-fill);
+  border: 1px solid var(--ops-warn-line);
+  border-radius: var(--ops-radius-pill);
+  padding: 0.1rem 0.6rem;
+}
+
+/* A failed action on a call says so (G611). */
+.cc-error {
+  color: var(--ops-bad-ink);
+  margin: 0.25rem 0 0;
+}
+
+/* Notices above a call's transcript: it stopped updating, or the time limit is near. */
+.cc-notice {
+  color: var(--ops-warn-ink);
+  background: var(--ops-warn-fill);
+  border: 1px solid var(--ops-warn-line);
+  border-radius: var(--ops-radius-sm);
+  padding: 0.35rem 0.6rem;
+  margin: 0 0 0.5rem;
+}
+
 .cc-dot {
   display: inline-block;
   width: 0.55rem;

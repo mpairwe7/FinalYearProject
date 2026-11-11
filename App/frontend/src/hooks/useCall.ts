@@ -26,6 +26,49 @@ import { resetAudioLevels, setInputLevel, setOutputLevel } from '@/services/audi
 
 const LANGUAGE_SOURCES: readonly CallLanguageSource[] = ['default', 'auto', 'explicit', 'override'];
 
+type CallErrorKey =
+  | 'call.error.unavailable'
+  | 'call.error.busy'
+  | 'call.error.signin'
+  | 'call.error.dropped'
+  | 'call.error.noConnection'
+  | 'call.error.generic';
+
+/** The message for an `error` frame's `code`. The server's English `detail` is never shown. */
+function errorKeyForCode(code: unknown): CallErrorKey {
+  switch (code) {
+    case 'unavailable':
+      return 'call.error.unavailable';
+    case 'busy':
+      return 'call.error.busy';
+    case 'signin':
+      return 'call.error.signin';
+    default:
+      return 'call.error.generic';
+  }
+}
+
+/**
+ * Why the call's socket closed, for a close the caller did not ask for and
+ * the server did not announce. Every code used to read "Thank you for calling
+ * URA", with no way to call again (G605).
+ */
+function errorKeyForClose(code: number, connected: boolean): CallErrorKey {
+  switch (code) {
+    case 1001:
+      return 'call.error.unavailable';
+    case 1013:
+      return 'call.error.busy';
+    case 4401:
+      return 'call.error.signin';
+    case 1003:
+    case 4403:
+      return 'call.error.generic';
+    default:
+      return connected ? 'call.error.dropped' : 'call.error.noConnection';
+  }
+}
+
 export function useCall() {
   const store = useCallStore();
   const t = useTranslation();
@@ -39,6 +82,29 @@ export function useCall() {
   const dialToneCtxRef = useRef<AudioContext | null>(null);
   const holdToneCleanupRef = useRef<(() => void) | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  /**
+   * Which call the hook is on. Bumped whenever call audio is torn down, so
+   * work a call started (a microphone prompt still open) can tell, when it
+   * finishes, that its call is over: hanging up during the prompt used to
+   * leave the microphone open, or stream it into the next call (G601).
+   */
+  const callGenRef = useRef(0);
+  /** The server answered with `call_ready`. */
+  const connectedRef = useRef(false);
+  /** The server said the call ended; the close that follows is not a failure. */
+  const endedByServerRef = useRef(false);
+  /** The latest mute change asked of LiveKit; an older one's result is stale. */
+  const muteRequestRef = useRef(0);
+  /**
+   * A microphone or mute operation's message is marked as its own, and cleared
+   * when that operation recovers or the call ends normally. An error from
+   * anything else (the socket, the server) replaces the mark, so it is left
+   * alone even when it reads the same.
+   */
+  const setMicError = useCallback((message: string) => store.setError(message, 'mic'), [store]);
+  const clearMicError = useCallback(() => {
+    if (useCallStore.getState().errorSource === 'mic') store.setError(null);
+  }, [store]);
 
   const getToneContext = useCallback((): AudioContext | null => {
     if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
@@ -63,6 +129,7 @@ export function useCall() {
   }, [store.isMuted]);
 
   const cleanupAudio = useCallback(() => {
+    callGenRef.current += 1;
     resetAudioLevels();
     if (timerRef.current) {
       clearInterval(timerRef.current);
@@ -109,10 +176,13 @@ export function useCall() {
       socketRef.current.hangup();
       socketRef.current = null;
     }
+    // Listening and typing without a microphone, or a mute that did not
+    // take, is not why the call ended. (A real failure set its own error.)
+    clearMicError();
     cleanupAudio();
     store.setAudioBlocked(false);
     store.setStatus('ended');
-  }, [cleanupAudio, store]);
+  }, [cleanupAudio, clearMicError, store]);
 
   /** Start call audio the browser held back; wired to a tap on the call screen. */
   const resumeAudio = useCallback(() => {
@@ -132,32 +202,62 @@ export function useCall() {
     socketRef.current?.requestCallback();
   }, []);
 
+  /**
+   * Turn the LiveKit microphone on or off. A microphone the browser refuses
+   * leaves the call connected and muted, with the listen-and-type message:
+   * it used to hang up the whole call (G603), and a failed un-mute left the
+   * screen saying the microphone was live (G609).
+   */
+  const applyLiveKitMute = useCallback(
+    async (session: LiveKitCallSession, muted: boolean): Promise<boolean> => {
+      const request = ++muteRequestRef.current;
+      // A result that a newer request has overtaken is not what the screen shows.
+      const stale = () => liveKitSessionRef.current !== session || muteRequestRef.current !== request;
+      try {
+        await session.setMuted(muted);
+      } catch {
+        if (stale()) return false;
+        if (muted) {
+          // Muting failed: the microphone may still be live, and the screen says so.
+          store.setMuted(false);
+          setMicError(t('call.error.generic'));
+        } else {
+          micFailedRef.current = true;
+          store.setMuted(true);
+          void session.setMuted(true).catch(() => {});
+          setMicError(t('call.micFallback'));
+        }
+        return false;
+      }
+      if (stale()) return true;
+      micFailedRef.current = muted ? micFailedRef.current : false;
+      clearMicError();
+      return true;
+    },
+    [clearMicError, setMicError, store, t],
+  );
+
   const toggleMute = useCallback(() => {
+    const session = liveKitSessionRef.current;
     if (
       useCallStore.getState().isMuted &&
       micFailedRef.current &&
-      !liveKitSessionRef.current &&
+      !session &&
       !micCleanupRef.current &&
       startLegacyAudioRef.current
     ) {
       void startLegacyAudioRef.current().then((ok) => {
         if (ok) {
-          store.setError(null);
+          clearMicError();
           store.setMuted(false);
         }
       });
       return;
     }
-    store.setMuted((prev) => {
-      const next = !prev;
-      if (liveKitSessionRef.current) {
-        void liveKitSessionRef.current.setMuted(next).catch((error: unknown) => {
-          store.setError((error as Error)?.message || 'Could not change microphone state');
-        });
-      }
-      return next;
-    });
-  }, [store]);
+    const next = !useCallStore.getState().isMuted;
+    store.setMuted(next);
+    if (session) void applyLiveKitMute(session, next);
+  }, [applyLiveKitMute, clearMicError, store]);
 
   /** Pin the call to *language* for the rest of the call (the server confirms). */
   const setLanguage = useCallback(
@@ -191,9 +291,17 @@ export function useCall() {
   const startCall = useCallback(
     async (locale = 'en') => {
       cleanupAudio();
+      const callGen = callGenRef.current;
+      const isCurrentCall = () => callGenRef.current === callGen;
+      connectedRef.current = false;
+      endedByServerRef.current = false;
       store.setStatus('dialing');
       store.setError(null);
       store.setAudioBlocked(false);
+      // A redial from the ended screen starts afresh too (G609).
+      store.setMuted(false);
+      store.setOfficerName(null);
+      store.setTicketRef(null);
       if (getAuthToken()) {
         void accountApi.grantConsents(['voice_recording']).catch(() => {});
       }
@@ -235,8 +343,10 @@ export function useCall() {
           let silenceTimer: ReturnType<typeof setTimeout> | null = null;
           const cleanup = await recorder.startStreaming(
             (pcmChunk) => {
-              if (!isMutedRef.current && socketRef.current) {
-                socketRef.current.sendAudio(pcmChunk);
+              // This call's own socket only: a late microphone from an earlier
+              // call must never stream into the next one.
+              if (!isMutedRef.current && isCurrentCall() && socketRef.current === socket) {
+                socket.sendAudio(pcmChunk);
                 if (pcmChunk.byteLength >= 2) {
                   const int16 = new Int16Array(pcmChunk);
                   let sum = 0;
@@ -255,6 +365,12 @@ export function useCall() {
             },
             { echoCancellation: true, noiseSuppression: true },
           );
+          if (!isCurrentCall()) {
+            // The call ended while the permission prompt was open.
+            if (silenceTimer) clearTimeout(silenceTimer);
+            cleanup();
+            return false;
+          }
           micFailedRef.current = false;
           micCleanupRef.current = () => {
             if (silenceTimer) clearTimeout(silenceTimer);
@@ -265,12 +381,14 @@ export function useCall() {
             void playerRef.current.resume();
           }
           return true;
-        } catch (err: unknown) {
+        } catch {
+          // Refused after the call ended: nothing to say on the ended screen.
+          if (!isCurrentCall()) return false;
           // Keep the call active so the caller still hears the AI receptionist
           // and can use the in-call text input ("Type instead") or officer handoff.
           micFailedRef.current = true;
           store.setMuted(true);
-          store.setError((err as Error)?.message || t('call.micFallback'));
+          setMicError(t('call.micFallback'));
           return false;
         }
       };
@@ -296,6 +414,7 @@ export function useCall() {
               }
               dialToneCtxRef.current = null;
               statusBeforeReconnectRef.current = 'ai';
+              connectedRef.current = true;
               store.setStatus('ai');
               {
                 const offered = Array.isArray(msg.languages)
@@ -335,7 +454,7 @@ export function useCall() {
                     },
                     onDisconnected: () => {
                       if (liveKitSessionRef.current === session) {
-                        store.setError('Call media disconnected. Please reconnect.');
+                        store.setError(t('call.error.dropped'));
                         hangup();
                       }
                     },
@@ -356,10 +475,20 @@ export function useCall() {
                     },
                   });
                   liveKitSessionRef.current = session;
-                  void session.connect(media, false).then(() => session.setMuted(isMutedRef.current)).catch((error: unknown) => {
-                    store.setError((error as Error)?.message || 'Could not connect call media');
-                    hangup();
-                  });
+                  // Connecting and turning the microphone on fail differently:
+                  // no media is the end of the call; a refused microphone is not.
+                  void session.connect(media, false).then(
+                    () => {
+                      if (liveKitSessionRef.current === session) {
+                        void applyLiveKitMute(session, isMutedRef.current);
+                      }
+                    },
+                    () => {
+                      if (liveKitSessionRef.current !== session) return;
+                      store.setError(t('call.error.noConnection'));
+                      hangup();
+                    },
+                  );
                 } else {
                   void startLegacyAudio();
                 }
@@ -432,6 +561,7 @@ export function useCall() {
                 statusBeforeReconnectRef.current = 'ai';
                 store.setStatus('ai');
               } else if (msg.status === 'ended') {
+                endedByServerRef.current = true;
                 hangup();
               }
               break;
@@ -472,21 +602,33 @@ export function useCall() {
               break;
             }
             case 'ended': {
+              endedByServerRef.current = true;
               hangup();
               break;
             }
             case 'error': {
-              store.setError(String(msg.detail || 'Call error occurred'));
+              store.setError(t(errorKeyForCode(msg.code)));
+              break;
+            }
+            case 'duration_warning': {
+              // A minute before the call's time limit (G602).
+              store.addCaption({ speaker: 'system', text: t('call.durationWarning'), final: true });
               break;
             }
           }
         },
-        onError: (err) => {
-          store.setError(err);
+        onError: () => {
+          // The close that follows says why; this only covers a socket that
+          // could not even be created.
+          if (!useCallStore.getState().error) {
+            store.setError(t(connectedRef.current ? 'call.error.dropped' : 'call.error.noConnection'));
+          }
         },
-        onClose: () => {
+        onClose: (code) => {
           cleanupAudio();
           store.setStatus('ended');
+          if (endedByServerRef.current || (code === 1000 && connectedRef.current)) return;
+          store.setError(t(errorKeyForClose(code, connectedRef.current)));
         },
       });
 
@@ -507,7 +649,7 @@ export function useCall() {
           : {}),
       });
     },
-    [cleanupAudio, getToneContext, hangup, store, t],
+    [applyLiveKitMute, cleanupAudio, getToneContext, hangup, setMicError, store, t],
   );
 
   useEffect(() => {

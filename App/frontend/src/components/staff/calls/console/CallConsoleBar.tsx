@@ -24,9 +24,10 @@ export function CallConsoleBar({
   onOpenCall: (callId: string) => void;
   onCheckMic: () => void;
 }) {
-  const { calls, availability, activeCall, soundEnabled, micReady, setAvailability, setSoundEnabled } =
+  const { calls, availability, activeCall, soundEnabled, micReady, lobbyStatus, setAvailability, setSoundEnabled } =
     useCallConsoleStore(
       useShallow((s) => ({
+        lobbyStatus: s.lobbyStatus,
         calls: s.calls,
         availability: s.availability,
         activeCall: s.activeCall,
@@ -71,6 +72,13 @@ export function CallConsoleBar({
         </div>
       )}
       <div className="cc-bar-group">
+        {lobbyStatus === 'retrying' && (
+          // On every staff page: the queue and its alerts are not live while
+          // this shows. It used to be visible nowhere (G606).
+          <span className="cc-state cc-state--warning" role="status">
+            Live call updates paused — reconnecting
+          </span>
+        )}
         <span className="cc-count">
           Live <strong>{live}</strong>
         </span>

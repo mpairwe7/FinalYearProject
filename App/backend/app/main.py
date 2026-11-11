@@ -5342,9 +5342,18 @@ def update_my_presence_endpoint(
     # The officer is on a live call on this server: the server's own on_call
     # stands. A heartbeat sent while their media reconnects, or as the call
     # ends, used to mark them available and offer them to callers.
-    on_a_call = any(
-        room.state.mode == "bridged" and room.state.officer_id == ctx.user_id for room in registry.list_live()
-    )
+    # Also while their media reconnects (the call is back in the queue for
+    # them during the grace) and while they hold a claim on a waiting call:
+    # in both the console showed them available to the next caller (G610).
+    def _holds(room: Any) -> bool:
+        state = room.state
+        if state.mode == "bridged" and state.officer_id == ctx.user_id:
+            return True
+        if state.mode == "ended":
+            return False
+        return ctx.user_id in (state.reconnecting_officer or "", state.claimed_by or "")
+
+    on_a_call = any(_holds(room) for room in registry.list_live())
     if on_a_call and status != "on_call":
         status = None
     return presence.upsert_presence(

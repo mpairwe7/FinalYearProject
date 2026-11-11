@@ -217,6 +217,11 @@ def set_on_call(user_id: str, call_id: str, display_name: str = "", tenant_id: s
     prev = "available"
     if existing and existing.get("raw_status") in ("available", "busy", "away"):
         prev = existing["raw_status"]
+    elif existing and existing.get("raw_status") == "on_call" and existing.get("previous_status") in (
+        "available", "busy", "away"
+    ):
+        # Already on this call since the claim: keep what they were before it.
+        prev = existing["previous_status"]
     name = display_name or (existing["display_name"] if existing else "")
     upsert_presence(
         user_id, tenant_id=tenant_id, display_name=name or None, status="on_call",
@@ -227,6 +232,48 @@ def set_on_call(user_id: str, call_id: str, display_name: str = "", tenant_id: s
 def set_wrap_up(user_id: str, call_id: str = "") -> None:
     """Transition an officer to 'wrap_up'."""
     upsert_presence(user_id, status="wrap_up", current_call_id=call_id)
+
+
+def end_claim_presence(user_id: str, call_id: str) -> None:
+    """A claim on *call_id* ended before the officer joined: they go back to what they were.
+
+    Only while their presence is still that call's. An officer can hold claims
+    on two calls, or claim one while on another, and the end of one must not
+    mark them free while they hold the other: presence then moves to the call
+    they still hold. The condition is in the write itself, so a change made
+    meanwhile (another claim, a join) is not undone. ``last_seen`` is left
+    alone: a claim that ended because the officer's console went away must not
+    make them look online.
+    """
+    from .store import live_call_held_by
+
+    now = time.time()
+    other = live_call_held_by(user_id, excluding=call_id)
+    if other:
+        db.execute(
+            "UPDATE officer_presence SET current_call_id = ?, updated_at = ? "
+            "WHERE user_id = ? AND status = 'on_call' AND current_call_id = ?",
+            (other, now, user_id, call_id),
+        )
+        return
+    affected = db.execute(
+        """
+        UPDATE officer_presence
+        SET status = CASE WHEN previous_status IN ('available', 'busy', 'away') THEN previous_status
+                          ELSE 'available' END,
+            current_call_id = '', updated_at = ?
+        WHERE user_id = ? AND status = 'on_call' AND current_call_id = ?
+        """,
+        (now, user_id, call_id),
+    )
+    if affected:
+        row = get_presence(user_id)
+        if row:
+            hub.publish_lobby(
+                "officer.presence",
+                {"user_id": user_id, "display_name": row["display_name"], "status": row["status"]},
+                tenant_id=str(row.get("tenant_id") or "default"),
+            )
 
 
 def finish_wrap_up(user_id: str) -> None:

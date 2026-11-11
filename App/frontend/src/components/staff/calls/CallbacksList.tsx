@@ -20,6 +20,7 @@ export function CallbacksList({
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
 
   // Filter only those needing callback that are not yet done, oldest first
   const pending = calls
@@ -32,11 +33,16 @@ export function CallbacksList({
 
   const markDone = async (callId: string) => {
     setSubmitting(true);
+    setFailure(null);
     try {
       await callsApi.markCallbackDone(callId, note.trim());
       setMarkingId(null);
       setNote('');
       onRefresh();
+    } catch (err) {
+      // It used to fail without a word (G611): another officer may have
+      // rung back first, or the server could not save it.
+      setFailure((err as Error)?.message || 'The callback could not be marked done. Try again.');
     } finally {
       setSubmitting(false);
     }
@@ -114,11 +120,19 @@ export function CallbacksList({
                 <button
                   type="button"
                   className="cc-btn cc-btn--quiet"
-                  onClick={() => setMarkingId(null)}
+                  onClick={() => {
+                    setMarkingId(null);
+                    setFailure(null);
+                  }}
                   disabled={submitting}
                 >
                   Cancel
                 </button>
+                {failure && (
+                  <p className="cc-error" role="alert">
+                    {failure}
+                  </p>
+                )}
               </div>
             ) : (
               <button

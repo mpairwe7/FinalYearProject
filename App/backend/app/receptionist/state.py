@@ -30,6 +30,13 @@ class CallState:
     started_at: float = field(default_factory=time.time)
     ended_at: float | None = None
     end_reason: str = ""
+    #: Why the call is ending, recorded before the caller is told: their
+    #: screen closes its socket on hearing it, and that hang-up must not be
+    #: taken for the reason (ADR-0042).
+    ending_reason: str = ""
+    #: When the call's time limit falls (epoch seconds), once the warning has
+    #: gone out: a console that opens the call later is told how long is left.
+    limit_at: float | None = None
     turn_seq: int = 0
     turn_words: list[Any] = field(default_factory=list)
     last_caller_text: str = ""
@@ -241,6 +248,7 @@ class CallRoom:
         async with self.lock:
             if self.state.mode == "ended":
                 return
+            reason = self.state.ending_reason or reason
             self.state.mode = "ended"
             self.state.ended_at = time.time()
             self.state.end_reason = reason

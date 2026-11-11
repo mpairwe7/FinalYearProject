@@ -46,7 +46,9 @@ async function resync(): Promise<void> {
 function connect(): void {
   if (socket || disabled || typeof window === 'undefined' || typeof WebSocket === 'undefined') return;
   const store = useCallConsoleStore.getState();
-  store.setLobbyStatus('connecting');
+  // A reconnect stays `retrying`, and the console says updates are paused,
+  // until the server says the stream is ready again.
+  if (store.lobbyStatus !== 'retrying') store.setLobbyStatus('connecting');
   let ws: WebSocket;
   try {
     ws = new WebSocket(lobbyUrl());
@@ -57,13 +59,19 @@ function connect(): void {
   socket = ws;
   ws.onopen = () => {
     ws.send(JSON.stringify({ type: 'authenticate', access_token: getAuthToken() }));
-    backoffMs = 1000;
-    useCallConsoleStore.getState().setLobbyStatus('open');
-    void resync();
   };
   ws.onmessage = (event: MessageEvent) => {
     try {
       const payload = JSON.parse(String(event.data));
+      if (payload?.type === 'ready') {
+        // Signed in and subscribed. Opening the socket proves neither: a
+        // refused sign-in opens it too, and resetting the backoff there made
+        // a refusal retry every second for good (G606).
+        backoffMs = 1000;
+        useCallConsoleStore.getState().setLobbyStatus('open');
+        void resync();
+        return;
+      }
       if (payload && typeof payload.type === 'string' && payload.type !== 'ping') {
         useCallConsoleStore.getState().applyLobbyEvent(payload);
       }

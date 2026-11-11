@@ -178,6 +178,12 @@ async def claim(call_id: str, officer_id: str, officer_name: str = "") -> dict[s
         room.state.claimed_name = name
         room.state.claimed_at = now
         _restart_claim_timer(room, officer_id, timeout)
+        # Holding a claim is being on a call: left as it was, an available
+        # officer could be reserved for a second call meanwhile (G610).
+        try:
+            presence.set_on_call(officer_id, call_id, display_name=name, tenant_id=room.state.tenant_id)
+        except Exception:
+            logger.warning("Could not mark the claiming officer as on a call", exc_info=True)
     hub.publish_lobby("call.claimed", {"call_id": call_id, "officer_id": officer_id, "officer_name": name})
     return {"claimed": True, "call_id": call_id, "officer_name": name, "claim_expires_at": now + timeout}
 
@@ -307,8 +313,14 @@ async def _expire_reservation(room: CallRoom, officer_id: str, epoch: int, wait_
 
 
 async def _release_locked(room: CallRoom, reason: str) -> None:
-    """Drop the claim (call under desk_lock): the call goes back to waiting."""
+    """Drop the claim (call under desk_lock): the call goes back to waiting, and its officer to what they were."""
+    officer_id = room.state.claimed_by
     release_claim(room.call_id)
+    if officer_id:
+        try:
+            presence.end_claim_presence(officer_id, room.call_id)
+        except Exception:
+            logger.warning("Could not restore the presence of an officer whose claim ended", exc_info=True)
     room.state.claimed_by = ""
     room.state.claimed_name = ""
     room.state.claimed_at = None
@@ -1243,7 +1255,12 @@ async def revoke_media(room: CallRoom, identity: str) -> bool:
 
 
 async def hang_up_caller(room: CallRoom, reason: str) -> None:
-    """End the call and tell the caller's screen, which then closes its socket."""
+    """End the call and tell the caller's screen, which then closes its socket.
+
+    The reason is recorded first: the caller's screen hangs up on hearing it,
+    and its endpoint must not record that as the caller's own hang-up.
+    """
+    room.state.ending_reason = room.state.ending_reason or reason
     await _send_to_caller(room, {"type": "status", "status": "ended"})
     await room.end(reason)
 

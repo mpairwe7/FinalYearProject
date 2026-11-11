@@ -1,7 +1,7 @@
 # =============================================================================
 # AI Risk Manifest — NIST AI RMF 1.0 + ISO/IEC 42001:2023 + EU AI Act
 # URA AI Chatbot — Retrieval-Augmented Generation System
-# Updated: 2026-11-11 (receptionist startup and readiness addendum, ADR-0041)
+# Updated: 2026-11-11 (call screens addendum, ADR-0042)
 # =============================================================================
 
 system:
@@ -646,6 +646,7 @@ owasp_agentic_2026:
       name: "Human-Agent Trust Exploitation"
       status: "mitigated"
       browser_agent_assurance: "ADR-0038: an approval needs a session of the caller's own and the SHA-256 of the fields shown, and is appended to the ledger with the evidence of the confirmation before the portal is reached; before this no portal decision reached the ledger at all (G541, G543). No identity field has a default and a value the taxpayer did not give is marked as assumed (G544). The app may be framed only by itself and huggingface.co, Allow needs a browser-raised click and is held back when the card appears, and a decision from another site is refused (G548, G549)."
+      call_screens_assurance: "ADR-0042: the pre-call notice that an AI answers and may read the tone of the voice is shown in all five languages (G607; Art. 50 transparency), every caller-facing call error is translated from a code rather than shown as server English, a refused call says why instead of thanking the caller (G605), and the time limit is announced before it ends a call (G602). The Luganda, Runyankole, Acholi and Swahili strings added have not been reviewed by first-language speakers."
       control_integrity: "ADR-0022: a streamed figure is held until the guards have read it, a fallback or incomplete answer says so, the reply names inputs assumed from memory, and the route to a person cannot be gated (G335, G353, G355, G358). Limitation: the figure lock measures rather than enforces outside the reasoning tier (G360), and vernacular number words are not held (G364)."
       live_web_assurance: "ADR-0021: a failed live check is disclosed on every serving path, commentary and search summaries are labelled as such, and a market rate is described as an estimate. Disclosures reach the audit row."
       receptionist_assurance: "ADR-0020: draft notes explicitly leave resolution and understanding unverified; recorded officer speech does not establish statutory advice. Wrap-up ownership/atomic writes remain G305."
@@ -656,6 +657,13 @@ owasp_agentic_2026:
       controls: "Fail-closed spoken action confirmation (G177), explicit AI disclosure (G170), simulation headers (live=false), and transparent 5-locale CXP operating-hours disclosure (G174/G196). Only current completed replies offer workflow/portal actions; interrupted replies retain a warning without a grounding badge. Portal approval requires a local digest; unknown execution outcomes cannot appear successful (ADR-0018)."
       limitations: "Nothing in a page proves that an approval came from a person rather than an agent driving the browser, so a high-value approval is a checkbox, not proof of presence (G551, ADR-0038). Reviewed translations and manual accessibility acceptance remain UI-11 (G275). See docs/plans/browser-agent-assurance-2026-11-10.md and docs/plans/intelligent-ui-integration-audit-2026-10.md."
       verified_by:
+        - "App/backend/tests/test_receptionist_call_screens.py::test_calls_switched_off_are_said_to_be_off"
+        - "App/backend/tests/test_receptionist_call_screens.py::test_all_lines_busy_is_said_to_be_busy"
+        - "App/backend/tests/test_receptionist_call_screens.py::test_every_error_the_caller_is_sent_carries_a_code_the_screen_can_translate"
+        - "App/backend/tests/test_receptionist_call_screens.py::test_the_caller_and_the_officers_are_told_a_minute_before_and_the_call_ends_at_the_limit"
+        - "App/backend/tests/test_receptionist_call_screens.py::test_an_officer_whose_media_is_reconnecting_is_not_offered_to_callers"
+        - "App/frontend/src/__tests__/hooks/useCall.screens.test.tsx"
+        - "App/frontend/src/__tests__/lib/i18n.test.ts"
         - "tests/agents/test_browser_agent_assurance_2026_11.py::test_a_value_only_the_page_supplied_is_marked_on_the_card"
         - "tests/agents/test_browser_agent_assurance_2026_11.py::test_what_the_person_typed_beats_what_the_page_shows"
         - "tests/agents/test_browser_agent_assurance_2026_11.py::test_an_allowed_task_leaves_an_approval_and_an_outcome"

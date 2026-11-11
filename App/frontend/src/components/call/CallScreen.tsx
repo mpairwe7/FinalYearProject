@@ -5,6 +5,7 @@ import { useTranslation } from '@/lib/i18n';
 import { useChatStore } from '@/store/useChatStore';
 import type { CallLanguage, CallLanguageSource, CaptionEntry } from '@/store/useCallStore';
 import { useCall } from '@/hooks/useCall';
+import { useDialogFocus } from '@/hooks/useDialogFocus';
 import { formatCallCaptionText } from '@/lib/answerText';
 import { ticketRef as caseReference } from '@/lib/ticketUi';
 import { CallOrb } from '@/components/call/CallOrb';
@@ -210,6 +211,11 @@ export function CallScreen() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isOpen, status, closeCall]);
 
+  // Focus belongs to the dialog while it is open (G608): it was marked
+  // aria-modal but never took, kept or gave back focus.
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const trapTab = useDialogFocus(dialogRef, isOpen ? (status === 'consent' ? 'pre' : 'live') : null);
+
   const speakerLabel = (speaker: CaptionEntry['speaker']): string => {
     if (speaker === 'caller') return t('call.you');
     if (speaker === 'officer') return officerName || t('call.officer');
@@ -229,7 +235,14 @@ export function CallScreen() {
   /* ---------------------------------------------------------------- pre-call */
   if (status === 'consent') {
     return (
-      <div className="call-backdrop" role="dialog" aria-modal="true" aria-label={t('call.preTitle')}>
+      <div
+        className="call-backdrop"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('call.preTitle')}
+        ref={dialogRef}
+        onKeyDown={trapTab}
+      >
         <div className="call-card call-card--pre">
           <div className="call-pre-avatar">
             <PhoneIcon size={22} />
@@ -271,8 +284,11 @@ export function CallScreen() {
       role="dialog"
       aria-modal="true"
       aria-label={t('call.assistantName')}
+      ref={dialogRef}
+      onKeyDown={trapTab}
     >
-      <div className="call-card call-card--live">
+      {/* Focus lands on the call itself, not on a control a stray Enter would press. */}
+      <div className="call-card call-card--live" tabIndex={-1} data-dialog-initial-focus>
         <header className="call-header">
           <div
             className={`call-status-pill ${
@@ -371,7 +387,8 @@ export function CallScreen() {
               <p className="call-system-note">{t('call.transferring')}</p>
             )}
             {status === 'officer' && <p className="call-system-note">{t('call.bridgeActive')}</p>}
-            {status === 'ended' && <p className="call-system-note">{t('call.thankYou')}</p>}
+            {/* A refused or dropped call says why instead, and offers to call again (G605). */}
+            {status === 'ended' && !error && <p className="call-system-note">{t('call.thankYou')}</p>}
 
             <div ref={threadEndRef} />
           </div>

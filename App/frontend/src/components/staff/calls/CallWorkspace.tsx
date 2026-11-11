@@ -19,6 +19,7 @@ import { CallMetricsCard } from './CallMetricsCard';
 import { CallReviewForm } from './CallReviewForm';
 import { CallSummaryCard } from './CallSummaryCard';
 import { CallTranscript } from './CallTranscript';
+import { LiveStreamNotices } from './LiveStreamNotices';
 import { LevelMeter } from './console/LevelMeter';
 import { WaitRing } from './console/WaitRing';
 import { TransferDialog } from './TransferDialog';
@@ -223,6 +224,10 @@ export function CallWorkspace({ callId, role }: { callId: string; role: string }
           )}
         </div>
       </header>
+
+      {/* Above everything that can be collapsed: an officer deciding whether
+          to take a waiting call sees a paused stream or a near time limit. */}
+      <LiveStreamNotices status={live.status} limitAt={live.limitAt} callStatus={call.status} />
 
       {safetyConcern && (
         <p className="cw-safety" role="alert" data-testid="call-safety-concern">

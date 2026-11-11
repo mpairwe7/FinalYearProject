@@ -4,6 +4,33 @@ Operator and deployment runbook for the browser voice receptionist powered by
 Pipecat 1.15, self-hosted LiveKit WebRTC media, Whisper-SALT confidence scoring,
 ClarifyGate terminology disambiguation, and staff takeover.
 
+### Assurance update — 2026-11-11, the call screens (ADR-0042)
+
+- **A refused call says why.** "Calls are not available", "All our lines are
+  busy" or "The call was cut off", in the caller's language, with a button to
+  call again. "Thank you for calling URA" appears only when the call ended
+  normally.
+- **Checking whether calls are taken, from outside.** A call socket is now
+  accepted before it is refused, so the HTTP status no longer tells: a probe
+  gets 101 either way. A close with **1001** (after an `error` frame with
+  `code: "unavailable"`) means calls are not being taken: switched off, or
+  switched on and unable to start or not configured. `GET /ready`
+  (`capabilities.voice_receptionist`: `off`, `ready` or `unavailable: <why>`)
+  and the API log say which. A socket that stays open waiting for
+  `call_start` is taking calls.
+- **The time limit is announced** a minute before it (halfway through a limit
+  of a minute or less), on the caller's screen and in the officer's call
+  workspace, and the call ends at it on every transport, even if the caller's
+  connection stalls.
+- **The console shows when it is not live.** "Live call updates paused —
+  reconnecting" on every staff page while the lobby is down; "Live transcript
+  paused — reconnecting…" in a call while its transcript is.
+- **A refused microphone keeps the call**: the caller listens and types, and
+  can press the microphone to try again.
+- **New strings need a first-language check.** The Luganda, Runyankole, Acholi
+  and Swahili call messages and the tone notice added on 11 November were
+  written from the existing strings and have not been reviewed by speakers.
+
 ### Assurance update — 2026-11-11, starts safely and fails visibly (ADR-0041)
 
 What an operator sees differently after phase 3 of the 11 November review:

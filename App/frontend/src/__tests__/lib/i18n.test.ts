@@ -37,6 +37,30 @@ describe('i18n', () => {
     expect(translate('ach', 'composer.attachPrivacyNotice')).toContain('Kan password');
   });
 
+  it('tells a caller in every language what the call does and why it ended (G607)', () => {
+    // The AI and tone notice is a disclosure (EU AI Act Art. 50): it used to
+    // fall back to English in Luganda, Runyankole and Acholi.
+    const keys = [
+      'call.preConsentTone',
+      'call.micFallback',
+      'call.durationWarning',
+      'call.error.unavailable',
+      'call.error.busy',
+      'call.error.signin',
+      'call.error.dropped',
+      'call.error.noConnection',
+      'call.error.generic',
+    ] as const;
+    for (const dictionary of [lg, sw, nyn, ach]) {
+      for (const key of keys) {
+        const text = dictionary[key];
+        expect(text, key).toBeTruthy();
+        expect(text, key).not.toBe(en[key]);
+        expect(text, key).toBe(text?.trim());
+      }
+    }
+  });
+
   it('falls back to English rather than rendering a key or a blank', () => {
     // Deliberately not translated in non-English dictionaries.
     expect(lg['message.escalated']).toBeUndefined();

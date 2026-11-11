@@ -123,6 +123,8 @@ class TestReceptionistWSAndHTTP(unittest.TestCase):
         with patch.object(flags, "is_enabled", return_value=True), patch("app.receptionist.ws.is_ws_origin_allowed", return_value=True):
             with self.client.websocket_connect("/v1/admin/calls/stream") as ws:
                 ws.send_text(json.dumps({"type": "authenticate", "access_token": token}))
+                # Signed in and subscribed: only now can a published event reach it.
+                self.assertEqual(ws.receive_json(), {"type": "ready"})
                 hub.publish_lobby(
                     "call.started",
                     {"call_id": call_id, "status": "ai", "topic": "VAT", "priority": "normal"},
