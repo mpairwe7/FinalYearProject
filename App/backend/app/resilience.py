@@ -1,4 +1,4 @@
-"""Shared resilience primitives — circuit breaker, turn deadline, cancel scope.
+"""Shared resilience primitives — circuit breaker, turn deadline, turn cancellation, cancel scope.
 
 Extracted from ``retriever.py`` so the same breaker can guard both
 Qdrant (retrieval) and the LLM worker (generation).  2026 production
@@ -14,7 +14,7 @@ import threading
 import time
 from contextlib import contextmanager
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -241,25 +241,115 @@ def remaining_turn_seconds(default: float) -> float:
     return min(default, deadline - time.monotonic())
 
 
+# ---------------------------------------------------------------------------
+# Turn cancellation
+# ---------------------------------------------------------------------------
+class CancelToken(Protocol):
+    """Anything that can say whether its run is still wanted, such as ``threading.Event``."""
+
+    def is_set(self) -> bool: ...
+
+
+class TurnCancelled(BaseException):
+    """The turn this run belongs to was superseded: stop, and hand nothing back.
+
+    A ``BaseException``, like ``asyncio.CancelledError``: the pipeline's many
+    ``except Exception`` fallbacks would otherwise catch it and go on to the
+    next model, which is the work this is meant to stop.
+    """
+
+
+#: Where a run checks whether its turn was superseded (``turn_cancelled_total{stage}``):
+#: a call step waiting for its thread, a pipeline stage (``trace_stage``), the local
+#: model call, the agentic loop, a continuation round, a cloud fallback hop, translation.
+TURN_CANCEL_STAGES: tuple[str, ...] = (
+    "slot",
+    "pipeline",
+    "generation",
+    "agentic",
+    "continuation",
+    "cloud_fallback",
+    "localize",
+)
+
+#: The current turn's cancel token, or None. Only a call turn sets one (the brain,
+#: in the context its model run is started with), so on the chat path every check
+#: is a no-op. Threads started with ``copy_context`` see it, as they see the deadline.
+_TURN_CANCEL: contextvars.ContextVar[CancelToken | None] = contextvars.ContextVar("turn_cancel", default=None)
+
+
+def set_turn_cancel(token: CancelToken | None) -> None:
+    """Make *token* this context's turn cancellation; for a context about to run a turn."""
+    _TURN_CANCEL.set(token)
+
+
+@contextmanager
+def turn_cancel_scope(token: CancelToken | None) -> Iterator[None]:
+    """Run a block under *token*."""
+    reset = _TURN_CANCEL.set(token)
+    try:
+        yield
+    finally:
+        _TURN_CANCEL.reset(reset)
+
+
+def current_turn_cancel() -> CancelToken | None:
+    """This turn's cancel token, to hand to a run that checks an event of its own."""
+    return _TURN_CANCEL.get()
+
+
+def turn_cancelled() -> bool:
+    """Whether the turn this code runs for has been superseded (False with no token)."""
+    token = _TURN_CANCEL.get()
+    return token is not None and token.is_set()
+
+
+def raise_if_turn_cancelled(stage: str) -> None:
+    """Stop here, counted under *stage*, if this turn was superseded."""
+    if not turn_cancelled():
+        return
+    label = stage if stage in TURN_CANCEL_STAGES else "other"
+    logger.info("Turn superseded: its run stops at %s", stage)
+    try:
+        from .analytics import metrics
+
+        metrics.inc("turn_cancelled_total", labels={"stage": label})
+    except Exception:  # noqa: BLE001 - telemetry must not keep a stale run going
+        logger.debug("turn cancellation not counted", exc_info=True)
+    raise TurnCancelled(stage)
+
+
+def declare_turn_cancel_metrics() -> None:
+    """Create ``turn_cancelled_total`` at zero for every stage, so ``increase()`` sees the first stop."""
+    from .analytics import metrics
+
+    stages = (*TURN_CANCEL_STAGES, "other")
+    metrics.reserve("turn_cancelled_total", "stage", stages)
+    for stage in stages:
+        metrics.inc("turn_cancelled_total", 0, labels={"stage": stage})
+
+
 class CancelScope:
-    """A cancellation of its own that also follows a parent's.
+    """A cancellation of its own that also follows its parents'.
 
     A run that times out must stop without cancelling the turn, which still has a
     fallback to serve. A turn that is cancelled must stop every run inside it.
-    Offers the part of ``threading.Event`` the code here uses.
+    Parents are anything with ``is_set()``: a streaming turn's event, another
+    scope, a call turn's cancel token. Offers the part of ``threading.Event``
+    the code here uses.
     """
 
     _POLL_S = 0.05
 
-    def __init__(self, parent: threading.Event | CancelScope | None = None) -> None:
+    def __init__(self, *parents: CancelToken | None) -> None:
         self._own = threading.Event()
-        self._parent = parent
+        self._parents = tuple(parent for parent in parents if parent is not None)
 
     def set(self) -> None:
         self._own.set()
 
     def is_set(self) -> bool:
-        return self._own.is_set() or (self._parent is not None and self._parent.is_set())
+        return self._own.is_set() or any(parent.is_set() for parent in self._parents)
 
     def wait(self, timeout: float | None = None) -> bool:
         """Block until set or *timeout* elapses; polls because a parent cannot wake this."""

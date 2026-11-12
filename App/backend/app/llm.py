@@ -74,6 +74,7 @@ from .guardrails import (
     scan_external_tool_text,
     scan_retrieved_text,
 )
+from .resilience import raise_if_turn_cancelled
 from .tracing import llm_call
 
 
@@ -1830,6 +1831,8 @@ def complete_with_continuation(
     for _ in range(max(0, eff_max_rounds)):
         if cur_finish != "length":
             break
+        # Each round is another model call: a superseded call turn makes no more (ADR-0046).
+        raise_if_turn_cancelled("continuation")
         if deadline is not None and (deadline - time.monotonic()) < 15.0:
             break
         rem_timeout = timeout

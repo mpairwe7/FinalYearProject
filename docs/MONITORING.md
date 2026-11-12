@@ -164,6 +164,7 @@ translation and retried unmasked when the tier mangles the sentinels.
 | `ura_autonomy_gate_faults_total` | `stage` (`evaluate`/`audit`) | The gate could not decide, or could not record a refusal |
 | `ura_turn_degraded_total` | `reason` | Answers that carry a disclosure of what they could not do |
 | `ura_turn_deadline_exceeded_total` | `stage` (`stream`/`generation`/`agentic`) | Work stopped at the turn deadline |
+| `ura_turn_cancelled_total` | `stage` (`slot`/`pipeline`/`generation`/`agentic`/`continuation`/`cloud_fallback`/`localize`/`other`) | A superseded call turn's model run stopped at this check (ADR-0046). Declared at zero by the call process; no alert: a rise means callers interrupt or change language, not a fault |
 | `ura_figure_lock_checks_total` | `mode` (`enforced`/`shadow`), `outcome` (`pass`/`reject`/`skipped`/`error`) | Figure lock verdicts; `ura:figure_lock:shadow_reject_ratio_1d` is the evidence for G360 |
 | `ura_audit_seals_total`, `ura_audit_seal_failed_total` | `trigger` | Seals made / failed |
 | `ura_audit_last_seal_timestamp_seconds` | — | Last successful seal |

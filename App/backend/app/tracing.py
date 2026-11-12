@@ -50,6 +50,8 @@ import time
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
+from .resilience import raise_if_turn_cancelled
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Mapping
 
@@ -322,7 +324,12 @@ def trace_stage(
     attributes: dict[str, Any] | None = None,
     timings: dict[str, float] | None = None,
 ) -> Generator[None, None, None]:
-    """Child span ``rag.<name>`` for one pipeline stage, timing it into *timings*."""
+    """Child span ``rag.<name>`` for one pipeline stage, timing it into *timings*.
+
+    A call turn that has been superseded does not start its next stage
+    (:func:`resilience.raise_if_turn_cancelled`; a no-op on the chat path).
+    """
+    raise_if_turn_cancelled("pipeline")
     t0 = time.perf_counter()
     if _tracer is None:
         try:

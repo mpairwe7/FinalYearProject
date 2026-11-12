@@ -19,6 +19,7 @@ from .. import database as db
 from .. import officer_hours
 from ..analytics import record_chat_turn
 from ..flags import flags
+from ..resilience import TurnCancelled, raise_if_turn_cancelled, set_turn_cancel
 from ..speech_normalization import clean_text_for_speech
 from ..text_signals import detect_crisis
 from .clarify import ClarifyGate, ClarifyState
@@ -423,7 +424,8 @@ SPEECH_FAILURE_LIMIT = 2
 #: Model runs one call may have in flight: the current turn's and the one it
 #: superseded. A caller who types quickly used to start a full run per turn,
 #: every one of them running to completion on the pool that also carries
-#: speech recognition and synthesis for every other call (G591).
+#: speech recognition and synthesis for every other call (G591). The superseded
+#: one now stops at its next stage (_RunCancel, ADR-0046).
 MAX_GENERATIONS_IN_FLIGHT = 2
 
 
@@ -496,6 +498,9 @@ class _GenerationSlot:
                     return None
                 self._running += 1
             try:
+                # Superseded while this step waited for its thread, or between
+                # two steps of a Luganda answer: the step is not run (ADR-0046).
+                raise_if_turn_cancelled("slot")
                 return fn(*args, **kwargs)
             finally:
                 with self._lock:
@@ -532,8 +537,33 @@ async def _blocking(fn: Any, /, *args: Any, **kwargs: Any) -> Any:
     return await asyncio.to_thread(fn, *args, **kwargs)
 
 
-class _Superseded(Exception):
-    """A newer turn arrived while this one waited for a model run."""
+class _RunCancel:
+    """Whether a call turn's model run is still wanted, read from the run's own threads (G591).
+
+    Set into the context the run starts in (:func:`resilience.set_turn_cancel`),
+    so every stage boundary of ``generate`` sees it. True once the turn's task
+    was cancelled (the caller talked over it, a new turn came, the answer ran
+    out of time) or the call moved on (``generation_id`` changed: the language
+    router bumps it without cancelling the task).
+    """
+
+    def __init__(self, state: Any, generation_id: int) -> None:
+        self._state = state
+        self._generation_id = generation_id
+        self._cancelled = threading.Event()
+
+    def set(self) -> None:
+        self._cancelled.set()
+
+    def is_set(self) -> bool:
+        return self._cancelled.is_set() or self._state.generation_id != self._generation_id
+
+
+def _run_over(task: asyncio.Task[Any], slot: _GenerationSlot, cancel: _RunCancel) -> None:
+    """A model run's task is done: tell its threads if nobody wants the answer, and give the slot back."""
+    if task.cancelled():
+        cancel.set()
+    slot.finish()
 
 
 #: Said in place of an answer the spoken-figure guard would not voice (G185):
@@ -2002,8 +2032,12 @@ class UraReceptionistBrain(LLMService):
         # loop: a thread that starts late must answer this question in the
         # language it was asked in, not in one a newer turn moved the call to.
         slot = _GenerationSlot(self._generation_slots, asyncio.get_running_loop())
+        # A superseded run stops at its next stage instead of running to the end
+        # for an answer nobody will hear (ADR-0046).
+        cancel = _RunCancel(self.room.state, curr_gen_id)
         run_context = contextvars.copy_context()
         run_context.run(_SLOT.set, slot)
+        run_context.run(set_turn_cancel, cancel)
         state = self.room.state
         language = state.locale
         if language == "lg":
@@ -2027,7 +2061,7 @@ class UraReceptionistBrain(LLMService):
                 defer_audit=True,
             )
         gen_task = asyncio.create_task(run, context=run_context)
-        gen_task.add_done_callback(lambda _task: slot.finish())
+        gen_task.add_done_callback(lambda task: _run_over(task, slot, cancel))
 
         self._active_gen_task = gen_task
 
@@ -2051,6 +2085,14 @@ class UraReceptionistBrain(LLMService):
                     turn.disposition = "cancelled"
                 return
             raise
+        except TurnCancelled:
+            # The run saw the call move on and stopped at a stage boundary (a
+            # language switch moves generation_id without cancelling the task).
+            # Not a failure: nothing is said, nothing is transferred.
+            logger.info("Stopped a superseded generation for call %s", self.room.call_id)
+            if turn is not None:
+                turn.disposition = "cancelled"
+            return
         except asyncio.TimeoutError:
             logger.warning("Generation timed out for call %s", self.room.call_id)
             record_chat_turn({}, elapsed_ms=(time.perf_counter() - t0) * 1000, channel="call", error=True)

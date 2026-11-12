@@ -181,7 +181,10 @@ from .query import (
 from .resilience import (
     CancelScope,
     CircuitBreaker,
+    TurnCancelled,
     admit,
+    current_turn_cancel,
+    raise_if_turn_cancelled,
     remaining_turn_seconds,
     set_turn_deadline,
     turn_deadline,
@@ -994,6 +997,8 @@ def _llm_cloud_fallback(
     # Sunbird first. It is trained on the Ugandan languages, so it serves every
     # locale (the locale policy below keeps them from Workers AI); a call turn never
     # reaches it (cloud_models_allowed, app.providers.scope).
+    # A superseded call turn starts no hop, and takes no provider breaker's slot.
+    raise_if_turn_cancelled("cloud_fallback")
     if _budget_exhausted():
         logger.warning("LLM fallback chain total budget exhausted before Sunbird attempt")
     elif backend == "sunbird" and cloud_models_allowed():
@@ -1059,6 +1064,7 @@ def _llm_cloud_fallback(
         routing.CF_LLM_FALLBACK_MODEL_2,
     )
     for model in cf_chain:
+        raise_if_turn_cancelled("cloud_fallback")
         if _budget_exhausted():
             logger.warning(
                 "LLM fallback chain total budget exhausted — stopping before %s", model
@@ -1501,8 +1507,11 @@ def _local_llm_then_cloud(
         logger.warning("Turn deadline reached; skipping generation")
         metrics.inc("turn_deadline_exceeded_total", labels={"stage": "generation"})
         return ""
+    # A superseded call turn takes no breaker slot and starts no model call (ADR-0046).
+    raise_if_turn_cancelled("generation")
 
     def _fallback_to_t1(reason: str) -> str:
+        raise_if_turn_cancelled("generation")
         log_tier_fallback(reason=reason)
         _note_generation(fallback=f"reasoner_{reason}")
         t1_ep = get_endpoint(ModelTier.T1)
@@ -1529,6 +1538,7 @@ def _local_llm_then_cloud(
     def _cloud() -> str:
         if not allow_cloud_fallback:
             return ""
+        raise_if_turn_cancelled("cloud_fallback")
         return _llm_cloud_fallback(
             query,
             passages,
@@ -1560,6 +1570,8 @@ def _local_llm_then_cloud(
         gen_kwargs["tier"] = tier
 
     def _invoke_generate() -> tuple[str, dict[str, Any]]:
+        # The pool is shared: the turn may have been superseded while this waited for a thread.
+        raise_if_turn_cancelled("generation")
         llm_module.clear_last_generation_meta()
         llm_module.set_active_generation_deadline(
             time.monotonic() + max(1.0, effective_deadline - 2.0)
@@ -1573,14 +1585,21 @@ def _local_llm_then_cloud(
         finally:
             llm_module.set_active_generation_deadline(None)
 
-    # copy_context: the pool thread then sees this turn's trace span and its
-    # token-usage tally (tracing.turn_usage_scope); a bare submit loses both.
+    # copy_context: the pool thread then sees this turn's trace span, its
+    # token-usage tally (tracing.turn_usage_scope) and a call turn's cancel
+    # token (resilience.turn_cancelled); a bare submit loses all three.
     future = _LLM_EXECUTOR.submit(
         contextvars.copy_context().run,
         _invoke_generate,
     )
     try:
-        raw_res = future.result(timeout=effective_deadline)
+        try:
+            raw_res = future.result(timeout=effective_deadline)
+        except TurnCancelled:
+            # The run stopped because its call turn was superseded: nothing was
+            # learned about the model, so its slot is given back, not judged.
+            circuit.release()
+            raise
         if isinstance(raw_res, tuple) and len(raw_res) == 2:
             reply, gen_meta = raw_res
         else:
@@ -2010,6 +2029,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
         logger.warning("Turn deadline reached; skipping the agentic loop")
         metrics.inc("turn_deadline_exceeded_total", labels={"stage": "agentic"})
         return empty
+    raise_if_turn_cancelled("agentic")
 
     if not circuit.allow_request():
         if is_reasoner:
@@ -2017,7 +2037,8 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
         logger.warning("LLM circuit breaker OPEN — skipping agentic path")
         return empty
 
-    run_cancel = CancelScope(cancel_event)
+    # Stops on its own timeout, the streaming turn's event, or a call turn's cancel token.
+    run_cancel = CancelScope(cancel_event, current_turn_cancel())
     tool_kwargs: dict[str, Any] = {
         "query": query,
         "passages": passages or None,
@@ -2059,13 +2080,19 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
         **tool_kwargs,
     )
     try:
-        result = _with_connector_outcomes(future.result(timeout=effective_deadline))
+        try:
+            raw = future.result(timeout=effective_deadline)
+        except TurnCancelled:
+            circuit.release()
+            raise
+        result = _with_connector_outcomes(raw)
         if result and result.get("text"):
             circuit.record_success()
             _note_generation(backend="local", model=_endpoint_model(endpoint), tier=_tier_name(tier))
             return result
         if run_cancel.is_set():
             circuit.release()
+            raise_if_turn_cancelled("agentic")
             return result or empty
         # Empty text counts as a soft failure
         circuit.record_failure()
@@ -11179,6 +11206,8 @@ class ChatModel:
             # that English with the Luganda or Swahili voice.
             result["reply_locale"] = "en"
             if effective not in ("", "en"):
+                # Translation is a model call of its own; a superseded call turn is not translated.
+                raise_if_turn_cancelled("localize")
                 english = str(result.get("reply", ""))
                 tone_reg = str(result.get("eq_tone_register") or "")
                 if not tone_reg and flags.is_enabled("eq_multimodal_fusion", subject=user_id):

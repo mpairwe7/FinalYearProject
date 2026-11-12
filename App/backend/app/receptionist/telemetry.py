@@ -12,6 +12,7 @@ Model failures on a call are already counted by ``chat_turns_total`` with
 from __future__ import annotations
 
 from ..analytics import metrics
+from ..resilience import declare_turn_cancel_metrics
 
 #: Why a call ended. ``process_lost`` is written by the startup sweep, the
 #: rest by :meth:`CallRoom.end`.
@@ -71,6 +72,8 @@ def declare() -> None:
             metrics.inc("receptionist_frames_dropped_total", 0, labels={"side": side, "reason": reason})
     metrics.inc("receptionist_calls_started_total", 0)
     metrics.inc("receptionist_calls_lost_total", 0)
+    # Only a call turn carries a cancel token, so only the call process counts these (ADR-0046).
+    declare_turn_cancel_metrics()
 
 
 def call_started() -> None:
