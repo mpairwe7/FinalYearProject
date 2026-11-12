@@ -99,7 +99,14 @@ def refresh_gauge() -> None:
     switched off included. Set only at start, it went on paging after calls
     were switched off, and had no value for a flag switched on later. Run at
     every scrape.
+
+    Not set by the chat process (G306), which never starts the receptionist:
+    it would report "unavailable" for calls the call process is taking.
     """
+    from ..process_role import process_role
+
+    if process_role() == "chat":
+        return
     _gauge(0 if status().startswith("unavailable") else 1)
 
 

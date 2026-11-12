@@ -124,3 +124,10 @@ paths = [
     '''.*\.ipynb$''',
     '''docs/capstone/sbom-cyclonedx\.json$''',
 ]
+# Values that look like keys but are public test vectors, not secrets.
+regexes = [
+    # RFC 6455 section 1.3's sample Sec-WebSocket-Key: base64 of the 16 bytes
+    # "the sample nonce". WebSocket probes in the runbook and
+    # App/scripts/container_smoke.sh send it; servers accept any nonce.
+    '''dGhlIHNhbXBsZSBub25jZQ==''',
+]

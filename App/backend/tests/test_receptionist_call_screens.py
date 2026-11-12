@@ -342,6 +342,11 @@ class CallClockTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(hub, "publish_call",
                              side_effect=lambda _cid, kind, _data: published.append((now["t"] - start, kind))):
             await real_wait_for(ws._call_clock(self.room), timeout=2.0)
+        # The clock does not wait for the row write it hands to a task (a slow
+        # database must not delay the warning or the end), so wait for it here
+        # before a test reads the row.
+        if ws._WARNINGS:
+            await asyncio.wait(set(ws._WARNINGS), timeout=5.0)
         return slept, published
 
     async def test_the_warning_comes_a_minute_before_or_halfway_through_a_limit_of_a_minute(self):

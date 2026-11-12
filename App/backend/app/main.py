@@ -133,6 +133,7 @@ from .speech_service import (
 from .workflows.registry import WorkflowRegistry
 
 from .logging_config import REQUEST_ID, install_logging
+from .process_role import ProcessRoleMiddleware, calls_process_status, process_role
 
 logger = logging.getLogger(__name__)
 # One structured handler on the root logger: the API's, uvicorn's and every
@@ -617,6 +618,12 @@ def _log_egress_reachability() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialise and tear down the ChatModel singleton."""
+    # Which process this is, once, so the two programs of the container (G306)
+    # can be told apart in one log. Nothing is logged while no role is set.
+    role = process_role()
+    if role:
+        logger.info("Process role: %s", role)
+
     # DNS-over-HTTPS workaround — must run BEFORE any outbound HTTPS (model
     # init, retriever, Cloudflare fallback, vLLM). On Crane Cloud / RENU the pod
     # has no working upstream DNS; this routes external hostname resolution
@@ -740,8 +747,10 @@ async def lifespan(app: FastAPI):
         app.state.offline_rag = None
 
     # Voice receptionist. In production its G36 gate is checked here, by
-    # receptionist.start(), not by _validate_production_env().
-    if _flags.is_enabled("voice_receptionist"):
+    # receptionist.start(), not by _validate_production_env(). The chat process
+    # leaves it to the call process (G306): its start ends every call row a
+    # previous process left live, which here would end the call process's calls.
+    if _flags.is_enabled("voice_receptionist") and process_role() != "chat":
         # An optional feature that cannot start does not stop the API (ADR-0041,
         # G373): the chat keeps serving, call sockets are refused, and /ready
         # and the `receptionist_available` gauge say why. This block used to
@@ -866,7 +875,13 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 return
 
-    gauge_task = asyncio.create_task(_receptionist_gauge_loop(), name="receptionist-gauge")
+    # The chat process does not set the gauge: its alert reflects the process
+    # that takes calls (G306).
+    gauge_task = (
+        asyncio.create_task(_receptionist_gauge_loop(), name="receptionist-gauge")
+        if process_role() != "chat"
+        else None
+    )
     try:
         yield
     finally:
@@ -1160,6 +1175,12 @@ async def security_headers(request: Request, call_next):
     return response
 
 
+# G306: the outermost layer, so the process role is named on every response, a
+# refused call request included. Added after every other middleware (the last
+# one added wraps the rest). It does nothing while URA_PROCESS_ROLE is unset.
+app.add_middleware(ProcessRoleMiddleware)
+
+
 # ---------------------------------------------------------------------------
 # System endpoints
 # ---------------------------------------------------------------------------
@@ -1230,7 +1251,8 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
         "procedural_memory": "active",
         # Calls: "off", "ready", or "unavailable: <why>" when the receptionist
         # is switched on and could not start. The probe itself stays ready:
-        # the chat does not depend on it.
+        # the chat does not depend on it. In the chat role (G306) the value is
+        # the call process's own, read from its /ready, not this process's.
         "voice_receptionist": _receptionist_status(),
     }
     # The statutory kernel's state (ADR-0033): release, graph backend, semantic layer,
@@ -1250,6 +1272,10 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
 
 def _receptionist_status() -> str:
     try:
+        if process_role() == "chat":
+            # This process never starts the receptionist; the call process's
+            # own value is the answer (G306).
+            return calls_process_status()
         from . import receptionist
 
         return receptionist.status()

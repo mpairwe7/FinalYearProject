@@ -16,8 +16,9 @@ Crane Cloud has two operational constraints that shape the deployment shape:
 
 The compose stack in `App/docker-compose.yml` (api + frontend + qdrant + redis)
 is therefore **not** what Crane Cloud runs. Crane Cloud uses a dedicated
-`Dockerfile.cranecloud` that bundles `nginx + uvicorn + Next.js standalone + a
-loopback sparse Qdrant sidecar` under `supervisord`.
+`Dockerfile.cranecloud` that bundles `nginx + two uvicorn programs (chat and
+calls) + Next.js standalone + a loopback sparse Qdrant sidecar` under
+`supervisord`.
 
 ---
 
@@ -33,7 +34,7 @@ loopback sparse Qdrant sidecar` under `supervisord`.
 | Crane Cloud project | URA Chatbot (`10c4afe6-8083-422e-bf96-339991891de8`) |
 | Crane Cloud app ID | `b01219c6-9555-41e2-84c3-f15d764fb938` |
 | Image (verified) | `landwind/ura-chatbot:cranecloud-test` (public, 675 MB) |
-| Container port | `8080` (nginx) → internal `8081` (uvicorn) + `3000` (Next.js standalone) |
+| Container port | `8080` (nginx) → internal `8081` (uvicorn chat), `8082` (uvicorn calls) + `3000` (Next.js standalone) |
 | Cluster | RENU (`9e81a70e-8460-4e5d-b0a8-17abcac30f68`) |
 | Source | `App/` subtree of `github.com/mpairwe7/FinalYearProject` |
 | LLM backend | `vllm` (external) or `groq` fallback (free tier) |
@@ -61,16 +62,34 @@ LOCAL (docker compose --profile dev up in App/)
 CRANE CLOUD (single container, port 8080)
 ┌────────────────────────────────────────────────────────────┐
 │ supervisord                                                │
-│  ├─ nginx :8080 ──┬── proxy_pass /api/* → uvicorn :8081    │
-│  │                └── proxy_pass /     → node :3000        │
-│  ├─ qdrant :6333 (loopback, sparse-only BM25 collection)  │
-│  ├─ uvicorn :8081 (FastAPI, sparse retrieval, LLM dispatch)│
+│  ├─ nginx :8080 ──┬── call paths  → uvicorn-calls :8082    │
+│  │                ├── other /api/* → uvicorn :8081 + :8082 │
+│  │                └── proxy_pass /  → node :3000           │
+│  ├─ qdrant :6333 (loopback, sparse-only BM25 collection)   │
+│  ├─ uvicorn-chat :8081  (FastAPI, role chat)               │
+│  ├─ uvicorn-calls :8082 (same app, role calls, 1 worker)   │
 │  └─ node :3000    (Next.js standalone build)               │
 │                                                            │
 │ Baked-in: Qdrant storage, BM25 state, knowledge base       │
 │ External: vLLM endpoint OR Groq API for LLM generation     │
 └────────────────────────────────────────────────────────────┘
 ```
+
+**Two API roles (G306, ADR-0043).** A live call lives in the memory of one
+process, so the API runs as two programs started by
+`App/deploy/cranecloud/uvicorn-role.sh <role>`: `uvicorn-chat` (127.0.0.1:8081,
+`URA_PROCESS_ROLE=chat`, `max(1, UVICORN_WORKERS - 1)` workers) and
+`uvicorn-calls` (127.0.0.1:8082, `URA_PROCESS_ROLE=calls`, one worker). With the
+image's `UVICORN_WORKERS=2` that is one process each; keep it at 2 on the Space,
+because nginx splits chat one to one between the two programs and a larger value
+would leave the one-worker call process carrying more than its share. nginx sends every call
+path (`calls/stream`, `admin/calls…`, officer presence) to the call process and
+the rest of the API to both (`upstream api`); the chat role refuses a call
+request that reaches it. The Prometheus multiprocess directory is emptied once
+per container start, not once per program start. The image's
+`verify-embedded-stores.sh` checks both programs and runs `nginx -t`. Crane Cloud
+is not deployed by the change that introduced this; the files are shared with
+the Space, so its next build runs the two roles.
 
 The local stack is multi-container for fast iteration (Qdrant restarts
 quickly, Redis is shared between rate-limit and semantic cache). The
@@ -124,7 +143,19 @@ docker push landwind/ura-chatbot:latest
 
 ## 4. nginx routing (baked into the image)
 
-`/etc/nginx/sites-available/default` inside the image:
+The snippet below is the original, simplified routing. The shipped file is
+`App/deploy/cranecloud/nginx.conf`: it points the API locations at `upstream api`
+(8081 and 8082, in place of the single `backend` upstream), and puts one call
+location first, which matches
+`^/(api/(v1/)?|v1/)(calls/stream|admin/calls(/.*)?|admin/officers/(me/)?presence)$`,
+proxies to `upstream calls` (8082 only) and has the WebSocket upgrade headers and
+3600 s timeouts. Every API location also sets `proxy_next_upstream error;`, so a
+request that timed out is not sent to the other process (nginx's default would do
+the work twice). nginx takes the first matching regex location, so that order is
+behaviour. The path list is `process_role.NGINX_CALL_LOCATION`, and
+`test_call_process_container.py` keeps the two equal.
+
+`/etc/nginx/sites-available/default` inside the image (simplified):
 
 ```nginx
 server {
@@ -200,7 +231,7 @@ Set these in the Crane Cloud app dashboard → **Environment variables**:
 | Key | Example value | Required | Purpose |
 |---|---|---|---|
 | `APP_ENV` | `production` | yes | Triggers `_validate_production_env()` in `main.py` |
-| `PORT` | `8081` | yes | Backend port behind nginx |
+| `PORT` | `8081` | yes | Backend port behind nginx. The two API programs take their ports from `uvicorn-role.sh` (8081 chat, 8082 calls), not from this |
 | `LOG_LEVEL` | `info` | yes | App logger level |
 | `LLM_BACKEND` | `vllm` or `groq` | yes | Never `local` on Crane Cloud — no GPU |
 | `VLLM_BASE_URL` | `https://vllm.example.com/v1` | if `vllm` | OpenAI-compatible endpoint |
@@ -582,7 +613,7 @@ token — they will 401 anonymously.
 
 ## 10. Operational notes
 
-**Logs**: nginx, uvicorn, and the Next.js node process all log to stdout
+**Logs**: nginx, both uvicorn programs (chat and calls), and the Next.js node process all log to stdout
 via `supervisord`. View with `kubectl logs -f <pod>` or the Crane Cloud
 log pane.
 
@@ -590,7 +621,9 @@ log pane.
 mutations). Scale horizontally by raising the replica count in the
 dashboard. The slowapi rate limiter falls back to in-process buckets on
 Crane Cloud (no Redis), so per-IP limits are enforced per replica only
-— set a global edge limit if needed.
+— set a global edge limit if needed. Not with the call receptionist on: call
+state lives in the memory of the one call process, so a second replica needs
+durable call ownership first (G613).
 
 **Health probes**: configure Crane Cloud's readiness probe at
 `/ready` and liveness at `/health` (both port 8080). The 5-minute boot
@@ -689,8 +722,8 @@ direct-curl pattern from `mpairwe7/MLOPS_V1/.github/workflows/`:
 | Build & push | `.github/workflows/ura-chatbot-build-push.yml` | push to dev/main, `v*` tag, manual dispatch | Builds `Dockerfile.cranecloud`, pushes to `landwind/ura-chatbot:<tag>` on Docker Hub, then dispatches the deploy workflow (dev / `v*` only). |
 | Crane Cloud deploy | `.github/workflows/ura-chatbot-deploy-cranecloud.yml` | dispatched by build, or manual | `POST /users/login` → `PATCH /apps/<id>` → poll `/health` for 10 min (RENU intermittently takes far longer than the usual ~90 s cold start for an unchanged image). Direct REST API — no `cranecloud` CLI, no Python keyring shim. |
 | Redeploy retry loop | `.github/workflows/ura-chatbot-cc-redeploy-retry.yml` | cron every 3h, manual dispatch | Retries a blocked image roll while Crane Cloud's control plane can't resolve `hub.docker.com` (its tag-validation DNS quirk): probes the live app for the target build, dispatches the deploy workflow if stale, and on success opens a notification issue and **disables itself**. Re-enable + bump `TARGET_TAG` for future blocked rolls. |
-| HF Space roll | `.github/workflows/ura-chatbot-roll-hf-space.yml` | dispatched by build on a green `dev` build, or manual | Moves the `FROM landwind/ura-chatbot:sha-*` pin in `App/deploy/hf-space/Dockerfile`, commits it back (`[skip ci]`), then pushes that Dockerfile to the Space with `HfApi.upload_file` (secret `HF_TOKEN`) — the Space repo has no webhook from GitHub, so without this second half the pin moves here and nothing changes there. Waits for `RUNNING` and probes `/health` before calling the roll good. Because the image bakes its Qdrant collection at build time, this is also what carries a corpus change onto the Space. |
-| HF Space keepalive | `.github/workflows/hf-space-keepalive.yml` | cron hourly, manual dispatch | Keeps `landwind22/ura-chatbot` from sleeping/pausing: checks the Space runtime stage via the HF API (secret `HF_TOKEN`) and restarts it when paused/errored, then pings `/v1/speech/health` so the free-tier inactivity timer keeps resetting. |
+| HF Space roll | `.github/workflows/ura-chatbot-roll-hf-space.yml` | dispatched by build on a green `dev` build, or manual | Moves the `FROM landwind/ura-chatbot:sha-*` pin in `App/deploy/hf-space/Dockerfile`, commits it back (`[skip ci]`), then pushes that Dockerfile to the Space with `HfApi.upload_file` (secret `HF_TOKEN`) — the Space repo has no webhook from GitHub, so without this second half the pin moves here and nothing changes there. Waits for `RUNNING`, probes `/health`, then polls `/ready` for up to about 5 minutes and fails the roll while `capabilities.voice_receptionist` reads `unavailable: the call process …` (the call process is a second program that `/health` does not cover; ADR-0043, G614) before calling the roll good. Because the image bakes its Qdrant collection at build time, this is also what carries a corpus change onto the Space. |
+| HF Space keepalive | `.github/workflows/hf-space-keepalive.yml` | cron hourly, manual dispatch | Keeps `landwind22/ura-chatbot` from sleeping/pausing: checks the Space runtime stage via the HF API (secret `HF_TOKEN`) and restarts it when paused/errored, then pings `/v1/speech/health` so the free-tier inactivity timer keeps resetting, then checks `/ready` (3 tries) and turns the run red when the call process is reported down (G614). |
 
 ### Crane Cloud REST API contract used by the deploy workflow
 

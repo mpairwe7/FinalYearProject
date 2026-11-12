@@ -682,3 +682,13 @@ groups:
           summary: "Calls are ending because the service failed"
           description: "Calls ended on a speech or media failure rather than because the caller or an officer hung up."
           runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#call-receptionist"
+
+      - alert: UraCallMisrouted
+        expr: sum by (kind) (increase(ura_receptionist_misrouted_total[10m])) > 0
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "A call request reached the chat process"
+          description: "nginx sent a {{ $labels.kind }} call request to the chat process, which refused it: the routing in nginx.conf and the call-path list have drifted (ADR-0043)."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#call-receptionist"
