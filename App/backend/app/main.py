@@ -5602,7 +5602,7 @@ def update_my_presence_endpoint(
     # call they are on or hold comes first (G610, ADR-0045).
     def _owed() -> str:
         try:
-            return owed_wrapup(ctx.user_id, tenant)
+            return owed_wrapup(ctx.user_id, _receptionist_tenant_scope(ctx))
         except Exception:
             logger.warning("Could not read the wrap-ups an officer owes", exc_info=True)
             return ""

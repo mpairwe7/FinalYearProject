@@ -379,14 +379,16 @@ def _like_escaped(text: str) -> str:
     return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def owed_wrapup(officer_id: str, tenant_id: str, *, now: float | None = None) -> str:
-    """The latest ended call of *tenant_id* that *officer_id* handled and has not wrapped up; "" if none.
+def owed_wrapup(officer_id: str, tenant_id: str | None = None, *, now: float | None = None) -> str:
+    """The latest ended call *officer_id* handled and has not wrapped up; "" if none.
 
     "Handled" is the call's ``handled_by`` list (every officer who was
     connected to it, ``desk.bridge``); "wrapped up" is an entry under their id
     in its ``wrapups`` (``desk.wrapup``). Both hold the officer's user id, as
-    presence does. *tenant_id* is the officer's, the tenant their presence is
-    written in: a user id is not unique across tenants. Only calls that began
+    presence does. *tenant_id* scopes the search to the officer's tenant (a
+    user id is not unique across tenants); ``None``, as the desk passes when
+    ``multi_tenant`` is off, does not filter, like :func:`get_call` and
+    :func:`list_calls`. Only calls that began
     within ``OWED_WRAPUP_LOOKBACK_S`` count, newest end first. The ``LIKE``
     filters narrow the scan on the indexed start time; the decoded lists
     decide (G610, ADR-0045).
@@ -394,16 +396,15 @@ def owed_wrapup(officer_id: str, tenant_id: str, *, now: float | None = None) ->
     now = time.time() if now is None else now
     handled = f'%{_like_escaped(json.dumps(officer_id))}%'
     wrapped = f'%{_like_escaped(json.dumps({"officer_id": officer_id})[1:-1])}%'
+    tenant_sql = " AND tenant_id = ?" if tenant_id is not None else ""
+    tenant_params: tuple[str, ...] = (tenant_id,) if tenant_id is not None else ()
     rows = db.query_all(
-        """
-        SELECT call_id, handled_by_json, wrapups_json FROM voice_calls
-        WHERE status = 'ended' AND tenant_id = ? AND started_at >= ?
-          AND handled_by_json LIKE ? ESCAPE '\\'
-          AND COALESCE(wrapups_json, '') NOT LIKE ? ESCAPE '\\'
-        ORDER BY COALESCE(ended_at, started_at) DESC
-        LIMIT ?
-        """,
-        (tenant_id, now - OWED_WRAPUP_LOOKBACK_S, handled, wrapped, _OWED_WRAPUP_SCAN),
+        "SELECT call_id, handled_by_json, wrapups_json FROM voice_calls "  # nosec B608 # noqa: S608
+        f"WHERE status = 'ended'{tenant_sql} AND started_at >= ? "
+        "AND handled_by_json LIKE ? ESCAPE '\\' "
+        "AND COALESCE(wrapups_json, '') NOT LIKE ? ESCAPE '\\' "
+        "ORDER BY COALESCE(ended_at, started_at) DESC LIMIT ?",
+        (*tenant_params, now - OWED_WRAPUP_LOOKBACK_S, handled, wrapped, _OWED_WRAPUP_SCAN),
     )
     for row in rows:
         decoded = _decode_row(dict(row))

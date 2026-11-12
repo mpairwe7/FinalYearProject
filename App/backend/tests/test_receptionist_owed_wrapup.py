@@ -190,7 +190,7 @@ class ReconnectGraceTests(OwedWrapUpCase):
 
 
 class OwedWrapUpStoreTests(OwedWrapUpCase):
-    def owed(self, officer: str | None = None, tenant_id: str = "default") -> str:
+    def owed(self, officer: str | None = None, tenant_id: str | None = "default") -> str:
         from app.receptionist.store import owed_wrapup
 
         return owed_wrapup(officer or self.officer, tenant_id)
@@ -227,6 +227,13 @@ class OwedWrapUpStoreTests(OwedWrapUpCase):
 
         self.assertEqual(self.owed(), "")
         self.assertNotEqual(self.owed(tenant_id="another-tenant"), "")
+
+    async def test_with_multi_tenancy_off_the_tenant_is_not_a_filter(self):
+        # As get_call and list_calls: the desk passes no tenant when
+        # multi_tenant is off, and a call's own tenant then does not hide it.
+        call_id = self.ended_call(self.officer, tenant_id="another-tenant")
+
+        self.assertEqual(self.owed(tenant_id=None), call_id)
 
     async def test_a_call_still_in_progress_is_not_owed(self):
         call_id = _new_id("call_live")
