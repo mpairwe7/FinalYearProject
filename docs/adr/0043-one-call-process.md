@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted, 2026-11-12. Phase 5 of the
+Accepted, 2026-11-12; on the Space the same day (`sha-4609a1c`, PR 718). Phase 5 of the
 [11 November call receptionist review](../plans/receptionist-assurance-2026-11-11.md);
 it follows [ADR-0042](0042-call-screens-say-what-happened.md). Design:
 [receptionist-call-process-2026-11-12](../plans/receptionist-call-process-2026-11-12.md).
@@ -203,7 +203,8 @@ that touches the build paths: its roll moves the pin forward again automatically
   them the call process.
 - **A drift between nginx and the call-path list is found, not hidden.** A call
   request that reaches the chat process is refused, logged at ERROR and counted,
-  and `UraCallMisrouted` raises a warning.
+  and `UraCallMisrouted` raises a warning where the counter is scraped. Nothing
+  scrapes the Space (G614), so there the ERROR log is the only signal.
 - **`/ready` on the chat process lags the call process by up to 10 s** and says
   "not answering" for at most that long after the call process comes up. It
   stays 200 while the call process is down: the call field is informational,
@@ -303,7 +304,9 @@ the hourly keepalive workflow runs the same check three times. Both pass on
 any other value, `off` included, and on an image that does not report it (the
 rollback image). Their shell was run here against a local stub of `/ready` (call
 process down on every attempt, down and then up, `off`, a missing field, no
-answer); the workflows themselves run on the next roll and the next hourly run.
+answer). The workflows have since run. The two rolls of 2026-11-12 (04:42 and
+08:58 UTC) and a keepalive run at 09:41 UTC each read
+`voice_receptionist → ready` on the first attempt.
 
 Monitoring: `tests/test_monitoring_config.py` (the series the rule names is one
 the code exports; the runbook anchor exists) and promtool cases in
@@ -311,8 +314,18 @@ the code exports; the runbook anchor exists) and promtool cases in
 one that stays quiet when both kinds are at zero. The promtool cases could not
 be run locally (no promtool); the `Monitoring config` CI job runs them.
 
-Not verified here: `nginx -t` on the shipped file (the tests read it as text;
-the image build runs the real check), the deployed Space (the live probes in the
-[receptionist runbook](../runbooks/voice-receptionist-demo.md) run after the
-roll), a real officer handoff (it needs a staff account; the owner is asked to
-run one test call), and Crane Cloud.
+On the Space, 2026-11-12 (`sha-4609a1c`, again on `sha-7dfd010`), using the live
+probes in the [receptionist runbook](../runbooks/voice-receptionist-demo.md):
+
+- every call path is answered with `X-URA-Process: calls`, and both call
+  sockets open (101);
+- an `Upgrade: h2c` request is not passed on;
+- `/health` and `/ready` answer from both processes, with `voice_receptionist`
+  reading `ready`;
+- the log shows one `Process role: chat`, one `Process role: calls`, both
+  programs running on 8081 and 8082, no two-worker warning and no misroute;
+- chat answers from both processes.
+
+Not verified: `nginx -t` on the shipped file (the tests read it as text; the
+image build runs the real check and passed), a real officer handoff (it needs a
+staff account; the owner is asked to run one test call), and Crane Cloud.

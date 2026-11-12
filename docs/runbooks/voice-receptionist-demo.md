@@ -8,8 +8,8 @@ ClarifyGate terminology disambiguation, and staff takeover.
 
 Phase 5 of [the 11 November review](../plans/receptionist-assurance-2026-11-11.md).
 In this image, officer handoffs and live call transcripts no longer depend on
-which worker answers (deployment to the Space is pending; the probes below are
-the check). What an operator needs to know:
+which worker answers (on the Space since 2026-11-12, `sha-4609a1c`; run the
+probes below after every roll). What an operator needs to know:
 
 - **The container runs two API programs, one per role.** supervisord starts
   both through `uvicorn-role.sh` (`App/deploy/cranecloud/`):
@@ -40,7 +40,8 @@ the check). What an operator needs to know:
 - **A call request that reaches the chat process is refused**: HTTP 421, or a
   WebSocket accepted, sent `{"type": "error", "code": "unavailable"}` and
   closed 1013. It is counted in `ura_receptionist_misrouted_total` (alert
-  `UraCallMisrouted`) and logged at ERROR in the chat process:
+  `UraCallMisrouted`, where that is scraped; nothing scrapes the Space, G614)
+  and logged at ERROR in the chat process, which is the signal on the Space:
   `misrouted http request for '/v1/admin/calls' reached the chat process; nginx
   should have sent it to the call process`. The quoted path is the one nginx no
   longer routes. See [MONITORING.md](../MONITORING.md#call-receptionist).

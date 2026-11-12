@@ -3,7 +3,7 @@
 Design spec, 2026-11-12. Phase 5 of the
 [11 November call receptionist review](receptionist-assurance-2026-11-11.md).
 Approved section by section in the session that produced it; the decision
-record will be ADR-0043.
+record is [ADR-0043](../adr/0043-one-call-process.md).
 
 ## Intent
 

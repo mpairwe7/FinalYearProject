@@ -1,6 +1,6 @@
 # Call receptionist assurance review — 11 November 2026
 
-Status: phases 1 to 4 implemented; phase 5 (G306 for one container) implemented on `fix/receptionist-call-process-2026-11`, deployment pending.
+Status: phases 1 to 5 implemented and on the Space. Phase 5 (G306 for one container, PR 718) has been live since 2026-11-12 (`sha-4609a1c`), and its live probes passed; a real officer handoff on the Space has not been run yet.
 Baseline: `dev` at `9a5043db`. Decisions: [ADR-0039](../adr/0039-call-handoff-and-caller-safety.md) (phase 1), [ADR-0040](../adr/0040-call-records-and-accountability.md) (phase 2), [ADR-0041](../adr/0041-receptionist-starts-safely-fails-visibly.md) (phase 3), [ADR-0042](../adr/0042-call-screens-say-what-happened.md) (phase 4), [ADR-0043](../adr/0043-one-call-process.md) (phase 5).
 The [30 October review](receptionist-assurance-2026-10-30.md) covered teardown,
 media isolation and draft evidence; this one covers the whole call flow: what the
@@ -174,10 +174,15 @@ longer races the clock's row write.
 
 Left open by this phase:
 
-- **Not seen on the deployed Space.** The live probes (each call path answered
-  with `X-URA-Process: calls`, the call socket opening, `/ready`) run after the
-  roll, and a real officer handoff needs a staff account: the owner is asked to
-  run one test call. Rollback is a roll to `sha-f5d79b7`.
+- **A real officer handoff on the Space.** It needs a staff account, so the
+  owner is asked to run one test call. The live probes passed on 2026-11-12
+  (`sha-4609a1c`, and again on `sha-7dfd010`):
+  - every call path is answered with `X-URA-Process: calls`, and both call
+    sockets open (101);
+  - `/ready` reads `ready` from both processes;
+  - the log shows one process of each role and no misroutes.
+
+  Rollback is a roll to `sha-f5d79b7`.
 - **The call process restarting still ends its calls**, as a dead worker did.
 - **G612, G613 and G614**, above.
 - **Crane Cloud** builds from the same files and was not deployed or tested.
