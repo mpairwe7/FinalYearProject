@@ -203,7 +203,8 @@ that touches the build paths: its roll moves the pin forward again automatically
   them the call process.
 - **A drift between nginx and the call-path list is found, not hidden.** A call
   request that reaches the chat process is refused, logged at ERROR and counted,
-  and `UraCallMisrouted` raises a warning.
+  and `UraCallMisrouted` raises a warning where the counter is scraped. Nothing
+  scrapes the Space (G614), so there the ERROR log is the only signal.
 - **`/ready` on the chat process lags the call process by up to 10 s** and says
   "not answering" for at most that long after the call process comes up. It
   stays 200 while the call process is down: the call field is informational,
