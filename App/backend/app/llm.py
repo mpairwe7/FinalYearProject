@@ -1807,6 +1807,10 @@ def complete_with_continuation(
         timeout=timeout,
         endpoint=endpoint,
     )
+    # A turn superseded while the first request ran gets no text back, as at the
+    # end of the loop: an empty one would reach the service's empty-reply branch,
+    # which counts a model failure (ADR-0046).
+    raise_if_turn_cancelled("continuation")
     if not first.text or first.finish_reason != "length":
         set_last_generation_meta(
             {

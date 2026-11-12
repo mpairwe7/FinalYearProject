@@ -187,3 +187,5 @@ pass unchanged.
 
 Not verified here: a live call on the Space. After the roll, interrupt an answer
 and look for `Turn superseded: its run stops at` in the call process's log.
+
+After the second review: a first model response that lands after the turn moved on is not returned (an empty one would have counted a breaker failure), and an English reply superseded before it is recorded records no case or audit row (the last check now covers every locale, not only translated ones).

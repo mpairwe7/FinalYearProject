@@ -11267,6 +11267,9 @@ class ChatModel:
                     cur_reply = str(result.get("reply") or "")
                     if notice.strip() not in cur_reply:
                         result["reply"] = f"{cur_reply.rstrip()}{notice}"
+        # Every locale, English included (it skips translation): a turn superseded
+        # by now records no case and no audit row (ADR-0046).
+        raise_if_turn_cancelled("localize")
         _record_turn_case(message, result, user_id=user_id, tenant_id=tenant_id, channel=channel)
         pending = _PENDING_TURN_AUDIT.get()
         _PENDING_TURN_AUDIT.set(None)

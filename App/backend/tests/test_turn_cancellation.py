@@ -132,6 +132,28 @@ class ModelChainTests(unittest.TestCase):
         self.assertEqual(runs(cancel_on_first=True), 1)
         self.assertEqual(cancelled_count("continuation") - before, 1)
 
+    def test_a_first_response_that_lands_after_the_turn_moved_on_is_not_returned(self):
+        """The early return (no continuation needed) checks too: a superseded turn gets no text.
+
+        An empty first response would otherwise reach the service's empty-reply
+        branch, which records a model failure on the breaker.
+        """
+        from app import llm
+
+        for text, finish in (("A whole answer.", "stop"), ("", "stop")):
+            token = threading.Event()
+
+            def first(*_a, _text=text, _finish=finish, **_kw):
+                token.set()  # the caller moved on while the request was in flight
+                return llm.Generation(text=_text, finish_reason=_finish)
+
+            with (
+                patch.object(llm, "_vllm_generate_ex", side_effect=first),
+                turn_cancel_scope(token),
+                self.assertRaises(TurnCancelled),
+            ):
+                llm.complete_with_continuation([{"role": "user", "content": "q"}], deadline=None)
+
     def test_an_empty_continuation_sends_no_fallback_request_for_a_superseded_turn(self):
         from app import llm
 
@@ -280,7 +302,7 @@ class ModelChainTests(unittest.TestCase):
         released.assert_called_once()
 
     def outlasted_wait(self, run_name: str, *, superseded: bool) -> SimpleNamespace:
-        """Run *run_name* over a model request that outlasts its 0.2 s wait.
+        """Run *run_name* over a model request that outlasts its 1.0 s wait.
 
         With *superseded*, the call turn moves on while the request is in
         flight; otherwise there is no token at all, as on the chat path.
@@ -310,10 +332,10 @@ class ModelChainTests(unittest.TestCase):
             try:
                 if run_name == "local":
                     out.reply = service._local_llm_then_cloud(
-                        "How do I register for a TIN?", [{"text": "x"}], None, "en", deadline_s=0.2
+                        "How do I register for a TIN?", [{"text": "x"}], None, "en", deadline_s=1.0
                     )
                 else:
-                    out.reply = service._call_llm_agentic("q", [{"text": "x"}], None, "en", deadline_s=0.2)
+                    out.reply = service._call_llm_agentic("q", [{"text": "x"}], None, "en", deadline_s=1.0)
             except TurnCancelled:
                 out.stopped = True
         gate.set()
@@ -591,6 +613,30 @@ class GenerateTests(unittest.TestCase):
         case_recorded.assert_not_called()
         audited.assert_not_called()
         self.assertEqual(cancelled_count("localize") - before, 1)
+
+    def test_an_english_reply_superseded_before_it_is_recorded_records_no_case(self):
+        """English skips translation, so the last check must not live inside it."""
+        from app import service
+
+        token = threading.Event()
+
+        def english_answer(**_kw):
+            service._PENDING_TURN_AUDIT.set({"latency_ms": 1})
+            token.set()  # the caller moved on as the answer came back
+            return {"reply": "You can register on the URA portal.", "locale": "en", "sources": []}
+
+        with (
+            patch.object(self.model, "_generate_en", side_effect=english_answer),
+            patch("app.service.resources_for_turn", return_value=[]),
+            patch("app.service._record_turn_case") as case_recorded,
+            patch.object(self.model, "record_turn_audit") as audited,
+            turn_cancel_scope(token),
+            self.assertRaises(TurnCancelled),
+        ):
+            self.model.generate(message="How do I register?", channel="call", locale="en")
+
+        case_recorded.assert_not_called()
+        audited.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
