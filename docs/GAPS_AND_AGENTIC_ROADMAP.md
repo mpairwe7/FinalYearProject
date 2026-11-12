@@ -620,7 +620,7 @@ Reviewed on branch `fix/receptionist-assurance-2026-10-30`; [evidence, sources a
 
 ### Call receptionist assurance — 2026-11-11
 
-A review of the whole call flow: what the AI says, the handoff, the officer's desk, both browser clients, startup and readiness. [Evidence, sources and phases](plans/receptionist-assurance-2026-11-11.md); decisions in ADR-0039. Fixed means implemented with a regression test that failed first; nothing here was exercised on a real microphone, SFU or speech backend, and production deployment is pending. G612 and G613 were opened on 2026-11-12 by phase 5 (ADR-0043). G615 was found and fixed on 2026-11-12 while checking phase 5 on the Space. G612 was closed by phase 6 (ADR-0044) the same day. G616 was found while checking phase 6 on the Space. Phase 7 part A (ADR-0045) narrowed G304, G610 and G614.
+A review of the whole call flow: what the AI says, the handoff, the officer's desk, both browser clients, startup and readiness. [Evidence, sources and phases](plans/receptionist-assurance-2026-11-11.md); decisions in ADR-0039. Fixed means implemented with a regression test that failed first; nothing here was exercised on a real microphone, SFU or speech backend, and production deployment is pending. G612 and G613 were opened on 2026-11-12 by phase 5 (ADR-0043). G615 was found and fixed on 2026-11-12 while checking phase 5 on the Space. G612 was closed by phase 6 (ADR-0044) the same day. G616 was found while checking phase 6 on the Space. Phase 7 part A (ADR-0045) narrowed G304, G610 and G614; part B (ADR-0046) closed G591.
 
 | Gap | Finding | Status |
 | --- | --- | --- |
@@ -1358,7 +1358,9 @@ full agent chain is locked.
 
 ---
 
-*Document version 3.23 — updated 2026-11-12: phase 7 part A of the call receptionist review (ADR-0045): G304 frame limits, G610 owed wrap-ups, G614 call-process gauge and alert.*
+*Document version 3.24 — updated 2026-11-12: G591 closed by phase 7 part B of the call receptionist review (ADR-0046): a superseded call turn stops its model run at the next stage.*
+
+*Previously: version 3.23 — updated 2026-11-12: phase 7 part A of the call receptionist review (ADR-0045): G304 frame limits, G610 owed wrap-ups, G614 call-process gauge and alert.*
 
 *Previously: version 3.22 — updated 2026-11-12: G616 opened (the Space loses its database on every restart).*
 
