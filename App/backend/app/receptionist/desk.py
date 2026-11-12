@@ -772,8 +772,11 @@ async def wrapup(
     """Save an officer's wrap-up of a call they handled, apply the ticket action, restore presence.
 
     **Who may.** An officer who was connected to the call, once they are off
-    it: after it ended, or after they passed it on. The officer still on the
-    call ends or transfers it first. A call no officer ever reached (the
+    it: after it ended, or after they passed it on or their reconnect grace
+    lapsed. While the call is live, an officer who still holds it waits: the
+    one on it ends or transfers it first, one whose media is reconnecting
+    rejoins or lets the grace lapse, and one who has claimed it joins or
+    releases it (G610, ADR-0047). A call no officer ever reached (the
     caller left the queue; a callback) can be wrapped up by any officer.
     Before, any officer could wrap up any call, a live one included (G305).
 
@@ -805,9 +808,13 @@ async def wrapup(
     satisfaction = _caller_satisfaction(caller_satisfaction, caller_satisfaction_status)
 
     room = registry.get(call_id)
+    reconnecting = ""
+    claimants = {str(call.get("claimed_by") or "")}
     if room is not None:
         mode, on_call = room.state.mode, room.state.officer_id
         live = mode != "ended"
+        reconnecting = room.state.reconnecting_officer or ""
+        claimants.add(room.state.claimed_by or "")
     else:
         # No room on this process: another worker holds the call, or the
         # process that did has gone. The row is what is known here, and a row
@@ -818,8 +825,17 @@ async def wrapup(
         mode, on_call = str(call.get("status") or ""), str(call.get("officer_id") or "")
         live = mode in _LIVE_STATUSES
     handlers = _handlers(call, room if live else None)
-    if live and mode == "bridged" and on_call == officer_id:
+    # A live call the officer still holds, in any form, is not theirs to wrap
+    # up yet: saving made them available while the call was still held for
+    # them. During their reconnect grace the room waits for them (its mode is
+    # `transferring`, so the bridged check alone let the save through); a claim
+    # is a call they are about to join (G610, ADR-0047).
+    if live and officer_id and reconnecting == officer_id:
+        raise DeskError(409, "The call is waiting for you to rejoin it: rejoin it before wrapping up")
+    if live and officer_id and on_call == officer_id:
         raise DeskError(409, "You are still on this call: end it or pass it on before wrapping up")
+    if live and officer_id and officer_id in claimants:
+        raise DeskError(409, "You have claimed this call: join it or release it before wrapping up")
     if (live or handlers) and officer_id not in handlers:
         # Live and never theirs (the AI or the queue still has it), or handled by others.
         raise DeskError(403, "Only an officer who handled this call can wrap it up")
@@ -1145,16 +1161,16 @@ async def _expire_reconnect_grace(room: CallRoom, officer_id: str, grace_s: floa
         # the media service is responding. A call that ended so was still this
         # officer's: they owe its wrap-up. They were marked available, and the
         # call's teardown, which no longer saw them on the call, left it at
-        # that (G610, ADR-0045).
+        # that (G610, ADR-0045). The wait can also end as a callback meanwhile
+        # (the caller asked for one): the AI has the caller and the call goes
+        # on without the officer, who owes its wrap-up just the same
+        # (ADR-0047).
         if not await revoke_media(room, stale_identity) or room.state.mode != "transferring":
             room.state.reconnecting_officer = None
             room.state.officer_id = None
             room.state.officer_name = None
             try:
-                if room.state.mode == "ended":
-                    presence.owe_wrap_up(officer_id, room.call_id)
-                else:
-                    presence.finish_wrap_up(officer_id)
+                presence.owe_wrap_up(officer_id, room.call_id)
             except Exception:
                 logger.warning("Could not update officer presence on call %s", room.call_id, exc_info=True)
             return
@@ -1168,6 +1184,17 @@ async def _expire_reconnect_grace(room: CallRoom, officer_id: str, grace_s: floa
         # allowlist and refuse the next officer's audio (4409): the call sat
         # in the queue unanswerable.
         waiting_since = time.time()
+        # They handled the call and it goes on without them: they owe its
+        # wrap-up now, not once it ends. They were marked available, and a
+        # reload before the wrap-up was saved offered them to the next caller
+        # (G610, ADR-0047). Written before the claim is dropped: the release
+        # puts back what the officer was only while they are still on_call on
+        # this call, so it leaves the wrap-up alone. Nothing else changes
+        # their presence here: a wrap-up saved, or another call taken, stands.
+        try:
+            presence.owe_wrap_up(officer_id, room.call_id)
+        except Exception:
+            logger.warning("Could not move the lapsed officer to wrap-up on call %s", room.call_id, exc_info=True)
         try:
             await _release_locked(room, "officer_disconnected")
         except Exception:
@@ -1225,11 +1252,6 @@ async def _expire_reconnect_grace(room: CallRoom, officer_id: str, grace_s: floa
             },
         )
         _start_countdown(room)
-    # Their presence still said on_call for a call they had left.
-    try:
-        presence.finish_wrap_up(officer_id)
-    except Exception:
-        logger.warning("Could not restore the lapsed officer's presence on call %s", room.call_id, exc_info=True)
 
 
 async def revoke_media(room: CallRoom, identity: str) -> bool:

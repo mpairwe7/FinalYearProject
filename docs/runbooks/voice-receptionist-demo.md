@@ -317,6 +317,15 @@ What an operator, an officer or an auditor will see differently:
   wrap-up", after a reload too. `busy`, `away` and `offline` still apply. This
   covers calls that began in the last 24 hours, one at a time, newest first. An
   officer stuck in `wrap_up` after a demo has an unsaved wrap-up: save it.
+- **A call the officer left while it still runs is owed too (G610,
+  ADR-0047).** After **Transfer**, or when their reconnect grace lapses and the
+  call goes back to the queue, the officer stays in `wrap_up` until they save
+  it, through a reload as well; before, a reload reported `available` and they
+  could be offered the next caller or named in a transfer. The wrap-up shows
+  only **Keep ticket open with note** while the call runs (the server refuses
+  to resolve a live call's ticket). While their media is reconnecting, or while
+  they hold a claim on the call, a save is refused (409): rejoin, or join or
+  release the claim, first.
 - **The call summary no longer touches a ticket's SLA.** It adds its note only
   when the ticket has none and never stamps a first response.
 - **Retention on Postgres.** Resolved tickets are purged whether or not the
