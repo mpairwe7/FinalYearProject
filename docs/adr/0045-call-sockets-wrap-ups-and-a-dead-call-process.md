@@ -92,16 +92,22 @@ call receptionist:
   `wrap_up` only while their presence is `on_call` for that call. So a wrap-up
   already saved, or another call taken meanwhile, is left alone.
 - **On the heartbeat:** `store.owed_wrapup(officer_id, tenant_id)` finds the latest
-  ended call of the officer's tenant that lists them in `handled_by` and has no
-  wrap-up of theirs.
-  - It looks at calls begun within 24 hours, newest end first, reading at most 20
-    rows.
+  ended call that lists the officer in `handled_by` and has no wrap-up of theirs.
+  With `multi_tenant` on, the search is limited to the officer's tenant. With it
+  off, `tenant_id` is `None` and no tenant filter applies, as with the desk's other
+  reads (`get_call`, `list_calls`).
+  - It looks at calls that ended within 24 hours, newest end first, reading at
+    most 20 rows. The scan is bounded on the indexed start time, widened by the
+    longest a call may run (`RECEPTIONIST_MAX_CALL_S`), so a long call that ended
+    recently is still found.
   - While one is owed, `PUT /v1/admin/officers/me/presence` turns a requested
     `available` into `wrap_up` and returns `wrap_up_call_id`. `busy`, `away` and
     `offline` still apply, and a call the officer is on or holds comes first.
-  - The console opens that call's wrap-up when it has no call of its own, after a
-    reload too, and only from the answer to its latest heartbeat: answers can
-    arrive out of order, and an older one can predate a wrap-up saved since.
+  - The console opens that call's wrap-up when it has no call of its own and the
+    officer is available, after a reload too. It acts only on the answer to its
+    latest heartbeat: answers can arrive out of order, and an older one can
+    predate a wrap-up saved since. While the officer has chosen away or offline it
+    waits, so their choice is not overwritten by `wrap_up`.
 - **The heartbeat never overwrites a claim:** it runs on a worker thread and does
   not take the desk's lock, so a claim could land between its checks and its write
   and be overwritten with `available` or a wrap-up. It now reads the officer's

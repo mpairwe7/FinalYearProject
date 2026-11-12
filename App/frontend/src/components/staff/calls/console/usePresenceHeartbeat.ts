@@ -15,8 +15,9 @@ let latestPulse = 0;
  * Periodically beats presence heartbeat to /v1/admin/officers/me/presence every 20s
  * while tab is visible (docs/plans/officer-call-desk-plan.md §6.4, §8.2).
  * An answer naming a wrap-up the officer owes (`wrap_up_call_id`) brings it up
- * when this tab has no call: the dock offers "Finish wrap-up", and the Desk
- * shows the wrap-up form for that call.
+ * when this tab has no call and the officer is available: the dock offers
+ * "Finish wrap-up", and the Desk shows the wrap-up form for that call. While
+ * they have chosen away or offline it waits until they come back.
  */
 export function usePresenceHeartbeat(userId?: string): void {
   const availability = useCallConsoleStore((s) => s.availability);
@@ -43,8 +44,15 @@ export function usePresenceHeartbeat(userId?: string): void {
           // tab's call has not changed since (a wrap-up saved meanwhile is
           // not reopened), and only from the latest pulse's answer: an older
           // one can arrive later and predate a wrap-up saved since (G610,
-          // ADR-0045).
-          if (presence?.wrap_up_call_id && thisPulse === latestPulse && getActiveCall() === sentWith) {
+          // ADR-0045). Only while the officer offered themselves as
+          // available: the server keeps away or offline and still names the
+          // call, and opening it would send wrap_up over that choice.
+          if (
+            presence?.wrap_up_call_id &&
+            effectiveStatus === 'available' &&
+            thisPulse === latestPulse &&
+            getActiveCall() === sentWith
+          ) {
             resumeOwedWrapUp(presence.wrap_up_call_id);
           }
         })

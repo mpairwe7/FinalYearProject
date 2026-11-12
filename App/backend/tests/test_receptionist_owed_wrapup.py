@@ -43,7 +43,12 @@ class OwedWrapUpCase(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(presence.upsert_presence, self.officer, status="offline")
 
     def ended_call(
-        self, *handlers: str, wrapped_by: tuple[str, ...] = (), ended_ago_s: float = 60.0, tenant_id: str = "default"
+        self,
+        *handlers: str,
+        wrapped_by: tuple[str, ...] = (),
+        ended_ago_s: float = 60.0,
+        tenant_id: str = "default",
+        lasted_s: float = 120.0,
     ) -> str:
         """A call of *tenant_id* that ended *ended_ago_s* ago, handled by *handlers*, wrapped up by *wrapped_by*."""
         call_id = _new_id("call_owed")
@@ -53,7 +58,7 @@ class OwedWrapUpCase(unittest.IsolatedAsyncioTestCase):
             conversation_id=f"conv_{call_id}",
             tenant_id=tenant_id,
             status="ended",
-            started_at=now - ended_ago_s - 120,
+            started_at=now - ended_ago_s - lasted_s,
         )
         update_call(
             call_id,
@@ -206,6 +211,16 @@ class OwedWrapUpStoreTests(OwedWrapUpCase):
 
         self.assertEqual(self.owed(), call_id)
         self.assertEqual(self.owed(first), "")
+
+    async def test_a_long_call_that_ended_recently_is_owed(self):
+        # The look-back runs from the end: a call that began more than a day
+        # ago (RECEPTIONIST_MAX_CALL_S has no upper bound) but ended a minute
+        # ago is still owed.
+        from unittest import mock
+
+        with mock.patch.dict("os.environ", {"RECEPTIONIST_MAX_CALL_S": str(30 * 3600)}):
+            call_id = self.ended_call(self.officer, ended_ago_s=60.0, lasted_s=26 * 3600)
+            self.assertEqual(self.owed(), call_id)
 
     async def test_a_call_ended_before_the_look_back_is_not_owed(self):
         from app.receptionist.store import OWED_WRAPUP_LOOKBACK_S

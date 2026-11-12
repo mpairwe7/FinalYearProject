@@ -343,6 +343,28 @@ describe('usePresenceHeartbeat', () => {
     resetSessionForTests();
   });
 
+  it('does not bring up an owed wrap-up while the officer has chosen away', async () => {
+    // The server keeps away/offline and still names the call. Opening it would
+    // publish a wrap_up session and send wrap_up over the officer's choice.
+    const { usePresenceHeartbeat } = await import('@/components/staff/calls/console/usePresenceHeartbeat');
+    const { resetSessionForTests } = await import('@/services/officerCallSession');
+    resetSessionForTests();
+    useCallConsoleStore.getState().setAvailability('away');
+    const sent = vi
+      .spyOn(callsApi, 'updatePresence')
+      .mockResolvedValue({ status: 'away', wrap_up_call_id: 'call_owed' } as never);
+
+    const hook = renderHook(() => usePresenceHeartbeat('okello'));
+
+    await waitFor(() => expect(sent).toHaveBeenCalledWith({ status: 'away' }));
+    await act(async () => {});
+    expect(useCallConsoleStore.getState().activeCall).toBeNull();
+    expect(sent).not.toHaveBeenCalledWith({ status: 'wrap_up' });
+    hook.unmount();
+    useCallConsoleStore.getState().setAvailability('available');
+    resetSessionForTests();
+  });
+
   it('keeps the wrap-up already open when the server names another owed call', async () => {
     const { usePresenceHeartbeat } = await import('@/components/staff/calls/console/usePresenceHeartbeat');
     const { resetSessionForTests, resumeOwedWrapUp } = await import('@/services/officerCallSession');
