@@ -211,8 +211,9 @@ Left open by this phase:
 - **G616 (new):** the Space's database is on the container's own disk with no
   persistent storage. Every restart and roll loses it: conversations, tickets,
   call records and owed callbacks, the audit ledger and stored flag overrides.
-  This is the service owner's decision, between persistent storage and a
-  managed Postgres.
+  The service owner decides. `ANALYTICS_DB_DIR` needs persistent storage
+  whichever backend holds the analytics tables: the audit ledger and
+  conversation memory stay SQLite-backed under it even with managed Postgres.
 
 ## Not in scope
 
