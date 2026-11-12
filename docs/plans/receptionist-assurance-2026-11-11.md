@@ -1,7 +1,7 @@
 # Call receptionist assurance review — 11 November 2026
 
-Status: phases 1 to 6 implemented and on the Space; phase 7 part A (G304, G610, G614) implemented on `fix/receptionist-p7-sockets-wrapup-alert-2026-11`. Phase 5 (G306 for one container, PR 718) has been live since 2026-11-12 (`sha-4609a1c`), and its live probes passed; a real officer handoff on the Space has not been run yet.
-Baseline: `dev` at `9a5043db`. Decisions: [ADR-0039](../adr/0039-call-handoff-and-caller-safety.md) (phase 1), [ADR-0040](../adr/0040-call-records-and-accountability.md) (phase 2), [ADR-0041](../adr/0041-receptionist-starts-safely-fails-visibly.md) (phase 3), [ADR-0042](../adr/0042-call-screens-say-what-happened.md) (phase 4), [ADR-0043](../adr/0043-one-call-process.md) (phase 5), [ADR-0044](../adr/0044-flag-changes-reach-every-process.md) (phase 6), [ADR-0045](../adr/0045-call-sockets-wrap-ups-and-a-dead-call-process.md) (phase 7 part A).
+Status: phases 1 to 7 part A implemented and on the Space; phase 7 part B (G591) implemented on `fix/receptionist-p7b-cancel-stale-runs-2026-11`. Phase 5 (G306 for one container, PR 718) has been live since 2026-11-12 (`sha-4609a1c`), and its live probes passed; a real officer handoff on the Space has not been run yet.
+Baseline: `dev` at `9a5043db`. Decisions: [ADR-0039](../adr/0039-call-handoff-and-caller-safety.md) (phase 1), [ADR-0040](../adr/0040-call-records-and-accountability.md) (phase 2), [ADR-0041](../adr/0041-receptionist-starts-safely-fails-visibly.md) (phase 3), [ADR-0042](../adr/0042-call-screens-say-what-happened.md) (phase 4), [ADR-0043](../adr/0043-one-call-process.md) (phase 5), [ADR-0044](../adr/0044-flag-changes-reach-every-process.md) (phase 6), [ADR-0045](../adr/0045-call-sockets-wrap-ups-and-a-dead-call-process.md) (phase 7 part A), [ADR-0046](../adr/0046-superseded-call-turns-stop.md) (phase 7 part B).
 The [30 October review](receptionist-assurance-2026-10-30.md) covered teardown,
 media isolation and draft evidence; this one covers the whole call flow: what the
 AI says, the handoff to an officer, the officer's desk, the two browser clients,
@@ -233,6 +233,17 @@ Left open by this part:
 - **LiveKit control sockets'** text frames are not rate-limited (G304).
 - **A call the officer passed on or lapsed off** is owed only once it ends (G610).
 - **Pipecat's receive loop** closing a flooded caller was not run locally.
+
+## Phase 7 part B — superseded call turns stop
+
+[ADR-0046](../adr/0046-superseded-call-turns-stop.md). Tests:
+`App/backend/tests/test_turn_cancellation.py`.
+
+| Gap | What changed |
+| --- | --- |
+| G591 | A call turn's model run carries a cancel token (a context variable, so every thread of the run sees it). It is set when the turn is superseded: a barge-in, a new turn, the 25 s timeout, a language switch, or the call leaving `ai` mode. `generate` checks it at each stage boundary (each traced stage, before the local model call, each continuation round, the agentic loop, each cloud hop, translation, each step of a Luganda answer) and stops with `TurnCancelled`, a `BaseException` the pipeline's fallbacks do not catch. A stopped run records no completed turn, gives its breaker slot back without a failure, and is counted in `turn_cancelled_total{stage}`. The chat path sets no token, so its checks do nothing. |
+
+Accepted limit: an HTTP request already in flight runs to its own timeout.
 
 ## Not in scope
 

@@ -294,7 +294,8 @@ Every iteration runs inside its **tier's circuit breaker**
 (`service._LLM_CIRCUIT`, or `_REASONER_CIRCUIT` for the reasoner), with a
 wall-clock deadline that's **2× the sync deadline** by default (90s for the
 tool-loop vs 45s for plain `generate()`), clamped to what is left of the turn.
-A `CancelScope` stops the loop before its next round or dispatch.
+A `CancelScope` stops the loop before its next round or dispatch. On a call turn
+the scope also follows the turn's cancel token (ADR-0046).
 
 The parser (`_parse_tool_calls`) is **tolerant**:
 
@@ -665,6 +666,7 @@ pipeline attestation, how the turn ended and what generated it.
 | --- | --- | --- |
 | A dependency fails | `resilience.CircuitBreaker` | The half-open probe is a lease, so no caller can wedge it. Each tier has its own breaker |
 | A turn runs long | `resilience.turn_deadline` | One deadline across every stage and transport. The tool loop stops at its next check |
+| A call turn is superseded | `resilience.raise_if_turn_cancelled` | The run stops at its next stage boundary and blames no model (ADR-0046) |
 | A figure is wrong | `guardrails.FigureReleaseGate`, `_apply_output_guards` | Streams hold from the first figure. The lock runs on every transport |
 | Retrieved text leaves the data region | `guardrails.fence_spotlight_body`, `llm._spotlight_passage` | Every prompt path fences the body and the header. The tool path uses the same hash id as retrieval (ADR-0027). Uploads share the normalization (`fence_untrusted_document_body`, ADR-0029) |
 | Third-party text speaks to the model | `guardrails.scan_retrieved_text`, `scan_external_tool_text`, `injection_present` | Injection phrases and directives addressed to an AI are removed to the end of their line; ingest quarantines them (ADR-0029) |
@@ -673,6 +675,17 @@ pipeline attestation, how the turn ended and what generated it.
 | A control faults | `ToolRegistry._autonomy_gate` | Writes fail closed. A refusal does not depend on its record |
 | A person is needed | `tools/escalate.ESCALATION_ROUTE` | Cannot be gated. Goes through `_maybe_create_ticket` |
 | Something degrades | `DEGRADED_DISCLOSURES` | The taxpayer is told, and the row records it |
+
+A call turn also carries a cancel token in the context (`resilience.turn_cancelled`,
+ADR-0046). The call brain sets one for each model run; it is set when the turn's task is
+cancelled (barge-in, a new turn, the 25 s timeout) or the call's `generation_id` moves on
+(a language switch). `trace_stage`, the local model call, each continuation round, the
+agentic loop's `CancelScope`, each cloud hop and translation check it and raise
+`TurnCancelled`, a `BaseException` so that no `except Exception` fallback carries on.
+Each stop is counted in `ura_turn_cancelled_total{stage}`. A run stopped inside the model
+call, or whose wait for it timed out after the turn moved on, gives its breaker slot back
+with `release()`. The chat path sets no token, so its checks do nothing. An HTTP request
+already in flight still runs to its own timeout.
 
 See the [runbook](runbooks/agent-fault-tolerance.md).
 

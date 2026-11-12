@@ -74,6 +74,7 @@ from .guardrails import (
     scan_external_tool_text,
     scan_retrieved_text,
 )
+from .resilience import raise_if_turn_cancelled
 from .tracing import llm_call
 
 
@@ -1806,6 +1807,10 @@ def complete_with_continuation(
         timeout=timeout,
         endpoint=endpoint,
     )
+    # A turn superseded while the first request ran gets no text back, as at the
+    # end of the loop: an empty one would reach the service's empty-reply branch,
+    # which counts a model failure (ADR-0046).
+    raise_if_turn_cancelled("continuation")
     if not first.text or first.finish_reason != "length":
         set_last_generation_meta(
             {
@@ -1830,6 +1835,8 @@ def complete_with_continuation(
     for _ in range(max(0, eff_max_rounds)):
         if cur_finish != "length":
             break
+        # Each round is another model call: a superseded call turn makes no more (ADR-0046).
+        raise_if_turn_cancelled("continuation")
         if deadline is not None and (deadline - time.monotonic()) < 15.0:
             break
         rem_timeout = timeout
@@ -1853,6 +1860,8 @@ def complete_with_continuation(
             },
         )
         if not nxt.text:
+            # The retry is a model call of its own: none for a superseded turn.
+            raise_if_turn_cancelled("continuation")
             fallback_messages = cont_messages + [
                 {
                     "role": "user",
@@ -1874,6 +1883,8 @@ def complete_with_continuation(
         cur_finish = nxt.finish_reason
         merged_usage = _merge_usage(merged_usage, nxt.usage)
 
+    # A turn superseded during the last round gets no stitched answer back.
+    raise_if_turn_cancelled("continuation")
     if cur_finish == "length":
         trimmed = trim_to_complete_boundary(accumulated)
         accumulated = f"{trimmed}\n\n{SHORTENED_CONTINUATION_NOTE}" if trimmed else SHORTENED_CONTINUATION_NOTE
