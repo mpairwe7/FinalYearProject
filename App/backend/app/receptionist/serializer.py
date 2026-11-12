@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .config import call_language
+from .frame_budget import FrameGate, Verdict, close_flooded
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +159,19 @@ class BrowserCallSerializer(FrameSerializer):
         self.room = room
         self._control_timestamps: list[float] = []
         self._telemetry_timestamps: list[float] = []
+        # The caller's audio has a budget of its own (G304): control messages
+        # keep the sliding windows above.
+        self._frames = FrameGate("caller", call_id=str(getattr(room, "call_id", "") or ""))
+
+    def admit_audio(self, data: bytes) -> Verdict:
+        """Whether the caller's audio frame is within budget (size, rate, whole samples).
+
+        ``CLOSE`` comes once, when frames have been dropped for five seconds
+        running; the caller of this closes the socket.
+        """
+        state = getattr(self.room, "state", None) if self.room is not None else None
+        mulaw = state is not None and getattr(state, "audio_codec", "pcm16_16k") == "mulaw_8k"
+        return self._frames.audio(data, one_byte_samples=mulaw)
 
     def _allow_telemetry_frame(self) -> bool:
         now = time.monotonic()
@@ -207,6 +221,11 @@ class BrowserCallSerializer(FrameSerializer):
     async def deserialize(self, data: bytes | str) -> Frame | None:
         """Convert a WebSocket message into a Pipecat frame."""
         if isinstance(data, bytes):
+            verdict = self.admit_audio(data)
+            if verdict is Verdict.CLOSE:
+                await close_flooded(getattr(self.room, "caller_ws", None))
+            if verdict is not Verdict.PASS:
+                return None
             audio_bytes = data
             state = getattr(self.room, "state", None) if self.room is not None else None
             if state is not None and getattr(state, "audio_codec", "pcm16_16k") == "mulaw_8k":

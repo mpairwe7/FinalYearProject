@@ -33,6 +33,7 @@ from .config import (
     get_max_call_s,
     local_engine_errors,
 )
+from .frame_budget import FrameGate, Verdict, close_flooded
 from .hub import hub
 from .metrics import get_aggregate_metrics, record_call_end_metrics
 from .officer import OfficerLeg
@@ -895,8 +896,12 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                 message = await _receive_or_end(websocket, room)
                 if message is None or message.get("type") == "websocket.disconnect":
                     break
-                if "bytes" in message and message["bytes"]:
-                    pass  # Audio frames in fallback mode
+                if message.get("bytes") is not None:
+                    # Audio is not used in fallback mode, but a flood of it still
+                    # costs the loop: the budget applies as it does on Pipecat (G304).
+                    if serializer.admit_audio(message["bytes"]) is Verdict.CLOSE:
+                        await close_flooded(websocket)
+                        break
                 elif "text" in message and message["text"]:
                     data = _control_message(message["text"])
                     if data is None:
@@ -1405,6 +1410,10 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
 
     officer_leg.start()
 
+    # What this socket may send (G304). Checked before a frame is handed on:
+    # a bad or excess frame is dropped and counted, and only a flood that
+    # lasts closes the socket, which then takes the same path as any close.
+    frame_gate = FrameGate("officer", call_id=call_id)
     try:
         while room.state.mode == "bridged":
             if token_exp is None:
@@ -1417,10 +1426,19 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
                     break
             if msg.get("type") == "websocket.disconnect":
                 break
-            if "bytes" in msg and msg["bytes"]:
-                await officer_leg.handle_officer_message(msg["bytes"])
-            elif "text" in msg and msg["text"]:
-                await officer_leg.handle_officer_message(msg["text"])
+            if msg.get("bytes") is not None:
+                frame: bytes | str = msg["bytes"]
+                verdict = frame_gate.audio(frame)
+            elif msg.get("text"):
+                frame = msg["text"]
+                verdict = frame_gate.text(frame)
+            else:
+                continue
+            if verdict is Verdict.CLOSE:
+                await close_flooded(websocket)
+                break
+            if verdict is Verdict.PASS and frame:
+                await officer_leg.handle_officer_message(frame)
     except WebSocketDisconnect:
         pass
     except Exception:

@@ -37,6 +37,10 @@ END_REASONS: tuple[str, ...] = (
 FAILURE_STAGES: tuple[str, ...] = ("stt", "tts", "media", "record")
 #: Why a call was refused before it began.
 REFUSALS: tuple[str, ...] = ("unavailable", "not_configured", "capacity")
+#: Whose socket a dropped frame came on, and why it was dropped (G304): over
+#: the rate budget, over the size cap, or not whole PCM16 samples.
+FRAME_SIDES: tuple[str, ...] = ("caller", "officer")
+FRAME_DROP_REASONS: tuple[str, ...] = ("rate", "size", "malformed")
 _OTHER = "other"
 
 
@@ -54,12 +58,17 @@ def declare() -> None:
     metrics.reserve("receptionist_calls_ended_total", "reason", (*END_REASONS, _OTHER))
     metrics.reserve("receptionist_call_failures_total", "stage", (*FAILURE_STAGES, _OTHER))
     metrics.reserve("receptionist_calls_refused_total", "reason", (*REFUSALS, _OTHER))
+    metrics.reserve("receptionist_frames_dropped_total", "side", (*FRAME_SIDES, _OTHER))
+    metrics.reserve("receptionist_frames_dropped_total", "reason", (*FRAME_DROP_REASONS, _OTHER))
     for reason in (*END_REASONS, _OTHER):
         metrics.inc("receptionist_calls_ended_total", 0, labels={"reason": reason})
     for stage in (*FAILURE_STAGES, _OTHER):
         metrics.inc("receptionist_call_failures_total", 0, labels={"stage": stage})
     for reason in (*REFUSALS, _OTHER):
         metrics.inc("receptionist_calls_refused_total", 0, labels={"reason": reason})
+    for side in (*FRAME_SIDES, _OTHER):
+        for reason in (*FRAME_DROP_REASONS, _OTHER):
+            metrics.inc("receptionist_frames_dropped_total", 0, labels={"side": side, "reason": reason})
     metrics.inc("receptionist_calls_started_total", 0)
     metrics.inc("receptionist_calls_lost_total", 0)
 
@@ -78,6 +87,13 @@ def failure(stage: str) -> None:
 
 def refused(reason: str) -> None:
     metrics.inc("receptionist_calls_refused_total", labels={"reason": _known(reason, REFUSALS)})
+
+
+def frame_dropped(side: str, reason: str) -> None:
+    metrics.inc(
+        "receptionist_frames_dropped_total",
+        labels={"side": _known(side, FRAME_SIDES), "reason": _known(reason, FRAME_DROP_REASONS)},
+    )
 
 
 def calls_lost(count: int) -> None:

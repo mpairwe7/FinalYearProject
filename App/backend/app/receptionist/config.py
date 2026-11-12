@@ -298,6 +298,16 @@ def get_brief_every_turns() -> int:
     return max(1, _env_int("RECEPTIONIST_BRIEF_EVERY_TURNS", 3))
 
 
+def get_audio_bytes_per_s() -> int:
+    """Audio a call socket may carry, in bytes a second (G304; the burst is two seconds' worth).
+
+    The browser sends 32 000 B/s of PCM16 at 16 kHz, so the default of 64 000
+    leaves room for a throttled tab's burst. A value below one real-time
+    stream would drop a normal call's audio, so it is raised to 32 000.
+    """
+    return max(32_000, _env_int("RECEPTIONIST_AUDIO_BYTES_PER_S", 64_000))
+
+
 def get_claim_timeout_s() -> float:
     """How long an officer's claim holds a call before their audio connects."""
     return _duration("RECEPTIONIST_CLAIM_TIMEOUT_S")

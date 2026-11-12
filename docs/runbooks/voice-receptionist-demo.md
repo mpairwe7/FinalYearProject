@@ -297,6 +297,17 @@ What an operator, an officer or an auditor will see differently:
   again. Staff sockets are capped per user (`STAFF_STREAMS_PER_USER` 8,
   `STAFF_AUDIO_PER_USER` 3, in `receptionist/ws.py`); over the cap the socket
   closes with 1013. A call has at most five listeners.
+- **A call socket limits what it takes in (G304, ADR-0045).** The officer's
+  audio socket and the caller's call socket drop a binary frame over 16 KiB,
+  an odd-length one (PCM16 needs whole samples; mu-law is exempt) and any frame
+  past 64 000 B/s with a 128 000 B burst, or 200 frames/s with a burst of 200;
+  the officer's text frames are held to 15 per 10 s. A browser sends 50 frames/s
+  and 32 KB/s, so a normal call never drops one. Each drop is counted in
+  `ura_receptionist_frames_dropped_total{side,reason}` and a flood is logged at
+  WARNING once. A socket that keeps dropping frames for 5 s is closed with 1008
+  `too many frames`; an officer's close then takes the reconnect grace like any
+  other. Set the byte rate with `RECEPTIONIST_AUDIO_BYTES_PER_S` (default 64000,
+  never below 32000).
 - **The call summary no longer touches a ticket's SLA.** It adds its note only
   when the ticket has none and never stamps a first response.
 - **Retention on Postgres.** Resolved tickets are purged whether or not the
@@ -503,6 +514,7 @@ All switches and thresholds are configured via environment variables:
 | `CXP_CLOSED_DATES` | unset | `YYYY-MM-DD,…` with no shift (public holidays) |
 | `RECEPTIONIST_BRIEF_EVERY_TURNS` | `3` | Caller turns between rolling rebuilds of the officer's brief (always rebuilt on transfer) |
 | `RECEPTIONIST_CLAIM_TIMEOUT_S` | `20` | How long an officer's "Take call" holds the call before their audio must join |
+| `RECEPTIONIST_AUDIO_BYTES_PER_S` | `64000` | Audio a call socket (officer or caller) may carry, in bytes a second; the burst is two seconds' worth. A browser sends 32 000. Never below 32 000. Over it, frames are dropped; 5 s of drops closes the socket 1008 (ADR-0045) |
 | `RECEPTIONIST_MAX_CALL_S` | `900` | Hard ceiling for one call connection (15 minutes). A value that is set but not a positive number makes calls unavailable (and fails the G36 gate) instead of falling back |
 | `RECEPTIONIST_FILLER_AFTER_MS` | `450` | Latency threshold before playing filler token (pool of short tokens) |
 | `RECEPTIONIST_MEMORY_MIN_ASR_CONF` | `0.6` | A call turn heard below this mean word probability is answered but not written to long-term memory (a mishearing must not become a fact about the caller; needs `FLAG_MEMORY_ENABLED` and personalization consent to matter) |
