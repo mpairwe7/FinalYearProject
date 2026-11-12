@@ -65,7 +65,8 @@ call receptionist:
     mu-law, which has one byte per sample;
   - audio over 64 000 B/s (burst 128 000 B) or over 200 frames/s (burst 200) is
     dropped (`rate`);
-  - the officer's text frames are held to 15 per 10 s.
+  - the officer's text frames are held to 15 per 10 s, and one over 16 KiB of UTF-8
+    is dropped (`size`): bytes, not characters.
 - **Configuration:** `RECEPTIONIST_AUDIO_BYTES_PER_S` sets the byte rate, which is
   never below 32 000.
 - **What happens to a dropped frame:** it is counted in
@@ -90,15 +91,26 @@ call receptionist:
   `presence.owe_wrap_up`, a single conditional write: it moves the officer to
   `wrap_up` only while their presence is `on_call` for that call. So a wrap-up
   already saved, or another call taken meanwhile, is left alone.
-- **On the heartbeat:** `store.owed_wrapup(officer_id)` finds the latest ended call
-  that lists the officer in `handled_by` and has no wrap-up of theirs.
+- **On the heartbeat:** `store.owed_wrapup(officer_id, tenant_id)` finds the latest
+  ended call of the officer's tenant that lists them in `handled_by` and has no
+  wrap-up of theirs.
   - It looks at calls begun within 24 hours, newest end first, reading at most 20
     rows.
   - While one is owed, `PUT /v1/admin/officers/me/presence` turns a requested
     `available` into `wrap_up` and returns `wrap_up_call_id`. `busy`, `away` and
     `offline` still apply, and a call the officer is on or holds comes first.
   - The console opens that call's wrap-up when it has no call of its own, after a
-    reload too.
+    reload too, and only from the answer to its latest heartbeat: answers can
+    arrive out of order, and an older one can predate a wrap-up saved since.
+- **The heartbeat never overwrites a claim:** it runs on a worker thread and does
+  not take the desk's lock, so a claim could land between its checks and its write
+  and be overwritten with `available` or a wrap-up. It now reads the officer's
+  presence first and writes only if `updated_at`, `status` and `current_call_id` are
+  still as read (`presence.upsert_presence_if_unchanged`). Every write to presence
+  stamps `updated_at`; the other two catch two writes in one clock tick. If the row
+  changed, the newer write stands and is the answer, and the heartbeat only stamps
+  `last_seen`. A version column was not added: every writer would have to bump it,
+  and one that did not would silently undo the guard.
 - **No new column:** the owed state follows from `handled_by` and `wrapups`, which the
   desk already writes. A new column would need a migration and a second source of
   truth.
@@ -157,6 +169,8 @@ reverted:
   - a normal 50 frames/s stream never dropped;
   - an oversize and an odd-length frame dropped and counted without ending the
     officer's leg;
+  - a text frame measured in UTF-8 bytes: 5 000 emoji are dropped, 16 KiB of ASCII
+    passes;
   - a flood dropped;
   - a five-second flood closed 1008, on both sockets;
   - the counter's zero series.
@@ -168,13 +182,18 @@ reverted:
   - the heartbeat holds `wrap_up` and returns `wrap_up_call_id` until the wrap-up is
     saved;
   - a second officer owes their own;
-  - the look-back and saved wrap-ups are honoured.
+  - the look-back and saved wrap-ups are honoured, and another tenant's call is not
+    owed;
+  - a claim that lands between the heartbeat's checks and its write stays `on_call`,
+    against an owed wrap-up, a plain `available` and an officer with no presence
+    row yet; a heartbeat nothing races still writes.
 
   Three existing tests that encoded the old behaviour were updated. The
   revocation-race and bridged hang-up tests now expect the owed wrap-up. The
   failed-revoke claim test now expects `wrap_up`.
 - **`App/frontend/src/__tests__/components/officerCallScreens.test.tsx`** (G610): a
-  heartbeat with `wrap_up_call_id` brings up that call's wrap-up with no active call.
+  heartbeat with `wrap_up_call_id` brings up that call's wrap-up with no active call;
+  an older heartbeat's answer that arrives last does not.
 
 **Not verified here:**
 - Pipecat's own receive loop closing the caller after a 1008. Pipecat is not

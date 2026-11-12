@@ -184,6 +184,18 @@ class FrameGateTests(unittest.TestCase):
         self.assertIs(gate.text("x" * 20000), Verdict.DROP)
         self.assertEqual(self.counted("officer", "size"), 1)
 
+    def test_a_text_frame_is_measured_in_utf8_bytes_not_characters(self):
+        # What arrives on the socket is UTF-8: 5 000 emoji are 20 000 B, and
+        # 16 383 two-byte letters are 32 766 B, both under 16 384 characters.
+        gate = self.gate()
+        self.assertIs(gate.text("\U0001f600" * 5000), Verdict.DROP)
+        self.assertIs(gate.text("é" * (frame_budget.MAX_FRAME_BYTES - 1)), Verdict.DROP)
+        self.assertEqual(self.counted("officer", "size"), 2)
+        # The boundary in ASCII, one byte a character: 16 KiB passes, one more does not.
+        self.assertIs(gate.text("x" * frame_budget.MAX_FRAME_BYTES), Verdict.PASS)
+        self.assertIs(gate.text("x" * (frame_budget.MAX_FRAME_BYTES + 1)), Verdict.DROP)
+        self.assertEqual(self.counted("officer", "size"), 3)
+
     def test_text_frames_are_limited_to_15_in_10_seconds(self):
         gate = self.gate()
         verdicts = [gate.text('{"type":"ping"}') for _ in range(20)]

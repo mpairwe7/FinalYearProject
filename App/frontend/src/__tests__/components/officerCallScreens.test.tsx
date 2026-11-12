@@ -8,7 +8,7 @@ import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { FakeSocket, callRecord } from '../helpers/callConsole';
-import { callsApi, type CallRecord } from '@/services/callsApi';
+import { callsApi, type CallRecord, type OfficerPresence } from '@/services/callsApi';
 import { useCallConsoleStore } from '@/store/useCallConsoleStore';
 
 // ---------------------------------------------------------------------------
@@ -357,6 +357,51 @@ describe('usePresenceHeartbeat', () => {
     await waitFor(() => expect(sent).toHaveBeenCalledWith({ status: 'wrap_up' }));
     await act(async () => {});
     expect(useCallConsoleStore.getState().activeCall).toMatchObject({ callId: 'call_first', state: 'wrap_up' });
+    hook.unmount();
+    resetSessionForTests();
+  });
+
+  // Pulses go out on mount, every 20 s and when the tab comes back, and are
+  // not answered in the order they were sent. An older answer can predate a
+  // wrap-up the officer has saved since: only the latest pulse's answer counts.
+  async function twoPulses() {
+    const { usePresenceHeartbeat } = await import('@/components/staff/calls/console/usePresenceHeartbeat');
+    const { resetSessionForTests } = await import('@/services/officerCallSession');
+    resetSessionForTests();
+    const answers: Array<(presence: Partial<OfficerPresence>) => void> = [];
+    vi.spyOn(callsApi, 'updatePresence').mockImplementation(
+      () =>
+        new Promise<OfficerPresence>((resolve) => {
+          answers.push((presence) => resolve(presence as OfficerPresence));
+        }),
+    );
+    const hook = renderHook(() => usePresenceHeartbeat('okello'));
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(answers).toHaveLength(2);
+    const [older, newer] = answers;
+    return { older, newer, hook, resetSessionForTests };
+  }
+
+  it('does not reopen a wrap-up from the answer to an older pulse', async () => {
+    const { older, newer, hook, resetSessionForTests } = await twoPulses();
+
+    await act(async () => newer({ status: 'available', wrap_up_call_id: '' }));
+    await act(async () => older({ status: 'wrap_up', wrap_up_call_id: 'call_saved' }));
+
+    expect(useCallConsoleStore.getState().activeCall).toBeNull();
+    hook.unmount();
+    resetSessionForTests();
+  });
+
+  it('brings up the wrap-up the latest pulse is told of, whatever comes after', async () => {
+    const { older, newer, hook, resetSessionForTests } = await twoPulses();
+
+    await act(async () => newer({ status: 'wrap_up', wrap_up_call_id: 'call_owed' }));
+    await act(async () => older({ status: 'available', wrap_up_call_id: '' }));
+
+    expect(useCallConsoleStore.getState().activeCall).toMatchObject({ callId: 'call_owed', state: 'wrap_up' });
     hook.unmount();
     resetSessionForTests();
   });

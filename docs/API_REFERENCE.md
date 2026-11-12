@@ -2141,7 +2141,15 @@ they are on no call, `available` is answered with `wrap_up` (and
 `current_call_id` set to that call); `busy`, `away`, `offline` and `wrap_up`
 still apply. Saving the wrap-up (`POST /v1/admin/calls/{call_id}/wrapup`) ends
 it; the next owed call, if any, is named on the next heartbeat. The console
-opens the wrap-up for that call when it has no call of its own.
+opens the wrap-up for that call when it has no call of its own, from the
+answer to its latest heartbeat only. Only calls of the officer's own tenant
+count.
+
+The PUT writes only if the officer's presence is still as it read it
+(`updated_at`, `status`, `current_call_id`). If a claim or a call's end
+wrote it meanwhile, that write stands: the answer is the presence as it now
+is, with only `last_seen` updated, and `wrap_up_call_id` is set only if that
+presence is the wrap-up of an owed call.
 
 ```json
 {"user_id": "okello@ura.go.ug", "status": "wrap_up", "current_call_id": "call_3f2a", "wrap_up_call_id": "call_3f2a", "...": "..."}

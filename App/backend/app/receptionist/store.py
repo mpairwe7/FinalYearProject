@@ -379,15 +379,17 @@ def _like_escaped(text: str) -> str:
     return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def owed_wrapup(officer_id: str, *, now: float | None = None) -> str:
-    """The latest ended call *officer_id* handled and has not wrapped up; "" if none.
+def owed_wrapup(officer_id: str, tenant_id: str, *, now: float | None = None) -> str:
+    """The latest ended call of *tenant_id* that *officer_id* handled and has not wrapped up; "" if none.
 
     "Handled" is the call's ``handled_by`` list (every officer who was
     connected to it, ``desk.bridge``); "wrapped up" is an entry under their id
     in its ``wrapups`` (``desk.wrapup``). Both hold the officer's user id, as
-    presence does. Only calls that began within ``OWED_WRAPUP_LOOKBACK_S``
-    count, newest end first. The ``LIKE`` filters narrow the scan on the
-    indexed start time; the decoded lists decide (G610, ADR-0045).
+    presence does. *tenant_id* is the officer's, the tenant their presence is
+    written in: a user id is not unique across tenants. Only calls that began
+    within ``OWED_WRAPUP_LOOKBACK_S`` count, newest end first. The ``LIKE``
+    filters narrow the scan on the indexed start time; the decoded lists
+    decide (G610, ADR-0045).
     """
     now = time.time() if now is None else now
     handled = f'%{_like_escaped(json.dumps(officer_id))}%'
@@ -395,13 +397,13 @@ def owed_wrapup(officer_id: str, *, now: float | None = None) -> str:
     rows = db.query_all(
         """
         SELECT call_id, handled_by_json, wrapups_json FROM voice_calls
-        WHERE status = 'ended' AND started_at >= ?
+        WHERE status = 'ended' AND tenant_id = ? AND started_at >= ?
           AND handled_by_json LIKE ? ESCAPE '\\'
           AND COALESCE(wrapups_json, '') NOT LIKE ? ESCAPE '\\'
         ORDER BY COALESCE(ended_at, started_at) DESC
         LIMIT ?
         """,
-        (now - OWED_WRAPUP_LOOKBACK_S, handled, wrapped, _OWED_WRAPUP_SCAN),
+        (tenant_id, now - OWED_WRAPUP_LOOKBACK_S, handled, wrapped, _OWED_WRAPUP_SCAN),
     )
     for row in rows:
         decoded = _decode_row(dict(row))

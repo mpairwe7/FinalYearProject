@@ -136,11 +136,16 @@ class FrameGate:
         return Verdict.PASS
 
     def text(self, data: str) -> Verdict:
-        """Whether to hand on a text frame: small, and at most 15 in 10 s."""
+        """Whether to hand on a text frame: small, and at most 15 in 10 s.
+
+        Its size is its UTF-8 bytes, as it came over the socket, not its
+        characters: an emoji is four. A frame with more characters than the
+        cap is over it whatever they are, so it is not encoded to find out.
+        """
         if self._closed:
             return Verdict.DROP
         now = self._tick()
-        if len(data) > MAX_FRAME_BYTES:
+        if len(data) > MAX_FRAME_BYTES or len(data.encode("utf-8", "surrogatepass")) > MAX_FRAME_BYTES:
             return self._drop("size", now)
         self._texts.refill(now)
         if not self._texts.covers(1):

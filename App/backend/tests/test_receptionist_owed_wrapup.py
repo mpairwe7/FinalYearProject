@@ -42,11 +42,19 @@ class OwedWrapUpCase(unittest.IsolatedAsyncioTestCase):
         self.officer = f"{_new_id('okello')}@ura.go.ug"
         self.addCleanup(presence.upsert_presence, self.officer, status="offline")
 
-    def ended_call(self, *handlers: str, wrapped_by: tuple[str, ...] = (), ended_ago_s: float = 60.0) -> str:
-        """A call that ended *ended_ago_s* ago, handled by *handlers*, wrapped up by *wrapped_by*."""
+    def ended_call(
+        self, *handlers: str, wrapped_by: tuple[str, ...] = (), ended_ago_s: float = 60.0, tenant_id: str = "default"
+    ) -> str:
+        """A call of *tenant_id* that ended *ended_ago_s* ago, handled by *handlers*, wrapped up by *wrapped_by*."""
         call_id = _new_id("call_owed")
         now = time.time()
-        create_call(call_id, conversation_id=f"conv_{call_id}", status="ended", started_at=now - ended_ago_s - 120)
+        create_call(
+            call_id,
+            conversation_id=f"conv_{call_id}",
+            tenant_id=tenant_id,
+            status="ended",
+            started_at=now - ended_ago_s - 120,
+        )
         update_call(
             call_id,
             ended_at=now - ended_ago_s,
@@ -182,10 +190,10 @@ class ReconnectGraceTests(OwedWrapUpCase):
 
 
 class OwedWrapUpStoreTests(OwedWrapUpCase):
-    def owed(self, officer: str | None = None) -> str:
+    def owed(self, officer: str | None = None, tenant_id: str = "default") -> str:
         from app.receptionist.store import owed_wrapup
 
-        return owed_wrapup(officer or self.officer)
+        return owed_wrapup(officer or self.officer, tenant_id)
 
     async def test_an_ended_call_the_officer_handled_without_a_wrap_up_is_owed(self):
         call_id = self.ended_call(self.officer)
@@ -213,6 +221,13 @@ class OwedWrapUpStoreTests(OwedWrapUpCase):
 
         self.assertEqual(self.owed(), latest)
 
+    async def test_a_call_in_another_tenant_is_not_owed(self):
+        # The heartbeat asks for the officer's own tenant, the one their presence is written in.
+        self.ended_call(self.officer, tenant_id="another-tenant")
+
+        self.assertEqual(self.owed(), "")
+        self.assertNotEqual(self.owed(tenant_id="another-tenant"), "")
+
     async def test_a_call_still_in_progress_is_not_owed(self):
         call_id = _new_id("call_live")
         create_call(call_id, conversation_id=f"conv_{call_id}", status="bridged")
@@ -226,7 +241,7 @@ class OwedWrapUpStoreTests(OwedWrapUpCase):
 # ---------------------------------------------------------------------------
 
 
-class HeartbeatTests(OwedWrapUpCase):
+class HeartbeatCase(OwedWrapUpCase):
     def client(self, officer: str | None = None):
         from app.auth.jwt_auth import make_dev_token
         from app.main import app
@@ -242,6 +257,8 @@ class HeartbeatTests(OwedWrapUpCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
 
+
+class HeartbeatTests(HeartbeatCase):
     async def test_an_officer_who_owes_a_wrap_up_stays_in_it_and_is_told_which_call(self):
         call_id = self.ended_call(self.officer)
 
@@ -296,6 +313,101 @@ class HeartbeatTests(OwedWrapUpCase):
         self.heartbeat("available")
 
         self.assertEqual(self.status(), ("on_call", waiting))
+
+
+class HeartbeatRaceTests(HeartbeatCase):
+    """A write to presence that lands while the heartbeat decides is not overwritten (ADR-0045).
+
+    The heartbeat runs on a worker thread and does not take the desk's lock; a
+    claim runs on the event loop. Here the write lands inside ``owed_wrapup``:
+    after the heartbeat's checks, before its own write.
+    """
+
+    def lands_during_the_heartbeat(self, write):
+        from app.receptionist import store
+
+        real = store.owed_wrapup
+        landed: list[bool] = []
+
+        def owed_then_written(*args, **kwargs):
+            answer = real(*args, **kwargs)
+            if not landed:
+                landed.append(True)
+                write()
+            return answer
+
+        return patch.object(store, "owed_wrapup", side_effect=owed_then_written)
+
+    def claim(self, call_id: str):
+        return self.lands_during_the_heartbeat(lambda: presence.set_on_call(self.officer, call_id))
+
+    async def test_a_claim_is_not_overwritten_by_an_owed_wrap_up(self):
+        self.ended_call(self.officer)
+        presence.upsert_presence(self.officer, status="available", current_call_id="")
+        claimed = _new_id("call_claimed")
+
+        with self.claim(claimed):
+            body = self.heartbeat("available")
+
+        self.assertEqual(self.status(), ("on_call", claimed))
+        self.assertEqual(body["status"], "on_call")
+        self.assertEqual(body["current_call_id"], claimed)
+        self.assertEqual(body["wrap_up_call_id"], "")
+
+    async def test_a_claim_is_not_overwritten_by_available(self):
+        presence.upsert_presence(self.officer, status="available", current_call_id="")
+        claimed = _new_id("call_claimed")
+
+        with self.claim(claimed):
+            body = self.heartbeat("available")
+
+        self.assertEqual(self.status(), ("on_call", claimed))
+        self.assertEqual(body["status"], "on_call")
+        self.assertEqual(body["wrap_up_call_id"], "")
+
+    async def test_a_claim_on_an_officer_with_no_presence_yet_is_not_overwritten(self):
+        claimed = _new_id("call_claimed")
+
+        with self.claim(claimed):
+            body = self.heartbeat("available")
+
+        self.assertEqual(self.status(), ("on_call", claimed))
+        self.assertEqual(body["status"], "on_call")
+
+    async def test_a_wrap_up_owed_meanwhile_is_answered_and_the_officer_counts_as_seen(self):
+        # Their tab was hidden: no heartbeat for five minutes, so they show offline.
+        call_id = self.ended_call(self.officer)
+        presence.set_on_call(self.officer, call_id)
+        db.execute("UPDATE officer_presence SET last_seen = ? WHERE user_id = ?", (time.time() - 300, self.officer))
+        sent_at = time.time()
+
+        with self.lands_during_the_heartbeat(lambda: presence.owe_wrap_up(self.officer, call_id)):
+            body = self.heartbeat("available")
+
+        self.assertEqual(self.status(), ("wrap_up", call_id))
+        self.assertEqual(body["status"], "wrap_up")
+        self.assertEqual(body["wrap_up_call_id"], call_id)
+        self.assertGreaterEqual((presence.get_presence(self.officer) or {}).get("last_seen", 0), sent_at)
+
+    async def test_a_heartbeat_nothing_races_still_writes(self):
+        presence.upsert_presence(self.officer, status="busy", current_call_id="")
+        before = (presence.get_presence(self.officer) or {})["last_seen"]
+
+        body = self.heartbeat("available")
+
+        self.assertEqual(self.status(), ("available", ""))
+        self.assertEqual(body["status"], "available")
+        self.assertEqual(body["wrap_up_call_id"], "")
+        self.assertGreater((presence.get_presence(self.officer) or {})["last_seen"], before)
+
+    async def test_an_owed_wrap_up_still_replaces_available_when_nothing_races(self):
+        call_id = self.ended_call(self.officer)
+        presence.upsert_presence(self.officer, status="available", current_call_id="")
+
+        body = self.heartbeat("available")
+
+        self.assertEqual(self.status(), ("wrap_up", call_id))
+        self.assertEqual(body["wrap_up_call_id"], call_id)
 
 
 if __name__ == "__main__":
