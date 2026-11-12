@@ -74,8 +74,9 @@ How it works:
   `flag_sync_failures_total` on every failed pass.
 - **The interval.** `FLAG_SYNC_INTERVAL_SECONDS`: 5 by default. 0 turns the sync
   off, and a change then reaches the other processes at their next start. Any other
-  value is at least 1. A value that is not a number, or is negative, falls back to
-  5 with a warning.
+  value is at least 1. A value that is not a finite, non-negative number (`abc`,
+  `-1`, `nan`, `inf`) falls back to 5 with a warning: `asyncio.timeout(inf)` never
+  fires, so the sync would never run while the API reported it on.
 - **The API says how far a change reaches.** `GET /v1/admin/flags` adds:
   - `scope`: `every_process_sharing_this_database`, or
     `this_process_until_the_others_restart` when the sync is off;
@@ -83,10 +84,18 @@ How it works:
   - `synced_at`: when the answering process last read the store, in epoch seconds;
   - `stored` on each flag.
 
-  `PATCH` and `DELETE` return the same `scope` and
-  `reaches_every_process_within_seconds`. The console's Feature flags page used to
+  `PATCH` and `DELETE` return the same `scope` and `sync_interval_seconds`. These
+  describe the setting, not a confirmation from the other processes: one that
+  cannot read the store keeps its flags. The console's Feature flags page used to
   say "Toggles here change this replica only". It now says a change reaches every
-  API process within the interval, or at their restart when the sync is off.
+  API process at its next sync (naming the interval), or at their restart when the
+  sync is off. Until the flag list arrives it makes no claim. For the calls
+  switch, it says to confirm from `/ready`.
+- **A store that cannot be read is never read as empty.** An empty read clears
+  every stored override in every process, a stored calls kill switch included. The
+  Postgres backend returned `{}` when it had no connection pool, and its writes
+  returned without storing. All three now raise, so the sync keeps its flags and
+  `PATCH` or `DELETE` fails instead of reporting a change nobody else would see.
 
 ## Consequences
 
@@ -96,7 +105,10 @@ How it works:
   call sockets are refused (a caller's, the staff call stream, an officer's audio);
   sockets already open carry on. The Space secret stays as the fallback for when
   the console or the store is unavailable. The runbook's kill switch now leads with
-  the console.
+  the console. If the store can be read but not written, a stored `true` override
+  cannot be removed and beats the secret. The runbook's last resort is then to
+  pause the Space, which takes chat down too, with the keepalive workflow turned
+  off: that workflow restarts any Space that is not running.
 - **A stored override now also beats a `FLAG_*` value while a process runs**, not
   only at its start: the sync re-applies it on every pass. So deleting a stored
   override is enough to make every process follow `FLAG_*` again within one
@@ -137,7 +149,11 @@ was shown to fail when the change it pins was reverted. The tests cover:
     recovers;
   - in production, a stored `false` for `auth_required` is refused without exiting,
     logged CRITICAL once over two passes and counted twice.
-- **The interval:** parsing of blank, unset, 2, 0, 0.2, -1 and `abc`.
+- **The interval:** parsing of blank, unset, 2, 0, 0.2, -1, `abc`, `nan`, `inf`
+  and `1e309`.
+- **The Postgres store:** with no pool, `load_flag_overrides`, `save_flag_override`
+  and `clear_flag_override` raise, and a sync pass reading through it keeps the
+  flags.
 - **The loop:** it runs on its interval, stops when the app stops and ends when
   cancelled. The real lifespan runs it, and does not run it at interval 0.
 - **The API:**
@@ -155,8 +171,9 @@ Each part of the change was also reverted on its own, and a test failed each tim
 - `PATCH` marking its row as stored.
 
 `App/frontend/src/__tests__/app/adminFlags.test.tsx` covers the console's note: it
-names the interval when the sync is on, gives the restart wording when the sync is
-off, and keeps the "replayed whenever a process restarts" sentence.
+names the interval and says to confirm from `/ready` when the sync is on, gives the
+restart wording when the sync is off, claims neither while the list is loading,
+and keeps the "replayed whenever a process restarts" sentence.
 
 Not verified here: two real processes on the Space. After the roll, the runbook's
 kill-switch steps are the check: switch calls off from the console, read `/ready`

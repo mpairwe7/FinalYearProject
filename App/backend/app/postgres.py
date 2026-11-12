@@ -1809,9 +1809,12 @@ def list_ticket_viewers(ticket_id: str, max_age: float | None = None) -> list[st
 
 
 def load_flag_overrides() -> dict[str, bool]:
+    # No pool is a store that cannot be read, not an empty one. Read as {}, the
+    # flag sync (ADR-0044) would clear every stored override in every process,
+    # a stored calls kill switch included; raising keeps the flags as they are.
     pool = _get_pool()
     if pool is None:
-        return {}
+        raise RuntimeError("Postgres pool unavailable; flag overrides cannot be read")
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT name, enabled FROM flag_overrides")
         return {str(r[0]): bool(r[1]) for r in cur.fetchall()}
@@ -1823,7 +1826,8 @@ def save_flag_override(name: str, enabled: bool) -> None:
         return
     pool = _get_pool()
     if pool is None:
-        return
+        # Returning let PATCH report a change no other process would see.
+        raise RuntimeError("Postgres pool unavailable; the flag override was not stored")
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             """INSERT INTO flag_overrides (name, enabled, updated_at)
@@ -1840,7 +1844,7 @@ def clear_flag_override(name: str) -> None:
         return
     pool = _get_pool()
     if pool is None:
-        return
+        raise RuntimeError("Postgres pool unavailable; the flag override was not removed")
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM flag_overrides WHERE name = %s", (key,))
         conn.commit()

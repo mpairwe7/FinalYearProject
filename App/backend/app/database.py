@@ -2621,8 +2621,9 @@ def load_flag_overrides() -> dict[str, bool]:
     set.  Returning ``{}`` made the two indistinguishable, so startup
     replayed nothing and still reported success — a production replica
     whose override state was unreadable looked exactly like one that had
-    no overrides.  The Postgres backend already propagates; both must
-    fail closed the same way.
+    no overrides.  The Postgres backend raises too, including when it has
+    no pool; both must fail closed the same way.  The flag sync (ADR-0044)
+    relies on it: an empty read clears every stored override.
     """
     conn = _get_connection()
     rows = conn.execute("SELECT name, enabled FROM flag_overrides").fetchall()

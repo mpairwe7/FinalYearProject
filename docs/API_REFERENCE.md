@@ -2224,8 +2224,11 @@ DELETE /v1/admin/flags/{name}
 `GET` lists the answering process's registry (`enabled`, `overridden`,
 `stored`, `protected`, rollout size) and `overrides_are_ephemeral: false`.
 It also reports:
-- `scope`: how far a change reaches. `every_process_sharing_this_database`, or
-  `this_process_until_the_others_restart` when the sync is off;
+- `scope`: how far a change is configured to reach.
+  `every_process_sharing_this_database`, or `this_process_until_the_others_restart`
+  when the sync is off. It describes the setting, not a confirmation: a process
+  that cannot read the store keeps its flags, and logs and counts it
+  (`flag_sync_failures_total`). Confirm the calls switch from `/ready`;
 - `sync_interval_seconds`: how often each process re-reads the stored overrides
   (`FLAG_SYNC_INTERVAL_SECONDS`, 5 by default; 0 turns the sync off);
 - `synced_at`: when the answering process last read them, in epoch seconds.
@@ -2233,8 +2236,9 @@ It also reports:
 `PATCH` is `ura_admin` only. It writes `flag_overrides` first, then applies the
 change in the answering process. Every other process sharing the database
 applies it within one sync interval (ADR-0044); before that, it reached only
-the process that answered (G612). A failed write changes nothing. The response
-carries the same `scope` and `reaches_every_process_within_seconds`. A change
+the process that answered (G612). A failed write changes nothing; on Postgres,
+no connection pool is a failed write, not a silent one. The response
+carries the same `scope` and `sync_interval_seconds`. A change
 survives restarts. Replicas with a database each still need `FLAG_*` on every
 replica. Safety flags (`auth_required`, `multi_tenant`, `audit_ledger`,
 `ticket_queue`, `voice_consent`) return 400.

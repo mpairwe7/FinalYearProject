@@ -206,7 +206,20 @@ def test_production_refuses_a_stored_off_for_a_protected_control_without_exiting
 
 @pytest.mark.parametrize(
     ("raw", "expected"),
-    [(None, 5.0), ("", 5.0), ("2", 2.0), ("0", 0.0), ("0.2", 1.0), ("-1", 5.0), ("abc", 5.0)],
+    [
+        (None, 5.0),
+        ("", 5.0),
+        ("2", 2.0),
+        ("0", 0.0),
+        ("0.2", 1.0),
+        ("-1", 5.0),
+        ("abc", 5.0),
+        ("nan", 5.0),
+        # asyncio.timeout(inf) never fires: the sync would never run while the
+        # API reported it on.
+        ("inf", 5.0),
+        ("1e309", 5.0),
+    ],
 )
 def test_the_interval_comes_from_the_environment(raw, expected) -> None:
     env = {} if raw is None else {"FLAG_SYNC_INTERVAL_SECONDS": raw}
@@ -278,7 +291,7 @@ def _admin() -> dict:
     return {"Authorization": f"Bearer {make_dev_token('ops', role='ura_admin')}"}
 
 
-def test_a_console_change_reaches_another_process_and_so_does_its_removal(clean_flags) -> None:
+def test_a_console_change_reaches_another_process_and_so_does_its_removal(clean_flags, shared_db) -> None:
     other = FeatureFlags()
     value = _off_default()
     client = TestClient(main_mod.app)
@@ -286,9 +299,7 @@ def test_a_console_change_reaches_another_process_and_so_does_its_removal(clean_
         r = client.patch(f"/v1/admin/flags/{FLAG}?enabled={str(value).lower()}", headers=_admin())
         assert r.status_code == 200, r.text
         assert r.json()["scope"] == "every_process_sharing_this_database"
-        assert (
-            r.json()["reaches_every_process_within_seconds"] == main_mod._FLAG_SYNC_INTERVAL_SECONDS
-        )
+        assert r.json()["sync_interval_seconds"] == main_mod._FLAG_SYNC_INTERVAL_SECONDS
         assert flags.describe(FLAG)["stored"] is True
         assert other.apply_stored(db.load_flag_overrides()).get(FLAG) is value
 
@@ -297,10 +308,10 @@ def test_a_console_change_reaches_another_process_and_so_does_its_removal(clean_
         assert other.apply_stored(db.load_flag_overrides()).get(FLAG, "absent") is None
         assert other.describe(FLAG)["overridden"] is False
     finally:
-        db.clear_flag_override(FLAG)
+        shared_db.clear_flag_override(FLAG)
 
 
-def test_a_change_that_cannot_be_stored_changes_nothing(clean_flags) -> None:
+def test_a_change_that_cannot_be_stored_changes_nothing(clean_flags, shared_db) -> None:
     """Store first, as DELETE does: a failed write must not leave a process-only override."""
     client = TestClient(main_mod.app, raise_server_exceptions=False)
     with mock.patch.object(
@@ -313,7 +324,7 @@ def test_a_change_that_cannot_be_stored_changes_nothing(clean_flags) -> None:
     assert flags.describe(FLAG)["overridden"] is False
 
 
-def test_the_flag_list_says_how_far_a_change_reaches(clean_flags) -> None:
+def test_the_flag_list_says_how_far_a_change_reaches(clean_flags, shared_db) -> None:
     staff = make_dev_token("a", role="ura_staff")
     r = TestClient(main_mod.app).get(
         "/v1/admin/flags", headers={"Authorization": f"Bearer {staff}"}
@@ -324,3 +335,43 @@ def test_the_flag_list_says_how_far_a_change_reaches(clean_flags) -> None:
     assert body["sync_interval_seconds"] == main_mod._FLAG_SYNC_INTERVAL_SECONDS
     assert "synced_at" in body
     assert all("stored" in row for row in body["flags"])
+
+
+# ---------------------------------------------------------------------------
+# The Postgres store: no pool is a failure, not an empty table
+# ---------------------------------------------------------------------------
+
+
+def test_the_postgres_store_without_a_pool_fails_instead_of_reading_empty() -> None:
+    """Read as {}, a lost pool would clear every stored override in every process.
+
+    That includes a stored calls kill switch. Raising sends the sync down its
+    "keep the current flags" path, and startup down its fail-closed path.
+    """
+    from app import postgres
+
+    with mock.patch.object(postgres, "_get_pool", return_value=None):
+        with pytest.raises(RuntimeError):
+            postgres.load_flag_overrides()
+        # A write that silently did nothing let PATCH report a change no other
+        # process would ever see.
+        with pytest.raises(RuntimeError):
+            postgres.save_flag_override(FLAG, True)
+        with pytest.raises(RuntimeError):
+            postgres.clear_flag_override(FLAG)
+
+
+def test_a_lost_postgres_pool_keeps_this_processs_flags(clean_flags) -> None:
+    from app import postgres
+
+    value = _off_default()
+    with mock.patch.object(main_mod.db, "load_flag_overrides", return_value={FLAG: value}):
+        main_mod._sync_flag_overrides()
+    with (
+        mock.patch.object(postgres, "_get_pool", return_value=None),
+        mock.patch.object(main_mod.db, "load_flag_overrides", postgres.load_flag_overrides),
+    ):
+        main_mod._sync_flag_overrides()
+
+    assert flags.is_enabled(FLAG) is value
+    assert main_mod._flag_sync_state["failing"] is True

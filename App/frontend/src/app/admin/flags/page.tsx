@@ -50,9 +50,10 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
   const canToggle = who.role === "ura_admin";
 
   const flags = useMemo(() => data?.flags ?? [], [data]);
-  // Every process re-reads the stored overrides on this interval (G612); 0, or
-  // an API that does not say, means the others apply a change at their restart.
-  const syncSeconds = data?.sync_interval_seconds ?? 0;
+  // Every process re-reads the stored overrides on this interval (G612); 0 means
+  // the others apply a change at their restart. Until the API says (loading, an
+  // error, an older API) the note claims neither.
+  const syncSeconds = data?.sync_interval_seconds;
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -115,9 +116,11 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
           <AlertTriangleIcon />
         </span>
         <div>
-          {syncSeconds > 0 ? (
+          {typeof syncSeconds !== "number" ? (
+            <p className="ops-note-title">How far a change here reaches is not known yet</p>
+          ) : syncSeconds > 0 ? (
             <p className="ops-note-title">
-              Changes here reach every API process within {syncSeconds} s
+              Changes here reach every API process at its next sync, every {syncSeconds} s
             </p>
           ) : (
             <p className="ops-note-title">
@@ -128,9 +131,14 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
             A change is stored in the <code>flag_overrides</code> table and replayed
             whenever a process restarts, so it keeps winning over <code>FLAG_*</code> until you
             reset it.{" "}
-            {syncSeconds > 0
-              ? "Every API process that shares this database also applies it while running."
-              : "It applies at once in the process that answered; the others apply it when they next start."}{" "}
+            {typeof syncSeconds !== "number" ? null : syncSeconds > 0 ? (
+              <>
+                A process that cannot read the store keeps its flags and logs it, so confirm the
+                calls switch from <code>/ready</code>.{" "}
+              </>
+            ) : (
+              "It applies at once in the process that answered; the others apply it when they next start. "
+            )}
             Replicas with a database each still need <code>FLAG_*</code> set on every replica.
             {data?.overrides_are_ephemeral === false
               ? " This deployment reports overrides as durable."

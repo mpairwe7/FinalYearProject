@@ -73,7 +73,8 @@ before it, the change reached one process of two, G612). From then on, new call
 sockets are refused: a caller's, the staff call stream and an officer's audio.
 Sockets already open carry on.
 
-1. Switch it off.
+1. Switch it off. The Feature flags page's note shows the configured sync
+   interval; it is how often each process reads the store, not a confirmation.
 2. Read `/ready` until `capabilities.voice_receptionist` says `off`. It is the
    call process's own value whichever process answers. The chat process caches
    it for 10 s, so allow about 15 s.
@@ -101,6 +102,25 @@ so:
    `ura_admin`). Every process clears it within one sync interval and follows
    the secret. Read `/ready` again after about 15 s: it says `off`. If the sync
    is off (`FLAG_SYNC_INTERVAL_SECONDS=0`), restart the Space instead.
+4. If the `DELETE` fails because the database rejects writes, the stored
+   override cannot be removed and keeps beating the secret. The only stop that
+   does not depend on the database takes chat down too: pause the Space, and
+   turn off the keepalive workflow, which otherwise restarts a Space that is not
+   running within the hour:
+
+   ```bash
+   gh workflow disable hf-space-keepalive.yml
+   hf spaces pause landwind22/ura-chatbot
+   ```
+
+   When the database accepts writes again, delete the override as in step 3.
+   Then restart the Space, which is the only way to resume a paused one, and
+   turn the keepalive back on:
+
+   ```bash
+   hf spaces restart landwind22/ura-chatbot
+   gh workflow enable hf-space-keepalive.yml
+   ```
 
 The 1001 close and the `off` field show whether the switch took (the ADR-0042
 update below).
@@ -111,7 +131,9 @@ page). The Space image sets `FLAG_VOICE_RECEPTIONIST=true`
 (`App/deploy/hf-space/Dockerfile`), so every process then follows it within one
 sync interval. If you used the secret, delete it, or set it to `true`; that
 restarts the Space. Then confirm that `/ready` says `ready`:
-- `off`: a stored `false` override is still there. Delete it.
+- `off`: delete any stored `false` override. With the sync off
+  (`FLAG_SYNC_INTERVAL_SECONDS=0`) the call process does not apply the deletion
+  until it restarts, so restart the Space (`hf spaces restart landwind22/ura-chatbot`).
 - `unavailable: switched on after the API started`: the call process started
   with calls off. Restart the Space (`hf spaces restart landwind22/ura-chatbot`).
 

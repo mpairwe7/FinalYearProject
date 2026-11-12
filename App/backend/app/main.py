@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import re
 import threading
@@ -162,7 +163,8 @@ def _flag_sync_interval_seconds() -> float:
     ``FLAG_SYNC_INTERVAL_SECONDS``: 5 by default; 0 turns the sync off (a
     console change then reaches other processes at their next start); at
     least 1 otherwise, so two processes do not poll the store in a tight
-    loop. A value that is not a number, or is negative, is the default.
+    loop. A value that is not a finite, non-negative number is the default
+    (``asyncio.timeout(inf)`` would never fire, so the sync would never run).
     """
     raw = (os.getenv("FLAG_SYNC_INTERVAL_SECONDS") or "").strip()
     if not raw:
@@ -171,7 +173,7 @@ def _flag_sync_interval_seconds() -> float:
         value = float(raw)
     except ValueError:
         value = -1.0
-    if value < 0 or value != value:  # negative or NaN
+    if value < 0 or not math.isfinite(value):
         logger.warning("FLAG_SYNC_INTERVAL_SECONDS=%r is not a number of seconds; using 5", raw[:32])
         return 5.0
     return 0.0 if value == 0 else max(1.0, value)
@@ -4154,7 +4156,7 @@ def set_flag_endpoint(
         "overridden": True,
         "ephemeral": False,
         **_flag_scope(),
-        "reaches_every_process_within_seconds": _FLAG_SYNC_INTERVAL_SECONDS or None,
+        "sync_interval_seconds": _FLAG_SYNC_INTERVAL_SECONDS,
     }
 
 
@@ -4196,7 +4198,7 @@ def clear_flag_endpoint(
         "enabled": flag_reg.is_enabled(name),
         "overridden": False,
         **_flag_scope(),
-        "reaches_every_process_within_seconds": _FLAG_SYNC_INTERVAL_SECONDS or None,
+        "sync_interval_seconds": _FLAG_SYNC_INTERVAL_SECONDS,
     }
 
 

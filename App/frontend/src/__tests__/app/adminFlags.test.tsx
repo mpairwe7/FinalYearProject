@@ -140,7 +140,12 @@ describe("Feature flags console", () => {
       synced_at: 1_700_000_000,
     });
     renderFlags();
-    expect(await screen.findByText(/reach every API process within 5 s/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/reach every API process at its next sync, every 5 s/),
+    ).toBeInTheDocument();
+    // A promise of "within 5 s" would be wrong for a process that cannot read
+    // the store; the note says how to confirm instead.
+    expect(screen.getByText(/confirm the calls switch from/)).toBeInTheDocument();
     expect(screen.queryByText(/this replica only/)).toBeNull();
   });
 
@@ -154,5 +159,15 @@ describe("Feature flags console", () => {
     });
     renderFlags();
     expect(await screen.findByText(/reach the other API processes when they restart/)).toBeInTheDocument();
+  });
+
+  it("claims no reach while the flag list has not arrived", async () => {
+    // A restart-only notice beside a spinner, or after an error, stated a
+    // sync setting the console had not been told.
+    vi.spyOn(analyticsApi, "flags").mockReturnValue(new Promise(() => {}));
+    renderFlags();
+    expect(await screen.findByText(/How far a change here reaches/)).toBeInTheDocument();
+    expect(screen.queryByText(/at its next sync/)).toBeNull();
+    expect(screen.queryByText(/when they restart/)).toBeNull();
   });
 });
