@@ -1359,7 +1359,9 @@ full agent chain is locked.
 
 ---
 
-*Document version 3.24 — updated 2026-11-12: G591 closed by phase 7 part B of the call receptionist review (ADR-0046): a superseded call turn stops its model run at the next stage.*
+*Document version 3.25 — updated 2026-11-13: G617 fixed (two API processes starting on a fresh SQLite file both start).*
+
+*Previously: version 3.24 — updated 2026-11-12: G591 closed by phase 7 part B of the call receptionist review (ADR-0046): a superseded call turn stops its model run at the next stage.*
 
 *Previously: version 3.23 — updated 2026-11-12: phase 7 part A of the call receptionist review (ADR-0045): G304 frame limits, G610 owed wrap-ups, G614 call-process gauge and alert.*
 
