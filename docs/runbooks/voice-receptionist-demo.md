@@ -109,14 +109,22 @@ so:
      Its database is `/app/data_store/analytics.db` on the container's own disk,
      and the Space has no persistent storage. A Space's disk is lost when it
      restarts (Hugging Face, "Disk usage on Spaces"), so it starts with no
-     stored overrides and the secret applies. Read `/ready` again.
+     stored overrides and the secret applies. Read `/ready` again. The restart
+     loses the rest of that database too: conversations, tickets and the audit
+     trail. That is true of every restart and roll of the Space, the secret
+     change in step 1 included. The Space offers this runbook no shell to copy
+     the file first.
    - **On a deployment whose database survives a restart**, nothing in the app
      can stop calls until the store accepts writes again. Stop the API (scale
      it to zero). Fix the write failure, then delete the row out of band:
      `psql "$POSTGRES_DSN" -c "DELETE FROM flag_overrides WHERE name = 'voice_receptionist'"`,
      or for SQLite
-     `sqlite3 "$ANALYTICS_DB_DIR/analytics.db" "DELETE FROM flag_overrides WHERE name = 'voice_receptionist'"`.
-     Then start the API and read `/ready`.
+     `sqlite3 "${ANALYTICS_DB_DIR:?set to the API's value}/analytics.db" "DELETE FROM flag_overrides WHERE name = 'voice_receptionist'"`.
+     Set `ANALYTICS_DB_DIR` to the value the API runs with first. When the API
+     has none, it uses `data_store/` under the project root (`/app/data_store`
+     in the image; `App/backend/app/database.py`). With the variable unset, the
+     command refuses to run rather than open the wrong file. Then start the API
+     and read `/ready`.
 
 The 1001 close and the `off` field show whether the switch took (the ADR-0042
 update below).
