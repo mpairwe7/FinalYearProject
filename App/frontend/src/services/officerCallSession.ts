@@ -395,6 +395,19 @@ export function finishWrapUp(): void {
   finish();
 }
 
+/**
+ * The server says the officer still owes the wrap-up of *callId*: a call that
+ * ended under them without this tab moving to wrap-up (its socket closed on
+ * an error, or the page was reloaded). Shown only when this tab has no call
+ * of its own; a call in progress or a wrap-up already open is left alone.
+ */
+export function resumeOwedWrapUp(callId: string): void {
+  if (!callId || (current && current.state !== 'idle')) return;
+  teardownAudio();
+  muted = false;
+  publish({ callId, state: 'wrap_up', since: Date.now(), muted: false, officerName: '', error: null });
+}
+
 /** Clear a finished call's leftover message. */
 export function dismissSessionError(): void {
   if (current && current.state === 'idle') publish(null);

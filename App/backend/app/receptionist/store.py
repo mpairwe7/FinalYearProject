@@ -366,6 +366,53 @@ def live_call_held_by(officer_id: str, *, excluding: str = "") -> str:
     return str(dict(rows[0])["call_id"]) if rows else ""
 
 
+#: How far back an unsaved wrap-up is still owed (``owed_wrapup``): calls that
+#: began within the last day.
+OWED_WRAPUP_LOOKBACK_S = 24 * 3600.0
+#: Calls read per look-up. The query keeps only calls the officer handled and
+#: has no wrap-up on, so this bounds the work, not the answer.
+_OWED_WRAPUP_SCAN = 20
+
+
+def _like_escaped(text: str) -> str:
+    """*text* for a ``LIKE … ESCAPE '\\'`` pattern: its ``%`` and ``_`` mean themselves."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def owed_wrapup(officer_id: str, *, now: float | None = None) -> str:
+    """The latest ended call *officer_id* handled and has not wrapped up; "" if none.
+
+    "Handled" is the call's ``handled_by`` list (every officer who was
+    connected to it, ``desk.bridge``); "wrapped up" is an entry under their id
+    in its ``wrapups`` (``desk.wrapup``). Both hold the officer's user id, as
+    presence does. Only calls that began within ``OWED_WRAPUP_LOOKBACK_S``
+    count, newest end first. The ``LIKE`` filters narrow the scan on the
+    indexed start time; the decoded lists decide (G610, ADR-0045).
+    """
+    now = time.time() if now is None else now
+    handled = f'%{_like_escaped(json.dumps(officer_id))}%'
+    wrapped = f'%{_like_escaped(json.dumps({"officer_id": officer_id})[1:-1])}%'
+    rows = db.query_all(
+        """
+        SELECT call_id, handled_by_json, wrapups_json FROM voice_calls
+        WHERE status = 'ended' AND started_at >= ?
+          AND handled_by_json LIKE ? ESCAPE '\\'
+          AND COALESCE(wrapups_json, '') NOT LIKE ? ESCAPE '\\'
+        ORDER BY COALESCE(ended_at, started_at) DESC
+        LIMIT ?
+        """,
+        (now - OWED_WRAPUP_LOOKBACK_S, handled, wrapped, _OWED_WRAPUP_SCAN),
+    )
+    for row in rows:
+        decoded = _decode_row(dict(row))
+        if officer_id not in decoded["handled_by"]:
+            continue
+        if any(isinstance(w, dict) and w.get("officer_id") == officer_id for w in decoded["wrapups"]):
+            continue
+        return str(decoded["call_id"])
+    return ""
+
+
 def release_claim(call_id: str, officer_id: str | None = None) -> bool:
     """Drop the claim on *call_id* — only *officer_id*'s, when given."""
     if officer_id is None:

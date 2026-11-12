@@ -319,6 +319,47 @@ describe('usePresenceHeartbeat', () => {
       expect(sent).toHaveBeenCalledWith({ status: 'on_call' });
     },
   );
+
+  // ADR-0045: a call that ended under the officer on an error, or before a
+  // reload, still owes its wrap-up. The server names it; the console shows it.
+  it('brings up the wrap-up the server says is owed when the console has no call', async () => {
+    const { usePresenceHeartbeat } = await import('@/components/staff/calls/console/usePresenceHeartbeat');
+    const { resetSessionForTests } = await import('@/services/officerCallSession');
+    const { ActiveCallDock } = await import('@/components/staff/calls/console/ActiveCallDock');
+    resetSessionForTests();
+    const sent = vi
+      .spyOn(callsApi, 'updatePresence')
+      .mockResolvedValue({ status: 'wrap_up', wrap_up_call_id: 'call_owed' } as never);
+
+    const hook = renderHook(() => usePresenceHeartbeat('okello'));
+
+    await waitFor(() =>
+      expect(useCallConsoleStore.getState().activeCall).toMatchObject({ callId: 'call_owed', state: 'wrap_up' }),
+    );
+    await waitFor(() => expect(sent).toHaveBeenLastCalledWith({ status: 'wrap_up' }));
+    render(<ActiveCallDock onBackToCall={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Finish wrap-up' })).toBeInTheDocument();
+    hook.unmount();
+    resetSessionForTests();
+  });
+
+  it('keeps the wrap-up already open when the server names another owed call', async () => {
+    const { usePresenceHeartbeat } = await import('@/components/staff/calls/console/usePresenceHeartbeat');
+    const { resetSessionForTests, resumeOwedWrapUp } = await import('@/services/officerCallSession');
+    resetSessionForTests();
+    resumeOwedWrapUp('call_first');
+    const sent = vi
+      .spyOn(callsApi, 'updatePresence')
+      .mockResolvedValue({ status: 'wrap_up', wrap_up_call_id: 'call_older' } as never);
+
+    const hook = renderHook(() => usePresenceHeartbeat('okello'));
+
+    await waitFor(() => expect(sent).toHaveBeenCalledWith({ status: 'wrap_up' }));
+    await act(async () => {});
+    expect(useCallConsoleStore.getState().activeCall).toMatchObject({ callId: 'call_first', state: 'wrap_up' });
+    hook.unmount();
+    resetSessionForTests();
+  });
 });
 
 // ---------------------------------------------------------------------------

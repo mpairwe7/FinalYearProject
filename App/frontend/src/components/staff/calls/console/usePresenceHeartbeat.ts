@@ -2,11 +2,15 @@
 
 import { useEffect } from 'react';
 import { callsApi } from '@/services/callsApi';
+import { getActiveCall, resumeOwedWrapUp } from '@/services/officerCallSession';
 import { useCallConsoleStore } from '@/store/useCallConsoleStore';
 
 /**
  * Periodically beats presence heartbeat to /v1/admin/officers/me/presence every 20s
  * while tab is visible (docs/plans/officer-call-desk-plan.md §6.4, §8.2).
+ * An answer naming a wrap-up the officer owes (`wrap_up_call_id`) brings it up
+ * when this tab has no call: the dock offers "Finish wrap-up", and the Desk
+ * shows the wrap-up form for that call.
  */
 export function usePresenceHeartbeat(userId?: string): void {
   const availability = useCallConsoleStore((s) => s.availability);
@@ -23,7 +27,19 @@ export function usePresenceHeartbeat(userId?: string): void {
       // the next caller (G610).
       const state = activeCall?.state ?? 'idle';
       const effectiveStatus = state === 'wrap_up' ? 'wrap_up' : state !== 'idle' ? 'on_call' : availability;
-      callsApi.updatePresence({ status: effectiveStatus }).catch(() => {});
+      const sentWith = getActiveCall();
+      callsApi
+        .updatePresence({ status: effectiveStatus })
+        .then((presence) => {
+          // A call that ended under the officer on an error, or before a
+          // reload, still owes its wrap-up: the server names it. Only if this
+          // tab's call has not changed since (a wrap-up saved meanwhile is
+          // not reopened) (G610, ADR-0045).
+          if (presence?.wrap_up_call_id && getActiveCall() === sentWith) {
+            resumeOwedWrapUp(presence.wrap_up_call_id);
+          }
+        })
+        .catch(() => {});
     };
 
     // Immediate first pulse

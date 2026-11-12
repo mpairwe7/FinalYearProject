@@ -7,7 +7,9 @@ is computed as offline on read when their last heartbeat is older than
 
 Status transitions are automatic:
 - Claim / bridge: on_call
-- End / transfer: wrap_up
+- End / transfer: wrap_up; a call that ends under the officer any other way
+  (the caller, the server, their reconnect grace): wrap_up, while their
+  presence is still that call's (``owe_wrap_up``)
 - Wrap-up saved: back to pre-call status (default: available)
 - Heartbeat: updates last_seen without spamming lobby events
 - Status / display_name change: publishes ``officer.presence`` to the lobby.
@@ -232,6 +234,32 @@ def set_on_call(user_id: str, call_id: str, display_name: str = "", tenant_id: s
 def set_wrap_up(user_id: str, call_id: str = "") -> None:
     """Transition an officer to 'wrap_up'."""
     upsert_presence(user_id, status="wrap_up", current_call_id=call_id)
+
+
+def owe_wrap_up(user_id: str, call_id: str) -> bool:
+    """*call_id* ended while *user_id* still had it: they owe its wrap-up.
+
+    Only while their presence is still that call's (``on_call`` on it), like
+    :func:`end_claim_presence`, and in the same single write: a wrap-up already
+    started or saved, or another call taken meanwhile, is left as it is.
+    ``last_seen`` is left alone: an officer whose console has gone must not
+    look online. Returns whether the officer was moved.
+    """
+    affected = db.execute(
+        "UPDATE officer_presence SET status = 'wrap_up', updated_at = ? "
+        "WHERE user_id = ? AND status = 'on_call' AND current_call_id = ?",
+        (time.time(), user_id, call_id),
+    )
+    if not affected:
+        return False
+    row = get_presence(user_id)
+    if row:
+        hub.publish_lobby(
+            "officer.presence",
+            {"user_id": user_id, "display_name": row["display_name"], "status": row["status"]},
+            tenant_id=str(row.get("tenant_id") or "default"),
+        )
+    return True
 
 
 def end_claim_presence(user_id: str, call_id: str) -> None:

@@ -2133,6 +2133,20 @@ passed to; `display_name` is at most 80 characters. Anything else is 422. While
 this server has the officer on a live call, a heartbeat cannot change their
 status to anything but `on_call`; since ADR-0042 (G610) the same holds while
 their media is reconnecting and while they hold a claim on a waiting call.
+
+Since ADR-0045 (G610) the PUT's answer also carries `wrap_up_call_id`: the
+latest call the officer handled (`handled_by`) that has ended, began in the
+last 24 hours and has no wrap-up from them (`wrapups`); `""` if none. While one is owed and
+they are on no call, `available` is answered with `wrap_up` (and
+`current_call_id` set to that call); `busy`, `away`, `offline` and `wrap_up`
+still apply. Saving the wrap-up (`POST /v1/admin/calls/{call_id}/wrapup`) ends
+it; the next owed call, if any, is named on the next heartbeat. The console
+opens the wrap-up for that call when it has no call of its own.
+
+```json
+{"user_id": "okello@ura.go.ug", "status": "wrap_up", "current_call_id": "call_3f2a", "wrap_up_call_id": "call_3f2a", "...": "..."}
+```
+
 With `multi_tenant` on, the GET returns the
 caller's tenant's officers only, and `officer.presence` lobby events reach that
 tenant's consoles only.

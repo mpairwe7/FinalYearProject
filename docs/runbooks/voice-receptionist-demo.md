@@ -308,6 +308,15 @@ What an operator, an officer or an auditor will see differently:
   `too many frames`; an officer's close then takes the reconnect grace like any
   other. Set the byte rate with `RECEPTIONIST_AUDIO_BYTES_PER_S` (default 64000,
   never below 32000).
+- **An officer owes the wrap-up of a call that ended under them (G610,
+  ADR-0045).** However the call ended (the caller, its time limit, a media
+  failure, during their reconnect grace) the officer who had it goes to
+  `wrap_up`, unless they already saved it or took another call. Until they save
+  it, a heartbeat asking for `available` keeps `wrap_up` and names the call
+  (`wrap_up_call_id`); the console then shows "Wrap-up pending · Finish
+  wrap-up", after a reload too. `busy`, `away` and `offline` still apply. This
+  covers calls that began in the last 24 hours, one at a time, newest first. An
+  officer stuck in `wrap_up` after a demo has an unsaved wrap-up: save it.
 - **The call summary no longer touches a ticket's SLA.** It adds its note only
   when the ticket has none and never stamps a first response.
 - **Retention on Postgres.** Resolved tickets are purged whether or not the

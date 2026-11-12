@@ -273,9 +273,18 @@ async def _finish_call(room: Any) -> None:
     endpoint owns registry and concurrency-slot removal in its outer finally.
     """
     call_id = room.call_id
-    abandoned = room.state.mode == "transferring"
-    bridged_officer = getattr(room.state, "officer_id", None) if room.state.mode == "bridged" else None
-    reconnecting_officer = getattr(room.state, "reconnecting_officer", None)
+    mode = room.state.mode
+    abandoned = mode == "transferring"
+    # The officer who had the call owes its wrap-up when it ends under them:
+    # still bridged (the caller hung up), already ended by the server while
+    # bridged (the time limit, a media failure, a hang-up message: room.end
+    # keeps `officer_id`), or ended in their reconnect grace. Only the first
+    # moved them to wrap_up; the others left them on_call on a dead call, or
+    # marked them available with the wrap-up owed (G610, ADR-0045).
+    # `owe_wrap_up` acts only while their presence is still this call's, so an
+    # End that already did it, a wrap-up saved, or another call is left alone.
+    held_by = getattr(room.state, "officer_id", None) if mode in ("bridged", "ended") else None
+    owing = [o for o in dict.fromkeys((held_by, getattr(room.state, "reconnecting_officer", None))) if o]
     for stop in (call_brief.stop, risk.stop):
         try:
             stop(call_id)
@@ -295,10 +304,8 @@ async def _finish_call(room: Any) -> None:
             "abandoned_while_waiting": abandoned,
         })),
     ]
-    if bridged_officer:
-        operations.insert(0, ("presence", lambda: desk.presence.set_wrap_up(bridged_officer, call_id=call_id)))
-    elif reconnecting_officer:
-        operations.insert(0, ("presence", lambda: desk.presence.finish_wrap_up(reconnecting_officer)))
+    for officer in owing:
+        operations.insert(0, ("presence", lambda officer=officer: desk.presence.owe_wrap_up(officer, call_id)))
     if abandoned:
         operations.insert(0, ("callback", lambda: update_call(
             call_id, needs_callback=1, callback_reason="caller_left_waiting", outcome="abandoned",
@@ -308,7 +315,8 @@ async def _finish_call(room: Any) -> None:
             callback()
         except Exception:
             logger.exception("Call %s finalization failed for %s", operation, call_id)
-    if bridged_officer:
+    # The officer's own End drafts its note itself (desk.end).
+    if owing and not getattr(room, "ending", False):
         asyncio.create_task(desk._save_draft_wrapup(call_id))
     asyncio.create_task(_summarise_when_transcribed(call_id))
 

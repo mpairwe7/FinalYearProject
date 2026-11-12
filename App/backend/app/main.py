@@ -5555,9 +5555,16 @@ def update_my_presence_endpoint(
     body: OfficerPresenceUpdate = Body(default_factory=OfficerPresenceUpdate),
     ctx: AuthContext = Depends(require_admin_access),
 ) -> Any:
-    """Update presence state for current officer or heartbeat last_seen."""
+    """Update presence state for current officer or heartbeat last_seen.
+
+    The answer is the officer's presence, plus ``wrap_up_call_id``: the call
+    whose wrap-up they still owe ("" if none). While one is owed, a console
+    that asks for ``available`` keeps ``wrap_up``; ``busy``, ``away`` and
+    ``offline`` still apply.
+    """
     from .receptionist import presence
     from .receptionist.state import registry
+    from .receptionist.store import owed_wrapup
 
     _desk_writer(ctx)
     status = body.status
@@ -5578,14 +5585,32 @@ def update_my_presence_endpoint(
     on_a_call = any(_holds(room) for room in registry.list_live())
     if on_a_call and status != "on_call":
         status = None
-    return presence.upsert_presence(
+    # A call that ended under the officer (its time limit, an error, their
+    # reconnect grace) leaves a wrap-up the console may never have shown: its
+    # socket closed on an error, or the page was reloaded, so it reports
+    # `available`. Until the wrap-up is saved (desk.wrapup) the officer is not
+    # offered to callers, and the console is told which call to wrap up. A
+    # call they are on or hold comes first (G610, ADR-0045).
+    owed = ""
+    if not on_a_call:
+        try:
+            owed = owed_wrapup(ctx.user_id)
+        except Exception:
+            logger.warning("Could not read the wrap-ups an officer owes", exc_info=True)
+    current_call_id = None
+    if owed and (status or (presence.get_presence(ctx.user_id) or {}).get("raw_status")) == "available":
+        status, current_call_id = "wrap_up", owed
+    result = presence.upsert_presence(
         ctx.user_id,
         tenant_id=ctx.tenant_id or "default",
         display_name=body.display_name or _desk_officer_name(ctx),
         status=status,
         languages=body.languages,
         teams=body.teams,
+        current_call_id=current_call_id,
     )
+    result["wrap_up_call_id"] = owed
+    return result
 
 
 @app.get("/v1/admin/officers/presence", tags=["admin"])

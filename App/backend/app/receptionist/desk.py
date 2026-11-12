@@ -1141,24 +1141,22 @@ async def _expire_reconnect_grace(room: CallRoom, officer_id: str, grace_s: floa
         stale_identity = room.state.livekit_officer_identity
         room.state.livekit_officer_identity = ""
         room.state.livekit_officer_route_active = False
-        if not await revoke_media(room, stale_identity):
+        # A failed revocation ends the call; the caller can also hang up while
+        # the media service is responding. A call that ended so was still this
+        # officer's: they owe its wrap-up. They were marked available, and the
+        # call's teardown, which no longer saw them on the call, left it at
+        # that (G610, ADR-0045).
+        if not await revoke_media(room, stale_identity) or room.state.mode != "transferring":
             room.state.reconnecting_officer = None
             room.state.officer_id = None
             room.state.officer_name = None
             try:
-                presence.finish_wrap_up(officer_id)
+                if room.state.mode == "ended":
+                    presence.owe_wrap_up(officer_id, room.call_id)
+                else:
+                    presence.finish_wrap_up(officer_id)
             except Exception:
-                logger.warning("Could not restore officer presence on call %s", room.call_id, exc_info=True)
-            return
-        # The caller can hang up while the media service is responding.
-        if room.state.mode != "transferring":
-            room.state.reconnecting_officer = None
-            room.state.officer_id = None
-            room.state.officer_name = None
-            try:
-                presence.finish_wrap_up(officer_id)
-            except Exception:
-                logger.warning("Could not restore officer presence on call %s", room.call_id, exc_info=True)
+                logger.warning("Could not update officer presence on call %s", room.call_id, exc_info=True)
             return
         logger.info("Reconnect grace period expired for %s on %s; releasing to queue", officer_id, room.call_id)
         room.state.reconnecting_officer = None
