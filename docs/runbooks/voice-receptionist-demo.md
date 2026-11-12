@@ -71,11 +71,23 @@ reaches both processes. Do not use the admin API's flag override
 the one process that answered the request and writes a stored row the other
 process reads only when it next starts, so calls can stay on in the call process
 while the console says they are off (G612). A stored override also beats a
-`FLAG_*` secret at start. To see whether one exists, `GET /v1/admin/flags` lists
-`voice_receptionist` with `overridden` set (it reports the process that answered,
-so ask a few times); if it is overridden, delete it first
-(`DELETE /v1/admin/flags/voice_receptionist`, `ura_admin`). The 1001 close and
-the `off` field show whether the switch took (the ADR-0042 update below).
+`FLAG_*` secret when a process starts. To see whether one exists,
+`GET /v1/admin/flags` lists `voice_receptionist` with `overridden` set (it reports
+the process that answered, so ask a few times). If one exists, take these steps
+in this order, so that calls are never switched on by the change itself:
+
+1. Set the secret to `false`. The Space restarts, and each process starts with
+   the stored override if there is one: calls are off now if it says `false`,
+   still on if it says `true`.
+2. Delete the stored override (`DELETE /v1/admin/flags/voice_receptionist`,
+   `ura_admin`). This removes the row and changes the registry of the process
+   that answered, usually the chat process; the call process keeps the value it
+   started with.
+3. Restart the Space (`hf spaces restart landwind22/ura-chatbot`). The call
+   process starts with no override, reads `false` and takes no calls.
+
+The 1001 close and the `off` field show whether the switch took (the ADR-0042
+update below).
 
 **Turning calls back on.** The Space image sets `FLAG_VOICE_RECEPTIONIST=true`
 (`App/deploy/hf-space/Dockerfile`), so deleting the secret, or setting it to
@@ -94,10 +106,13 @@ the `off` field show whether the switch took (the ADR-0042 update below).
    ```
 
    Every line must read `x-ura-process: calls` (the status behind it is the
-   app's own: 401 or 403 without a login, never 421). `NO HEADER` means the
-   Space is not running this change (or the response was a 500, which carries
-   none); `x-ura-process: chat` on a call path means nginx's call location is
-   not first or not matching.
+   app's own: 401 or 403 without a login, never 421). `NO HEADER` comes with
+   three causes; print the status (`curl -sS -o /dev/null -w '%{http_code}\n'`)
+   to tell them apart: a 502 means the call process is down or restarting
+   (nginx answered for it; see the troubleshooting row and `/ready`); a 500 is
+   the app's own error response, which carries no header; any other status
+   means the Space is not running this change. `x-ura-process: chat` on a call
+   path means nginx's call location is not first or not matching.
 2. *The call socket opens.* An upgrade request with the Space's own `Origin`
    gets `101 Switching Protocols` and `x-ura-process: calls`; calls being off
    shows as a close with 1001 after the handshake, not as a failed handshake:
@@ -980,7 +995,7 @@ check them, and have 3–5 Luganda speakers rate the Orpheus samples blind
 | A Swahili or Luganda answer arrives in English | api log `reply localization to sw collapsed the answer; serving English` (or `failed`): the translation came back short or empty, so the English answer was served. Replies are translated one paragraph at a time; a paragraph that still comes back cut short fails the whole reply rather than shipping a fragment |
 | Caller cannot talk over the assistant | api log `Caller talking over the assistant` (the sentinel's VAD stopped it); if absent, the caller's speech never reached the server over the playback: try headphones (the browser's echo canceller can mute a caller while the speaker plays) |
 | Assistant cuts itself off mid-sentence | its own voice leaking from speaker to mic: `RECEPTIONIST_LOCAL_BARGE_IN=false`, or raise `RECEPTIONIST_BARGE_IN_MIN_S` |
-| A call or the officer console fails with HTTP 421, or a call socket closes 1013 after an `error` frame with `code: "unavailable"` (and calls are on) | A call request reached the chat process. The chat process logs `misrouted … request for '<path>' reached the chat process` and `UraCallMisrouted` fires. Compare the path with `process_role.CALL_PATH_RE` and the call location in `App/deploy/cranecloud/nginx.conf` (`test_call_process_routing.py` keeps them equal); the call-path probe in the 2026-11-12 update at the top shows which process answers |
+| A call or the officer console fails with HTTP 421, or a call socket closes 1013 after an `error` frame with `code: "unavailable"` (and calls are on) | A call request reached the chat process. The chat process logs `misrouted … request for '<path>' reached the chat process` and counts it in `ura_receptionist_misrouted_total`. `UraCallMisrouted` fires only where that counter is scraped: the Prometheus in `monitoring/` does not scrape the Space (G614), so there, read the log. Compare the path with `process_role.CALL_PATH_RE` and the call location in `App/deploy/cranecloud/nginx.conf` (`test_call_process_routing.py` keeps them equal); the call-path probe in the 2026-11-12 update at the top shows which process answers |
 | Call paths answer 502, and the console says live updates are paused | The call process (`uvicorn-calls`, 127.0.0.1:8082) is down or restarting. supervisord restarts it; chat is unaffected. Its calls ended; callers owed a callback are flagged `service_interrupted` |
 | `/ready` says `unavailable: the call process is not answering` | The chat process asked 8082 and got nothing within 1 s (the answer is kept for 10 s). A cold start of the call process is slow: it waits for Qdrant (up to `QDRANT_WAIT_SECONDS`, 90 s by default) and then loads its models, and a chat process that booted first reports this until the call process is up (within 10 s of it). Look at the `uvicorn-calls` log if it persists after the start has finished |
 | Stale or unjoined call stuck in queue | In `/calls`, an officer (`ura_staff`; administrators are refused desk actions) can click **Terminate call** (`POST /v1/admin/calls/{call_id}/end`). It ends the call through `CallRoom.end()` — countdown cancelled, media room closed, pipeline stopped, row `ended` — releases queue locks (`end_reason="officer_terminated_waiting"` or `officer_terminated_stale`) and refreshes the live lobby board. Before G176 it answered 500 on a call whose officer had dropped off, and skipped that teardown. A row with no call room behind it is ended as stale only where no other process can be holding the call: one worker and one replica are declared, or the call began longer ago than a call may last. Declared means `VOICE_RECEPTIONIST_REPLICAS=1` and a worker count of 1 in every one of `WORKERS`, `UVICORN_WORKERS` and `WEB_CONCURRENCY` that is set, with at least one set. Under the supervisord image `UVICORN_WORKERS` defaults to 2, so `WORKERS=1` alone is not enough there. Otherwise, the button answers 409 "on another server process"; on a deployment that runs several workers, try again (the request may reach the worker that has the call) or wait for the call's time limit to pass |

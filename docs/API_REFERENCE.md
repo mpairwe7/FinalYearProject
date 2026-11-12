@@ -2084,7 +2084,7 @@ state the process does not hold. It is also logged at ERROR and counted in
 
 | Request | Answer |
 | --- | --- |
-| Any HTTP request to a call path, whatever its method, query string or trailing slash | **421 Misdirected Request**, `{"detail": "This request belongs to the call process but reached the chat process; the proxy's routing for call paths has drifted."}` |
+| Any HTTP request to a call path, whatever its method or query string (a trailing slash counts only under `/v1/admin/calls`: `/v1/calls/stream/` and the officer presence paths with one are not call paths) | **421 Misdirected Request**, `{"detail": "This request belongs to the call process but reached the chat process; the proxy's routing for call paths has drifted."}` |
 | A WebSocket to a call path (`/v1/calls/stream`, `/v1/admin/calls/stream`, `/v1/admin/calls/{call_id}/audio`) | Accepted, sent `{"type": "error", "code": "unavailable", "recoverable": false}`, then closed **1013** |
 
 The socket's code is `unavailable`, which the table above pairs with 1001 (calls

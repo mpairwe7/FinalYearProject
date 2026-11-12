@@ -245,7 +245,7 @@ jobs:
           CALLS_DOWN=""
           for attempt in $(seq 1 15); do
             # jq fails on a body that is not JSON; a missing field reads as empty.
-            READY=$(curl -sS --max-time 45 "$SPACE_URL/ready" 2>/dev/null \
+            READY=$(curl -fsS --max-time 45 "$SPACE_URL/ready" 2>/dev/null \
               | jq -r '(.capabilities.voice_receptionist? // "") | tostring' 2>/dev/null) \
               || READY="<no answer>"
             echo "  [$attempt] /ready voice_receptionist → ${READY:-<not reported>}"
