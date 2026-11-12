@@ -154,6 +154,33 @@ def workflow_session_ttl_days() -> int:
 _local = threading.local()
 _init_lock = threading.Lock()
 
+#: How long a new connection keeps trying to switch the file to WAL (G617).
+_WAL_SWITCH_DEADLINE_S = 10.0
+
+
+def _enable_wal(conn: sqlite3.Connection, *, deadline_s: float = _WAL_SWITCH_DEADLINE_S) -> None:
+    """Switch *conn*'s database to WAL, trying again while another process holds it.
+
+    The Space's chat and call processes (ADR-0043) open a fresh file at the
+    same moment. The switch needs the file to itself, and SQLite answers
+    "database is locked" at once instead of waiting out the busy timeout, so
+    one process's ``init_db`` failed at startup (G617). A lock or busy error is
+    tried again with a short backoff until *deadline_s*; any other error, or a
+    lock that outlasts the deadline, is raised as before.
+    """
+    give_up = time.monotonic() + deadline_s
+    delay = 0.05
+    while True:
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            return
+        except sqlite3.OperationalError as exc:
+            message = str(exc).lower()
+            if ("locked" not in message and "busy" not in message) or time.monotonic() >= give_up:
+                raise
+        time.sleep(delay)
+        delay = min(delay * 2, 0.5)
+
 
 def _get_connection() -> sqlite3.Connection:
     """Return a thread-local SQLite connection (safe per-thread singleton)."""
@@ -166,7 +193,7 @@ def _get_connection() -> sqlite3.Connection:
                 _DB_DIR.mkdir(parents=True, exist_ok=True)
                 conn = sqlite3.connect(str(_DB_PATH), timeout=10)
                 conn.row_factory = sqlite3.Row
-                conn.execute("PRAGMA journal_mode=WAL")
+                _enable_wal(conn)
                 conn.execute("PRAGMA synchronous=NORMAL")
                 conn.execute("PRAGMA foreign_keys=ON")
                 conn.execute("PRAGMA busy_timeout=5000")
