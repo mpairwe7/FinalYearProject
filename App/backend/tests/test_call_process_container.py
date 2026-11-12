@@ -134,6 +134,41 @@ class RoleScriptTests(unittest.TestCase):
         )
         self.assertEqual(no_role.returncode, 2, no_role.stdout + no_role.stderr)
 
+    def test_the_call_process_exports_every_worker_variable_as_one(self) -> None:
+        # The receptionist's single-worker declaration (receptionist/config.py,
+        # single_worker_declared) needs every one of these that is set to be 1, and a
+        # container can arrive with any of them set (a Space secret, the image's own
+        # UVICORN_WORKERS=2). The dry run prints what the exec'd server would inherit.
+        names = ("UVICORN_WORKERS", "WORKERS", "WEB_CONCURRENCY")
+        for label, env in (
+            ("unset", {}),
+            ("inherited 2", {name: "2" for name in names}),
+            ("inherited 4", {name: "4" for name in names}),
+            ("inherited 1", {name: "1" for name in names}),
+            ("only WORKERS", {"WORKERS": "3"}),
+            ("only WEB_CONCURRENCY", {"WEB_CONCURRENCY": "3"}),
+        ):
+            with self.subTest(inherited=label):
+                calls = _run_role_script("calls", self.metrics_dir, **env)
+                self.assertEqual(calls.returncode, 0, calls.stderr)
+                lines = calls.stdout.splitlines()
+                for name in names:
+                    self.assertIn(f"{name}=1", lines)
+                    self.assertNotIn(f"{name}=2", lines)
+                self.assertEqual(_launch_workers(calls.stdout), 1)
+
+    def test_the_chat_process_leaves_the_worker_variables_it_inherits_alone(self) -> None:
+        # Only the call process declares a single worker; the chat role has no use for
+        # the declaration and must not have the call role's values forced on it.
+        chat = _run_role_script(
+            "chat", self.metrics_dir, UVICORN_WORKERS="4", WORKERS="4", WEB_CONCURRENCY="4"
+        )
+        self.assertEqual(chat.returncode, 0, chat.stderr)
+        lines = chat.stdout.splitlines()
+        for name in ("UVICORN_WORKERS", "WORKERS", "WEB_CONCURRENCY"):
+            self.assertNotIn(f"{name}=1", lines)
+        self.assertEqual(_launch_workers(chat.stdout), 3)
+
     def test_the_launch_is_the_command_supervisord_used_to_run(self) -> None:
         chat = _run_role_script("chat", self.metrics_dir, UVICORN_WORKERS="2", LOG_LEVEL="warning")
         self.assertIn(
@@ -330,6 +365,17 @@ class SupervisordTests(unittest.TestCase):
         )
 
 
+    def test_the_frontend_reaches_the_api_only_through_nginx(self) -> None:
+        # INTERNAL_API_URL is not read at runtime today (the standalone server bakes its
+        # rewrites at build), but 8081 is the chat role: were it ever baked in, Next's
+        # case-insensitive /api rewrite would send /API/v1/admin/calls past nginx's call
+        # location to a process that refuses it.
+        environment = _supervisord().get("program:next", "environment")
+        match = re.search(r'INTERNAL_API_URL="([^"]*)"', environment)
+        self.assertIsNotNone(match, "program:next sets no INTERNAL_API_URL")
+        self.assertEqual(match.group(1), "http://127.0.0.1:8080")
+
+
 class NginxTests(unittest.TestCase):
     def test_nginx_sends_every_call_path_to_the_call_process(self) -> None:
         text = _nginx_text()
@@ -373,6 +419,22 @@ class NginxTests(unittest.TestCase):
             with self.subTest(location=other_regex):
                 self.assertNotIn("http://calls", other_body)
                 self.assertIn("proxy_pass http://api;", other_body)
+
+    def test_a_timed_out_request_is_not_sent_to_the_other_process(self) -> None:
+        # With two servers in `upstream api`, nginx's default `proxy_next_upstream error
+        # timeout` would re-send a request that timed out to the other process: the work
+        # done twice, and a 504 after 120 s instead of the first process's answer. Only a
+        # failed connection (a process that is down) may move on to the other one.
+        proxied = [
+            (regex, body)
+            for regex, body in _regex_locations(_nginx_text())
+            if "proxy_pass http://api;" in body
+        ]
+        self.assertGreaterEqual(len(proxied), 4, "the API locations were not found")
+        for regex, body in proxied:
+            with self.subTest(location=regex):
+                self.assertIn("proxy_next_upstream error;", body)
+                self.assertNotIn("timeout", re.findall(r"proxy_next_upstream\s+([^;]*);", body)[0])
 
     def test_the_call_location_matches_exactly_the_call_paths(self) -> None:
         pattern = re.compile(NGINX_CALL_LOCATION)

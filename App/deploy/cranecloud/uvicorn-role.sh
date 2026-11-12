@@ -17,8 +17,10 @@
 #          URA_DRY_RUN=1            print the launch instead of exec'ing it
 # Exports  URA_PROCESS_ROLE
 #          chat:  URA_CALLS_PROCESS_URL=http://127.0.0.1:8082
-#          calls: UVICORN_WORKERS=1, which is how the receptionist knows it is the
-#                 only call process (VOICE_RECEPTIONIST_REPLICAS=1 is the Space's)
+#          calls: UVICORN_WORKERS=1, WORKERS=1 and WEB_CONCURRENCY=1, which is how the
+#                 receptionist knows it is the only call process: it needs every one
+#                 of the three that is set to be 1 (VOICE_RECEPTIONIST_REPLICAS=1 is
+#                 the Space's)
 #
 # Exits 2 on an unknown role. Like wait-for-qdrant.sh, it execs the server, so
 # supervisord's signals and stop handling reach the real process.
@@ -52,12 +54,20 @@ while [ "${TOTAL#0}" != "$TOTAL" ]; do
 done
 [ -n "$TOTAL" ] || TOTAL=2
 
+# `n_workers` is this script's own count. It must not be called WORKERS: that is
+# one of the variables the receptionist reads (below), and a shell that imports a
+# variable from the environment keeps it exported, so a local WORKERS would be
+# overwritten, and leaked into the server, only by accident.
 if [ "$ROLE" = calls ]; then
-    WORKERS=1
-    export UVICORN_WORKERS=1
+    n_workers=1
+    # The call process declares itself the only one: receptionist/config.py
+    # single_worker_declared() needs every one of these that is set to be 1, and the
+    # container may arrive with any of them set (the image's own UVICORN_WORKERS=2,
+    # a Space secret), so all three are set here rather than the one this script reads.
+    export UVICORN_WORKERS=1 WORKERS=1 WEB_CONCURRENCY=1
 else
-    WORKERS=$((TOTAL - 1))
-    [ "$WORKERS" -ge 1 ] || WORKERS=1
+    n_workers=$((TOTAL - 1))
+    [ "$n_workers" -ge 1 ] || n_workers=1
     export URA_CALLS_PROCESS_URL="http://127.0.0.1:8082"
 fi
 export URA_PROCESS_ROLE="$ROLE"
@@ -102,14 +112,19 @@ flock "$DIR/.lock" sh -c '
 
 # Gated on the Qdrant sidecar (wait-for-qdrant.sh is bounded and never fail-closed).
 set -- /usr/local/bin/wait-for-qdrant.sh /opt/venv/bin/uvicorn app.main:app \
-    --host 127.0.0.1 --port "$PORT" --workers "$WORKERS" \
+    --host 127.0.0.1 --port "$PORT" --workers "$n_workers" \
     --log-level "${LOG_LEVEL:-info}" --proxy-headers '--forwarded-allow-ips=*'
 
 if [ "${URA_DRY_RUN:-}" = 1 ]; then
     echo "URA_PROCESS_ROLE=$URA_PROCESS_ROLE"
     case "$ROLE" in
         chat) echo "URA_CALLS_PROCESS_URL=$URA_CALLS_PROCESS_URL" ;;
-        calls) echo "UVICORN_WORKERS=$UVICORN_WORKERS" ;;
+        calls)
+            # What the exec'd server inherits, read back from the environment.
+            for name in UVICORN_WORKERS WORKERS WEB_CONCURRENCY; do
+                echo "$name=$(printenv "$name" || true)"
+            done
+            ;;
     esac
     echo "exec $*"
     exit 0
