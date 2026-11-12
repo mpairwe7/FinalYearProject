@@ -2165,7 +2165,7 @@ longer ago than a call may last. Declared means `VOICE_RECEPTIONIST_REPLICAS=1`
 and a worker count of 1 in every one of `WORKERS`, `UVICORN_WORKERS` and
 `WEB_CONCURRENCY` that is set, with at least one set (the supervisord image
 defaults `UVICORN_WORKERS` to 2, so `WORKERS=1` alone is not enough there; its
-call process is started with `UVICORN_WORKERS=1` and the Space Dockerfile sets
+call process is started with `UVICORN_WORKERS`, `WORKERS` and `WEB_CONCURRENCY` all 1 and the Space Dockerfile sets
 `VOICE_RECEPTIONIST_REPLICAS=1`, so the Space's call process declares it,
 ADR-0043). Otherwise it answers **409** ("on another
 server process"), because a live call on another worker looks the same from

@@ -47,10 +47,14 @@ supervisord, with Qdrant and Redis sidecars. Today one uvicorn program runs
     `max(1, UVICORN_WORKERS - 1)` workers, computed in the program's shell
     command (supervisord cannot do arithmetic);
   - `uvicorn-calls` on 127.0.0.1:8082, `URA_PROCESS_ROLE=calls`, one worker,
-    with `UVICORN_WORKERS=1` in its own environment.
+    with `UVICORN_WORKERS`, `WORKERS` and `WEB_CONCURRENCY` all exported as 1 in
+    its own environment (the receptionist's single-worker declaration reads all
+    three, and the container may pass any of them in).
 
   With the Space's `UVICORN_WORKERS=2` that is one process each: the same two
-  processes as today. Both start through one script,
+  processes as today; keep it at 2 on the Space, because nginx splits chat one
+  to one between the two programs, so a larger value would leave the one-worker
+  call process carrying more than its share. Both start through one script,
   `App/deploy/cranecloud/uvicorn-role.sh <role>`, which sets the role's port,
   worker count and environment and keeps the `wait-for-qdrant.sh` wrapper and
   today's uvicorn flags. A blank or invalid `UVICORN_WORKERS` counts as 2.

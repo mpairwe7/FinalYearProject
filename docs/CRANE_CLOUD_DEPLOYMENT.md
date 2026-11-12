@@ -80,7 +80,9 @@ process, so the API runs as two programs started by
 `App/deploy/cranecloud/uvicorn-role.sh <role>`: `uvicorn-chat` (127.0.0.1:8081,
 `URA_PROCESS_ROLE=chat`, `max(1, UVICORN_WORKERS - 1)` workers) and
 `uvicorn-calls` (127.0.0.1:8082, `URA_PROCESS_ROLE=calls`, one worker). With the
-image's `UVICORN_WORKERS=2` that is one process each. nginx sends every call
+image's `UVICORN_WORKERS=2` that is one process each; keep it at 2 on the Space,
+because nginx splits chat one to one between the two programs and a larger value
+would leave the one-worker call process carrying more than its share. nginx sends every call
 path (`calls/stream`, `admin/calls…`, officer presence) to the call process and
 the rest of the API to both (`upstream api`); the chat role refuses a call
 request that reaches it. The Prometheus multiprocess directory is emptied once
@@ -147,7 +149,9 @@ The snippet below is the original, simplified routing. The shipped file is
 location first, which matches
 `^/(api/(v1/)?|v1/)(calls/stream|admin/calls(/.*)?|admin/officers/(me/)?presence)$`,
 proxies to `upstream calls` (8082 only) and has the WebSocket upgrade headers and
-3600 s timeouts. nginx takes the first matching regex location, so that order is
+3600 s timeouts. Every API location also sets `proxy_next_upstream error;`, so a
+request that timed out is not sent to the other process (nginx's default would do
+the work twice). nginx takes the first matching regex location, so that order is
 behaviour. The path list is `process_role.NGINX_CALL_LOCATION`, and
 `test_call_process_container.py` keeps the two equal.
 

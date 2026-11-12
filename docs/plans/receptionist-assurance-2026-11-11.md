@@ -164,6 +164,7 @@ process, and nginx sends every call path to the call process.
 | G595 | The call receptionist alert group has five rules; `UraCallMisrouted` is the new one. |
 | G612 (new) | An admin-API flag override reaches only the process that answered it; the calls kill switch is now a `FLAG_VOICE_RECEPTIONIST` Space secret (runbook). |
 | G613 (new) | More than one replica needs durable call ownership: the rest of G306. |
+| G614 (new) | No metrics alert notices a dead call process on the Space; the roll workflow and the hourly keepalive workflow fail while `/ready` reports the call process down. |
 
 Also changed: `verify-embedded-stores.sh` checks both programs and runs
 `nginx -t`; the metrics directory is emptied once per container start, and a
@@ -178,7 +179,7 @@ Left open by this phase:
   roll, and a real officer handoff needs a staff account: the owner is asked to
   run one test call. Rollback is a roll to `sha-f5d79b7`.
 - **The call process restarting still ends its calls**, as a dead worker did.
-- **G612 and G613**, above.
+- **G612, G613 and G614**, above.
 - **Crane Cloud** builds from the same files and was not deployed or tested.
 
 ## Not in scope
@@ -259,8 +260,8 @@ Phase 3, the same day, the laptop still on battery:
 
 Phase 5, 2026-11-12, Python 3.11, hosted models, Qdrant and speech disabled:
 
-- `test_call_process_routing.py` and `test_call_process_container.py`: 55 passed
-  (123 subtests). The container tests run `uvicorn-role.sh` with its dry-run
+- `test_call_process_routing.py` and `test_call_process_container.py`: 61 passed
+  (134 subtests). The container tests run `uvicorn-role.sh` with its dry-run
   switch and read `supervisord.conf` and `nginx.conf` as text.
 - Root `tests/test_monitoring_config.py`, `tests/test_monorepo_architecture_governance.py`
   and `tests/test_governance_evidence.py`: 156 passed.

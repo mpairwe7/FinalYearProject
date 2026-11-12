@@ -21,6 +21,13 @@ the check). What an operator needs to know:
 
   With the Space's `UVICORN_WORKERS=2` that is one process each, the same two
   processes as before. A blank, non-numeric or zero `UVICORN_WORKERS` counts as 2.
+  **Keep `UVICORN_WORKERS=2` on the Space.** nginx's `api` upstream lists both
+  programs and splits chat between them one to one, whatever their worker
+  counts, so raising it only adds workers to the chat program: the one-worker
+  call process would still carry half of all chat, more than its share. The
+  launcher sets `UVICORN_WORKERS`, `WORKERS` and `WEB_CONCURRENCY` to 1 in the
+  call process's own environment, whatever the container passes in, because
+  the receptionist reads all three.
   The receptionist starts, sweeps the rows a previous run left and takes calls
   in the call process only.
 - **nginx sends every call path to the call process**: `/v1/calls/stream`, the
@@ -124,6 +131,12 @@ gh workflow run ura-chatbot-roll-hf-space.yml -f image_tag=sha-f5d79b7
 ```
 
 Handoffs on the Space are then unreliable again, as in the ADR-0041 update below.
+
+The roll commits the old pin to `dev` (the workflow moves the
+`FROM landwind/ura-chatbot:sha-*` line in `App/deploy/hf-space/Dockerfile` and
+pushes it back), so the rollback lasts only until the next `dev` build that
+touches the build paths: its roll moves the pin forward again, automatically,
+to an image that has this change. Hold such merges to `dev` until the fix is in.
 
 ### Assurance update — 2026-11-11, the call screens (ADR-0042)
 
@@ -357,6 +370,11 @@ since every call now runs on the local engine, that it can: `SPEECH_ENABLED` and
 `LLM_ENABLED` on, `ORPHEUS_TTS_URL` set, and every language in
 `RECEPTIONIST_LANGUAGES` voiced by Orpheus (`ORPHEUS_TTS_LANGUAGES`).
 `python -m app.production_readiness --as-production` reports those G36 checks.
+Run in a shell inside the supervisord image's container, it reads that image's
+`UVICORN_WORKERS=2` and reports a G36 worker-count error that does not apply to
+the Space: the call process, the only one that starts the receptionist, runs one
+worker and sets all three worker variables to 1 itself (ADR-0043). Read that line
+as expected there, and the other lines as real.
 Since ADR-0041 a production deployment that fails them still starts and serves
 the chat; calls are refused and `GET /ready` names the failed check under
 `capabilities.voice_receptionist`.
@@ -402,8 +420,8 @@ All switches and thresholds are configured via environment variables:
 | `FLAG_VOICE_CONSENT` | `true` | Enforces explicit voice consent dialog prior to audio processing |
 | `FLAG_TICKET_QUEUE` | `true` | Enforces human queue oversight; transfers fail safely if disabled |
 | `WORKERS` | `4` in the Docker image | Explicitly set `1` for the receptionist — active call state is process-local |
-| `UVICORN_WORKERS` | `2` in the supervisord image (`Dockerfile.cranecloud`, HF Space) | The image's worker budget: the chat program gets `max(1, N − 1)` and the call program always 1 (ADR-0043); leave it at 2 on the Space. Outside the supervisord image, set `1` for the receptionist; `WORKERS=1` alone leaves two workers there (ADR-0041) |
-| `WEB_CONCURRENCY` | unset | Read by the gate as well: if set, it must be `1` |
+| `UVICORN_WORKERS` | `2` in the supervisord image (`Dockerfile.cranecloud`, HF Space) | The image's worker budget: the chat program gets `max(1, N − 1)` and the call program always 1 (ADR-0043); keep it at 2 on the Space (nginx splits chat one to one between the two programs, so a larger N overloads the one-worker call process). Outside the supervisord image, set `1` for the receptionist; `WORKERS=1` alone leaves two workers there (ADR-0041) |
+| `WEB_CONCURRENCY` | unset | Read by the gate as well: if set, it must be `1` (the supervisord image's call process exports `1` itself) |
 | `RECEPTIONIST_CLARIFY_THRESHOLD` | `0.55` | Word acoustic probability below which ClarifyGate assesses candidates |
 | `RECEPTIONIST_MAX_CLARIFY_ATTEMPTS` | `2` | Number of failed clarification attempts before auto-transferring |
 | `RECEPTIONIST_TRANSFER_TIMEOUT_S` | `90` | Seconds to hold for available officer before promising a callback |

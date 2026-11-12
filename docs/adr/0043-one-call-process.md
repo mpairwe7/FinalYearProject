@@ -6,7 +6,7 @@ Accepted, 2026-11-12. Phase 5 of the
 [11 November call receptionist review](../plans/receptionist-assurance-2026-11-11.md);
 it follows [ADR-0042](0042-call-screens-say-what-happened.md). Design:
 [receptionist-call-process-2026-11-12](../plans/receptionist-call-process-2026-11-12.md).
-It mitigates G306 for one container, and records G612 and G613.
+It mitigates G306 for one container, and records G612, G613 and G614.
 
 ## Context and Problem Statement
 
@@ -167,7 +167,9 @@ says so.
 
 **Rollback.** Roll the Space to `sha-f5d79b7` with
 `gh workflow run ura-chatbot-roll-hf-space.yml -f image_tag=sha-f5d79b7`. That
-image runs one two-worker uvicorn and needs nothing from this change.
+image runs one two-worker uvicorn and needs nothing from this change. The roll
+commits that pin to `dev`, so the rollback lasts only until the next `dev` build
+that touches the build paths: its roll moves the pin forward again automatically.
 
 ## Consequences
 
@@ -186,7 +188,11 @@ image runs one two-worker uvicorn and needs nothing from this change.
   officer for a callback (`service_interrupted`, ADR-0041). Chat keeps being
   served through 8081.
 - **A chat request in flight on the call process can fail once when it
-  restarts**: nginx does not retry a POST.
+  restarts**: nginx does not retry a POST. Every location that proxies to `api`
+  sets `proxy_next_upstream error;`: with two servers, nginx's default (`error
+  timeout`) would send a request that timed out to the other process, so its
+  work was done twice and the caller waited for a 504 after the full timeout.
+  Only a refused connection (a process that is down) moves on to the other one.
 - **Chat load can reach the call process's one worker.** The `api` upstream
   lists both, without `backup`, so chat shares that worker's event loop with
   calls. It adds chat capacity (calls and chat shared a process before), and it
@@ -213,11 +219,22 @@ image runs one two-worker uvicorn and needs nothing from this change.
   the next start (overrides are replayed into the registry at start), so remove
   a stored `voice_receptionist` override (`DELETE /v1/admin/flags/voice_receptionist`)
   before relying on the secret.
-- **The call process's single-worker declaration needs `WORKERS` and
-  `WEB_CONCURRENCY` unset or `1`.** `uvicorn-role.sh` sets
-  `UVICORN_WORKERS=1` for it and leaves the other two alone; a Space secret that
-  sets either to another value makes the declaration false, and the start ends
-  only rows older than a call may last.
+- **The call process declares its single worker in all three worker
+  variables.** `uvicorn-role.sh` exports `UVICORN_WORKERS=1`, `WORKERS=1` and
+  `WEB_CONCURRENCY=1` for it, whatever the container passed in (the image's own
+  `UVICORN_WORKERS=2`, a Space secret), because the receptionist's declaration
+  needs every one of them that is set to be 1. The launcher's own worker count is
+  a variable named `n_workers`, not `WORKERS`: a shell keeps an imported variable
+  exported, so a local `WORKERS` would have been overwritten, and leaked into the
+  server, only by accident. The chat process inherits the three untouched.
+- **Keep `UVICORN_WORKERS=2` on the Space.** The chat process gets
+  `max(1, N − 1)` workers, but nginx splits chat one to one between the two
+  programs, so raising N adds workers to the chat process only and the
+  one-worker call process carries more than its share of chat.
+- **`python -m app.production_readiness` run in a container shell reports a G36
+  worker error that does not apply.** It reads the image's `UVICORN_WORKERS=2`;
+  the call process, the only one that starts the receptionist, runs one worker
+  and exports all three variables as 1 itself.
 - **No metrics alert notices a dead call process on the Space (G614).** The
   Prometheus in `monitoring/` scrapes the compose stack, not the Space;
   `UraApiDown` is satisfied by either process; `receptionist_available` goes stale
@@ -262,16 +279,29 @@ change:
 
 `App/backend/tests/test_call_process_container.py`: `uvicorn-role.sh` run with
 `URA_DRY_RUN=1` for ports, roles, environment, the worker count for each
-`UVICORN_WORKERS` (blank, `abc`, `0`, `1`, `4`) and the launch itself; the
+`UVICORN_WORKERS` (blank, `abc`, `0`, `1`, `4`) and the launch itself; the call
+process exporting `UVICORN_WORKERS`, `WORKERS` and `WEB_CONCURRENCY` as 1 whatever
+the container passes in, and the chat process leaving them alone; the
 metrics directory cleared on the first start only, with two roles starting
 together clearing once, and a restart dropping only dead processes' live gauge
 files; `supervisord.conf` parsed, with both programs keeping what the single one
 had; `nginx.conf` read as text (the call location first among the location
 blocks, `calls` holding 8082 only, `api` holding both, samples of every call
 path matching, `/calls`, `/v1/chat`, `/v1/admin/flags` and ticket presence not
-matching, the upgrade headers and the 3600 s timeouts); the Space declaring one
+matching, the upgrade headers and the 3600 s timeouts, and every location that
+proxies to `api` setting `proxy_next_upstream error;`); `INTERNAL_API_URL` for
+Next.js naming nginx (8080), not an API process; the Space declaring one
 replica; the image shipping the script executable and checking both programs
 and `nginx -t`.
+
+Deployment checks (G614): the roll workflow's "Confirm the app answers" step
+polls `/ready` after `/health` for about 5 minutes and fails while
+`capabilities.voice_receptionist` starts with `unavailable: the call process`;
+the hourly keepalive workflow runs the same check three times. Both pass on
+any other value, `off` included, and on an image that does not report it (the
+rollback image). Their shell was run here against a local stub of `/ready` (call
+process down on every attempt, down and then up, `off`, a missing field, no
+answer); the workflows themselves run on the next roll and the next hourly run.
 
 Monitoring: `tests/test_monitoring_config.py` (the series the rule names is one
 the code exports; the runbook anchor exists) and promtool cases in
