@@ -2239,7 +2239,8 @@ applies it within one sync interval (ADR-0044); before that, it reached only
 the process that answered (G612). A failed write changes nothing; on Postgres,
 no connection pool is a failed write, not a silent one. The response
 carries the same `scope` and `sync_interval_seconds`. A change
-survives restarts. Replicas with a database each still need `FLAG_*` on every
+survives restarts where the database does; the Space's database is on the container's
+own disk, so a restart there starts with no stored overrides. Replicas with a database each still need `FLAG_*` on every
 replica. Safety flags (`auth_required`, `multi_tenant`, `audit_ledger`,
 `ticket_queue`, `voice_consent`) return 400.
 

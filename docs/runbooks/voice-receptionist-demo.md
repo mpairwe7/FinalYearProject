@@ -103,24 +103,20 @@ so:
    the secret. Read `/ready` again after about 15 s: it says `off`. If the sync
    is off (`FLAG_SYNC_INTERVAL_SECONDS=0`), restart the Space instead.
 4. If the `DELETE` fails because the database rejects writes, the stored
-   override cannot be removed and keeps beating the secret. The only stop that
-   does not depend on the database takes chat down too: pause the Space, and
-   turn off the keepalive workflow, which otherwise restarts a Space that is not
-   running within the hour:
-
-   ```bash
-   gh workflow disable hf-space-keepalive.yml
-   hf spaces pause landwind22/ura-chatbot
-   ```
-
-   When the database accepts writes again, delete the override as in step 3.
-   Then restart the Space, which is the only way to resume a paused one, and
-   turn the keepalive back on:
-
-   ```bash
-   hf spaces restart landwind22/ura-chatbot
-   gh workflow enable hf-space-keepalive.yml
-   ```
+   override cannot be removed while the API runs, and it keeps beating the
+   secret.
+   - **On the Space**, restart it (`hf spaces restart landwind22/ura-chatbot`).
+     Its database is `/app/data_store/analytics.db` on the container's own disk,
+     and the Space has no persistent storage. A Space's disk is lost when it
+     restarts (Hugging Face, "Disk usage on Spaces"), so it starts with no
+     stored overrides and the secret applies. Read `/ready` again.
+   - **On a deployment whose database survives a restart**, nothing in the app
+     can stop calls until the store accepts writes again. Stop the API (scale
+     it to zero). Fix the write failure, then delete the row out of band:
+     `psql "$POSTGRES_DSN" -c "DELETE FROM flag_overrides WHERE name = 'voice_receptionist'"`,
+     or for SQLite
+     `sqlite3 "$ANALYTICS_DB_DIR/analytics.db" "DELETE FROM flag_overrides WHERE name = 'voice_receptionist'"`.
+     Then start the API and read `/ready`.
 
 The 1001 close and the `off` field show whether the switch took (the ADR-0042
 update below).

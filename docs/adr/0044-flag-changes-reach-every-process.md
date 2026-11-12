@@ -106,9 +106,13 @@ How it works:
   sockets already open carry on. The Space secret stays as the fallback for when
   the console or the store is unavailable. The runbook's kill switch now leads with
   the console. If the store can be read but not written, a stored `true` override
-  cannot be removed and beats the secret. The runbook's last resort is then to
-  pause the Space, which takes chat down too, with the keepalive workflow turned
-  off: that workflow restarts any Space that is not running.
+  cannot be removed while the API runs, and it beats the secret. On the Space a
+  restart clears it: the database is `/app/data_store/analytics.db` on the
+  container's own disk, with no persistent storage, so every restart starts with
+  no stored overrides. Where the database survives a restart, the runbook stops
+  the API, fixes the write failure and deletes the row out of band.
+- **On the Space, stored overrides do not survive a restart** (same reason). A
+  console change lasts until the next restart or roll, as it did before this ADR.
 - **A stored override now also beats a `FLAG_*` value while a process runs**, not
   only at its start: the sync re-applies it on every pass. So deleting a stored
   override is enough to make every process follow `FLAG_*` again within one

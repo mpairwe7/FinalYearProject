@@ -130,7 +130,8 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
           <p className="ops-note-body">
             A change is stored in the <code>flag_overrides</code> table and replayed
             whenever a process restarts, so it keeps winning over <code>FLAG_*</code> until you
-            reset it.{" "}
+            reset it, as long as the database survives the restart (a Space without persistent
+            storage starts with an empty one).{" "}
             {typeof syncSeconds !== "number" ? null : syncSeconds > 0 ? (
               <>
                 A process that cannot read the store keeps its flags and logs it, so confirm the
