@@ -36,7 +36,12 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import threading
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 logger = logging.getLogger(__name__)
 
@@ -762,6 +767,12 @@ def _env_rollout(name: str, declared: Rollout | None) -> Rollout | None:
 class FeatureFlags:
     def __init__(self) -> None:
         self._overrides: dict[str, bool] = {}
+        #: Overrides that came from (or were written to) the ``flag_overrides``
+        #: store. :meth:`apply_stored` keeps exactly these in step with the
+        #: store; an override set in this process only is left alone (G612).
+        self._stored: set[str] = set()
+        # The sync runs in a worker thread while requests set and clear.
+        self._lock = threading.Lock()
         #: Flags already warned about for an unsubjected rollout check,
         #: so a hot-path caller logs once rather than once per request.
         self._warned_no_subject: set[str] = set()
@@ -912,18 +923,51 @@ class FeatureFlags:
             "locale": locale or "",
         }
 
-    def set(self, name: str, enabled: bool) -> None:
+    def set(self, name: str, enabled: bool, *, stored: bool = False) -> None:
         """Programmatic override (e.g. from an admin API).
 
-        Overrides live in-process only.  For cluster-wide toggles, set
-        the ``FLAG_<NAME>`` env var on all replicas.
+        ``stored=True`` marks an override that is also in the
+        ``flag_overrides`` store, so :meth:`apply_stored` keeps it in step
+        with the store (and every process that reads it). Without it the
+        override lives in this process only.
         """
         if name not in _REGISTRY:
             raise KeyError(name)
-        self._overrides[name] = enabled
+        with self._lock:
+            self._overrides[name] = enabled
+            if stored:
+                self._stored.add(name)
 
     def clear(self, name: str) -> None:
-        self._overrides.pop(name, None)
+        with self._lock:
+            self._overrides.pop(name, None)
+            self._stored.discard(name)
+
+    def apply_stored(self, stored: Mapping[str, bool]) -> dict[str, bool | None]:
+        """Make the overrides that came from the store match *stored* (G612).
+
+        Each process runs this on an interval with the rows it reads, so a
+        console change made through one process reaches the others. A stored
+        row is applied (it beats an override set in this process only); an
+        override that came from the store and is no longer in it is cleared.
+        Unknown names are skipped, as at startup. Returns what changed:
+        ``name -> value``, or ``None`` for a cleared override.
+        """
+        changed: dict[str, bool | None] = {}
+        with self._lock:
+            for name, enabled in stored.items():
+                if name not in _REGISTRY:
+                    continue
+                value = bool(enabled)
+                if self._overrides.get(name) is not value:
+                    changed[name] = value
+                self._overrides[name] = value
+                self._stored.add(name)
+            for name in sorted(self._stored - set(stored)):
+                self._stored.discard(name)
+                if self._overrides.pop(name, None) is not None:
+                    changed[name] = None
+        return changed
 
     def all(self) -> dict[str, bool]:
         """Global resolution of every flag, with no subject.
@@ -946,6 +990,7 @@ class FeatureFlags:
             "category": flag.effective_category,
             "owner": flag.owner,
             "overridden": name in self._overrides,
+            "stored": name in self._stored,
             "rollout": (
                 {
                     "percent": rollout.percent,

@@ -172,6 +172,8 @@ translation and retried unmasked when the tier mangles the sentinels.
 | `ura_security_events_total` | `event` | OWASP-vocabulary security events (§6) |
 | `ura_retention_runs_total`, `ura_retention_last_success_timestamp_seconds` | `status` | Personal-data retention job |
 | `ura_storage_world_writable` | — | 1 when `ANALYTICS_DB_DIR` is world-writable |
+| `ura_flag_sync_failures_total` | — | Passes of the flag sync (ADR-0044) that could not read `flag_overrides`; the process keeps its flags. Logged at ERROR once per run of failures |
+| `ura_flag_sync_refused_total` | — | In production, passes that left out a stored `false` for a protected control, so the control stays on. Logged CRITICAL once until the row changes. Delete the row |
 | `ura_build_info` | `version`, `revision`, `environment` | Which build is answering |
 | `ura_crawl_last_full_run_timestamp_seconds`, `ura_crawl_oldest_verified_timestamp_seconds`, `ura_crawl_unverified_pages`, `ura_crawl_quarantined_pages` | — | How old the crawled corpus in this image is, read from its manifest. `ura_qdrant_index_fresh` only says the index matches the image |
 | `ura_qdrant_index_*`, `ura_qdrant_backup_*`, `ura_qdrant_restore_drill_*` | — | Index lifecycle (read from status files at scrape time) |

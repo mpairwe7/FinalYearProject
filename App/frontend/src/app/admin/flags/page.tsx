@@ -50,6 +50,9 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
   const canToggle = who.role === "ura_admin";
 
   const flags = useMemo(() => data?.flags ?? [], [data]);
+  // Every process re-reads the stored overrides on this interval (G612); 0, or
+  // an API that does not say, means the others apply a change at their restart.
+  const syncSeconds = data?.sync_interval_seconds ?? 0;
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -106,17 +109,29 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
         ) : null
       }
     >
-      {/* Not a footnote: believing this is cluster-wide is the failure mode. */}
+      {/* Not a footnote: how far a toggle reaches is what an operator gets wrong. */}
       <div className="ops-note" role="note">
         <span className="ops-note-mark" aria-hidden="true">
           <AlertTriangleIcon />
         </span>
         <div>
-          <p className="ops-note-title">Toggles here change this replica only</p>
+          {syncSeconds > 0 ? (
+            <p className="ops-note-title">
+              Changes here reach every API process within {syncSeconds} s
+            </p>
+          ) : (
+            <p className="ops-note-title">
+              Changes here reach the other API processes when they restart
+            </p>
+          )}
           <p className="ops-note-body">
-            A change persists in this pod’s <code>flag_overrides</code> table and is replayed when
-            it restarts, so it keeps winning over <code>FLAG_*</code> until you reset it. A
-            cluster-wide change means setting <code>FLAG_*</code> on every replica.
+            A change is stored in the <code>flag_overrides</code> table and replayed
+            whenever a process restarts, so it keeps winning over <code>FLAG_*</code> until you
+            reset it.{" "}
+            {syncSeconds > 0
+              ? "Every API process that shares this database also applies it while running."
+              : "It applies at once in the process that answered; the others apply it when they next start."}{" "}
+            Replicas with a database each still need <code>FLAG_*</code> set on every replica.
             {data?.overrides_are_ephemeral === false
               ? " This deployment reports overrides as durable."
               : null}

@@ -126,6 +126,33 @@ describe("Feature flags console", () => {
     renderFlags();
     // The note used to read "lost when it is replaced", which is the opposite
     // of what boot rehydration does and is why nobody looked for a reset.
-    expect(await screen.findByText(/replayed when\s+it restarts/)).toBeInTheDocument();
+    expect(await screen.findByText(/replayed whenever\s+a process\s+restarts/)).toBeInTheDocument();
+  });
+
+  it("says a change reaches every API process within the sync interval (G612)", async () => {
+    // It used to say "this replica only", which was true until every process
+    // re-read the stored overrides; now the calls kill switch works from here.
+    vi.spyOn(analyticsApi, "flags").mockResolvedValue({
+      flags: FLAGS,
+      overrides_are_ephemeral: false,
+      scope: "every_process_sharing_this_database",
+      sync_interval_seconds: 5,
+      synced_at: 1_700_000_000,
+    });
+    renderFlags();
+    expect(await screen.findByText(/reach every API process within 5 s/)).toBeInTheDocument();
+    expect(screen.queryByText(/this replica only/)).toBeNull();
+  });
+
+  it("says the other processes apply a change when they restart if the sync is off", async () => {
+    vi.spyOn(analyticsApi, "flags").mockResolvedValue({
+      flags: FLAGS,
+      overrides_are_ephemeral: false,
+      scope: "this_process_until_the_others_restart",
+      sync_interval_seconds: 0,
+      synced_at: null,
+    });
+    renderFlags();
+    expect(await screen.findByText(/reach the other API processes when they restart/)).toBeInTheDocument();
   });
 });

@@ -163,7 +163,9 @@ the admin API (`PATCH /v1/admin/flags/{name}`) changes the registry of the one
 process that answered it and writes a row the other process reads only at its
 next start. That includes the calls kill switch: switching calls off through the
 console can leave the call process taking calls. Recorded as G612; the runbook
-says so.
+says so. (Closed on 2026-11-12 by [ADR-0044](0044-flag-changes-reach-every-process.md):
+every process now re-reads the stored overrides, and the console switch reaches
+the call process.)
 
 **Rollback.** Roll the Space to `sha-f5d79b7` with
 `gh workflow run ura-chatbot-roll-hf-space.yml -f image_tag=sha-f5d79b7`. That
@@ -215,7 +217,7 @@ that touches the build paths: its roll moves the pin forward again automatically
   comes from the outermost layer, so it carries the header and `detail` but none
   of the headers the inner security and CORS middleware add. It is an
   operator-facing error for something that should not happen.
-- **Admin-API flag overrides reach one process (G612).** Use the Space secret
+- **Admin-API flag overrides reach one process (G612; closed by ADR-0044).** Use the Space secret
   for the calls kill switch. A stored override also beats a `FLAG_*` secret at
   the next start (overrides are replayed into the registry at start), and
   `GET /v1/admin/flags` reports only the answering process's registry. So the
