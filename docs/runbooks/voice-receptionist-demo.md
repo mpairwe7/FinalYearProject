@@ -71,27 +71,34 @@ reaches both processes. Do not use the admin API's flag override
 the one process that answered the request and writes a stored row the other
 process reads only when it next starts, so calls can stay on in the call process
 while the console says they are off (G612). A stored override also beats a
-`FLAG_*` secret when a process starts. To see whether one exists,
-`GET /v1/admin/flags` lists `voice_receptionist` with `overridden` set (it reports
-the process that answered, so ask a few times). If one exists, take these steps
-in this order, so that calls are never switched on by the change itself:
+`FLAG_*` secret when a process starts. `GET /v1/admin/flags` cannot tell you
+whether one is stored: its `overridden` field is the registry of the process
+that answered, and every request can reach the same process. Decide from
+`/ready` instead: its `capabilities.voice_receptionist` is the call process's
+own value whichever process answers. Take these steps in this order, so that
+calls are never switched on by the change itself:
 
 1. Set the secret to `false`. The Space restarts, and each process starts with
-   the stored override if there is one: calls are off now if it says `false`,
-   still on if it says `true`.
-2. Delete the stored override (`DELETE /v1/admin/flags/voice_receptionist`,
-   `ura_admin`). This removes the row and changes the registry of the process
-   that answered, usually the chat process; the call process keeps the value it
-   started with.
-3. Restart the Space (`hf spaces restart landwind22/ura-chatbot`). The call
-   process starts with no override, reads `false` and takes no calls.
+   the stored override if there is one, otherwise with `false`.
+2. When the Space is back, read `/ready`. `off`: the switch took; stop here.
+   `ready`: a stored `true` override won, and calls are still on.
+3. Delete the stored override (`DELETE /v1/admin/flags/voice_receptionist`,
+   `ura_admin`). The row is removed whichever process answers. The call process
+   keeps the value it started with, so calls stay on until step 4.
+4. Restart the Space (`hf spaces restart landwind22/ura-chatbot`) and read
+   `/ready` again. The call process starts with no override and reads `false`.
+   The switch has taken only when `/ready` says `off`; while it says `ready`,
+   calls are on. If it still says `ready`, check the secret's name and value
+   and whether someone set the override again.
 
 The 1001 close and the `off` field show whether the switch took (the ADR-0042
 update below).
 
 **Turning calls back on.** The Space image sets `FLAG_VOICE_RECEPTIONIST=true`
 (`App/deploy/hf-space/Dockerfile`), so deleting the secret, or setting it to
-`true`, restarts the Space with calls on.
+`true`, restarts the Space with calls on. Confirm that `/ready` says `ready`. If
+it says `off`, a stored `false` override won: delete it as in step 3, then
+restart the Space.
 
 **Live probes after a roll** (the Space is `https://landwind22-ura-chatbot.hf.space`):
 

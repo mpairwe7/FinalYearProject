@@ -216,9 +216,11 @@ that touches the build paths: its roll moves the pin forward again automatically
   operator-facing error for something that should not happen.
 - **Admin-API flag overrides reach one process (G612).** Use the Space secret
   for the calls kill switch. A stored override also beats a `FLAG_*` secret at
-  the next start (overrides are replayed into the registry at start), so remove
-  a stored `voice_receptionist` override (`DELETE /v1/admin/flags/voice_receptionist`)
-  before relying on the secret.
+  the next start (overrides are replayed into the registry at start), and
+  `GET /v1/admin/flags` reports only the answering process's registry. So the
+  runbook sets the secret first, reads `/ready` (the call process's own value)
+  and, if calls are still on, deletes the stored `voice_receptionist` override
+  (`DELETE /v1/admin/flags/voice_receptionist`) and restarts the Space.
 - **The call process declares its single worker in all three worker
   variables.** `uvicorn-role.sh` exports `UVICORN_WORKERS=1`, `WORKERS=1` and
   `WEB_CONCURRENCY=1` for it, whatever the container passed in (the image's own
