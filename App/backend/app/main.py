@@ -23,12 +23,14 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Path, Query, Request, Response, status
+from fastapi.exception_handlers import http_exception_handler as _fastapi_http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sse_starlette.sse import EventSourceResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.websockets import WebSocket
 
@@ -1006,6 +1008,25 @@ try:
 except Exception:
     logger.warning("OpenTelemetry tracing init skipped", exc_info=True)
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+async def _http_exception_with_challenge(request: Request, exc: StarletteHTTPException):
+    """Give every 401 a ``WWW-Authenticate: Bearer`` challenge (RFC 9110 §15.5.2).
+
+    The API's 401s (no login, a bad or expired token) had none, so a client
+    could not tell which scheme would work. A 401 that names its own challenge
+    keeps it; every other status, and the rest of the response, is FastAPI's
+    default. Any other response that is a 401 (MCP's ``wire.py``) builds its own
+    challenge and does not come through here.
+    """
+    if exc.status_code == 401 and not any(k.lower() == "www-authenticate" for k in (exc.headers or {})):
+        exc = StarletteHTTPException(
+            exc.status_code, detail=exc.detail, headers={**(exc.headers or {}), "WWW-Authenticate": "Bearer"}
+        )
+    return await _fastapi_http_exception_handler(request, exc)
+
+
+app.add_exception_handler(StarletteHTTPException, _http_exception_with_challenge)
 
 
 # ---------------------------------------------------------------------------
@@ -2841,18 +2862,18 @@ def require_admin_access(
     Ticket triage endpoints should not be public. During OIDC rollout we
     still allow the existing operator key as a break-glass path, but only
     when it is explicitly configured.
+
+    A request with no login is a 401 whether or not that key is set: a staff
+    sign-in opens these endpoints either way. Without the key it used to be a
+    503 "configure OIDC staff auth or INDEX_API_KEY", which on the Space (OIDC
+    configured, no key) told a prober the endpoint was down (2026-11-12).
     """
     if _has_valid_ops_key(request):
         return AuthContext()
 
     ctx = current_user(request, request.headers.get("Authorization"))
     if not ctx.is_authenticated:
-        if _INDEX_API_KEY:
-            raise HTTPException(status_code=401, detail="authentication required")
-        raise HTTPException(
-            status_code=503,
-            detail="admin endpoint unavailable: configure OIDC staff auth or INDEX_API_KEY",
-        )
+        raise HTTPException(status_code=401, detail="authentication required")
     if ctx.user and ctx.user.is_staff:
         return ctx
     raise HTTPException(status_code=403, detail="staff role required")

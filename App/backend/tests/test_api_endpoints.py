@@ -297,6 +297,25 @@ class AdminEndpoints(_Base):
             self.assertIn(c.get(path).status_code, (401, 403, 503), path)
             self.assertEqual(c.get(path, headers=_bearer(staff)).status_code, 200, path)
 
+    def test_a_staff_endpoint_without_a_login_is_401_with_or_without_the_ops_key(self):
+        """A staff sign-in opens these endpoints, so no login is a 401, never a 503.
+
+        Without INDEX_API_KEY it used to answer 503 "admin endpoint unavailable:
+        configure OIDC staff auth or INDEX_API_KEY", on a Space where staff
+        sign in through OIDC (found verifying ADR-0043, 2026-11-12). With
+        auth_required on, current_user answers 401 before this gate, so it is
+        pinned off here (tearDown clears it).
+        """
+        flags.set("auth_required", False)
+        c = _client()
+        for key in ("", "secret-ops-key"):
+            with mock.patch.object(main_mod, "_INDEX_API_KEY", key):
+                for path in ("/v1/admin/tickets", "/v1/admin/flags", "/v1/admin/calls"):
+                    r = c.get(path)
+                    self.assertEqual(r.status_code, 401, f"{path} key={bool(key)}: {r.text}")
+                    self.assertEqual(r.json()["detail"], "authentication required", path)
+                    self.assertEqual(r.headers.get("www-authenticate"), "Bearer", path)
+
     def test_ticket_get_unknown_404(self):
         staff = make_dev_token("a", role="ura_staff")
         r = _client().get("/v1/admin/tickets/" + "a" * 36, headers=_bearer(staff))
@@ -695,6 +714,33 @@ class MeEndpoints(_Base):
     def test_invalid_token_rejected(self):
         r = _client().get("/v1/me/profile", headers=_bearer("not.a.jwt"))
         self.assertEqual(r.status_code, 401)
+
+    def test_every_401_names_the_bearer_scheme(self):
+        """RFC 9110 §15.5.2: a 401 carries a challenge, so a client can tell what would work."""
+        c = _client()
+        for label, headers in (("no login", {}), ("bad token", _bearer("not.a.jwt"))):
+            r = c.get("/v1/me/profile", headers=headers)
+            self.assertEqual(r.status_code, 401, label)
+            self.assertEqual(r.headers.get("www-authenticate"), "Bearer", label)
+
+    def test_a_401_that_names_its_own_challenge_keeps_it(self):
+        from fastapi import HTTPException
+
+        challenge = 'Bearer error="invalid_token"'
+        with mock.patch.object(
+            main_mod,
+            "current_user",
+            side_effect=HTTPException(status_code=401, detail="x", headers={"WWW-Authenticate": challenge}),
+        ):
+            r = _client().get("/v1/admin/tickets")
+        self.assertEqual(r.status_code, 401, r.text)
+        self.assertEqual(r.headers.get("www-authenticate"), challenge)
+
+    def test_other_statuses_get_no_challenge(self):
+        staff_free = make_dev_token("alice", role="verified_taxpayer")
+        r = _client().get("/v1/admin/tickets", headers=_bearer(staff_free))
+        self.assertEqual(r.status_code, 403, r.text)
+        self.assertNotIn("www-authenticate", r.headers)
 
     def test_expired_token_rejected(self):
         expired = make_dev_token("alice", ttl_seconds=-10)

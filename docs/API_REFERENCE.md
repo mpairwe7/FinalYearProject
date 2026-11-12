@@ -16,6 +16,19 @@ The API is open for chat and classification endpoints. The indexing endpoint req
 Authorization: Bearer <INDEX_API_KEY>
 ```
 
+Staff endpoints (`/v1/admin/*`) need a staff sign-in: a bearer token whose role is
+`ura_staff`, `ura_admin` or `ura_auditor`. When `INDEX_API_KEY` is set, it also opens
+most of them as a break-glass path. It does not open the call desk's actions (claim,
+release, hold, end, transfer, wrap-up, callback done, review) or an officer's own
+presence: those need an officer's sign-in (`ura_staff`) and answer **403** to the key.
+
+- **401:** a request with no login, with or without the key. A bad or expired token gets
+  401 anywhere in the API. Every 401 carries `WWW-Authenticate: Bearer`.
+- **403:** a signed-in user without a staff role, or an auditor on an endpoint that
+  changes a case.
+- **503:** the operator-only endpoints (`/v1/index`, `/v1/evaluate`,
+  `/v1/export/artifacts`) take only the key, and answer 503 when it is not set.
+
 Session tracking uses the `X-Session-ID` header (optional, client-provided). For a
 signed-out taxpayer it is also what binds a conversation's history, attachments and
 escalation transcript to them: a conversation id alone never unlocks history. The web
