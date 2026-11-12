@@ -138,6 +138,30 @@ def _ask_call_process(timeout: float) -> str:
     return value if isinstance(value, str) else CALLS_NOT_READY
 
 
+def refresh_call_process_gauge(status: str | None = None) -> int:
+    """Set ``receptionist_call_process_up`` from what the call process says; return it (G614).
+
+    0 when the call process does not answer or answers with nothing usable
+    (:data:`CALLS_NOT_ANSWERING`, :data:`CALLS_NOT_READY`, matched whole); 1 for
+    anything it says itself, including its own ``unavailable: <why>``, which
+    ``receptionist_available`` reports. Without this the Space could lose the
+    call process and keep answering chat, ``/health`` and ``/ready`` while every
+    call failed.
+
+    Written only by the chat process: a call process would be asking itself.
+    Callers hold that rule. *status* is a ``calls_process_status()`` answer
+    already in hand (``/ready`` reports it too); without one this asks, and may
+    block for up to :data:`CALLS_STATUS_TIMEOUT_S`, so the event loop must call
+    it through ``asyncio.to_thread``. The value is the lowest of the live
+    workers', so one that cannot reach the call process is not hidden by another.
+    """
+    if status is None:
+        status = calls_process_status()
+    value = 0 if status in (CALLS_NOT_ANSWERING, CALLS_NOT_READY) else 1
+    metrics.set_gauge_min("receptionist_call_process_up", float(value))
+    return value
+
+
 #: The ways a call request can reach the chat process: the ASGI scope types,
 #: and the ``kind`` label values.
 MISROUTED_KINDS: tuple[str, ...] = ("http", "websocket")

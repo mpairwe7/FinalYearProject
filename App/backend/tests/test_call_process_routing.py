@@ -317,8 +317,8 @@ class _Recorder(logging.Handler):
 def _lifespan(role: str):
     """Run the app's lifespan in *role* with the flag on.
 
-    Returns the receptionist hooks it called and the messages the app logged
-    while it ran.
+    Returns the receptionist hooks it called, the messages the app logged
+    while it ran, and the chat role's call-process gauge refresh (G614).
     """
     import app.main
     from app import receptionist
@@ -334,6 +334,8 @@ def _lifespan(role: str):
             _env(URA_PROCESS_ROLE=role, FLAG_VOICE_RECEPTIONIST="true"),
             patch.object(receptionist, "start") as start,
             patch.object(receptionist, "refresh_gauge", side_effect=gauge_refreshed.set) as refresh,
+            # The chat role's own loop (G614) would ask 127.0.0.1:8082: keep it off the network.
+            patch.object(app.main, "refresh_call_process_gauge") as call_process_refresh,
             TestClient(app.main.app),
         ):
             # The gauge loop is a task on the app's own loop: give it its first turn.
@@ -341,7 +343,7 @@ def _lifespan(role: str):
     finally:
         app_logger.removeHandler(recorder)
         app_logger.setLevel(level)
-    return start, refresh, recorder.messages
+    return start, refresh, recorder.messages, call_process_refresh
 
 
 class ChatRoleStartupTests(unittest.TestCase):
@@ -350,9 +352,9 @@ class ChatRoleStartupTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         # One lifespan per role (each loads the app), read by the tests below.
-        cls.chat_start, cls.chat_refresh, cls.chat_log = _lifespan("chat")
-        cls.calls_start, cls.calls_refresh, cls.calls_log = _lifespan("calls")
-        cls.unset_start, cls.unset_refresh, cls.unset_log = _lifespan("")
+        cls.chat_start, cls.chat_refresh, cls.chat_log, cls.chat_call_process = _lifespan("chat")
+        cls.calls_start, cls.calls_refresh, cls.calls_log, cls.calls_call_process = _lifespan("calls")
+        cls.unset_start, cls.unset_refresh, cls.unset_log, cls.unset_call_process = _lifespan("")
 
     def setUp(self) -> None:
         process_role._reset_status_cache()
@@ -381,6 +383,13 @@ class ChatRoleStartupTests(unittest.TestCase):
     def test_the_chat_process_leaves_the_availability_gauge_alone(self) -> None:
         self.chat_refresh.assert_not_called()
         self.calls_refresh.assert_called()
+
+    def test_only_the_chat_process_keeps_the_call_process_gauge_current(self) -> None:
+        # Whether the call process answers is for the chat process to say (G614):
+        # in the call process, or with no role, the answer would be itself.
+        self.chat_call_process.assert_called()
+        self.calls_call_process.assert_not_called()
+        self.unset_call_process.assert_not_called()
 
     def test_a_scrape_of_the_chat_process_leaves_the_availability_gauge_alone(self) -> None:
         # The gauge is also refreshed at every /metrics scrape. This process never

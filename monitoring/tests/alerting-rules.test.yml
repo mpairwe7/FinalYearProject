@@ -497,3 +497,31 @@ tests:
       - eval_time: 20m
         alertname: UraCallMisrouted
         exp_alerts: []
+
+  # The chat process cannot reach the call process for ten minutes: every call
+  # fails while chat, /health and /ready keep answering (G614).
+  - interval: 1m
+    input_series:
+      - series: 'ura_receptionist_call_process_up'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: UraCallProcessDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: backend
+            exp_annotations:
+              summary: "The call process is not answering"
+              description: "The chat process cannot reach the call process's /ready, or gets no usable answer from it, so every call fails while chat keeps answering (G614, ADR-0043)."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#call-receptionist"
+
+  # A call process that answers is not an incident.
+  - interval: 1m
+    input_series:
+      - series: 'ura_receptionist_call_process_up'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: UraCallProcessDown
+        exp_alerts: []

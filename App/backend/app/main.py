@@ -136,7 +136,12 @@ from .speech_service import (
 from .workflows.registry import WorkflowRegistry
 
 from .logging_config import REQUEST_ID, install_logging
-from .process_role import ProcessRoleMiddleware, calls_process_status, process_role
+from .process_role import (
+    ProcessRoleMiddleware,
+    calls_process_status,
+    process_role,
+    refresh_call_process_gauge,
+)
 
 logger = logging.getLogger(__name__)
 # One structured handler on the root logger: the API's, uvicorn's and every
@@ -180,6 +185,9 @@ def _flag_sync_interval_seconds() -> float:
 
 
 _FLAG_SYNC_INTERVAL_SECONDS = _flag_sync_interval_seconds()
+# How often the chat process re-asks whether the call process answers, so
+# ``ura_receptionist_call_process_up`` follows it between /ready probes (G614).
+_CALL_PROCESS_GAUGE_INTERVAL_SECONDS = 30.0
 # How often the audit ledger's new rows are sealed (Merkle root + chain head).
 # 0 turns the schedule off; sealing on demand from /admin/audit still works.
 _AUDIT_SEAL_INTERVAL_SECONDS = max(0, int(os.getenv("AUDIT_SEAL_INTERVAL_SECONDS", "3600")))
@@ -582,6 +590,25 @@ async def _flag_sync_loop(stop: asyncio.Event, interval: float) -> None:
             return
 
 
+async def _call_process_gauge_loop(stop: asyncio.Event, interval: float) -> None:
+    """Keep ``receptionist_call_process_up`` current in the chat process (G614, ADR-0045).
+
+    The ask is a blocking ``httpx.get`` (1 s timeout, 10 s cache), so it runs on
+    a worker thread. A failed refresh is logged and tried again next round.
+    """
+    while True:
+        try:
+            await asyncio.to_thread(refresh_call_process_gauge)
+        except Exception:  # noqa: BLE001 - a metric never stops the loop
+            logger.warning("Could not refresh receptionist_call_process_up", exc_info=True)
+        try:
+            async with asyncio.timeout(interval):
+                await stop.wait()
+            return
+        except TimeoutError:
+            continue
+
+
 def _initialize_analytics_database() -> None:
     """Initialize persistence, failing closed when production storage is unavailable.
 
@@ -974,11 +1001,21 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 return
 
-    # The chat process does not set the gauge: its alert reflects the process
-    # that takes calls (G306).
+    # The chat process does not set `receptionist_available`: its alert reflects
+    # the process that takes calls (G306).
     gauge_task = (
         asyncio.create_task(_receptionist_gauge_loop(), name="receptionist-gauge")
         if process_role() != "chat"
+        else None
+    )
+    # The chat process does set one gauge, and only the chat process: whether
+    # the call process answers (G614). It is the one that can see it die.
+    call_process_gauge_task = (
+        asyncio.create_task(
+            _call_process_gauge_loop(retention_stop, _CALL_PROCESS_GAUGE_INTERVAL_SECONDS),
+            name="call-process-gauge",
+        )
+        if process_role() == "chat"
         else None
     )
     # Every process, either role: a console flag change reaches all of them (G612).
@@ -996,7 +1033,14 @@ async def lifespan(app: FastAPI):
             from .receptionist.serializer import drain_checkpoints
 
             await drain_checkpoints(timeout=5.0)
-        for task in (retention_task, seal_task, eval_task, gauge_task, flag_sync_task):
+        for task in (
+            retention_task,
+            seal_task,
+            eval_task,
+            gauge_task,
+            call_process_gauge_task,
+            flag_sync_task,
+        ):
             if task is None:
                 continue
             task.cancel()
@@ -1398,8 +1442,12 @@ def _receptionist_status() -> str:
     try:
         if process_role() == "chat":
             # This process never starts the receptionist; the call process's
-            # own value is the answer (G306).
-            return calls_process_status()
+            # own value is the answer (G306). The same answer sets
+            # `receptionist_call_process_up` (G614), so /ready and the gauge
+            # cannot disagree.
+            status = calls_process_status()
+            refresh_call_process_gauge(status)
+            return status
         from . import receptionist
 
         return receptionist.status()
