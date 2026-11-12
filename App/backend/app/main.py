@@ -23,12 +23,14 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Path, Query, Request, Response, status
+from fastapi.exception_handlers import http_exception_handler as _fastapi_http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sse_starlette.sse import EventSourceResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.websockets import WebSocket
 
@@ -1006,6 +1008,25 @@ try:
 except Exception:
     logger.warning("OpenTelemetry tracing init skipped", exc_info=True)
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+async def _http_exception_with_challenge(request: Request, exc: StarletteHTTPException):
+    """Give every 401 a ``WWW-Authenticate: Bearer`` challenge (RFC 9110 §15.5.2).
+
+    The API's 401s (no login, a bad or expired token) had none, so a client
+    could not tell which scheme would work. A 401 that names its own challenge
+    keeps it; every other status, and the rest of the response, is FastAPI's
+    default. Any other response that is a 401 (MCP's ``wire.py``) builds its own
+    challenge and does not come through here.
+    """
+    if exc.status_code == 401 and not any(k.lower() == "www-authenticate" for k in (exc.headers or {})):
+        exc = StarletteHTTPException(
+            exc.status_code, detail=exc.detail, headers={**(exc.headers or {}), "WWW-Authenticate": "Bearer"}
+        )
+    return await _fastapi_http_exception_handler(request, exc)
+
+
+app.add_exception_handler(StarletteHTTPException, _http_exception_with_challenge)
 
 
 # ---------------------------------------------------------------------------
