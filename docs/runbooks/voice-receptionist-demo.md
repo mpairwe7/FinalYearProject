@@ -8,8 +8,8 @@ ClarifyGate terminology disambiguation, and staff takeover.
 
 Phase 5 of [the 11 November review](../plans/receptionist-assurance-2026-11-11.md).
 In this image, officer handoffs and live call transcripts no longer depend on
-which worker answers (deployment to the Space is pending; the probes below are
-the check). What an operator needs to know:
+which worker answers (on the Space since 2026-11-12, `sha-4609a1c`; run the
+probes below after every roll). What an operator needs to know:
 
 - **The container runs two API programs, one per role.** supervisord starts
   both through `uvicorn-role.sh` (`App/deploy/cranecloud/`):
