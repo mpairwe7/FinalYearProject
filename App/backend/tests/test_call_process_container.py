@@ -377,6 +377,22 @@ class SupervisordTests(unittest.TestCase):
 
 
 class NginxTests(unittest.TestCase):
+    def test_only_a_websocket_upgrade_reaches_the_api(self):
+        """Any other Upgrade value (h2c above all) is dropped, so it cannot open an
+        unproxied channel to a backend (Semgrep possible-nginx-h2c-smuggling)."""
+        text = NGINX_CONF.read_text(encoding="utf-8")
+        self.assertNotIn("proxy_set_header Upgrade $http_upgrade;", text)
+        websocket_map = re.search(r"map \$http_upgrade \$websocket_upgrade \{(.*?)\}", text, re.S)
+        self.assertIsNotNone(websocket_map, "no map from $http_upgrade to $websocket_upgrade")
+        entries = [" ".join(line.split("#")[0].split()) for line in websocket_map.group(1).splitlines()]
+        entries = [e for e in entries if e]
+        self.assertEqual(sorted(entries), sorted(["~*^websocket$ websocket;", 'default "";']))
+        connection_map = re.search(r"map \$websocket_upgrade \$connection_upgrade \{(.*?)\}", text, re.S)
+        self.assertIsNotNone(connection_map, "no map from $websocket_upgrade to $connection_upgrade")
+        entries = [" ".join(line.split("#")[0].split()) for line in connection_map.group(1).splitlines()]
+        entries = [e for e in entries if e]
+        self.assertEqual(sorted(entries), sorted(["websocket upgrade;", "default close;"]))
+
     def test_nginx_sends_every_call_path_to_the_call_process(self) -> None:
         text = _nginx_text()
         calls_upstream = _upstream(text, "calls")
@@ -404,7 +420,7 @@ class NginxTests(unittest.TestCase):
         for directive in (
             "proxy_pass http://calls;",
             "rewrite ^/api/(.*)$ /$1 break;",
-            "proxy_set_header Upgrade $http_upgrade;",
+            "proxy_set_header Upgrade $websocket_upgrade;",
             "proxy_set_header Connection $connection_upgrade;",
             "proxy_read_timeout 3600s;",
             "proxy_send_timeout 3600s;",

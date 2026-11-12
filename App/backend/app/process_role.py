@@ -65,7 +65,7 @@ def process_role() -> str:
     if raw not in _LOGGED_INVALID_ROLES:
         _LOGGED_INVALID_ROLES.add(raw)
         logger.error(
-            "%s=%r is not a process role (expected 'calls' or 'chat'); treating it as unset",
+            "%s=%r is not a process role (expected 'calls' or 'chat'); it counts as unset",
             ROLE_ENV,
             raw,
         )
