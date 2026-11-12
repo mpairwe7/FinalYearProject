@@ -620,7 +620,7 @@ Reviewed on branch `fix/receptionist-assurance-2026-10-30`; [evidence, sources a
 
 ### Call receptionist assurance — 2026-11-11
 
-A review of the whole call flow: what the AI says, the handoff, the officer's desk, both browser clients, startup and readiness. [Evidence, sources and phases](plans/receptionist-assurance-2026-11-11.md); decisions in ADR-0039. Fixed means implemented with a regression test that failed first; nothing here was exercised on a real microphone, SFU or speech backend, and production deployment is pending. G612 and G613 were opened on 2026-11-12 by phase 5 (ADR-0043).
+A review of the whole call flow: what the AI says, the handoff, the officer's desk, both browser clients, startup and readiness. [Evidence, sources and phases](plans/receptionist-assurance-2026-11-11.md); decisions in ADR-0039. Fixed means implemented with a regression test that failed first; nothing here was exercised on a real microphone, SFU or speech backend, and production deployment is pending. G612 and G613 were opened on 2026-11-12 by phase 5 (ADR-0043). G615 was found and fixed on 2026-11-12 while checking phase 5 on the Space.
 
 | Gap | Finding | Status |
 | --- | --- | --- |
@@ -671,6 +671,7 @@ A review of the whole call flow: what the AI says, the handoff, the officer's de
 | G612 🟡 | An admin-API flag override (`PATCH /v1/admin/flags/{name}`) reaches only the process that answers it: the other process reads the stored row at its next start, and `GET /v1/admin/flags` shows only the answering process's registry (it was one worker of two before ADR-0043 as well). The calls kill switch, `voice_receptionist`, is such a flag: switched off from the console it can leave the call process taking calls. | Opened 2026-11-12 (ADR-0043). Mitigated by procedure: the calls kill switch is a `FLAG_VOICE_RECEPTIONIST` Space secret, which restarts the Space and reaches both processes (runbook: voice receptionist). A stored override beats the secret at start, so the runbook sets the secret first, reads `/ready` (the call process's own value, whichever process answers) and, if calls are still on, deletes the stored `voice_receptionist` override and restarts the Space. Open: platform owner; a registry that every process re-reads from the stored rows would close it. |
 | G613 ⚪ | More than one replica (or a second call process) would split calls across processes that cannot see each other: a call's room, desk lock, claim timer, event hub and audio bridge live in one process's memory, and only nginx's single `calls` upstream sends an officer's request to the process that holds the call. | Opened 2026-11-12 (ADR-0043). The Space is one container and is not affected. Open: SRE and backend owners; durable ownership of a call (state and an event hub every process can reach), and process-loss and drain drills, before any scale-out. This is the remaining part of G306. |
 | G614 🟡 | On the Space, no metrics alert notices a dead call process. The Prometheus in `monitoring/` scrapes the compose stack, not the Space; `UraApiDown` (`up{job="ura-api"} == 0`) is satisfied by either process answering; and `receptionist_available` goes stale or absent when only the call process is down, so `UraReceptionistUnavailable` does not fire for it. A call process that is dead or crash-looping leaves `/health`, chat and `/ready` answering, and every call fails. | Opened 2026-11-12 (ADR-0043). Mitigated 2026-11-12: the roll workflow's "Confirm the app answers" step polls `/ready` for about 5 minutes and fails the roll while `capabilities.voice_receptionist` reads `unavailable: the call process …`, and the hourly keepalive workflow checks the same (3 tries) and turns its run red. Open: a chat-role gauge exported from the cached call-process status (`app/process_role.py`, `calls_process_status()`) plus an alert, once the Space is scraped. |
+| G615 🟢 | ~~A request with no login to a staff endpoint (`require_admin_access`: tickets, flags, calls, quality, connectors) got 503 "admin endpoint unavailable: configure OIDC staff auth or INDEX_API_KEY" whenever `INDEX_API_KEY` was unset, although a staff sign-in opens those endpoints. On the Space (OIDC configured, no operator key) every unauthenticated probe looked like an outage, and the runbook's "401 or 403" for its call-path probe was wrong.~~ | Fixed 2026-11-12 (`require_admin_access` in `main.py`): no login is 401 "authentication required" whether or not the key is set; a signed-in user without a staff role is still 403. The operator-only endpoints (`/v1/index`, `/v1/evaluate`, `/v1/export/artifacts`) still answer 503 without the key, because nothing else opens them. Regression: `test_a_staff_endpoint_without_a_login_is_401_with_or_without_the_ops_key`. |
 
 ### Planner and live web assurance — 2026-10-31
 
@@ -1356,7 +1357,9 @@ full agent chain is locked.
 
 ---
 
-*Document version 3.18 — updated 2026-11-12: G306 mitigated for one container and G612, G613 and G614 opened by phase 5 of the call receptionist review (ADR-0043).*
+*Document version 3.19 — updated 2026-11-12: G615 fixed (a staff endpoint without a login is 401, not 503).*
+
+*Previously: version 3.18 — updated 2026-11-12: G306 mitigated for one container and G612, G613 and G614 opened by phase 5 of the call receptionist review (ADR-0043).*
 
 *Previously: version 3.17 — updated 2026-11-11: G601–G606, G608, G609 and G611 closed and G607 and G610 mitigated by phase 4 of the call receptionist review (ADR-0042).*
 

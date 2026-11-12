@@ -2841,18 +2841,18 @@ def require_admin_access(
     Ticket triage endpoints should not be public. During OIDC rollout we
     still allow the existing operator key as a break-glass path, but only
     when it is explicitly configured.
+
+    A request with no login is a 401 whether or not that key is set: a staff
+    sign-in opens these endpoints either way. Without the key it used to be a
+    503 "configure OIDC staff auth or INDEX_API_KEY", which on the Space (OIDC
+    configured, no key) told a prober the endpoint was down (2026-11-12).
     """
     if _has_valid_ops_key(request):
         return AuthContext()
 
     ctx = current_user(request, request.headers.get("Authorization"))
     if not ctx.is_authenticated:
-        if _INDEX_API_KEY:
-            raise HTTPException(status_code=401, detail="authentication required")
-        raise HTTPException(
-            status_code=503,
-            detail="admin endpoint unavailable: configure OIDC staff auth or INDEX_API_KEY",
-        )
+        raise HTTPException(status_code=401, detail="authentication required")
     if ctx.user and ctx.user.is_staff:
         return ctx
     raise HTTPException(status_code=403, detail="staff role required")

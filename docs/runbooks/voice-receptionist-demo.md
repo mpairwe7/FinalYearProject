@@ -122,7 +122,8 @@ restart the Space.
    ```
 
    Every line must read `x-ura-process: calls` (the status behind it is the
-   app's own: 401 or 403 without a login, never 421). `NO HEADER` comes with
+   app's own: 401 without a login, never 421; before G615 it was 503 when
+   `INDEX_API_KEY` was unset). `NO HEADER` comes with
    three causes; print the status (`curl -sS -o /dev/null -w '%{http_code}\n'`)
    to tell them apart: a 502 means the call process is down or restarting
    (nginx answered for it; see the troubleshooting row and `/ready`); a 500 is
