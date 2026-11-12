@@ -235,7 +235,15 @@ the sealed statement was rejected.
 
 ## Storage permissions
 
-The ledger lives in the analytics database under `ANALYTICS_DB_DIR`. If that
+The ledger lives in the analytics database under `ANALYTICS_DB_DIR`.
+
+On the Hugging Face Space that database is `/app/data_store/analytics.db`, on
+the container's own disk. The Space has no persistent storage, so every restart
+and every roll starts a new, empty ledger, with no seals. The chain and its
+verification cover only the time since the last start (G616). Do not treat the
+Space's trail as the record of anything before its last restart.
+
+If that
 directory or its files are world-writable, any local user can rewrite rows
 and seals together. The API exports `ura_storage_world_writable` (alert
 `StorageWorldWritable`) and logs a warning at startup; production refuses to
