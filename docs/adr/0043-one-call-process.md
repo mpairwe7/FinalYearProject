@@ -259,6 +259,11 @@ that touches the build paths: its roll moves the pin forward again automatically
   1013), one new counter, one new alert rule, one new environment variable
   (`URA_PROCESS_ROLE`) and one address variable (`URA_CALLS_PROCESS_URL`).
 
+- **The two processes start together on one SQLite file** (G617, fixed
+  2026-11-12). Switching a fresh file to WAL could fail with "database is
+  locked" in one of them, because SQLite does not wait out the busy timeout for
+  that switch. `database._enable_wal` now tries again for up to 10 s.
+
 ## Confirmation
 
 `App/backend/tests/test_call_process_routing.py`, each test failing before its
