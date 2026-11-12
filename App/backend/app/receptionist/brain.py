@@ -543,8 +543,9 @@ class _RunCancel:
     Set into the context the run starts in (:func:`resilience.set_turn_cancel`),
     so every stage boundary of ``generate`` sees it. True once the turn's task
     was cancelled (the caller talked over it, a new turn came, the answer ran
-    out of time) or the call moved on (``generation_id`` changed: the language
-    router bumps it without cancelling the task).
+    out of time) or the call moved on: ``generation_id`` changed (the language
+    router bumps it without cancelling the task), or the call left ``ai`` mode
+    (a transfer, a bridge or an end), when the answer would be thrown away.
     """
 
     def __init__(self, state: Any, generation_id: int) -> None:
@@ -556,7 +557,11 @@ class _RunCancel:
         self._cancelled.set()
 
     def is_set(self) -> bool:
-        return self._cancelled.is_set() or self._state.generation_id != self._generation_id
+        return (
+            self._cancelled.is_set()
+            or self._state.generation_id != self._generation_id
+            or getattr(self._state, "mode", "ai") != "ai"
+        )
 
 
 def _run_over(task: asyncio.Task[Any], slot: _GenerationSlot, cancel: _RunCancel) -> None:

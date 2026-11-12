@@ -66,7 +66,9 @@ How it works:
   - the run's task was cancelled (a done callback): a barge-in, a new turn, the
     25 s timeout;
   - the call's `generation_id` moved on. This covers the language router, which
-    moves it without cancelling the task.
+    moves it without cancelling the task;
+  - the call left `ai` mode: a transfer, a bridge or an end. The brain already
+    threw such an answer away; now the run stops too.
 - **Where it is checked** (the `stage` label):
   - `slot`: a step of a model run starting in its thread (`_GenerationSlot.run`).
     This also stops a Luganda answer between its steps.
@@ -104,9 +106,9 @@ How it works:
 - Work in a thread the pipeline starts without copying the context (the local
   dense retrieval leg, for one) does not see the token and runs to its end. The
   next stage boundary stops the run.
-- A turn whose call moves to an officer is not stopped by this: the token does
-  not read the call's mode. Its answer is dropped when it arrives, as before
-  (ADR-0040).
+- A turn whose call moves to an officer (a transfer, a bridge or an end) stops
+  at its next stage, because the token reads the call's mode. Its answer would
+  have been dropped anyway (ADR-0040).
 - A stopped run keeps what stages it finished had written, such as the turn's
   case facts. A run dropped after it completed kept all of it.
 - **The chat path is unchanged.** It sets no token. `trace_stage` and the model
@@ -148,6 +150,7 @@ with only the token in place. The tests cover:
     slot, and nobody hears an apology;
   - a language switch through the real router stops the run it made stale, and
     the turn is recorded `cancelled`;
+  - a call moved to an officer mid-run stops the AI's run;
   - a turn that ran out of time stops its run;
   - a superseded Luganda turn does not start its next step.
 

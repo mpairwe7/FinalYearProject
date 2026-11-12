@@ -454,14 +454,14 @@ class BrainTests(unittest.IsolatedAsyncioTestCase):
             if c.args[0].__class__.__name__ == "LLMTextFrame"
         ]
 
-    def assert_no_apology(self) -> None:
+    def assert_no_apology(self, *, mode: str = "ai") -> None:
         from app.receptionist.phrases import phrase
 
         spoken = " ".join(self.voiced())
         for language in {"en", self.state.locale or "en"}:
             for key in ("error_transfer", "timeout_transfer"):
                 self.assertNotIn(phrase(key, language), spoken)
-        self.assertEqual(self.state.mode, "ai")
+        self.assertEqual(self.state.mode, mode)
 
     def dispositions(self) -> list[str]:
         return [
@@ -523,6 +523,20 @@ class BrainTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(len(self.run.stages("registration")), len(STAGES), "the stale run went on to the end")
         self.assertEqual(self.dispositions(), ["cancelled"])
         self.assert_no_apology()
+
+    async def test_a_call_moved_to_an_officer_stops_the_ai_run(self):
+        # A transfer, a bridge or an end leaves "ai" mode without bumping
+        # generation_id or cancelling the task: the answer would be thrown
+        # away, so the run stops at its next stage too.
+        turn = asyncio.create_task(self.hear("How do I register for a TIN?"))
+        await self.until(lambda: self.run.stages("registration"))
+        self.room.state.mode = "transferring"
+        await turn
+        await self.runs_over()
+
+        self.assertLess(len(self.run.stages("registration")), len(STAGES), "the run went on after the transfer")
+        # No failure transfer of its own: the call stays where the transfer put it.
+        self.assert_no_apology(mode="transferring")
 
     async def test_a_turn_that_ran_out_of_time_stops_its_run(self):
         with (
