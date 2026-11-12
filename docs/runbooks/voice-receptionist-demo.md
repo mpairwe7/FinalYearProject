@@ -80,16 +80,25 @@ calls are never switched on by the change itself:
 
 1. Set the secret to `false`. The Space restarts, and each process starts with
    the stored override if there is one, otherwise with `false`.
-2. When the Space is back, read `/ready`. `off`: the switch took; stop here.
-   `ready`: a stored `true` override won, and calls are still on.
+2. When the Space is back, read `/ready`. The call process reports `off`
+   whenever its flag is off, so:
+   - `off`: the switch took; stop here.
+   - `ready`: a stored `true` override won, and calls are still on. Go to step 3.
+   - `unavailable: <why>`: a stored `true` override won, but the call process
+     could not start the receptionist. It takes no calls now, but the override
+     stays and a later restart can switch calls on. Go to step 3.
+   - `unavailable: the call process is not answering` or `… is not ready`: the
+     chat process answered and could not read the call process. Its state is
+     unknown; read `/ready` again in a minute.
 3. Delete the stored override (`DELETE /v1/admin/flags/voice_receptionist`,
    `ura_admin`). The row is removed whichever process answers. The call process
    keeps the value it started with, so calls stay on until step 4.
 4. Restart the Space (`hf spaces restart landwind22/ura-chatbot`) and read
    `/ready` again. The call process starts with no override and reads `false`.
-   The switch has taken only when `/ready` says `off`; while it says `ready`,
-   calls are on. If it still says `ready`, check the secret's name and value
-   and whether someone set the override again.
+   The switch has taken only when `/ready` says `off`. While it says `ready`,
+   calls are on. If it says anything other than `off` once the call process
+   answers, check the secret's name and value and whether someone set the
+   override again.
 
 The 1001 close and the `off` field show whether the switch took (the ADR-0042
 update below).
