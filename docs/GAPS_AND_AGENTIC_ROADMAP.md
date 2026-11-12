@@ -670,6 +670,7 @@ A review of the whole call flow: what the AI says, the handoff, the officer's de
 | G611 🟢 | ~~"Mark done" on a callback, and the call review form, fail silently.~~ | Fixed 2026-11-11 (ADR-0042): both show the failure. |
 | G612 🟡 | An admin-API flag override (`PATCH /v1/admin/flags/{name}`) reaches only the process that answers it: the other process reads the stored row at its next start, and `GET /v1/admin/flags` shows only the answering process's registry (it was one worker of two before ADR-0043 as well). The calls kill switch, `voice_receptionist`, is such a flag: switched off from the console it can leave the call process taking calls. | Opened 2026-11-12 (ADR-0043). Mitigated by procedure: the calls kill switch is a `FLAG_VOICE_RECEPTIONIST` Space secret, which restarts the Space and reaches both processes (runbook: voice receptionist). A stored override beats the secret at start, so a stored `voice_receptionist` override is deleted first. Open: platform owner; a registry that every process re-reads from the stored rows would close it. |
 | G613 ⚪ | More than one replica (or a second call process) would split calls across processes that cannot see each other: a call's room, desk lock, claim timer, event hub and audio bridge live in one process's memory, and only nginx's single `calls` upstream sends an officer's request to the process that holds the call. | Opened 2026-11-12 (ADR-0043). The Space is one container and is not affected. Open: SRE and backend owners; durable ownership of a call (state and an event hub every process can reach), and process-loss and drain drills, before any scale-out. This is the remaining part of G306. |
+| G614 🟡 | On the Space, no metrics alert notices a dead call process. The Prometheus in `monitoring/` scrapes the compose stack, not the Space; `UraApiDown` (`up{job="ura-api"} == 0`) is satisfied by either process answering; and `receptionist_available` goes stale or absent when only the call process is down, so `UraReceptionistUnavailable` does not fire for it. A call process that is dead or crash-looping leaves `/health`, chat and `/ready` answering, and every call fails. | Opened 2026-11-12 (ADR-0043). Mitigated 2026-11-12: the roll workflow's "Confirm the app answers" step polls `/ready` for about 5 minutes and fails the roll while `capabilities.voice_receptionist` reads `unavailable: the call process …`, and the hourly keepalive workflow checks the same (3 tries) and turns its run red. Open: a chat-role gauge exported from the cached call-process status (`app/process_role.py`, `calls_process_status()`) plus an alert, once the Space is scraped. |
 
 ### Planner and live web assurance — 2026-10-31
 
@@ -1355,7 +1356,7 @@ full agent chain is locked.
 
 ---
 
-*Document version 3.18 — updated 2026-11-12: G306 mitigated for one container and G612 and G613 opened by phase 5 of the call receptionist review (ADR-0043).*
+*Document version 3.18 — updated 2026-11-12: G306 mitigated for one container and G612, G613 and G614 opened by phase 5 of the call receptionist review (ADR-0043).*
 
 *Previously: version 3.17 — updated 2026-11-11: G601–G606, G608, G609 and G611 closed and G607 and G610 mitigated by phase 4 of the call receptionist review (ADR-0042).*
 

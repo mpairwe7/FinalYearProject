@@ -5,10 +5,13 @@
 # leave the Space paused until someone notices. This workflow, every hour:
 #   1. checks the Space runtime stage via the HF API and restarts it when it
 #      is paused / sleeping / errored (requires the HF_TOKEN repo secret);
-#   2. pings /v1/speech/health so the Space always sees recent traffic.
+#   2. pings /v1/speech/health so the Space always sees recent traffic;
+#   3. checks /ready: the call process is a second program that the ping does
+#      not cover (ADR-0043, G614), so a dead one turns the run red.
 #
 # A restart takes ~2 min to come back; this job reports the stage it saw and
-# only fails when the HF API itself rejects us (bad/expired token).
+# only fails when the HF API itself rejects us (bad/expired token) or /ready
+# says the call process is down.
 # =============================================================================
 name: "HF Space — keepalive"
 
@@ -66,3 +69,38 @@ jobs:
             sleep 45
           done
           echo "Health ping did not reach 200 (Space may still be booting after a restart)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check the call process is up
+        run: |
+          set -uo pipefail
+          # /v1/speech/health is answered by the chat process alone. The call
+          # process is a second uvicorn program (ADR-0043); when it has died the
+          # chat process's /ready says so in capabilities.voice_receptionist
+          # ("unavailable: the call process is not answering" / "... is not
+          # ready"). Nothing else notices (G614), so this turns the hourly run red.
+          # A few attempts ride out a restart; any other value passes, "off"
+          # included. No reading at all (the Space is asleep or booting) is not
+          # this step's failure; the ping above notes it in the summary.
+          CALLS_DOWN=""
+          for attempt in 1 2 3; do
+            # jq fails on a body that is not JSON; a missing field reads as empty.
+            READY=$(curl -sS --max-time 45 "$SPACE_URL/ready" 2>/dev/null \
+              | jq -r '(.capabilities.voice_receptionist? // "") | tostring' 2>/dev/null) \
+              || READY="<no answer>"
+            echo "Ready attempt ${attempt}: voice_receptionist → ${READY:-<not reported>}"
+            case "$READY" in
+              "unavailable: the call process"*) CALLS_DOWN="$READY" ;;
+              "<no answer>") ;;
+              *)
+                echo "Call process OK (voice_receptionist: ${READY:-not reported})" >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+                ;;
+            esac
+            [ "$attempt" -lt 3 ] && sleep 20
+          done
+          if [ -n "$CALLS_DOWN" ]; then
+            echo "::error::The call process is down: /ready reported '${CALLS_DOWN}' and never a working call process in 3 attempts (supervisord's uvicorn-calls program is dead or crash-looping; check the Space logs)."
+            echo "Call process DOWN: ${CALLS_DOWN}" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "/ready gave no reading; call process not checked" >> "$GITHUB_STEP_SUMMARY"

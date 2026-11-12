@@ -495,6 +495,15 @@ and `TurnsHittingDeadline`. See the [fault tolerance runbook](runbooks/agent-fau
    `misrouted … request for … reached the chat process`, and the quoted path is
    the one that drifted.
 
+7. **A dead call process on the Space has no metrics alert (G614).** The
+   Prometheus here scrapes the compose stack, not the Space; `UraApiDown` is
+   satisfied by either process; `receptionist_available` goes stale or absent when
+   only the call process is down. Until a chat-role gauge from the cached
+   call-process status and an alert exist, the roll workflow and the hourly
+   keepalive workflow check `/ready`: `capabilities.voice_receptionist` reading
+   `unavailable: the call process …` fails the roll, or turns the keepalive red
+   (ADR-0043).
+
 See the [receptionist runbook](runbooks/voice-receptionist-demo.md).
 
 ### Dependencies

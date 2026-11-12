@@ -218,6 +218,13 @@ image runs one two-worker uvicorn and needs nothing from this change.
   `UVICORN_WORKERS=1` for it and leaves the other two alone; a Space secret that
   sets either to another value makes the declaration false, and the start ends
   only rows older than a call may last.
+- **No metrics alert notices a dead call process on the Space (G614).** The
+  Prometheus in `monitoring/` scrapes the compose stack, not the Space;
+  `UraApiDown` is satisfied by either process; `receptionist_available` goes stale
+  or absent when only the call process is down. Mitigated 2026-11-12 by the roll
+  workflow (it fails while `/ready` reports the call process down) and the hourly
+  keepalive check. Open: a chat-role gauge exported from the cached call-process
+  status plus an alert, when the Space is scraped.
 - **More than one replica is still not supported (G613).** Call ownership is in
   one process's memory, so a second replica would split calls across processes
   that cannot see each other. G306's remaining open part (durable ownership,
