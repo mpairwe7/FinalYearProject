@@ -244,7 +244,7 @@ class AssuranceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(livekit._is_participant_absent_error(NotFoundError("participant does not exist")))
         self.assertFalse(livekit._is_participant_absent_error(RuntimeError("service unavailable")))
 
-    async def test_caller_hangup_during_revocation_still_restores_officer_presence(self):
+    async def test_caller_hangup_during_revocation_leaves_the_officer_owing_the_wrap_up(self):
         room = self.room()
 
         async def revoke_and_hangup(r, _ident):
@@ -254,9 +254,13 @@ class AssuranceTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(desk, "revoke_media", revoke_and_hangup),
             patch.object(desk.presence, "finish_wrap_up") as finish_wrap,
+            patch.object(desk.presence, "owe_wrap_up") as owe_wrap,
         ):
             await desk._expire_reconnect_grace(room, "old-officer", 0)
-        finish_wrap.assert_called_once_with("old-officer")
+        # The call ended while it was still theirs: they owe its wrap-up, and
+        # are not marked available (G610, ADR-0045).
+        owe_wrap.assert_called_once_with("old-officer", "call_assurance")
+        finish_wrap.assert_not_called()
         self.assertIsNone(room.state.reconnecting_officer)
 
     async def test_caller_hangup_on_bridged_call_moves_officer_to_wrap_up(self):
@@ -274,13 +278,14 @@ class AssuranceTests(unittest.IsolatedAsyncioTestCase):
             patch.object(ws, "record_call_end_metrics"),
             patch.object(ws, "log_voice_event"),
             patch.object(ws.hub, "publish_lobby"),
-            patch.object(ws.desk.presence, "set_wrap_up") as set_wrap,
+            patch.object(ws.desk.presence, "owe_wrap_up") as owe_wrap,
             patch.object(ws.desk, "_save_draft_wrapup", AsyncMock()),
             patch.object(ws.asyncio, "to_thread", AsyncMock()),
         ):
             await ws._finish_call(room)
             await asyncio.sleep(0)
-        set_wrap.assert_called_once_with("officer-active", call_id="call_assurance")
+        # Conditional since ADR-0045: only while their presence is still this call's.
+        owe_wrap.assert_called_once_with("officer-active", "call_assurance")
 
     async def test_wrapup_ticket_failure_does_not_commit_wrapup_before_ticket(self):
         from app import database as db

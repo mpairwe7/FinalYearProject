@@ -59,6 +59,13 @@ probes below after every roll). What an operator needs to know:
   sends `/ready` to either process; the field is the call process's state
   whichever answers (the call process reports its own, the chat process reads
   it), and `X-URA-Process` on the response says which one answered.
+  A dead call process leaves chat, `/health` and `/ready` answering, so the
+  chat process also exports it: `ura_receptionist_call_process_up` is 0 while
+  the call process does not answer or answers with nothing usable, and
+  `UraCallProcessDown` pages after 5 minutes at 0 (G614, ADR-0045). It fires
+  only where the API is scraped. Nothing scrapes the Space yet, so there the
+  roll workflow and the hourly keepalive workflow, which read the same `/ready`
+  field, are the signal.
 - **Every response names its process**: `X-URA-Process: chat` or
   `X-URA-Process: calls`. It is absent on Starlette's own 500 error responses
   and on a WebSocket closed before it was accepted (a foreign origin). Each
@@ -290,6 +297,26 @@ What an operator, an officer or an auditor will see differently:
   again. Staff sockets are capped per user (`STAFF_STREAMS_PER_USER` 8,
   `STAFF_AUDIO_PER_USER` 3, in `receptionist/ws.py`); over the cap the socket
   closes with 1013. A call has at most five listeners.
+- **A call socket limits what it takes in (G304, ADR-0045).** The officer's
+  audio socket and the caller's call socket drop a binary frame over 16 KiB,
+  an odd-length one (PCM16 needs whole samples; mu-law is exempt) and any frame
+  past 64 000 B/s with a 128 000 B burst, or 200 frames/s with a burst of 200;
+  the officer's text frames are held to 15 per 10 s. A browser sends 50 frames/s
+  and 32 KB/s, so a normal call never drops one. Each drop is counted in
+  `ura_receptionist_frames_dropped_total{side,reason}` and a flood is logged at
+  WARNING once. A socket that keeps dropping frames for 5 s is closed with 1008
+  `too many frames`; an officer's close then takes the reconnect grace like any
+  other. Set the byte rate with `RECEPTIONIST_AUDIO_BYTES_PER_S` (default 64000,
+  never below 32000).
+- **An officer owes the wrap-up of a call that ended under them (G610,
+  ADR-0045).** However the call ended (the caller, its time limit, a media
+  failure, during their reconnect grace) the officer who had it goes to
+  `wrap_up`, unless they already saved it or took another call. Until they save
+  it, a heartbeat asking for `available` keeps `wrap_up` and names the call
+  (`wrap_up_call_id`); the console then shows "Wrap-up pending · Finish
+  wrap-up", after a reload too. `busy`, `away` and `offline` still apply. This
+  covers calls that began in the last 24 hours, one at a time, newest first. An
+  officer stuck in `wrap_up` after a demo has an unsaved wrap-up: save it.
 - **The call summary no longer touches a ticket's SLA.** It adds its note only
   when the ticket has none and never stamps a first response.
 - **Retention on Postgres.** Resolved tickets are purged whether or not the
@@ -496,6 +523,7 @@ All switches and thresholds are configured via environment variables:
 | `CXP_CLOSED_DATES` | unset | `YYYY-MM-DD,…` with no shift (public holidays) |
 | `RECEPTIONIST_BRIEF_EVERY_TURNS` | `3` | Caller turns between rolling rebuilds of the officer's brief (always rebuilt on transfer) |
 | `RECEPTIONIST_CLAIM_TIMEOUT_S` | `20` | How long an officer's "Take call" holds the call before their audio must join |
+| `RECEPTIONIST_AUDIO_BYTES_PER_S` | `64000` | Audio a call socket (officer or caller) may carry, in bytes a second; the burst is two seconds' worth. A browser sends 32 000. Never below 32 000. Over it, frames are dropped; 5 s of drops closes the socket 1008 (ADR-0045) |
 | `RECEPTIONIST_MAX_CALL_S` | `900` | Hard ceiling for one call connection (15 minutes). A value that is set but not a positive number makes calls unavailable (and fails the G36 gate) instead of falling back |
 | `RECEPTIONIST_FILLER_AFTER_MS` | `450` | Latency threshold before playing filler token (pool of short tokens) |
 | `RECEPTIONIST_MEMORY_MIN_ASR_CONF` | `0.6` | A call turn heard below this mean word probability is answered but not written to long-term memory (a mishearing must not become a fact about the caller; needs `FLAG_MEMORY_ENABLED` and personalization consent to matter) |
@@ -1046,7 +1074,7 @@ check them, and have 3–5 Luganda speakers rate the Orpheus samples blind
 | Assistant cuts itself off mid-sentence | its own voice leaking from speaker to mic: `RECEPTIONIST_LOCAL_BARGE_IN=false`, or raise `RECEPTIONIST_BARGE_IN_MIN_S` |
 | A call or the officer console fails with HTTP 421, or a call socket closes 1013 after an `error` frame with `code: "unavailable"` (and calls are on) | A call request reached the chat process. The chat process logs `misrouted … request for '<path>' reached the chat process` and counts it in `ura_receptionist_misrouted_total`. `UraCallMisrouted` fires only where that counter is scraped: the Prometheus in `monitoring/` does not scrape the Space (G614), so there, read the log. Compare the path with `process_role.CALL_PATH_RE` and the call location in `App/deploy/cranecloud/nginx.conf` (`test_call_process_routing.py` keeps them equal); the call-path probe in the 2026-11-12 update at the top shows which process answers |
 | Call paths answer 502, and the console says live updates are paused | The call process (`uvicorn-calls`, 127.0.0.1:8082) is down or restarting. supervisord restarts it; chat is unaffected. Its calls ended; callers owed a callback are flagged `service_interrupted` |
-| `/ready` says `unavailable: the call process is not answering` | The chat process asked 8082 and got nothing within 1 s (the answer is kept for 10 s). A cold start of the call process is slow: it waits for Qdrant (up to `QDRANT_WAIT_SECONDS`, 90 s by default) and then loads its models, and a chat process that booted first reports this until the call process is up (within 10 s of it). Look at the `uvicorn-calls` log if it persists after the start has finished |
+| `/ready` says `unavailable: the call process is not answering` | The chat process asked 8082 and got nothing within 1 s (the answer is kept for 10 s). A cold start of the call process is slow: it waits for Qdrant (up to `QDRANT_WAIT_SECONDS`, 90 s by default) and then loads its models, and a chat process that booted first reports this until the call process is up (within 10 s of it). Look at the `uvicorn-calls` log if it persists after the start has finished. Where the API is scraped, `UraCallProcessDown` fires after 5 minutes of it (ADR-0045) |
 | Stale or unjoined call stuck in queue | In `/calls`, an officer (`ura_staff`; administrators are refused desk actions) can click **Terminate call** (`POST /v1/admin/calls/{call_id}/end`). It ends the call through `CallRoom.end()` — countdown cancelled, media room closed, pipeline stopped, row `ended` — releases queue locks (`end_reason="officer_terminated_waiting"` or `officer_terminated_stale`) and refreshes the live lobby board. Before G176 it answered 500 on a call whose officer had dropped off, and skipped that teardown. A row with no call room behind it is ended as stale only where no other process can be holding the call: one worker and one replica are declared, or the call began longer ago than a call may last. Declared means `VOICE_RECEPTIONIST_REPLICAS=1` and a worker count of 1 in every one of `WORKERS`, `UVICORN_WORKERS` and `WEB_CONCURRENCY` that is set, with at least one set. Under the supervisord image `UVICORN_WORKERS` defaults to 2, so `WORKERS=1` alone is not enough there. Otherwise, the button answers 409 "on another server process"; on a deployment that runs several workers, try again (the request may reach the worker that has the call) or wait for the call's time limit to pass |
 | No voice/speech heard in browser, or `The AudioContext encountered an error` in console | Fixed in G249 (`PR #650`): `PCMPlayer` (`App/frontend/src/services/pcmPlayer.ts`) guards initialization with a singleton `initPromise` and `pendingChunks` FIFO queue, expands `pcm-player-worklet.js` to a 60s circular buffer (`16000 * 60`), falls back to an inline `Blob` `AudioWorklet` (and scheduled `AudioBufferSourceNode` queue) when external worklet scripts return `text/html` behind ngrok/proxies (`blob:` permitted in `script-src`/`worker-src` in `next.config.mjs`), and `useCall.ts` separates `dialToneCtxRef` from `audioCtxRef` (`getToneContext()`) |
 | Multi-turn call conversation stalls after greeting/Turn 1 or repeats *"Excuse me, did you say vat?"* | Fixed in G249 (`PR #650`): `UraSpeechTTS` (`tts.py`) enables `push_start_frame=True` and `push_stop_frames=True` so `TTSStoppedFrame` immediately triggers `BotStoppedSpeakingFrame` without the 3.0s `BOT_VAD_STOP_FALLBACK_SECS` window; `ClarifyGate.assess` (`clarify.py`) skips exact lexicon matches (`cand_term == clean_target.lower()`) and context-repaired homophones; and `UraReceptionistBrain` (`brain.py`) supersedes open clarification when the caller asks a complete new question and strips written-chat follow-up footers in `_spoken_answer` |

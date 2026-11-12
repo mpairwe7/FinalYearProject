@@ -136,7 +136,12 @@ from .speech_service import (
 from .workflows.registry import WorkflowRegistry
 
 from .logging_config import REQUEST_ID, install_logging
-from .process_role import ProcessRoleMiddleware, calls_process_status, process_role
+from .process_role import (
+    ProcessRoleMiddleware,
+    calls_process_status,
+    process_role,
+    refresh_call_process_gauge,
+)
 
 logger = logging.getLogger(__name__)
 # One structured handler on the root logger: the API's, uvicorn's and every
@@ -180,6 +185,9 @@ def _flag_sync_interval_seconds() -> float:
 
 
 _FLAG_SYNC_INTERVAL_SECONDS = _flag_sync_interval_seconds()
+# How often the chat process re-asks whether the call process answers, so
+# ``ura_receptionist_call_process_up`` follows it between /ready probes (G614).
+_CALL_PROCESS_GAUGE_INTERVAL_SECONDS = 30.0
 # How often the audit ledger's new rows are sealed (Merkle root + chain head).
 # 0 turns the schedule off; sealing on demand from /admin/audit still works.
 _AUDIT_SEAL_INTERVAL_SECONDS = max(0, int(os.getenv("AUDIT_SEAL_INTERVAL_SECONDS", "3600")))
@@ -582,6 +590,25 @@ async def _flag_sync_loop(stop: asyncio.Event, interval: float) -> None:
             return
 
 
+async def _call_process_gauge_loop(stop: asyncio.Event, interval: float) -> None:
+    """Keep ``receptionist_call_process_up`` current in the chat process (G614, ADR-0045).
+
+    The ask is a blocking ``httpx.get`` (1 s timeout, 10 s cache), so it runs on
+    a worker thread. A failed refresh is logged and tried again next round.
+    """
+    while True:
+        try:
+            await asyncio.to_thread(refresh_call_process_gauge)
+        except Exception:  # noqa: BLE001 - a metric never stops the loop
+            logger.warning("Could not refresh receptionist_call_process_up", exc_info=True)
+        try:
+            async with asyncio.timeout(interval):
+                await stop.wait()
+            return
+        except TimeoutError:
+            continue
+
+
 def _initialize_analytics_database() -> None:
     """Initialize persistence, failing closed when production storage is unavailable.
 
@@ -974,11 +1001,21 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 return
 
-    # The chat process does not set the gauge: its alert reflects the process
-    # that takes calls (G306).
+    # The chat process does not set `receptionist_available`: its alert reflects
+    # the process that takes calls (G306).
     gauge_task = (
         asyncio.create_task(_receptionist_gauge_loop(), name="receptionist-gauge")
         if process_role() != "chat"
+        else None
+    )
+    # The chat process does set one gauge, and only the chat process: whether
+    # the call process answers (G614). It is the one that can see it die.
+    call_process_gauge_task = (
+        asyncio.create_task(
+            _call_process_gauge_loop(retention_stop, _CALL_PROCESS_GAUGE_INTERVAL_SECONDS),
+            name="call-process-gauge",
+        )
+        if process_role() == "chat"
         else None
     )
     # Every process, either role: a console flag change reaches all of them (G612).
@@ -996,7 +1033,14 @@ async def lifespan(app: FastAPI):
             from .receptionist.serializer import drain_checkpoints
 
             await drain_checkpoints(timeout=5.0)
-        for task in (retention_task, seal_task, eval_task, gauge_task, flag_sync_task):
+        for task in (
+            retention_task,
+            seal_task,
+            eval_task,
+            gauge_task,
+            call_process_gauge_task,
+            flag_sync_task,
+        ):
             if task is None:
                 continue
             task.cancel()
@@ -1398,8 +1442,12 @@ def _receptionist_status() -> str:
     try:
         if process_role() == "chat":
             # This process never starts the receptionist; the call process's
-            # own value is the answer (G306).
-            return calls_process_status()
+            # own value is the answer (G306). The same answer sets
+            # `receptionist_call_process_up` (G614), so /ready and the gauge
+            # cannot disagree.
+            status = calls_process_status()
+            refresh_call_process_gauge(status)
+            return status
         from . import receptionist
 
         return receptionist.status()
@@ -5507,11 +5555,27 @@ def update_my_presence_endpoint(
     body: OfficerPresenceUpdate = Body(default_factory=OfficerPresenceUpdate),
     ctx: AuthContext = Depends(require_admin_access),
 ) -> Any:
-    """Update presence state for current officer or heartbeat last_seen."""
+    """Update presence state for current officer or heartbeat last_seen.
+
+    The answer is the officer's presence, plus ``wrap_up_call_id``: the call
+    whose wrap-up they still owe ("" if none). While one is owed, a console
+    that asks for ``available`` keeps ``wrap_up``; ``busy``, ``away`` and
+    ``offline`` still apply. The write is made only if presence is as it was
+    read first: one made meanwhile (a claim, a call's end) stands, and is the
+    answer.
+    """
     from .receptionist import presence
     from .receptionist.state import registry
+    from .receptionist.store import owed_wrapup
 
     _desk_writer(ctx)
+    tenant = ctx.tenant_id or "default"
+    # Read first: the write below is made only if presence is still this. The
+    # heartbeat runs on a worker thread without the desk's lock, and a claim
+    # (set_on_call, on the event loop) that landed between the checks below
+    # and the write was overwritten with what they decided: `available`, or a
+    # wrap-up, over the officer's on_call (ADR-0045).
+    seen = presence.get_presence(ctx.user_id)
     status = body.status
     # The officer is on a live call on this server: the server's own on_call
     # stands. A heartbeat sent while their media reconnects, or as the call
@@ -5530,14 +5594,50 @@ def update_my_presence_endpoint(
     on_a_call = any(_holds(room) for room in registry.list_live())
     if on_a_call and status != "on_call":
         status = None
-    return presence.upsert_presence(
+    # A call that ended under the officer (its time limit, an error, their
+    # reconnect grace) leaves a wrap-up the console may never have shown: its
+    # socket closed on an error, or the page was reloaded, so it reports
+    # `available`. Until the wrap-up is saved (desk.wrapup) the officer is not
+    # offered to callers, and the console is told which call to wrap up. A
+    # call they are on or hold comes first (G610, ADR-0045).
+    def _owed() -> str:
+        try:
+            return owed_wrapup(ctx.user_id, _receptionist_tenant_scope(ctx))
+        except Exception:
+            logger.warning("Could not read the wrap-ups an officer owes", exc_info=True)
+            return ""
+
+    owed = "" if on_a_call else _owed()
+    current_call_id = None
+    if owed and (status or (seen or {}).get("raw_status")) == "available":
+        status, current_call_id = "wrap_up", owed
+    result = presence.upsert_presence_if_unchanged(
+        seen,
         ctx.user_id,
-        tenant_id=ctx.tenant_id or "default",
+        tenant_id=tenant,
         display_name=body.display_name or _desk_officer_name(ctx),
         status=status,
         languages=body.languages,
         teams=body.teams,
+        current_call_id=current_call_id,
     )
+    if result is None:
+        # Presence was written while this heartbeat decided: that write
+        # stands, and the officer still counts as seen. Its call is named as
+        # owed only if that write is the wrap-up of one.
+        row = presence.mark_seen(ctx.user_id) or {}
+        result = {
+            key: row.get(key)
+            for key in ("user_id", "tenant_id", "display_name", "status", "raw_status", "languages", "teams",
+                        "current_call_id", "last_seen", "updated_at")
+        }
+        call_id = str(row.get("current_call_id") or "")
+        if row.get("raw_status") != "wrap_up" or not call_id:
+            owed = ""
+        elif call_id != owed:
+            owed = call_id if _owed() == call_id else ""
+    result["wrap_up_call_id"] = owed
+    return result
 
 
 @app.get("/v1/admin/officers/presence", tags=["admin"])

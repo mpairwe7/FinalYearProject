@@ -8,7 +8,7 @@ import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { FakeSocket, callRecord } from '../helpers/callConsole';
-import { callsApi, type CallRecord } from '@/services/callsApi';
+import { callsApi, type CallRecord, type OfficerPresence } from '@/services/callsApi';
 import { useCallConsoleStore } from '@/store/useCallConsoleStore';
 
 // ---------------------------------------------------------------------------
@@ -319,6 +319,114 @@ describe('usePresenceHeartbeat', () => {
       expect(sent).toHaveBeenCalledWith({ status: 'on_call' });
     },
   );
+
+  // ADR-0045: a call that ended under the officer on an error, or before a
+  // reload, still owes its wrap-up. The server names it; the console shows it.
+  it('brings up the wrap-up the server says is owed when the console has no call', async () => {
+    const { usePresenceHeartbeat } = await import('@/components/staff/calls/console/usePresenceHeartbeat');
+    const { resetSessionForTests } = await import('@/services/officerCallSession');
+    const { ActiveCallDock } = await import('@/components/staff/calls/console/ActiveCallDock');
+    resetSessionForTests();
+    const sent = vi
+      .spyOn(callsApi, 'updatePresence')
+      .mockResolvedValue({ status: 'wrap_up', wrap_up_call_id: 'call_owed' } as never);
+
+    const hook = renderHook(() => usePresenceHeartbeat('okello'));
+
+    await waitFor(() =>
+      expect(useCallConsoleStore.getState().activeCall).toMatchObject({ callId: 'call_owed', state: 'wrap_up' }),
+    );
+    await waitFor(() => expect(sent).toHaveBeenLastCalledWith({ status: 'wrap_up' }));
+    render(<ActiveCallDock onBackToCall={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Finish wrap-up' })).toBeInTheDocument();
+    hook.unmount();
+    resetSessionForTests();
+  });
+
+  it('does not bring up an owed wrap-up while the officer has chosen away', async () => {
+    // The server keeps away/offline and still names the call. Opening it would
+    // publish a wrap_up session and send wrap_up over the officer's choice.
+    const { usePresenceHeartbeat } = await import('@/components/staff/calls/console/usePresenceHeartbeat');
+    const { resetSessionForTests } = await import('@/services/officerCallSession');
+    resetSessionForTests();
+    useCallConsoleStore.getState().setAvailability('away');
+    const sent = vi
+      .spyOn(callsApi, 'updatePresence')
+      .mockResolvedValue({ status: 'away', wrap_up_call_id: 'call_owed' } as never);
+
+    const hook = renderHook(() => usePresenceHeartbeat('okello'));
+
+    await waitFor(() => expect(sent).toHaveBeenCalledWith({ status: 'away' }));
+    await act(async () => {});
+    expect(useCallConsoleStore.getState().activeCall).toBeNull();
+    expect(sent).not.toHaveBeenCalledWith({ status: 'wrap_up' });
+    hook.unmount();
+    useCallConsoleStore.getState().setAvailability('available');
+    resetSessionForTests();
+  });
+
+  it('keeps the wrap-up already open when the server names another owed call', async () => {
+    const { usePresenceHeartbeat } = await import('@/components/staff/calls/console/usePresenceHeartbeat');
+    const { resetSessionForTests, resumeOwedWrapUp } = await import('@/services/officerCallSession');
+    resetSessionForTests();
+    resumeOwedWrapUp('call_first');
+    const sent = vi
+      .spyOn(callsApi, 'updatePresence')
+      .mockResolvedValue({ status: 'wrap_up', wrap_up_call_id: 'call_older' } as never);
+
+    const hook = renderHook(() => usePresenceHeartbeat('okello'));
+
+    await waitFor(() => expect(sent).toHaveBeenCalledWith({ status: 'wrap_up' }));
+    await act(async () => {});
+    expect(useCallConsoleStore.getState().activeCall).toMatchObject({ callId: 'call_first', state: 'wrap_up' });
+    hook.unmount();
+    resetSessionForTests();
+  });
+
+  // Pulses go out on mount, every 20 s and when the tab comes back, and are
+  // not answered in the order they were sent. An older answer can predate a
+  // wrap-up the officer has saved since: only the latest pulse's answer counts.
+  async function twoPulses() {
+    const { usePresenceHeartbeat } = await import('@/components/staff/calls/console/usePresenceHeartbeat');
+    const { resetSessionForTests } = await import('@/services/officerCallSession');
+    resetSessionForTests();
+    const answers: Array<(presence: Partial<OfficerPresence>) => void> = [];
+    vi.spyOn(callsApi, 'updatePresence').mockImplementation(
+      () =>
+        new Promise<OfficerPresence>((resolve) => {
+          answers.push((presence) => resolve(presence as OfficerPresence));
+        }),
+    );
+    const hook = renderHook(() => usePresenceHeartbeat('okello'));
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(answers).toHaveLength(2);
+    const [older, newer] = answers;
+    return { older, newer, hook, resetSessionForTests };
+  }
+
+  it('does not reopen a wrap-up from the answer to an older pulse', async () => {
+    const { older, newer, hook, resetSessionForTests } = await twoPulses();
+
+    await act(async () => newer({ status: 'available', wrap_up_call_id: '' }));
+    await act(async () => older({ status: 'wrap_up', wrap_up_call_id: 'call_saved' }));
+
+    expect(useCallConsoleStore.getState().activeCall).toBeNull();
+    hook.unmount();
+    resetSessionForTests();
+  });
+
+  it('brings up the wrap-up the latest pulse is told of, whatever comes after', async () => {
+    const { older, newer, hook, resetSessionForTests } = await twoPulses();
+
+    await act(async () => newer({ status: 'wrap_up', wrap_up_call_id: 'call_owed' }));
+    await act(async () => older({ status: 'available', wrap_up_call_id: '' }));
+
+    expect(useCallConsoleStore.getState().activeCall).toMatchObject({ callId: 'call_owed', state: 'wrap_up' });
+    hook.unmount();
+    resetSessionForTests();
+  });
 });
 
 // ---------------------------------------------------------------------------

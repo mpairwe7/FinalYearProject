@@ -33,6 +33,7 @@ from .config import (
     get_max_call_s,
     local_engine_errors,
 )
+from .frame_budget import FrameGate, Verdict, close_flooded
 from .hub import hub
 from .metrics import get_aggregate_metrics, record_call_end_metrics
 from .officer import OfficerLeg
@@ -272,9 +273,18 @@ async def _finish_call(room: Any) -> None:
     endpoint owns registry and concurrency-slot removal in its outer finally.
     """
     call_id = room.call_id
-    abandoned = room.state.mode == "transferring"
-    bridged_officer = getattr(room.state, "officer_id", None) if room.state.mode == "bridged" else None
-    reconnecting_officer = getattr(room.state, "reconnecting_officer", None)
+    mode = room.state.mode
+    abandoned = mode == "transferring"
+    # The officer who had the call owes its wrap-up when it ends under them:
+    # still bridged (the caller hung up), already ended by the server while
+    # bridged (the time limit, a media failure, a hang-up message: room.end
+    # keeps `officer_id`), or ended in their reconnect grace. Only the first
+    # moved them to wrap_up; the others left them on_call on a dead call, or
+    # marked them available with the wrap-up owed (G610, ADR-0045).
+    # `owe_wrap_up` acts only while their presence is still this call's, so an
+    # End that already did it, a wrap-up saved, or another call is left alone.
+    held_by = getattr(room.state, "officer_id", None) if mode in ("bridged", "ended") else None
+    owing = [o for o in dict.fromkeys((held_by, getattr(room.state, "reconnecting_officer", None))) if o]
     for stop in (call_brief.stop, risk.stop):
         try:
             stop(call_id)
@@ -294,10 +304,8 @@ async def _finish_call(room: Any) -> None:
             "abandoned_while_waiting": abandoned,
         })),
     ]
-    if bridged_officer:
-        operations.insert(0, ("presence", lambda: desk.presence.set_wrap_up(bridged_officer, call_id=call_id)))
-    elif reconnecting_officer:
-        operations.insert(0, ("presence", lambda: desk.presence.finish_wrap_up(reconnecting_officer)))
+    for officer in owing:
+        operations.insert(0, ("presence", lambda officer=officer: desk.presence.owe_wrap_up(officer, call_id)))
     if abandoned:
         operations.insert(0, ("callback", lambda: update_call(
             call_id, needs_callback=1, callback_reason="caller_left_waiting", outcome="abandoned",
@@ -307,7 +315,8 @@ async def _finish_call(room: Any) -> None:
             callback()
         except Exception:
             logger.exception("Call %s finalization failed for %s", operation, call_id)
-    if bridged_officer:
+    # The officer's own End drafts its note itself (desk.end).
+    if owing and not getattr(room, "ending", False):
         asyncio.create_task(desk._save_draft_wrapup(call_id))
     asyncio.create_task(_summarise_when_transcribed(call_id))
 
@@ -895,8 +904,12 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                 message = await _receive_or_end(websocket, room)
                 if message is None or message.get("type") == "websocket.disconnect":
                     break
-                if "bytes" in message and message["bytes"]:
-                    pass  # Audio frames in fallback mode
+                if message.get("bytes") is not None:
+                    # Audio is not used in fallback mode, but a flood of it still
+                    # costs the loop: the budget applies as it does on Pipecat (G304).
+                    if serializer.admit_audio(message["bytes"]) is Verdict.CLOSE:
+                        await close_flooded(websocket)
+                        break
                 elif "text" in message and message["text"]:
                     data = _control_message(message["text"])
                     if data is None:
@@ -1405,6 +1418,10 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
 
     officer_leg.start()
 
+    # What this socket may send (G304). Checked before a frame is handed on:
+    # a bad or excess frame is dropped and counted, and only a flood that
+    # lasts closes the socket, which then takes the same path as any close.
+    frame_gate = FrameGate("officer", call_id=call_id)
     try:
         while room.state.mode == "bridged":
             if token_exp is None:
@@ -1417,10 +1434,19 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
                     break
             if msg.get("type") == "websocket.disconnect":
                 break
-            if "bytes" in msg and msg["bytes"]:
-                await officer_leg.handle_officer_message(msg["bytes"])
-            elif "text" in msg and msg["text"]:
-                await officer_leg.handle_officer_message(msg["text"])
+            if msg.get("bytes") is not None:
+                frame: bytes | str = msg["bytes"]
+                verdict = frame_gate.audio(frame)
+            elif msg.get("text"):
+                frame = msg["text"]
+                verdict = frame_gate.text(frame)
+            else:
+                continue
+            if verdict is Verdict.CLOSE:
+                await close_flooded(websocket)
+                break
+            if verdict is Verdict.PASS and frame:
+                await officer_leg.handle_officer_message(frame)
     except WebSocketDisconnect:
         pass
     except Exception:

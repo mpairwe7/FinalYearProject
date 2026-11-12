@@ -164,6 +164,8 @@ export interface OfficerPresence {
   current_call_id: string;
   last_seen: number;
   updated_at: number;
+  /** In the heartbeat's answer only: the call whose wrap-up this officer still owes ("" if none). */
+  wrap_up_call_id?: string;
 }
 
 export interface PresenceBoardResponse {

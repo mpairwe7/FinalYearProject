@@ -181,19 +181,22 @@ translation and retried unmasked when the tier mangles the sentinels.
 ### Calls
 
 Reported by `app/receptionist/telemetry.py` once the receptionist has started,
-except `ura_receptionist_misrouted_total`, which `app/process_role.py` reports
-from the chat process (the receptionist does not start there, ADR-0043).
+except `ura_receptionist_misrouted_total` and `ura_receptionist_call_process_up`,
+which `app/process_role.py` reports from the chat process (the receptionist does
+not start there, ADR-0043).
 Every label is a closed vocabulary of code constants. Model failures on a call
 are not repeated here: they are `ura_chat_turns_total{channel="call",outcome="error"}`.
 
 | Metric | Labels | Meaning |
 | --- | --- | --- |
 | `ura_receptionist_available` | — | 0 while calls are switched on and cannot be taken (the start failed, or never ran because the flag was switched on later); 1 otherwise, switched off included. The lowest live worker's value (`livemin`), refreshed every 30 s in each worker and at every scrape. The chat process (`URA_PROCESS_ROLE=chat`) never sets it, so in the two-process container it is the call process's value (ADR-0043) |
+| `ura_receptionist_call_process_up` | — | Whether the call process answers, as the chat process sees it (G614, ADR-0045): 0 when the call process's `/ready` does not answer in time or answers with nothing usable (`unavailable: the call process is not answering` / `… is not ready`); 1 for anything it says itself, `ready`, `off` or its own `unavailable: <why>` (that reason is `ura_receptionist_available`'s). Set **only** by the chat process, from the cached call-process status (10 s), every 30 s and at each chat-role `/ready`; never set in the call process or with no role. The lowest live worker's value (`livemin`). Exported only where the API is scraped: the Space is not scraped yet |
 | `ura_receptionist_calls_started_total` | — | Calls admitted |
 | `ura_receptionist_calls_ended_total` | `reason` | Why each call ended: `caller_hangup`, `caller_idle`, `officer_hangup`, `max_call_duration`, `speech_failed`, `media_pipeline_stopped`, … (`telemetry.END_REASONS`); anything else is `other` |
 | `ura_receptionist_calls_refused_total` | `reason` (`unavailable`/`not_configured`/`capacity`) | Calls turned away before they began. A switched-off receptionist is not counted |
 | `ura_receptionist_call_failures_total` | `stage` (`stt`/`tts`/`media`/`record`) | The recognizer failed on an utterance, a line could not be voiced, or the call's own record could not be written |
 | `ura_receptionist_calls_lost_total` | — | Call rows a start found still live with no process behind them, and ended (`end_reason = process_lost`) |
+| `ura_receptionist_frames_dropped_total` | `side` (`caller`/`officer`), `reason` (`rate`/`size`/`malformed`) | Frames a call socket dropped before handing them on (G304, ADR-0045): `size` is a binary or text frame over 16 KiB, `malformed` an odd-length binary frame (PCM16 takes whole samples; mu-law is exempt), `rate` a frame over the budget (64 000 B/s with a 128 000 B burst, 200 frames/s with a burst of 200; officer text frames 15 per 10 s). A socket that keeps dropping frames for 5 s is closed with 1008 `too many frames`, and a flood is logged at WARNING once. A browser's own stream is 50 frames/s and 32 KB/s and is never dropped; a steady count here is a broken or hostile client |
 | `ura_receptionist_misrouted_total` | `kind` (`http`/`websocket`) | Call requests that reached the chat process and were refused (HTTP 421, or a WebSocket closed 1013). Counted by `app/process_role.py` (not by `telemetry.py`): the zero series for both kinds is declared in every process, whatever its role, when the app starts, so the first increment raises `UraCallMisrouted`; the increment itself happens only in the chat process, which refuses the request |
 
 ## 4. SLOs and alerting
@@ -216,7 +219,7 @@ Burn-rate alerts follow the multi-window, multi-burn-rate method (Google SRE
 workbook): page when the 1h **and** 5m windows burn faster than 14.4× the
 budget (or 6h and 30m faster than 6×); ticket on 1d/2h at 3× or 3d/6h at 1×.
 
-`monitoring/alerting-rules.yml` holds 57 rules in 11 groups:
+`monitoring/alerting-rules.yml` holds 58 rules in 11 groups:
 availability, latency, quality, audit-and-compliance, security, dependencies,
 the Qdrant index lifecycle, the agent planner and live research, agent
 resilience, crawl freshness and the call receptionist. Each carries `severity` (`critical` pages,
@@ -462,8 +465,9 @@ and `TurnsHittingDeadline`. See the [fault tolerance runbook](runbooks/agent-fau
 
 ### Call receptionist
 
-`UraReceptionistUnavailable` (page), `UraCallsRefused`, `UraCallSpeechFailing`,
-`UraCallsEndingOnFailure` and `UraCallMisrouted`. The chat does not depend on any of them.
+`UraReceptionistUnavailable` (page), `UraCallProcessDown` (page), `UraCallsRefused`,
+`UraCallSpeechFailing`, `UraCallsEndingOnFailure` and `UraCallMisrouted`. The chat
+does not depend on any of them.
 
 1. **Why calls cannot be taken.** `GET /ready` gives it under
    `capabilities.voice_receptionist`: `ready`, `off`, or `unavailable: <why>`.
@@ -497,14 +501,21 @@ and `TurnsHittingDeadline`. See the [fault tolerance runbook](runbooks/agent-fau
    `misrouted … request for … reached the chat process`, and the quoted path is
    the one that drifted.
 
-7. **A dead call process on the Space has no metrics alert (G614).** The
-   Prometheus here scrapes the compose stack, not the Space; `UraApiDown` is
-   satisfied by either process; `receptionist_available` goes stale or absent when
-   only the call process is down. Until a chat-role gauge from the cached
-   call-process status and an alert exist, the roll workflow and the hourly
-   keepalive workflow check `/ready`: `capabilities.voice_receptionist` reading
-   `unavailable: the call process …` fails the roll, or turns the keepalive red
-   (ADR-0043).
+7. **The call process is not answering (`UraCallProcessDown`, G614).**
+   `ura_receptionist_call_process_up` has been 0 for five minutes: the chat
+   process cannot reach the call process's `/ready`, or gets no usable answer
+   from it, so every call fails while chat, `/health` and `/ready` keep
+   answering. `GET /ready` says which, under `capabilities.voice_receptionist`:
+   `unavailable: the call process is not answering` (down, or no answer within
+   1 s) or `… is not ready` (something answered that was not a `/ready` body).
+   Read the call process's own log in the Space; a restart of the Space brings
+   both processes back (ADR-0043). The alert fires only where the API is
+   scraped, and the Prometheus here scrapes the compose stack, not the Space
+   (`UraApiDown` is satisfied by either process, and `receptionist_available`
+   goes stale or absent when only the call process is down). On the Space the
+   roll workflow and the hourly keepalive workflow still check `/ready`:
+   `capabilities.voice_receptionist` reading `unavailable: the call process …`
+   fails the roll, or turns the keepalive red (ADR-0043, ADR-0045).
 
 See the [receptionist runbook](runbooks/voice-receptionist-demo.md).
 

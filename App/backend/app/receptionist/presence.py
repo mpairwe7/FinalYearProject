@@ -7,7 +7,9 @@ is computed as offline on read when their last heartbeat is older than
 
 Status transitions are automatic:
 - Claim / bridge: on_call
-- End / transfer: wrap_up
+- End / transfer: wrap_up; a call that ends under the officer any other way
+  (the caller, the server, their reconnect grace): wrap_up, while their
+  presence is still that call's (``owe_wrap_up``)
 - Wrap-up saved: back to pre-call status (default: available)
 - Heartbeat: updates last_seen without spamming lobby events
 - Status / display_name change: publishes ``officer.presence`` to the lobby.
@@ -18,7 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Any
+from typing import Any, cast
 
 from .. import database as db
 from ..escalation_notify import known_teams
@@ -89,8 +91,79 @@ def upsert_presence(
     the officer's tenant. *tenant_id* is the officer's tenant when the caller
     knows it (their own request); otherwise the one already on the row is kept.
     """
+    # Unguarded, the write always lands: never None.
+    return cast("dict[str, Any]", _write_presence(
+        user_id, get_presence(user_id), guarded=False, tenant_id=tenant_id, display_name=display_name,
+        status=status, languages=languages, teams=teams, current_call_id=current_call_id,
+        previous_status=previous_status,
+    ))
+
+
+def upsert_presence_if_unchanged(
+    seen: dict[str, Any] | None,
+    user_id: str,
+    *,
+    tenant_id: str | None = None,
+    display_name: str | None = None,
+    status: str | None = None,
+    languages: list[str] | None = None,
+    teams: list[str] | None = None,
+    current_call_id: str | None = None,
+) -> dict[str, Any] | None:
+    """:func:`upsert_presence`, but only while the row is still *seen*; None if it is not.
+
+    *seen* is the officer's row as :func:`get_presence` read it before the
+    caller decided what to write (None: there was no row). Anything written
+    to the row since (a claim, a call's end, a wrap-up owed) changed its
+    ``updated_at``, which every write to presence stamps, and that write
+    stands. The comparison also takes ``status`` and ``current_call_id``, so
+    two writes in one tick of a coarse clock cannot pass for none. With no row
+    read, the row is inserted unless one has been meanwhile.
+    """
+    return _write_presence(
+        user_id, seen, guarded=True, tenant_id=tenant_id, display_name=display_name, status=status,
+        languages=languages, teams=teams, current_call_id=current_call_id, previous_status=None,
+    )
+
+
+def mark_seen(user_id: str) -> dict[str, Any] | None:
+    """The officer's console has checked in: stamp ``last_seen`` and nothing else.
+
+    For a heartbeat whose own write gave way to another
+    (:func:`upsert_presence_if_unchanged`): the officer is still there.
+    ``updated_at`` is left alone, so no other write is mistaken for stale. The
+    lobby hears of it only if that brings the officer back from offline.
+    Returns their row, or None if they have none.
+    """
+    before = get_presence(user_id)
+    if before is None:
+        return None
+    db.execute("UPDATE officer_presence SET last_seen = ? WHERE user_id = ?", (time.time(), user_id))
+    row = get_presence(user_id)
+    if row and row["status"] != before["status"]:
+        hub.publish_lobby(
+            "officer.presence",
+            {"user_id": user_id, "display_name": row["display_name"], "status": row["status"]},
+            tenant_id=str(row.get("tenant_id") or "default"),
+        )
+    return row
+
+
+def _write_presence(
+    user_id: str,
+    existing: dict[str, Any] | None,
+    *,
+    guarded: bool,
+    tenant_id: str | None,
+    display_name: str | None,
+    status: str | None,
+    languages: list[str] | None,
+    teams: list[str] | None,
+    current_call_id: str | None,
+    previous_status: str | None,
+) -> dict[str, Any] | None:
+    """Write the officer's row from *existing* and the values given; None if *guarded* and it changed."""
     now = time.time()
-    existing = get_presence(user_id)
     prev_effective = existing["status"] if existing else "offline"
     prev_name = existing["display_name"] if existing else ""
 
@@ -105,37 +178,59 @@ def upsert_presence(
     lang_json = json.dumps(target_languages)
     teams_json = json.dumps(target_teams)
 
-    def _do_write() -> None:
+    def _do_write() -> int:
+        values = (target_display, target_status, lang_json, teams_json, target_call_id, target_prev_status, now, now,
+                  target_tenant, user_id)
+        if existing is not None and guarded:
+            return db.execute(
+                """
+                UPDATE officer_presence
+                SET display_name = ?, status = ?, languages_json = ?, teams_json = ?,
+                    current_call_id = ?, previous_status = ?, last_seen = ?, updated_at = ?, tenant_id = ?
+                WHERE user_id = ? AND updated_at = ? AND status = ? AND current_call_id = ?
+                """,
+                (*values, existing["updated_at"], existing["raw_status"], existing.get("current_call_id") or ""),
+            )
         if existing is not None:
-            db.execute(
+            return db.execute(
                 """
                 UPDATE officer_presence
                 SET display_name = ?, status = ?, languages_json = ?, teams_json = ?,
                     current_call_id = ?, previous_status = ?, last_seen = ?, updated_at = ?, tenant_id = ?
                 WHERE user_id = ?
                 """,
-                (target_display, target_status, lang_json, teams_json, target_call_id, target_prev_status, now, now,
-                 target_tenant, user_id),
+                values,
             )
-        else:
-            db.execute(
+        if guarded:
+            return db.execute(
                 """
                 INSERT INTO officer_presence (
-                    user_id, display_name, status, languages_json, teams_json,
-                    current_call_id, previous_status, last_seen, updated_at, tenant_id
+                    display_name, status, languages_json, teams_json,
+                    current_call_id, previous_status, last_seen, updated_at, tenant_id, user_id
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id) DO NOTHING
                 """,
-                (user_id, target_display, target_status, lang_json, teams_json, target_call_id, target_prev_status, now, now,
-                 target_tenant),
+                values,
             )
+        return db.execute(
+            """
+            INSERT INTO officer_presence (
+                display_name, status, languages_json, teams_json,
+                current_call_id, previous_status, last_seen, updated_at, tenant_id, user_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            values,
+        )
 
     try:
-        _do_write()
+        written = _do_write()
     except Exception:
         from .store import init_receptionist_schema
 
         init_receptionist_schema()
-        _do_write()
+        written = _do_write()
+    if guarded and not written:
+        return None
 
     current_effective = _effective_status(target_status, now, now)
 
@@ -232,6 +327,32 @@ def set_on_call(user_id: str, call_id: str, display_name: str = "", tenant_id: s
 def set_wrap_up(user_id: str, call_id: str = "") -> None:
     """Transition an officer to 'wrap_up'."""
     upsert_presence(user_id, status="wrap_up", current_call_id=call_id)
+
+
+def owe_wrap_up(user_id: str, call_id: str) -> bool:
+    """*call_id* ended while *user_id* still had it: they owe its wrap-up.
+
+    Only while their presence is still that call's (``on_call`` on it), like
+    :func:`end_claim_presence`, and in the same single write: a wrap-up already
+    started or saved, or another call taken meanwhile, is left as it is.
+    ``last_seen`` is left alone: an officer whose console has gone must not
+    look online. Returns whether the officer was moved.
+    """
+    affected = db.execute(
+        "UPDATE officer_presence SET status = 'wrap_up', updated_at = ? "
+        "WHERE user_id = ? AND status = 'on_call' AND current_call_id = ?",
+        (time.time(), user_id, call_id),
+    )
+    if not affected:
+        return False
+    row = get_presence(user_id)
+    if row:
+        hub.publish_lobby(
+            "officer.presence",
+            {"user_id": user_id, "display_name": row["display_name"], "status": row["status"]},
+            tenant_id=str(row.get("tenant_id") or "default"),
+        )
+    return True
 
 
 def end_claim_presence(user_id: str, call_id: str) -> None:

@@ -306,7 +306,10 @@ class LapsedOfficerMediaTests(DeskTestCase):
         self.assertEqual(self.room.state.mode, "ended")
         self.assertEqual(self.room.state.end_reason, "media_revocation_failed")
         self.assertEqual(self.lobby_events("call.transfer_requested"), [])
-        self.assertEqual(desk.presence.get_presence("okello")["current_call_id"], "")
+        # The call ended while it was still okello's: they owe its wrap-up,
+        # rather than being marked available (G610, ADR-0045).
+        officer = desk.presence.get_presence("okello")
+        self.assertEqual((officer["raw_status"], officer["current_call_id"]), ("wrap_up", self.call_id))
         close_room.assert_awaited_once_with(f"ura-{self.call_id}")
 
 

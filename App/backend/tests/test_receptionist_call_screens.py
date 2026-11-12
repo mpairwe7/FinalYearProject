@@ -444,11 +444,12 @@ class CallClockTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PresenceHeartbeatGuardTests(unittest.IsolatedAsyncioTestCase):
-    officer = "okello@ura.go.ug"
-
     async def asyncSetUp(self) -> None:
         from app.receptionist import presence
 
+        # One officer per test: a call a shared officer handled in another test
+        # and never wrapped up is owed, and keeps them in wrap_up (ADR-0045).
+        self.officer = f"okello_{uuid.uuid4().hex[:6]}@ura.go.ug"
         db.init_db()
         init_receptionist_schema()
         self.presence = presence
