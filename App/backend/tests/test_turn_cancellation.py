@@ -17,6 +17,7 @@ import threading
 import time
 import unittest
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app import database as db
@@ -131,6 +132,58 @@ class ModelChainTests(unittest.TestCase):
         self.assertEqual(runs(cancel_on_first=True), 1)
         self.assertEqual(cancelled_count("continuation") - before, 1)
 
+    def test_an_empty_continuation_sends_no_fallback_request_for_a_superseded_turn(self):
+        from app import llm
+
+        def run(cancel: bool) -> tuple[int, bool]:
+            token = threading.Event()
+            calls: list[int] = []
+
+            def model(*_a, **_kw):
+                calls.append(1)
+                if len(calls) == 1:
+                    return llm.Generation(text="Part one of the answer", finish_reason="length")
+                if len(calls) == 2:
+                    if cancel:
+                        token.set()  # the caller moved on while the continuation ran
+                    return llm.Generation(text="", finish_reason="stop")
+                return llm.Generation(text=" and part two.", finish_reason="stop")
+
+            stopped = False
+            with patch.object(llm, "_vllm_generate_ex", side_effect=model), turn_cancel_scope(token):
+                try:
+                    llm.complete_with_continuation([{"role": "user", "content": "q"}], deadline=None)
+                except TurnCancelled:
+                    stopped = True
+            return len(calls), stopped
+
+        # Still wanted: an empty continuation is retried with an explicit user turn.
+        self.assertEqual(run(cancel=False), (3, False))
+        before = cancelled_count("continuation")
+        self.assertEqual(run(cancel=True), (2, True))
+        self.assertEqual(cancelled_count("continuation") - before, 1)
+
+    def test_a_continuation_finished_after_the_turn_moved_on_hands_back_nothing(self):
+        from app import llm
+
+        token = threading.Event()
+
+        def model(*_a, **kwargs):
+            if "extra_body" not in kwargs:
+                return llm.Generation(text="Part one of the answer", finish_reason="length")
+            token.set()  # the caller moved on while the last round ran
+            return llm.Generation(text=" and part two.", finish_reason="stop")
+
+        before = cancelled_count("continuation")
+        with (
+            patch.object(llm, "_vllm_generate_ex", side_effect=model) as gen,
+            turn_cancel_scope(token),
+            self.assertRaises(TurnCancelled),
+        ):
+            llm.complete_with_continuation([{"role": "user", "content": "q"}], deadline=None)
+        self.assertEqual(gen.call_count, 2)
+        self.assertEqual(cancelled_count("continuation") - before, 1)
+
     def test_a_run_cancelled_while_the_model_runs_tries_no_fallback_and_blames_no_one(self):
         from app import llm, service
 
@@ -225,6 +278,167 @@ class ModelChainTests(unittest.TestCase):
         self.assertEqual(seen, [True])
         failed.assert_not_called()
         released.assert_called_once()
+
+    def outlasted_wait(self, run_name: str, *, superseded: bool) -> SimpleNamespace:
+        """Run *run_name* over a model request that outlasts its 0.2 s wait.
+
+        With *superseded*, the call turn moves on while the request is in
+        flight; otherwise there is no token at all, as on the chat path.
+        """
+        from app import service
+
+        token = threading.Event()
+        gate = threading.Event()
+        self.addCleanup(gate.set)
+
+        def in_flight(**_kw):
+            if superseded:
+                token.set()
+            gate.wait(5)  # the request runs on past the wait
+            return "A late answer." if run_name == "local" else {"text": "A late answer.", "tool_calls": []}
+
+        out = SimpleNamespace(stopped=False, reply=None)
+        with (
+            patch.object(service.llm_module, "generate", side_effect=in_flight),
+            patch.object(service.llm_module, "generate_with_tools", side_effect=in_flight),
+            patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True),
+            patch.object(service._LLM_CIRCUIT, "record_failure") as out.failed,
+            patch.object(service._LLM_CIRCUIT, "release") as out.released,
+            patch.object(service, "_llm_cloud_fallback", return_value="CLOUD") as out.cloud,
+            turn_cancel_scope(token if superseded else None),
+        ):
+            try:
+                if run_name == "local":
+                    out.reply = service._local_llm_then_cloud(
+                        "How do I register for a TIN?", [{"text": "x"}], None, "en", deadline_s=0.2
+                    )
+                else:
+                    out.reply = service._call_llm_agentic("q", [{"text": "x"}], None, "en", deadline_s=0.2)
+            except TurnCancelled:
+                out.stopped = True
+        gate.set()
+        return out
+
+    def test_a_model_call_that_outlasts_its_wait_after_the_turn_moved_on_blames_no_one(self):
+        # A real timeout with no token is still the model's failure, and the cloud is tried.
+        chat = self.outlasted_wait("local", superseded=False)
+        self.assertEqual(chat.reply, "CLOUD")
+        chat.failed.assert_called_once()
+        chat.released.assert_not_called()
+
+        before = cancelled_count("generation")
+        call = self.outlasted_wait("local", superseded=True)
+        self.assertTrue(call.stopped)
+        call.failed.assert_not_called()
+        call.released.assert_called_once()
+        call.cloud.assert_not_called()
+        self.assertEqual(cancelled_count("generation") - before, 1)
+
+    def test_an_agentic_loop_that_outlasts_its_wait_after_the_turn_moved_on_blames_no_one(self):
+        chat = self.outlasted_wait("agentic", superseded=False)
+        self.assertEqual(chat.reply["text"], "")  # the caller falls back to the plain model call
+        chat.failed.assert_called_once()
+        chat.released.assert_not_called()
+
+        before = cancelled_count("agentic")
+        call = self.outlasted_wait("agentic", superseded=True)
+        self.assertTrue(call.stopped)
+        call.failed.assert_not_called()
+        call.released.assert_called_once()
+        self.assertEqual(cancelled_count("agentic") - before, 1)
+
+
+# ---------------------------------------------------------------------------
+# Translation
+# ---------------------------------------------------------------------------
+class TranslationTests(unittest.TestCase):
+    """Each translation request is a model call: a superseded turn sends no more."""
+
+    def setUp(self) -> None:
+        from app import mt
+
+        mt.cache.clear()
+
+    def test_translation_stops_between_paragraphs(self):
+        from app import llm, service
+
+        paragraphs = [
+            f"Step {word}: you need to open the portal and fill in the form for the tax office."
+            for word in ("one", "two", "three", "four", "five", "six")
+        ]
+        token = threading.Event()
+        sent: list[str] = []
+        lock = threading.Lock()
+        # Four paragraphs are translated at once (the pool's size); the other two wait for a thread.
+        in_flight = threading.Barrier(4)
+
+        def sunflower(text: str, **_kw) -> str:
+            with lock:
+                sent.append(text)
+                first_four = len(sent) <= 4
+            if first_four:
+                in_flight.wait(5)
+                token.set()  # the caller moved on while those four were being translated
+            return f"[sw] {text}"
+
+        before = cancelled_count("localize")
+        with (
+            patch.object(service, "REPLY_MT_BACKEND", "local"),
+            patch.object(llm, "translate_text", side_effect=sunflower),
+            turn_cancel_scope(token),
+            self.assertRaises(TurnCancelled),
+        ):
+            service.ChatModel._localize_reply("\n\n".join(paragraphs), "sw")
+
+        # The two left waiting for a thread are not sent, and the stop is counted once.
+        self.assertEqual(len(sent), 4)
+        self.assertEqual(cancelled_count("localize") - before, 1)
+
+    def test_a_failed_translation_tries_no_other_model_for_a_superseded_turn(self):
+        from app import llm, service
+
+        token = threading.Event()
+
+        def sunflower(_text: str, **_kw) -> None:
+            token.set()  # the caller moved on, and the local model gave nothing back
+            return None
+
+        before = cancelled_count("localize")
+        with (
+            patch.object(service, "REPLY_MT_BACKEND", "local_first"),
+            patch.object(llm, "translate_text", side_effect=sunflower) as local,
+            patch("app.sunbird.translate_from_english", return_value="Unaweza kujisajili.") as sunbird,
+            turn_cancel_scope(token),
+            self.assertRaises(TurnCancelled),
+        ):
+            service.ChatModel._localize_reply("You can register for a TIN on the portal.", "sw")
+
+        local.assert_called_once()
+        sunbird.assert_not_called()
+        self.assertEqual(cancelled_count("localize") - before, 1)
+
+    def test_the_fast_fallback_asks_no_second_model_for_a_superseded_turn(self):
+        from app import service
+        from app.speech_service import SpeechModel
+
+        token = threading.Event()
+
+        def sunbird_llm(*_a, **_kw) -> None:
+            token.set()  # the caller moved on, and the first fallback model gave nothing back
+            return None
+
+        with (
+            patch.object(service, "REPLY_MT_BACKEND", "sunbird"),
+            patch("app.sunbird.translate_from_english", return_value=None),
+            patch.object(SpeechModel, "_sunbird_llm_translate", side_effect=sunbird_llm) as first,
+            patch.object(SpeechModel, "_cf_llama_translate", return_value="Unaweza kujisajili.") as second,
+            turn_cancel_scope(token),
+            self.assertRaises(TurnCancelled),
+        ):
+            service._translate_reply("You can register for a TIN on the portal.", "sw")
+
+        first.assert_called_once()
+        second.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +561,36 @@ class GenerateTests(unittest.TestCase):
 
         localized.assert_not_called()
         case_recorded.assert_not_called()
+
+    def test_a_run_cancelled_during_translation_records_no_case(self):
+        from app import service
+
+        token = threading.Event()
+
+        def english_answer(**_kw):
+            service._PENDING_TURN_AUDIT.set({"latency_ms": 1})  # what the real pipeline leaves for the audit row
+            return {"reply": "You can register on the URA portal.", "locale": "sw", "sources": []}
+
+        def translating(_reply, _locale, **_kw):
+            token.set()  # the caller moved on while the reply was being translated
+            return "Unaweza kujisajili kwenye tovuti ya URA."
+
+        before = cancelled_count("localize")
+        with (
+            patch.object(self.model, "_generate_en", side_effect=english_answer),
+            patch.object(self.model, "_localize_reply", side_effect=translating) as localized,
+            patch("app.service.resources_for_turn", return_value=[]),
+            patch("app.service._record_turn_case") as case_recorded,
+            patch.object(self.model, "record_turn_audit") as audited,
+            turn_cancel_scope(token),
+            self.assertRaises(TurnCancelled),
+        ):
+            self.model.generate(message="Ninawezaje kujisajili?", channel="call", locale="sw")
+
+        localized.assert_called_once()
+        case_recorded.assert_not_called()
+        audited.assert_not_called()
+        self.assertEqual(cancelled_count("localize") - before, 1)
 
 
 # ---------------------------------------------------------------------------

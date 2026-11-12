@@ -74,18 +74,26 @@ How it works:
     This also stops a Luganda answer between its steps.
   - `pipeline`: entry to `trace_stage`, so before every stage of `_generate_en`.
   - `generation`: before the local model call takes its breaker slot, when its
-    pool thread starts, and before a reasoner falls back to T1.
-  - `agentic`: before the tool loop. The loop's `CancelScope` also follows the
-    token, so it stops before its next round or tool call.
-  - `continuation`: before each continuation round of `complete_with_continuation`.
+    pool thread starts, before a reasoner falls back to T1, and when the wait for
+    the model times out after the turn moved on.
+  - `agentic`: before the tool loop, and when its wait times out after the turn
+    moved on. The loop's `CancelScope` also follows the token, so it stops before
+    its next round or tool call.
+  - `continuation`: before each continuation round of `complete_with_continuation`,
+    before the retry of a round that came back empty, and before a continued
+    answer is handed back.
   - `cloud_fallback`: before the cloud chain, and before each hop (Sunbird, each
     Workers AI model).
-  - `localize`: before translation in `_generate_localized`.
+  - `localize`: before translation in `_generate_localized`, before each
+    translation request (each provider, each fast-fallback model, each paragraph
+    still waiting for a thread), and after translation, before the case record
+    and the audit row.
 - **The breakers.** A run stopped before a model call takes no breaker slot. A run
-  stopped inside the model call (its pool thread raised) gives the slot back with
-  `release()`. Nothing was learned about the model, so it is neither a failure
-  nor a success. The cloud chain checks before `admit`, so no provider breaker is
-  touched.
+  stopped inside the model call (its pool thread raised), or whose wait for the
+  model timed out after its turn moved on, gives the slot back with `release()`
+  and tries no fallback. Nothing was learned about the model, so it is neither a
+  failure nor a success. The cloud chain checks before `admit`, so no provider
+  breaker is touched.
 - **The brain.** A `TurnCancelled` that comes out of the run is a stale turn. The
   turn's disposition is `cancelled`, as for an answer dropped after it arrived. It
   is not counted as a failed turn, nothing is said to the caller and no transfer
@@ -135,15 +143,24 @@ with only the token in place. The tests cover:
   `CancelScope` follows the token; every stage is declared at zero.
 - **The model chain:**
   - a continuation loop stops at its next round, and continues with no token;
+  - an empty continuation round is not retried for a superseded turn, and is
+    with no token; a turn superseded during the last round gets no answer back;
   - a run cancelled while the model answers tries no cloud fallback, calls
     `release()` and not `record_failure()`;
+  - a model call or agentic loop whose wait times out after the turn moved on
+    calls `release()`, not `record_failure()`, and tries no fallback; with no
+    token the same timeout still records the failure;
   - a run cancelled before the model takes no breaker slot;
   - the cloud chain is not walked for a cancelled turn, and is with no token;
   - the agentic loop's scope follows the token, and its breaker slot is released.
+- **Translation:** paragraphs still waiting for a thread are not sent, and the
+  stop is counted once; a failed translation tries no other provider; the fast
+  fallback asks no second model.
 - **`ChatModel.generate`, the real pipeline:** a turn still wanted reaches the
   model; a run cancelled before it starts makes no model call and records
   nothing; a run cancelled during retrieval stops before the model; a run
-  cancelled before translation is not translated.
+  cancelled before translation is not translated; a run cancelled during
+  translation records no case and no audit row.
 - **The brain:**
   - a turn nothing supersedes runs every stage;
   - a turn replaced by a new one stops at its next stage, is counted, frees its
@@ -159,7 +176,11 @@ time: the brain's handling of `TurnCancelled`; the done callback setting the
 token; the token reading `generation_id`; the slot check; the `trace_stage`
 check; `release()` on a cancel; the check before the local model call; the
 agentic scope following the token; the cloud hop check; the translation check;
-the continuation check; declaring the series.
+the continuation check; declaring the series. The review fixes were checked the
+same way, one check removed at a time: the empty-round retry check; the check
+after the continuation loop; each timeout branch's check; the per-request,
+fast-fallback, waiting-paragraph and after-pool translation checks; the check
+after translation.
 
 `test_receptionist_records_accountability.py` and `test_receptionist_brain.py`
 pass unchanged.

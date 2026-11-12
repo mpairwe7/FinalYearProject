@@ -683,8 +683,9 @@ cancelled (barge-in, a new turn, the 25 s timeout) or the call's `generation_id`
 agentic loop's `CancelScope`, each cloud hop and translation check it and raise
 `TurnCancelled`, a `BaseException` so that no `except Exception` fallback carries on.
 Each stop is counted in `ura_turn_cancelled_total{stage}`. A run stopped inside the model
-call gives its breaker slot back with `release()`. The chat path sets no token, so its
-checks do nothing. An HTTP request already in flight still runs to its own timeout.
+call, or whose wait for it timed out after the turn moved on, gives its breaker slot back
+with `release()`. The chat path sets no token, so its checks do nothing. An HTTP request
+already in flight still runs to its own timeout.
 
 See the [runbook](runbooks/agent-fault-tolerance.md).
 

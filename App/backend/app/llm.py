@@ -1856,6 +1856,8 @@ def complete_with_continuation(
             },
         )
         if not nxt.text:
+            # The retry is a model call of its own: none for a superseded turn.
+            raise_if_turn_cancelled("continuation")
             fallback_messages = cont_messages + [
                 {
                     "role": "user",
@@ -1877,6 +1879,8 @@ def complete_with_continuation(
         cur_finish = nxt.finish_reason
         merged_usage = _merge_usage(merged_usage, nxt.usage)
 
+    # A turn superseded during the last round gets no stitched answer back.
+    raise_if_turn_cancelled("continuation")
     if cur_finish == "length":
         trimmed = trim_to_complete_boundary(accumulated)
         accumulated = f"{trimmed}\n\n{SHORTENED_CONTINUATION_NOTE}" if trimmed else SHORTENED_CONTINUATION_NOTE

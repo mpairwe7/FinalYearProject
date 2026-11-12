@@ -187,6 +187,7 @@ from .resilience import (
     raise_if_turn_cancelled,
     remaining_turn_seconds,
     set_turn_deadline,
+    turn_cancelled,
     turn_deadline,
 )
 from .retriever import HybridRetriever, active_retrieval_mode
@@ -1640,6 +1641,11 @@ def _local_llm_then_cloud(
         return _cloud()
     except concurrent.futures.TimeoutError:
         future.cancel()  # best-effort; transformers generate may ignore
+        if turn_cancelled():
+            # The call turn moved on while the request was in flight: it says
+            # nothing about the model, and no fallback is wanted (ADR-0046).
+            circuit.release()
+            raise_if_turn_cancelled("generation")
         # Cut short by the turn, this says nothing about the model.
         if effective_deadline < own_deadline:
             circuit.release()
@@ -2102,6 +2108,10 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     except concurrent.futures.TimeoutError:
         future.cancel()
         run_cancel.set()
+        # The turn's own token, not run_cancel, which was just set for the timeout.
+        if turn_cancelled():
+            circuit.release()
+            raise_if_turn_cancelled("agentic")
         if effective_deadline < own_deadline:
             circuit.release()
         else:
@@ -4204,6 +4214,7 @@ def _translate_reply(text: str, locale: str) -> str | None:
             out = SpeechModel._sunbird_llm_translate(text, "en", locale)
             if out and out.strip():
                 return out.strip()
+            raise_if_turn_cancelled("localize")
             out = SpeechModel._cf_llama_translate(text, "en", locale)
             if out and out.strip():
                 return out.strip()
@@ -4222,6 +4233,8 @@ def _translate_reply(text: str, locale: str) -> str | None:
         order = tuple(step for step in order if step[0] == "local")
 
     for name, fn in order:
+        # Each try is a model call: a superseded call turn sends no more (ADR-0046).
+        raise_if_turn_cancelled("localize")
         try:
             out = fn()
         except Exception:  # noqa: BLE001 — localization is best-effort
@@ -4261,12 +4274,19 @@ def _translate_by_paragraph(text: str, locale: str) -> tuple[str | None, str]:
     # One copied context per task (a context cannot be entered by two threads
     # at once), taken here so each translation keeps the turn's span and usage.
     contexts = [contextvars.copy_context() for _ in paragraphs]
+
+    def _paragraph(source: str) -> str | None:
+        # A paragraph still waiting for a thread when its call turn is superseded
+        # is not sent; the stop is raised, and counted, once below (ADR-0046).
+        return None if turn_cancelled() else _translate_reply(source, locale)
+
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=min(4, len(paragraphs)), thread_name_prefix="reply-mt"
     ) as pool:
         results = list(
-            pool.map(lambda job: job[0].run(_translate_reply, job[1][1], locale), zip(contexts, paragraphs))
+            pool.map(lambda job: job[0].run(_paragraph, job[1][1]), zip(contexts, paragraphs))
         )
+    raise_if_turn_cancelled("localize")
     translated = list(pieces)
     for (index, source), out in zip(paragraphs, results):
         if out is None or not out.strip():
@@ -11232,6 +11252,9 @@ class ChatModel:
                     result["resources"] = [self._localize_resource(r, effective) for r in result["resources"]]
                 if "workflow" in result and isinstance(result["workflow"], dict):
                     result["workflow"] = self._localize_workflow(result["workflow"], effective)
+                # Translation can outlast the turn: one superseded meanwhile records
+                # no case and no audit row (ADR-0046).
+                raise_if_turn_cancelled("localize")
             if result.get("ticket_id") and flags.is_enabled("cxp_business_hours", subject=user_id or None):
                 from .escalation_policy import (
                     after_hours_escalation_notice,
