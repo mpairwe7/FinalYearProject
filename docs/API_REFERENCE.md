@@ -2221,20 +2221,36 @@ PATCH  /v1/admin/flags/{name}?enabled=true
 DELETE /v1/admin/flags/{name}
 ```
 
-`GET` lists the replica registry (`enabled`, `protected`, rollout size)
-and `overrides_are_ephemeral: false` / `scope: this_replica`.
-`PATCH` is `ura_admin` only and writes `flag_overrides` on this replica
-(survives process restart; cluster-wide still needs `FLAG_*`). Safety
-flags (`auth_required`, `multi_tenant`, `audit_ledger`, `voice_consent`)
-return 400.
+`GET` lists the answering process's registry (`enabled`, `overridden`,
+`stored`, `protected`, rollout size) and `overrides_are_ephemeral: false`.
+It also reports:
+- `scope`: how far a change is configured to reach.
+  `every_process_sharing_this_database`, or `this_process_until_the_others_restart`
+  when the sync is off. It describes the setting, not a confirmation: a process
+  that cannot read the store keeps its flags, and logs and counts it
+  (`flag_sync_failures_total`). Confirm the calls switch from `/ready`;
+- `sync_interval_seconds`: how often each process re-reads the stored overrides
+  (`FLAG_SYNC_INTERVAL_SECONDS`, 5 by default; 0 turns the sync off);
+- `synced_at`: when the answering process last read them, in epoch seconds.
+
+`PATCH` is `ura_admin` only. It writes `flag_overrides` first, then applies the
+change in the answering process. Every other process sharing the database
+applies it within one sync interval (ADR-0044); before that, it reached only
+the process that answered (G612). A failed write changes nothing; on Postgres,
+no connection pool is a failed write, not a silent one. The response
+carries the same `scope` and `sync_interval_seconds`. A change
+survives restarts where the database does; the Space's database is on the container's
+own disk, so a restart there starts with no stored overrides. Replicas with a database each still need `FLAG_*` on every
+replica. Safety flags (`auth_required`, `multi_tenant`, `audit_ledger`,
+`ticket_queue`, `voice_consent`) return 400.
 
 `DELETE` drops the override so the flag follows `FLAG_*` or its
 registry default again. This is not the same as `PATCH`-ing it back to
 the default value: an in-process override beats the environment variable
-by design, and startup replays every stored row into the registry, so a
-flag toggled once from the console keeps shadowing `FLAG_*` until it is
-deleted. Same `ura_admin` gate and the same 400 on protected flags;
-404 on an unknown flag.
+by design, and every process applies the stored rows at startup and on every
+sync, so a flag toggled once from the console keeps shadowing `FLAG_*` until it
+is deleted. Every process clears it within one sync interval. Same `ura_admin`
+gate and the same 400 on protected flags; 404 on an unknown flag.
 
 ```http
 GET /v1/admin/overrides

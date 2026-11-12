@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import re
 import threading
@@ -154,6 +155,31 @@ VOICE_CHAT_BUDGET_S = float(os.getenv("VOICE_CHAT_BUDGET_S", "50"))
 _RETENTION_CLEANUP_INTERVAL_SECONDS = max(
     60, int(os.getenv("RETENTION_CLEANUP_INTERVAL_SECONDS", "3600"))
 )
+
+
+def _flag_sync_interval_seconds() -> float:
+    """How often this process re-reads the stored flag overrides (G612, ADR-0044).
+
+    ``FLAG_SYNC_INTERVAL_SECONDS``: 5 by default; 0 turns the sync off (a
+    console change then reaches other processes at their next start); at
+    least 1 otherwise, so two processes do not poll the store in a tight
+    loop. A value that is not a finite, non-negative number is the default
+    (``asyncio.timeout(inf)`` would never fire, so the sync would never run).
+    """
+    raw = (os.getenv("FLAG_SYNC_INTERVAL_SECONDS") or "").strip()
+    if not raw:
+        return 5.0
+    try:
+        value = float(raw)
+    except ValueError:
+        value = -1.0
+    if value < 0 or not math.isfinite(value):
+        logger.warning("FLAG_SYNC_INTERVAL_SECONDS=%r is not a number of seconds; using 5", raw[:32])
+        return 5.0
+    return 0.0 if value == 0 else max(1.0, value)
+
+
+_FLAG_SYNC_INTERVAL_SECONDS = _flag_sync_interval_seconds()
 # How often the audit ledger's new rows are sealed (Merkle root + chain head).
 # 0 turns the schedule off; sealing on demand from /admin/audit still works.
 _AUDIT_SEAL_INTERVAL_SECONDS = max(0, int(os.getenv("AUDIT_SEAL_INTERVAL_SECONDS", "3600")))
@@ -478,11 +504,82 @@ def _apply_persisted_flag_overrides(overrides: dict[str, bool]) -> None:
 
     for name, enabled in overrides.items():
         try:
-            flag_reg.set(name, enabled)
+            flag_reg.set(name, enabled, stored=True)
         except KeyError:
             # A row for a removed flag has no effect and must not block an
             # otherwise safe upgrade.
             continue
+    _flag_sync_state["synced_at"] = time.time()
+
+
+# What the flag sync last did in this process, for GET /v1/admin/flags and the
+# log (a failure or a refusal is logged when it starts, not on every pass).
+_flag_sync_state: dict[str, Any] = {"synced_at": None, "failing": False, "refused": frozenset()}
+
+
+def _sync_flag_overrides() -> None:
+    """One pass: make this process's stored overrides match ``flag_overrides`` (G612).
+
+    A console change is written to the store and applied in the process that
+    answered it; every other process (the Space's chat and call processes,
+    ADR-0043, or another replica on the same database) picks it up here
+    within one interval. The rules are the startup replay's, except that a
+    running process does not exit: in production a stored ``false`` for a
+    protected control is refused (the control stays on), logged CRITICAL and
+    counted. An unreadable store keeps this process's flags as they are.
+    """
+    from .flags import _log_safe, flags as flag_reg, is_protected
+
+    try:
+        stored = db.load_flag_overrides()
+    except Exception:
+        metrics.inc("flag_sync_failures_total")
+        if not _flag_sync_state["failing"]:
+            logger.error(
+                "Flag overrides could not be read; this process keeps its current flags "
+                "until the store answers",
+                exc_info=True,
+            )
+        _flag_sync_state["failing"] = True
+        return
+    if _flag_sync_state["failing"]:
+        logger.info("Flag overrides are readable again")
+    _flag_sync_state["failing"] = False
+
+    refused: frozenset[str] = frozenset()
+    if (os.getenv("APP_ENV") or "development").lower() == "production":
+        refused = frozenset(name for name, enabled in stored.items() if is_protected(name) and not enabled)
+        stored = {name: enabled for name, enabled in stored.items() if name not in refused}
+        for _ in refused:
+            metrics.inc("flag_sync_refused_total")
+        for name in sorted(refused - _flag_sync_state["refused"]):
+            logger.critical(
+                "A stored flag override disables the protected control %s; this process "
+                "keeps it on. Delete the row from flag_overrides.",
+                _log_safe(name),
+            )
+    _flag_sync_state["refused"] = refused
+
+    for name, value in flag_reg.apply_stored(stored).items():
+        logger.info(
+            "Flag %s %s by a change made through another process",
+            _log_safe(name),
+            "cleared" if value is None else f"set to {value}",
+        )
+    _flag_sync_state["synced_at"] = time.time()
+
+
+async def _flag_sync_loop(stop: asyncio.Event, interval: float) -> None:
+    """Run :func:`_sync_flag_overrides` every *interval* seconds until *stop* is set."""
+    while True:
+        try:
+            async with asyncio.timeout(interval):
+                await stop.wait()
+            return
+        except TimeoutError:
+            await asyncio.to_thread(_sync_flag_overrides)
+        except asyncio.CancelledError:
+            return
 
 
 def _initialize_analytics_database() -> None:
@@ -884,6 +981,12 @@ async def lifespan(app: FastAPI):
         if process_role() != "chat"
         else None
     )
+    # Every process, either role: a console flag change reaches all of them (G612).
+    flag_sync_task = (
+        asyncio.create_task(_flag_sync_loop(retention_stop, _FLAG_SYNC_INTERVAL_SECONDS), name="flag-sync")
+        if _FLAG_SYNC_INTERVAL_SECONDS > 0
+        else None
+    )
     try:
         yield
     finally:
@@ -893,7 +996,7 @@ async def lifespan(app: FastAPI):
             from .receptionist.serializer import drain_checkpoints
 
             await drain_checkpoints(timeout=5.0)
-        for task in (retention_task, seal_task, eval_task, gauge_task):
+        for task in (retention_task, seal_task, eval_task, gauge_task, flag_sync_task):
             if task is None:
                 continue
             task.cancel()
@@ -3989,7 +4092,13 @@ def ticket_presence_endpoint(
 def list_flags_endpoint(
     _ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
-    """Replica flag registry — what is on, without SSH."""
+    """The answering process's flag registry — what is on, without SSH.
+
+    Every process applies the stored overrides within one sync interval
+    (G612), so a ``stored`` override here is what every process sharing this
+    database has. ``synced_at`` (epoch seconds) says when this one last read
+    the store.
+    """
     from .flags import _REGISTRY, flags as flag_reg, is_protected
 
     items = []
@@ -4002,7 +4111,20 @@ def list_flags_endpoint(
                 "protected": is_protected(name),
             }
         )
-    return {"flags": items, "overrides_are_ephemeral": False, "scope": "this_replica"}
+    return {
+        "flags": items,
+        "overrides_are_ephemeral": False,
+        **_flag_scope(),
+        "sync_interval_seconds": _FLAG_SYNC_INTERVAL_SECONDS,
+        "synced_at": _flag_sync_state["synced_at"],
+    }
+
+
+def _flag_scope() -> dict[str, str]:
+    """How far a console flag change reaches (G612): every process, unless the sync is off."""
+    if _FLAG_SYNC_INTERVAL_SECONDS > 0:
+        return {"scope": "every_process_sharing_this_database"}
+    return {"scope": "this_process_until_the_others_restart"}
 
 
 @app.patch("/v1/admin/flags/{name}", tags=["admin"])
@@ -4011,25 +4133,30 @@ def set_flag_endpoint(
     enabled: bool,
     ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
-    """In-process override. Cluster-wide still needs FLAG_* on every replica."""
-    from .flags import flags as flag_reg, is_protected
+    """Override a flag: stored, applied here, and in every other process within one sync.
+
+    The row is written first, as ``DELETE`` does, so a failed write changes
+    nothing anywhere. It used to set this process first: a failed write left
+    an override in this process alone, which no other process would ever see.
+    """
+    from .flags import _REGISTRY, flags as flag_reg, is_protected
 
     if ctx.user and ctx.role != "ura_admin":
         raise HTTPException(status_code=403, detail="only ura_admin may toggle flags")
     if is_protected(name):
         raise HTTPException(status_code=400, detail="this flag cannot be toggled from the UI")
-    try:
-        flag_reg.set(name, enabled)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="unknown flag") from None
+    if name not in _REGISTRY:
+        raise HTTPException(status_code=404, detail="unknown flag")
     db.save_flag_override(name, enabled)
+    flag_reg.set(name, enabled, stored=True)
     _audit_staff_action(ctx, "staff.flag_set", {"flag": name, "enabled": bool(enabled)})
     return {
         "name": name,
         "enabled": flag_reg.is_enabled(name),
         "overridden": True,
         "ephemeral": False,
-        "scope": "this_replica",
+        **_flag_scope(),
+        "sync_interval_seconds": _FLAG_SYNC_INTERVAL_SECONDS,
     }
 
 
@@ -4061,9 +4188,8 @@ def clear_flag_endpoint(
     # cleared while the override survived in the database, so the endpoint
     # returned an error and the next restart re-applied the override the
     # operator had just removed. Persisting first fails closed instead: nothing
-    # changes anywhere. (The PATCH path above writes in the opposite order, but
-    # its failure mode is safe — an override that was never persisted is simply
-    # lost on restart rather than resurrected.)
+    # changes anywhere. PATCH writes in the same order; the other processes
+    # clear it at their next sync (G612).
     db.clear_flag_override(name)
     flag_reg.clear(name)
     _audit_staff_action(ctx, "staff.flag_cleared", {"flag": name})
@@ -4071,7 +4197,8 @@ def clear_flag_endpoint(
         "name": name,
         "enabled": flag_reg.is_enabled(name),
         "overridden": False,
-        "scope": "this_replica",
+        **_flag_scope(),
+        "sync_interval_seconds": _FLAG_SYNC_INTERVAL_SECONDS,
     }
 
 

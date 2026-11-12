@@ -1,7 +1,7 @@
 # Call receptionist assurance review — 11 November 2026
 
-Status: phases 1 to 5 implemented and on the Space. Phase 5 (G306 for one container, PR 718) has been live since 2026-11-12 (`sha-4609a1c`), and its live probes passed; a real officer handoff on the Space has not been run yet.
-Baseline: `dev` at `9a5043db`. Decisions: [ADR-0039](../adr/0039-call-handoff-and-caller-safety.md) (phase 1), [ADR-0040](../adr/0040-call-records-and-accountability.md) (phase 2), [ADR-0041](../adr/0041-receptionist-starts-safely-fails-visibly.md) (phase 3), [ADR-0042](../adr/0042-call-screens-say-what-happened.md) (phase 4), [ADR-0043](../adr/0043-one-call-process.md) (phase 5).
+Status: phases 1 to 5 implemented and on the Space; phase 6 (G612) implemented on `fix/flag-overrides-every-process-2026-11`. Phase 5 (G306 for one container, PR 718) has been live since 2026-11-12 (`sha-4609a1c`), and its live probes passed; a real officer handoff on the Space has not been run yet.
+Baseline: `dev` at `9a5043db`. Decisions: [ADR-0039](../adr/0039-call-handoff-and-caller-safety.md) (phase 1), [ADR-0040](../adr/0040-call-records-and-accountability.md) (phase 2), [ADR-0041](../adr/0041-receptionist-starts-safely-fails-visibly.md) (phase 3), [ADR-0042](../adr/0042-call-screens-say-what-happened.md) (phase 4), [ADR-0043](../adr/0043-one-call-process.md) (phase 5), [ADR-0044](../adr/0044-flag-changes-reach-every-process.md) (phase 6).
 The [30 October review](receptionist-assurance-2026-10-30.md) covered teardown,
 media isolation and draft evidence; this one covers the whole call flow: what the
 AI says, the handoff to an officer, the officer's desk, the two browser clients,
@@ -184,8 +184,30 @@ Left open by this phase:
 
   Rollback is a roll to `sha-f5d79b7`.
 - **The call process restarting still ends its calls**, as a dead worker did.
-- **G612, G613 and G614**, above.
+- **G612** (closed by phase 6), **G613 and G614**, above.
 - **Crane Cloud** builds from the same files and was not deployed or tested.
+
+## Phase 6 — flag changes reach every process
+
+[ADR-0044](../adr/0044-flag-changes-reach-every-process.md). Tests:
+`App/backend/tests/test_flag_sync.py`,
+`App/frontend/src/__tests__/app/adminFlags.test.tsx`.
+
+After phase 5 the Space runs two API processes, and a flag changed from the
+console reached only the one that answered. The calls kill switch is such a flag.
+
+| Gap | What changed |
+| --- | --- |
+| G612 | Every process re-reads `flag_overrides` every `FLAG_SYNC_INTERVAL_SECONDS` (5 by default; 0 turns it off) and applies it with `FeatureFlags.apply_stored`. Only overrides that came from the store follow it; an override set in one process only is left alone. `PATCH` writes the store first, as `DELETE` does. In production, a stored `false` for a protected control is refused without exiting. An unreadable store keeps the flags. Both are logged once and counted. `GET /v1/admin/flags` reports `scope`, `sync_interval_seconds`, `synced_at` and `stored`. The console's note says a change reaches every API process within the interval. |
+
+The runbook's kill switch now leads with the console switch, confirmed from
+`/ready`. The Space secret stays as the fallback.
+
+Left open by this phase:
+
+- **Not seen on the Space yet.** After the roll, switch calls off from the console,
+  read `/ready` until it says `off`, then switch them back on.
+- **Replicas with a database each** still need `FLAG_*` on every replica.
 
 ## Not in scope
 

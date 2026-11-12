@@ -482,8 +482,21 @@ export interface FlagRecord {
   description: string;
   enabled: boolean;
   overridden?: boolean;
+  /** The override is in the store, so every API process applies it (G612). */
+  stored?: boolean;
   protected?: boolean;
   rollout?: { percent: number; cohorts: string[]; allowlist_size: number } | null;
+}
+
+export interface FlagList {
+  flags: FlagRecord[];
+  overrides_are_ephemeral: boolean;
+  /** "every_process_sharing_this_database", or "this_process_until_the_others_restart" when the sync is off. */
+  scope?: string;
+  /** How often each API process re-reads the stored overrides; 0 when it does not. */
+  sync_interval_seconds?: number;
+  /** When the answering process last read them (epoch seconds). */
+  synced_at?: number | null;
 }
 
 export interface AnswerOverride {
@@ -858,7 +871,7 @@ export const analyticsApi = {
       `/v1/admin/tickets/${encodeURIComponent(id)}/presence`,
       { method: "POST" },
     ),
-  flags: () => fetchJson<{ flags: FlagRecord[]; overrides_are_ephemeral: boolean }>("/v1/admin/flags"),
+  flags: () => fetchJson<FlagList>("/v1/admin/flags"),
   setFlag: (name: string, enabled: boolean) =>
     fetchJson<{ name: string; enabled: boolean; ephemeral: boolean }>(
       `/v1/admin/flags/${encodeURIComponent(name)}?enabled=${enabled}`,

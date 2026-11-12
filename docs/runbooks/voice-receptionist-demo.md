@@ -65,50 +65,81 @@ probes below after every roll). What an operator needs to know:
   process also logs `Process role: chat` or `Process role: calls` once at
   startup.
 
-**Kill switch: set `FLAG_VOICE_RECEPTIONIST=false` as a Space secret** (change
-the existing value if the Space already has one). It restarts the Space and
-reaches both processes. Do not use the admin API's flag override
-(`PATCH /v1/admin/flags/voice_receptionist`) for this: it changes the registry of
-the one process that answered the request and writes a stored row the other
-process reads only when it next starts, so calls can stay on in the call process
-while the console says they are off (G612). A stored override also beats a
-`FLAG_*` secret when a process starts. `GET /v1/admin/flags` cannot tell you
-whether one is stored: its `overridden` field is the registry of the process
-that answered, and every request can reach the same process. Decide from
-`/ready` instead: its `capabilities.voice_receptionist` is the call process's
-own value whichever process answers. Take these steps in this order, so that
-calls are never switched on by the change itself:
+**Kill switch: the console's `voice_receptionist` switch** (Feature flags page,
+or `PATCH /v1/admin/flags/voice_receptionist?enabled=false`, `ura_admin`). The
+change is stored and applied at once in the process that answered. Every other
+process applies it within `FLAG_SYNC_INTERVAL_SECONDS`, 5 s by default (ADR-0044;
+before it, the change reached one process of two, G612). From then on, new call
+sockets are refused: a caller's, the staff call stream and an officer's audio.
+Sockets already open carry on.
 
-1. Set the secret to `false`. The Space restarts, and each process starts with
-   the stored override if there is one, otherwise with `false`.
-2. When the Space is back, read `/ready`. The call process reports `off`
-   whenever its flag is off, so:
-   - `off`: the switch took; stop here.
-   - `ready`: a stored `true` override won, and calls are still on. Go to step 3.
-   - `unavailable: <why>`: a stored `true` override won, but the call process
-     could not start the receptionist. It takes no calls now, but the override
-     stays and a later restart can switch calls on. Go to step 3.
+1. Switch it off. The Feature flags page's note shows the configured sync
+   interval; it is how often each process reads the store, not a confirmation.
+2. Read `/ready` until `capabilities.voice_receptionist` says `off`. It is the
+   call process's own value whichever process answers. The chat process caches
+   it for 10 s, so allow about 15 s.
+   - `off`: done.
+   - Still `ready` after 30 s: the call process has not applied the change. Its
+     log says `Flag overrides could not be read` when it cannot read the store.
+     Use the Space secret below.
    - `unavailable: the call process is not answering` or `… is not ready`: the
-     chat process answered and could not read the call process. Its state is
-     unknown; read `/ready` again in a minute.
+     chat process could not read the call process. Read `/ready` again in a
+     minute.
+
+**Fallback: set `FLAG_VOICE_RECEPTIONIST=false` as a Space secret**, when the
+console or the database is unavailable. Change the existing value if the Space
+already has one. It restarts the Space and reaches both processes. A stored
+override beats the secret, at a process's start and on every sync while it runs,
+so:
+
+1. Set the secret to `false`. The Space restarts.
+2. When the Space is back, read `/ready`:
+   - `off`: done.
+   - `ready`, or `unavailable: <why>`: a stored `true` override won. Go to step 3.
+   - `unavailable: the call process is not answering` or `… is not ready`: its
+     state is unknown; read `/ready` again in a minute.
 3. Delete the stored override (`DELETE /v1/admin/flags/voice_receptionist`,
-   `ura_admin`). The row is removed whichever process answers. The call process
-   keeps the value it started with, so calls stay on until step 4.
-4. Restart the Space (`hf spaces restart landwind22/ura-chatbot`) and read
-   `/ready` again. The call process starts with no override and reads `false`.
-   The switch has taken only when `/ready` says `off`. While it says `ready`,
-   calls are on. If it says anything other than `off` once the call process
-   answers, check the secret's name and value and whether someone set the
-   override again.
+   `ura_admin`). Every process clears it within one sync interval and follows
+   the secret. Read `/ready` again after about 15 s: it says `off`. If the sync
+   is off (`FLAG_SYNC_INTERVAL_SECONDS=0`), restart the Space instead.
+4. If the `DELETE` fails because the database rejects writes, the stored
+   override cannot be removed while the API runs, and it keeps beating the
+   secret.
+   - **On the Space**, restart it (`hf spaces restart landwind22/ura-chatbot`).
+     Its database is `/app/data_store/analytics.db` on the container's own disk,
+     and the Space has no persistent storage. A Space's disk is lost when it
+     restarts (Hugging Face, "Disk usage on Spaces"), so it starts with no
+     stored overrides and the secret applies. Read `/ready` again. The restart
+     loses the rest of that database too: conversations, tickets and the audit
+     trail. That is true of every restart and roll of the Space, the secret
+     change in step 1 included. The Space offers this runbook no shell to copy
+     the file first.
+   - **On a deployment whose database survives a restart**, nothing in the app
+     can stop calls until the store accepts writes again. Stop the API (scale
+     it to zero). Fix the write failure, then delete the row out of band:
+     `psql "$POSTGRES_DSN" -c "DELETE FROM flag_overrides WHERE name = 'voice_receptionist'"`,
+     or for SQLite
+     `sqlite3 "${ANALYTICS_DB_DIR:?set to the API's value}/analytics.db" "DELETE FROM flag_overrides WHERE name = 'voice_receptionist'"`.
+     Set `ANALYTICS_DB_DIR` to the value the API runs with first. When the API
+     has none, it uses `data_store/` under the project root (`/app/data_store`
+     in the image; `App/backend/app/database.py`). With the variable unset, the
+     command refuses to run rather than open the wrong file. Then start the API
+     and read `/ready`.
 
 The 1001 close and the `off` field show whether the switch took (the ADR-0042
 update below).
 
-**Turning calls back on.** The Space image sets `FLAG_VOICE_RECEPTIONIST=true`
-(`App/deploy/hf-space/Dockerfile`), so deleting the secret, or setting it to
-`true`, restarts the Space with calls on. Confirm that `/ready` says `ready`. If
-it says `off`, a stored `false` override won: delete it as in step 3, then
-restart the Space.
+**Turning calls back on.** Delete the stored override
+(`DELETE /v1/admin/flags/voice_receptionist`, or Reset on the Feature flags
+page). The Space image sets `FLAG_VOICE_RECEPTIONIST=true`
+(`App/deploy/hf-space/Dockerfile`), so every process then follows it within one
+sync interval. If you used the secret, delete it, or set it to `true`; that
+restarts the Space. Then confirm that `/ready` says `ready`:
+- `off`: delete any stored `false` override. With the sync off
+  (`FLAG_SYNC_INTERVAL_SECONDS=0`) the call process does not apply the deletion
+  until it restarts, so restart the Space (`hf spaces restart landwind22/ura-chatbot`).
+- `unavailable: switched on after the API started`: the call process started
+  with calls off. Restart the Space (`hf spaces restart landwind22/ura-chatbot`).
 
 **Live probes after a roll** (the Space is `https://landwind22-ura-chatbot.hf.space`):
 
