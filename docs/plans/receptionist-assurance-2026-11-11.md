@@ -208,6 +208,12 @@ Left open by this phase:
 - **Not seen on the Space yet.** After the roll, switch calls off from the console,
   read `/ready` until it says `off`, then switch them back on.
 - **Replicas with a database each** still need `FLAG_*` on every replica.
+- **G616 (new):** the Space's database is on the container's own disk with no
+  persistent storage. Every restart and roll loses it: conversations, tickets,
+  call records and owed callbacks, the audit ledger and stored flag overrides.
+  The service owner decides. `ANALYTICS_DB_DIR` needs persistent storage
+  whichever backend holds the analytics tables: the audit ledger and
+  conversation memory stay SQLite-backed under it even with managed Postgres.
 
 ## Not in scope
 
