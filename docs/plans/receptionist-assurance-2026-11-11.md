@@ -1,7 +1,7 @@
 # Call receptionist assurance review — 11 November 2026
 
-Status: phases 1 to 5 implemented and on the Space; phase 6 (G612) implemented on `fix/flag-overrides-every-process-2026-11`. Phase 5 (G306 for one container, PR 718) has been live since 2026-11-12 (`sha-4609a1c`), and its live probes passed; a real officer handoff on the Space has not been run yet.
-Baseline: `dev` at `9a5043db`. Decisions: [ADR-0039](../adr/0039-call-handoff-and-caller-safety.md) (phase 1), [ADR-0040](../adr/0040-call-records-and-accountability.md) (phase 2), [ADR-0041](../adr/0041-receptionist-starts-safely-fails-visibly.md) (phase 3), [ADR-0042](../adr/0042-call-screens-say-what-happened.md) (phase 4), [ADR-0043](../adr/0043-one-call-process.md) (phase 5), [ADR-0044](../adr/0044-flag-changes-reach-every-process.md) (phase 6).
+Status: phases 1 to 6 implemented and on the Space; phase 7 part A (G304, G610, G614) implemented on `fix/receptionist-p7-sockets-wrapup-alert-2026-11`. Phase 5 (G306 for one container, PR 718) has been live since 2026-11-12 (`sha-4609a1c`), and its live probes passed; a real officer handoff on the Space has not been run yet.
+Baseline: `dev` at `9a5043db`. Decisions: [ADR-0039](../adr/0039-call-handoff-and-caller-safety.md) (phase 1), [ADR-0040](../adr/0040-call-records-and-accountability.md) (phase 2), [ADR-0041](../adr/0041-receptionist-starts-safely-fails-visibly.md) (phase 3), [ADR-0042](../adr/0042-call-screens-say-what-happened.md) (phase 4), [ADR-0043](../adr/0043-one-call-process.md) (phase 5), [ADR-0044](../adr/0044-flag-changes-reach-every-process.md) (phase 6), [ADR-0045](../adr/0045-call-sockets-wrap-ups-and-a-dead-call-process.md) (phase 7 part A).
 The [30 October review](receptionist-assurance-2026-10-30.md) covered teardown,
 media isolation and draft evidence; this one covers the whole call flow: what the
 AI says, the handoff to an officer, the officer's desk, the two browser clients,
@@ -214,6 +214,25 @@ Left open by this phase:
   The service owner decides. `ANALYTICS_DB_DIR` needs persistent storage
   whichever backend holds the analytics tables: the audit ledger and
   conversation memory stay SQLite-backed under it even with managed Postgres.
+
+## Phase 7 — sockets, wrap-ups and a dead call process (part A)
+
+[ADR-0045](../adr/0045-call-sockets-wrap-ups-and-a-dead-call-process.md). Part B
+(G591, superseded model runs) follows in its own change because it touches the
+generation path chat shares.
+
+| Gap | What changed |
+| --- | --- |
+| G304 | Both call sockets drop a binary frame over 16 KiB, an odd-length one (mu-law exempt) and any frame over 64 000 B/s (burst 128 000) or 200 frames/s; the officer's text frames are held to 15 per 10 s. Drops are counted (`receptionist_frames_dropped_total{side,reason}`); only a five-second flood closes the socket, 1008. |
+| G610 | A call that ends under an officer (time limit, a server end, their reconnect grace) moves them to `wrap_up` while their presence is still that call's; the heartbeat keeps `wrap_up` and returns `wrap_up_call_id` until the wrap-up is saved, and the console opens it, after a reload too. |
+| G614 | The chat process exports `receptionist_call_process_up` (0 when the call process does not answer or is not ready), refreshed every 30 s and on `/ready`; `UraCallProcessDown` alerts after 5 minutes. |
+
+Left open by this part:
+
+- **The Space is not scraped**, so `UraCallProcessDown` cannot fire there (G614).
+- **LiveKit control sockets'** text frames are not rate-limited (G304).
+- **A call the officer passed on or lapsed off** is owed only once it ends (G610).
+- **Pipecat's receive loop** closing a flooded caller was not run locally.
 
 ## Not in scope
 
