@@ -108,7 +108,7 @@ describe('speakStreamed', () => {
     const spoken = speakStreamed('Three pieces.');
     await vi.waitFor(() => expect(FakeSource.all).toHaveLength(2));
     finishAudio();
-    expect(await spoken).toMatchObject({ pieces: 2, failed: 1 });
+    expect(await spoken).toMatchObject({ pieces: 2, failed: 1, complete: false });
   });
 
   it('skips a piece it cannot decode once speech has started', async () => {
@@ -151,6 +151,47 @@ describe('speakStreamed', () => {
     await vi.waitFor(() => expect(FakeSource.all).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 80));
     finishAudio();
-    expect(await spoken).toMatchObject({ pieces: 1, stopped: false });
+    // G645: a reading the server never finished is not a whole reading.
+    expect(await spoken).toMatchObject({ pieces: 1, stopped: false, complete: false });
+  });
+
+  it('is complete only when the server closed the stream and every piece played', async () => {
+    vi.stubGlobal('fetch', respondWith([line(piece(0, 1)) + line(piece(1, 1)) + line({ done: true, failed: 0 })]));
+    const spoken = speakStreamed('Two pieces.');
+    await vi.waitFor(() => expect(FakeSource.all).toHaveLength(2));
+    finishAudio();
+    expect(await spoken).toMatchObject({ pieces: 2, failed: 0, complete: true });
+  });
+
+  it('is not complete when the stream ends without its closing line', async () => {
+    vi.stubGlobal('fetch', respondWith([line(piece(0, 1))]));
+    const spoken = speakStreamed('Cut off.');
+    await vi.waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    finishAudio();
+    expect(await spoken).toMatchObject({ pieces: 1, complete: false });
+  });
+
+  it('is not complete when the server says a piece failed', async () => {
+    vi.stubGlobal('fetch', respondWith([line(piece(0, 1)) + line({ done: true, failed: 1 })]));
+    const spoken = speakStreamed('One failed upstream.');
+    await vi.waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    finishAudio();
+    expect(await spoken).toMatchObject({ complete: false });
+  });
+
+  // CodeRabbit on PR 733: the closing line arrived while audio was still
+  // queued; a Stop after it could not reach the finished stream, so the cut-off
+  // reading came back complete and voice mode reopened the microphone.
+  it('is not complete when stopped after the closing line, while audio still plays', async () => {
+    vi.stubGlobal('fetch', respondWith([line(piece(0, 1.5)) + line(piece(1, 2)) + line({ done: true, pieces: 2, failed: 0 })]));
+    const reading = speakStreamed('two sentences');
+    await vi.waitFor(() => expect(FakeSource.all.length).toBe(2));
+    // The stream has closed; the second piece is still to be heard.
+    await new Promise((r) => setTimeout(r, 0));
+    stopPlayback();
+    const outcome = await reading;
+    expect(outcome.stopped).toBe(true);
+    expect(outcome.complete).toBe(false);
   });
 });
+

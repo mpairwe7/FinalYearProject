@@ -214,4 +214,18 @@ describe('VoiceModeDock', () => {
     expect(label()).toHaveTextContent('Ninasikiliza');
     expect(screen.getByRole('button', { name: 'Toka hali ya sauti' })).toBeInTheDocument();
   });
+
+  // G647: voice mode hid the composer's footer, the only always-visible notice
+  // that an AI is answering (EU AI Act Art. 50(1)).
+  it('says, in the reader\'s language, that an AI is answering', () => {
+    try {
+      useChatStore.setState({ locale: 'sw' });
+      dock({ phase: 'listening' });
+      const notice = screen.getByTestId('voice-dock-ai-notice');
+      expect(notice).toHaveTextContent(/AI/);
+      expect(notice).not.toHaveTextContent(/You are talking to/);
+    } finally {
+      useChatStore.setState({ locale: 'en' });
+    }
+  });
 });

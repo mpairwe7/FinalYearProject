@@ -60,6 +60,15 @@ describe('NarrationBar (G200, G202)', () => {
     expect(screen.getByRole('button', { name: 'Pause reading' })).toBeDisabled();
   });
 
+  // CodeRabbit on PR 733: outside voice mode a partial reading was announced
+  // only to screen readers; nothing on screen said part of it was not heard.
+  it('says when only part of a reply could be read aloud', () => {
+    const { onDismiss } = bar({ active: false, partial: true });
+    expect(screen.getByRole('status')).toHaveTextContent("Part of this answer couldn't be read aloud");
+    fireEvent.click(screen.getByRole('button', { name: /dismiss/i }));
+    expect(onDismiss).toHaveBeenCalled();
+  });
+
   it('says when a reply could not be read aloud, with a retry', () => {
     const { onRetry, onDismiss } = bar({ active: false, failed: true });
     expect(screen.getByRole('status')).toHaveTextContent('Couldn’t read this aloud. The answer is on screen.');
