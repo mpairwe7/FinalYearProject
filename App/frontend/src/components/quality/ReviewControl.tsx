@@ -30,6 +30,11 @@ export function ReviewControl({ item }: { item: NeedsReviewItem }) {
 
   const decide = (status: ReviewStatus | "open") =>
     save.mutate({ item, status, note: status === "open" ? "" : note.trim() });
+  // G639: Reopen takes a finding back; it asks first, and the server keeps
+  // the decision in the item's history.
+  const [confirmReopen, setConfirmReopen] = useState(false);
+  const earlier = item.history ?? [];
+  const confirmId = `qa-reopen-${item.item_type}-${item.item_id}`;
 
   return (
     <div className="qa-review" role="group" aria-label={`Decision on: ${item.title}`}>
@@ -80,7 +85,13 @@ export function ReviewControl({ item }: { item: NeedsReviewItem }) {
           </button>
         ) : null}
         {review ? (
-          <button type="button" className="ops-btn is-ghost is-sm" disabled={save.isPending} onClick={() => decide("open")}>
+          <button
+            type="button"
+            className="ops-btn is-ghost is-sm"
+            disabled={save.isPending}
+            aria-expanded={confirmReopen}
+            onClick={() => setConfirmReopen(true)}
+          >
             Reopen
           </button>
         ) : null}
@@ -91,6 +102,48 @@ export function ReviewControl({ item }: { item: NeedsReviewItem }) {
           </span>
         ) : null}
       </div>
+      {confirmReopen && review ? (
+        <div className="qa-review-confirm" role="alertdialog" aria-labelledby={`${confirmId}-title`}>
+          <p id={`${confirmId}-title`}>
+            <strong>Reopen this item?</strong> It goes back to the open queue. The decision
+            {review.note ? " and its note" : ""} stays in the history, with who reopened it.
+          </p>
+          <div className="qa-review-actions">
+            <button
+              type="button"
+              className="ops-btn is-sm"
+              disabled={save.isPending}
+              onClick={() => {
+                setConfirmReopen(false);
+                decide("open");
+              }}
+            >
+              Reopen it
+            </button>
+            <button type="button" className="ops-btn is-primary is-sm" onClick={() => setConfirmReopen(false)}>
+              Keep the decision
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {earlier.length > 0 && !review ? (
+        <ul className="qa-review-history" aria-label="Earlier decisions">
+          {earlier.map((h, idx) => (
+            <li key={`${h.decided_at}-${idx}`}>
+              {h.status === "open" ? (
+                <>Reopened{h.reviewer_name ? ` by ${h.reviewer_name}` : ""}</>
+              ) : (
+                <>
+                  <strong>{REVIEW_LABEL[h.status]}</strong>
+                  {h.reviewer_name ? ` by ${h.reviewer_name}` : ""}
+                  {h.note ? <span className="qa-review-note">“{h.note}”</span> : null}
+                </>
+              )}{" "}
+              · {when(h.decided_at)}
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }

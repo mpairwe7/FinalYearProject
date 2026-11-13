@@ -130,6 +130,29 @@ class QueueTests(unittest.TestCase):
         self.assertIsNone(audit_reviews.set_review("rating", low["id"], status="open"))
         self.assertIn(low["id"], _ids(_queue(status="open")))
 
+    def test_reopening_keeps_the_decision_it_takes_back(self):
+        """G639: Reopen deleted the decision and its note; the ledger kept only
+        ``note_chars``, so an auditor's finding could vanish in one click."""
+        low = _rating("call_officer_csat", score=2)
+        audit_reviews.set_review("rating", low["id"], status="action_needed", note="AI quoted the wrong PAYE band", reviewer_name="Auditor A")
+        audit_reviews.set_review("rating", low["id"], status="open", reviewer_name="Auditor B")
+        history = audit_reviews.history("rating", low["id"])
+        self.assertEqual([h["status"] for h in history], ["action_needed", "open"])
+        self.assertEqual(history[0]["note"], "AI quoted the wrong PAYE band")
+        self.assertEqual((history[0]["reviewer_name"], history[1]["reviewer_name"]), ("Auditor A", "Auditor B"))
+        # The queue's current decision is cleared, as before, and the queue
+        # shows what was decided before.
+        self.assertIsNone(audit_reviews.get_review("rating", low["id"]))
+        item = next(i for i in _queue(status="open")["items"] if i["item_id"] == low["id"])
+        self.assertEqual([h["status"] for h in item["history"]], ["action_needed", "open"])
+
+    def test_the_history_goes_when_its_item_does(self):
+        low = _rating("chat_officer_csat", score=1)
+        audit_reviews.set_review("rating", low["id"], status="reviewed", note="ok")
+        db.execute("DELETE FROM service_ratings WHERE id = ?", (low["id"],))
+        audit_reviews.purge()
+        self.assertEqual(audit_reviews.history("rating", low["id"]), [])
+
     def test_the_note_is_redacted(self):
         low = _rating("chat_officer_csat", score=1)
         review = audit_reviews.set_review("rating", low["id"], status="reviewed", note="Caller on 0772123456 was upset")

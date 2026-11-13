@@ -25,7 +25,7 @@ import {
   PhoneIcon,
 } from "../ops/icons";
 import { useEndChat } from "../../hooks/useAnalyticsDashboard";
-import { TICKET_MACROS } from "../../lib/ticketMacros";
+import { TICKET_MACROS, unfilledPlaceholders } from "../../lib/ticketMacros";
 import {
   officerHandle,
   STATUS_LABEL,
@@ -59,6 +59,11 @@ export function TicketComposer({
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [figuresSurvived, setFiguresSurvived] = useState<boolean | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  // G635: the English the preview was made from. A preview goes with a reply
+  // only if it is of exactly that text and its figure check passed; an edit
+  // drops it. The server checks figures again either way.
+  const [previewFor, setPreviewFor] = useState("");
+  const [previewUnavailable, setPreviewUnavailable] = useState(false);
   const handle = officerHandle(who);
   const mine = handle && (ticket.assignee || "").toLowerCase() === handle.toLowerCase();
   const locked = Boolean(ticket.assignee && handle && !mine);
@@ -72,32 +77,56 @@ export function TicketComposer({
   const isChat = ticket.modality !== "voice";
   const chatLive = isChat && ticket.chat?.state !== "ended" && ticket.status !== "resolved" && ticket.status !== "wontfix";
 
+  const clearPreview = () => {
+    setPreviewText("");
+    setPreviewBackend("");
+    setPreviewFor("");
+    setFiguresSurvived(null);
+    setPreviewUnavailable(false);
+  };
+
   const generatePreview = async () => {
     if (!reply.trim() || !isVernacular) return;
+    const source = reply.trim();
+    clearPreview();
     setIsPreviewing(true);
     setShowPreview(true);
     try {
-      const res = await analyticsApi.translate(reply.trim(), "en", ticket.locale || "lg");
-      if (res && res.text) {
-        setPreviewText(res.text);
-        setPreviewBackend(res.backend || "");
-        setFiguresSurvived(res.figures_survived !== false);
+      const res = await analyticsApi.translate(source, "en", ticket.locale || "lg");
+      // No translation came back: the server returns the English with an
+      // error and backend "unavailable". That is not a translation, and its
+      // figures "surviving" proves nothing (G635).
+      if (!res || !res.text || res.error || res.backend === "unavailable") {
+        setPreviewUnavailable(true);
+        return;
       }
+      setPreviewText(res.text);
+      setPreviewBackend(res.backend || "");
+      setPreviewFor(source);
+      setFiguresSurvived(res.figures_survived !== false);
     } catch {
-      setPreviewText("");
-      setFiguresSurvived(null);
+      setPreviewUnavailable(true);
     } finally {
       setIsPreviewing(false);
     }
   };
 
+  // G636: a template's [[parts]] are what the officer found; none may reach
+  // the taxpayer unwritten.
+  const toFill = unfilledPlaceholders(reply);
+  const blocked = toFill.length > 0;
+
+  /** The preview, if it may go with this exact reply. */
+  const sendablePreview = () =>
+    previewText.trim() && previewFor === reply.trim() && figuresSurvived === true ? previewText.trim() : "";
+
   const sendReply = (resolve: boolean) => {
+    if (unfilledPlaceholders(reply).length) return;
     const patch: TicketPatch = {};
     if (reply.trim()) {
       patch.officer_reply = reply.trim();
-      if (previewText.trim()) {
-        patch.officer_reply_localized = previewText.trim();
-      }
+      const localized = sendablePreview();
+      if (localized) patch.officer_reply_localized = localized;
     }
     if (note.trim()) patch.staff_note = note.trim();
     if (resolve) patch.status = "resolved";
@@ -111,9 +140,8 @@ export function TicketComposer({
     onPatch(patch);
     setReply("");
     setNote("");
-    setPreviewText("");
+    clearPreview();
     setShowPreview(false);
-    setFiguresSurvived(null);
   };
 
   const confirmEndChat = () => {
@@ -123,16 +151,15 @@ export function TicketComposer({
         body: {
           outcome,
           closing_message: reply.trim() || undefined,
-          closing_message_localized: reply.trim() && previewText.trim() ? previewText.trim() : undefined,
+          closing_message_localized: reply.trim() ? sendablePreview() || undefined : undefined,
         },
       },
       {
         onSuccess: () => {
           setConfirmEnd(false);
           setReply("");
-          setPreviewText("");
+          clearPreview();
           setShowPreview(false);
-          setFiguresSurvived(null);
         },
       },
     );
@@ -188,7 +215,10 @@ export function TicketComposer({
       {/* Two fields, never one. One reaches the taxpayer and one does not, so
           the difference is stated on the label rather than left to be
           remembered — and shown, by the edge each field carries. */}
-      <label className="st-field is-outbound">
+      {/* A div, not a label: the Preview button sits in this field, and a
+          button inside a label takes the label's text as its accessible name.
+          The textarea names itself (aria-label). */}
+      <div className="st-field is-outbound">
         <div className="st-field-header-row">
           <span className="st-field-label">
             Reply to the taxpayer (English)
@@ -221,13 +251,12 @@ export function TicketComposer({
           placeholder="Answer the question they actually asked in English…"
           onChange={(event) => {
             setReply(event.target.value);
-            if (showPreview) {
-              setFiguresSurvived(null);
-            }
+            // G635: a preview of other words is not this reply's translation.
+            if (previewText || figuresSurvived !== null || previewUnavailable) clearPreview();
           }}
           aria-label="Reply to the taxpayer"
         />
-      </label>
+      </div>
 
       {showPreview && isVernacular ? (
         <div className="st-translation-preview-panel" role="region" aria-label="Translation Preview">
@@ -258,12 +287,17 @@ export function TicketComposer({
                 </div>
               ) : figuresSurvived === true ? (
                 <div className="st-fidelity-ok">
-                  <CheckIcon /> Figures &amp; statutory amounts verified
+                  <CheckIcon /> Figure check passed (automatic): the same numbers appear in both texts
                 </div>
               ) : null}
             </>
+          ) : previewUnavailable ? (
+            <p className="st-preview-empty" role="status">
+              Translation is unavailable right now. When you send, the server tries again; if it still
+              cannot, the taxpayer receives your English.
+            </p>
           ) : (
-            <p className="st-preview-empty">Could not generate live preview. Reply will be localized on delivery.</p>
+            <p className="st-preview-empty">Edit made: preview again to see the translation of this text.</p>
           )}
         </div>
       ) : null}
@@ -283,11 +317,16 @@ export function TicketComposer({
         />
       </label>
 
+      {blocked ? (
+        <p className="st-save-err" role="status">
+          Fill in or delete the parts in [[double brackets]] before sending: {toFill.join("; ")}.
+        </p>
+      ) : null}
       <div className="st-actions">
         <button
           type="button"
           className="ops-btn is-primary"
-          disabled={!reply.trim() || pending || locked}
+          disabled={!reply.trim() || pending || locked || blocked}
           onClick={() => sendReply(false)}
         >
           {pending ? "Saving…" : "Send reply"}
@@ -295,7 +334,7 @@ export function TicketComposer({
         <button
           type="button"
           className="ops-btn"
-          disabled={pending || locked || (!reply.trim() && !note.trim())}
+          disabled={pending || locked || blocked || (!reply.trim() && !note.trim())}
           onClick={() => sendReply(true)}
         >
           {chatLive ? "Send & end chat" : "Send and resolve"}
@@ -381,7 +420,7 @@ export function TicketComposer({
             </label>
           </fieldset>
           <div className="st-actions">
-            <button type="button" className="ops-btn is-primary" disabled={endChat.isPending} onClick={confirmEndChat}>
+            <button type="button" className="ops-btn is-primary" disabled={endChat.isPending || blocked} onClick={confirmEndChat}>
               {endChat.isPending ? "Ending…" : "End chat"}
             </button>
             <button type="button" className="ops-btn" onClick={() => setConfirmEnd(false)} disabled={endChat.isPending}>

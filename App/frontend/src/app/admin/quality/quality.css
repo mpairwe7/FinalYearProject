@@ -775,3 +775,24 @@
     grid-row: 2;
   }
 }
+
+
+/* G639: Reopen asks first, and earlier decisions stay visible. */
+.qa-review-confirm {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--ops-line);
+  border-left: 3px solid var(--ops-warn-line);
+  background: var(--ops-warn-fill);
+  border-radius: 6px;
+  font-size: 13px;
+}
+.qa-review-confirm p {
+  margin: 0 0 6px;
+}
+.qa-review-history {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--text-3);
+}

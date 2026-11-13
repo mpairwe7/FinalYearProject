@@ -148,6 +148,33 @@ class TaxpayerThreadTests(_Chat):
             self.assertFalse(msg["translated"])
             self.assertEqual(msg["original_text"], "")
 
+    def test_a_supplied_translation_that_lost_a_figure_is_not_sent(self):
+        """G635: the console sent the officer's earlier preview after they corrected
+        the English, so the taxpayer read the old amount in their language."""
+        db.update_ticket(self.tid, locale="lg")
+        self.take_case()
+        with mock.patch("app.service.localize_reply", return_value="Obanjibwa UGX 50,000."):
+            r = self.client.patch(
+                f"/v1/admin/tickets/{self.tid}",
+                json={"officer_reply": "You owe UGX 50,000.", "officer_reply_localized": "Obanjibwa UGX 200,000."},
+                headers=OFFICER,
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        msg = self.thread()["messages"][0]
+        self.assertNotIn("200,000", msg["text"])
+        self.assertIn("50,000", msg["text"])
+
+    def test_a_supplied_translation_that_keeps_the_figures_is_used(self):
+        db.update_ticket(self.tid, locale="lg")
+        self.take_case()
+        r = self.client.patch(
+            f"/v1/admin/tickets/{self.tid}",
+            json={"officer_reply": "You owe UGX 50,000.", "officer_reply_localized": "Obanjibwa UGX 50,000."},
+            headers=OFFICER,
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.thread()["messages"][0]["text"], "Obanjibwa UGX 50,000.")
+
     def test_the_officer_and_the_auditor_read_the_thread_on_the_case(self):
         self.take_case()
         self.officer_says("Which period?")
@@ -188,6 +215,20 @@ class EndChatTests(_Chat):
         self.assertEqual(rating["status"], "pending")
         self.assertTrue(rating["officer_name"].startswith("Officer "))
         self.assertEqual(rating["user_id"], self.taxpayer)
+
+    def test_a_closing_translation_that_lost_a_figure_is_not_sent(self):
+        """G635 on End chat: the closing message carried the console's preview too."""
+        db.update_ticket(self.tid, locale="lg")
+        self.take_case()
+        with mock.patch("app.service.localize_reply", return_value="Sasula UGX 50,000 nga 15."):
+            r = self.end(
+                closing_message="Pay UGX 50,000 by the 15th.",
+                closing_message_localized="Sasula UGX 200,000 nga 15.",
+                outcome="resolved",
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        officer = [m for m in self.thread()["messages"] if m["sender"] == "officer"][0]
+        self.assertNotIn("200,000", officer["text"])
 
     def test_closing_without_resolving_is_recorded_as_closed(self):
         self.take_case()

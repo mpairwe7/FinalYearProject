@@ -1,0 +1,117 @@
+# ADR-0050: Staff controls that change what taxpayers are told say what they do
+
+## Status
+
+Accepted, 2026-11-13. Phase 3 of the
+[13 November intelligent UI integration audit](../plans/intelligent-ui-integration-audit-2026-11-13.md)
+(G634–G639). The service owner asked for the audit's fixes to be applied phase by
+phase in the session that made it.
+
+## Context and Problem Statement
+
+Six staff controls change what the assistant tells taxpayers, or the record of
+what was wrong with it, and each made that change easier or larger than it looked:
+
+- "Verify & Hotfix" on a taxpayer's discrepancy report pre-filled the precedence
+  rule (injected as law that "STRICTLY SUPERSEDES" retrieved passages) with the
+  taxpayer's own unverified correction, ticked "withdraw the cited sources" by
+  default, wrote a stock note, required no statute, audited only two ids, and left
+  cached answers in place (G634, Critical);
+- the officer's translation preview was sent after the English was edited, and
+  "Figures & statutory amounts verified" was shown when translation was
+  unavailable (G635);
+- one-click canned replies stated results — an invoice "audited", a signature
+  "authentic", a credit "reconciled against URA ledgers", customs "cleared" — that
+  nothing in the workbench recorded, and asked for an upload the officer chat
+  cannot take (G636);
+- the overrides console said "character for character" and "word for word" while
+  the server matches normalized, rewritten and translated questions and replaces
+  an override with the same key without a word (G637);
+- the flags console called overrides durable on the Space, which loses them on
+  restart, labelled stored overrides "this replica", and switched the figure hold
+  off in one click (G638);
+- "Reopen" deleted an auditor's finding and its note, unconfirmed (G639).
+
+OWASP ASI09 asks to separate preview from effect and to give plain-language risk
+summaries; OWASP LLM03 (2026) asks for approval on high-impact actions; EU AI Act
+Art. 14(4) (a benchmark here, not a duty) asks that overseers understand what they
+change and can stay aware of automation bias.
+
+## Considered Options
+
+For the canned replies (G636): remove the result-stating ones, or keep them as
+templates the officer must complete. Officers do check invoices and credits in
+URA's own systems, so the shortcuts are useful; what was wrong was asserting a
+result. Chosen: templates with `[[…]]` parts the composer will not send unfilled.
+
+For a stale translation (G635): only fix the console, or also refuse it on the
+server. Another client can send `officer_reply_localized` too. Chosen: both.
+
+## Decision Outcome
+
+1. **Verify & Hotfix** starts empty with nothing withdrawn; a precedence rule needs
+   a statute reference (the console disables Confirm; the API answers 422 before
+   writing anything); a summary says what the hotfix will change for every
+   taxpayer before it is applied. The API audits the override, the precedence
+   (`rule_sha256`, statute) and the tombstones (sources), and retires cached
+   answers as the standalone routes do.
+2. **A translation that loses a figure is not sent.** The reply and End-chat routes
+   drop a supplied translation whose figures differ from the English
+   (`mt.figures_survived`) and translate again through `localize_reply`, counted
+   in `officer_reply_translation_rejected_total`. The console sends a preview only
+   of exactly the text being sent, after its figure check passed; an edit drops
+   it; an unavailable translation says so.
+3. **Canned results are templates.** Their `[[…]]` parts are what the officer
+   found; Send, Send & end and End chat are disabled while any remain
+   (`unfilledPlaceholders`). The document request names email or a station.
+4. **The overrides console tells the truth.** It shows the normalized key, explains
+   rewritten and translated matching, and shows the live answer a save replaces,
+   with "Replace the live answer" on the button; the ledger records `replaced`
+   and the before and after digests.
+5. **The flags console says what it knows.** The API reports
+   `overrides_durability` (`durable`, `ephemeral`, `unknown`) from where the store
+   lives, with `ANALYTICS_DB_PERSISTENT` for a mounted volume; the console words
+   it accordingly, labels a stored override "stored · every process", and asks
+   before switching off a safety control (`stream_figure_hold`,
+   `spoken_figure_guard`, `action_level_audit_v3`, `guardrail_strike_friction`,
+   `verifiable_decision_receipts`, `autonomous_outcome_verification`).
+6. **Review decisions are kept.** Every decision, a reopening included, is appended
+   to `audit_review_history` (purged by the same rules as the decision); the queue
+   returns it; Reopen asks first and earlier decisions are shown.
+
+## Consequences
+
+- A hotfix takes a deliberate entry and a statute; an administrator in a hurry can
+  no longer turn a taxpayer's claim into law for the model in two clicks.
+- An officer's reply may reach the taxpayer in a server translation rather than
+  the preview they saw, when the preview no longer matched; the translation
+  carries the same figures.
+- Templates add a step for officers who did check something; that step is the
+  point.
+- The Space's flags console now says its overrides are lost on restart, which is
+  true until storage persists (G616); the `FLAG_*` secret remains the durable path.
+- `normalizeOverrideQuery` mirrors `cms.normalize_query`; `toLowerCase` and
+  `casefold` differ on a few letters such as `ß`.
+- Discrepancies are still not tenant-scoped; that part of G634 stays open.
+
+## Confirmation
+
+Each test was watched failing before the fix; for G635 the server checks were
+also disabled after they passed and the tests failed again:
+
+- `App/backend/tests/test_discrepancy_and_precedence.py`: a rule without a statute is
+  422 and writes nothing; every hotfix write is audited and the cache is retired.
+- `App/frontend/src/__tests__/app/admin/DiscrepanciesAdmin.test.tsx`: empty fields,
+  nothing withdrawn, the statute gate and the change summary.
+- `App/backend/tests/test_officer_chat.py`: a supplied reply or closing translation
+  that lost a figure is replaced; one that kept them is used.
+- `App/frontend/src/__tests__/components/TicketComposerTranslation.test.tsx`: no stale
+  preview is sent; an unavailable translation is not called verified; a template
+  with unfilled parts cannot be sent.
+- `App/frontend/src/__tests__/lib/ticketMacros.test.ts`: no macro states a result.
+- `App/backend/tests/test_override_replacement_audit.py`,
+  `App/frontend/src/__tests__/app/adminOverrides.test.tsx`.
+- `App/backend/tests/test_flag_override_durability.py`,
+  `App/frontend/src/__tests__/app/adminFlags.test.tsx`.
+- `App/backend/tests/test_audit_reviews.py`,
+  `App/frontend/src/__tests__/components/ReviewControl.test.tsx`.

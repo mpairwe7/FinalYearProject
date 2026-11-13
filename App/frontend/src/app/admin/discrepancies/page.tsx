@@ -61,6 +61,60 @@ export function discrepanciesToCsv(rows: DiscrepancyRecord[]): string {
   );
 }
 
+/**
+ * What a hotfix will change, in plain words, before it is applied (G634).
+ * Each part reaches every taxpayer: an override answers a question, a
+ * precedence rule is told to the model as law that beats the passages, and a
+ * withdrawn source leaves retrieval.
+ */
+function HotfixSummary({
+  overrideQuery,
+  overrideReply,
+  precedenceRule,
+  precedenceTopic,
+  statuteRef,
+  withdrawn,
+}: {
+  overrideQuery: string;
+  overrideReply: string;
+  precedenceRule: string;
+  precedenceTopic: string;
+  statuteRef: string;
+  withdrawn: string[];
+}) {
+  const lines: React.ReactNode[] = [];
+  if (overrideQuery.trim() && overrideReply.trim()) {
+    lines.push(
+      <li key="override">
+        Taxpayers whose question matches “{overrideQuery.trim()}” will be answered, word for word in English and
+        machine-translated otherwise: “{overrideReply.trim()}”
+      </li>,
+    );
+  }
+  if (precedenceRule.trim()) {
+    lines.push(
+      <li key="rule">
+        The model will be told, as law that overrides the passages it retrieves
+        {precedenceTopic.trim() ? ` (${precedenceTopic.trim()})` : ""}: “{precedenceRule.trim()}”
+        {statuteRef.trim() ? ` — ${statuteRef.trim()}` : " — no statute named yet"}
+      </li>,
+    );
+  }
+  if (withdrawn.length) {
+    lines.push(<li key="withdrawn">Withdrawn from retrieval for every taxpayer: {withdrawn.join(", ")}</li>);
+  }
+  return (
+    <section className="disc-summary" role="region" aria-label="What this will change">
+      <h5>What this will change</h5>
+      {lines.length ? (
+        <ul>{lines}</ul>
+      ) : (
+        <p>Marks the report verified; changes nothing the assistant says.</p>
+      )}
+    </section>
+  );
+}
+
 export function DiscrepanciesWorkbench({ who }: { who?: StaffIdentity }) {
   const client = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string>("pending");
@@ -73,7 +127,8 @@ export function DiscrepanciesWorkbench({ who }: { who?: StaffIdentity }) {
   const [precedenceTopic, setPrecedenceTopic] = useState("");
   const [precedenceRule, setPrecedenceRule] = useState("");
   const [statuteRef, setStatuteRef] = useState("");
-  const [tombstoneCited, setTombstoneCited] = useState(true);
+  // G634: nothing is withdrawn from retrieval unless the admin asks.
+  const [tombstoneCited, setTombstoneCited] = useState(false);
   const [adminNote, setAdminNote] = useState("");
   const [actionNotice, setActionNotice] = useState<string>("");
   const [actionError, setActionError] = useState<string>("");
@@ -159,20 +214,23 @@ export function DiscrepanciesWorkbench({ who }: { who?: StaffIdentity }) {
     setPrecedenceTopic("");
     setPrecedenceRule("");
     setStatuteRef("");
-    setTombstoneCited(true);
+    setTombstoneCited(false);
     setAdminNote("");
   }
 
   function startVerify(d: DiscrepancyRecord) {
+    // G634: every field starts empty. The taxpayer's correction is what is
+    // being checked, not a rule to adopt; the precedence rule is injected as
+    // law that overrides the passages, for every taxpayer.
     setVerifyingId(d.id);
     setDismissingId(null);
-    setOverrideQuery(d.user_correction || "");
+    setOverrideQuery("");
     setOverrideReply("");
     setPrecedenceTopic(d.discrepancy_type.replace("_", " ").toUpperCase());
-    setPrecedenceRule(d.user_correction || "");
+    setPrecedenceRule("");
     setStatuteRef("");
-    setTombstoneCited(true);
-    setAdminNote("Verified legal change");
+    setTombstoneCited(false);
+    setAdminNote("");
   }
 
   function handleConfirmVerify(d: DiscrepancyRecord) {
@@ -433,14 +491,30 @@ export function DiscrepanciesWorkbench({ who }: { who?: StaffIdentity }) {
                         checked={tombstoneCited}
                         onChange={(e) => setTombstoneCited(e.target.checked)}
                       />
-                      <span>Tombstone cited chunk / sources in Qdrant (Solution B)</span>
+                      <span>
+                        Withdraw the cited sources from retrieval for every taxpayer (tombstone, Solution B)
+                        {d.cited_sources?.length ? `: ${d.cited_sources.join(", ")}` : ""}
+                      </span>
                     </label>
+                    {precedenceRule.trim() && !statuteRef.trim() ? (
+                      <p className="disc-field-error" role="status">
+                        Name the statute this rule comes from before applying it.
+                      </p>
+                    ) : null}
+                    <HotfixSummary
+                      overrideQuery={overrideQuery}
+                      overrideReply={overrideReply}
+                      precedenceRule={precedenceRule}
+                      precedenceTopic={precedenceTopic}
+                      statuteRef={statuteRef}
+                      withdrawn={tombstoneCited ? d.cited_sources ?? [] : []}
+                    />
                     <div className="disc-actions">
                       <button
                         type="button"
                         className="ops-btn is-primary is-sm"
                         onClick={() => handleConfirmVerify(d)}
-                        disabled={verifyMutation.isPending}
+                        disabled={verifyMutation.isPending || Boolean(precedenceRule.trim() && !statuteRef.trim())}
                       >
                         {verifyMutation.isPending ? "Applying..." : "Confirm & Apply Hotfixes"}
                       </button>

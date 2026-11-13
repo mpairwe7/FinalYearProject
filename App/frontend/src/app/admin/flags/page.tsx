@@ -26,6 +26,19 @@ import { analyticsApi, type FlagRecord } from "../../../services/analyticsApi";
 import { queryKeys } from "../../../lib/queryKeys";
 import "../admin.css";
 
+/**
+ * Controls that keep an answer safe to show (G638). Switching one off changes
+ * what every taxpayer is shown, so the console says what it does and asks.
+ */
+const SAFETY_CONTROLS: Record<string, string> = {
+  stream_figure_hold: "Figures will stream to taxpayers before the guards have read them.",
+  spoken_figure_guard: "Calls will speak figures the guard has not checked.",
+  action_level_audit_v3: "High-risk tool effects will run without a durable intent record first.",
+  guardrail_strike_friction: "Repeated guardrail strikes will no longer slow a session down.",
+  verifiable_decision_receipts: "Decisions will no longer carry a verifiable receipt.",
+  autonomous_outcome_verification: "Autonomous actions will no longer have their outcome checked.",
+};
+
 function FlagsBoard({ who }: { who: StaffIdentity }) {
   const client = useQueryClient();
   const [query, setQuery] = useState("");
@@ -48,6 +61,8 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.admin.flags() }),
   });
   const canToggle = who.role === "ura_admin";
+  // G638: a safety control is switched off only after saying what that does.
+  const [confirmOff, setConfirmOff] = useState<string | null>(null);
 
   const flags = useMemo(() => data?.flags ?? [], [data]);
   // Every process re-reads the stored overrides on this interval (G612); 0 means
@@ -141,9 +156,12 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
               "It applies at once in the process that answered; the others apply it when they next start. "
             )}
             Replicas with a database each still need <code>FLAG_*</code> set on every replica.
-            {data?.overrides_are_ephemeral === false
-              ? " This deployment reports overrides as durable."
-              : null}
+            {/* G638: said only when the API knows where its store lives. */}
+            {data?.overrides_durability === "durable"
+              ? " This deployment keeps its overrides across a restart."
+              : data?.overrides_durability === "ephemeral"
+                ? " Overrides on this deployment are lost when this deployment restarts: set the FLAG_* secret for anything that must stay."
+                : " This deployment does not say whether its database survives a restart."}
           </p>
         </div>
       </div>
@@ -209,7 +227,11 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
                           checked={flag.enabled}
                           disabled={mutating}
                           label={`${flag.name} — currently ${flag.enabled ? "on" : "off"}`}
-                          onChange={(next) => toggle.mutate({ name: flag.name, enabled: next })}
+                          onChange={(next) =>
+                            !next && SAFETY_CONTROLS[flag.name]
+                              ? setConfirmOff(flag.name)
+                              : toggle.mutate({ name: flag.name, enabled: next })
+                          }
                         />
                       ) : (
                         <span className={`ops-chip ${flag.enabled ? "is-good" : ""}`}>
@@ -224,7 +246,11 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
                           <span className="ops-chip is-warn">not at default</span>
                         ) : null}
                         {flag.protected ? <span className="ops-chip">protected</span> : null}
-                        {flag.overridden ? <span className="ops-chip is-info">this replica</span> : null}
+                        {flag.stored ? (
+                          <span className="ops-chip is-info">stored · every process</span>
+                        ) : flag.overridden ? (
+                          <span className="ops-chip is-info">this process only</span>
+                        ) : null}
                         {flag.rollout ? (
                           <span className="ops-chip">{flag.rollout.percent}% rollout</span>
                         ) : null}
@@ -247,6 +273,35 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
             </tbody>
           </table>
         </TableScroll>
+      ) : null}
+
+      {confirmOff ? (
+        <div className="ops-note ops-confirm" role="alertdialog" aria-labelledby="flag-confirm-title" aria-describedby="flag-confirm-body">
+          <div>
+            <p className="ops-note-title" id="flag-confirm-title">
+              Turn off {confirmOff}?
+            </p>
+            <p className="ops-note-body" id="flag-confirm-body">
+              {SAFETY_CONTROLS[confirmOff]} Within one sync interval this reaches every API process.
+            </p>
+            <div className="ops-row-inline">
+              <button
+                type="button"
+                className="ops-btn is-sm"
+                disabled={toggle.isPending || reset.isPending}
+                onClick={() => {
+                  toggle.mutate({ name: confirmOff, enabled: false });
+                  setConfirmOff(null);
+                }}
+              >
+                Turn it off
+              </button>
+              <button type="button" className="ops-btn is-primary is-sm" onClick={() => setConfirmOff(null)}>
+                Keep it on
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {toggle.isError || reset.isError ? (

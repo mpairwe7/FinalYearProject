@@ -703,6 +703,34 @@
   cursor: pointer;
 }
 
+/* G634: what a hotfix will change, read before it is applied. */
+.disc-summary {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--ops-line);
+  border-left: 3px solid var(--ops-warn-line);
+  background: var(--ops-warn-fill);
+  border-radius: 6px;
+  font-size: 13px;
+}
+.disc-summary h5 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+.disc-summary ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.disc-summary p {
+  margin: 0;
+}
+.disc-field-error {
+  margin: 6px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ops-warn-ink);
+}
+
 /* ── Notification Outbox (/admin/outbox) ─────────────────────────────────── */
 
 .ob-provider-banner {
@@ -778,3 +806,28 @@
   margin: var(--ops-space-4) 0;
 }
 
+
+
+/* G637: the key an override matches on, and the live answer a save replaces. */
+.ov-match-key {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.ov-replaces {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--ops-line);
+  border-left: 3px solid var(--ops-warn-line);
+  background: var(--ops-warn-fill);
+  border-radius: 6px;
+  font-size: 13px;
+}
+.ov-replaces p {
+  margin: 0 0 6px;
+}
+.ov-replaces blockquote {
+  margin: 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--ops-line-strong);
+}

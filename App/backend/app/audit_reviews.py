@@ -61,6 +61,18 @@ def init_schema() -> None:
             updated_at    DOUBLE PRECISION NOT NULL
         );
         CREATE UNIQUE INDEX IF NOT EXISTS uq_audit_reviews_item ON audit_reviews(tenant_id, item_type, item_id);
+        CREATE TABLE IF NOT EXISTS audit_review_history (
+            id            TEXT PRIMARY KEY,
+            tenant_id     TEXT NOT NULL DEFAULT 'default',
+            item_type     TEXT NOT NULL,
+            item_id       TEXT NOT NULL,
+            status        TEXT NOT NULL,
+            note          TEXT NOT NULL DEFAULT '',
+            reviewer_id   TEXT NOT NULL DEFAULT '',
+            reviewer_name TEXT NOT NULL DEFAULT '',
+            decided_at    DOUBLE PRECISION NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_audit_review_history_item ON audit_review_history(tenant_id, item_type, item_id);
         """
     )
     _schema_ready = True
@@ -116,16 +128,23 @@ def set_review(
         raise ValueError(f"unknown review status {status!r}")
     _ensure()
     tenant = _tenant(tenant_id)
+    from .guardrails import redact_pii_text
+
+    clean_note = redact_pii_text((note or "").strip())[:1000]
+    now = time.time()
+    # G639: every decision, a reopening included, is kept. Reopen used to
+    # delete the decision and its note, so a finding could vanish in a click.
+    db.execute(
+        "INSERT INTO audit_review_history (id, tenant_id, item_type, item_id, status, note, reviewer_id, "
+        "reviewer_name, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (uuid.uuid4().hex, tenant, item_type, item_id, status, clean_note, reviewer_id, reviewer_name[:128], now),
+    )
     if status == "open":
         db.execute(
             "DELETE FROM audit_reviews WHERE tenant_id = ? AND item_type = ? AND item_id = ?",
             (tenant, item_type, item_id),
         )
         return None
-    from .guardrails import redact_pii_text
-
-    clean_note = redact_pii_text((note or "").strip())[:1000]
-    now = time.time()
     if get_review(item_type, item_id, tenant_id=tenant) is None:
         try:
             db.execute(
@@ -142,6 +161,51 @@ def set_review(
         (status, clean_note, reviewer_id, reviewer_name[:128], now, tenant, item_type, item_id),
     )
     return get_review(item_type, item_id, tenant_id=tenant)
+
+
+def history(item_type: str, item_id: str, *, tenant_id: str | None = None) -> list[dict[str, Any]]:
+    """Every decision on an item, oldest first, reopenings included (G639)."""
+    _ensure()
+    rows = db.query_all(
+        "SELECT status, note, reviewer_name, decided_at FROM audit_review_history "
+        "WHERE tenant_id = ? AND item_type = ? AND item_id = ? ORDER BY decided_at, id",
+        (_tenant(tenant_id), item_type, item_id),
+    )
+    return [
+        {
+            "status": r["status"],
+            "note": r.get("note") or "",
+            "reviewer_name": r.get("reviewer_name") or "",
+            "decided_at": float(r.get("decided_at") or 0.0),
+        }
+        for r in rows
+    ]
+
+
+def histories_for(item_type: str, ids: list[str], *, tenant_id: str | None = None) -> dict[str, list[dict[str, Any]]]:
+    """Every decision on each of these items, oldest first (G639)."""
+    if not ids:
+        return {}
+    _ensure()
+    found: dict[str, list[dict[str, Any]]] = {}
+    for start in range(0, len(ids), 500):
+        chunk = ids[start : start + 500]
+        ph = ",".join("?" * len(chunk))
+        rows = db.query_all(
+            "SELECT item_id, status, note, reviewer_name, decided_at FROM audit_review_history "  # noqa: S608
+            f"WHERE tenant_id = ? AND item_type = ? AND item_id IN ({ph}) ORDER BY decided_at, id",
+            (_tenant(tenant_id), item_type, *chunk),
+        )
+        for r in rows:
+            found.setdefault(r["item_id"], []).append(
+                {
+                    "status": r["status"],
+                    "note": r.get("note") or "",
+                    "reviewer_name": r.get("reviewer_name") or "",
+                    "decided_at": float(r.get("decided_at") or 0.0),
+                }
+            )
+    return found
 
 
 def reviews_for(item_type: str, ids: list[str], *, tenant_id: str | None = None) -> dict[str, dict[str, Any]]:
@@ -292,6 +356,14 @@ def needs_review(
     items.sort(key=lambda i: -i["occurred_at"])
     limit = max(1, min(int(limit), 100))
     offset = max(0, int(offset))
+    page = items[offset : offset + limit]
+    # G639: what was decided before, a reopening included, for the page shown.
+    for item_type in ITEM_TYPES:
+        ids = [i["item_id"] for i in page if i["item_type"] == item_type]
+        found = histories_for(item_type, ids, tenant_id=tenant_id)
+        for item in page:
+            if item["item_type"] == item_type:
+                item["history"] = found.get(item["item_id"], [])
     return {
         "period_days": days,
         "truncated": truncated,
@@ -299,7 +371,7 @@ def needs_review(
         "total": len(items),
         "limit": limit,
         "offset": offset,
-        "items": items[offset : offset + limit],
+        "items": page,
     }
 
 
@@ -322,6 +394,16 @@ def purge(now: float | None = None) -> int:
     )
     removed += db.execute(
         "DELETE FROM audit_reviews WHERE item_type = 'ai_chat' AND item_id NOT LIKE 'msg:%' "
+        "AND item_id NOT IN (SELECT conversation_id FROM feedback WHERE conversation_id IS NOT NULL)"
+    )
+    # The history follows the same rules: kept for the audit period, and gone
+    # with its item (retention, or a taxpayer's erasure).
+    removed += db.execute("DELETE FROM audit_review_history WHERE decided_at < ?", (cutoff,))
+    removed += db.execute(
+        "DELETE FROM audit_review_history WHERE item_type = 'rating' AND item_id NOT IN (SELECT id FROM service_ratings)"
+    )
+    removed += db.execute(
+        "DELETE FROM audit_review_history WHERE item_type = 'ai_chat' AND item_id NOT LIKE 'msg:%' "
         "AND item_id NOT IN (SELECT conversation_id FROM feedback WHERE conversation_id IS NOT NULL)"
     )
     return removed

@@ -677,7 +677,7 @@ A review of the whole call flow: what the AI says, the handoff, the officer's de
 
 ### Intelligent UI assurance — 2026-11-13
 
-A review of every surface where the AI meets a person: the chat's trust signals, its actions and handoff, the staff console's oversight, and voice, capture, offline and language. [Evidence, sources, phases and the audit prompt](plans/intelligent-ui-integration-audit-2026-11-13.md); phase 1 decisions in ADR-0048, phase 2 in ADR-0049. Fixed means implemented with a regression test that failed first; nothing here was exercised on the Space, a real microphone, a screen reader or by a first-language reader.
+A review of every surface where the AI meets a person: the chat's trust signals, its actions and handoff, the staff console's oversight, and voice, capture, offline and language. [Evidence, sources, phases and the audit prompt](plans/intelligent-ui-integration-audit-2026-11-13.md); phase 1 decisions in ADR-0048, phase 2 in ADR-0049, phase 3 in ADR-0050. Fixed means implemented with a regression test that failed first; nothing here was exercised on the Space, a real microphone, a screen reader or by a first-language reader.
 
 | Gap | Finding | Status |
 | --- | --- | --- |
@@ -697,12 +697,12 @@ A review of every surface where the AI meets a person: the chat's trust signals,
 | G631 🟢 | ~~An officer's message is machine-translated for the taxpayer and shown as the officer's own words, unlabelled.~~ | Fixed 2026-11-13 (ADR-0049): the thread returns `translated` and `original_text`; the chat labels the translation and shows the original on request. `test_officer_chat.py`, `ChatMessage.test.tsx`. |
 | G632 🟢 | ~~A late-escalated turn keeps the inferred goal's "Start guided steps".~~ | Fixed 2026-11-13 (ADR-0049): the objective card is hidden on an escalated turn. `ChatMessage.test.tsx`. |
 | G633 🟢 | ~~Resuming a portal task after sign-in posts to the AI while an officer holds the chat.~~ | Fixed 2026-11-13 (ADR-0049): nothing is sent to the AI while an officer holds the chat; a resume after sign-in waits for the chat to end. |
-| G634 ⚪ | "Verify & Hotfix" pre-fills the precedence rule the model must obey with the taxpayer's own correction, withdraws the cited sources by default, and audits neither; discrepancies are not tenant-scoped. | Open: phase 3. |
-| G635 ⚪ | An officer's stale translation preview is sent after the English is edited; "figures verified" shows when translation was unavailable. | Open: phase 3. |
-| G636 ⚪ | One-click canned replies claim audits, reconciliations and an authentic EFRIS signature the workbench never shows. | Open: phase 3. |
-| G637 ⚪ | The overrides console says "character for character" and "word for word" while matching normalized, rewritten and translated questions across tenants, and replaces an existing override silently. | Open: phase 3. |
-| G638 ⚪ | The flags console calls overrides durable on the Space, labels stored overrides "this replica", and switches the figure hold with one click. | Open: phase 3. |
-| G639 ⚪ | "Reopen" in Needs review deletes an auditor's finding and note without confirmation or history. | Open: phase 3. |
+| G634 🟡 | "Verify & Hotfix" pre-fills the precedence rule the model must obey with the taxpayer's own correction, withdraws the cited sources by default, and audits neither; discrepancies are not tenant-scoped. | Mitigated 2026-11-13 (ADR-0050): the form starts empty with nothing withdrawn; a rule needs a statute (422 otherwise); a summary shows the change; every write is audited and the cache retired. Open: discrepancies are not tenant-scoped. |
+| G635 🟢 | ~~An officer's stale translation preview is sent after the English is edited; "figures verified" shows when translation was unavailable.~~ | Fixed 2026-11-13 (ADR-0050): the server drops a supplied translation whose figures differ and translates again; the console sends only a checked preview of the exact text and says when translation is unavailable. |
+| G636 🟢 | ~~One-click canned replies claim audits, reconciliations and an authentic EFRIS signature the workbench never shows.~~ | Fixed 2026-11-13 (ADR-0050): result-stating canned replies are `[[…]]` templates that cannot be sent unfilled; the document request names email or a station. |
+| G637 🟢 | ~~The overrides console says "character for character" and "word for word" while matching normalized, rewritten and translated questions across tenants, and replaces an existing override silently.~~ | Fixed 2026-11-13 (ADR-0050): the console shows the normalized key, explains rewritten and translated matching, shows the live answer a save replaces; the ledger records `replaced` and before/after digests. |
+| G638 🟢 | ~~The flags console calls overrides durable on the Space, labels stored overrides "this replica", and switches the figure hold with one click.~~ | Fixed 2026-11-13 (ADR-0050): `overrides_durability` from where the store lives (`ANALYTICS_DB_PERSISTENT`); stored overrides labelled "every process"; safety flags ask before switching off. |
+| G639 🟢 | ~~"Reopen" in Needs review deletes an auditor's finding and note without confirmation or history.~~ | Fixed 2026-11-13 (ADR-0050): every decision is appended to `audit_review_history`, returned with the queue; Reopen asks first and earlier decisions are shown. |
 | G640 ⚪ | The officer's case view drops the AI's evidence and doubt the API returns (claim check, withheld figure, judge revision, sources). | Open: phase 4. |
 | G641 ⚪ | AI answers after escalation never reach the ticket; a second escalation does not raise priority or reasons. | Open: phase 4. |
 | G642 ⚪ | The machine translation of the taxpayer's words is shown as "Taxpayer [EN]". | Open: phase 4. |
@@ -1404,7 +1404,9 @@ full agent chain is locked.
 
 ---
 
-*Document version 3.28 — updated 2026-11-13: intelligent UI assurance phase 2 (ADR-0049): G625–G629 and G631–G633 fixed, G630 mitigated.*
+*Document version 3.29 — updated 2026-11-13: intelligent UI assurance phase 3 (ADR-0050): G635–G639 fixed, G634 mitigated (tenant scoping open).*
+
+*Previously: version 3.28 — updated 2026-11-13: intelligent UI assurance phase 2 (ADR-0049): G625–G629 and G631–G633 fixed, G630 mitigated.*
 
 *Previously: version 3.27 — updated 2026-11-13: intelligent UI assurance: G618–G624 fixed by phase 1 (ADR-0048); G625–G655 opened for phases 2 to 6.*
 
