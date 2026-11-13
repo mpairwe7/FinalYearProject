@@ -91,13 +91,25 @@ function turnTime(ts: number): string {
  * read the reply as plain "Assistant" text, with no sign that a figure was
  * withheld or that the claim check never ran.
  */
+/** The claim verifier's decisions, as an officer reads them (a model's check). */
+const CLAIM_CHECK: Record<string, string> = {
+  unavailable: "The claim check did not run: nothing compared the answer with its sources.",
+  approve: "The claim check ran: each claim matched its cited sources (a model's check).",
+  revise: "The claim check found claims its sources did not fully support (a model's check).",
+  escalate: "The claim check found a claim its sources contradicted or did not support, and sent the case on (a model's check).",
+};
+
 function AiEvidence({ ticket }: { ticket: TicketDetail }) {
   const judge = ticket.response_judge ?? {};
   const sources = ticket.handoff?.sources_reviewed ?? [];
   const lines: string[] = [];
-  if (judge.claim_verification?.decision === "unavailable") {
-    lines.push("The claim check did not run: nothing compared the answer with its sources.");
-  }
+  // The claim check is stated on its own: sources reviewed or a judge's
+  // confidence are not a claim check, and must not stand in for one.
+  const claimDecision = judge.claim_verification?.decision;
+  const claimLine = claimDecision
+    ? CLAIM_CHECK[claimDecision] ?? `The claim check recorded "${claimDecision}" (a model's check).`
+    : null;
+  if (claimLine) lines.push(claimLine);
   if (judge.withheld_contradicted) {
     lines.push("A figure was withheld from the answer because it contradicted the cited passage.");
   }
@@ -109,6 +121,9 @@ function AiEvidence({ ticket }: { ticket: TicketDetail }) {
   }
   const reasons = (judge.reasons ?? []).filter((r) => typeof r === "string" && r.trim());
   const recorded = lines.length > 0 || reasons.length > 0 || sources.length > 0;
+  if (recorded && !claimDecision) {
+    lines.unshift("No claim check was recorded for this answer: read its claims as unchecked.");
+  }
   return (
     <section className="st-ai-evidence" role="region" aria-label="What the AI did">
       <span className="st-brief-label">What the AI did</span>

@@ -223,6 +223,30 @@ describe("TicketCase — what the AI did", () => {
     );
   });
 
+  // CodeRabbit on PR 731: with sources or a confidence but no claim check on
+  // record, the panel said nothing about the check; a recorded result other
+  // than "unavailable" was not shown either.
+  it("says no claim check was recorded even when other evidence is present", () => {
+    renderCase({
+      ...LIVE,
+      handoff: { sources_reviewed: ["vat_act.pdf"] },
+      response_judge: { confidence_band: "medium" },
+    } as unknown as TicketDetail);
+    expect(screen.getByRole("region", { name: /What the AI did/i })).toHaveTextContent(
+      /No claim check was recorded for this answer/i,
+    );
+  });
+
+  it("states a recorded claim check result", () => {
+    renderCase({
+      ...LIVE,
+      response_judge: { claim_verification: { decision: "approve" } },
+    } as unknown as TicketDetail);
+    const evidence = screen.getByRole("region", { name: /What the AI did/i });
+    expect(evidence).toHaveTextContent(/claim check ran: each claim matched its cited sources/i);
+    expect(evidence).not.toHaveTextContent(/No record of the AI's checks/i);
+  });
+
   // G642: the machine translation of the taxpayer's words was shown as theirs.
   it("labels the machine translation of the taxpayer's words", () => {
     renderCase({

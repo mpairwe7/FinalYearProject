@@ -521,6 +521,97 @@ class TestAReusedTicketIsBroughtUpToDate:
         assert any("UGX 200,000" in r for r in replies)
         assert ticket["transcript"][-1]["user_message"] == "my deadline is today, please help"
 
+    @staticmethod
+    def _model(monkeypatch):
+        from app.flags import flags
+        from app.service import ChatModel
+
+        monkeypatch.setenv("FLAG_TICKET_QUEUE", "true")
+        flags.set("ticket_queue", True)
+        return ChatModel.__new__(ChatModel)
+
+    KW = dict(session_id="sess1", conversation_id="conv-abc", user_id="oidc-sub-123")
+
+    def test_a_taxpayer_follow_up_does_not_hide_earlier_ai_answers(self, seeded, monkeypatch):
+        """CodeRabbit on PR 731: the watermark was the newest turn on the ticket,
+        follow-ups included, so an AI answer logged before a follow-up was
+        dropped on re-escalation."""
+        model = self._model(monkeypatch)
+        first = model._maybe_create_ticket(
+            reason="r", user_query="it is still not showing", bot_reply="An officer will look.", priority="normal", **self.KW
+        )
+        time.sleep(0.01)
+        seeded.log_conversation(user_message="what is the late filing penalty?",
+                                bot_reply="UGX 200,000 or 2% of the tax.", **self.KW)
+        time.sleep(0.01)
+        seeded.append_taxpayer_reply(first, "I have uploaded the receipt")
+        time.sleep(0.01)
+        model._maybe_create_ticket(reason="r", user_query="any news?", bot_reply="An officer will look.", **self.KW)
+        replies = [t.get("bot_reply", "") for t in seeded.get_ticket(first)["transcript"]]
+        assert any("UGX 200,000" in r for r in replies)
+
+    def test_the_escalated_turn_is_not_added_twice(self, seeded, monkeypatch):
+        """The escalated turn is snapshotted before the caller logs it; the
+        logged copy is later, so the next refresh appended the same exchange."""
+        model = self._model(monkeypatch)
+        first = model._maybe_create_ticket(
+            reason="r", user_query="please check my VAT refund", bot_reply="I will pass this to an officer.", **self.KW
+        )
+        time.sleep(0.01)
+        seeded.log_conversation(user_message="please check my VAT refund",
+                                bot_reply="I will pass this to an officer.", **self.KW)
+        time.sleep(0.01)
+        model._maybe_create_ticket(reason="r", user_query="hello?", bot_reply="An officer will look.", **self.KW)
+        asked = [t.get("user_message") for t in seeded.get_ticket(first)["transcript"]]
+        assert asked.count("please check my VAT refund") == 1
+
+    def test_a_reuse_applies_the_escalation_assessment_priority(self, seeded, monkeypatch):
+        """CodeRabbit on PR 731: the assessment that raises a deadline-today
+        escalation ran only when a ticket was created, not when one was reused."""
+        from app.flags import flags
+
+        model = self._model(monkeypatch)
+        # Restored after the test: a process-wide override would leak into the
+        # receptionist's crisis tests, which assume this flag's default.
+        monkeypatch.setitem(flags._overrides, "eq_stakes_escalation", True)
+        first = model._maybe_create_ticket(reason="r", user_query="q1", bot_reply="b", priority="normal", **self.KW)
+        handoff: dict = {}
+        model._maybe_create_ticket(
+            reason="r", user_query="my deadline is today, please help", bot_reply="b", priority="normal",
+            handoff=handoff, **self.KW,
+        )
+        assert seeded.get_ticket(first)["priority"] == "high"
+        assert handoff.get("escalation", {}).get("priority") == "high"
+
+    def test_a_reuse_adds_its_reason_and_refreshes_the_ai_evidence(self, seeded, monkeypatch):
+        """CodeRabbit on PR 731: the reason and the AI's evidence stayed those of
+        the first escalation, so the officer read old checks as the new ones."""
+        model = self._model(monkeypatch)
+        first = model._maybe_create_ticket(
+            reason="The VAT answer looked wrong", user_query="q1", bot_reply="b",
+            handoff={"topic": "vat", "sources_reviewed": ["old.pdf"]},
+            response_judge={"claim_verification": {"decision": "supported"}}, **self.KW,
+        )
+        model._maybe_create_ticket(
+            reason="Deadline today", user_query="q2", bot_reply="b2",
+            handoff={"topic": "general", "sources_reviewed": ["vat_act.pdf"]},
+            response_judge={"claim_verification": {"decision": "unavailable"}, "confidence_band": "low"}, **self.KW,
+        )
+        ticket = seeded.get_ticket(first)
+        assert "The VAT answer looked wrong" in ticket["reason"] and "Deadline today" in ticket["reason"]
+        assert ticket["response_judge"]["claim_verification"]["decision"] == "unavailable"
+        assert ticket["handoff"]["sources_reviewed"] == ["vat_act.pdf"]
+        # A button press's placeholder topic does not replace a classified one.
+        assert ticket["handoff"]["topic"] == "vat"
+
+    def test_a_failed_refresh_is_flagged_not_just_logged(self, seeded, monkeypatch):
+        model = self._model(monkeypatch)
+        model._maybe_create_ticket(reason="r", user_query="q1", bot_reply="b", **self.KW)
+        monkeypatch.setattr(seeded, "refresh_open_ticket", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("db down")))
+        handoff: dict = {}
+        model._maybe_create_ticket(reason="r", user_query="q2", bot_reply="b", handoff=handoff, **self.KW)
+        assert handoff.get("ticket_refresh_failed") is True
+
     def _ticket(self, seeded) -> str:
         return seeded.create_ticket(
             reason="taxpayer asked for an officer",

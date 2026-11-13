@@ -124,7 +124,7 @@ All six were implemented with a test watched failing first. ADR-0050 records whe
 
 ## Phase 4 — officers see what the AI did (implemented, ADR-0051)
 
-All five were implemented as planned, each with a test watched failing first.
+All five were implemented, each with a test watched failing first. G641 does more than the plan: a re-escalation also adds its reason, replaces the AI evidence with the latest escalation's, gets the escalation assessment's priority, and is written in one transaction that cannot lose a taxpayer's follow-up; a failed refresh is counted and flagged on the handoff.
 
 | Gap | Severity | Finding | Fix |
 | --- | --- | --- | --- |

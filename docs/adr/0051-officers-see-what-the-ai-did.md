@@ -39,8 +39,17 @@ risk summaries, not model rationales presented as fact.
    handoff's `sources_reviewed`.
 2. **A reused ticket is brought up to date** (`db.refresh_open_ticket`): the turns
    since its last snapshot are appended, taxpayer follow-ups stay where they are,
-   and the priority is raised, never lowered. It is dispatched to the Postgres
-   mirror like the other ticket functions. It and `append_taxpayer_reply` read the
+   and the priority is raised, never lowered, including by the escalation
+   assessment (`officer_handoff.assessed_priority`, shared with `enrich_handoff`).
+   The snapshot's watermark ignores taxpayer follow-ups, and an exchange already
+   on the ticket (its question and the start of its answer) is not added again, so
+   the escalated turn's later logged copy is not duplicated. The new reason is
+   added after the earlier ones; the judge record and the handoff's
+   `sources_reviewed` and `escalation` become the latest escalation's, while a
+   classified topic is kept. One merge (`database._merge_reused_ticket`) serves
+   both backends. A failed refresh is counted (`ticket_refresh_failed_total`) and
+   flagged on the handoff. It is dispatched to the Postgres mirror like the other
+   ticket functions. It and `append_taxpayer_reply` read the
    transcript inside their own write transaction (`BEGIN IMMEDIATE` on SQLite,
    `SELECT … FOR UPDATE` on Postgres), so neither overwrites the other's turns, and
    both redact what they add, as `create_ticket` does.
@@ -69,7 +78,13 @@ Each test was watched failing before the fix:
 
 - `tests/agents/test_escalation_context.py`: a refresh keeps a taxpayer reply its
   stale read missed; a taxpayer reply keeps turns a refresh added; turns both add
-  are redacted at rest.
+  are redacted at rest; a follow-up does not hide earlier AI answers; the escalated
+  turn is not added twice; a reuse gets the assessment's priority, adds its reason
+  and refreshes the evidence while keeping the topic; a failed refresh is flagged.
+- `App/frontend/src/__tests__/components/TicketCaseChat.test.tsx`: the claim check's
+  status is always stated, missing or recorded.
+- `App/frontend/src/__tests__/lib/ratingsStatus.test.ts`: "no ratings" is said only
+  after a response with none, not while loading.
 - `tests/agents/test_backend_shim.py`: every SQLite function with a Postgres mirror
   reaches it (dispatched, or handing over through `_pg_module()`).
 - `App/frontend/src/__tests__/components/TicketCaseChat.test.tsx`: the evidence block

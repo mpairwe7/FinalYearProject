@@ -1504,43 +1504,64 @@ def append_taxpayer_reply(ticket_id: str, message: str) -> dict[str, Any] | None
     return get_ticket(ticket_id)
 
 
-_TICKET_PRIORITY_RANK = {"low": 0, "normal": 1, "high": 2, "urgent": 3}
-
-
 def refresh_open_ticket(
     ticket_id: str,
     *,
     new_turns: list[dict[str, Any]],
     priority: str | None = None,
+    reason: str | None = None,
+    handoff: dict[str, Any] | None = None,
+    response_judge: dict[str, Any] | None = None,
 ) -> bool:
     """Postgres mirror of :func:`database.refresh_open_ticket` (G641).
 
-    Read FOR UPDATE and written in one transaction; new turns are redacted.
+    The row is read FOR UPDATE and written in one transaction; the merge is
+    the shared :func:`database._merge_reused_ticket`.
     """
-    from .database import _redact_ticket_value
+    from .database import _merge_reused_ticket
 
     pool = _get_pool()
     if pool is None:
         return False
     with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT transcript_json, priority FROM tickets WHERE id = %s FOR UPDATE", (ticket_id,))
+        cur.execute(
+            "SELECT transcript_json, priority, reason, handoff_json, response_judge_json "
+            "FROM tickets WHERE id = %s FOR UPDATE",
+            (ticket_id,),
+        )
         row = cur.fetchone()
         if not row:
             conn.rollback()
             return False
-        transcript = list(_loads(row[0], []) or [])
-        last = max((float(t.get("created_at") or 0.0) for t in transcript), default=0.0)
-        added = [t for t in new_turns if float(t.get("created_at") or 0.0) > last]
-        current = str(row[1] or "normal")
-        wanted = str(priority or current)
-        raised = _TICKET_PRIORITY_RANK.get(wanted, 1) > _TICKET_PRIORITY_RANK.get(current, 1)
-        if not added and not raised:
+        merged = _merge_reused_ticket(
+            {
+                "transcript": _loads(row[0], []),
+                "priority": row[1],
+                "reason": row[2],
+                "handoff": _loads(row[3], {}),
+                "response_judge": _loads(row[4], {}),
+            },
+            new_turns=new_turns,
+            priority=priority,
+            reason=reason,
+            handoff=handoff,
+            response_judge=response_judge,
+        )
+        if merged is None:
             conn.rollback()
             return False
-        transcript.extend(_redact_ticket_value(added))
         cur.execute(
-            "UPDATE tickets SET transcript_json = %s, priority = %s, updated_at = %s WHERE id = %s",
-            (json.dumps(transcript), wanted if raised else current, time.time(), ticket_id),
+            "UPDATE tickets SET transcript_json = %s, priority = %s, reason = %s, handoff_json = %s, "
+            "response_judge_json = %s, updated_at = %s WHERE id = %s",
+            (
+                json.dumps(merged["transcript"]),
+                merged["priority"],
+                merged["reason"],
+                json.dumps(merged["handoff"]),
+                json.dumps(merged["response_judge"]),
+                time.time(),
+                ticket_id,
+            ),
         )
         conn.commit()
     return True
