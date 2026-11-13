@@ -380,7 +380,7 @@ def _like_escaped(text: str) -> str:
 
 
 def owed_wrapup(officer_id: str, tenant_id: str | None = None, *, now: float | None = None) -> str:
-    """The latest ended call *officer_id* handled and has not wrapped up; "" if none.
+    """The latest call *officer_id* handled, has left and has not wrapped up; "" if none.
 
     "Handled" is the call's ``handled_by`` list (every officer who was
     connected to it, ``desk.bridge``); "wrapped up" is an entry under their id
@@ -388,18 +388,31 @@ def owed_wrapup(officer_id: str, tenant_id: str | None = None, *, now: float | N
     presence does. *tenant_id* scopes the search to the officer's tenant (a
     user id is not unique across tenants); ``None``, as the desk passes when
     ``multi_tenant`` is off, does not filter, like :func:`get_call` and
-    :func:`list_calls`. Only calls that ended
-    within ``OWED_WRAPUP_LOOKBACK_S`` count, newest end first. The scan is
-    bounded on the indexed start time (the look-back plus the longest a call
-    may run) and narrowed by the ``LIKE`` filters; the decoded lists decide
-    (G610, ADR-0045).
+    :func:`list_calls`.
+
+    "Left" is either of:
+
+    * the call has ended (G610, ADR-0045). Only calls that ended within
+      ``OWED_WRAPUP_LOOKBACK_S`` count;
+    * the call still runs without them: they passed it on, or their
+      reconnect grace lapsed (G610, ADR-0047). The row's ``officer_id`` is
+      cleared by both and replaced by the next officer to join, so a live
+      call is theirs to wrap up once neither ``officer_id`` nor
+      ``claimed_by`` names them. While their media reconnects the row still
+      names them: the call is held for them, not left.
+
+    Newest end (or, for a live call, start) first. The scan is bounded on the
+    indexed start time (the look-back plus the longest a call may run) and
+    narrowed by the ``LIKE`` filters; the decoded row decides.
     """
     now = time.time() if now is None else now
     handled = f'%{_like_escaped(json.dumps(officer_id))}%'
     wrapped = f'%{_like_escaped(json.dumps({"officer_id": officer_id})[1:-1])}%'
     # The look-back runs from a call's end. ``started_at`` is the indexed
     # column, so the scan is bounded by it, widened by the longest a call may
-    # run (RECEPTIONIST_MAX_CALL_S has no upper bound).
+    # run (RECEPTIONIST_MAX_CALL_S has no upper bound). A live call has no end
+    # yet: that bound alone holds it, so a row a dead process left marked live
+    # is not owed for ever.
     try:
         from .config import get_max_call_s
 
@@ -409,19 +422,34 @@ def owed_wrapup(officer_id: str, tenant_id: str | None = None, *, now: float | N
     tenant_sql = " AND tenant_id = ?" if tenant_id is not None else ""
     tenant_params: tuple[str, ...] = (tenant_id,) if tenant_id is not None else ()
     rows = db.query_all(
-        "SELECT call_id, handled_by_json, wrapups_json FROM voice_calls "  # nosec B608 # noqa: S608
-        f"WHERE status = 'ended'{tenant_sql} AND started_at >= ? "
-        "AND COALESCE(ended_at, started_at) >= ? "
+        "SELECT call_id, status, officer_id, claimed_by, handled_by_json, wrapups_json "  # nosec B608 # noqa: S608
+        "FROM voice_calls WHERE ((status = 'ended' AND COALESCE(ended_at, started_at) >= ?) "
+        "OR (status IN ('ai', 'transferring', 'bridged') "
+        "AND COALESCE(officer_id, '') != ? AND COALESCE(claimed_by, '') != ?))"
+        f"{tenant_sql} AND started_at >= ? "
         "AND handled_by_json LIKE ? ESCAPE '\\' "
         "AND COALESCE(wrapups_json, '') NOT LIKE ? ESCAPE '\\' "
         "ORDER BY COALESCE(ended_at, started_at) DESC LIMIT ?",
-        (*tenant_params, now - OWED_WRAPUP_LOOKBACK_S - longest, now - OWED_WRAPUP_LOOKBACK_S, handled, wrapped, _OWED_WRAPUP_SCAN),
+        (
+            now - OWED_WRAPUP_LOOKBACK_S,
+            officer_id,
+            officer_id,
+            *tenant_params,
+            now - OWED_WRAPUP_LOOKBACK_S - longest,
+            handled,
+            wrapped,
+            _OWED_WRAPUP_SCAN,
+        ),
     )
     for row in rows:
         decoded = _decode_row(dict(row))
         if officer_id not in decoded["handled_by"]:
             continue
         if any(isinstance(w, dict) and w.get("officer_id") == officer_id for w in decoded["wrapups"]):
+            continue
+        if decoded.get("status") != "ended" and officer_id in (
+            str(decoded.get("officer_id") or ""), str(decoded.get("claimed_by") or "")
+        ):
             continue
         return str(decoded["call_id"])
     return ""

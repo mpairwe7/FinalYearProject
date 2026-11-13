@@ -349,6 +349,7 @@ export function CallWorkspace({ callId, role }: { callId: string; role: string }
             initialNote={call.wrapup_note || ''}
             ticketId={call.ticket_id}
             aiAnswered={turns.some((t) => t.speaker === 'assistant' && t.kind === 'answer')}
+            live={call.status !== 'ended'}
             onFinished={() => {
               void refetch();
             }}

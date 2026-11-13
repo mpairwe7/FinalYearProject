@@ -2084,6 +2084,18 @@ caller a minute before the time limit (`RECEPTIONIST_MAX_CALL_S`), or halfway
 through a limit of a minute or less, on every transport, and the call
 ends at the limit with `status: ended`.
 
+What a call socket may send (G304, ADR-0045 and ADR-0047): a frame over the
+socket's budget is dropped and counted (`receptionist_frames_dropped_total`),
+never answered with an error. A socket that keeps dropping frames for 5 s is
+closed **1008** `too many frames`. Audio sockets take a binary frame of at most
+16 KiB, in whole PCM16 samples (a mu-law call is exempt from that rule), within
+64 000 B/s (`RECEPTIONIST_AUDIO_BYTES_PER_S`) and 200 frames/s. On a
+LiveKit call the audio is WebRTC and the three sockets (the caller's
+`/v1/calls/stream`, the officer's and a listener's
+`/v1/admin/calls/{call_id}/audio`) carry control messages only: at most 15 text
+frames per 10 s, each at most 16 KiB, and a binary frame is dropped. The
+officer's audio socket on the WebSocket transport has the same text limit.
+
 #### Call requests that reach the wrong process (ADR-0043)
 
 In the container image (`Dockerfile.cranecloud`, the HF Space) the API runs as a
@@ -2145,6 +2157,18 @@ opens the wrap-up for that call when it has no call of its own, from the
 answer to its latest heartbeat only. Only calls of the officer's own tenant
 count.
 
+Since ADR-0047 (G610) a call still in progress is owed too, once the officer
+has left it: they passed it on, or their reconnect grace lapsed, and the call
+goes on in the queue, with another officer or with the AI. Such a call lists
+them in `handled_by`, has no wrap-up from them, and its record no longer names
+them as its officer (`officer_id`) or claimant (`claimed_by`). While their
+media reconnects the record still names them, so it is not owed then. A live
+call counts from its start, bounded like an ended one (24 hours plus the
+longest a call may last); the newest end or start comes first. Before, a
+console reloaded after a transfer reported `available` with the wrap-up
+unsaved, and the officer was offered to callers and could be named in a
+transfer.
+
 The PUT writes only if the officer's presence is still as it read it
 (`updated_at`, `status`, `current_call_id`). If a claim or a call's end
 wrote it meanwhile, that write stands: the answer is the presence as it now
@@ -2172,7 +2196,14 @@ Ownership (2026-11-11, ADR-0040, G305): a wrap-up is accepted from an officer
 who was connected to the call, once they are off it. **403** for an officer who
 never was, or for anyone while the call is still with the AI or the queue;
 **409** for the officer still on the call (end it or pass it on first), and for
-`ticket_action: "resolve"` while the caller is still on the line. A call no
+`ticket_action: "resolve"` while the caller is still on the line. Since
+ADR-0047 (G610) a live call is also refused, **409**, to an officer who still
+holds it in another form: one whose media is reconnecting (the call waits for
+them to rejoin, so a save would make them available while it is held for them)
+and one who has claimed it (join it or release it first). The officer who
+passed a live call on can still save their wrap-up, with any ticket action
+but `resolve`; for a call with a ticket, the console offers only "Keep ticket
+open" while the call runs. A call no
 officer reached can be wrapped up by any officer of the tenant. Each officer's
 outcome and note are kept under `wrapups` on the call record
 (`[{officer_id, officer_name, outcome, note, at}]`); `outcome` and

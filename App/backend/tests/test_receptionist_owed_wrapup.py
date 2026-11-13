@@ -73,6 +73,26 @@ class OwedWrapUpCase(unittest.IsolatedAsyncioTestCase):
         )
         return call_id
 
+    def live_call(
+        self,
+        status: str,
+        *handlers: str,
+        officer_id: str | None = None,
+        claimed_by: str = "",
+        started_ago_s: float = 120.0,
+    ) -> str:
+        """A call still in progress (*status*), handled by *handlers*; its row names *officer_id* and *claimed_by*."""
+        call_id = _new_id("call_live")
+        create_call(
+            call_id,
+            conversation_id=f"conv_{call_id}",
+            tenant_id="default",
+            status=status,
+            started_at=time.time() - started_ago_s,
+        )
+        update_call(call_id, officer_id=officer_id, claimed_by=claimed_by, handled_by_json=list(handlers))
+        return call_id
+
     def status(self, officer: str | None = None) -> tuple[str, str]:
         row = presence.get_presence(officer or self.officer) or {}
         return str(row.get("raw_status") or ""), str(row.get("current_call_id") or "")
@@ -188,6 +208,34 @@ class ReconnectGraceTests(OwedWrapUpCase):
 
         self.assertEqual(self.status(), ("wrap_up", room.call_id))
 
+    async def test_a_caller_who_asks_for_a_callback_during_the_revocation_leaves_the_officer_owing_its_wrap_up(self):
+        # The wait ends as a callback while the media is revoked: the AI has
+        # the caller again, and the call goes on without the officer.
+        room = self.room()
+
+        async def caller_asks_for_a_callback(r: CallRoom, _identity: str) -> bool:
+            r.state.mode = "ai"  # close_transfer_on_timeout
+            return True
+
+        with patch.object(desk, "revoke_media", caller_asks_for_a_callback):
+            await desk._expire_reconnect_grace(room, self.officer, 0)
+
+        self.assertEqual(self.status(), ("wrap_up", room.call_id))
+
+    async def test_a_grace_that_lapses_on_a_call_still_running_leaves_the_officer_owing_its_wrap_up(self):
+        # The caller is still on the line and the call goes back to the queue.
+        # The officer handled it: they were marked available with its wrap-up
+        # unsaved, and offered to the next caller (G610, ADR-0047).
+        room = self.room()
+        room.state.claimed_by = self.officer  # a bridged call keeps its claimant
+        update_call(room.call_id, officer_id=self.officer, claimed_by=self.officer, handled_by_json=[self.officer])
+
+        with patch.object(desk, "revoke_media", AsyncMock(return_value=True)):
+            await desk._expire_reconnect_grace(room, self.officer, 0)
+
+        self.assertEqual(room.state.mode, "transferring")  # the caller waits for the next officer
+        self.assertEqual(self.status(), ("wrap_up", room.call_id))
+
 
 # ---------------------------------------------------------------------------
 # The store: which call does an officer owe?
@@ -254,6 +302,59 @@ class OwedWrapUpStoreTests(OwedWrapUpCase):
         call_id = _new_id("call_live")
         create_call(call_id, conversation_id=f"conv_{call_id}", status="bridged")
         update_call(call_id, officer_id=self.officer, handled_by_json=[self.officer])
+
+        self.assertEqual(self.owed(), "")
+
+    # A call the officer has left while it still runs (G610, ADR-0047). A
+    # transfer and the end of their reconnect grace clear the row's officer;
+    # the next officer to join replaces it.
+
+    async def test_a_live_call_the_officer_passed_on_is_owed(self):
+        call_id = self.live_call("transferring", self.officer, officer_id=None)
+
+        self.assertEqual(self.owed(), call_id)
+
+    async def test_a_live_call_now_bridged_to_another_officer_is_owed(self):
+        nakato = f"{_new_id('nakato')}@ura.go.ug"
+        call_id = self.live_call("bridged", self.officer, nakato, officer_id=nakato)
+
+        self.assertEqual(self.owed(), call_id)
+        self.assertEqual(self.owed(nakato), "")  # on the call: not theirs to wrap up yet
+
+    async def test_a_live_call_back_with_the_ai_is_owed(self):
+        # Nobody took it in time: the AI has the caller again, owed a callback.
+        call_id = self.live_call("ai", self.officer, officer_id=None)
+
+        self.assertEqual(self.owed(), call_id)
+
+    async def test_a_call_in_the_officers_reconnect_grace_is_not_owed(self):
+        # The row stays the officer's while the call waits for them to rejoin.
+        self.live_call("bridged", self.officer, officer_id=self.officer)
+
+        self.assertEqual(self.owed(), "")
+
+    async def test_a_live_call_the_officer_has_claimed_again_is_not_owed(self):
+        self.live_call("transferring", self.officer, officer_id=None, claimed_by=self.officer)
+
+        self.assertEqual(self.owed(), "")
+
+    async def test_a_live_call_already_wrapped_up_is_not_owed(self):
+        call_id = self.live_call("transferring", self.officer, officer_id=None)
+        update_call(call_id, wrapups_json=[
+            {"officer_id": self.officer, "officer_name": "", "outcome": "referred", "note": "Passed to VAT.",
+             "at": time.time()},
+        ])
+
+        self.assertEqual(self.owed(), "")
+
+    async def test_a_live_call_older_than_the_look_back_and_longest_call_is_not_owed(self):
+        # A row a dead process left marked live is not owed for ever.
+        from app.receptionist.config import get_max_call_s
+        from app.receptionist.store import OWED_WRAPUP_LOOKBACK_S
+
+        self.live_call(
+            "transferring", self.officer, started_ago_s=OWED_WRAPUP_LOOKBACK_S + get_max_call_s() + 3600
+        )
 
         self.assertEqual(self.owed(), "")
 
@@ -335,6 +436,116 @@ class HeartbeatTests(HeartbeatCase):
         self.heartbeat("available")
 
         self.assertEqual(self.status(), ("on_call", waiting))
+
+
+class LeftWhileLiveTests(HeartbeatCase):
+    """A call the officer left while it still runs owes its wrap-up too (G610, ADR-0047).
+
+    After a transfer, or the end of their reconnect grace, the call goes on
+    without them. Only a call that had ended was owed, so a console reloaded
+    before its wrap-up was saved reported ``available`` and the officer was
+    offered to callers, and could be named in a transfer.
+    """
+
+    async def asyncSetUp(self) -> None:
+        await super().asyncSetUp()
+        self.call_id = _new_id("call_left")
+        create_call(self.call_id, conversation_id=f"conv_{self.call_id}", status="transferring", tenant_id="default")
+        self.room = await registry.create(self.call_id, f"conv_{self.call_id}", tenant_id="default")
+        self.room.state.mode = "transferring"
+        self.addAsyncCleanup(registry.remove, self.call_id)
+        self.addAsyncCleanup(self.stop_timers)
+        draft = patch.object(desk, "_save_draft_wrapup", AsyncMock())
+        draft.start()
+        self.addCleanup(draft.stop)
+
+    async def stop_timers(self) -> None:
+        desk._cancel_claim_timer(self.room)
+        desk._cancel_reconnect_timer(self.room)
+        desk._cancel_reservation(self.room)
+
+    async def bridged(self, officer: str | None = None) -> str:
+        officer = officer or self.officer
+        await desk.claim(self.call_id, officer)
+        await desk.bridge(self.room, None, officer, speech_model=None)
+        return officer
+
+    async def in_grace(self) -> None:
+        """Bridged, then their media dropped: the call waits for them to rejoin."""
+        await self.bridged()
+        with patch.object(desk, "get_officer_reconnect_grace_s", return_value=3600.0):
+            await desk.handle_officer_disconnect(self.room, self.officer, speech_model=None)
+        self.assertEqual(self.room.state.reconnecting_officer, self.officer)
+
+    async def wrap_up(self, officer: str | None = None, **kwargs) -> dict:
+        return await desk.wrapup(self.call_id, officer or self.officer, "referred", "Passed to the VAT team.", **kwargs)
+
+    async def test_a_reload_after_passing_a_call_on_keeps_the_officer_in_wrap_up(self):
+        await self.bridged()
+        await desk.transfer(self.call_id, self.officer)
+        self.assertEqual(self.status(), ("wrap_up", self.call_id))
+
+        body = self.heartbeat("available")  # the console was reloaded
+
+        self.assertEqual(self.status(), ("wrap_up", self.call_id))
+        self.assertEqual(body["wrap_up_call_id"], self.call_id)
+        # So nobody can name them in a transfer meanwhile.
+        with self.assertRaises(desk.DeskError):
+            desk._available_officer_name(self.officer)
+
+    async def test_the_officer_may_still_wrap_up_a_call_they_passed_on(self):
+        await self.bridged()
+        await desk.transfer(self.call_id, self.officer)
+
+        saved = await self.wrap_up(ticket_action=None)
+        body = self.heartbeat("available")
+
+        self.assertTrue(saved["wrapped_up"])
+        self.assertEqual(self.status()[0], "available")
+        self.assertEqual(body["wrap_up_call_id"], "")
+
+    async def test_a_grace_that_lapses_while_the_call_runs_leaves_the_officer_in_wrap_up(self):
+        await self.in_grace()
+
+        await desk._expire_reconnect_grace(self.room, self.officer, 0)
+        body = self.heartbeat("available")
+
+        self.assertEqual(self.room.state.mode, "transferring")
+        self.assertEqual(self.status(), ("wrap_up", self.call_id))
+        self.assertEqual(body["wrap_up_call_id"], self.call_id)
+
+    async def test_an_officer_in_their_reconnect_grace_cannot_wrap_the_call_up(self):
+        # They may rejoin it: a wrap-up saved now made them available while
+        # the call was still held for them.
+        await self.in_grace()
+
+        with self.assertRaises(desk.DeskError) as refused:
+            await self.wrap_up()
+
+        self.assertEqual(refused.exception.status, 409)
+        self.assertEqual(self.status(), ("on_call", self.call_id))
+
+    async def test_an_officer_who_has_claimed_the_call_cannot_wrap_it_up(self):
+        # They passed it on, then took it again before joining.
+        await self.bridged()
+        await desk.transfer(self.call_id, self.officer)
+        await desk.claim(self.call_id, self.officer)
+
+        with self.assertRaises(desk.DeskError) as refused:
+            await self.wrap_up()
+
+        self.assertEqual(refused.exception.status, 409)
+        self.assertEqual(self.status(), ("on_call", self.call_id))
+
+    async def test_a_claim_recorded_only_on_the_row_still_refuses_the_wrap_up(self):
+        # Another process holds the call: no room here, the row is what is known.
+        await registry.remove(self.call_id)
+        update_call(self.call_id, status="transferring", claimed_by=self.officer, handled_by_json=[self.officer])
+
+        with self.assertRaises(desk.DeskError) as refused:
+            await self.wrap_up()
+
+        self.assertEqual(refused.exception.status, 409)
 
 
 class HeartbeatRaceTests(HeartbeatCase):

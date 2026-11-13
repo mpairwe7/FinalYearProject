@@ -13,6 +13,11 @@
  * The officer's own rating of how the AI handled the call before the
  * transfer is separate and optional, offered only when the AI answered
  * something; nothing is sent unless a star is chosen.
+ *
+ * An officer can owe the wrap-up of a call that is still in progress: they
+ * passed it on, or their reconnect grace lapsed, and the caller is with the
+ * next officer or the AI. Its ticket stays open until the call ends (the
+ * server refuses to resolve it), so only "keep open" is offered then.
  */
 import React, { useEffect, useState } from 'react';
 import { formatClock, useNow } from '@/hooks/useNow';
@@ -25,6 +30,7 @@ export function WrapUpPanel({
   initialNote = '',
   ticketId,
   aiAnswered = false,
+  live = false,
   onFinished,
 }: {
   callId: string;
@@ -32,15 +38,19 @@ export function WrapUpPanel({
   ticketId?: string | null;
   /** The AI answered at least one question before the transfer. */
   aiAnswered?: boolean;
+  /** The call is still in progress (passed on, or back with the AI): its ticket cannot be resolved yet. */
+  live?: boolean;
   onFinished: () => void;
 }) {
   const [startedAt] = useState(() => Date.now());
   const now = useNow();
   const [note, setNote] = useState(initialNote);
   const [outcome, setOutcome] = useState<WrapUpPayload['outcome']>('resolved');
-  const [ticketAction, setTicketAction] = useState<'resolve' | 'keep_open' | 'create'>(
-    ticketId ? 'resolve' : 'keep_open',
+  const [chosenTicketAction, setTicketAction] = useState<'resolve' | 'keep_open' | 'create'>(
+    ticketId && !live ? 'resolve' : 'keep_open',
   );
+  // A live call's ticket stays open until the call ends.
+  const ticketAction = live && chosenTicketAction === 'resolve' ? 'keep_open' : chosenTicketAction;
   const [satisfaction, setSatisfaction] = useState<number | null>(null);
   const [notSaid, setNotSaid] = useState(false);
   const [rating, setRating] = useState<number | null>(null);
@@ -178,13 +188,20 @@ export function WrapUpPanel({
               <span className="cw-ticket-badge">#{ticketId.slice(0, 8)}</span>
               <select
                 className="cc-select"
+                aria-label="Ticket action"
+                aria-describedby={live ? 'wrapup-ticket-live-hint' : undefined}
                 value={ticketAction}
                 onChange={(e) => setTicketAction(e.target.value as 'resolve' | 'keep_open')}
                 disabled={submitting}
               >
-                <option value="resolve">Resolve ticket</option>
+                {!live && <option value="resolve">Resolve ticket</option>}
                 <option value="keep_open">Keep ticket open with note</option>
               </select>
+              {live && (
+                <span id="wrapup-ticket-live-hint" className="cw-wrapup-hint">
+                  The call is still in progress: its ticket stays open until it ends.
+                </span>
+              )}
             </div>
           ) : (
             <div className="cc-row-inline">

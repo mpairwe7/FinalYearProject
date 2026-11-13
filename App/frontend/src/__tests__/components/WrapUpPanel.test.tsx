@@ -94,3 +94,29 @@ describe("WrapUpPanel — the officer's rating of the AI", () => {
     expect(wrapUpCall.mock.calls[0][0]).toMatchObject({ rating: 3, rating_note: "Missed the PRN question" });
   });
 });
+
+describe("WrapUpPanel — the call's ticket", () => {
+  it("resolves the ticket by default once the call has ended", async () => {
+    renderPanel({ ticketId: "ticket-0123456789", live: false });
+    expect(screen.getByRole("combobox", { name: "Ticket action" })).toHaveValue("resolve");
+    fireEvent.click(screen.getByRole("radio", { name: "4 of 5, Satisfied" }));
+    save();
+    await waitFor(() => expect(wrapUpCall).toHaveBeenCalled());
+    expect(wrapUpCall.mock.calls[0][0]).toMatchObject({ ticket_action: "resolve" });
+  });
+
+  it("offers only keeping the ticket open while the call is still in progress", async () => {
+    // Passed on, or back with the AI: the server refuses to resolve the ticket
+    // of a live call, so offering it only produced a refusal (G610, ADR-0047).
+    renderPanel({ ticketId: "ticket-0123456789", live: true });
+    const action = screen.getByRole("combobox", { name: "Ticket action" });
+    expect(action).toHaveValue("keep_open");
+    expect(screen.queryByRole("option", { name: "Resolve ticket" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Keep ticket open with note" })).toBeInTheDocument();
+    expect(action).toHaveAccessibleDescription(/still in progress/);
+    fireEvent.click(screen.getByRole("radio", { name: "4 of 5, Satisfied" }));
+    save();
+    await waitFor(() => expect(wrapUpCall).toHaveBeenCalled());
+    expect(wrapUpCall.mock.calls[0][0]).toMatchObject({ ticket_action: "keep_open" });
+  });
+});
