@@ -2705,8 +2705,11 @@ class UraReceptionistBrain(LLMService):
             # being said: a waiting screen sent now would replace theirs (G657).
             logger.info("Call %s is no longer queued; its queue status was not sent", self.room.call_id)
             return
+        # Urgent: written at once, not after the handoff line's audio. Queued
+        # behind it, the status and ticket reference reached the screen about
+        # 5 s after the request (G659).
         await self.push_frame(
-            OutputTransportMessageFrame(status_event), FrameDirection.DOWNSTREAM
+            OutputTransportMessageUrgentFrame(status_event), FrameDirection.DOWNSTREAM
         )
         # 5. Their place in the queue, on screen at once (G186).
         await self._show_queue_position(queue_position(self.room))
@@ -2718,26 +2721,35 @@ class UraReceptionistBrain(LLMService):
         """The caller's place in the queue, for their screen — not a transcript line.
 
         It changes while they wait; written into the transcript it would be
-        noise for the officer's brief, the summary and the risk monitor.
+        noise for the officer's brief, the summary and the risk monitor. Sent
+        urgent, so a hold line being spoken does not hold it back (G659).
         """
         await self.push_frame(
-            OutputTransportMessageFrame({"type": "queue", "position": position}), FrameDirection.DOWNSTREAM
+            OutputTransportMessageUrgentFrame({"type": "queue", "position": position}), FrameDirection.DOWNSTREAM
         )
 
-    def start_queue_countdown(self, ticket_ref: str) -> None:
+    def start_queue_countdown(self, ticket_ref: str, *, announce: bool = False) -> None:
         """Keep the waiting caller told, and time the wait out to a callback.
 
         Started for every wait: the AI's own transfer, and — through
         ``room.brain`` — a call an officer passed on, or whose officer dropped
         and did not come back. Any earlier countdown stops; this one acts only
         while the call is still in the wait it was started for (G179).
+
+        *announce* shows the caller their place at once. The desk asks for it
+        when it puts a call back in the queue; the AI's own transfer has just
+        shown it (G659).
         """
         stop_countdown(self.room)
         self.room.state.transfer_timer_task = asyncio.create_task(
-            self._transfer_timeout_countdown(get_transfer_timeout_s(), ticket_ref, epoch=self.room.state.queue_epoch)
+            self._transfer_timeout_countdown(
+                get_transfer_timeout_s(), ticket_ref, epoch=self.room.state.queue_epoch, announce=announce
+            )
         )
 
-    async def _transfer_timeout_countdown(self, timeout_s: float, ticket_ref: str, *, epoch: int | None = None) -> None:
+    async def _transfer_timeout_countdown(
+        self, timeout_s: float, ticket_ref: str, *, epoch: int | None = None, announce: bool = False
+    ) -> None:
         """Keep a waiting caller told; hand the call back when no officer joins in time.
 
         Every ``RECEPTIONIST_HOLD_UPDATE_S`` a "thank you for holding" line,
@@ -2762,6 +2774,8 @@ class UraReceptionistBrain(LLMService):
         every = get_hold_update_s()
         waited = 0.0
         shown = queue_position(self.room)
+        if announce and waiting():
+            await self._show_queue_position(shown)
         told_next = False
         while every and waited + every < timeout_s:
             await asyncio.sleep(every)
