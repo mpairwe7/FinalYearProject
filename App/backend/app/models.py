@@ -624,6 +624,12 @@ class OfficerChatMessage(BaseModel):
     text: str
     officer_name: str = ""
     created_at: float
+    #: ``text`` is a machine translation of what the officer wrote (G631). The
+    #: chat labels it and offers ``original_text``, so a mistranslated date or
+    #: amount is not read as the officer's own words.
+    translated: bool = False
+    #: What the officer wrote, when ``text`` is a translation of it; else empty.
+    original_text: str = ""
 
 
 class ChatRatingState(BaseModel):

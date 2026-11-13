@@ -180,4 +180,58 @@ describe("useOfficerChat", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(poll).toHaveBeenCalledTimes(1);
   });
+
+  // G626: a case that is gone left the taxpayer "with the officer" for good:
+  // every message failed and the assistant never answered again, across reloads.
+  it.each(["404 Not Found", "422 Unprocessable Entity"])(
+    "hands back to the assistant when the case is gone (%s)",
+    async (status) => {
+      useChatStore.getState().setOfficerChat({ ticketId: TICKET, lastSeq: 3, state: "officer", officerName: "Officer Nakato" });
+      vi.spyOn(analyticsApi, "publicTicketMessages").mockRejectedValue(new Error(status));
+      const { result } = renderHook(() => useOfficerChat());
+      await waitFor(() => expect(result.current.withOfficer).toBe(false));
+      expect(useChatStore.getState().activeTicketId).toBeNull();
+      expect(useChatStore.getState().officerChat).toBeNull();
+      const notice = useChatStore.getState().chat.find((t) => t.id === `notice-gone-${TICKET}`);
+      expect(notice?.notice).toBe("officer_left");
+      expect(notice?.content).toMatch(/no longer available/);
+    },
+  );
+
+  it("hands back to the assistant when a message finds the case gone", async () => {
+    useChatStore.getState().setOfficerChat({ ticketId: TICKET, lastSeq: 3, state: "officer" });
+    vi.spyOn(analyticsApi, "publicTicketMessages").mockResolvedValue(thread({ chat_state: "officer", last_seq: 3 }));
+    vi.spyOn(analyticsApi, "replyToPublicTicket").mockRejectedValue(new Error("404 Not Found"));
+    const { result } = renderHook(() => useOfficerChat());
+    await waitFor(() => expect(result.current.withOfficer).toBe(true));
+    let delivered = true;
+    await act(async () => {
+      delivered = await result.current.sendToOfficer("Are you there?");
+    });
+    expect(delivered).toBe(false);
+    expect(result.current.sendFailed).toBe(false);
+    expect(useChatStore.getState().activeTicketId).toBeNull();
+    expect(result.current.withOfficer).toBe(false);
+  });
+
+  // G631: a machine translation of the officer's words is marked as one.
+  it("marks an officer's message that was machine-translated, and keeps what they wrote", async () => {
+    vi.spyOn(analyticsApi, "publicTicketMessages").mockResolvedValue(
+      thread({
+        chat_state: "officer",
+        officer_name: "Officer Nakato",
+        messages: [
+          { seq: 1, sender: "officer", text: "Ssente zo zakkirizibwa.", translated: true, original_text: "Your refund was approved.", created_at: 1 },
+        ],
+        last_seq: 1,
+      }),
+    );
+    renderHook(() => useOfficerChat());
+    await waitFor(() => expect(officerTurns()).toHaveLength(1));
+    expect(officerTurns()[0]).toMatchObject({
+      content: "Ssente zo zakkirizibwa.",
+      machineTranslated: true,
+      originalText: "Your refund was approved.",
+    });
+  });
 });

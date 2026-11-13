@@ -184,6 +184,9 @@ interface ChatMessageProps {
 function needsHuman(turn: ChatTurn): boolean {
   if (turn.escalationRequired) return true;
   if (turn.retrievalMode === 'abstained') return true;
+  // A crisis or well-being reply opens no ticket by design, and its "Talk to
+  // an officer" chip goes through the assistant: offer the person directly (G625).
+  if (turn.retrievalMode === 'crisis_support' || turn.retrievalMode === 'wellbeing_checkin') return true;
   return turn.faithfulnessScore != null && turn.faithfulnessScore < 0.6;
 }
 
@@ -247,6 +250,7 @@ function ChatMessageInner({
   // An officer's reply relayed into the chat is not the AI's answer: officers
   // are rated on their own service, not with the answer thumbs.
   const isOfficerReply = turn.retrievalMode === 'officer_reply';
+  const [showOriginal, setShowOriginal] = useState(false);
   const t = useTranslation();
   const disabled = actionsDisabled || Boolean(phaseLabel) || turn.responseIncomplete === true || turn.restored === true;
   const onActionClick = disabled ? undefined : actionCallback;
@@ -318,11 +322,29 @@ function ChatMessageInner({
         )}
         <div className="msg-content">
           {isAssistant ? (
-            <Markdown content={isGreeting ? t('chat.greeting') : turn.content} />
+            <Markdown
+              content={isGreeting ? t('chat.greeting') : showOriginal && turn.originalText ? turn.originalText : turn.content}
+            />
           ) : (
             turn.content
           )}
         </div>
+        {/* G631: a machine translation of an officer's words is said to be one,
+            and what they wrote is a click away: a mistranslated date or amount
+            must not read as the officer's own statement. */}
+        {isOfficerReply && turn.machineTranslated && turn.originalText && (
+          <p className="officer-translation-note">
+            <span>{t('officerChat.machineTranslated')}</span>{' '}
+            <button
+              type="button"
+              className="officer-translation-toggle"
+              aria-pressed={showOriginal}
+              onClick={() => setShowOriginal((v) => !v)}
+            >
+              {showOriginal ? t('officerChat.showTranslation') : t('officerChat.showOriginal')}
+            </button>
+          </p>
+        )}
 
         {isAssistant && !phaseLabel && turn.responseIncomplete && (
           <p className="portal-field-error" role="status">{t('message.incomplete')}</p>
@@ -342,7 +364,9 @@ function ChatMessageInner({
           />
         )}
 
-        {isAssistant && turn.objectiveHypothesis && !turn.workflow && (
+        {/* G632: once a turn escalates the backend withdraws its guided steps;
+            the card from the early metadata frame must not offer them. */}
+        {isAssistant && turn.objectiveHypothesis && !turn.workflow && !turn.escalationRequired && (
           <div className="objective-hypothesis-card" data-testid="objective-hypothesis-card" role="region" aria-label={t('objective.cardTitle')}>
             <div className="objective-hypothesis-header">{t('objective.cardTitle')}</div>
             <div className="objective-hypothesis-title">{turn.objectiveHypothesis.title}</div>

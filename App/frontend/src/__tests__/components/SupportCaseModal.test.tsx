@@ -4,6 +4,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SupportCaseModal } from "../../components/SupportCaseModal";
 import { analyticsApi } from "../../services/analyticsApi";
+import { useChatStore } from "../../store/useChatStore";
 
 const mockCase = {
   ok: true,
@@ -114,5 +115,52 @@ describe("SupportCaseModal", () => {
     const closeBtn = screen.getByRole("button", { name: /Close support case room/i });
     fireEvent.click(closeBtn);
     expect(onClose).toHaveBeenCalled();
+  });
+
+  // G628: the room said "A URA Officer is Reviewing Your Case … has been
+  // assigned" whatever the case's status, a load failure included.
+  describe("says where the case really stands", () => {
+    const TID = "abcdef12-3456-7890-abcd-ef1234567890";
+    const waiting = { ...mockCase, officer_reply: "", reply_at: 0 };
+
+    it("an open case is waiting for an officer, not being reviewed", async () => {
+      vi.spyOn(analyticsApi, "publicTicketStatus").mockResolvedValue({ ...waiting, status: "open" });
+      render(<SupportCaseModal isOpen={true} onClose={vi.fn()} ticketId={TID} />);
+      expect(await screen.findByText(/waiting for an officer to pick it up/i)).toBeInTheDocument();
+      expect(screen.queryByText(/Reviewing Your Case/i)).toBeNull();
+      expect(screen.queryByText(/has been assigned/i)).toBeNull();
+    });
+
+    it("an assigned case names the team that has it", async () => {
+      vi.spyOn(analyticsApi, "publicTicketStatus").mockResolvedValue({ ...waiting, status: "assigned" });
+      render(<SupportCaseModal isOpen={true} onClose={vi.fn()} ticketId={TID} />);
+      expect(await screen.findByText(/An officer in Domestic Taxes - Objections & Advisory has your case/i)).toBeInTheDocument();
+    });
+
+    it("a case closed without action says so and how to get help", async () => {
+      vi.spyOn(analyticsApi, "publicTicketStatus").mockResolvedValue({ ...waiting, status: "wontfix", can_reply: false });
+      render(<SupportCaseModal isOpen={true} onClose={vi.fn()} ticketId={TID} />);
+      expect(await screen.findByText(/closed without further action/i)).toBeInTheDocument();
+      expect(screen.queryByText(/waiting for an officer/i)).toBeNull();
+    });
+
+    it("a case that cannot be loaded promises nothing", async () => {
+      vi.spyOn(analyticsApi, "publicTicketStatus").mockRejectedValue(new Error("404 Not Found"));
+      render(<SupportCaseModal isOpen={true} onClose={vi.fn()} ticketId={TID} />);
+      expect(await screen.findByText(/could not be loaded/i)).toBeInTheDocument();
+      expect(screen.queryByText(/waiting for an officer/i)).toBeNull();
+      expect(screen.queryByText(/Reviewing Your Case/i)).toBeNull();
+    });
+
+    it("speaks the taxpayer's language", async () => {
+      useChatStore.setState({ locale: "sw" });
+      try {
+        vi.spyOn(analyticsApi, "publicTicketStatus").mockResolvedValue({ ...waiting, status: "open" });
+        render(<SupportCaseModal isOpen={true} onClose={vi.fn()} ticketId={TID} />);
+        expect(await screen.findByText(/inasubiri afisa aichukue/i)).toBeInTheDocument();
+      } finally {
+        useChatStore.setState({ locale: "en" });
+      }
+    });
   });
 });

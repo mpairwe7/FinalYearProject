@@ -677,7 +677,7 @@ A review of the whole call flow: what the AI says, the handoff, the officer's de
 
 ### Intelligent UI assurance — 2026-11-13
 
-A review of every surface where the AI meets a person: the chat's trust signals, its actions and handoff, the staff console's oversight, and voice, capture, offline and language. [Evidence, sources, phases and the audit prompt](plans/intelligent-ui-integration-audit-2026-11-13.md); phase 1 decisions in ADR-0048. Fixed means implemented with a regression test that failed first; nothing here was exercised on the Space, a real microphone, a screen reader or by a first-language reader.
+A review of every surface where the AI meets a person: the chat's trust signals, its actions and handoff, the staff console's oversight, and voice, capture, offline and language. [Evidence, sources, phases and the audit prompt](plans/intelligent-ui-integration-audit-2026-11-13.md); phase 1 decisions in ADR-0048, phase 2 in ADR-0049. Fixed means implemented with a regression test that failed first; nothing here was exercised on the Space, a real microphone, a screen reader or by a first-language reader.
 
 | Gap | Finding | Status |
 | --- | --- | --- |
@@ -688,15 +688,15 @@ A review of every surface where the AI meets a person: the chat's trust signals,
 | G622 🟢 | ~~A stream that abstained kept the passages it had rejected as the answer's sources and, reading the mode as `hybrid`, offered no officer.~~ | Fixed 2026-11-13 (ADR-0048): the grounding frame names the mode and withdraws citations, sources and resources. `test_deterministic_streaming_parity.py`. |
 | G623 🟢 | ~~"Well grounded" followed the raw score while the judge said the claim check had not run; no frontend file read `response_judge`.~~ | Fixed 2026-11-13 (ADR-0048): badges follow `confidence_band`; below `high`, nothing says grounded or official; badge text is translated. Web evidence earning the badge is G651. |
 | G624 🟢 | ~~Document totals read by OCR were "✓ Verified" and "Total Payable", every note was ticked, and the server's extraction warnings were dropped.~~ | Fixed 2026-11-13 (ADR-0048): warnings shown; "Figures add up", "on the document", a machine-read note, a warning icon on a discrepancy. `DocumentInspectionModal.test.tsx`. |
-| G625 ⚪ | When the assistant opens a ticket itself (judge, supervisor, the "Talk to an officer" chip, a crisis reply) the chat never follows it, so the officer writes into a chat the taxpayer never sees. | Open: phase 2. |
-| G626 ⚪ | A case that is gone (404) leaves the taxpayer "with the officer": every message fails and the AI never answers again in that conversation, across reloads. | Open: phase 2. |
-| G627 ⚪ | The supervisor's ESCALATE route says "I've flagged it for a URA officer" when no ticket exists (queue off or a failed write). | Open: phase 2. |
-| G628 ⚪ | The Support Case room says an officer is reviewing the case whatever its status, and is English only. | Open: phase 2. |
-| G629 ⚪ | "New chat" silently stops following an open case; the rail does not show one. | Open: phase 2. |
-| G630 ⚪ | After an officer hands back, the AI cannot see the officer chat, while the notice implies continuity. | Open: phase 2. |
-| G631 ⚪ | An officer's message is machine-translated for the taxpayer and shown as the officer's own words, unlabelled. | Open: phase 2. |
-| G632 ⚪ | A late-escalated turn keeps the inferred goal's "Start guided steps". | Open: phase 2. |
-| G633 ⚪ | Resuming a portal task after sign-in posts to the AI while an officer holds the chat. | Open: phase 2. |
+| G625 🟢 | ~~When the assistant opens a ticket itself (judge, supervisor, the "Talk to an officer" chip, a crisis reply) the chat never follows it, so the officer writes into a chat the taxpayer never sees.~~ | Fixed 2026-11-13 (ADR-0049): `ticketIdFrom` follows any `ticket_id` the current response returns; crisis and well-being replies show the handoff button. `e2e/officer-chat.spec.ts`. |
+| G626 🟢 | ~~A case that is gone (404) leaves the taxpayer "with the officer": every message fails and the AI never answers again in that conversation, across reloads.~~ | Fixed 2026-11-13 (ADR-0049): a 404/422 on the poll or a reply hands back to the assistant with a notice and clears the case. `useOfficerChat.test.ts`. |
+| G627 🟢 | ~~The supervisor's ESCALATE route says "I've flagged it for a URA officer" when no ticket exists (queue off or a failed write).~~ | Fixed 2026-11-13 (ADR-0049): with no ticket both ESCALATE branches say `ESCALATION_NOT_QUEUED_REPLY`, shared with `POST /v1/escalate`. `test_supervisor_route_contract.py`, `test_streaming_language_parity.py`. |
+| G628 🟢 | ~~The Support Case room says an officer is reviewing the case whatever its status, and is English only.~~ | Fixed 2026-11-13 (ADR-0049): status-specific translated copy (open, assigned, won't fix, resolved, not loaded). `SupportCaseModal.test.tsx`. |
+| G629 🟢 | ~~"New chat" silently stops following an open case; the rail does not show one.~~ | Fixed 2026-11-13 (ADR-0049): the rail marks "Case open" / "Officer chatting"; a new chat announces where the case is. Not polled in the background. `ConversationRail.test.tsx`. |
+| G630 🟡 | After an officer hands back, the AI cannot see the officer chat, while the notice implies continuity. | Mitigated 2026-11-13 (ADR-0049): the hand-back notice says the assistant has not seen the officer chat. Open: giving the assistant the officer thread as spotlighted context. |
+| G631 🟢 | ~~An officer's message is machine-translated for the taxpayer and shown as the officer's own words, unlabelled.~~ | Fixed 2026-11-13 (ADR-0049): the thread returns `translated` and `original_text`; the chat labels the translation and shows the original on request. `test_officer_chat.py`, `ChatMessage.test.tsx`. |
+| G632 🟢 | ~~A late-escalated turn keeps the inferred goal's "Start guided steps".~~ | Fixed 2026-11-13 (ADR-0049): the objective card is hidden on an escalated turn. `ChatMessage.test.tsx`. |
+| G633 🟢 | ~~Resuming a portal task after sign-in posts to the AI while an officer holds the chat.~~ | Fixed 2026-11-13 (ADR-0049): nothing is sent to the AI while an officer holds the chat; a resume after sign-in waits for the chat to end. |
 | G634 ⚪ | "Verify & Hotfix" pre-fills the precedence rule the model must obey with the taxpayer's own correction, withdraws the cited sources by default, and audits neither; discrepancies are not tenant-scoped. | Open: phase 3. |
 | G635 ⚪ | An officer's stale translation preview is sent after the English is edited; "figures verified" shows when translation was unavailable. | Open: phase 3. |
 | G636 ⚪ | One-click canned replies claim audits, reconciliations and an authentic EFRIS signature the workbench never shows. | Open: phase 3. |
@@ -1404,7 +1404,9 @@ full agent chain is locked.
 
 ---
 
-*Document version 3.27 — updated 2026-11-13: intelligent UI assurance: G618–G624 fixed by phase 1 (ADR-0048); G625–G655 opened for phases 2 to 6.*
+*Document version 3.28 — updated 2026-11-13: intelligent UI assurance phase 2 (ADR-0049): G625–G629 and G631–G633 fixed, G630 mitigated.*
+
+*Previously: version 3.27 — updated 2026-11-13: intelligent UI assurance: G618–G624 fixed by phase 1 (ADR-0048); G625–G655 opened for phases 2 to 6.*
 
 *Previously: version 3.26 — updated 2026-11-13: phase 8 part C of the call receptionist review (ADR-0047): G610 closed (wrap-ups owed while a call runs) and the LiveKit control limit added to G304.*
 

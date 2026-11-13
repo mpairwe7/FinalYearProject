@@ -201,6 +201,10 @@ export interface OfficerChatThread {
     text: string;
     officer_name?: string;
     created_at: number;
+    /** `text` is a machine translation of what the officer wrote (G631). */
+    translated?: boolean;
+    /** What the officer wrote, when `text` is a translation of it. */
+    original_text?: string;
   }>;
   last_seq: number;
   csat: { requested: boolean; submitted: boolean };

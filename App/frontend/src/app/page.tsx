@@ -44,7 +44,7 @@ import {
   type ConnectorNotice,
   type ConnectorUse,
 } from '../lib/connectors';
-import { applyTurnMeta } from '../lib/turnMeta';
+import { applyTurnMeta, ticketIdFrom } from '../lib/turnMeta';
 import { consumeChatStream } from '../lib/chatStream';
 import { createRevealQueue, type RevealQueue } from '../lib/revealQueue';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
@@ -1247,18 +1247,24 @@ export default function Page() {
       recognitionRef.current?.stop();
     }
     // An officer has the case: the message is theirs, and the assistant waits
-    // until they end the chat (unless a structured portal task submission is also attached).
+    // until they end the chat. Nothing reaches the assistant meanwhile, a
+    // portal task submission included: a chat POST can advance a workflow,
+    // and the officer would have been sent system text as the taxpayer's
+    // (G633). A resumed task waits for the chat to end (see below).
     if (withOfficer) {
+      if (portalTaskSubmission) return;
       setMessage('');
       shouldStickToBottomRef.current = true;
       const delivered = await sendToOfficer(text);
       if (!delivered) {
         setMessage(text);
-        setChatLiveStatus(t('officerChat.sendFailed'));
+        // The case may have gone (G626): then the chat is back with the
+        // assistant and the text waits in the composer to be sent there.
+        setChatLiveStatus(
+          useChatStore.getState().activeTicketId ? t('officerChat.sendFailed') : t('officerChat.caseGone'),
+        );
       }
-      if (!portalTaskSubmission) {
-        return;
-      }
+      return;
     }
     const sentAttachments = pendingAttachments
       .filter((a) => a.status === 'ready' && a.documentId)
@@ -1295,6 +1301,15 @@ export default function Page() {
     };
     const updateResponse = (updater: (turn: ChatTurn) => ChatTurn) => {
       if (isResponseActive()) updateLastTurn(updater);
+    };
+    // G625: a ticket the assistant opened itself (the judge, the supervisor,
+    // the "Talk to an officer" chip) is followed like one the HumanHandoff
+    // button opened, so the officer's messages reach this chat.
+    const followTicket = (frame: unknown) => {
+      const tid = ticketIdFrom(frame);
+      if (!tid || !isResponseActive()) return;
+      const store = useChatStore.getState();
+      if (store.activeTicketId !== tid) store.setActiveTicketId(tid);
     };
     addTurns([
       createTurn('user', text, userTurnMeta),
@@ -1371,6 +1386,7 @@ export default function Page() {
       const connectorNotices = parseConnectorNotices(d.connector_notices);
       if (connectorNotices.length) applyConnectorTurnState(connectorNotices);
       updateResponse((turn) => applyTurnMeta({ ...turn, content, responseIncomplete: false }, d, connectorNotices));
+      followTicket(d);
       trackChatReceived(Date.now() - t0, (d.sources?.length ?? 0) > 0);
     };
 
@@ -1425,6 +1441,7 @@ export default function Page() {
             if (p.locale) useChatStore.getState().adoptResponseLocale(p.locale, p.locale_source);
             if (typeof p.reply === 'string') reveal.set(cleanResponse(p.reply));
             updateResponse((turn) => applyTurnMeta(turn, p));
+            followTicket(p);
           }
           return;
         }
@@ -1485,6 +1502,7 @@ export default function Page() {
                 const notices = parseConnectorNotices(p.connector_notices);
                 if (notices.length) applyConnectorTurnState(notices);
                 updateResponse((t) => applyTurnMeta(t, p, notices));
+                followTicket(p);
               }
             } catch {}
             continue;
@@ -1509,6 +1527,7 @@ export default function Page() {
             const notices = parseConnectorNotices(p.connector_notices);
             if (notices.length) applyConnectorTurnState(notices);
             updateResponse((t) => applyTurnMeta(t, p, notices));
+            followTicket(p);
           } catch {}
           return;
         }
@@ -1643,6 +1662,9 @@ export default function Page() {
   useEffect(() => {
     if (resumedTaskRef.current || typeof window === 'undefined') return;
     if (isLoading || pendingAttachments.some((a) => a.status === 'uploading')) return;
+    // G633: not while an officer holds the chat. The continuation stays
+    // pending and runs once they end it.
+    if (withOfficer) return;
     const params = new URLSearchParams(window.location.search);
     if (params.get('auth_resumed') !== '1' || !getAuthToken()) return;
     const preview = peekPendingPortalContinuation();
@@ -1684,6 +1706,7 @@ export default function Page() {
     sendMessage,
     switchSession,
     t,
+    withOfficer,
   ]);
 
   // ---- Voice input ----
@@ -2346,8 +2369,11 @@ export default function Page() {
           activeConversationId={activeConversationId}
           onClose={() => setSidebarOpen(false)}
           onNewConversation={() => {
+            // G629: the case stays with its conversation; say where it is.
+            const caseLeftOpen = Boolean(useChatStore.getState().activeTicketId);
             createNewSession();
             setSidebarOpen(false);
+            if (caseLeftOpen) setChatLiveStatus(t('officerChat.caseStillOpen'));
           }}
           onSelectConversation={(id) => {
             switchSession(id);

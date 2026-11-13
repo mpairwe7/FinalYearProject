@@ -51,6 +51,7 @@ from . import documents
 from . import officer_hours
 from .analytics import METRICS_CONTENT_TYPE, AnalyticsMiddleware, metrics, record_chat_turn, route_label
 from .security_events import record_http_security_event
+from .text_signals import ESCALATION_NOT_QUEUED_REPLY
 from .tracing import current_traceresponse
 from .auth import AuthContext, current_user, optional_user, require_role, require_user
 from .auth.models import (
@@ -1106,11 +1107,8 @@ _ESCALATION_REUSED_OFF_DUTY_MESSAGE = (
     "Your question is already with URA's officers. They work {hours}, so their "
     "reply will appear here {when}. There is no need to ask again."
 )
-_ESCALATION_QUEUE_OFF_MESSAGE = (
-    "This assistant cannot pass your question to an officer right now. "
-    "Please call URA toll-free on 0800 117 000 or 0800 217 000, or visit "
-    "ura.go.ug."
-)
+# One sentence for every route into the queue that cannot reach it (G627).
+_ESCALATION_QUEUE_OFF_MESSAGE = ESCALATION_NOT_QUEUED_REPLY
 
 _RATE_LIMIT = os.getenv("RATE_LIMIT", "30/minute")
 #: An active guided journey untouched for this long counts as abandoned in the
@@ -3661,6 +3659,23 @@ def reply_to_escalation(
     }
 
 
+def _taxpayer_thread_message(row: dict) -> dict:
+    """One thread message as the taxpayer reads it: an officer's in their language,
+    marked as a machine translation with the original kept beside it (G631)."""
+    text = row.get("text") or ""
+    localized = row.get("text_localized") or ""
+    translated = row["sender"] == "officer" and bool(localized) and localized != text
+    return {
+        "seq": int(row["seq"]),
+        "sender": row["sender"],
+        "text": localized if translated else text,
+        "officer_name": row.get("officer_name") or "",
+        "created_at": float(row.get("created_at") or 0.0),
+        "translated": translated,
+        "original_text": text if translated else "",
+    }
+
+
 @app.get("/v1/escalate/{ticket_id}/messages", response_model=OfficerChatThreadResponse, tags=["chat"])
 @limiter.limit(_CHAT_POLL_RATE_LIMIT)
 def escalation_messages(
@@ -3694,16 +3709,7 @@ def escalation_messages(
         ticket_id=ticket_id,
         chat_state=officer_chat.chat_state(ticket, chat),
         officer_name=officer_chat.officer_name_for(ticket, chat),
-        messages=[
-            {
-                "seq": int(r["seq"]),
-                "sender": r["sender"],
-                "text": (r.get("text_localized") or r.get("text") or "") if r["sender"] == "officer" else (r.get("text") or ""),
-                "officer_name": r.get("officer_name") or "",
-                "created_at": float(r.get("created_at") or 0.0),
-            }
-            for r in rows
-        ],
+        messages=[_taxpayer_thread_message(r) for r in rows],
         last_seq=last_seq,
         csat=officer_chat.csat_state(ticket, chat),
     )

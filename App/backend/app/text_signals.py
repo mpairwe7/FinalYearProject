@@ -1340,6 +1340,15 @@ ESCALATION_REPLY_FOOTER = (
     "via the Contact Centre."
 )
 
+#: Said instead of the promise above when no ticket was written: the queue is off
+#: or the write failed (G627). Also ``POST /v1/escalate``'s queue-off message, so
+#: both routes into the queue say the same true thing.
+ESCALATION_NOT_QUEUED_REPLY = (
+    "This assistant cannot pass your question to an officer right now. "
+    "Please call URA toll-free on 0800 117 000 or 0800 217 000, or visit "
+    "ura.go.ug."
+)
+
 CONTACT_FOOTER = (
     "If you get stuck at any step, URA is happy to help: visit "
     "https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or "

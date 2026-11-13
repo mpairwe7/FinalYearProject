@@ -222,6 +222,22 @@
   white-space: nowrap;
 }
 
+/* G629: a conversation holding an open support case. Text, not colour alone,
+   carries the meaning; the live state adds the accent. */
+.chatv2 .rail-item-case {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--warning);
+  color: var(--text-1);
+}
+.chatv2 .rail-item-case.is-live {
+  border-color: var(--cv2-accent);
+}
+
 /* The kebab replaces the old always-on delete icon. Hidden until the row is
    hovered or something inside it has focus, so a keyboard reaches it too. */
 .chatv2 .rail-item-menu {

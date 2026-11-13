@@ -144,6 +144,27 @@ class StreamingRouteParityTest(_Base):
         self.assertEqual(out["retrieval_mode"], "escalated")
         self.assertTrue(out["escalation_required"])
 
+    def test_supervisor_escalation_promises_no_officer_without_a_ticket(self) -> None:
+        """G627, streaming path: the reply was the promise whatever the ticket write did."""
+        from app.agents import AgentRoute
+        from app.text_signals import ESCALATION_NOT_QUEUED_REPLY
+
+        decision = mock.Mock(route=AgentRoute.ESCALATE, reason="taxpayer asked for an officer")
+        decision.clarification_question = ""
+        decision.suggested_tools = []
+        with mock.patch.object(self.service.supervisor, "classify", return_value=decision), \
+             mock.patch.object(self.service.flags, "is_enabled", side_effect=lambda name, **_rollout: name in {"agentic_mode", "query_rewrite"}), \
+             mock.patch.object(self.service.ChatModel, "_maybe_create_ticket", return_value=""):
+            out = self._run(
+                self._patches(_maybe_handle_workflow=mock.Mock(return_value=None)),
+                message="I want to dispute my assessment with an officer",
+                locale="en",
+                locale_explicit=False,
+            )
+        self.assertEqual(out["retrieval_mode"], "escalated")
+        self.assertNotIn("flagged it for a URA officer", out["reply"])
+        self.assertIn(ESCALATION_NOT_QUEUED_REPLY, out["reply"])
+
     def test_officer_reply_is_delivered_before_the_bot_answers(self) -> None:
         out = self._run(
             self._patches(
