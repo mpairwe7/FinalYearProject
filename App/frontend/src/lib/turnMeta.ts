@@ -66,8 +66,22 @@ export function workflowFrom(value: unknown): WorkflowState | undefined {
   if (record(value.journey_gps) && value.journey_gps.parent_goals !== undefined && !Array.isArray(value.journey_gps.parent_goals)) {
     return undefined;
   }
+  // The elements too: the stepper reads properties off each one during render,
+  // so a null among them threw as surely as a non-list did.
+  const objects = (list: unknown) => (Array.isArray(list) ? list.filter(record) : list);
+  const strings = (list: unknown) =>
+    Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string') : list;
   return {
     ...value,
+    prerequisites: objects(value.prerequisites),
+    parent_goals: objects(value.parent_goals),
+    option_labels: strings(value.option_labels),
+    form_draft: record(value.form_draft)
+      ? { ...value.form_draft, fields: objects(value.form_draft.fields) }
+      : value.form_draft,
+    journey_gps: record(value.journey_gps)
+      ? { ...value.journey_gps, parent_goals: objects(value.journey_gps.parent_goals) }
+      : value.journey_gps,
     options: Array.isArray(value.options)
       ? value.options.filter((o): o is string => typeof o === 'string').slice(0, 64)
       : undefined,

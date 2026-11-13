@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { applyTurnMeta, formatNextShift, officerHoursFrom } from '../../lib/turnMeta';
+import { applyTurnMeta, formatNextShift, officerHoursFrom, workflowFrom } from '../../lib/turnMeta';
 import type { ChatTurn } from '../../store/useChatStore';
 
 const turn = (over: Partial<ChatTurn> = {}): ChatTurn =>
@@ -193,3 +193,28 @@ describe('applyTurnMeta', () => {
     expect(preserved.objectiveHypothesis).toEqual(hypothesis);
   });
 });
+
+// CodeRabbit on PR 736: a list could pass as a list while holding null, and
+// the stepper read properties off each element during render.
+describe('workflowFrom nested elements', () => {
+  it('keeps only objects in the lists the stepper reads properties from, and strings in option_labels', () => {
+    const wf = workflowFrom({
+      id: 'vat_registration',
+      name: 'Register for VAT',
+      status: 'active',
+      prerequisites: [null, { id: 'tin', title: 'TIN', satisfied: true }],
+      parent_goals: [7, { workflow_id: 'w' }],
+      option_labels: [null, 'Yes'],
+      form_draft: { fields: [null, { slot: 'tin', label: 'TIN' }] },
+      journey_gps: { parent_goals: ['x', { workflow_id: 'w' }] },
+    });
+    expect(wf).toBeDefined();
+    const w = wf as unknown as Record<string, any>;
+    expect(w.prerequisites).toEqual([{ id: 'tin', title: 'TIN', satisfied: true }]);
+    expect(w.parent_goals).toEqual([{ workflow_id: 'w' }]);
+    expect(w.option_labels).toEqual(['Yes']);
+    expect(w.form_draft.fields).toEqual([{ slot: 'tin', label: 'TIN' }]);
+    expect(w.journey_gps.parent_goals).toEqual([{ workflow_id: 'w' }]);
+  });
+});
+

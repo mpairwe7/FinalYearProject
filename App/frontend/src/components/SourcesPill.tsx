@@ -110,7 +110,21 @@ export function collectSources(
   for (const c of citations ?? []) {
     const explicit = safeHttpUrl(c.url);
     const key = explicit ? dedupeKey(explicit) : `cite:${c.source}|${c.page ?? ''}|${c.section ?? ''}`;
-    if (seen.has(key)) continue;
+    // G651: what kind of web evidence this is, before anything else.
+    const provenance = present([
+      c.authority === 'commentary' ? label('sources.adviser') : c.authority === 'official' ? label('sources.uraWebsite') : '',
+      c.evidence === 'search_summary' ? label('sources.searchSummary') : '',
+      c.stale ? label('sources.mayBeOutdated') : '',
+    ]);
+    if (seen.has(key)) {
+      // The same link listed as a resource: one entry, but it keeps what the
+      // citation says about the evidence (an adviser's page, a summary, stale).
+      const existing = items.find((item) => item.key === key);
+      if (existing && provenance.length) {
+        existing.meta = [...provenance, ...existing.meta.filter((m) => !provenance.includes(m))];
+      }
+      continue;
+    }
     seen.add(key);
     const passage = c.passage?.trim();
     items.push({
@@ -119,10 +133,7 @@ export function collectSources(
       title: c.title?.trim() || sourceLabel(c.source),
       href: citationHref(c),
       meta: present([
-        // G651: what kind of web evidence this is, before anything else.
-        c.authority === 'commentary' ? label('sources.adviser') : c.authority === 'official' ? label('sources.uraWebsite') : '',
-        c.evidence === 'search_summary' ? label('sources.searchSummary') : '',
-        c.stale ? label('sources.mayBeOutdated') : '',
+        ...provenance,
         c.effective_date,
         // The publisher's date. A crawl date is never shown: it made old pages look current.
         c.published_at ? label('sources.published', { date: c.published_at }) : '',

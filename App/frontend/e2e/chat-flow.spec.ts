@@ -187,6 +187,26 @@ test.describe("Agentic chat flow", () => {
     await expect(page.getByText('Old private response')).toHaveCount(0);
   });
 
+  // CodeRabbit on PR 736: an English-default chat that gets a Luganda reply
+  // adopts Luganda, but the completion was still announced in English.
+  test("the completion is announced in the language the reply adopted", async ({ page }) => {
+    await mockBackend(page);
+    await page.route("**/api/v1/chat/stream", (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { "content-type": "text/event-stream; charset=utf-8" },
+        body: sseReply("Omusolo gwa VAT guli ebitundu 18 ku buli kikumi.").replace(
+          '"conversation_id":"c-e2e"',
+          '"conversation_id":"c-e2e","locale":"lg","locale_source":"detected"',
+        ),
+      }),
+    );
+    await page.goto("/");
+    await sendMessage(page, "omusolo gwa VAT gwenkana wa?");
+    await expect(page.locator(".message-row-assistant").last()).toContainText("ebitundu 18");
+    await expect(page.locator('p.sr-only[role="status"]')).toHaveText("Okuddamu kwa URA kutuuse.");
+  });
+
   test("a starter prompt seeds the conversation", async ({ page }) => {
     await mockBackend(page);
     await page.goto("/");

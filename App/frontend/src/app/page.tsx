@@ -5,7 +5,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExtern
 import { useChatStore, ChatTurn, type ChatAttachment, createTurn, cleanResponse } from '../store/useChatStore';
 import { useVoiceStore } from '../store/useVoiceStore';
 import { LOCALE_OPTIONS } from '../lib/locales';
-import { useTranslation, type TranslationKey } from '../lib/i18n';
+import { translate, useTranslation, type TranslationKey } from '../lib/i18n';
 import {
   initAnalytics,
   trackChatSent,
@@ -1374,6 +1374,10 @@ export default function Page() {
     setTurnPhase('thinking');
     setTurnStartedAt(t0);
     setChatLiveStatus(t('status.waiting'));
+    // The reply may adopt another language (adoptResponseLocale) while this
+    // call runs; what follows is announced in the language the screen is now
+    // in, not the one captured when the message was sent.
+    const announce = (key: TranslationKey) => translate(useChatStore.getState().locale, key);
     lastUserQueryRef.current = text;
     trackChatSent(text.length);
     const ac = new AbortController();
@@ -1460,7 +1464,7 @@ export default function Page() {
         }
         if (res.status !== 404 && res.status !== 405 && res.status !== 401) throw new Error(`API ${res.status}`);
         await applySyncReply();
-        setChatLiveStatus(t('status.ready'));
+        setChatLiveStatus(announce('status.ready'));
         return;
       }
       if (!res.headers.get('content-type')?.toLowerCase().startsWith('text/event-stream')) {
@@ -1619,7 +1623,7 @@ export default function Page() {
       if (!useChatStore.getState().chat.at(-1)?.content.trim()) throw new Error('Empty chat reply');
       updateResponse((turn) => ({ ...turn, responseIncomplete: stoppedAtDeadline }));
       trackChatReceived(Date.now() - t0, (Array.isArray(meta.sources) && meta.sources.length > 0));
-      setChatLiveStatus(stoppedAtDeadline ? t('message.incomplete') : t('status.ready'));
+      setChatLiveStatus(stoppedAtDeadline ? announce('message.incomplete') : announce('status.ready'));
     } catch {
       revealQueueRef.current?.stop();
       if (!isResponseActive()) return;
@@ -1637,10 +1641,10 @@ export default function Page() {
         updateResponse((t) => ({ ...t, content: fallbackText, offlineMode: isOff }));
       }
       if (userStoppedRef.current) {
-        setChatLiveStatus(t('status.stopped'));
+        setChatLiveStatus(announce('status.stopped'));
       } else {
         trackErrorOccurred('chat_fetch_failed');
-        setChatLiveStatus(t('status.unavailable'));
+        setChatLiveStatus(announce('status.unavailable'));
       }
     } finally {
       unsubscribe();

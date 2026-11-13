@@ -2864,20 +2864,28 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             return
         # G653: a correction of the previous answer is recorded here too; the
         # metadata frame carries the report, which the chat shows as a badge.
-        if not result.get("discrepancy_report") and flags.is_enabled("knowledge_discrepancy_reporting"):
+        # A blocked turn (a paused principal, G464) reads and writes nothing more
+        # on its behalf, a correction included.
+        if (
+            not result.get("discrepancy_report")
+            and result.get("retrieval_mode") != "blocked"
+            and flags.is_enabled("knowledge_discrepancy_reporting")
+        ):
             history = result.get("_history") or []
             if not history and (conversation_id or session_id):
                 # A short-circuited turn carries no history: read the previous
-                # turn, which is the one a correction is about.
+                # turn, which is the one a correction is about, with the sources
+                # the challenged answer cited (the report keeps them).
                 try:
-                    history = await asyncio.to_thread(
-                        db.get_recent_turns,
-                        session_id or "",
-                        conversation_id=conversation_id or None,
-                        limit=1,
-                        user_id=user_id or None,
-                        tenant_id=tenant_id or "default",
-                    )
+                    history = (
+                        await asyncio.to_thread(
+                            db.get_conversation_transcript,
+                            conversation_id=conversation_id or None,
+                            session_id=session_id or None,
+                            user_id=user_id or None,
+                            tenant_id=tenant_id or "default",
+                        )
+                    )[-1:]
                 except Exception:
                     logger.debug("previous turn lookup for discrepancy failed", exc_info=True)
                     history = []
@@ -2920,7 +2928,9 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
         # Reuse the history generate_retrieval_only already loaded; read the
         # database only when it loaded none, and off the event loop.
         history_turns = turns_from_history(result.get("_history") or [])
-        if not history_turns:
+        # Not for a blocked turn: a paused principal is answered without
+        # reading anything more on its behalf (G464).
+        if not history_turns and result.get("retrieval_mode") != "blocked":
             history_turns = await asyncio.to_thread(
                 _recent_turns_for_guidance, result, user_id, tenant_id
             )

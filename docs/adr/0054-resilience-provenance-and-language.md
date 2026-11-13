@@ -31,24 +31,30 @@ the main paths are right:
 1. **Restore validates and contains.** Restored turns go through `citationsFrom`,
    `resourcesFrom`, `workflowFrom` and `score`; `workflowFrom` also rejects a
    non-list `prerequisites`, `parent_goals`, `option_labels`,
-   `form_draft.fields` or `journey_gps.parent_goals`. Each message renders inside
+   `form_draft.fields` or `journey_gps.parent_goals`, and keeps only objects in
+   those lists (strings in `option_labels`), since the stepper reads properties
+   off each element. Each message renders inside
    `MessageBoundary`, which replaces a turn that throws with a translated notice
    and leaves the rest of the chat.
 2. **Web evidence says what it is.** `build_citations` carries `authority`,
    `evidence` and `stale` from web hits (`Citation` in `models.py`); a search
-   summary gets no effective date; the sources list labels each kind; an answer
-   citing web evidence is never badged well grounded.
+   summary gets no effective date; the sources list labels each kind, also when a
+   citation repeats a listed resource's link; an answer citing web evidence is
+   never badged well grounded.
 3. `applyTurnMeta` maps `connectors_used`.
 4. **Corrections are recorded on both transports.** `record_discrepancy` is
-   shared by REST and `run_chat_turn`; the stream reads the previous turn when
-   its result carries no history, and the metadata frame carries the report. A
+   shared by REST and `run_chat_turn`; the stream reads the previous turn, with
+   the sources the challenged answer cited, when its result carries no history,
+   and the metadata frame carries the report. A blocked turn (a paused
+   principal, G464) records nothing and reads no history, on either hook. A
    comment that does not save says so and is kept.
 5. **Analyses are not persisted.** `withoutTransientCards` strips attachment
    analyses before writing to storage; the inspection view says why a reloaded
    document has none.
 6. **The taxpayer's language.** The consent notice, every status announcement
    and the screen-reader speaker names are dictionary keys; a source scan test
-   keeps literals out of those places. The screen-reader name for an answer is
+   keeps literals out of those places. A reply's completion is announced in the
+   language the reply adopted, not the one in use when the message was sent. The screen-reader name for an answer is
    "The AI assistant replied".
 
 ## Consequences
@@ -69,6 +75,15 @@ the main paths are right:
 
 Each test was watched failing before the fix:
 
+- `App/backend/tests/test_discrepancy_and_precedence.py`: a blocked turn on the
+  stream reads and records nothing; the fallback history keeps the challenged
+  answer's sources.
+- `App/frontend/src/__tests__/lib/turnMeta.test.ts`: null elements in the nested
+  workflow lists are dropped.
+- `App/frontend/src/__tests__/components/SourcesPill.test.tsx`: a citation that
+  repeats a resource's link keeps its warnings.
+- `App/frontend/e2e/chat-flow.spec.ts`: a completion is announced in the language
+  the reply adopted.
 - `App/frontend/src/__tests__/store/useChatStore.test.ts`: corrupt stored citations,
   resources, workflows and scores are dropped; no extracted field reaches storage.
 - `App/frontend/src/__tests__/components/MessageBoundary.test.tsx`.

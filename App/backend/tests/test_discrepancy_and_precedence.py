@@ -458,5 +458,71 @@ class TestDiscrepancyOnTheStream(unittest.TestCase):
         self.assertIn("18%", stored["user_correction"])
 
 
+
+class TestDiscrepancyOnTheStreamGuards(unittest.TestCase):
+    """CodeRabbit on PR 736: the stream's hook ran for a paused principal's
+    blocked turn, and its fallback history carried no sources."""
+
+    def _run(self, result: dict, message: str, conversation_id: str):
+        import asyncio
+
+        from app import service
+
+        class _Model:
+            name = "test_model"
+
+            def generate_retrieval_only(self, **kwargs):
+                return {**result, "_rewritten": kwargs.get("message", "")}
+
+            def _maybe_create_ticket(self, **kwargs):
+                return ""
+
+        async def collect():
+            return [
+                ev async for ev in service.run_chat_turn(
+                    _Model(), message=message, conversation_id=conversation_id, top_k=4, locale="en",
+                    session_id=f"s-{conversation_id}", request_id="r", user_id=None, tenant_id="default",
+                )
+            ]
+
+        with mock.patch.object(flags, "is_enabled", side_effect=lambda name, **_: name == "knowledge_discrepancy_reporting"):
+            events = asyncio.run(collect())
+        return [p for (t, p) in events if t == "metadata"]
+
+    def _base(self, conversation_id: str, **over):
+        return {
+            "reply": "Thanks.", "sources": [], "citations": [], "faithfulness_score": None,
+            "retrieval_mode": "hybrid", "model": "test_model", "conversation_id": conversation_id, "locale": "en",
+            "escalation_required": False, "escalation_reason": "", "agent_role": "rag_answerer", "handoff": None,
+            "response_judge": None, "next_actions": [], "ticket_id": "", "_hits": [], "_short_circuit": True,
+            "_history": [], **over,
+        }
+
+    def test_a_blocked_turn_reads_and_records_nothing(self):
+        db.init_db()
+        conv = f"c-blocked-{uuid.uuid4().hex[:6]}"
+        with mock.patch.object(db, "get_recent_turns") as recent, \
+             mock.patch.object(db, "get_conversation_transcript") as transcript, \
+             mock.patch.object(db, "create_or_increment_discrepancy") as create:
+            metadata = self._run(self._base(conv, retrieval_mode="blocked"), "Report bug: the withholding tax is incorrect", conv)
+        self.assertFalse(metadata and metadata[0].get("discrepancy_report"))
+        recent.assert_not_called()
+        transcript.assert_not_called()
+        create.assert_not_called()
+
+    def test_the_fallback_history_keeps_the_challenged_answers_sources(self):
+        db.init_db()
+        conv = f"c-sources-{uuid.uuid4().hex[:6]}"
+        db.log_conversation(
+            session_id=f"s-{conv}", conversation_id=conv, user_message="What is the VAT rate?",
+            bot_reply=f"The standard VAT rate in Uganda is 16% ({conv}).", sources='["vat_act.pdf"]',
+        )
+        metadata = self._run(self._base(conv), "No, that is incorrect, VAT is 18%, not 16%", conv)
+        report = (metadata[0] if metadata else {}).get("discrepancy_report") or {}
+        self.assertTrue(report.get("id"), metadata)
+        stored = db.get_discrepancy(report["id"])
+        self.assertIn("vat_act.pdf", stored.get("cited_sources") or [])
+
+
 if __name__ == "__main__":
     unittest.main()
