@@ -801,6 +801,18 @@ class UraReceptionistBrain(LLMService):
             return
 
         if isinstance(frame, RequestOfficerFrame):
+            if self.room.state.mode == "ai" and not self._transfer_in_flight:
+                # Asking for a person cuts the AI off, as a call control or a
+                # typed question does (G657). It used to finish what it was
+                # saying first: live, the rest of a 23 s greeting, with no
+                # answer and no waiting screen until it ended. Only a request
+                # that opens the transfer: a second one must not cut off the
+                # hold it is in.
+                self.room.state.generation_id += 1
+                self._cancel_active_generation()
+                self.room.state.offer_interrupted = False
+                self._bot_speaking = False
+                await self.push_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
             await self._transfer("caller_requested")
             return
 
@@ -2688,6 +2700,11 @@ class UraReceptionistBrain(LLMService):
         await self._say_and_record(
             phrase("review_ask_transfer" if ask_review else "transfer", self.language), kind="handoff"
         )
+        if self.room.state.mode != "transferring":
+            # An officer took the call (or it ended) while the notice was
+            # being said: a waiting screen sent now would replace theirs (G657).
+            logger.info("Call %s is no longer queued; its queue status was not sent", self.room.call_id)
+            return
         await self.push_frame(
             OutputTransportMessageFrame(status_event), FrameDirection.DOWNSTREAM
         )

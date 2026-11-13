@@ -280,6 +280,26 @@ Left open by this part:
 - **The officer's LiveKit identity** is the same on every sign-in, so an old media
   client that rejoins after the officer signed in again is not told apart.
 
+## Phase 9 — an officer's takeover silences the AI
+
+[ADR-0055](../adr/0055-officer-takeover-silences-the-ai.md). Found on 2026-11-13 by
+signing in to the Space as the test officer and administrator and driving real handoffs
+with a scripted caller. Tests: `App/backend/tests/test_receptionist_takeover_silence.py`
+(including the real Pipecat 1.15 output transport, in CI's receptionist job),
+`App/backend/tests/test_receptionist_frame_limits.py`,
+`App/backend/tests/test_session_revocation.py`.
+
+| Gap | What changed |
+| --- | --- |
+| G657 | The bridge clears the AI's speech already queued in the output transport, and waits (at most 1 s) before the joining line. The gate and the caller's socket writer hold back the AI's replies once bridged or ended, and a queue place or `transferring` from a wait that is over. The brain sends the waiting screen only if the call still waits. Asking for an officer interrupts the AI. The officer audio socket's `hangup` is the desk's End. On the WebSocket transport `CallRoom.end()` stops the pipeline, which closes the caller's socket. A revocation resolves an internal user id to its `sub`. |
+
+Left open by this phase:
+
+- **On LiveKit** one 40 ms chunk being written as the interruption lands can still
+  reach the caller: there is no socket writer to hold it back.
+- **A mistyped id** given to the revoke route is still taken as a `sub` (200); the
+  answer shows what was revoked.
+
 ## Not in scope
 
 Needs staging, real callers or an owner's decision: self-hosted token replay

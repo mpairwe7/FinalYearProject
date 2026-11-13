@@ -70,6 +70,10 @@ _PCM_CHUNK = 16000
 
 #: ``voice_calls.status`` values of a call that has not ended.
 _LIVE_STATUSES = ("ai", "transferring", "bridged")
+# How long the bridge waits for the AI's queued output to be cleared before the
+# officer's joining line plays (G657). Pipecat clears it in well under this; a
+# pipeline that never answers holds the officer up no longer.
+_AI_SILENCE_TIMEOUT_S = 1.0
 
 
 class DeskError(Exception):
@@ -338,8 +342,9 @@ async def bridge(room: CallRoom, officer_leg: Any, officer_id: str, speech_model
 
     Returns the officer's display name. The AI goes quiet first (mode
     ``bridged`` closes ``OfficerOutputGate`` and stops caller audio reaching
-    it), the caller's player drops whatever AI audio it still had queued,
-    and only then is the joining line played.
+    it), the AI's output already queued on the server is cleared
+    (:func:`_interrupt_ai_output`), the caller's player drops whatever AI audio
+    it still had, and only then is the joining line played.
     """
     name = room.state.claimed_name or officer_display_name(officer_id)
     now = time.time()
@@ -385,15 +390,75 @@ async def bridge(room: CallRoom, officer_leg: Any, officer_id: str, speech_model
             db.update_ticket(room.state.ticket_id, status="assigned", assignee=officer_id)
         except Exception:
             logger.debug("Could not assign ticket %s", room.state.ticket_id, exc_info=True)
+    def still_joining() -> bool:
+        # Every await below (each send included) gives the call time to move on:
+        # the caller hangs up, or the officer presses End. Such a call is not
+        # announced as bridged (its "ended" already went out); CallRoom.end()
+        # tells the officer. Checked after each await; the publishes are sync.
+        return not room.ending and room.state.mode == "bridged" and room.state.officer_id == officer_id
+
+    await _interrupt_ai_output(room)
+    if not still_joining():
+        return name
     await _send_to_caller(room, {"type": "interrupt"})
+    if not still_joining():
+        return name
     await say_to_caller(room, phrase("officer_joining", room.state.locale, name=name), speech_model)
+    if not still_joining():
+        return name
     status_event = {"type": "status", "status": "bridged", "officer_name": name}
     await _send_to_caller(room, status_event)
+    if not still_joining():
+        return name
     hub.publish_call(room.call_id, "status", status_event)
     hub.publish_lobby("call.bridged", {
         "call_id": room.call_id, "status": "bridged", "officer_id": officer_id, "officer_name": name,
     })
     return name
+
+
+async def _interrupt_ai_output(room: CallRoom) -> None:
+    """Clear what the AI has queued for the caller, in the output transport itself (G657, ADR-0055).
+
+    The AI's speech is made faster than it plays: Pipecat queues it in the
+    output transport, and plays it out in real time, with the messages sent
+    after it (the transfer's "transferring" status and queue place). The gate
+    upstream sees none of it again, and the caller's player only drops what it
+    already holds. Live on the Space a caller heard the rest of the greeting
+    over the officer for 15 s, then "I'm connecting you to an officer", and was
+    then shown the queue for the rest of the call.
+
+    The interruption goes into the output transport's own queue, ahead of
+    anything queued after it there (on LiveKit the joining line is), and this
+    waits until Pipecat reports it handled: the queue cleared and, on the
+    WebSocket transport, the caller's player told to drop what it holds, so
+    that cannot land after the joining line and cut it. A pipeline that does
+    not answer within :data:`_AI_SILENCE_TIMEOUT_S` holds the officer up no
+    longer; the caller's socket writer still holds the AI back then.
+    """
+    transport = getattr(room, "transport", None)
+    if transport is None:
+        return
+    from .serializer import InterruptionFrame
+
+    handled = asyncio.Event()
+
+    async def _cleared(_processor: Any, _frame: Any, _direction: Any) -> None:
+        handled.set()
+
+    try:
+        await transport.output().queue_frame(InterruptionFrame(), callback=_cleared)
+    except Exception:
+        logger.warning("Could not clear the AI's queued output on call %s", room.call_id, exc_info=True)
+        return
+    try:
+        await asyncio.wait_for(handled.wait(), timeout=_AI_SILENCE_TIMEOUT_S)
+    except TimeoutError:
+        logger.warning(
+            "The pipeline did not confirm clearing the AI's output on call %s within %.1f s",
+            room.call_id,
+            _AI_SILENCE_TIMEOUT_S,
+        )
 
 
 async def end(call_id: str, officer_id: str, speech_model: Any) -> dict[str, Any]:
