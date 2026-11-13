@@ -186,6 +186,15 @@ class FrameGateTests(unittest.TestCase):
         self.assertIs(gate.audio(b"\x00" * (frame_budget.MAX_FRAME_HARD_BYTES - 2)), Verdict.DROP)
         self.assertEqual((gate.close_code, gate.close_reason), (1008, "too many frames"))
 
+    def test_a_call_id_cannot_forge_a_log_line(self):
+        # The call id comes from the request (CodeQL py/log-injection).
+        gate = frame_budget.FrameGate("caller", call_id="call_x\nFAKE ERROR line", clock=self.clock)
+        with self.assertLogs(frame_budget.logger, level="WARNING") as logs:
+            gate.audio(b"\x00" * (frame_budget.MAX_FRAME_HARD_BYTES + 2))
+        self.assertTrue(logs.records)
+        for record in logs.records:
+            self.assertNotIn("\n", record.getMessage())
+
     def test_an_odd_length_frame_is_dropped_as_malformed(self):
         gate = self.gate()
         self.assertIs(gate.audio(b"\x00" * 641), Verdict.DROP)

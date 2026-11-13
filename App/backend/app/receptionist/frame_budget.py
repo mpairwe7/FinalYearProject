@@ -34,6 +34,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
+from ..flags import _log_safe
 from . import config, telemetry
 
 if TYPE_CHECKING:
@@ -199,7 +200,7 @@ class FrameGate:
         logger.warning(
             "Closing the %s socket of call %s: a %d B frame is over the %d B cap",
             self.side,
-            self.call_id or "?",
+            _log_safe(self.call_id or "?"),
             size,
             MAX_FRAME_HARD_BYTES,
         )
@@ -213,7 +214,7 @@ class FrameGate:
             logger.warning(
                 "Dropping %s frames on call %s (%s); the socket is closed if this lasts %g s",
                 self.side,
-                self.call_id or "?",
+                _log_safe(self.call_id or "?"),
                 reason,
                 FLOOD_CLOSE_AFTER_S,
             )
@@ -223,7 +224,7 @@ class FrameGate:
             logger.warning(
                 "Closing the %s socket of call %s: its frames were dropped for %g s",
                 self.side,
-                self.call_id or "?",
+                _log_safe(self.call_id or "?"),
                 FLOOD_CLOSE_AFTER_S,
             )
             return Verdict.CLOSE
