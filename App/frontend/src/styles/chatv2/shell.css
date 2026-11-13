@@ -479,3 +479,14 @@
     display: block;
   }
 }
+
+/* G629: a case still open in the chat the taxpayer left. */
+.chatv2 .landing .landing-case-note {
+  margin: 12px auto 0;
+  max-width: 34rem;
+  padding: 8px 12px;
+  border: 1px solid var(--warning);
+  border-radius: 10px;
+  font-size: 14px;
+  color: var(--text-1);
+}

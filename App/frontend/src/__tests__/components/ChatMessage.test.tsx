@@ -482,6 +482,53 @@ describe("ChatMessage — what the answer's badges and reminders claim", () => {
   });
 });
 
+describe("ChatMessage — the way to a person", () => {
+  // G625: a crisis or well-being reply offered an officer only as a chip that
+  // went to the AI; the direct handoff was never shown on it.
+  it.each(["crisis_support", "wellbeing_checkin"])("offers an officer directly on a %s reply", (mode) => {
+    renderMsg({ ...assistantTurn, retrievalMode: mode, faithfulnessScore: null, citations: [] });
+    expect(screen.getByTestId("handoff-request")).toBeInTheDocument();
+  });
+
+  // G632: the backend withdraws the guided steps once a turn escalates; the
+  // card from the early metadata frame offered them anyway.
+  it("does not offer guided steps on a turn that escalated to an officer", () => {
+    renderMsg(
+      {
+        ...assistantTurn,
+        escalationRequired: true,
+        objectiveHypothesis: {
+          objective_id: "o1", title: "Register for VAT", domain: "vat", workflow_id: "vat_registration",
+          confirm_action: "Start guided steps",
+        },
+      },
+      { onActionClick: vi.fn() },
+    );
+    expect(screen.queryByText("Start guided steps")).toBeNull();
+    expect(screen.queryByText("Register for VAT")).toBeNull();
+  });
+});
+
+describe("ChatMessage — an officer's translated message (G631)", () => {
+  it("says it was machine-translated and shows the officer's own words on request", () => {
+    renderMsg({
+      id: "officer-t-1", role: "assistant", content: "Ssente zo zakkirizibwa.", timestamp: 1,
+      retrievalMode: "officer_reply", officerName: "Officer Nakato",
+      machineTranslated: true, originalText: "Your refund was approved.",
+    });
+    expect(screen.getByText(/Machine-translated from what the officer wrote/)).toBeInTheDocument();
+    expect(screen.queryByText("Your refund was approved.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Show what the officer wrote/ }));
+    expect(screen.getByText("Your refund was approved.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Show the translation/ })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("adds nothing to a message the officer wrote in the reader's language", () => {
+    renderMsg({ id: "officer-t-2", role: "assistant", content: "Which period?", timestamp: 1, retrievalMode: "officer_reply" });
+    expect(screen.queryByText(/Machine-translated/)).toBeNull();
+  });
+});
+
 describe("ChatMessage — services an answer used", () => {
   it("names each service, says when it is demo data, and how its lookup ended", () => {
     renderMsg({

@@ -104,6 +104,16 @@ function confidenceBandFrom(judge: unknown): ConfidenceBand | undefined {
   return record(judge) && isConfidenceBand(judge.confidence_band) ? judge.confidence_band : undefined;
 }
 
+/**
+ * The support case a frame says this turn opened (`ticket_id`), or null.
+ * A UUID from `create_ticket`; anything else is no case.
+ */
+export function ticketIdFrom(meta: unknown): string | null {
+  if (!record(meta)) return null;
+  const tid = meta.ticket_id;
+  return typeof tid === 'string' && /^[A-Za-z0-9-]{8,64}$/.test(tid) ? tid : null;
+}
+
 /** Whether officers were on duty when a handoff was queued (`app.officer_hours.status`). */
 export interface OfficerHours {
   onDuty: boolean;

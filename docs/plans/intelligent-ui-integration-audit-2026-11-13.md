@@ -1,7 +1,7 @@
 # Intelligent UI integration audit — 13 November 2026
 
-Status: phase 1 implemented on `fix/intelligent-ui-p1-figures-and-disclosures-2026-11`; phases 2 to 6 open.
-Baseline: `dev` at `882a99b5`. Decisions: [ADR-0048](../adr/0048-figures-and-disclosures-the-taxpayer-sees.md) (phase 1).
+Status: phase 1 implemented (PR 727); phase 2 implemented on `fix/intelligent-ui-p2-human-handoff-2026-11`; phases 3 to 6 open.
+Baseline: `dev` at `882a99b5`. Decisions: [ADR-0048](../adr/0048-figures-and-disclosures-the-taxpayer-sees.md) (phase 1), [ADR-0049](../adr/0049-a-promise-of-a-human-is-kept.md) (phase 2).
 Follows the [30 October audit](intelligent-ui-integration-audit-2026-10.md) (UI-01 to UI-13, ADR-0018).
 
 That audit covered the chat's REST/SSE contract, action boundaries and the
@@ -93,9 +93,11 @@ first-language speakers; that stays G275. The pre-existing browser test "languag
 switch toggles to Luganda" expected the English label after switching to
 Luganda; it now checks the language name, since the localized label is correct.
 
-## Phase 2 — a promise of a human is kept
+## Phase 2 — a promise of a human is kept (implemented, ADR-0049)
 
-| Gap | Severity | Finding | Planned fix |
+All nine were implemented with a test watched failing first; G630 is mitigated (the notice is honest; the assistant still does not see the officer thread). The fix column is what was planned; ADR-0049 records where it differs: G629 marks open cases in the rail rather than polling them in the background, and G632 is fixed in the browser (the card is hidden on an escalated turn) without withdrawing `objective_hypothesis` server-side.
+
+| Gap | Severity | Finding | Fix |
 | --- | --- | --- | --- |
 | G625 | High | When the assistant opens a ticket itself (judge or supervisor escalation, the "Talk to an officer" chip, a crisis reply), the chat never follows it: `applyTurnMeta` does not read `ticket_id`, the only caller of `setActiveTicketId` is the HumanHandoff button, and `needsHuman` has no `crisis_support` case. The officer writes into a chat the taxpayer never sees. | Follow `ticket_id` from the current response; offer the officer on crisis and well-being replies. |
 | G626 | High | A case that is gone (404, for example after the Space loses its database, G616) leaves the taxpayer "with the officer": polling stops, every message fails with "Try again", the AI never answers again in that conversation, and the state survives a reload. | On 404/422, end the officer chat with a notice and hand back to the assistant. |

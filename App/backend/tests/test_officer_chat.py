@@ -129,6 +129,25 @@ class TaxpayerThreadTests(_Chat):
         self.assertEqual(staff["messages"][0]["text"], "Your refund was approved.")
         self.assertEqual(staff["messages"][0]["text_localized"], "Ssente zo zakkirizibwa.")
 
+    def test_a_translated_officers_message_says_it_was_machine_translated(self):
+        """G631: the taxpayer read the translation as the officer's own words, with
+        no label and no way to see what the officer wrote."""
+        db.update_ticket(self.tid, locale="lg")
+        self.take_case()
+        with mock.patch("app.service.localize_reply", return_value="Ssente zo zakkirizibwa."):
+            self.officer_says("Your refund was approved.")
+        msg = self.thread()["messages"][0]
+        self.assertTrue(msg["translated"])
+        self.assertEqual(msg["original_text"], "Your refund was approved.")
+
+    def test_an_untranslated_message_carries_no_original(self):
+        self.take_case()
+        self.officer_says("Which period?")
+        self.taxpayer_says("March 2026.")
+        for msg in self.thread()["messages"]:
+            self.assertFalse(msg["translated"])
+            self.assertEqual(msg["original_text"], "")
+
     def test_the_officer_and_the_auditor_read_the_thread_on_the_case(self):
         self.take_case()
         self.officer_says("Which period?")

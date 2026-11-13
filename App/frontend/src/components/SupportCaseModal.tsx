@@ -41,9 +41,9 @@ export function SupportCaseModal({
       setCaseData(data);
       setError(null);
     } catch {
-      setError("Unable to load support case details. Please try again.");
+      setError(t("case.loadFailed"));
     }
-  }, [ticketId]);
+  }, [ticketId, t]);
 
   useEffect(() => {
     if (!isOpen || !ticketId) return;
@@ -86,7 +86,7 @@ export function SupportCaseModal({
         setTimeout(() => setReplySuccess(false), 3000);
       }
     } catch {
-      setError("Failed to send message to the officer. Please try again.");
+      setError(t("case.sendFailed"));
     } finally {
       setSendingReply(false);
     }
@@ -100,6 +100,8 @@ export function SupportCaseModal({
   const status = caseData?.status || "open";
   const hasOfficerReplied = Boolean(caseData?.officer_reply);
   const isResolved = status === "resolved";
+  // G628: "won't fix" is a closed case, not one still in the queue.
+  const isClosed = status === "wontfix";
   const hasLocalizedReply = Boolean(
     caseData?.officer_reply_localized && caseData.officer_reply_localized !== caseData.officer_reply,
   );
@@ -112,7 +114,7 @@ export function SupportCaseModal({
   if (status === "open") stepIndex = 1;
   else if (status === "assigned" && !hasOfficerReplied) stepIndex = 2;
   else if (hasOfficerReplied && !isResolved) stepIndex = 3;
-  else if (isResolved) stepIndex = 4;
+  else if (isResolved || isClosed) stepIndex = 4;
 
   return (
     <div className="scm-overlay" role="dialog" aria-modal="true" aria-labelledby="scm-title">
@@ -182,22 +184,22 @@ export function SupportCaseModal({
           <div className="scm-stepper" aria-label="Case Progress">
             <div className={`scm-step${stepIndex >= 1 ? " is-active" : ""}`}>
               <div className="scm-step-dot">{stepIndex > 1 ? "✓" : "1"}</div>
-              <div className="scm-step-label">Logged</div>
+              <div className="scm-step-label">{t("case.stepLogged")}</div>
             </div>
             <div className={`scm-step-line${stepIndex >= 2 ? " is-active" : ""}`} />
             <div className={`scm-step${stepIndex >= 2 ? " is-active" : ""}`}>
               <div className="scm-step-dot">{stepIndex > 2 ? "✓" : "2"}</div>
-              <div className="scm-step-label">Assigned</div>
+              <div className="scm-step-label">{t("case.stepAssigned")}</div>
             </div>
             <div className={`scm-step-line${stepIndex >= 3 ? " is-active" : ""}`} />
             <div className={`scm-step${stepIndex >= 3 ? " is-active" : ""}`}>
               <div className="scm-step-dot">{stepIndex > 3 ? "✓" : "3"}</div>
-              <div className="scm-step-label">In Review</div>
+              <div className="scm-step-label">{t("case.stepInReview")}</div>
             </div>
             <div className={`scm-step-line${stepIndex >= 4 ? " is-active" : ""}`} />
             <div className={`scm-step${stepIndex >= 4 ? " is-active" : ""}`}>
               <div className="scm-step-dot">{stepIndex >= 4 ? "✓" : "4"}</div>
-              <div className="scm-step-label">Resolved</div>
+              <div className="scm-step-label">{isClosed ? t("case.stepClosed") : t("case.stepResolved")}</div>
             </div>
           </div>
 
@@ -246,26 +248,35 @@ export function SupportCaseModal({
                 </div>
               ) : null}
             </div>
-          ) : (
-            <div className="scm-waiting-card">
-              <div className="scm-waiting-spinner">
-                <LoadingDots />
-              </div>
+          ) : caseData ? (
+            // G628: what the case's status says, not a promise of review.
+            <div className="scm-waiting-card" role="status">
+              {!isClosed && !isResolved && (
+                <div className="scm-waiting-spinner">
+                  <LoadingDots />
+                </div>
+              )}
               <div className="scm-waiting-content">
-                <h4>A URA Officer is Reviewing Your Case</h4>
+                <h4>
+                  {isClosed || isResolved
+                    ? t("case.titleClosed")
+                    : status === "open"
+                      ? t("case.titleOpen")
+                      : t("case.titleAssigned")}
+                </h4>
                 <p>
-                  Your inquiry has been assigned to the{" "}
-                  <strong>{caseData?.team_label || "support team"}</strong>. An officer is
-                  reviewing the official ledger and documents. Their verified response will appear
-                  directly here.
+                  {isClosed
+                    ? t("case.closed")
+                    : isResolved
+                      ? t("case.resolved")
+                    : status === "open"
+                      ? t("case.waitingOpen")
+                      : t("case.waitingAssigned", { team: caseData.team_label || caseData.team || "URA" })}
                 </p>
-                <p className="scm-waiting-sub">
-                  You can keep this window open or return anytime — your reference code is{" "}
-                  <code>#{refCode}</code>.
-                </p>
+                <p className="scm-waiting-sub">{t("case.reference", { ref: refCode })}</p>
               </div>
             </div>
-          )}
+          ) : null}
 
           {/* Two-Way Taxpayer Follow-up Composer */}
           {liveChat ? (

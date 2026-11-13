@@ -113,6 +113,23 @@ function RailItemTitle({ title }: { title: string }) {
   );
 }
 
+/**
+ * An open support case, shown on its conversation (G629). Officers' messages
+ * reach the chat only while that conversation is open, so the rail says where
+ * the case is.
+ */
+function CaseBadge({ conversation }: { conversation: Conversation }) {
+  const t = useTranslation();
+  if (!conversation.activeTicketId) return null;
+  const chatting =
+    conversation.officerChat?.ticketId === conversation.activeTicketId && conversation.officerChat.state === 'officer';
+  return (
+    <span className={`rail-item-case${chatting ? ' is-live' : ''}`}>
+      {chatting ? t('rail.officerChatting') : t('rail.caseOpen')}
+    </span>
+  );
+}
+
 interface RowProps {
   conversation: Conversation;
   isActive: boolean;
@@ -138,6 +155,7 @@ function ConversationRow({
       <button className="rail-item-main" onClick={onSelect}>
         <span className="rail-item-dot" aria-hidden="true" />
         <RailItemTitle title={conversation.title} />
+        <CaseBadge conversation={conversation} />
       </button>
       <ConversationMenu
         pinned={Boolean(conversation.pinned)}

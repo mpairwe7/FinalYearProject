@@ -39,6 +39,12 @@ function statusOf(error: unknown): number | null {
   return match ? Number(match[1]) : null;
 }
 
+/** The case cannot be read any more: deleted, or lost with the Space's database (G616). */
+function isGone(error: unknown): boolean {
+  const status = statusOf(error);
+  return status === 404 || status === 422;
+}
+
 export interface OfficerChat {
   /** Where the chat stands; null when the conversation has no case. */
   state: OfficerChatState | null;
@@ -72,17 +78,21 @@ export function useOfficerChat({ hold = false }: { hold?: boolean } = {}): Offic
 
   const current = sync && ticketId && sync.ticketId === ticketId ? sync : null;
 
-  /** Hand the taxpayer back to the assistant: notice, then clear the case. */
-  const finish = useCallback((forTicket: string, officerName?: string) => {
+  /**
+   * Hand the taxpayer back to the assistant: notice, then clear the case.
+   * `gone`: the case can no longer be read (G626), so the notice says that
+   * rather than that the officer ended the chat.
+   */
+  const finish = useCallback((forTicket: string, officerName?: string, gone = false) => {
     const store = useChatStore.getState();
     if (store.activeTicketId !== forTicket) return;
-    const id = `notice-left-${forTicket}`;
+    const id = gone ? `notice-gone-${forTicket}` : `notice-left-${forTicket}`;
     if (!store.chat.some((turn) => turn.id === id)) {
       store.addTurns([
         {
           id,
           role: 'assistant',
-          content: tRef.current('officerChat.ended'),
+          content: tRef.current(gone ? 'officerChat.caseGone' : 'officerChat.ended'),
           timestamp: Date.now(),
           notice: 'officer_left',
           officerName,
@@ -107,8 +117,16 @@ export function useOfficerChat({ hold = false }: { hold?: boolean } = {}): Offic
       try {
         res = await analyticsApi.publicTicketMessages(forTicket, known.lastSeq);
       } catch (error) {
-        // The case is gone (or never was one this chat can follow).
-        if (statusOf(error) === 404 || statusOf(error) === 422) return 'stop';
+        // The case is gone (or never was one this chat can follow). Stopping
+        // alone left the taxpayer "with the officer" for good: every message
+        // failed and the assistant never answered again (G626).
+        if (isGone(error)) {
+          // An answer is streaming into the last turn: a notice added now
+          // would land under it. Poll again once it has finished.
+          if (holdRef.current) return 'continue';
+          finish(forTicket, known.officerName, true);
+          return 'stop';
+        }
         return 'error';
       }
       const store = useChatStore.getState();
@@ -136,6 +154,8 @@ export function useOfficerChat({ hold = false }: { hold?: boolean } = {}): Offic
         if (message.sender !== 'officer') continue;
         const id = `officer-${forTicket}-${message.seq}`;
         if (shown.has(id) || !message.text) continue;
+        // G631: a machine translation is marked as one, with the officer's words.
+        const translated = message.translated === true && typeof message.original_text === 'string' && message.original_text.trim() !== '';
         turns.push({
           id,
           role: 'assistant',
@@ -143,6 +163,7 @@ export function useOfficerChat({ hold = false }: { hold?: boolean } = {}): Offic
           timestamp: message.created_at ? message.created_at * 1000 : Date.now(),
           retrievalMode: 'officer_reply',
           officerName: message.officer_name || name,
+          ...(translated ? { machineTranslated: true, originalText: message.original_text } : {}),
         });
       }
       if (turns.length) store.addTurns(turns);
@@ -248,6 +269,10 @@ export function useOfficerChat({ hold = false }: { hold?: boolean } = {}): Offic
       } catch (error) {
         // 409: the officer ended the chat a moment ago — the next poll says so.
         if (statusOf(error) === 409) pollNowRef.current?.();
+        // The case is gone: hand back rather than ask them to try again (G626).
+        // Only a 404: a 422 here is the reply itself being refused (too long),
+        // and the text stays in the composer to be shortened.
+        else if (statusOf(error) === 404) finish(ticketId, current?.officerName, true);
         else setSendFailed(true);
         return false;
       }
@@ -257,7 +282,7 @@ export function useOfficerChat({ hold = false }: { hold?: boolean } = {}): Offic
       pollNowRef.current?.();
       return true;
     },
-    [ticketId, locale],
+    [ticketId, locale, current?.officerName, finish],
   );
 
   const state: OfficerChatState | null = ticketId ? current?.state ?? 'waiting' : null;
