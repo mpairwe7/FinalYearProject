@@ -130,4 +130,10 @@ regexes = [
     # "the sample nonce". WebSocket probes in the runbook and
     # App/scripts/container_smoke.sh send it; servers accept any nonce.
     '''dGhlIHNhbXBsZSBub25jZQ==''',
+    # The sign-out test's stand-in bearer token
+    # (App/frontend/src/__tests__/lib/signOutRevokesSession.test.tsx): header
+    # {"alg":"HS256"}, payload {"sub":"okello"}, signature the text "sig". It is
+    # signed by nothing and opens nothing. Gitleaks scans every commit in a PR,
+    # so the line's gitleaks:allow marker does not cover the commit that added it.
+    '''eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiJva2VsbG8ifQ\.c2ln''',
 ]

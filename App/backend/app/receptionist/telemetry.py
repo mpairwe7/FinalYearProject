@@ -31,6 +31,7 @@ END_REASONS: tuple[str, ...] = (
     "media_pipeline_unavailable",
     "media_pipeline_stopped",
     "media_revocation_failed",
+    "session_revoked",
     "process_lost",
 )
 #: Where a call failed: the recognizer, the voice, the media pipeline, or a

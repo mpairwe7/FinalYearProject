@@ -12,7 +12,7 @@
  * backend host in the client bundle.
  */
 
-import { authHeaders } from "@/lib/authSession";
+import { authHeaders, getAuthToken } from "@/lib/authSession";
 
 const BASE = "/api";
 const TIMEOUT_MS = 15_000;
@@ -145,6 +145,31 @@ async function request<T>(
     throw new ApiError(res.status, detail);
   }
   return res.json() as Promise<T>;
+}
+
+/**
+ * End this person's sessions on the server as well: `POST /v1/me/logout`
+ * revokes every token issued to them up to now, so a copy of this one (another
+ * tab, another device, a leaked one) stops working too, on the API and on any
+ * open staff or call socket (G304, ADR-0053).
+ *
+ * Call it BEFORE clearing the token: it sends the token it revokes. Fire and
+ * forget: `keepalive` lets the request finish while the page navigates to the
+ * provider's logout, and any failure is ignored, because signing out here must
+ * always complete.
+ */
+export function endServerSession(): void {
+  if (!getAuthToken()) return;
+  try {
+    const pending = fetch(`${BASE}/v1/me/logout`, {
+      method: "POST",
+      keepalive: true,
+      headers: authHeaders(),
+    });
+    void Promise.resolve(pending).catch(() => undefined);
+  } catch {
+    // A token that fetch refuses to send (see sanitizeAuthToken) must not stop the sign-out.
+  }
 }
 
 export const accountApi = {

@@ -130,7 +130,9 @@ class LiveCallCase(unittest.IsolatedAsyncioTestCase):
         stack = contextlib.ExitStack()
         stack.enter_context(patch.object(ws, "_voice_receptionist_enabled", return_value=True))
         stack.enter_context(
-            patch.object(ws, "_staff_session", return_value=(user, self.tenant_id, role, (claims or {}).get("exp")))
+            patch.object(
+                ws, "_staff_session", return_value=(user, self.tenant_id, role, (claims or {}).get("exp"), None)
+            )
         )
         stack.enter_context(patch.object(ws.livekit, "enabled", return_value=False))
         return stack
