@@ -582,7 +582,9 @@ there is no search fallback that could answer for someone else's case, and
 in `main.py`; OWASP API1:2023). Rate-limited by
 `CHAT_POLL_RATE_LIMIT` (default `120/minute`). Reading the officer's latest
 message here counts as delivering it, so the next assistant turn does not
-repeat it.
+repeat it. A 404 (the case is gone) or 422 makes the chat hand the taxpayer
+back to the assistant with a notice rather than keep sending to an officer
+(G626, ADR-0049).
 
 **Response**
 ```json
@@ -591,8 +593,8 @@ repeat it.
   "chat_state": "officer",
   "officer_name": "Officer Nakato",
   "messages": [
-    {"seq": 1, "sender": "officer", "text": "Which period?", "officer_name": "Officer Nakato", "created_at": 1790000000.0},
-    {"seq": 2, "sender": "taxpayer", "text": "March 2026.", "officer_name": "", "created_at": 1790000060.0}
+    {"seq": 1, "sender": "officer", "text": "Wiiki ki?", "officer_name": "Officer Nakato", "created_at": 1790000000.0, "translated": true, "original_text": "Which period?"},
+    {"seq": 2, "sender": "taxpayer", "text": "March 2026.", "officer_name": "", "created_at": 1790000060.0, "translated": false, "original_text": ""}
   ],
   "last_seq": 2,
   "csat": {"requested": false, "submitted": false}
@@ -602,7 +604,7 @@ repeat it.
 | Field | Description |
 |-------|-------------|
 | `chat_state` | `waiting` (in the queue; the assistant still answers) · `officer` (an officer has the case: the taxpayer's messages go to them) · `ended` · `none` (a call's ticket: no chat) |
-| `messages` | The thread after `after_seq`, oldest first. An officer's message is in the taxpayer's language when it was translated. `sender: "system"` with text `chat_ended` marks the end |
+| `messages` | The thread after `after_seq`, oldest first. An officer's message is in the taxpayer's language when it was translated; then `translated` is `true` and `original_text` holds what the officer wrote, which the chat labels as a machine translation and shows on request (G631, ADR-0049). `sender: "system"` with text `chat_ended` marks the end |
 | `csat` | Whether the taxpayer has been asked to rate the chat, and has |
 
 `POST /v1/escalate/{ticket_id}/reply` adds the taxpayer's message to the same

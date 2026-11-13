@@ -180,4 +180,97 @@ describe("useOfficerChat", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(poll).toHaveBeenCalledTimes(1);
   });
+
+  // G626: a case that is gone left the taxpayer "with the officer" for good:
+  // every message failed and the assistant never answered again, across reloads.
+  it.each(["404 Not Found", "422 Unprocessable Entity"])(
+    "hands back to the assistant when the case is gone (%s)",
+    async (status) => {
+      useChatStore.getState().setOfficerChat({ ticketId: TICKET, lastSeq: 3, state: "officer", officerName: "Officer Nakato" });
+      vi.spyOn(analyticsApi, "publicTicketMessages").mockRejectedValue(new Error(status));
+      const { result } = renderHook(() => useOfficerChat());
+      await waitFor(() => expect(result.current.withOfficer).toBe(false));
+      expect(useChatStore.getState().activeTicketId).toBeNull();
+      expect(useChatStore.getState().officerChat).toBeNull();
+      const notice = useChatStore.getState().chat.find((t) => t.id === `notice-gone-${TICKET}`);
+      expect(notice?.notice).toBe("officer_left");
+      expect(notice?.content).toMatch(/no longer available/);
+    },
+  );
+
+  it("hands back to the assistant when a message finds the case gone", async () => {
+    useChatStore.getState().setOfficerChat({ ticketId: TICKET, lastSeq: 3, state: "officer" });
+    vi.spyOn(analyticsApi, "publicTicketMessages").mockResolvedValue(thread({ chat_state: "officer", last_seq: 3 }));
+    vi.spyOn(analyticsApi, "replyToPublicTicket").mockRejectedValue(new Error("404 Not Found"));
+    const { result } = renderHook(() => useOfficerChat());
+    await waitFor(() => expect(result.current.withOfficer).toBe(true));
+    let delivered = true;
+    await act(async () => {
+      delivered = await result.current.sendToOfficer("Are you there?");
+    });
+    expect(delivered).toBe(false);
+    expect(result.current.sendFailed).toBe(false);
+    expect(useChatStore.getState().activeTicketId).toBeNull();
+    expect(result.current.withOfficer).toBe(false);
+  });
+
+  // G631: a machine translation of the officer's words is marked as one.
+  it("marks an officer's message that was machine-translated, and keeps what they wrote", async () => {
+    vi.spyOn(analyticsApi, "publicTicketMessages").mockResolvedValue(
+      thread({
+        chat_state: "officer",
+        officer_name: "Officer Nakato",
+        messages: [
+          { seq: 1, sender: "officer", text: "Ssente zo zakkirizibwa.", translated: true, original_text: "Your refund was approved.", created_at: 1 },
+        ],
+        last_seq: 1,
+      }),
+    );
+    renderHook(() => useOfficerChat());
+    await waitFor(() => expect(officerTurns()).toHaveLength(1));
+    expect(officerTurns()[0]).toMatchObject({
+      content: "Ssente zo zakkirizibwa.",
+      machineTranslated: true,
+      originalText: "Your refund was approved.",
+    });
+  });
+
+  // CodeRabbit on PR 729: a reply the API rejects as invalid (422, e.g. over
+  // 2,000 characters) is not a case that has gone.
+  it("keeps the officer chat when a reply is rejected as invalid", async () => {
+    useChatStore.getState().setOfficerChat({ ticketId: TICKET, lastSeq: 3, state: "officer" });
+    vi.spyOn(analyticsApi, "publicTicketMessages").mockResolvedValue(thread({ chat_state: "officer", last_seq: 3 }));
+    vi.spyOn(analyticsApi, "replyToPublicTicket").mockRejectedValue(new Error("422 Unprocessable Entity"));
+    const { result } = renderHook(() => useOfficerChat());
+    await waitFor(() => expect(result.current.withOfficer).toBe(true));
+    await act(async () => {
+      await result.current.sendToOfficer("x".repeat(2100));
+    });
+    expect(result.current.sendFailed).toBe(true);
+    expect(useChatStore.getState().activeTicketId).toBe(TICKET);
+    expect(result.current.withOfficer).toBe(true);
+  });
+
+  // CodeRabbit on PR 729: a gone case found while an answer streams waits, so
+  // the notice is not appended under the streaming turn.
+  it("hands back only after a streaming answer finishes", async () => {
+    useChatStore.getState().setOfficerChat({ ticketId: TICKET, lastSeq: 3, state: "officer" });
+    let fail: (e: Error) => void = () => {};
+    const poll = vi.spyOn(analyticsApi, "publicTicketMessages");
+    poll.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+    poll.mockRejectedValue(new Error("404 Not Found"));
+    const { rerender } = renderHook(({ hold }) => useOfficerChat({ hold }), { initialProps: { hold: false } });
+    await waitFor(() => expect(poll).toHaveBeenCalledTimes(1));
+    // An answer starts streaming while the poll is in flight; the poll then finds the case gone.
+    rerender({ hold: true });
+    await act(async () => {
+      fail(new Error("404 Not Found"));
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(useChatStore.getState().chat.some((t) => t.id === `notice-gone-${TICKET}`)).toBe(false);
+    expect(useChatStore.getState().activeTicketId).toBe(TICKET);
+    rerender({ hold: false });
+    await waitFor(() => expect(useChatStore.getState().activeTicketId).toBeNull());
+    expect(useChatStore.getState().chat.some((t) => t.id === `notice-gone-${TICKET}`)).toBe(true);
+  });
 });

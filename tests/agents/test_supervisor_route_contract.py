@@ -77,6 +77,30 @@ def test_rest_honours_the_escalate_route_when_passages_exist(model, message):
     assert result["ticket_id"], "a taxpayer who asked for a person must get a ticket"
 
 
+@pytest.mark.parametrize("ticket_id", ["", None])
+def test_rest_promises_no_officer_without_a_ticket(model, ticket_id):
+    """G627: the ESCALATE route said "I've flagged it for a URA officer to review"
+    whether or not a ticket was written. With the queue off or a failed write
+    there is none, and AGENTS.md says no route may promise a handoff then."""
+    from unittest import mock
+
+    from app.text_signals import ESCALATION_NOT_QUEUED_REPLY
+
+    with mock.patch.object(type(model), "_maybe_create_ticket", return_value=ticket_id or ""):
+        result = model.generate("I want to speak to a human officer")  # nosemgrep: ura-llm01-raw-user-input-to-llm
+
+    assert result["retrieval_mode"] == "escalated"
+    assert "flagged it for a URA officer" not in result["reply"]
+    assert ESCALATION_NOT_QUEUED_REPLY in result["reply"]
+    assert not result.get("ticket_id")
+
+
+def test_rest_still_promises_an_officer_with_a_ticket(model):
+    result = model.generate("I want to speak to a human officer")  # nosemgrep: ura-llm01-raw-user-input-to-llm
+    assert result["ticket_id"]
+    assert "flagged it for a URA officer" in result["reply"]
+
+
 def test_tiering_without_agentic_mode_does_not_dereference_a_missing_route(model, monkeypatch):
     from app.service import flags as service_flags
 

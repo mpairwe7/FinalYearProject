@@ -9,7 +9,7 @@
  */
 import { expect, test, type Page } from "@playwright/test";
 
-import { clearChatStore, mockBackend, seedConsent, sendMessage } from "./helpers";
+import { clearChatStore, mockBackend, seedConsent, sendMessage, sseReply } from "./helpers";
 
 const TICKET = "abc12345-6789-4def-8123-456789abcdef";
 
@@ -54,6 +54,32 @@ test.describe("Live chat with an officer", () => {
   test.beforeEach(async ({ page }) => {
     await seedConsent(page);
     await clearChatStore(page);
+  });
+
+  // G625: a ticket the assistant opened itself (the judge or the supervisor)
+  // was never followed: the officer wrote into a chat the taxpayer never saw.
+  test("a ticket the assistant opened itself is followed without pressing the handoff button", async ({ page }) => {
+    await mockBackend(page);
+    const chat = await mockOfficerChat(page);
+    let polled = 0;
+    page.on("request", (request) => {
+      if (request.url().includes(`/escalate/${TICKET}/messages`)) polled++;
+    });
+    await page.route("**/api/v1/chat/stream", (route) =>
+      route.fulfill({
+        contentType: "text/event-stream",
+        body: sseReply("I've flagged it for a URA officer to review (ticket abc12345).", { escalate: true }).replace(
+          '"escalation_reason":"dispute"',
+          `"escalation_reason":"dispute","ticket_id":"${TICKET}"`,
+        ),
+      }),
+    );
+    await page.goto("/");
+    await sendMessage(page, "I want to speak to a human officer");
+    await expect(page.locator(".chat-case-status").filter({ hasText: "Waiting for a URA officer" })).toBeVisible();
+    await expect.poll(() => polled).toBeGreaterThan(0);
+    chat.phase = "officer";
+    await expect(page.locator(".message-row-officer")).toContainText("Which period was assessed twice?", { timeout: 15_000 });
   });
 
   test("an officer takes the chat, ends it, and the taxpayer rates it and is handed back", async ({ page }) => {

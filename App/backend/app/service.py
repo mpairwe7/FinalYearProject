@@ -199,6 +199,7 @@ from .text_signals import (
     CONTACT_FOOTER,
     CONTRADICTED_CLAIM_REPLY,
     ESCALATION_REPLY_FOOTER,
+    ESCALATION_NOT_QUEUED_REPLY,
     ESCALATION_REPLY_LEAD,
     FAREWELL_REPLY,
     GRATITUDE_REPLY,
@@ -12164,9 +12165,11 @@ class ChatModel:
                     )
                     if ticket_id:
                         trace_ctx["ticket_id"] = ticket_id
-                    if ticket_id:
-                        reply += f" (ticket {ticket_id[:8]})"
-                    reply += ESCALATION_REPLY_FOOTER
+                        reply += f" (ticket {ticket_id[:8]})" + ESCALATION_REPLY_FOOTER
+                    else:
+                        # G627: no ticket (queue off, or the write failed and was
+                        # logged ESCALATION LOST) means no officer is coming.
+                        reply = ESCALATION_NOT_QUEUED_REPLY
                     escalated = {
                         "reply": reply,
                         "sources": [],
@@ -14258,6 +14261,9 @@ class ChatModel:
                     response_judge=response_judge,
                     user_id=user_id or "",
                 )
+                if not ticket_id:
+                    # G627: as on REST, no ticket means no officer is coming.
+                    reply = ESCALATION_NOT_QUEUED_REPLY
                 return {
                     "reply": reply,
                     "sources": [],

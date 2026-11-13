@@ -292,6 +292,10 @@ export interface ChatTurn {
   /** The officer who wrote this turn (an officer's message in a live chat),
    *  or who joined or ended it (a notice). */
   officerName?: string;
+  /** An officer's message the taxpayer reads in a machine translation (G631). */
+  machineTranslated?: boolean;
+  /** What the officer wrote, shown on request beside the translation. */
+  originalText?: string;
   citations?: Citation[];
   faithfulnessScore?: number | null;
   /** The answer judge's confidence (`response_judge.confidence_band`). Below
@@ -550,6 +554,10 @@ function sanitizeTurn(value: unknown): ChatTurn | null {
   if (typeof value.serverTurnId === 'string' && value.serverTurnId) turn.serverTurnId = value.serverTurnId;
   if (value.notice === 'officer_joined' || value.notice === 'officer_left') turn.notice = value.notice;
   if (typeof value.officerName === 'string' && value.officerName) turn.officerName = value.officerName.slice(0, 128);
+  if (value.machineTranslated === true && typeof value.originalText === 'string' && value.originalText) {
+    turn.machineTranslated = true;
+    turn.originalText = value.originalText.slice(0, 8000);
+  }
   if (typeof value.escalationRequired === 'boolean') turn.escalationRequired = value.escalationRequired;
   if (typeof value.escalationReason === 'string') turn.escalationReason = value.escalationReason;
   const hours = officerHoursFrom({ officer_hours: value.officerHours });

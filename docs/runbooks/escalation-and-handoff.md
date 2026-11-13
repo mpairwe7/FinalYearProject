@@ -179,13 +179,43 @@ endpoint: the officer completes the action in their own system or declines it, a
   share `clean_text_for_speech` and `apply_tts_engine_phonetics` (`Tin`, `Nin`, `Vat`, `Payee`,
   `Efris`, `U R A`, `P R N`, `Runyankole`, `Acholi`) with Main Chat (`G439`, `G440`).
 
+## In the taxpayer's chat (ADR-0049, 2026-11-13)
+
+- **Any turn that opens a ticket is followed.** The chat reads `ticket_id` from
+  `/v1/chat` and from the stream's frames, as it does from the HumanHandoff button,
+  so the waiting banner shows and the officer's messages arrive in that chat. A
+  crisis or well-being reply shows the HumanHandoff button (G625).
+- **No ticket, no promise.** The supervisor's ESCALATE route says
+  `ESCALATION_NOT_QUEUED_REPLY` ("This assistant cannot pass your question to an
+  officer right now…" and the toll-free lines) when `_maybe_create_ticket` returns
+  nothing, on REST and the stream, exactly as `POST /v1/escalate` does (G627). If
+  taxpayers report that sentence, check the `ticket_queue` flag and the logs for
+  `ESCALATION LOST` before anything else.
+- **A lost case hands back.** A 404 or 422 on the thread or a reply ends the officer
+  chat in the browser with "This support case is no longer available…" and the
+  assistant answers again (G626). On the Space this follows every restart that
+  loses the database (G616): expect it there until storage persists.
+- **The case room** speaks to the real status: open (waiting for an officer),
+  assigned (the team that has it), won't fix (closed, call 0800 117 000),
+  resolved, or could not be loaded (G628).
+- **The rail** marks a conversation holding a case "Case open" or "Officer
+  chatting" (G629). The hand-back notice tells the taxpayer the assistant has not
+  seen the officer chat (G630). An officer's translated message is labelled with
+  what they wrote one click away (G631).
+
 ## Verify after a change
 
+Run from the repository root; each directory change stays in its subshell.
+
 ```bash
-cd App/backend && pytest tests/test_escalation_policy.py tests/test_turn_cases.py \
-  tests/test_taxpayer_escalation.py -q
+(cd App/backend && pytest tests/test_escalation_policy.py tests/test_turn_cases.py \
+  tests/test_taxpayer_escalation.py tests/test_officer_chat.py -q)
 pytest tests/agents/test_phase38_cx.py -q        # root suite: the service paths
+pytest tests/agents/test_supervisor_route_contract.py -q   # G627: no ticket, no promise
 pytest tests/test_answer_integrity_integration.py -k AnswersOnlyToItsOwner -q   # G243 BOLA
+(cd App/frontend && bunx vitest run src/__tests__/hooks/useOfficerChat.test.ts \
+  src/__tests__/components/SupportCaseModal.test.tsx \
+  && CI=1 bunx playwright test e2e/officer-chat.spec.ts --project=chromium)   # G625
 ```
 
 Live (isolated api, flags on): drive hardship + enforcement through
