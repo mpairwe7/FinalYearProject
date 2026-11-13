@@ -92,7 +92,9 @@ class OfficerOutputGate(FrameProcessor):  # type: ignore[misc,valid-type]
     Sits just before the transport's output in every pipeline. Once an officer
     is bridged the caller talks to them — their audio and captions go straight
     to the caller's socket, not through here — and anything the AI still says
-    (a reply it was halfway through when the officer joined) is dropped.
+    (a reply it was halfway through when the officer joined) is dropped, as it
+    is once the call has ended (``CallRoom.end()`` stops the pipeline only
+    after closing the language router).
     So is a queue place or "transferring" status from a wait that is over
     (:func:`is_stale_wait_message`). Everything else passes: lifecycle,
     interruptions, other status.
@@ -106,6 +108,6 @@ class OfficerOutputGate(FrameProcessor):  # type: ignore[misc,valid-type]
         await super().process_frame(frame, direction)
         if direction == FrameDirection.DOWNSTREAM:
             mode = self.room.state.mode
-            if (mode == "bridged" and is_reply_frame(frame)) or is_stale_wait_message(frame, mode):
+            if (mode in ("bridged", "ended") and is_reply_frame(frame)) or is_stale_wait_message(frame, mode):
                 return
         await self.push_frame(frame, direction)

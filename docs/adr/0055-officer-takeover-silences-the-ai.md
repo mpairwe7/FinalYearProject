@@ -8,7 +8,10 @@ It follows [ADR-0053](0053-sessions-can-be-revoked.md) (phase 8, part D) and
 amends the handoff of [ADR-0039](0039-call-handoff-and-caller-safety.md) and
 the hang-up paths of [ADR-0047](0047-wrap-ups-owed-while-live-and-livekit-control-limits.md).
 It fixes G657. The service owner asked for the investigation, then approved all six
-changes, on 2026-11-13, in the session that made them.
+changes, on 2026-11-13, in the session that made them. Amended the same day after
+review: the bridge re-checks the call after each of its awaits; the gate holds the AI
+back once the call has ended as well as while bridged; a call that ended during the
+greeting starts no pipeline.
 
 ## Context and Problem Statement
 
@@ -88,11 +91,16 @@ end a call, as the LiveKit control socket already does.
    WebSocket transport it also writes `{"type": "interrupt"}` to the caller before
    the callback, so that cannot land after the joining line and cut it. A pipeline
    that does not answer is logged, and the officer joins anyway. A call with no
-   pipeline is unchanged.
+   pipeline is unchanged. The call can move on during those awaits (the caller
+   hangs up, the officer presses End): after the interruption and again after the
+   joining line, a call no longer bridged to this officer, or ending, gets no
+   joining line, no `bridged` status and no `call.bridged` lobby event.
 2. **The AI's frames are held back once the wait is over, at the gate and at the
    socket.** `hold_gate.is_stale_wait_message` marks a `queue` place or a
    `status: transferring` that arrives when the call is not `transferring`.
-   `OfficerOutputGate` drops these, as well as the AI's replies while bridged.
+   `OfficerOutputGate` drops these, as well as the AI's replies once the call is
+   bridged or ended (`CallRoom.end()` closes the language router before it stops
+   the pipeline, and on LiveKit nothing behind the gate holds them back).
    `BrowserCallSerializer`, which runs as each frame is written to the caller's
    socket, drops the AI's audio and captions once the call is `bridged` or `ended`,
    and drops stale waiting messages in any mode. The officer's audio, captions and
@@ -113,7 +121,8 @@ end a call, as the LiveKit control socket already does.
 6. **On the WebSocket transport, ending the call stops its pipeline.**
    `ws._run_pipeline` runs the runner as `room.pipeline_runner_task`, as the
    LiveKit path does. `CallRoom.end()` cancels it, and Pipecat's transport then
-   closes the caller's socket. Every server-side end already tells the caller
+   closes the caller's socket. A call that ended during the greeting, before
+   there was a runner to cancel, starts none. Every server-side end already tells the caller
    `status: ended` first or closes the socket itself.
 7. **A revocation resolves an internal id to its `sub`**
    (`main._session_subject`). An id that is a user row's internal id is replaced
@@ -148,7 +157,9 @@ before the change, or is a guard that passes before and after:
 
 - the bridge interrupts the output transport and waits for it before the joining
   line; an output that never answers delays the officer only by the timeout and is
-  logged; one that fails does not stop the officer joining;
+  logged; one that fails does not stop the officer joining; a call that ends while
+  the AI is silenced, or whose End is pressed during the joining line, is not
+  announced as bridged, and one that completes is announced once;
 - the socket writer holds back the AI's audio and captions once bridged or ended,
   and stale waiting messages in any mode; it lets a waiting caller's audio, queue
   place and status through, and the interrupt and other messages in every mode;
@@ -157,14 +168,16 @@ before the change, or is a guard that passes before and after:
 - asking for an officer pushes the interruption first, supersedes the generation
   and cancels the answer in progress; asking again while waiting, or while
   bridged, pushes nothing;
-- `CallRoom.end()` stops a pipeline run by `ws._run_pipeline`;
+- `CallRoom.end()` stops a pipeline run by `ws._run_pipeline`; a call that ended
+  during the greeting starts no runner;
 - **with Pipecat 1.15 itself** (CI's receptionist job): the real FastAPI WebSocket
   transport and `OfficerOutputGate`, fed the AI's speech queued in real time and
   then the waiting screen. A waiting caller gets both. After the bridge, the
   queued speech stops within one chunk, the waiting screen never arrives, and the
   caller gets the interrupt. The output transport's own clearing does this even
   without the mode check behind it. Frames the AI sends after the bridge stop at
-  the gate. Ending the call closes the caller's socket from the server.
+  the gate, which holds the AI's replies back once the call is bridged or ended
+  and passes them while it waits or talks to the AI. Ending the call closes the caller's socket from the server.
 
 **`App/backend/tests/test_receptionist_frame_limits.py`.** The officer's socket
 hang-up ends the call as `officer_ended`, the caller hears the closing line and gets

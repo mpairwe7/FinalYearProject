@@ -388,6 +388,9 @@ async def _run_pipeline(room: Any, runner: Any, task: Any) -> None:
     ask for (an officer's hang-up) left the pipeline, and the caller's socket,
     open until the caller hung up, playing the AI's queued speech to them.
     """
+    if room.state.mode == "ended":
+        # Ended during the greeting: CallRoom.end() found no runner to stop.
+        return
     room.pipeline_runner_task = asyncio.create_task(runner.run(task))
     await room.pipeline_runner_task
 

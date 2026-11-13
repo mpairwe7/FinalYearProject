@@ -137,7 +137,7 @@ class WaitingCall(unittest.IsolatedAsyncioTestCase):
         )
         self.room.state.mode = "transferring"
         self.log: list[str] = []
-        patch.object(hub, "publish_lobby").start()
+        self.lobby = patch.object(hub, "publish_lobby").start()
         patch.object(hub, "publish_call").start()
 
         async def joining_line(room, text, _speech_model):
@@ -184,6 +184,49 @@ class BridgeClearsTheAiOutputTests(WaitingCall):
         self.assertEqual(self.log, ["AI output interrupted", "joining line"])
         self.assertIn("did not confirm", "\n".join(logs.output))
         self.assertEqual(self.room.state.mode, "bridged")
+
+    async def test_a_call_that_ends_while_the_ai_is_silenced_is_not_announced_as_bridged(self):
+        # Review of PR 732: bridge() awaits after it sets the mode, so the
+        # caller can hang up meanwhile; "bridged" then reached the lobby after
+        # "ended".
+        output = self.with_output(delay=0.02)
+        original = output.queue_frame
+
+        async def caller_hangs_up(frame, direction=None, callback=None):
+            await original(frame, direction, callback)
+            self.room.state.mode = "ended"
+
+        output.queue_frame = caller_hangs_up
+
+        await self.bridge()
+
+        self.assertNotIn("joining line", self.log)
+        self.assertNotIn("bridged", [m.get("status") for m in self.caller.messages])
+        self.assertEqual([c for c in self.lobby.call_args_list if c.args[0] == "call.bridged"], [])
+
+    async def test_an_end_pressed_during_the_joining_line_is_not_followed_by_bridged(self):
+        self.with_output()
+
+        async def end_pressed_while_it_plays(room, text, _speech_model):
+            self.log.append("joining line")
+            room.ending = True
+            return 0.0
+
+        self.say.side_effect = end_pressed_while_it_plays
+
+        await self.bridge()
+
+        self.assertIn("joining line", self.log)
+        self.assertNotIn("bridged", [m.get("status") for m in self.caller.messages])
+        self.assertEqual([c for c in self.lobby.call_args_list if c.args[0] == "call.bridged"], [])
+
+    async def test_a_bridge_that_completes_is_announced(self):
+        self.with_output()
+
+        await self.bridge()
+
+        self.assertIn("bridged", [m.get("status") for m in self.caller.messages])
+        self.assertEqual(len([c for c in self.lobby.call_args_list if c.args[0] == "call.bridged"]), 1)
 
     async def test_an_output_that_fails_does_not_stop_the_officer_joining(self):
         self.with_output(fail=True)
@@ -384,6 +427,19 @@ class WebSocketPipelineEndsWithTheCallTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(running, timeout=1.0)
         self.assertTrue(task.cancelled.is_set())
 
+    async def test_a_call_that_ended_during_the_greeting_starts_no_pipeline(self):
+        # Review of PR 732: CallRoom.end() during the greeting found no runner
+        # to stop, and the runner then started for an ended call.
+        task = FakeTask()
+        self.room.pipeline_task = task
+        self.room.state.mode = "ended"
+        runner = MagicMock()
+
+        await asyncio.wait_for(ws_mod._run_pipeline(self.room, runner, task), timeout=1.0)
+
+        runner.run.assert_not_called()
+        self.assertIsNone(self.room.pipeline_runner_task)
+
     async def test_a_pipeline_that_finishes_on_its_own_returns(self):
         task = FakeTask()
         self.room.pipeline_task = task
@@ -536,6 +592,28 @@ class RealOutputTransportTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(self.socket.audio, [])
         self.assertEqual(self.waiting_screen(), [])
+
+    async def test_the_gate_holds_the_ais_replies_once_the_call_is_bridged_or_ended(self):
+        # Review of PR 732: on LiveKit nothing behind the gate holds the AI
+        # back, and CallRoom.end() awaits the router's close before it stops
+        # the pipeline.
+        from app.receptionist.hold_gate import OfficerOutputGate
+        from pipecat.frames.frames import OutputAudioRawFrame as RealAudio
+        from pipecat.processors.frame_processor import FrameDirection
+
+        for mode, passes in (("ai", True), ("transferring", True), ("bridged", False), ("ended", False)):
+            with self.subTest(mode=mode):
+                room = SimpleNamespace(state=SimpleNamespace(mode=mode))
+                gate = OfficerOutputGate(room)
+                pushed: list = []
+
+                async def record(frame, direction=FrameDirection.DOWNSTREAM, _pushed=pushed):
+                    _pushed.append(frame)
+
+                gate.push_frame = record
+                await gate.process_frame(RealAudio(PCM_40MS, 16000, 1), FrameDirection.DOWNSTREAM)
+                await gate.process_frame(_caption(), FrameDirection.DOWNSTREAM)
+                self.assertEqual(len(pushed), 2 if passes else 0)
 
     async def test_ending_the_call_closes_the_callers_socket_from_the_server(self):
         await asyncio.sleep(0.05)
