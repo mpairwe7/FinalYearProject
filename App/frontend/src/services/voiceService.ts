@@ -683,6 +683,13 @@ export interface SpokenOutcome {
   failed: number;
   /** Stopped by stopPlayback() before the end. */
   stopped: boolean;
+  /**
+   * The whole reply was heard: the server closed the stream with its `done`
+   * line, it reported no failed piece, and every piece played (G645). False
+   * after a skipped sentence, a stall or a cut-off, which the listener must be
+   * told about rather than hearing a confident partial answer.
+   */
+  complete: boolean;
 }
 
 let _speechStream: AbortController | null = null;
@@ -704,10 +711,16 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
   return bytes.buffer;
 }
 
+/** How a speech stream ended: whether the server's closing line arrived, and what it reported. */
+export interface SpeechEnding {
+  closed: boolean;
+  serverFailed: number;
+}
+
 /** The pieces of speech for `text`, in speaking order, as the server finishes each one. */
 export async function* streamSpeech(
   text: string,
-  opts: { language?: string; voice?: string; signal?: AbortSignal } = {},
+  opts: { language?: string; voice?: string; signal?: AbortSignal; ending?: SpeechEnding } = {},
 ): AsyncGenerator<SpeechPiece> {
   const res = await fetch(`${API_URL}/v1/tts/stream`, {
     method: 'POST',
@@ -727,8 +740,14 @@ export async function* streamSpeech(
         const line = buffered.slice(0, nl).trim();
         buffered = buffered.slice(nl + 1);
         if (!line) continue;
-        const message = JSON.parse(line) as SpeechPiece & { done?: boolean };
-        if (message.done) return;
+        const message = JSON.parse(line) as SpeechPiece & { done?: boolean; failed?: number };
+        if (message.done) {
+          if (opts.ending) {
+            opts.ending.closed = true;
+            opts.ending.serverFailed = typeof message.failed === 'number' ? message.failed : 0;
+          }
+          return;
+        }
         yield message;
       }
       if (done) return;
@@ -770,8 +789,10 @@ export async function speakStreamed(
   let pieces = 0;
   let failed = 0;
   let lastEnded: Promise<void> = Promise.resolve();
+  const ending: SpeechEnding = { closed: false, serverFailed: 0 };
+  let brokeOff = false;
   try {
-    for await (const piece of streamSpeech(text, { ...opts, signal: controller.signal })) {
+    for await (const piece of streamSpeech(text, { ...opts, signal: controller.signal, ending })) {
       clearTimeout(watchdog);
       watchdog = setTimeout(() => ((stalled = true), controller.abort()), stallMs);
       if (!piece.audio_base64) {
@@ -818,6 +839,7 @@ export async function speakStreamed(
       notifyNarration();
       throw err;
     }
+    brokeOff = true;
   } finally {
     clearTimeout(watchdog);
   }
@@ -826,7 +848,8 @@ export async function speakStreamed(
   notifyNarration();
   if (pieces === 0 && !stopped) throw new Error(failed ? 'No piece of the reply could be voiced' : 'Empty speech stream');
   if (!stopped) await lastEnded;
-  return { firstAudioMs, pieces, failed, stopped };
+  const complete = !stopped && !stalled && !brokeOff && ending.closed && ending.serverFailed === 0 && failed === 0;
+  return { firstAudioMs, pieces, failed, stopped, complete };
 }
 
 // ---------------------------------------------------------------------------

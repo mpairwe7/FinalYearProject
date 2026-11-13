@@ -209,7 +209,74 @@ test.describe("Voice STT/TTS (mocked)", () => {
     await expect(page.locator(".message-row-assistant").last()).toContainText("18%", {
       timeout: 15_000,
     });
-    expect((await ttsReq).postDataJSON().text).toContain("18%");
+    const spoken = (await ttsReq).postDataJSON().text as string;
+    expect(spoken).toContain("18%");
+    // G647 (EU AI Act Art. 50(1)): a voice session's first answer says, aloud,
+    // that an AI is speaking; the dock says it on screen throughout.
+    // The speech text spells URA out ("U R A") for the voice.
+    expect(spoken).toMatch(/^This is U ?R ?A's AI assistant, not a person\./);
+    await expect(page.getByTestId("voice-dock-ai-notice")).toContainText("AI assistant");
+  });
+
+  // G646: a low-confidence answer sounded exactly like a well-supported one:
+  // its "Verify with URA" warning existed only on screen.
+  test("a doubted answer is read aloud with its caveat", async ({ page }) => {
+    test.slow();
+    await mockBackend(page);
+    await page.route("**/api/v1/chat/stream", (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { "content-type": "text/event-stream; charset=utf-8" },
+        body: sseReply("Rental income may be taxed at 12%.").replace('"faithfulness_score":0.9', '"faithfulness_score":0.4'),
+      }),
+    );
+    await page.goto("/");
+    await page.getByRole("button", { name: "Enter voice mode" }).click();
+    const send = page.getByRole("button", { name: "Send now" });
+    await expect(send).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(1500);
+    const ttsReq = page.waitForRequest("**/api/v1/tts/stream");
+    await send.click();
+    const spoken = (await ttsReq).postDataJSON().text as string;
+    expect(spoken).toContain("12%");
+    expect(spoken).toContain("this answer may not be reliable");
+    // Before the answer, so a listener who stops it early has heard it.
+    expect(spoken.indexOf("this answer may not be reliable")).toBeLessThan(spoken.indexOf("12%"));
+  });
+
+  // G648: a spoken question still being transcribed was sent into whichever
+  // chat was open when transcription finished (ADR-0018's binding).
+  test("a spoken turn is not sent into a chat opened while it was transcribed", async ({ page }) => {
+    test.slow();
+    await mockBackend(page);
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/v1/asr**", async (route) => {
+      await held;
+      await route.fulfill({ json: { text: "generate a PRN for my VAT", language: "en", latency_s: 0.1, backend: "stub" } });
+    });
+    let chats = 0;
+    page.on("request", (request) => {
+      // A chat turn, not its title (/v1/chat/title) or anything else.
+      if (/\/api\/v1\/chat(\/stream)?$/.test(new URL(request.url()).pathname)) chats++;
+    });
+    await page.goto("/");
+    await sendMessage(page, "What is VAT?");
+    await expect(page.locator(".message-row-assistant").last()).not.toBeEmpty();
+    const before = chats;
+    await page.getByRole("button", { name: "Enter voice mode" }).click();
+    const send = page.getByRole("button", { name: "Send now" });
+    await expect(send).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(1500);
+    const asrReq = page.waitForRequest("**/api/v1/asr**");
+    await send.click();
+    await asrReq;
+    await page.getByRole("button", { name: "New chat" }).first().click();
+    release();
+    await expect(page.getByTestId("voice-dock-detail")).toContainText("You moved to another chat", { timeout: 10_000 });
+    expect(chats).toBe(before);
   });
 
   test("Stop in voice mode stops the answer, and does not read it out", async ({ page }) => {

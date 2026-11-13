@@ -45,6 +45,7 @@ import {
   type ConnectorUse,
 } from '../lib/connectors';
 import { applyTurnMeta, ticketIdFrom } from '../lib/turnMeta';
+import { needsSpokenCaveat, spokenReply } from '../lib/spokenCaveat';
 import { consumeChatStream } from '../lib/chatStream';
 import { createRevealQueue, type RevealQueue } from '../lib/revealQueue';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
@@ -429,9 +430,11 @@ export default function Page() {
   /** Bumped to abandon the voice turn in flight: Stop, leaving voice mode. */
   const voiceTurnRef = useRef(0);
   /** A spoken question held until an attachment has been read (see the effect below). */
-  const queuedVoiceTurnRef = useRef<{ text: string; options: TurnOptions } | null>(null);
+  const queuedVoiceTurnRef = useRef<{ text: string; options: TurnOptions; conversationId: string | null } | null>(null);
   /** Set on entering voice mode: the mic opens as soon as the mode has rendered. */
   const listenOnEnterRef = useRef(false);
+  // G647: whether this voice session has said aloud that an AI is speaking.
+  const voiceDisclosedRef = useRef(false);
   /**
    * Narration's bookkeeping, as state because the dock's phase reads it: the
    * reply already read (each is read once) and when narration was switched on
@@ -911,6 +914,14 @@ export default function Page() {
     const timer = window.setTimeout(() => setNarrationFailed(null), NARRATION_NOTICE_MS);
     return () => window.clearTimeout(timer);
   }, [narrationFailed]);
+  // G645: a reading that skipped a sentence or was cut off. Said, not hidden,
+  // and voice mode does not hand the floor back as if the answer had been heard.
+  const [narrationPartial, setNarrationPartial] = useState(false);
+  useEffect(() => {
+    if (!narrationPartial) return;
+    const timer = window.setTimeout(() => setNarrationPartial(false), NARRATION_NOTICE_MS);
+    return () => window.clearTimeout(timer);
+  }, [narrationPartial]);
 
   // The current read-aloud request. A stop, or a newer request, makes an older
   // one stale: its whole-reply fallback must not start playing when it lands.
@@ -923,7 +934,7 @@ export default function Page() {
     setTtsLoading(null);
   }, []);
   /** Read a reply aloud. Resolves when it has ended, or was stopped. */
-  const handleListenToReply = useCallback(async (turnId: string, text: string): Promise<'ended' | 'stopped'> => {
+  const handleListenToReply = useCallback(async (turnId: string, text: string): Promise<'ended' | 'stopped' | 'partial'> => {
     // A second tap stops it, whether it is playing or still fetching its first piece.
     if (playingTurnId === turnId || ttsLoading === turnId) {
       stopReading();
@@ -932,6 +943,7 @@ export default function Page() {
     const request = ++listenRequestRef.current;
     stopPlayback();
     setNarrationFailed(null);
+    setNarrationPartial(false);
     setTtsLoading(turnId);
     try {
       const speechText = cleanMarkdownForSpeech(text, locale);
@@ -952,7 +964,13 @@ export default function Page() {
           },
         });
         if (outcome.failed) trackErrorOccurred('tts_failed');
-        return outcome.stopped ? 'stopped' : 'ended';
+        if (outcome.stopped) return 'stopped';
+        if (!outcome.complete) {
+          setNarrationPartial(true);
+          setChatLiveStatus(t('narration.partial'));
+          return 'partial';
+        }
+        return 'ended';
       } catch {
         // Nothing of the stream could be played: ask for the whole reply once.
       }
@@ -978,7 +996,7 @@ export default function Page() {
       if (request === listenRequestRef.current) setTtsLoading(null);
       setPlayingTurnId((prev) => (prev === turnId ? null : prev));
     }
-  }, [playingTurnId, ttsLoading, locale, ttsMutation, stopReading]);
+  }, [playingTurnId, ttsLoading, locale, ttsMutation, stopReading, t]);
 
   /**
    * The reply to read aloud next: the newest one, once it has finished
@@ -991,6 +1009,14 @@ export default function Page() {
    * a typed question's answer was never read aloud, narration on or not.
    */
   const lastTurn = chat[chat.length - 1];
+  // G646: in voice mode an answer that was interrupted or failed is not read
+  // aloud; the dock says so instead of "Replies are read aloud".
+  const voiceTurnIncomplete =
+    voiceMode &&
+    !isLoading &&
+    lastTurn?.role === 'assistant' &&
+    lastTurn.responseIncomplete === true &&
+    lastTurn.timestamp >= narrationArmedAt;
   const replyToNarrate =
     autoNarrate &&
     !isLoading &&
@@ -1008,11 +1034,25 @@ export default function Page() {
     setNarratedTurnId(replyToNarrate.id);
     // Something is already being read (a Listen tap on an older reply): leave it.
     if (isPlaying()) return;
-    void handleListenToReply(replyToNarrate.id, replyToNarrate.content).then((how) => {
+    // G647 (EU AI Act Art. 50(1); Commission guidelines: spoken at the start of
+    // a voice interaction): the first answer read aloud in a voice session says
+    // that an AI is speaking. Once per session; entering voice mode resets it.
+    const disclose = voiceMode && !voiceDisclosedRef.current;
+    if (disclose) voiceDisclosedRef.current = true;
+    // G646: what the screen says about the answer's reliability, said too,
+    // before the answer so it is heard even if the reading is stopped early.
+    const spokenText = spokenReply(replyToNarrate.content, {
+      disclosure: disclose ? t('voiceDock.aiSpoken') : undefined,
+      caveat: needsSpokenCaveat(replyToNarrate) ? t('narration.caveat') : undefined,
+    });
+    void handleListenToReply(replyToNarrate.id, spokenText).then((how) => {
+      // Not heard to the end (stopped, cut off, a skipped piece): the notice
+      // may not have been heard either, so the next answer says it again.
+      if (disclose && how !== 'ended') voiceDisclosedRef.current = false;
       // Hands-free: once the answer has been heard, the floor goes back to the taxpayer.
       if (how === 'ended') listenAgainRef.current();
     });
-  }, [replyToNarrate, handleListenToReply]);
+  }, [replyToNarrate, handleListenToReply, voiceMode, t]);
 
   // ---- Document attachments ----
 
@@ -1740,6 +1780,9 @@ export default function Page() {
           setSpeechState('idle');
           audioSignifiers.playMicStop();
           const turn = ++voiceTurnRef.current;
+          // G648: the turn belongs to the chat it was spoken in (ADR-0018). A
+          // switch while it is transcribed must not send it into another one.
+          const spokenIn = useChatStore.getState().activeConversationId;
           setVoiceStage('transcribing');
           let heard = '';
           let heardLanguage: string | null = null;
@@ -1756,6 +1799,10 @@ export default function Page() {
             const r = await transcribe(pcm16, locale, undefined, { domain: 'tax' });
             // Stopped, or voice mode left, while it was being transcribed.
             if (turn !== voiceTurnRef.current) return;
+            if (useChatStore.getState().activeConversationId !== spokenIn) {
+              setDictationNotice(t('voice.conversationChanged'));
+              return;
+            }
             heard = r.text?.trim() ?? '';
             heardLanguage = r.language;
             if (!heard) {
@@ -1784,6 +1831,7 @@ export default function Page() {
           queuedVoiceTurnRef.current = {
             text: heard,
             options: { locale: heardLocale, localeExplicit: true, spoken: true },
+            conversationId: spokenIn,
           };
           setVoiceStage('queued');
         } else {
@@ -1983,8 +2031,13 @@ export default function Page() {
     if (pendingAttachments.some((a) => a.status === 'uploading')) return;
     queuedVoiceTurnRef.current = null;
     setVoiceStage(null);
+    // G648: the chat changed while the turn waited to be sent.
+    if (queued.conversationId !== useChatStore.getState().activeConversationId) {
+      setDictationNotice(t('voice.conversationChanged'));
+      return;
+    }
     void sendMessage(queued.text, undefined, queued.options);
-  }, [voiceStage, isLoading, pendingAttachments, sendMessage]);
+  }, [voiceStage, isLoading, pendingAttachments, sendMessage, t]);
 
   // Voice mode's end of turn. A pause after speech, or a turn that reached
   // its limit, is sent as the checkmark sends it. A mic that heard nothing
@@ -2039,6 +2092,7 @@ export default function Page() {
       recognitionRef.current?.stop();
     }
     listenOnEnterRef.current = true;
+    voiceDisclosedRef.current = false;
     setDictationNotice(null);
     setVoiceHeard(null);
     setNarrationArmedAt(Date.now());
@@ -2315,7 +2369,16 @@ export default function Page() {
             : undefined
       }
       heard={voiceHeard}
-      notice={dictationNotice ?? (narrationFailed ? t('narration.failed') : null)}
+      notice={
+        dictationNotice ??
+        (narrationFailed
+          ? t('narration.failed')
+          : narrationPartial
+            ? t('narration.partial')
+            : voiceTurnIncomplete
+              ? t('message.incomplete')
+              : null)
+      }
       autoSend={silenceTimeout > 0}
       onTalk={handleMicClick}
       onSend={handleMicClick}

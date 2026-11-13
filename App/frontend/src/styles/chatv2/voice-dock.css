@@ -220,3 +220,13 @@
     animation: none;
   }
 }
+
+/* G647: the AI notice voice mode carries in the composer's place. */
+.chatv2 .voice-dock-ai-notice {
+  margin: 0;
+  order: 10;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-2);
+  text-align: center;
+}

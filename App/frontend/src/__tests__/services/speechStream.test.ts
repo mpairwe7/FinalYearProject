@@ -108,7 +108,7 @@ describe('speakStreamed', () => {
     const spoken = speakStreamed('Three pieces.');
     await vi.waitFor(() => expect(FakeSource.all).toHaveLength(2));
     finishAudio();
-    expect(await spoken).toMatchObject({ pieces: 2, failed: 1 });
+    expect(await spoken).toMatchObject({ pieces: 2, failed: 1, complete: false });
   });
 
   it('skips a piece it cannot decode once speech has started', async () => {
@@ -151,6 +151,31 @@ describe('speakStreamed', () => {
     await vi.waitFor(() => expect(FakeSource.all).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 80));
     finishAudio();
-    expect(await spoken).toMatchObject({ pieces: 1, stopped: false });
+    // G645: a reading the server never finished is not a whole reading.
+    expect(await spoken).toMatchObject({ pieces: 1, stopped: false, complete: false });
+  });
+
+  it('is complete only when the server closed the stream and every piece played', async () => {
+    vi.stubGlobal('fetch', respondWith([line(piece(0, 1)) + line(piece(1, 1)) + line({ done: true, failed: 0 })]));
+    const spoken = speakStreamed('Two pieces.');
+    await vi.waitFor(() => expect(FakeSource.all).toHaveLength(2));
+    finishAudio();
+    expect(await spoken).toMatchObject({ pieces: 2, failed: 0, complete: true });
+  });
+
+  it('is not complete when the stream ends without its closing line', async () => {
+    vi.stubGlobal('fetch', respondWith([line(piece(0, 1))]));
+    const spoken = speakStreamed('Cut off.');
+    await vi.waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    finishAudio();
+    expect(await spoken).toMatchObject({ pieces: 1, complete: false });
+  });
+
+  it('is not complete when the server says a piece failed', async () => {
+    vi.stubGlobal('fetch', respondWith([line(piece(0, 1)) + line({ done: true, failed: 1 })]));
+    const spoken = speakStreamed('One failed upstream.');
+    await vi.waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    finishAudio();
+    expect(await spoken).toMatchObject({ complete: false });
   });
 });

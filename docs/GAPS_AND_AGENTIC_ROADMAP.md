@@ -678,7 +678,7 @@ A review of the whole call flow: what the AI says, the handoff, the officer's de
 
 ### Intelligent UI assurance — 2026-11-13
 
-A review of every surface where the AI meets a person: the chat's trust signals, its actions and handoff, the staff console's oversight, and voice, capture, offline and language. [Evidence, sources, phases and the audit prompt](plans/intelligent-ui-integration-audit-2026-11-13.md); phase 1 decisions in ADR-0048, phase 2 in ADR-0049, phase 3 in ADR-0050, phase 4 in ADR-0051. Fixed means implemented with a regression test that failed first; nothing here was exercised on the Space, a real microphone, a screen reader or by a first-language reader.
+A review of every surface where the AI meets a person: the chat's trust signals, its actions and handoff, the staff console's oversight, and voice, capture, offline and language. [Evidence, sources, phases and the audit prompt](plans/intelligent-ui-integration-audit-2026-11-13.md); phase 1 decisions in ADR-0048, phase 2 in ADR-0049, phase 3 in ADR-0050, phase 4 in ADR-0051, phase 5 in ADR-0052. Fixed means implemented with a regression test that failed first; nothing here was exercised on the Space, a real microphone, a screen reader or by a first-language reader.
 
 | Gap | Finding | Status |
 | --- | --- | --- |
@@ -709,11 +709,11 @@ A review of every surface where the AI meets a person: the chat's trust signals,
 | G642 🟢 | ~~The machine translation of the taxpayer's words is shown as "Taxpayer [EN]".~~ | Fixed 2026-11-13 (ADR-0051): labelled "machine translation (for search; may differ)" with the taxpayer's words kept beside it. |
 | G643 🟢 | ~~An auditor is offered "assign to me", which the API refuses silently.~~ | Fixed 2026-11-13 (ADR-0051): the shortcut and its hint are for officers only. |
 | G644 🟢 | ~~"Found helpful" shows 0% "Below target" with no ratings or a failed request.~~ | Fixed 2026-11-13 (ADR-0051): a gauge with no data shows why and no verdict. |
-| G645 ⚪ | A partial read-aloud counts as complete and voice mode reopens the microphone. | Open: phase 5. |
-| G646 ⚪ | Voice mode never speaks an answer's caveats or a failed answer. | Open: phase 5. |
-| G647 ⚪ | Voice mode removes the only always-visible AI notice (EU AI Act Art. 50(1)); the manifest has no `verified_by` for it. | Open: phase 5. |
-| G648 ⚪ | A spoken question still being transcribed is sent into whichever conversation is open when it finishes. | Open: phase 5. |
-| G649 ⚪ | "Take a photo" on desktop cannot work under `camera=()` and would lose the photo. | Open: phase 5. |
+| G645 🟢 | ~~A partial read-aloud counts as complete and voice mode reopens the microphone.~~ | Fixed 2026-11-13 (ADR-0052): `speakStreamed` reports `complete`; a partial reading is said and the microphone stays closed. |
+| G646 🟢 | ~~Voice mode never speaks an answer's caveats or a failed answer.~~ | Fixed 2026-11-13 (ADR-0052): a doubted answer is spoken with its caveat; an interrupted one is noted in the dock. |
+| G647 🟢 | ~~Voice mode removes the only always-visible AI notice (EU AI Act Art. 50(1)); the manifest has no `verified_by` for it.~~ | Fixed 2026-11-13 (ADR-0052): the dock shows the AI notice; the first answer of each voice session says it aloud; the manifest's Art. 50(1) entry has `verified_by`. |
+| G648 🟢 | ~~A spoken question still being transcribed is sent into whichever conversation is open when it finishes.~~ | Fixed 2026-11-13 (ADR-0052): a spoken turn is dropped, with a notice, if the chat changed while it was transcribed or queued. |
+| G649 🟢 | ~~"Take a photo" on desktop cannot work under `camera=()` and would lose the photo.~~ | Fixed 2026-11-13 (ADR-0052): "Take a photo" uses the capture input everywhere. |
 | G650 ⚪ | The open remainder of G274: restored history skips the validators, the storage version is never read, and one throwing card replaces the whole chat. | Open: phase 6. |
 | G651 ⚪ | Web citations lose their provenance (adviser commentary, search summaries, a guessed fiscal year) and web-grounded answers can earn "Well grounded". | Open: phase 6. |
 | G652 ⚪ | The REST fallback drops `connectors_used`. | Open: phase 6. |
@@ -1406,7 +1406,9 @@ full agent chain is locked.
 
 ---
 
-*Document version 3.31 — updated 2026-11-13: intelligent UI assurance phase 4 (ADR-0051): G640–G644 fixed; G658 opened (spaced phone numbers escape ticket redaction).*
+*Document version 3.32 — updated 2026-11-13: intelligent UI assurance phase 5 (ADR-0052): G645–G649 fixed.*
+
+*Previously: version 3.31 — updated 2026-11-13: intelligent UI assurance phase 4 (ADR-0051): G640–G644 fixed; G658 opened (spaced phone numbers escape ticket redaction).*
 
 *Previously: version 3.30 — updated 2026-11-13: intelligent UI assurance phase 3 (ADR-0050): G635, G636, G638 and G639 fixed; G634 and G637 mitigated (tenant scoping open for discrepancies and overrides).*
 
