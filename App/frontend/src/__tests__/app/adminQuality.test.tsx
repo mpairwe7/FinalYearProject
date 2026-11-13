@@ -580,6 +580,8 @@ describe("Needs review tab", () => {
     const decided = screen.getByRole("group", { name: "Decision on: Officer chat rated 2/5 — Officer Okello" });
     expect(within(decided).getByRole("button", { name: "Action needed" })).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(within(decided).getByRole("button", { name: "Reopen" }));
+    // G639: Reopen asks first; the decision stays in the history.
+    fireEvent.click(within(decided).getByRole("button", { name: "Reopen it" }));
     await waitFor(() => expect(analyticsApi.setQualityReview).toHaveBeenLastCalledWith("rating", "r-low", "open", ""));
   });
 

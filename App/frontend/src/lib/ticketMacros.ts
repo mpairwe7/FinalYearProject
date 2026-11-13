@@ -1,5 +1,16 @@
 /** Catalog canned replies for the staff composer. Staff-facing only. */
 
+// Empty brackets count: an emptied part has still not been written.
+const PLACEHOLDER = /\[\[([^\]]*)\]\]/g;
+
+/**
+ * The parts of a reply still to fill in: text in [[double brackets]] (G636).
+ * The case-reference chip's single brackets are not a placeholder.
+ */
+export function unfilledPlaceholders(text: string): string[] {
+  return Array.from(text.matchAll(PLACEHOLDER), (match) => match[1].trim() || "[[ ]]");
+}
+
 export interface TicketMacro {
   id: string;
   label: string;
@@ -19,8 +30,8 @@ export const TICKET_MACROS: readonly TicketMacro[] = [
   },
   {
     id: "tin_ok",
-    label: "TIN in order",
-    body: "Your TIN is active. No further action is needed on registration. If a return or payment is outstanding, say which tax type and the period and I will outline the steps.",
+    label: "TIN status",
+    body: "I looked up your TIN [[TIN]] in [[the system you checked]]: [[what you found, e.g. active or suspended]]. If a return or payment is outstanding, say which tax type and the period and I will outline the steps.",
   },
   {
     id: "how_to_pay",
@@ -34,27 +45,32 @@ export const TICKET_MACROS: readonly TicketMacro[] = [
   },
   {
     id: "request_document",
-    label: "Request document upload",
-    body: "Please attach your invoice, assessment notice, or payment receipt directly in this chat (PDF, Word, Excel, CSV, or Image up to 40 MB). Our automated document inspection will extract the figures and verify compliance immediately.",
+    label: "Request a document",
+    // The taxpayer's composer takes no attachments while an officer has the
+    // chat, so the document goes by email or to a station (G636).
+    body: "Please send a copy of [[the document, e.g. your invoice, assessment notice or payment receipt]] to services@ura.go.ug, quoting your case reference, or bring it to your nearest URA station. Do not send passwords or one-time codes.",
   },
+  // G636: these state a result only the officer can give. Each is a template:
+  // the parts in [[double brackets]] are what the officer found, and the
+  // composer will not send while any are left (`unfilledPlaceholders`).
   {
     id: "efris_verified",
-    label: "EFRIS invoice verified",
-    body: "I have audited your attached invoice. The supplier and buyer TINs are valid, the 18% standard VAT calculation reconciles with URA records, and the EFRIS fiscal signature is authentic. Your input tax credit claim is compliant.",
+    label: "EFRIS invoice check",
+    body: "I checked invoice [[invoice number]] in EFRIS: [[what you found — the supplier and buyer TINs, the VAT on it, and whether the fiscal signature checked out]]. [[What this means for the input tax credit claim]].",
   },
   {
     id: "objection_recorded",
-    label: "Objection lodged under Sec 24",
-    body: "Your notice of objection has been recorded under Section 24 of the Tax Procedures Code Act 2014. Your grounds and supporting documentation have been attached to the case. An official objection decision will be issued within the 90-day statutory period.",
+    label: "Objection (Sec 24)",
+    body: "Your objection under Section 24 of the Tax Procedures Code Act is [[its status and reference]]. [[What happens next and by when]].",
   },
   {
     id: "wht_credit_ok",
-    label: "WHT credit verified",
-    body: "Your Withholding Tax credit certificate has been verified. The 6% withholding tax credit and Payment Registration Number (PRN) have been reconciled against URA ledgers and can be offset against your periodic Income Tax return.",
+    label: "WHT credit check",
+    body: "I checked your withholding tax credit [[certificate or PRN]]: [[what you found]]. [[Whether and how it can be offset against your income tax return]].",
   },
   {
     id: "customs_doc_check",
-    label: "Customs declaration cleared",
-    body: "Customs documentation review complete: your commercial invoice, Bill of Lading, and Single Customs Territory declaration have been matched. Customs valuation is based on the CIF transaction value in accordance with EACCMA regulations.",
+    label: "Customs documents check",
+    body: "I reviewed [[the documents you checked, e.g. commercial invoice, bill of lading, declaration]]: [[what you found]]. [[The next step]].",
   },
 ];

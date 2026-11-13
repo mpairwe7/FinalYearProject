@@ -1,7 +1,9 @@
 """Tests for the Conversational Bug Reporting, Solution B (Tombstones), and Solution C (Precedences)."""
 
+import hashlib
 import os
 import unittest
+import uuid
 from unittest import mock
 from fastapi.testclient import TestClient
 
@@ -197,6 +199,151 @@ class TestAdminEndpointsE2E(unittest.TestCase):
         self.client = TestClient(app)
         self.admin_token = make_dev_token("admin_test_user", role="ura_admin")
         self.auth_headers = {"Authorization": f"Bearer {self.admin_token}"}
+
+    def test_a_precedence_rule_needs_a_statute_reference_and_nothing_is_written_without_one(self):
+        """G634: a rule the model is told STRICTLY SUPERSEDES retrieved law could be
+        saved from a taxpayer's unverified correction with no statute named."""
+        run = uuid.uuid4().hex[:8]
+        rule, source = f"VAT is 12% ({run}).", f"vat_act_{run}.pdf"
+        rep = db.create_or_increment_discrepancy(
+            bot_statement=f"VAT is 18% {run}", user_correction="VAT is 12% now", cited_sources=[source],
+        )
+        res = self.client.post(
+            f"/v1/admin/discrepancies/{rep['id']}/verify",
+            headers=self.auth_headers,
+            json={"precedence_topic": "VAT", "precedence_rule": rule, "tombstone_sources": [source]},
+        )
+        self.assertEqual(res.status_code, 422, res.text)
+        self.assertEqual(db.get_discrepancy(rep["id"])["status"], "pending")
+        precs = self.client.get("/v1/admin/precedences", headers=self.auth_headers).json()["precedences"]
+        self.assertFalse(any(p["rule_statement"] == rule for p in precs))
+        tombs = self.client.get("/v1/admin/tombstones", headers=self.auth_headers).json()["tombstones"]
+        self.assertFalse(any(source in t["source_uri"] for t in tombs))
+
+    def test_a_precedence_rule_needs_a_topic_and_nothing_is_written_without_one(self):
+        """CodeRabbit on PR 730: a rule with no topic was skipped while the report
+        was still marked verified, so the console's promise went unkept."""
+        run = uuid.uuid4().hex[:8]
+        rule, source = f"WHT on rent is 6% ({run}).", f"wht_{run}.pdf"
+        rep = db.create_or_increment_discrepancy(
+            bot_statement=f"WHT on rent is 10% {run}", user_correction="It is 6%", cited_sources=[source],
+        )
+        res = self.client.post(
+            f"/v1/admin/discrepancies/{rep['id']}/verify",
+            headers=self.auth_headers,
+            json={
+                "precedence_topic": "  ",
+                "precedence_rule": rule,
+                "statute_reference": "Income Tax Act, s.119",
+                "tombstone_sources": [source],
+            },
+        )
+        self.assertEqual(res.status_code, 422, res.text)
+        self.assertEqual(db.get_discrepancy(rep["id"])["status"], "pending")
+        tombs = self.client.get("/v1/admin/tombstones", headers=self.auth_headers).json()["tombstones"]
+        self.assertFalse(any(source in t["source_uri"] for t in tombs))
+
+    def test_every_write_the_hotfix_makes_is_audited(self):
+        """G634: the ledger recorded only the report and override ids, not the rule
+        or the sources withdrawn from retrieval for every taxpayer."""
+        rep = db.create_or_increment_discrepancy(
+            bot_statement="WHT is 15%", user_correction="WHT is 6%", cited_sources=["old_wht_g634.pdf"],
+        )
+        with mock.patch("app.main._audit_staff_action") as audit, \
+             mock.patch("app.cache.reset_index_stamp") as reset_cache:
+            res = self.client.post(
+                f"/v1/admin/discrepancies/{rep['id']}/verify",
+                headers=self.auth_headers,
+                json={
+                    "create_override": True,
+                    "override_query": "wht rate on professional fees g634",
+                    "override_reply": "Withholding tax on professional fees is 6%.",
+                    "precedence_topic": "WHT professional fees",
+                    "precedence_rule": "Withholding tax on professional fees is 6%.",
+                    "statute_reference": "Income Tax (Amendment) Act 2023, s.3",
+                    "tombstone_sources": ["old_wht_g634.pdf"],
+                },
+            )
+        self.assertEqual(res.status_code, 200, res.text)
+        events = {call.args[1]: call.args[2] for call in audit.call_args_list}
+        self.assertIn("staff.override_saved", events)
+        self.assertTrue(events["staff.precedence_created"]["precedence_id"])
+        self.assertEqual(events["staff.precedence_created"]["statute_reference"], "Income Tax (Amendment) Act 2023, s.3")
+        self.assertEqual(len(events["staff.precedence_created"]["rule_sha256"]), 64)
+        self.assertEqual(events["staff.tombstone_created"]["sources"], ["old_wht_g634.pdf"])
+        verified = events["staff.discrepancy_verified"]
+        self.assertTrue(verified["precedence_id"])
+        self.assertEqual(verified["tombstoned_sources"], ["old_wht_g634.pdf"])
+        # Answers cached before the hotfix are retired, as on the standalone routes.
+        reset_cache.assert_called()
+
+    def test_a_chunk_only_hotfix_is_audited_and_retires_cached_answers(self):
+        """CodeRabbit on PR 730: chunk withdrawals were never collected, so a
+        chunk-only hotfix wrote no tombstone event and kept serving cached answers."""
+        run = uuid.uuid4().hex[:8]
+        rep = db.create_or_increment_discrepancy(
+            bot_statement=f"PAYE band {run}", user_correction="That band changed", cited_sources=[],
+        )
+        with mock.patch("app.main._audit_staff_action") as audit, \
+             mock.patch("app.cache.reset_index_stamp") as reset_cache:
+            res = self.client.post(
+                f"/v1/admin/discrepancies/{rep['id']}/verify",
+                headers=self.auth_headers,
+                json={"tombstone_chunk_ids": [f"chunk-{run}"]},
+            )
+        self.assertEqual(res.status_code, 200, res.text)
+        events = {call.args[1]: call.args[2] for call in audit.call_args_list}
+        self.assertEqual(events["staff.tombstone_created"]["chunk_ids"], [f"chunk-{run}"])
+        self.assertEqual(len(events["staff.tombstone_created"]["tombstone_ids"]), 1)
+        self.assertEqual(events["staff.discrepancy_verified"]["tombstoned_chunk_ids"], [f"chunk-{run}"])
+        reset_cache.assert_called()
+
+    def test_a_hotfix_that_replaces_a_live_override_says_so(self):
+        """CodeRabbit on PR 730: the hotfix also upserts an override, but its
+        ledger entry lacked the replacement record the override route writes."""
+        from app import cms
+
+        run = uuid.uuid4().hex[:8]
+        query = f"wht on rent {run}"
+        cms.upsert(query, "Withholding tax on rent is 10%.", source_url="old")
+        rep = db.create_or_increment_discrepancy(
+            bot_statement=f"WHT rent 10% {run}", user_correction="It is 6%", cited_sources=[],
+        )
+        new_reply = "Withholding tax on rent is 6%."
+        with mock.patch("app.main._audit_staff_action") as audit:
+            res = self.client.post(
+                f"/v1/admin/discrepancies/{rep['id']}/verify",
+                headers=self.auth_headers,
+                json={"create_override": True, "override_query": query, "override_reply": new_reply},
+            )
+        self.assertEqual(res.status_code, 200, res.text)
+        saved = {call.args[1]: call.args[2] for call in audit.call_args_list}["staff.override_saved"]
+        self.assertTrue(saved["replaced"])
+        self.assertEqual(saved["previous_reply_sha256"], hashlib.sha256(b"Withholding tax on rent is 10%.").hexdigest())
+        self.assertEqual(saved["reply_sha256"], hashlib.sha256(new_reply.encode()).hexdigest())
+
+    def test_a_hotfix_that_fails_part_way_still_retires_cached_answers(self):
+        """CodeRabbit on PR 730: each hotfix write commits on its own, so a failure
+        after the override was saved left answers cached before it in service."""
+        run = uuid.uuid4().hex[:8]
+        rep = db.create_or_increment_discrepancy(
+            bot_statement=f"VAT on {run} is 18%", user_correction="It is exempt", cited_sources=[f"vat_{run}.pdf"],
+        )
+        client = TestClient(app, raise_server_exceptions=False)
+        with mock.patch("app.database.add_corpus_tombstone", side_effect=RuntimeError("disk full")), \
+             mock.patch("app.cache.reset_index_stamp") as reset_cache:
+            res = client.post(
+                f"/v1/admin/discrepancies/{rep['id']}/verify",
+                headers=self.auth_headers,
+                json={
+                    "create_override": True,
+                    "override_query": f"vat on {run}",
+                    "override_reply": "This supply is exempt from VAT.",
+                    "tombstone_sources": [f"vat_{run}.pdf"],
+                },
+            )
+        self.assertEqual(res.status_code, 500)
+        reset_cache.assert_called()
 
     def test_admin_discrepancy_verification_workflow(self):
         # 1. Create a discrepancy report

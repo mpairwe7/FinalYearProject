@@ -203,6 +203,22 @@ endpoint: the officer completes the action in their own system or declines it, a
   seen the officer chat (G630). An officer's translated message is labelled with
   what they wrote one click away (G631).
 
+## On the officer's desk (ADR-0050, 2026-11-13)
+
+- **Translations keep the figures.** The reply and End-chat routes drop a supplied
+  translation whose figures differ from the English and translate again;
+  `officer_reply_translation_rejected_total` counts it. A rising count means
+  officers are sending previews of text they then changed, or a translation
+  backend is shifting numbers: read the logs for "translation dropped".
+- **Canned results are templates.** "EFRIS invoice check", "WHT credit check",
+  "Customs documents check", "Objection (Sec 24)" and "TIN status" insert text
+  with `[[…]]` parts; the composer will not send until each is replaced with what
+  the officer actually found.
+- **Hotfixes from discrepancy reports** need a statute reference for a precedence
+  rule and show what they change before they apply; each write is on the audit
+  trail (`staff.precedence_created`, `staff.tombstone_created`,
+  `staff.override_saved`, `staff.discrepancy_verified`).
+
 ## Verify after a change
 
 Run from the repository root; each directory change stays in its subshell.

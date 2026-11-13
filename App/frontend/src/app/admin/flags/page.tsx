@@ -15,7 +15,7 @@
  * the replica caveat is a banner instead of a sentence in the subtitle, since
  * acting on it wrongly means believing a cluster is configured when one pod is.
  */
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import StaffGuard, { type StaffIdentity } from "../../../components/StaffGuard";
 import { OpsPage, TableScroll } from "../../../components/ops/OpsPage";
@@ -25,6 +25,19 @@ import { AlertTriangleIcon, InfoCircleIcon } from "../../../components/ops/icons
 import { analyticsApi, type FlagRecord } from "../../../services/analyticsApi";
 import { queryKeys } from "../../../lib/queryKeys";
 import "../admin.css";
+
+/**
+ * Controls that keep an answer safe to show (G638). Switching one off changes
+ * what every taxpayer is shown, so the console says what it does and asks.
+ */
+const SAFETY_CONTROLS: Record<string, string> = {
+  stream_figure_hold: "Figures will stream to taxpayers before the guards have read them.",
+  spoken_figure_guard: "Calls will speak figures the guard has not checked.",
+  action_level_audit_v3: "High-risk tool effects will run without a durable intent record first.",
+  guardrail_strike_friction: "Repeated guardrail strikes will no longer slow a session down.",
+  verifiable_decision_receipts: "Decisions will no longer carry a verifiable receipt.",
+  autonomous_outcome_verification: "Autonomous actions will no longer have their outcome checked.",
+};
 
 function FlagsBoard({ who }: { who: StaffIdentity }) {
   const client = useQueryClient();
@@ -48,12 +61,70 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.admin.flags() }),
   });
   const canToggle = who.role === "ura_admin";
+  // G638: a safety control is switched off, or reset to a value that may be
+  // off, only after saying what that does.
+  const [confirm, setConfirm] = useState<{ name: string; action: "off" | "reset" } | null>(null);
+  // The confirmation renders after the whole table: it takes focus when it
+  // opens (which scrolls it into view) and gives it back when it closes — to
+  // the control that opened it, once any save it started has settled (a
+  // pending save disables that control), or to the row's switch if a reset
+  // removed the Reset button.
+  const keepOnRef = useRef<HTMLButtonElement>(null);
+  const openerRef = useRef<{ el: HTMLElement | null; name: string } | null>(null);
+  const focusAfterRef = useRef<{ el: HTMLElement | null; name: string } | null>(null);
+  const [focusTick, setFocusTick] = useState(0);
+  const askFirst = (next: { name: string; action: "off" | "reset" }) => {
+    const active = document.activeElement;
+    openerRef.current = { el: active instanceof HTMLElement ? active : null, name: next.name };
+    setConfirm(next);
+  };
+  const giveFocusBack = () => {
+    focusAfterRef.current = openerRef.current;
+    openerRef.current = null;
+    setFocusTick((t) => t + 1);
+  };
+  const keepItOn = () => {
+    setConfirm(null);
+    giveFocusBack();
+  };
+  const confirmIt = async (current: { name: string; action: "off" | "reset" }) => {
+    setConfirm(null);
+    try {
+      if (current.action === "off") await toggle.mutateAsync({ name: current.name, enabled: false });
+      else await reset.mutateAsync(current.name);
+    } catch {
+      // Shown by the error line below; focus still goes back.
+    }
+    giveFocusBack();
+  };
+  useEffect(() => {
+    if (confirm) keepOnRef.current?.focus();
+  }, [confirm]);
+  useEffect(() => {
+    const target = focusAfterRef.current;
+    if (!target || confirm) return;
+    focusAfterRef.current = null;
+    const usable = (el: Element | null): HTMLElement | null =>
+      el instanceof HTMLElement && el.isConnected && !(el as HTMLButtonElement).disabled ? el : null;
+    const el =
+      usable(target.el) ?? usable(document.querySelector(`tr[data-flag="${target.name}"] [role="switch"]`));
+    el?.focus();
+  }, [focusTick, confirm]);
 
   const flags = useMemo(() => data?.flags ?? [], [data]);
   // Every process re-reads the stored overrides on this interval (G612); 0 means
   // the others apply a change at their restart. Until the API says (loading, an
   // error, an older API) the note claims neither.
   const syncSeconds = data?.sync_interval_seconds;
+  // The same reach the page note states, for the confirmation (G638): a
+  // promise of "every process within one sync" is wrong where the sync is off,
+  // and a replica with its own database is never reached from here.
+  const reachOfAChange =
+    typeof syncSeconds !== "number"
+      ? "How far this reaches is not known yet: confirm each process from /ready."
+      : syncSeconds > 0
+        ? `Other API processes sharing this database apply it at their next successful sync (every ${syncSeconds} s); confirm the call process from /ready. Replicas with their own database are not reached.`
+        : "It applies at once in the process that answered; the other processes apply it when they next start. Replicas with their own database are not reached.";
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -141,9 +212,12 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
               "It applies at once in the process that answered; the others apply it when they next start. "
             )}
             Replicas with a database each still need <code>FLAG_*</code> set on every replica.
-            {data?.overrides_are_ephemeral === false
-              ? " This deployment reports overrides as durable."
-              : null}
+            {/* G638: said only when the API knows where its store lives. */}
+            {data?.overrides_durability === "durable"
+              ? " This deployment keeps its overrides across a restart."
+              : data?.overrides_durability === "ephemeral"
+                ? " Overrides on this deployment are lost when this deployment restarts: set the FLAG_* secret for anything that must stay."
+                : " This deployment does not say whether its database survives a restart."}
           </p>
         </div>
       </div>
@@ -196,7 +270,7 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
                 // leave the override in place.
                 const mutating = toggle.isPending || reset.isPending;
                 return (
-                  <tr key={flag.name}>
+                  <tr key={flag.name} data-flag={flag.name}>
                     <td>
                       <span className="ops-cell-strong">
                         <code>{flag.name}</code>
@@ -209,7 +283,11 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
                           checked={flag.enabled}
                           disabled={mutating}
                           label={`${flag.name} — currently ${flag.enabled ? "on" : "off"}`}
-                          onChange={(next) => toggle.mutate({ name: flag.name, enabled: next })}
+                          onChange={(next) =>
+                            !next && SAFETY_CONTROLS[flag.name]
+                              ? askFirst({ name: flag.name, action: "off" })
+                              : toggle.mutate({ name: flag.name, enabled: next })
+                          }
                         />
                       ) : (
                         <span className={`ops-chip ${flag.enabled ? "is-good" : ""}`}>
@@ -224,7 +302,11 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
                           <span className="ops-chip is-warn">not at default</span>
                         ) : null}
                         {flag.protected ? <span className="ops-chip">protected</span> : null}
-                        {flag.overridden ? <span className="ops-chip is-info">this replica</span> : null}
+                        {flag.stored ? (
+                          <span className="ops-chip is-info">stored · every process</span>
+                        ) : flag.overridden ? (
+                          <span className="ops-chip is-info">this process only</span>
+                        ) : null}
                         {flag.rollout ? (
                           <span className="ops-chip">{flag.rollout.percent}% rollout</span>
                         ) : null}
@@ -233,7 +315,14 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
                             type="button"
                             className="ops-btn is-ghost is-sm"
                             disabled={mutating}
-                            onClick={() => reset.mutate(flag.name)}
+                            onClick={() =>
+                              // Reset drops the override: an enabled safety
+                              // control then follows FLAG_* or its default,
+                              // which may be off, so it asks first too.
+                              SAFETY_CONTROLS[flag.name] && flag.enabled
+                                ? askFirst({ name: flag.name, action: "reset" })
+                                : reset.mutate(flag.name)
+                            }
                             title="Drop the override so this flag follows FLAG_* or its default again"
                           >
                             Reset
@@ -247,6 +336,37 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
             </tbody>
           </table>
         </TableScroll>
+      ) : null}
+
+      {confirm ? (
+        <div className="ops-note ops-confirm" role="alertdialog" aria-labelledby="flag-confirm-title" aria-describedby="flag-confirm-body">
+          <div>
+            <p className="ops-note-title" id="flag-confirm-title">
+              {confirm.action === "off" ? `Turn off ${confirm.name}?` : `Reset ${confirm.name}?`}
+            </p>
+            <p className="ops-note-body" id="flag-confirm-body">
+              {confirm.action === "reset"
+                ? `This drops the override, so the flag follows its FLAG_* value or its default (${
+                    flags.find((f) => f.name === confirm.name)?.default ? "on" : "off"
+                  }), which may switch it off. If it does: `
+                : null}
+              {SAFETY_CONTROLS[confirm.name]} {reachOfAChange}
+            </p>
+            <div className="ops-row-inline">
+              <button
+                type="button"
+                className="ops-btn is-sm"
+                disabled={toggle.isPending || reset.isPending}
+                onClick={() => void confirmIt(confirm)}
+              >
+                {confirm.action === "off" ? "Turn it off" : "Reset it"}
+              </button>
+              <button type="button" className="ops-btn is-primary is-sm" ref={keepOnRef} onClick={keepItOn}>
+                Keep it on
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {toggle.isError || reset.isError ? (

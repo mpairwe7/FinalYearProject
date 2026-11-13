@@ -148,6 +148,74 @@ class TaxpayerThreadTests(_Chat):
             self.assertFalse(msg["translated"])
             self.assertEqual(msg["original_text"], "")
 
+    def test_a_supplied_translation_that_lost_a_figure_is_not_sent(self):
+        """G635: the console sent the officer's earlier preview after they corrected
+        the English, so the taxpayer read the old amount in their language."""
+        db.update_ticket(self.tid, locale="lg")
+        self.take_case()
+        with mock.patch("app.service.localize_reply", return_value="Obanjibwa UGX 50,000."):
+            r = self.client.patch(
+                f"/v1/admin/tickets/{self.tid}",
+                json={"officer_reply": "You owe UGX 50,000.", "officer_reply_localized": "Obanjibwa UGX 200,000."},
+                headers=OFFICER,
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        msg = self.thread()["messages"][0]
+        self.assertNotIn("200,000", msg["text"])
+        self.assertIn("50,000", msg["text"])
+
+    def test_a_regenerated_translation_that_changed_an_amount_is_not_sent(self):
+        """CodeRabbit on PR 730: the server's own translation was used unchecked
+        beyond the shared MT check, which lets one changed amount of four through.
+        It now passes the same strict check, or the officer's English is sent."""
+        db.update_ticket(self.tid, locale="lg")
+        self.take_case()
+        english = "You owe UGX 1,200,000, UGX 240,000, UGX 60,000 and UGX 15,000."
+        with mock.patch(
+            "app.service.localize_reply",
+            return_value="Obanjibwa UGX 1,200,000, UGX 240,000, UGX 60,000 ne UGX 25,000.",
+        ):
+            r = self.client.patch(f"/v1/admin/tickets/{self.tid}", json={"officer_reply": english}, headers=OFFICER)
+        self.assertEqual(r.status_code, 200, r.text)
+        text = self.thread()["messages"][0]["text"]
+        self.assertNotIn("25,000", text)
+        self.assertIn("15,000", text)
+
+    def test_a_new_reply_with_no_valid_translation_clears_the_old_one(self):
+        """CodeRabbit on PR 730: when the new reply's translation was refused, the
+        previous reply's translation stayed stored, so the case view showed it
+        beside the new English."""
+        db.update_ticket(self.tid, locale="lg")
+        self.take_case()
+        with mock.patch("app.service.localize_reply", return_value="Obanjibwa UGX 50,000."):
+            self.officer_says("You owe UGX 50,000.")
+        self.assertEqual(db.get_ticket(self.tid)["officer_reply_localized"], "Obanjibwa UGX 50,000.")
+        with mock.patch("app.service.localize_reply", return_value="Obanjibwa UGX 90,000."):
+            self.officer_says("You owe UGX 80,000.")
+        self.assertEqual(db.get_ticket(self.tid)["officer_reply_localized"], "")
+        status = self.client.get(f"/v1/escalate/{self.tid}").json()
+        self.assertNotIn("50,000", status.get("officer_reply_localized") or "")
+        self.assertNotIn("90,000", status.get("officer_reply_localized") or "")
+
+    def test_the_status_view_translation_passes_the_strict_check(self):
+        """CodeRabbit on PR 730: with no stored translation the status endpoint
+        translated the reply itself, without the strict figure check."""
+        db.update_ticket(self.tid, locale="lg", officer_reply="You owe UGX 1,200,000 and UGX 15,000.", officer_reply_localized="")
+        with mock.patch("app.service.localize_reply", return_value="Obanjibwa UGX 1,200,000 ne UGX 25,000."):
+            status = self.client.get(f"/v1/escalate/{self.tid}").json()
+        self.assertNotIn("25,000", status.get("officer_reply_localized") or "")
+
+    def test_a_supplied_translation_that_keeps_the_figures_is_used(self):
+        db.update_ticket(self.tid, locale="lg")
+        self.take_case()
+        r = self.client.patch(
+            f"/v1/admin/tickets/{self.tid}",
+            json={"officer_reply": "You owe UGX 50,000.", "officer_reply_localized": "Obanjibwa UGX 50,000."},
+            headers=OFFICER,
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.thread()["messages"][0]["text"], "Obanjibwa UGX 50,000.")
+
     def test_the_officer_and_the_auditor_read_the_thread_on_the_case(self):
         self.take_case()
         self.officer_says("Which period?")
@@ -188,6 +256,20 @@ class EndChatTests(_Chat):
         self.assertEqual(rating["status"], "pending")
         self.assertTrue(rating["officer_name"].startswith("Officer "))
         self.assertEqual(rating["user_id"], self.taxpayer)
+
+    def test_a_closing_translation_that_lost_a_figure_is_not_sent(self):
+        """G635 on End chat: the closing message carried the console's preview too."""
+        db.update_ticket(self.tid, locale="lg")
+        self.take_case()
+        with mock.patch("app.service.localize_reply", return_value="Sasula UGX 50,000 nga 15."):
+            r = self.end(
+                closing_message="Pay UGX 50,000 by the 15th.",
+                closing_message_localized="Sasula UGX 200,000 nga 15.",
+                outcome="resolved",
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        officer = [m for m in self.thread()["messages"] if m["sender"] == "officer"][0]
+        self.assertNotIn("200,000", officer["text"])
 
     def test_closing_without_resolving_is_recorded_as_closed(self):
         self.take_case()
@@ -236,6 +318,18 @@ class EndChatTests(_Chat):
         self.assertEqual(self.end().status_code, 200)
         rows = db.query_all("SELECT id FROM service_ratings WHERE ticket_id = ?", (self.tid,))
         self.assertEqual(len(rows), 1)
+
+
+class EndChatTranslationTests(_Chat):
+    def test_a_closing_message_with_no_valid_translation_clears_the_old_one(self):
+        """CodeRabbit on PR 730: as for a reply, End chat kept the previous
+        translation when the closing message's own was refused."""
+        db.update_ticket(self.tid, locale="lg", officer_reply="You owe UGX 50,000.", officer_reply_localized="Obanjibwa UGX 50,000.")
+        self.take_case()
+        with mock.patch("app.service.localize_reply", return_value="Sasula UGX 90,000."):
+            r = self.end(outcome="resolved", closing_message="Please pay UGX 80,000.")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(db.get_ticket(self.tid)["officer_reply_localized"], "")
 
 
 class ChatRatingTests(_Chat):
@@ -287,6 +381,54 @@ class PrivacyTests(_Chat):
         self.assertEqual(counts["service_ratings"], 1)
         self.assertEqual(officer_chat.list_messages(self.tid), [])
         self.assertIsNone(service_ratings.find("chat_officer_csat", ticket_id=self.tid))
+
+
+class SuppliedTranslationFigureCheckTests(unittest.TestCase):
+    """CodeRabbit on PR 730: the shared MT check tolerates a changed figure when
+    enough others match (three of four amounts pass its 75% bar). An officer's
+    preview of *earlier* text differs in exactly that way, so the reply routes
+    compare amounts and rates strictly: none missing, changed or added."""
+
+    ENGLISH = (
+        "Your assessment is UGX 1,200,000 in principal, UGX 240,000 in penalty, "
+        "UGX 60,000 in interest and UGX 15,000 in fees."
+    )
+
+    def keeps(self, localized: str, english: str | None = None, locale: str = "lg") -> bool:
+        from app.main import _translation_keeps_figures
+
+        return _translation_keeps_figures(english or self.ENGLISH, localized, locale)
+
+    def test_the_same_figures_pass(self):
+        self.assertTrue(
+            self.keeps(
+                "Okubalirirwa kwo kwe UGX 1,200,000 ku musingi, UGX 240,000 ku kibonerezo, "
+                "UGX 60,000 ku magoba ne UGX 15,000 ku bisale."
+            )
+        )
+
+    def test_one_changed_amount_of_four_fails(self):
+        self.assertFalse(
+            self.keeps(
+                "Okubalirirwa kwo kwe UGX 1,200,000 ku musingi, UGX 240,000 ku kibonerezo, "
+                "UGX 60,000 ku magoba ne UGX 25,000 ku bisale."
+            )
+        )
+
+    def test_an_added_amount_fails(self):
+        self.assertFalse(
+            self.keeps(
+                "Okubalirirwa kwo kwe UGX 1,200,000 ku musingi, UGX 240,000 ku kibonerezo, "
+                "UGX 60,000 ku magoba ne UGX 15,000 ku bisale. Sasula UGX 500,000 kati."
+            )
+        )
+
+    def test_an_added_rate_fails(self):
+        self.assertFalse(self.keeps("Sasula UGX 50,000 nga 15. VAT eri 18%.", english="Pay UGX 50,000 by the 15th."))
+
+    def test_a_rate_written_without_a_percent_sign_still_passes(self):
+        # Luganda states 18% as "eighteen parts in every hundred".
+        self.assertTrue(self.keeps("VAT eri ebitundu 18 ku buli kikumi.", english="VAT is 18%."))
 
 
 if __name__ == "__main__":

@@ -3636,11 +3636,9 @@ def get_escalation_status(
     officer_reply_localized = str(ticket.get("officer_reply_localized") or "")
 
     if officer_reply and not officer_reply_localized and locale not in ("", "en"):
-        try:
-            from .service import localize_reply
-            officer_reply_localized = localize_reply(officer_reply, locale)
-        except Exception:
-            officer_reply_localized = officer_reply
+        # The same strict figure check as the reply routes (G635): a translation
+        # that changed an amount or a rate is not shown; the English is.
+        officer_reply_localized = _localize_for_ticket(officer_reply, locale) or ""
 
     return EscalationDetailResponse(
         ok=True,
@@ -4203,6 +4201,30 @@ def ticket_presence_endpoint(
     return {"status": "ok", "viewers": db.list_ticket_viewers(ticket_id)}
 
 
+def _analytics_db_dir() -> str:
+    """Where the SQLite store (flag overrides among it) lives."""
+    return str(getattr(db, "_DB_DIR", "") or "")
+
+
+def _flag_override_durability() -> str:
+    """Whether stored flag overrides survive a restart (G638).
+
+    ``durable``: Postgres, a directory under a Hugging Face Space's persistent
+    ``/data``, or one the operator declares persistent with
+    ``ANALYTICS_DB_PERSISTENT=true``. ``ephemeral``: a Space storing anywhere
+    else, which loses its disk on every restart (G616). ``unknown``: nothing
+    says, so the console does not claim it.
+    """
+    if os.getenv("ANALYTICS_BACKEND", "").strip().lower() == "postgres":
+        return "durable"
+    if os.getenv("ANALYTICS_DB_PERSISTENT", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return "durable"
+    if os.getenv("SPACE_ID", "").strip():
+        db_dir = _analytics_db_dir()
+        return "durable" if db_dir == "/data" or db_dir.startswith("/data/") else "ephemeral"
+    return "unknown"
+
+
 @app.get("/v1/admin/flags", tags=["admin"])
 def list_flags_endpoint(
     _ctx: AuthContext = Depends(require_admin_access),
@@ -4228,7 +4250,10 @@ def list_flags_endpoint(
         )
     return {
         "flags": items,
-        "overrides_are_ephemeral": False,
+        # G638: said only when known. The Space's database is on the
+        # container's disk, so its overrides do not survive a restart (G616).
+        "overrides_durability": (durability := _flag_override_durability()),
+        "overrides_are_ephemeral": durability != "durable",
         **_flag_scope(),
         "sync_interval_seconds": _FLAG_SYNC_INTERVAL_SECONDS,
         "synced_at": _flag_sync_state["synced_at"],
@@ -4387,6 +4412,20 @@ def list_overrides_endpoint(
     return {"overrides": db.list_answer_overrides(), "exact_match": True}
 
 
+def _override_replacement_record(previous_reply: str, new_reply: str) -> dict[str, Any]:
+    """What an override write replaced, as the ledger seals it (G637).
+
+    The texts stay in their table; the ledger keeps their digests. Used by
+    every route that upserts an override, so none of them overwrites a live
+    answer without a record of it.
+    """
+    return {
+        "replaced": bool(previous_reply),
+        "previous_reply_sha256": hashlib.sha256(previous_reply.encode("utf-8")).hexdigest() if previous_reply else "",
+        "reply_sha256": hashlib.sha256(new_reply.encode("utf-8")).hexdigest(),
+    }
+
+
 @app.put("/v1/admin/overrides", tags=["admin"])
 def put_override_endpoint(
     body: dict,
@@ -4396,6 +4435,9 @@ def put_override_endpoint(
 
     if ctx.user and ctx.role != "ura_admin":
         raise HTTPException(status_code=403, detail="only ura_admin may edit overrides")
+    # G637: an override is keyed on the normalized question, so this may
+    # replace a live answer. The store returns the reply this write replaced,
+    # read in the same transaction, so the ledger can say so.
     try:
         row = cms.upsert(
             str(body.get("query") or ""),
@@ -4406,6 +4448,8 @@ def put_override_endpoint(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    row = dict(row or {})
+    previous_reply = str(row.pop("previous_reply", "") or "")
     from .cache import reset_index_stamp
 
     reset_index_stamp()
@@ -4413,10 +4457,15 @@ def put_override_endpoint(
     if cache_obj is not None and hasattr(cache_obj, "clear"):
         with contextlib.suppress(Exception):
             cache_obj.clear()
+    new_reply = str((row or {}).get("reply") or body.get("reply") or "").strip()
     _audit_staff_action(
         ctx,
         "staff.override_saved",
-        {"override_id": str((row or {}).get("id") or ""), "enabled": bool(body.get("enabled", True))},
+        {
+            "override_id": str((row or {}).get("id") or ""),
+            "enabled": bool(body.get("enabled", True)),
+            **_override_replacement_record(previous_reply, new_reply),
+        },
     )
     return row
 
@@ -4493,76 +4542,154 @@ def verify_discrepancy_endpoint(
 
     admin_note = str(body.get("admin_note") or "").strip()
     override_id = ""
+    precedence_id = ""
+    tombstoned_sources: list[str] = []
+    tombstoned_chunks: list[str] = []
+    tombstone_ids: list[str] = []
 
-    # Optional 1-Click Answer Override
-    if body.get("create_override"):
-        from . import cms
+    # G634: a precedence rule is injected as law that "strictly supersedes" the
+    # passages, so it must name the statute it comes from. Checked before any
+    # write, so a refused hotfix changes nothing.
+    if str(body.get("precedence_rule") or "").strip() and not str(body.get("statute_reference") or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail="a precedence rule needs the statute reference it comes from",
+        )
+    # A rule is saved only with its topic; without one it was skipped while the
+    # report was still marked verified, so refuse it instead.
+    if str(body.get("precedence_rule") or "").strip() and not str(body.get("precedence_topic") or "").strip():
+        raise HTTPException(status_code=422, detail="a precedence rule needs the topic it is about")
 
-        override_query = str(body.get("override_query") or "").strip()
-        if not override_query and report.get("conversation_id"):
-            with contextlib.suppress(Exception):
-                msgs = db.get_conversation_messages(str(report["conversation_id"]))
-                bot_stmt = str(report.get("bot_statement") or "").strip()
-                last_user = ""
-                for m in msgs or []:
-                    role = str(m.get("role") or "")
-                    content = str(m.get("content") or "").strip()
-                    if role == "user" and content:
-                        last_user = content
-                    elif role == "assistant" and bot_stmt and bot_stmt[:80] in content and last_user:
+    # Each write below commits on its own, so a failure part-way leaves the
+    # earlier ones in place: answers cached before them are retired whether
+    # or not the rest succeeds (G277), and the report stays pending.
+    try:
+        # Optional 1-Click Answer Override
+        if body.get("create_override"):
+            from . import cms
+
+            override_query = str(body.get("override_query") or "").strip()
+            if not override_query and report.get("conversation_id"):
+                with contextlib.suppress(Exception):
+                    msgs = db.get_conversation_messages(str(report["conversation_id"]))
+                    bot_stmt = str(report.get("bot_statement") or "").strip()
+                    last_user = ""
+                    for m in msgs or []:
+                        role = str(m.get("role") or "")
+                        content = str(m.get("content") or "").strip()
+                        if role == "user" and content:
+                            last_user = content
+                        elif role == "assistant" and bot_stmt and bot_stmt[:80] in content and last_user:
+                            override_query = last_user
+                            break
+                    if not override_query and last_user:
                         override_query = last_user
-                        break
-                if not override_query and last_user:
-                    override_query = last_user
-        if not override_query:
-            override_query = str(report.get("user_correction") or "").strip()
-        override_reply = str(body.get("override_reply") or "").strip()
-        source_url = str(body.get("source_url") or "staff-verified-discrepancy").strip()
-        if override_query and override_reply:
-            row = cms.upsert(
-                override_query,
-                override_reply,
-                source_url=source_url,
-                created_by=ctx.user.user_id if ctx.user else "ura_admin",
+            if not override_query:
+                override_query = str(report.get("user_correction") or "").strip()
+            override_reply = str(body.get("override_reply") or "").strip()
+            source_url = str(body.get("source_url") or "staff-verified-discrepancy").strip()
+            if override_query and override_reply:
+                # This may replace a live answer, as the override route may; the
+                # store returns the reply it replaced, read with the write (G637).
+                row = cms.upsert(
+                    override_query,
+                    override_reply,
+                    source_url=source_url,
+                    created_by=ctx.user.user_id if ctx.user else "ura_admin",
+                    enabled=True,
+                )
+                override_id = str((row or {}).get("id") or "")
+                _audit_staff_action(
+                    ctx,
+                    "staff.override_saved",
+                    {
+                        "override_id": override_id,
+                        "enabled": True,
+                        "via_report": report_id,
+                        **_override_replacement_record(
+                            str((row or {}).get("previous_reply") or ""),
+                            str((row or {}).get("reply") or override_reply).strip(),
+                        ),
+                    },
+                )
+
+        # Optional Solution C: Active Statutory Precedence
+        precedence_topic = str(body.get("precedence_topic") or "").strip()
+        precedence_rule = str(body.get("precedence_rule") or "").strip()
+        statute_ref = str(body.get("statute_reference") or "").strip()
+        if precedence_topic and precedence_rule:
+            prec = db.add_statutory_precedence(
+                precedence_topic,
+                precedence_rule,
+                statute_reference=statute_ref,
                 enabled=True,
             )
-            override_id = str((row or {}).get("id") or "")
+            precedence_id = str((prec or {}).get("id") or "")
+            # The rule's text stays in its table; the ledger seals its digest.
+            _audit_staff_action(
+                ctx,
+                "staff.precedence_created",
+                {
+                    "precedence_id": precedence_id,
+                    "topic": precedence_topic,
+                    "statute_reference": statute_ref,
+                    "rule_sha256": hashlib.sha256(precedence_rule.encode("utf-8")).hexdigest(),
+                    "via_report": report_id,
+                },
+            )
 
-    # Optional Solution C: Active Statutory Precedence
-    precedence_topic = str(body.get("precedence_topic") or "").strip()
-    precedence_rule = str(body.get("precedence_rule") or "").strip()
-    statute_ref = str(body.get("statute_reference") or "").strip()
-    if precedence_topic and precedence_rule:
-        db.add_statutory_precedence(
-            precedence_topic,
-            precedence_rule,
-            statute_reference=statute_ref,
-            enabled=True,
-        )
+        # Optional Solution B: Tombstone cited sources or chunks
+        tomb_sources = body.get("tombstone_sources") or []
+        if isinstance(tomb_sources, list):
+            for src in tomb_sources:
+                if src and str(src).strip():
+                    tomb = db.add_corpus_tombstone(
+                        str(src).strip(),
+                        reason=f"Superseded via report {report_id}",
+                        superseded_by=override_id,
+                        created_by=ctx.user.user_id if ctx.user else "ura_admin",
+                    )
+                    tombstoned_sources.append(str(src).strip())
+                    tombstone_ids.append(str((tomb or {}).get("id") or ""))
 
-    # Optional Solution B: Tombstone cited sources or chunks
-    tomb_sources = body.get("tombstone_sources") or []
-    if isinstance(tomb_sources, list):
-        for src in tomb_sources:
-            if src and str(src).strip():
-                db.add_corpus_tombstone(
-                    str(src).strip(),
-                    reason=f"Superseded via report {report_id}",
-                    superseded_by=override_id,
-                    created_by=ctx.user.user_id if ctx.user else "ura_admin",
-                )
+        tomb_chunks = body.get("tombstone_chunk_ids") or []
+        if isinstance(tomb_chunks, list):
+            for cid in tomb_chunks:
+                if cid and str(cid).strip():
+                    tomb = db.add_corpus_tombstone(
+                        "",
+                        chunk_id=str(cid).strip(),
+                        reason=f"Superseded via report {report_id}",
+                        superseded_by=override_id,
+                        created_by=ctx.user.user_id if ctx.user else "ura_admin",
+                    )
+                    # A chunk withdrawal is a tombstone too: audited and it
+                    # retires cached answers, like a source withdrawal.
+                    tombstoned_chunks.append(str(cid).strip())
+                    tombstone_ids.append(str((tomb or {}).get("id") or ""))
 
-    tomb_chunks = body.get("tombstone_chunk_ids") or []
-    if isinstance(tomb_chunks, list):
-        for cid in tomb_chunks:
-            if cid and str(cid).strip():
-                db.add_corpus_tombstone(
-                    "",
-                    chunk_id=str(cid).strip(),
-                    reason=f"Superseded via report {report_id}",
-                    superseded_by=override_id,
-                    created_by=ctx.user.user_id if ctx.user else "ura_admin",
-                )
+        if tombstone_ids:
+            _audit_staff_action(
+                ctx,
+                "staff.tombstone_created",
+                {
+                    "tombstone_ids": tombstone_ids,
+                    "sources": tombstoned_sources,
+                    "chunk_ids": tombstoned_chunks,
+                    "via_report": report_id,
+                },
+            )
+    finally:
+        if override_id or precedence_id or tombstone_ids:
+            # As the standalone override and tombstone routes do: answers cached
+            # before the hotfix must not keep being served after it (G277).
+            from .cache import reset_index_stamp
+
+            reset_index_stamp()
+            cache_obj = getattr(getattr(app.state, "model", None), "_cache", None)
+            if cache_obj is not None and hasattr(cache_obj, "clear"):
+                with contextlib.suppress(Exception):
+                    cache_obj.clear()
 
     db.update_discrepancy_status(
         report_id,
@@ -4573,7 +4700,13 @@ def verify_discrepancy_endpoint(
     _audit_staff_action(
         ctx,
         "staff.discrepancy_verified",
-        {"report_id": report_id, "override_id": override_id},
+        {
+            "report_id": report_id,
+            "override_id": override_id,
+            "precedence_id": precedence_id,
+            "tombstoned_sources": tombstoned_sources,
+            "tombstoned_chunk_ids": tombstoned_chunks,
+        },
     )
     return {"ok": True, "report_id": report_id, "status": "verified", "override_id": override_id}
 
@@ -5073,10 +5206,23 @@ async def update_ticket_endpoint(
     from . import officer_chat
 
     before = await asyncio.to_thread(db.get_ticket, ticket_id)
+    reply_locale = locale or (before or {}).get("locale") or "en"
+    if officer_reply and officer_reply_localized and not _translation_keeps_figures(
+        officer_reply, officer_reply_localized, reply_locale
+    ):
+        # G635: a translation the client supplies must say the same amounts as
+        # the English. A preview made before the officer corrected a figure did
+        # not, and reached the taxpayer as the officer's word. Translate again
+        # here, where localize_reply guards the figures.
+        logger.warning("officer reply translation dropped: its figures differ from the English")
+        metrics.inc("officer_reply_translation_rejected_total")
+        officer_reply_localized = None
     if officer_reply and not officer_reply_localized:
-        officer_reply_localized = await asyncio.to_thread(
-            _localize_for_ticket, officer_reply, locale or (before or {}).get("locale") or "en"
-        )
+        officer_reply_localized = await asyncio.to_thread(_localize_for_ticket, officer_reply, reply_locale)
+    if officer_reply and not officer_reply_localized:
+        # No valid translation of *this* reply: clear the stored one, which is of
+        # an earlier reply, so the case view cannot show it beside the new English.
+        officer_reply_localized = ""
 
     # Resolving or closing a live text chat *is* ending it: the taxpayer is
     # told, asked to rate it, and handed back to the assistant — the same as
@@ -5138,18 +5284,60 @@ async def update_ticket_endpoint(
     return {"status": "ok", "ticket_id": ticket_id}
 
 
+def _translation_keeps_figures(english: str, localized: str, locale: str) -> bool:
+    """Whether a supplied translation carries exactly the English text's figures (G635).
+
+    The shared MT check tolerates a changed figure when enough others match,
+    which suits a fresh machine translation. An officer's supplied preview may be
+    of *earlier* text, which differs in exactly that way, so here every amount
+    and rate in the English must appear in the translation, and the translation
+    may add no amount or rate. Rates are matched as numbers, not by the percent
+    sign: Luganda says "ebitundu 18 ku buli kikumi" for 18%.
+    """
+    try:
+        from . import mt
+        from .entailment import percentages
+
+        loc = (locale or "en").lower().strip()
+        if not mt.figures_survived(english, localized, locale=loc):
+            return False
+        src_all = mt.figures(english, locale="en")
+        tr_all = mt.figures(localized, locale=loc)
+        src_pct = {float(p) for p in percentages(english)}
+        src_key = {f for f in src_all if f >= 1000.0} | src_pct
+        if not src_key <= tr_all:
+            return False  # an amount or a rate is missing or changed
+        added_money = {f for f in tr_all if f >= 1000.0} - src_all
+        added_pct = {float(p) for p in percentages(localized)} - src_all - src_pct
+        return not (added_money or added_pct)
+    except Exception:
+        logger.debug("figure check on a supplied translation failed", exc_info=True)
+        return False
+
+
 def _localize_for_ticket(text: str, ticket_locale: str) -> str | None:
-    """An officer's English message in the taxpayer's language (None for English or on failure)."""
+    """An officer's English message in the taxpayer's language.
+
+    None for English, on failure, or when the translation does not carry
+    exactly the English amounts and rates (G635): the officer's English is
+    then sent instead. ``localize_reply``'s own check tolerates one changed
+    figure among enough matches, which is not good enough for an officer's word.
+    """
     t_loc = (ticket_locale or "en").lower().strip()
     if t_loc in ("", "en"):
         return None
     try:
         from .service import localize_reply
 
-        return localize_reply(text, t_loc)
+        localized = localize_reply(text, t_loc)
     except Exception:
         logger.debug("auto-localizing officer reply failed", exc_info=True)
         return None
+    if localized and not _translation_keeps_figures(text, localized, t_loc):
+        logger.warning("officer reply machine translation dropped: its figures differ from the English")
+        metrics.inc("officer_reply_translation_rejected_total")
+        return None
+    return localized
 
 
 def _note_officer_chat_turn(
@@ -5204,6 +5392,13 @@ async def end_ticket_chat(
         raise HTTPException(status_code=409, detail="This chat has already ended")
     closing = body.closing_message.strip()
     closing_localized = body.closing_message_localized.strip()
+    if closing and closing_localized and not _translation_keeps_figures(
+        closing, closing_localized, ticket.get("locale") or "en"
+    ):
+        # G635, as for a reply: a stale or wrong translation is not sent.
+        logger.warning("closing message translation dropped: its figures differ from the English")
+        metrics.inc("officer_reply_translation_rejected_total")
+        closing_localized = ""
     if closing and not closing_localized:
         closing_localized = await asyncio.to_thread(_localize_for_ticket, closing, ticket.get("locale") or "en") or ""
     result = await asyncio.to_thread(

@@ -1175,8 +1175,11 @@ PUT /v1/admin/quality/reviews/{item_type}/{item_id}
 {"status": "action_needed", "note": "Sole proprietors can register — fix the override."}
 ```
 
-`status` is `reviewed`, `action_needed` or `open` (reopen: the decision is
-removed and the item is open again).
+`status` is `reviewed`, `action_needed` or `open` (reopen: the item is open
+again). Every decision, a reopening included, is also appended to the item's
+history (`audit_review_history`), which the Needs review queue returns as
+`history` on each item, oldest first (G639, ADR-0050). A decision stored before
+that table existed is copied in once, as its item's first entry.
 
 **Response**
 ```json
@@ -2295,8 +2298,11 @@ DELETE /v1/admin/flags/{name}
 ```
 
 `GET` lists the answering process's registry (`enabled`, `overridden`,
-`stored`, `protected`, rollout size) and `overrides_are_ephemeral: false`.
-It also reports:
+`stored`, `protected`, rollout size), `overrides_durability` and
+`overrides_are_ephemeral` (true unless durability is `durable`). Durability is
+`durable` on Postgres, under a Space's persistent `/data`, or with
+`ANALYTICS_DB_PERSISTENT=true`; `ephemeral` on a Space storing anywhere else;
+otherwise `unknown` (G638, ADR-0050). It also reports:
 - `scope`: how far a change is configured to reach.
   `every_process_sharing_this_database`, or `this_process_until_the_others_restart`
   when the sync is off. It describes the setting, not a confirmation: a process
@@ -2331,8 +2337,26 @@ PUT /v1/admin/overrides
 DELETE /v1/admin/overrides/{override_id}
 ```
 
-Exact-match staff answer overrides (`FLAG_ANSWER_OVERRIDES`). `PUT` body:
-`{"query":"…","reply":"…","source_url":"","enabled":true}`.
+Staff answer overrides (`FLAG_ANSWER_OVERRIDES`). `PUT` body:
+`{"query":"…","reply":"…","source_url":"","enabled":true}`. The question is
+stored and matched normalized (`cms.normalize_query`: case folded, punctuation
+dropped except `.`/`-` between digits, spacing collapsed); the chat also tries the
+rewritten and the machine-translated question, and translates the reply for other
+languages. A `PUT` whose normalized question already has an override replaces it;
+`staff.override_saved` records `replaced`, `previous_reply_sha256` and
+`reply_sha256`, the replaced reply read inside the write's own transaction (G637,
+ADR-0050). Overrides are not tenant-scoped: one answers every tenant.
+
+`POST /v1/admin/discrepancies/{report_id}/verify` (`ura_admin`) applies a
+taxpayer-reported correction: an override, a statutory precedence rule (told to
+the model as law that overrides retrieved passages) and tombstones on the cited
+sources. A `precedence_rule` without a `statute_reference` or a `precedence_topic`
+is 422 and nothing is written. `tombstone_chunk_ids` withdraws single chunks. Each write is audited
+(`staff.override_saved` with `replaced` and its digests, as on `PUT`,
+`staff.precedence_created` with `rule_sha256` and the statute,
+`staff.tombstone_created` with the sources and `chunk_ids`, then
+`staff.discrepancy_verified` with `tombstoned_sources` and `tombstoned_chunk_ids`),
+and cached answers are retired, a chunk-only hotfix included (G634, ADR-0050).
 
 ```http
 GET /v1/admin/outbox
