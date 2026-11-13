@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { applyTurnMeta, formatNextShift, officerHoursFrom } from '../../lib/turnMeta';
+import { applyTurnMeta, formatNextShift, officerHoursFrom, workflowFrom } from '../../lib/turnMeta';
 import type { ChatTurn } from '../../store/useChatStore';
 
 const turn = (over: Partial<ChatTurn> = {}): ChatTurn =>
@@ -52,6 +52,28 @@ describe('applyTurnMeta', () => {
     expect(out.retrievalMode).toBe('abstained');
     expect(out.citations).toEqual([]);
     expect(out.resources).toEqual([]);
+  });
+
+  // G652: the REST fallback dropped connectors_used, so the "Looked up in X ·
+  // Demo" note was lost whenever the stream was unavailable.
+  it('keeps the services an answer used, from a REST reply too', () => {
+    const out = applyTurnMeta(turn(), {
+      connectors_used: [{ namespace: 'ursb', label: 'URSB', mode: 'simulation', outcome: 'found' }],
+    });
+    expect(out.connectorsUsed).toHaveLength(1);
+    expect(out.connectorsUsed?.[0]).toMatchObject({ namespace: 'ursb', mode: 'simulation' });
+    expect(applyTurnMeta(out, { faithfulness_score: 0.9 }).connectorsUsed).toHaveLength(1);
+  });
+
+  it('keeps a web citation\'s provenance and drops a malformed one', () => {
+    const out = applyTurnMeta(turn(), {
+      citations: [
+        { ref: '[1]', source: 'pwc.com', authority: 'commentary', evidence: 'search_summary', stale: true },
+        { ref: '[2]', source: 'x', authority: 'friend' },
+        { ref: '[3]', source: 'y', stale: 'yes' },
+      ],
+    });
+    expect(out.citations).toEqual([{ ref: '[1]', source: 'pwc.com', authority: 'commentary', evidence: 'search_summary', stale: true }]);
   });
 
   it('drops malformed source rows and malformed inferred objectives', () => {
@@ -171,3 +193,34 @@ describe('applyTurnMeta', () => {
     expect(preserved.objectiveHypothesis).toEqual(hypothesis);
   });
 });
+
+// CodeRabbit on PR 736: a list could pass as a list while holding null, and
+// the stepper read properties off each element during render.
+describe('workflowFrom nested elements', () => {
+  it('keeps only objects in the lists the stepper reads properties from, and strings in option_labels', () => {
+    const wf = workflowFrom({
+      id: 'vat_registration',
+      name: 'Register for VAT',
+      status: 'active',
+      prerequisites: [null, { id: 'tin', title: 'TIN', satisfied: true }],
+      parent_goals: [7, { workflow_id: 'w' }],
+      option_labels: [null, 'Yes'],
+      form_draft: { fields: [null, { slot: 'tin', label: 'TIN' }] },
+      journey_gps: { parent_goals: ['x', { workflow_id: 'w' }] },
+    });
+    expect(wf).toBeDefined();
+    const w = wf as unknown as {
+      prerequisites: unknown[];
+      parent_goals: unknown[];
+      option_labels: unknown[];
+      form_draft: { fields: unknown[] };
+      journey_gps: { parent_goals: unknown[] };
+    };
+    expect(w.prerequisites).toEqual([{ id: 'tin', title: 'TIN', satisfied: true }]);
+    expect(w.parent_goals).toEqual([{ workflow_id: 'w' }]);
+    expect(w.option_labels).toEqual(['Yes']);
+    expect(w.form_draft.fields).toEqual([{ slot: 'tin', label: 'TIN' }]);
+    expect(w.journey_gps.parent_goals).toEqual([{ workflow_id: 'w' }]);
+  });
+});
+

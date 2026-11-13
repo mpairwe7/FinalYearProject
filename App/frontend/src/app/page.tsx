@@ -5,7 +5,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExtern
 import { useChatStore, ChatTurn, type ChatAttachment, createTurn, cleanResponse } from '../store/useChatStore';
 import { useVoiceStore } from '../store/useVoiceStore';
 import { LOCALE_OPTIONS } from '../lib/locales';
-import { useTranslation, type TranslationKey } from '../lib/i18n';
+import { translate, useTranslation, type TranslationKey } from '../lib/i18n';
 import {
   initAnalytics,
   trackChatSent,
@@ -46,6 +46,7 @@ import {
 } from '../lib/connectors';
 import { applyTurnMeta, ticketIdFrom } from '../lib/turnMeta';
 import { needsSpokenCaveat, spokenReply } from '../lib/spokenCaveat';
+import { MessageBoundary } from '../components/MessageBoundary';
 import { consumeChatStream } from '../lib/chatStream';
 import { createRevealQueue, type RevealQueue } from '../lib/revealQueue';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
@@ -1337,7 +1338,7 @@ export default function Page() {
       ]);
       setMessage('');
       setPendingAttachments([]);
-      setChatLiveStatus('Offline mode. Please reconnect to submit questions.');
+      setChatLiveStatus(t('status.offline'));
       return;
     }
 
@@ -1372,7 +1373,11 @@ export default function Page() {
     const t0 = Date.now();
     setTurnPhase('thinking');
     setTurnStartedAt(t0);
-    setChatLiveStatus('Getting a response from URA.');
+    setChatLiveStatus(t('status.waiting'));
+    // The reply may adopt another language (adoptResponseLocale) while this
+    // call runs; what follows is announced in the language the screen is now
+    // in, not the one captured when the message was sent.
+    const announce = (key: TranslationKey) => translate(useChatStore.getState().locale, key);
     lastUserQueryRef.current = text;
     trackChatSent(text.length);
     const ac = new AbortController();
@@ -1459,7 +1464,7 @@ export default function Page() {
         }
         if (res.status !== 404 && res.status !== 405 && res.status !== 401) throw new Error(`API ${res.status}`);
         await applySyncReply();
-        setChatLiveStatus('URA response ready.');
+        setChatLiveStatus(announce('status.ready'));
         return;
       }
       if (!res.headers.get('content-type')?.toLowerCase().startsWith('text/event-stream')) {
@@ -1618,7 +1623,7 @@ export default function Page() {
       if (!useChatStore.getState().chat.at(-1)?.content.trim()) throw new Error('Empty chat reply');
       updateResponse((turn) => ({ ...turn, responseIncomplete: stoppedAtDeadline }));
       trackChatReceived(Date.now() - t0, (Array.isArray(meta.sources) && meta.sources.length > 0));
-      setChatLiveStatus(stoppedAtDeadline ? t('message.incomplete') : 'URA response ready.');
+      setChatLiveStatus(stoppedAtDeadline ? announce('message.incomplete') : announce('status.ready'));
     } catch {
       revealQueueRef.current?.stop();
       if (!isResponseActive()) return;
@@ -1636,10 +1641,10 @@ export default function Page() {
         updateResponse((t) => ({ ...t, content: fallbackText, offlineMode: isOff }));
       }
       if (userStoppedRef.current) {
-        setChatLiveStatus('Response stopped.');
+        setChatLiveStatus(announce('status.stopped'));
       } else {
         trackErrorOccurred('chat_fetch_failed');
-        setChatLiveStatus('URA response unavailable. Please try again.');
+        setChatLiveStatus(announce('status.unavailable'));
       }
     } finally {
       unsubscribe();
@@ -2604,8 +2609,9 @@ export default function Page() {
                   isLoading && turnPhase !== null && i === chat.length - 1 && turn.role === 'assistant';
                 if (turn.notice) return <ChatNotice key={turn.id} turn={turn} />;
                 return (
+                  // G650: a turn that cannot be rendered does not take the chat with it.
+                  <MessageBoundary key={turn.id} turnId={turn.id}>
                   <ChatMessage
-                    key={turn.id}
                     turn={turn}
                     userQuery={userQueries[turn.id] || ''}
                     locale={locale}
@@ -2623,6 +2629,7 @@ export default function Page() {
                     onActionClick={handleSuggestedAction}
                     onSubmitInlineForm={handleInlineSubmission}
                   />
+                  </MessageBoundary>
                 );
               })}
               {/* A turn with no assistant bubble to sit in — the voice path

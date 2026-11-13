@@ -1,4 +1,13 @@
-import { isConfidenceBand, officerHoursFrom, type ConfidenceBand, type OfficerHours } from '../lib/turnMeta';
+import {
+  citationsFrom,
+  isConfidenceBand,
+  officerHoursFrom,
+  resourcesFrom,
+  score,
+  workflowFrom,
+  type ConfidenceBand,
+  type OfficerHours,
+} from '../lib/turnMeta';
 import { create } from 'zustand';
 import { conversationTtlMs, resetChatSession } from '../lib/chatSession';
 import { normalizeLocale } from '../lib/locales';
@@ -22,6 +31,12 @@ export interface Citation {
   effective_date?: string;
   published_at?: string;
   title?: string;
+  /** Web evidence (G651): URA itself, or an adviser's commentary. */
+  authority?: 'official' | 'commentary';
+  /** Web evidence: the page was read, or only a search summary. */
+  evidence?: 'document' | 'search_summary';
+  /** Web evidence older than the question allows. */
+  stale?: boolean;
 }
 
 /** A document attached to a user turn (analysed via /v1/documents/analyze). */
@@ -545,9 +560,12 @@ function sanitizeTurn(value: unknown): ChatTurn | null {
     restored: true,
   };
 
-  if (Array.isArray(value.citations)) turn.citations = value.citations as Citation[];
+  // G650: restored turns go through the same validators as live metadata. Before,
+  // corrupt or older storage reached the renderer unchecked and crashed it on
+  // every reload.
+  if (Array.isArray(value.citations)) turn.citations = citationsFrom(value.citations);
   if (typeof value.faithfulnessScore === 'number' || value.faithfulnessScore === null) {
-    turn.faithfulnessScore = value.faithfulnessScore;
+    turn.faithfulnessScore = score(value.faithfulnessScore);
   }
   if (typeof value.retrievalMode === 'string') turn.retrievalMode = value.retrievalMode;
   if (isConfidenceBand(value.confidenceBand)) turn.confidenceBand = value.confidenceBand;
@@ -595,7 +613,8 @@ function sanitizeTurn(value: unknown): ChatTurn | null {
     turn.nextActions = value.nextActions.filter((a): a is string => typeof a === 'string');
   }
   if (isRecord(value.workflow) && typeof value.workflow.id === 'string') {
-    turn.workflow = value.workflow as unknown as WorkflowState;
+    const workflow = workflowFrom(value.workflow);
+    if (workflow) turn.workflow = workflow;
   }
   const objHyp = value.objectiveHypothesis ?? (value as Record<string, unknown>).objective_hypothesis;
   // The card's button sends confirm_action as the taxpayer's next message in
@@ -627,7 +646,7 @@ function sanitizeTurn(value: unknown): ChatTurn | null {
     };
   }
   if (Array.isArray(value.resources)) {
-    turn.resources = value.resources.filter(isRecord) as unknown as ContextResource[];
+    turn.resources = resourcesFrom(value.resources);
   }
 
   return turn;
@@ -761,10 +780,23 @@ function readPersistedChatState(): PersistedChatState | null {
   }
 }
 
+/**
+ * What is not written to browser storage: portal cards (they need a fresh
+ * server turn), and a document's analysis (G654). The analysis carries what
+ * was read off the document (TINs, NINs, amounts), and browser storage
+ * outlives the tab on a shared computer. The attachment's name stays; its
+ * analysis is gone after a reload, and the inspection view says so.
+ */
 function withoutTransientCards(conversations: Conversation[]): Conversation[] {
   return conversations.map((c) => ({
     ...c,
-    turns: c.turns.map((t) => (t.portalCopilot ? { ...t, portalCopilot: undefined } : t)),
+    turns: c.turns.map((t) => {
+      let next = t.portalCopilot ? { ...t, portalCopilot: undefined } : t;
+      if (next.attachments?.some((a) => a.analysis)) {
+        next = { ...next, attachments: next.attachments.map(({ analysis: _analysis, ...rest }) => rest) };
+      }
+      return next;
+    }),
   }));
 }
 

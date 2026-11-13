@@ -160,4 +160,44 @@ describe("SourcesPill", () => {
     render(<SourcesPill resources={[onlineForm, statute]} />);
     expect(screen.getByRole("button", { name: "Vyanzo (2)" })).toHaveTextContent("Vyanzo");
   });
+
+  // G651: web evidence looked like a URA document, and a fiscal year regexed
+  // from a snippet read as the citation's effective date.
+  it("says what kind of web evidence a source is", () => {
+    render(
+      <SourcesPill
+        citations={[
+          { ref: "[1]", source: "pwc.com", url: "https://www.pwc.com/ug", title: "Uganda tax summary",
+            authority: "commentary", evidence: "search_summary", stale: true },
+          { ref: "[2]", source: "ura.go.ug", url: "https://ura.go.ug/vat", title: "VAT", authority: "official", evidence: "document" },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("sources-pill"));
+    const popover = screen.getByTestId("sources-popover");
+    expect(popover).toHaveTextContent("Adviser's view, not URA");
+    expect(popover).toHaveTextContent("Search summary, page not opened");
+    expect(popover).toHaveTextContent("May be out of date");
+    expect(popover).toHaveTextContent("URA website");
+  });
+
+  // CodeRabbit on PR 736: a citation with the same URL as a resource was
+  // dropped as a duplicate, and its warnings with it.
+  it("keeps a web citation's warnings when it repeats a resource's link", () => {
+    render(
+      <SourcesPill
+        resources={[{ title: "Uganda tax summary", url: "https://www.pwc.com/ug", type: "guide" } as ContextResource]}
+        citations={[
+          { ref: "[1]", source: "pwc.com", url: "https://www.pwc.com/ug", title: "Uganda tax summary",
+            authority: "commentary", evidence: "search_summary", stale: true },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("sources-pill"));
+    const popover = screen.getByTestId("sources-popover");
+    expect(popover).toHaveTextContent("Adviser's view, not URA");
+    expect(popover).toHaveTextContent("Search summary, page not opened");
+    expect(popover).toHaveTextContent("May be out of date");
+  });
 });
+

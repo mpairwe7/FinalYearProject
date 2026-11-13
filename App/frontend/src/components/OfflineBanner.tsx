@@ -92,9 +92,7 @@ export default function OfflineBanner() {
           <line x1="12" y1="20" x2="12.01" y2="20" />
         </svg>
         <span className="offline-banner-text">
-          <strong>Low Bandwidth:</strong>{" "}
-          {t("common.low_bandwidth") ||
-            "Connection bandwidth is limited. Data Saver mode active."}
+          <strong>{t("common.low_bandwidth_title")}</strong> {t("common.low_bandwidth")}
         </span>
       </div>
     </aside>

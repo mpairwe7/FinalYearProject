@@ -2862,6 +2862,44 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             progress["result"] = result
         if await _should_stop():
             return
+        # G653: a correction of the previous answer is recorded here too; the
+        # metadata frame carries the report, which the chat shows as a badge.
+        # A blocked turn (a paused principal, G464) reads and writes nothing more
+        # on its behalf, a correction included.
+        if (
+            not result.get("discrepancy_report")
+            and result.get("retrieval_mode") != "blocked"
+            and flags.is_enabled("knowledge_discrepancy_reporting")
+        ):
+            history = result.get("_history") or []
+            if not history and (conversation_id or session_id):
+                # A short-circuited turn carries no history: read the previous
+                # turn, which is the one a correction is about, with the sources
+                # the challenged answer cited (the report keeps them).
+                try:
+                    history = (
+                        await asyncio.to_thread(
+                            db.get_conversation_transcript,
+                            conversation_id=conversation_id or None,
+                            session_id=session_id or None,
+                            user_id=user_id or None,
+                            tenant_id=tenant_id or "default",
+                        )
+                    )[-1:]
+                except Exception:
+                    logger.debug("previous turn lookup for discrepancy failed", exc_info=True)
+                    history = []
+            report, _ack = await asyncio.to_thread(
+                record_discrepancy,
+                message,
+                history,
+                conversation_id=str(result.get("conversation_id") or conversation_id or ""),
+                session_id=session_id or "",
+                user_id=user_id or "",
+                locale=locale or "en",
+            )
+            if report:
+                result["discrepancy_report"] = report
         if result.get("_case_facts") is not None:
             _ACTIVE_CASE_FACTS.set(result["_case_facts"])
         if turn_out.get("source"):
@@ -2890,7 +2928,9 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
         # Reuse the history generate_retrieval_only already loaded; read the
         # database only when it loaded none, and off the event loop.
         history_turns = turns_from_history(result.get("_history") or [])
-        if not history_turns:
+        # Not for a blocked turn: a paused principal is answered without
+        # reading anything more on its behalf (G464).
+        if not history_turns and result.get("retrieval_mode") != "blocked":
             history_turns = await asyncio.to_thread(
                 _recent_turns_for_guidance, result, user_id, tenant_id
             )
@@ -5039,6 +5079,60 @@ def ordered_sources(hits: list[dict[str, Any]]) -> list[str]:
 # ---------------------------------------------------------------------------
 # Main service class
 # ---------------------------------------------------------------------------
+
+def record_discrepancy(
+    message: str,
+    conversation_history: list[dict[str, Any]] | None,
+    *,
+    conversation_id: str = "",
+    session_id: str = "",
+    user_id: str = "",
+    locale: str = "en",
+) -> tuple[dict[str, Any] | None, str]:
+    """Record a taxpayer's challenge to the previous answer, on every transport.
+
+    Returns the report the chat shows (``discrepancy_report``) and the
+    acknowledgement REST puts before its reply. It ran only on REST, so the web
+    chat, which streams, never logged a taxpayer's correction (G653).
+    """
+    if not flags.is_enabled("knowledge_discrepancy_reporting"):
+        return None, ""
+    try:
+        last_turn = (conversation_history or [])[-1] if conversation_history else {}
+        prev_bot_reply = str(last_turn.get("bot_reply") or "").strip()
+        from .discrepancy_detector import detect_discrepancy, format_discrepancy_acknowledgement
+
+        det = detect_discrepancy(message, prev_bot_reply)
+        if not det.is_dispute:
+            return None, ""
+        rep = db.create_or_increment_discrepancy(
+            bot_statement=det.bot_statement,
+            user_correction=det.user_correction,
+            conversation_id=conversation_id,
+            session_id=session_id,
+            user_id=user_id,
+            discrepancy_type=det.discrepancy_type,
+            cited_sources=last_turn.get("sources") or [],
+            priority=det.suggested_priority,
+        )
+        payload = {
+            "id": rep.get("id"),
+            "status": rep.get("status", "pending"),
+            "frequency_count": rep.get("frequency_count", 1),
+            "discrepancy_type": det.discrepancy_type,
+            "reused_existing": rep.get("reused_existing", False),
+        }
+        ack = format_discrepancy_acknowledgement(
+            rep.get("id", ""),
+            baseline_topic="indexed statutory guidance",
+            locale=locale,
+            user_assertion=det.user_correction,
+        )
+        return payload, ack
+    except Exception:
+        logger.debug("Discrepancy detection hook failed", exc_info=True)
+        return None, ""
+
 
 #: The judge's reason when a table answer uses a figure the table does not confirm.
 UNCONFIRMED_FIGURE_REASON = "figure not confirmed against a gazetted schedule"
@@ -11438,43 +11532,14 @@ class ChatModel:
                     logger.debug("Failed to fetch conversation history", exc_info=True)
 
             # 0a. Check for factual dispute against previous turn (Auto Bug / Knowledge Discrepancy Reporting)
-            discrepancy_payload = None
-            discrepancy_ack_prefix = ""
-            if flags.is_enabled("knowledge_discrepancy_reporting"):
-                try:
-                    last_turn = conversation_history[-1] if conversation_history else {}
-                    prev_bot_reply = str(last_turn.get("bot_reply") or "").strip()
-                    from .discrepancy_detector import detect_discrepancy, format_discrepancy_acknowledgement
-
-                    det = detect_discrepancy(message, prev_bot_reply)
-                    if det.is_dispute:
-                            prev_sources = last_turn.get("sources") or []
-                            rep = db.create_or_increment_discrepancy(
-                                bot_statement=det.bot_statement,
-                                user_correction=det.user_correction,
-                                conversation_id=conversation_id or "",
-                                session_id=session_id or "",
-                                user_id=user_id or "",
-                                discrepancy_type=det.discrepancy_type,
-                                cited_sources=prev_sources,
-                                priority=det.suggested_priority,
-                            )
-                            discrepancy_payload = {
-                                "id": rep.get("id"),
-                                "status": rep.get("status", "pending"),
-                                "frequency_count": rep.get("frequency_count", 1),
-                                "discrepancy_type": det.discrepancy_type,
-                                "reused_existing": rep.get("reused_existing", False),
-                            }
-                            eff_loc = requested_locale or "en"
-                            discrepancy_ack_prefix = format_discrepancy_acknowledgement(
-                                rep.get("id", ""),
-                                baseline_topic="indexed statutory guidance",
-                                locale=eff_loc,
-                                user_assertion=det.user_correction,
-                            )
-                except Exception:
-                    logger.debug("Discrepancy detection hook failed", exc_info=True)
+            discrepancy_payload, discrepancy_ack_prefix = record_discrepancy(
+                message,
+                conversation_history,
+                conversation_id=conversation_id or "",
+                session_id=session_id or "",
+                user_id=user_id or "",
+                locale=requested_locale or "en",
+            )
 
             copilot_card: dict[str, Any] | None = None
 

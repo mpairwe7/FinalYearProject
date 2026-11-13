@@ -804,3 +804,21 @@
     transition: none;
   }
 }
+
+/* G650: a turn that could not be rendered. */
+.chatv2 .message-boundary-notice {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border: 1px dashed var(--border-2, currentColor);
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+/* G653: a feedback comment that did not save. */
+.chatv2 .feedback-comment-error {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--warning);
+}

@@ -293,6 +293,9 @@ function ChatMessageInner({
     turn.confidenceBand === 'medium' ||
     turn.confidenceBand === 'low' ||
     (turn.restored === true && turn.confidenceBand === undefined);
+  // G651: an answer resting on web evidence (an adviser's page, a search
+  // summary) is never badged well grounded, whatever its score.
+  const webEvidence = (turn.citations ?? []).some((c) => Boolean(c.authority));
 
   return (
     <article className={`message-row message-row-${turn.role}${isOfficerReply ? ' message-row-officer' : ''}`}>
@@ -302,10 +305,10 @@ function ChatMessageInner({
       <div className={`bubble ${turn.role}${isOfficerReply ? ' officer' : ''}`}>
         <span className="sr-only">
           {turn.role === 'user'
-            ? 'You said'
+            ? t('message.youSaid')
             : isOfficerReply
               ? t('officerChat.officerReplied', { name: turn.officerName || t('officerChat.officerLabel') })
-              : 'Assistant replied'}
+              : t('message.assistantReplied')}
         </span>
         {/* A person wrote this, not the assistant: say who, in words. */}
         {isOfficerReply && (
@@ -663,9 +666,9 @@ function ChatMessageInner({
               </span>
             ) : turn.faithfulnessScore != null ? (
               <span
-                className={`grounding-badge ${turn.faithfulnessScore >= 0.6 && !judgeDoubts ? 'grounding-ok' : 'grounding-warn'}`}
+                className={`grounding-badge ${turn.faithfulnessScore >= 0.6 && !judgeDoubts && !webEvidence ? 'grounding-ok' : 'grounding-warn'}`}
               >
-                {turn.faithfulnessScore >= 0.6 && !judgeDoubts ? t('grounding.ok') : t('grounding.verify')}
+                {turn.faithfulnessScore >= 0.6 && !judgeDoubts && !webEvidence ? t('grounding.ok') : t('grounding.verify')}
               </span>
             ) : null}
             {/* The forms and passages behind the answer, behind one pill. A

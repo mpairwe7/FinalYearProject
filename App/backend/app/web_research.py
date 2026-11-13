@@ -1582,7 +1582,9 @@ def _snippet_hit(result: WebSearchResult, index: int, query: str, retrieved_at: 
         "source_url": result.url,
         "url": result.url,
         "title": result.title,
-        "effective_date": result.fiscal_year,
+        # G651: no effective date for a search summary. Its fiscal year is a
+        # regex over the title, URL and snippet, not a date the publisher gave;
+        # it stays as fiscal_year for edition handling.
         "fiscal_year": result.fiscal_year,
         "section": "Search summary",
         "page": "",
