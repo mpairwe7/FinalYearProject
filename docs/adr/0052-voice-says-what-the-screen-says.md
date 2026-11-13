@@ -37,17 +37,22 @@ notice in the dock throughout.
 ## Decision Outcome
 
 1. `speakStreamed` reports `complete`: the server's `done` line arrived, it
-   reported no failed piece, and every piece played. Otherwise the page shows and
-   announces `narration.partial` and does not reopen the microphone.
+   reported no failed piece, and every piece played. It stays registered until
+   the last piece has been heard, so a Stop after the closing line still counts as
+   a stop. Otherwise the page shows `narration.partial` (in the dock, and in the
+   read-aloud bar outside voice mode), announces it, and does not reopen the
+   microphone. A reading that could not play at all is `failed`, distinct from
+   `ended`, and does not reopen it either.
 2. `needsSpokenCaveat` (score under 0.6, judge below `high`, escalation; not an
    abstention or an officer's message) puts `narration.caveat` before the spoken
    answer (`spokenReply`), so a listener who stops a long answer early has heard it; an interrupted answer in voice mode puts `message.incomplete` in the
    dock.
 3. The dock shows `voiceDock.aiNotice`; the first answer read aloud after entering
    voice mode starts with `voiceDock.aiSpoken`. If that reading is not heard to the
-   end (stopped, cut off, a skipped piece), the next answer says it again.
-4. A spoken turn records the chat it was spoken in; if another is open when it
-   is transcribed or about to send, it is dropped with `voice.conversationChanged`.
+   end (failed, stopped, cut off, a skipped piece), the next answer says it again.
+4. A spoken turn records the chat it was spoken in, giving a blank chat its id
+   when the turn starts; if another is open when it is transcribed or about to
+   send, it is dropped with `voice.conversationChanged`.
 5. "Take a photo" uses the capture file input everywhere.
 
 ## Consequences
@@ -62,6 +67,13 @@ notice in the dock throughout.
 Each test was watched failing before the fix; G648's was also run against the
 code with the check removed and failed:
 
+- `App/frontend/src/__tests__/services/speechStream.test.ts`: a Stop after the
+  closing line, while audio still plays, is a stop and not a complete reading.
+- `App/frontend/src/__tests__/components/NarrationBar.test.tsx`: a partial reading
+  is said in the read-aloud bar outside voice mode.
+- `App/frontend/e2e/voice.spec.ts`: the AI notice is said on the next answer after
+  a reading that failed; a turn spoken in a blank chat is not sent into a new chat
+  opened meanwhile.
 - `App/frontend/src/__tests__/services/speechStream.test.ts`: complete only with the
   closing line, no server-reported failure and no skipped piece.
 - `App/frontend/src/__tests__/lib/spokenCaveat.test.ts`: which answers need the caveat;

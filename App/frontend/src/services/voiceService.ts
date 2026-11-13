@@ -843,11 +843,19 @@ export async function speakStreamed(
   } finally {
     clearTimeout(watchdog);
   }
+  if (pieces === 0 && !(controller.signal.aborted && !stalled)) {
+    if (_speechStream === controller) _speechStream = null;
+    notifyNarration();
+    throw new Error(failed ? 'No piece of the reply could be voiced' : 'Empty speech stream');
+  }
+  // The controller stays registered until the last piece has been heard: the
+  // server's closing line can arrive while audio is still queued, and a Stop
+  // pressed after it must still count as a stop, not a complete reading.
+  // (A stall aborts the controller too; what was already queued still plays.)
+  if (!(controller.signal.aborted && !stalled)) await lastEnded;
   const stopped = controller.signal.aborted && !stalled;
   if (_speechStream === controller) _speechStream = null;
   notifyNarration();
-  if (pieces === 0 && !stopped) throw new Error(failed ? 'No piece of the reply could be voiced' : 'Empty speech stream');
-  if (!stopped) await lastEnded;
   const complete = !stopped && !stalled && !brokeOff && ending.closed && ending.serverFailed === 0 && failed === 0;
   return { firstAudioMs, pieces, failed, stopped, complete };
 }

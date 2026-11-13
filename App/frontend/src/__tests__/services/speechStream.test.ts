@@ -178,4 +178,20 @@ describe('speakStreamed', () => {
     finishAudio();
     expect(await spoken).toMatchObject({ complete: false });
   });
+
+  // CodeRabbit on PR 733: the closing line arrived while audio was still
+  // queued; a Stop after it could not reach the finished stream, so the cut-off
+  // reading came back complete and voice mode reopened the microphone.
+  it('is not complete when stopped after the closing line, while audio still plays', async () => {
+    vi.stubGlobal('fetch', respondWith([line(piece(0, 1.5)) + line(piece(1, 2)) + line({ done: true, pieces: 2, failed: 0 })]));
+    const reading = speakStreamed('two sentences');
+    await vi.waitFor(() => expect(FakeSource.all.length).toBe(2));
+    // The stream has closed; the second piece is still to be heard.
+    await new Promise((r) => setTimeout(r, 0));
+    stopPlayback();
+    const outcome = await reading;
+    expect(outcome.stopped).toBe(true);
+    expect(outcome.complete).toBe(false);
+  });
 });
+

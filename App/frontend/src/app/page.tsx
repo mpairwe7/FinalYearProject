@@ -934,7 +934,12 @@ export default function Page() {
     setTtsLoading(null);
   }, []);
   /** Read a reply aloud. Resolves when it has ended, or was stopped. */
-  const handleListenToReply = useCallback(async (turnId: string, text: string): Promise<'ended' | 'stopped' | 'partial'> => {
+  /**
+   * Read a reply aloud. 'failed' when nothing could be played: then the reply
+   * was not heard, so neither the AI notice it carried nor hands-free listening
+   * may treat it as heard.
+   */
+  const handleListenToReply = useCallback(async (turnId: string, text: string): Promise<'ended' | 'stopped' | 'partial' | 'failed'> => {
     // A second tap stops it, whether it is playing or still fetching its first piece.
     if (playingTurnId === turnId || ttsLoading === turnId) {
       stopReading();
@@ -981,7 +986,7 @@ export default function Page() {
       if (result.error || !result.audio_base64) {
         if (result.error) trackErrorOccurred('tts_failed');
         setNarrationFailed({ turnId, text });
-        return 'ended';
+        return 'failed';
       }
       setPlayingTurnId(turnId);
       await playAudioBase64(result.audio_base64);
@@ -990,7 +995,7 @@ export default function Page() {
       // TTS unavailable — degrade to text, record it, and say so.
       trackErrorOccurred('tts_failed');
       if (request === listenRequestRef.current) setNarrationFailed({ turnId, text });
-      return 'ended';
+      return 'failed';
     } finally {
       // A stale request leaves the loading state to the one that replaced it.
       if (request === listenRequestRef.current) setTtsLoading(null);
@@ -1046,8 +1051,8 @@ export default function Page() {
       caveat: needsSpokenCaveat(replyToNarrate) ? t('narration.caveat') : undefined,
     });
     void handleListenToReply(replyToNarrate.id, spokenText).then((how) => {
-      // Not heard to the end (stopped, cut off, a skipped piece): the notice
-      // may not have been heard either, so the next answer says it again.
+      // Not heard to the end (failed, stopped, cut off, a skipped piece): the
+      // notice may not have been heard either, so the next answer says it again.
       if (disclose && how !== 'ended') voiceDisclosedRef.current = false;
       // Hands-free: once the answer has been heard, the floor goes back to the taxpayer.
       if (how === 'ended') listenAgainRef.current();
@@ -1782,7 +1787,9 @@ export default function Page() {
           const turn = ++voiceTurnRef.current;
           // G648: the turn belongs to the chat it was spoken in (ADR-0018). A
           // switch while it is transcribed must not send it into another one.
-          const spokenIn = useChatStore.getState().activeConversationId;
+          // A blank chat gets its id now, so a switch to another blank chat
+          // (whose id is also unset) still counts as a switch.
+          const spokenIn = useChatStore.getState().ensureActiveConversationId();
           setVoiceStage('transcribing');
           let heard = '';
           let heardLanguage: string | null = null;
@@ -2658,10 +2665,14 @@ export default function Page() {
                   loading={Boolean(ttsLoading) && !playingTurnId}
                   onStop={stopReading}
                   failed={narrationFailed !== null}
+                  partial={narrationPartial}
                   onRetry={() => {
                     if (narrationFailed) void handleListenToReply(narrationFailed.turnId, narrationFailed.text);
                   }}
-                  onDismiss={() => setNarrationFailed(null)}
+                  onDismiss={() => {
+                    setNarrationFailed(null);
+                    setNarrationPartial(false);
+                  }}
                 />
               )}
               {voiceDock ?? <ChatInput {...composerProps} />}

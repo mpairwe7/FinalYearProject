@@ -22,7 +22,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { silentWavB64 } from "./audio";
 import { TINY_WAV_B64 } from "./fixtures";
-import { clearChatStore, mockBackend, seedConsent, sendMessage, sseReply } from "./helpers";
+import { clearChatStore, mockBackend, seedConsent, sendMessage, speechStreamBody, sseReply } from "./helpers";
 
 // Desktop-only: some composer controls are hidden <720px.
 const HEADER_ONLY = "these controls are hidden on the mobile layout (<720px)";
@@ -242,6 +242,78 @@ test.describe("Voice STT/TTS (mocked)", () => {
     expect(spoken).toContain("this answer may not be reliable");
     // Before the answer, so a listener who stops it early has heard it.
     expect(spoken.indexOf("this answer may not be reliable")).toBeLessThan(spoken.indexOf("12%"));
+  });
+
+  // CodeRabbit on PR 733: a reading that failed altogether still counted the AI
+  // notice it carried as said, so once speech recovered no answer in that
+  // session said an AI was speaking (EU AI Act Art. 50(1)).
+  test("the AI notice is said on the next answer when the first could not be read aloud", async ({ page }) => {
+    test.slow();
+    await mockBackend(page);
+    let streams = 0;
+    await page.route("**/api/v1/tts/stream", (route) => {
+      streams += 1;
+      return streams === 1
+        ? route.fulfill({ status: 503, body: "down" })
+        : route.fulfill({ contentType: "application/x-ndjson", body: speechStreamBody() });
+    });
+    let wholes = 0;
+    await page.route("**/api/v1/tts", (route) => {
+      wholes += 1;
+      return route.fulfill({
+        json: { sample_rate: 22050, num_samples: 0, duration_s: 0, latency_s: 0.1, backend: "stub", voice: "stub",
+                audio_base64: "", error: "speech is down" },
+      });
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: "Enter voice mode" }).click();
+    const send = page.getByRole("button", { name: "Send now" });
+    await expect(send).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(1500);
+    await send.click();
+    // Nothing could be read: the stream failed, then the whole reply.
+    await expect.poll(() => wholes, { timeout: 15_000 }).toBe(1);
+    await page.getByRole("button", { name: "Start talking" }).click();
+    await expect(send).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(1500);
+    const second = page.waitForRequest("**/api/v1/tts/stream");
+    await send.click();
+    const spoken = (await second).postDataJSON().text as string;
+    expect(spoken).toMatch(/^This is U ?R ?A's AI assistant, not a person\./);
+  });
+
+  // CodeRabbit on PR 733: a turn spoken in a blank chat had no chat id, so a
+  // switch to another blank chat (also without one) passed the check.
+  test("a spoken turn from a blank chat is not sent into a new chat opened meanwhile", async ({ page }, testInfo) => {
+    test.slow();
+    await mockBackend(page);
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/v1/asr**", async (route) => {
+      await held;
+      await route.fulfill({ json: { text: "generate a PRN for my VAT", language: "en", latency_s: 0.1, backend: "stub" } });
+    });
+    let chats = 0;
+    page.on("request", (request) => {
+      if (/\/api\/v1\/chat(\/stream)?$/.test(new URL(request.url()).pathname)) chats++;
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: "Enter voice mode" }).click();
+    const send = page.getByRole("button", { name: "Send now" });
+    await expect(send).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(1500);
+    const asrReq = page.waitForRequest("**/api/v1/asr**");
+    await send.click();
+    await asrReq;
+    if (testInfo.project.name === "mobile-chrome") {
+      await page.getByRole("button", { name: "Open conversation history" }).click();
+    }
+    await page.getByRole("button", { name: "New chat" }).first().click();
+    release();
+    await expect(page.getByTestId("voice-dock-detail")).toContainText("You moved to another chat", { timeout: 10_000 });
+    expect(chats).toBe(0);
   });
 
   // G648: a spoken question still being transcribed was sent into whichever
