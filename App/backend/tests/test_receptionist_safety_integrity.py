@@ -217,7 +217,7 @@ class RequeueKeepsTopicAndPriorityTests(BrainCase):
             await desk.transfer(self.call_id, "officer_okello", team="disputes")
         event = next(c.args[1] for c in desk_lobby.call_args_list if c.args[0] == "call.transfer_requested")
         self.assertEqual((event["topic"], event["priority"]), ("registration", "high"))
-        self.room.brain.start_queue_countdown.assert_called_once_with("TICK-R1-0001")
+        self.room.brain.start_queue_countdown.assert_called_once_with("TICK-R1-0001", announce=True)  # place shown at once (G659)
 
 
 class SpokenConfirmationFailsClosedTests(BrainCase):
@@ -379,7 +379,7 @@ class OfficerTerminatesWaitingCallTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.state.mode, "transferring")
         self.assertIsNone(self.state.officer_id)
         self.assertNotEqual(presence.get_presence("officer_okello")["status"], "on_call")
-        self.room.brain.start_queue_countdown.assert_called_once_with("")
+        self.room.brain.start_queue_countdown.assert_called_once_with("", announce=True)  # place shown at once (G659)
 
     async def test_terminating_the_re_queued_call_ends_it_cleanly(self):
         await self._officer_drops_and_lapses()

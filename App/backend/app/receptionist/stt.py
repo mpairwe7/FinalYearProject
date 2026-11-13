@@ -92,7 +92,7 @@ class UraWhisperSTT(SegmentedSTTService):
         room: Any = None,
         **kwargs: Any,
     ) -> None:
-        settings = STTSettings(language=language) if STTSettings else None
+        settings = STTSettings(model=None, language=language) if STTSettings else None  # G660
         super().__init__(
             sample_rate=16000,
             audio_passthrough=False,

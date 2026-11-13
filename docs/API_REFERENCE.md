@@ -2218,6 +2218,11 @@ call; the caller hears the closing line and gets `{"type": "status", "status":
 "ended"}`; the officer owes a wrap-up; the call ends as `officer_ended`. On the
 audio socket it used to end the call without telling the caller.
 
+While the caller waits, `{"type": "status", "status": "transferring"}` (with
+`ticket_ref`) and each `{"type": "queue", "position": n}` are written at once, not
+after the AI's handoff or hold line; a caller put back in the queue gets their place
+straight away (G659).
+
 Once an officer has the call, the caller's socket (`/v1/calls/stream`) carries
 nothing more from the AI: no audio, no caption, and no `queue` place or `status:
 transferring` from the wait that is over (ADR-0055). Those were already queued

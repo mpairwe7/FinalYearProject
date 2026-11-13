@@ -93,3 +93,28 @@ class SingleEnginePipelineTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SpeechServiceSettingsTests(unittest.TestCase):
+    def test_the_speech_services_initialise_every_setting(self):
+        # G660: Pipecat checks a service's settings as it starts and logs an
+        # ERROR for each field left NOT_GIVEN: two lines on every call on the
+        # Space (STT and TTS `model`), noise an error-rate alert would count.
+        from dataclasses import fields
+
+        from app.receptionist.stt import UraWhisperSTT
+        from app.receptionist.tts import UraSpeechTTS
+        from pipecat.utils.types import is_given
+
+        room = _room()
+        for service in (
+            UraWhisperSTT(speech_model=MagicMock(), user_id="u", language="en", room=room),
+            UraSpeechTTS(speech_model=MagicMock(), language="en", room=room),
+        ):
+            with self.subTest(service=type(service).__name__):
+                missing = [
+                    f.name for f in fields(service.settings)
+                    if f.name != "extra" and not is_given(getattr(service.settings, f.name))
+                ]
+                self.assertEqual(missing, [])
+

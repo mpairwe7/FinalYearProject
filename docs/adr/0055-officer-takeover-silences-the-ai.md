@@ -11,7 +11,9 @@ It fixes G657. The service owner asked for the investigation, then approved all 
 changes, on 2026-11-13, in the session that made them. Amended the same day after
 review: the bridge re-checks the call after each of its awaits; the gate holds the AI
 back once the call has ended as well as while bridged; a call that ended during the
-greeting starts no pipeline.
+greeting starts no pipeline. Amended again the same day after verifying it live
+(G659): the waiting status and queue place are sent urgent, and a caller put back in
+the queue is shown their place at once.
 
 ## Context and Problem Statement
 
@@ -109,6 +111,11 @@ end a call, as the LiveKit control socket already does.
 3. **The brain sends the waiting screen only if the call still waits.** After the
    transfer notice, `_open_transfer` sends `status: transferring` and the queue
    place, and starts the countdown, only if the call is still `transferring`.
+   Both go out as urgent transport messages, which Pipecat writes at once: queued
+   behind the handoff line's audio they reached the caller about 5 s after the
+   request (G659). Every later queue place is urgent too. When the desk puts a call
+   back in the queue, the countdown it restarts shows the caller's place at once
+   (`announce=True`); it used to show a place only when it changed.
 4. **Asking for an officer interrupts the AI**, as a call control does: the
    generation is superseded, the answer in progress is cancelled, and an
    `InterruptionFrame` goes downstream before the transfer notice. Only a
@@ -166,7 +173,9 @@ before the change, or is a guard that passes before and after:
   and stale waiting messages in any mode; it lets a waiting caller's audio, queue
   place and status through, and the interrupt and other messages in every mode;
 - a transfer notice overtaken by the officer sends no waiting screen and starts no
-  countdown; a caller still waiting gets both;
+  countdown; a caller still waiting gets both, as urgent messages; a caller put
+  back in the queue is shown their place at once, and the AI's own transfer shows
+  it once;
 - asking for an officer pushes the interruption first, supersedes the generation
   and cancels the answer in progress; asking again while waiting, or while
   bridged, pushes nothing;
@@ -176,7 +185,8 @@ before the change, or is a guard that passes before and after:
   transport and `OfficerOutputGate`, fed the AI's speech queued in real time and
   then the waiting screen. A waiting caller gets both. After the bridge, the
   queued speech stops within one chunk, the waiting screen never arrives, and the
-  caller gets the interrupt. The output transport's own clearing does this even
+  caller gets the interrupt. An urgent status reaches the caller while queued
+  speech still plays (why the waiting screen is sent urgent). The output transport's own clearing does this even
   without the mode check behind it. Frames the AI sends after the bridge stop at
   the gate, which holds the AI's replies back once the call is bridged or ended
   and passes them while it waits or talks to the AI. Ending the call closes the caller's socket from the server.

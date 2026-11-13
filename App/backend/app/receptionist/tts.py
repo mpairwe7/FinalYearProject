@@ -122,7 +122,9 @@ class UraSpeechTTS(TTSService):
         **kwargs: Any,
     ) -> None:
         v = voice or get_tts_voice()
-        settings = TTSSettings(language=language, voice=v) if TTSSettings else None
+        # model=None: the backend picks its own; a field left unset is logged
+        # as an ERROR on every call (G660).
+        settings = TTSSettings(model=None, language=language, voice=v) if TTSSettings else None
         kwargs.setdefault("push_start_frame", True)
         kwargs.setdefault("push_stop_frames", True)
         super().__init__(sample_rate=16000, settings=settings, **kwargs)
