@@ -679,7 +679,7 @@ A review of the whole call flow: what the AI says, the handoff, the officer's de
 
 ### Intelligent UI assurance — 2026-11-13
 
-A review of every surface where the AI meets a person: the chat's trust signals, its actions and handoff, the staff console's oversight, and voice, capture, offline and language. [Evidence, sources, phases and the audit prompt](plans/intelligent-ui-integration-audit-2026-11-13.md); phase 1 decisions in ADR-0048, phase 2 in ADR-0049, phase 3 in ADR-0050, phase 4 in ADR-0051, phase 5 in ADR-0052. Fixed means implemented with a regression test that failed first; nothing here was exercised on the Space, a real microphone, a screen reader or by a first-language reader.
+A review of every surface where the AI meets a person: the chat's trust signals, its actions and handoff, the staff console's oversight, and voice, capture, offline and language. [Evidence, sources, phases and the audit prompt](plans/intelligent-ui-integration-audit-2026-11-13.md); phase 1 decisions in ADR-0048, phase 2 in ADR-0049, phase 3 in ADR-0050, phase 4 in ADR-0051, phase 5 in ADR-0052, phase 6 in ADR-0054. Fixed means implemented with a regression test that failed first; nothing here was exercised on the Space, a real microphone, a screen reader or by a first-language reader.
 
 | Gap | Finding | Status |
 | --- | --- | --- |
@@ -715,12 +715,12 @@ A review of every surface where the AI meets a person: the chat's trust signals,
 | G647 🟢 | ~~Voice mode removes the only always-visible AI notice (EU AI Act Art. 50(1)); the manifest has no `verified_by` for it.~~ | Fixed 2026-11-13 (ADR-0052): the dock shows the AI notice; the first answer of each voice session says it aloud; the manifest's Art. 50(1) entry has `verified_by`. |
 | G648 🟢 | ~~A spoken question still being transcribed is sent into whichever conversation is open when it finishes.~~ | Fixed 2026-11-13 (ADR-0052): a spoken turn is dropped, with a notice, if the chat changed while it was transcribed or queued. |
 | G649 🟢 | ~~"Take a photo" on desktop cannot work under `camera=()` and would lose the photo.~~ | Fixed 2026-11-13 (ADR-0052): "Take a photo" uses the capture input everywhere. |
-| G650 ⚪ | The open remainder of G274: restored history skips the validators, the storage version is never read, and one throwing card replaces the whole chat. | Open: phase 6. |
-| G651 ⚪ | Web citations lose their provenance (adviser commentary, search summaries, a guessed fiscal year) and web-grounded answers can earn "Well grounded". | Open: phase 6. |
-| G652 ⚪ | The REST fallback drops `connectors_used`. | Open: phase 6. |
-| G653 ⚪ | Discrepancy detection runs only on REST; a failed feedback-comment save is silent. | Open: phase 6. |
-| G654 ⚪ | Document analyses (TINs, NINs) persist in browser storage; a failed save is silent. | Open: phase 6. |
-| G655 ⚪ | 195 hard-coded English strings on taxpayer surfaces, the consent notice and live-region announcements among them; the accessibility statement overstated lg and sw key coverage. | Open: phase 6. The statement's claim is corrected in phase 1. |
+| G650 🟢 | ~~The open remainder of G274: restored history skips the validators, the storage version is never read, and one throwing card replaces the whole chat.~~ | Fixed 2026-11-13 (ADR-0054): restored turns use the live validators (nested workflow lists included); each message renders inside `MessageBoundary`. Closes the remainder of G274. |
+| G651 🟢 | ~~Web citations lose their provenance (adviser commentary, search summaries, a guessed fiscal year) and web-grounded answers can earn "Well grounded".~~ | Fixed 2026-11-13 (ADR-0054): citations carry `authority`, `evidence`, `stale`; search summaries get no effective date; the sources list labels them; no "Well grounded" on web evidence. |
+| G652 🟢 | ~~The REST fallback drops `connectors_used`.~~ | Fixed 2026-11-13 (ADR-0054): `applyTurnMeta` maps `connectors_used`. |
+| G653 🟢 | ~~Discrepancy detection runs only on REST; a failed feedback-comment save is silent.~~ | Fixed 2026-11-13 (ADR-0054): `record_discrepancy` runs on both transports; a failed comment save is shown and the comment kept. |
+| G654 🟢 | ~~Document analyses (TINs, NINs) persist in browser storage; a failed save is silent.~~ | Fixed 2026-11-13 (ADR-0054): analyses are stripped before persisting; the inspection view says why a reloaded document has none. |
+| G655 🟡 | 195 hard-coded English strings on taxpayer surfaces, the consent notice and live-region announcements among them; the accessibility statement overstated lg and sw key coverage. | Mitigated 2026-11-13 (ADR-0054): the consent notice, status announcements and speaker names are translated, with a scan test; the statement's claim was corrected in phase 1. Open: the remaining literals (Support Case room labels, document field names and others). |
 | G658 ⚪ | Ticket redaction (`guardrails.redact_pii_text`, used by `_redact_ticket_value`) misses phone numbers written with spaces ("0772 123 456", "+256 772 123456"); it catches "0772123456". Found while redacting a reused ticket's new turns (ADR-0051). | Open: widening the pattern must not catch money written with spaces ("UGX 1 200 000"); needs its own change and tests across the guardrail's callers. |
 
 ### Planner and live web assurance — 2026-10-31
@@ -1407,7 +1407,9 @@ full agent chain is locked.
 
 ---
 
-*Document version 3.33 — updated 2026-11-13: intelligent UI assurance phase 5 (ADR-0052): G645–G649 fixed.*
+*Document version 3.34 — updated 2026-11-13: intelligent UI assurance phase 6 (ADR-0054): G650–G654 fixed, G655 mitigated; every gap the audit opened now has a fix or a named remainder.*
+
+*Previously: version 3.33 — updated 2026-11-13: intelligent UI assurance phase 5 (ADR-0052): G645–G649 fixed.*
 
 *Previously: version 3.32 — updated 2026-11-13: phase 9 of the call receptionist review (ADR-0055): G657 fixed (an officer's takeover silences the AI on the server and the caller's screen; the officer socket's hang-up is End; an ended WebSocket call closes; a revocation takes either id).*
 

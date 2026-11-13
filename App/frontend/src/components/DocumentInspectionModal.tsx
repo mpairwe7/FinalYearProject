@@ -129,6 +129,13 @@ export function DocumentInspectionModal({
 
         <div className="doc-modal-body">
           {/* Summary */}
+          {/* G654: a document's analysis is not kept in browser storage. */}
+          {!analysis ? (
+            <p className="doc-modal-machine-read" role="note" data-testid="doc-modal-not-kept">
+              {t('documents.notKept')}
+            </p>
+          ) : null}
+
           {analysis?.summary && (
             <section className="doc-modal-section">
               <h3 className="doc-modal-section-title">{t('documents.summary')}</h3>

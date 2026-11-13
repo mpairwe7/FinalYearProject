@@ -60,6 +60,8 @@ export default function FeedbackButtons({
   const [showComment, setShowComment] = useState(false);
   const [comment, setComment] = useState('');
   const [commentSent, setCommentSent] = useState(false);
+  // G653: a comment that did not save is said, and kept for another try.
+  const [commentFailed, setCommentFailed] = useState(false);
   const [, startTransition] = useTransition();
 
   // React 19 useOptimistic: flip the rating visually before the network
@@ -104,11 +106,14 @@ export default function FeedbackButtons({
   const handleCommentSubmit = useCallback(async () => {
     if (!comment.trim() || !rating) return;
     // Use PATCH to update existing feedback comment (no duplicate entry)
+    setCommentFailed(false);
     const ok = await updateFeedbackComment(messageId, comment.trim());
     if (ok) {
       setCommentSent(true);
       setShowComment(false);
       setComment('');
+    } else {
+      setCommentFailed(true);
     }
   }, [comment, rating, messageId]);
 
@@ -161,6 +166,11 @@ export default function FeedbackButtons({
 
       {showComment && (
         <div className="feedback-comment" role="form" aria-label={t('message.feedbackCommentLabel')}>
+          {commentFailed ? (
+            <p className="feedback-comment-error" role="alert">
+              {t('message.feedbackCommentFailed')}
+            </p>
+          ) : null}
           <input
             className="feedback-comment-input"
             placeholder={t('message.feedbackCommentPlaceholder')}

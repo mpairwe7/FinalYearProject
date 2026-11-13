@@ -99,7 +99,7 @@ describe("ChatMessage", () => {
   it("renders assistant message with bot icon", () => {
     renderMsg(assistantTurn);
     expect(screen.getByText("VAT is 18% in Uganda.")).toBeInTheDocument();
-    expect(screen.getByText("Assistant replied")).toBeInTheDocument();
+    expect(screen.getByText("The AI assistant replied")).toBeInTheDocument();
   });
 
   it("renders attachment chips with a report download on user turns", () => {
@@ -466,6 +466,16 @@ describe("ChatMessage — what the answer's badges and reminders claim", () => {
   // G623: a high score next to "the claim check did not run" is not "well grounded".
   it("does not say well grounded when the judge is not confident", () => {
     renderMsg({ ...assistantTurn, faithfulnessScore: 0.9, confidenceBand: "medium" });
+    expect(screen.queryByText("Well grounded")).toBeNull();
+    expect(screen.getByText("Verify with URA")).toBeInTheDocument();
+  });
+
+  // G651: an answer grounded in web evidence is not "well grounded".
+  it("does not say well grounded when the answer rests on web evidence", () => {
+    renderMsg({
+      ...assistantTurn, faithfulnessScore: 0.9, confidenceBand: "high",
+      citations: [{ ref: "[1]", source: "pwc.com", url: "https://www.pwc.com/ug", authority: "commentary", evidence: "search_summary" }],
+    });
     expect(screen.queryByText("Well grounded")).toBeNull();
     expect(screen.getByText("Verify with URA")).toBeInTheDocument();
   });

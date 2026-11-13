@@ -2378,6 +2378,14 @@ GET /v1/admin/outbox
 
 Mock email/SMS queue (`live=false`). Nothing is sent.
 
+**Citations from web evidence (ADR-0054).** A citation built from a live web hit
+also carries `authority` (`official` for URA's own site, `commentary` for an
+adviser), `evidence` (`document` when the page was read, `search_summary` when only
+the search result was) and `stale`; a search summary has no `effective_date`. The
+web chat labels these and never badges an answer citing one as well grounded.
+A taxpayer's correction of the previous answer is recorded on `/v1/chat/stream` as
+on `/v1/chat`; the stream's `metadata` frame carries `discrepancy_report`.
+
 **Tickets and re-escalation (ADR-0051).** A second escalation of a conversation
 with an open ticket reuses it; the ticket's `transcript` then gains the turns
 since its last snapshot (taxpayer follow-ups already on it stay in place, and do

@@ -110,6 +110,7 @@ export const en = {
   // Which services an answer used, which it left out, and what a lookup sends.
   'composer.connectorDataShared': 'Only what a lookup needs is sent to the service — for example a TIN, PRN or stamp code you type — with your account reference if you are signed in.',
   'message.incomplete': 'This response was interrupted and may be incomplete. Verify the guidance before acting. For a portal submission, check its status before trying again.',
+  'message.cannotShow': 'This part of the conversation couldn\'t be shown. The rest of the chat is unaffected; ask again if you need this answer.',
   'message.stopped': 'Stopped.',
   'portalCopilot.prepareFailed': 'Your changes could not be prepared for review. They remain in this form; try reviewing them again.',
   'portalCopilot.verificationUnavailable': 'Your browser could not verify the details shown. No approval was sent. Please reload and review the details again.',
@@ -217,6 +218,7 @@ export const en = {
   'message.feedbackThanks': 'Thanks for your feedback',
   'message.feedbackThanksDetailed': 'Thanks for your detailed feedback',
   'message.feedbackFailed': 'Failed to send',
+  'message.feedbackCommentFailed': 'Your comment was not saved. Try sending it again.',
   'message.feedbackRetry': 'Retry',
   'message.feedbackCommentLabel': 'Feedback comment',
   'message.feedbackCommentPlaceholder': 'What could be improved? (optional)',
@@ -266,6 +268,10 @@ export const en = {
   'resource.action.statute': 'View Statute',
   'resource.action.guide': 'Access Guide',
   'sources.label': 'Sources',
+  'sources.adviser': 'Adviser\'s view, not URA',
+  'sources.uraWebsite': 'URA website',
+  'sources.searchSummary': 'Search summary, page not opened',
+  'sources.mayBeOutdated': 'May be out of date',
 
   // Answer badges and the monthly reminder (G619, G620, G623) --------------
   'grounding.ok': 'Well grounded',
@@ -417,6 +423,20 @@ export const en = {
   'common.retry': 'Try again',
   'common.offline': 'You are offline. Messages will send when you reconnect.',
   'common.low_bandwidth': 'Low-bandwidth connection detected. Data Saver mode active.',
+
+  // Consent, status announcements, screen-reader names (G655) ------------
+  'consent.title': 'Privacy notice',
+  'consent.body': 'We use anonymous analytics to improve the URA Tax Assistant. No personal data is stored. You can change this anytime.',
+  'consent.decline': 'Decline',
+  'consent.accept': 'Accept',
+  'status.waiting': 'Getting a response from URA.',
+  'status.ready': 'URA response ready.',
+  'status.stopped': 'Response stopped.',
+  'status.unavailable': 'URA response unavailable. Please try again.',
+  'status.offline': 'Offline mode. Please reconnect to submit questions.',
+  'message.youSaid': 'You said',
+  'message.assistantReplied': 'The AI assistant replied',
+  'common.low_bandwidth_title': 'Low bandwidth:',
   'common.offline_notice':
     'You are offline. Tax figures are only given online, where they are checked. URA\'s phone lines are listed offline.',
   'common.offline_contacts': 'URA contacts',
@@ -426,6 +446,7 @@ export const en = {
   'documents.downloadReport': 'Download Report',
   'documents.reconciliation': 'Tax Reconciliation',
   'documents.verified': 'Figures add up',
+  'documents.notKept': 'This document\'s analysis is not kept after the page reloads, to protect the details on it. Attach it again to inspect it.',
   'documents.partial': 'Some figures missing',
   'documents.informational': 'For information',
   'documents.subtotal': 'Subtotal on the document',

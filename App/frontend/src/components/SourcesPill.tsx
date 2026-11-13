@@ -119,6 +119,10 @@ export function collectSources(
       title: c.title?.trim() || sourceLabel(c.source),
       href: citationHref(c),
       meta: present([
+        // G651: what kind of web evidence this is, before anything else.
+        c.authority === 'commentary' ? label('sources.adviser') : c.authority === 'official' ? label('sources.uraWebsite') : '',
+        c.evidence === 'search_summary' ? label('sources.searchSummary') : '',
+        c.stale ? label('sources.mayBeOutdated') : '',
         c.effective_date,
         // The publisher's date. A crawl date is never shown: it made old pages look current.
         c.published_at ? label('sources.published', { date: c.published_at }) : '',

@@ -129,6 +129,15 @@ class Citation(BaseModel):
     effective_date: str = Field("", description="Fiscal year or effective-from date. Never a crawl date.")
     published_at: str = Field("", description="The publisher's own date for a web page (YYYY-MM-DD)")
     title: str = Field("", description="Document title when present")
+    #: Web evidence only (G651): who published it, what was read, and whether
+    #: it is older than the question allows. Empty for the URA corpus.
+    authority: Literal["", "official", "commentary"] = Field(
+        "", description="Web evidence: URA itself (official) or an adviser's commentary"
+    )
+    evidence: Literal["", "document", "search_summary"] = Field(
+        "", description="Web evidence: the page was read (document), or only a search summary"
+    )
+    stale: bool = Field(False, description="Web evidence older than the question allows")
 
 
 class ResourceLink(BaseModel):

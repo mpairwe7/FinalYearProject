@@ -223,4 +223,10 @@ describe('DocumentInspectionModal', () => {
       expect(note?.getAttribute('data-tone')).toBe('warn');
     });
   });
+
+  // G654: analyses are not kept across a reload; the view says why it is empty.
+  it('says a reloaded document has no analysis, and why', () => {
+    render(<DocumentInspectionModal isOpen={true} onClose={vi.fn()} document={{ id: 'doc1', name: 'nin_slip.jpg' }} />);
+    expect(screen.getByTestId('doc-modal-not-kept').textContent).toMatch(/not kept after the page reloads/);
+  });
 });

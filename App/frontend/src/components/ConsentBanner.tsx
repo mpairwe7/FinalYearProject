@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslation } from '../lib/i18n';
 import React, { memo, useCallback, useSyncExternalStore } from "react";
 import { clearAnalyticsQueue, initAnalytics } from "../store/useAnalyticsStore";
 import {
@@ -47,6 +48,7 @@ function useConsent() {
 
 function ConsentBannerInner() {
   const { consent, grant, deny } = useConsent();
+  const t = useTranslation();
 
   // undefined = not yet mounted (SSR), null = undecided, true/false = decided
   if (consent === undefined || consent !== null) return null;
@@ -59,18 +61,16 @@ function ConsentBannerInner() {
       aria-describedby="analytics-consent-description"
     >
       <div className="consent-text">
-        <h2 id="analytics-consent-title">Privacy notice</h2>
-        <p id="analytics-consent-description">
-          We use anonymous analytics to improve the URA Tax Assistant.
-          No personal data is stored. You can change this anytime.
-        </p>
+        {/* G655: consent asked in a language the reader cannot read is not informed. */}
+        <h2 id="analytics-consent-title">{t('consent.title')}</h2>
+        <p id="analytics-consent-description">{t('consent.body')}</p>
       </div>
       <div className="consent-actions">
         <button className="consent-btn consent-deny" onClick={deny}>
-          Decline
+          {t('consent.decline')}
         </button>
         <button className="consent-btn consent-accept" onClick={grant}>
-          Accept
+          {t('consent.accept')}
         </button>
       </div>
     </section>

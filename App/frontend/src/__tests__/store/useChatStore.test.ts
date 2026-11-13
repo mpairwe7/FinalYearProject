@@ -148,6 +148,52 @@ describe("useChatStore", () => {
     expect(store().localeExplicit).toBe(false);
   });
 
+  // G650 (the open remainder of G274): restored turns bypassed the metadata
+  // validators, so corrupt storage crashed the transcript on every reload.
+  // G654: a document's extracted fields (TINs, NINs) were written to browser
+  // storage, which outlives the tab on a shared computer.
+  it("does not keep a document's extracted fields in browser storage", () => {
+    store().ensureActiveConversationId();
+    store().addTurns([
+      createTurn("user", "What does this slip say?", {
+        attachments: [{
+          id: "d".repeat(32), name: "nin_slip.jpg", docType: "id_document",
+          analysis: {
+            documentId: "d".repeat(32), filename: "nin_slip.jpg", kind: "image", sizeBytes: 1000,
+            docType: "id_document", confidence: 0.9, fields: { nins: ["CM90012345ABCD"], tins: ["1000123456"] },
+          },
+        }],
+      }),
+    ]);
+    store().saveCurrentSession();
+    const stored = localStorage.getItem("ura-chat-store") || "";
+    expect(stored).not.toContain("CM90012345ABCD");
+    expect(stored).not.toContain("1000123456");
+    expect(stored).toContain("nin_slip.jpg");
+  });
+
+  it("drops corrupt stored cards on restore instead of rendering them", () => {
+    store().ensureActiveConversationId();
+    store().addTurns([createTurn("user", "q"), createTurn("assistant", "a")]);
+    store().saveCurrentSession();
+    const raw = JSON.parse(localStorage.getItem("ura-chat-store") || "{}");
+    const conv = raw.state.conversations.find((c: { id: string }) => c.id === raw.state.activeConversationId);
+    const answer = conv.turns.find((t: { role: string; content: string }) => t.role === "assistant" && t.content === "a");
+    answer.citations = [null, { ref: "[1]" }, { ref: "[2]", source: "vat.pdf" }];
+    answer.resources = [{ title: 1, url: "x" }];
+    answer.workflow = { id: "w", name: "VAT", status: "active", options: "abc", prerequisites: "x" };
+    answer.faithfulnessScore = 7;
+    localStorage.setItem("ura-chat-store", JSON.stringify(raw));
+    useChatStore.setState({ chat: [], conversations: [] });
+
+    store().hydratePersisted();
+    const restored = store().conversations.flatMap((c) => c.turns).find((t) => t.role === "assistant" && t.content === "a");
+    expect(restored?.citations).toEqual([{ ref: "[2]", source: "vat.pdf" }]);
+    expect(restored?.resources).toEqual([]);
+    expect(restored?.workflow).toBeUndefined();
+    expect(restored?.faithfulnessScore).toBeNull();
+  });
+
   it("a reload mid-case resumes the case, its live chat and the answer ids it rated", () => {
     store().ensureActiveConversationId();
     store().addTurns([

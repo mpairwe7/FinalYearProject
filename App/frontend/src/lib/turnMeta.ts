@@ -6,7 +6,7 @@ import type {
   PortalCopilotPayload,
   WorkflowState,
 } from '../store/useChatStore';
-import type { ConnectorNotice } from './connectors';
+import { sanitizeConnectorUses, type ConnectorNotice } from './connectors';
 
 /** A turn's metadata as the server sends it (SSE `metadata`/`grounding`/`done`, or a metadata line). */
 export type TurnMeta = Record<string, unknown>;
@@ -16,18 +16,22 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 
 /** Invalid evidence must not produce a reassuring grounding badge or crash a source list. */
-function score(value: unknown): number | null {
+export function score(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
 }
 
-function citationsFrom(value: unknown): Citation[] {
+export function citationsFrom(value: unknown): Citation[] {
   if (!Array.isArray(value)) return [];
   return value.filter((c): c is Citation => record(c) && typeof c.ref === 'string' &&
     typeof c.source === 'string' && ['page', 'section', 'passage', 'url', 'effective_date', 'published_at', 'title']
-      .every((key) => c[key] === undefined || typeof c[key] === 'string'));
+      .every((key) => c[key] === undefined || typeof c[key] === 'string') &&
+    // G651: web provenance, when present, is one of the known values.
+    (c.authority === undefined || c.authority === '' || c.authority === 'official' || c.authority === 'commentary') &&
+    (c.evidence === undefined || c.evidence === '' || c.evidence === 'document' || c.evidence === 'search_summary') &&
+    (c.stale === undefined || typeof c.stale === 'boolean'));
 }
 
-function resourcesFrom(value: unknown): ContextResource[] {
+export function resourcesFrom(value: unknown): ContextResource[] {
   if (!Array.isArray(value)) return [];
   return value.filter((r): r is ContextResource => record(r) && typeof r.title === 'string' &&
     typeof r.url === 'string' && ['type', 'format', 'size', 'description', 'citation', 'effective_year', 'source_domain']
@@ -41,7 +45,7 @@ function objectiveFrom(value: unknown): ObjectiveHypothesis | null {
   return { ...value, confidence: score(value.confidence) ?? undefined } as unknown as ObjectiveHypothesis;
 }
 
-function workflowFrom(value: unknown): WorkflowState | undefined {
+export function workflowFrom(value: unknown): WorkflowState | undefined {
   if (!record(value)) return undefined;
   if (typeof value.id !== 'string' || typeof value.name !== 'string' || typeof value.status !== 'string') {
     return undefined;
@@ -51,6 +55,17 @@ function workflowFrom(value: unknown): WorkflowState | undefined {
   }
   if (value.options !== undefined && !Array.isArray(value.options)) return undefined;
   if (value.all_steps !== undefined && !Array.isArray(value.all_steps)) return undefined;
+  // G650: the nested lists the stepper maps over. A string or object where it
+  // expects a list threw during render and took the whole transcript down.
+  for (const key of ['prerequisites', 'parent_goals', 'option_labels']) {
+    if (value[key] !== undefined && !Array.isArray(value[key])) return undefined;
+  }
+  if (record(value.form_draft) && value.form_draft.fields !== undefined && !Array.isArray(value.form_draft.fields)) {
+    return undefined;
+  }
+  if (record(value.journey_gps) && value.journey_gps.parent_goals !== undefined && !Array.isArray(value.journey_gps.parent_goals)) {
+    return undefined;
+  }
   return {
     ...value,
     options: Array.isArray(value.options)
@@ -196,6 +211,9 @@ export function applyTurnMeta(turn: ChatTurn, meta: TurnMeta, notices: Connector
     ...turn,
     serverTurnId: typeof meta.turn_id === 'string' ? meta.turn_id : turn.serverTurnId,
     connectorNotices: notices.length ? notices : turn.connectorNotices,
+    // G652: REST carries the services an answer used as `connectors_used`; the
+    // stream carries them in its agent trace, which the page reads itself.
+    connectorsUsed: 'connectors_used' in meta ? sanitizeConnectorUses(meta.connectors_used) : turn.connectorsUsed,
     citations: 'citations' in meta ? citationsFrom(meta.citations) : turn.citations,
     faithfulnessScore: 'faithfulness_score' in meta ? score(meta.faithfulness_score) : turn.faithfulnessScore,
     confidenceBand: 'response_judge' in meta ? confidenceBandFrom(meta.response_judge) : turn.confidenceBand,

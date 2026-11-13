@@ -54,6 +54,28 @@ describe('applyTurnMeta', () => {
     expect(out.resources).toEqual([]);
   });
 
+  // G652: the REST fallback dropped connectors_used, so the "Looked up in X ·
+  // Demo" note was lost whenever the stream was unavailable.
+  it('keeps the services an answer used, from a REST reply too', () => {
+    const out = applyTurnMeta(turn(), {
+      connectors_used: [{ namespace: 'ursb', label: 'URSB', mode: 'simulation', outcome: 'found' }],
+    });
+    expect(out.connectorsUsed).toHaveLength(1);
+    expect(out.connectorsUsed?.[0]).toMatchObject({ namespace: 'ursb', mode: 'simulation' });
+    expect(applyTurnMeta(out, { faithfulness_score: 0.9 }).connectorsUsed).toHaveLength(1);
+  });
+
+  it('keeps a web citation\'s provenance and drops a malformed one', () => {
+    const out = applyTurnMeta(turn(), {
+      citations: [
+        { ref: '[1]', source: 'pwc.com', authority: 'commentary', evidence: 'search_summary', stale: true },
+        { ref: '[2]', source: 'x', authority: 'friend' },
+        { ref: '[3]', source: 'y', stale: 'yes' },
+      ],
+    });
+    expect(out.citations).toEqual([{ ref: '[1]', source: 'pwc.com', authority: 'commentary', evidence: 'search_summary', stale: true }]);
+  });
+
   it('drops malformed source rows and malformed inferred objectives', () => {
     const out = applyTurnMeta(turn(), {
       citations: [null, { ref: '[1]', source: 'VAT', passage: {} }],

@@ -409,5 +409,54 @@ class TestAdminEndpointsE2E(unittest.TestCase):
         self.assertEqual(res_dismiss.json()["status"], "dismissed")
 
 
+
+class TestDiscrepancyOnTheStream(unittest.TestCase):
+    """G653: the web chat streams, and only REST ran discrepancy detection, so
+    a taxpayer correcting a wrong figure in the web chat was never logged."""
+
+    def test_a_correction_on_the_stream_is_recorded_and_reported(self):
+        import asyncio
+
+        from app import service
+
+        db.init_db()
+        challenged = f"The standard VAT rate in Uganda is 16% ({uuid.uuid4().hex[:6]})."
+
+        class _Model:
+            name = "test_model"
+
+            def generate_retrieval_only(self, **kwargs):
+                return {
+                    "reply": "Thanks, let me check that.", "sources": [], "citations": [],
+                    "faithfulness_score": None, "retrieval_mode": "hybrid", "model": "test_model",
+                    "conversation_id": "c-g653", "locale": "en", "escalation_required": False,
+                    "escalation_reason": "", "agent_role": "rag_answerer", "handoff": None,
+                    "response_judge": None, "next_actions": [], "ticket_id": "",
+                    "_hits": [], "_short_circuit": True,
+                    "_history": [{"user_message": "What is the VAT rate?", "bot_reply": challenged, "sources": ["vat.pdf"]}],
+                    "_rewritten": kwargs.get("message", ""),
+                }
+
+            def _maybe_create_ticket(self, **kwargs):
+                return ""
+
+        async def collect():
+            return [
+                ev async for ev in service.run_chat_turn(
+                    _Model(), message="No, that is incorrect, VAT is 18%, not 16%", conversation_id="c-g653",
+                    top_k=4, locale="en", session_id="s-g653", request_id="r", user_id=None, tenant_id="default",
+                )
+            ]
+
+        with mock.patch.object(flags, "is_enabled", side_effect=lambda name, **_: name == "knowledge_discrepancy_reporting"):
+            events = asyncio.run(collect())
+        metadata = [p for (t, p) in events if t == "metadata"]
+        self.assertTrue(metadata)
+        report = metadata[0].get("discrepancy_report") or {}
+        self.assertTrue(report.get("id"), metadata[0])
+        stored = db.get_discrepancy(report["id"])
+        self.assertIn("18%", stored["user_correction"])
+
+
 if __name__ == "__main__":
     unittest.main()

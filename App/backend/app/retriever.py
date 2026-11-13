@@ -2819,9 +2819,15 @@ class HybridRetriever:
         return round(grounded / scoreable, 4)
 
     @staticmethod
-    def build_citations(hits: list[dict[str, Any]]) -> list[dict[str, str]]:
-        """Build passage-level citations with section spans from retrieval hits."""
-        citations: list[dict[str, str]] = []
+    def build_citations(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Build passage-level citations with section spans from retrieval hits.
+
+        A web hit also says what kind of evidence it is (G651): ``authority``
+        (``official`` URA, or an adviser's ``commentary``), ``evidence`` (the
+        ``document`` was read, or only a ``search_summary``) and ``stale``. The
+        chat labels it, and never calls an answer resting on it well grounded.
+        """
+        citations: list[dict[str, Any]] = []
         for i, hit in enumerate(hits, 1):
             cit: dict[str, str] = {"ref": f"[{i}]", "source": hit.get("source", "unknown")}
             if hit.get("page"):
@@ -2839,6 +2845,12 @@ class HybridRetriever:
                 cit["title"] = str(hit["title"])
             passage = hit.get("text") or hit.get("answer") or ""
             cit["passage"] = passage[:500]
+            authority = hit.get("live_authority")
+            if authority in ("official", "commentary"):
+                cit["authority"] = authority
+                evidence = str(hit.get("live_evidence") or "")
+                cit["evidence"] = "search_summary" if evidence.startswith("search summary") else "document"
+                cit["stale"] = bool(hit.get("live_stale"))
             citations.append(cit)
         return citations
 

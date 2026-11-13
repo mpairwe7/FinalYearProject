@@ -1,7 +1,7 @@
 # Intelligent UI integration audit — 13 November 2026
 
-Status: phase 1 implemented (PR 727); phase 2 on `fix/intelligent-ui-p2-human-handoff-2026-11`; phase 3 on `fix/intelligent-ui-p3-staff-controls-2026-11`; phase 4 on `fix/intelligent-ui-p4-officer-evidence-2026-11`; phase 5 on `fix/intelligent-ui-p5-voice-and-capture-2026-11`; phase 6 open.
-Baseline: `dev` at `882a99b5`. Decisions: [ADR-0048](../adr/0048-figures-and-disclosures-the-taxpayer-sees.md) (phase 1), [ADR-0049](../adr/0049-a-promise-of-a-human-is-kept.md) (phase 2), [ADR-0050](../adr/0050-staff-controls-say-what-they-do.md) (phase 3), [ADR-0051](../adr/0051-officers-see-what-the-ai-did.md) (phase 4), [ADR-0052](../adr/0052-voice-says-what-the-screen-says.md) (phase 5).
+Status: phase 1 implemented (PR 727); phase 2 on `fix/intelligent-ui-p2-human-handoff-2026-11`; phase 3 on `fix/intelligent-ui-p3-staff-controls-2026-11`; phase 4 on `fix/intelligent-ui-p4-officer-evidence-2026-11`; phase 5 on `fix/intelligent-ui-p5-voice-and-capture-2026-11`; phase 6 on `fix/intelligent-ui-p6-resilience-provenance-language-2026-11`.
+Baseline: `dev` at `882a99b5`. Decisions: [ADR-0048](../adr/0048-figures-and-disclosures-the-taxpayer-sees.md) (phase 1), [ADR-0049](../adr/0049-a-promise-of-a-human-is-kept.md) (phase 2), [ADR-0050](../adr/0050-staff-controls-say-what-they-do.md) (phase 3), [ADR-0051](../adr/0051-officers-see-what-the-ai-did.md) (phase 4), [ADR-0052](../adr/0052-voice-says-what-the-screen-says.md) (phase 5), [ADR-0054](../adr/0054-resilience-provenance-and-language.md) (phase 6).
 Follows the [30 October audit](intelligent-ui-integration-audit-2026-10.md) (UI-01 to UI-13, ADR-0018).
 
 That audit covered the chat's REST/SSE contract, action boundaries and the
@@ -146,9 +146,11 @@ All five were implemented with a test watched failing first. G647's spoken discl
 | G648 | Medium | A spoken question still being transcribed is sent into whichever conversation is open when it finishes (ADR-0018 binding). | Bind the queued voice turn to its conversation; drop it with a notice on a switch. |
 | G649 | Medium | "Take a photo" on desktop calls `getUserMedia` under `Permissions-Policy: camera=()`, blames the browser, and would lose the photo (`atob` of a bare base64 string). | Use the capture file input everywhere, or fix the policy and the data URL. |
 
-## Phase 6 — resilience, provenance, contestability, language
+## Phase 6 — resilience, provenance, contestability, language (implemented, ADR-0054)
 
-| Gap | Severity | Finding | Planned fix |
+G650–G654 were implemented with a test watched failing first; G655 is mitigated (consent, status announcements and speaker names; the scan test found one more literal on the REST path). The consent notice still says "No personal data is stored"; whether that holds when consent links ratings to a signed-in user is a question for the privacy owner, and the wording was not changed here.
+
+| Gap | Severity | Finding | Fix |
 | --- | --- | --- | --- |
 | G650 | Medium | The open remainder of G274 (UI-08): restored history casts `citations`, `workflow` and `resources` without the validators, the storage version is written but never read, nested workflow fields are unchecked, and one throwing card replaces the whole chat with `error.tsx` (reload throws again). | Restore through the same validators; check the version; a per-message error boundary. |
 | G651 | Medium | Web citations lose their provenance: adviser commentary and search summaries look like corpus references, the "effective date" can be a fiscal year guessed from snippet text, and web-grounded answers can earn "Well grounded". | Carry authority, evidence and staleness on `Citation`; label them; no badge on web evidence; no regex fiscal year. |
