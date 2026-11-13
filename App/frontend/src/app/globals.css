@@ -761,6 +761,12 @@ main {
   color: var(--text-muted, #a1a1aa);
 }
 
+/* G619: the reminder says which period it is for, and to check it. */
+.deadline-sync-note {
+  font-size: 0.75rem;
+  color: var(--text-muted, #a1a1aa);
+}
+
 .deadline-sync-actions {
   display: flex;
   align-items: center;

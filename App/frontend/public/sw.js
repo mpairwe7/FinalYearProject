@@ -5,8 +5,13 @@
  * to keep the bundle minimal and avoid build-tool coupling.
  */
 
-// v7: enhanced trilingual offline portal with emergency tax directory and client-side calculators.
-const CACHE_NAME = 'ura-v7';
+// v8 (G618): the offline page gives URA's lines and no tax figure. The cache is
+// named after the page's content, so a corrected page replaces one a phone
+// installed earlier; src/__tests__/public/offlinePortal.test.ts holds the two
+// together (update OFFLINE_PAGE_REV to the first 12 hex digits of the page's
+// SHA-256 whenever offline.html changes).
+const OFFLINE_PAGE_REV = '048c05914868';
+const CACHE_NAME = `ura-v8-${OFFLINE_PAGE_REV}`;
 const OFFLINE_PAGE = '/offline.html';
 const STATIC_ASSETS = [
   '/',

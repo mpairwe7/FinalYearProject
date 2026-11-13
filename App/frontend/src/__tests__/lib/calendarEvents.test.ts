@@ -8,23 +8,38 @@ import {
 } from '../../lib/calendarEvents';
 
 describe('calendarEvents', () => {
-  it('detects 15th monthly returns in message text', () => {
-    const event = detectDeadlineInMessage(
-      'PAYE returns and payments are due by the 15th day of each month.'
+  it('detects the monthly 15th deadline for a named tax head', () => {
+    const due = detectDeadlineInMessage(
+      'PAYE returns and payments are due by the 15th day of the following month.',
+      new Date(2026, 10, 3, 10),
     );
-    expect(event).not.toBeNull();
-    expect(event?.title).toContain('PAYE Return');
-    expect(event?.startDate.getDate()).toBe(15);
-    expect(event?.description).toContain('Statutory deadline');
+    expect(due).toEqual({ taxHead: 'PAYE', due: new Date(2026, 10, 15, 9, 0, 0) });
   });
 
-  it('detects 45-day objection window in message text', () => {
-    const event = detectDeadlineInMessage(
-      'Under Section 24 of the Tax Procedures Code Act, you have 45 days to lodge an objection.'
-    );
-    expect(event).not.toBeNull();
-    expect(event?.title).toContain('45-Day Statutory Objection');
-    expect(event?.description).toContain('Commissioner General');
+  // G619: the date the chat offered was the client's own inference.
+  it('on the 15th itself, the deadline is today, not next month', () => {
+    const due = detectDeadlineInMessage('VAT is due by the 15th of the following month.', new Date(2026, 10, 15, 8));
+    expect(due?.due).toEqual(new Date(2026, 10, 15, 9, 0, 0));
+    const after = detectDeadlineInMessage('VAT is due by the 15th of the following month.', new Date(2026, 10, 16, 8));
+    expect(after?.due).toEqual(new Date(2026, 11, 15, 9, 0, 0));
+  });
+
+  it('never dates an objection window from today', () => {
+    // 45 days run from service of the assessment, which the chat does not know.
+    expect(
+      detectDeadlineInMessage('Under Section 24 of the Tax Procedures Code Act, you have 45 days to lodge an objection.'),
+    ).toBeNull();
+    expect(detectDeadlineInMessage('Object within 45 days of the assessment notice.')).toBeNull();
+  });
+
+  it('needs a monthly tax head and the monthly rule, not just "15th" and "deadline"', () => {
+    expect(detectDeadlineInMessage('The deadline for your appeal hearing is the 15th of December.')).toBeNull();
+    expect(detectDeadlineInMessage('PAYE was introduced on the 15th anniversary of the Act.')).toBeNull();
+  });
+
+  it('does not pick one head when the answer names several', () => {
+    const due = detectDeadlineInMessage('PAYE and VAT returns are due by the 15th of the following month.', new Date(2026, 0, 2));
+    expect(due?.taxHead).toBeNull();
   });
 
   it('returns null when no deadline is mentioned', () => {

@@ -1405,9 +1405,16 @@ export default function Page() {
       const reader = res.body?.getReader();
       if (!reader) throw new Error('No body');
       let meta: Record<string, unknown> = {};
+      // G621: the server stopped this turn at its deadline. What arrived is the
+      // start of an answer and the notice that says so, not a whole answer.
+      let stoppedAtDeadline = false;
 
       const dispatchEvent = (eventName: string, dataLines: string[]) => {
         if (!isResponseActive()) throw new Error('Conversation changed');
+        if (eventName === 'deadline_exceeded') {
+          stoppedAtDeadline = true;
+          return;
+        }
         if (dataLines.length === 0) return;
         if (eventName === 'done') {
           const raw = dataLines.join('\n').trim();
@@ -1543,9 +1550,9 @@ export default function Page() {
 
       if (!isResponseActive()) throw new Error('Conversation changed');
       if (!useChatStore.getState().chat.at(-1)?.content.trim()) throw new Error('Empty chat reply');
-      updateResponse((turn) => ({ ...turn, responseIncomplete: false }));
+      updateResponse((turn) => ({ ...turn, responseIncomplete: stoppedAtDeadline }));
       trackChatReceived(Date.now() - t0, (Array.isArray(meta.sources) && meta.sources.length > 0));
-      setChatLiveStatus('URA response ready.');
+      setChatLiveStatus(stoppedAtDeadline ? t('message.incomplete') : 'URA response ready.');
     } catch {
       revealQueueRef.current?.stop();
       if (!isResponseActive()) return;

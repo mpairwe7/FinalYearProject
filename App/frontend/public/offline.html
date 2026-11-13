@@ -18,6 +18,10 @@
       --border: #E2E8F0;
       --accent: #B7791F;
       --radius: 12px;
+      /* Brand red as text. On the dark canvas the brand red itself measures
+         about 1.9:1, so dark mode lightens the text colour and keeps the brand
+         red only behind white button text. */
+      --primary-text: var(--primary);
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -27,6 +31,7 @@
         --text-muted: #94A3B8;
         --border: #27273A;
         --navy: #63B3ED;
+        --primary-text: #FCA5A5;
       }
     }
     body {
@@ -61,7 +66,7 @@
       align-items: center;
       gap: 0.5rem;
       background: rgba(124, 46, 38, 0.1);
-      color: var(--primary);
+      color: var(--primary-text);
       padding: 0.25rem 0.75rem;
       border-radius: 9999px;
       font-size: 0.85rem;
@@ -72,7 +77,7 @@
       width: 8px;
       height: 8px;
       border-radius: 50%;
-      background: var(--primary);
+      background: var(--primary-text);
     }
     h1 {
       font-size: 1.4rem;
@@ -166,79 +171,29 @@
     .contact-val {
       font-size: 0.95rem;
       font-weight: 700;
-      color: var(--primary);
+      color: var(--primary-text);
       margin-top: 0.15rem;
     }
-    .rate-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.85rem;
-    }
-    .rate-table th, .rate-table td {
-      padding: 0.5rem 0.75rem;
-      text-align: left;
-      border-bottom: 1px solid var(--border);
-    }
-    .rate-table th {
-      color: var(--text-muted);
-      font-weight: 600;
-      background: rgba(0,0,0,0.02);
-    }
-    .calc-tabs {
-      display: flex;
-      gap: 0.5rem;
-      margin-bottom: 1rem;
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 0.5rem;
-    }
-    .calc-tab {
-      background: none;
-      border: none;
-      font-size: 0.85rem;
-      font-weight: 600;
-      color: var(--text-muted);
-      cursor: pointer;
-      padding: 0.25rem 0.5rem;
-    }
-    .calc-tab.active {
-      color: var(--primary);
-      border-bottom: 2px solid var(--primary);
-    }
-    .input-group {
-      margin-bottom: 0.75rem;
-    }
-    .input-label {
-      display: block;
-      font-size: 0.8rem;
-      font-weight: 600;
-      margin-bottom: 0.25rem;
-      color: var(--text-muted);
-    }
-    .calc-input {
-      width: 100%;
-      padding: 0.6rem;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      font-size: 0.95rem;
-      background: var(--bg);
-      color: var(--text);
-    }
-    .calc-result {
-      background: rgba(0,0,0,0.03);
-      border: 1px solid var(--border);
+    .note {
+      background: rgba(183, 121, 31, 0.08);
+      border: 1px solid rgba(183, 121, 31, 0.35);
       border-radius: 8px;
-      padding: 0.75rem;
+      padding: 0.75rem 1rem;
+      font-size: 0.9rem;
+      text-align: left;
+    }
+    .status-msg {
+      min-height: 1.25rem;
       margin-top: 0.75rem;
       font-size: 0.85rem;
+      color: var(--text-muted);
     }
-    .result-row {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 0.35rem;
+    .lang-switcher { flex-wrap: wrap; }
+    .lang-btn, .action-btn { min-height: 44px; }
+    .lang-btn:focus-visible, .action-btn:focus-visible, .contact-item:focus-visible {
+      outline: 3px solid var(--accent);
+      outline-offset: 2px;
     }
-    .result-label { color: var(--text-muted); }
-    .result-val { font-weight: 700; color: var(--text); }
-    .result-val.highlight { color: var(--primary); font-size: 1rem; }
     .toast-reconnect {
       display: none;
       background: #15803D;
@@ -253,351 +208,195 @@
   </style>
 </head>
 <body>
-  <div class="container">
-    <div id="reconnectToast" class="toast-reconnect">
-      &#x2714; Connection restored! Reconnecting to URA Tax Assistant...
-    </div>
+  <main class="container">
+    <div id="reconnectToast" class="toast-reconnect" role="status" aria-live="polite"></div>
 
-    <!-- Header & Offline Notice -->
     <header class="header-card">
       <div class="status-badge">
-        <span class="status-dot"></span>
-        <span id="badgeText">Offline Mode Active</span>
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="badgeText">Offline</span>
       </div>
-      <h1 id="mainTitle">URA Tax Assistant — Offline Portal</h1>
-      <p id="mainSubtitle" class="subtitle">
-        You are currently disconnected. Cached emergency guidance, official toll-free contacts, and statutory tax calculators remain functional.
-      </p>
+      <h1 id="mainTitle">URA Tax Assistant</h1>
+      <p id="mainSubtitle" class="subtitle">You appear to be offline. Try again when you reconnect, or call URA toll-free on 0800 117 000.</p>
 
-      <div class="lang-switcher">
-        <button class="lang-btn active" onclick="switchLang('en')">English</button>
-        <button class="lang-btn" onclick="switchLang('lg')">Luganda</button>
-        <button class="lang-btn" onclick="switchLang('sw')">Kiswahili</button>
+      <div class="lang-switcher" role="group" aria-label="Language">
+        <button type="button" class="lang-btn active" data-lang="en" lang="en" aria-pressed="true">English</button>
+        <button type="button" class="lang-btn" data-lang="lg" lang="lg" aria-pressed="false">Oluganda</button>
+        <button type="button" class="lang-btn" data-lang="sw" lang="sw" aria-pressed="false">Kiswahili</button>
+        <button type="button" class="lang-btn" data-lang="nyn" lang="nyn" aria-pressed="false">Orunyankore</button>
+        <button type="button" class="lang-btn" data-lang="ach" lang="ach" aria-pressed="false">Leb Acoli</button>
       </div>
 
-      <button class="action-btn" onclick="checkConnection()">
-        &#x21bb; <span id="btnRetry">Check Connection & Reconnect</span>
+      <button type="button" class="action-btn" id="retryBtn">
+        <span aria-hidden="true">&#x21bb;</span> <span id="btnRetry">Try again</span>
       </button>
+      <p id="retryStatus" class="status-msg" role="status" aria-live="polite"></p>
     </header>
 
-    <!-- Emergency Contacts Section -->
+    <!-- G618: no rate, amount or calculator offline. A figure here cannot be
+         checked against the law in force, and the service worker can keep this
+         page long after a rate changes. -->
     <section class="section-card">
+      <p id="figuresNote" class="note">Tax rates and amounts are not shown offline. They are only given online, where they are checked against the law in force.</p>
+    </section>
+
+    <section class="section-card" aria-labelledby="contactsTitle">
       <h2 class="section-title">
-        &#x260E; <span id="contactsTitle">Official URA Helplines & Emergency Support</span>
+        <span aria-hidden="true">&#x260E;</span> <span id="contactsTitle">Talk to URA</span>
       </h2>
       <div class="contact-grid">
         <a href="tel:0800117000" class="contact-item">
-          <span class="contact-label" id="lblTollFree1">Toll-Free Helpline (MTN / Airtel)</span>
+          <span class="contact-label" id="lblTollFree1">Toll-free</span>
           <span class="contact-val">0800 117 000</span>
         </a>
         <a href="tel:0800217000" class="contact-item">
-          <span class="contact-label" id="lblTollFree2">Toll-Free Helpline (Alternative)</span>
+          <span class="contact-label" id="lblTollFree2">Toll-free (second line)</span>
           <span class="contact-val">0800 217 000</span>
         </a>
         <a href="https://wa.me/256772140000" target="_blank" rel="noopener" class="contact-item">
-          <span class="contact-label" id="lblWhatsapp">URA Official WhatsApp</span>
+          <span class="contact-label" id="lblWhatsapp">WhatsApp</span>
           <span class="contact-val">+256 772 140 000</span>
         </a>
         <a href="mailto:services@ura.go.ug" class="contact-item">
-          <span class="contact-label" id="lblEmail">Official Support Email</span>
+          <span class="contact-label" id="lblEmail">Email</span>
           <span class="contact-val">services@ura.go.ug</span>
         </a>
       </div>
     </section>
-
-    <!-- Key Statutory Rates & Deadlines -->
-    <section class="section-card">
-      <h2 class="section-title">
-        &#x1F4C5; <span id="deadlinesTitle">Key Statutory Rates & Filing Deadlines (FY2026/27)</span>
-      </h2>
-      <table class="rate-table">
-        <thead>
-          <tr>
-            <th id="thTaxHead">Tax Head / Obligation</th>
-            <th id="thRate">Statutory Rate / Threshold</th>
-            <th id="thDeadline">Filing & Payment Due Date</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><strong>PAYE (Individual)</strong></td>
-            <td>0% up to UGX 335k/mo; 10%-30% progressive</td>
-            <td>15th of the following month</td>
-          </tr>
-          <tr>
-            <td><strong>VAT (Standard)</strong></td>
-            <td>18% (Threshold: UGX 150M/yr)</td>
-            <td>15th of the following month</td>
-          </tr>
-          <tr>
-            <td><strong>Withholding Tax (WHT)</strong></td>
-            <td>6% standard local; 15% non-resident</td>
-            <td>15th of the following month</td>
-          </tr>
-          <tr>
-            <td><strong>Income Tax (Final Return)</strong></td>
-            <td>30% Corporation; Presumptive rates</td>
-            <td>31st December (or 6 mos after FY)</td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
-
-    <!-- Interactive Offline Calculator -->
-    <section class="section-card">
-      <h2 class="section-title">
-        &#x1F522; <span id="calcTitle">Offline Statutory Tax Calculator</span>
-      </h2>
-      <div class="calc-tabs">
-        <button class="calc-tab active" id="tabPaye" onclick="switchCalc('paye')">PAYE Calculator (Monthly)</button>
-        <button class="calc-tab" id="tabVat" onclick="switchCalc('vat')">VAT Calculator (18%)</button>
-      </div>
-
-      <!-- PAYE Form -->
-      <div id="payeForm">
-        <div class="input-group">
-          <label class="input-label" id="lblGrossPay" for="grossSalary">Monthly Gross Salary / Income (UGX)</label>
-          <input type="number" id="grossSalary" class="calc-input" placeholder="e.g. 1000000" min="0" oninput="runPayeCalc()" />
-        </div>
-        <div class="calc-result" id="payeResult">
-          <div class="result-row">
-            <span class="result-label" id="lblTaxFree">Tax-Free Threshold:</span>
-            <span class="result-val">UGX 335,000</span>
-          </div>
-          <div class="result-row">
-            <span class="result-label" id="lblTaxPayable">Monthly PAYE Tax Payable:</span>
-            <span class="result-val highlight" id="payeTaxVal">UGX 0</span>
-          </div>
-          <div class="result-row">
-            <span class="result-label" id="lblNetPay">Estimated Net Take-Home Pay:</span>
-            <span class="result-val" id="payeNetVal">UGX 0</span>
-          </div>
-          <div class="result-row">
-            <span class="result-label" id="lblEffRate">Effective Tax Rate:</span>
-            <span class="result-val" id="payeRateVal">0%</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- VAT Form -->
-      <div id="vatForm" style="display:none;">
-        <div class="input-group">
-          <label class="input-label" id="lblVatAmount" for="vatAmount">Invoice / Transaction Amount (UGX)</label>
-          <input type="number" id="vatAmount" class="calc-input" placeholder="e.g. 500000" min="0" oninput="runVatCalc()" />
-        </div>
-        <div class="input-group">
-          <label class="input-label" id="lblVatMode">Calculation Mode</label>
-          <select id="vatMode" class="calc-input" onchange="runVatCalc()">
-            <option value="exclusive">Add 18% VAT (Exclusive: Net + 18%)</option>
-            <option value="inclusive">Extract 18% VAT (Inclusive: Amount includes 18%)</option>
-          </select>
-        </div>
-        <div class="calc-result" id="vatResult">
-          <div class="result-row">
-            <span class="result-label" id="lblVatBase">Base Net Amount:</span>
-            <span class="result-val" id="vatBaseVal">UGX 0</span>
-          </div>
-          <div class="result-row">
-            <span class="result-label" id="lblVat18">VAT (18%):</span>
-            <span class="result-val highlight" id="vatTaxVal">UGX 0</span>
-          </div>
-          <div class="result-row">
-            <span class="result-label" id="lblVatTotal">Total Gross Amount:</span>
-            <span class="result-val" id="vatTotalVal">UGX 0</span>
-          </div>
-        </div>
-      </div>
-    </section>
-  </div>
+  </main>
 
   <script>
-    // --- Auto Reconnect Listener ---
-    window.addEventListener('online', () => {
-      const toast = document.getElementById('reconnectToast');
-      toast.style.display = 'block';
-      setTimeout(() => {
-        window.location.href = '/';
-      }, 1200);
-    });
+    (function () {
+      // Vernacular strings other than mainSubtitle (the app's own
+      // handoff.offline) have not been reviewed by first-language speakers (G275).
+      var dict = {
+        en: {
+          badge: 'Offline',
+          title: 'URA Tax Assistant',
+          sub: 'You appear to be offline. Try again when you reconnect, or call URA toll-free on 0800 117 000.',
+          figuresNote: 'Tax rates and amounts are not shown offline. They are only given online, where they are checked against the law in force.',
+          btnRetry: 'Try again',
+          stillOffline: 'Still offline. Check your mobile data or Wi-Fi.',
+          reconnected: 'Back online. Returning to the assistant…',
+          contactsTitle: 'Talk to URA',
+          lblTollFree1: 'Toll-free',
+          lblTollFree2: 'Toll-free (second line)',
+          lblWhatsapp: 'WhatsApp',
+          lblEmail: 'Email'
+        },
+        lg: {
+          badge: 'Toli ku yintaneeti',
+          title: 'Omuyambi wa URA ku Misolo',
+          sub: 'Olabika toli ku yintaneeti. Gezaako nate bw’oddamu okuyingira, oba kuba 0800 117 000.',
+          figuresNote: 'Emiwendo gy’emisolo n’ensimbi tebiragibwa ng’otali ku yintaneeti. Biweebwa ng’oli ku yintaneeti, we bikeberebwa n’amateeka agakola kati.',
+          btnRetry: 'Gezaako nate',
+          stillOffline: 'Okyali toli ku yintaneeti. Kebera data oba Wi-Fi yo.',
+          reconnected: 'Oddeyo ku yintaneeti. Tukuzzaayo eri omuyambi…',
+          contactsTitle: 'Yogera ne URA',
+          lblTollFree1: 'Essimu ya bwereere',
+          lblTollFree2: 'Essimu ya bwereere (ey’okubiri)',
+          lblWhatsapp: 'WhatsApp',
+          lblEmail: 'Email'
+        },
+        sw: {
+          badge: 'Nje ya mtandao',
+          title: 'Msaidizi wa Kodi wa URA',
+          sub: 'Inaonekana huna mtandao. Jaribu tena ukiunganishwa, au piga 0800 117 000.',
+          figuresNote: 'Viwango na kiasi cha kodi havionyeshwi ukiwa nje ya mtandao. Hutolewa ukiwa mtandaoni tu, ambapo vinakaguliwa dhidi ya sheria inayotumika.',
+          btnRetry: 'Jaribu tena',
+          stillOffline: 'Bado huna mtandao. Angalia data au Wi-Fi yako.',
+          reconnected: 'Umerudi mtandaoni. Tunakurudisha kwa msaidizi…',
+          contactsTitle: 'Wasiliana na URA',
+          lblTollFree1: 'Simu bila malipo',
+          lblTollFree2: 'Simu bila malipo (laini ya pili)',
+          lblWhatsapp: 'WhatsApp',
+          lblEmail: 'Barua pepe'
+        },
+        nyn: {
+          badge: 'Toine intaneeti',
+          title: 'Omuhwezi wa URA aha Mishoro',
+          sub: 'Torikureebeka ori aha intaneeti. Gezaho obundi waagarukaho, nari teera 0800 117 000.',
+          figuresNote: 'Emishoro n’esente zaayo tibirikworekwa obu otari aha intaneeti. Nibihabwa obu ori aha intaneeti, ahu bikeberwa n’ebiragiro ebirikukora hati.',
+          btnRetry: 'Gezaho obundi',
+          stillOffline: 'Okyari otari aha intaneeti. Kebera data nari Wi-Fi yaawe.',
+          reconnected: 'Wagaruka aha intaneeti. Nitukugarura ahari omuhwezi…',
+          contactsTitle: 'Gamba na URA',
+          lblTollFree1: 'Esimu y’obusha',
+          lblTollFree2: 'Esimu y’obusha (ey’akabiri)',
+          lblWhatsapp: 'WhatsApp',
+          lblEmail: 'Email'
+        },
+        ach: {
+          badge: 'Pe intanet',
+          title: 'Lakony Mucoro pa URA',
+          sub: 'Inen calo pe itye i intanet. Tem doki ka idonyo, onyo goyo 0800 117 000.',
+          figuresNote: 'Rwom mucoro ki wel cente pe ginyuto ka pe itye i intanet. Gimiyo keken ka itye i intanet, kama gipimo ki cik ma tye ka tic.',
+          btnRetry: 'Tem doki',
+          stillOffline: 'Pud pe itye i intanet. Nen data onyo Wi-Fi ni.',
+          reconnected: 'Idok i intanet. Wadwoki bot lakony…',
+          contactsTitle: 'Lok ki URA',
+          lblTollFree1: 'Cim ma nono',
+          lblTollFree2: 'Cim ma nono (me aryo)',
+          lblWhatsapp: 'WhatsApp',
+          lblEmail: 'Email'
+        }
+      };
+      var TEXT_IDS = {
+        badgeText: 'badge', mainTitle: 'title', mainSubtitle: 'sub', figuresNote: 'figuresNote',
+        btnRetry: 'btnRetry', contactsTitle: 'contactsTitle', lblTollFree1: 'lblTollFree1',
+        lblTollFree2: 'lblTollFree2', lblWhatsapp: 'lblWhatsapp', lblEmail: 'lblEmail'
+      };
+      var current = 'en';
 
-    function checkConnection() {
-      if (navigator.onLine) {
-        window.location.href = '/';
-      } else {
-        alert('Still offline. Please check your cellular data or Wi-Fi connection.');
-      }
-    }
-
-    // --- Trilingual Translations ---
-    const dict = {
-      en: {
-        badge: 'Offline Mode Active',
-        title: 'URA Tax Assistant — Offline Portal',
-        sub: 'You are currently disconnected. Cached emergency guidance, official toll-free contacts, and statutory tax calculators remain functional.',
-        btnRetry: 'Check Connection & Reconnect',
-        contactsTitle: 'Official URA Helplines & Emergency Support',
-        lblTollFree1: 'Toll-Free Helpline (MTN / Airtel)',
-        lblTollFree2: 'Toll-Free Helpline (Alternative)',
-        lblWhatsapp: 'URA Official WhatsApp',
-        lblEmail: 'Official Support Email',
-        deadlinesTitle: 'Key Statutory Rates & Filing Deadlines (FY2026/27)',
-        thTaxHead: 'Tax Head / Obligation',
-        thRate: 'Statutory Rate / Threshold',
-        thDeadline: 'Filing & Payment Due Date',
-        calcTitle: 'Offline Statutory Tax Calculator',
-        lblGrossPay: 'Monthly Gross Salary / Income (UGX)',
-        lblTaxFree: 'Tax-Free Threshold:',
-        lblTaxPayable: 'Monthly PAYE Tax Payable:',
-        lblNetPay: 'Estimated Net Take-Home Pay:',
-        lblEffRate: 'Effective Tax Rate:',
-        lblVatAmount: 'Invoice / Transaction Amount (UGX)',
-        lblVatMode: 'Calculation Mode',
-        lblVatBase: 'Base Net Amount:',
-        lblVat18: 'VAT (18%):',
-        lblVatTotal: 'Total Gross Amount:'
-      },
-      lg: {
-        badge: 'Tolina Yintaneeti Kaakano',
-        title: 'Omubeezi w\'Emisolo owa URA — Eby\'Amangu',
-        sub: 'Tolina mukutu gwa yintaneeti kaakano. Eby\'amangu eby\'emisolo, essimu z\'obwereere ez\'abakulu, n\'ekibala emisolo bikola bulungi.',
-        btnRetry: 'Kebera Yintaneeti Oddemu Oyingire',
-        contactsTitle: 'Essimu z\'Obwereere eza URA & Obuyambi',
-        lblTollFree1: 'Essimu ya Bwereere (MTN / Airtel)',
-        lblTollFree2: 'Essimu ya Bwereere (Ey\'okubiri)',
-        lblWhatsapp: 'WhatsApp ya URA Entongole',
-        lblEmail: 'Email ya URA ey\'Obuyambi',
-        deadlinesTitle: 'Emiwendo gy\'Emisolo n\'Ennaku z\'Okusasulirako (FY2026/27)',
-        thTaxHead: 'Ekika ky\'Omusolo',
-        thRate: 'Omuwendo gw\'Omusolo',
-        thDeadline: 'Olunaku olw\'Okusasulirako',
-        calcTitle: 'Ekibala Emisolo eky\'Amangu ku Simu',
-        lblGrossPay: 'Omusaala gw\'Omwezi Ogwonna (UGX)',
-        lblTaxFree: 'Ekkomo eritasolozebwako musolo:',
-        lblTaxPayable: 'Omusolo gwa PAYE ogusasulwa:',
-        lblNetPay: 'Ensimbi ezikusigalamu:',
-        lblEffRate: 'Ekitundu kikumi eky\'omusolo:',
-        lblVatAmount: 'Omuwendo gw\'Ebintu / Ebyamaguzi (UGX)',
-        lblVatMode: 'Enkola y\'Okubala',
-        lblVatBase: 'Omuwendo ogutasoloozeddwako VAT:',
-        lblVat18: 'VAT (18%):',
-        lblVatTotal: 'Omuwendo gwonna awamu:'
-      },
-      sw: {
-        badge: 'Hali ya Nje ya Mtandao',
-        title: 'Msaidizi wa Kodi wa URA — Tovuti ya Dharura',
-        sub: 'Huna muunganisho wa mtandao kwa sasa. Mwongozo wa dharura wa kodi, nambari za simu bila malipo, na vikokotoo vya kodi vinaendelea kufanya kazi.',
-        btnRetry: 'Angalia Muunganisho na Uunganishe Tena',
-        contactsTitle: 'Nambari za Simu za URA Bila Malipo & Msaada',
-        lblTollFree1: 'Simu Bila Malipo (MTN / Airtel)',
-        lblTollFree2: 'Simu Bila Malipo (Mbadala)',
-        lblWhatsapp: 'WhatsApp Rasmi ya URA',
-        lblEmail: 'Barua Pepe Rasmi ya Msaada',
-        deadlinesTitle: 'Viwango vya Kodi na Tarehe za Mwisho (FY2026/27)',
-        thTaxHead: 'Aina ya Kodi / Wajibu',
-        thRate: 'Kiwango cha Sheria',
-        thDeadline: 'Tarehe ya Mwisho ya Kulipa',
-        calcTitle: 'Kikokotoo cha Kodi cha Nje ya Mtandao',
-        lblGrossPay: 'Mshahara Ghafi wa Kila Mwezi (UGX)',
-        lblTaxFree: 'Kiwango kisichotozwa kodi:',
-        lblTaxPayable: 'Kodi ya PAYE Inayopaswa Kulipwa:',
-        lblNetPay: 'Kiasi Halisi Baada ya Kodi:',
-        lblEffRate: 'Asilimia Halisi ya Kodi:',
-        lblVatAmount: 'Kiasi cha Ankara au Biashara (UGX)',
-        lblVatMode: 'Njia ya Kukokotoa',
-        lblVatBase: 'Kiasi Halisi Bila VAT:',
-        lblVat18: 'VAT (18%):',
-        lblVatTotal: 'Jumla Kuu Pamoja na VAT:'
-      }
-    };
-
-    function switchLang(lang) {
-      document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
-      const activeBtn = Array.from(document.querySelectorAll('.lang-btn')).find(b => b.textContent.toLowerCase().includes(lang === 'sw' ? 'kiswahili' : lang));
-      if (activeBtn) activeBtn.classList.add('active');
-
-      const d = dict[lang] || dict.en;
-      document.getElementById('badgeText').textContent = d.badge;
-      document.getElementById('mainTitle').textContent = d.title;
-      document.getElementById('mainSubtitle').textContent = d.sub;
-      document.getElementById('btnRetry').textContent = d.btnRetry;
-      document.getElementById('contactsTitle').textContent = d.contactsTitle;
-      document.getElementById('lblTollFree1').textContent = d.lblTollFree1;
-      document.getElementById('lblTollFree2').textContent = d.lblTollFree2;
-      document.getElementById('lblWhatsapp').textContent = d.lblWhatsapp;
-      document.getElementById('lblEmail').textContent = d.lblEmail;
-      document.getElementById('deadlinesTitle').textContent = d.deadlinesTitle;
-      document.getElementById('thTaxHead').textContent = d.thTaxHead;
-      document.getElementById('thRate').textContent = d.thRate;
-      document.getElementById('thDeadline').textContent = d.thDeadline;
-      document.getElementById('calcTitle').textContent = d.calcTitle;
-      document.getElementById('lblGrossPay').textContent = d.lblGrossPay;
-      document.getElementById('lblTaxFree').textContent = d.lblTaxFree;
-      document.getElementById('lblTaxPayable').textContent = d.lblTaxPayable;
-      document.getElementById('lblNetPay').textContent = d.lblNetPay;
-      document.getElementById('lblEffRate').textContent = d.lblEffRate;
-      document.getElementById('lblVatAmount').textContent = d.lblVatAmount;
-      document.getElementById('lblVatMode').textContent = d.lblVatMode;
-      document.getElementById('lblVatBase').textContent = d.lblVatBase;
-      document.getElementById('lblVat18').textContent = d.lblVat18;
-      document.getElementById('lblVatTotal').textContent = d.lblVatTotal;
-    }
-
-    // --- Calculator Tab Switching ---
-    function switchCalc(type) {
-      document.getElementById('tabPaye').classList.toggle('active', type === 'paye');
-      document.getElementById('tabVat').classList.toggle('active', type === 'vat');
-      document.getElementById('payeForm').style.display = type === 'paye' ? 'block' : 'none';
-      document.getElementById('vatForm').style.display = type === 'vat' ? 'block' : 'none';
-    }
-
-    function formatUgx(n) {
-      return 'UGX ' + Math.round(n).toLocaleString('en-UG');
-    }
-
-    // --- PAYE Calculation (FY2026/27) ---
-    function runPayeCalc() {
-      const income = Math.max(0, Number(document.getElementById('grossSalary').value) || 0);
-      let tax = 0;
-      if (income <= 335000) {
-        tax = 0;
-      } else if (income <= 410000) {
-        tax = (income - 335000) * 0.1;
-      } else if (income <= 10000000) {
-        tax = 7500 + (income - 410000) * 0.2;
-      } else {
-        const excess = income - 10000000;
-        tax = 1925500 + (excess * 0.3) + (excess * 0.1);
-      }
-      const net = Math.max(0, income - tax);
-      const effRate = income > 0 ? ((tax / income) * 100).toFixed(1) : '0';
-
-      document.getElementById('payeTaxVal').textContent = formatUgx(tax);
-      document.getElementById('payeNetVal').textContent = formatUgx(net);
-      document.getElementById('payeRateVal').textContent = effRate + '%';
-    }
-
-    // --- VAT Calculation (18%) ---
-    function runVatCalc() {
-      const amt = Math.max(0, Number(document.getElementById('vatAmount').value) || 0);
-      const mode = document.getElementById('vatMode').value;
-      let base = 0;
-      let vat = 0;
-      let total = 0;
-
-      if (mode === 'inclusive') {
-        vat = Math.round((amt * 18) / 118);
-        base = amt - vat;
-        total = amt;
-      } else {
-        base = amt;
-        vat = Math.round(amt * 0.18);
-        total = amt + vat;
+      function setText(id, value) {
+        var el = document.getElementById(id);
+        if (el) el.textContent = value;
       }
 
-      document.getElementById('vatBaseVal').textContent = formatUgx(base);
-      document.getElementById('vatTaxVal').textContent = formatUgx(vat);
-      document.getElementById('vatTotalVal').textContent = formatUgx(total);
-    }
+      function switchLang(lang) {
+        current = Object.prototype.hasOwnProperty.call(dict, lang) ? lang : 'en';
+        var d = dict[current];
+        document.documentElement.lang = current;
+        Object.keys(TEXT_IDS).forEach(function (id) { setText(id, d[TEXT_IDS[id]]); });
+        setText('retryStatus', '');
+        document.querySelectorAll('.lang-btn').forEach(function (b) {
+          var on = b.getAttribute('data-lang') === current;
+          b.classList.toggle('active', on);
+          b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+      }
+
+      // The language the taxpayer chose in the app, if this browser kept it.
+      function storedLocale() {
+        try {
+          var raw = window.localStorage.getItem('ura-chat-store');
+          var state = raw ? JSON.parse(raw).state : null;
+          return state && typeof state.locale === 'string' ? state.locale : null;
+        } catch (e) {
+          return null;
+        }
+      }
+
+      function goBack() {
+        setText('reconnectToast', dict[current].reconnected);
+        var toast = document.getElementById('reconnectToast');
+        if (toast) toast.style.display = 'block';
+        setTimeout(function () { window.location.href = '/'; }, 1200);
+      }
+
+      document.querySelectorAll('.lang-btn').forEach(function (b) {
+        b.addEventListener('click', function () { switchLang(b.getAttribute('data-lang')); });
+      });
+      var retry = document.getElementById('retryBtn');
+      if (retry) {
+        retry.addEventListener('click', function () {
+          if (navigator.onLine) goBack();
+          else setText('retryStatus', dict[current].stillOffline);
+        });
+      }
+      window.addEventListener('online', goBack);
+      switchLang(storedLocale() || 'en');
+    })();
   </script>
 </body>
 </html>

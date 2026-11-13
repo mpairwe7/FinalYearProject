@@ -1,5 +1,7 @@
 # Intelligent UI integration audit — 30 October 2026
 
+Followed by the [13 November audit](intelligent-ui-integration-audit-2026-11-13.md), which carries UI-08's remainder (G650) and UI-10 to UI-13 (G275, G276) forward.
+
 Baseline: `dev` at `87460457`. Remediation branch:
 `fix/intelligent-ui-integration-audit-2026-10`. Implementation decision:
 [ADR-0018](../adr/0018-intelligent-ui-completion-and-action-boundaries.md).

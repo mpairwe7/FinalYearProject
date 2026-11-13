@@ -12,7 +12,12 @@ import { getChatSessionId } from '../lib/chatSession';
 import { authHeaders, getAuthToken, getServerAuthToken, subscribeAuthToken } from '../lib/authSession';
 import { sanitizeReturnTo } from '../lib/oidcFlow';
 import { savePendingPortalContinuation } from '../lib/portalContinuation';
-import { detectDeadlineInMessage, downloadCalendarEvent, getGoogleCalendarUrl } from '../lib/calendarEvents';
+import {
+  detectDeadlineInMessage,
+  downloadCalendarEvent,
+  getGoogleCalendarUrl,
+  type CalendarEventData,
+} from '../lib/calendarEvents';
 import FeedbackButtons from './FeedbackButtons';
 import HumanHandoff from './HumanHandoff';
 import { SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon, FileIcon, DownloadIcon, EyeIcon, PlugIcon, ArrowRightIcon, ExternalLinkIcon, AlertTriangleIcon, LockIcon, MicIcon, BookIcon, PhoneIcon, CalendarIcon, ClipboardIcon } from './Icons';
@@ -252,10 +257,25 @@ function ChatMessageInner({
   const offDuty = turn.officerHours?.onDuty === false;
   const nextShift =
     offDuty && turn.officerHours?.nextOnDuty ? formatNextShift(turn.officerHours.nextOnDuty, locale) : null;
-  const deadlineEvent = useMemo(
-    () => (isAssistant && !isGreeting ? detectDeadlineInMessage(turn.content) : null),
-    [isAssistant, isGreeting, turn.content]
-  );
+  // G619: a reminder only for the statutory monthly rule an answer states, and
+  // only on a whole, current answer. The chat never dates a window that runs
+  // from an event it does not know (an objection's 45 days).
+  const wholeAnswer = turn.responseIncomplete !== true && turn.restored !== true;
+  const deadlineEvent = useMemo<CalendarEventData | null>(() => {
+    if (!isAssistant || isGreeting || !wholeAnswer) return null;
+    const deadline = detectDeadlineInMessage(turn.content);
+    if (!deadline) return null;
+    return {
+      title: deadline.taxHead ? t('deadline.title', { tax: deadline.taxHead }) : t('deadline.titleGeneric'),
+      description: `${t('deadline.note')} https://ura.go.ug`,
+      startDate: deadline.due,
+      endDate: new Date(deadline.due.getTime() + 8 * 3600 * 1000),
+      location: 'https://ura.go.ug',
+    };
+  }, [isAssistant, isGreeting, wholeAnswer, turn.content, t]);
+  // G620, G623: below the judge's `high`, no badge calls the answer official or
+  // grounded. An answer with no judge keeps the score's own reading.
+  const judgeDoubts = turn.confidenceBand === 'medium' || turn.confidenceBand === 'low';
 
   return (
     <article className={`message-row message-row-${turn.role}${isOfficerReply ? ' message-row-officer' : ''}`}>
@@ -589,22 +609,26 @@ function ChatMessageInner({
         {isAssistant && !isGreeting && !phaseLabel && !turn.responseIncomplete && turn.content && (
           <div className="grounding-row">
             {turn.retrievalMode === 'calculator' ? (
-              <span className="grounding-badge grounding-ok" title="Deterministic arithmetic against official URA statutory rate tables">
-                <CheckIcon /> Official Statutory Calculator
-              </span>
+              judgeDoubts ? (
+                <span className="grounding-badge grounding-warn">{t('grounding.calculatorUnconfirmed')}</span>
+              ) : (
+                <span className="grounding-badge grounding-ok">
+                  <CheckIcon /> {t('grounding.calculator')}
+                </span>
+              )
             ) : turn.retrievalMode === 'education' ? (
-              <span className="grounding-badge grounding-ok" title="Scaffolded curriculum verified against URA taxpayer handbooks">
-                <BookIcon /> Verified Taxpayer Education
+              <span className="grounding-badge grounding-ok">
+                <BookIcon /> {t('grounding.education')}
               </span>
             ) : turn.retrievalMode === 'contact_channels' ? (
-              <span className="grounding-badge grounding-ok" title="Official URA toll-free, WhatsApp, email and portal channels">
-                <PhoneIcon size={14} /> Official URA Helpdesk
+              <span className="grounding-badge grounding-ok">
+                <PhoneIcon size={14} /> {t('grounding.contacts')}
               </span>
             ) : turn.faithfulnessScore != null ? (
               <span
-                className={`grounding-badge ${turn.faithfulnessScore >= 0.6 ? 'grounding-ok' : 'grounding-warn'}`}
+                className={`grounding-badge ${turn.faithfulnessScore >= 0.6 && !judgeDoubts ? 'grounding-ok' : 'grounding-warn'}`}
               >
-                {turn.faithfulnessScore >= 0.6 ? 'Well grounded' : 'Verify with URA'}
+                {turn.faithfulnessScore >= 0.6 && !judgeDoubts ? t('grounding.ok') : t('grounding.verify')}
               </span>
             ) : null}
             {/* The forms and passages behind the answer, behind one pill. A
@@ -621,37 +645,36 @@ function ChatMessageInner({
         )}
 
         {isAssistant && !isGreeting && !phaseLabel && deadlineEvent && (
-          <div className="deadline-sync-banner" role="region" aria-label="Statutory Tax Deadline Sync">
+          <div className="deadline-sync-banner" role="region" aria-label={t('deadline.region')}>
             <span className="deadline-sync-icon" aria-hidden="true"><CalendarIcon /></span>
             <div className="deadline-sync-info">
               <span className="deadline-sync-title">{deadlineEvent.title}</span>
               <span className="deadline-sync-date">
-                Due: {deadlineEvent.startDate.toLocaleDateString(['lg', 'nyn', 'ach'].includes(locale) ? 'en-UG' : locale, {
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
+                {t('deadline.due', {
+                  date: deadlineEvent.startDate.toLocaleDateString(['lg', 'nyn', 'ach'].includes(locale) ? 'en-UG' : locale, {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                  }),
                 })}
               </span>
+              <span className="deadline-sync-note">{t('deadline.note')}</span>
             </div>
             <div className="deadline-sync-actions">
               <button
                 type="button"
                 className="deadline-sync-btn"
                 onClick={() => downloadCalendarEvent(deadlineEvent)}
-                title="Download iCalendar (.ics) reminder file with 1-day alert"
-                aria-label={`Download calendar reminder for ${deadlineEvent.title}`}
               >
-                Add to Calendar (.ics)
+                {t('deadline.ics')}
               </button>
               <a
                 className="deadline-sync-link"
-                aria-label="Open in Google Calendar"
                 href={getGoogleCalendarUrl(deadlineEvent)}
                 target="_blank"
                 rel="noopener noreferrer"
-                title="Open in Google Calendar"
               >
-                Google Calendar ↗
+                {t('deadline.google')} <span aria-hidden="true">↗</span>
               </a>
             </div>
           </div>

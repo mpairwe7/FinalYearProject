@@ -89,6 +89,21 @@ function portalCopilotFrom(value: unknown): PortalCopilotPayload | null {
   } as unknown as PortalCopilotPayload;
 }
 
+/** The answer judge's confidence band (`response_judge.confidence_band`). */
+export type ConfidenceBand = 'high' | 'medium' | 'low';
+
+export function isConfidenceBand(value: unknown): value is ConfidenceBand {
+  return value === 'high' || value === 'medium' || value === 'low';
+}
+
+/**
+ * The band a frame's judge gives, or undefined. A frame carrying
+ * `response_judge: null` withdraws an earlier band (G623).
+ */
+function confidenceBandFrom(judge: unknown): ConfidenceBand | undefined {
+  return record(judge) && isConfidenceBand(judge.confidence_band) ? judge.confidence_band : undefined;
+}
+
 /** Whether officers were on duty when a handoff was queued (`app.officer_hours.status`). */
 export interface OfficerHours {
   onDuty: boolean;
@@ -173,6 +188,7 @@ export function applyTurnMeta(turn: ChatTurn, meta: TurnMeta, notices: Connector
     connectorNotices: notices.length ? notices : turn.connectorNotices,
     citations: 'citations' in meta ? citationsFrom(meta.citations) : turn.citations,
     faithfulnessScore: 'faithfulness_score' in meta ? score(meta.faithfulness_score) : turn.faithfulnessScore,
+    confidenceBand: 'response_judge' in meta ? confidenceBandFrom(meta.response_judge) : turn.confidenceBand,
     retrievalMode: typeof meta.retrieval_mode === 'string' ? meta.retrieval_mode : turn.retrievalMode,
     escalationRequired: typeof meta.escalation_required === 'boolean' ? meta.escalation_required : turn.escalationRequired,
     escalationReason: typeof meta.escalation_reason === 'string' ? meta.escalation_reason : turn.escalationReason,

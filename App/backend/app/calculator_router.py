@@ -1321,11 +1321,34 @@ def _unverified_note(table: RateTable, keys: list[str], *, main: str = "") -> st
         return ""
     if unverified == [main]:
         return "\n\n" + UNVERIFIED_CAVEAT
+    return "\n\n" + _named_unverified_caveat(unverified)
+
+
+def _named_unverified_caveat(keys: list[str]) -> str:
+    """The caveat naming each unconfirmed figure a reply uses."""
     from .tools.rates import display_name
 
-    return ("\n\n_These figures have not been confirmed against a gazetted schedule: "
-            + "; ".join(display_name(k) for k in unverified)
+    return ("_These figures have not been confirmed against a gazetted schedule: "
+            + "; ".join(display_name(k) for k in keys)
             + ". Confirm them with URA or the responsible agency before paying or filing._")
+
+
+#: What this module writes into a reply whose figures the table does not stand
+#: behind: an unverified entry (either caveat) or a provisional table.
+_UNCONFIRMED_MARKERS = (
+    "has not been confirmed against a gazetted schedule",
+    "have not been confirmed against a gazetted schedule",
+    "figures are provisional",
+)
+
+
+def reply_has_unconfirmed_figures(reply: str) -> bool:
+    """Whether an English calculator or rate reply carries a figure the table does not confirm (G620).
+
+    The service reads this before localisation to lower the turn's confidence
+    band, which is what keeps the chat from badging the answer "official".
+    """
+    return any(marker in reply for marker in _UNCONFIRMED_MARKERS)
 
 
 def _after_latest_table(fy: str) -> bool:
@@ -1357,6 +1380,13 @@ def _rate_table_footer(result: dict[str, object]) -> list[str]:
     lines = ["", f"Figures use the official URA {fy} rate table."]
     if status == "provisional":
         lines.append(PROVISIONAL_CAVEAT.format(fy=fy))
+    else:
+        # G620: the table is confirmed, but this calculation used an entry it
+        # marks unverified. The tool payload's verification_warning says so; the
+        # reply must too, or the footer above reads as covering every figure.
+        unverified = basis.get("unverified") if isinstance(basis, dict) else None
+        if isinstance(unverified, (list, tuple)) and unverified:
+            lines.append(_named_unverified_caveat([str(k) for k in unverified]))
     if not result.get("period_requested") and _after_latest_table(str(fy)):
         lines.append(ROLLOVER_CAVEAT.format(fy=fy))
     return lines

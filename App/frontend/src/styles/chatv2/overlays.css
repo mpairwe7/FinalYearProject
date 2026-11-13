@@ -1469,6 +1469,37 @@ dialog.connectors-dialog::backdrop,
   flex-shrink: 0;
   margin-top: 1px;
 }
+.doc-modal-note-item[data-tone="warn"] svg {
+  color: var(--warning);
+}
+
+/* G624: machine-read figures and what could not be read. */
+.doc-modal-machine-read {
+  margin: 12px 0 0;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.doc-modal-warnings {
+  border: 1px solid var(--warning);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+}
+.doc-modal-warnings-lead {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 0 0 6px;
+  font-weight: 600;
+}
+.doc-modal-warnings-lead svg {
+  color: var(--warning);
+}
+.doc-modal-warnings ul {
+  margin: 0;
+  padding-left: 18px;
+}
 
 .doc-modal-fields-grid {
   display: flex;
