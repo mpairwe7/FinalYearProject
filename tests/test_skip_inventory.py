@@ -67,6 +67,10 @@ KNOWN_SKIPS: dict[str, int] = {
     # One test streams through Pipecat's TTSService, which the main job does
     # not install; the receptionist-stack CI job runs it (ADR-0041, G598).
     "App/backend/tests/test_receptionist_startup_readiness.py": 1,
+    # One class drives Pipecat's own FastAPI output transport (the AI's queued
+    # speech and an officer's takeover); the receptionist-stack CI job runs it
+    # (ADR-0055, G657). Every other test in the file runs everywhere.
+    "App/backend/tests/test_receptionist_takeover_silence.py": 1,
 }
 
 
