@@ -1,7 +1,7 @@
 # Intelligent UI integration audit — 13 November 2026
 
 Status: phase 1 implemented on `fix/intelligent-ui-p1-figures-and-disclosures-2026-11`; phases 2 to 6 open.
-Baseline: `dev` at `882a99b5`. Decisions: [ADR-0047](../adr/0047-figures-and-disclosures-the-taxpayer-sees.md) (phase 1).
+Baseline: `dev` at `882a99b5`. Decisions: [ADR-0048](../adr/0048-figures-and-disclosures-the-taxpayer-sees.md) (phase 1).
 Follows the [30 October audit](intelligent-ui-integration-audit-2026-10.md) (UI-01 to UI-13, ADR-0018).
 
 That audit covered the chat's REST/SSE contract, action boundaries and the

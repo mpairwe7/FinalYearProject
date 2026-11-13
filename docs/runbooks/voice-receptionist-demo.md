@@ -305,9 +305,22 @@ What an operator, an officer or an auditor will see differently:
   and 32 KB/s, so a normal call never drops one. Each drop is counted in
   `ura_receptionist_frames_dropped_total{side,reason}` and a flood is logged at
   WARNING once. A socket that keeps dropping frames for 5 s is closed with 1008
-  `too many frames`; an officer's close then takes the reconnect grace like any
-  other. Set the byte rate with `RECEPTIONIST_AUDIO_BYTES_PER_S` (default 64000,
+  `too many frames`. A single frame over 64 KiB closes the socket at once with
+  1009 `frame too large` (ADR-0047). Either way, an officer's close then takes
+  the reconnect grace like any other. Set the byte rate with `RECEPTIONIST_AUDIO_BYTES_PER_S` (default 64000,
   never below 32000).
+- **A LiveKit call's control sockets are limited too (G304, ADR-0047).** On a
+  LiveKit call the audio is WebRTC and these sockets carry text only: the
+  caller's call socket, the officer's audio socket and a listener's. Each
+  holds text frames to 15 per 10 s (16 KiB each); the caller's 16th control
+  message in that window, a typed question included, is dropped, not
+  answered. A binary frame on them is dropped and counted as `malformed`;
+  before, it ended the caller's call, put the officer into the reconnect grace
+  or cut the listener off. Drops are counted under `side="caller"` or
+  `side="officer"` (a listener counts as `officer`). A flood that lasts 5 s
+  closes the socket 1008: the caller's call then ends and its media pipeline
+  stops, the officer goes into the reconnect grace, and a listener is
+  removed from the room.
 - **An officer owes the wrap-up of a call that ended under them (G610,
   ADR-0045).** However the call ended (the caller, its time limit, a media
   failure, during their reconnect grace) the officer who had it goes to
@@ -317,6 +330,15 @@ What an operator, an officer or an auditor will see differently:
   wrap-up", after a reload too. `busy`, `away` and `offline` still apply. This
   covers calls that began in the last 24 hours, one at a time, newest first. An
   officer stuck in `wrap_up` after a demo has an unsaved wrap-up: save it.
+- **A call the officer left while it still runs is owed too (G610,
+  ADR-0047).** After **Transfer**, or when their reconnect grace lapses and the
+  call goes back to the queue, the officer stays in `wrap_up` until they save
+  it, through a reload as well; before, a reload reported `available` and they
+  could be offered the next caller or named in a transfer. The wrap-up shows
+  only **Keep ticket open with note** while the call runs (the server refuses
+  to resolve a live call's ticket). While their media is reconnecting, or while
+  they hold a claim on the call, a save is refused (409): rejoin, or join or
+  release the claim, first.
 - **The call summary no longer touches a ticket's SLA.** It adds its note only
   when the ticket has none and never stamps a first response.
 - **Retention on Postgres.** Resolved tickets are purged whether or not the

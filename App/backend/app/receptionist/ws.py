@@ -825,10 +825,17 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
 
                 room.pipeline_runner_task = asyncio.create_task(runner.run(task))
                 max_call_s = get_max_call_s()
-                # A dropped control socket raises out of receive_text(), and
-                # CallRoom.end() does not own the Pipecat runner: without this
-                # finally the runner outlived the call. (The warning before the
-                # ceiling is _call_clock's, on every transport.)
+                # What this socket may send (G304, ADR-0047). It carries the
+                # caller's control messages only (the audio is LiveKit's), and
+                # each one can become a pipeline frame (a `text_turn` is a model
+                # turn): text is held to the budget the officer's socket has,
+                # and a binary frame is dropped. It ended the call when
+                # receive_text() raised on it.
+                gate = FrameGate("caller", call_id=call_id)
+                # A dropped control socket ends the loop, and CallRoom.end()
+                # does not own the Pipecat runner: without this finally the
+                # runner outlived the call. (The warning before the ceiling is
+                # _call_clock's, on every transport.)
                 try:
                     while room.state.mode != "ended":
                         elapsed_s = time.time() - room.state.started_at
@@ -837,11 +844,24 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                             await task.cancel()
                             break
                         try:
-                            raw = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
+                            message = await asyncio.wait_for(websocket.receive(), timeout=1.0)
                         except asyncio.TimeoutError:
                             if room.pipeline_runner_task.done():
                                 await room.end("media_pipeline_stopped")
                                 break
+                            continue
+                        if message.get("type") == "websocket.disconnect":
+                            logger.info("Caller disconnected: %s", call_id)
+                            break
+                        raw = message.get("text")
+                        if message.get("bytes") is not None:
+                            verdict = gate.unexpected(message["bytes"])
+                        else:
+                            verdict = gate.text(raw or "")
+                        if verdict is Verdict.CLOSE:
+                            await close_flooded(websocket, gate)
+                            break
+                        if verdict is not Verdict.PASS or not raw:
                             continue
                         data = _control_message(raw)
                         if data is None:
@@ -908,7 +928,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                     # Audio is not used in fallback mode, but a flood of it still
                     # costs the loop: the budget applies as it does on Pipecat (G304).
                     if serializer.admit_audio(message["bytes"]) is Verdict.CLOSE:
-                        await close_flooded(websocket)
+                        await close_flooded(websocket, serializer._frames)
                         break
                 elif "text" in message and message["text"]:
                     data = _control_message(message["text"])
@@ -1191,15 +1211,29 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
                 "token": observer_token,
                 "can_publish": False,
             }))
+            # A listener sends nothing after sign-in; what it does send is
+            # read, discarded and held to the staff text budget, and a binary
+            # frame is dropped rather than cutting the listener off (G304,
+            # ADR-0047). Counted under the staff side, `officer`.
+            gate = FrameGate("officer", call_id=call_id)
             try:
                 while room.state.mode == "bridged":
                     if _expired(token_exp):
                         await websocket.close(code=4401)
                         break
                     try:
-                        await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
+                        message = await asyncio.wait_for(websocket.receive(), timeout=1.0)
                     except asyncio.TimeoutError:
                         continue
+                    if message.get("type") == "websocket.disconnect":
+                        break
+                    if message.get("bytes") is not None:
+                        verdict = gate.unexpected(message["bytes"])
+                    else:
+                        verdict = gate.text(message.get("text") or "")
+                    if verdict is Verdict.CLOSE:
+                        await close_flooded(websocket, gate)
+                        break
             except Exception:
                 pass
             finally:
@@ -1364,6 +1398,12 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
                 metadata={"actor_role": role, "transport": "livekit"},
                 tenant_id=tenant_id or "default",
             )
+            # The officer's text budget, as on their audio socket (G304,
+            # ADR-0047). The audio is LiveKit's, so a binary frame is dropped:
+            # it put the officer into the reconnect grace when receive_text()
+            # raised on it. A flood that lasts closes the socket, and the
+            # finally below takes the officer into the grace as for any close.
+            gate = FrameGate("officer", call_id=call_id)
             while room.state.mode == "bridged" or (
                 room.state.mode == "transferring"
                 and room.state.reconnecting_officer == user_id
@@ -1372,8 +1412,20 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
                     await websocket.close(code=4401)
                     break
                 try:
-                    raw = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
+                    message = await asyncio.wait_for(websocket.receive(), timeout=1.0)
                 except asyncio.TimeoutError:
+                    continue
+                if message.get("type") == "websocket.disconnect":
+                    break
+                raw = message.get("text")
+                if message.get("bytes") is not None:
+                    verdict = gate.unexpected(message["bytes"])
+                else:
+                    verdict = gate.text(raw or "")
+                if verdict is Verdict.CLOSE:
+                    await close_flooded(websocket, gate)
+                    break
+                if verdict is not Verdict.PASS or not raw:
                     continue
                 data = _control_message(raw)
                 if data is not None and data.get("type") == "hangup":
@@ -1443,7 +1495,7 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
             else:
                 continue
             if verdict is Verdict.CLOSE:
-                await close_flooded(websocket)
+                await close_flooded(websocket, frame_gate)
                 break
             if verdict is Verdict.PASS and frame:
                 await officer_leg.handle_officer_message(frame)

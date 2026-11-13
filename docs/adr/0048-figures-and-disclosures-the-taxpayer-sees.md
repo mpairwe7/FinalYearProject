@@ -1,4 +1,4 @@
-# ADR-0047: A figure, a date or a "verified" mark reaches the taxpayer only when it is true
+# ADR-0048: A figure, a date or a "verified" mark reaches the taxpayer only when it is true
 
 ## Status
 

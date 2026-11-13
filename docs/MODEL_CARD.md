@@ -228,7 +228,7 @@ Evaluated across 16 Ugandan tax heads (`paye`, `vat`, `withholding`, `rental`, `
    page gives no tax figure. Deadline reminders are offered only for the statutory
    monthly 15th. Document totals are labelled as read by machine. A badge still does not
    establish that an answer is correct, and web evidence can still earn "Well grounded"
-   (G651). See [ADR-0047](adr/0047-figures-and-disclosures-the-taxpayer-sees.md) and the
+   (G651). See [ADR-0048](adr/0048-figures-and-disclosures-the-taxpayer-sees.md) and the
    [November UI audit](plans/intelligent-ui-integration-audit-2026-11-13.md).
 
 ---

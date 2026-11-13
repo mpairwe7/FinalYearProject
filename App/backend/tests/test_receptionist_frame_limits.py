@@ -19,7 +19,7 @@ import logging
 import unittest
 import uuid
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from app import database as db
 from app.receptionist import desk, frame_budget, telemetry, ws
@@ -166,6 +166,35 @@ class FrameGateTests(unittest.TestCase):
         self.assertEqual(self.counted("caller", "size"), 1)
         self.assertEqual(self.counted("caller", "rate"), 0)
 
+    def test_a_frame_over_64_kib_closes_the_socket_at_once_with_1009(self):
+        """Dropping a huge frame does not bound what a peer sends: uvicorn has
+        read up to 16 MiB of it already, and one a little over a second apart
+        never adds up to a flood. Nothing on a call socket comes near 64 KiB
+        (a frame is 640 B), so one closes it (ADR-0047)."""
+        for send in (
+            lambda g: g.audio(b"\x00" * (frame_budget.MAX_FRAME_HARD_BYTES + 2)),
+            lambda g: g.text("x" * (frame_budget.MAX_FRAME_HARD_BYTES + 1)),
+            lambda g: g.unexpected(b"\x00" * (frame_budget.MAX_FRAME_HARD_BYTES + 1)),
+        ):
+            gate = self.gate("caller")
+            self.assertIs(send(gate), Verdict.CLOSE)
+            self.assertEqual((gate.close_code, gate.close_reason), (1009, "frame too large"))
+            self.assertIs(gate.audio(FRAME), Verdict.DROP)  # closed: nothing more is handed on
+        self.assertEqual(self.counted("caller", "size"), 3)
+        # Between the drop cap and the hard cap a frame is still only dropped.
+        gate = self.gate("caller")
+        self.assertIs(gate.audio(b"\x00" * (frame_budget.MAX_FRAME_HARD_BYTES - 2)), Verdict.DROP)
+        self.assertEqual((gate.close_code, gate.close_reason), (1008, "too many frames"))
+
+    def test_a_call_id_cannot_forge_a_log_line(self):
+        # The call id comes from the request (CodeQL py/log-injection).
+        gate = frame_budget.FrameGate("caller", call_id="call_x\nFAKE ERROR line", clock=self.clock)
+        with self.assertLogs(frame_budget.logger, level="WARNING") as logs:
+            gate.audio(b"\x00" * (frame_budget.MAX_FRAME_HARD_BYTES + 2))
+        self.assertTrue(logs.records)
+        for record in logs.records:
+            self.assertNotIn("\n", record.getMessage())
+
     def test_an_odd_length_frame_is_dropped_as_malformed(self):
         gate = self.gate()
         self.assertIs(gate.audio(b"\x00" * 641), Verdict.DROP)
@@ -204,6 +233,19 @@ class FrameGateTests(unittest.TestCase):
         self.assertEqual(self.counted("officer", "rate"), 5)
         self.clock.advance(10.0)
         self.assertEqual([gate.text('{"type":"ping"}') for _ in range(15)], [Verdict.PASS] * 15)
+
+    def test_a_frame_the_socket_never_takes_is_dropped_as_malformed(self):
+        # A binary frame on a LiveKit control socket (ADR-0047): one is
+        # dropped and counted; a stream of them that lasts 5 s is a flood.
+        gate = self.gate("caller")
+        self.assertIs(gate.unexpected(b"\x00\x01"), Verdict.DROP)
+        self.assertEqual(self.counted("caller", "malformed"), 1)
+        self.assertIs(gate.text('{"type":"hangup"}'), Verdict.PASS)  # spends nothing of the text budget
+        verdicts = []
+        for _ in range(600):
+            self.clock.advance(0.01)
+            verdicts.append(gate.unexpected(b"\x00\x01"))
+        self.assertIn(Verdict.CLOSE, verdicts)
 
     def test_text_and_audio_do_not_spend_each_others_budget(self):
         gate = self.gate()
@@ -460,6 +502,15 @@ class OfficerSocketTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.caller.audio), 2)
         self.assertEqual(self.counted("officer", "size"), 1)
 
+    async def test_a_frame_over_64_kib_closes_the_officers_socket_with_1009(self):
+        task, socket = await self.officer_sends([FRAME, b"\x00" * (frame_budget.MAX_FRAME_HARD_BYTES + 2), FRAME])
+
+        done, _pending = await asyncio.wait({task}, timeout=10.0)
+
+        self.assertTrue(done, "a 64 KiB frame did not end the officer's socket")
+        self.assertEqual((socket.closed, socket.close_reason), (1009, "frame too large"))
+        self.assertEqual(len(self.caller.audio), 1)
+
     async def test_an_odd_length_frame_is_dropped_instead_of_ending_the_leg(self):
         # np.frombuffer raised on it and the officer fell into the reconnect grace.
         task, socket = await self.officer_sends([FRAME, b"\x00" * 641, FRAME])
@@ -577,6 +628,10 @@ class CallerSerializerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(await self.serializer.deserialize(FRAME))
         self.assertEqual(self.counted("caller", "size"), 1)
         self.assertEqual(self.socket.closed, [])
+
+    async def test_a_frame_over_64_kib_closes_the_callers_socket_with_1009(self):
+        self.assertIsNone(await self.serializer.deserialize(b"\x00" * (frame_budget.MAX_FRAME_HARD_BYTES + 2)))
+        self.assertEqual(self.socket.closed, [(1009, "frame too large")])
 
     async def test_an_odd_length_frame_is_dropped_as_malformed(self):
         self.assertIsNone(await self.serializer.deserialize(b"\x00" * 641))
@@ -748,3 +803,324 @@ class CallerSocketTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((caller.closed, caller.close_reason), (1008, "too many frames"))
         self.assertIsNone(task.exception())
         self.assertGreater(len(caller.frames), 0, "the socket kept reading after it was closed")
+
+
+# ---------------------------------------------------------------------------
+# The control sockets of a LiveKit call
+# ---------------------------------------------------------------------------
+#
+# On a LiveKit call the audio goes over WebRTC, and the browser keeps a text
+# socket for control: the caller's call socket, the officer's audio socket and
+# a listener's. None of them limited what it took in (G304, ADR-0047). Every
+# text frame the caller sent was handed to the pipeline (a `text_turn` queues
+# a model turn), and a binary frame made `receive_text()` raise: it ended the
+# caller's call, put the officer into the reconnect grace and cut a listener
+# off.
+
+
+class StarletteSocket(ScriptedSocket):
+    """A scripted socket whose ``receive_text`` behaves like Starlette's: the next frame's text.
+
+    A binary frame has no text, and Starlette's ``receive_text`` raises on it.
+    """
+
+    async def receive_text(self) -> str:
+        if self._first:
+            return self._first.pop(0)
+        message = await self.receive()
+        return message["text"]
+
+
+async def played_out_or_ended(task: asyncio.Task, socket: StarletteSocket) -> None:
+    """Until the socket has played its script, or its endpoint has returned (the call ended under it)."""
+    drained = asyncio.ensure_future(socket.drained.wait())
+    try:
+        await asyncio.wait({task, drained}, timeout=10.0, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        drained.cancel()
+
+
+def counts_before() -> dict[tuple[str, str], float]:
+    return {
+        (side, reason): dropped(side, reason)
+        for side in ("caller", "officer")
+        for reason in ("rate", "size", "malformed")
+    }
+
+
+class LiveKitCallerControlTests(unittest.IsolatedAsyncioTestCase):
+    """The caller's control socket on a LiveKit call takes control messages within the text budget."""
+
+    async def asyncSetUp(self) -> None:
+        import os
+        import sys
+
+        from app import ws_concurrency
+
+        db.init_db()
+        init_receptionist_schema()
+        ws_concurrency.reset()
+        self.addCleanup(ws_concurrency.reset)
+        self.clock = FakeClock()
+        seen = self.seen = SimpleNamespace(frames=[], cancelled=asyncio.Event())
+
+        class FakeTask:
+            stop: asyncio.Event | None = None
+
+            async def cancel(self) -> None:
+                seen.cancelled.set()
+                if self.stop is not None:
+                    self.stop.set()
+
+            async def queue_frame(self, frame) -> None:
+                seen.frames.append(frame)
+
+        class FakeRunner:
+            async def run(self, task: FakeTask) -> None:
+                task.stop = asyncio.Event()
+                await task.stop.wait()
+
+        class FakeTransport:
+            def event_handler(self, _name):
+                return lambda fn: fn
+
+            def get_participants(self):
+                return []
+
+        # The runner is the only part of Pipecat this loop touches; a stand-in
+        # module lets it run where Pipecat is not installed.
+        runner_module = SimpleNamespace(PipelineRunner=FakeRunner)
+        brain = SimpleNamespace(say_greeting=AsyncMock())
+        for patcher in (
+            patch.dict(sys.modules, {"pipecat.pipeline.runner": runner_module}),
+            patch.dict(os.environ, {"LIVEKIT_URL": "wss://rtc.example.test"}),
+            patch.object(frame_budget, "_now", self.clock),
+            patch.object(hub, "publish_lobby"),
+            patch.object(ws, "_voice_receptionist_enabled", return_value=True),
+            patch.object(ws.livekit, "enabled", return_value=True),
+            patch.object(ws.livekit, "mint_token", return_value="room-jwt"),
+            patch.object(ws.livekit, "close_room", AsyncMock()),
+            patch.object(ws, "build_call_pipeline", return_value=(FakeTask(), FakeTransport(), brain)),
+            patch.object(ws.call_brief, "start"),
+            patch.object(ws.call_brief, "stop"),
+            patch.object(ws.risk, "start"),
+            patch.object(ws.risk, "stop"),
+            patch.object(ws, "generate_call_summary"),
+        ):
+            patcher.start()
+        self.addCleanup(patch.stopall)
+        self.before = counts_before()
+
+    def counted(self, side: str, reason: str) -> float:
+        return dropped(side, reason) - self.before[(side, reason)]
+
+    async def call(self, frames: list, step: float) -> tuple[asyncio.Task, StarletteSocket]:
+        """The caller starts a LiveKit call, then sends *frames* on its control socket, *step* seconds apart."""
+        start = json.dumps({"type": "call_start", "locale": "en", "voice_consent_accepted": True})
+        caller = StarletteSocket(frames, self.clock, step, first=[start])
+        task = asyncio.create_task(ws.call_stream_endpoint(caller))
+        self.addAsyncCleanup(stop, task)
+        return task, caller
+
+    async def played_out(self, task: asyncio.Task, caller: StarletteSocket) -> None:
+        await played_out_or_ended(task, caller)
+
+    def assert_call_goes_on(self, task: asyncio.Task, caller: StarletteSocket) -> None:
+        self.assertFalse(task.done(), "the caller's call ended")
+        self.assertIsNone(caller.closed)
+        self.assertFalse(self.seen.cancelled.is_set(), "the media pipeline was stopped")
+
+    async def test_the_sixteenth_control_message_in_ten_seconds_is_dropped_and_not_forwarded(self):
+        # Each `text_turn` is a model turn: 20 at once were 20 turns.
+        turn = json.dumps({"type": "text_turn", "text": "What is my TIN?"})
+        task, caller = await self.call([turn] * 20, step=0.0)
+
+        await self.played_out(task, caller)
+
+        self.assert_call_goes_on(task, caller)
+        self.assertEqual(len(self.seen.frames), 15)
+        self.assertEqual(self.counted("caller", "rate"), 5)
+
+    async def test_a_binary_frame_is_dropped_and_the_call_goes_on(self):
+        language = json.dumps({"type": "set_language", "language": "sw"})
+        task, caller = await self.call([b"\x00\x01" * 320, language], step=0.02)
+
+        await self.played_out(task, caller)
+
+        self.assert_call_goes_on(task, caller)
+        self.assertEqual([frame.language for frame in self.seen.frames], ["sw"])
+        self.assertEqual(self.counted("caller", "malformed"), 1)
+
+    async def test_a_flood_that_lasts_five_seconds_closes_the_socket_with_1008_and_stops_the_pipeline(self):
+        ping = json.dumps({"type": "ping"})
+        task, caller = await self.call([ping] * 800, step=0.01)
+
+        done, _pending = await asyncio.wait({task}, timeout=10.0)
+
+        self.assertTrue(done, "a sustained flood did not end the caller's control socket")
+        self.assertIsNone(task.exception())
+        self.assertEqual((caller.closed, caller.close_reason), (1008, "too many frames"))
+        self.assertGreater(len(caller.frames), 0, "the socket kept reading after it was closed")
+        self.assertGreater(self.counted("caller", "rate"), 0)
+        # As for any close: the pipeline is stopped and the call torn down.
+        self.assertTrue(self.seen.cancelled.is_set(), "the media pipeline outlived the call")
+        ready = next(m for m in caller.sent if isinstance(m, dict) and m.get("type") == "call_ready")
+        self.assertIsNone(registry.get(ready["call_id"]))
+
+
+class LiveKitStaffControlTests(unittest.IsolatedAsyncioTestCase):
+    """The officer's and a listener's control sockets on a LiveKit call take frames within the text budget."""
+
+    async def asyncSetUp(self) -> None:
+        import os
+
+        from app import ws_concurrency
+
+        db.init_db()
+        init_receptionist_schema()
+        ws_concurrency.reset()
+        self.addCleanup(ws_concurrency.reset)
+        self.call_id = f"call_lkctl_{uuid.uuid4().hex[:8]}"
+        create_call(self.call_id, conversation_id=f"conv_{self.call_id}", status="transferring", tenant_id="default")
+        self.room = await registry.create(self.call_id, f"conv_{self.call_id}", tenant_id="default")
+        self.room.state.mode = "transferring"
+        self.room.state.livekit_room = f"ura-{self.call_id}"
+        self.clock = FakeClock()
+        for patcher in (
+            patch.dict(os.environ, {"LIVEKIT_URL": "wss://rtc.example.test"}),
+            patch.object(frame_budget, "_now", self.clock),
+            patch.object(hub, "publish_lobby"),
+            patch.object(hub, "publish_call"),
+            patch.object(ws, "_voice_receptionist_enabled", return_value=True),
+            patch.object(ws.livekit, "enabled", return_value=True),
+            patch.object(ws.livekit, "mint_token", return_value="room-jwt"),
+            patch.object(ws.livekit, "close_room", AsyncMock()),
+            patch.object(ws.livekit, "revoke_participant", AsyncMock()),
+            # The officer's media is in the room as soon as it is asked for.
+            patch.object(self.room, "wait_for_participant", AsyncMock(return_value=True)),
+        ):
+            patcher.start()
+        self.addCleanup(patch.stopall)
+        self.before = counts_before()
+
+    async def asyncTearDown(self) -> None:
+        desk._cancel_claim_timer(self.room)
+        desk._cancel_reconnect_timer(self.room)
+        desk._cancel_reservation(self.room)
+        await registry.remove(self.call_id)
+
+    def counted(self, side: str, reason: str) -> float:
+        return dropped(side, reason) - self.before[(side, reason)]
+
+    def connect(self, socket: StarletteSocket, user: str, role: str) -> asyncio.Task:
+        session = patch.object(ws, "_staff_session", return_value=(user, "default", role, None))
+        session.start()
+        self.addCleanup(session.stop)
+        task = asyncio.create_task(ws.officer_audio_endpoint(socket, self.call_id))
+        self.addAsyncCleanup(stop, task)
+        return task
+
+    async def officer_sends(self, frames: list, step: float = 0.02) -> tuple[asyncio.Task, StarletteSocket]:
+        """Okello takes the call, his media joins, then his control socket sends *frames*."""
+        await desk.claim(self.call_id, "okello")
+        socket = StarletteSocket(frames, self.clock, step)
+        return self.connect(socket, "okello", "ura_staff"), socket
+
+    async def listener_sends(self, frames: list, step: float = 0.02) -> tuple[asyncio.Task, StarletteSocket]:
+        """An auditor listens to the bridged call, and their console sends *frames*."""
+        await desk.claim(self.call_id, "okello")
+        await desk.bridge(self.room, None, "okello", speech_model=None)
+        socket = StarletteSocket(frames, self.clock, step)
+        socket.query_params = {"listen": "true"}
+        return self.connect(socket, "auditor1", "ura_auditor"), socket
+
+    async def played_out(self, task: asyncio.Task, socket: StarletteSocket) -> None:
+        await played_out_or_ended(task, socket)
+
+    def assert_officer_still_on_the_call(self, task: asyncio.Task, socket: StarletteSocket) -> None:
+        self.assertFalse(task.done(), "the officer's control socket ended")
+        self.assertIsNone(socket.closed)
+        self.assertEqual((self.room.state.mode, self.room.state.officer_id), ("bridged", "okello"))
+        self.assertFalse(self.room.state.reconnecting_officer, "the officer was put into the reconnect grace")
+
+    async def test_text_frames_from_the_officer_are_limited_to_15_in_10_seconds(self):
+        ping = json.dumps({"type": "ping"})
+        task, socket = await self.officer_sends([ping] * 20, step=0.0)
+
+        await self.played_out(task, socket)
+
+        self.assert_officer_still_on_the_call(task, socket)
+        self.assertEqual(self.counted("officer", "rate"), 5)
+
+    async def test_a_binary_frame_from_the_officer_is_dropped_without_the_reconnect_grace(self):
+        task, socket = await self.officer_sends([b"\x00\x01" * 320])
+
+        await self.played_out(task, socket)
+
+        self.assert_officer_still_on_the_call(task, socket)
+        self.assertEqual(self.counted("officer", "malformed"), 1)
+
+    async def test_a_binary_frame_over_64_kib_closes_the_officers_control_socket_with_1009(self):
+        task, socket = await self.officer_sends([b"\x00" * (frame_budget.MAX_FRAME_HARD_BYTES + 2)])
+
+        done, _pending = await asyncio.wait({task}, timeout=10.0)
+
+        self.assertTrue(done, "a 64 KiB binary frame did not end the officer's control socket")
+        self.assertEqual((socket.closed, socket.close_reason), (1009, "frame too large"))
+
+    async def test_a_flood_from_the_officer_that_lasts_five_seconds_closes_with_1008_and_starts_the_grace(self):
+        ping = json.dumps({"type": "ping"})
+        task, socket = await self.officer_sends([ping] * 800, step=0.01)
+
+        done, _pending = await asyncio.wait({task}, timeout=10.0)
+
+        self.assertTrue(done, "a sustained flood did not end the officer's control socket")
+        self.assertIsNone(task.exception())
+        self.assertEqual((socket.closed, socket.close_reason), (1008, "too many frames"))
+        self.assertGreater(len(socket.frames), 0, "the socket kept reading after it was closed")
+        self.assertGreater(self.counted("officer", "rate"), 0)
+        # As for any close: the caller is kept, and the officer has the grace to come back.
+        self.assertEqual(
+            (self.room.state.mode, self.room.state.reconnecting_officer), ("transferring", "okello")
+        )
+
+    async def test_the_officer_hanging_up_within_the_budget_still_ends_the_call(self):
+        task, socket = await self.officer_sends([json.dumps({"type": "ping"}), json.dumps({"type": "hangup"})])
+
+        done, _pending = await asyncio.wait({task}, timeout=5.0)
+
+        self.assertTrue(done)
+        self.assertEqual((self.room.state.mode, self.room.state.end_reason), ("ended", "officer_ended"))
+        self.assertNotEqual(socket.closed, 1008)
+
+    async def test_text_frames_from_a_listener_are_limited_and_the_listener_stays(self):
+        ping = json.dumps({"type": "ping"})
+        task, socket = await self.listener_sends([ping] * 20, step=0.0)
+
+        await self.played_out(task, socket)
+
+        self.assertFalse(task.done(), "the listener was cut off")
+        self.assertIsNone(socket.closed)
+        self.assertEqual(len(self.room.state.livekit_observer_identities), 1)
+        self.assertEqual(self.counted("officer", "rate"), 5)
+
+    async def test_a_binary_frame_from_a_listener_is_dropped_and_the_listener_stays(self):
+        task, socket = await self.listener_sends([b"\x00\x01" * 320])
+
+        await self.played_out(task, socket)
+
+        self.assertFalse(task.done(), "the listener was cut off")
+        self.assertIsNone(socket.closed)
+        self.assertEqual(self.counted("officer", "malformed"), 1)
+
+    async def test_a_flood_from_a_listener_that_lasts_five_seconds_closes_with_1008(self):
+        ping = json.dumps({"type": "ping"})
+        task, socket = await self.listener_sends([ping] * 800, step=0.01)
+
+        done, _pending = await asyncio.wait({task}, timeout=10.0)
+
+        self.assertTrue(done, "a sustained flood did not end the listener's socket")
+        self.assertEqual((socket.closed, socket.close_reason), (1008, "too many frames"))
+        # Out of the room as for any close; the call itself goes on.
+        self.assertEqual(self.room.state.livekit_observer_identities, set())
+        self.assertEqual(self.room.state.mode, "bridged")

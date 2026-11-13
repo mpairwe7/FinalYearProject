@@ -2,7 +2,7 @@
 
 Updated 2026-11-13 for phase 1 of the
 [13 November audit](../plans/intelligent-ui-integration-audit-2026-11-13.md)
-(ADR-0047, G618–G624). The 2026-10-30 baseline (`87460457`, ADR-0018) and its
+(ADR-0048, G618–G624). The 2026-10-30 baseline (`87460457`, ADR-0018) and its
 [findings](../plans/intelligent-ui-integration-audit-2026-10.md) follow below.
 
 ## Local gates
@@ -33,7 +33,7 @@ live adversarial traffic.
 
 ## Local results — 13 November 2026
 
-Phase 1 (ADR-0047) on `fix/intelligent-ui-p1-figures-and-disclosures-2026-11`, from
+Phase 1 (ADR-0048) on `fix/intelligent-ui-p1-figures-and-disclosures-2026-11`, from
 `dev` at `882a99b5`; Node 24.19.0, Bun 1.3.14 (the repository pins 1.4.3; CI uses
 the pin), Python 3.11 (`.venv`), Playwright Chromium 1248 against `next dev` on
 `127.0.0.1:3100` (`CI=1 BASE_URL=http://127.0.0.1:3100`). The laptop was on battery.
@@ -97,7 +97,7 @@ Registry facts are unchanged by this frontend change: 72 tools in 18 namespaces,
 
 ## Phase 1 checks on the Space (13 November 2026)
 
-What the taxpayer sees about a figure is true (ADR-0047). Run after the roll, against
+What the taxpayer sees about a figure is true (ADR-0048). Run after the roll, against
 `https://landwind22-ura-chatbot.hf.space`, in a private window:
 
 1. **Offline page (G618).** Load `/offline.html` directly. It shows no rate, amount,

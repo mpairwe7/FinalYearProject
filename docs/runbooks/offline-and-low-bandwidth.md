@@ -2,7 +2,7 @@
 
 **Scope:** Frontend PWA & service worker, offline fallback page, low-bandwidth network detection, and backend response compression.  
 **Audience:** Frontend and backend engineers, SREs, QA engineers.  
-**Updated:** 13 November 2026 (G618, ADR-0047: no tax figure offline)
+**Updated:** 13 November 2026 (G618, ADR-0048: no tax figure offline)
 
 ---
 

@@ -223,7 +223,7 @@ class BrowserCallSerializer(FrameSerializer):
         if isinstance(data, bytes):
             verdict = self.admit_audio(data)
             if verdict is Verdict.CLOSE:
-                await close_flooded(getattr(self.room, "caller_ws", None))
+                await close_flooded(getattr(self.room, "caller_ws", None), self._frames)
             if verdict is not Verdict.PASS:
                 return None
             audio_bytes = data

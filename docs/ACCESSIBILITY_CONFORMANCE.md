@@ -79,7 +79,7 @@ them.
   English literals outside the dictionary. The handoff, voice and offline keys are
   complete in all five languages. The rest is tracked as G655; strings added since
   are machine-assisted and not yet reviewed by first-language speakers (G275).
-- **AI-specific status and trust marks (2026-11-13, ADR-0047):** an answer stopped
+- **AI-specific status and trust marks (2026-11-13, ADR-0048):** an answer stopped
   at its deadline is announced as incomplete; answer badges, the monthly filing
   reminder and the document view's verification labels are dictionary keys; the
   document view's extraction warnings are a `role="status"` region; the offline

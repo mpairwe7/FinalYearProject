@@ -1,7 +1,7 @@
 # Call receptionist assurance review — 11 November 2026
 
-Status: phases 1 to 7 part A implemented and on the Space; phase 7 part B (G591) implemented on `fix/receptionist-p7b-cancel-stale-runs-2026-11`. Phase 5 (G306 for one container, PR 718) has been live since 2026-11-12 (`sha-4609a1c`), and its live probes passed; a real officer handoff on the Space has not been run yet.
-Baseline: `dev` at `9a5043db`. Decisions: [ADR-0039](../adr/0039-call-handoff-and-caller-safety.md) (phase 1), [ADR-0040](../adr/0040-call-records-and-accountability.md) (phase 2), [ADR-0041](../adr/0041-receptionist-starts-safely-fails-visibly.md) (phase 3), [ADR-0042](../adr/0042-call-screens-say-what-happened.md) (phase 4), [ADR-0043](../adr/0043-one-call-process.md) (phase 5), [ADR-0044](../adr/0044-flag-changes-reach-every-process.md) (phase 6), [ADR-0045](../adr/0045-call-sockets-wrap-ups-and-a-dead-call-process.md) (phase 7 part A), [ADR-0046](../adr/0046-superseded-call-turns-stop.md) (phase 7 part B).
+Status: phases 1 to 7 implemented and on the Space; phase 8 part C (G610, G304 LiveKit control) implemented on `fix/receptionist-p8-owed-live-livekit-limit-2026-11`. Phase 5 (G306 for one container, PR 718) has been live since 2026-11-12 (`sha-4609a1c`), and its live probes passed; a real officer handoff on the Space has not been run yet.
+Baseline: `dev` at `9a5043db`. Decisions: [ADR-0039](../adr/0039-call-handoff-and-caller-safety.md) (phase 1), [ADR-0040](../adr/0040-call-records-and-accountability.md) (phase 2), [ADR-0041](../adr/0041-receptionist-starts-safely-fails-visibly.md) (phase 3), [ADR-0042](../adr/0042-call-screens-say-what-happened.md) (phase 4), [ADR-0043](../adr/0043-one-call-process.md) (phase 5), [ADR-0044](../adr/0044-flag-changes-reach-every-process.md) (phase 6), [ADR-0045](../adr/0045-call-sockets-wrap-ups-and-a-dead-call-process.md) (phase 7 part A), [ADR-0046](../adr/0046-superseded-call-turns-stop.md) (phase 7 part B), [ADR-0047](../adr/0047-wrap-ups-owed-while-live-and-livekit-control-limits.md) (phase 8 part C).
 The [30 October review](receptionist-assurance-2026-10-30.md) covered teardown,
 media isolation and draft evidence; this one covers the whole call flow: what the
 AI says, the handoff to an officer, the officer's desk, the two browser clients,
@@ -244,6 +244,23 @@ Left open by this part:
 | G591 | A call turn's model run carries a cancel token (a context variable, so every thread of the run sees it). It is set when the turn is superseded: a barge-in, a new turn, the 25 s timeout, a language switch, or the call leaving `ai` mode. `generate` checks it at each stage boundary (each traced stage, before the local model call, each continuation round, the agentic loop, each cloud hop, translation, each step of a Luganda answer) and stops with `TurnCancelled`, a `BaseException` the pipeline's fallbacks do not catch. A stopped run records no completed turn, gives its breaker slot back without a failure, and is counted in `turn_cancelled_total{stage}`. The chat path sets no token, so its checks do nothing. |
 
 Accepted limit: an HTTP request already in flight runs to its own timeout.
+
+## Phase 8 part C — wrap-ups owed while a call runs; LiveKit control limits
+
+[ADR-0047](../adr/0047-wrap-ups-owed-while-live-and-livekit-control-limits.md).
+Part D (G304, revocation before a token expires) has its own record.
+
+| Gap | What changed |
+| --- | --- |
+| G610 | The owed-wrap-up lookup also returns a live call the officer has left (passed on, or their reconnect grace lapsed): it lists them in `handled_by`, holds no wrap-up of theirs, and its row no longer names them. `desk.wrapup` refuses an officer who still holds a live call in any form (on it, reconnecting, claimed). The end of the grace moves the officer to `wrap_up` instead of `available`. The wrap-up form offers only keep-open on a live call. |
+| G304 | The LiveKit caller, officer and listener control loops use `FrameGate`: 15 text frames per 10 s, 16 KiB at most, a binary frame dropped as malformed instead of ending the call, and only a five-second flood closes 1008. |
+
+Left open by this part:
+
+- **A callback during the officer's grace,** or during the media revocation that
+  follows a lapse, leaves the old claim in place: the officer's save is refused
+  until they release it or the call ends.
+- **Revocation before a token expires** (G304, part D).
 
 ## Not in scope
 
