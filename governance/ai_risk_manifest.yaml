@@ -303,7 +303,15 @@ eu_ai_act:
   transparency_obligations:
     - requirement: "Art. 50(1) — Users informed they are interacting with AI"
       status: "implemented"
-      evidence: "App/frontend/ (UI branding as AI chatbot)"
+      evidence: >
+        Text chat: the composer footer says "URA's AI assistant can make mistakes" in all five
+        languages (G170). Voice mode, which replaces the composer, shows the same notice in the
+        dock and says aloud at the start of each voice session's first answer that an AI is
+        speaking (G647, ADR-0052; Commission guidelines C(2026) 5054: spoken at the start of a
+        voice interaction). Calls: the pre-call notice (G607).
+      verified_by:
+        - "App/frontend/src/__tests__/components/VoiceModeDock.test.tsx"
+        - "App/frontend/e2e/voice.spec.ts"
     - requirement: "Art. 50(2) — AI-generated content marked"
       status: "partial"
       evidence: >
@@ -674,6 +682,7 @@ owasp_agentic_2026:
       live_web_assurance: "ADR-0021: a failed live check is disclosed on every serving path, commentary and search summaries are labelled as such, and a market rate is described as an estimate. Disclosures reach the audit row."
       receptionist_assurance: "ADR-0020: draft notes explicitly leave resolution and understanding unverified; recorded officer speech does not establish statutory advice. Wrap-up ownership/atomic writes remain G305."
       call_handoff_assurance: "ADR-0039: the call says an officer is coming only after the transfer has checked the queue flag and staffing, and offers none while handoffs are off (G572); it ends a call only on a goodbye that is not a question, never during a caller's reply to the closing line (G573); an answer finished after the caller went on hold is dropped (G574); an answer the spoken-figure guard withholds is put on screen as written and the caller is told so, instead of the turn crashing (G575)."
+      voice_assurance: "ADR-0052: voice mode says aloud what the screen says: that an AI is speaking (G647), an answer's reliability caveat (G646), and that a reading was partial, after which it does not reopen the microphone (G645); a spoken turn is not sent into a chat opened while it was transcribed (G648)."
       officer_evidence_assurance: "ADR-0051: an officer taking over a case sees whether the AI's answer was checked (claim check, withheld figure, judge revision and confidence labelled as a model's, sources reviewed) and a reused ticket carries the answers given since, the new reason and the latest evidence (G640, G641); if that refresh fails it is logged, counted (ticket_refresh_failed_total) and flagged on the handoff (ticket_refresh_failed), and the ticket keeps its earlier snapshot; a machine translation of the taxpayer is labelled (G642)."
       staff_controls_assurance: "ADR-0050: a hotfix that changes what the model treats as law needs a statute and shows its effect before it applies, and every write is audited (G634); a translation that loses a figure is not sent (G635); canned replies cannot be sent while a [[…]] part remains, so the officer writes each result; the composer does not verify what is written or record a check (G636); the overrides and flags consoles state their real reach and durability (G637, G638); review findings are kept (G639). Limitation: discrepancies and answer overrides are not tenant-scoped (G634, G637)."
       human_handoff_assurance: "ADR-0049: a ticket any turn opens is followed in the chat (G625); no route promises an officer without a ticket (G627); a lost case hands the taxpayer back to the assistant instead of leaving them with a dead officer chat (G626); the case room states the real status (G628); an officer's machine-translated message is labelled with the original one click away (G631)."

@@ -1,7 +1,7 @@
 # Intelligent UI integration audit — 13 November 2026
 
-Status: phase 1 implemented (PR 727); phase 2 on `fix/intelligent-ui-p2-human-handoff-2026-11`; phase 3 on `fix/intelligent-ui-p3-staff-controls-2026-11`; phase 4 on `fix/intelligent-ui-p4-officer-evidence-2026-11`; phases 5 and 6 open.
-Baseline: `dev` at `882a99b5`. Decisions: [ADR-0048](../adr/0048-figures-and-disclosures-the-taxpayer-sees.md) (phase 1), [ADR-0049](../adr/0049-a-promise-of-a-human-is-kept.md) (phase 2), [ADR-0050](../adr/0050-staff-controls-say-what-they-do.md) (phase 3), [ADR-0051](../adr/0051-officers-see-what-the-ai-did.md) (phase 4).
+Status: phase 1 implemented (PR 727); phase 2 on `fix/intelligent-ui-p2-human-handoff-2026-11`; phase 3 on `fix/intelligent-ui-p3-staff-controls-2026-11`; phase 4 on `fix/intelligent-ui-p4-officer-evidence-2026-11`; phase 5 on `fix/intelligent-ui-p5-voice-and-capture-2026-11`; phase 6 open.
+Baseline: `dev` at `882a99b5`. Decisions: [ADR-0048](../adr/0048-figures-and-disclosures-the-taxpayer-sees.md) (phase 1), [ADR-0049](../adr/0049-a-promise-of-a-human-is-kept.md) (phase 2), [ADR-0050](../adr/0050-staff-controls-say-what-they-do.md) (phase 3), [ADR-0051](../adr/0051-officers-see-what-the-ai-did.md) (phase 4), [ADR-0052](../adr/0052-voice-says-what-the-screen-says.md) (phase 5).
 Follows the [30 October audit](intelligent-ui-integration-audit-2026-10.md) (UI-01 to UI-13, ADR-0018).
 
 That audit covered the chat's REST/SSE contract, action boundaries and the
@@ -134,13 +134,15 @@ All five were implemented, each with a test watched failing first. G641 does mor
 | G643 | Low | An auditor on `/admin/tickets` is offered "a — assign to me", which the API refuses silently. | Gate it on `isLiveOfficer`. |
 | G644 | Low | "Found helpful by taxpayers" shows 0% "Below target" when nothing was rated or the request failed. | Show "no ratings yet" and N. |
 
-## Phase 5 — voice and capture
+## Phase 5 — voice and capture (implemented, ADR-0052)
 
-| Gap | Severity | Finding | Planned fix |
+All five were implemented with a test watched failing first. G647's spoken disclosure is the first sentence of the session's first answer rather than a notice before the microphone opens (ADR-0052 says why). The browser test "dictation still works with no browser Speech API" failed once in three runs here, with no change to dictation; it is recorder timing and is noted for the QA owner.
+
+| Gap | Severity | Finding | Fix |
 | --- | --- | --- | --- |
 | G645 | High | A read-aloud that skips a sentence or is cut off counts as complete, and voice mode reopens the microphone; nothing tells the listener part was missing. | `complete` on the spoken outcome; on a partial reading, say so and do not reopen the microphone. |
-| G646 | High | Voice mode never speaks the answer's caveats ("Verify with URA", "human review recommended") or a failed answer; on a dropped stream the dock says replies are read aloud. | Speak a translated caveat and the incomplete or failed notice. |
-| G647 | Medium | Voice mode replaces the composer, whose footer is the only always-visible "AI" notice (EU AI Act Art. 50(1); Commission guidelines: spoken at the start). The manifest marks Art. 50(1) implemented with no `verified_by`. | A dock notice and a spoken disclosure when voice mode starts; `verified_by` in the manifest. |
+| G646 | High | Voice mode never speaks the answer's caveats ("Verify with URA", "human review recommended") or a failed answer; on a dropped stream the dock says replies are read aloud. | Speak a translated caveat before the answer, and show the incomplete or failed notice (in the dock, and in the read-aloud bar outside voice mode). |
+| G647 | Medium | Voice mode replaces the composer, whose footer is the only always-visible "AI" notice (EU AI Act Art. 50(1); Commission guidelines: spoken at the start). The manifest marks Art. 50(1) implemented with no `verified_by`. | A dock notice throughout voice mode, and a spoken disclosure as the first sentence of the session's first answer (said again on the next answer if that reading is not heard to the end); `verified_by` in the manifest. |
 | G648 | Medium | A spoken question still being transcribed is sent into whichever conversation is open when it finishes (ADR-0018 binding). | Bind the queued voice turn to its conversation; drop it with a notice on a switch. |
 | G649 | Medium | "Take a photo" on desktop calls `getUserMedia` under `Permissions-Policy: camera=()`, blames the browser, and would lose the photo (`atob` of a bare base64 string). | Use the capture file input everywhere, or fix the policy and the data URL. |
 

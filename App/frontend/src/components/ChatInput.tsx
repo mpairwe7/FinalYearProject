@@ -1,6 +1,5 @@
 import React, { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from '../lib/i18n';
-import { CameraCapture } from './CameraCapture';
 import { ModalDialog } from './ModalDialog';
 import {
   MicIcon,
@@ -159,7 +158,6 @@ function ChatInputInner({
   const [authLinkAll, setAuthLinkAll] = useState(true);
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [isCameraActive, setIsCameraActive] = useState(false);
   const attachMenuRef = useRef<HTMLDivElement>(null);
   const dragCounterRef = useRef(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -189,34 +187,6 @@ function ChatInputInner({
       onMessageChange(t('composer.imagePrompt'));
     }
   }, [message, onAttachFiles, onMessageChange, t]);
-
-  const handleCameraCapture = (imageBase64: string) => {
-    setIsCameraActive(false);
-    if (!onAttachFiles) return;
-
-    try {
-      const arr = imageBase64.split(',');
-      const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
-      const bstr = atob(arr[1]);
-      let n = bstr.length;
-      const u8arr = new Uint8Array(n);
-      while (n--) {
-        u8arr[n] = bstr.charCodeAt(n);
-      }
-      const file = new File(
-        [u8arr],
-        `ura_photo_capture_${Date.now().toString().slice(-4)}.jpg`,
-        { type: mime }
-      );
-      if (typeof DataTransfer !== 'undefined') {
-        const dt = new DataTransfer();
-        dt.items.add(file);
-        handleAttachFiles(dt.files);
-      }
-    } catch {
-      console.error('Failed to process camera capture');
-    }
-  };
 
   const [addMenuFocusIdx, setAddMenuFocusIdx] = useState<number | null>(null);
   const addBtnRef = useRef<HTMLButtonElement>(null);
@@ -293,13 +263,14 @@ function ChatInputInner({
     addBtnRef.current?.focus();
   }, [setAddMenuFocusIdx, setShowAttachMenu]);
 
+  // G649: always the capture input. It opens the camera on a phone and a
+  // picker on a desktop. The in-page camera it replaces called getUserMedia
+  // under the site's own Permissions-Policy (camera=()), so it could never
+  // open, blamed the browser, and handed on a bare base64 string that the
+  // attach step could not decode.
   const handleTakePhotoClick = () => {
     closeAddMenu();
-    if (typeof navigator !== 'undefined' && navigator.mediaDevices && window.innerWidth >= 768) {
-      setIsCameraActive(true);
-    } else {
-      cameraInputRef.current?.click();
-    }
+    cameraInputRef.current?.click();
   };
 
   const addMenuOptionIndices = [0, 1, 2].filter(
@@ -1298,13 +1269,6 @@ function ChatInputInner({
         </ModalDialog>
       )}
 
-      {isCameraActive && (
-        <CameraCapture
-          active={isCameraActive}
-          onCapture={handleCameraCapture}
-          onClose={() => setIsCameraActive(false)}
-        />
-      )}
     </>
   );
 }

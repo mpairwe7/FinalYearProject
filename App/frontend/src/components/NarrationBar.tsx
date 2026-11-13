@@ -24,11 +24,21 @@ interface NarrationBarProps {
   onStop: () => void;
   /** The last read-aloud could not play at all. */
   failed: boolean;
+  /** The last read-aloud skipped a sentence or was cut off (G645). */
+  partial?: boolean;
   onRetry: () => void;
   onDismiss: () => void;
 }
 
-export default function NarrationBar({ active, loading, onStop, failed, onRetry, onDismiss }: NarrationBarProps) {
+export default function NarrationBar({
+  active,
+  loading,
+  onStop,
+  failed,
+  partial = false,
+  onRetry,
+  onDismiss,
+}: NarrationBarProps) {
   const t = useTranslation();
   const { paused, sentence } = useNarration();
 
@@ -39,6 +49,16 @@ export default function NarrationBar({ active, loading, onStop, failed, onRetry,
         <button type="button" className="narration-btn narration-btn-text" onClick={onRetry}>
           {t('narration.retry')}
         </button>
+        <button type="button" className="narration-btn" onClick={onDismiss} aria-label={t('narration.dismiss')}>
+          <CloseIcon />
+        </button>
+      </div>
+    );
+  }
+  if (partial && !active) {
+    return (
+      <div className="narration-bar narration-bar-failed" data-testid="narration-partial">
+        <p className="narration-label" role="status">{t('narration.partial')}</p>
         <button type="button" className="narration-btn" onClick={onDismiss} aria-label={t('narration.dismiss')}>
           <CloseIcon />
         </button>

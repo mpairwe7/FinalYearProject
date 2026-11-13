@@ -224,6 +224,11 @@ export default function VoiceModeDock({
       <p className="sr-only" role="status" aria-atomic="true">
         {announcement}
       </p>
+      {/* G647 (EU AI Act Art. 50(1)): voice mode replaces the composer, whose
+          footer was the only always-visible notice that an AI is answering. */}
+      <p className="voice-dock-ai-notice" data-testid="voice-dock-ai-notice">
+        {t('voiceDock.aiNotice')}
+      </p>
       <div className="voice-dock-status">
         {/* Nothing to follow while idle: the loop rests, and the orb breathes in CSS. */}
         <CallOrb active={phase !== 'idle'} state={orbStateFor(phase)} readLevels={readVoiceLevels} />

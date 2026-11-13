@@ -155,6 +155,28 @@ describe("ChatInput attachments", () => {
     expect(screen.getByText("Add a connector")).toBeInTheDocument();
   });
 
+  // G649: on a wide screen "Take a photo" called getUserMedia under the site's
+  // own Permissions-Policy camera=(), blamed the browser, and could lose the
+  // photo. The capture input works everywhere (a picker on desktop).
+  it("takes a photo through the capture input on a wide screen too", async () => {
+    const original = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1280 });
+    const getUserMedia = vi.fn();
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia } });
+    const click = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => {});
+    try {
+      render(<ChatInput {...defaults} onAttachFiles={vi.fn()} />);
+      await userEvent.click(screen.getByTestId("composer-add-btn"));
+      await userEvent.click(screen.getByRole("menuitem", { name: /Take a photo/ }));
+      expect(click).toHaveBeenCalled();
+      expect(getUserMedia).not.toHaveBeenCalled();
+      expect(screen.queryByText(/Camera access denied/)).toBeNull();
+    } finally {
+      click.mockRestore();
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: original });
+    }
+  });
+
   it("opens the connector picker, exposes safe service state, and adds a removable chip", async () => {
     const connector = {
       namespace: "efris",
