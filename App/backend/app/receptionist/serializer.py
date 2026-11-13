@@ -11,6 +11,7 @@ from typing import Any
 
 from .config import call_language
 from .frame_budget import FrameGate, Verdict, close_flooded
+from .hold_gate import is_stale_wait_message
 
 logger = logging.getLogger(__name__)
 
@@ -191,8 +192,33 @@ class BrowserCallSerializer(FrameSerializer):
         self._control_timestamps.append(now)
         return True
 
+    def _held_back(self, frame: Frame) -> bool:
+        """Whether the AI's *frame* must not reach the caller now (G657, ADR-0055).
+
+        Decided as the frame is written, not when it was made: Pipecat makes
+        the AI's speech faster than it plays and queues it, with the messages
+        sent after it, in the output transport. Once an officer has the call,
+        or it has ended, the AI's speech and captions no longer reach the
+        caller; the officer's go to the socket directly, never through here.
+        A queue place or "transferring" status for a wait that is over never
+        does (it put a caller talking to an officer back on a waiting screen).
+        """
+        state = getattr(self.room, "state", None) if self.room is not None else None
+        mode = getattr(state, "mode", None)
+        if not isinstance(mode, str):
+            return False
+        if mode in ("bridged", "ended"):
+            if isinstance(frame, OutputAudioRawFrame):
+                return True
+            message = getattr(frame, "message", None)
+            if isinstance(message, dict) and message.get("type") == "caption":
+                return True
+        return is_stale_wait_message(frame, mode)
+
     async def serialize(self, frame: Frame) -> bytes | str | None:
         """Convert a Pipecat frame into a WebSocket message (with 2G/3G mu-law & caption-only support)."""
+        if self._held_back(frame):
+            return None
         if isinstance(frame, OutputAudioRawFrame):
             state = getattr(self.room, "state", None) if self.room is not None else None
             if state is not None:

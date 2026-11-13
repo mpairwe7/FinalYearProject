@@ -452,6 +452,38 @@ def test_only_an_administrator_revokes_someone_else(memory_db, clean_map) -> Non
     assert (refused.status_code, refused.json()["detail"]) == (401, "session revoked")
 
 
+def test_the_internal_id_me_shows_revokes_the_same_person(memory_db, clean_map) -> None:
+    # G657 (ADR-0055): /v1/me shows an internal user_id beside the token's sub
+    # (external_id). Revoking with the internal id answered 200 and refused
+    # nothing (found on the Space): it named nobody's tokens.
+    target = _user("officer")
+    internal = memory_db.upsert_user(external_id=target, role="ura_staff")["id"]
+    assert internal != target
+    target_token = _signed(target, "ura_staff", iat=int(time.time()))
+    admin = make_dev_token(_user("admin"), role="ura_admin")
+    client = TestClient(main_mod.app)
+
+    with mock.patch.object(main_mod, "_audit_staff_action") as audit:
+        r = client.post(f"/v1/admin/users/{internal}/revoke", headers=_bearer(admin))
+
+    assert r.status_code == 200, r.text
+    assert r.json()["user_id"] == target  # the sub that was revoked, not the id given
+    assert memory_db.load_session_revocations()[target] == r.json()["revoked_before"]
+    assert internal not in memory_db.load_session_revocations()
+    assert audit.call_args.args[2]["subject"] == target
+    refused = client.get("/v1/me/profile", headers=_bearer(target_token))
+    assert (refused.status_code, refused.json()["detail"]) == (401, "session revoked")
+
+
+def test_a_sub_no_one_has_used_yet_is_revoked_as_given(memory_db, clean_map) -> None:
+    target = _user("new-officer")
+    admin = make_dev_token(_user("admin"), role="ura_admin")
+    with mock.patch.object(main_mod.db, "get_user", side_effect=RuntimeError("store down")):
+        r = TestClient(main_mod.app).post(f"/v1/admin/users/{target}/revoke", headers=_bearer(admin))
+    assert r.status_code == 200, r.text
+    assert r.json()["user_id"] == target
+
+
 def test_an_administrator_may_revoke_without_a_reason(memory_db, clean_map) -> None:
     target = _user("officer")
     admin = make_dev_token(_user("admin"), role="ura_admin")

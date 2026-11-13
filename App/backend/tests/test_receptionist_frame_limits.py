@@ -22,9 +22,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from app import database as db
-from app.receptionist import desk, frame_budget, telemetry, ws
+from app.receptionist import desk, frame_budget, presence, telemetry, ws
 from app.receptionist.frame_budget import FrameGate, Verdict
 from app.receptionist.hub import hub
+from app.receptionist.phrases import phrase
 from app.receptionist.serializer import BrowserCallSerializer
 from app.receptionist.state import registry
 from app.receptionist.store import create_call, init_receptionist_schema
@@ -574,8 +575,31 @@ class OfficerSocketTests(unittest.IsolatedAsyncioTestCase):
         done, _pending = await asyncio.wait({task}, timeout=5.0)
 
         self.assertTrue(done)
-        self.assertEqual((self.room.state.mode, self.room.state.end_reason), ("ended", "officer_hangup"))
+        # Ended as the console's End ends it (G657, ADR-0055).
+        self.assertEqual((self.room.state.mode, self.room.state.end_reason), ("ended", "officer_ended"))
         self.assertNotEqual(socket.closed, 1008)
+
+    async def test_the_officers_hang_up_tells_the_caller_as_end_does(self):
+        # G657 (ADR-0055): this message ended the room without a word to the
+        # caller, whose screen stayed on the officer, then showed the AI's
+        # queued "transferring" and a queue place for a call already over.
+        with patch.object(desk, "say_to_caller", AsyncMock(return_value=0.0)) as closing:
+            task, _socket = await self.officer_sends([FRAME, json.dumps({"type": "hangup"})])
+            await asyncio.wait({task}, timeout=5.0)
+
+        self.assertEqual(self.caller.messages[-1], {"type": "status", "status": "ended"})
+        self.assertEqual(closing.await_args.args[1], phrase("officer_closing", self.room.state.locale))
+        self.assertEqual(presence.get_presence("okello")["status"], "wrap_up")
+
+    async def test_a_hang_up_from_an_officer_who_is_not_on_the_call_ends_nothing(self):
+        task, socket = await self.officer_sends([FRAME])
+        await self.played_out(socket)
+        self.room.state.officer_id = "someone_else"
+
+        await self.room.officer.handle_officer_message(json.dumps({"type": "hangup"}))
+
+        self.assertEqual(self.room.state.mode, "bridged")
+        self.assertNotIn({"type": "status", "status": "ended"}, self.caller.messages)
 
 
 # ---------------------------------------------------------------------------
