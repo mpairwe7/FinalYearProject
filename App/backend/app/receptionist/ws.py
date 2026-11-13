@@ -855,11 +855,11 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                             break
                         raw = message.get("text")
                         if message.get("bytes") is not None:
-                            verdict = gate.unexpected()
+                            verdict = gate.unexpected(message["bytes"])
                         else:
                             verdict = gate.text(raw or "")
                         if verdict is Verdict.CLOSE:
-                            await close_flooded(websocket)
+                            await close_flooded(websocket, gate)
                             break
                         if verdict is not Verdict.PASS or not raw:
                             continue
@@ -928,7 +928,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                     # Audio is not used in fallback mode, but a flood of it still
                     # costs the loop: the budget applies as it does on Pipecat (G304).
                     if serializer.admit_audio(message["bytes"]) is Verdict.CLOSE:
-                        await close_flooded(websocket)
+                        await close_flooded(websocket, serializer._frames)
                         break
                 elif "text" in message and message["text"]:
                     data = _control_message(message["text"])
@@ -1228,11 +1228,11 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
                     if message.get("type") == "websocket.disconnect":
                         break
                     if message.get("bytes") is not None:
-                        verdict = gate.unexpected()
+                        verdict = gate.unexpected(message["bytes"])
                     else:
                         verdict = gate.text(message.get("text") or "")
                     if verdict is Verdict.CLOSE:
-                        await close_flooded(websocket)
+                        await close_flooded(websocket, gate)
                         break
             except Exception:
                 pass
@@ -1419,11 +1419,11 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
                     break
                 raw = message.get("text")
                 if message.get("bytes") is not None:
-                    verdict = gate.unexpected()
+                    verdict = gate.unexpected(message["bytes"])
                 else:
                     verdict = gate.text(raw or "")
                 if verdict is Verdict.CLOSE:
-                    await close_flooded(websocket)
+                    await close_flooded(websocket, gate)
                     break
                 if verdict is not Verdict.PASS or not raw:
                     continue
@@ -1495,7 +1495,7 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
             else:
                 continue
             if verdict is Verdict.CLOSE:
-                await close_flooded(websocket)
+                await close_flooded(websocket, frame_gate)
                 break
             if verdict is Verdict.PASS and frame:
                 await officer_leg.handle_officer_message(frame)

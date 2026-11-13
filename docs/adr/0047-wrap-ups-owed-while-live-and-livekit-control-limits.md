@@ -90,6 +90,14 @@ ended the call.
   - Only a flood that lasts five seconds closes the socket, with 1008. Teardown
     takes the existing paths: the pipeline stops for the caller, and the officer
     gets the disconnect and its grace.
+  - **A frame over 64 KiB closes any call socket at once, with 1009** ("frame
+    too large"), on every call socket: the WebSocket audio sockets of ADR-0045
+    too. This came out of the review. Dropping a large frame does not bound what
+    a peer sends, because uvicorn has already read up to 16 MiB of it
+    (`ws_max_size`), and frames a little over a second apart never count as a
+    flood. nginx sets no WebSocket frame limit either. Nothing on a call socket
+    comes near 64 KiB: an audio frame is 640 B. Between 16 and 64 KiB a frame is
+    still only dropped.
 - **Why not the serializer's windows:** those apply only to `call_control` and
   `text_turn` on the WebSocket path. The gate is one rule for every frame on every
   call socket.

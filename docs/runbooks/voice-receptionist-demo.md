@@ -305,8 +305,9 @@ What an operator, an officer or an auditor will see differently:
   and 32 KB/s, so a normal call never drops one. Each drop is counted in
   `ura_receptionist_frames_dropped_total{side,reason}` and a flood is logged at
   WARNING once. A socket that keeps dropping frames for 5 s is closed with 1008
-  `too many frames`; an officer's close then takes the reconnect grace like any
-  other. Set the byte rate with `RECEPTIONIST_AUDIO_BYTES_PER_S` (default 64000,
+  `too many frames`. A single frame over 64 KiB closes the socket at once with
+  1009 `frame too large` (ADR-0047). Either way, an officer's close then takes
+  the reconnect grace like any other. Set the byte rate with `RECEPTIONIST_AUDIO_BYTES_PER_S` (default 64000,
   never below 32000).
 - **A LiveKit call's control sockets are limited too (G304, ADR-0047).** On a
   LiveKit call the audio is WebRTC and these sockets carry text only: the

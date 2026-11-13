@@ -166,6 +166,26 @@ class FrameGateTests(unittest.TestCase):
         self.assertEqual(self.counted("caller", "size"), 1)
         self.assertEqual(self.counted("caller", "rate"), 0)
 
+    def test_a_frame_over_64_kib_closes_the_socket_at_once_with_1009(self):
+        """Dropping a huge frame does not bound what a peer sends: uvicorn has
+        read up to 16 MiB of it already, and one a little over a second apart
+        never adds up to a flood. Nothing on a call socket comes near 64 KiB
+        (a frame is 640 B), so one closes it (ADR-0047)."""
+        for send in (
+            lambda g: g.audio(b"\x00" * (frame_budget.MAX_FRAME_HARD_BYTES + 2)),
+            lambda g: g.text("x" * (frame_budget.MAX_FRAME_HARD_BYTES + 1)),
+            lambda g: g.unexpected(b"\x00" * (frame_budget.MAX_FRAME_HARD_BYTES + 1)),
+        ):
+            gate = self.gate("caller")
+            self.assertIs(send(gate), Verdict.CLOSE)
+            self.assertEqual((gate.close_code, gate.close_reason), (1009, "frame too large"))
+            self.assertIs(gate.audio(FRAME), Verdict.DROP)  # closed: nothing more is handed on
+        self.assertEqual(self.counted("caller", "size"), 3)
+        # Between the drop cap and the hard cap a frame is still only dropped.
+        gate = self.gate("caller")
+        self.assertIs(gate.audio(b"\x00" * (frame_budget.MAX_FRAME_HARD_BYTES - 2)), Verdict.DROP)
+        self.assertEqual((gate.close_code, gate.close_reason), (1008, "too many frames"))
+
     def test_an_odd_length_frame_is_dropped_as_malformed(self):
         gate = self.gate()
         self.assertIs(gate.audio(b"\x00" * 641), Verdict.DROP)
@@ -209,13 +229,13 @@ class FrameGateTests(unittest.TestCase):
         # A binary frame on a LiveKit control socket (ADR-0047): one is
         # dropped and counted; a stream of them that lasts 5 s is a flood.
         gate = self.gate("caller")
-        self.assertIs(gate.unexpected(), Verdict.DROP)
+        self.assertIs(gate.unexpected(b"\x00\x01"), Verdict.DROP)
         self.assertEqual(self.counted("caller", "malformed"), 1)
         self.assertIs(gate.text('{"type":"hangup"}'), Verdict.PASS)  # spends nothing of the text budget
         verdicts = []
         for _ in range(600):
             self.clock.advance(0.01)
-            verdicts.append(gate.unexpected())
+            verdicts.append(gate.unexpected(b"\x00\x01"))
         self.assertIn(Verdict.CLOSE, verdicts)
 
     def test_text_and_audio_do_not_spend_each_others_budget(self):
@@ -473,6 +493,15 @@ class OfficerSocketTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.caller.audio), 2)
         self.assertEqual(self.counted("officer", "size"), 1)
 
+    async def test_a_frame_over_64_kib_closes_the_officers_socket_with_1009(self):
+        task, socket = await self.officer_sends([FRAME, b"\x00" * (frame_budget.MAX_FRAME_HARD_BYTES + 2), FRAME])
+
+        done, _pending = await asyncio.wait({task}, timeout=10.0)
+
+        self.assertTrue(done, "a 64 KiB frame did not end the officer's socket")
+        self.assertEqual((socket.closed, socket.close_reason), (1009, "frame too large"))
+        self.assertEqual(len(self.caller.audio), 1)
+
     async def test_an_odd_length_frame_is_dropped_instead_of_ending_the_leg(self):
         # np.frombuffer raised on it and the officer fell into the reconnect grace.
         task, socket = await self.officer_sends([FRAME, b"\x00" * 641, FRAME])
@@ -590,6 +619,10 @@ class CallerSerializerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(await self.serializer.deserialize(FRAME))
         self.assertEqual(self.counted("caller", "size"), 1)
         self.assertEqual(self.socket.closed, [])
+
+    async def test_a_frame_over_64_kib_closes_the_callers_socket_with_1009(self):
+        self.assertIsNone(await self.serializer.deserialize(b"\x00" * (frame_budget.MAX_FRAME_HARD_BYTES + 2)))
+        self.assertEqual(self.socket.closed, [(1009, "frame too large")])
 
     async def test_an_odd_length_frame_is_dropped_as_malformed(self):
         self.assertIsNone(await self.serializer.deserialize(b"\x00" * 641))
@@ -1017,6 +1050,14 @@ class LiveKitStaffControlTests(unittest.IsolatedAsyncioTestCase):
 
         self.assert_officer_still_on_the_call(task, socket)
         self.assertEqual(self.counted("officer", "malformed"), 1)
+
+    async def test_a_binary_frame_over_64_kib_closes_the_officers_control_socket_with_1009(self):
+        task, socket = await self.officer_sends([b"\x00" * (frame_budget.MAX_FRAME_HARD_BYTES + 2)])
+
+        done, _pending = await asyncio.wait({task}, timeout=10.0)
+
+        self.assertTrue(done, "a 64 KiB binary frame did not end the officer's control socket")
+        self.assertEqual((socket.closed, socket.close_reason), (1009, "frame too large"))
 
     async def test_a_flood_from_the_officer_that_lasts_five_seconds_closes_with_1008_and_starts_the_grace(self):
         ping = json.dumps({"type": "ping"})
