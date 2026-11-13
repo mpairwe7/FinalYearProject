@@ -86,7 +86,7 @@ type State =
 
 function signOut() {
   const method = getAuthMethod();
-  // Revoke the token on the server before dropping it here (ADR-0048).
+  // Revoke the token on the server before dropping it here (ADR-0053).
   endServerSession();
   clearAuthToken();
   // The other half of signing out: end the session at the identity provider,

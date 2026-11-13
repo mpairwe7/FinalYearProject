@@ -169,7 +169,7 @@ _PIPELINE_STOP_TIMEOUT_S = 5.0
 _LISTEN_POLL_S = 0.5
 #: The longest any staff socket, or a signed-in caller's, goes between checks of
 #: its session, so a revoked session closes it within about this long (G304,
-#: ADR-0048). The revocation itself reaches another process within its 5 s sync.
+#: ADR-0053). The revocation itself reaches another process within its 5 s sync.
 #: The same value as the chat and voice sockets' (``revocation``).
 _SESSION_POLL_S = revocation.SOCKET_CHECK_INTERVAL_S
 #: A lobby or live transcript with nothing to send pings after this long.
@@ -223,7 +223,7 @@ def _staff_session(
     fourth value of ``_resolve_ws_principal``, which is the token's consent
     purposes, so it was never found and no staff socket ever expired.
     ``issued_at`` is the token's ``iat``, checked against the person's
-    revocation cutoff while the socket is open (G304, ADR-0048). A token
+    revocation cutoff while the socket is open (G304, ADR-0053). A token
     already revoked does not sign in (``JWTAuthError``, closed 4401).
     """
     return resolve_ws_session(websocket, required=True, token_override=token)
@@ -234,7 +234,7 @@ def _expired(expiry: float | None) -> bool:
 
 
 def _session_over(user_id: str, expiry: float | None, issued_at: float | None) -> bool:
-    """Whether a socket's session has ended: its token expired, or it was revoked (G304, ADR-0048)."""
+    """Whether a socket's session has ended: its token expired, or it was revoked (G304, ADR-0053)."""
     return _expired(expiry) or revocation.is_revoked(user_id, issued_at)
 
 
@@ -258,7 +258,7 @@ async def _while_session_lasts(
     expiry: float | None,
     issued_at: float | None,
 ) -> None:
-    """Run a staff socket's loop, *work*, until it ends or its session does (G304, ADR-0048).
+    """Run a staff socket's loop, *work*, until it ends or its session does (G304, ADR-0053).
 
     The loop checks the session between frames. A frame whose handling does
     not return (the officer's audio sent to a caller who stopped reading, the
@@ -287,7 +287,7 @@ async def _while_session_lasts(
 
 
 async def _refuse_revoked_officer_media(room: Any, identity: str) -> bool:
-    """Revoke the officer's call media if the session it was issued under is revoked (G304, ADR-0048).
+    """Revoke the officer's call media if the session it was issued under is revoked (G304, ADR-0053).
 
     The officer's media outlives their control socket until the reconnect
     grace ends, and its LiveKit token lasts five minutes: media that came back
@@ -310,7 +310,7 @@ async def _refuse_revoked_officer_media(room: Any, identity: str) -> bool:
 async def _end_call_when_session_revoked(
     room: Any, websocket: WebSocket, user_id: str, issued_at: float | None
 ) -> None:
-    """End a signed-in caller's call once their session is revoked (G304, ADR-0048).
+    """End a signed-in caller's call once their session is revoked (G304, ADR-0053).
 
     Checked every ``_SESSION_POLL_S`` on every transport, beside the call
     clock. The caller's screen is told to sign in again (``signin``, as when
@@ -840,7 +840,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
 
         # The call's time limit, on every transport.
         clock = asyncio.create_task(_call_clock(room))
-        # A signed-in caller's session, on every transport (G304, ADR-0048).
+        # A signed-in caller's session, on every transport (G304, ADR-0053).
         if user_id:
             session_watch = asyncio.create_task(
                 _end_call_when_session_revoked(room, websocket, user_id, caller_issued_at)
@@ -886,7 +886,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                         await desk.revoke_media(room, identity)
                         return
                     # The officer's media rejoining after their session was
-                    # revoked is not bridged again (G304, ADR-0048).
+                    # revoked is not bridged again (G304, ADR-0053).
                     if await _refuse_revoked_officer_media(room, identity):
                         return
                     if identity == room.state.livekit_caller_identity:
@@ -1426,7 +1426,7 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
 
         try:
             # The session is watched beside the relay: a listener who stopped
-            # reading held send_bytes(), and the checks with it (G304, ADR-0048).
+            # reading held send_bytes(), and the checks with it (G304, ADR-0053).
             await _while_session_lasts(websocket, relay_call_audio(), user_id, token_exp, token_iat)
         finally:
             # No `return` here: it would swallow a cancellation.
@@ -1475,7 +1475,7 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
             room.state.livekit_officer_route_active = True
             room.state.livekit_officer_identity = officer_identity
             # The session this media is issued under: media that rejoins after
-            # it is revoked is refused (G304, ADR-0048).
+            # it is revoked is refused (G304, ADR-0053).
             room.state.livekit_officer_user = user_id
             room.state.livekit_officer_issued_at = token_iat
 
@@ -1638,7 +1638,7 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
     # lasts closes the socket, which then takes the same path as any close.
     frame_gate = FrameGate("officer", call_id=call_id)
     # The session is checked at least every _SESSION_POLL_S, so a revoked one
-    # closes the socket (4401) like an expired one (G304, ADR-0048). The wait
+    # closes the socket (4401) like an expired one (G304, ADR-0053). The wait
     # used to run to the token's expiry, or for ever without one. A receive
     # still pending when a check comes round is kept, not cancelled: a frame
     # arriving just then is read on the next pass rather than lost.
@@ -1648,7 +1648,7 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
     # reading) held them off, with the leg and its caller-audio sender. So the
     # session is also watched beside the loop, which it cancels and closes
     # 4401 once the session is over; the teardown below then runs as for any
-    # close (review of ADR-0048).
+    # close (review of ADR-0053).
     async def relay_officer_frames() -> None:
         receiving: asyncio.Future[Any] | None = None
         try:

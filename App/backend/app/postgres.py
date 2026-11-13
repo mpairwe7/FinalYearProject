@@ -1859,7 +1859,7 @@ def clear_flag_override(name: str) -> None:
 
 
 def revoke_sessions(user_id: str, *, revoked_before: float, reason: str = "", actor: str = "") -> None:
-    """Revoke every token *user_id* was issued before *revoked_before*; a later cutoff wins (ADR-0048)."""
+    """Revoke every token *user_id* was issued before *revoked_before*; a later cutoff wins (ADR-0053)."""
     uid = (user_id or "").strip()
     if not uid:
         raise ValueError("a revocation needs a user id")

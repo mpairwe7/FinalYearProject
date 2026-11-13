@@ -74,7 +74,7 @@ def _resolve_ws_auth(
     """Verify WebSocket auth when present: ``(user_id, tenant_id, issued_at)``.
 
     *issued_at* is the token's ``iat`` (``None`` when anonymous): the socket's
-    loop re-checks it against the person's revocation cutoff (G304, ADR-0048).
+    loop re-checks it against the person's revocation cutoff (G304, ADR-0053).
     """
     auth_header = websocket.headers.get("authorization", "")
     token = ""
@@ -99,7 +99,7 @@ def _resolve_ws_auth(
             claims = _hs256_verify(token, verifier.dev_secret)
         else:
             raise
-    if revocation.claims_revoked(claims):  # signed out before it expired (G304, ADR-0048)
+    if revocation.claims_revoked(claims):  # signed out before it expired (G304, ADR-0053)
         raise JWTAuthError("session revoked")
     return str(claims.get("sub", "")), str(claims.get("tenant_id", "default")), revocation.issued_at(claims)
 
@@ -282,7 +282,7 @@ async def voice_stream_ws_v2(websocket: WebSocket, app: object) -> None:
         # ── Main loop ─────────────────────────────────────────────
         # A signed-in socket re-checks its session at least every
         # revocation.SOCKET_CHECK_INTERVAL_S while it waits, and on every
-        # frame, and closes 4401 once it is revoked (G304, ADR-0048).
+        # frame, and closes 4401 once it is revoked (G304, ADR-0053).
         receiver = revocation.SessionCheckedReceiver(websocket.receive, user_id, token_issued_at)
         while True:
             if time.perf_counter() - session_start_time > max_duration_s:

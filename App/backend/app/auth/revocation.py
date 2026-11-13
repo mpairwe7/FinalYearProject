@@ -1,4 +1,4 @@
-"""Sessions revoked before their tokens expire (G304, ADR-0048).
+"""Sessions revoked before their tokens expire (G304, ADR-0053).
 
 The service verifies a bearer token by its signature and its expiry, so a
 token that has been signed out of, or that an administrator wants stopped,
@@ -180,7 +180,7 @@ class SessionRevoked(Exception):
 
 
 class SessionCheckedReceiver:
-    """A signed-in socket's next frame, with its session re-checked while it waits (G304, ADR-0048).
+    """A signed-in socket's next frame, with its session re-checked while it waits (G304, ADR-0053).
 
     The chat and voice sockets waited on ``receive()`` for as long as the
     person was quiet, so a session revoked meanwhile kept the socket open

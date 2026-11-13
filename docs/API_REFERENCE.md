@@ -29,7 +29,7 @@ presence: those need an officer's sign-in (`ura_staff`) and answer **403** to th
   (`POST /v1/admin/users/{user_id}/revoke`). A token's `iat` is compared with the
   person's cutoff. A token with no usable `iat` is refused as invalid (401) everywhere,
   so every token the service accepts can be revoked. Every process applies a
-  revocation within 5 s (ADR-0048). A socket that signs in with such a token is
+  revocation within 5 s (ADR-0053). A socket that signs in with such a token is
   refused as for an invalid one.
 - **403:** a signed-in user without a staff role, or an auditor on an endpoint that
   changes a case.
@@ -1778,7 +1778,7 @@ barge-in support. Gated by `FLAG_VOICE_STREAMING=true`.
 
 A signed-in socket (this one, `/v2/voice/chat/stream` and `/v2/chat/stream`)
 re-checks its session at least every 5 s and on every frame. Once the session is
-revoked (ADR-0048) it is sent `{"type": "error", "code": "signin", "detail":
+revoked (ADR-0053) it is sent `{"type": "error", "code": "signin", "detail":
 "Session revoked", "recoverable": false}` and closes **4401**. An anonymous socket
 has no session and is not affected.
 
@@ -2198,7 +2198,7 @@ tenant's consoles only.
 
 Staff WebSockets (`/v1/admin/calls/stream`, `/v1/admin/calls/{call_id}/audio`)
 close with **4401** when the token that opened them expires or its session is
-revoked (checked at least every 5 s, ADR-0048), and with **1013**
+revoked (checked at least every 5 s, ADR-0053), and with **1013**
 when the user already holds their share of sockets or the call already has five
 listeners. An officer whose session is revoked goes into the reconnect grace, as
 at expiry, but their LiveKit media is revoked at once and is not bridged again if
@@ -2338,7 +2338,7 @@ GET /v1/admin/outbox
 
 Mock email/SMS queue (`live=false`). Nothing is sent.
 
-#### Revoke someone's sessions (ADR-0048)
+#### Revoke someone's sessions (ADR-0053)
 
 ```http
 POST /v1/admin/users/{user_id}/revoke
@@ -2361,7 +2361,7 @@ sync, then up to 5 s for the socket's check). A failed write
 answers 503 and changes nothing. Audited as `staff.session_revoked` with the
 subject and the reason's length. Rate-limited (`RATE_LIMIT`, 30/minute).
 
-Not covered yet (G618): the live ticket stream checks a token only at sign-in,
+Not covered yet (G656): the live ticket stream checks a token only at sign-in,
 so a stream already open stays open; and the MCP server's own bearer check does
 not read the revocation list.
 
@@ -2417,14 +2417,14 @@ Authorization: Bearer <token>
 ```
 
 Revokes every token issued to the signed-in person up to now, this one
-included (ADR-0048). Afterwards those tokens get 401 `session revoked`, and an
+included (ADR-0053). Afterwards those tokens get 401 `session revoked`, and an
 open staff, call, chat or voice socket opened with one closes 4401: within about
 5 s on the process that took the sign-out, about 10 s on another (its 5 s sync,
 then the socket's 5 s check). A token issued later (signing in again) works.
 The cutoff is the time of the request, and a token's
 `iat` is a whole second, so a sign-in completed in the same second is revoked
 too. A token with no usable `iat` never gets this far: it is refused as invalid.
-Not covered yet (G618): an open live ticket stream stays open (it checks only at
+Not covered yet (G656): an open live ticket stream stays open (it checks only at
 sign-in), and the MCP server's bearer check does not read this list. The
 browser's sign-outs call this
 with `keepalive: true` before dropping the token, and ignore a failure.

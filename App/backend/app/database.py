@@ -783,7 +783,7 @@ def init_db() -> None:
         );
 
         -- A person's sessions revoked before their tokens expire (G304,
-        -- ADR-0048): a token issued before `revoked_before` is refused.
+        -- ADR-0053): a token issued before `revoked_before` is refused.
         CREATE TABLE IF NOT EXISTS revoked_sessions (
             user_id        TEXT PRIMARY KEY,
             revoked_before REAL NOT NULL,
@@ -2696,7 +2696,7 @@ def clear_flag_override(name: str) -> None:
 
 
 def revoke_sessions(user_id: str, *, revoked_before: float, reason: str = "", actor: str = "") -> None:
-    """Revoke every token *user_id* was issued before *revoked_before* (G304, ADR-0048).
+    """Revoke every token *user_id* was issued before *revoked_before* (G304, ADR-0053).
 
     One row per person. A later cutoff replaces an earlier one and an earlier
     one never moves it back: a token once revoked stays revoked. ``reason``

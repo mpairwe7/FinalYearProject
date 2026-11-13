@@ -264,7 +264,7 @@ Left open by this part:
 
 ## Phase 8 part D — sessions can be revoked
 
-[ADR-0048](../adr/0048-sessions-can-be-revoked.md). Tests:
+[ADR-0053](../adr/0053-sessions-can-be-revoked.md). Tests:
 `App/backend/tests/test_session_revocation.py`,
 `App/frontend/src/__tests__/lib/signOutRevokesSession.test.tsx`.
 

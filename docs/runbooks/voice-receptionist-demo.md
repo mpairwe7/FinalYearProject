@@ -4,7 +4,7 @@ Operator and deployment runbook for the browser voice receptionist powered by
 Pipecat 1.15, self-hosted LiveKit WebRTC media, Whisper-SALT confidence scoring,
 ClarifyGate terminology disambiguation, and staff takeover.
 
-### Assurance update — 2026-11-13, sessions can be revoked (ADR-0048)
+### Assurance update — 2026-11-13, sessions can be revoked (ADR-0053)
 
 Phase 8 part D of [the 11 November review](../plans/receptionist-assurance-2026-11-11.md).
 A token used to work until it expired, whatever happened to its owner. Now:
@@ -50,7 +50,7 @@ A token used to work until it expired, whatever happened to its owner. Now:
 Limits: a token with no usable `iat` is refused outright (401), since it could
 not be revoked. An open live ticket stream stays open (it checks only at
 sign-in), and the MCP server's bearer check does not read the revocation list
-(G618). On the Space the database, and so every revocation, is wiped on restart;
+(G656). On the Space the database, and so every revocation, is wiped on restart;
 revoke again after a restart if the old token may still be in use.
 
 ### Assurance update — 2026-11-12, one call process (ADR-0043)

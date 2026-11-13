@@ -1,4 +1,4 @@
-# ADR-0048: A session can be revoked before its token expires
+# ADR-0053: A session can be revoked before its token expires
 
 ## Status
 
@@ -169,7 +169,7 @@ Our tokens carry `iat`. `jti` and `sid` are not guaranteed by every provider
   process never moves a cutoff back.
 - **The ticket stream and MCP.** The live ticket stream refuses a revoked token at
   sign-in but does not close an open stream; it does not close at expiry either.
-  The MCP server's own bearer check does not read this list. Both are tracked as G618, with the provider session and the Space's wipe.
+  The MCP server's own bearer check does not read this list. Both are tracked as G656, with the provider session and the Space's wipe.
 - **The officer's LiveKit identity is the same on every sign-in.** An old media
   client that rejoins after the officer has signed in again, within its token's
   five minutes, is not told apart from the new one.

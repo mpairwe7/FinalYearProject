@@ -134,7 +134,7 @@ def _verified_ws_claims(
     The token is the *token_override* (sent in the first application message)
     when one is given, else the ``Authorization`` header or the query string.
     Raises :class:`JWTAuthError` for a token that does not verify, for a
-    token whose session was revoked (G304, ADR-0048), and for no token at all
+    token whose session was revoked (G304, ADR-0053), and for no token at all
     when *required*.
     """
     auth_header = websocket.headers.get("authorization", "")
@@ -211,7 +211,7 @@ def resolve_ws_session(
     closes itself then: the verifier only checks expiry at sign-in.
     *issued_at* is its ``iat``, or ``None``: the socket's loop compares it with
     the person's revocation cutoff, so a session revoked after sign-in also
-    closes the socket (G304, ADR-0048).
+    closes the socket (G304, ADR-0053).
     """
     from .auth.revocation import issued_at
 
@@ -859,7 +859,7 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
         return
     user_id, tenant_id, user_role, granted_purposes = _principal_of(claims)
     # Kept for the life of the socket: a session revoked after sign-in closes
-    # it too (G304, ADR-0048).
+    # it too (G304, ADR-0053).
     token_issued_at = revocation.issued_at(claims)
 
     from .ws_concurrency import is_ws_origin_allowed
@@ -979,7 +979,7 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
         # A signed-in socket re-checks its session at least every
         # revocation.SOCKET_CHECK_INTERVAL_S while it waits, and on every
         # frame: it was checked at sign-in only, so a signed-out token's
-        # socket stayed open (G304, ADR-0048). Anonymous: waits as before.
+        # socket stayed open (G304, ADR-0053). Anonymous: waits as before.
         receiver = revocation.SessionCheckedReceiver(
             websocket.receive_text, session_user_id or "", token_issued_at
         )

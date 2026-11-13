@@ -151,7 +151,7 @@ async function request<T>(
  * End this person's sessions on the server as well: `POST /v1/me/logout`
  * revokes every token issued to them up to now, so a copy of this one (another
  * tab, another device, a leaked one) stops working too, on the API and on any
- * open staff or call socket (G304, ADR-0048).
+ * open staff or call socket (G304, ADR-0053).
  *
  * Call it BEFORE clearing the token: it sends the token it revokes. Fire and
  * forget: `keepalive` lets the request finish while the page navigates to the

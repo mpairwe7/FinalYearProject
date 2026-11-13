@@ -1,5 +1,5 @@
 /**
- * Signing out ends the session on the server too (G304, ADR-0048).
+ * Signing out ends the session on the server too (G304, ADR-0053).
  *
  * Both sign-outs only dropped the token in this browser and ended the
  * provider's session; the token itself stayed valid until it expired, so a

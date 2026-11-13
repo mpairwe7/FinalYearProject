@@ -107,7 +107,7 @@ def _hs256_verify(token: str, secret: str) -> dict[str, Any]:
 
 
 def _require_issued_at(claims: dict[str, Any]) -> None:
-    """Refuse a token with no usable ``iat`` (G304, ADR-0048).
+    """Refuse a token with no usable ``iat`` (G304, ADR-0053).
 
     A session is revoked by refusing every token issued to the person before
     a cutoff. A token that does not say when it was issued cannot be placed
@@ -326,7 +326,7 @@ class JWTVerifier:
         """Verify signature, iat, exp, nbf, iss, aud.  Return claims.
 
         ``iat`` is required: a token without one could not be revoked
-        (G304, ADR-0048).
+        (G304, ADR-0053).
         """
         if not token:
             raise JWTAuthError("empty token")
@@ -344,7 +344,7 @@ class JWTVerifier:
             raise JWTAuthError(f"unexpected alg: {token_alg}")
 
         # Issued-at, before the temporal claims: required, so that every token
-        # the service accepts can be revoked (G304, ADR-0048).
+        # the service accepts can be revoked (G304, ADR-0053).
         _require_issued_at(claims)
 
         # Temporal claims

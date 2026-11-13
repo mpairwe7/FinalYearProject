@@ -185,7 +185,7 @@ def _flag_sync_interval_seconds() -> float:
 
 
 _FLAG_SYNC_INTERVAL_SECONDS = _flag_sync_interval_seconds()
-# How often every process re-reads ``revoked_sessions`` (G304, ADR-0048). Not
+# How often every process re-reads ``revoked_sessions`` (G304, ADR-0053). Not
 # tied to the flag sync's setting: switching that off must not leave a signed-out
 # token working on the other processes.
 _SESSION_REVOCATION_SYNC_INTERVAL_SECONDS = 5.0
@@ -595,7 +595,7 @@ async def _flag_sync_loop(stop: asyncio.Event, interval: float) -> None:
 
 
 async def _session_revocation_sync_loop(stop: asyncio.Event, interval: float) -> None:
-    """Keep this process's revoked sessions current (G304, ADR-0048): a pass now, then every *interval*.
+    """Keep this process's revoked sessions current (G304, ADR-0053): a pass now, then every *interval*.
 
     The revocations are first read during startup, before the process serves
     (``_load_session_revocations_at_start``); this loop's first pass follows
@@ -683,7 +683,7 @@ def _initialize_analytics_database() -> None:
 
 
 def _load_session_revocations_at_start() -> None:
-    """Read every stored session revocation before the first request (G304, ADR-0048).
+    """Read every stored session revocation before the first request (G304, ADR-0053).
 
     The periodic sync is a lifespan task: its first pass ran only once the
     application was already serving, so a process that had just restarted
@@ -4318,7 +4318,7 @@ class SessionRevokeRequest(BaseModel):
 
 
 def _revoke_sessions_or_503(user_id: str, *, reason: str, actor: str) -> float:
-    """Store and apply a revocation (G304, ADR-0048); 503 when the store cannot keep it.
+    """Store and apply a revocation (G304, ADR-0053); 503 when the store cannot keep it.
 
     Stored first, as a flag change is: a failed write changes nothing in any
     process, so nobody is told a sign-out happened that the other process,
@@ -5895,7 +5895,7 @@ def me_whoami(ctx: AuthContext = Depends(current_user)) -> dict:
 @app.post("/v1/me/logout", tags=["me"])
 @limiter.limit(_RATE_LIMIT)
 def me_logout(request: Request, ctx: AuthContext = Depends(require_user)) -> dict:
-    """Sign out everywhere: every token issued to you before now stops working (G304, ADR-0048).
+    """Sign out everywhere: every token issued to you before now stops working (G304, ADR-0053).
 
     The console and the chat call this as they sign out, before dropping the
     token. Tokens issued later (signing in again) work. The cutoff is the

@@ -1,4 +1,4 @@
-"""A session can be revoked before its token expires (G304, ADR-0048).
+"""A session can be revoked before its token expires (G304, ADR-0053).
 
 The service kept no revocation list: a signed-out or compromised token kept
 working on the API, and a staff socket opened with it stayed open, until the
@@ -266,7 +266,7 @@ def test_the_lifespan_runs_the_sync_in_every_process() -> None:
 
 
 def test_a_restarted_process_refuses_a_revoked_token_from_its_first_request(memory_db, clean_map) -> None:
-    """The sync loop's first pass ran only once the app was serving (review of ADR-0048).
+    """The sync loop's first pass ran only once the app was serving (review of ADR-0053).
 
     The revocations are read during startup, before the first request; the
     loop is stubbed out here so only that read can have applied them.
@@ -701,7 +701,7 @@ class _FakeVoiceSession:
 
 
 class OpenChatAndVoiceSocketTests(unittest.IsolatedAsyncioTestCase):
-    """The chat and voice sockets checked a session only at sign-in (review of ADR-0048).
+    """The chat and voice sockets checked a session only at sign-in (review of ADR-0053).
 
     A signed-in chat or voice socket now re-checks it at least every
     ``revocation.SOCKET_CHECK_INTERVAL_S`` while it waits for a frame, and on

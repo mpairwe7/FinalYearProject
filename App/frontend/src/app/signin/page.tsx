@@ -83,7 +83,7 @@ export default function SignInPage() {
 
   const signOut = useCallback(() => {
     const method = getAuthMethod();
-    // Revoke the token on the server before dropping it here (ADR-0048).
+    // Revoke the token on the server before dropping it here (ADR-0053).
     endServerSession();
     clearAuthToken();
     setStatus({ kind: "idle", message: "Signed out." });

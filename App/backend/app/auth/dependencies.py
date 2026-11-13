@@ -253,7 +253,7 @@ def _resolve_bearer_context(request: Request, authorization: str) -> AuthContext
             raise HTTPException(status_code=401, detail=f"invalid token: {e}") from e
 
     # Signed out of, or revoked by an administrator, before it expired (G304,
-    # ADR-0048). Checked before the profile fetch: a revoked token reaches
+    # ADR-0053). Checked before the profile fetch: a revoked token reaches
     # nothing else. A token with no `iat` never gets here: it fails verification.
     if claims_revoked(claims):
         request.state.security_reason = "session revoked"
