@@ -1,6 +1,6 @@
 # Intelligent UI integration audit — 13 November 2026
 
-Status: phase 1 implemented (PR 727); phase 2 on `fix/intelligent-ui-p2-human-handoff-2026-11`; phase 3 on `fix/intelligent-ui-p3-staff-controls-2026-11`; phase 4 on `fix/intelligent-ui-p4-officer-evidence-2026-11`; phase 5 on `fix/intelligent-ui-p5-voice-and-capture-2026-11`; phase 6 on `fix/intelligent-ui-p6-resilience-provenance-language-2026-11`.
+Status: phases 1 to 5 merged and deployed (PRs 727, 729, 730, 731, 733); phase 6 in PR 736. Open after the audit: G634 and G637 tenant scoping, G630, G655's remaining literals, G658 (spaced phone numbers in ticket redaction), and review of the machine-assisted vernacular strings (G275).
 Baseline: `dev` at `882a99b5`. Decisions: [ADR-0048](../adr/0048-figures-and-disclosures-the-taxpayer-sees.md) (phase 1), [ADR-0049](../adr/0049-a-promise-of-a-human-is-kept.md) (phase 2), [ADR-0050](../adr/0050-staff-controls-say-what-they-do.md) (phase 3), [ADR-0051](../adr/0051-officers-see-what-the-ai-did.md) (phase 4), [ADR-0052](../adr/0052-voice-says-what-the-screen-says.md) (phase 5), [ADR-0054](../adr/0054-resilience-provenance-and-language.md) (phase 6).
 Follows the [30 October audit](intelligent-ui-integration-audit-2026-10.md) (UI-01 to UI-13, ADR-0018).
 
