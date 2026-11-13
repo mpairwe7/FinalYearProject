@@ -91,10 +91,11 @@ end a call, as the LiveKit control socket already does.
    WebSocket transport it also writes `{"type": "interrupt"}` to the caller before
    the callback, so that cannot land after the joining line and cut it. A pipeline
    that does not answer is logged, and the officer joins anyway. A call with no
-   pipeline is unchanged. The call can move on during those awaits (the caller
-   hangs up, the officer presses End): after the interruption and again after the
-   joining line, a call no longer bridged to this officer, or ending, gets no
-   joining line, no `bridged` status and no `call.bridged` lobby event.
+   pipeline is unchanged. The call can move on during any of the bridge's awaits,
+   each send to the caller included (the caller hangs up, the officer presses End):
+   after every one, a call no longer bridged to this officer, or ending, gets
+   nothing more: no joining line, no `bridged` status, no `call.bridged` lobby
+   event.
 2. **The AI's frames are held back once the wait is over, at the gate and at the
    socket.** `hold_gate.is_stale_wait_message` marks a `queue` place or a
    `status: transferring` that arrives when the call is not `transferring`.
@@ -158,8 +159,9 @@ before the change, or is a guard that passes before and after:
 - the bridge interrupts the output transport and waits for it before the joining
   line; an output that never answers delays the officer only by the timeout and is
   logged; one that fails does not stop the officer joining; a call that ends while
-  the AI is silenced, or whose End is pressed during the joining line, is not
-  announced as bridged, and one that completes is announced once;
+  the AI is silenced, while the interrupt or the `bridged` status is being sent, or
+  whose End is pressed during the joining line, is not announced as bridged, and
+  one that completes is announced once;
 - the socket writer holds back the AI's audio and captions once bridged or ended,
   and stale waiting messages in any mode; it lets a waiting caller's audio, queue
   place and status through, and the interrupt and other messages in every mode;

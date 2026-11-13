@@ -391,20 +391,25 @@ async def bridge(room: CallRoom, officer_leg: Any, officer_id: str, speech_model
         except Exception:
             logger.debug("Could not assign ticket %s", room.state.ticket_id, exc_info=True)
     def still_joining() -> bool:
-        # The awaits below give the call time to move on: the caller hangs up,
-        # or the officer presses End. Such a call is not announced as bridged
-        # (its "ended" already went out); CallRoom.end() tells the officer.
+        # Every await below (each send included) gives the call time to move on:
+        # the caller hangs up, or the officer presses End. Such a call is not
+        # announced as bridged (its "ended" already went out); CallRoom.end()
+        # tells the officer. Checked after each await; the publishes are sync.
         return not room.ending and room.state.mode == "bridged" and room.state.officer_id == officer_id
 
     await _interrupt_ai_output(room)
     if not still_joining():
         return name
     await _send_to_caller(room, {"type": "interrupt"})
+    if not still_joining():
+        return name
     await say_to_caller(room, phrase("officer_joining", room.state.locale, name=name), speech_model)
     if not still_joining():
         return name
     status_event = {"type": "status", "status": "bridged", "officer_name": name}
     await _send_to_caller(room, status_event)
+    if not still_joining():
+        return name
     hub.publish_call(room.call_id, "status", status_event)
     hub.publish_lobby("call.bridged", {
         "call_id": room.call_id, "status": "bridged", "officer_id": officer_id, "officer_name": name,

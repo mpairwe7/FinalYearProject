@@ -220,6 +220,38 @@ class BridgeClearsTheAiOutputTests(WaitingCall):
         self.assertNotIn("bridged", [m.get("status") for m in self.caller.messages])
         self.assertEqual([c for c in self.lobby.call_args_list if c.args[0] == "call.bridged"], [])
 
+    async def ends_while_sending(self, kind: str) -> None:
+        """The call ends while the bridge's *kind* message is on its way to the caller."""
+        send = self.caller.send_text
+
+        async def slow_send(text: str) -> None:
+            await send(text)
+            message = json.loads(text)
+            if message.get("type") == kind or message.get("status") == kind:
+                self.room.state.mode = "ended"
+                await asyncio.sleep(0)
+
+        self.caller.send_text = slow_send
+
+    async def test_a_call_that_ends_while_the_interrupt_is_sent_gets_no_joining_line(self):
+        # Review of PR 732: each send to the caller can yield.
+        self.with_output()
+        await self.ends_while_sending("interrupt")
+
+        await self.bridge()
+
+        self.assertNotIn("joining line", self.log)
+        self.assertEqual([c for c in self.lobby.call_args_list if c.args[0] == "call.bridged"], [])
+
+    async def test_a_call_that_ends_while_bridged_is_sent_is_not_published_as_bridged(self):
+        self.with_output()
+        await self.ends_while_sending("bridged")
+
+        await self.bridge()
+
+        self.assertIn("joining line", self.log)
+        self.assertEqual([c for c in self.lobby.call_args_list if c.args[0] == "call.bridged"], [])
+
     async def test_a_bridge_that_completes_is_announced(self):
         self.with_output()
 
