@@ -3033,26 +3033,38 @@ def upsert_answer_override(
     body = (reply or "").strip()
     conn = _get_connection()
     now = time.time()
-    existing = conn.execute(
-        "SELECT id FROM answer_overrides WHERE match_query = ?", (key,)
-    ).fetchone()
-    if existing:
-        oid = str(existing["id"] if not isinstance(existing, tuple) else existing[0])
-        conn.execute(
-            """UPDATE answer_overrides
-               SET reply = ?, source_url = ?, created_by = ?, enabled = ?, updated_at = ?
-               WHERE id = ?""",
-            (body, source_url, created_by, 1 if enabled else 0, now, oid),
-        )
-    else:
-        oid = str(uuid.uuid4())
-        conn.execute(
-            """INSERT INTO answer_overrides
-               (id, match_query, reply, source_url, created_by, enabled, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (oid, key, body, source_url, created_by, 1 if enabled else 0, now),
-        )
-    conn.commit()
+    previous_reply = ""
+    # The read of the reply being replaced and the write are one transaction
+    # (BEGIN IMMEDIATE takes the write lock first), so the ledger names the
+    # reply this write actually replaced, not one another writer had already
+    # replaced (G637). Nothing in here opens a second connection.
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    try:
+        existing = conn.execute(
+            "SELECT id, reply FROM answer_overrides WHERE match_query = ?", (key,)
+        ).fetchone()
+        if existing:
+            oid = str(existing["id"] if not isinstance(existing, tuple) else existing[0])
+            previous_reply = str((existing["reply"] if not isinstance(existing, tuple) else existing[1]) or "")
+            conn.execute(
+                """UPDATE answer_overrides
+                   SET reply = ?, source_url = ?, created_by = ?, enabled = ?, updated_at = ?
+                   WHERE id = ?""",
+                (body, source_url, created_by, 1 if enabled else 0, now, oid),
+            )
+        else:
+            oid = str(uuid.uuid4())
+            conn.execute(
+                """INSERT INTO answer_overrides
+                   (id, match_query, reply, source_url, created_by, enabled, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (oid, key, body, source_url, created_by, 1 if enabled else 0, now),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     return {
         "id": oid,
         "match_query": key,
@@ -3060,6 +3072,7 @@ def upsert_answer_override(
         "source_url": source_url,
         "created_by": created_by,
         "enabled": enabled,
+        "previous_reply": previous_reply,
     }
 
 

@@ -4438,9 +4438,8 @@ def put_override_endpoint(
     if ctx.user and ctx.role != "ura_admin":
         raise HTTPException(status_code=403, detail="only ura_admin may edit overrides")
     # G637: an override is keyed on the normalized question, so this may
-    # replace a live answer. Read it first so the ledger can say so.
-    previous = db.get_answer_override(cms.normalize_query(str(body.get("query") or ""))) or {}
-    previous_reply = str(previous.get("reply") or "")
+    # replace a live answer. The store returns the reply this write replaced,
+    # read in the same transaction, so the ledger can say so.
     try:
         row = cms.upsert(
             str(body.get("query") or ""),
@@ -4451,6 +4450,8 @@ def put_override_endpoint(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    row = dict(row or {})
+    previous_reply = str(row.pop("previous_reply", "") or "")
     from .cache import reset_index_stamp
 
     reset_index_stamp()
@@ -4561,132 +4562,136 @@ def verify_discrepancy_endpoint(
     if str(body.get("precedence_rule") or "").strip() and not str(body.get("precedence_topic") or "").strip():
         raise HTTPException(status_code=422, detail="a precedence rule needs the topic it is about")
 
-    # Optional 1-Click Answer Override
-    if body.get("create_override"):
-        from . import cms
+    # Each write below commits on its own, so a failure part-way leaves the
+    # earlier ones in place: answers cached before them are retired whether
+    # or not the rest succeeds (G277), and the report stays pending.
+    try:
+        # Optional 1-Click Answer Override
+        if body.get("create_override"):
+            from . import cms
 
-        override_query = str(body.get("override_query") or "").strip()
-        if not override_query and report.get("conversation_id"):
-            with contextlib.suppress(Exception):
-                msgs = db.get_conversation_messages(str(report["conversation_id"]))
-                bot_stmt = str(report.get("bot_statement") or "").strip()
-                last_user = ""
-                for m in msgs or []:
-                    role = str(m.get("role") or "")
-                    content = str(m.get("content") or "").strip()
-                    if role == "user" and content:
-                        last_user = content
-                    elif role == "assistant" and bot_stmt and bot_stmt[:80] in content and last_user:
+            override_query = str(body.get("override_query") or "").strip()
+            if not override_query and report.get("conversation_id"):
+                with contextlib.suppress(Exception):
+                    msgs = db.get_conversation_messages(str(report["conversation_id"]))
+                    bot_stmt = str(report.get("bot_statement") or "").strip()
+                    last_user = ""
+                    for m in msgs or []:
+                        role = str(m.get("role") or "")
+                        content = str(m.get("content") or "").strip()
+                        if role == "user" and content:
+                            last_user = content
+                        elif role == "assistant" and bot_stmt and bot_stmt[:80] in content and last_user:
+                            override_query = last_user
+                            break
+                    if not override_query and last_user:
                         override_query = last_user
-                        break
-                if not override_query and last_user:
-                    override_query = last_user
-        if not override_query:
-            override_query = str(report.get("user_correction") or "").strip()
-        override_reply = str(body.get("override_reply") or "").strip()
-        source_url = str(body.get("source_url") or "staff-verified-discrepancy").strip()
-        if override_query and override_reply:
-            # This may replace a live answer, as the override route may: read
-            # it first so the ledger can say so (G637).
-            previous = db.get_answer_override(cms.normalize_query(override_query)) or {}
-            row = cms.upsert(
-                override_query,
-                override_reply,
-                source_url=source_url,
-                created_by=ctx.user.user_id if ctx.user else "ura_admin",
+            if not override_query:
+                override_query = str(report.get("user_correction") or "").strip()
+            override_reply = str(body.get("override_reply") or "").strip()
+            source_url = str(body.get("source_url") or "staff-verified-discrepancy").strip()
+            if override_query and override_reply:
+                # This may replace a live answer, as the override route may; the
+                # store returns the reply it replaced, read with the write (G637).
+                row = cms.upsert(
+                    override_query,
+                    override_reply,
+                    source_url=source_url,
+                    created_by=ctx.user.user_id if ctx.user else "ura_admin",
+                    enabled=True,
+                )
+                override_id = str((row or {}).get("id") or "")
+                _audit_staff_action(
+                    ctx,
+                    "staff.override_saved",
+                    {
+                        "override_id": override_id,
+                        "enabled": True,
+                        "via_report": report_id,
+                        **_override_replacement_record(
+                            str((row or {}).get("previous_reply") or ""),
+                            str((row or {}).get("reply") or override_reply).strip(),
+                        ),
+                    },
+                )
+
+        # Optional Solution C: Active Statutory Precedence
+        precedence_topic = str(body.get("precedence_topic") or "").strip()
+        precedence_rule = str(body.get("precedence_rule") or "").strip()
+        statute_ref = str(body.get("statute_reference") or "").strip()
+        if precedence_topic and precedence_rule:
+            prec = db.add_statutory_precedence(
+                precedence_topic,
+                precedence_rule,
+                statute_reference=statute_ref,
                 enabled=True,
             )
-            override_id = str((row or {}).get("id") or "")
+            precedence_id = str((prec or {}).get("id") or "")
+            # The rule's text stays in its table; the ledger seals its digest.
             _audit_staff_action(
                 ctx,
-                "staff.override_saved",
+                "staff.precedence_created",
                 {
-                    "override_id": override_id,
-                    "enabled": True,
+                    "precedence_id": precedence_id,
+                    "topic": precedence_topic,
+                    "statute_reference": statute_ref,
+                    "rule_sha256": hashlib.sha256(precedence_rule.encode("utf-8")).hexdigest(),
                     "via_report": report_id,
-                    **_override_replacement_record(
-                        str(previous.get("reply") or ""),
-                        str((row or {}).get("reply") or override_reply).strip(),
-                    ),
                 },
             )
 
-    # Optional Solution C: Active Statutory Precedence
-    precedence_topic = str(body.get("precedence_topic") or "").strip()
-    precedence_rule = str(body.get("precedence_rule") or "").strip()
-    statute_ref = str(body.get("statute_reference") or "").strip()
-    if precedence_topic and precedence_rule:
-        prec = db.add_statutory_precedence(
-            precedence_topic,
-            precedence_rule,
-            statute_reference=statute_ref,
-            enabled=True,
-        )
-        precedence_id = str((prec or {}).get("id") or "")
-        # The rule's text stays in its table; the ledger seals its digest.
-        _audit_staff_action(
-            ctx,
-            "staff.precedence_created",
-            {
-                "precedence_id": precedence_id,
-                "topic": precedence_topic,
-                "statute_reference": statute_ref,
-                "rule_sha256": hashlib.sha256(precedence_rule.encode("utf-8")).hexdigest(),
-                "via_report": report_id,
-            },
-        )
+        # Optional Solution B: Tombstone cited sources or chunks
+        tomb_sources = body.get("tombstone_sources") or []
+        if isinstance(tomb_sources, list):
+            for src in tomb_sources:
+                if src and str(src).strip():
+                    tomb = db.add_corpus_tombstone(
+                        str(src).strip(),
+                        reason=f"Superseded via report {report_id}",
+                        superseded_by=override_id,
+                        created_by=ctx.user.user_id if ctx.user else "ura_admin",
+                    )
+                    tombstoned_sources.append(str(src).strip())
+                    tombstone_ids.append(str((tomb or {}).get("id") or ""))
 
-    # Optional Solution B: Tombstone cited sources or chunks
-    tomb_sources = body.get("tombstone_sources") or []
-    if isinstance(tomb_sources, list):
-        for src in tomb_sources:
-            if src and str(src).strip():
-                tomb = db.add_corpus_tombstone(
-                    str(src).strip(),
-                    reason=f"Superseded via report {report_id}",
-                    superseded_by=override_id,
-                    created_by=ctx.user.user_id if ctx.user else "ura_admin",
-                )
-                tombstoned_sources.append(str(src).strip())
-                tombstone_ids.append(str((tomb or {}).get("id") or ""))
+        tomb_chunks = body.get("tombstone_chunk_ids") or []
+        if isinstance(tomb_chunks, list):
+            for cid in tomb_chunks:
+                if cid and str(cid).strip():
+                    tomb = db.add_corpus_tombstone(
+                        "",
+                        chunk_id=str(cid).strip(),
+                        reason=f"Superseded via report {report_id}",
+                        superseded_by=override_id,
+                        created_by=ctx.user.user_id if ctx.user else "ura_admin",
+                    )
+                    # A chunk withdrawal is a tombstone too: audited and it
+                    # retires cached answers, like a source withdrawal.
+                    tombstoned_chunks.append(str(cid).strip())
+                    tombstone_ids.append(str((tomb or {}).get("id") or ""))
 
-    tomb_chunks = body.get("tombstone_chunk_ids") or []
-    if isinstance(tomb_chunks, list):
-        for cid in tomb_chunks:
-            if cid and str(cid).strip():
-                tomb = db.add_corpus_tombstone(
-                    "",
-                    chunk_id=str(cid).strip(),
-                    reason=f"Superseded via report {report_id}",
-                    superseded_by=override_id,
-                    created_by=ctx.user.user_id if ctx.user else "ura_admin",
-                )
-                # A chunk withdrawal is a tombstone too: audited and it
-                # retires cached answers, like a source withdrawal.
-                tombstoned_chunks.append(str(cid).strip())
-                tombstone_ids.append(str((tomb or {}).get("id") or ""))
+        if tombstone_ids:
+            _audit_staff_action(
+                ctx,
+                "staff.tombstone_created",
+                {
+                    "tombstone_ids": tombstone_ids,
+                    "sources": tombstoned_sources,
+                    "chunk_ids": tombstoned_chunks,
+                    "via_report": report_id,
+                },
+            )
+    finally:
+        if override_id or precedence_id or tombstone_ids:
+            # As the standalone override and tombstone routes do: answers cached
+            # before the hotfix must not keep being served after it (G277).
+            from .cache import reset_index_stamp
 
-    if tombstone_ids:
-        _audit_staff_action(
-            ctx,
-            "staff.tombstone_created",
-            {
-                "tombstone_ids": tombstone_ids,
-                "sources": tombstoned_sources,
-                "chunk_ids": tombstoned_chunks,
-                "via_report": report_id,
-            },
-        )
-    if override_id or precedence_id or tombstone_ids:
-        # As the standalone override and tombstone routes do: answers cached
-        # before the hotfix must not keep being served after it (G277).
-        from .cache import reset_index_stamp
-
-        reset_index_stamp()
-        cache_obj = getattr(getattr(app.state, "model", None), "_cache", None)
-        if cache_obj is not None and hasattr(cache_obj, "clear"):
-            with contextlib.suppress(Exception):
-                cache_obj.clear()
+            reset_index_stamp()
+            cache_obj = getattr(getattr(app.state, "model", None), "_cache", None)
+            if cache_obj is not None and hasattr(cache_obj, "clear"):
+                with contextlib.suppress(Exception):
+                    cache_obj.clear()
 
     db.update_discrepancy_status(
         report_id,
@@ -5309,17 +5314,28 @@ def _translation_keeps_figures(english: str, localized: str, locale: str) -> boo
 
 
 def _localize_for_ticket(text: str, ticket_locale: str) -> str | None:
-    """An officer's English message in the taxpayer's language (None for English or on failure)."""
+    """An officer's English message in the taxpayer's language.
+
+    None for English, on failure, or when the translation does not carry
+    exactly the English amounts and rates (G635): the officer's English is
+    then sent instead. ``localize_reply``'s own check tolerates one changed
+    figure among enough matches, which is not good enough for an officer's word.
+    """
     t_loc = (ticket_locale or "en").lower().strip()
     if t_loc in ("", "en"):
         return None
     try:
         from .service import localize_reply
 
-        return localize_reply(text, t_loc)
+        localized = localize_reply(text, t_loc)
     except Exception:
         logger.debug("auto-localizing officer reply failed", exc_info=True)
         return None
+    if localized and not _translation_keeps_figures(text, localized, t_loc):
+        logger.warning("officer reply machine translation dropped: its figures differ from the English")
+        metrics.inc("officer_reply_translation_rejected_total")
+        return None
+    return localized
 
 
 def _note_officer_chat_turn(

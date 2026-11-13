@@ -3,7 +3,7 @@
  * visible (G639). Reopen deleted the finding and its note in one click.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ReviewControl } from '../../components/quality/ReviewControl';
@@ -82,5 +82,18 @@ describe('ReviewControl', () => {
       }),
     );
     expect(screen.queryByText(/Earlier decisions/)).toBeNull();
+  });
+
+  // CodeRabbit on PR 730: the confirmation never took focus, and cancelling
+  // dropped focus with the button that closed it.
+  it('moves focus into the reopen confirmation, and back to Reopen on cancel', async () => {
+    vi.spyOn(analyticsApi, 'setQualityReview').mockResolvedValue({} as never);
+    renderControl(item({ review: { status: 'reviewed', note: '', reviewer_name: 'A', updated_at: 1790000000 } }));
+    const reopen = screen.getByRole('button', { name: 'Reopen' });
+    reopen.focus();
+    fireEvent.click(reopen);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Keep the decision' })).toHaveFocus());
+    fireEvent.click(screen.getByRole('button', { name: 'Keep the decision' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Reopen' })).toHaveFocus());
   });
 });

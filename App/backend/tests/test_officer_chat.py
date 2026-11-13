@@ -164,6 +164,23 @@ class TaxpayerThreadTests(_Chat):
         self.assertNotIn("200,000", msg["text"])
         self.assertIn("50,000", msg["text"])
 
+    def test_a_regenerated_translation_that_changed_an_amount_is_not_sent(self):
+        """CodeRabbit on PR 730: the server's own translation was used unchecked
+        beyond the shared MT check, which lets one changed amount of four through.
+        It now passes the same strict check, or the officer's English is sent."""
+        db.update_ticket(self.tid, locale="lg")
+        self.take_case()
+        english = "You owe UGX 1,200,000, UGX 240,000, UGX 60,000 and UGX 15,000."
+        with mock.patch(
+            "app.service.localize_reply",
+            return_value="Obanjibwa UGX 1,200,000, UGX 240,000, UGX 60,000 ne UGX 25,000.",
+        ):
+            r = self.client.patch(f"/v1/admin/tickets/{self.tid}", json={"officer_reply": english}, headers=OFFICER)
+        self.assertEqual(r.status_code, 200, r.text)
+        text = self.thread()["messages"][0]["text"]
+        self.assertNotIn("25,000", text)
+        self.assertIn("15,000", text)
+
     def test_a_supplied_translation_that_keeps_the_figures_is_used(self):
         db.update_ticket(self.tid, locale="lg")
         self.take_case()

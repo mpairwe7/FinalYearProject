@@ -8,7 +8,7 @@
  * it is about, and every decision is recorded on the audit trail
  * (`staff.quality_reviewed`). Who decided, and when, is shown with it.
  */
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useSetReview } from "../../hooks/useQualityAudit";
 import type { NeedsReviewItem, ReviewStatus } from "../../services/analyticsApi";
 
@@ -54,6 +54,19 @@ export function ReviewControl({ item }: { item: NeedsReviewItem }) {
   // G639: Reopen takes a finding back; it asks first, and the server keeps
   // the decision in the item's history.
   const [confirmReopen, setConfirmReopen] = useState(false);
+  // The confirmation takes focus when it opens (on the safe choice), and a
+  // cancel gives it back to Reopen, so keyboard and screen-reader users are
+  // neither left behind nor dropped at the top of the page.
+  const reopenRef = useRef<HTMLButtonElement>(null);
+  const keepRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (confirmReopen) keepRef.current?.focus();
+  }, [confirmReopen]);
+  const cancelReopen = () => {
+    setConfirmReopen(false);
+    // After the dialog unmounts, so the button exists and is enabled.
+    requestAnimationFrame(() => reopenRef.current?.focus());
+  };
   const earlier = item.history ?? [];
   // The newest history entry is the decision shown above; not repeated below.
   const last = earlier[earlier.length - 1];
@@ -115,6 +128,7 @@ export function ReviewControl({ item }: { item: NeedsReviewItem }) {
             className="ops-btn is-ghost is-sm"
             disabled={save.isPending}
             aria-expanded={confirmReopen}
+            ref={reopenRef}
             onClick={() => setConfirmReopen(true)}
           >
             Reopen
@@ -145,7 +159,7 @@ export function ReviewControl({ item }: { item: NeedsReviewItem }) {
             >
               Reopen it
             </button>
-            <button type="button" className="ops-btn is-primary is-sm" onClick={() => setConfirmReopen(false)}>
+            <button type="button" className="ops-btn is-primary is-sm" ref={keepRef} onClick={cancelReopen}>
               Keep the decision
             </button>
           </div>

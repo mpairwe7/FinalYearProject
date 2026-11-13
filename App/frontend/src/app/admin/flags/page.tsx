@@ -15,7 +15,7 @@
  * the replica caveat is a banner instead of a sentence in the subtitle, since
  * acting on it wrongly means believing a cluster is configured when one pod is.
  */
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import StaffGuard, { type StaffIdentity } from "../../../components/StaffGuard";
 import { OpsPage, TableScroll } from "../../../components/ops/OpsPage";
@@ -64,6 +64,26 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
   // G638: a safety control is switched off, or reset to a value that may be
   // off, only after saying what that does.
   const [confirm, setConfirm] = useState<{ name: string; action: "off" | "reset" } | null>(null);
+  // The confirmation renders after the whole table: it takes focus when it
+  // opens (which scrolls it into view) and gives it back to the control that
+  // opened it when it closes.
+  const keepOnRef = useRef<HTMLButtonElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const askFirst = (next: { name: string; action: "off" | "reset" }) => {
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setConfirm(next);
+  };
+  const closeConfirm = () => {
+    setConfirm(null);
+    const opener = openerRef.current;
+    openerRef.current = null;
+    requestAnimationFrame(() => {
+      if (opener && opener.isConnected) opener.focus();
+    });
+  };
+  useEffect(() => {
+    if (confirm) keepOnRef.current?.focus();
+  }, [confirm]);
 
   const flags = useMemo(() => data?.flags ?? [], [data]);
   // Every process re-reads the stored overrides on this interval (G612); 0 means
@@ -239,7 +259,7 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
                           label={`${flag.name} — currently ${flag.enabled ? "on" : "off"}`}
                           onChange={(next) =>
                             !next && SAFETY_CONTROLS[flag.name]
-                              ? setConfirm({ name: flag.name, action: "off" })
+                              ? askFirst({ name: flag.name, action: "off" })
                               : toggle.mutate({ name: flag.name, enabled: next })
                           }
                         />
@@ -274,7 +294,7 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
                               // control then follows FLAG_* or its default,
                               // which may be off, so it asks first too.
                               SAFETY_CONTROLS[flag.name] && flag.enabled
-                                ? setConfirm({ name: flag.name, action: "reset" })
+                                ? askFirst({ name: flag.name, action: "reset" })
                                 : reset.mutate(flag.name)
                             }
                             title="Drop the override so this flag follows FLAG_* or its default again"
@@ -314,12 +334,12 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
                 onClick={() => {
                   if (confirm.action === "off") toggle.mutate({ name: confirm.name, enabled: false });
                   else reset.mutate(confirm.name);
-                  setConfirm(null);
+                  closeConfirm();
                 }}
               >
                 {confirm.action === "off" ? "Turn it off" : "Reset it"}
               </button>
-              <button type="button" className="ops-btn is-primary is-sm" onClick={() => setConfirm(null)}>
+              <button type="button" className="ops-btn is-primary is-sm" ref={keepOnRef} onClick={closeConfirm}>
                 Keep it on
               </button>
             </div>

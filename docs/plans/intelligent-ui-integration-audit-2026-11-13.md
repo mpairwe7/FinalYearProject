@@ -111,7 +111,7 @@ All nine were implemented with a test watched failing first; G630 is mitigated (
 
 ## Phase 3 — staff controls that change what taxpayers are told (implemented, ADR-0050)
 
-All six were implemented with a test watched failing first. ADR-0050 records where the fix differs from the plan: G634 is mitigated, since discrepancies are still not tenant-scoped; G635 also refuses a stale translation on the server, whichever client sends it; G636 keeps the result shortcuts as `[[…]]` templates rather than removing them. While testing G635 the reply field's Preview button was found to take the label's text as its accessible name (it sat inside the `<label>`); the field is now a `div`.
+All six were implemented with a test watched failing first. ADR-0050 records where the fix differs from the plan: G634 and G637 are mitigated, since discrepancies and answer overrides are still not tenant-scoped; G635 also refuses a stale translation on the server, whichever client sends it; G636 keeps the result shortcuts as `[[…]]` templates rather than removing them. While testing G635 the reply field's Preview button was found to take the label's text as its accessible name (it sat inside the `<label>`); the field is now a `div`.
 
 | Gap | Severity | Finding | Fix |
 | --- | --- | --- | --- |

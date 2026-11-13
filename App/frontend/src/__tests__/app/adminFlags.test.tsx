@@ -249,6 +249,20 @@ describe("Feature flags console", () => {
       expect(confirm).not.toHaveTextContent(/within one sync interval/i);
     });
 
+    // CodeRabbit on PR 730: the confirmation sits after the whole table; focus
+    // stayed on the switch, so the dialog could open out of sight.
+    it("moves focus into the confirmation, and back to the switch when kept on", async () => {
+      vi.spyOn(analyticsApi, "flags").mockResolvedValue({ flags: [SAFETY], overrides_are_ephemeral: false } as never);
+      renderFlags();
+      await screen.findByText("stream_figure_hold");
+      const toggle = within(row("stream_figure_hold")).getByRole("switch");
+      toggle.focus();
+      fireEvent.click(toggle);
+      await waitFor(() => expect(screen.getByRole("button", { name: /^Keep it on$/ })).toHaveFocus());
+      fireEvent.click(screen.getByRole("button", { name: /^Keep it on$/ }));
+      await waitFor(() => expect(within(row("stream_figure_hold")).getByRole("switch")).toHaveFocus());
+    });
+
     it("can be kept on", async () => {
       vi.spyOn(analyticsApi, "flags").mockResolvedValue({ flags: [SAFETY], overrides_are_ephemeral: false } as never);
       renderFlags();

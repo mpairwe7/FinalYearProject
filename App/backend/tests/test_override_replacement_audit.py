@@ -50,6 +50,28 @@ class OverrideReplacementAuditTests(unittest.TestCase):
         self.assertEqual(event["previous_reply_sha256"], _sha("UGX 150,000,000 a year."))
         self.assertEqual(event["reply_sha256"], _sha("UGX 300,000,000 a year."))
 
+    def test_the_replaced_reply_is_read_with_the_write_not_before_it(self) -> None:
+        """CodeRabbit on PR 730: the route read the old reply in a call of its own
+        before writing, so a write that landed in between was recorded as never
+        having existed. The store now returns what the write itself replaced."""
+        self._put(self.question, "UGX 150,000,000 a year.")
+        # A stale read, as a concurrent request's would be: the store holds 150m.
+        with mock.patch.object(db, "get_answer_override", return_value={"reply": "UGX 100,000,000 a year."}):
+            event = self._put(self.question, "UGX 300,000,000 a year.")
+        self.assertEqual(event["previous_reply_sha256"], _sha("UGX 150,000,000 a year."))
+
+    def test_the_store_returns_the_reply_it_replaced(self) -> None:
+        key = f"g637 store {uuid.uuid4().hex[:6]}"
+        self.assertEqual(db.upsert_answer_override(key, "first")["previous_reply"], "")
+        self.assertEqual(db.upsert_answer_override(key, "second")["previous_reply"], "first")
+
+    def test_the_api_response_carries_no_previous_reply(self) -> None:
+        self._put(self.question, "UGX 150,000,000 a year.")
+        res = self.client.put(
+            "/v1/admin/overrides", json={"query": self.question, "reply": "UGX 300,000,000 a year."}, headers=self.headers
+        )
+        self.assertNotIn("previous_reply", res.json())
+
 
 if __name__ == "__main__":
     unittest.main()

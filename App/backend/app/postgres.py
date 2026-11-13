@@ -2205,11 +2205,15 @@ def upsert_answer_override(
     if pool is None or not key:
         return {}
     now = time.time()
+    previous_reply = ""
     with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT id FROM answer_overrides WHERE match_query = %s", (key,))
+        # FOR UPDATE: the reply read here is the one this write replaces, even
+        # with another save of the same question in flight (G637).
+        cur.execute("SELECT id, reply FROM answer_overrides WHERE match_query = %s FOR UPDATE", (key,))
         existing = cur.fetchone()
         if existing:
             oid = str(existing[0])
+            previous_reply = str(existing[1] or "")
             cur.execute(
                 """UPDATE answer_overrides
                    SET reply = %s, source_url = %s, created_by = %s,
@@ -2233,6 +2237,7 @@ def upsert_answer_override(
         "source_url": source_url,
         "created_by": created_by,
         "enabled": enabled,
+        "previous_reply": previous_reply,
     }
 
 

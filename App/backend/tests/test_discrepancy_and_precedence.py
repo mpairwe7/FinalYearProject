@@ -322,6 +322,29 @@ class TestAdminEndpointsE2E(unittest.TestCase):
         self.assertEqual(saved["previous_reply_sha256"], hashlib.sha256(b"Withholding tax on rent is 10%.").hexdigest())
         self.assertEqual(saved["reply_sha256"], hashlib.sha256(new_reply.encode()).hexdigest())
 
+    def test_a_hotfix_that_fails_part_way_still_retires_cached_answers(self):
+        """CodeRabbit on PR 730: each hotfix write commits on its own, so a failure
+        after the override was saved left answers cached before it in service."""
+        run = uuid.uuid4().hex[:8]
+        rep = db.create_or_increment_discrepancy(
+            bot_statement=f"VAT on {run} is 18%", user_correction="It is exempt", cited_sources=[f"vat_{run}.pdf"],
+        )
+        client = TestClient(app, raise_server_exceptions=False)
+        with mock.patch("app.database.add_corpus_tombstone", side_effect=RuntimeError("disk full")), \
+             mock.patch("app.cache.reset_index_stamp") as reset_cache:
+            res = client.post(
+                f"/v1/admin/discrepancies/{rep['id']}/verify",
+                headers=self.auth_headers,
+                json={
+                    "create_override": True,
+                    "override_query": f"vat on {run}",
+                    "override_reply": "This supply is exempt from VAT.",
+                    "tombstone_sources": [f"vat_{run}.pdf"],
+                },
+            )
+        self.assertEqual(res.status_code, 500)
+        reset_cache.assert_called()
+
     def test_admin_discrepancy_verification_workflow(self):
         # 1. Create a discrepancy report
         rep = db.create_or_increment_discrepancy(

@@ -2344,7 +2344,8 @@ dropped except `.`/`-` between digits, spacing collapsed); the chat also tries t
 rewritten and the machine-translated question, and translates the reply for other
 languages. A `PUT` whose normalized question already has an override replaces it;
 `staff.override_saved` records `replaced`, `previous_reply_sha256` and
-`reply_sha256` (G637, ADR-0050).
+`reply_sha256`, the replaced reply read inside the write's own transaction (G637,
+ADR-0050). Overrides are not tenant-scoped: one answers every tenant.
 
 `POST /v1/admin/discrepancies/{report_id}/verify` (`ura_admin`) applies a
 taxpayer-reported correction: an override, a statutory precedence rule (told to
