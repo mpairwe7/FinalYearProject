@@ -308,6 +308,18 @@ What an operator, an officer or an auditor will see differently:
   `too many frames`; an officer's close then takes the reconnect grace like any
   other. Set the byte rate with `RECEPTIONIST_AUDIO_BYTES_PER_S` (default 64000,
   never below 32000).
+- **A LiveKit call's control sockets are limited too (G304, ADR-0047).** On a
+  LiveKit call the audio is WebRTC and these sockets carry text only: the
+  caller's call socket, the officer's audio socket and a listener's. Each
+  holds text frames to 15 per 10 s (16 KiB each); the caller's 16th control
+  message in that window, a typed question included, is dropped, not
+  answered. A binary frame on them is dropped and counted as `malformed`;
+  before, it ended the caller's call, put the officer into the reconnect grace
+  or cut the listener off. Drops are counted under `side="caller"` or
+  `side="officer"` (a listener counts as `officer`). A flood that lasts 5 s
+  closes the socket 1008: the caller's call then ends and its media pipeline
+  stops, the officer goes into the reconnect grace, and a listener is
+  removed from the room.
 - **An officer owes the wrap-up of a call that ended under them (G610,
   ADR-0045).** However the call ended (the caller, its time limit, a media
   failure, during their reconnect grace) the officer who had it goes to

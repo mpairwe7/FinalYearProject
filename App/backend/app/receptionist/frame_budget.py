@@ -7,6 +7,11 @@ far more than a microphone does grew the utterance buffer without a byte
 bound, and an odd-length frame made ``np.frombuffer`` raise and sent the
 officer into the reconnect grace.
 
+On a LiveKit call the audio is WebRTC, and the caller's, the officer's and a
+listener's sockets carry control messages only; nothing limited those either
+(ADR-0047). They take text through the same gate, and a binary frame there is
+dropped (:meth:`FrameGate.unexpected`).
+
 A :class:`FrameGate` belongs to one socket and is asked before a frame is
 handed on. It drops a frame that is too big, malformed or over budget, counts
 it in ``receptionist_frames_dropped_total`` and logs the flood once. It tells
@@ -44,7 +49,8 @@ FRAME_BURST = 200
 #: The byte budget holds this many seconds of its rate (128 000 B at the default
 #: 64 000 B/s, ``RECEPTIONIST_AUDIO_BYTES_PER_S``).
 BYTE_BURST_S = 2
-#: Text frames (the officer's console sends only ``hangup``) per window.
+#: Text frames per window: the officer's console sends only ``hangup``, and on
+#: a LiveKit call the caller's control messages are text too (ADR-0047).
 TEXT_FRAMES = 15
 TEXT_WINDOW_S = 10.0
 #: Drops this long without a quiet second between them close the socket.
@@ -152,6 +158,18 @@ class FrameGate:
             return self._drop("rate", now)
         self._texts.spend(1)
         return Verdict.PASS
+
+    def unexpected(self) -> Verdict:
+        """A frame this socket never takes: dropped, and counted as ``malformed``.
+
+        A LiveKit call's control sockets carry text only (its audio goes over
+        WebRTC), so a binary frame there is one. It is never handed on, and one
+        never ends the call; a stream of them that lasts is a flood like any
+        other (G304, ADR-0047).
+        """
+        if self._closed:
+            return Verdict.DROP
+        return self._drop("malformed", self._tick())
 
     def _drop(self, reason: str, now: float) -> Verdict:
         telemetry.frame_dropped(self.side, reason)

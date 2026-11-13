@@ -2084,6 +2084,18 @@ caller a minute before the time limit (`RECEPTIONIST_MAX_CALL_S`), or halfway
 through a limit of a minute or less, on every transport, and the call
 ends at the limit with `status: ended`.
 
+What a call socket may send (G304, ADR-0045 and ADR-0047): a frame over the
+socket's budget is dropped and counted (`receptionist_frames_dropped_total`),
+never answered with an error. A socket that keeps dropping frames for 5 s is
+closed **1008** `too many frames`. Audio sockets take a binary frame of at most
+16 KiB, in whole PCM16 samples (a mu-law call is exempt from that rule), within
+64 000 B/s (`RECEPTIONIST_AUDIO_BYTES_PER_S`) and 200 frames/s. On a
+LiveKit call the audio is WebRTC and the three sockets (the caller's
+`/v1/calls/stream`, the officer's and a listener's
+`/v1/admin/calls/{call_id}/audio`) carry control messages only: at most 15 text
+frames per 10 s, each at most 16 KiB, and a binary frame is dropped. The
+officer's audio socket on the WebSocket transport has the same text limit.
+
 #### Call requests that reach the wrong process (ADR-0043)
 
 In the container image (`Dockerfile.cranecloud`, the HF Space) the API runs as a

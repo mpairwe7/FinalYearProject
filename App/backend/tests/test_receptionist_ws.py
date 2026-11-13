@@ -359,9 +359,21 @@ class TestLiveKitCallControlLoop(unittest.TestCase):
         _init_schema()
         cls.client = TestClient(app)
 
-    def _run_call(self, frames: list[str], **start: str):
+    def _run_call(
+        self,
+        frames: list[str | bytes],
+        *,
+        forwarded: int | None = None,
+        clock=None,
+        **start: str,
+    ):
         """Start a LiveKit call (``call_start`` extended by *start*), send *frames*,
-        drop the socket; return what the pipeline saw."""
+        drop the socket; return what the pipeline saw.
+
+        A ``bytes`` frame is sent binary. The socket is dropped once *forwarded*
+        frames reached the pipeline (by default, one per ``set_language`` frame),
+        or after 5 s. *clock* stands in for the frame budget's clock."""
+        import contextlib
         import threading
         from types import SimpleNamespace
         from unittest.mock import AsyncMock, MagicMock
@@ -373,7 +385,7 @@ class TestLiveKitCallControlLoop(unittest.TestCase):
             reason="LiveKit control-loop integration requires the receptionist extra",
         )
 
-        from app.receptionist import livekit
+        from app.receptionist import frame_budget, livekit
         from app.receptionist import ws as ws_mod
 
         seen = SimpleNamespace(frames=[], cancelled=threading.Event(), running=threading.Event(), call_id="")
@@ -417,6 +429,7 @@ class TestLiveKitCallControlLoop(unittest.TestCase):
             patch.object(ws_mod.risk, "start"),
             patch.object(ws_mod.risk, "stop"),
             patch.object(ws_mod, "generate_call_summary", new=MagicMock()),
+            patch.object(frame_budget, "_now", clock) if clock is not None else contextlib.nullcontext(),
         ):
             with self.client.websocket_connect("/v1/calls/stream") as sock:
                 sock.send_text(
@@ -427,9 +440,14 @@ class TestLiveKitCallControlLoop(unittest.TestCase):
                 self.assertEqual(ready["media"]["transport"], "livekit")
                 self.assertTrue(seen.running.wait(5), "the media pipeline never started")
                 for frame in frames:
-                    sock.send_text(frame)
+                    if isinstance(frame, bytes):
+                        sock.send_bytes(frame)
+                    else:
+                        sock.send_text(frame)
+                if forwarded is None:
+                    forwarded = sum(isinstance(f, str) and '"set_language"' in f for f in frames)
                 deadline = time.monotonic() + 5
-                while len(seen.frames) < sum('"set_language"' in f for f in frames) and time.monotonic() < deadline:
+                while len(seen.frames) < forwarded and time.monotonic() < deadline:
                     time.sleep(0.02)
                 # Drop the control socket without a hangup, then wait for the
                 # server's teardown to finish here: leaving the block cancels
@@ -471,3 +489,21 @@ class TestLiveKitCallControlLoop(unittest.TestCase):
         seen = self._run_call(["not json", "[1]", json.dumps({"type": "set_language", "language": "sw"})])
         self.assertEqual([frame.language for frame in seen.frames], ["sw"])
         self.assertTrue(seen.cancelled.is_set())
+
+    def test_a_binary_frame_on_the_control_socket_does_not_end_the_call(self):
+        """G304 (ADR-0047): LiveKit carries the audio, so nothing binary belongs on this
+        socket. ``receive_text()`` raised on one and the caller's call ended."""
+        seen = self._run_call([b"\x00\x01" * 320, json.dumps({"type": "set_language", "language": "sw"})])
+        self.assertEqual([frame.language for frame in seen.frames], ["sw"])
+
+    def test_the_sixteenth_control_message_in_ten_seconds_is_dropped(self):
+        """G304 (ADR-0047): each control message became a pipeline frame (a ``text_turn``
+        a model turn) however many the caller sent. A stopped clock: no budget refills."""
+        from app.analytics import metrics
+
+        series = 'receptionist_frames_dropped_total{reason="rate",side="caller"}'
+        before = float(metrics.snapshot()["counters"].get(series, 0))
+        language = json.dumps({"type": "set_language", "language": "sw"})
+        seen = self._run_call([language] * 16, forwarded=15, clock=lambda: 1000.0)
+        self.assertEqual(len(seen.frames), 15)
+        self.assertEqual(float(metrics.snapshot()["counters"].get(series, 0)) - before, 1)
