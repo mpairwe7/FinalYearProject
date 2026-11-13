@@ -1,8 +1,8 @@
 # Runbook: Offline & Low-Bandwidth Connectivity
 
-**Scope:** Frontend PWA & service worker, offline fallback portal, client-side statutory tax calculators, low-bandwidth network detection, and backend response compression.  
+**Scope:** Frontend PWA & service worker, offline fallback page, low-bandwidth network detection, and backend response compression.  
 **Audience:** Frontend and backend engineers, SREs, QA engineers.  
-**Updated:** September 2026
+**Updated:** 13 November 2026 (G618, ADR-0048: no tax figure offline)
 
 ---
 
@@ -39,32 +39,27 @@ FastAPI serves responses using `starlette.middleware.gzip.GZipMiddleware(minimum
 
 ## 3. Offline Capabilities & Emergency Portal
 
-### 3.1 Hand-Rolled PWA Service Worker (`sw.js` v7)
-* Caches core app shell (`/`, `/manifest.json`, `/favicon.svg`, icons) on install.
-* Serves `offline.html` immediately on network failure for all document navigations.
+### 3.1 Hand-Rolled PWA Service Worker (`sw.js` v8)
+* Caches core app shell (`/`, `/manifest.json`, `/favicon.svg`, icons) and `offline.html` on install.
+* A same-origin GET outside `/api/*` that fails on the network gets its cached copy if there is one; otherwise a page navigation (`request.mode === "navigate"`) gets `offline.html` and any other request fails as a network error, so a `fetch()` for data never receives HTML (`serviceWorkerOffline.test.ts`). It never touches `/api/*` or cross-origin requests, so it cannot serve a stale AI answer or rate.
 * Implements navigation preload (`registration.navigationPreload.enable()`) to prevent cold-start latency penalties.
+* The cache is named after the offline page's content: `CACHE_NAME = ura-v8-${OFFLINE_PAGE_REV}`, where `OFFLINE_PAGE_REV` is the first 12 hex digits of `sha256(public/offline.html)`. Activation deletes every other cache, so a changed page replaces the copy a phone installed earlier. **Whenever you edit `offline.html`, update `OFFLINE_PAGE_REV`**:
+  ```bash
+  sha256sum App/frontend/public/offline.html | cut -c1-12
+  ```
+  `src/__tests__/public/offlinePortal.test.ts` fails until the two match.
 
-### 3.2 Enhanced Offline Portal (`offline.html`)
-When completely disconnected, the browser serves `offline.html`, which includes:
-1. **Trilingual Language Switcher:** Full parity across **English**, **Luganda**, and **Swahili**.
-2. **Official URA Contact Directory:**
-   * Toll-free helplines: `0800 117 000` / `0800 217 000` (`tel:0800117000`)
-   * Official WhatsApp: `+256 772 140 000` (`https://wa.me/256772140000`)
-   * Support email: `services@ura.go.ug`
-3. **Key Statutory Deadlines & Rates Reference:**
-   * PAYE monthly tax-free threshold: **UGX 235,000** (0% band; 10% up to **UGX 335,000**, FY2026/27).
-   * Standard VAT rate: **18%**; compulsory registration threshold: **UGX 300,000,000/year** (effective 1 July 2026, FY2026/27; formerly UGX 150,000,000/year).
-   * Return deadlines: **15th of each month** for PAYE/VAT/WHT; **31st December** for Income Tax.
-4. **Zero-Dependency Client-Side Statutory Tax Calculators:**
-   * **Monthly PAYE Calculator:** Executes progressive tax calculations across all statutory brackets including high-earner surcharge (>UGX 10M).
-   * **18% VAT Calculator:** Computes exclusive (net + 18%) or inclusive (extract 18%) amounts.
-5. **Auto-Reconnect Listener:** Automatically detects `window.addEventListener('online')`, displays a success toast, and redirects back into the live app.
+### 3.2 Offline Page (`offline.html`)
+When completely disconnected, the browser serves `offline.html`. It gives **no tax rate, amount, threshold or calculator**: a figure offline cannot be checked against the law in force, and the cached page can outlive a Finance Act. Until 13 November 2026 it carried a "Statutory" PAYE and VAT calculator whose FY2026/27 bands were wrong (10% on 335,001–410,000 instead of 20%; a flat 20% above instead of 25% then 30%; a VAT threshold of UGX 150M instead of 300M), and this runbook described a third set (G618). The page now holds:
+1. **Five languages** (English, Luganda, Swahili, Runyankole, Acholi). It opens in the language the taxpayer chose in the app (`ura-chat-store` in local storage), sets `<html lang>`, and the language buttons expose `aria-pressed`. Vernacular strings other than the subtitle (the app's own `handoff.offline`) are not yet reviewed by first-language speakers (G275).
+2. **Why there are no figures:** "Tax rates and amounts are not shown offline. They are only given online, where they are checked against the law in force."
+3. **URA's lines**, the same values as `lib/uraContacts.ts`: toll-free `0800 117 000` / `0800 217 000` (`tel:` links), WhatsApp `+256 772 140 000`, email `services@ura.go.ug`.
+4. **Try again and auto-reconnect:** the button checks `navigator.onLine` and says in the page's language if still offline (no `alert()`); the `online` event shows a status toast and returns to `/`.
 
-### 3.3 Pure Offline Calculator Library (`offlineCalculators.ts`)
-* `calculatePayeMonthly(grossSalary)`
-* `calculateVat(amount, mode)`
-* `calculatePresumptiveTax(turnover)`
-* `formatUgx(amount)`
+The in-app offline banner (`OfflineBanner.tsx`) says the same in the taxpayer's language (`common.offline_notice`) and links to the page as "URA contacts" (`common.offline_contacts`).
+
+### 3.3 Removed: offline calculator library
+`lib/offlineCalculators.ts` was imported only by its own test and carried the same wrong bands; it was removed with G618. Tax figures are computed only by the backend's calculators, from `App/backend/app/tax/data/<FY>.json`.
 
 ### 3.4 State Persistence Across Backgrounding & Mobile App Switching
 * **Debounced Form Draft Persistence:** Taxpayer inquiry drafts are debounced (400 ms) and saved to local storage under `ura-chat-store.draftMessage`.
@@ -79,7 +74,8 @@ When completely disconnected, the browser serves `offline.html`, which includes:
 ### Frontend Unit & Integration Tests
 ```bash
 cd App/frontend
-bun run test src/__tests__/lib/offlineCalculators.test.ts
+bun run test src/__tests__/public/offlinePortal.test.ts
+bun run test src/__tests__/lib/serviceWorker.test.ts
 bun run test src/__tests__/hooks/useNetworkStatus.test.ts
 bun run test src/__tests__/components/OfflineBanner.test.tsx
 bun run test

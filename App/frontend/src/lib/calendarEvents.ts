@@ -106,80 +106,61 @@ export function getGoogleCalendarUrl(event: CalendarEventData): string {
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
 
+/** A monthly tax head whose return and payment fall due on the 15th. */
+export type MonthlyTaxHead = 'PAYE' | 'VAT' | 'WHT' | 'Excise';
+
+/** A monthly deadline an answer states. */
+export interface MonthlyDeadline {
+  /** The one head the answer names, or null when it names several. */
+  taxHead: MonthlyTaxHead | null;
+  /** The next 15th, at 09:00 local time: today when today is the 15th. */
+  due: Date;
+}
+
+const MONTHLY_HEADS: ReadonlyArray<[MonthlyTaxHead, RegExp]> = [
+  ['PAYE', /\bpaye\b/],
+  ['VAT', /\bvat\b/],
+  ['WHT', /\b(?:wht|withholding)\b/],
+  ['Excise', /\bexcise\b/],
+];
+
+/** A statement that the rule does not apply. */
+const NEGATION = /\b(?:not|no longer|never|isn't|aren't|doesn't|don't|exempt)\b/;
+/** A sentence that names the period it is about: a month, a year or a fiscal year. */
+const NAMED_PERIOD =
+  /\b(?:january|february|march|april|june|july|august|september|october|november|december|fy\s?\d{2,4}|20\d\d)\b/i;
+/** "May" the month, not "may" the verb: only capitalised mid-sentence. */
+const MAY_MONTH = /(?<=\S\s+)May\b|\bMay\s+(?:return|20\d\d|\d{1,2}\b)/;
+
 /**
- * Scan assistant message text for statutory deadline signals.
+ * The monthly 15th deadline an answer states, if it states one (G619).
  *
- * Catches:
- * - 15th monthly returns (PAYE, VAT, WHT, Excise)
- * - 45-day statutory objection window (s.24 TPCA)
- * - Provisional quarterly deadlines (30 Sept, 31 Dec, 31 March, 30 June)
+ * Only the statutory monthly rule is recognised: a monthly tax head and "the
+ * 15th of the following (or each) month". The date it gives is the next 15th.
+ * Nothing else is dated: a window that runs from an event the chat does not
+ * know — 45 days from service of an assessment — would be counted from today
+ * and be wrong, and "15th" next to "deadline" is not a monthly return.
  */
-export function detectDeadlineInMessage(content: string): CalendarEventData | null {
+export function detectDeadlineInMessage(content: string, now: Date = new Date()): MonthlyDeadline | null {
   if (!content) return null;
-  const text = content.toLowerCase();
-
-  // Monthly 15th deadline (PAYE, VAT, Excise, WHT)
-  if (
-    text.includes('15th') &&
-    (text.includes('paye') ||
-      text.includes('vat') ||
-      text.includes('excise') ||
-      text.includes('withholding') ||
-      text.includes('deadline') ||
-      text.includes('due date'))
-  ) {
-    const now = new Date();
-    let targetMonth = now.getMonth();
-    let targetYear = now.getFullYear();
-
-    // If today is past the 15th, schedule for the 15th of next month
-    if (now.getDate() >= 15) {
-      targetMonth += 1;
-      if (targetMonth > 11) {
-        targetMonth = 0;
-        targetYear += 1;
-      }
-    }
-
-    const startDate = new Date(targetYear, targetMonth, 15, 9, 0, 0);
-    const taxName = text.includes('paye')
-      ? 'PAYE'
-      : text.includes('vat')
-      ? 'VAT'
-      : text.includes('excise')
-      ? 'Excise'
-      : 'Monthly Return';
-
-    return {
-      title: `URA ${taxName} Return & Payment Deadline`,
-      description:
-        `Statutory deadline to submit your ${taxName} return and remit tax due to ` +
-        `Uganda Revenue Authority (URA) to avoid late filing penalties. File at https://ura.go.ug.`,
-      startDate,
-      endDate: new Date(targetYear, targetMonth, 15, 17, 0, 0),
-      location: 'URA Portal (https://ura.go.ug)',
-    };
+  // One statement must carry the whole rule: a head, "the 15th" and a monthly
+  // recurrence, affirmatively. Two clauses that each carry part of it ("VAT is
+  // due at month-end. Your hearing is on the 15th of next month.") are not it.
+  const sentences = content.split(/(?<=[.!?;])\s+|\n+/);
+  const heads = new Set<MonthlyTaxHead>();
+  for (const original of sentences) {
+    const sentence = original.toLowerCase();
+    if (!/\b15th\b/.test(sentence) || !/\b(?:following|next|each|every) month\b/.test(sentence)) continue;
+    if (NEGATION.test(sentence)) continue;
+    // A sentence naming its own period ("the November return", "FY2026/27")
+    // has a date the next 15th may not be. Say nothing rather than guess.
+    if (NAMED_PERIOD.test(sentence) || MAY_MONTH.test(original)) return null;
+    for (const [head, rx] of MONTHLY_HEADS) if (rx.test(sentence)) heads.add(head);
   }
-
-  // 45-day objection deadline
-  if (
-    text.includes('45 days') &&
-    (text.includes('objection') || text.includes('appeal') || text.includes('assessment'))
-  ) {
-    const now = new Date();
-    const target = new Date(now.getTime() + 45 * 24 * 3600 * 1000);
-    target.setHours(9, 0, 0, 0);
-
-    return {
-      title: 'URA 45-Day Statutory Objection Deadline',
-      description:
-        'Final statutory deadline to lodge a formal written objection against a tax ' +
-        'assessment with the Commissioner General under Section 24 of the Tax Procedures Code Act.',
-      startDate: target,
-      endDate: new Date(target.getTime() + 8 * 3600 * 1000),
-      location: 'URA Web Portal (https://ura.go.ug)',
-    };
-  }
-
-  return null;
+  if (!heads.size) return null;
+  const month = now.getDate() > 15 ? now.getMonth() + 1 : now.getMonth();
+  return {
+    taxHead: heads.size === 1 ? [...heads][0] : null,
+    due: new Date(now.getFullYear(), month, 15, 9, 0, 0),
+  };
 }

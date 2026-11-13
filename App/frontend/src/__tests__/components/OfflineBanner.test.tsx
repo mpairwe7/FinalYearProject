@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import OfflineBanner from '../../components/OfflineBanner';
 import * as networkHook from '../../hooks/useNetworkStatus';
+import { useChatStore } from '../../store/useChatStore';
+import { lg } from '../../lib/i18n/lg';
 
 describe('OfflineBanner', () => {
   beforeEach(() => {
@@ -54,5 +56,36 @@ describe('OfflineBanner', () => {
     render(<OfflineBanner />);
     expect(screen.getByRole('status')).toBeDefined();
     expect(screen.getByText(/Low Bandwidth/i)).toBeDefined();
+  });
+
+  // G618: the offline page has no calculator, so the banner must not promise one,
+  // and it speaks the taxpayer's language like the rest of the chat.
+  const offline = () =>
+    vi.spyOn(networkHook, 'useNetworkStatus').mockReturnValue({
+      isOnline: false,
+      isOffline: true,
+      isLowBandwidth: false,
+      effectiveType: 'unknown',
+      saveData: false,
+      downlink: null,
+      rtt: null,
+    });
+
+  it('does not promise a calculator offline', () => {
+    useChatStore.getState().setLocale('en');
+    offline();
+    render(<OfflineBanner />);
+    expect(screen.getByRole('status').textContent).not.toMatch(/calculat/i);
+    expect(screen.getByRole('link').getAttribute('href')).toBe('/offline.html');
+  });
+
+  it('is in the taxpayer\'s language', () => {
+    useChatStore.getState().setLocale('lg');
+    offline();
+    render(<OfflineBanner />);
+    const status = screen.getByRole('status').textContent ?? '';
+    expect(status).toContain(lg['common.offline_notice'] as string);
+    expect(status).not.toMatch(/You are offline/);
+    useChatStore.getState().setLocale('en');
   });
 });

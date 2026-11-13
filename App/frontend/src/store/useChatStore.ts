@@ -1,4 +1,4 @@
-import { officerHoursFrom, type OfficerHours } from '../lib/turnMeta';
+import { isConfidenceBand, officerHoursFrom, type ConfidenceBand, type OfficerHours } from '../lib/turnMeta';
 import { create } from 'zustand';
 import { conversationTtlMs, resetChatSession } from '../lib/chatSession';
 import { normalizeLocale } from '../lib/locales';
@@ -294,6 +294,10 @@ export interface ChatTurn {
   officerName?: string;
   citations?: Citation[];
   faithfulnessScore?: number | null;
+  /** The answer judge's confidence (`response_judge.confidence_band`). Below
+   *  `high` — the claim check did not run, or a figure the rate table does not
+   *  confirm — no badge calls the answer grounded or official (G620, G623). */
+  confidenceBand?: ConfidenceBand;
   /** Interrupted/stopped replies are retained as partial text, never as finished guidance. */
   responseIncomplete?: boolean;
   /** Browser history cannot establish that an action is still current on the server. */
@@ -542,6 +546,7 @@ function sanitizeTurn(value: unknown): ChatTurn | null {
     turn.faithfulnessScore = value.faithfulnessScore;
   }
   if (typeof value.retrievalMode === 'string') turn.retrievalMode = value.retrievalMode;
+  if (isConfidenceBand(value.confidenceBand)) turn.confidenceBand = value.confidenceBand;
   if (typeof value.serverTurnId === 'string' && value.serverTurnId) turn.serverTurnId = value.serverTurnId;
   if (value.notice === 'officer_joined' || value.notice === 'officer_left') turn.notice = value.notice;
   if (typeof value.officerName === 'string' && value.officerName) turn.officerName = value.officerName.slice(0, 128);
@@ -889,7 +894,12 @@ export function cleanResponse(text: string): string {
     else break;
   }
 
-  cleaned = blocks.slice(lastAnswerStart).filter((_, i) => !tags[lastAnswerStart + i]).join('\n\n').trim();
+  // Everything from the final answer to the end is kept, whatever it looks
+  // like (G621). The server appends its disclosures as closing paragraphs — a
+  // live check that could not run ("…may not include recent changes"), a turn
+  // stopped at its deadline ("This is taking longer…") — and both read as
+  // reasoning to the patterns above. Leaked reasoning comes before the answer.
+  cleaned = blocks.slice(lastAnswerStart).join('\n\n').trim();
 
   // Normalize *Note: disclaimers into visually separated sections
   cleaned = cleaned.replace(/\n---\n\*Note/g, '\n\n---\n\n*Note');

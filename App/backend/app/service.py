@@ -145,6 +145,7 @@ from .calculator_router import (
     plan_rate_lookup,
     recall_calculation,
     remember_calculation,
+    reply_has_unconfirmed_figures,
     slot_question,
 )
 from .claim_verifier import verify_claims
@@ -3230,6 +3231,12 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             )
             result["reply"] = abstained_reply
             result["retrieval_mode"] = "abstained"
+            # G622: the metadata frame already sent the passages this turn has
+            # just rejected. Withdraw them, as REST does, so the chat neither
+            # lists them as the answer's sources nor reads the mode as hybrid.
+            result["citations"] = []
+            result["sources"] = []
+            result["resources"] = []
             result["escalation_required"] = escalate
             result["escalation_reason"] = esc_reason
             result["handoff"] = handoff
@@ -3252,6 +3259,10 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 "grounding",
                 officer_hours.attach_status({
                     "faithfulness_score": None,
+                    "retrieval_mode": "abstained",
+                    "citations": [],
+                    "sources": [],
+                    "resources": [],
                     "escalation_required": escalate,
                     "escalation_reason": esc_reason,
                     "agent_role": result.get("agent_role", "rag_answerer"),
@@ -5027,6 +5038,27 @@ def ordered_sources(hits: list[dict[str, Any]]) -> list[str]:
 # ---------------------------------------------------------------------------
 # Main service class
 # ---------------------------------------------------------------------------
+
+#: The judge's reason when a table answer uses a figure the table does not confirm.
+UNCONFIRMED_FIGURE_REASON = "figure not confirmed against a gazetted schedule"
+
+
+def _table_answer_judge(english_reply: str, reason: str) -> dict[str, Any]:
+    """The judge for an answer computed from the rate table (G620).
+
+    ``high`` only when every figure in it is confirmed: a reply carrying the
+    unverified or provisional caveat is ``medium``, which is what the chat reads
+    before it badges an answer as the official calculator.
+    """
+    unconfirmed = reply_has_unconfirmed_figures(english_reply)
+    return {
+        "decision": "approve",
+        "final_decision": "approve",
+        "applied_revision": False,
+        "reasons": [reason, UNCONFIRMED_FIGURE_REASON] if unconfirmed else [reason],
+        "confidence_band": "medium" if unconfirmed else "high",
+    }
+
 class ChatModel:
     """Unified service that backs all API endpoints.
 
@@ -9409,13 +9441,7 @@ class ChatModel:
             "escalation_reason": "",
             "agent_role": "tool_specialist",
             "handoff": None,
-            "response_judge": {
-                "decision": "approve",
-                "final_decision": "approve",
-                "applied_revision": False,
-                "reasons": ["official rate table"],
-                "confidence_band": "high",
-            },
+            "response_judge": _table_answer_judge(reply_text, "official rate table"),
             "next_actions": actions,
             "ticket_id": "",
         }
@@ -10098,13 +10124,7 @@ class ChatModel:
             "escalation_reason": "",
             "agent_role": "tool_specialist",
             "handoff": None,
-            "response_judge": {
-                "decision": "approve",
-                "final_decision": "approve",
-                "applied_revision": False,
-                "reasons": ["deterministic tax calculator"],
-                "confidence_band": "high",
-            },
+            "response_judge": _table_answer_judge(text, "deterministic tax calculator"),
             "next_actions": (
                 [_continue_flow_action(suspended)]
                 if (suspended := self._get_suspended_workflow_name(thread_id))

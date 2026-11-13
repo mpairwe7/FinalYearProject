@@ -407,9 +407,78 @@ describe("ChatMessage", () => {
       ...assistantTurn,
       content: "PAYE returns and payments are due by the 15th day of each month under the Tax Procedures Code Act.",
     });
-    expect(screen.getByLabelText(/Statutory Tax Deadline Sync/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Download calendar reminder/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Open in Google Calendar/i })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: /Monthly filing reminder/i })).toBeInTheDocument();
+    expect(screen.getByText("PAYE: monthly return and payment")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Add to calendar/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Google Calendar/i })).toBeInTheDocument();
+  });
+});
+
+const MONTHLY = "PAYE returns and payments are due by the 15th day of the following month.";
+
+describe("ChatMessage — what the answer's badges and reminders claim", () => {
+  // G619: a reminder is offered for a whole answer only.
+  it("offers no deadline reminder on an interrupted or restored answer", () => {
+    const { unmount } = renderMsg({ ...assistantTurn, content: MONTHLY, responseIncomplete: true });
+    expect(screen.queryByRole("region", { name: /Monthly filing reminder/i })).toBeNull();
+    unmount();
+    renderMsg({ ...assistantTurn, content: MONTHLY, restored: true });
+    expect(screen.queryByRole("region", { name: /Monthly filing reminder/i })).toBeNull();
+  });
+
+  it("never offers a reminder for an objection window", () => {
+    renderMsg({ ...assistantTurn, content: "You have 45 days from service of the assessment to object." });
+    expect(screen.queryByRole("region", { name: /Monthly filing reminder/i })).toBeNull();
+    expect(screen.queryByText(/Objection Deadline/i)).toBeNull();
+  });
+
+  it("names the reminder in the reader's language", () => {
+    try {
+      useChatStore.setState({ locale: "sw" });
+      renderMsg({ ...assistantTurn, content: MONTHLY });
+      expect(screen.getByText("PAYE: ritani na malipo ya kila mwezi")).toBeInTheDocument();
+    } finally {
+      useChatStore.setState({ locale: "en" });
+    }
+  });
+
+  // G620: the judge's band says a figure is not confirmed by the rate table.
+  it("does not call a calculation official when a rate in it is unconfirmed", () => {
+    renderMsg({ ...assistantTurn, faithfulnessScore: null, retrievalMode: "calculator", confidenceBand: "medium" });
+    expect(screen.queryByText(/Official Statutory Calculator/)).toBeNull();
+    expect(screen.getByText(/Rate not yet confirmed/)).toBeInTheDocument();
+  });
+
+  it("does not call a restored calculation official when history kept no band", () => {
+    const { unmount } = renderMsg({ ...assistantTurn, faithfulnessScore: null, retrievalMode: "calculator", restored: true });
+    expect(screen.queryByText(/Official Statutory Calculator/)).toBeNull();
+    expect(screen.getByText(/Rate not yet confirmed/)).toBeInTheDocument();
+    unmount();
+    renderMsg({ ...assistantTurn, faithfulnessScore: null, retrievalMode: "calculator", restored: true, confidenceBand: "high" });
+    expect(screen.getByText(/Official Statutory Calculator/)).toBeInTheDocument();
+  });
+
+  it("calls a fully confirmed calculation official", () => {
+    renderMsg({ ...assistantTurn, faithfulnessScore: null, retrievalMode: "calculator", confidenceBand: "high" });
+    expect(screen.getByText(/Official Statutory Calculator/)).toBeInTheDocument();
+  });
+
+  // G623: a high score next to "the claim check did not run" is not "well grounded".
+  it("does not say well grounded when the judge is not confident", () => {
+    renderMsg({ ...assistantTurn, faithfulnessScore: 0.9, confidenceBand: "medium" });
+    expect(screen.queryByText("Well grounded")).toBeNull();
+    expect(screen.getByText("Verify with URA")).toBeInTheDocument();
+  });
+
+  it("speaks the reader's language on its trust badge", () => {
+    try {
+      useChatStore.setState({ locale: "lg" });
+      renderMsg({ ...assistantTurn, faithfulnessScore: 0.4 });
+      expect(screen.queryByText("Verify with URA")).toBeNull();
+      expect(screen.getByText("Kakasa ne URA")).toBeInTheDocument();
+    } finally {
+      useChatStore.setState({ locale: "en" });
+    }
   });
 });
 

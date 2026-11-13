@@ -3,7 +3,7 @@
 **Service:** URA Tax Assistant (taxpayer chat and staff operations workbench)
 **Conformance target:** [WCAG 2.2 Level AA](https://www.w3.org/TR/WCAG22/)
 **Published:** 2026-08-19
-**Updated:** 2026-10-07
+**Updated:** 2026-11-13
 **Owner:** URA Tax Assistant engineering team
 
 ## Current status
@@ -27,6 +27,7 @@ both light and dark themes:
 | Surface | Route or entry point |
 | --- | --- |
 | Taxpayer chat and composer | `/` |
+| Offline page (served by the service worker with no connection; follows the system colour scheme; scanned in light, dark and Acholi) | `/offline.html` |
 | Account settings | header **More options** → **Settings** |
 | Sign in | `/signin` |
 | Service quality overview | `/admin` |
@@ -70,7 +71,20 @@ them.
   retains an accessibility score gate of at least 0.90.
 - **WCAG 2.2 SC 2.4.11 (Focus Not Obscured - Minimum):** The conversation scroll container enforces explicit `scroll-padding-top: calc(var(--cv2-top-h) + 12px)` and `scroll-padding-bottom: calc(var(--chat-dock-height, 92px) + 24px)`. Keyboard focus rings on message items, citations, and interactive chips remain fully visible above sticky bottom docks and floating headers.
 - **WCAG 2.2 SC 2.5.8 (Target Size - Minimum):** Interactive targets on attachment removal and download controls enforce a minimum bounding box of 26×26 CSS pixels with generous hover hit areas.
-- **Trilingual Vernacular Screen-Reader Parity:** Complete dictionary key coverage across English, Luganda (`lg.ts`), and Swahili (`sw.ts`) prevents accidental language-mixing or English fallbacks during assistive technology announcements on human escalation and support rooms.
+- **Language of announcements (corrected 2026-11-13):** an earlier version of this
+  statement claimed complete dictionary coverage for Luganda and Swahili. That was
+  not true: on 2026-11-13 each of `lg.ts`, `sw.ts`, `nyn.ts` and `ach.ts` lacked
+  52–54 of the 556 English keys (a missing key falls back to English), and 195
+  taxpayer-facing strings, the response-status announcements among them, were
+  English literals outside the dictionary. The handoff, voice and offline keys are
+  complete in all five languages. The rest is tracked as G655; strings added since
+  are machine-assisted and not yet reviewed by first-language speakers (G275).
+- **AI-specific status and trust marks (2026-11-13, ADR-0048):** an answer stopped
+  at its deadline is announced as incomplete; answer badges, the monthly filing
+  reminder and the document view's verification labels are dictionary keys; the
+  document view's extraction warnings are a `role="status"` region; the offline
+  page sets `lang` to the language chosen and its language buttons expose
+  `aria-pressed`.
 
 Run the automated evidence locally:
 
