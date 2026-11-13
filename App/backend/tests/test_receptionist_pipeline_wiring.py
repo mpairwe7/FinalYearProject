@@ -106,7 +106,12 @@ class SpeechServiceSettingsTests(unittest.TestCase):
         from app.receptionist.tts import UraSpeechTTS
         from pipecat.utils.types import is_given
 
-        room = _room()
+        # Only a room object: building one through _room() writes a call row,
+        # which needs a schema this class does not create.
+        room = CallRoom(
+            call_id="call_settings",
+            state=CallState(call_id="call_settings", conversation_id="conv_settings"),
+        )
         for service in (
             UraWhisperSTT(speech_model=MagicMock(), user_id="u", language="en", room=room),
             UraSpeechTTS(speech_model=MagicMock(), language="en", room=room),

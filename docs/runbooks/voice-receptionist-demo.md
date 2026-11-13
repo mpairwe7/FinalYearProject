@@ -54,8 +54,9 @@ caller over `wss://<space>/api/v1/calls/stream`:
    should read `ended` / `officer_ended`.
 5. **Save the wrap-up** (`POST /v1/admin/calls/{id}/wrapup`) so the officer is available
    again.
-6. **Optionally, drop the officer.** Close the officer's audio socket without a
-   hang-up while bridged. After the reconnect grace (30 s) the caller should get
+6. **Optionally, drop the officer.** Steps 4 and 5 ended their calls, so start a
+   new call and bridge it as in steps 2 and 3. Then close the officer's audio socket
+   without a hang-up. After the reconnect grace (30 s) the caller should get
    `status: transferring` and, at once, `queue` (G659), then the AI's hold line
    about 30 s later; the officer owes a wrap-up.
 
