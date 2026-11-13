@@ -234,4 +234,43 @@ describe("useOfficerChat", () => {
       originalText: "Your refund was approved.",
     });
   });
+
+  // CodeRabbit on PR 729: a reply the API rejects as invalid (422, e.g. over
+  // 2,000 characters) is not a case that has gone.
+  it("keeps the officer chat when a reply is rejected as invalid", async () => {
+    useChatStore.getState().setOfficerChat({ ticketId: TICKET, lastSeq: 3, state: "officer" });
+    vi.spyOn(analyticsApi, "publicTicketMessages").mockResolvedValue(thread({ chat_state: "officer", last_seq: 3 }));
+    vi.spyOn(analyticsApi, "replyToPublicTicket").mockRejectedValue(new Error("422 Unprocessable Entity"));
+    const { result } = renderHook(() => useOfficerChat());
+    await waitFor(() => expect(result.current.withOfficer).toBe(true));
+    await act(async () => {
+      await result.current.sendToOfficer("x".repeat(2100));
+    });
+    expect(result.current.sendFailed).toBe(true);
+    expect(useChatStore.getState().activeTicketId).toBe(TICKET);
+    expect(result.current.withOfficer).toBe(true);
+  });
+
+  // CodeRabbit on PR 729: a gone case found while an answer streams waits, so
+  // the notice is not appended under the streaming turn.
+  it("hands back only after a streaming answer finishes", async () => {
+    useChatStore.getState().setOfficerChat({ ticketId: TICKET, lastSeq: 3, state: "officer" });
+    let fail: (e: Error) => void = () => {};
+    const poll = vi.spyOn(analyticsApi, "publicTicketMessages");
+    poll.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+    poll.mockRejectedValue(new Error("404 Not Found"));
+    const { rerender } = renderHook(({ hold }) => useOfficerChat({ hold }), { initialProps: { hold: false } });
+    await waitFor(() => expect(poll).toHaveBeenCalledTimes(1));
+    // An answer starts streaming while the poll is in flight; the poll then finds the case gone.
+    rerender({ hold: true });
+    await act(async () => {
+      fail(new Error("404 Not Found"));
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(useChatStore.getState().chat.some((t) => t.id === `notice-gone-${TICKET}`)).toBe(false);
+    expect(useChatStore.getState().activeTicketId).toBe(TICKET);
+    rerender({ hold: false });
+    await waitFor(() => expect(useChatStore.getState().activeTicketId).toBeNull());
+    expect(useChatStore.getState().chat.some((t) => t.id === `notice-gone-${TICKET}`)).toBe(true);
+  });
 });

@@ -320,6 +320,8 @@ export default function Page() {
   // repeatedly announce the whole conversation. This compact status is the
   // one, stable announcement for the start and end of a response.
   const [chatLiveStatus, setChatLiveStatus] = useState('');
+  // G629: the taxpayer started a new chat while a case was open in the last one.
+  const [caseLeftOpen, setCaseLeftOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageListRef = useRef<HTMLDivElement>(null);
   const chatDockRef = useRef<HTMLDivElement>(null);
@@ -2370,12 +2372,14 @@ export default function Page() {
           onClose={() => setSidebarOpen(false)}
           onNewConversation={() => {
             // G629: the case stays with its conversation; say where it is.
-            const caseLeftOpen = Boolean(useChatStore.getState().activeTicketId);
+            const leftOpen = Boolean(useChatStore.getState().activeTicketId);
             createNewSession();
             setSidebarOpen(false);
-            if (caseLeftOpen) setChatLiveStatus(t('officerChat.caseStillOpen'));
+            setCaseLeftOpen(leftOpen);
+            if (leftOpen) setChatLiveStatus(t('officerChat.caseStillOpen'));
           }}
           onSelectConversation={(id) => {
+            setCaseLeftOpen(false);
             switchSession(id);
             setSidebarOpen(false);
           }}
@@ -2454,6 +2458,11 @@ export default function Page() {
       )}
 
       <main id="main-content" className="app-content" tabIndex={-1}>
+        {/* One status region for both views, so an announcement made as the
+            view changes (a new chat with a case left open) is still heard. */}
+        <p className="sr-only" role="status" aria-atomic="true">
+          {chatLiveStatus}
+        </p>
         {!hasStartedChat ? (
           /* ── Landing state — input-first hierarchy (chatv2) ── */
           <div className="landing">
@@ -2465,6 +2474,12 @@ export default function Page() {
                   the landing would start at h2 with nothing above it. */}
               <h1 className="ldv2-headline">{t('landing.headline')}</h1>
               <p className="landing-sub">{t('landing.subtitle')}</p>
+              {/* G629: a case is still open in the chat the taxpayer just left. */}
+              {caseLeftOpen ? (
+                <p className="landing-case-note" role="note" data-testid="case-left-open">
+                  {t('officerChat.caseStillOpen')}
+                </p>
+              ) : null}
             </div>
 
             <div ref={chatDockRef} className="landing-composer landing-dock chat-dock">
@@ -2557,10 +2572,6 @@ export default function Page() {
               )}
               <div ref={messagesEndRef} className="messages-end-spacer" />
             </div>
-
-            <p className="sr-only" role="status" aria-atomic="true">
-              {chatLiveStatus}
-            </p>
 
             {showScrollToLatest && (
               <button

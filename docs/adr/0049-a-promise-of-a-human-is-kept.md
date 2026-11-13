@@ -116,6 +116,13 @@ reverted after it passed and the tests failed again:
 - `App/frontend/src/__tests__/hooks/useOfficerChat.test.ts`: a 404 or 422 from the
   poll, or a 404 from a reply, hands back with the `notice-gone-…` notice and clears
   the case; a translated message keeps `machineTranslated` and `originalText`.
+  A 422 from a *reply* (the text itself refused, e.g. over 2,000 characters) keeps
+  the officer chat and shows the send failure; a gone case found while an answer
+  streams waits for the stream to end before the notice is added.
+- `App/frontend/src/__tests__/components/SupportCaseModal.test.tsx`: the case
+  room's step labels follow the taxpayer's language. The chat's Copy copies what
+  the bubble shows (the officer's original when chosen), and the "case still open"
+  note is visible on the landing screen with one status region for both views.
 - `tests/agents/test_supervisor_route_contract.py`: with no ticket (empty or none)
   the REST reply has no "flagged it for a URA officer" and has the not-queued
   sentence; with a ticket it still promises.

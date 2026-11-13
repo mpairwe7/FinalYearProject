@@ -141,6 +141,7 @@ describe("SupportCaseModal", () => {
       vi.spyOn(analyticsApi, "publicTicketStatus").mockResolvedValue({ ...waiting, status: "wontfix", can_reply: false });
       render(<SupportCaseModal isOpen={true} onClose={vi.fn()} ticketId={TID} />);
       expect(await screen.findByText(/closed without further action/i)).toBeInTheDocument();
+      expect(screen.getByText("Closed")).toBeInTheDocument();
       expect(screen.queryByText(/waiting for an officer/i)).toBeNull();
     });
 
@@ -158,6 +159,9 @@ describe("SupportCaseModal", () => {
         vi.spyOn(analyticsApi, "publicTicketStatus").mockResolvedValue({ ...waiting, status: "open" });
         render(<SupportCaseModal isOpen={true} onClose={vi.fn()} ticketId={TID} />);
         expect(await screen.findByText(/inasubiri afisa aichukue/i)).toBeInTheDocument();
+        // The steps too (CodeRabbit on PR 729).
+        expect(screen.getByText("Imesajiliwa")).toBeInTheDocument();
+        expect(screen.queryByText("Logged")).toBeNull();
       } finally {
         useChatStore.setState({ locale: "en" });
       }

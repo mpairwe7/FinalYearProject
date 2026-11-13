@@ -252,6 +252,13 @@ function ChatMessageInner({
   const isOfficerReply = turn.retrievalMode === 'officer_reply';
   const [showOriginal, setShowOriginal] = useState(false);
   const t = useTranslation();
+  // What the bubble shows, and what Copy copies: the officer's own words when
+  // the reader chose them over the translation (G631).
+  const displayedText = isGreeting
+    ? t('chat.greeting')
+    : showOriginal && turn.originalText
+      ? turn.originalText
+      : turn.content;
   const disabled = actionsDisabled || Boolean(phaseLabel) || turn.responseIncomplete === true || turn.restored === true;
   const onActionClick = disabled ? undefined : actionCallback;
   const onSubmitInlineForm = disabled ? undefined : inlineCallback;
@@ -323,7 +330,7 @@ function ChatMessageInner({
         <div className="msg-content">
           {isAssistant ? (
             <Markdown
-              content={isGreeting ? t('chat.greeting') : showOriginal && turn.originalText ? turn.originalText : turn.content}
+              content={displayedText}
             />
           ) : (
             turn.content
@@ -774,7 +781,7 @@ function ChatMessageInner({
                 <><SpeakerIcon /> {t('message.listen')}</>
               )}
             </button>
-            <CopyButton text={stripCitationMarkers(turn.content)} />
+            <CopyButton text={stripCitationMarkers(displayedText)} />
             {!isOfficerReply && (
               <FeedbackButtons
                 messageId={turn.id}

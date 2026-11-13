@@ -121,6 +121,9 @@ export function useOfficerChat({ hold = false }: { hold?: boolean } = {}): Offic
         // alone left the taxpayer "with the officer" for good: every message
         // failed and the assistant never answered again (G626).
         if (isGone(error)) {
+          // An answer is streaming into the last turn: a notice added now
+          // would land under it. Poll again once it has finished.
+          if (holdRef.current) return 'continue';
           finish(forTicket, known.officerName, true);
           return 'stop';
         }
@@ -267,7 +270,9 @@ export function useOfficerChat({ hold = false }: { hold?: boolean } = {}): Offic
         // 409: the officer ended the chat a moment ago — the next poll says so.
         if (statusOf(error) === 409) pollNowRef.current?.();
         // The case is gone: hand back rather than ask them to try again (G626).
-        else if (isGone(error)) finish(ticketId, current?.officerName, true);
+        // Only a 404: a 422 here is the reply itself being refused (too long),
+        // and the text stays in the composer to be shortened.
+        else if (statusOf(error) === 404) finish(ticketId, current?.officerName, true);
         else setSendFailed(true);
         return false;
       }

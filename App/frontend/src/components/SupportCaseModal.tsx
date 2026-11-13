@@ -184,22 +184,22 @@ export function SupportCaseModal({
           <div className="scm-stepper" aria-label="Case Progress">
             <div className={`scm-step${stepIndex >= 1 ? " is-active" : ""}`}>
               <div className="scm-step-dot">{stepIndex > 1 ? "✓" : "1"}</div>
-              <div className="scm-step-label">Logged</div>
+              <div className="scm-step-label">{t("case.stepLogged")}</div>
             </div>
             <div className={`scm-step-line${stepIndex >= 2 ? " is-active" : ""}`} />
             <div className={`scm-step${stepIndex >= 2 ? " is-active" : ""}`}>
               <div className="scm-step-dot">{stepIndex > 2 ? "✓" : "2"}</div>
-              <div className="scm-step-label">Assigned</div>
+              <div className="scm-step-label">{t("case.stepAssigned")}</div>
             </div>
             <div className={`scm-step-line${stepIndex >= 3 ? " is-active" : ""}`} />
             <div className={`scm-step${stepIndex >= 3 ? " is-active" : ""}`}>
               <div className="scm-step-dot">{stepIndex > 3 ? "✓" : "3"}</div>
-              <div className="scm-step-label">In Review</div>
+              <div className="scm-step-label">{t("case.stepInReview")}</div>
             </div>
             <div className={`scm-step-line${stepIndex >= 4 ? " is-active" : ""}`} />
             <div className={`scm-step${stepIndex >= 4 ? " is-active" : ""}`}>
               <div className="scm-step-dot">{stepIndex >= 4 ? "✓" : "4"}</div>
-              <div className="scm-step-label">{isClosed ? "Closed" : "Resolved"}</div>
+              <div className="scm-step-label">{isClosed ? t("case.stepClosed") : t("case.stepResolved")}</div>
             </div>
           </div>
 

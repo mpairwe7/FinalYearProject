@@ -205,14 +205,17 @@ endpoint: the officer completes the action in their own system or declines it, a
 
 ## Verify after a change
 
+Run from the repository root; each directory change stays in its subshell.
+
 ```bash
-cd App/backend && pytest tests/test_escalation_policy.py tests/test_turn_cases.py \
-  tests/test_taxpayer_escalation.py -q
+(cd App/backend && pytest tests/test_escalation_policy.py tests/test_turn_cases.py \
+  tests/test_taxpayer_escalation.py tests/test_officer_chat.py -q)
 pytest tests/agents/test_phase38_cx.py -q        # root suite: the service paths
 pytest tests/agents/test_supervisor_route_contract.py -q   # G627: no ticket, no promise
-cd App/frontend && bunx vitest run src/__tests__/hooks/useOfficerChat.test.ts src/__tests__/components/SupportCaseModal.test.tsx
-CI=1 bunx playwright test e2e/officer-chat.spec.ts --project=chromium   # G625
 pytest tests/test_answer_integrity_integration.py -k AnswersOnlyToItsOwner -q   # G243 BOLA
+(cd App/frontend && bunx vitest run src/__tests__/hooks/useOfficerChat.test.ts \
+  src/__tests__/components/SupportCaseModal.test.tsx \
+  && CI=1 bunx playwright test e2e/officer-chat.spec.ts --project=chromium)   # G625
 ```
 
 Live (isolated api, flags on): drive hardship + enforcement through
