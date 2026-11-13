@@ -167,6 +167,28 @@ def _handoff_domain(user_query: str, history: Sequence[str], session: Mapping[st
     return "general"
 
 
+def assessed_priority(
+    *,
+    user_query: str,
+    transcript: Sequence[Mapping[str, Any]],
+    priority: str = "normal",
+    user_id: str = "",
+) -> tuple[str, Any]:
+    """The ticket priority after the escalation assessment, and the assessment.
+
+    The same rule :func:`enrich_handoff` applies to a new ticket, for a reused
+    one (G641): never lower than *priority*; *transcript* ends with the
+    escalated turn. With ``eq_stakes_escalation`` off the priority is returned
+    unchanged with no assessment.
+    """
+    effective = priority or "normal"
+    if not flags.is_enabled("eq_stakes_escalation", subject=user_id or None):
+        return effective, None
+    history = [h for h in (str(turn.get("user_message") or "") for turn in list(transcript)[:-1]) if h]
+    assessment = strongest_assessment(user_query, history)
+    return higher_priority(effective, assessment.priority), assessment
+
+
 def enrich_handoff(
     handoff: dict[str, Any] | None,
     *,
@@ -211,10 +233,12 @@ def enrich_handoff(
         logger.debug("cxp schedule enrichment skipped", exc_info=True)
 
     try:
-        if flags.is_enabled("eq_stakes_escalation", subject=subject):
-            assessment = strongest_assessment(user_query, history)
+        # The same rule a reused ticket gets (assessed_priority, G641).
+        effective, assessment = assessed_priority(
+            user_query=user_query, transcript=transcript, priority=effective, user_id=user_id
+        )
+        if assessment is not None:
             handoff["escalation"] = assessment.to_dict()
-            effective = higher_priority(effective, assessment.priority)
             handoff["priority"] = higher_priority(str(handoff.get("priority") or "normal"), effective)
             from .analytics import metrics  # noqa: PLC0415
 

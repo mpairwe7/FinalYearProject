@@ -8523,7 +8523,12 @@ class ChatModel:
                 "user_message": self.redact_for_storage(user_query),
                 "bot_reply": self.redact_for_storage(bot_reply),
                 "created_at": time.time(),
-                "sources": [],
+                # G640: what the escalated answer rested on, for the officer.
+                "sources": [
+                    str(src)[:200]
+                    for src in ((handoff or {}).get("sources_reviewed") or [])[:10]
+                    if isinstance(src, str) and src.strip()
+                ],
                 "topic_tag": "escalated",
             }
         )
@@ -8552,6 +8557,40 @@ class ChatModel:
         if existing:
             ticket_id = str(existing.get("id", ""))
             logger.info("escalation reuses open ticket %s", ticket_id)
+            # G641: the officer works from this ticket. Without this, answers
+            # the AI gave while the taxpayer waited, and the turn that
+            # escalated again, never reached it, and a higher priority (a
+            # deadline today) left it in the queue at the old one.
+            # The escalation assessment that raises a new ticket (a deadline
+            # today) applies here too; the rest of enrich_handoff (topic,
+            # envelope, schedule) belongs to a new ticket and is not repeated.
+            from .officer_handoff import assessed_priority
+
+            reuse_priority = priority
+            try:
+                reuse_priority, assessment = assessed_priority(
+                    user_query=user_query, transcript=transcript, priority=priority, user_id=user_id
+                )
+                if assessment is not None and handoff is not None:
+                    handoff["escalation"] = assessment.to_dict()
+            except Exception:
+                logger.debug("escalation assessment on a reused ticket skipped", exc_info=True)
+            try:
+                db.refresh_open_ticket(
+                    ticket_id,
+                    new_turns=transcript,
+                    priority=reuse_priority,
+                    reason=reason,
+                    handoff=handoff,
+                    response_judge=response_judge,
+                )
+            except Exception:
+                # The officer then works from the earlier snapshot. Say so, in
+                # the metrics and on the handoff, not only in the log.
+                logger.exception("refreshing reused ticket %s failed", ticket_id)
+                metrics.inc("ticket_refresh_failed_total")
+                if handoff is not None:
+                    handoff["ticket_refresh_failed"] = True
             if handoff is not None and ticket_id:
                 handoff["ticket_id"] = ticket_id
                 handoff["reused_existing_ticket"] = True

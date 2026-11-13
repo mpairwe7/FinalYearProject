@@ -2364,6 +2364,19 @@ GET /v1/admin/outbox
 
 Mock email/SMS queue (`live=false`). Nothing is sent.
 
+**Tickets and re-escalation (ADR-0051).** A second escalation of a conversation
+with an open ticket reuses it; the ticket's `transcript` then gains the turns
+since its last snapshot (taxpayer follow-ups already on it stay in place, and do
+not move the snapshot's watermark; an exchange already on it is not added again),
+its `priority` rises to the new one if higher, never lower (the escalation
+assessment's priority included), its `reason` gains the new reason, and its
+`response_judge` and the handoff's `sources_reviewed` and `escalation` become the
+latest escalation's. If that refresh fails, the handoff carries
+`ticket_refresh_failed: true`. The escalated turn's `sources` are the handoff's
+`sources_reviewed`. `response_judge` on a ticket may
+carry `claim_verification` (`decision: "unavailable"` when the check did not run)
+and `withheld_contradicted`; the officer console shows both.
+
 #### Revoke someone's sessions (ADR-0053)
 
 ```http

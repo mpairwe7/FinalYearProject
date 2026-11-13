@@ -85,6 +85,79 @@ function turnTime(ts: number): string {
  * are still two fields — both are load-bearing rather than stylistic, and both
  * are covered by tests that would notice.
  */
+/**
+ * What the AI did on the answer that escalated (G640): its checks and the
+ * sources it reviewed, labelled as a model's output. Without it the officer
+ * read the reply as plain "Assistant" text, with no sign that a figure was
+ * withheld or that the claim check never ran.
+ */
+/** The claim verifier's decisions, as an officer reads them (a model's check). */
+const CLAIM_CHECK: Record<string, string> = {
+  unavailable: "The claim check did not run: nothing compared the answer with its sources.",
+  approve: "The claim check ran: each claim matched its cited sources (a model's check).",
+  revise: "The claim check found claims its sources did not fully support (a model's check).",
+  escalate: "The claim check found a claim its sources contradicted or did not support, and sent the case on (a model's check).",
+};
+
+function AiEvidence({ ticket }: { ticket: TicketDetail }) {
+  const judge = ticket.response_judge ?? {};
+  const sources = ticket.handoff?.sources_reviewed ?? [];
+  const lines: string[] = [];
+  // The claim check is stated on its own: sources reviewed or a judge's
+  // confidence are not a claim check, and must not stand in for one.
+  const claimDecision = judge.claim_verification?.decision;
+  const claimLine = claimDecision
+    ? CLAIM_CHECK[claimDecision] ?? `The claim check recorded "${claimDecision}" (a model's check).`
+    : null;
+  if (claimLine) lines.push(claimLine);
+  if (judge.withheld_contradicted) {
+    lines.push("A figure was withheld from the answer because it contradicted the cited passage.");
+  }
+  if (judge.applied_revision) {
+    lines.push("The answer was revised by the answer judge, a model; the taxpayer saw the revision.");
+  }
+  if (judge.confidence_band) {
+    lines.push(`Judge confidence: ${judge.confidence_band} (a model's estimate, not a finding).`);
+  }
+  const reasons = (judge.reasons ?? []).filter((r) => typeof r === "string" && r.trim());
+  const recorded = lines.length > 0 || reasons.length > 0 || sources.length > 0;
+  if (recorded && !claimDecision) {
+    lines.unshift("No claim check was recorded for this answer: read its claims as unchecked.");
+  }
+  return (
+    <section className="st-ai-evidence" role="region" aria-label="What the AI did">
+      <span className="st-brief-label">What the AI did</span>
+      {recorded ? (
+        <>
+          {lines.length ? (
+            <ul>
+              {lines.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          ) : null}
+          {reasons.length ? <p className="st-ai-reasons">Judge&apos;s reasons: {reasons.join("; ")}</p> : null}
+          {sources.length ? (
+            <p className="st-ai-sources">
+              Sources it reviewed:{" "}
+              {sources.map((source, idx) => (
+                <React.Fragment key={source}>
+                  {idx > 0 ? ", " : null}
+                  <code>{source}</code>
+                </React.Fragment>
+              ))}
+            </p>
+          ) : null}
+        </>
+      ) : (
+        <p className="st-empty">
+          No record of the AI&apos;s checks was kept for this case. Read its answer as unchecked.
+        </p>
+      )}
+    </section>
+  );
+}
+
 export function TicketCase({
   ticket,
   loading,
@@ -216,7 +289,7 @@ export function TicketCase({
       {ticket.user_query_en && ticket.user_query_en !== ticket.user_query ? (
         <section className="st-query-translation-banner" aria-label="Query Translation">
           <span className="st-brief-label">
-            <GlobeIcon /> English Translation of Citizen Query
+            <GlobeIcon /> Machine translation of the taxpayer&apos;s question (for search; may differ)
           </span>
           <p className="st-query-translation-text">{ticket.user_query_en}</p>
           <span className="st-query-translation-orig">
@@ -265,14 +338,16 @@ export function TicketCase({
         </section>
       ) : null}
 
+      <AiEvidence ticket={ticket} />
+
       <section aria-label="Conversation as it stood at escalation">
         <div className="st-conversation-head">
           <span className="st-brief-label">
             Conversation
             <span>
               {" "}
-              · {transcript.length} turn{transcript.length === 1 ? "" : "s"}, as it stood when the
-              ticket was raised
+              · {transcript.length} turn{transcript.length === 1 ? "" : "s"}, brought up to date each
+              time the taxpayer is escalated again
             </span>
           </span>
           {isVernacular ? (
@@ -317,18 +392,33 @@ export function TicketCase({
                       </p>
                       <p className="st-turn-trans">
                         <span className="st-turn-who">
-                          <GlobeIcon /> English Translation
+                          <GlobeIcon /> Machine translation (for search; may differ)
                         </span>
                         {turn.user_message_en}
                       </p>
                     </div>
                   ) : (
-                    <p>
-                      <span className="st-turn-who">
-                        Taxpayer {hasEn && transMode === "en" ? "[EN]" : ""}
-                      </span>
-                      {hasEn && transMode === "en" ? turn.user_message_en : turn.user_message}
-                    </p>
+                    // G642: a machine translation is never shown as the taxpayer's
+                    // own words; their words stay beside it.
+                    hasEn && transMode === "en" ? (
+                      <div className="st-turn-bilingual-block">
+                        <p className="st-turn-trans">
+                          <span className="st-turn-who">
+                            <GlobeIcon /> Machine translation of the taxpayer (for search; may differ)
+                          </span>
+                          {turn.user_message_en}
+                        </p>
+                        <p className="st-turn-orig">
+                          <span className="st-turn-who">Taxpayer ({ticketLocaleLabel(ticket.locale)})</span>
+                          {turn.user_message}
+                        </p>
+                      </div>
+                    ) : (
+                      <p>
+                        <span className="st-turn-who">Taxpayer</span>
+                        {turn.user_message}
+                      </p>
+                    )
                   )}
                   <p className="st-turn-bot">
                     <span className="st-turn-who">Assistant</span>

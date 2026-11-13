@@ -1473,30 +1473,98 @@ def list_tickets(
 
 
 def append_taxpayer_reply(ticket_id: str, message: str) -> dict[str, Any] | None:
-    """Postgres mirror of :func:`database.append_taxpayer_reply`."""
-    ticket = get_ticket(ticket_id)
-    if not ticket:
-        return None
-    transcript = list(ticket.get("transcript") or [])
-    now = time.time()
-    turn = {
-        "user_message": message.strip()[:2000],
-        "bot_reply": "",
-        "created_at": now,
-        "sender": "taxpayer",
-    }
-    transcript.append(turn)
-    transcript_json = json.dumps(transcript)
+    """Postgres mirror of :func:`database.append_taxpayer_reply`.
+
+    The row is read FOR UPDATE and written in the same transaction, so a
+    concurrent refresh of the same ticket is not overwritten (G641).
+    """
+    from .database import _redact_ticket_value
+
     pool = _get_pool()
     if pool is None:
         return None
-    new_status = "assigned" if ticket.get("status") in ("assigned", "resolved") else "open"
+    now = time.time()
+    turn = _redact_ticket_value(
+        {"user_message": message.strip()[:2000], "bot_reply": "", "created_at": now, "sender": "taxpayer"}
+    )
     with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT transcript_json, status FROM tickets WHERE id = %s FOR UPDATE", (ticket_id,))
+        row = cur.fetchone()
+        if not row:
+            conn.rollback()
+            return None
+        transcript = list(_loads(row[0], []) or [])
+        transcript.append(turn)
+        new_status = "assigned" if row[1] in ("assigned", "resolved") else "open"
         cur.execute(
             "UPDATE tickets SET transcript_json = %s, status = %s, updated_at = %s WHERE id = %s",
-            (transcript_json, new_status, now, ticket_id),
+            (json.dumps(transcript), new_status, now, ticket_id),
         )
+        conn.commit()
     return get_ticket(ticket_id)
+
+
+def refresh_open_ticket(
+    ticket_id: str,
+    *,
+    new_turns: list[dict[str, Any]],
+    priority: str | None = None,
+    reason: str | None = None,
+    handoff: dict[str, Any] | None = None,
+    response_judge: dict[str, Any] | None = None,
+) -> bool:
+    """Postgres mirror of :func:`database.refresh_open_ticket` (G641).
+
+    The row is read FOR UPDATE and written in one transaction; the merge is
+    the shared :func:`database._merge_reused_ticket`.
+    """
+    from .database import _merge_reused_ticket
+
+    pool = _get_pool()
+    if pool is None:
+        return False
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT transcript_json, priority, reason, handoff_json, response_judge_json "
+            "FROM tickets WHERE id = %s FOR UPDATE",
+            (ticket_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            conn.rollback()
+            return False
+        merged = _merge_reused_ticket(
+            {
+                "transcript": _loads(row[0], []),
+                "priority": row[1],
+                "reason": row[2],
+                "handoff": _loads(row[3], {}),
+                "response_judge": _loads(row[4], {}),
+            },
+            new_turns=new_turns,
+            priority=priority,
+            reason=reason,
+            handoff=handoff,
+            response_judge=response_judge,
+        )
+        if merged is None:
+            conn.rollback()
+            return False
+        cur.execute(
+            "UPDATE tickets SET transcript_json = %s, priority = %s, reason = %s, handoff_json = %s, "
+            "response_judge_json = %s, updated_at = %s WHERE id = %s",
+            (
+                json.dumps(merged["transcript"]),
+                merged["priority"],
+                merged["reason"],
+                json.dumps(merged["handoff"]),
+                json.dumps(merged["response_judge"]),
+                time.time(),
+                ticket_id,
+            ),
+        )
+        conn.commit()
+    return True
 
 
 def find_open_ticket(conversation_id: str, tenant_id: str | None = None) -> dict[str, Any] | None:

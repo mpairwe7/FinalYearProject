@@ -51,6 +51,7 @@ import { plainSeconds } from "../../components/charts/chartTheme";
 import dynamic from "next/dynamic";
 import { routeFromMetricKey } from "../../components/charts/LatencyChart";
 import { watchesLiveQueue } from "../../lib/roles";
+import { ratingsEmptyText } from "../../lib/ratingsStatus";
 import "./analytics.css";
 
 const ChartSkeleton = () => <Skeleton height={260} />;
@@ -244,7 +245,8 @@ function Dashboard({ role }: { role?: string }) {
               />
               <SloGaugeCard
                 label="Found helpful by taxpayers"
-                value={feedback.data?.satisfaction_pct ?? 0}
+                value={feedback.data && feedback.data.total > 0 ? feedback.data.satisfaction_pct : null}
+                emptyText={ratingsEmptyText(feedback)}
                 target={80}
                 unit="%"
                 note="Of the answers taxpayers rated, this share was marked helpful. Most answers are never rated, so this reflects the people who chose to tell us."
