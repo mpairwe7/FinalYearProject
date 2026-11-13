@@ -4,6 +4,56 @@ Operator and deployment runbook for the browser voice receptionist powered by
 Pipecat 1.15, self-hosted LiveKit WebRTC media, Whisper-SALT confidence scoring,
 ClarifyGate terminology disambiguation, and staff takeover.
 
+### Assurance update — 2026-11-13, an officer's takeover silences the AI (ADR-0055)
+
+Found on the Space with the test officer (G657). The AI's speech is queued on the
+server and played out in real time, and its "transferring" status and queue place wait
+behind it. An officer who joined while the AI was still talking was heard over the rest
+of the AI's greeting and its "I'm connecting you" line, and the caller's screen then went
+back to the queue for the rest of the call. What changed:
+
+- **The officer joining clears the AI's queued output on the server** before the joining
+  line, then the caller's player. A log line `The pipeline did not confirm clearing the AI's
+  output on call … within 1.0 s` means the pipeline was slow; the officer joined anyway.
+- **The AI's speech, captions and stale waiting screen never reach a caller who is with an
+  officer**, or whose call ended. This is checked at the output gate and again as each frame
+  is written to the caller's socket.
+- **Asking for an officer stops the AI at once**, as a typed question does, and the waiting
+  screen shows at once.
+- **An officer's `{"type": "hangup"}` on the audio socket is End.** It plays the closing
+  line, tells the caller, and owes a wrap-up; the call ends as `officer_ended`. It used to
+  leave the caller connected to an ended call.
+- **The server closes the caller's socket when it ends a call** on the WebSocket transport,
+  as it does on LiveKit.
+- **`POST /v1/admin/users/{id}/revoke` takes either id `/v1/me` shows.** The answer's
+  `user_id` is the token `sub` that was revoked. Revoking by the internal id used to do
+  nothing.
+
+#### Checking an officer handoff end to end
+
+Use the test officer account (its credentials are in the operator's `.env` as
+`STAFF_TEST_OFFICER_*`, never in the repo). Sign in through the real login page: the
+browser app's Auth0 client does not allow the password grant. The scripted check plays a
+caller over `wss://<space>/api/v1/calls/stream`:
+
+1. **Set up the officer.** Mark them available
+   (`PUT /v1/admin/officers/me/presence {"status": "available"}`).
+2. **Start the call.** The caller sends `call_start`, waits about 4 s into the greeting,
+   then sends `request_officer`. The caller should get the AI's `interrupt` and the
+   handoff line at once, then `status: transferring` and `queue`.
+3. **Take the call.** The officer claims it (`POST /v1/admin/calls/{id}/claim`), opens
+   `/api/v1/admin/calls/{id}/audio`, sends `authenticate`, and stays on for 30 s or more.
+   The caller should get `status: bridged`, then no AI audio, no caption from the AI, and
+   no `transferring` or `queue` until the end. The X-URA-Process header on the claim reads
+   `calls`.
+4. **End the call**, once with End (`POST /v1/admin/calls/{id}/end`) and once, on another
+   call, with `{"type": "hangup"}` on the officer's audio socket. Either way the caller
+   should get the closing line, then `status: ended`, and its socket should close. The
+   presence heartbeat should then return `wrap_up_call_id` for the call, and the row
+   should read `ended` / `officer_ended`.
+5. **Save the wrap-up** (`POST /v1/admin/calls/{id}/wrapup`) so the officer is available
+   again.
+
 ### Assurance update — 2026-11-13, sessions can be revoked (ADR-0053)
 
 Phase 8 part D of [the 11 November review](../plans/receptionist-assurance-2026-11-11.md).
@@ -940,7 +990,8 @@ could not be completed on the call and offers an officer (G177).
    now connected to Officer {Name}."* in the call's language. Officers take the calls the
    AI hands over; a call the AI is still handling cannot be taken.
 4. The AI goes silent: caller audio goes to the officer only, and anything the AI was
-   still saying is dropped. Officer audio streams directly to the caller socket.
+   still saying is dropped, including what was already queued on the server to play, and
+   its waiting screen (ADR-0055). Officer audio streams directly to the caller socket.
 5. `EnergyVAD` segments officer speech, transcribes turns, and records them in the live transcript.
 6. The call follows the officer: open a ticket mid-call and a dock at the bottom of every
    staff page keeps the timer, **Mute** (`M`), **End** (`E`) and **Back to call**. Leaving
@@ -953,7 +1004,8 @@ could not be completed on the call and offers an officer (G177).
 ### Step 6: Hang-up & Performance Evaluation
 1. Either side ends it: the officer's **End call** plays *"Thank you for calling URA.
    Goodbye."* and then hangs the caller up (it hangs up even if the line cannot be
-   spoken, and a second press joins the first, G569); the caller can hang up at any
+   spoken, and a second press joins the first, G569). A `{"type": "hangup"}` on the
+   officer's audio socket does the same (ADR-0055). The caller can hang up at any
    time, and the officer's console then opens the wrap-up (G582). Before
    ending, the officer asks *"Were you satisfied with the help I gave you today?"* (the
    End-call confirm reminds them).

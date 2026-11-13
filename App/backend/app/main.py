@@ -4341,6 +4341,25 @@ def _revoke_sessions_or_503(user_id: str, *, reason: str, actor: str) -> float:
         ) from exc
 
 
+def _session_subject(identifier: str) -> str:
+    """The token ``sub`` a revocation names, for either id ``/v1/me`` shows (G657, ADR-0055).
+
+    ``/v1/me`` shows the internal ``user_id`` beside ``external_id`` (the
+    token's ``sub``), and revocations are kept by ``sub``. Given the internal
+    id, the revocation answered 200 and refused nobody's tokens (found on the
+    Space). An internal id is resolved to its ``sub``; anything else (a
+    ``sub``, one not seen yet, or any id while the user table cannot be read)
+    is used as given.
+    """
+    try:
+        row = db.get_user(identifier)
+    except Exception:
+        logger.warning("Could not look up a user to revoke; revoking the id as given", exc_info=True)
+        return identifier
+    external = str((row or {}).get("external_id") or "").strip()
+    return external or identifier
+
+
 @app.post("/v1/admin/users/{user_id}/revoke", tags=["admin"])
 @limiter.limit(_RATE_LIMIT)
 def revoke_user_sessions_endpoint(
@@ -4359,9 +4378,10 @@ def revoke_user_sessions_endpoint(
     """
     if ctx.user and ctx.role != "ura_admin":
         raise HTTPException(status_code=403, detail="only ura_admin may revoke another person's sessions")
-    target = (user_id or "").strip()
-    if not target or len(target) > 256:
+    requested = (user_id or "").strip()
+    if not requested or len(requested) > 256:
         raise HTTPException(status_code=400, detail="a user id is required")
+    target = _session_subject(requested)
     reason = (body.reason if body else "").strip()
     cutoff = _revoke_sessions_or_503(
         target, reason=reason or "revoked_by_admin", actor=ctx.user_id or "operator-key"

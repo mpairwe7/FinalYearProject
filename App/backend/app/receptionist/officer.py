@@ -142,10 +142,30 @@ class OfficerLeg:
         elif isinstance(data, str):
             try:
                 msg = json.loads(data)
-                if msg.get("type") == "hangup":
-                    await self.room.end("officer_hangup")
-            except Exception:
-                pass
+            except ValueError:
+                return
+            if isinstance(msg, dict) and msg.get("type") == "hangup":
+                await self._hang_up()
+
+    async def _hang_up(self) -> None:
+        """The officer hangs up from their socket: the call ends as End ends it (G657, ADR-0055).
+
+        It ended the room directly, with no word to the caller: their screen
+        stayed on the officer, and on the WebSocket transport the AI's queued
+        speech and waiting screen then reached them for a call already over.
+        The console's End and the LiveKit control socket's hang-up both go
+        through :func:`desk.end` (the officer must be on the call; a closing
+        line; the caller's screen told; the officer owed a wrap-up), and so does
+        this.
+        """
+        from . import desk
+
+        try:
+            await desk.end(self.room.call_id, self.officer_id, self.speech_model)
+        except desk.DeskError as exc:
+            logger.info("Officer hang-up on call %s not taken: %s", self.room.call_id, exc)
+        except Exception:
+            logger.warning("Officer hang-up on call %s failed", self.room.call_id, exc_info=True)
 
     def queue_transcription(self, pcm_bytes: bytes) -> None:
         """Hand one officer utterance to the leg's single transcription worker.

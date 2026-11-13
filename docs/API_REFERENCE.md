@@ -2208,6 +2208,20 @@ it rejoins. A signed-in caller whose session is revoked is sent
 `{"type": "error", "code": "signin"}`, the socket closes 4401 and the call ends
 with `session_revoked`.
 
+On the officer's audio socket (`/v1/admin/calls/{call_id}/audio`, WebSocket
+transport) and the LiveKit control socket, `{"type": "hangup"}` is End
+(`POST /v1/admin/calls/{call_id}/end`, ADR-0055): the officer must be on the
+call; the caller hears the closing line and gets `{"type": "status", "status":
+"ended"}`; the officer owes a wrap-up; the call ends as `officer_ended`. On the
+audio socket it used to end the call without telling the caller.
+
+Once an officer has the call, the caller's socket (`/v1/calls/stream`) carries
+nothing more from the AI: no audio, no caption, and no `queue` place or `status:
+transferring` from the wait that is over (ADR-0055). Those were already queued
+behind the AI's speech and arrived during the officer's call. When the server ends a
+call, the caller gets `status: ended` and then the server closes the socket, on
+the WebSocket transport as on LiveKit.
+
 ---
 
 #### Call wrap-up: the caller's satisfaction
@@ -2350,8 +2364,11 @@ Content-Type: application/json
 ```
 
 `ura_admin` only (or the operator key); 403 for other staff. The body is
-optional; `reason` is at most 200 characters. Every token issued to `user_id`
-(the token's `sub`) before now stops working: 401 `session revoked` on the API,
+optional; `reason` is at most 200 characters. `user_id` is the token's `sub`
+(`external_id` in `/v1/me`) or the internal `user_id` `/v1/me` shows, which is
+resolved to its `sub` (ADR-0055); the answer's `user_id`, and the audit record,
+name the `sub` that was revoked. Every token issued to that `sub` before now
+stops working: 401 `session revoked` on the API,
 refused at socket sign-in, and an open staff, call, chat or voice socket opened
 with one closes 4401. A token issued after this works, so the person
 can sign in again; to keep them out, disable the account at the identity

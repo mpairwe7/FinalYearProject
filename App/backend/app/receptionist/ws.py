@@ -379,6 +379,19 @@ async def _stop_pipeline(room: Any, task: Any) -> None:
         logger.debug("Pipeline runner for %s ended with an error", room.call_id, exc_info=True)
 
 
+async def _run_pipeline(room: Any, runner: Any, task: Any) -> None:
+    """Run the call's pipeline as a task the room holds, until it finishes (G657, ADR-0055).
+
+    ``CallRoom.end()`` stops a pipeline whose runner it can see, and Pipecat's
+    WebSocket transport then closes the caller's socket. The LiveKit path
+    registers its runner; this one ran it inline, so an end the caller did not
+    ask for (an officer's hang-up) left the pipeline, and the caller's socket,
+    open until the caller hung up, playing the AI's queued speech to them.
+    """
+    room.pipeline_runner_task = asyncio.create_task(runner.run(task))
+    await room.pipeline_runner_task
+
+
 async def _receive_or_end(websocket: WebSocket, room: Any) -> dict[str, Any] | None:
     """The caller's next message, or ``None`` when the call ends first."""
     receiving = asyncio.ensure_future(websocket.receive())
@@ -1013,7 +1026,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                     await _stop_pipeline(room, task)
             else:
                 await brain.say_greeting()
-                await runner.run(task)
+                await _run_pipeline(room, runner, task)
         except (ImportError, RuntimeError) as pipeline_err:
             logger.warning("Pipeline fallback active: %s", pipeline_err)
             if caller_token:
