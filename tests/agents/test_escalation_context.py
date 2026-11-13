@@ -521,6 +521,55 @@ class TestAReusedTicketIsBroughtUpToDate:
         assert any("UGX 200,000" in r for r in replies)
         assert ticket["transcript"][-1]["user_message"] == "my deadline is today, please help"
 
+    def _ticket(self, seeded) -> str:
+        return seeded.create_ticket(
+            reason="taxpayer asked for an officer",
+            user_query="it is still not showing",
+            conversation_id="conv-race",
+            transcript=[{"user_message": "hello", "bot_reply": "hi", "created_at": 1.0}],
+        )["id"]
+
+    def test_a_refresh_keeps_a_taxpayer_reply_its_stale_read_missed(self, seeded, monkeypatch):
+        """The refresh read the ticket, then wrote the whole transcript back; a
+        taxpayer follow-up appended in between was lost. It now reads inside
+        its own write transaction."""
+        tid = self._ticket(seeded)
+        stale = seeded.get_ticket(tid)
+        seeded.append_taxpayer_reply(tid, "I have now uploaded the receipt")
+        # Only within this block: the fixture's own patches must stay.
+        with monkeypatch.context() as m:
+            m.setattr(seeded, "get_ticket", lambda _tid: stale)
+            assert seeded.refresh_open_ticket(
+                tid, new_turns=[{"user_message": "again", "bot_reply": "ok", "created_at": time.time() + 5}]
+            )
+        messages = [t.get("user_message") for t in seeded.get_ticket(tid)["transcript"]]
+        assert "I have now uploaded the receipt" in messages
+        assert messages[-1] == "again"
+
+    def test_a_taxpayer_reply_keeps_turns_a_refresh_added(self, seeded, monkeypatch):
+        tid = self._ticket(seeded)
+        stale = seeded.get_ticket(tid)
+        seeded.refresh_open_ticket(
+            tid, new_turns=[{"user_message": "again", "bot_reply": "ok", "created_at": time.time() + 5}]
+        )
+        with monkeypatch.context() as m:
+            m.setattr(seeded, "get_ticket", lambda _tid: stale)
+            seeded.append_taxpayer_reply(tid, "any news?")
+        messages = [t.get("user_message") for t in seeded.get_ticket(tid)["transcript"]]
+        assert "again" in messages and messages[-1] == "any news?"
+
+    def test_turns_added_by_a_refresh_are_redacted_at_rest(self, seeded):
+        """create_ticket redacts the transcript it stores; the refresh stored
+        the new turns as they came."""
+        tid = self._ticket(seeded)
+        seeded.refresh_open_ticket(
+            tid,
+            new_turns=[{"user_message": "call me on 0772123456", "bot_reply": "ok", "created_at": time.time() + 5}],
+        )
+        seeded.append_taxpayer_reply(tid, "or email me at kato@example.com")
+        raw = seeded.query_one("SELECT transcript_json FROM tickets WHERE id = ?", (tid,))["transcript_json"]
+        assert "0772123456" not in raw and "kato@example.com" not in raw
+
     def test_a_lower_priority_does_not_lower_it(self, seeded, monkeypatch):
         from app.flags import flags
         from app.service import ChatModel

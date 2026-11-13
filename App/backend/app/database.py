@@ -2415,50 +2415,75 @@ def refresh_open_ticket(
     taxpayer waited, and the turn that escalated again) are appended, and the
     priority is raised to the new one if it is higher; it is never lowered.
     Taxpayer follow-ups already on the ticket stay where they are.
+
+    The transcript is read inside the write's own transaction (BEGIN
+    IMMEDIATE), so a follow-up appended between a read and this write is not
+    overwritten; the new turns are redacted as ``create_ticket`` redacts.
     """
-    ticket = get_ticket(ticket_id)
-    if not ticket:
-        return False
-    transcript = list(ticket.get("transcript") or [])
-    last = max((float(t.get("created_at") or 0.0) for t in transcript), default=0.0)
-    added = [t for t in new_turns if float(t.get("created_at") or 0.0) > last]
-    current = str(ticket.get("priority") or "normal")
-    wanted = str(priority or current)
-    raised = _TICKET_PRIORITY_RANK.get(wanted, 1) > _TICKET_PRIORITY_RANK.get(current, 1)
-    if not added and not raised:
-        return False
-    transcript.extend(added)
     conn = _get_connection()
-    conn.execute(
-        "UPDATE tickets SET transcript_json = ?, priority = ?, updated_at = ? WHERE id = ?",
-        (json.dumps(transcript), wanted if raised else current, time.time(), ticket_id),
-    )
-    conn.commit()
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    try:
+        row = conn.execute("SELECT transcript_json, priority FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
+        if not row:
+            conn.rollback()
+            return False
+        transcript = list(_json_loads(row[0], []) or [])
+        last = max((float(t.get("created_at") or 0.0) for t in transcript), default=0.0)
+        added = [t for t in new_turns if float(t.get("created_at") or 0.0) > last]
+        current = str(row[1] or "normal")
+        wanted = str(priority or current)
+        raised = _TICKET_PRIORITY_RANK.get(wanted, 1) > _TICKET_PRIORITY_RANK.get(current, 1)
+        if not added and not raised:
+            conn.rollback()
+            return False
+        transcript.extend(_redact_ticket_value(added))
+        conn.execute(
+            "UPDATE tickets SET transcript_json = ?, priority = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(transcript), wanted if raised else current, time.time(), ticket_id),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     return True
 
 
 def append_taxpayer_reply(ticket_id: str, message: str) -> dict[str, Any] | None:
-    """Append a taxpayer follow-up message to the ticket transcript."""
-    ticket = get_ticket(ticket_id)
-    if not ticket:
-        return None
-    transcript = list(ticket.get("transcript") or [])
+    """Append a taxpayer follow-up message to the ticket transcript.
+
+    Read and written in one transaction, so turns a refresh of a reused ticket
+    adds at the same moment are not overwritten (G641); the message is
+    redacted at rest, as the rest of the transcript is.
+    """
     now = time.time()
-    turn = {
-        "user_message": message.strip()[:2000],
-        "bot_reply": "",
-        "created_at": now,
-        "sender": "taxpayer",
-    }
-    transcript.append(turn)
-    transcript_json = json.dumps(transcript)
-    conn = _get_connection()
-    new_status = "assigned" if ticket.get("status") in ("assigned", "resolved") else "open"
-    conn.execute(
-        "UPDATE tickets SET transcript_json = ?, status = ?, updated_at = ? WHERE id = ?",
-        (transcript_json, new_status, now, ticket_id),
+    turn = _redact_ticket_value(
+        {
+            "user_message": message.strip()[:2000],
+            "bot_reply": "",
+            "created_at": now,
+            "sender": "taxpayer",
+        }
     )
-    conn.commit()
+    conn = _get_connection()
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    try:
+        row = conn.execute("SELECT transcript_json, status FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
+        if not row:
+            conn.rollback()
+            return None
+        transcript = list(_json_loads(row[0], []) or [])
+        transcript.append(turn)
+        new_status = "assigned" if row[1] in ("assigned", "resolved") else "open"
+        conn.execute(
+            "UPDATE tickets SET transcript_json = ?, status = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(transcript), new_status, now, ticket_id),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     return get_ticket(ticket_id)
 
 
@@ -4768,6 +4793,7 @@ if ANALYTICS_BACKEND == "postgres":
         pending_officer_reply = _pg.pending_officer_reply  # type: ignore
         mark_reply_delivered = _pg.mark_reply_delivered  # type: ignore
         append_taxpayer_reply = _pg.append_taxpayer_reply  # type: ignore
+        refresh_open_ticket = _pg.refresh_open_ticket  # type: ignore
         sla_stats = _pg.sla_stats  # type: ignore
         heartbeat_ticket_presence = _pg.heartbeat_ticket_presence  # type: ignore
         list_ticket_viewers = _pg.list_ticket_viewers  # type: ignore

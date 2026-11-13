@@ -1473,29 +1473,34 @@ def list_tickets(
 
 
 def append_taxpayer_reply(ticket_id: str, message: str) -> dict[str, Any] | None:
-    """Postgres mirror of :func:`database.append_taxpayer_reply`."""
-    ticket = get_ticket(ticket_id)
-    if not ticket:
-        return None
-    transcript = list(ticket.get("transcript") or [])
-    now = time.time()
-    turn = {
-        "user_message": message.strip()[:2000],
-        "bot_reply": "",
-        "created_at": now,
-        "sender": "taxpayer",
-    }
-    transcript.append(turn)
-    transcript_json = json.dumps(transcript)
+    """Postgres mirror of :func:`database.append_taxpayer_reply`.
+
+    The row is read FOR UPDATE and written in the same transaction, so a
+    concurrent refresh of the same ticket is not overwritten (G641).
+    """
+    from .database import _redact_ticket_value
+
     pool = _get_pool()
     if pool is None:
         return None
-    new_status = "assigned" if ticket.get("status") in ("assigned", "resolved") else "open"
+    now = time.time()
+    turn = _redact_ticket_value(
+        {"user_message": message.strip()[:2000], "bot_reply": "", "created_at": now, "sender": "taxpayer"}
+    )
     with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT transcript_json, status FROM tickets WHERE id = %s FOR UPDATE", (ticket_id,))
+        row = cur.fetchone()
+        if not row:
+            conn.rollback()
+            return None
+        transcript = list(_loads(row[0], []) or [])
+        transcript.append(turn)
+        new_status = "assigned" if row[1] in ("assigned", "resolved") else "open"
         cur.execute(
             "UPDATE tickets SET transcript_json = %s, status = %s, updated_at = %s WHERE id = %s",
-            (transcript_json, new_status, now, ticket_id),
+            (json.dumps(transcript), new_status, now, ticket_id),
         )
+        conn.commit()
     return get_ticket(ticket_id)
 
 
@@ -1508,27 +1513,36 @@ def refresh_open_ticket(
     new_turns: list[dict[str, Any]],
     priority: str | None = None,
 ) -> bool:
-    """Postgres mirror of :func:`database.refresh_open_ticket` (G641)."""
-    ticket = get_ticket(ticket_id)
-    if not ticket:
-        return False
-    transcript = list(ticket.get("transcript") or [])
-    last = max((float(t.get("created_at") or 0.0) for t in transcript), default=0.0)
-    added = [t for t in new_turns if float(t.get("created_at") or 0.0) > last]
-    current = str(ticket.get("priority") or "normal")
-    wanted = str(priority or current)
-    raised = _TICKET_PRIORITY_RANK.get(wanted, 1) > _TICKET_PRIORITY_RANK.get(current, 1)
-    if not added and not raised:
-        return False
-    transcript.extend(added)
+    """Postgres mirror of :func:`database.refresh_open_ticket` (G641).
+
+    Read FOR UPDATE and written in one transaction; new turns are redacted.
+    """
+    from .database import _redact_ticket_value
+
     pool = _get_pool()
     if pool is None:
         return False
     with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT transcript_json, priority FROM tickets WHERE id = %s FOR UPDATE", (ticket_id,))
+        row = cur.fetchone()
+        if not row:
+            conn.rollback()
+            return False
+        transcript = list(_loads(row[0], []) or [])
+        last = max((float(t.get("created_at") or 0.0) for t in transcript), default=0.0)
+        added = [t for t in new_turns if float(t.get("created_at") or 0.0) > last]
+        current = str(row[1] or "normal")
+        wanted = str(priority or current)
+        raised = _TICKET_PRIORITY_RANK.get(wanted, 1) > _TICKET_PRIORITY_RANK.get(current, 1)
+        if not added and not raised:
+            conn.rollback()
+            return False
+        transcript.extend(_redact_ticket_value(added))
         cur.execute(
             "UPDATE tickets SET transcript_json = %s, priority = %s, updated_at = %s WHERE id = %s",
             (json.dumps(transcript), wanted if raised else current, time.time(), ticket_id),
         )
+        conn.commit()
     return True
 
 

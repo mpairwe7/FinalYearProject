@@ -39,7 +39,11 @@ risk summaries, not model rationales presented as fact.
    handoff's `sources_reviewed`.
 2. **A reused ticket is brought up to date** (`db.refresh_open_ticket`): the turns
    since its last snapshot are appended, taxpayer follow-ups stay where they are,
-   and the priority is raised, never lowered.
+   and the priority is raised, never lowered. It is dispatched to the Postgres
+   mirror like the other ticket functions. It and `append_taxpayer_reply` read the
+   transcript inside their own write transaction (`BEGIN IMMEDIATE` on SQLite,
+   `SELECT … FOR UPDATE` on Postgres), so neither overwrites the other's turns, and
+   both redact what they add, as `create_ticket` does.
 3. **A machine translation is labelled** as one ("for search; may differ") and the
    taxpayer's own words stay beside it in every transcript mode.
 4. **Only officers are offered "assign to me"** (`isLiveOfficer`), as the API allows.
@@ -56,11 +60,18 @@ risk summaries, not model rationales presented as fact.
   brought up to date each time.
 - The quality timeline's per-answer confidence (noted by the audit) is not yet
   shown; it is outside this phase.
+- Ticket redaction misses phone numbers written with spaces (G658, open); widening
+  the pattern without catching spaced money amounts needs its own change.
 
 ## Confirmation
 
 Each test was watched failing before the fix:
 
+- `tests/agents/test_escalation_context.py`: a refresh keeps a taxpayer reply its
+  stale read missed; a taxpayer reply keeps turns a refresh added; turns both add
+  are redacted at rest.
+- `tests/agents/test_backend_shim.py`: every SQLite function with a Postgres mirror
+  reaches it (dispatched, or handing over through `_pg_module()`).
 - `App/frontend/src/__tests__/components/TicketCaseChat.test.tsx`: the evidence block
   with every signal and the sources; the "unchecked" note with none; the machine
   translation labelled with the original kept.

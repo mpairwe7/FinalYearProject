@@ -203,6 +203,30 @@ class TestEveryPublicFunctionReachesTheProductionBackend:
         )
 
 
+class TestAMirrorIsActuallyUsed:
+    def test_every_sqlite_function_with_a_postgres_mirror_reaches_it(self):
+        """A mirror in postgres.py does nothing unless the dispatch block binds
+        it or the function hands over itself (``_pg_module()``).
+        ``refresh_open_ticket`` had a mirror and neither, so on Postgres it
+        wrote a reused ticket's new turns to a local SQLite file (G641)."""
+        import inspect
+
+        from app import postgres as pg
+
+        source = Path(db.__file__).read_text()
+        dispatched = set(re.findall(r"^\s+(\w+) = _pg\.", source, re.M))
+        unused = []
+        for name, obj in vars(db).items():
+            if name.startswith("_") or not inspect.isfunction(obj) or getattr(obj, "__module__", "") != "app.database":
+                continue
+            if name in dispatched or not hasattr(pg, name):
+                continue
+            body = inspect.getsource(obj)
+            if "_get_connection()" in body and "_pg_module()" not in body:
+                unused.append(name)
+        assert not unused, f"Postgres mirrors never reached: {unused}"
+
+
 class TestAuditUsesTheSeam:
     def test_the_ledger_no_longer_reaches_for_a_raw_connection(self):
         for name in ("audit/ledger.py", "audit/verifier.py"):

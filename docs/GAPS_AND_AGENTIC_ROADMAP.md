@@ -705,7 +705,7 @@ A review of every surface where the AI meets a person: the chat's trust signals,
 | G638 🟢 | ~~The flags console calls overrides durable on the Space, labels stored overrides "this replica", and switches the figure hold with one click.~~ | Fixed 2026-11-13 (ADR-0050): `overrides_durability` from where the store lives (`ANALYTICS_DB_PERSISTENT`); stored overrides labelled "every process"; safety flags ask before switching off. |
 | G639 🟢 | ~~"Reopen" in Needs review deletes an auditor's finding and note without confirmation or history.~~ | Fixed 2026-11-13 (ADR-0050): every decision is appended to `audit_review_history`, returned with the queue; Reopen asks first and earlier decisions are shown. |
 | G640 🟢 | ~~The officer's case view drops the AI's evidence and doubt the API returns (claim check, withheld figure, judge revision, sources).~~ | Fixed 2026-11-13 (ADR-0051): a "What the AI did" block shows the judge's signals as a model's and the sources reviewed; the escalated turn keeps its sources. |
-| G641 🟢 | ~~AI answers after escalation never reach the ticket; a second escalation does not raise priority or reasons.~~ | Fixed 2026-11-13 (ADR-0051): a reused ticket gets the turns since its snapshot and a raised (never lowered) priority (`db.refresh_open_ticket`). |
+| G641 🟢 | ~~AI answers after escalation never reach the ticket; a second escalation does not raise priority or reasons.~~ | Fixed 2026-11-13 (ADR-0051): a reused ticket gets the turns since its snapshot and a raised (never lowered) priority (`db.refresh_open_ticket`, dispatched to Postgres). It and a taxpayer's follow-up read and write the transcript in one transaction, so neither overwrites the other, and their turns are redacted at rest. |
 | G642 🟢 | ~~The machine translation of the taxpayer's words is shown as "Taxpayer [EN]".~~ | Fixed 2026-11-13 (ADR-0051): labelled "machine translation (for search; may differ)" with the taxpayer's words kept beside it. |
 | G643 🟢 | ~~An auditor is offered "assign to me", which the API refuses silently.~~ | Fixed 2026-11-13 (ADR-0051): the shortcut and its hint are for officers only. |
 | G644 🟢 | ~~"Found helpful" shows 0% "Below target" with no ratings or a failed request.~~ | Fixed 2026-11-13 (ADR-0051): a gauge with no data shows why and no verdict. |
@@ -720,6 +720,7 @@ A review of every surface where the AI meets a person: the chat's trust signals,
 | G653 ⚪ | Discrepancy detection runs only on REST; a failed feedback-comment save is silent. | Open: phase 6. |
 | G654 ⚪ | Document analyses (TINs, NINs) persist in browser storage; a failed save is silent. | Open: phase 6. |
 | G655 ⚪ | 195 hard-coded English strings on taxpayer surfaces, the consent notice and live-region announcements among them; the accessibility statement overstated lg and sw key coverage. | Open: phase 6. The statement's claim is corrected in phase 1. |
+| G658 ⚪ | Ticket redaction (`guardrails.redact_pii_text`, used by `_redact_ticket_value`) misses phone numbers written with spaces ("0772 123 456", "+256 772 123456"); it catches "0772123456". Found while redacting a reused ticket's new turns (ADR-0051). | Open: widening the pattern must not catch money written with spaces ("UGX 1 200 000"); needs its own change and tests across the guardrail's callers. |
 
 ### Planner and live web assurance — 2026-10-31
 
@@ -1405,7 +1406,7 @@ full agent chain is locked.
 
 ---
 
-*Document version 3.31 — updated 2026-11-13: intelligent UI assurance phase 4 (ADR-0051): G640–G644 fixed.*
+*Document version 3.31 — updated 2026-11-13: intelligent UI assurance phase 4 (ADR-0051): G640–G644 fixed; G658 opened (spaced phone numbers escape ticket redaction).*
 
 *Previously: version 3.30 — updated 2026-11-13: intelligent UI assurance phase 3 (ADR-0050): G635, G636, G638 and G639 fixed; G634 and G637 mitigated (tenant scoping open for discrepancies and overrides).*
 
