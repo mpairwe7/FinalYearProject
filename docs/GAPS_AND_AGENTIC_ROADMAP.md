@@ -620,7 +620,7 @@ Reviewed on branch `fix/receptionist-assurance-2026-10-30`; [evidence, sources a
 
 ### Call receptionist assurance — 2026-11-11
 
-A review of the whole call flow: what the AI says, the handoff, the officer's desk, both browser clients, startup and readiness. [Evidence, sources and phases](plans/receptionist-assurance-2026-11-11.md); decisions in ADR-0039. Fixed means implemented with a regression test that failed first; nothing here was exercised on a real microphone, SFU or speech backend, and production deployment is pending. G612 and G613 were opened on 2026-11-12 by phase 5 (ADR-0043). G615 was found and fixed on 2026-11-12 while checking phase 5 on the Space. G612 was closed by phase 6 (ADR-0044) the same day. G616 was found while checking phase 6 on the Space. Phase 7 part A (ADR-0045) narrowed G304, G610 and G614; part B (ADR-0046) closed G591. G617 was found and fixed while checking phase 7 part A on the Space. ADR-0047 closed G610 and narrowed G304.
+A review of the whole call flow: what the AI says, the handoff, the officer's desk, both browser clients, startup and readiness. [Evidence, sources and phases](plans/receptionist-assurance-2026-11-11.md); decisions in ADR-0039. Fixed means implemented with a regression test that failed first; nothing here was exercised on a real microphone, SFU or speech backend, and production deployment is pending. G612 and G613 were opened on 2026-11-12 by phase 5 (ADR-0043). G615 was found and fixed on 2026-11-12 while checking phase 5 on the Space. G612 was closed by phase 6 (ADR-0044) the same day. G616 was found while checking phase 6 on the Space. Phase 7 part A (ADR-0045) narrowed G304, G610 and G614; part B (ADR-0046) closed G591. G617 was found and fixed while checking phase 7 part A on the Space. Phase 8 part C (ADR-0047) closed G610 and narrowed G304. ADR-0047 closed G610 and narrowed G304.
 
 | Gap | Finding | Status |
 | --- | --- | --- |
@@ -1359,7 +1359,9 @@ full agent chain is locked.
 
 ---
 
-*Document version 3.25 — updated 2026-11-13: G617 fixed (two API processes starting on a fresh SQLite file both start).*
+*Document version 3.26 — updated 2026-11-13: phase 8 part C of the call receptionist review (ADR-0047): G610 closed (wrap-ups owed while a call runs) and the LiveKit control limit added to G304.*
+
+*Previously: version 3.25 — updated 2026-11-13: G617 fixed (two API processes starting on a fresh SQLite file both start).*
 
 *Previously: version 3.24 — updated 2026-11-12: G591 closed by phase 7 part B of the call receptionist review (ADR-0046): a superseded call turn stops its model run at the next stage.*
 
