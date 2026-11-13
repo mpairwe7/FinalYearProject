@@ -326,6 +326,22 @@
   background: var(--ops-row);
 }
 
+/* G640: what the AI did on the answer being taken over. */
+.st-ai-evidence {
+  padding: var(--ops-space-4);
+  border: 1px solid var(--ops-line);
+  border-left: 3px solid var(--ops-warn-line);
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-row);
+}
+.st-ai-evidence ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.st-ai-evidence p {
+  margin: var(--ops-space-2) 0 0;
+}
+
 .st-brief-label {
   display: block;
   margin-bottom: var(--ops-space-2);

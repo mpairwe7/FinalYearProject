@@ -2399,28 +2399,195 @@ def list_tickets(
     return [_hydrate_ticket(r) for r in rows]
 
 
-def append_taxpayer_reply(ticket_id: str, message: str) -> dict[str, Any] | None:
-    """Append a taxpayer follow-up message to the ticket transcript."""
-    ticket = get_ticket(ticket_id)
-    if not ticket:
-        return None
-    transcript = list(ticket.get("transcript") or [])
-    now = time.time()
-    turn = {
-        "user_message": message.strip()[:2000],
-        "bot_reply": "",
-        "created_at": now,
-        "sender": "taxpayer",
-    }
-    transcript.append(turn)
-    transcript_json = json.dumps(transcript)
-    conn = _get_connection()
-    new_status = "assigned" if ticket.get("status") in ("assigned", "resolved") else "open"
-    conn.execute(
-        "UPDATE tickets SET transcript_json = ?, status = ?, updated_at = ? WHERE id = ?",
-        (transcript_json, new_status, now, ticket_id),
+_TICKET_PRIORITY_RANK = {"low": 0, "normal": 1, "high": 2, "urgent": 3}
+
+
+def _turn_key(turn: dict[str, Any]) -> tuple[str, str]:
+    """An exchange's identity for de-duplication: its question and the start of its answer.
+
+    Conversation turns carry no stable id, and the escalated turn is
+    snapshotted before the caller logs it, so its logged copy has a later
+    timestamp. Matching on the words catches that copy.
+    """
+
+    def norm(value: Any, limit: int) -> str:
+        return " ".join(str(value or "").lower().split())[:limit]
+
+    return norm(turn.get("user_message"), 500), norm(turn.get("bot_reply"), 160)
+
+
+def _merge_reused_ticket(
+    stored: dict[str, Any],
+    *,
+    new_turns: list[dict[str, Any]],
+    priority: str | None = None,
+    reason: str | None = None,
+    handoff: dict[str, Any] | None = None,
+    response_judge: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """What a re-escalation changes on its open ticket, or None for nothing (G641).
+
+    *stored* holds the ticket's ``transcript``, ``priority``, ``reason``,
+    ``handoff`` and ``response_judge`` as read inside the write's transaction.
+    Shared by both backends so they cannot drift.
+
+    - Turns after the snapshot are appended. The watermark is the newest turn
+      of the snapshot itself: a taxpayer follow-up appended later does not
+      move it, or AI answers logged before that follow-up would be skipped.
+      An exchange already on the ticket (by :func:`_turn_key`) is not added
+      again.
+    - The priority is raised, never lowered.
+    - A new reason is added after the earlier ones.
+    - The AI's evidence is the latest escalation's: its judge record replaces
+      the old one, and its ``sources_reviewed`` and escalation assessment
+      replace theirs. Other handoff fields (a classified topic, the details
+      asked for) are kept: a button press carries placeholders for them.
+    """
+    transcript = list(stored.get("transcript") or [])
+    snapshot = [t for t in transcript if t.get("sender") != "taxpayer"]
+    last = max((float(t.get("created_at") or 0.0) for t in snapshot), default=0.0)
+    seen = {_turn_key(t) for t in snapshot}
+    added: list[dict[str, Any]] = []
+    for turn in _redact_ticket_value(list(new_turns or [])):
+        key = _turn_key(turn)
+        if float(turn.get("created_at") or 0.0) > last and key not in seen:
+            added.append(turn)
+            seen.add(key)
+
+    current = str(stored.get("priority") or "normal")
+    wanted = str(priority or current)
+    raised = _TICKET_PRIORITY_RANK.get(wanted, 1) > _TICKET_PRIORITY_RANK.get(current, 1)
+
+    old_reason = str(stored.get("reason") or "")
+    new_reason = str(_redact_ticket_value((reason or "").strip()))
+    reason_out = old_reason
+    if new_reason and new_reason not in old_reason:
+        reason_out = (f"{old_reason}; then: {new_reason}" if old_reason else new_reason)[:1000]
+
+    handoff_out = dict(stored.get("handoff") or {})
+    for field in ("sources_reviewed", "escalation"):
+        value = (handoff or {}).get(field)
+        if value:
+            handoff_out[field] = _redact_ticket_value(value)
+    judge_out = _redact_ticket_value(dict(response_judge)) if response_judge else dict(stored.get("response_judge") or {})
+
+    changed = (
+        bool(added)
+        or raised
+        or reason_out != old_reason
+        or handoff_out != dict(stored.get("handoff") or {})
+        or judge_out != dict(stored.get("response_judge") or {})
     )
-    conn.commit()
+    if not changed:
+        return None
+    return {
+        "transcript": transcript + added,
+        "priority": wanted if raised else current,
+        "reason": reason_out,
+        "handoff": handoff_out,
+        "response_judge": judge_out,
+    }
+
+
+def refresh_open_ticket(
+    ticket_id: str,
+    *,
+    new_turns: list[dict[str, Any]],
+    priority: str | None = None,
+    reason: str | None = None,
+    handoff: dict[str, Any] | None = None,
+    response_judge: dict[str, Any] | None = None,
+) -> bool:
+    """Bring a reused open ticket up to date (G641); see :func:`_merge_reused_ticket`.
+
+    A second escalation of the same conversation reuses its open ticket. The
+    ticket is read inside the write's own transaction (BEGIN IMMEDIATE), so a
+    taxpayer follow-up appended between a read and this write is not
+    overwritten, and a concurrent raise of the priority is not lowered.
+    """
+    conn = _get_connection()
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    try:
+        row = conn.execute(
+            "SELECT transcript_json, priority, reason, handoff_json, response_judge_json FROM tickets WHERE id = ?",
+            (ticket_id,),
+        ).fetchone()
+        if not row:
+            conn.rollback()
+            return False
+        merged = _merge_reused_ticket(
+            {
+                "transcript": _json_loads(row[0], []),
+                "priority": row[1],
+                "reason": row[2],
+                "handoff": _json_loads(row[3], {}),
+                "response_judge": _json_loads(row[4], {}),
+            },
+            new_turns=new_turns,
+            priority=priority,
+            reason=reason,
+            handoff=handoff,
+            response_judge=response_judge,
+        )
+        if merged is None:
+            conn.rollback()
+            return False
+        conn.execute(
+            "UPDATE tickets SET transcript_json = ?, priority = ?, reason = ?, handoff_json = ?, "
+            "response_judge_json = ?, updated_at = ? WHERE id = ?",
+            (
+                json.dumps(merged["transcript"]),
+                merged["priority"],
+                merged["reason"],
+                _json_dumps(merged["handoff"], "{}"),
+                _json_dumps(merged["response_judge"], "{}"),
+                time.time(),
+                ticket_id,
+            ),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return True
+
+
+def append_taxpayer_reply(ticket_id: str, message: str) -> dict[str, Any] | None:
+    """Append a taxpayer follow-up message to the ticket transcript.
+
+    Read and written in one transaction, so turns a refresh of a reused ticket
+    adds at the same moment are not overwritten (G641); the message is
+    redacted at rest, as the rest of the transcript is.
+    """
+    now = time.time()
+    turn = _redact_ticket_value(
+        {
+            "user_message": message.strip()[:2000],
+            "bot_reply": "",
+            "created_at": now,
+            "sender": "taxpayer",
+        }
+    )
+    conn = _get_connection()
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    try:
+        row = conn.execute("SELECT transcript_json, status FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
+        if not row:
+            conn.rollback()
+            return None
+        transcript = list(_json_loads(row[0], []) or [])
+        transcript.append(turn)
+        new_status = "assigned" if row[1] in ("assigned", "resolved") else "open"
+        conn.execute(
+            "UPDATE tickets SET transcript_json = ?, status = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(transcript), new_status, now, ticket_id),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     return get_ticket(ticket_id)
 
 
@@ -4730,6 +4897,7 @@ if ANALYTICS_BACKEND == "postgres":
         pending_officer_reply = _pg.pending_officer_reply  # type: ignore
         mark_reply_delivered = _pg.mark_reply_delivered  # type: ignore
         append_taxpayer_reply = _pg.append_taxpayer_reply  # type: ignore
+        refresh_open_ticket = _pg.refresh_open_ticket  # type: ignore
         sla_stats = _pg.sla_stats  # type: ignore
         heartbeat_ticket_presence = _pg.heartbeat_ticket_presence  # type: ignore
         list_ticket_viewers = _pg.list_ticket_viewers  # type: ignore

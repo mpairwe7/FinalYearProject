@@ -126,6 +126,10 @@ export interface TicketQueueItem {
     applied_revision?: boolean;
     reasons?: string[];
     confidence_band?: string;
+    /** The claim check's report on the draft; `decision: "unavailable"` when it did not run. */
+    claim_verification?: { decision?: string };
+    /** A figure that contradicted its cited passage was withheld from the reply. */
+    withheld_contradicted?: boolean;
   };
 }
 

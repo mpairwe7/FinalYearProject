@@ -22,6 +22,7 @@ import React, { useMemo } from "react";
 import StaffGuard, { type StaffIdentity } from "../../../components/StaffGuard";
 import { OpsPage } from "../../../components/ops/OpsPage";
 import { KeyHint } from "../../../components/ops/Controls";
+import { isLiveOfficer } from "../../../lib/roles";
 import {
   EmptyState,
   ErrorState,
@@ -85,8 +86,9 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
     ids: tickets.map((ticket) => ticket.id),
     selectedId: selected,
     onSelect: select,
+    // G643: only officers handle cases live; the API refuses anyone else's claim.
     onAssignMe:
-      selected && handle
+      selected && handle && isLiveOfficer(who?.role)
         ? () =>
             update.mutate({
               id: selected,
@@ -338,7 +340,7 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
           <KeyHint keys={["j", "k"]}>move</KeyHint>
           <KeyHint keys={["/"]}>search</KeyHint>
           <KeyHint keys={["r"]}>reply</KeyHint>
-          <KeyHint keys={["a"]}>assign to me</KeyHint>
+          {isLiveOfficer(who?.role) ? <KeyHint keys={["a"]}>assign to me</KeyHint> : null}
         </span>
       </div>
 

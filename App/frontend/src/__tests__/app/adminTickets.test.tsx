@@ -151,6 +151,22 @@ describe("StaffTicketQueue", () => {
     );
   });
 
+  // G643: the API refuses an auditor's claim (only officers handle cases
+  // live), but the console offered the shortcut and failed silently.
+  it("offers an auditor no 'assign to me'", async () => {
+    renderPage("ura_auditor");
+    fireEvent.click(await screen.findByText(/User explicitly asked for a human/));
+    expect(screen.queryByText("assign to me")).toBeNull();
+    fireEvent.keyDown(document.body, { key: "a" });
+    expect(analyticsApi.updateTicket).not.toHaveBeenCalled();
+  });
+
+  it("still offers an officer 'assign to me'", async () => {
+    renderPage("ura_staff");
+    await screen.findByText(/User explicitly asked for a human/);
+    expect(screen.getByText("assign to me")).toBeInTheDocument();
+  });
+
   it("inserts a canned reply without sending it", async () => {
     renderPage();
     fireEvent.click(await screen.findByText(/User explicitly asked for a human/));

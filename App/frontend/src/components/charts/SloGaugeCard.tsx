@@ -6,7 +6,8 @@ import { ChartNote, STATUS_MARK } from "./chartTheme";
 interface Props {
   /** Plain-language name of what is being measured. */
   label: string;
-  value: number;
+  /** Null when there is nothing to measure (G644): no meter, no verdict. */
+  value: number | null;
   target: number;
   unit?: string;
   invert?: boolean; // true = lower is better (error rate, latency)
@@ -16,6 +17,8 @@ interface Props {
   format?: (value: number) => string;
   /** The technical name, for the engineer who came looking for it. */
   term?: string;
+  /** Why there is no figure, shown when `value` is null. */
+  emptyText?: string;
 }
 
 /**
@@ -54,7 +57,25 @@ export default function SloGaugeCard({
   note,
   format,
   term,
+  emptyText,
 }: Props) {
+  // G644: no data is not a zero. A gauge reading 0% "Below target" for a
+  // period with no ratings, or a request that failed, read as a measured fault.
+  if (value === null || !Number.isFinite(value)) {
+    return (
+      <div className="ops-chart-card ops-gauge">
+        <h3 className="ops-chart-title">
+          {label}
+          {term ? <span className="ops-chart-term"> ({term})</span> : null}
+        </h3>
+        <p className="ops-gauge-value ops-gauge-value-lg">—</p>
+        <p className="ops-gauge-target" role="status">
+          {emptyText || "No data for this period."}
+        </p>
+        {note ? <ChartNote>{note}</ChartNote> : null}
+      </div>
+    );
+  }
   const safeTarget = target || 1;
   const ok = invert ? value <= target : value >= target;
   // Within a tenth of the target is a warning, not a failure.

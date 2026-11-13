@@ -100,6 +100,7 @@ Tunables (env, read on every call): `ESCALATION_OFFER_TURNS` (6, minimum 2),
 | `ura_cx_escalation_tier_total{path="offer",tier=…,trigger=…}` | `/metrics` | `priority` is a small share of `offer`; a jump after a release means a lexicon change widened the net |
 | `ura_cx_escalation_tier_total{path="ticket",…}` | `/metrics` | tracks `ura_escalation_requested_total{outcome="created"}` |
 | `ura_cx_case_events_total{domain=…,event=…}` | `/metrics` | `updated` ≥ `opened`; a large `general` share means domains are not being named |
+| `ura_ticket_refresh_failed_total` | `/metrics` | 0. A re-escalation that could not update its open ticket: the officer works from the earlier snapshot (G641); the handoff carries `ticket_refresh_failed` |
 | Ticket queue, urgent filter | `/admin/tickets` | urgent tickets carry "Prioritised: …" in the **Handoff brief** with a reason an officer agrees with |
 | Officer feedback | desk | the "Already given — do not ask again" line matches what they see in the transcript |
 
@@ -214,6 +215,12 @@ endpoint: the officer completes the action in their own system or declines it, a
   "Customs documents check", "Objection (Sec 24)" and "TIN status" insert text
   with `[[…]]` parts; the composer will not send until each is replaced with what
   the officer actually found.
+- **What the AI did** heads every case: whether the claim check ran, a withheld
+  figure, a judge revision, the judge's confidence (all labelled as a model's)
+  and the sources reviewed. "No record … read its answer as unchecked" means the
+  ticket was raised without a judge verdict (ADR-0051).
+- **A re-escalation updates the ticket**: answers given since the last snapshot
+  are appended and the priority rises if the new one is higher (G641).
 - **Hotfixes from discrepancy reports** need a statute reference for a precedence
   rule and show what they change before they apply; each write is on the audit
   trail (`staff.precedence_created`, `staff.tombstone_created`,
