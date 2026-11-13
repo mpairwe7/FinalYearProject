@@ -31,6 +31,25 @@ PYTHONPATH=App/backend python3 -m app.freshness --check
 A passing source/artifact gate does not prove a control's effectiveness against
 live adversarial traffic.
 
+## Local results — 13 November 2026
+
+Phase 1 (ADR-0047) on `fix/intelligent-ui-p1-figures-and-disclosures-2026-11`, from
+`dev` at `882a99b5`; Node 24.19.0, Bun 1.3.14 (the repository pins 1.4.3; CI uses
+the pin), Python 3.11 (`.venv`), Playwright Chromium 1248 against `next dev` on
+`127.0.0.1:3100` (`CI=1 BASE_URL=http://127.0.0.1:3100`). The laptop was on battery.
+
+| Gate | Result |
+|---|---|
+| `bun run test` | 97 files, 937 tests passed (baseline 96 / 921) |
+| `tsc --noEmit`, `bun run lint` | Passed |
+| `e2e/chat-flow.spec.ts`, chromium | 16 passed, 3 of them new (deadline stop, disclosure kept, stream abstention) |
+| `test:a11y`, every required surface | Passed; the new offline-page scan passes in light, dark and Acholi |
+| `pytest tests/` (root, one process) | 4809 passed; 1 failed (`test_workspace_hygiene…`: an empty, ignored local `.agents` directory; not in CI's checkout); 1 collection error (`test_cx_500_complex_ngrok_schema.py`: `requests` not in `.venv`) |
+| `App/backend`: `pytest tests/` (one process, `VLLM_BASE_URL=http://127.0.0.1:1/v1`) | 4169 passed, 25 skipped; 1 collection error (`test_tracing_genai.py`: `opentelemetry` not in `.venv`) |
+| `compliance_check.py`, `validate_threats.py` | Passed; STRIDE 6/6, OWASP LLM 10/10 |
+| `bun audit` | 28 findings (7 high, 17 moderate, 4 low), unchanged by this phase (G276) |
+| Mutation checks | Reverting the G620 footer or judge band, the G622 grounding fields, or the G621 deadline handling fails the new tests |
+
 ## Local results — 30 October 2026
 
 Working tree of `fix/intelligent-ui-integration-audit-2026-10` on `87460457`;
