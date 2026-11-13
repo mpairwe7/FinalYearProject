@@ -77,8 +77,8 @@ describe('DocumentInspectionModal', () => {
     expect(screen.getByText('efris_tax_invoice.pdf')).toBeDefined();
     expect(screen.getByText('Invoice')).toBeDefined();
     expect(screen.getByText('Tax invoice with 18% standard VAT calculated.')).toBeDefined();
-    expect(screen.getByText('Taxable Subtotal')).toBeDefined();
-    expect(screen.getByText('Total Payable')).toBeDefined();
+    expect(screen.getByText('Subtotal on the document')).toBeDefined();
+    expect(screen.getByText('Total on the document')).toBeDefined();
     expect(screen.getAllByText(/1,180,000/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/1009876543/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/202699887766554/).length).toBeGreaterThanOrEqual(1);
@@ -185,5 +185,42 @@ describe('DocumentInspectionModal', () => {
     // Areas are the screen's usual layout, not something found in the image.
     expect(screen.getByText(/not detected from your image/i)).toBeDefined();
     expect(screen.getByText(/Open Official Portal ↗/i)).toBeDefined();
+  });
+
+  // G624: figures read by machine from a photo or PDF are not checked by URA.
+  describe('what the reconciliation claims', () => {
+    const open = (analysis: DocumentAnalysisData) =>
+      render(
+        <DocumentInspectionModal
+          isOpen={true}
+          onClose={vi.fn()}
+          document={{ id: 'doc123', name: 'scan.pdf', analysis }}
+        />,
+      );
+
+    it('shows the extraction warnings the server sent', () => {
+      open({ ...mockAnalysis, warnings: ['Only the first 40 of 52 pages were processed.', 'OCR failed while processing page 3.'] });
+      const status = screen.getByTestId('doc-modal-warnings');
+      expect(status.getAttribute('role')).toBe('status');
+      expect(status.textContent).toContain('Only the first 40 of 52 pages were processed.');
+      expect(status.textContent).toContain('OCR failed while processing page 3.');
+    });
+
+    it('never says Verified for machine-read arithmetic, and says the figures were machine-read', () => {
+      open(mockAnalysis);
+      expect(screen.queryByText(/✓\s*Verified/)).toBeNull();
+      expect(screen.getByText('Figures add up')).toBeDefined();
+      expect(screen.getByText(/read by machine from your document/i)).toBeDefined();
+      expect(screen.queryByText('Total Payable')).toBeNull();
+    });
+
+    it('does not tick a note when the arithmetic does not add up', () => {
+      const { container } = open({
+        ...mockAnalysis,
+        taxReconciliation: { ...mockAnalysis.taxReconciliation!, status: 'discrepancy_detected', notes: ['Arithmetic discrepancy detected.'] },
+      });
+      const note = container.querySelector('.doc-modal-note-item');
+      expect(note?.getAttribute('data-tone')).toBe('warn');
+    });
   });
 });

@@ -515,6 +515,20 @@ test.describe("WCAG 2.2 AA automated route audit", () => {
     }
   });
 
+  // G618: the offline page is what a taxpayer with no connection sees. It is
+  // static HTML that follows the system colour scheme, not the app's theme.
+  test("has no serious or critical axe violations on the offline page in both colour schemes", async ({ page }) => {
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme });
+      await page.goto("/offline.html");
+      await expect(page.locator("#figuresNote")).toBeVisible();
+      await expectNoSeriousOrCritical(page, `offline page (${colorScheme})`);
+      await page.getByRole("button", { name: "Leb Acoli" }).click();
+      await expect(page.locator("html")).toHaveAttribute("lang", "ach");
+      await expectNoSeriousOrCritical(page, `offline page, Acholi (${colorScheme})`);
+    }
+  });
+
   test("has no serious or critical axe violations on every required staff surface in both themes", async ({ page }) => {
     // Twenty-eight navigations and axe passes: fourteen console routes in two
     // themes. That is inherently past the 30s default, and was already close to

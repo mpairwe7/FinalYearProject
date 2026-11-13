@@ -259,6 +259,54 @@ class RunChatTurnShortCircuitTest(unittest.TestCase):
         self.assertEqual(grounding["escalation_reason"], "confidence below threshold")
         self.assertEqual(grounding["ticket_id"], "TICK-123")
 
+    def test_an_abstention_decided_mid_stream_withdraws_the_rejected_sources(self) -> None:
+        """G622: the metadata frame sent the passages before the abstention was decided.
+
+        The grounding frame did not withdraw them or name the mode, so the chat
+        kept a "Sources" pill of the passages it had just rejected beside
+        "I'd rather connect you with the right people than guess", and, still
+        reading the mode as ``hybrid``, offered no officer. REST already returned
+        ``retrieval_mode: abstained`` with no citations.
+        """
+        from app import service
+
+        weak_hit = {"source": "ura_misc_faqs.csv", "question": "q", "answer": "unrelated text",
+                    "text": "unrelated text", "score_norm": 0.01, "score_rrf": 0.01,
+                    "score_lexical": 0.0, "chunk_id": "x1"}
+
+        class _WeakEvidenceModel:
+            name = "test_model"
+
+            def generate_retrieval_only(self, **kwargs):
+                return {
+                    "reply": "unrelated text", "sources": ["ura_misc_faqs.csv"],
+                    "citations": [{"ref": "[1]", "source": "ura_misc_faqs.csv"}],
+                    "resources": [{"title": "Form", "url": "https://ura.go.ug/form"}],
+                    "faithfulness_score": None, "retrieval_mode": "hybrid", "model": "test_model",
+                    "conversation_id": "c1", "locale": "en", "escalation_required": False,
+                    "escalation_reason": "", "agent_role": "rag_answerer", "handoff": None,
+                    "response_judge": None, "next_actions": [], "ticket_id": "",
+                    "_hits": [dict(weak_hit)], "_history": [], "_rewritten": kwargs.get("message", ""),
+                }
+
+            def _maybe_create_ticket(self, **kwargs):
+                return ""
+
+        async def _collect():
+            return [ev async for ev in service.run_chat_turn(
+                _WeakEvidenceModel(), message="something obscure", conversation_id="c1", top_k=4,
+                locale="en", session_id="s", request_id="r", user_id=None, tenant_id="default",
+            )]
+
+        events = _run_async(_collect())
+        metadata = [p for (t, p) in events if t == "metadata"]
+        self.assertTrue(metadata and metadata[0].get("citations"), "precondition: sources were sent early")
+        grounding = [p for (t, p) in events if t == "grounding"][-1]
+        self.assertEqual(grounding.get("retrieval_mode"), "abstained")
+        self.assertEqual(grounding.get("citations"), [])
+        self.assertEqual(grounding.get("sources"), [])
+        self.assertEqual(grounding.get("resources"), [])
+
 
 def _run_async(coro):
     return asyncio.run(coro)

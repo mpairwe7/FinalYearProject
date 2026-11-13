@@ -221,6 +221,15 @@ Evaluated across 16 Ugandan tax heads (`paye`, `vat`, `withholding`, `rental`, `
    not held (G364). When every model tier fails, or a graph draft is not supported by its
    passages, the reply is the closest passage found, labelled as a fallback. That can be web
    commentary if nothing official was found (G369). See [ADR-0022](adr/0022-control-integrity-turn-accounting-and-verified-release.md).
+9. **What the screen claims (2026-11-13)**: the web chat's badges follow the answer
+   judge's confidence band, not the raw faithfulness score: below `high` (the claim check
+   did not run, or a calculator or rate answer used a figure the rate table marks
+   unverified or provisional) no badge says "Well grounded" or "Official". The offline
+   page gives no tax figure. Deadline reminders are offered only for the statutory
+   monthly 15th. Document totals are labelled as read by machine. A badge still does not
+   establish that an answer is correct, and web evidence can still earn "Well grounded"
+   (G651). See [ADR-0048](adr/0048-figures-and-disclosures-the-taxpayer-sees.md) and the
+   [November UI audit](plans/intelligent-ui-integration-audit-2026-11-13.md).
 
 ---
 

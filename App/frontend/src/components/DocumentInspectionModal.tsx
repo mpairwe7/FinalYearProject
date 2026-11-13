@@ -7,6 +7,7 @@ import { useTranslation } from '../lib/i18n';
 import { useChatStore } from '../store/useChatStore';
 import { ModalDialog } from './ModalDialog';
 import {
+  AlertTriangleIcon,
   CloseIcon,
   CopyIcon,
   DownloadIcon,
@@ -227,6 +228,21 @@ export function DocumentInspectionModal({
             </section>
           )}
 
+          {/* G624: what the server could not read. Its sentences are English;
+              the lead is the reader's language. */}
+          {analysis?.warnings && analysis.warnings.length > 0 && (
+            <section className="doc-modal-section doc-modal-warnings" role="status" data-testid="doc-modal-warnings">
+              <p className="doc-modal-warnings-lead">
+                <AlertTriangleIcon /> {t('documents.warningsLead')}
+              </p>
+              <ul>
+                {analysis.warnings.map((warning, idx) => (
+                  <li key={idx}>{warning}</li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           {/* Tax Reconciliation & Audit */}
           {recon && (
             <section className="doc-modal-section doc-modal-recon-card">
@@ -235,10 +251,12 @@ export function DocumentInspectionModal({
                 <span
                   className={`doc-modal-status-badge doc-modal-status-${recon.status}`}
                 >
-                  {recon.status === 'verified' && `✓ ${t('documents.verified')}`}
+                  {/* G624: "the figures add up", never "verified": the server only
+                      checked that the amounts it read balance. */}
+                  {recon.status === 'verified' && t('documents.verified')}
                   {recon.status === 'discrepancy_detected' && `! ${t('documents.discrepancy')}`}
-                  {recon.status === 'unreconciled_partial' && 'ℹ Partial equation'}
-                  {recon.status === 'informational_only' && 'General filing'}
+                  {recon.status === 'unreconciled_partial' && t('documents.partial')}
+                  {recon.status === 'informational_only' && t('documents.informational')}
                 </span>
               </div>
 
@@ -246,7 +264,7 @@ export function DocumentInspectionModal({
                 <div className="doc-modal-recon-grid">
                   {recon.subtotal_ugx != null && (
                     <div className="doc-modal-recon-item">
-                      <span className="doc-modal-recon-label">Taxable Subtotal</span>
+                      <span className="doc-modal-recon-label">{t('documents.subtotal')}</span>
                       <span className="doc-modal-recon-val">
                         {recon.currency || 'UGX'} {recon.subtotal_ugx.toLocaleString()}
                       </span>
@@ -255,7 +273,7 @@ export function DocumentInspectionModal({
                   {recon.tax_ugx != null && (
                     <div className="doc-modal-recon-item">
                       <span className="doc-modal-recon-label">
-                        VAT / Tax {recon.effective_rate ? `(${(recon.effective_rate * 100).toFixed(1)}%)` : ''}
+                        {t('documents.tax')} {recon.effective_rate ? `(${(recon.effective_rate * 100).toFixed(1)}%)` : ''}
                       </span>
                       <span className="doc-modal-recon-val">
                         {recon.currency || 'UGX'} {recon.tax_ugx.toLocaleString()}
@@ -264,7 +282,7 @@ export function DocumentInspectionModal({
                   )}
                   {recon.total_ugx != null && (
                     <div className="doc-modal-recon-item doc-modal-recon-item-total">
-                      <span className="doc-modal-recon-label">Total Payable</span>
+                      <span className="doc-modal-recon-label">{t('documents.total')}</span>
                       <span className="doc-modal-recon-val">
                         {recon.currency || 'UGX'} {recon.total_ugx.toLocaleString()}
                       </span>
@@ -276,13 +294,19 @@ export function DocumentInspectionModal({
               {recon.notes && recon.notes.length > 0 && (
                 <ul className="doc-modal-notes-list">
                   {recon.notes.map((n, idx) => (
-                    <li key={idx} className="doc-modal-note-item">
-                      <CheckCircleIcon />
+                    <li
+                      key={idx}
+                      className="doc-modal-note-item"
+                      data-tone={recon.status === 'verified' ? 'ok' : 'warn'}
+                    >
+                      {recon.status === 'verified' ? <CheckCircleIcon /> : <AlertTriangleIcon />}
                       <span>{n}</span>
                     </li>
                   ))}
                 </ul>
               )}
+
+              <p className="doc-modal-machine-read" role="note">{t('documents.machineRead')}</p>
             </section>
           )}
 

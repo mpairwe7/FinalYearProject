@@ -31,6 +31,29 @@ describe('applyTurnMeta', () => {
     expect(applyTurnMeta(turn(), { faithfulness_score: value }).faithfulnessScore).toBeNull();
   });
 
+  // G620, G623: the judge's band decides whether a badge may say official or grounded.
+  it("takes the judge's confidence band, and lets a later frame withdraw it", () => {
+    const judged = applyTurnMeta(turn(), { response_judge: { confidence_band: 'medium', reasons: [] } });
+    expect(judged.confidenceBand).toBe('medium');
+    expect(applyTurnMeta(judged, { response_judge: null }).confidenceBand).toBeUndefined();
+    expect(applyTurnMeta(judged, { faithfulness_score: 0.9 }).confidenceBand).toBe('medium');
+    expect(applyTurnMeta(turn(), { response_judge: { confidence_band: 'certain' } }).confidenceBand).toBeUndefined();
+  });
+
+  // G622: an abstention decided mid-stream withdraws what the metadata frame sent.
+  it('clears early sources when the grounding frame abstains', () => {
+    const early = applyTurnMeta(turn(), {
+      retrieval_mode: 'hybrid',
+      citations: [{ ref: '[1]', source: 'ura_misc_faqs.csv' }],
+      resources: [{ title: 'Form', url: 'https://ura.go.ug/form' }],
+    });
+    expect(early.citations).toHaveLength(1);
+    const out = applyTurnMeta(early, { retrieval_mode: 'abstained', citations: [], resources: [], faithfulness_score: null });
+    expect(out.retrievalMode).toBe('abstained');
+    expect(out.citations).toEqual([]);
+    expect(out.resources).toEqual([]);
+  });
+
   it('drops malformed source rows and malformed inferred objectives', () => {
     const out = applyTurnMeta(turn(), {
       citations: [null, { ref: '[1]', source: 'VAT', passage: {} }],

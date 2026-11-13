@@ -5,7 +5,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-import { clearChatStore, mockBackend, seedConsent, sendMessage } from "./helpers";
+import { clearChatStore, mockBackend, seedConsent, sendMessage, sseReply } from "./helpers";
 
 test.describe("Agentic chat flow", () => {
   test.beforeEach(async ({ page }) => {
@@ -77,6 +77,61 @@ test.describe("Agentic chat flow", () => {
     await expect(reply.getByText('Well grounded')).toHaveCount(0);
     await expect(reply.getByRole('button', { name: 'Advance payment' })).toHaveCount(0);
     expect(syncRequests).toBe(0);
+  });
+
+  // G621: a turn the server stopped at its deadline is not a whole answer.
+  test("a turn stopped at its deadline is marked incomplete and offers no actions", async ({ page }) => {
+    await mockBackend(page);
+    await page.route("**/api/v1/chat/stream", (route) => route.fulfill({
+      contentType: 'text/event-stream', body: [
+        'event: metadata', 'data: {"faithfulness_score":0.99,"next_actions":["Advance payment"]}', '',
+        'event: token', 'data: Partial payment guidance', '',
+        'event: token', 'data: ', 'data: ', 'data: This is taking longer than it should, so I have stopped rather than give you a partial answer.', '',
+        'event: deadline_exceeded', 'data: {"code":"deadline_exceeded"}', '',
+        'event: done', 'data: ', '', '',
+      ].join('\n'),
+    }));
+    await page.goto('/');
+    await sendMessage(page, 'Help with payment');
+    const reply = page.locator('.message-row-assistant').last();
+    await expect(reply).toContainText('This is taking longer than it should');
+    await expect(reply.getByRole('status')).toContainText('interrupted');
+    await expect(reply.getByRole('button', { name: 'Advance payment' })).toHaveCount(0);
+    await expect(reply.getByText('Well grounded')).toHaveCount(0);
+  });
+
+  // G621: the browser's reasoning filter deleted the server's closing notices.
+  test("a failed live check is still disclosed after an opener the filter reads as reasoning", async ({ page }) => {
+    await mockBackend(page);
+    const notice = "I could not check URA's website just now, so this may not include recent changes.";
+    await page.route("**/api/v1/chat/stream", (route) => route.fulfill({
+      contentType: 'text/event-stream',
+      body: sseReply(`I can help with that.\n\nThe standard VAT rate is 18% [1].\n\n${notice}`.split('\n').join('\ndata: ')),
+    }));
+    await page.goto('/');
+    await sendMessage(page, 'What is the VAT rate now?');
+    await expect(page.locator('.message-row-assistant').last()).toContainText(notice);
+  });
+
+  // G622: an abstention decided mid-stream withdraws the passages it rejected.
+  test("a stream that abstains drops its early sources and offers an officer", async ({ page }) => {
+    await mockBackend(page);
+    await page.route("**/api/v1/chat/stream", (route) => route.fulfill({
+      contentType: 'text/event-stream', body: [
+        'event: metadata',
+        `data: ${JSON.stringify({ retrieval_mode: 'hybrid', citations: [{ ref: '[1]', source: 'ura_misc_faqs.csv' }], conversation_id: 'c-e2e' })}`, '',
+        'event: token', "data: I'd rather connect you with the right people than guess.", '',
+        'event: grounding',
+        `data: ${JSON.stringify({ faithfulness_score: null, retrieval_mode: 'abstained', citations: [], sources: [], resources: [], escalation_required: false })}`, '',
+        'event: done', 'data: ', '', '',
+      ].join('\n'),
+    }));
+    await page.goto('/');
+    await sendMessage(page, 'Something obscure');
+    const reply = page.locator('.message-row-assistant').last();
+    await expect(reply).toContainText('connect you with the right people');
+    await expect(reply.getByTestId('sources-pill')).toHaveCount(0);
+    await expect(reply.getByTestId('handoff-request')).toBeVisible();
   });
 
   test('JSON replies retain the inferred objective card and supersede old workflow controls', async ({ page }) => {
@@ -180,12 +235,12 @@ test.describe("Agentic chat flow", () => {
     await page.goto("/");
     await page.getByRole("button", { name: /Response language/ }).click();
     await page.getByRole("radio", { name: /Luganda/i }).click();
-    // Selecting closes the picker and the trigger reflects the new locale.
-    await expect(
-      page.getByRole("button", { name: "Response language: Luganda" }),
-    ).toBeVisible();
+    // Selecting closes the picker and the trigger reflects the new locale, in
+    // that locale: the label reads "Olulimi lw’okuddamu: Luganda".
+    const trigger = page.getByRole("button", { name: /: Luganda$/ });
+    await expect(trigger).toBeVisible();
     // Re-open to confirm the radio state persisted.
-    await page.getByRole("button", { name: /Response language/ }).click();
+    await trigger.click();
     await expect(page.getByRole("radio", { name: /Luganda/i })).toHaveAttribute(
       "aria-checked",
       "true",

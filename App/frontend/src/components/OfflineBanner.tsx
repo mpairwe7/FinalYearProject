@@ -42,10 +42,9 @@ export default function OfflineBanner() {
             <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
             <line x1="12" y1="20" x2="12.01" y2="20" />
           </svg>
-          <span className="offline-banner-text">
-            <strong>You are offline.</strong>{" "}
-            Cached emergency guidance and tax calculators remain functional.
-          </span>
+          {/* G618: no calculator offline. Tax figures are only given online,
+              where they are checked; the offline page lists URA's lines. */}
+          <span className="offline-banner-text">{t("common.offline_notice")}</span>
           <a
             href="/offline.html"
             className="offline-banner-link"
@@ -61,7 +60,7 @@ export default function OfflineBanner() {
               whiteSpace: "nowrap",
             }}
           >
-            {t("common.offline_calculator") || "Offline Portal"} &rarr;
+            {t("common.offline_contacts")} <span aria-hidden="true">&rarr;</span>
           </a>
         </div>
       </aside>
