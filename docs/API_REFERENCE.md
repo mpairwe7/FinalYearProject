@@ -2331,8 +2331,8 @@ languages. A `PUT` whose normalized question already has an override replaces it
 `POST /v1/admin/discrepancies/{report_id}/verify` (`ura_admin`) applies a
 taxpayer-reported correction: an override, a statutory precedence rule (told to
 the model as law that overrides retrieved passages) and tombstones on the cited
-sources. A `precedence_rule` without a `statute_reference` is 422 and nothing is
-written. `tombstone_chunk_ids` withdraws single chunks. Each write is audited
+sources. A `precedence_rule` without a `statute_reference` or a `precedence_topic`
+is 422 and nothing is written. `tombstone_chunk_ids` withdraws single chunks. Each write is audited
 (`staff.override_saved` with `replaced` and its digests, as on `PUT`,
 `staff.precedence_created` with `rule_sha256` and the statute,
 `staff.tombstone_created` with the sources and `chunk_ids`, then

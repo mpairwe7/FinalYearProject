@@ -220,6 +220,29 @@ class TestAdminEndpointsE2E(unittest.TestCase):
         tombs = self.client.get("/v1/admin/tombstones", headers=self.auth_headers).json()["tombstones"]
         self.assertFalse(any(source in t["source_uri"] for t in tombs))
 
+    def test_a_precedence_rule_needs_a_topic_and_nothing_is_written_without_one(self):
+        """CodeRabbit on PR 730: a rule with no topic was skipped while the report
+        was still marked verified, so the console's promise went unkept."""
+        run = uuid.uuid4().hex[:8]
+        rule, source = f"WHT on rent is 6% ({run}).", f"wht_{run}.pdf"
+        rep = db.create_or_increment_discrepancy(
+            bot_statement=f"WHT on rent is 10% {run}", user_correction="It is 6%", cited_sources=[source],
+        )
+        res = self.client.post(
+            f"/v1/admin/discrepancies/{rep['id']}/verify",
+            headers=self.auth_headers,
+            json={
+                "precedence_topic": "  ",
+                "precedence_rule": rule,
+                "statute_reference": "Income Tax Act, s.119",
+                "tombstone_sources": [source],
+            },
+        )
+        self.assertEqual(res.status_code, 422, res.text)
+        self.assertEqual(db.get_discrepancy(rep["id"])["status"], "pending")
+        tombs = self.client.get("/v1/admin/tombstones", headers=self.auth_headers).json()["tombstones"]
+        self.assertFalse(any(source in t["source_uri"] for t in tombs))
+
     def test_every_write_the_hotfix_makes_is_audited(self):
         """G634: the ledger recorded only the report and override ids, not the rule
         or the sources withdrawn from retrieval for every taxpayer."""

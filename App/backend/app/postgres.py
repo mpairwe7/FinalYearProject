@@ -3530,6 +3530,12 @@ def execute(sql: str, params: tuple[Any, ...] = ()) -> int:
     return _db.execute(sql, params)
 
 
+def execute_all(statements: list[tuple[str, tuple[Any, ...]]]) -> list[int]:
+    from . import database as _db
+
+    return _db.execute_all(statements)
+
+
 def execute_script(sql: str) -> None:
     from . import database as _db
 

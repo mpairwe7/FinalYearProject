@@ -147,31 +147,38 @@ def set_review(
     now = time.time()
     # G639: every decision, a reopening included, is kept. Reopen used to
     # delete the decision and its note, so a finding could vanish in a click.
-    db.execute(
+    # The history row and the change it records commit together: a failed
+    # write must not leave a decision on record that was never applied.
+    record = (
         "INSERT INTO audit_review_history (id, tenant_id, item_type, item_id, status, note, reviewer_id, "
         "reviewer_name, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (uuid.uuid4().hex, tenant, item_type, item_id, status, clean_note, reviewer_id, reviewer_name[:128], now),
     )
     if status == "open":
-        db.execute(
-            "DELETE FROM audit_reviews WHERE tenant_id = ? AND item_type = ? AND item_id = ?",
-            (tenant, item_type, item_id),
+        db.execute_all(
+            [
+                record,
+                (
+                    "DELETE FROM audit_reviews WHERE tenant_id = ? AND item_type = ? AND item_id = ?",
+                    (tenant, item_type, item_id),
+                ),
+            ]
         )
         return None
-    if get_review(item_type, item_id, tenant_id=tenant) is None:
-        try:
-            db.execute(
+    # One statement whether or not the item was decided before, so a decision
+    # made by someone else a moment ago is replaced rather than raced.
+    db.execute_all(
+        [
+            record,
+            (
                 "INSERT INTO audit_reviews (id, tenant_id, item_type, item_id, status, note, reviewer_id, "
-                "reviewer_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "reviewer_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(tenant_id, item_type, item_id) DO UPDATE SET status = excluded.status, "
+                "note = excluded.note, reviewer_id = excluded.reviewer_id, "
+                "reviewer_name = excluded.reviewer_name, updated_at = excluded.updated_at",
                 (uuid.uuid4().hex, tenant, item_type, item_id, status, clean_note, reviewer_id, reviewer_name[:128], now, now),
-            )
-            return get_review(item_type, item_id, tenant_id=tenant)
-        except Exception:
-            pass  # decided by someone else a moment ago: this decision replaces it
-    db.execute(
-        "UPDATE audit_reviews SET status = ?, note = ?, reviewer_id = ?, reviewer_name = ?, updated_at = ? "
-        "WHERE tenant_id = ? AND item_type = ? AND item_id = ?",
-        (status, clean_note, reviewer_id, reviewer_name[:128], now, tenant, item_type, item_id),
+            ),
+        ]
     )
     return get_review(item_type, item_id, tenant_id=tenant)
 

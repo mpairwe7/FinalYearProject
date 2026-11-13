@@ -168,6 +168,24 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(history[0]["note"], "Officer promised a refund date")
         self.assertEqual(history[0]["reviewer_name"], "Auditor Old")
 
+    def test_a_decision_that_fails_to_apply_leaves_no_history(self):
+        """CodeRabbit on PR 730: the history row committed before the review
+        write ran, so a failed write left a decision on record that was never
+        applied. Both now commit together or not at all."""
+        low = _rating("call_officer_csat", score=2)
+        audit_reviews.set_review("rating", low["id"], status="action_needed", note="first", reviewer_name="A")
+        real = db.execute_all
+
+        def failing(statements):
+            return real([*statements, ("INSERT INTO no_such_table_g639 VALUES (1)", ())])
+
+        for status in ("reviewed", "open"):
+            with self.subTest(status=status), patch.object(db, "execute_all", side_effect=failing):
+                with self.assertRaises(Exception):
+                    audit_reviews.set_review("rating", low["id"], status=status, note="second", reviewer_name="B")
+            self.assertEqual([h["status"] for h in audit_reviews.history("rating", low["id"])], ["action_needed"])
+            self.assertEqual(audit_reviews.get_review("rating", low["id"])["note"], "first")
+
     def test_the_history_goes_when_its_item_does(self):
         low = _rating("chat_officer_csat", score=1)
         audit_reviews.set_review("rating", low["id"], status="reviewed", note="ok")

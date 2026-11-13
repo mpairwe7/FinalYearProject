@@ -91,11 +91,12 @@ function HotfixSummary({
       </li>,
     );
   }
-  if (precedenceRule.trim()) {
+  // The API saves a rule only with its topic, so only then is one promised.
+  if (precedenceRule.trim() && precedenceTopic.trim()) {
     lines.push(
       <li key="rule">
-        The model will be told, as law that overrides the passages it retrieves
-        {precedenceTopic.trim() ? ` (${precedenceTopic.trim()})` : ""}: “{precedenceRule.trim()}”
+        The model will be told, as law that overrides the passages it retrieves ({precedenceTopic.trim()}): “
+        {precedenceRule.trim()}”
         {statuteRef.trim() ? ` — ${statuteRef.trim()}` : " — no statute named yet"}
       </li>,
     );
@@ -501,6 +502,11 @@ export function DiscrepanciesWorkbench({ who }: { who?: StaffIdentity }) {
                         Name the statute this rule comes from before applying it.
                       </p>
                     ) : null}
+                    {precedenceRule.trim() && !precedenceTopic.trim() ? (
+                      <p className="disc-field-error" role="status">
+                        Name the topic this rule is about before applying it.
+                      </p>
+                    ) : null}
                     <HotfixSummary
                       overrideQuery={overrideQuery}
                       overrideReply={overrideReply}
@@ -514,7 +520,10 @@ export function DiscrepanciesWorkbench({ who }: { who?: StaffIdentity }) {
                         type="button"
                         className="ops-btn is-primary is-sm"
                         onClick={() => handleConfirmVerify(d)}
-                        disabled={verifyMutation.isPending || Boolean(precedenceRule.trim() && !statuteRef.trim())}
+                        disabled={
+                          verifyMutation.isPending ||
+                          Boolean(precedenceRule.trim() && (!statuteRef.trim() || !precedenceTopic.trim()))
+                        }
                       >
                         {verifyMutation.isPending ? "Applying..." : "Confirm & Apply Hotfixes"}
                       </button>

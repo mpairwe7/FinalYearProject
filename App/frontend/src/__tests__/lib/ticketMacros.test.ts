@@ -36,6 +36,14 @@ describe("ticketMacros", () => {
     }
   });
 
+  // CodeRabbit on PR 730: an officer who empties a part but leaves its
+  // brackets has still not written it.
+  it("counts an emptied part as unfilled", () => {
+    expect(unfilledPlaceholders("I checked invoice [[]] on EFRIS.")).toEqual(["[[ ]]"]);
+    expect(unfilledPlaceholders("I checked invoice [[  ]] on EFRIS.")).toEqual(["[[ ]]"]);
+    expect(unfilledPlaceholders("Reference [CASE-1] is open.")).toEqual([]);
+  });
+
   it("does not ask for an upload the officer chat cannot take", () => {
     const body = TICKET_MACROS.find((m) => m.id === "request_document")!.body;
     expect(body).not.toMatch(/in this chat|automated document inspection|attach/i);

@@ -1,13 +1,14 @@
 /** Catalog canned replies for the staff composer. Staff-facing only. */
 
-const PLACEHOLDER = /\[\[([^\]]+)\]\]/g;
+// Empty brackets count: an emptied part has still not been written.
+const PLACEHOLDER = /\[\[([^\]]*)\]\]/g;
 
 /**
  * The parts of a reply still to fill in: text in [[double brackets]] (G636).
  * The case-reference chip's single brackets are not a placeholder.
  */
 export function unfilledPlaceholders(text: string): string[] {
-  return Array.from(text.matchAll(PLACEHOLDER), (match) => match[1].trim());
+  return Array.from(text.matchAll(PLACEHOLDER), (match) => match[1].trim() || "[[ ]]");
 }
 
 export interface TicketMacro {

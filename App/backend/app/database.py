@@ -296,6 +296,37 @@ def execute(sql: str, params: tuple[Any, ...] = ()) -> int:
     return affected
 
 
+def execute_all(statements: list[tuple[str, tuple[Any, ...]]]) -> list[int]:
+    """Run several writes as one transaction: all commit, or none do.
+
+    ``execute`` commits each call, so two writes that must agree (a record
+    and the change it records) could land half-done. Every statement here
+    runs on one connection and commits once; any failure rolls all of them
+    back. Nothing in it opens a second connection, so it cannot wait on the
+    pool or on its own SQLite write lock. Returns each statement's row count.
+    """
+    pg = _pg_module()
+    if pg is None:
+        conn = _get_connection()
+        try:
+            counts = [conn.execute(sql, params).rowcount for sql, params in statements]
+            conn.commit()
+            return counts
+        except Exception:
+            conn.rollback()
+            raise
+    pool = pg._get_pool()
+    # psycopg_pool rolls back a connection returned with an exception.
+    with pool.connection() as conn:
+        counts = []
+        with conn.cursor() as cur:
+            for sql, params in statements:
+                cur.execute(_to_pg_placeholders(sql), params)
+                counts.append(cur.rowcount)
+        conn.commit()
+    return counts
+
+
 def execute_script(sql: str) -> None:
     """Run a multi-statement DDL script (schema bootstrap).
 

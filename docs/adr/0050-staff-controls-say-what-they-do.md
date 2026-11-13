@@ -50,8 +50,8 @@ server. Another client can send `officer_reply_localized` too. Chosen: both.
 ## Decision Outcome
 
 1. **Verify & Hotfix** starts empty with nothing withdrawn; a precedence rule needs
-   a statute reference (the console disables Confirm; the API answers 422 before
-   writing anything); a summary says what the hotfix will change for every
+   a statute reference and a topic (the console disables Confirm; the API answers
+   422 before writing anything); a summary says what the hotfix will change for every
    taxpayer before it is applied. The API audits the override (with what it
    replaced, as the override route does), the precedence (`rule_sha256`, statute)
    and the tombstones (sources and chunk ids), and retires cached answers as the
@@ -67,8 +67,10 @@ server. Another client can send `officer_reply_localized` too. Chosen: both.
    after its figure check passed; an edit, even one made while the translation is
    on its way, drops it; an unavailable translation says so.
 3. **Canned results are templates.** Their `[[…]]` parts are what the officer
-   found; Send, Send & end and End chat are disabled while any remain
-   (`unfilledPlaceholders`). The document request names email or a station.
+   found; Send, Send & end and End chat are disabled while any remain, an emptied
+   `[[]]` included (`unfilledPlaceholders`). The composer does not verify what the
+   officer writes in them or record that a check was made. The document request
+   names email or a station.
 4. **The overrides console tells the truth.** It shows the normalized key, explains
    rewritten and translated matching, and shows the live answer a save replaces,
    with "Replace the live answer" on the button; the ledger records `replaced`
@@ -81,7 +83,8 @@ server. Another client can send `officer_reply_localized` too. Chosen: both.
    `spoken_figure_guard`, `action_level_audit_v3`, `guardrail_strike_friction`,
    `verifiable_decision_receipts`, `autonomous_outcome_verification`).
 6. **Review decisions are kept.** Every decision, a reopening included, is appended
-   to `audit_review_history` (purged by the same rules as the decision), and a
+   to `audit_review_history` (purged by the same rules as the decision) in the same
+   transaction as the change it records (`database.execute_all`), and a
    decision stored before the table existed is copied in once as its item's first
    entry; the queue returns it; Reopen asks first and earlier decisions are shown,
    on a decided item behind "Earlier decisions".
@@ -106,12 +109,13 @@ server. Another client can send `officer_reply_localized` too. Chosen: both.
 Each test was watched failing before the fix; for G635 the server checks were
 also disabled after they passed and the tests failed again:
 
-- `App/backend/tests/test_discrepancy_and_precedence.py`: a rule without a statute is
-  422 and writes nothing; every hotfix write is audited and the cache is retired; a
+- `App/backend/tests/test_discrepancy_and_precedence.py`: a rule without a statute, or
+  without a topic, is 422 and writes nothing; every hotfix write is audited and the cache is retired; a
   chunk-only hotfix is audited and retires the cache; a hotfix that replaces a live
   override records `replaced` and both digests.
 - `App/frontend/src/__tests__/app/admin/DiscrepanciesAdmin.test.tsx`: empty fields,
-  nothing withdrawn, the statute gate and the change summary.
+  nothing withdrawn, the statute and topic gates, and a change summary that promises
+  a rule only when it will be saved.
 - `App/backend/tests/test_officer_chat.py`: a supplied reply or closing translation
   that lost a figure is replaced; one that kept them is used; one changed amount of
   four, an added amount or an added rate fails the check; a Luganda rate without a
@@ -120,13 +124,15 @@ also disabled after they passed and the tests failed again:
   preview is sent, nor shown when the text changed while it was on its way; an
   unavailable translation is not called verified; a template with unfilled parts
   cannot be sent.
-- `App/frontend/src/__tests__/lib/ticketMacros.test.ts`: no macro states a result.
+- `App/frontend/src/__tests__/lib/ticketMacros.test.ts`: no macro states a result
+  without a part to fill in; an emptied `[[]]` counts as unfilled.
 - `App/backend/tests/test_override_replacement_audit.py`,
   `App/frontend/src/__tests__/app/adminOverrides.test.tsx`.
 - `App/backend/tests/test_flag_override_durability.py`,
   `App/frontend/src/__tests__/app/adminFlags.test.tsx` (switching off and resetting
   an enabled safety control both ask, with the reach the page note states).
 - `App/backend/tests/test_audit_reviews.py` (including a decision stored before the
-  history table, backfilled once),
+  history table, backfilled once, and a decision whose write fails leaving no
+  history), `tests/agents/test_backend_shim.py` (`execute_all` commits all or none),
   `App/frontend/src/__tests__/components/ReviewControl.test.tsx` (earlier decisions
   stay readable on a decided item).

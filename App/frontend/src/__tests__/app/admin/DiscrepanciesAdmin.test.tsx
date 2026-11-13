@@ -144,6 +144,7 @@ describe("DiscrepanciesWorkbench (/admin/discrepancies)", () => {
     expect(screen.getByRole("button", { name: /Confirm & Apply Hotfixes/i })).toBeDisabled();
     expect(screen.getByText(/Name the statute/i)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/Statute Reference/i), { target: { value: "Income Tax Act, Second Schedule" } });
+    fireEvent.change(screen.getByLabelText(/Precedence Topic/i), { target: { value: "Presumptive tax" } });
     fireEvent.click(withdraw);
     expect(summary).toHaveTextContent(/The model will be told, as law that overrides the passages it retrieves/i);
     expect(summary).toHaveTextContent("Presumptive tax follows the Second Schedule brackets.");
@@ -156,6 +157,31 @@ describe("DiscrepanciesWorkbench (/admin/discrepancies)", () => {
         expect.objectContaining({ statute_reference: "Income Tax Act, Second Schedule", tombstone_sources: ["income_tax_act.pdf"] }),
       ),
     );
+  });
+
+  // CodeRabbit on PR 730: the API saves a rule only with a topic, so a rule
+  // with none was dropped while the report was marked verified.
+  it("needs a topic for a rule, and promises no rule without one", async () => {
+    const verify = vi.spyOn(analyticsApi, "verifyDiscrepancy").mockResolvedValue({ ok: true } as never);
+    render(
+      <DiscrepanciesWorkbench who={{ authenticated: true, role: "ura_admin", email: "admin@ura.go.ug" }} />,
+      { wrapper },
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /Verify & Hotfix/i }));
+    // The topic starts as the report's type; the administrator clears it.
+    fireEvent.change(screen.getByLabelText(/Precedence Topic/i), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText(/Precedence Rule Statement/i), { target: { value: "WHT on rent is 6%." } });
+    fireEvent.change(screen.getByLabelText(/Statute Reference/i), { target: { value: "Income Tax Act, s.119" } });
+    const confirm = screen.getByRole("button", { name: /Confirm & Apply Hotfixes/i });
+    expect(confirm).toBeDisabled();
+    expect(screen.getByText(/Name the topic this rule is about/i)).toBeInTheDocument();
+    const summary = screen.getByRole("region", { name: /What this will change/i });
+    expect(summary).not.toHaveTextContent(/The model will be told/i);
+    fireEvent.click(confirm);
+    expect(verify).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText(/Precedence Topic/i), { target: { value: "WHT on rent" } });
+    expect(confirm).toBeEnabled();
+    expect(summary).toHaveTextContent(/The model will be told/i);
   });
 
   it("withdraws no source unless asked", async () => {

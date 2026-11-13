@@ -4432,6 +4432,10 @@ def verify_discrepancy_endpoint(
             status_code=422,
             detail="a precedence rule needs the statute reference it comes from",
         )
+    # A rule is saved only with its topic; without one it was skipped while the
+    # report was still marked verified, so refuse it instead.
+    if str(body.get("precedence_rule") or "").strip() and not str(body.get("precedence_topic") or "").strip():
+        raise HTTPException(status_code=422, detail="a precedence rule needs the topic it is about")
 
     # Optional 1-Click Answer Override
     if body.get("create_override"):
