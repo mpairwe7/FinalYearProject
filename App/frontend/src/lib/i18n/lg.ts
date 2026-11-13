@@ -247,7 +247,7 @@ export const lg: Partial<Dictionary> = {
   'deadline.title': '{tax}: okuwaayo n’okusasula kwa buli mwezi',
   'deadline.titleGeneric': 'Okuwaayo n’okusasula kwa buli mwezi',
   'deadline.due': 'Olunaku olusembayo: {date}',
-  'deadline.note': 'Kino kya mwezi ogwakaggwa. Buuza URA singa ekiseera kyo kya njawulo.',
+  'deadline.note': 'Kino kya mwezi ogusooka olunaku olusembayo. Buuza URA singa ekiseera kyo kya njawulo.',
   'deadline.ics': 'Teeka ku kalenda (.ics)',
   'deadline.google': 'Google Calendar',
   'sources.groupForms': 'Foomu n’empeereza',

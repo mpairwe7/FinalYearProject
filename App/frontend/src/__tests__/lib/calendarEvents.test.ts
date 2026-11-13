@@ -37,6 +37,26 @@ describe('calendarEvents', () => {
     expect(detectDeadlineInMessage('PAYE was introduced on the 15th anniversary of the Act.')).toBeNull();
   });
 
+  // CodeRabbit on PR 727: the head, the 15th and the monthly rule must be one
+  // affirmative statement, and a stated period is not replaced by the next 15th.
+  it('needs the head, the 15th and the monthly rule in one affirmative sentence', () => {
+    expect(
+      detectDeadlineInMessage('VAT is due at month-end. Your appeal hearing is on the 15th of next month.'),
+    ).toBeNull();
+    expect(detectDeadlineInMessage('VAT is not due on the 15th of every month.')).toBeNull();
+    expect(detectDeadlineInMessage("PAYE isn't paid by the 15th of the following month for casual workers.")).toBeNull();
+  });
+
+  it('does not guess when the sentence names its period', () => {
+    expect(
+      detectDeadlineInMessage('The November VAT return is due by the 15th of the following month.', new Date(2026, 10, 3)),
+    ).toBeNull();
+    expect(detectDeadlineInMessage('PAYE for FY2026/27 is due by the 15th of the following month.')).toBeNull();
+    expect(detectDeadlineInMessage('The VAT return for May is due by the 15th of the following month.')).toBeNull();
+    // "may" the verb is not a period.
+    expect(detectDeadlineInMessage('PAYE may be paid by the 15th of the following month.')?.taxHead).toBe('PAYE');
+  });
+
   it('does not pick one head when the answer names several', () => {
     const due = detectDeadlineInMessage('PAYE and VAT returns are due by the 15th of the following month.', new Date(2026, 0, 2));
     expect(due?.taxHead).toBeNull();

@@ -275,7 +275,13 @@ function ChatMessageInner({
   }, [isAssistant, isGreeting, wholeAnswer, turn.content, t]);
   // G620, G623: below the judge's `high`, no badge calls the answer official or
   // grounded. An answer with no judge keeps the score's own reading.
-  const judgeDoubts = turn.confidenceBand === 'medium' || turn.confidenceBand === 'low';
+  // A turn restored from history saved before bands were kept has none, and
+  // whether it carried an unconfirmed figure cannot be known: treat it as
+  // unconfirmed rather than official (CodeRabbit, PR 727).
+  const judgeDoubts =
+    turn.confidenceBand === 'medium' ||
+    turn.confidenceBand === 'low' ||
+    (turn.restored === true && turn.confidenceBand === undefined);
 
   return (
     <article className={`message-row message-row-${turn.role}${isOfficerReply ? ' message-row-officer' : ''}`}>

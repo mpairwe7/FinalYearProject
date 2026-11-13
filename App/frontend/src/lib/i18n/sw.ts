@@ -245,7 +245,7 @@ export const sw: Partial<Dictionary> = {
   'deadline.title': '{tax}: ritani na malipo ya kila mwezi',
   'deadline.titleGeneric': 'Ritani na malipo ya kila mwezi',
   'deadline.due': 'Tarehe ya mwisho: {date}',
-  'deadline.note': 'Hii ni kwa mwezi uliopita. Thibitisha na URA ikiwa kipindi chako ni tofauti.',
+  'deadline.note': 'Hii ni kwa mwezi uliotangulia tarehe ya mwisho. Thibitisha na URA ikiwa kipindi chako ni tofauti.',
   'deadline.ics': 'Ongeza kwenye kalenda (.ics)',
   'deadline.google': 'Google Calendar',
   'sources.groupForms': 'Fomu na huduma',

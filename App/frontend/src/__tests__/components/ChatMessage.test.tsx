@@ -449,6 +449,15 @@ describe("ChatMessage — what the answer's badges and reminders claim", () => {
     expect(screen.getByText(/Rate not yet confirmed/)).toBeInTheDocument();
   });
 
+  it("does not call a restored calculation official when history kept no band", () => {
+    const { unmount } = renderMsg({ ...assistantTurn, faithfulnessScore: null, retrievalMode: "calculator", restored: true });
+    expect(screen.queryByText(/Official Statutory Calculator/)).toBeNull();
+    expect(screen.getByText(/Rate not yet confirmed/)).toBeInTheDocument();
+    unmount();
+    renderMsg({ ...assistantTurn, faithfulnessScore: null, retrievalMode: "calculator", restored: true, confidenceBand: "high" });
+    expect(screen.getByText(/Official Statutory Calculator/)).toBeInTheDocument();
+  });
+
   it("calls a fully confirmed calculation official", () => {
     renderMsg({ ...assistantTurn, faithfulnessScore: null, retrievalMode: "calculator", confidenceBand: "high" });
     expect(screen.getByText(/Official Statutory Calculator/)).toBeInTheDocument();

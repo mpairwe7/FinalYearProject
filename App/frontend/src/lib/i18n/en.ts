@@ -276,7 +276,7 @@ export const en = {
   'deadline.title': '{tax}: monthly return and payment',
   'deadline.titleGeneric': 'Monthly return and payment',
   'deadline.due': 'Due {date}',
-  'deadline.note': 'For the month just ended. Check with URA if your filing period differs.',
+  'deadline.note': 'For the month before the due date. Check with URA if your filing period differs.',
   'deadline.ics': 'Add to calendar (.ics)',
   'deadline.google': 'Google Calendar',
   'sources.published': 'Published {date}',

@@ -242,7 +242,7 @@ export const ach: Partial<Dictionary> = {
   'deadline.title': '{tax}: miyo ripot ki culo me dwe ki dwe',
   'deadline.titleGeneric': 'Miyo ripot ki culo me dwe ki dwe',
   'deadline.due': 'Nino me agikki: {date}',
-  'deadline.note': 'Man pi dwe ma okato. Penyo URA ka kare ni pe rom.',
+  'deadline.note': 'Man pi dwe ma okato nino me agikki. Penyo URA ka kare ni pe rom.',
   'deadline.ics': 'Med i kalenda (.ics)',
   'deadline.google': 'Google Calendar',
 

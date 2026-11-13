@@ -41,7 +41,7 @@ FastAPI serves responses using `starlette.middleware.gzip.GZipMiddleware(minimum
 
 ### 3.1 Hand-Rolled PWA Service Worker (`sw.js` v8)
 * Caches core app shell (`/`, `/manifest.json`, `/favicon.svg`, icons) and `offline.html` on install.
-* Serves `offline.html` on network failure for same-origin document navigations; never touches `/api/*` or cross-origin requests, so it cannot serve a stale AI answer or rate.
+* A same-origin GET outside `/api/*` that fails on the network gets its cached copy if there is one; otherwise a page navigation (`request.mode === "navigate"`) gets `offline.html` and any other request fails as a network error, so a `fetch()` for data never receives HTML (`serviceWorkerOffline.test.ts`). It never touches `/api/*` or cross-origin requests, so it cannot serve a stale AI answer or rate.
 * Implements navigation preload (`registration.navigationPreload.enable()`) to prevent cold-start latency penalties.
 * The cache is named after the offline page's content: `CACHE_NAME = ura-v8-${OFFLINE_PAGE_REV}`, where `OFFLINE_PAGE_REV` is the first 12 hex digits of `sha256(public/offline.html)`. Activation deletes every other cache, so a changed page replaces the copy a phone installed earlier. **Whenever you edit `offline.html`, update `OFFLINE_PAGE_REV`**:
   ```bash

@@ -124,6 +124,14 @@ const MONTHLY_HEADS: ReadonlyArray<[MonthlyTaxHead, RegExp]> = [
   ['Excise', /\bexcise\b/],
 ];
 
+/** A statement that the rule does not apply. */
+const NEGATION = /\b(?:not|no longer|never|isn't|aren't|doesn't|don't|exempt)\b/;
+/** A sentence that names the period it is about: a month, a year or a fiscal year. */
+const NAMED_PERIOD =
+  /\b(?:january|february|march|april|june|july|august|september|october|november|december|fy\s?\d{2,4}|20\d\d)\b/i;
+/** "May" the month, not "may" the verb: only capitalised mid-sentence. */
+const MAY_MONTH = /(?<=\S\s+)May\b|\bMay\s+(?:return|20\d\d|\d{1,2}\b)/;
+
 /**
  * The monthly 15th deadline an answer states, if it states one (G619).
  *
@@ -135,10 +143,24 @@ const MONTHLY_HEADS: ReadonlyArray<[MonthlyTaxHead, RegExp]> = [
  */
 export function detectDeadlineInMessage(content: string, now: Date = new Date()): MonthlyDeadline | null {
   if (!content) return null;
-  const text = content.toLowerCase();
-  if (!/\b15th\b/.test(text) || !/\b(?:following|next|each|every) month\b/.test(text)) return null;
-  const heads = MONTHLY_HEADS.filter(([, rx]) => rx.test(text)).map(([head]) => head);
-  if (!heads.length) return null;
+  // One statement must carry the whole rule: a head, "the 15th" and a monthly
+  // recurrence, affirmatively. Two clauses that each carry part of it ("VAT is
+  // due at month-end. Your hearing is on the 15th of next month.") are not it.
+  const sentences = content.split(/(?<=[.!?;])\s+|\n+/);
+  const heads = new Set<MonthlyTaxHead>();
+  for (const original of sentences) {
+    const sentence = original.toLowerCase();
+    if (!/\b15th\b/.test(sentence) || !/\b(?:following|next|each|every) month\b/.test(sentence)) continue;
+    if (NEGATION.test(sentence)) continue;
+    // A sentence naming its own period ("the November return", "FY2026/27")
+    // has a date the next 15th may not be. Say nothing rather than guess.
+    if (NAMED_PERIOD.test(sentence) || MAY_MONTH.test(original)) return null;
+    for (const [head, rx] of MONTHLY_HEADS) if (rx.test(sentence)) heads.add(head);
+  }
+  if (!heads.size) return null;
   const month = now.getDate() > 15 ? now.getMonth() + 1 : now.getMonth();
-  return { taxHead: heads.length === 1 ? heads[0] : null, due: new Date(now.getFullYear(), month, 15, 9, 0, 0) };
+  return {
+    taxHead: heads.size === 1 ? [...heads][0] : null,
+    due: new Date(now.getFullYear(), month, 15, 9, 0, 0),
+  };
 }

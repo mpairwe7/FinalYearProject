@@ -105,7 +105,12 @@ self.addEventListener('fetch', (event) => {
         return resp;
       } catch {
         const cached = await caches.match(event.request);
-        return cached || (await caches.match(OFFLINE_PAGE));
+        if (cached) return cached;
+        // Only a page navigation can be answered with a page. A fetch() for
+        // data that got /offline.html would read HTML where it expected JSON;
+        // it fails as a network error instead.
+        if (event.request.mode === 'navigate') return (await caches.match(OFFLINE_PAGE)) || Response.error();
+        return Response.error();
       }
     })()
   );

@@ -242,7 +242,7 @@ export const nyn: Partial<Dictionary> = {
   'deadline.title': '{tax}: okuha ripooti n’okushashura buri kwezi',
   'deadline.titleGeneric': 'Okuha ripooti n’okushashura buri kwezi',
   'deadline.due': 'Eizooba rya hamuheru: {date}',
-  'deadline.note': 'Eki n’eky’okwezi okuheire. Buuza URA obwire bwawe ku buri butari bumwe.',
+  'deadline.note': 'Eki n’eky’okwezi okubanza eizooba rya hamuheru. Buuza URA obwire bwawe ku buri butari bumwe.',
   'deadline.ics': 'Ta aha kalenda (.ics)',
   'deadline.google': 'Google Calendar',
 
