@@ -40,7 +40,8 @@ caller over `wss://<space>/api/v1/calls/stream`:
    (`PUT /v1/admin/officers/me/presence {"status": "available"}`).
 2. **Start the call.** The caller sends `call_start`, waits about 4 s into the greeting,
    then sends `request_officer`. The caller should get the AI's `interrupt` and the
-   handoff line at once, then `status: transferring` and `queue`.
+   handoff line at once, and `status: transferring` and `queue` within about a
+   second (G659), not after the line.
 3. **Take the call.** The officer claims it (`POST /v1/admin/calls/{id}/claim`), opens
    `/api/v1/admin/calls/{id}/audio`, sends `authenticate`, and stays on for 30 s or more.
    The caller should get `status: bridged`, then no AI audio, no caption from the AI, and
@@ -53,6 +54,11 @@ caller over `wss://<space>/api/v1/calls/stream`:
    should read `ended` / `officer_ended`.
 5. **Save the wrap-up** (`POST /v1/admin/calls/{id}/wrapup`) so the officer is available
    again.
+6. **Optionally, drop the officer.** Steps 4 and 5 ended their calls, so start a
+   new call and bridge it as in steps 2 and 3. Then close the officer's audio socket
+   without a hang-up. After the reconnect grace (30 s) the caller should get
+   `status: transferring` and, at once, `queue` (G659), then the AI's hold line
+   about 30 s later; the officer owes a wrap-up.
 
 ### Assurance update — 2026-11-13, sessions can be revoked (ADR-0053)
 

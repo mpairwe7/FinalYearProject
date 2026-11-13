@@ -747,7 +747,7 @@ def _start_countdown(room: CallRoom) -> None:
     silence until the call's ceiling (G179).
     """
     if room.brain is not None:
-        room.brain.start_queue_countdown(room.state.ticket_id or "")
+        room.brain.start_queue_countdown(room.state.ticket_id or "", announce=True)
 
 
 def _start_hold_reassurance(room: CallRoom, speech_model: Any) -> None:

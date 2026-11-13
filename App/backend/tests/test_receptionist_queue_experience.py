@@ -75,7 +75,7 @@ class QueueCase(unittest.IsolatedAsyncioTestCase):
         return [
             c.args[0].message.get("status")
             for c in self.brain.push_frame.call_args_list
-            if c.args[0].__class__.__name__ == "OutputTransportMessageFrame"
+            if c.args[0].__class__.__name__ in ("OutputTransportMessageFrame", "OutputTransportMessageUrgentFrame")
             and isinstance(c.args[0].message, dict)
             and c.args[0].message.get("type") == "status"
         ]
@@ -85,7 +85,7 @@ class QueueCase(unittest.IsolatedAsyncioTestCase):
         return [
             c.args[0].message["position"]
             for c in self.brain.push_frame.call_args_list
-            if c.args[0].__class__.__name__ == "OutputTransportMessageFrame"
+            if c.args[0].__class__.__name__ in ("OutputTransportMessageFrame", "OutputTransportMessageUrgentFrame")
             and isinstance(c.args[0].message, dict)
             and c.args[0].message.get("type") == "queue"
         ]

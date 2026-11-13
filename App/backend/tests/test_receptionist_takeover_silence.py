@@ -358,7 +358,7 @@ class BrainCase(unittest.IsolatedAsyncioTestCase):
     def messages(self, kind: str) -> list[dict]:
         return [
             f.message for f in self.pushed()
-            if f.__class__.__name__ == "OutputTransportMessageFrame"
+            if f.__class__.__name__ in ("OutputTransportMessageFrame", "OutputTransportMessageUrgentFrame")
             and isinstance(f.message, dict) and f.message.get("type") == kind
         ]
 
@@ -419,6 +419,44 @@ class AskingForAnOfficerInterruptsTests(BrainCase):
         await self.brain.process_frame(RequestOfficerFrame())
 
         self.assertEqual(self.pushed(), [])
+
+
+class WaitingScreenAtOnceTests(BrainCase):
+    """G659: what the waiting caller's screen shows arrives at once, not behind a spoken line."""
+
+    def urgent(self, kind: str) -> list[dict]:
+        return [
+            f.message for f in self.pushed()
+            if f.__class__.__name__ == "OutputTransportMessageUrgentFrame"
+            and isinstance(f.message, dict) and f.message.get("type") == kind
+        ]
+
+    async def test_the_waiting_status_and_place_do_not_wait_behind_the_handoff_line(self):
+        # Sent as ordinary messages they queued behind the line's audio: live,
+        # the status and the ticket reference reached the screen 5 s after the
+        # request, and a spoken request had no waiting screen until then.
+        await self.brain.process_frame(RequestOfficerFrame())
+
+        self.assertIn("transferring", [m.get("status") for m in self.urgent("status")])
+        self.assertEqual([m["position"] for m in self.urgent("queue")], [1])
+
+    async def test_a_caller_put_back_in_the_queue_is_shown_their_place_at_once(self):
+        # An officer dropped or passed the call on: the desk restarts the
+        # countdown, which showed a place only when it changed, so a caller
+        # alone in the queue was never shown one.
+        self.state.mode = "transferring"
+
+        desk._start_countdown(self.room)
+        await asyncio.sleep(0.05)
+
+        self.assertEqual([m["position"] for m in self.urgent("queue")], [1])
+
+    async def test_the_ais_own_transfer_shows_the_place_once(self):
+        with patch.dict("os.environ", {"RECEPTIONIST_HOLD_UPDATE_S": "0.05"}):
+            await self.brain.process_frame(RequestOfficerFrame())
+            await asyncio.sleep(0.12)
+
+        self.assertEqual([m["position"] for m in self.messages("queue")], [1])
 
 
 class FakeTask:
@@ -624,6 +662,19 @@ class RealOutputTransportTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(self.socket.audio, [])
         self.assertEqual(self.waiting_screen(), [])
+
+    async def test_an_urgent_status_reaches_the_caller_while_queued_speech_still_plays(self):
+        # G659: why the waiting status is sent urgent. Pipecat writes an urgent
+        # message at once; an ordinary one waits for the audio queued before it.
+        from pipecat.frames.frames import OutputTransportMessageUrgentFrame as Urgent
+
+        frames = [OutputAudioRawFrame(PCM_40MS, 16000, 1) for _ in range(50)]  # 2 s
+        await self.task.queue_frames(frames)
+        await self.until(lambda: len(self.socket.audio) >= 3)
+        await self.task.queue_frame(Urgent(message={"type": "status", "status": "transferring"}))
+
+        await self.until(lambda: len(self.waiting_screen()) == 1, timeout=1.0)
+        self.assertLess(len(self.socket.audio), 40)
 
     async def test_the_gate_holds_the_ais_replies_once_the_call_is_bridged_or_ended(self):
         # Review of PR 732: on LiveKit nothing behind the gate holds the AI

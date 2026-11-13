@@ -300,6 +300,17 @@ Left open by this phase:
 - **A mistyped id** given to the revoke route is still taken as a `sub` (200); the
   answer shows what was revoked.
 
+## Phase 9 part B — what the waiting caller sees, on time
+
+Found verifying phase 9 live on the Space (2026-11-13). [ADR-0055](../adr/0055-officer-takeover-silences-the-ai.md), amended. Tests: `App/backend/tests/test_receptionist_takeover_silence.py` (`WaitingScreenAtOnceTests`, and Pipecat's urgent-message ordering), `App/backend/tests/test_receptionist_pipeline_wiring.py`.
+
+| Gap | What changed |
+| --- | --- |
+| G659 | The waiting status and every queue place are urgent transport messages, written at once rather than after the AI's queued speech; a caller the desk puts back in the queue is shown their place at once. |
+| G660 | The STT and TTS services set every Pipecat setting (`model=None`), so a call no longer logs two ERROR lines. |
+
+Left open: caching the officer's joining line to shorten claim-to-bridged waits until the Sunbird accounts are restored; the fallback voice dominates that time today.
+
 ## Not in scope
 
 Needs staging, real callers or an owner's decision: self-hosted token replay
