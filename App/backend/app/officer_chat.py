@@ -321,10 +321,12 @@ def end_chat(
     ticket_id = str(ticket["id"])
     now = time.time()
     if closing_message.strip():
+        # An empty translation clears the stored one: it is of an earlier
+        # message, and must not be shown beside this one.
         db.update_ticket(
             ticket_id,
             officer_reply=closing_message,
-            officer_reply_localized=closing_localized or None,
+            officer_reply_localized=closing_localized or "",
         )
         append_message(
             ticket,

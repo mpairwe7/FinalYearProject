@@ -2205,31 +2205,43 @@ def upsert_answer_override(
     if pool is None or not key:
         return {}
     now = time.time()
-    previous_reply = ""
-    with pool.connection() as conn, conn.cursor() as cur:
-        # FOR UPDATE: the reply read here is the one this write replaces, even
-        # with another save of the same question in flight (G637).
-        cur.execute("SELECT id, reply FROM answer_overrides WHERE match_query = %s FOR UPDATE", (key,))
-        existing = cur.fetchone()
-        if existing:
-            oid = str(existing[0])
-            previous_reply = str(existing[1] or "")
-            cur.execute(
-                """UPDATE answer_overrides
-                   SET reply = %s, source_url = %s, created_by = %s,
-                       enabled = %s, updated_at = %s
-                   WHERE id = %s""",
-                (body, source_url, created_by, enabled, now, oid),
-            )
-        else:
-            oid = str(_uuid.uuid4())
-            cur.execute(
-                """INSERT INTO answer_overrides
-                   (id, match_query, reply, source_url, created_by, enabled, updated_at)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-                (oid, key, body, source_url, created_by, enabled, now),
-            )
-        conn.commit()
+    # Two attempts: FOR UPDATE locks an existing row, but there is no row to
+    # lock when two requests create the same question at once, and the slower
+    # INSERT hits the unique key. That one is retried, and its locked read then
+    # finds the other request's row and updates it, recording what it replaced.
+    for attempt in range(2):
+        previous_reply = ""
+        try:
+            with pool.connection() as conn, conn.cursor() as cur:
+                # FOR UPDATE: the reply read here is the one this write replaces,
+                # even with another save of the same question in flight (G637).
+                cur.execute("SELECT id, reply FROM answer_overrides WHERE match_query = %s FOR UPDATE", (key,))
+                existing = cur.fetchone()
+                if existing:
+                    oid = str(existing[0])
+                    previous_reply = str(existing[1] or "")
+                    cur.execute(
+                        """UPDATE answer_overrides
+                           SET reply = %s, source_url = %s, created_by = %s,
+                               enabled = %s, updated_at = %s
+                           WHERE id = %s""",
+                        (body, source_url, created_by, enabled, now, oid),
+                    )
+                else:
+                    oid = str(_uuid.uuid4())
+                    cur.execute(
+                        """INSERT INTO answer_overrides
+                           (id, match_query, reply, source_url, created_by, enabled, updated_at)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                        (oid, key, body, source_url, created_by, enabled, now),
+                    )
+                conn.commit()
+            break
+        except Exception as exc:
+            # 23505 unique_violation; the pool rolls the connection back.
+            if attempt == 0 and getattr(exc, "sqlstate", None) == "23505":
+                continue
+            raise
     return {
         "id": oid,
         "match_query": key,

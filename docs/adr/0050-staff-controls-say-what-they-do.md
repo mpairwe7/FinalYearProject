@@ -66,7 +66,9 @@ server. Another client can send `officer_reply_localized` too. Chosen: both.
    matches: every amount and rate in the English must appear in the translation
    (a rate as a number, since Luganda has no percent sign), and none may be added.
    The server's own translation, made when a supplied one is refused or absent,
-   passes the same check, or the officer's English is sent.
+   passes the same check, or the officer's English is sent; so does the case
+   status view's translation. A reply or closing message with no valid
+   translation clears the stored one, which is of an earlier message.
    The console shows and sends a preview only of exactly the text being sent,
    after its figure check passed; an edit, even one made while the translation is
    on its way, drops it; an unavailable translation says so.
@@ -78,7 +80,9 @@ server. Another client can send `officer_reply_localized` too. Chosen: both.
 4. **The overrides console tells the truth.** It shows the normalized key, explains
    rewritten and translated matching, and shows the live answer a save replaces
    (the store reads the replaced reply inside the write's own transaction, so a
-   concurrent save cannot make the ledger name the wrong one),
+   concurrent save cannot make the ledger name the wrong one; on Postgres a first
+   save that loses a race to create the same question is retried once and
+   updates the winner's row),
    with "Replace the live answer" on the button; the ledger records `replaced`
    and the before and after digests.
 5. **The flags console says what it knows.** The API reports
@@ -130,7 +134,8 @@ also disabled after they passed and the tests failed again:
   that lost a figure is replaced; one that kept them is used; one changed amount of
   four, an added amount or an added rate fails the check; a Luganda rate without a
   percent sign passes; the server's own translation that changed an amount is not
-  sent.
+  sent, nor shown on the status view; a reply or closing message without a valid
+  translation clears the earlier one.
 - `App/frontend/src/__tests__/components/TicketComposerTranslation.test.tsx`: no stale
   preview is sent, nor shown when the text changed while it was on its way; an
   unavailable translation is not called verified; a template with unfilled parts
@@ -138,12 +143,14 @@ also disabled after they passed and the tests failed again:
 - `App/frontend/src/__tests__/lib/ticketMacros.test.ts`: no macro states a result
   without a part to fill in; an emptied `[[]]` counts as unfilled.
 - `App/backend/tests/test_override_replacement_audit.py` (the replaced reply comes
-  from the write, not a separate read that a concurrent save could make stale),
+  from the write, not a separate read that a concurrent save could make stale; two
+  first saves at once both land on SQLite, and the Postgres path retries the loser),
   `App/frontend/src/__tests__/app/adminOverrides.test.tsx`.
 - `App/backend/tests/test_flag_override_durability.py`,
   `App/frontend/src/__tests__/app/adminFlags.test.tsx` (switching off and resetting
   an enabled safety control both ask, with the reach the page note states; the
-  confirmation takes focus and gives it back).
+  confirmation takes focus and gives it back, after a pending save settles, or to
+  the row's switch when a reset removed the Reset button).
 - `App/backend/tests/test_audit_reviews.py` (including a decision stored before the
   history table, backfilled once, and a decision whose write fails leaving no
   history), `tests/agents/test_backend_shim.py` (`execute_all` commits all or none),

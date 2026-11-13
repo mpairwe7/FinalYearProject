@@ -65,25 +65,51 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
   // off, only after saying what that does.
   const [confirm, setConfirm] = useState<{ name: string; action: "off" | "reset" } | null>(null);
   // The confirmation renders after the whole table: it takes focus when it
-  // opens (which scrolls it into view) and gives it back to the control that
-  // opened it when it closes.
+  // opens (which scrolls it into view) and gives it back when it closes — to
+  // the control that opened it, once any save it started has settled (a
+  // pending save disables that control), or to the row's switch if a reset
+  // removed the Reset button.
   const keepOnRef = useRef<HTMLButtonElement>(null);
-  const openerRef = useRef<HTMLElement | null>(null);
+  const openerRef = useRef<{ el: HTMLElement | null; name: string } | null>(null);
+  const focusAfterRef = useRef<{ el: HTMLElement | null; name: string } | null>(null);
+  const [focusTick, setFocusTick] = useState(0);
   const askFirst = (next: { name: string; action: "off" | "reset" }) => {
-    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const active = document.activeElement;
+    openerRef.current = { el: active instanceof HTMLElement ? active : null, name: next.name };
     setConfirm(next);
   };
-  const closeConfirm = () => {
-    setConfirm(null);
-    const opener = openerRef.current;
+  const giveFocusBack = () => {
+    focusAfterRef.current = openerRef.current;
     openerRef.current = null;
-    requestAnimationFrame(() => {
-      if (opener && opener.isConnected) opener.focus();
-    });
+    setFocusTick((t) => t + 1);
+  };
+  const keepItOn = () => {
+    setConfirm(null);
+    giveFocusBack();
+  };
+  const confirmIt = async (current: { name: string; action: "off" | "reset" }) => {
+    setConfirm(null);
+    try {
+      if (current.action === "off") await toggle.mutateAsync({ name: current.name, enabled: false });
+      else await reset.mutateAsync(current.name);
+    } catch {
+      // Shown by the error line below; focus still goes back.
+    }
+    giveFocusBack();
   };
   useEffect(() => {
     if (confirm) keepOnRef.current?.focus();
   }, [confirm]);
+  useEffect(() => {
+    const target = focusAfterRef.current;
+    if (!target || confirm) return;
+    focusAfterRef.current = null;
+    const usable = (el: Element | null): HTMLElement | null =>
+      el instanceof HTMLElement && el.isConnected && !(el as HTMLButtonElement).disabled ? el : null;
+    const el =
+      usable(target.el) ?? usable(document.querySelector(`tr[data-flag="${target.name}"] [role="switch"]`));
+    el?.focus();
+  }, [focusTick, confirm]);
 
   const flags = useMemo(() => data?.flags ?? [], [data]);
   // Every process re-reads the stored overrides on this interval (G612); 0 means
@@ -244,7 +270,7 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
                 // leave the override in place.
                 const mutating = toggle.isPending || reset.isPending;
                 return (
-                  <tr key={flag.name}>
+                  <tr key={flag.name} data-flag={flag.name}>
                     <td>
                       <span className="ops-cell-strong">
                         <code>{flag.name}</code>
@@ -331,15 +357,11 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
                 type="button"
                 className="ops-btn is-sm"
                 disabled={toggle.isPending || reset.isPending}
-                onClick={() => {
-                  if (confirm.action === "off") toggle.mutate({ name: confirm.name, enabled: false });
-                  else reset.mutate(confirm.name);
-                  closeConfirm();
-                }}
+                onClick={() => void confirmIt(confirm)}
               >
                 {confirm.action === "off" ? "Turn it off" : "Reset it"}
               </button>
-              <button type="button" className="ops-btn is-primary is-sm" ref={keepOnRef} onClick={closeConfirm}>
+              <button type="button" className="ops-btn is-primary is-sm" ref={keepOnRef} onClick={keepItOn}>
                 Keep it on
               </button>
             </div>

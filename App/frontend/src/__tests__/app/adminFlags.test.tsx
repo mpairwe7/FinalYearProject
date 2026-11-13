@@ -263,6 +263,40 @@ describe("Feature flags console", () => {
       await waitFor(() => expect(within(row("stream_figure_hold")).getByRole("switch")).toHaveFocus());
     });
 
+    // CodeRabbit on PR 730: while the save is pending the switch is disabled
+    // and cannot take focus; focus returns once it settles.
+    it("gives focus back to the switch once a switch-off has saved", async () => {
+      vi.spyOn(analyticsApi, "flags").mockResolvedValue({ flags: [SAFETY], overrides_are_ephemeral: false } as never);
+      let settle: () => void = () => {};
+      vi.spyOn(analyticsApi, "setFlag").mockImplementation(
+        () => new Promise((resolve) => { settle = () => resolve({ name: SAFETY.name, enabled: false, ephemeral: false } as never); }),
+      );
+      renderFlags();
+      await screen.findByText("stream_figure_hold");
+      const toggle = within(row("stream_figure_hold")).getByRole("switch");
+      toggle.focus();
+      fireEvent.click(toggle);
+      fireEvent.click(await screen.findByRole("button", { name: /^Turn it off$/ }));
+      await waitFor(() => expect(within(row("stream_figure_hold")).getByRole("switch")).toBeDisabled());
+      settle();
+      await waitFor(() => expect(within(row("stream_figure_hold")).getByRole("switch")).toHaveFocus());
+    });
+
+    it("falls back to the row's switch when the reset removed the Reset button", async () => {
+      const overridden = { ...SAFETY, name: "spoken_figure_guard", default: false, overridden: true, stored: true };
+      vi.spyOn(analyticsApi, "flags")
+        .mockResolvedValueOnce({ flags: [overridden], overrides_are_ephemeral: false } as never)
+        .mockResolvedValue({ flags: [{ ...overridden, enabled: false, overridden: false, stored: false }], overrides_are_ephemeral: false } as never);
+      renderFlags();
+      await screen.findByText("spoken_figure_guard");
+      const resetBtn = within(row("spoken_figure_guard")).getByRole("button", { name: /^Reset$/ });
+      resetBtn.focus();
+      fireEvent.click(resetBtn);
+      fireEvent.click(await screen.findByRole("button", { name: /^Reset it$/ }));
+      await waitFor(() => expect(within(row("spoken_figure_guard")).queryByRole("button", { name: /^Reset$/ })).toBeNull());
+      await waitFor(() => expect(within(row("spoken_figure_guard")).getByRole("switch")).toHaveFocus());
+    });
+
     it("can be kept on", async () => {
       vi.spyOn(analyticsApi, "flags").mockResolvedValue({ flags: [SAFETY], overrides_are_ephemeral: false } as never);
       renderFlags();

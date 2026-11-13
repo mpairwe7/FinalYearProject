@@ -3636,11 +3636,9 @@ def get_escalation_status(
     officer_reply_localized = str(ticket.get("officer_reply_localized") or "")
 
     if officer_reply and not officer_reply_localized and locale not in ("", "en"):
-        try:
-            from .service import localize_reply
-            officer_reply_localized = localize_reply(officer_reply, locale)
-        except Exception:
-            officer_reply_localized = officer_reply
+        # The same strict figure check as the reply routes (G635): a translation
+        # that changed an amount or a rate is not shown; the English is.
+        officer_reply_localized = _localize_for_ticket(officer_reply, locale) or ""
 
     return EscalationDetailResponse(
         ok=True,
@@ -5221,6 +5219,10 @@ async def update_ticket_endpoint(
         officer_reply_localized = None
     if officer_reply and not officer_reply_localized:
         officer_reply_localized = await asyncio.to_thread(_localize_for_ticket, officer_reply, reply_locale)
+    if officer_reply and not officer_reply_localized:
+        # No valid translation of *this* reply: clear the stored one, which is of
+        # an earlier reply, so the case view cannot show it beside the new English.
+        officer_reply_localized = ""
 
     # Resolving or closing a live text chat *is* ending it: the taxpayer is
     # told, asked to rate it, and handed back to the assistant — the same as

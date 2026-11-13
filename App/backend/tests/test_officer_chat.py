@@ -181,6 +181,30 @@ class TaxpayerThreadTests(_Chat):
         self.assertNotIn("25,000", text)
         self.assertIn("15,000", text)
 
+    def test_a_new_reply_with_no_valid_translation_clears_the_old_one(self):
+        """CodeRabbit on PR 730: when the new reply's translation was refused, the
+        previous reply's translation stayed stored, so the case view showed it
+        beside the new English."""
+        db.update_ticket(self.tid, locale="lg")
+        self.take_case()
+        with mock.patch("app.service.localize_reply", return_value="Obanjibwa UGX 50,000."):
+            self.officer_says("You owe UGX 50,000.")
+        self.assertEqual(db.get_ticket(self.tid)["officer_reply_localized"], "Obanjibwa UGX 50,000.")
+        with mock.patch("app.service.localize_reply", return_value="Obanjibwa UGX 90,000."):
+            self.officer_says("You owe UGX 80,000.")
+        self.assertEqual(db.get_ticket(self.tid)["officer_reply_localized"], "")
+        status = self.client.get(f"/v1/escalate/{self.tid}").json()
+        self.assertNotIn("50,000", status.get("officer_reply_localized") or "")
+        self.assertNotIn("90,000", status.get("officer_reply_localized") or "")
+
+    def test_the_status_view_translation_passes_the_strict_check(self):
+        """CodeRabbit on PR 730: with no stored translation the status endpoint
+        translated the reply itself, without the strict figure check."""
+        db.update_ticket(self.tid, locale="lg", officer_reply="You owe UGX 1,200,000 and UGX 15,000.", officer_reply_localized="")
+        with mock.patch("app.service.localize_reply", return_value="Obanjibwa UGX 1,200,000 ne UGX 25,000."):
+            status = self.client.get(f"/v1/escalate/{self.tid}").json()
+        self.assertNotIn("25,000", status.get("officer_reply_localized") or "")
+
     def test_a_supplied_translation_that_keeps_the_figures_is_used(self):
         db.update_ticket(self.tid, locale="lg")
         self.take_case()
@@ -294,6 +318,18 @@ class EndChatTests(_Chat):
         self.assertEqual(self.end().status_code, 200)
         rows = db.query_all("SELECT id FROM service_ratings WHERE ticket_id = ?", (self.tid,))
         self.assertEqual(len(rows), 1)
+
+
+class EndChatTranslationTests(_Chat):
+    def test_a_closing_message_with_no_valid_translation_clears_the_old_one(self):
+        """CodeRabbit on PR 730: as for a reply, End chat kept the previous
+        translation when the closing message's own was refused."""
+        db.update_ticket(self.tid, locale="lg", officer_reply="You owe UGX 50,000.", officer_reply_localized="Obanjibwa UGX 50,000.")
+        self.take_case()
+        with mock.patch("app.service.localize_reply", return_value="Sasula UGX 90,000."):
+            r = self.end(outcome="resolved", closing_message="Please pay UGX 80,000.")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(db.get_ticket(self.tid)["officer_reply_localized"], "")
 
 
 class ChatRatingTests(_Chat):

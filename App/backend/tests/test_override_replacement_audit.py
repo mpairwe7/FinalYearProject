@@ -73,5 +73,99 @@ class OverrideReplacementAuditTests(unittest.TestCase):
         self.assertNotIn("previous_reply", res.json())
 
 
+class ConcurrentCreationTests(unittest.TestCase):
+    """CodeRabbit on PR 730: two first saves of the same question at once."""
+
+    def setUp(self) -> None:
+        db.init_db()
+
+    def test_two_first_saves_on_sqlite_both_land_and_one_replaces_the_other(self) -> None:
+        import threading
+
+        key = f"g637 race {uuid.uuid4().hex[:6]}"
+        barrier = threading.Barrier(2)
+        results: dict[str, dict] = {}
+        errors: list[BaseException] = []
+
+        def save(reply: str) -> None:
+            try:
+                barrier.wait(timeout=5)
+                results[reply] = db.upsert_answer_override(key, reply)
+            except BaseException as exc:  # noqa: BLE001 - reported below
+                errors.append(exc)
+
+        threads = [threading.Thread(target=save, args=(r,)) for r in ("first", "second")]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=15)
+        self.assertEqual(errors, [])
+        previous = sorted(r["previous_reply"] for r in results.values())
+        # One write created the row; the other replaced exactly what it wrote.
+        self.assertEqual(previous[0], "")
+        self.assertIn(previous[1], {"first", "second"})
+        self.assertEqual(db.get_answer_override(key)["reply"], ({"first", "second"} - {previous[1]}).pop())
+
+    def test_postgres_retries_a_first_save_that_lost_the_race(self) -> None:
+        """No row to lock: the losing INSERT hits the unique key. It is retried
+        once, when the locked read finds the winner's row and updates it."""
+        from app import postgres as pg
+
+        class UniqueViolation(Exception):
+            sqlstate = "23505"
+
+        state = {"inserts": 0, "rows": {}}
+
+        class Cursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def execute(self, sql, params=()):
+                self.last = None
+                if sql.lstrip().startswith("SELECT id, reply FROM answer_overrides"):
+                    row = state["rows"].get(params[0])
+                    self.last = (row["id"], row["reply"]) if row else None
+                elif sql.lstrip().startswith("INSERT INTO answer_overrides"):
+                    state["inserts"] += 1
+                    if state["inserts"] == 1:
+                        # Another request created the key a moment ago.
+                        state["rows"][params[1]] = {"id": "winner", "reply": "theirs"}
+                        raise UniqueViolation("duplicate key value violates unique constraint")
+                    state["rows"][params[1]] = {"id": params[0], "reply": params[2]}
+                elif sql.lstrip().startswith("UPDATE answer_overrides"):
+                    for row in state["rows"].values():
+                        if row["id"] == params[-1]:
+                            row["reply"] = params[0]
+
+            def fetchone(self):
+                return self.last
+
+        class Conn:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def cursor(self):
+                return Cursor()
+
+            def commit(self):
+                pass
+
+        class Pool:
+            def connection(self):
+                return Conn()
+
+        with mock.patch.object(pg, "_get_pool", return_value=Pool()):
+            row = pg.upsert_answer_override("g637 pg race", "mine")
+        self.assertEqual(row["previous_reply"], "theirs")
+        self.assertEqual(row["id"], "winner")
+        self.assertEqual(state["rows"]["g637 pg race"]["reply"], "mine")
+
+
 if __name__ == "__main__":
     unittest.main()
