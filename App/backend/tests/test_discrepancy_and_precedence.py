@@ -1,5 +1,6 @@
 """Tests for the Conversational Bug Reporting, Solution B (Tombstones), and Solution C (Precedences)."""
 
+import hashlib
 import os
 import unittest
 import uuid
@@ -252,6 +253,51 @@ class TestAdminEndpointsE2E(unittest.TestCase):
         self.assertEqual(verified["tombstoned_sources"], ["old_wht_g634.pdf"])
         # Answers cached before the hotfix are retired, as on the standalone routes.
         reset_cache.assert_called()
+
+    def test_a_chunk_only_hotfix_is_audited_and_retires_cached_answers(self):
+        """CodeRabbit on PR 730: chunk withdrawals were never collected, so a
+        chunk-only hotfix wrote no tombstone event and kept serving cached answers."""
+        run = uuid.uuid4().hex[:8]
+        rep = db.create_or_increment_discrepancy(
+            bot_statement=f"PAYE band {run}", user_correction="That band changed", cited_sources=[],
+        )
+        with mock.patch("app.main._audit_staff_action") as audit, \
+             mock.patch("app.cache.reset_index_stamp") as reset_cache:
+            res = self.client.post(
+                f"/v1/admin/discrepancies/{rep['id']}/verify",
+                headers=self.auth_headers,
+                json={"tombstone_chunk_ids": [f"chunk-{run}"]},
+            )
+        self.assertEqual(res.status_code, 200, res.text)
+        events = {call.args[1]: call.args[2] for call in audit.call_args_list}
+        self.assertEqual(events["staff.tombstone_created"]["chunk_ids"], [f"chunk-{run}"])
+        self.assertEqual(len(events["staff.tombstone_created"]["tombstone_ids"]), 1)
+        self.assertEqual(events["staff.discrepancy_verified"]["tombstoned_chunk_ids"], [f"chunk-{run}"])
+        reset_cache.assert_called()
+
+    def test_a_hotfix_that_replaces_a_live_override_says_so(self):
+        """CodeRabbit on PR 730: the hotfix also upserts an override, but its
+        ledger entry lacked the replacement record the override route writes."""
+        from app import cms
+
+        run = uuid.uuid4().hex[:8]
+        query = f"wht on rent {run}"
+        cms.upsert(query, "Withholding tax on rent is 10%.", source_url="old")
+        rep = db.create_or_increment_discrepancy(
+            bot_statement=f"WHT rent 10% {run}", user_correction="It is 6%", cited_sources=[],
+        )
+        new_reply = "Withholding tax on rent is 6%."
+        with mock.patch("app.main._audit_staff_action") as audit:
+            res = self.client.post(
+                f"/v1/admin/discrepancies/{rep['id']}/verify",
+                headers=self.auth_headers,
+                json={"create_override": True, "override_query": query, "override_reply": new_reply},
+            )
+        self.assertEqual(res.status_code, 200, res.text)
+        saved = {call.args[1]: call.args[2] for call in audit.call_args_list}["staff.override_saved"]
+        self.assertTrue(saved["replaced"])
+        self.assertEqual(saved["previous_reply_sha256"], hashlib.sha256(b"Withholding tax on rent is 10%.").hexdigest())
+        self.assertEqual(saved["reply_sha256"], hashlib.sha256(new_reply.encode()).hexdigest())
 
     def test_admin_discrepancy_verification_workflow(self):
         # 1. Create a discrepancy report

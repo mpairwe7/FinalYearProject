@@ -97,6 +97,7 @@ export function TicketComposer({
       // error and backend "unavailable". That is not a translation, and its
       // figures "surviving" proves nothing (G635).
       if (!res || !res.text || res.error || res.backend === "unavailable") {
+        setPreviewFor(source);
         setPreviewUnavailable(true);
         return;
       }
@@ -105,11 +106,17 @@ export function TicketComposer({
       setPreviewFor(source);
       setFiguresSurvived(res.figures_survived !== false);
     } catch {
+      setPreviewFor(source);
       setPreviewUnavailable(true);
     } finally {
       setIsPreviewing(false);
     }
   };
+
+  // A preview, or its absence, speaks only for the text it was made from. An
+  // edit made while it was on its way leaves it about other words, so it is
+  // neither shown nor sent (sendablePreview) as this reply's translation.
+  const previewIsCurrent = previewFor !== "" && previewFor === reply.trim();
 
   // G636: a template's [[parts]] are what the officer found; none may reach
   // the taxpayer unwritten.
@@ -277,7 +284,7 @@ export function TicketComposer({
           </div>
           {isPreviewing ? (
             <p className="st-preview-loading">Generating translation in {ticketLocaleLabel(ticket.locale)}…</p>
-          ) : previewText ? (
+          ) : previewText && previewIsCurrent ? (
             <>
               <p className="st-preview-content">{previewText}</p>
               {figuresSurvived === false ? (
@@ -291,7 +298,7 @@ export function TicketComposer({
                 </div>
               ) : null}
             </>
-          ) : previewUnavailable ? (
+          ) : previewUnavailable && previewIsCurrent ? (
             <p className="st-preview-empty" role="status">
               Translation is unavailable right now. When you send, the server tries again; if it still
               cannot, the taxpayer receives your English.

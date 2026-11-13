@@ -16,6 +16,7 @@ or a taxpayer's erasure) is purged with it.
 
 from __future__ import annotations
 
+import contextlib
 import time
 import uuid
 from typing import Any
@@ -75,6 +76,18 @@ def init_schema() -> None:
         CREATE INDEX IF NOT EXISTS ix_audit_review_history_item ON audit_review_history(tenant_id, item_type, item_id);
         """
     )
+    # A decision stored before the history table existed becomes its item's
+    # first entry, so the first reopening after an upgrade does not erase it.
+    # Only items with no history at all are copied, so this runs once per item;
+    # the derived id makes a concurrent copy by another process a no-op.
+    with contextlib.suppress(Exception):  # another process copied them a moment ago
+        db.execute(
+            "INSERT INTO audit_review_history (id, tenant_id, item_type, item_id, status, note, reviewer_id, "
+            "reviewer_name, decided_at) SELECT 'backfill:' || r.id, r.tenant_id, r.item_type, r.item_id, "
+            "r.status, r.note, r.reviewer_id, r.reviewer_name, r.updated_at FROM audit_reviews r "
+            "WHERE NOT EXISTS (SELECT 1 FROM audit_review_history h WHERE h.tenant_id = r.tenant_id "
+            "AND h.item_type = r.item_type AND h.item_id = r.item_id)"
+        )
     _schema_ready = True
 
 

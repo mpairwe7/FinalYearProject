@@ -330,5 +330,53 @@ class PrivacyTests(_Chat):
         self.assertIsNone(service_ratings.find("chat_officer_csat", ticket_id=self.tid))
 
 
+class SuppliedTranslationFigureCheckTests(unittest.TestCase):
+    """CodeRabbit on PR 730: the shared MT check tolerates a changed figure when
+    enough others match (three of four amounts pass its 75% bar). An officer's
+    preview of *earlier* text differs in exactly that way, so the reply routes
+    compare amounts and rates strictly: none missing, changed or added."""
+
+    ENGLISH = (
+        "Your assessment is UGX 1,200,000 in principal, UGX 240,000 in penalty, "
+        "UGX 60,000 in interest and UGX 15,000 in fees."
+    )
+
+    def keeps(self, localized: str, english: str | None = None, locale: str = "lg") -> bool:
+        from app.main import _translation_keeps_figures
+
+        return _translation_keeps_figures(english or self.ENGLISH, localized, locale)
+
+    def test_the_same_figures_pass(self):
+        self.assertTrue(
+            self.keeps(
+                "Okubalirirwa kwo kwe UGX 1,200,000 ku musingi, UGX 240,000 ku kibonerezo, "
+                "UGX 60,000 ku magoba ne UGX 15,000 ku bisale."
+            )
+        )
+
+    def test_one_changed_amount_of_four_fails(self):
+        self.assertFalse(
+            self.keeps(
+                "Okubalirirwa kwo kwe UGX 1,200,000 ku musingi, UGX 240,000 ku kibonerezo, "
+                "UGX 60,000 ku magoba ne UGX 25,000 ku bisale."
+            )
+        )
+
+    def test_an_added_amount_fails(self):
+        self.assertFalse(
+            self.keeps(
+                "Okubalirirwa kwo kwe UGX 1,200,000 ku musingi, UGX 240,000 ku kibonerezo, "
+                "UGX 60,000 ku magoba ne UGX 15,000 ku bisale. Sasula UGX 500,000 kati."
+            )
+        )
+
+    def test_an_added_rate_fails(self):
+        self.assertFalse(self.keeps("Sasula UGX 50,000 nga 15. VAT eri 18%.", english="Pay UGX 50,000 by the 15th."))
+
+    def test_a_rate_written_without_a_percent_sign_still_passes(self):
+        # Luganda states 18% as "eighteen parts in every hundred".
+        self.assertTrue(self.keeps("VAT eri ebitundu 18 ku buli kikumi.", english="VAT is 18%."))
+
+
 if __name__ == "__main__":
     unittest.main()

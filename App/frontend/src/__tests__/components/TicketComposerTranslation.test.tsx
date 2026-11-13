@@ -55,6 +55,26 @@ describe('TicketComposer translation preview', () => {
     expect(onPatch.mock.calls[0][0].officer_reply_localized).toBeUndefined();
   });
 
+  // CodeRabbit on PR 730: an edit made while the translation was still on its
+  // way was undone by its arrival, which showed the old preview and a passed
+  // figure check as this reply's delivery preview.
+  it('shows no preview for text edited while its translation was on its way', async () => {
+    let arrive: (v: Awaited<ReturnType<typeof analyticsApi.translate>>) => void = () => {};
+    vi.spyOn(analyticsApi, 'translate').mockImplementation(() => new Promise((resolve) => { arrive = resolve; }));
+    const onPatch = renderComposer();
+    fireEvent.change(reply(), { target: { value: 'You owe UGX 200,000.' } });
+    fireEvent.click(screen.getByRole('button', { name: /Preview/ }));
+    fireEvent.change(reply(), { target: { value: 'You owe UGX 50,000.' } });
+    arrive({
+      text: 'Obanjibwa UGX 200,000.', source_lang: 'en', target_lang: 'lg', latency_s: 0.1, backend: 'sunbird', figures_survived: true,
+    });
+    await screen.findByText(/preview again to see the translation of this text/i);
+    expect(screen.queryByText('Obanjibwa UGX 200,000.')).toBeNull();
+    expect(screen.queryByText(/Figure check passed/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^Send reply$/ }));
+    expect(onPatch.mock.calls[0][0].officer_reply_localized).toBeUndefined();
+  });
+
   it('sends a checked preview of exactly the text being sent', async () => {
     vi.spyOn(analyticsApi, 'translate').mockResolvedValue({
       text: 'Obanjibwa UGX 50,000.', source_lang: 'en', target_lang: 'lg', latency_s: 0.1, backend: 'sunbird', figures_survived: true,

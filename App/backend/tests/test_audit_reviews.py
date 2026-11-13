@@ -146,6 +146,28 @@ class QueueTests(unittest.TestCase):
         item = next(i for i in _queue(status="open")["items"] if i["item_id"] == low["id"])
         self.assertEqual([h["status"] for h in item["history"]], ["action_needed", "open"])
 
+    def test_a_decision_made_before_the_history_existed_survives_reopening(self):
+        """CodeRabbit on PR 730: a decision stored before ``audit_review_history``
+        existed had no history row, so the first reopen after the upgrade still
+        erased its finding. The schema step backfills it, once."""
+        low = _rating("call_officer_csat", score=1)
+        audit_reviews.init_schema()
+        # As an upgraded database holds it: the decision, and no history.
+        db.execute(
+            "INSERT INTO audit_reviews (id, tenant_id, item_type, item_id, status, note, reviewer_id, "
+            "reviewer_name, created_at, updated_at) VALUES (?, 'default', 'rating', ?, 'action_needed', "
+            "'Officer promised a refund date', 'u-old', 'Auditor Old', 1000.0, 1000.0)",
+            (uuid.uuid4().hex, low["id"]),
+        )
+        self.assertEqual(audit_reviews.history("rating", low["id"]), [])
+        audit_reviews.init_schema()
+        audit_reviews.init_schema()  # idempotent: one backfilled entry, not two
+        audit_reviews.set_review("rating", low["id"], status="open", reviewer_name="Auditor New")
+        history = audit_reviews.history("rating", low["id"])
+        self.assertEqual([h["status"] for h in history], ["action_needed", "open"])
+        self.assertEqual(history[0]["note"], "Officer promised a refund date")
+        self.assertEqual(history[0]["reviewer_name"], "Auditor Old")
+
     def test_the_history_goes_when_its_item_does(self):
         low = _rating("chat_officer_csat", score=1)
         audit_reviews.set_review("rating", low["id"], status="reviewed", note="ok")

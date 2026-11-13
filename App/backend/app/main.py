@@ -4290,6 +4290,20 @@ def list_overrides_endpoint(
     return {"overrides": db.list_answer_overrides(), "exact_match": True}
 
 
+def _override_replacement_record(previous_reply: str, new_reply: str) -> dict[str, Any]:
+    """What an override write replaced, as the ledger seals it (G637).
+
+    The texts stay in their table; the ledger keeps their digests. Used by
+    every route that upserts an override, so none of them overwrites a live
+    answer without a record of it.
+    """
+    return {
+        "replaced": bool(previous_reply),
+        "previous_reply_sha256": hashlib.sha256(previous_reply.encode("utf-8")).hexdigest() if previous_reply else "",
+        "reply_sha256": hashlib.sha256(new_reply.encode("utf-8")).hexdigest(),
+    }
+
+
 @app.put("/v1/admin/overrides", tags=["admin"])
 def put_override_endpoint(
     body: dict,
@@ -4327,10 +4341,7 @@ def put_override_endpoint(
         {
             "override_id": str((row or {}).get("id") or ""),
             "enabled": bool(body.get("enabled", True)),
-            # The texts stay in their table; the ledger seals their digests.
-            "replaced": bool(previous_reply),
-            "previous_reply_sha256": hashlib.sha256(previous_reply.encode("utf-8")).hexdigest() if previous_reply else "",
-            "reply_sha256": hashlib.sha256(new_reply.encode("utf-8")).hexdigest(),
+            **_override_replacement_record(previous_reply, new_reply),
         },
     )
     return row
@@ -4410,6 +4421,7 @@ def verify_discrepancy_endpoint(
     override_id = ""
     precedence_id = ""
     tombstoned_sources: list[str] = []
+    tombstoned_chunks: list[str] = []
     tombstone_ids: list[str] = []
 
     # G634: a precedence rule is injected as law that "strictly supersedes" the
@@ -4446,6 +4458,9 @@ def verify_discrepancy_endpoint(
         override_reply = str(body.get("override_reply") or "").strip()
         source_url = str(body.get("source_url") or "staff-verified-discrepancy").strip()
         if override_query and override_reply:
+            # This may replace a live answer, as the override route may: read
+            # it first so the ledger can say so (G637).
+            previous = db.get_answer_override(cms.normalize_query(override_query)) or {}
             row = cms.upsert(
                 override_query,
                 override_reply,
@@ -4457,7 +4472,15 @@ def verify_discrepancy_endpoint(
             _audit_staff_action(
                 ctx,
                 "staff.override_saved",
-                {"override_id": override_id, "enabled": True, "via_report": report_id},
+                {
+                    "override_id": override_id,
+                    "enabled": True,
+                    "via_report": report_id,
+                    **_override_replacement_record(
+                        str(previous.get("reply") or ""),
+                        str((row or {}).get("reply") or override_reply).strip(),
+                    ),
+                },
             )
 
     # Optional Solution C: Active Statutory Precedence
@@ -4503,19 +4526,28 @@ def verify_discrepancy_endpoint(
     if isinstance(tomb_chunks, list):
         for cid in tomb_chunks:
             if cid and str(cid).strip():
-                db.add_corpus_tombstone(
+                tomb = db.add_corpus_tombstone(
                     "",
                     chunk_id=str(cid).strip(),
                     reason=f"Superseded via report {report_id}",
                     superseded_by=override_id,
                     created_by=ctx.user.user_id if ctx.user else "ura_admin",
                 )
+                # A chunk withdrawal is a tombstone too: audited and it
+                # retires cached answers, like a source withdrawal.
+                tombstoned_chunks.append(str(cid).strip())
+                tombstone_ids.append(str((tomb or {}).get("id") or ""))
 
     if tombstone_ids:
         _audit_staff_action(
             ctx,
             "staff.tombstone_created",
-            {"tombstone_ids": tombstone_ids, "sources": tombstoned_sources, "via_report": report_id},
+            {
+                "tombstone_ids": tombstone_ids,
+                "sources": tombstoned_sources,
+                "chunk_ids": tombstoned_chunks,
+                "via_report": report_id,
+            },
         )
     if override_id or precedence_id or tombstone_ids:
         # As the standalone override and tombstone routes do: answers cached
@@ -4542,6 +4574,7 @@ def verify_discrepancy_endpoint(
             "override_id": override_id,
             "precedence_id": precedence_id,
             "tombstoned_sources": tombstoned_sources,
+            "tombstoned_chunk_ids": tombstoned_chunks,
         },
     )
     return {"ok": True, "report_id": report_id, "status": "verified", "override_id": override_id}
@@ -5117,11 +5150,31 @@ async def update_ticket_endpoint(
 
 
 def _translation_keeps_figures(english: str, localized: str, locale: str) -> bool:
-    """Whether a supplied translation carries the English text's figures (G635)."""
+    """Whether a supplied translation carries exactly the English text's figures (G635).
+
+    The shared MT check tolerates a changed figure when enough others match,
+    which suits a fresh machine translation. An officer's supplied preview may be
+    of *earlier* text, which differs in exactly that way, so here every amount
+    and rate in the English must appear in the translation, and the translation
+    may add no amount or rate. Rates are matched as numbers, not by the percent
+    sign: Luganda says "ebitundu 18 ku buli kikumi" for 18%.
+    """
     try:
         from . import mt
+        from .entailment import percentages
 
-        return bool(mt.figures_survived(english, localized, locale=(locale or "en").lower().strip()))
+        loc = (locale or "en").lower().strip()
+        if not mt.figures_survived(english, localized, locale=loc):
+            return False
+        src_all = mt.figures(english, locale="en")
+        tr_all = mt.figures(localized, locale=loc)
+        src_pct = {float(p) for p in percentages(english)}
+        src_key = {f for f in src_all if f >= 1000.0} | src_pct
+        if not src_key <= tr_all:
+            return False  # an amount or a rate is missing or changed
+        added_money = {f for f in tr_all if f >= 1000.0} - src_all
+        added_pct = {float(p) for p in percentages(localized)} - src_all - src_pct
+        return not (added_money or added_pct)
     except Exception:
         logger.debug("figure check on a supplied translation failed", exc_info=True)
         return False

@@ -217,6 +217,38 @@ describe("Feature flags console", () => {
       await waitFor(() => expect(analyticsApi.setFlag).toHaveBeenCalledWith("stream_figure_hold", false));
     });
 
+    // CodeRabbit on PR 730: Reset drops the override, so an enabled safety
+    // control falls back to FLAG_* or its default, which may be off.
+    it("asks before resetting an enabled safety control, and resets rather than saving off", async () => {
+      vi.spyOn(analyticsApi, "flags").mockResolvedValue({
+        flags: [{ ...SAFETY, name: "spoken_figure_guard", default: false, overridden: true, stored: true }],
+        overrides_are_ephemeral: false,
+      } as never);
+      renderFlags();
+      await screen.findByText("spoken_figure_guard");
+      fireEvent.click(within(row("spoken_figure_guard")).getByRole("button", { name: /^Reset$/ }));
+      expect(analyticsApi.clearFlag).not.toHaveBeenCalled();
+      const confirm = screen.getByRole("alertdialog", { name: /Reset spoken_figure_guard/ });
+      expect(confirm).toHaveTextContent(/default \(off\)/i);
+      fireEvent.click(within(confirm).getByRole("button", { name: /^Reset it$/ }));
+      await waitFor(() => expect(analyticsApi.clearFlag).toHaveBeenCalledWith("spoken_figure_guard"));
+      expect(analyticsApi.setFlag).not.toHaveBeenCalled();
+    });
+
+    // CodeRabbit on PR 730: the confirmation claimed every process within one
+    // sync interval even where the sync is off.
+    it("says how far turning a control off reaches, as the page note does", async () => {
+      vi.spyOn(analyticsApi, "flags").mockResolvedValue({
+        flags: [SAFETY], overrides_are_ephemeral: false, sync_interval_seconds: 0,
+      } as never);
+      renderFlags();
+      await screen.findByText("stream_figure_hold");
+      fireEvent.click(within(row("stream_figure_hold")).getByRole("switch"));
+      const confirm = screen.getByRole("alertdialog", { name: /Turn off stream_figure_hold/ });
+      expect(confirm).toHaveTextContent(/when they next start/i);
+      expect(confirm).not.toHaveTextContent(/within one sync interval/i);
+    });
+
     it("can be kept on", async () => {
       vi.spyOn(analyticsApi, "flags").mockResolvedValue({ flags: [SAFETY], overrides_are_ephemeral: false } as never);
       renderFlags();

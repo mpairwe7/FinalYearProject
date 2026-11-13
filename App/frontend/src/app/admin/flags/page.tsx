@@ -61,14 +61,24 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.admin.flags() }),
   });
   const canToggle = who.role === "ura_admin";
-  // G638: a safety control is switched off only after saying what that does.
-  const [confirmOff, setConfirmOff] = useState<string | null>(null);
+  // G638: a safety control is switched off, or reset to a value that may be
+  // off, only after saying what that does.
+  const [confirm, setConfirm] = useState<{ name: string; action: "off" | "reset" } | null>(null);
 
   const flags = useMemo(() => data?.flags ?? [], [data]);
   // Every process re-reads the stored overrides on this interval (G612); 0 means
   // the others apply a change at their restart. Until the API says (loading, an
   // error, an older API) the note claims neither.
   const syncSeconds = data?.sync_interval_seconds;
+  // The same reach the page note states, for the confirmation (G638): a
+  // promise of "every process within one sync" is wrong where the sync is off,
+  // and a replica with its own database is never reached from here.
+  const reachOfAChange =
+    typeof syncSeconds !== "number"
+      ? "How far this reaches is not known yet: confirm each process from /ready."
+      : syncSeconds > 0
+        ? `Other API processes sharing this database apply it at their next successful sync (every ${syncSeconds} s); confirm the call process from /ready. Replicas with their own database are not reached.`
+        : "It applies at once in the process that answered; the other processes apply it when they next start. Replicas with their own database are not reached.";
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -229,7 +239,7 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
                           label={`${flag.name} — currently ${flag.enabled ? "on" : "off"}`}
                           onChange={(next) =>
                             !next && SAFETY_CONTROLS[flag.name]
-                              ? setConfirmOff(flag.name)
+                              ? setConfirm({ name: flag.name, action: "off" })
                               : toggle.mutate({ name: flag.name, enabled: next })
                           }
                         />
@@ -259,7 +269,14 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
                             type="button"
                             className="ops-btn is-ghost is-sm"
                             disabled={mutating}
-                            onClick={() => reset.mutate(flag.name)}
+                            onClick={() =>
+                              // Reset drops the override: an enabled safety
+                              // control then follows FLAG_* or its default,
+                              // which may be off, so it asks first too.
+                              SAFETY_CONTROLS[flag.name] && flag.enabled
+                                ? setConfirm({ name: flag.name, action: "reset" })
+                                : reset.mutate(flag.name)
+                            }
                             title="Drop the override so this flag follows FLAG_* or its default again"
                           >
                             Reset
@@ -275,14 +292,19 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
         </TableScroll>
       ) : null}
 
-      {confirmOff ? (
+      {confirm ? (
         <div className="ops-note ops-confirm" role="alertdialog" aria-labelledby="flag-confirm-title" aria-describedby="flag-confirm-body">
           <div>
             <p className="ops-note-title" id="flag-confirm-title">
-              Turn off {confirmOff}?
+              {confirm.action === "off" ? `Turn off ${confirm.name}?` : `Reset ${confirm.name}?`}
             </p>
             <p className="ops-note-body" id="flag-confirm-body">
-              {SAFETY_CONTROLS[confirmOff]} Within one sync interval this reaches every API process.
+              {confirm.action === "reset"
+                ? `This drops the override, so the flag follows its FLAG_* value or its default (${
+                    flags.find((f) => f.name === confirm.name)?.default ? "on" : "off"
+                  }), which may switch it off. If it does: `
+                : null}
+              {SAFETY_CONTROLS[confirm.name]} {reachOfAChange}
             </p>
             <div className="ops-row-inline">
               <button
@@ -290,13 +312,14 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
                 className="ops-btn is-sm"
                 disabled={toggle.isPending || reset.isPending}
                 onClick={() => {
-                  toggle.mutate({ name: confirmOff, enabled: false });
-                  setConfirmOff(null);
+                  if (confirm.action === "off") toggle.mutate({ name: confirm.name, enabled: false });
+                  else reset.mutate(confirm.name);
+                  setConfirm(null);
                 }}
               >
-                Turn it off
+                {confirm.action === "off" ? "Turn it off" : "Reset it"}
               </button>
-              <button type="button" className="ops-btn is-primary is-sm" onClick={() => setConfirmOff(null)}>
+              <button type="button" className="ops-btn is-primary is-sm" onClick={() => setConfirm(null)}>
                 Keep it on
               </button>
             </div>

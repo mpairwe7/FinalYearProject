@@ -1171,7 +1171,8 @@ PUT /v1/admin/quality/reviews/{item_type}/{item_id}
 `status` is `reviewed`, `action_needed` or `open` (reopen: the item is open
 again). Every decision, a reopening included, is also appended to the item's
 history (`audit_review_history`), which the Needs review queue returns as
-`history` on each item, oldest first (G639, ADR-0050).
+`history` on each item, oldest first (G639, ADR-0050). A decision stored before
+that table existed is copied in once, as its item's first entry.
 
 **Response**
 ```json
@@ -2331,10 +2332,12 @@ languages. A `PUT` whose normalized question already has an override replaces it
 taxpayer-reported correction: an override, a statutory precedence rule (told to
 the model as law that overrides retrieved passages) and tombstones on the cited
 sources. A `precedence_rule` without a `statute_reference` is 422 and nothing is
-written. Each write is audited (`staff.override_saved`, `staff.precedence_created`
-with `rule_sha256` and the statute, `staff.tombstone_created` with the sources,
-then `staff.discrepancy_verified`), and cached answers are retired (G634,
-ADR-0050).
+written. `tombstone_chunk_ids` withdraws single chunks. Each write is audited
+(`staff.override_saved` with `replaced` and its digests, as on `PUT`,
+`staff.precedence_created` with `rule_sha256` and the statute,
+`staff.tombstone_created` with the sources and `chunk_ids`, then
+`staff.discrepancy_verified` with `tombstoned_sources` and `tombstoned_chunk_ids`),
+and cached answers are retired, a chunk-only hotfix included (G634, ADR-0050).
 
 ```http
 GET /v1/admin/outbox

@@ -21,6 +21,27 @@ function when(ts: number): string {
   return new Date(ts * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+function historyList(entries: NonNullable<NeedsReviewItem["history"]>) {
+  return (
+    <ul className="qa-review-history" aria-label="Earlier decisions">
+      {entries.map((h, idx) => (
+        <li key={`${h.decided_at}-${idx}`}>
+          {h.status === "open" ? (
+            <>Reopened{h.reviewer_name ? ` by ${h.reviewer_name}` : ""}</>
+          ) : (
+            <>
+              <strong>{REVIEW_LABEL[h.status]}</strong>
+              {h.reviewer_name ? ` by ${h.reviewer_name}` : ""}
+              {h.note ? <span className="qa-review-note">“{h.note}”</span> : null}
+            </>
+          )}{" "}
+          · {when(h.decided_at)}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function ReviewControl({ item }: { item: NeedsReviewItem }) {
   const review = item.review;
   const [note, setNote] = useState(review?.note ?? "");
@@ -34,6 +55,10 @@ export function ReviewControl({ item }: { item: NeedsReviewItem }) {
   // the decision in the item's history.
   const [confirmReopen, setConfirmReopen] = useState(false);
   const earlier = item.history ?? [];
+  // The newest history entry is the decision shown above; not repeated below.
+  const last = earlier[earlier.length - 1];
+  const earlierThanCurrent =
+    review && last && last.status === review.status && last.note === (review.note ?? '') ? earlier.slice(0, -1) : earlier;
   const confirmId = `qa-reopen-${item.item_type}-${item.item_id}`;
 
   return (
@@ -126,23 +151,15 @@ export function ReviewControl({ item }: { item: NeedsReviewItem }) {
           </div>
         </div>
       ) : null}
-      {earlier.length > 0 && !review ? (
-        <ul className="qa-review-history" aria-label="Earlier decisions">
-          {earlier.map((h, idx) => (
-            <li key={`${h.decided_at}-${idx}`}>
-              {h.status === "open" ? (
-                <>Reopened{h.reviewer_name ? ` by ${h.reviewer_name}` : ""}</>
-              ) : (
-                <>
-                  <strong>{REVIEW_LABEL[h.status]}</strong>
-                  {h.reviewer_name ? ` by ${h.reviewer_name}` : ""}
-                  {h.note ? <span className="qa-review-note">“{h.note}”</span> : null}
-                </>
-              )}{" "}
-              · {when(h.decided_at)}
-            </li>
-          ))}
-        </ul>
+      {!review && earlier.length > 0 ? (
+        historyList(earlier)
+      ) : review && earlierThanCurrent.length > 0 ? (
+        // A decided item keeps its earlier decisions one click away, so reading
+        // a finding never means reopening the item.
+        <details className="qa-review-history-more">
+          <summary>Earlier decisions ({earlierThanCurrent.length})</summary>
+          {historyList(earlierThanCurrent)}
+        </details>
       ) : null}
     </div>
   );

@@ -52,4 +52,35 @@ describe('ReviewControl', () => {
     expect(earlier).toHaveTextContent('Wrong PAYE band');
     expect(earlier).toHaveTextContent(/Reopened by Auditor B/);
   });
+
+  // CodeRabbit on PR 730: once an item was decided again, the finding and the
+  // reopening before it could be read only by reopening the item.
+  it('keeps the earlier decisions readable on an item decided again', () => {
+    renderControl(
+      item({
+        review: { status: 'reviewed', note: 'Fine on second look', reviewer_name: 'Auditor C', updated_at: 1790000200 },
+        history: [
+          { status: 'action_needed', note: 'Wrong PAYE band', reviewer_name: 'Auditor A', decided_at: 1790000000 },
+          { status: 'open', note: '', reviewer_name: 'Auditor B', decided_at: 1790000100 },
+          { status: 'reviewed', note: 'Fine on second look', reviewer_name: 'Auditor C', decided_at: 1790000200 },
+        ],
+      }),
+    );
+    fireEvent.click(screen.getByText(/Earlier decisions \(2\)/));
+    const earlier = screen.getByRole('list', { name: /Earlier decisions/ });
+    expect(earlier).toHaveTextContent('Wrong PAYE band');
+    expect(earlier).toHaveTextContent(/Reopened by Auditor B/);
+    // The current decision is shown above, not repeated in the history.
+    expect(earlier).not.toHaveTextContent('Fine on second look');
+  });
+
+  it('shows no history control for an item decided once', () => {
+    renderControl(
+      item({
+        review: { status: 'reviewed', note: '', reviewer_name: 'Auditor C', updated_at: 1790000200 },
+        history: [{ status: 'reviewed', note: '', reviewer_name: 'Auditor C', decided_at: 1790000200 }],
+      }),
+    );
+    expect(screen.queryByText(/Earlier decisions/)).toBeNull();
+  });
 });

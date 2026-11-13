@@ -52,15 +52,20 @@ server. Another client can send `officer_reply_localized` too. Chosen: both.
 1. **Verify & Hotfix** starts empty with nothing withdrawn; a precedence rule needs
    a statute reference (the console disables Confirm; the API answers 422 before
    writing anything); a summary says what the hotfix will change for every
-   taxpayer before it is applied. The API audits the override, the precedence
-   (`rule_sha256`, statute) and the tombstones (sources), and retires cached
-   answers as the standalone routes do.
+   taxpayer before it is applied. The API audits the override (with what it
+   replaced, as the override route does), the precedence (`rule_sha256`, statute)
+   and the tombstones (sources and chunk ids), and retires cached answers as the
+   standalone routes do; a chunk-only hotfix does both too.
 2. **A translation that loses a figure is not sent.** The reply and End-chat routes
-   drop a supplied translation whose figures differ from the English
-   (`mt.figures_survived`) and translate again through `localize_reply`, counted
-   in `officer_reply_translation_rejected_total`. The console sends a preview only
-   of exactly the text being sent, after its figure check passed; an edit drops
-   it; an unavailable translation says so.
+   drop a supplied translation whose figures differ from the English and translate
+   again through `localize_reply`, counted in
+   `officer_reply_translation_rejected_total`. The check is stricter than the
+   shared `mt.figures_survived`, which tolerates one changed figure among enough
+   matches: every amount and rate in the English must appear in the translation
+   (a rate as a number, since Luganda has no percent sign), and none may be added.
+   The console shows and sends a preview only of exactly the text being sent,
+   after its figure check passed; an edit, even one made while the translation is
+   on its way, drops it; an unavailable translation says so.
 3. **Canned results are templates.** Their `[[…]]` parts are what the officer
    found; Send, Send & end and End chat are disabled while any remain
    (`unfilledPlaceholders`). The document request names email or a station.
@@ -76,8 +81,10 @@ server. Another client can send `officer_reply_localized` too. Chosen: both.
    `spoken_figure_guard`, `action_level_audit_v3`, `guardrail_strike_friction`,
    `verifiable_decision_receipts`, `autonomous_outcome_verification`).
 6. **Review decisions are kept.** Every decision, a reopening included, is appended
-   to `audit_review_history` (purged by the same rules as the decision); the queue
-   returns it; Reopen asks first and earlier decisions are shown.
+   to `audit_review_history` (purged by the same rules as the decision), and a
+   decision stored before the table existed is copied in once as its item's first
+   entry; the queue returns it; Reopen asks first and earlier decisions are shown,
+   on a decided item behind "Earlier decisions".
 
 ## Consequences
 
@@ -100,18 +107,26 @@ Each test was watched failing before the fix; for G635 the server checks were
 also disabled after they passed and the tests failed again:
 
 - `App/backend/tests/test_discrepancy_and_precedence.py`: a rule without a statute is
-  422 and writes nothing; every hotfix write is audited and the cache is retired.
+  422 and writes nothing; every hotfix write is audited and the cache is retired; a
+  chunk-only hotfix is audited and retires the cache; a hotfix that replaces a live
+  override records `replaced` and both digests.
 - `App/frontend/src/__tests__/app/admin/DiscrepanciesAdmin.test.tsx`: empty fields,
   nothing withdrawn, the statute gate and the change summary.
 - `App/backend/tests/test_officer_chat.py`: a supplied reply or closing translation
-  that lost a figure is replaced; one that kept them is used.
+  that lost a figure is replaced; one that kept them is used; one changed amount of
+  four, an added amount or an added rate fails the check; a Luganda rate without a
+  percent sign passes.
 - `App/frontend/src/__tests__/components/TicketComposerTranslation.test.tsx`: no stale
-  preview is sent; an unavailable translation is not called verified; a template
-  with unfilled parts cannot be sent.
+  preview is sent, nor shown when the text changed while it was on its way; an
+  unavailable translation is not called verified; a template with unfilled parts
+  cannot be sent.
 - `App/frontend/src/__tests__/lib/ticketMacros.test.ts`: no macro states a result.
 - `App/backend/tests/test_override_replacement_audit.py`,
   `App/frontend/src/__tests__/app/adminOverrides.test.tsx`.
 - `App/backend/tests/test_flag_override_durability.py`,
-  `App/frontend/src/__tests__/app/adminFlags.test.tsx`.
-- `App/backend/tests/test_audit_reviews.py`,
-  `App/frontend/src/__tests__/components/ReviewControl.test.tsx`.
+  `App/frontend/src/__tests__/app/adminFlags.test.tsx` (switching off and resetting
+  an enabled safety control both ask, with the reach the page note states).
+- `App/backend/tests/test_audit_reviews.py` (including a decision stored before the
+  history table, backfilled once),
+  `App/frontend/src/__tests__/components/ReviewControl.test.tsx` (earlier decisions
+  stay readable on a decided item).
