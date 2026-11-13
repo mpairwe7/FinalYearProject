@@ -246,7 +246,7 @@ test.describe("Voice STT/TTS (mocked)", () => {
 
   // G648: a spoken question still being transcribed was sent into whichever
   // chat was open when transcription finished (ADR-0018's binding).
-  test("a spoken turn is not sent into a chat opened while it was transcribed", async ({ page }) => {
+  test("a spoken turn is not sent into a chat opened while it was transcribed", async ({ page }, testInfo) => {
     test.slow();
     await mockBackend(page);
     let release: () => void = () => {};
@@ -273,6 +273,10 @@ test.describe("Voice STT/TTS (mocked)", () => {
     const asrReq = page.waitForRequest("**/api/v1/asr**");
     await send.click();
     await asrReq;
+    // On a phone the chat list is an off-screen drawer: open it, as a taxpayer would.
+    if (testInfo.project.name === "mobile-chrome") {
+      await page.getByRole("button", { name: "Open conversation history" }).click();
+    }
     await page.getByRole("button", { name: "New chat" }).first().click();
     release();
     await expect(page.getByTestId("voice-dock-detail")).toContainText("You moved to another chat", { timeout: 10_000 });
