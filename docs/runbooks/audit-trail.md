@@ -52,6 +52,8 @@ these appends one hash-chained row to `audit_events`:
 | `staff.ticket_viewed` | A ticket and its transcript are opened | `ticket_id` |
 | `staff.ticket_updated` | A ticket change is accepted | `ticket_id`, changed `status` / `assignee` / `priority` / `locale`, `staff_note_chars`, `officer_reply_chars` |
 | `staff.flag_set` / `staff.flag_cleared` | A flag is toggled or reset | `flag`, `enabled` |
+| `auth.signed_out_everywhere` | Someone signs out, which revokes every token they hold (`POST /v1/me/logout`, ADR-0048) | `revoked_before` |
+| `staff.session_revoked` | An administrator signs someone else out everywhere (`POST /v1/admin/users/{user_id}/revoke`) | `subject` (the user id), `revoked_before`, `reason_length` |
 | `staff.override_saved` / `staff.override_deleted` | A staff-written answer changes | `override_id`, `enabled` |
 | `generate` | The assistant answers — on **every** transport: `/v1/chat`, the SSE stream, the WebSocket stream, voice chat, multimodal and the call receptionist (field `channel`) | see [The answer record](#the-answer-record) |
 | `tool_confirm` | A taxpayer confirms or refuses an action (existing) | tool, decision |

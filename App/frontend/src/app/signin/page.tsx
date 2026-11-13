@@ -36,6 +36,7 @@ import {
   OIDC_CONFIGURED,
   sanitizeReturnTo,
 } from "../../lib/oidcFlow";
+import { endServerSession } from "../../services/accountApi";
 import "./signin.css";
 
 export default function SignInPage() {
@@ -82,6 +83,8 @@ export default function SignInPage() {
 
   const signOut = useCallback(() => {
     const method = getAuthMethod();
+    // Revoke the token on the server before dropping it here (ADR-0048).
+    endServerSession();
     clearAuthToken();
     setStatus({ kind: "idle", message: "Signed out." });
     if (method !== "dev") endOidcSession();

@@ -4,6 +4,48 @@ Operator and deployment runbook for the browser voice receptionist powered by
 Pipecat 1.15, self-hosted LiveKit WebRTC media, Whisper-SALT confidence scoring,
 ClarifyGate terminology disambiguation, and staff takeover.
 
+### Assurance update — 2026-11-13, sessions can be revoked (ADR-0048)
+
+Phase 8 part D of [the 11 November review](../plans/receptionist-assurance-2026-11-11.md).
+A token used to work until it expired, whatever happened to its owner. Now:
+
+- **Signing out signs you out everywhere.** The console's and the chat's sign-out
+  call `POST /v1/me/logout` before dropping the token. Every token the person
+  holds stops working, on every device. They sign in again to carry on.
+- **Open sockets follow within about 5 s.** The lobby, the live transcript, the
+  officer's audio socket and a listener close 4401. An officer on a call goes into
+  the reconnect grace, as at expiry, but their LiveKit media leaves the room at
+  once. A signed-in caller's call ends with `session_revoked`.
+- **Each process re-reads `revoked_sessions` every 5 s.** A failed read keeps the
+  revocations it has, logs `Session revocations could not be read` at ERROR once,
+  and counts `ura_session_revocation_sync_failures_total`.
+
+#### Revoke a session (lost device, leaked token, an officer leaving)
+
+1. Find the person's user id: the token's `sub`, as `GET /v1/me` shows it
+   (`external_id`), or the `user_id` on their rows in `/admin/audit`.
+2. As a `ura_admin` (or with the operator key):
+
+   ```bash
+   curl -sS -X POST "$API/v1/admin/users/$USER_ID/revoke" \
+     -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+     -d '{"reason": "laptop reported stolen"}'
+   ```
+
+   A 200 returns `revoked_before`. A 503 means it was not stored and nothing
+   changed: try again.
+3. Check it took: a request with the old token gets 401 `session revoked`. Within
+   5 s their console shows the sign-in again, and an officer on a call is put in
+   the reconnect grace.
+4. To keep them out, also disable the account at the identity provider (Auth0).
+   This service only refuses tokens issued before the revocation; a new sign-in
+   works.
+5. It is in the audit trail as `staff.session_revoked`.
+
+Limits: a token with no `iat` is not affected. On the Space the database, and so
+every revocation, is wiped on restart; revoke again after a restart if the old
+token may still be in use.
+
 ### Assurance update — 2026-11-12, one call process (ADR-0043)
 
 Phase 5 of [the 11 November review](../plans/receptionist-assurance-2026-11-11.md).

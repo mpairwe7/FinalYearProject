@@ -15,8 +15,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
-from ..auth import AuthContext, require_role
-from ..chat_ws_v2 import _resolve_ws_principal, resolve_ws_session
+from ..auth import AuthContext, require_role, revocation
+from ..chat_ws_v2 import resolve_ws_session
 from ..flags import flags
 from ..query import SUPPORTED_LOCALES
 from ..tenancy import tenant_enabled
@@ -163,6 +163,12 @@ _PIPELINE_STOP_TIMEOUT_S = 5.0
 
 #: How often a listen socket checks that the call it listens to is still bridged.
 _LISTEN_POLL_S = 0.5
+#: The longest any staff socket, or a signed-in caller's, goes between checks of
+#: its session, so a revoked session closes it within about this long (G304,
+#: ADR-0048). The revocation itself reaches another process within its 5 s sync.
+_SESSION_POLL_S = 5.0
+#: A lobby or live transcript with nothing to send pings after this long.
+_STAFF_KEEPALIVE_S = 25.0
 
 # Admission for staff sockets (G304). The caller's socket has had a cap since
 # it shipped; the lobby, the live transcript and the officer's audio socket had
@@ -203,18 +209,93 @@ class _StaffSlot:
             self.held = False
 
 
-def _staff_session(websocket: WebSocket, token: str) -> tuple[str, str, str, float | None]:
-    """``(user_id, tenant_id, role, expiry)`` of the staff token sent in a socket's first message.
+def _staff_session(
+    websocket: WebSocket, token: str
+) -> tuple[str, str, str, float | None, float | None]:
+    """``(user_id, tenant_id, role, expiry, issued_at)`` of the staff token sent in a socket's first message.
 
     The expiry is the verified token's own. It used to be read from the
     fourth value of ``_resolve_ws_principal``, which is the token's consent
     purposes, so it was never found and no staff socket ever expired.
+    ``issued_at`` is the token's ``iat``, checked against the person's
+    revocation cutoff while the socket is open (G304, ADR-0048). A token
+    already revoked does not sign in (``JWTAuthError``, closed 4401).
     """
     return resolve_ws_session(websocket, required=True, token_override=token)
 
 
 def _expired(expiry: float | None) -> bool:
     return expiry is not None and time.time() >= expiry
+
+
+def _session_over(user_id: str, expiry: float | None, issued_at: float | None) -> bool:
+    """Whether a socket's session has ended: its token expired, or it was revoked (G304, ADR-0048)."""
+    return _expired(expiry) or revocation.is_revoked(user_id, issued_at)
+
+
+def _session_wait(expiry: float | None) -> float:
+    """How long a socket's loop may wait before it checks its session again."""
+    if expiry is None:
+        return _SESSION_POLL_S
+    return max(0.0, min(_SESSION_POLL_S, expiry - time.time()))
+
+
+async def _refuse_revoked_officer_media(room: Any, identity: str) -> bool:
+    """Revoke the officer's call media if the session it was issued under is revoked (G304, ADR-0048).
+
+    The officer's media outlives their control socket until the reconnect
+    grace ends, and its LiveKit token lasts five minutes: media that came back
+    after a sign-out was bridged again with no check. True when refused.
+    """
+    state = room.state
+    if not identity or identity != getattr(state, "livekit_officer_identity", ""):
+        return False
+    if not revocation.is_revoked(
+        getattr(state, "livekit_officer_user", ""), getattr(state, "livekit_officer_issued_at", None)
+    ):
+        return False
+    logger.warning(
+        "Refused the media of a signed-out officer (ref %s) in call %s", livekit.log_ref(identity), room.call_id
+    )
+    await desk.revoke_media(room, identity)
+    return True
+
+
+async def _end_call_when_session_revoked(
+    room: Any, websocket: WebSocket, user_id: str, issued_at: float | None
+) -> None:
+    """End a signed-in caller's call once their session is revoked (G304, ADR-0048).
+
+    Checked every ``_SESSION_POLL_S`` on every transport, beside the call
+    clock. The caller's screen is told to sign in again (``signin``, as when
+    ``call_start`` is refused) and the socket closes 4401; the call ends
+    ``session_revoked`` and the endpoint's teardown follows. An anonymous
+    caller has no session to revoke and is not watched. The token's expiry
+    does not end a call: it is checked at sign-in only, as before.
+    """
+    try:
+        while room.state.mode != "ended":
+            await asyncio.sleep(_SESSION_POLL_S)
+            if not revocation.is_revoked(user_id, issued_at):
+                continue
+            # Recorded first, as the call clock does: the caller's screen
+            # closing in reply must not be taken for their own hang-up.
+            room.state.ending_reason = room.state.ending_reason or "session_revoked"
+            with contextlib.suppress(Exception):
+                async with asyncio.timeout(1.0):
+                    await websocket.send_text(json.dumps(
+                        {"type": "error", "code": "signin", "detail": "Session revoked", "recoverable": False}
+                    ))
+            with contextlib.suppress(Exception):
+                await websocket.close(code=4401)
+            # Shielded: the endpoint's teardown cancels this task, and an end
+            # cut short would leave the room's media and its row open.
+            ending = asyncio.create_task(room.end("session_revoked"))
+            _hold(ending)
+            await asyncio.shield(ending)
+            return
+    except asyncio.CancelledError:
+        return
 
 
 async def _until_disconnected(websocket: WebSocket) -> None:
@@ -519,6 +600,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
     call_id = f"call_{uuid.uuid4().hex[:12]}"
     room = None
     clock: asyncio.Task[None] | None = None
+    session_watch: asyncio.Task[None] | None = None
     try:
         await websocket.accept()
         # 5. Read first text frame: call_start
@@ -535,7 +617,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
             return
 
         try:
-            user_id, tenant_id, role, _ = _resolve_ws_principal(
+            user_id, tenant_id, role, _expiry, caller_issued_at = resolve_ws_session(
                 websocket,
                 required=auth_req,
                 token_override=str(init_msg.get("access_token") or ""),
@@ -711,6 +793,11 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
 
         # The call's time limit, on every transport.
         clock = asyncio.create_task(_call_clock(room))
+        # A signed-in caller's session, on every transport (G304, ADR-0048).
+        if user_id:
+            session_watch = asyncio.create_task(
+                _end_call_when_session_revoked(room, websocket, user_id, caller_issued_at)
+            )
 
         # 8. Run pipeline if Pipecat is present, otherwise fallback loop
         try:
@@ -750,6 +837,10 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                             call_id,
                         )
                         await desk.revoke_media(room, identity)
+                        return
+                    # The officer's media rejoining after their session was
+                    # revoked is not bridged again (G304, ADR-0048).
+                    if await _refuse_revoked_officer_media(room, identity):
                         return
                     if identity == room.state.livekit_caller_identity:
                         reconnect_task = room.caller_reconnect_task
@@ -955,6 +1046,8 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
     finally:
         if clock is not None:
             clock.cancel()
+        if session_watch is not None:
+            session_watch.cancel()
         try:
             if room:
                 await _finish_call(room)
@@ -1002,7 +1095,7 @@ async def _staff_calls_stream(websocket: WebSocket, call_id: str | None, slot: _
         auth_message = json.loads(await asyncio.wait_for(websocket.receive_text(), timeout=5.0))
         if not isinstance(auth_message, dict) or auth_message.get("type") != "authenticate":
             raise ValueError("missing WebSocket authentication message")
-        user_id, tenant_id, role, token_exp = _staff_session(
+        user_id, tenant_id, role, token_exp, token_iat = _staff_session(
             websocket, str(auth_message.get("access_token") or "")
         )
     except Exception:
@@ -1078,20 +1171,23 @@ async def _staff_calls_stream(websocket: WebSocket, call_id: str | None, slot: _
         return
 
     try:
+        last_sent = time.monotonic()
         while True:
-            if _expired(token_exp):
+            if _session_over(user_id, token_exp, token_iat):
                 await websocket.close(code=4401)
                 break
-            # Wait for an event from the hub, for the keep-alive (25 s), or
-            # for the session to expire, whichever comes first.
-            wait = 25.0 if token_exp is None else max(0.0, min(25.0, token_exp - time.time()))
+            # Wait for an event from the hub, for the next session check (at
+            # most _SESSION_POLL_S, so a revoked session closes within it), or
+            # for the session to expire, whichever comes first. It waited up
+            # to the 25 s keep-alive, which a revocation could not cut short.
+            wait = _session_wait(token_exp)
             # asyncio.timeout rather than wait_for throughout: on Python 3.11
             # wait_for drops a cancellation that lands as its operation
             # completes, and the stream would run on after being stopped.
             try:
                 async with asyncio.timeout(wait):
                     event = await queue.get()
-                if _expired(token_exp):
+                if _session_over(user_id, token_exp, token_iat):
                     await websocket.close(code=4401)
                     break
                 if (
@@ -1101,11 +1197,15 @@ async def _staff_calls_stream(websocket: WebSocket, call_id: str | None, slot: _
                     continue  # the snapshot already showed it
                 async with asyncio.timeout(5.0):
                     await websocket.send_text(json.dumps(event))
+                last_sent = time.monotonic()
             except asyncio.TimeoutError:
-                if _expired(token_exp):
+                if _session_over(user_id, token_exp, token_iat):
                     continue  # closed at the top of the loop
+                if time.monotonic() - last_sent < _STAFF_KEEPALIVE_S:
+                    continue
                 async with asyncio.timeout(5.0):
                     await websocket.send_text(json.dumps({"type": "ping", "ts": time.time()}))
+                last_sent = time.monotonic()
     except WebSocketDisconnect:
         pass
     except Exception:
@@ -1154,7 +1254,7 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
         auth_message = json.loads(await asyncio.wait_for(websocket.receive_text(), timeout=5.0))
         if not isinstance(auth_message, dict) or auth_message.get("type") != "authenticate":
             raise ValueError("missing WebSocket authentication message")
-        user_id, tenant_id, role, token_exp = _staff_session(
+        user_id, tenant_id, role, token_exp, token_iat = _staff_session(
             websocket, str(auth_message.get("access_token") or "")
         )
     except Exception:
@@ -1218,7 +1318,7 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
             gate = FrameGate("officer", call_id=call_id)
             try:
                 while room.state.mode == "bridged":
-                    if _expired(token_exp):
+                    if _session_over(user_id, token_exp, token_iat):
                         await websocket.close(code=4401)
                         break
                     try:
@@ -1259,7 +1359,7 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
         try:
             await websocket.send_text(json.dumps({"type": "authenticated"}))
             while room.state.mode == "bridged" and not gone.done():
-                if _expired(token_exp):
+                if _session_over(user_id, token_exp, token_iat):
                     await websocket.close(code=4401)
                     break
                 # Audio stops when the call ends, is held or is passed on, and
@@ -1320,6 +1420,10 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
         if use_livekit:
             room.state.livekit_officer_route_active = True
             room.state.livekit_officer_identity = officer_identity
+            # The session this media is issued under: media that rejoins after
+            # it is revoked is refused (G304, ADR-0048).
+            room.state.livekit_officer_user = user_id
+            room.state.livekit_officer_issued_at = token_iat
 
     if not use_livekit:
         await websocket.send_text(json.dumps({"type": "authenticated"}))
@@ -1408,8 +1512,13 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
                 room.state.mode == "transferring"
                 and room.state.reconnecting_officer == user_id
             ):
-                if _expired(token_exp):
+                if _session_over(user_id, token_exp, token_iat):
+                    revoked = revocation.is_revoked(user_id, token_iat)
                     await websocket.close(code=4401)
+                    if revoked:
+                        # Signed out, not just expired: their media leaves the
+                        # room now, not when the reconnect grace ends (G304).
+                        await desk.revoke_media(room, officer_identity)
                     break
                 try:
                     message = await asyncio.wait_for(websocket.receive(), timeout=1.0)
@@ -1474,16 +1583,24 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
     # a bad or excess frame is dropped and counted, and only a flood that
     # lasts closes the socket, which then takes the same path as any close.
     frame_gate = FrameGate("officer", call_id=call_id)
+    # The session is checked at least every _SESSION_POLL_S, so a revoked one
+    # closes the socket (4401) like an expired one (G304, ADR-0048). The wait
+    # used to run to the token's expiry, or for ever without one. A receive
+    # still pending when a check comes round is kept, not cancelled: a frame
+    # arriving just then is read on the next pass rather than lost.
+    receiving: asyncio.Future[Any] | None = None
     try:
         while room.state.mode == "bridged":
-            if token_exp is None:
-                msg = await websocket.receive()
-            else:
-                try:
-                    msg = await asyncio.wait_for(websocket.receive(), timeout=max(0.0, token_exp - time.time()))
-                except asyncio.TimeoutError:
-                    await websocket.close(code=4401)
-                    break
+            if _session_over(user_id, token_exp, token_iat):
+                await websocket.close(code=4401)
+                break
+            if receiving is None:
+                receiving = asyncio.ensure_future(websocket.receive())
+            done, _pending = await asyncio.wait({receiving}, timeout=_session_wait(token_exp))
+            if not done:
+                continue
+            msg = receiving.result()
+            receiving = None
             if msg.get("type") == "websocket.disconnect":
                 break
             if msg.get("bytes") is not None:
@@ -1504,6 +1621,8 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
     except Exception:
         logger.debug("Officer audio connection closed", exc_info=True)
     finally:
+        if receiving is not None and not receiving.done():
+            receiving.cancel()
         await officer_leg.close()
         room.officer = None
         if room.state.mode == "bridged":

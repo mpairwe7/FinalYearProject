@@ -27,6 +27,7 @@ from fastapi import Depends, Header, HTTPException, Request
 from ..flags import flags
 from .jwt_auth import APP_ENV, JWTAuthError, JWTVerifier
 from .models import AuthUser
+from .revocation import claims_revoked
 
 logger = logging.getLogger(__name__)
 
@@ -231,8 +232,10 @@ def _anonymous_context(request: Request) -> AuthContext:
 
 def _resolve_bearer_context(request: Request, authorization: str) -> AuthContext:
     token = authorization.split(" ", 1)[1].strip()
+    from_provider = False
     try:
         claims = _get_verifier().verify(token)
+        from_provider = True
     except JWTAuthError as e:
         verifier = _get_verifier()
         if APP_ENV != "production" and verifier.dev_secret and "unexpected alg" in str(e):
@@ -248,13 +251,20 @@ def _resolve_bearer_context(request: Request, authorization: str) -> AuthContext
             # middleware (app.security_events), with this reason attached.
             request.state.security_reason = f"invalid token: {e}"[:160]
             raise HTTPException(status_code=401, detail=f"invalid token: {e}") from e
-    else:
-        # A provider's access token often carries no name or email; fill them
-        # from its profile (cached) so nobody is shown a bare account id.
-        if _get_verifier().alg == "RS256":
-            from .userinfo import with_profile
 
-            claims = with_profile(token, claims)
+    # Signed out of, or revoked by an administrator, before it expired (G304,
+    # ADR-0048). Checked before the profile fetch: a revoked token reaches
+    # nothing else. A token with no `iat` is not affected (see revocation).
+    if claims_revoked(claims):
+        request.state.security_reason = "session revoked"
+        raise HTTPException(status_code=401, detail="session revoked")
+
+    # A provider's access token often carries no name or email; fill them
+    # from its profile (cached) so nobody is shown a bare account id.
+    if from_provider and _get_verifier().alg == "RS256":
+        from .userinfo import with_profile
+
+        claims = with_profile(token, claims)
 
     user = _claims_to_user(claims)
     ctx = AuthContext(authenticated=True, user=user, claims=claims)

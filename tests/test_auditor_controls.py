@@ -421,6 +421,7 @@ def test_every_admin_write_route_refuses_an_auditor(client, tenant):
         "tombstone_id": "tomb_test123",
         "precedence_id": "prec_test123",
         "notification_id": "ntf_test123",
+        "user_id": "user-matrix",
     }
     auditor = _headers("aud-matrix", "ura_auditor", tenant)
     checked, leaks = [], []

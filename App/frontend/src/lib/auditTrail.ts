@@ -30,6 +30,8 @@ const EVENT_LABEL: Record<string, string> = {
   "staff.outbox_retried": "Retried a failed or queued notification",
   "staff.outbox_test_sent": "Sent a live test notification",
   "staff.connector_toggled": "Enabled or disabled a system connector",
+  "staff.session_revoked": "Signed someone out everywhere",
+  "auth.signed_out_everywhere": "Signed out everywhere",
   voice_staff_viewed_call: "Opened a call and its transcript",
   voice_staff_listened_call: "Listened in to a live call",
   voice_staff_viewed_brief: "Opened a call brief",

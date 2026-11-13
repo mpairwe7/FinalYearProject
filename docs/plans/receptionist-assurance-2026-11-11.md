@@ -262,6 +262,24 @@ Left open by this part:
   until they release it or the call ends.
 - **Revocation before a token expires** (G304, part D).
 
+## Phase 8 part D — sessions can be revoked
+
+[ADR-0048](../adr/0048-sessions-can-be-revoked.md). Tests:
+`App/backend/tests/test_session_revocation.py`,
+`App/frontend/src/__tests__/lib/signOutRevokesSession.test.tsx`.
+
+| Gap | What changed |
+| --- | --- |
+| G304 | `revoked_sessions` keeps one cutoff per person; a token whose `iat` is before it is revoked. `POST /v1/me/logout` (sign out everywhere) and `POST /v1/admin/users/{user_id}/revoke` (ura_admin) write it; every process re-reads it every 5 s. A revoked token gets 401 `session revoked` and is refused at socket sign-in. Open staff sockets and a signed-in caller's call check at least every 5 s and close 4401. A revoked officer's LiveKit media is revoked at once and refused if it rejoins. The browser's sign-outs call the logout before clearing the token. |
+
+Left open by this part:
+
+- **A token with no `iat`** cannot be revoked.
+- **The live ticket stream** checks the session at sign-in only; the MCP server's
+  bearer check does not read the list.
+- **The officer's LiveKit identity** is the same on every sign-in, so an old media
+  client that rejoins after the officer signed in again is not told apart.
+
 ## Not in scope
 
 Needs staging, real callers or an owner's decision: self-hosted token replay

@@ -133,8 +133,9 @@ def _verified_ws_claims(
 
     The token is the *token_override* (sent in the first application message)
     when one is given, else the ``Authorization`` header or the query string.
-    Raises :class:`JWTAuthError` for a token that does not verify, and for no
-    token at all when *required*.
+    Raises :class:`JWTAuthError` for a token that does not verify, for a
+    token whose session was revoked (G304, ADR-0048), and for no token at all
+    when *required*.
     """
     auth_header = websocket.headers.get("authorization", "")
     token = ""
@@ -162,6 +163,10 @@ def _verified_ws_claims(
             claims = _hs256_verify(token, verifier.dev_secret)
         else:
             raise
+    from .auth.revocation import claims_revoked
+
+    if claims_revoked(claims):
+        raise JWTAuthError("session revoked")
     return claims
 
 
@@ -198,18 +203,23 @@ def _resolve_ws_principal(
 
 def resolve_ws_session(
     websocket: WebSocket, *, required: bool = False, token_override: str | None = None
-) -> tuple[str, str, str, float | None]:
-    """Resolve ``(user_id, tenant_id, user_role, expiry)`` for a socket that outlives its request.
+) -> tuple[str, str, str, float | None, float | None]:
+    """Resolve ``(user_id, tenant_id, user_role, expiry, issued_at)`` for a socket that outlives its request.
 
     *expiry* is the verified token's ``exp`` (epoch seconds), or ``None`` when
     the token carries none or the socket is anonymous. A long-lived socket
     closes itself then: the verifier only checks expiry at sign-in.
+    *issued_at* is its ``iat``, or ``None``: the socket's loop compares it with
+    the person's revocation cutoff, so a session revoked after sign-in also
+    closes the socket (G304, ADR-0048).
     """
+    from .auth.revocation import issued_at
+
     claims = _verified_ws_claims(websocket, required=required, token_override=token_override)
     user_id, tenant_id, role, _purposes = _principal_of(claims)
     exp = claims.get("exp") if claims else None
     expiry = float(exp) if isinstance(exp, (int, float)) and not isinstance(exp, bool) and exp > 0 else None
-    return user_id, tenant_id, role, expiry
+    return user_id, tenant_id, role, expiry, issued_at(claims)
 
 
 @dataclass

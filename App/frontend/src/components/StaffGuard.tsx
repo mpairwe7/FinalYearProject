@@ -31,6 +31,7 @@ import {
   subscribeAuthToken,
 } from "../lib/authSession";
 import { endOidcSession } from "../lib/oidcFlow";
+import { endServerSession } from "../services/accountApi";
 import { isStaffRole, signedInName, staffLandingPath, staffSectionsFor, watchesLiveQueue } from "../lib/roles";
 import { useTicketStream, type LiveEscalation } from "../hooks/useTicketStream";
 import AccountMenu from "./ops/AccountMenu";
@@ -85,6 +86,8 @@ type State =
 
 function signOut() {
   const method = getAuthMethod();
+  // Revoke the token on the server before dropping it here (ADR-0048).
+  endServerSession();
   clearAuthToken();
   // The other half of signing out: end the session at the identity provider,
   // or the next sign-in is answered silently from its surviving cookie and

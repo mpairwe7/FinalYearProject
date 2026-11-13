@@ -93,6 +93,10 @@ def _resolve_ws_auth(websocket: WebSocket, *, required: bool = False) -> tuple[s
             claims = _hs256_verify(token, verifier.dev_secret)
         else:
             raise
+    from .auth.revocation import claims_revoked
+
+    if claims_revoked(claims):  # signed out before it expired (G304, ADR-0048)
+        raise JWTAuthError("session revoked")
     return str(claims.get("sub", "")), str(claims.get("tenant_id", "default"))
 
 
