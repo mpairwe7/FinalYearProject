@@ -712,7 +712,7 @@ test.describe("Staff UI on Chromium", () => {
       );
       // Counts the turns actually rendered rather than handoff.turns_before_handoff,
       // so the label can never claim more conversation than the pane shows.
-      await expect(page.getByText(/1 turn, as it stood/)).toBeVisible();
+      await expect(page.getByText(/1 turn, brought up to date/)).toBeVisible();
     });
 
     test("taxpayer reply and internal note stay separate inputs", async ({ page }) => {

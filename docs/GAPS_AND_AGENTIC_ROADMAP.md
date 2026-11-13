@@ -678,7 +678,7 @@ A review of the whole call flow: what the AI says, the handoff, the officer's de
 
 ### Intelligent UI assurance — 2026-11-13
 
-A review of every surface where the AI meets a person: the chat's trust signals, its actions and handoff, the staff console's oversight, and voice, capture, offline and language. [Evidence, sources, phases and the audit prompt](plans/intelligent-ui-integration-audit-2026-11-13.md); phase 1 decisions in ADR-0048, phase 2 in ADR-0049, phase 3 in ADR-0050. Fixed means implemented with a regression test that failed first; nothing here was exercised on the Space, a real microphone, a screen reader or by a first-language reader.
+A review of every surface where the AI meets a person: the chat's trust signals, its actions and handoff, the staff console's oversight, and voice, capture, offline and language. [Evidence, sources, phases and the audit prompt](plans/intelligent-ui-integration-audit-2026-11-13.md); phase 1 decisions in ADR-0048, phase 2 in ADR-0049, phase 3 in ADR-0050, phase 4 in ADR-0051. Fixed means implemented with a regression test that failed first; nothing here was exercised on the Space, a real microphone, a screen reader or by a first-language reader.
 
 | Gap | Finding | Status |
 | --- | --- | --- |
@@ -704,11 +704,11 @@ A review of every surface where the AI meets a person: the chat's trust signals,
 | G637 🟡 | The overrides console says "character for character" and "word for word" while matching normalized, rewritten and translated questions across tenants, and replaces an existing override silently. | Mitigated 2026-11-13 (ADR-0050): the console shows the normalized key, explains rewritten and translated matching, shows the live answer a save replaces; the ledger records `replaced` and before/after digests of the reply the write itself replaced. Open: overrides are not tenant-scoped (the table, lookup and upsert key on the normalized question alone), so one tenant's override answers, and can replace, another's. |
 | G638 🟢 | ~~The flags console calls overrides durable on the Space, labels stored overrides "this replica", and switches the figure hold with one click.~~ | Fixed 2026-11-13 (ADR-0050): `overrides_durability` from where the store lives (`ANALYTICS_DB_PERSISTENT`); stored overrides labelled "every process"; safety flags ask before switching off. |
 | G639 🟢 | ~~"Reopen" in Needs review deletes an auditor's finding and note without confirmation or history.~~ | Fixed 2026-11-13 (ADR-0050): every decision is appended to `audit_review_history`, returned with the queue; Reopen asks first and earlier decisions are shown. |
-| G640 ⚪ | The officer's case view drops the AI's evidence and doubt the API returns (claim check, withheld figure, judge revision, sources). | Open: phase 4. |
-| G641 ⚪ | AI answers after escalation never reach the ticket; a second escalation does not raise priority or reasons. | Open: phase 4. |
-| G642 ⚪ | The machine translation of the taxpayer's words is shown as "Taxpayer [EN]". | Open: phase 4. |
-| G643 ⚪ | An auditor is offered "assign to me", which the API refuses silently. | Open: phase 4. |
-| G644 ⚪ | "Found helpful" shows 0% "Below target" with no ratings or a failed request. | Open: phase 4. |
+| G640 🟢 | ~~The officer's case view drops the AI's evidence and doubt the API returns (claim check, withheld figure, judge revision, sources).~~ | Fixed 2026-11-13 (ADR-0051): a "What the AI did" block shows the judge's signals as a model's and the sources reviewed; the escalated turn keeps its sources. |
+| G641 🟢 | ~~AI answers after escalation never reach the ticket; a second escalation does not raise priority or reasons.~~ | Fixed 2026-11-13 (ADR-0051): a reused ticket gets the turns since its snapshot and a raised (never lowered) priority (`db.refresh_open_ticket`). |
+| G642 🟢 | ~~The machine translation of the taxpayer's words is shown as "Taxpayer [EN]".~~ | Fixed 2026-11-13 (ADR-0051): labelled "machine translation (for search; may differ)" with the taxpayer's words kept beside it. |
+| G643 🟢 | ~~An auditor is offered "assign to me", which the API refuses silently.~~ | Fixed 2026-11-13 (ADR-0051): the shortcut and its hint are for officers only. |
+| G644 🟢 | ~~"Found helpful" shows 0% "Below target" with no ratings or a failed request.~~ | Fixed 2026-11-13 (ADR-0051): a gauge with no data shows why and no verdict. |
 | G645 ⚪ | A partial read-aloud counts as complete and voice mode reopens the microphone. | Open: phase 5. |
 | G646 ⚪ | Voice mode never speaks an answer's caveats or a failed answer. | Open: phase 5. |
 | G647 ⚪ | Voice mode removes the only always-visible AI notice (EU AI Act Art. 50(1)); the manifest has no `verified_by` for it. | Open: phase 5. |
@@ -1405,7 +1405,9 @@ full agent chain is locked.
 
 ---
 
-*Document version 3.30 — updated 2026-11-13: intelligent UI assurance phase 3 (ADR-0050): G635, G636, G638 and G639 fixed; G634 and G637 mitigated (tenant scoping open for discrepancies and overrides).*
+*Document version 3.31 — updated 2026-11-13: intelligent UI assurance phase 4 (ADR-0051): G640–G644 fixed.*
+
+*Previously: version 3.30 — updated 2026-11-13: intelligent UI assurance phase 3 (ADR-0050): G635, G636, G638 and G639 fixed; G634 and G637 mitigated (tenant scoping open for discrepancies and overrides).*
 
 *Previously: version 3.29 — updated 2026-11-13: phase 8 part D of the call receptionist review (ADR-0053): G304 closed (sessions can be revoked before their tokens expire); G656 opened for what revocation does not yet reach.*
 

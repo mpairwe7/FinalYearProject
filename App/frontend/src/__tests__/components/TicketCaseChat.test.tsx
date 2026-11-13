@@ -190,3 +190,49 @@ describe("TicketCase — the handoff brief (Phase 38)", () => {
     expect(screen.queryByTestId("handoff-already-given")).not.toBeInTheDocument();
   });
 });
+
+// G640: the case view showed the AI's reply as "Assistant" text only. The API
+// returns the judge's verdict (claim check, withheld figure, revision) and the
+// sources the handoff reviewed; an officer could not see any of it.
+describe("TicketCase — what the AI did", () => {
+  it("shows the AI's checks and sources, as a model's output", () => {
+    renderCase({
+      ...LIVE,
+      handoff: { sources_reviewed: ["vat_act.pdf", "ura_vat_faqs.csv"] },
+      response_judge: {
+        decision: "escalate",
+        applied_revision: true,
+        confidence_band: "low",
+        reasons: ["claim check did not run"],
+        claim_verification: { decision: "unavailable" },
+        withheld_contradicted: true,
+      },
+    } as unknown as TicketDetail);
+    const evidence = screen.getByRole("region", { name: /What the AI did/i });
+    expect(evidence).toHaveTextContent(/claim check did not run/i);
+    expect(evidence).toHaveTextContent(/figure was withheld/i);
+    expect(evidence).toHaveTextContent(/revised by the answer judge, a model/i);
+    expect(evidence).toHaveTextContent(/confidence: low/i);
+    expect(within(evidence).getByText("vat_act.pdf")).toBeInTheDocument();
+  });
+
+  it("says when nothing was recorded rather than implying all was well", () => {
+    renderCase(LIVE);
+    expect(screen.getByRole("region", { name: /What the AI did/i })).toHaveTextContent(
+      /No record of the AI's checks was kept/i,
+    );
+  });
+
+  // G642: the machine translation of the taxpayer's words was shown as theirs.
+  it("labels the machine translation of the taxpayer's words", () => {
+    renderCase({
+      ...LIVE,
+      locale: "lg",
+      transcript: [{ user_message: "Lwaki nnasoloozebwa emirundi ebiri?", user_message_en: "Why was I taxed twice?", bot_reply: "", created_at: NOW - 3600 }],
+    } as TicketDetail);
+    fireEvent.click(screen.getByRole("button", { name: "English Only" }));
+    expect(screen.queryByText(/Taxpayer \[EN\]/)).toBeNull();
+    expect(screen.getAllByText(/Machine translation/i).length).toBeGreaterThan(0);
+    expect(screen.getByText("Lwaki nnasoloozebwa emirundi ebiri?")).toBeInTheDocument();
+  });
+});

@@ -214,6 +214,12 @@ endpoint: the officer completes the action in their own system or declines it, a
   "Customs documents check", "Objection (Sec 24)" and "TIN status" insert text
   with `[[…]]` parts; the composer will not send until each is replaced with what
   the officer actually found.
+- **What the AI did** heads every case: whether the claim check ran, a withheld
+  figure, a judge revision, the judge's confidence (all labelled as a model's)
+  and the sources reviewed. "No record … read its answer as unchecked" means the
+  ticket was raised without a judge verdict (ADR-0051).
+- **A re-escalation updates the ticket**: answers given since the last snapshot
+  are appended and the priority rises if the new one is higher (G641).
 - **Hotfixes from discrepancy reports** need a statute reference for a precedence
   rule and show what they change before they apply; each write is on the audit
   trail (`staff.precedence_created`, `staff.tombstone_created`,

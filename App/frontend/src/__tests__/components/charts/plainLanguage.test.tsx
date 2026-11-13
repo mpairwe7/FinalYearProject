@@ -103,6 +103,18 @@ describe("RetrievalModeChart", () => {
 describe("SloGaugeCard", () => {
   const base = { value: 1400, target: 2000, unit: "ms", invert: true };
 
+  // G644: "Found helpful" showed 0% "Below target" when nothing had been rated
+  // or the request failed: missing data read as a measured failure.
+  it("says there is no measurement instead of showing zero against the target", () => {
+    render(
+      <SloGaugeCard label="Found helpful by taxpayers" value={null} target={80} unit="%" emptyText="No answers have been rated in this period." />,
+    );
+    expect(screen.getByText("No answers have been rated in this period.")).toBeInTheDocument();
+    expect(screen.queryByText(/Below target/)).toBeNull();
+    expect(screen.queryByText("0")).toBeNull();
+    expect(screen.queryByRole("img")).toBeNull();
+  });
+
   it("shows the figure in a unit a reader thinks in, and the target in words", () => {
     render(
       <SloGaugeCard

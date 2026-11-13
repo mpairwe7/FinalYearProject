@@ -2399,6 +2399,44 @@ def list_tickets(
     return [_hydrate_ticket(r) for r in rows]
 
 
+_TICKET_PRIORITY_RANK = {"low": 0, "normal": 1, "high": 2, "urgent": 3}
+
+
+def refresh_open_ticket(
+    ticket_id: str,
+    *,
+    new_turns: list[dict[str, Any]],
+    priority: str | None = None,
+) -> bool:
+    """Bring a reused open ticket up to date (G641).
+
+    A second escalation of the same conversation reuses its open ticket. The
+    turns since the ticket's last snapshot (AI answers given while the
+    taxpayer waited, and the turn that escalated again) are appended, and the
+    priority is raised to the new one if it is higher; it is never lowered.
+    Taxpayer follow-ups already on the ticket stay where they are.
+    """
+    ticket = get_ticket(ticket_id)
+    if not ticket:
+        return False
+    transcript = list(ticket.get("transcript") or [])
+    last = max((float(t.get("created_at") or 0.0) for t in transcript), default=0.0)
+    added = [t for t in new_turns if float(t.get("created_at") or 0.0) > last]
+    current = str(ticket.get("priority") or "normal")
+    wanted = str(priority or current)
+    raised = _TICKET_PRIORITY_RANK.get(wanted, 1) > _TICKET_PRIORITY_RANK.get(current, 1)
+    if not added and not raised:
+        return False
+    transcript.extend(added)
+    conn = _get_connection()
+    conn.execute(
+        "UPDATE tickets SET transcript_json = ?, priority = ?, updated_at = ? WHERE id = ?",
+        (json.dumps(transcript), wanted if raised else current, time.time(), ticket_id),
+    )
+    conn.commit()
+    return True
+
+
 def append_taxpayer_reply(ticket_id: str, message: str) -> dict[str, Any] | None:
     """Append a taxpayer follow-up message to the ticket transcript."""
     ticket = get_ticket(ticket_id)

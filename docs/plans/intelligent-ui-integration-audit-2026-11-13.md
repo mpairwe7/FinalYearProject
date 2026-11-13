@@ -1,7 +1,7 @@
 # Intelligent UI integration audit — 13 November 2026
 
-Status: phase 1 implemented (PR 727); phase 2 on `fix/intelligent-ui-p2-human-handoff-2026-11`; phase 3 on `fix/intelligent-ui-p3-staff-controls-2026-11`; phases 4 to 6 open.
-Baseline: `dev` at `882a99b5`. Decisions: [ADR-0048](../adr/0048-figures-and-disclosures-the-taxpayer-sees.md) (phase 1), [ADR-0049](../adr/0049-a-promise-of-a-human-is-kept.md) (phase 2), [ADR-0050](../adr/0050-staff-controls-say-what-they-do.md) (phase 3).
+Status: phase 1 implemented (PR 727); phase 2 on `fix/intelligent-ui-p2-human-handoff-2026-11`; phase 3 on `fix/intelligent-ui-p3-staff-controls-2026-11`; phase 4 on `fix/intelligent-ui-p4-officer-evidence-2026-11`; phases 5 and 6 open.
+Baseline: `dev` at `882a99b5`. Decisions: [ADR-0048](../adr/0048-figures-and-disclosures-the-taxpayer-sees.md) (phase 1), [ADR-0049](../adr/0049-a-promise-of-a-human-is-kept.md) (phase 2), [ADR-0050](../adr/0050-staff-controls-say-what-they-do.md) (phase 3), [ADR-0051](../adr/0051-officers-see-what-the-ai-did.md) (phase 4).
 Follows the [30 October audit](intelligent-ui-integration-audit-2026-10.md) (UI-01 to UI-13, ADR-0018).
 
 That audit covered the chat's REST/SSE contract, action boundaries and the
@@ -122,9 +122,11 @@ All six were implemented with a test watched failing first. ADR-0050 records whe
 | G638 | Medium | The flags console calls overrides durable where the Space loses them on restart (G616), labels a stored override "this replica", and switches `stream_figure_hold` (the FigureReleaseGate) with one click. | Report durability from where the store lives; label reach correctly; confirm figure, audit and guard flags. |
 | G639 | Medium | "Reopen" in Needs review deletes an auditor's finding and note in one click with no confirmation; the ledger keeps only `note_chars`. | Append-only review history; confirm Reopen; show prior decisions. |
 
-## Phase 4 — officers see what the AI did
+## Phase 4 — officers see what the AI did (implemented, ADR-0051)
 
-| Gap | Severity | Finding | Planned fix |
+All five were implemented as planned, each with a test watched failing first.
+
+| Gap | Severity | Finding | Fix |
 | --- | --- | --- | --- |
 | G640 | High | The officer's case view shows the AI's reply as "Assistant" text only. The API returns `response_judge` (claim check unavailable, a figure withheld as contradicted, a revision) and `handoff.sources_reviewed`; none is rendered, and the escalated turn's sources are stored empty. | An "AI evidence" block: sources, claim check not run, figure withheld, judge revision (labelled a model's opinion). |
 | G641 | High | AI answers given after escalation never reach the ticket, and a second escalation reuses the ticket without raising its priority or reasons, so the officer works from the first snapshot. | Append later turns and raise priority and reasons on reuse; show "answers since escalation". |

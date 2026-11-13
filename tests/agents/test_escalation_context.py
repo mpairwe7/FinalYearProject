@@ -456,3 +456,79 @@ class TestConversationContextUserIsolation:
         )
         assert session.try_resume("resp-owned") is False
         assert session.history == []
+
+
+class TestTheEscalatedTurnNamesItsSources:
+    """G640: the turn that triggered the handoff was stored with no sources, so
+    the officer could not see what the answer they were taking over rested on."""
+
+    def test_the_sources_the_handoff_reviewed_are_on_the_escalated_turn(self, seeded, monkeypatch):
+        from app.flags import flags
+        from app.service import ChatModel
+
+        monkeypatch.setenv("FLAG_TICKET_QUEUE", "true")
+        flags.set("ticket_queue", True)
+        model = ChatModel.__new__(ChatModel)
+        ticket_id = model._maybe_create_ticket(
+            reason="taxpayer asked for an officer",
+            user_query="it is still not showing",
+            bot_reply="Let me check what could cause that.",
+            session_id="sess1",
+            conversation_id="conv-abc",
+            handoff={"summary": "VAT registration not showing", "sources_reviewed": ["vat_registration_faqs.csv", "vat_act.pdf"]},
+            user_id="oidc-sub-123",
+        )
+        assert ticket_id
+        last = seeded.get_ticket(ticket_id)["transcript"][-1]
+        assert last["topic_tag"] == "escalated"
+        assert last["sources"] == ["vat_registration_faqs.csv", "vat_act.pdf"]
+
+
+class TestAReusedTicketIsBroughtUpToDate:
+    """G641: AI answers given after escalation never reached the ticket, and a
+    second escalation reused it without raising its priority, so the officer
+    worked from the first snapshot."""
+
+    def test_later_turns_and_a_higher_priority_reach_the_open_ticket(self, seeded, monkeypatch):
+        from app.flags import flags
+        from app.service import ChatModel
+
+        monkeypatch.setenv("FLAG_TICKET_QUEUE", "true")
+        flags.set("ticket_queue", True)
+        model = ChatModel.__new__(ChatModel)
+        first = model._maybe_create_ticket(
+            reason="taxpayer asked for an officer", user_query="it is still not showing",
+            bot_reply="An officer will look at this.", session_id="sess1", conversation_id="conv-abc",
+            user_id="oidc-sub-123", priority="normal",
+        )
+        time.sleep(0.01)
+        seeded.log_conversation(
+            session_id="sess1", conversation_id="conv-abc",
+            user_message="what is the penalty if I file late?",
+            bot_reply="The penalty is UGX 200,000 or 2% of the tax, whichever is higher.",
+            user_id="oidc-sub-123",
+        )
+        time.sleep(0.01)
+        second = model._maybe_create_ticket(
+            reason="deadline today", user_query="my deadline is today, please help",
+            bot_reply="An officer will look at this.", session_id="sess1", conversation_id="conv-abc",
+            user_id="oidc-sub-123", priority="urgent",
+        )
+        assert second == first
+        ticket = seeded.get_ticket(first)
+        assert ticket["priority"] == "urgent"
+        replies = [t.get("bot_reply", "") for t in ticket["transcript"]]
+        assert any("UGX 200,000" in r for r in replies)
+        assert ticket["transcript"][-1]["user_message"] == "my deadline is today, please help"
+
+    def test_a_lower_priority_does_not_lower_it(self, seeded, monkeypatch):
+        from app.flags import flags
+        from app.service import ChatModel
+
+        monkeypatch.setenv("FLAG_TICKET_QUEUE", "true")
+        flags.set("ticket_queue", True)
+        model = ChatModel.__new__(ChatModel)
+        kw = dict(reason="r", bot_reply="b", session_id="sess1", conversation_id="conv-abc", user_id="oidc-sub-123")
+        first = model._maybe_create_ticket(user_query="q1", priority="high", **kw)
+        model._maybe_create_ticket(user_query="q2", priority="low", **kw)
+        assert seeded.get_ticket(first)["priority"] == "high"

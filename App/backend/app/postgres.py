@@ -1499,6 +1499,39 @@ def append_taxpayer_reply(ticket_id: str, message: str) -> dict[str, Any] | None
     return get_ticket(ticket_id)
 
 
+_TICKET_PRIORITY_RANK = {"low": 0, "normal": 1, "high": 2, "urgent": 3}
+
+
+def refresh_open_ticket(
+    ticket_id: str,
+    *,
+    new_turns: list[dict[str, Any]],
+    priority: str | None = None,
+) -> bool:
+    """Postgres mirror of :func:`database.refresh_open_ticket` (G641)."""
+    ticket = get_ticket(ticket_id)
+    if not ticket:
+        return False
+    transcript = list(ticket.get("transcript") or [])
+    last = max((float(t.get("created_at") or 0.0) for t in transcript), default=0.0)
+    added = [t for t in new_turns if float(t.get("created_at") or 0.0) > last]
+    current = str(ticket.get("priority") or "normal")
+    wanted = str(priority or current)
+    raised = _TICKET_PRIORITY_RANK.get(wanted, 1) > _TICKET_PRIORITY_RANK.get(current, 1)
+    if not added and not raised:
+        return False
+    transcript.extend(added)
+    pool = _get_pool()
+    if pool is None:
+        return False
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE tickets SET transcript_json = %s, priority = %s, updated_at = %s WHERE id = %s",
+            (json.dumps(transcript), wanted if raised else current, time.time(), ticket_id),
+        )
+    return True
+
+
 def find_open_ticket(conversation_id: str, tenant_id: str | None = None) -> dict[str, Any] | None:
     """Postgres mirror of :func:`database.find_open_ticket`."""
     pool = _get_pool()

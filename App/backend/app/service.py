@@ -8523,7 +8523,12 @@ class ChatModel:
                 "user_message": self.redact_for_storage(user_query),
                 "bot_reply": self.redact_for_storage(bot_reply),
                 "created_at": time.time(),
-                "sources": [],
+                # G640: what the escalated answer rested on, for the officer.
+                "sources": [
+                    str(src)[:200]
+                    for src in ((handoff or {}).get("sources_reviewed") or [])[:10]
+                    if isinstance(src, str) and src.strip()
+                ],
                 "topic_tag": "escalated",
             }
         )
@@ -8552,6 +8557,14 @@ class ChatModel:
         if existing:
             ticket_id = str(existing.get("id", ""))
             logger.info("escalation reuses open ticket %s", ticket_id)
+            # G641: the officer works from this ticket. Without this, answers
+            # the AI gave while the taxpayer waited, and the turn that
+            # escalated again, never reached it, and a higher priority (a
+            # deadline today) left it in the queue at the old one.
+            try:
+                db.refresh_open_ticket(ticket_id, new_turns=transcript, priority=priority)
+            except Exception:
+                logger.exception("refreshing reused ticket %s failed", ticket_id)
             if handoff is not None and ticket_id:
                 handoff["ticket_id"] = ticket_id
                 handoff["reused_existing_ticket"] = True
