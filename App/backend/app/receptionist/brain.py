@@ -2703,7 +2703,7 @@ class UraReceptionistBrain(LLMService):
         if self.room.state.mode != "transferring":
             # An officer took the call (or it ended) while the notice was
             # being said: a waiting screen sent now would replace theirs (G657).
-            logger.info("Call %s left the queue before its waiting screen was sent", self.room.call_id)
+            logger.info("Call %s is no longer queued; its queue status was not sent", self.room.call_id)
             return
         await self.push_frame(
             OutputTransportMessageFrame(status_event), FrameDirection.DOWNSTREAM
