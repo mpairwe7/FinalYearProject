@@ -813,6 +813,16 @@ def init_db() -> None:
             updated_at REAL NOT NULL
         );
 
+        -- A person's sessions revoked before their tokens expire (G304,
+        -- ADR-0053): a token issued before `revoked_before` is refused.
+        CREATE TABLE IF NOT EXISTS revoked_sessions (
+            user_id        TEXT PRIMARY KEY,
+            revoked_before REAL NOT NULL,
+            reason         TEXT,
+            actor          TEXT,
+            created_at     REAL
+        );
+
         CREATE TABLE IF NOT EXISTS reminder_inbox (
             id            TEXT PRIMARY KEY,
             user_id       TEXT NOT NULL,
@@ -2714,6 +2724,47 @@ def clear_flag_override(name: str) -> None:
     conn = _get_connection()
     conn.execute("DELETE FROM flag_overrides WHERE name = ?", (key,))
     conn.commit()
+
+
+def revoke_sessions(user_id: str, *, revoked_before: float, reason: str = "", actor: str = "") -> None:
+    """Revoke every token *user_id* was issued before *revoked_before* (G304, ADR-0053).
+
+    One row per person. A later cutoff replaces an earlier one and an earlier
+    one never moves it back: a token once revoked stays revoked. ``reason``
+    and ``actor`` describe the latest change.
+    """
+    uid = (user_id or "").strip()
+    if not uid:
+        raise ValueError("a revocation needs a user id")
+    conn = _get_connection()
+    conn.execute(
+        """INSERT INTO revoked_sessions (user_id, revoked_before, reason, actor, created_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(user_id) DO UPDATE SET
+               revoked_before = MAX(revoked_sessions.revoked_before, excluded.revoked_before),
+               reason = excluded.reason,
+               actor = excluded.actor,
+               created_at = excluded.created_at""",
+        (uid, float(revoked_before), (reason or "")[:200], (actor or "")[:128], time.time()),
+    )
+    conn.commit()
+
+
+def load_session_revocations() -> dict[str, float]:
+    """``{user_id: revoked_before}`` for every revoked person, raising when the store cannot be read.
+
+    As with :func:`load_flag_overrides`, a failed read is not an empty table:
+    read as ``{}``, a broken store would look like nobody was ever signed out.
+    The revocation sync keeps its current map when this raises.
+    """
+    conn = _get_connection()
+    rows = conn.execute("SELECT user_id, revoked_before FROM revoked_sessions").fetchall()
+    out: dict[str, float] = {}
+    for row in rows:
+        uid = row["user_id"] if not isinstance(row, tuple) else row[0]
+        cutoff = row["revoked_before"] if not isinstance(row, tuple) else row[1]
+        out[str(uid)] = float(cutoff)
+    return out
 
 
 def upsert_reminder_inbox(
@@ -4672,6 +4723,8 @@ if ANALYTICS_BACKEND == "postgres":
         load_flag_overrides = _pg.load_flag_overrides  # type: ignore
         save_flag_override = _pg.save_flag_override  # type: ignore
         clear_flag_override = _pg.clear_flag_override  # type: ignore
+        revoke_sessions = _pg.revoke_sessions  # type: ignore
+        load_session_revocations = _pg.load_session_revocations  # type: ignore
         upsert_reminder_inbox = _pg.upsert_reminder_inbox  # type: ignore
         list_reminder_inbox = _pg.list_reminder_inbox  # type: ignore
         enqueue_notification = _pg.enqueue_notification  # type: ignore

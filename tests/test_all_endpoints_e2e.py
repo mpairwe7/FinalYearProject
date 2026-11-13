@@ -132,6 +132,7 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("GET", "/v1/admin/flags"),
     ("PATCH", "/v1/admin/flags/{name}"),
     ("DELETE", "/v1/admin/flags/{name}"),
+    ("POST", "/v1/admin/users/{user_id}/revoke"),
     ("GET", "/v1/admin/overrides"),
     ("PUT", "/v1/admin/overrides"),
     ("DELETE", "/v1/admin/overrides/{override_id}"),
@@ -192,6 +193,7 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("GET", "/v1/me/consents"),
     ("POST", "/v1/me/consents/grant"),
     ("POST", "/v1/me/consents/withdraw"),
+    ("POST", "/v1/me/logout"),
     ("GET", "/v1/me/export"),
     # --- Quantized models + offline RAG (flag gated) ---
     ("GET", "/v1/models/quantized"),
@@ -281,6 +283,7 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("GET", "/v1/admin/flags"): "test_api_endpoints.AdminEndpoints.test_flags_list_includes_protection",
     ("PATCH", "/v1/admin/flags/{name}"): "test_api_endpoints.AdminEndpoints.test_admin_can_set_an_ephemeral_flag",
     ("DELETE", "/v1/admin/flags/{name}"): "test_api_endpoints.AdminEndpoints.test_clearing_an_override_restores_the_default",
+    ("POST", "/v1/admin/users/{user_id}/revoke"): "test_session_revocation.test_only_an_administrator_revokes_someone_else",
     ("GET", "/v1/admin/voice_audit"): "test_api_endpoints.AdminEndpoints",
     ("GET", "/v1/admin/offline_stats"): "test_api_endpoints.AdminEndpoints",
     ("POST", "/v1/index"): "test_api_endpoints.OpsKeyEndpoints",
@@ -334,6 +337,7 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("GET", "/v1/me/consents"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
     ("POST", "/v1/me/consents/grant"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
     ("POST", "/v1/me/consents/withdraw"): "test_me_endpoints",
+    ("POST", "/v1/me/logout"): "test_session_revocation.test_sign_out_everywhere_refuses_the_token_and_a_later_sign_in_works",
     ("GET", "/v1/me/export"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
     ("GET", "/v1/models/quantized"): "this:test_quantized_models_flag_on",
     ("GET", "/v1/offline/status"): "this:test_offline_status_flag_on",
@@ -514,10 +518,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (126 HTTP + 7 WS)."""
+    """Lock the surface size so additions are deliberate (128 HTTP + 7 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 126, f"expected 126 HTTP endpoints, found {len(http)}"
+    assert len(http) == 128, f"expected 128 HTTP endpoints, found {len(http)}"
     assert len(ws) == 7, f"expected 7 WS endpoints, found {len(ws)}"
 
 

@@ -220,7 +220,7 @@ class AssuranceTests(unittest.IsolatedAsyncioTestCase):
             patch.object(ws, "is_ws_origin_allowed", return_value=True),
             patch.object(ws, "try_acquire", return_value=True),
             patch.object(
-                ws, "_resolve_ws_principal", return_value=("", "default", "anonymous", None)
+                ws, "resolve_ws_session", return_value=("", "default", "anonymous", None, None)
             ),
             patch.object(ws, "chat_carryover", return_value=None),
             patch.object(ws.livekit, "enabled", return_value=False),

@@ -186,6 +186,10 @@ def _flag_sync_interval_seconds() -> float:
 
 
 _FLAG_SYNC_INTERVAL_SECONDS = _flag_sync_interval_seconds()
+# How often every process re-reads ``revoked_sessions`` (G304, ADR-0053). Not
+# tied to the flag sync's setting: switching that off must not leave a signed-out
+# token working on the other processes.
+_SESSION_REVOCATION_SYNC_INTERVAL_SECONDS = 5.0
 # How often the chat process re-asks whether the call process answers, so
 # ``ura_receptionist_call_process_up`` follows it between /ready probes (G614).
 _CALL_PROCESS_GAUGE_INTERVAL_SECONDS = 30.0
@@ -591,6 +595,30 @@ async def _flag_sync_loop(stop: asyncio.Event, interval: float) -> None:
             return
 
 
+async def _session_revocation_sync_loop(stop: asyncio.Event, interval: float) -> None:
+    """Keep this process's revoked sessions current (G304, ADR-0053): a pass now, then every *interval*.
+
+    The revocations are first read during startup, before the process serves
+    (``_load_session_revocations_at_start``); this loop's first pass follows
+    at once and catches up a development process whose startup read failed.
+    ``revocation.sync`` never raises; the guard keeps the loop alive if it
+    ever does.
+    """
+    from .auth import revocation
+
+    while True:
+        try:
+            await asyncio.to_thread(revocation.sync)
+        except Exception:  # noqa: BLE001 - one bad pass never stops the sync
+            logger.error("Session revocation sync pass failed", exc_info=True)
+        try:
+            async with asyncio.timeout(interval):
+                await stop.wait()
+            return
+        except TimeoutError:
+            continue
+
+
 async def _call_process_gauge_loop(stop: asyncio.Event, interval: float) -> None:
     """Keep ``receptionist_call_process_up`` current in the chat process (G614, ADR-0045).
 
@@ -652,6 +680,33 @@ def _initialize_analytics_database() -> None:
         return
 
     _apply_persisted_flag_overrides(overrides)
+    _load_session_revocations_at_start()
+
+
+def _load_session_revocations_at_start() -> None:
+    """Read every stored session revocation before the first request (G304, ADR-0053).
+
+    The periodic sync is a lifespan task: its first pass ran only once the
+    application was already serving, so a process that had just restarted
+    accepted a signed-out token until then. In production a store that cannot
+    be read here refuses to start, as unreadable flag overrides do; elsewhere
+    the failure is logged and counted by the sync, which keeps trying.
+    """
+    from .auth import revocation
+
+    try:
+        revocation.sync(strict=True)
+    except Exception as exc:
+        if (os.getenv("APP_ENV") or "development").lower() == "production":
+            message = (
+                "PRODUCTION SAFETY CHECK FAILED — refusing to start because the stored "
+                "session revocations cannot be read. Tokens that were signed out of, or "
+                "revoked by an administrator, would be accepted until a later read."
+            )
+            logger.critical(message)
+            raise SystemExit(message) from exc
+        return
+    logger.info("Session revocations loaded")
 
 
 # ---------------------------------------------------------------------------
@@ -1025,6 +1080,11 @@ async def lifespan(app: FastAPI):
         if _FLAG_SYNC_INTERVAL_SECONDS > 0
         else None
     )
+    # Every process, either role: a revoked session is refused by all of them (G304).
+    revocation_sync_task = asyncio.create_task(
+        _session_revocation_sync_loop(retention_stop, _SESSION_REVOCATION_SYNC_INTERVAL_SECONDS),
+        name="session-revocation-sync",
+    )
     try:
         yield
     finally:
@@ -1041,6 +1101,7 @@ async def lifespan(app: FastAPI):
             gauge_task,
             call_process_gauge_task,
             flag_sync_task,
+            revocation_sync_task,
         ):
             if task is None:
                 continue
@@ -4283,6 +4344,69 @@ def clear_flag_endpoint(
     }
 
 
+class SessionRevokeRequest(BaseModel):
+    """Why an administrator revoked someone's sessions; kept with the revocation, not in the audit ledger."""
+
+    reason: str = Field("", max_length=200)
+
+
+def _revoke_sessions_or_503(user_id: str, *, reason: str, actor: str) -> float:
+    """Store and apply a revocation (G304, ADR-0053); 503 when the store cannot keep it.
+
+    Stored first, as a flag change is: a failed write changes nothing in any
+    process, so nobody is told a sign-out happened that the other process,
+    or this one after a restart, would not honour.
+    """
+    from .auth import revocation
+
+    try:
+        return revocation.revoke(user_id, reason=reason, actor=actor)
+    except Exception as exc:
+        logger.error("A session revocation could not be stored", exc_info=True)
+        raise HTTPException(
+            status_code=503, detail="the sign-out could not be recorded; try again"
+        ) from exc
+
+
+@app.post("/v1/admin/users/{user_id}/revoke", tags=["admin"])
+@limiter.limit(_RATE_LIMIT)
+def revoke_user_sessions_endpoint(
+    request: Request,
+    user_id: str,
+    body: SessionRevokeRequest | None = None,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    """Sign *user_id* out everywhere: every token issued to them before now stops working (G304).
+
+    The API refuses those tokens at once in this process and within
+    ``sync_interval_seconds`` in every other process sharing this database;
+    an open staff or call socket opened with one is closed 4401 within about
+    5 s, and an officer's call media is revoked. A token issued after this
+    works, so the person can sign in again. Administrators only.
+    """
+    if ctx.user and ctx.role != "ura_admin":
+        raise HTTPException(status_code=403, detail="only ura_admin may revoke another person's sessions")
+    target = (user_id or "").strip()
+    if not target or len(target) > 256:
+        raise HTTPException(status_code=400, detail="a user id is required")
+    reason = (body.reason if body else "").strip()
+    cutoff = _revoke_sessions_or_503(
+        target, reason=reason or "revoked_by_admin", actor=ctx.user_id or "operator-key"
+    )
+    # The reason is the administrator's own text: the ledger keeps its length,
+    # as it does for any free text a staff action carries.
+    _audit_staff_action(
+        ctx,
+        "staff.session_revoked",
+        {"subject": target, "revoked_before": cutoff, "reason_length": len(reason)},
+    )
+    return {
+        "user_id": target,
+        "revoked_before": cutoff,
+        "sync_interval_seconds": _SESSION_REVOCATION_SYNC_INTERVAL_SECONDS,
+    }
+
+
 @app.get("/v1/admin/overrides", tags=["admin"])
 def list_overrides_endpoint(
     _ctx: AuthContext = Depends(require_admin_access),
@@ -5949,6 +6073,20 @@ def me_whoami(ctx: AuthContext = Depends(current_user)) -> dict:
         "granted_purposes": ctx.user.granted_purposes,
         "account_api": account_api_status(),
     }
+
+
+@app.post("/v1/me/logout", tags=["me"])
+@limiter.limit(_RATE_LIMIT)
+def me_logout(request: Request, ctx: AuthContext = Depends(require_user)) -> dict:
+    """Sign out everywhere: every token issued to you before now stops working (G304, ADR-0053).
+
+    The console and the chat call this as they sign out, before dropping the
+    token. Tokens issued later (signing in again) work. The cutoff is the
+    time of this request; a token issued in the same second is revoked too.
+    """
+    cutoff = _revoke_sessions_or_503(ctx.user_id, reason="logout", actor=ctx.user_id)
+    _audit_staff_action(ctx, "auth.signed_out_everywhere", {"revoked_before": cutoff})
+    return {"revoked_before": cutoff}
 
 
 @app.get("/v1/me/reminders", tags=["me"])

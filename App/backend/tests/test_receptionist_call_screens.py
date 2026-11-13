@@ -122,7 +122,7 @@ class CallerRefusalTests(unittest.IsolatedAsyncioTestCase):
             patch.object(ws, "release", return_value=None),
         ):
             if "principal_error" in patches:
-                with patch.object(ws, "_resolve_ws_principal", side_effect=patches["principal_error"]):
+                with patch.object(ws, "resolve_ws_session", side_effect=patches["principal_error"]):
                     await asyncio.wait_for(ws.call_stream_endpoint(socket), timeout=5)
             else:
                 await asyncio.wait_for(ws.call_stream_endpoint(socket), timeout=5)
@@ -187,7 +187,7 @@ class LobbyReadyTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(ws, "_voice_receptionist_enabled", return_value=True),
             patch.object(ws, "is_ws_origin_allowed", return_value=True),
-            patch.object(ws, "_staff_session", return_value=("okello", "default", "ura_staff", None)),
+            patch.object(ws, "_staff_session", return_value=("okello", "default", "ura_staff", None, None)),
         ):
             task = asyncio.create_task(ws.staff_calls_stream_endpoint(socket, call_id=None))
             for _ in range(50):
@@ -232,7 +232,7 @@ class LateViewerTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(ws, "_voice_receptionist_enabled", return_value=True),
             patch.object(ws, "is_ws_origin_allowed", return_value=True),
-            patch.object(ws, "_staff_session", return_value=("okello", "default", "ura_staff", None)),
+            patch.object(ws, "_staff_session", return_value=("okello", "default", "ura_staff", None, None)),
         ):
             task = asyncio.create_task(ws.staff_calls_stream_endpoint(socket, call_id=self.call_id))
             for _ in range(100):

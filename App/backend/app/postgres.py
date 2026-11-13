@@ -305,6 +305,14 @@ def init_db() -> None:
         updated_at DOUBLE PRECISION NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS revoked_sessions (
+        user_id        TEXT PRIMARY KEY,
+        revoked_before DOUBLE PRECISION NOT NULL,
+        reason         TEXT,
+        actor          TEXT,
+        created_at     DOUBLE PRECISION
+    );
+
     CREATE TABLE IF NOT EXISTS reminder_inbox (
         id            TEXT PRIMARY KEY,
         user_id       TEXT NOT NULL,
@@ -1848,6 +1856,40 @@ def clear_flag_override(name: str) -> None:
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM flag_overrides WHERE name = %s", (key,))
         conn.commit()
+
+
+def revoke_sessions(user_id: str, *, revoked_before: float, reason: str = "", actor: str = "") -> None:
+    """Revoke every token *user_id* was issued before *revoked_before*; a later cutoff wins (ADR-0053)."""
+    uid = (user_id or "").strip()
+    if not uid:
+        raise ValueError("a revocation needs a user id")
+    pool = _get_pool()
+    if pool is None:
+        # Returning would report a sign-out that no other process would see.
+        raise RuntimeError("Postgres pool unavailable; the revocation was not stored")
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO revoked_sessions (user_id, revoked_before, reason, actor, created_at)
+               VALUES (%s, %s, %s, %s, %s)
+               ON CONFLICT (user_id) DO UPDATE SET
+                   revoked_before = GREATEST(revoked_sessions.revoked_before, EXCLUDED.revoked_before),
+                   reason = EXCLUDED.reason,
+                   actor = EXCLUDED.actor,
+                   created_at = EXCLUDED.created_at""",
+            (uid, float(revoked_before), (reason or "")[:200], (actor or "")[:128], time.time()),
+        )
+        conn.commit()
+
+
+def load_session_revocations() -> dict[str, float]:
+    # No pool is a store that cannot be read, not an empty one: read as {}, it
+    # would look like nobody was ever signed out. Raising keeps the current map.
+    pool = _get_pool()
+    if pool is None:
+        raise RuntimeError("Postgres pool unavailable; session revocations cannot be read")
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT user_id, revoked_before FROM revoked_sessions")
+        return {str(r[0]): float(r[1]) for r in cur.fetchall()}
 
 
 def upsert_reminder_inbox(

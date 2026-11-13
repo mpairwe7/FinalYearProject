@@ -122,6 +122,11 @@ class CallState:
     livekit_agent_identity: str = ""
     livekit_observer_identities: set[str] = field(default_factory=set)
     livekit_officer_route_active: bool = False
+    # Whose session the officer's media was issued under, and that token's
+    # `iat`: the media is refused if it rejoins once that session is revoked
+    # (G304, ADR-0053).
+    livekit_officer_user: str = ""
+    livekit_officer_issued_at: float | None = None
     reconnect_timer: asyncio.Task | None = None
     transfer_timer_task: asyncio.Task | None = None
     # The caller's spoken review of the AI (review.py): "" (not asked),

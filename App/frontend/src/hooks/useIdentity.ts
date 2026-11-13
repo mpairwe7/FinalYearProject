@@ -24,7 +24,7 @@ import {
 } from "../lib/authSession";
 import { endOidcSession } from "../lib/oidcFlow";
 import { isStaffRole, roleLabel } from "../lib/roles";
-import { accountApi, ApiError, type Identity } from "../services/accountApi";
+import { accountApi, ApiError, endServerSession, type Identity } from "../services/accountApi";
 
 export type IdentityStatus =
   /** No token in this browser. */
@@ -93,6 +93,8 @@ export function useIdentity(): IdentityState {
   const signOut = useCallback(() => {
     // Read the method BEFORE clearing — clearAuthToken drops it too.
     const method = getAuthMethod();
+    // Revoke the token on the server first; it is sent with the request.
+    endServerSession();
     clearAuthToken();
     // Drop the identity and everything derived from it, so no panel keeps
     // rendering the previous person's data until its own staleTime expires.

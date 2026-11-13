@@ -466,7 +466,7 @@ class OfficerSocketTests(unittest.IsolatedAsyncioTestCase):
         stack = contextlib.ExitStack()
         stack.enter_context(patch.object(ws, "_voice_receptionist_enabled", return_value=True))
         stack.enter_context(
-            patch.object(ws, "_staff_session", return_value=("okello", "default", "ura_staff", None))
+            patch.object(ws, "_staff_session", return_value=("okello", "default", "ura_staff", None, None))
         )
         stack.enter_context(patch.object(ws.livekit, "enabled", return_value=False))
         self.addCleanup(stack.close)
@@ -1013,7 +1013,7 @@ class LiveKitStaffControlTests(unittest.IsolatedAsyncioTestCase):
         return dropped(side, reason) - self.before[(side, reason)]
 
     def connect(self, socket: StarletteSocket, user: str, role: str) -> asyncio.Task:
-        session = patch.object(ws, "_staff_session", return_value=(user, "default", role, None))
+        session = patch.object(ws, "_staff_session", return_value=(user, "default", role, None, None))
         session.start()
         self.addCleanup(session.stop)
         task = asyncio.create_task(ws.officer_audio_endpoint(socket, self.call_id))

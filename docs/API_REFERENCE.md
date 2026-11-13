@@ -24,6 +24,13 @@ presence: those need an officer's sign-in (`ura_staff`) and answer **403** to th
 
 - **401:** a request with no login, with or without the key. A bad or expired token gets
   401 anywhere in the API. Every 401 carries `WWW-Authenticate: Bearer`.
+- **401 `session revoked`:** a token issued before its owner signed out everywhere
+  (`POST /v1/me/logout`) or was signed out by an administrator
+  (`POST /v1/admin/users/{user_id}/revoke`). A token's `iat` is compared with the
+  person's cutoff. A token with no usable `iat` is refused as invalid (401) everywhere,
+  so every token the service accepts can be revoked. Every process applies a
+  revocation within 5 s (ADR-0053). A socket that signs in with such a token is
+  refused as for an invalid one.
 - **403:** a signed-in user without a staff role, or an auditor on an endpoint that
   changes a case.
 - **503:** the operator-only endpoints (`/v1/index`, `/v1/evaluate`,
@@ -1774,6 +1781,12 @@ barge-in support. Gated by `FLAG_VOICE_STREAMING=true`.
 7. Client can send `{"type": "barge_in"}` at any time to interrupt TTS playback.
 8. Clean close via `{"type": "session_end"}`.
 
+A signed-in socket (this one, `/v2/voice/chat/stream` and `/v2/chat/stream`)
+re-checks its session at least every 5 s and on every frame. Once the session is
+revoked (ADR-0053) it is sent `{"type": "error", "code": "signin", "detail":
+"Session revoked", "recoverable": false}` and closes **4401**. An anonymous socket
+has no session and is not affected.
+
 **Server → Client events:**
 
 | Event | Format | Description |
@@ -2079,7 +2092,7 @@ handshake). Every `error` frame to the caller carries a `code`:
 | --- | --- | --- |
 | `unavailable` | 1001 | Calls are not being taken: switched off, or switched on and unable to start or not configured (`GET /ready` says which), or the media pipeline could not start |
 | `busy` | 1013 | All lines are busy, or this caller already has five calls |
-| `signin` | 4401 | The call needs a valid sign-in |
+| `signin` | 4401 | The call needs a valid sign-in, or the caller's session was revoked during the call |
 | `consent_required` | 4403 | Voice recording consent was not given |
 | `bad_request` | 1003 | No valid `call_start` message |
 
@@ -2189,9 +2202,14 @@ caller's tenant's officers only, and `officer.presence` lobby events reach that
 tenant's consoles only.
 
 Staff WebSockets (`/v1/admin/calls/stream`, `/v1/admin/calls/{call_id}/audio`)
-close with **4401** when the token that opened them expires and with **1013**
+close with **4401** when the token that opened them expires or its session is
+revoked (checked at least every 5 s, ADR-0053), and with **1013**
 when the user already holds their share of sockets or the call already has five
-listeners.
+listeners. An officer whose session is revoked goes into the reconnect grace, as
+at expiry, but their LiveKit media is revoked at once and is not bridged again if
+it rejoins. A signed-in caller whose session is revoked is sent
+`{"type": "error", "code": "signin"}`, the socket closes 4401 and the call ends
+with `session_revoked`.
 
 ---
 
@@ -2345,6 +2363,37 @@ GET /v1/admin/outbox
 
 Mock email/SMS queue (`live=false`). Nothing is sent.
 
+#### Revoke someone's sessions (ADR-0053)
+
+```http
+POST /v1/admin/users/{user_id}/revoke
+Content-Type: application/json
+
+{"reason": "laptop reported stolen"}
+```
+
+`ura_admin` only (or the operator key); 403 for other staff. The body is
+optional; `reason` is at most 200 characters. Every token issued to `user_id`
+(the token's `sub`) before now stops working: 401 `session revoked` on the API,
+refused at socket sign-in, and an open staff, call, chat or voice socket opened
+with one closes 4401. A token issued after this works, so the person
+can sign in again; to keep them out, disable the account at the identity
+provider too. The row is stored before the answering process applies it, and
+every other process applies it within `sync_interval_seconds`. An open socket
+checks at least every 5 s, so it closes within about 5 s on the process that
+took the revocation and about 10 s on another (up to 5 s for that process's
+sync, then up to 5 s for the socket's check). A failed write
+answers 503 and changes nothing. Audited as `staff.session_revoked` with the
+subject and the reason's length. Rate-limited (`RATE_LIMIT`, 30/minute).
+
+Not covered yet (G656): the live ticket stream checks a token only at sign-in,
+so a stream already open stays open; and the MCP server's own bearer check does
+not read the revocation list.
+
+```json
+{"user_id": "auth0|6a7d7af3", "revoked_before": 1794556800.42, "sync_interval_seconds": 5.0}
+```
+
 ---
 
 ### Identity & Profile (Phase 14)
@@ -2381,6 +2430,34 @@ Returns the current authentication context. Works for both anonymous and authent
     "error": "URA account API is not configured"
   }
 }
+```
+
+---
+
+#### Sign Out Everywhere
+
+```http
+POST /v1/me/logout
+Authorization: Bearer <token>
+```
+
+Revokes every token issued to the signed-in person up to now, this one
+included (ADR-0053). Afterwards those tokens get 401 `session revoked`, and an
+open staff, call, chat or voice socket opened with one closes 4401: within about
+5 s on the process that took the sign-out, about 10 s on another (its 5 s sync,
+then the socket's 5 s check). A token issued later (signing in again) works.
+The cutoff is the time of the request, and a token's
+`iat` is a whole second, so a sign-in completed in the same second is revoked
+too. A token with no usable `iat` never gets this far: it is refused as invalid.
+Not covered yet (G656): an open live ticket stream stays open (it checks only at
+sign-in), and the MCP server's bearer check does not read this list. The
+browser's sign-outs call this
+with `keepalive: true` before dropping the token, and ignore a failure.
+401 without a valid token; 503 when the revocation could not be stored (nothing
+changed). Audited as `auth.signed_out_everywhere`. Rate-limited (`RATE_LIMIT`).
+
+```json
+{"revoked_before": 1794556800.42}
 ```
 
 ---
