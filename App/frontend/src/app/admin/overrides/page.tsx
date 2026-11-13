@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Staff answer-override CMS (G31). Exact-match only. Not a FAQ editor.
+ * Staff answer-override CMS (G31). Matched on the normalized question. Not a FAQ editor.
  *
  * The form here was the last unstyled surface in the console — bare `<label>`,
  * `<input>` and `<button>` elements inheriting nothing, inside a panel that had
@@ -18,6 +18,7 @@ import { EmptyState, ErrorState, SkeletonRows } from "../../../components/ops/St
 import { InfoCircleIcon } from "../../../components/ops/icons";
 import { analyticsApi } from "../../../services/analyticsApi";
 import { queryKeys } from "../../../lib/queryKeys";
+import { normalizeOverrideQuery } from "../../../lib/overrides";
 import "../admin.css";
 
 function OverridesBoard({ who }: { who: StaffIdentity }) {
@@ -59,12 +60,15 @@ function OverridesBoard({ who }: { who: StaffIdentity }) {
   }, [overrides, filter]);
 
   const ready = query.trim().length > 0 && reply.trim().length > 0;
+  // G637: what the server will match on, and the live answer a save replaces.
+  const matchKey = normalizeOverrideQuery(query);
+  const live = matchKey ? overrides.find((row) => row.match_query === matchKey) : undefined;
 
   return (
     <OpsPage
       eyebrow="Configure"
       title="Answer overrides"
-      description="Exact-match staff replies. These do not change the FAQ corpus, and they only take effect while FLAG_ANSWER_OVERRIDES is on."
+      description="Staff replies matched on the taxpayer's question. They apply to every taxpayer, do not change the FAQ corpus, and only take effect while FLAG_ANSWER_OVERRIDES is on."
       width="read"
       actions={
         overrides.length > 0 ? (
@@ -83,7 +87,7 @@ function OverridesBoard({ who }: { who: StaffIdentity }) {
         <OpsPanel
           id="new-override"
           title="Add an override"
-          note="The taxpayer's question must match exactly, character for character. Anything close but not identical falls through to normal retrieval."
+          note="A question matches when it is the same as this one once case, punctuation and spacing are ignored. The assistant also tries the question as it reworded it and, for other languages, as machine-translated, so this answer can reach taxpayers writing in any of the five languages. Anything else falls through to normal retrieval."
           glass
         >
           <form
@@ -96,7 +100,7 @@ function OverridesBoard({ who }: { who: StaffIdentity }) {
             <label className="ops-field">
               <span className="ops-field-label">
                 Taxpayer question
-                <em className="ops-field-hint">Matched exactly, so paste it as they type it.</em>
+                <em className="ops-field-hint">Case, punctuation and extra spaces are ignored.</em>
               </span>
               <input
                 className="ops-input"
@@ -110,7 +114,7 @@ function OverridesBoard({ who }: { who: StaffIdentity }) {
               <span className="ops-field-label">
                 Staff reply
                 <em className="ops-field-hint">
-                  Served to the taxpayer word for word, with no retrieval and no citations added.
+                  Served instead of a retrieved answer, with no citations. Taxpayers writing in another language receive a machine translation of it.
                 </em>
               </span>
               <textarea
@@ -122,9 +126,18 @@ function OverridesBoard({ who }: { who: StaffIdentity }) {
                 required
               />
             </label>
+            {matchKey ? <p className="ov-match-key">Matched as: {matchKey}</p> : null}
+            {live ? (
+              <section className="ov-replaces" role="region" aria-label="Replaces a live answer">
+                <p>
+                  <strong>Replaces a live answer.</strong> An override for “{live.match_query}” is being served now:
+                </p>
+                <blockquote>{live.reply}</blockquote>
+              </section>
+            ) : null}
             <div className="ov-form-actions">
               <button type="submit" className="ops-btn is-primary" disabled={!ready || save.isPending}>
-                {save.isPending ? "Saving…" : "Save override"}
+                {save.isPending ? "Saving…" : live ? "Replace the live answer" : "Save override"}
               </button>
               {query || reply ? (
                 <button

@@ -495,6 +495,8 @@ export interface FlagRecord {
 export interface FlagList {
   flags: FlagRecord[];
   overrides_are_ephemeral: boolean;
+  /** Whether stored overrides survive a restart (G638): `unknown` is not a claim either way. */
+  overrides_durability?: "durable" | "ephemeral" | "unknown";
   /** "every_process_sharing_this_database", or "this_process_until_the_others_restart" when the sync is off. */
   scope?: string;
   /** How often each API process re-reads the stored overrides; 0 when it does not. */
@@ -638,6 +640,8 @@ export interface NeedsReviewItem {
   /** Where to read it on /admin/quality: `?tab=` and the parameter that opens it. */
   link: { tab: string; param: string; value: string };
   review: QualityReview | null;
+  /** Every decision on the item, oldest first, reopenings included (G639). */
+  history?: Array<{ status: ReviewStatus | "open"; note: string; reviewer_name: string; decided_at: number }>;
 }
 
 export interface NeedsReviewPage {

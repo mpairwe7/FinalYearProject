@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DiscrepanciesWorkbench } from "../../../app/admin/discrepancies/page";
@@ -118,5 +118,85 @@ describe("DiscrepanciesWorkbench (/admin/discrepancies)", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Action could not be completed");
     expect(alert).toHaveTextContent("Database write locked");
+  });
+
+  // G634: "Verify & Hotfix" pre-filled the rule the model must obey with the
+  // taxpayer's own unverified correction and withdrew the cited sources by
+  // default; two clicks changed what the AI tells every taxpayer.
+  it("starts empty, needs a statute for a rule, and shows what will change before it applies", async () => {
+    const verify = vi.spyOn(analyticsApi, "verifyDiscrepancy").mockResolvedValue({ ok: true } as never);
+    render(
+      <DiscrepanciesWorkbench who={{ authenticated: true, role: "ura_admin", email: "admin@ura.go.ug" }} />,
+      { wrapper },
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /Verify & Hotfix/i }));
+
+    const rule = screen.getByLabelText(/Precedence Rule Statement/i) as HTMLInputElement;
+    const query = screen.getByLabelText(/Answer Override Query/i) as HTMLInputElement;
+    const withdraw = screen.getByRole("checkbox", { name: /withdraw/i }) as HTMLInputElement;
+    expect(rule.value).toBe("");
+    expect(query.value).toBe("");
+    expect(withdraw.checked).toBe(false);
+    const summary = screen.getByRole("region", { name: /What this will change/i });
+    expect(summary).toHaveTextContent(/changes nothing the assistant says/i);
+
+    fireEvent.change(rule, { target: { value: "Presumptive tax follows the Second Schedule brackets." } });
+    expect(screen.getByRole("button", { name: /Confirm & Apply Hotfixes/i })).toBeDisabled();
+    expect(screen.getByText(/Name the statute/i)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Statute Reference/i), { target: { value: "Income Tax Act, Second Schedule" } });
+    fireEvent.change(screen.getByLabelText(/Precedence Topic/i), { target: { value: "Presumptive tax" } });
+    fireEvent.click(withdraw);
+    expect(summary).toHaveTextContent(/The model will be told, as law that overrides the passages it retrieves/i);
+    expect(summary).toHaveTextContent("Presumptive tax follows the Second Schedule brackets.");
+    expect(summary).toHaveTextContent(/Withdrawn from retrieval for every taxpayer: income_tax_act.pdf/i);
+
+    fireEvent.click(screen.getByRole("button", { name: /Confirm & Apply Hotfixes/i }));
+    await waitFor(() =>
+      expect(verify).toHaveBeenCalledWith(
+        "disc-12345678",
+        expect.objectContaining({ statute_reference: "Income Tax Act, Second Schedule", tombstone_sources: ["income_tax_act.pdf"] }),
+      ),
+    );
+  });
+
+  // CodeRabbit on PR 730: the API saves a rule only with a topic, so a rule
+  // with none was dropped while the report was marked verified.
+  it("needs a topic for a rule, and promises no rule without one", async () => {
+    const verify = vi.spyOn(analyticsApi, "verifyDiscrepancy").mockResolvedValue({ ok: true } as never);
+    render(
+      <DiscrepanciesWorkbench who={{ authenticated: true, role: "ura_admin", email: "admin@ura.go.ug" }} />,
+      { wrapper },
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /Verify & Hotfix/i }));
+    // The topic starts as the report's type; the administrator clears it.
+    fireEvent.change(screen.getByLabelText(/Precedence Topic/i), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText(/Precedence Rule Statement/i), { target: { value: "WHT on rent is 6%." } });
+    fireEvent.change(screen.getByLabelText(/Statute Reference/i), { target: { value: "Income Tax Act, s.119" } });
+    const confirm = screen.getByRole("button", { name: /Confirm & Apply Hotfixes/i });
+    expect(confirm).toBeDisabled();
+    expect(screen.getByText(/Name the topic this rule is about/i)).toBeInTheDocument();
+    const summary = screen.getByRole("region", { name: /What this will change/i });
+    expect(summary).not.toHaveTextContent(/The model will be told/i);
+    fireEvent.click(confirm);
+    expect(verify).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText(/Precedence Topic/i), { target: { value: "WHT on rent" } });
+    expect(confirm).toBeEnabled();
+    expect(summary).toHaveTextContent(/The model will be told/i);
+  });
+
+  it("withdraws no source unless asked", async () => {
+    const verify = vi.spyOn(analyticsApi, "verifyDiscrepancy").mockResolvedValue({ ok: true } as never);
+    render(
+      <DiscrepanciesWorkbench who={{ authenticated: true, role: "ura_admin", email: "admin@ura.go.ug" }} />,
+      { wrapper },
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /Verify & Hotfix/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Confirm & Apply Hotfixes/i }));
+    await waitFor(() =>
+      expect(verify).toHaveBeenCalledWith(
+        "disc-12345678",
+        expect.objectContaining({ tombstone_sources: [], precedence_rule: "", admin_note: "" }),
+      ),
+    );
   });
 });

@@ -1,7 +1,7 @@
 # Intelligent UI integration audit — 13 November 2026
 
-Status: phase 1 implemented (PR 727); phase 2 implemented on `fix/intelligent-ui-p2-human-handoff-2026-11`; phases 3 to 6 open.
-Baseline: `dev` at `882a99b5`. Decisions: [ADR-0048](../adr/0048-figures-and-disclosures-the-taxpayer-sees.md) (phase 1), [ADR-0049](../adr/0049-a-promise-of-a-human-is-kept.md) (phase 2).
+Status: phase 1 implemented (PR 727); phase 2 on `fix/intelligent-ui-p2-human-handoff-2026-11`; phase 3 on `fix/intelligent-ui-p3-staff-controls-2026-11`; phases 4 to 6 open.
+Baseline: `dev` at `882a99b5`. Decisions: [ADR-0048](../adr/0048-figures-and-disclosures-the-taxpayer-sees.md) (phase 1), [ADR-0049](../adr/0049-a-promise-of-a-human-is-kept.md) (phase 2), [ADR-0050](../adr/0050-staff-controls-say-what-they-do.md) (phase 3).
 Follows the [30 October audit](intelligent-ui-integration-audit-2026-10.md) (UI-01 to UI-13, ADR-0018).
 
 That audit covered the chat's REST/SSE contract, action boundaries and the
@@ -109,9 +109,11 @@ All nine were implemented with a test watched failing first; G630 is mitigated (
 | G632 | Low | A turn escalated late keeps the inferred-goal card's "Start guided steps", which the backend withdrew from the actions. | Withdraw `objective_hypothesis` on escalation; hide the card when escalated. |
 | G633 | Low | Resuming a portal task after sign-in posts to the AI while an officer holds the chat; the screenshot sign-in link is not gated. | Defer the continuation while an officer holds the chat; gate the link. |
 
-## Phase 3 — staff controls that change what taxpayers are told
+## Phase 3 — staff controls that change what taxpayers are told (implemented, ADR-0050)
 
-| Gap | Severity | Finding | Planned fix |
+All six were implemented with a test watched failing first. ADR-0050 records where the fix differs from the plan: G634 and G637 are mitigated, since discrepancies and answer overrides are still not tenant-scoped; G635 also refuses a stale translation on the server, whichever client sends it; G636 keeps the result shortcuts as `[[…]]` templates rather than removing them. While testing G635 the reply field's Preview button was found to take the label's text as its accessible name (it sat inside the `<label>`); the field is now a `div`.
+
+| Gap | Severity | Finding | Fix |
 | --- | --- | --- | --- |
 | G634 | Critical | "Verify & Hotfix" on a taxpayer's discrepancy report pre-fills the precedence rule — which the model is told "STRICTLY SUPERSEDES" retrieved law — with the taxpayer's own unverified correction, ticks "withdraw the cited sources" by default, and writes a stock note; two clicks change what the AI tells every taxpayer. The ledger records only the report and override ids, not the rule or the withdrawn sources; discrepancies are not tenant-scoped. | Empty fields, unticked withdrawal, a required statute reference, a confirmation that shows the rule as the model will see it and each source withdrawn; audit events for the precedence, the tombstones and the override. |
 | G635 | High | The officer's translation preview is sent as `officer_reply_localized` after the officer edits the English, so the taxpayer gets the old figure in their language; "Figures & statutory amounts verified" shows when translation was unavailable and the English came back unchanged. | Clear the preview on every edit or failure; badge only a real check; let the server localize through `localize_reply`. |

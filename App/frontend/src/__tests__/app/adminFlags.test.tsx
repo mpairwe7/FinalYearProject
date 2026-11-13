@@ -170,4 +170,141 @@ describe("Feature flags console", () => {
     expect(screen.queryByText(/at its next sync/)).toBeNull();
     expect(screen.queryByText(/when they restart/)).toBeNull();
   });
+
+  // G638: the console called overrides durable on the Space, labelled a
+  // stored override "this replica", and switched the figure hold off in one click.
+  describe("what a change reaches, and the safety controls", () => {
+    const SAFETY = {
+      name: "stream_figure_hold",
+      default: true,
+      description: "Hold streamed figures until the guards have read them",
+      enabled: true,
+      overridden: false,
+      stored: false,
+      protected: false,
+      rollout: null,
+    };
+
+    it("says overrides are lost on restart where they are", async () => {
+      vi.spyOn(analyticsApi, "flags").mockResolvedValue({
+        flags: FLAGS, overrides_are_ephemeral: true, overrides_durability: "ephemeral",
+      } as never);
+      renderFlags();
+      expect(await screen.findByText(/lost when this deployment restarts/i)).toBeInTheDocument();
+      expect(screen.queryByText(/reports overrides as durable/i)).toBeNull();
+    });
+
+    it("labels a stored override as reaching every process", async () => {
+      vi.spyOn(analyticsApi, "flags").mockResolvedValue({
+        flags: [{ ...FLAGS[0], stored: true }], overrides_are_ephemeral: false, overrides_durability: "durable",
+        scope: "every_process_sharing_this_database", sync_interval_seconds: 5,
+      } as never);
+      renderFlags();
+      await screen.findByText("hyde");
+      expect(within(row("hyde")).getByText("stored · every process")).toBeInTheDocument();
+      expect(within(row("hyde")).queryByText("this replica")).toBeNull();
+    });
+
+    it("asks before switching a safety control off", async () => {
+      vi.spyOn(analyticsApi, "flags").mockResolvedValue({ flags: [SAFETY], overrides_are_ephemeral: false } as never);
+      renderFlags();
+      await screen.findByText("stream_figure_hold");
+      fireEvent.click(within(row("stream_figure_hold")).getByRole("switch"));
+      expect(analyticsApi.setFlag).not.toHaveBeenCalled();
+      const confirm = screen.getByRole("alertdialog", { name: /Turn off stream_figure_hold/ });
+      expect(confirm).toHaveTextContent(/before the guards have read them/i);
+      fireEvent.click(within(confirm).getByRole("button", { name: /^Turn it off$/ }));
+      await waitFor(() => expect(analyticsApi.setFlag).toHaveBeenCalledWith("stream_figure_hold", false));
+    });
+
+    // CodeRabbit on PR 730: Reset drops the override, so an enabled safety
+    // control falls back to FLAG_* or its default, which may be off.
+    it("asks before resetting an enabled safety control, and resets rather than saving off", async () => {
+      vi.spyOn(analyticsApi, "flags").mockResolvedValue({
+        flags: [{ ...SAFETY, name: "spoken_figure_guard", default: false, overridden: true, stored: true }],
+        overrides_are_ephemeral: false,
+      } as never);
+      renderFlags();
+      await screen.findByText("spoken_figure_guard");
+      fireEvent.click(within(row("spoken_figure_guard")).getByRole("button", { name: /^Reset$/ }));
+      expect(analyticsApi.clearFlag).not.toHaveBeenCalled();
+      const confirm = screen.getByRole("alertdialog", { name: /Reset spoken_figure_guard/ });
+      expect(confirm).toHaveTextContent(/default \(off\)/i);
+      fireEvent.click(within(confirm).getByRole("button", { name: /^Reset it$/ }));
+      await waitFor(() => expect(analyticsApi.clearFlag).toHaveBeenCalledWith("spoken_figure_guard"));
+      expect(analyticsApi.setFlag).not.toHaveBeenCalled();
+    });
+
+    // CodeRabbit on PR 730: the confirmation claimed every process within one
+    // sync interval even where the sync is off.
+    it("says how far turning a control off reaches, as the page note does", async () => {
+      vi.spyOn(analyticsApi, "flags").mockResolvedValue({
+        flags: [SAFETY], overrides_are_ephemeral: false, sync_interval_seconds: 0,
+      } as never);
+      renderFlags();
+      await screen.findByText("stream_figure_hold");
+      fireEvent.click(within(row("stream_figure_hold")).getByRole("switch"));
+      const confirm = screen.getByRole("alertdialog", { name: /Turn off stream_figure_hold/ });
+      expect(confirm).toHaveTextContent(/when they next start/i);
+      expect(confirm).not.toHaveTextContent(/within one sync interval/i);
+    });
+
+    // CodeRabbit on PR 730: the confirmation sits after the whole table; focus
+    // stayed on the switch, so the dialog could open out of sight.
+    it("moves focus into the confirmation, and back to the switch when kept on", async () => {
+      vi.spyOn(analyticsApi, "flags").mockResolvedValue({ flags: [SAFETY], overrides_are_ephemeral: false } as never);
+      renderFlags();
+      await screen.findByText("stream_figure_hold");
+      const toggle = within(row("stream_figure_hold")).getByRole("switch");
+      toggle.focus();
+      fireEvent.click(toggle);
+      await waitFor(() => expect(screen.getByRole("button", { name: /^Keep it on$/ })).toHaveFocus());
+      fireEvent.click(screen.getByRole("button", { name: /^Keep it on$/ }));
+      await waitFor(() => expect(within(row("stream_figure_hold")).getByRole("switch")).toHaveFocus());
+    });
+
+    // CodeRabbit on PR 730: while the save is pending the switch is disabled
+    // and cannot take focus; focus returns once it settles.
+    it("gives focus back to the switch once a switch-off has saved", async () => {
+      vi.spyOn(analyticsApi, "flags").mockResolvedValue({ flags: [SAFETY], overrides_are_ephemeral: false } as never);
+      let settle: () => void = () => {};
+      vi.spyOn(analyticsApi, "setFlag").mockImplementation(
+        () => new Promise((resolve) => { settle = () => resolve({ name: SAFETY.name, enabled: false, ephemeral: false } as never); }),
+      );
+      renderFlags();
+      await screen.findByText("stream_figure_hold");
+      const toggle = within(row("stream_figure_hold")).getByRole("switch");
+      toggle.focus();
+      fireEvent.click(toggle);
+      fireEvent.click(await screen.findByRole("button", { name: /^Turn it off$/ }));
+      await waitFor(() => expect(within(row("stream_figure_hold")).getByRole("switch")).toBeDisabled());
+      settle();
+      await waitFor(() => expect(within(row("stream_figure_hold")).getByRole("switch")).toHaveFocus());
+    });
+
+    it("falls back to the row's switch when the reset removed the Reset button", async () => {
+      const overridden = { ...SAFETY, name: "spoken_figure_guard", default: false, overridden: true, stored: true };
+      vi.spyOn(analyticsApi, "flags")
+        .mockResolvedValueOnce({ flags: [overridden], overrides_are_ephemeral: false } as never)
+        .mockResolvedValue({ flags: [{ ...overridden, enabled: false, overridden: false, stored: false }], overrides_are_ephemeral: false } as never);
+      renderFlags();
+      await screen.findByText("spoken_figure_guard");
+      const resetBtn = within(row("spoken_figure_guard")).getByRole("button", { name: /^Reset$/ });
+      resetBtn.focus();
+      fireEvent.click(resetBtn);
+      fireEvent.click(await screen.findByRole("button", { name: /^Reset it$/ }));
+      await waitFor(() => expect(within(row("spoken_figure_guard")).queryByRole("button", { name: /^Reset$/ })).toBeNull());
+      await waitFor(() => expect(within(row("spoken_figure_guard")).getByRole("switch")).toHaveFocus());
+    });
+
+    it("can be kept on", async () => {
+      vi.spyOn(analyticsApi, "flags").mockResolvedValue({ flags: [SAFETY], overrides_are_ephemeral: false } as never);
+      renderFlags();
+      await screen.findByText("stream_figure_hold");
+      fireEvent.click(within(row("stream_figure_hold")).getByRole("switch"));
+      fireEvent.click(screen.getByRole("button", { name: /^Keep it on$/ }));
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      expect(analyticsApi.setFlag).not.toHaveBeenCalled();
+    });
+  });
 });

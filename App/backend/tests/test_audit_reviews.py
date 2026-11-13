@@ -130,6 +130,69 @@ class QueueTests(unittest.TestCase):
         self.assertIsNone(audit_reviews.set_review("rating", low["id"], status="open"))
         self.assertIn(low["id"], _ids(_queue(status="open")))
 
+    def test_reopening_keeps_the_decision_it_takes_back(self):
+        """G639: Reopen deleted the decision and its note; the ledger kept only
+        ``note_chars``, so an auditor's finding could vanish in one click."""
+        low = _rating("call_officer_csat", score=2)
+        audit_reviews.set_review("rating", low["id"], status="action_needed", note="AI quoted the wrong PAYE band", reviewer_name="Auditor A")
+        audit_reviews.set_review("rating", low["id"], status="open", reviewer_name="Auditor B")
+        history = audit_reviews.history("rating", low["id"])
+        self.assertEqual([h["status"] for h in history], ["action_needed", "open"])
+        self.assertEqual(history[0]["note"], "AI quoted the wrong PAYE band")
+        self.assertEqual((history[0]["reviewer_name"], history[1]["reviewer_name"]), ("Auditor A", "Auditor B"))
+        # The queue's current decision is cleared, as before, and the queue
+        # shows what was decided before.
+        self.assertIsNone(audit_reviews.get_review("rating", low["id"]))
+        item = next(i for i in _queue(status="open")["items"] if i["item_id"] == low["id"])
+        self.assertEqual([h["status"] for h in item["history"]], ["action_needed", "open"])
+
+    def test_a_decision_made_before_the_history_existed_survives_reopening(self):
+        """CodeRabbit on PR 730: a decision stored before ``audit_review_history``
+        existed had no history row, so the first reopen after the upgrade still
+        erased its finding. The schema step backfills it, once."""
+        low = _rating("call_officer_csat", score=1)
+        audit_reviews.init_schema()
+        # As an upgraded database holds it: the decision, and no history.
+        db.execute(
+            "INSERT INTO audit_reviews (id, tenant_id, item_type, item_id, status, note, reviewer_id, "
+            "reviewer_name, created_at, updated_at) VALUES (?, 'default', 'rating', ?, 'action_needed', "
+            "'Officer promised a refund date', 'u-old', 'Auditor Old', 1000.0, 1000.0)",
+            (uuid.uuid4().hex, low["id"]),
+        )
+        self.assertEqual(audit_reviews.history("rating", low["id"]), [])
+        audit_reviews.init_schema()
+        audit_reviews.init_schema()  # idempotent: one backfilled entry, not two
+        audit_reviews.set_review("rating", low["id"], status="open", reviewer_name="Auditor New")
+        history = audit_reviews.history("rating", low["id"])
+        self.assertEqual([h["status"] for h in history], ["action_needed", "open"])
+        self.assertEqual(history[0]["note"], "Officer promised a refund date")
+        self.assertEqual(history[0]["reviewer_name"], "Auditor Old")
+
+    def test_a_decision_that_fails_to_apply_leaves_no_history(self):
+        """CodeRabbit on PR 730: the history row committed before the review
+        write ran, so a failed write left a decision on record that was never
+        applied. Both now commit together or not at all."""
+        low = _rating("call_officer_csat", score=2)
+        audit_reviews.set_review("rating", low["id"], status="action_needed", note="first", reviewer_name="A")
+        real = db.execute_all
+
+        def failing(statements):
+            return real([*statements, ("INSERT INTO no_such_table_g639 VALUES (1)", ())])
+
+        for status in ("reviewed", "open"):
+            with self.subTest(status=status), patch.object(db, "execute_all", side_effect=failing):
+                with self.assertRaises(Exception):
+                    audit_reviews.set_review("rating", low["id"], status=status, note="second", reviewer_name="B")
+            self.assertEqual([h["status"] for h in audit_reviews.history("rating", low["id"])], ["action_needed"])
+            self.assertEqual(audit_reviews.get_review("rating", low["id"])["note"], "first")
+
+    def test_the_history_goes_when_its_item_does(self):
+        low = _rating("chat_officer_csat", score=1)
+        audit_reviews.set_review("rating", low["id"], status="reviewed", note="ok")
+        db.execute("DELETE FROM service_ratings WHERE id = ?", (low["id"],))
+        audit_reviews.purge()
+        self.assertEqual(audit_reviews.history("rating", low["id"]), [])
+
     def test_the_note_is_redacted(self):
         low = _rating("chat_officer_csat", score=1)
         review = audit_reviews.set_review("rating", low["id"], status="reviewed", note="Caller on 0772123456 was upset")

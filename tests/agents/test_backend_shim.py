@@ -107,6 +107,34 @@ _MIGRATED_MODULES = (
 )
 
 
+class TestExecuteAll:
+    """Writes that must agree commit together (CodeRabbit on PR 730)."""
+
+    def test_every_statement_commits(self, tmp_db):
+        created = tmp_db.create_ticket(reason="a")
+        counts = db.execute_all(
+            [
+                ("UPDATE tickets SET staff_note = ? WHERE id = ?", ("one", created["id"])),
+                ("UPDATE tickets SET reason = ? WHERE id = ?", ("b", created["id"])),
+            ]
+        )
+        assert counts == [1, 1]
+        row = db.query_one("SELECT staff_note, reason FROM tickets WHERE id = ?", (created["id"],))
+        assert (row["staff_note"], row["reason"]) == ("one", "b")
+
+    def test_a_failing_statement_rolls_back_the_ones_before_it(self, tmp_db):
+        created = tmp_db.create_ticket(reason="a")
+        with pytest.raises(Exception):
+            db.execute_all(
+                [
+                    ("UPDATE tickets SET staff_note = ? WHERE id = ?", ("half", created["id"])),
+                    ("INSERT INTO no_such_table VALUES (1)", ()),
+                ]
+            )
+        row = db.query_one("SELECT staff_note FROM tickets WHERE id = ?", (created["id"],))
+        assert row["staff_note"] != "half"
+
+
 class TestNoModuleBypassesTheSeam:
     def test_the_whole_app_is_free_of_raw_connection_reaches(self):
         """23 call sites once went straight to SQLite. None may return.
@@ -153,7 +181,7 @@ class TestEveryPublicFunctionReachesTheProductionBackend:
 
         source = Path(db.__file__).read_text()
         dispatched = set(re.findall(r"^\s+(\w+) = _pg\.", source, re.M))
-        seam = {"query_all", "query_one", "execute", "execute_script"}
+        seam = {"query_all", "query_one", "execute", "execute_all", "execute_script"}
         stranded = []
         for name, obj in vars(db).items():
             if name.startswith("_") or not inspect.isfunction(obj):

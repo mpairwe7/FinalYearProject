@@ -340,7 +340,9 @@ class AdminEndpoints(_Base):
         r = _client().get("/v1/admin/flags", headers=_bearer(staff))
         self.assertEqual(r.status_code, 200, r.text)
         payload = r.json()
-        self.assertFalse(payload["overrides_are_ephemeral"])
+        # G638: not claimed durable unless the store is known to survive a restart.
+        self.assertIn(payload["overrides_durability"], {"durable", "ephemeral", "unknown"})
+        self.assertEqual(payload["overrides_are_ephemeral"], payload["overrides_durability"] != "durable")
         names = {row["name"] for row in payload["flags"]}
         self.assertIn("hyde", names)
         protected = {row["name"] for row in payload["flags"] if row["protected"]}

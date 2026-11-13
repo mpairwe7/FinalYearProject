@@ -8,7 +8,7 @@
  * it is about, and every decision is recorded on the audit trail
  * (`staff.quality_reviewed`). Who decided, and when, is shown with it.
  */
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useSetReview } from "../../hooks/useQualityAudit";
 import type { NeedsReviewItem, ReviewStatus } from "../../services/analyticsApi";
 
@@ -21,6 +21,27 @@ function when(ts: number): string {
   return new Date(ts * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+function historyList(entries: NonNullable<NeedsReviewItem["history"]>) {
+  return (
+    <ul className="qa-review-history" aria-label="Earlier decisions">
+      {entries.map((h, idx) => (
+        <li key={`${h.decided_at}-${idx}`}>
+          {h.status === "open" ? (
+            <>Reopened{h.reviewer_name ? ` by ${h.reviewer_name}` : ""}</>
+          ) : (
+            <>
+              <strong>{REVIEW_LABEL[h.status]}</strong>
+              {h.reviewer_name ? ` by ${h.reviewer_name}` : ""}
+              {h.note ? <span className="qa-review-note">“{h.note}”</span> : null}
+            </>
+          )}{" "}
+          · {when(h.decided_at)}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function ReviewControl({ item }: { item: NeedsReviewItem }) {
   const review = item.review;
   const [note, setNote] = useState(review?.note ?? "");
@@ -30,6 +51,28 @@ export function ReviewControl({ item }: { item: NeedsReviewItem }) {
 
   const decide = (status: ReviewStatus | "open") =>
     save.mutate({ item, status, note: status === "open" ? "" : note.trim() });
+  // G639: Reopen takes a finding back; it asks first, and the server keeps
+  // the decision in the item's history.
+  const [confirmReopen, setConfirmReopen] = useState(false);
+  // The confirmation takes focus when it opens (on the safe choice), and a
+  // cancel gives it back to Reopen, so keyboard and screen-reader users are
+  // neither left behind nor dropped at the top of the page.
+  const reopenRef = useRef<HTMLButtonElement>(null);
+  const keepRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (confirmReopen) keepRef.current?.focus();
+  }, [confirmReopen]);
+  const cancelReopen = () => {
+    setConfirmReopen(false);
+    // After the dialog unmounts, so the button exists and is enabled.
+    requestAnimationFrame(() => reopenRef.current?.focus());
+  };
+  const earlier = item.history ?? [];
+  // The newest history entry is the decision shown above; not repeated below.
+  const last = earlier[earlier.length - 1];
+  const earlierThanCurrent =
+    review && last && last.status === review.status && last.note === (review.note ?? '') ? earlier.slice(0, -1) : earlier;
+  const confirmId = `qa-reopen-${item.item_type}-${item.item_id}`;
 
   return (
     <div className="qa-review" role="group" aria-label={`Decision on: ${item.title}`}>
@@ -80,7 +123,14 @@ export function ReviewControl({ item }: { item: NeedsReviewItem }) {
           </button>
         ) : null}
         {review ? (
-          <button type="button" className="ops-btn is-ghost is-sm" disabled={save.isPending} onClick={() => decide("open")}>
+          <button
+            type="button"
+            className="ops-btn is-ghost is-sm"
+            disabled={save.isPending}
+            aria-expanded={confirmReopen}
+            ref={reopenRef}
+            onClick={() => setConfirmReopen(true)}
+          >
             Reopen
           </button>
         ) : null}
@@ -91,6 +141,40 @@ export function ReviewControl({ item }: { item: NeedsReviewItem }) {
           </span>
         ) : null}
       </div>
+      {confirmReopen && review ? (
+        <div className="qa-review-confirm" role="alertdialog" aria-labelledby={`${confirmId}-title`}>
+          <p id={`${confirmId}-title`}>
+            <strong>Reopen this item?</strong> It goes back to the open queue. The decision
+            {review.note ? " and its note" : ""} stays in the history, with who reopened it.
+          </p>
+          <div className="qa-review-actions">
+            <button
+              type="button"
+              className="ops-btn is-sm"
+              disabled={save.isPending}
+              onClick={() => {
+                setConfirmReopen(false);
+                decide("open");
+              }}
+            >
+              Reopen it
+            </button>
+            <button type="button" className="ops-btn is-primary is-sm" ref={keepRef} onClick={cancelReopen}>
+              Keep the decision
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {!review && earlier.length > 0 ? (
+        historyList(earlier)
+      ) : review && earlierThanCurrent.length > 0 ? (
+        // A decided item keeps its earlier decisions one click away, so reading
+        // a finding never means reopening the item.
+        <details className="qa-review-history-more">
+          <summary>Earlier decisions ({earlierThanCurrent.length})</summary>
+          {historyList(earlierThanCurrent)}
+        </details>
+      ) : null}
     </div>
   );
 }
