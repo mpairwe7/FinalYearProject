@@ -850,11 +850,17 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
         await websocket.close(code=1011, reason="chat model not available")
         return
 
+    from .auth import revocation
+
     try:
-        user_id, tenant_id, user_role, granted_purposes = _resolve_ws_principal(websocket)
+        claims = _verified_ws_claims(websocket)
     except JWTAuthError as exc:
         await websocket.close(code=1008, reason=f"authentication failed: {exc}")
         return
+    user_id, tenant_id, user_role, granted_purposes = _principal_of(claims)
+    # Kept for the life of the socket: a session revoked after sign-in closes
+    # it too (G304, ADR-0048).
+    token_issued_at = revocation.issued_at(claims)
 
     from .ws_concurrency import is_ws_origin_allowed
 
@@ -876,6 +882,7 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
     _metric("_ws_chat_active")
     session_start_time = time.perf_counter()
     session_id = ""
+    receiver: revocation.SessionCheckedReceiver | None = None
 
     try:
         # ── session_start config frame ──────────────────────────────
@@ -969,6 +976,13 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
         )
 
         # ── main loop ────────────────────────────────────────────────
+        # A signed-in socket re-checks its session at least every
+        # revocation.SOCKET_CHECK_INTERVAL_S while it waits, and on every
+        # frame: it was checked at sign-in only, so a signed-out token's
+        # socket stayed open (G304, ADR-0048). Anonymous: waits as before.
+        receiver = revocation.SessionCheckedReceiver(
+            websocket.receive_text, session_user_id or "", token_issued_at
+        )
         while True:
             if time.perf_counter() - session_start_time > _SESSION_MAX_DURATION_S:
                 await _send_json(
@@ -978,9 +992,10 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
                 break
 
             try:
-                raw = await websocket.receive_text()
-            except WebSocketDisconnect:
-                raise
+                raw = await receiver.next()
+            except revocation.SessionRevoked:
+                await revocation.close_revoked_socket(websocket)
+                break
             if len(raw) > _MAX_TEXT_FRAME_BYTES:
                 await _send_error(websocket, "Frame too large", recoverable=True)
                 continue
@@ -1071,6 +1086,8 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
         except Exception:
             pass
     finally:
+        if receiver is not None:
+            receiver.close()
         _release_socket_slot(socket_user_key)
         _metric_dec("_ws_chat_active")
         duration = time.perf_counter() - session_start_time

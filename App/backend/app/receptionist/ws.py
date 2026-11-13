@@ -10,7 +10,7 @@ import os
 import re
 import time
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
@@ -51,6 +51,10 @@ from .store import (
 from .summary import generate_call_summary
 
 require_admin_access = require_role("ura_staff", "ura_admin", "ura_auditor")
+
+if TYPE_CHECKING:
+    from collections.abc import Coroutine
+
 logger = logging.getLogger(__name__)
 
 
@@ -166,7 +170,8 @@ _LISTEN_POLL_S = 0.5
 #: The longest any staff socket, or a signed-in caller's, goes between checks of
 #: its session, so a revoked session closes it within about this long (G304,
 #: ADR-0048). The revocation itself reaches another process within its 5 s sync.
-_SESSION_POLL_S = 5.0
+#: The same value as the chat and voice sockets' (``revocation``).
+_SESSION_POLL_S = revocation.SOCKET_CHECK_INTERVAL_S
 #: A lobby or live transcript with nothing to send pings after this long.
 _STAFF_KEEPALIVE_S = 25.0
 
@@ -240,6 +245,47 @@ def _session_wait(expiry: float | None) -> float:
     return max(0.0, min(_SESSION_POLL_S, expiry - time.time()))
 
 
+async def _until_session_over(user_id: str, expiry: float | None, issued_at: float | None) -> None:
+    """Return once the session has expired or been revoked, checking at least every ``_SESSION_POLL_S``."""
+    while not _session_over(user_id, expiry, issued_at):
+        await asyncio.sleep(_session_wait(expiry))
+
+
+async def _while_session_lasts(
+    websocket: WebSocket,
+    work: Coroutine[Any, Any, None],
+    user_id: str,
+    expiry: float | None,
+    issued_at: float | None,
+) -> None:
+    """Run a staff socket's loop, *work*, until it ends or its session does (G304, ADR-0048).
+
+    The loop checks the session between frames. A frame whose handling does
+    not return (the officer's audio sent to a caller who stopped reading, the
+    call's audio sent to a listener who did) stopped those checks, and the
+    socket outlived a revoked session. This watch runs beside the loop: once
+    the session is over it cancels the loop and closes the socket 4401
+    (bounded), and the caller's own teardown then runs as for any close.
+    """
+    loop_task = asyncio.ensure_future(work)
+    watch = asyncio.create_task(_until_session_over(user_id, expiry, issued_at))
+    try:
+        await asyncio.wait({loop_task, watch}, return_when=asyncio.FIRST_COMPLETED)
+        if loop_task.done():
+            return
+        loop_task.cancel()
+        await asyncio.gather(loop_task, return_exceptions=True)
+        with contextlib.suppress(Exception):
+            async with asyncio.timeout(1.0):
+                await websocket.close(code=4401)
+    finally:
+        unfinished = [task for task in (watch, loop_task) if not task.done()]
+        for task in unfinished:
+            task.cancel()
+        if unfinished:
+            await asyncio.gather(*unfinished, return_exceptions=True)
+
+
 async def _refuse_revoked_officer_media(room: Any, identity: str) -> bool:
     """Revoke the officer's call media if the session it was issued under is revoked (G304, ADR-0048).
 
@@ -287,7 +333,8 @@ async def _end_call_when_session_revoked(
                         {"type": "error", "code": "signin", "detail": "Session revoked", "recoverable": False}
                     ))
             with contextlib.suppress(Exception):
-                await websocket.close(code=4401)
+                async with asyncio.timeout(1.0):
+                    await websocket.close(code=4401)
             # Shielded: the endpoint's teardown cancels this task, and an end
             # cut short would leave the room's media and its row open.
             ending = asyncio.create_task(room.end("session_revoked"))
@@ -1356,24 +1403,31 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
         # the socket: one who left during a silence kept their place, and the
         # call's listener cap, until audio resumed or the call ended.
         gone = asyncio.create_task(_until_disconnected(websocket))
+
+        async def relay_call_audio() -> None:
+            try:
+                await websocket.send_text(json.dumps({"type": "authenticated"}))
+                while room.state.mode == "bridged" and not gone.done():
+                    if _session_over(user_id, token_exp, token_iat):
+                        await websocket.close(code=4401)
+                        break
+                    # Audio stops when the call ends, is held or is passed on, and
+                    # nothing more is ever queued: an unbounded get() left this
+                    # handler, its socket and the whole room alive for good.
+                    try:
+                        chunk = await asyncio.wait_for(queue.get(), timeout=_LISTEN_POLL_S)
+                    except asyncio.TimeoutError:
+                        continue
+                    await websocket.send_bytes(chunk)
+            except WebSocketDisconnect:
+                pass
+            except Exception:
+                logger.debug("Listen connection closed", exc_info=True)
+
         try:
-            await websocket.send_text(json.dumps({"type": "authenticated"}))
-            while room.state.mode == "bridged" and not gone.done():
-                if _session_over(user_id, token_exp, token_iat):
-                    await websocket.close(code=4401)
-                    break
-                # Audio stops when the call ends, is held or is passed on, and
-                # nothing more is ever queued: an unbounded get() left this
-                # handler, its socket and the whole room alive for good.
-                try:
-                    chunk = await asyncio.wait_for(queue.get(), timeout=_LISTEN_POLL_S)
-                except asyncio.TimeoutError:
-                    continue
-                await websocket.send_bytes(chunk)
-        except WebSocketDisconnect:
-            pass
-        except Exception:
-            logger.debug("Listen connection closed", exc_info=True)
+            # The session is watched beside the relay: a listener who stopped
+            # reading held send_bytes(), and the checks with it (G304, ADR-0048).
+            await _while_session_lasts(websocket, relay_call_audio(), user_id, token_exp, token_iat)
         finally:
             # No `return` here: it would swallow a cancellation.
             room.remove_listener(queue)
@@ -1588,41 +1642,61 @@ async def _officer_audio(websocket: WebSocket, call_id: str, slot: _StaffSlot) -
     # used to run to the token's expiry, or for ever without one. A receive
     # still pending when a check comes round is kept, not cancelled: a frame
     # arriving just then is read on the next pass rather than lost.
-    receiving: asyncio.Future[Any] | None = None
+    #
+    # The loop's own checks run between frames only: a frame whose handling
+    # does not return (the officer's audio sent to a caller who stopped
+    # reading) held them off, with the leg and its caller-audio sender. So the
+    # session is also watched beside the loop, which it cancels and closes
+    # 4401 once the session is over; the teardown below then runs as for any
+    # close (review of ADR-0048).
+    async def relay_officer_frames() -> None:
+        receiving: asyncio.Future[Any] | None = None
+        try:
+            while room.state.mode == "bridged":
+                if _session_over(user_id, token_exp, token_iat):
+                    await websocket.close(code=4401)
+                    break
+                if receiving is None:
+                    receiving = asyncio.ensure_future(websocket.receive())
+                done, _pending = await asyncio.wait({receiving}, timeout=_session_wait(token_exp))
+                if not done:
+                    continue
+                msg = receiving.result()
+                receiving = None
+                if msg.get("type") == "websocket.disconnect":
+                    break
+                if msg.get("bytes") is not None:
+                    frame: bytes | str = msg["bytes"]
+                    verdict = frame_gate.audio(frame)
+                elif msg.get("text"):
+                    frame = msg["text"]
+                    verdict = frame_gate.text(frame)
+                else:
+                    continue
+                if verdict is Verdict.CLOSE:
+                    await close_flooded(websocket, frame_gate)
+                    break
+                if verdict is Verdict.PASS and frame:
+                    if isinstance(frame, str):
+                        # A control message (a hangup ends the call) is not cut
+                        # short by the session watch cancelling this loop: an
+                        # end left half done would keep the room open.
+                        handling = asyncio.ensure_future(officer_leg.handle_officer_message(frame))
+                        _hold(handling)
+                        await asyncio.shield(handling)
+                    else:
+                        await officer_leg.handle_officer_message(frame)
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            logger.debug("Officer audio connection closed", exc_info=True)
+        finally:
+            if receiving is not None and not receiving.done():
+                receiving.cancel()
+
     try:
-        while room.state.mode == "bridged":
-            if _session_over(user_id, token_exp, token_iat):
-                await websocket.close(code=4401)
-                break
-            if receiving is None:
-                receiving = asyncio.ensure_future(websocket.receive())
-            done, _pending = await asyncio.wait({receiving}, timeout=_session_wait(token_exp))
-            if not done:
-                continue
-            msg = receiving.result()
-            receiving = None
-            if msg.get("type") == "websocket.disconnect":
-                break
-            if msg.get("bytes") is not None:
-                frame: bytes | str = msg["bytes"]
-                verdict = frame_gate.audio(frame)
-            elif msg.get("text"):
-                frame = msg["text"]
-                verdict = frame_gate.text(frame)
-            else:
-                continue
-            if verdict is Verdict.CLOSE:
-                await close_flooded(websocket, frame_gate)
-                break
-            if verdict is Verdict.PASS and frame:
-                await officer_leg.handle_officer_message(frame)
-    except WebSocketDisconnect:
-        pass
-    except Exception:
-        logger.debug("Officer audio connection closed", exc_info=True)
+        await _while_session_lasts(websocket, relay_officer_frames(), user_id, token_exp, token_iat)
     finally:
-        if receiving is not None and not receiving.done():
-            receiving.cancel()
         await officer_leg.close()
         room.officer = None
         if room.state.mode == "bridged":

@@ -12,13 +12,17 @@ A token used to work until it expired, whatever happened to its owner. Now:
 - **Signing out signs you out everywhere.** The console's and the chat's sign-out
   call `POST /v1/me/logout` before dropping the token. Every token the person
   holds stops working, on every device. They sign in again to carry on.
-- **Open sockets follow within about 5 s.** The lobby, the live transcript, the
-  officer's audio socket and a listener close 4401. An officer on a call goes into
-  the reconnect grace, as at expiry, but their LiveKit media leaves the room at
-  once. A signed-in caller's call ends with `session_revoked`.
-- **Each process re-reads `revoked_sessions` every 5 s.** A failed read keeps the
-  revocations it has, logs `Session revocations could not be read` at ERROR once,
-  and counts `ura_session_revocation_sync_failures_total`.
+- **Open sockets follow within about 10 s.** The lobby, the live transcript, the
+  officer's audio socket, a listener, and a signed-in chat or voice socket close
+  4401. An officer on a call goes into the reconnect grace, as at expiry, but
+  their LiveKit media leaves the room at once. A signed-in caller's call ends
+  with `session_revoked`. The bound is about 5 s on the process that took the
+  revocation; on the other one it is up to 5 s for that process's sync plus up
+  to 5 s for the socket's own check.
+- **Each process reads `revoked_sessions` before it serves, then every 5 s.** In
+  production a process that cannot read it at start refuses to start. A failed
+  read later keeps the revocations it has, logs `Session revocations could not be
+  read` at ERROR once, and counts `ura_session_revocation_sync_failures_total`.
 
 #### Revoke a session (lost device, leaked token, an officer leaving)
 
@@ -35,16 +39,19 @@ A token used to work until it expired, whatever happened to its owner. Now:
    A 200 returns `revoked_before`. A 503 means it was not stored and nothing
    changed: try again.
 3. Check it took: a request with the old token gets 401 `session revoked`. Within
-   5 s their console shows the sign-in again, and an officer on a call is put in
-   the reconnect grace.
+   about 10 s (5 s for the other process's sync, 5 s for the socket's check)
+   their console shows the sign-in again, and an officer on a call is put in the
+   reconnect grace.
 4. To keep them out, also disable the account at the identity provider (Auth0).
    This service only refuses tokens issued before the revocation; a new sign-in
    works.
 5. It is in the audit trail as `staff.session_revoked`.
 
-Limits: a token with no `iat` is not affected. On the Space the database, and so
-every revocation, is wiped on restart; revoke again after a restart if the old
-token may still be in use.
+Limits: a token with no usable `iat` is refused outright (401), since it could
+not be revoked. An open live ticket stream stays open (it checks only at
+sign-in), and the MCP server's bearer check does not read the revocation list
+(G618). On the Space the database, and so every revocation, is wiped on restart;
+revoke again after a restart if the old token may still be in use.
 
 ### Assurance update — 2026-11-12, one call process (ADR-0043)
 

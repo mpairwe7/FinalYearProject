@@ -27,7 +27,8 @@ presence: those need an officer's sign-in (`ura_staff`) and answer **403** to th
 - **401 `session revoked`:** a token issued before its owner signed out everywhere
   (`POST /v1/me/logout`) or was signed out by an administrator
   (`POST /v1/admin/users/{user_id}/revoke`). A token's `iat` is compared with the
-  person's cutoff; a token with no `iat` is not affected. Every process applies a
+  person's cutoff. A token with no usable `iat` is refused as invalid (401) everywhere,
+  so every token the service accepts can be revoked. Every process applies a
   revocation within 5 s (ADR-0048). A socket that signs in with such a token is
   refused as for an invalid one.
 - **403:** a signed-in user without a staff role, or an auditor on an endpoint that
@@ -1775,6 +1776,12 @@ barge-in support. Gated by `FLAG_VOICE_STREAMING=true`.
 7. Client can send `{"type": "barge_in"}` at any time to interrupt TTS playback.
 8. Clean close via `{"type": "session_end"}`.
 
+A signed-in socket (this one, `/v2/voice/chat/stream` and `/v2/chat/stream`)
+re-checks its session at least every 5 s and on every frame. Once the session is
+revoked (ADR-0048) it is sent `{"type": "error", "code": "signin", "detail":
+"Session revoked", "recoverable": false}` and closes **4401**. An anonymous socket
+has no session and is not affected.
+
 **Server → Client events:**
 
 | Event | Format | Description |
@@ -2343,13 +2350,20 @@ Content-Type: application/json
 `ura_admin` only (or the operator key); 403 for other staff. The body is
 optional; `reason` is at most 200 characters. Every token issued to `user_id`
 (the token's `sub`) before now stops working: 401 `session revoked` on the API,
-refused at socket sign-in, and an open staff socket or call opened with one
-closes 4401 within about 5 s. A token issued after this works, so the person
+refused at socket sign-in, and an open staff, call, chat or voice socket opened
+with one closes 4401. A token issued after this works, so the person
 can sign in again; to keep them out, disable the account at the identity
 provider too. The row is stored before the answering process applies it, and
-every other process applies it within `sync_interval_seconds`. A failed write
+every other process applies it within `sync_interval_seconds`. An open socket
+checks at least every 5 s, so it closes within about 5 s on the process that
+took the revocation and about 10 s on another (up to 5 s for that process's
+sync, then up to 5 s for the socket's check). A failed write
 answers 503 and changes nothing. Audited as `staff.session_revoked` with the
 subject and the reason's length. Rate-limited (`RATE_LIMIT`, 30/minute).
+
+Not covered yet (G618): the live ticket stream checks a token only at sign-in,
+so a stream already open stays open; and the MCP server's own bearer check does
+not read the revocation list.
 
 ```json
 {"user_id": "auth0|6a7d7af3", "revoked_before": 1794556800.42, "sync_interval_seconds": 5.0}
@@ -2403,11 +2417,16 @@ Authorization: Bearer <token>
 ```
 
 Revokes every token issued to the signed-in person up to now, this one
-included (ADR-0048). Afterwards those tokens get 401 `session revoked` and
-any socket opened with one closes 4401 within about 5 s; a token issued later
-(signing in again) works. The cutoff is the time of the request, and a token's
+included (ADR-0048). Afterwards those tokens get 401 `session revoked`, and an
+open staff, call, chat or voice socket opened with one closes 4401: within about
+5 s on the process that took the sign-out, about 10 s on another (its 5 s sync,
+then the socket's 5 s check). A token issued later (signing in again) works.
+The cutoff is the time of the request, and a token's
 `iat` is a whole second, so a sign-in completed in the same second is revoked
-too. A token with no `iat` is not affected. The browser's sign-outs call this
+too. A token with no usable `iat` never gets this far: it is refused as invalid.
+Not covered yet (G618): an open live ticket stream stays open (it checks only at
+sign-in), and the MCP server's bearer check does not read this list. The
+browser's sign-outs call this
 with `keepalive: true` before dropping the token, and ignore a failure.
 401 without a valid token; 503 when the revocation could not be stored (nothing
 changed). Audited as `auth.signed_out_everywhere`. Rate-limited (`RATE_LIMIT`).

@@ -511,6 +511,11 @@ class OAuthResourceServerTests(_RegisteredTools):
             with self.subTest(case=label):
                 self.assertFalse(self.auth.verify(f"Bearer {self._jwt(**overrides)}").ok)
 
+    def test_a_token_without_an_issue_time_is_refused(self) -> None:
+        """No `iat`, no revocation (ADR-0048): the RS256 verifier refuses it as invalid."""
+        outcome = self.auth.verify(f"Bearer {self._jwt(iat=None)}")
+        self.assertEqual((outcome.ok, outcome.status, outcome.error), (False, 401, "invalid_token"))
+
     def test_a_tampered_token_is_refused(self) -> None:
         header, payload, signature = self._jwt().split(".")
         forged = _b64url_encode(

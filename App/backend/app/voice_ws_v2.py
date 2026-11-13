@@ -17,7 +17,6 @@ Route: ``/v2/voice/chat/stream``
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import time
@@ -27,6 +26,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
 from . import ws_concurrency
 from .analytics import MetricSpec, record_mapped
+from .auth import revocation
 from .auth.jwt_auth import JWTAuthError, JWTVerifier
 from .flags import flags
 from .voice_stream import VADConfig
@@ -68,8 +68,14 @@ def _v2_dec(name: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_ws_auth(websocket: WebSocket, *, required: bool = False) -> tuple[str, str]:
-    """Verify WebSocket auth when present."""
+def _resolve_ws_auth(
+    websocket: WebSocket, *, required: bool = False
+) -> tuple[str, str, float | None]:
+    """Verify WebSocket auth when present: ``(user_id, tenant_id, issued_at)``.
+
+    *issued_at* is the token's ``iat`` (``None`` when anonymous): the socket's
+    loop re-checks it against the person's revocation cutoff (G304, ADR-0048).
+    """
     auth_header = websocket.headers.get("authorization", "")
     token = ""
     if auth_header.lower().startswith("bearer "):
@@ -79,7 +85,7 @@ def _resolve_ws_auth(websocket: WebSocket, *, required: bool = False) -> tuple[s
     if not token:
         if required:
             raise JWTAuthError("authentication required")
-        return "", "default"
+        return "", "default", None
 
     from .auth.dependencies import APP_ENV, _get_verifier
 
@@ -93,11 +99,9 @@ def _resolve_ws_auth(websocket: WebSocket, *, required: bool = False) -> tuple[s
             claims = _hs256_verify(token, verifier.dev_secret)
         else:
             raise
-    from .auth.revocation import claims_revoked
-
-    if claims_revoked(claims):  # signed out before it expired (G304, ADR-0048)
+    if revocation.claims_revoked(claims):  # signed out before it expired (G304, ADR-0048)
         raise JWTAuthError("session revoked")
-    return str(claims.get("sub", "")), str(claims.get("tenant_id", "default"))
+    return str(claims.get("sub", "")), str(claims.get("tenant_id", "default")), revocation.issued_at(claims)
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +118,7 @@ async def voice_stream_ws_v2(websocket: WebSocket, app: object) -> None:
         return
 
     try:
-        user_id, tenant_id = _resolve_ws_auth(
+        user_id, tenant_id, token_issued_at = _resolve_ws_auth(
             websocket, required=flags.is_enabled("auth_required")
         )
     except JWTAuthError as exc:
@@ -141,6 +145,7 @@ async def voice_stream_ws_v2(websocket: WebSocket, app: object) -> None:
     idle_timeout_s = ws_concurrency.int_env("VOICE_WS_IDLE_TIMEOUT_S", 120)
 
     session: VoiceSessionV2 | None = None
+    receiver: revocation.SessionCheckedReceiver | None = None
 
     try:
         # ── session_start config frame ────────────────────────────
@@ -275,6 +280,10 @@ async def voice_stream_ws_v2(websocket: WebSocket, app: object) -> None:
         expecting_image_binary = False
 
         # ── Main loop ─────────────────────────────────────────────
+        # A signed-in socket re-checks its session at least every
+        # revocation.SOCKET_CHECK_INTERVAL_S while it waits, and on every
+        # frame, and closes 4401 once it is revoked (G304, ADR-0048).
+        receiver = revocation.SessionCheckedReceiver(websocket.receive, user_id, token_issued_at)
         while True:
             if time.perf_counter() - session_start_time > max_duration_s:
                 await _send_json(
@@ -282,13 +291,14 @@ async def voice_stream_ws_v2(websocket: WebSocket, app: object) -> None:
                 )
                 break
             try:
-                message = await asyncio.wait_for(
-                    websocket.receive(), timeout=idle_timeout_s
-                )
-            except asyncio.TimeoutError:
+                message = await receiver.next(timeout=idle_timeout_s)
+            except TimeoutError:
                 await _send_json(
                     websocket, {"type": "session.expired", "reason": "idle_timeout"}
                 )
+                break
+            except revocation.SessionRevoked:
+                await revocation.close_revoked_socket(websocket)
                 break
 
             if message.get("type") == "websocket.disconnect":
@@ -390,6 +400,8 @@ async def voice_stream_ws_v2(websocket: WebSocket, app: object) -> None:
         except Exception:
             pass
     finally:
+        if receiver is not None:
+            receiver.close()
         ws_concurrency.release("voice", socket_user_key)
         if session is not None:
             session.close()

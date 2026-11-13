@@ -100,7 +100,25 @@ def _hs256_verify(token: str, secret: str) -> dict[str, Any]:
     if header.get("alg") != "HS256":
         raise JWTAuthError(f"unexpected alg: {header.get('alg')}")
 
+    # Here as well as in JWTVerifier.verify: the development fallback (an
+    # HS256 token under an RS256 verifier) calls this directly.
+    _require_issued_at(payload)
     return payload
+
+
+def _require_issued_at(claims: dict[str, Any]) -> None:
+    """Refuse a token with no usable ``iat`` (G304, ADR-0048).
+
+    A session is revoked by refusing every token issued to the person before
+    a cutoff. A token that does not say when it was issued cannot be placed
+    before or after one, so a sign-out would "succeed" while it went on
+    working until it expired. Every provider this service accepts issues
+    ``iat`` (Auth0 and Keycloak access tokens, ``make_dev_token``).
+    """
+    from .revocation import issued_at
+
+    if issued_at(claims) is None:
+        raise JWTAuthError("token has no usable iat (issued-at) claim")
 
 
 def _rsa_public_key_from_jwk(jwk: dict[str, Any]) -> Any:
@@ -305,7 +323,11 @@ class JWTVerifier:
         return payload
 
     def verify(self, token: str) -> dict[str, Any]:
-        """Verify signature, exp, nbf, iss, aud.  Return claims."""
+        """Verify signature, iat, exp, nbf, iss, aud.  Return claims.
+
+        ``iat`` is required: a token without one could not be revoked
+        (G304, ADR-0048).
+        """
         if not token:
             raise JWTAuthError("empty token")
 
@@ -320,6 +342,10 @@ class JWTVerifier:
             claims = _hs256_verify(token, self.dev_secret)
         else:
             raise JWTAuthError(f"unexpected alg: {token_alg}")
+
+        # Issued-at, before the temporal claims: required, so that every token
+        # the service accepts can be revoked (G304, ADR-0048).
+        _require_issued_at(claims)
 
         # Temporal claims
         now = time.time()

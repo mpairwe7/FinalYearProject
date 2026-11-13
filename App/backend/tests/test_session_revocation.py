@@ -5,10 +5,12 @@ working on the API, and a staff socket opened with it stayed open, until the
 token's own expiry. Now ``POST /v1/me/logout`` (any signed-in person) and
 ``POST /v1/admin/users/{user_id}/revoke`` (an administrator) store a cutoff
 for the person in ``revoked_sessions``; every process re-reads that table every
-5 s; a token issued before the cutoff is refused on the API (401 "session
-revoked") and at socket sign-in (4401), and an open socket opened with one is
-closed 4401 within about 5 s. An officer's LiveKit media is revoked at once,
-and refused if it rejoins.
+5 s, and reads it before it serves; a token issued before the cutoff is
+refused on the API (401 "session revoked") and at socket sign-in (4401), and an
+open staff, call, chat or voice socket opened with one is closed 4401 within
+about 5 s of the process knowing. An officer's LiveKit media is revoked at
+once, and refused if it rejoins. A token with no usable ``iat`` could never be
+revoked, so verification refuses it.
 """
 
 from __future__ import annotations
@@ -158,7 +160,7 @@ def test_a_token_issued_before_the_cutoff_is_revoked_and_one_issued_at_or_after_
     assert clean_map.is_revoked("okello", 1000.0) is True  # the logout's own second
     assert clean_map.is_revoked("okello", 1000.5) is False
     assert clean_map.is_revoked("okello", 1001.0) is False  # a sign-in after it
-    # Unknown, anonymous, and a token without `iat` are never revoked.
+    # Unknown and anonymous (no user, no `iat`) are never revoked.
     assert clean_map.is_revoked("nakato", 1.0) is False
     assert clean_map.is_revoked("", 1.0) is False
     assert clean_map.is_revoked("okello", None) is False
@@ -181,7 +183,8 @@ def test_the_claims_of_a_token_say_whether_it_is_revoked(clean_map) -> None:
 
     assert clean_map.claims_revoked({"sub": "okello", "iat": 1000}) is True
     assert clean_map.claims_revoked({"sub": "okello", "iat": 1001}) is False
-    # No usable `iat`: the token cannot be placed before or after the cutoff.
+    # No usable `iat`: not placeable against a cutoff. Verification refuses such
+    # a token before it gets here (test_a_signed_token_without_a_usable_iat_is_refused).
     assert clean_map.claims_revoked({"sub": "okello"}) is False
     assert clean_map.claims_revoked({"sub": "okello", "iat": "1000"}) is False
     assert clean_map.claims_revoked({"sub": "okello", "iat": True}) is False
@@ -262,6 +265,65 @@ def test_the_lifespan_runs_the_sync_in_every_process() -> None:
     assert main_mod._SESSION_REVOCATION_SYNC_INTERVAL_SECONDS <= 5
 
 
+def test_a_restarted_process_refuses_a_revoked_token_from_its_first_request(memory_db, clean_map) -> None:
+    """The sync loop's first pass ran only once the app was serving (review of ADR-0048).
+
+    The revocations are read during startup, before the first request; the
+    loop is stubbed out here so only that read can have applied them.
+    """
+    from app import receptionist
+
+    user = _user("taxpayer")
+    iat = int(time.time())
+    memory_db.revoke_sessions(user, revoked_before=iat + 0.5, reason="logout", actor=user)
+    token = _signed(user, "verified_taxpayer", iat=iat)
+
+    async def no_periodic_sync(stop: asyncio.Event, _interval: float) -> None:
+        await stop.wait()
+
+    with (
+        mock.patch.object(main_mod, "_session_revocation_sync_loop", no_periodic_sync),
+        mock.patch.object(receptionist, "start"),
+        TestClient(main_mod.app) as client,
+    ):
+        first = client.get("/v1/me/profile", headers=_bearer(token))
+
+    assert first.status_code == 401, first.text
+    assert first.json()["detail"] == "session revoked"
+
+
+def _initialise_with_unreadable_revocations(monkeypatch, app_env: str) -> None:
+    monkeypatch.setenv("APP_ENV", app_env)
+    with (
+        mock.patch.object(main_mod.db, "init_db"),
+        mock.patch.object(main_mod, "_should_seed", return_value=False),
+        mock.patch.object(main_mod.db, "load_flag_overrides", return_value={}),
+        mock.patch.object(
+            main_mod.db, "load_session_revocations", side_effect=RuntimeError("database is locked")
+        ),
+    ):
+        main_mod._initialize_analytics_database()
+
+
+def test_in_production_unreadable_revocations_at_start_refuse_to_start(monkeypatch, clean_map) -> None:
+    """It would serve tokens signed out of, until a sync pass managed to read them."""
+    with pytest.raises(SystemExit, match="session revocations"):
+        _initialise_with_unreadable_revocations(monkeypatch, "production")
+
+
+def test_elsewhere_unreadable_revocations_at_start_are_logged_and_start_goes_on(
+    monkeypatch, clean_map, caplog
+) -> None:
+    failures = _counter("session_revocation_sync_failures_total")
+    caplog.set_level(logging.ERROR)
+
+    _initialise_with_unreadable_revocations(monkeypatch, "development")
+
+    assert _counter("session_revocation_sync_failures_total") - failures == 1
+    assert any("could not be read" in r.getMessage() for r in caplog.records)
+    assert clean_map.state()["failing"] is True
+
+
 # ---------------------------------------------------------------------------
 # The API
 # ---------------------------------------------------------------------------
@@ -312,17 +374,42 @@ def test_sign_out_is_audited(memory_db, clean_map) -> None:
     assert payload["revoked_before"] == r.json()["revoked_before"]
 
 
-def test_a_token_without_iat_is_not_affected(memory_db, clean_map) -> None:
-    """Documented: such a token cannot be placed before or after the cutoff; its expiry still ends it."""
-    user = _user("taxpayer")
-    client = TestClient(main_mod.app)
-    r = client.post(
-        "/v1/me/logout", headers=_bearer(_signed(user, "verified_taxpayer", iat=int(time.time())))
-    )
-    assert r.status_code == 200, r.text
+@pytest.mark.parametrize("iat", [None, "1000", True, 0, -5], ids=["none", "text", "bool", "zero", "negative"])
+def test_a_signed_token_without_a_usable_iat_is_refused(memory_db, clean_map, iat) -> None:
+    """It could never be revoked: a sign-out would "succeed" while it went on working.
 
-    no_iat = _signed(user, "verified_taxpayer", iat=None)
-    assert client.get("/v1/me/profile", headers=_bearer(no_iat)).status_code == 200
+    Verification refuses it as it refuses any invalid token (401), before the
+    revocation check, so no token that reaches the service escapes a cutoff.
+    """
+    user = _user("taxpayer")
+    r = TestClient(main_mod.app).get(
+        "/v1/me/profile", headers=_bearer(_signed(user, "verified_taxpayer", iat=iat))
+    )
+    assert r.status_code == 401, r.text
+    assert "iat" in r.json()["detail"]
+
+
+@pytest.mark.parametrize("iat", [None, "1000", True, 0], ids=["none", "text", "bool", "zero"])
+def test_the_verifier_refuses_a_token_without_a_usable_iat(iat) -> None:
+    from app.auth import JWTAuthError, JWTVerifier
+    from app.auth.dependencies import _get_verifier
+    from app.auth.jwt_auth import _hs256_verify
+
+    configured = _get_verifier()
+    verifier = JWTVerifier(
+        alg="HS256",
+        dev_secret=configured.dev_secret,
+        issuer=configured.issuer,
+        audience=configured.audience,
+    )
+    token = _signed("okello", iat=iat)
+    with pytest.raises(JWTAuthError, match="iat"):
+        verifier.verify(token)
+    # The development fallback (an HS256 token under an RS256 verifier) too.
+    with pytest.raises(JWTAuthError, match="iat"):
+        _hs256_verify(token, configured.dev_secret)
+    # A token with one verifies.
+    assert verifier.verify(_signed("okello", iat=int(time.time())))["sub"] == "okello"
 
 
 def test_a_sign_out_the_store_cannot_keep_changes_nothing(memory_db, clean_map) -> None:
@@ -415,6 +502,22 @@ class _Socket:
         return [m for m in self.sent if isinstance(m, dict) and m.get("type") == kind]
 
 
+class _FeedSocket(_Socket):
+    """A socket whose frames after sign-in are fed by the test, binary ones included."""
+
+    def __init__(self, inbound: list[str], query: dict | None = None) -> None:
+        super().__init__(inbound, query)
+        self._fed: asyncio.Queue[dict] = asyncio.Queue()
+
+    def feed(self, message: dict) -> None:
+        self._fed.put_nowait(message)
+
+    async def receive(self) -> dict:
+        if self._inbound:
+            return {"type": "websocket.receive", "text": self._inbound.pop(0)}
+        return await self._fed.get()
+
+
 def _authenticate(token: str) -> str:
     return json.dumps({"type": "authenticate", "access_token": token})
 
@@ -465,6 +568,25 @@ class SocketSignInTests(unittest.IsolatedAsyncioTestCase):
             with pytest.raises(JWTAuthError, match="session revoked"):
                 resolve(_Socket([]), required=True, token_override=token)
 
+    def test_a_token_without_iat_does_not_sign_a_socket_in(self) -> None:
+        from app.auth import JWTAuthError
+        from app.chat_ws_v2 import _resolve_ws_principal, resolve_ws_session
+
+        token = _signed("okello", "ura_staff", iat=None)
+        for resolve in (resolve_ws_session, _resolve_ws_principal):
+            with pytest.raises(JWTAuthError, match="iat"):
+                resolve(_Socket([]), required=True, token_override=token)
+
+    async def test_a_token_without_iat_cannot_open_the_lobby(self) -> None:
+        socket = _Socket([_authenticate(_signed(_user("okello"), "ura_staff", iat=None))])
+        with patch.object(ws, "_voice_receptionist_enabled", return_value=True):
+            task = asyncio.create_task(ws.staff_calls_stream_endpoint(socket, call_id=None))
+            await _until(lambda: socket.closed is not None or task.done(), timeout=1.0)
+            await _stop(task)
+
+        self.assertEqual(socket.closed, 4401)
+        self.assertEqual(socket.frames("ready"), [])
+
     async def test_a_revoked_token_cannot_open_the_lobby(self) -> None:
         user = _user("okello")
         iat = int(time.time())
@@ -494,6 +616,20 @@ def test_a_revoked_token_does_not_open_a_voice_socket(module_name, clean_map) ->
 
     clean_map.record(user, iat + 0.5)
     with pytest.raises(JWTAuthError, match="session revoked"):
+        module._resolve_ws_auth(socket, required=True)
+
+
+@pytest.mark.parametrize("module_name", ["app.voice_ws", "app.voice_ws_v2"])
+def test_a_token_without_iat_does_not_open_a_voice_socket(module_name, clean_map) -> None:
+    import importlib
+
+    from app.auth import JWTAuthError
+
+    module = importlib.import_module(module_name)
+    socket = SimpleNamespace(
+        headers={"authorization": f"Bearer {_signed(_user('taxpayer'), iat=None)}"}, query_params={}
+    )
+    with pytest.raises(JWTAuthError, match="iat"):
         module._resolve_ws_auth(socket, required=True)
 
 
@@ -549,6 +685,120 @@ class LobbyRevocationTests(unittest.IsolatedAsyncioTestCase):
             await _stop(task)
 
         self.assertTrue(still_open)
+        self.assertIsNone(socket.closed)
+
+
+class _FakeVoiceSession:
+    """Stands in for the voice engine: the tests below only need the socket's loop."""
+
+    def __init__(self, **kwargs) -> None:
+        self.session_id = kwargs.get("session_id", "")
+        self.user_id = kwargs.get("user_id", "")
+        self._turn_count = 0
+
+    def close(self) -> None:
+        return None
+
+
+class OpenChatAndVoiceSocketTests(unittest.IsolatedAsyncioTestCase):
+    """The chat and voice sockets checked a session only at sign-in (review of ADR-0048).
+
+    A signed-in chat or voice socket now re-checks it at least every
+    ``revocation.SOCKET_CHECK_INTERVAL_S`` while it waits for a frame, and on
+    every frame, and closes 4401 once it is revoked. An anonymous one has no
+    session and is not affected.
+    """
+
+    async def asyncSetUp(self) -> None:
+        from app import chat_ws_v2, ws_concurrency
+
+        self.revocation = _revocation()
+        self.revocation.reset()
+        self.addCleanup(self.revocation.reset)
+        ws_concurrency.reset()
+        self.addCleanup(ws_concurrency.reset)
+        with chat_ws_v2._active_per_user_lock:
+            chat_ws_v2._active_per_user.clear()
+        poll = patch.object(self.revocation, "SOCKET_CHECK_INTERVAL_S", 0.05, create=True)
+        poll.start()
+        self.addCleanup(poll.stop)
+
+    def socket(self, token: str = "") -> _Socket:
+        socket = _Socket([json.dumps({"type": "session_start", "locale": "en", "language": "en"})])
+        if token:
+            socket.headers["authorization"] = f"Bearer {token}"
+        return socket
+
+    async def open(self, handler, socket: _Socket, flag: str, **patches) -> asyncio.Task:
+        app = SimpleNamespace(state=SimpleNamespace(model=object(), speech=object()))
+        module = sys.modules[handler.__module__]
+        for patcher in (
+            patch.object(module.flags, "is_enabled", side_effect=lambda name: name == flag),
+            *(patch.object(module, name, value) for name, value in patches.items()),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        task = asyncio.create_task(handler(socket, app))
+        self.addAsyncCleanup(_stop, task)
+        self.assertTrue(
+            await _until(lambda: socket.frames("session_ready") or task.done()), "the socket never opened"
+        )
+        self.assertFalse(task.done(), f"the socket closed at once: {socket.sent}")
+        return task
+
+    async def assert_closed_on_revocation(self, handler, flag: str, **patches) -> None:
+        user, iat = _user("taxpayer"), int(time.time())
+        socket = self.socket(_signed(user, "verified_taxpayer", iat=iat))
+        task = await self.open(handler, socket, flag, **patches)
+
+        self.revocation.record(user, iat + 0.5)
+        done, _pending = await asyncio.wait({task}, timeout=2.0)
+
+        self.assertTrue(done, "the socket outlived the revoked session")
+        self.assertEqual(socket.closed, 4401)
+
+    async def test_an_open_chat_socket_closes_when_the_session_is_revoked(self) -> None:
+        from app.chat_ws_v2 import chat_stream_ws
+
+        await self.assert_closed_on_revocation(chat_stream_ws, "ws_chat")
+
+    async def test_an_open_voice_socket_closes_when_the_session_is_revoked(self) -> None:
+        from app.voice_ws import voice_stream_ws
+
+        await self.assert_closed_on_revocation(
+            voice_stream_ws, "voice_streaming", VoiceSession=_FakeVoiceSession
+        )
+
+    async def test_an_open_v2_voice_socket_closes_when_the_session_is_revoked(self) -> None:
+        from app.voice_ws_v2 import voice_stream_ws_v2
+
+        await self.assert_closed_on_revocation(
+            voice_stream_ws_v2, "native_voice", VoiceSessionV2=_FakeVoiceSession
+        )
+
+    async def test_a_chat_socket_whose_session_stands_stays_open(self) -> None:
+        from app.chat_ws_v2 import chat_stream_ws
+
+        user, iat = _user("taxpayer"), int(time.time())
+        socket = self.socket(_signed(user, "verified_taxpayer", iat=iat))
+        task = await self.open(chat_stream_ws, socket, "ws_chat")
+
+        self.revocation.record(_user("nakato"), iat + 0.5)
+        await asyncio.sleep(0.3)
+
+        self.assertFalse(task.done())
+        self.assertIsNone(socket.closed)
+
+    async def test_an_anonymous_chat_socket_is_not_affected(self) -> None:
+        from app.chat_ws_v2 import chat_stream_ws
+
+        socket = self.socket()
+        task = await self.open(chat_stream_ws, socket, "ws_chat")
+
+        self.revocation.record(_user("taxpayer"), time.time() + 1)
+        await asyncio.sleep(0.3)
+
+        self.assertFalse(task.done())
         self.assertIsNone(socket.closed)
 
 
@@ -630,6 +880,90 @@ class OfficerAudioRevocationTests(_CallCase):
             (self.room.state.mode, self.room.state.reconnecting_officer), ("transferring", "okello")
         )
         self.assertIsNone(self.room.officer)
+
+    async def test_a_send_to_the_caller_that_never_returns_does_not_keep_a_revoked_officer_on(self) -> None:
+        """The session was checked only between frames; a frame stuck on its way to the caller stopped it."""
+        await desk.claim(self.call_id, "okello")
+        socket = _FeedSocket([_authenticate("t")])
+        self.staff("okello")
+        task = asyncio.create_task(ws.officer_audio_endpoint(socket, self.call_id))
+        self.addAsyncCleanup(_stop, task)
+        self.assertTrue(
+            await _until(lambda: self.room.state.mode == "bridged"), "the officer never joined the call"
+        )
+        stuck = asyncio.Event()
+
+        async def never_returns(_data: bytes) -> None:
+            stuck.set()
+            await asyncio.Event().wait()  # a caller who stopped reading
+
+        self.caller.send_bytes = never_returns
+        socket.feed({"type": "websocket.receive", "bytes": b"\x00\x00" * 320})
+        self.assertTrue(await _until(stuck.is_set), "the officer's audio never reached the caller")
+
+        self.revoke("okello")
+        done, _pending = await asyncio.wait({task}, timeout=2.0)
+
+        self.assertTrue(done, "a blocked send kept the revoked officer's audio socket open")
+        self.assertEqual(socket.closed, 4401)
+        self.assertIsNone(self.room.officer)
+        self.assertEqual(
+            (self.room.state.mode, self.room.state.reconnecting_officer), ("transferring", "okello")
+        )
+
+    async def test_a_hangup_under_way_is_not_cut_short_when_the_watch_closes_the_socket(self) -> None:
+        """The watch cancels the officer's loop; the call's end that loop started must still finish."""
+        await desk.claim(self.call_id, "okello")
+        socket = _FeedSocket([_authenticate("t")])
+        self.staff("okello")
+        task = asyncio.create_task(ws.officer_audio_endpoint(socket, self.call_id))
+        self.addAsyncCleanup(_stop, task)
+        self.assertTrue(
+            await _until(lambda: self.room.state.mode == "bridged"), "the officer never joined the call"
+        )
+        started, release, finished = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+        async def slow_end(_reason: str) -> None:
+            started.set()
+            await release.wait()
+            finished.set()
+
+        with patch.object(self.room, "end", slow_end):
+            socket.feed({"type": "websocket.receive", "text": json.dumps({"type": "hangup"})})
+            self.assertTrue(await _until(started.is_set), "the hangup never reached the call")
+            self.revoke("okello")
+            done, _pending = await asyncio.wait({task}, timeout=2.0)
+            release.set()
+            ended = await _until(finished.is_set, timeout=1.0)
+
+        self.assertTrue(done, "the revoked officer's socket stayed open during the hangup")
+        self.assertEqual(socket.closed, 4401)
+        self.assertTrue(ended, "the call's end was cut short")
+
+    async def test_a_listener_whose_socket_stopped_reading_is_cut_off_when_revoked(self) -> None:
+        await desk.claim(self.call_id, "okello")
+        await desk.bridge(self.room, None, "okello", speech_model=None)
+        socket = _FeedSocket([_authenticate("t")], query={"listen": "true"})
+        stuck = asyncio.Event()
+
+        async def never_returns(_data: bytes) -> None:
+            stuck.set()
+            await asyncio.Event().wait()
+
+        socket.send_bytes = never_returns
+        self.staff("auditor1", "ura_auditor")
+        task = asyncio.create_task(ws.officer_audio_endpoint(socket, self.call_id))
+        self.addAsyncCleanup(_stop, task)
+        self.assertTrue(await _until(lambda: bool(self.room.listeners)), "the listener never joined")
+        self.room.broadcast_audio(b"\x00\x00" * 320)
+        self.assertTrue(await _until(stuck.is_set), "the call's audio never reached the listener")
+
+        self.revoke("auditor1")
+        done, _pending = await asyncio.wait({task}, timeout=2.0)
+
+        self.assertTrue(done, "a blocked send kept the revoked listener on the call")
+        self.assertEqual(socket.closed, 4401)
+        self.assertEqual(self.room.listeners, [])
 
     async def test_a_listener_is_cut_off_when_their_session_is_revoked(self) -> None:
         await desk.claim(self.call_id, "okello")

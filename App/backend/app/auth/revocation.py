@@ -7,28 +7,43 @@ token issued to them before ``revoked_before`` is refused, and any token issued
 after it works. It is stored in ``revoked_sessions`` (one row per person) by
 ``POST /v1/me/logout`` and ``POST /v1/admin/users/{user_id}/revoke``.
 
-Each process keeps the table in memory and re-reads it every 5 s
-(``main._session_revocation_sync_loop``), as the flag overrides are
-(ADR-0044); the process that records a revocation applies it at once. So the
-check on every request and in every open socket's loop is a dictionary
-lookup.
+Each process reads the table during startup, before it serves its first
+request (``main._load_session_revocations_at_start``), keeps it in memory and
+re-reads it every 5 s (``main._session_revocation_sync_loop``), as the flag
+overrides are (ADR-0044); the process that records a revocation applies it at
+once. So the check on every request and in every open socket's loop is a
+dictionary lookup.
 
 The cutoff is the wall-clock time of the revocation, a float. A token's
 ``iat`` is a whole second, so a token issued in the same second as the
 sign-out, before it, is revoked; so is a sign-in completed in that same
-second. A sign-in a second later works. A token with no usable ``iat`` cannot
-be placed before or after the cutoff and is not affected: its expiry still
-ends it. ``jti`` and ``sid`` are not used: not every provider issues them.
+second. A sign-in a second later works. A token with no usable ``iat`` could
+not be placed before or after a cutoff, so it is refused when it is verified
+(``jwt_auth``, 401 like any invalid token): every token the service accepts can
+be revoked. ``jti`` and ``sid`` are not used: not every provider issues them.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import json
 import logging
+import math
 import threading
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 logger = logging.getLogger(__name__)
+
+#: The longest an open, signed-in socket goes between checks of its session, so
+#: a revoked one closes within about this long once this process knows of it
+#: (another process learns of it within its own 5 s sync). The chat and voice
+#: sockets use it here; the staff and call sockets as ``receptionist.ws._SESSION_POLL_S``.
+SOCKET_CHECK_INTERVAL_S = 5.0
 
 _lock = threading.Lock()
 #: user id -> cutoff (epoch seconds). Only ever moves later in a running process.
@@ -42,7 +57,9 @@ def issued_at(claims: dict[str, Any] | None) -> float | None:
     if not claims:
         return None
     value = claims.get("iat")
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not math.isfinite(value) or value <= 0:
         return None
     return float(value)
 
@@ -56,8 +73,8 @@ def revoked_before(user_id: str) -> float | None:
 def is_revoked(user_id: str, issued: float | None) -> bool:
     """Whether a token issued to *user_id* at *issued* was revoked.
 
-    False for an anonymous socket (no user id) and for a token with no
-    ``iat``: neither can be placed before a cutoff.
+    False for an anonymous socket (no user id, no ``iat``). A signed-in
+    token always has an ``iat``: verification refuses one without.
     """
     if not user_id or issued is None:
         return False
@@ -120,12 +137,14 @@ def revoke(user_id: str, *, reason: str, actor: str) -> float:
     return cutoff
 
 
-def sync() -> None:
+def sync(*, strict: bool = False) -> None:
     """One pass: bring this process's map up to date with ``revoked_sessions``.
 
     An unreadable store keeps the map as it is (a revocation is never
     forgotten because the store could not be read), counts
     ``session_revocation_sync_failures_total`` and logs once until it answers.
+    With *strict* (the read at startup, before the process serves) it then
+    raises as well, so the caller decides whether to start without them.
     """
     from .. import database as db
     from ..analytics import metrics
@@ -141,9 +160,89 @@ def sync() -> None:
                 exc_info=True,
             )
         _state["failing"] = True
+        if strict:
+            raise
         return
     if _state["failing"]:
         logger.info("Session revocations are readable again")
     _state["failing"] = False
     apply(stored)
     _state["synced_at"] = time.time()
+
+
+# ---------------------------------------------------------------------------
+# Open sockets
+# ---------------------------------------------------------------------------
+
+
+class SessionRevoked(Exception):
+    """The session a socket signed in with was revoked while it was open."""
+
+
+class SessionCheckedReceiver:
+    """A signed-in socket's next frame, with its session re-checked while it waits (G304, ADR-0048).
+
+    The chat and voice sockets waited on ``receive()`` for as long as the
+    person was quiet, so a session revoked meanwhile kept the socket open
+    until its next frame, or for good. :meth:`next` checks at least every
+    ``SOCKET_CHECK_INTERVAL_S`` and on every frame, and raises
+    :class:`SessionRevoked` once the session is revoked. A receive still
+    pending when a check comes round is kept, not cancelled, so no frame is
+    lost; :meth:`close` cancels it when the socket's loop ends. An anonymous
+    socket (no user id) has no session and waits as it always did.
+    """
+
+    def __init__(self, receive: Callable[[], Awaitable[Any]], user_id: str, issued: float | None) -> None:
+        self._receive = receive
+        self._user_id = user_id
+        self._issued = issued
+        self._pending: asyncio.Future[Any] | None = None
+
+    def revoked(self) -> bool:
+        return is_revoked(self._user_id, self._issued)
+
+    async def next(self, timeout: float | None = None) -> Any:
+        """The next frame; ``TimeoutError`` after *timeout* without one; ``SessionRevoked`` once revoked."""
+        loop = asyncio.get_running_loop()
+        deadline = None if timeout is None else loop.time() + timeout
+        while True:
+            if self.revoked():
+                raise SessionRevoked
+            if self._pending is None:
+                self._pending = asyncio.ensure_future(self._receive())
+            wait = SOCKET_CHECK_INTERVAL_S if self._user_id else None
+            if deadline is not None:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise TimeoutError
+                wait = remaining if wait is None else min(wait, remaining)
+            done, _pending = await asyncio.wait({self._pending}, timeout=wait)
+            if not done:
+                continue
+            received, self._pending = self._pending, None
+            if self.revoked():
+                raise SessionRevoked
+            return received.result()
+
+    def close(self) -> None:
+        """Cancel a receive still pending: the socket's loop has ended."""
+        if self._pending is not None and not self._pending.done():
+            self._pending.cancel()
+        self._pending = None
+
+
+async def close_revoked_socket(websocket: Any) -> None:
+    """Tell a socket's client its session was revoked, then close it 4401.
+
+    The client is told as a refused ``call_start`` is (``signin``: sign in
+    again). Both steps are bounded: a client that stopped reading cannot hold
+    the socket open.
+    """
+    with contextlib.suppress(Exception):
+        async with asyncio.timeout(1.0):
+            await websocket.send_text(json.dumps(
+                {"type": "error", "code": "signin", "detail": "Session revoked", "recoverable": False}
+            ))
+    with contextlib.suppress(Exception):
+        async with asyncio.timeout(1.0):
+            await websocket.close(code=4401)

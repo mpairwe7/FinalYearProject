@@ -597,9 +597,11 @@ async def _flag_sync_loop(stop: asyncio.Event, interval: float) -> None:
 async def _session_revocation_sync_loop(stop: asyncio.Event, interval: float) -> None:
     """Keep this process's revoked sessions current (G304, ADR-0048): a pass now, then every *interval*.
 
-    The first pass runs at start, so a process that restarts refuses a
-    revoked token from its first request. ``revocation.sync`` never raises;
-    the guard keeps the loop alive if it ever does.
+    The revocations are first read during startup, before the process serves
+    (``_load_session_revocations_at_start``); this loop's first pass follows
+    at once and catches up a development process whose startup read failed.
+    ``revocation.sync`` never raises; the guard keeps the loop alive if it
+    ever does.
     """
     from .auth import revocation
 
@@ -677,6 +679,33 @@ def _initialize_analytics_database() -> None:
         return
 
     _apply_persisted_flag_overrides(overrides)
+    _load_session_revocations_at_start()
+
+
+def _load_session_revocations_at_start() -> None:
+    """Read every stored session revocation before the first request (G304, ADR-0048).
+
+    The periodic sync is a lifespan task: its first pass ran only once the
+    application was already serving, so a process that had just restarted
+    accepted a signed-out token until then. In production a store that cannot
+    be read here refuses to start, as unreadable flag overrides do; elsewhere
+    the failure is logged and counted by the sync, which keeps trying.
+    """
+    from .auth import revocation
+
+    try:
+        revocation.sync(strict=True)
+    except Exception as exc:
+        if (os.getenv("APP_ENV") or "development").lower() == "production":
+            message = (
+                "PRODUCTION SAFETY CHECK FAILED — refusing to start because the stored "
+                "session revocations cannot be read. Tokens that were signed out of, or "
+                "revoked by an administrator, would be accepted until a later read."
+            )
+            logger.critical(message)
+            raise SystemExit(message) from exc
+        return
+    logger.info("Session revocations loaded")
 
 
 # ---------------------------------------------------------------------------

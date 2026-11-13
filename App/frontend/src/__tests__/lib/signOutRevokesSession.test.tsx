@@ -24,7 +24,8 @@ import { useIdentity } from "../../hooks/useIdentity";
 import { getAuthToken, setAuthToken } from "../../lib/authSession";
 import { endOidcSession } from "../../lib/oidcFlow";
 
-const TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJva2VsbG8ifQ.c2ln";
+// A fake, unsigned test token ({"sub":"okello"}, signature "sig"): no secret.
+const TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJva2VsbG8ifQ.c2ln"; // gitleaks:allow
 
 interface Seen {
   url: string;
