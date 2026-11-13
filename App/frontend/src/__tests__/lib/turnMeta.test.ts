@@ -209,7 +209,13 @@ describe('workflowFrom nested elements', () => {
       journey_gps: { parent_goals: ['x', { workflow_id: 'w' }] },
     });
     expect(wf).toBeDefined();
-    const w = wf as unknown as Record<string, any>;
+    const w = wf as unknown as {
+      prerequisites: unknown[];
+      parent_goals: unknown[];
+      option_labels: unknown[];
+      form_draft: { fields: unknown[] };
+      journey_gps: { parent_goals: unknown[] };
+    };
     expect(w.prerequisites).toEqual([{ id: 'tin', title: 'TIN', satisfied: true }]);
     expect(w.parent_goals).toEqual([{ workflow_id: 'w' }]);
     expect(w.option_labels).toEqual(['Yes']);
