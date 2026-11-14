@@ -598,7 +598,7 @@ def test_the_title_route_shares_the_pause(monkeypatch: pytest.MonkeyPatch) -> No
     from app import chat_title
 
     strike_tracker.reset()
-    monkeypatch.setattr(chat_title.llm, "summarize_title", lambda _messages: "VAT registration")
+    monkeypatch.setattr(chat_title.generator, "summarize_title", lambda _messages: "VAT registration")
     principal = principal_key(client_address="198.51.100.7")
     try:
         for _ in range(5):
