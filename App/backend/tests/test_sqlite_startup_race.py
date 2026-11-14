@@ -100,7 +100,7 @@ class WalSwitchTests(unittest.TestCase):
 _RACER = textwrap.dedent(
     """
     import os, sys
-    from app import database
+    from app.db import database
     go = sys.argv[1]
     while not os.path.exists(go):
         pass
