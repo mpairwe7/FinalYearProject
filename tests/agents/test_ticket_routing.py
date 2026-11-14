@@ -110,7 +110,7 @@ class TestRoutingIsAppliedAtEscalation:
     """Enabled via the env var, which is read on every call."""
 
     def test_the_service_routes_on_the_classified_topic(self, tmp_db, monkeypatch):
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         monkeypatch.setenv("FLAG_TICKET_QUEUE", "true")
         model = ChatModel.__new__(ChatModel)
@@ -130,7 +130,7 @@ class TestRoutingIsAppliedAtEscalation:
         """G196: the chat reads from the handoff whether anyone can pick it up now."""
         import datetime as dt
 
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         monkeypatch.setenv("FLAG_TICKET_QUEUE", "true")
         monkeypatch.setenv("CXP_OPEN_HOUR", "0")
@@ -159,8 +159,8 @@ class TestRoutingIsAppliedAtEscalation:
 
     def test_a_ticket_that_failed_to_save_is_not_said_to_be_queued(self, tmp_db, monkeypatch):
         """``officer_hours`` on a handoff tells the chat it is queued: never without the ticket."""
-        from app import database
-        from app.service import ChatModel
+        from app.db import database
+        from app.rag.pipeline import ChatModel
 
         def fail(**_kw):
             raise RuntimeError("database down")
@@ -178,7 +178,7 @@ class TestRoutingIsAppliedAtEscalation:
         assert "officer_hours" not in handoff
 
     def test_an_unclassified_handoff_still_gets_a_team(self, tmp_db, monkeypatch):
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         monkeypatch.setenv("FLAG_TICKET_QUEUE", "true")
         model = ChatModel.__new__(ChatModel)

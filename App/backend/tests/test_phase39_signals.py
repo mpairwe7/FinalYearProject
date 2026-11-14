@@ -129,7 +129,7 @@ class InternalKeysTests(unittest.TestCase):
 
         written: dict[str, Any] = {}
         with mock.patch.multiple(
-            "app.database",
+            "app.db.database",
             has_active_consent=lambda *a, **k: True,
             get_working_memory=lambda *a, **k: {},
             upsert_working_memory=lambda user_id, tenant, fields, ttl_seconds=0: written.update(fields) or True,

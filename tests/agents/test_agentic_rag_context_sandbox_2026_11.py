@@ -25,7 +25,8 @@ import ast
 from pathlib import Path
 
 import pytest
-from app import document_worker, query
+from app import document_worker
+from app.rag import query
 from app.guardrails import OutputGuard
 
 APP = Path(__file__).resolve().parents[2] / "App" / "backend" / "app"
@@ -67,8 +68,8 @@ def test_a_parse_child_keeps_only_allowlisted_settings() -> None:
 def test_every_setting_the_extractors_read_is_allowed_through() -> None:
     import re
 
-    sources = ["documents.py", "ephemeral_pdf_sandbox.py", "docling_intelligence.py", "pdf_guards.py",
-               "document_normalization.py", "ocr_service.py"]
+    sources = ["documents.py", "ephemeral_pdf_sandbox.py", "ingestion/docling_intelligence.py", "pdf_guards.py",
+               "ingestion/document_normalization.py", "ocr_service.py"]
     names: set[str] = set()
     for name in sources:
         text = (APP / name).read_text(encoding="utf-8")
@@ -163,26 +164,26 @@ def test_an_identifier_the_taxpayer_typed_may_be_carried() -> None:
 
 
 def test_without_a_chat_backend_the_rewriter_stands_down(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app import llm
+    from app.rag import generator
 
     monkeypatch.setenv("FLAG_LLM_QUERY_REWRITE", "true")  # so the backend check is what decides
-    monkeypatch.setattr(llm, "LLM_BACKEND", "hf", raising=False)
-    monkeypatch.setattr(llm, "generate", lambda *a, **k: "I don't have enough information.")
-    monkeypatch.setattr(llm, "_vllm_generate", lambda *a, **k: "What VAT rate applies to exports in Uganda?")
+    monkeypatch.setattr(generator, "LLM_BACKEND", "hf", raising=False)
+    monkeypatch.setattr(generator, "generate", lambda *a, **k: "I don't have enough information.")
+    monkeypatch.setattr(generator, "_vllm_generate", lambda *a, **k: "What VAT rate applies to exports in Uganda?")
 
     assert query._llm_rewrite_query("And for exports?", [{"user_message": "VAT rate?", "bot_reply": "18%."}]) is None
 
 
 def test_a_chat_backend_rewrite_is_validated(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app import llm
+    from app.rag import generator
 
-    monkeypatch.setattr(llm, "LLM_BACKEND", "vllm", raising=False)
+    monkeypatch.setattr(generator, "LLM_BACKEND", "vllm", raising=False)
     monkeypatch.setenv("FLAG_LLM_QUERY_REWRITE", "true")
     history = [{"user_message": "What is the VAT rate?", "bot_reply": "It is charged on supplies."}]
 
-    monkeypatch.setattr(llm, "_vllm_generate", lambda *a, **k: "I don't have enough information.")
+    monkeypatch.setattr(generator, "_vllm_generate", lambda *a, **k: "I don't have enough information.")
     assert query._llm_rewrite_query("And for exports?", history) is None
-    monkeypatch.setattr(llm, "_vllm_generate", lambda *a, **k: "What VAT rate applies to exports in Uganda?")
+    monkeypatch.setattr(generator, "_vllm_generate", lambda *a, **k: "What VAT rate applies to exports in Uganda?")
     assert query._llm_rewrite_query("And for exports?", history) == "What VAT rate applies to exports in Uganda?"
 
 
@@ -266,7 +267,7 @@ def _imports_of_source(source: str, package: list[str]) -> list[tuple[str, list[
         if isinstance(node, ast.Call):
             module = _dynamic_import(node, importlib_names, import_module_names, package)
             if module:
-                # __import__("app", fromlist=["service"]) imports app.service (CodeRabbit on #705).
+                # __import__("app", fromlist=["service"]) imports app.rag.pipeline (CodeRabbit on #705).
                 names: list[str] = []
                 if isinstance(node.func, ast.Name) and node.func.id == "__import__":
                     fromlist = _argument_node(node, 3, "fromlist")
@@ -289,7 +290,7 @@ def _importers_of_service() -> dict[str, set[str]]:
         if "__pycache__" in path.parts or path == APP / "service.py":
             continue
         for module, names in _imports_of(path):
-            if module == "app.service" or (module == "app" and "service" in names):
+            if module == "app.rag.pipeline" or (module == "app" and "service" in names):
                 importers.setdefault(str(path.relative_to(APP)), set()).update(names)
     return importers
 
@@ -301,11 +302,11 @@ _SERVICE_IMPORTERS = {
 }
 #: The modules G486 extracted from the orchestrator. Each is shared by the
 #: orchestrator and the graph, so none may reach back up into either.
-_EXTRACTED = ("turn_record.py", "live_research_turn.py", "english_rendering.py", "faq_binding.py")
+_EXTRACTED = ("rag/turn_record.py", "rag/live_research_turn.py", "rag/english_rendering.py", "rag/faq_binding.py")
 
 
 def test_turn_context_is_a_leaf() -> None:
-    imports = [module for module, _ in _imports_of(APP / "turn_context.py")]
+    imports = [module for module, _ in _imports_of(APP / "rag/turn_context.py")]
 
     assert not [m for m in imports if m.startswith("app")]
 
@@ -313,8 +314,8 @@ def test_turn_context_is_a_leaf() -> None:
 def test_the_security_layer_and_tools_do_not_reach_into_the_orchestrator() -> None:
     importers = _importers_of_service()
 
-    for lower in ("guardrails.py", "agents/evaluator.py", "tools/empathy.py", "query.py", "retriever.py",
-                  "context_manager.py", "corrective_rag.py", "turn_context.py", *_EXTRACTED):
+    for lower in ("guardrails.py", "agents/evaluator.py", "tools/empathy.py", "query.py", "rag/retriever.py",
+                  "rag/context_manager.py", "rag/corrective_rag.py", "rag/turn_context.py", *_EXTRACTED):
         assert lower not in importers, lower
 
 
@@ -343,16 +344,16 @@ def _reaches_the_graph(imports: list[tuple[str, list[str]]]) -> list[str]:
 @pytest.mark.parametrize(
     ("source", "package", "expected"),
     [
-        ('import importlib\nimportlib.import_module("app.service")\n', ["app", "agents", "graphs"], ("app.service", [])),
-        ('from importlib import import_module\nimport_module("...service")\n', ["app", "agents", "graphs"], ("app.service", [])),
-        ('__import__("app.service")\n', ["app"], ("app.service", [])),
-        ('import importlib\nimportlib.import_module(name="app.service")\n', ["app"], ("app.service", [])),
-        ('from importlib import import_module as load\nload(".service", package="app")\n', ["app", "agents"], ("app.service", [])),
-        ('__import__("service", globals(), locals(), [], 3)\n', ["app", "agents", "graphs"], ("app.service", [])),
-        ('__import__(name="service", level=1)\n', ["app"], ("app.service", [])),
+        ('import importlib\nimportlib.import_module("app.rag.pipeline")\n', ["app", "agents", "graphs"], ("app.rag.pipeline", [])),
+        ('from importlib import import_module\nimport_module("...service")\n', ["app", "agents", "graphs"], ("app.rag.pipeline", [])),
+        ('__import__("app.rag.pipeline")\n', ["app"], ("app.rag.pipeline", [])),
+        ('import importlib\nimportlib.import_module(name="app.rag.pipeline")\n', ["app"], ("app.rag.pipeline", [])),
+        ('from importlib import import_module as load\nload(".service", package="app")\n', ["app", "agents"], ("app.rag.pipeline", [])),
+        ('__import__("service", globals(), locals(), [], 3)\n', ["app", "agents", "graphs"], ("app.rag.pipeline", [])),
+        ('__import__(name="service", level=1)\n', ["app"], ("app.rag.pipeline", [])),
         ('__import__("app", globals(), locals(), ["service"])\n', ["app"], ("app", ["service"])),
         ('__import__("app", fromlist=("service",))\n', ["app"], ("app", ["service"])),
-        ('import importlib\nimportlib.import_module("...service", __package__)\n', ["app", "agents", "graphs"], ("app.service", [])),
+        ('import importlib\nimportlib.import_module("...service", __package__)\n', ["app", "agents", "graphs"], ("app.rag.pipeline", [])),
         ("from . import service\n", ["app"], ("app", ["service"])),
     ],
 )
@@ -374,16 +375,16 @@ def test_a_package_import_of_the_graph_is_caught() -> None:
 
 
 def test_service_reexports_the_same_turn_context() -> None:
-    from app import service, turn_context
+    from app.rag import pipeline, turn_context
 
-    assert service._ACTIVE_USER_STATED_IDS is turn_context.ACTIVE_USER_STATED_IDS
-    assert service._ACTIVE_CASE_FACTS is turn_context.ACTIVE_CASE_FACTS
-    assert service._ACTIVE_TENANT_ID is turn_context.ACTIVE_TENANT_ID
-    assert service._ACTIVE_CONVERSATION_STATE is turn_context.ACTIVE_CONVERSATION_STATE
+    assert pipeline._ACTIVE_USER_STATED_IDS is turn_context.ACTIVE_USER_STATED_IDS
+    assert pipeline._ACTIVE_CASE_FACTS is turn_context.ACTIVE_CASE_FACTS
+    assert pipeline._ACTIVE_TENANT_ID is turn_context.ACTIVE_TENANT_ID
+    assert pipeline._ACTIVE_CONVERSATION_STATE is turn_context.ACTIVE_CONVERSATION_STATE
 
 
 def test_redaction_reads_stated_identifiers_from_turn_context() -> None:
-    from app.turn_context import ACTIVE_USER_STATED_IDS
+    from app.rag.turn_context import ACTIVE_USER_STATED_IDS
 
     token = ACTIVE_USER_STATED_IDS.set(("1000123456",))
     try:
@@ -398,15 +399,15 @@ def test_the_llm_rewriter_is_off_until_measured(monkeypatch: pytest.MonkeyPatch,
     """G483: it never ran (a swallowed AttributeError); now it is a default-off flag."""
     from unittest.mock import Mock
 
-    from app import llm
-    from app.flags import _REGISTRY
+    from app.rag import generator
+    from app.config.flags import _REGISTRY
 
     assert _REGISTRY["llm_query_rewrite"].default is False
     monkeypatch.delenv("FLAG_LLM_QUERY_REWRITE", raising=False)
     monkeypatch.setenv("FLAG_QUERY_REWRITE", "true")
-    monkeypatch.setattr(llm, "LLM_BACKEND", "vllm", raising=False)
+    monkeypatch.setattr(generator, "LLM_BACKEND", "vllm", raising=False)
     generate = Mock(return_value="What VAT rate applies to exports in Uganda?")
-    monkeypatch.setattr(llm, "_vllm_generate", generate)
+    monkeypatch.setattr(generator, "_vllm_generate", generate)
     history = [{"user_message": "What is the VAT rate?", "bot_reply": "It is charged on supplies."}]
 
     assert query._llm_rewrite_query("And for exports?", history) is None

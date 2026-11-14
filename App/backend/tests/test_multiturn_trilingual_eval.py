@@ -7,7 +7,7 @@ then stored with its answer language and, for a Luganda or Swahili turn, its
 English form. The checks are:
 
 * the turn's answer language and the reason for it;
-* what the next prompt reads of it (:func:`app.context_manager.english_view`):
+* what the next prompt reads of it (:func:`app.rag.context_manager.english_view`):
   the English form, with any instruction neutralised;
 * the facts long-term memory would keep from it.
 
@@ -25,7 +25,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from app.context_manager import english_view, normalize_history_turns
+from app.rag.context_manager import english_view, normalize_history_turns
 from app.guardrails import REPLAY_WITHHELD, scan_replayed_text
 from app.language_state import LanguageDecision, resolve_turn_locale
 from app.memory.extractor import FactExtractor

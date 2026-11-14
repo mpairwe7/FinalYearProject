@@ -99,7 +99,7 @@ bitsandbytes>=0.50.0; sys_platform == 'linux'
 # try/except that already degrades to "skipping ONNX export", and no workflow
 # installs it from this file, so splitting costs nothing at runtime.
 #
-# `onnxruntime` itself stays: App/backend/app/offline_rag.py loads it at
+# `onnxruntime` itself stays: App/backend/app/rag/offline_rag.py loads it at
 # serving time, independently of the export toolchain.
 onnxruntime>=1.20.0
 # Unified on-device audio runtime (ASR + VAD + TTS + lang-ID)

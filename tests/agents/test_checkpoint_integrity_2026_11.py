@@ -30,7 +30,7 @@ from app.agents.graphs.runtime import (
     NodeResult,
 )
 from app.agents.graphs.state import AgentGraphState, GraphOutcome, TaxpayerActionRequest
-from app.database import init_db, list_agent_checkpoints
+from app.db.database import init_db, list_agent_checkpoints
 
 
 @pytest.fixture(autouse=True)
@@ -235,7 +235,7 @@ def test_an_approval_expires(store, monkeypatch: pytest.MonkeyPatch) -> None:
 def test_a_tampered_suspend_is_refused() -> None:
     import json
 
-    from app.database import execute, query_one
+    from app.db.database import execute, query_one
 
     store = DurableCheckpointStore()
     effects: list[int] = []
@@ -272,7 +272,7 @@ def test_a_tampered_suspend_is_refused() -> None:
 def test_checkpoint_sql_is_portable() -> None:
     import inspect
 
-    import app.database as database
+    import app.db.database as database
 
     source = inspect.getsource(database.save_agent_checkpoint) + inspect.getsource(
         database.insert_agent_checkpoint_if_absent
@@ -315,7 +315,7 @@ def _rewrite_latest(thread_id: str, mutate) -> None:
     """Edit the latest row in place, as someone with write access to the store could."""
     import json
 
-    from app.database import execute, query_one
+    from app.db.database import execute, query_one
 
     row = query_one(
         "SELECT step, state_json FROM agent_checkpoints WHERE thread_id = ? ORDER BY step DESC LIMIT 1",
@@ -338,7 +338,7 @@ def test_a_suspend_copied_to_a_higher_step_cannot_be_resumed_again() -> None:
     runtime.resume(thread_id, _approval(paused), expected_user_id="u1", expected_tenant_id="t1")
     import json
 
-    from app.database import execute, query_one
+    from app.db.database import execute, query_one
 
     suspend = query_one(
         "SELECT step, node_name, state_json FROM agent_checkpoints WHERE thread_id = ? AND node_name = 'gate'",
@@ -378,7 +378,7 @@ def test_any_edit_to_the_resumed_state_is_refused(field_change) -> None:
 
 
 def test_an_unreadable_store_fails_a_suspend_closed(monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.database as database
+    import app.db.database as database
 
     def broken(_thread_id):
         raise RuntimeError("database down")
@@ -470,7 +470,7 @@ def test_a_claim_with_no_recorded_end_is_reported_for_reconciliation(store) -> N
 
 
 def test_configured_but_unavailable_postgres_refuses_checkpoints(monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.database as database
+    import app.db.database as database
 
     monkeypatch.setattr(database, "ANALYTICS_BACKEND", "postgres")
     monkeypatch.setattr(database, "_pg_module", lambda: None)
@@ -496,7 +496,7 @@ def test_routine_persistence_is_a_registry_flag(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_a_corrupt_latest_row_fails_a_suspend_closed() -> None:
-    from app.database import execute
+    from app.db.database import execute
 
     store = DurableCheckpointStore()
     effects: list[int] = []

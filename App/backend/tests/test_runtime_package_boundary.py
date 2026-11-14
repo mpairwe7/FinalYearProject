@@ -32,8 +32,8 @@ APP_DIR = Path(__file__).resolve().parents[1] / "app"
 KNOWN_ML_IMPORTERS: dict[str, str] = {
     "query.py": "lang_id — lingua language detection; shipped explicitly in the image",
     "speech_service.py": "ASR/MT/TTS inference wrappers; speech is disabled on CPU deploys",
-    "pdf_corpus.py": "chunkers, used at corpus-build time rather than per request",
-    "crawl_corpus.py": "chunkers, used at corpus-build time rather than per request",
+    "ingestion/pdf_corpus.py": "chunkers, used at corpus-build time rather than per request",
+    "ingestion/crawl_corpus.py": "chunkers, used at corpus-build time rather than per request",
 }
 
 _ML_IMPORT = re.compile(r"^\s*(?:from\s+ml[\s.]|import\s+ml\b)", re.M)
@@ -69,12 +69,12 @@ class RuntimeImportBoundaryTest(unittest.TestCase):
 
 class CapabilityReportingTest(unittest.TestCase):
     def test_language_detection_backend_names_the_resolved_backend(self) -> None:
-        from app.query import language_detection_backend
+        from app.rag.query import language_detection_backend
 
         self.assertIn(language_detection_backend(), {"lingua", "heuristic"})
 
     def test_health_response_carries_capabilities(self) -> None:
-        from app.models import HealthResponse
+        from app.api.models import HealthResponse
 
         payload = HealthResponse(
             status="ready",
@@ -86,7 +86,7 @@ class CapabilityReportingTest(unittest.TestCase):
 
     def test_capabilities_defaults_to_empty_rather_than_none(self) -> None:
         """Absent capabilities must not serialize as null into the contract."""
-        from app.models import HealthResponse
+        from app.api.models import HealthResponse
 
         payload = HealthResponse(status="ready", version="1.2.0", model_loaded=True).model_dump()
         self.assertEqual(payload["capabilities"], {})

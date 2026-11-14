@@ -35,7 +35,7 @@ Audience: a **new** coding session with no memory of the conversation that produ
   - Every phase or logical increment lands via a dedicated feature branch (`feat/...`) branched from `origin/dev` → PR against `dev` → 100% green CI → resolve all CodeRabbit comments → squash-merge. Never push directly to `dev` or `main`.
   - Never use GitHub auto-closing keywords (`fixes #N`, `closes #N`, `resolves #N`) in commit messages or PR bodies (`no-issue-autoclose`).
 - **Feature Flags:** Any new flag must land in **all three** files in the same commit:
-  1. `App/backend/app/flags.py`
+  1. `App/backend/app/config/flags.py`
   2. `docs/RAG_ARCHITECTURE.md` (including updating the total flag count in the summary paragraph)
   3. `.env.example`
 - **FastAPI Route Coverage:** Any new FastAPI route must be added to `tests/test_all_endpoints_e2e.py` (`EXPECTED_ENDPOINTS` + `COVERAGE`), and backend behaviour must be exercised by tests under `tests/` (which CI runs for the `--cov=App/backend` gate).
@@ -137,7 +137,7 @@ Every URA portal service is deterministically mapped in `PORTAL_TASK_CATALOG` (`
 ## 3. Phase A — Feature Flag, 4-Tier Portal Task Policy Engine & Expanded DOM Recipe Catalog
 
 ### 3.1 Register Feature Flag `portal_copilot`
-1. **`App/backend/app/flags.py`:**
+1. **`App/backend/app/config/flags.py`:**
    Add `Flag("portal_copilot", True, "Phase 42 (FLAG_PORTAL_COPILOT): 4-tier URA portal task execution, Claude-style HITL confirmation cards, inline form elicitation, and inbuilt stuck-user DOM co-pilot.", category="kill_switch", owner="agentic_runtime")` to `_REGISTRY`.
 2. **`docs/RAG_ARCHITECTURE.md`:**
    Add `portal_copilot` (`FLAG_PORTAL_COPILOT`, default `on`) to the Feature Flags table and increment the total flag count in the summary sentence below the table (`85` → `86`).
@@ -216,7 +216,7 @@ Implement the core backend engine with the following pure, well-typed functions 
 
 ### 3.4 Phase A Verification
 Run unit tests in `tests/agents/test_portal_copilot_phase_a.py` verifying:
-- `portal_copilot` flag registration in `flags.py`, `docs/RAG_ARCHITECTURE.md`, and `.env.example`.
+- `portal_copilot` flag registration in `config/flags.py`, `docs/RAG_ARCHITECTURE.md`, and `.env.example`.
 - All 4 tiers in `PORTAL_TASK_CATALOG` and `get_portal_dom_recipe` across all 9 portal keys.
 - Password/OTP/PIN/CVV selector and field scrubbing in `analyze_portal_context`.
 
@@ -224,8 +224,8 @@ Run unit tests in `tests/agents/test_portal_copilot_phase_a.py` verifying:
 
 ## 4. Phase B — Inline Chat Form Elicitation, Claude-Style Allow/Disallow Confirmation Protocol & `POST /v1/portal/tasks/execute`
 
-### 4.1 Request & Response Schemas (`App/backend/app/models.py`)
-1. Add structured models to `App/backend/app/models.py`:
+### 4.1 Request & Response Schemas (`App/backend/app/api/models.py`)
+1. Add structured models to `App/backend/app/api/models.py`:
    - `PortalFieldError(BaseModel)`: `field: str`, `message: str`, `selector: str = ""`
    - `PortalContextInput(BaseModel)`:
      - `portal_id: str = Field(..., pattern=r"^[a-z0-9_]{1,64}$")`
@@ -277,7 +277,7 @@ Run unit tests in `tests/agents/test_portal_copilot_phase_a.py` verifying:
      - Returns `status="executed"`, `live=False` (in simulation mode), the structured `result` (e.g. generated 13-digit PRN `226...`, assigned 10-digit TIN `100...`, or verified stamp status), `dom_actions` to populate the portal screen if open, and `copilot_portal_url`.
 2. Register `("POST", "/v1/portal/tasks/execute")` in `tests/test_all_endpoints_e2e.py` (`EXPECTED_ENDPOINTS` + `COVERAGE`).
 
-### 4.3 Wire into `/v1/chat` and `/v1/chat/stream` (`App/backend/app/service.py` & `App/backend/app/main.py`)
+### 4.3 Wire into `/v1/chat` and `/v1/chat/stream` (`App/backend/app/rag/pipeline.py` & `App/backend/app/main.py`)
 1. Thread `portal_context` and `portal_task_submission` into `model.generate(...)`, `_generate_en(...)`, `run_chat_turn(...)`, and `_run_chat_turn_events(...)`.
 2. Inside `_generate_en` and `generate_retrieval_only` / `_run_chat_turn_events`:
    - When `flags.is_enabled("portal_copilot")` is True:

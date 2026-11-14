@@ -283,7 +283,7 @@ def sort_tokens_reading_order(tokens: list[FusedTextToken]) -> list[FusedTextTok
     if len(tokens) <= 1:
         return list(tokens)
     try:
-        from app.docling_intelligence import sort_spatial_reading_order
+        from app.ingestion.docling_intelligence import sort_spatial_reading_order
 
         return sort_spatial_reading_order(tokens)
     except Exception:

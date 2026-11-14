@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from app.database import compose_sla_stats
+from app.db.database import compose_sla_stats
 
 
 @pytest.fixture
@@ -142,7 +142,7 @@ def test_a_fresh_open_ticket_is_not_a_breach() -> None:
 
 @pytest.fixture
 def isolated_db(monkeypatch: pytest.MonkeyPatch):
-    from app import database as db
+    from app.db import database as db
 
     conn = sqlite3.connect(":memory:", timeout=10, check_same_thread=False)
     conn.row_factory = sqlite3.Row

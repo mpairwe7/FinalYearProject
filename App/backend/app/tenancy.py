@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .flags import flags
+from .config.flags import flags
 
 
 DEFAULT_TENANT = "default"

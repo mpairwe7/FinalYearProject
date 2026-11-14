@@ -350,8 +350,8 @@ message ──► connector_intent        names a service + asks for a record?  
 ```
 
 Modules: `app/connector_intent.py` (routing and argument guard), `app/connector_outcome.py`
-(wording), `app/tool_budget.py` (schema fitting), `app/llm.py` (`generate_with_tools`,
-`forced_operations`, `summarise_records`), `app/service.py` (`_with_connector_outcomes`).
+(wording), `app/tool_budget.py` (schema fitting), `app/rag/generator.py` (`generate_with_tools`,
+`forced_operations`, `summarise_records`), `app/rag/pipeline.py` (`_with_connector_outcomes`).
 The runbook's §7.3 lists the knobs and §4.5a the failure signatures.
 
 A selection that cannot be used is resolved before any of this

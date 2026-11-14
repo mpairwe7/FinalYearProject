@@ -14,7 +14,7 @@ import unittest
 
 from unittest import mock
 
-from app.cache import SemanticCache, exact_cache_key, reset_index_stamp
+from app.rag.cache import SemanticCache, exact_cache_key, reset_index_stamp
 
 
 class ExactCacheKeyTests(unittest.TestCase):
@@ -91,7 +91,7 @@ class ExactTierWithoutAnEmbedderTests(unittest.TestCase):
         self.assertEqual(stats["size"], 1)
 
     def test_expired_exact_entries_are_evicted(self) -> None:
-        import app.cache as cache_module
+        import app.rag.cache as cache_module
 
         original = cache_module.CACHE_TTL_SECONDS
         cache_module.CACHE_TTL_SECONDS = 0
@@ -102,7 +102,7 @@ class ExactTierWithoutAnEmbedderTests(unittest.TestCase):
             cache_module.CACHE_TTL_SECONDS = original
 
     def test_the_exact_tier_respects_the_size_cap(self) -> None:
-        import app.cache as cache_module
+        import app.rag.cache as cache_module
 
         original = cache_module.CACHE_MAX_SIZE
         cache_module.CACHE_MAX_SIZE = 3
@@ -151,7 +151,7 @@ class CacheKeyIndexStampTests(unittest.TestCase):
     @staticmethod
     def _key_with_stamp(stamp: str, query: str = "What taxes apply to private schools?") -> str:
         reset_index_stamp()
-        with mock.patch("app.cache._read_index_stamp", return_value=stamp):
+        with mock.patch("app.rag.cache._read_index_stamp", return_value=stamp):
             return exact_cache_key(query)
 
     def test_a_reindex_makes_the_previous_entries_unreachable(self) -> None:
@@ -162,7 +162,7 @@ class CacheKeyIndexStampTests(unittest.TestCase):
     def test_the_same_corpus_still_reuses_one_entry(self) -> None:
         """The stamp must not defeat the reuse the exact tier exists for."""
         reset_index_stamp()
-        with mock.patch("app.cache._read_index_stamp", return_value=_STAMP_NEW):
+        with mock.patch("app.rag.cache._read_index_stamp", return_value=_STAMP_NEW):
             self.assertEqual(
                 exact_cache_key("What taxes apply to private schools?"),
                 exact_cache_key("  WHAT taxes   apply to PRIVATE schools?! "),
@@ -170,12 +170,12 @@ class CacheKeyIndexStampTests(unittest.TestCase):
 
     def test_locale_still_separates_entries(self) -> None:
         reset_index_stamp()
-        with mock.patch("app.cache._read_index_stamp", return_value=_STAMP_NEW):
+        with mock.patch("app.rag.cache._read_index_stamp", return_value=_STAMP_NEW):
             self.assertNotEqual(exact_cache_key("What is VAT?", "en"), exact_cache_key("What is VAT?", "lg"))
 
     def test_an_unreadable_snapshot_does_not_break_lookups(self) -> None:
         """No index stamp is a degraded cache, not a failed request."""
         reset_index_stamp()
-        with mock.patch("app.cache._read_index_stamp", return_value=""):
+        with mock.patch("app.rag.cache._read_index_stamp", return_value=""):
             self.assertTrue(exact_cache_key("What is VAT?").endswith("what is vat"))
 

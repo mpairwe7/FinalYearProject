@@ -24,7 +24,7 @@ from cryptography.hazmat.primitives import hashes, serialization  # noqa: E402
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa  # noqa: E402
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID  # noqa: E402
 
-from app import database as db  # noqa: E402
+from app.db import database as db  # noqa: E402
 from app.audit import tsa  # noqa: E402
 from app.audit.tsa import (  # noqa: E402
     OID_ATTR_CONTENT_TYPE,
@@ -41,7 +41,7 @@ from app.audit.tsa import (  # noqa: E402
     der_seq,
     der_set,
 )
-from app.flags import flags  # noqa: E402
+from app.config.flags import flags  # noqa: E402
 
 NOW = dt.datetime(2026, 10, 6, 12, 0, tzinfo=dt.timezone.utc)  # noqa: UP017
 DER = serialization.Encoding.DER

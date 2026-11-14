@@ -8,7 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from app import qdrant_backup
+from app.vectorstore import qdrant_backup
 
 
 class _SnapshotClient:

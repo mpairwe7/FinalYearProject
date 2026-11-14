@@ -54,12 +54,12 @@ from app.language_state import resolve_turn_locale  # noqa: E402
 from app.memory.resolution_ledger import objective_for  # noqa: E402
 from app.number_words import ach_words, nyn_words  # noqa: E402
 from app.officer_handoff import prune_required_details  # noqa: E402
-from app.query import (  # noqa: E402
+from app.rag.query import (  # noqa: E402
     canonicalize_tax_terms,
     detect_language,
     english_retrieval_query,
 )
-from app.query import (  # noqa: E402
+from app.rag.query import (  # noqa: E402
     normalize as normalize_query,
 )
 from app.receptionist.clarify import classify_yes_no, entity_mishear  # noqa: E402

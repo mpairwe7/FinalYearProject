@@ -45,14 +45,14 @@ User Query
   │     └── Check if query triggers a guided workflow (TIN registration, filing, etc.)
   │         └── If matched: enter slot-filling state machine, skip RAG
   │
-  ├─► Stage 1c: Semantic Cache Lookup (cache.py)  [FLAG_SEMANTIC_CACHE]
+  ├─► Stage 1c: Semantic Cache Lookup (rag/cache.py)  [FLAG_SEMANTIC_CACHE]
   │     └── Same corpus generation + same question terms + cosine ≥ 0.92 → instant return (G277)
   │
   ├─► Stage 1d: Supervisor Routing (agents/supervisor.py)  [FLAG_AGENTIC_MODE]
   │     ├── Rule-based fast path (regex+keywords) + optional LLM fallback
   │     └── Routes: RAG | TOOLS | TAX_SPECIALIST | CUSTOMS_SPECIALIST | CLARIFY | ESCALATE
   │
-  ├─► Stage 2: Hybrid Retrieval (retriever.py → search_planned)
+  ├─► Stage 2: Hybrid Retrieval (rag/retriever.py → search_planned)
   │     ├── Dense: BAAI/bge-m3 (1024-dim multilingual) → Qdrant ANN search
   │     │     └── Optional HyDE document as the *dense* query only  [FLAG_HYDE]
   │     ├── Sparse: BM25 on the taxpayer's original words (never HyDE)
@@ -66,7 +66,7 @@ User Query
   ├─► Stage 3: Keyword Fallback
   │     └── If no Qdrant hits, fall back to keyword-overlap search on FAQ CSVs
   │
-  ├─► Stage 3b: Corrective RAG (corrective_rag.py)  [FLAG_CORRECTIVE_RAG]
+  ├─► Stage 3b: Corrective RAG (rag/corrective_rag.py)  [FLAG_CORRECTIVE_RAG]
   │     ├── should_correct() — avg reranker score < threshold?
   │     ├── Re-retrieve with expanded query + "Uganda Revenue Authority" context
   │     └── Merge, deduplicate, re-sort by best score
@@ -83,7 +83,7 @@ User Query
   ├─► Stage 4: Abstention Check (guardrails.py → OutputGuard.should_abstain)
   │     └── Best retrieval score < ABSTENTION_THRESHOLD → refuse politely
   │
-  ├─► Stage 5: LLM Generation (llm.py)
+  ├─► Stage 5: LLM Generation (rag/generator.py)
   │     ├── Standard path: Qwen3-8B with spotlight-marked passages (LLM01 defence)
   │     │   ├── Sync: _model.generate() → decode new tokens
   │     │   └── Stream: TextIteratorStreamer → yield tokens via SSE
@@ -117,13 +117,13 @@ User Query
   └─► Stage 9: Response Finalization
         ├── Build response dict with citations, scores, metadata
         ├── Store in semantic cache (unless blocked/abstained)
-        ├── Log to analytics (database.py / postgres.py)
+        ├── Log to analytics (database.py / db/postgres.py)
         └── Append to audit ledger if FLAG_AUDIT_LEDGER enabled
 ```
 
 ## Phase Details
 
-### Hybrid Retrieval (`retriever.py`)
+### Hybrid Retrieval (`rag/retriever.py`)
 
 | Component | Details |
 |-----------|---------|
@@ -135,9 +135,9 @@ User Query
 | Preference Boost (`apply_preference_boost`) | Idempotent post-retrieval soft ranking: boosts current FY (`+0.08`) and matched tax head / topic sections (`TOPIC_SECTION_BOOST = +0.05`, word-boundary matched via `TOPIC_SECTION_HINTS`) while soft-demoting sector-specific guides (`SECTOR_GUIDE_DEMOTION = -0.06`, `SECTOR_GUIDE_SOURCE_PATTERNS`) unless the query explicitly names a sector (`_SECTOR_QUERY_RE`). |
 | Circuit breaker | CLOSED → OPEN (on 3 failures) → HALF_OPEN (after backoff) → CLOSED (on success). Exponential backoff 10s→300s. |
 | Fallback | Keyword-overlap / BM25 search on in-memory FAQ index with domain phrase normalisation, synonym expansion retry, and closed-class stopword filtering |
-| Docling Document Intelligence (`docling_intelligence.py`, `pdf_corpus.py`, `documents.py`, `ADR-0026`) | Dual-backend `DoclingDocumentIR` (`DOCLING_BACKEND=auto\|docling\|native_structural`, `G441`, `G453`) with `ContentLayer.FURNITURE` running header/footer segregation (`G443`), 2D XY-Cut multi-column reading-order reconstruction (`G442`), `pdfplumber` and native table-bbox deduplication (`G441`, `G456`), row-boundary Markdown table splitting with header-row propagation and unescaped-pipe-safe cross-page continuation stitching (`G446`, `G451`, `G452`), horizontal (`col_span`), vertical (`row_span`), and 2-row compound header propagation plus Docling `TripletTableSerializer` semantic triplets (`G448`, `G454`), 1-based page provenance preservation (`G444`, `G445`), structure-aware ephemeral PDF sandbox chunking (`G447`), table cell pipe/bidi/injection sanitization (`G449`), multi-word vector-vs-OCR shadow tamper escalation to `urgent_audit` (`G450`, `G455`), and deprecation-free `import pymupdf` standardization. |
+| Docling Document Intelligence (`ingestion/docling_intelligence.py`, `ingestion/pdf_corpus.py`, `documents.py`, `ADR-0026`) | Dual-backend `DoclingDocumentIR` (`DOCLING_BACKEND=auto\|docling\|native_structural`, `G441`, `G453`) with `ContentLayer.FURNITURE` running header/footer segregation (`G443`), 2D XY-Cut multi-column reading-order reconstruction (`G442`), `pdfplumber` and native table-bbox deduplication (`G441`, `G456`), row-boundary Markdown table splitting with header-row propagation and unescaped-pipe-safe cross-page continuation stitching (`G446`, `G451`, `G452`), horizontal (`col_span`), vertical (`row_span`), and 2-row compound header propagation plus Docling `TripletTableSerializer` semantic triplets (`G448`, `G454`), 1-based page provenance preservation (`G444`, `G445`), structure-aware ephemeral PDF sandbox chunking (`G447`), table cell pipe/bidi/injection sanitization (`G449`), multi-word vector-vs-OCR shadow tamper escalation to `urgent_audit` (`G450`, `G455`), and deprecation-free `import pymupdf` standardization. |
 
-### LLM Generation (`llm.py`)
+### LLM Generation (`rag/generator.py`)
 
 | Setting | Default | Env Var |
 |---------|---------|---------|
@@ -315,7 +315,7 @@ chat's owner (`receptionist/carryover.py`).
 - Anonymous sockets do not advertise durable resume. Same-socket history remains
   connection-local and bounded; it is not a cross-replica checkpoint.
 
-**Semantic Cache** (`cache.py`):
+**Semantic Cache** (`rag/cache.py`):
 - Shares embedding model with retriever
 - Two tiers, both keyed on `cache_generation()` (G277): the freshness index stamp,
   the corpus hash of the collection the retriever bound to, a digest of the
@@ -367,14 +367,14 @@ chat's owner (`receptionist/carryover.py`).
 | LLM05 Improper Output | XSS strip, HTML sanitize, unsafe schemes; link provenance: every inline, reference, image, autolink, bare or scheme-less URL whose host is not `*.go.ug`, a Tier-1 research host, a corpus host or `OUTPUT_LINK_ALLOWED_HOSTS` is de-linked, and an identifier in a trusted link's query is dropped, per chunk and again on the final reply (G462) | `guardrails.py` → `OutputGuard.sanitize()`, `neutralize_untrusted_links`; `service._apply_output_guards` |
 | LLM07 System Prompt Leakage | Signature phrases synced to the live prompts by test, plus a word 8-gram fingerprint of `llm.SYSTEM_PROMPT` (two shared n-grams = leak; sanctioned refusal/contact text excluded) (G465) | `guardrails.py` → `OutputGuard.check_prompt_leakage()` |
 | LLM09 Misinformation | Runtime faithfulness scoring, grounding disclaimer, calibrated abstention | `guardrails.py` → `OutputGuard.check_grounding()` |
-| LLM10 Unbounded Consumption | Rate limiting, bearer auth on indexing, semantic cache, per-principal guard-strike cool-down (G464) | `main.py` (slowapi), `cache.py`, `guard_friction.py` |
+| LLM10 Unbounded Consumption | Rate limiting, bearer auth on indexing, semantic cache, per-principal guard-strike cool-down (G464) | `main.py` (slowapi), `rag/cache.py`, `guard_friction.py` |
 
-**Corrective RAG** (`corrective_rag.py`):
+**Corrective RAG** (`rag/corrective_rag.py`):
 - Triggers when average calibrated relevance (`gating_relevance`) < `CORRECTIVE_RAG_THRESHOLD_NORM` (default: 0.50); `CORRECTIVE_RAG_THRESHOLD` is logged only
 - Re-retrieves with expanded query + domain context, in the question's locale (translated leg kept; English spelling correction for English only, G280)
 - Merges and deduplicates by chunk_id, re-prunes against the merged best, keeps results only if quality improved
 
-**Protected translation & statutory projection** (`mt.py`, `service.py`, `llm.py`):
+**Protected translation & statutory projection** (`mt.py`, `service.py`, `rag/generator.py`):
 - Figures are masked behind opaque sentinels (`#NMBRA#`) *before* a reply is handed to a translator and restored verbatim afterwards — `mt.protect_figures` / `mt.restore_figures`, wired in `service.localize_reply`. A translator that never sees a digit cannot paraphrase one, so figure mutation is prevented rather than detected.
 - Only the digits are masked. The currency code and the percent sign stay visible because they are the cue the target language needs to build the right construction: Luganda renders a rate as "ebitundu 18 ku buli kikumi" and can only do so if it can still see that 18 was a percentage.
 - `figures_survived` remains as the assertion, not the mechanism. It still fires when a tier drops a sentinel outright rather than mutating it, and English remains the fallback for that case.
@@ -385,9 +385,9 @@ chat's owner (`receptionist/carryover.py`).
 - Only the figure and its indices are emitted, never a quotation of the surrounding prose. Passage bodies are isolated inside hash-bound `<passage>` spotlight markers, and lifting a clause out to caption a number would move attacker-controlled text outside that isolation for attribution the citation index already gives.
 - Ordering follows retrieval rank and truncation is declared in the block rather than silent, because a partial list that reads as exhaustive is worse than no list.
 
-**Versioned Multilingual Parallel FAQ Corpus & Direct Native Match** (`faq_corpus.py`, `service.py`, `mt.py`):
+**Versioned Multilingual Parallel FAQ Corpus & Direct Native Match** (`ingestion/faq_corpus.py`, `service.py`, `mt.py`):
 - High-frequency statutory FAQ CSVs in `Data/dataset/ura_*_faqs.csv` (e.g. VAT, Corporation Tax) contain canonical trilingual columns: `question`, `answer`, `question_lg`, `answer_lg`, `question_sw`, `answer_sw`.
-- During corpus compilation (`python -m app.faq_corpus`), `_validate_vernacular_figures` tests every localized answer with `mt.figures_survived`, enforcing statutory rates (18%, 30%), currency limits, and calendar deadlines at build time.
+- During corpus compilation (`python -m app.ingestion.faq_corpus`), `_validate_vernacular_figures` tests every localized answer with `mt.figures_survived`, enforcing statutory rates (18%, 30%), currency limits, and calendar deadlines at build time.
 - `_simple_search` in `service.py` executes a direct `_vernacular_pass` against the pre-indexed native terms when `locale in ("lg", "sw")`. Matched rows return pre-verified vernacular answers with `< 50 ms` latency, completely skipping runtime machine-translation round trips and eliminating figure drift under load.
 - When an exact native FAQ match is not found, queries fall back seamlessly to lazy translate-then-retrieve (`translate_query_for_retrieval`), ensuring comprehensive coverage.
 
@@ -404,27 +404,27 @@ App/backend/app/
 ├── models.py            # Pydantic v2 schemas (chat, speech, export, auth, feedback)
 ├── service.py           # ChatModel — 12-stage RAG orchestrator + agentic routing
 ├── topics.py            # G6 conversation topic catalog + persist/follow-up bind
-├── llm.py               # Qwen3-8B generation (local + vLLM + tool-calling + LoRA)
+├── rag/generator.py               # Qwen3-8B generation (local + vLLM + tool-calling + LoRA)
 ├── query.py             # Query rewriting (abbreviations, spelling, coreference, lang detect)
-├── turn_context.py      # Turn ContextVars: identifiers, case facts, tenant, generation, live check (leaf, ADR-0031)
-├── turn_record.py       # What served the turn: backend, model, degradation (G486)
-├── live_research_turn.py # One live-research step for REST, SSE and the graph (G486)
-├── english_rendering.py # English-decided reply translated back; the one patch point (G486)
-├── faq_binding.py       # FAQ binding, equivalence promotion and acronym folding (G486)
-├── cache.py             # Semantic response cache (memory or Redis backend)
-├── corrective_rag.py    # Corrective re-retrieval + clarification detection
+├── rag/turn_context.py      # Turn ContextVars: identifiers, case facts, tenant, generation, live check (leaf, ADR-0031)
+├── rag/turn_record.py       # What served the turn: backend, model, degradation (G486)
+├── rag/live_research_turn.py # One live-research step for REST, SSE and the graph (G486)
+├── rag/english_rendering.py # English-decided reply translated back; the one patch point (G486)
+├── rag/faq_binding.py       # FAQ binding, equivalence promotion and acronym folding (G486)
+├── rag/cache.py             # Semantic response cache (memory or Redis backend)
+├── rag/corrective_rag.py    # Corrective re-retrieval + clarification detection
 ├── guardrails.py        # InputGuard + OutputGuard (OWASP LLM Top 10 2025)
-├── retriever.py         # HybridRetriever (bge-m3 + BM25 + RRF + rerank) + CircuitBreaker
-├── indexer.py           # JSONL → Qdrant indexing (Qdrant → Vectorize → keyword tiers)
-├── faq_corpus.py        # ura_*_faqs.csv + teacher-QA → validated JSONL → vector docs
-├── docling_intelligence.py # Docling DocumentIR, XY-Cut reading order, furniture stripping & TripletTableSerializer (ADR-0026)
-├── pdf_corpus.py        # Statutory & 10-MDA PDF harvester + hierarchical chunk JSONL (186 PDFs → 5,639 chunks)
-├── crawl_corpus.py      # Crawl ledger + pages → chunk JSONL: current capture, quarantine, editions (ADR-0023)
+├── rag/retriever.py         # HybridRetriever (bge-m3 + BM25 + RRF + rerank) + CircuitBreaker
+├── ingestion/indexer.py           # JSONL → Qdrant indexing (Qdrant → Vectorize → keyword tiers)
+├── ingestion/faq_corpus.py        # ura_*_faqs.csv + teacher-QA → validated JSONL → vector docs
+├── ingestion/docling_intelligence.py # Docling DocumentIR, XY-Cut reading order, furniture stripping & TripletTableSerializer (ADR-0026)
+├── ingestion/pdf_corpus.py        # Statutory & 10-MDA PDF harvester + hierarchical chunk JSONL (186 PDFs → 5,639 chunks)
+├── ingestion/crawl_corpus.py      # Crawl ledger + pages → chunk JSONL: current capture, quarantine, editions (ADR-0023)
 ├── crawl_gate.py        # pass / review / hold on a crawl before a person sees it; freshness objective
 ├── web_research.py      # 9-trigger live check, source authority & evidence labelling (ADR-0008, ADR-0021)
 ├── web_search_providers.py # Search backends with failover and breakers (ADR-0021)
 ├── ephemeral_pdf_sandbox.py # Ephemeral tmpfs PDF/XLSX sandbox + GPU micro-reranking (ADR-0008)
-├── corpus_sync.py       # Self-updating Qdrant comparator, hot-swap & web_sync_ledger (ADR-0008)
+├── vectorstore/corpus_sync.py       # Self-updating Qdrant comparator, hot-swap & web_sync_ledger (ADR-0008)
 ├── scenario_planner.py  # Deterministic multi-tool planner & Verified Statutory Facts injection
 ├── calculator_router.py # Single-calculator fast path & multi-turn amount carryover
 ├── premise_guard.py     # False-premise detector & legitimate statutory modifier allowlist
@@ -433,8 +433,8 @@ App/backend/app/
 ├── tracing.py           # OpenTelemetry GenAI 2025 semconv tracing
 ├── analytics.py         # Prometheus-compatible metrics middleware
 ├── database.py          # SQLite WAL store (11 tables, retention TTLs, migrations)
-├── postgres.py          # PostgreSQL backend (opt-in, drop-in substitute for database.py)
-├── flags.py             # Feature flag registry (91 flags, env-backed, cohort rollout)
+├── db/postgres.py          # PostgreSQL backend (opt-in, drop-in substitute for database.py)
+├── config/flags.py             # Feature flag registry (91 flags, env-backed, cohort rollout)
 ├── resilience.py        # Circuit breaker (exponential backoff, CLOSED→OPEN→HALF_OPEN)
 ├── pdf_export.py        # Branded PDF conversation/tax summary export
 ├── evaluation.py        # RAG evaluation harness (8 metrics)
@@ -725,7 +725,7 @@ Energy-based VAD with hysteresis (numpy only, no silero-vad dependency):
 | `ura_workflow_tangent_resumed_total` | counter | Mid-workflow policy side-questions answered and seamlessly resumed on the parked step |
 | `ura_officer_copilot_edit_distance_ratio` | histogram | Normalized edit distance `[0..1]` between AI co-pilot draft and final officer reply |
 
-## Feature Flags (`flags.py`)
+## Feature Flags (`config/flags.py`)
 
 All major subsystems are behind feature flags for progressive rollout:
 
@@ -789,14 +789,14 @@ All major subsystems are behind feature flags for progressive rollout:
 | `wellbeing_checkin` | off | Phase 39: hopelessness said amid hardship or enforcement (this or the last two messages) gets a check-in with the crisis lines before the tax answer, once per conversation, on REST and stream alike |
 | `cxp_business_hours` (`FLAG_CXP_BUSINESS_HOURS`) | off | Phase 40 (G174): timezone-aware URA CXP operating schedule (`07:00–23:00 EAT`, closing at 11:00 PM EAT). Escalations after 11:00 PM when no live officer is online queue for priority morning review/callback with SLA pause/resume (`business_hours_elapsed_seconds`) and transparent 5-locale after-hours disclosure |
 | `live_web_research` (`FLAG_LIVE_WEB_RESEARCH`) | off | Phase 41, ADR-0021: a deterministic 9-trigger check over the question (`web_research.py`), failover across Tavily, Brave and SearXNG (`web_search_providers.py`), 3-tier source authority, closed-vocabulary queries and the ephemeral document sandbox. Web text stays labelled evidence and never enters `verified_facts`; every check ends in a `status`, and a failed one is disclosed. Market FX (`web_fx.py`) is an indicative estimate; a verified Bank of Uganda snapshot takes precedence. Time-sensitive turns bypass the semantic cache. |
-| `auto_qdrant_web_sync` (`FLAG_AUTO_QDRANT_WEB_SYNC`) | off | Phase 41: self-updating Qdrant comparator (`corpus_sync.py`) that compares `ura.go.ug` / `ulii.org` PDFs against Qdrant, tombstones/deletes superseded documents, upserts newer editions, archives replaced `.jsonl` files, and records 7-day state in `web_sync_ledger` |
+| `auto_qdrant_web_sync` (`FLAG_AUTO_QDRANT_WEB_SYNC`) | off | Phase 41: self-updating Qdrant comparator (`vectorstore/corpus_sync.py`) that compares `ura.go.ug` / `ulii.org` PDFs against Qdrant, tombstones/deletes superseded documents, upserts newer editions, archives replaced `.jsonl` files, and records 7-day state in `web_sync_ledger` |
 | `portal_copilot` (`FLAG_PORTAL_COPILOT`) | on | Phase 42/43 (`ADR-0014`, `ADR-0025`): 4-tier URA portal task execution (`portal_copilot.py`), Claude-style HITL Allow/Disallow confirmation cards (`POST /v1/portal/tasks/execute`), inline chat form elicitation, step-up login auto-return (`returnTo`), screenshot-to-co-pilot handoff, inbuilt stuck-user DOM co-pilot (`/portal/[portalKey]`) with `<untrusted_portal_dom_telemetry>` spotlighting, and unified DTS stamp catalog/fees. `ADR-0038`: one approval runs once behind a lease in the shared store (`claim_workflow_session`, lifetime `PORTAL_TASK_STATE_TTL_SECONDS`, default 900) and is in the ledger before the portal is reached; a decision needs a session and `displayed_fields_sha256`; selectors come from the server only and every `dom_actions` list leaves through `harden_dom_actions`. Other `G416`–`G438` fixes are not gated by this flag; see `docs/GAPS_AND_AGENTIC_ROADMAP.md` |
 | `guardrail_strike_friction` (`FLAG_GUARDRAIL_STRIKE_FRICTION`) | on | G464 (`ADR-0029`): a user, session or conversation that trips the input guard `GUARD_STRIKE_THRESHOLD` times (default 5) inside `GUARD_STRIKE_WINDOW_S` (600) is answered with a fixed notice and URA contacts for `GUARD_STRIKE_COOLDOWN_S` (300) without a model call, and a `guardrail_strike_cooldown` security event is recorded (`guard_friction.py`). Per replica; the IP rate limit stays in front |
 | `graph_checkpoint_routine` (`FLAG_GRAPH_CHECKPOINT_ROUTINE`) | off | ADR-0030: also persist routine graph transitions (full state: question, history, passages) to `agent_checkpoints`. Off, only a suspended approval, its resume claim and its markers are written. Nothing reads routine rows; turn on for a debugging window only |
 | `semantic_layer` (`FLAG_SEMANTIC_LAYER`) | off | ADR-0033 phase 3 (G507): staff-only `semantic_layer` namespace (`semantic_metric_catalogue`, `semantic_metric_query`, `ura_staff`/`ura_admin` only). Certified aggregate metrics over certified views, never free SQL; SELECT-only guard; read-only, 500 rows, 10 s; groups under 10 suppressed. Production refuses it without https `VAULT_ADDR`, `SEMANTIC_LAYER_VAULT_PATH`, `SEMANTIC_LAYER_DSA_REF`, `SEMANTIC_LAYER_DPIA_REF` and a certified metric. The graph backend is separate: `GRAPH_STORE_BACKEND=neo4j` (G506) needs `neo4j+s://` or `bolt+s://` in production |
 | `llm_query_rewrite` (`FLAG_LLM_QUERY_REWRITE`) | off | ADR-0031 (G483): rewrite a follow-up into a standalone retrieval query with the vLLM chat model, history fenced and injection-scrubbed, output validated (`query.accept_rewrite`). It had never run (a swallowed import error). Off until measured on the multilingual retrieval benchmark |
 
-The table above lists the flags that gate a subsystem; `flags.py` holds
+The table above lists the flags that gate a subsystem; `config/flags.py` holds
 **91** in total, including the per-phase switches for voice, offline and
 quantization. `flags.all()` is the authoritative list. Production also
 forces `auth_required`, `multi_tenant`, `audit_ledger`, `ticket_queue`,
@@ -933,7 +933,7 @@ actually shipped.
   before comparison, because the *category* does not survive translation even
   when the number does — Luganda states a rate as "ebitundu 18 ku buli kikumi",
   with no percent sign.
-  * **Spoken Percentages**: `entailment.py` supports both Swahili (`_SWAHILI_PCT_WORDS`, e.g. `asilimia kumi na nane` $\rightarrow$ 18) and Luganda (`_LUGANDA_PCT_WORDS`, e.g. `ebitundu kumi na munaana` $\rightarrow$ 18, `ebitundu mukaaga` $\rightarrow$ 6).
+  * **Spoken Percentages**: `rag/entailment.py` supports both Swahili (`_SWAHILI_PCT_WORDS`, e.g. `asilimia kumi na nane` $\rightarrow$ 18) and Luganda (`_LUGANDA_PCT_WORDS`, e.g. `ebitundu kumi na munaana` $\rightarrow$ 18, `ebitundu mukaaga` $\rightarrow$ 6).
   * **Vernacular Multipliers**: Recognizes East African singular forms (`akakadde` 1M, `omutwalo` 10k, `olukumi` 1k, `akawumbi` 1B) alongside plurals (`obukadde`, `emitwalo`, `enkumi`, `milioni`, `laki`).
   * **Contact Line Exclusion**: Ugandan toll-free and mobile patterns (`0800 117 000`, `0772 140 000`) are stripped before currency extraction so helpdesk footers are not misread as hundred-million shilling tax figures.
 
@@ -1043,8 +1043,8 @@ while every existing gate passed (G277–G287).
 * **Index operations.** `build_index` ensures keyword payload indexes on
   `fiscal_year`, `doc_type`, `tax_type`, `tag`, `source`, `chunk_id` and
   `doc_family`. Backfill a live collection with
-  `python -m app.indexer --ensure-payload-indexes`. `POST /v1/index` runs the
-  staged lifecycle (`app.index_lifecycle`), one rebuild at a time (409
+  `python -m app.ingestion.indexer --ensure-payload-indexes`. `POST /v1/index` runs the
+  staged lifecycle (`app.vectorstore.index_lifecycle`), one rebuild at a time (409
   otherwise), and re-binds the retriever even when bookkeeping after the alias
   swap fails.
 
@@ -1068,7 +1068,7 @@ When `FLAG_MODEL_TIERING=true`, `providers/routing.py` (`select_tier`, `ENDPOINT
 - **T1 (`Sunbird/Sunflower-Qwen3.5-9B`, `VLLM_BASE_URL`):** Fast single-clause RAG, greetings, local machine translation, and vernacular locales (`lg`, `sw`, `nyn`, `ach` unless `FLAG_REASONER_FOR_TRANSLATED_LOCALES=true`).
 - **T2 / T3 (`Qwen/Qwen3.8-27B-FP8`, `REASONER_BASE_URL`, `enable_thinking=False`):** Multi-hop legal reasoning, multi-tool tax scenarios (`planner_tool_count >= 2`), statutory premise contradictions (`premise_contradiction=True`), and dispute/objection turns. Capped by a rolling 200-turn window (`REASONER_MAX_SHARE=0.25`) and per-turn timeout (`REASONER_DEADLINE_S=90`) with automatic local T1 fallback (`reasoner_fallback_total`).
 - **Code-Owned Tax Scenario Planner (`case_facts.py`, `scenario_planner.py`, `premise_guard.py`):** Extracts conversation-scoped `CaseFacts`, executes deterministic calculators and rule tools (`determine_residency`, `value_benefit_in_kind`, `convert_currency`, `calculate_paye`, `vat_input_claim_eligibility`, `wht_applicability`, `objection_requirements`, `calculate_late_filing_penalty`), runs 8 statutory premise contradiction rules (`check_fact_contradictions`), and injects `## Verified Statutory Facts & Calculations` ahead of retrieved passages in both REST and SSE streaming paths.
-- **Polarity-Aware Faithfulness & Figure Lock (`claim_polarity.py`, `agents/evaluator.py`):** `DIRECTION_LEXICON` (22 opposing tax-law pole pairs) penalizes directional inversions in `compute_faithfulness` and `verify_claims`. `verify_figure_lock` verifies that every money amount, percentage, and day count in the draft reply traces to the user query, `verified_facts`, or retrieved passages, triggering a bounded same-tier `_reflect_llm` revision or sentence strip (`strip_unverified_figure_sentences`).
+- **Polarity-Aware Faithfulness & Figure Lock (`rag/claim_polarity.py`, `agents/evaluator.py`):** `DIRECTION_LEXICON` (22 opposing tax-law pole pairs) penalizes directional inversions in `compute_faithfulness` and `verify_claims`. `verify_figure_lock` verifies that every money amount, percentage, and day count in the draft reply traces to the user query, `verified_facts`, or retrieved passages, triggering a bounded same-tier `_reflect_llm` revision or sentence strip (`strip_unverified_figure_sentences`).
 
 Eval set: `Data/eval/rag_eval.jsonl` (30 English rows, including `reg-*` regression ids). Keyword self-retrieval gate: `App/backend/tests/test_retrieval_regression_gate.py`. Completeness: `test_eval_set_completeness.py`.
 

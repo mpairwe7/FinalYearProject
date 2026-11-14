@@ -53,8 +53,8 @@ from __future__ import annotations
 import unittest
 import unittest.mock as mock
 
-from app.query import extract_question_span
-from app.service import _FAQ_MATCH_MIN, _faq_match_score
+from app.rag.query import extract_question_span
+from app.rag.pipeline import _FAQ_MATCH_MIN, _faq_match_score
 from app.text_signals import detect_user_distress
 
 _PREAMBLE_QUESTION = "I am opening a hardware store in Jinja. Do I have to charge VAT?"
@@ -168,15 +168,15 @@ class SituationalPreambleWiringTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        from app import database as db
+        from app.db import database as db
 
         db.init_db()
-        from app import service
+        from app.rag import pipeline
 
-        cls.model = service.ChatModel()
+        cls.model = pipeline.ChatModel()
 
     def _capture(self, message: str) -> tuple[list[str], list[str]]:
-        from app import service
+        from app.rag import pipeline
 
         seen: list[str] = []
         seen_binding: list[str] = []
@@ -186,16 +186,16 @@ class SituationalPreambleWiringTest(unittest.TestCase):
             seen_binding.append(kwargs.get("binding_query", ""))
             return []
 
-        with mock.patch.object(service.flags, "is_enabled", return_value=False), \
+        with mock.patch.object(pipeline.flags, "is_enabled", return_value=False), \
                 mock.patch.object(
-                    service.ChatModel, "_priority_faq_hits",
+                    pipeline.ChatModel, "_priority_faq_hits",
                     side_effect=lambda query, **k: seen.append(query) or [],
                 ), \
-                mock.patch.object(service, "_simple_search", side_effect=_capture_simple_search), \
-                mock.patch.object(service, "needs_clarification", return_value=""), \
-                mock.patch.object(service.ChatModel, "_maybe_handle_fast_paths", return_value=None), \
+                mock.patch.object(pipeline, "_simple_search", side_effect=_capture_simple_search), \
+                mock.patch.object(pipeline, "needs_clarification", return_value=""), \
+                mock.patch.object(pipeline.ChatModel, "_maybe_handle_fast_paths", return_value=None), \
                 mock.patch.object(
-                    service.ChatModel, "_deterministic_procedure_reply",
+                    pipeline.ChatModel, "_deterministic_procedure_reply",
                     return_value=("", False),
                 ), \
                 mock.patch.object(self.model._cache, "get", return_value=None), \

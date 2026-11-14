@@ -111,7 +111,7 @@ def propose(items: list[dict[str, Any]]) -> dict[str, Any] | None:
 
 def run(tenant_id: str = "default", *, min_turns: int = DEFAULT_MIN_TURNS, page: int = 200) -> dict[str, Any] | None:
     """Read the ledger and the discrepancy queue, and queue what recurs."""
-    from .. import database as db
+    from ..db import database as db
     from ..audit.ledger import get_ledger
 
     ledger = get_ledger()

@@ -4,7 +4,7 @@ import os
 import unittest
 from unittest.mock import MagicMock, patch
 
-from app import database as db
+from app.db import database as db
 from app.notify import (
     configured_providers,
     dispatch,

@@ -12,7 +12,7 @@ locally generated index state.
 | `pdfs/` | Upstream URA guidance | via `pdf_jsonl/` |
 | `pdf_jsonl/` | Hierarchical PDF chunk JSONL plus coverage manifest | Yes |
 | `crawl_jsonl/` | Chunked crawl pages plus coverage manifest (source: `Data/crawl/pages`) | Yes |
-| `dense/` | The local dense leg's pinned model and corpus vectors (`manifest.json` lists each vector's Qdrant point id), built in CI by `python -m app.pgvector_dense build-artifact`; an empty directory is enough for a local image build (ADR-0034) | Loaded into pgvector on the HF Space |
+| `dense/` | The local dense leg's pinned model and corpus vectors (`manifest.json` lists each vector's Qdrant point id), built in CI by `python -m app.vectorstore.vector_db build-artifact`; an empty directory is enough for a local image build (ADR-0034) | Loaded into pgvector on the HF Space |
 | `eval/` | RAG and red-team evaluation fixtures | No |
 
 Every corpus reaches the vector store as **validated JSONL** carrying source
@@ -33,12 +33,12 @@ which ships in the serving image. Run these from a source checkout:
 
 ```bash
 cd App/backend
-python -m app.indexer --download-pdfs --export-pdf-jsonl \
+python -m app.ingestion.indexer --download-pdfs --export-pdf-jsonl \
   --pdf-source-urls "https://www.parliament.go.ug/page/tax-bills-2026,https://ura.go.ug/download-category/laws-and-acts/"
-python -m app.indexer --export-faq-jsonl     # CSV  -> faq_jsonl/
-python -m app.indexer --export-pdf-jsonl     # PDFs -> pdf_jsonl/   (minutes)
-python -m app.indexer --export-crawl-jsonl   # crawl -> crawl_jsonl/ (seconds)
-python -m app.index_lifecycle --rebuild       # safely stage + promote Qdrant
+python -m app.ingestion.indexer --export-faq-jsonl     # CSV  -> faq_jsonl/
+python -m app.ingestion.indexer --export-pdf-jsonl     # PDFs -> pdf_jsonl/   (minutes)
+python -m app.ingestion.indexer --export-crawl-jsonl   # crawl -> crawl_jsonl/ (seconds)
+python -m app.vectorstore.index_lifecycle --rebuild       # safely stage + promote Qdrant
 python scripts/reindex_vectorize.py --create # build Vectorize from the same JSONL
 ```
 
@@ -58,7 +58,7 @@ numbers, so `page` is empty and `section` addresses the chunk instead.
 
 URA's PDFs encode the period as a glyph that decodes to `U+FFFD`, so extraction
 yields `1<?>2` for `1.2` and renders table-of-contents leaders as runs of
-replacement characters. `app.pdf_corpus.normalise_extracted_text` repairs both
+replacement characters. `app.ingestion.pdf_corpus.normalise_extracted_text` repairs both
 and the min-chars floor then drops the contents pages, which clean down to
 nothing.
 
@@ -75,7 +75,7 @@ source filename and empty when unknown. **Empty means unknown, never stale** —
 roughly two thirds of URA filenames carry no fiscal year at all.
 
 Among near-identical passages the retriever keeps the newer *known* edition
-regardless of rank (`app.retriever._dedupe_candidates`). Retrieval scores cannot
+regardless of rank (`app.rag.retriever._dedupe_candidates`). Retrieval scores cannot
 distinguish a repealed rate from the one in force, because the FY2023-24 and
 FY2025-26 phrasings of a rate table are near-identical text; without this the
 oldest handbook in the corpus can silently evict the current one.

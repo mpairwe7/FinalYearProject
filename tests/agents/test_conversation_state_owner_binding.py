@@ -27,9 +27,9 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from app import database
+from app.db import database
 from app.memory.resolution_ledger import ResolutionLedger
-from app.service import _ACTIVE_CONVERSATION_STATE, _ACTIVE_TENANT_ID, ChatModel
+from app.rag.pipeline import _ACTIVE_CONVERSATION_STATE, _ACTIVE_TENANT_ID, ChatModel
 from app.workflows.loader import load_workflow
 from app.workflows.registry import WorkflowRegistry
 

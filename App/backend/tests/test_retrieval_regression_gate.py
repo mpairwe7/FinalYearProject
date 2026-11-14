@@ -34,7 +34,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.service import (  # noqa: E402
+from app.rag.pipeline import (  # noqa: E402
     _DATA_DIR,
     ChatModel,
     _faq_hits_to_retrieval_hits,

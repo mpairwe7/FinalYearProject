@@ -40,7 +40,7 @@ nist_ai_rmf:
       evidence: ".github/workflows/ci-ml-pipeline.yml (quality gates)"
     - control: "GOVERN 6.1 – Policies for GAI content provenance"
       status: "implemented"
-      evidence: "App/backend/app/retriever.py (citations), App/backend/app/guardrails.py (grounding)"
+      evidence: "App/backend/app/rag/retriever.py (citations), App/backend/app/guardrails.py (grounding)"
 
   map:
     - control: "MAP 1.1 – Intended purpose documented"
@@ -87,7 +87,7 @@ nist_ai_rmf:
       evidence: "ml/pipelines/quality_gates.py, ml/pipelines/evaluate_rag.py"
     - control: "MANAGE 2.1 – Mechanisms for human oversight"
       status: "implemented"
-      evidence: "App/backend/app/main.py (feedback endpoint), App/backend/app/database.py"
+      evidence: "App/backend/app/main.py (feedback endpoint), App/backend/app/db/database.py"
     - control: "MANAGE 3.1 – Incidents logged and responded to"
       status: "implemented"
       evidence: >
@@ -154,7 +154,7 @@ owasp_llm:
   - id: "LLM01"
     name: "Prompt Injection"
     status: "mitigated"
-    evidence: "App/backend/app/guardrails.py:InputGuard, App/backend/app/guardrails.py:scan_retrieved_text, App/backend/app/guard_friction.py, App/backend/app/service.py:_guard_both_forms"
+    evidence: "App/backend/app/guardrails.py:InputGuard, App/backend/app/guardrails.py:scan_retrieved_text, App/backend/app/guard_friction.py, App/backend/app/rag/pipeline.py:_guard_both_forms"
     controls: "Patterns matched on raw, canonical, de-obfuscated (leetspeak, spaced letters, typoglycemia) and decoded (Base64, hex, ROT13) views; verb-by-target override, persona-swap and prompt-extraction rules that require an assistant-addressed target (G460); directives addressed to an AI in third-party text removed to the end of their line (G461); upload fence shares the passage-fence normalization (G463); a principal tripping the guard 5 times in 10 minutes is paused (G464); input length limits. ADR-0029."
     limitations: "Recognition is bypassable by an adaptive attacker (arXiv:2510.09023); the spotlight fences, output guards and tool tiers are the controls that hold. No prompt-injection classifier model is deployed. Strike state is per replica."
     verified_by:
@@ -164,7 +164,7 @@ owasp_llm:
   - id: "LLM02"
     name: "Sensitive Information Disclosure"
     status: "mitigated"
-    evidence: "App/backend/app/guardrails.py:OutputGuard.redact_pii(), App/backend/app/service.py (_state_conversation_id)"
+    evidence: "App/backend/app/guardrails.py:OutputGuard.redact_pii(), App/backend/app/rag/pipeline.py (_state_conversation_id)"
     controls: "PII pattern redaction (UG phone, TIN, 14-character NIN (G247), email, CC); stated case facts, calculator memory and workflow state are read back only under the caller's owner-scoped key, never by conversation id alone (ADR-0013 A)"
     verified_by:
       - "tests/agents/test_nin_redaction.py"
@@ -197,20 +197,20 @@ owasp_llm:
   - id: "LLM06"
     name: "Excessive Agency"
     status: "mitigated"
-    evidence: "App/backend/app/mcp/policy.py, App/backend/app/flags.py, threat-model T28"
+    evidence: "App/backend/app/mcp/policy.py, App/backend/app/config/flags.py, threat-model T28"
     controls: "MCP allowlist, unknown-tool errors without registry leak, bounded ReAct (one retrieve hop). FLAG_TOOL_USE / FLAG_AGENTIC_MODE / FLAG_TOOL_RAG default off. Calculators and workflows are deterministic, not model-chosen write actions."
   - id: "LLM07"
     name: "System Prompt Leakage"
     status: "mitigated"
     evidence: "App/backend/app/guardrails.py:InputGuard + OutputGuard.check_prompt_leakage()"
-    controls: "Blocks reveal-prompt and extraction probes; scrubs signature phrases that a test keeps in sync with the live prompts, and flags a reply sharing two word 8-grams with llm.SYSTEM_PROMPT outside its sanctioned refusal/contact text (G465, ADR-0029). A system prompt IS used (llm.py) — confidentiality of that prompt is not treated as a security boundary (OWASP LLM08:2026 Hidden Context)."
+    controls: "Blocks reveal-prompt and extraction probes; scrubs signature phrases that a test keeps in sync with the live prompts, and flags a reply sharing two word 8-grams with llm.SYSTEM_PROMPT outside its sanctioned refusal/contact text (G465, ADR-0029). A system prompt IS used (rag/generator.py) — confidentiality of that prompt is not treated as a security boundary (OWASP LLM08:2026 Hidden Context)."
     verified_by:
       - "tests/agents/test_ai_security_layer_2026_11.py"
       - "App/backend/tests/test_output_guard.py"
   - id: "LLM08"
     name: "Vector and Embedding Weaknesses"
     status: "mitigated"
-    evidence: "App/backend/app/indexer.py (trusted sources, payload indexes), App/backend/app/retriever.py (cross-encoder reranking, exact tombstones, in-force editions), App/backend/app/cache.py (generation-keyed semantic cache), App/backend/app/index_lifecycle.py (staged /v1/index)"
+    evidence: "App/backend/app/ingestion/indexer.py (trusted sources, payload indexes), App/backend/app/rag/retriever.py (cross-encoder reranking, exact tombstones, in-force editions), App/backend/app/rag/cache.py (generation-keyed semantic cache), App/backend/app/vectorstore/index_lifecycle.py (staged /v1/index)"
     controls: "Embeddings computed from trusted URA documents only. Cross-encoder reranking validates semantic relevance; gates read the calibrated score, never ranking boosts (G284). INDEX_API_KEY required for re-indexing, which runs the staged lifecycle with a canary gate and atomic alias swap (G286). Cached answers are keyed on the index stamp, bound corpus, tombstone digest and fiscal year, and a hit needs the same question terms (G277). Tombstones withdraw exact documents and survive store outages (G279)."
     limitations: "Ingested PDFs carry no per-chunk signature, and a running retriever does not re-bind after an alias swap (G292); valid-from/valid-to versioning is not modelled (G294)."
     verified_by:
@@ -243,7 +243,7 @@ owasp_llm:
   - id: "LLM10"
     name: "Unbounded Consumption"
     status: "mitigated"
-    evidence: "App/backend/app/main.py (INDEX_API_KEY auth, slowapi), App/backend/app/models.py (input limits), App/backend/app/guard_friction.py"
+    evidence: "App/backend/app/main.py (INDEX_API_KEY auth, slowapi), App/backend/app/api/models.py (input limits), App/backend/app/guard_friction.py"
     controls: "Input length capped at 2000 chars, top_k bounded 1-10, index endpoint requires auth token, request timeouts enforced, per-IP rate limits, and a per-principal cool-down after repeated guard refusals that answers without a model call (G464)"
     verified_by:
       - "tests/agents/test_ai_security_layer_2026_11.py"
@@ -341,7 +341,7 @@ eu_ai_act:
         transport (REST, SSE, WebSocket, voice, calls), including turns that failed or were
         cut short, with a disposition, what generated the reply, sources, citation digests,
         build, prompt and corpus provenance; App/backend/app/audit/tsa.py — RFC 3161 timestamps on
-        seals; structured logs with request and trace ids (App/backend/app/logging_config.py).
+        seals; structured logs with request and trace ids (App/backend/app/middleware/logger.py).
       verified_by:
         - "tests/test_observability_integration.py::test_rest_turn_is_audited_with_the_served_reply"
         - "tests/test_observability_integration.py::test_streamed_turn_is_audited_and_counted"
@@ -483,7 +483,7 @@ owasp_agentic_2026:
       status: "mitigated"
       browser_agent_assurance: "ADR-0038: DOM telemetry from a page chooses nothing. A selector comes from the server's own map, a field name that is not an identifier is dropped, text is folded to one line, cleared of instruction phrases, the fence tag and untrusted links, and quoted in the reply as what the page shows (G545, G547). Limitation: the phrase screen is one layer and misses sentences it does not know (a Luganda row in the eval shows this); the structural rules do not depend on it."
       live_web_assurance: "ADR-0021: search control flow is decided from the question, not by the model, which has no search tool. Web text reaches the model only as labelled, spotlighted passages, never the prompt or verified_facts, and instruction-shaped results are dropped. Regex screening can be evaded; the boundary is what holds when it misses. ADR-0027: the passage body cannot close that spotlight, header fields cannot open a prompt section, and the cloud fallback uses the same fence."
-      evidence: "App/backend/app/web_research.py, App/backend/app/llm.py, App/backend/app/guardrails.py, App/backend/app/service.py, App/backend/app/agents/supervisor.py"
+      evidence: "App/backend/app/web_research.py, App/backend/app/rag/generator.py, App/backend/app/guardrails.py, App/backend/app/rag/pipeline.py, App/backend/app/agents/supervisor.py"
       controls: "Cross-lingual prompt-injection & harmful-intent screening (en, lg, sw, nyn, ach) prior to supervisor routing and tool dispatch, on de-obfuscated and decoded views; directives addressed to an AI removed from passages, tool output and uploads (G460, G461); spotlight delimiter fence on every prompt path (G458) and on uploads (G463); answer links limited to trusted hosts (G462)"
       verified_by:
         - "tests/agents/test_browser_agent_assurance_2026_11.py::test_a_selector_sent_by_the_page_is_not_sent_back"
@@ -689,7 +689,7 @@ owasp_agentic_2026:
       human_handoff_assurance: "ADR-0049: a ticket any turn opens is followed in the chat (G625); no route promises an officer without a ticket (G627); a lost case hands the taxpayer back to the assistant instead of leaving them with a dead officer chat (G626); the case room states the real status (G628); an officer's machine-translated message is labelled with the original one click away (G631)."
       officer_takeover_assurance: "ADR-0055: once an officer has the call the caller hears and sees only the officer (G657). The bridge clears the AI's speech already queued in the output transport, and waits at most 1 s, before the joining line; the output gate and the caller's socket writer hold back the AI's audio and captions once bridged or ended and any queue place or transferring status from a wait that is over; the brain sends the waiting screen only if the call still waits; asking for an officer interrupts the AI; the officer audio socket's hang-up is the desk's End (closing line, the caller told, a wrap-up owed); on the WebSocket transport an ended call stops its pipeline and closes the caller's socket. Limit: on LiveKit one 40 ms chunk being written when the interruption lands can still reach the caller. The waiting status and queue place are urgent messages that reach the caller at once, and a caller put back in the queue is shown their place at once (G659)."
       call_records_assurance: "ADR-0040: every call turn the AI handles writes one audit row of what the caller was told, in the call's language, with its disposition, crisis turns and handoffs included (G585); a Luganda answer carries the checked answer's figures and no others (G586, G588); the end-of-call summary no longer stamps a ticket's first response or replaces an officer's note, and does not call a crisis-only call answered (G587)."
-      evidence: "App/backend/app/web_fx.py, App/backend/app/service.py, App/backend/app/receptionist/brain.py, App/backend/app/escalation_policy.py, plugins/apps/common_ui.py, App/frontend/src/components/ChatMessage.tsx, App/frontend/src/components/PortalCopilotCard.tsx"
+      evidence: "App/backend/app/web_fx.py, App/backend/app/rag/pipeline.py, App/backend/app/receptionist/brain.py, App/backend/app/escalation_policy.py, plugins/apps/common_ui.py, App/frontend/src/components/ChatMessage.tsx, App/frontend/src/components/PortalCopilotCard.tsx"
       graph_approval_integrity: "ADR-0030: a graph approval names the SHA-256 digest of the action shown, is HMAC-sealed over thread, owner, tenant, time and action, expires after GRAPH_APPROVAL_TTL_S, and is claimed so it runs once (G468-G472)."
       controls: "Fail-closed spoken action confirmation (G177), explicit AI disclosure (G170), simulation headers (live=false), and transparent 5-locale CXP operating-hours disclosure (G174/G196). Only current completed replies offer workflow/portal actions; interrupted replies retain a warning without a grounding badge. Portal approval requires a local digest; unknown execution outcomes cannot appear successful (ADR-0018)."
       limitations: "Nothing in a page proves that an approval came from a person rather than an agent driving the browser, so a high-value approval is a checkbox, not proof of presence (G551, ADR-0038). Reviewed translations and manual accessibility acceptance remain UI-11 (G275). See docs/plans/browser-agent-assurance-2026-11-10.md and docs/plans/intelligent-ui-integration-audit-2026-10.md."
@@ -771,7 +771,7 @@ owasp_agentic_2026:
       status: "mitigated"
       control_integrity: "ADR-0022: attestation now needs evidence: a turn that served model text must show a guard stage, streamed turns are attested (closes G325), and the graph path runs the output guards (G350, G351). Every turn writes a row with its disposition and what generated it (G349, G359)."
       live_web_assurance: "ADR-0021: attest_turn holds each REST turn to the behavioural manifest from its real stage timings, and the plan digest and verdict enter the audit row. Streaming turns are not attested (G325)."
-      evidence: "App/backend/app/turn_pipeline.py, App/backend/app/audit/turns.py, App/backend/app/audit/ledger.py, App/backend/app/flags.py"
+      evidence: "App/backend/app/turn_pipeline.py, App/backend/app/audit/turns.py, App/backend/app/audit/ledger.py, App/backend/app/config/flags.py"
       controls: "Hash-chained turn and action audit ledger v3 with RFC 3161 seals, risk-tiered autonomy gates, and per-feature kill switches"
       verified_by:
         - "tests/agents/test_turn_terminal_contract.py"
@@ -796,7 +796,7 @@ aibom_inventory:
       freshness: "One Kampala clock; explicit caveat after the last table; edition-aware precedence ranks contradicting passages last"
     - id: "ura-dense-corpus-vectors"
       role: "The retrieval corpus embedded with multilingual-e5-small for the local pgvector leg (ADR-0034)"
-      source: "app.indexer.load_documents() over the exported corpus JSONL, embedded in CI (ura-chatbot-build-push.yml) and baked into the image as App/Data/dense"
+      source: "app.ingestion.indexer.load_documents() over the exported corpus JSONL, embedded in CI (ura-chatbot-build-push.yml) and baked into the image as App/Data/dense"
       provenance: "manifest.json names the model, revision, dimension and every vector's Qdrant point id, with a digest of the id set"
       release_control: "Loaded at Space build only if its point-id set equals the baked Qdrant collection's; the store opens only for the pinned model, revision and dimension"
       storage: "PostgreSQL 15 + pgvector 0.8.1 (image digest-pinned), Unix socket only, read-only serving role"
@@ -880,7 +880,7 @@ aibom_inventory:
       sha: "614241f622f53c4eeff9890bdc4f31cfecc418b3"  # pragma: allowlist secret
       hosting: "local"
       locales: ["en", "sw"]
-      runtime: "ONNX Runtime fp32 on CPU; onnx/model.onnx and tokenizer.json pinned by SHA-256 in App/backend/app/dense_cpu.py"
+      runtime: "ONNX Runtime fp32 on CPU; onnx/model.onnx and tokenizer.json pinned by SHA-256 in App/backend/app/embeddings/embedder.py"
       limits: "Not trained on Luganda, Runyankole or Acholi (those reach retrieval through translate-then-retrieve); similarity is uncalibrated and takes no part in abstention (G524)"
       verified_by:
         - "App/backend/tests/test_local_dense_leg.py"
@@ -970,7 +970,7 @@ csa_aicm_maestro_2026:
       name: "Data Operations"
       aicm_domains: ["DSP", "STA"]
       status: "mitigated"
-      controls: "Structural PDF guards (pdf_guards.py), Docling Document Intelligence IR & table/page provenance (docling_intelligence.py, ADR-0026, G441-G450), SHA-256 corpus/freshness manifests, and tenant/consent-scoped 4-tier cognitive memory"
+      controls: "Structural PDF guards (pdf_guards.py), Docling Document Intelligence IR & table/page provenance (ingestion/docling_intelligence.py, ADR-0026, G441-G450), SHA-256 corpus/freshness manifests, and tenant/consent-scoped 4-tier cognitive memory"
       verified_by:
         - "App/backend/tests/test_mcp_2026_october_audit_and_corpus.py"
         - "tests/agents/test_docling_rag_document_intelligence_2026.py"

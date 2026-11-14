@@ -285,7 +285,7 @@ class MemoryDiscardTool(Tool):
 
         import time
 
-        from .. import database as db
+        from ..db import database as db
 
         try:
             db.execute(

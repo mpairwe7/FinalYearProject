@@ -16,7 +16,7 @@ from tempfile import TemporaryDirectory
 
 import pytest
 from app.agents import AgentRoute, supervisor
-from app.service import _EXPLICIT_WORKFLOW_START_RE
+from app.rag.pipeline import _EXPLICIT_WORKFLOW_START_RE
 from app.text_signals import (
     REPAIR_QUESTION,
     crisis_support_reply,

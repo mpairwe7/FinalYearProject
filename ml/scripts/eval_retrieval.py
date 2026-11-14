@@ -41,7 +41,7 @@ def _tokenize(text: str) -> list[str]:
 
 
 def _load_entries() -> list[dict]:
-    from app.service import _DATA_DIR, _load_faq_data
+    from app.rag.pipeline import _DATA_DIR, _load_faq_data
 
     faq_index, _ = _load_faq_data(_DATA_DIR)
     out = []
@@ -74,7 +74,7 @@ class BM25:
     """
 
     def __init__(self, entries: list[dict]):
-        from app.retriever import BM25SparseEncoder
+        from app.rag.retriever import BM25SparseEncoder
 
         texts = [f"{e['question']} {e['answer']}" for e in entries]
         self.encoder = BM25SparseEncoder().fit(texts)

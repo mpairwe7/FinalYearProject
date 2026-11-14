@@ -202,7 +202,7 @@ class TestCrossReplicaDelivery:
     """The property an in-process hub cannot provide on its own."""
 
     def test_an_event_published_here_reaches_a_listener_there(self):
-        import app.database as db
+        import app.db.database as db
         from app.ticket_events import listen_for_events, publish
 
         db.init_db()

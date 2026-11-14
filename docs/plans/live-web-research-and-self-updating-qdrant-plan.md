@@ -1,9 +1,9 @@
 # Plan: Sovereign Live Web Research, Global FX (`XE.com` / Google), Ephemeral PDF Sandbox & Self-Updating Qdrant Corpus
 
-Status: **Ready for implementation.** Authored 2026-10-21 against `dev` @ `de3ed5ed72` (plus the local streaming-parity diff in `App/backend/app/service.py` and `App/backend/app/calculator_router.py`).  
+Status: **Ready for implementation.** Authored 2026-10-21 against `dev` @ `de3ed5ed72` (plus the local streaming-parity diff in `App/backend/app/rag/pipeline.py` and `App/backend/app/calculator_router.py`).  
 Audience: a **new** coding session with no memory of the conversation that produced this plan. Read each referenced file before editing it.
 
-> **Builds upon:** [`docs/plans/sovereign-opus-level-accuracy-plan.md`](sovereign-opus-level-accuracy-plan.md) and [`ADR-0007`](../adr/0007-sovereign-local-reasoning-tier-and-code-owned-tax-logic.md) (merged in PRs #594–#607). All local two-tier vLLM routing (`Sunbird/Sunflower-Qwen3.5-9B` T1 on GPU 4 + `Qwen/Qwen3.8-27B-FP8` T2/T3 on GPU 7), `CaseFacts`, `scenario_planner.py`, `premise_guard.py`, `claim_polarity.py`, and `verify_figure_lock` are already live on `dev`.
+> **Builds upon:** [`docs/plans/sovereign-opus-level-accuracy-plan.md`](sovereign-opus-level-accuracy-plan.md) and [`ADR-0007`](../adr/0007-sovereign-local-reasoning-tier-and-code-owned-tax-logic.md) (merged in PRs #594–#607). All local two-tier vLLM routing (`Sunbird/Sunflower-Qwen3.5-9B` T1 on GPU 4 + `Qwen/Qwen3.8-27B-FP8` T2/T3 on GPU 7), `CaseFacts`, `scenario_planner.py`, `premise_guard.py`, `rag/claim_polarity.py`, and `verify_figure_lock` are already live on `dev`.
 
 ---
 
@@ -16,7 +16,7 @@ Audience: a **new** coding session with no memory of the conversation that produ
 4. Phase B — Live Global Exchange Rate Engine (`XE.com` / Google Currency) & `scenario_planner` Integration
 5. Phase C — Frontier-Style Web Research Planner, 8-Trigger Router & Source-Authority Tiering
 6. Phase D — Ephemeral RAM-Backed PDF/Document Sandbox (`/tmp/ura-web-sandbox/<turn_id>/`)
-7. Phase E — Self-Updating Qdrant Comparator & Hot-Swap Engine (`corpus_sync.py`)
+7. Phase E — Self-Updating Qdrant Comparator & Hot-Swap Engine (`vectorstore/corpus_sync.py`)
 8. Phase F — End-to-End Orchestration (`service.py`, `verify_figure_lock`, `claim_verifier`, SSE Stream Events)
 9. Phase G — Evaluation Suite, Live Tunnel Verification, ADR-0008, Runbook & Living Docs
 
@@ -33,7 +33,7 @@ Audience: a **new** coding session with no memory of the conversation that produ
   ~/bin/gh auth switch --user mpairwe7
   ~/bin/gh api user --jq .login   # must output: mpairwe7
   ```
-- Any new feature flag must land in **all three** files: `App/backend/app/flags.py`, `docs/RAG_ARCHITECTURE.md`, and `.env.example`.
+- Any new feature flag must land in **all three** files: `App/backend/app/config/flags.py`, `docs/RAG_ARCHITECTURE.md`, and `.env.example`.
 - Any new FastAPI route must land in `tests/test_all_endpoints_e2e.py` (`EXPECTED_ENDPOINTS` + `COVERAGE`).
 - Metrics go through `App/backend/app/analytics.py` (`metrics.inc(...)` / `metrics.observe(...)`) only, with bounded label values.
 
@@ -106,7 +106,7 @@ Audience: a **new** coding session with no memory of the conversation that produ
 
 ### Ambiguity 5: Self-Updating Qdrant Corpus — Compare `ura.go.ug` PDF vs. Qdrant, Delete Outdated Doc, Replace With New Doc, and Remember the Update
 - **Requirement:** When the AI finds a PDF on `https://ura.go.ug` (exclusively) and discovers that the corresponding document in Qdrant is outdated, it must **delete the old document from Qdrant**, **insert the new document into Qdrant**, and **remember that the database was updated** so future questions use Qdrant directly without searching the web again.
-- **Resolution (§7 — `App/backend/app/corpus_sync.py`):**
+- **Resolution (§7 — `App/backend/app/vectorstore/corpus_sync.py`):**
   1. **Canonical Document Family & Fiscal-Year Comparator:** Maps every URA PDF to a `(doc_family, doc_kind, fiscal_year, sha256)` tuple (e.g., `doc_family="sector_guide_real_estate"`, `doc_kind="full_guide"`, `fiscal_year="FY2026-27"`).
   2. **Replace Mode (Newer Edition of an Existing Document):**
      - When `ura.go.ug` has a newer `fiscal_year` (or newer revision date with `page_count >= 0.5 * old_page_count`) for the same `doc_family`:
@@ -116,7 +116,7 @@ Audience: a **new** coding session with no memory of the conversation that produ
   3. **Add Mode (Brand-New Document or Short Public Notice):**
      - When the `ura.go.ug` PDF has no prior version in Qdrant (or is a 1–4 page Public Notice), upserts its chunks into Qdrant without deleting existing handbooks.
   4. **Persistent Memory of Updates (`web_sync_ledger` table):**
-     - Records `(topic_key, doc_family, source_uri, ura_url, pdf_sha256, fiscal_year, status, synced_at, expires_at)` in SQLite/Postgres (`database.py` + `postgres.py`).
+     - Records `(topic_key, doc_family, source_uri, ura_url, pdf_sha256, fiscal_year, status, synced_at, expires_at)` in SQLite/Postgres (`database.py` + `db/postgres.py`).
      - Before launching any web search on `ura.go.ug`, the router checks `web_sync_ledger`: if `doc_family` / `topic_key` was already verified or updated before `expires_at` (default 7 days), **it skips the web search completely** and serves from the updated Qdrant collection in `< 250 ms`!
 
 ### Ambiguity 6 & 7: Streaming Guard Parity (`/v1/chat/stream`) & Live UI Progress Events
@@ -166,15 +166,15 @@ Incoming Chat Turn (REST `/v1/chat` or SSE `/v1/chat/stream`)
 ## 3. Phase A — Streaming Guard Parity, Feature Flags & `web_sync_ledger` Schema
 
 ### A.1 Commit the Existing Streaming Guard Parity Fix
-The working tree currently has uncommitted fixes in `App/backend/app/service.py` and `App/backend/app/calculator_router.py` that wire `verified_facts_block` and `_case_facts` into the SSE streaming path (`_apply_output_guards`, `generate_retrieval_only`, `_run_chat_turn_events`) and add `"compared to"` / `"versus"` to `_SCENARIO_PLANNER_BYPASS_RE`. Keep those changes and include a regression test in `tests/agents/test_streaming_verified_facts_parity.py`.
+The working tree currently has uncommitted fixes in `App/backend/app/rag/pipeline.py` and `App/backend/app/calculator_router.py` that wire `verified_facts_block` and `_case_facts` into the SSE streaming path (`_apply_output_guards`, `generate_retrieval_only`, `_run_chat_turn_events`) and add `"compared to"` / `"versus"` to `_SCENARIO_PLANNER_BYPASS_RE`. Keep those changes and include a regression test in `tests/agents/test_streaming_verified_facts_parity.py`.
 
-### A.2 Feature Flags (`App/backend/app/flags.py`, `docs/RAG_ARCHITECTURE.md`, `.env.example`)
-Add two flags to `flags.py` (and document in `docs/RAG_ARCHITECTURE.md` and `.env.example`):
+### A.2 Feature Flags (`App/backend/app/config/flags.py`, `docs/RAG_ARCHITECTURE.md`, `.env.example`)
+Add two flags to `config/flags.py` (and document in `docs/RAG_ARCHITECTURE.md` and `.env.example`):
 - `live_web_research` (`FLAG_LIVE_WEB_RESEARCH`, default `False` in unit-test registry so offline CI tests stay 100% deterministic; enabled via `FLAG_LIVE_WEB_RESEARCH=true` in `App/docker-compose.gpu-salt.yml` and `configs/prototype.env`): enables live FX lookup (`xe.com` / Google Currency) and tiered official web/PDF research.
 - `auto_qdrant_web_sync` (`FLAG_AUTO_QDRANT_WEB_SYNC`, default `False` in unit-test registry; enabled via `FLAG_AUTO_QDRANT_WEB_SYNC=true` on the live stack): enables automatic comparison of `ura.go.ug` PDFs against Qdrant, deletion/tombstoning of outdated Qdrant documents, upsert of newer `ura.go.ug` PDFs, and `web_sync_ledger` tracking.
 
-### A.3 `web_sync_ledger` Table (`App/backend/app/database.py` & `App/backend/app/postgres.py`)
-Read `App/backend/app/database.py` lines `735–765` and `3010–3085` (where `corpus_tombstones` is defined). Add:
+### A.3 `web_sync_ledger` Table (`App/backend/app/db/database.py` & `App/backend/app/db/postgres.py`)
+Read `App/backend/app/db/database.py` lines `735–765` and `3010–3085` (where `corpus_tombstones` is defined). Add:
 ```sql
 CREATE TABLE IF NOT EXISTS web_sync_ledger (
     id                TEXT PRIMARY KEY,
@@ -192,7 +192,7 @@ CREATE TABLE IF NOT EXISTS web_sync_ledger (
 CREATE INDEX IF NOT EXISTS idx_web_sync_family ON web_sync_ledger(doc_family);
 CREATE INDEX IF NOT EXISTS idx_web_sync_topic ON web_sync_ledger(topic_key);
 ```
-Add helper functions in both `database.py` and `postgres.py`:
+Add helper functions in both `database.py` and `db/postgres.py`:
 - `upsert_web_sync_entry(...) -> dict[str, Any]`
 - `get_active_web_sync_entry(*, doc_family: str = "", topic_key: str = "") -> dict[str, Any] | None` (returns the entry if `expires_at > now_iso()`, else `None`)
 - `list_web_sync_entries(limit: int = 100) -> list[dict[str, Any]]`
@@ -327,10 +327,10 @@ Read `App/backend/app/pdf_guards.py` and `App/backend/app/documents.py` first. B
 
 ---
 
-## 7. Phase E — Self-Updating Qdrant Comparator & Hot-Swap Engine (`corpus_sync.py`)
+## 7. Phase E — Self-Updating Qdrant Comparator & Hot-Swap Engine (`vectorstore/corpus_sync.py`)
 
-### E.1 Create `App/backend/app/corpus_sync.py`
-Read `App/backend/app/retriever.py` (lines `242–280`, `1150–1250`), `App/backend/app/indexer.py`, and `App/backend/app/freshness.py` first.
+### E.1 Create `App/backend/app/vectorstore/corpus_sync.py`
+Read `App/backend/app/rag/retriever.py` (lines `242–280`, `1150–1250`), `App/backend/app/ingestion/indexer.py`, and `App/backend/app/freshness.py` first.
 
 Implement `compare_and_sync_ura_document(sandbox_doc: SandboxDocument, retriever: HybridRetriever) -> SyncOutcome`:
 
@@ -368,7 +368,7 @@ Implement `compare_and_sync_ura_document(sandbox_doc: SandboxDocument, retriever
 
 ## 8. Phase F — End-to-End Orchestration (`service.py`, `verify_figure_lock`, `claim_verifier`, SSE Stream)
 
-Read `App/backend/app/service.py` (lines `1830–1940`, `2200–2360`, `11000–11800`, `12700–13115`), `App/backend/app/agents/evaluator.py` (lines `335–425`), and `App/backend/app/claim_verifier.py` (lines `230–315`):
+Read `App/backend/app/rag/pipeline.py` (lines `1830–1940`, `2200–2360`, `11000–11800`, `12700–13115`), `App/backend/app/agents/evaluator.py` (lines `335–425`), and `App/backend/app/rag/claim_verifier.py` (lines `230–315`):
 
 1. **Hook Live Web Research into `_generate_en` (REST) and `generate_retrieval_only` (SSE Streaming):**
    - Right after Step 3b (`corrective_rag`), when `flags.is_enabled("live_web_research")`:
@@ -379,7 +379,7 @@ Read `App/backend/app/service.py` (lines `1830–1940`, `2200–2360`, `11000–
        - Prepend the top web/PDF chunks to `hits` (with `source_url` and `effective_date` preserved in `HybridRetriever.build_citations(hits)`).
        - Append a `## Live Web & Official Portal Verification` summary bullet (with exact figures, URLs, and fetch timestamps) to `verified_facts_block`.
 2. **Ensure `verify_figure_lock()` and `verify_claims()` Honor Web-Verified Figures:**
-   - Because web-verified figures and live FX conversions (`web_fx.py`) are added to `verified_facts_block` and `hits`, both `verify_figure_lock()` (`agents/evaluator.py`) and `verify_claims()` (`claim_verifier.py`) automatically include their numbers in `allowed_money`, `allowed_pcts`, and `verified_numbers` on **both** REST (`/v1/chat`) and Chrome SSE streaming (`/v1/chat/stream`).
+   - Because web-verified figures and live FX conversions (`web_fx.py`) are added to `verified_facts_block` and `hits`, both `verify_figure_lock()` (`agents/evaluator.py`) and `verify_claims()` (`rag/claim_verifier.py`) automatically include their numbers in `allowed_money`, `allowed_pcts`, and `verified_numbers` on **both** REST (`/v1/chat`) and Chrome SSE streaming (`/v1/chat/stream`).
 3. **Admin Visibility Endpoint (Optional / Existing Admin Console):**
    - Expose `web_sync_ledger` entries alongside `corpus_tombstones` in the existing admin discrepancy/tombstone status payload so staff can see every document auto-updated from `ura.go.ug`.
 

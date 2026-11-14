@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from .flags import flags
+from .config.flags import flags
 
 logger = logging.getLogger(__name__)
 

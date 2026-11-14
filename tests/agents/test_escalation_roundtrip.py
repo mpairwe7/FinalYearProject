@@ -74,7 +74,7 @@ class TestInternalNotesStayInternal:
 
 class TestChatSurfacing:
     def test_the_reply_is_returned_to_the_taxpayer(self, tmp_db, ticket):
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         tmp_db.update_ticket(
             ticket["id"], officer_reply="Your TIN was reactivated on 4 Aug.",
@@ -85,24 +85,24 @@ class TestChatSurfacing:
         assert "officer.jane" in text
 
     def test_it_is_delivered_only_once(self, tmp_db, ticket):
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         tmp_db.update_ticket(ticket["id"], officer_reply="Sorted.")
         assert ChatModel._deliver_officer_reply("conv-1")
         assert ChatModel._deliver_officer_reply("conv-1") == ""
 
     def test_no_pending_reply_returns_empty(self, tmp_db, ticket):
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         assert ChatModel._deliver_officer_reply("conv-1") == ""
 
     def test_a_broken_ticket_store_does_not_take_out_the_chat(self, tmp_db, monkeypatch):
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         def _boom(_):
             raise RuntimeError("db down")
 
-        monkeypatch.setattr("app.database.pending_officer_reply", _boom)
+        monkeypatch.setattr("app.db.database.pending_officer_reply", _boom)
         assert ChatModel._deliver_officer_reply("conv-1") == ""
 
 

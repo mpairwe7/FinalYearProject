@@ -64,7 +64,7 @@ def tmp_db(monkeypatch: pytest.MonkeyPatch):
 
     Uses ``:memory:`` to avoid any filesystem locking issues (WAL
     journals, NFS, concurrent test runners, or other processes
-    holding the real analytics.db open).  The app.database module
+    holding the real analytics.db open).  The app.db.database module
     is patched so ``_get_connection`` returns a single shared
     in-memory connection for the duration of the test; every
     subsequent call inside the test body sees the same connection
@@ -74,7 +74,7 @@ def tmp_db(monkeypatch: pytest.MonkeyPatch):
     ``_get_connection`` is restored via monkeypatch automatically.
     """
     import sqlite3
-    from app import database as db
+    from app.db import database as db
 
     # One in-memory connection per test.  Note: multiple `sqlite3.connect(":memory:")`
     # calls would each produce a DIFFERENT in-memory DB, so we must
@@ -136,12 +136,12 @@ def fresh_registry():
 @pytest.fixture
 def clean_flags():
     """Clear all in-memory flag overrides, yield the registry, then clear again."""
-    from app import service
-    from app.flags import flags, _REGISTRY
+    from app.rag import pipeline
+    from app.config.flags import flags, _REGISTRY
 
-    assert flags is service.flags, (
+    assert flags is pipeline.flags, (
         "A test replaced the flag singleton, so clearing it would not reach the service. "
-        "Reload app.flags only with test_integration.restored_modules."
+        "Reload app.config.flags only with test_integration.restored_modules."
     )
     for name in list(_REGISTRY.keys()):
         flags.clear(name)

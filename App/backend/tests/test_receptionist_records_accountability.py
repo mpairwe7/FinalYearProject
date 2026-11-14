@@ -14,7 +14,7 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app import database as db
+from app.db import database as db
 from app.receptionist import desk, ws
 from app.receptionist.hub import hub
 from app.receptionist.state import registry
@@ -368,7 +368,7 @@ class WrapUpOwnershipTests(LiveCallCase):
                 raise RuntimeError("database is locked")
             return real_merge(*args, **kwargs)
 
-        with patch("app.flags.flags.is_enabled", side_effect=lambda name, **_kw: name == "ticket_queue"):
+        with patch("app.config.flags.flags.is_enabled", side_effect=lambda name, **_kw: name == "ticket_queue"):
             with patch.object(desk, "merge_wrapup", side_effect=fail_the_wrap_up_once):
                 with self.assertRaises(desk.DeskError) as failed:
                     await desk.wrapup(self.call_id, "okello", outcome="follow_up", note="Needs a letter", ticket_action="create")
@@ -765,7 +765,7 @@ class DeferredAuditTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         db.init_db()
         cls.model = ChatModel()
@@ -1228,7 +1228,7 @@ class RetentionPurgeTests(unittest.TestCase):
     """On Postgres, a missing voice table does not undo the purge of resolved tickets."""
 
     def run_cleanup(self, missing: tuple[str, ...]):
-        from app import postgres
+        from app.db import postgres
 
         log: list[str] = []
 
@@ -1267,7 +1267,7 @@ class RetentionPurgeTests(unittest.TestCase):
         pool = SimpleNamespace(connection=lambda: Connection())
         with (
             patch.object(postgres, "_get_pool", return_value=pool),
-            patch("app.database.module_retention", return_value={}),
+            patch("app.db.database.module_retention", return_value={}),
         ):
             deleted = postgres.cleanup_expired_data()
         return deleted, log
@@ -1527,7 +1527,7 @@ class WrapUpReviewTests(LiveCallCase):
         await self.bridge("okello")
         await desk.transfer(self.call_id, "okello", team="disputes")
 
-        with self.no_room_here(), patch("app.flags.flags.is_enabled", side_effect=only("ticket_queue")):
+        with self.no_room_here(), patch("app.config.flags.flags.is_enabled", side_effect=only("ticket_queue")):
             error = await self.refused("okello", ticket_action="resolve")
 
         self.assertEqual(error.status, 409)
@@ -1565,7 +1565,7 @@ class WrapUpReviewTests(LiveCallCase):
             return real_update(call_id, **fields)
 
         patches = [
-            patch("app.flags.flags.is_enabled", side_effect=only("ticket_queue")),
+            patch("app.config.flags.flags.is_enabled", side_effect=only("ticket_queue")),
             patch.object(desk, "update_call", side_effect=refuse_the_link),
         ]
         if withdrawal is not None:
@@ -1598,7 +1598,7 @@ class WrapUpReviewTests(LiveCallCase):
         await self.bridge("okello")
         await self.room.end("caller_hangup")
         with (
-            patch("app.flags.flags.is_enabled", side_effect=only("ticket_queue")),
+            patch("app.config.flags.flags.is_enabled", side_effect=only("ticket_queue")),
             patch.object(db, "update_ticket", return_value=False),
             patch.object(db, "get_ticket", return_value=ticket if exists else None),
         ):

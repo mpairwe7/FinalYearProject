@@ -9,7 +9,7 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
-from app import database as db
+from app.db import database as db
 from app.receptionist.language import LanguagePolicy, LanguageVote, PolicyConfig
 from app.receptionist.phrases import phrase
 from app.receptionist.router import LanguageRouter

@@ -49,7 +49,7 @@ os.environ["DOCUMENT_MAX_BYTES"] = str(40 * 1024 * 1024)
 
 from fastapi.testclient import TestClient
 from app.main import app
-from app import database as db
+from app.db import database as db
 
 
 def get_mem_mb() -> float:

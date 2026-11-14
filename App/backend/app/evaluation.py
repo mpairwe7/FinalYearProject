@@ -32,8 +32,8 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from . import database as db
-from .retriever import HybridRetriever
+from .db import database as db
+from .rag.retriever import HybridRetriever
 from .text_signals import content_tokens
 
 logger = logging.getLogger(__name__)

@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 
 def _client_with_flag(enabled: bool) -> TestClient:
-    from app.flags import flags
+    from app.config.flags import flags
     from app.main import app
 
     flags.set("ws_chat", enabled)
@@ -70,7 +70,7 @@ class WsChatSessionUnitTest(unittest.TestCase):
 
 class WsSessionStateIntegrationTest(unittest.TestCase):
     def tearDown(self) -> None:
-        from app.flags import flags
+        from app.config.flags import flags
 
         flags.clear("ws_chat")
 
@@ -98,7 +98,7 @@ class WsSessionStateIntegrationTest(unittest.TestCase):
 
         client = _client_with_flag(True)
         with unittest.mock.patch.object(
-            chat_ws_v2.service_module, "run_chat_turn", _fake_run_chat_turn
+            chat_ws_v2.pipeline_module, "run_chat_turn", _fake_run_chat_turn
         ):
             with client.websocket_connect("/v2/chat/stream") as ws:
                 _send(ws, {"type": "session_start", "conversation_id": "conv-X"})
@@ -129,7 +129,7 @@ class WsSessionStateIntegrationTest(unittest.TestCase):
         self.assertEqual(override[1]["content"], "OK")
 
     def test_session_ready_advertises_capabilities(self) -> None:
-        from app.flags import flags
+        from app.config.flags import flags
 
         flags.set("ws_chat", True)
         flags.set("tool_use", True)

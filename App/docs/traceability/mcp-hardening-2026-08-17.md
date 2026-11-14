@@ -38,8 +38,8 @@ Shipped in five phases in one change set.
 | Phase | Files |
 |-------|-------|
 | 1 Spec | `app/mcp/protocol.py` (new), `transport.py`, `servers/tax_calculator/server.py`, `client.py`, `tools/__init__.py` |
-| 2 MRTR | `app/mcp/mrtr.py` (new), `transport.py`, `client.py`, `llm.py` (`tool_call.input_required`) |
-| 3 Tool RAG | `tool_rag.py` (`inject_dense_model`, rails-only miss), `retriever.py`, `graphs/main_graph.py` |
+| 2 MRTR | `app/mcp/mrtr.py` (new), `transport.py`, `client.py`, `rag/generator.py` (`tool_call.input_required`) |
+| 3 Tool RAG | `tool_rag.py` (`inject_dense_model`, rails-only miss), `rag/retriever.py`, `graphs/main_graph.py` |
 | 4 Schemas | `calendar.py`, `escalate.py`, `rag_tool.py`, `ura_account.py`, `ura_actions.py` |
 | 5 Ops | `client.py` (Redis idempotency, breaker) |
 

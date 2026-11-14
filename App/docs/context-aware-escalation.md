@@ -112,7 +112,7 @@ matters. Production mandates `ANALYTICS_BACKEND=postgres`.
 
 **Tickets were never dispatched to Postgres.** The dispatch block in
 `database.py` re-bound conversation functions to the Postgres module but
-not ticket functions, and `postgres.py` had no tickets table at all. So
+not ticket functions, and `db/postgres.py` had no tickets table at all. So
 every escalation was written to a per-replica SQLite file: invisible to
 an officer whose request reached a different pod, lost on restart, and
 pointing at a `conversation_id` in a different database.
@@ -125,7 +125,7 @@ multi-turn memory, no transcript to attach to an escalation, and nothing
 for erasure to find.
 
 `TestBackendParity` now asserts that every name in the dispatch block
-exists in `postgres.py` and takes the same arguments, so neither can
+exists in `db/postgres.py` and takes the same arguments, so neither can
 recur quietly.
 
 Signature parity turned out not to be enough. `postgres.get_ticket`
@@ -150,7 +150,7 @@ POSTGRES_DSN="postgresql://postgres:pw@localhost:55432/ura" \
   python -m pytest tests/agents/test_backend_column_parity.py
 ```
 
-Worth doing for any change touching `postgres.py`: the `user_id` defect
+Worth doing for any change touching `db/postgres.py`: the `user_id` defect
 above passed every SQLite test and every signature check.
 
 ## The round trip (Phase 18)

@@ -10,7 +10,8 @@ from __future__ import annotations
 from unittest import mock
 
 import pytest
-from app import service, sunbird
+from app.rag import pipeline
+from app import sunbird
 from app.providers import breakers, gateway
 from app.speech_service import SpeechModel
 
@@ -25,7 +26,7 @@ def healthy_breaker():
 @pytest.fixture
 def translation_on(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("TRANSLATE_FALLBACK_BACKEND", "sunbird")
-    monkeypatch.setattr("app.flags.flags.is_enabled", lambda name, **_k: name == "cloudflare_fallback")
+    monkeypatch.setattr("app.config.flags.flags.is_enabled", lambda name, **_k: name == "cloudflare_fallback")
     monkeypatch.setattr(sunbird, "is_available", lambda: True)
 
 
@@ -106,7 +107,7 @@ def _index() -> dict:
 
 @pytest.fixture
 def judge_on(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(service, "FAQ_JUDGE_ENABLED", True)
+    monkeypatch.setattr(pipeline, "FAQ_JUDGE_ENABLED", True)
     monkeypatch.setattr(sunbird, "is_available", lambda: True)
 
 
@@ -115,23 +116,23 @@ def test_the_judge_asks_sunflower_and_reads_past_its_thinking(judge_on) -> None:
     verdict = '<think>Maybe {"pick": 2} fits.</think>{"pick": 1, "confident": true}'
     with mock.patch.object(sunbird, "chat_completion", return_value=verdict) as chat, \
          mock.patch.object(gateway, "gemini_generate") as gem:
-        hits = service._judge_rescue("What is the VAT rate?", _index(), 4)
+        hits = pipeline._judge_rescue("What is the VAT rate?", _index(), 4)
     assert hits
     assert "VAT" in hits[0]["question"]
-    assert chat.call_args.kwargs["timeout"] == service.FAQ_JUDGE_TIMEOUT
+    assert chat.call_args.kwargs["timeout"] == pipeline.FAQ_JUDGE_TIMEOUT
     gem.assert_not_called()
 
 
 def test_the_judge_is_skipped_when_sunbird_is_unavailable(judge_on, monkeypatch) -> None:
     monkeypatch.setattr(sunbird, "is_available", lambda: False)
     with mock.patch.object(sunbird, "chat_completion") as chat:
-        assert service._judge_rescue("What is the VAT rate?", _index(), 4) == []
+        assert pipeline._judge_rescue("What is the VAT rate?", _index(), 4) == []
     chat.assert_not_called()
 
 
 def test_a_failing_judge_opens_the_shared_breaker(judge_on) -> None:
     with mock.patch.object(sunbird, "chat_completion", side_effect=RuntimeError("down")) as chat:
-        results = [service._judge_rescue("What is the VAT rate?", _index(), 4) for _ in range(5)]
+        results = [pipeline._judge_rescue("What is the VAT rate?", _index(), 4) for _ in range(5)]
     assert results == [[]] * 5
     assert chat.call_count == breakers.SUNBIRD_LLM_BREAKER.failure_threshold
 

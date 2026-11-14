@@ -1787,7 +1787,7 @@ def _system_prompt_shingles() -> frozenset[tuple[str, ...]]:
     cannot be imported; the signature phrases still apply.
     """
     try:
-        from .llm import CLOUD_SYSTEM_PROMPT, SYSTEM_PROMPT
+        from .rag.generator import CLOUD_SYSTEM_PROMPT, SYSTEM_PROMPT
     except Exception:  # pragma: no cover - import guard for partial installs
         logger.debug("System prompt unavailable for leakage fingerprint", exc_info=True)
         return frozenset()
@@ -1853,7 +1853,7 @@ class OutputGuard:
         if allowed_values is None:
             # From the leaf module, not the orchestrator: the security layer must
             # not depend on service.py, and must not fail silently (ADR-0031).
-            from .turn_context import ACTIVE_USER_STATED_IDS
+            from .rag.turn_context import ACTIVE_USER_STATED_IDS
 
             allowed_values = ACTIVE_USER_STATED_IDS.get()
         return redact_pii_text(text, allowed_values=allowed_values)
@@ -2333,7 +2333,7 @@ class OutputGuard:
         if not contexts:
             return GuardResult(allowed=True, sanitized_text=answer)
 
-        from .retriever import HybridRetriever
+        from .rag.retriever import HybridRetriever
 
         score = HybridRetriever.compute_faithfulness(answer, contexts)
         if score < threshold:
@@ -2370,7 +2370,7 @@ class OutputGuard:
         if not hits:
             _record_abstention("no_hits", True)
             return True
-        from .retriever import LEXICAL_RELEVANCE_FLOOR, gating_relevance
+        from .rag.retriever import LEXICAL_RELEVANCE_FLOOR, gating_relevance
 
         loc = (locale or "en").strip().lower().split("-")[0]
         if loc == "lg":

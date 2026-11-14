@@ -24,8 +24,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.retriever import HybridRetriever  # noqa: E402
-from app.service import _DATA_DIR, ChatModel, _load_faq_data  # noqa: E402
+from app.rag.retriever import HybridRetriever  # noqa: E402
+from app.rag.pipeline import _DATA_DIR, ChatModel, _load_faq_data  # noqa: E402
 
 
 class FrameTestCase(unittest.TestCase):
@@ -181,10 +181,10 @@ class TestSuggestionSurvivesAMissingBm25State(FrameTestCase):
     this method was rewritten to fix."""
 
     def test_a_suggestion_is_still_produced_without_the_encoder(self):
-        import app.service as svc
+        from app.rag import pipeline
 
-        saved_enc, saved_flag = svc._BM25_ENCODER, svc._BM25_LOAD_ATTEMPTED
-        svc._BM25_ENCODER, svc._BM25_LOAD_ATTEMPTED = None, True  # force the fallback
+        saved_enc, saved_flag = pipeline._BM25_ENCODER, pipeline._BM25_LOAD_ATTEMPTED
+        pipeline._BM25_ENCODER, pipeline._BM25_LOAD_ATTEMPTED = None, True  # force the fallback
         try:
             out = self.model._add_conversational_frame(
                 "EFRIS is URA's e-invoicing system.",
@@ -193,7 +193,7 @@ class TestSuggestionSurvivesAMissingBm25State(FrameTestCase):
                 retrieval_mode="hybrid",
             )
         finally:
-            svc._BM25_ENCODER, svc._BM25_LOAD_ATTEMPTED = saved_enc, saved_flag
+            pipeline._BM25_ENCODER, pipeline._BM25_LOAD_ATTEMPTED = saved_enc, saved_flag
         self.assertIn("You might also want to know:", out)
 
 

@@ -41,9 +41,9 @@ os.environ.setdefault("SPEECH_ENABLED", "false")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import database  # noqa: E402
-from app import service as service_module  # noqa: E402
-from app.flags import flags  # noqa: E402
+from app.db import database  # noqa: E402
+from app.rag import pipeline as pipeline_module  # noqa: E402
+from app.config.flags import flags  # noqa: E402
 from app.main import app  # noqa: E402
 from app.providers import breakers, budget, gateway  # noqa: E402
 from app.providers import config as cloud_config  # noqa: E402
@@ -85,7 +85,7 @@ def _passthrough_guard(model, **kwargs):
 @pytest.fixture(scope="module")
 def client():
     database.init_db()
-    real_model = service_module.ChatModel()
+    real_model = pipeline_module.ChatModel()
     app.state.model = real_model
     app.state.speech = types.SimpleNamespace(enabled=False)
     # No `with` block: skips the lifespan (model download / prod gate).
@@ -109,7 +109,7 @@ def cloud_fallback_env():
     budget._redis_tried = True  # force in-process counters
     budget._local_gemini.clear()
     breakers.SUNBIRD_LLM_BREAKER.record_success()
-    service_module._LLM_CIRCUIT.record_success()
+    pipeline_module._LLM_CIRCUIT.record_success()
     yield
     flags.clear("cloudflare_fallback")
     for key in env:
@@ -122,17 +122,17 @@ def cloud_fallback_env():
 def deterministic_pipeline(client):
     """Pin retrieval + guards so only the LLM/fallback routing is variable."""
     model = app.state.model
-    with mock.patch.object(service_module, "_simple_search", return_value=[dict(_FAQ_ROW)]), \
-         mock.patch.object(service_module, "needs_clarification", return_value=""), \
-         mock.patch.object(service_module, "verify_claims",
+    with mock.patch.object(pipeline_module, "_simple_search", return_value=[dict(_FAQ_ROW)]), \
+         mock.patch.object(pipeline_module, "needs_clarification", return_value=""), \
+         mock.patch.object(pipeline_module, "verify_claims",
                            return_value={"decision": "approve", "score": 1.0}), \
-         mock.patch.object(service_module, "_apply_output_guards", _passthrough_guard), \
-         mock.patch.object(service_module.ChatModel, "_deterministic_procedure_reply",
+         mock.patch.object(pipeline_module, "_apply_output_guards", _passthrough_guard), \
+         mock.patch.object(pipeline_module.ChatModel, "_deterministic_procedure_reply",
                            return_value=("", False)), \
-         mock.patch.object(service_module.ChatModel, "_priority_faq_hits", return_value=[]), \
-         mock.patch.object(service_module.ChatModel, "_evaluate_response_judge",
+         mock.patch.object(pipeline_module.ChatModel, "_priority_faq_hits", return_value=[]), \
+         mock.patch.object(pipeline_module.ChatModel, "_evaluate_response_judge",
                            return_value=dict(_APPROVE_JUDGE)), \
-         mock.patch.object(service_module, "detect_language", return_value="en"), \
+         mock.patch.object(pipeline_module, "detect_language", return_value="en"), \
          mock.patch.object(model._output_guard, "should_abstain", return_value=False), \
          mock.patch.object(model._cache, "get", return_value=None), \
          mock.patch.object(model._cache, "put"):
@@ -145,7 +145,7 @@ class TestChatEndpointFallback:
     ):
         model = deterministic_pipeline
         model._llm_available = True
-        with mock.patch.object(service_module.llm_module, "generate", return_value=""), \
+        with mock.patch.object(pipeline_module.generator_module, "generate", return_value=""), \
              mock.patch("app.sunbird.is_available", return_value=True), \
                  mock.patch("app.sunbird.chat_completion", return_value=CLOUD_REPLY) as gg:
             resp = client.post("/v1/chat", json={"message": "How is VAT charged on local supplies?"})
@@ -162,9 +162,9 @@ class TestChatEndpointFallback:
         model = deterministic_pipeline
         model._llm_available = False
         try:
-            with mock.patch.object(service_module.llm_module, "is_available",
+            with mock.patch.object(pipeline_module.generator_module, "is_available",
                                    return_value=False), \
-                 mock.patch.object(service_module.llm_module, "generate", return_value=""), \
+                 mock.patch.object(pipeline_module.generator_module, "generate", return_value=""), \
                  mock.patch("app.sunbird.is_available", return_value=True), \
                  mock.patch("app.sunbird.chat_completion", return_value=CLOUD_REPLY) as gg:
                 resp = client.post(
@@ -183,7 +183,7 @@ class TestChatEndpointFallback:
         """Without the flag/creds the old behaviour stands: extractive answer."""
         model = deterministic_pipeline
         model._llm_available = True
-        with mock.patch.object(service_module.llm_module, "generate", return_value=""), \
+        with mock.patch.object(pipeline_module.generator_module, "generate", return_value=""), \
              mock.patch.object(gateway, "gemini_generate") as gg:
             resp = client.post("/v1/chat", json={"message": "How is VAT charged on local supplies?"})
 
@@ -200,8 +200,8 @@ class TestChatStreamEndpointFallback:
     ):
         model = deterministic_pipeline
         model._llm_available = True
-        with mock.patch.object(service_module.llm_module, "is_available", return_value=True), \
-             mock.patch.object(service_module.llm_module, "generate_stream",
+        with mock.patch.object(pipeline_module.generator_module, "is_available", return_value=True), \
+             mock.patch.object(pipeline_module.generator_module, "generate_stream",
                                return_value=iter([])), \
              mock.patch("app.sunbird.is_available", return_value=True), \
                  mock.patch("app.sunbird.chat_completion", return_value=CLOUD_REPLY) as gg:

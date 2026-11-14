@@ -26,7 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import service  # noqa: E402
+from app.rag import pipeline  # noqa: E402
 
 # Off-domain, but sharing vocabulary with a tax corpus: pay, apply, business,
 # cost, Uganda, government. Plain nonsense is not the interesting case — a
@@ -73,7 +73,7 @@ class TestOffDomainQuestionsAreRefused(unittest.TestCase):
         for question in OFF_DOMAIN:
             with self.subTest(question=question):
                 self.assertEqual(
-                    service._simple_search(question, FAQ_INDEX, top_k=4),
+                    pipeline._simple_search(question, FAQ_INDEX, top_k=4),
                     [],
                     "an off-domain question reached an FAQ answer",
                 )
@@ -82,12 +82,12 @@ class TestOffDomainQuestionsAreRefused(unittest.TestCase):
         """Guards the claim above: these are refused BY the floor, so a lower
         one would let them through. If this ever stops being true the gate has
         been replaced by something else and the reasoning needs revisiting."""
-        original = service._FAQ_MATCH_MIN
+        original = pipeline._FAQ_MATCH_MIN
         try:
-            service._FAQ_MATCH_MIN = 0.40
-            leaked = [q for q in OFF_DOMAIN if service._simple_search(q, FAQ_INDEX, top_k=4)]
+            pipeline._FAQ_MATCH_MIN = 0.40
+            leaked = [q for q in OFF_DOMAIN if pipeline._simple_search(q, FAQ_INDEX, top_k=4)]
         finally:
-            service._FAQ_MATCH_MIN = original
+            pipeline._FAQ_MATCH_MIN = original
         self.assertTrue(
             leaked,
             "lowering the floor no longer leaks off-domain answers — re-run the "
@@ -96,7 +96,7 @@ class TestOffDomainQuestionsAreRefused(unittest.TestCase):
 
     def test_an_in_domain_question_still_gets_through(self):
         """The gate must not be so tight that nothing survives it."""
-        hits = service._simple_search(
+        hits = pipeline._simple_search(
             "Can a business register for VAT voluntarily?", FAQ_INDEX, top_k=4
         )
         self.assertTrue(hits)
@@ -117,14 +117,14 @@ class TestOffDomainQuestionsAreRefused(unittest.TestCase):
             "doc_type": "faq_jsonl",
             "score_rrf": 0.5,
         }
-        score = service._faq_match_score(query, hit)
+        score = pipeline._faq_match_score(query, hit)
         self.assertGreaterEqual(score, 0.9, f"Expected high score, got {score}")
         self.assertEqual(hit.get("question"), "What services does URA provide?")
 
-        filtered = service._filter_unbound_faq_hits(query, [hit])
+        filtered = pipeline._filter_unbound_faq_hits(query, [hit])
         self.assertEqual(len(filtered), 1)
 
-        promoted = service._promote_equivalent_faq_hits(query, filtered)
+        promoted = pipeline._promote_equivalent_faq_hits(query, filtered)
         self.assertEqual(promoted[0]["source"], "ura_about_ura_faqs.csv")
 
     def test_natural_user_paraphrases_match_indexed_faqs(self):
@@ -171,7 +171,7 @@ class TestOffDomainQuestionsAreRefused(unittest.TestCase):
         ]
         for query, expected_sub in probes:
             with self.subTest(query=query):
-                hits = service._simple_search(query, corpus, top_k=2)
+                hits = pipeline._simple_search(query, corpus, top_k=2)
                 self.assertTrue(hits, f"Natural paraphrase '{query}' yielded 0 hits")
                 self.assertIn(expected_sub.lower(), hits[0]["question"].lower())
 

@@ -4,7 +4,7 @@ Single source of truth for which models each task should try (Best -> Fallbacks)
 and the place that records what actually served a request. Model IDs are
 env-overridable so the strategy can be tuned (e.g. swap to a different
 Cloudflare model) without code changes. The call wiring lives in service.py /
-speech_service.py / retriever.py; those modules import the IDs below and call
+speech_service.py / rag/retriever.py; those modules import the IDs below and call
 ``log_model_use()`` / ``log_fallback()`` at each routing decision, which surface
 on the existing Prometheus ``/metrics`` (``analytics.MetricsStore``).
 
@@ -416,7 +416,7 @@ def select_tier(
     if lang in ADAPTER_BOUND_LOCALES:
         if allow_translated_locales is None:
             try:
-                from ..flags import flags
+                from ..config.flags import flags
 
                 allow_translated_locales = flags.is_enabled("reasoner_for_translated_locales")
             except Exception:

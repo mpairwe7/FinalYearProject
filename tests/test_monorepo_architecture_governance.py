@@ -30,8 +30,8 @@ APP_DIR = REPO_ROOT / "App" / "backend" / "app"
 KNOWN_ML_IMPORTERS = {
     "query.py",
     "speech_service.py",
-    "pdf_corpus.py",
-    "crawl_corpus.py",
+    "ingestion/pdf_corpus.py",
+    "ingestion/crawl_corpus.py",
 }
 
 
@@ -222,9 +222,9 @@ def test_madr_40_adr_catalog_and_living_docs_skill_integrity() -> None:
 
 
 def test_storage_backend_api_parity_and_flag_lifecycle_taxonomy() -> None:
-    """database.py and postgres.py must expose 100% identical public functions, and all 85 flags must classify cleanly."""
-    from app import database, postgres
-    from app.flags import _REGISTRY, flags
+    """database.py and db/postgres.py must expose 100% identical public functions, and all 85 flags must classify cleanly."""
+    from app.db import database, postgres
+    from app.config.flags import _REGISTRY, flags
     from app.storage_protocol import StorageBackendProtocol, verify_storage_backend_parity
 
     parity = verify_storage_backend_parity(APP_DIR)

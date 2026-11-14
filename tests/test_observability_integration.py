@@ -35,8 +35,8 @@ os.environ.setdefault("SPEECH_ENABLED", "false")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import database  # noqa: E402
-from app import service as service_module  # noqa: E402
+from app.db import database  # noqa: E402
+from app.rag import pipeline as pipeline_module  # noqa: E402
 from app import tracing  # noqa: E402
 from app.analytics import metrics  # noqa: E402
 from app.audit.turns import TURN_PAYLOAD_SCHEMA  # noqa: E402
@@ -110,7 +110,7 @@ def _audit_rows(conversation_id: str) -> list[dict]:
 @pytest.fixture(scope="module")
 def client():
     database.init_db()
-    app.state.model = service_module.ChatModel()
+    app.state.model = pipeline_module.ChatModel()
     app.state.speech = types.SimpleNamespace(enabled=False)
     return TestClient(app)
 
@@ -120,22 +120,22 @@ def pipeline(client, monkeypatch):
     model = app.state.model
     model._llm_available = True
     # The env var, not flags.set(): tests/agents/test_integration.py reloads
-    # app.flags, so a set() here would land on a stale singleton.
+    # app.config.flags, so a set() here would land on a stale singleton.
     monkeypatch.setenv("FLAG_AUDIT_LEDGER", "true")
-    with mock.patch.object(service_module, "_simple_search", return_value=[dict(_FAQ_ROW)]), \
-         mock.patch.object(service_module, "needs_clarification", return_value=""), \
-         mock.patch.object(service_module, "verify_claims", return_value={"decision": "approve", "score": 1.0}), \
-         mock.patch.object(service_module, "_apply_output_guards", _passthrough_guard), \
-         mock.patch.object(service_module.ChatModel, "_deterministic_procedure_reply", return_value=("", False)), \
-         mock.patch.object(service_module.ChatModel, "_priority_faq_hits", return_value=[]), \
-         mock.patch.object(service_module.ChatModel, "_evaluate_response_judge", return_value=dict(_APPROVE)), \
-         mock.patch.object(service_module, "detect_language", return_value="en"), \
+    with mock.patch.object(pipeline_module, "_simple_search", return_value=[dict(_FAQ_ROW)]), \
+         mock.patch.object(pipeline_module, "needs_clarification", return_value=""), \
+         mock.patch.object(pipeline_module, "verify_claims", return_value={"decision": "approve", "score": 1.0}), \
+         mock.patch.object(pipeline_module, "_apply_output_guards", _passthrough_guard), \
+         mock.patch.object(pipeline_module.ChatModel, "_deterministic_procedure_reply", return_value=("", False)), \
+         mock.patch.object(pipeline_module.ChatModel, "_priority_faq_hits", return_value=[]), \
+         mock.patch.object(pipeline_module.ChatModel, "_evaluate_response_judge", return_value=dict(_APPROVE)), \
+         mock.patch.object(pipeline_module, "detect_language", return_value="en"), \
          mock.patch.object(model._output_guard, "should_abstain", return_value=False), \
          mock.patch.object(model._cache, "get", return_value=None), \
          mock.patch.object(model._cache, "put"), \
-         mock.patch.object(service_module.llm_module, "is_available", return_value=True), \
-         mock.patch.object(service_module.llm_module, "generate", return_value=REPLY), \
-         mock.patch.object(service_module.llm_module, "generate_stream", side_effect=_streamed_generation):
+         mock.patch.object(pipeline_module.generator_module, "is_available", return_value=True), \
+         mock.patch.object(pipeline_module.generator_module, "generate", return_value=REPLY), \
+         mock.patch.object(pipeline_module.generator_module, "generate_stream", side_effect=_streamed_generation):
         yield model
 
 

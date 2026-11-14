@@ -13,8 +13,8 @@ import uuid
 from pathlib import Path
 
 import pytest
-from app import database
-from app.service import _ACTIVE_CONVERSATION_STATE, _ACTIVE_TENANT_ID, ChatModel
+from app.db import database
+from app.rag.pipeline import _ACTIVE_CONVERSATION_STATE, _ACTIVE_TENANT_ID, ChatModel
 from app.workflows.journey_copilot import (
     RESUME_CODE_PREFIXES,
     generate_resume_code,

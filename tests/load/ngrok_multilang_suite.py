@@ -16,7 +16,7 @@ questions that matter for this deployment are not answered by latency alone:
     under load, not just on a quiet box?
 
 Reply-language verification is deliberately NOT done with the app's own
-app.query.detect_language: lingua classifies this deployment's own Luganda
+app.rag.query.detect_language: lingua classifies this deployment's own Luganda
 replies as `nyn`, so scoring the app's output with the app's own detector
 would report a false failure. `classify_reply()` below is an independent
 marker-density discriminator, and every phase keeps verbatim reply samples

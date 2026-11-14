@@ -35,11 +35,11 @@ sources, plus one BM25 sentinel → 509 points):
 docker run -d --name ura-qdrant -p 127.0.0.1:6333:6333 qdrant/qdrant:v1.17.1
 
 PYTHONPATH=App/backend QDRANT_URL=http://127.0.0.1:6333 \
-  python -m app.indexer --export-faq-jsonl
+  python -m app.ingestion.indexer --export-faq-jsonl
 
 PYTHONPATH=App/backend QDRANT_URL=http://127.0.0.1:6333 \
   SPARSE_ONLY_INDEX=true QDRANT_COLLECTION=ura_knowledge_base \
-  python -m app.indexer --faq-jsonl-only --recreate
+  python -m app.ingestion.indexer --faq-jsonl-only --recreate
 
 curl -s http://127.0.0.1:6333/collections/ura_knowledge_base
 # points_count=509, indexed_vectors_count=508, status=green

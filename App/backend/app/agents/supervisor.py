@@ -39,7 +39,7 @@ from ..calculator_router import (
     detect_calculator_intent,
     has_money_amount,
 )
-from ..flags import flags
+from ..config.flags import flags
 from ..text_signals import CLARIFICATION_PROMPT
 from .patterns import any_match, for_locale, supported_locales
 from .state import AgentRoute, RouteDecision

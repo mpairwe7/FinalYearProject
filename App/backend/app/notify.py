@@ -301,7 +301,7 @@ def _send_webhook_live(target_url: str, payload: dict[str, Any]) -> dict[str, An
 
 def _send_in_app_live(user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Persist notification to taxpayer's reminder inbox and emit live socket event."""
-    from . import database as db
+    from .db import database as db
 
     deadline = payload.get("deadline_name") or payload.get("title") or "Tax Reminder"
     due_date = payload.get("due_date") or ""
@@ -325,7 +325,7 @@ def _send_in_app_live(user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 def send_notification_item(item: dict[str, Any]) -> dict[str, Any]:
     """Execute live transport for one outbox item and record delivery status."""
-    from . import database as db
+    from .db import database as db
 
     nid = str(item.get("id") or "")
     ch = str(item.get("channel") or "").lower().strip()
@@ -379,7 +379,7 @@ def send_notification_item(item: dict[str, Any]) -> dict[str, Any]:
 
 def drain_outbox(limit: int = 50) -> dict[str, Any]:
     """Fetch queued outbox messages and process them through live transports."""
-    from . import database as db
+    from .db import database as db
 
     queued = db.list_notification_outbox(status="queued", limit=limit)
     processed = 0
@@ -404,7 +404,7 @@ def drain_outbox(limit: int = 50) -> dict[str, Any]:
 
 def retry_notification(notification_id: str) -> dict[str, Any]:
     """Retry sending a specific notification by ID."""
-    from . import database as db
+    from .db import database as db
 
     item = db.get_notification_by_id(notification_id)
     if not item:
@@ -420,7 +420,7 @@ def send_test_notification(
     user_id: str = "staff-test",
 ) -> dict[str, Any]:
     """Enqueue and immediately dispatch an end-to-end test notification."""
-    from . import database as db
+    from .db import database as db
 
     ch = (channel or "").lower().strip()
     if ch not in SUPPORTED:
@@ -462,7 +462,7 @@ def dispatch(
     channels: tuple[str, ...] = ("in_app",),
 ) -> list[dict[str, Any]]:
     """Enqueue deadline reminder notifications, auto-delivering when live mode is on."""
-    from . import database as db
+    from .db import database as db
 
     written: list[dict[str, Any]] = []
     live_mode = is_live()

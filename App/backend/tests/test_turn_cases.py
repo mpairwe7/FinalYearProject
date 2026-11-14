@@ -116,7 +116,7 @@ class LedgerUpsertTests(unittest.TestCase):
     def setUp(self) -> None:
         self.memory = _Memory()
         patcher = mock.patch.multiple(
-            "app.database",
+            "app.db.database",
             has_active_consent=self.memory.has_active_consent,
             get_working_memory=self.memory.get_working_memory,
             upsert_working_memory=self.memory.upsert_working_memory,

@@ -12,8 +12,8 @@ This release streamlines the LLM serving architecture across the repository by:
 1. **Decommissioning Obsolete vLLM Flows**: Removed legacy and duplicate vLLM services that did not serve `Sunbird/Sunflower-14B-FP8` (specifically `vllm-quantized` and `App/docker-compose.local-qwen.yml`), while strictly preserving `ura-app-vllm-master` (`Qwen2.5-72B-Instruct-AWQ` on `dev2` stack).
 2. **Enhancing Sunflower-14B-FP8 Context Window (32K → 131K via YaRN)**: Enhanced `App/Model/Sunflower-14B-FP8` model configuration and vLLM runtime settings to utilize modern YaRN (Yet another RoPE extensioN) RoPE scaling, extending the effective context length from native 32K/40K up to **131,072 tokens (131K / 128K)**.
 3. **Applying Latest vLLM Production Standards**: Configured chunked prefill (`--enable-chunked-prefill`), automatic prefix caching (`--enable-prefix-caching`), batched token headroom (`--max-num-batched-tokens 16384`), and Hermes tool-call parsing (`--tool-call-parser hermes`) in Docker compose manifests.
-4. **Backend Token Budget Alignment**: Updated `LLM_CONTEXT_WINDOW` in `App/backend/app/llm.py` and `.env.example` to default to `131072`, allowing `_fit_to_context` to dynamically allocate up to the full 131K window served by vLLM.
-5. **Verifying FAISS Offline Retrieval**: Confirmed the production offline RAG pipeline (`offline_rag.py`, `offline_bundle.py`, `scripts/export_offline_bundle.py`) remains intact for on-device and air-gapped deployments.
+4. **Backend Token Budget Alignment**: Updated `LLM_CONTEXT_WINDOW` in `App/backend/app/rag/generator.py` and `.env.example` to default to `131072`, allowing `_fit_to_context` to dynamically allocate up to the full 131K window served by vLLM.
+5. **Verifying FAISS Offline Retrieval**: Confirmed the production offline RAG pipeline (`rag/offline_rag.py`, `offline_bundle.py`, `scripts/export_offline_bundle.py`) remains intact for on-device and air-gapped deployments.
 6. **Docker Resource & Image Deduplication**: Removed stale duplicate image layers and tags (`app-api:pre-*`, `app-frontend:pre-*`, `ura-chatbot-*`), reclaiming >40 GB of host disk space.
 
 ---
@@ -58,7 +58,7 @@ This release streamlines the LLM serving architecture across the repository by:
   - `vllm` (`ura-vllm` / `ura-app-vllm-sunflower`) running `Sunbird/Sunflower-14B-FP8`.
 
 ### 2.4 FAISS Offline Retrieval Verification
-* Confirmed `App/backend/app/offline_rag.py` and `App/backend/app/offline_bundle.py` remain fully active:
+* Confirmed `App/backend/app/rag/offline_rag.py` and `App/backend/app/offline_bundle.py` remain fully active:
   - FAISS `IndexFlatIP` on-device vector search.
   - ONNX `bge-m3` embedder fallback.
   - Offline sync endpoints (`/v1/offline/status`, `/v1/offline/bundle`, `/v1/offline/sync`).
@@ -66,7 +66,7 @@ This release streamlines the LLM serving architecture across the repository by:
 ### 2.5 Inference Memory & Time Controls Verification
 * **Token Budget & Bounds (`max_new_tokens`)**:
   - `max_new_tokens=LLM_MAX_TOKENS` (512 tokens default) enforced across local and vLLM inference paths, preventing unbounded generation loops.
-  - Bounded prompt and output budgets calculated via `_fit_to_context` (`App/backend/app/llm.py`).
+  - Bounded prompt and output budgets calculated via `_fit_to_context` (`App/backend/app/rag/generator.py`).
 * **KV-Cache Retention (`use_cache=True`)**:
   - Enabled `"use_cache": true` in `App/Model/Sunflower-14B-FP8/config.json`.
   - Passed `use_cache=True` explicitly in `_model.generate(...)` calls across `_local_generate`, `_local_translate`, `_local_generate_with_tools`, and `classify_choice`.

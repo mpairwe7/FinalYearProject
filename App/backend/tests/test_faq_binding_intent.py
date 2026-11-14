@@ -7,7 +7,7 @@ three pre-existing defects in what they decide, pinned here.
 from __future__ import annotations
 
 import pytest
-from app import faq_binding as fb
+from app.rag import faq_binding as fb
 
 
 def test_every_alias_names_a_final_term() -> None:

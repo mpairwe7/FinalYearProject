@@ -385,7 +385,7 @@ async def bridge(room: CallRoom, officer_leg: Any, officer_id: str, speech_model
     presence.set_on_call(officer_id, room.call_id, display_name=name, tenant_id=room.state.tenant_id)
     if room.state.ticket_id:
         try:
-            from .. import database as db
+            from ..db import database as db
 
             db.update_ticket(room.state.ticket_id, status="assigned", assignee=officer_id)
         except Exception:
@@ -907,7 +907,7 @@ async def wrapup(
 
     ticket_id = call.get("ticket_id")
     if ticket_action:
-        from ..flags import flags
+        from ..config.flags import flags
 
         if not flags.is_enabled("ticket_queue"):
             raise DeskError(409, "Ticket queue is unavailable")
@@ -945,7 +945,7 @@ async def wrapup(
 
     ticket_changed = False
     if ticket_action:
-        from .. import database as db
+        from ..db import database as db
 
         try:
             if ticket_action == "resolve" and ticket_id:
@@ -1053,7 +1053,7 @@ def _update_ticket(ticket_id: str, **fields: Any) -> None:
     it does not raise. Read as success, that let a call be recorded
     ``resolved`` while its ticket stayed open.
     """
-    from .. import database as db
+    from ..db import database as db
 
     if db.update_ticket(ticket_id, **fields):
         return
@@ -1074,7 +1074,7 @@ def _link_new_ticket(call_id: str, ticket_id: str, *, log_id: str) -> None:
         logger.warning("Ticket %s could not be linked to call %s; withdrawing it", ticket_id, log_id, exc_info=True)
         withdrawn = False
         try:
-            from .. import database as db
+            from ..db import database as db
 
             # The system's own write: it is never an officer's first response.
             withdrawn = db.update_ticket(

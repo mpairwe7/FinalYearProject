@@ -24,7 +24,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..flags import flags
+from ..config.flags import flags
 
 logger = logging.getLogger(__name__)
 
@@ -360,7 +360,7 @@ def call_drop_snapshot(room: object) -> dict[str, object] | None:
 def save_call_drop_snapshot(snapshot: dict[str, object]) -> bool:
     """Write a :func:`call_drop_snapshot`. Blocking: it reads nothing from the live room."""
     try:
-        from .. import database as db
+        from ..db import database as db
 
         return bool(
             db.upsert_working_memory(
@@ -384,7 +384,7 @@ def restore_call_drop_state(
     if not call_id:
         return None
     try:
-        from .. import database as db
+        from ..db import database as db
 
         working = db.get_working_memory(f"call_drop:{call_id}", tenant_id=tenant_id or "default")
         if not isinstance(working, dict):

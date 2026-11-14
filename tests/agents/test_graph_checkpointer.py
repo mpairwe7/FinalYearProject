@@ -4,7 +4,7 @@ import unittest
 from app.agents.graphs.main_graph import build_main_graph
 from app.agents.graphs.runtime import DurableCheckpointStore, InMemoryCheckpointStore
 from app.agents.graphs.state import AgentGraphState, GraphOutcome
-from app.database import (
+from app.db.database import (
     get_agent_checkpoint,
     init_db,
     list_agent_checkpoints,

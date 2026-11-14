@@ -56,10 +56,10 @@ os.environ.setdefault("SPEECH_ENABLED", "false")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from App.backend.app import database as db  # noqa: E402
+from App.backend.app.db import database as db  # noqa: E402
 from App.backend.app.auth.dependencies import reset_verifier  # noqa: E402
 from App.backend.app.auth.jwt_auth import make_dev_token  # noqa: E402
-from App.backend.app.flags import flags  # noqa: E402
+from App.backend.app.config.flags import flags  # noqa: E402
 from App.backend.app.main import app  # noqa: E402
 from App.backend.app.speech_service import (  # noqa: E402
     SynthesizeResult,
@@ -578,7 +578,7 @@ def test_chat_title_names_conversation():
         sent.append(messages)
         return '"Title: TIN verification for tax clearance."'
 
-    with mock.patch("App.backend.app.llm.summarize_title", side_effect=fake_summarize):
+    with mock.patch("App.backend.app.rag.generator.summarize_title", side_effect=fake_summarize):
         r = _client().post(
             "/v1/chat/title",
             json={
@@ -595,7 +595,7 @@ def test_chat_title_names_conversation():
 
 
 def test_chat_title_is_null_when_no_usable_title_comes_back():
-    with mock.patch("App.backend.app.llm.summarize_title", return_value=""):
+    with mock.patch("App.backend.app.rag.generator.summarize_title", return_value=""):
         r = _client().post("/v1/chat/title", json={"messages": [{"role": "user", "content": "What is VAT?"}]})
     assert r.status_code == 200
     assert r.json() == {"title": None, "source": "unavailable"}

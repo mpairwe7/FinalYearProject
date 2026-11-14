@@ -28,7 +28,7 @@ os.environ.setdefault("QDRANT_ENABLED", "false")
 os.environ.setdefault("ANALYTICS_BACKEND", "sqlite")
 os.environ.setdefault("OTEL_ENABLED", "false")
 
-from app import database as db  # noqa: E402
+from app.db import database as db  # noqa: E402
 from app import documents  # noqa: E402
 from app.main import app  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -532,7 +532,7 @@ class ServiceInjectionTest(_RegistryIsolation):
     """Attachment passages must reach the retrieval result un-abstained."""
 
     def test_retrieval_only_grounds_on_attachment(self):
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         model = ChatModel()
         model._cache = mock.MagicMock(name="cache")
@@ -554,7 +554,7 @@ class ServiceInjectionTest(_RegistryIsolation):
         model._cache.put.assert_not_called()
 
     def test_attachment_fallback_reply_structure_and_no_scaffolding(self):
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         compendium_text = (
             "DOMESTIC TAX LAWS OF UGANDA 1 | P a g e\n"
@@ -574,7 +574,7 @@ class ServiceInjectionTest(_RegistryIsolation):
         self.assertNotIn("[User-attached document:", reply)
 
     def test_contexts_json_redacts_attachment_text(self):
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         record = _analyze_receipt()
         hits = documents.attachment_passages([record])

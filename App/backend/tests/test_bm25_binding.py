@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.retriever import (
+from app.rag.retriever import (
     DENSE_DIM,
     DENSE_MODEL_NAME,
     BM25SparseEncoder,

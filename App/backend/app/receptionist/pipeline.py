@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ..flags import flags
+from ..config.flags import flags
 from . import livekit
 from .brain import UraReceptionistBrain
 from .config import get_idle_reprompt_s, get_max_call_s

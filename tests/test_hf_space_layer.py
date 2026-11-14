@@ -129,7 +129,7 @@ class _Answer:
 @pytest.fixture
 def gemini_audio(built_speech, monkeypatch):
     """Everything open, so each test closes the one gate it is about."""
-    from app.flags import flags
+    from app.config.flags import flags
     from app.providers import breakers, budget, gateway
     from app.providers import config as cfg
 
@@ -173,7 +173,7 @@ class TestRecordingsReachGeminiOnlyThroughItsPolicy:
         assert gemini_audio == []
 
     def test_the_cloud_tier_flag_stops_it(self, built_speech, gemini_audio, monkeypatch) -> None:
-        from app.flags import flags
+        from app.config.flags import flags
 
         monkeypatch.setattr(flags, "is_enabled", lambda _name, **_kw: False)
         assert _transcribe(built_speech, "en") is None

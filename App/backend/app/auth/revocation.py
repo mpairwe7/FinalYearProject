@@ -129,7 +129,7 @@ def revoke(user_id: str, *, reason: str, actor: str) -> float:
     process changes nothing either: a revocation only one process knew of
     would be undone by the next restart and missed by every other process.
     """
-    from .. import database as db
+    from ..db import database as db
 
     cutoff = time.time()
     db.revoke_sessions(user_id, revoked_before=cutoff, reason=reason, actor=actor)
@@ -146,7 +146,7 @@ def sync(*, strict: bool = False) -> None:
     With *strict* (the read at startup, before the process serves) it then
     raises as well, so the caller decides whether to start without them.
     """
-    from .. import database as db
+    from ..db import database as db
     from ..analytics import metrics
 
     try:

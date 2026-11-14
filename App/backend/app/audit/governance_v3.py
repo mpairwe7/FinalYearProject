@@ -28,7 +28,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from ..flags import flags
+from ..config.flags import flags
 from .turns import provenance
 
 logger = logging.getLogger(__name__)

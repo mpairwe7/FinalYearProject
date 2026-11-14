@@ -7,7 +7,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from app import database as db
+from app.db import database as db
 from app.receptionist import risk
 from app.receptionist.hub import hub
 from app.receptionist.store import create_call, create_turn, init_receptionist_schema

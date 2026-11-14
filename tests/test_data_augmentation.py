@@ -213,7 +213,7 @@ def _write_csv_faqs(tmpdir: Path) -> Path:
 #
 # These cover the markdown-parsing internals only, so no real PDF and no
 # pymupdf4llm are needed. The chunker feeds both the training corpus and — since
-# ``app.pdf_corpus`` — the retrieval index, so its structure guarantees are now
+# ``app.ingestion.pdf_corpus`` — the retrieval index, so its structure guarantees are now
 # load-bearing in two places.
 
 

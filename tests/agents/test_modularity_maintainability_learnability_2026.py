@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from app.calculator_router import plan_rate_lookup
-from app.flags import _REGISTRY, flags
+from app.config.flags import _REGISTRY, flags
 from app.memory.procedural import ProceduralMemory
 from app.premise_guard import check_false_premise
 from app.scenario_planner import should_defer_to_scenario_planner
@@ -25,8 +25,8 @@ from evals.export_preferences import build_bilevel_preference_bundle
 
 
 def test_phase1_maintainability_storage_parity_and_flag_lifecycle() -> None:
-    """Verify 103/103 public function parity between database.py and postgres.py and 4-tier flag taxonomy."""
-    from app import database, postgres
+    """Verify 103/103 public function parity between database.py and db/postgres.py and 4-tier flag taxonomy."""
+    from app.db import database, postgres
 
     parity = verify_storage_backend_parity()
     assert parity["ok"] is True

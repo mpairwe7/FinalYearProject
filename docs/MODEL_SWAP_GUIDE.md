@@ -10,16 +10,16 @@ without restrictions.
 
 ```bash
 # Current defaults (set in .env or docker-compose.yml — updated 2026-10-15)
-LLM_MODEL=Sunbird/Sunflower-Qwen3.5-9B  # llm.py — Sunflower v2 (67 African languages, Apache-2.0)
+LLM_MODEL=Sunbird/Sunflower-Qwen3.5-9B  # rag/generator.py — Sunflower v2 (67 African languages, Apache-2.0)
                                          # Served via vLLM with --quantization fp8 --kv-cache-dtype fp8
                                          # --dtype auto --max-model-len 262144 (native 256K/262K context without YaRN).
                                          # Also supports Sunbird/Sunflower-Qwen3.8-27B.
 LLM_MAX_CONCURRENCY=12                   # service.py — 8-16 bounded LLM thread-pool size for vLLM continuous batching
 WHISPER_SALT_MODEL=Sunbird/SunflowerASR-51-african-languages  # 51 African languages (SFT + GRPO)
 ORPHEUS_MODEL=Sunbird/orpheus-3b-tts-multilingual             # Primary streaming TTS (lg, sw, en; uses apply_tts_engine_phonetics for Tin/Nin/Vat/Payee/Efris/Runyankole/Acholi, G439/G440)
-DENSE_MODEL=BAAI/bge-m3            # retriever.py / indexer.py — dense embeddings
+DENSE_MODEL=BAAI/bge-m3            # rag/retriever.py / ingestion/indexer.py — dense embeddings
 DENSE_DIM=1024                     # must match DENSE_MODEL output dimension
-RERANKER_MODEL=mixedbread-ai/mxbai-rerank-base-v2  # retriever.py — cross-encoder reranking
+RERANKER_MODEL=mixedbread-ai/mxbai-rerank-base-v2  # rag/retriever.py — cross-encoder reranking
 ```
 
 **LLM_BACKEND matters as much as LLM_MODEL for this checkpoint.** Measured
@@ -55,7 +55,7 @@ against the local in-process Transformers+BitsAndBytes path. See §1.
 | **Sunbird/Sunflower-Qwen3.5-9B** (default T1) | 9B (FP8 on-the-fly) | n/a (67 African languages) | Apache-2.0 | ~9.5 GB weights (vLLM `--quantization fp8 --kv-cache-dtype fp8`) | 65K–262K (native `max_position_embeddings: 262144` without YaRN) | Sunflower V2 built on Qwen3.5-9B; continued pretraining + SFT + GRPO across **67 African languages** + English (`enable_thinking=False` recommended). Served via `vllm serve Sunbird/Sunflower-Qwen3.5-9B --quantization fp8 --kv-cache-dtype fp8 --dtype auto --max-model-len 262144 --gpu-memory-utilization 0.90 --max-num-seqs 12`. Replaced `Sunbird/Sunflower-14B-FP8` in the local HF cache on 2026-10-15. |
 | **Qwen/Qwen3.8-27B-FP8** (default T2/T3 reasoner) | 27.8B dense (pre-quantized FP8) | — | Apache-2.0 | ~29 GB weights + ~13 GB FP8 KV cache (~42.3 GB total on GPU 7) | 65,536 (`REASONER_MAX_MODEL_LEN=65536`) | Selected in Phase B bake-off (`docs/Reports/reasoner-bakeoff-2026-10.md`: `73.23/100` vs `61.25/100` on Sunflower-9B, `100%` `15/15` tool-calling accuracy). Served via `App/docker-compose.reasoner.yml` on GPU 7 (`127.0.0.1:8012:8001`) with `--tool-call-parser qwen3_coder --reasoning-parser qwen3` and `REASONER_THINKING=false`. |
 | **Sunbird/Sunflower-Qwen3.8-27B** (high-capacity BF16 option) | 27B (50.97 GiB BF16 checkpoint) | n/a (67 African languages) | Apache-2.0 | ~44.8 GB (requires non-Marlin FP8 or TP=2) | 65K–262K | Scored `71.60/100` in Phase B bake-off; note that stock vLLM `v0.17.1` `--quantization fp8` on Ampere (RTX A6000) hits `RuntimeError: size_n = 96 is not divisible by tile_n_size = 64` in `gptq_marlin_repack` on `linear_attn.in_proj_ba` unless pre-quantized or served across 2 GPUs in BF16 (see `G223`). |
-| Qwen/Qwen3-8B (previous default; simple/no-vLLM fallback) | 8B | 74.7 | Apache-2.0 | 16 GB | 128K | `llm.py`'s own code-level default when `LLM_MODEL` is unset entirely; ungated; hybrid thinking mode. The one path the lg/sw/nyn/ach LoRA adapters (`fine-tuning/adapters/`) apply to — they are trained against this base and loaded via `set_adapter()`, only on `LLM_BACKEND=local`. |
+| Qwen/Qwen3-8B (previous default; simple/no-vLLM fallback) | 8B | 74.7 | Apache-2.0 | 16 GB | 128K | `rag/generator.py`'s own code-level default when `LLM_MODEL` is unset entirely; ungated; hybrid thinking mode. The one path the lg/sw/nyn/ach LoRA adapters (`fine-tuning/adapters/`) apply to — they are trained against this base and loaded via `set_adapter()`, only on `LLM_BACKEND=local`. |
 | Qwen/Qwen3-30B-A3B | 30B (3B active) | 81.4 | Apache-2.0 | 18 GB | 128K | MoE — 30B quality at 3B cost; needs vLLM/SGLang |
 | Qwen/Qwen3-4B | 4B | ~68 | Apache-2.0 | 8 GB | 128K | Matches Qwen2.5-7B; fits small GPUs |
 | microsoft/Phi-4-mini-instruct | 3.8B | 68 | MIT | 8 GB | 128K | Strong math/logic; MIT license |
@@ -147,27 +147,27 @@ DENSE_MODEL=sentence-transformers/all-MiniLM-L6-v2 DENSE_DIM=384
 
 ```bash
 # Option A: Full re-index (recommended)
-python -m App.backend.app.indexer --recreate
+python -m App.backend.app.ingestion.indexer --recreate
 
 # Option B: Incremental (keeps old vectors, adds new — NOT recommended for dim change)
-python -m App.backend.app.indexer
+python -m App.backend.app.ingestion.indexer
 ```
 
 ### CPU deployments: the local dense leg (ADR-0034)
 
 The HF Space does not use `DENSE_MODEL`: its Qdrant collection is sparse-only, and its dense
 signal comes from `intfloat/multilingual-e5-small` in pgvector (`LOCAL_DENSE_BACKEND=pgvector`).
-The model is pinned in `App/backend/app/dense_cpu.py` by revision and by the SHA-256 of
+The model is pinned in `App/backend/app/embeddings/embedder.py` by revision and by the SHA-256 of
 `onnx/model.onnx` and `tokenizer.json`.
 
 To swap it:
 
-1. Change `MODEL_REPO`, `MODEL_REVISION`, `MODEL_FILES` and `DIM` in `dense_cpu.py`, and the
-   `vector(384)` literal in `pgvector_dense.py`. `test_the_sql_spells_out_the_names_it_is_built_from`
+1. Change `MODEL_REPO`, `MODEL_REVISION`, `MODEL_FILES` and `DIM` in `embeddings/embedder.py`, and the
+   `vector(384)` literal in `vectorstore/vector_db.py`. `test_the_sql_spells_out_the_names_it_is_built_from`
    fails until they agree.
 2. Keep the query and passage prefixes and the pooling right for the new model; e5 uses
    `query: ` / `passage: ` and mean pooling.
-3. Merge. The change to `dense_cpu.py` misses the CI cache, so the build re-embeds the corpus
+3. Merge. The change to `embeddings/embedder.py` misses the CI cache, so the build re-embeds the corpus
    (about 15–20 minutes), and the Space loads the new vectors.
 
 pgvector's HNSW index accepts at most 2,000 dimensions for the `vector` type (4,000 for
@@ -324,13 +324,13 @@ verifies the collection has vectors with the correct dimension.
 
 ```bash
 # Full re-index (drops old collection, rebuilds from Data/)
-python -m App.backend.app.indexer --recreate
+python -m App.backend.app.ingestion.indexer --recreate
 
 # CSVs only (useful when only FAQ data changed)
-python -m App.backend.app.indexer --recreate --csvs-only
+python -m App.backend.app.ingestion.indexer --recreate --csvs-only
 
 # PDFs only
-python -m App.backend.app.indexer --recreate --pdfs-only
+python -m App.backend.app.ingestion.indexer --recreate --pdfs-only
 
 # Verify
 curl http://localhost:6333/collections/ura_knowledge_base | python -m json.tool

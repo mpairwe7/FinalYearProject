@@ -432,7 +432,7 @@ class ToolRegistry:
         # A call that failed is evidence too: the return paths above used to skip
         # this, so the actions an auditor most wants to see left no record.
         try:
-            from ..flags import flags
+            from ..config.flags import flags
 
             if flags.is_enabled("action_level_audit_v3", subject=resolved_user_id or None) or flags.is_enabled(
                 "verifiable_decision_receipts", subject=resolved_user_id or None
@@ -475,7 +475,7 @@ class ToolRegistry:
         if tool.schema.risk not in ("high", "critical") or name in HUMAN_OVERSIGHT_ACTIONS:
             return None
         subject = str(audit_context.get("user_id") or "") or None
-        from ..flags import flags
+        from ..config.flags import flags
 
         if not (
             flags.is_enabled("action_level_audit_v3", subject=subject)
@@ -524,7 +524,7 @@ class ToolRegistry:
         subject = str(audit_context["user_id"]) or None
         schema = tool.schema
         try:
-            from ..flags import flags
+            from ..config.flags import flags
 
             if not flags.is_enabled("risk_tiered_autonomy_gates", subject=subject):
                 return "", None
@@ -572,7 +572,7 @@ class ToolRegistry:
                 context["ticket_id"] = referred
         try:
             from ..audit import governance_v3
-            from ..flags import flags
+            from ..config.flags import flags
 
             record, receipt = governance_v3.append_action_audit_v3(
                 **context,

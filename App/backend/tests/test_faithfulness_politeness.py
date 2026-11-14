@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.retriever import HybridRetriever
+from app.rag.retriever import HybridRetriever
 
 CONTEXTS = [
     "To register for an instant TIN, go to ura.go.ug and click Get a TIN. "

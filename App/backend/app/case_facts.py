@@ -28,7 +28,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
 
 from .calculator_router import _MULTIPLIERS, _redis_store, extract_amounts
-from .context_manager import extract_conversation_entities
+from .rag.context_manager import extract_conversation_entities
 from .guardrails import redact_pii_text
 from .number_words import (
     _ACH_TENS,
@@ -882,7 +882,7 @@ def _scoped_case_key(
     if not conversation_id:
         return ""
     try:
-        from .database import conversation_state_key
+        from .db.database import conversation_state_key
 
         scoped = conversation_state_key(
             conversation_id,

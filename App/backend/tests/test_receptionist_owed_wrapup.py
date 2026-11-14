@@ -19,7 +19,7 @@ import unittest
 import uuid
 from unittest.mock import AsyncMock, patch
 
-from app import database as db
+from app.db import database as db
 from app.receptionist import desk, presence, ws
 from app.receptionist.hub import hub
 from app.receptionist.state import CallRoom, CallState, registry

@@ -32,7 +32,7 @@ def readiness_capabilities() -> dict[str, str]:
     except Exception:
         out["graph_store"] = "unavailable"
     try:
-        from ..flags import flags
+        from ..config.flags import flags
 
         out["semantic_layer"] = "on" if flags.is_enabled("semantic_layer") else "off"
     except Exception:

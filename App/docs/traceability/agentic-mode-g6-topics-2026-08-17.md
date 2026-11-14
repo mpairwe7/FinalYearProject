@@ -31,10 +31,10 @@ routing gate, and for shipping conversation topic persistence (G6).
 | Area | Files |
 |------|-------|
 | Classifier | `App/backend/app/topics.py` |
-| Store | `database.py` / `postgres.py` (`conversation_topics`) |
+| Store | `database.py` / `db/postgres.py` (`conversation_topics`) |
 | Bind | `service.py` `_bind_conversation_topic` (REST + stream) |
 | API | `models.py` `ChatResponse.current_topic` |
-| Flag | `flags.py` `agentic_mode` default True |
+| Flag | `config/flags.py` `agentic_mode` default True |
 | Gate | `agents/eval_routing.py` `agentic_mode_gate` |
 | Tests | `App/backend/tests/test_topics.py`, `tests/agents/test_eval_routing.py`, `tests/agents/test_integration.py` |
 

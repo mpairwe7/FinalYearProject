@@ -9,7 +9,7 @@ CI and a nightly cron can run ``python -m app.freshness --check``. Add
 ``--verify-qdrant`` to compare the shipped corpus hash with the hash stamped
 into the serving Qdrant collection. Optional ``--notify`` posts to
 ``FRESHNESS_SLACK_WEBHOOK`` (https only). Optional ``--enqueue`` writes
-a request file; rebuild orchestration lives in :mod:`app.index_lifecycle`.
+a request file; rebuild orchestration lives in :mod:`app.vectorstore.index_lifecycle`.
 """
 
 from __future__ import annotations
@@ -245,7 +245,7 @@ def qdrant_index_hash(
     """
     from qdrant_client import QdrantClient
 
-    from .retriever import bm25_binding_sentinel_id
+    from .rag.retriever import bm25_binding_sentinel_id
 
     index_url = url or os.getenv("QDRANT_URL", "http://localhost:6333")
     index_collection = collection or os.getenv("QDRANT_COLLECTION", "ura_knowledge_base")
@@ -280,7 +280,7 @@ def write_status(report: FreshnessReport, path: Path | None = None) -> Path:
     payload = {
         **report.to_dict(),
         "checked_at": datetime.now(UTC).isoformat(),
-        "reindex_hint": "python -m app.index_lifecycle --rebuild",
+        "reindex_hint": "python -m app.vectorstore.index_lifecycle --rebuild",
     }
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_suffix(target.suffix + ".tmp")
@@ -427,7 +427,7 @@ def notify_drift(report: FreshnessReport, *, webhook: str | None = None) -> bool
     text = (
         f"URA index drift: +{len(report.added)} -{len(report.removed)} "
         f"~{len(report.changed)}; qdrant_index_drift={report.index_drift}. "
-        "Run the safe rebuild: python -m app.index_lifecycle --rebuild"
+        "Run the safe rebuild: python -m app.vectorstore.index_lifecycle --rebuild"
     )
     body = json.dumps({"text": text}).encode()
     req = Request(  # noqa: S310 -- the URL is restricted to HTTPS below.
@@ -460,7 +460,7 @@ def enqueue_reindex_request(
         **report.to_dict(),
         "requested_at": datetime.now(UTC).isoformat(),
         "auto_reindex": False,
-        "reindex_hint": "python -m app.index_lifecycle --rebuild",
+        "reindex_hint": "python -m app.vectorstore.index_lifecycle --rebuild",
     }
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_suffix(target.suffix + ".tmp")

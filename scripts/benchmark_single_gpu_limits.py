@@ -77,7 +77,7 @@ from docx import Document
 from openpyxl import Workbook
 from fastapi.testclient import TestClient
 
-from app import database as db
+from app.db import database as db
 from app import documents, pdf_export
 from app.main import app
 

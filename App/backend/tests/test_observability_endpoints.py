@@ -23,11 +23,11 @@ os.environ.setdefault("OTEL_ENABLED", "false")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import database as db  # noqa: E402
+from app.db import database as db  # noqa: E402
 from app.ai_disclosure import DIGITAL_SOURCE_TYPE, is_marked, mark_wav  # noqa: E402
 from app.analytics import metrics  # noqa: E402
 from app.client_telemetry import normalise_route  # noqa: E402
-from app.logging_config import (  # noqa: E402
+from app.middleware.logger import (  # noqa: E402
     REQUEST_ID,
     PIISanitizingFilter,
     RequestContextFilter,
@@ -82,7 +82,7 @@ class StructuredLogTest(unittest.TestCase):
         self.assertNotIn("taxpayer@example.com", line["exception"])
 
     def test_install_is_idempotent_and_on_root(self) -> None:
-        from app.logging_config import install_logging
+        from app.middleware.logger import install_logging
 
         first = install_logging()
         second = install_logging()

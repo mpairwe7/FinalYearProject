@@ -9,10 +9,10 @@ from typing import Any
 
 import pytest
 
-from app import database as db
-from app import postgres as pg
+from app.db import database as db
+from app.db import postgres as pg
 from app.calculator_router import _SCENARIO_PLANNER_BYPASS_RE
-from app.flags import _REGISTRY, flags
+from app.config.flags import _REGISTRY, flags
 
 
 @pytest.fixture()
@@ -147,7 +147,7 @@ def test_web_sync_ledger_validation_and_postgres_parity(
         "get_active_web_sync_entry",
         "list_web_sync_entries",
     ):
-        assert hasattr(pg, fn_name), f"postgres.py missing {fn_name}"
+        assert hasattr(pg, fn_name), f"db/postgres.py missing {fn_name}"
         assert list(inspect.signature(getattr(db, fn_name)).parameters) == list(
             inspect.signature(getattr(pg, fn_name)).parameters
         )
@@ -279,7 +279,7 @@ def test_scenario_planner_bypass_regex_matches_compared_to_and_versus() -> None:
 def test_streaming_apply_output_guards_honors_verified_facts() -> None:
     """Verify _apply_output_guards passes verified_facts and calculation_message to judge and claim verifier."""
     from app.guardrails import OutputGuard
-    from app.service import _apply_output_guards
+    from app.rag.pipeline import _apply_output_guards
 
     class _StubModel:
         """Minimal stub model for testing _apply_output_guards."""

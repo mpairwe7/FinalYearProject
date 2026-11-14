@@ -23,7 +23,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from app import database as db
+from app.db import database as db
 from app.memory.extractor import FactExtractor
 from app.memory.semantic import SemanticMemory, UserFact
 from app.memory.service import MemoryService, _guess_topic_tag, _ordered_topic_tags, topic_label
@@ -225,10 +225,10 @@ class PersistTurnTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         db.init_db()
-        from app import service
+        from app.rag import pipeline
 
-        cls.service = service
-        cls.model = service.ChatModel()
+        cls.service = pipeline
+        cls.model = pipeline.ChatModel()
 
     def test_working_memory_records_the_topic_not_the_role(self) -> None:
         memsvc = MagicMock()
@@ -268,35 +268,35 @@ class MemoryStartsForANewConsentedUserTest(unittest.TestCase):
     """Live 2026-10-06: a consented user with no profile never got a memory write."""
 
     def test_consent_state_is_returned_with_nothing_to_inject(self) -> None:
-        from app import service
+        from app.rag import pipeline
         from app.memory.service import MemoryReadResult
 
         db.init_db()
-        model = service.ChatModel()
+        model = pipeline.ChatModel()
         empty = MemoryReadResult(facts=[], episodic=[], working=None, consent_granted=True)
-        with patch.object(service.flags, "is_enabled", side_effect=lambda name, *a, **k: name == "memory_enabled"), \
+        with patch.object(pipeline.flags, "is_enabled", side_effect=lambda name, *a, **k: name == "memory_enabled"), \
              patch.object(MemoryService, "read_all", return_value=empty), \
-             patch.object(service.db, "get_user_profile", return_value=None):
+             patch.object(pipeline.db, "get_user_profile", return_value=None):
             state = model._load_personalization_state(f"new-{uuid.uuid4().hex[:8]}")
         self.assertIsNotNone(state)
         self.assertTrue(state["consent_granted"])
         self.assertEqual(state["prompt_context"], "")
 
     def test_no_consent_still_means_no_state(self) -> None:
-        from app import service
+        from app.rag import pipeline
         from app.memory.service import MemoryReadResult
 
         db.init_db()
-        model = service.ChatModel()
+        model = pipeline.ChatModel()
         refused = MemoryReadResult(facts=[], episodic=[], working=None, consent_granted=False)
-        with patch.object(service.flags, "is_enabled", side_effect=lambda name, *a, **k: name == "memory_enabled"), \
+        with patch.object(pipeline.flags, "is_enabled", side_effect=lambda name, *a, **k: name == "memory_enabled"), \
              patch.object(MemoryService, "read_all", return_value=refused):
             self.assertIsNone(model._load_personalization_state("someone"))
 
 
 class StreamedTurnMemoryTest(unittest.TestCase):
     def test_a_consented_streamed_turn_is_written_once_final(self) -> None:
-        from app import service
+        from app.rag import pipeline
 
         model = MagicMock()
         payload = {
@@ -304,18 +304,18 @@ class StreamedTurnMemoryTest(unittest.TestCase):
             "full_reply": "VAT ni 18%.",
             "elapsed_ms": 10.0,
         }
-        service._finish_streamed_turn(
+        pipeline._finish_streamed_turn(
             model, payload, channel="sse", failed=False, message="VAT kye ki?", session_id="s", user_id="u9", tenant_id="default"
         )
         kwargs = model._persist_personalization_turn.call_args.kwargs
         self.assertEqual((kwargs["message"], kwargs["message_en"], kwargs["reply"]), ("VAT kye ki?", "What is VAT?", "VAT ni 18%."))
 
     def test_not_written_twice_or_without_consent(self) -> None:
-        from app import service
+        from app.rag import pipeline
 
         for result in ({"_memory_consent": True, "_memory_absorbed": True}, {}):
             model = MagicMock()
-            service._finish_streamed_turn(
+            pipeline._finish_streamed_turn(
                 model,
                 {"result": result, "full_reply": "x", "elapsed_ms": 1.0},
                 channel="sse",
@@ -329,7 +329,7 @@ class StreamedTurnMemoryTest(unittest.TestCase):
 
     def test_stream_to_finalizer_handoff_persists_consented_turn(self) -> None:
         """Verify generate_retrieval_only through stream-to-finalizer handoff forwards consent and English translation."""
-        from app import service
+        from app.rag import pipeline
 
         model = MagicMock()
 
@@ -354,7 +354,7 @@ class StreamedTurnMemoryTest(unittest.TestCase):
 
         async def _run() -> list[Any]:
             events = []
-            async for ev in service.run_chat_turn(
+            async for ev in pipeline.run_chat_turn(
                 model,
                 message="VAT kye ki?",
                 conversation_id="c-stream-1",
@@ -368,7 +368,7 @@ class StreamedTurnMemoryTest(unittest.TestCase):
                 events.append(ev)
             return events
 
-        with patch.object(service, "localize_reply", side_effect=lambda text, loc: text):
+        with patch.object(pipeline, "localize_reply", side_effect=lambda text, loc: text):
             asyncio.run(_run())
 
         model._persist_personalization_turn.assert_called_once()

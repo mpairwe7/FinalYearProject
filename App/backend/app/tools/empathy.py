@@ -88,7 +88,7 @@ _GUIDANCE: dict[str, dict[str, Any]] = {
 def _wellbeing_checkin_allowed(*, user_id: str | None = None) -> bool:
     """Evaluate server-side wellbeing_checkin flag and once-per-conversation state."""
     try:
-        from ..flags import flags
+        from ..config.flags import flags
 
         if not flags.is_enabled("wellbeing_checkin", subject=user_id or None):
             return False
@@ -96,9 +96,9 @@ def _wellbeing_checkin_allowed(*, user_id: str | None = None) -> bool:
         return False
 
     try:
-        from .. import database as db
-        from ..turn_context import ACTIVE_CONVERSATION_STATE as _ACTIVE_CONVERSATION_STATE
-        from ..turn_context import ACTIVE_TENANT_ID as _ACTIVE_TENANT_ID
+        from ..db import database as db
+        from ..rag.turn_context import ACTIVE_CONVERSATION_STATE as _ACTIVE_CONVERSATION_STATE
+        from ..rag.turn_context import ACTIVE_TENANT_ID as _ACTIVE_TENANT_ID
 
         active_conv = _ACTIVE_CONVERSATION_STATE.get()
         if active_conv:
@@ -134,7 +134,7 @@ def assess(
     eff_locale = (locale or "").strip().lower()
     if not eff_locale:
         try:
-            from ..query import detect_language
+            from ..rag.query import detect_language
 
             eff_locale = detect_language(text, default_lang="en")
         except Exception:
@@ -227,7 +227,7 @@ def assess(
 
     if kind and record_metric:
         try:
-            from ..flags import flags
+            from ..config.flags import flags
 
             if flags.is_enabled("eq_adaptive_retrieval") or flags.is_enabled("eq_multimodal_fusion"):
                 from ..analytics import metrics
@@ -420,7 +420,7 @@ def fuse_multimodal_affect(
 
     if kind and record_metric:
         try:
-            from ..flags import flags
+            from ..config.flags import flags
 
             if flags.is_enabled("eq_multimodal_fusion", subject=user_id) or flags.is_enabled("eq_adaptive_retrieval", subject=user_id):
                 from ..analytics import metrics

@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from app.service import _WORKFLOW_SENSITIVE_SLOTS, ChatModel
+from app.rag.pipeline import _WORKFLOW_SENSITIVE_SLOTS, ChatModel
 from app.turn_guidance import apply_turn_guidance
 from app.workflows.journey_copilot import (
     bind_document_facts_to_workflow,
@@ -245,7 +245,7 @@ def test_e2e_goal_stack_persistence_prerequisite_push_and_auto_pop_in_chat_model
     """Verify goal_stack survives DB serialization, pushes prerequisite sub-flows, and pops on completion."""
     import uuid
 
-    from app import database
+    from app.db import database
 
     database.init_db()
     model = ChatModel()
@@ -305,7 +305,7 @@ def test_e2e_resume_code_parsing_and_localization_parity():
     """Verify cross-channel resume codes parse cleanly and _localize_workflow translates journey_gps."""
     import uuid
 
-    from app import database
+    from app.db import database
 
     database.init_db()
     model = ChatModel()
@@ -346,8 +346,8 @@ def test_qa_audit_subworkflow_cancel_returns_to_parent_and_anon_to_auth_migratio
     """Verify QA-1 (anon->auth state key migration), QA-2 (sub-workflow cancel pop), QA-3 (cross-flow resume code), QA-4 (YAML slot alignment), and QA-6 (Node.js 24 CI pins)."""
     import uuid
 
-    from app import database
-    from app.service import _ACTIVE_CONVERSATION_STATE, _ACTIVE_TENANT_ID
+    from app.db import database
+    from app.rag.pipeline import _ACTIVE_CONVERSATION_STATE, _ACTIVE_TENANT_ID
 
     database.init_db()
     model = ChatModel()
@@ -456,8 +456,8 @@ def test_post_619_phased_audit_remediations_session_binding_goal_stack_snap_to_f
     import uuid
     from types import SimpleNamespace
 
-    from app import database
-    from app.service import _ACTIVE_CONVERSATION_STATE, _ACTIVE_TENANT_ID
+    from app.db import database
+    from app.rag.pipeline import _ACTIVE_CONVERSATION_STATE, _ACTIVE_TENANT_ID
     from app.turn_guidance import apply_turn_guidance
     from app.workflows.journey_copilot import (
         _OBJECTIVE_PATTERNS,

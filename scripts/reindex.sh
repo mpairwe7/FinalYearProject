@@ -59,12 +59,12 @@ info "  COLLECTION   = ${COLLECTION}"
 
 # ---------------------------------------------------------------------------
 # Stage a candidate and atomically swap the serving alias only after it is
-# complete. Unlike `app.indexer --recreate`, a failure leaves the old index
+# complete. Unlike `app.ingestion.indexer --recreate`, a failure leaves the old index
 # serving and the old versioned collection available for rollback.
 # ---------------------------------------------------------------------------
 info "Starting staged re-index ..."
 cd "$PROJECT_ROOT"
-PYTHONPATH=App/backend python -m app.index_lifecycle --rebuild "$@"
+PYTHONPATH=App/backend python -m app.vectorstore.index_lifecycle --rebuild "$@"
 
 # ---------------------------------------------------------------------------
 # Post-index verification

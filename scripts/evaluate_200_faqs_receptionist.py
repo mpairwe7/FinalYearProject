@@ -296,9 +296,9 @@ def main() -> int:
     os.environ["FLAG_TICKET_QUEUE"] = "false"
     os.environ["FLAG_MEMORY_ENABLED"] = "false"
 
-    from app.database import init_db
+    from app.db.database import init_db
     init_db()
-    from app.service import ChatModel
+    from app.rag.pipeline import ChatModel
     chat_model = ChatModel()
 
     print("Building 200 Call Receptionist FAQs (EN, LG, SW)...")

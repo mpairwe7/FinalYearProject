@@ -348,7 +348,7 @@ class TestConversationalIntelligenceEngine:
         # 6. TIN/PRN/BRN identifier spans excluded from UGX amount extraction & ChatResponse.connectors_used
         from app.calculator_router import extract_amounts
         from app.connector_intent import detect_connector_intent, missing_arguments
-        from app.models import ChatResponse
+        from app.api.models import ChatResponse
         from app.speech_normalization import _format_ugx_amount
         from app.text_signals import detect_crisis, detect_high_stakes
 
@@ -429,7 +429,7 @@ class TestConversationalIntelligenceEngine:
         # 11. Runyankole ("eigana" / "igana" / "kikumi") & 4-locale TTS/ASR/entailment/MT/case_facts parity
         from app import mt
         from app.case_facts import _normalize_vernacular_amount_words
-        from app.entailment import percentages
+        from app.rag.entailment import percentages
         from app.receptionist.lexicon import repair_asr_entities
         from app.speech_normalization import clean_text_for_speech
 
@@ -455,7 +455,7 @@ class TestConversationalIntelligenceEngine:
         assert "milioni 25" in _normalize_vernacular_amount_words("milioni pyeraryo wiye abic")
 
         # 12. Expanded vernacular number-words, compound hundreds/tens/halves & money extraction across lg, sw, nyn, ach
-        from app.entailment import canonical_amounts
+        from app.rag.entailment import canonical_amounts
 
         assert [v for v, _, _ in extract_amounts("shilingi obukadde amakumi asatu mu bitaano")] == [35_000_000.0]
         assert [v for v, _, _ in extract_amounts("shiringi obukaikuru makumi ashatu na bitaano")] == [35_000_000.0]

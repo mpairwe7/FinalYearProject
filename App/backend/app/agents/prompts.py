@@ -158,10 +158,10 @@ def governance_prompt(*, subject: str | None = None) -> str:
     floor it used to cite is inert (G361), so the model was told of a control
     that does not run.
     """
-    from ..flags import flags
+    from ..config.flags import flags
 
     if flags.is_enabled("risk_tiered_autonomy_gates", subject=subject):
-        from ..query import current_fiscal_year
+        from ..rag.query import current_fiscal_year
 
         return _GOVERNANCE_V3_PROMPT.format(fiscal_year=current_fiscal_year())
     return ""

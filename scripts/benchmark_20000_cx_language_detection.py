@@ -34,7 +34,7 @@ import httpx
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "App" / "backend"))
-from app.query import detect_language
+from app.rag.query import detect_language
 
 DEFAULT_GATEWAY_URL = os.getenv(
     "NGROK_GATEWAY_URL",

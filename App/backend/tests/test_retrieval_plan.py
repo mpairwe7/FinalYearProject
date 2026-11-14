@@ -10,14 +10,14 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.query import (  # noqa: E402
+from app.rag.query import (  # noqa: E402
     current_fiscal_year,
     decompose_query,
     extract_retrieval_filters,
     extract_retrieval_preferences,
     plan_retrieval,
 )
-from app.retriever import apply_preference_boost, merge_retrieval_hits  # noqa: E402
+from app.rag.retriever import apply_preference_boost, merge_retrieval_hits  # noqa: E402
 
 
 class FilterExtractionTests(unittest.TestCase):
@@ -123,10 +123,10 @@ class PlanBundleTests(unittest.TestCase):
 
 class CorrectiveFlagTests(unittest.TestCase):
     def test_flag_off_skips_correction(self) -> None:
-        from app.corrective_rag import should_correct
+        from app.rag.corrective_rag import should_correct
 
         hits = [{"score_norm": 0.1}]
-        with patch("app.flags.flags.is_enabled", return_value=False):
+        with patch("app.config.flags.flags.is_enabled", return_value=False):
             self.assertFalse(should_correct(hits))
 
 

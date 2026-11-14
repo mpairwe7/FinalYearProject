@@ -104,7 +104,7 @@ class SemanticMemory:
         self._init_schema()
 
     def _init_schema(self) -> None:
-        from .. import database as db
+        from ..db import database as db
 
         db.execute_script(
             """
@@ -172,7 +172,7 @@ class SemanticMemory:
     def _ensure_bitemporal_columns(self) -> None:
         import contextlib
 
-        from .. import database as db
+        from ..db import database as db
 
         for col_ddl in (
             "ALTER TABLE user_facts ADD COLUMN valid_from_fy TEXT DEFAULT ''",
@@ -183,7 +183,7 @@ class SemanticMemory:
 
     # -- Writes --------------------------------------------------------
     def write(self, fact: UserFact) -> str:
-        from .. import database as db
+        from ..db import database as db
 
         if not fact.fact_id:
             fact.fact_id = str(uuid.uuid4())
@@ -267,7 +267,7 @@ class SemanticMemory:
 
     def supersede(self, old_fact_id: str, new_fact_id: str) -> bool:
         """Mark *old_fact_id* as superseded by *new_fact_id*."""
-        from .. import database as db
+        from ..db import database as db
 
         try:
             return db.execute(
@@ -295,7 +295,7 @@ class SemanticMemory:
         as_of_fy: str | None = None,
     ) -> list[UserFact]:
         """Return active facts above the decay floor (with optional bi-temporal FY filter, MS-3)."""
-        from .. import database as db
+        from ..db import database as db
 
         sql = "SELECT * FROM user_facts WHERE tenant_id = ? AND user_id = ?"
         params: list[Any] = [tenant_id or "default", user_id]
@@ -365,7 +365,7 @@ class SemanticMemory:
     # -- Deletes / erasure --------------------------------------------
     def forget_user(self, user_id: str, tenant_id: str = "default") -> int:
         """Delete every fact for this user (UDPA right-to-erasure)."""
-        from .. import database as db
+        from ..db import database as db
 
         try:
             return db.execute(
@@ -377,7 +377,7 @@ class SemanticMemory:
             return 0
 
     def forget_fact(self, fact_id: str) -> bool:
-        from .. import database as db
+        from ..db import database as db
 
         try:
             return db.execute("DELETE FROM user_facts WHERE fact_id = ?", (fact_id,)) > 0
@@ -387,7 +387,7 @@ class SemanticMemory:
 
     def cleanup_expired(self) -> int:
         """Delete facts that have reached the declared retention limit."""
-        from .. import database as db
+        from ..db import database as db
 
         cutoff = time.time() - (SEMANTIC_TTL_DAYS * 86400)
         try:

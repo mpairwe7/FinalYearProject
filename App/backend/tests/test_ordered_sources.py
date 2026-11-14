@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import unittest
 
-from app.retriever import HybridRetriever
-from app.service import ordered_sources
+from app.rag.retriever import HybridRetriever
+from app.rag.pipeline import ordered_sources
 
 
 class OrderedSourcesTests(unittest.TestCase):

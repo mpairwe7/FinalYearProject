@@ -174,7 +174,7 @@ class TestPlanIdentity:
 
 class TestOncePerTurn:
     def test_prompt_building_and_verification_share_one_run(self, monkeypatch):
-        from app import service
+        from app.rag import pipeline
 
         calls: list[str] = []
 
@@ -184,20 +184,20 @@ class TestOncePerTurn:
             return "block"
 
         monkeypatch.setattr(sp, "build_verified_facts", fake)
-        token = service._TURN_PLANS.set({})
+        token = pipeline._TURN_PLANS.set({})
         try:
-            first = service._evaluate_calculation_context("What is PAYE?")
-            second = service._evaluate_calculation_context("what is  paye?")
-            summary = service._turn_plan_summary()
+            first = pipeline._evaluate_calculation_context("What is PAYE?")
+            second = pipeline._evaluate_calculation_context("what is  paye?")
+            summary = pipeline._turn_plan_summary()
         finally:
-            service._TURN_PLANS.reset(token)
+            pipeline._TURN_PLANS.reset(token)
 
         assert first == second == "block"
         assert calls == ["What is PAYE?"]
         assert summary["sha256"] == "abc"
 
     def test_outside_a_turn_each_call_runs(self, monkeypatch):
-        from app import service
+        from app.rag import pipeline
 
         calls: list[str] = []
 
@@ -207,8 +207,8 @@ class TestOncePerTurn:
 
         monkeypatch.setattr(sp, "build_verified_facts", fake)
 
-        service._evaluate_calculation_context("What is PAYE?")
-        service._evaluate_calculation_context("What is PAYE?")
+        pipeline._evaluate_calculation_context("What is PAYE?")
+        pipeline._evaluate_calculation_context("What is PAYE?")
 
         assert len(calls) == 2
 
@@ -229,7 +229,7 @@ class TestAuditRow:
 class TestPlanReachesTheLedger:
     def test_a_real_turn_writes_its_plan_digest(self, tmp_db, fresh_registry, monkeypatch):
         from app import audit
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         written: list[dict] = []
 
@@ -343,7 +343,7 @@ class TestRuntimeAttestation:
     def test_a_fault_in_attestation_does_not_cost_the_answer(self, tmp_db, fresh_registry, monkeypatch):
         # It runs on every exit of every turn.
         from app import turn_pipeline
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         def explode(*_a, **_k):
             raise RuntimeError("attestation broke")
@@ -357,7 +357,7 @@ class TestRuntimeAttestation:
 
     def test_a_real_turn_reaches_the_audit_row(self, tmp_db, fresh_registry):
         from app.audit.turns import build_turn_payload
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         result = ChatModel().generate("How do I evade tax?")  # nosemgrep: ura-llm01-raw-user-input-to-llm
 

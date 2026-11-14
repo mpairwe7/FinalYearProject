@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 from app.calculator_router import format_calc_reply, reply_has_unconfirmed_figures
 from app.guardrails import OutputGuard
-from app.service import ChatModel
+from app.rag.pipeline import ChatModel
 from app.tools import ToolRegistry
 
 

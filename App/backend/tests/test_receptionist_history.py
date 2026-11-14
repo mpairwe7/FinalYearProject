@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 import unittest
 
-from app import database as db
+from app.db import database as db
 from app.auth.jwt_auth import make_dev_token
 from app.main import app
 from app.receptionist.store import (

@@ -24,26 +24,26 @@ EN_TIN = "How can I register to get a TIN?"
 class _Base(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        from app import database as db
+        from app.db import database as db
 
         db.init_db()
-        from app import service
+        from app.rag import pipeline
 
-        cls.service = service
-        cls.model = service.ChatModel()
+        cls.service = pipeline
+        cls.model = pipeline.ChatModel()
 
     def _patches(self, **extra: object) -> list[mock._patch]:  # type: ignore[name-defined]
-        service = self.service
+        pipeline = self.service
         patches = [
-            mock.patch.object(service, "english_retrieval_query", side_effect=self._translate),
-            mock.patch.object(service, "_simple_search", return_value=[]),
-            mock.patch.object(service, "needs_clarification", return_value=""),
-            mock.patch.object(service.ChatModel, "_priority_faq_hits", return_value=[]),
+            mock.patch.object(pipeline, "english_retrieval_query", side_effect=self._translate),
+            mock.patch.object(pipeline, "_simple_search", return_value=[]),
+            mock.patch.object(pipeline, "needs_clarification", return_value=""),
+            mock.patch.object(pipeline.ChatModel, "_priority_faq_hits", return_value=[]),
             mock.patch.object(self.model._cache, "get", return_value=None),
             mock.patch.object(self.model._cache, "put"),
         ]
         for name, value in extra.items():
-            patches.append(mock.patch.object(service.ChatModel, name, value))
+            patches.append(mock.patch.object(pipeline.ChatModel, name, value))
         return patches
 
     @staticmethod

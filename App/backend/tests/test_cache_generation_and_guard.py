@@ -28,8 +28,8 @@ from typing import Any
 from unittest import mock
 
 import numpy as np
-from app import cache as cache_mod
-from app.cache import (
+from app.rag import cache as cache_mod
+from app.rag.cache import (
     RedisSemanticCache,
     SemanticCache,
     _cache_queries_compatible,
@@ -51,9 +51,9 @@ class _Stamps:
     def __init__(self, test: unittest.TestCase, *, index: str = "idxA", tombstones: str = "", fy: str = "FY2026-27"):
         self.values = {"index": index, "tombstones": tombstones, "fy": fy}
         for name, target in (
-            ("index", "app.cache._read_index_stamp"),
-            ("tombstones", "app.cache._read_tombstone_stamp"),
-            ("fy", "app.cache._read_fiscal_year"),
+            ("index", "app.rag.cache._read_index_stamp"),
+            ("tombstones", "app.rag.cache._read_tombstone_stamp"),
+            ("fy", "app.rag.cache._read_fiscal_year"),
         ):
             patcher = mock.patch(target, side_effect=lambda name=name: self.values[name])
             patcher.start()
@@ -152,20 +152,20 @@ class GenerationTests(unittest.TestCase):
         self.assertEqual(cache_generation(), "idx1..FY2026-27")
 
     def test_tombstone_stamp_digests_active_ids_and_ignores_the_flag_off(self) -> None:
-        from app import database as db
+        from app.db import database as db
 
         rows = [{"id": "tomb_b"}, {"id": "tomb_a"}]
         with mock.patch.object(db, "get_active_corpus_tombstones", return_value=rows), mock.patch(
-            "app.flags.flags.is_enabled", return_value=True
+            "app.config.flags.flags.is_enabled", return_value=True
         ):
             first = cache_mod._read_tombstone_stamp()
         with mock.patch.object(db, "get_active_corpus_tombstones", return_value=list(reversed(rows))), mock.patch(
-            "app.flags.flags.is_enabled", return_value=True
+            "app.config.flags.flags.is_enabled", return_value=True
         ):
             self.assertEqual(cache_mod._read_tombstone_stamp(), first, "order-independent")
         self.assertTrue(first)
         with mock.patch.object(db, "get_active_corpus_tombstones", return_value=rows), mock.patch(
-            "app.flags.flags.is_enabled", return_value=False
+            "app.config.flags.flags.is_enabled", return_value=False
         ):
             self.assertEqual(cache_mod._read_tombstone_stamp(), "", "retrieval applies none")
 
@@ -283,7 +283,7 @@ class RedisSimilarityTierTests(unittest.TestCase):
 
 class DegradedRetrievalTests(unittest.TestCase):
     def _retriever(self, *, ready: bool, client: object | None = object()):
-        from app.retriever import HybridRetriever
+        from app.rag.retriever import HybridRetriever
 
         retriever = HybridRetriever()
         retriever._ready = ready
@@ -291,11 +291,11 @@ class DegradedRetrievalTests(unittest.TestCase):
         return retriever
 
     def test_configured_but_unavailable_qdrant_is_degraded(self) -> None:
-        with mock.patch("app.retriever.QDRANT_ENABLED", True):
+        with mock.patch("app.rag.retriever.QDRANT_ENABLED", True):
             self.assertTrue(self._retriever(ready=False, client=None).serving_degraded())
 
     def test_a_keyword_only_deployment_is_not_degraded(self) -> None:
-        with mock.patch("app.retriever.QDRANT_ENABLED", False):
+        with mock.patch("app.rag.retriever.QDRANT_ENABLED", False):
             self.assertFalse(self._retriever(ready=False, client=None).serving_degraded())
 
     def test_an_open_circuit_is_degraded_and_a_closed_one_is_not(self) -> None:
@@ -306,7 +306,7 @@ class DegradedRetrievalTests(unittest.TestCase):
         self.assertTrue(retriever.serving_degraded())
 
     def test_the_service_probe_tolerates_doubles(self) -> None:
-        from app.service import _retrieval_degraded
+        from app.rag.pipeline import _retrieval_degraded
 
         self.assertFalse(_retrieval_degraded(object()))
         self.assertFalse(_retrieval_degraded(mock.Mock(serving_degraded=mock.Mock(side_effect=RuntimeError))))

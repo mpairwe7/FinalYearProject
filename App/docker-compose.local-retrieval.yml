@@ -63,7 +63,7 @@ services:
       context: ..
       dockerfile: Dockerfile
       target: runtime
-    entrypoint: ["python", "-m", "app.index_lifecycle"]
+    entrypoint: ["python", "-m", "app.vectorstore.index_lifecycle"]
     command: ["--rebuild"]
     user: "0:0"
     environment:
@@ -115,7 +115,7 @@ services:
       context: ..
       dockerfile: Dockerfile
       target: runtime
-    entrypoint: ["python", "-m", "app.qdrant_backup"]
+    entrypoint: ["python", "-m", "app.vectorstore.qdrant_backup"]
     command: ["--loop", "--interval-seconds", "86400", "--retry-seconds", "300", "--keep", "7"]
     user: "0:0"
     environment:

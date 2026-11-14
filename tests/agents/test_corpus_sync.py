@@ -8,10 +8,10 @@ from typing import Any
 
 import pytest
 
-from app import corpus_sync as cs
-from app import database as db
+from app.vectorstore import corpus_sync as cs
+from app.db import database as db
 from app.ephemeral_pdf_sandbox import SandboxDocument
-from app.pdf_corpus import PDF_JSONL_SCHEMA_VERSION, _stable_id
+from app.ingestion.pdf_corpus import PDF_JSONL_SCHEMA_VERSION, _stable_id
 
 
 @pytest.fixture()

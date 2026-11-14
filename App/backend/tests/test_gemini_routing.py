@@ -207,13 +207,13 @@ class TestTheGuardCoversTheRealChatPath(unittest.TestCase):
     def _run(self, locale: str, *, sunbird_reply: str = "generated", backend: str = "sunbird"):
         import os
 
-        from app import service as svc
+        from app.rag import pipeline
         from app.providers import breakers
 
         breakers.SUNBIRD_LLM_BREAKER.record_success()
         breakers.CF_LLM_BREAKER.record_success()
         with patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": backend}), patch.object(
-            svc.flags, "is_enabled", return_value=True
+            pipeline.flags, "is_enabled", return_value=True
         ), patch("app.providers.config.is_cloudflare_configured", return_value=True), patch(
             "app.providers.budget.try_consume_neurons", return_value=True
         ), patch("app.sunbird.is_available", return_value=True), patch(
@@ -221,7 +221,7 @@ class TestTheGuardCoversTheRealChatPath(unittest.TestCase):
         ) as sb, patch(
             "app.providers.gateway.workers_ai_chat", return_value="a full answer."
         ) as cf, patch("app.providers.gateway.gemini_generate", return_value="x") as gem:
-            out = svc._llm_cloud_fallback("How do I file a return?", [{"text": "passage"}], None, locale)
+            out = pipeline._llm_cloud_fallback("How do I file a return?", [{"text": "passage"}], None, locale)
         return out, sb, cf, gem
 
     def test_a_luganda_turn_is_served_by_sunbird(self):

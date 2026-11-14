@@ -24,7 +24,7 @@ os.environ.setdefault("OTEL_ENABLED", "false")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import database as db  # noqa: E402
+from app.db import database as db  # noqa: E402
 from app import officer_chat, service_ratings  # noqa: E402
 from app.auth.jwt_auth import make_dev_token  # noqa: E402
 from app.main import app  # noqa: E402
@@ -121,7 +121,7 @@ class TaxpayerThreadTests(_Chat):
     def test_an_officers_message_reaches_the_taxpayer_in_their_language(self):
         db.update_ticket(self.tid, locale="lg")
         self.take_case()
-        with mock.patch("app.service.localize_reply", return_value="Ssente zo zakkirizibwa."):
+        with mock.patch("app.rag.pipeline.localize_reply", return_value="Ssente zo zakkirizibwa."):
             self.officer_says("Your refund was approved.")
         msg = self.thread()["messages"][0]
         self.assertEqual(msg["text"], "Ssente zo zakkirizibwa.")
@@ -134,7 +134,7 @@ class TaxpayerThreadTests(_Chat):
         no label and no way to see what the officer wrote."""
         db.update_ticket(self.tid, locale="lg")
         self.take_case()
-        with mock.patch("app.service.localize_reply", return_value="Ssente zo zakkirizibwa."):
+        with mock.patch("app.rag.pipeline.localize_reply", return_value="Ssente zo zakkirizibwa."):
             self.officer_says("Your refund was approved.")
         msg = self.thread()["messages"][0]
         self.assertTrue(msg["translated"])
@@ -153,7 +153,7 @@ class TaxpayerThreadTests(_Chat):
         the English, so the taxpayer read the old amount in their language."""
         db.update_ticket(self.tid, locale="lg")
         self.take_case()
-        with mock.patch("app.service.localize_reply", return_value="Obanjibwa UGX 50,000."):
+        with mock.patch("app.rag.pipeline.localize_reply", return_value="Obanjibwa UGX 50,000."):
             r = self.client.patch(
                 f"/v1/admin/tickets/{self.tid}",
                 json={"officer_reply": "You owe UGX 50,000.", "officer_reply_localized": "Obanjibwa UGX 200,000."},
@@ -172,7 +172,7 @@ class TaxpayerThreadTests(_Chat):
         self.take_case()
         english = "You owe UGX 1,200,000, UGX 240,000, UGX 60,000 and UGX 15,000."
         with mock.patch(
-            "app.service.localize_reply",
+            "app.rag.pipeline.localize_reply",
             return_value="Obanjibwa UGX 1,200,000, UGX 240,000, UGX 60,000 ne UGX 25,000.",
         ):
             r = self.client.patch(f"/v1/admin/tickets/{self.tid}", json={"officer_reply": english}, headers=OFFICER)
@@ -187,10 +187,10 @@ class TaxpayerThreadTests(_Chat):
         beside the new English."""
         db.update_ticket(self.tid, locale="lg")
         self.take_case()
-        with mock.patch("app.service.localize_reply", return_value="Obanjibwa UGX 50,000."):
+        with mock.patch("app.rag.pipeline.localize_reply", return_value="Obanjibwa UGX 50,000."):
             self.officer_says("You owe UGX 50,000.")
         self.assertEqual(db.get_ticket(self.tid)["officer_reply_localized"], "Obanjibwa UGX 50,000.")
-        with mock.patch("app.service.localize_reply", return_value="Obanjibwa UGX 90,000."):
+        with mock.patch("app.rag.pipeline.localize_reply", return_value="Obanjibwa UGX 90,000."):
             self.officer_says("You owe UGX 80,000.")
         self.assertEqual(db.get_ticket(self.tid)["officer_reply_localized"], "")
         status = self.client.get(f"/v1/escalate/{self.tid}").json()
@@ -201,7 +201,7 @@ class TaxpayerThreadTests(_Chat):
         """CodeRabbit on PR 730: with no stored translation the status endpoint
         translated the reply itself, without the strict figure check."""
         db.update_ticket(self.tid, locale="lg", officer_reply="You owe UGX 1,200,000 and UGX 15,000.", officer_reply_localized="")
-        with mock.patch("app.service.localize_reply", return_value="Obanjibwa UGX 1,200,000 ne UGX 25,000."):
+        with mock.patch("app.rag.pipeline.localize_reply", return_value="Obanjibwa UGX 1,200,000 ne UGX 25,000."):
             status = self.client.get(f"/v1/escalate/{self.tid}").json()
         self.assertNotIn("25,000", status.get("officer_reply_localized") or "")
 
@@ -261,7 +261,7 @@ class EndChatTests(_Chat):
         """G635 on End chat: the closing message carried the console's preview too."""
         db.update_ticket(self.tid, locale="lg")
         self.take_case()
-        with mock.patch("app.service.localize_reply", return_value="Sasula UGX 50,000 nga 15."):
+        with mock.patch("app.rag.pipeline.localize_reply", return_value="Sasula UGX 50,000 nga 15."):
             r = self.end(
                 closing_message="Pay UGX 50,000 by the 15th.",
                 closing_message_localized="Sasula UGX 200,000 nga 15.",
@@ -326,7 +326,7 @@ class EndChatTranslationTests(_Chat):
         translation when the closing message's own was refused."""
         db.update_ticket(self.tid, locale="lg", officer_reply="You owe UGX 50,000.", officer_reply_localized="Obanjibwa UGX 50,000.")
         self.take_case()
-        with mock.patch("app.service.localize_reply", return_value="Sasula UGX 90,000."):
+        with mock.patch("app.rag.pipeline.localize_reply", return_value="Sasula UGX 90,000."):
             r = self.end(outcome="resolved", closing_message="Please pay UGX 80,000.")
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(db.get_ticket(self.tid)["officer_reply_localized"], "")

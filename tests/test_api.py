@@ -27,7 +27,7 @@ os.environ.setdefault("SPEECH_ENABLED", "false")
 def isolated_analytics_db(tmp_path, monkeypatch):
     """Run service/database tests against a fresh SQLite schema."""
     import importlib
-    from App.backend.app import database
+    from App.backend.app.db import database
 
     monkeypatch.setenv("ANALYTICS_DB_DIR", str(tmp_path))
     importlib.reload(database)
@@ -92,7 +92,7 @@ class TestChatRequest:
     
     def test_chat_request_valid(self):
         """Test valid chat request."""
-        from App.backend.app.models import ChatRequest
+        from App.backend.app.api.models import ChatRequest
         
         request = ChatRequest(message="How do I pay VAT?")
         
@@ -102,7 +102,7 @@ class TestChatRequest:
     
     def test_chat_request_with_options(self):
         """Test chat request with all options."""
-        from App.backend.app.models import ChatRequest
+        from App.backend.app.api.models import ChatRequest
         
         request = ChatRequest(
             message="What is VAT?",
@@ -116,7 +116,7 @@ class TestChatRequest:
     
     def test_chat_request_top_k_bounds(self):
         """Test top_k field has proper bounds."""
-        from App.backend.app.models import ChatRequest
+        from App.backend.app.api.models import ChatRequest
         from pydantic import ValidationError
         
         # Valid values
@@ -135,7 +135,7 @@ class TestChatRequest:
     
     def test_chat_request_empty_message_fails(self):
         """Test empty message fails validation."""
-        from App.backend.app.models import ChatRequest
+        from App.backend.app.api.models import ChatRequest
         from pydantic import ValidationError
         
         with pytest.raises(ValidationError):
@@ -147,7 +147,7 @@ class TestChatResponse:
     
     def test_chat_response_format(self):
         """Test chat response format."""
-        from App.backend.app.models import ChatResponse
+        from App.backend.app.api.models import ChatResponse
         
         response = ChatResponse(
             reply="You can pay VAT online...",
@@ -161,7 +161,7 @@ class TestChatResponse:
     
     def test_chat_response_default_values(self):
         """Test chat response with defaults."""
-        from App.backend.app.models import ChatResponse
+        from App.backend.app.api.models import ChatResponse
 
         response = ChatResponse(reply="Test response")
 
@@ -175,7 +175,7 @@ class TestChatModel:
     
     def test_model_initialization(self):
         """Test model initializes correctly."""
-        from App.backend.app.service import ChatModel
+        from App.backend.app.rag.pipeline import ChatModel
 
         model = ChatModel()
 
@@ -183,7 +183,7 @@ class TestChatModel:
     
     def test_generate_returns_dict(self, isolated_analytics_db):
         """Test generate returns proper dict."""
-        from App.backend.app.service import ChatModel
+        from App.backend.app.rag.pipeline import ChatModel
         
         model = ChatModel()
         # nosemgrep: ura-llm01-raw-user-input-to-llm -- ChatModel.generate applies InputGuard before inference.
@@ -196,7 +196,7 @@ class TestChatModel:
     
     def test_generate_with_top_k(self, isolated_analytics_db):
         """Test generate accepts top_k parameter."""
-        from App.backend.app.service import ChatModel
+        from App.backend.app.rag.pipeline import ChatModel
         
         model = ChatModel()
         # nosemgrep: ura-llm01-raw-user-input-to-llm -- ChatModel.generate applies InputGuard before inference.
@@ -207,7 +207,7 @@ class TestChatModel:
     
     def test_generate_response_content(self, isolated_analytics_db):
         """Test generate response contains expected fields and valid content."""
-        from App.backend.app.service import ChatModel
+        from App.backend.app.rag.pipeline import ChatModel
 
         model = ChatModel()
         # nosemgrep: ura-llm01-raw-user-input-to-llm -- ChatModel.generate applies InputGuard before inference.
@@ -227,8 +227,8 @@ class TestChatEndpoint:
     
     def test_chat_endpoint_integration(self, isolated_analytics_db):
         """Test full chat endpoint flow."""
-        from App.backend.app.models import ChatRequest, ChatResponse
-        from App.backend.app.service import ChatModel
+        from App.backend.app.api.models import ChatRequest, ChatResponse
+        from App.backend.app.rag.pipeline import ChatModel
         
         # Create request
         request = ChatRequest(message="How do I register for TIN?")
@@ -250,14 +250,14 @@ class TestAPIModels:
     
     def test_models_importable(self):
         """Test all models can be imported."""
-        from App.backend.app.models import ChatRequest, ChatResponse
+        from App.backend.app.api.models import ChatRequest, ChatResponse
         
         assert ChatRequest is not None
         assert ChatResponse is not None
     
     def test_service_importable(self):
         """Test service can be imported."""
-        from App.backend.app.service import ChatModel
+        from App.backend.app.rag.pipeline import ChatModel
         
         assert ChatModel is not None
 
@@ -334,7 +334,7 @@ class TestFeedbackModels:
 
     def test_feedback_request_valid(self):
         """Test valid feedback request."""
-        from App.backend.app.models import FeedbackRequest
+        from App.backend.app.api.models import FeedbackRequest
 
         fb = FeedbackRequest(message_id="msg-123", rating="up")
         assert fb.rating == "up"
@@ -342,7 +342,7 @@ class TestFeedbackModels:
 
     def test_feedback_request_with_comment(self):
         """Test feedback request with comment."""
-        from App.backend.app.models import FeedbackRequest
+        from App.backend.app.api.models import FeedbackRequest
 
         fb = FeedbackRequest(
             message_id="msg-123",
@@ -356,7 +356,7 @@ class TestFeedbackModels:
 
     def test_feedback_request_invalid_rating(self):
         """Test feedback rejects invalid rating."""
-        from App.backend.app.models import FeedbackRequest
+        from App.backend.app.api.models import FeedbackRequest
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
@@ -364,7 +364,7 @@ class TestFeedbackModels:
 
     def test_feedback_response_format(self):
         """Test feedback response format."""
-        from App.backend.app.models import FeedbackResponse
+        from App.backend.app.api.models import FeedbackResponse
 
         resp = FeedbackResponse(
             id="fb-1", message_id="msg-123", rating="up", created_at=1709000000.0
@@ -378,7 +378,7 @@ class TestAnalyticsEvent:
 
     def test_analytics_event_valid(self):
         """Test valid analytics event."""
-        from App.backend.app.models import AnalyticsEvent
+        from App.backend.app.api.models import AnalyticsEvent
 
         event = AnalyticsEvent(event_type="chat_sent", event_data={"length": 42})
         assert event.event_type == "chat_sent"
@@ -386,7 +386,7 @@ class TestAnalyticsEvent:
 
     def test_analytics_event_defaults(self):
         """Test analytics event defaults."""
-        from App.backend.app.models import AnalyticsEvent
+        from App.backend.app.api.models import AnalyticsEvent
 
         event = AnalyticsEvent(event_type="page_view")
         assert event.event_data == {}
@@ -403,7 +403,7 @@ class TestDatabaseLayer:
 
         # Force reimport to pick up new env
         import importlib
-        from App.backend.app import database
+        from App.backend.app.db import database
         importlib.reload(database)
         database._DB_DIR = tmp_path
         database._DB_PATH = tmp_path / "analytics.db"
@@ -416,7 +416,7 @@ class TestDatabaseLayer:
     def test_save_and_retrieve_feedback(self, tmp_path):
         """Test feedback save and summary retrieval."""
         import importlib
-        from App.backend.app import database
+        from App.backend.app.db import database
         importlib.reload(database)
         database._DB_DIR = tmp_path
         database._DB_PATH = tmp_path / "analytics.db"
@@ -435,7 +435,7 @@ class TestDatabaseLayer:
     def test_track_and_count_events(self, tmp_path):
         """Test event tracking and counting."""
         import importlib
-        from App.backend.app import database
+        from App.backend.app.db import database
         importlib.reload(database)
         database._DB_DIR = tmp_path
         database._DB_PATH = tmp_path / "analytics.db"
@@ -453,7 +453,7 @@ class TestDatabaseLayer:
     def test_conversation_logging(self, tmp_path):
         """Test conversation logging and stats."""
         import importlib
-        from App.backend.app import database
+        from App.backend.app.db import database
         importlib.reload(database)
         database._DB_DIR = tmp_path
         database._DB_PATH = tmp_path / "analytics.db"
@@ -555,14 +555,14 @@ class TestFeedbackCommentModel:
 
     def test_comment_request_valid(self):
         """Test valid comment request."""
-        from App.backend.app.models import FeedbackCommentRequest
+        from App.backend.app.api.models import FeedbackCommentRequest
 
         req = FeedbackCommentRequest(comment="This was unhelpful because...")
         assert req.comment == "This was unhelpful because..."
 
     def test_comment_request_empty_fails(self):
         """Test empty comment fails validation."""
-        from App.backend.app.models import FeedbackCommentRequest
+        from App.backend.app.api.models import FeedbackCommentRequest
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
@@ -575,7 +575,7 @@ class TestDatabaseFeedbackUpdate:
     def test_update_feedback_comment(self, tmp_path):
         """Test updating feedback comment."""
         import importlib
-        from App.backend.app import database
+        from App.backend.app.db import database
         importlib.reload(database)
         database._DB_DIR = tmp_path
         database._DB_PATH = tmp_path / "analytics.db"
@@ -589,7 +589,7 @@ class TestDatabaseFeedbackUpdate:
     def test_update_nonexistent_feedback(self, tmp_path):
         """Test updating non-existent feedback returns False."""
         import importlib
-        from App.backend.app import database
+        from App.backend.app.db import database
         importlib.reload(database)
         database._DB_DIR = tmp_path
         database._DB_PATH = tmp_path / "analytics.db"
@@ -606,7 +606,7 @@ class TestDatabaseErrorHandling:
     def test_save_feedback_returns_data(self, tmp_path):
         """Test save_feedback returns correct data structure."""
         import importlib
-        from App.backend.app import database
+        from App.backend.app.db import database
         importlib.reload(database)
         database._DB_DIR = tmp_path
         database._DB_PATH = tmp_path / "analytics.db"
@@ -622,7 +622,7 @@ class TestDatabaseErrorHandling:
     def test_session_upsert_increments_count(self, tmp_path):
         """Test session upsert correctly increments message count."""
         import importlib
-        from App.backend.app import database
+        from App.backend.app.db import database
         importlib.reload(database)
         database._DB_DIR = tmp_path
         database._DB_PATH = tmp_path / "analytics.db"

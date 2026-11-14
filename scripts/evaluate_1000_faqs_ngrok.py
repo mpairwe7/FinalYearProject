@@ -1437,7 +1437,7 @@ def _number_matched(num_str: str, reply_lower: str, locale: str) -> bool:
         if _contains_term(reply_lower, f"asilimia {bare_pct}") or _contains_term(reply_lower, f"ebitundu {bare_pct}"):
             return True
     try:
-        from app.entailment import canonical_amounts, percentages
+        from app.rag.entailment import canonical_amounts, percentages
         ca = canonical_amounts(reply_lower)
         cp = percentages(reply_lower)
         raw_num = clean_num.replace(",", "").replace("%", "").strip()

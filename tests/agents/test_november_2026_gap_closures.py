@@ -17,17 +17,17 @@ from decimal import Decimal
 from unittest import mock
 
 import pytest
-from app import database as db
+from app.db import database as db
 from app.agents.graphs.main_graph import node_act, node_observe, node_reflect
 from app.agents.graphs.state import AgentGraphState, GraphOutcome
-from app.context_manager import extract_conversation_entities
-from app.corrective_rag import build_reflection_query
+from app.rag.context_manager import extract_conversation_entities
+from app.rag.corrective_rag import build_reflection_query
 from app.document_worker import _apply_child_sandbox_limits, try_isolated
 from app.documents import UnsupportedDocumentError, _validate_document_content
-from app.flags import flags
+from app.config.flags import flags
 from app.graph.build import build_graph, build_summary
 from app.graph.schema import EdgeKind
-from app.indexer import (
+from app.ingestion.indexer import (
     _embedding_text,
     _vector_payload,
     annotate_fiscal_year,
@@ -38,7 +38,7 @@ from app.mcp.transport import HttpTransport
 from app.memory.procedural import ProceduralMemory
 from app.memory.semantic import SemanticMemory, UserFact
 from app.memory.service import MemoryService
-from app.retriever import _DBSF_PREFETCH_MIN, _RERANK_CHARS
+from app.rag.retriever import _DBSF_PREFETCH_MIN, _RERANK_CHARS
 from app.tax.schedule_sandbox import (
     SandboxViolationError,
     evaluate_decimal_expression,
@@ -573,7 +573,7 @@ def test_mcp_wire_server_enforces_actor_assertion_header_alignment() -> None:
 
 def test_graph_waiting_user_surfaces_pending_action_in_turn_result() -> None:
     from app.agents.graphs.state import TaxpayerActionRequest
-    from app.service import ChatModel
+    from app.rag.pipeline import ChatModel
 
     model = ChatModel()
     state = AgentGraphState(
@@ -608,7 +608,7 @@ def test_efris_handbooks_en_lg_nyn_sw_chunking_and_vernacular_normalization(tmp_
     import shutil
     from pathlib import Path
 
-    from app.pdf_corpus import (
+    from app.ingestion.pdf_corpus import (
         _chunk_pdf_records,
         _sha256_file,
         export_pdf_chunks_to_jsonl,
@@ -616,7 +616,7 @@ def test_efris_handbooks_en_lg_nyn_sw_chunking_and_vernacular_normalization(tmp_
         language_from_pdf_name,
         tax_type_from_pdf_name,
     )
-    from app.retriever import apply_preference_boost
+    from app.rag.retriever import apply_preference_boost
 
     expected_handbooks = {
         "URA-EFRIS-Handbook-FY2026-27-English.pdf": ("en", "1. What is EFRIS?"),
@@ -683,7 +683,7 @@ def test_qa_audit_gemini_translate_budget_fixed_point_mt_cache_and_midparagraph_
 
     from app import mt
     from app.providers import gateway as gw
-    from app.query import translate_query_for_retrieval
+    from app.rag.query import translate_query_for_retrieval
 
     from ml.scripts.data_aug.chunkers import chunk_markdown
 
@@ -698,7 +698,7 @@ def test_qa_audit_gemini_translate_budget_fixed_point_mt_cache_and_midparagraph_
             "app.sunbird.translate_to_english",
             return_value="Can I use EFRIS without internet in Uganda?",
         ) as tr_mock,
-        mock.patch("app.query.RETRIEVAL_MT_BACKEND", "sunbird"),
+        mock.patch("app.rag.query.RETRIEVAL_MT_BACKEND", "sunbird"),
     ):
         en_out = translate_query_for_retrieval(
             "Nsobola okukozesa enkola ya EFRIS nga sirina yintaneeti mu Uganda?", "lg"

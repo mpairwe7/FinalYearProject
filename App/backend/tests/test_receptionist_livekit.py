@@ -318,7 +318,7 @@ def test_log_ref_hides_the_identity_and_any_control_characters() -> None:
 
 
 def test_officer_caption_is_skipped_when_the_caller_socket_is_gone(caplog) -> None:
-    from app import database as db
+    from app.db import database as db
     from app.receptionist.store import init_receptionist_schema, list_turns
 
     db.init_db()

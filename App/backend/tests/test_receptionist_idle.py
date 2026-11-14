@@ -7,7 +7,7 @@ import unittest
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app import database as db
+from app.db import database as db
 from app.receptionist import config
 from app.receptionist.brain import UraReceptionistBrain
 from app.receptionist.phrases import phrase

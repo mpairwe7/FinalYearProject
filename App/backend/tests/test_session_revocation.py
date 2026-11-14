@@ -29,7 +29,7 @@ from unittest import mock
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from app import database as db
+from app.db import database as db
 from app import main as main_mod
 from app.analytics import metrics
 from app.auth import make_dev_token
@@ -126,7 +126,7 @@ def test_an_unreadable_sqlite_store_raises_instead_of_reading_empty(monkeypatch)
 
 
 def test_the_postgres_store_without_a_pool_raises() -> None:
-    from app import postgres
+    from app.db import postgres
 
     with mock.patch.object(postgres, "_get_pool", return_value=None):
         with pytest.raises(RuntimeError):
@@ -142,7 +142,7 @@ def test_the_postgres_backend_is_dispatched_like_the_other_helpers() -> None:
     source = Path(db.__file__).read_text(encoding="utf-8")
     assert "load_session_revocations = _pg.load_session_revocations" in source
     assert "revoke_sessions = _pg.revoke_sessions" in source
-    pg_source = (Path(db.__file__).parent / "postgres.py").read_text(encoding="utf-8")
+    pg_source = (Path(db.__file__).parent / "db/postgres.py").read_text(encoding="utf-8")
     assert "CREATE TABLE IF NOT EXISTS revoked_sessions" in pg_source
 
 

@@ -18,10 +18,10 @@ from typing import Any
 import pytest
 from app.auth.jwt_auth import make_dev_token
 from app.documents import diagnose_portal_screenshot
-from app.flags import flags
+from app.config.flags import flags
 from app.main import app
 from app.portal_copilot import clear_portal_task_cache
-from app.service import ChatModel
+from app.rag.pipeline import ChatModel
 from fastapi.testclient import TestClient
 
 
@@ -472,7 +472,7 @@ def test_9_qa_hardening_temporal_ttl_intent_capsule_validators_and_multiturn_mem
     """Verify OWASP ASI01/ASI07 temporal TTL anti-replay, strict NIRA NIN/phone validators, and multi-turn memory."""
     import time
 
-    from app import database as db
+    from app.db import database as db
     from app.mcp import mrtr
     from app.portal_copilot import (
         PortalTaskValidationError,

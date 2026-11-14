@@ -7,16 +7,16 @@ import uuid
 from unittest import mock
 from fastapi.testclient import TestClient
 
-from app import database as db
+from app.db import database as db
 from app.auth.jwt_auth import make_dev_token
 from app.discrepancy_detector import (
     detect_discrepancy,
     format_discrepancy_acknowledgement,
 )
-from app.flags import flags
-from app.llm import _inject_statutory_precedences
+from app.config.flags import flags
+from app.rag.generator import _inject_statutory_precedences
 from app.main import app
-from app.retriever import _filter_tombstoned_candidates
+from app.rag.retriever import _filter_tombstoned_candidates
 
 
 class TestDiscrepancyDetector(unittest.TestCase):
@@ -250,7 +250,7 @@ class TestAdminEndpointsE2E(unittest.TestCase):
             bot_statement="WHT is 15%", user_correction="WHT is 6%", cited_sources=["old_wht_g634.pdf"],
         )
         with mock.patch("app.main._audit_staff_action") as audit, \
-             mock.patch("app.cache.reset_index_stamp") as reset_cache:
+             mock.patch("app.rag.cache.reset_index_stamp") as reset_cache:
             res = self.client.post(
                 f"/v1/admin/discrepancies/{rep['id']}/verify",
                 headers=self.auth_headers,
@@ -285,7 +285,7 @@ class TestAdminEndpointsE2E(unittest.TestCase):
             bot_statement=f"PAYE band {run}", user_correction="That band changed", cited_sources=[],
         )
         with mock.patch("app.main._audit_staff_action") as audit, \
-             mock.patch("app.cache.reset_index_stamp") as reset_cache:
+             mock.patch("app.rag.cache.reset_index_stamp") as reset_cache:
             res = self.client.post(
                 f"/v1/admin/discrepancies/{rep['id']}/verify",
                 headers=self.auth_headers,
@@ -330,8 +330,8 @@ class TestAdminEndpointsE2E(unittest.TestCase):
             bot_statement=f"VAT on {run} is 18%", user_correction="It is exempt", cited_sources=[f"vat_{run}.pdf"],
         )
         client = TestClient(app, raise_server_exceptions=False)
-        with mock.patch("app.database.add_corpus_tombstone", side_effect=RuntimeError("disk full")), \
-             mock.patch("app.cache.reset_index_stamp") as reset_cache:
+        with mock.patch("app.db.database.add_corpus_tombstone", side_effect=RuntimeError("disk full")), \
+             mock.patch("app.rag.cache.reset_index_stamp") as reset_cache:
             res = client.post(
                 f"/v1/admin/discrepancies/{rep['id']}/verify",
                 headers=self.auth_headers,
@@ -417,7 +417,7 @@ class TestDiscrepancyOnTheStream(unittest.TestCase):
     def test_a_correction_on_the_stream_is_recorded_and_reported(self):
         import asyncio
 
-        from app import service
+        from app.rag import pipeline
 
         db.init_db()
         challenged = f"The standard VAT rate in Uganda is 16% ({uuid.uuid4().hex[:6]})."
@@ -442,7 +442,7 @@ class TestDiscrepancyOnTheStream(unittest.TestCase):
 
         async def collect():
             return [
-                ev async for ev in service.run_chat_turn(
+                ev async for ev in pipeline.run_chat_turn(
                     _Model(), message="No, that is incorrect, VAT is 18%, not 16%", conversation_id="c-g653",
                     top_k=4, locale="en", session_id="s-g653", request_id="r", user_id=None, tenant_id="default",
                 )
@@ -466,7 +466,7 @@ class TestDiscrepancyOnTheStreamGuards(unittest.TestCase):
     def _run(self, result: dict, message: str, conversation_id: str):
         import asyncio
 
-        from app import service
+        from app.rag import pipeline
 
         class _Model:
             name = "test_model"
@@ -479,7 +479,7 @@ class TestDiscrepancyOnTheStreamGuards(unittest.TestCase):
 
         async def collect():
             return [
-                ev async for ev in service.run_chat_turn(
+                ev async for ev in pipeline.run_chat_turn(
                     _Model(), message=message, conversation_id=conversation_id, top_k=4, locale="en",
                     session_id=f"s-{conversation_id}", request_id="r", user_id=None, tenant_id="default",
                 )

@@ -7,7 +7,7 @@ import logging
 import time
 from typing import Any
 
-from .. import database as db
+from ..db import database as db
 from .state import CallState
 from .store import get_call, list_turns, update_call
 

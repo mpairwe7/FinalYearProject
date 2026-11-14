@@ -1,6 +1,6 @@
 """Identity, consent and workflow state must behave the same on both backends.
 
-These tables were absent from `postgres.py` entirely, so the dispatch
+These tables were absent from `db/postgres.py` entirely, so the dispatch
 block left them on SQLite while production runs Postgres. Every one is
 per-replica there, and two of them are legal instructions:
 
@@ -26,8 +26,8 @@ from pathlib import Path
 
 import pytest
 
-from app import database as db
-from app import postgres as pg
+from app.db import database as db
+from app.db import postgres as pg
 
 _COMPLIANCE_SURFACE = [
     "upsert_user",
@@ -73,7 +73,7 @@ class TestSurfaceIsMirrored:
         source = Path(pg.__file__).read_text()
         declared = set(re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", source))
         for table in ("users", "user_profiles", "consent_receipts", "workflow_sessions"):
-            assert table in declared, f"postgres.py has no {table} table"
+            assert table in declared, f"db/postgres.py has no {table} table"
 
 
 class TestConsentSemanticsOnSqlite:

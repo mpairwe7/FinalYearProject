@@ -40,7 +40,7 @@ OLD_DISCREPANCY_DDL = """CREATE TABLE knowledge_discrepancies (id TEXT PRIMARY K
 
 
 def test_an_old_sqlite_queue_is_rebuilt_to_accept_evidence_conflicts() -> None:
-    from app import database
+    from app.db import database
 
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
@@ -56,7 +56,7 @@ def test_an_old_sqlite_queue_is_rebuilt_to_accept_evidence_conflicts() -> None:
 
 
 def test_init_db_migrates_an_old_queue(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app import database
+    from app.db import database
 
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -68,7 +68,7 @@ def test_init_db_migrates_an_old_queue(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_a_conflict_reaches_the_real_review_queue() -> None:
-    from app import database
+    from app.db import database
 
     database.init_db()
     conflict = precedence.Conflict(key="passenger_baggage_allowance_usd", display_name="Passenger baggage allowance",
@@ -101,7 +101,7 @@ class _Cursor:
      "'citation_mismatch', 'general', 'evidence_conflict'))", False),
 ])
 def test_postgres_adds_the_type_only_when_missing(definition, altered: bool) -> None:
-    from app import postgres
+    from app.db import postgres
 
     cur = _Cursor(definition)
     postgres._refresh_discrepancy_type_check(cur)
@@ -109,7 +109,7 @@ def test_postgres_adds_the_type_only_when_missing(definition, altered: bool) -> 
 
 
 def test_a_failed_postgres_alter_does_not_abort_the_migration() -> None:
-    from app import postgres
+    from app.db import postgres
 
     cur = _Cursor("CHECK (discrepancy_type IN ('general'))", fail=True)
     postgres._refresh_discrepancy_type_check(cur)
@@ -155,7 +155,7 @@ def _baggage_graph_hit() -> dict:
 
 
 def test_the_rest_fusion_path_ranks_a_contradicting_passage_last(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.service import ChatModel
+    from app.rag.pipeline import ChatModel
 
     monkeypatch.setattr(precedence, "record_conflicts", lambda conflicts, **_: len(conflicts))
     monkeypatch.setattr(ChatModel, "_graph_hits", staticmethod(lambda _q: [_baggage_graph_hit()]))
@@ -565,7 +565,7 @@ def test_the_mda_resolver_uses_the_tables_rate(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_the_semantic_layer_gate_sees_overrides_and_rollouts(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.flags import flags
+    from app.config.flags import flags
     from app.semantic_layer import config
 
     for name in ("FLAG_SEMANTIC_LAYER", "FLAG_SEMANTIC_LAYER_COHORTS", "FLAG_SEMANTIC_LAYER_PERCENT",
@@ -583,7 +583,7 @@ def test_the_semantic_layer_gate_sees_overrides_and_rollouts(monkeypatch: pytest
 
 
 def test_the_tools_refuse_an_uncleared_layer_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.flags import flags
+    from app.config.flags import flags
     from app.tools import ToolRegistry
 
     for name in ("VAULT_ADDR", "SEMANTIC_LAYER_VAULT_PATH", "SEMANTIC_LAYER_DSA_REF", "SEMANTIC_LAYER_DPIA_REF"):
@@ -601,7 +601,7 @@ def test_the_tools_refuse_an_uncleared_layer_in_production(monkeypatch: pytest.M
 
 def _rate_model():
     from app.guardrails import OutputGuard
-    from app.service import ChatModel
+    from app.rag.pipeline import ChatModel
 
     model = ChatModel.__new__(ChatModel)
     model._output_guard = OutputGuard()
@@ -681,7 +681,7 @@ def test_the_penalty_binder_respects_period_and_tax_due(question: str, expected)
 
 
 def test_an_interrupted_rebuild_is_recovered() -> None:
-    from app import database
+    from app.db import database
 
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
@@ -700,7 +700,7 @@ def test_a_stated_change_is_a_conflict_beside_the_old_figure() -> None:
 
 
 def test_the_langgraph_faq_gate_orders_by_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app import faq_binding
+    from app.rag import faq_binding
     from app.agents.graphs import main_graph
 
     stale = {"text": "The VAT standard rate is 17%.", "doc_type": "csv", "id": "stale"}
@@ -713,7 +713,7 @@ def test_the_langgraph_faq_gate_orders_by_precedence(monkeypatch: pytest.MonkeyP
 
 
 def test_the_postgres_lookup_is_scoped_to_the_altered_table() -> None:
-    from app import postgres
+    from app.db import postgres
 
     cur = _Cursor(None)
     postgres._refresh_discrepancy_type_check(cur)
@@ -757,7 +757,7 @@ def test_a_cte_is_still_accepted() -> None:
 def test_an_outer_trace_is_read_live_by_the_audit() -> None:
     from app.audit import turns
     from app.kernel import trace
-    from app.service import _scoped_conversation_state
+    from app.rag.pipeline import _scoped_conversation_state
 
     class Probe:
         @_scoped_conversation_state
@@ -774,8 +774,8 @@ def test_an_outer_trace_is_read_live_by_the_audit() -> None:
     finally:
         trace.TURN_KERNEL_TRACE.reset(token)
     assert payload["kernel_trace"]["misses"][0]["concept"] == "carbon_border_levy"
-    service = (ROOT / "App/backend/app/service.py").read_text(encoding="utf-8")
-    assert "_stream_kernel_trace.open_turn()" in service
+    pipeline = (ROOT / "App/backend/app/rag/pipeline.py").read_text(encoding="utf-8")
+    assert "_stream_kernel_trace.open_turn()" in pipeline
 
 
 # --------------------------------------------------------------------------- round three
@@ -818,7 +818,7 @@ def test_a_failed_write_is_tried_again(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_a_refused_postgres_write_is_not_counted(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app import database
+    from app.db import database
 
     monkeypatch.setattr(database, "create_or_increment_discrepancy", lambda **_: {"id": "", "status": "failed"})
     conflict = precedence.find_conflicts([VAT], [{"text": "The VAT standard rate is 17%.", "doc_type": "csv"}])
@@ -848,7 +848,7 @@ def test_the_certified_templates_still_pass() -> None:
 def test_each_streamed_turn_has_its_own_pin_and_trace(monkeypatch: pytest.MonkeyPatch) -> None:
     import asyncio
 
-    from app import service
+    from app.rag import pipeline
     from app.kernel import trace
 
     seen: list[tuple] = []
@@ -861,24 +861,24 @@ def test_each_streamed_turn_has_its_own_pin_and_trace(monkeypatch: pytest.Monkey
         yield "_log", {"result": {}, "full_reply": "r", "elapsed_ms": 1.0}
 
     def finish(_model, _payload, **_kwargs):
-        seen.append((trace.snapshot(), service._ACTIVE_KERNEL_PIN.get()))
+        seen.append((trace.snapshot(), pipeline._ACTIVE_KERNEL_PIN.get()))
 
-    monkeypatch.setattr(service, "_run_chat_turn_events", events)
-    monkeypatch.setattr(service, "_finish_streamed_turn", finish)
+    monkeypatch.setattr(pipeline, "_run_chat_turn_events", events)
+    monkeypatch.setattr(pipeline, "_finish_streamed_turn", finish)
     pins = iter([{"as_of": "2026-11-08"}, {"as_of": "2026-11-09"}])
-    monkeypatch.setattr(service, "_kernel_pin_for_turn", lambda: next(pins))
+    monkeypatch.setattr(pipeline, "_kernel_pin_for_turn", lambda: next(pins))
 
     stale_pin = {"as_of": "2026-01-01"}
     stale_trace = {"misses": [{"concept": "from_an_earlier_turn"}], "uncited_served": []}
     after: list = []
 
     async def session() -> None:  # one WebSocket session: every turn in one context
-        service._ACTIVE_KERNEL_PIN.set(stale_pin)  # what the context holds before these turns
+        pipeline._ACTIVE_KERNEL_PIN.set(stale_pin)  # what the context holds before these turns
         trace.TURN_KERNEL_TRACE.set(stale_trace)
         for _ in range(2):
-            async for _event in service.run_chat_turn(object(), channel="ws", message="q", session_id="s"):
+            async for _event in pipeline.run_chat_turn(object(), channel="ws", message="q", session_id="s"):
                 pass
-        after.append((service._ACTIVE_KERNEL_PIN.get(), trace.TURN_KERNEL_TRACE.get()))
+        after.append((pipeline._ACTIVE_KERNEL_PIN.get(), trace.TURN_KERNEL_TRACE.get()))
 
     asyncio.run(session())
     (first_trace, first_pin), (second_trace, second_pin) = seen

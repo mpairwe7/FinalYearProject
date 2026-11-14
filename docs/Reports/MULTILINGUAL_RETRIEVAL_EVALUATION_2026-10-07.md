@@ -545,7 +545,7 @@ tomorrow?" gets a table of URA office hours at probability 0.981; "Who won the
 photosynthesis?" a tax-incentive table that mentions hoes at 0.867. Abstention
 needs a calibrated threshold per language **and** a second signal (an
 answerability or entailment check, which the repository already has in
-`entailment.py`), and the index needs fewer table fragments.
+`rag/entailment.py`), and the index needs fewer table fragments.
 
 ### 6.3 The translation pivot
 

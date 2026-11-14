@@ -3,7 +3,7 @@
 - **Effective Date:** 2026-10-22
 - **Related ADRs:** [ADR-0010](../adr/0010-agentic-journey-copilot-prerequisites-a2ui-and-step-up-auth.md), [ADR-0011](../adr/0011-nodejs-24-runtime-and-github-actions-supply-chain-upgrade.md), [ADR-0013](../adr/0013-session-bound-workflow-adoption-and-verified-resume-codes.md)
 - **Last revised:** 2026-10-23 (post-#619 audit, third pass: ADR-0013 Amendment A)
-- **Primary Modules:** `App/backend/app/workflows/journey_copilot.py`, `App/backend/app/workflows/registry.py`, `App/backend/app/service.py`, `App/frontend/src/components/WorkflowStepper.tsx`, `App/frontend/src/components/ChatMessage.tsx`
+- **Primary Modules:** `App/backend/app/workflows/journey_copilot.py`, `App/backend/app/workflows/registry.py`, `App/backend/app/rag/pipeline.py`, `App/frontend/src/components/WorkflowStepper.tsx`, `App/frontend/src/components/ChatMessage.tsx`
 
 ---
 

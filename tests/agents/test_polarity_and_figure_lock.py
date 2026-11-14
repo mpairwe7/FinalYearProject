@@ -11,11 +11,11 @@ from app.agents.evaluator import (
     strip_unverified_figure_sentences,
     verify_figure_lock,
 )
-from app.claim_polarity import DIRECTION_LEXICON, polarity_conflicts
-from app.claim_verifier import verify_claims
+from app.rag.claim_polarity import DIRECTION_LEXICON, polarity_conflicts
+from app.rag.claim_verifier import verify_claims
 from app.providers.routing import ENDPOINTS, ModelTier
-from app.retriever import HybridRetriever
-from app.service import ChatModel
+from app.rag.retriever import HybridRetriever
+from app.rag.pipeline import ChatModel
 
 
 # ---------------------------------------------------------------------------
@@ -249,7 +249,7 @@ def test_figure_lock_accepts_verified_and_rounded_figures_and_rejects_invented_o
 
 def test_reflect_llm_uses_same_tier_endpoint_and_60s_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     """_reflect_llm forwards endpoint= and timeout=60.0 to llm._vllm_generate (§9.G.2)."""
-    from app import llm as llm_module
+    from app.rag import generator as generator_module
 
     captured: dict[str, Any] = {}
 
@@ -258,8 +258,8 @@ def test_reflect_llm_uses_same_tier_endpoint_and_60s_timeout(monkeypatch: pytest
         captured.update(kwargs)
         return "Revised grounded answer with verified figures [1]."
 
-    monkeypatch.setattr(llm_module, "LLM_BACKEND", "vllm")
-    monkeypatch.setattr(llm_module, "_vllm_generate", _fake_vllm_generate)
+    monkeypatch.setattr(generator_module, "LLM_BACKEND", "vllm")
+    monkeypatch.setattr(generator_module, "_vllm_generate", _fake_vllm_generate)
 
     t3_ep = ENDPOINTS[ModelTier.T3]
     out = ChatModel._reflect_llm(

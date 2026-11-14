@@ -12,15 +12,15 @@ from __future__ import annotations
 
 import unittest
 
-from app.claim_verifier import verify_claims
-from app.context_manager import (
+from app.rag.claim_verifier import verify_claims
+from app.rag.context_manager import (
     RollingContextManager,
     extract_conversation_entities,
 )
-from app.entailment import is_contradicted, numeric_contradiction
+from app.rag.entailment import is_contradicted, numeric_contradiction
 from app.guardrails import OutputGuard, redact_pii_text
 from app.premise_guard import check_false_premise
-from app.query import correct_spelling, rewrite_with_history
+from app.rag.query import correct_spelling, rewrite_with_history
 
 
 class TestLongHorizonContextAwareness(unittest.TestCase):

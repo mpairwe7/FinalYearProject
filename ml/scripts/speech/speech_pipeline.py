@@ -62,9 +62,9 @@ def _run_llm_stage(query: str) -> tuple[str, str]:
     back to an echo so the pipeline still produces a result.
     """
     try:
-        from App.backend.app import llm as llm_module  # type: ignore
+        from App.backend.app.rag import generator as generator_module  # type: ignore
 
-        reply = llm_module.generate(
+        reply = generator_module.generate(
             query=query, passages=[], conversation_history=None, locale="en"
         )
         return (reply or "").strip(), "backend.llm"

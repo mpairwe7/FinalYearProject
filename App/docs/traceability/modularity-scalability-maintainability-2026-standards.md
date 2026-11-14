@@ -12,11 +12,11 @@ Implements architectural enhancements closing identified gaps across three core 
 - **Problem**: Output PII redaction was unconditional, censoring the taxpayer's own user-stated identifiers (e.g. `1000123456` -> `[REDACTED_UG_TIN]`) when the model confirmed or repeated the taxpayer's input.
 - **Solution**:
   - Enhanced `redact_pii_text` and `OutputGuard.redact_pii` in `App/backend/app/guardrails.py` to accept `allowed_values: Iterable[str] | None`.
-  - Introduced turn-scoped `_ACTIVE_USER_STATED_IDS` ContextVar in `App/backend/app/service.py`, automatically capturing user-declared TINs/PRNs per turn and passing them into `_finalize_reply` without leaking across sessions.
+  - Introduced turn-scoped `_ACTIVE_USER_STATED_IDS` ContextVar in `App/backend/app/rag/pipeline.py`, automatically capturing user-declared TINs/PRNs per turn and passing them into `_finalize_reply` without leaking across sessions.
 
 ### 2. Vernacular-Safe Query Rewriting (G135)
 - **Problem**: `query.rewrite()` unconditionally invoked English dictionary fuzzy spell correction, mutating valid Swahili words (e.g. `nini` -> `nin`) and Luganda terms before translation.
-- **Solution**: Updated `rewrite()` in `App/backend/app/query.py` to accept `locale` and consult `detect_language()`. Queries in vernacular languages (`lg`, `sw`, `nyn`, `ach`) skip English dictionary spell correction, preserving native morphology and contractions.
+- **Solution**: Updated `rewrite()` in `App/backend/app/rag/query.py` to accept `locale` and consult `detect_language()`. Queries in vernacular languages (`lg`, `sw`, `nyn`, `ach`) skip English dictionary spell correction, preserving native morphology and contractions.
 
 ### 3. Operator Readiness Probe Observability (G137)
 - **Problem**: `/ready` reported `translation: unavailable` when local Sunflower prompted MT was active and did not advertise dense device or cross-encoder reranker presence.

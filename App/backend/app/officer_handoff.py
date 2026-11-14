@@ -35,7 +35,7 @@ from .escalation_policy import (
     evaluate_cxp_schedule,
     higher_priority,
 )
-from .flags import flags
+from .config.flags import flags
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -115,7 +115,7 @@ def workflow_session(state_key: str, *, tenant_id: str = "default") -> Mapping[s
     if not state_key:
         return {}
     try:
-        from . import database as db  # noqa: PLC0415
+        from .db import database as db  # noqa: PLC0415
 
         return db.get_workflow_session(state_key, tenant_id) or {}
     except Exception:

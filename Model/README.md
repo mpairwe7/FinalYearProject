@@ -17,7 +17,7 @@ This directory contains trained model files for the URA chatbot.
 
 | Model | Format | Use Case | Size |
 |-------|--------|----------|------|
-| Qwen2.5-3B-Instruct | HF safetensors | API backend inference (`App/backend/app/llm.py`) | ~6 GB |
+| Qwen2.5-3B-Instruct | HF safetensors | API backend inference (`App/backend/app/rag/generator.py`) | ~6 GB |
 | Gemma-2-2B (fine-tuned) | GGUF Q4_K_M | On-device mobile inference | ~1.5 GB |
 
 **API backend**: Qwen2.5-3B-Instruct auto-downloads from HuggingFace on first request.

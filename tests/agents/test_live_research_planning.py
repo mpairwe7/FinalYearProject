@@ -373,9 +373,9 @@ UNAVAILABLE = wr.LIVE_DISCLOSURES[wr.LIVE_UNAVAILABLE]
 
 @pytest.fixture
 def model(fresh_registry, monkeypatch):
-    # Flags go through the environment: test_integration.py reloads app.flags,
+    # Flags go through the environment: test_integration.py reloads app.config.flags,
     # so flags.set() can land on a different object from the one service.py holds.
-    from app.service import ChatModel
+    from app.rag.pipeline import ChatModel
 
     monkeypatch.setenv("FLAG_LIVE_WEB_RESEARCH", "true")
     monkeypatch.setenv("FLAG_SEMANTIC_CACHE", "true")
@@ -416,7 +416,7 @@ class TestServingPaths:
         assert any(name == "web_research.completed" for name, _ in result["_web_research_events"])
 
     def test_a_streamed_turn_ends_with_the_disclosure(self, model):
-        from app.service import run_chat_turn
+        from app.rag.pipeline import run_chat_turn
 
         async def collect() -> list:
             return [
@@ -526,7 +526,7 @@ class TestEveryExit:
         assert result["_live_check"]["status"] == wr.LIVE_UNAVAILABLE
 
     def test_an_abstained_stream_says_the_check_failed(self, empty):
-        from app.service import run_chat_turn
+        from app.rag.pipeline import run_chat_turn
 
         async def collect() -> list:
             return [
@@ -550,13 +550,13 @@ class TestEveryExit:
 
     @staticmethod
     def _audited(model, result: dict) -> dict:
-        from app import service
+        from app.rag import pipeline
 
-        token = service._TURN_LIVE_CHECK.set({"audit": {"status": "unavailable"}, "disclosure": UNAVAILABLE})
+        token = pipeline._TURN_LIVE_CHECK.set({"audit": {"status": "unavailable"}, "disclosure": UNAVAILABLE})
         try:
             model._audit_turn(message="q", result=result, session_id="s", trace_ctx={})
         finally:
-            service._TURN_LIVE_CHECK.reset(token)
+            pipeline._TURN_LIVE_CHECK.reset(token)
         return result
 
     def test_a_clarifying_question_makes_no_claim_but_is_still_audited(self, model):
@@ -576,7 +576,7 @@ class TestEveryExit:
         from app.audit.turns import build_turn_payload
 
         monkeypatch.setenv("FLAG_LANGGRAPH", "true")
-        monkeypatch.setattr("app.retriever.get_shared_retriever", lambda **_k: _Retriever())
+        monkeypatch.setattr("app.rag.retriever.get_shared_retriever", lambda **_k: _Retriever())
 
         result = model.generate(QUESTION)  # nosemgrep: ura-llm01-raw-user-input-to-llm
 
@@ -589,9 +589,9 @@ class TestEveryLanguage:
     BODY = "Hakuna taarifa mpya kuhusu msamaha wa adhabu."
 
     def _localize(self, monkeypatch, text: str) -> str:
-        from app import service
+        from app.rag import pipeline
 
-        real = service.localize_reply
+        real = pipeline.localize_reply
 
         def stub(reply, locale, **kwargs):
             if reply == self.BODY:
@@ -600,7 +600,7 @@ class TestEveryLanguage:
                 return "[sw] " + reply
             return real(reply, locale, **kwargs)
 
-        monkeypatch.setattr(service, "localize_reply", stub)
+        monkeypatch.setattr(pipeline, "localize_reply", stub)
         return real(text, "sw")
 
     def test_a_body_already_in_the_locale_does_not_strand_the_english_sentence(self, monkeypatch):
@@ -616,7 +616,7 @@ class TestEveryLanguage:
         assert served == f"{self.BODY}\n\n[sw] {unconfirmed}\n\n[sw] {wr.LIVE_PARTIAL_DISCLOSURE}"
 
     def test_english_is_untouched(self):
-        from app.service import localize_reply
+        from app.rag.pipeline import localize_reply
 
         text = f"An answer.\n\n{UNAVAILABLE}"
 
@@ -644,7 +644,7 @@ class TestCorpusSyncApproval:
     def _research(self, monkeypatch, sync: list[str], query: str):
         from types import SimpleNamespace
 
-        import app.corpus_sync as corpus_sync
+        import app.vectorstore.corpus_sync as corpus_sync
         import app.ephemeral_pdf_sandbox as sandbox
 
         document = SimpleNamespace(
@@ -704,7 +704,7 @@ class TestGraphParity:
             return ChainResult("unavailable")
 
         monkeypatch.setattr(wr, "search_with_failover", spy)
-        monkeypatch.setattr("app.retriever.get_shared_retriever", lambda **_k: _Retriever())
+        monkeypatch.setattr("app.rag.retriever.get_shared_retriever", lambda **_k: _Retriever())
         state = self._state()
 
         main_graph.node_retrieve(state)
@@ -723,7 +723,7 @@ class TestGraphParity:
         monkeypatch.setenv("FLAG_LIVE_WEB_RESEARCH", "true")
         rows = (RawResult("Notice", "https://ura.go.ug/en/notice/", "Penalty waiver."),)
         monkeypatch.setattr(wr, "search_with_failover", lambda *_a, **_k: ChainResult("ok", rows, "tavily"))
-        monkeypatch.setattr("app.retriever.get_shared_retriever", lambda **_k: _Retriever())
+        monkeypatch.setattr("app.rag.retriever.get_shared_retriever", lambda **_k: _Retriever())
         state = self._state()
 
         main_graph.node_retrieve(state)

@@ -79,7 +79,7 @@ class TestATaintedDocumentIsRejectedWhole:
         synced: list[str] = []
         monkeypatch.setattr(wr, "corpus_sync_permitted", lambda: True)
         monkeypatch.setattr(wr, "can_persist_to_qdrant", lambda url: True)
-        import app.corpus_sync as corpus_sync
+        import app.vectorstore.corpus_sync as corpus_sync
 
         monkeypatch.setattr(corpus_sync, "compare_and_sync_ura_document", lambda doc, *a, **k: synced.append(doc.url))
 
@@ -288,7 +288,7 @@ def test_a_read_that_misses_the_deadline_is_not_quoted_meanwhile(monkeypatch, bo
     Deterministic: the turn's wait expires by construction, not by racing a clock,
     and the read it abandoned is a valid document that finishes afterwards.
     """
-    import app.corpus_sync as corpus_sync
+    import app.vectorstore.corpus_sync as corpus_sync
 
     started, hold, finished = threading.Event(), threading.Event(), threading.Event()
     synced: list[str] = []

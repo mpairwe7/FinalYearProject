@@ -14,7 +14,7 @@ from datetime import date
 
 import pytest
 
-from app import llm
+from app.rag import generator
 from app import web_research as wr
 from app.web_search_providers import RawResult, parse_ddg_html
 
@@ -57,7 +57,7 @@ class TestTrustBoundary:
     def test_a_snippet_figure_cannot_reach_the_deterministic_channel(self):
         # verify_claims treats verified_facts as deterministic: a number in it
         # approves a claim outright. The notice is what the service passes on.
-        from app.claim_verifier import verify_claims
+        from app.rag.claim_verifier import verify_claims
 
         outcome = _research(COMMENTARY)
         statute = [{"text": "The standard rate of VAT in Uganda is 18% on taxable supplies."}]
@@ -117,7 +117,7 @@ class TestTrustBoundary:
     def test_passage_headers_state_authority_evidence_and_age(self):
         hit = _research(COMMENTARY).web_hits[0]
 
-        header = llm._passage_header(1, hit)
+        header = generator._passage_header(1, hit)
 
         assert "Live web retrieved" in header
         assert "Authority: commentary" in header
@@ -148,7 +148,7 @@ class TestEditionMetadata:
     }
 
     def _decision(self, reply: str) -> str:
-        from app.claim_verifier import verify_claims
+        from app.rag.claim_verifier import verify_claims
 
         citations = [{"ref": "[1]", "passage": self.PASSAGE["text"]}]
         return verify_claims(reply, citations, [self.PASSAGE], query="rental tax", locale="en")["decision"]
@@ -165,7 +165,7 @@ class TestEditionMetadata:
 
     def test_another_passages_edition_is_no_support(self):
         # Pooling every hit's edition let a claim cite FY2024-25 and name FY2026-27.
-        from app.claim_verifier import verify_claims
+        from app.rag.claim_verifier import verify_claims
 
         cited = {
             "text": "Individual rental income tax is 12% of gross rental income exceeding UGX 2,820,000.",
@@ -186,7 +186,7 @@ class TestEditionMetadata:
         assert report["decision"] != "approve"
 
     def test_a_marker_matching_no_citation_earns_no_edition_credit(self):
-        from app.claim_verifier import _cited_hits
+        from app.rag.claim_verifier import _cited_hits
 
         hits = [{"text": "a", "fiscal_year": "FY2026-27"}]
 
@@ -194,7 +194,7 @@ class TestEditionMetadata:
 
     def test_a_filtered_citation_list_still_finds_its_own_passage(self):
         # Filtering citations after retrieval leaves [1] pointing at the second hit.
-        from app.claim_verifier import _cited_hits
+        from app.rag.claim_verifier import _cited_hits
 
         first = {"text": "First passage about VAT.", "fiscal_year": "FY2024-25"}
         second = {"text": "Second passage about PAYE.", "fiscal_year": "FY2026-27"}
@@ -202,7 +202,7 @@ class TestEditionMetadata:
         assert _cited_hits(["1"], [{"ref": "[1]", "passage": second["text"]}], [first, second]) == [second]
 
     def test_a_claim_citing_nothing_may_draw_on_every_hit(self):
-        from app.claim_verifier import _cited_hits
+        from app.rag.claim_verifier import _cited_hits
 
         hits = [{"text": "a"}, {"text": "b"}]
 
@@ -325,7 +325,7 @@ class TestRecencyLabelling:
 
         assert outcome.status == wr.LIVE_STALE_ONLY
         assert outcome.disclosure == wr.LIVE_DISCLOSURES[wr.LIVE_STALE_ONLY]
-        assert "May be out of date" in llm._passage_header(1, outcome.web_hits[0])
+        assert "May be out of date" in generator._passage_header(1, outcome.web_hits[0])
 
 
 class TestDestinationCheck:

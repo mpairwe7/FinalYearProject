@@ -40,7 +40,7 @@ import pymupdf as fitz  # PyMuPDF
 from docx import Document
 from openpyxl import Workbook
 
-from app import database as db
+from app.db import database as db
 from app import documents, pdf_export
 
 

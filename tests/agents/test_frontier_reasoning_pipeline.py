@@ -15,7 +15,7 @@ import pytest
 from app.calculator_router import plan_calculation
 from app.premise_guard import check_false_premise
 from app.providers.routing import ModelTier, select_tier
-from app.query import correct_spelling, expand_abbreviations
+from app.rag.query import correct_spelling, expand_abbreviations
 from app.text_signals import detect_user_distress
 
 
@@ -36,7 +36,7 @@ class TestCalculatorRouterGuards:
         assert plan.params.get("amount") == 5000000.0
 
     def test_rental_pooling_calculation_context(self):
-        from app.service import _evaluate_calculation_context
+        from app.rag.pipeline import _evaluate_calculation_context
         query = (
             "I own a multi-story building in Kampala generating UGX 90M annually—the upper floors "
             "are residential apartments (UGX 40M) and the ground floor is commercial shops (UGX 50M). "

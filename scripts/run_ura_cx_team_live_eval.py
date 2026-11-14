@@ -41,11 +41,11 @@ os.environ["FLAG_SEMANTIC_CACHE"] = "false"
 os.environ["FLAG_TICKET_QUEUE"] = "true"
 os.environ["FLAG_MEMORY_ENABLED"] = "false"
 
-from app.database import init_db  # noqa: E402
+from app.db.database import init_db  # noqa: E402
 
 init_db()
 
-from app.service import ChatModel  # noqa: E402
+from app.rag.pipeline import ChatModel  # noqa: E402
 
 SCENARIOS = [
     {

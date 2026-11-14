@@ -1,0 +1,407 @@
+"""Deterministic claim-level citation checks for RAG answers.
+
+This is intentionally conservative. It is not a legal/semantic NLI model; it
+checks whether each factual-looking sentence is visibly cited and lexically
+supported by its cited passage. Low confidence becomes a revise/escalate signal
+instead of allowing unsupported policy claims to pass silently.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+from typing import Any
+
+from .claim_polarity import polarity_conflicts
+from .entailment import canonical_amounts, is_contradicted, percentages
+from ..model_welfare import is_self_reflection_sentence
+from ..text_signals import is_courtesy_sentence
+
+_CITATION_RE = re.compile(r"\[(\d{1,3})\]")
+_SENTENCE_RE = re.compile(r"[^.!?\n]+(?:[.!?]+|(?=\n)|$)")
+_WORD_RE = re.compile(r"[a-zA-Z0-9]+")
+_MIN_SUPPORT = float(os.getenv("CLAIM_VERIFIER_MIN_SUPPORT", "0.32"))
+_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "can",
+    "for",
+    "from",
+    "i",
+    "if",
+    "in",
+    "is",
+    "it",
+    "of",
+    "on",
+    "or",
+    "that",
+    "the",
+    "this",
+    "to",
+    "with",
+    "you",
+    "your",
+}
+_NON_CLAIM_HINTS = (
+    "based on the ura guidance",
+    "i could not find",
+    "please contact",
+    "please try",
+    "i don't have enough",
+    # The uncontracted form the models actually emit. "i don't have enough" was
+    # already exempt; a refusal written "I do not have enough information in the
+    # provided context" was not, so the model's own refusal counted as an
+    # uncited factual claim against it.
+    "do not have enough",
+    "ask a new",
+    "you might also want to know",
+    "you may also want to",
+    "would you also like to know",
+    "for more details, visit",
+    "for more information, visit",
+    "contact the ura contact centre",
+    "visit https://ura",
+    "call ura toll-free",
+    # Statements ABOUT the context rather than about tax. A model instructed to
+    # answer only from the passages says so when they run out, and that
+    # disclaimer is exactly the behaviour we asked for — but it asserts nothing
+    # citable, so it scored as an uncited, zero-overlap claim and dragged an
+    # otherwise fully-cited answer to "revise". Measured in production: a reply
+    # whose two substantive claims both carried correct refs still failed at
+    # score 0.667 on the single sentence "Please note that the provided context
+    # does not contain additional specific details regarding small traders."
+    # This is the same category the hints above already exempt (a request to
+    # contact URA is not a factual claim either), not a new leniency.
+    "the provided context does not contain",
+    "the provided context does not include",
+    "the context does not contain",
+    "the context does not include",
+    "the provided information does not",
+    "does not contain additional",
+    "is not covered in the provided",
+    "not specified in the provided",
+    "no information about",
+    "this response may not be fully supported",
+    "verify with official ura sources",
+    "verify with official ura",
+    "verify with ura",
+    "official ura sources at https://ura",
+    "okulabula",
+    "eky'okuddamu kino kiyinza obutaba",
+    "kiwagirwa mu bujjuvu",
+    "kakasa n'ensonda za ura",
+    "bw'oba ng'osanze obuzibu",
+    "genda ku https://ura",
+    "onyo",
+    "tahadhari",
+    "jibu hili linaweza lisiungwe mkono",
+    "jibu hili huenda halijaungwa mkono",
+    "thibitisha na vyanzo rasmi vya ura",
+    "ikiwa utakabiliwa na changamoto",
+    "tembelea https://ura",
+    "okuhabura: eky'okugarukamu eki nikibaasa",
+    "kihamiibwe gye ebihandiiko bya ura",
+    "ninkushaba ohamye n'obukomooko obutongore",
+    "ku oraashangye obuzibu bwona, za aha https://ura.go.ug",
+    "cik: lagam man romo pe bedo ma kimoko",
+    "tim ber imok ki kama ngec me ura oa iye",
+    "ka inongo peko mo, cit i https://ura.go.ug",
+    "these services are crucial",
+    "essential to the country",
+    "here is the official guidance",
+    "here is what you need to know",
+    "services@ura.go.ug",
+    "info@ura.go.ug",
+)
+
+
+def _tokens(text: str) -> set[str]:
+    return {t.lower() for t in _WORD_RE.findall(text) if t.lower() not in _STOPWORDS}
+
+
+def _numbers(text: str) -> set[str]:
+    """Figures in *text*, normalised so containment is meaningful.
+
+    Percentages stay as written ("18%"); money is canonicalised to its
+    value, so "UGX 1,500,000" is the single figure ``1500000.0`` rather
+    than the three fragments ``1``/``500``/``000`` a bare digit-run regex
+    produced.  Those fragments matched nearly any passage containing a
+    grouped number, which is how unsupported money claims scored as
+    supported.
+    """
+    lowered = (text or "").lower()
+    # Fixed-point, not "%g": six significant digits would collapse
+    # 1,234,567 and 1,234,568 onto the same key and call them equal.
+    figures = {f"{value:.2f}" for value in canonical_amounts(lowered)}
+    figures.update(f"{pct}%" for pct in percentages(lowered))
+    return figures
+
+
+def _split_claims(reply: str) -> list[str]:
+    claims: list[str] = []
+    # Normalize glued citation markers like otherL1] or word[1] -> word [1]
+    norm_reply = re.sub(r"(?<=[a-zA-Z])(?:L|\[)(\d+)\]", r" [\1]", reply or "")
+    # Protect decimal points and domain/abbreviation dots (e.g. ura.go.ug, s.12, p.a.)
+    # before sentence splitting so URLs and statute refs are not shattered into fragments.
+    text = re.sub(r"(?<=\d)\.(?=\d)", "<decimal_point>", norm_reply)
+    text = re.sub(r"(?<=[a-zA-Z])\.(?=[a-zA-Z0-9])", "<dot>", text)
+    text = re.sub(r"([.!?])\s+(\[\d{1,3}\])", r" \2\1", text)
+    for raw in _SENTENCE_RE.findall(text):
+        sentence = " ".join(raw.strip(" -\t\r\n").split())
+        sentence = sentence.replace("<decimal_point>", ".").replace("<dot>", ".")
+        if len(sentence) < 10 or sentence.lstrip().startswith("#"):
+            continue
+        lowered = sentence.lower()
+        if any(hint in lowered for hint in _NON_CLAIM_HINTS):
+            continue
+        if is_courtesy_sentence(sentence):
+            continue
+        if re.search(r"0800\s?117\s?000|0800\s?217\s?000|0772\s?140\s?000|services@ura\.go\.ug|info@ura\.go\.ug", lowered):
+            continue
+        if "ura.go.ug" in lowered and not _numbers(sentence):
+            continue
+        if len(_tokens(sentence)) < 3:
+            continue
+        claims.append(sentence)
+    return claims
+
+
+def _citation_contexts(
+    refs: list[str],
+    citations: list[dict[str, Any]],
+    hits: list[dict[str, Any]],
+) -> list[str]:
+    by_ref: dict[str, str] = {}
+    for idx, citation in enumerate(citations or [], 1):
+        ref = str(citation.get("ref") or f"[{idx}]").strip("[]")
+        passage = ""
+        if idx - 1 < len(hits or []):
+            hit = hits[idx - 1]
+            passage = str(hit.get("text") or hit.get("answer") or "").strip()
+        if not passage:
+            passage = str(citation.get("passage") or "").strip()
+        by_ref[ref] = passage
+
+    contexts = [by_ref[ref] for ref in refs if by_ref.get(ref)]
+    if contexts:
+        return contexts
+    return [str(h.get("text") or h.get("answer") or "") for h in hits or [] if h]
+
+
+def _cited_hits(
+    refs: list[str],
+    citations: list[dict[str, Any]],
+    hits: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """The hits a claim cites. Every hit when it cites none; none when a marker matches nothing.
+
+    A citation is matched by its passage first, because citations can be filtered
+    after retrieval and a position then points at the wrong hit.
+    """
+    if not refs:
+        return list(hits or [])
+
+    def hit_for(citation: dict[str, Any], index: int) -> dict[str, Any] | None:
+        passage = str(citation.get("passage") or "").strip()[:200]
+        if passage:
+            for hit in hits or []:
+                if str(hit.get("text") or hit.get("answer") or "").strip().startswith(passage):
+                    return hit
+        return hits[index] if index < len(hits or []) else None
+
+    by_ref = {
+        str(citation.get("ref") or f"[{index + 1}]").strip("[]"): hit_for(citation, index)
+        for index, citation in enumerate(citations or [])
+    }
+    return [by_ref[ref] for ref in refs if by_ref.get(ref) is not None]
+
+
+def verify_claims(
+    reply: str,
+    citations: list[dict[str, Any]] | None,
+    hits: list[dict[str, Any]] | None,
+    *,
+    min_support: float | None = None,
+    query: str = "",
+    locale: str = "en",
+    verified_facts: str = "",
+) -> dict[str, Any]:
+    """Return a claim-verification report for a draft answer."""
+    threshold = _MIN_SUPPORT if min_support is None else min_support
+    claims = _split_claims(reply)
+    report: dict[str, Any] = {
+        "decision": "approve",
+        "score": 1.0,
+        "claim_count": len(claims),
+        "supported_claim_count": 0,
+        "uncited_claims": [],
+        "unsupported_claims": [],
+        "contradicted_claims": [],
+        "backend": "deterministic_overlap_v1",
+    }
+    if not claims:
+        return report
+
+    has_grounding = bool(citations or hits or verified_facts)
+    if not has_grounding:
+        report["decision"] = "escalate"
+        report["score"] = 0.0
+        report["unsupported_claims"] = [
+            {"text": claim[:220], "reason": "no retrieved passages available"} for claim in claims
+        ]
+        return report
+
+    supported = 0
+    saw_numeric_contradiction = False
+    welfare_turn = any(
+        str(h.get("doc_type") or "") == "model_welfare_context" for h in (hits or [])
+    )
+    verified_numbers = _numbers(verified_facts) if verified_facts else set()
+    query_pcts = percentages(query) if query else set()
+    query_numbers = (_numbers(query) - query_pcts) if query else set()
+    for claim in claims:
+        refs = _CITATION_RE.findall(claim)
+        clean_claim = _CITATION_RE.sub("", claim)
+        contexts = _citation_contexts(refs, citations or [], hits or [])
+        if verified_facts:
+            contexts = [*contexts, verified_facts]
+        claim_tokens = _tokens(clean_claim)
+        context_text = " ".join(contexts)
+        context_tokens = _tokens(context_text)
+        overlap = len(claim_tokens & context_tokens) / max(1, len(claim_tokens))
+
+        if welfare_turn and is_self_reflection_sentence(clean_claim, in_welfare_turn=True):
+            overlap = max(overlap, 0.85)
+            if not refs and citations:
+                refs = ["1"]
+
+        # If overlap is below threshold against the specifically cited passage,
+        # verify if the claim is supported by any individual retrieved hit (or hit + verified_facts)
+        # rather than a bag-of-words union across unrelated passages (G293).
+        if overlap < threshold and hits:
+            best_hit_overlap = overlap
+            best_hit_contexts = contexts
+            for h in hits:
+                h_txt = str(h.get("text") or h.get("answer") or "").strip()
+                if not h_txt:
+                    continue
+                cand_contexts = [h_txt, verified_facts] if verified_facts else [h_txt]
+                cand_tokens = _tokens(" ".join(cand_contexts))
+                cand_overlap = len(claim_tokens & cand_tokens) / max(1, len(claim_tokens))
+                if cand_overlap > best_hit_overlap:
+                    best_hit_overlap = cand_overlap
+                    best_hit_contexts = cand_contexts
+            if best_hit_overlap >= threshold:
+                overlap = best_hit_overlap
+                contexts = best_hit_contexts
+
+        # Cross-lingual claim support: when the reply is generated in a local
+        # language (e.g. Swahili or Luganda) against English retrieved context passages,
+        # lexical token overlap is naturally suppressed across languages.
+        # Translate the claim to English for lexical verification.
+        if overlap < threshold and locale not in ("", "en"):
+            try:
+                from .. import mt
+                from . import generator  # noqa: PLC0415
+                translated_claim = mt.translate_cached(
+                    clean_claim,
+                    locale,
+                    "en",
+                    lambda: generator.translate_text(clean_claim, source_lang=locale, target_lang="en"),
+                )
+                if translated_claim:
+                    tr_tokens = _tokens(translated_claim)
+                    tr_overlap = len(tr_tokens & context_tokens) / max(1, len(tr_tokens))
+                    overlap = max(overlap, tr_overlap)
+            except Exception:
+                pass
+
+        claim_numbers = _numbers(clean_claim)
+        context_numbers = _numbers(context_text)
+        model_introduced_numbers = claim_numbers - query_numbers
+        # Rule 8 tells the model to name the edition, and the passage header shows
+        # it, so the edition of a cited passage is not a figure the model
+        # introduced. Only the cited passage: another hit's edition is no support.
+        edition_numbers = _numbers(
+            " ".join(str(h.get("fiscal_year") or "") for h in _cited_hits(refs, citations or [], hits or []))
+        )
+        if model_introduced_numbers and not model_introduced_numbers <= (
+            context_numbers | verified_numbers | edition_numbers
+        ):
+            overlap = min(overlap, 0.25)
+
+        # P1-8: a claim whose percentage conflicts with the cited context is a
+        # hard contradiction (e.g. answer "20%" vs source "18%") — force it
+        # unsupported so the response judge escalates rather than disclaiming.
+        # When every number in the claim is backed by deterministic verified_facts,
+        # do not let a stale passage (e.g. FY2023-24 235,000 vs FY2026-27 335,000)
+        # falsely flag the verified figure as contradicted.
+        backed_by_verified_facts = bool(
+            verified_numbers and claim_numbers and claim_numbers <= (verified_numbers | query_numbers)
+        )
+        cited_passage_contexts = _citation_contexts(refs, citations or [], hits or [])
+        all_contradiction_contexts = list(cited_passage_contexts)
+        if hits:
+            for h in hits:
+                h_txt = str(h.get("text") or h.get("answer") or "").strip()
+                if h_txt and h_txt not in all_contradiction_contexts:
+                    all_contradiction_contexts.append(h_txt)
+        contradicted = (
+            False
+            if backed_by_verified_facts
+            else (
+                is_contradicted(clean_claim, cited_passage_contexts, user_query=query)
+                or is_contradicted(clean_claim, all_contradiction_contexts, user_query=query)
+            )
+        )
+        if contradicted:
+            saw_numeric_contradiction = True
+            overlap = 0.0
+
+        # Phase G.1: directional polarity conflict against supporting passages/facts
+        pol_conflicts = polarity_conflicts(clean_claim, contexts, verified_facts)
+        if pol_conflicts:
+            overlap = 0.0
+
+        item: dict[str, Any] = {
+            "text": clean_claim.strip()[:220],
+            "refs": [f"[{ref}]" for ref in refs],
+            "support_score": round(overlap, 4),
+        }
+        if pol_conflicts:
+            item["kind"] = "polarity_conflict"
+            item["polarity_conflicts"] = [
+                {
+                    "pair": c.pair_name,
+                    "reply_cue": c.reply_cue,
+                    "supporting_cue": c.supporting_cue,
+                }
+                for c in pol_conflicts
+            ]
+        elif contradicted:
+            item["kind"] = "numeric_contradiction"
+
+        if not refs and citations:
+            report["uncited_claims"].append(item)
+        if overlap >= threshold:
+            supported += 1
+        else:
+            report["unsupported_claims"].append(item)
+            if contradicted or pol_conflicts:
+                report["contradicted_claims"].append(item)
+
+    report["supported_claim_count"] = supported
+    report["score"] = round(supported / len(claims), 4)
+
+    if saw_numeric_contradiction:
+        report["decision"] = "escalate"
+    elif report["contradicted_claims"] or report["unsupported_claims"] or report["uncited_claims"]:
+        report["decision"] = "revise"
+    return report

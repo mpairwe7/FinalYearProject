@@ -16,7 +16,7 @@ def _on() -> bool:
     if any(os.getenv(f"FLAG_SEMANTIC_LAYER_{suffix}") for suffix in ("PERCENT", "COHORTS", "ALLOWLIST")):
         return True
     try:
-        from ..flags import flags
+        from ..config.flags import flags
 
         return flags.is_enabled("semantic_layer")
     except Exception:  # noqa: BLE001 - a flag registry that cannot answer is treated as on

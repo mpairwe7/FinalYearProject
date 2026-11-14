@@ -52,7 +52,7 @@ def test_the_kernel_pin_and_the_tables_agree_on_the_day() -> None:
 
 
 def test_no_frozen_current_year_constant() -> None:
-    from app import query
+    from app.rag import query
 
     assert not hasattr(query, "CURRENT_FISCAL_YEAR"), "computed once at import, it went stale on 1 July"
 

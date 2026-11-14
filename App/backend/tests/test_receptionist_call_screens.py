@@ -14,7 +14,7 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app import database as db
+from app.db import database as db
 from app.receptionist import ws
 from app.receptionist.hub import hub
 from app.receptionist.state import CallRoom, CallState, registry

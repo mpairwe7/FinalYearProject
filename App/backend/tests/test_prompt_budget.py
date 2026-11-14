@@ -12,7 +12,7 @@ from __future__ import annotations
 import unittest
 import unittest.mock as mock
 
-from app import llm
+from app.rag import generator
 
 
 class _FakeResponse:
@@ -59,19 +59,19 @@ def _messages(history_pairs: int, passage_chars: int) -> list[dict[str, str]]:
 
 class PromptBudgetTest(unittest.TestCase):
     def setUp(self) -> None:
-        llm._vllm_limits.update({"max_model_len": 0.0, "models_checked_at": 0.0, "tokenize_down_until": 0.0})
+        generator._vllm_limits.update({"max_model_len": 0.0, "models_checked_at": 0.0, "tokenize_down_until": 0.0})
 
     def _fit(self, fake: _FakeVllm, msgs: list[dict[str, str]], max_tokens: int = 512) -> int:
-        with mock.patch.object(llm, "_get_vllm_client", return_value=fake), \
-             mock.patch.object(llm, "LLM_CONTEXT_WINDOW", 8192):
-            return llm._fit_to_context(msgs, max_tokens)
+        with mock.patch.object(generator, "_get_vllm_client", return_value=fake), \
+             mock.patch.object(generator, "LLM_CONTEXT_WINDOW", 8192):
+            return generator._fit_to_context(msgs, max_tokens)
 
     def test_served_window_beats_a_larger_configured_one(self) -> None:
         fake = _FakeVllm(window=4096)
         msgs = _messages(history_pairs=1, passage_chars=200)
         safe = self._fit(fake, msgs)
         self.assertEqual(safe, 512)
-        self.assertEqual(llm._served_context_window(), 4096)
+        self.assertEqual(generator._served_context_window(), 4096)
 
     def test_oldest_exchanges_go_first_in_whole_pairs(self) -> None:
         fake = _FakeVllm(window=4096)
@@ -98,8 +98,8 @@ class PromptBudgetTest(unittest.TestCase):
         fake = _FakeVllm(window=4096, tokenize_ok=False)
         msgs = _messages(history_pairs=6, passage_chars=6000)
         safe = self._fit(fake, msgs)
-        self.assertGreater(llm._vllm_limits["tokenize_down_until"], 0)
-        estimate = llm._estimate_prompt_tokens(msgs)
+        self.assertGreater(generator._vllm_limits["tokenize_down_until"], 0)
+        estimate = generator._estimate_prompt_tokens(msgs)
         self.assertLessEqual(estimate + safe, 4096)
 
     def test_streamed_answer_is_budgeted_too(self) -> None:
@@ -127,9 +127,9 @@ class PromptBudgetTest(unittest.TestCase):
 
         fake = _Client(window=4096)
         msgs = _messages(history_pairs=6, passage_chars=1000)
-        with mock.patch.object(llm, "_get_vllm_client", return_value=fake), \
-             mock.patch.object(llm, "LLM_CONTEXT_WINDOW", 8192):
-            list(llm._vllm_generate_stream(msgs))
+        with mock.patch.object(generator, "_get_vllm_client", return_value=fake), \
+             mock.patch.object(generator, "LLM_CONTEXT_WINDOW", 8192):
+            list(generator._vllm_generate_stream(msgs))
         body = captured["body"]
         prompt_tokens = fake.post("/tokenize", json={"messages": body["messages"]}).json()["count"]
         self.assertLessEqual(prompt_tokens + body["max_tokens"], 4096)
@@ -139,7 +139,7 @@ class ToolLoopBudgetTest(unittest.TestCase):
     """CodeRabbit on #543: a tool loop must keep its active question."""
 
     def setUp(self) -> None:
-        llm._vllm_limits.update({"max_model_len": 0.0, "models_checked_at": 0.0, "tokenize_down_until": 0.0})
+        generator._vllm_limits.update({"max_model_len": 0.0, "models_checked_at": 0.0, "tokenize_down_until": 0.0})
 
     def test_the_active_request_and_its_tool_results_survive(self) -> None:
         msgs = [{"role": "system", "content": "You are the URA assistant."}]
@@ -150,9 +150,9 @@ class ToolLoopBudgetTest(unittest.TestCase):
         msgs.append({"role": "assistant", "content": "", "tool_calls": [{"id": "t1"}]})
         msgs.append({"role": "tool", "content": "rate: 18%", "tool_call_id": "t1"})
         fake = _FakeVllm(window=4096)
-        with mock.patch.object(llm, "_get_vllm_client", return_value=fake), \
-             mock.patch.object(llm, "LLM_CONTEXT_WINDOW", 8192):
-            llm._fit_to_context(msgs, 512)
+        with mock.patch.object(generator, "_get_vllm_client", return_value=fake), \
+             mock.patch.object(generator, "LLM_CONTEXT_WINDOW", 8192):
+            generator._fit_to_context(msgs, 512)
         roles = [m["role"] for m in msgs]
         self.assertEqual(roles[-3:], ["user", "assistant", "tool"])
         self.assertIn("## User question\nWhat is VAT?", msgs[-3]["content"])
@@ -162,7 +162,7 @@ class ToolLoopBudgetTest(unittest.TestCase):
 class ShortenPassagesTest(unittest.TestCase):
     def test_keeps_everything_from_the_question_on(self) -> None:
         content = "## Retrieved passages\n" + "a" * 1000 + "\n\n## User question\nQ?\n\n## Answer language\nEnglish."
-        out = llm._shorten_passages(content, 0.1)
+        out = generator._shorten_passages(content, 0.1)
         self.assertTrue(out.endswith("## User question\nQ?\n\n## Answer language\nEnglish."))
         self.assertLess(len(out), len(content))
 

@@ -21,7 +21,7 @@ We implemented a six-phase Sovereign Live Web Research and Self-Updating Qdrant 
 
 1. **Streaming Verified-Facts Parity & `web_sync_ledger` Schema (Phase A — PR #608)**:
    - Wired `_evaluate_calculation_context` and `verified_facts` into `_apply_output_guards()`, `compute_faithfulness()`, `verify_claims()`, and `_evaluate_response_judge()` on `/v1/chat/stream`.
-   - Added the `web_sync_ledger` table and helpers (`upsert_web_sync_entry`, `get_active_web_sync_entry`, `list_web_sync_entries`) in both SQLite (`database.py`) and PostgreSQL (`postgres.py`).
+   - Added the `web_sync_ledger` table and helpers (`upsert_web_sync_entry`, `get_active_web_sync_entry`, `list_web_sync_entries`) in both SQLite (`database.py`) and PostgreSQL (`db/postgres.py`).
 2. **Live Global Exchange Rate Engine (`App/backend/app/web_fx.py`, Phase B — PR #609)**:
    - Fetches real-time mid-market exchange rates (`USD`, `EUR`, `GBP`, `KES`, `TZS`, `RWF`, `AED`, `CNY`, `ZAR`, `JPY`, `INR`, `CAD`, `CHF`, `AUD` → `UGX`) via `XE.com` primary, Google Finance secondary, and Open ER JSON mirror tertiary, with pair-bound regex extraction, a `±35%` plausible bounds guard against `BOU_mid_rates_2026.json`, a 30-minute L1/Redis cache (`ura:fx:live:{CUR}:UGX`), and a 90-second negative cache.
    - Wired into `ConvertCurrencyTool.compute` (`tools/calculators.py`) and chained into `value_benefit_in_kind(kind="housing")` and `calculate_paye` in `scenario_planner.py`.
@@ -33,11 +33,11 @@ We implemented a six-phase Sovereign Live Web Research and Self-Updating Qdrant 
    - Creates turn-scoped `0o700` directories under `/dev/shm/ura-web-sandbox/<turn_id>/` (or a dedicated `tmpfs` mount configured via `URA_WEB_SANDBOX_DIR`) and wipes the directory tree (`shutil.rmtree(sandbox_dir)`) in a `finally:` block, logging any cleanup error explicitly rather than silencing it.
    - Enforces HTTPS + Tier-1 hostname allowlist on every redirect hop, a 25 MB mid-stream byte cap, `malware_scan.scan_bytes`, `pdf_guards.inspect_pdf_bytes(..., limits=QUERY_PDF_LIMITS)`, optional `document_worker` subprocess isolation (`DOCUMENT_PARSE_ISOLATED=true`), and page-level prompt-injection screening (`scan_retrieved_text` + `screen_tool_result`).
    - Caches extracted chunks by `sha256` in Redis (`ura:pdf_chunks:{sha256}`, 24h TTL) and micro-reranks the top 4 chunks against the taxpayer's query on GPU 2.
-5. **Self-Updating Qdrant Comparator & Hot-Swap Coordinator (`App/backend/app/corpus_sync.py`, Phase E — PR #612)**:
+5. **Self-Updating Qdrant Comparator & Hot-Swap Coordinator (`App/backend/app/vectorstore/corpus_sync.py`, Phase E — PR #612)**:
    - Enforces a strict origin invariant (`https` + `ura.go.ug`, `ulii.org`, or `parliament.go.ug` / `bills.parliament.ug` only) before any document can modify Qdrant.
    - Compares `(sha256, fiscal_year, doc_kind, page_count)` against existing counterparts in `App/Data/pdf_jsonl/` and Qdrant across five outcomes: `verified_current`, `skipped_older`, `replaced_outdated` (upserting new chunks first, tombstoning and deleting superseded points, archiving old `.jsonl` to `App/Data/archive/`, writing canonical new `.jsonl`, and refreshing `index_freshness.json`), `needs_review`, and `added_new`.
    - Records a 7-day verification entry in `web_sync_ledger` so Turn 2+ queries on the same family skip external web search completely (`0` outbound HTTP requests).
-6. **REST & SSE End-to-End Orchestration (`App/backend/app/service.py`, `App/backend/app/main.py`, Phase F — PR #613)**:
+6. **REST & SSE End-to-End Orchestration (`App/backend/app/rag/pipeline.py`, `App/backend/app/main.py`, Phase F — PR #613)**:
    - Hooks `run_web_research` into `_generate_en` (`/v1/chat`) and `generate_retrieval_only` + `_run_chat_turn_events` (`/v1/chat/stream`), emitting SSE phase events (`web_research.started`, `pdf_sandbox.extracting`, `qdrant_sync.updated`) and exposing `web_sync_ledger` alongside `tombstones` in `GET /v1/admin/tombstones`.
 
 ## Consequences

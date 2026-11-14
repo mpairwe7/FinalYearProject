@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import unittest
 
-from app.claim_verifier import _numbers, verify_claims
-from app.entailment import canonical_amounts, numeric_contradiction
+from app.rag.claim_verifier import _numbers, verify_claims
+from app.rag.entailment import canonical_amounts, numeric_contradiction
 
 
 class CanonicalAmountTests(unittest.TestCase):

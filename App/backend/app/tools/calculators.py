@@ -2140,7 +2140,7 @@ class CurrencyConversionTool(CalculatorTool):
             )
 
         from datetime import datetime, timezone
-        from ..flags import flags
+        from ..config.flags import flags
         from ..web_fx import official_bou_rate
 
         # The Bank of Uganda rate is the one that counts for a return, so a

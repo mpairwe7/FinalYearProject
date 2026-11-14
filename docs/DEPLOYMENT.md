@@ -385,7 +385,7 @@ one-minor-version-at-a-time storage upgrade procedure.
 
 ```bash
 docker compose -f App/docker-compose.yml -f App/docker-compose.local-retrieval.yml \
-  exec qdrant-backup python -m app.qdrant_backup --restore-drill
+  exec qdrant-backup python -m app.vectorstore.qdrant_backup --restore-drill
 ```
 
 ```bash
@@ -520,7 +520,7 @@ Apple requires apps that use AI/ML features to disclose:
 - Whether conversations are stored (controlled by `STORE_RAW_PROMPTS` and `CONVERSATION_TTL_DAYS`).
 - Whether data is used for model training (it is **not** — the production API does not feed user data back into training).
 
-Include this disclosure in the App Store Connect privacy section and in the app's privacy policy. The app uses PII redaction before storage (see `ChatModel.redact_for_storage` in `App/backend/app/service.py`).
+Include this disclosure in the App Store Connect privacy section and in the app's privacy policy. The app uses PII redaction before storage (see `ChatModel.redact_for_storage` in `App/backend/app/rag/pipeline.py`).
 
 ---
 

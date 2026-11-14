@@ -33,7 +33,7 @@ Audience: a **new** coding session (any model) with no memory of the conversatio
 - Every change goes on a feature branch → PR against `dev` → CI green → address **every CodeRabbit comment** (threads *and* review-body nitpicks) → merge. Never push to `dev`/`main` directly.
 - Commits: conventional commits, author `mpairwe7`, **no `Co-Authored-By` trailers** (also pass an explicit `commit_message` when squash-merging through the API, otherwise GitHub adds one).
 - Use the real GitHub CLI at `~/bin/gh` (bare `gh` is a stub). Check `~/bin/gh auth status`; switch with `~/bin/gh auth switch --user mpairwe7` only if needed.
-- A new flag must land in **all three**: `App/backend/app/flags.py`, `docs/RAG_ARCHITECTURE.md`, `.env.example`.
+- A new flag must land in **all three**: `App/backend/app/config/flags.py`, `docs/RAG_ARCHITECTURE.md`, `.env.example`.
 - New FastAPI routes must be added to `tests/test_all_endpoints_e2e.py` (`EXPECTED_ENDPOINTS` + `COVERAGE`). This plan adds **no** routes; if you add one, update that file.
 - Answers are generated in **English** and localized in exactly one place (`localize_reply`). Every translation goes through `app/mt.py` (cache + `figures_survived`). Do not add a second translation path.
 - A new model client must wrap its HTTP call in `tracing.llm_call(...)` and report the provider's `usage`. Metrics go through `analytics.metrics` only, with bounded label values.
@@ -286,7 +286,7 @@ docker run -d --name "$NAME" --gpus "device=$GPU" --ipc=host \
 
 1. **Freeze contexts once** (the same for every contender). For each **dev** scenario turn, capture inside the live api container the exact `messages` the system would send to the LLM: the passages from `retriever.search_planned(...)` and the prompt from `llm._build_messages(...)`, plus `_evaluate_calculation_context(query)` output. Write a small script `scripts/bakeoff_freeze_contexts.py` and pipe it via `docker exec -i ura-app-api /opt/venv/bin/python - < script.py`. Save to `evals/complex_scenarios/frozen_contexts_dev.jsonl`. This file is **gitignored** if it contains anything beyond public corpus text; check before committing.
 2. `scripts/bakeoff_reasoner.py --endpoint http://127.0.0.1:8021/v1 --model bakeoff --mode {nothink,think} --label B-nothink …`:
-   - Sends each frozen `messages` list to `/chat/completions` with the production sampling parameters (`LLM_TEMPERATURE`, `top_p` 0.95, `min_p`, penalties from `app/llm.py`), `max_tokens=1536` (nothink) or `max_tokens=4096` (think, total, including reasoning), and `chat_template_kwargs={"enable_thinking": <mode>}`.
+   - Sends each frozen `messages` list to `/chat/completions` with the production sampling parameters (`LLM_TEMPERATURE`, `top_p` 0.95, `min_p`, penalties from `app/rag/generator.py`), `max_tokens=1536` (nothink) or `max_tokens=4096` (think, total, including reasoning), and `chat_template_kwargs={"enable_thinking": <mode>}`.
    - Records reply, `finish_reason`, `usage`, TTFT and total latency (use streaming for TTFT), and the reasoning-token count.
    - Scores with `evals/complex_scenarios/scoring.py` (`route_ok` and `sources_relevant` are not applicable here; reweight).
 3. **Add a 12-question lg/sw sanity set** (use `evals/multiturn_trilingual/scenarios.jsonl` turns) for contender C only. Measure the English answer quality and, separately, C's translation quality vs A (spot-check plus `mt.figures_survived`). This only informs the "one model for both roles" follow-up.
@@ -342,7 +342,7 @@ Document the bring-up command in a runbook (Phase I). Do **not** bring it up aga
 
 Today `providers/routing.select_tier` is only **logged** (`service.py` ≈ line 10240: `trace_ctx["model_tier"]`). Every generation goes to the single `LLM_MODEL` @ `VLLM_BASE_URL`. `MODEL_SLOTS` still names Qwen3-8B / 30B-A3B / 235B-A22B, which are not served anywhere.
 
-### D.1 `ModelEndpoint` (read `app/llm.py` lines 1–200 and 1030–1560 first)
+### D.1 `ModelEndpoint` (read `app/rag/generator.py` lines 1–200 and 1030–1560 first)
 - In `app/providers/routing.py` add:
   ```python
   @dataclass(frozen=True)
@@ -355,7 +355,7 @@ Today `providers/routing.select_tier` is only **logged** (`service.py` ≈ line 
   ENDPOINTS: dict[ModelTier, ModelEndpoint]  # built from env at import: T1 → VLLM_BASE_URL/LLM_MODEL, T3 → REASONER_BASE_URL/REASONER_MODEL
   ```
   Keep the existing comment's dataflow principle: the URL comes only from this env-built dict, **never from request data**.
-  - T2: points to the T3 endpoint with `thinking=False` (the old "agentic MoE" slot is not served). Update the `ModelTier` docstrings and the `model_tiering` flag description in `flags.py` + `docs/RAG_ARCHITECTURE.md` to the real models.
+  - T2: points to the T3 endpoint with `thinking=False` (the old "agentic MoE" slot is not served). Update the `ModelTier` docstrings and the `model_tiering` flag description in `config/flags.py` + `docs/RAG_ARCHITECTURE.md` to the real models.
   - If `REASONER_BASE_URL` is unset, T2/T3 fall back to the T1 endpoint and the reason string says so. The flag-off behaviour must be unchanged.
 - Thread an optional `endpoint: ModelEndpoint | None = None` through `llm._vllm_generate`, `async_vllm_generate`, `_vllm_chat_completion`, `_vllm_generate_stream`, `generate`, `generate_stream`, `generate_with_tools`. `None` = today's behaviour (`LLM_MODEL` @ `VLLM_BASE_URL`). Use `endpoint.model` in the body **and** in `llm_call("chat", model, "vllm")` so traces and token usage are attributed correctly.
 - `_served_context_window()` / `_count_prompt_tokens()` / `_fit_to_context()` cache **per base URL** (today they are global). The tokenizer endpoint must be the same server as the generation endpoint.
@@ -381,7 +381,7 @@ Today `providers/routing.select_tier` is only **logged** (`service.py` ≈ line 
 Root cause (D8): `max_tokens` too small, and `finish_reason` is thrown away; the only recovery is the forbidden cloud chain.
 
 ### E.1 Surface `finish_reason`
-- Add `@dataclass(frozen=True) class Generation: text: str; finish_reason: str | None; usage: dict | None` in `app/llm.py`. Add `_vllm_generate_ex(...) -> Generation`; make `_vllm_generate(...)` a thin wrapper that returns `.text`, so existing callers keep working. Do the same for `async_vllm_generate_ex`.
+- Add `@dataclass(frozen=True) class Generation: text: str; finish_reason: str | None; usage: dict | None` in `app/rag/generator.py`. Add `_vllm_generate_ex(...) -> Generation`; make `_vllm_generate(...)` a thin wrapper that returns `.text`, so existing callers keep working. Do the same for `async_vllm_generate_ex`.
 - Streaming: `_stream_tokens` already sets `call.finish_reason`. Expose it to the caller: the generator's `return` value, or a mutable holder passed in. Read the streaming core in `service.stream_llm_tokens` and use the least invasive option.
 
 ### E.2 Continuation instead of truncation
@@ -412,7 +412,7 @@ Root cause (D8): `max_tokens` too small, and `finish_reason` is thrown away; the
 
 Generalisation strategy: **(1)** a generic per-conversation *facts* layer, **(2)** a generic *planner* that maps facts + question to tools, **(3)** rules as **data** in the rate table with `legal_basis`, and **(4)** an explicit "no tool covers this" disclosure. New tax rules then become data plus a small tool, not new router special cases.
 
-Read first: `app/calculator_router.py` (whole file), `app/tools/calculators.py` (`CalculatorTool`, `PAYECalculator`, `CALCULATOR_TOOLS`, `_require_scalar`, `_require_bands`, `apply_bands`), `app/tax/tables.py` (`_load_table` validation), `app/tax/data/FY2026-27.json` and `FY2025-26.json`, `app/context_manager.py` (`ConversationEntities`, `extract_conversation_entities`, `RollingContextManager`), `app/premise_guard.py`, `service._maybe_handle_calculator` (≈ line 8620), `service._evaluate_calculation_context` (≈ line 997), and `tests/test_calculator_router.py` / `tests/test_tax_calculators.py`.
+Read first: `app/calculator_router.py` (whole file), `app/tools/calculators.py` (`CalculatorTool`, `PAYECalculator`, `CALCULATOR_TOOLS`, `_require_scalar`, `_require_bands`, `apply_bands`), `app/tax/tables.py` (`_load_table` validation), `app/tax/data/FY2026-27.json` and `FY2025-26.json`, `app/rag/context_manager.py` (`ConversationEntities`, `extract_conversation_entities`, `RollingContextManager`), `app/premise_guard.py`, `service._maybe_handle_calculator` (≈ line 8620), `service._evaluate_calculation_context` (≈ line 997), and `tests/test_calculator_router.py` / `tests/test_tax_calculators.py`.
 
 ### F.1 CaseFacts — per-conversation structured facts (fixes D2, enables everything else)
 - New module `app/case_facts.py`:
@@ -512,7 +512,7 @@ Tests: `tests/agents/test_scenario_planner.py` — the §1 case end-to-end with 
 ## 9. Phase G — Remaining "why it falls short" fixes
 
 ### G.1 Faithfulness that sees polarity (fixes D6)
-- `retriever.compute_faithfulness` (≈ line 1840) and `claim_verifier.verify_claims` (≈ line 194) are overlap-only. Add `app/claim_polarity.py`:
+- `retriever.compute_faithfulness` (≈ line 1840) and `claim_verifier.verify_claims` (≈ line 194) are overlap-only. Add `app/rag/claim_polarity.py`:
   - a curated **direction lexicon** of opposing pairs that matter in tax: added/included ↔ subtracted/deducted/excluded/exempt; taxable ↔ exempt/not taxable; resident ↔ non-resident; allowed/claimable ↔ disallowed/not claimable; before ↔ after; increase ↔ decrease; lesser/lower ↔ greater/higher; must ↔ need not; within N days ↔ after N days
   - `polarity_conflicts(sentence, passages, verified_facts) -> list[Conflict]`: for a reply sentence that shares the content tokens of a supporting passage/fact sentence but uses the **opposite** term of a pair, report a conflict.
 - Wire it into both: `compute_faithfulness` sets a conflicting sentence to **ungrounded**; `verify_claims` adds a `contradicted_claims` entry, and the decision becomes `revise`.
@@ -531,7 +531,7 @@ Tests: `tests/agents/test_scenario_planner.py` — the §1 case end-to-end with 
 - Measure with `scripts/eval_retrieval_multilingual.py` and the `Data/eval/rag_eval.jsonl` gate. **Any Hit@1 drop > 1 point fails the change; tune the numbers or drop the change.** (Memory: BM25 retuning made things worse before; measure, don't assume.)
 
 ### G.4 Prompt for complex answers
-- In the system-prompt builder (`llm._build_messages` / `SYSTEM_PROMPT` in `app/llm.py`), add a **complex-answer contract**, used only when the verified-facts block is present or the tier is T3:
+- In the system-prompt builder (`llm._build_messages` / `SYSTEM_PROMPT` in `app/rag/generator.py`), add a **complex-answer contract**, used only when the verified-facts block is present or the tier is T3:
   1. Start with a 1–2 sentence direct answer.
   2. If the block lists a premise contradiction, address it first.
   3. "Assumptions" — list the facts used (and their source turn).

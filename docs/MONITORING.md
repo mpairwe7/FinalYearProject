@@ -45,7 +45,7 @@ Grafana's first-login password, which it makes you change.
  │  PROMETHEUS_MULTI-   │                                    │  SLO burn  │◄── blackbox, redis-, node-,
  │  PROC_DIR)           │                                    └─────┬──────┘    dcgm-exporter, vLLM
  │ app.tracing (OTel)   ├── OTLP gRPC ──► OTel Collector ──► Jaeger │ (traces, tail-sampled)
- │ app.logging_config   ├── OTLP logs ──►       │       ──► Loki    │ (logs, 93 days)
+ │ app.middleware.logger   ├── OTLP logs ──►       │       ──► Loki    │ (logs, 93 days)
  │ stdout JSON lines    │                       └──── :8889 ──► Prometheus (gen_ai.* metrics)
  └──────────────────────┘                                          ▼
                                                                 Grafana (Prometheus + Loki + Jaeger, linked)
@@ -56,7 +56,7 @@ Grafana's first-login password, which it makes you change.
 | Metrics | `App/backend/app/analytics.py` (prometheus_client) | Prometheus scrape of `/metrics` with `METRICS_TOKEN` | Prometheus, Grafana |
 | GenAI metrics | `App/backend/app/tracing.py` | OTLP → Collector → `:8889` | Prometheus |
 | Traces | `tracing.py` + FastAPI/httpx instrumentation | OTLP → Collector (tail sampling) | Jaeger |
-| Logs | `logging_config.py` (root handler) | stdout JSON **and** OTLP → Collector | platform log pane; Loki |
+| Logs | `middleware/logger.py` (root handler) | stdout JSON **and** OTLP → Collector | platform log pane; Loki |
 | Real users | `App/frontend/src/lib/web-vitals.ts`, `client-errors.ts` | `POST /v1/telemetry/{vitals,errors}` | Prometheus |
 | Synthetic | blackbox exporter | HTTP probes of `/health`, `/ready`, the frontend | Prometheus |
 
@@ -569,7 +569,7 @@ its API was answering without the local LLM.
 | --- | --- |
 | `App/backend/app/analytics.py` | Metrics facade, request middleware, chat-turn recorder |
 | `App/backend/app/tracing.py` | OTel setup, GenAI spans/metrics, turn token usage |
-| `App/backend/app/logging_config.py` | Root JSON logging, request id, redaction |
+| `App/backend/app/middleware/logger.py` | Root JSON logging, request id, redaction |
 | `App/backend/app/security_events.py` | OWASP-vocabulary security events |
 | `App/backend/app/client_telemetry.py` | RUM endpoints' models and recording |
 | `App/backend/app/audit/turns.py`, `audit/tsa.py` | Audit rows per turn; RFC 3161 seals |

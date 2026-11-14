@@ -1278,7 +1278,7 @@ class SpeechModel:
         self, audio_bytes: bytes, sample_rate: int, language: str | None
     ) -> str:
         """Cloud STT via Cloudflare Workers AI Whisper (flag/budget/breaker-gated)."""
-        from .flags import flags
+        from .config.flags import flags
 
         if not flags.is_enabled("cloudflare_fallback"):
             return ""
@@ -1322,7 +1322,7 @@ class SpeechModel:
         """Cloud TTS via Cloudflare Workers AI (flag/backend/config/breaker/budget
         gated). Tries TTS_FALLBACK_MODEL then TTS_FALLBACK_MODEL_2 for resilience.
         Returns None when disabled/unavailable so the caller falls through."""
-        from .flags import flags
+        from .config.flags import flags
 
         if not flags.is_enabled("cloudflare_fallback"):
             return None
@@ -1374,7 +1374,7 @@ class SpeechModel:
         once the Sunbird quota cooldown expires.
         """
         from . import sunbird
-        from .flags import flags
+        from .config.flags import flags
 
         tts_fb = os.getenv("TTS_FALLBACK_BACKEND", "").strip().lower()
         if tts_fb != "gemini" and not sunbird.both_accounts_quota_exhausted():
@@ -2900,8 +2900,8 @@ class SpeechModel:
         def _prompted():
             if self._chat_model is not None:
                 try:
-                    from . import llm as llm_module
-                    reply = llm_module.translate_text(text, source_lang=source_lang, target_lang=target_lang)
+                    from .rag import generator as generator_module
+                    reply = generator_module.translate_text(text, source_lang=source_lang, target_lang=target_lang)
                     if reply and reply.strip():
                         return _res(reply.strip(), "prompted_qwen3")
                 except Exception:
@@ -2974,7 +2974,7 @@ class SpeechModel:
         as ``sunbird``). Shares the Sunbird generation breaker. Returns "" when
         disabled or unavailable, so the next tier still runs.
         """
-        from .flags import flags
+        from .config.flags import flags
 
         if not flags.is_enabled("cloudflare_fallback") or not cloud_models_allowed():
             return ""
@@ -3004,7 +3004,7 @@ class SpeechModel:
         """Translate via Cloudflare Workers AI Llama (prompted) — the model-routing
         fallback after Sunflower. Flag/budget/breaker-gated; returns "" when disabled
         or unavailable so the Sunbird tier still runs."""
-        from .flags import flags
+        from .config.flags import flags
 
         if not flags.is_enabled("cloudflare_fallback") or not cloud_models_allowed():
             return ""

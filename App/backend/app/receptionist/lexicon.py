@@ -12,7 +12,7 @@ except ImportError:
     jellyfish = None  # type: ignore[assignment]
 
 from .._root import PROJECT_ROOT
-from ..query import _ABBREVIATIONS, _TAX_DOMAIN_VOCAB, _damerau_levenshtein
+from ..rag.query import _ABBREVIATIONS, _TAX_DOMAIN_VOCAB, _damerau_levenshtein
 
 logger = logging.getLogger(__name__)
 

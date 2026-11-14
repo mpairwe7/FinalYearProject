@@ -15,19 +15,19 @@ import uuid
 from typing import Any
 
 import pytest
-from app import service as service_module
+from app.rag import pipeline as pipeline_module
 from app.agents.graphs.main_graph import node_reflect, node_synthesize
 from app.agents.graphs.state import AgentGraphState
 from app.audit import turns
-from app.flags import flags
+from app.config.flags import flags
 from app.guardrails import OutputGuard
 from app.providers import breakers
 from app.providers.routing import ModelTier
-from app.service import ChatModel
+from app.rag.pipeline import ChatModel
 
 HIT = {"text": "The standard VAT rate in Uganda is 18 percent.", "source": "vat.pdf", "score_rerank": 0.9}
 CITATION = {"marker": "1", "ref": "[1]", "source": "vat.pdf", "text": HIT["text"]}
-UNAVAILABLE = service_module.DEGRADED_DISCLOSURES["generation_unavailable"]
+UNAVAILABLE = pipeline_module.DEGRADED_DISCLOSURES["generation_unavailable"]
 
 
 class Model:
@@ -81,7 +81,7 @@ def run_turn(model: Model, **overrides: Any) -> list[tuple[str, Any]]:
     }
 
     async def collect() -> list[tuple[str, Any]]:
-        return [e async for e in service_module.run_chat_turn(model, channel="sse", **{**arguments, **overrides})]
+        return [e async for e in pipeline_module.run_chat_turn(model, channel="sse", **{**arguments, **overrides})]
 
     return asyncio.run(collect())
 
@@ -89,19 +89,19 @@ def run_turn(model: Model, **overrides: Any) -> list[tuple[str, Any]]:
 @pytest.fixture
 def stream(monkeypatch):
     def install(*words: str) -> None:
-        monkeypatch.setattr(service_module, "stream_llm_tokens", lambda *_a, **_k: iter(words))
+        monkeypatch.setattr(pipeline_module, "stream_llm_tokens", lambda *_a, **_k: iter(words))
 
-    monkeypatch.setattr(service_module.llm_module, "is_available", lambda: True)
-    monkeypatch.setattr(service_module.llm_module, "can_generate_in_locale", lambda _locale: True)
-    monkeypatch.setattr("app.english_rendering.answer_in_english", lambda text: text)
-    monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
+    monkeypatch.setattr(pipeline_module.generator_module, "is_available", lambda: True)
+    monkeypatch.setattr(pipeline_module.generator_module, "can_generate_in_locale", lambda _locale: True)
+    monkeypatch.setattr("app.rag.english_rendering.answer_in_english", lambda text: text)
+    monkeypatch.setattr(pipeline_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
     monkeypatch.setattr(OutputGuard, "should_abstain", lambda _self, _hits, locale="en": False)
     return install
 
 
 class TestAFallbackSaysSo:
     def test_a_passage_that_replaced_a_draft_says_so_too(self) -> None:
-        assert UNAVAILABLE in service_module._with_degraded_disclosure("A passage.", ["draft_unsupported"])
+        assert UNAVAILABLE in pipeline_module._with_degraded_disclosure("A passage.", ["draft_unsupported"])
 
     def test_it_does_not_call_the_passage_official(self) -> None:
         # With nothing official found, the closest passage can be web commentary.
@@ -128,28 +128,28 @@ class TestAFallbackSaysSo:
             yield "You must register first. "
             raise ConnectionError("worker died")
 
-        monkeypatch.setattr(service_module.llm_module, "generate_stream", breaks)
+        monkeypatch.setattr(pipeline_module.generator_module, "generate_stream", breaks)
         monkeypatch.setattr(
-            service_module,
+            pipeline_module,
             "stream_llm_tokens",
-            lambda *_a, **_k: service_module._stream_local_then_cloud("q", [HIT], None, "en"),
+            lambda *_a, **_k: pipeline_module._stream_local_then_cloud("q", [HIT], None, "en"),
         )
-        service_module._LLM_CIRCUIT.record_success()
+        pipeline_module._LLM_CIRCUIT.record_success()
         events = run_turn(Model())
         text = "".join(str(payload) for kind, payload in events if kind in ("token", "revision"))
-        assert service_module.DEGRADED_DISCLOSURES["stream_interrupted"] in text
+        assert pipeline_module.DEGRADED_DISCLOSURES["stream_interrupted"] in text
 
     def test_a_cut_off_stream_gets_no_second_answer_appended(self, monkeypatch) -> None:
         def breaks(**_kwargs: Any):
             yield "First half"
             raise ConnectionError("worker died")
 
-        monkeypatch.setattr(service_module.llm_module, "generate_stream", breaks)
-        monkeypatch.setattr(service_module.llm_module, "is_available", lambda: True)
-        monkeypatch.setattr(service_module, "_stream_cloud_fallback", lambda *_a, **_k: iter(["Second answer"]))
-        service_module._LLM_CIRCUIT.record_success()
+        monkeypatch.setattr(pipeline_module.generator_module, "generate_stream", breaks)
+        monkeypatch.setattr(pipeline_module.generator_module, "is_available", lambda: True)
+        monkeypatch.setattr(pipeline_module, "_stream_cloud_fallback", lambda *_a, **_k: iter(["Second answer"]))
+        pipeline_module._LLM_CIRCUIT.record_success()
 
-        tokens = list(service_module._stream_local_then_cloud("q", [], None, "en"))
+        tokens = list(pipeline_module._stream_local_then_cloud("q", [], None, "en"))
 
         assert tokens == ["First half"]
 
@@ -162,12 +162,12 @@ def chat_model() -> ChatModel:
 class TestOnRest:
     def test_a_failed_generation_is_disclosed_in_the_reply(self, chat_model, clean_flags, tmp_db, monkeypatch) -> None:
         flags.set("agentic_mode", False)
-        monkeypatch.setattr(service_module, "_cloud_llm_ready", lambda: True)
-        monkeypatch.setattr(service_module, "_call_llm_with_deadline", lambda **_kw: "")
+        monkeypatch.setattr(pipeline_module, "_cloud_llm_ready", lambda: True)
+        monkeypatch.setattr(pipeline_module, "_call_llm_with_deadline", lambda **_kw: "")
         monkeypatch.setattr(chat_model, "_llm_available", True)
         hits = [{**HIT, "doc_type": "faq", "answer": HIT["text"]}]
-        monkeypatch.setattr(service_module, "_simple_search", lambda *_a, **_k: [])
-        monkeypatch.setattr(service_module, "_faq_hits_to_retrieval_hits", lambda *_a, **_k: hits)
+        monkeypatch.setattr(pipeline_module, "_simple_search", lambda *_a, **_k: [])
+        monkeypatch.setattr(pipeline_module, "_faq_hits_to_retrieval_hits", lambda *_a, **_k: hits)
         monkeypatch.setattr(OutputGuard, "should_abstain", lambda _self, _hits, locale="en": False)
         result = chat_model.generate("Tell me about keeping records for a small shop", session_id=uuid.uuid4().hex)
         assert result["retrieval_mode"] not in ("abstained", "calculator", "rate_lookup"), result["retrieval_mode"]
@@ -176,15 +176,15 @@ class TestOnRest:
 
     def test_the_audit_helper_adds_it_on_every_exit(self) -> None:
         model = ChatModel.__new__(ChatModel)
-        token = service_module._TURN_GENERATION.set(
-            {**service_module._new_generation_record(), "degraded": ["tool_loop_truncated"]}
+        token = pipeline_module._TURN_GENERATION.set(
+            {**pipeline_module._new_generation_record(), "degraded": ["tool_loop_truncated"]}
         )
         try:
             result = {"reply": "Partly checked.", "retrieval_mode": "agentic"}
             model._audit_turn(message="q", result=result, session_id=None, trace_ctx={})
         finally:
-            service_module._TURN_GENERATION.reset(token)
-        assert service_module.DEGRADED_DISCLOSURES["tool_loop_truncated"] in result["reply"]
+            pipeline_module._TURN_GENERATION.reset(token)
+        assert pipeline_module.DEGRADED_DISCLOSURES["tool_loop_truncated"] in result["reply"]
         assert result["_generation"]["degraded"] == ["tool_loop_truncated"]
 
 
@@ -200,14 +200,14 @@ class TestADegradedAnswerIsNotKept:
             yield self.GROUNDED
             raise ConnectionError("worker died")
 
-        monkeypatch.setattr(service_module.llm_module, "generate_stream", breaks)
+        monkeypatch.setattr(pipeline_module.generator_module, "generate_stream", breaks)
         monkeypatch.setattr(
-            service_module,
+            pipeline_module,
             "stream_llm_tokens",
-            lambda *_a, **_k: service_module._stream_local_then_cloud("q", [HIT], None, "en"),
+            lambda *_a, **_k: pipeline_module._stream_local_then_cloud("q", [HIT], None, "en"),
         )
-        monkeypatch.setattr(service_module.flags, "is_enabled", lambda name, **_kw: name == "semantic_cache")
-        service_module._LLM_CIRCUIT.record_success()
+        monkeypatch.setattr(pipeline_module.flags, "is_enabled", lambda name, **_kw: name == "semantic_cache")
+        pipeline_module._LLM_CIRCUIT.record_success()
         model = Model()
         stored: list[Any] = []
         model._cache.put = lambda *a, **_k: stored.append(a)
@@ -220,7 +220,7 @@ class TestADegradedAnswerIsNotKept:
 
     def test_a_healthy_answer_still_is(self, stream, monkeypatch) -> None:
         stream(self.GROUNDED)
-        monkeypatch.setattr(service_module.flags, "is_enabled", lambda name, **_kw: name == "semantic_cache")
+        monkeypatch.setattr(pipeline_module.flags, "is_enabled", lambda name, **_kw: name == "semantic_cache")
         model = Model()
         stored: list[Any] = []
         model._cache.put = lambda *a, **_k: stored.append(a)
@@ -234,12 +234,12 @@ class TestADegradedAnswerIsNotKept:
     def test_on_rest(self, chat_model, clean_flags, tmp_db, monkeypatch) -> None:
         flags.set("agentic_mode", False)
         flags.set("semantic_cache", True)
-        monkeypatch.setattr(service_module, "_cloud_llm_ready", lambda: True)
-        monkeypatch.setattr(service_module, "_call_llm_with_deadline", lambda **_kw: "")
+        monkeypatch.setattr(pipeline_module, "_cloud_llm_ready", lambda: True)
+        monkeypatch.setattr(pipeline_module, "_call_llm_with_deadline", lambda **_kw: "")
         monkeypatch.setattr(chat_model, "_llm_available", True)
-        monkeypatch.setattr(service_module, "_simple_search", lambda *_a, **_k: [])
+        monkeypatch.setattr(pipeline_module, "_simple_search", lambda *_a, **_k: [])
         monkeypatch.setattr(
-            service_module,
+            pipeline_module,
             "_faq_hits_to_retrieval_hits",
             lambda *_a, **_k: [{**HIT, "doc_type": "faq", "answer": HIT["text"]}],
         )
@@ -263,35 +263,35 @@ class TestAGraphFallback:
 
         class Graph:
             def run(self, state: AgentGraphState, thread_id: str = "") -> AgentGraphState:
-                service_module._note_generation(degraded="generation_unavailable")
+                pipeline_module._note_generation(degraded="generation_unavailable")
                 return final
 
         flags.set("langgraph", True)
         flags.set("agentic_mode", True)
         monkeypatch.setattr("app.agents.graphs.main_graph.build_main_graph", lambda: Graph())
-        token = service_module._TURN_GENERATION.set(service_module._new_generation_record())
+        token = pipeline_module._TURN_GENERATION.set(pipeline_module._new_generation_record())
         try:
             result = chat_model.generate_retrieval_only(
                 "Tell me about keeping records for a small shop", session_id=uuid.uuid4().hex
             )
         finally:
-            service_module._TURN_GENERATION.reset(token)
+            pipeline_module._TURN_GENERATION.reset(token)
         assert UNAVAILABLE in result["reply"]
 
 
 class TestTheRowNamesWhatAnswered:
     @pytest.fixture
     def record(self):
-        token = service_module._TURN_GENERATION.set(service_module._new_generation_record())
-        yield service_module._TURN_GENERATION.get()
-        service_module._TURN_GENERATION.reset(token)
+        token = pipeline_module._TURN_GENERATION.set(pipeline_module._new_generation_record())
+        yield pipeline_module._TURN_GENERATION.get()
+        pipeline_module._TURN_GENERATION.reset(token)
 
     def test_a_cloud_answer(self, record, monkeypatch) -> None:
         from app import sunbird
 
         self._sunbird_says(monkeypatch, "A complete answer.")
 
-        service_module._llm_cloud_fallback("q", [], None, "en")
+        pipeline_module._llm_cloud_fallback("q", [], None, "en")
 
         assert record["backend"] == "sunbird"
         assert record["model"] == sunbird.SUNBIRD_LLM_MODEL
@@ -308,7 +308,7 @@ class TestTheRowNamesWhatAnswered:
     def test_a_provider_that_returned_nothing_is_not_named(self, record, monkeypatch) -> None:
         self._sunbird_says(monkeypatch, "")
 
-        assert service_module._llm_cloud_fallback("q", [], None, "en") == ""
+        assert pipeline_module._llm_cloud_fallback("q", [], None, "en") == ""
 
         assert record["backend"] == ""
         assert record["model"] == ""
@@ -318,7 +318,7 @@ class TestTheRowNamesWhatAnswered:
 
         self._sunbird_says(monkeypatch, "The penalty is calculated on the")
 
-        served = service_module._llm_cloud_fallback("q", [], None, "en")
+        served = pipeline_module._llm_cloud_fallback("q", [], None, "en")
 
         assert served == "The penalty is calculated on the"
         assert record["backend"] == "sunbird"
@@ -326,7 +326,7 @@ class TestTheRowNamesWhatAnswered:
 
     def test_a_draft_replaced_by_a_passage_is_not_credited_to_the_model(self, record, monkeypatch) -> None:
         record.update(backend="local", model="some-model", tier="T1")
-        monkeypatch.setattr("app.retriever.HybridRetriever.compute_faithfulness", lambda *_a, **_k: 0.0)
+        monkeypatch.setattr("app.rag.retriever.HybridRetriever.compute_faithfulness", lambda *_a, **_k: 0.0)
         state = AgentGraphState(query="q", reply="An unsupported draft.", hits=[HIT], locale="en", max_reflections=0)
 
         node_reflect(state)
@@ -337,7 +337,7 @@ class TestTheRowNamesWhatAnswered:
 
     def test_a_draft_that_was_supported_stays_the_models(self, record, monkeypatch) -> None:
         record.update(backend="local", model="some-model")
-        monkeypatch.setattr("app.retriever.HybridRetriever.compute_faithfulness", lambda *_a, **_k: 0.95)
+        monkeypatch.setattr("app.rag.retriever.HybridRetriever.compute_faithfulness", lambda *_a, **_k: 0.95)
         state = AgentGraphState(
             query="VAT rate", reply="The VAT rate is 18 percent.", hits=[HIT], locale="en", max_reflections=0
         )
@@ -350,7 +350,7 @@ class TestTheRowNamesWhatAnswered:
 
     def test_a_fallback_after_a_good_first_pass_loses_that_passs_author(self, record, monkeypatch) -> None:
         record.update(backend="local", model="some-model")
-        monkeypatch.setattr(service_module.llm_module, "is_available", lambda: False)
+        monkeypatch.setattr(pipeline_module.generator_module, "is_available", lambda: False)
 
         node_synthesize(AgentGraphState(query="q", hits=[HIT], locale="en"))
 
@@ -358,21 +358,21 @@ class TestTheRowNamesWhatAnswered:
         assert record["degraded"] == ["generation_unavailable"]
 
     def test_a_graph_answer(self, record, monkeypatch) -> None:
-        monkeypatch.setattr(service_module.llm_module, "is_available", lambda: True)
-        monkeypatch.setattr(service_module.llm_module, "generate", lambda **_kw: "A complete answer.")
+        monkeypatch.setattr(pipeline_module.generator_module, "is_available", lambda: True)
+        monkeypatch.setattr(pipeline_module.generator_module, "generate", lambda **_kw: "A complete answer.")
 
         node_synthesize(AgentGraphState(query="q", hits=[HIT], locale="en"))
 
         assert record["backend"] == "local"
-        assert record["model"] == service_module.llm_module.LLM_MODEL
+        assert record["model"] == pipeline_module.generator_module.LLM_MODEL
         assert record["degraded"] == []
 
     def test_a_local_answer(self, record, monkeypatch) -> None:
-        monkeypatch.setattr(service_module.llm_module, "generate", lambda **_kw: "A complete answer.")
-        monkeypatch.setattr(service_module.llm_module, "get_last_generation_meta", lambda: {"finish_reason": "stop"})
-        service_module._LLM_CIRCUIT.record_success()
+        monkeypatch.setattr(pipeline_module.generator_module, "generate", lambda **_kw: "A complete answer.")
+        monkeypatch.setattr(pipeline_module.generator_module, "get_last_generation_meta", lambda: {"finish_reason": "stop"})
+        pipeline_module._LLM_CIRCUIT.record_success()
 
-        service_module._local_llm_then_cloud("q", [], None, "en", tier=ModelTier.T1)
+        pipeline_module._local_llm_then_cloud("q", [], None, "en", tier=ModelTier.T1)
 
         assert record["backend"] == "local"
         assert record["tier"] == ModelTier.T1.value
@@ -384,23 +384,23 @@ class TestTheRowNamesWhatAnswered:
             timeout_s = 5.0
 
         reasoner = Reasoner()
-        monkeypatch.setattr(service_module, "_is_non_t1_endpoint", lambda ep: ep is reasoner)
-        monkeypatch.setattr(service_module, "get_endpoint", lambda _tier: None)
+        monkeypatch.setattr(pipeline_module, "_is_non_t1_endpoint", lambda ep: ep is reasoner)
+        monkeypatch.setattr(pipeline_module, "get_endpoint", lambda _tier: None)
         monkeypatch.setattr(
-            service_module.llm_module,
+            pipeline_module.generator_module,
             "generate",
             lambda **kw: "" if kw.get("endpoint") is reasoner else "T1 answered.",
         )
-        monkeypatch.setattr(service_module.llm_module, "get_last_generation_meta", lambda: {"finish_reason": "stop"})
-        service_module._LLM_CIRCUIT.record_success()
-        service_module._REASONER_CIRCUIT.record_success()
+        monkeypatch.setattr(pipeline_module.generator_module, "get_last_generation_meta", lambda: {"finish_reason": "stop"})
+        pipeline_module._LLM_CIRCUIT.record_success()
+        pipeline_module._REASONER_CIRCUIT.record_success()
 
-        service_module._local_llm_then_cloud("q", [], None, "en", endpoint=reasoner, tier=ModelTier.T3)
+        pipeline_module._local_llm_then_cloud("q", [], None, "en", endpoint=reasoner, tier=ModelTier.T3)
 
         assert record["fallbacks"] == ["reasoner_empty"]
 
     def test_outside_a_turn_nothing_is_recorded(self) -> None:
-        service_module._note_generation(backend="local", degraded="stream_interrupted")
+        pipeline_module._note_generation(backend="local", degraded="stream_interrupted")
 
     def test_it_reaches_the_ledger(self) -> None:
         payload = turns.build_turn_payload(

@@ -22,7 +22,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from app import database as db
+from app.db import database as db
 
 BACKEND = Path(__file__).resolve().parents[1]
 

@@ -15,7 +15,7 @@ import unittest
 import uuid
 from unittest.mock import AsyncMock, patch
 
-from app import database as db
+from app.db import database as db
 from app.receptionist import desk, livekit, transfer
 from app.receptionist.hub import hub
 from app.receptionist.state import registry
@@ -467,11 +467,11 @@ class TransferTenantTests(WaitingCallCase):
     tenant_id = "tenant_kla"
 
     async def test_the_transfer_ticket_is_in_the_callers_tenant(self):
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         self.room.state.mode = "ai"
         self.room.state.user_id = "taxpayer-1"
-        with patch("app.service.flags.is_enabled", side_effect=lambda name, **_kw: name == "ticket_queue"):
+        with patch("app.rag.pipeline.flags.is_enabled", side_effect=lambda name, **_kw: name == "ticket_queue"):
             ticket_id, _status = transfer.open_transfer(
                 self.room,
                 ChatModel(),

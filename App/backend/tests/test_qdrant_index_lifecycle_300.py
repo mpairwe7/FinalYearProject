@@ -12,7 +12,7 @@ pytest.importorskip("qdrant_client")
 
 from app.analytics import MetricsStore
 from app.freshness import FreshnessReport, compare_index_hash
-from app.index_lifecycle import (
+from app.vectorstore.index_lifecycle import (
     IndexLifecycleError,
     candidate_collection_name,
     promote_alias,
@@ -70,10 +70,10 @@ def test_build_failure_never_updates_the_serving_alias() -> None:
 
     with (
         mock.patch("qdrant_client.QdrantClient", return_value=client),
-        mock.patch("app.index_lifecycle.snapshot_sources", return_value=snapshot),
-        mock.patch("app.index_lifecycle.load_documents", return_value=[{"text": "x"}]),
-        mock.patch("app.index_lifecycle.build_index", side_effect=RuntimeError("embedding failed")),
-        mock.patch("app.index_lifecycle.QDRANT_COLLECTION", "ura_knowledge_base"),
+        mock.patch("app.vectorstore.index_lifecycle.snapshot_sources", return_value=snapshot),
+        mock.patch("app.vectorstore.index_lifecycle.load_documents", return_value=[{"text": "x"}]),
+        mock.patch("app.vectorstore.index_lifecycle.build_index", side_effect=RuntimeError("embedding failed")),
+        mock.patch("app.vectorstore.index_lifecycle.QDRANT_COLLECTION", "ura_knowledge_base"),
         pytest.raises(RuntimeError, match="embedding failed"),
     ):
         rebuild_if_needed(force=True)
@@ -91,10 +91,10 @@ def test_matching_active_hash_is_idempotent() -> None:
 
     with (
         mock.patch("qdrant_client.QdrantClient", return_value=client),
-        mock.patch("app.index_lifecycle.snapshot_sources", return_value=snapshot),
-        mock.patch("app.index_lifecycle._write_fresh_status"),
-        mock.patch("app.index_lifecycle.build_index") as build,
-        mock.patch("app.index_lifecycle.QDRANT_COLLECTION", "ura_knowledge_base"),
+        mock.patch("app.vectorstore.index_lifecycle.snapshot_sources", return_value=snapshot),
+        mock.patch("app.vectorstore.index_lifecycle._write_fresh_status"),
+        mock.patch("app.vectorstore.index_lifecycle.build_index") as build,
+        mock.patch("app.vectorstore.index_lifecycle.QDRANT_COLLECTION", "ura_knowledge_base"),
     ):
         result = rebuild_if_needed()
 
@@ -115,15 +115,15 @@ def test_candidate_quality_failure_never_updates_the_serving_alias() -> None:
 
     with (
         mock.patch("qdrant_client.QdrantClient", return_value=client),
-        mock.patch("app.index_lifecycle.snapshot_sources", side_effect=[snapshot, snapshot]),
-        mock.patch("app.index_lifecycle.load_documents", return_value=[{"text": "VAT"}]),
-        mock.patch("app.index_lifecycle.build_index", return_value={"total_upserted": 1}),
+        mock.patch("app.vectorstore.index_lifecycle.snapshot_sources", side_effect=[snapshot, snapshot]),
+        mock.patch("app.vectorstore.index_lifecycle.load_documents", return_value=[{"text": "VAT"}]),
+        mock.patch("app.vectorstore.index_lifecycle.build_index", return_value={"total_upserted": 1}),
         mock.patch(
-            "app.index_lifecycle.binding_payload",
+            "app.vectorstore.index_lifecycle.binding_payload",
             side_effect=[{"source_corpus_hash": "old"}, candidate_payload],
         ),
-        mock.patch("app.index_lifecycle.validate_candidate_retrieval", side_effect=IndexLifecycleError("miss")),
-        mock.patch("app.index_lifecycle.QDRANT_COLLECTION", "ura_knowledge_base"),
+        mock.patch("app.vectorstore.index_lifecycle.validate_candidate_retrieval", side_effect=IndexLifecycleError("miss")),
+        mock.patch("app.vectorstore.index_lifecycle.QDRANT_COLLECTION", "ura_knowledge_base"),
         pytest.raises(IndexLifecycleError, match="miss"),
     ):
         rebuild_if_needed(force=True)
@@ -162,7 +162,7 @@ def test_local_compose_runs_the_staged_indexer_before_api() -> None:
     body = compose.read_text(encoding="utf-8")
 
     assert "qdrant-indexer:" in body
-    assert "app.index_lifecycle" in body
+    assert "app.vectorstore.index_lifecycle" in body
     assert "service_completed_successfully" in body
     assert "ura_knowledge_base_jsonl_active" in body
     assert "./Data/pdf_jsonl:/app/Data/pdf_jsonl:ro" in body
@@ -170,7 +170,7 @@ def test_local_compose_runs_the_staged_indexer_before_api() -> None:
     assert "../Data/pdfs:/app/Data/pdfs:ro" in body
     assert "../Data/crawl/pages:/app/Data/crawl/pages:ro" in body
     assert "qdrant-backup:" in body
-    assert "app.qdrant_backup" in body
+    assert "app.vectorstore.qdrant_backup" in body
     assert "qdrant_backups" in body
 
 

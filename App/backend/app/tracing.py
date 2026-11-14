@@ -156,7 +156,7 @@ def _init_log_export(resource: Any) -> None:
     set_logger_provider(provider)
     handler = LoggingHandler(level=logging.INFO, logger_provider=provider)
     # The redaction filter guards OTLP the same way it guards stdout.
-    from .logging_config import PIISanitizingFilter, RequestContextFilter
+    from .middleware.logger import PIISanitizingFilter, RequestContextFilter
 
     handler.addFilter(RequestContextFilter())
     handler.addFilter(PIISanitizingFilter())

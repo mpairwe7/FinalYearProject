@@ -11,15 +11,15 @@ on:
   pull_request:
     branches: [dev, main]
     paths:
-      - "App/backend/app/pgvector_dense.py"
-      - "App/backend/app/dense_cpu.py"
+      - "App/backend/app/vectorstore/vector_db.py"
+      - "App/backend/app/embeddings/embedder.py"
       - "App/backend/tests/test_local_dense_pgvector_live.py"
       - ".github/workflows/local-dense-pgvector.yml"
   push:
     branches: [dev]
     paths:
-      - "App/backend/app/pgvector_dense.py"
-      - "App/backend/app/dense_cpu.py"
+      - "App/backend/app/vectorstore/vector_db.py"
+      - "App/backend/app/embeddings/embedder.py"
   workflow_dispatch:
 
 permissions:

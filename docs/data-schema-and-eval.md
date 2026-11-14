@@ -236,7 +236,7 @@ Fields:
 - `question_sw`, `answer_sw`: Optional human/SALT-reviewed Swahili parallel fields.
 
 Integrity invariant:
-When compiling via `app.faq_corpus.export_faq_csvs_to_jsonl`, every vernacular answer (`answer_lg`, `answer_sw`) must pass `app.mt.figures_survived`. If numbers (e.g. 18%, 30%, UGX amounts) or statutory compliance periods are mutated, compilation halts with `CorpusValidationError`.
+When compiling via `app.ingestion.faq_corpus.export_faq_csvs_to_jsonl`, every vernacular answer (`answer_lg`, `answer_sw`) must pass `app.mt.figures_survived`. If numbers (e.g. 18%, 30%, UGX amounts) or statutory compliance periods are mutated, compilation halts with `CorpusValidationError`.
 
 ### Evaluation Datasets
 - `Data/eval/rag_eval.jsonl` — English eval set (30 samples), JSONL format:

@@ -32,7 +32,7 @@ ml/
 │   ├── tts/infer_tts.py       # Local TTS synthesis — same local-tier role
 │   ├── speech/speech_pipeline.py # Dev end-to-end ASR→MT→TTS pipeline runner
 │   └── data_aug/              # Corpus ingest/clean/split package. App/backend's
-│                              # pdf_corpus.py and crawl_corpus.py import
+│                              # ingestion/pdf_corpus.py and ingestion/crawl_corpus.py import
 │                              # `chunkers` from here for offline corpus export.
 └── configs/
     └── training_config.yaml   # RAG + production quality gate thresholds
@@ -40,7 +40,7 @@ ml/
 
 ## Why these files are load-bearing
 
-- **`lang_id.py`** is imported at runtime by `App/backend/app/query.py` and
+- **`lang_id.py`** is imported at runtime by `App/backend/app/rag/query.py` and
   `App/backend/app/speech_service.py`, and is explicitly copied into the
   Crane Cloud production image (see the comment in
   `App/Dockerfile.cranecloud` — dropping it silently degrades Luganda
@@ -58,8 +58,8 @@ ml/
 - **`data_aug/chunkers.py`** (plus its dependencies `text_utils.py`,
   `schema.py`, `provenance.py`, `loaders.py`, `dedup.py`, `quality.py`,
   `splitters.py`, `formatters.py`, `pipeline.py`) is imported lazily by
-  `App/backend/app/pdf_corpus.py` and `crawl_corpus.py` for offline corpus
-  export (`python -m app.indexer --export-pdf-jsonl --export-crawl-jsonl`).
+  `App/backend/app/ingestion/pdf_corpus.py` and `ingestion/crawl_corpus.py` for offline corpus
+  export (`python -m app.ingestion.indexer --export-pdf-jsonl --export-crawl-jsonl`).
   `data_aug/crawler.py` is the live crawler `.github/workflows/scheduled-crawl.yml`
   runs: weekdays for what changed, the last day of the month for everything due. It
   is not training tooling either. See `docs/runbooks/crawl-operations.md`.
@@ -99,8 +99,8 @@ python ml/pipelines/validate_data.py
 ## Corpus export (offline, needs this package installed)
 
 ```bash
-python -m app.indexer --export-faq-jsonl --export-pdf-jsonl --export-crawl-jsonl
+python -m app.ingestion.indexer --export-faq-jsonl --export-pdf-jsonl --export-crawl-jsonl
 ```
 
-See `App/backend/app/pdf_corpus.py` and `crawl_corpus.py` for what each
+See `App/backend/app/ingestion/pdf_corpus.py` and `ingestion/crawl_corpus.py` for what each
 export step needs from `data_aug/`.

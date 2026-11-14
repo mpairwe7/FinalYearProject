@@ -21,7 +21,7 @@ import pytest
 from app.agents.graphs import AgentGraphState, GraphOutcome
 from app.agents.graphs.main_graph import bind_arguments, build_main_graph
 from app.premise_guard import check_false_premise
-from app.service import ChatModel, _call_llm_agentic, run_chat_turn
+from app.rag.pipeline import ChatModel, _call_llm_agentic, run_chat_turn
 
 
 # ---------------------------------------------------------------------------
@@ -29,10 +29,10 @@ from app.service import ChatModel, _call_llm_agentic, run_chat_turn
 # ---------------------------------------------------------------------------
 class TestVLLMToolCalling:
     def test_vllm_chat_completion_with_openai_tool_calls(self, monkeypatch):
-        from app import llm
+        from app.rag import generator
 
-        monkeypatch.setattr(llm, "LLM_BACKEND", "vllm")
-        monkeypatch.setattr(llm, "VLLM_BASE_URL", "http://vllm-mock:8000/v1")
+        monkeypatch.setattr(generator, "LLM_BACKEND", "vllm")
+        monkeypatch.setattr(generator, "VLLM_BASE_URL", "http://vllm-mock:8000/v1")
 
         fake_response = {
             "choices": [
@@ -60,7 +60,7 @@ class TestVLLMToolCalling:
         mock_resp.__enter__.return_value = mock_resp
 
         with mock.patch("urllib.request.urlopen", return_value=mock_resp):
-            res = llm._vllm_chat_completion(
+            res = generator._vllm_chat_completion(
                 messages=[{"role": "user", "content": "calculate vat"}],
                 tools=[{"type": "function", "function": {"name": "calculate_vat"}}],
             )
@@ -71,10 +71,10 @@ class TestVLLMToolCalling:
             assert calls[0]["arguments"] == {"amount": 100000.0}
 
     def test_vllm_chat_completion_with_xml_tool_call(self, monkeypatch):
-        from app import llm
+        from app.rag import generator
 
-        monkeypatch.setattr(llm, "LLM_BACKEND", "vllm")
-        monkeypatch.setattr(llm, "VLLM_BASE_URL", "http://vllm-mock:8000/v1")
+        monkeypatch.setattr(generator, "LLM_BACKEND", "vllm")
+        monkeypatch.setattr(generator, "VLLM_BASE_URL", "http://vllm-mock:8000/v1")
 
         fake_xml_content = (
             "Let me calculate that.\n"
@@ -96,7 +96,7 @@ class TestVLLMToolCalling:
         mock_resp.__enter__.return_value = mock_resp
 
         with mock.patch("urllib.request.urlopen", return_value=mock_resp):
-            res = llm._vllm_chat_completion(
+            res = generator._vllm_chat_completion(
                 messages=[{"role": "user", "content": "calculate vat on 500k"}],
             )
             calls = res["tool_calls"]
@@ -106,13 +106,13 @@ class TestVLLMToolCalling:
             assert calls[0]["arguments"] == {"amount": 500000}
 
     def test_vllm_ready_and_generate_with_tools(self, monkeypatch):
-        from app import llm
+        from app.rag import generator
 
-        monkeypatch.setattr(llm, "LLM_BACKEND", "vllm")
-        monkeypatch.setattr(llm, "LLM_ENABLED", True)
-        monkeypatch.setattr(llm, "VLLM_BASE_URL", "http://vllm-mock:8000/v1")
+        monkeypatch.setattr(generator, "LLM_BACKEND", "vllm")
+        monkeypatch.setattr(generator, "LLM_ENABLED", True)
+        monkeypatch.setattr(generator, "VLLM_BASE_URL", "http://vllm-mock:8000/v1")
 
-        assert llm._vllm_ready() is True
+        assert generator._vllm_ready() is True
 
         fake_chat = {
             "choices": [
@@ -130,7 +130,7 @@ class TestVLLMToolCalling:
         mock_resp.__enter__.return_value = mock_resp
 
         with mock.patch("urllib.request.urlopen", return_value=mock_resp):
-            out = llm.generate_with_tools(
+            out = generator.generate_with_tools(
                 query="What is the VAT on 1,000,000?",
                 passages=[],
                 conversation_history=None,
@@ -141,10 +141,10 @@ class TestVLLMToolCalling:
 
     def test_vllm_chat_completion_http_error_graceful_handling(self, monkeypatch):
         import urllib.error
-        from app import llm
+        from app.rag import generator
 
-        monkeypatch.setattr(llm, "LLM_BACKEND", "vllm")
-        monkeypatch.setattr(llm, "VLLM_BASE_URL", "http://vllm-mock:8000/v1")
+        monkeypatch.setattr(generator, "LLM_BACKEND", "vllm")
+        monkeypatch.setattr(generator, "VLLM_BASE_URL", "http://vllm-mock:8000/v1")
 
         http_err = urllib.error.HTTPError(
             url="http://vllm-mock:8000/v1/chat/completions",
@@ -155,7 +155,7 @@ class TestVLLMToolCalling:
         )
 
         with mock.patch("urllib.request.urlopen", side_effect=http_err):
-            res = llm._vllm_chat_completion(messages=[{"role": "user", "content": "hi"}])
+            res = generator._vllm_chat_completion(messages=[{"role": "user", "content": "hi"}])
             assert res == {"content": "", "tool_calls": []}
 
 
@@ -179,8 +179,8 @@ class TestDecoupledToolExecution:
                 "truncated": False,
             }
 
-        monkeypatch.setattr("app.service._call_llm_agentic", mock_agentic)
-        monkeypatch.setattr("app.service.plan_calculation", lambda *args, **kwargs: None)
+        monkeypatch.setattr("app.rag.pipeline._call_llm_agentic", mock_agentic)
+        monkeypatch.setattr("app.rag.pipeline.plan_calculation", lambda *args, **kwargs: None)
 
         clean_flags.set("tool_use", True)
         result = model.generate(  # nosemgrep: ura-llm01-raw-user-input-to-llm
@@ -377,16 +377,16 @@ class TestStreamingAgenticParity:
     ):
         async def _run():
             model = ChatModel()
-            from app import llm
+            from app.rag import generator
 
-            monkeypatch.setattr(llm, "is_available", lambda: True)
+            monkeypatch.setattr(generator, "is_available", lambda: True)
 
             async def fake_stream_agentic(*args, **kwargs):
                 yield ("tool.started", {"tool": "calculate_vat"})
                 yield ("tool.completed", {"tool": "calculate_vat", "ok": True})
                 yield ("_full_reply", "The VAT on UGX 1,000,000 is UGX 180,000.")
 
-            monkeypatch.setattr("app.service._stream_agentic_turn", fake_stream_agentic)
+            monkeypatch.setattr("app.rag.pipeline._stream_agentic_turn", fake_stream_agentic)
 
             # generate_retrieval_only returning force_agentic=True with empty hits
             def fake_retrieval(*args, **kwargs):
@@ -464,7 +464,7 @@ class TestWorkflowResumptionNextActions:
     def test_active_workflow_reflected_in_next_actions_on_subject_change(
         self, fresh_registry, clean_flags, monkeypatch, tmp_db
     ):
-        from app import database as db
+        from app.db import database as db
 
         thread_id = "test-thread-resume"
         # Seed an active workflow session where the engine writes one for a
@@ -494,7 +494,7 @@ class TestWorkflowResumptionNextActions:
     def test_workflow_resume_keyword_triggers_prompt_recap(
         self, fresh_registry, clean_flags, monkeypatch, tmp_db
     ):
-        from app import database as db
+        from app.db import database as db
 
         thread_id = "test-thread-resume-keyword"
         db.upsert_workflow_session(

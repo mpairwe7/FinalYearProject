@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .. import mt
-from ..flags import flags
+from ..config.flags import flags
 from ..speech_service import pcm16_to_wav
 
 logger = logging.getLogger(__name__)

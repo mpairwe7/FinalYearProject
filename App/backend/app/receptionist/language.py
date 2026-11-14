@@ -20,7 +20,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Literal
 
-from ..query import (
+from ..rag.query import (
     _ACHOLI_WORDS,
     _COMMON_ENGLISH_WORDS,
     _LUGANDA_WORDS,
@@ -188,7 +188,7 @@ class PolicyConfig:
 def lexical_hits(text: str) -> dict[str, int]:
     """Count words that belong to each language, from local word lists only.
 
-    Never calls a network detector (unlike :func:`app.query.detect_language`,
+    Never calls a network detector (unlike :func:`app.rag.query.detect_language`,
     which may ask Sunbird): this runs inside a live call turn. Cross-language
     homographs (``an``/``in`` in English vs Acholi, ``ki``/``ku`` across Luganda,
     Runyankole, and Acholi) are credited to a language only when that language

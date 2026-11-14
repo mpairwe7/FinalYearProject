@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from starlette.testclient import TestClient
 
-from app import database as db
+from app.db import database as db
 from app.auth.jwt_auth import make_dev_token
 from app.receptionist import brief as call_brief
 from app.receptionist.hub import hub
@@ -126,7 +126,7 @@ class BuildBriefTests(unittest.TestCase):
             self.assertEqual(messages[0]["role"], "system")  # chat messages, not a string
             return json.dumps(MODEL_BRIEF)
 
-        with patch("app.providers.gateway.gemini_generate", gemini), patch("app.llm._vllm_generate", sunflower):
+        with patch("app.providers.gateway.gemini_generate", gemini), patch("app.rag.generator._vllm_generate", sunflower):
             _, model = call_brief._generate("prompt")
         self.assertEqual((order, model), (["sunflower"], "sunflower"))
 
@@ -136,7 +136,7 @@ class BuildBriefTests(unittest.TestCase):
             raise RuntimeError("vLLM down")
 
         with patch("app.providers.gateway.gemini_generate", side_effect=AssertionError("Gemini called")) as gemini, \
-                patch("app.llm._vllm_generate", sunflower):
+                patch("app.rag.generator._vllm_generate", sunflower):
             reply, model = call_brief._generate("prompt")
         self.assertEqual((reply, model), (None, ""))
         gemini.assert_not_called()

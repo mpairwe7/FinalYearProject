@@ -260,7 +260,7 @@ def test_calculator_router_bypass_and_full_10_mda_planner_coverage_and_latency()
     import time
 
     from app.calculator_router import plan_calculation
-    from app.corpus_sync import _NON_REPLACING_FAMILIES
+    from app.vectorstore.corpus_sync import _NON_REPLACING_FAMILIES
     from app.web_research import infer_doc_family
 
     # 1. calculator_router must return None on B2G / Deemed VAT / UNBS / NEMA queries carrying amounts
@@ -291,7 +291,7 @@ def test_calculator_router_bypass_and_full_10_mda_planner_coverage_and_latency()
     assert infer_doc_family("PPDA e-GP and IFMS deemed VAT compliance") == "b2g_ppda_ifms_compliance"
     assert infer_doc_family("UNBS PVoC and NDAMIS single window UESW clearance") == "unbs_nda_uesw_clearance"
     assert {"mda_ntr_schedule", "b2g_ppda_ifms_compliance", "unbs_nda_uesw_clearance"}.issubset(_NON_REPLACING_FAMILIES)
-    from app.corpus_sync import validate_qdrant_sync_origin
+    from app.vectorstore.corpus_sync import validate_qdrant_sync_origin
 
     for nita_url in (
         "https://nita.go.ug/publications/it-certification-guidelines.pdf",
@@ -531,7 +531,7 @@ def test_novel_queue_reduction_and_new_taxpayer_onboarding_tools() -> None:
 
 def test_government_mda_pronunciation_normalization_and_asr_repair() -> None:
     """Verify speech pronunciation rules for all 10-MDA/government terms and TIN/NIN natural word preservation."""
-    from app.query import expand_abbreviations
+    from app.rag.query import expand_abbreviations
     from app.receptionist.lexicon import repair_asr_entities
     from app.speech_normalization import clean_text_for_speech, phoneticize_bantu_acronyms
 

@@ -18,8 +18,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
-from app import database
-from app.service import _ACTIVE_CASE_FACTS, _ACTIVE_CONVERSATION_STATE, _ACTIVE_TENANT_ID, ChatModel
+from app.db import database
+from app.rag.pipeline import _ACTIVE_CASE_FACTS, _ACTIVE_CONVERSATION_STATE, _ACTIVE_TENANT_ID, ChatModel
 from app.workflows.journey_copilot import prerequisite_case_facts
 from app.workflows.loader import load_workflow
 from app.workflows.registry import WorkflowRegistry, WorkflowSession

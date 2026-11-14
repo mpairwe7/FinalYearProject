@@ -6,7 +6,7 @@ import time
 import unittest
 import uuid
 
-from app import database as db
+from app.db import database as db
 from app.receptionist.store import (
     create_call,
     create_turn,

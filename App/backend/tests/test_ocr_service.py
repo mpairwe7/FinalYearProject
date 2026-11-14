@@ -206,7 +206,7 @@ def test_local_ocr_status_reports_variant() -> None:
 
 
 def test_document_normalization_adapter_on_image() -> None:
-    from app.document_normalization import normalize_document, RasterizeSpec
+    from app.ingestion.document_normalization import normalize_document, RasterizeSpec
 
     img_data = _png_bytes()
     bundle = normalize_document(img_data, RasterizeSpec(), render_images=True)

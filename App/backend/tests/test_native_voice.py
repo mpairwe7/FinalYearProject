@@ -670,23 +670,23 @@ class TestPhase28FeatureFlags(unittest.TestCase):
     """Verify new Phase 28 feature flags exist and default to off."""
 
     def test_native_voice_flag_exists(self):
-        from app.flags import flags
+        from app.config.flags import flags
         self.assertFalse(flags.is_enabled("native_voice"))
 
     def test_streaming_tts_v2_flag_exists(self):
-        from app.flags import flags
+        from app.config.flags import flags
         self.assertFalse(flags.is_enabled("streaming_tts_v2"))
 
     def test_voice_vision_v2_flag_exists(self):
-        from app.flags import flags
+        from app.config.flags import flags
         self.assertFalse(flags.is_enabled("voice_vision_v2"))
 
     def test_speculative_prefetch_flag_exists(self):
-        from app.flags import flags
+        from app.config.flags import flags
         self.assertFalse(flags.is_enabled("speculative_prefetch"))
 
     def test_programmatic_override(self):
-        from app.flags import flags
+        from app.config.flags import flags
 
         flags.set("native_voice", True)
         self.assertTrue(flags.is_enabled("native_voice"))

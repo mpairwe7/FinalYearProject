@@ -105,7 +105,7 @@ class Methods:
         return text, mean_lp, (time.perf_counter() - t0) * 1000
 
     def text_lid(self, pcm: bytes) -> dict[str, Any]:
-        from app.query import detect_language
+        from app.rag.query import detect_language
 
         text, _, ms = self._decode(pcm, None)
         top = detect_language(text, default_lang="en") if text else "en"

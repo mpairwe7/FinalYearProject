@@ -5,7 +5,7 @@
 > `feat/agentic-workflows` branch actually *ships* (Phases A-D of
 > the broader Phase 14 work).
 
-Most capabilities below are **gated behind a feature flag** (`flags.py`, 91 flags total).
+Most capabilities below are **gated behind a feature flag** (`config/flags.py`, 91 flags total).
 `FLAG_TOOL_USE` defaults OFF; `FLAG_TICKET_QUEUE` defaults ON (`true`).
 `FLAG_AGENTIC_MODE` defaults ON after the English routing golden set
 holds ≥ 0.95 (`agentic_mode_gate`, currently `36/36`).
@@ -83,10 +83,10 @@ per-request in tests via `flags.set("tool_use", True)`.
 
 | Phase | Files added / touched | Purpose |
 |---|---|---|
-| **A** | `backend/app/tools/{__init__,calculators,calendar,rates,rag_tool,escalate}.py` + `flags.py` | Tool framework (ABC + registry + schema) and 11 starter tools |
-| **B** | `backend/app/llm.py` + `service.py` | `generate_with_tools()` — bounded tool-call loop wired into the LLM layer, gated by `FLAG_TOOL_USE` |
+| **A** | `backend/app/tools/{__init__,calculators,calendar,rates,rag_tool,escalate}.py` + `config/flags.py` | Tool framework (ABC + registry + schema) and 11 starter tools |
+| **B** | `backend/app/rag/generator.py` + `service.py` | `generate_with_tools()` — bounded tool-call loop wired into the LLM layer, gated by `FLAG_TOOL_USE` |
 | **C** | `backend/app/agents/{__init__,state,supervisor}.py` + `service.py` | Supervisor classifier (rule-based), `AgentRoute` enum, `AgentState` TypedDict; routes to CLARIFY/ESCALATE/TOOLS/SPECIALIST/RAG |
-| **D** | `backend/app/database.py` (+ schema) + `backend/app/tools/escalate.py` + `service.py` + `main.py` + `models.py` | `tickets` table + CRUD + `escalate_to_human` tool + 4 admin endpoints + `ticket_id` surfacing in ChatResponse |
+| **D** | `backend/app/db/database.py` (+ schema) + `backend/app/tools/escalate.py` + `service.py` + `main.py` + `models.py` | `tickets` table + CRUD + `escalate_to_human` tool + 4 admin endpoints + `ticket_id` surfacing in ChatResponse |
 
 All code is under the `feat/agentic-workflows` branch.
 
@@ -272,7 +272,7 @@ imported lazily inside the flag check, so a closed flag costs nothing.
 
 ## 5. LLM tool-calling loop (Phase B)
 
-`backend/app/llm.py::generate_with_tools()` implements a bounded
+`backend/app/rag/generator.py::generate_with_tools()` implements a bounded
 iterative loop:
 
 ```
@@ -589,7 +589,7 @@ Qwen.  Live-LLM integration tests belong in a separate
 ### Fixture design notes
 
 - `tmp_db` — **in-memory SQLite** (`sqlite3.connect(":memory:")`)
-  monkey-patched into `app.database._get_connection`.  This
+  monkey-patched into `app.db.database._get_connection`.  This
   avoids all file-locking issues that pytest's `tmp_path_factory`
   hit on hosts where `/tmp/pytest-of-<user>` lives on an NFS
   mount, and avoids cross-test WAL state contamination.

@@ -129,7 +129,7 @@ FULL_HUBS = (
 )
 
 #: Direct statutory & fee PDF URLs across the 11 high-dependency Ugandan MDAs
-#: (mirrored from ``app.pdf_corpus.MDA_STATUTORY_PDF_REGISTRY`` because ``ml/``
+#: (mirrored from ``app.ingestion.pdf_corpus.MDA_STATUTORY_PDF_REGISTRY`` because ``ml/``
 #: may not import ``app.*``). Queued when ``CrawlConfig.include_mda_pdfs`` is set.
 MDA_CANONICAL_FILENAMES: dict[str, str] = {
     "https://media.ulii.org/media/legislation/18258/source_file/5b5c2f1ce136c1a3/1998-15.pdf": "MoWT-Traffic-and-Road-Safety-Act-Cap-361.pdf",

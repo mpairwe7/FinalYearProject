@@ -6,10 +6,10 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from app import database as db
+from app.db import database as db
 from app.memory.semantic import UserFact
 from app.memory.service import get_memory_service, reset_memory_service
-from app.service import ChatModel
+from app.rag.pipeline import ChatModel
 from app.workflows.loader import load_workflow
 from app.workflows.registry import WorkflowRegistry
 

@@ -360,7 +360,7 @@ class TestVoiceConsent(unittest.TestCase):
         self.assertFalse(require_voice_consent(""))
 
     @patch("app.voice_consent.flags")
-    @patch("app.database.has_active_consent")
+    @patch("app.db.database.has_active_consent")
     def test_consent_granted(self, mock_has_consent, mock_flags):
         from app.voice_consent import require_voice_consent
 
@@ -369,7 +369,7 @@ class TestVoiceConsent(unittest.TestCase):
         self.assertTrue(require_voice_consent("user123"))
 
     @patch("app.voice_consent.flags")
-    @patch("app.database.has_active_consent")
+    @patch("app.db.database.has_active_consent")
     def test_consent_denied(self, mock_has_consent, mock_flags):
         from app.voice_consent import require_voice_consent
 
@@ -398,20 +398,20 @@ class TestVoiceConsent(unittest.TestCase):
 
 class TestFeatureFlags(unittest.TestCase):
     def test_voice_streaming_flag_exists(self):
-        from app.flags import flags
+        from app.config.flags import flags
 
         # Should return False (default) without env var
         result = flags.is_enabled("voice_streaming")
         self.assertFalse(result)
 
     def test_voice_consent_flag_exists(self):
-        from app.flags import flags
+        from app.config.flags import flags
 
         result = flags.is_enabled("voice_consent")
         self.assertFalse(result)
 
     def test_programmatic_override(self):
-        from app.flags import flags
+        from app.config.flags import flags
 
         flags.set("voice_streaming", True)
         self.assertTrue(flags.is_enabled("voice_streaming"))

@@ -17,7 +17,7 @@ Target Environment: `dev-2.0` (FastAPI backend + Next.js frontend + vLLM on mult
 2. **Invariants (from `AGENTS.md` and `App/backend/AGENTS.md`):**
    - **Zero Regression on 2,000-FAQ Benchmark:** All existing FAQ regressions, golden sets, and vernacular routing (English, Luganda, Swahili) must continue to pass (baseline ≥ 99.85%).
    - **Endpoint Manifest Contract:** If any FastAPI route is modified or added, update `tests/test_all_endpoints_e2e.py` (`EXPECTED_ENDPOINTS`, `COVERAGE`, and locked endpoint counts).
-   - **Feature Flag Governance:** Any new feature flag must be registered in `App/backend/app/flags.py`, documented in `docs/RAG_ARCHITECTURE.md`, and reflected in `.env.example`.
+   - **Feature Flag Governance:** Any new feature flag must be registered in `App/backend/app/config/flags.py`, documented in `docs/RAG_ARCHITECTURE.md`, and reflected in `.env.example`.
    - **Secrets Safety:** Never commit, log, or echo credentials. Use `SecretStr` for API keys.
 3. **Investigation Origin:**
    - Prompt testing on `dev-2.0` revealed that complex tax queries are corrupted or intercepted prematurely by rigid regex heuristics, aggressive spell-checking, and naive false-premise blocks before reaching the LLM, or are choked by a 512-token limit and single-tier 14B model.
@@ -128,8 +128,8 @@ Fix the five acute bugs that caused immediate failure during testing.
 - **Remedy:**
   Refine the urgency regex to require actual temporal/emotional pressure, e.g. `\b(?:under\s+audit|being\s+audited|facing\s+penalt\w+|incurred\s+penalt\w+|threatened\s+with)\b`, rather than the mere statutory noun `penalties` or `fine`.
 
-#### 0.3 Fix Destructive Query Rewriting in `App/backend/app/query.py`
-- **Location:** `App/backend/app/query.py` in `correct_spelling()` and `expand_abbreviations()`
+#### 0.3 Fix Destructive Query Rewriting in `App/backend/app/rag/query.py`
+- **Location:** `App/backend/app/rag/query.py` in `correct_spelling()` and `expand_abbreviations()`
 - **Current Defect:**
   - `_fuzzy_correct_word` has a narrow vocabulary; valid words like `"disputed"` (len 8) have distance 1 to `"dispute"` (len 7) and are incorrectly mutated.
   - `expand_abbreviations` blindly replaces `WHT` with `Withholding Tax (WHT)`, resulting in `Withholding Tax Withholding Tax (WHT))`.
@@ -161,19 +161,19 @@ Fix the five acute bugs that caused immediate failure during testing.
 ### Phase 1: Output Generation Budget & Context Expansion
 
 #### 1.1 Increase Output Generation Limits
-- **Location:** `App/backend/app/service.py` and environment configuration.
+- **Location:** `App/backend/app/rag/pipeline.py` and environment configuration.
 - **Problem:**
   `LLM_MAX_TOKENS=512` causes comprehensive legal analyses to be chopped off mid-sentence (as observed in Question 2: `UGX 6,000,0001]`).
 - **Implementation:**
   - Update default `LLM_MAX_TOKENS=1536` (with `LLM_CONTEXT_WINDOW=8192` or `16384`) in:
-    - `App/backend/app/service.py`
+    - `App/backend/app/rag/pipeline.py`
     - `configs/prototype.env`
     - `.env.example`
     - `docker-compose.yml` / `docker-compose.gpu-salt.yml`
   - In `_call_llm_with_deadline()`, allow full token generation up to 1,536 tokens for RAG answers.
 
 #### 1.2 Improve Synthesis Prompt for Multi-Part Questions
-- In `App/backend/app/service.py:7260` (system prompt construction):
+- In `App/backend/app/rag/pipeline.py:7260` (system prompt construction):
   - Instruct the model to address all specific numbers, scenarios, and taxpayer classifications provided by the user.
   - Require explicit statutory sections where available (e.g. VAT Act Section 16, 24, 28; Income Tax Act Section 5, 83, 86; Tax Procedures Code Act Section 23, 24).
   - Explicitly forbid cutting off or substituting generic FAQ amounts when the user provided concrete figures.
@@ -185,7 +185,7 @@ Fix the five acute bugs that caused immediate failure during testing.
 The repository already defines `ModelTier` (T0, T1, T2, T3) and `select_tier()` in `App/backend/app/providers/routing.py`, but `service.py` currently only logs the decision and uses the same 14B model for all generation.
 
 #### 2.1 Wire Active Model Selection in `service.py`
-- **Location:** `App/backend/app/service.py:7863` and `_call_llm_with_deadline()`
+- **Location:** `App/backend/app/rag/pipeline.py:7863` and `_call_llm_with_deadline()`
 - **Implementation:**
   - When `flags.is_enabled("model_tiering")` is true:
     - Route complex queries (multi-hop, objections/disputes, legal synthesis, high-value corporate inquiries) to **ModelTier.T3**.
@@ -208,7 +208,7 @@ The repository already defines `ModelTier` (T0, T1, T2, T3) and `select_tier()` 
 Enable the embedded graph in `App/backend/app/graph/` to provide the statutory connections that flat retrieval misses.
 
 #### 3.1 Activate Graph Edge Retrieval for Compositional Questions
-- **Location:** `App/backend/app/graph/query.py` and `App/backend/app/retriever.py`
+- **Location:** `App/backend/app/graph/query.py` and `App/backend/app/rag/retriever.py`
 - **Key Joins to Index & Query:**
   1. `Electronic Services (Cross-Border)` $\rightarrow$ `VAT Act s.16 (Reverse Charge)` + `Income Tax Act s.86 (15% WHT)`.
   2. `EFRIS Non-Compliance` $\rightarrow$ `VAT Act s.24 / s.28 (Disallowance of Input Tax without Fiscal Receipt)`.
@@ -224,7 +224,7 @@ Enable the embedded graph in `App/backend/app/graph/` to provide the statutory c
 ### Phase 4: Modernizing the Response Judge & Eliminating Franken-Text Fallbacks
 
 #### 4.1 Replace `_build_grounded_revision` with Targeted Reflection
-- **Location:** `App/backend/app/service.py:5556` and `4111-4170`
+- **Location:** `App/backend/app/rag/pipeline.py:5556` and `4111-4170`
 - **Current Defect:**
   When claim verification returns `revise`, `_build_grounded_revision` concatenates disconnected sentence fragments from whatever chunks were retrieved, creating bizarre replies (e.g. talking about hotel income and schools when the user asked about Irish SaaS).
 - **Implementation:**

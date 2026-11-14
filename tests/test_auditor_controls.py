@@ -46,11 +46,11 @@ os.environ.setdefault("SPEECH_ENABLED", "false")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from App.backend.app import database as db  # noqa: E402
+from App.backend.app.db import database as db  # noqa: E402
 from App.backend.app import main as main_module  # noqa: E402
 from App.backend.app.audit.ledger import get_ledger  # noqa: E402
 from App.backend.app.auth.jwt_auth import make_dev_token  # noqa: E402
-from App.backend.app.flags import flags  # noqa: E402
+from App.backend.app.config.flags import flags  # noqa: E402
 from App.backend.app.main import app  # noqa: E402
 
 

@@ -11,8 +11,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.retriever import RRF_K, rrf_fuse_ranked_lists  # noqa: E402
-from app.service import ChatModel  # noqa: E402
+from app.rag.retriever import RRF_K, rrf_fuse_ranked_lists  # noqa: E402
+from app.rag.pipeline import ChatModel  # noqa: E402
 
 
 class RrfFuseTests(unittest.TestCase):
@@ -113,7 +113,7 @@ class GraphHitShapeTests(unittest.TestCase):
             matched=True,
         )
         with (
-            patch("app.query.current_fiscal_year", return_value="FY2027-28"),
+            patch("app.rag.query.current_fiscal_year", return_value="FY2027-28"),
             patch("app.graph.query.resolve", return_value=answer) as resolve,
         ):
             graph_hit_for("What is the VAT rate?")
@@ -124,7 +124,7 @@ class GraphHitShapeTests(unittest.TestCase):
 class FuseGraphLegFlagTests(unittest.TestCase):
     def test_flags_off_leaves_hits_unchanged(self) -> None:
         hits = [{"id": "p", "text": "passage"}]
-        with patch("app.flags.flags.is_enabled", return_value=False):
+        with patch("app.config.flags.flags.is_enabled", return_value=False):
             out, fused = ChatModel._fuse_graph_leg("What is the VAT rate?", hits)
         self.assertFalse(fused)
         self.assertIs(out, hits)
@@ -144,7 +144,7 @@ class FuseGraphLegFlagTests(unittest.TestCase):
             "score_norm": 0.84,
         }
         with (
-            patch("app.flags.flags.is_enabled", return_value=True),
+            patch("app.config.flags.flags.is_enabled", return_value=True),
             patch("app.graph.shadow.graph_hit_for", return_value=fake),
         ):
             out, fused = ChatModel._fuse_graph_leg("What is the VAT rate?", hits)

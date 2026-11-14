@@ -20,11 +20,11 @@ os.environ.setdefault("QDRANT_ENABLED", "false")
 os.environ.setdefault("ANALYTICS_BACKEND", "sqlite")
 os.environ.setdefault("OTEL_ENABLED", "false")
 
-from app import database as db  # noqa: E402
-from app import service  # noqa: E402
+from app.db import database as db  # noqa: E402
+from app.rag import pipeline  # noqa: E402
 from app.analytics import metrics  # noqa: E402
 from app.audit import turns  # noqa: E402
-from app.flags import flags  # noqa: E402
+from app.config.flags import flags  # noqa: E402
 
 
 def setUpModule() -> None:
@@ -136,7 +136,7 @@ class StreamedTurnTest(unittest.TestCase):
 
         async def collect() -> list[tuple[str, object]]:
             out = []
-            async for event in service.run_chat_turn(
+            async for event in pipeline.run_chat_turn(
                 model,
                 channel=channel,
                 message="What is the VAT rate?",
@@ -151,7 +151,7 @@ class StreamedTurnTest(unittest.TestCase):
                 out.append(event)
             return out
 
-        with mock.patch.object(service, "_run_chat_turn_events", fake_events):
+        with mock.patch.object(pipeline, "_run_chat_turn_events", fake_events):
             return asyncio.run(collect())
 
     def test_sse_turn_is_audited_with_served_text(self) -> None:
@@ -247,7 +247,7 @@ class GenerateDefersAuditTest(unittest.TestCase):
     """The REST row is written after localization, so it hashes the served reply."""
 
     def test_localized_reply_is_what_gets_hashed(self) -> None:
-        model = service.ChatModel.__new__(service.ChatModel)
+        model = pipeline.ChatModel.__new__(pipeline.ChatModel)
         model.name = "test-model"
 
         def fake_generate_en(**kwargs):
@@ -259,9 +259,9 @@ class GenerateDefersAuditTest(unittest.TestCase):
         model._generate_en = fake_generate_en
         model._localize_reply = lambda text, locale: "Omusolo guli 18%."
         model.record_turn_audit = lambda **kwargs: recorded.append(kwargs)
-        with mock.patch.object(service, "resources_for_turn", return_value=[]), \
-             mock.patch.object(service, "apply_turn_guidance"), \
-             mock.patch.object(service, "_recent_turns_for_guidance", return_value=[]):
+        with mock.patch.object(pipeline, "resources_for_turn", return_value=[]), \
+             mock.patch.object(pipeline, "apply_turn_guidance"), \
+             mock.patch.object(pipeline, "_recent_turns_for_guidance", return_value=[]):
             result = model.generate(message="VAT ki?", locale="lg", channel="voice")
         self.assertEqual(result["reply"], "Omusolo guli 18%.")
         self.assertEqual(len(recorded), 1)

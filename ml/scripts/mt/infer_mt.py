@@ -60,9 +60,9 @@ class MtTranslator:
 
         if self.backend in {"auto", "prompted", "transformers", "llm"}:
             try:
-                from app import llm as llm_module
+                from app.rag import generator as generator_module
 
-                translated = llm_module.translate_text(
+                translated = generator_module.translate_text(
                     text,
                     source_lang=source_lang,
                     target_lang=target_lang,

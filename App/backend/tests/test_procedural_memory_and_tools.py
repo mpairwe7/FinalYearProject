@@ -118,8 +118,8 @@ class TestAgentMemoryTools(unittest.TestCase):
         store_tool = ToolRegistry.get("memory_store")
         recall_tool = ToolRegistry.get("memory_recall")
 
-        with patch("app.database.has_active_consent", return_value=True), \
-             patch("app.database.execute", return_value=1):
+        with patch("app.db.database.has_active_consent", return_value=True), \
+             patch("app.db.database.execute", return_value=1):
             store_res = store_tool.execute(
                 key="filing_regime",
                 value="presumptive",
@@ -179,7 +179,7 @@ class TestScopedRedactionAndVernacularRewrite(unittest.TestCase):
         self.assertNotIn("4111 2222 3333 4444", preserved)
 
     def test_vernacular_query_skips_english_spell_corrector(self) -> None:
-        from app.query import rewrite
+        from app.rag.query import rewrite
 
         sw_query = "PAYE ni nini na inalipwa lini?"
         rewritten = rewrite(sw_query, locale="sw")

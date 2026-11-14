@@ -17,7 +17,7 @@ from __future__ import annotations
 import pytest
 
 from app.agents.prompts import specialist_prompt, specialist_roles
-from app.llm import SYSTEM_PROMPT, _build_tool_messages
+from app.rag.generator import SYSTEM_PROMPT, _build_tool_messages
 
 
 def _system_for(role: str) -> str:
@@ -106,14 +106,14 @@ class TestPlumbing:
     def test_generate_with_tools_accepts_the_role(self):
         import inspect
 
-        from app.llm import generate_with_tools
+        from app.rag.generator import generate_with_tools
 
         assert "agent_role" in inspect.signature(generate_with_tools).parameters
 
     def test_the_service_passes_the_role_through(self):
         import inspect
 
-        from app.service import _call_llm_agentic
+        from app.rag.pipeline import _call_llm_agentic
 
         assert "agent_role" in inspect.signature(_call_llm_agentic).parameters
 

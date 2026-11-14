@@ -1,7 +1,7 @@
 # Triton-served PP-OCRv6 SOTA OCR & Document Recognition
 
 The document pipeline extracts a clean PDF text layer and normalizes document inputs
-first via the `app.document_normalization` adapter. For scanned PDFs, fine-print receipts,
+first via the `app.ingestion.document_normalization` adapter. For scanned PDFs, fine-print receipts,
 complex financial tables, and hybrid embedded visual evidence, the system dispatches
 to **Triton-served PP-OCRv6**.
 

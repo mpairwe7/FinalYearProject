@@ -23,7 +23,7 @@ import base64
 import re
 
 import pytest
-from app import service
+from app.rag import pipeline
 from app.guard_friction import COOLDOWN_REPLY, StrikeTracker, principal_key, strike_tracker
 from app.guardrails import (
     _DEFAULT_EXTRA_LINK_HOSTS,
@@ -37,7 +37,7 @@ from app.guardrails import (
     scan_external_tool_text,
     scan_retrieved_text,
 )
-from app.llm import SYSTEM_PROMPT
+from app.rag.generator import SYSTEM_PROMPT
 
 # --------------------------------------------------------------------------- G460
 
@@ -205,9 +205,9 @@ def test_a_link_removed_from_the_final_reply_is_a_revision(monkeypatch: pytest.M
         def _evaluate_response_judge(**_kwargs):
             return {"decision": "approve", "final_decision": "approve", "confidence_band": "high", "reasons": []}
 
-    token = service._TURN_GENERATION.set(service._new_generation_record())
+    token = pipeline._TURN_GENERATION.set(pipeline._new_generation_record())
     try:
-        result = service._apply_output_guards(
+        result = pipeline._apply_output_guards(
             Model(),
             message="Where do I claim a refund?",
             reply="Claim it at [the refund page](https://ura-refund.example/claim).",
@@ -219,7 +219,7 @@ def test_a_link_removed_from_the_final_reply_is_a_revision(monkeypatch: pytest.M
             output_guard=OutputGuard(),
         )
     finally:
-        service._TURN_GENERATION.reset(token)
+        pipeline._TURN_GENERATION.reset(token)
 
     assert result["revised"] is True
     assert "ura-refund.example" not in result["reply"]
@@ -313,7 +313,7 @@ def test_principal_key_hashes_and_prefers_the_signed_in_user() -> None:
 @pytest.fixture
 def chat_model():
     strike_tracker.reset()
-    model = service.ChatModel.__new__(service.ChatModel)
+    model = pipeline.ChatModel.__new__(pipeline.ChatModel)
     model._input_guard = InputGuard()
     yield model
     strike_tracker.reset()
@@ -365,7 +365,7 @@ def _normalised(text: str) -> str:
 
 
 def test_every_leak_signature_names_text_a_live_prompt_contains() -> None:
-    fallback_system, _ = service._build_fallback_prompt("What is VAT?", [], "en")
+    fallback_system, _ = pipeline._build_fallback_prompt("What is VAT?", [], "en")
     prompts = _normalised(SYSTEM_PROMPT) + " " + _normalised(fallback_system)
 
     stale = [phrase for phrase in _PROMPT_SIGNATURE_PHRASES if _normalised(phrase) not in prompts]
@@ -534,9 +534,9 @@ def test_an_identifier_dropped_from_a_trusted_link_is_a_revision() -> None:
         def _evaluate_response_judge(**_kwargs):
             return {"decision": "approve", "final_decision": "approve", "confidence_band": "high", "reasons": []}
 
-    token = service._TURN_GENERATION.set(service._new_generation_record())
+    token = pipeline._TURN_GENERATION.set(pipeline._new_generation_record())
     try:
-        result = service._apply_output_guards(
+        result = pipeline._apply_output_guards(
             Model(),
             message="Check my TIN 1000123456",
             reply="Check it at https://ura.go.ug/verify?tin=1000123456 today.",
@@ -548,7 +548,7 @@ def test_an_identifier_dropped_from_a_trusted_link_is_a_revision() -> None:
             output_guard=OutputGuard(),
         )
     finally:
-        service._TURN_GENERATION.reset(token)
+        pipeline._TURN_GENERATION.reset(token)
 
     assert result["revised"] is True
     assert "1000123456" not in result["reply"]
@@ -615,15 +615,15 @@ def test_a_paused_turn_does_no_work_before_it_is_refused(monkeypatch: pytest.Mon
     principal = principal_key(session_id="paused-session")
     for _ in range(5):
         strike_tracker.record_strike(principal)
-    model = service.ChatModel.__new__(service.ChatModel)
+    model = pipeline.ChatModel.__new__(pipeline.ChatModel)
     model._input_guard = InputGuard()
     model.name = "test-model"
 
     def forbidden(*_args, **_kwargs):
         raise AssertionError("work done for a paused principal")
 
-    monkeypatch.setattr(service.db, "get_conversation_context", forbidden)
-    monkeypatch.setattr(service, "normalize_locale_tag", lambda tag: tag)
+    monkeypatch.setattr(pipeline.db, "get_conversation_context", forbidden)
+    monkeypatch.setattr(pipeline, "normalize_locale_tag", lambda tag: tag)
     try:
         out = model.generate_retrieval_only("What is the VAT rate?", conversation_id="c-1", session_id="paused-session")
         assert out["retrieval_mode"] == "blocked"

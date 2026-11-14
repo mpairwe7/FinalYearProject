@@ -111,7 +111,7 @@ Inventory (do not cite from memory):
 
 ```bash
 PYTHONPATH=App/backend python3 -c "
-from app.flags import flags, _PRODUCTION_ON_FLAGS
+from app.config.flags import flags, _PRODUCTION_ON_FLAGS
 from app.tools import ToolRegistry
 print(len(flags.all()), sorted(_PRODUCTION_ON_FLAGS))
 print(len(ToolRegistry.all()), len(ToolRegistry.namespaces()))

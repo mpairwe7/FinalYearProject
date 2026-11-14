@@ -81,7 +81,7 @@ def unavailable_reason() -> str:
 
 def status() -> str:
     """``off``, ``ready`` or ``unavailable: <why>``, for the readiness probe."""
-    from ..flags import flags
+    from ..config.flags import flags
 
     if not flags.is_enabled("voice_receptionist"):
         return "off"
@@ -143,7 +143,7 @@ def start(*, speech_model: Any) -> str:
 
 def _warn_about_resume(workers: dict[str, str]) -> None:
     """Say so when call-drop resume is switched on and cannot do what it says."""
-    from ..flags import flags
+    from ..config.flags import flags
     from .low_bandwidth import resume_can_be_issued
 
     if not flags.is_enabled("call_drop_resume"):

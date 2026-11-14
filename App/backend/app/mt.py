@@ -60,7 +60,7 @@ import threading
 from collections import Counter, OrderedDict
 from collections.abc import Callable, Iterator
 
-from .entailment import canonical_amounts, percentages
+from .rag.entailment import canonical_amounts, percentages
 
 logger = logging.getLogger(__name__)
 

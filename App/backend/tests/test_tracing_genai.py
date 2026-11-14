@@ -82,17 +82,17 @@ class ExecutorContextTest(unittest.TestCase):
     def test_generation_on_the_executor_counts_toward_the_turn(self) -> None:
         import unittest.mock as mock
 
-        from app import service
+        from app.rag import pipeline
 
         def fake_generate(**_kwargs):
             with tracing.llm_call("chat", "m-exec", "vllm") as call:
                 call.usage(2644, 180)
             return "generated"
 
-        with mock.patch.object(service.llm_module, "generate", side_effect=fake_generate), \
-             mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True), \
+        with mock.patch.object(pipeline.generator_module, "generate", side_effect=fake_generate), \
+             mock.patch.object(pipeline._LLM_CIRCUIT, "allow_request", return_value=True), \
              tracing.turn_usage_scope() as usage:
-            reply = service._local_llm_then_cloud("q", [], None, "en", allow_cloud_fallback=False)
+            reply = pipeline._local_llm_then_cloud("q", [], None, "en", allow_cloud_fallback=False)
         self.assertEqual(reply, "generated")
         self.assertEqual(usage["input_tokens"], 2644)
         self.assertEqual(usage["calls"], 1)

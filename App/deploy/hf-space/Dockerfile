@@ -12,7 +12,7 @@
 # This Space's build now GATES on the two embedded stores rather than trusting
 # the pin: a Qdrant collection seeded from the FAQ JSONL corpus, and an embedded
 # Redis. Neither is fail-closed at runtime — wait-for-qdrant.sh starts the
-# backend anyway on timeout and cache.py falls back to in-process memory — so a
+# backend anyway on timeout and rag/cache.py falls back to in-process memory — so a
 # base missing either one boots, answers, and looks healthy while serving 499
 # FAQ rows instead of 7,943 documents and recomputing every response. That is
 # how it went unnoticed before. The gate runs the base image's own
@@ -171,7 +171,7 @@
 # Known residual: "What is the capital of France?" still answers, from an EAC
 # tax-cases compendium where both content terms genuinely occur. Four lexical
 # variants were measured and none separate it; closing it needs a reranker or a
-# judge over the candidates. See app/retriever.py LEXICAL_RELEVANCE_FLOOR.
+# judge over the candidates. See app/rag/retriever.py LEXICAL_RELEVANCE_FLOOR.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
@@ -184,7 +184,7 @@
 #
 # Redis matters here for a non-obvious reason. Both cache backends returned None
 # whenever no dense model was present, and this image ships no torch, so the
-# response cache missed on EVERY request — it was not slow, it was off. cache.py
+# response cache missed on EVERY request — it was not slow, it was off. rag/cache.py
 # now has a model-free exact tier (casefolded, punctuation-stripped query +
 # locale), which is what makes a cache worth running here. Measured in the built
 # image: 211ms cold, 27ms on a repeat, 25ms on a normalised variant, with the LLM
@@ -927,7 +927,7 @@ RUN set -eux; \
         echo "FAIL: root can connect as postgres; the serving process must be read-only" >&2; exit 1; \
     fi; \
     test "$($PG/psql -h /app/pgrun -U ura_dense_reader -d ura_dense -tAc "SELECT current_user")" = "ura_dense_reader"; \
-    if [ -f /app/Data/dense/manifest.json ] && [ -f /app/backend/app/pgvector_dense.py ]; then \
+    if [ -f /app/Data/dense/manifest.json ] && [ -f /app/backend/app/vectorstore/vector_db.py ]; then \
         cd /app/qdrant; \
         QDRANT__STORAGE__STORAGE_PATH=/app/qdrant/storage QDRANT__SERVICE__HTTP_PORT=6333 QDRANT__TELEMETRY_DISABLED=true \
             /usr/local/bin/qdrant & \
@@ -936,9 +936,9 @@ RUN set -eux; \
         cd /app/backend; \
         if /usr/sbin/runuser -u postgres -- env QDRANT_URL=http://127.0.0.1:6333 QDRANT_COLLECTION=ura_knowledge_base_active \
                LOCAL_DENSE_DIR=/app/Data/dense LOCAL_DENSE_BUILD_DSN="postgresql:///ura_dense?host=/app/pgrun&user=postgres" \
-               PYTHONDONTWRITEBYTECODE=1 /opt/venv/bin/python -m app.pgvector_dense load \
+               PYTHONDONTWRITEBYTECODE=1 /opt/venv/bin/python -m app.vectorstore.vector_db load \
            && LOCAL_DENSE_DIR=/app/Data/dense LOCAL_DENSE_DSN="postgresql:///ura_dense?host=/app/pgrun&user=ura_dense_reader" \
-               /opt/venv/bin/python -m app.pgvector_dense check; then \
+               /opt/venv/bin/python -m app.vectorstore.vector_db check; then \
             echo "dense leg loaded"; \
         else \
             echo "WARNING: the dense leg was not loaded (see above); retrieval will serve BM25 alone"; \

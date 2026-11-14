@@ -1,6 +1,6 @@
 """Shared resilience primitives — circuit breaker, turn deadline, turn cancellation, cancel scope.
 
-Extracted from ``retriever.py`` so the same breaker can guard both
+Extracted from ``rag/retriever.py`` so the same breaker can guard both
 Qdrant (retrieval) and the LLM worker (generation).  2026 production
 standard: each external/expensive dependency gets its own breaker so one
 slow dependency cannot exhaust the request pool via thundering-herd.

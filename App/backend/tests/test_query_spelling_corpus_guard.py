@@ -28,8 +28,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from app import query as query_mod
-from app.query import _fuzzy_correct_word, correct_spelling, register_corpus_text, rewrite
+from app.rag import query as query_mod
+from app.rag.query import _fuzzy_correct_word, correct_spelling, register_corpus_text, rewrite
 
 _FAQ_DIR = Path(__file__).resolve().parents[3] / "Data" / "dataset"
 

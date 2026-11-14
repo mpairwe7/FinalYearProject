@@ -21,7 +21,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from .. import database as db
+from ..db import database as db
 
 logger = logging.getLogger(__name__)
 
@@ -77,8 +77,8 @@ def chat_carryover(
         except Exception:
             return None
 
-    from ..context_manager import english_view, normalize_history_turns, summarize_older_turns
-    from ..flags import flags
+    from ..rag.context_manager import english_view, normalize_history_turns, summarize_older_turns
+    from ..config.flags import flags
 
     parts: list[str] = []
     if turns:
@@ -125,7 +125,7 @@ def call_to_web_carryover(
 
     Gated on ``continuous_relationship_memory`` and personalization consent.
     """
-    from ..flags import flags
+    from ..config.flags import flags
 
     if not user_id or not flags.is_enabled("continuous_relationship_memory", subject=user_id):
         return ""
@@ -157,7 +157,7 @@ def checkpoint_call_resolution(
     asr_confidence: float | None = None,
 ) -> bool:
     """Persist the call's resolution progress into the longitudinal ResolutionLedger."""
-    from ..flags import flags
+    from ..config.flags import flags
 
     state = getattr(room, "state", None)
     user_id = getattr(state, "user_id", "") if state else ""

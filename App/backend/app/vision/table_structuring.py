@@ -58,7 +58,7 @@ class StructuredTable:
         """Render table as GitHub-flavored Markdown table with sanitized cells and pipe escaping (G448, G449)."""
         if not self.matrix:
             return ""
-        from app.docling_intelligence import (
+        from app.ingestion.docling_intelligence import (
             propagate_merged_table_headers,
             sanitize_table_cell_text,
         )
@@ -83,7 +83,7 @@ class StructuredTable:
         """Serialize table into Docling TripletTableSerializer semantic triplets (G448)."""
         if not self.matrix:
             return []
-        from app.docling_intelligence import serialize_table_to_triplets
+        from app.ingestion.docling_intelligence import serialize_table_to_triplets
 
         return serialize_table_to_triplets(
             f"Page {self.page_number} {self.table_id}",
@@ -108,7 +108,7 @@ def detect_pdf_vector_table_grid(
     try:
         import pdfplumber
 
-        from app.docling_intelligence import propagate_merged_table_headers
+        from app.ingestion.docling_intelligence import propagate_merged_table_headers
 
         with pdfplumber.open(io.BytesIO(pdf_data)) as pdf:
             if page_index < 0 or page_index >= len(pdf.pages):

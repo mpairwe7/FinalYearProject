@@ -41,10 +41,10 @@ def freeze_all_dev_turns(scenarios: list[dict[str, Any]]) -> list[dict[str, Any]
     """Build frozen LLM message contexts for every turn across ``scenarios``."""
     import logging
     logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
-    from app import llm as llm_module
-    from app.query import rewrite
-    from app.retriever import HybridRetriever
-    from app.service import _evaluate_calculation_context
+    from app.rag import generator as generator_module
+    from app.rag.query import rewrite
+    from app.rag.retriever import HybridRetriever
+    from app.rag.pipeline import _evaluate_calculation_context
 
     retriever = HybridRetriever()
     retriever.initialize()
@@ -68,7 +68,7 @@ def freeze_all_dev_turns(scenarios: list[dict[str, Any]]) -> list[dict[str, Any]
                     " ".join([h["user_message"] for h in history] + [raw_msg])
                 )
             )
-            messages = llm_module._build_messages(
+            messages = generator_module._build_messages(
                 query=rewritten,
                 passages=passages,
                 conversation_history=history or None,

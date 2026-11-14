@@ -147,7 +147,7 @@ class ChatReadyRefreshTests(unittest.TestCase):
 
     def _ready(self, role: str, **get_kwargs):
         from app.main import app, get_model
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         model = ChatModel()
         app.dependency_overrides[get_model] = lambda: model

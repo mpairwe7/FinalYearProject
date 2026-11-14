@@ -78,7 +78,7 @@ def sovereign_mode_errors() -> list[str]:
     if not is_sovereign_mode():
         return []
 
-    from .flags import flags
+    from .config.flags import flags
 
     errors: list[str] = []
     if flags.is_enabled("cloudflare_fallback") or _truthy("FLAG_CLOUDFLARE_FALLBACK"):
@@ -280,7 +280,7 @@ def _seed_errors() -> list[str]:
 def _receptionist_flag_on() -> bool:
     """The receptionist flag as the running service reads it, overrides included."""
     try:
-        from .flags import flags
+        from .config.flags import flags
 
         return bool(flags.is_enabled("voice_receptionist"))
     except Exception:  # noqa: BLE001 - the report falls back to the environment
@@ -482,7 +482,7 @@ def _live_research_status() -> dict[str, Any]:
     check", which is safe; refusing to start would turn a missing key into an
     outage of every other answer.
     """
-    from .flags import flags
+    from .config.flags import flags
     from .web_research import corpus_sync_permitted
     from .web_search_providers import active_providers, sanctioned_provider_configured
 
@@ -496,7 +496,7 @@ def _live_research_status() -> dict[str, Any]:
 
 def architecture_integrity_status() -> dict[str, Any]:
     """Verify October 2026 architectural invariants (ADR-0012): storage parity, ASI10 manifest, portal pack, and ExpRAG."""
-    from .flags import flags
+    from .config.flags import flags
     from .memory.procedural import ProceduralMemory
     from .storage_protocol import verify_storage_backend_parity
     from .tools.portal_navigator_data import get_portal_knowledge_provenance

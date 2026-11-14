@@ -199,13 +199,13 @@ def fallback_brief(call: dict[str, Any], turns: list[dict[str, Any]]) -> dict[st
 def _vllm_available_for_brief() -> bool:
     """True when local Sunflower via vLLM is either mocked for tests or available out of cooldown."""
     try:
-        from .. import llm
+        from ..rag import generator
         from . import brain as _brain
 
-        is_unmocked = getattr(llm, "_vllm_generate", None) is getattr(llm, "_ORIGINAL_VLLM_GENERATE", None)
+        is_unmocked = getattr(generator, "_vllm_generate", None) is getattr(generator, "_ORIGINAL_VLLM_GENERATE", None)
         if not is_unmocked:
             return True
-        return getattr(llm, "LLM_BACKEND", "local") == "vllm" and time.monotonic() >= _brain._VLLM_BRIDGE_DOWN_UNTIL
+        return getattr(generator, "LLM_BACKEND", "local") == "vllm" and time.monotonic() >= _brain._VLLM_BRIDGE_DOWN_UNTIL
     except Exception:
         return False
 
@@ -217,11 +217,11 @@ def _generate(prompt: str) -> tuple[dict[str, Any] | None, str]:
     deployment. With vLLM down the caller still gets the deterministic brief.
     """
     try:
-        from .. import llm
-        from ..llm import _vllm_generate
+        from ..rag import generator
+        from ..rag.generator import _vllm_generate
         from . import brain as _brain
 
-        is_unmocked = getattr(llm, "_vllm_generate", None) is getattr(llm, "_ORIGINAL_VLLM_GENERATE", None)
+        is_unmocked = getattr(generator, "_vllm_generate", None) is getattr(generator, "_ORIGINAL_VLLM_GENERATE", None)
         if not _vllm_available_for_brief():
             return None, ""
         messages = [{"role": "system", "content": BRIEF_SYSTEM}, {"role": "user", "content": prompt}]

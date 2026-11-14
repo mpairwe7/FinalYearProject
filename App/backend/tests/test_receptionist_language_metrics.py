@@ -7,7 +7,7 @@ import unittest
 import uuid
 from unittest.mock import patch
 
-from app import database as db
+from app.db import database as db
 from app.receptionist.metrics import compute_call_metrics, get_aggregate_metrics, record_call_end_metrics
 from app.receptionist.state import CallState
 from app.receptionist.store import create_call, get_call, init_receptionist_schema

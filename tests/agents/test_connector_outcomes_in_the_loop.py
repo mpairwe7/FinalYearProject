@@ -14,10 +14,10 @@ import json
 from typing import Any
 
 import pytest
-from app import llm
-from app import service as service_module
+from app.rag import generator
+from app.rag import pipeline as pipeline_module
 from app.connector_outcome import DEMO_NOTICE
-from app.flags import flags
+from app.config.flags import flags
 from app.mcp import MCPClient
 from app.mcp.transport import InProcessTransport
 
@@ -83,11 +83,11 @@ def stack(monkeypatch):
     ursb = Remote("ursb", "ursb_verify_business", "query", NO_BUSINESS)
     client = MCPClient({"core": InProcessTransport(), "efris": efris, "ursb": ursb})
     monkeypatch.setattr(flags, "is_enabled", lambda name: name == "enterprise_connectors")
-    monkeypatch.setattr(llm, "LLM_BACKEND", "vllm")
-    monkeypatch.setattr(llm, "_vllm_ready", lambda: True)
+    monkeypatch.setattr(generator, "LLM_BACKEND", "vllm")
+    monkeypatch.setattr(generator, "_vllm_ready", lambda: True)
     monkeypatch.setattr("app.mcp.get_client", lambda: client)
-    monkeypatch.setattr(llm, "_select_tools_for_query", lambda _query, names, **_options: names)
-    monkeypatch.setattr(llm, "_count_prompt_tokens", lambda messages: 10 * len(messages))
+    monkeypatch.setattr(generator, "_select_tools_for_query", lambda _query, names, **_options: names)
+    monkeypatch.setattr(generator, "_count_prompt_tokens", lambda messages: 10 * len(messages))
     return efris, ursb
 
 
@@ -112,8 +112,8 @@ class Model:
 
 
 def run(monkeypatch, model: Model, *, namespaces, forced, events=None):
-    monkeypatch.setattr(llm, "_vllm_chat_completion", model)
-    return llm.generate_with_tools(
+    monkeypatch.setattr(generator, "_vllm_chat_completion", model)
+    return generator.generate_with_tools(
         query=QUERY,
         passages=[],
         locale="en",
@@ -186,9 +186,9 @@ class TestMixedTurn:
 class TestARecordInATranslatedReply:
     def test_the_model_does_not_write_the_record_up_when_the_reply_is_translated(self, stack, monkeypatch):
         model = Model()
-        monkeypatch.setattr(llm, "_vllm_chat_completion", model)
+        monkeypatch.setattr(generator, "_vllm_chat_completion", model)
 
-        result = llm.generate_with_tools(
+        result = generator.generate_with_tools(
             query=QUERY,
             passages=[],
             locale="lg",
@@ -203,9 +203,9 @@ class TestARecordInATranslatedReply:
 
     def test_english_keeps_the_models_summary(self, stack, monkeypatch):
         model = Model()
-        monkeypatch.setattr(llm, "_vllm_chat_completion", model)
+        monkeypatch.setattr(generator, "_vllm_chat_completion", model)
 
-        result = llm.generate_with_tools(
+        result = generator.generate_with_tools(
             query=QUERY,
             passages=[],
             locale="en",
@@ -223,10 +223,10 @@ class TestToolsAreFittedEachRound:
         # 4,096 window with 512 kept for the answer: the first prompt (system
         # prompt + question) leaves room for the tools; after the model's call
         # and the result are in it, nothing does.
-        monkeypatch.setattr(llm, "_served_context_window", lambda: 4096)
-        monkeypatch.setattr(llm, "LLM_CONTEXT_WINDOW", 4096)
-        monkeypatch.setattr(llm, "LLM_MAX_TOKENS", 512)
-        monkeypatch.setattr(llm, "_count_prompt_tokens", lambda messages: 1000 * len(messages))
+        monkeypatch.setattr(generator, "_served_context_window", lambda: 4096)
+        monkeypatch.setattr(generator, "LLM_CONTEXT_WINDOW", 4096)
+        monkeypatch.setattr(generator, "LLM_MAX_TOKENS", 512)
+        monkeypatch.setattr(generator, "_count_prompt_tokens", lambda messages: 1000 * len(messages))
         model = Model()
 
         run(monkeypatch, model, namespaces=["efris"], forced=["efris_taxpayer_status"])
@@ -253,8 +253,8 @@ class TestMissingIdentifier:
                 return {"content": "", "tool_calls": [{"name": "efris_taxpayer_status", "arguments": {"tin": "1000000009"}}]}
             return {"content": "unused", "tool_calls": []}
 
-        monkeypatch.setattr(llm, "_vllm_chat_completion", invents)
-        result = llm.generate_with_tools(
+        monkeypatch.setattr(generator, "_vllm_chat_completion", invents)
+        result = generator.generate_with_tools(
             query="Is my taxpayer registered on EFRIS?",
             passages=[],
             locale="en",
@@ -278,8 +278,8 @@ class TestAnEmptyForcedCall:
                 return {"content": "", "tool_calls": [{"name": "efris_taxpayer_status", "arguments": {}}]}
             return {"content": "unused", "tool_calls": []}
 
-        monkeypatch.setattr(llm, "_vllm_chat_completion", leaves_it_out)
-        result = llm.generate_with_tools(
+        monkeypatch.setattr(generator, "_vllm_chat_completion", leaves_it_out)
+        result = generator.generate_with_tools(
             query="Is my taxpayer registered on EFRIS?",
             passages=[],
             locale="en",
@@ -297,11 +297,11 @@ class TestAnEmptyForcedCall:
 class TestTheFunnelWordsTheReply:
     @pytest.fixture(autouse=True)
     def _breaker(self, monkeypatch):
-        monkeypatch.setattr(service_module._LLM_CIRCUIT, "allow_request", lambda: True)
+        monkeypatch.setattr(pipeline_module._LLM_CIRCUIT, "allow_request", lambda: True)
 
     def _funnel(self, monkeypatch, agent_result: dict[str, Any]) -> dict[str, Any]:
-        monkeypatch.setattr(service_module.llm_module, "generate_with_tools", lambda **_kw: agent_result)
-        return service_module._call_llm_agentic(
+        monkeypatch.setattr(pipeline_module.generator_module, "generate_with_tools", lambda **_kw: agent_result)
+        return pipeline_module._call_llm_agentic(
             query=QUERY,
             passages=[],
             conversation_history=None,
@@ -345,9 +345,9 @@ class TestTheFunnelWordsTheReply:
             seen.update(kwargs)
             return {"text": "", "tool_calls": [], "iterations": 1}
 
-        monkeypatch.setattr(service_module.llm_module, "generate_with_tools", agent)
+        monkeypatch.setattr(pipeline_module.generator_module, "generate_with_tools", agent)
 
-        service_module._call_llm_agentic(
+        pipeline_module._call_llm_agentic(
             query=QUERY,
             passages=[],
             conversation_history=None,

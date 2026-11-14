@@ -463,7 +463,7 @@ def translate_with_sunflower(
     *deadline* (``time.monotonic()``) bounds the call, account failover
     included. Raises on failure, like :func:`chat_completion`.
     """
-    from .llm import strip_thought
+    from .rag.generator import strip_thought
 
     src = _LANGUAGE_NAMES.get(source_lang, source_lang)
     tgt = _LANGUAGE_NAMES.get(target_lang, target_lang)

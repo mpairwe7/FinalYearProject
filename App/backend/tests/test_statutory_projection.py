@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.llm import _build_messages, extract_statutory_context
+from app.rag.generator import _build_messages, extract_statutory_context
 
 
 class _StubTokenizer:

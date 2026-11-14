@@ -112,7 +112,7 @@ def raise_waiting_priority(room: Any, *, reason: str, priority: str = "urgent") 
 
 def _update_ticket_priority(ticket_id: str, priority: str) -> None:
     try:
-        from .. import database as db
+        from ..db import database as db
 
         db.update_ticket(ticket_id, priority=priority)
     except Exception:
@@ -421,8 +421,8 @@ def close_transfer_on_timeout(
         callback_reason=callback_reason,
     )
     try:
-        from .. import database as db
-        from ..flags import flags
+        from ..db import database as db
+        from ..config.flags import flags
         from .carryover import checkpoint_call_resolution
 
         ref = case_reference(ticket_ref) if ticket_ref else f"CALL-{room.call_id[:8].upper()}"

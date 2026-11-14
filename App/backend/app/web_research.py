@@ -58,7 +58,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from . import database as db
+from .db import database as db
 from .guardrails import AI_ORGANISATION_SUFFIX, redact_pii_text, scan_retrieved_text
 from .tax.tables import get_table
 from .web_fx import SUPPORTED_FX_CURRENCIES
@@ -961,7 +961,7 @@ def detect_research_triggers(
     # An RRF score is not comparable to the reranker scale. It reads as "unknown"
     # here, as it does at the abstention gate; reading it as 0.0 sent every
     # question to the web whenever the reranker was down.
-    from .retriever import gating_relevance
+    from .rag.retriever import gating_relevance
 
     relevances = [
         score
@@ -1800,7 +1800,7 @@ def run_web_research(
     persist_files: bool = True,
 ) -> WebResearchTurnOutcome:
     """Live research for one turn, inside its wall-clock budget, with an honest status."""
-    from .flags import flags
+    from .config.flags import flags
 
     started = time.monotonic()
     checked_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -1924,7 +1924,7 @@ def run_web_research(
             if do_sync and not corpus_sync_permitted():
                 logger.warning("Corpus sync refused: WEB_SYNC_PRODUCTION_APPROVED is not set")
             elif do_sync and can_persist_to_qdrant(sandbox_doc.url):
-                from .corpus_sync import compare_and_sync_ura_document, serialize_sync_outcome
+                from .vectorstore.corpus_sync import compare_and_sync_ura_document, serialize_sync_outcome
 
                 # The topic of the search that found this document, not the
                 # turn's first: the ledger must not mark the wrong topic as checked.

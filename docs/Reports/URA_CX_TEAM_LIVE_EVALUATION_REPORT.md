@@ -2,7 +2,7 @@
 ### Frontline Operational Usability, Pain-Point Resolution, and Empirical System Test Results
 
 > **Evaluation Date:** 2026-10-07  
-> **Target System Under Test:** Live URA ChatModel Pipeline (App/backend/app/service.py)  
+> **Target System Under Test:** Live URA ChatModel Pipeline (App/backend/app/rag/pipeline.py)  
 > **Evaluation Profile:** URA Contact Centre, Frontline Desk Officers, and CX Quality Assurance  
 > **Artifact Data:** `docs/Reports/data/ura_cx_team_live_eval_results.json`  
 > **Test Suite:** `scripts/run_ura_cx_team_live_eval.py` (10 Frontline Live Scenarios)  

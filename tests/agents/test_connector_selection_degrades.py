@@ -18,8 +18,8 @@ from typing import Any
 from unittest import mock
 
 import pytest
-from app import service as service_module
-from app.flags import flags
+from app.rag import pipeline as pipeline_module
+from app.config.flags import flags
 from app.main import app
 from app.mcp import MCPClient
 from app.mcp.transport import InProcessTransport
@@ -107,7 +107,7 @@ def test_stream_turn_is_answered_and_names_what_was_left_out(connectors, monkeyp
         yield ("token", "Answered.")
         yield ("done", "")
 
-    monkeypatch.setattr(service_module, "run_chat_turn", run_chat_turn)
+    monkeypatch.setattr(pipeline_module, "run_chat_turn", run_chat_turn)
     app.state.model = _model()
     response = TestClient(app).post(
         "/v1/chat/stream",

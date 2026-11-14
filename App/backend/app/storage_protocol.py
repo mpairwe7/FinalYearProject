@@ -1,7 +1,7 @@
 """Storage Backend Protocol & Dual-Database Parity Verifier (October 2026).
 
 Enforces ISO/IEC 25010:2023 Modifiability & Replaceability between
-``app.database`` (SQLite WAL default) and ``app.postgres`` (PostgreSQL
+``app.db.database`` (SQLite WAL default) and ``app.db.postgres`` (PostgreSQL
 connection-pooled backend) so neither backend can drift in public functions or
 call signatures.
 """
@@ -16,7 +16,7 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class StorageBackendProtocol(Protocol):
-    """Core runtime storage contract shared by ``app.database`` and ``app.postgres``."""
+    """Core runtime storage contract shared by ``app.db.database`` and ``app.db.postgres``."""
 
     def init_db(self) -> None: ...
     def close_db(self) -> None: ...
@@ -112,10 +112,10 @@ def _cached_parity_check(
 
 
 def verify_storage_backend_parity(app_dir: Path | None = None) -> dict[str, Any]:
-    """Compare public top-level functions and call signatures in ``database.py`` and ``postgres.py`` via cached AST."""
+    """Compare public top-level functions and call signatures in ``database.py`` and ``db/postgres.py`` via cached AST."""
     base = app_dir if app_dir is not None else Path(__file__).resolve().parent
     db_path = (base / "database.py").resolve()
-    pg_path = (base / "postgres.py").resolve()
+    pg_path = (base / "db/postgres.py").resolve()
     return dict(
         _cached_parity_check(
             str(db_path),

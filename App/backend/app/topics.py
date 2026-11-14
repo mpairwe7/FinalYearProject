@@ -190,7 +190,7 @@ def topic_retrieval_query(topic: TopicRecord | None, query: str) -> str:
 
 def resolve_topic(conversation_id: str, message: str) -> TopicRecord | None:
     """Load, update, or clear the persisted topic for *conversation_id*."""
-    from . import database as db
+    from .db import database as db
 
     cid = (conversation_id or "").strip()
     if not cid:

@@ -460,7 +460,7 @@ class DocumentRecord:
                 lines.append(f"  - {trip}")
         header = escape_untrusted_document_markers("\n".join(lines))
         remaining = max(200, char_budget - len(header) - 80)
-        from .docling_intelligence import strip_document_furniture
+        from .ingestion.docling_intelligence import strip_document_furniture
 
         cleaned_pages, _ = strip_document_furniture([self.text])
         cleaned_text = cleaned_pages[0] if cleaned_pages else self.text
@@ -533,7 +533,7 @@ def _summarize_table(name: str, rows: list[list[Any]]) -> tuple[TableSummary, st
             header = headers[col].strip() or f"column_{col + 1}"
             numeric_totals[header] = round(sum(parsed), 2)
 
-    from .docling_intelligence import serialize_table_to_triplets
+    from .ingestion.docling_intelligence import serialize_table_to_triplets
 
     triplets = serialize_table_to_triplets(safe_name, rows, max_triplets=30)
     summary = TableSummary(
@@ -641,7 +641,7 @@ def _extract_pdf(data: bytes) -> _Extraction:
             out.warnings.append("The PDF could not be parsed (corrupt or password-protected).")
             return out
 
-    from .docling_intelligence import strip_document_furniture
+    from .ingestion.docling_intelligence import strip_document_furniture
 
     parts, furniture_removed = strip_document_furniture(parts)
     if furniture_removed:

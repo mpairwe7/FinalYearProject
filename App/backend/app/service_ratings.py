@@ -29,7 +29,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
-from . import database as db
+from .db import database as db
 
 SOURCES: tuple[str, ...] = (
     "chat_officer_csat",

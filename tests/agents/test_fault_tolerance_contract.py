@@ -22,11 +22,11 @@ from typing import Any
 from unittest import mock
 
 import pytest
-from app import llm
-from app import service as service_module
+from app.rag import generator
+from app.rag import pipeline as pipeline_module
 from app.agents.loop_control import ToolCallBudget
 from app.analytics import metrics
-from app.flags import flags
+from app.config.flags import flags
 from app.providers import breakers
 from app.providers.routing import ModelTier
 from app.resilience import CircuitBreaker, CircuitState, admit
@@ -50,8 +50,8 @@ def clock():
 @pytest.fixture(autouse=True)
 def _closed_breakers():
     live = (
-        service_module._LLM_CIRCUIT,
-        service_module._REASONER_CIRCUIT,
+        pipeline_module._LLM_CIRCUIT,
+        pipeline_module._REASONER_CIRCUIT,
         breakers.GEMINI_BREAKER,
         breakers.CF_LLM_BREAKER,
     )
@@ -170,8 +170,8 @@ def _local_generate(monkeypatch, reply_for) -> list[Any]:
         seen.append(endpoint)
         return reply_for(endpoint)
 
-    monkeypatch.setattr(service_module.llm_module, "generate", fake)
-    monkeypatch.setattr(service_module.llm_module, "get_last_generation_meta", lambda: {"finish_reason": "stop"})
+    monkeypatch.setattr(pipeline_module.generator_module, "generate", fake)
+    monkeypatch.setattr(pipeline_module.generator_module, "get_last_generation_meta", lambda: {"finish_reason": "stop"})
     return seen
 
 
@@ -185,8 +185,8 @@ class Reasoner:
 def reasoner(monkeypatch):
     endpoint = Reasoner()
     t1 = mock.Mock(base_url="http://t1:8011/v1", model="t1-model")
-    monkeypatch.setattr(service_module, "get_endpoint", lambda _tier: t1)
-    monkeypatch.setattr(service_module, "_is_non_t1_endpoint", lambda ep: ep is endpoint)
+    monkeypatch.setattr(pipeline_module, "get_endpoint", lambda _tier: t1)
+    monkeypatch.setattr(pipeline_module, "_is_non_t1_endpoint", lambda ep: ep is endpoint)
     return endpoint
 
 
@@ -201,7 +201,7 @@ class TestNoCallPathWedgesAProviderBreaker:
         monkeypatch.setattr("app.providers.budget.try_consume_gemini_call", lambda: False)
         _half_open(breakers.GEMINI_BREAKER)
 
-        service_module._llm_cloud_fallback("q", [], None, "en")
+        pipeline_module._llm_cloud_fallback("q", [], None, "en")
 
         assert breakers.GEMINI_BREAKER._half_open_probe_in_flight is False
 
@@ -212,10 +212,10 @@ class TestNoCallPathWedgesAProviderBreaker:
         monkeypatch.setattr("app.providers.gateway.cloud_generation_allowed_for", lambda _l: True)
         monkeypatch.setattr("app.providers.config.is_cloudflare_configured", lambda: True)
         monkeypatch.setattr("app.providers.budget.try_consume_neurons", lambda _n: False)
-        monkeypatch.setattr(service_module.llm_module, "_build_messages", lambda **_kw: [])
+        monkeypatch.setattr(pipeline_module.generator_module, "_build_messages", lambda **_kw: [])
         _half_open(breakers.CF_LLM_BREAKER)
 
-        service_module._llm_cloud_fallback("q", [], None, "en")
+        pipeline_module._llm_cloud_fallback("q", [], None, "en")
 
         assert breakers.CF_LLM_BREAKER._half_open_probe_in_flight is False
 
@@ -223,30 +223,30 @@ class TestNoCallPathWedgesAProviderBreaker:
         # The reasoner took the shared probe, failed, and fell back to T1, which
         # found the probe taken: no answer, nothing reported, breaker stuck.
         _local_generate(monkeypatch, lambda ep: "" if ep is reasoner else "T1 answered.")
-        _half_open(service_module._LLM_CIRCUIT)
+        _half_open(pipeline_module._LLM_CIRCUIT)
 
-        reply = service_module._local_llm_then_cloud(
+        reply = pipeline_module._local_llm_then_cloud(
             "q", [], None, "en", endpoint=reasoner, tier=ModelTier.T3
         )
 
         assert reply == "T1 answered."
-        assert service_module._LLM_CIRCUIT.state is CircuitState.CLOSED
+        assert pipeline_module._LLM_CIRCUIT.state is CircuitState.CLOSED
 
     def test_a_client_leaving_mid_stream_during_the_probe(self, monkeypatch) -> None:
         def stream(**_kwargs):
             yield "first"
             yield "second"
 
-        monkeypatch.setattr(service_module.llm_module, "generate_stream", stream)
-        monkeypatch.setattr(service_module.llm_module, "is_available", lambda: True)
-        _half_open(service_module._LLM_CIRCUIT)
+        monkeypatch.setattr(pipeline_module.generator_module, "generate_stream", stream)
+        monkeypatch.setattr(pipeline_module.generator_module, "is_available", lambda: True)
+        _half_open(pipeline_module._LLM_CIRCUIT)
 
-        tokens = service_module._stream_local_then_cloud("q", [], None, "en")
+        tokens = pipeline_module._stream_local_then_cloud("q", [], None, "en")
         assert next(tokens) == "first"
         tokens.close()
 
-        assert service_module._LLM_CIRCUIT._half_open_probe_in_flight is False
-        assert service_module._LLM_CIRCUIT.allow_request() is True
+        assert pipeline_module._LLM_CIRCUIT._half_open_probe_in_flight is False
+        assert pipeline_module._LLM_CIRCUIT.allow_request() is True
 
 
 class TestALeavingClientIsNotAnOutage:
@@ -255,14 +255,14 @@ class TestALeavingClientIsNotAnOutage:
             yield "never shown"
 
         cloud = mock.Mock(side_effect=lambda *a, **k: iter(["cloud answer"]))
-        monkeypatch.setattr(service_module.llm_module, "generate_stream", stream)
-        monkeypatch.setattr(service_module.llm_module, "is_available", lambda: True)
-        monkeypatch.setattr(service_module, "_stream_cloud_fallback", cloud)
+        monkeypatch.setattr(pipeline_module.generator_module, "generate_stream", stream)
+        monkeypatch.setattr(pipeline_module.generator_module, "is_available", lambda: True)
+        monkeypatch.setattr(pipeline_module, "_stream_cloud_fallback", cloud)
         cancelled = threading.Event()
         cancelled.set()
 
-        with mock.patch.object(service_module._LLM_CIRCUIT, "record_failure") as failed:
-            out = list(service_module._stream_local_then_cloud("q", [], None, "en", cancel_event=cancelled))
+        with mock.patch.object(pipeline_module._LLM_CIRCUIT, "record_failure") as failed:
+            out = list(pipeline_module._stream_local_then_cloud("q", [], None, "en", cancel_event=cancelled))
 
         assert out == []
         failed.assert_not_called()
@@ -272,29 +272,29 @@ class TestALeavingClientIsNotAnOutage:
 class TestTheReasonerHasItsOwnBreaker:
     def test_a_down_reasoner_stops_costing_every_turn_its_deadline(self, monkeypatch, reasoner) -> None:
         seen = _local_generate(monkeypatch, lambda ep: "" if ep is reasoner else "T1 answered.")
-        threshold = service_module._REASONER_CIRCUIT.failure_threshold
+        threshold = pipeline_module._REASONER_CIRCUIT.failure_threshold
 
         for _ in range(threshold):
-            service_module._local_llm_then_cloud("q", [], None, "en", endpoint=reasoner, tier=ModelTier.T3)
+            pipeline_module._local_llm_then_cloud("q", [], None, "en", endpoint=reasoner, tier=ModelTier.T3)
         seen.clear()
-        reply = service_module._local_llm_then_cloud("q", [], None, "en", endpoint=reasoner, tier=ModelTier.T3)
+        reply = pipeline_module._local_llm_then_cloud("q", [], None, "en", endpoint=reasoner, tier=ModelTier.T3)
 
         assert reply == "T1 answered."
         assert reasoner not in seen, "an open reasoner circuit goes straight to T1"
 
     def test_a_reasoner_outage_leaves_t1_closed(self, monkeypatch, reasoner) -> None:
         _local_generate(monkeypatch, lambda ep: "" if ep is reasoner else "T1 answered.")
-        for _ in range(service_module._REASONER_CIRCUIT.failure_threshold + 1):
-            service_module._local_llm_then_cloud("q", [], None, "en", endpoint=reasoner, tier=ModelTier.T3)
-        assert service_module._REASONER_CIRCUIT.state is CircuitState.OPEN
-        assert service_module._LLM_CIRCUIT.state is CircuitState.CLOSED
+        for _ in range(pipeline_module._REASONER_CIRCUIT.failure_threshold + 1):
+            pipeline_module._local_llm_then_cloud("q", [], None, "en", endpoint=reasoner, tier=ModelTier.T3)
+        assert pipeline_module._REASONER_CIRCUIT.state is CircuitState.OPEN
+        assert pipeline_module._LLM_CIRCUIT.state is CircuitState.CLOSED
 
     def test_a_t1_outage_leaves_the_reasoner_reachable(self, monkeypatch, reasoner) -> None:
         _local_generate(monkeypatch, lambda ep: "Reasoner answered." if ep is reasoner else "")
-        for _ in range(service_module._LLM_CIRCUIT.failure_threshold):
-            service_module._local_llm_then_cloud("q", [], None, "en")
-        assert service_module._LLM_CIRCUIT.state is CircuitState.OPEN
-        reply = service_module._local_llm_then_cloud("q", [], None, "en", endpoint=reasoner, tier=ModelTier.T3)
+        for _ in range(pipeline_module._LLM_CIRCUIT.failure_threshold):
+            pipeline_module._local_llm_then_cloud("q", [], None, "en")
+        assert pipeline_module._LLM_CIRCUIT.state is CircuitState.OPEN
+        reply = pipeline_module._local_llm_then_cloud("q", [], None, "en", endpoint=reasoner, tier=ModelTier.T3)
         assert reply == "Reasoner answered."
 
     def test_the_stream_also_skips_an_open_reasoner(self, monkeypatch, reasoner) -> None:
@@ -304,13 +304,13 @@ class TestTheReasonerHasItsOwnBreaker:
             seen.append(kwargs.get("endpoint"))
             yield "T1 token."
 
-        monkeypatch.setattr(service_module.llm_module, "generate_stream", stream)
-        monkeypatch.setattr(service_module.llm_module, "is_available", lambda: True)
-        for _ in range(service_module._REASONER_CIRCUIT.failure_threshold):
-            service_module._REASONER_CIRCUIT.record_failure()
+        monkeypatch.setattr(pipeline_module.generator_module, "generate_stream", stream)
+        monkeypatch.setattr(pipeline_module.generator_module, "is_available", lambda: True)
+        for _ in range(pipeline_module._REASONER_CIRCUIT.failure_threshold):
+            pipeline_module._REASONER_CIRCUIT.record_failure()
 
         out = list(
-            service_module._stream_local_then_cloud("q", [], None, "en", endpoint=reasoner, tier=ModelTier.T3)
+            pipeline_module._stream_local_then_cloud("q", [], None, "en", endpoint=reasoner, tier=ModelTier.T3)
         )
 
         assert out == ["T1 token."]
@@ -320,10 +320,10 @@ class TestTheReasonerHasItsOwnBreaker:
 @pytest.fixture
 def tool_loop(monkeypatch):
     """The real tool loop with a scripted model and the real local tools."""
-    monkeypatch.setattr(llm, "LLM_BACKEND", "vllm")
-    monkeypatch.setattr(llm, "_vllm_ready", lambda: True)
-    monkeypatch.setattr(llm, "_select_tools_for_query", lambda _query, names, **_options: names)
-    monkeypatch.setattr(llm, "_fit_tools_to_window", lambda _m, specs, **_kw: specs)
+    monkeypatch.setattr(generator, "LLM_BACKEND", "vllm")
+    monkeypatch.setattr(generator, "_vllm_ready", lambda: True)
+    monkeypatch.setattr(generator, "_select_tools_for_query", lambda _query, names, **_options: names)
+    monkeypatch.setattr(generator, "_fit_tools_to_window", lambda _m, specs, **_kw: specs)
 
     def script(rounds: list[list[dict[str, Any]]]) -> list[Any]:
         calls: list[Any] = []
@@ -333,7 +333,7 @@ def tool_loop(monkeypatch):
             planned = rounds[len(calls) - 1] if len(calls) <= len(rounds) else []
             return {"content": "" if planned else "Done.", "tool_calls": planned}
 
-        monkeypatch.setattr(llm, "_vllm_chat_completion", model)
+        monkeypatch.setattr(generator, "_vllm_chat_completion", model)
         return calls
 
     return script
@@ -351,7 +351,7 @@ class TestTheAgentStopsWhenTheTurnDoes:
             if event["type"] == "tool_call.completed":
                 cancel.set()
 
-        result = llm.generate_with_tools(
+        result = generator.generate_with_tools(
             "VAT on 1,000,000?",
             tool_names=["calculate_vat"],
             cancel_event=cancel,
@@ -370,7 +370,7 @@ class TestTheAgentStopsWhenTheTurnDoes:
         client.available_for.return_value = ["calculate_vat"]
         client.remote_tool_descriptors.return_value = []
 
-        result = llm.generate_with_tools("VAT?", tool_names=["calculate_vat"], cancel_event=cancel)
+        result = generator.generate_with_tools("VAT?", tool_names=["calculate_vat"], cancel_event=cancel)
 
         client.call_tool.assert_not_called()
         assert result["cancelled"] is True
@@ -383,9 +383,9 @@ class TestTheAgentStopsWhenTheTurnDoes:
             stopped.set() if kwargs["cancel_event"].wait(2.0) else None
             return {"text": "", "tool_calls": [], "iterations": 0, "truncated": False}
 
-        monkeypatch.setattr(service_module.llm_module, "generate_with_tools", slow_loop)
+        monkeypatch.setattr(pipeline_module.generator_module, "generate_with_tools", slow_loop)
 
-        result = service_module._call_llm_agentic("q", [], None, "en", deadline_s=0.05)
+        result = pipeline_module._call_llm_agentic("q", [], None, "en", deadline_s=0.05)
 
         assert result["text"] == ""
         assert stopped.wait(1.0), "the abandoned run kept going"
@@ -397,18 +397,18 @@ class TestTheAgentStopsWhenTheTurnDoes:
             stopped.set() if kwargs["cancel_event"].wait(2.0) else None
             return {"text": "", "tool_calls": [], "iterations": 0, "truncated": False}
 
-        monkeypatch.setattr(service_module.llm_module, "generate_with_tools", slow_loop)
+        monkeypatch.setattr(pipeline_module.generator_module, "generate_with_tools", slow_loop)
         turn_cancel = threading.Event()
         timer = threading.Timer(0.05, turn_cancel.set)
         timer.start()
-        service_module._call_llm_agentic("q", [], None, "en", deadline_s=2.0, cancel_event=turn_cancel)
+        pipeline_module._call_llm_agentic("q", [], None, "en", deadline_s=2.0, cancel_event=turn_cancel)
         timer.join()
 
         assert stopped.is_set()
 
     def test_the_streamed_agent_notices_the_client_has_gone(self, monkeypatch) -> None:
         monkeypatch.setattr(
-            service_module.llm_module,
+            pipeline_module.generator_module,
             "generate_with_tools",
             lambda **kw: kw["cancel_event"].wait(5.0) and {"text": "", "tool_calls": []},
         )
@@ -425,7 +425,7 @@ class TestTheAgentStopsWhenTheTurnDoes:
                 return False
 
             started = time.perf_counter()
-            async for _ in service_module._stream_agentic_turn(
+            async for _ in pipeline_module._stream_agentic_turn(
                 rewritten_query="q", hits=[], conversation_history=None, locale="en",
                 personalization_context="", tenant_id="default", user_id="", user_role="public",
                 granted_purposes=[], cancel_event=cancel, _output_guard=mock.Mock(),
@@ -441,7 +441,7 @@ class TestParallelToolCalls:
     def test_the_same_call_twice_in_one_round_runs_once(self, tool_loop, monkeypatch) -> None:
         tool_loop([[VAT, dict(VAT)], []])
         dispatched: list[str] = []
-        real = service_module.llm_module
+        real = pipeline_module.generator_module
 
         from app.mcp import get_client
 
@@ -469,7 +469,7 @@ class TestParallelToolCalls:
         )
         events: list[dict[str, Any]] = []
 
-        result = llm.generate_with_tools(
+        result = generator.generate_with_tools(
             "I need a person",
             tool_names=["escalate_to_human"],
             user_id="u1",
@@ -493,7 +493,7 @@ class TestParallelToolCalls:
         )
         events: list[dict[str, Any]] = []
 
-        result = llm.generate_with_tools(
+        result = generator.generate_with_tools(
             "I need a person",
             tool_names=["escalate_to_human"],
             user_id="u1",
@@ -527,7 +527,7 @@ class TestParallelToolCalls:
 
         monkeypatch.setattr(ToolCallBudget, "admit", first_caller_admitted_last)
 
-        result = llm.generate_with_tools("VAT on 1,000,000?", tool_names=["calculate_vat"])
+        result = generator.generate_with_tools("VAT on 1,000,000?", tool_names=["calculate_vat"])
 
         assert [call["result"]["error"] for call in result["tool_calls"]] == ["offline", "offline"]
 
@@ -570,7 +570,7 @@ class TestParallelToolCalls:
             return mock.Mock(result={"ok": True}, ok=True)
 
         monkeypatch.setattr(client, "call_tool", overlapping)
-        llm.generate_with_tools(
+        generator.generate_with_tools(
             "I need a person", tool_names=["escalate_to_human"], user_id="u1", user_role="verified_taxpayer"
         )
 
@@ -592,7 +592,7 @@ class TestParallelToolCalls:
             return mock.Mock(result={"ok": True}, ok=True)
 
         monkeypatch.setattr(client, "call_tool", together)
-        llm.generate_with_tools("VAT?", tool_names=["calculate_vat"])
+        generator.generate_with_tools("VAT?", tool_names=["calculate_vat"])
 
         # A failed wait is caught as a tool error, so look at the barrier itself.
         assert not barrier.broken
@@ -615,7 +615,7 @@ class TestParallelToolCalls:
             return mock.Mock(result={"ok": True}, ok=True)
 
         monkeypatch.setattr(client, "call_tool", recording)
-        llm.generate_with_tools("VAT?", tool_names=["calculate_vat"])
+        generator.generate_with_tools("VAT?", tool_names=["calculate_vat"])
 
         assert seen == ["this turn", "this turn"]
 
@@ -666,7 +666,7 @@ def _turn(model: Any, **overrides: Any) -> Any:
         "user_id": "",
         "tenant_id": "default",
     }
-    return service_module.run_chat_turn(model, channel="sse", **{**arguments, **overrides})
+    return pipeline_module.run_chat_turn(model, channel="sse", **{**arguments, **overrides})
 
 
 class TestTheEventLoopKeepsRunning:
@@ -675,7 +675,7 @@ class TestTheEventLoopKeepsRunning:
             time.sleep(0.4)
             return text
 
-        monkeypatch.setattr(service_module, "localize_reply", slow_localize)
+        monkeypatch.setattr(pipeline_module, "localize_reply", slow_localize)
 
         async def run() -> int:
             ticks = 0
@@ -718,23 +718,23 @@ class TestAWholeTurnHasADeadline:
             return wait_for_it(self, timeout)
 
         monkeypatch.setattr(concurrent.futures.Future, "result", spying_result)
-        monkeypatch.setattr(service_module.llm_module, "generate", lambda **_kwargs: "An answer.")
-        with service_module.turn_deadline(5.0):
-            service_module._local_llm_then_cloud("q", [], None, "en", deadline_s=45.0)
+        monkeypatch.setattr(pipeline_module.generator_module, "generate", lambda **_kwargs: "An answer.")
+        with pipeline_module.turn_deadline(5.0):
+            pipeline_module._local_llm_then_cloud("q", [], None, "en", deadline_s=45.0)
 
         assert seen
         assert seen[0] <= 5.0
 
     def test_no_time_left_means_no_new_generation(self, monkeypatch) -> None:
         generate = mock.Mock(return_value="never")
-        monkeypatch.setattr(service_module.llm_module, "generate", generate)
-        with service_module.turn_deadline(0.0):
-            reply = service_module._local_llm_then_cloud("q", [], None, "en", allow_cloud_fallback=False)
+        monkeypatch.setattr(pipeline_module.generator_module, "generate", generate)
+        with pipeline_module.turn_deadline(0.0):
+            reply = pipeline_module._local_llm_then_cloud("q", [], None, "en", allow_cloud_fallback=False)
         assert reply == ""
         generate.assert_not_called()
 
     def test_outside_a_turn_nothing_is_clamped(self) -> None:
-        assert service_module.remaining_turn_seconds(45.0) == 45.0
+        assert pipeline_module.remaining_turn_seconds(45.0) == 45.0
 
 
 class TestReasonerFallbackSharesItsToolBudget:
@@ -775,12 +775,12 @@ class TestReasonerFallbackSharesItsToolBudget:
                 pass
 
         executor = Executor()
-        monkeypatch.setattr(service_module, "_LLM_EXECUTOR", executor)
-        monkeypatch.setattr(service_module, "_is_non_t1_endpoint", lambda endpoint: endpoint == "reasoner")
-        monkeypatch.setattr(service_module, "get_endpoint", lambda _tier: "t1")
-        monkeypatch.setattr(service_module, "_circuit_for", lambda _endpoint: Circuit())
+        monkeypatch.setattr(pipeline_module, "_LLM_EXECUTOR", executor)
+        monkeypatch.setattr(pipeline_module, "_is_non_t1_endpoint", lambda endpoint: endpoint == "reasoner")
+        monkeypatch.setattr(pipeline_module, "get_endpoint", lambda _tier: "t1")
+        monkeypatch.setattr(pipeline_module, "_circuit_for", lambda _endpoint: Circuit())
 
-        result = service_module._call_llm_agentic(
+        result = pipeline_module._call_llm_agentic(
             "VAT?", [], None, "en", endpoint="reasoner", deadline_s=2.0
         )
 

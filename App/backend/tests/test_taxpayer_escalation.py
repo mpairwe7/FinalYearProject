@@ -34,8 +34,8 @@ os.environ.setdefault("OTEL_ENABLED", "false")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import database as db  # noqa: E402
-from app.flags import flags  # noqa: E402
+from app.db import database as db  # noqa: E402
+from app.config.flags import flags  # noqa: E402
 from app.main import app  # noqa: E402
 
 

@@ -50,7 +50,7 @@
 
 ## 3. Runtime Defects Discovered & Fixed During Live Ngrok Benchmarking
 
-1. **Education Route Preserving Parked Workflow Resumption (`App/backend/app/service.py`):**
+1. **Education Route Preserving Parked Workflow Resumption (`App/backend/app/rag/pipeline.py`):**
    - *Observation:* When a mid-workflow side question (e.g., *"What does EFRIS mean for a business?"* or *"What is rental income tax in Uganda?"*) routed to the deterministic Education tool (`retrieval_mode: "education"`), the education action builder overwrote `next_actions` without checking `_get_suspended_workflow_name()`.
    - *Fix:* Added centralized suspended-workflow preservation in both the Education route and `ChatModel.generate` post-guidance finalization so `"Continue <Workflow Name>"` is always prepended at index 0 whenever an active workflow is parked on the conversation.
 2. **Objective Hypothesis Attachment on Escalation-Flagged Account Recovery Queries (`App/backend/app/turn_guidance.py`):**

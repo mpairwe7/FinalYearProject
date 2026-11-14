@@ -25,10 +25,10 @@ os.environ.setdefault("OTEL_ENABLED", "false")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import database as db  # noqa: E402
+from app.db import database as db  # noqa: E402
 from app.auth.dependencies import reset_verifier  # noqa: E402
 from app.auth.jwt_auth import make_dev_token  # noqa: E402
-from app.flags import flags  # noqa: E402
+from app.config.flags import flags  # noqa: E402
 from app.main import app  # noqa: E402
 from app import main as main_mod  # noqa: E402
 
@@ -452,8 +452,8 @@ class OpsKeyEndpoints(_Base):
         c = _client()
         stats = {"reindexed": True, "alias": "ura_knowledge_base", "collection": "ura_knowledge_base__build_x"}
         with mock.patch.object(main_mod, "_INDEX_API_KEY", "secret-ops-key"), mock.patch(
-            "app.index_lifecycle.rebuild_if_needed", return_value=dict(stats)
-        ) as rebuild, mock.patch("app.indexer.build_index") as in_place:
+            "app.vectorstore.index_lifecycle.rebuild_if_needed", return_value=dict(stats)
+        ) as rebuild, mock.patch("app.ingestion.indexer.build_index") as in_place:
             r = c.post("/v1/index", headers=_bearer("secret-ops-key"))
         self.assertEqual(r.status_code, 200, r.text)
         rebuild.assert_called_once_with(force=True)
@@ -463,11 +463,11 @@ class OpsKeyEndpoints(_Base):
         app.state.model._retriever.initialize.assert_called_once()
 
     def test_index_refuses_a_legacy_physical_collection_with_409(self):
-        from app.index_lifecycle import IndexLifecycleError
+        from app.vectorstore.index_lifecycle import IndexLifecycleError
 
         c = _client()
         with mock.patch.object(main_mod, "_INDEX_API_KEY", "secret-ops-key"), mock.patch(
-            "app.index_lifecycle.rebuild_if_needed",
+            "app.vectorstore.index_lifecycle.rebuild_if_needed",
             side_effect=IndexLifecycleError("'ura_knowledge_base' is a physical legacy collection, not an alias."),
         ), mock.patch("app.freshness.write_lifecycle_status") as status:
             r = c.post("/v1/index", headers=_bearer("secret-ops-key"))
@@ -480,7 +480,7 @@ class OpsKeyEndpoints(_Base):
         """Bookkeeping after the alias swap re-raises; the process must not keep the old binding."""
         c = _client()
         with mock.patch.object(main_mod, "_INDEX_API_KEY", "secret-ops-key"), mock.patch(
-            "app.index_lifecycle.rebuild_if_needed", side_effect=OSError("read-only file system")
+            "app.vectorstore.index_lifecycle.rebuild_if_needed", side_effect=OSError("read-only file system")
         ), mock.patch("app.freshness.write_lifecycle_status") as status:
             r = c.post("/v1/index", headers=_bearer("secret-ops-key"))
         self.assertEqual(r.status_code, 500, r.text)
@@ -493,7 +493,7 @@ class OpsKeyEndpoints(_Base):
         with mock.patch.object(main_mod, "_INDEX_API_KEY", "secret-ops-key"), mock.patch.object(
             db, "add_corpus_tombstone", return_value={"id": "tomb_x", "source_uri": "old.pdf"}
         ), mock.patch.object(db, "delete_corpus_tombstone", return_value=True), mock.patch(
-            "app.cache.reset_index_stamp"
+            "app.rag.cache.reset_index_stamp"
         ) as reset:
             created = c.post("/v1/admin/tombstones", json={"source_uri": "old.pdf"}, headers=_bearer("secret-ops-key"))
             deleted = c.delete("/v1/admin/tombstones/tomb_x", headers=_bearer("secret-ops-key"))
@@ -505,7 +505,7 @@ class OpsKeyEndpoints(_Base):
         self.assertTrue(main_mod._INDEX_REBUILD_LOCK.acquire(blocking=False))
         try:
             with mock.patch.object(main_mod, "_INDEX_API_KEY", "secret-ops-key"), mock.patch(
-                "app.index_lifecycle.rebuild_if_needed"
+                "app.vectorstore.index_lifecycle.rebuild_if_needed"
             ) as rebuild:
                 r = c.post("/v1/index", headers=_bearer("secret-ops-key"))
         finally:
@@ -777,7 +777,7 @@ class MeEndpoints(_Base):
 
     # -- completeness: export/erasure must actually reach chat history + memory --
     def test_export_includes_conversation_history(self):
-        from app import database as db
+        from app.db import database as db
 
         sub = "exporter1"
         db.log_conversation(
@@ -796,7 +796,7 @@ class MeEndpoints(_Base):
         self.assertIn("conv-exp-1", conv_ids)
 
     def test_erasure_deletes_conversation_history(self):
-        from app import database as db
+        from app.db import database as db
 
         sub = "eraser1"
         db.log_conversation(
@@ -854,7 +854,7 @@ class MeEndpoints(_Base):
         # Consent receipts are keyed by the internal UUID, but the chat/voice
         # runtime checks consent with the external OIDC sub. The gate must bridge
         # the two — otherwise personalization memory + voice consent stay dormant.
-        from app import database as db
+        from app.db import database as db
 
         sub = "zoe-ext"
         row = db.upsert_user(external_id=sub, tenant_id="default")

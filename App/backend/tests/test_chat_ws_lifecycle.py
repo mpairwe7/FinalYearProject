@@ -30,7 +30,7 @@ def _client_with_flag(enabled: bool) -> TestClient:
     MagicMock so we don't pay for ChatModel construction or trigger
     Qdrant/LLM connections in the test process.
     """
-    from app.flags import flags
+    from app.config.flags import flags
     from app.main import app
 
     flags.set("ws_chat", enabled)
@@ -49,7 +49,7 @@ def _recv(ws) -> dict:
 
 class TestChatWsLifecycle(unittest.TestCase):
     def tearDown(self) -> None:
-        from app.flags import flags
+        from app.config.flags import flags
 
         flags.clear("ws_chat")
 
@@ -109,7 +109,7 @@ class TestChatWsLifecycle(unittest.TestCase):
 
         client = _client_with_flag(True)
         with unittest.mock.patch.object(
-            chat_ws_v2.service_module, "run_chat_turn", _fake_run_chat_turn
+            chat_ws_v2.pipeline_module, "run_chat_turn", _fake_run_chat_turn
         ):
             with client.websocket_connect("/v2/chat/stream") as ws:
                 _send(ws, {"type": "session_start"})
@@ -178,7 +178,7 @@ class TestChatWsLifecycle(unittest.TestCase):
 
         client = _client_with_flag(True)
         with unittest.mock.patch.object(
-            chat_ws_v2.service_module, "run_chat_turn", _fake_run_chat_turn
+            chat_ws_v2.pipeline_module, "run_chat_turn", _fake_run_chat_turn
         ):
             with client.websocket_connect("/v2/chat/stream") as ws:
                 _send(ws, {"type": "session_start"})

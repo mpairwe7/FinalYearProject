@@ -53,7 +53,7 @@ def _get_retriever() -> Any:
         _retriever_ready = bool(getattr(_retriever, "is_ready", True))
         return _retriever
     try:
-        from ..retriever import get_shared_retriever
+        from ..rag.retriever import get_shared_retriever
 
         shared = get_shared_retriever(auto_init=True)
         _retriever_ready = bool(getattr(shared, "is_ready", False))
@@ -154,7 +154,7 @@ class SearchKnowledgeBaseTool(Tool):
             filters["tag"] = filter_tag
 
         try:
-            from ..query import detect_language
+            from ..rag.query import detect_language
 
             locale = detect_language(query)
             search = getattr(retriever, "search_planned", None) or getattr(retriever, "search")

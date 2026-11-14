@@ -26,7 +26,7 @@ from fastapi.testclient import TestClient
 
 
 def _client(enabled: bool = True) -> TestClient:
-    from app.flags import flags
+    from app.config.flags import flags
     from app.main import app
 
     flags.set("ws_chat", enabled)
@@ -114,7 +114,7 @@ class ConfirmTokenUnitTest(unittest.TestCase):
 
 class WsConfirmFlowTest(unittest.TestCase):
     def tearDown(self) -> None:
-        from app.flags import flags
+        from app.config.flags import flags
 
         flags.clear("ws_chat")
 
@@ -172,7 +172,7 @@ class WsConfirmFlowTest(unittest.TestCase):
         stub = _StubMCPClient()
         client = _client(True)
         with unittest.mock.patch.object(
-            chat_ws_v2.service_module, "run_chat_turn", self._proposal_run_chat_turn()
+            chat_ws_v2.pipeline_module, "run_chat_turn", self._proposal_run_chat_turn()
         ), unittest.mock.patch("app.mcp.get_client", return_value=stub):
             with client.websocket_connect("/v2/chat/stream") as ws:
                 _send(ws, {"type": "session_start"})
@@ -215,7 +215,7 @@ class WsConfirmFlowTest(unittest.TestCase):
         stub = _StubMCPClient()
         client = _client(True)
         with unittest.mock.patch.object(
-            chat_ws_v2.service_module, "run_chat_turn", self._proposal_run_chat_turn()
+            chat_ws_v2.pipeline_module, "run_chat_turn", self._proposal_run_chat_turn()
         ), unittest.mock.patch("app.mcp.get_client", return_value=stub):
             with client.websocket_connect("/v2/chat/stream") as ws:
                 _send(ws, {"type": "session_start"})
@@ -244,7 +244,7 @@ class WsConfirmFlowTest(unittest.TestCase):
         stub = _StubMCPClient()
         client = _client(True)
         with unittest.mock.patch.object(
-            chat_ws_v2.service_module, "run_chat_turn", self._proposal_run_chat_turn()
+            chat_ws_v2.pipeline_module, "run_chat_turn", self._proposal_run_chat_turn()
         ), unittest.mock.patch("app.mcp.get_client", return_value=stub):
             with client.websocket_connect("/v2/chat/stream") as ws:
                 _send(ws, {"type": "session_start"})
@@ -308,7 +308,7 @@ class WsConfirmFlowTest(unittest.TestCase):
         reset_client()  # use the real in-process client + tool registry
         client = _client(True)
         with unittest.mock.patch.object(
-            chat_ws_v2.service_module, "run_chat_turn", self._critical_proposal_turn()
+            chat_ws_v2.pipeline_module, "run_chat_turn", self._critical_proposal_turn()
         ):
             with client.websocket_connect("/v2/chat/stream") as ws:  # no token → public
                 _send(ws, {"type": "session_start"})
@@ -346,7 +346,7 @@ class WsConfirmFlowTest(unittest.TestCase):
         )
         client = _client(True)
         with unittest.mock.patch.object(
-            chat_ws_v2.service_module, "run_chat_turn", self._critical_proposal_turn()
+            chat_ws_v2.pipeline_module, "run_chat_turn", self._critical_proposal_turn()
         ):
             with client.websocket_connect(
                 "/v2/chat/stream", headers={"authorization": f"Bearer {jwt}"}

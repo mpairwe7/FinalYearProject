@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ..flags import flags
+from ..config.flags import flags
 from . import Tool, ToolRegistry, ToolSchema
 
 logger = logging.getLogger(__name__)

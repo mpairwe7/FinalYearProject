@@ -7,7 +7,7 @@ import logging
 import re
 from typing import Any
 
-from .. import database as db
+from ..db import database as db
 from ..guardrails import redact_pii_text
 from .language import LANGUAGE_NAMES, lexical_hits
 from .store import get_call, list_turns, update_call
@@ -117,13 +117,13 @@ def _summarise_local(prompt: str) -> dict[str, Any] | None:
     try:
         import time
 
-        from .. import llm
-        from ..llm import _vllm_generate
+        from ..rag import generator
+        from ..rag.generator import _vllm_generate
         from . import brain as _brain
 
-        is_unmocked = getattr(llm, "_vllm_generate", None) is getattr(llm, "_ORIGINAL_VLLM_GENERATE", None)
+        is_unmocked = getattr(generator, "_vllm_generate", None) is getattr(generator, "_ORIGINAL_VLLM_GENERATE", None)
         if is_unmocked and (
-            getattr(llm, "LLM_BACKEND", "local") != "vllm" or time.monotonic() < _brain._VLLM_BRIDGE_DOWN_UNTIL
+            getattr(generator, "LLM_BACKEND", "local") != "vllm" or time.monotonic() < _brain._VLLM_BRIDGE_DOWN_UNTIL
         ):
             return None
         # Chat messages, not a string: given a string, _vllm_generate's own

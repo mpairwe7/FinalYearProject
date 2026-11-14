@@ -39,7 +39,7 @@ def _cases(db, user_id: str) -> dict:
 
 class TestTextTurnsKeepTheCase:
     def test_a_workflow_turn_opens_one_case_and_the_next_moves_it(self, consented) -> None:
-        from app.service import _record_turn_case
+        from app.rag.pipeline import _record_turn_case
 
         db, user_id = consented
         started = {
@@ -66,14 +66,14 @@ class TestTextTurnsKeepTheCase:
         assert "1000000001" not in json.dumps(cases)
 
     def test_a_plain_answer_opens_nothing(self, consented) -> None:
-        from app.service import _record_turn_case
+        from app.rag.pipeline import _record_turn_case
 
         db, user_id = consented
         _record_turn_case("What is VAT?", {"retrieval_mode": "hybrid"}, user_id=user_id, tenant_id="default", channel="sse")
         assert _cases(db, user_id) == {}
 
     def test_without_the_flag_nothing_is_written(self, consented, monkeypatch: pytest.MonkeyPatch) -> None:
-        from app.service import _record_turn_case
+        from app.rag.pipeline import _record_turn_case
 
         db, user_id = consented
         monkeypatch.setenv("FLAG_CONTINUOUS_RELATIONSHIP_MEMORY", "false")
@@ -83,7 +83,7 @@ class TestTextTurnsKeepTheCase:
         assert _cases(db, user_id) == {}
 
     def test_a_rate_read_out_is_not_progress_but_a_computation_is(self, consented) -> None:
-        from app.service import _record_turn_case
+        from app.rag.pipeline import _record_turn_case
 
         db, user_id = consented
         # Both come back as retrieval_mode "calculator"; only the figure makes it a case.
@@ -97,7 +97,7 @@ class TestTextTurnsKeepTheCase:
 
 
 def _ticket(db, *, query: str, prior: list[str] = (), handoff: dict | None = None) -> dict:
-    from app.service import ChatModel
+    from app.rag.pipeline import ChatModel
 
     conversation = f"c-{uuid.uuid4().hex[:8]}"
     for message in prior:
@@ -149,7 +149,7 @@ class TestEveryPathToAnOfficer:
         tmp_db.upsert_workflow_session(
             state_key, "return_filing", 1, {"tax_type": "vat", "filing_period": "2026-09", "tin": "1000000001"}
         )
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         model = ChatModel.__new__(ChatModel)
         handoff = {
@@ -168,7 +168,7 @@ class TestEveryPathToAnOfficer:
         assert stored["envelope"]["verified_slot_bank"] == {"filing_period": "provided", "tax_type": "provided", "tin": "provided"}
 
     def test_another_owners_workflow_under_the_bare_id_is_not_read(self, tmp_db) -> None:
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         conversation = f"c-{uuid.uuid4().hex[:8]}"
         tmp_db.upsert_workflow_session(conversation, "return_filing", 1, {"tax_type": "vat", "filing_period": "2026-09"})

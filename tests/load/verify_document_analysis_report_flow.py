@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from app import documents, pdf_export, hitl_routing
-from app.document_normalization import normalize_document, build_normalization_manifest, validate_normalization_manifest
+from app.ingestion.document_normalization import normalize_document, build_normalization_manifest, validate_normalization_manifest
 
 
 def verify_all_flows():

@@ -32,8 +32,8 @@ os.environ.setdefault("QDRANT_URL", "http://127.0.0.1:1")
 os.environ.setdefault("QDRANT_ENABLED", "false")
 os.environ.setdefault("SPEECH_ENABLED", "false")
 
-from app import database  # noqa: E402
-from app import service as service_module  # noqa: E402
+from app.db import database  # noqa: E402
+from app.rag import pipeline as pipeline_module  # noqa: E402
 from app.main import app  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -53,7 +53,7 @@ _FAQ_ROW = {
 @pytest.fixture(scope="module")
 def client():
     database.init_db()
-    app.state.model = service_module.ChatModel()
+    app.state.model = pipeline_module.ChatModel()
     app.state.speech = types.SimpleNamespace(enabled=False)
     return TestClient(app)
 
@@ -62,12 +62,12 @@ def client():
 def pinned(client):
     """Deterministic retrieval; translation is the identity."""
     model = app.state.model
-    with mock.patch.object(service_module, "_simple_search", return_value=[dict(_FAQ_ROW)]), \
-         mock.patch.object(service_module, "needs_clarification", return_value=""), \
-         mock.patch.object(service_module, "english_retrieval_query", side_effect=lambda text, _loc: text), \
-         mock.patch.object(service_module, "localize_reply", side_effect=lambda reply, _loc: reply), \
-         mock.patch.object(service_module.ChatModel, "_maybe_handle_workflow", return_value=None), \
-         mock.patch.object(service_module.ChatModel, "_priority_faq_hits", return_value=[]), \
+    with mock.patch.object(pipeline_module, "_simple_search", return_value=[dict(_FAQ_ROW)]), \
+         mock.patch.object(pipeline_module, "needs_clarification", return_value=""), \
+         mock.patch.object(pipeline_module, "english_retrieval_query", side_effect=lambda text, _loc: text), \
+         mock.patch.object(pipeline_module, "localize_reply", side_effect=lambda reply, _loc: reply), \
+         mock.patch.object(pipeline_module.ChatModel, "_maybe_handle_workflow", return_value=None), \
+         mock.patch.object(pipeline_module.ChatModel, "_priority_faq_hits", return_value=[]), \
          mock.patch.object(model._cache, "get", return_value=None), \
          mock.patch.object(model._cache, "put"):
         yield model
@@ -162,7 +162,7 @@ EN_ANSWER = "To register for a TIN, bring these documents to a URA office now."
 def generation_pinned(client):
     """Retrieval and judges pinned; the LLM answers in Luganda on an English turn."""
     model = app.state.model
-    real_is_enabled = service_module.flags.is_enabled
+    real_is_enabled = pipeline_module.flags.is_enabled
 
     def flags_on(name, *args, **kwargs):
         if name in ("agentic_mode", "langgraph", "semantic_cache", "workflows"):
@@ -171,16 +171,16 @@ def generation_pinned(client):
 
     approve = {"decision": "approve", "final_decision": "approve", "applied_revision": False,
                "reasons": [], "confidence_band": "high", "revised_reply": ""}
-    with mock.patch.object(service_module, "_simple_search", return_value=[dict(_FAQ_ROW)]), \
-         mock.patch.object(service_module, "needs_clarification", return_value=""), \
-         mock.patch.object(service_module, "verify_claims", return_value={"decision": "approve", "score": 1.0}), \
-         mock.patch.object(service_module.ChatModel, "_deterministic_procedure_reply", return_value=("", False)), \
-         mock.patch.object(service_module.ChatModel, "_priority_faq_hits", return_value=[]), \
-         mock.patch.object(service_module.ChatModel, "_evaluate_response_judge", return_value=approve), \
-         mock.patch.object(service_module.ChatModel, "_maybe_handle_fast_paths", return_value=None), \
-         mock.patch.object(service_module.flags, "is_enabled", side_effect=flags_on), \
-         mock.patch.object(service_module, "translate_query_for_retrieval", return_value=EN_ANSWER), \
-         mock.patch("app.english_rendering.translate_query_for_retrieval", return_value=EN_ANSWER) as reply_translator, \
+    with mock.patch.object(pipeline_module, "_simple_search", return_value=[dict(_FAQ_ROW)]), \
+         mock.patch.object(pipeline_module, "needs_clarification", return_value=""), \
+         mock.patch.object(pipeline_module, "verify_claims", return_value={"decision": "approve", "score": 1.0}), \
+         mock.patch.object(pipeline_module.ChatModel, "_deterministic_procedure_reply", return_value=("", False)), \
+         mock.patch.object(pipeline_module.ChatModel, "_priority_faq_hits", return_value=[]), \
+         mock.patch.object(pipeline_module.ChatModel, "_evaluate_response_judge", return_value=approve), \
+         mock.patch.object(pipeline_module.ChatModel, "_maybe_handle_fast_paths", return_value=None), \
+         mock.patch.object(pipeline_module.flags, "is_enabled", side_effect=flags_on), \
+         mock.patch.object(pipeline_module, "translate_query_for_retrieval", return_value=EN_ANSWER), \
+         mock.patch("app.rag.english_rendering.translate_query_for_retrieval", return_value=EN_ANSWER) as reply_translator, \
          mock.patch.object(model._output_guard, "should_abstain", return_value=False), \
          mock.patch.object(model._cache, "get", return_value=None), \
          mock.patch.object(model._cache, "put"):
@@ -200,7 +200,7 @@ class TestEnglishCorrectionRunsBeforeTheGuards:
             return real_leak(text)
 
         with mock.patch.object(model, "_llm_available", True), \
-             mock.patch.object(service_module, "_call_llm_with_deadline", return_value=LG_ANSWER), \
+             mock.patch.object(pipeline_module, "_call_llm_with_deadline", return_value=LG_ANSWER), \
              mock.patch.object(model._output_guard, "check_prompt_leakage", side_effect=spy):
             resp = client.post(
                 "/v1/chat",
@@ -218,9 +218,9 @@ class TestEnglishCorrectionRunsBeforeTheGuards:
         english_draft = "Keep books of account, invoices and receipts for five years."
 
         with mock.patch.object(model, "_llm_available", True), \
-             mock.patch.object(service_module, "SELF_REFLECT_ENABLED", True), \
-             mock.patch.object(service_module, "SELF_REFLECT_THRESHOLD", 2.0), \
-             mock.patch.object(service_module, "_call_llm_with_deadline", side_effect=[english_draft, LG_ANSWER]):
+             mock.patch.object(pipeline_module, "SELF_REFLECT_ENABLED", True), \
+             mock.patch.object(pipeline_module, "SELF_REFLECT_THRESHOLD", 2.0), \
+             mock.patch.object(pipeline_module, "_call_llm_with_deadline", side_effect=[english_draft, LG_ANSWER]):
             resp = client.post(
                 "/v1/chat",
                 json={"message": "Which records should a small business keep for tax purposes?", "locale": "en", "locale_explicit": True},
@@ -240,9 +240,9 @@ class TestEnglishCorrectionRunsBeforeTheGuards:
                     "claim_report": {"decision": "approve"}}
 
         with mock.patch.object(model, "_llm_available", True), \
-             mock.patch.object(service_module.llm_module, "is_available", return_value=True), \
-             mock.patch.object(service_module.llm_module, "generate_stream", return_value=iter([LG_ANSWER])), \
-             mock.patch.object(service_module, "_apply_output_guards", side_effect=guard):
+             mock.patch.object(pipeline_module.generator_module, "is_available", return_value=True), \
+             mock.patch.object(pipeline_module.generator_module, "generate_stream", return_value=iter([LG_ANSWER])), \
+             mock.patch.object(pipeline_module, "_apply_output_guards", side_effect=guard):
             with client.stream(
                 "POST",
                 "/v1/chat/stream",

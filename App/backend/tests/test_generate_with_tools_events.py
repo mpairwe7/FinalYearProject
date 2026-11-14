@@ -23,7 +23,7 @@ class SummariseToolResultTest(unittest.TestCase):
     """Unit tests for the event-payload summariser."""
 
     def test_dict_with_summary_key(self) -> None:
-        from app.llm import _summarise_tool_result
+        from app.rag.generator import _summarise_tool_result
 
         self.assertEqual(
             _summarise_tool_result({"summary": "VAT = 18,000 UGX"}),
@@ -31,32 +31,32 @@ class SummariseToolResultTest(unittest.TestCase):
         )
 
     def test_dict_with_error_key(self) -> None:
-        from app.llm import _summarise_tool_result
+        from app.rag.generator import _summarise_tool_result
 
         out = _summarise_tool_result({"error": "rate not found"})
         self.assertTrue(out.startswith("error:"))
         self.assertIn("rate not found", out)
 
     def test_list_payload(self) -> None:
-        from app.llm import _summarise_tool_result
+        from app.rag.generator import _summarise_tool_result
 
         self.assertEqual(_summarise_tool_result([1, 2, 3]), "list[3]")
 
     def test_long_string_truncated(self) -> None:
-        from app.llm import _summarise_tool_result
+        from app.rag.generator import _summarise_tool_result
 
         out = _summarise_tool_result("x" * 500)
         self.assertLessEqual(len(out), 200)
 
     def test_none_returns_empty_marker(self) -> None:
-        from app.llm import _summarise_tool_result
+        from app.rag.generator import _summarise_tool_result
 
         self.assertEqual(_summarise_tool_result(None), "<empty>")
 
 
 class StreamAgenticTurnTest(unittest.IsolatedAsyncioTestCase):
     async def test_stream_forwards_callback_events_in_order(self) -> None:
-        from app import service as service_module
+        from app.rag import pipeline as pipeline_module
 
         canned_events = [
             {"type": "iteration.started", "iteration": 0},
@@ -75,9 +75,9 @@ class StreamAgenticTurnTest(unittest.IsolatedAsyncioTestCase):
         guard.sanitize.side_effect = lambda x: x
         guard.redact_pii.side_effect = lambda x: x
 
-        with unittest.mock.patch.object(service_module, "_call_llm_agentic", _fake_agentic):
+        with unittest.mock.patch.object(pipeline_module, "_call_llm_agentic", _fake_agentic):
             yielded: list[tuple[str, object]] = []
-            async for evt in service_module._stream_agentic_turn(
+            async for evt in pipeline_module._stream_agentic_turn(
                 rewritten_query="vat",
                 hits=[{"text": "VAT is 18%"}],
                 conversation_history=None,

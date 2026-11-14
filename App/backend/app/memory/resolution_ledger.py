@@ -377,7 +377,7 @@ class ResolutionLedger:
             )
             return False
         try:
-            from .. import database as db
+            from ..db import database as db
 
             tenant = tenant_id or case.tenant_id or "default"
             if not db.has_active_consent(user_id, "personalization", tenant_id=tenant):
@@ -445,7 +445,7 @@ class ResolutionLedger:
         if not user_id:
             return None
         try:
-            from .. import database as db
+            from ..db import database as db
 
             tenant = tenant_id or "default"
             if not db.has_active_consent(user_id, "personalization", tenant_id=tenant):
@@ -516,8 +516,8 @@ class ResolutionLedger:
         ok = self.checkpoint(user_id, case, tenant_id=tenant_id)
         if completed_step and ok:
             try:
-                from .. import database as db
-                from ..flags import flags
+                from ..db import database as db
+                from ..config.flags import flags
 
                 if flags.is_enabled("proactive_resolution_continuation", subject=user_id):
                     summary_msg = build_resumption_prompt(case, target_locale=case.locale)
@@ -556,7 +556,7 @@ class ResolutionLedger:
         if not user_id or not slots:
             return False
         try:
-            from .. import database as db
+            from ..db import database as db
 
             tenant = tenant_id or "default"
             if not db.has_active_consent(user_id, "personalization", tenant_id=tenant):
@@ -597,7 +597,7 @@ class ResolutionLedger:
         if not user_id:
             return {}
         try:
-            from .. import database as db
+            from ..db import database as db
 
             tenant = tenant_id or "default"
             if not db.has_active_consent(user_id, "personalization", tenant_id=tenant):
@@ -620,14 +620,14 @@ class ResolutionLedger:
 
         Gated by ``FLAG_OFFLINE_ACTION_OUTBOX`` and active ``personalization`` consent.
         """
-        from ..flags import flags
+        from ..config.flags import flags
 
         if not user_id or not actions:
             return {"synced_count": 0, "slots_merged": {}}
         if not flags.is_enabled("offline_action_outbox", subject=user_id):
             return {"synced_count": 0, "slots_merged": {}, "skipped": "flag_disabled"}
         try:
-            from .. import database as db
+            from ..db import database as db
 
             tenant = tenant_id or "default"
             if not db.has_active_consent(user_id, "personalization", tenant_id=tenant):
@@ -761,7 +761,7 @@ class ResolutionLedger:
         if not user_id:
             return []
         try:
-            from .. import database as db
+            from ..db import database as db
 
             tenant = tenant_id or "default"
             if not db.has_active_consent(user_id, "personalization", tenant_id=tenant):
@@ -915,7 +915,7 @@ class ResolutionLedger:
         if not anonymous_session_id or not user_id or anonymous_session_id == user_id:
             return {"ok": False, "promoted_slots": 0, "promoted_cases": 0, "workflow_migrated": False}
         try:
-            from .. import database as db
+            from ..db import database as db
 
             tenant = tenant_id or "default"
             if not db.has_active_consent(user_id, "personalization", tenant_id=tenant):

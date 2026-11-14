@@ -10,7 +10,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-from .. import database as db
+from ..db import database as db
 from ..guardrails import redact_pii_text
 
 logger = logging.getLogger(__name__)

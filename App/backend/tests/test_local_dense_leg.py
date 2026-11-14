@@ -14,8 +14,9 @@ from typing import Any
 
 import numpy as np
 import pytest
-from app import dense_cpu, pgvector_dense
-from app.retriever import (
+from app.embeddings import embedder as embedder_module
+from app.vectorstore import vector_db
+from app.rag.retriever import (
     BM25SparseEncoder,
     HybridRetriever,
     active_retrieval_mode,
@@ -62,7 +63,7 @@ class _Input:
 class _Session:
     """Hidden state per token: [token id, 1, 0, …], so mean pooling is checkable."""
 
-    def __init__(self, dim: int = dense_cpu.DIM, inputs: tuple[str, ...] = ("input_ids", "attention_mask")) -> None:
+    def __init__(self, dim: int = embedder_module.DIM, inputs: tuple[str, ...] = ("input_ids", "attention_mask")) -> None:
         self.dim, self._inputs, self.feeds = dim, inputs, []
 
     def get_inputs(self) -> list[_Input]:
@@ -77,8 +78,8 @@ class _Session:
         return [hidden]
 
 
-def _embedder(**kwargs: Any) -> dense_cpu.OnnxEmbedder:
-    return dense_cpu.OnnxEmbedder(Path("."), session=_Session(**kwargs), tokenizer=_Tokenizer())
+def _embedder(**kwargs: Any) -> embedder_module.OnnxEmbedder:
+    return embedder_module.OnnxEmbedder(Path("."), session=_Session(**kwargs), tokenizer=_Tokenizer())
 
 
 class _FixedEmbedder:
@@ -89,13 +90,13 @@ class _FixedEmbedder:
 
     def embed_passages(self, texts: list[str]) -> np.ndarray:
         self.texts.extend(texts)
-        out = np.zeros((len(texts), dense_cpu.DIM), dtype=np.float32)
+        out = np.zeros((len(texts), embedder_module.DIM), dtype=np.float32)
         for i, text in enumerate(texts):
-            out[i, int(hashlib.sha256(text.encode()).hexdigest(), 16) % dense_cpu.DIM] = 1.0
+            out[i, int(hashlib.sha256(text.encode()).hexdigest(), 16) % embedder_module.DIM] = 1.0
         return out
 
     def embed_query(self, _text: str) -> np.ndarray:
-        vector = np.zeros(dense_cpu.DIM, dtype=np.float32)
+        vector = np.zeros(embedder_module.DIM, dtype=np.float32)
         vector[0] = 1.0
         return vector
 
@@ -173,7 +174,7 @@ class _Scroller:
 
 def _doc_points(drop_first: bool = False) -> list[tuple[str, dict[str, Any]]]:
     """The documents as the baked collection holds them: (point id, payload)."""
-    from app.indexer import _vector_payload
+    from app.ingestion.indexer import _vector_payload
 
     points = [(deterministic_point_id(d), _vector_payload(d)) for d in _docs()]
     return points[1:] if drop_first else points
@@ -202,12 +203,12 @@ def test_embeddings_are_prefixed_mean_pooled_and_normalised() -> None:
         assert np.isclose(np.linalg.norm(row), 1.0)
     query = embedder.embed_query("vat")
     assert embedder._tokenizer.seen[-1] == "query: vat"
-    assert query.shape == (dense_cpu.DIM,)
+    assert query.shape == (embedder_module.DIM,)
 
 
 def test_token_type_ids_are_sent_when_the_model_takes_them() -> None:
     session = _Session(inputs=("input_ids", "attention_mask", "token_type_ids"))
-    dense_cpu.OnnxEmbedder(Path("."), session=session, tokenizer=_Tokenizer()).embed_query("x")
+    embedder_module.OnnxEmbedder(Path("."), session=session, tokenizer=_Tokenizer()).embed_query("x")
     assert "token_type_ids" in session.feeds[0]
     assert not session.feeds[0]["token_type_ids"].any()
 
@@ -220,13 +221,13 @@ def test_a_model_of_another_width_is_refused() -> None:
 def test_model_files_must_match_their_pins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / "onnx").mkdir()
     (tmp_path / "onnx/model.onnx").write_bytes(b"model")
-    monkeypatch.setattr(dense_cpu, "MODEL_FILES", {"onnx/model.onnx": hashlib.sha256(b"model").hexdigest(),
+    monkeypatch.setattr(embedder_module, "MODEL_FILES", {"onnx/model.onnx": hashlib.sha256(b"model").hexdigest(),
                                                    "tokenizer.json": "0" * 64})
-    assert dense_cpu.verify_model_files(tmp_path) == ["tokenizer.json: missing"]
+    assert embedder_module.verify_model_files(tmp_path) == ["tokenizer.json: missing"]
     (tmp_path / "tokenizer.json").write_text("{}")
-    assert dense_cpu.verify_model_files(tmp_path)[0].startswith("tokenizer.json: SHA-256 differs")
+    assert embedder_module.verify_model_files(tmp_path)[0].startswith("tokenizer.json: SHA-256 differs")
     with pytest.raises(RuntimeError, match="rejected"):
-        dense_cpu.OnnxEmbedder(tmp_path)
+        embedder_module.OnnxEmbedder(tmp_path)
 
 
 # --------------------------------------------------------------------------- artifact
@@ -235,14 +236,14 @@ def test_model_files_must_match_their_pins(tmp_path: Path, monkeypatch: pytest.M
 def test_the_artifact_carries_qdrant_point_ids(tmp_path: Path) -> None:
     docs = _docs() + [dict(_docs()[0], doc_type="faq_v2")]  # same id as the first: Qdrant keeps the last
     embedder = _FixedEmbedder()
-    manifest = pgvector_dense.build_artifact(tmp_path, documents=docs, embedder=embedder)
+    manifest = vector_db.build_artifact(tmp_path, documents=docs, embedder=embedder)
     assert manifest["ids"] == [deterministic_point_id(_docs()[0]), deterministic_point_id(_docs()[1])]
     assert manifest["count"] == 2
     assert len(embedder.texts) == 2
-    read, vectors = pgvector_dense.read_artifact(tmp_path)
+    read, vectors = vector_db.read_artifact(tmp_path)
     assert read["id_set_sha256"] == manifest["id_set_sha256"]
     assert vectors.dtype == np.float16
-    assert vectors.shape == (2, dense_cpu.DIM)
+    assert vectors.shape == (2, embedder_module.DIM)
 
 
 @pytest.mark.parametrize(("change", "match"), [
@@ -252,16 +253,16 @@ def test_the_artifact_carries_qdrant_point_ids(tmp_path: Path) -> None:
     ({"id_set_sha256": "x"}, "digest"),
 ])
 def test_an_artifact_for_anything_else_is_refused(tmp_path: Path, change: dict, match: str) -> None:
-    pgvector_dense.build_artifact(tmp_path, documents=_docs(), embedder=_FixedEmbedder())
+    vector_db.build_artifact(tmp_path, documents=_docs(), embedder=_FixedEmbedder())
     manifest = json.loads((tmp_path / "manifest.json").read_text())
     (tmp_path / "manifest.json").write_text(json.dumps({**manifest, **change}))
-    with pytest.raises(pgvector_dense.ArtifactError, match=match):
-        pgvector_dense.read_artifact(tmp_path)
+    with pytest.raises(vector_db.ArtifactError, match=match):
+        vector_db.read_artifact(tmp_path)
 
 
 def test_a_missing_artifact_is_reported(tmp_path: Path) -> None:
-    with pytest.raises(pgvector_dense.ArtifactError, match="no readable"):
-        pgvector_dense.read_artifact(tmp_path)
+    with pytest.raises(vector_db.ArtifactError, match="no readable"):
+        vector_db.read_artifact(tmp_path)
 
 
 # --------------------------------------------------------------------------- load
@@ -269,35 +270,35 @@ def test_a_missing_artifact_is_reported(tmp_path: Path) -> None:
 
 def test_qdrant_points_skips_the_binding_sentinel_and_pages() -> None:
     client = _Scroller([[_Point("a", {"text": "x"}), _Point("s", {"_meta": "bm25_binding"})], [_Point("b", {"text": "y"})]])
-    assert [pid for pid, _ in pgvector_dense.qdrant_points(client, "c")] == ["a", "b"]
+    assert [pid for pid, _ in vector_db.qdrant_points(client, "c")] == ["a", "b"]
 
 
 def test_the_load_takes_qdrant_payloads_and_builds_hnsw(tmp_path: Path) -> None:
-    manifest = pgvector_dense.build_artifact(tmp_path, documents=_docs(), embedder=_FixedEmbedder())
+    manifest = vector_db.build_artifact(tmp_path, documents=_docs(), embedder=_FixedEmbedder())
     conn = _Conn()
-    report = pgvector_dense.load_into_postgres(conn, tmp_path, _doc_points(), binding={"corpus_hash": "c0ffee"})
+    report = vector_db.load_into_postgres(conn, tmp_path, _doc_points(), binding={"corpus_hash": "c0ffee"})
     assert report["loaded"] == 2
     assert conn.committed
     assert [json.loads(row[1])["text"] for row in conn.copied] == [d["text"] for d in _docs()]
     assert [row[0] for row in conn.copied] == manifest["ids"]
-    assert all(row[2].startswith("[") and row[2].count(",") == dense_cpu.DIM - 1 for row in conn.copied)
+    assert all(row[2].startswith("[") and row[2].count(",") == embedder_module.DIM - 1 for row in conn.copied)
     sql = "\n".join(s for s, _ in conn.sql)
     assert "USING hnsw (embedding vector_cosine_ops)" in sql
-    assert f"GRANT SELECT ON {pgvector_dense.TABLE}" in sql
+    assert f"GRANT SELECT ON {vector_db.TABLE}" in sql
     assert "INSERT" not in sql.split("GRANT")[1]
-    meta = dict(next(rows for s, rows in conn.sql if s.startswith(f"INSERT INTO {pgvector_dense.META_TABLE}")))
-    assert meta["revision"] == dense_cpu.MODEL_REVISION
+    meta = dict(next(rows for s, rows in conn.sql if s.startswith(f"INSERT INTO {vector_db.META_TABLE}")))
+    assert meta["revision"] == embedder_module.MODEL_REVISION
     assert meta["count"] == "2"
 
 
 @pytest.mark.parametrize("drop", ["point", "vector"])
 def test_a_load_for_another_corpus_is_refused(tmp_path: Path, drop: str) -> None:
-    manifest = pgvector_dense.build_artifact(tmp_path, documents=_docs(), embedder=_FixedEmbedder())
+    manifest = vector_db.build_artifact(tmp_path, documents=_docs(), embedder=_FixedEmbedder())
     points = _doc_points(drop_first=True) if drop == "point" else _doc_points() + [("not-in-artifact", {"text": "t"})]
     assert manifest["count"] == 2
     conn = _Conn()
-    with pytest.raises(pgvector_dense.LoadRefused, match="disagree"):
-        pgvector_dense.load_into_postgres(conn, tmp_path, points, binding={"corpus_hash": "c0ffee"})
+    with pytest.raises(vector_db.LoadRefused, match="disagree"):
+        vector_db.load_into_postgres(conn, tmp_path, points, binding={"corpus_hash": "c0ffee"})
     assert conn.sql == [], "nothing is written for a refused load"
     assert not conn.committed
 
@@ -306,7 +307,7 @@ def test_a_load_for_another_corpus_is_refused(tmp_path: Path, drop: str) -> None
 
 
 def test_filters_follow_qdrant_semantics_and_are_parameterised() -> None:
-    where, params = pgvector_dense._filter_sql({"doc_type": ["faq", "pdf_chunk"], "fiscal_year": "FY2026-27",
+    where, params = vector_db._filter_sql({"doc_type": ["faq", "pdf_chunk"], "fiscal_year": "FY2026-27",
                                                 "tag": "vat'; DROP TABLE x; --"})
     assert where.count("payload @> %s::jsonb") == 10
     assert "DROP" not in where
@@ -316,11 +317,11 @@ def test_filters_follow_qdrant_semantics_and_are_parameterised() -> None:
         {"fiscal_year": "FY2026-27"}, {"fiscal_year": ["FY2026-27"]}, {"fiscal_year": ""}, {"fiscal_year": [""]},
         {"tag": "vat'; DROP TABLE x; --"}, {"tag": ["vat'; DROP TABLE x; --"]},
     ]
-    assert pgvector_dense._filter_sql(None) == ("", [])
+    assert vector_db._filter_sql(None) == ("", [])
 
 
 def _meta_rows(**override: str) -> list[tuple[str, str]]:
-    meta = {"model": dense_cpu.MODEL_REPO, "revision": dense_cpu.MODEL_REVISION, "dim": str(dense_cpu.DIM),
+    meta = {"model": embedder_module.MODEL_REPO, "revision": embedder_module.MODEL_REVISION, "dim": str(embedder_module.DIM),
             "count": "7251", "qdrant_corpus_hash": "c0ffee", **override}
     return list(meta.items())
 
@@ -330,7 +331,7 @@ def _meta_rows(**override: str) -> list[tuple[str, str]]:
     (_meta_rows(count="0"), "empty"),
 ])
 def test_a_table_for_another_model_or_empty_is_not_opened(meta: list, reason: str) -> None:
-    store = pgvector_dense.LocalDenseStore(embedder=_FixedEmbedder(), connect=lambda _dsn: _Conn([meta]))
+    store = vector_db.LocalDenseStore(embedder=_FixedEmbedder(), connect=lambda _dsn: _Conn([meta]))
     assert store.open() is False
     assert reason in store.reason
     assert store.status().startswith("unavailable")
@@ -338,7 +339,7 @@ def test_a_table_for_another_model_or_empty_is_not_opened(meta: list, reason: st
 
 def test_search_returns_similarity_best_first() -> None:
     conn = _Conn([_meta_rows(), [("b", {"text": "efris"}, 0.2), ("a", json.dumps({"text": "vat"}), 0.4)]])
-    store = pgvector_dense.LocalDenseStore(embedder=_FixedEmbedder(), connect=lambda _dsn: conn)
+    store = vector_db.LocalDenseStore(embedder=_FixedEmbedder(), connect=lambda _dsn: conn)
     assert store.open()
     assert store.status() == "pgvector multilingual-e5-small, 7251 vectors"
     hits = store.search("offline invoices", 5, {"doc_type": "pdf_chunk"})
@@ -352,7 +353,7 @@ def test_search_returns_similarity_best_first() -> None:
 
 def test_a_lost_connection_is_reopened() -> None:
     conns = [_Conn([_meta_rows()]), _Conn([[("a", {"text": "x"}, 0.1)]])]
-    store = pgvector_dense.LocalDenseStore(embedder=_FixedEmbedder(), connect=lambda _dsn: conns.pop(0))
+    store = vector_db.LocalDenseStore(embedder=_FixedEmbedder(), connect=lambda _dsn: conns.pop(0))
     assert store.open()
     store._conn.fail_next = True
     with pytest.raises(RuntimeError):
@@ -441,7 +442,7 @@ def test_a_failing_dense_leg_serves_bm25_alone_without_charging_qdrant(monkeypat
 
 
 def test_blending_keeps_the_dense_leg_s_top_hit_near_the_top() -> None:
-    from app.retriever import _blend_orders
+    from app.rag.retriever import _blend_orders
 
     lexical = [{"id": "vat"}, {"id": "other"}, {"id": "efris"}]  # word overlap alone
     blended = _blend_orders(lexical, ["efris", "vat", "other"])  # the fused order
@@ -461,7 +462,7 @@ class _LexicalOnly:
 @pytest.mark.parametrize(("lexical", "blended"), [(True, True), (False, False)])
 def test_search_blends_only_behind_the_cpu_lexical_reranker(monkeypatch: pytest.MonkeyPatch, lexical: bool,
                                                            blended: bool) -> None:
-    from app import retriever as retriever_module
+    from app.rag import retriever as retriever_module
 
     calls: list[list[str]] = []
     real = retriever_module._blend_orders
@@ -490,10 +491,10 @@ def test_readiness_names_the_leg() -> None:
 
 def test_the_leg_is_off_unless_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     r = HybridRetriever()
-    monkeypatch.setattr(pgvector_dense, "BACKEND", "")
+    monkeypatch.setattr(vector_db, "BACKEND", "")
     assert r._init_local_dense() is False
     assert r.local_dense_status() == "off"
-    monkeypatch.setattr(pgvector_dense, "BACKEND", "faiss")
+    monkeypatch.setattr(vector_db, "BACKEND", "faiss")
     assert r._init_local_dense() is False
     assert "unrecognised" in r.local_dense_status()
 
@@ -513,21 +514,21 @@ def test_startup_waits_for_postgres_but_not_for_a_bad_table(monkeypatch: pytest.
         def status(self) -> str:
             return "ok"
 
-    monkeypatch.setattr(pgvector_dense, "BACKEND", "pgvector")
-    monkeypatch.setattr("app.retriever.time.sleep", lambda _s: None)
-    monkeypatch.setattr(pgvector_dense, "LocalDenseStore", lambda: _Store(["OperationalError: no socket"] * 2))
+    monkeypatch.setattr(vector_db, "BACKEND", "pgvector")
+    monkeypatch.setattr("app.rag.retriever.time.sleep", lambda _s: None)
+    monkeypatch.setattr(vector_db, "LocalDenseStore", lambda: _Store(["OperationalError: no socket"] * 2))
     r = HybridRetriever()
     assert r._init_local_dense() is True
     assert len(attempts) == 3
     attempts.clear()
-    monkeypatch.setattr(pgvector_dense, "LocalDenseStore", lambda: _Store(["table built for another model: {}"]))
+    monkeypatch.setattr(vector_db, "LocalDenseStore", lambda: _Store(["table built for another model: {}"]))
     assert r._init_local_dense() is False
     assert len(attempts) == 1
 
 
 def test_a_sparse_only_collection_prefers_the_local_leg_over_vectorize(monkeypatch: pytest.MonkeyPatch) -> None:
     r = HybridRetriever()
-    monkeypatch.setattr("app.retriever.QDRANT_ENABLED", True)
+    monkeypatch.setattr("app.rag.retriever.QDRANT_ENABLED", True)
 
     def _qdrant() -> bool:
         r._sparse_only = True
@@ -565,10 +566,10 @@ def test_ci_embeds_with_the_runtime_tokenizer_and_the_base_image_ships_it() -> N
     ci = re.search(r'"tokenizers==([\d.]+)"', workflow).group(1)
     space = re.search(r'"tokenizers==([\d.]+)"', dockerfile).group(1)
     assert ci == space, "queries must be tokenised as the passages were"
-    assert "python -m app.pgvector_dense build-artifact" in workflow
+    assert "python -m app.vectorstore.vector_db build-artifact" in workflow
     key = re.search(r"key: dense-[^\n]+", workflow).group(0)
-    assert "dense_cpu.py" in key
-    assert "pgvector_dense.py" in key
+    assert "embeddings/embedder.py" in key
+    assert "vectorstore/vector_db.py" in key
     assert "pdf_jsonl" in key
     assert "COPY App/Data/dense" in (ROOT / "App/Dockerfile.cranecloud").read_text()
     assert "!App/Data/dense/**" in (ROOT / "App/Dockerfile.cranecloud.dockerignore").read_text()
@@ -576,48 +577,48 @@ def test_ci_embeds_with_the_runtime_tokenizer_and_the_base_image_ships_it() -> N
 
 def test_the_sql_spells_out_the_names_it_is_built_from() -> None:
     """No statement is formatted (Bandit B608); the literals must match the constants and width."""
-    source = (Path(pgvector_dense.__file__)).read_text()
+    source = (Path(vector_db.__file__)).read_text()
     assert not re.search(r'f"[^"\n]*\b(SELECT|INSERT|CREATE|DROP|GRANT|ANALYZE|COPY|WITH)\b', source)
-    for name in (pgvector_dense.TABLE, pgvector_dense.META_TABLE, pgvector_dense.READER_ROLE):
+    for name in (vector_db.TABLE, vector_db.META_TABLE, vector_db.READER_ROLE):
         assert name in source
-    assert f"vector({dense_cpu.DIM})" in source
-    assert pgvector_dense.TABLE in pgvector_dense._SEARCH_HEAD
+    assert f"vector({embedder_module.DIM})" in source
+    assert vector_db.TABLE in vector_db._SEARCH_HEAD
 
 
 # --------------------------------------------------------------------------- PR 707 review
 
 
 def test_a_reordered_vectors_file_is_refused(tmp_path: Path) -> None:
-    pgvector_dense.build_artifact(tmp_path, documents=_docs(), embedder=_FixedEmbedder())
+    vector_db.build_artifact(tmp_path, documents=_docs(), embedder=_FixedEmbedder())
     vectors = np.load(tmp_path / "vectors.npy")
     np.save(tmp_path / "vectors.npy", vectors[::-1])  # same shape, rows swapped
-    with pytest.raises(pgvector_dense.ArtifactError, match="does not match the manifest"):
-        pgvector_dense.read_artifact(tmp_path)
+    with pytest.raises(vector_db.ArtifactError, match="does not match the manifest"):
+        vector_db.read_artifact(tmp_path)
 
 
 def test_an_empty_list_filter_matches_nothing() -> None:
-    where, params = pgvector_dense._filter_sql({"tag": [], "doc_type": "faq"})
+    where, params = vector_db._filter_sql({"tag": [], "doc_type": "faq"})
     assert "FALSE" in where
     assert [json.loads(p) for p in params] == [{"doc_type": "faq"}, {"doc_type": ["faq"]}]
 
 
 def test_the_load_binds_the_table_to_the_collection(tmp_path: Path) -> None:
-    manifest = pgvector_dense.build_artifact(tmp_path, documents=_docs(), embedder=_FixedEmbedder())
+    manifest = vector_db.build_artifact(tmp_path, documents=_docs(), embedder=_FixedEmbedder())
     sentinel = _Point("s", {"_meta": "bm25_binding", "source_corpus_hash": "c0ffee", "corpus_hash": "older"})
     client = _Scroller([[_Point(pid, payload) for pid, payload in _doc_points()] + [sentinel]])
     assert len(manifest["ids"]) == 2
     binding: dict[str, str] = {}
     conn = _Conn()
-    pgvector_dense.load_into_postgres(conn, tmp_path, pgvector_dense.qdrant_points(client, "c", binding),
+    vector_db.load_into_postgres(conn, tmp_path, vector_db.qdrant_points(client, "c", binding),
                                       binding=binding)
     meta = dict(next(rows for s, rows in conn.sql if s.startswith("INSERT INTO dense_meta")))
     assert meta["qdrant_corpus_hash"] == "c0ffee"
-    with pytest.raises(pgvector_dense.LoadRefused, match="binding"):
-        pgvector_dense.load_into_postgres(_Conn(), tmp_path, _doc_points())
+    with pytest.raises(vector_db.LoadRefused, match="binding"):
+        vector_db.load_into_postgres(_Conn(), tmp_path, _doc_points())
 
 
 def test_a_table_without_a_corpus_binding_is_not_opened() -> None:
-    store = pgvector_dense.LocalDenseStore(embedder=_FixedEmbedder(),
+    store = vector_db.LocalDenseStore(embedder=_FixedEmbedder(),
                                            connect=lambda _dsn: _Conn([_meta_rows(qdrant_corpus_hash="")]))
     assert store.open() is False
     assert "no Qdrant corpus binding" in store.reason
@@ -625,10 +626,10 @@ def test_a_table_without_a_corpus_binding_is_not_opened() -> None:
 
 def test_queries_are_bounded_server_side_and_on_the_lock(monkeypatch: pytest.MonkeyPatch) -> None:
     conn = _Conn([_meta_rows()])
-    store = pgvector_dense.LocalDenseStore(embedder=_FixedEmbedder(), connect=lambda _dsn: conn)
+    store = vector_db.LocalDenseStore(embedder=_FixedEmbedder(), connect=lambda _dsn: conn)
     assert store.open()
     assert any(s.startswith("SET statement_timeout = ") for s, _ in conn.sql)
-    monkeypatch.setattr(pgvector_dense, "LOCK_WAIT_S", 0.01)
+    monkeypatch.setattr(vector_db, "LOCK_WAIT_S", 0.01)
     store._lock.acquire()  # a stalled search holds the connection
     try:
         with pytest.raises(TimeoutError):
@@ -641,8 +642,8 @@ def test_building_the_artifact_needs_no_psycopg(tmp_path: Path, monkeypatch: pyt
     import sys
 
     monkeypatch.setitem(sys.modules, "psycopg", None)  # CI's embed step does not install it
-    monkeypatch.setattr(pgvector_dense, "build_artifact", lambda out: {"ids": [], "count": 0})
-    assert pgvector_dense.main(["build-artifact", "--skip-download", "--out", str(tmp_path)]) == 0
+    monkeypatch.setattr(vector_db, "build_artifact", lambda out: {"ids": [], "count": 0})
+    assert vector_db.main(["build-artifact", "--skip-download", "--out", str(tmp_path)]) == 0
 
 
 class _Slow(_FakeStore):
@@ -669,7 +670,7 @@ def test_a_promoted_collection_turns_the_leg_off() -> None:
 def test_a_stalled_dense_search_is_abandoned(monkeypatch: pytest.MonkeyPatch) -> None:
     import time
 
-    from app import retriever as retriever_module
+    from app.rag import retriever as retriever_module
 
     monkeypatch.setattr(retriever_module, "_LOCAL_DENSE_TIMEOUT_S", 0.05)
     r = _retriever([_Point("vat", VAT)], _Slow([("efris", EFRIS, 0.9)]))
@@ -698,7 +699,7 @@ class _BrokenQdrant(_Qdrant):
 @pytest.mark.parametrize("how", ["raises", "circuit_open"])
 def test_qdrant_down_serves_no_unconfirmed_dense_hits(how: str) -> None:
     """The dense snapshot cannot be confirmed against a collection that is down (PR 707 review)."""
-    from app import retriever as retriever_module
+    from app.rag import retriever as retriever_module
 
     store = _FakeStore([("efris", EFRIS, 0.9)])
     r = _retriever([], store)
@@ -730,7 +731,7 @@ class _OverlapReranker:
 
 def test_a_dense_only_passage_with_no_word_in_common_cannot_carry_an_answer() -> None:
     from app.guardrails import OutputGuard
-    from app.retriever import gating_relevance
+    from app.rag.retriever import gating_relevance
 
     r = _retriever([], _FakeStore([("efris", EFRIS, 0.9)]))
     r._reranker = _OverlapReranker()
@@ -741,7 +742,7 @@ def test_a_dense_only_passage_with_no_word_in_common_cannot_carry_an_answer() ->
 
 
 def test_preference_ordering_keeps_the_blended_order() -> None:
-    from app.retriever import _blend_cpu_lexical, hit_relevance
+    from app.rag.retriever import _blend_cpu_lexical, hit_relevance
 
     reranked = [{"id": "vat", "score_rerank": 0.6}, {"id": "other", "score_rerank": 0.4},
                 {"id": "efris", "score_rerank": 0.1}]
@@ -752,13 +753,14 @@ def test_preference_ordering_keeps_the_blended_order() -> None:
 
 
 def test_point_ids_have_their_own_module_and_the_cache_key_sees_it() -> None:
-    from app import point_ids, retriever
+    from app.vectorstore import point_ids
+    from app.rag import retriever
 
     assert retriever.deterministic_point_id is point_ids.deterministic_point_id
     key = re.search(r"key: dense-[^\n]+", (ROOT / ".github/workflows/ura-chatbot-build-push.yml").read_text()).group(0)
-    assert "point_ids.py" in key
-    assert "retriever.py" not in key, "every retriever edit would re-embed the corpus"
-    for ingester in ("faq_corpus.py", "pdf_corpus.py", "crawl_corpus.py", "indexer.py"):
+    assert "vectorstore/point_ids.py" in key
+    assert "rag/retriever.py" not in key, "every retriever edit would re-embed the corpus"
+    for ingester in ("ingestion/faq_corpus.py", "ingestion/pdf_corpus.py", "ingestion/crawl_corpus.py", "ingestion/indexer.py"):
         assert ingester in key, f"{ingester} decides what is embedded and must be in the cache key"
 
 
@@ -789,16 +791,16 @@ def test_sparse_only_builds_have_the_dense_directory() -> None:
 
 
 def test_a_document_changed_since_it_was_embedded_refuses_the_load(tmp_path: Path) -> None:
-    pgvector_dense.build_artifact(tmp_path, documents=_docs(), embedder=_FixedEmbedder())
+    vector_db.build_artifact(tmp_path, documents=_docs(), embedder=_FixedEmbedder())
     points = _doc_points()
     pid, payload = points[0]
     points[0] = (pid, {**payload, "title": "Renamed guide"})  # same id: the id ignores the title
-    with pytest.raises(pgvector_dense.LoadRefused, match="changed since they were embedded"):
-        pgvector_dense.load_into_postgres(_Conn(), tmp_path, points, binding={"corpus_hash": "c0ffee"})
+    with pytest.raises(vector_db.LoadRefused, match="changed since they were embedded"):
+        vector_db.load_into_postgres(_Conn(), tmp_path, points, binding={"corpus_hash": "c0ffee"})
 
 
 def test_a_dotted_filter_is_a_nested_path() -> None:
-    _where, params = pgvector_dense._filter_sql({"metadata.tax_type": "vat"})
+    _where, params = vector_db._filter_sql({"metadata.tax_type": "vat"})
     assert [json.loads(p) for p in params] == [{"metadata": {"tax_type": "vat"}}, {"metadata": {"tax_type": ["vat"]}}]
 
 
@@ -824,7 +826,7 @@ def test_unconfirmable_dense_hits_are_dropped() -> None:
 
 
 def test_a_half_open_breaker_is_not_yet_healthy() -> None:
-    from app.retriever import _breaker_open
+    from app.rag.retriever import _breaker_open
 
     class _Breaker:
         def __init__(self, name: str) -> None:
@@ -838,7 +840,7 @@ def test_a_half_open_breaker_is_not_yet_healthy() -> None:
 def test_outstanding_dense_searches_are_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
     import threading
 
-    from app import retriever as retriever_module
+    from app.rag import retriever as retriever_module
 
     slots = threading.BoundedSemaphore(1)
     monkeypatch.setattr(retriever_module, "_LOCAL_DENSE_SLOTS", slots)

@@ -1,10 +1,10 @@
-"""Tests for the Phase-B tool-call parser helpers in app.llm."""
+"""Tests for the Phase-B tool-call parser helpers in app.rag.generator."""
 
 from __future__ import annotations
 
 import pytest
 
-from app.llm import (
+from app.rag.generator import (
     TOOL_USE_PROMPT_SUFFIX,
     _parse_tool_calls,
     _strip_tool_calls,

@@ -11,9 +11,9 @@ from unittest.mock import patch
 
 from starlette.testclient import TestClient
 
-from app import database as db
+from app.db import database as db
 from app.auth.jwt_auth import make_dev_token
-from app.flags import flags
+from app.config.flags import flags
 from app.main import app
 from app.receptionist.hub import CallEventHub, hub
 from app.receptionist.state import CallRoom, CallState, registry

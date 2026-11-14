@@ -17,7 +17,7 @@ come up.
    builds it.
    - It installs Debian's PostgreSQL 15, copies the pgvector 0.8.1 extension from the
      digest-pinned image, and runs a SQL selftest.
-   - It then runs `python -m app.pgvector_dense load` and `check`.
+   - It then runs `python -m app.vectorstore.vector_db load` and `check`.
    - The load refuses vectors whose point ids differ from the baked Qdrant collection's. A refused
      or failed load does not fail the build: it prints
      `WARNING: the dense leg was not loaded`, and the Space serves BM25 alone.
@@ -52,10 +52,10 @@ The build log (`hf spaces logs ... --build`) shows `pgvector selftest passed` an
 | `local_dense` reason | Cause | Fix |
 | --- | --- | --- |
 | `UndefinedTable: relation "dense_meta" does not exist` | The load did not run or was refused. | Read the build log. `NOTE: this base predates the dense leg` means the base image has no artifact yet, so roll a base built after ADR-0034 merged. `artifact and Qdrant disagree` means the vectors are for another corpus; see the next row. |
-| `artifact and Qdrant disagree` (build log) | The artifact's point ids are not the collection's. The cache key covers the corpus, the ingesters, `indexer.py` and `point_ids.py`, so this means the collection was built from something else. | Compare the missing and extra ids printed in the build log with the corpus the image baked. Delete the `dense-e5s-v1-*` cache entry only once you know why they differ. |
+| `artifact and Qdrant disagree` (build log) | The artifact's point ids are not the collection's. The cache key covers the corpus, the ingesters, `ingestion/indexer.py` and `vectorstore/point_ids.py`, so this means the collection was built from something else. | Compare the missing and extra ids printed in the build log with the corpus the image baked. Delete the `dense-e5s-v1-*` cache entry only once you know why they differ. |
 | `documents changed since they were embedded` (build log) | Same ids, different documents (for example a title edit): the vectors describe the old text. | Rebuild without the cached artifact (delete the `dense-e5s-v1-*` entry), then roll. |
 | `local_dense_stale_hits_total` rising | Dense hits the serving collection no longer holds (a live replacement or a promotion); they are dropped before fusion. | Expected after corpus sync replaces a guide. Rebuild and roll to refresh the snapshot. |
-| `table built for another model` | `dense_cpu.py`'s pins changed but the vectors did not. | Same as above: rebuild the artifact. |
+| `table built for another model` | `embeddings/embedder.py`'s pins changed but the vectors did not. | Same as above: rebuild the artifact. |
 | `OperationalError: ... /app/pgrun ...` | Postgres is not running. | `hf spaces logs` for `postgres` exits. Postgres writes to `/app/pgdata`, which must stay owned by `postgres`. |
 | `dense model files rejected` | The model files in the image do not match their pins. | Rebuild the base image; never edit the pins without new vectors. |
 | `the Qdrant collection changed since the vectors were loaded` | A new collection was promoted (G292), so the vectors describe the old corpus. The leg turned itself off rather than serve removed guidance. | Rebuild and roll the image so CI embeds the new corpus. |

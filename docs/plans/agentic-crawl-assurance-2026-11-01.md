@@ -7,7 +7,7 @@ Status: phased fixes implemented with regressions; production acceptance open (s
 
 Baseline: `f3d024e7` (`dev`), branch `fix/agentic-crawl-assurance-2026-11-01`. Scope: every
 path by which web content becomes something the agent believes, from discovery to the
-citation a taxpayer sees: `crawler.py`, `crawl_corpus.py`, the PDF harvester, publications
+citation a taxpayer sees: `crawler.py`, `ingestion/crawl_corpus.py`, the PDF harvester, publications
 ingest, the freshness checks, and the workflows that move crawl data to production. This
 is a targeted review, not a penetration test or a legal compliance certification.
 

@@ -1,8 +1,8 @@
 # ADR-0019: Retrieval answer integrity — cache generations, in-force editions and decisions on calibrated evidence
 
 - **Date:** 2026-10-30
-- **Scope:** Backend retrieval, answer verification, and caching (`cache.py`, `retriever.py`, `query.py`,
-  `corrective_rag.py`, `guardrails.py`, `indexer.py`, `llm.py`, `entailment.py`, `claim_verifier.py`, `cms.py`, `main.py` `/v1/index`).
+- **Scope:** Backend retrieval, answer verification, and caching (`rag/cache.py`, `rag/retriever.py`, `query.py`,
+  `rag/corrective_rag.py`, `guardrails.py`, `ingestion/indexer.py`, `rag/generator.py`, `rag/entailment.py`, `rag/claim_verifier.py`, `cms.py`, `main.py` `/v1/index`).
 - **Gaps:** G277–G290, G292–G294, G296–G297 fixed; G291 and G295 open (`docs/GAPS_AND_AGENTIC_ROADMAP.md`).
 
 ## Status
@@ -94,7 +94,7 @@ Current practice points the same way:
 6. **Multi-intent recall (G285).** Each sub-query batch is pruned against its own
    best, and each batch's best hit keeps a place.
 7. **Index operations (G286).** `build_index` ensures keyword payload indexes on
-   every filtered field. `python -m app.indexer --ensure-payload-indexes` backfills
+   every filtered field. `python -m app.ingestion.indexer --ensure-payload-indexes` backfills
    a live collection. `POST /v1/index` runs the staged lifecycle; it returns 409 on
    a legacy non-alias collection rather than deleting it.
 8. **A stack that can store its state (G296).** The compose tmpfs mounts are owned

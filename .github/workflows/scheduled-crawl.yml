@@ -167,7 +167,7 @@ jobs:
             if [ "$MAX_FETCHES" -lt 20 ]; then max_pages=1; fi
             harvest_args+=(--max-pdf-downloads "$MAX_FETCHES")
           fi
-          python -m app.pdf_corpus \
+          python -m app.ingestion.pdf_corpus \
             --harvest \
             --include-mda-sources \
             --max-pages-per-source "$max_pages" \

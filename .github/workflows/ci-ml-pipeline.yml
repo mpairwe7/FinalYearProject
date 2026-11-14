@@ -125,8 +125,8 @@ jobs:
           import tempfile
           from pathlib import Path
 
-          from app.crawl_corpus import export_crawl_pages_to_jsonl, ingest_crawl_jsonls
-          from app.faq_corpus import export_faq_csvs_to_jsonl, ingest_faq_jsonls
+          from app.ingestion.crawl_corpus import export_crawl_pages_to_jsonl, ingest_crawl_jsonls
+          from app.ingestion.faq_corpus import export_faq_csvs_to_jsonl, ingest_faq_jsonls
 
           root = Path(os.environ["REPO_ROOT"])
           with tempfile.TemporaryDirectory() as tmp:

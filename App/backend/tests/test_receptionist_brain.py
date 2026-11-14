@@ -8,8 +8,8 @@ import time
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app import database as db
-from app.flags import flags
+from app.db import database as db
+from app.config.flags import flags
 from app.receptionist.brain import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,

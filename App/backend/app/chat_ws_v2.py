@@ -40,11 +40,11 @@ from typing import Any
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
 from . import confirm_tokens
-from . import database as db
-from . import service as service_module
+from .db import database as db
+from .rag import pipeline as pipeline_module
 from .analytics import MetricSpec, metrics, record_mapped
 from .auth.jwt_auth import JWTAuthError, JWTVerifier
-from .flags import flags
+from .config.flags import flags
 from .voice_ws_v2 import _send_error, _send_json
 
 logger = logging.getLogger(__name__)
@@ -375,7 +375,7 @@ async def _run_response_create(
         await _send_json(websocket, {"type": "response.done"})
         return
 
-    from .query import SUPPORTED_LOCALES
+    from .rag.query import SUPPORTED_LOCALES
 
     turn_locale = msg.get("locale")
     turn_explicit = msg.get("locale_explicit")
@@ -407,7 +407,7 @@ async def _run_response_create(
     dlp_filter = StreamingDLPFilter(allowed_values=stated_ids)
 
     try:
-        async for event_type, payload in service_module.run_chat_turn(
+        async for event_type, payload in pipeline_module.run_chat_turn(
             chat_model,
             message=user_input,
             conversation_id=session.conversation_id or None,
@@ -550,7 +550,7 @@ async def _run_response_create(
             if new_conv and not session.conversation_id:
                 session.conversation_id = new_conv
             if full_reply:
-                english = service_module.ChatModel.english_forms(
+                english = pipeline_module.ChatModel.english_forms(
                     result,
                     served_reply=full_reply,
                     english_reply=str(final_log.get("english_reply") or ""),
@@ -790,7 +790,7 @@ def _log_ws_turn(
     response_id: str = "",
 ) -> None:
     """Persist a chat-WS turn to the analytics DB (mirrors SSE behaviour)."""
-    from .service import ChatModel as _CM
+    from .rag.pipeline import ChatModel as _CM
 
     result = log_payload.get("result") or {}
     elapsed_ms = log_payload.get("elapsed_ms", 0.0)
@@ -900,7 +900,7 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
             await _send_error(websocket, "First message must be session_start", recoverable=False)
             return
 
-        from .query import SUPPORTED_LOCALES
+        from .rag.query import SUPPORTED_LOCALES
 
         requested_locale = config.get("locale")
         supported = isinstance(requested_locale, str) and requested_locale in SUPPORTED_LOCALES

@@ -2,7 +2,7 @@
 
 Operator guide for the path a reply takes from English generation to a
 taxpayer reading Luganda or Swahili: `app/mt.py`, `service.localize_reply`,
-and the decoding parameters in `app/llm.py` that feed it.
+and the decoding parameters in `app/rag/generator.py` that feed it.
 
 Decisions recorded here reflect the code as of 2026-09-09. Where a decision
 reversed an earlier one, the earlier one is stated too — the reversals are
@@ -223,7 +223,7 @@ the units, the length or the citation markers. All three are now guards on the
 same round trip.
 
 Closed (2026-09-17, **G59**): vernacular numeral and idiom disambiguation in
-`entailment.py` and `mt.py`. Disambiguated Luganda action verb *"saba"* (*"to
+`rag/entailment.py` and `mt.py`. Disambiguated Luganda action verb *"saba"* (*"to
 apply/request"*) from Swahili cardinal numeral *"saba"* (*7*); shielded non-numeric
 idioms (*"mtu wa tatu"*, *"third party"*); added English number words (`two`...`ten`,
 `twenty`...`fifty`) to align with translated vernacular words; shielded decimal legal
@@ -269,7 +269,7 @@ Still open:
 ## Decision 4 — compound statutory rate words and vernacular orthography (2026-09-28)
 
 **Current behaviour.** When statutory tax rates and figures appear as spelled-out words rather than digits:
-- **Luganda (`lg`)**: `_LG_WORD_NUMBERS` in `app/mt.py` and `_LUGANDA_PCT_WORDS` in `app/entailment.py` recognize both geminate and single consonant orthographies (`kkumi na munaana` / `kumi na munaana` for 18%, `kkumi na bbiri` for 12%, `kkumi na ttaano` for 15%, `asatu` for 30%). Vernacular percentage idiom `ku buli kikumi` ("per hundred") is stripped during normalization so that "kikumi" is not falsely parsed as a standalone 100.0 tax amount.
+- **Luganda (`lg`)**: `_LG_WORD_NUMBERS` in `app/mt.py` and `_LUGANDA_PCT_WORDS` in `app/rag/entailment.py` recognize both geminate and single consonant orthographies (`kkumi na munaana` / `kumi na munaana` for 18%, `kkumi na bbiri` for 12%, `kkumi na ttaano` for 15%, `asatu` for 30%). Vernacular percentage idiom `ku buli kikumi` ("per hundred") is stripped during normalization so that "kikumi" is not falsely parsed as a standalone 100.0 tax amount.
 - **Swahili (`sw`)**: `_SW_WORD_NUMBERS` in `app/mt.py` supports compound statutory rate phrases (`kumi na nane` for 18%, `kumi na mbili` for 12%, `kumi na tano` for 15%, `thelathini` for 30%).
 - **English (`en`)**: `_EN_WORD_NUMBERS` supports `eighteen` (18.0) and `twelve` (12.0).
 
@@ -281,7 +281,7 @@ Parsing evaluates compound words in descending order of key length so that large
 - `question_lg`, `answer_lg`
 - `question_sw`, `answer_sw`
 
-1. **Build-time figure verification (`app/faq_corpus.py`)**:
+1. **Build-time figure verification (`app/ingestion/faq_corpus.py`)**:
    During corpus compilation (`export_faq_csvs_to_jsonl`), every localized answer (`answer_lg`, `answer_sw`) is validated with `mt.figures_survived(row['answer'], row[f'answer_{lang}'], locale=lang)`. If any statutory rate (18%, 30%), currency figure, or compliance timeline is mutated or missing, the build fails immediately with a `CorpusValidationError`.
 2. **Deterministic Manifest Auditing**:
    `Data/faq_jsonl/faq_corpus_manifest.json` tracks `"multilingual_records"` counts alongside source file SHA-256 hashes.

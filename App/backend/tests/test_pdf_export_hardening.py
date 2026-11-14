@@ -7,7 +7,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from app.models import ExportConversationRequest, ExportTaxSummaryRequest
+from app.api.models import ExportConversationRequest, ExportTaxSummaryRequest
 from app.pdf_export import generate_conversation_pdf, generate_tax_summary_pdf
 
 

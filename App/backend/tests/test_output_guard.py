@@ -359,7 +359,7 @@ class ThoughtSuppressionTests(unittest.TestCase):
         self.assertEqual(sanitized, "")
 
     def test_filter_thought_stream_suppresses_thinking_tokens(self) -> None:
-        from app.llm import filter_thought_stream
+        from app.rag.generator import filter_thought_stream
 
         def _mock_stream():
             yield "<th"

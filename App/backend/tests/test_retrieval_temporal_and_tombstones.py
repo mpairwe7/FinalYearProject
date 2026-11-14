@@ -24,10 +24,10 @@ import unittest
 from typing import Any
 from unittest import mock
 
-from app import retriever as retriever_mod
-from app.corrective_rag import _expand_query, corrective_retrieve
-from app.llm import SYSTEM_PROMPT, _build_messages, _passage_header
-from app.retriever import (
+from app.rag import retriever as retriever_mod
+from app.rag.corrective_rag import _expand_query, corrective_retrieve
+from app.rag.generator import SYSTEM_PROMPT, _build_messages, _passage_header
+from app.rag.retriever import (
     STALE_EDITION_PENALTY,
     HybridRetriever,
     _filter_tombstoned_candidates,
@@ -38,7 +38,7 @@ from app.retriever import (
 
 
 def _in_force(fy: str):
-    return mock.patch("app.query.current_fiscal_year", return_value=fy)
+    return mock.patch("app.rag.query.current_fiscal_year", return_value=fy)
 
 
 class EditionTests(unittest.TestCase):
@@ -116,7 +116,7 @@ class RerankScaleTests(unittest.TestCase):
         retriever = HybridRetriever()
         retriever._reranker = _Reranker(scores)
         candidates = [{"text": f"passage {i}", "source": "ura_vat_faqs.csv"} for i in range(len(scores))]
-        with mock.patch("app.flags.flags.is_enabled", return_value=True):
+        with mock.patch("app.config.flags.flags.is_enabled", return_value=True):
             retriever._rerank("What is the VAT rate?", candidates)
         return candidates
 
@@ -157,7 +157,7 @@ class TombstoneFilterTests(unittest.TestCase):
     def setUp(self) -> None:
         retriever_mod._last_tombstones = None
         self.addCleanup(setattr, retriever_mod, "_last_tombstones", None)
-        flags_on = mock.patch("app.flags.flags.is_enabled", return_value=True)
+        flags_on = mock.patch("app.config.flags.flags.is_enabled", return_value=True)
         flags_on.start()
         self.addCleanup(flags_on.stop)
         self.candidates = [
@@ -168,7 +168,7 @@ class TombstoneFilterTests(unittest.TestCase):
         ]
 
     def _store(self, *outcomes: Any):
-        from app import database as db
+        from app.db import database as db
 
         return mock.patch.object(db, "get_active_corpus_tombstones", side_effect=list(outcomes))
 
@@ -226,13 +226,13 @@ class _BrokenPlanningRetriever(_RecordingRetriever):
 
 class CorrectiveRagTests(unittest.TestCase):
     def setUp(self) -> None:
-        flags_on = mock.patch("app.flags.flags.is_enabled", return_value=True)
+        flags_on = mock.patch("app.config.flags.flags.is_enabled", return_value=True)
         flags_on.start()
         self.addCleanup(flags_on.stop)
         self.weak = [{"id": "w", "text": "weak", "score_norm": 0.40}]
 
     def test_english_spelling_correction_is_for_english_only(self) -> None:
-        with mock.patch("app.query.correct_spelling", side_effect=lambda q: q) as spell:
+        with mock.patch("app.rag.query.correct_spelling", side_effect=lambda q: q) as spell:
             _expand_query("Omusolo gwa VAT guli gwa?", "lg")
             spell.assert_not_called()
             _expand_query("What is the VAT rat?", "en")
@@ -281,7 +281,7 @@ class PassageHeaderTests(unittest.TestCase):
 
     def test_rule_8_keeps_the_edition_a_historical_question_asks_for(self) -> None:
         """'Most recent' alone would answer "the FY2021-22 band" with today's figure."""
-        from app.llm import SYSTEM_PROMPT
+        from app.rag.generator import SYSTEM_PROMPT
 
         rule = " ".join(SYSTEM_PROMPT.split())
         self.assertIn("unless the question names an earlier year", rule)
@@ -362,7 +362,7 @@ class CrawledPageTombstoneTests(unittest.TestCase):
 
     def _survivors(self, tombstone: dict[str, Any], hit: dict[str, Any]) -> list[dict[str, Any]]:
         with (
-            mock.patch("app.flags.flags.is_enabled", return_value=True),
+            mock.patch("app.config.flags.flags.is_enabled", return_value=True),
             mock.patch.object(retriever_mod, "_active_tombstones", return_value=[tombstone]),
         ):
             return _filter_tombstoned_candidates([hit])

@@ -503,7 +503,7 @@ def test_phase3_toolathlon_long_horizon_multi_server_chain_execution() -> None:
 def test_phase4_multiturn_case_facts_retraction_and_calculator_sensitivity() -> None:
     from app.calculator_router import continue_calculation
     from app.case_facts import extract_case_facts
-    from app.context_manager import RollingContextManager
+    from app.rag.context_manager import RollingContextManager
 
     # 1. Multi-turn benefit retraction in CaseFacts
     t1 = extract_case_facts("I earn UGX 6,000,000 per month and have a company car worth UGX 40,000,000.")
@@ -619,8 +619,8 @@ def test_phase5_mcp_security_event_telemetry_and_threat_registry_parity(caplog: 
 def test_phase6_rental_multi_unit_calculation_fuzzy_guard_and_cross_passage_claim_verifier() -> None:
     from app.calculator_router import continue_calculation, plan_calculation
     from app.case_facts import extract_case_facts
-    from app.claim_verifier import verify_claims
-    from app.query import _fuzzy_correct_word
+    from app.rag.claim_verifier import verify_claims
+    from app.rag.query import _fuzzy_correct_word
     from plugins.ursb.database import UrsbDatabase
 
     # 1. Multi-line multi-unit rental calculation ("10 units where clients pay 1,000,000 Ugx each per month")

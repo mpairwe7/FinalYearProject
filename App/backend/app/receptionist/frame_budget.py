@@ -34,7 +34,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
-from ..flags import _log_safe
+from ..config.flags import _log_safe
 from . import config, telemetry
 
 if TYPE_CHECKING:

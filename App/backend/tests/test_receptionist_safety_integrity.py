@@ -13,8 +13,8 @@ import unittest
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app import database as db
-from app.flags import flags
+from app.db import database as db
+from app.config.flags import flags
 from app.receptionist import desk, presence
 from app.receptionist import transfer as transfer_mod
 from app.receptionist.brain import UraReceptionistBrain

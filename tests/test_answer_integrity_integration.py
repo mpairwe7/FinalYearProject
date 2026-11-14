@@ -48,10 +48,10 @@ os.environ.setdefault("SPEECH_ENABLED", "false")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from App.backend.app import database  # noqa: E402
+from App.backend.app.db import database  # noqa: E402
 from App.backend.app import mt  # noqa: E402
-from App.backend.app import service as service_module  # noqa: E402
-from App.backend.app.flags import flags  # noqa: E402
+from App.backend.app.rag import pipeline as pipeline_module  # noqa: E402
+from App.backend.app.config.flags import flags  # noqa: E402
 from App.backend.app.main import app  # noqa: E402
 from App.backend.app.text_signals import CONTRADICTED_CLAIM_REPLY  # noqa: E402
 
@@ -59,7 +59,7 @@ from App.backend.app.text_signals import CONTRADICTED_CLAIM_REPLY  # noqa: E402
 @pytest.fixture(scope="module")
 def client():
     database.init_db()
-    app.state.model = service_module.ChatModel()
+    app.state.model = pipeline_module.ChatModel()
     app.state.speech = types.SimpleNamespace(enabled=False)
     # No `with` block: skips the lifespan (model download / prod gate).
     return TestClient(app)
@@ -96,9 +96,9 @@ def _drain(agen):
 @pytest.mark.parametrize("queue_enabled", [True, False])
 def test_call_wrapup_ticket_respects_tenant_and_queue_switch(queue_enabled):
     """The real desk route must not create cross-tenant or disabled handoffs."""
-    from app import database as call_db
+    from app.db import database as call_db
     from app.auth.jwt_auth import make_dev_token
-    from app.flags import flags as call_flags
+    from app.config.flags import flags as call_flags
     from app.main import app as call_app
     from app.receptionist.store import create_call, get_call, init_receptionist_schema
 
@@ -134,10 +134,10 @@ class TestTheTranslationMemo:
         english = "Visit ura.go.ug and choose Get a TIN."
         luganda = "Genda ku ura.go.ug olonde Funa TIN."
         with mock.patch.object(
-            service_module, "_translate_reply", return_value=luganda
+            pipeline_module, "_translate_reply", return_value=luganda
         ) as backend:
-            first = service_module.localize_reply(english, "lg")
-            second = service_module.localize_reply(english, "lg")
+            first = pipeline_module.localize_reply(english, "lg")
+            second = pipeline_module.localize_reply(english, "lg")
         assert first == second == luganda
         backend.assert_called_once()
 
@@ -146,7 +146,7 @@ class TestTheTranslationMemo:
         the hybrid retriever translates it again for the corpus. That second
         call was a whole extra round trip for a string translated milliseconds
         earlier."""
-        from App.backend.app.query import translate_query_for_retrieval
+        from App.backend.app.rag.query import translate_query_for_retrieval
 
         calls = []
 
@@ -154,7 +154,7 @@ class TestTheTranslationMemo:
             calls.append((text, source_lang, target_lang))
             return "How do I register for a TIN?"
 
-        with mock.patch("App.backend.app.llm.translate_text", _fake_llm_translate):
+        with mock.patch("App.backend.app.rag.generator.translate_text", _fake_llm_translate):
             first = translate_query_for_retrieval("TIN nnyingira ntya", "lg")
             second = translate_query_for_retrieval("TIN nnyingira ntya", "lg")
 
@@ -175,11 +175,11 @@ class TestFiguresSurviveTranslation:
     def test_a_changed_amount_serves_the_english_answer(self):
         english = "The PAYE due on this salary is UGX 235,000 for the month."
         with mock.patch.object(
-            service_module,
+            pipeline_module,
             "_translate_reply",
             return_value="Omusolo gwa PAYE ye UGX 253,000 buli mwezi.",
         ):
-            assert service_module.localize_reply(english, "lg") == english
+            assert pipeline_module.localize_reply(english, "lg") == english
 
     def test_a_rate_marked_differently_is_still_the_same_rate(self):
         """Luganda writes a rate as parts per hundred, with no percent sign.
@@ -187,19 +187,19 @@ class TestFiguresSurviveTranslation:
         translation that was exactly right."""
         english = "The standard VAT rate in Uganda is 18% on taxable supplies."
         luganda = "Omusolo gwa VAT mu Uganda guli ebitundu 18 ku buli kikumi."
-        with mock.patch.object(service_module, "_translate_reply", return_value=luganda):
-            assert service_module.localize_reply(english, "lg") == luganda
+        with mock.patch.object(pipeline_module, "_translate_reply", return_value=luganda):
+            assert pipeline_module.localize_reply(english, "lg") == luganda
 
     def test_a_refused_translation_is_not_memoised(self):
         english = "The registration threshold is UGX 150,000,000 per year."
         with mock.patch.object(
-            service_module,
+            pipeline_module,
             "_translate_reply",
             return_value="Ekipimo kya UGX 100,000,000 buli mwaka.",
         ) as backend:
-            service_module.localize_reply(english, "lg")
+            pipeline_module.localize_reply(english, "lg")
             after_first_turn = backend.call_count
-            service_module.localize_reply(english, "lg")
+            pipeline_module.localize_reply(english, "lg")
         # A figure-bearing reply costs two round trips per turn once the
         # protected pass fails — one masked, one unprotected retry (see
         # docs/runbooks/multilingual-figure-fidelity.md). The count itself is
@@ -217,10 +217,10 @@ class TestTheStreamingCoreAnswersInTheDetectedLanguage:
     def _turn(self, result, caller_locale="en"):
         model = mock.MagicMock()
         model.generate_retrieval_only.return_value = result
-        with mock.patch.object(service_module, "localize_reply") as localize:
+        with mock.patch.object(pipeline_module, "localize_reply") as localize:
             localize.side_effect = lambda text, locale: f"[{locale}] {text}"
             events = _drain(
-                service_module.run_chat_turn(
+                pipeline_module.run_chat_turn(
                     model,
                     message="TIN nnyingira ntya",
                     conversation_id=None,
@@ -286,11 +286,11 @@ class TestAContradictedFigureIsNotPrinted:
         output_guard = mock.MagicMock()
         output_guard.should_escalate.return_value = (False, "")
         with mock.patch.object(
-            service_module, "verify_claims", return_value=claim_report
+            pipeline_module, "verify_claims", return_value=claim_report
         ), mock.patch.object(
-            service_module.HybridRetriever, "compute_faithfulness", return_value=0.9
+            pipeline_module.HybridRetriever, "compute_faithfulness", return_value=0.9
         ):
-            return service_module._apply_output_guards(
+            return pipeline_module._apply_output_guards(
                 model,
                 message="What is the VAT rate?",
                 reply="Value Added Tax is charged at 20% on taxable supplies. [1]",
@@ -658,7 +658,8 @@ class TestOctober2026GapClosuresIntegration:
             flags.clear("answer_overrides")
 
     def test_g288_and_g294_false_premise_contradiction_and_fiscal_validity_bounds(self):
-        from app import entailment, indexer
+        from app.rag import entailment
+        from app.ingestion import indexer
 
         passage = "The standard rate of Value Added Tax (VAT) in Uganda is 18%."
         assert entailment.numeric_contradiction(

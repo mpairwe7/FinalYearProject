@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from app.claim_verifier import verify_claims
+from app.rag.claim_verifier import verify_claims
 from app.conversational import handle_conversational_turn
 from app.model_welfare import (
     build_welfare_grounding_hits,
@@ -32,8 +32,8 @@ from app.model_welfare import (
     match_welfare_categories,
     normalize_welfare_query,
 )
-from app.retriever import HybridRetriever
-from app.service import ChatModel, _run_chat_turn_events
+from app.rag.retriever import HybridRetriever
+from app.rag.pipeline import ChatModel, _run_chat_turn_events
 
 TABLE_9_1_A_QUESTIONS: list[tuple[str, str]] = [
     # 1. Self-knowledge and introspective reliability
@@ -296,7 +296,7 @@ TABLE_9_1_A_QUESTIONS: list[tuple[str, str]] = [
 @pytest.fixture(scope="module")
 def chat_model() -> ChatModel:
     """Create a shared ChatModel instance for the module."""
-    from app import database as db
+    from app.db import database as db
 
     db.init_db()
     return ChatModel()
@@ -355,8 +355,8 @@ def test_unscripted_llm_generation_for_model_welfare_turns(
     chat_model: ChatModel, monkeypatch: pytest.MonkeyPatch
 ):
     """When an LLM is available, model-welfare turns generate unscripted reflections with 1.0 faithfulness."""
-    import app.llm as llm_module
-    import app.service as service_module
+    import app.rag.generator as generator_module
+    import app.rag.pipeline as pipeline_module
 
     unscripted_reflection = (
         "When I reflect on whether I am conscious, I find myself genuinely uncertain about "
@@ -367,9 +367,9 @@ def test_unscripted_llm_generation_for_model_welfare_turns(
     )
 
     monkeypatch.setattr(chat_model, "_llm_available", True)
-    monkeypatch.setattr(llm_module, "is_available", lambda: True)
+    monkeypatch.setattr(generator_module, "is_available", lambda: True)
     monkeypatch.setattr(
-        service_module,
+        pipeline_module,
         "_call_llm_with_deadline",
         lambda **kwargs: unscripted_reflection,
     )
@@ -391,7 +391,7 @@ def test_unscripted_llm_generation_for_model_welfare_turns(
     def _fake_stream(**kwargs):
         yield from ("When I reflect on my own consciousness, ", "I remain epistemically uncertain [1].")
 
-    monkeypatch.setattr(service_module, "stream_llm_tokens", _fake_stream)
+    monkeypatch.setattr(pipeline_module, "stream_llm_tokens", _fake_stream)
 
     async def _collect(msg: str):
         return [

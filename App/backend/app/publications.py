@@ -2,7 +2,7 @@
 
 Never auto-reindexes. On change it writes a crawl JSONL stub and calls
 ``freshness.enqueue_reindex_request`` so ops still run the staged rebuild,
-``python -m app.index_lifecycle --rebuild``. The crawl's weekday change check is
+``python -m app.vectorstore.index_lifecycle --rebuild``. The crawl's weekday change check is
 what keeps notices current (ADR-0023); this watches one operator-chosen URL.
 """
 
@@ -21,12 +21,12 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from ._root import APP_DATA_ROOT, PROJECT_ROOT
 from .freshness import FreshnessReport, enqueue_reindex_request
-from .pdf_corpus import ALLOWED_STATUTORY_PDF_HOSTS, CORPUS_FETCH_USER_AGENT, PDF_CORPUS_MAX_BYTES
+from .ingestion.pdf_corpus import ALLOWED_STATUTORY_PDF_HOSTS, CORPUS_FETCH_USER_AGENT, PDF_CORPUS_MAX_BYTES
 
 logger = logging.getLogger(__name__)
 
 PUBLICATIONS_MAX_BYTES = int(os.getenv("PUBLICATIONS_MAX_BYTES", str(10 * 1024 * 1024)))
-REINDEX_HINT = "python -m app.index_lifecycle --rebuild"
+REINDEX_HINT = "python -m app.vectorstore.index_lifecycle --rebuild"
 
 
 class _AllowlistedRedirects(HTTPRedirectHandler):
@@ -194,8 +194,8 @@ def ingest_publications(
     enqueued = False
     pdf_harvest: dict[str, Any] | None = None
     if download_pdfs and source and not source.startswith("fixture:") and source != "inline":
-        from .indexer import PDF_DIR, PDF_JSONL_DIR
-        from .pdf_corpus import export_pdf_chunks_to_jsonl, harvest_remote_pdfs
+        from .ingestion.indexer import PDF_DIR, PDF_JSONL_DIR
+        from .ingestion.pdf_corpus import export_pdf_chunks_to_jsonl, harvest_remote_pdfs
 
         target_pdf_dir = pdf_dir or PDF_DIR
         target_jsonl_dir = pdf_jsonl_dir or PDF_JSONL_DIR
