@@ -1,6 +1,6 @@
 """FAQ binding: aliases, timing evidence and question intent (G486 review, CodeRabbit on #705).
 
-The helpers moved out of ``service.py`` in G486; the review of the move found
+The helpers moved out of ``rag/pipeline.py`` in G486; the review of the move found
 three pre-existing defects in what they decide, pinned here.
 """
 

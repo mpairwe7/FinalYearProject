@@ -1,6 +1,6 @@
 """An English-decided reply that came back in another language, translated back (G486).
 
-Moved out of ``service.py``. :func:`answer_in_english` is the one patch point: ``service``
+Moved out of ``rag/pipeline.py``. :func:`answer_in_english` is the one patch point: ``service``
 and the graph both call it through this module, so a stub here reaches every path.
 """
 

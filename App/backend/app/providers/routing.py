@@ -3,7 +3,7 @@
 Single source of truth for which models each task should try (Best -> Fallbacks)
 and the place that records what actually served a request. Model IDs are
 env-overridable so the strategy can be tuned (e.g. swap to a different
-Cloudflare model) without code changes. The call wiring lives in service.py /
+Cloudflare model) without code changes. The call wiring lives in rag/pipeline.py /
 speech_service.py / rag/retriever.py; those modules import the IDs below and call
 ``log_model_use()`` / ``log_fallback()`` at each routing decision, which surface
 on the existing Prometheus ``/metrics`` (``analytics.MetricsStore``).

@@ -374,7 +374,7 @@ UNAVAILABLE = wr.LIVE_DISCLOSURES[wr.LIVE_UNAVAILABLE]
 @pytest.fixture
 def model(fresh_registry, monkeypatch):
     # Flags go through the environment: test_integration.py reloads app.config.flags,
-    # so flags.set() can land on a different object from the one service.py holds.
+    # so flags.set() can land on a different object from the one rag/pipeline.py holds.
     from app.rag.pipeline import ChatModel
 
     monkeypatch.setenv("FLAG_LIVE_WEB_RESEARCH", "true")

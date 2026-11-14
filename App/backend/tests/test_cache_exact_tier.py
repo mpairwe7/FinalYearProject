@@ -1,7 +1,7 @@
 """Tests for the model-free exact tier of the response cache.
 
 Both cache backends used to return ``None`` from ``get`` the moment no dense
-model was present, and ``service.py`` only calls ``set_model`` when the retriever
+model was present, and ``rag/pipeline.py`` only calls ``set_model`` when the retriever
 has one. Every deployment shipping without torch — Crane Cloud, the HF Space —
 therefore ran with a cache that missed on every single request and never reused
 anything. The exact tier is what makes it work there, so these tests all

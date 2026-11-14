@@ -1,6 +1,6 @@
 """Turn-scoped context: who and what this chat turn is about (ADR-0031, G484).
 
-These lived in ``service.py``, the 15,000-line orchestrator. So the security
+These lived in ``rag/pipeline.py``, the 15,000-line orchestrator. So the security
 layer (``guardrails.OutputGuard.redact_pii``), the evaluator and the empathy
 tool each imported the orchestrator to read one value. The lowest layer of the
 system depended on the highest, and a failed import there fell back silently,

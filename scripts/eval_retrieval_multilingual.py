@@ -744,9 +744,9 @@ def pct(values: list[float], p: float) -> float:
 
 
 # --------------------------------------------------------------------------- mechanisms
-# A verbatim copy of the language-boost block in service.py (generate() step
+# A verbatim copy of the language-boost block in rag/pipeline.py (generate() step
 # 3b2 and its generate_retrieval_only twin), so its effect can be measured on
-# its own. If service.py changes, this copy must follow it.
+# its own. If rag/pipeline.py changes, this copy must follow it.
 _LOCALE_BOOST_TERMS = {
     "lg": {"luganda", "oluganda", "lg"},
     "sw": {"swahili", "kiswahili", "sw"},
@@ -754,7 +754,7 @@ _LOCALE_BOOST_TERMS = {
 
 
 def service_language_boost(hits: list[dict[str, Any]], locale: str) -> tuple[list[dict[str, Any]], int]:
-    # G131: Removed buggy substring boost from service.py; reranker order is preserved.
+    # G131: Removed buggy substring boost from rag/pipeline.py; reranker order is preserved.
     return [dict(h) for h in hits], 0
 
 

@@ -1,6 +1,6 @@
 """What served this turn: backend, model, tier and any degradation (G486).
 
-Moved out of ``service.py`` so the agentic graph records a turn without importing the
+Moved out of ``rag/pipeline.py`` so the agentic graph records a turn without importing the
 orchestrator. The record itself is :data:`app.rag.turn_context.TURN_GENERATION`.
 """
 

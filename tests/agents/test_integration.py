@@ -70,7 +70,7 @@ class TestSupervisorToolWhitelist:
 # ---------------------------------------------------------------------------
 class TestEscalationRoundTrip:
     def test_supervisor_reason_flows_into_ticket(self, tmp_db):
-        """Emulates the service.py ESCALATE branch."""
+        """Emulates the rag/pipeline.py ESCALATE branch."""
         from app.agents import supervisor, AgentRoute
 
         decision = supervisor.classify("I want to dispute my assessment")
@@ -95,7 +95,7 @@ class TestEscalationRoundTrip:
 def restored_modules():
     """Put ``app.config.flags`` and ``app.main`` back after a test reloads them.
 
-    A reload replaces the flag singleton, while ``service.py`` keeps the one it bound
+    A reload replaces the flag singleton, while ``rag/pipeline.py`` keeps the one it bound
     at import. Left that way, ``clean_flags`` clears an object nothing reads, so a flag
     one test sets stays on for every test after it, in another file, for no visible
     reason.

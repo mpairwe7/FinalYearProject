@@ -418,7 +418,7 @@ LLM_TOTAL_BUDGET_SECONDS = float(os.getenv("LLM_TOTAL_BUDGET_SECONDS", "70"))
 SUNBIRD_WORKERS_AI_RESERVE_S = float(os.getenv("SUNBIRD_WORKERS_AI_RESERVE_S", "15"))
 SELF_REFLECT_ENABLED = os.getenv("SELF_REFLECT_ENABLED", "false").lower() == "true"
 SELF_REFLECT_THRESHOLD = float(os.getenv("SELF_REFLECT_THRESHOLD", "0.4"))
-_WORKFLOW_FLOWS_DIR = Path(__file__).resolve().parent / "workflows" / "flows"
+_WORKFLOW_FLOWS_DIR = Path(__file__).resolve().parents[1] / "workflows" / "flows"
 _WORKFLOW_CANCEL_WORDS = {"cancel", "stop", "quit", "exit", "nevermind", "never mind"}
 _WORKFLOW_RESUME_WORDS = {
     "resume", "continue", "resume workflow", "continue workflow", "resume process", "continue the steps",

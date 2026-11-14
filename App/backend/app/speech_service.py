@@ -1,6 +1,6 @@
 """Speech service layer — production ASR + MT + TTS (2026).
 
-Parallel singleton to :class:`ChatModel` (see ``service.py``). Loads speech
+Parallel singleton to :class:`ChatModel` (see ``rag/pipeline.py``). Loads speech
 models lazily so the backend still boots when speech assets are missing —
 this is critical for the dev / CI path where only the text pipeline is
 exercised.

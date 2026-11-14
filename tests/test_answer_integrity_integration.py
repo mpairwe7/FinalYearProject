@@ -142,7 +142,7 @@ class TestTheTranslationMemo:
         backend.assert_called_once()
 
     def test_the_question_is_translated_once_per_turn_not_per_caller(self):
-        """service.py translates the question for the deterministic routers and
+        """rag/pipeline.py translates the question for the deterministic routers and
         the hybrid retriever translates it again for the corpus. That second
         call was a whole extra round trip for a string translated milliseconds
         earlier."""

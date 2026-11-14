@@ -2125,7 +2125,7 @@ async def transcribe_audio(
         language = None
     # 639-1 OR 639-3: two of the five locales the picker offers (nyn, ach) have
     # no two-letter code, so a {2}-only rule rejected Runyankole and Acholi
-    # speech outright. Every request model in models.py already allows {2,3}.
+    # speech outright. Every request model in api/models.py already allows {2,3}.
     if language is not None and not re.match(r"^[a-z]{2,3}$", language):
         raise HTTPException(status_code=400, detail="language must be an ISO 639-1/639-3 code")
 

@@ -142,7 +142,7 @@ def test_the_postgres_backend_is_dispatched_like_the_other_helpers() -> None:
     source = Path(db.__file__).read_text(encoding="utf-8")
     assert "load_session_revocations = _pg.load_session_revocations" in source
     assert "revoke_sessions = _pg.revoke_sessions" in source
-    pg_source = (Path(db.__file__).parent / "db/postgres.py").read_text(encoding="utf-8")
+    pg_source = (Path(db.__file__).parent / "postgres.py").read_text(encoding="utf-8")
     assert "CREATE TABLE IF NOT EXISTS revoked_sessions" in pg_source
 
 

@@ -25,7 +25,7 @@ from evals.export_preferences import build_bilevel_preference_bundle
 
 
 def test_phase1_maintainability_storage_parity_and_flag_lifecycle() -> None:
-    """Verify 103/103 public function parity between database.py and db/postgres.py and 4-tier flag taxonomy."""
+    """Verify 103/103 public function parity between db/database.py and db/postgres.py and 4-tier flag taxonomy."""
     from app.db import database, postgres
 
     parity = verify_storage_backend_parity()

@@ -52,7 +52,7 @@ def _log_safe(value: str) -> str:
 #
 # Gated 2026-08-19: an explicit or auto-detected locale outside this set is
 # treated as English (see ChatModel._generate_en / generate_retrieval_only
-# in service.py, both of which import this constant).
+# in rag/pipeline.py, both of which import this constant).
 SUPPORTED_LOCALES = frozenset(
     loc.strip()
     for loc in os.getenv("SUPPORTED_LOCALES", "en,lg,sw,nyn,ach").split(",")
@@ -1921,13 +1921,13 @@ def translate_query_for_retrieval(query: str, locale: str) -> str | None:
     """Best-effort non-English -> English for retrieval. Never raises.
 
     Shared by both retrieval paths — ``english_retrieval_query`` below (the
-    hybrid retriever, G18) and service.py's FAQ translation rescue. They each
+    hybrid retriever, G18) and rag/pipeline.py's FAQ translation rescue. They each
     used to call ``sunbird.translate_to_english`` directly, so a single cloud
     timeout took out both.
 
     Cached (``mt.cache``). One non-English turn translates the same question
     twice as a matter of course — the deterministic routers translate it in
-    service.py before retrieval runs, and the hybrid retriever translates it
+    rag/pipeline.py before retrieval runs, and the hybrid retriever translates it
     again for the corpus — and a taxpayer assistant is asked the same
     questions repeatedly besides. The second call was a whole extra MT round
     trip for a string already translated milliseconds earlier.

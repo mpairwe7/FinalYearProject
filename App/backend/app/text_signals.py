@@ -1420,7 +1420,7 @@ CONTRADICTED_CLAIM_REPLY = (
 #
 # Normalising once, where generated text enters the system, is what makes that
 # right everywhere instead of in six places — the claim verifier, the three
-# has-a-citation checks in service.py, and the frontend's marker stripper, which
+# has-a-citation checks in rag/pipeline.py, and the frontend's marker stripper, which
 # would otherwise leave a literal "[1, 3]" sitting in the rendered answer.
 _GROUPED_CITATION_RE = re.compile(r"\[\s*(\d{1,3}(?:\s*[,;]\s*\d{1,3})+)\s*\]")
 

@@ -51,7 +51,7 @@ LANGUAGE_NAMES: dict[str, str] = {
 }
 
 # Function words and conversational glue that the tax-vocabulary lists in
-# query.py do not carry. A Luganda sentence about VAT may contain no Luganda
+# rag/query.py do not carry. A Luganda sentence about VAT may contain no Luganda
 # tax noun at all ("Nsaba okumanya ku VAT yange") — these are what is left.
 # Words shared by both languages ("na" = "and" in each) are left out.
 _LUGANDA_FUNCTION_WORDS: frozenset[str] = frozenset({

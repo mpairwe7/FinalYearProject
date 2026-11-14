@@ -43,7 +43,7 @@ POSTGRES_DSN = os.getenv("POSTGRES_DSN", "")
 POOL_MIN = int(os.getenv("POSTGRES_POOL_MIN", "1"))
 POOL_MAX = int(os.getenv("POSTGRES_POOL_MAX", "10"))
 
-# Retention TTLs — reused from database.py defaults so migrated deploys
+# Retention TTLs — reused from db/database.py defaults so migrated deploys
 # behave identically.
 _CONVERSATION_TTL_DAYS = int(os.getenv("CONVERSATION_TTL_DAYS", "7"))
 _ANALYTICS_TTL_DAYS = int(os.getenv("ANALYTICS_TTL_DAYS", "365"))
@@ -1451,7 +1451,7 @@ def list_tickets(
             term = term[4:]
         # A search for "%" or "_" means those characters, not "every ticket".
         # Backslash is PostgreSQL's default LIKE escape, and the term is a bound
-        # parameter, so escaping the term is enough (parity with database.py).
+        # parameter, so escaping the term is enough (parity with db/database.py).
         escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         q_like = f"%{escaped}%"
         clause = "(id ILIKE %s OR reason ILIKE %s OR user_query ILIKE %s OR assignee ILIKE %s OR team ILIKE %s OR staff_note ILIKE %s OR officer_reply ILIKE %s OR transcript_json ILIKE %s)"
@@ -3629,7 +3629,7 @@ def list_agent_checkpoints(thread_id: str) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Backend-Agnostic Public API Parity Surface (ISO/IEC 25010:2023 Modifiability)
 # ---------------------------------------------------------------------------
-# The helpers below in ``database.py`` already route through ``query_all`` /
+# The helpers below in ``db/database.py`` already route through ``query_all`` /
 # ``execute`` / ``execute_script`` onto the active Postgres connection pool
 # when ``DATABASE_BACKEND=postgres``. Exposing thin wrappers here guarantees
 # ``app.db.postgres`` and ``app.db.database`` satisfy the exact same 103-function

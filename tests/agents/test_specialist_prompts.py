@@ -26,7 +26,7 @@ def _system_for(role: str) -> str:
 
 class TestSpecialistSelection:
     def test_the_routed_specialists_all_have_instructions(self):
-        # These are the roles service.py actually routes to.
+        # These are the roles rag/pipeline.py actually routes to.
         for role in (
             "tax_specialist",
             "customs_specialist",

@@ -8,7 +8,7 @@ questions that matter for this deployment are not answered by latency alone:
   * does the LLM still generate real text under concurrency, or start
     abstaining / truncating / erroring?
   * does auto language detection still fire when the box is saturated?
-    (service.py only auto-detects when the caller sends locale == "en", so
+    (rag/pipeline.py only auto-detects when the caller sends locale == "en", so
     every request here deliberately sends "en" and asserts on the locale the
     API reports back)
   * does an English question keep getting an English answer, a Luganda
@@ -215,7 +215,7 @@ async def send_one(
     try:
         r = await client.post(
             f"{base}/v1/chat",
-            # locale "en" on every request: service.py only runs auto-detection
+            # locale "en" on every request: rag/pipeline.py only runs auto-detection
             # when the caller sends "en", so this is the path under test.
             json={"message": message, "locale": "en"},
             headers={

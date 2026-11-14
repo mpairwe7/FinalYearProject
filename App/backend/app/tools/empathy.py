@@ -1,7 +1,7 @@
 """Emotional-intelligence assessment exposed as an agent tool.
 
 Distress detection already existed as lexical helpers in
-:mod:`app.text_signals`, wired straight into ``service.py``.  That works
+:mod:`app.text_signals`, wired straight into ``rag/pipeline.py``.  That works
 for the fixed reply paths, but the agent had no way to *ask* how a
 message reads before deciding how to answer — so a tool-calling turn
 could open with a cheerful sales tone on a message about a seized

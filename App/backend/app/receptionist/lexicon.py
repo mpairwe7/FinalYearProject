@@ -55,7 +55,7 @@ class ReceptionistLexicon:
         self._load_sources()
 
     def _load_sources(self) -> None:
-        # 1. Abbreviations and expansions from query.py
+        # 1. Abbreviations and expansions from rag/query.py
         for abbr, full in _ABBREVIATIONS.items():
             self.single_terms.add(abbr.lower())
             self.acronyms.add(abbr.lower())
@@ -64,7 +64,7 @@ class ReceptionistLexicon:
                 if len(piece) > 2:
                     self.single_terms.add(piece.lower())
 
-        # 2. Tax domain vocab from query.py
+        # 2. Tax domain vocab from rag/query.py
         for term in _TAX_DOMAIN_VOCAB:
             self.single_terms.add(term.lower())
 

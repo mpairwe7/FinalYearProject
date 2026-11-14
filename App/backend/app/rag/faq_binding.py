@@ -1,6 +1,6 @@
 """Whether a retrieved FAQ answers this question, and which equivalent FAQ to promote (G486).
 
-Moved out of ``service.py`` so retrieval-side code and the agentic graph share one
+Moved out of ``rag/pipeline.py`` so retrieval-side code and the agentic graph share one
 definition without importing the orchestrator.
 """
 

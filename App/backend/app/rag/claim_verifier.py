@@ -308,7 +308,7 @@ def verify_claims(
         # Translate the claim to English for lexical verification.
         if overlap < threshold and locale not in ("", "en"):
             try:
-                from .. import mt
+                from .. import mt  # noqa: PLC0415
                 from . import generator  # noqa: PLC0415
                 translated_claim = mt.translate_cached(
                     clean_claim,

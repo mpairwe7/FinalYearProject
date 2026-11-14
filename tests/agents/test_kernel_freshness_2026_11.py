@@ -184,7 +184,7 @@ def test_both_fusion_paths_apply_precedence() -> None:
     from pathlib import Path
 
     root = Path(precedence.__file__).resolve().parents[1]
-    for path in (root / "service.py", root / "agents/graphs/main_graph.py"):
+    for path in (root / "rag/pipeline.py", root / "agents/graphs/main_graph.py"):
         source = path.read_text(encoding="utf-8")
         assert "apply_precedence(" in source, path.name
 

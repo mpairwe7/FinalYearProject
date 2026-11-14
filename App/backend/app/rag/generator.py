@@ -2738,7 +2738,7 @@ def translate_text(
     # fidelity model for Ugandan languages, but measured on this host a cold
     # /tasks/translate took the full 30s deadline and returned 404, which
     # failed every translation call in that window. Prefer local when
-    # configured for it; see RETRIEVAL_MT_BACKEND in service.py for the same
+    # configured for it; see RETRIEVAL_MT_BACKEND in rag/pipeline.py for the same
     # trade-off on the retrieval leg.
     #
     # The vLLM branch does NOT need _load_model() — calling it would only fail
@@ -3029,7 +3029,7 @@ def count_tokens(text: str) -> int:
 #
 # The loop is bounded (default 3 hops) so a misbehaving model can't
 # call itself into an infinite loop.  Every tool call is logged for
-# OTel spans in service.py.
+# OTel spans in rag/pipeline.py.
 #
 # Safety: only tools already registered in ToolRegistry can be called.
 # The LLM cannot introduce new tool names.  All tool execution goes
@@ -3481,7 +3481,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
     Parameters
     ----------
     query:
-        The user's question (possibly rewritten by query.py).
+        The user's question (possibly rewritten by rag/query.py).
     passages:
         Optional pre-fetched RAG hits.  If provided, they're inlined
         into the first user message as a seed.  If None, the agent

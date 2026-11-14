@@ -49,7 +49,7 @@ class TestPlaceholderTranslation:
         """
         offenders = []
         for name in ("audit/ledger.py", "audit/verifier.py"):
-            source = (Path(db.__file__).parent / name).read_text()
+            source = (Path(db.__file__).parents[1] / name).read_text()
             for literal in re.findall(r"'[^'\n]*'", source):
                 if "?" in literal:
                     offenders.append(f"{name}: {literal}")
@@ -144,7 +144,7 @@ class TestNoModuleBypassesTheSeam:
         is how the audit ledger, memory and voice audit all ended up
         invisible on the backend production runs.
         """
-        app_dir = Path(db.__file__).parent
+        app_dir = Path(db.__file__).parents[1]
         offenders = []
         for path in app_dir.rglob("*.py"):
             if path.name == "database.py":
@@ -155,7 +155,7 @@ class TestNoModuleBypassesTheSeam:
 
     @pytest.mark.parametrize("name", _MIGRATED_MODULES)
     def test_no_question_mark_inside_a_string_literal(self, name):
-        source = (Path(db.__file__).parent / name).read_text()
+        source = (Path(db.__file__).parents[1] / name).read_text()
         offenders = [lit for lit in re.findall(r"'[^'\n]*'", source) if "?" in lit]
         assert not offenders, (
             f"{name}: '?' inside a SQL string literal would be rewritten "
@@ -230,7 +230,7 @@ class TestAMirrorIsActuallyUsed:
 class TestAuditUsesTheSeam:
     def test_the_ledger_no_longer_reaches_for_a_raw_connection(self):
         for name in ("audit/ledger.py", "audit/verifier.py"):
-            source = (Path(db.__file__).parent / name).read_text()
+            source = (Path(db.__file__).parents[1] / name).read_text()
             assert "_get_connection()" not in source, (
                 f"{name} still bypasses the dispatch block, so its tables "
                 "stay on SQLite when ANALYTICS_BACKEND=postgres"

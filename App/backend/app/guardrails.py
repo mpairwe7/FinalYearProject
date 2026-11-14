@@ -1852,7 +1852,7 @@ class OutputGuard:
         """Replace detected PII with redaction markers (LLM02), preserving user-stated identifiers."""
         if allowed_values is None:
             # From the leaf module, not the orchestrator: the security layer must
-            # not depend on service.py, and must not fail silently (ADR-0031).
+            # not depend on rag/pipeline.py, and must not fail silently (ADR-0031).
             from .rag.turn_context import ACTIVE_USER_STATED_IDS
 
             allowed_values = ACTIVE_USER_STATED_IDS.get()

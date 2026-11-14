@@ -164,7 +164,7 @@ class DistressRetrievalQueryWiringTest(unittest.TestCase):
 
     def test_distressed_question_binding_query_excludes_preamble(self) -> None:
         # binding_query gates FAQ-match authorization independently of the
-        # search query (service.py's _faq_match_score) — the residual bug
+        # search query (rag/pipeline.py's _faq_match_score) — the residual bug
         # after the first fix: retrieval used the clean question, but
         # binding_query still carried the raw distress preamble, diluting
         # coverage enough that _retain_faq_candidates rejected the very hit

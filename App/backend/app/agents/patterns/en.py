@@ -193,7 +193,7 @@ _CUSTOMS = (
 #: How-to phrasing. A question asking *how* to do something with one's own
 #: return or TIN has a public, procedural answer; only a question about the
 #: account's current state needs an authenticated lookup or a person. Shared
-#: with the answer judge in ``service.py`` so the two cannot disagree.
+#: with the answer judge in ``rag/pipeline.py`` so the two cannot disagree.
 #:
 #: "help me" is not here: it opens account-state requests as often as how-to
 #: ones — "Please help me, my account is locked" must still reach a person.

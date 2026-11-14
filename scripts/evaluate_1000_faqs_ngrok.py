@@ -1244,7 +1244,7 @@ _NON_ANSWER_MODES: frozenset[str] = frozenset({"abstained", "error", "clarificat
 #: guided-flow steps in ``App/backend/app/workflows/flows/*.yaml`` are one
 #: sentence — "What is your **gross monthly salary** in UGX? (e.g. 1,500,000 or
 #: 1.5m)" is 70 characters, and the longest reaches ~200 with the
-#: ``"I can work that out for you"`` intro ``service.py`` prepends. A grounded
+#: ``"I can work that out for you"`` intro ``rag/pipeline.py`` prepends. A grounded
 #: answer clears this comfortably; this harness's own conversational grade
 #: already treats 150 characters as the floor for a substantive reply.
 _SLOT_PROMPT_MAX_CHARS = 220
@@ -1260,7 +1260,7 @@ def _is_non_answer(reply: str, retrieval_mode: str) -> bool:
     workflow reports ``"workflow"`` too, and that is a real answer.
 
     The marker list catches the fixed English templates —
-    ``slots.py`` and ``service.py`` own the strings.
+    ``slots.py`` and ``rag/pipeline.py`` own the strings.
 
     The shape test catches the rest, and is the only one that survives
     translation. A guided-flow step is a short question; a grounded answer is

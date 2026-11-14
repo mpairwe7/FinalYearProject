@@ -17,7 +17,7 @@ def _resolve() -> Path:
     # [/app/app, /app, /] and the old `_parents[-1]` fallback resolved the
     # project root to "/". Every PROJECT_ROOT-derived path then pointed at the
     # read-only rootfs — `/data_store/analytics.db` rather than
-    # `/app/data_store/analytics.db` — and service.py's `is_relative_to`
+    # `/app/data_store/analytics.db` — and rag/pipeline.py's `is_relative_to`
     # containment check became vacuous, because every path is under "/".
     # The application root is the parent of the package directory.
     return _parents[1] if len(_parents) > 1 else _parents[-1]

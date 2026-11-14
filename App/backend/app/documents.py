@@ -336,7 +336,7 @@ class DocumentRecord:
         }
 
     def to_response_payload(self) -> dict[str, Any]:
-        """Shape consumed by ``DocumentAnalysisResponse`` in models.py."""
+        """Shape consumed by ``DocumentAnalysisResponse`` in api/models.py."""
         return {
             "document_id": self.doc_id,
             "filename": self.filename,
