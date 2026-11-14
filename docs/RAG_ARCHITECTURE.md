@@ -15,16 +15,16 @@ The URA Chatbot implements a production-grade Retrieval-Augmented Generation pip
 ```
 User Query
   │
-  ├─► Stage 0: Conversation History (database.py)
+  ├─► Stage 0: Conversation History (db/database.py)
   │     └── Fetch tenant + subject scoped history, or anonymous session scoped history
   │
-  ├─► Stage 0b: Query Rewriting (query.py)  [FLAG_QUERY_REWRITE]
+  ├─► Stage 0b: Query Rewriting (rag/query.py)  [FLAG_QUERY_REWRITE]
   │     ├── normalize() — whitespace cleanup
   │     ├── correct_spelling() — 20+ domain misspellings
   │     ├── expand_abbreviations() — 15+ URA terms (TIN, VAT, PAYE, EFRIS, etc.)
   │     └── rewrite_with_history() — coreference resolution from 5-turn memory
   │
-  ├─► Stage 0b2: Retrieval plan (query.py → plan_retrieval)
+  ├─► Stage 0b2: Retrieval plan (rag/query.py → plan_retrieval)
   │     ├── extract_retrieval_filters() — hard FY filter only on explicit FY2024-25
   │     ├── extract_retrieval_preferences() — soft tax-type / current-FY boost,
   │     │     sector-guide demotion (`demote_sector_guides`), and topic-section hints (`preferred_sections`)
@@ -117,7 +117,7 @@ User Query
   └─► Stage 9: Response Finalization
         ├── Build response dict with citations, scores, metadata
         ├── Store in semantic cache (unless blocked/abstained)
-        ├── Log to analytics (database.py / db/postgres.py)
+        ├── Log to analytics (db/database.py / db/postgres.py)
         └── Append to audit ledger if FLAG_AUDIT_LEDGER enabled
 ```
 
@@ -219,13 +219,13 @@ supervisor's ESCALATE and specialist routes run on streaming turns too (G115).
 
 ### Phase 4: Query Intelligence
 
-**Query Rewriting** (`query.py`):
+**Query Rewriting** (`rag/query.py`):
 - 15+ abbreviation expansions: TIN, VAT, PAYE, EFRIS, DTS, TREP, CIT, PIT, WHIT, ETAX, etc.
 - 20+ spelling corrections for common URA domain misspellings
 - Vernacular-aware spellcheck guard (G135): `rewrite(..., locale=...)` skips English dictionary fuzzy spell correction on non-English queries (`lg`, `sw`, `nyn`, `ach`), preventing native vocabulary (e.g. Swahili `nini`) from mutating into English words.
 - Coreference resolution: detects pronouns (it, that, this, they) and prepends context from last assistant reply
 
-**Multi-turn Memory** (`database.py`):
+**Multi-turn Memory** (`db/database.py`):
 - Up to 25 stored turns are summarized into a bounded context; the prompt receives
   the recent window plus a coarse summary.
 - Authenticated reads require tenant, subject, and conversation identity. Anonymous
@@ -248,7 +248,7 @@ supervisor's ESCALATE and specialist routes run on streaming turns too (G115).
   the last `PROMPT_VERBATIM_TURNS` (3) turns verbatim; the rolling summary covers
   every older one. Before, the summary started at turn seven and turns four to
   six reached the model in neither.
-- **Prompt budget under vLLM (G120).** `llm._fit_to_context` asks the server for
+- **Prompt budget under vLLM (G120).** `generator._fit_to_context` asks the server for
   its served window (`/v1/models` `max_model_len`, up to 262,144 native for `Sunbird/Sunflower-Qwen3.5-9B` without YaRN) and the
   prompt's exact token count (`/tokenize`); over budget it drops the oldest
   replayed exchanges whole, then shortens the passages, never the question or
@@ -359,13 +359,13 @@ chat's owner (`receptionist/carryover.py`).
 
 | Control | Implementation | Module |
 |---------|---------------|--------|
-| LLM01 Prompt Injection | Literal patterns plus verb×target override, persona-swap and prompt-extraction rules, matched on raw, canonical (NFKD, confusables, Unicode tags, bidi), de-obfuscated (leetspeak, spaced letters, typoglycemia) and decoded (Base64, hex, ROT13) views (G460, ADR-0029); max length; spotlight fences (ADR-0027); replayed history neutralised (`scan_replayed_text`, G123 / OWASP ASI06); a principal that keeps tripping the guard is paused (`guard_friction.py`, G464) | `guardrails.py` → `InputGuard`, `context_manager.english_view`, `service._guard_both_forms` |
+| LLM01 Prompt Injection | Literal patterns plus verb×target override, persona-swap and prompt-extraction rules, matched on raw, canonical (NFKD, confusables, Unicode tags, bidi), de-obfuscated (leetspeak, spaced letters, typoglycemia) and decoded (Base64, hex, ROT13) views (G460, ADR-0029); max length; spotlight fences (ADR-0027); replayed history neutralised (`scan_replayed_text`, G123 / OWASP ASI06); a principal that keeps tripping the guard is paused (`guard_friction.py`, G464) | `guardrails.py` → `InputGuard`, `context_manager.english_view`, `pipeline._guard_both_forms` |
 | LLM01 Indirect (ASI01) | Third-party text (passages, tool output, uploads, crawl, PDFs) is also checked for directives addressed to an AI, removed from their start to the end of the line (G461); uploaded documents share the passage fence normalization (`fence_untrusted_document_body`, G463) | `guardrails.py` → `scan_retrieved_text`, `scan_external_tool_text`, `injection_present` |
 | LLM02 Sensitive Info Disclosure | Uganda-specific PII redaction (TIN, NID, phone, email, cards, passport; official @ura.go.ug emails preserved) | `guardrails.py` → `OutputGuard.redact_pii()` |
 | LLM03 Supply Chain | Pinned deps, Trivy scanning, SBOM, SHA-256 integrity | `requirements.txt`, CI/CD |
 | LLM04 Data Poisoning | Provenance tracking, quality gates, local inference | `governance/`, `ml/pipelines/` |
-| LLM05 Improper Output | XSS strip, HTML sanitize, unsafe schemes; link provenance: every inline, reference, image, autolink, bare or scheme-less URL whose host is not `*.go.ug`, a Tier-1 research host, a corpus host or `OUTPUT_LINK_ALLOWED_HOSTS` is de-linked, and an identifier in a trusted link's query is dropped, per chunk and again on the final reply (G462) | `guardrails.py` → `OutputGuard.sanitize()`, `neutralize_untrusted_links`; `service._apply_output_guards` |
-| LLM07 System Prompt Leakage | Signature phrases synced to the live prompts by test, plus a word 8-gram fingerprint of `llm.SYSTEM_PROMPT` (two shared n-grams = leak; sanctioned refusal/contact text excluded) (G465) | `guardrails.py` → `OutputGuard.check_prompt_leakage()` |
+| LLM05 Improper Output | XSS strip, HTML sanitize, unsafe schemes; link provenance: every inline, reference, image, autolink, bare or scheme-less URL whose host is not `*.go.ug`, a Tier-1 research host, a corpus host or `OUTPUT_LINK_ALLOWED_HOSTS` is de-linked, and an identifier in a trusted link's query is dropped, per chunk and again on the final reply (G462) | `guardrails.py` → `OutputGuard.sanitize()`, `neutralize_untrusted_links`; `pipeline._apply_output_guards` |
+| LLM07 System Prompt Leakage | Signature phrases synced to the live prompts by test, plus a word 8-gram fingerprint of `generator.SYSTEM_PROMPT` (two shared n-grams = leak; sanctioned refusal/contact text excluded) (G465) | `guardrails.py` → `OutputGuard.check_prompt_leakage()` |
 | LLM09 Misinformation | Runtime faithfulness scoring, grounding disclaimer, calibrated abstention | `guardrails.py` → `OutputGuard.check_grounding()` |
 | LLM10 Unbounded Consumption | Rate limiting, bearer auth on indexing, semantic cache, per-principal guard-strike cool-down (G464) | `main.py` (slowapi), `rag/cache.py`, `guard_friction.py` |
 
@@ -374,21 +374,21 @@ chat's owner (`receptionist/carryover.py`).
 - Re-retrieves with expanded query + domain context, in the question's locale (translated leg kept; English spelling correction for English only, G280)
 - Merges and deduplicates by chunk_id, re-prunes against the merged best, keeps results only if quality improved
 
-**Protected translation & statutory projection** (`mt.py`, `service.py`, `rag/generator.py`):
-- Figures are masked behind opaque sentinels (`#NMBRA#`) *before* a reply is handed to a translator and restored verbatim afterwards — `mt.protect_figures` / `mt.restore_figures`, wired in `service.localize_reply`. A translator that never sees a digit cannot paraphrase one, so figure mutation is prevented rather than detected.
+**Protected translation & statutory projection** (`mt.py`, `rag/pipeline.py`, `rag/generator.py`):
+- Figures are masked behind opaque sentinels (`#NMBRA#`) *before* a reply is handed to a translator and restored verbatim afterwards — `mt.protect_figures` / `mt.restore_figures`, wired in `pipeline.localize_reply`. A translator that never sees a digit cannot paraphrase one, so figure mutation is prevented rather than detected.
 - Only the digits are masked. The currency code and the percent sign stay visible because they are the cue the target language needs to build the right construction: Luganda renders a rate as "ebitundu 18 ku buli kikumi" and can only do so if it can still see that 18 was a percentage.
 - `figures_survived` remains as the assertion, not the mechanism. It still fires when a tier drops a sentinel outright rather than mutating it, and English remains the fallback for that case.
 - A tier that cannot carry the sentinels (an NMT model that drops unknown tokens) fails a guard and is retried **unprotected**, which is the pre-existing behaviour. Protection therefore only ever adds vernacular coverage, at the cost of one extra round trip on a path that was already failing. `MT_PROTECT_FIGURES=false` is the kill switch.
 - This replaced `heal_vernacular_figures`, which repaired MT output after the fact. Repairing means guessing where a number belonged; guessing wrong wrote a figure into a sentence that never had one, and narrowing it until it could not guess left it unable to fire at all. See G55 in `docs/GAPS_AND_AGENTIC_ROADMAP.md`.
-- A `## Figure cross-check` block lists every figure found in the retrieved passages, each with the citation index of the passages that state it, and instructs the model not to state a figure absent from the list or attribute one to a passage it is not listed against (`llm.extract_statutory_context`). It is an allowlist derived from what was retrieved — it constrains the model to the retrieved figure set; it does not validate that the corpus itself is correct, which is a corpus-provenance concern.
+- A `## Figure cross-check` block lists every figure found in the retrieved passages, each with the citation index of the passages that state it, and instructs the model not to state a figure absent from the list or attribute one to a passage it is not listed against (`generator.extract_statutory_context`). It is an allowlist derived from what was retrieved — it constrains the model to the retrieved figure set; it does not validate that the corpus itself is correct, which is a corpus-provenance concern.
 - The block is built from the **prepared** passage text — already scrubbed by `scan_retrieved_text` and already trimmed to the token budget — not from the raw retrieval payload. Reading the raw payload put it behind both defences: a figure inside an injected span was mined after the passage body had been redacted, and a figure trimmed away for budget was projected with no passage left to support it.
 - Only the figure and its indices are emitted, never a quotation of the surrounding prose. Passage bodies are isolated inside hash-bound `<passage>` spotlight markers, and lifting a clause out to caption a number would move attacker-controlled text outside that isolation for attribution the citation index already gives.
 - Ordering follows retrieval rank and truncation is declared in the block rather than silent, because a partial list that reads as exhaustive is worse than no list.
 
-**Versioned Multilingual Parallel FAQ Corpus & Direct Native Match** (`ingestion/faq_corpus.py`, `service.py`, `mt.py`):
+**Versioned Multilingual Parallel FAQ Corpus & Direct Native Match** (`ingestion/faq_corpus.py`, `rag/pipeline.py`, `mt.py`):
 - High-frequency statutory FAQ CSVs in `Data/dataset/ura_*_faqs.csv` (e.g. VAT, Corporation Tax) contain canonical trilingual columns: `question`, `answer`, `question_lg`, `answer_lg`, `question_sw`, `answer_sw`.
 - During corpus compilation (`python -m app.ingestion.faq_corpus`), `_validate_vernacular_figures` tests every localized answer with `mt.figures_survived`, enforcing statutory rates (18%, 30%), currency limits, and calendar deadlines at build time.
-- `_simple_search` in `service.py` executes a direct `_vernacular_pass` against the pre-indexed native terms when `locale in ("lg", "sw")`. Matched rows return pre-verified vernacular answers with `< 50 ms` latency, completely skipping runtime machine-translation round trips and eliminating figure drift under load.
+- `_simple_search` in `rag/pipeline.py` executes a direct `_vernacular_pass` against the pre-indexed native terms when `locale in ("lg", "sw")`. Matched rows return pre-verified vernacular answers with `< 50 ms` latency, completely skipping runtime machine-translation round trips and eliminating figure drift under load.
 - When an exact native FAQ match is not found, queries fall back seamlessly to lazy translate-then-retrieve (`translate_query_for_retrieval`), ensuring comprehensive coverage.
 
 **Escalation** (`guardrails.py` → `OutputGuard.should_escalate()`):
@@ -400,31 +400,67 @@ chat's owner (`receptionist/carryover.py`).
 
 ```
 App/backend/app/
-├── main.py              # 50+ FastAPI routes, SSE, CORS, rate limiting, auth, lifecycle
-├── models.py            # Pydantic v2 schemas (chat, speech, export, auth, feedback)
-├── service.py           # ChatModel — 12-stage RAG orchestrator + agentic routing
+├── main.py              # FastAPI entry point: 50+ routes, SSE, CORS, rate limiting, auth, lifecycle
+│
+├── api/                 # HTTP schemas and modular routers (ADR-0056)
+│   ├── models.py        #   Pydantic v2 schemas (chat, speech, export, auth, feedback)
+│   ├── connectors.py    #   System connector routes (EFRIS, Digital Tax Stamps)
+│   ├── offline.py       #   Offline RAG bundle and delta sync routes
+│   └── quality.py       #   Service-quality audit routes (/v1/admin/quality/*)
+│
+├── middleware/
+│   └── logger.py        #   Root JSON logging: request id, trace ids, scrubbed attributes and tracebacks
+│
+├── rag/                 # Main RAG flow (ADR-0056)
+│   ├── pipeline.py      #   ChatModel — 12-stage RAG orchestrator + agentic routing
+│   ├── retriever.py     #   HybridRetriever (bge-m3 + BM25 + RRF + rerank) + CircuitBreaker
+│   ├── generator.py     #   Answer generation (local + vLLM + cloud tiers + tool-calling + LoRA)
+│   ├── query.py         #   Query rewriting (abbreviations, spelling, coreference, lang detect)
+│   ├── hyde.py          #   Hypothetical document embeddings for the dense leg (flag `hyde`, off)
+│   ├── corrective_rag.py #  Corrective re-retrieval + clarification detection
+│   ├── context_manager.py # Rolling context and multi-turn memory
+│   ├── cache.py         #   Semantic response cache (memory or Redis backend)
+│   ├── claim_verifier.py #  Deterministic claim-level citation checks
+│   ├── claim_polarity.py #  Polarity-aware grounding and contradiction detection
+│   ├── entailment.py    #   Entailment / contradiction grounding for high-stakes claims
+│   ├── faq_binding.py   #   FAQ binding, equivalence promotion and acronym folding (G486)
+│   ├── turn_context.py  #   Turn ContextVars: identifiers, case facts, tenant, generation, live check (leaf, ADR-0031)
+│   ├── turn_record.py   #   What served the turn: backend, model, degradation (G486)
+│   ├── live_research_turn.py # One live-research step for REST, SSE and the graph (G486)
+│   ├── english_rendering.py  # English-decided reply translated back; the one patch point (G486)
+│   └── offline_rag.py   #   Offline RAG pipeline
+│
+├── ingestion/           # Load, parse and chunk sources into the corpus (ADR-0056)
+│   ├── indexer.py       #   JSONL → Qdrant indexing (Qdrant → Vectorize → keyword tiers)
+│   ├── faq_corpus.py    #   ura_*_faqs.csv + teacher-QA → validated JSONL → vector docs
+│   ├── pdf_corpus.py    #   Statutory & 10-MDA PDF harvester + hierarchical chunk JSONL (186 PDFs → 5,639 chunks)
+│   ├── crawl_corpus.py  #   Crawl ledger + pages → chunk JSONL: current capture, quarantine, editions (ADR-0023)
+│   ├── docling_intelligence.py # Docling DocumentIR, XY-Cut reading order, furniture stripping & TripletTableSerializer (ADR-0026)
+│   └── document_normalization.py # Document input normalization
+│
+├── embeddings/
+│   └── embedder.py      #   CPU ONNX embeddings for the local dense leg (ADR-0034)
+│
+├── vectorstore/         # Vector database operations (ADR-0056)
+│   ├── vector_db.py     #   pgvector dense leg beside the sparse Qdrant collection (ADR-0034)
+│   ├── index_lifecycle.py # Candidate collection, canary gate, atomic alias swap
+│   ├── corpus_sync.py   #   Self-updating Qdrant comparator, hot-swap & web_sync_ledger (ADR-0008)
+│   ├── qdrant_backup.py #   Retained collection snapshots
+│   └── point_ids.py     #   Content-derived point ids, so re-indexing is idempotent
+│
+├── db/                  # Persistence
+│   ├── database.py      #   SQLite WAL store (11 tables, retention TTLs, migrations)
+│   └── postgres.py      #   PostgreSQL backend (opt-in, drop-in substitute for database.py)
+│
+├── config/
+│   └── flags.py         #   Feature flag registry (91 flags, env-backed, cohort rollout)
+│
 ├── topics.py            # G6 conversation topic catalog + persist/follow-up bind
-├── rag/generator.py               # Qwen3-8B generation (local + vLLM + tool-calling + LoRA)
-├── query.py             # Query rewriting (abbreviations, spelling, coreference, lang detect)
-├── rag/turn_context.py      # Turn ContextVars: identifiers, case facts, tenant, generation, live check (leaf, ADR-0031)
-├── rag/turn_record.py       # What served the turn: backend, model, degradation (G486)
-├── rag/live_research_turn.py # One live-research step for REST, SSE and the graph (G486)
-├── rag/english_rendering.py # English-decided reply translated back; the one patch point (G486)
-├── rag/faq_binding.py       # FAQ binding, equivalence promotion and acronym folding (G486)
-├── rag/cache.py             # Semantic response cache (memory or Redis backend)
-├── rag/corrective_rag.py    # Corrective re-retrieval + clarification detection
 ├── guardrails.py        # InputGuard + OutputGuard (OWASP LLM Top 10 2025)
-├── rag/retriever.py         # HybridRetriever (bge-m3 + BM25 + RRF + rerank) + CircuitBreaker
-├── ingestion/indexer.py           # JSONL → Qdrant indexing (Qdrant → Vectorize → keyword tiers)
-├── ingestion/faq_corpus.py        # ura_*_faqs.csv + teacher-QA → validated JSONL → vector docs
-├── ingestion/docling_intelligence.py # Docling DocumentIR, XY-Cut reading order, furniture stripping & TripletTableSerializer (ADR-0026)
-├── ingestion/pdf_corpus.py        # Statutory & 10-MDA PDF harvester + hierarchical chunk JSONL (186 PDFs → 5,639 chunks)
-├── ingestion/crawl_corpus.py      # Crawl ledger + pages → chunk JSONL: current capture, quarantine, editions (ADR-0023)
 ├── crawl_gate.py        # pass / review / hold on a crawl before a person sees it; freshness objective
 ├── web_research.py      # 9-trigger live check, source authority & evidence labelling (ADR-0008, ADR-0021)
 ├── web_search_providers.py # Search backends with failover and breakers (ADR-0021)
 ├── ephemeral_pdf_sandbox.py # Ephemeral tmpfs PDF/XLSX sandbox + GPU micro-reranking (ADR-0008)
-├── vectorstore/corpus_sync.py       # Self-updating Qdrant comparator, hot-swap & web_sync_ledger (ADR-0008)
 ├── scenario_planner.py  # Deterministic multi-tool planner & Verified Statutory Facts injection
 ├── calculator_router.py # Single-calculator fast path & multi-turn amount carryover
 ├── premise_guard.py     # False-premise detector & legitimate statutory modifier allowlist
@@ -432,9 +468,6 @@ App/backend/app/
 ├── sunbird.py           # Sunbird AI cloud fallback (Ugandan languages)
 ├── tracing.py           # OpenTelemetry GenAI 2025 semconv tracing
 ├── analytics.py         # Prometheus-compatible metrics middleware
-├── database.py          # SQLite WAL store (11 tables, retention TTLs, migrations)
-├── db/postgres.py          # PostgreSQL backend (opt-in, drop-in substitute for database.py)
-├── config/flags.py             # Feature flag registry (91 flags, env-backed, cohort rollout)
 ├── resilience.py        # Circuit breaker (exponential backoff, CLOSED→OPEN→HALF_OPEN)
 ├── pdf_export.py        # Branded PDF conversation/tax summary export
 ├── evaluation.py        # RAG evaluation harness (8 metrics)
@@ -472,7 +505,7 @@ App/backend/app/
 │                        #   mda_ntr_resolution.yaml, new_taxpayer_and_relief.yaml, calc_* flows)
 │
 ├── memory/              # Consent-gated, tenant-scoped personalization memory (Phase 16)
-│   ├── service.py       #   Unified memory interface (MemoryService)
+│   ├── service.py           #   Unified memory interface (MemoryService)
 │   ├── semantic.py      #   User facts with time-based decay
 │   ├── episodic.py      #   Conversation summaries by topic
 │   ├── working.py       #   Standalone in-process helper; service uses shared TTL storage
@@ -532,14 +565,14 @@ abstain on.
 | Route | Trigger | Handler |
 |-------|---------|---------|
 | `RAG` | General knowledge questions | Standard 12-stage pipeline |
-| `TOOLS` | Calculations, rates, deadlines | `llm.generate_with_tools()` with calculator/rate tools |
+| `TOOLS` | Calculations, rates, deadlines | `generator.generate_with_tools()` with calculator/rate tools |
 | `TAX_SPECIALIST` | Income tax, PAYE, CIT questions | Specialist system prompt + narrowed tool scope |
 | `CUSTOMS_SPECIALIST` | Import duty, tariff questions | Specialist system prompt + customs tools |
 | `CLARIFY` | Ambiguous single-word queries | Ask for more details |
 | `ESCALATE` | Complex cases, account-specific | Create ticket, return handoff packet |
 | `WORKFLOW` | Procedural (registration, filing) | Guided slot-filling workflow |
 
-**Tool-calling loop** (`llm.generate_with_tools()`): bounded to 3 iterations. Parses `<tool_call>` XML blocks, dispatches through `ToolRegistry.call()`, feeds results back as `tool` role messages.
+**Tool-calling loop** (`generator.generate_with_tools()`): bounded to 3 iterations. Parses `<tool_call>` XML blocks, dispatches through `ToolRegistry.call()`, feeds results back as `tool` role messages.
 
 ## Workflow Engine (Phase 15 & ADR-0009 / ADR-0010 — 21 Guided Journeys)
 
@@ -766,7 +799,7 @@ All major subsystems are behind feature flags for progressive rollout:
 | `emotion_aware_prosody` | off | Acoustic prosody extraction (`receptionist/prosody.py`) in `CallerAudioTap` and dynamic empathy/pacing conditioning in TTS. Affect needs the caller's words: loudness or pace alone names nothing (Phase 39; `PROSODY_ACOUSTIC_ONLY_AFFECT=true` for a validation study) |
 | `spoken_figure_guard` | off | Acoustic & lexical digit verification (`receptionist/spoken_figure_guard.py`) and dictation pauses on synthesized TTS audio containing statutory figures, TINs, or PRNs |
 | `officer_voice_copilot` | off | Streams live ASR transcripts, English router views, and statutory rate cards to the officer desk while a voice call is bridged to `ura_staff` |
-| `eq_adaptive_retrieval` | off | Stage 0c/0b2 EQ assessment (`tools/empathy.py`, `query.py`) boosting statutory relief/instalment/waiver passages (`TPCA s.39, s.66`) on hardship/anxiety |
+| `eq_adaptive_retrieval` | off | Stage 0c/0b2 EQ assessment (`tools/empathy.py`, `rag/query.py`) boosting statutory relief/instalment/waiver passages (`TPCA s.39, s.66`) on hardship/anxiety |
 | `zero_effort_slot_prefill` | off | Pre-fills `WorkflowSession` and calculator slots from consented `SemanticMemory`, `WorkingMemory.verified_slot_bank`, and scanned documents |
 | `workflow_specialist_bridge` | off | Allows active guided workflows (`workflows/registry.py`) to delegate mid-flow calculations to MCP calculator tools and bind results into pending slots |
 | `proactive_resolution_continuation` | off | Writes localized continuation cards to `reminder_inbox` when background `mcp_tasks` or officer reviews complete on an open `ResolutionCase` |
@@ -862,7 +895,7 @@ for checkpoint-backed recovery and state retention.
 
 The corpus is English. Non-English questions take a merged English
 translation pass (`FLAG_TRANSLATE_RETRIEVE`, default on). Generation is
-**English too** unless a locale LoRA adapter is loaded (`llm.can_generate_in_locale`),
+**English too** unless a locale LoRA adapter is loaded (`generator.can_generate_in_locale`),
 and the reply is translated on the way out — see *Answer language* below.
 Citations carry `url` / `effective_date` when the index stored them, and crawl chunks
 add `published_at`, the publisher's date. A crawl time is never an effective date. A
@@ -887,12 +920,12 @@ more years old is demoted. Undated pages stay unknown, which is not old (ADR-002
 ### Answer language
 
 The answer is produced in English and translated into the taxpayer's language
-by `service.localize_reply`, in one place, because `_generate_en` has a dozen
+by `pipeline.localize_reply`, in one place, because `_generate_en` has a dozen
 or so exits (blocked, workflow, calculator, greeting, clarification,
 deterministic, abstained, escalated, generated) and translating at each of them
 is how one branch quietly answers a Luganda question in English.
 
-`llm._build_messages` states the answer language explicitly on every request,
+`generator._build_messages` states the answer language explicitly on every request,
 in an `## Answer language` section. The system prompt used to carry an
 unconditional rule — "if the user writes in Luganda … respond in the same
 language" — where nothing could see whether the deployment can do that. The CPU
@@ -971,7 +1004,7 @@ over the localized text and a per-locale golden set to gate it (G58).
 
 The cache is why a non-English turn is no longer two to three times slower than
 the same question in English. One turn translated the same question **twice** —
-the deterministic routers translate it in `service.py` before retrieval runs,
+the deterministic routers translate it in `rag/pipeline.py` before retrieval runs,
 and the hybrid retriever translates it again for the corpus — and the
 deterministic replies (greetings, the TIN and return-filing templates, the
 abstention line) are byte-identical every time. Entries hold a digest of the
@@ -987,7 +1020,7 @@ and the response judge has always escalated them. What none of that did was
 stop showing the figure, and a taxpayer acts on the number rather than on the
 amber banner above it.
 
-`service.withhold_if_contradicted` replaces such an answer with
+`pipeline.withhold_if_contradicted` replaces such an answer with
 `CONTRADICTED_CLAIM_REPLY`, forces escalation, and drops the faithfulness score
 (the score described text that is no longer being sent). It fires on
 **contradicted** claims only, never on merely *unsupported* ones — an

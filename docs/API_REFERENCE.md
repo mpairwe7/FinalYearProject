@@ -557,7 +557,7 @@ and gives the contact-centre numbers rather than promising a handoff that will
 never arrive.
 
 The officer's reply is delivered back into the same conversation on the
-taxpayer's next turn (`_deliver_officer_reply` in `service.py`), which is why
+taxpayer's next turn (`_deliver_officer_reply` in `rag/pipeline.py`), which is why
 `conversation_id` matters more than anything else in the body. Once an officer
 takes the case the chat follows it live (below).
 

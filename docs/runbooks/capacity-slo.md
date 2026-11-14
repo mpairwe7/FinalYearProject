@@ -95,5 +95,5 @@ Docs currently disagree (2s vs 3s). Until one table is chosen, treat
 2. FAQ/calculator slow → API/threadpool, not GPU.
 3. Hybrid slow → vLLM queue (campaign A curve) or `LLM_DEADLINE_SECONDS`.
 4. Sudden 429 → `RATE_LIMIT`, not capacity loss.
-5. Hang toward 45–70s → deadline/budget path in `service.py`; should
+5. Hang toward 45–70s → deadline/budget path in `rag/pipeline.py`; should
    return, not block forever.

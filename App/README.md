@@ -24,30 +24,35 @@ App/
 ├── backend/           # FastAPI backend API
 │   ├── app/
 │   │   ├── main.py          # API routes + SSE streaming + speech + eval endpoints
-│   │   ├── models.py        # Pydantic v2 request/response models
+│   │   ├── api/
+│   │   │   └── models.py        # Pydantic v2 request/response models
+│   │   ├── rag/
+│   │   │   ├── pipeline.py       # ChatModel (RAG orchestrator + agentic routing)
+│   │   │   ├── generator.py           # Qwen3-8B vLLM + local generation + tool-calling
+│   │   │   └── retriever.py     # Hybrid retriever (Qdrant + BM25 + reranking)
+│   │   ├── config/
+│   │   │   └── flags.py         # Feature flag registry (91 flags, cohort rollout)
+│   │   ├── ingestion/
+│   │   │   ├── docling_intelligence.py # Docling DocumentIR, XY-Cut reading order, furniture stripping & TripletTableSerializer (ADR-0026)
+│   │   │   └── pdf_corpus.py    # Statutory & 10-MDA PDF harvester (186 PDFs → 5,639 chunks, ADR-0009)
+│   │   ├── vectorstore/
+│   │   │   └── corpus_sync.py   # Self-updating Qdrant comparator, hot-swap & web_sync_ledger (ADR-0008)
 │   │   ├── speech_service.py # SpeechModel (ASR/Whisper + TTS/Piper + MT + Sunbird fallback)
-│   │   ├── service.py       # ChatModel (RAG orchestrator + agentic routing)
-│   │   ├── rag/generator.py           # Qwen3-8B vLLM + local generation + tool-calling
-│   │   ├── config/flags.py         # Feature flag registry (91 flags, cohort rollout)
 │   │   ├── agents/          # Supervisor router + agent graph runtime
 │   │   ├── tools/           # 79 MCP tools across 19 namespaces in dev, 56/13 in prod (calculators, 10-MDA NTR/PRN, onboarding, B2G/UESW, relief, EFRIS, rates, calendar, RAG, education, empathy, escalate, connectors)
 │   │   ├── workflows/       # 21 YAML-driven guided journeys (TIN, filing, PRN, Cross-MDA NTR, New-Taxpayer Relief, TCC, objections, customs) + Journey Copilot
 │   │   ├── scenario_planner.py # Deterministic multi-tool planner & Verified Statutory Facts injection
 │   │   ├── calculator_router.py # Single-calculator fast path & multi-turn figure carryover
-│   │   ├── ingestion/docling_intelligence.py # Docling DocumentIR, XY-Cut reading order, furniture stripping & TripletTableSerializer (ADR-0026)
-│   │   ├── ingestion/pdf_corpus.py    # Statutory & 10-MDA PDF harvester (186 PDFs → 5,639 chunks, ADR-0009)
 │   │   ├── web_research.py  # 9-trigger live check, source authority & evidence labelling (ADR-0008, ADR-0021)
 │   │   ├── ephemeral_pdf_sandbox.py # Ephemeral tmpfs PDF/XLSX sandbox + GPU micro-reranking (ADR-0008)
-│   │   ├── vectorstore/corpus_sync.py   # Self-updating Qdrant comparator, hot-swap & web_sync_ledger (ADR-0008)
 │   │   ├── memory/          # Episodic + semantic + working + procedural memory + ResolutionLedger
 │   │   ├── guardrails.py    # OWASP LLM Top 10 guards + abstention, link provenance (ADR-0029)
 │   │   ├── guard_friction.py # Per-principal cool-down after repeated guard refusals (G464)
-│   │   ├── rag/retriever.py     # Hybrid retriever (Qdrant + BM25 + reranking)
 │   │   ├── native_voice/    # Phase 28: streaming ASR/TTS, speculative prefetch, query planner
 │   │   ├── vision/          # Phase 28: Qwen2-VL encoder, OCR, document classifier
 │   │   ├── voice_stream_v2.py # V2 voice session (dual-path + vision)
 │   │   ├── voice_ws_v2.py   # V2 WebSocket handler (/v2/voice/chat/stream)
-│   │   └── ...              # cache, query, indexer, resilience, tracing, analytics, database
+│   │   └── ...              # resilience, tracing, analytics and the other top-level modules
 │   └── requirements.txt
 └── frontend/          # Next.js 16 PWA frontend
     ├── src/
@@ -144,7 +149,7 @@ source for those QA pairs, while evaluation JSONL stays out of live retrieval.
 
 #### RAG Pipeline Flow (10-stage)
 
-Source: `service.py::generate()` (lines 992-1677). Every `/v1/chat` and
+Source: `rag/pipeline.py::generate()` (lines 992-1677). Every `/v1/chat` and
 `/v1/chat/stream` request traverses this pipeline:
 
 ```
@@ -543,7 +548,7 @@ VoiceSessionV2 (voice_stream_v2.py):
   |     +-- VISION path: image context + RAG
   |     +-- ESCALATE path: human handoff
   |
-  +-- LLM Generation (existing service.py 21-phase pipeline)
+  +-- LLM Generation (existing rag/pipeline.py 21-phase pipeline)
   |
   +-- Token-Level Streaming TTS (streaming_tts.py):
         +-- CosyVoice2-0.5B flow-matching codec (primary)
@@ -1226,7 +1231,7 @@ changed and why.
 **Phase 2 — OTel GenAI 2025 alignment**
 
 - Token accounting now uses the real Qwen tokenizer
-  (`llm.count_tokens`) rather than `len(text.split())`.
+  (`generator.count_tokens`) rather than `len(text.split())`.
 - Span attributes follow the 2025 stable semconv:
   `gen_ai.operation.name`, `gen_ai.usage.input_tokens`,
   `gen_ai.usage.output_tokens`, `rag.retrieval.num_results`.
@@ -1320,7 +1325,7 @@ changed and why.
 
 - New `backend/app/db/postgres.py` — psycopg3 + `psycopg_pool`
   implementation mirroring the functions listed in the dispatch block
-  at the bottom of `database.py` (34 of 37 public functions). Identity,
+  at the bottom of `db/database.py` (34 of 37 public functions). Identity,
   consent, profiles, workflow sessions and tickets are all mirrored.
   **Still SQLite-only:** `export_user_data`, `delete_user_cascade` and
   `export_eval_samples`, because they cascade through memory and audit
@@ -1406,7 +1411,7 @@ empty.
 - New `backend/app/config/flags.py` — tiny env-backed feature flag registry
   with 7 canonical flags.  `flags.is_enabled("self_reflect")`
   resolves in this order: in-memory override → `FLAG_<NAME>` env
-  → registry default.  `service.py` uses this alongside the legacy
+  → registry default.  `rag/pipeline.py` uses this alongside the legacy
   `SELF_REFLECT_ENABLED` env for back-compat.
 - `backend/app/rag/retriever.py` + `backend/app/ingestion/indexer.py` —
   `DENSE_MODEL` default upgraded to `BAAI/bge-m3` (1024-dim,
@@ -1697,7 +1702,7 @@ an operator flips a flag.
   loop using Qwen's native `apply_chat_template(tools=...)` format
 - `_parse_tool_calls()` handles parallel calls, string-encoded
   arguments, and malformed blocks (silent skip)
-- `_call_llm_agentic()` in `service.py` routes the loop through the
+- `_call_llm_agentic()` in `rag/pipeline.py` routes the loop through the
   shared `_LLM_CIRCUIT` breaker with 2× the sync deadline
 
 **Phase C — Supervisor router + state machine** (`App/backend/app/agents/`)
@@ -1881,7 +1886,7 @@ tool — see:
 - **Audit ledger:** Hash-chained append-only `audit_events` table with
   tamper-evident integrity. Every `generate()` outcome (blocked, cached,
   clarified, escalated, abstained, happy-path) appends an event via
-  `_audit_turn()` in `service.py`. Payloads store SHA-256 hashes of
+  `_audit_turn()` in `rag/pipeline.py`. Payloads store SHA-256 hashes of
   queries and replies (no raw PII), plus metadata: retrieval_mode,
   num_sources, faithfulness_score, escalation_required, model, locale,
   input_tokens, output_tokens, tool_calls, agent_route, ticket_id.

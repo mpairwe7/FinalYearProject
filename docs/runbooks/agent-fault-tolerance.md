@@ -9,7 +9,7 @@ evidence is in the [assurance review](../plans/agentic-orchestrator-resilience-a
 | What failed | What happens | What the taxpayer sees |
 | --- | --- | --- |
 | Reasoner down | `llm_reasoner` breaker opens; turns go straight to T1 | A normal answer |
-| T1 down | `llm` breaker opens; turns go to the cloud chain if configured | A normal answer |
+| T1 down | `generator` breaker opens; turns go to the cloud chain if configured | A normal answer |
 | Every model down | The closest passage is served | The passage, and a sentence saying it is a fallback |
 | A graph draft is not supported by its passages | The closest passage replaces it | The same passage and sentence |
 | Tool loop out of steps | The last text is served | The text, and a sentence saying it may be incomplete |
@@ -29,7 +29,7 @@ tier, fallbacks and degradations.
 The state is 0 closed, 1 half-open, 2 open, and `ura_circuit_breaker_transitions_total`
 counts the changes.
 
-1. Read the `breaker` label: `llm` is T1, `llm_reasoner` the reasoner, `sunbird_llm`
+1. Read the `breaker` label: `generator` is T1, `llm_reasoner` the reasoner, `sunbird_llm`
    and `cf_workers_ai_llm` the cloud answer chain (ADR-0036), `gemini_flash` the FAQ
    judge and speech fallbacks, `mcp:<namespace>` a connector.
 2. Check that dependency. An open breaker is a symptom: it opened because calls failed.

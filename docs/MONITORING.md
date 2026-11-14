@@ -245,8 +245,8 @@ python -m pytest tests/test_monitoring_config.py -q
 ## 5. Tracing
 
 Off unless `OTEL_ENABLED=true`. `app/tracing.py` sets up the SDK with
-`service.name`, `service.version`, `deployment.environment.name` and a
-per-worker `service.instance.id`, instruments FastAPI (server span per
+`pipeline.name`, `pipeline.version`, `deployment.environment.name` and a
+per-worker `pipeline.instance.id`, instruments FastAPI (server span per
 request; inbound W3C `traceparent` honoured) and httpx (client spans;
 `traceparent` injected into calls to vLLM, Qdrant, Sunbird, Cloudflare and MCP
 servers), and bridges Python logging to OTLP.

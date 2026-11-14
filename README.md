@@ -53,27 +53,32 @@ FinalYearProject/
 │   ├── backend/          # FastAPI backend
 │   │   └── app/
 │   │       ├── main.py        # FastAPI app + endpoints (sync + SSE streaming)
-│   │       ├── models.py      # Pydantic v2 request/response models
-│   │       ├── service.py     # ChatModel (12-stage RAG + agentic routing + speech)
-│   │       ├── rag/generator.py         # Sunbird/Sunflower-Qwen3.5-9B (262K native context) / Qwen3-8B generation, LoRA routing
-│   │       ├── query.py       # Query rewriting (abbreviations, spelling, coreference)
-│   │       ├── rag/cache.py       # Semantic cache (cosine similarity)
-│   │       ├── rag/corrective_rag.py # Corrective re-retrieval + clarification
+│   │       ├── api/
+│   │       │   └── models.py      # Pydantic v2 request/response models
+│   │       ├── rag/
+│   │       │   ├── pipeline.py     # ChatModel (12-stage RAG + agentic routing + speech)
+│   │       │   ├── generator.py         # Sunbird/Sunflower-Qwen3.5-9B (262K native context) / Qwen3-8B generation, LoRA routing
+│   │       │   ├── query.py       # Query rewriting (abbreviations, spelling, coreference)
+│   │       │   ├── cache.py       # Semantic cache (cosine similarity)
+│   │       │   ├── corrective_rag.py # Corrective re-retrieval + clarification
+│   │       │   └── retriever.py   # Qdrant hybrid retriever (dense+BM25+RRF+circuit breaker)
+│   │       ├── ingestion/
+│   │       │   ├── indexer.py     # Document indexing pipeline (PDF+CSV→Qdrant, 7,251 hybrid vectors)
+│   │       │   ├── docling_intelligence.py # Docling DocumentIR, XY-Cut reading order, furniture stripping & TripletTableSerializer (ADR-0026)
+│   │       │   └── pdf_corpus.py  # Statutory & 10-MDA PDF harvester (186 PDFs → 5,639 chunks, ADR-0009)
+│   │       ├── vectorstore/
+│   │       │   └── corpus_sync.py # Self-updating Qdrant comparator, hot-swap & web_sync_ledger (ADR-0008)
+│   │       ├── db/
+│   │       │   └── database.py    # SQLite WAL analytics/feedback/session/conversation store
 │   │       ├── guardrails.py  # OWASP LLM Top 10 input/output guards
-│   │       ├── rag/retriever.py   # Qdrant hybrid retriever (dense+BM25+RRF+circuit breaker)
-│   │       ├── ingestion/indexer.py     # Document indexing pipeline (PDF+CSV→Qdrant, 7,251 hybrid vectors)
-│   │       ├── ingestion/docling_intelligence.py # Docling DocumentIR, XY-Cut reading order, furniture stripping & TripletTableSerializer (ADR-0026)
-│   │       ├── ingestion/pdf_corpus.py  # Statutory & 10-MDA PDF harvester (186 PDFs → 5,639 chunks, ADR-0009)
 │   │       ├── web_research.py # 9-trigger live check, source authority & evidence labelling (ADR-0008, ADR-0021)
 │   │       ├── ephemeral_pdf_sandbox.py # Ephemeral tmpfs PDF/XLSX sandbox + GPU micro-reranking (ADR-0008)
-│   │       ├── vectorstore/corpus_sync.py # Self-updating Qdrant comparator, hot-swap & web_sync_ledger (ADR-0008)
 │   │       ├── scenario_planner.py # Deterministic multi-tool planner & Verified Statutory Facts block
 │   │       ├── calculator_router.py # Instant single-calculator router & multi-turn amount carryover
 │   │       ├── tools/         # 72 MCP tools across 18 namespaces (incl. mda_interdependence.py)
 │   │       ├── workflows/     # 21 YAML-driven guided journeys (Prerequisite DAG, A2UI, Step-Up Auth)
 │   │       ├── tracing.py     # OpenTelemetry GenAI tracing (per-stage spans)
-│   │       ├── analytics.py   # Prometheus-compatible metrics middleware
-│   │       └── database.py    # SQLite WAL analytics/feedback/session/conversation store
+│   │       └── analytics.py   # Prometheus-compatible metrics middleware
 │   └── frontend/         # Next.js 16 + React 19 + Zustand 5 frontend
 │       ├── lib/
 │       │   ├── core/      # Config, networking (Dio), theme, storage
@@ -147,7 +152,7 @@ User Query
 | **Vector Store** | Qdrant (`v1.19.0` local persistent) | Versioned collections, alias-based zero-downtime indexing |
 | **Retrieval** | Hybrid dense + BM25 sparse | DBSF / RRF fusion + circuit breaker with exponential backoff |
 | **Reranking** | `mixedbread-ai/mxbai-rerank-base-v2` | Cross-encoder reranking with clean single-sigmoid probabilities |
-| **Query Rewriting** | `query.py` | Abbreviation expansion (15+ URA terms), vernacular-safe spell correction, coreference resolution |
+| **Query Rewriting** | `rag/query.py` | Abbreviation expansion (15+ URA terms), vernacular-safe spell correction, coreference resolution |
 | **Semantic Cache** | `rag/cache.py` | Cosine similarity matching, configurable TTL/threshold/max-size |
 | **Corrective RAG** | `rag/corrective_rag.py` | Re-retrieve with expanded query when initial quality is low |
 | **Generation** | `Sunbird/Sunflower-Qwen3.5-9B` + `Qwen/Qwen3.8-27B-FP8` | vLLM HTTP (T1 9B FP8 with native 256K / 262,144 context window across 67 African languages; T2/T3 27.8B FP8 Sovereign Reasoning Tier for multi-hop statutory & dispute queries per `ADR-0007`); `Qwen/Qwen3-8B` + local Transformers/BnB 4-bit is the fallback and what the lg/sw/nyn/ach LoRA adapters target |

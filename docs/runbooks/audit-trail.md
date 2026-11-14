@@ -38,7 +38,7 @@ recorded as actor `operator-key`.
 `tests/test_auditor_controls.py::test_every_admin_write_route_refuses_an_auditor`
 walks every `POST`/`PUT`/`PATCH`/`DELETE` route under `/v1/admin` in the live
 app — including those registered on included routers, such as
-`routes/quality.py` — and requires a 403 for an auditor. The listed exceptions
+`api/quality.py` — and requires a 403 for an auditor. The listed exceptions
 are the two audit notes: sealing the trail and recording a quality-audit
 decision. A new staff write that forgets its role check fails that test.
 

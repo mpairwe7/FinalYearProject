@@ -14,7 +14,7 @@ LLM_MODEL=Sunbird/Sunflower-Qwen3.5-9B  # rag/generator.py — Sunflower v2 (67 
                                          # Served via vLLM with --quantization fp8 --kv-cache-dtype fp8
                                          # --dtype auto --max-model-len 262144 (native 256K/262K context without YaRN).
                                          # Also supports Sunbird/Sunflower-Qwen3.8-27B.
-LLM_MAX_CONCURRENCY=12                   # service.py — 8-16 bounded LLM thread-pool size for vLLM continuous batching
+LLM_MAX_CONCURRENCY=12                   # rag/pipeline.py — 8-16 bounded LLM thread-pool size for vLLM continuous batching
 WHISPER_SALT_MODEL=Sunbird/SunflowerASR-51-african-languages  # 51 African languages (SFT + GRPO)
 ORPHEUS_MODEL=Sunbird/orpheus-3b-tts-multilingual             # Primary streaming TTS (lg, sw, en; uses apply_tts_engine_phonetics for Tin/Nin/Vat/Payee/Efris/Runyankole/Acholi, G439/G440)
 DENSE_MODEL=BAAI/bge-m3            # rag/retriever.py / ingestion/indexer.py — dense embeddings
@@ -103,7 +103,7 @@ backend comparison table above.
 ### Cloud answer generation (deployments without a local model)
 
 Where no local model runs (the HF Space), answers come from the cloud chain in
-`service._llm_cloud_fallback` (ADR-0036):
+`pipeline._llm_cloud_fallback` (ADR-0036):
 
 ```bash
 FLAG_CLOUDFLARE_FALLBACK=true

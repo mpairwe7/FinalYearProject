@@ -45,7 +45,7 @@ single legs and fusion on the raw query and on the **pivot** (the English the
 retriever searches with), Qdrant RRF (k = 2, its default) against client RRF
 (k = 60) and DBSF, the cross-encoder where it runs, `search_planned` as
 production calls it (`production`), and `ChatModel.generate_retrieval_only`
-with no locale hint (`service`: language detection, routers, keyword fallback,
+with no locale hint (`pipeline`: language detection, routers, keyword fallback,
 corrective RAG, FAQ blend, binding gates, abstention).
 
 Relevance is `strict` (the gold point, or one with the same question) or

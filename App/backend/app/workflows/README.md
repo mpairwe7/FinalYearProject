@@ -17,7 +17,7 @@ On by default (`workflows` flag).
 | id | Name | Started by |
 | --- | --- | --- |
 | `tin_registration` | TIN Registration Guide | trigger phrases |
-| `tin_procedure_help` | TIN Registration Help | the TIN-procedure path in `service.py` (no triggers) |
+| `tin_procedure_help` | TIN Registration Help | the TIN-procedure path in `rag/pipeline.py` (no triggers) |
 | `return_filing` | Return Filing | trigger phrases |
 | `payment_assistance` | Payment Assistance | trigger phrases |
 | `tax_clearance` | Tax Clearance Certificate | trigger phrases |
@@ -63,7 +63,7 @@ reply localization path and fall back to English if translation fails.
    "file"), and a tax type before "return" ("my VAT return" → "my return") —
    and treats a flow's own **name** as a trigger when the flow has trigger
    phrases. Calculators are never started by name.
-2. The entrance rule (G39, `service._maybe_handle_workflow`): a message that
+2. The entrance rule (G39, `pipeline._maybe_handle_workflow`): a message that
    reads as a question (`_reads_as_question`, which includes "I need…" and "I
    want…") is **answered**, not captured, unless it also asks to be guided
    ("guide me", "walk me through", "help me file/register/apply/submit",
@@ -84,7 +84,7 @@ A flow owns its conversation until it completes or is cancelled ("cancel",
 - an explicit request for a **different** flow ("help me file my return"
   inside the Tax Clearance checklist) starts the requested one. The current
   flow is marked cancelled only after the new session is created, so a refused
-  start leaves it resumable (`service._flow_switch_target`).
+  start leaves it resumable (`pipeline._flow_switch_target`).
 
 Trigger matching folds "-ing" forms only. Past tense is left alone, so "I
 filed my return yesterday but …" reports a problem instead of starting a new

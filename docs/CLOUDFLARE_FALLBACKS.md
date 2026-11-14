@@ -148,7 +148,7 @@ unreachable.
 
 The same no-torch constraint applies, and it used to make the cache useless
 here: both backends return `None` from `get()` when there is no dense model, and
-`service.py` only calls `set_model` when the retriever has one. So the cache
+`rag/pipeline.py` only calls `set_model` when the retriever has one. So the cache
 missed on every request in these deployments. `rag/cache.py` now has a **model-free
 exact tier** keyed on the casefolded, punctuation-stripped query plus locale,
 which is what makes Redis worth embedding — a repeated question is the common
@@ -172,7 +172,7 @@ Tier 2 only helps if the index holds the whole corpus, which is why
 `reindex_vectorize.py` refuses to seed a subset — otherwise the same question
 answers from the full corpus normally and from 486 FAQ rows only once tier 1
 degrades (whether to tier 1b or all the way to tier 3).
-- **Phase 2 — LLM fallback: DONE.** `service._llm_cloud_fallback` /
+- **Phase 2 — LLM fallback: DONE.** `pipeline._llm_cloud_fallback` /
   `_stream_cloud_fallback` wired into `_call_llm_with_deadline` + `stream_llm_tokens`,
   keyed off `_LLM_CIRCUIT` (Gemini → Workers AI).
 - **Phase 3 — Gemini 2.5 Flash Luganda translation: DONE.** `SpeechModel._gemini_translate`
@@ -193,7 +193,7 @@ repo root (`tests/test_fallback_integration.py`, run by CI) that assert the clou
 answer reaches the `/v1/chat` + `/v1/chat/stream` surfaces when the primary LLM is
 down — see `docs/EVALUATION_REPORT.md`. Full `App/backend` suite green; blocking
 ruff clean. NB: the local LLM being *unavailable* (not just failing) now also routes
-to the cloud tier (`service._cloud_llm_ready` widens the availability gates).
+to the cloud tier (`pipeline._cloud_llm_ready` widens the availability gates).
 
 ### Deferred (follow-up, mostly provisioning-time)
 1. **Vectorize re-index CLI — DONE** (`App/backend/scripts/reindex_vectorize.py`).
