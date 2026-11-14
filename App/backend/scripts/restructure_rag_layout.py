@@ -22,6 +22,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 APP = REPO / "App/backend/app"
 SELF = Path(__file__).resolve()
+MOVE_RECORD = REPO / "docs/adr/0056-rag-package-layout.md"  # names the old paths on purpose
 
 # Old module (dotted, under app) -> new module. A package key moves the whole tree.
 MOVES: dict[str, str] = {
@@ -449,6 +450,7 @@ def verify() -> int:
     problems: list[str] = []
     old_dotted = re.compile(r"(?<![\w.])(?:App\.backend\.)?app\.(" + "|".join(re.escape(k) for k in MOVES if k != "routes") + r")(?![\w])")
     patch_target = re.compile(r"[\"'](?:App\.backend\.)?(app(?:\.\w+)+)[\"']")
+    old_bindings = {o.rpartition(".")[2] for o, n in MOVES.items() if o.rpartition(".")[2] != n.rpartition(".")[2]} | set(WORD_RENAMES)
     for path in tracked_files():
         if not is_text(path):
             continue
@@ -456,7 +458,7 @@ def verify() -> int:
             text = path.read_text()
         except UnicodeDecodeError:
             continue
-        for m in old_dotted.finditer(text):
+        for m in old_dotted.finditer(text if path != MOVE_RECORD else ""):
             if not _module_file(canonical(m.group(0))):
                 problems.append(f"{path.relative_to(REPO)}: stale {m.group(0)}")
         if path.suffix != ".py":
@@ -467,10 +469,11 @@ def verify() -> int:
             tree = ast.parse(text)
         except SyntaxError:
             continue
+        bound: dict[str, Path] = {}  # local name -> the app module file it is bound to
         for node in ast.walk(tree):
-            targets: list[tuple[str, str | None]] = []
+            targets: list[tuple[str, str | None, str | None]] = []
             if isinstance(node, ast.Import):
-                targets = [(canonical(a.name), None) for a in node.names if app_prefix(a.name)]
+                targets = [(canonical(a.name), None, a.asname) for a in node.names if app_prefix(a.name)]
             elif isinstance(node, ast.ImportFrom):
                 if node.level and in_app:
                     absolute = resolve_relative(package_of(path, mod), node.level, node.module)
@@ -479,13 +482,21 @@ def verify() -> int:
                 else:
                     absolute = node.module or ""
                 if app_prefix(absolute):
-                    targets = [(canonical(absolute), a.name) for a in node.names]
-            for module, name in targets:
+                    targets = [(canonical(absolute), a.name, a.asname) for a in node.names]
+            for module, name, asname in targets:
                 target_file = _module_file(module)
+                if name and _module_file(f"{module}.{name}"):
+                    bound[asname or name] = _module_file(f"{module}.{name}")
+                elif not name and asname and target_file:
+                    bound[asname] = target_file
                 if target_file is None:
                     problems.append(f"{path.relative_to(REPO)}:{node.lineno}: no module {module}")
                 elif name and name != "*" and not _module_file(f"{module}.{name}") and not _defines(target_file, name):
                     problems.append(f"{path.relative_to(REPO)}:{node.lineno}: {module} has no {name}")
+        for node in ast.walk(tree):  # module.llm where the module bound the old name
+            if (isinstance(node, ast.Attribute) and node.attr in old_bindings and isinstance(node.value, ast.Name)
+                    and node.value.id in bound and not _defines(bound[node.value.id], node.attr)):
+                problems.append(f"{path.relative_to(REPO)}:{node.lineno}: {node.value.id}.{node.attr} no longer exists")
         for m in patch_target.finditer(text):
             parts = m.group(1).split(".")
             for i in range(len(parts), 1, -1):
