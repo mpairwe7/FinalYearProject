@@ -546,43 +546,6 @@ def extract_statutory_context(prepared: list[tuple[int, str]]) -> str:
     return "\n".join(lines)
 
 
-_FEW_SHOT_PROMPTS_BY_LOCALE: Final[dict[str, str]] = {
-    "en": (
-        "## Grounded reference examples\n"
-        "User question: What is the standard VAT rate in Uganda?\n"
-        "[1] Source: ura_vat_faqs.csv\n"
-        "<passage id=\"p1\">Standard rate of VAT in Uganda is 18% on taxable supplies under the Value Added Tax Act.</passage>\n"
-        "Answer: The standard Value Added Tax (VAT) rate in Uganda is 18% on taxable goods and services [1].\n\n"
-        "User question: What is the resident corporation tax rate?\n"
-        "[1] Source: ura_taxation_handbook.pdf\n"
-        "<passage id=\"p1\">The resident corporation income tax rate is 30% on taxable business profits.</passage>\n"
-        "Answer: The corporation tax rate for resident companies in Uganda is 30% on taxable profit [1]."
-    ),
-    "lg": (
-        "## Grounded reference examples (Luganda)\n"
-        "User question: Kiwalo ki eky'omusolo gwa VAT mu Uganda?\n"
-        "[1] Source: ura_vat_faqs.csv\n"
-        "<passage id=\"p1\">Standard rate of VAT in Uganda is 18% on taxable supplies under the Value Added Tax Act.</passage>\n"
-        "Answer: Omusolo gw'Okwongera ku Muwendo (VAT) mu Uganda gusasulwa ku kigero kya 18% ku bintu n'empeereza ebisasulwako omusolo [1].\n\n"
-        "User question: Omusolo gwa kampuni guli ebitundu bimeka?\n"
-        "[1] Source: ura_taxation_handbook.pdf\n"
-        "<passage id=\"p1\">The resident corporation income tax rate is 30% on taxable business profits.</passage>\n"
-        "Answer: Omusolo gw'amakampuni ag'omu ggwanga (Corporation Tax) guli ebitundu 30% ku magoba agasasulirwako omusolo [1]."
-    ),
-    "sw": (
-        "## Grounded reference examples (Swahili)\n"
-        "User question: Kiwango cha kodi ya ongezeko la thamani (VAT) nchini Uganda ni asilimia ngapi?\n"
-        "[1] Source: ura_vat_faqs.csv\n"
-        "<passage id=\"p1\">Standard rate of VAT in Uganda is 18% on taxable supplies under the Value Added Tax Act.</passage>\n"
-        "Answer: Kiwango cha kawaida cha kodi ya ongezeko la thamani (VAT) nchini Uganda ni 18% kwa bidhaa na huduma zinazotozwa kodi [1].\n\n"
-        "User question: Kodi ya mapato ya makampuni ni kiasi gani nchini Uganda?\n"
-        "[1] Source: ura_taxation_handbook.pdf\n"
-        "<passage id=\"p1\">The resident corporation income tax rate is 30% on taxable business profits.</passage>\n"
-        "Answer: Kiwango cha kodi ya mapato ya makampuni (Corporation Tax) kwa makampuni ya wakaazi ni 30% ya faida inayotozwa kodi [1]."
-    ),
-}
-
-
 def _inject_statutory_precedences(system_content: str) -> str:
     """Inject active statutory precedence rules (Solution C) into system prompt."""
     try:
@@ -847,11 +810,6 @@ def _build_messages(
 
     loc = (locale or "en").strip().lower().split("-")[0]
     can_direct_loc = loc != "en" and can_generate_in_locale(locale)
-    few_shot_loc = loc if can_direct_loc else "en"
-    few_shot = _FEW_SHOT_PROMPTS_BY_LOCALE.get(few_shot_loc)
-    if few_shot:
-        parts.append(few_shot)
-        parts.append("")
 
     # The answer language, stated every time rather than only when it is not
     # English.

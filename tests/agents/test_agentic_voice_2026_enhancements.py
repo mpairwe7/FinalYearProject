@@ -1871,7 +1871,6 @@ def test_phase41_trase_grounding_single_pass_retrieval_and_multilingual_guardrai
     user_block = msgs_nyn[-1]["content"]
     assert "Write the answer in English" in user_block
     assert "Runyankole, or Acholi" in user_block
-    assert "The standard Value Added Tax (VAT) rate in Uganda is 18%" in user_block
 
     # 2. CAN-Bench 2026 cross-lingual prompt-injection & tax-evasion guardrails
     ig = InputGuard()
