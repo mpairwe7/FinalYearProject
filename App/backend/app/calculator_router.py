@@ -1598,7 +1598,7 @@ _RATE_ASK_RE = re.compile(
     r"\b(what(?:'s|\s+is|\s+are)?|how\s+many|current|how\s+much\s+is|how\s+is\b.*\b(?:calculated|computed)|how\s+much\s+tax|how\s+much\s+cut|tell\s+me|kiwango|o?muwendo|e?bitundu|asilimia|ssente\s+mmeka|kiasi\s+gani)\b[^?]*\b(percentages?|ratio|rates?|thresholds?|limits?|bands?|exempt(?:ion|ions)?|relief|penalt(?:y|ies)?|fines?|allowance|days?|due|calculated|computed|kiwango|viwango|o?muwendo|e?kkomo|kikomo|e?bitundu|asilimia|pay|charged|deducted|cut|take|adhabu|okubonerezebwa|siku|nnaku|tarehe)\b"
     r"|\b(rates?|thresholds?|limits?|bands?|exempt(?:ion|ions)?|relief|penalt(?:y|ies)?|fines?|allowance|days?|due|kiwango|viwango|o?muwendo|e?kkomo|kikomo|adhabu|okubonerezebwa|siku|nnaku|tarehe)\s+(of|for|kya|cha|ku|kwa|kye|gwa|bwa|eri)\b"
     r"|\b(e?bitundu\s+bimeka|asilimia\s+ngapi|o?muwendo\s+gwa\s+ssente|ssente\s+mmeka|kiasi\s+gani|nnaku\s+mmeka|siku\s+ngapi|o?muwendo\b.*\bguli\s+gutya|gwa\s+bimeka|gw['’]ameka|y['’]emeka|kiwango\s+ni\s+kipi|kodi\s+ni\s+asilimia\s+ngapi|e?bicweka\s+bingahi|omushoro\b.*\bshangahi|wel\s+mucoro\b.*\badi|mucoro\b.*\btye\s+adi)\b"
-    r"|\bhow\s+is\s+.*(?:calculated|computed|taxed)\b"
+    r"|\bhow\s+is\s+(?:\S.*)?(?:calculated|computed|taxed)\b"
     r"|\bhow\s+much\s+(?:tax|cut)\b[^?]*\b(on|for|pay|charged|deducted|take)\b"
     r"|\b(?:can|is|are|may)\b[^?]*\b(?:import\b|offset\b|claim\b|clear|cleared|exempt|allowed|duty[-\s]?free|concession)\b"
     r"|\b(?:customs\s+valuation|valuation\s+method|hierarchy|hierarchical|sequential|method\s+[1-6]|fallback\s+method|transaction\s+value)\b"

@@ -302,7 +302,7 @@ def figures(text: str, locale: str | None = None) -> set[float]:
     stripped = re.sub(r"(?:^|\s)\d{1,2}[\.\)]\s+", " ", stripped)
     # Strip legal references (e.g. section 40, subsection (4), cap 349, Sura. 339, sehemu 5, Form XII, Fomu 12, Kifungu cha 2, article 1.2, First Schedule, jedwali 2, enteekateeka 2, foomu y'ekitongole 20)
     stripped = re.sub(
-        r"\(?\b(?:sub-?section|section|sehemu|schedule|cap\.?|sura\.?|essuula\.?|enteekateeka\.?|article|clause|jedwali|ratiba|form|fomu|foomu|ekitundu|kitundu|akatundu|kawaayiro|ekiwandiiko|kiwandiiko|kifungu|ibara)\s*(?:[a-zA-Z'\s]{0,20})?\s*\(?(?:[IVXLCDM]+|kumi\s+na\s+\w+|\d+(?:\.\d+)?)\)?\)?",
+        r"\(?\b(?:sub-?section|section|sehemu|schedule|cap\.?|sura\.?|essuula\.?|enteekateeka\.?|article|clause|jedwali|ratiba|form|fomu|foomu|ekitundu|kitundu|akatundu|kawaayiro|ekiwandiiko|kiwandiiko|kifungu|ibara)\s*(?:[a-zA-Z'](?:[a-zA-Z'\s]{0,18}[a-zA-Z'])?\s*)?\(?(?:[IVXLCDM]+|kumi\s+na\s+\w+|\d+(?:\.\d+)?)\)?\)?",
         " ",
         stripped,
         flags=re.IGNORECASE,
@@ -770,11 +770,30 @@ def restore_missing_citations(source: str, translated: str) -> str:
     return res
 
 
+_NUMBER_AT_RE = re.compile(r"\d+(?:,\d{3})*(?:\.\d+)?\b")
+_DIGIT_RUN_RE = re.compile(r"\d+")
+_ASCII_WORD = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+
+
+def _prefix_first_number(text: str, prefix: str) -> str:
+    """``re.sub(r"(?<![a-zA-Z0-9_])(\\d+(?:,\\d{3})*(?:\\.\\d+)?)\\b", prefix + r"\\1", text, count=1)``.
+
+    Tried only where the lookbehind holds, so no digit run is rescanned from inside.
+    """
+    for run in _DIGIT_RUN_RE.finditer(text):
+        for at in range(run.start(), run.end()):
+            if at and text[at - 1] in _ASCII_WORD:
+                continue
+            if (match := _NUMBER_AT_RE.match(text, at)) is not None:
+                return text[:at] + prefix + match.group() + text[match.end() :]
+    return text
+
+
 def restore_missing_units(source: str, translated: str) -> str:
     """If source carried currency (UGX) or percentage unit and translation dropped it, restore."""
     res = translated
     if _CURRENCY_TOKEN_RE.search(source or "") and not _CURRENCY_TOKEN_RE.search(res or ""):
-        res = re.sub(r"(?<![a-zA-Z0-9_])(\d+(?:,\d{3})*(?:\.\d+)?)\b", r"UGX \1", res, count=1)
+        res = _prefix_first_number(res, "UGX ")
     src_pcts = percentages(source)
     if src_pcts and not percentages(res):
         for p in src_pcts:
@@ -855,7 +874,7 @@ def protect_figures(text: str) -> tuple[str, dict[str, str]]:
     clean_text = _CITATION_MARKER_RE.sub(_shield, clean_text)
     # 3. Shield legal references (e.g. section 40, article 1.2, cap 349, First Schedule, jedwali 2)
     clean_text = re.sub(
-        r"\(?\b(?:sub-?section|section|sehemu|schedule|cap\.?|sura\.?|essuula\.?|enteekateeka\.?|article|clause|jedwali|ratiba|form|fomu|foomu|ekitundu|ekiwandiiko|kifungu)\s*(?:[a-zA-Z'\s]{0,20})?\s*\(?(?:[IVXLCDM]+|kumi\s+na\s+\w+|\d+(?:\.\d+)?)\)?\)?",
+        r"\(?\b(?:sub-?section|section|sehemu|schedule|cap\.?|sura\.?|essuula\.?|enteekateeka\.?|article|clause|jedwali|ratiba|form|fomu|foomu|ekitundu|ekiwandiiko|kifungu)\s*(?:[a-zA-Z'](?:[a-zA-Z'\s]{0,18}[a-zA-Z'])?\s*)?\(?(?:[IVXLCDM]+|kumi\s+na\s+\w+|\d+(?:\.\d+)?)\)?\)?",
         _shield,
         clean_text,
         flags=re.IGNORECASE,
