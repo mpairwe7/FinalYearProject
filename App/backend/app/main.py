@@ -1839,7 +1839,7 @@ async def chat_stream(
 ):
     """Server-Sent Events streaming chat — tokens arrive progressively.
 
-    Thin adapter around :func:`service.run_chat_turn`.  Maps the
+    Thin adapter around :func:`pipeline.run_chat_turn`.  Maps the
     transport-agnostic ``(event_type, payload)`` tuples into SSE frames.
     """
     from .rag import pipeline as pipeline_module
