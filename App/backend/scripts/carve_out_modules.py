@@ -196,19 +196,29 @@ def global_uses(nodes: list[ast.stmt]) -> set[str]:
     """Names read from module scope: a function's parameters and locals shadow the module's names."""
     found: set[str] = set()
 
+    def own_scope(fn: ast.AST):
+        """The nodes of fn's own scope: a nested def, class or lambda is named, never entered."""
+        todo = list(fn.body) if isinstance(fn.body, list) else [fn.body]
+        while todo:
+            n = todo.pop()
+            yield n
+            if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                todo.extend(ast.iter_child_nodes(n))
+
     def local_names(fn: ast.AST) -> set[str]:
         args = fn.args
         names = {a.arg for a in [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg] if a}
-        for n in ast.walk(fn):
+        declared_global: set[str] = set()
+        for n in own_scope(fn):
             if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store):
                 names.add(n.id)
-            elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n is not fn:
+            elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 names.add(n.name)
             elif isinstance(n, (ast.Import, ast.ImportFrom)):
                 names |= {(a.asname or a.name).split(".")[0] for a in n.names}
             elif isinstance(n, ast.Global):
-                names -= set(n.names)
-        return names
+                declared_global |= set(n.names)
+        return names - declared_global
 
     def visit(node: ast.AST, shadowed: set[str]) -> None:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
@@ -427,8 +437,8 @@ class Carve:
                 comment = line[line.index("#"):].rstrip("\n") if "#" in line else ""
                 if kept:
                     names = ", ".join(a.name + (f" as {a.asname}" if a.asname else "") for a in kept)
-                    head = ast.unparse(stmt).split(" import ")[0]
-                    rewrites[stmt.lineno] = " " * stmt.col_offset + f"{head} import {names}" + (f"  {comment}" if comment else "") + "\n"
+                    head = "import" if isinstance(stmt, ast.Import) else ast.unparse(stmt).split(" import ")[0] + " import"
+                    rewrites[stmt.lineno] = " " * stmt.col_offset + f"{head} {names}" + (f"  {comment}" if comment else "") + "\n"
                 else:
                     drop_lines.add(stmt.lineno)
             else:
