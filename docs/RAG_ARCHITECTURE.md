@@ -365,7 +365,7 @@ chat's owner (`receptionist/carryover.py`).
 | LLM03 Supply Chain | Pinned deps, Trivy scanning, SBOM, SHA-256 integrity | `requirements.txt`, CI/CD |
 | LLM04 Data Poisoning | Provenance tracking, quality gates, local inference | `governance/`, `ml/pipelines/` |
 | LLM05 Improper Output | XSS strip, HTML sanitize, unsafe schemes; link provenance: every inline, reference, image, autolink, bare or scheme-less URL whose host is not `*.go.ug`, a Tier-1 research host, a corpus host or `OUTPUT_LINK_ALLOWED_HOSTS` is de-linked, and an identifier in a trusted link's query is dropped, per chunk and again on the final reply (G462) | `guardrails.py` → `OutputGuard.sanitize()`, `neutralize_untrusted_links`; `pipeline._apply_output_guards` |
-| LLM07 System Prompt Leakage | Signature phrases synced to the live prompts by test, plus a word 8-gram fingerprint of `generator.SYSTEM_PROMPT` (two shared n-grams = leak; sanctioned refusal/contact text excluded) (G465) | `guardrails.py` → `OutputGuard.check_prompt_leakage()` |
+| LLM07 System Prompt Leakage | Signature phrases synced to the live prompts by test, plus a word 8-gram fingerprint of `prompt_builder.SYSTEM_PROMPT` (two shared n-grams = leak; sanctioned refusal/contact text excluded) (G465) | `guardrails.py` → `OutputGuard.check_prompt_leakage()` |
 | LLM09 Misinformation | Runtime faithfulness scoring, grounding disclaimer, calibrated abstention | `guardrails.py` → `OutputGuard.check_grounding()` |
 | LLM10 Unbounded Consumption | Rate limiting, bearer auth on indexing, semantic cache, per-principal guard-strike cool-down (G464) | `main.py` (slowapi), `rag/cache.py`, `guard_friction.py` |
 
@@ -400,21 +400,28 @@ chat's owner (`receptionist/carryover.py`).
 
 ```
 App/backend/app/
-├── main.py              # FastAPI entry point: 50+ routes, SSE, CORS, rate limiting, auth, lifecycle
+├── main.py              # FastAPI entry point: app, middleware stack, lifespan, the remaining routes; includes the routers below
 │
-├── api/                 # HTTP schemas and modular routers (ADR-0056)
+├── api/                 # HTTP routers, their shared dependencies and schemas (ADR-0056)
+│   ├── rag.py           #   RAG APIs: /v1/chat, /v1/chat/stream, /v1/chat/title, /v2/chat/stream, /tags, /faq/{tag}
+│   ├── documents.py     #   Upload analysis, report and status; /v1/index re-index
+│   ├── health.py        #   /health, /ready, /v1/index/freshness, /metrics
+│   ├── deps.py          #   get_model, get_speech_model and the operator checks shared with main.py
 │   ├── models.py        #   Pydantic v2 schemas (chat, speech, export, auth, feedback)
 │   ├── connectors.py    #   System connector routes (EFRIS, Digital Tax Stamps)
 │   ├── offline.py       #   Offline RAG bundle and delta sync routes
 │   └── quality.py       #   Service-quality audit routes (/v1/admin/quality/*)
 │
 ├── middleware/
-│   └── logger.py        #   Root JSON logging: request id, trace ids, scrubbed attributes and tracebacks
+│   ├── logger.py        #   Root JSON logging: request id, trace ids, scrubbed attributes and tracebacks
+│   ├── rate_limiter.py  #   Shared slowapi limiter (Redis-backed when SLOWAPI_STORAGE_URI is set) and per-route ceilings
+│   └── error_handler.py #   Every 401 carries a WWW-Authenticate: Bearer challenge
 │
 ├── rag/                 # Main RAG flow (ADR-0056)
 │   ├── pipeline.py      #   ChatModel — 12-stage RAG orchestrator + agentic routing
 │   ├── retriever.py     #   HybridRetriever (bge-m3 + BM25 + RRF + rerank) + CircuitBreaker
-│   ├── generator.py     #   Answer generation (local + vLLM + cloud tiers + tool-calling + LoRA)
+│   ├── generator.py     #   Answer generation (local + vLLM + cloud tiers + tool-calling + LoRA) and message assembly
+│   ├── prompt_builder.py #  System and cloud prompts, answer contracts, passage headers and spotlight fencing
 │   ├── query.py         #   Query rewriting (abbreviations, spelling, coreference, lang detect)
 │   ├── hyde.py          #   Hypothetical document embeddings for the dense leg (flag `hyde`, off)
 │   ├── corrective_rag.py #  Corrective re-retrieval + clarification detection
@@ -453,7 +460,8 @@ App/backend/app/
 │   └── postgres.py      #   PostgreSQL backend (opt-in, drop-in substitute for database.py)
 │
 ├── config/
-│   └── flags.py         #   Feature flag registry (91 flags, env-backed, cohort rollout)
+│   ├── flags.py         #   Feature flag registry (91 flags, env-backed, cohort rollout)
+│   └── settings.py      #   API title and version
 │
 ├── topics.py            # G6 conversation topic catalog + persist/follow-up bind
 ├── guardrails.py        # InputGuard + OutputGuard (OWASP LLM Top 10 2025)
