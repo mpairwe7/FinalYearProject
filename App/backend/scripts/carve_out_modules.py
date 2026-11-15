@@ -137,7 +137,7 @@ PROMPTS_SPEC = Spec(
         "rag/prompt_builder.py": (
             "Build prompts: the system prompts, the answer contracts, and how each retrieved passage is labelled and fenced.",
             ["SYSTEM_PROMPT", "CLOUD_SYSTEM_PROMPT", "STRUCTURED_JSON_SUFFIX", "COMPLEX_ANSWER_CONTRACT", "_passage_marker",
-             "_trim_to_tokens", "_FEW_SHOT_PROMPTS_BY_LOCALE", "_HEADER_DATE", "_passage_header", "_spotlight_passage",
+             "_trim_to_tokens", "_HEADER_DATE", "_passage_header", "_spotlight_passage",
              "_fence_system_aside", "TOOL_USE_PROMPT_SUFFIX"],
         ),
     },
@@ -145,7 +145,6 @@ PROMPTS_SPEC = Spec(
         "_passage_header": "passage_header",
         "_spotlight_passage": "spotlight_passage",
         "_fence_system_aside": "fence_system_aside",
-        "_FEW_SHOT_PROMPTS_BY_LOCALE": "FEW_SHOT_PROMPTS_BY_LOCALE",
     },
     imports_after_header=True,
 )

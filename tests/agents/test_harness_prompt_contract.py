@@ -21,7 +21,7 @@ from __future__ import annotations
 import re
 
 import pytest
-from app.rag import pipeline, prompt_builder
+from app.rag import generator, pipeline, prompt_builder
 from app.agents import prompts
 
 _CLOUD = prompt_builder.CLOUD_SYSTEM_PROMPT
@@ -150,6 +150,20 @@ def test_specialist_fragments_state_no_statutory_figure(role: str) -> None:
 
     assert not re.search(r"\d+(?:\.\d+)?\s?%", fragment), role
     assert not re.search(r"\b\d+[- ]day\b", fragment), role
+
+
+@pytest.mark.parametrize("locale", ["en", "lg", "sw"])
+def test_the_answer_prompt_carries_only_the_retrieved_passages(
+    locale: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hard-coded example passage read as one more source for the question (#742)."""
+    monkeypatch.setattr(generator, "can_generate_in_locale", lambda _locale: True)
+    passage = {"text": "VAT is charged on taxable supplies.", "source": "ura_vat_faqs.csv"}
+
+    user = generator._build_messages("Who charges VAT?", [passage], locale=locale)[-1]["content"]
+
+    assert user.count("Source:") == 1, locale
+    assert user.count("<passage") == 1, locale
 
 
 def test_a_leak_of_the_cloud_prompt_is_caught() -> None:

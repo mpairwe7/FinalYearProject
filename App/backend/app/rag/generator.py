@@ -76,7 +76,6 @@ from ..resilience import raise_if_turn_cancelled
 from ..tracing import llm_call
 from .prompt_builder import (
     COMPLEX_ANSWER_CONTRACT,
-    FEW_SHOT_PROMPTS_BY_LOCALE,
     STRUCTURED_JSON_SUFFIX,
     SYSTEM_PROMPT,
     TOOL_USE_PROMPT_SUFFIX,
@@ -542,11 +541,6 @@ def _build_messages(
 
     loc = (locale or "en").strip().lower().split("-")[0]
     can_direct_loc = loc != "en" and can_generate_in_locale(locale)
-    few_shot_loc = loc if can_direct_loc else "en"
-    few_shot = FEW_SHOT_PROMPTS_BY_LOCALE.get(few_shot_loc)
-    if few_shot:
-        parts.append(few_shot)
-        parts.append("")
 
     # The answer language, stated every time rather than only when it is not
     # English.
