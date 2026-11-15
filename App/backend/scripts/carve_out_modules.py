@@ -145,6 +145,7 @@ PROMPTS_SPEC = Spec(
         "_passage_header": "passage_header",
         "_spotlight_passage": "spotlight_passage",
         "_fence_system_aside": "fence_system_aside",
+        "_FEW_SHOT_PROMPTS_BY_LOCALE": "FEW_SHOT_PROMPTS_BY_LOCALE",
     },
     imports_after_header=True,
 )
@@ -166,6 +167,14 @@ def relative(target: str, pkg: str) -> str:
     while common < min(len(t), len(p)) and t[common] == p[common]:
         common += 1
     return "." * (len(p) - common + 1) + ".".join(t[common:])
+
+
+def wrap_import(line: str, width: int = 100) -> str:
+    """One name per line inside parentheses once a from-import passes the repo's line length."""
+    if len(line) <= width or not line.startswith("from ") or "(" in line:
+        return line
+    head, names = line.split(" import ", 1)
+    return f"{head} import (\n" + "".join(f"    {n.strip()},\n" for n in names.split(",")) + ")"
 
 
 def bound_names(stmt: ast.stmt) -> list[str]:
@@ -343,7 +352,7 @@ class Carve:
         third = sorted((i for i in imports if i not in stdlib and not i.split()[1].startswith(".")), key=order)
         local = sorted((i for i in imports if i.split()[1].startswith(".")), key=order)
         head = f'"""{self.spec.plan[module][0]}"""\n\nfrom __future__ import annotations\n\n'
-        head += "\n\n".join("\n".join(group) for group in (stdlib, third, local) if group) + "\n\n"
+        head += "\n\n".join("\n".join(map(wrap_import, group)) for group in (stdlib, third, local) if group) + "\n\n"
         if logger:
             head += "logger = logging.getLogger(__name__)\n"
         if module in self.spec.routers:
@@ -377,7 +386,8 @@ class Carve:
         for name, module in self.home.items():
             if name in still:
                 back.setdefault(module, []).append(self.spec.renames.get(name, name))
-        block = [f"from {relative(dotted(m), self.pkg)} import {', '.join(sorted(n))}" for m, n in sorted(back.items())]
+        block = [wrap_import(f"from {relative(dotted(m), self.pkg)} import {', '.join(sorted(n))}")
+                 for m, n in sorted(back.items())]
         block += self.spec.extra_imports.get(self.spec.source, [])
         insert_at = sum(1 for i in range(1, first) if not any(a <= i <= b for a, b in spans))
         keep[insert_at:insert_at] = [line + "\n" for line in block] + ["\n"]
