@@ -10,7 +10,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from . import database, documents
+from .db import database
+from . import documents
 
 logger = logging.getLogger(__name__)
 

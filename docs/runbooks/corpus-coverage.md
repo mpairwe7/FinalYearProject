@@ -46,7 +46,7 @@ phrased the way contact-centre callers phrase them.
 
 ### `--mode corpus` (the CI gate)
 
-Offline. Drives the keyword + priority + filter path in `app.service` — what
+Offline. Drives the keyword + priority + filter path in `app.rag.pipeline` — what
 production serves from when Qdrant and the LLM are absent. No network, no
 model, no vector store; runs in seconds.
 

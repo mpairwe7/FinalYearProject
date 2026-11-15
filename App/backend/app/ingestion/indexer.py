@@ -1,0 +1,738 @@
+"""JSONL-first indexing pipeline for the local Qdrant vector store.
+
+Every source reaches the index as validated JSONL carrying source hashes and
+stable record ids, so a partial or stale export is rejected rather than
+silently indexed. Three corpora feed it:
+
+* canonical FAQ JSONL exported from ``ura_*_faqs.csv``;
+* normalised teacher-QA JSONL generated from the PDF corpus;
+* hierarchical PDF chunk JSONL exported by :mod:`app.ingestion.pdf_corpus`; and
+* crawled-page chunk JSONL exported by :mod:`app.ingestion.crawl_corpus`.
+
+Evaluation and red-team JSONL are never indexed.
+
+The two chunk corpora need an offline export first (they depend on ``ml/`` and,
+for PDFs, ``pymupdf4llm`` — neither ships in the serving image). Without one
+they are skipped, so a FAQ-only deployment is unaffected.
+
+Usage:
+    python -m app.ingestion.indexer --export-faq-jsonl          # refresh canonical FAQ JSONL
+    python -m app.ingestion.indexer --export-pdf-jsonl          # chunk PDFs → canonical JSONL (offline)
+    python -m app.ingestion.indexer --export-crawl-jsonl        # chunk crawled pages → JSONL (offline)
+    python -m app.ingestion.indexer --recreate                  # index every exported corpus
+    python -m app.ingestion.indexer --faq-jsonl-only            # FAQ JSONL only
+    python -m app.ingestion.indexer --teacher-qa-only           # teacher-QA JSONL only
+    python -m app.ingestion.indexer --pdf-jsonl-only            # PDF chunk JSONL only
+    python -m app.ingestion.indexer --crawl-jsonl-only          # crawl chunk JSONL only
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import logging
+import os
+import re
+import zlib
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "") or None
+QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "ura_knowledge_base")
+# 2026 default: BAAI/bge-m3 multilingual embeddings (1024-dim).
+# Override DENSE_MODEL / DENSE_DIM when re-indexing legacy collections.
+DENSE_MODEL_NAME = os.getenv("DENSE_MODEL", "BAAI/bge-m3")
+DENSE_DIM = int(os.getenv("DENSE_DIM", "1024"))
+# Same knob the query path uses (retriever.RETRIEVER_DENSE_DEVICE), read here
+# rather than imported to keep the indexer free of the retriever's import cost.
+# Without it a bulk build ignored configuration entirely and took whatever
+# SentenceTransformer auto-selected — always cuda:0 — so on a shared multi-GPU
+# host the rebuild landed on GPU 0 no matter what the deployment asked for, and
+# CUDA_VISIBLE_DEVICES was the only way to move it.
+DENSE_DEVICE = os.getenv("RETRIEVER_DENSE_DEVICE", "") or None
+BATCH_SIZE = int(os.getenv("INDEX_BATCH_SIZE", "64"))
+# Build sparse (BM25) vectors only, skipping the dense half. Set this where no
+# torch is available — the collection stays fully queryable there because a BM25
+# query vector is computed from bm25_state.json alone.
+SPARSE_ONLY_INDEX = os.getenv("SPARSE_ONLY_INDEX", "false").lower() in ("1", "true", "yes", "on")
+
+from .._root import APP_DATA_ROOT as _APP_DATA_ROOT
+from .._root import PROJECT_ROOT as _PROJECT_ROOT
+from .faq_corpus import (
+    CorpusValidationError,
+    export_faq_csvs_to_jsonl,
+    ingest_faq_jsonls,
+    ingest_teacher_qa_jsonls,
+)
+from .crawl_corpus import (
+    CRAWL_MANIFEST_NAME,
+    export_crawl_pages_to_jsonl,
+    ingest_crawl_jsonls,
+)
+from .pdf_corpus import (
+    DEFAULT_STATUTORY_PDF_SOURCES_CSV,
+    PDF_MANIFEST_NAME,
+    export_pdf_chunks_to_jsonl,
+    fiscal_year_from_name,
+    harvest_remote_pdfs,
+    ingest_pdf_jsonls,
+)
+
+DATA_DIR = Path(os.getenv("DATA_DIR", str(_APP_DATA_ROOT / "dataset")))
+FAQ_JSONL_DIR = Path(os.getenv("FAQ_JSONL_DIR", str(_APP_DATA_ROOT / "faq_jsonl")))
+TEACHER_QA_DIR = Path(os.getenv("TEACHER_QA_DIR", str(_APP_DATA_ROOT / "teacher_qa")))
+# Tracked PDFs live at the repository root (`Data/pdfs`), matching `Data/crawl/pages`.
+_DEFAULT_PDF_DIR = (
+    _PROJECT_ROOT / "Data" / "pdfs"
+    if (_PROJECT_ROOT / "Data" / "pdfs").is_dir()
+    else _APP_DATA_ROOT / "pdfs"
+)
+PDF_DIR = Path(os.getenv("PDF_DIR", str(_DEFAULT_PDF_DIR)))
+PDF_JSONL_DIR = Path(os.getenv("PDF_JSONL_DIR", str(_APP_DATA_ROOT / "pdf_jsonl")))
+# The crawl lives at the repository root (it is committed), not under App/Data.
+CRAWL_PAGES_DIR = Path(os.getenv("CRAWL_PAGES_DIR", str(_PROJECT_ROOT / "Data" / "crawl" / "pages")))
+CRAWL_JSONL_DIR = Path(os.getenv("CRAWL_JSONL_DIR", str(_APP_DATA_ROOT / "crawl_jsonl")))
+BM25_STATE_PATH = Path(
+    os.getenv("BM25_STATE_PATH", str(_APP_DATA_ROOT.parent / "Model" / "bm25_state.json"))
+)
+
+
+# ---------------------------------------------------------------------------
+# Index builder
+# ---------------------------------------------------------------------------
+def _build_contextual_prefix(doc: dict[str, Any]) -> str:
+    """Generate an Anthropic Contextual Retrieval prefix from document metadata."""
+    parts = []
+    title = doc.get("title") or doc.get("source") or ""
+    if title:
+        parts.append(f"Document: {Path(str(title)).stem.replace('_', ' ').title()}")
+    category = doc.get("category") or doc.get("tag") or doc.get("tax_head")
+    if category:
+        parts.append(f"Domain: {str(category).replace('_', ' ').title()}")
+    fy = doc.get("fiscal_year")
+    if fy:
+        parts.append(f"Scope: {fy}")
+    if not parts:
+        return ""
+    return "[" + " | ".join(parts) + "]\n"
+
+
+def _embedding_text(doc: dict[str, Any]) -> str:
+    """Return the text to embed and BM25-fit for *doc*.
+
+    Anthropic Contextual Retrieval standard (2026):
+    Prepend a situational contextual prefix (document, domain, fiscal year)
+    to the body for embedding and BM25 indexing, while keeping doc["text"] clean
+    for display and citation generation. When multilingual FAQ fields
+    (``question_lg``, ``question_sw``, ``question_nyn``, ``question_ach``) are
+    present on *doc*, they are appended to the embedding input so ``BAAI/bge-m3``
+    and ``BM25SparseEncoder`` index native vernacular phrasing directly (HS-4).
+    """
+    if doc.get("embed_text"):
+        return doc["embed_text"]
+    prefix = _build_contextual_prefix(doc)
+    base = (prefix + doc["text"]).strip() if prefix else doc["text"]
+    vernacular_lines: list[str] = []
+    for field_name, label in (
+        ("question_lg", "Luganda"),
+        ("question_sw", "Swahili"),
+        ("question_nyn", "Runyankole"),
+        ("question_ach", "Acholi"),
+    ):
+        val = str(doc.get(field_name) or "").strip()
+        if val:
+            vernacular_lines.append(f"{label}: {val}")
+    if vernacular_lines:
+        return f"{base}\n" + "\n".join(vernacular_lines)
+    return base
+
+
+_FY_BOUNDS_RE = re.compile(r"^FY(\d{4})-(\d{2,4})$", re.IGNORECASE)
+_MONTH_MAP: dict[str, int] = {
+    "january": 1, "jan": 1, "february": 2, "feb": 2, "march": 3, "mar": 3,
+    "april": 4, "apr": 4, "may": 5, "june": 6, "jun": 6, "july": 7, "jul": 7,
+    "august": 8, "aug": 8, "september": 9, "sep": 9, "october": 10, "oct": 10,
+    "november": 11, "nov": 11, "december": 12, "dec": 12,
+}
+_PROVISION_EFFECTIVE_DATE_RE = re.compile(
+    r"\b(?:with\s+effect\s+from|effective(?:\s+from|\s+on)?|commencing(?:\s+on)?)\s+"
+    r"(?:(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\s+(20\d{2})|(20\d{2}-\d{2}-\d{2}))\b",
+    re.IGNORECASE,
+)
+
+
+def extract_provision_effective_date(text: str) -> str:
+    """Extract a validated ISO-8601 calendar effective date from statutory prose if stated (HS-5)."""
+    import datetime as _dt
+
+    match = _PROVISION_EFFECTIVE_DATE_RE.search(text or "")
+    if not match:
+        return ""
+    if match.group(4):
+        try:
+            return _dt.date.fromisoformat(match.group(4)).isoformat()
+        except ValueError:
+            return ""
+    day_s, month_s, year_s = match.group(1), match.group(2), match.group(3)
+    month_num = _MONTH_MAP.get((month_s or "").lower())
+    if not month_num or not day_s or not year_s:
+        return ""
+    try:
+        return _dt.date(int(year_s), month_num, int(day_s)).isoformat()
+    except ValueError:
+        return ""
+
+
+def fiscal_year_validity_bounds(fiscal_year: str) -> tuple[str, str]:
+    """Return ISO-8601 ``(valid_from, valid_to)`` bounds for a Ugandan fiscal year (1 July – 30 June).
+
+    Models explicit effective-date validity in the index payload (G294) so
+    point-in-time ('as of') queries can filter or rank by statutory validity
+    window rather than relying on string labels alone.
+    """
+    m = _FY_BOUNDS_RE.match(str(fiscal_year or "").strip())
+    if not m:
+        return "", ""
+    start_year = int(m.group(1))
+    end_part = m.group(2)
+    end_year = int(f"{str(start_year)[:2]}{end_part}") if len(end_part) == 2 else int(end_part)
+    if end_year < start_year:
+        end_year = start_year + 1
+    return f"{start_year:04d}-07-01", f"{end_year:04d}-06-30"
+
+
+def annotate_fiscal_year(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Ensure every vector document carries ``fiscal_year`` and effective-date bounds (G294), in place.
+
+    PDF chunks already record the edition their source PDF declares. FAQ and
+    teacher-QA rows do not, so it is derived from the source filename here —
+    the indexer is where the corpora are composed, which keeps
+    :mod:`app.ingestion.faq_corpus` free of a dependency on :mod:`app.ingestion.pdf_corpus` and
+    leaves the validated FAQ JSONL schema untouched.
+
+    Idempotent: an existing value is never overwritten. An empty value means
+    *unknown*, which :func:`app.rag.retriever.fiscal_year_rank` treats as
+    "do not rank", not as "old".
+    """
+    for doc in documents:
+        if not doc.get("fiscal_year"):
+            doc["fiscal_year"] = fiscal_year_from_name(Path(doc.get("source", "")).stem)
+        fy = str(doc.get("fiscal_year") or "")
+        v_from, v_to = fiscal_year_validity_bounds(fy)
+        if not doc.get("valid_from"):
+            prov_from = extract_provision_effective_date(str(doc.get("text") or ""))
+            doc["valid_from"] = prov_from or v_from
+        if not doc.get("valid_to"):
+            doc["valid_to"] = v_to
+        if "superseded_by" not in doc:
+            doc["superseded_by"] = ""
+    return documents
+
+
+def _vector_payload(doc: dict[str, Any]) -> dict[str, Any]:
+    """Return the Qdrant payload for *doc*.
+
+    ``embed_text`` is an input to embedding rather than retrievable content, so
+    keeping it would store every chunk body twice per point.
+    """
+    return {k: v for k, v in doc.items() if k != "embed_text"}
+
+
+def _write_bm25_state(path: Path, state: dict[str, Any]) -> None:
+    """Atomically persist a BM25 state file for legacy/offline consumers."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w") as fh:
+        json.dump(state, fh, sort_keys=True)
+        fh.write("\n")
+    tmp.replace(path)
+
+
+def _packed_bm25_state(state: dict[str, Any]) -> str:
+    """Compact BM25 state embedded in the Qdrant binding sentinel.
+
+    A staged collection can be promoted by changing one Qdrant alias. Keeping
+    the sparse encoder state beside that collection means a running retriever
+    can load the matching state after the alias swap; it never has to pair a
+    new sparse index with an old local ``bm25_state.json``.
+    """
+    raw = json.dumps(state, separators=(",", ":"), sort_keys=True).encode()
+    return base64.b64encode(zlib.compress(raw, level=9)).decode("ascii")
+
+
+#: Payload fields a query or a corpus sync filters on: the explicit fiscal-year
+#: filter, the caller's doc_type/tag/tax_type filters, and corpus_sync's
+#: source/doc_family deletes. Qdrant asks for an index on every filtered field.
+#: Without one the HNSW search checks the condition point by point, and a
+#: restrictive filter — one fiscal year's edition — can leave the graph
+#: disconnected and lose recall; with one the planner can estimate the
+#: filter's cardinality and use a filter-aware graph or an exact scan instead.
+FILTERED_PAYLOAD_FIELDS: tuple[str, ...] = (
+    "fiscal_year",
+    "doc_type",
+    "tax_type",
+    "tag",
+    "source",
+    "chunk_id",
+    "doc_family",
+)
+
+
+def ensure_payload_indexes(client: Any, collection: str) -> list[str]:
+    """Create the keyword payload indexes *collection* lacks; return the fields indexed.
+
+    Idempotent, so it serves a fresh build and a backfill of a collection built
+    before these indexes existed (``python -m app.ingestion.indexer --ensure-payload-indexes``).
+    A failure is logged, not raised: an unindexed collection is slower and less
+    exact under filters, which is no reason to abandon a build.
+    """
+    from qdrant_client import models
+
+    try:
+        existing = set((client.get_collection(collection).payload_schema or {}).keys())
+    except Exception:
+        existing = set()
+    created: list[str] = []
+    for field_name in FILTERED_PAYLOAD_FIELDS:
+        if field_name in existing:
+            continue
+        try:
+            client.create_payload_index(
+                collection_name=collection,
+                field_name=field_name,
+                field_schema=models.PayloadSchemaType.KEYWORD,
+                wait=True,
+            )
+        except Exception:
+            logger.warning("Could not create payload index %s on %s", field_name, collection, exc_info=True)
+            continue
+        created.append(field_name)
+    if created:
+        logger.info("Created payload indexes on %s: %s", collection, ", ".join(created))
+    return created
+
+
+def load_dense_model(device: str | None = None):
+    """Load the dense embedding model on the configured device.
+
+    Split out so the device decision is one testable place rather than a branch
+    buried in the middle of the build. *device* defaults to
+    :data:`DENSE_DEVICE`; an unavailable accelerator degrades to CPU the way
+    ``rag/retriever.py`` does, but an explicit CPU request that fails stays fatal —
+    there is no lower rung, and masking it would produce a build with no
+    vectors instead of an error.
+    """
+    from sentence_transformers import SentenceTransformer
+
+    target = DENSE_DEVICE if device is None else device
+    try:
+        model = SentenceTransformer(DENSE_MODEL_NAME, device=target)
+    except Exception:
+        if target in (None, "cpu"):
+            raise
+        logger.warning("Dense index device %s unavailable; falling back to CPU", target, exc_info=True)
+        model = SentenceTransformer(DENSE_MODEL_NAME, device="cpu")
+    logger.info("Dense index model on device: %s", getattr(model, "device", "unknown"))
+    return model
+
+
+def build_index(
+    documents: list[dict[str, Any]],
+    recreate: bool = False,
+    *,
+    collection_name: str | None = None,
+    binding_collection_name: str | None = None,
+    bm25_state_path: Path | None = None,
+    source_corpus_hash: str = "",
+) -> dict[str, Any]:
+    """Embed *documents* and upsert into Qdrant with dense + sparse vectors.
+
+    Returns indexing statistics.
+    """
+    from qdrant_client import QdrantClient, models
+
+    from ..rag.retriever import (
+        BM25SparseEncoder,
+        bm25_binding_sentinel_id,
+        deterministic_point_id,
+    )
+
+    # Sparse-only builds exist so the collection can be created inside an image
+    # that has no torch (Crane Cloud / HF Space sidecar). A BM25 query vector
+    # needs no model, so a sparse-only collection still serves the whole corpus;
+    # a dense one would be unqueryable there because the *query* could not be
+    # encoded.
+    dense_model = None
+    if SPARSE_ONLY_INDEX:
+        logger.info("SPARSE_ONLY_INDEX=true — building sparse vectors only")
+    else:
+        dense_model = load_dense_model()
+
+    collection = collection_name or QDRANT_COLLECTION
+    binding_collection = binding_collection_name or collection
+    state_path = bm25_state_path or BM25_STATE_PATH
+    client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=30)
+
+    # -- Collection management -----------------------------------------------
+    existing = [c.name for c in client.get_collections().collections]
+    if recreate and collection in existing:
+        client.delete_collection(collection)
+        logger.info("Deleted existing collection '%s'", collection)
+
+    if collection not in existing or recreate:
+        quantization_cfg = None
+        if not SPARSE_ONLY_INDEX and os.getenv("QDRANT_QUANTIZATION_ENABLED", "true").lower() == "true":
+            try:
+                quantization_cfg = models.ScalarQuantization(
+                    scalar=models.ScalarQuantizationConfig(
+                        type=models.ScalarType.INT8,
+                        quantile=0.99,
+                        always_ram=True,
+                    )
+                )
+            except Exception:
+                logger.debug("ScalarQuantization configuration not supported by current qdrant client")
+
+        client.create_collection(
+            collection_name=collection,
+            vectors_config=(
+                {}
+                if SPARSE_ONLY_INDEX
+                else {
+                    "dense": models.VectorParams(
+                        size=DENSE_DIM,
+                        distance=models.Distance.COSINE,
+                    ),
+                }
+            ),
+            sparse_vectors_config={
+                "sparse": models.SparseVectorParams(
+                    index=models.SparseIndexParams(on_disk=False),
+                ),
+            },
+            quantization_config=quantization_cfg,
+        )
+        logger.info(
+            "Created Qdrant collection '%s' (%s)",
+            collection,
+            "sparse only" if SPARSE_ONLY_INDEX else f"dense {DENSE_DIM}d + sparse",
+        )
+    ensure_payload_indexes(client, collection)
+
+    # -- BM25 sparse encoder -------------------------------------------------
+    # Fitted on the same text that gets embedded, so dense and sparse retrieval
+    # see an identical view of the corpus.
+    texts = [_embedding_text(d) for d in documents]
+    sparse_encoder = BM25SparseEncoder().fit(texts)
+
+    bm25_state = sparse_encoder.to_dict()
+    _write_bm25_state(state_path, bm25_state)
+    logger.info("Saved BM25 state to %s", state_path)
+
+    # -- Batch embed + upsert ------------------------------------------------
+    total_upserted = 0
+    for i in range(0, len(documents), BATCH_SIZE):
+        batch = documents[i : i + BATCH_SIZE]
+        batch_texts = [_embedding_text(d) for d in batch]
+
+        dense_embeddings = (
+            None if dense_model is None else dense_model.encode(batch_texts, show_progress_bar=False)
+        )
+
+        points: list[models.PointStruct] = []
+        for j, doc in enumerate(batch):
+            sparse_idx, sparse_val = sparse_encoder.encode_document(_embedding_text(doc))
+            vectors: dict[str, Any] = {}
+            if dense_embeddings is not None:
+                vectors["dense"] = dense_embeddings[j].tolist()
+            if sparse_idx:
+                vectors["sparse"] = models.SparseVector(indices=sparse_idx, values=sparse_val)
+
+            payload = _vector_payload(doc)
+            points.append(
+                models.PointStruct(
+                    id=deterministic_point_id(doc),
+                    vector=vectors,
+                    payload=payload,
+                )
+            )
+
+        client.upsert(collection_name=collection, points=points)
+        total_upserted += len(points)
+        logger.info(
+            "Upserted batch %d–%d (%d/%d)",
+            i,
+            i + len(batch),
+            total_upserted,
+            len(documents),
+        )
+
+    # Stamp the corpus hash into Qdrant so the retriever can detect a
+    # bm25_state.json that is out of sync with these vectors (P1-6).
+    client.upsert(
+        collection_name=collection,
+        points=[
+            models.PointStruct(
+                id=bm25_binding_sentinel_id(binding_collection),
+                vector={} if SPARSE_ONLY_INDEX else {"dense": [0.0] * DENSE_DIM},
+                payload={
+                    "_meta": "bm25_binding",
+                    "corpus_hash": sparse_encoder.corpus_hash,
+                    "source_corpus_hash": source_corpus_hash,
+                    "bm25_state_zlib": _packed_bm25_state(bm25_state),
+                    # Dense-side binding: querying a bge-m3 collection with a
+                    # different encoder returns confident nonsense rather than
+                    # an error, so the retriever verifies this at init. Omitted
+                    # for a sparse-only collection — claiming an encoder that
+                    # never ran would make the check assert a false fact.
+                    **(
+                        {}
+                        if SPARSE_ONLY_INDEX
+                        else {"dense_model": DENSE_MODEL_NAME, "dense_dim": DENSE_DIM}
+                    ),
+                },
+            )
+        ],
+    )
+
+    stats = {
+        "collection": collection,
+        "binding_collection": binding_collection,
+        "source_corpus_hash": source_corpus_hash,
+        "total_documents": len(documents),
+        "total_upserted": total_upserted,
+        "faq_jsonl_documents": sum(1 for d in documents if d["doc_type"] == "faq_jsonl"),
+        "teacher_qa_jsonl_documents": sum(
+            1 for d in documents if d["doc_type"] == "teacher_qa_jsonl"
+        ),
+        "pdf_chunk_documents": sum(1 for d in documents if d["doc_type"] == "pdf_chunk"),
+        "crawl_chunk_documents": sum(1 for d in documents if d["doc_type"] == "crawl_chunk"),
+    }
+    logger.info("Indexing complete: %s", stats)
+    return stats
+
+
+def load_documents(
+    *,
+    only: str | None = None,
+    csv_dir: Path = DATA_DIR,
+    faq_jsonl_dir: Path = FAQ_JSONL_DIR,
+    teacher_qa_dir: Path = TEACHER_QA_DIR,
+    pdf_dir: Path = PDF_DIR,
+    pdf_jsonl_dir: Path = PDF_JSONL_DIR,
+    crawl_pages_dir: Path = CRAWL_PAGES_DIR,
+    crawl_jsonl_dir: Path = CRAWL_JSONL_DIR,
+) -> list[dict[str, Any]]:
+    """Load the validated corpus set used by both direct and staged builds."""
+    corpora: list[tuple[str, Path | None, Any]] = [
+        ("faq", None, lambda: ingest_faq_jsonls(csv_dir, faq_jsonl_dir)),
+        ("teacher_qa", None, lambda: ingest_teacher_qa_jsonls(teacher_qa_dir)),
+        ("pdf", pdf_jsonl_dir / PDF_MANIFEST_NAME, lambda: ingest_pdf_jsonls(pdf_dir, pdf_jsonl_dir)),
+        (
+            "crawl",
+            crawl_jsonl_dir / CRAWL_MANIFEST_NAME,
+            lambda: ingest_crawl_jsonls(crawl_pages_dir, crawl_jsonl_dir),
+        ),
+    ]
+    documents: list[dict[str, Any]] = []
+    for name, manifest_path, ingest in corpora:
+        if only is not None and only != name:
+            continue
+        if only is None and manifest_path is not None and not manifest_path.is_file():
+            logger.info("%s corpus skipped (no export at %s)", name, manifest_path.parent)
+            continue
+        rows = ingest()
+        logger.info("%s corpus: %d documents", name, len(rows))
+        documents.extend(rows)
+    if not documents:
+        raise CorpusValidationError(
+            "No FAQ, teacher-QA, PDF-chunk or crawl-chunk JSONL documents to index"
+        )
+    return annotate_fiscal_year(documents)
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
+def main() -> None:
+    import argparse
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    )
+
+    parser = argparse.ArgumentParser(
+        description="Index validated FAQ, teacher-QA and PDF-chunk JSONL into Qdrant"
+    )
+    source_group = parser.add_mutually_exclusive_group()
+    source_group.add_argument("--faq-jsonl-only", action="store_true")
+    source_group.add_argument("--teacher-qa-only", action="store_true")
+    source_group.add_argument("--pdf-jsonl-only", action="store_true")
+    source_group.add_argument("--crawl-jsonl-only", action="store_true")
+    parser.add_argument("--export-faq-jsonl", action="store_true")
+    parser.add_argument(
+        "--export-pdf-jsonl",
+        action="store_true",
+        help="Chunk every PDF into canonical JSONL (offline; needs ml/ + pymupdf4llm)",
+    )
+    parser.add_argument(
+        "--export-crawl-jsonl",
+        action="store_true",
+        help="Chunk the newest capture of every substantive crawled page (offline; needs ml/)",
+    )
+    parser.add_argument(
+        "--download-pdfs",
+        action="store_true",
+        help="Retrieve/download statutory & 10-MDA PDFs from --pdf-source-urls into --pdf-dir before export/indexing",
+    )
+    parser.add_argument(
+        "--no-mda-sources",
+        action="store_true",
+        help="When --download-pdfs is set, skip the 10 high-dependency MDA statutory/fee PDF sources",
+    )
+    parser.add_argument(
+        "--pdf-source-urls",
+        type=str,
+        default=os.getenv("PDF_SOURCE_URLS", DEFAULT_STATUTORY_PDF_SOURCES_CSV),
+        help=(
+            "Comma-separated HTTPS statutory portal URLs to harvest PDFs from "
+            f"(default: {DEFAULT_STATUTORY_PDF_SOURCES_CSV})"
+        ),
+    )
+    parser.add_argument("--recreate", action="store_true", help="Drop and recreate collection")
+    parser.add_argument(
+        "--ensure-payload-indexes",
+        action="store_true",
+        help="Create any missing payload indexes on the live collection (or alias) and exit",
+    )
+    parser.add_argument("--csv-dir", type=str, default=str(DATA_DIR))
+    parser.add_argument("--faq-jsonl-dir", type=str, default=str(FAQ_JSONL_DIR))
+    parser.add_argument("--teacher-qa-dir", type=str, default=str(TEACHER_QA_DIR))
+    parser.add_argument("--pdf-dir", type=str, default=str(PDF_DIR))
+    parser.add_argument("--pdf-jsonl-dir", type=str, default=str(PDF_JSONL_DIR))
+    parser.add_argument("--crawl-pages-dir", type=str, default=str(CRAWL_PAGES_DIR))
+    parser.add_argument("--crawl-jsonl-dir", type=str, default=str(CRAWL_JSONL_DIR))
+    args = parser.parse_args()
+
+    if args.ensure_payload_indexes:
+        from qdrant_client import QdrantClient
+
+        from ..vectorstore.index_lifecycle import alias_target
+
+        client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=30)
+        target = alias_target(client, QDRANT_COLLECTION) or QDRANT_COLLECTION
+        logger.info("Payload indexes created on %s: %s", target, ensure_payload_indexes(client, target) or "none missing")
+        return
+
+    csv_dir = Path(args.csv_dir)
+    faq_jsonl_dir = Path(args.faq_jsonl_dir)
+    teacher_qa_dir = Path(args.teacher_qa_dir)
+    pdf_dir = Path(args.pdf_dir)
+    pdf_jsonl_dir = Path(args.pdf_jsonl_dir)
+    crawl_pages_dir = Path(args.crawl_pages_dir)
+    crawl_jsonl_dir = Path(args.crawl_jsonl_dir)
+
+    if args.download_pdfs:
+        try:
+            mirror_dirs = (
+                [_APP_DATA_ROOT / "pdfs"]
+                if (_APP_DATA_ROOT / "pdfs").resolve() != pdf_dir.resolve()
+                else []
+            )
+            harvest_stats = harvest_remote_pdfs(
+                pdf_dir,
+                source_urls=args.pdf_source_urls,
+                include_mda_sources=not args.no_mda_sources,
+                mirror_dirs=mirror_dirs,
+            )
+            logger.info("Statutory PDF harvest complete: %s", harvest_stats)
+            if not args.export_pdf_jsonl:
+                logger.info(
+                    "PDF chunk JSONL export complete: %s",
+                    export_pdf_chunks_to_jsonl(pdf_dir, pdf_jsonl_dir),
+                )
+        except CorpusValidationError as exc:
+            logger.error("Statutory PDF harvest/export failed: %s", exc)
+            raise SystemExit(2) from exc
+
+    if args.export_faq_jsonl or args.export_pdf_jsonl or args.export_crawl_jsonl:
+        try:
+            if args.export_faq_jsonl:
+                logger.info("FAQ JSONL export complete: %s", export_faq_csvs_to_jsonl(csv_dir, faq_jsonl_dir))
+            if args.export_pdf_jsonl:
+                logger.info(
+                    "PDF chunk JSONL export complete: %s",
+                    export_pdf_chunks_to_jsonl(pdf_dir, pdf_jsonl_dir),
+                )
+            if args.export_crawl_jsonl:
+                logger.info(
+                    "Crawl chunk JSONL export complete: %s",
+                    export_crawl_pages_to_jsonl(crawl_pages_dir, crawl_jsonl_dir),
+                )
+        except CorpusValidationError as exc:
+            logger.error("Corpus export failed: %s", exc)
+            raise SystemExit(2) from exc
+        if not args.recreate and not (
+            args.faq_jsonl_only or args.teacher_qa_only or args.pdf_jsonl_only or args.crawl_jsonl_only
+        ):
+            return
+
+    # At most one --*-only flag is accepted (mutually exclusive group); it pins
+    # the run to a single corpus. Otherwise every corpus is indexed, except that
+    # PDF and crawl chunks require an export first — a missing export is "not
+    # configured" rather than an error, so FAQ-only deployments keep working
+    # unchanged, while an explicit --pdf-jsonl-only/--crawl-jsonl-only still
+    # fails loudly with the command to run.
+    only = next(
+        (
+            name
+            for name, selected in (
+                ("faq", args.faq_jsonl_only),
+                ("teacher_qa", args.teacher_qa_only),
+                ("pdf", args.pdf_jsonl_only),
+                ("crawl", args.crawl_jsonl_only),
+            )
+            if selected
+        ),
+        None,
+    )
+    try:
+        documents = load_documents(
+            only=only,
+            csv_dir=csv_dir,
+            faq_jsonl_dir=faq_jsonl_dir,
+            teacher_qa_dir=teacher_qa_dir,
+            pdf_dir=pdf_dir,
+            pdf_jsonl_dir=pdf_jsonl_dir,
+            crawl_pages_dir=crawl_pages_dir,
+            crawl_jsonl_dir=crawl_jsonl_dir,
+        )
+    except CorpusValidationError as exc:
+        logger.error("Corpus validation failed: %s", exc)
+        raise SystemExit(2) from exc
+
+    source_corpus_hash = ""
+    try:
+        from ..freshness import snapshot_sources
+
+        source_corpus_hash = str(snapshot_sources().get("corpus_hash") or "")
+    except Exception:
+        logger.warning("Could not calculate source corpus hash", exc_info=True)
+    build_index(documents, recreate=args.recreate, source_corpus_hash=source_corpus_hash)
+    try:
+        from ..freshness import write_snapshot
+
+        write_snapshot()
+    except Exception:
+        logger.warning("Could not write index freshness snapshot", exc_info=True)
+
+
+if __name__ == "__main__":
+    main()

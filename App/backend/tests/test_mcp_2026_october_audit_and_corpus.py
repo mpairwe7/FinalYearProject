@@ -18,7 +18,7 @@ from app.mcp.validation import (
     inspect_descriptor_integrity,
     screen_tool_result,
 )
-from app.pdf_corpus import PDF_MANIFEST_NAME
+from app.ingestion.pdf_corpus import PDF_MANIFEST_NAME
 from app.tax import tables
 from app.tools import ToolRegistry
 
@@ -80,8 +80,8 @@ class MCP2026OctoberAuditTests(unittest.TestCase):
 
     def test_in_process_transport_propagates_verified_user_and_tenant_to_memory_tools(self) -> None:
         with (
-            patch("app.database.has_active_consent", return_value=True),
-            patch("app.database.execute", return_value=1) as mock_exec,
+            patch("app.db.database.has_active_consent", return_value=True),
+            patch("app.db.database.execute", return_value=1) as mock_exec,
         ):
             store_res = get_client().call_tool(
                 "memory_store",

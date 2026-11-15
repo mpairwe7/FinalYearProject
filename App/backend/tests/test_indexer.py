@@ -1,8 +1,8 @@
-"""Regression tests for the JSONL-first indexing pipeline (backend/app/indexer.py).
+"""Regression tests for the JSONL-first indexing pipeline (backend/app/ingestion/indexer.py).
 
 The chunking that used to live here moved to ``ml.scripts.data_aug.chunkers``
 (structure-preserving, exercised by ``tests/test_data_augmentation.py``) and
-reaches the index through ``app.pdf_corpus``. What remains indexer-owned is how
+reaches the index through ``app.ingestion.pdf_corpus``. What remains indexer-owned is how
 a vector document is turned into embedding input and a Qdrant payload.
 """
 
@@ -13,8 +13,8 @@ import types
 import unittest
 from unittest import mock
 
-from app import indexer
-from app.indexer import _embedding_text, _vector_payload, annotate_fiscal_year
+from app.ingestion import indexer
+from app.ingestion.indexer import _embedding_text, _vector_payload, annotate_fiscal_year
 
 
 class EmbeddingTextTests(unittest.TestCase):
@@ -111,7 +111,7 @@ class DenseDeviceSelectionTests(unittest.TestCase):
     ``SentenceTransformer`` defaults to ``cuda:0`` whenever any CUDA device is
     visible. On a shared multi-GPU host that meant a rebuild always seized GPU 0
     — the busiest card — no matter what ``RETRIEVER_DENSE_DEVICE`` said, and the
-    only way to move it was ``CUDA_VISIBLE_DEVICES``. ``retriever.py`` has always
+    only way to move it was ``CUDA_VISIBLE_DEVICES``. ``rag/retriever.py`` has always
     passed the setting through; the indexer had not.
     """
 

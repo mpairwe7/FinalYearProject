@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.service import _promote_equivalent_faq_hits, faq_question_equivalence
+from app.rag.pipeline import _promote_equivalent_faq_hits, faq_question_equivalence
 
 
 def _faq(question: str, source: str = "ura_x_faqs.csv") -> dict:

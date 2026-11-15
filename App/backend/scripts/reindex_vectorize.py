@@ -40,9 +40,9 @@ import httpx
 # Make `app` importable when run from App/backend/scripts/.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.faq_corpus import CorpusValidationError  # noqa: E402
-from app.crawl_corpus import CRAWL_MANIFEST_NAME, ingest_crawl_jsonls  # noqa: E402
-from app.indexer import (  # noqa: E402
+from app.ingestion.faq_corpus import CorpusValidationError  # noqa: E402
+from app.ingestion.crawl_corpus import CRAWL_MANIFEST_NAME, ingest_crawl_jsonls  # noqa: E402
+from app.ingestion.indexer import (  # noqa: E402
     CRAWL_JSONL_DIR,
     CRAWL_PAGES_DIR,
     DATA_DIR,
@@ -56,10 +56,10 @@ from app.indexer import (  # noqa: E402
     ingest_pdf_jsonls,
     ingest_teacher_qa_jsonls,
 )
-from app.pdf_corpus import PDF_MANIFEST_NAME  # noqa: E402
+from app.ingestion.pdf_corpus import PDF_MANIFEST_NAME  # noqa: E402
 from app.providers import config as cfg  # noqa: E402
 from app.providers import gateway as gw  # noqa: E402
-from app.retriever import deterministic_point_id  # noqa: E402
+from app.rag.retriever import deterministic_point_id  # noqa: E402
 
 EMBED_BATCH = int(os.getenv("INDEX_BATCH_SIZE", "32"))
 WRANGLER = os.getenv("WRANGLER_BIN", "wrangler")
@@ -86,7 +86,7 @@ def load_documents(*, allow_partial: bool = False) -> list[dict]:
     absent = [(label, flag) for label, manifest, flag in optional if not manifest.is_file()]
     if absent and not allow_partial:
         detail = "\n".join(
-            f"  - {label} corpus not exported; run: python -m app.indexer {flag}"
+            f"  - {label} corpus not exported; run: python -m app.ingestion.indexer {flag}"
             for label, flag in absent
         )
         sys.exit(

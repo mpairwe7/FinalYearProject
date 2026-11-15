@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from app import service as service_module
+from app.rag import pipeline as pipeline_module
 from app.guardrails import OutputGuard
 
 
@@ -26,11 +26,11 @@ def test_a_streamed_turn_keeps_the_tin_the_taxpayer_typed(monkeypatch) -> None:
         yield ("token", in_thread)
         yield ("token", OutputGuard.redact_pii(" Again: 1000000001."))
 
-    monkeypatch.setattr(service_module, "_run_chat_turn_events", core)
+    monkeypatch.setattr(pipeline_module, "_run_chat_turn_events", core)
 
     async def collect() -> str:
         text = []
-        async for event, payload in service_module.run_chat_turn(
+        async for event, payload in pipeline_module.run_chat_turn(
             object(), message="What does EFRIS hold for TIN 1000000001?"
         ):
             if event == "token":
@@ -64,7 +64,7 @@ def test_the_sse_adapter_keeps_the_stated_tin_and_redacts_another(monkeypatch) -
     from app.main import app
     from starlette.testclient import TestClient
 
-    monkeypatch.setattr(service_module, "run_chat_turn", _core_repeating_tins)
+    monkeypatch.setattr(pipeline_module, "run_chat_turn", _core_repeating_tins)
     app.state.model = mock.MagicMock(name="chat_model")
 
     response = TestClient(app).post("/v1/chat/stream", json={"message": _STATED})
@@ -84,7 +84,7 @@ def test_the_websocket_adapter_keeps_the_stated_tin_and_redacts_another(monkeypa
     from starlette.testclient import TestClient
 
     monkeypatch.setenv("FLAG_WS_CHAT", "true")
-    monkeypatch.setattr(chat_ws_v2.service_module, "run_chat_turn", _core_repeating_tins)
+    monkeypatch.setattr(chat_ws_v2.pipeline_module, "run_chat_turn", _core_repeating_tins)
     app.state.model = mock.MagicMock(name="chat_model")
 
     deltas: list[str] = []

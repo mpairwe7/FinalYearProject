@@ -16,7 +16,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
-from app import dense_cpu, pgvector_dense
+from app.embeddings import embedder
+from app.vectorstore import vector_db
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -27,15 +28,15 @@ pytestmark = pytest.mark.skipif(not DSN, reason="LOCAL_DENSE_TEST_DSN is not set
 
 def _artifact(directory: Path, count: int = 60) -> tuple[list[str], np.ndarray]:
     rng = np.random.default_rng(7)
-    vectors = rng.normal(size=(count, dense_cpu.DIM)).astype(np.float32)
+    vectors = rng.normal(size=(count, embedder.DIM)).astype(np.float32)
     vectors /= np.linalg.norm(vectors, axis=1, keepdims=True)
     ids = [f"00000000-0000-0000-0000-{i:012d}" for i in range(count)]
     np.save(directory / "vectors.npy", vectors.astype(np.float16))
-    manifest = {"schema": pgvector_dense.ARTIFACT_SCHEMA, "model": dense_cpu.MODEL_REPO,
-                "revision": dense_cpu.MODEL_REVISION, "dim": dense_cpu.DIM, "count": count, "ids": ids,
+    manifest = {"schema": vector_db.ARTIFACT_SCHEMA, "model": embedder.MODEL_REPO,
+                "revision": embedder.MODEL_REVISION, "dim": embedder.DIM, "count": count, "ids": ids,
                 "id_set_sha256": hashlib.sha256("\n".join(sorted(ids)).encode()).hexdigest(),
-                "vectors_sha256": pgvector_dense._vectors_digest(vectors.astype(np.float16), ids),
-                "payload_sha256": [pgvector_dense._payload_digest(_payload(i)) for i in range(count)]}
+                "vectors_sha256": vector_db._vectors_digest(vectors.astype(np.float16), ids),
+                "payload_sha256": [vector_db._payload_digest(_payload(i)) for i in range(count)]}
     (directory / "manifest.json").write_text(json.dumps(manifest))
     return ids, vectors
 
@@ -59,18 +60,18 @@ def loaded(tmp_path: Path) -> tuple[list[str], np.ndarray, str]:
 
     ids, vectors = _artifact(tmp_path)
     with psycopg.connect(DSN) as conn:
-        report = pgvector_dense.load_into_postgres(conn, tmp_path, [(pid, _payload(i)) for i, pid in enumerate(ids)],
+        report = vector_db.load_into_postgres(conn, tmp_path, [(pid, _payload(i)) for i, pid in enumerate(ids)],
                                           binding={"corpus_hash": "ci-corpus"})
         assert report["loaded"] == len(ids)
     # The CI database trusts loopback connections, so the serving role needs no password.
-    reader = psycopg.conninfo.make_conninfo(DSN, user=pgvector_dense.READER_ROLE)
+    reader = psycopg.conninfo.make_conninfo(DSN, user=vector_db.READER_ROLE)
     return ids, vectors, reader
 
 
 def test_a_loaded_table_answers_as_the_serving_role(loaded: tuple) -> None:
     ids, vectors, reader = loaded
     target = 17
-    store = pgvector_dense.LocalDenseStore(reader, embedder=_Query(vectors[target]))
+    store = vector_db.LocalDenseStore(reader, embedder=_Query(vectors[target]))
     assert store.open(), store.reason
     assert store.status() == f"pgvector multilingual-e5-small, {len(ids)} vectors"
     hits = store.search("q", 5)
@@ -81,7 +82,7 @@ def test_a_loaded_table_answers_as_the_serving_role(loaded: tuple) -> None:
 
 def test_filters_hold_in_sql(loaded: tuple) -> None:
     ids, vectors, reader = loaded
-    store = pgvector_dense.LocalDenseStore(reader, embedder=_Query(vectors[17]))
+    store = vector_db.LocalDenseStore(reader, embedder=_Query(vectors[17]))
     assert store.open(), store.reason
     faq = store.search("q", 10, {"doc_type": "faq"})
     assert faq
@@ -99,7 +100,7 @@ def test_the_serving_role_cannot_write(loaded: tuple) -> None:
 
     _ids, _vectors, reader = loaded
     with psycopg.connect(reader) as conn, conn.cursor() as cur, pytest.raises(psycopg.errors.InsufficientPrivilege):
-        cur.execute(f"DELETE FROM {pgvector_dense.TABLE}")  # noqa: S608 - table name is a module constant
+        cur.execute(f"DELETE FROM {vector_db.TABLE}")  # noqa: S608 - table name is a module constant
 
 
 def test_loading_again_replaces_the_table(loaded: tuple, tmp_path: Path) -> None:
@@ -107,10 +108,10 @@ def test_loading_again_replaces_the_table(loaded: tuple, tmp_path: Path) -> None
 
     ids, _vectors = _artifact(tmp_path, count=10)
     with psycopg.connect(DSN) as conn:
-        pgvector_dense.load_into_postgres(conn, tmp_path, [(pid, _payload(i)) for i, pid in enumerate(ids)],
+        vector_db.load_into_postgres(conn, tmp_path, [(pid, _payload(i)) for i, pid in enumerate(ids)],
                                           binding={"corpus_hash": "ci-corpus"})
         with conn.cursor() as cur:
-            cur.execute(f"SELECT count(*) FROM {pgvector_dense.TABLE}")  # noqa: S608 - table name is a module constant
+            cur.execute(f"SELECT count(*) FROM {vector_db.TABLE}")  # noqa: S608 - table name is a module constant
             assert cur.fetchone()[0] == 10
-            cur.execute(f"SELECT value FROM {pgvector_dense.META_TABLE} WHERE key = 'count'")  # noqa: S608 - table name is a module constant
+            cur.execute(f"SELECT value FROM {vector_db.META_TABLE} WHERE key = 'count'")  # noqa: S608 - table name is a module constant
             assert cur.fetchone()[0] == "10"

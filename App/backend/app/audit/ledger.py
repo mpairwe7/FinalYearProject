@@ -188,7 +188,7 @@ class AuditLedger:
         self._init_schema()
 
     def _init_schema(self) -> None:
-        from .. import database as db
+        from ..db import database as db
 
         db.execute_script(
             """
@@ -240,7 +240,7 @@ class AuditLedger:
 
     @staticmethod
     def _has_column(table: str, column: str) -> bool:
-        from .. import database as db
+        from ..db import database as db
 
         try:
             db.query_all(f"SELECT {column} FROM {table} LIMIT 1")  # noqa: S608 - fixed identifiers
@@ -250,7 +250,7 @@ class AuditLedger:
 
     def _add_column(self, table: str, column: str, ddl: str) -> None:
         """Add *column* to a table created before it existed; safe to race."""
-        from .. import database as db
+        from ..db import database as db
 
         if self._has_column(table, column):
             return
@@ -274,7 +274,7 @@ class AuditLedger:
         Runs under a lock so two concurrent callers can't both read
         the same prev_hash + insert with the same seq.
         """
-        from .. import database as db
+        from ..db import database as db
 
         with self._lock:
             attempt = 0
@@ -323,7 +323,7 @@ class AuditLedger:
         since_seq: int = 0,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        from .. import database as db
+        from ..db import database as db
 
         sql = "SELECT * FROM audit_events WHERE tenant_id = ? AND seq > ?"
         params: list[Any] = [tenant_id, since_seq]
@@ -361,7 +361,7 @@ class AuditLedger:
         previous page. ``limit`` is clamped to 1..200 so one request can never
         pull the whole ledger.
         """
-        from .. import database as db
+        from ..db import database as db
 
         sql = "SELECT * FROM audit_events WHERE tenant_id = ?"
         params: list[Any] = [tenant_id]
@@ -395,7 +395,7 @@ class AuditLedger:
 
     def latest_anchor(self, tenant_id: str = "default") -> dict[str, Any] | None:
         """The seal covering the newest rows for *tenant_id*, if any."""
-        from .. import database as db
+        from ..db import database as db
 
         return db.query_one(
             """SELECT anchor_id, first_seq, last_seq, merkle_root, head_hash, created_at, tsa_token
@@ -406,7 +406,7 @@ class AuditLedger:
 
     def anchors(self, tenant_id: str = "default") -> list[dict[str, Any]]:
         """Every seal for *tenant_id*, oldest range first."""
-        from .. import database as db
+        from ..db import database as db
 
         return db.query_all(
             """SELECT anchor_id, first_seq, last_seq, merkle_root, head_hash, created_at, tsa_token
@@ -417,19 +417,19 @@ class AuditLedger:
 
     def head_seq(self, tenant_id: str = "default") -> int:
         """The newest sequence number for *tenant_id*; 0 when it has no rows."""
-        from .. import database as db
+        from ..db import database as db
 
         row = db.query_one("SELECT MAX(seq) AS n FROM audit_events WHERE tenant_id = ?", (tenant_id,))
         return int(row["n"] or 0) if row else 0
 
     def tenants(self) -> list[str]:
         """Every tenant with at least one event."""
-        from .. import database as db
+        from ..db import database as db
 
         return [str(r["tenant_id"]) for r in db.query_all("SELECT DISTINCT tenant_id FROM audit_events")]
 
     def count(self, tenant_id: str = "default") -> int:
-        from .. import database as db
+        from ..db import database as db
 
         row = db.query_one(
             "SELECT COUNT(*) AS n FROM audit_events WHERE tenant_id = ?",
@@ -438,7 +438,7 @@ class AuditLedger:
         return int(row["n"] if row else 0)
 
     def last_row_hash(self, tenant_id: str = "default") -> str:
-        from .. import database as db
+        from ..db import database as db
 
         row = db.query_one(
             """SELECT row_hash FROM audit_events
@@ -485,7 +485,7 @@ class AuditLedger:
         up to it. Raises a unique-constraint error when another writer already
         sealed a range starting at ``first_seq`` (see :meth:`seal_pending`).
         """
-        from .. import database as db
+        from ..db import database as db
 
         rows = db.query_all(
             """SELECT seq, payload_hash, row_hash FROM audit_events

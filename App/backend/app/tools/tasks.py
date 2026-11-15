@@ -10,7 +10,7 @@ So a long-running call returns a **task id** and the caller polls it.
 That is what these three tools are: an addressable, durable record of
 state, not a job queue. What actually performs the work — the OCR
 batch, the filing submission, the graph rebuild — advances the row
-through :func:`app.database.update_task`.
+through :func:`app.db.database.update_task`.
 
 Two properties are load-bearing:
 
@@ -33,7 +33,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..flags import flags
+from ..config.flags import flags
 from . import Tool, ToolRegistry, ToolSchema
 
 TASKS_NAMESPACE = "tasks"
@@ -130,7 +130,7 @@ class TaskCreateTool(Tool):
                 "error": f"unknown task kind {kind!r}",
                 "known_kinds": list(TASK_KINDS),
             }
-        from ..database import create_task
+        from ..db.database import create_task
 
         task_data = create_task(
             kind,
@@ -195,7 +195,7 @@ class TaskGetTool(Tool):
     ) -> dict[str, Any]:
         if not _enabled():
             return dict(_DISABLED)
-        from ..database import get_task
+        from ..db.database import get_task
 
         task = get_task(task_id, tenant_id=tenant_id or "default")
         task_owner = str((task or {}).get("user_id") or "")
@@ -259,7 +259,7 @@ class TaskCancelTool(Tool):
     ) -> dict[str, Any]:
         if not _enabled():
             return dict(_DISABLED)
-        from ..database import cancel_task, get_task
+        from ..db.database import cancel_task, get_task
 
         eff_tenant = tenant_id or "default"
         before = get_task(task_id, tenant_id=eff_tenant)

@@ -147,7 +147,7 @@ def compact_messages(
 
 def analyze_context_window(state: AgentGraphState) -> dict[str, Any]:
     """Analyze token footprint, context utilization, and attention rot risk."""
-    from ...llm import (
+    from ...rag.generator import (
         LLM_CONTEXT_WINDOW,
         _estimate_tokens,
         _served_context_window,
@@ -230,7 +230,7 @@ def compact_prompt_context(
     if len(history) > max_verbatim_turns:
         recent = history[-max_verbatim_turns:]
         older = history[:-max_verbatim_turns]
-        from ...context_manager import summarize_older_turns
+        from ...rag.context_manager import summarize_older_turns
 
         older_summary = summarize_older_turns(older)
         if older_summary:
@@ -241,7 +241,7 @@ def compact_prompt_context(
             )
         history = recent
 
-    from ...llm import (
+    from ...rag.generator import (
         LLM_CONTEXT_WINDOW,
         _estimate_tokens,
         _served_context_window,

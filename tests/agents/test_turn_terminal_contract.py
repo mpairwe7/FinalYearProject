@@ -21,7 +21,7 @@ from typing import Any
 from unittest import mock
 
 import pytest
-from app import service as service_module
+from app.rag import pipeline as pipeline_module
 from app.audit import turns
 from app.guardrails import OutputGuard
 from app.turn_pipeline import attest_turn
@@ -42,7 +42,7 @@ class Model:
     def generate_retrieval_only(self, **kwargs: Any) -> dict[str, Any]:
         if self._retrieval is not None:
             return self._retrieval(**kwargs)
-        service_module._mark_stage("input_guard", time.perf_counter())
+        pipeline_module._mark_stage("input_guard", time.perf_counter())
         return {
             "_hits": [HIT],
             "retrieval_mode": "hybrid",
@@ -93,7 +93,7 @@ ARGUMENTS = {
 
 
 def turn(model: Model, **overrides: Any) -> Any:
-    return service_module.run_chat_turn(model, channel="sse", **{**ARGUMENTS, **overrides})
+    return pipeline_module.run_chat_turn(model, channel="sse", **{**ARGUMENTS, **overrides})
 
 
 @pytest.fixture
@@ -107,11 +107,11 @@ def stream(monkeypatch):
                     time.sleep(pause)
                 yield word
 
-        monkeypatch.setattr(service_module, "stream_llm_tokens", tokens)
+        monkeypatch.setattr(pipeline_module, "stream_llm_tokens", tokens)
 
-    monkeypatch.setattr(service_module.llm_module, "is_available", lambda: True)
-    monkeypatch.setattr(service_module.llm_module, "can_generate_in_locale", lambda _locale: True)
-    monkeypatch.setattr("app.english_rendering.answer_in_english", lambda text: text)
+    monkeypatch.setattr(pipeline_module.generator_module, "is_available", lambda: True)
+    monkeypatch.setattr(pipeline_module.generator_module, "can_generate_in_locale", lambda _locale: True)
+    monkeypatch.setattr("app.rag.english_rendering.answer_in_english", lambda text: text)
     monkeypatch.setattr(OutputGuard, "should_abstain", lambda _self, _hits, locale="en": False)
     return install
 
@@ -278,8 +278,8 @@ class TestAttestationIsEvidence:
     def test_the_real_streaming_pipeline_records_its_guards(self, tmp_db, clean_flags, monkeypatch, stream) -> None:
         # Against the real retrieval path, not the stand-in above: a stage that
         # stopped being recorded would otherwise pass unnoticed.
-        from app.flags import flags
-        from app.service import ChatModel
+        from app.config.flags import flags
+        from app.rag.pipeline import ChatModel
 
         flags.set("agentic_mode", False)
         stream(["The VAT rate is 18 percent. [1]"])

@@ -29,7 +29,7 @@ import time
 import uuid
 from typing import Any
 
-from . import database as db
+from .db import database as db
 from . import service_ratings
 
 #: Who can write a message in the thread.
@@ -404,12 +404,12 @@ def submit_csat(ticket: dict[str, Any], *, score: int | None, comment: str = "")
 def build_officer_copilot_draft(ticket: dict[str, Any], draft_en: str) -> dict[str, Any]:
     """Prepare a figure-protected bilingual draft reply for the officer workbench.
 
-    Gated on ``FLAG_OFFICER_AI_CO_EXECUTION``. Uses ``service.localize_reply``
+    Gated on ``FLAG_OFFICER_AI_CO_EXECUTION``. Uses ``pipeline.localize_reply``
     so every statutory rate, currency amount, and citation is protected by
     ``mt.protect_figures`` and verified by ``mt.figures_survived``.
     """
     from . import mt
-    from .flags import flags
+    from .config.flags import flags
 
     clean_en = _redact(draft_en)
     ticket_id = str(ticket.get("id") or "")
@@ -424,7 +424,7 @@ def build_officer_copilot_draft(ticket: dict[str, Any], draft_en: str) -> dict[s
             "figures_verified": True,
         }
     try:
-        from .service import localize_reply
+        from .rag.pipeline import localize_reply
 
         translated = localize_reply(clean_en, locale)
         figures_ok = (
@@ -462,7 +462,7 @@ def delegate_ticket_to_ai(
     on the ticket's conversation, logs a system transition message in ``ticket_messages``,
     and records ``ura_workforce_delegation_total{direction="officer_to_ai"}``.
     """
-    from .flags import flags
+    from .config.flags import flags
     from .workflows.registry import WorkflowRegistry
 
     if not flags.is_enabled("officer_ai_co_execution", cohorts={"ura_staff"}):
@@ -532,7 +532,7 @@ def capture_officer_preference_pair(
     """Persist a PII-redacted DPO/ORPO preference pair when an officer edits an AI draft."""
     from difflib import SequenceMatcher
 
-    from .flags import flags
+    from .config.flags import flags
 
     if not flags.is_enabled("officer_preference_capture", cohorts={"ura_staff"}):
         return None

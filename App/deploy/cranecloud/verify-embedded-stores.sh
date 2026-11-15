@@ -4,7 +4,7 @@
 #
 # Both stores are built or installed at image build time and neither is
 # fail-closed at runtime — wait-for-qdrant.sh starts the backend anyway on
-# timeout, and cache.py falls back to in-process memory when Redis is
+# timeout, and rag/cache.py falls back to in-process memory when Redis is
 # unreachable. That is the right runtime behaviour (a degraded pod beats a dead
 # one) but it means a broken store produces no startup failure to notice: the
 # Space served keyword-only answers over 499 FAQ rows for a full minute after a

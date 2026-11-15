@@ -303,9 +303,9 @@ the image's alias. Prepare the generated JSONL inputs before each release:
 
 ```bash
 cd App/backend
-PYTHONPATH=. python -m app.indexer --export-faq-jsonl
-PYTHONPATH=. python -m app.indexer --export-pdf-jsonl     # optional, minutes
-PYTHONPATH=. python -m app.indexer --export-crawl-jsonl   # optional, seconds
+PYTHONPATH=. python -m app.ingestion.indexer --export-faq-jsonl
+PYTHONPATH=. python -m app.ingestion.indexer --export-pdf-jsonl     # optional, minutes
+PYTHONPATH=. python -m app.ingestion.indexer --export-crawl-jsonl   # optional, seconds
 ```
 
 **Do not fit the sparse state on its own.** BM25 token ids are assigned in
@@ -365,7 +365,7 @@ Images built before ~13 Aug 2026 report only `hybrid`/`keyword` and will say
 
 Neither embedded store is fail-closed at runtime, and that is deliberate — a
 degraded pod beats a dead one. `wait-for-qdrant.sh` starts the backend anyway on
-timeout, and `cache.py` falls back to in-process memory when Redis is
+timeout, and `rag/cache.py` falls back to in-process memory when Redis is
 unreachable. The cost is that a broken store produces **no startup failure to
 notice**: the Space served keyword-only answers over 499 FAQ rows for a full
 minute after a roll before anyone spotted it, and the response cache silently

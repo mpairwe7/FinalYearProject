@@ -476,7 +476,7 @@ async def _chat_once(
             mode = body.get("retrieval_mode", body.get("mode", "unknown"))
             sources = len(body.get("sources", body.get("context", [])))
             # ``ChatResponse.reply`` is the field the API actually returns
-            # (App/backend/app/models.py). Reading only response/answer/message
+            # (App/backend/app/api/models.py). Reading only response/answer/message
             # meant this was False for every successful request. Nothing reports
             # it today, so the effect was latent rather than a wrong published
             # number — but it would have quietly zeroed any metric built on it.

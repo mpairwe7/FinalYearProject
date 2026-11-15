@@ -101,13 +101,13 @@ def graph_hit_for(question: str) -> dict[str, Any] | None:
     Carries a calibrated ``score_norm`` and a rank-0 RRF contribution so
     callers can fuse it with dense/BM25 hits instead of prepending it.
     """
-    from ..retriever import RRF_K
+    from ..rag.retriever import RRF_K
     from .query import resolve
 
     try:
         # Resolve at request time: a module-level FY freezes the graph leg
         # across tax-year rollover and ignores CURRENT_FISCAL_YEAR overrides.
-        from ..query import current_fiscal_year
+        from ..rag.query import current_fiscal_year
 
         answer = resolve(question, default_fiscal_year=current_fiscal_year())
     except Exception as exc:

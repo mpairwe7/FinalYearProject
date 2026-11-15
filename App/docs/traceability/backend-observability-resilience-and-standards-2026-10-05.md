@@ -15,7 +15,7 @@ This release addresses foundational backend gaps identified during the October 2
 4. **Streaming Analytics Observability**: Instrumented SSE and voice chat lifecycles to observe retrieval modes, faithfulness scores, and escalation events on streaming responses.
 5. **RFC 3161 TSA Cryptographic Witnesses**: Extended the Merkle audit ledger with binary DER and JSON timestamp token ingestion, storage on `audit_anchors`, and verification during chain checks.
 6. **Persistence Concurrency & Multi-Tenancy**: Added non-blocking thread offloading for synchronous database writes in async route handlers and completed `tenant_id` column isolation across `tickets`, `feedback`, `analytics_events`, and `sessions`.
-7. **Router Modularity**: Partitioned connectors and offline endpoints into dedicated `app/routes/` sub-routers (`connectors.py`, `offline.py`) mounted onto FastAPI without altering OpenAPI route contracts.
+7. **Router Modularity**: Partitioned connectors and offline endpoints into dedicated `app/api/` sub-routers (`connectors.py`, `offline.py`) mounted onto FastAPI without altering OpenAPI route contracts.
 
 ---
 
@@ -38,7 +38,7 @@ This release addresses foundational backend gaps identified during the October 2
 ### 2.3 Structured JSON Logging & PII Sanitization (Gap 3.1 & 3.3)
 * **Problem**: `docs/MONITORING.md` claimed `structlog JSON` logging, while the code utilized standard library text formatting without trace correlation or log-level PII protection.
 * **Resolution**:
-  - Created `App/backend/app/logging_config.py` containing `StructuredJsonFormatter` (ISO 8601 UTC timestamps, level, logger, message, service name, `trace_id`, `span_id`, and exception formatting).
+  - Created `App/backend/app/middleware/logger.py` containing `StructuredJsonFormatter` (ISO 8601 UTC timestamps, level, logger, message, service name, `trace_id`, `span_id`, and exception formatting).
   - Implemented `PIISanitizingFilter` that automatically scrubs TINs, phone numbers, and email addresses (preserving `@ura.go.ug` domains) before log emission.
   - Integrated via `configure_logging()` in `main.py`, controlled by `LOG_FORMAT=json|text` (defaulting to JSON in production).
 
@@ -51,7 +51,7 @@ This release addresses foundational backend gaps identified during the October 2
 * **Problem**: `request_rfc3161_timestamp` only sent JSON payloads and did not persist tokens to `audit_anchors`, nor were tokens validated during ledger checks.
 * **Resolution**:
   - Updated `request_rfc3161_timestamp()` in `App/backend/app/audit/ledger.py` to support standard DER `application/timestamp-reply` (base64 encoded) and JSON mock responses.
-  - Added `tsa_token` column migration to `audit_anchors` in both `database.py` and `postgres.py`.
+  - Added `tsa_token` column migration to `audit_anchors` in both `database.py` and `db/postgres.py`.
   - Extended `verify_anchor()` in `App/backend/app/audit/verifier.py` to validate persisted timestamp tokens.
 
 ### 2.6 Persistence Concurrency & Multi-Tenancy (Gap 1.2 & 2.3)
@@ -59,12 +59,12 @@ This release addresses foundational backend gaps identified during the October 2
 * **Resolution**:
   - Offloaded database logging in `chat_stream` and `voice_chat` to worker threads via `asyncio.to_thread`.
   - Added `tenant_id` columns, defaults, indexes, and query filters across `tickets`, `feedback`, `analytics_events`, and `sessions` on both SQLite and PostgreSQL engines.
-  - Maintained signature parity across `database.py` and `postgres.py`.
+  - Maintained signature parity across `database.py` and `db/postgres.py`.
 
 ### 2.7 Modular Domain Routing (Gap 1.1)
 * **Problem**: `main.py` was a 5,032-line monolith registering all routes on the global `app` instance.
 * **Resolution**:
-  - Created `App/backend/app/routes/` with modular `connectors.py` and `offline.py` APIRouters.
+  - Created `App/backend/app/api/` with modular `connectors.py` and `offline.py` APIRouters.
   - Mounted onto `app` via `app.include_router()`, preserving 100% of the 70+ route contracts tested by `tests/test_all_endpoints_e2e.py`.
 
 ---

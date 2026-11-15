@@ -17,12 +17,12 @@ from app.text_signals import FAREWELL_REPLY, GRATITUDE_REPLY
 class ClosingCourtesyFlowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        from app import database as db
+        from app.db import database as db
 
         db.init_db()
-        from app import service
+        from app.rag import pipeline
 
-        cls.model = service.ChatModel()
+        cls.model = pipeline.ChatModel()
 
     def test_gratitude_short_circuits_rest(self) -> None:
         for msg in ("thank you!", "Thanks!", "thanks so much", "webale", "asante"):

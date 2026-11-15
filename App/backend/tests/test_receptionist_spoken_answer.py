@@ -6,7 +6,7 @@ import unittest
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app import database as db
+from app.db import database as db
 from app.receptionist.brain import UraReceptionistBrain, _split_into_sentences
 from app.receptionist.state import CallRoom, CallState
 from app.receptionist.store import init_receptionist_schema, list_turns

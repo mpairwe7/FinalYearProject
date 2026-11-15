@@ -39,7 +39,7 @@ os.environ.setdefault("VLLM_BASE_URL", "http://localhost:18001/v1")
 os.environ.setdefault("LLM_MODEL", "Sunbird/Sunflower-14B-FP8")
 os.environ.setdefault("LLM_ENABLED", "true")
 
-from app import llm  # noqa: E402
+from app.rag import generator  # noqa: E402
 from app.workflows.slots import validate_slot  # noqa: E402
 
 KIND = "enum[individual,organisation]"
@@ -57,11 +57,11 @@ def check(ok: bool, label: str, detail: str = "") -> None:
 
 def resolver(reply: str, options: list[str]) -> str | None:
     """The same wiring service.ChatModel._resolve_slot_choice uses."""
-    return llm.classify_choice(reply, options) or None
+    return generator.classify_choice(reply, options) or None
 
 
-print(f"\nbackend={llm.LLM_BACKEND}  base={os.environ['VLLM_BASE_URL']}")
-print(f"model reachable: {llm.is_available()}")
+print(f"\nbackend={generator.LLM_BACKEND}  base={os.environ['VLLM_BASE_URL']}")
+print(f"model reachable: {generator.is_available()}")
 
 # ---- the model is only meant to be reached when the rules fail --------------
 print("\n[1] The rules still decide first (no inference on the common path)")

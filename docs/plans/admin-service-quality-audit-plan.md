@@ -90,7 +90,7 @@ All new tables use the module-owned, backend-agnostic DDL pattern: `db.execute_s
 ### B1. A server-issued turn id per answer
 - `/v1/chat` (`main.py:1160`), `/v1/chat/stream` (`main.py` around `_log_stream_conversation`, 1413) and `chat_ws_v2.py` (for parity) generate `turn_id = uuid4()` **before** generation.
   - Return it as `ChatResponse.turn_id` (`models.py:76`) and in the SSE terminal/metadata event.
-  - Pass it to `db.log_conversation(..., row_id=turn_id)`. Add the optional `row_id` parameter to both twins: `database.py:1358` and `postgres.py:800`.
+  - Pass it to `db.log_conversation(..., row_id=turn_id)`. Add the optional `row_id` parameter to both twins: `database.py:1358` and `db/postgres.py:800`.
 - Frontend:
   - Store `serverTurnId` on the assistant `Turn` (`store/useChatStore.ts`, from the REST/SSE response in `app/page.tsx`).
   - `FeedbackButtons` → `submitFeedback` sends `turn_id`, `conversation_id` (`activeConversationId`), `turn_index` (ordinal of this AI answer in the conversation; greeting and officer turns excluded) and `chat_session_id` (`getChatSessionId()`).
@@ -99,7 +99,7 @@ All new tables use the module-owned, backend-agnostic DDL pattern: `db.execute_s
 - **New `feedback` columns:**
   - `conversation_id`, `turn_id`, `turn_index`, `locale`, `topic_tag`, `sources_json`, `confidence`.
   - Index `(conversation_id, turn_index)`.
-  - Added in SQLite (`_ensure_column`, `database.py:919-970`) and Postgres (`postgres.py:425`). `save_feedback` in both now also **writes `tenant_id`**, which it never did.
+  - Added in SQLite (`_ensure_column`, `database.py:919-970`) and Postgres (`db/postgres.py:425`). `save_feedback` in both now also **writes `tenant_id`**, which it never did.
 - **Snapshot on write.** When `turn_id` is given, `save_feedback` reads that `conversations` row and copies `sources` (≤5 titles/ids), `confidence`, `topic_tag` and `locale` into the feedback row. It also derives an authoritative `turn_index` (rows in that conversation with `created_at` ≤ this one). The rated context therefore survives the 7-day `CONVERSATION_TTL_DAYS` purge; feedback lives 90 days.
 - **`POST /v1/feedback` (`main.py:2655`) accepts anonymous ratings.**
   - Signed-in with analytics consent → store `user_id` as today.
@@ -143,7 +143,7 @@ All new tables use the module-owned, backend-agnostic DDL pattern: `db.execute_s
   - `ended` (`chat_ended_at` set, or resolved/wontfix);
   - `n/a` for voice tickets.
 - **New ticket columns `resolved_by`, `resolved_by_name`, `chat_ended_at`, `csat_requested_at`.** Both backends need them, plus:
-  - `postgres.py` `_TICKET_COLUMNS` / `_TICKET_COLUMNS_FULL` (1149-1157);
+  - `db/postgres.py` `_TICKET_COLUMNS` / `_TICKET_COLUMNS_FULL` (1149-1157);
   - the SQLite `list_tickets` SELECT (1999-2005);
   - parity tests in `tests/agents/test_backend_column_parity.py`.
 - **`end_chat(ticket, officer, closing_message, outcome)`**, used by both routes below:
@@ -203,7 +203,7 @@ All new tables use the module-owned, backend-agnostic DDL pattern: `db.execute_s
 - **Hook into retention and privacy:**
   - erasure (`delete_user_analytics` `database.py:1333`, `delete_user_cascade` 3789);
   - export (`export_user_data` 3707);
-  - TTL lists (`database.py:1001`, `postgres.py:468`), kept as long as feedback (90 days);
+  - TTL lists (`database.py:1001`, `db/postgres.py:468`), kept as long as feedback (90 days);
   - `ticket_messages` is deleted together with its ticket (retention and erasure).
 
 ---
@@ -332,7 +332,7 @@ Each tab is built from `OpsPage` / `OpsPanel` / `StatCard` / `TableScroll` / `St
 | `GET /v1/escalate/{ticket_id}/messages?after_seq=` | taxpayer (ticket-id capability, exact id) | Live thread + chat state + CSAT state |
 | `POST /v1/escalate/{ticket_id}/csat` | taxpayer (exact id, once, only after end) | Submit or skip the rating |
 
-- The `/v1/admin/quality/*` routes live in a new `App/backend/app/routes/quality.py` `APIRouter`, following the `routes/connectors.py` pattern and registered in `main.py`. The other two families sit beside their siblings in `main.py`.
+- The `/v1/admin/quality/*` routes live in a new `App/backend/app/api/quality.py` `APIRouter`, following the `routes/connectors.py` pattern and registered in `main.py`. The other two families sit beside their siblings in `main.py`.
 - Every route goes into `tests/test_all_endpoints_e2e.py`: `EXPECTED_ENDPOINTS`, `COVERAGE`, and `test_manifest_endpoint_count` updated to **121 HTTP + 7 WS**. Each gets a request model in `models.py`.
 - Metric `service_rating_total{source,sentiment}` (bounded labels, through `analytics.metrics`).
 

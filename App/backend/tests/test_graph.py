@@ -106,9 +106,9 @@ class GraphRuntimeSafetyTests(unittest.TestCase):
                 return [{"ref": "[1]", "source": str(hits[0]["source"])}]
 
         with (
-            mock.patch("app.retriever.HybridRetriever", OfflineRetriever),
+            mock.patch("app.rag.retriever.HybridRetriever", OfflineRetriever),
             mock.patch(
-                "app.flags.flags.is_enabled",
+                "app.config.flags.flags.is_enabled",
                 side_effect=lambda name, **kwargs: name in {"graph_fusion", "tax_graph"},
             ),
             mock.patch("app.graph.shadow.graph_hit_for", return_value=graph_hit),

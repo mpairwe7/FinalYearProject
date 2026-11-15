@@ -50,9 +50,9 @@ class _RetrieverWithHits:
 
 @pytest.fixture
 def model(tmp_db, fresh_registry, monkeypatch):
-    # Flags go through the environment: test_integration.py reloads app.flags,
-    # so flags.set() can land on a different object from the one service.py holds.
-    from app.service import ChatModel
+    # Flags go through the environment: test_integration.py reloads app.config.flags,
+    # so flags.set() can land on a different object from the one rag/pipeline.py holds.
+    from app.rag.pipeline import ChatModel
 
     monkeypatch.setenv("FLAG_TICKET_QUEUE", "true")
     instance = ChatModel()
@@ -102,7 +102,7 @@ def test_rest_still_promises_an_officer_with_a_ticket(model):
 
 
 def test_tiering_without_agentic_mode_does_not_dereference_a_missing_route(model, monkeypatch):
-    from app.service import flags as service_flags
+    from app.rag.pipeline import flags as service_flags
 
     monkeypatch.setenv("FLAG_AGENTIC_MODE", "false")
     monkeypatch.setenv("FLAG_MODEL_TIERING", "true")
@@ -114,7 +114,7 @@ def test_tiering_without_agentic_mode_does_not_dereference_a_missing_route(model
 
 
 def test_a_tool_route_reaches_the_agentic_path_with_its_whitelist(model, monkeypatch):
-    from app import service
+    from app.rag import pipeline
     from app.agents.state import AgentRoute, RouteDecision
     from app.agents.supervisor import supervisor
 
@@ -132,7 +132,7 @@ def test_a_tool_route_reaches_the_agentic_path_with_its_whitelist(model, monkeyp
         seen.update(kwargs)
         return {"text": "", "tool_calls": [], "iterations": 0}
 
-    monkeypatch.setattr(service, "_call_llm_agentic", spy)
+    monkeypatch.setattr(pipeline, "_call_llm_agentic", spy)
 
     model.generate("What are the customs clearance requirements for export?")  # nosemgrep: ura-llm01-raw-user-input-to-llm
 

@@ -123,8 +123,8 @@ class AssuranceTests(unittest.IsolatedAsyncioTestCase):
         publish.assert_called_once()
 
     async def test_wrapup_ticket_keeps_call_tenant_and_conversation(self):
-        from app import database as db
-        from app.flags import flags
+        from app.db import database as db
+        from app.config.flags import flags
 
         call = {
             "call_id": "call_assurance",
@@ -150,7 +150,7 @@ class AssuranceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(create.call_args.kwargs["locale"], "lg")
 
     async def test_disabled_queue_refuses_ticket_action_before_any_write(self):
-        from app.flags import flags
+        from app.config.flags import flags
 
         with (
             patch.object(desk, "get_call", return_value={"call_id": "call_assurance"}),
@@ -288,8 +288,8 @@ class AssuranceTests(unittest.IsolatedAsyncioTestCase):
         owe_wrap.assert_called_once_with("officer-active", "call_assurance")
 
     async def test_wrapup_ticket_failure_does_not_commit_wrapup_before_ticket(self):
-        from app import database as db
-        from app.flags import flags
+        from app.db import database as db
+        from app.config.flags import flags
 
         with (
             patch.object(desk, "get_call", return_value={"call_id": "call_assurance"}),
@@ -305,7 +305,7 @@ class AssuranceTests(unittest.IsolatedAsyncioTestCase):
         update.assert_not_called()
 
     def test_conditional_draft_wrapup_does_not_overwrite_submitted_officer_wrapup(self):
-        from app import database as db
+        from app.db import database as db
         from app.receptionist.store import (
             create_call,
             get_call,

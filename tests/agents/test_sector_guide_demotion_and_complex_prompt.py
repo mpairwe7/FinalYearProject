@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from app.llm import COMPLEX_ANSWER_CONTRACT, _build_messages, _build_tool_messages
+from app.rag.generator import COMPLEX_ANSWER_CONTRACT, _build_messages, _build_tool_messages
 from app.providers.routing import ENDPOINTS, ModelTier
-from app.query import decompose_query, extract_retrieval_preferences
-from app.retriever import (
+from app.rag.query import decompose_query, extract_retrieval_preferences
+from app.rag.retriever import (
     SECTOR_GUIDE_DEMOTION,
     SECTOR_GUIDE_SOURCE_PATTERNS,
     TOPIC_SECTION_BOOST,
@@ -278,8 +278,8 @@ def test_complex_answer_contract_injected_only_when_verified_facts_or_t3() -> No
 
     # 6. stream_llm_tokens threads tier into generate_stream so T2 streaming turns do not get COMPLEX_ANSWER_CONTRACT
     from unittest.mock import patch
-    import app.llm as llm_mod
-    from app.service import stream_llm_tokens
+    import app.rag.generator as llm_mod
+    from app.rag.pipeline import stream_llm_tokens
 
     captured_tiers: list[object] = []
 

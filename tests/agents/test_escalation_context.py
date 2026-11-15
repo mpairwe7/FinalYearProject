@@ -214,20 +214,20 @@ class TestBackendParity:
         import re
         from pathlib import Path
 
-        from app import postgres as pg
+        from app.db import postgres as pg
 
         source = Path(pg.__file__).with_name("database.py").read_text()
         bound = set(re.findall(r"^\s+(\w+) = _pg\.", source, re.M))
         assert bound, "dispatch block not found"
         missing = sorted(name for name in bound if not hasattr(pg, name))
-        assert not missing, f"re-bound but absent from postgres.py: {missing}"
+        assert not missing, f"re-bound but absent from db/postgres.py: {missing}"
 
     @pytest.mark.parametrize(
         "name",
         ["create_ticket", "get_ticket", "list_tickets", "update_ticket", "ticket_stats"],
     )
     def test_the_ticket_surface_is_mirrored(self, name):
-        from app import postgres as pg
+        from app.db import postgres as pg
 
         assert hasattr(pg, name), f"postgres backend is missing {name}"
 
@@ -246,8 +246,8 @@ class TestBackendParity:
         import re
         from pathlib import Path
 
-        from app import database as db
-        from app import postgres as pg
+        from app.db import database as db
+        from app.db import postgres as pg
 
         source = Path(pg.__file__).with_name("database.py").read_text()
         drift = []
@@ -268,7 +268,7 @@ class TestBackendParity:
         # The exact kwargs main.py passes must bind.
         import inspect
 
-        from app import postgres as pg
+        from app.db import postgres as pg
 
         inspect.signature(pg.log_conversation).bind(
             session_id="s",
@@ -463,8 +463,8 @@ class TestTheEscalatedTurnNamesItsSources:
     the officer could not see what the answer they were taking over rested on."""
 
     def test_the_sources_the_handoff_reviewed_are_on_the_escalated_turn(self, seeded, monkeypatch):
-        from app.flags import flags
-        from app.service import ChatModel
+        from app.config.flags import flags
+        from app.rag.pipeline import ChatModel
 
         monkeypatch.setenv("FLAG_TICKET_QUEUE", "true")
         flags.set("ticket_queue", True)
@@ -490,8 +490,8 @@ class TestAReusedTicketIsBroughtUpToDate:
     worked from the first snapshot."""
 
     def test_later_turns_and_a_higher_priority_reach_the_open_ticket(self, seeded, monkeypatch):
-        from app.flags import flags
-        from app.service import ChatModel
+        from app.config.flags import flags
+        from app.rag.pipeline import ChatModel
 
         monkeypatch.setenv("FLAG_TICKET_QUEUE", "true")
         flags.set("ticket_queue", True)
@@ -523,8 +523,8 @@ class TestAReusedTicketIsBroughtUpToDate:
 
     @staticmethod
     def _model(monkeypatch):
-        from app.flags import flags
-        from app.service import ChatModel
+        from app.config.flags import flags
+        from app.rag.pipeline import ChatModel
 
         monkeypatch.setenv("FLAG_TICKET_QUEUE", "true")
         flags.set("ticket_queue", True)
@@ -568,7 +568,7 @@ class TestAReusedTicketIsBroughtUpToDate:
     def test_a_reuse_applies_the_escalation_assessment_priority(self, seeded, monkeypatch):
         """CodeRabbit on PR 731: the assessment that raises a deadline-today
         escalation ran only when a ticket was created, not when one was reused."""
-        from app.flags import flags
+        from app.config.flags import flags
 
         model = self._model(monkeypatch)
         # Restored after the test: a process-wide override would leak into the
@@ -662,8 +662,8 @@ class TestAReusedTicketIsBroughtUpToDate:
         assert "0772123456" not in raw and "kato@example.com" not in raw
 
     def test_a_lower_priority_does_not_lower_it(self, seeded, monkeypatch):
-        from app.flags import flags
-        from app.service import ChatModel
+        from app.config.flags import flags
+        from app.rag.pipeline import ChatModel
 
         monkeypatch.setenv("FLAG_TICKET_QUEUE", "true")
         flags.set("ticket_queue", True)

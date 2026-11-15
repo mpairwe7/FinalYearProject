@@ -17,8 +17,8 @@ from pydantic import BaseModel, Field
 
 from ..auth import AuthContext, require_role, revocation
 from ..chat_ws_v2 import resolve_ws_session
-from ..flags import flags
-from ..query import SUPPORTED_LOCALES
+from ..config.flags import flags
+from ..rag.query import SUPPORTED_LOCALES
 from ..tenancy import tenant_enabled
 from ..voice_consent import grant_voice_consent, log_voice_event, require_voice_consent
 from ..ws_concurrency import is_ws_origin_allowed, rekey_slot, release, try_acquire

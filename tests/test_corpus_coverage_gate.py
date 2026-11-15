@@ -197,9 +197,9 @@ class TheBugThisGateWasBuiltForTest(unittest.TestCase):
     """
 
     def test_removing_the_objections_corpus_fails_the_objections_floor(self) -> None:
-        from app import service
+        from app.rag import pipeline
 
-        real = service._load_faq_data
+        real = pipeline._load_faq_data
 
         def without_objections(data_dir):
             index, labels = real(data_dir)
@@ -208,7 +208,7 @@ class TheBugThisGateWasBuiltForTest(unittest.TestCase):
 
         bank = [e for e in cc.load_bank() if e.domain == "objections"]
         spec = {"objections": cc.load_domains()["objections"]}
-        with patch.object(service, "_load_faq_data", without_objections):
+        with patch.object(pipeline, "_load_faq_data", without_objections):
             probe = cc._corpus_prober(translate=False)
         results = cc.run(("en",), probe, bank)
         report = cc.summarise(results, spec, ("en",))

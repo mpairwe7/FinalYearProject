@@ -40,26 +40,26 @@ Chosen: **a pgvector dense leg, fused with BM25 by reciprocal-rank fusion (RRF).
 - **Model.** `intfloat/multilingual-e5-small` (MIT, 384 dimensions, about 100 languages) runs
   through ONNX Runtime.
   - **Pins.** Revision `614241f622f53c4eeff9890bdc4f31cfecc418b3`; `onnx/model.onnx` and
-    `tokenizer.json` are pinned by SHA-256 in `app/dense_cpu.py`. The fp32 export is used, not
+    `tokenizer.json` are pinned by SHA-256 in `app/embeddings/embedder.py`. The fp32 export is used, not
     int8, because integer kernels can differ between the CPU that builds the index and the one
     that serves queries.
   - **Measured** on a 2-core i5-7200U: queries take 10 ms. Passages embed at about 8 per second
     (FAQ length) or 3 per second (512 tokens). On the FAQ corpus, the int8 export's vectors
     matched fp32 at cosine 0.996.
 - **Embedding.** The build workflow's "Embed the corpus for the dense leg" step runs
-  `python -m app.pgvector_dense build-artifact`.
-  - It embeds every document from `app.indexer.load_documents()`, using the indexer's own
+  `python -m app.vectorstore.vector_db build-artifact`.
+  - It embeds every document from `app.ingestion.indexer.load_documents()`, using the indexer's own
     `_embedding_text`.
   - It records each vector against the document's Qdrant point id
     (`retriever.deterministic_point_id`).
-  - The step is cached on the corpus JSONL, the CSVs, `dense_cpu.py`, `pgvector_dense.py` and
-    `indexer.py`, so an unchanged corpus is not embedded again.
+  - The step is cached on the corpus JSONL, the CSVs, `embeddings/embedder.py`, `vectorstore/vector_db.py` and
+    `ingestion/indexer.py`, so an unchanged corpus is not embedded again.
   - The model and vectors ship in the base image as `App/Data/dense`: 470 MB of model plus about
     5.5 MB of float16 vectors.
 - **Load.** The Space layer installs Debian bookworm's PostgreSQL 15. The pgvector 0.8.1 extension
   files are copied from `pgvector/pgvector:0.8.1-pg15-bookworm`, pinned by digest. A SQL selftest
   proves they load and answer an HNSW query.
-  - `python -m app.pgvector_dense load` scrolls the baked Qdrant collection and requires its
+  - `python -m app.vectorstore.vector_db load` scrolls the baked Qdrant collection and requires its
     point-id set to equal the artifact's exactly. Ids derive from source, page, section, chunk id
     and the text's hash, but not from the title or metadata that the embedded text's contextual
     prefix is built from. So the manifest also carries a fingerprint of every document as Qdrant
@@ -126,7 +126,7 @@ Chosen: **a pgvector dense leg, fused with BM25 by reciprocal-rank fusion (RRF).
 - **Bad:** the image grows by about 470 MB of model and about 150 MB of PostgreSQL packages. Each
   uvicorn worker holds an ONNX session of roughly 500 MB.
 - **Bad:** the first build after a corpus change embeds the whole corpus, about 15–20 minutes on a
-  4-core runner. The cache key covers `point_ids.py` (moved out of `retriever.py`), so a change to
+  4-core runner. The cache key covers `vectorstore/point_ids.py` (moved out of `rag/retriever.py`), so a change to
   how point ids are derived re-embeds, and other retriever edits do not.
 - **Behaviour change:** with the leg on, the Space abstains on weak lexical matches it used to
   answer from (see the gates bullet). That is the gate working as documented, but the abstention

@@ -22,11 +22,11 @@ import time
 from unittest import mock
 
 import pytest
-from app import database as db
+from app.db import database as db
 from app import main as main_mod
 from app.analytics import metrics
 from app.auth import make_dev_token
-from app.flags import FeatureFlags, flags
+from app.config.flags import FeatureFlags, flags
 from fastapi.testclient import TestClient
 
 FLAG = "hyde"
@@ -348,7 +348,7 @@ def test_the_postgres_store_without_a_pool_fails_instead_of_reading_empty() -> N
     That includes a stored calls kill switch. Raising sends the sync down its
     "keep the current flags" path, and startup down its fail-closed path.
     """
-    from app import postgres
+    from app.db import postgres
 
     with mock.patch.object(postgres, "_get_pool", return_value=None):
         with pytest.raises(RuntimeError):
@@ -362,7 +362,7 @@ def test_the_postgres_store_without_a_pool_fails_instead_of_reading_empty() -> N
 
 
 def test_a_lost_postgres_pool_keeps_this_processs_flags(clean_flags) -> None:
-    from app import postgres
+    from app.db import postgres
 
     value = _off_default()
     with mock.patch.object(main_mod.db, "load_flag_overrides", return_value={FLAG: value}):

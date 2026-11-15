@@ -15,10 +15,10 @@ from functools import lru_cache
 from dataclasses import dataclass, field
 from typing import Any, Final
 
-from .. import database as db
+from ..db import database as db
 from .. import officer_hours
 from ..analytics import record_chat_turn
-from ..flags import flags
+from ..config.flags import flags
 from ..resilience import TurnCancelled, raise_if_turn_cancelled, set_turn_cancel
 from ..speech_normalization import clean_text_for_speech
 from ..text_signals import detect_crisis
@@ -836,7 +836,7 @@ class UraReceptionistBrain(LLMService):
             self.room.state.offer_interrupted = False
             self._bot_speaking = False
             await self.push_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
-            from ..query import detect_language
+            from ..rag.query import detect_language
             from .language import detect_explicit_request
             from .router import announce_language
 
@@ -1086,7 +1086,7 @@ class UraReceptionistBrain(LLMService):
             and getattr(self.speech_model, "_asr_pipeline", None) is None
         )
         if no_local_asr:
-            from ..query import detect_language
+            from ..rag.query import detect_language
             from .language import detect_explicit_request
             from .router import announce_language
 
@@ -1521,7 +1521,7 @@ class UraReceptionistBrain(LLMService):
         if self.room.state.chat_context:
             lines.append(f"Before the call, in the chat: {self.room.state.chat_context}")
         try:
-            from ..context_manager import english_view, normalize_history_turns
+            from ..rag.context_manager import english_view, normalize_history_turns
 
             turns = db.get_recent_turns(
                 session_id=self.room.call_id,
@@ -1569,12 +1569,12 @@ class UraReceptionistBrain(LLMService):
         # (decided 2026-09-30); with vLLM down the Luganda words are searched.
         global _VLLM_BRIDGE_DOWN_UNTIL
         try:
-            from .. import llm
-            from ..llm import _vllm_generate
+            from ..rag import generator
+            from ..rag.generator import _vllm_generate
 
-            is_unmocked = getattr(llm, "_vllm_generate", None) is getattr(llm, "_ORIGINAL_VLLM_GENERATE", None)
+            is_unmocked = getattr(generator, "_vllm_generate", None) is getattr(generator, "_ORIGINAL_VLLM_GENERATE", None)
             if not is_unmocked or (
-                getattr(llm, "LLM_BACKEND", "local") == "vllm" and time.monotonic() >= _VLLM_BRIDGE_DOWN_UNTIL
+                getattr(generator, "LLM_BACKEND", "local") == "vllm" and time.monotonic() >= _VLLM_BRIDGE_DOWN_UNTIL
             ):
                 messages = [
                     {"role": "system", "content": QUERY_EXTRACT_SYSTEM},
@@ -1597,7 +1597,7 @@ class UraReceptionistBrain(LLMService):
 
         if os.getenv("RECEPTIONIST_ALLOW_CLOUD_LLM", "false").strip().lower() in ("1", "true", "yes", "on"):
             try:
-                from ..query import english_retrieval_query
+                from ..rag.query import english_retrieval_query
 
                 translated_en = english_retrieval_query(normalized or luganda_query, "lg")
                 if translated_en and translated_en.strip():
@@ -1615,12 +1615,12 @@ class UraReceptionistBrain(LLMService):
         # Local Sunflower only (decided 2026-09-30). With vLLM down the caller
         # gets the English answer translated, or the transfer phrase.
         try:
-            from .. import llm
-            from ..llm import _vllm_generate
+            from ..rag import generator
+            from ..rag.generator import _vllm_generate
 
-            is_unmocked = getattr(llm, "_vllm_generate", None) is getattr(llm, "_ORIGINAL_VLLM_GENERATE", None)
+            is_unmocked = getattr(generator, "_vllm_generate", None) is getattr(generator, "_ORIGINAL_VLLM_GENERATE", None)
             if is_unmocked and (
-                getattr(llm, "LLM_BACKEND", "local") != "vllm" or time.monotonic() < _VLLM_BRIDGE_DOWN_UNTIL
+                getattr(generator, "LLM_BACKEND", "local") != "vllm" or time.monotonic() < _VLLM_BRIDGE_DOWN_UNTIL
             ):
                 return ""
             messages = [
@@ -2168,7 +2168,7 @@ class UraReceptionistBrain(LLMService):
 
         # Save Q/A in database conversation history for continuity & tickets
         try:
-            from ..service import ChatModel
+            from ..rag.pipeline import ChatModel
 
             _english_forms = ChatModel.english_forms
             db.log_conversation(

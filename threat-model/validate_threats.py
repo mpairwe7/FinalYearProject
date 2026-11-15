@@ -54,7 +54,7 @@ THREAT_REGISTRY: list[dict] = [
         ),
         "evidence": [
             "ml/scripts/data_aug/crawler.py",
-            "App/backend/app/crawl_corpus.py",
+            "App/backend/app/ingestion/crawl_corpus.py",
             "App/backend/app/crawl_gate.py",
             "tests/test_crawl_gate.py",
         ],
@@ -96,8 +96,8 @@ THREAT_REGISTRY: list[dict] = [
         ),
         "evidence": [
             "ml/scripts/data_aug/crawler.py",
-            "App/backend/app/pdf_corpus.py",
-            "App/backend/app/crawl_corpus.py",
+            "App/backend/app/ingestion/pdf_corpus.py",
+            "App/backend/app/ingestion/crawl_corpus.py",
             "tests/test_crawler.py",
         ],
         "status": "mitigated",
@@ -157,7 +157,7 @@ THREAT_REGISTRY: list[dict] = [
             "official addresses stay. The reply guard remains the second layer. DPO review of company TINs is open"
         ),
         "evidence": [
-            "App/backend/app/crawl_corpus.py",
+            "App/backend/app/ingestion/crawl_corpus.py",
             "App/backend/tests/test_crawl_corpus.py",
         ],
         "status": "mitigated",
@@ -206,7 +206,7 @@ THREAT_REGISTRY: list[dict] = [
         ),
         "evidence": [
             "App/backend/app/guardrails.py",
-            "App/backend/app/service.py",
+            "App/backend/app/rag/pipeline.py",
             "tests/agents/test_ai_security_layer_2026_11.py",
         ],
         "status": "mitigated",
@@ -248,7 +248,7 @@ THREAT_REGISTRY: list[dict] = [
         ),
         "evidence": [
             "App/backend/app/guard_friction.py",
-            "App/backend/app/service.py",
+            "App/backend/app/rag/pipeline.py",
             "tests/agents/test_ai_security_layer_2026_11.py",
         ],
         "status": "in_progress",
@@ -269,7 +269,7 @@ THREAT_REGISTRY: list[dict] = [
         ),
         "evidence": [
             "App/backend/app/agents/graphs/runtime.py",
-            "App/backend/app/database.py",
+            "App/backend/app/db/database.py",
             "tests/agents/test_checkpoint_integrity_2026_11.py",
         ],
         "status": "mitigated",
@@ -309,8 +309,8 @@ THREAT_REGISTRY: list[dict] = [
             "history is replayed withheld-if-injected and fenced; the leak fingerprint covers both prompts"
         ),
         "evidence": [
-            "App/backend/app/llm.py",
-            "App/backend/app/service.py",
+            "App/backend/app/rag/generator.py",
+            "App/backend/app/rag/pipeline.py",
             "tests/agents/test_harness_prompt_contract.py",
         ],
         "status": "mitigated",
@@ -356,7 +356,7 @@ THREAT_REGISTRY: list[dict] = [
             "History fenced as data with injected turns left out, output validated before retrieval, vLLM chat only, "
             "behind a default-off flag"
         ),
-        "evidence": ["App/backend/app/query.py", "tests/agents/test_agentic_rag_context_sandbox_2026_11.py"],
+        "evidence": ["App/backend/app/rag/query.py", "tests/agents/test_agentic_rag_context_sandbox_2026_11.py"],
         "status": "mitigated",
     },
     {
@@ -578,7 +578,7 @@ THREAT_REGISTRY: list[dict] = [
             "is checked at load, and every dense hit is confirmed against the serving collection before it is fused. A "
             "refused load leaves BM25 serving and /ready names it. Residual (G525): the serving stack runs as root"
         ),
-        "evidence": ["App/backend/app/dense_cpu.py", "App/backend/app/pgvector_dense.py",
+        "evidence": ["App/backend/app/embeddings/embedder.py", "App/backend/app/vectorstore/vector_db.py",
                      "App/deploy/hf-space/Dockerfile", "App/backend/tests/test_local_dense_leg.py",
                      "App/backend/tests/test_local_dense_pgvector_live.py"],
         "status": "mitigated",
@@ -601,7 +601,7 @@ THREAT_REGISTRY: list[dict] = [
             "never an invented answer. Sunbird refusals log their error code. Residual: a suspended account (G539) "
             "and the relay (G540) are fixed outside the code"
         ),
-        "evidence": ["App/backend/app/service.py", "App/backend/app/sunbird.py",
+        "evidence": ["App/backend/app/rag/pipeline.py", "App/backend/app/sunbird.py",
                      "App/backend/app/providers/gateway.py", "App/backend/app/providers/breakers.py",
                      "tests/agents/test_sunbird_primary_llm_2026_11.py", "App/backend/tests/test_gemini_routing.py"],
         "status": "in_progress",
@@ -624,8 +624,8 @@ THREAT_REGISTRY: list[dict] = [
             "the portal call and the receipt write leaves the lease held until it lapses, and the outcome is "
             "read from the connector, not from this service"
         ),
-        "evidence": ["App/backend/app/portal_copilot.py", "App/backend/app/database.py",
-                     "App/backend/app/postgres.py", "App/backend/app/main.py",
+        "evidence": ["App/backend/app/portal_copilot.py", "App/backend/app/db/database.py",
+                     "App/backend/app/db/postgres.py", "App/backend/app/main.py",
                      "tests/agents/test_browser_agent_assurance_2026_11.py"],
         "status": "mitigated",
     },
@@ -649,7 +649,7 @@ THREAT_REGISTRY: list[dict] = [
             "does not know; the structural rules do not depend on it"
         ),
         "evidence": ["App/backend/app/portal_copilot.py", "App/backend/app/tools/portal_navigator_data.py",
-                     "App/backend/app/models.py", "evals/portal_copilot_scenarios/adversarial.jsonl",
+                     "App/backend/app/api/models.py", "evals/portal_copilot_scenarios/adversarial.jsonl",
                      "tests/agents/test_portal_copilot_adversarial_eval.py",
                      "tests/agents/test_browser_agent_assurance_2026_11.py"],
         "status": "mitigated",
@@ -757,7 +757,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitre_atlas": None,
         "mitigation": "Conversation logging with timestamps, OpenTelemetry tracing",
         "evidence": [
-            "App/backend/app/database.py",
+            "App/backend/app/db/database.py",
             "App/backend/app/tracing.py",
         ],
         "status": "mitigated",
@@ -783,7 +783,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "No direct model access endpoint; retrieval-only API; rate limiting",
         "evidence": [
             "App/backend/app/main.py",
-            "App/backend/app/service.py",
+            "App/backend/app/rag/pipeline.py",
         ],
         "status": "mitigated",
     },
@@ -883,8 +883,8 @@ THREAT_REGISTRY: list[dict] = [
         "mitre_atlas": "AML.T0043",
         "mitigation": "Cross-encoder reranking validates semantic relevance, trusted-source-only indexing",
         "evidence": [
-            "App/backend/app/retriever.py",
-            "App/backend/app/indexer.py",
+            "App/backend/app/rag/retriever.py",
+            "App/backend/app/ingestion/indexer.py",
         ],
         "status": "mitigated",
     },
@@ -909,7 +909,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitre_atlas": "AML.T0029",
         "mitigation": "Pydantic input validation with max_length, Docker resource limits, read-only filesystem",
         "evidence": [
-            "App/backend/app/models.py",
+            "App/backend/app/api/models.py",
             "App/backend/app/documents.py",
             "docker-compose.yml",
         ],
@@ -1017,7 +1017,7 @@ THREAT_REGISTRY: list[dict] = [
         "evidence": [
             "App/backend/app/documents.py",
             "App/backend/app/guardrails.py",
-            "App/backend/app/llm.py",
+            "App/backend/app/rag/generator.py",
         ],
         "status": "mitigated",
     },
@@ -1054,7 +1054,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitre_atlas": "AML.T0020",
         "mitigation": "Same structural PDF guards on export; SHA-256 manifest; ingest rejects hash drift; injection scrub on retrieved chunks",
         "evidence": [
-            "App/backend/app/pdf_corpus.py",
+            "App/backend/app/ingestion/pdf_corpus.py",
             "App/backend/app/pdf_guards.py",
         ],
         "status": "mitigated",
@@ -1068,7 +1068,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "MCP policy allowlist, unknown-tool errors without registry leak, bounded ReAct (one retrieve hop), FLAG_TOOL_RAG default off",
         "evidence": [
             "App/backend/app/mcp/policy.py",
-            "App/backend/app/flags.py",
+            "App/backend/app/config/flags.py",
         ],
         "status": "mitigated",
     },
@@ -1082,7 +1082,7 @@ THREAT_REGISTRY: list[dict] = [
         "evidence": [
             "App/backend/app/vision/ocr.py",
             "App/backend/app/vision/document_classifier.py",
-            "App/backend/app/service.py",
+            "App/backend/app/rag/pipeline.py",
         ],
         "status": "mitigated",
     },
@@ -1094,7 +1094,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitre_atlas": "AML.T0052",
         "mitigation": "Dynamic registration and runtime configuration are disabled (POST /v1/connectors/register and /configure return 410 Gone); a remote MCP endpoint comes only from deployment configuration (MCP_SERVER_URL_<NAMESPACE>), must be http(s) with no embedded credentials and https in production, redirects are never followed, and simulators are refused in production",
         "evidence": [
-            "App/backend/app/routes/connectors.py",
+            "App/backend/app/api/connectors.py",
             "App/backend/app/mcp/transport.py",
             "App/backend/app/mcp/chat_connectors.py",
         ],
@@ -1251,7 +1251,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "Case routes answer to the exact ticket UUID only (_TICKET_ID_PATH_PATTERN + db.get_ticket, no search fallback); the chat reference lookup runs after the input guard and crisis check and answers only the owning subject or session; staff ticket detail, writes, presence, chat termination, live events, queue lists, statistics and SLA aggregates are tenant-scoped when multi_tenant is enabled (ADR-0028, G362); list_tickets escapes LIKE wildcards in both backends",
         "evidence": [
             "App/backend/app/main.py",
-            "App/backend/app/service.py",
+            "App/backend/app/rag/pipeline.py",
             "App/backend/app/tenancy.py",
             "App/backend/app/ticket_ws.py",
             "App/backend/app/ticket_events.py",
@@ -1300,9 +1300,9 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "Search control flow is decided from the question and the model has no search tool. Web text reaches the model only as scanned, spotlighted passages labelled with authority, evidence and age, never the prompt or verified_facts. Instruction-shaped results are dropped whole. Regex screening can be evaded; the channel boundary is what holds when it misses. The body cannot close the spotlight, header fields are single-line, and the cloud fallback uses the same fence (ADR-0027, G458).",
         "evidence": [
             "App/backend/app/web_research.py",
-            "App/backend/app/llm.py",
+            "App/backend/app/rag/generator.py",
             "App/backend/app/guardrails.py",
-            "App/backend/app/service.py",
+            "App/backend/app/rag/pipeline.py",
             "tests/agents/test_web_evidence_boundary.py",
             "tests/agents/test_web_research_adversarial_eval.py",
             "tests/agents/test_spotlight_fence.py",
@@ -1389,7 +1389,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitre_atlas": None,
         "mitigation": "Every turn writes one row with a disposition and what generated it; a high/critical action writes an intent row before its effect when action-level audit is enabled and fails closed if the write fails (G366); a failed tool call is recorded; the record states the decision taken rather than re-evaluating the gate; a turn that served model text must show a guard stage to attest (ADR-0022, ADR-0028).",
         "evidence": [
-            "App/backend/app/service.py",
+            "App/backend/app/rag/pipeline.py",
             "App/backend/app/audit/turns.py",
             "App/backend/app/turn_pipeline.py",
             "tests/agents/test_turn_terminal_contract.py",
@@ -1406,7 +1406,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "The half-open probe is a lease; each tier has its own breaker; one deadline bounds every stage; a cancel scope stops the tool loop; blocking work runs off the event loop; transitions, lost probes and degraded answers are alerted (ADR-0022).",
         "evidence": [
             "App/backend/app/resilience.py",
-            "App/backend/app/service.py",
+            "App/backend/app/rag/pipeline.py",
             "tests/agents/test_fault_tolerance_contract.py",
         ],
         "status": "mitigated",

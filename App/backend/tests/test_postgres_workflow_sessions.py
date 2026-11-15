@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from typing import Any
 from unittest.mock import patch
 
-from app import postgres
+from app.db import postgres
 
 
 class _RecordingCursor:

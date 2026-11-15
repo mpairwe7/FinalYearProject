@@ -129,7 +129,7 @@ def verify_chain(
     ``after_seq``/``start_hash`` resume from a trusted checkpoint (a seal's
     last sequence number and head hash) instead of the genesis row.
     """
-    from .. import database as db
+    from ..db import database as db
 
     report = VerificationReport(tenant_id=tenant_id)
     prev_row_hash = start_hash
@@ -200,7 +200,7 @@ def verify_chain(
 
 def verify_anchor(anchor: dict[str, Any], tenant_id: str = "default") -> AnchorBreak | None:
     """Re-check one seal against the rows it covers; ``None`` when it holds."""
-    from .. import database as db
+    from ..db import database as db
 
     first, last = int(anchor["first_seq"]), int(anchor["last_seq"])
     rows = db.query_all(

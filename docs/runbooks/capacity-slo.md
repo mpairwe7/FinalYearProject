@@ -35,11 +35,11 @@ sources, plus one BM25 sentinel → 509 points):
 docker run -d --name ura-qdrant -p 127.0.0.1:6333:6333 qdrant/qdrant:v1.17.1
 
 PYTHONPATH=App/backend QDRANT_URL=http://127.0.0.1:6333 \
-  python -m app.indexer --export-faq-jsonl
+  python -m app.ingestion.indexer --export-faq-jsonl
 
 PYTHONPATH=App/backend QDRANT_URL=http://127.0.0.1:6333 \
   SPARSE_ONLY_INDEX=true QDRANT_COLLECTION=ura_knowledge_base \
-  python -m app.indexer --faq-jsonl-only --recreate
+  python -m app.ingestion.indexer --faq-jsonl-only --recreate
 
 curl -s http://127.0.0.1:6333/collections/ura_knowledge_base
 # points_count=509, indexed_vectors_count=508, status=green
@@ -95,5 +95,5 @@ Docs currently disagree (2s vs 3s). Until one table is chosen, treat
 2. FAQ/calculator slow → API/threadpool, not GPU.
 3. Hybrid slow → vLLM queue (campaign A curve) or `LLM_DEADLINE_SECONDS`.
 4. Sudden 429 → `RATE_LIMIT`, not capacity loss.
-5. Hang toward 45–70s → deadline/budget path in `service.py`; should
+5. Hang toward 45–70s → deadline/budget path in `rag/pipeline.py`; should
    return, not block forever.

@@ -16,8 +16,8 @@ import unittest
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app import database as db
-from app.flags import flags
+from app.db import database as db
+from app.config.flags import flags
 from app.receptionist.brain import LLMContextFrame, UraReceptionistBrain
 from app.receptionist.lexicon import (
     LUGANDA_ENGLISH_TAX_TERMS,

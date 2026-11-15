@@ -35,7 +35,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..flags import flags
+from ..config.flags import flags
 from .client import MCPClient, RemoteNamespace, _meta_of
 from .protocol import MCP_PROTOCOL_VERSION
 

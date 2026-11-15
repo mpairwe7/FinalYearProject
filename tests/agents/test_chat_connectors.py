@@ -6,8 +6,8 @@ import threading
 from types import SimpleNamespace
 from typing import Any
 
-from app import llm
-from app.flags import flags
+from app.rag import generator
+from app.config.flags import flags
 from app.guardrails import scan_external_tool_text
 from app.mcp import MCPClient
 from app.mcp.chat_connectors import (
@@ -20,7 +20,7 @@ from app.mcp.chat_connectors import (
     validate_chat_connector_selection,
 )
 from app.mcp.transport import InProcessTransport
-from app.routes.connectors import list_system_connectors
+from app.api.connectors import list_system_connectors
 from starlette.requests import Request
 from starlette.responses import Response
 
@@ -478,10 +478,10 @@ def test_agentic_connector_turn_offers_only_read_tools_and_scrubs_tool_output(mo
     )
     client = make_client(remote)
     monkeypatch.setattr(flags, "is_enabled", lambda name: name == "enterprise_connectors")
-    monkeypatch.setattr(llm, "LLM_BACKEND", "vllm")
-    monkeypatch.setattr(llm, "_vllm_ready", lambda: True)
+    monkeypatch.setattr(generator, "LLM_BACKEND", "vllm")
+    monkeypatch.setattr(generator, "_vllm_ready", lambda: True)
     monkeypatch.setattr("app.mcp.get_client", lambda: client)
-    monkeypatch.setattr(llm, "_select_tools_for_query", lambda _query, names, **_options: names)
+    monkeypatch.setattr(generator, "_select_tools_for_query", lambda _query, names, **_options: names)
 
     calls: list[dict[str, Any]] = []
 
@@ -494,10 +494,10 @@ def test_agentic_connector_turn_offers_only_read_tools_and_scrubs_tool_output(mo
             }
         return {"content": "The service reports an active status.", "tool_calls": []}
 
-    monkeypatch.setattr(llm, "_vllm_chat_completion", fake_completion)
+    monkeypatch.setattr(generator, "_vllm_chat_completion", fake_completion)
 
     events: list[dict[str, Any]] = []
-    result = llm.generate_with_tools(
+    result = generator.generate_with_tools(
         query="Check my EFRIS taxpayer status",
         passages=[],
         locale="en",
@@ -527,20 +527,20 @@ def _run_connector_turn(monkeypatch, *, window: int | None = None, tools_registe
     remote = StaticTransport("efris", [descriptor("efris_taxpayer_status")], result={"ok": True, "status": "active"})
     client = make_client(remote)
     monkeypatch.setattr(flags, "is_enabled", lambda name: name == "enterprise_connectors")
-    monkeypatch.setattr(llm, "LLM_BACKEND", "vllm")
-    monkeypatch.setattr(llm, "_vllm_ready", lambda: True)
+    monkeypatch.setattr(generator, "LLM_BACKEND", "vllm")
+    monkeypatch.setattr(generator, "_vllm_ready", lambda: True)
     monkeypatch.setattr("app.mcp.get_client", lambda: client)
     if window is not None:
-        monkeypatch.setattr(llm, "_served_context_window", lambda: window)
-        monkeypatch.setattr(llm, "LLM_CONTEXT_WINDOW", window)
+        monkeypatch.setattr(generator, "_served_context_window", lambda: window)
+        monkeypatch.setattr(generator, "LLM_CONTEXT_WINDOW", window)
     offered: list[list[dict[str, Any]]] = []
 
     def fake_completion(messages, *, tools=None, **_kwargs):
         offered.append(list(tools or []))
         return {"content": "Done.", "tool_calls": []}
 
-    monkeypatch.setattr(llm, "_vllm_chat_completion", fake_completion)
-    llm.generate_with_tools(
+    monkeypatch.setattr(generator, "_vllm_chat_completion", fake_completion)
+    generator.generate_with_tools(
         query="Check EFRIS for this taxpayer and also work out the VAT on 1,000,000 shillings",
         passages=[{"source": "faq", "text": "VAT is charged at 18%. " * 80} for _ in range(4)],
         locale="en",
@@ -562,24 +562,24 @@ def test_a_connector_turn_does_not_offer_the_whole_local_registry(monkeypatch):
 
     eligible_local = [
         name
-        for name in llm._connector_chat_local_tool_names(ToolRegistry.names())
+        for name in generator._connector_chat_local_tool_names(ToolRegistry.names())
         if ToolRegistry.get(name).schema.namespace not in {"efris", "payment_system", "ursb", "bwims"}
     ]
-    assert len(eligible_local) > llm.CONNECTOR_TURN_LOCAL_TOOLS + 5, "the registry must be large enough to matter"
+    assert len(eligible_local) > generator.CONNECTOR_TURN_LOCAL_TOOLS + 5, "the registry must be large enough to matter"
 
     names = [spec["function"]["name"] for spec in _run_connector_turn(monkeypatch)]
 
     assert names[0] == "efris_taxpayer_status", "the selected connector's tool comes first"
-    assert len(names) <= 1 + llm.CONNECTOR_TURN_LOCAL_TOOLS
+    assert len(names) <= 1 + generator.CONNECTOR_TURN_LOCAL_TOOLS
 
 
 def test_a_tight_window_keeps_the_connector_tool_and_a_prompt_that_fits(monkeypatch):
     """The fit step, directly: what survives is what the window can hold."""
     window = 4096
-    monkeypatch.setattr(llm, "LLM_BACKEND", "vllm")
-    monkeypatch.setattr(llm, "_served_context_window", lambda: window)
-    monkeypatch.setattr(llm, "LLM_CONTEXT_WINDOW", window)
-    monkeypatch.setattr(llm, "_count_prompt_tokens", lambda _messages: None)  # estimate path
+    monkeypatch.setattr(generator, "LLM_BACKEND", "vllm")
+    monkeypatch.setattr(generator, "_served_context_window", lambda: window)
+    monkeypatch.setattr(generator, "LLM_CONTEXT_WINDOW", window)
+    monkeypatch.setattr(generator, "_count_prompt_tokens", lambda _messages: None)  # estimate path
     messages = [
         {"role": "system", "content": "s" * 5_000},
         {"role": "user", "content": "## Pre-fetched passages\n" + "p" * 3_000 + "\n\n## User question\nIs TIN 1000000001 registered?"},
@@ -602,28 +602,28 @@ def test_a_tight_window_keeps_the_connector_tool_and_a_prompt_that_fits(monkeypa
 
     # Prose is slimmed away; structure (the fields) is what has to be dropped.
     specs = [spec("efris_taxpayer_status", 300, 2)] + [spec(f"local_{i}", 1_500, 12) for i in range(10)]
-    full_tokens = llm._tool_schema_tokens(specs)
+    full_tokens = generator._tool_schema_tokens(specs)
 
-    fitted = llm._fit_tools_to_window(messages, specs)
+    fitted = generator._fit_tools_to_window(messages, specs)
 
     names = [item["function"]["name"] for item in fitted]
     assert names, "some tool is offered"
     assert names[0] == "efris_taxpayer_status", "the connector's tool is the last to go"
     assert len(names) < len(specs), "structure that cannot be slimmed is dropped, lowest priority first"
     assert names == [item["function"]["name"] for item in specs][: len(names)]
-    assert llm._tool_schema_tokens(fitted) < full_tokens
-    answer = min(llm.LLM_MAX_TOKENS, window // 2)
-    system_and_question = llm._estimate_prompt_tokens(
+    assert generator._tool_schema_tokens(fitted) < full_tokens
+    answer = min(generator.LLM_MAX_TOKENS, window // 2)
+    system_and_question = generator._estimate_prompt_tokens(
         [messages[0], {"content": "## User question\nIs TIN 1000000001 registered?"}]
     )
-    assert system_and_question + llm._tool_schema_tokens(fitted) + answer < window
+    assert system_and_question + generator._tool_schema_tokens(fitted) + answer < window
 
 
 def test_slimming_alone_is_used_when_it_is_enough(monkeypatch):
-    monkeypatch.setattr(llm, "LLM_BACKEND", "vllm")
-    monkeypatch.setattr(llm, "_served_context_window", lambda: 4096)
-    monkeypatch.setattr(llm, "LLM_CONTEXT_WINDOW", 4096)
-    monkeypatch.setattr(llm, "_count_prompt_tokens", lambda _messages: None)
+    monkeypatch.setattr(generator, "LLM_BACKEND", "vllm")
+    monkeypatch.setattr(generator, "_served_context_window", lambda: 4096)
+    monkeypatch.setattr(generator, "LLM_CONTEXT_WINDOW", 4096)
+    monkeypatch.setattr(generator, "_count_prompt_tokens", lambda _messages: None)
     messages = [{"role": "system", "content": "s" * 2_000}, {"role": "user", "content": "## User question\nq"}]
     wordy = {
         "type": "function",
@@ -634,7 +634,7 @@ def test_slimming_alone_is_used_when_it_is_enough(monkeypatch):
         },
     }
 
-    fitted = llm._fit_tools_to_window(messages, [wordy])
+    fitted = generator._fit_tools_to_window(messages, [wordy])
 
     assert [item["function"]["name"] for item in fitted] == ["wordy"]
     assert fitted[0]["function"]["description"] == "Reads a thing."
@@ -642,19 +642,19 @@ def test_slimming_alone_is_used_when_it_is_enough(monkeypatch):
 
 
 def test_a_prompt_whose_system_text_alone_exceeds_the_window_offers_no_tools(monkeypatch):
-    monkeypatch.setattr(llm, "LLM_BACKEND", "vllm")
-    monkeypatch.setattr(llm, "_served_context_window", lambda: 1000)
-    monkeypatch.setattr(llm, "LLM_CONTEXT_WINDOW", 1000)
-    monkeypatch.setattr(llm, "_count_prompt_tokens", lambda _messages: None)
+    monkeypatch.setattr(generator, "LLM_BACKEND", "vllm")
+    monkeypatch.setattr(generator, "_served_context_window", lambda: 1000)
+    monkeypatch.setattr(generator, "LLM_CONTEXT_WINDOW", 1000)
+    monkeypatch.setattr(generator, "_count_prompt_tokens", lambda _messages: None)
     messages = [{"role": "system", "content": "s" * 6_000}, {"role": "user", "content": "## User question\nq"}]
     spec = {"type": "function", "function": {"name": "t", "description": "d", "parameters": {"type": "object"}}}
 
     # Not a request the server will refuse: the caller falls back to answering without tools.
-    assert llm._fit_tools_to_window(messages, [spec]) == []
+    assert generator._fit_tools_to_window(messages, [spec]) == []
 
 
 def test_a_selected_connector_is_not_lost_when_tool_selection_finds_nothing(monkeypatch):
-    monkeypatch.setattr(llm, "_select_tools_for_query", lambda *_a, **_k: [])
+    monkeypatch.setattr(generator, "_select_tools_for_query", lambda *_a, **_k: [])
     names = [spec["function"]["name"] for spec in _run_connector_turn(monkeypatch)]
     assert names == ["efris_taxpayer_status"]
 
@@ -669,11 +669,11 @@ def test_forced_selection_never_falls_back_to_everything(monkeypatch):
             raise RuntimeError("selector down")
 
     monkeypatch.setattr(tool_rag, "ToolRAGSelector", Broken)
-    assert llm._select_tools_for_query("q", names, k=3, force=True) == []
+    assert generator._select_tools_for_query("q", names, k=3, force=True) == []
     # Unforced, the long-standing fallback is unchanged: an agent with too
     # many tools still works.
     monkeypatch.setattr(flags, "is_enabled", lambda name: name == "tool_rag")
-    assert llm._select_tools_for_query("q", names) == names
+    assert generator._select_tools_for_query("q", names) == names
 
 
 # ---------------------------------------------------------------------------

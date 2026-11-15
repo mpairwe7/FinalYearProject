@@ -1,6 +1,6 @@
 """Speech service layer — production ASR + MT + TTS (2026).
 
-Parallel singleton to :class:`ChatModel` (see ``service.py``). Loads speech
+Parallel singleton to :class:`ChatModel` (see ``rag/pipeline.py``). Loads speech
 models lazily so the backend still boots when speech assets are missing —
 this is critical for the dev / CI path where only the text pipeline is
 exercised.
@@ -13,7 +13,7 @@ Architecture::
 
 The model singleton is created in ``main.py`` lifespan and stashed on
 ``app.state.speech``. Each method wraps the underlying inference in a
-bounded executor + circuit breaker (same pattern as ``service._LLM_EXECUTOR``)
+bounded executor + circuit breaker (same pattern as ``pipeline._LLM_EXECUTOR``)
 so a slow / failing speech model cannot exhaust API workers.
 
 Environment flags:
@@ -1278,7 +1278,7 @@ class SpeechModel:
         self, audio_bytes: bytes, sample_rate: int, language: str | None
     ) -> str:
         """Cloud STT via Cloudflare Workers AI Whisper (flag/budget/breaker-gated)."""
-        from .flags import flags
+        from .config.flags import flags
 
         if not flags.is_enabled("cloudflare_fallback"):
             return ""
@@ -1322,7 +1322,7 @@ class SpeechModel:
         """Cloud TTS via Cloudflare Workers AI (flag/backend/config/breaker/budget
         gated). Tries TTS_FALLBACK_MODEL then TTS_FALLBACK_MODEL_2 for resilience.
         Returns None when disabled/unavailable so the caller falls through."""
-        from .flags import flags
+        from .config.flags import flags
 
         if not flags.is_enabled("cloudflare_fallback"):
             return None
@@ -1374,7 +1374,7 @@ class SpeechModel:
         once the Sunbird quota cooldown expires.
         """
         from . import sunbird
-        from .flags import flags
+        from .config.flags import flags
 
         tts_fb = os.getenv("TTS_FALLBACK_BACKEND", "").strip().lower()
         if tts_fb != "gemini" and not sunbird.both_accounts_quota_exhausted():
@@ -1491,7 +1491,7 @@ class SpeechModel:
         # audio samples. There is no prompt for an instruction to be injected
         # into, and InputGuard.check() takes a string, so it cannot be applied
         # to a tensor. The transcript this produces IS guarded — downstream in
-        # service.generate(), whose first step is InputGuard.check(message).
+        # pipeline.generate(), whose first step is InputGuard.check(message).
         #
         # The directive has to sit on the line immediately above the match;
         # anything between it and the code makes it inert.
@@ -1683,7 +1683,7 @@ class SpeechModel:
         # See the matching comment on _transcribe_whisper_peft: this is
         # Whisper ASR fed a mel spectrogram (input_features), not user text —
         # there is no prompt for LLM01 to inject into. The transcript IS
-        # guarded downstream, at service.generate()'s InputGuard.check(message).
+        # guarded downstream, at pipeline.generate()'s InputGuard.check(message).
         words: list[WordConf] | None = None
         mean_word_prob: float | None = None
 
@@ -2900,8 +2900,8 @@ class SpeechModel:
         def _prompted():
             if self._chat_model is not None:
                 try:
-                    from . import llm as llm_module
-                    reply = llm_module.translate_text(text, source_lang=source_lang, target_lang=target_lang)
+                    from .rag import generator as generator_module
+                    reply = generator_module.translate_text(text, source_lang=source_lang, target_lang=target_lang)
                     if reply and reply.strip():
                         return _res(reply.strip(), "prompted_qwen3")
                 except Exception:
@@ -2974,7 +2974,7 @@ class SpeechModel:
         as ``sunbird``). Shares the Sunbird generation breaker. Returns "" when
         disabled or unavailable, so the next tier still runs.
         """
-        from .flags import flags
+        from .config.flags import flags
 
         if not flags.is_enabled("cloudflare_fallback") or not cloud_models_allowed():
             return ""
@@ -3004,7 +3004,7 @@ class SpeechModel:
         """Translate via Cloudflare Workers AI Llama (prompted) — the model-routing
         fallback after Sunflower. Flag/budget/breaker-gated; returns "" when disabled
         or unavailable so the Sunbird tier still runs."""
-        from .flags import flags
+        from .config.flags import flags
 
         if not flags.is_enabled("cloudflare_fallback") or not cloud_models_allowed():
             return ""

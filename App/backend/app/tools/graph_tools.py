@@ -32,7 +32,7 @@ from __future__ import annotations
 import datetime as _dt
 from typing import Any
 
-from ..flags import flags
+from ..config.flags import flags
 from . import Tool, ToolRegistry, ToolSchema
 
 GRAPH_NAMESPACE = "tax_graph"

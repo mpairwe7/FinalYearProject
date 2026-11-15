@@ -22,7 +22,8 @@ fi
 echo "pgvector $(reader "SELECT extversion FROM pg_extension WHERE extname = 'vector'")"
 # Orthogonal vectors are at cosine distance 1.
 test "$(reader "SELECT ('[1,0,0]'::vector <=> '[0,1,0]'::vector)::int")" = "1"
-if [ -f /app/Data/dense/manifest.json ] && [ -f /app/backend/app/pgvector_dense.py ]; then
+# The loader is app/vectorstore/vector_db.py, or app/pgvector_dense.py in a base image from before ADR-0056.
+if [ -f /app/Data/dense/manifest.json ] && { [ -f /app/backend/app/vectorstore/vector_db.py ] || [ -f /app/backend/app/pgvector_dense.py ]; }; then
   # This base ships the dense leg: a missing or empty table is a failed load.
   count=$(reader "SELECT value FROM dense_meta WHERE key = 'count'")
   test "${count:-0}" -gt 0

@@ -25,7 +25,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from app.service import ChatModel
+from app.rag.pipeline import ChatModel
 from app.workflows.loader import load_workflow
 from app.workflows.registry import WorkflowRegistry
 
@@ -152,10 +152,10 @@ class WorkflowTopicChangeTest(unittest.TestCase):
             "updated_at": time.time(),
         }
         with (
-            patch("app.service.flags.is_enabled", return_value=True),
-            patch("app.service.db.get_workflow_session", return_value=persisted),
-            patch("app.service.db.complete_workflow_session") as complete,
-            patch("app.service.WorkflowRegistry.create_session", return_value=None),
+            patch("app.rag.pipeline.flags.is_enabled", return_value=True),
+            patch("app.rag.pipeline.db.get_workflow_session", return_value=persisted),
+            patch("app.rag.pipeline.db.complete_workflow_session") as complete,
+            patch("app.rag.pipeline.WorkflowRegistry.create_session", return_value=None),
         ):
             result = self.model._maybe_handle_workflow(
                 message="help me file my return",

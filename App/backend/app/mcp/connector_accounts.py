@@ -120,7 +120,7 @@ CREATE TABLE IF NOT EXISTS connector_account_links (
 
 
 def _ensure_schema() -> None:
-    from .. import database as db
+    from ..db import database as db
 
     env_dir = os.getenv("CONNECTOR_DATA_STORE_DIR")
     key = env_dir or "default_seam"
@@ -146,7 +146,7 @@ def _db_query_one(sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | No
             conn.row_factory = sqlite3.Row
             row = conn.execute(sql, params).fetchone()
             return dict(row) if row is not None else None
-    from .. import database as db
+    from ..db import database as db
 
     return db.query_one(sql, params)
 
@@ -160,7 +160,7 @@ def _db_query_all(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]
             conn.row_factory = sqlite3.Row
             rows = conn.execute(sql, params).fetchall()
             return [dict(r) for r in rows]
-    from .. import database as db
+    from ..db import database as db
 
     return db.query_all(sql, params)
 
@@ -174,7 +174,7 @@ def _db_execute(sql: str, params: tuple[Any, ...] = ()) -> int:
             cur = conn.execute(sql, params)
             conn.commit()
             return cur.rowcount
-    from .. import database as db
+    from ..db import database as db
 
     return db.execute(sql, params)
 

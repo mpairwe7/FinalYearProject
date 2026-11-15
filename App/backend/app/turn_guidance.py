@@ -30,7 +30,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from .escalation_policy import TIER_PRIORITY, assess_escalation
-from .flags import flags
+from .config.flags import flags
 from .text_signals import detect_user_distress, distress_trajectory, strip_repeated_ack
 from .workflows.journey_copilot import infer_taxpayer_objective
 from .workflows.registry import WorkflowRegistry

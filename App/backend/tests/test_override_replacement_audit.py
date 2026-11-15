@@ -15,7 +15,7 @@ from unittest import mock
 
 from fastapi.testclient import TestClient
 
-from app import database as db
+from app.db import database as db
 from app.auth.jwt_auth import make_dev_token
 from app.main import app
 
@@ -109,7 +109,7 @@ class ConcurrentCreationTests(unittest.TestCase):
     def test_postgres_retries_a_first_save_that_lost_the_race(self) -> None:
         """No row to lock: the losing INSERT hits the unique key. It is retried
         once, when the locked read finds the winner's row and updates it."""
-        from app import postgres as pg
+        from app.db import postgres as pg
 
         class UniqueViolation(Exception):
             sqlstate = "23505"

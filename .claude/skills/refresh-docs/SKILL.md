@@ -32,7 +32,7 @@ cd App/backend
 ../../.venv/bin/python -c "
 import app.tools as t
 from app.agents.eval_routing import GOLDEN_SETS, run_routing_eval
-from app.flags import _REGISTRY
+from app.config.flags import _REGISTRY
 from app.agents.patterns import supported_locales
 tools = t.ToolRegistry.all()
 print('tools:', len(tools), 'namespaces:', len({x.schema.namespace for x in tools}))
@@ -91,7 +91,7 @@ grep -rn "<old fact>" --include="*.md" . | grep -v node_modules
 
 - **Correct the claim, keep the prose.** Do not restructure a doc while
   fixing a number in it.
-- **A new feature flag must land in three places**: the `flags.py` registry,
+- **A new feature flag must land in three places**: the `config/flags.py` registry,
   the flag table in `docs/RAG_ARCHITECTURE.md`, and `.env.example`. Two out of
   three is the usual failure.
 - **A shipped gap flips its status** in `GAPS_AND_AGENTIC_ROADMAP.md` and gets

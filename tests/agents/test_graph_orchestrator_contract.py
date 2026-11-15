@@ -15,14 +15,14 @@ from typing import Any
 from unittest import mock
 
 import pytest
-from app import service as service_module
+from app.rag import pipeline as pipeline_module
 from app.agents.graphs.main_graph import build_main_graph, node_human_gate
 from app.agents.graphs.runtime import END, GraphRuntime, InMemoryCheckpointStore, NodeResult
 from app.agents.graphs.state import AgentGraphState, GraphOutcome, TaxpayerActionRequest
-from app.flags import flags
+from app.config.flags import flags
 from app.providers.routing import ModelTier, TierDecision
 from app.resilience import turn_deadline
-from app.service import ChatModel
+from app.rag.pipeline import ChatModel
 
 HIT = {
     "text": "The standard VAT rate in Uganda is 18 percent.",
@@ -85,7 +85,7 @@ def on_graph(clean_flags, tmp_db, monkeypatch):
 class TestAGraphAnswerIsCheckedLikeAnyOther:
     def test_a_contradicted_figure_is_withheld(self, chat_model, on_graph) -> None:
         on_graph(_final())
-        with mock.patch.object(service_module, "verify_claims", return_value=CONTRADICTED):
+        with mock.patch.object(pipeline_module, "verify_claims", return_value=CONTRADICTED):
             result = chat_model.generate("What is the VAT rate?", session_id=uuid.uuid4().hex)
         assert "25%" not in result["reply"]
         assert result["escalation_required"] is True
@@ -117,7 +117,7 @@ class TestAGraphAnswerIsCheckedLikeAnyOther:
 
     def test_a_clarification_is_not_judged_as_a_claim(self, chat_model, on_graph) -> None:
         on_graph(_final("Which tax do you mean?", outcome=GraphOutcome.CLARIFY, hits=[], citations=[]))
-        with mock.patch.object(service_module, "verify_claims") as verify:
+        with mock.patch.object(pipeline_module, "verify_claims") as verify:
             result = chat_model.generate("that one", session_id=uuid.uuid4().hex)
         verify.assert_not_called()
         assert result["reply"] == "Which tax do you mean?"
@@ -141,16 +141,16 @@ class TestAGraphAnswerIsCheckedLikeAnyOther:
 
         on_graph(_final("Which tax do you mean?", outcome=GraphOutcome.CLARIFY, hits=[], citations=[]))
         stages = {"input_guard": 1.0}
-        token = service_module._TURN_STAGES.set(stages)
+        token = pipeline_module._TURN_STAGES.set(stages)
         try:
             chat_model.generate_retrieval_only("that one", session_id=uuid.uuid4().hex)
         finally:
-            service_module._TURN_STAGES.reset(token)
+            pipeline_module._TURN_STAGES.reset(token)
         assert attest_turn(stages, transport="sse")["ok"] is True
 
     def test_the_stream_gets_the_same_checks(self, chat_model, on_graph) -> None:
         on_graph(_final())
-        with mock.patch.object(service_module, "verify_claims", return_value=CONTRADICTED):
+        with mock.patch.object(pipeline_module, "verify_claims", return_value=CONTRADICTED):
             result = chat_model.generate_retrieval_only("What is the VAT rate?", session_id=uuid.uuid4().hex)
         assert "25%" not in result["reply"]
         assert result["_short_circuit"] is True
@@ -172,7 +172,7 @@ class TestAReasoningTurnOnTheGraph:
     @pytest.fixture
     def tier(self, monkeypatch):
         def choose(tier: ModelTier) -> None:
-            monkeypatch.setattr(service_module, "select_tier", lambda *_a, **_k: TierDecision(tier=tier, reason="test"))
+            monkeypatch.setattr(pipeline_module, "select_tier", lambda *_a, **_k: TierDecision(tier=tier, reason="test"))
 
         return choose
 
@@ -180,7 +180,7 @@ class TestAReasoningTurnOnTheGraph:
     def test_an_invented_figure_is_stripped(self, chat_model, on_graph, tier, transport) -> None:
         tier(ModelTier.T3)
         on_graph(_final("The penalty is UGX 7,777,777 [1]."))
-        with mock.patch.object(service_module, "verify_claims", return_value={"decision": "approve"}):
+        with mock.patch.object(pipeline_module, "verify_claims", return_value={"decision": "approve"}):
             result = getattr(chat_model, transport)("What is the VAT rate?", session_id=uuid.uuid4().hex)
         assert "7,777,777" not in result["reply"]
         assert result["_figure_lock"]["mode"] == "enforced"
@@ -189,7 +189,7 @@ class TestAReasoningTurnOnTheGraph:
     def test_below_that_tier_it_only_measures(self, chat_model, on_graph, tier, transport) -> None:
         tier(ModelTier.T1)
         on_graph(_final("The penalty is UGX 7,777,777 [1]."))
-        with mock.patch.object(service_module, "verify_claims", return_value={"decision": "approve"}):
+        with mock.patch.object(pipeline_module, "verify_claims", return_value={"decision": "approve"}):
             result = getattr(chat_model, transport)("What is the VAT rate?", session_id=uuid.uuid4().hex)
         assert "7,777,777" in result["reply"]
         assert result["_figure_lock"]["mode"] == "shadow"
@@ -331,7 +331,7 @@ class TestCheckpointsAreSafeToKeep:
         def down(*_args: Any, **_kwargs: Any) -> None:
             raise ConnectionError("database unreachable")
 
-        monkeypatch.setattr("app.database.save_agent_checkpoint", down)
+        monkeypatch.setattr("app.db.database.save_agent_checkpoint", down)
         with pytest.raises(ConnectionError):
             DurableCheckpointStore().save_checkpoint("t", 0, "n", {})
 

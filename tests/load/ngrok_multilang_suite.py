@@ -8,7 +8,7 @@ questions that matter for this deployment are not answered by latency alone:
   * does the LLM still generate real text under concurrency, or start
     abstaining / truncating / erroring?
   * does auto language detection still fire when the box is saturated?
-    (service.py only auto-detects when the caller sends locale == "en", so
+    (rag/pipeline.py only auto-detects when the caller sends locale == "en", so
     every request here deliberately sends "en" and asserts on the locale the
     API reports back)
   * does an English question keep getting an English answer, a Luganda
@@ -16,7 +16,7 @@ questions that matter for this deployment are not answered by latency alone:
     under load, not just on a quiet box?
 
 Reply-language verification is deliberately NOT done with the app's own
-app.query.detect_language: lingua classifies this deployment's own Luganda
+app.rag.query.detect_language: lingua classifies this deployment's own Luganda
 replies as `nyn`, so scoring the app's output with the app's own detector
 would report a false failure. `classify_reply()` below is an independent
 marker-density discriminator, and every phase keeps verbatim reply samples
@@ -215,7 +215,7 @@ async def send_one(
     try:
         r = await client.post(
             f"{base}/v1/chat",
-            # locale "en" on every request: service.py only runs auto-detection
+            # locale "en" on every request: rag/pipeline.py only runs auto-detection
             # when the caller sends "en", so this is the path under test.
             json={"message": message, "locale": "en"},
             headers={

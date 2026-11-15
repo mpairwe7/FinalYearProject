@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.service import ChatModel
+from app.rag.pipeline import ChatModel
 from app.text_signals import (
     detect_comparison_jurisdiction,
     detect_foreign_jurisdiction,
@@ -90,7 +90,7 @@ class DispatcherPrecedenceTests(unittest.TestCase):
     def test_the_guard_is_the_first_fast_path(self) -> None:
         import inspect
 
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         source = inspect.getsource(ChatModel._maybe_handle_fast_paths)
         order = [

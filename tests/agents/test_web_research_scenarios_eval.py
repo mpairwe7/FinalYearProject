@@ -8,12 +8,12 @@ from typing import Any
 
 import pytest
 
-from app import database as db
+from app.db import database as db
 from app import ephemeral_pdf_sandbox as sbx
 from app import scenario_planner as sp
 from app import web_fx
 from app import web_research as wr
-from app.pdf_corpus import PDF_JSONL_SCHEMA_VERSION, _stable_id
+from app.ingestion.pdf_corpus import PDF_JSONL_SCHEMA_VERSION, _stable_id
 
 SCENARIOS_PATH = Path(__file__).resolve().parents[2] / "evals" / "web_research_scenarios" / "scenarios.jsonl"
 
@@ -103,7 +103,7 @@ def test_web_research_scenarios_triggers_and_turn2_ledger_skip(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify every scenario triggers its expected category, executes live FX / Qdrant sync outcomes, and skips Turn 2."""
-    import app.flags as flags_mod
+    import app.config.flags as flags_mod
 
     db_file = tmp_path / "eval_scenarios.db"
     monkeypatch.setattr(db, "_DB_DIR", tmp_path)

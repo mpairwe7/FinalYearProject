@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from app.calculator_router import format_rate_reply, plan_rate_lookup
 from app.guardrails import OutputGuard
-from app.service import ChatModel
+from app.rag.pipeline import ChatModel
 from app.tax.tables import get_table as get_table_in_force
 
 
@@ -94,7 +94,7 @@ class RateLookupTemporalScopeTests(unittest.TestCase):
 
 class GroundedRevisionDigitTests(unittest.TestCase):
     def test_trailing_footnote_digit_and_inline_ref_removed(self) -> None:
-        from app import service
+        from app.rag import pipeline
 
         hits = [{
             "source": "taxation_handbook.pdf",
@@ -105,13 +105,13 @@ class GroundedRevisionDigitTests(unittest.TestCase):
             ),
         }]
         citations = [{"ref": "[1]", "source": "taxation_handbook.pdf"}]
-        out = service.ChatModel._build_grounded_revision(hits, citations, "vat")
+        out = pipeline.ChatModel._build_grounded_revision(hits, citations, "vat")
         self.assertTrue(out)
         self.assertFalse(out.rstrip().endswith("1"), out[-80:])
         self.assertNotIn("[1]", out)
 
     def test_legitimate_trailing_numbers_survive(self) -> None:
-        from app import service
+        from app.rag import pipeline
 
         hits = [{
             "source": "contacts.csv",
@@ -120,7 +120,7 @@ class GroundedRevisionDigitTests(unittest.TestCase):
                 "Centre on the toll-free line 0800 117 000."
             ),
         }]
-        out = service.ChatModel._build_grounded_revision(hits, [], "help")
+        out = pipeline.ChatModel._build_grounded_revision(hits, [], "help")
         self.assertIn("0800 117 000.", out)
 
 
@@ -134,7 +134,7 @@ class CleanPassageMarkdownTests(unittest.TestCase):
     extractive-fallback reply verbatim."""
 
     def test_atx_headings_and_bold_markers_are_stripped(self) -> None:
-        from app.service import _clean_passage_text
+        from app.rag.pipeline import _clean_passage_text
 
         raw = (
             "omes and wealth of the rich. The revenue raised is then used to "
@@ -159,7 +159,7 @@ class CleanPassageMarkdownTests(unittest.TestCase):
         """Stripping the "##"/"**" markers must not collapse a multi-section
         chunk into one run-on paragraph — each former heading should still
         start a new paragraph so the excerpt stays readable."""
-        from app.service import _clean_passage_text
+        from app.rag.pipeline import _clean_passage_text
 
         raw = (
             "Intro sentence about revenue. \n\n"
@@ -179,7 +179,7 @@ class CleanPassageMarkdownTests(unittest.TestCase):
         )
 
     def test_bare_hash_in_prose_is_not_a_heading(self) -> None:
-        from app.service import _clean_passage_text
+        from app.rag.pipeline import _clean_passage_text
 
         self.assertEqual(
             _clean_passage_text("Room #12 is on the third floor."),
@@ -190,7 +190,7 @@ class CleanPassageMarkdownTests(unittest.TestCase):
         """A lossy PDF-extraction encoding step corrupted section numbers like
         "8.0" into "8�0" in the live corpus; any other stray U+FFFD carries
         no recoverable meaning and is dropped outright."""
-        from app.service import _clean_passage_text
+        from app.rag.pipeline import _clean_passage_text
 
         cleaned = _clean_passage_text(
             "Section 8�0 covers the tax base, split into 5�1 and 5�2. "
@@ -203,7 +203,7 @@ class CleanPassageMarkdownTests(unittest.TestCase):
         self.assertIn("straycharacter", cleaned)
 
     def test_grounded_revision_excludes_markdown_artifacts(self) -> None:
-        from app import service
+        from app.rag import pipeline
 
         hits = [{
             "source": "TAXATION-HANDBOOK-FY-2025-26-1.pdf",
@@ -216,7 +216,7 @@ class CleanPassageMarkdownTests(unittest.TestCase):
                 "Uganda."
             ),
         }]
-        out = service.ChatModel._build_grounded_revision(hits, [], "what services does ura provide")
+        out = pipeline.ChatModel._build_grounded_revision(hits, [], "what services does ura provide")
         self.assertNotIn("##", out)
         self.assertNotIn("**", out)
 
@@ -225,7 +225,7 @@ class CleanPassageMarkdownTests(unittest.TestCase):
         wording for the same section. The top-2 ranked hits repeating that
         passage must not both make it into the reply — the second slot
         should fall through to the next genuinely distinct hit."""
-        from app import service
+        from app.rag import pipeline
 
         hit_a = {
             "source": "Taxation-handbook-FY2023-24.pdf",
@@ -261,7 +261,7 @@ class CleanPassageMarkdownTests(unittest.TestCase):
                 "UGX 37.5 million in any 3 consecutive months."
             ),
         }
-        out = service.ChatModel._build_grounded_revision(
+        out = pipeline.ChatModel._build_grounded_revision(
             [hit_a, hit_b, hit_c], [], "what services does ura provide"
         )
         self.assertEqual(out.count("Statutory Authority"), 1)
@@ -273,7 +273,7 @@ class CleanPassageMarkdownTests(unittest.TestCase):
         the union, even though the shorter excerpt is ~97% contained in the
         longer one. A containment ratio over the shorter excerpt's own
         token count must still catch it."""
-        from app import service
+        from app.rag import pipeline
 
         hit_a = {
             "source": "Taxation-handbook-FY2023-24.pdf",
@@ -320,7 +320,7 @@ class CleanPassageMarkdownTests(unittest.TestCase):
                 "UGX 37.5 million in any 3 consecutive months."
             ),
         }
-        out = service.ChatModel._build_grounded_revision(
+        out = pipeline.ChatModel._build_grounded_revision(
             [hit_a, hit_b, hit_c], [], "what services does ura provide"
         )
         self.assertEqual(out.count("Statutory Authority"), 1)
@@ -331,15 +331,15 @@ class CleanPassageMarkdownTests(unittest.TestCase):
 class TinClarificationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        from app import database as db
+        from app.db import database as db
 
         db.init_db()
-        from app import service
-        from app.flags import flags
+        from app.rag import pipeline
+        from app.config.flags import flags
 
         flags.set("workflows", True)
         cls._flags = flags
-        cls.model = service.ChatModel()
+        cls.model = pipeline.ChatModel()
 
     @classmethod
     def tearDownClass(cls):
@@ -392,7 +392,7 @@ class TinClarificationTests(unittest.TestCase):
         self.assertIn("official rate table", result["response_judge"]["reasons"])
 
     def test_pdf_page_furniture_and_marginal_notes_cleaned(self) -> None:
-        from app.service import _clean_passage_text
+        from app.rag.pipeline import _clean_passage_text
 
         raw = (
             "EXPORT PROCESSING ZONES AND FREEPORTS\n"
@@ -412,7 +412,7 @@ class TinClarificationTests(unittest.TestCase):
         self.assertIn("goods in export freeports", cleaned)
 
     def test_concise_faq_answer_is_not_diluted_by_second_chunk(self) -> None:
-        from app import service
+        from app.rag import pipeline
 
         hits = [
             {
@@ -429,7 +429,7 @@ class TinClarificationTests(unittest.TestCase):
                 ),
             },
         ]
-        out = service.ChatModel._build_grounded_revision(
+        out = pipeline.ChatModel._build_grounded_revision(
             hits, [], "Is removing goods from an EPZ/Freeport for home use without authority an offence?"
         )
         self.assertIn("Yes; fine USD 5,000 or 50% of goods' value, whichever is higher.", out)

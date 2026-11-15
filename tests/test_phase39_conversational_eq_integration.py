@@ -41,8 +41,8 @@ os.environ.setdefault("SPEECH_ENABLED", "false")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from App.backend.app import database  # noqa: E402
-from App.backend.app import service as service_module  # noqa: E402
+from App.backend.app.db import database  # noqa: E402
+from App.backend.app.rag import pipeline as pipeline_module  # noqa: E402
 from App.backend.app.main import app, limiter  # noqa: E402
 
 HANDOFF = "Talk to an officer"
@@ -58,7 +58,7 @@ def _fresh_rate_window():
 @pytest.fixture(scope="module")
 def client():
     database.init_db()
-    app.state.model = service_module.ChatModel()
+    app.state.model = pipeline_module.ChatModel()
     app.state.speech = types.SimpleNamespace(enabled=False)
     return TestClient(app)
 
@@ -210,10 +210,10 @@ class TestVoiceAffectGateAndSlotHygiene:
             "tax_type"
         ]
         written: dict = {}
-        monkeypatch.setattr("app.database.has_active_consent", lambda *a, **k: True)
-        monkeypatch.setattr("app.database.get_working_memory", lambda *a, **k: {})
+        monkeypatch.setattr("app.db.database.has_active_consent", lambda *a, **k: True)
+        monkeypatch.setattr("app.db.database.get_working_memory", lambda *a, **k: {})
         monkeypatch.setattr(
-            "app.database.upsert_working_memory",
+            "app.db.database.upsert_working_memory",
             lambda user_id, tenant, fields, ttl_seconds=0: written.update(fields) or True,
         )
         ResolutionLedger().store_verified_slots("u-1", {"tax_type": "vat", "_invalid_step": "collect_period"})

@@ -299,7 +299,7 @@ def test_kernel_tools_answer_only_when_enabled(monkeypatch: pytest.MonkeyPatch) 
 def test_a_turn_records_the_kernel_it_answered_under() -> None:
     from app.audit import turns
     from app.kernel.pin import pin_for_turn
-    from app.turn_context import ACTIVE_KERNEL_PIN
+    from app.rag.turn_context import ACTIVE_KERNEL_PIN
 
     pin = pin_for_turn(_dt.date(2026, 8, 15)).to_dict()
     token = ACTIVE_KERNEL_PIN.set(pin)
@@ -326,7 +326,7 @@ def _approval_graph(store) -> GraphRuntime:
 
 
 def test_an_approval_cannot_resume_under_another_kernel_release(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.database import init_db
+    from app.db.database import init_db
 
     init_db()
     store = InMemoryCheckpointStore()

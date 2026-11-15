@@ -35,7 +35,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from .query import SUPPORTED_LOCALES, detect_language
+from .rag.query import SUPPORTED_LOCALES, detect_language
 from .receptionist.language import detect_explicit_request, lexical_hits
 
 LocaleSource = Literal[

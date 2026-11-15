@@ -5,7 +5,7 @@
 > `feat/agentic-workflows` branch actually *ships* (Phases A-D of
 > the broader Phase 14 work).
 
-Most capabilities below are **gated behind a feature flag** (`flags.py`, 91 flags total).
+Most capabilities below are **gated behind a feature flag** (`config/flags.py`, 91 flags total).
 `FLAG_TOOL_USE` defaults OFF; `FLAG_TICKET_QUEUE` defaults ON (`true`).
 `FLAG_AGENTIC_MODE` defaults ON after the English routing golden set
 holds ≥ 0.95 (`agentic_mode_gate`, currently `36/36`).
@@ -15,7 +15,7 @@ holds ≥ 0.95 (`agentic_mode_gate`, currently `36/36`).
 | `FLAG_TOOL_USE` | Allow the LLM to call registered tools via Qwen2.5 native function-calling. |
 | `FLAG_AGENTIC_MODE` | Route every request through the supervisor classifier before retrieval. |
 | `FLAG_TICKET_QUEUE` | Persist supervisor-driven escalations to the `tickets` table. |
-| `FLAG_AUDIT_LEDGER` | Write hash-chained audit events on every `service.generate()` return path. |
+| `FLAG_AUDIT_LEDGER` | Write hash-chained audit events on every `pipeline.generate()` return path. |
 | `FLAG_STREAM_FIGURE_HOLD` | Default **on**. Hold streamed text from the first figure until the output guards have read it. |
 
 Flags can be set per-process via env (`FLAG_TOOL_USE=true …`) or
@@ -83,10 +83,10 @@ per-request in tests via `flags.set("tool_use", True)`.
 
 | Phase | Files added / touched | Purpose |
 |---|---|---|
-| **A** | `backend/app/tools/{__init__,calculators,calendar,rates,rag_tool,escalate}.py` + `flags.py` | Tool framework (ABC + registry + schema) and 11 starter tools |
-| **B** | `backend/app/llm.py` + `service.py` | `generate_with_tools()` — bounded tool-call loop wired into the LLM layer, gated by `FLAG_TOOL_USE` |
-| **C** | `backend/app/agents/{__init__,state,supervisor}.py` + `service.py` | Supervisor classifier (rule-based), `AgentRoute` enum, `AgentState` TypedDict; routes to CLARIFY/ESCALATE/TOOLS/SPECIALIST/RAG |
-| **D** | `backend/app/database.py` (+ schema) + `backend/app/tools/escalate.py` + `service.py` + `main.py` + `models.py` | `tickets` table + CRUD + `escalate_to_human` tool + 4 admin endpoints + `ticket_id` surfacing in ChatResponse |
+| **A** | `backend/app/tools/{__init__,calculators,calendar,rates,rag_tool,escalate}.py` + `config/flags.py` | Tool framework (ABC + registry + schema) and 11 starter tools |
+| **B** | `backend/app/rag/generator.py` + `rag/pipeline.py` | `generate_with_tools()` — bounded tool-call loop wired into the LLM layer, gated by `FLAG_TOOL_USE` |
+| **C** | `backend/app/agents/{__init__,state,supervisor}.py` + `rag/pipeline.py` | Supervisor classifier (rule-based), `AgentRoute` enum, `AgentState` TypedDict; routes to CLARIFY/ESCALATE/TOOLS/SPECIALIST/RAG |
+| **D** | `backend/app/db/database.py` (+ schema) + `backend/app/tools/escalate.py` + `rag/pipeline.py` + `main.py` + `api/models.py` | `tickets` table + CRUD + `escalate_to_human` tool + 4 admin endpoints + `ticket_id` surfacing in ChatResponse |
 
 All code is under the `feat/agentic-workflows` branch.
 
@@ -264,7 +264,7 @@ imported lazily inside the flag check, so a closed flag costs nothing.
 2. Add a regex + trigger entry to the relevant pattern table in
    `supervisor.py`, or add a whole new `_<name>_PATTERNS` list and
    reference it from `classify()`.  Also handle the route in
-   `service.py::generate()` — early-return for short-circuit
+   `rag/pipeline.py::generate()` — early-return for short-circuit
    routes, or set `force_agentic` + `force_tool_whitelist` for
    tool-using routes.
 
@@ -272,7 +272,7 @@ imported lazily inside the flag check, so a closed flag costs nothing.
 
 ## 5. LLM tool-calling loop (Phase B)
 
-`backend/app/llm.py::generate_with_tools()` implements a bounded
+`backend/app/rag/generator.py::generate_with_tools()` implements a bounded
 iterative loop:
 
 ```
@@ -291,7 +291,7 @@ max_iterations hit → return best text + truncated=True
 ```
 
 Every iteration runs inside its **tier's circuit breaker**
-(`service._LLM_CIRCUIT`, or `_REASONER_CIRCUIT` for the reasoner), with a
+(`pipeline._LLM_CIRCUIT`, or `_REASONER_CIRCUIT` for the reasoner), with a
 wall-clock deadline that's **2× the sync deadline** by default (90s for the
 tool-loop vs 45s for plain `generate()`), clamped to what is left of the turn.
 A `CancelScope` stops the loop before its next round or dispatch. On a call turn
@@ -589,7 +589,7 @@ Qwen.  Live-LLM integration tests belong in a separate
 ### Fixture design notes
 
 - `tmp_db` — **in-memory SQLite** (`sqlite3.connect(":memory:")`)
-  monkey-patched into `app.database._get_connection`.  This
+  monkey-patched into `app.db.database._get_connection`.  This
   avoids all file-locking issues that pytest's `tmp_path_factory`
   hit on hosts where `/tmp/pytest-of-<user>` lives on an NFS
   mount, and avoids cross-test WAL state contamination.
@@ -668,10 +668,10 @@ pipeline attestation, how the turn ended and what generated it.
 | A turn runs long | `resilience.turn_deadline` | One deadline across every stage and transport. The tool loop stops at its next check |
 | A call turn is superseded | `resilience.raise_if_turn_cancelled` | The run stops at its next stage boundary and blames no model (ADR-0046) |
 | A figure is wrong | `guardrails.FigureReleaseGate`, `_apply_output_guards` | Streams hold from the first figure. The lock runs on every transport |
-| Retrieved text leaves the data region | `guardrails.fence_spotlight_body`, `llm._spotlight_passage` | Every prompt path fences the body and the header. The tool path uses the same hash id as retrieval (ADR-0027). Uploads share the normalization (`fence_untrusted_document_body`, ADR-0029) |
+| Retrieved text leaves the data region | `guardrails.fence_spotlight_body`, `generator._spotlight_passage` | Every prompt path fences the body and the header. The tool path uses the same hash id as retrieval (ADR-0027). Uploads share the normalization (`fence_untrusted_document_body`, ADR-0029) |
 | Third-party text speaks to the model | `guardrails.scan_retrieved_text`, `scan_external_tool_text`, `injection_present` | Injection phrases and directives addressed to an AI are removed to the end of their line; ingest quarantines them (ADR-0029) |
 | An answer links off-government | `guardrails.neutralize_untrusted_links`, `_apply_output_guards` | Only `*.go.ug` and listed hosts stay linked; the final reply is re-checked and a removal is a revision (ADR-0029) |
-| Someone probes the input guard | `guard_friction.strike_tracker`, `service._guard_both_forms` | Five refusals in ten minutes pause the principal without a model call (`guardrail_strike_friction`, on) |
+| Someone probes the input guard | `guard_friction.strike_tracker`, `pipeline._guard_both_forms` | Five refusals in ten minutes pause the principal without a model call (`guardrail_strike_friction`, on) |
 | A control faults | `ToolRegistry._autonomy_gate` | Writes fail closed. A refusal does not depend on its record |
 | A person is needed | `tools/escalate.ESCALATION_ROUTE` | Cannot be gated. Goes through `_maybe_create_ticket` |
 | Something degrades | `DEGRADED_DISCLOSURES` | The taxpayer is told, and the row records it |
@@ -711,7 +711,7 @@ See the [runbook](runbooks/agent-fault-tolerance.md).
 | `1ed7589` | 16 | Three-tier personal memory + consent gating + temporal decay |
 | `6330f1d` | 21 subset | Hash-chained audit ledger + per-segment eval |
 | `ec224c4` | 17-20 | Directory scaffolds + READMEs for DMZ MCP, workflows, scheduler |
-| `79c7239` | 21 wire | Audit ledger wired into `service.generate` on every return path |
+| `79c7239` | 21 wire | Audit ledger wired into `pipeline.generate` on every return path |
 | `95236ae` | tests + docs | +151 pytest tests (154 → 304), TestClient integration for /v1/me/*, AGENT_ARCHITECTURE v2 |
 | `<current>` | infra | Qdrant v1.19.0, staged aliases, retained snapshots, restore drills, and lifecycle metrics |
 

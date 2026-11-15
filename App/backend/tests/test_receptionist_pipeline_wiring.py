@@ -11,7 +11,7 @@ import pytest
 
 pytest.importorskip("pipecat")
 
-from app import database as db  # noqa: E402
+from app.db import database as db  # noqa: E402
 from app.receptionist.state import CallRoom, CallState  # noqa: E402
 from app.receptionist.store import create_call, init_receptionist_schema  # noqa: E402
 
@@ -78,7 +78,7 @@ class SingleEnginePipelineTests(unittest.IsolatedAsyncioTestCase):
         Pipecat cancels an idle task after 300 s by default, which ended every officer call
         longer than five minutes (recorded as the caller hanging up).
         """
-        from app.flags import flags
+        from app.config.flags import flags
         from app.receptionist.pipeline import build_call_pipeline
 
         room = _room()

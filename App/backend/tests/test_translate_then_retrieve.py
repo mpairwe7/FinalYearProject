@@ -21,7 +21,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import service  # noqa: E402
+from app.rag import pipeline  # noqa: E402
 
 
 def _index() -> dict[str, list[dict[str, str]]]:
@@ -46,23 +46,23 @@ class TestEnglishIsUntouched(unittest.TestCase):
         idx = _index()
         for query in ("What is the VAT rate in Uganda?", "How do I register for a TIN?"):
             with self.subTest(query=query):
-                bare = [h["question"] for h in service._simple_search(query, idx, top_k=4)]
+                bare = [h["question"] for h in pipeline._simple_search(query, idx, top_k=4)]
                 with_en = [
                     h["question"]
-                    for h in service._simple_search(query, idx, top_k=4, locale="en")
+                    for h in pipeline._simple_search(query, idx, top_k=4, locale="en")
                 ]
                 self.assertEqual(bare, with_en)
 
     def test_english_never_calls_the_translator(self):
         """locale='en' must not spend a network round trip."""
         with patch("app.sunbird.translate_to_english") as tr:
-            service._simple_search("What is the VAT rate in Uganda?", _index(), locale="en")
+            pipeline._simple_search("What is the VAT rate in Uganda?", _index(), locale="en")
             tr.assert_not_called()
 
     def test_a_matching_non_english_query_does_not_translate(self):
         """The fallback is lazy: a hit on the original text short-circuits it."""
         with patch("app.sunbird.translate_to_english") as tr:
-            hits = service._simple_search(
+            hits = pipeline._simple_search(
                 "What is the VAT rate in Uganda?", _index(), locale="lg"
             )
             self.assertTrue(hits)
@@ -73,13 +73,13 @@ class TestNonEnglishFallback(unittest.TestCase):
     def test_translation_rescues_a_query_that_found_nothing(self):
         idx = _index()
         luganda = "Omusolo gwa VAT gw'ameka mu Uganda?"
-        self.assertEqual(service._simple_search(luganda, idx, top_k=4), [])
+        self.assertEqual(pipeline._simple_search(luganda, idx, top_k=4), [])
 
         with patch(
             "app.sunbird.translate_to_english",
             return_value="What is the VAT rate in Uganda?",
         ):
-            rescued = service._simple_search(luganda, idx, top_k=4, locale="lg")
+            rescued = pipeline._simple_search(luganda, idx, top_k=4, locale="lg")
         self.assertTrue(rescued)
         self.assertIn("VAT", rescued[0]["question"])
 
@@ -90,7 +90,7 @@ class TestNonEnglishFallback(unittest.TestCase):
             with self.subTest(outcome=list(outcome)[0]):
                 with patch("app.sunbird.translate_to_english", **outcome):
                     self.assertEqual(
-                        service._simple_search(luganda, idx, top_k=4, locale="lg"), []
+                        pipeline._simple_search(luganda, idx, top_k=4, locale="lg"), []
                     )
 
     def test_no_retry_when_translation_returns_the_input(self):
@@ -98,7 +98,7 @@ class TestNonEnglishFallback(unittest.TestCase):
         idx = _index()
         luganda = "Omusolo gwa VAT gw'ameka mu Uganda?"
         with patch("app.sunbird.translate_to_english", return_value=luganda):
-            self.assertEqual(service._simple_search(luganda, idx, top_k=4, locale="lg"), [])
+            self.assertEqual(pipeline._simple_search(luganda, idx, top_k=4, locale="lg"), [])
 
     def test_an_off_domain_translation_is_still_rejected(self):
         """Translation must not become a way past the relevance gate."""
@@ -108,7 +108,7 @@ class TestNonEnglishFallback(unittest.TestCase):
             return_value="How do I bake banana bread at home?",
         ):
             self.assertEqual(
-                service._simple_search("Nsobola ntya okufumba?", idx, top_k=4, locale="lg"),
+                pipeline._simple_search("Nsobola ntya okufumba?", idx, top_k=4, locale="lg"),
                 [],
             )
 
@@ -134,36 +134,36 @@ class TestJudgeRescueIsOffByDefault(unittest.TestCase):
         breakers.SUNBIRD_LLM_BREAKER.record_success()
 
     def test_disabled_by_default(self):
-        self.assertFalse(service.FAQ_JUDGE_ENABLED)
+        self.assertFalse(pipeline.FAQ_JUDGE_ENABLED)
 
     def test_returns_nothing_and_calls_no_model_when_disabled(self):
         with patch("app.sunbird.chat_completion") as gen, patch("app.providers.gateway.gemini_generate") as gem:
-            self.assertEqual(service._judge_rescue("anything", _index(), 4), [])
+            self.assertEqual(pipeline._judge_rescue("anything", _index(), 4), [])
             gen.assert_not_called()
             gem.assert_not_called()
 
     def test_an_unconfident_verdict_is_refused(self):
         """A confidently wrong tax answer costs more than 'I could not find it'."""
         with (
-            patch.object(service, "FAQ_JUDGE_ENABLED", True),
+            patch.object(pipeline, "FAQ_JUDGE_ENABLED", True),
             patch("app.sunbird.is_available", return_value=True),
             patch(
                 "app.sunbird.chat_completion",
                 return_value='{"pick": 1, "confident": false}',
             ),
         ):
-            self.assertEqual(service._judge_rescue("What is VAT?", _index(), 4), [])
+            self.assertEqual(pipeline._judge_rescue("What is VAT?", _index(), 4), [])
 
     def test_a_confident_verdict_is_accepted(self):
         with (
-            patch.object(service, "FAQ_JUDGE_ENABLED", True),
+            patch.object(pipeline, "FAQ_JUDGE_ENABLED", True),
             patch("app.sunbird.is_available", return_value=True),
             patch(
                 "app.sunbird.chat_completion",
                 return_value='```json\n{"pick": 1, "confident": true}\n```',
             ),
         ):
-            hits = service._judge_rescue("What is the VAT rate?", _index(), 4)
+            hits = pipeline._judge_rescue("What is the VAT rate?", _index(), 4)
         self.assertTrue(hits)
         self.assertIn("VAT", hits[0]["question"])
 
@@ -171,22 +171,22 @@ class TestJudgeRescueIsOffByDefault(unittest.TestCase):
         for outcome in ({"side_effect": RuntimeError("offline")}, {"return_value": "not json"}):
             with self.subTest(outcome=list(outcome)[0]):
                 with (
-                    patch.object(service, "FAQ_JUDGE_ENABLED", True),
+                    patch.object(pipeline, "FAQ_JUDGE_ENABLED", True),
                     patch("app.sunbird.is_available", return_value=True),
                     patch("app.sunbird.chat_completion", **outcome),
                 ):
-                    self.assertEqual(service._judge_rescue("What is VAT?", _index(), 4), [])
+                    self.assertEqual(pipeline._judge_rescue("What is VAT?", _index(), 4), [])
 
     def test_an_out_of_range_pick_is_refused(self):
         with (
-            patch.object(service, "FAQ_JUDGE_ENABLED", True),
+            patch.object(pipeline, "FAQ_JUDGE_ENABLED", True),
             patch("app.sunbird.is_available", return_value=True),
             patch(
                 "app.sunbird.chat_completion",
                 return_value='{"pick": 99, "confident": true}',
             ),
         ):
-            self.assertEqual(service._judge_rescue("What is VAT?", _index(), 4), [])
+            self.assertEqual(pipeline._judge_rescue("What is VAT?", _index(), 4), [])
 
 
 class TestNativeMultilingualFaqMatching(unittest.TestCase):
@@ -206,19 +206,19 @@ class TestNativeMultilingualFaqMatching(unittest.TestCase):
             ]
         }
         with patch("app.sunbird.translate_to_english") as tr:
-            hits = service._simple_search("Omusolo gwa VAT gw'ameka mu Uganda?", idx, top_k=4, locale="lg")
+            hits = pipeline._simple_search("Omusolo gwa VAT gw'ameka mu Uganda?", idx, top_k=4, locale="lg")
             self.assertTrue(hits)
             tr.assert_not_called()
             self.assertEqual(hits[0].get("_matched_locale"), "lg")
-            retrieval_hits = service._faq_hits_to_retrieval_hits(hits, locale="lg")
+            retrieval_hits = pipeline._faq_hits_to_retrieval_hits(hits, locale="lg")
             self.assertEqual(retrieval_hits[0]["answer"], idx["vat"][0]["answer_lg"])
             self.assertEqual(retrieval_hits[0]["question"], idx["vat"][0]["question_lg"])
 
         with patch("app.sunbird.translate_to_english") as tr:
-            hits_sw = service._simple_search("Kiwango cha kodi ya VAT nchini Uganda ni kipi?", idx, top_k=4, locale="sw")
+            hits_sw = pipeline._simple_search("Kiwango cha kodi ya VAT nchini Uganda ni kipi?", idx, top_k=4, locale="sw")
             self.assertTrue(hits_sw)
             tr.assert_not_called()
             self.assertEqual(hits_sw[0].get("_matched_locale"), "sw")
-            retrieval_hits_sw = service._faq_hits_to_retrieval_hits(hits_sw, locale="sw")
+            retrieval_hits_sw = pipeline._faq_hits_to_retrieval_hits(hits_sw, locale="sw")
             self.assertEqual(retrieval_hits_sw[0]["answer"], idx["vat"][0]["answer_sw"])
             self.assertEqual(retrieval_hits_sw[0]["question"], idx["vat"][0]["question_sw"])

@@ -37,4 +37,4 @@ jobs:
             exit 0
           fi
           python -m app.publications
-          echo "Re-index remains manual: python -m app.index_lifecycle --rebuild"
+          echo "Re-index remains manual: python -m app.vectorstore.index_lifecycle --rebuild"

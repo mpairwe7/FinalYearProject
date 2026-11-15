@@ -6,7 +6,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from app import database as db
+from app.db import database as db
 from app.auth.jwt_auth import make_dev_token
 from app.main import app
 from app.receptionist import presence

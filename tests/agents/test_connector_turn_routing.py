@@ -18,7 +18,7 @@ from typing import Any
 from unittest import mock
 
 import pytest
-from app import service as service_module
+from app.rag import pipeline as pipeline_module
 from app.mcp import MCPClient
 from app.mcp.transport import InProcessTransport
 from app.text_signals import CONNECTOR_UNAVAILABLE_REPLY
@@ -67,7 +67,7 @@ def model(monkeypatch, tmp_db):
     monkeypatch.setenv("FLAG_ENTERPRISE_CONNECTORS", "true")
     client = MCPClient({"core": InProcessTransport(), "efris": _Remote()})
     monkeypatch.setattr("app.mcp.get_client", lambda: client)
-    chat = service_module.ChatModel()
+    chat = pipeline_module.ChatModel()
     chat._llm_available = True
     return chat
 
@@ -100,7 +100,7 @@ def _must_not_run(*_args: Any, **_kwargs: Any):
 class TestSyncPath:
     def test_a_lookup_goes_to_the_service_and_not_to_a_template(self, model, monkeypatch):
         agent = _agent_answering("The sample EFRIS record lists this taxpayer as registered (demo data).")
-        monkeypatch.setattr(service_module, "_call_llm_agentic", agent)
+        monkeypatch.setattr(pipeline_module, "_call_llm_agentic", agent)
         monkeypatch.setattr(model, "_maybe_handle_fast_paths", _must_not_run)
         monkeypatch.setattr(model, "_deterministic_procedure_reply", _must_not_run)
 
@@ -118,7 +118,7 @@ class TestSyncPath:
         self, model, monkeypatch
     ):
         monkeypatch.setattr(
-            service_module, "_call_llm_agentic", _agent_answering("Registered (demo data).")
+            pipeline_module, "_call_llm_agentic", _agent_answering("Registered (demo data).")
         )
 
         result = model.generate(LOOKUP, connector_namespaces=["efris"], locale="en")  # nosemgrep: ura-llm01-raw-user-input-to-llm -- ChatModel.generate applies InputGuard before inference.
@@ -136,10 +136,10 @@ class TestSyncPath:
         # lookup never reached it (and could open a ticket). None of them may
         # answer a turn the taxpayer sent to a chosen service.
         agent = _agent_answering("The sample EFRIS record lists this taxpayer as registered (demo data).")
-        monkeypatch.setattr(service_module, "_call_llm_agentic", agent)
-        monkeypatch.setattr(service_module, "needs_clarification", lambda *_a, **_k: "Which tax do you mean?")
+        monkeypatch.setattr(pipeline_module, "_call_llm_agentic", agent)
+        monkeypatch.setattr(pipeline_module, "needs_clarification", lambda *_a, **_k: "Which tax do you mean?")
         monkeypatch.setattr(
-            service_module,
+            pipeline_module,
             "check_false_premise",
             lambda *_a, **_k: mock.Mock(is_false_premise=True, reply="That tax does not exist."),
         )
@@ -154,9 +154,9 @@ class TestSyncPath:
     def test_the_streaming_prelude_does_not_abstain_or_ask_back_before_the_service_is_called(
         self, model, monkeypatch
     ):
-        monkeypatch.setattr(service_module, "needs_clarification", lambda *_a, **_k: "Which tax do you mean?")
+        monkeypatch.setattr(pipeline_module, "needs_clarification", lambda *_a, **_k: "Which tax do you mean?")
         monkeypatch.setattr(
-            service_module,
+            pipeline_module,
             "check_false_premise",
             lambda *_a, **_k: mock.Mock(is_false_premise=True, reply="That tax does not exist."),
         )
@@ -170,7 +170,7 @@ class TestSyncPath:
         assert result["_connector_forced"] == ["efris_taxpayer_status"]
 
     def test_a_connector_answer_is_not_escalated_for_missing_passages(self, model, monkeypatch):
-        monkeypatch.setattr(service_module, "_call_llm_agentic", _agent_answering("Registered (sample data)."))
+        monkeypatch.setattr(pipeline_module, "_call_llm_agentic", _agent_answering("Registered (sample data)."))
 
         result = model.generate(LOOKUP, connector_namespaces=["efris"], locale="en")  # nosemgrep: ura-llm01-raw-user-input-to-llm -- ChatModel.generate applies InputGuard before inference.
 
@@ -178,7 +178,7 @@ class TestSyncPath:
 
     def test_a_procedural_question_still_gets_the_template_that_answers_it(self, model, monkeypatch):
         agent = _agent_answering("should not be needed", used_tool=False)
-        monkeypatch.setattr(service_module, "_call_llm_agentic", agent)
+        monkeypatch.setattr(pipeline_module, "_call_llm_agentic", agent)
         templates = mock.Mock(wraps=model._maybe_handle_fast_paths)
         monkeypatch.setattr(model, "_maybe_handle_fast_paths", templates)
 
@@ -190,7 +190,7 @@ class TestSyncPath:
 
     def test_a_service_that_cannot_be_asked_is_reported_not_guessed_around(self, model, monkeypatch):
         monkeypatch.setattr(
-            service_module, "_call_llm_agentic", _agent_answering("", used_tool=False)
+            pipeline_module, "_call_llm_agentic", _agent_answering("", used_tool=False)
         )
 
         result = model.generate(LOOKUP, connector_namespaces=["efris"], locale="en")  # nosemgrep: ura-llm01-raw-user-input-to-llm -- ChatModel.generate applies InputGuard before inference.
@@ -206,7 +206,7 @@ class TestSyncPath:
 
     def test_nothing_changes_without_a_selected_connector(self, model, monkeypatch):
         agent = _agent_answering("unused", used_tool=False)
-        monkeypatch.setattr(service_module, "_call_llm_agentic", agent)
+        monkeypatch.setattr(pipeline_module, "_call_llm_agentic", agent)
         templates = mock.Mock(wraps=model._maybe_handle_fast_paths)
         monkeypatch.setattr(model, "_maybe_handle_fast_paths", templates)
 
@@ -233,8 +233,8 @@ class TestStreamingPrelude:
 
     def test_the_first_frame_does_not_offer_passages_as_the_answers_sources(self, monkeypatch):
         monkeypatch.setenv("FLAG_ENTERPRISE_CONNECTORS", "true")
-        monkeypatch.setattr(service_module.llm_module, "is_available", lambda: True)
-        monkeypatch.setattr(service_module, "_call_llm_agentic", _agent_answering("Registered (demo data)."))
+        monkeypatch.setattr(pipeline_module.generator_module, "is_available", lambda: True)
+        monkeypatch.setattr(pipeline_module, "_call_llm_agentic", _agent_answering("Registered (demo data)."))
 
         model_double = mock.MagicMock()
         model_double.generate_retrieval_only.return_value = {
@@ -253,7 +253,7 @@ class TestStreamingPrelude:
         async def run():
             return [
                 event
-                async for event in service_module.run_chat_turn(
+                async for event in pipeline_module.run_chat_turn(
                     model_double,
                     message=LOOKUP,
                     conversation_id=None,
@@ -302,7 +302,7 @@ class TestStreamedTurn:
         async def run():
             return [
                 event
-                async for event in service_module.run_chat_turn(
+                async for event in pipeline_module.run_chat_turn(
                     model_double,
                     message=LOOKUP,
                     conversation_id=None,
@@ -320,9 +320,9 @@ class TestStreamedTurn:
 
     def test_the_forced_operations_reach_the_agent_and_the_answer_is_not_escalated(self, monkeypatch):
         agent = _agent_answering("The sample EFRIS record lists this taxpayer as registered (demo data).")
-        monkeypatch.setattr(service_module, "_call_llm_agentic", agent)
+        monkeypatch.setattr(pipeline_module, "_call_llm_agentic", agent)
         monkeypatch.setenv("FLAG_ENTERPRISE_CONNECTORS", "true")
-        monkeypatch.setattr(service_module.llm_module, "is_available", lambda: True)
+        monkeypatch.setattr(pipeline_module.generator_module, "is_available", lambda: True)
 
         events, _ = self._events(_connector_forced=["efris_taxpayer_status"])
 
@@ -337,10 +337,10 @@ class TestStreamedTurn:
 
     def test_an_unreachable_service_is_reported_in_the_stream(self, monkeypatch):
         monkeypatch.setattr(
-            service_module, "_call_llm_agentic", _agent_answering("", used_tool=False)
+            pipeline_module, "_call_llm_agentic", _agent_answering("", used_tool=False)
         )
         monkeypatch.setenv("FLAG_ENTERPRISE_CONNECTORS", "true")
-        monkeypatch.setattr(service_module.llm_module, "is_available", lambda: True)
+        monkeypatch.setattr(pipeline_module.generator_module, "is_available", lambda: True)
 
         events, _ = self._events(_connector_forced=["efris_taxpayer_status"])
 

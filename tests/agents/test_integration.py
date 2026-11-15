@@ -24,7 +24,7 @@ class TestFeatureFlags:
 
     def test_phase_flag_defaults(self, clean_flags):
         """tool_use stays off; agentic_mode and ticket_queue default on in the registry."""
-        from app.flags import _REGISTRY
+        from app.config.flags import _REGISTRY
 
         assert clean_flags.is_enabled("tool_use") is False
         assert clean_flags.is_enabled("agentic_mode") is True
@@ -70,7 +70,7 @@ class TestSupervisorToolWhitelist:
 # ---------------------------------------------------------------------------
 class TestEscalationRoundTrip:
     def test_supervisor_reason_flows_into_ticket(self, tmp_db):
-        """Emulates the service.py ESCALATE branch."""
+        """Emulates the rag/pipeline.py ESCALATE branch."""
         from app.agents import supervisor, AgentRoute
 
         decision = supervisor.classify("I want to dispute my assessment")
@@ -93,17 +93,17 @@ class TestEscalationRoundTrip:
 # ---------------------------------------------------------------------------
 @pytest.fixture
 def restored_modules():
-    """Put ``app.flags`` and ``app.main`` back after a test reloads them.
+    """Put ``app.config.flags`` and ``app.main`` back after a test reloads them.
 
-    A reload replaces the flag singleton, while ``service.py`` keeps the one it bound
+    A reload replaces the flag singleton, while ``rag/pipeline.py`` keeps the one it bound
     at import. Left that way, ``clean_flags`` clears an object nothing reads, so a flag
     one test sets stays on for every test after it, in another file, for no visible
     reason.
     """
-    import app.flags
+    import app.config.flags
     import app.main
 
-    saved = [(vars(module), dict(vars(module))) for module in (app.flags, app.main)]
+    saved = [(vars(module), dict(vars(module))) for module in (app.config.flags, app.main)]
     yield
     for namespace, contents in saved:
         namespace.update(contents)
@@ -117,10 +117,10 @@ class TestAppAssembly:
 
         # Import fresh so the flag env is re-read
         import importlib
-        import app.flags
-        importlib.reload(app.flags)
+        import app.config.flags
+        importlib.reload(app.config.flags)
 
-        from app.flags import flags
+        from app.config.flags import flags
         assert flags.is_enabled("tool_use") is True
         assert flags.is_enabled("agentic_mode") is True
         assert flags.is_enabled("ticket_queue") is True

@@ -15,7 +15,7 @@ import time
 from unittest import mock
 
 import pytest
-from app import database as db
+from app.db import database as db
 from app import guardrails
 from app.auth.dependencies import AuthContext
 from app.auth.models import AuthUser, ConsentGrantRequest, ConsentWithdrawRequest
@@ -25,7 +25,7 @@ from app.main import (
     me_withdraw_consent,
     track_analytics_event,
 )
-from app.models import AnalyticsEvent
+from app.api.models import AnalyticsEvent
 
 
 @pytest.fixture

@@ -50,7 +50,7 @@ def load_seed(path: Path | None = None) -> dict[str, Any]:
 
 def seed(path: Path | None = None) -> dict[str, int]:
     from . import cms
-    from . import database as db
+    from .db import database as db
     from .reminders import Reminder
     from .notify import dispatch
 
@@ -139,7 +139,7 @@ _DEMO_TURNS = (
 
 def seed_quality_audit(uid: str) -> int:
     """Demo rows for every stream of the quality audit; returns 1 when written, 0 when already there."""
-    from . import database as db
+    from .db import database as db
     from . import officer_chat, service_ratings
     from .receptionist.store import create_call, get_call, update_call
 

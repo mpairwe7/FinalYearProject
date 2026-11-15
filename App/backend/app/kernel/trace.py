@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ..turn_context import TURN_KERNEL_TRACE
+from ..rag.turn_context import TURN_KERNEL_TRACE
 
 _CONCEPT_RE = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 MAX_LISTED = 10

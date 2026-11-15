@@ -8,7 +8,7 @@ Verifies all 5 phases of the high-stakes government RAG Document Intelligence re
   cross-page continuation table stitching, merged-cell (`col_span`) header propagation,
   cell bounding-box recovery, scanned-PDF OCR table structuring, and Docling
   `TripletTableSerializer` semantic triplets.
-- Phase 3 (G444, G445): End-to-end 1-based page provenance (`Chunk.page_range`, `pdf_corpus.py`
+- Phase 3 (G444, G445): End-to-end 1-based page provenance (`Chunk.page_range`, `ingestion/pdf_corpus.py`
   `"page"` field, `attachment_passages` page locators) and 40-page vector glyph evidence coverage.
 - Phase 4 (G447): Structure-aware, table-preserving chunking in `ephemeral_pdf_sandbox.py`
   (never slicing mid-word, mid-UGX-amount, or mid-table-row).
@@ -26,7 +26,7 @@ from unittest import mock
 
 from app import documents
 from app import ephemeral_pdf_sandbox as sbx
-from app.docling_intelligence import (
+from app.ingestion.docling_intelligence import (
     _convert_via_docling_library,
     _glyph_in_table_bboxes,
     _vector_glyph_lines_with_paragraphs,
@@ -39,7 +39,7 @@ from app.docling_intelligence import (
     strip_document_furniture,
 )
 from app.hitl_routing import assess_document_for_human_review
-from app.pdf_corpus import export_pdf_chunks_to_jsonl, ingest_pdf_jsonls
+from app.ingestion.pdf_corpus import export_pdf_chunks_to_jsonl, ingest_pdf_jsonls
 from app.vision.glyph_fusion import (
     VectorGlyph,
     fuse_page_glyphs_and_ocr,
@@ -585,7 +585,7 @@ def test_docling_without_resource_cap_api_falls_back_instead_of_running_unbounde
 
     fake_base = type("Mod", (), {"DocumentStream": lambda **kw: kw})
     fake_converter = type("Mod", (), {"DocumentConverter": LegacyConverter})
-    monkeypatch.setattr("app.docling_intelligence.DOCLING_BACKEND", "auto")
+    monkeypatch.setattr("app.ingestion.docling_intelligence.DOCLING_BACKEND", "auto")
     with mock.patch.dict(
         "sys.modules",
         {

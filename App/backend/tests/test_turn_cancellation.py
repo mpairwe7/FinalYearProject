@@ -20,7 +20,7 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app import database as db
+from app.db import database as db
 from app.analytics import metrics
 from app.resilience import (
     TURN_CANCEL_STAGES,
@@ -109,7 +109,7 @@ class ModelChainTests(unittest.TestCase):
     """The checks inside the model chain, below ``ChatModel.generate``."""
 
     def test_a_continuation_loop_stops_at_its_next_round(self):
-        from app import llm
+        from app.rag import generator
 
         def runs(cancel_on_first: bool) -> int:
             token = threading.Event()
@@ -117,14 +117,14 @@ class ModelChainTests(unittest.TestCase):
             def first_part(*_a, **_kw):
                 if cancel_on_first:
                     token.set()
-                return llm.Generation(text="Part one of the answer", finish_reason="length")
+                return generator.Generation(text="Part one of the answer", finish_reason="length")
 
             with (
-                patch.object(llm, "_vllm_generate_ex", side_effect=first_part) as gen,
+                patch.object(generator, "_vllm_generate_ex", side_effect=first_part) as gen,
                 turn_cancel_scope(token),
                 contextlib.suppress(TurnCancelled),
             ):
-                llm.complete_with_continuation([{"role": "user", "content": "q"}], deadline=None)
+                generator.complete_with_continuation([{"role": "user", "content": "q"}], deadline=None)
             return gen.call_count
 
         self.assertGreater(runs(cancel_on_first=False), 1)  # a truncated answer is continued
@@ -138,24 +138,24 @@ class ModelChainTests(unittest.TestCase):
         An empty first response would otherwise reach the service's empty-reply
         branch, which records a model failure on the breaker.
         """
-        from app import llm
+        from app.rag import generator
 
         for text, finish in (("A whole answer.", "stop"), ("", "stop")):
             token = threading.Event()
 
             def first(*_a, _text=text, _finish=finish, **_kw):
                 token.set()  # the caller moved on while the request was in flight
-                return llm.Generation(text=_text, finish_reason=_finish)
+                return generator.Generation(text=_text, finish_reason=_finish)
 
             with (
-                patch.object(llm, "_vllm_generate_ex", side_effect=first),
+                patch.object(generator, "_vllm_generate_ex", side_effect=first),
                 turn_cancel_scope(token),
                 self.assertRaises(TurnCancelled),
             ):
-                llm.complete_with_continuation([{"role": "user", "content": "q"}], deadline=None)
+                generator.complete_with_continuation([{"role": "user", "content": "q"}], deadline=None)
 
     def test_an_empty_continuation_sends_no_fallback_request_for_a_superseded_turn(self):
-        from app import llm
+        from app.rag import generator
 
         def run(cancel: bool) -> tuple[int, bool]:
             token = threading.Event()
@@ -164,17 +164,17 @@ class ModelChainTests(unittest.TestCase):
             def model(*_a, **_kw):
                 calls.append(1)
                 if len(calls) == 1:
-                    return llm.Generation(text="Part one of the answer", finish_reason="length")
+                    return generator.Generation(text="Part one of the answer", finish_reason="length")
                 if len(calls) == 2:
                     if cancel:
                         token.set()  # the caller moved on while the continuation ran
-                    return llm.Generation(text="", finish_reason="stop")
-                return llm.Generation(text=" and part two.", finish_reason="stop")
+                    return generator.Generation(text="", finish_reason="stop")
+                return generator.Generation(text=" and part two.", finish_reason="stop")
 
             stopped = False
-            with patch.object(llm, "_vllm_generate_ex", side_effect=model), turn_cancel_scope(token):
+            with patch.object(generator, "_vllm_generate_ex", side_effect=model), turn_cancel_scope(token):
                 try:
-                    llm.complete_with_continuation([{"role": "user", "content": "q"}], deadline=None)
+                    generator.complete_with_continuation([{"role": "user", "content": "q"}], deadline=None)
                 except TurnCancelled:
                     stopped = True
             return len(calls), stopped
@@ -186,46 +186,46 @@ class ModelChainTests(unittest.TestCase):
         self.assertEqual(cancelled_count("continuation") - before, 1)
 
     def test_a_continuation_finished_after_the_turn_moved_on_hands_back_nothing(self):
-        from app import llm
+        from app.rag import generator
 
         token = threading.Event()
 
         def model(*_a, **kwargs):
             if "extra_body" not in kwargs:
-                return llm.Generation(text="Part one of the answer", finish_reason="length")
+                return generator.Generation(text="Part one of the answer", finish_reason="length")
             token.set()  # the caller moved on while the last round ran
-            return llm.Generation(text=" and part two.", finish_reason="stop")
+            return generator.Generation(text=" and part two.", finish_reason="stop")
 
         before = cancelled_count("continuation")
         with (
-            patch.object(llm, "_vllm_generate_ex", side_effect=model) as gen,
+            patch.object(generator, "_vllm_generate_ex", side_effect=model) as gen,
             turn_cancel_scope(token),
             self.assertRaises(TurnCancelled),
         ):
-            llm.complete_with_continuation([{"role": "user", "content": "q"}], deadline=None)
+            generator.complete_with_continuation([{"role": "user", "content": "q"}], deadline=None)
         self.assertEqual(gen.call_count, 2)
         self.assertEqual(cancelled_count("continuation") - before, 1)
 
     def test_a_run_cancelled_while_the_model_runs_tries_no_fallback_and_blames_no_one(self):
-        from app import llm, service
+        from app.rag import generator, pipeline
 
         token = threading.Event()
 
         def first_part(*_a, **_kw):
             token.set()  # the caller moved on while the model was answering
-            return llm.Generation(text="Part one of the answer", finish_reason="length")
+            return generator.Generation(text="Part one of the answer", finish_reason="length")
 
         with (
-            patch.object(llm, "LLM_BACKEND", "vllm"),
-            patch.object(llm, "_vllm_generate_ex", side_effect=first_part) as gen,
-            patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True),
-            patch.object(service._LLM_CIRCUIT, "record_failure") as failed,
-            patch.object(service._LLM_CIRCUIT, "release") as released,
-            patch.object(service, "_llm_cloud_fallback", return_value="CLOUD") as cloud,
+            patch.object(generator, "LLM_BACKEND", "vllm"),
+            patch.object(generator, "_vllm_generate_ex", side_effect=first_part) as gen,
+            patch.object(pipeline._LLM_CIRCUIT, "allow_request", return_value=True),
+            patch.object(pipeline._LLM_CIRCUIT, "record_failure") as failed,
+            patch.object(pipeline._LLM_CIRCUIT, "release") as released,
+            patch.object(pipeline, "_llm_cloud_fallback", return_value="CLOUD") as cloud,
             turn_cancel_scope(token),
             self.assertRaises(TurnCancelled),
         ):
-            service._local_llm_then_cloud("How do I register for a TIN?", [{"text": "x"}], None, "en")
+            pipeline._local_llm_then_cloud("How do I register for a TIN?", [{"text": "x"}], None, "en")
 
         self.assertEqual(gen.call_count, 1)
         cloud.assert_not_called()
@@ -233,18 +233,18 @@ class ModelChainTests(unittest.TestCase):
         released.assert_called_once()
 
     def test_a_run_cancelled_before_the_model_takes_no_breaker_slot(self):
-        from app import service
+        from app.rag import pipeline
 
         token = threading.Event()
         token.set()
         with (
-            patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True) as admitted,
-            patch.object(service.llm_module, "generate", return_value="An answer.") as gen,
-            patch.object(service, "_llm_cloud_fallback", return_value="CLOUD") as cloud,
+            patch.object(pipeline._LLM_CIRCUIT, "allow_request", return_value=True) as admitted,
+            patch.object(pipeline.generator_module, "generate", return_value="An answer.") as gen,
+            patch.object(pipeline, "_llm_cloud_fallback", return_value="CLOUD") as cloud,
             turn_cancel_scope(token),
             self.assertRaises(TurnCancelled),
         ):
-            service._call_llm_with_deadline("How do I register for a TIN?", [{"text": "x"}], None, "en")
+            pipeline._call_llm_with_deadline("How do I register for a TIN?", [{"text": "x"}], None, "en")
 
         admitted.assert_not_called()
         gen.assert_not_called()
@@ -253,17 +253,17 @@ class ModelChainTests(unittest.TestCase):
     def test_the_cloud_chain_is_not_walked_for_a_cancelled_turn(self):
         import os
 
-        from app import service
+        from app.rag import pipeline
 
         def walk() -> MagicMock:
             with (
-                patch.object(service.flags, "is_enabled", return_value=True),
+                patch.object(pipeline.flags, "is_enabled", return_value=True),
                 patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "sunbird"}),
                 patch("app.sunbird.is_available", return_value=True),
                 patch("app.sunbird.chat_completion", return_value="VAT is 18%. [1]") as sunbird,
                 contextlib.suppress(TurnCancelled),
             ):
-                service._llm_cloud_fallback(
+                pipeline._llm_cloud_fallback(
                     "vat rate?", [{"text": "VAT is 18%"}], None, "en", deadline=time.monotonic() + 100
                 )
             return sunbird
@@ -277,7 +277,7 @@ class ModelChainTests(unittest.TestCase):
         self.assertEqual(cancelled_count("cloud_fallback") - before, 1)
 
     def test_the_agentic_loop_follows_the_turn_and_blames_no_one(self):
-        from app import service
+        from app.rag import pipeline
 
         token = threading.Event()
         seen: list[bool] = []
@@ -288,14 +288,14 @@ class ModelChainTests(unittest.TestCase):
             return {"text": "", "tool_calls": [], "iterations": 0, "truncated": False, "cancelled": True}
 
         with (
-            patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True),
-            patch.object(service._LLM_CIRCUIT, "record_failure") as failed,
-            patch.object(service._LLM_CIRCUIT, "release") as released,
-            patch.object(service.llm_module, "generate_with_tools", side_effect=loop),
+            patch.object(pipeline._LLM_CIRCUIT, "allow_request", return_value=True),
+            patch.object(pipeline._LLM_CIRCUIT, "record_failure") as failed,
+            patch.object(pipeline._LLM_CIRCUIT, "release") as released,
+            patch.object(pipeline.generator_module, "generate_with_tools", side_effect=loop),
             turn_cancel_scope(token),
             self.assertRaises(TurnCancelled),
         ):
-            service._call_llm_agentic("q", [{"text": "x"}], None, "en")
+            pipeline._call_llm_agentic("q", [{"text": "x"}], None, "en")
 
         self.assertEqual(seen, [True])
         failed.assert_not_called()
@@ -307,7 +307,7 @@ class ModelChainTests(unittest.TestCase):
         With *superseded*, the call turn moves on while the request is in
         flight; otherwise there is no token at all, as on the chat path.
         """
-        from app import service
+        from app.rag import pipeline
 
         token = threading.Event()
         gate = threading.Event()
@@ -321,21 +321,21 @@ class ModelChainTests(unittest.TestCase):
 
         out = SimpleNamespace(stopped=False, reply=None)
         with (
-            patch.object(service.llm_module, "generate", side_effect=in_flight),
-            patch.object(service.llm_module, "generate_with_tools", side_effect=in_flight),
-            patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True),
-            patch.object(service._LLM_CIRCUIT, "record_failure") as out.failed,
-            patch.object(service._LLM_CIRCUIT, "release") as out.released,
-            patch.object(service, "_llm_cloud_fallback", return_value="CLOUD") as out.cloud,
+            patch.object(pipeline.generator_module, "generate", side_effect=in_flight),
+            patch.object(pipeline.generator_module, "generate_with_tools", side_effect=in_flight),
+            patch.object(pipeline._LLM_CIRCUIT, "allow_request", return_value=True),
+            patch.object(pipeline._LLM_CIRCUIT, "record_failure") as out.failed,
+            patch.object(pipeline._LLM_CIRCUIT, "release") as out.released,
+            patch.object(pipeline, "_llm_cloud_fallback", return_value="CLOUD") as out.cloud,
             turn_cancel_scope(token if superseded else None),
         ):
             try:
                 if run_name == "local":
-                    out.reply = service._local_llm_then_cloud(
+                    out.reply = pipeline._local_llm_then_cloud(
                         "How do I register for a TIN?", [{"text": "x"}], None, "en", deadline_s=1.0
                     )
                 else:
-                    out.reply = service._call_llm_agentic("q", [{"text": "x"}], None, "en", deadline_s=1.0)
+                    out.reply = pipeline._call_llm_agentic("q", [{"text": "x"}], None, "en", deadline_s=1.0)
             except TurnCancelled:
                 out.stopped = True
         gate.set()
@@ -382,7 +382,7 @@ class TranslationTests(unittest.TestCase):
         mt.cache.clear()
 
     def test_translation_stops_between_paragraphs(self):
-        from app import llm, service
+        from app.rag import generator, pipeline
 
         paragraphs = [
             f"Step {word}: you need to open the portal and fill in the form for the tax office."
@@ -405,19 +405,19 @@ class TranslationTests(unittest.TestCase):
 
         before = cancelled_count("localize")
         with (
-            patch.object(service, "REPLY_MT_BACKEND", "local"),
-            patch.object(llm, "translate_text", side_effect=sunflower),
+            patch.object(pipeline, "REPLY_MT_BACKEND", "local"),
+            patch.object(generator, "translate_text", side_effect=sunflower),
             turn_cancel_scope(token),
             self.assertRaises(TurnCancelled),
         ):
-            service.ChatModel._localize_reply("\n\n".join(paragraphs), "sw")
+            pipeline.ChatModel._localize_reply("\n\n".join(paragraphs), "sw")
 
         # The two left waiting for a thread are not sent, and the stop is counted once.
         self.assertEqual(len(sent), 4)
         self.assertEqual(cancelled_count("localize") - before, 1)
 
     def test_a_failed_translation_tries_no_other_model_for_a_superseded_turn(self):
-        from app import llm, service
+        from app.rag import generator, pipeline
 
         token = threading.Event()
 
@@ -427,20 +427,20 @@ class TranslationTests(unittest.TestCase):
 
         before = cancelled_count("localize")
         with (
-            patch.object(service, "REPLY_MT_BACKEND", "local_first"),
-            patch.object(llm, "translate_text", side_effect=sunflower) as local,
+            patch.object(pipeline, "REPLY_MT_BACKEND", "local_first"),
+            patch.object(generator, "translate_text", side_effect=sunflower) as local,
             patch("app.sunbird.translate_from_english", return_value="Unaweza kujisajili.") as sunbird,
             turn_cancel_scope(token),
             self.assertRaises(TurnCancelled),
         ):
-            service.ChatModel._localize_reply("You can register for a TIN on the portal.", "sw")
+            pipeline.ChatModel._localize_reply("You can register for a TIN on the portal.", "sw")
 
         local.assert_called_once()
         sunbird.assert_not_called()
         self.assertEqual(cancelled_count("localize") - before, 1)
 
     def test_the_fast_fallback_asks_no_second_model_for_a_superseded_turn(self):
-        from app import service
+        from app.rag import pipeline
         from app.speech_service import SpeechModel
 
         token = threading.Event()
@@ -450,14 +450,14 @@ class TranslationTests(unittest.TestCase):
             return None
 
         with (
-            patch.object(service, "REPLY_MT_BACKEND", "sunbird"),
+            patch.object(pipeline, "REPLY_MT_BACKEND", "sunbird"),
             patch("app.sunbird.translate_from_english", return_value=None),
             patch.object(SpeechModel, "_sunbird_llm_translate", side_effect=sunbird_llm) as first,
             patch.object(SpeechModel, "_cf_llama_translate", return_value="Unaweza kujisajili.") as second,
             turn_cancel_scope(token),
             self.assertRaises(TurnCancelled),
         ):
-            service._translate_reply("You can register for a TIN on the portal.", "sw")
+            pipeline._translate_reply("You can register for a TIN on the portal.", "sw")
 
         first.assert_called_once()
         second.assert_not_called()
@@ -481,15 +481,15 @@ class GenerateTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        from app import service
+        from app.rag import pipeline
 
         db.init_db()
-        cls.model = service.ChatModel()
+        cls.model = pipeline.ChatModel()
         cls.model._llm_available = True
 
     @contextlib.contextmanager
     def pipeline(self, search=None):
-        from app import service
+        from app.rag import pipeline
 
         approve = {
             "decision": "approve", "final_decision": "approve", "applied_revision": False,
@@ -497,21 +497,21 @@ class GenerateTests(unittest.TestCase):
         }
         spies = MagicMock()
         with (
-            patch.object(service, "_call_llm_agentic",
+            patch.object(pipeline, "_call_llm_agentic",
                          return_value={"text": "", "tool_calls": [], "iterations": 0, "truncated": False}) as agentic,
-            patch.object(service, "_call_llm_with_deadline",
+            patch.object(pipeline, "_call_llm_with_deadline",
                          return_value="You need the bill of lading and the commercial invoice [1].") as chain,
-            patch.object(service, "_simple_search", side_effect=search or (lambda *_a, **_kw: [dict(FAQ_ROW)])),
-            patch.object(service, "needs_clarification", return_value=""),
-            patch.object(service, "verify_claims", return_value={"decision": "approve", "score": 1.0}),
-            patch.object(service.ChatModel, "_deterministic_procedure_reply", return_value=("", False)),
-            patch.object(service.ChatModel, "_priority_faq_hits", return_value=[]),
-            patch.object(service.ChatModel, "_evaluate_response_judge", return_value=approve),
+            patch.object(pipeline, "_simple_search", side_effect=search or (lambda *_a, **_kw: [dict(FAQ_ROW)])),
+            patch.object(pipeline, "needs_clarification", return_value=""),
+            patch.object(pipeline, "verify_claims", return_value={"decision": "approve", "score": 1.0}),
+            patch.object(pipeline.ChatModel, "_deterministic_procedure_reply", return_value=("", False)),
+            patch.object(pipeline.ChatModel, "_priority_faq_hits", return_value=[]),
+            patch.object(pipeline.ChatModel, "_evaluate_response_judge", return_value=approve),
             patch.object(self.model._output_guard, "should_abstain", return_value=False),
             patch.object(self.model._cache, "get", return_value=None),
             patch.object(self.model._cache, "put"),
             patch.object(self.model, "_persist_personalization_turn") as persisted,
-            patch.object(service, "_record_turn_case") as case_recorded,
+            patch.object(pipeline, "_record_turn_case") as case_recorded,
             patch.object(self.model, "record_turn_audit") as audited,
         ):
             spies.agentic, spies.chain, spies.persisted = agentic, chain, persisted
@@ -575,7 +575,7 @@ class GenerateTests(unittest.TestCase):
         with (
             patch.object(self.model, "_generate_en", side_effect=english_answer),
             patch.object(self.model, "_localize_reply", return_value="Unaweza kujisajili.") as localized,
-            patch("app.service._record_turn_case") as case_recorded,
+            patch("app.rag.pipeline._record_turn_case") as case_recorded,
             turn_cancel_scope(token),
             self.assertRaises(TurnCancelled),
         ):
@@ -585,12 +585,12 @@ class GenerateTests(unittest.TestCase):
         case_recorded.assert_not_called()
 
     def test_a_run_cancelled_during_translation_records_no_case(self):
-        from app import service
+        from app.rag import pipeline
 
         token = threading.Event()
 
         def english_answer(**_kw):
-            service._PENDING_TURN_AUDIT.set({"latency_ms": 1})  # what the real pipeline leaves for the audit row
+            pipeline._PENDING_TURN_AUDIT.set({"latency_ms": 1})  # what the real pipeline leaves for the audit row
             return {"reply": "You can register on the URA portal.", "locale": "sw", "sources": []}
 
         def translating(_reply, _locale, **_kw):
@@ -601,8 +601,8 @@ class GenerateTests(unittest.TestCase):
         with (
             patch.object(self.model, "_generate_en", side_effect=english_answer),
             patch.object(self.model, "_localize_reply", side_effect=translating) as localized,
-            patch("app.service.resources_for_turn", return_value=[]),
-            patch("app.service._record_turn_case") as case_recorded,
+            patch("app.rag.pipeline.resources_for_turn", return_value=[]),
+            patch("app.rag.pipeline._record_turn_case") as case_recorded,
             patch.object(self.model, "record_turn_audit") as audited,
             turn_cancel_scope(token),
             self.assertRaises(TurnCancelled),
@@ -616,19 +616,19 @@ class GenerateTests(unittest.TestCase):
 
     def test_an_english_reply_superseded_before_it_is_recorded_records_no_case(self):
         """English skips translation, so the last check must not live inside it."""
-        from app import service
+        from app.rag import pipeline
 
         token = threading.Event()
 
         def english_answer(**_kw):
-            service._PENDING_TURN_AUDIT.set({"latency_ms": 1})
+            pipeline._PENDING_TURN_AUDIT.set({"latency_ms": 1})
             token.set()  # the caller moved on as the answer came back
             return {"reply": "You can register on the URA portal.", "locale": "en", "sources": []}
 
         with (
             patch.object(self.model, "_generate_en", side_effect=english_answer),
-            patch("app.service.resources_for_turn", return_value=[]),
-            patch("app.service._record_turn_case") as case_recorded,
+            patch("app.rag.pipeline.resources_for_turn", return_value=[]),
+            patch("app.rag.pipeline._record_turn_case") as case_recorded,
             patch.object(self.model, "record_turn_audit") as audited,
             turn_cancel_scope(token),
             self.assertRaises(TurnCancelled),

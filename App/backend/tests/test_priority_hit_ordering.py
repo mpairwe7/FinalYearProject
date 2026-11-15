@@ -27,7 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.service import _prepend_unique  # noqa: E402
+from app.rag.pipeline import _prepend_unique  # noqa: E402
 
 
 def _hit(name: str) -> dict:
@@ -108,7 +108,7 @@ class TestPriorityFaqSortStillRanksProcedureFirst(unittest.TestCase):
     about, arriving by a different route."""
 
     def test_the_procedural_question_exists_in_the_corpus(self):
-        from app.service import _DATA_DIR, _load_faq_data
+        from app.rag.pipeline import _DATA_DIR, _load_faq_data
 
         faq_index, _ = _load_faq_data(_DATA_DIR)
         questions = {
@@ -142,7 +142,7 @@ class TestPriorityHitsSurviveTheBindingFilter(unittest.TestCase):
     """
 
     def _pipeline(self, query: str):
-        from app.service import (
+        from app.rag.pipeline import (
             _DATA_DIR,
             ChatModel,
             _filter_unbound_faq_hits,
@@ -182,7 +182,7 @@ class TestPriorityHitsSurviveTheBindingFilter(unittest.TestCase):
 
     def test_ordinary_faq_rows_are_still_filtered(self):
         """The exemption must not disable the gate for everything else."""
-        from app.service import _filter_unbound_faq_hits
+        from app.rag.pipeline import _filter_unbound_faq_hits
 
         unrelated = {
             "text": "Question: What is a driving permit?\nAnswer: A permit to drive.",

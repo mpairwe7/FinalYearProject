@@ -5,7 +5,7 @@ on natural paraphrases of the *same* indexed rows.  Measured locally, bge-m3
 ranks every one of those paraphrases #1 with a reranker score of 0.98-1.00,
 so the retrieval stack was never the problem — the deployed image has no
 sentence-transformers, so ``HybridRetriever`` drops the embedder and the
-reranker and serves BM25 alone (``retriever.py``, the ImportError branch).
+reranker and serves BM25 alone (``rag/retriever.py``, the ImportError branch).
 
 Every chat response nevertheless reported ``"hybrid"``, which is the one
 field an operator would have read to notice.  ``/ready`` had already been
@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.retriever import active_retrieval_mode
+from app.rag.retriever import active_retrieval_mode
 
 
 class _Retriever:

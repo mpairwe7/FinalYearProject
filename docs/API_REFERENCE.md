@@ -410,7 +410,7 @@ and the outcome row after it.
 
 ### Trigger Re-Indexing
 
-Rebuild the Qdrant vector index through the staged lifecycle (`app.index_lifecycle`, ADR-0019 / G286). The whole corpus (FAQ, teacher QA, PDF and crawl chunks) is built into a candidate collection, which must pass a canary retrieval gate. One atomic alias swap then promotes it, and the retriever is re-initialised. The serving collection is never rebuilt in place. Requires `Authorization: Bearer <INDEX_API_KEY>` when configured (OWASP LLM10 — unbounded consumption protection).
+Rebuild the Qdrant vector index through the staged lifecycle (`app.vectorstore.index_lifecycle`, ADR-0019 / G286). The whole corpus (FAQ, teacher QA, PDF and crawl chunks) is built into a candidate collection, which must pass a canary retrieval gate. One atomic alias swap then promotes it, and the retriever is re-initialised. The serving collection is never rebuilt in place. Requires `Authorization: Bearer <INDEX_API_KEY>` when configured (OWASP LLM10 — unbounded consumption protection).
 
 Returns **409** when `QDRANT_COLLECTION` names a legacy physical collection instead of an alias (migrate to an alias, see `docs/runbooks/qdrant-staged-rebuild.md`), or while another rebuild runs. Returns **422** when the corpus fails validation. Returns **500** for any other failure; the failure is recorded in the lifecycle status, and the retriever is re-bound in case the alias had already moved. The request blocks for the whole rebuild, which takes minutes on GPU and over an hour on CPU for the full corpus, so a scheduled job is usually the better caller. Before G286 this route rebuilt the live collection in place from FAQ and teacher-QA rows only, dropping the PDF and crawl corpus.
 
@@ -557,7 +557,7 @@ and gives the contact-centre numbers rather than promising a handoff that will
 never arrive.
 
 The officer's reply is delivered back into the same conversation on the
-taxpayer's next turn (`_deliver_officer_reply` in `service.py`), which is why
+taxpayer's next turn (`_deliver_officer_reply` in `rag/pipeline.py`), which is why
 `conversation_id` matters more than anything else in the body. Once an officer
 takes the case the chat follows it live (below).
 
@@ -3406,7 +3406,7 @@ All responses include hardened security headers (OWASP, NIST SSDF):
 - Phase 27: `voice_first_mobile`, `voice_vision`, `offline_voice`
 
 **New Backend Modules:**
-- `offline_rag.py` — Production rewrite with versioned bundles, SHA-256 integrity, chunk hashes, ONNX embedder optimization
+- `rag/offline_rag.py` — Production rewrite with versioned bundles, SHA-256 integrity, chunk hashes, ONNX embedder optimization
 - `offline_sync.py` — Delta sync engine with hash-based chunk diffing, sync event logging
 - `offline_bundle.py` — Bundle builder (FAISS + passages + embedder + manifest) + bundle manager for serving
 

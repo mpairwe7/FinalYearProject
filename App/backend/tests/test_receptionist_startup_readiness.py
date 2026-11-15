@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app import database as db
+from app.db import database as db
 from app import receptionist
 from app.receptionist import config, livekit, ws
 from app.receptionist.store import create_call, get_call, init_receptionist_schema, update_call
@@ -181,11 +181,11 @@ class AvailabilityTests(unittest.TestCase):
             self.assertFalse(ws._voice_receptionist_enabled())
 
     def test_its_status_says_why(self):
-        with patch("app.flags.flags.is_enabled", return_value=True):
+        with patch("app.config.flags.flags.is_enabled", return_value=True):
             self.assertEqual(receptionist.status(), "ready")
             receptionist.mark_unavailable("Pipecat is not installed")
             self.assertEqual(receptionist.status(), "unavailable: Pipecat is not installed")
-        with patch("app.flags.flags.is_enabled", return_value=False):
+        with patch("app.config.flags.flags.is_enabled", return_value=False):
             self.assertEqual(receptionist.status(), "off")
 
     def start(self, **patches):
@@ -251,13 +251,13 @@ class AvailabilityTests(unittest.TestCase):
         from starlette.testclient import TestClient
 
         from app.main import app, get_model
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         model = ChatModel()
         app.dependency_overrides[get_model] = lambda: model
         self.addCleanup(app.dependency_overrides.pop, get_model, None)
         receptionist.mark_unavailable("Pipecat is not installed")
-        with patch("app.flags.flags.is_enabled", side_effect=lambda name, **_kw: name == "voice_receptionist"):
+        with patch("app.config.flags.flags.is_enabled", side_effect=lambda name, **_kw: name == "voice_receptionist"):
             body = TestClient(app).get("/ready").json()
 
         self.assertEqual(body["capabilities"]["voice_receptionist"], "unavailable: Pipecat is not installed")
@@ -704,7 +704,7 @@ class OnlyWorkerTests(unittest.TestCase):
 
 
 def flags_on(*names: str):
-    from app.flags import flags
+    from app.config.flags import flags
 
     class _On:
         def __enter__(self):
@@ -812,7 +812,7 @@ class ResumeSigningTests(unittest.TestCase):
         self.assertTrue(self.mint({"AUTH_DEV_SECRET": "dev-secret-everyone-knows"}))
 
     def test_startup_says_when_resume_is_on_and_cannot_issue_tickets(self):
-        from app.flags import flags
+        from app.config.flags import flags
 
         def enabled(name, **_kw):
             return name in ("voice_receptionist", "call_drop_resume")
@@ -988,7 +988,7 @@ class StartReviewTests(unittest.TestCase):
             patch.object(ws, "local_engine_errors", return_value=[]),
         ):
             self.assertEqual(ws._refusal_reason(), "unavailable")
-        with patch("app.flags.flags.is_enabled", return_value=True):
+        with patch("app.config.flags.flags.is_enabled", return_value=True):
             self.assertIn("restart", receptionist.status())
 
     def test_a_long_turn_timeout_that_used_to_work_still_does(self):
@@ -1241,17 +1241,17 @@ class AvailabilityGaugeTests(unittest.TestCase):
 
     def test_switching_calls_off_stops_the_page(self):
         receptionist.mark_unavailable("Pipecat is not installed")
-        with patch("app.flags.flags.is_enabled", return_value=False):
+        with patch("app.config.flags.flags.is_enabled", return_value=False):
             self.assertEqual(self.gauge(), 1.0)
 
     def test_an_unavailable_receptionist_reads_zero(self):
         receptionist.mark_unavailable("Pipecat is not installed")
-        with patch("app.flags.flags.is_enabled", return_value=True):
+        with patch("app.config.flags.flags.is_enabled", return_value=True):
             self.assertEqual(self.gauge(), 0.0)
 
     def test_calls_switched_on_after_a_skipped_start_read_zero(self):
         receptionist.reset()
-        with patch("app.flags.flags.is_enabled", return_value=True):
+        with patch("app.config.flags.flags.is_enabled", return_value=True):
             self.assertEqual(self.gauge(), 0.0)
 
 
@@ -1346,7 +1346,7 @@ class ThirdReviewStartTests(unittest.TestCase):
 
         with (
             patch.dict("os.environ", {"APP_ENV": "production", "FLAG_VOICE_RECEPTIONIST": ""}),
-            patch("app.flags.flags.is_enabled", side_effect=lambda name, **_kw: name == "voice_receptionist"),
+            patch("app.config.flags.flags.is_enabled", side_effect=lambda name, **_kw: name == "voice_receptionist"),
         ):
             row = evaluate_gate("G36")
 

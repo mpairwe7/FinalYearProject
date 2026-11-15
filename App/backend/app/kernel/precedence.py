@@ -126,7 +126,7 @@ _SUFFIX = {"percent": "%", "UGX": " UGX", "USD": " USD"}
 def _edition(hit: dict[str, Any]) -> tuple[int | None, str]:
     """``(start year, label)`` of the edition *hit* came from, or ``(None, "")`` when unlabelled."""
     try:
-        from ..retriever import edition_start_year
+        from ..rag.retriever import edition_start_year
 
         start = edition_start_year(hit)
     except Exception:
@@ -636,7 +636,7 @@ def record_conflicts(conflicts: list[Conflict], *, kernel_version: str) -> int:
     recorded = 0
     for conflict in conflicts:
         try:
-            from ..database import create_or_increment_discrepancy
+            from ..db.database import create_or_increment_discrepancy
 
             outcome = create_or_increment_discrepancy(
                 bot_statement=f"{conflict.evidence_source}: {conflict.excerpt}"[:900],

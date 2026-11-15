@@ -24,30 +24,35 @@ App/
 ├── backend/           # FastAPI backend API
 │   ├── app/
 │   │   ├── main.py          # API routes + SSE streaming + speech + eval endpoints
-│   │   ├── models.py        # Pydantic v2 request/response models
+│   │   ├── api/
+│   │   │   └── models.py        # Pydantic v2 request/response models
+│   │   ├── rag/
+│   │   │   ├── pipeline.py       # ChatModel (RAG orchestrator + agentic routing)
+│   │   │   ├── generator.py           # Qwen3-8B vLLM + local generation + tool-calling
+│   │   │   └── retriever.py     # Hybrid retriever (Qdrant + BM25 + reranking)
+│   │   ├── config/
+│   │   │   └── flags.py         # Feature flag registry (91 flags, cohort rollout)
+│   │   ├── ingestion/
+│   │   │   ├── docling_intelligence.py # Docling DocumentIR, XY-Cut reading order, furniture stripping & TripletTableSerializer (ADR-0026)
+│   │   │   └── pdf_corpus.py    # Statutory & 10-MDA PDF harvester (186 PDFs → 5,639 chunks, ADR-0009)
+│   │   ├── vectorstore/
+│   │   │   └── corpus_sync.py   # Self-updating Qdrant comparator, hot-swap & web_sync_ledger (ADR-0008)
 │   │   ├── speech_service.py # SpeechModel (ASR/Whisper + TTS/Piper + MT + Sunbird fallback)
-│   │   ├── service.py       # ChatModel (RAG orchestrator + agentic routing)
-│   │   ├── llm.py           # Qwen3-8B vLLM + local generation + tool-calling
-│   │   ├── flags.py         # Feature flag registry (91 flags, cohort rollout)
 │   │   ├── agents/          # Supervisor router + agent graph runtime
 │   │   ├── tools/           # 79 MCP tools across 19 namespaces in dev, 56/13 in prod (calculators, 10-MDA NTR/PRN, onboarding, B2G/UESW, relief, EFRIS, rates, calendar, RAG, education, empathy, escalate, connectors)
 │   │   ├── workflows/       # 21 YAML-driven guided journeys (TIN, filing, PRN, Cross-MDA NTR, New-Taxpayer Relief, TCC, objections, customs) + Journey Copilot
 │   │   ├── scenario_planner.py # Deterministic multi-tool planner & Verified Statutory Facts injection
 │   │   ├── calculator_router.py # Single-calculator fast path & multi-turn figure carryover
-│   │   ├── docling_intelligence.py # Docling DocumentIR, XY-Cut reading order, furniture stripping & TripletTableSerializer (ADR-0026)
-│   │   ├── pdf_corpus.py    # Statutory & 10-MDA PDF harvester (186 PDFs → 5,639 chunks, ADR-0009)
 │   │   ├── web_research.py  # 9-trigger live check, source authority & evidence labelling (ADR-0008, ADR-0021)
 │   │   ├── ephemeral_pdf_sandbox.py # Ephemeral tmpfs PDF/XLSX sandbox + GPU micro-reranking (ADR-0008)
-│   │   ├── corpus_sync.py   # Self-updating Qdrant comparator, hot-swap & web_sync_ledger (ADR-0008)
 │   │   ├── memory/          # Episodic + semantic + working + procedural memory + ResolutionLedger
 │   │   ├── guardrails.py    # OWASP LLM Top 10 guards + abstention, link provenance (ADR-0029)
 │   │   ├── guard_friction.py # Per-principal cool-down after repeated guard refusals (G464)
-│   │   ├── retriever.py     # Hybrid retriever (Qdrant + BM25 + reranking)
 │   │   ├── native_voice/    # Phase 28: streaming ASR/TTS, speculative prefetch, query planner
 │   │   ├── vision/          # Phase 28: Qwen2-VL encoder, OCR, document classifier
 │   │   ├── voice_stream_v2.py # V2 voice session (dual-path + vision)
 │   │   ├── voice_ws_v2.py   # V2 WebSocket handler (/v2/voice/chat/stream)
-│   │   └── ...              # cache, query, indexer, resilience, tracing, analytics, database
+│   │   └── ...              # resilience, tracing, analytics and the other top-level modules
 │   └── requirements.txt
 └── frontend/          # Next.js 16 PWA frontend
     ├── src/
@@ -126,7 +131,7 @@ for normal chat usage.
 9. **Context-aware escalation** — an escalated ticket carries the whole conversation (both sides, untruncated), the taxpayer's sentiment at the point of transfer, and whether the officer should be briefed first; queued urgent-first then longest-waiting, de-duplicated per conversation, and announced over a webhook that carries triage metadata but never the transcript. See [`docs/context-aware-escalation.md`](docs/context-aware-escalation.md)
 10. **Taxpayer education** — `explain_tax_concept` teaches a concept instead of only answering about it: fading scaffolding (worked → completion problem → transfer question), a check question whose answer is withheld until asked for, and every figure computed from the effective-dated rate tables
 11. **Cross-MDA Interdependence, Queue-Reduction & New-Taxpayer Onboarding (`tools/mda_interdependence.py`, `ADR-0009`)** — 6 deterministic MCP tools (`resolve_mda_ntr_payment`, `assess_life_event_tax_onboarding`, `evaluate_b2g_and_uesw_clearance`, `build_new_taxpayer_compliance_shield`, `simulate_tax_relief_and_instalments`, `resolve_efris_and_account_recovery`) and 2 guided journeys (`mda_ntr_resolution.yaml`, `new_taxpayer_and_relief.yaml`) resolving 3-hop PRN settlement across all 10 high-dependency Ugandan MDAs (`MoWT`, `DCIC`, `NIRA`, `PPDA/MoFPED`, `UNBS`, `MLHUD`, `KCCA/MoLG`, `UPF`, `URSB`, `NDA/NEMA/UESW`), `0%` (`UGX 0`) Presumptive Tax onboarding below `UGX 10,000,000`, NIRA NIN-to-TIN pre-flight checks, B2G `IFMS` `6%` WHT / `18%` Deemed VAT / `UNBS` PVoC holds, Day-1 Nil-Return penalty shields (`UGX 200,000/month`), Voluntary Disclosure (`TPC Act s.66(1a)` 100% penalty/interest waiver) / `s.40` TCC-unlocking instalment plans, and FY2026-27 `5%` consumer EFRIS e-receipt refunds (`UGX 2,000,000` threshold)
-12. **Live Web Research, Ephemeral PDF Sandbox & Self-Updating Qdrant (`web_research.py`, `ephemeral_pdf_sandbox.py`, `corpus_sync.py`, `pdf_corpus.py`, `ADR-0008`, `ADR-0009`)** — indicative market FX with Bank of Uganda precedence, 9-trigger official source discovery across URA/Parliament/ULII/10-MDA allowlists, `tmpfs`-isolated PDF/XLSX inspection (`pdf_guards` + GPU micro-reranking), and zero-downtime Qdrant corpus hot-swapping (`186` PDFs → `5,639` statutory chunks → `7,251` hybrid vectors)
+12. **Live Web Research, Ephemeral PDF Sandbox & Self-Updating Qdrant (`web_research.py`, `ephemeral_pdf_sandbox.py`, `vectorstore/corpus_sync.py`, `ingestion/pdf_corpus.py`, `ADR-0008`, `ADR-0009`)** — indicative market FX with Bank of Uganda precedence, 9-trigger official source discovery across URA/Parliament/ULII/10-MDA allowlists, `tmpfs`-isolated PDF/XLSX inspection (`pdf_guards` + GPU micro-reranking), and zero-downtime Qdrant corpus hot-swapping (`186` PDFs → `5,639` statutory chunks → `7,251` hybrid vectors)
 13. **Observability** — OpenTelemetry per-stage spans, Prometheus metrics, analytics dashboard, live smoke + deploy preflight gates
 
 ### Backend Architecture & Request Flows
@@ -144,7 +149,7 @@ source for those QA pairs, while evaluation JSONL stays out of live retrieval.
 
 #### RAG Pipeline Flow (10-stage)
 
-Source: `service.py::generate()` (lines 992-1677). Every `/v1/chat` and
+Source: `rag/pipeline.py::generate()` (lines 992-1677). Every `/v1/chat` and
 `/v1/chat/stream` request traverses this pipeline:
 
 ```
@@ -292,7 +297,7 @@ Supervisor.classify(query)
 
 _call_llm_agentic(max_iterations=3, deadline=90s)
   --> tool schemas narrowed by Tool RAG when FLAG_TOOL_RAG is on
-  --> llm_module.generate_with_tools(messages, tool_schemas)
+  --> generator_module.generate_with_tools(messages, tool_schemas)
       Loop (bounded by iterations AND by spend):
         LLM proposes tool_call(name, args)
         --> ToolCallBudget.admit(name, args)  # ceilings + duplicate memo
@@ -484,7 +489,7 @@ VoiceSession (voice_stream.py):
 | `voice_stream.py` | `backend/app/` | VADConfig, VoiceSession, sentence splitting |
 | `voice_ws.py` | `backend/app/` | WebSocket handler, Prometheus metrics |
 | `voice_consent.py` | `backend/app/` | Voice consent, audit log, retention policy |
-| `offline_rag.py` | `backend/app/` | FAISS offline retrieval fallback |
+| `rag/offline_rag.py` | `backend/app/` | FAISS offline retrieval fallback |
 | `accent_detector.py` | `backend/app/` | Prosodic accent classifier |
 
 **New frontend:**
@@ -543,7 +548,7 @@ VoiceSessionV2 (voice_stream_v2.py):
   |     +-- VISION path: image context + RAG
   |     +-- ESCALATE path: human handoff
   |
-  +-- LLM Generation (existing service.py 21-phase pipeline)
+  +-- LLM Generation (existing rag/pipeline.py 21-phase pipeline)
   |
   +-- Token-Level Streaming TTS (streaming_tts.py):
         +-- CosyVoice2-0.5B flow-matching codec (primary)
@@ -1206,7 +1211,7 @@ changed and why.
 
 **Phase 1 — OWASP closure**
 
-- `trust_remote_code=False` by default in `backend/app/llm.py` (LLM03).
+- `trust_remote_code=False` by default in `backend/app/rag/generator.py` (LLM03).
 - New env `LLM_MODEL_REVISION` pins the HF commit SHA for reproducible
   builds and SLSA provenance.
 - Retrieved passages are scrubbed for injection phrases, and for directives
@@ -1226,7 +1231,7 @@ changed and why.
 **Phase 2 — OTel GenAI 2025 alignment**
 
 - Token accounting now uses the real Qwen tokenizer
-  (`llm.count_tokens`) rather than `len(text.split())`.
+  (`generator.count_tokens`) rather than `len(text.split())`.
 - Span attributes follow the 2025 stable semconv:
   `gen_ai.operation.name`, `gen_ai.usage.input_tokens`,
   `gen_ai.usage.output_tokens`, `rag.retrieval.num_results`.
@@ -1285,11 +1290,11 @@ changed and why.
   tag and digest — the Node major CI tests on (`frontend/.nvmrc`; Bun from
   `frontend/.bun-version`). Node 26 waits for its 2026-10-28 LTS promotion;
   see ADR-0011 (amendment A6).
-- Gap #16 fix — `backend/app/service.py::stream_llm_tokens` routes
+- Gap #16 fix — `backend/app/rag/pipeline.py::stream_llm_tokens` routes
   the SSE streaming path through the shared `_LLM_CIRCUIT` breaker
   with the same success/failure accounting as the sync path.
   `backend/app/main.py::chat_stream` calls it instead of
-  `llm_module.generate_stream` directly, closing the last resilience
+  `generator_module.generate_stream` directly, closing the last resilience
   gap.
 
 **Zero-impact Next.js 16 breaking changes** (verified unused here):
@@ -1303,7 +1308,7 @@ changed and why.
 - `backend/app/main.py` — `Limiter(storage_uri=SLOWAPI_STORAGE_URI)`
   is used when set, so the per-IP rate bucket is shared across
   workers and replicas instead of being per-process memory.
-- `backend/app/cache.py` — new `RedisSemanticCache` class +
+- `backend/app/rag/cache.py` — new `RedisSemanticCache` class +
   `create_cache()` factory.  `CACHE_BACKEND=redis` stores embeddings
   as base64 numpy blobs in Redis hashes with TTL.  Falls back to
   the in-process `SemanticCache` automatically if Redis is unreachable.
@@ -1318,9 +1323,9 @@ changed and why.
 
 **Phase 8 — Postgres analytics backend (opt-in)**
 
-- New `backend/app/postgres.py` — psycopg3 + `psycopg_pool`
+- New `backend/app/db/postgres.py` — psycopg3 + `psycopg_pool`
   implementation mirroring the functions listed in the dispatch block
-  at the bottom of `database.py` (34 of 37 public functions). Identity,
+  at the bottom of `db/database.py` (34 of 37 public functions). Identity,
   consent, profiles, workflow sessions and tickets are all mirrored.
   **Still SQLite-only:** `export_user_data`, `delete_user_cascade` and
   `export_eval_samples`, because they cascade through memory and audit
@@ -1359,7 +1364,7 @@ UDPA subject access and erasure are verified end to end on Postgres:
 export returns the user, profile, consents, conversations and tickets;
 erasure removes all of them; and a post-erasure export comes back
 empty.
-- `backend/app/database.py` — dispatch block at the bottom re-binds
+- `backend/app/db/database.py` — dispatch block at the bottom re-binds
   the public names to `postgres.*` when `ANALYTICS_BACKEND=postgres`.
   SQLite remains the zero-config default for single-node deploys;
   Postgres is the correct choice for multi-replica deploys.
@@ -1368,7 +1373,7 @@ empty.
 
 **Phase 9 — vLLM runtime + Caddy TLS ingress**
 
-- `backend/app/llm.py` — new `LLM_BACKEND=local|vllm` switch plus
+- `backend/app/rag/generator.py` — new `LLM_BACKEND=local|vllm` switch plus
   `_vllm_generate()` and `_vllm_generate_stream()` that call the
   OpenAI-compatible `/v1/chat/completions` endpoint that vLLM exposes.
   When `LLM_BACKEND=vllm`, no local HF model is loaded and the
@@ -1403,12 +1408,12 @@ empty.
   p95 latency < 3 s, error rate < 1 %, faithfulness ≥ 0.5, Qdrant
   availability ≥ 99.9 %, LLM breaker never OPEN > 5 min.  Includes
   `UraFaithfulnessLow`, `UraEvalRegression`, `UraEscalationSpike`.
-- New `backend/app/flags.py` — tiny env-backed feature flag registry
+- New `backend/app/config/flags.py` — tiny env-backed feature flag registry
   with 7 canonical flags.  `flags.is_enabled("self_reflect")`
   resolves in this order: in-memory override → `FLAG_<NAME>` env
-  → registry default.  `service.py` uses this alongside the legacy
+  → registry default.  `rag/pipeline.py` uses this alongside the legacy
   `SELF_REFLECT_ENABLED` env for back-compat.
-- `backend/app/retriever.py` + `backend/app/indexer.py` —
+- `backend/app/rag/retriever.py` + `backend/app/ingestion/indexer.py` —
   `DENSE_MODEL` default upgraded to `BAAI/bge-m3` (1024-dim,
   multilingual, MTEB state-of-art for free models).  **Re-index
   required** when switching collections.  See the "Host gotchas"
@@ -1419,7 +1424,7 @@ empty.
 **Phase 12 — `app.py` unified with the hardened ChatModel**
 
 - `App/app.py` — new `_load_chat_model()` lazy singleton attempts
-  `from App.backend.app.service import ChatModel`.  When successful,
+  `from App.backend.app.rag.pipeline import ChatModel`.  When successful,
   `generate_response()` delegates to the full Phase 1-11 pipeline
   (hybrid retrieval, spotlight guardrails, self-reflect, circuit
   breakers, etc.) and the Gradio UI renders its replies.  When the
@@ -1547,7 +1552,7 @@ docker compose up -d qdrant redis
 
 # 4. Index the FAQs into Qdrant (uses sentence-transformers)
 QDRANT_URL=http://127.0.0.1:6333 \
-  .venv/bin/python -m App.backend.app.indexer --recreate --csvs-only
+  .venv/bin/python -m App.backend.app.ingestion.indexer --recreate --csvs-only
 
 # 5. Run the FastAPI backend
 LLM_ENABLED=false QDRANT_URL=http://127.0.0.1:6333 REDIS_URL=redis://127.0.0.1:6379/0 \
@@ -1692,12 +1697,12 @@ an operator flips a flag.
   `escalate_to_human`
 - Auto-registration via `__init__.py` import hook
 
-**Phase B — Qwen3 tool-calling loop** (`App/backend/app/llm.py`)
+**Phase B — Qwen3 tool-calling loop** (`App/backend/app/rag/generator.py`)
 - `generate_with_tools()` — bounded (`max_iterations=3`) tool-call
   loop using Qwen's native `apply_chat_template(tools=...)` format
 - `_parse_tool_calls()` handles parallel calls, string-encoded
   arguments, and malformed blocks (silent skip)
-- `_call_llm_agentic()` in `service.py` routes the loop through the
+- `_call_llm_agentic()` in `rag/pipeline.py` routes the loop through the
   shared `_LLM_CIRCUIT` breaker with 2× the sync deadline
 
 **Phase C — Supervisor router + state machine** (`App/backend/app/agents/`)
@@ -1708,7 +1713,7 @@ an operator flips a flag.
 - `AgentRoute` enum (stable string values, logged to analytics)
 - `AgentState` TypedDict threaded through the pipeline
 
-**Phase D — Ticket queue + admin endpoints** (`App/backend/app/database.py`,
+**Phase D — Ticket queue + admin endpoints** (`App/backend/app/db/database.py`,
 `main.py`, `tools/escalate.py`)
 - New `tickets` table with status/priority/assignee/staff_note
 - `escalate_to_human` tool creates tickets from within the LLM loop
@@ -1759,24 +1764,24 @@ tool — see:
   presets to `MODEL_CONFIGS`, plus `_messages_to_qwen_text()` (ChatML template)
   and `format_for_qwen()` for Qwen3-specific training data formatting.
   Model type detection recognises "qwen" and routes to the correct template.
-- `App/backend/app/service.py` — Model name derived dynamically from
+- `App/backend/app/rag/pipeline.py` — Model name derived dynamically from
   `LLM_MODEL` env var instead of hardcoded `"ura-qwen2.5-3b-instruct"`.
 - `.env.example` — Added `LLM_BACKEND`, `VLLM_BASE_URL`, `VLLM_API_KEY`,
   `VLLM_HTTP_TIMEOUT`, and all `FLAG_*` env vars.
 
 **Phase 16 — Agentic mode activation + vLLM tool-calling**
 
-- `App/backend/app/llm.py` — New `_vllm_generate_with_tools()` function
+- `App/backend/app/rag/generator.py` — New `_vllm_generate_with_tools()` function
   implements the full OpenAI-compatible tool-calling loop over vLLM HTTP.
   Dispatches tool calls via `ToolRegistry.call()`, feeds results back,
   bounded by `max_iterations`. Added `_strip_thinking()` to remove
   Qwen3's `<think>` reasoning blocks from all output paths.
-- `App/backend/app/flags.py` — `tool_use` stays off by default.
+- `App/backend/app/config/flags.py` — `tool_use` stays off by default.
   `agentic_mode` defaults **on** after the English routing golden set
   holds ≥ 0.95 (`agentic_mode_gate`). Tool-calling still activates only
   when the supervisor routes to TOOLS/SPECIALIST (`force_agentic`) or
   when a deployment turns `FLAG_TOOL_USE` on.
-- `App/backend/app/service.py` — Fixed `use_agentic` logic: now only
+- `App/backend/app/rag/pipeline.py` — Fixed `use_agentic` logic: now only
   `force_agentic` (supervisor decision), not `FLAG_TOOL_USE` alone,
   triggers the tool-calling path. This prevents double-search degradation
   on simple factual queries.
@@ -1791,7 +1796,7 @@ tool — see:
   - Workflow flows now include `tin_registration`, `return_filing`,
     `objection_or_dispute`, `payment_assistance`, and
     `customs_clearance`
-- `App/backend/app/flags.py` — `FLAG_WORKFLOWS` now defaults to `true`
+- `App/backend/app/config/flags.py` — `FLAG_WORKFLOWS` now defaults to `true`
   so high-intent task queries can be routed into guided flows by default
 
 **Phase 18 — UI redesign (Grok-inspired, production-grade)**
@@ -1881,7 +1886,7 @@ tool — see:
 - **Audit ledger:** Hash-chained append-only `audit_events` table with
   tamper-evident integrity. Every `generate()` outcome (blocked, cached,
   clarified, escalated, abstained, happy-path) appends an event via
-  `_audit_turn()` in `service.py`. Payloads store SHA-256 hashes of
+  `_audit_turn()` in `rag/pipeline.py`. Payloads store SHA-256 hashes of
   queries and replies (no raw PII), plus metadata: retrieval_mode,
   num_sources, faithfulness_score, escalation_required, model, locale,
   input_tokens, output_tokens, tool_calls, agent_route, ticket_id.
@@ -2214,13 +2219,13 @@ uv run python -m ml.scripts.export_mobile \
 
 ```bash
 # Full reindex (PDFs + CSVs → Qdrant)
-uv run python -m App.backend.app.indexer --recreate
+uv run python -m App.backend.app.ingestion.indexer --recreate
 
 # FAQ CSVs only
-uv run python -m App.backend.app.indexer --csvs-only
+uv run python -m App.backend.app.ingestion.indexer --csvs-only
 
 # PDFs only
-uv run python -m App.backend.app.indexer --pdfs-only
+uv run python -m App.backend.app.ingestion.indexer --pdfs-only
 ```
 
 ## Additional Links

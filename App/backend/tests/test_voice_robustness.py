@@ -270,7 +270,7 @@ class TestVoiceChatBudget(unittest.TestCase):
     def setUpClass(cls):
         from fastapi.testclient import TestClient
 
-        from app import database as db
+        from app.db import database as db
         from app import main as main_module
 
         db.init_db()
@@ -372,7 +372,7 @@ class TestVoiceChatReplyLanguage(unittest.TestCase):
     def setUpClass(cls):
         from fastapi.testclient import TestClient
 
-        from app import database as db
+        from app.db import database as db
         from app import main as main_module
 
         db.init_db()

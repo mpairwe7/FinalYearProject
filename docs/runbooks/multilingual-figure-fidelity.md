@@ -1,8 +1,8 @@
 # Runbook — multilingual figure fidelity
 
 Operator guide for the path a reply takes from English generation to a
-taxpayer reading Luganda or Swahili: `app/mt.py`, `service.localize_reply`,
-and the decoding parameters in `app/llm.py` that feed it.
+taxpayer reading Luganda or Swahili: `app/mt.py`, `pipeline.localize_reply`,
+and the decoding parameters in `app/rag/generator.py` that feed it.
 
 Decisions recorded here reflect the code as of 2026-09-09. Where a decision
 reversed an earlier one, the earlier one is stated too — the reversals are
@@ -55,7 +55,7 @@ regex that edits the answer on its way out.
 
 ## Decision 2 — a tier that cannot carry sentinels is retried unprotected
 
-`service.localize_reply` runs the protected pass first. If it comes back with
+`pipeline.localize_reply` runs the protected pass first. If it comes back with
 sentinel fragments still in the text, with a figure missing, collapsed, or
 empty, the reply is translated again **without** masking, which is exactly the
 behaviour that shipped before this change. Only when that also fails does the
@@ -108,7 +108,7 @@ only meaningful alongside a higher temperature.
 
 ## Decision 4 — the figure cross-check is built from the prompt's own text
 
-`llm.extract_statutory_context` lists every figure found in the retrieved
+`generator.extract_statutory_context` lists every figure found in the retrieved
 passages, each with the citation index of the passages that state it, and tells
 the model not to state a figure absent from the list.
 
@@ -202,7 +202,7 @@ Full metric definitions: `docs/MONITORING.md`.
 
 Tracked as **G56** in `docs/GAPS_AND_AGENTIC_ROADMAP.md`.
 
-Closed: `llm.extract_statutory_context` used to re-read raw passage text after
+Closed: `generator.extract_statutory_context` used to re-read raw passage text after
 `scan_retrieved_text` had scrubbed and trimmed the same passages in
 `_build_messages`. It now takes the prepared `(citation index, text)` pairs —
 the scrubbed, trimmed text the model actually sees — and emits a
@@ -223,7 +223,7 @@ the units, the length or the citation markers. All three are now guards on the
 same round trip.
 
 Closed (2026-09-17, **G59**): vernacular numeral and idiom disambiguation in
-`entailment.py` and `mt.py`. Disambiguated Luganda action verb *"saba"* (*"to
+`rag/entailment.py` and `mt.py`. Disambiguated Luganda action verb *"saba"* (*"to
 apply/request"*) from Swahili cardinal numeral *"saba"* (*7*); shielded non-numeric
 idioms (*"mtu wa tatu"*, *"third party"*); added English number words (`two`...`ten`,
 `twenty`...`fifty`) to align with translated vernacular words; shielded decimal legal
@@ -269,7 +269,7 @@ Still open:
 ## Decision 4 — compound statutory rate words and vernacular orthography (2026-09-28)
 
 **Current behaviour.** When statutory tax rates and figures appear as spelled-out words rather than digits:
-- **Luganda (`lg`)**: `_LG_WORD_NUMBERS` in `app/mt.py` and `_LUGANDA_PCT_WORDS` in `app/entailment.py` recognize both geminate and single consonant orthographies (`kkumi na munaana` / `kumi na munaana` for 18%, `kkumi na bbiri` for 12%, `kkumi na ttaano` for 15%, `asatu` for 30%). Vernacular percentage idiom `ku buli kikumi` ("per hundred") is stripped during normalization so that "kikumi" is not falsely parsed as a standalone 100.0 tax amount.
+- **Luganda (`lg`)**: `_LG_WORD_NUMBERS` in `app/mt.py` and `_LUGANDA_PCT_WORDS` in `app/rag/entailment.py` recognize both geminate and single consonant orthographies (`kkumi na munaana` / `kumi na munaana` for 18%, `kkumi na bbiri` for 12%, `kkumi na ttaano` for 15%, `asatu` for 30%). Vernacular percentage idiom `ku buli kikumi` ("per hundred") is stripped during normalization so that "kikumi" is not falsely parsed as a standalone 100.0 tax amount.
 - **Swahili (`sw`)**: `_SW_WORD_NUMBERS` in `app/mt.py` supports compound statutory rate phrases (`kumi na nane` for 18%, `kumi na mbili` for 12%, `kumi na tano` for 15%, `thelathini` for 30%).
 - **English (`en`)**: `_EN_WORD_NUMBERS` supports `eighteen` (18.0) and `twelve` (12.0).
 
@@ -281,11 +281,11 @@ Parsing evaluates compound words in descending order of key length so that large
 - `question_lg`, `answer_lg`
 - `question_sw`, `answer_sw`
 
-1. **Build-time figure verification (`app/faq_corpus.py`)**:
+1. **Build-time figure verification (`app/ingestion/faq_corpus.py`)**:
    During corpus compilation (`export_faq_csvs_to_jsonl`), every localized answer (`answer_lg`, `answer_sw`) is validated with `mt.figures_survived(row['answer'], row[f'answer_{lang}'], locale=lang)`. If any statutory rate (18%, 30%), currency figure, or compliance timeline is mutated or missing, the build fails immediately with a `CorpusValidationError`.
 2. **Deterministic Manifest Auditing**:
    `Data/faq_jsonl/faq_corpus_manifest.json` tracks `"multilingual_records"` counts alongside source file SHA-256 hashes.
-3. **Direct Native Retrieval (`service._simple_search`)**:
+3. **Direct Native Retrieval (`pipeline._simple_search`)**:
    When a taxpayer queries in Luganda or Swahili (`locale in ("lg", "sw")`), `_simple_search` performs a direct native pass against the pre-translated vernacular question and answer texts (`_vernacular_pass`).
    - If a match is found: the pre-verified native FAQ answer is returned directly, bypassing runtime MT round-trips and dropping median latency from ~5.4 seconds to under 50 ms.
    - If no native translation is found: the pipeline gracefully falls back to lazy translate-then-retrieve (`translate_query_for_retrieval`), preserving 100% backward compatibility.

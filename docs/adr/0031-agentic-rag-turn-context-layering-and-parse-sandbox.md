@@ -67,7 +67,7 @@ the next upward import (G485).
    API, never the full answerer. Its import bug is fixed, but it never ran, so turning it on is an
    unmeasured retrieval change. It stays behind `llm_query_rewrite`, default off, like `hyde` and
    `graph_fusion`, until measured on the multilingual retrieval benchmark.
-6. **Turn context as a leaf (G484).** `app/turn_context.py` owns the four turn `ContextVar`s and
+6. **Turn context as a leaf (G484).** `app/rag/turn_context.py` owns the four turn `ContextVar`s and
    imports nothing from the app. `service` re-exports the same objects under their old names, so
    callers and tests are unchanged. Guardrails, the evaluator and the empathy tool read from the leaf.
 7. **Layering as a fitness function (G485).** An AST test (`test_agentic_rag_context_sandbox_2026_11.py`)

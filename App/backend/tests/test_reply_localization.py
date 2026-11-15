@@ -22,7 +22,8 @@ from __future__ import annotations
 import unittest
 import unittest.mock as mock
 
-from app import mt, service
+from app import mt
+from app.rag import pipeline
 
 
 class LocalizeReplyTest(unittest.TestCase):
@@ -39,28 +40,28 @@ class LocalizeReplyTest(unittest.TestCase):
     def test_english_locale_is_passed_through_untouched(self) -> None:
         for locale in ("en", ""):
             with self.subTest(locale=locale):
-                with mock.patch.object(service, "localize_reply", wraps=service.localize_reply):
-                    self.assertEqual(service.localize_reply(self.ENGLISH, locale), self.ENGLISH)
+                with mock.patch.object(pipeline, "localize_reply", wraps=pipeline.localize_reply):
+                    self.assertEqual(pipeline.localize_reply(self.ENGLISH, locale), self.ENGLISH)
 
     def test_translated_text_replaces_the_english(self) -> None:
         luganda = "Omusolo gwa VAT mu Uganda guli ebitundu 18 ku buli kikumi."
         with mock.patch("app.sunbird.translate_from_english", return_value=luganda):
-            self.assertEqual(service.localize_reply(self.ENGLISH, "lg"), luganda)
+            self.assertEqual(pipeline.localize_reply(self.ENGLISH, "lg"), luganda)
 
     def test_translation_failure_serves_english_rather_than_an_error(self) -> None:
         with mock.patch("app.sunbird.translate_from_english", side_effect=RuntimeError("boom")):
-            self.assertEqual(service.localize_reply(self.ENGLISH, "lg"), self.ENGLISH)
+            self.assertEqual(pipeline.localize_reply(self.ENGLISH, "lg"), self.ENGLISH)
 
     def test_empty_translation_serves_english(self) -> None:
         for bad in (None, "", "   "):
             with self.subTest(returned=repr(bad)):
                 with mock.patch("app.sunbird.translate_from_english", return_value=bad):
-                    self.assertEqual(service.localize_reply(self.ENGLISH, "lg"), self.ENGLISH)
+                    self.assertEqual(pipeline.localize_reply(self.ENGLISH, "lg"), self.ENGLISH)
 
     def test_collapsed_translation_is_rejected(self) -> None:
         """A one-word MT response must not replace a full answer."""
         with mock.patch("app.sunbird.translate_from_english", return_value="Yee"):
-            self.assertEqual(service.localize_reply(self.ENGLISH, "lg"), self.ENGLISH)
+            self.assertEqual(pipeline.localize_reply(self.ENGLISH, "lg"), self.ENGLISH)
 
     def test_a_translation_that_loops_serves_english(self) -> None:
         """Sunflower rendered a phone number as "0[[[[((((…" on a call (2026-09-30)."""
@@ -68,10 +69,10 @@ class LocalizeReplyTest(unittest.TestCase):
         whole = "Tuukirira URA ku 0800 117 000 oba 0800 217 000 ku VAT ebitundu 18 ku buli kikumi."
         looping = "Tuukirira URA ku 0800 117 000 oba 0" + "[" * 16 + "(" * 312 + " ku VAT ebitundu 18 ku buli kikumi."
         with mock.patch("app.sunbird.translate_from_english", return_value=whole):
-            self.assertEqual(service.localize_reply(english, "lg"), whole)  # every other guard passes it
+            self.assertEqual(pipeline.localize_reply(english, "lg"), whole)  # every other guard passes it
         mt.cache.clear()
         with mock.patch("app.sunbird.translate_from_english", return_value=looping):
-            self.assertEqual(service.localize_reply(english, "lg"), english)
+            self.assertEqual(pipeline.localize_reply(english, "lg"), english)
 
     def test_only_a_loop_the_english_lacks_counts(self) -> None:
         table = "| Tax | Rate |\n|----------|------|\n| VAT | 18% |"
@@ -82,20 +83,20 @@ class LocalizeReplyTest(unittest.TestCase):
 
     def test_blank_reply_is_not_sent_for_translation(self) -> None:
         with mock.patch("app.sunbird.translate_from_english") as translate:
-            self.assertEqual(service.localize_reply("", "lg"), "")
+            self.assertEqual(pipeline.localize_reply("", "lg"), "")
             translate.assert_not_called()
 
     def test_swahili_translation_with_prefix_percentage_survives(self) -> None:
         """'asilimia 18' in Swahili must survive figures_survived check against '18%'."""
         swahili = "Kiwango cha kawaida cha ushuru wa thamani nchini Uganda ni asilimia 18 kwa bidhaa."
         with mock.patch("app.sunbird.translate_from_english", return_value=swahili):
-            self.assertEqual(service.localize_reply(self.ENGLISH, "sw"), swahili)
+            self.assertEqual(pipeline.localize_reply(self.ENGLISH, "sw"), swahili)
 
     def test_swahili_word_percentage_survives(self) -> None:
         """'asilimia kumi na nane' in Swahili must survive figures_survived check against '18%'."""
         swahili = "Kiwango cha kawaida cha ushuru wa thamani nchini Uganda ni asilimia kumi na nane kwa bidhaa."
         with mock.patch("app.sunbird.translate_from_english", return_value=swahili):
-            self.assertEqual(service.localize_reply(self.ENGLISH, "sw"), swahili)
+            self.assertEqual(pipeline.localize_reply(self.ENGLISH, "sw"), swahili)
 
 
 class ProtectedLocalizationTest(unittest.TestCase):
@@ -122,7 +123,7 @@ class ProtectedLocalizationTest(unittest.TestCase):
             return f"Omusolo gwa VAT mu Uganda guli {swapped} ku bintu ebiguzibwa."
 
         with mock.patch("app.sunbird.translate_from_english", side_effect=_transposing):
-            out = service.localize_reply(self.ENGLISH, "lg")
+            out = pipeline.localize_reply(self.ENGLISH, "lg")
         self.assertNotEqual(out, self.ENGLISH)
         self.assertIn("18%", out)
         self.assertTrue(mt.figures_survived(self.ENGLISH, out))
@@ -134,7 +135,7 @@ class ProtectedLocalizationTest(unittest.TestCase):
             return f"Omusolo gwa VAT guli {text} ne {text} ku bintu ebiguzibwa."
 
         with mock.patch("app.sunbird.translate_from_english", side_effect=_echoing):
-            out = service.localize_reply(self.ENGLISH, "lg")
+            out = pipeline.localize_reply(self.ENGLISH, "lg")
         self.assertNotIn("NMBR", out)
 
     def test_a_translator_that_drops_the_sentinel_falls_back_unprotected(self):
@@ -153,7 +154,7 @@ class ProtectedLocalizationTest(unittest.TestCase):
             return luganda
 
         with mock.patch("app.sunbird.translate_from_english", side_effect=_drops_sentinels):
-            self.assertEqual(service.localize_reply(self.ENGLISH, "lg"), luganda)
+            self.assertEqual(pipeline.localize_reply(self.ENGLISH, "lg"), luganda)
 
     def test_the_kill_switch_restores_the_unprotected_path(self):
         """``MT_PROTECT_FIGURES=false`` means the translator sees the digits."""
@@ -166,7 +167,7 @@ class ProtectedLocalizationTest(unittest.TestCase):
         with mock.patch.object(mt, "MT_PROTECT_FIGURES", False), mock.patch(
             "app.sunbird.translate_from_english", side_effect=_record
         ):
-            service.localize_reply(self.THRESHOLD, "lg")
+            pipeline.localize_reply(self.THRESHOLD, "lg")
         self.assertEqual(len(seen), 1)
         self.assertIn("150,000,000", seen[0])
         self.assertNotIn("NMBR", seen[0])
@@ -181,7 +182,7 @@ class ProtectedLocalizationTest(unittest.TestCase):
             return "Genda mu ofiisi ya URA yonna oba okube essimu."
 
         with mock.patch("app.sunbird.translate_from_english", side_effect=_record):
-            service.localize_reply(english, "lg")
+            pipeline.localize_reply(english, "lg")
         self.assertEqual(seen, [english])
 
 
@@ -189,18 +190,18 @@ class GenerationLanguageTest(unittest.TestCase):
     """The model is only asked for a language it can actually produce."""
 
     def test_no_adapter_means_no_respond_in_locale_instruction(self) -> None:
-        from app import llm
+        from app.rag import generator
 
-        with mock.patch.object(llm, "_active_adapter", None):
-            self.assertFalse(llm.can_generate_in_locale("lg"))
-            self.assertTrue(llm.can_generate_in_locale("en"))
+        with mock.patch.object(generator, "_active_adapter", None):
+            self.assertFalse(generator.can_generate_in_locale("lg"))
+            self.assertTrue(generator.can_generate_in_locale("en"))
 
     def test_a_matching_adapter_permits_direct_generation(self) -> None:
-        from app import llm
+        from app.rag import generator
 
-        with mock.patch.object(llm, "_active_adapter", "lg"):
-            self.assertTrue(llm.can_generate_in_locale("lg"))
-            self.assertFalse(llm.can_generate_in_locale("nyn"))
+        with mock.patch.object(generator, "_active_adapter", "lg"):
+            self.assertTrue(generator.can_generate_in_locale("lg"))
+            self.assertFalse(generator.can_generate_in_locale("nyn"))
 
 
 
@@ -226,8 +227,8 @@ class ParagraphLocalizationTest(unittest.TestCase):
             seen.append(text)
             return f"SW {text}"
 
-        with mock.patch.object(service, "_translate_reply", side_effect=sunflower):
-            out = service.localize_reply(self.TIN_REPLY, "sw")
+        with mock.patch.object(pipeline, "_translate_reply", side_effect=sunflower):
+            out = pipeline.localize_reply(self.TIN_REPLY, "sw")
         # Paragraphs are translated concurrently: which runs first is not fixed.
         self.assertCountEqual(seen, self.TIN_REPLY.split("\n\n"))
         self.assertTrue(out.startswith("SW Happy to help"))
@@ -240,33 +241,33 @@ class ParagraphLocalizationTest(unittest.TestCase):
             # Whole reply: the opening line only. One paragraph: all of it.
             return opening if "\n\n" in text else f"[sw] {text}"
 
-        with mock.patch.object(service, "_translate_reply", side_effect=sunflower):
-            out = service.localize_reply(self.TIN_REPLY, "sw")
+        with mock.patch.object(pipeline, "_translate_reply", side_effect=sunflower):
+            out = pipeline.localize_reply(self.TIN_REPLY, "sw")
         self.assertIn("[sw] To register for a TIN", out)
 
     def test_a_truncated_paragraph_serves_the_english_answer(self) -> None:
         def truncating(text: str, _locale: str) -> str:
             return "Ndiyo." if text.startswith("To register") else f"[sw] {text}"
 
-        with mock.patch.object(service, "_translate_reply", side_effect=truncating):
-            self.assertEqual(service.localize_reply(self.TIN_REPLY, "sw"), self.TIN_REPLY)
+        with mock.patch.object(pipeline, "_translate_reply", side_effect=truncating):
+            self.assertEqual(pipeline.localize_reply(self.TIN_REPLY, "sw"), self.TIN_REPLY)
 
     def test_one_failed_paragraph_fails_the_whole_reply(self) -> None:
         def failing(text: str, _locale: str) -> str | None:
             return None if text.startswith("To register") else f"[sw] {text}"
 
-        with mock.patch.object(service, "_translate_reply", side_effect=failing):
-            self.assertEqual(service.localize_reply(self.TIN_REPLY, "sw"), self.TIN_REPLY)
+        with mock.patch.object(pipeline, "_translate_reply", side_effect=failing):
+            self.assertEqual(pipeline.localize_reply(self.TIN_REPLY, "sw"), self.TIN_REPLY)
 
 
 class PromptedTranslationInputTest(unittest.TestCase):
     def test_nothing_to_translate_never_reaches_the_model(self) -> None:
         """Given empty text, Sunflower translated its own instructions instead."""
-        from app import llm
+        from app.rag import generator
 
-        with mock.patch.object(llm, "LLM_BACKEND", "vllm"), mock.patch.object(llm, "_vllm_generate") as generate:
+        with mock.patch.object(generator, "LLM_BACKEND", "vllm"), mock.patch.object(generator, "_vllm_generate") as generate:
             for blank in ("", "   ", "\n\n"):
-                self.assertEqual(llm.translate_text(blank, source_lang="en", target_lang="sw"), "")
+                self.assertEqual(generator.translate_text(blank, source_lang="en", target_lang="sw"), "")
         generate.assert_not_called()
 
 if __name__ == "__main__":

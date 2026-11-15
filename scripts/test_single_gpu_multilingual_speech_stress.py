@@ -51,7 +51,7 @@ os.environ["DOCUMENT_MAX_BYTES"] = str(40 * 1024 * 1024)
 
 from fastapi.testclient import TestClient
 
-from app import database as db
+from app.db import database as db
 from app.main import app
 from scripts.cleanup_gpu_processes import cleanup_mpairwe7_gpu_processes
 

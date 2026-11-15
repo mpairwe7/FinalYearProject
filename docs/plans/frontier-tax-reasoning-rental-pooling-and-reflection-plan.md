@@ -29,9 +29,9 @@ Tracing the pipeline execution revealed three distinct failures:
 1. **Un-pooled Multi-Stream Rental Calculations in Draft Generation:**
    The base model tried to calculate taxes for the two streams separately (UGX 40M and UGX 50M) and deducted the UGX 2,820,000 threshold twice (yielding UGX 10,123,200 total tax). It failed to synthesize that individual landlords must pool all properties into a single gross annual rental figure (UGX 90M) and deduct the threshold once (UGX 10,461,600). It also omitted addressing the taxpayer's question regarding the repealed 20% expense deduction.
 2. **Lexical Claim Verifier Triggering Revision:**
-   Because the un-pooled numbers (`UGX 4,461,600` and `UGX 5,661,600`) did not exist verbatim in the retrieved URA handbook passages, `claim_verifier.py` scored the draft low and returned `decision: revise`.
+   Because the un-pooled numbers (`UGX 4,461,600` and `UGX 5,661,600`) did not exist verbatim in the retrieved URA handbook passages, `rag/claim_verifier.py` scored the draft low and returned `decision: revise`.
 3. **`_reflect_llm` 15-Second Socket Timeout:**
-   In `App/backend/app/service.py:4166`, `_reflect_llm` had a hardcoded `timeout=15.0`. On a 72B parameter model (`Qwen2.5-72B-Instruct-AWQ`), a reflection call with context passages takes ~30–45 seconds. The call timed out silently, returning `""`.
+   In `App/backend/app/rag/pipeline.py:4166`, `_reflect_llm` had a hardcoded `timeout=15.0`. On a 72B parameter model (`Qwen2.5-72B-Instruct-AWQ`), a reflection call with context passages takes ~30–45 seconds. The call timed out silently, returning `""`.
 4. **Destructive Canned FAQ Dump Fallback:**
    When `_reflect_llm` returned empty, the Response Judge fell back to `_build_grounded_revision()`. This function prepended `"Here's the most relevant guidance I found in official URA sources:"` and dumped the verbatim raw FAQ text with the canned UGX 6M example, completely discarding the user's specific scenario.
 
@@ -40,7 +40,7 @@ Tracing the pipeline execution revealed three distinct failures:
 ## 2. Technical Architecture & Solutions
 
 ### 2.1 Solution 1: Pre-Evaluate Deterministic Rental Calculations with Multi-Property Pooling
-* **File:** `App/backend/app/service.py` (`_evaluate_calculation_context`)
+* **File:** `App/backend/app/rag/pipeline.py` (`_evaluate_calculation_context`)
 * **Logic:**
   - Inspect query for rental tax context and money amounts.
   - When multiple rental figures appear (e.g. `40M residential` + `50M commercial` or `total 90M`), detect whether individual rental tax is being queried.
@@ -52,7 +52,7 @@ Tracing the pipeline execution revealed three distinct failures:
   - Inject this verified statutory arithmetic into the LLM context under `## Verified Statutory Calculation (Tool Ground Truth)` so the Master Brain formats the exact numbers into a clean tabular response.
 
 ### 2.2 Solution 2: Explicit Statutory Instructions in `SYSTEM_PROMPT`
-* **File:** `App/backend/app/llm.py` (`SYSTEM_PROMPT`)
+* **File:** `App/backend/app/rag/generator.py` (`SYSTEM_PROMPT`)
 * **Additions:**
   - **Individual Rental Income Pooling:** Under Section 5(3) of the *Income Tax Act*, an individual's rental income from all properties (residential, commercial, land) is **pooled together** into a single total annual gross rental income.
   - **Single Threshold Application:** The statutory tax-free threshold of **UGX 2,820,000** applies **once per individual taxpayer per tax year**, never per property, per building, or per floor.
@@ -60,7 +60,7 @@ Tracing the pipeline execution revealed three distinct failures:
   - **Statutory Rate:** Flat rate of **12%** on chargeable income exceeding UGX 2,820,000.
 
 ### 2.3 Solution 3: Resilient Reflection (`_reflect_llm`) & Suppressing Canned FAQ Dumps
-* **File:** `App/backend/app/service.py` (`_reflect_llm`, `_evaluate_response_judge`)
+* **File:** `App/backend/app/rag/pipeline.py` (`_reflect_llm`, `_evaluate_response_judge`)
 * **Implementation:**
   - Increase `_reflect_llm` timeout from `15.0s` to `60.0s`.
   - For user queries that present custom figures or situational scenarios (e.g. `UGX 90M`, `40M`, `50M`), **do not** replace the draft with `_build_grounded_revision()` (which dumps irrelevant FAQ text).
@@ -75,7 +75,7 @@ Tracing the pipeline execution revealed three distinct failures:
 - Extract all rental amounts, sum them if separate components are stated, and execute `calculate_rental_tax`.
 - Format a verified statutory calculation card in prompt context.
 
-### Step 2: Update System Prompt Standards in `llm.py`
+### Step 2: Update System Prompt Standards in `rag/generator.py`
 - Add Section 5(3) *Income Tax Act* rental pooling standards to `SYSTEM_PROMPT`.
 - Detail the single UGX 2,820,000 annual threshold rule and the repeal of the 20% expense deduction for individuals.
 - Require presenting multi-property rental scenarios as a clean breakdown table:
@@ -102,6 +102,6 @@ Tracing the pipeline execution revealed three distinct failures:
 
 ## 4. Rollout & Commit Strategy
 1. Commit the plan file `docs/plans/frontier-tax-reasoning-rental-pooling-and-reflection-plan.md` to `dev-2.0` and push to remote.
-2. Implement the changes in `service.py` and `llm.py`.
+2. Implement the changes in `service.py` and `rag/generator.py`.
 3. Commit and push the implementation to `dev-2.0`.
 4. Restart `ura-app-api-dev2` and verify the live endpoint.

@@ -12,8 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.agents.graphs.main_graph import node_act, node_observe, node_reflect  # noqa: E402
 from app.agents.graphs.state import AgentGraphState  # noqa: E402
 from app.agents.prompts import detail_level_prompt  # noqa: E402
-from app.query import english_retrieval_query  # noqa: E402
-from app.retriever import HybridRetriever, _provenance_fields  # noqa: E402
+from app.rag.query import english_retrieval_query  # noqa: E402
+from app.rag.retriever import HybridRetriever, _provenance_fields  # noqa: E402
 
 
 class EnglishRetrievalQueryTests(unittest.TestCase):
@@ -112,7 +112,7 @@ class SpecialistHandoffTests(unittest.TestCase):
             hits=[{"text": "Register for a TIN on the URA portal.", "answer": "Use the portal."}],
             faithfulness=0.9,
         )
-        with patch("app.corrective_rag._expand_query", return_value=state.query):
+        with patch("app.rag.corrective_rag._expand_query", return_value=state.query):
             result = node_reflect(state)
         self.assertEqual(result.next_node, "retrieve")
         self.assertEqual(state.reflect_count, 1)
@@ -126,10 +126,10 @@ class SpecialistHandoffTests(unittest.TestCase):
         )
         with (
             patch(
-                "app.retriever.HybridRetriever.compute_faithfulness",
+                "app.rag.retriever.HybridRetriever.compute_faithfulness",
                 return_value=0.1,
             ),
-            patch("app.corrective_rag._expand_query", return_value=state.query),
+            patch("app.rag.corrective_rag._expand_query", return_value=state.query),
         ):
             result = node_reflect(state)
         self.assertEqual(result.next_node, "retrieve")

@@ -14,8 +14,8 @@ from unittest import mock
 
 import pytest
 
-from app.corrective_rag import _improved, _ranking_key
-from app.retriever import (
+from app.rag.corrective_rag import _improved, _ranking_key
+from app.rag.retriever import (
     BM25SparseEncoder,
     HybridRetriever,
     _dedupe_candidates,
@@ -200,7 +200,7 @@ class EditionAwareDeduplicationTests(unittest.TestCase):
 
 class QueryEmbeddingCacheTests(unittest.TestCase):
     def test_repeat_queries_reuse_the_embedding(self) -> None:
-        from app.retriever import HybridRetriever
+        from app.rag.retriever import HybridRetriever
 
         class CountingModel:
             def __init__(self) -> None:
@@ -228,8 +228,8 @@ class QueryEmbeddingCacheTests(unittest.TestCase):
         self.assertEqual(model.calls, 2, "identical query must not be re-embedded")
 
     def test_cache_is_bounded(self) -> None:
-        from app import retriever as retriever_module
-        from app.retriever import HybridRetriever
+        from app.rag import retriever as retriever_module
+        from app.rag.retriever import HybridRetriever
 
         class StubModel:
             @staticmethod
@@ -282,27 +282,27 @@ class BackendPriorityTests(unittest.TestCase):
         r = self._retriever(qdrant_ok=True, vectorize_ok=True)
         calls: list[str] = []
         r._init_vectorize_mode = lambda: calls.append("vectorize") or False  # type: ignore[method-assign]
-        with mock.patch("app.retriever.QDRANT_ENABLED", True):
+        with mock.patch("app.rag.retriever.QDRANT_ENABLED", True):
             self.assertTrue(r.initialize())
         self.assertEqual(calls, [], "Vectorize must not be probed while Qdrant works")
         self.assertFalse(r._vectorize_mode)
 
     def test_qdrant_failure_falls_through_to_vectorize(self) -> None:
         r = self._retriever(qdrant_ok=False, vectorize_ok=True)
-        with mock.patch("app.retriever.QDRANT_ENABLED", True):
+        with mock.patch("app.rag.retriever.QDRANT_ENABLED", True):
             self.assertTrue(r.initialize())
         self.assertTrue(r._vectorize_mode)
         self.assertEqual(r.backend, "vectorize")
 
     def test_both_unavailable_reports_keyword(self) -> None:
         r = self._retriever(qdrant_ok=False, vectorize_ok=False)
-        with mock.patch("app.retriever.QDRANT_ENABLED", True):
+        with mock.patch("app.rag.retriever.QDRANT_ENABLED", True):
             self.assertFalse(r.initialize())
         self.assertEqual(r.backend, "keyword")
 
     def test_disabled_qdrant_still_reaches_vectorize(self) -> None:
         r = self._retriever(qdrant_ok=True, vectorize_ok=True)
-        with mock.patch("app.retriever.QDRANT_ENABLED", False):
+        with mock.patch("app.rag.retriever.QDRANT_ENABLED", False):
             self.assertTrue(r.initialize())
         self.assertTrue(r._vectorize_mode)
 
@@ -319,7 +319,7 @@ class BackendPriorityTests(unittest.TestCase):
 
         r._init_qdrant = _failing_qdrant  # type: ignore[method-assign]
         r._init_vectorize_mode = lambda: False  # type: ignore[method-assign]
-        with mock.patch("app.retriever.QDRANT_ENABLED", True):
+        with mock.patch("app.rag.retriever.QDRANT_ENABLED", True):
             r.initialize()
         self.assertIsNone(r._client)
         self.assertIsNone(r._dense_model)
@@ -566,7 +566,7 @@ class VectorizeQueryTimeFallbackTests(unittest.TestCase):
     def test_fall_through_queries_the_configured_collection(self) -> None:
         qdrant_client = pytest.importorskip("qdrant_client")
         del qdrant_client
-        from app import retriever as R
+        from app.rag import retriever as R
 
         r = self._vectorize_retriever(with_qdrant=True)
         with mock.patch.object(r, "_search_vectorize", return_value=[]):

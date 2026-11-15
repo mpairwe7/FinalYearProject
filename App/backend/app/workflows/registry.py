@@ -394,7 +394,7 @@ def delegate_workflow_slot_calculation(
     Gated by ``FLAG_WORKFLOW_SPECIALIST_BRIDGE``. Maps calculator output keys to the
     semantic meaning of *slot_name* (tax/payment liability vs base/turnover amount).
     """
-    from ..flags import flags
+    from ..config.flags import flags
 
     if not flags.is_enabled("workflow_specialist_bridge"):
         return None, None
@@ -641,7 +641,7 @@ class WorkflowRegistry:
             try:
                 import os
 
-                from ..flags import flags
+                from ..config.flags import flags
 
                 max_hops = max(1, int(os.getenv("WORKFLOW_MAX_TANGENT_HOPS", "2")))
                 tangent_enabled = flags.is_enabled("workflow_tangent_resume")

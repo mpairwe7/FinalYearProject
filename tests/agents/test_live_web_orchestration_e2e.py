@@ -8,16 +8,16 @@ from typing import Any
 
 import pytest
 
-from app import corpus_sync as cs
-from app import database as db
+from app.vectorstore import corpus_sync as cs
+from app.db import database as db
 from app import ephemeral_pdf_sandbox as sbx
-from app import service as svc
+from app.rag import pipeline
 from app import web_fx
 from app import web_research as wr
 from app.agents.evaluator import verify_figure_lock
-from app.claim_verifier import verify_claims
-from app.flags import flags
-from app.pdf_corpus import PDF_JSONL_SCHEMA_VERSION, _stable_id
+from app.rag.claim_verifier import verify_claims
+from app.config.flags import flags
+from app.ingestion.pdf_corpus import PDF_JSONL_SCHEMA_VERSION, _stable_id
 
 
 @pytest.fixture()
@@ -118,7 +118,7 @@ def test_scenario1_expat_usd_paye_live_fx_verified_across_guards(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify Scenario 1 ($6,000/month expat salary) live FX conversion passes verify_figure_lock and _apply_output_guards."""
-    import app.flags as flags_mod
+    import app.config.flags as flags_mod
 
     monkeypatch.setenv("FLAG_LIVE_WEB_RESEARCH", "true")
     monkeypatch.setenv("FLAG_AUTO_QDRANT_WEB_SYNC", "true")
@@ -143,7 +143,7 @@ def test_scenario1_expat_usd_paye_live_fx_verified_across_guards(
         "An expatriate engineer arrives in Uganda on a 4-month contract earning USD 6,000 per month. "
         "Calculate monthly PAYE both if non-resident and if resident."
     )
-    verified_block = svc._evaluate_calculation_context(user_msg)
+    verified_block = pipeline._evaluate_calculation_context(user_msg)
     assert "3,785.50" in verified_block
     assert "22,713,000" in verified_block
     assert "Source: XE" in verified_block
@@ -164,7 +164,7 @@ def test_scenario1_expat_usd_paye_live_fx_verified_across_guards(
             "score_norm": 0.91,
         }
     ]
-    citations = svc.HybridRetriever.build_citations(hits)
+    citations = pipeline.HybridRetriever.build_citations(hits)
 
     ok_lock, offending, _meta = verify_figure_lock(
         draft_reply,
@@ -190,7 +190,7 @@ def test_turn1_outdated_guide_replacement_and_turn2_zero_network_skip(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify Turn 1 replaces an outdated FY2024-25 guide in Qdrant and Turn 2 skips web search via web_sync_ledger."""
-    import app.flags as flags_mod
+    import app.config.flags as flags_mod
 
     monkeypatch.setenv("FLAG_LIVE_WEB_RESEARCH", "true")
     monkeypatch.setenv("FLAG_AUTO_QDRANT_WEB_SYNC", "true")
@@ -338,7 +338,7 @@ def test_turn1_outdated_guide_replacement_and_turn2_zero_network_skip(
     # Verify verify_figure_lock and verify_claims approve an answer citing the new PDF's 12% and UGX 2,820,000.
     # The passages are the only grounding: web text never enters verified_facts.
     combined_hits = list(outcome_t1.web_hits)
-    citations_t1 = svc.HybridRetriever.build_citations(combined_hits)
+    citations_t1 = pipeline.HybridRetriever.build_citations(combined_hits)
     reply_t1 = (
         "Under the updated URA Real Estate Sector Guide (FY2026-27), individual landlords pay rental tax "
         "at 12% on gross rental income exceeding the annual threshold of UGX 2,820,000 [1]."

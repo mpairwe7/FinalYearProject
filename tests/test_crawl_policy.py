@@ -264,7 +264,7 @@ class TestDocumentDates:
     def test_the_backend_reads_the_same_date(self):
         """``app`` may not import this module, so the two must be held together."""
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "App" / "backend"))
-        from app.pdf_corpus import pdf_document_date as backend_date
+        from app.ingestion.pdf_corpus import pdf_document_date as backend_date
 
         for data in (b"/ModDate (D:20260814120000)", b"<xmp:ModifyDate>2025-03-04</xmp:ModifyDate>", b"nothing"):
             assert backend_date(data) == pdf_document_date(data)
@@ -273,13 +273,13 @@ class TestDocumentDates:
 class TestOneIdentityAndOneAllowlist:
     def test_the_backend_fetchers_use_the_same_identity(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "App" / "backend"))
-        from app.pdf_corpus import CORPUS_FETCH_USER_AGENT
+        from app.ingestion.pdf_corpus import CORPUS_FETCH_USER_AGENT
 
         assert CORPUS_FETCH_USER_AGENT == USER_AGENT
 
     def test_every_crawl_host_is_one_the_corpus_will_accept(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "App" / "backend"))
-        from app.pdf_corpus import (
+        from app.ingestion.pdf_corpus import (
             ALLOWED_STATUTORY_PDF_HOSTS,
             DEFAULT_MDA_PDF_SOURCE_URLS,
             MDA_STATUTORY_PDF_REGISTRY,

@@ -157,7 +157,7 @@ class TestGraphRuntime:
 # ---------------------------------------------------------------------------
 class TestMainGraph:
     def test_agentic_mode_off_bypasses_supervisor_routing(self, monkeypatch):
-        from app.flags import flags
+        from app.config.flags import flags
         from app.agents.supervisor import supervisor
 
         monkeypatch.setattr(flags, "is_enabled", lambda name, **kwargs: False)
@@ -174,7 +174,7 @@ class TestMainGraph:
     def test_tool_route_does_not_bypass_tool_use_flag(self, monkeypatch):
         from types import SimpleNamespace
 
-        from app.flags import flags
+        from app.config.flags import flags
 
         monkeypatch.setattr(flags, "is_enabled", lambda name, **kwargs: name == "agentic_mode")
         from app.agents.supervisor import supervisor
@@ -197,7 +197,7 @@ class TestMainGraph:
         assert state.plan == []
 
     def test_statutory_graph_survives_empty_retrieval_index(self, monkeypatch):
-        from app.flags import flags
+        from app.config.flags import flags
 
         graph_hit = {
             "id": "graph:statutory",
@@ -216,7 +216,7 @@ class TestMainGraph:
             def build_citations(hits):
                 return [{"ref": "[1]", "source": hits[0]["source"]}]
 
-        monkeypatch.setattr("app.retriever.HybridRetriever", OfflineRetriever)
+        monkeypatch.setattr("app.rag.retriever.HybridRetriever", OfflineRetriever)
         monkeypatch.setattr(flags, "is_enabled", lambda name, **kwargs: name in {"graph_fusion", "tax_graph"})
         monkeypatch.setattr("app.graph.shadow.graph_hit_for", lambda query: graph_hit)
         monkeypatch.setattr("app.agents.graphs.main_graph._apply_faq_gates", lambda query, hits: hits)
@@ -359,7 +359,7 @@ class TestNodeReflect:
         state.hits = [{"text": "unrelated passage"}]
         state.reply = "The VAT rate is 18 percent."
         monkeypatch.setattr(
-            "app.retriever.HybridRetriever.compute_faithfulness",
+            "app.rag.retriever.HybridRetriever.compute_faithfulness",
             staticmethod(lambda reply, contexts: 0.1),
         )
         result = node_reflect(state)
@@ -372,7 +372,7 @@ class TestNodeReflect:
         state.reply = "The VAT rate is 18 percent."
         state.reflect_count = state.max_reflections
         monkeypatch.setattr(
-            "app.retriever.HybridRetriever.compute_faithfulness",
+            "app.rag.retriever.HybridRetriever.compute_faithfulness",
             staticmethod(lambda reply, contexts: 0.1),
         )
         assert node_reflect(state).next_node == "respond"
@@ -382,7 +382,7 @@ class TestNodeReflect:
         state.hits = [{"text": "The VAT rate is 18 percent."}]
         state.reply = "The VAT rate is 18 percent."
         monkeypatch.setattr(
-            "app.retriever.HybridRetriever.compute_faithfulness",
+            "app.rag.retriever.HybridRetriever.compute_faithfulness",
             staticmethod(lambda reply, contexts: 0.95),
         )
         assert node_reflect(state).next_node == "respond"

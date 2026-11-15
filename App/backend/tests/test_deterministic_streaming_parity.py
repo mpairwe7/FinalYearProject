@@ -34,24 +34,24 @@ _TIN_HIT = {
 class GenerateRetrievalOnlyDeterministicTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        from app import database as db
+        from app.db import database as db
 
         db.init_db()
-        from app import service
+        from app.rag import pipeline
 
-        cls.model = service.ChatModel()
+        cls.model = pipeline.ChatModel()
 
     def test_tin_query_short_circuits_with_curated_score(self) -> None:
-        from app import service
+        from app.rag import pipeline
 
         with mock.patch.object(
-            service.ChatModel, "_priority_faq_hits", return_value=[dict(_TIN_HIT)]
+            pipeline.ChatModel, "_priority_faq_hits", return_value=[dict(_TIN_HIT)]
         ), mock.patch.object(
-            service, "_simple_search", return_value=[]
+            pipeline, "_simple_search", return_value=[]
         ), mock.patch.object(
-            service, "needs_clarification", return_value=""
+            pipeline, "needs_clarification", return_value=""
         ), mock.patch.object(
-            service.ChatModel, "_maybe_handle_workflow", return_value=None
+            pipeline.ChatModel, "_maybe_handle_workflow", return_value=None
         ), mock.patch.object(
             self.model._cache, "get", return_value=None
         ), mock.patch.object(
@@ -79,7 +79,7 @@ class GenerateRetrievalOnlyDeterministicTest(unittest.TestCase):
         self.assertFalse([k for k in cached if k.startswith("_")])
 
     def test_workflow_prompt_gets_empathy_prefix_when_distressed(self) -> None:
-        from app import service
+        from app.rag import pipeline
         from app.text_signals import empathy_ack
 
         workflow_stub = {
@@ -88,13 +88,13 @@ class GenerateRetrievalOnlyDeterministicTest(unittest.TestCase):
             "faithfulness_score": None,
         }
         with mock.patch.object(
-            service.ChatModel, "_maybe_handle_workflow", return_value=dict(workflow_stub)
+            pipeline.ChatModel, "_maybe_handle_workflow", return_value=dict(workflow_stub)
         ):
             distressed = self.model.generate_retrieval_only(
                 message="I'm so frustrated, I still can't register for a TIN!!"
             )
         with mock.patch.object(
-            service.ChatModel, "_maybe_handle_workflow", return_value=dict(workflow_stub)
+            pipeline.ChatModel, "_maybe_handle_workflow", return_value=dict(workflow_stub)
         ):
             calm = self.model.generate_retrieval_only(
                 message="I would like to register for a TIN"
@@ -148,13 +148,13 @@ class _ShortCircuitFakeModel:
 
 class RunChatTurnShortCircuitTest(unittest.TestCase):
     def test_deterministic_result_streams_as_single_bundle(self) -> None:
-        from app import service
+        from app.rag import pipeline
 
         model = _ShortCircuitFakeModel()
 
         async def _collect():
             out = []
-            async for ev in service.run_chat_turn(
+            async for ev in pipeline.run_chat_turn(
                 model,
                 message="how do I register for a TIN",
                 conversation_id=None,
@@ -172,8 +172,8 @@ class RunChatTurnShortCircuitTest(unittest.TestCase):
             raise AssertionError("LLM stream must not run for deterministic replies")
 
         with mock.patch.object(
-            service.llm_module, "is_available", return_value=True
-        ), mock.patch.object(service, "stream_llm_tokens", _must_not_stream):
+            pipeline.generator_module, "is_available", return_value=True
+        ), mock.patch.object(pipeline, "stream_llm_tokens", _must_not_stream):
             events = _run_async(_collect())
 
         kinds = [t for (t, _) in events]
@@ -191,7 +191,7 @@ class RunChatTurnShortCircuitTest(unittest.TestCase):
         self.assertIn("1. Go to ura.go.ug", token)
 
     def test_abstained_result_streams_grounding_event(self) -> None:
-        from app import service
+        from app.rag import pipeline
 
         class _AbstainedFakeModel:
             name = "test_model"
@@ -228,7 +228,7 @@ class RunChatTurnShortCircuitTest(unittest.TestCase):
 
         async def _collect():
             out = []
-            async for ev in service.run_chat_turn(
+            async for ev in pipeline.run_chat_turn(
                 model,
                 message="obscure tax question",
                 conversation_id="c1",
@@ -268,7 +268,7 @@ class RunChatTurnShortCircuitTest(unittest.TestCase):
         reading the mode as ``hybrid``, offered no officer. REST already returned
         ``retrieval_mode: abstained`` with no citations.
         """
-        from app import service
+        from app.rag import pipeline
 
         weak_hit = {"source": "ura_misc_faqs.csv", "question": "q", "answer": "unrelated text",
                     "text": "unrelated text", "score_norm": 0.01, "score_rrf": 0.01,
@@ -293,7 +293,7 @@ class RunChatTurnShortCircuitTest(unittest.TestCase):
                 return ""
 
         async def _collect():
-            return [ev async for ev in service.run_chat_turn(
+            return [ev async for ev in pipeline.run_chat_turn(
                 _WeakEvidenceModel(), message="something obscure", conversation_id="c1", top_k=4,
                 locale="en", session_id="s", request_id="r", user_id=None, tenant_id="default",
             )]

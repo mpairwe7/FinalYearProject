@@ -209,7 +209,7 @@ def _rule_paye_and_bik(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
         return []
 
     # 1. Foreign currency conversion for salary if not UGX
-    from .flags import flags
+    from .config.flags import flags
 
     live_fx_enabled = flags.is_enabled("live_web_research")
     sal = facts.monthly_salary
@@ -1155,7 +1155,7 @@ def _rule_mda_interdependence(facts: CaseFacts, question: str) -> list[ToolCallS
 
 def _rule_foreign_currency(facts: CaseFacts, _question: str) -> list[ToolCallSpec]:
     """Plan convert_currency for any non-UGX monetary amount in *facts.amounts*."""
-    from .flags import flags
+    from .config.flags import flags
 
     live_fx_enabled = flags.is_enabled("live_web_research")
     specs: list[ToolCallSpec] = []

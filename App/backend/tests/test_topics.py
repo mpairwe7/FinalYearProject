@@ -82,7 +82,7 @@ class FollowupAndResetTests(unittest.TestCase):
 
 class TopicStoreTests(unittest.TestCase):
     def setUp(self) -> None:
-        from app import database as db
+        from app.db import database as db
 
         db.init_db()
 
@@ -115,7 +115,7 @@ class TopicStoreTests(unittest.TestCase):
 
 class ChatResponseTopicFieldTests(unittest.TestCase):
     def test_current_topic_is_a_declared_field(self) -> None:
-        from app.models import ChatResponse
+        from app.api.models import ChatResponse
 
         body = ChatResponse(reply="ok", current_topic="import_vehicle")
         self.assertEqual(body.current_topic, "import_vehicle")

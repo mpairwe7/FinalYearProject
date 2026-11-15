@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from app import database as db
+from app.db import database as db
 
 
 class TestPlaceholderTranslation:
@@ -49,7 +49,7 @@ class TestPlaceholderTranslation:
         """
         offenders = []
         for name in ("audit/ledger.py", "audit/verifier.py"):
-            source = (Path(db.__file__).parent / name).read_text()
+            source = (Path(db.__file__).parents[1] / name).read_text()
             for literal in re.findall(r"'[^'\n]*'", source):
                 if "?" in literal:
                     offenders.append(f"{name}: {literal}")
@@ -144,7 +144,7 @@ class TestNoModuleBypassesTheSeam:
         is how the audit ledger, memory and voice audit all ended up
         invisible on the backend production runs.
         """
-        app_dir = Path(db.__file__).parent
+        app_dir = Path(db.__file__).parents[1]
         offenders = []
         for path in app_dir.rglob("*.py"):
             if path.name == "database.py":
@@ -155,7 +155,7 @@ class TestNoModuleBypassesTheSeam:
 
     @pytest.mark.parametrize("name", _MIGRATED_MODULES)
     def test_no_question_mark_inside_a_string_literal(self, name):
-        source = (Path(db.__file__).parent / name).read_text()
+        source = (Path(db.__file__).parents[1] / name).read_text()
         offenders = [lit for lit in re.findall(r"'[^'\n]*'", source) if "?" in lit]
         assert not offenders, (
             f"{name}: '?' inside a SQL string literal would be rewritten "
@@ -177,7 +177,7 @@ class TestEveryPublicFunctionReachesTheProductionBackend:
     def test_no_function_is_stranded_on_sqlite(self):
         import inspect
 
-        from app import postgres as pg
+        from app.db import postgres as pg
 
         source = Path(db.__file__).read_text()
         dispatched = set(re.findall(r"^\s+(\w+) = _pg\.", source, re.M))
@@ -186,7 +186,7 @@ class TestEveryPublicFunctionReachesTheProductionBackend:
         for name, obj in vars(db).items():
             if name.startswith("_") or not inspect.isfunction(obj):
                 continue
-            if getattr(obj, "__module__", "") != "app.database":
+            if getattr(obj, "__module__", "") != "app.db.database":
                 continue
             if name in dispatched or name in seam or hasattr(pg, name):
                 continue
@@ -205,19 +205,19 @@ class TestEveryPublicFunctionReachesTheProductionBackend:
 
 class TestAMirrorIsActuallyUsed:
     def test_every_sqlite_function_with_a_postgres_mirror_reaches_it(self):
-        """A mirror in postgres.py does nothing unless the dispatch block binds
+        """A mirror in db/postgres.py does nothing unless the dispatch block binds
         it or the function hands over itself (``_pg_module()``).
         ``refresh_open_ticket`` had a mirror and neither, so on Postgres it
         wrote a reused ticket's new turns to a local SQLite file (G641)."""
         import inspect
 
-        from app import postgres as pg
+        from app.db import postgres as pg
 
         source = Path(db.__file__).read_text()
         dispatched = set(re.findall(r"^\s+(\w+) = _pg\.", source, re.M))
         unused = []
         for name, obj in vars(db).items():
-            if name.startswith("_") or not inspect.isfunction(obj) or getattr(obj, "__module__", "") != "app.database":
+            if name.startswith("_") or not inspect.isfunction(obj) or getattr(obj, "__module__", "") != "app.db.database":
                 continue
             if name in dispatched or not hasattr(pg, name):
                 continue
@@ -230,7 +230,7 @@ class TestAMirrorIsActuallyUsed:
 class TestAuditUsesTheSeam:
     def test_the_ledger_no_longer_reaches_for_a_raw_connection(self):
         for name in ("audit/ledger.py", "audit/verifier.py"):
-            source = (Path(db.__file__).parent / name).read_text()
+            source = (Path(db.__file__).parents[1] / name).read_text()
             assert "_get_connection()" not in source, (
                 f"{name} still bypasses the dispatch block, so its tables "
                 "stay on SQLite when ANALYTICS_BACKEND=postgres"
@@ -272,7 +272,7 @@ class TestWorkflowLeaseOnPostgres:
     @pytest.fixture(autouse=True)
     def _bound_to_postgres(self):
         # Without this, a DSN with the default backend runs these on SQLite and passes.
-        from app import postgres
+        from app.db import postgres
 
         assert db.init_db is postgres.init_db
         assert db.claim_workflow_session is postgres.claim_workflow_session

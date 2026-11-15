@@ -35,14 +35,14 @@ re-index:
 
 | Area | Files |
 |------|-------|
-| Query plan | `App/backend/app/query.py` (`plan_retrieval`, filters, preferences, `decompose_query`) |
-| HyDE | `App/backend/app/hyde.py`; dense encode in `retriever.search` and `_search_vectorize` |
-| Fusion / boosts | `App/backend/app/retriever.py` (`search_planned`, `rrf_fuse_ranked_lists`, `apply_preference_boost`, `RRF_K`) |
+| Query plan | `App/backend/app/rag/query.py` (`plan_retrieval`, filters, preferences, `decompose_query`) |
+| HyDE | `App/backend/app/rag/hyde.py`; dense encode in `retriever.search` and `_search_vectorize` |
+| Fusion / boosts | `App/backend/app/rag/retriever.py` (`search_planned`, `rrf_fuse_ranked_lists`, `apply_preference_boost`, `RRF_K`) |
 | Graph hit | `App/backend/app/graph/shadow.py` (`graph_hit_for`) |
-| Serving | `App/backend/app/service.py` (`search_planned`, `_fuse_graph_leg`, flag-gated rewrite/cache/corrective) |
+| Serving | `App/backend/app/rag/pipeline.py` (`search_planned`, `_fuse_graph_leg`, flag-gated rewrite/cache/corrective) |
 | Tool / graph runtime | `App/backend/app/tools/rag_tool.py`, `App/backend/app/agents/graphs/main_graph.py`, `App/backend/app/native_voice/speculative_prefetch.py` |
 | Freshness | `App/backend/app/freshness.py`; snapshot write from `indexer.main` |
-| Flags | `App/backend/app/flags.py` (`query_decomposition`, `hyde`) |
+| Flags | `App/backend/app/config/flags.py` (`query_decomposition`, `hyde`) |
 | Eval | `Data/eval/rag_eval.jsonl` (30 rows) |
 
 ## 4. Flags and environment

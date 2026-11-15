@@ -8,8 +8,8 @@ from typing import Any
 from unittest import mock
 
 import pytest
-from app import llm
-from app.flags import flags
+from app.rag import generator
+from app.config.flags import flags
 from app.providers.routing import (
     ENDPOINTS,
     ModelEndpoint,
@@ -29,10 +29,10 @@ def _clean_routing_state(monkeypatch: pytest.MonkeyPatch):
     reset_tier_window()
     flags.clear("model_tiering")
     flags.clear("reasoner_for_translated_locales")
-    llm._vllm_limits.update(
+    generator._vllm_limits.update(
         {"max_model_len": 0.0, "models_checked_at": 0.0, "tokenize_down_until": 0.0}
     )
-    llm._vllm_limits_by_url.clear()
+    generator._vllm_limits_by_url.clear()
     yield
     reset_tier_window()
     flags.clear("model_tiering")
@@ -56,7 +56,7 @@ def test_env_to_endpoints_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
         model="Sunbird/Sunflower-Qwen3.5-9B",
         thinking=False,
         max_tokens=768,
-        timeout_s=float(llm.VLLM_HTTP_TIMEOUT),
+        timeout_s=float(generator.VLLM_HTTP_TIMEOUT),
     )
     assert ENDPOINTS[ModelTier.T3].base_url == "http://vllm-reasoner:8001/v1"
     assert ENDPOINTS[ModelTier.T3].model == "Qwen/Qwen3.8-27B-FP8"
@@ -146,17 +146,17 @@ def test_per_endpoint_context_window_and_tokenizer_cache() -> None:
     )
     msgs = [{"role": "user", "content": "Explain PAYE residency rules."}]
 
-    with mock.patch.object(llm, "_get_vllm_client", return_value=fake), mock.patch.object(
-        llm, "LLM_CONTEXT_WINDOW", 131072
+    with mock.patch.object(generator, "_get_vllm_client", return_value=fake), mock.patch.object(
+        generator, "LLM_CONTEXT_WINDOW", 131072
     ):
-        assert llm._served_context_window(t1_ep.base_url) == 8192
-        assert llm._served_context_window(t3_ep.base_url) == 65536
+        assert generator._served_context_window(t1_ep.base_url) == 8192
+        assert generator._served_context_window(t3_ep.base_url) == 65536
         # Second call hits cache without extra GET
-        assert llm._served_context_window(t1_ep.base_url) == 8192
-        assert llm._served_context_window(t3_ep.base_url) == 65536
+        assert generator._served_context_window(t1_ep.base_url) == 8192
+        assert generator._served_context_window(t3_ep.base_url) == 65536
 
-        c1 = llm._count_prompt_tokens(msgs, base_url=t1_ep.base_url, model=t1_ep.model)
-        c3 = llm._count_prompt_tokens(msgs, base_url=t3_ep.base_url, model=t3_ep.model)
+        c1 = generator._count_prompt_tokens(msgs, base_url=t1_ep.base_url, model=t1_ep.model)
+        c3 = generator._count_prompt_tokens(msgs, base_url=t3_ep.base_url, model=t3_ep.model)
         assert c1 == 180
         assert c3 == 420
 
@@ -218,8 +218,8 @@ def test_request_body_model_and_thinking_match_endpoint_and_suppress_reasoning_c
         max_tokens=1536,
         timeout_s=60.0,
     )
-    with mock.patch.object(llm, "_get_vllm_client", return_value=_FakeHttpClient()):
-        out = llm._vllm_generate(
+    with mock.patch.object(generator, "_get_vllm_client", return_value=_FakeHttpClient()):
+        out = generator._vllm_generate(
             [{"role": "user", "content": "When is an individual a resident?"}],
             endpoint=t3_ep,
         )
@@ -237,7 +237,7 @@ def test_reasoner_deadline_falls_back_to_local_t1_with_verified_facts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """On reasoner timeout, _local_llm_then_cloud falls back to T1 with the same verified-facts block."""
-    from app import service
+    from app.rag import pipeline
 
     monkeypatch.setenv("VLLM_BASE_URL", "http://vllm:8001/v1")
     monkeypatch.setenv("LLM_MODEL", "Sunbird/Sunflower-Qwen3.5-9B")
@@ -271,11 +271,11 @@ def test_reasoner_deadline_falls_back_to_local_t1_with_verified_facts(
 
     verified_block = "## Verified Statutory Calculation\n- PAYE: UGX 1,020,000"
     with (
-        mock.patch.object(service.llm_module, "generate", side_effect=_fake_generate),
-        mock.patch.object(service._LLM_EXECUTOR, "submit", side_effect=lambda fn, *a, **kw: _FakeFuture(fn, *a, **kw)),
-        mock.patch.object(service, "log_tier_fallback") as mock_fallback,
+        mock.patch.object(pipeline.generator_module, "generate", side_effect=_fake_generate),
+        mock.patch.object(pipeline._LLM_EXECUTOR, "submit", side_effect=lambda fn, *a, **kw: _FakeFuture(fn, *a, **kw)),
+        mock.patch.object(pipeline, "log_tier_fallback") as mock_fallback,
     ):
-        reply = service._local_llm_then_cloud(
+        reply = pipeline._local_llm_then_cloud(
             query="Calculate PAYE",
             passages=[{"text": "PAYE bands", "source": "ITA"}],
             conversation_history=None,

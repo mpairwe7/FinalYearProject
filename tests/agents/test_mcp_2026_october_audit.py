@@ -44,8 +44,8 @@ def test_mcp_memory_tools_enforce_consent_and_propagate_caller_identity() -> Non
     assert denied.result["error"] == "policy_denied"
 
     with (
-        patch("app.database.has_active_consent", return_value=True),
-        patch("app.database.execute", return_value=1) as mock_exec,
+        patch("app.db.database.has_active_consent", return_value=True),
+        patch("app.db.database.execute", return_value=1) as mock_exec,
     ):
         stored = get_client().call_tool(
             "memory_store",
@@ -253,7 +253,7 @@ def test_mcp_mrtr_production_signing_transport_bounds_and_5_locale_tool_rag(monk
 def test_backend_circuit_breaker_half_open_single_probe_and_security_headers(monkeypatch) -> None:
     from fastapi.testclient import TestClient
 
-    from app import database as db
+    from app.db import database as db
     from app.main import app
     from app.production_readiness import _mcp_security_errors
     from app.resilience import CircuitBreaker

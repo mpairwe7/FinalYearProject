@@ -82,7 +82,7 @@ from prometheus_client import (  # noqa: E402 - must follow the multiprocess set
 from prometheus_client import multiprocess as _prom_multiprocess  # noqa: E402
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint  # noqa: E402
 
-from . import database as db  # noqa: E402
+from .db import database as db  # noqa: E402
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping

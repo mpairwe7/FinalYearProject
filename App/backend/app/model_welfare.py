@@ -32,7 +32,7 @@ import re
 import unicodedata
 from typing import Any
 
-from .entailment import canonical_amounts, percentages
+from .rag.entailment import canonical_amounts, percentages
 
 # ---------------------------------------------------------------------------
 # Strict Tax, Customs, Distress & Handoff Domain Exclusion Guard

@@ -27,11 +27,11 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Any, AsyncGenerator
 
-from .flags import flags
+from .config.flags import flags
 from .voice_stream import VADConfig, VoiceStreamEvent, _run_blocking, _split_sentences
 
 if TYPE_CHECKING:
-    from .service import ChatModel
+    from .rag.pipeline import ChatModel
     from .speech_service import SpeechModel
 
 logger = logging.getLogger(__name__)

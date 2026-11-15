@@ -39,7 +39,7 @@ from unittest.mock import Mock
 import numpy as np
 
 if TYPE_CHECKING:
-    from .service import ChatModel
+    from .rag.pipeline import ChatModel
     from .speech_service import SpeechModel, SynthesizeResult, TranscribeResult
 
 logger = logging.getLogger(__name__)
@@ -502,7 +502,7 @@ class VoiceSession:
         figure_guard_blocked = False
         verified_caption_text = reply_for_tts
         try:
-            from .flags import flags
+            from .config.flags import flags
             from .receptionist.spoken_figure_guard import inject_dictation_pauses, verify_spoken_figures
             from .speech_normalization import clean_text_for_speech
 
@@ -532,7 +532,7 @@ class VoiceSession:
         # amount, a name) as its objective, pushing real cases out (Phase 38).
         if self.user_id:
             try:
-                from .flags import flags
+                from .config.flags import flags
                 from .memory import get_memory_service
                 from .memory.resolution_ledger import infer_domain_tag
 

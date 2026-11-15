@@ -110,7 +110,7 @@ class PipelineConfig:
 
     # Canonical retrieval embedder, recorded in the manifest and data card.
     # This must name the encoder that actually builds the served index
-    # (``app.indexer.DENSE_MODEL_NAME``); it previously said MiniLM while
+    # (``app.ingestion.indexer.DENSE_MODEL_NAME``); it previously said MiniLM while
     # serving had moved to bge-m3, so the provenance record was wrong by two
     # model generations and 640 dimensions. The binding that is *enforced* is
     # stamped into the collection itself and checked by

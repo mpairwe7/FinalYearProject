@@ -29,7 +29,7 @@ import csv
 import unittest
 from pathlib import Path
 
-from app.service import _DATA_DIR, _load_faq_data, _simple_search
+from app.rag.pipeline import _DATA_DIR, _load_faq_data, _simple_search
 
 OBJECTION_CSV = "ura_objections_and_appeals_faqs.csv"
 

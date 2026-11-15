@@ -2,7 +2,7 @@
  * Official URA (Uganda Revenue Authority) contact constants and helpers.
  *
  * Values mirror the authoritative figures used by the backend service layer
- * (see backend/app/service.py) so the frontend never invents contact details:
+ * (see backend/app/rag/pipeline.py) so the frontend never invents contact details:
  *   - Toll-free contact centre: 0800 117 000 / 0800 217 000
  *   - WhatsApp: 0772 140 000
  *   - Portal: https://ura.go.ug

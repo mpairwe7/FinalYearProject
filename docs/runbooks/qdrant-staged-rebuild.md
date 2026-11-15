@@ -30,11 +30,11 @@ documents changed:
 
 ```bash
 cd App/backend
-PYTHONPATH=. python -m app.indexer --download-pdfs --export-pdf-jsonl \
+PYTHONPATH=. python -m app.ingestion.indexer --download-pdfs --export-pdf-jsonl \
   --pdf-source-urls "https://www.parliament.go.ug/page/tax-bills-2026,https://ura.go.ug/download-category/laws-and-acts/"
-PYTHONPATH=. python -m app.indexer --export-faq-jsonl
-PYTHONPATH=. python -m app.indexer --export-pdf-jsonl
-PYTHONPATH=. python -m app.indexer --export-crawl-jsonl
+PYTHONPATH=. python -m app.ingestion.indexer --export-faq-jsonl
+PYTHONPATH=. python -m app.ingestion.indexer --export-pdf-jsonl
+PYTHONPATH=. python -m app.ingestion.indexer --export-crawl-jsonl
 ```
 
 ## Full rebuild and verification
@@ -50,7 +50,7 @@ three `INDEX_CANARY_*` variables only from a measured evaluation result.
 ```bash
 PYTHONPATH=App/backend \
 QDRANT_COLLECTION=ura_knowledge_base_active \
-python -m app.index_lifecycle --rebuild --force
+python -m app.vectorstore.index_lifecycle --rebuild --force
 
 PYTHONPATH=App/backend \
 QDRANT_COLLECTION=ura_knowledge_base_active \
@@ -77,7 +77,7 @@ place. This is idempotent and needs no rebuild:
 ```bash
 PYTHONPATH=App/backend \
 QDRANT_COLLECTION=ura_knowledge_base_active \
-python -m app.indexer --ensure-payload-indexes
+python -m app.ingestion.indexer --ensure-payload-indexes
 ```
 
 Confirm with `GET /collections/<physical collection>`: `payload_schema` lists all
@@ -97,7 +97,7 @@ keys on the index stamp and on the corpus the retriever binds to
 - PDF JSONL export is the longest step and is data- and CPU-dependent; budget
   up to 30 minutes on the GitHub-hosted build runner.
 
-Do not use `app.indexer --recreate` for an active local collection: it deletes
+Do not use `app.ingestion.indexer --recreate` for an active local collection: it deletes
 the serving collection before replacement. Retain the previous versioned
 collection until the deployment and the freshness endpoint have been checked;
 it is the rollback target.
@@ -129,7 +129,7 @@ Inspect the durable status and trigger a manual drill when an alert fires:
 ```bash
 cd App
 docker compose -f docker-compose.yml -f docker-compose.local-retrieval.yml \
-  exec qdrant-backup python -m app.qdrant_backup --restore-drill
+  exec qdrant-backup python -m app.vectorstore.qdrant_backup --restore-drill
 docker compose -f docker-compose.yml -f docker-compose.local-retrieval.yml \
   logs --tail=100 qdrant-backup
 ```

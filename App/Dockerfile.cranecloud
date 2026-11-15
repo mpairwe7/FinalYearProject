@@ -183,7 +183,7 @@ COPY Model/bm25_state.json /app/Model/bm25_state.json
 COPY Data/dataset /app/Data/dataset
 # Validated JSONL corpora. APP_DATA_ROOT resolves to /app/Data in the container
 # (no /app/App directory), so these land where the ingesters look for them.
-# The chunk corpora are generated — build with `python -m app.indexer
+# The chunk corpora are generated — build with `python -m app.ingestion.indexer
 # --export-faq-jsonl --export-pdf-jsonl --export-crawl-jsonl` before the image
 # build, or these COPYs fail loudly rather than shipping a half corpus.
 COPY App/Data/faq_jsonl   /app/Data/faq_jsonl
@@ -249,7 +249,7 @@ RUN set -eux; \
     # export is still verified; only the source-hash comparison is skipped.
     CORPUS_TRUST_MANIFEST=true \
     PYTHONPATH=. \
-    /opt/venv/bin/python -m app.index_lifecycle --bootstrap; \
+    /opt/venv/bin/python -m app.vectorstore.index_lifecycle --bootstrap; \
     # bm25_state.json is rewritten by the index build so the sparse vectors and
     # the vocab/idf come from the same fit — the corpus-hash sentinel would
     # otherwise disable sparse retrieval at startup.
@@ -318,7 +318,7 @@ ENV BM25_STATE_PATH=/app/Model/bm25_state.json \
 
 # Both embedded stores are verified here, at build time, against the ENV set
 # above. Neither is fail-closed at runtime by design — wait-for-qdrant.sh starts
-# the backend anyway on timeout and cache.py falls back to in-process memory —
+# the backend anyway on timeout and rag/cache.py falls back to in-process memory —
 # so a broken store produces no startup failure to notice. Two regressions this
 # turns into a failed build instead of a quiet degradation:
 #

@@ -1,7 +1,7 @@
 """Comprehensive verification suite for the October 2026 Agentic Voice CX & Speech Enhancements (E1–E9).
 
 Covers:
-1. Feature flags registration, default-off safety, and variant logging (`flags.py`).
+1. Feature flags registration, default-off safety, and variant logging (`config/flags.py`).
 2. Hybrid S2S + Regulated Cascaded Speech Router & Semantic Endpointing (`receptionist/hybrid_s2s.py`).
 3. Acoustic Prosody & Emotion Conditioning (`receptionist/prosody.py`) + Orpheus first-clause streaming (`orpheus_tts.py`).
 4. Spoken-Figure Round-Trip Verification & Dictation Pacing (`receptionist/spoken_figure_guard.py`).
@@ -23,7 +23,7 @@ from app.agents.graphs.main_graph import node_observe, node_route
 from app.agents.graphs.state import AgentGraphState
 from app.agents.state import AgentRoute
 from app.agents.supervisor import supervisor
-from app.flags import flags
+from app.config.flags import flags
 from app.memory import (
     EvidenceCard,
     HandoffEnvelope,
@@ -323,7 +323,7 @@ def test_handoff_envelope_v2_and_resolution_ledger(tmp_db):
         assert "Customs & VAT Deferment" in prompt_lg
         assert build_resumption_prompt(updated, "sw").startswith("Katika kipindi")
 
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         model = ChatModel.__new__(ChatModel)
         p_state = model._load_personalization_state(user_id, tenant_id=tenant_id)
@@ -382,7 +382,7 @@ def test_spoken_confirmation_and_officer_voice_copilot(tmp_db):
 
 
 def test_phase32_eq_adaptive_retrieval_and_sla_reprioritization():
-    from app.query import plan_retrieval
+    from app.rag.query import plan_retrieval
     from app.tools.empathy import assess
 
     flags.set("eq_adaptive_retrieval", True)
@@ -419,7 +419,7 @@ def test_phase32_eq_adaptive_retrieval_and_sla_reprioritization():
 def test_phase32_zero_effort_slot_prefill_and_workflow_specialist_bridge(tmp_db):
     from pathlib import Path
 
-    from app.service import ChatModel
+    from app.rag.pipeline import ChatModel
     from app.workflows.registry import (
         WorkflowSession,
         auto_load_flows,
@@ -858,7 +858,8 @@ def test_phase34_sunbird_v2_model_defaults(monkeypatch):
     from unittest.mock import patch
 
     import httpx
-    from app import llm, orpheus_tts, spark_tts_salt
+    from app.rag import generator
+    from app import orpheus_tts, spark_tts_salt
     from app import speech_service as ss
 
     try:
@@ -866,18 +867,18 @@ def test_phase34_sunbird_v2_model_defaults(monkeypatch):
             for name in ("LLM_MODEL", "WHISPER_SALT_MODEL", "SPARK_TTS_ENABLED"):
                 defaults.delenv(name, raising=False)
 
-            importlib.reload(llm)
+            importlib.reload(generator)
             importlib.reload(ss)
             importlib.reload(spark_tts_salt)
 
-            assert llm.LLM_MODEL == "Sunbird/Sunflower-Qwen3.5-9B"
+            assert generator.LLM_MODEL == "Sunbird/Sunflower-Qwen3.5-9B"
             assert ss.WHISPER_SALT_MODEL == "Sunbird/SunflowerASR-51-african-languages"
             assert ss.SALT_LANGUAGE_TOKEN_IDS["lg"] == 50332
             assert ss.SALT_LANGUAGE_TOKEN_IDS["nyn"] == 50322
             assert ss.SALT_LANGUAGE_TOKEN_IDS["ach"] == 50357
             assert spark_tts_salt.SPARK_TTS_ENABLED is False
     finally:
-        importlib.reload(llm)
+        importlib.reload(generator)
         importlib.reload(ss)
         importlib.reload(spark_tts_salt)
 
@@ -909,14 +910,14 @@ def test_phase34_sunbird_v2_model_defaults(monkeypatch):
 
 
 def test_phase35_sunflower_v2_native_262k_context_without_yarn():
-    from app import llm
+    from app.rag import generator
     from app.agents.graphs.compactor import analyze_context_window, compact_prompt_context
 
-    assert llm.NATIVE_SUNFLOWER_V2_CONTEXT_WINDOW == 262_144
-    assert llm.uses_native_long_context_without_yarn("Sunbird/Sunflower-Qwen3.5-9B") is True
-    assert llm.uses_native_long_context_without_yarn("Sunbird/Sunflower-14B-FP8") is False
-    assert llm.native_model_context_window("Sunbird/Sunflower-Qwen3.5-9B") == 262_144
-    assert llm.native_model_context_window("Sunbird/Sunflower-14B-FP8") == 131_072
+    assert generator.NATIVE_SUNFLOWER_V2_CONTEXT_WINDOW == 262_144
+    assert generator.uses_native_long_context_without_yarn("Sunbird/Sunflower-Qwen3.5-9B") is True
+    assert generator.uses_native_long_context_without_yarn("Sunbird/Sunflower-14B-FP8") is False
+    assert generator.native_model_context_window("Sunbird/Sunflower-Qwen3.5-9B") == 262_144
+    assert generator.native_model_context_window("Sunbird/Sunflower-14B-FP8") == 131_072
 
     state = AgentGraphState(
         query="Explain customs valuation and VAT deferment",
@@ -936,7 +937,7 @@ def test_phase35_sunflower_v2_native_262k_context_without_yarn():
 
 def test_phase35_multimodal_eq_fusion_vernacular_hardship_and_affect_mt():
     from app import mt
-    from app.query import plan_retrieval
+    from app.rag.query import plan_retrieval
     from app.receptionist.prosody import ProsodyProfile
     from app.text_signals import detect_user_distress
     from app.tools.empathy import fuse_multimodal_affect
@@ -1420,7 +1421,7 @@ def test_phase38_nyn_and_ach_full_2026_ttt_tts_stt_parity(monkeypatch):
     from app import speech_service as ss
     from app.language_state import normalize_locale_tag, resolve_turn_locale
     from app.number_words import ach_words, nyn_words
-    from app.query import SUPPORTED_LOCALES, detect_language, english_retrieval_query
+    from app.rag.query import SUPPORTED_LOCALES, detect_language, english_retrieval_query
     from app.receptionist.clarify import classify_yes_no
     from app.receptionist.config import KNOWN_LANGUAGES
     from app.receptionist.hybrid_s2s import (
@@ -1633,7 +1634,7 @@ def test_phase38_nyn_and_ach_full_2026_ttt_tts_stt_parity(monkeypatch):
 def test_phase39_eq_conversational_and_structuring_tools_5_locale_uniformity():
     from app.conversational import handle_conversational_turn
     from app.guardrails import OutputGuard
-    from app.service import ChatModel
+    from app.rag.pipeline import ChatModel
     from app.text_signals import (
         ack_already_given,
         detect_crisis,
@@ -1859,11 +1860,11 @@ def test_phase40_qa_audit_gaps_prometheus_slots_calculators_and_resumption():
 
 
 def test_phase41_trase_grounding_single_pass_retrieval_and_multilingual_guardrails():
-    from app import llm
+    from app.rag import generator
     from app.guardrails import InputGuard
 
     # 1. TraSe English-pivot prompt construction when no locale LoRA adapter is active
-    msgs_nyn = llm._build_messages(
+    msgs_nyn = generator._build_messages(
         "How is EFRIS used for invoicing and goods?",
         [{"source": "ura_efris.pdf", "text": "EFRIS issues real-time e-invoices and e-receipts."}],
         locale="nyn",
@@ -1896,7 +1897,7 @@ def test_phase41_trase_grounding_single_pass_retrieval_and_multilingual_guardrai
 def test_phase42_claim_verifier_disclaimers_and_langgraph_reasoning_miss(monkeypatch):
     from app.agents.graphs.main_graph import _is_reasoning_miss
     from app.agents.graphs.state import AgentGraphState
-    from app.claim_verifier import verify_claims
+    from app.rag.claim_verifier import verify_claims
     from app.guardrails import OutputGuard
 
     hits = [{"source": "ura_vat.pdf", "text": "The standard Value Added Tax (VAT) rate in Uganda is 18% on taxable supplies."}]
@@ -1931,7 +1932,7 @@ def test_phase42_claim_verifier_disclaimers_and_langgraph_reasoning_miss(monkeyp
     assert _is_reasoning_miss(state_ach) is False
 
     # 3. Bare "dul 3" (Acholi for "group 3") is not treated as a percentage, while "dul 18 i kom miya" is
-    from app.entailment import percentages
+    from app.rag.entailment import percentages
 
     assert "3" not in percentages("Dul 3 tye ki lutic 10")
     assert "18" in percentages("Mucoro me VAT obedo dul 18 i kom miya")
@@ -1944,7 +1945,7 @@ def test_phase42_claim_verifier_disclaimers_and_langgraph_reasoning_miss(monkeyp
     # 5. Multi-intent Luganda query decomposition in HybridRetriever.search_planned
     from unittest.mock import patch
 
-    from app.retriever import HybridRetriever
+    from app.rag.retriever import HybridRetriever
 
     ret = HybridRetriever.__new__(HybridRetriever)
     searched_calls: list[tuple[str, str | None]] = []
@@ -1955,8 +1956,8 @@ def test_phase42_claim_verifier_disclaimers_and_langgraph_reasoning_miss(monkeyp
 
     ret.search = _fake_search  # type: ignore[method-assign]
     with (
-        patch("app.flags.flags.is_enabled", side_effect=lambda name, **kw: name in ("translate_retrieve", "query_decomposition")),
-        patch("app.query.english_retrieval_query", return_value="How do I register for a TIN and what is the VAT rate in Uganda?"),
+        patch("app.config.flags.flags.is_enabled", side_effect=lambda name, **kw: name in ("translate_retrieve", "query_decomposition")),
+        patch("app.rag.query.english_retrieval_query", return_value="How do I register for a TIN and what is the VAT rate in Uganda?"),
     ):
         planned_hits = ret.search_planned(
             "Nsobola ntya okwewandiisa ku TIN era omusolo gwa VAT guli mmeka?",
@@ -2026,14 +2027,14 @@ def test_phase44_cxp_after_hours_escalation_and_sla_pause(monkeypatch):
     import datetime as dt
     from zoneinfo import ZoneInfo
 
-    from app.database import compose_sla_stats
+    from app.db.database import compose_sla_stats
     from app.escalation_policy import (
         after_hours_escalation_message,
         after_hours_escalation_notice,
         business_hours_elapsed_seconds,
         evaluate_cxp_schedule,
     )
-    from app.flags import flags
+    from app.config.flags import flags
     from app.officer_handoff import enrich_handoff
     from app.receptionist.phrases import phrase
 

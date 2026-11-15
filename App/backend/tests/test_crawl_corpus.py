@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
-from app.crawl_corpus import (
+from app.ingestion.crawl_corpus import (
     CRAWL_MANIFEST_NAME,
     split_qa_digest,
     CRAWL_MIN_PAGE_CHARS,
@@ -26,7 +26,7 @@ from app.crawl_corpus import (
     review_pages,
     select_pages,
 )
-from app.faq_corpus import CorpusValidationError
+from app.ingestion.faq_corpus import CorpusValidationError
 
 
 @dataclass
@@ -428,7 +428,7 @@ class ExpiryTests(unittest.TestCase):
         """Export and ingest both select, so a day boundary must not make them disagree."""
         self.tree.capture("old")
         self.tree.ledger({}, last_full_run_at="2026-10-02T00:00:00Z")
-        with mock.patch("app.crawl_corpus.datetime", wraps=datetime) as clock:
+        with mock.patch("app.ingestion.crawl_corpus.datetime", wraps=datetime) as clock:
             review_pages(self.tree.pages_dir)
         clock.now.assert_not_called()
 

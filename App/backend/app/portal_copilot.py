@@ -27,7 +27,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import database as db
+from .db import database as db
 from .mcp import mrtr
 from .tools import ToolRegistry
 from .tools.portal_navigator_data import (

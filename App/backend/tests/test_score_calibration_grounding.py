@@ -16,7 +16,7 @@ import unittest.mock as mock
 
 class NormalizationTest(unittest.TestCase):
     def test_sigmoid_bounds_and_monotonic(self) -> None:
-        from app.retriever import normalize_rerank_score
+        from app.rag.retriever import normalize_rerank_score
 
         self.assertAlmostEqual(normalize_rerank_score(0.0), 0.5, places=6)
         self.assertGreater(normalize_rerank_score(8.0), 0.99)
@@ -26,7 +26,7 @@ class NormalizationTest(unittest.TestCase):
         self.assertTrue(0.0 <= normalize_rerank_score(-1e6) <= 1.0)
 
     def test_hit_relevance_priority_and_degraded(self) -> None:
-        from app.retriever import hit_relevance
+        from app.rag.retriever import hit_relevance
 
         self.assertEqual(hit_relevance({"score_norm": 0.7}), 0.7)
         self.assertAlmostEqual(hit_relevance({"score_rerank": 0.0}), 0.5, places=6)
@@ -50,7 +50,7 @@ class AbstainTest(unittest.TestCase):
 
 class CorrectTest(unittest.TestCase):
     def test_uses_normalized_scale_and_degraded_mode(self) -> None:
-        import app.corrective_rag as cr
+        import app.rag.corrective_rag as cr
 
         with mock.patch.object(cr, "CORRECTIVE_ENABLED", True):
             self.assertTrue(cr.should_correct([]))  # no hits → correct
@@ -62,7 +62,7 @@ class CorrectTest(unittest.TestCase):
 
 class NumericContradictionTest(unittest.TestCase):
     def test_percentage_conflict_detection(self) -> None:
-        from app.entailment import is_contradicted, numeric_contradiction
+        from app.rag.entailment import is_contradicted, numeric_contradiction
 
         self.assertTrue(numeric_contradiction("VAT is 20%", "VAT is 18%"))
         self.assertTrue(numeric_contradiction("VAT is 20 percent", "VAT is 18 percent"))
@@ -76,7 +76,7 @@ class NumericContradictionTest(unittest.TestCase):
 
 class VerifyClaimsContradictionTest(unittest.TestCase):
     def test_contradicted_claim_escalates(self) -> None:
-        from app.claim_verifier import verify_claims
+        from app.rag.claim_verifier import verify_claims
 
         hits = [{"text": "The standard VAT rate in Uganda is 18%."}]
         citations = [{"ref": "[1]", "passage": hits[0]["text"]}]
@@ -86,7 +86,7 @@ class VerifyClaimsContradictionTest(unittest.TestCase):
         self.assertTrue(report["unsupported_claims"])  # contradicted is also unsupported
 
     def test_supported_claim_not_contradicted(self) -> None:
-        from app.claim_verifier import verify_claims
+        from app.rag.claim_verifier import verify_claims
 
         hits = [{"text": "The standard VAT rate in Uganda is 18% for taxable supplies."}]
         citations = [{"ref": "[1]", "passage": hits[0]["text"]}]

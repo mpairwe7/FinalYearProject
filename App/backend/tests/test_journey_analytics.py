@@ -8,7 +8,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from app import database as db
+from app.db import database as db
 from app import main as main_module
 from app.journey_analytics import build_journey_funnel
 from app.main import journey_funnel

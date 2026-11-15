@@ -159,7 +159,7 @@ strike_tracker = StrikeTracker()
 
 
 def _friction_enabled() -> bool:
-    from .flags import flags
+    from .config.flags import flags
 
     return flags.is_enabled("guardrail_strike_friction")
 

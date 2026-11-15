@@ -7,7 +7,7 @@
  *
  * This mirrors what the backend already keys its per-locale support on:
  *   - app/sunbird.py LOCALE_TO_SUNBIRD (translation + native TTS voices)
- *   - app/llm.py _select_adapter's fine-tuned LoRA allowlist
+ *   - app/rag/generator.py _select_adapter's fine-tuned LoRA allowlist
  *   - app/agents/patterns (locale-aware supervisor routing tables)
  * Adding a locale here without matching backend support would put a
  * non-functional option in the picker, so keep this list in step with

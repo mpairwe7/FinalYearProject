@@ -55,7 +55,7 @@ os.environ["OTEL_ENABLED"] = "false"
 
 from fastapi.testclient import TestClient
 
-from app import database as db
+from app.db import database as db
 from app.main import app
 from scripts.cleanup_gpu_processes import cleanup_mpairwe7_gpu_processes
 

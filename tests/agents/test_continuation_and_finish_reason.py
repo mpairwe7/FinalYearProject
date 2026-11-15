@@ -7,19 +7,19 @@ from typing import Any
 from unittest import mock
 
 import pytest
-from app import llm
+from app.rag import generator
 from app.production_readiness import gap_gate_errors
 
 
 @pytest.fixture(autouse=True)
 def _reset_llm_meta():
-    llm.clear_last_generation_meta()
-    llm._vllm_limits.update(
+    generator.clear_last_generation_meta()
+    generator._vllm_limits.update(
         {"max_model_len": 0.0, "models_checked_at": 0.0, "tokenize_down_until": 0.0}
     )
-    llm._vllm_limits_by_url.clear()
+    generator._vllm_limits_by_url.clear()
     yield
-    llm.clear_last_generation_meta()
+    generator.clear_last_generation_meta()
 
 
 class _FakeHttpResponse:
@@ -74,8 +74,8 @@ def test_complete_with_continuation_length_then_stop_stitches_two_calls() -> Non
             post_bodies.append(body)
             return _FakeHttpResponse(responses[len(post_bodies) - 1])
 
-    with mock.patch.object(llm, "_get_vllm_client", return_value=_FakeClient()):
-        gen = llm.complete_with_continuation(
+    with mock.patch.object(generator, "_get_vllm_client", return_value=_FakeClient()):
+        gen = generator.complete_with_continuation(
             [{"role": "user", "content": "When is an individual resident in Uganda?"}],
             max_rounds=2,
         )
@@ -124,8 +124,8 @@ def test_complete_with_continuation_always_length_trims_at_sentence_boundary_and
                 }
             )
 
-    with mock.patch.object(llm, "_get_vllm_client", return_value=_FakeClient()):
-        gen = llm.complete_with_continuation(
+    with mock.patch.object(generator, "_get_vllm_client", return_value=_FakeClient()):
+        gen = generator.complete_with_continuation(
             [{"role": "user", "content": "List the rules."}],
             max_rounds=2,
         )
@@ -138,7 +138,7 @@ def test_complete_with_continuation_always_length_trims_at_sentence_boundary_and
         gen.text
         == "1. First statutory rule: PAYE is withheld monthly by the employer [1].\n\n"
         "2. Second statutory rule: VAT is charged at 18% on standard-rated supplies [2].\n\n"
-        f"{llm.SHORTENED_CONTINUATION_NOTE}"
+        f"{generator.SHORTENED_CONTINUATION_NOTE}"
     )
 
 
@@ -185,9 +185,9 @@ def test_streaming_length_then_stop_yields_one_continuous_sse_answer() -> None:
             )
 
     meta: dict[str, Any] = {}
-    with mock.patch.object(llm, "_get_vllm_client", return_value=_FakeStreamClient()):
+    with mock.patch.object(generator, "_get_vllm_client", return_value=_FakeStreamClient()):
         tokens = list(
-            llm._vllm_generate_stream(
+            generator._vllm_generate_stream(
                 [{"role": "user", "content": "What is the VAT rate?"}],
                 stream_meta=meta,
             )
@@ -204,21 +204,21 @@ def test_looks_truncated_is_not_consulted_when_finish_reason_exists_and_sovereig
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """_local_llm_then_cloud trusts finish_reason when present without calling _looks_truncated or _llm_cloud_fallback."""
-    from app import service
+    from app.rag import pipeline
 
     def _fake_generate(**_kwargs: Any) -> str:
-        llm.set_last_generation_meta(
+        generator.set_last_generation_meta(
             {"finish_reason": "stop", "continuation_rounds": 0, "model": "Sunbird/Sunflower-Qwen3.5-9B"}
         )
         # Deliberately ends with a colon so _looks_truncated would have been tested if called
         return "Here is the summary:"
 
     with (
-        mock.patch.object(service.llm_module, "generate", side_effect=_fake_generate),
-        mock.patch.object(service, "_looks_truncated", side_effect=AssertionError("_looks_truncated must not be called")),
-        mock.patch.object(service, "_llm_cloud_fallback", side_effect=AssertionError("cloud fallback must not be called")),
+        mock.patch.object(pipeline.generator_module, "generate", side_effect=_fake_generate),
+        mock.patch.object(pipeline, "_looks_truncated", side_effect=AssertionError("_looks_truncated must not be called")),
+        mock.patch.object(pipeline, "_llm_cloud_fallback", side_effect=AssertionError("cloud fallback must not be called")),
     ):
-        reply = service._local_llm_then_cloud(
+        reply = pipeline._local_llm_then_cloud(
             query="Summarize VAT",
             passages=[{"text": "VAT is 18%", "source": "VAT Act"}],
             conversation_history=None,
@@ -229,10 +229,10 @@ def test_looks_truncated_is_not_consulted_when_finish_reason_exists_and_sovereig
     # Also verify Sovereign Mode never calls cloud even when finish_reason is None and reply has no punctuation
     monkeypatch.setenv("SOVEREIGN_MODE", "true")
     with (
-        mock.patch.object(service.llm_module, "generate", return_value="Unpunctuated text without finish_reason"),
-        mock.patch.object(service, "_llm_cloud_fallback", side_effect=AssertionError("cloud fallback forbidden in sovereign mode")),
+        mock.patch.object(pipeline.generator_module, "generate", return_value="Unpunctuated text without finish_reason"),
+        mock.patch.object(pipeline, "_llm_cloud_fallback", side_effect=AssertionError("cloud fallback forbidden in sovereign mode")),
     ):
-        reply_sov = service._local_llm_then_cloud(
+        reply_sov = pipeline._local_llm_then_cloud(
             query="Summarize VAT",
             passages=[{"text": "VAT is 18%", "source": "VAT Act"}],
             conversation_history=None,

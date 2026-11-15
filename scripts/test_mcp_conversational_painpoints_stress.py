@@ -63,7 +63,7 @@ os.environ["FLAG_TOOL_USE"] = "true"
 
 from fastapi.testclient import TestClient
 
-from app import database as db
+from app.db import database as db
 from app.main import app as fastapi_app
 from app.tools import ToolRegistry
 import app.tools.calculators

@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from app import database as db
-from app.flags import _REGISTRY, flags
+from app.db import database as db
+from app.config.flags import _REGISTRY, flags
 from app.portal_copilot import (
     PORTAL_TASK_CATALOG,
     PortalTaskOwnershipError,
@@ -31,7 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_portal_copilot_flag_registered_in_all_three_places() -> None:
-    """`portal_copilot` must land in `flags.py`, `docs/RAG_ARCHITECTURE.md`, and `.env.example`."""
+    """`portal_copilot` must land in `config/flags.py`, `docs/RAG_ARCHITECTURE.md`, and `.env.example`."""
     assert "portal_copilot" in _REGISTRY
     spec = _REGISTRY["portal_copilot"]
     assert spec.default is True

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.retriever import HybridRetriever
+from app.rag.retriever import HybridRetriever
 
 
 def _web_hit(**over):

@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from app.service import ChatModel
+from app.rag.pipeline import ChatModel
 from app.workflows.loader import load_workflow
 from app.workflows.registry import WorkflowRegistry
 

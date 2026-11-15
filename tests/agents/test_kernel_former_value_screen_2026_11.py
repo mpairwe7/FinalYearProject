@@ -85,7 +85,7 @@ def test_a_graph_hit_lists_what_the_screen_left_out() -> None:
 
 
 def test_every_retrieval_caller_gets_the_screen(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.retriever import HybridRetriever
+    from app.rag.retriever import HybridRetriever
 
     retriever = HybridRetriever.__new__(HybridRetriever)
     fine = _faq("Declare goods at the Red Channel.")

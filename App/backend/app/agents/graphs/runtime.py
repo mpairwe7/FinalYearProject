@@ -211,7 +211,7 @@ class DurableCheckpointStore(CheckpointStore):
         """The ``graph_checkpoint_routine`` flag, unless set on this store."""
         if self._persist_routine is not None:
             return self._persist_routine
-        from ...flags import flags
+        from ...config.flags import flags
 
         return flags.is_enabled("graph_checkpoint_routine")
 
@@ -220,7 +220,7 @@ class DurableCheckpointStore(CheckpointStore):
         self._persist_routine = bool(value)
 
     def save_checkpoint(self, thread_id: str, step: int, node_name: str, state_dict: dict[str, Any]) -> None:
-        from ...database import save_agent_checkpoint
+        from ...db.database import save_agent_checkpoint
 
         save_agent_checkpoint(thread_id, step, node_name, state_dict)
 
@@ -235,17 +235,17 @@ class DurableCheckpointStore(CheckpointStore):
         Read as empty, a run would start at step 0 and could write a suspend
         beneath the thread's latest row, where no resume would ever find it.
         """
-        from ...database import get_latest_agent_checkpoint
+        from ...db.database import get_latest_agent_checkpoint
 
         return get_latest_agent_checkpoint(thread_id)
 
     def claim(self, thread_id: str, step: int, node_name: str, state_dict: dict[str, Any]) -> bool:
-        from ...database import insert_agent_checkpoint_if_absent
+        from ...db.database import insert_agent_checkpoint_if_absent
 
         return insert_agent_checkpoint_if_absent(thread_id, step, node_name, state_dict)
 
     def history(self, thread_id: str) -> list[tuple[int, str]]:
-        from ...database import list_agent_checkpoints
+        from ...db.database import list_agent_checkpoints
 
         return [(int(row["step"]), str(row["node_name"])) for row in list_agent_checkpoints(thread_id)]
 

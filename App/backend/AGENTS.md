@@ -17,16 +17,21 @@ PYTHONPATH=App/backend python3 -m app.seed_prototype   # development only
 | Module | Role |
 | --- | --- |
 | `agents/` | Supervisor, golden-set routing, LangGraph |
-| `routes/` | Modular domain APIRouters (`connectors.py`, `offline.py`) |
+| `api/` | Pydantic request/response models (`models.py`) and modular domain APIRouters (`connectors.py`, `offline.py`, `quality.py`) |
+| `rag/` | The RAG flow (ADR-0056): `pipeline.py` (the `ChatModel` orchestrator), `retriever.py`, `generator.py` (answer generation and the prompts), `query.py`, grounding checks, turn context |
+| `ingestion/` | Corpus builders (`pdf_corpus`, `faq_corpus`, `crawl_corpus`), document parsing (`docling_intelligence`, `document_normalization`) and `indexer.py` |
+| `embeddings/` | `embedder.py`: CPU embeddings for the local dense leg (ADR-0034) |
+| `vectorstore/` | `vector_db.py` (the pgvector leg), Qdrant `index_lifecycle`, `corpus_sync`, `qdrant_backup`, `point_ids` |
+| `db/` | `database.py` (the store and its backend seam) and `postgres.py` |
 | `tools/` | Registered tools (`ToolRegistry`) |
 | `mcp/` | MCP client + tax-calculator server |
 | `guardrails.py` | Input/output OWASP LLM01–09 |
-| `logging_config.py` | Root JSON logging: request id, trace ids, scrubbed `attributes` and tracebacks |
+| `middleware/logger.py` | Root JSON logging: request id, trace ids, scrubbed `attributes` and tracebacks |
 | `analytics.py` | The one metrics facade (prometheus_client, all workers); `record_chat_turn` |
 | `tracing.py` | OTel setup; `llm_call`, `trace_tool_call`, GenAI spans and turn token usage |
 | `audit/` | Hash-chained ledger, `turns.append_turn` (one row per answer while `audit_ledger` is on; a failed append is counted and logged, never retried), RFC 3161 seals (`tsa.py`) |
 | `mt.py` | Shared translation cache + the figure-fidelity guard |
-| `flags.py` | Registry + rollout; do not add a flag here only |
+| `config/flags.py` | Registry + rollout; do not add a flag here only |
 
 ## Rules
 
@@ -53,8 +58,8 @@ PYTHONPATH=App/backend python3 -m app.seed_prototype   # development only
 - Metrics go through `analytics.metrics` only (never `prometheus_client` directly): label values must be bounded (route templates, enums), and a rule or dashboard panel may only name series the code emits — `tests/test_monitoring_config.py` fails otherwise.
 - A new chat transport calls `record_chat_turn` once per turn and audits through `ChatModel.record_turn_audit` (or goes through `run_chat_turn`, which does both). Audit the text that was served, after localization.
 - A graph approval carries `pending_action.action_digest`; a resume claims its suspend with `CheckpointStore.claim` before acting, and checkpoint SQL stays portable (`ON CONFLICT`, never SQLite-only forms). Keep the `graph_checkpoint_routine` flag off in production (ADR-0030).
-- The Gemini branch of the cloud tier answers under `llm.CLOUD_SYSTEM_PROMPT`; the Workers AI branch keeps the full `SYSTEM_PROMPT` through `_build_messages`, a superset. A guarding rule added to `SYSTEM_PROMPT` is added to the cloud prompt too; `tests/agents/test_harness_prompt_contract.py` lists the rules it must keep. Prompt fragments never state a fiscal-year literal or a statutory figure (ADR-0030).
-- Turn context (stated identifiers, case facts, tenant, conversation) is read from `turn_context`, never from `service`. Only transports and composition roots import `service`; the graph imports nothing from `service`, and neither do `turn_record`, `live_research_turn`, `english_rendering` or `faq_binding` (`test_agentic_rag_context_sandbox_2026_11.py`, ADR-0031, G486). Stub `answer_in_english` on `english_rendering`, the one patch point.
+- The Gemini branch of the cloud tier answers under `generator.CLOUD_SYSTEM_PROMPT`; the Workers AI branch keeps the full `SYSTEM_PROMPT` through `_build_messages`, a superset. A guarding rule added to `SYSTEM_PROMPT` is added to the cloud prompt too; `tests/agents/test_harness_prompt_contract.py` lists the rules it must keep. Prompt fragments never state a fiscal-year literal or a statutory figure (ADR-0030).
+- Turn context (stated identifiers, case facts, tenant, conversation) is read from `turn_context`, never from `pipeline`. Only transports and composition roots import `pipeline`; the graph imports nothing from `pipeline`, and neither do `turn_record`, `live_research_turn`, `english_rendering` or `faq_binding` (`test_agentic_rag_context_sandbox_2026_11.py`, ADR-0031, G486). Stub `answer_in_english` on `english_rendering`, the one patch point.
 - A parse child sees only `document_worker.child_environment`; a new extractor setting needs its name allowed there. Keep `DOCUMENT_PARSE_MAX_MEM_BYTES` non-zero (ADR-0031).
 - An answer may link only to a trusted host (`guardrails.is_trusted_link_target`): `*.go.ug`, `_DEFAULT_EXTRA_LINK_HOSTS` or `OUTPUT_LINK_ALLOWED_HOSTS`. Never add a redirector. Text a model reads from a third party goes through `scan_retrieved_text` or `scan_external_tool_text`; an upload is wrapped only after `vision.ocr.escape_untrusted_document_markers` (ADR-0029).
 - A guard pattern change adds its attack to `Data/eval/redteam_corpus.jsonl` and anything lawful it nearly caught to `Data/eval/guardrail_benign_controls.jsonl`; both gates must pass.

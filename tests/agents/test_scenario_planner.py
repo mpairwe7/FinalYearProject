@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 from App.backend.tests.test_calculator_router import ExplanationVsCalculationRoutingTests  # noqa: F401
-from app import service as service_module
+from app.rag import pipeline as pipeline_module
 from app.case_facts import extract_case_facts
 from app.premise_guard import check_fact_contradictions
 from app.scenario_planner import build_verified_facts, plan_tools
@@ -167,7 +167,7 @@ def test_out_of_coverage_disclosure_when_numeric_question_has_no_planner_rule() 
 
 def test_no_duplicate_rental_pooling_logic_in_service_py() -> None:
     """Verify rental pooling logic was moved out of service._evaluate_calculation_context into scenario_planner.py."""
-    src = inspect.getsource(service_module._evaluate_calculation_context)
+    src = inspect.getsource(pipeline_module._evaluate_calculation_context)
     assert "pooled_gross" not in src
     assert "build_verified_facts" in src
 

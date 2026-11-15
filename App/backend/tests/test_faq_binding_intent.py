@@ -1,13 +1,13 @@
 """FAQ binding: aliases, timing evidence and question intent (G486 review, CodeRabbit on #705).
 
-The helpers moved out of ``service.py`` in G486; the review of the move found
+The helpers moved out of ``rag/pipeline.py`` in G486; the review of the move found
 three pre-existing defects in what they decide, pinned here.
 """
 
 from __future__ import annotations
 
 import pytest
-from app import faq_binding as fb
+from app.rag import faq_binding as fb
 
 
 def test_every_alias_names_a_final_term() -> None:

@@ -150,7 +150,7 @@ def due_reminders(
     profile. The reason is what makes "nobody was reminded" debuggable
     instead of silent.
     """
-    from . import database as db
+    from .db import database as db
     from .tools.calendar import upcoming_deadlines
 
     if not user_id:
@@ -211,7 +211,7 @@ def refresh_inbox(
 
     This is the channel. It does not send email or SMS.
     """
-    from . import database as db
+    from .db import database as db
 
     from .notify import dispatch_selection
 

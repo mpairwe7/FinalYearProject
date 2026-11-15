@@ -17,17 +17,17 @@ cd "$ROOT_DIR"
 printf 'Release gate: backend syntax\n'
 "$PYTHON_BIN" -m py_compile \
   backend/app/authority.py \
-  backend/app/claim_verifier.py \
+  backend/app/rag/claim_verifier.py \
   backend/app/mcp/policy.py \
   backend/app/mcp/client.py \
   backend/app/tools/rates.py \
   backend/app/tools/ura_account.py \
   backend/app/tools/ura_actions.py \
-  backend/app/service.py \
+  backend/app/rag/pipeline.py \
   backend/app/main.py \
   backend/app/chat_ws_v2.py \
   backend/app/confirm_tokens.py \
-  backend/app/llm.py
+  backend/app/rag/generator.py
 
 printf 'Release gate: backend tests\n'
 (

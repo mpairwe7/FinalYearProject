@@ -22,7 +22,7 @@ import logging
 import time
 from typing import Any, cast
 
-from .. import database as db
+from ..db import database as db
 from ..escalation_notify import known_teams
 from .config import get_presence_ttl_s
 from .hub import hub

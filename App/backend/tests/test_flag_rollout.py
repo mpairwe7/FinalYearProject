@@ -16,7 +16,7 @@ import os
 import unittest
 from unittest import mock
 
-from app.flags import _REGISTRY, FeatureFlags, Flag, Rollout, _bucket_of, is_protected
+from app.config.flags import _REGISTRY, FeatureFlags, Flag, Rollout, _bucket_of, is_protected
 
 
 class BucketingTests(unittest.TestCase):
@@ -146,7 +146,7 @@ class RolloutResolutionTests(_FlagHarness):
 
     def test_percentage_without_subject_warns_once(self) -> None:
         self.register(default=False, rollout=Rollout(percent=50.0))
-        with self.assertLogs("app.flags", level="WARNING") as captured:
+        with self.assertLogs("app.config.flags", level="WARNING") as captured:
             self.flags.is_enabled("_test_flag")
             self.flags.is_enabled("_test_flag")
             self.flags.is_enabled("_test_flag")
@@ -172,7 +172,7 @@ class EnvRampTests(_FlagHarness):
         self.register(default=False, rollout=Rollout(percent=0.0))
         with (
             mock.patch.dict(os.environ, {"FLAG__TEST_FLAG_PERCENT": "lots"}),
-            self.assertLogs("app.flags", level="WARNING"),
+            self.assertLogs("app.config.flags", level="WARNING"),
         ):
             self.assertFalse(self.flags.is_enabled("_test_flag", subject="u1"))
 

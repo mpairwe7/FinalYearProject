@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import re
 
-from . import llm
+from .rag import generator
 from .guard_friction import note_refusal, paused
 from .guardrails import InputGuard, contains_pii, redact_pii_text
 
@@ -129,14 +129,14 @@ def generate_title(
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": f"{conversation}\n\nTitle:"},
     ]
-    title = clean_title(llm.summarize_title(messages))
+    title = clean_title(generator.summarize_title(messages))
     if not title:
         return None, "unavailable"
 
     if locale and locale != "en":
         # Generated in English and localized in the one place answers are.
         # localize_reply hands back the English on any failure.
-        from .service import localize_reply  # noqa: PLC0415 — service imports are heavy
+        from .rag.pipeline import localize_reply  # noqa: PLC0415 — service imports are heavy
 
         localized = clean_title(localize_reply(title, locale), max_words=MAX_WORDS_LOCALIZED)
         if localized:

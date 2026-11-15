@@ -33,7 +33,8 @@ import asyncio
 import unittest
 import unittest.mock as mock
 
-from app import mt, service
+from app import mt
+from app.rag import pipeline
 
 
 def _drain(agen):
@@ -51,10 +52,10 @@ class EffectiveLocaleTest(unittest.TestCase):
     def _run_turn(self, retrieval_result, *, caller_locale="en"):
         model = mock.MagicMock()
         model.generate_retrieval_only.return_value = retrieval_result
-        with mock.patch.object(service, "localize_reply") as localize:
+        with mock.patch.object(pipeline, "localize_reply") as localize:
             localize.side_effect = lambda text, locale: f"[{locale}] {text}"
             events = _drain(
-                service.run_chat_turn(
+                pipeline.run_chat_turn(
                     model,
                     message="TIN ntandika ntya",
                     conversation_id=None,
@@ -148,16 +149,16 @@ class EmptyStreamFallbackTest(unittest.TestCase):
             "_history": [],
             "_rewritten": "vat rate",
         }
-        with mock.patch.object(service, "localize_reply") as localize, mock.patch.object(
-            service.llm_module, "is_available", return_value=True
+        with mock.patch.object(pipeline, "localize_reply") as localize, mock.patch.object(
+            pipeline.generator_module, "is_available", return_value=True
         ), mock.patch.object(
-            service.flags, "is_enabled", return_value=False
+            pipeline.flags, "is_enabled", return_value=False
         ), mock.patch.object(
-            service, "stream_llm_tokens", return_value=iter(())
+            pipeline, "stream_llm_tokens", return_value=iter(())
         ):
             localize.side_effect = lambda text, locale: f"[{locale}] {text}"
             events = _drain(
-                service.run_chat_turn(
+                pipeline.run_chat_turn(
                     model,
                     message="VAT eri ki",
                     conversation_id=None,
@@ -173,7 +174,7 @@ class EmptyStreamFallbackTest(unittest.TestCase):
         self.assertEqual(len(tokens), 1)
         self.assertTrue(tokens[0].startswith("[lg] VAT is 18%."))
         # The sentence saying this is a fallback is localized with the answer.
-        self.assertIn(service.DEGRADED_DISCLOSURES["generation_unavailable"], tokens[0])
+        self.assertIn(pipeline.DEGRADED_DISCLOSURES["generation_unavailable"], tokens[0])
 
 
 class FigureFidelityTest(unittest.TestCase):
@@ -185,31 +186,31 @@ class FigureFidelityTest(unittest.TestCase):
     def test_a_changed_amount_serves_the_english_text(self):
         english = "The PAYE due on this salary is UGX 235,000 for the month."
         with mock.patch.object(
-            service, "_translate_reply", return_value="Omusolo gwa PAYE ye UGX 253,000 buli mwezi."
+            pipeline, "_translate_reply", return_value="Omusolo gwa PAYE ye UGX 253,000 buli mwezi."
         ):
-            out = service.localize_reply(english, "lg")
+            out = pipeline.localize_reply(english, "lg")
         self.assertEqual(out, english)
 
     def test_a_changed_percentage_serves_the_english_text(self):
         english = "Value Added Tax is charged at 18% on taxable supplies."
         with mock.patch.object(
-            service, "_translate_reply", return_value="VAT esolooza ku 20% ku bintu ebisoloozebwa."
+            pipeline, "_translate_reply", return_value="VAT esolooza ku 20% ku bintu ebisoloozebwa."
         ):
-            out = service.localize_reply(english, "lg")
+            out = pipeline.localize_reply(english, "lg")
         self.assertEqual(out, english)
 
     def test_a_faithful_translation_is_served(self):
         english = "Value Added Tax is charged at 18% on taxable supplies."
         luganda = "VAT esolooza ku 18% ku bintu ebisoloozebwa mu Uganda."
-        with mock.patch.object(service, "_translate_reply", return_value=luganda):
-            out = service.localize_reply(english, "lg")
+        with mock.patch.object(pipeline, "_translate_reply", return_value=luganda):
+            out = pipeline.localize_reply(english, "lg")
         self.assertEqual(out, luganda)
 
     def test_a_reply_with_no_figures_is_never_blocked(self):
         english = "Visit any URA office and ask for the registration desk."
         luganda = "Genda mu ofiisi ya URA yonna obuuze ku mmeeza y’okwewandiisa."
-        with mock.patch.object(service, "_translate_reply", return_value=luganda):
-            out = service.localize_reply(english, "lg")
+        with mock.patch.object(pipeline, "_translate_reply", return_value=luganda):
+            out = pipeline.localize_reply(english, "lg")
         self.assertEqual(out, luganda)
 
 
@@ -222,9 +223,9 @@ class ReplyCacheTest(unittest.TestCase):
     def test_a_second_identical_reply_does_not_call_a_backend(self):
         english = "Visit ura.go.ug and choose Get a TIN."
         luganda = "Genda ku ura.go.ug olonde Funa TIN."
-        with mock.patch.object(service, "_translate_reply", return_value=luganda) as backend:
-            first = service.localize_reply(english, "lg")
-            second = service.localize_reply(english, "lg")
+        with mock.patch.object(pipeline, "_translate_reply", return_value=luganda) as backend:
+            first = pipeline.localize_reply(english, "lg")
+            second = pipeline.localize_reply(english, "lg")
         self.assertEqual(first, luganda)
         self.assertEqual(second, luganda)
         backend.assert_called_once()
@@ -232,11 +233,11 @@ class ReplyCacheTest(unittest.TestCase):
     def test_a_rejected_translation_is_not_cached(self):
         english = "The threshold is UGX 150,000,000 per year."
         with mock.patch.object(
-            service, "_translate_reply", return_value="Ekipimo kya UGX 100,000,000 buli mwaka."
+            pipeline, "_translate_reply", return_value="Ekipimo kya UGX 100,000,000 buli mwaka."
         ) as backend:
-            service.localize_reply(english, "lg")
+            pipeline.localize_reply(english, "lg")
             after_first_turn = backend.call_count
-            service.localize_reply(english, "lg")
+            pipeline.localize_reply(english, "lg")
         # A figure-bearing reply costs two round trips per turn once the
         # protected pass fails — one masked, one unprotected retry (see
         # docs/runbooks/multilingual-figure-fidelity.md). The count itself is

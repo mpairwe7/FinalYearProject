@@ -173,6 +173,6 @@ def test_an_uncited_reply_passes_trivially():
 
 def test_the_marker_shape_matches_the_one_claim_verifier_reads():
     """The two must agree, or the report describes a text that was not shipped."""
-    from app.claim_verifier import _CITATION_RE
+    from app.rag.claim_verifier import _CITATION_RE
 
     assert _CITATION_RE.pattern == mt._CITATION_MARKER_RE.pattern

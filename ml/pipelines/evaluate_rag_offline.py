@@ -247,7 +247,7 @@ def main():
 
     # Import service (requires backend dependencies)
     sys.path.insert(0, str(PROJECT_ROOT))
-    from App.backend.app.service import ChatModel
+    from App.backend.app.rag.pipeline import ChatModel
 
     logger.info("Initialising ChatModel for offline evaluation...")
     service = ChatModel()

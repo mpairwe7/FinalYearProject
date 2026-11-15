@@ -16,7 +16,7 @@ os.environ.setdefault("CUDA_VISIBLE_DEVICES", "2")
 
 import torch
 from app import documents, hitl_routing
-from app.document_normalization import normalize_document, build_normalization_manifest, validate_normalization_manifest
+from app.ingestion.document_normalization import normalize_document, build_normalization_manifest, validate_normalization_manifest
 from app.vision import glyph_fusion, table_structuring
 
 

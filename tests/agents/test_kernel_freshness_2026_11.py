@@ -52,7 +52,7 @@ def test_the_kernel_pin_and_the_tables_agree_on_the_day() -> None:
 
 
 def test_no_frozen_current_year_constant() -> None:
-    from app import query
+    from app.rag import query
 
     assert not hasattr(query, "CURRENT_FISCAL_YEAR"), "computed once at import, it went stale on 1 July"
 
@@ -184,7 +184,7 @@ def test_both_fusion_paths_apply_precedence() -> None:
     from pathlib import Path
 
     root = Path(precedence.__file__).resolve().parents[1]
-    for path in (root / "service.py", root / "agents/graphs/main_graph.py"):
+    for path in (root / "rag/pipeline.py", root / "agents/graphs/main_graph.py"):
         source = path.read_text(encoding="utf-8")
         assert "apply_precedence(" in source, path.name
 

@@ -15,7 +15,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "App" / "backend"))
 
-from app import database as db  # noqa: E402
+from app.db import database as db  # noqa: E402
 
 #: Golden statutory anchor preference pairs replayed at ratio gamma=0.5 per DICE (ICLR 2025)
 #: and LoRR Reset Replay (arXiv:2508.06412) to prevent catastrophic forgetting of Ugandan statutory rates.

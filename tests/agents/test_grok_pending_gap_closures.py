@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app import service
+from app.rag import pipeline
 
 
 def test_claim_verifier_failure_is_reported_as_unavailable_and_disclosed(monkeypatch) -> None:
@@ -22,13 +22,13 @@ def test_claim_verifier_failure_is_reported_as_unavailable_and_disclosed(monkeyp
                 "reasons": [],
             }
 
-    monkeypatch.setattr(service, "verify_claims", verifier_down)
-    monkeypatch.setattr(service.HybridRetriever, "compute_faithfulness", lambda *_args, **_kwargs: 0.95)
+    monkeypatch.setattr(pipeline, "verify_claims", verifier_down)
+    monkeypatch.setattr(pipeline.HybridRetriever, "compute_faithfulness", lambda *_args, **_kwargs: 0.95)
     guard = OutputGuard()
     monkeypatch.setattr(guard, "should_escalate", lambda *_args, **_kwargs: (False, ""))
-    token = service._TURN_GENERATION.set(service._new_generation_record())
+    token = pipeline._TURN_GENERATION.set(pipeline._new_generation_record())
     try:
-        result = service._apply_output_guards(
+        result = pipeline._apply_output_guards(
             Model(),
             message="What is the VAT rate?",
             reply="The standard VAT rate is 18%. [1]",
@@ -42,8 +42,8 @@ def test_claim_verifier_failure_is_reported_as_unavailable_and_disclosed(monkeyp
 
         assert result["claim_report"]["decision"] == "unavailable"
         assert result["response_judge"]["claim_verification"]["error"] == "claim_verifier_unavailable"
-        assert "claim_check_unavailable" in service._turn_degradations()
-        served = service._with_degraded_disclosure(result["reply"], service._turn_degradations())
+        assert "claim_check_unavailable" in pipeline._turn_degradations()
+        served = pipeline._with_degraded_disclosure(result["reply"], pipeline._turn_degradations())
         assert "could not finish the check" in served
     finally:
-        service._TURN_GENERATION.reset(token)
+        pipeline._TURN_GENERATION.reset(token)

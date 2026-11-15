@@ -22,7 +22,7 @@ os.environ.setdefault("OTEL_ENABLED", "false")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import database as db  # noqa: E402
+from app.db import database as db  # noqa: E402
 from app import service_ratings as sr  # noqa: E402
 from app.auth.jwt_auth import make_dev_token  # noqa: E402
 from app.main import app  # noqa: E402

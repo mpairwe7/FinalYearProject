@@ -492,7 +492,7 @@ def _resolve_conversational_locale(text: str, locale: str = "en") -> str:
     if courtesy_loc != norm_loc:
         return courtesy_loc
     try:
-        from .query import detect_language
+        from .rag.query import detect_language
 
         det = detect_language(text, default_lang=norm_loc or "en")
         if det in ("lg", "sw", "nyn", "ach"):

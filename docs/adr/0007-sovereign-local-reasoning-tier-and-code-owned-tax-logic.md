@@ -13,9 +13,9 @@ An October 2026 live evaluation of complex multi-issue Ugandan tax inquiries (`d
 3. **D3 — Unchallenged False Statutory Premises (`premise_guard.py`)**: False taxpayer premises (e.g., claiming an 8-month contract is `< 183 days` non-resident, claiming input VAT on a manual paper invoice, or deducting >50% corporate rental expenses) were accepted rather than corrected.
 4. **D4 — Missing Residency, BIK, FX & Per-Head Rule Tools (`tools/calculators.py`)**: The tool registry lacked deterministic calculators for `determine_residency`, `value_benefit_in_kind`, `convert_currency`, and statutory eligibility rules.
 5. **D5 — Hallucinated Statutory Figures & Schedules (`agents/evaluator.py`)**: When the LLM synthesized band tables or arithmetic in free text without a figure lock, it invented non-existent brackets (e.g. "10% on the first UGX 4,020,000" or "simplified flat rate for residents").
-6. **D6 — Directional Polarity Inversions (`claim_polarity.py`)**: Lexical token overlap in `compute_faithfulness` and `verify_claims` scored polarity-inverted statements (*"benefits in kind are subtracted from gross salary"* vs. *"added to employment income"*) as faithful.
-7. **D7 — Mid-Sentence Truncation (`llm.py`)**: `LLM_MAX_TOKENS=512` and heuristic punctuation checks truncated multi-part explanations mid-sentence without continuation.
-8. **D8 — Unrelated Sector-Guide Citations (`retriever.py`)**: Generic tax questions retrieved sector-specific PDFs (`Agricultural Sector`, `Hotel and Accommodation Sector`, `Real Estate Sector`) that outranked the general Taxation Handbook.
+6. **D6 — Directional Polarity Inversions (`rag/claim_polarity.py`)**: Lexical token overlap in `compute_faithfulness` and `verify_claims` scored polarity-inverted statements (*"benefits in kind are subtracted from gross salary"* vs. *"added to employment income"*) as faithful.
+7. **D7 — Mid-Sentence Truncation (`rag/generator.py`)**: `LLM_MAX_TOKENS=512` and heuristic punctuation checks truncated multi-part explanations mid-sentence without continuation.
+8. **D8 — Unrelated Sector-Guide Citations (`rag/retriever.py`)**: Generic tax questions retrieved sector-specific PDFs (`Agricultural Sector`, `Hotel and Accommodation Sector`, `Real Estate Sector`) that outranked the general Taxation Handbook.
 
 At the same time, **strict government data sovereignty** requires that zero taxpayer prompts, documents, or queries leave the on-premises GPU infrastructure to commercial or hosted AI APIs (`Anthropic`, `OpenAI`, `Groq`, `Cerebras`, `Cloudflare Workers AI`, `Gemini`).
 
@@ -23,7 +23,7 @@ At the same time, **strict government data sovereignty** requires that zero taxp
 
 We implemented a nine-phase sovereign accuracy architecture (Phases A–I, PRs #594–#605):
 
-1. **Sovereign Two-Tier Local vLLM Topology (`App/docker-compose.reasoner.yml`, `providers/routing.py`, `llm.py`)**:
+1. **Sovereign Two-Tier Local vLLM Topology (`App/docker-compose.reasoner.yml`, `providers/routing.py`, `rag/generator.py`)**:
    - **T1 (`Sunbird/Sunflower-Qwen3.5-9B`, GPU 4, port `8011`)**: Serves fast single-clause RAG, greetings, and all 5 Ugandan vernacular locales (`en`, `lg`, `sw`, `nyn`, `ach` — pinned to T1 unless `FLAG_REASONER_FOR_TRANSLATED_LOCALES=true`) plus local machine translation.
    - **T2 / T3 (`Qwen/Qwen3.8-27B-FP8`, GPU 7, port `127.0.0.1:8012`, `enable_thinking=False`)**: Selected via the Phase B bake-off (`docs/Reports/reasoner-bakeoff-2026-10.md`: `73.23/100` vs `61.25/100` on `Sunflower-9B`, `100%` `15/15` tool-calling fidelity, `0` critical errors). Serves multi-hop legal reasoning, multi-tool scenarios, premise challenges, and dispute/objection queries behind `FLAG_MODEL_TIERING`, capped by a rolling 200-turn budget (`REASONER_MAX_SHARE=0.25`) and per-turn deadline (`REASONER_DEADLINE_S=90`) with automatic local T1 fallback.
 2. **Fail-Closed `SOVEREIGN_MODE` Guard (`production_readiness.py`, `main.py`, `service.py`, `providers/gateway.py`)**:
@@ -31,9 +31,9 @@ We implemented a nine-phase sovereign accuracy architecture (Phases A–I, PRs #
 3. **Code-Owned Tax Logic & Declarative Scenario Planner (`case_facts.py`, `tools/calculators.py`, `scenario_planner.py`, `premise_guard.py`)**:
    - All tax arithmetic, rate-table lookups (`FY2026-27.json`, `FY2025-26.json`), residency tests (`determine_residency`), benefits-in-kind formulas (`value_benefit_in_kind`), FX rules (`convert_currency`), and 8 statutory premise contradiction rules execute deterministically in Python and inject a `## Verified Statutory Facts & Calculations` block ahead of retrieved passages in both REST and streaming paths.
    - Unverified statutory interpretations (`bik_housing_employment_income_rate`, `statutory_interest_rate_bou`) are tracked in the rate table's `"unverified"` list so `calculate_paye` reports both `paye_verified` and `paye_conditional`.
-4. **Zero-Truncation Continuation (`llm.py`)**:
+4. **Zero-Truncation Continuation (`rag/generator.py`)**:
    - Raised default `LLM_MAX_TOKENS` to `768` and implemented `complete_with_continuation` (using vLLM `continue_final_message=True` when `finish_reason == "length"`) and `trim_to_complete_boundary` across REST and SSE streaming.
-5. **Polarity-Aware Faithfulness, Figure Lock & Sector Demotion (`claim_polarity.py`, `agents/evaluator.py`, `retriever.py`)**:
+5. **Polarity-Aware Faithfulness, Figure Lock & Sector Demotion (`rag/claim_polarity.py`, `agents/evaluator.py`, `rag/retriever.py`)**:
    - `DIRECTION_LEXICON` (22 opposing tax-law pole pairs) penalizes directional inversions in `compute_faithfulness` and `verify_claims`.
    - `verify_figure_lock` rejects any money amount, percentage, or day count in the draft reply that cannot be traced to the user query, `verified_facts`, or retrieved passages, triggering a bounded same-tier `_reflect_llm` revision or sentence strip (`strip_unverified_figure_sentences`).
    - `SECTOR_GUIDE_SOURCE_PATTERNS` demotes sector-specific guides on non-sector queries while `TOPIC_SECTION_HINTS` boosts authoritative handbook sections.

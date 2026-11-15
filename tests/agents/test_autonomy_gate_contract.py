@@ -16,7 +16,7 @@ import uuid
 
 import pytest
 from app.audit import governance_v3 as gov
-from app.flags import flags
+from app.config.flags import flags
 from app.tools import Tool, ToolRegistry, ToolSchema
 
 TIERS = ("low", "medium", "high", "critical")

@@ -27,7 +27,7 @@ Generate canonical FAQ JSONL whenever a source CSV changes:
 
 ```bash
 cd backend
-PYTHONPATH=. python -m app.indexer --export-faq-jsonl
+PYTHONPATH=. python -m app.ingestion.indexer --export-faq-jsonl
 ```
 
 The export produces one JSONL file per `ura_*_faqs.csv` and
@@ -52,7 +52,7 @@ docker compose -f docker-compose.yml -f docker-compose.local-retrieval.yml \
 cd backend
 QDRANT_URL=http://127.0.0.1:6333 \
 QDRANT_COLLECTION=ura_knowledge_base_jsonl \
-PYTHONPATH=. python -m app.indexer --recreate
+PYTHONPATH=. python -m app.ingestion.indexer --recreate
 ```
 
 The resulting `ura_knowledge_base_jsonl` collection contains `faq_jsonl` and

@@ -13,8 +13,8 @@ import unittest
 import unittest.mock as mock
 import uuid
 
-from app import database as db
-from app.context_manager import (
+from app.db import database as db
+from app.rag.context_manager import (
     PROMPT_VERBATIM_TURNS,
     RollingContextManager,
     english_view,
@@ -111,7 +111,7 @@ class NoContextHoleTest(unittest.TestCase):
 
 class EnglishFormsForLoggingTest(unittest.TestCase):
     def test_forms_from_a_result_and_a_streamed_reply(self) -> None:
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         forms = ChatModel.english_forms(
             {"_english_message": EN_TIN}, served_reply=LG_REPLY, english_reply=EN_REPLY
@@ -119,7 +119,7 @@ class EnglishFormsForLoggingTest(unittest.TestCase):
         self.assertEqual(forms, {"user_message_en": EN_TIN, "bot_reply_en": EN_REPLY})
 
     def test_an_untranslated_reply_is_not_stored_twice(self) -> None:
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         forms = ChatModel.english_forms({}, served_reply=EN_REPLY, english_reply=EN_REPLY)
         self.assertEqual(forms, {"user_message_en": "", "bot_reply_en": ""})
@@ -129,16 +129,16 @@ class RestPathCarriesEnglishFormsTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         db.init_db()
-        from app import service
+        from app.rag import pipeline
 
-        cls.service = service
-        cls.model = service.ChatModel()
+        cls.service = pipeline
+        cls.model = pipeline.ChatModel()
 
     def test_luganda_turn_result_carries_both_english_forms(self) -> None:
-        service = self.service
-        with mock.patch.object(service, "english_retrieval_query", side_effect=lambda t, _l: EN_TIN if t == LG_TIN else t), \
-             mock.patch.object(service, "localize_reply", side_effect=lambda r, loc: f"[{loc}] {r}"), \
-             mock.patch.object(service.ChatModel, "_maybe_handle_workflow", return_value=None), \
+        pipeline = self.service
+        with mock.patch.object(pipeline, "english_retrieval_query", side_effect=lambda t, _l: EN_TIN if t == LG_TIN else t), \
+             mock.patch.object(pipeline, "localize_reply", side_effect=lambda r, loc: f"[{loc}] {r}"), \
+             mock.patch.object(pipeline.ChatModel, "_maybe_handle_workflow", return_value=None), \
              mock.patch.object(self.model._cache, "get", return_value=None), \
              mock.patch.object(self.model._cache, "put"):
             out = self.model.generate(message=LG_TIN, locale="en", locale_explicit=False)
@@ -150,7 +150,7 @@ class RestPathCarriesEnglishFormsTest(unittest.TestCase):
 
 class AlreadyEnglishSearchTextTest(unittest.TestCase):
     def test_english_search_text_is_not_translated_again(self) -> None:
-        from app import query
+        from app.rag import query
 
         with mock.patch.object(query, "translate_query_for_retrieval") as mt:
             out = query.english_retrieval_query("What documents do I need for TIN registration?", "lg")
@@ -158,7 +158,7 @@ class AlreadyEnglishSearchTextTest(unittest.TestCase):
         mt.assert_not_called()
 
     def test_luganda_and_code_switched_text_is_still_translated(self) -> None:
-        from app import query
+        from app.rag import query
 
         for text in (LG_TIN, "Withholding tax eri ebitundu bimeka for my company?"):
             with self.subTest(text=text), mock.patch.object(
@@ -177,14 +177,14 @@ class EnglishDecidedReplySafetyNetTest(unittest.TestCase):
     )
 
     def test_an_english_reply_is_left_alone(self) -> None:
-        from app import english_rendering
+        from app.rag import english_rendering
 
         with mock.patch.object(english_rendering, "translate_query_for_retrieval") as mt:
             self.assertEqual(english_rendering.answer_in_english(EN_REPLY), EN_REPLY)
         mt.assert_not_called()
 
     def test_a_luganda_reply_is_translated_paragraph_by_paragraph(self) -> None:
-        from app import english_rendering
+        from app.rag import english_rendering
 
         with mock.patch.object(
             english_rendering, "translate_query_for_retrieval", side_effect=["To register for a TIN, bring these documents to a URA office now.", "Your national ID and phone number on the URA portal."]
@@ -194,13 +194,13 @@ class EnglishDecidedReplySafetyNetTest(unittest.TestCase):
         self.assertEqual(out, "To register for a TIN, bring these documents to a URA office now.\n\nYour national ID and phone number on the URA portal.")
 
     def test_a_failed_translation_serves_the_reply_as_it_is(self) -> None:
-        from app import english_rendering
+        from app.rag import english_rendering
 
         with mock.patch.object(english_rendering, "translate_query_for_retrieval", return_value=None):
             self.assertEqual(english_rendering.answer_in_english(self.LG_ANSWER), self.LG_ANSWER)
 
     def test_a_later_failed_translation_serves_the_original_reply(self) -> None:
-        from app import english_rendering
+        from app.rag import english_rendering
 
         with mock.patch.object(
             english_rendering,
@@ -234,9 +234,9 @@ class WebSocketResumeRestoresEnglishFormsTest(unittest.TestCase):
 
 class PromptReadsEnglishHistoryTest(unittest.TestCase):
     def test_build_messages_replays_the_english_form(self) -> None:
-        from app import llm
+        from app.rag import generator
 
-        messages = llm._build_messages(
+        messages = generator._build_messages(
             "Kiki ekyetaagisa?",
             [],
             [{"user_message": LG_TIN, "bot_reply": LG_REPLY, "user_message_en": EN_TIN, "bot_reply_en": EN_REPLY, "locale": "lg"}],

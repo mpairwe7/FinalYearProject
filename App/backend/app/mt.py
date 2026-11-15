@@ -60,7 +60,7 @@ import threading
 from collections import Counter, OrderedDict
 from collections.abc import Callable, Iterator
 
-from .entailment import canonical_amounts, percentages
+from .rag.entailment import canonical_amounts, percentages
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +120,7 @@ MT_CACHE_MAX_CHARS = int(os.getenv("MT_CACHE_MAX_CHARS", "4000"))
 #: because it is the only mechanism here that prevents a mutated figure
 #: rather than detecting one. It is a kill switch rather than a rollout
 #: flag: a translation tier that cannot carry the sentinels degrades to the
-#: unprotected path on its own (see ``service.localize_reply``), so this
+#: unprotected path on its own (see ``pipeline.localize_reply``), so this
 #: exists for the case where that degradation is itself the problem and an
 #: operator needs it off without a redeploy.
 MT_PROTECT_FIGURES = os.getenv("MT_PROTECT_FIGURES", "true").lower() in ("1", "true", "yes", "on")

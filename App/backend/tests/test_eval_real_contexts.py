@@ -17,7 +17,7 @@ import uuid
 
 class ContextsJsonTest(unittest.TestCase):
     def test_extracts_topk_hit_texts(self) -> None:
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         result = {
             "_hits": [
@@ -30,13 +30,13 @@ class ContextsJsonTest(unittest.TestCase):
         self.assertEqual(ctx, ["VAT standard rate is 18%.", "PAYE is computed in bands."])
 
     def test_empty_when_no_hits(self) -> None:
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         self.assertEqual(ChatModel.contexts_json({}), "[]")
         self.assertEqual(ChatModel.contexts_json(None), "[]")
 
     def test_respects_limit(self) -> None:
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         result = {"_hits": [{"text": f"passage {i}"} for i in range(10)]}
         self.assertEqual(len(json.loads(ChatModel.contexts_json(result, limit=3))), 3)
@@ -87,7 +87,7 @@ class EvalGateCanFailTest(unittest.TestCase):
 
 class DbRoundtripTest(unittest.TestCase):
     def test_contexts_persist_and_export(self) -> None:
-        from app import database as db
+        from app.db import database as db
 
         db.init_db()  # ensures the contexts column migration has run
         marker = "evalctx-" + uuid.uuid4().hex[:8]

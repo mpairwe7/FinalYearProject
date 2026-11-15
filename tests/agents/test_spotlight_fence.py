@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 
 from app.guardrails import fence_prompt_header_field, fence_spotlight_body
-from app.llm import _build_messages, _build_tool_messages, _passage_header
-from app.service import _build_fallback_prompt
+from app.rag.generator import _build_messages, _build_tool_messages, _passage_header
+from app.rag.pipeline import _build_fallback_prompt
 
 _PASSAGE_ID = re.compile(r'<passage id="p\d+-[0-9a-f]{8}">')
 

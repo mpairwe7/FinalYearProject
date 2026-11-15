@@ -40,8 +40,8 @@ os.environ.setdefault("SPEECH_ENABLED", "false")
 from app.workflows.loader import load_workflow  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from App.backend.app import database  # noqa: E402
-from App.backend.app import service as service_module  # noqa: E402
+from App.backend.app.db import database  # noqa: E402
+from App.backend.app.rag import pipeline as pipeline_module  # noqa: E402
 from App.backend.app.main import app  # noqa: E402
 
 GUIDE_RETURN_FILING = "Guide me step by step through Return Filing"
@@ -50,7 +50,7 @@ GUIDE_RETURN_FILING = "Guide me step by step through Return Filing"
 @pytest.fixture(scope="module")
 def client():
     database.init_db()
-    app.state.model = service_module.ChatModel()
+    app.state.model = pipeline_module.ChatModel()
     app.state.speech = types.SimpleNamespace(enabled=False)
     return TestClient(app)
 
@@ -122,7 +122,7 @@ def test_tin_guide_avoids_personal_data_and_makes_no_submission_claim(client):
     ],
 )
 def test_tin_guide_stepper_labels_are_curated_for_supported_languages(locale, name, title):
-    workflow = service_module.ChatModel._localize_workflow(
+    workflow = pipeline_module.ChatModel._localize_workflow(
         {
             "name": "TIN Registration Guide",
             "step_title": "Continue securely",
@@ -171,7 +171,7 @@ def test_invoice_review_does_not_collect_tins_or_claim_live_efris_verification()
 def test_invoice_review_buttons_and_step_titles_are_localized(
     locale, name, first_option, step_title, supplier_title
 ):
-    workflow = service_module.ChatModel._localize_workflow(
+    workflow = pipeline_module.ChatModel._localize_workflow(
         {
             "name": "Tax Invoice & EFRIS Document Review",
             "step_title": "Document category",
@@ -198,14 +198,14 @@ def test_invoice_review_buttons_and_step_titles_are_localized(
 def test_payment_and_return_buttons_are_localized_without_changing_schema_values(
     locale, channel_label, tax_label
 ):
-    localized = service_module.ChatModel._localize_workflow(
+    localized = pipeline_module.ChatModel._localize_workflow(
         {
             "name": "Payment Assistance",
             "options": ["mobile money", "online card"],
         },
         locale,
     )
-    localized_return = service_module.ChatModel._localize_workflow(
+    localized_return = pipeline_module.ChatModel._localize_workflow(
         {
             "name": "Return Filing",
             "options": ["corporation tax", "withholding tax"],
@@ -268,11 +268,11 @@ def test_bwims_guide_labels_follow_selected_language_without_changing_values(
     locale, name, issue_label, next_steps, portal_label, monkeypatch
 ):
     monkeypatch.setattr(
-        service_module,
+        pipeline_module,
         "localize_reply",
         lambda text, target_locale: f"{target_locale}:{text}",
     )
-    workflow = service_module.ChatModel._localize_workflow(
+    workflow = pipeline_module.ChatModel._localize_workflow(
         {
             "name": "Bonded Warehouse & BWIMS Guidance",
             "step_title": "Official next steps",
@@ -339,11 +339,11 @@ def test_journey_funnel_events_are_counted(client):
     def key(event: str, step: str) -> str:
         return f'journey_events_total{{event="{event}",step="{step}",workflow="return_filing"}}'
 
-    before = dict(service_module.metrics.snapshot()["counters"])
+    before = dict(pipeline_module.metrics.snapshot()["counters"])
     conversation_id = f"conv-gj-{uuid.uuid4().hex[:12]}"
     client.post("/v1/chat", json={"message": "Help me file my return", "conversation_id": conversation_id})
     client.post("/v1/chat", json={"message": "cancel", "conversation_id": conversation_id})
-    after = service_module.metrics.snapshot()["counters"]
+    after = pipeline_module.metrics.snapshot()["counters"]
 
     def delta(counter: str) -> int:
         return after.get(counter, 0) - before.get(counter, 0)
@@ -380,11 +380,11 @@ def test_i_dont_understand_after_a_real_question_is_not_restarted(client):
 
 def test_resume_does_not_count_a_step_twice(client):
     step_key = 'journey_events_total{event="step_entered",step="collect_taxpayer_type",workflow="return_filing"}'
-    before = service_module.metrics.snapshot()["counters"].get(step_key, 0)
+    before = pipeline_module.metrics.snapshot()["counters"].get(step_key, 0)
     conversation_id = f"conv-gj-{uuid.uuid4().hex[:12]}"
     client.post("/v1/chat", json={"message": "Help me file my return", "conversation_id": conversation_id})
     client.post("/v1/chat", json={"message": "resume", "conversation_id": conversation_id})
-    after = service_module.metrics.snapshot()["counters"].get(step_key, 0)
+    after = pipeline_module.metrics.snapshot()["counters"].get(step_key, 0)
     assert after - before == 1
 
 
@@ -409,7 +409,7 @@ def test_the_streaming_abstention_neither_repeats_the_opener_nor_competes_with_a
     async def _run():
         return [
             event
-            async for event in service_module.run_chat_turn(
+            async for event in pipeline_module.run_chat_turn(
                 model,
                 message="I'm still worried, how do I file my return?",
                 conversation_id=None,
@@ -504,7 +504,7 @@ def test_the_streaming_core_applies_the_same_guidance(client):
     async def _run():
         return [
             event
-            async for event in service_module.run_chat_turn(
+            async for event in pipeline_module.run_chat_turn(
                 model,
                 message="How do I file my return?",
                 conversation_id=None,

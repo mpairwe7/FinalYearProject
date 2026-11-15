@@ -9,7 +9,7 @@ was ever called.
 This is that function. It exists as its own module, injected rather than
 imported by the supervisor, for one reason: the supervisor's value is
 that it is pure Python with no network and no model load, testable
-offline in CI at 36/36 in under 2 ms. Importing :mod:`app.llm` into it
+offline in CI at 36/36 in under 2 ms. Importing :mod:`app.rag.generator` into it
 would end that.
 
 ## What it may and may not do
@@ -170,7 +170,7 @@ def _parse_route(raw: str) -> AgentRoute | None:
 
 def _default_classifier(query: str) -> str:
     """Ask the configured model. Imported lazily — see the module docstring."""
-    from ..llm import generate
+    from ..rag.generator import generate
 
     return generate(query, passages=[], structured=False)
 

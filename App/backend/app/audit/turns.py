@@ -61,7 +61,7 @@ def _index_corpus_hash() -> str:
 
 def _prompt_template_sha256() -> str:
     try:
-        from ..llm import SYSTEM_PROMPT
+        from ..rag.generator import SYSTEM_PROMPT
     except Exception:
         return ""
     return _sha256(SYSTEM_PROMPT)
@@ -162,7 +162,7 @@ def _usage(message: str, reply: str, usage: Mapping[str, Any] | None) -> dict[st
             "source": str(usage.get("source") or "provider"),
         }
     try:
-        from ..llm import count_tokens
+        from ..rag.generator import count_tokens
 
         return {
             "input_tokens": count_tokens(message),
@@ -344,7 +344,7 @@ def build_turn_payload(
         "kernel_trace": result.get("_kernel_trace") or _kernel_trace(),
     }
     try:
-        from ..flags import flags
+        from ..config.flags import flags
 
         if flags.is_enabled("continuous_quality_scorecard"):
             from .governance_v3 import evaluate_interaction_scorecard
@@ -394,7 +394,7 @@ def append_turn(
     ``ura_audit_append_failed_total{event_type="generate"}``, which the
     ``AuditAppendFailing`` alert watches.
     """
-    from ..flags import flags
+    from ..config.flags import flags
 
     if not flags.is_enabled("audit_ledger"):
         return False

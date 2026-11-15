@@ -23,7 +23,7 @@ from __future__ import annotations
 import unittest
 import unittest.mock as mock
 
-from app import service
+from app.rag import pipeline
 from app.text_signals import CONTRADICTED_CLAIM_REPLY
 
 
@@ -36,7 +36,7 @@ class WithholdContradictedTest(unittest.TestCase):
             "contradicted_claims": [{"text": "Value Added Tax is charged at 20%"}],
             "unsupported_claims": [{"text": "Value Added Tax is charged at 20%"}],
         }
-        reply, withheld = service.withhold_if_contradicted(self.ANSWER, report)
+        reply, withheld = pipeline.withhold_if_contradicted(self.ANSWER, report)
         self.assertTrue(withheld)
         self.assertEqual(reply, CONTRADICTED_CLAIM_REPLY)
         # The wrong figure must not survive anywhere in what is sent.
@@ -46,7 +46,7 @@ class WithholdContradictedTest(unittest.TestCase):
         """Not "I could not find anything" — retrieval worked, generation went
         wrong, and telling the taxpayer the first is a false statement about
         their question."""
-        reply, _ = service.withhold_if_contradicted(
+        reply, _ = pipeline.withhold_if_contradicted(
             self.ANSWER, {"contradicted_claims": [{"text": "x"}]}
         )
         self.assertIn("disagreed with the URA documents", reply)
@@ -62,17 +62,17 @@ class WithholdContradictedTest(unittest.TestCase):
             "unsupported_claims": [{"text": "You may register online."}],
             "uncited_claims": [{"text": "You may register online."}],
         }
-        reply, withheld = service.withhold_if_contradicted(self.ANSWER, report)
+        reply, withheld = pipeline.withhold_if_contradicted(self.ANSWER, report)
         self.assertFalse(withheld)
         self.assertEqual(reply, self.ANSWER)
 
     def test_no_report_and_no_reply_are_both_no_ops(self):
-        self.assertEqual(service.withhold_if_contradicted(self.ANSWER, None), (self.ANSWER, False))
-        self.assertEqual(service.withhold_if_contradicted("", {"contradicted_claims": [{}]}), ("", False))
+        self.assertEqual(pipeline.withhold_if_contradicted(self.ANSWER, None), (self.ANSWER, False))
+        self.assertEqual(pipeline.withhold_if_contradicted("", {"contradicted_claims": [{}]}), ("", False))
 
     def test_it_can_be_turned_off(self):
-        with mock.patch.object(service, "WITHHOLD_CONTRADICTED_CLAIMS", False):
-            reply, withheld = service.withhold_if_contradicted(
+        with mock.patch.object(pipeline, "WITHHOLD_CONTRADICTED_CLAIMS", False):
+            reply, withheld = pipeline.withhold_if_contradicted(
                 self.ANSWER, {"contradicted_claims": [{"text": "x"}]}
             )
         self.assertFalse(withheld)
@@ -90,9 +90,9 @@ class StreamingGuardTest(unittest.TestCase):
         model._maybe_create_ticket.return_value = "ticket-1"
         output_guard = mock.MagicMock()
         output_guard.should_escalate.return_value = (False, "")
-        with mock.patch.object(service, "verify_claims", return_value=claim_report), \
-             mock.patch.object(service.HybridRetriever, "compute_faithfulness", return_value=0.9):
-            return service._apply_output_guards(
+        with mock.patch.object(pipeline, "verify_claims", return_value=claim_report), \
+             mock.patch.object(pipeline.HybridRetriever, "compute_faithfulness", return_value=0.9):
+            return pipeline._apply_output_guards(
                 model,
                 message="What is the VAT rate?",
                 reply="Value Added Tax is charged at 20% on taxable supplies. [1]",
@@ -141,10 +141,10 @@ class AnswerLanguageDirectiveTest(unittest.TestCase):
     """
 
     def _language_section(self, locale, can_generate):
-        from app import llm
+        from app.rag import generator
 
-        with mock.patch.object(llm, "can_generate_in_locale", return_value=can_generate):
-            messages = llm._build_messages(
+        with mock.patch.object(generator, "can_generate_in_locale", return_value=can_generate):
+            messages = generator._build_messages(
                 "VAT eri ki?",
                 [{"source": "vat.csv", "text": "VAT is 18%"}],
                 locale=locale,
@@ -161,9 +161,9 @@ class AnswerLanguageDirectiveTest(unittest.TestCase):
         self.assertIn("Write the answer in lg.", content)
 
     def test_the_system_prompt_no_longer_decides_the_language_by_itself(self):
-        from app import llm
+        from app.rag import generator
 
-        self.assertNotIn("respond in the same language", llm.SYSTEM_PROMPT.lower())
+        self.assertNotIn("respond in the same language", generator.SYSTEM_PROMPT.lower())
         self.assertIn("## Answer language", self._language_section("en", True))
 
 
@@ -195,9 +195,9 @@ class DraftClaimReportSurvivesRevisionTest(unittest.TestCase):
         output_guard.should_escalate.return_value = (False, "")
         output_guard.sanitize.side_effect = lambda t: t
         output_guard.redact_pii.side_effect = lambda t: t
-        with mock.patch.object(service, "verify_claims", side_effect=[draft_report, post_report]), \
-             mock.patch.object(service.HybridRetriever, "compute_faithfulness", return_value=0.9):
-            return service._apply_output_guards(
+        with mock.patch.object(pipeline, "verify_claims", side_effect=[draft_report, post_report]), \
+             mock.patch.object(pipeline.HybridRetriever, "compute_faithfulness", return_value=0.9):
+            return pipeline._apply_output_guards(
                 model,
                 message="What is the VAT rate?",
                 reply="VAT is charged at 18% and refunds take four months. [1]",
@@ -248,9 +248,9 @@ class DraftClaimReportSurvivesRevisionTest(unittest.TestCase):
         model._evaluate_response_judge.return_value = {"decision": "approve", "reasons": []}
         output_guard = mock.MagicMock()
         output_guard.should_escalate.return_value = (False, "")
-        with mock.patch.object(service, "verify_claims", return_value=report), \
-             mock.patch.object(service.HybridRetriever, "compute_faithfulness", return_value=0.9):
-            out = service._apply_output_guards(
+        with mock.patch.object(pipeline, "verify_claims", return_value=report), \
+             mock.patch.object(pipeline.HybridRetriever, "compute_faithfulness", return_value=0.9):
+            out = pipeline._apply_output_guards(
                 model,
                 message="What is the VAT rate?",
                 reply="VAT is charged at 18%. [1]",

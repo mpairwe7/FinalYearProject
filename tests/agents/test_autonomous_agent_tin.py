@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from app.documents import DocumentRecord
-from app.service import ChatModel
+from app.rag.pipeline import ChatModel
 from app.vision.ocr import (
     extract_national_id_card_data,
     extract_nin_numbers,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 from PIL import Image
 
-from app.document_normalization import (
+from app.ingestion.document_normalization import (
     NormalizationBundle,
     NormalizedPage,
     RasterizeSpec,

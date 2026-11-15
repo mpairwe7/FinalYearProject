@@ -25,7 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.retriever import HybridRetriever  # noqa: E402
+from app.rag.retriever import HybridRetriever  # noqa: E402
 
 
 def _fake_init_qdrant(retriever: HybridRetriever, *, sparse_only: bool):
@@ -60,12 +60,12 @@ class InitializePriorityTests(unittest.TestCase):
     def setUp(self) -> None:
         self._orig_env = os.environ.get("QDRANT_ENABLED")
         os.environ["QDRANT_ENABLED"] = "true"
-        import app.retriever as R
+        import app.rag.retriever as R
         self._orig_flag = R.QDRANT_ENABLED
         R.QDRANT_ENABLED = True
 
     def tearDown(self) -> None:
-        import app.retriever as R
+        import app.rag.retriever as R
         R.QDRANT_ENABLED = self._orig_flag
         if self._orig_env is None:
             os.environ.pop("QDRANT_ENABLED", None)

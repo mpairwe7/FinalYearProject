@@ -119,7 +119,7 @@ Recorded because a reader should know how far to trust the process.
 * A cancellation probe passed `cancel_event` positionally into `personalization_context`,
   which made G346 look like a false alarm until the probe was corrected. The test had the
   same mistake.
-* A `sed` import fix missed `retriever.py`, leaving `admit` undefined. The 35 targeted tests
+* A `sed` import fix missed `rag/retriever.py`, leaving `admit` undefined. The 35 targeted tests
   stayed green. Linting for undefined names found it, and `test_providers.py` would have.
 * The first commit went in despite lint findings, because the command chained with `;`. It
   was amended before anything was pushed.
@@ -137,14 +137,14 @@ Recorded because a reader should know how far to trust the process.
   mutant and a real test failure.
 * **My runs were not CI's.** The shards split `tests/agents` and ran the root tests separately,
   so nothing ran `pytest tests/` as one process. CI then failed 12 tests that had passed here.
-  `test_integration.py` reloaded `app.flags`, so `clean_flags` cleared an object nothing reads
+  `test_integration.py` reloaded `app.config.flags`, so `clean_flags` cleared an object nothing reads
   and a flag set by a new test stayed on for every later test. `fresh_registry` reloads the tool
   modules, so a test set an `ESCALATION_ROUTE` the tool had stopped reading. Production imports
   both at use and is unaffected. The reload now restores what it replaced, and `clean_flags` fails
   at once if the singleton is replaced again.
 * **The pull request claimed more than had been checked.** It said every gate passed, when
   `app.freshness --check` had not been run and cannot run here. It said a failing test could not
-  reach changed code, without the test having been read; it does call `app.llm`. Both statements
+  reach changed code, without the test having been read; it does call `app.rag.generator`. Both statements
   were withdrawn from the pull request when caught.
 * **Parallel shards shared one database.** That was the failing test above. Three receptionist
   files in other shards delete `voice_call_turns` in their setup. Repeating the test beside a

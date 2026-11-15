@@ -10,7 +10,7 @@ the flag is on, unchanged when it is off, and never empty.
 from __future__ import annotations
 
 import pytest
-from app.llm import _select_tools_for_query
+from app.rag.generator import _select_tools_for_query
 from app.mcp.tool_rag import MANDATORY_RAILS
 
 

@@ -15,7 +15,8 @@ from unittest import mock
 
 import httpx
 import pytest
-from app import service, sunbird
+from app.rag import pipeline
+from app import sunbird
 from app.providers import breakers, gateway, relay_client
 from app.providers import config as cloud_config
 
@@ -23,7 +24,7 @@ from app.providers import config as cloud_config
 @pytest.fixture
 def chain(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("LLM_FALLBACK_BACKEND", "sunbird")
-    monkeypatch.setattr(service.flags, "is_enabled", lambda name, **_kw: name == "cloudflare_fallback")
+    monkeypatch.setattr(pipeline.flags, "is_enabled", lambda name, **_kw: name == "cloudflare_fallback")
     monkeypatch.setattr("app.production_readiness.is_sovereign_mode", lambda: False)
     monkeypatch.setattr("app.providers.config.is_cloudflare_configured", lambda: True)
     monkeypatch.setattr("app.providers.budget.try_consume_neurons", lambda *_a, **_k: True)
@@ -48,7 +49,7 @@ def test_a_suspended_sunbird_account_opens_its_breaker_and_workers_ai_keeps_serv
     calls = []
     with mock.patch.object(sunbird, "chat_completion", side_effect=_suspended) as sb, \
          mock.patch.object(gateway, "workers_ai_chat", side_effect=lambda *a, **k: calls.append(1) or "Served. [1]"):
-        replies = [service._llm_cloud_fallback("q", [{"text": "p"}], None, "en") for _ in range(5)]
+        replies = [pipeline._llm_cloud_fallback("q", [{"text": "p"}], None, "en") for _ in range(5)]
     assert replies == ["Served. [1]"] * 5
     threshold = breakers.SUNBIRD_LLM_BREAKER.failure_threshold
     assert sb.call_count == threshold, "an open breaker stops paying the 403 round trip on every turn"
@@ -60,14 +61,14 @@ def test_a_call_turn_never_reaches_sunbird(chain) -> None:
 
     with mock.patch.object(sunbird, "chat_completion") as sb, \
          mock.patch.object(gateway, "workers_ai_chat") as cf, local_models_only():
-        assert service._llm_cloud_fallback("q", [{"text": "p"}], None, "en") == ""
+        assert pipeline._llm_cloud_fallback("q", [{"text": "p"}], None, "en") == ""
     sb.assert_not_called()
     cf.assert_not_called()
 
 
 def test_sunbird_gets_the_qwen_directive_and_workers_ai_does_not(chain, monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict[str, str] = {}
-    monkeypatch.setattr(service.llm_module, "_build_messages",
+    monkeypatch.setattr(pipeline.generator_module, "_build_messages",
                         lambda **_k: [{"role": "system", "content": "/no_think\nRules."}, {"role": "user", "content": "q"}])
 
     def sunbird_reply(messages, **_k):
@@ -80,21 +81,21 @@ def test_sunbird_gets_the_qwen_directive_and_workers_ai_does_not(chain, monkeypa
 
     with mock.patch.object(sunbird, "chat_completion", side_effect=sunbird_reply), \
          mock.patch.object(gateway, "workers_ai_chat", side_effect=cf_reply):
-        assert service._llm_cloud_fallback("q", [{"text": "p"}], None, "en") == "A complete answer."
+        assert pipeline._llm_cloud_fallback("q", [{"text": "p"}], None, "en") == "A complete answer."
     assert seen == {"sunbird": "/no_think\nRules.", "cf": "Rules."}
 
 
 def test_thinking_text_never_reaches_the_answer(chain) -> None:
     with mock.patch.object(sunbird, "chat_completion", return_value="<think>scratch</think>VAT is 18%. [1]"):
-        assert service._llm_cloud_fallback("q", [{"text": "p"}], None, "en") == "VAT is 18%. [1]"
+        assert pipeline._llm_cloud_fallback("q", [{"text": "p"}], None, "en") == "VAT is 18%. [1]"
 
 
 def test_the_retired_gemini_setting_warns_once(chain, monkeypatch: pytest.MonkeyPatch, caplog) -> None:
     monkeypatch.setenv("LLM_FALLBACK_BACKEND", "gemini")
-    monkeypatch.setattr(service, "_RETIRED_BACKEND_WARNED", set())
-    with caplog.at_level(logging.WARNING, logger="app.service"):
-        assert service._cloud_llm_backend() == "sunbird"
-        assert service._cloud_llm_backend() == "sunbird"
+    monkeypatch.setattr(pipeline, "_RETIRED_BACKEND_WARNED", set())
+    with caplog.at_level(logging.WARNING, logger="app.rag.pipeline"):
+        assert pipeline._cloud_llm_backend() == "sunbird"
+        assert pipeline._cloud_llm_backend() == "sunbird"
     assert sum("retired" in r.getMessage() for r in caplog.records) == 1
 
 
@@ -160,9 +161,9 @@ def test_the_cloud_draft_is_written_in_english_for_every_locale(chain, monkeypat
         seen.append(kwargs["locale"])
         return [{"role": "system", "content": "Rules."}, {"role": "user", "content": "q"}]
 
-    monkeypatch.setattr(service.llm_module, "_build_messages", build)
+    monkeypatch.setattr(pipeline.generator_module, "_build_messages", build)
     with mock.patch.object(sunbird, "chat_completion", return_value="An answer. [1]"):
-        service._llm_cloud_fallback("q", [{"text": "p"}], None, "lg")
+        pipeline._llm_cloud_fallback("q", [{"text": "p"}], None, "lg")
     assert seen == ["en"]
 
 
@@ -170,19 +171,19 @@ def test_a_reply_cut_at_the_token_limit_tries_workers_ai_and_is_kept_as_a_floor(
     cut = sunbird.ChatReply("VAT is 18%. [1]", "length")  # looks complete, but the model was stopped
     with mock.patch.object(sunbird, "chat_completion", return_value=cut), \
          mock.patch.object(gateway, "workers_ai_chat", return_value="VAT is charged at 18% on taxable supplies. [1]") as cf:
-        assert service._llm_cloud_fallback("q", [{"text": "p"}], None, "en") == \
+        assert pipeline._llm_cloud_fallback("q", [{"text": "p"}], None, "en") == \
             "VAT is charged at 18% on taxable supplies. [1]"
     cf.assert_called()
     with mock.patch.object(sunbird, "chat_completion", return_value=cut), \
          mock.patch.object(gateway, "workers_ai_chat", side_effect=RuntimeError("down")):
-        assert service._llm_cloud_fallback("q", [{"text": "p"}], None, "en") == "VAT is 18%. [1]"
+        assert pipeline._llm_cloud_fallback("q", [{"text": "p"}], None, "en") == "VAT is 18%. [1]"
 
 
 def test_sunbird_is_given_the_chain_budget_less_a_reserve_for_workers_ai(chain) -> None:
-    deadline = service.time.monotonic() + 60.0
+    deadline = pipeline.time.monotonic() + 60.0
     with mock.patch.object(sunbird, "chat_completion", return_value="An answer. [1]") as sb:
-        service._llm_cloud_fallback("q", [{"text": "p"}], None, "en", deadline=deadline)
-    assert sb.call_args.kwargs["deadline"] == deadline - service.SUNBIRD_WORKERS_AI_RESERVE_S
+        pipeline._llm_cloud_fallback("q", [{"text": "p"}], None, "en", deadline=deadline)
+    assert sb.call_args.kwargs["deadline"] == deadline - pipeline.SUNBIRD_WORKERS_AI_RESERVE_S
 
 
 def test_failover_stops_at_the_deadline_and_timeouts_shrink_to_it(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -263,12 +264,12 @@ def test_an_ai_gateway_failure_tries_the_direct_api(monkeypatch: pytest.MonkeyPa
 
 def test_a_spent_budget_skips_sunbird_without_counting_a_failure(chain) -> None:
     """Running out of time is not the provider failing; three such turns must not open its breaker."""
-    deadline = service.time.monotonic() + service.SUNBIRD_WORKERS_AI_RESERVE_S + 0.5  # under 1 s for Sunbird
+    deadline = pipeline.time.monotonic() + pipeline.SUNBIRD_WORKERS_AI_RESERVE_S + 0.5  # under 1 s for Sunbird
     with mock.patch.object(sunbird, "chat_completion") as sb, \
          mock.patch.object(breakers.SUNBIRD_LLM_BREAKER, "record_failure") as failure, \
          mock.patch.object(gateway, "workers_ai_chat", return_value="Served. [1]"):
         for _ in range(4):
-            assert service._llm_cloud_fallback("q", [{"text": "p"}], None, "en", deadline=deadline) == "Served. [1]"
+            assert pipeline._llm_cloud_fallback("q", [{"text": "p"}], None, "en", deadline=deadline) == "Served. [1]"
     sb.assert_not_called()
     failure.assert_not_called()
 

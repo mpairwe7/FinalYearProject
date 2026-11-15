@@ -5,19 +5,19 @@ from __future__ import annotations
 
 import unittest
 
-from app.context_manager import (
+from app.rag.context_manager import (
     RollingContextManager,
     extract_conversation_entities,
     normalize_history_turns,
     summarize_older_turns,
 )
-from app.database import (
+from app.db.database import (
     get_conversation_context,
     init_db,
     log_conversation,
 )
-from app.llm import _build_messages
-from app.query import rewrite_with_history
+from app.rag.generator import _build_messages
+from app.rag.query import rewrite_with_history
 
 
 class NormalizeHistoryTurnsTests(unittest.TestCase):

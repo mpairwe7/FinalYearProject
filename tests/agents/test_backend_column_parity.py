@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from app import postgres as pg
+from app.db import postgres as pg
 
 #: Columns held back from a SELECT on purpose, with the reason.
 _INTENTIONALLY_UNSELECTED = {
@@ -41,7 +41,7 @@ def _declared_columns(table: str) -> set[str]:
         source,
         re.S,
     )
-    assert match, f"no CREATE TABLE for {table} in postgres.py"
+    assert match, f"no CREATE TABLE for {table} in db/postgres.py"
     columns = set()
     for line in match.group(1).splitlines():
         line = line.strip()
@@ -179,7 +179,7 @@ class TestLiveBackendRoundTrip:
     def test_the_two_backends_return_the_same_keys(self):
         import sqlite3
 
-        from app import database as db
+        from app.db import database as db
 
         pg.init_db()
         conn = sqlite3.connect(":memory:")

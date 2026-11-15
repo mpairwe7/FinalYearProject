@@ -17,8 +17,8 @@ from unittest import mock
 
 import httpx
 
-from app.faq_corpus import CorpusValidationError
-from app.pdf_corpus import (
+from app.ingestion.faq_corpus import CorpusValidationError
+from app.ingestion.pdf_corpus import (
     ALLOWED_STATUTORY_PDF_HOSTS,
     CORPUS_FETCH_USER_AGENT,
     _default_page_fetcher,
@@ -383,7 +383,7 @@ class PdfCorpusExportIngestTests(unittest.TestCase):
                 root, {"guide-FY-2024-25.pdf": [_FakeChunk(text=_body("A"), heading_trail=["H"])]}
             )
             (pdf_dir / "guide-FY-2024-25.pdf").unlink()
-            with mock.patch("app.pdf_corpus.TRUST_MANIFEST", True):
+            with mock.patch("app.ingestion.pdf_corpus.TRUST_MANIFEST", True):
                 documents = ingest_pdf_jsonls(pdf_dir, jsonl_dir)
             self.assertEqual(len(documents), 1)
             self.assertEqual(documents[0]["fiscal_year"], "FY2024-25")
@@ -398,7 +398,7 @@ class PdfCorpusExportIngestTests(unittest.TestCase):
                 root, {"guide-FY-2024-25.pdf": [_FakeChunk(text=_body("A"))]}
             )
             (pdf_dir / "guide-FY-2024-25.pdf").write_bytes(b"%PDF-1.7 replaced")
-            with mock.patch("app.pdf_corpus.TRUST_MANIFEST", True):
+            with mock.patch("app.ingestion.pdf_corpus.TRUST_MANIFEST", True):
                 with self.assertRaisesRegex(CorpusValidationError, "source changed"):
                     ingest_pdf_jsonls(pdf_dir, jsonl_dir)
 
@@ -414,7 +414,7 @@ class PdfCorpusExportIngestTests(unittest.TestCase):
             record = json.loads(jsonl_path.read_text(encoding="utf-8").splitlines()[0])
             record["text"] = record["text"].replace("taxable", "exempt")
             jsonl_path.write_text(json.dumps(record, sort_keys=True) + "\n", encoding="utf-8")
-            with mock.patch("app.pdf_corpus.TRUST_MANIFEST", True):
+            with mock.patch("app.ingestion.pdf_corpus.TRUST_MANIFEST", True):
                 with self.assertRaisesRegex(CorpusValidationError, "does not match its content"):
                     ingest_pdf_jsonls(pdf_dir, jsonl_dir)
 
@@ -443,7 +443,7 @@ class NotAPdfTests(unittest.TestCase):
                 stem_calls.append(path.name)
                 return iter(())
 
-            with mock.patch("app.pdf_corpus._chunk_pdf_records", records):
+            with mock.patch("app.ingestion.pdf_corpus._chunk_pdf_records", records):
                 export_pdf_chunks_to_jsonl(pdf_dir, root / "jsonl")
             self.assertEqual(stem_calls, ["real.pdf"])
             manifest = json.loads((root / "jsonl" / PDF_MANIFEST_NAME).read_text(encoding="utf-8"))
@@ -636,7 +636,7 @@ class StatutoryPortalHarvestTests(unittest.TestCase):
             directory = Path(temporary)
             (directory / "Income-Tax-Act.pdf").write_bytes(self.OLD)
             patcher, seen = self._serve(new)
-            with patcher, mock.patch("app.pdf_corpus.inspect_pdf_bytes"):
+            with patcher, mock.patch("app.ingestion.pdf_corpus.inspect_pdf_bytes"):
                 stats = harvest_remote_pdfs(directory, source_urls=[self.URL])
             self.assertEqual(seen, [self.URL])
             self.assertEqual(stats["downloaded_count"], 1)
@@ -651,7 +651,7 @@ class StatutoryPortalHarvestTests(unittest.TestCase):
             directory = Path(temporary)
             (directory / "Income-Tax-Act.pdf").write_bytes(self.OLD)
             patcher, _seen = self._serve(other)
-            with patcher, mock.patch("app.pdf_corpus.inspect_pdf_bytes"):
+            with patcher, mock.patch("app.ingestion.pdf_corpus.inspect_pdf_bytes"):
                 stats = harvest_remote_pdfs(directory, source_urls=["https://ura.go.ug/download/Stamp-Duty-2026.pdf"])
             self.assertEqual(stats["verified_existing_count"], 0)
             self.assertTrue((directory / "Stamp-Duty-2026.pdf").is_file())
@@ -673,7 +673,7 @@ class StatutoryPortalHarvestTests(unittest.TestCase):
             directory = Path(temporary)
             (directory / "Income-Tax-Act.pdf").write_bytes(self.OLD)
             patcher, _seen = self._serve(revised_same_len)
-            with patcher, mock.patch("app.pdf_corpus.inspect_pdf_bytes"):
+            with patcher, mock.patch("app.ingestion.pdf_corpus.inspect_pdf_bytes"):
                 stats = harvest_remote_pdfs(directory, source_urls=[self.URL])
             self.assertEqual(stats["verified_existing_count"], 0)
             self.assertEqual(stats["downloaded_count"], 1)
@@ -687,7 +687,7 @@ class StatutoryPortalHarvestTests(unittest.TestCase):
             directory = Path(temporary)
             (directory / "Income-Tax-Act.pdf").write_bytes(current)
             patcher, _seen = self._serve(older)
-            with patcher, mock.patch("app.pdf_corpus.inspect_pdf_bytes"):
+            with patcher, mock.patch("app.ingestion.pdf_corpus.inspect_pdf_bytes"):
                 stats = harvest_remote_pdfs(directory, source_urls=[self.URL])
             self.assertEqual((directory / "Income-Tax-Act.pdf").read_bytes(), current)
             self.assertEqual(stats["downloaded_count"], 0)
@@ -701,7 +701,7 @@ class StatutoryPortalHarvestTests(unittest.TestCase):
             directory = Path(temporary)
             (directory / "Income-Tax-Act.pdf").write_bytes(current)
             patcher, _seen = self._serve(undated)
-            with patcher, mock.patch("app.pdf_corpus.inspect_pdf_bytes"):
+            with patcher, mock.patch("app.ingestion.pdf_corpus.inspect_pdf_bytes"):
                 stats = harvest_remote_pdfs(directory, source_urls=[self.URL])
             self.assertEqual(stats["downloaded_count"], 1)
 
@@ -771,7 +771,7 @@ class StatutoryPortalHarvestTests(unittest.TestCase):
             )
 
     def test_harvest_records_new_pdfs_in_crawl_state_for_crawl_gate(self) -> None:
-        from app.pdf_corpus import main as pdf_corpus_main
+        from app.ingestion.pdf_corpus import main as pdf_corpus_main
 
         nita_url = "https://media.ulii.org/media/legislation/18138/source_file/2009-4.pdf"
         with tempfile.TemporaryDirectory() as temporary:
@@ -779,7 +779,7 @@ class StatutoryPortalHarvestTests(unittest.TestCase):
             pdf_dir = root / "pdfs"
             crawl_state = root / "crawl" / "crawl_state.json"
             patcher, _seen = self._serve(self.OLD)
-            with patcher, mock.patch("app.pdf_corpus.inspect_pdf_bytes"):
+            with patcher, mock.patch("app.ingestion.pdf_corpus.inspect_pdf_bytes"):
                 rc = pdf_corpus_main(
                     [
                         "--harvest",
@@ -805,7 +805,7 @@ class StatutoryPortalHarvestTests(unittest.TestCase):
             # Replacing with a newer edition evicts the old digest for the same filename/URL
             revised = b"%PDF-1.7\nrevised edition\n" + b"z" * 1000
             patcher2, _seen2 = self._serve(revised)
-            with patcher2, mock.patch("app.pdf_corpus.inspect_pdf_bytes"):
+            with patcher2, mock.patch("app.ingestion.pdf_corpus.inspect_pdf_bytes"):
                 rc2 = pdf_corpus_main(
                     [
                         "--harvest",
@@ -822,7 +822,7 @@ class StatutoryPortalHarvestTests(unittest.TestCase):
             self.assertEqual(len(state_data2["pdf_hashes"]), 1)
 
     def test_harvest_refuses_non_public_dns_resolution(self) -> None:
-        from app.pdf_corpus import _assert_public_host, _resolve_host_ips
+        from app.ingestion.pdf_corpus import _assert_public_host, _resolve_host_ips
 
         _resolve_host_ips.cache_clear()
         with mock.patch(
@@ -833,7 +833,7 @@ class StatutoryPortalHarvestTests(unittest.TestCase):
         _resolve_host_ips.cache_clear()
 
     def test_harvest_rejects_robots_noindex_and_ai_usage_opt_out_and_embedded_injection(self) -> None:
-        from app.pdf_corpus import _pdf_response_opts_out, inspect_pdf_for_prompt_injection
+        from app.ingestion.pdf_corpus import _pdf_response_opts_out, inspect_pdf_for_prompt_injection
         from app.pdf_guards import PdfRejected
 
         self.assertEqual(_pdf_response_opts_out({"x-robots-tag": "noindex"}), "noindex")
@@ -849,13 +849,13 @@ class StatutoryPortalHarvestTests(unittest.TestCase):
             )
 
     def test_harvest_caps_max_pdf_downloads_and_exits_nonzero_on_all_failed(self) -> None:
-        from app.pdf_corpus import main as pdf_corpus_main
+        from app.ingestion.pdf_corpus import main as pdf_corpus_main
 
         mda_urls = [entry["url"] for entry in MDA_STATUTORY_PDF_REGISTRY[:5]]
         with tempfile.TemporaryDirectory() as temporary:
             pdf_dir = Path(temporary) / "pdfs"
             patcher, seen = self._serve(self.OLD)
-            with patcher, mock.patch("app.pdf_corpus.inspect_pdf_bytes"):
+            with patcher, mock.patch("app.ingestion.pdf_corpus.inspect_pdf_bytes"):
                 stats = harvest_remote_pdfs(
                     pdf_dir,
                     source_urls=mda_urls,

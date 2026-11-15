@@ -39,30 +39,30 @@ _ALL_ACKS = tuple(empathy_ack(k) for k in ("frustration", "anxiety", "urgency"))
 
 def _extractive_seams(model):
     """Patch generate() past the fast paths so it reaches the extractive branch."""
-    from app import service
+    from app.rag import pipeline
 
     return (
         # False for everything except semantic_cache: this test's own point is
         # that the cache keeps the neutral copy (see module docstring), so a
         # blanket False here — which used to be harmless — now also disables
-        # the cache.put() gate service.py added (`flags.is_enabled("semantic_cache")`),
+        # the cache.put() gate rag/pipeline.py added (`flags.is_enabled("semantic_cache")`),
         # silently turning off the exact behavior these tests assert on.
         mock.patch.object(
-            service.flags, "is_enabled", side_effect=lambda name, **kw: name == "semantic_cache"
+            pipeline.flags, "is_enabled", side_effect=lambda name, **kw: name == "semantic_cache"
         ),
         mock.patch.object(
-            service.ChatModel, "_priority_faq_hits", return_value=[dict(_VAT_HIT)]
+            pipeline.ChatModel, "_priority_faq_hits", return_value=[dict(_VAT_HIT)]
         ),
-        mock.patch.object(service, "_simple_search", return_value=[]),
-        mock.patch.object(service, "needs_clarification", return_value=""),
-        mock.patch.object(service.ChatModel, "_maybe_handle_fast_paths", return_value=None),
+        mock.patch.object(pipeline, "_simple_search", return_value=[]),
+        mock.patch.object(pipeline, "needs_clarification", return_value=""),
+        mock.patch.object(pipeline.ChatModel, "_maybe_handle_fast_paths", return_value=None),
         mock.patch.object(
-            service.ChatModel,
+            pipeline.ChatModel,
             "_deterministic_procedure_reply",
             return_value=("", False),
         ),
         mock.patch.object(
-            service.ChatModel,
+            pipeline.ChatModel,
             "_evaluate_response_judge",
             return_value={
                 "decision": "approve",
@@ -77,26 +77,26 @@ def _extractive_seams(model):
         # The scenario is every LLM tier down with retrieval healthy. With no
         # vector index in the test environment the service would otherwise
         # treat the turn as an outage answer, which it never caches (G277).
-        mock.patch.object(service, "_retrieval_degraded", return_value=False),
+        mock.patch.object(pipeline, "_retrieval_degraded", return_value=False),
     )
 
 
 class ExtractiveFallbackEmpathyRestTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        from app import database as db
+        from app.db import database as db
 
         db.init_db()
-        from app import service
+        from app.rag import pipeline
 
-        cls.model = service.ChatModel()
+        cls.model = pipeline.ChatModel()
 
     def _generate(self, message: str, *, retrieval_down: bool = False):
-        from app import service
+        from app.rag import pipeline
 
         patches = list(_extractive_seams(self.model))
         if retrieval_down:
-            patches[9] = mock.patch.object(service, "_retrieval_degraded", return_value=True)
+            patches[9] = mock.patch.object(pipeline, "_retrieval_degraded", return_value=True)
         with patches[0], patches[1], patches[2], patches[3], patches[4], patches[
             5
         ], patches[6], patches[7], patches[8] as cache_put, patches[9]:
@@ -131,10 +131,10 @@ class ExtractiveFallbackEmpathyRestTest(unittest.TestCase):
         )
 
     def test_llm_empty_reply_falls_back_with_ack(self) -> None:
-        from app import service
+        from app.rag import pipeline
 
-        with mock.patch.object(service, "_cloud_llm_ready", return_value=True), \
-                mock.patch.object(service, "_call_llm_with_deadline", return_value=""):
+        with mock.patch.object(pipeline, "_cloud_llm_ready", return_value=True), \
+                mock.patch.object(pipeline, "_call_llm_with_deadline", return_value=""):
             result, cache_put = self._generate(
                 "My VAT deadline is tomorrow and I fear a penalty — what is the threshold?"
             )
@@ -190,11 +190,11 @@ class _ExtractiveFakeModel:
 
 
 def _collect_turn(model):
-    from app import service
+    from app.rag import pipeline
 
     async def _run():
         out = []
-        async for ev in service.run_chat_turn(
+        async for ev in pipeline.run_chat_turn(
             model,
             message="what is the VAT threshold",
             conversation_id=None,
@@ -213,36 +213,36 @@ def _collect_turn(model):
 
 class StreamFallbackEmpathyTest(unittest.TestCase):
     def test_no_llm_branch_prefixes_ack(self) -> None:
-        from app import service
+        from app.rag import pipeline
 
         with mock.patch.object(
-            service.llm_module, "is_available", return_value=False
-        ), mock.patch.object(service, "_cloud_llm_ready", return_value=False):
+            pipeline.generator_module, "is_available", return_value=False
+        ), mock.patch.object(pipeline, "_cloud_llm_ready", return_value=False):
             events = _collect_turn(_ExtractiveFakeModel(distress="frustration"))
 
         token = [p for (t, p) in events if t == "token"][0]
         self.assertTrue(token.startswith(empathy_ack("frustration")), token[:80])
 
     def test_no_llm_branch_calm_is_unprefixed(self) -> None:
-        from app import service
+        from app.rag import pipeline
 
         with mock.patch.object(
-            service.llm_module, "is_available", return_value=False
-        ), mock.patch.object(service, "_cloud_llm_ready", return_value=False):
+            pipeline.generator_module, "is_available", return_value=False
+        ), mock.patch.object(pipeline, "_cloud_llm_ready", return_value=False):
             events = _collect_turn(_ExtractiveFakeModel(distress=""))
 
         token = [p for (t, p) in events if t == "token"][0]
         self.assertFalse(any(token.startswith(a) for a in _ALL_ACKS), token[:80])
 
     def test_empty_stream_fallback_prefixes_ack(self) -> None:
-        from app import service
+        from app.rag import pipeline
 
         def _empty_stream(**kwargs):
             return iter(())
 
         with mock.patch.object(
-            service.llm_module, "is_available", return_value=True
-        ), mock.patch.object(service, "stream_llm_tokens", _empty_stream):
+            pipeline.generator_module, "is_available", return_value=True
+        ), mock.patch.object(pipeline, "stream_llm_tokens", _empty_stream):
             events = _collect_turn(_ExtractiveFakeModel(distress="anxiety"))
 
         token = [p for (t, p) in events if t == "token"][0]

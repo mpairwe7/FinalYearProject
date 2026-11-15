@@ -24,7 +24,7 @@ def _fresh_db():
     every count assertion would drift with execution order. Emptying
     the one table these tests own is both correct and cheap.
     """
-    from app import database as db
+    from app.db import database as db
 
     db.init_db()
     db.execute("DELETE FROM mcp_tasks")

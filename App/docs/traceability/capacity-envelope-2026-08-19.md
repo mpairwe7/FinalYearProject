@@ -46,12 +46,12 @@ FAQ JSONL corpus:
 
 ```bash
 PYTHONPATH=App/backend QDRANT_URL=http://127.0.0.1:6333 \
-  python -m app.indexer --export-faq-jsonl
+  python -m app.ingestion.indexer --export-faq-jsonl
 # {'sources': 41, 'source_rows': 515, 'records': 508, 'duplicates_removed': 7}
 
 PYTHONPATH=App/backend QDRANT_URL=http://127.0.0.1:6333 \
   SPARSE_ONLY_INDEX=true QDRANT_COLLECTION=ura_knowledge_base \
-  python -m app.indexer --faq-jsonl-only --recreate
+  python -m app.ingestion.indexer --faq-jsonl-only --recreate
 # total_upserted=508, faq_jsonl_documents=508
 ```
 

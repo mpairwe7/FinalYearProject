@@ -43,7 +43,7 @@ Gemini uses `x-goog-api-key`. **No key is ever placed in a URL query string.**
    `python scripts/reindex_vectorize.py --create`. It builds from the same
    validated JSONL as the Qdrant indexer (FAQ + teacher-QA + PDF chunks + crawl
    chunks) and **refuses to seed a partial corpus** unless `--allow-partial` is
-   given, so export the chunk corpora first (`python -m app.indexer
+   given, so export the chunk corpora first (`python -m app.ingestion.indexer
    --export-pdf-jsonl --export-crawl-jsonl`). Per-vector metadata is
    `{text, source, page, section, tag, chunk_id, doc_type, fiscal_year}`.
 
@@ -143,13 +143,13 @@ The single-container image also runs Redis under supervisord: response cache on
 db 0 (`REDIS_URL`), rate-limit storage on db 1 (`SLOWAPI_STORAGE_URI`) so
 flushing the cache cannot reset a rate-limit window. It is configured as a pure
 cache — persistence off, `maxmemory 192mb`, `allkeys-lru` — and has no readiness
-gate, because `cache.py` falls back to in-process memory when Redis is
+gate, because `rag/cache.py` falls back to in-process memory when Redis is
 unreachable.
 
 The same no-torch constraint applies, and it used to make the cache useless
 here: both backends return `None` from `get()` when there is no dense model, and
-`service.py` only calls `set_model` when the retriever has one. So the cache
-missed on every request in these deployments. `cache.py` now has a **model-free
+`rag/pipeline.py` only calls `set_model` when the retriever has one. So the cache
+missed on every request in these deployments. `rag/cache.py` now has a **model-free
 exact tier** keyed on the casefolded, punctuation-stripped query plus locale,
 which is what makes Redis worth embedding — a repeated question is the common
 case for an FAQ assistant. Semantic similarity remains a second tier wherever an
@@ -172,7 +172,7 @@ Tier 2 only helps if the index holds the whole corpus, which is why
 `reindex_vectorize.py` refuses to seed a subset — otherwise the same question
 answers from the full corpus normally and from 486 FAQ rows only once tier 1
 degrades (whether to tier 1b or all the way to tier 3).
-- **Phase 2 — LLM fallback: DONE.** `service._llm_cloud_fallback` /
+- **Phase 2 — LLM fallback: DONE.** `pipeline._llm_cloud_fallback` /
   `_stream_cloud_fallback` wired into `_call_llm_with_deadline` + `stream_llm_tokens`,
   keyed off `_LLM_CIRCUIT` (Gemini → Workers AI).
 - **Phase 3 — Gemini 2.5 Flash Luganda translation: DONE.** `SpeechModel._gemini_translate`
@@ -193,7 +193,7 @@ repo root (`tests/test_fallback_integration.py`, run by CI) that assert the clou
 answer reaches the `/v1/chat` + `/v1/chat/stream` surfaces when the primary LLM is
 down — see `docs/EVALUATION_REPORT.md`. Full `App/backend` suite green; blocking
 ruff clean. NB: the local LLM being *unavailable* (not just failing) now also routes
-to the cloud tier (`service._cloud_llm_ready` widens the availability gates).
+to the cloud tier (`pipeline._cloud_llm_ready` widens the availability gates).
 
 ### Deferred (follow-up, mostly provisioning-time)
 1. **Vectorize re-index CLI — DONE** (`App/backend/scripts/reindex_vectorize.py`).

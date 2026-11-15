@@ -6,7 +6,7 @@ from __future__ import annotations
 import unittest
 import uuid
 
-from app.query import rewrite as rewrite_query
+from app.rag.query import rewrite as rewrite_query
 from app.calculator_router import (
     _INFO_ONLY_RE,
     _PAYE_THRESHOLD_ASK_RE,
@@ -191,15 +191,15 @@ class ServiceCalculatorPathTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from app import database as db
+        from app.db import database as db
 
         db.init_db()
-        from app import service
-        from app.flags import flags
+        from app.rag import pipeline
+        from app.config.flags import flags
 
         flags.set("workflows", True)
         cls._flags = flags
-        cls.model = service.ChatModel()
+        cls.model = pipeline.ChatModel()
 
     @classmethod
     def tearDownClass(cls):

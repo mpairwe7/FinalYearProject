@@ -19,7 +19,7 @@ Read it end to end before starting. Build in the phase order given; each phase e
   - **Every new FastAPI route** goes into `tests/test_all_endpoints_e2e.py`: `EXPECTED_ENDPOINTS`,
     `COVERAGE`, and the locked counts in `test_manifest_endpoint_count` (currently **74 HTTP + 7 WS**;
     this plan adds **11 HTTP, 0 WS** → 85 + 7).
-  - A new flag lands in `flags.py`, `docs/RAG_ARCHITECTURE.md` (table + count) and `.env.example`.
+  - A new flag lands in `config/flags.py`, `docs/RAG_ARCHITECTURE.md` (table + count) and `.env.example`.
     This plan adds **no new flag** — everything sits under the existing `voice_receptionist` flag.
   - Every route into the officer queue honours `ticket_queue` (never promise a handoff when it is off).
   - Runtime code stays under `App/backend/app`. Do not move `App/backend` or `App/frontend`.
@@ -316,7 +316,7 @@ claimed first (so the caller is held) and the permission prompt follows.
 Add a column-migration helper to `receptionist/store.py`: `_ensure_columns(table, {name: ddl})` that runs
 `ALTER TABLE <t> ADD COLUMN <name> <ddl>` and ignores "duplicate column" errors (SQLite) — on Postgres use
 `ADD COLUMN IF NOT EXISTS` (check `db.ANALYTICS_BACKEND` / follow `database._ensure_column` and
-`postgres.py:294-321`). Call it from `init_receptionist_schema()`.
+`db/postgres.py:294-321`). Call it from `init_receptionist_schema()`.
 
 ### New `voice_calls` columns
 
@@ -367,7 +367,7 @@ Status transitions are automatic on claim (`on_call`), end/transfer (`wrap_up`) 
 ### Tickets
 
 `database.list_tickets` (`database.py:1509`) has no `user_id` filter — add `user_id: str | None = None`
-to it **and** its Postgres mirror in `postgres.py`, for caller history.
+to it **and** its Postgres mirror in `db/postgres.py`, for caller history.
 
 ---
 

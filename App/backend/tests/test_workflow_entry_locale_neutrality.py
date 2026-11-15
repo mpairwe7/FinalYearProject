@@ -25,13 +25,13 @@ from __future__ import annotations
 import unittest
 import uuid
 
-from app import service
+from app.rag import pipeline
 
 
 class WorkflowEntryLocaleNeutralityTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.model = service.ChatModel()
+        cls.model = pipeline.ChatModel()
 
     def _entered(self, message: str, rewritten: str, tag: str) -> bool:
         """Whether this turn is captured into a guided flow.
@@ -90,11 +90,11 @@ class WorkflowEntryLocaleNeutralityTest(unittest.TestCase):
     # -- the predicate itself ----------------------------------------------
     def test_the_word_count_floor_keeps_a_hedged_slot_answer_with_the_validator(self) -> None:
         """G38's floor. A one-word "individual?" is uncertainty, not a question."""
-        self.assertFalse(service._reads_as_question("individual?"))
+        self.assertFalse(pipeline._reads_as_question("individual?"))
 
     def test_a_local_language_question_with_no_english_opener_reads_as_one(self) -> None:
-        self.assertTrue(service._reads_as_question("Ssente mmeka ez'omusolo gwa VAT?"))
-        self.assertTrue(service._reads_as_question("Je, ninaweza kulipa kodi yangu leo?"))
+        self.assertTrue(pipeline._reads_as_question("Ssente mmeka ez'omusolo gwa VAT?"))
+        self.assertTrue(pipeline._reads_as_question("Je, ninaweza kulipa kodi yangu leo?"))
 
 
 if __name__ == "__main__":

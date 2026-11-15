@@ -17,8 +17,8 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from app import llm
-from app.flags import flags
+from app.rag import generator
+from app.config.flags import flags
 from app.mcp import MCPClient
 from app.mcp.auth import MIN_SHARED_TOKEN_CHARS
 from app.mcp.chat_connectors import (
@@ -182,10 +182,10 @@ def test_a_simulator_is_refused_in_production_at_both_ends(bind, monkeypatch: py
 
 def test_an_agent_turn_reads_from_the_selected_connector(bind, monkeypatch: pytest.MonkeyPatch):
     client = bind("efris", "payment_system")
-    monkeypatch.setattr(llm, "LLM_BACKEND", "vllm")
-    monkeypatch.setattr(llm, "_vllm_ready", lambda: True)
+    monkeypatch.setattr(generator, "LLM_BACKEND", "vllm")
+    monkeypatch.setattr(generator, "_vllm_ready", lambda: True)
     monkeypatch.setattr("app.mcp.get_client", lambda: client)
-    monkeypatch.setattr(llm, "_select_tools_for_query", lambda _query, names, **_options: names)
+    monkeypatch.setattr(generator, "_select_tools_for_query", lambda _query, names, **_options: names)
     turns: list[dict[str, Any]] = []
 
     def model(messages, *, tools=None, **_kwargs):
@@ -197,10 +197,10 @@ def test_an_agent_turn_reads_from_the_selected_connector(bind, monkeypatch: pyte
             }
         return {"content": "The demo EFRIS record shows this taxpayer.", "tool_calls": []}
 
-    monkeypatch.setattr(llm, "_vllm_chat_completion", model)
+    monkeypatch.setattr(generator, "_vllm_chat_completion", model)
     events: list[dict[str, Any]] = []
 
-    result = llm.generate_with_tools(
+    result = generator.generate_with_tools(
         query=f"What does EFRIS hold for TIN {SAMPLE_TIN}?",
         passages=[],
         locale="en",

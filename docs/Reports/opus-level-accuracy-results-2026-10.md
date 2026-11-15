@@ -21,7 +21,7 @@ Following the 2026-10-18 expatriate-payroll accuracy probe (§1 of the plan, def
    - Added conversation-scoped `CaseFacts` (`App/backend/app/case_facts.py`), deterministic residency (`determine_residency`), benefits-in-kind (`value_benefit_in_kind`), FX conversion (`convert_currency`), PAYEresident/non-resident comparison, and 8 statutory rule tools backed by `FY2026-27.json` and `FY2025-26.json`.
    - Built `scenario_planner.py` (`plan_tools`, `build_verified_facts`) and `premise_guard.py` (`check_fact_contradictions`, 8 statutory premise checks) to inject `## Verified Statutory Facts & Calculations` before retrieved passages in both REST and streaming paths.
 4. **Polarity Verification, Figure Lock & Retrieval Precision (Phase G):**
-   - Added `claim_polarity.py` (`DIRECTION_LEXICON` with 22 opposing tax-law pairs and `polarity_conflicts`), `verify_figure_lock` in `agents/evaluator.py`, same-tier bounded `_reflect_llm` revision, sector-guide demotion (`SECTOR_GUIDE_SOURCE_PATTERNS`), topic-section boosts (`TOPIC_SECTION_HINTS`), and the `COMPLEX_ANSWER_CONTRACT` prompt structure.
+   - Added `rag/claim_polarity.py` (`DIRECTION_LEXICON` with 22 opposing tax-law pairs and `polarity_conflicts`), `verify_figure_lock` in `agents/evaluator.py`, same-tier bounded `_reflect_llm` revision, sector-guide demotion (`SECTOR_GUIDE_SOURCE_PATTERNS`), topic-section boosts (`TOPIC_SECTION_HINTS`), and the `COMPLEX_ANSWER_CONTRACT` prompt structure.
 
 ### Headline Results
 

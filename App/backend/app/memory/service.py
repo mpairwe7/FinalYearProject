@@ -74,7 +74,7 @@ class MemoryService:
         if not user_id:
             return False
         try:
-            from .. import database as db
+            from ..db import database as db
 
             return db.has_active_consent(user_id, purpose, tenant_id=tenant_id or "default")
         except Exception:
@@ -126,7 +126,7 @@ class MemoryService:
     ) -> MemoryReadResult:
         """One-shot read — facts, episodic summaries, and working state."""
         granted = self._has_consent(user_id, purpose, tenant_id)
-        from .. import database as db
+        from ..db import database as db
 
         return MemoryReadResult(
             facts=self.semantic.read(user_id=user_id, tenant_id=tenant_id) if granted else [],
@@ -246,7 +246,7 @@ class MemoryService:
         """
         if not user_id or not self._has_consent(user_id, tenant_id=tenant_id):
             return {"consolidated_facts": 0, "superseded_count": 0, "pruned_decayed": 0}
-        from .. import database as db
+        from ..db import database as db
         from .decay import compute_decayed_confidence
         from .semantic import SINGLE_VALUED_CATEGORIES
 
@@ -302,8 +302,8 @@ class MemoryService:
         if not conversation_id:
             return []
         try:
-            from .. import database as db
-            from ..context_manager import english_view, normalize_history_turns
+            from ..db import database as db
+            from ..rag.context_manager import english_view, normalize_history_turns
 
             turns = db.get_recent_turns(
                 conversation_id=conversation_id, user_id=user_id, tenant_id=tenant_id or "default", limit=limit
@@ -319,7 +319,7 @@ class MemoryService:
         if not conversation_id:
             return 0
         try:
-            from .. import database as db
+            from ..db import database as db
 
             row = db.query_one(
                 """SELECT COUNT(*) AS n FROM conversations
@@ -359,7 +359,7 @@ class MemoryService:
         """Construct an immutable, structured handoff envelope for human or peer escalation."""
         import os
 
-        from ..flags import flags
+        from ..config.flags import flags
 
         eq_enabled = flags.is_enabled("eq_adaptive_retrieval", subject=user_id or None) or flags.is_enabled(
             "eq_multimodal_fusion", subject=user_id or None
@@ -513,7 +513,7 @@ class MemoryService:
         """Persist consented short-term state in the shared analytics backend."""
         if not self._has_consent(user_id, tenant_id=tenant_id):
             return
-        from .. import database as db
+        from ..db import database as db
 
         db.upsert_working_memory(
             user_id,
@@ -532,7 +532,7 @@ class MemoryService:
         # Export stored records directly, without retrieval decay, consent, or
         # a short result cap. Access/export must include historical facts even
         # when they are no longer selected for personalization.
-        from .. import database as db
+        from ..db import database as db
 
         facts = db.query_all(
             """SELECT * FROM user_facts WHERE tenant_id = ? AND user_id = ?
@@ -553,7 +553,7 @@ class MemoryService:
         The audit ledger is intentionally not touched — erasure is
         cryptographically noted but the hash chain is immutable.
         """
-        from .. import database as db
+        from ..db import database as db
 
         working_deleted = db.clear_working_memory(user_id, tenant_id=tenant_id)
         episodic_deleted = self.episodic.delete_for_user(user_id, tenant_id)
@@ -570,7 +570,7 @@ class MemoryService:
         Working memory uses the shared backend and a short expiry; persistent
         tiers are deleted explicitly.
         """
-        from .. import database as db
+        from ..db import database as db
 
         return {
             "working": db.cleanup_expired_working_memory(),

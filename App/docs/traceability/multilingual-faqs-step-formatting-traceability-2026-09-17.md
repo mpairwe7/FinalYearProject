@@ -18,11 +18,11 @@ This record establishes traceability for the fixes applied to close domestic tax
 - `App/frontend/src/store/useChatStore.ts`: Unsmashing of inline list numbering (`steps:1.**`, `section.2.**`) and paragraph breaks.
 - `App/backend/app/guardrails.py`: OutputGuard `normalize_structure()` regex strict boundary matching on horizontal whitespace; stray glued citation marker cleanup (`otherL1]` $\rightarrow$ `other [1]`).
 - `App/backend/app/text_signals.py`: `_SENTENCE_SPLIT_RE = re.compile(r"[.!?]+|\n+")` to split lists and bullet points into distinct sentences for faithfulness scoring.
-- `App/backend/app/claim_verifier.py`: `_SENTENCE_RE` matching non-punctuated list lines; cross-passage corroboration across all retrieved `hits`; revision rather than escalation when no contradiction exists.
+- `App/backend/app/rag/claim_verifier.py`: `_SENTENCE_RE` matching non-punctuated list lines; cross-passage corroboration across all retrieved `hits`; revision rather than escalation when no contradiction exists.
 - `App/backend/app/mt.py`: Currency tokens (`milioni`, `obukadde`, `emitwalo`); statutory article and clause subsection shielding (`Article 1.2`, `ekiwandiiko 1.2`).
-- `App/backend/app/entailment.py`: Disambiguation of Luganda verb *"Saba"* (*"to apply / request"*) from Swahili cardinal numeral *"saba"* (*7*); non-numeric idiom shielding (*"mtu wa tatu"*, *"third party"*); English number words (`two`...`ten`, `twenty`...`fifty`).
-- `App/backend/app/service.py`: Preserving English generation inside `_generate_en` and localizing only once at outer boundary; web scrape header artifact removal (`_WEB_SCRAPE_ARTIFACT_RE`).
-- `App/backend/app/llm.py`: Removal of hallucination-inducing exemplars `(e.g. 18%)` from translation system prompt instructions.
+- `App/backend/app/rag/entailment.py`: Disambiguation of Luganda verb *"Saba"* (*"to apply / request"*) from Swahili cardinal numeral *"saba"* (*7*); non-numeric idiom shielding (*"mtu wa tatu"*, *"third party"*); English number words (`two`...`ten`, `twenty`...`fifty`).
+- `App/backend/app/rag/pipeline.py`: Preserving English generation inside `_generate_en` and localizing only once at outer boundary; web scrape header artifact removal (`_WEB_SCRAPE_ARTIFACT_RE`).
+- `App/backend/app/rag/generator.py`: Removal of hallucination-inducing exemplars `(e.g. 18%)` from translation system prompt instructions.
 
 ---
 
@@ -57,7 +57,7 @@ This record establishes traceability for the fixes applied to close domestic tax
 - **Root Cause**:
   1. `_SENTENCE_SPLIT_RE = re.compile(r"[.!?]+")` only split on terminal punctuation. Bullet items end in `\n`, so the entire list was treated as a single composite sentence of 68 tokens.
   2. The single composite sentence had only 32% token overlap against Citation `[1]`, failing the 50% sentence grounding threshold. `grounded = 0 / 1`, yielding `faithfulness_score = 0.00`.
-  3. `claim_verifier.py` discarded bullet lines without periods, checking only the final sentence against Citation `[1]`.
+  3. `rag/claim_verifier.py` discarded bullet lines without periods, checking only the final sentence against Citation `[1]`.
 - **Verification**:
   Updated `_SENTENCE_SPLIT_RE = re.compile(r"[.!?]+|\n+")` and cross-passage corroboration. Faithfulness score rose from **0.00** to **0.67–1.00**, and the answer was approved with **High Confidence** and zero escalation.
 

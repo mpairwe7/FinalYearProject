@@ -44,7 +44,7 @@ REFLECT_FAITHFULNESS_FLOOR = 0.50
 # ---------------------------------------------------------------------------
 def node_route(state: AgentGraphState) -> NodeResult:
     """Delegate routing to the existing Phase C supervisor."""
-    from ...flags import flags
+    from ...config.flags import flags
     from ..supervisor import supervisor as _supervisor
 
     if not flags.is_enabled("agentic_mode"):
@@ -115,7 +115,7 @@ def node_tool_rag_select(state: AgentGraphState) -> NodeResult:
         granted_purposes=state.granted_purposes,
     )
 
-    from ...flags import flags
+    from ...config.flags import flags
 
     if not flags.is_enabled("tool_rag"):
         # Flag off → accept the supervisor's raw whitelist
@@ -160,9 +160,9 @@ def node_human_gate(state: AgentGraphState) -> NodeResult:
 def node_retrieve(state: AgentGraphState) -> NodeResult:
     """Hybrid retrieval with the same plan/corrective gates as REST."""
     # Deferred import to avoid the heavy retriever at module load
-    from ...corrective_rag import corrective_retrieve
+    from ...rag.corrective_rag import corrective_retrieve
     from ...model_welfare import build_welfare_grounding_hits, match_welfare_categories
-    from ...retriever import HybridRetriever, get_shared_retriever
+    from ...rag.retriever import HybridRetriever, get_shared_retriever
 
     query = state.rewritten_query or state.query
     welfare_cats = match_welfare_categories(query)
@@ -241,14 +241,14 @@ def _apply_live_research(
     evidence is kept and merged back, or the retry would drop what the notice
     and citations still describe.
     """
-    from ...flags import flags
+    from ...config.flags import flags
     from ...web_research import merge_web_hits
 
     if state.live_checked:
         return merge_web_hits(state.live_web_hits, hits), state.live_mode
     if not flags.is_enabled("live_web_research", subject=state.user_id or None):
         return hits, ""
-    from ...live_research_turn import live_research_for_turn
+    from ...rag.live_research_turn import live_research_for_turn
 
     state.live_checked = True
     merged, mode, outcome = live_research_for_turn(
@@ -267,7 +267,7 @@ def _apply_live_research(
 def _apply_faq_gates(query: str, hits: list) -> list:
     """Same unbound-FAQ filter + exact-FAQ promote REST uses after blend."""
     try:
-        from ...faq_binding import filter_unbound_faq_hits, promote_equivalent_faq_hits
+        from ...rag.faq_binding import filter_unbound_faq_hits, promote_equivalent_faq_hits
     except Exception:
         logger.debug("graph: FAQ gates unavailable", exc_info=True)
         return hits
@@ -280,8 +280,8 @@ def _apply_faq_gates(query: str, hits: list) -> list:
 
 def _fuse_graph_leg(query: str, hits: list) -> list:
     """Same rank-level RRF fuse REST uses; no-op when flags are off."""
-    from ...flags import flags
-    from ...retriever import rrf_fuse_ranked_lists
+    from ...config.flags import flags
+    from ...rag.retriever import rrf_fuse_ranked_lists
 
     if not (flags.is_enabled("graph_fusion") and flags.is_enabled("tax_graph")):
         return hits
@@ -322,7 +322,7 @@ _TAX_DUE_RE = re.compile(
 
 def _requested_period_start(text: str) -> str | bool | None:
     """The start date of a fiscal year the question names; ``False`` if no table holds it."""
-    from ...query import extract_retrieval_filters
+    from ...rag.query import extract_retrieval_filters
     from ...tax.tables import get_table, list_fiscal_years
 
     fiscal_year = str(extract_retrieval_filters(text).get("fiscal_year") or "")
@@ -484,7 +484,7 @@ def bind_arguments(tool_name: str, state: AgentGraphState) -> dict[str, object] 
 
     # 6. Memory-backed & DAG-receipt argument binding (Phase 35)
     try:
-        from ...flags import flags
+        from ...config.flags import flags
 
         uid = state.user_id or None
         if flags.is_enabled("autonomous_outcome_verification", subject=uid) or flags.is_enabled(
@@ -811,7 +811,7 @@ def node_observe(state: AgentGraphState) -> NodeResult:
     (or statutory retrieval) before final synthesis.
     """
     usable = _usable_observations(state)
-    from ...flags import flags
+    from ...config.flags import flags
 
     if (
         len(state.sub_routes) >= 2
@@ -919,21 +919,21 @@ def node_synthesize(state: AgentGraphState) -> NodeResult:
         return NodeResult(next_node="respond", outcome=GraphOutcome.ABSTAINED)
 
     if state.hits:
-        from ... import llm as _llm_module
-        from ...query import english_retrieval_query
+        from ...rag import generator as _generator_module
+        from ...rag.query import english_retrieval_query
 
-        if _llm_module.is_available():
+        if _generator_module.is_available():
             try:
                 raw_q = state.rewritten_query or state.query
                 synth_query = (
                     english_retrieval_query(raw_q, state.locale)
                     if (
                         state.locale not in ("", "en")
-                        and not _llm_module.can_generate_in_locale(state.locale)
+                        and not _generator_module.can_generate_in_locale(state.locale)
                     )
                     else raw_q
                 )
-                llm_reply = _llm_module.generate(
+                llm_reply = _generator_module.generate(
                     query=synth_query or raw_q,
                     passages=state.hits,
                     conversation_history=state.conversation_history or None,
@@ -941,19 +941,19 @@ def node_synthesize(state: AgentGraphState) -> NodeResult:
                     personalization_context=state.live_check_notice,
                 )
                 if llm_reply and llm_reply.strip():
-                    from ...turn_record import endpoint_model, note_generation
+                    from ...rag.turn_record import endpoint_model, note_generation
 
                     state.reply = llm_reply.strip()
                     # No endpoint was passed above, so this is the configured model.
                     note_generation(backend="local", model=endpoint_model(None))
-                    if state.locale in ("", "en") or not _llm_module.can_generate_in_locale(state.locale):
-                        from ... import english_rendering
+                    if state.locale in ("", "en") or not _generator_module.can_generate_in_locale(state.locale):
+                        from ...rag import english_rendering
 
                         state.reply = english_rendering.answer_in_english(state.reply)
             except Exception:
                 logger.warning("graph: LLM synthesis failed, using best hit", exc_info=True)
         if not state.reply:
-            from ...turn_record import note_passage_served
+            from ...rag.turn_record import note_passage_served
 
             note_passage_served("generation_unavailable")
             best = state.hits[0]
@@ -988,7 +988,7 @@ def node_reflect(state: AgentGraphState) -> NodeResult:
     correct.  Re-retrieval only helps the RAG path — a tool answer is
     grounded in its own computation, not in passages.
     """
-    from ...retriever import HybridRetriever
+    from ...rag.retriever import HybridRetriever
 
     if state.hits and state.reply:
         contexts = [h.get("text") or h.get("answer", "") for h in state.hits]
@@ -1006,7 +1006,7 @@ def node_reflect(state: AgentGraphState) -> NodeResult:
         and state.reflect_count <= state.max_reflections
         and (weak_grounding or reasoning_miss)
     ):
-        from ...corrective_rag import build_reflection_query
+        from ...rag.corrective_rag import build_reflection_query
 
         query = state.rewritten_query or state.query
         expanded = build_reflection_query(
@@ -1030,7 +1030,7 @@ def node_reflect(state: AgentGraphState) -> NodeResult:
         best = state.hits[0]
         verified_text = best.get("answer") or best.get("text", "")
         if verified_text:
-            from ...turn_record import note_passage_served
+            from ...rag.turn_record import note_passage_served
 
             state.reply = verified_text.strip()
             state.reflections.append("grounded revision: aligned synthesis with verified statutory passage")
@@ -1080,7 +1080,7 @@ def node_respond(state: AgentGraphState) -> NodeResult:
     if notice and state.outcome == GraphOutcome.ANSWERED and notice not in state.reply:
         state.reply = f"{state.reply.rstrip()}\n\n{notice}"
     if state.live_check_disclosure and state.outcome in (GraphOutcome.ANSWERED, GraphOutcome.ABSTAINED):
-        from ...live_research_turn import with_live_check_disclosure
+        from ...rag.live_research_turn import with_live_check_disclosure
 
         state.reply = with_live_check_disclosure(state.reply, state.live_check_disclosure)
     return NodeResult(next_node=END, outcome=state.outcome)

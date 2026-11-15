@@ -12,8 +12,8 @@
 An October 2026 empirical static-analysis audit across the `281` Python modules (`138,442` LOC) in `App/backend/app` identified structural gaps across **Maintainability**, **Learnability**, and **Modularity**:
 
 1. **Maintainability (`MAINT-GAP-01`, `MAINT-GAP-03`)**:
-   - `App/backend/app/database.py` (SQLite WAL default) exported `102` public functions whereas `App/backend/app/postgres.py` (PostgreSQL backend) exported `78` public functions — a 24-function parity gap (`create_task`, `get_task`, `update_task`, `cancel_task`, `list_tasks`, `get_working_memory`, `clear_working_memory`, `cleanup_expired_working_memory`, `compose_sla_stats`, `delete_user_cascade`, `export_user_data`, etc.) that could cause `AttributeError` under `DATABASE_BACKEND=postgres`.
-   - The `85` feature flags in `App/backend/app/flags.py` lacked formal lifecycle classification (`compliance_invariant`, `kill_switch`, `release_rollout`, `experimental_rag`).
+   - `App/backend/app/db/database.py` (SQLite WAL default) exported `102` public functions whereas `App/backend/app/db/postgres.py` (PostgreSQL backend) exported `78` public functions — a 24-function parity gap (`create_task`, `get_task`, `update_task`, `cancel_task`, `list_tasks`, `get_working_memory`, `clear_working_memory`, `cleanup_expired_working_memory`, `compose_sla_stats`, `delete_user_cascade`, `export_user_data`, etc.) that could cause `AttributeError` under `DATABASE_BACKEND=postgres`.
+   - The `85` feature flags in `App/backend/app/config/flags.py` lacked formal lifecycle classification (`compliance_invariant`, `kill_switch`, `release_rollout`, `experimental_rag`).
 2. **Learnability (`LEARN-GAP-01`, `LEARN-GAP-02`, `LEARN-GAP-03`)**:
    - `ProceduralMemory` in `App/backend/app/memory/procedural.py` held only 5 static exemplars and lacked dynamic experience ingestion (`ExpRAG`, arXiv:2603.18272) or JSONL persistence.
    - `evals/export_preferences.py` and `evals/dpo_job.py` exported flat preference rows without bi-level retrieval/router process supervision (`BPO-RAG`, AAAI 2026; `DecEx-RAG`, arXiv:2510.05691), response-length debiasing, or golden statutory experience replay (`DICE`, ICLR 2025; `LoRR`, arXiv:2508.06412).
@@ -29,8 +29,8 @@ We implemented a 3-phase architectural upgrade:
 
 ### Phase 1 — Maintainability (`StorageBackendProtocol` & Flag Lifecycle Taxonomy)
 - Added `App/backend/app/storage_protocol.py` defining `@runtime_checkable class StorageBackendProtocol` and `verify_storage_backend_parity()`.
-- Synchronized `App/backend/app/database.py` and `App/backend/app/postgres.py` to **100% public function parity (`103 / 103` public functions)**, enforced in CI via `tests/test_monorepo_architecture_governance.py`.
-- Enriched `Flag` in `App/backend/app/flags.py` with `category` (`compliance_invariant`, `kill_switch`, `release_rollout`, `experimental_rag`) and `owner`, plus `flags.by_category()` and `flags.lifecycle_summary()`.
+- Synchronized `App/backend/app/db/database.py` and `App/backend/app/db/postgres.py` to **100% public function parity (`103 / 103` public functions)**, enforced in CI via `tests/test_monorepo_architecture_governance.py`.
+- Enriched `Flag` in `App/backend/app/config/flags.py` with `category` (`compliance_invariant`, `kill_switch`, `release_rollout`, `experimental_rag`) and `owner`, plus `flags.by_category()` and `flags.lifecycle_summary()`.
 
 ### Phase 2 — Learnability (`ExpRAG` Dynamic Procedural Trajectories & `BPO-RAG`/`DICE` Preference Bundle)
 - Upgraded `App/backend/app/memory/procedural.py` with 12 default exemplars spanning the 2026 statutory and 10-MDA capability surface, plus `record_verified_trajectory()`, `retrieve_exemplars()` (IDF + tool-sequence overlap + faithfulness scoring), `format_experience_memory_block()`, `export_trajectories_jsonl()`, and `load_trajectories_jsonl()`.
@@ -51,7 +51,7 @@ We implemented a 3-phase architectural upgrade:
 - Zero false-premise false positives across the entire 105-scenario sovereign evaluation benchmark (`dev.jsonl` + `heldout.jsonl`).
 
 ### Negative / Trade-offs
-- Adding a new public function to `database.py` now requires adding its counterpart to `postgres.py` (enforced by `verify_storage_backend_parity()`).
+- Adding a new public function to `database.py` now requires adding its counterpart to `db/postgres.py` (enforced by `verify_storage_backend_parity()`).
 
 ---
 

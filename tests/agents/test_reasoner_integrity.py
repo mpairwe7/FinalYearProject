@@ -20,8 +20,8 @@ from typing import Any
 from unittest import mock
 
 import pytest
-from app import llm
-from app import service as service_module
+from app.rag import generator
+from app.rag import pipeline as pipeline_module
 from app.agents.evaluator import verify_figure_lock
 from app.agents.graphs import main_graph
 from app.agents.graphs.state import AgentGraphState
@@ -29,7 +29,7 @@ from app.agents.state import AgentRoute, RouteDecision
 from app.agents import tiebreak
 from app.agents.tiebreak import _READ_ONLY_TOOLS, cache_clear, refine
 from app.analytics import metrics
-from app.flags import flags
+from app.config.flags import flags
 from app.guardrails import FigureReleaseGate, OutputGuard
 from app.providers.routing import ModelTier
 from app.tools import ToolRegistry
@@ -154,7 +154,7 @@ ARGUMENTS = {
 
 def run_turn(model: Model, **overrides: Any) -> list[tuple[str, Any]]:
     async def collect() -> list[tuple[str, Any]]:
-        return [e async for e in service_module.run_chat_turn(model, channel="sse", **{**ARGUMENTS, **overrides})]
+        return [e async for e in pipeline_module.run_chat_turn(model, channel="sse", **{**ARGUMENTS, **overrides})]
 
     return asyncio.run(collect())
 
@@ -178,11 +178,11 @@ def ever_shown(events: list[tuple[str, Any]]) -> str:
 @pytest.fixture
 def stream(monkeypatch):
     def install(*words: str) -> None:
-        monkeypatch.setattr(service_module, "stream_llm_tokens", lambda *_a, **_k: iter(words))
+        monkeypatch.setattr(pipeline_module, "stream_llm_tokens", lambda *_a, **_k: iter(words))
 
-    monkeypatch.setattr(service_module.llm_module, "is_available", lambda: True)
-    monkeypatch.setattr(service_module.llm_module, "can_generate_in_locale", lambda _locale: True)
-    monkeypatch.setattr("app.english_rendering.answer_in_english", lambda text: text)
+    monkeypatch.setattr(pipeline_module.generator_module, "is_available", lambda: True)
+    monkeypatch.setattr(pipeline_module.generator_module, "can_generate_in_locale", lambda _locale: True)
+    monkeypatch.setattr("app.rag.english_rendering.answer_in_english", lambda text: text)
     monkeypatch.setattr(OutputGuard, "should_abstain", lambda _self, _hits, locale="en": False)
     return install
 
@@ -198,7 +198,7 @@ CONTRADICTED = {
 class TestAnUnverifiedFigureIsNeverShown:
     def test_a_contradicted_figure_never_reaches_the_screen(self, stream, monkeypatch) -> None:
         stream("The VAT rate is 25%. ", "Register online. [1]")
-        monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: CONTRADICTED)
+        monkeypatch.setattr(pipeline_module, "verify_claims", lambda *_a, **_k: CONTRADICTED)
 
         events = run_turn(Model())
 
@@ -206,7 +206,7 @@ class TestAnUnverifiedFigureIsNeverShown:
 
     def test_prose_before_the_figure_still_streams_first(self, stream, monkeypatch) -> None:
         stream("You must register first. ", "The rate is 18 percent. [1]")
-        monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
+        monkeypatch.setattr(pipeline_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
 
         events = run_turn(Model())
 
@@ -216,7 +216,7 @@ class TestAnUnverifiedFigureIsNeverShown:
 
     def test_a_verified_figure_arrives_as_a_token_with_no_revision(self, stream, monkeypatch) -> None:
         stream("You must register. ", "The rate is 18 percent. [1]")
-        monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
+        monkeypatch.setattr(pipeline_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
 
         events = run_turn(Model())
 
@@ -225,7 +225,7 @@ class TestAnUnverifiedFigureIsNeverShown:
 
     def test_the_figure_is_released_before_the_turn_closes(self, stream, monkeypatch) -> None:
         stream("The rate is 18 percent. [1]")
-        monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
+        monkeypatch.setattr(pipeline_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
 
         kinds = [kind for kind, _ in run_turn(Model())]
 
@@ -235,7 +235,7 @@ class TestAnUnverifiedFigureIsNeverShown:
         # The whole reply held from its first word used to read as "the model said
         # nothing", which fell through to the extractive answer.
         stream("18 percent is the rate. [1]")
-        monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
+        monkeypatch.setattr(pipeline_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
 
         events = run_turn(Model())
 
@@ -248,7 +248,7 @@ class TestAnUnverifiedFigureIsNeverShown:
             time.sleep(0.3)
             yield "More text. "
 
-        monkeypatch.setattr(service_module, "stream_llm_tokens", slow)
+        monkeypatch.setattr(pipeline_module, "stream_llm_tokens", slow)
 
         events = run_turn(Model(), turn_deadline_s=0.15)
 
@@ -256,7 +256,7 @@ class TestAnUnverifiedFigureIsNeverShown:
 
     def test_the_audit_row_has_what_was_served(self, stream, monkeypatch) -> None:
         stream("You must register. ", "The rate is 18 percent. [1]")
-        monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
+        monkeypatch.setattr(pipeline_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
         model = Model()
 
         run_turn(model)
@@ -266,7 +266,7 @@ class TestAnUnverifiedFigureIsNeverShown:
     def test_the_gate_can_be_switched_off(self, stream, monkeypatch, clean_flags) -> None:
         flags.set("stream_figure_hold", False)
         stream("The VAT rate is 25%. ", "Register online. [1]")
-        monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
+        monkeypatch.setattr(pipeline_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
 
         events = run_turn(Model())
 
@@ -280,7 +280,7 @@ class TestAnUnverifiedFigureIsNeverShown:
             "- Customs Services: Import and export clearance, [1].\n\n",
             "Please feel free to reach out if you need further assistance with any of these services!",
         )
-        monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
+        monkeypatch.setattr(pipeline_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
 
         events = run_turn(Model())
         shown = visible(events)
@@ -293,12 +293,12 @@ class TestAnUnverifiedFigureIsNeverShown:
 
     def test_a_tool_answer_is_checked_before_any_of_it_is_shown(self, monkeypatch) -> None:
         # The tool loop produces its reply whole, so waiting costs nothing.
-        monkeypatch.setattr(service_module.llm_module, "is_available", lambda: True)
-        monkeypatch.setattr(service_module.llm_module, "can_generate_in_locale", lambda _locale: True)
-        monkeypatch.setattr("app.english_rendering.answer_in_english", lambda text: text)
-        monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: CONTRADICTED)
+        monkeypatch.setattr(pipeline_module.generator_module, "is_available", lambda: True)
+        monkeypatch.setattr(pipeline_module.generator_module, "can_generate_in_locale", lambda _locale: True)
+        monkeypatch.setattr("app.rag.english_rendering.answer_in_english", lambda text: text)
+        monkeypatch.setattr(pipeline_module, "verify_claims", lambda *_a, **_k: CONTRADICTED)
         monkeypatch.setattr(
-            service_module,
+            pipeline_module,
             "_call_llm_agentic",
             lambda **_kw: {"text": "The VAT rate is 25% [1].", "tool_calls": [], "iterations": 1, "truncated": False},
         )
@@ -317,7 +317,7 @@ def _raises(*_args: Any, **_kwargs: Any) -> Any:
 
 class TestTheFigureLockRunsOnEveryTransport:
     def _guards(self, reply: str, message: str = "What is the VAT rate?", **kwargs: Any) -> dict[str, Any]:
-        return service_module._apply_output_guards(
+        return pipeline_module._apply_output_guards(
             Model(),
             message=message,
             reply=reply,
@@ -331,7 +331,7 @@ class TestTheFigureLockRunsOnEveryTransport:
         )
 
     def test_the_reasoning_tier_strips_an_invented_figure_when_streamed(self, monkeypatch) -> None:
-        monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
+        monkeypatch.setattr(pipeline_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
         guard = self._guards(
             "The rate is 18% [1]. The penalty is UGX 7,777,777 [1].", model_tier=ModelTier.T3.value
         )
@@ -341,12 +341,12 @@ class TestTheFigureLockRunsOnEveryTransport:
 
     def test_the_flag_enforces_it_on_any_tier(self, monkeypatch, clean_flags) -> None:
         flags.set("evaluator_optimizer", True)
-        monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
+        monkeypatch.setattr(pipeline_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
         guard = self._guards("The penalty is UGX 7,777,777 [1].")
         assert "7,777,777" not in guard["reply"]
 
     def test_otherwise_it_measures_without_touching_the_reply(self, monkeypatch, clean_flags) -> None:
-        monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
+        monkeypatch.setattr(pipeline_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
         key = 'figure_lock_checks_total{mode="shadow",outcome="reject"}'
         before = metrics.snapshot()["counters"].get(key, 0)
 
@@ -358,7 +358,7 @@ class TestTheFigureLockRunsOnEveryTransport:
         assert metrics.snapshot()["counters"].get(key, 0) - before == 1
 
     def test_an_enforced_lock_that_cannot_run_shows_no_figure(self, monkeypatch) -> None:
-        monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
+        monkeypatch.setattr(pipeline_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
         monkeypatch.setattr("app.agents.evaluator.verify_figure_lock", _raises)
 
         guard = self._guards(
@@ -371,16 +371,16 @@ class TestTheFigureLockRunsOnEveryTransport:
         assert guard["figure_lock"]["ok"] is None
 
     def test_if_figures_cannot_even_be_removed_the_reply_is_withheld(self, monkeypatch) -> None:
-        monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
+        monkeypatch.setattr(pipeline_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
         monkeypatch.setattr("app.agents.evaluator.verify_figure_lock", _raises)
         monkeypatch.setattr("app.agents.evaluator.strip_unverified_figure_sentences", _raises)
 
         guard = self._guards("The penalty is UGX 7,777,777 [1].", model_tier=ModelTier.T3.value)
 
-        assert guard["reply"] == service_module.FIGURES_WITHHELD_REPLY
+        assert guard["reply"] == pipeline_module.FIGURES_WITHHELD_REPLY
 
     def test_a_lock_that_only_measures_changes_nothing_if_it_cannot_run(self, monkeypatch, clean_flags) -> None:
-        monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
+        monkeypatch.setattr(pipeline_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
         monkeypatch.setattr("app.agents.evaluator.verify_figure_lock", _raises)
 
         guard = self._guards("The penalty is UGX 7,777,777 [1].")
@@ -389,7 +389,7 @@ class TestTheFigureLockRunsOnEveryTransport:
         assert guard["figure_lock"] == {"mode": "shadow", "ok": None, "rejected": 0}
 
     def test_a_figure_a_calculator_returned_is_not_invented(self, monkeypatch) -> None:
-        monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
+        monkeypatch.setattr(pipeline_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
         guard = self._guards(
             "VAT on 1,000,000 is UGX 180,000 [1].",
             message="What is the VAT on 1,000,000?",
@@ -399,7 +399,7 @@ class TestTheFigureLockRunsOnEveryTransport:
         assert "180,000" in guard["reply"]
 
     def test_a_withheld_reply_is_not_checked_again(self, monkeypatch) -> None:
-        monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: CONTRADICTED)
+        monkeypatch.setattr(pipeline_module, "verify_claims", lambda *_a, **_k: CONTRADICTED)
         guard = self._guards("The penalty is UGX 7,777,777 [1].", model_tier=ModelTier.T3.value)
         assert guard["response_judge"]["withheld_contradicted"] is True
         assert guard["figure_lock"] == {}
@@ -481,29 +481,29 @@ class TestASlotOnlyTakesWhatItMeans:
 
 @pytest.fixture
 def tool_loop(monkeypatch):
-    monkeypatch.setattr(llm, "LLM_BACKEND", "vllm")
-    monkeypatch.setattr(llm, "_vllm_ready", lambda: True)
-    monkeypatch.setattr(llm, "_select_tools_for_query", lambda _query, names, **_options: names)
-    monkeypatch.setattr(llm, "_fit_tools_to_window", lambda _m, specs, **_kw: specs)
+    monkeypatch.setattr(generator, "LLM_BACKEND", "vllm")
+    monkeypatch.setattr(generator, "_vllm_ready", lambda: True)
+    monkeypatch.setattr(generator, "_select_tools_for_query", lambda _query, names, **_options: names)
+    monkeypatch.setattr(generator, "_fit_tools_to_window", lambda _m, specs, **_kw: specs)
 
 
 class TestATruncatedLoopIsNotAFinishedAnswer:
     def test_the_taxpayer_is_told_on_rest(self) -> None:
-        reply = service_module._with_degraded_disclosure("Part of an answer.", ["tool_loop_truncated"])
+        reply = pipeline_module._with_degraded_disclosure("Part of an answer.", ["tool_loop_truncated"])
         assert reply.startswith("Part of an answer.")
         assert "may not be complete" in reply
 
     def test_a_disclosure_is_added_once(self) -> None:
-        once = service_module._with_degraded_disclosure("Answer.", ["tool_loop_truncated"])
-        assert service_module._with_degraded_disclosure(once, ["tool_loop_truncated"]) == once
+        once = pipeline_module._with_degraded_disclosure("Answer.", ["tool_loop_truncated"])
+        assert pipeline_module._with_degraded_disclosure(once, ["tool_loop_truncated"]) == once
 
     def test_the_stream_says_so_too(self, monkeypatch) -> None:
-        monkeypatch.setattr(service_module.llm_module, "is_available", lambda: True)
-        monkeypatch.setattr(service_module.llm_module, "can_generate_in_locale", lambda _locale: True)
-        monkeypatch.setattr("app.english_rendering.answer_in_english", lambda text: text)
-        monkeypatch.setattr(service_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
+        monkeypatch.setattr(pipeline_module.generator_module, "is_available", lambda: True)
+        monkeypatch.setattr(pipeline_module.generator_module, "can_generate_in_locale", lambda _locale: True)
+        monkeypatch.setattr("app.rag.english_rendering.answer_in_english", lambda text: text)
+        monkeypatch.setattr(pipeline_module, "verify_claims", lambda *_a, **_k: {"decision": "approve"})
         monkeypatch.setattr(
-            service_module,
+            pipeline_module,
             "_call_llm_agentic",
             lambda **_kw: {
                 "text": "I checked some of it [1].",

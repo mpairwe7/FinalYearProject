@@ -1,7 +1,7 @@
 """Per-channel circuit breakers for the cloud fallbacks.
 
 Reuses the app's existing ``CircuitBreaker`` (``resilience.py``) verbatim — one
-named breaker per provider channel, mirroring ``_LLM_CIRCUIT`` (``service.py``)
+named breaker per provider channel, mirroring ``_LLM_CIRCUIT`` (``rag/pipeline.py``)
 and ``self._breakers[...]`` (``speech_service.py``). A hook checks
 ``allow_request()`` before calling the provider, then ``record_success()`` /
 ``record_failure()`` — identical to every existing tier, so failures show up in

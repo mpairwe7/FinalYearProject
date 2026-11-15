@@ -7,8 +7,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from app import cache, cms, entailment, indexer, mt, query, retriever, speech_normalization
-from app.claim_verifier import verify_claims
+from app.rag import cache, entailment, query, retriever
+from app import cms, mt, speech_normalization
+from app.ingestion import indexer
+from app.rag.claim_verifier import verify_claims
 from app.receptionist import lexicon
 
 
@@ -61,7 +63,7 @@ class AnswerVerificationGapClosureTests(unittest.TestCase):
 
     def test_g289_money_amount_in_query_does_not_approve_unverified_hallucinated_figures(self) -> None:
         """G289: A salary question must not blanket-approve an unsupported claim stating an invented penalty."""
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         model = ChatModel.__new__(ChatModel)
         model._has_inline_citations = lambda r: "[1]" in r
@@ -114,7 +116,7 @@ class AnswerVerificationGapClosureTests(unittest.TestCase):
             cms.normalize_query("Is the rate 1.5%?"),
             cms.normalize_query("Is the rate 1-5%?"),
         )
-        with mock.patch("app.database.get_answer_override") as mock_get:
+        with mock.patch("app.db.database.get_answer_override") as mock_get:
             mock_get.side_effect = lambda k: {"id": "ov1", "reply": "18%"} if k == "what is vat" else None
             found = cms.lookup("What is VAT?!")
             self.assertIsNotNone(found)
@@ -144,7 +146,7 @@ class RetrieverLifecycleAndTemporalTests(unittest.TestCase):
 
         # Simulate desynced BM25 state recovering when sentinel payload updates
         enc = retriever.BM25SparseEncoder().fit(["vat registration threshold is 300 million shillings"])
-        from app.indexer import _packed_bm25_state
+        from app.ingestion.indexer import _packed_bm25_state
 
         packed = _packed_bm25_state(enc.to_dict())
         r._client = mock.MagicMock()
@@ -191,7 +193,7 @@ class RetrieverLifecycleAndTemporalTests(unittest.TestCase):
 
     def test_g293_rag_tool_citation_offset_and_keyword_fallback_fy_filter(self) -> None:
         """G293: prompt_citation_offset_scope shifts RAG tool refs [k+1]..[k+m] and keyword fallback filters conflicting FYs."""
-        from app.service import _faq_hits_to_retrieval_hits
+        from app.rag.pipeline import _faq_hits_to_retrieval_hits
         from app.tools.rag_tool import SearchKnowledgeBaseTool, prompt_citation_offset_scope
 
         tool = SearchKnowledgeBaseTool()
@@ -236,7 +238,7 @@ class MultilingualAndSpeechHardeningTests(unittest.TestCase):
     def test_g188_resume_ticket_enforces_anonymous_vs_authenticated_owner(self) -> None:
         """G188: An anonymous caller (expected_user_id='') must not consume a ticket issued to an authenticated user."""
         import os
-        from app.flags import flags
+        from app.config.flags import flags
         from app.receptionist.low_bandwidth import mint_call_resume_ticket, verify_call_resume_ticket
 
         flags.set("call_drop_resume", True)
@@ -288,8 +290,8 @@ class MultilingualAndSpeechHardeningTests(unittest.TestCase):
             return "How do I pay Rental Income Tax?"
 
         mt.cache.clear()
-        with mock.patch("app.llm.translate_text", side_effect=_fake_translate), mock.patch(
-            "app.query.detect_language", return_value="en"
+        with mock.patch("app.rag.generator.translate_text", side_effect=_fake_translate), mock.patch(
+            "app.rag.query.detect_language", return_value="en"
         ):
             out = query.translate_query_for_retrieval(
                 "Ninawezaje kulipa kodi ya mapato ya upangishaji?", "sw"

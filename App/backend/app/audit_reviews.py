@@ -21,7 +21,7 @@ import time
 import uuid
 from typing import Any
 
-from . import database as db
+from .db import database as db
 from . import quality_audit, service_ratings
 
 ITEM_TYPES: tuple[str, ...] = ("ai_chat", "rating")

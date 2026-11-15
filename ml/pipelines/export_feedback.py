@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 def export_review_set(days: int = 30, output_dir: Path = Path("Data/eval/feedback")) -> dict:
     """Query the analytics DB and export review-worthy entries."""
-    from App.backend.app import database as db
+    from App.backend.app.db import database as db
 
     db.init_db()
     entries = db.export_review_feedback(days=days)

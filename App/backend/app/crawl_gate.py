@@ -39,7 +39,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from .crawl_corpus import CRAWL_STATE_NAME, CorpusSelection, _clean, _parse_time, load_crawl_state, review_pages
+from .ingestion.crawl_corpus import CRAWL_STATE_NAME, CorpusSelection, _clean, _parse_time, load_crawl_state, review_pages
 
 logger = logging.getLogger(__name__)
 
@@ -250,7 +250,7 @@ def vet_new_pdfs(
     candidate and forgotten by the ledger, so the next run looks at it afresh.
     """
     from .malware_scan import MalwareRejected, scan_bytes
-    from .pdf_corpus import inspect_pdf_for_prompt_injection
+    from .ingestion.pdf_corpus import inspect_pdf_for_prompt_injection
     from .pdf_guards import CORPUS_PDF_LIMITS, PdfRejected, inspect_pdf_bytes, validate_pdf_header
 
     known = before_state.get("pdf_hashes") or {}

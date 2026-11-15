@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app.faq_corpus import (
+from app.ingestion.faq_corpus import (
     CorpusValidationError,
     export_faq_csvs_to_jsonl,
     ingest_faq_jsonls,

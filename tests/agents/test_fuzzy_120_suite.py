@@ -15,10 +15,10 @@ import time
 import pytest
 
 from app.auth.dependencies import resolve_role
-from app.context_manager import RollingContextManager, extract_conversation_entities
-from app.entailment import numeric_contradiction
+from app.rag.context_manager import RollingContextManager, extract_conversation_entities
+from app.rag.entailment import numeric_contradiction
 from app.escalation_notify import team_for_topic
-from app.flags import flags
+from app.config.flags import flags
 from app.guardrails import (
     InputGuard,
     MAX_INPUT_LENGTH,
@@ -30,7 +30,7 @@ from app.malware_scan import MalwareRejected, scan_required
 from app.mt import citations_survived, figures_survived, units_survived
 from app.premise_guard import check_false_premise
 from app.production_readiness import gap_gate_errors
-from app.query import correct_spelling, rewrite_with_history
+from app.rag.query import correct_spelling, rewrite_with_history
 from app.resilience import CircuitBreaker, CircuitState
 from app.tax.money import to_decimal
 from app.tenancy import qdrant_payload_filter, rls_set_local_sql
@@ -201,7 +201,8 @@ class TestPillarIRobustness:
     def test_fzz_028_url_in_prompt(self):
         """FZZ-028: URL in prompt treated as plain text."""
         raw = "look at https://ura.go.ug/taxes/vat and tell me the rate"
-        assert "https://ura.go.ug" in raw
+        res = InputGuard().check(raw)
+        assert res.allowed is True
 
     def test_fzz_029_arithmetic_expression_safety(self):
         """FZZ-029: Mathematical expressions not passed to dangerous eval."""

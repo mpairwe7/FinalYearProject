@@ -177,7 +177,7 @@ VLLM_BASE_URL=http://vllm:8001/v1
 # CORS & Security
 CORS_ORIGINS=http://localhost:3300  # Comma-separated, no wildcard
 
-# Feature Flags (all FLAG_<NAME> env vars, see flags.py)
+# Feature Flags (all FLAG_<NAME> env vars, see config/flags.py)
 FLAG_CORRECTIVE_RAG=true      # Re-retrieve on low quality
 FLAG_SEMANTIC_CACHE=true      # Cache similar queries
 FLAG_QUERY_REWRITE=true       # Spell/abbrev/coreference
@@ -675,34 +675,39 @@ FinalYearProject/
 │   ├── backend/            # FastAPI REST API (v1.3.0)
 │   │   ├── app/
 │   │   │   ├── main.py     # 50+ API routes, SSE streaming, CORS, rate limiting, auth
-│   │   │   ├── models.py   # Pydantic v2 schemas (citations, escalation, speech, export)
-│   │   │   ├── service.py  # 12-stage RAG pipeline orchestrator + agentic routing
-│   │   │   ├── llm.py      # Qwen3-8B local generation + vLLM backend + tool-calling
-│   │   │   ├── query.py    # Query rewriting (abbreviations, spelling, coreference)
-│   │   │   ├── cache.py    # Semantic response cache (memory or Redis backend)
-│   │   │   ├── corrective_rag.py # Corrective re-retrieval + clarification
-│   │   │   ├── retriever.py # Hybrid retrieval (bge-m3+BM25+RRF+rerank+circuit breaker)
-│   │   │   ├── indexer.py  # PDF/CSV ingestion → Qdrant
+│   │   │   ├── api/
+│   │   │   │   └── models.py   # Pydantic v2 schemas (citations, escalation, speech, export)
+│   │   │   ├── rag/
+│   │   │   │   ├── pipeline.py  # 12-stage RAG pipeline orchestrator + agentic routing
+│   │   │   │   ├── generator.py      # Qwen3-8B local generation + vLLM backend + tool-calling
+│   │   │   │   ├── query.py    # Query rewriting (abbreviations, spelling, coreference)
+│   │   │   │   ├── cache.py    # Semantic response cache (memory or Redis backend)
+│   │   │   │   ├── corrective_rag.py # Corrective re-retrieval + clarification
+│   │   │   │   ├── retriever.py # Hybrid retrieval (bge-m3+BM25+RRF+rerank+circuit breaker)
+│   │   │   │   └── offline_rag.py # FAISS offline retrieval fallback
+│   │   │   ├── ingestion/
+│   │   │   │   └── indexer.py  # PDF/CSV ingestion → Qdrant
+│   │   │   ├── db/
+│   │   │   │   ├── database.py # SQLite + WAL + 11 tables + data retention TTLs
+│   │   │   │   └── postgres.py # PostgreSQL analytics backend (opt-in)
+│   │   │   ├── config/
+│   │   │   │   └── flags.py    # Feature flag registry (91 flags, env-backed)
 │   │   │   ├── guardrails.py # OWASP LLM Top 10 2025 (input/output/indirect injection)
 │   │   │   ├── tracing.py  # OpenTelemetry GenAI 2025 semconv tracing
-│   │   │   ├── database.py # SQLite + WAL + 11 tables + data retention TTLs
-│   │   │   ├── postgres.py # PostgreSQL analytics backend (opt-in)
 │   │   │   ├── analytics.py # Prometheus-compatible metrics + middleware
 │   │   │   ├── speech_service.py # ASR (Whisper) + TTS (Piper) + MT + streaming extensions
 │   │   │   ├── sunbird.py  # Sunbird AI cloud fallback (Ugandan languages)
 │   │   │   ├── voice_stream.py # Streaming voice engine (VAD, VoiceSession, barge-in)
 │   │   │   ├── voice_ws.py    # WebSocket handler for /v1/voice/chat/stream
 │   │   │   ├── voice_consent.py # Voice consent, audit log, retention policy
-│   │   │   ├── offline_rag.py # FAISS offline retrieval fallback
 │   │   │   ├── accent_detector.py # Prosodic accent classifier
-│   │   │   ├── flags.py    # Feature flag registry (91 flags, env-backed)
 │   │   │   ├── resilience.py # Circuit breaker (exponential backoff)
 │   │   │   ├── pdf_export.py # Branded PDF conversation/tax export
 │   │   │   ├── evaluation.py # RAG evaluation harness (8 metrics)
 │   │   │   ├── auth/       # JWT auth (HS256 dev / RS256 prod OIDC)
 │   │   │   │   ├── jwt_auth.py      # Token verification + JWKS cache
 │   │   │   │   ├── dependencies.py  # FastAPI DI (current_user, require_role)
-│   │   │   │   └── models.py        # AuthUser, UserProfile, ConsentReceipt
+│   │   │   │   └── models.py            # AuthUser, UserProfile, ConsentReceipt
 │   │   │   ├── agents/     # Supervisor + specialist routing
 │   │   │   │   ├── supervisor.py    # Query router (7 routes)
 │   │   │   │   ├── state.py         # AgentRoute, RouteDecision enums
@@ -720,7 +725,7 @@ FinalYearProject/
 │   │   │   │   ├── slots.py         # Slot validators (TIN, email, phone, date)
 │   │   │   │   └── flows/           # YAML workflow definitions
 │   │   │   ├── memory/     # Personalization memory (consent-gated)
-│   │   │   │   ├── service.py       # Unified memory interface
+│   │   │   │   ├── service.py            # Unified memory interface
 │   │   │   │   ├── semantic.py      # User facts with decay
 │   │   │   │   ├── episodic.py      # Conversation summaries
 │   │   │   │   ├── working.py       # Transient session state
@@ -733,7 +738,6 @@ FinalYearProject/
 │   │   │   ├── voice_stream.py      # Streaming voice engine (VAD, VoiceSession, barge-in)
 │   │   │   ├── voice_ws.py         # WebSocket handler for streaming voice chat
 │   │   │   ├── voice_consent.py    # Voice consent, audit log, retention policy
-│   │   │   ├── offline_rag.py      # FAISS offline retrieval fallback
 │   │   │   └── accent_detector.py  # Prosodic accent classifier (5 UG profiles)
 │   │   ├── tests/          # Backend test suite
 │   │   └── requirements.txt
@@ -928,10 +932,10 @@ python governance/compliance_check.py
 ### Index Documents into Qdrant
 ```bash
 # Incremental upsert
-python -m App.backend.app.indexer
+python -m App.backend.app.ingestion.indexer
 
 # Recreate collection from scratch
-python -m App.backend.app.indexer --recreate
+python -m App.backend.app.ingestion.indexer --recreate
 ```
 
 ### Export Production Feedback

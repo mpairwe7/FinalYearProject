@@ -49,6 +49,6 @@ def pin_for_turn(as_of: _dt.date | None = None) -> KernelPin:
 
 def active_pin() -> dict[str, Any] | None:
     """The pin of the running turn, or ``None`` outside a turn."""
-    from ..turn_context import ACTIVE_KERNEL_PIN
+    from ..rag.turn_context import ACTIVE_KERNEL_PIN
 
     return ACTIVE_KERNEL_PIN.get()

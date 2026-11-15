@@ -36,7 +36,7 @@ from . import ws_concurrency
 from .analytics import MetricSpec, record_mapped
 from .auth import revocation
 from .auth.jwt_auth import JWTAuthError, JWTVerifier
-from .flags import flags
+from .config.flags import flags
 from .voice_stream import VADConfig, VoiceSession, VoiceStreamEvent
 
 logger = logging.getLogger(__name__)

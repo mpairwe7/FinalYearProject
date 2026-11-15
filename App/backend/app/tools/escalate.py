@@ -142,8 +142,8 @@ class EscalateToHumanTool(Tool):
         tenant_id: str = "default",
     ) -> dict[str, Any]:
         try:
-            from .. import database as db  # noqa: PLC0415
-            from ..flags import flags  # noqa: PLC0415
+            from ..db import database as db  # noqa: PLC0415
+            from ..config.flags import flags  # noqa: PLC0415
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "error": f"database unavailable: {e}"}
 

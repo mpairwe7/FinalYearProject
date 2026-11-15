@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from app.flags import flags
+from app.config.flags import flags
 from app.production_readiness import (
     COMMERCIAL_KEY_ENV_VARS,
     assert_sovereign_mode,
@@ -12,7 +12,7 @@ from app.production_readiness import (
     sovereign_mode_errors,
 )
 from app.providers import gateway as gw
-from app.service import _llm_cloud_fallback
+from app.rag.pipeline import _llm_cloud_fallback
 
 
 def _clean_sovereign_env(monkeypatch: pytest.MonkeyPatch) -> None:

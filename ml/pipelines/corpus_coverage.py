@@ -30,7 +30,7 @@ printed by question so the output is a work list rather than a percentage.
 Three modes:
 
 ``--mode corpus`` (default)
-    Offline. Drives ``app.service``'s keyword + priority + filter path — the
+    Offline. Drives ``app.rag.pipeline``'s keyword + priority + filter path — the
     one production serves from when Qdrant and the LLM are absent — so it
     needs no network, no model and no vector store, and can gate every PR.
     The indexed corpus is English, so a Luganda or Kiswahili question only
@@ -299,7 +299,7 @@ def _corpus_prober(translate: bool) -> Callable[..., ProbeResult]:
     os.environ.setdefault("QDRANT_ENABLED", "false")
     os.environ.setdefault("SPEECH_ENABLED", "false")
 
-    from app.service import (  # noqa: PLC0415 — import cost only when this mode runs
+    from app.rag.pipeline import (  # noqa: PLC0415 — import cost only when this mode runs
         _DATA_DIR,
         ChatModel,
         _faq_hits_to_retrieval_hits,
@@ -314,7 +314,7 @@ def _corpus_prober(translate: bool) -> Callable[..., ProbeResult]:
     model._faq_index, _ = _load_faq_data(Path(_DATA_DIR))
 
     def _english(question: str, language: str) -> tuple[str, bool]:
-        from app.query import english_retrieval_query  # noqa: PLC0415
+        from app.rag.query import english_retrieval_query  # noqa: PLC0415
 
         english = english_retrieval_query(question, language)
         return english, english.strip().casefold() != question.strip().casefold()

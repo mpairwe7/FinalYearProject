@@ -23,7 +23,7 @@ Design invariants (see docs/URA_Chatbot_Roadmap_2026_Enhanced.md §6):
   the same hash.
 
 Feature flag: ``FLAG_AUDIT_LEDGER`` — when on, every agentic turn
-in service.generate() appends an event.  Default false so the
+in pipeline.generate() appends an event.  Default false so the
 compute overhead is opt-in during rollout.
 """
 

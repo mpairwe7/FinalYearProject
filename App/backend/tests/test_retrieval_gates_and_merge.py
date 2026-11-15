@@ -23,11 +23,11 @@ from typing import Any
 from unittest import mock
 
 import numpy as np
-from app import cache as cache_mod
-from app import retriever as retriever_mod
-from app.corrective_rag import _avg_relevance
+from app.rag import cache as cache_mod
+from app.rag import retriever as retriever_mod
+from app.rag.corrective_rag import _avg_relevance
 from app.guardrails import OutputGuard
-from app.retriever import (
+from app.rag.retriever import (
     LEXICAL_RELEVANCE_FLOOR,
     BM25SparseEncoder,
     HybridRetriever,
@@ -134,7 +134,7 @@ class RerankFailureIsolationTests(unittest.TestCase):
 
     def test_a_reranker_failure_serves_unscored_hits_and_spares_the_circuit(self) -> None:
         retriever = self._retriever()
-        with mock.patch("app.flags.flags.is_enabled", return_value=True), mock.patch.object(
+        with mock.patch("app.config.flags.flags.is_enabled", return_value=True), mock.patch.object(
             retriever_mod, "_filter_tombstoned_candidates", side_effect=lambda c: c
         ), mock.patch.object(retriever_mod.metrics, "inc") as inc:
             for _ in range(4):
@@ -161,11 +161,11 @@ class GenerationInputsTests(unittest.TestCase):
             self.assertTrue(cache_mod.cache_generation().startswith("+bbbb2222"))
 
     def test_a_store_never_read_never_repeats_a_stamp(self) -> None:
-        from app import database as db
+        from app.db import database as db
 
         self.addCleanup(setattr, retriever_mod, "_last_tombstones", retriever_mod._last_tombstones)
         retriever_mod._last_tombstones = None
-        with mock.patch("app.flags.flags.is_enabled", return_value=True), mock.patch.object(
+        with mock.patch("app.config.flags.flags.is_enabled", return_value=True), mock.patch.object(
             db, "get_active_corpus_tombstones", side_effect=RuntimeError("database is locked")
         ):
             first, second = cache_mod._read_tombstone_stamp(), cache_mod._read_tombstone_stamp()
@@ -174,11 +174,11 @@ class GenerationInputsTests(unittest.TestCase):
 
     def test_an_outage_after_a_good_read_stamps_what_retrieval_applies(self) -> None:
         """The cache and retrieval read the same tombstones through the same outage rule."""
-        from app import database as db
+        from app.db import database as db
 
         self.addCleanup(setattr, retriever_mod, "_last_tombstones", retriever_mod._last_tombstones)
         rows = [{"id": "tomb_1", "source_uri": "old.pdf", "chunk_id": ""}]
-        with mock.patch("app.flags.flags.is_enabled", return_value=True):
+        with mock.patch("app.config.flags.flags.is_enabled", return_value=True):
             with mock.patch.object(db, "get_active_corpus_tombstones", return_value=rows):
                 healthy = cache_mod._read_tombstone_stamp()
             with mock.patch.object(db, "get_active_corpus_tombstones", side_effect=RuntimeError("locked")):
@@ -203,12 +203,12 @@ class SearchFailureDegradedTests(unittest.TestCase):
 
         def scenario() -> None:
             broken = self._retriever(mock.Mock(query_points=mock.Mock(side_effect=TimeoutError("qdrant timed out"))))
-            with mock.patch("app.flags.flags.is_enabled", return_value=False):
+            with mock.patch("app.config.flags.flags.is_enabled", return_value=False):
                 self.assertEqual(broken.search("vat rate"), [])
             self.assertTrue(broken.serving_degraded(), "the circuit is still CLOSED after one failure")
             self.assertFalse(broken._circuit.state is not retriever_mod.CircuitState.CLOSED)
             healthy = self._retriever(mock.Mock(query_points=mock.Mock(return_value=types.SimpleNamespace(points=[]))))
-            with mock.patch("app.flags.flags.is_enabled", return_value=False):
+            with mock.patch("app.config.flags.flags.is_enabled", return_value=False):
                 healthy.search_planned("vat rate")
             self.assertFalse(healthy.serving_degraded(), "a new planned search starts clean")
 
@@ -234,7 +234,7 @@ class RerankScaleIsPerModelTests(unittest.TestCase):
     def _rerank(self, retriever: HybridRetriever, scores: list[float]) -> list[float]:
         retriever._reranker.predict = mock.Mock(return_value=list(scores))
         candidates = [{"text": f"p{i}", "source": "ura_vat_faqs.csv"} for i in range(len(scores))]
-        with mock.patch("app.flags.flags.is_enabled", return_value=True):
+        with mock.patch("app.config.flags.flags.is_enabled", return_value=True):
             retriever._rerank("What is the VAT rate?", candidates)
         return sorted(c["score_calibrated"] for c in candidates)
 

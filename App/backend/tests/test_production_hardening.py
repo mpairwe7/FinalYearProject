@@ -12,7 +12,7 @@ from unittest.mock import patch
 from fastapi import HTTPException, Request
 
 from app.auth.dependencies import current_user, optional_user
-from app.flags import flags
+from app.config.flags import flags
 from app.main import (
     _apply_persisted_flag_overrides,
     _initialize_analytics_database,

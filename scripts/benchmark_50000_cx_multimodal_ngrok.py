@@ -60,12 +60,12 @@ from app.portal_copilot import (  # noqa: E402
     detect_portal_task_intent,
     extract_task_entities,
 )
-from app.query import (  # noqa: E402
+from app.rag.query import (  # noqa: E402
     canonicalize_tax_terms,
     detect_language,
     english_retrieval_query,
 )
-from app.query import (  # noqa: E402
+from app.rag.query import (  # noqa: E402
     normalize as normalize_query,
 )
 from app.receptionist.clarify import classify_yes_no, entity_mishear  # noqa: E402

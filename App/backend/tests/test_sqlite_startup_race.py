@@ -4,7 +4,7 @@ The Space runs a chat process and a call process (ADR-0043) that start together
 on one new analytics database. Switching the file to WAL needs it to itself, and
 SQLite answers "database is locked" at once instead of waiting out the busy
 timeout. On 2026-11-12 one process's ``init_db`` failed that way (the Space log:
-``database.py`` ``_get_connection``, ``PRAGMA journal_mode=WAL``). Outside
+``db/database.py`` ``_get_connection``, ``PRAGMA journal_mode=WAL``). Outside
 production the process carried on without its startup step; in production it
 would have exited.
 """
@@ -22,7 +22,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from app import database as db
+from app.db import database as db
 
 BACKEND = Path(__file__).resolve().parents[1]
 
@@ -100,7 +100,7 @@ class WalSwitchTests(unittest.TestCase):
 _RACER = textwrap.dedent(
     """
     import os, sys
-    from app import database
+    from app.db import database
     go = sys.argv[1]
     while not os.path.exists(go):
         pass

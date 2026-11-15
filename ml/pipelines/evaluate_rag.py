@@ -36,7 +36,7 @@ def _load_text_signals():
     """Load the runtime text-signals module (stdlib-only) by file path.
 
     Keeps this offline harness scoring EXACTLY like the runtime scorer in
-    ``App/backend/app/retriever.py`` — courtesy sentences excluded,
+    ``App/backend/app/rag/retriever.py`` — courtesy sentences excluded,
     content-token overlap — without importing the backend package (App/ is
     not a Python package).
     """

@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 
-from app import database as db
+from app.db import database as db
 from app.cms import lookup, normalize_query, upsert
 from app.notify import dispatch
 from app.reminders import Reminder
@@ -104,7 +104,7 @@ def test_notify_outbox_is_mock(mem_db) -> None:
 
 
 def test_cms_exact_match_roundtrip(mem_db) -> None:
-    from app.flags import flags
+    from app.config.flags import flags
 
     flags.set("answer_overrides", True)
     row = upsert("What is the VAT rate?", "Staff override: 18%.", source_url="https://ura.go.ug")

@@ -29,7 +29,7 @@ from unittest import mock
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from app import database as db
+from app.db import database as db
 from app import main as main_mod
 from app.analytics import metrics
 from app.auth import make_dev_token
@@ -126,7 +126,7 @@ def test_an_unreadable_sqlite_store_raises_instead_of_reading_empty(monkeypatch)
 
 
 def test_the_postgres_store_without_a_pool_raises() -> None:
-    from app import postgres
+    from app.db import postgres
 
     with mock.patch.object(postgres, "_get_pool", return_value=None):
         with pytest.raises(RuntimeError):

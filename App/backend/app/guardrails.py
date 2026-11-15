@@ -159,7 +159,7 @@ def _canonicalize_text(text: str) -> str:
 
 # System prompt phrases that must never appear verbatim in a model response
 # (LLM07 — System Prompt Leakage, OWASP 2025). Each one must occur in a
-# runtime prompt (llm.SYSTEM_PROMPT or service._build_fallback_prompt):
+# runtime prompt (generator.SYSTEM_PROMPT or pipeline._build_fallback_prompt):
 # tests/agents/test_ai_security_layer_2026_11.py fails otherwise. Two entries
 # named a persona the prompt had dropped, so a leak of its opening line went
 # unseen (G465). Matching tolerates Markdown emphasis between words, since
@@ -1782,12 +1782,12 @@ def _shingles(words: list[str]) -> set[tuple[str, ...]]:
 def _system_prompt_shingles() -> frozenset[tuple[str, ...]]:
     """Word 8-grams of the live system prompt, less the text it tells the model to say (G465).
 
-    Read from ``llm.SYSTEM_PROMPT`` itself, so a prompt edit cannot leave the
+    Read from ``generator.SYSTEM_PROMPT`` itself, so a prompt edit cannot leave the
     detector behind the way the signature list was. Empty if the prompt
     cannot be imported; the signature phrases still apply.
     """
     try:
-        from .llm import CLOUD_SYSTEM_PROMPT, SYSTEM_PROMPT
+        from .rag.generator import CLOUD_SYSTEM_PROMPT, SYSTEM_PROMPT
     except Exception:  # pragma: no cover - import guard for partial installs
         logger.debug("System prompt unavailable for leakage fingerprint", exc_info=True)
         return frozenset()
@@ -1852,8 +1852,8 @@ class OutputGuard:
         """Replace detected PII with redaction markers (LLM02), preserving user-stated identifiers."""
         if allowed_values is None:
             # From the leaf module, not the orchestrator: the security layer must
-            # not depend on service.py, and must not fail silently (ADR-0031).
-            from .turn_context import ACTIVE_USER_STATED_IDS
+            # not depend on rag/pipeline.py, and must not fail silently (ADR-0031).
+            from .rag.turn_context import ACTIVE_USER_STATED_IDS
 
             allowed_values = ACTIVE_USER_STATED_IDS.get()
         return redact_pii_text(text, allowed_values=allowed_values)
@@ -2333,7 +2333,7 @@ class OutputGuard:
         if not contexts:
             return GuardResult(allowed=True, sanitized_text=answer)
 
-        from .retriever import HybridRetriever
+        from .rag.retriever import HybridRetriever
 
         score = HybridRetriever.compute_faithfulness(answer, contexts)
         if score < threshold:
@@ -2370,7 +2370,7 @@ class OutputGuard:
         if not hits:
             _record_abstention("no_hits", True)
             return True
-        from .retriever import LEXICAL_RELEVANCE_FLOOR, gating_relevance
+        from .rag.retriever import LEXICAL_RELEVANCE_FLOOR, gating_relevance
 
         loc = (locale or "en").strip().lower().split("-")[0]
         if loc == "lg":

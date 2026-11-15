@@ -80,7 +80,7 @@ class TestConsentGate:
         def _boom(*args, **kwargs):
             raise RuntimeError("db down")
 
-        monkeypatch.setattr("app.database.has_active_consent", _boom)
+        monkeypatch.setattr("app.db.database.has_active_consent", _boom)
         result = due_reminders(user["id"], profile=ENABLED_PROFILE, today=JAN_12)
         assert not result
         assert result.skipped_reason == "consent lookup failed"
@@ -215,14 +215,14 @@ class TestStaleDatabaseMigration:
         return conn
 
     def test_the_rebuild_preserves_existing_receipts(self):
-        from app import database as db
+        from app.db import database as db
 
         conn = self._stale_db()
         db._refresh_consent_purpose_check(conn)
         assert conn.execute("SELECT COUNT(*) FROM consent_receipts").fetchone()[0] == 1
 
     def test_the_new_purpose_is_accepted_afterwards(self):
-        from app import database as db
+        from app.db import database as db
 
         conn = self._stale_db()
         db._refresh_consent_purpose_check(conn)
@@ -236,7 +236,7 @@ class TestStaleDatabaseMigration:
 
     def test_the_constraint_is_not_simply_dropped(self):
         # The remedy must not be "remove the check".
-        from app import database as db
+        from app.db import database as db
 
         conn = self._stale_db()
         db._refresh_consent_purpose_check(conn)
@@ -247,7 +247,7 @@ class TestStaleDatabaseMigration:
             )
 
     def test_it_is_a_no_op_when_the_schema_is_current(self, tmp_db):
-        from app import database as db
+        from app.db import database as db
 
         conn = tmp_db._get_connection()
         before = conn.execute(

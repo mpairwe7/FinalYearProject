@@ -25,7 +25,7 @@ from __future__ import annotations
 import unittest
 import unittest.mock as mock
 
-from app.query import canonicalize_tax_terms
+from app.rag.query import canonicalize_tax_terms
 
 
 class CanonicalizeTaxTermsTest(unittest.TestCase):
@@ -62,9 +62,9 @@ class DeterministicRoutingReachabilityTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        from app import service
+        from app.rag import pipeline
 
-        cls.model = service.ChatModel()
+        cls.model = pipeline.ChatModel()
 
     def _mode(self, text: str) -> str | None:
         canon = canonicalize_tax_terms(text)
@@ -84,41 +84,41 @@ class EffectiveLocaleTest(unittest.TestCase):
     """Localization keys off the detected locale, not the requested one."""
 
     def test_autodetected_locale_drives_localization(self) -> None:
-        from app import service
+        from app.rag import pipeline
 
-        model = service.ChatModel.__new__(service.ChatModel)
+        model = pipeline.ChatModel.__new__(pipeline.ChatModel)
         detected = {"reply": "The VAT rate is 18%.", "locale": "lg"}
-        with mock.patch.object(service.ChatModel, "_generate_en", return_value=detected), \
+        with mock.patch.object(pipeline.ChatModel, "_generate_en", return_value=detected), \
                 mock.patch.object(
-                    service, "localize_reply", return_value="Omusolo gwa VAT..."
+                    pipeline, "localize_reply", return_value="Omusolo gwa VAT..."
                 ) as localize:
             # Caller sends no locale at all — the default "en". _generate_en is
             # mocked above, so nothing reaches a model; this asserts only which
             # locale generate() hands to localize_reply.
             # nosemgrep: ura-llm01-raw-user-input-to-llm
-            out = service.ChatModel.generate(model, message="Omusolo gwa VAT guli gwa bbeeyi ki?")
+            out = pipeline.ChatModel.generate(model, message="Omusolo gwa VAT guli gwa bbeeyi ki?")
         localize.assert_called_once()
         self.assertEqual(localize.call_args.args[1], "lg")
         self.assertEqual(out["reply"], "Omusolo gwa VAT...")
 
     def test_english_turn_is_not_sent_for_translation(self) -> None:
-        from app import service
+        from app.rag import pipeline
 
-        model = service.ChatModel.__new__(service.ChatModel)
+        model = pipeline.ChatModel.__new__(pipeline.ChatModel)
         english = {"reply": "The VAT rate is 18%.", "locale": "en"}
-        with mock.patch.object(service.ChatModel, "_generate_en", return_value=english), \
-                mock.patch.object(service, "localize_reply") as localize:
+        with mock.patch.object(pipeline.ChatModel, "_generate_en", return_value=english), \
+                mock.patch.object(pipeline, "localize_reply") as localize:
             # nosemgrep: ura-llm01-raw-user-input-to-llm  # _generate_en mocked; no model call.
-            out = service.ChatModel.generate(model, message="What is the VAT rate?")
+            out = pipeline.ChatModel.generate(model, message="What is the VAT rate?")
         localize.assert_not_called()
         self.assertEqual(out["reply"], "The VAT rate is 18%.")
         self.assertEqual(out["reply_locale"], "en")
 
     def test_reply_locale_is_the_language_the_reply_is_in(self) -> None:
         """Voice reads reply_locale: English served after failed MT gets the English voice."""
-        from app import service
+        from app.rag import pipeline
 
-        model = service.ChatModel.__new__(service.ChatModel)
+        model = pipeline.ChatModel.__new__(pipeline.ChatModel)
         english = "The VAT rate is 18%."
         luganda = "Buli kampuni esasula omusolo era esindika alipoota."
         cases = (
@@ -129,11 +129,11 @@ class EffectiveLocaleTest(unittest.TestCase):
         for label, reply, localized, expected in cases:
             with self.subTest(label), \
                     mock.patch.object(
-                        service.ChatModel, "_generate_en", return_value={"reply": reply, "locale": "lg"}
+                        pipeline.ChatModel, "_generate_en", return_value={"reply": reply, "locale": "lg"}
                     ), \
-                    mock.patch.object(service, "localize_reply", return_value=localized):
+                    mock.patch.object(pipeline, "localize_reply", return_value=localized):
                 # nosemgrep: ura-llm01-raw-user-input-to-llm  # _generate_en mocked; no model call.
-                out = service.ChatModel.generate(model, message="Omusolo gwa VAT guli gwa bbeeyi ki?")
+                out = pipeline.ChatModel.generate(model, message="Omusolo gwa VAT guli gwa bbeeyi ki?")
                 self.assertEqual(out["reply_locale"], expected)
 
 

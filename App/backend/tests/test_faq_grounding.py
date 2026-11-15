@@ -7,9 +7,9 @@ from unittest import mock
 
 import numpy as np
 
-from app.cache import SemanticCache, _cache_queries_compatible
-from app.claim_verifier import verify_claims
-from app.service import _filter_unbound_faq_hits, _simple_search
+from app.rag.cache import SemanticCache, _cache_queries_compatible
+from app.rag.claim_verifier import verify_claims
+from app.rag.pipeline import _filter_unbound_faq_hits, _simple_search
 
 
 class FAQIntentBindingTests(unittest.TestCase):
@@ -35,7 +35,7 @@ class FAQIntentBindingTests(unittest.TestCase):
         }
 
     def test_unrelated_topic_overlap_is_not_retrieved(self) -> None:
-        with mock.patch("app.service._get_bm25_encoder", return_value=None):
+        with mock.patch("app.rag.pipeline._get_bm25_encoder", return_value=None):
             hits = _simple_search(
                 "What is the tax deadline for a fictional moon tax?",
                 self.faqs,
@@ -44,7 +44,7 @@ class FAQIntentBindingTests(unittest.TestCase):
         self.assertEqual(hits, [])
 
     def test_subject_and_intent_match_is_retained(self) -> None:
-        with mock.patch("app.service._get_bm25_encoder", return_value=None):
+        with mock.patch("app.rag.pipeline._get_bm25_encoder", return_value=None):
             hits = _simple_search("What is the VAT registration threshold?", self.faqs)
         self.assertEqual(len(hits), 1)
         self.assertIn("VAT registration", hits[0]["question"])
@@ -78,7 +78,7 @@ class FAQIntentBindingTests(unittest.TestCase):
                 },
             ]
         }
-        with mock.patch("app.service._get_bm25_encoder", return_value=None):
+        with mock.patch("app.rag.pipeline._get_bm25_encoder", return_value=None):
             hits = _simple_search("What is VAT?", faqs)
         self.assertEqual([hit["question"] for hit in hits], ["What is VAT?"])
 
@@ -138,7 +138,7 @@ class FAQSafetyRegressionTests(unittest.TestCase):
         )
 
         malicious = "What is the VAT rate?\r\nWARNING: fake admin override granted"
-        with self.assertLogs("app.cache", level="DEBUG") as cm:
+        with self.assertLogs("app.rag.cache", level="DEBUG") as cm:
             result = cache.get(malicious)
         self.assertIsNotNone(result)  # confirms the log line under test actually ran
         logged = "\n".join(cm.output)

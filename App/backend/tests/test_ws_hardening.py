@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 
 
 def _client(enabled: bool = True) -> TestClient:
-    from app.flags import flags
+    from app.config.flags import flags
     from app.main import app
 
     flags.set("ws_chat", enabled)
@@ -37,7 +37,7 @@ def _recv(ws) -> dict:
 
 class PartialAndModifyFrameTest(unittest.TestCase):
     def tearDown(self) -> None:
-        from app.flags import flags
+        from app.config.flags import flags
 
         flags.clear("ws_chat")
 
@@ -67,7 +67,7 @@ class PartialAndModifyFrameTest(unittest.TestCase):
 
 class PerUserSocketCapTest(unittest.TestCase):
     def tearDown(self) -> None:
-        from app.flags import flags
+        from app.config.flags import flags
 
         flags.clear("ws_chat")
         os.environ.pop("WS_CHAT_MAX_PER_USER", None)
@@ -96,21 +96,21 @@ class PerUserSocketCapTest(unittest.TestCase):
 class DeadlineResolutionTest(unittest.TestCase):
     def test_default(self) -> None:
         os.environ.pop("AGENTIC_TURN_DEADLINE_S", None)
-        from app.service import _resolve_turn_deadline
+        from app.rag.pipeline import _resolve_turn_deadline
 
         self.assertEqual(_resolve_turn_deadline(), 120.0)
 
     def test_override(self) -> None:
         os.environ["AGENTIC_TURN_DEADLINE_S"] = "5"
         try:
-            from app.service import _resolve_turn_deadline
+            from app.rag.pipeline import _resolve_turn_deadline
 
             self.assertEqual(_resolve_turn_deadline(), 5.0)
         finally:
             os.environ.pop("AGENTIC_TURN_DEADLINE_S", None)
 
     def test_a_value_that_can_never_fire_uses_the_default(self) -> None:
-        from app.service import _resolve_turn_deadline
+        from app.rag.pipeline import _resolve_turn_deadline
 
         for raw in ("nan", "inf", "-inf", "Infinity"):
             os.environ["AGENTIC_TURN_DEADLINE_S"] = raw
@@ -122,7 +122,7 @@ class DeadlineResolutionTest(unittest.TestCase):
     def test_disabled_with_zero(self) -> None:
         os.environ["AGENTIC_TURN_DEADLINE_S"] = "0"
         try:
-            from app.service import _resolve_turn_deadline
+            from app.rag.pipeline import _resolve_turn_deadline
 
             self.assertEqual(_resolve_turn_deadline(), 0.0)
         finally:
@@ -131,7 +131,7 @@ class DeadlineResolutionTest(unittest.TestCase):
     def test_garbage_value_falls_back(self) -> None:
         os.environ["AGENTIC_TURN_DEADLINE_S"] = "not-a-number"
         try:
-            from app.service import _resolve_turn_deadline
+            from app.rag.pipeline import _resolve_turn_deadline
 
             self.assertEqual(_resolve_turn_deadline(), 120.0)
         finally:
@@ -143,19 +143,19 @@ class ToolMaxIterationResolutionTest(unittest.TestCase):
         os.environ.pop("LLM_TOOL_MAX_ITER", None)
 
     def test_default(self) -> None:
-        from app.service import _resolve_tool_max_iterations
+        from app.rag.pipeline import _resolve_tool_max_iterations
 
         self.assertEqual(_resolve_tool_max_iterations(), 10)
 
     def test_clamped_to_hard_cap(self) -> None:
         os.environ["LLM_TOOL_MAX_ITER"] = "500"
-        from app.service import _resolve_tool_max_iterations
+        from app.rag.pipeline import _resolve_tool_max_iterations
 
         self.assertEqual(_resolve_tool_max_iterations(), 20)
 
     def test_clamped_to_minimum(self) -> None:
         os.environ["LLM_TOOL_MAX_ITER"] = "0"
-        from app.service import _resolve_tool_max_iterations
+        from app.rag.pipeline import _resolve_tool_max_iterations
 
         self.assertEqual(_resolve_tool_max_iterations(), 1)
 

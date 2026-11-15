@@ -15,8 +15,8 @@ from unittest import mock
 import pytest
 from app import tools as tools_pkg
 from app.audit import governance_v3 as gov
-from app.flags import flags
-from app.service import ChatModel
+from app.config.flags import flags
+from app.rag.pipeline import ChatModel
 from app.tools import Tool, ToolRegistry, ToolSchema
 
 # The module, not the name: ``fresh_registry`` reloads it, which makes a new ContextVar,
@@ -75,7 +75,7 @@ class TestTheToolReachesAnOfficer:
         conversation = f"c-{uuid.uuid4().hex[:8]}"
         token = escalate_tool.ESCALATION_ROUTE.set(_route(_model(), conversation))
         try:
-            with mock.patch("app.service.notify_ticket_created") as notify:
+            with mock.patch("app.rag.pipeline.notify_ticket_created") as notify:
                 ToolRegistry.call("escalate_to_human", {"reason": "needs review"}, user_id="u1")
         finally:
             escalate_tool.ESCALATION_ROUTE.reset(token)

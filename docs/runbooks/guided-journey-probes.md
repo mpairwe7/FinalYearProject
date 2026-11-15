@@ -12,7 +12,7 @@ Retention and subject export/erasure behavior updated 2026-09-30.
 
 ## When to run it
 
-After any change to routing (`agents/patterns/*`, `service._maybe_handle_workflow`),
+After any change to routing (`agents/patterns/*`, `pipeline._maybe_handle_workflow`),
 to a flow under `app/workflows/flows/`, to `app/text_signals.py` or
 `app/turn_guidance.py`, and after every deploy of the api image. It is a
 canary: exit status 1 means at least one case missed.
@@ -46,20 +46,20 @@ stacks, not production.
 
 | Behaviour | Cases | Code |
 | --- | --- | --- |
-| A how-to question is answered and offers the matching journey | how-to return, TCC need, vehicle how-to | `turn_guidance.guided_mode_action`; G39 entrance rule in `service._maybe_handle_workflow` |
+| A how-to question is answered and offers the matching journey | how-to return, TCC need, vehicle how-to | `turn_guidance.guided_mode_action`; G39 entrance rule in `pipeline._maybe_handle_workflow` |
 | An explicit request starts the journey | help-me return/TIN, VAT walkthrough, PRN, customs, objection, TCC guide, imported car | `WorkflowRegistry.match_trigger` (normalised, name as trigger) |
 | The TIN guide does not ask for identifiers or claim registration | individual/company TIN guide | `app/workflows/flows/tin_registration.yaml`; `test_tin_guide_avoids_personal_data_and_makes_no_submission_claim` |
 | Invoice review asks only whether TIN fields are present and never claims a live EFRIS check | invoice review | `app/workflows/flows/audit_invoice_compliance.yaml`; `test_invoice_review_does_not_collect_tins_or_claim_live_efris_verification` |
 | "Help me …" gets no stress opener | help-me return/TIN | `text_signals._DISTRESS_PATTERNS` |
 | Only account-state questions escalate | how-to return (no), "What is my balance?" (yes) | `HOW_TO_QUESTION_RE` in `agents/patterns/en.py` |
 | An explicit human request escalates | "I want to talk to a person" | supervisor escalation rules |
-| Self-harm gets crisis lines, no tax content | crisis | `text_signals.detect_crisis`, `service._crisis_support_result` |
-| A feeling with no task gets a clarifying question | feeling-only turn | `text_signals.is_feeling_only`, `service._conversation_repair_result` |
+| Self-harm gets crisis lines, no tax content | crisis | `text_signals.detect_crisis`, `pipeline._crisis_support_result` |
+| A feeling with no task gets a clarifying question | feeling-only turn | `text_signals.is_feeling_only`, `pipeline._conversation_repair_result` |
 | Distress across turns brings in an officer | sustained frustration (3 turns) | repair's second reply, or `distress_trajectory` |
 | "I'm …" still reads as a feeling | contraction | `_FEELING_WORDS` includes contraction fragments |
 | A past event does not start a flow | "I filed my return yesterday but …" | `_VERB_FORMS` folds "-ing" forms only |
 | "nil return" still starts Return Filing | nil return | `_RETURN_QUALIFIER_RE` leaves "nil" alone |
-| Asking for another flow inside one switches | TCC, then "help me file my return" | `service._leaves_flow_for_another` |
+| Asking for another flow inside one switches | TCC, then "help me file my return" | `pipeline._leaves_flow_for_another` |
 | "Help me" does not exempt an account problem | "Please help me, my account is locked" | `HOW_TO_QUESTION_RE` has no "help me" |
 | Luganda / Kiswahili questions are answered in that language | Luganda TIN, Kiswahili TIN | `localize_reply` (G64 open for Kiswahili) |
 

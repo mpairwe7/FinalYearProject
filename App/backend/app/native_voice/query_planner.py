@@ -83,7 +83,7 @@ class QueryPlanner:
     Args:
         supervisor: The existing :class:`Supervisor` instance for
             rule-based query classification.
-        cache: Optional semantic cache (``service._SemanticCache``)
+        cache: Optional semantic cache (``rag.cache.SemanticCache``)
             for near-duplicate query detection.
     """
 

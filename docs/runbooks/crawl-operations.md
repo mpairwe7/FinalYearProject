@@ -11,7 +11,7 @@ this page. It reads `ura.go.ug`, `www.ura.go.ug`, `uramedia.ura.go.ug`,
 `ppda.go.ug`, `finance.go.ug`, `works.go.ug`, `immigration.go.ug`, `mlhud.go.ug`,
 `kcca.go.ug`, `upf.go.ug`, `nda.or.ug`, `nema.go.ug`, `singlewindow.go.ug`) over https,
 and it never reads an archive. Each scheduled crawl also runs the statutory and 11-MDA PDF
-harvester (`python -m app.pdf_corpus --harvest --include-mda-sources`) before `crawl_gate`
+harvester (`python -m app.ingestion.pdf_corpus --harvest --include-mda-sources`) before `crawl_gate`
 judges the candidate.
 
 **On URA's hosts, robots.txt is read last, on purpose.** Requesting it gets the caller's

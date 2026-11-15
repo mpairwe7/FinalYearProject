@@ -141,7 +141,7 @@ def evaluate_call_risk(call_id: str, scan: RepeatScan | None = None) -> dict[str
 
     # 3b. Acoustic Prosody Frustration / Distress (Phase 33, 2026)
     try:
-        from ..flags import flags
+        from ..config.flags import flags
 
         room = registry.get(call_id)
         if room is not None and flags.is_enabled("emotion_aware_prosody", subject=getattr(room.state, "user_id", "") or None):

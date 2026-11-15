@@ -43,14 +43,14 @@ class _GuardFakeModel:
 
 class ApplyOutputGuardsUnitTest(unittest.TestCase):
     def test_runs_claim_verification_and_feeds_judge(self) -> None:
-        from app import service
+        from app.rag import pipeline
         from app.guardrails import OutputGuard
 
         model = _GuardFakeModel()
         report = {"decision": "approve", "score": 1.0, "claim_count": 1}
 
-        with mock.patch.object(service, "verify_claims", return_value=report) as vc:
-            guard = service._apply_output_guards(
+        with mock.patch.object(pipeline, "verify_claims", return_value=report) as vc:
+            guard = pipeline._apply_output_guards(
                 model,
                 message="what is the VAT rate?",
                 reply="The standard VAT rate is 18% [1].",
@@ -103,7 +103,7 @@ class _FakeModel:
 
 class GuardParityIntegrationTest(unittest.TestCase):
     def tearDown(self) -> None:
-        from app.flags import flags
+        from app.config.flags import flags
 
         flags.clear("tool_use")
 
@@ -130,7 +130,7 @@ class GuardParityIntegrationTest(unittest.TestCase):
         return _spy
 
     def _run(self, model):
-        from app import service
+        from app.rag import pipeline
 
         base = dict(
             message="what is vat?",
@@ -145,15 +145,15 @@ class GuardParityIntegrationTest(unittest.TestCase):
 
         async def _collect():
             out = []
-            async for ev in service.run_chat_turn(model, **base):
+            async for ev in pipeline.run_chat_turn(model, **base):
                 out.append(ev)
             return out
 
         return asyncio.run(_collect())
 
     def test_both_branches_invoke_unified_guard(self) -> None:
-        from app import service
-        from app.flags import flags
+        from app.rag import pipeline
+        from app.config.flags import flags
 
         calls: list[dict] = []
         model = _FakeModel()
@@ -165,15 +165,15 @@ class GuardParityIntegrationTest(unittest.TestCase):
         def _fake_stream(**kwargs):  # noqa: ANN003
             yield "VAT is 18% [1]."
 
-        with mock.patch.object(service, "_apply_output_guards", self._spy_guard(calls)), \
-                mock.patch.object(service.llm_module, "is_available", return_value=True):
+        with mock.patch.object(pipeline, "_apply_output_guards", self._spy_guard(calls)), \
+                mock.patch.object(pipeline.generator_module, "is_available", return_value=True):
             # Agentic branch (tool_use ON)
             flags.set("tool_use", True)
-            with mock.patch.object(service, "_stream_agentic_turn", _fake_agentic):
+            with mock.patch.object(pipeline, "_stream_agentic_turn", _fake_agentic):
                 ev_agentic = self._run(model)
             flags.clear("tool_use")
             # Token-streaming branch (tool_use OFF)
-            with mock.patch.object(service, "stream_llm_tokens", _fake_stream):
+            with mock.patch.object(pipeline, "stream_llm_tokens", _fake_stream):
                 ev_stream = self._run(model)
 
         # The unified guard was invoked once on each path.

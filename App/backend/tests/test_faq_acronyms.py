@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import service  # noqa: E402
+from app.rag import pipeline  # noqa: E402
 
 CORPUS = {
     "employment": [
@@ -53,7 +53,7 @@ class AcronymMiningTest(unittest.TestCase):
     """The miner is strict on purpose — a parenthetical is not an expansion."""
 
     def test_learns_both_written_orders(self):
-        pairs = service.mine_faq_acronyms(
+        pairs = pipeline.mine_faq_acronyms(
             [
                 "What is PAYE (Pay As You Earn)?",
                 "the Authorized Economic Operator (AEO) program",
@@ -63,7 +63,7 @@ class AcronymMiningTest(unittest.TestCase):
         self.assertEqual(pairs.get("authorized economic operator"), "aeo")
 
     def test_rejects_a_parenthetical_that_is_not_an_expansion(self):
-        pairs = service.mine_faq_acronyms(
+        pairs = pipeline.mine_faq_acronyms(
             [
                 "Which disposals are not recognized (no gain taxed, no loss allowed)?",
                 "How are passengers cleared (red/green channels)?",
@@ -73,22 +73,22 @@ class AcronymMiningTest(unittest.TestCase):
         self.assertEqual(pairs, {})
 
     def test_initials_may_skip_only_function_words(self):
-        self.assertTrue(service._acronym_matches("PAYE", "Pay As You Earn"))
-        self.assertTrue(service._acronym_matches("FOB", "Free On Board"))
-        self.assertTrue(service._acronym_matches("AEOI", "Automatic Exchange of Information"))
+        self.assertTrue(pipeline._acronym_matches("PAYE", "Pay As You Earn"))
+        self.assertTrue(pipeline._acronym_matches("FOB", "Free On Board"))
+        self.assertTrue(pipeline._acronym_matches("AEOI", "Automatic Exchange of Information"))
         # "Solution" is not a function word, so it cannot be skipped to make
         # the initials line up.
-        self.assertFalse(service._acronym_matches("DT", "Digital Tracking Solution"))
-        self.assertFalse(service._acronym_matches("XYZ", "Pay As You Earn"))
+        self.assertFalse(pipeline._acronym_matches("DT", "Digital Tracking Solution"))
+        self.assertFalse(pipeline._acronym_matches("XYZ", "Pay As You Earn"))
 
 
 class AcronymFoldingTest(unittest.TestCase):
     def setUp(self):
         self.addCleanup(
-            service.install_faq_acronyms, dict(service._FAQ_ACRONYM_EXPANSIONS)
+            pipeline.install_faq_acronyms, dict(pipeline._FAQ_ACRONYM_EXPANSIONS)
         )
-        service.install_faq_acronyms(
-            service.mine_faq_acronyms(
+        pipeline.install_faq_acronyms(
+            pipeline.mine_faq_acronyms(
                 f"{row['question']} {row['answer']}"
                 for rows in CORPUS.values()
                 for row in rows
@@ -99,10 +99,10 @@ class AcronymFoldingTest(unittest.TestCase):
         return CORPUS["employment"][0]
 
     def test_the_acronym_and_its_expansion_are_one_subject(self):
-        self.assertEqual(service._faq_subject_terms("What is PAYE?"), {"paye"})
-        self.assertEqual(service._faq_subject_terms("what is pay as you earn"), {"paye"})
+        self.assertEqual(pipeline._faq_subject_terms("What is PAYE?"), {"paye"})
+        self.assertEqual(pipeline._faq_subject_terms("what is pay as you earn"), {"paye"})
         self.assertEqual(
-            service._faq_subject_terms(self.paye_row()["question"]), {"paye"}
+            pipeline._faq_subject_terms(self.paye_row()["question"]), {"paye"}
         )
 
     def test_coverage_keeps_every_spelling(self):
@@ -110,7 +110,7 @@ class AcronymFoldingTest(unittest.TestCase):
         served by redundancy — collapsing it made a real probe fail (see
         ``test_a_spelling_variant_still_clears_the_floor``)."""
         self.assertEqual(
-            service._faq_terms("what is pay as you earn"), {"pay", "as", "earn"}
+            pipeline._faq_terms("what is pay as you earn"), {"pay", "as", "earn"}
         )
 
     def test_a_spelling_variant_still_clears_the_floor(self):
@@ -119,36 +119,36 @@ class AcronymFoldingTest(unittest.TestCase):
         term, which is survivable across four coverage terms and fatal across
         two."""
         aeo = CORPUS["customs"][0]
-        score = service._faq_match_score(
+        score = pipeline._faq_match_score(
             "What is the Authorized Economic Operator programme?", aeo
         )
-        self.assertGreaterEqual(score, service._FAQ_MATCH_MIN)
+        self.assertGreaterEqual(score, pipeline._FAQ_MATCH_MIN)
 
     def test_a_definition_is_reachable_by_its_acronym(self):
         """The regression: this scored 0.0 because the row's own gloss made its
         question look broader than the query."""
-        self.assertEqual(service._faq_match_score("What is PAYE?", self.paye_row()), 1.0)
+        self.assertEqual(pipeline._faq_match_score("What is PAYE?", self.paye_row()), 1.0)
 
     def test_the_expansion_still_works(self):
         self.assertGreater(
-            service._faq_match_score("what is pay as you earn", self.paye_row()), 0.9
+            pipeline._faq_match_score("what is pay as you earn", self.paye_row()), 0.9
         )
 
     def test_an_acronym_inside_the_bracket_also_folds(self):
         aeo = CORPUS["customs"][0]
-        self.assertGreater(service._faq_match_score("What is AEO?", aeo), 0.0)
+        self.assertGreater(pipeline._faq_match_score("What is AEO?", aeo), 0.0)
 
     def test_subject_focus_still_rejects_a_broader_question(self):
         """The rule the folding relaxes must keep doing its job: "What is VAT?"
         is contained in the EFRIS question but is not answered by it."""
         self.assertEqual(
-            service._faq_match_score("What is VAT?", CORPUS["efris"][0]), 0.0
+            pipeline._faq_match_score("What is VAT?", CORPUS["efris"][0]), 0.0
         )
 
     def test_folding_is_inert_until_a_corpus_is_loaded(self):
-        service.install_faq_acronyms({})
-        self.assertEqual(service._fold_acronyms("pay as you earn"), "pay as you earn")
-        self.assertEqual(service._faq_subject_terms("what is pay as you earn"), {"pay", "as", "earn"})
+        pipeline.install_faq_acronyms({})
+        self.assertEqual(pipeline._fold_acronyms("pay as you earn"), "pay as you earn")
+        self.assertEqual(pipeline._faq_subject_terms("what is pay as you earn"), {"pay", "as", "earn"})
 
 
 class LiveCorpusAcronymTest(unittest.TestCase):
@@ -156,16 +156,16 @@ class LiveCorpusAcronymTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.index, _ = service._load_faq_data(service._DATA_DIR)
+        cls.index, _ = pipeline._load_faq_data(pipeline._DATA_DIR)
         if not cls.index:
             raise unittest.SkipTest("FAQ corpus not present")
 
     def test_acronyms_are_learned_from_the_shipped_corpus(self):
-        self.assertGreaterEqual(len(service._FAQ_ACRONYM_EXPANSIONS), 10)
-        self.assertEqual(service._FAQ_ACRONYM_EXPANSIONS.get("pay as you earn"), "paye")
+        self.assertGreaterEqual(len(pipeline._FAQ_ACRONYM_EXPANSIONS), 10)
+        self.assertEqual(pipeline._FAQ_ACRONYM_EXPANSIONS.get("pay as you earn"), "paye")
 
     def test_asking_by_acronym_finds_the_definition(self):
-        hits = service._simple_search(
+        hits = pipeline._simple_search(
             "What is PAYE?", self.index, top_k=3, binding_query="What is PAYE?", locale="en"
         )
         self.assertTrue(hits, "'What is PAYE?' returned no FAQ at all")
@@ -179,7 +179,7 @@ class LiveCorpusAcronymTest(unittest.TestCase):
         for rows in self.index.values():
             for row in rows:
                 question = row["question"]
-                hits = service._simple_search(
+                hits = pipeline._simple_search(
                     question, self.index, top_k=3, binding_query=question, locale="en"
                 )
                 if question not in [h.get("question") for h in hits]:

@@ -1,4 +1,4 @@
-"""Regression tests for domain spelling correction (backend/app/query.py).
+"""Regression tests for domain spelling correction (backend/app/rag/query.py).
 
 The corrector rewrote correctly-spelled words. ``_CORRECTIONS`` maps
 ``"withholdin" -> "withholding"`` and the substitution was a bare
@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.query import _CORRECTIONS, correct_spelling, rewrite
+from app.rag.query import _CORRECTIONS, correct_spelling, rewrite
 
 
 class SpellingCorrectionBoundaryTests(unittest.TestCase):

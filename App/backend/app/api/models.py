@@ -1,0 +1,1291 @@
+"""Pydantic v2 request/response models for the URA Chatbot API."""
+
+from decimal import Decimal
+from typing import Annotated, Any, Literal
+
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
+
+
+# ---------------------------------------------------------------------------
+# Chat & Portal Co-Pilot (Phase 42)
+# ---------------------------------------------------------------------------
+class PortalFieldError(BaseModel):
+    field: str = Field(..., max_length=64)
+    message: str = Field(..., max_length=300)
+    # Accepted so an older client is not refused, and ignored: the server
+    # names the element, never the page (ADR-0038).
+    selector: str = Field("", max_length=160)
+
+
+#: Telemetry describes one form. These are well above any URA screen and far
+#: below the 5 MiB body cap, which was the only limit before (G547).
+_PortalFieldName = Annotated[str, StringConstraints(max_length=64)]
+_PORTAL_FIELD_VALUE_MAX = 2000
+_PortalFieldValue = Annotated[str, StringConstraints(max_length=_PORTAL_FIELD_VALUE_MAX)]
+
+
+class PortalContextInput(BaseModel):
+    portal_id: str = Field(..., pattern=r"^[a-z0-9_]{1,64}$")
+    current_route: str = Field("", max_length=240)
+    active_step: str = Field("", max_length=160)
+    form_id: str = Field("", max_length=64)
+    visible_fields: dict[_PortalFieldName, _PortalFieldValue] = Field(default_factory=dict, max_length=64)
+    empty_required_fields: list[_PortalFieldName] = Field(default_factory=list, max_length=25)
+
+    @field_validator("visible_fields", mode="before")
+    @classmethod
+    def _cut_long_values(cls, value: Any) -> Any:
+        """Cut a long field value rather than refuse the turn.
+
+        Objection grounds are free text and can run long. Refusing them left
+        the taxpayer with no co-pilot help; the sanitiser keeps 240 characters
+        of any value in any case. Field names and the field count stay bounded.
+        """
+        if not isinstance(value, dict):
+            return value
+        return {k: v[:_PORTAL_FIELD_VALUE_MAX] if isinstance(v, str) else v for k, v in value.items()}
+    validation_errors: list[PortalFieldError] = Field(default_factory=list, max_length=15)
+    error_banner: str = Field("", max_length=400)
+    stalled_duration_ms: int = Field(0, ge=0, le=3_600_000)
+    last_user_action: str = Field("", max_length=120)
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000, description="User message text")
+    conversation_id: str | None = Field(
+        None,
+        validation_alias=AliasChoices(
+            "conversation_id", "thread_id", "conversationId", "session_id", "sessionId"
+        ),
+        pattern=r"^[a-zA-Z0-9_-]{1,64}$",
+        description="Optional conversation/session id",
+    )
+    top_k: int = Field(4, ge=1, le=10, description="Number of passages to retrieve")
+    locale: str | None = Field(
+        None,
+        pattern=r"^[a-z]{2,3}(-[A-Z]{2})?$",
+        description="Optional ISO 639-1/639-3 locale override (e.g. en, lg, sw)",
+    )
+    locale_explicit: bool | None = Field(
+        None,
+        description=(
+            "True when the taxpayer chose `locale` themselves; false when it is only "
+            "the client's default or an earlier detection. Omitted: a requested lg/sw "
+            "counts as a choice and en as a default (see app.language_state)."
+        ),
+    )
+
+    @field_validator("locale", mode="before")
+    @classmethod
+    def _normalize_optional_locale(cls, v: Any) -> str | None:
+        if v is None:
+            return None
+        s = str(v).strip().replace("_", "-")
+        if not s or s.lower() == "auto":
+            return None
+        parts = s.split("-", 1)
+        if len(parts) == 2 and parts[1]:
+            return f"{parts[0].lower()}-{parts[1].upper()}"
+        return parts[0].lower()
+    attachment_ids: list[Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")]] = Field(
+        default_factory=list,
+        max_length=3,
+        description="Ids of analysed documents (POST /v1/documents/analyze) to ground this turn",
+    )
+    connector_namespaces: list[Annotated[str, Field(pattern=r"^[a-z0-9_]{1,64}$")]] = Field(
+        default_factory=list,
+        max_length=8,
+        description="Deployment-configured chat connectors selected for this turn",
+    )
+    portal_context: PortalContextInput | None = Field(
+        None,
+        description="Live DOM telemetry from the inbuilt URA Portal Co-Pilot or Browser Companion",
+    )
+    portal_task_submission: dict[str, Any] | None = Field(
+        None,
+        description="Submitted values from an inline chat elicitation form card",
+    )
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class Citation(BaseModel):
+    ref: str = Field(..., description="Reference marker, e.g. '[1]'")
+    source: str = Field(..., description="Source file name")
+    page: str = Field("", description="Page number (PDFs)")
+    section: str = Field("", description="Section or heading title")
+    passage: str = Field("", max_length=500, description="Relevant passage excerpt")
+    url: str = Field("", description="Canonical source URL when the index stored one")
+    effective_date: str = Field("", description="Fiscal year or effective-from date. Never a crawl date.")
+    published_at: str = Field("", description="The publisher's own date for a web page (YYYY-MM-DD)")
+    title: str = Field("", description="Document title when present")
+    #: Web evidence only (G651): who published it, what was read, and whether
+    #: it is older than the question allows. Empty for the URA corpus.
+    authority: Literal["", "official", "commentary"] = Field(
+        "", description="Web evidence: URA itself (official) or an adviser's commentary"
+    )
+    evidence: Literal["", "document", "search_summary"] = Field(
+        "", description="Web evidence: the page was read (document), or only a search summary"
+    )
+    stale: bool = Field(False, description="Web evidence older than the question allows")
+
+
+class ResourceLink(BaseModel):
+    """An official URA page offered beside an answer (see ``app.verified_resources``)."""
+
+    id: str = Field(..., description="Registry id, stable across releases")
+    title: str
+    type: Literal["online_form", "downloadable_form", "statutory_source", "guide"]
+    format: Literal["web", "pdf"] = "web"
+    url: str = Field(..., description="https URL on an official URA host; never carries user data")
+    description: str = ""
+    citation: str = Field("", description="Statutory provision the page implements, when one applies")
+    checklist: list[str] = Field(default_factory=list, description="What to have ready, from URA's own page")
+    source_domain: str = Field(..., description="Host the link opens on")
+    verified_on: str = Field(..., description="ISO date the link was last confirmed live")
+
+
+class ConnectorNotice(BaseModel):
+    """A selected chat connector that a turn did not use (see ``ChatResponse.connector_notices``)."""
+
+    namespace: str = Field(..., pattern=r"^[a-z0-9_]{1,64}$")
+    label: str = Field(..., max_length=80)
+    reason: Literal["disabled", "unavailable", "not_offered"] = Field(
+        ...,
+        description=(
+            "disabled: the deployment has chat connectors off; unavailable: not answering "
+            "right now; not_offered: not available to this account"
+        ),
+    )
+
+
+class OfficerHoursStatus(BaseModel):
+    """Whether a URA officer can pick a handoff up now (``app.officer_hours.status``)."""
+
+    on_duty: bool = Field(..., description="True while officers are on duty")
+    hours: str = Field(..., description='Officers\' working hours, e.g. "07:00–23:00 EAT"')
+    next_on_duty: str | None = Field(
+        None, description="ISO 8601 time officers are next on duty (now, when on duty)"
+    )
+
+
+class ChatResponse(BaseModel):
+    reply: str
+    sources: list[str] = Field(default_factory=list)
+    citations: list[Citation] = Field(default_factory=list, description="Passage-level citations")
+    faithfulness_score: float | None = Field(None, description="Grounding score 0-1")
+    retrieval_mode: str = Field(
+        "keyword",
+        description=(
+            "hybrid | hybrid_corrected | keyword | blocked | abstained | "
+            "clarification | workflow | escalated"
+        ),
+    )
+    model: str = "Sunbird/Sunflower-Qwen3.5-9B"
+    conversation_id: str | None = None
+    turn_id: str | None = Field(
+        None,
+        description="This answer's id in the conversation log; a 👍/👎 on it names this id (POST /v1/feedback)",
+    )
+    locale: str = Field("en", description="Locale used for this response")
+    locale_source: str = Field(
+        "",
+        description=(
+            "Why the reply is in `locale`: explicit_request | client_explicit | continuity | "
+            "switched | detected | profile | default. Clients keep only the first two as the "
+            "user's own choice."
+        ),
+    )
+    escalation_required: bool = Field(False, description="Whether human review is needed")
+    escalation_reason: str = Field("", description="Why escalation was triggered")
+    agent_role: str = Field(
+        "rag_answerer",
+        description=(
+            "Active system role for this turn, e.g. rag_answerer, workflow_guide, "
+            "clarification_agent, or escalation_triage"
+        ),
+    )
+    workflow: dict[str, Any] | None = Field(
+        None,
+        description="Workflow metadata for guided multi-step tasks, if active",
+    )
+    objective_hypothesis: dict[str, Any] | None = Field(
+        None,
+        description="Proactive objective confirmation card metadata inferred from situational taxpayer challenges",
+    )
+    handoff: dict[str, Any] | None = Field(
+        None,
+        description="Structured human handoff packet, when escalation or review is recommended",
+    )
+    response_judge: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "Post-answer quality gate metadata describing whether the reply was "
+            "approved, deterministically revised, or escalated"
+        ),
+    )
+    next_actions: list[str] = Field(
+        default_factory=list,
+        description="UI-friendly next suggested actions for the user",
+    )
+    # Phase 14-D — when the supervisor routes a query to the ticket
+    # queue, the ticket id comes back to the frontend so the UI can
+    # display "ticket 1234abcd" to the user.  Empty string when no
+    # ticket was created.
+    ticket_id: str = Field("", description="Escalation ticket id, if one was created")
+    officer_hours: OfficerHoursStatus | None = Field(
+        None,
+        description="With a ticket: whether officers are on duty, their hours and the next shift (G196)",
+    )
+    current_topic: str = Field(
+        "",
+        description="Persisted conversation task id (G6), empty when none is active",
+    )
+    resources: list[ResourceLink] = Field(
+        default_factory=list,
+        description="Official URA pages for this answer; empty for refusals, abstentions and small talk",
+    )
+    discrepancy_report: dict[str, Any] | None = Field(
+        None,
+        description="Knowledge discrepancy report metadata if the user disputed previous guidance",
+    )
+    connector_notices: list[ConnectorNotice] = Field(
+        default_factory=list,
+        description=(
+            "Selected services this turn was answered without, and why. The turn is "
+            "answered either way; nothing listed here was consulted."
+        ),
+    )
+    connectors_used: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "MCP connectors consulted on this turn and their outcome "
+            "(found / no_record / needs_input / unavailable)."
+        ),
+    )
+    debug: dict[str, Any] | None = Field(
+        None,
+        description="Eval-only generation metadata when EVAL_DEBUG=1 (rejected in production)",
+    )
+    portal_copilot: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "Structured inbuilt portal co-pilot assistance, inline form card, or "
+            "Claude-style Allow/Disallow action confirmation card"
+        ),
+    )
+
+
+class PortalTaskDecisionRequest(BaseModel):
+    decision: Literal["allow", "disallow", "accept", "decline", "cancel", "prepare"]
+    request_state: dict[str, Any]
+    idempotency_key: str = Field(..., min_length=8, max_length=128, pattern=r"^[a-zA-Z0-9_:-]+$")
+    conversation_id: str | None = Field(None, pattern=r"^[a-zA-Z0-9_-]{1,64}$")
+    edited_fields: dict[str, str] | None = Field(
+        None,
+        description="Inline edited field values when decision='prepare' re-validates and re-signs request_state without an LLM call",
+    )
+    displayed_fields_sha256: str | None = Field(
+        None,
+        pattern=r"^[a-fA-F0-9]{64}$",
+        description="Optional WYSIWYS SHA-256 digest of rendered display_fields verified against request_state (OWASP ASI09)",
+    )
+    high_value_acknowledged: bool | None = Field(
+        None,
+        description="Explicit human acknowledgement required when high_value_requires_ack is True (>= UGX 50,000,000)",
+    )
+
+
+class PortalTaskDecisionResponse(BaseModel):
+    ok: bool
+    status: Literal["executed", "declined", "requires_auth", "prepared", "validation_error", "error"]
+    task_id: str
+    portal_key: str = ""
+    live: bool = False
+    mode: Literal["simulation", "live"] = "simulation"
+    summary: str
+    result: dict[str, Any] = Field(default_factory=dict)
+    dom_actions: list[dict[str, Any]] = Field(default_factory=list)
+    copilot_portal_url: str = ""
+    idempotent_replay: bool = False
+    displayed_fields_sha256: str | None = None
+    updated_card: dict[str, Any] | None = None
+    decision_receipt: dict[str, Any] | None = None
+
+
+
+# ---------------------------------------------------------------------------
+# Classification
+# ---------------------------------------------------------------------------
+class Prediction(BaseModel):
+    tag: str
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    label: str
+
+
+class ClassifyRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=2000)
+    top_k: int = Field(1, ge=1, le=10)
+
+
+class ClassifyResponse(BaseModel):
+    predictions: list[Prediction]
+    processing_time_ms: float = Field(..., ge=0.0)
+
+
+# Annotated type so each string in the batch list is independently validated
+ValidText = Annotated[str, Field(min_length=1, max_length=2000)]
+
+
+class BatchClassifyRequest(BaseModel):
+    texts: list[ValidText] = Field(..., min_length=1, max_length=50)
+
+
+class BatchClassifyResult(BaseModel):
+    text: str
+    tag: str
+    confidence: float = Field(..., ge=0.0, le=1.0)
+
+
+class BatchClassifyResponse(BaseModel):
+    results: list[BatchClassifyResult]
+    processing_time_ms: float = Field(..., ge=0.0)
+
+
+# ---------------------------------------------------------------------------
+# Tags & FAQ
+# ---------------------------------------------------------------------------
+class TagInfo(BaseModel):
+    id: str
+    name: str
+    description: str
+
+
+class TagListResponse(BaseModel):
+    tags: list[TagInfo]
+    total: int
+
+
+class FAQItem(BaseModel):
+    question: str
+    answer: str
+    source: str
+
+
+class FAQResponse(BaseModel):
+    tag: str
+    faqs: list[FAQItem]
+    total: int
+
+
+# ---------------------------------------------------------------------------
+# Feedback
+# ---------------------------------------------------------------------------
+class FeedbackRequest(BaseModel):
+    message_id: str = Field(..., min_length=1, max_length=128, description="ID of the bot message")
+    rating: str = Field(..., pattern=r"^(up|down)$", description="Thumbs up or down")
+    comment: str = Field("", max_length=1000, description="Optional text feedback")
+    session_id: str | None = Field(None, max_length=128)
+    user_query: str = Field("", max_length=2000, description="Original user question")
+    bot_reply: str = Field("", max_length=5000, description="Bot response that was rated")
+    # Where the rated reply came from, so a rating can be read against the
+    # journey step or route that produced it (the analytics journey panel).
+    # Identifiers only, never free text, so the pattern is strict.
+    retrieval_mode: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$", description="Route that produced the reply")
+    workflow_id: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$", description="Guided journey the reply belongs to")
+    step_id: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$", description="Journey step the reply asked")
+    # Which answer of which conversation is rated, so the audit can read a
+    # conversation's ratings in order and find where it went wrong.
+    conversation_id: str = Field("", max_length=64, pattern=r"^[a-zA-Z0-9_-]*$", description="Conversation the answer belongs to")
+    turn_id: str = Field("", max_length=64, pattern=r"^[a-zA-Z0-9_-]*$", description="The answer's turn_id from the chat response")
+    turn_index: int | None = Field(None, ge=1, le=1000, description="The answer's position in its conversation (1 = first)")
+
+
+class FeedbackResponse(BaseModel):
+    id: str
+    message_id: str
+    rating: str
+    created_at: float
+
+
+class FeedbackCommentRequest(BaseModel):
+    comment: str = Field(..., min_length=1, max_length=1000, description="Follow-up comment text")
+
+
+# ---------------------------------------------------------------------------
+# Guided-journey funnel (staff analytics)
+# ---------------------------------------------------------------------------
+class JourneyStepStats(BaseModel):
+    step_id: str
+    title: str
+    #: Journeys cancelled or abandoned while waiting on this step.
+    stopped: int = 0
+    helpful: int = 0
+    not_helpful: int = 0
+
+
+class JourneyStats(BaseModel):
+    workflow_id: str
+    name: str
+    started: int = 0
+    completed: int = 0
+    cancelled: int = 0
+    #: Still active but untouched for longer than ``abandon_after_hours``.
+    abandoned: int = 0
+    in_progress: int = 0
+    completion_pct: float = 0.0
+    steps: list[JourneyStepStats] = Field(default_factory=list)
+
+
+class JourneyFunnelResponse(BaseModel):
+    period_days: int
+    abandon_after_hours: int
+    journeys: list[JourneyStats] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Audit trail (administrators and auditors)
+# ---------------------------------------------------------------------------
+class AuditEventOut(BaseModel):
+    seq: int
+    event_id: str
+    event_type: str
+    #: The acting user's id ("operator-key" for the break-glass key).
+    actor: str
+    ts: float
+    payload: dict[str, Any] = Field(default_factory=dict)
+    row_hash: str
+
+
+class AuditEventsResponse(BaseModel):
+    #: Whether this deployment is recording new events (``audit_ledger``).
+    ledger_enabled: bool
+    events: list[AuditEventOut] = Field(default_factory=list)
+    #: Pass as ``before_seq`` for the next (older) page; null when none.
+    next_before_seq: int | None = None
+
+
+class AuditChainBreak(BaseModel):
+    seq: int
+    event_id: str
+    reason: str
+
+
+class AuditAnchorOut(BaseModel):
+    """A seal: the Merkle root of a range of rows and the chain head at its end."""
+
+    anchor_id: str
+    first_seq: int
+    last_seq: int
+    merkle_root: str
+    #: ``row_hash`` at ``last_seq``; empty on seals made before it was recorded.
+    head_hash: str = ""
+    created_at: float
+
+
+class AuditAnchorBreak(BaseModel):
+    anchor_id: str
+    first_seq: int
+    last_seq: int
+    reason: str
+
+
+class AuditVerifyResponse(BaseModel):
+    ledger_enabled: bool
+    valid: bool
+    #: ``full`` walked every row and every seal; ``since_seal`` re-checked the
+    #: newest seal and the rows after it.
+    scope: Literal["full", "since_seal"]
+    rows_checked: int
+    first_seq: int
+    last_seq: int
+    head_hash: str
+    #: At most the first 20 breaks; ``valid`` is false when there are any.
+    breaks: list[AuditChainBreak] = Field(default_factory=list)
+    anchors_checked: int = 0
+    anchor_breaks: list[AuditAnchorBreak] = Field(default_factory=list)
+    latest_anchor: AuditAnchorOut | None = None
+    #: Rows written after the newest seal.
+    unsealed_rows: int = 0
+    verified_at: float
+
+
+class AuditSealResponse(BaseModel):
+    #: False when every row was already sealed (or another replica sealed first).
+    sealed: bool
+    anchor: AuditAnchorOut | None = None
+
+
+# ---------------------------------------------------------------------------
+# Escalation (taxpayer-initiated)
+# ---------------------------------------------------------------------------
+class EscalationRequest(BaseModel):
+    """A taxpayer asking for a person.
+
+    Every other route into the ticket queue is a decision the system makes on
+    the taxpayer's behalf — the supervisor's ESCALATE route, the response
+    judge, the ``escalate_to_human`` tool the model may call. Someone who has
+    decided the assistant cannot help them had no way to say so, which is the
+    gap this request closes.
+
+    ``conversation_id`` is what makes the ticket worth anything: it is how the
+    officer gets the transcript, and how their reply finds its way back into
+    this conversation. Optional, because a taxpayer can ask for a person
+    before saying anything at all.
+    """
+
+    conversation_id: str | None = Field(
+        None,
+        validation_alias=AliasChoices(
+            "conversation_id", "thread_id", "conversationId", "session_id", "sessionId"
+        ),
+        pattern=r"^[a-zA-Z0-9_-]{1,64}$",
+        description="Conversation to attach the transcript to and deliver the reply into",
+    )
+    session_id: str | None = Field(None, max_length=128)
+    reason: str = Field(
+        "",
+        max_length=1000,
+        description="What the taxpayer needs, in their own words. Shown to the officer.",
+    )
+    # No `priority` field, deliberately. Self-declared urgency is not urgency,
+    # and a queue where every taxpayer can mark their own ticket "urgent"
+    # stops sorting anything. Staff re-prioritise from the officer console.
+    locale: str = Field(
+        "en",
+        pattern=r"^[a-z]{2,3}(-[A-Z]{2})?$",
+        description="Language to acknowledge in",
+    )
+    modality: str = Field("text", description="Input modality: text or voice")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class EscalationResponse(BaseModel):
+    ok: bool = Field(..., description="False when the queue is off; see `message`")
+    ticket_id: str = Field("", description="Reference to quote when contacting URA")
+    status: str = Field("", description="open | queue_disabled | failed")
+    reused_existing: bool = Field(
+        False, description="True when this conversation already had an open ticket"
+    )
+    after_hours: bool = Field(
+        False,
+        description="True when escalated after CXP operating hours (after 11:00 PM EAT) and queued for priority morning review",
+    )
+    next_open_eat: str = Field(
+        "",
+        description="When live CXP officer operations next reopen in East Africa Time",
+    )
+    message: str = Field(..., description="What happens next, in the taxpayer's language")
+    officer_hours: OfficerHoursStatus | None = Field(
+        None, description="Whether officers are on duty, so the chat can say when they will reply (G196)"
+    )
+
+
+class EscalationDetailResponse(BaseModel):
+    ok: bool = True
+    ticket_id: str
+    reference: str
+    status: str
+    status_label: str
+    priority: str
+    team: str
+    team_label: str
+    assignee: str
+    assignee_display: str
+    reason: str
+    user_query: str
+    user_query_en: str = ""
+    locale: str = "en"
+    modality: str = "text"
+    officer_reply: str
+    officer_reply_localized: str = ""
+    reply_at: float
+    reply_delivered: bool
+    created_at: float
+    resolved_at: float
+    transcript: list[dict[str, Any]] = Field(default_factory=list)
+    can_reply: bool = True
+
+
+class TaxpayerReplyRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+    conversation_id: str | None = None
+    locale: str = Field("en", pattern=r"^[a-z]{2,3}(-[A-Z]{2})?$")
+
+
+class OfficerChatMessage(BaseModel):
+    seq: int
+    sender: Literal["taxpayer", "officer", "system"]
+    #: What the taxpayer reads: an officer's message in their language when it
+    #: was translated. A ``system`` message is a marker (``chat_ended``) the
+    #: client words in the taxpayer's language.
+    text: str
+    officer_name: str = ""
+    created_at: float
+    #: ``text`` is a machine translation of what the officer wrote (G631). The
+    #: chat labels it and offers ``original_text``, so a mistranslated date or
+    #: amount is not read as the officer's own words.
+    translated: bool = False
+    #: What the officer wrote, when ``text`` is a translation of it; else empty.
+    original_text: str = ""
+
+
+class ChatRatingState(BaseModel):
+    requested: bool = False
+    submitted: bool = False
+
+
+class OfficerChatThreadResponse(BaseModel):
+    """``GET /v1/escalate/{ticket_id}/messages`` — the taxpayer's live view of the chat."""
+
+    ticket_id: str
+    #: ``waiting`` (in the queue — the AI still answers), ``officer`` (an
+    #: officer has the case and the AI is paused), ``ended``, or ``none`` for
+    #: a call's ticket, which has no chat.
+    chat_state: Literal["waiting", "officer", "ended", "none"]
+    officer_name: str = ""
+    messages: list[OfficerChatMessage] = Field(default_factory=list)
+    last_seq: int = 0
+    csat: ChatRatingState = Field(default_factory=ChatRatingState)
+
+
+class ChatRatingRequest(BaseModel):
+    """The taxpayer's rating of an officer chat: 1 (very dissatisfied) to 5, or ``null`` to skip."""
+
+    score: int | None = Field(None, ge=1, le=5)
+    comment: str = Field("", max_length=1000)
+
+
+class QualityReviewRequest(BaseModel):
+    """An auditor's decision on an item in the quality audit's Needs review queue.
+
+    ``open`` takes a decided item back to the queue.
+    """
+
+    status: Literal["reviewed", "action_needed", "open"]
+    note: str = Field("", max_length=1000)
+
+
+class EndChatRequest(BaseModel):
+    """An officer ends a live chat: an optional closing message and how it ended."""
+
+    closing_message: str = Field("", max_length=4000)
+    #: The closing message in the taxpayer's language, from the composer's
+    #: preview; translated on the server when missing for a non-English case.
+    closing_message_localized: str = Field("", max_length=4000)
+    outcome: Literal["resolved", "wontfix"] = "resolved"
+
+
+class FeedbackSummary(BaseModel):
+    period_days: int
+    total: int
+    thumbs_up: int
+    thumbs_down: int
+    satisfaction_pct: float
+    recent: list[dict]
+
+
+# ---------------------------------------------------------------------------
+# Analytics
+# ---------------------------------------------------------------------------
+class AnalyticsEvent(BaseModel):
+    event_type: str = Field(..., min_length=1, max_length=100)
+    event_data: dict = Field(default_factory=dict)
+    session_id: str | None = Field(None, max_length=128)
+
+
+class AnalyticsDashboard(BaseModel):
+    uptime_seconds: float
+    requests: dict
+    chat: dict
+    sessions: dict
+    conversations: dict
+    feedback: dict
+
+
+# ---------------------------------------------------------------------------
+# Speech (2026 — ASR / MT / TTS)
+# ---------------------------------------------------------------------------
+class TranscribeRequest(BaseModel):
+    """ASR request body. Audio is sent separately as raw bytes in the POST body.
+
+    The `/asr` endpoint accepts audio as an ``application/octet-stream`` body
+    (raw PCM16 / float32) with the metadata passed via query params rather
+    than a JSON body, mirroring the ``/v1/index`` pattern. This model is kept
+    for documentation / OpenAPI schema only.
+    """
+
+    sample_rate: int = Field(16000, ge=8000, le=48000)
+    language: str | None = Field(None, pattern=r"^[a-z]{2,3}$", description="ISO 639-1/639-3 hint")
+
+
+class TranscribeResponse(BaseModel):
+    text: str
+    language: str | None = None
+    duration_s: float | None = None
+    latency_s: float | None = None
+    rtf: float | None = None
+    backend: str = "unknown"
+    error: str | None = None
+
+
+class SynthesizeRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=4000)
+    voice: str | None = Field(
+        None,
+        pattern=r"^[a-zA-Z0-9_\-]{1,64}$",
+        description="Voice id (e.g. en_US-lessac-medium, luganda-vits-v1)",
+    )
+    language: str = Field("en", pattern=r"^[a-z]{2,3}$", description="ISO 639-1/639-3 language code")
+    locale: str | None = Field(None, pattern=r"^[a-z]{2,3}$", description="Alias for language (e.g. en, lg, sw)")
+    streaming: bool = Field(False, description="Emit audio as a sentence-chunked stream")
+    format: Literal["wav", "opus"] = Field(
+        "wav", description="/v1/tts/stream only: 'opus' for Ogg/Opus pieces, about a tenth the size of WAV"
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sync_language_and_locale(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if data.get("locale") and not data.get("language"):
+                data["language"] = data["locale"]
+            elif data.get("language") and not data.get("locale"):
+                data["locale"] = data["language"]
+        return data
+
+
+class SynthesizeResponse(BaseModel):
+    sample_rate: int
+    num_samples: int
+    duration_s: float
+    latency_s: float
+    backend: str
+    voice: str
+    audio_base64: str = Field("", description="Base64-encoded WAV bytes")
+    error: str | None = None
+
+
+class ChatTitleMessage(BaseModel):
+    """One turn of the exchange a conversation title is made from."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1, max_length=2000)
+
+
+class ChatTitleRequest(BaseModel):
+    """A conversation's opening exchange, to be named for the sidebar."""
+
+    messages: list[ChatTitleMessage] = Field(..., min_length=1, max_length=4)
+    locale: str = Field("en", pattern=r"^[a-z]{2,3}$")
+
+    @model_validator(mode="after")
+    def _names_a_user_message(self) -> "ChatTitleRequest":
+        if not any(message.role == "user" for message in self.messages):
+            raise ValueError("A title needs at least one user message")
+        return self
+
+
+class ChatTitleResponse(BaseModel):
+    """``title`` is null when no usable title came back; the client keeps its own."""
+
+    title: str | None = None
+    source: Literal["model", "unavailable", "blocked"]
+
+
+class TranslateRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=4000)
+    source_lang: str = Field("en", pattern=r"^[a-z]{2,3}$")
+    target_lang: str = Field("lg", pattern=r"^[a-z]{2,3}$")
+
+
+class TranslateResponse(BaseModel):
+    text: str
+    source_lang: str
+    target_lang: str
+    latency_s: float
+    backend: str
+    error: str | None = None
+    figures_survived: bool = True
+
+
+class VoiceChatRequest(BaseModel):
+    """Compound voice chat: audio in -> ASR -> [MT] -> LLM -> [MT] -> TTS -> audio out."""
+
+    language: str = Field(
+        "en", pattern=r"^[a-z]{2,3}$", description="User language (en, lg, sw, nyn, ach)"
+    )
+    voice: str | None = Field(None, pattern=r"^[a-zA-Z0-9_\-]{1,64}$")
+    top_k: int = Field(4, ge=1, le=10)
+    conversation_id: str | None = Field(None, pattern=r"^[a-zA-Z0-9_-]{1,64}$")
+    tts_enabled: bool = Field(True, description="Whether to synthesize audio for the reply")
+
+
+class VoiceChatResponse(BaseModel):
+    """Full round-trip voice chat result."""
+
+    transcript: str = Field("", description="ASR transcript of user audio")
+    transcript_language: str | None = None
+    conversation_id: str | None = Field(None, description="Stable conversation thread id")
+    reply: str = Field("", description="LLM reply text (in user language)")
+    reply_audio_base64: str = Field("", description="Base64-encoded WAV of narrated reply")
+    tts_skipped: bool = Field(
+        False,
+        description=(
+            "True when reply narration was skipped because the request had "
+            "already consumed the VOICE_CHAT_BUDGET_S time budget — the "
+            "client should fetch audio via /v1/tts instead"
+        ),
+    )
+    sample_rate: int = 0
+    duration_s: float = 0.0
+    sources: list[str] = Field(default_factory=list)
+    citations: list[Citation] = Field(default_factory=list)
+    faithfulness_score: float | None = None
+    retrieval_mode: str = "keyword"
+    asr_latency_s: float = 0.0
+    mt_latency_s: float = 0.0
+    llm_latency_s: float = 0.0
+    tts_latency_s: float = 0.0
+    total_latency_s: float = 0.0
+    asr_backend: str = ""
+    tts_backend: str = ""
+    mt_backend: str = ""
+    error: str | None = None
+    error_code: Literal["no_speech", "asr_failed"] | None = Field(
+        None,
+        description="Why there is no transcript, for the client to word in the user's language: "
+        "no_speech (it ran and heard nothing) or asr_failed",
+    )
+
+
+class SpeechHealthResponse(BaseModel):
+    status: str
+    enabled: bool
+    asr_backend: str
+    tts_backend: str
+    mt_backend: str
+    # unconfigured | up | down | cooldown. cooldown and down mean Luganda
+    # is on Spark-TTS-SALT, not the streaming Orpheus sidecar.
+    orpheus: str = "unconfigured"
+    whisper_salt: bool = False
+    spark_tts: bool = False
+    last_tts_backend: str = ""
+    last_asr_backend: str = ""
+    last_asr_rtf: float | None = None
+
+
+# ---------------------------------------------------------------------------
+# Streaming voice
+# ---------------------------------------------------------------------------
+
+
+class VoiceStreamConfig(BaseModel):
+    """Initial config frame sent by client on WebSocket connect."""
+
+    language: str = Field("en", pattern=r"^[a-z]{2,3}$")
+    voice: str | None = Field(None, pattern=r"^[a-zA-Z0-9_\-]{1,64}$")
+    conversation_id: str | None = Field(None, pattern=r"^[a-zA-Z0-9_-]{1,64}$")
+    sample_rate: int = Field(16000, ge=8000, le=48000)
+    vad_sensitivity: str = Field("medium", pattern=r"^(low|medium|high)$")
+    tts_enabled: bool = True
+    top_k: int = Field(4, ge=1, le=10)
+
+
+class VoiceAuditEntry(BaseModel):
+    """One row from the voice audit log."""
+
+    id: str
+    user_id: str = ""
+    session_id: str
+    event_type: str
+    metadata: dict = Field(default_factory=dict)
+    audio_hash: str = ""
+    tenant_id: str = "default"
+    created_at: float
+
+
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Export
+# ---------------------------------------------------------------------------
+class ExportMessage(BaseModel):
+    """One bounded conversation record suitable for a PDF export."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user", "assistant", "system"] = "user"
+    content: str = Field(..., min_length=1, max_length=6_000)
+    timestamp: str = Field("", max_length=64)
+
+
+class ExportConversationRequest(BaseModel):
+    messages: list[ExportMessage] = Field(
+        ..., min_length=1, max_length=50, description="Bounded conversation messages"
+    )
+    title: str = Field("Conversation Report", min_length=1, max_length=120)
+    session_id: str = Field("", max_length=64, pattern=r"^[a-zA-Z0-9_-]*$")
+
+    @model_validator(mode="after")
+    def _total_content_is_bounded(self) -> "ExportConversationRequest":
+        if sum(len(message.content) for message in self.messages) > 30_000:
+            raise ValueError("Conversation export content exceeds the 30,000-character limit")
+        return self
+
+
+class TaxSummaryItem(BaseModel):
+    """One line in a tax summary; Decimal avoids float-formatting failures."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(..., min_length=1, max_length=160)
+    amount: Decimal = Field(..., ge=Decimal("-1000000000000000"), le=Decimal("1000000000000000"))
+
+
+class TaxCalculation(BaseModel):
+    """Strict, bounded input contract for a generated tax-summary PDF."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[TaxSummaryItem] = Field(default_factory=list, max_length=100)
+    total: Decimal = Field(
+        Decimal("0"), ge=Decimal("-1000000000000000"), le=Decimal("1000000000000000")
+    )
+    notes: str = Field("", max_length=4_000)
+
+
+class ExportTaxSummaryRequest(BaseModel):
+    calculation: TaxCalculation = Field(..., description="Bounded tax calculation with items and total")
+    taxpayer_ref: str = Field("", max_length=50, pattern=r"^[a-zA-Z0-9_./-]*$")
+
+
+# ---------------------------------------------------------------------------
+# Document attachments
+# ---------------------------------------------------------------------------
+class DocumentFields(BaseModel):
+    """URA-specific fields extracted from an attached document."""
+
+    tins: list[str] = Field(default_factory=list, description="Uganda TIN numbers found")
+    nins: list[str] = Field(
+        default_factory=list,
+        description="Uganda 14-character National Identification Numbers (NINs) found",
+    )
+    prns: list[str] = Field(default_factory=list, description="Uganda Payment Registration Numbers (PRNs) found")
+    efris_invoices: list[str] = Field(default_factory=list, description="EFRIS fiscal invoice/receipt numbers found")
+    amounts: list[str] = Field(default_factory=list, description="UGX currency amounts found")
+    dates: list[str] = Field(default_factory=list, description="Date strings found")
+    references: list[str] = Field(
+        default_factory=list, description="URA reference/assessment numbers found"
+    )
+    tax_heads: list[str] = Field(default_factory=list, description="Identified URA tax regimes/heads")
+
+
+class DocumentProvenance(BaseModel):
+    """Evidence and processing metadata for a document analysis result."""
+
+    source_sha256: str = Field("", description="SHA-256 of the uploaded source bytes")
+    extraction_method: str = Field("", description="pdf_text | pdf_ocr | image_ocr | docx | xlsx | csv | text")
+    ocr_backend: str = Field("", description="service | easyocr | pytesseract | disabled | unavailable")
+    ocr_status: str = Field("not_used", description="ready | unavailable | disabled | timed_out | failed")
+    ocr_page_numbers: list[int] = Field(default_factory=list)
+    ocr_regions: int = Field(0, ge=0)
+    ocr_mean_confidence: float | None = Field(None, ge=0.0, le=1.0)
+
+
+class DocumentFieldEvidence(BaseModel):
+    """A bounded source pointer for one extracted field value."""
+
+    value: str
+    source: str = Field("extracted_text", description="pdf_text | ocr | image_ocr | table | text")
+    page: int | None = Field(None, ge=1)
+    box: list[list[float]] = Field(default_factory=list, description="OCR quadrilateral when available")
+    confidence: float | None = Field(None, ge=0.0, le=1.0)
+
+
+class DocumentTableSummary(BaseModel):
+    """Compact summary of one table or spreadsheet sheet."""
+
+    name: str
+    rows: int = Field(0, ge=0)
+    cols: int = Field(0, ge=0)
+    headers: list[str] = Field(default_factory=list)
+    numeric_totals: dict[str, float] = Field(
+        default_factory=dict, description="Per-column totals for numeric columns"
+    )
+    source: str = Field("extracted", description="pdf_vector | raster_line_geometry | vlm | extracted")
+    status: str = Field("ok", description="ok | needs_review | rejected")
+    downstream_action: str = Field("auto_use", description="auto_use | use_with_warning | review_required")
+    warnings: list[str] = Field(default_factory=list)
+
+
+class DocumentAnalysisResponse(BaseModel):
+    """Result of POST /v1/documents/analyze."""
+
+    document_id: str = Field(..., description="Opaque id used in chat attachment_ids")
+    filename: str
+    kind: str = Field(..., description="pdf | docx | xlsx | csv | image | text")
+    size_bytes: int = Field(0, ge=0)
+    doc_type: str = Field(
+        "generic",
+        description=(
+            "receipt | tin_card | assessment | customs_declaration | "
+            "filing_form | invoice | portal_screenshot | generic"
+        ),
+    )
+    confidence: float = Field(
+        0.0,
+        ge=0.0,
+        le=1.0,
+        description="Keyword-heuristic match score; not a calibrated probability",
+    )
+    classification_method: str = Field("keyword_heuristic")
+    matched_keywords: list[str] = Field(default_factory=list)
+    fields: DocumentFields = Field(default_factory=DocumentFields)
+    field_evidence: dict[str, list[DocumentFieldEvidence]] = Field(default_factory=dict)
+    provenance: DocumentProvenance = Field(default_factory=DocumentProvenance)
+    tables: list[DocumentTableSummary] = Field(default_factory=list)
+    text_preview: str = Field("", description="First characters of the extracted text")
+    truncated: bool = Field(False, description="Whether extracted text was truncated")
+    summary: str = Field("", description="Heuristic analysis summary")
+    tax_reconciliation: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Automated financial reconciliation & rate compliance status",
+    )
+    screenshot_guidance: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Interactive screenshot navigation, error diagnostics, and resolution steps for URA sites",
+    )
+    warnings: list[str] = Field(default_factory=list)
+    expires_in_seconds: int = Field(0, ge=0, description="TTL until the document is purged")
+
+
+# ---------------------------------------------------------------------------
+# System
+# ---------------------------------------------------------------------------
+class HealthResponse(BaseModel):
+    status: str
+    version: str
+    model_loaded: bool
+    tags_loaded: int = 0
+    retrieval_mode: str = "keyword"
+    # Which backend each optional capability actually resolved to, so a silent
+    # fallback is visible to an operator instead of only to a debug log. The
+    # language detector degrading to its character heuristic shipped unnoticed
+    # for the life of the deployment and read every Luganda question as English
+    # (#308); the point of this field is that the next one is legible from
+    # outside the process.
+    capabilities: dict[str, str] = Field(
+        default_factory=dict,
+        description="capability -> resolved backend, e.g. {'language_detection': 'lingua'}",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Quantized Models (Phase 24)
+# ---------------------------------------------------------------------------
+class QuantizedModelInfo(BaseModel):
+    """Metadata for a single quantized model variant."""
+
+    name: str = Field(..., description="Model name, e.g. Qwen3-8B-Q4_K_M")
+    format: str = Field(..., description="Quantization format: gguf, awq, gptq, onnx")
+    quant_type: str = Field(..., description="Quantization type, e.g. Q4_K_M, w4-g128")
+    size_mb: float = Field(..., ge=0, description="File size in megabytes")
+    faithfulness_score: float | None = Field(None, ge=0, le=1, description="Measured faithfulness")
+    faithfulness_drop_pct: float | None = Field(None, description="Drop from bfloat16 baseline (%)")
+    wer_increase_pct: float | None = Field(None, description="WER increase from baseline (%)")
+    sha256: str = Field("", description="SHA-256 checksum of the quantized artifact")
+    created_at: str = Field("", description="ISO 8601 timestamp of quantization")
+    status: str = Field("available", description="available | building | failed")
+
+
+class QuantizedModelsResponse(BaseModel):
+    """Response for GET /v1/models/quantized."""
+
+    models: list[QuantizedModelInfo] = Field(default_factory=list)
+    total: int = 0
+    baseline_faithfulness: float | None = Field(None, description="bfloat16 baseline faithfulness")
+
+
+# ---------------------------------------------------------------------------
+# Offline RAG (Phase 25)
+# ---------------------------------------------------------------------------
+class OfflineBundleInfo(BaseModel):
+    """Metadata for an offline knowledge bundle."""
+
+    version: str = Field(..., description="Semantic version, e.g. 1.2.0")
+    size_bytes: int = Field(..., ge=0, description="Compressed bundle size in bytes")
+    size_mb: float = Field(..., ge=0, description="Compressed bundle size in MB")
+    passage_count: int = Field(0, ge=0, description="Number of passages in the index")
+    index_dim: int = Field(0, ge=0, description="Embedding dimension")
+    sha256: str = Field("", description="SHA-256 of the compressed bundle")
+    created_at: str = Field("", description="ISO 8601 creation timestamp")
+    min_app_version: str = Field("", description="Minimum app version required")
+
+
+class OfflineStatusResponse(BaseModel):
+    """Response for GET /v1/offline/status."""
+
+    available: bool = Field(False, description="Whether offline bundle is available on server")
+    bundle: OfflineBundleInfo | None = None
+    sync_enabled: bool = Field(False, description="Whether delta sync is enabled")
+    last_sync_at: str | None = Field(None, description="ISO 8601 last sync timestamp")
+    pending_chunks: int = Field(0, ge=0, description="Chunks awaiting sync")
+
+
+class OfflineSyncRequest(BaseModel):
+    """Client sends its current state for delta sync."""
+
+    client_version: str = Field(..., description="Client's current bundle version")
+    client_chunk_hashes: dict[str, str] = Field(
+        default_factory=dict,
+        description="Map of chunk_id -> SHA-256 hash for client-side chunks",
+    )
+    device_id: str = Field("", max_length=128, description="Device identifier for sync tracking")
+    max_download_bytes: int = Field(
+        50_000_000, ge=0, description="Max bytes the client is willing to download"
+    )
+
+
+class OfflineSyncResponse(BaseModel):
+    """Server response with delta information."""
+
+    server_version: str = Field(..., description="Current server bundle version")
+    needs_full_sync: bool = Field(False, description="True if delta sync is not possible")
+    changed_chunks: list[dict] = Field(
+        default_factory=list,
+        description="List of {chunk_id, sha256, size_bytes, download_url} for changed chunks",
+    )
+    deleted_chunk_ids: list[str] = Field(
+        default_factory=list,
+        description="Chunk IDs that should be removed from client",
+    )
+    total_download_bytes: int = Field(0, ge=0, description="Total bytes to download")
+    estimated_sync_seconds: float = Field(0, ge=0, description="Estimated sync time")
+
+
+class OfflineAdminStats(BaseModel):
+    """Response for GET /v1/admin/offline_stats."""
+
+    total_bundles_served: int = 0
+    total_syncs_completed: int = 0
+    total_sync_bytes: int = 0
+    active_offline_devices: int = 0
+    avg_sync_duration_s: float = 0.0
+    bundle_version: str = ""
+    bundle_size_mb: float = 0.0
+    passage_count: int = 0
+    offline_faithfulness: float | None = None
+    last_bundle_built_at: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Voice-First Mobile (Phase 27)
+# ---------------------------------------------------------------------------
+class VoiceVisionChatRequest(BaseModel):
+    """Compound voice + vision chat: audio + image -> ASR -> OCR -> LLM -> TTS."""
+
+    language: str = Field("en", pattern=r"^[a-z]{2,3}$", description="User language")
+    voice: str | None = Field(None, pattern=r"^[a-zA-Z0-9_\-]{1,64}$")
+    top_k: int = Field(4, ge=1, le=10)
+    conversation_id: str | None = Field(None, pattern=r"^[a-zA-Z0-9_-]{1,64}$")
+    tts_enabled: bool = Field(True, description="Whether to synthesize audio reply")
+    ocr_enabled: bool = Field(True, description="Whether to extract text from image")
+
+
+class VoiceVisionChatResponse(BaseModel):
+    """Full round-trip voice + vision chat result."""
+
+    transcript: str = Field("", description="ASR transcript of user audio")
+    ocr_text: str = Field("", description="Extracted text from image/document")
+    reply: str = Field("", description="LLM reply text")
+    reply_audio_base64: str = Field("", description="Base64-encoded WAV of narrated reply")
+    sample_rate: int = 0
+    duration_s: float = 0.0
+    sources: list[str] = Field(default_factory=list)
+    citations: list[Citation] = Field(default_factory=list)
+    faithfulness_score: float | None = None
+    retrieval_mode: str = "keyword"
+    conversation_id: str | None = None
+    asr_latency_s: float = 0.0
+    ocr_latency_s: float = 0.0
+    llm_latency_s: float = 0.0
+    tts_latency_s: float = 0.0
+    total_latency_s: float = 0.0
+    error: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Cloudflare relay (internal-only; see /internal/cf-relay/* in main.py)
+# ---------------------------------------------------------------------------
+class CFRelayEmbedRequest(BaseModel):
+    """Forwarded Workers AI embedding request.
+
+    No ``model`` field on purpose: this relay exists solely for the
+    dense-retrieval fallback, which always embeds with the same model
+    (``@cf/baai/bge-m3``, hardcoded server-side in main.py). Accepting a
+    caller-supplied model string would let request data influence the
+    Cloudflare URL this process builds — a partial-SSRF shape CodeQL flags
+    even with a regex constraint, since a pattern isn't a real allowlist.
+    ``extra="forbid"`` so a ``model`` field in the request body is rejected
+    outright rather than silently ignored.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    texts: list[str] = Field(..., min_length=1, max_length=32)
+
+
+class CFRelayVectorizeQueryRequest(BaseModel):
+    """Forwarded Vectorize query request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    vector: list[float] = Field(..., min_length=1, max_length=4096)
+    top_k: int = Field(10, ge=1, le=50)
+    vector_filter: dict[str, Any] | None = None
+
+
+class CFRelayChatMessage(BaseModel):
+    """One chat-completion message, forwarded to Workers AI verbatim."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["system", "user", "assistant"]
+    content: str = Field(..., max_length=16_000)
+
+
+class CFRelayChatRequest(BaseModel):
+    """Forwarded Workers AI chat-completion request.
+
+    ``model_slot`` names a slot in ``routing.CHAT_MODEL_SLOTS``
+    (primary/fallback/fallback2 — the same cloud-primary chain this
+    deployment already trusts, see pipeline._llm_cloud_fallback), never a raw
+    model string. Unlike the embed relay this endpoint genuinely needs to
+    select between a few different models, so it can't just drop the field
+    the way CFRelayEmbedRequest does — but a ``str`` field checked in a
+    ``field_validator`` still reads as tainted to CodeQL's dataflow analysis
+    (a validator is arbitrary code to it, not a proven sanitizer, the same
+    problem a regex ``Field(pattern=)`` had on the embed relay). A
+    ``Literal`` of slot NAMES resolved through a fixed dict in main.py is the
+    pattern it recognizes as safe: the value that ever reaches the outbound
+    Cloudflare URL always comes from ``routing.py``, never from this field.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    messages: list[CFRelayChatMessage] = Field(..., min_length=1, max_length=64)
+    model_slot: Literal["primary", "fallback", "fallback2"]
+    max_tokens: int = Field(512, ge=1, le=2048)
+    temperature: float = Field(0.2, ge=0.0, le=2.0)

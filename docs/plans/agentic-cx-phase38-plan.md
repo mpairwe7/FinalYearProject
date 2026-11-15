@@ -51,7 +51,7 @@ and English-router form, and the read-only, code-routed connector surface (G138�
 
 - **On-premises first.** Every core path runs on the local stack (Sunflower on vLLM, Whisper-SALT,
   Orpheus/Spark, Qdrant, Redis, Postgres/SQLite). External services stay circuit-broken last resorts.
-- **Flag everything, address it.** New behaviour lands default **off** in `flags.py`, subject-addressable
+- **Flag everything, address it.** New behaviour lands default **off** in `config/flags.py`, subject-addressable
   (`FLAG_<NAME>_PERCENT/_COHORTS/_ALLOWLIST`), documented in `docs/RAG_ARCHITECTURE.md` and `.env.example`.
   Ramp: `ura_staff` cohort → 5% → 25% → 100%, each step gated on the metrics in §8.
 - **Statutory accuracy outranks autonomy.** No change may bypass figure protection, the premise guard,
@@ -151,11 +151,11 @@ ledger as part of the turn row (`escalation_tier`, `escalation_reasons`), digest
 
 - **Modules.** New: `app/escalation_policy.py` (QW2), `app/officer_handoff.py` (QW2/QW3 at the ticket
   choke point). Changed: `app/memory/resolution_ledger.py` (`DOMAIN_OBJECTIVES`, `case_update_for_turn`,
-  `case_for_prompt`, `mentioned_domains`, `upsert_turn_case`), `app/service.py` (`_record_turn_case` on REST
+  `case_for_prompt`, `mentioned_domains`, `upsert_turn_case`), `app/rag/pipeline.py` (`_record_turn_case` on REST
   and stream, `connectors_used` on the result, `enrich_handoff` in `_maybe_create_ticket`, the prompt's case),
   `app/turn_guidance.py` (the offer), `app/voice_stream.py` (upsert), `app/connector_outcome.py`
   (`connectors_used`), `app/audit/turns.py` + `audit/governance_v3.py` (QW4), `app/text_signals.py`
-  (`detect_high_stakes`, `strip_stakes`), `flags.py`. Frontend: `components/staff/TicketCase.tsx`. Tests:
+  (`detect_high_stakes`, `strip_stakes`), `config/flags.py`. Frontend: `components/staff/TicketCase.tsx`. Tests:
   `App/backend/tests/test_escalation_policy.py`, `test_turn_cases.py`, root `tests/agents/test_phase38_cx.py`
   (the CI coverage gate measures `service.py` from the root suite only).
 - **Env vars.** `ESCALATION_STAKES_AMOUNT_UGX` (default 10,000,000), `ESCALATION_OFFER_TURNS`

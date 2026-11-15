@@ -80,7 +80,7 @@ class WsConcurrencyCapTest(unittest.TestCase):
 class VoiceWsAuthTest(unittest.TestCase):
     def tearDown(self) -> None:
         from app import ws_concurrency
-        from app.flags import flags
+        from app.config.flags import flags
 
         flags.clear("native_voice")
         flags.clear("voice_streaming")
@@ -96,14 +96,14 @@ class VoiceWsAuthTest(unittest.TestCase):
                 pass
 
     def test_v2_voice_rejects_anonymous_when_auth_required(self) -> None:
-        from app.flags import flags
+        from app.config.flags import flags
 
         flags.set("native_voice", True)
         flags.set("auth_required", True)
         self._expect_rejected("/v2/voice/chat/stream")
 
     def test_v1_voice_rejects_anonymous_when_auth_required(self) -> None:
-        from app.flags import flags
+        from app.config.flags import flags
 
         flags.set("voice_streaming", True)
         flags.set("auth_required", True)
@@ -112,7 +112,7 @@ class VoiceWsAuthTest(unittest.TestCase):
     def test_v2_voice_allows_anonymous_when_auth_not_required(self) -> None:
         # With auth NOT required the handshake completes (auth passes, slot is
         # acquired, accept happens) — proving the gate is conditional.
-        from app.flags import flags
+        from app.config.flags import flags
         from app.main import app
 
         flags.set("native_voice", True)

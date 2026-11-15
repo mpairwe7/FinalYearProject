@@ -13,12 +13,12 @@ import re
 from typing import Any
 
 import pytest
-from app import database as db
+from app.db import database as db
 from app import portal_copilot as pc
 from app.audit.ledger import get_ledger, reset_ledger
-from app.flags import flags
+from app.config.flags import flags
 from app.main import app, limiter
-from app.service import ChatModel
+from app.rag.pipeline import ChatModel
 from app.tools.portal_navigator_data import harden_dom_actions, selector_targets_a_credential
 from fastapi.testclient import TestClient
 

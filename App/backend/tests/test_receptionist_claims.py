@@ -13,9 +13,9 @@ import pytest
 from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from app import database as db
+from app.db import database as db
 from app.auth.jwt_auth import make_dev_token
-from app.flags import flags
+from app.config.flags import flags
 from app.receptionist import desk
 from app.receptionist.hub import hub
 from app.receptionist.state import registry

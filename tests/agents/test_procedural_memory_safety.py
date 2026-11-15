@@ -29,7 +29,7 @@ sys.path.insert(0, str(REPO_ROOT / "App" / "backend"))
 
 from app.memory import procedural  # noqa: E402
 from app.memory.procedural import ProceduralMemory, TrajectoryExemplar  # noqa: E402
-from app.service import ChatModel  # noqa: E402
+from app.rag.pipeline import ChatModel  # noqa: E402
 
 
 def _faq_questions() -> list[str]:

@@ -24,7 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.claim_verifier import verify_claims  # noqa: E402
+from app.rag.claim_verifier import verify_claims  # noqa: E402
 from app.text_signals import normalise_citation_markers  # noqa: E402
 
 PASSAGES = [
@@ -194,7 +194,7 @@ class TestTheGeneratorActuallyAppliesIt(unittest.TestCase):
         import os
         from unittest.mock import patch
 
-        from app import service as svc
+        from app.rag import pipeline
 
         from app.providers import breakers
 
@@ -202,13 +202,13 @@ class TestTheGeneratorActuallyAppliesIt(unittest.TestCase):
         breakers.CF_LLM_BREAKER.record_success()
         sunbird_reply = backend_return if which == "sunbird" else "x"  # "x" is truncated: CF runs next
         with patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "sunbird"}), patch.object(
-            svc.flags, "is_enabled", return_value=True
+            pipeline.flags, "is_enabled", return_value=True
         ), patch("app.providers.config.is_cloudflare_configured", return_value=True), patch(
             "app.providers.budget.try_consume_neurons", return_value=True
         ), patch("app.sunbird.is_available", return_value=True), patch(
             "app.sunbird.chat_completion", return_value=sunbird_reply
         ), patch("app.providers.gateway.workers_ai_chat", return_value=backend_return):
-            return svc._llm_cloud_fallback("q", [{"text": "p"}], None, locale)
+            return pipeline._llm_cloud_fallback("q", [{"text": "p"}], None, locale)
 
     def test_sunbird_output_is_normalised_before_it_is_returned(self):
         out = self._run("A TIN is issued by URA [1, 3].", "sunbird")

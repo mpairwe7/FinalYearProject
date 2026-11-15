@@ -28,7 +28,7 @@ from . import ws_concurrency
 from .analytics import MetricSpec, record_mapped
 from .auth import revocation
 from .auth.jwt_auth import JWTAuthError, JWTVerifier
-from .flags import flags
+from .config.flags import flags
 from .voice_stream import VADConfig
 from .voice_stream_v2 import VoiceSessionV2, VoiceStreamEvent
 

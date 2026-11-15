@@ -338,17 +338,17 @@ def graded_ndcg(grades: list[int], ideal: list[int], k: int = 10) -> float:
 # --------------------------------------------------------------------------- retrieval
 class Harness:
     def __init__(self, *, sparse_only: bool, service: bool) -> None:
-        from app import query as query_module
-        from app import service as service_module
-        from app.retriever import QDRANT_COLLECTION
+        from app.rag import query as query_module
+        from app.rag import pipeline as pipeline_module
+        from app.rag.retriever import QDRANT_COLLECTION
 
         self.collection = QDRANT_COLLECTION
         self.query_module = query_module
         if service:
-            self.chat = service_module.ChatModel()
+            self.chat = pipeline_module.ChatModel()
             self.r = self.chat._retriever
         else:
-            from app.retriever import HybridRetriever
+            from app.rag.retriever import HybridRetriever
 
             self.chat = None
             self.r = HybridRetriever()
@@ -367,7 +367,7 @@ class Harness:
             self.r._reranker.predict = timed("rerank", self.r._reranker.predict)
         translate = timed("mt", query_module.translate_query_for_retrieval)
         query_module.translate_query_for_retrieval = translate
-        service_module.translate_query_for_retrieval = translate
+        pipeline_module.translate_query_for_retrieval = translate
         self.has_dense = self.r._dense_model is not None
         self.has_rerank = self.r._reranker is not None
 
@@ -415,7 +415,7 @@ class Harness:
         return out
 
     def ranked(self, query: str, mode: str, *, rerank_with: tuple[str, str | None] | None = None) -> list[dict[str, Any]]:
-        from app.retriever import _dedupe_candidates, _filter_tombstoned_candidates
+        from app.rag.retriever import _dedupe_candidates, _filter_tombstoned_candidates
 
         if mode == "rrf60":
             legs = [self._points(query, "dense"), self._points(query, "bm25")]
@@ -452,7 +452,7 @@ def abstains(hits: list[dict[str, Any]], lang: str) -> bool:
 
 def best_signal(hits: list[dict[str, Any]]) -> tuple[str, float | None]:
     """The number ``should_abstain`` decides on, and which one it is."""
-    from app.retriever import hit_relevance
+    from app.rag.retriever import hit_relevance
 
     rel = [v for h in hits if (v := hit_relevance(h)) is not None]
     if rel:
@@ -482,7 +482,7 @@ def isolate_side_effects(work: Path) -> None:
         os.environ[key] = "false"
     (work / "db").mkdir(parents=True, exist_ok=True)
     os.environ["ANALYTICS_DB_DIR"] = str(work / "db")
-    from app import database as db
+    from app.db import database as db
 
     db.init_db()
 
@@ -586,9 +586,9 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def env_summary(h: Harness) -> dict[str, Any]:
-    from app.flags import flags
+    from app.config.flags import flags
     from app.guardrails import ABSTENTION_THRESHOLD_NORM
-    from app.retriever import (
+    from app.rag.retriever import (
         DENSE_MODEL_NAME,
         LEXICAL_RELEVANCE_FLOOR,
         RERANK_ENABLED,
@@ -684,7 +684,7 @@ def precision_check(h: Harness, rows: list[dict[str, Any]]) -> dict[str, Any]:
     float16 twin on the same device and scores identical inputs.
     """
     import torch
-    from app.retriever import (
+    from app.rag.retriever import (
         DENSE_MODEL_NAME,
         RERANKER_DEVICE,
         RERANKER_MODEL_NAME,
@@ -744,9 +744,9 @@ def pct(values: list[float], p: float) -> float:
 
 
 # --------------------------------------------------------------------------- mechanisms
-# A verbatim copy of the language-boost block in service.py (generate() step
+# A verbatim copy of the language-boost block in rag/pipeline.py (generate() step
 # 3b2 and its generate_retrieval_only twin), so its effect can be measured on
-# its own. If service.py changes, this copy must follow it.
+# its own. If rag/pipeline.py changes, this copy must follow it.
 _LOCALE_BOOST_TERMS = {
     "lg": {"luganda", "oluganda", "lg"},
     "sw": {"swahili", "kiswahili", "sw"},
@@ -754,7 +754,7 @@ _LOCALE_BOOST_TERMS = {
 
 
 def service_language_boost(hits: list[dict[str, Any]], locale: str) -> tuple[list[dict[str, Any]], int]:
-    # G131: Removed buggy substring boost from service.py; reranker order is preserved.
+    # G131: Removed buggy substring boost from rag/pipeline.py; reranker order is preserved.
     return [dict(h) for h in hits], 0
 
 
@@ -765,7 +765,7 @@ def cmd_mechanisms(args: argparse.Namespace) -> int:
     ``corrective_retrieve`` does to them (trigger, time, top-1), then what the
     language boost does to its output (passages boosted, top-1 moved).
     """
-    from app.corrective_rag import corrective_retrieve, should_correct
+    from app.rag.corrective_rag import corrective_retrieve, should_correct
 
     rows = [r for r in load_queries(Path(args.queries), {"faq", "native"}, 0)
             if "+" not in r["variant"] and r["variant"] != "verbatim" and sampled(r["id"], args.sample)]
@@ -935,7 +935,7 @@ def cmd_judge(args: argparse.Namespace) -> int:
             for sysrec in rec["systems"].values():
                 for hit in sysrec["hits"][: args.depth]:
                     pool[rec["parent"]].add(hit["key"])
-    from app.retriever import QDRANT_COLLECTION, QDRANT_URL
+    from app.rag.retriever import QDRANT_COLLECTION, QDRANT_URL
     from qdrant_client import QdrantClient
 
     client = QdrantClient(url=QDRANT_URL)

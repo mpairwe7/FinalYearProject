@@ -46,7 +46,7 @@ except ImportError:  # pragma: no cover – uvicorn always present at runtime
 
 from pydantic import BaseModel, Field, field_validator
 
-from . import database as db
+from .db import database as db
 from . import documents
 from . import officer_hours
 from .analytics import METRICS_CONTENT_TYPE, AnalyticsMiddleware, metrics, record_chat_turn, route_label
@@ -64,7 +64,7 @@ from .auth.models import (
 from .authority import authority_required, get_authority_status
 from .escalation_notify import known_teams
 from .journey_analytics import build_journey_funnel
-from .models import (
+from .api.models import (
     AnalyticsDashboard,
     AnalyticsEvent,
     AuditAnchorBreak,
@@ -121,11 +121,11 @@ from .models import (
     VoiceChatResponse,
     VoiceVisionChatResponse,
 )
-from .query import gate_locale
-from .retriever import active_retrieval_mode
+from .rag.query import gate_locale
+from .rag.retriever import active_retrieval_mode
 from .seed_prototype import seed as _seed_prototype
 from .seed_prototype import should_seed as _should_seed
-from .service import ChatModel, localize_reply
+from .rag.pipeline import ChatModel, localize_reply
 from .speech_service import (
     SPEECH_ASR_BACKEND,
     SPEECH_ENABLED,
@@ -136,7 +136,7 @@ from .speech_service import (
 )
 from .workflows.registry import WorkflowRegistry
 
-from .logging_config import REQUEST_ID, install_logging
+from .middleware.logger import REQUEST_ID, install_logging
 from .process_role import (
     ProcessRoleMiddleware,
     calls_process_status,
@@ -498,8 +498,8 @@ def _apply_persisted_flag_overrides(overrides: dict[str, bool]) -> None:
     value for a protected control would therefore undo that validation unless
     it is rejected here.
     """
-    from .flags import flags as flag_reg
-    from .flags import is_protected
+    from .config.flags import flags as flag_reg
+    from .config.flags import is_protected
 
     if (os.getenv("APP_ENV") or "development").lower() == "production":
         disabled = sorted(
@@ -541,7 +541,7 @@ def _sync_flag_overrides() -> None:
     protected control is refused (the control stays on), logged CRITICAL and
     counted. An unreadable store keeps this process's flags as they are.
     """
-    from .flags import _log_safe, flags as flag_reg, is_protected
+    from .config.flags import _log_safe, flags as flag_reg, is_protected
 
     try:
         stored = db.load_flag_overrides()
@@ -722,7 +722,7 @@ def _request_truthy_header(request: Request, name: str) -> bool:
 
 def _require_voice_processing_consent(request: Request, ctx: AuthContext) -> None:
     """Enforce voice consent for both authenticated and anonymous users."""
-    from .flags import flags
+    from .config.flags import flags
 
     if not flags.is_enabled("voice_consent"):
         return
@@ -907,11 +907,11 @@ async def lifespan(app: FastAPI):
         logger.debug("Voice consent schema init skipped", exc_info=True)
 
     # Offline RAG pipeline (Phase 25) — loads FAISS + ONNX bundle if present.
-    from .flags import flags as _flags
+    from .config.flags import flags as _flags
 
     if _flags.is_enabled("offline_rag"):
         try:
-            from .offline_rag import OfflineRAGPipeline
+            from .rag.offline_rag import OfflineRAGPipeline
 
             app.state.offline_rag = OfflineRAGPipeline()
             if app.state.offline_rag.initialize():
@@ -1350,7 +1350,7 @@ async def security_headers(request: Request, call_next):
     # Stash on request.state so handlers can read it without re-parsing headers
     request.state.request_id = request_id
     # Every log record written while serving this request carries the id
-    # (logging_config.RequestContextFilter). Inbound W3C traceparent is
+    # (middleware.logger.RequestContextFilter). Inbound W3C traceparent is
     # handled by the OpenTelemetry FastAPI instrumentation when tracing is on.
     request_id_token = REQUEST_ID.set(request_id)
     traceresponse: str | None = None
@@ -1451,12 +1451,13 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
     # heuristic, translation drops to serving English — and both degradations
     # shipped unnoticed. An operator should not have to ask the assistant a
     # Luganda question to find out.
-    from . import llm, sunbird
-    from .query import language_detection_backend
+    from .rag import generator
+    from . import sunbird
+    from .rag.query import language_detection_backend
 
     if sunbird.is_available():
         trans_cap = "sunbird"
-    elif llm.is_available():
+    elif generator.is_available():
         trans_cap = "prompted_local"
     else:
         trans_cap = "unavailable"
@@ -1633,7 +1634,7 @@ def chat(
 
     # Log conversation with PII redaction (privacy-by-design)
     try:
-        from .service import ChatModel as _CM
+        from .rag.pipeline import ChatModel as _CM
 
         db.log_conversation(
             session_id=session_id or None,
@@ -1687,7 +1688,7 @@ def execute_portal_task_decision(
 ) -> PortalTaskDecisionResponse:
     """Verify HMAC-signed `request_state` and execute or decline a confirmed URA portal task."""
     from . import portal_copilot as pc_mod
-    from .flags import flags
+    from .config.flags import flags
 
     if not flags.is_enabled("portal_copilot", subject=ctx.user_id or None):
         raise HTTPException(
@@ -1838,10 +1839,10 @@ async def chat_stream(
 ):
     """Server-Sent Events streaming chat — tokens arrive progressively.
 
-    Thin adapter around :func:`service.run_chat_turn`.  Maps the
+    Thin adapter around :func:`pipeline.run_chat_turn`.  Maps the
     transport-agnostic ``(event_type, payload)`` tuples into SSE frames.
     """
-    from . import service as service_module
+    from .rag import pipeline as pipeline_module
 
     connector_namespaces, connector_notices = _resolve_chat_connectors(body, ctx)
 
@@ -1863,7 +1864,7 @@ async def chat_stream(
         agent_trace: list[dict[str, Any]] = []
         stated_ids = user_stated_identifiers(body.message)
         dlp_filter = StreamingDLPFilter(allowed_values=stated_ids)
-        async for event_type, payload in service_module.run_chat_turn(
+        async for event_type, payload in pipeline_module.run_chat_turn(
             model,
             message=body.message,
             conversation_id=body.conversation_id,
@@ -1995,7 +1996,7 @@ async def _sse_not_disconnected(request: Request) -> bool:
 
 def _experiment_log_fields(user_id: str = "", locale: str = "") -> dict[str, str]:
     """Flag variants + locale persisted on each turn (G26)."""
-    from .flags import flags
+    from .config.flags import flags
 
     return flags.experiment_log_fields(subject=user_id or None, locale=locale)
 
@@ -2010,10 +2011,10 @@ def _log_stream_conversation(
 ) -> None:
     """Mirror the old SSE ``finally`` block — log to analytics DB.
 
-    Turn metrics and the audit row are recorded by ``service.run_chat_turn``
+    Turn metrics and the audit row are recorded by ``pipeline.run_chat_turn``
     itself, for every streaming transport alike.
     """
-    from .service import ChatModel as _CM
+    from .rag.pipeline import ChatModel as _CM
 
     result = log_payload.get("result") or {}
     full_reply = log_payload.get("full_reply", "")
@@ -2124,7 +2125,7 @@ async def transcribe_audio(
         language = None
     # 639-1 OR 639-3: two of the five locales the picker offers (nyn, ach) have
     # no two-letter code, so a {2}-only rule rejected Runyankole and Acholi
-    # speech outright. Every request model in models.py already allows {2,3}.
+    # speech outright. Every request model in api/models.py already allows {2,3}.
     if language is not None and not re.match(r"^[a-z]{2,3}$", language):
         raise HTTPException(status_code=400, detail="language must be an ISO 639-1/639-3 code")
 
@@ -2859,7 +2860,7 @@ async def voice_chat(
 
     # Log voice conversation for analytics (mirrors /v1/chat logging)
     try:
-        from .service import ChatModel as _CM
+        from .rag.pipeline import ChatModel as _CM
 
         await asyncio.to_thread(
             db.log_conversation,
@@ -3131,7 +3132,7 @@ def _seal_audit_ledgers() -> int:
     Scheduled from the lifespan. Housekeeping never takes the service down: a
     failure is logged and counted, and the next interval tries again.
     """
-    from .flags import flags as flag_reg
+    from .config.flags import flags as flag_reg
 
     if not flag_reg.is_enabled("audit_ledger"):
         return 0
@@ -3173,7 +3174,7 @@ def _audit_staff_action(ctx: AuthContext, event_type: str, payload: dict[str, An
     failed append is logged and counted, never raised: the action has already
     happened, and ``audit_append_failed_total`` is what an alert should watch.
     """
-    from .flags import flags as flag_reg
+    from .config.flags import flags as flag_reg
 
     if not flag_reg.is_enabled("audit_ledger"):
         return
@@ -3236,7 +3237,7 @@ def trigger_indexing(
     """Trigger document re-indexing into the Qdrant vector store.
 
     Requires ``Authorization: Bearer <INDEX_API_KEY>`` when configured. Runs
-    the staged index lifecycle (``app.index_lifecycle``): the whole corpus —
+    the staged index lifecycle (``app.vectorstore.index_lifecycle``): the whole corpus —
     FAQ, teacher QA, PDF and crawl chunks — into a candidate collection, a
     canary retrieval gate, then one atomic alias swap; then re-initialises the
     hybrid retriever (G286).
@@ -3250,9 +3251,9 @@ def trigger_indexing(
     """
     _require_ops_key(request)
 
-    from .faq_corpus import CorpusValidationError
+    from .ingestion.faq_corpus import CorpusValidationError
     from .freshness import write_lifecycle_status
-    from .index_lifecycle import IndexLifecycleError, rebuild_if_needed
+    from .vectorstore.index_lifecycle import IndexLifecycleError, rebuild_if_needed
 
     def _record_failure(exc: Exception) -> None:
         with contextlib.suppress(Exception):
@@ -3279,7 +3280,7 @@ def trigger_indexing(
     # Re-initialise the retriever so it picks up the new collection
     model._retriever_ready = model._retriever.initialize()
     # Retire cached answers across Redis / in-memory caches and MT cache immediately
-    from .cache import reset_index_stamp
+    from .rag.cache import reset_index_stamp
     from . import mt as _mt
 
     reset_index_stamp()
@@ -3404,7 +3405,7 @@ def submit_feedback(
     reply are kept rather than the client's copy.
     """
     from . import quality_audit
-    from .service import ChatModel as _CM
+    from .rag.pipeline import ChatModel as _CM
 
     tenant_id = ctx.tenant_id or "default"
     turn = quality_audit.rated_turn(body.turn_id, body.conversation_id, tenant_id=tenant_id)
@@ -3474,7 +3475,7 @@ def request_human_officer(
     client treats any non-`ok` response the same way, by showing the
     contact-centre numbers.
     """
-    from .flags import flags
+    from .config.flags import flags
 
     locale = gate_locale(body.locale)
     if not flags.is_enabled("ticket_queue"):
@@ -3819,7 +3820,7 @@ def update_feedback_comment(
     The rating it comments on must be the same rater's (the same user, or —
     for an anonymous rating — anonymous), and gets one comment.
     """
-    from .service import ChatModel as _CM
+    from .rag.pipeline import ChatModel as _CM
 
     updated = db.update_feedback_comment(
         message_id, _CM.redact_for_storage(body.comment), user_id=_feedback_rater(ctx)
@@ -4236,7 +4237,7 @@ def list_flags_endpoint(
     database has. ``synced_at`` (epoch seconds) says when this one last read
     the store.
     """
-    from .flags import _REGISTRY, flags as flag_reg, is_protected
+    from .config.flags import _REGISTRY, flags as flag_reg, is_protected
 
     items = []
     for name in sorted(_REGISTRY):
@@ -4279,7 +4280,7 @@ def set_flag_endpoint(
     nothing anywhere. It used to set this process first: a failed write left
     an override in this process alone, which no other process would ever see.
     """
-    from .flags import _REGISTRY, flags as flag_reg, is_protected
+    from .config.flags import _REGISTRY, flags as flag_reg, is_protected
 
     if ctx.user and ctx.role != "ura_admin":
         raise HTTPException(status_code=403, detail="only ura_admin may toggle flags")
@@ -4314,7 +4315,7 @@ def clear_flag_endpoint(
     its environment for good. Setting it back to the default value is
     not the same thing: it stays overridden and keeps winning.
     """
-    from .flags import _REGISTRY, flags as flag_reg, is_protected
+    from .config.flags import _REGISTRY, flags as flag_reg, is_protected
 
     if ctx.user and ctx.role != "ura_admin":
         raise HTTPException(status_code=403, detail="only ura_admin may toggle flags")
@@ -4470,7 +4471,7 @@ def put_override_endpoint(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     row = dict(row or {})
     previous_reply = str(row.pop("previous_reply", "") or "")
-    from .cache import reset_index_stamp
+    from .rag.cache import reset_index_stamp
 
     reset_index_stamp()
     cache_obj = getattr(getattr(app.state, "model", None), "_cache", None)
@@ -4500,7 +4501,7 @@ def delete_override_endpoint(
     ok = db.delete_answer_override(override_id)
     if not ok:
         raise HTTPException(status_code=404, detail="override not found")
-    from .cache import reset_index_stamp
+    from .rag.cache import reset_index_stamp
 
     reset_index_stamp()
     cache_obj = getattr(getattr(app.state, "model", None), "_cache", None)
@@ -4703,7 +4704,7 @@ def verify_discrepancy_endpoint(
         if override_id or precedence_id or tombstone_ids:
             # As the standalone override and tombstone routes do: answers cached
             # before the hotfix must not keep being served after it (G277).
-            from .cache import reset_index_stamp
+            from .rag.cache import reset_index_stamp
 
             reset_index_stamp()
             cache_obj = getattr(getattr(app.state, "model", None), "_cache", None)
@@ -4789,7 +4790,7 @@ def create_tombstone_endpoint(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     # Retire cached answers at once on this replica; others within the cache
     # generation's 60 s memo (G277).
-    from .cache import reset_index_stamp
+    from .rag.cache import reset_index_stamp
 
     reset_index_stamp()
     _audit_staff_action(ctx, "staff.tombstone_created", {"tombstone_id": tomb.get("id")})
@@ -4806,7 +4807,7 @@ def delete_tombstone_endpoint(
     ok = db.delete_corpus_tombstone(tombstone_id)
     if not ok:
         raise HTTPException(status_code=404, detail="tombstone not found")
-    from .cache import reset_index_stamp
+    from .rag.cache import reset_index_stamp
 
     reset_index_stamp()
     _audit_staff_action(ctx, "staff.tombstone_deleted", {"tombstone_id": tombstone_id})
@@ -4979,7 +4980,7 @@ def audit_events_endpoint(
     are being recorded.
     """
     from .audit import get_ledger
-    from .flags import flags as flag_reg
+    from .config.flags import flags as flag_reg
 
     _require_audit_reader(ctx)
     rows = get_ledger().query(
@@ -5054,7 +5055,7 @@ def audit_verify_endpoint(
     """
     from .audit import get_ledger
     from .audit.verifier import SCOPE_FULL, SCOPE_SINCE_SEAL, verify_ledger
-    from .flags import flags as flag_reg
+    from .config.flags import flags as flag_reg
 
     _require_audit_reader(ctx)
     tenant = ctx.tenant_id or "default"
@@ -5316,7 +5317,7 @@ def _translation_keeps_figures(english: str, localized: str, locale: str) -> boo
     """
     try:
         from . import mt
-        from .entailment import percentages
+        from .rag.entailment import percentages
 
         loc = (locale or "en").lower().strip()
         if not mt.figures_survived(english, localized, locale=loc):
@@ -5347,7 +5348,7 @@ def _localize_for_ticket(text: str, ticket_locale: str) -> str | None:
     if t_loc in ("", "en"):
         return None
     try:
-        from .service import localize_reply
+        from .rag.pipeline import localize_reply
 
         localized = localize_reply(text, t_loc)
     except Exception:
@@ -5879,7 +5880,7 @@ class OfficerPresenceUpdate(BaseModel):
     @field_validator("languages")
     @classmethod
     def _known_languages(cls, value: list[str] | None) -> list[str] | None:
-        from .query import SUPPORTED_LOCALES
+        from .rag.query import SUPPORTED_LOCALES
 
         if value is not None and any(v not in SUPPORTED_LOCALES for v in value):
             raise ValueError("languages must be locales the service supports")
@@ -6386,8 +6387,8 @@ def list_quantized_models(
 
     Feature-flagged behind ``FLAG_QUANTIZATION``.
     """
-    from .flags import flags
-    from .models import QuantizedModelInfo
+    from .config.flags import flags
+    from .api.models import QuantizedModelInfo
 
     if not flags.is_enabled("quantization"):
         return QuantizedModelsResponse(models=[], total=0)
@@ -6428,9 +6429,9 @@ def list_quantized_models(
 # ---------------------------------------------------------------------------
 # Modular domain route handlers (2026 clean architecture)
 # ---------------------------------------------------------------------------
-from .routes.connectors import router as connectors_router
-from .routes.offline import router as offline_router
-from .routes.quality import router as quality_router
+from .api.connectors import router as connectors_router
+from .api.offline import router as offline_router
+from .api.quality import router as quality_router
 
 app.include_router(offline_router)
 app.include_router(connectors_router)
@@ -6459,7 +6460,7 @@ async def voice_vision_chat(
 
     Feature-flagged behind ``FLAG_VOICE_VISION``.
     """
-    from .flags import flags
+    from .config.flags import flags
 
     if not flags.is_enabled("voice_vision"):
         raise HTTPException(

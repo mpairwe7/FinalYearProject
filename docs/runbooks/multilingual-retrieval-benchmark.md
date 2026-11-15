@@ -9,7 +9,7 @@ reranking, score calibration, abstention gating, and running the 2,000-FAQ evalu
 ## 1. System Architecture & Component Defaults
 
 The retrieval pipeline serves REST, WebSocket, LangGraph, and voice prefetch through
-`HybridRetriever.search_planned` (`App/backend/app/retriever.py`).
+`HybridRetriever.search_planned` (`App/backend/app/rag/retriever.py`).
 
 | Component | Default | Configuration Knob | Rationale |
 |---|---|---|---|

@@ -64,7 +64,7 @@ class EpisodicMemory:
         self._init_schema()
 
     def _init_schema(self) -> None:
-        from .. import database as db
+        from ..db import database as db
 
         db.execute_script(
             """
@@ -106,7 +106,7 @@ class EpisodicMemory:
         )
 
     def write(self, summary: EpisodicSummary) -> str:
-        from .. import database as db
+        from ..db import database as db
 
         if not summary.summary_id:
             summary.summary_id = str(uuid.uuid4())
@@ -140,7 +140,7 @@ class EpisodicMemory:
         topic_tag: str | None = None,
         since_days: int = 90,
     ) -> list[dict[str, Any]]:
-        from .. import database as db
+        from ..db import database as db
 
         cutoff = time.time() - (since_days * 86400)
         sql = "SELECT * FROM episodic_summaries " "WHERE tenant_id = ? AND user_id = ? AND created_at >= ?"
@@ -154,7 +154,7 @@ class EpisodicMemory:
 
     def export_for_user(self, user_id: str, tenant_id: str = "default") -> list[dict[str, Any]]:
         """Return every retained episode for subject access/export."""
-        from .. import database as db
+        from ..db import database as db
 
         return db.query_all(
             """SELECT * FROM episodic_summaries
@@ -164,7 +164,7 @@ class EpisodicMemory:
 
     def delete_for_user(self, user_id: str, tenant_id: str = "default") -> int:
         """Forget cascade — delete every summary for this user."""
-        from .. import database as db
+        from ..db import database as db
 
         try:
             return db.execute(
@@ -177,7 +177,7 @@ class EpisodicMemory:
 
     def cleanup_expired(self) -> int:
         """TTL enforcement — called from the nightly worker."""
-        from .. import database as db
+        from ..db import database as db
 
         cutoff = time.time() - (EPISODIC_TTL_DAYS * 86400)
         try:

@@ -34,7 +34,7 @@ CRAWLER_INFO_URL = "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/r
 USER_AGENT = f"{CRAWLER_TOKEN}/{CRAWLER_VERSION} (+{CRAWLER_INFO_URL})"
 
 #: Exact hosts, never suffixes: ``*.ura.go.ug`` also covers the sign-in portals.
-#: Every entry must be in ``app.pdf_corpus.ALLOWED_STATUTORY_PDF_HOSTS`` too
+#: Every entry must be in ``app.ingestion.pdf_corpus.ALLOWED_STATUTORY_PDF_HOSTS`` too
 #: (``tests/test_crawl_policy.py`` holds the two lists together).
 CRAWL_ALLOWED_HOSTS: frozenset[str] = frozenset(
     {

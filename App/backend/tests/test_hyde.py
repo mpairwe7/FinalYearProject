@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.flags import FeatureFlags  # noqa: E402
-from app.hyde import dense_query_text, template_hypothetical  # noqa: E402
+from app.config.flags import FeatureFlags  # noqa: E402
+from app.rag.hyde import dense_query_text, template_hypothetical  # noqa: E402
 
 
 class TemplateHydeTests(unittest.TestCase):
@@ -26,13 +26,13 @@ class TemplateHydeTests(unittest.TestCase):
 
 class DenseQueryTextFlagTests(unittest.TestCase):
     def test_flag_off_returns_the_raw_query(self) -> None:
-        with patch("app.flags.flags.is_enabled", return_value=False):
+        with patch("app.config.flags.flags.is_enabled", return_value=False):
             self.assertEqual(dense_query_text("What is PAYE?"), "What is PAYE?")
 
     def test_flag_on_uses_the_template_when_llm_hyde_is_off(self) -> None:
         with (
-            patch("app.flags.flags.is_enabled", return_value=True),
-            patch("app.hyde.HYDE_LLM", False),
+            patch("app.config.flags.flags.is_enabled", return_value=True),
+            patch("app.rag.hyde.HYDE_LLM", False),
         ):
             text = dense_query_text("What is PAYE?")
         self.assertIn("What is PAYE?", text)
@@ -41,9 +41,9 @@ class DenseQueryTextFlagTests(unittest.TestCase):
 
     def test_llm_hyde_falls_back_to_template_when_generation_is_empty(self) -> None:
         with (
-            patch("app.flags.flags.is_enabled", return_value=True),
-            patch("app.hyde.HYDE_LLM", True),
-            patch("app.hyde._llm_hypothetical", return_value=""),
+            patch("app.config.flags.flags.is_enabled", return_value=True),
+            patch("app.rag.hyde.HYDE_LLM", True),
+            patch("app.rag.hyde._llm_hypothetical", return_value=""),
         ):
             text = dense_query_text("How do I register for a TIN?")
         self.assertEqual(text, template_hypothetical("How do I register for a TIN?"))
@@ -51,9 +51,9 @@ class DenseQueryTextFlagTests(unittest.TestCase):
     def test_llm_hyde_uses_the_generated_document_when_present(self) -> None:
         fake = "A TIN is issued through the URA web portal after identity checks."
         with (
-            patch("app.flags.flags.is_enabled", return_value=True),
-            patch("app.hyde.HYDE_LLM", True),
-            patch("app.hyde._llm_hypothetical", return_value=fake),
+            patch("app.config.flags.flags.is_enabled", return_value=True),
+            patch("app.rag.hyde.HYDE_LLM", True),
+            patch("app.rag.hyde._llm_hypothetical", return_value=fake),
         ):
             self.assertEqual(dense_query_text("How do I get a TIN?"), fake)
 
@@ -68,8 +68,8 @@ class DenseOnlyContractTests(unittest.TestCase):
         """
         query = "What is withholding tax?"
         with (
-            patch("app.flags.flags.is_enabled", return_value=True),
-            patch("app.hyde.HYDE_LLM", False),
+            patch("app.config.flags.flags.is_enabled", return_value=True),
+            patch("app.rag.hyde.HYDE_LLM", False),
         ):
             dense = dense_query_text(query)
         self.assertNotEqual(dense, query)
@@ -78,7 +78,7 @@ class DenseOnlyContractTests(unittest.TestCase):
 
 class HydePercentRolloutTests(unittest.TestCase):
     def test_subject_is_forwarded_to_the_flag(self) -> None:
-        with patch("app.flags.flags.is_enabled", return_value=False) as enabled:
+        with patch("app.config.flags.flags.is_enabled", return_value=False) as enabled:
             dense_query_text("What is PAYE?", subject="user-42")
         enabled.assert_called_once()
         kwargs = enabled.call_args.kwargs

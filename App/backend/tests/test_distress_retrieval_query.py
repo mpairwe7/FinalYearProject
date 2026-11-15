@@ -15,8 +15,8 @@ from __future__ import annotations
 import unittest
 import unittest.mock as mock
 
-from app.query import extract_question_span
-from app.service import _filter_unbound_faq_hits
+from app.rag.query import extract_question_span
+from app.rag.pipeline import _filter_unbound_faq_hits
 
 
 class ExtractQuestionSpanTest(unittest.TestCase):
@@ -117,15 +117,15 @@ class DistressRetrievalQueryWiringTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from app import database as db
+        from app.db import database as db
 
         db.init_db()
-        from app import service
+        from app.rag import pipeline
 
-        cls.model = service.ChatModel()
+        cls.model = pipeline.ChatModel()
 
     def _generate_and_capture_query(self, message: str) -> tuple[list[str], list[str]]:
-        from app import service
+        from app.rag import pipeline
 
         seen: list[str] = []
         seen_binding: list[str] = []
@@ -135,16 +135,16 @@ class DistressRetrievalQueryWiringTest(unittest.TestCase):
             seen_binding.append(kwargs.get("binding_query", ""))
             return []
 
-        with mock.patch.object(service.flags, "is_enabled", return_value=False), \
+        with mock.patch.object(pipeline.flags, "is_enabled", return_value=False), \
                 mock.patch.object(
-                    service.ChatModel, "_priority_faq_hits",
+                    pipeline.ChatModel, "_priority_faq_hits",
                     side_effect=lambda query, **k: seen.append(query) or [],
                 ), \
-                mock.patch.object(service, "_simple_search", side_effect=_capture_simple_search), \
-                mock.patch.object(service, "needs_clarification", return_value=""), \
-                mock.patch.object(service.ChatModel, "_maybe_handle_fast_paths", return_value=None), \
+                mock.patch.object(pipeline, "_simple_search", side_effect=_capture_simple_search), \
+                mock.patch.object(pipeline, "needs_clarification", return_value=""), \
+                mock.patch.object(pipeline.ChatModel, "_maybe_handle_fast_paths", return_value=None), \
                 mock.patch.object(
-                    service.ChatModel, "_deterministic_procedure_reply",
+                    pipeline.ChatModel, "_deterministic_procedure_reply",
                     return_value=("", False),
                 ), \
                 mock.patch.object(self.model._cache, "get", return_value=None), \
@@ -164,7 +164,7 @@ class DistressRetrievalQueryWiringTest(unittest.TestCase):
 
     def test_distressed_question_binding_query_excludes_preamble(self) -> None:
         # binding_query gates FAQ-match authorization independently of the
-        # search query (service.py's _faq_match_score) — the residual bug
+        # search query (rag/pipeline.py's _faq_match_score) — the residual bug
         # after the first fix: retrieval used the clean question, but
         # binding_query still carried the raw distress preamble, diluting
         # coverage enough that _retain_faq_candidates rejected the very hit

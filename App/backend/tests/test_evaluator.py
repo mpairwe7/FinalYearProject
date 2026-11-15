@@ -320,7 +320,7 @@ class ServiceWiringTests(unittest.TestCase):
         path than the agent's own call — different routing, different
         validation — and could pass an answer the real path would fail.
         """
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         result = ChatModel._recompute_for_verification(
             "calculate_vat", {"amount": 500000, "direction": "add"}
@@ -329,7 +329,7 @@ class ServiceWiringTests(unittest.TestCase):
         self.assertTrue(result)
 
     def test_recompute_result_verifies_a_correct_answer(self) -> None:
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         verdict, detail = verify_money(
             "How much VAT on UGX 500,000?",
@@ -339,7 +339,7 @@ class ServiceWiringTests(unittest.TestCase):
         self.assertTrue(verdict, detail)
 
     def test_recompute_result_catches_a_wrong_answer(self) -> None:
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         verdict, _detail = verify_money(
             "How much VAT on UGX 500,000?",
@@ -349,7 +349,7 @@ class ServiceWiringTests(unittest.TestCase):
         self.assertFalse(verdict)
 
     def test_confirmed_mismatch_escalates(self) -> None:
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         escalate, reason = ChatModel._escalate_on_numeric_mismatch(
             {"accepted": False, "failures": ["numerically_consistent"], "unverified": []},
@@ -361,7 +361,7 @@ class ServiceWiringTests(unittest.TestCase):
 
     def test_unverified_does_not_escalate(self) -> None:
         """Treating "could not check" as "wrong" would flood the queue."""
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         escalate, reason = ChatModel._escalate_on_numeric_mismatch(
             {"accepted": True, "failures": [], "unverified": ["numerically_consistent"]},
@@ -372,7 +372,7 @@ class ServiceWiringTests(unittest.TestCase):
         self.assertEqual(reason, "")
 
     def test_absent_verification_leaves_the_decision_alone(self) -> None:
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         self.assertEqual(
             ChatModel._escalate_on_numeric_mismatch(None, True, "prior reason"),
@@ -380,7 +380,7 @@ class ServiceWiringTests(unittest.TestCase):
         )
 
     def test_other_failures_do_not_escalate_on_this_rule(self) -> None:
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         escalate, _reason = ChatModel._escalate_on_numeric_mismatch(
             {"accepted": False, "failures": ["cites_effective_year"], "unverified": []},
@@ -446,7 +446,7 @@ class RevisionWiringTests(unittest.TestCase):
 
     def test_service_still_escalates_when_the_revision_fails(self) -> None:
         """The escalation rule reads the post-revision verdict."""
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         escalate, reason = ChatModel._escalate_on_numeric_mismatch(
             {"accepted": False, "failures": ["numerically_consistent"], "unverified": []},
@@ -456,7 +456,7 @@ class RevisionWiringTests(unittest.TestCase):
         self.assertTrue(escalate)
 
     def test_service_does_not_escalate_when_the_revision_succeeded(self) -> None:
-        from app.service import ChatModel
+        from app.rag.pipeline import ChatModel
 
         escalate, _reason = ChatModel._escalate_on_numeric_mismatch(
             {"accepted": True, "failures": [], "unverified": []}, False, ""

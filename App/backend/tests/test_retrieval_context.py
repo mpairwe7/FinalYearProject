@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import unittest
 
-from app.query import _ABBREVIATIONS, expand_abbreviations
-from app.retriever import BM25SparseEncoder, prune_context
+from app.rag.query import _ABBREVIATIONS, expand_abbreviations
+from app.rag.retriever import BM25SparseEncoder, prune_context
 
 
 def _hits(*relevances: float) -> list[dict]:
@@ -73,7 +73,7 @@ class ContextPruningTests(unittest.TestCase):
         # This trims a result set that was already good enough to answer
         # from. It must never be the thing that decides to abstain.
         from app.guardrails import ABSTENTION_THRESHOLD_NORM
-        from app.retriever import _CONTEXT_FLOOR
+        from app.rag.retriever import _CONTEXT_FLOOR
 
         self.assertLess(_CONTEXT_FLOOR, ABSTENTION_THRESHOLD_NORM)
 

@@ -442,7 +442,7 @@ def test_the_audit_row_carries_the_trace() -> None:
 
 
 def test_every_turn_opens_a_trace() -> None:
-    from app.service import _scoped_conversation_state
+    from app.rag.pipeline import _scoped_conversation_state
 
     class Probe:
         @_scoped_conversation_state

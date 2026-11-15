@@ -51,7 +51,7 @@ This release closes critical customer experience (CX) and operational gaps ident
 * **Problem**: When a taxpayer specifically asked to generate a PRN for a known tax liability (e.g., *"Generate a PRN for 750,000 UGX stamp duty on my land sale"*), the assistant deflected into a 4-step blank questionnaire asking *"Do you know the amount?"*.
 * **Architecture Change**:
   - Implemented `generate_mock_prn()` and `format_prn_voucher_reply()` in `App/backend/app/ura_account_mock.py`.
-  - Added transactional fast-path in `App/backend/app/service.py`: when an explicit amount (`extract_amounts`) and tax head are supplied, the assistant autonomously executes and returns a **PRN Payment Voucher Card**:
+  - Added transactional fast-path in `App/backend/app/rag/pipeline.py`: when an explicit amount (`extract_amounts`) and tax head are supplied, the assistant autonomously executes and returns a **PRN Payment Voucher Card**:
     - 10-digit PRN number (`26...`)
     - Assessment Search Code (`ASMT-...`)
     - Tax head and amount payable

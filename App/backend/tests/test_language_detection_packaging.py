@@ -46,7 +46,7 @@ DOCKERIGNORE = _BACKEND.parent / "Dockerfile.cranecloud.dockerignore"
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from app.query import detect_language  # noqa: E402  (import after path setup)
+from app.rag.query import detect_language  # noqa: E402  (import after path setup)
 
 
 class LugandaDetectionTest(unittest.TestCase):
@@ -82,7 +82,7 @@ class LugandaDetectionTest(unittest.TestCase):
 
     def test_the_lingua_backend_is_actually_reachable(self) -> None:
         """Guards the silent degradation itself, not just its symptom."""
-        from app import query
+        from app.rag import query
 
         self.assertIsNotNone(
             query._get_language_detector(),
@@ -146,12 +146,12 @@ class IndexFreshnessPackagingTest(unittest.TestCase):
 
     def test_the_image_bootstraps_with_the_staged_lifecycle(self) -> None:
         body = DOCKERFILE.read_text(encoding="utf-8")
-        self.assertIn("app.index_lifecycle --bootstrap", body)
+        self.assertIn("app.vectorstore.index_lifecycle --bootstrap", body)
         self.assertIn("test -s /app/Model/index_freshness.json", body)
         self.assertIn("test -s /app/Model/index_freshness_status.json", body)
 
     def test_the_lifecycle_writes_status_only_after_alias_promotion(self) -> None:
-        lifecycle = (_BACKEND / "app/index_lifecycle.py").read_text(encoding="utf-8")
+        lifecycle = (_BACKEND / "app/vectorstore/index_lifecycle.py").read_text(encoding="utf-8")
         self.assertLess(
             lifecycle.index("promote_alias(client, alias="),
             lifecycle.index("_write_fresh_status(after_build)"),
@@ -163,7 +163,7 @@ class IndexFreshnessPackagingTest(unittest.TestCase):
         body = DOCKERFILE.read_text(encoding="utf-8")
         self.assertIn("QDRANT_COLLECTION=", body)
         self.assertIn("knowledge_base_active", body)
-        self.assertIn("app.index_lifecycle --bootstrap", body)
+        self.assertIn("app.vectorstore.index_lifecycle --bootstrap", body)
 
 if __name__ == "__main__":
     unittest.main()

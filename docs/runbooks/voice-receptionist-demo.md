@@ -234,7 +234,7 @@ so:
      `sqlite3 "${ANALYTICS_DB_DIR:?set to the API's value}/analytics.db" "DELETE FROM flag_overrides WHERE name = 'voice_receptionist'"`.
      Set `ANALYTICS_DB_DIR` to the value the API runs with first. When the API
      has none, it uses `data_store/` under the project root (`/app/data_store`
-     in the image; `App/backend/app/database.py`). With the variable unset, the
+     in the image; `App/backend/app/db/database.py`). With the variable unset, the
      command refuses to run rather than open the wrong file. Then start the API
      and read `/ready`.
 

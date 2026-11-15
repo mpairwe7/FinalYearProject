@@ -474,7 +474,7 @@ class RetrieverVectorizeModeTest(unittest.TestCase):
         gateway._client = None
 
     def test_vectorize_mode_initialises_and_searches(self):
-        from app import retriever as R
+        from app.rag import retriever as R
 
         r = R.HybridRetriever()
         with mock.patch.object(R, "QDRANT_ENABLED", False), mock.patch.object(
@@ -506,7 +506,7 @@ class RetrieverVectorizeModeTest(unittest.TestCase):
         """Unset means AUTO. It used to mean OFF, which left a deployment holding
         valid Vectorize credentials on keyword-only search whenever Qdrant was
         unavailable — the opposite of the intent."""
-        from app import retriever as R
+        from app.rag import retriever as R
 
         r = R.HybridRetriever()
         with mock.patch.object(R, "QDRANT_ENABLED", False), mock.patch.object(
@@ -517,7 +517,7 @@ class RetrieverVectorizeModeTest(unittest.TestCase):
             self.assertEqual(r.backend, "vectorize")
 
     def test_fallback_can_be_explicitly_disabled(self):
-        from app import retriever as R
+        from app.rag import retriever as R
 
         for value in ("none", "off", "disabled"):
             r = R.HybridRetriever()
@@ -529,7 +529,7 @@ class RetrieverVectorizeModeTest(unittest.TestCase):
                 self.assertEqual(r.backend, "keyword")
 
     def test_fallback_stays_off_when_cloudflare_is_not_configured(self):
-        from app import retriever as R
+        from app.rag import retriever as R
 
         _clear_keys()
         r = R.HybridRetriever()
@@ -540,7 +540,7 @@ class RetrieverVectorizeModeTest(unittest.TestCase):
             self.assertFalse(r._vectorize_mode)
 
     def _vectorize_retriever(self):
-        from app import retriever as R
+        from app.rag import retriever as R
 
         r = R.HybridRetriever()
         with mock.patch.object(R, "QDRANT_ENABLED", False), mock.patch.object(
@@ -609,66 +609,66 @@ class LLMFallbackTest(unittest.TestCase):
 
     def test_fallback_uses_sunbird_when_configured(self):
         """Sunflower through Sunbird's API leads the cloud chain (ADR-0036)."""
-        from app import service
+        from app.rag import pipeline
 
-        with mock.patch.object(service.flags, "is_enabled", return_value=True), \
+        with mock.patch.object(pipeline.flags, "is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "sunbird"}), \
              mock.patch("app.sunbird.is_available", return_value=True), \
              mock.patch("app.sunbird.chat_completion", return_value="VAT is 18%. [1]") as sb, \
              mock.patch.object(gateway, "gemini_generate") as gg:
-            out = service._llm_cloud_fallback("vat rate?", [{"text": "VAT is 18%"}], None, "en")
+            out = pipeline._llm_cloud_fallback("vat rate?", [{"text": "VAT is 18%"}], None, "en")
         self.assertEqual(out, "VAT is 18%. [1]")
         sb.assert_called_once()
         gg.assert_not_called()
 
     def test_fallback_disabled_when_flag_off(self):
-        from app import service
+        from app.rag import pipeline
 
-        with mock.patch.object(service.flags, "is_enabled", return_value=False):
+        with mock.patch.object(pipeline.flags, "is_enabled", return_value=False):
             self.assertEqual(
-                service._llm_cloud_fallback("vat?", [{"text": "x"}], None, "en"), ""
+                pipeline._llm_cloud_fallback("vat?", [{"text": "x"}], None, "en"), ""
             )
 
     def test_empty_primary_reply_triggers_cloud_fallback(self):
         """A swallowed-error empty reply from the primary backend must route to
         the cloud fallback, not return "" (regression: vLLM HTTP failure →
         _vllm_generate returns "" → _call_llm_with_deadline recorded success)."""
-        from app import service
+        from app.rag import pipeline
 
-        with mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True), \
-             mock.patch.object(service.llm_module, "generate", return_value=""), \
-             mock.patch.object(service, "_llm_cloud_fallback", return_value="CLOUD ANSWER") as cf:
-            out = service._call_llm_with_deadline("vat?", [{"text": "x"}], None, "en")
+        with mock.patch.object(pipeline._LLM_CIRCUIT, "allow_request", return_value=True), \
+             mock.patch.object(pipeline.generator_module, "generate", return_value=""), \
+             mock.patch.object(pipeline, "_llm_cloud_fallback", return_value="CLOUD ANSWER") as cf:
+            out = pipeline._call_llm_with_deadline("vat?", [{"text": "x"}], None, "en")
         self.assertEqual(out, "CLOUD ANSWER")
         cf.assert_called_once()
 
     def test_nonempty_primary_reply_skips_fallback(self):
-        from app import service
+        from app.rag import pipeline
 
-        with mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True), \
-             mock.patch.object(service.llm_module, "generate", return_value="real answer [1]"), \
-             mock.patch.object(service, "_llm_cloud_fallback", return_value="CLOUD") as cf:
-            out = service._call_llm_with_deadline("vat?", [{"text": "x"}], None, "en")
+        with mock.patch.object(pipeline._LLM_CIRCUIT, "allow_request", return_value=True), \
+             mock.patch.object(pipeline.generator_module, "generate", return_value="real answer [1]"), \
+             mock.patch.object(pipeline, "_llm_cloud_fallback", return_value="CLOUD") as cf:
+            out = pipeline._call_llm_with_deadline("vat?", [{"text": "x"}], None, "en")
         self.assertEqual(out, "real answer [1]")
         cf.assert_not_called()
 
     def test_fallback_disabled_without_backend_env(self):
-        from app import service
+        from app.rag import pipeline
 
         os.environ.pop("LLM_FALLBACK_BACKEND", None)
-        with mock.patch.object(service.flags, "is_enabled", return_value=True):
+        with mock.patch.object(pipeline.flags, "is_enabled", return_value=True):
             self.assertEqual(
-                service._llm_cloud_fallback("vat?", [{"text": "x"}], None, "en"), ""
+                pipeline._llm_cloud_fallback("vat?", [{"text": "x"}], None, "en"), ""
             )
 
     def test_stream_fallback_yields_chunks(self):
-        from app import service
+        from app.rag import pipeline
 
-        with mock.patch.object(service.flags, "is_enabled", return_value=True), \
+        with mock.patch.object(pipeline.flags, "is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "sunbird"}), \
              mock.patch("app.sunbird.is_available", return_value=True), \
              mock.patch("app.sunbird.chat_completion", return_value="VAT is eighteen percent."):
-            chunks = list(service._stream_cloud_fallback("vat?", [{"text": "VAT"}], None, "en"))
+            chunks = list(pipeline._stream_cloud_fallback("vat?", [{"text": "VAT"}], None, "en"))
         self.assertGreater(len(chunks), 1)
         self.assertEqual("".join(chunks).strip(), "VAT is eighteen percent.")
 
@@ -677,9 +677,9 @@ class LLMFallbackTest(unittest.TestCase):
         not win outright — the chain should still try Workers AI for a
         complete answer (regression test for the Crane Cloud truncation
         bug: '...The Electronic' with nothing after it)."""
-        from app import service
+        from app.rag import pipeline
 
-        with mock.patch.object(service.flags, "is_enabled", return_value=True), \
+        with mock.patch.object(pipeline.flags, "is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "sunbird"}), \
              mock.patch("app.sunbird.is_available", return_value=True), \
              mock.patch("app.sunbird.chat_completion", return_value="The Electronic") as gg, \
@@ -688,7 +688,7 @@ class LLMFallbackTest(unittest.TestCase):
                  "workers_ai_chat",
                  return_value="EFRIS is mandatory for VAT-registered taxpayers. [1]",
              ) as wac:
-            out = service._llm_cloud_fallback(
+            out = pipeline._llm_cloud_fallback(
                 "what is efris?", [{"text": "EFRIS info"}], None, "en"
             )
         self.assertEqual(out, "EFRIS is mandatory for VAT-registered taxpayers. [1]")
@@ -696,17 +696,17 @@ class LLMFallbackTest(unittest.TestCase):
         wac.assert_called_once()
 
     def test_workers_ai_chain_tries_next_model_on_truncated_reply(self):
-        from app import service
+        from app.rag import pipeline
         from app.providers import routing
 
-        with mock.patch.object(service.flags, "is_enabled", return_value=True), \
+        with mock.patch.object(pipeline.flags, "is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "workers_ai"}), \
              mock.patch.object(
                  gateway,
                  "workers_ai_chat",
                  side_effect=["Short", "The full VAT rate is eighteen percent. [1]"],
              ) as wac:
-            out = service._llm_cloud_fallback(
+            out = pipeline._llm_cloud_fallback(
                 "vat rate?", [{"text": "VAT is 18%"}], None, "en"
             )
         self.assertEqual(out, "The full VAT rate is eighteen percent. [1]")
@@ -720,28 +720,28 @@ class LLMFallbackTest(unittest.TestCase):
         extractive answer) — the first non-empty candidate is kept as a
         floor, so this path is never worse than before the truncation
         check existed."""
-        from app import service
+        from app.rag import pipeline
 
-        with mock.patch.object(service.flags, "is_enabled", return_value=True), \
+        with mock.patch.object(pipeline.flags, "is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "workers_ai"}), \
              mock.patch.object(gateway, "workers_ai_chat", return_value="Short"):
-            out = service._llm_cloud_fallback(
+            out = pipeline._llm_cloud_fallback(
                 "vat rate?", [{"text": "VAT is 18%"}], None, "en"
             )
         self.assertEqual(out, "Short")
 
     def test_local_truncated_reply_upgrades_via_cloud_fallback(self):
-        from app import service
+        from app.rag import pipeline
 
-        with mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True), \
-             mock.patch.object(service.llm_module, "generate", return_value="The Electronic"), \
+        with mock.patch.object(pipeline._LLM_CIRCUIT, "allow_request", return_value=True), \
+             mock.patch.object(pipeline.generator_module, "generate", return_value="The Electronic"), \
              mock.patch.object(
-                 service,
+                 pipeline,
                  "_llm_cloud_fallback",
                  return_value="The Electronic Fiscal Receipting and Invoicing System "
                  "(EFRIS) is mandatory for VAT-registered taxpayers. [1]",
              ) as cf:
-            out = service._call_llm_with_deadline("what is efris?", [{"text": "x"}], None, "en")
+            out = pipeline._call_llm_with_deadline("what is efris?", [{"text": "x"}], None, "en")
         self.assertTrue(out.startswith("The Electronic Fiscal"))
         cf.assert_called_once()
 
@@ -749,24 +749,24 @@ class LLMFallbackTest(unittest.TestCase):
         """If the cloud chain can't do better (disabled/empty), keep the
         original truncated-but-present local reply rather than discarding a
         usable answer — same floor as before this check existed."""
-        from app import service
+        from app.rag import pipeline
 
-        with mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True), \
-             mock.patch.object(service.llm_module, "generate", return_value="The Electronic"), \
-             mock.patch.object(service, "_llm_cloud_fallback", return_value="") as cf:
-            out = service._call_llm_with_deadline("what is efris?", [{"text": "x"}], None, "en")
+        with mock.patch.object(pipeline._LLM_CIRCUIT, "allow_request", return_value=True), \
+             mock.patch.object(pipeline.generator_module, "generate", return_value="The Electronic"), \
+             mock.patch.object(pipeline, "_llm_cloud_fallback", return_value="") as cf:
+            out = pipeline._call_llm_with_deadline("what is efris?", [{"text": "x"}], None, "en")
         self.assertEqual(out, "The Electronic")
         cf.assert_called_once()
 
     def test_local_complete_short_reply_skips_fallback(self):
         """A short but properly terminated reply is a legitimate terse
         answer, not a truncation — must not trigger the cloud round-trip."""
-        from app import service
+        from app.rag import pipeline
 
-        with mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True), \
-             mock.patch.object(service.llm_module, "generate", return_value="VAT is 18%."), \
-             mock.patch.object(service, "_llm_cloud_fallback", return_value="CLOUD") as cf:
-            out = service._call_llm_with_deadline("vat rate?", [{"text": "x"}], None, "en")
+        with mock.patch.object(pipeline._LLM_CIRCUIT, "allow_request", return_value=True), \
+             mock.patch.object(pipeline.generator_module, "generate", return_value="VAT is 18%."), \
+             mock.patch.object(pipeline, "_llm_cloud_fallback", return_value="CLOUD") as cf:
+            out = pipeline._call_llm_with_deadline("vat rate?", [{"text": "x"}], None, "en")
         self.assertEqual(out, "VAT is 18%.")
         cf.assert_not_called()
 
@@ -776,19 +776,19 @@ class LLMFallbackTest(unittest.TestCase):
         Cloud's /v1/chat hanging to a uniform ~51s then 504ing under load:
         a request with no time left should fail fast, not still try every
         hop's own ~30s timeout on top of an already-exhausted budget."""
-        from app import service
+        from app.rag import pipeline
 
-        with mock.patch.object(service.flags, "is_enabled", return_value=True), \
+        with mock.patch.object(pipeline.flags, "is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "sunbird"}), \
              mock.patch("app.sunbird.is_available", return_value=True), \
              mock.patch("app.sunbird.chat_completion") as gg, \
              mock.patch.object(gateway, "workers_ai_chat") as wac:
-            out = service._llm_cloud_fallback(
+            out = pipeline._llm_cloud_fallback(
                 "vat rate?",
                 [{"text": "VAT is 18%"}],
                 None,
                 "en",
-                deadline=service.time.monotonic() - 1,
+                deadline=pipeline.time.monotonic() - 1,
             )
         self.assertEqual(out, "")
         gg.assert_not_called()
@@ -798,17 +798,17 @@ class LLMFallbackTest(unittest.TestCase):
         """Budget is re-checked before each hop, not just once at entry — a
         Sunbird attempt that itself eats the remaining budget must stop the
         chain from also trying every Workers AI model afterward."""
-        from app import service
+        from app.rag import pipeline
 
-        with mock.patch.object(service.flags, "is_enabled", return_value=True), \
+        with mock.patch.object(pipeline.flags, "is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "sunbird"}), \
              mock.patch("app.sunbird.is_available", return_value=True), \
              mock.patch("app.sunbird.chat_completion", return_value="Short") as gg, \
              mock.patch.object(gateway, "workers_ai_chat") as wac, \
-             mock.patch.object(service.time, "monotonic", side_effect=[100.0, 100.0, 200.0]):
+             mock.patch.object(pipeline.time, "monotonic", side_effect=[100.0, 100.0, 200.0]):
             # Readings: the chain budget before Sunbird, Sunbird's own share (135 - 100 s left),
             # then the chain budget before Workers AI, spent by the Sunbird attempt.
-            out = service._llm_cloud_fallback(
+            out = pipeline._llm_cloud_fallback(
                 "vat rate?", [{"text": "VAT is 18%"}], None, "en", deadline=150.0
             )
         self.assertEqual(out, "Short")  # best-effort floor from the Sunbird attempt
@@ -819,18 +819,18 @@ class LLMFallbackTest(unittest.TestCase):
         """A generous deadline must not change existing behaviour — same
         assertion as test_fallback_uses_sunbird_when_configured, plus an
         explicit far-future deadline."""
-        from app import service
+        from app.rag import pipeline
 
-        with mock.patch.object(service.flags, "is_enabled", return_value=True), \
+        with mock.patch.object(pipeline.flags, "is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "sunbird"}), \
              mock.patch("app.sunbird.is_available", return_value=True), \
              mock.patch("app.sunbird.chat_completion", return_value="VAT is 18%. [1]") as gg:
-            out = service._llm_cloud_fallback(
+            out = pipeline._llm_cloud_fallback(
                 "vat rate?",
                 [{"text": "VAT is 18%"}],
                 None,
                 "en",
-                deadline=service.time.monotonic() + 100,
+                deadline=pipeline.time.monotonic() + 100,
             )
         self.assertEqual(out, "VAT is 18%. [1]")
         gg.assert_called_once()
@@ -840,44 +840,44 @@ class LLMFallbackTest(unittest.TestCase):
         before the local attempt, and pass it through to the cloud fallback
         — not give the cloud chain a fresh full budget on top of whatever
         the local attempt already spent."""
-        from app import service
+        from app.rag import pipeline
 
-        with mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True), \
-             mock.patch.object(service.llm_module, "generate", return_value=""), \
-             mock.patch.object(service, "_llm_cloud_fallback", return_value="CLOUD") as cf:
-            before = service.time.monotonic()
-            service._call_llm_with_deadline("vat?", [{"text": "x"}], None, "en")
-            after = service.time.monotonic()
+        with mock.patch.object(pipeline._LLM_CIRCUIT, "allow_request", return_value=True), \
+             mock.patch.object(pipeline.generator_module, "generate", return_value=""), \
+             mock.patch.object(pipeline, "_llm_cloud_fallback", return_value="CLOUD") as cf:
+            before = pipeline.time.monotonic()
+            pipeline._call_llm_with_deadline("vat?", [{"text": "x"}], None, "en")
+            after = pipeline.time.monotonic()
         cf.assert_called_once()
         deadline = cf.call_args.kwargs["deadline"]
         self.assertIsNotNone(deadline)
         # Must land within [now, now + LLM_TOTAL_BUDGET_SECONDS], not None
         # (unbounded) and not some unrelated/huge value.
         self.assertGreaterEqual(deadline, before)
-        self.assertLessEqual(deadline, after + service.LLM_TOTAL_BUDGET_SECONDS)
+        self.assertLessEqual(deadline, after + pipeline.LLM_TOTAL_BUDGET_SECONDS)
 
 
 class LooksTruncatedHeuristicTest(unittest.TestCase):
     def test_short_without_terminal_punctuation_is_truncated(self):
-        from app import service
+        from app.rag import pipeline
 
-        self.assertTrue(service._looks_truncated("The Electronic"))
+        self.assertTrue(pipeline._looks_truncated("The Electronic"))
 
     def test_short_with_terminal_punctuation_is_not_truncated(self):
-        from app import service
+        from app.rag import pipeline
 
-        self.assertFalse(service._looks_truncated("VAT is 18%."))
+        self.assertFalse(pipeline._looks_truncated("VAT is 18%."))
 
     def test_short_ending_in_citation_bracket_is_not_truncated(self):
-        from app import service
+        from app.rag import pipeline
 
-        self.assertFalse(service._looks_truncated("See section 5 [1]"))
+        self.assertFalse(pipeline._looks_truncated("See section 5 [1]"))
 
     def test_empty_or_blank_text_is_not_truncated(self):
-        from app import service
+        from app.rag import pipeline
 
-        self.assertFalse(service._looks_truncated(""))
-        self.assertFalse(service._looks_truncated("   "))
+        self.assertFalse(pipeline._looks_truncated(""))
+        self.assertFalse(pipeline._looks_truncated("   "))
 
     def test_long_text_without_terminal_punctuation_is_still_flagged(self):
         """Regression: an empathy preamble sentence (the model's own, per
@@ -886,26 +886,26 @@ class LooksTruncatedHeuristicTest(unittest.TestCase):
         time pressure! ... the fastest path to your answer:\\n\\nFor" (85
         chars, cut off mid-word). Length alone must not exempt a reply from
         the truncation check."""
-        from app import service
+        from app.rag import pipeline
 
-        self.assertTrue(service._looks_truncated("x" * 80))
+        self.assertTrue(pipeline._looks_truncated("x" * 80))
         self.assertTrue(
-            service._looks_truncated(
+            pipeline._looks_truncated(
                 "I understand you're under time pressure! Here's the fastest "
                 "path to your answer:\n\nFor"
             )
         )
         self.assertTrue(
-            service._looks_truncated(
+            pipeline._looks_truncated(
                 "Please don't worry, we're here to help you understand.\n\nA customs"
             )
         )
 
     def test_long_complete_text_is_not_flagged(self):
-        from app import service
+        from app.rag import pipeline
 
         self.assertFalse(
-            service._looks_truncated(
+            pipeline._looks_truncated(
                 "VAT is charged at 18% on most goods and services supplied in "
                 "Uganda, and registration is mandatory once annual taxable "
                 "turnover exceeds UGX 150 million. [1]"
@@ -919,50 +919,50 @@ class StreamFallbackTest(unittest.TestCase):
     stream, raised stream, breaker OPEN, and LLM-unavailable."""
 
     def test_empty_stream_triggers_cloud_fallback(self):
-        from app import service
+        from app.rag import pipeline
 
-        with mock.patch.object(service.llm_module, "is_available", return_value=True), \
-             mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True), \
-             mock.patch.object(service._LLM_CIRCUIT, "record_failure") as rf, \
-             mock.patch.object(service.llm_module, "generate_stream", return_value=iter([])), \
-             mock.patch.object(service, "_stream_cloud_fallback", return_value=iter(["CLOUD ", "ANSWER"])) as cf:
-            out = list(service.stream_llm_tokens("vat?", [{"text": "x"}], None, "en"))
+        with mock.patch.object(pipeline.generator_module, "is_available", return_value=True), \
+             mock.patch.object(pipeline._LLM_CIRCUIT, "allow_request", return_value=True), \
+             mock.patch.object(pipeline._LLM_CIRCUIT, "record_failure") as rf, \
+             mock.patch.object(pipeline.generator_module, "generate_stream", return_value=iter([])), \
+             mock.patch.object(pipeline, "_stream_cloud_fallback", return_value=iter(["CLOUD ", "ANSWER"])) as cf:
+            out = list(pipeline.stream_llm_tokens("vat?", [{"text": "x"}], None, "en"))
         self.assertEqual("".join(out), "CLOUD ANSWER")
         rf.assert_called_once()  # an always-empty worker must eventually trip the breaker
         cf.assert_called_once()
 
     def test_stream_exception_triggers_cloud_fallback(self):
-        from app import service
+        from app.rag import pipeline
 
-        with mock.patch.object(service.llm_module, "is_available", return_value=True), \
-             mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True), \
-             mock.patch.object(service._LLM_CIRCUIT, "record_failure") as rf, \
-             mock.patch.object(service.llm_module, "generate_stream", side_effect=RuntimeError("boom")), \
-             mock.patch.object(service, "_stream_cloud_fallback", return_value=iter(["CLOUD"])) as cf:
-            out = list(service.stream_llm_tokens("vat?", [{"text": "x"}], None, "en"))
+        with mock.patch.object(pipeline.generator_module, "is_available", return_value=True), \
+             mock.patch.object(pipeline._LLM_CIRCUIT, "allow_request", return_value=True), \
+             mock.patch.object(pipeline._LLM_CIRCUIT, "record_failure") as rf, \
+             mock.patch.object(pipeline.generator_module, "generate_stream", side_effect=RuntimeError("boom")), \
+             mock.patch.object(pipeline, "_stream_cloud_fallback", return_value=iter(["CLOUD"])) as cf:
+            out = list(pipeline.stream_llm_tokens("vat?", [{"text": "x"}], None, "en"))
         self.assertEqual(out, ["CLOUD"])
         rf.assert_called_once()
         cf.assert_called_once()
 
     def test_breaker_open_streams_cloud_fallback_without_primary(self):
-        from app import service
+        from app.rag import pipeline
 
-        with mock.patch.object(service.llm_module, "is_available", return_value=True), \
-             mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=False), \
-             mock.patch.object(service.llm_module, "generate_stream") as gs, \
-             mock.patch.object(service, "_stream_cloud_fallback", return_value=iter(["CLOUD"])) as cf:
-            out = list(service.stream_llm_tokens("vat?", [{"text": "x"}], None, "en"))
+        with mock.patch.object(pipeline.generator_module, "is_available", return_value=True), \
+             mock.patch.object(pipeline._LLM_CIRCUIT, "allow_request", return_value=False), \
+             mock.patch.object(pipeline.generator_module, "generate_stream") as gs, \
+             mock.patch.object(pipeline, "_stream_cloud_fallback", return_value=iter(["CLOUD"])) as cf:
+            out = list(pipeline.stream_llm_tokens("vat?", [{"text": "x"}], None, "en"))
         self.assertEqual(out, ["CLOUD"])
         gs.assert_not_called()
         cf.assert_called_once()
 
     def test_llm_unavailable_streams_cloud_fallback(self):
-        from app import service
+        from app.rag import pipeline
 
-        with mock.patch.object(service.llm_module, "is_available", return_value=False), \
-             mock.patch.object(service.llm_module, "generate_stream") as gs, \
-             mock.patch.object(service, "_stream_cloud_fallback", return_value=iter(["CLOUD"])) as cf:
-            out = list(service.stream_llm_tokens("vat?", [{"text": "x"}], None, "en"))
+        with mock.patch.object(pipeline.generator_module, "is_available", return_value=False), \
+             mock.patch.object(pipeline.generator_module, "generate_stream") as gs, \
+             mock.patch.object(pipeline, "_stream_cloud_fallback", return_value=iter(["CLOUD"])) as cf:
+            out = list(pipeline.stream_llm_tokens("vat?", [{"text": "x"}], None, "en"))
         self.assertEqual(out, ["CLOUD"])
         gs.assert_not_called()
         cf.assert_called_once()
@@ -974,33 +974,33 @@ class AgenticDeadlineContractTest(unittest.TestCase):
     cloud fallback)."""
 
     def test_breaker_open_returns_empty_without_calling_llm(self):
-        from app import service
+        from app.rag import pipeline
 
-        with mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=False), \
-             mock.patch.object(service.llm_module, "generate_with_tools") as gwt:
-            out = service._call_llm_agentic("q", [{"text": "x"}], None, "en")
+        with mock.patch.object(pipeline._LLM_CIRCUIT, "allow_request", return_value=False), \
+             mock.patch.object(pipeline.generator_module, "generate_with_tools") as gwt:
+            out = pipeline._call_llm_agentic("q", [{"text": "x"}], None, "en")
         self.assertEqual(out["text"], "")
         self.assertEqual(out["tool_calls"], [])
         gwt.assert_not_called()
 
     def test_empty_text_records_breaker_failure(self):
-        from app import service
+        from app.rag import pipeline
 
         empty = {"text": "", "tool_calls": [], "iterations": 1, "truncated": False}
-        with mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True), \
-             mock.patch.object(service._LLM_CIRCUIT, "record_failure") as rf, \
-             mock.patch.object(service.llm_module, "generate_with_tools", return_value=empty):
-            out = service._call_llm_agentic("q", [{"text": "x"}], None, "en")
+        with mock.patch.object(pipeline._LLM_CIRCUIT, "allow_request", return_value=True), \
+             mock.patch.object(pipeline._LLM_CIRCUIT, "record_failure") as rf, \
+             mock.patch.object(pipeline.generator_module, "generate_with_tools", return_value=empty):
+            out = pipeline._call_llm_agentic("q", [{"text": "x"}], None, "en")
         self.assertEqual(out["text"], "")
         rf.assert_called_once()
 
     def test_exception_records_breaker_failure_and_returns_empty(self):
-        from app import service
+        from app.rag import pipeline
 
-        with mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True), \
-             mock.patch.object(service._LLM_CIRCUIT, "record_failure") as rf, \
-             mock.patch.object(service.llm_module, "generate_with_tools", side_effect=RuntimeError("boom")):
-            out = service._call_llm_agentic("q", [{"text": "x"}], None, "en")
+        with mock.patch.object(pipeline._LLM_CIRCUIT, "allow_request", return_value=True), \
+             mock.patch.object(pipeline._LLM_CIRCUIT, "record_failure") as rf, \
+             mock.patch.object(pipeline.generator_module, "generate_with_tools", side_effect=RuntimeError("boom")):
+            out = pipeline._call_llm_agentic("q", [{"text": "x"}], None, "en")
         self.assertEqual(out["text"], "")
         self.assertEqual(out["tool_calls"], [])
         rf.assert_called_once()
@@ -1022,17 +1022,17 @@ class AgenticCloudFallbackChainTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from app import database as db
+        from app.db import database as db
 
         db.init_db()
-        from app import service
+        from app.rag import pipeline
 
-        cls.model = service.ChatModel()
+        cls.model = pipeline.ChatModel()
         cls.model._llm_available = True
 
     def _generate(self, message: str, agentic_result: dict):
-        from app import service
-        from app.flags import flags
+        from app.rag import pipeline
+        from app.config.flags import flags
 
         flags.set("tool_use", True)
         self.addCleanup(flags.clear, "tool_use")
@@ -1044,17 +1044,17 @@ class AgenticCloudFallbackChainTest(unittest.TestCase):
             "confidence_band": "high",
             "revised_reply": "",
         }
-        with mock.patch.object(service, "_call_llm_agentic", return_value=agentic_result) as ag, \
+        with mock.patch.object(pipeline, "_call_llm_agentic", return_value=agentic_result) as ag, \
              mock.patch.object(
-                 service, "_call_llm_with_deadline",
+                 pipeline, "_call_llm_with_deadline",
                  return_value="Cloud answer: the standard VAT rate in Uganda is 18% [1].",
              ) as fb, \
-             mock.patch.object(service, "_simple_search", return_value=[dict(self._FAQ_ROW)]), \
-             mock.patch.object(service, "needs_clarification", return_value=""), \
-             mock.patch.object(service, "verify_claims", return_value={"decision": "approve", "score": 1.0}), \
-             mock.patch.object(service.ChatModel, "_deterministic_procedure_reply", return_value=("", False)), \
-             mock.patch.object(service.ChatModel, "_priority_faq_hits", return_value=[]), \
-             mock.patch.object(service.ChatModel, "_evaluate_response_judge", return_value=approve), \
+             mock.patch.object(pipeline, "_simple_search", return_value=[dict(self._FAQ_ROW)]), \
+             mock.patch.object(pipeline, "needs_clarification", return_value=""), \
+             mock.patch.object(pipeline, "verify_claims", return_value={"decision": "approve", "score": 1.0}), \
+             mock.patch.object(pipeline.ChatModel, "_deterministic_procedure_reply", return_value=("", False)), \
+             mock.patch.object(pipeline.ChatModel, "_priority_faq_hits", return_value=[]), \
+             mock.patch.object(pipeline.ChatModel, "_evaluate_response_judge", return_value=approve), \
              mock.patch.object(self.model._output_guard, "should_abstain", return_value=False), \
              mock.patch.object(self.model._cache, "get", return_value=None), \
              mock.patch.object(self.model._cache, "put"):
@@ -1090,11 +1090,11 @@ class AgenticCloudFallbackChainTest(unittest.TestCase):
         """P3-1: with no local LLM at all, a configured cloud fallback must
         keep the generation step alive instead of degrading to FAQ extracts.
         The agentic branch stays off (tool calling is local-only)."""
-        from app import service
+        from app.rag import pipeline
 
         self.model._llm_available = False
         self.addCleanup(setattr, self.model, "_llm_available", True)
-        with mock.patch.object(service, "_cloud_llm_ready", return_value=True):
+        with mock.patch.object(pipeline, "_cloud_llm_ready", return_value=True):
             out, ag, fb = self._generate(
                 "What withholding tax applies to imports in Uganda?",
                 {"text": "", "tool_calls": [], "iterations": 0, "truncated": False},
@@ -1113,47 +1113,47 @@ class CloudLlmReadyTest(unittest.TestCase):
         os.environ.pop("LLM_FALLBACK_BACKEND", None)
 
     def test_false_when_flag_off(self):
-        from app import service
+        from app.rag import pipeline
 
         _with_keys()
         os.environ["LLM_FALLBACK_BACKEND"] = "gemini"
-        with mock.patch.object(service.flags, "is_enabled", return_value=False):
-            self.assertFalse(service._cloud_llm_ready())
+        with mock.patch.object(pipeline.flags, "is_enabled", return_value=False):
+            self.assertFalse(pipeline._cloud_llm_ready())
 
     def test_false_without_backend_env(self):
-        from app import service
+        from app.rag import pipeline
 
         _with_keys()
         os.environ.pop("LLM_FALLBACK_BACKEND", None)
-        with mock.patch.object(service.flags, "is_enabled", return_value=True):
-            self.assertFalse(service._cloud_llm_ready())
+        with mock.patch.object(pipeline.flags, "is_enabled", return_value=True):
+            self.assertFalse(pipeline._cloud_llm_ready())
 
     def test_false_when_unconfigured(self):
-        from app import service
+        from app.rag import pipeline
 
         _clear_keys()
         os.environ["LLM_FALLBACK_BACKEND"] = "sunbird"
-        with mock.patch.object(service.flags, "is_enabled", return_value=True), \
+        with mock.patch.object(pipeline.flags, "is_enabled", return_value=True), \
              mock.patch("app.sunbird.is_available", return_value=False):
-            self.assertFalse(service._cloud_llm_ready())
+            self.assertFalse(pipeline._cloud_llm_ready())
 
     def test_true_for_configured_sunbird_without_cloudflare(self):
-        from app import service
+        from app.rag import pipeline
 
         _clear_keys()
         for backend in ("sunbird", "gemini"):  # the retired gemini reads as sunbird
             os.environ["LLM_FALLBACK_BACKEND"] = backend
-            with mock.patch.object(service.flags, "is_enabled", return_value=True), \
+            with mock.patch.object(pipeline.flags, "is_enabled", return_value=True), \
                  mock.patch("app.sunbird.is_available", return_value=True):
-                self.assertTrue(service._cloud_llm_ready(), backend)
+                self.assertTrue(pipeline._cloud_llm_ready(), backend)
 
     def test_true_for_configured_workers_ai(self):
-        from app import service
+        from app.rag import pipeline
 
         _with_keys()
         os.environ["LLM_FALLBACK_BACKEND"] = "workers_ai"
-        with mock.patch.object(service.flags, "is_enabled", return_value=True):
-            self.assertTrue(service._cloud_llm_ready())
+        with mock.patch.object(pipeline.flags, "is_enabled", return_value=True):
+            self.assertTrue(pipeline._cloud_llm_ready())
 
 
 class CfWhisperSTTTest(unittest.TestCase):
@@ -1186,7 +1186,7 @@ class CfWhisperSTTTest(unittest.TestCase):
         from app.speech_service import SpeechModel
 
         sm = self._speech_model()
-        with mock.patch("app.flags.flags.is_enabled", return_value=True), \
+        with mock.patch("app.config.flags.flags.is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"STT_FALLBACK_BACKEND": "workers_ai"}), \
              mock.patch.object(SpeechModel, "_decode_audio_bytes",
                                return_value=np.zeros(1600, dtype="float32")), \
@@ -1198,7 +1198,7 @@ class CfWhisperSTTTest(unittest.TestCase):
 
     def test_disabled_when_flag_off(self):
         sm = self._speech_model()
-        with mock.patch("app.flags.flags.is_enabled", return_value=False), \
+        with mock.patch("app.config.flags.flags.is_enabled", return_value=False), \
              mock.patch.object(gateway, "workers_ai_stt") as stt:
             self.assertEqual(sm._cf_whisper_transcribe(b"x", 16000, "en"), "")
         stt.assert_not_called()
@@ -1206,14 +1206,14 @@ class CfWhisperSTTTest(unittest.TestCase):
     def test_disabled_without_backend_env(self):
         sm = self._speech_model()
         os.environ.pop("STT_FALLBACK_BACKEND", None)
-        with mock.patch("app.flags.flags.is_enabled", return_value=True), \
+        with mock.patch("app.config.flags.flags.is_enabled", return_value=True), \
              mock.patch.object(gateway, "workers_ai_stt") as stt:
             self.assertEqual(sm._cf_whisper_transcribe(b"x", 16000, "en"), "")
         stt.assert_not_called()
 
     def test_budget_exhausted_returns_empty(self):
         sm = self._speech_model()
-        with mock.patch("app.flags.flags.is_enabled", return_value=True), \
+        with mock.patch("app.config.flags.flags.is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"STT_FALLBACK_BACKEND": "workers_ai"}), \
              mock.patch("app.providers.budget.try_consume_neurons", return_value=False), \
              mock.patch.object(gateway, "workers_ai_stt") as stt:
@@ -1227,7 +1227,7 @@ class CfWhisperSTTTest(unittest.TestCase):
         from app.speech_service import SpeechModel
 
         sm = self._speech_model()
-        with mock.patch("app.flags.flags.is_enabled", return_value=True), \
+        with mock.patch("app.config.flags.flags.is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"STT_FALLBACK_BACKEND": "workers_ai"}), \
              mock.patch.object(SpeechModel, "_decode_audio_bytes",
                                return_value=np.zeros(1600, dtype="float32")), \
@@ -1263,7 +1263,7 @@ class CfWorkersTtsTest(unittest.TestCase):
 
     def test_synthesizes_when_configured(self):
         sm = self._speech_model()
-        with mock.patch("app.flags.flags.is_enabled", return_value=True), \
+        with mock.patch("app.config.flags.flags.is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"TTS_FALLBACK_BACKEND": "workers_ai"}), \
              mock.patch.object(gateway, "workers_ai_tts",
                                return_value={"audio": b"ID3audio", "fmt": "mp3", "sample_rate": 24000}) as tts:
@@ -1276,7 +1276,7 @@ class CfWorkersTtsTest(unittest.TestCase):
 
     def test_disabled_when_flag_off(self):
         sm = self._speech_model()
-        with mock.patch("app.flags.flags.is_enabled", return_value=False), \
+        with mock.patch("app.config.flags.flags.is_enabled", return_value=False), \
              mock.patch.object(gateway, "workers_ai_tts") as tts:
             self.assertIsNone(sm._cf_workers_ai_tts("hi", None, "en"))
         tts.assert_not_called()
@@ -1284,14 +1284,14 @@ class CfWorkersTtsTest(unittest.TestCase):
     def test_disabled_without_backend_env(self):
         sm = self._speech_model()
         os.environ.pop("TTS_FALLBACK_BACKEND", None)
-        with mock.patch("app.flags.flags.is_enabled", return_value=True), \
+        with mock.patch("app.config.flags.flags.is_enabled", return_value=True), \
              mock.patch.object(gateway, "workers_ai_tts") as tts:
             self.assertIsNone(sm._cf_workers_ai_tts("hi", None, "en"))
         tts.assert_not_called()
 
     def test_budget_exhausted_returns_none(self):
         sm = self._speech_model()
-        with mock.patch("app.flags.flags.is_enabled", return_value=True), \
+        with mock.patch("app.config.flags.flags.is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"TTS_FALLBACK_BACKEND": "workers_ai"}), \
              mock.patch("app.providers.budget.try_consume_neurons", return_value=False), \
              mock.patch.object(gateway, "workers_ai_tts") as tts:
@@ -1308,7 +1308,7 @@ class CfWorkersTtsTest(unittest.TestCase):
                 raise RuntimeError("HTTP 500")
             return {"audio": b"ID3second", "fmt": "mp3", "sample_rate": 24000}
 
-        with mock.patch("app.flags.flags.is_enabled", return_value=True), \
+        with mock.patch("app.config.flags.flags.is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"TTS_FALLBACK_BACKEND": "workers_ai"}), \
              mock.patch.object(gateway, "workers_ai_tts", side_effect=fake_tts):
             out = sm._cf_workers_ai_tts("hi", None, "en")
@@ -1321,7 +1321,7 @@ class CfWorkersTtsTest(unittest.TestCase):
         from app.providers import breakers
 
         sm = self._speech_model()
-        with mock.patch("app.flags.flags.is_enabled", return_value=True), \
+        with mock.patch("app.config.flags.flags.is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"TTS_FALLBACK_BACKEND": "workers_ai"}), \
              mock.patch.object(breakers.CF_TTS_BREAKER, "record_failure") as rf, \
              mock.patch.object(gateway, "workers_ai_tts", side_effect=RuntimeError("HTTP 429")):
@@ -1403,7 +1403,7 @@ class CfGatewayDispatchTest(unittest.TestCase):
         budget._local_neurons.clear()
         breakers.CF_STT_BREAKER.record_success()
         sm = SpeechModel.__new__(SpeechModel)
-        with mock.patch("app.flags.flags.is_enabled", return_value=True), \
+        with mock.patch("app.config.flags.flags.is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"STT_FALLBACK_BACKEND": "workers_ai"}), \
              mock.patch.object(ss, "STT_FALLBACK_MODEL", "@cf/openai/whisper-large-v3-turbo"), \
              mock.patch.object(SpeechModel, "_decode_audio_bytes",
@@ -1486,22 +1486,22 @@ class LLMRoutingOrderTest(unittest.TestCase):
 
     def test_sunbird_is_primary_and_gemini_never_generates(self):
         """The retired LLM_FALLBACK_BACKEND=gemini reads as sunbird (ADR-0036)."""
-        from app import service
+        from app.rag import pipeline
         for backend in ("sunbird", "gemini"):
-            with mock.patch.object(service.flags, "is_enabled", return_value=True), \
+            with mock.patch.object(pipeline.flags, "is_enabled", return_value=True), \
                  mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": backend}), \
                  mock.patch("app.sunbird.is_available", return_value=True), \
                  mock.patch("app.sunbird.chat_completion", return_value="ans [1]") as sb, \
                  mock.patch.object(gateway, "gemini_generate") as gg, \
                  mock.patch.object(gateway, "workers_ai_chat") as wc:
-                out = service._llm_cloud_fallback("q", [{"text": "ctx"}], None, "en")
+                out = pipeline._llm_cloud_fallback("q", [{"text": "ctx"}], None, "en")
             self.assertEqual(out, "ans [1]", backend)
             sb.assert_called_once()
             gg.assert_not_called()
             wc.assert_not_called()  # Sunbird served; CF not reached
 
     def test_cf_llama_70b_then_mistral_fallback(self):
-        from app import service
+        from app.rag import pipeline
         from app.providers import routing
         calls = []
 
@@ -1511,10 +1511,10 @@ class LLMRoutingOrderTest(unittest.TestCase):
                 raise RuntimeError("HTTP 500")
             return "ans via mistral [1]"
 
-        with mock.patch.object(service.flags, "is_enabled", return_value=True), \
+        with mock.patch.object(pipeline.flags, "is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "workers_ai"}), \
              mock.patch.object(gateway, "workers_ai_chat", side_effect=chat):
-            out = service._llm_cloud_fallback("q", [{"text": "ctx"}], None, "en")
+            out = pipeline._llm_cloud_fallback("q", [{"text": "ctx"}], None, "en")
         self.assertEqual(out, "ans via mistral [1]")
         self.assertEqual(calls, [routing.CF_LLM_MODEL, routing.CF_LLM_FALLBACK_MODEL])
 
@@ -1527,59 +1527,59 @@ class HybridCloudPrimaryRoutingTest(unittest.TestCase):
     """
 
     def test_prefer_cloud_primary_opt_in_and_locale(self):
-        from app import service
+        from app.rag import pipeline
 
         with mock.patch.dict(os.environ), \
-             mock.patch.object(service, "_cloud_llm_ready", return_value=True):
+             mock.patch.object(pipeline, "_cloud_llm_ready", return_value=True):
             # Default (opt-out) → local-first regardless of cloud readiness.
             os.environ.pop("LLM_PRIMARY_BACKEND", None)
-            self.assertFalse(service._prefer_cloud_primary("en"))
+            self.assertFalse(pipeline._prefer_cloud_primary("en"))
             # Opt-in → cloud-primary for high-resource locales...
             os.environ["LLM_PRIMARY_BACKEND"] = "workers_ai"
-            self.assertTrue(service._prefer_cloud_primary("en"))
-            self.assertTrue(service._prefer_cloud_primary("sw"))
+            self.assertTrue(pipeline._prefer_cloud_primary("en"))
+            self.assertTrue(pipeline._prefer_cloud_primary("sw"))
             # ...but Ugandan languages stay on the local LoRA-adapted model.
             for lg in ("lg", "nyn", "ach"):
-                self.assertFalse(service._prefer_cloud_primary(lg))
+                self.assertFalse(pipeline._prefer_cloud_primary(lg))
         # Opt-in but cloud not ready → safe degrade to local-first.
         with mock.patch.dict(os.environ, {"LLM_PRIMARY_BACKEND": "workers_ai"}), \
-             mock.patch.object(service, "_cloud_llm_ready", return_value=False):
-            self.assertFalse(service._prefer_cloud_primary("en"))
+             mock.patch.object(pipeline, "_cloud_llm_ready", return_value=False):
+            self.assertFalse(pipeline._prefer_cloud_primary("en"))
 
     def test_cloud_primary_serves_before_local(self):
-        from app import service
+        from app.rag import pipeline
 
         with mock.patch.dict(os.environ, {"LLM_PRIMARY_BACKEND": "workers_ai"}), \
-             mock.patch.object(service, "_cloud_llm_ready", return_value=True), \
-             mock.patch.object(service, "_llm_cloud_fallback", return_value="CLOUD [1]") as cf, \
-             mock.patch.object(service.llm_module, "generate", return_value="LOCAL") as gen:
-            out = service._call_llm_with_deadline("vat?", [{"text": "x"}], None, "en")
+             mock.patch.object(pipeline, "_cloud_llm_ready", return_value=True), \
+             mock.patch.object(pipeline, "_llm_cloud_fallback", return_value="CLOUD [1]") as cf, \
+             mock.patch.object(pipeline.generator_module, "generate", return_value="LOCAL") as gen:
+            out = pipeline._call_llm_with_deadline("vat?", [{"text": "x"}], None, "en")
         self.assertEqual(out, "CLOUD [1]")
         cf.assert_called_once()
         gen.assert_not_called()  # local never invoked when cloud-primary succeeds
 
     def test_cloud_primary_falls_back_to_local_when_cloud_empty(self):
-        from app import service
+        from app.rag import pipeline
 
         with mock.patch.dict(os.environ, {"LLM_PRIMARY_BACKEND": "workers_ai"}), \
-             mock.patch.object(service, "_cloud_llm_ready", return_value=True), \
-             mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True), \
-             mock.patch.object(service, "_llm_cloud_fallback", return_value="") as cf, \
-             mock.patch.object(service.llm_module, "generate", return_value="LOCAL [1]") as gen:
-            out = service._call_llm_with_deadline("vat?", [{"text": "x"}], None, "en")
+             mock.patch.object(pipeline, "_cloud_llm_ready", return_value=True), \
+             mock.patch.object(pipeline._LLM_CIRCUIT, "allow_request", return_value=True), \
+             mock.patch.object(pipeline, "_llm_cloud_fallback", return_value="") as cf, \
+             mock.patch.object(pipeline.generator_module, "generate", return_value="LOCAL [1]") as gen:
+            out = pipeline._call_llm_with_deadline("vat?", [{"text": "x"}], None, "en")
         self.assertEqual(out, "LOCAL [1]")
         cf.assert_called_once()  # cloud attempted once as primary...
         gen.assert_called_once()  # ...then local served as the fallback
 
     def test_ugandan_locale_stays_local_primary(self):
-        from app import service
+        from app.rag import pipeline
 
         with mock.patch.dict(os.environ, {"LLM_PRIMARY_BACKEND": "workers_ai"}), \
-             mock.patch.object(service, "_cloud_llm_ready", return_value=True), \
-             mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True), \
-             mock.patch.object(service, "_llm_cloud_fallback", return_value="CLOUD") as cf, \
-             mock.patch.object(service.llm_module, "generate", return_value="LOCAL LG [1]") as gen:
-            out = service._call_llm_with_deadline("q", [{"text": "x"}], None, "lg")
+             mock.patch.object(pipeline, "_cloud_llm_ready", return_value=True), \
+             mock.patch.object(pipeline._LLM_CIRCUIT, "allow_request", return_value=True), \
+             mock.patch.object(pipeline, "_llm_cloud_fallback", return_value="CLOUD") as cf, \
+             mock.patch.object(pipeline.generator_module, "generate", return_value="LOCAL LG [1]") as gen:
+            out = pipeline._call_llm_with_deadline("q", [{"text": "x"}], None, "lg")
         self.assertEqual(out, "LOCAL LG [1]")
         gen.assert_called_once()
         cf.assert_not_called()  # cloud is only the fallback for Ugandan locales
@@ -1640,7 +1640,7 @@ class TranslationFallbackTest(unittest.TestCase):
         from app.speech_service import SpeechModel
 
         for backend in ("sunbird", "gemini"):  # the retired gemini reads as sunbird
-            with mock.patch("app.flags.flags.is_enabled", return_value=True), \
+            with mock.patch("app.config.flags.flags.is_enabled", return_value=True), \
                  mock.patch.dict(os.environ, {"TRANSLATE_FALLBACK_BACKEND": backend}), \
                  mock.patch("app.sunbird.is_available", return_value=True), \
                  mock.patch("app.sunbird.chat_completion", return_value="Omusolo gwa VAT") as chat, \
@@ -1653,7 +1653,7 @@ class TranslationFallbackTest(unittest.TestCase):
     def test_sunflower_translation_disabled_when_flag_off(self):
         from app.speech_service import SpeechModel
 
-        with mock.patch("app.flags.flags.is_enabled", return_value=False), \
+        with mock.patch("app.config.flags.flags.is_enabled", return_value=False), \
              mock.patch("app.sunbird.chat_completion") as chat:
             self.assertEqual(SpeechModel._sunbird_llm_translate("x", "en", "lg"), "")
         chat.assert_not_called()
@@ -1668,15 +1668,15 @@ class DeterministicProcedureReplyFormattingTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from app import database as db
+        from app.db import database as db
 
         db.init_db()
-        from app import service
+        from app.rag import pipeline
 
-        cls.model = service.ChatModel()
+        cls.model = pipeline.ChatModel()
 
     def _tin_reply(self) -> str:
-        from app import retriever as R
+        from app.rag import retriever as R
 
         hits = [
             {
@@ -1714,7 +1714,7 @@ class DeterministicProcedureReplyFormattingTest(unittest.TestCase):
         self.assertIsNone(re.search(r"\d\s*$", reply.strip()))
 
     def _return_reply(self) -> str:
-        from app import retriever as R
+        from app.rag import retriever as R
 
         hits = [
             {
@@ -1751,9 +1751,9 @@ class DeterministicProcedureReplyFormattingTest(unittest.TestCase):
 
     def test_format_procedure_steps_paragraph_fallback(self):
         # Non-procedural (no ';') text is left as a single paragraph, not a list.
-        from app import service
+        from app.rag import pipeline
 
-        out = service.ChatModel._format_procedure_steps("A single grounded sentence.", "Lead:")
+        out = pipeline.ChatModel._format_procedure_steps("A single grounded sentence.", "Lead:")
         self.assertEqual(out, "Lead: A single grounded sentence.")
         self.assertNotIn("1.", out)
 
@@ -1761,7 +1761,7 @@ class DeterministicProcedureReplyFormattingTest(unittest.TestCase):
         # The "revise" fallback dumps raw retrieved chunks. PDF-extraction noise
         # (omitted-image blocks, page footers, orphan page numbers) must be
         # stripped, and an inline numbered list rendered as a real list.
-        from app import service
+        from app.rag import pipeline
 
         raw = (
             "Background to Taxation ==> picture [348 x 505] intentionally omitted "
@@ -1772,7 +1772,7 @@ class DeterministicProcedureReplyFormattingTest(unittest.TestCase):
             "Act, Cap. 337; 2. East African Customs Management Act; 3. Excise Tariff Act, "
             "Cap. 338; 5. 2"
         )
-        out = service.ChatModel._build_grounded_revision(
+        out = pipeline.ChatModel._build_grounded_revision(
             [{"source": "taxation_guide.pdf", "text": raw}], [], "explain taxation in uganda"
         )
         self.assertTrue(
@@ -1792,7 +1792,7 @@ class DeterministicProcedureReplyFormattingTest(unittest.TestCase):
         # overlap, and score_rrf — the PRE-rerank fusion score — broke the tie
         # against the reranked order the citations are numbered in, so the [2]
         # passage displaced the verbatim [1] FAQ match.
-        from app import service
+        from app.rag import pipeline
 
         hits = [
             {
@@ -1815,7 +1815,7 @@ class DeterministicProcedureReplyFormattingTest(unittest.TestCase):
                 "score_rrf": 95.0,
             },
         ]
-        out = service.ChatModel._build_grounded_revision(
+        out = pipeline.ChatModel._build_grounded_revision(
             hits, [{"ref": "[1]"}, {"ref": "[2]"}], "What services does URA provide?"
         )
         body = out.split("\n\n", 1)[1]

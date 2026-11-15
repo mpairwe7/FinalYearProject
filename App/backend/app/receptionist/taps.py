@@ -147,7 +147,7 @@ class CallerAudioTap(FrameProcessor):
 
     def _capture_caller_for_copilot(self, pcm: bytes) -> None:
         """When bridged to an officer and officer_voice_copilot is enabled, stream live caller assist."""
-        from ..flags import flags
+        from ..config.flags import flags
 
         if not flags.is_enabled("officer_voice_copilot", cohorts={"ura_staff"}) or self.speech_model is None:
             return
@@ -439,7 +439,7 @@ class LivePartialTranscriptTap(FrameProcessor):
 
         # Adaptive semantic endpointing & speculative prefetch on partial hypothesis
         try:
-            from ..flags import flags
+            from ..config.flags import flags
             from .hybrid_s2s import compute_semantic_endpoint_silence_ms
             from .lexicon import normalize_call_query
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.claim_verifier import verify_claims
+from app.rag.claim_verifier import verify_claims
 
 
 class ClaimVerifierTests(unittest.TestCase):

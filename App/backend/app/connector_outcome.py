@@ -21,7 +21,7 @@ sentence), never a paraphrase. Only a record that was found is summarised by
 the model — that is the part a language model is for — and the practice-
 system notice is attached by code, so it cannot be forgotten.
 
-Pure functions over the tool-call dicts :func:`app.llm.generate_with_tools`
+Pure functions over the tool-call dicts :func:`app.rag.generator.generate_with_tools`
 returns; nothing here talks to a service or a model.
 """
 

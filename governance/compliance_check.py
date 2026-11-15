@@ -20,7 +20,7 @@ REQUIRED_FILES = [
     "SECURITY.md",
     "App/backend/app/guardrails.py",
     "App/backend/app/tracing.py",
-    "App/backend/app/retriever.py",
+    "App/backend/app/rag/retriever.py",
     "ml/pipelines/evaluate_rag.py",
     "ml/pipelines/quality_gates.py",
     "Data/eval/rag_eval.jsonl",
@@ -101,12 +101,12 @@ REQUIRED_CONTENT: dict[str, list[str]] = {
     "App/backend/app/audit/tsa.py": ["build_request", "verify_token", "_chain_to_anchor"],
     "App/backend/app/audit/turns.py": ["append_turn", "provenance"],
     "monitoring/prometheus.yml": ["alerting:", "credentials_file"],
-    "App/backend/app/database.py": [
+    "App/backend/app/db/database.py": [
         "cleanup_expired_data",
         "export_review_feedback",
         "CONVERSATION_TTL_DAYS",
     ],
-    "App/backend/app/models.py": [
+    "App/backend/app/api/models.py": [
         "locale",
         "escalation_required",
         "section",

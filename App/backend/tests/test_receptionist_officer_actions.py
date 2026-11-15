@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from app import database as db
+from app.db import database as db
 from app.auth.jwt_auth import make_dev_token
 from app.main import app
 from app.receptionist import desk, presence
