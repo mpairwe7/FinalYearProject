@@ -545,7 +545,7 @@ _LEXICAL_TOKEN_RE = re.compile(r"[a-z0-9]+")
 #:
 #: The residual is "What is the capital of France?" at 0.664: both content terms
 #: genuinely occur in the corpus (an EAC tax-cases compendium), so no lexical
-#: variant separates it — which is what ``service._FAQ_MATCH_MIN``'s comment
+#: variant separates it — which is what ``pipeline._FAQ_MATCH_MIN``'s comment
 #: already concluded from its own measurements. Closing it needs a signal that
 #: separates: the cross-encoder where it runs, or a judge over the candidates.
 LEXICAL_RELEVANCE_FLOOR = float(os.getenv("RETRIEVER_LEXICAL_FLOOR", "0.50"))

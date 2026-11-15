@@ -48,7 +48,7 @@ _TAXPAYER_STATUS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 
-#: Earlier turns the LLM prompt replays verbatim (``llm._build_messages``).
+#: Earlier turns the LLM prompt replays verbatim (``generator._build_messages``).
 #: Every older turn is in the rolling summary instead, so none falls between
 #: the two (G120: the prompt used the last three while the summary started at
 #: turn seven, and turns four to six reached the model in neither).

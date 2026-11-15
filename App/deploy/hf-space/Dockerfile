@@ -927,7 +927,11 @@ RUN set -eux; \
         echo "FAIL: root can connect as postgres; the serving process must be read-only" >&2; exit 1; \
     fi; \
     test "$($PG/psql -h /app/pgrun -U ura_dense_reader -d ura_dense -tAc "SELECT current_user")" = "ura_dense_reader"; \
-    if [ -f /app/Data/dense/manifest.json ] && [ -f /app/backend/app/vectorstore/vector_db.py ]; then \
+    DENSE_LOADER=""; \
+    if [ -f /app/backend/app/vectorstore/vector_db.py ]; then DENSE_LOADER=app.vectorstore.vector_db; \
+    elif [ -f /app/backend/app/pgvector_dense.py ]; then DENSE_LOADER=app.pgvector_dense; fi; \
+    echo "dense loader: ${DENSE_LOADER:-none} (app.pgvector_dense in a base image from before ADR-0056)"; \
+    if [ -f /app/Data/dense/manifest.json ] && [ -n "$DENSE_LOADER" ]; then \
         cd /app/qdrant; \
         QDRANT__STORAGE__STORAGE_PATH=/app/qdrant/storage QDRANT__SERVICE__HTTP_PORT=6333 QDRANT__TELEMETRY_DISABLED=true \
             /usr/local/bin/qdrant & \
@@ -936,9 +940,9 @@ RUN set -eux; \
         cd /app/backend; \
         if /usr/sbin/runuser -u postgres -- env QDRANT_URL=http://127.0.0.1:6333 QDRANT_COLLECTION=ura_knowledge_base_active \
                LOCAL_DENSE_DIR=/app/Data/dense LOCAL_DENSE_BUILD_DSN="postgresql:///ura_dense?host=/app/pgrun&user=postgres" \
-               PYTHONDONTWRITEBYTECODE=1 /opt/venv/bin/python -m app.vectorstore.vector_db load \
+               PYTHONDONTWRITEBYTECODE=1 /opt/venv/bin/python -m "$DENSE_LOADER" load \
            && LOCAL_DENSE_DIR=/app/Data/dense LOCAL_DENSE_DSN="postgresql:///ura_dense?host=/app/pgrun&user=ura_dense_reader" \
-               /opt/venv/bin/python -m app.vectorstore.vector_db check; then \
+               /opt/venv/bin/python -m "$DENSE_LOADER" check; then \
             echo "dense leg loaded"; \
         else \
             echo "WARNING: the dense leg was not loaded (see above); retrieval will serve BM25 alone"; \

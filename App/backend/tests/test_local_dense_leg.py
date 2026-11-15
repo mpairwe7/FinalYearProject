@@ -555,7 +555,9 @@ def test_the_space_layer_installs_a_socket_only_pinned_pgvector() -> None:
     assert "--auth-host=reject" in dockerfile
     assert "LOCAL_DENSE_BACKEND=pgvector" in dockerfile
     # A refused load leaves BM25 serving: the load sits in an if, never under set -e alone.
-    assert re.search(r"if /usr/sbin/runuser -u postgres -- env QDRANT_URL=.*?app\.vectorstore\.vector_db load", dockerfile, re.S)
+    assert re.search(r'if /usr/sbin/runuser -u postgres -- env QDRANT_URL=.*?-m "\$DENSE_LOADER" load', dockerfile, re.S)
+    # The pinned base image may predate ADR-0056: the load finds the loader under either name.
+    assert "DENSE_LOADER=app.vectorstore.vector_db" in dockerfile and "DENSE_LOADER=app.pgvector_dense" in dockerfile
     # The base image's PATH has no /usr/sbin: every runuser is called by its path.
     assert not re.search(r"(?<!/usr/sbin/)runuser -u", dockerfile)
 

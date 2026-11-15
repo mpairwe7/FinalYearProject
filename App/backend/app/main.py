@@ -1350,7 +1350,7 @@ async def security_headers(request: Request, call_next):
     # Stash on request.state so handlers can read it without re-parsing headers
     request.state.request_id = request_id
     # Every log record written while serving this request carries the id
-    # (logging_config.RequestContextFilter). Inbound W3C traceparent is
+    # (middleware.logger.RequestContextFilter). Inbound W3C traceparent is
     # handled by the OpenTelemetry FastAPI instrumentation when tracing is on.
     request_id_token = REQUEST_ID.set(request_id)
     traceresponse: str | None = None
@@ -2011,7 +2011,7 @@ def _log_stream_conversation(
 ) -> None:
     """Mirror the old SSE ``finally`` block — log to analytics DB.
 
-    Turn metrics and the audit row are recorded by ``service.run_chat_turn``
+    Turn metrics and the audit row are recorded by ``pipeline.run_chat_turn``
     itself, for every streaming transport alike.
     """
     from .rag.pipeline import ChatModel as _CM

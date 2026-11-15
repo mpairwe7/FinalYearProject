@@ -404,7 +404,7 @@ def submit_csat(ticket: dict[str, Any], *, score: int | None, comment: str = "")
 def build_officer_copilot_draft(ticket: dict[str, Any], draft_en: str) -> dict[str, Any]:
     """Prepare a figure-protected bilingual draft reply for the officer workbench.
 
-    Gated on ``FLAG_OFFICER_AI_CO_EXECUTION``. Uses ``service.localize_reply``
+    Gated on ``FLAG_OFFICER_AI_CO_EXECUTION``. Uses ``pipeline.localize_reply``
     so every statutory rate, currency amount, and citation is protected by
     ``mt.protect_figures`` and verified by ``mt.figures_survived``.
     """

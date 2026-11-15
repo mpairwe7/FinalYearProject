@@ -2393,7 +2393,7 @@ def generate(
             inputs = _tokenizer([text], return_tensors="pt").to(_model.device)
 
             with torch.no_grad():
-                # Input reaches here only through service.ChatModel.generate, which runs
+                # Input reaches here only through pipeline.ChatModel.generate, which runs
                 # InputGuard.check(message) and returns a blocked reply before any
                 # generation — the guard the rule asks for is at the service boundary,
                 # not repeated per backend. Suppressed per-line with the rule named.
@@ -2930,7 +2930,7 @@ def generate_stream(
             # Run generation in a separate thread so we can yield tokens while
             # holding adapter state stable for this response.
             thread = threading.Thread(
-                # Streaming variant of the same call, same boundary: service.ChatModel
+                # Streaming variant of the same call, same boundary: pipeline.ChatModel
                 # has already run InputGuard.check() on the message these kwargs carry.
                 # nosemgrep: ura-llm01-raw-user-input-to-llm
                 target=lambda: _model.generate(**generation_kwargs),
@@ -3813,7 +3813,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                     _select_adapter(locale)
                     inputs = _tokenizer([text], return_tensors="pt").to(_model.device)
                     with torch.no_grad():
-                        # Same boundary as generate(): service.ChatModel guards the message before
+                        # Same boundary as generate(): pipeline.ChatModel guards the message before
                         # this is reached, and tool arguments are validated by the MCP client.
                         # nosemgrep: ura-llm01-raw-user-input-to-llm
                         output_ids = _model.generate(

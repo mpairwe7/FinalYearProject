@@ -3554,7 +3554,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 on_screen = full_reply
 
             # Tokens streamed in English (the model has no adapter for these
-            # languages — see llm.can_generate_in_locale), so the localized
+            # languages — see generator.can_generate_in_locale), so the localized
             # text arrives as a revision, which the client already applies for
             # grounded revisions above. Emitted only when translation actually
             # changed something, so an English session sees no extra frame.
@@ -4461,13 +4461,13 @@ def _is_already_in_locale(text: str, target_locale: str) -> bool:
 def localize_reply(reply: str, locale: str, *, tone_register: str = "") -> str:
     """Render *reply* in *locale*, or return the English unchanged.
 
-    Answers are generated in English (see ``llm.can_generate_in_locale``) and
+    Answers are generated in English (see ``generator.can_generate_in_locale``) and
     translated here. Sunbird's Ugandan-language MT is built for lg/nyn/ach and
     remains the fallback; the generation model is now tried first, which is a
     reversal of the previous order. That order existed because asking the
     generation model directly produced repetition loops ("kozesa kozesa
     kozesa…") rather than sentences — a prompting problem, not a capability
-    one. llm.translate_text now follows Sunflower-14B's own documented prompt
+    one. generator.translate_text now follows Sunflower-14B's own documented prompt
     shape and decodes greedily, and returns clean sentences for the same
     inputs. The length guard below stays as the safety net either way.
 

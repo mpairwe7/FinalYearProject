@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # When LLM_PRIMARY_BACKEND=workers_ai this chain is the PRIMARY generator for
 # high-resource locales (English, Swahili, …); the local Qwen3-8B stays primary
 # for Ugandan languages and is the universal fallback (see
-# service._prefer_cloud_primary).  Reasoning models (QwQ-32B, DeepSeek-R1) are
+# pipeline._prefer_cloud_primary).  Reasoning models (QwQ-32B, DeepSeek-R1) are
 # deliberately excluded — their <think> traces add latency/cost a citation-
 # grounded chatbot does not want.
 # 1) Llama 3.3 70B — best instruction-following / citation discipline (~92 IFEval).

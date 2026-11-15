@@ -102,7 +102,7 @@ def _chat_model_slot(model: str) -> str:
     """Reverse-lookup a model id to its routing.CHAT_MODEL_SLOTS name.
 
     ``model`` here always originates from this deployment's own trusted call
-    sites (service._llm_cloud_fallback, speech_service — both read straight
+    sites (pipeline._llm_cloud_fallback, speech_service — both read straight
     from routing.py), never from a request — but the *relay endpoint* only
     accepts a slot name (see CFRelayChatRequest), so the caller's already-
     trusted model id has to be translated to the slot the far side expects.

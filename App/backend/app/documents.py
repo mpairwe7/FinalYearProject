@@ -2832,7 +2832,7 @@ def attachment_passages(records: list[DocumentRecord]) -> list[dict[str, Any]]:
 
     These are prepended to the normal retrieval hits so attachment content
     flows through the same LLM01 scrub + spotlight markers in
-    ``llm._build_messages``, counts as grounding for faithfulness scoring,
+    ``generator._build_messages``, counts as grounding for faithfulness scoring,
     and prevents spurious abstention. ``doc_type: "attachment"`` marks them
     for redaction in ``ChatModel.contexts_json`` (user content must not be
     persisted verbatim to analytics).

@@ -281,7 +281,7 @@ or slower-than-3 s trace and 25% of the rest.
 
 ## 6. Logging
 
-`app/logging_config.install_logging()` puts one handler on the **root**
+`app/middleware/logger.install_logging()` puts one handler on the **root**
 logger, so the API's records, uvicorn's access and error lines and every
 library's records share one format. JSON lines (production, compose) carry:
 
