@@ -31,7 +31,6 @@ OLD_NAMES_ON_PURPOSE = {
 }
 # Findings on dev before the move, keyed without line numbers; --verify fails only on others.
 KNOWN_FINDINGS = {
-    "App/backend/app/agents/graphs/main_graph.py: app.tax.money has no parse_money_amount",
     "App/backend/app/client_telemetry.py: unresolved string app.client",
     "App/backend/app/security_events.py: unresolved string app.security",
     "App/backend/tests/test_mcp_wire_conformance.py: no module app.mcp.servers",
