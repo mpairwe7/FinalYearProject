@@ -61,8 +61,10 @@ def _patched_lines() -> list[tuple[Path, str, str]]:
         if not (isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)):
             continue
         name, value = node.targets[0].id, node.value
-        if isinstance(value, ast.Call) and getattr(value.func, "id", "") == "Path":
+        if isinstance(value, ast.Call) and getattr(value.func, "id", "") in ("Path", "_app_source"):
             path = value.args[0].value
+            if getattr(value.func, "id", "") == "_app_source":  # the ADR-0056 path, as this repo has it
+                path = f"/app/backend/app/{path}"
             if path.endswith(".py"):
                 source = _in_repo(path)
         elif name.startswith("old") and isinstance(value, ast.Constant) and source is not None:
