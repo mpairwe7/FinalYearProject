@@ -86,7 +86,7 @@ Parts of the reference layout were not adopted:
 - A branch cut before this change that adds an import of an old path fails at
   import time. Merge `dev`, then run the script with `--verify`: it lists every
   import or patch-target string that no longer resolves, and exits non-zero only
-  on findings outside the ten it found on `dev` before the move, so it works as a
+  on findings outside the nine it found on `dev` before the move, so it works as a
   gate.
 - The app code keeps no compatibility layer, but the HF Space build does, on
   purpose. The Space builds `FROM` a pinned image of `dev`, which predates this
@@ -103,13 +103,14 @@ Parts of the reference layout were not adopted:
 ## Confirmation
 
 - `python3 App/backend/scripts/restructure_rag_layout.py --verify` exits 0: it
-  reports only the ten findings it reports on the parent commit. Seven are
+  reports only nine findings, all present on the parent commit. Seven are
   strings that only look like module paths (logger names such as `app.security`,
-  test fixtures such as `app.test`), two import a test-only `app.mcp.servers`,
-  and one is a real defect that predates the move: `agents/graphs/main_graph.py` imports
-  `tax.money.parse_money_amount`, which does not exist, and an `except` hides the
-  failure, so a remembered amount reaches a calculator unparsed. Every other
-  import and patch-target string in the repository resolves.
+  test fixtures such as `app.test`), and two import a test-only `app.mcp.servers`.
+  The script also found a real defect that predates the move:
+  `agents/graphs/main_graph.py` imported `tax.money.parse_money_amount`, which
+  does not exist, so a remembered amount reached a calculator unparsed. #741
+  fixed it (#740). Every other import and patch-target string in the repository
+  resolves.
 - The HF Space image check builds on the old pin: the CPU patch and the dense-leg
   load find the old file names, and the smoke check requires a non-empty dense
   table whenever the base ships the dense artifact.
