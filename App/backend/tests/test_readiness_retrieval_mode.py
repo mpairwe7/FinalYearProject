@@ -29,7 +29,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.main import health_readiness  # noqa: E402
+from app.api.health import health_readiness  # noqa: E402
 
 
 def _model(ready: bool, sparse_only: bool, vectorize_mode: bool = False):

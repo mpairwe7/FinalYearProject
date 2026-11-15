@@ -20,7 +20,7 @@ router = APIRouter(tags=["connectors"])
 
 
 def get_admin_access(request: Request) -> AuthContext:
-    from ..main import require_admin_access
+    from .deps import require_admin_access
 
     return require_admin_access(request)
 

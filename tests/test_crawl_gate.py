@@ -13,7 +13,8 @@ from typing import Any
 
 import pytest
 
-from app import analytics, crawl_gate, freshness, main
+from app import analytics, crawl_gate, freshness
+from app.api import health
 from app.crawl_gate import check_slo, evaluate, figures, vet_new_pdfs, write_candidate
 
 VAT = "https://ura.go.ug/en/vat/"
@@ -365,7 +366,7 @@ class TestFreshnessReporting:
     def test_the_route_reports_the_age_beside_the_index_check(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr(freshness, "load_status", lambda: {"ok": True, "checked_at": "x"})
         monkeypatch.setattr(freshness, "load_crawl_status", lambda: self.SUMMARY)
-        assert main.index_freshness() == {"ok": True, "checked_at": "x", "crawl": self.SUMMARY}
+        assert health.index_freshness() == {"ok": True, "checked_at": "x", "crawl": self.SUMMARY}
 
     def test_the_metrics_follow_the_summary(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr(freshness, "load_crawl_status", lambda: self.SUMMARY)

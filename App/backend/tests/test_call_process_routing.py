@@ -19,6 +19,7 @@ from unittest.mock import patch
 
 import httpx
 from app import process_role
+from app.api import health as health_routes
 from app.analytics import MetricsStore, metrics
 from starlette.routing import Route, WebSocketRoute
 from starlette.testclient import TestClient
@@ -419,7 +420,7 @@ class ChatRoleStartupTests(unittest.TestCase):
                 _env(URA_PROCESS_ROLE="chat"),
                 patch.object(httpx, "get", return_value=_ready_response(value)) as get,
             ):
-                self.assertEqual(app.main._receptionist_status(), value)
+                self.assertEqual(health_routes._receptionist_status(), value)
                 get.assert_called_once_with(CALLS_READY, timeout=1.0)
 
     def test_ready_in_the_calls_role_is_the_receptionists_own_status(self) -> None:
@@ -432,7 +433,7 @@ class ChatRoleStartupTests(unittest.TestCase):
                 patch.object(httpx, "get") as get,
                 patch("app.receptionist.status", return_value="off"),
             ):
-                self.assertEqual(app.main._receptionist_status(), "off")
+                self.assertEqual(health_routes._receptionist_status(), "off")
                 get.assert_not_called()
 
     def test_ready_in_the_chat_role_is_not_the_receptionists_status(self) -> None:
@@ -443,7 +444,7 @@ class ChatRoleStartupTests(unittest.TestCase):
             patch.object(httpx, "get", return_value=_ready_response("ready")),
             patch("app.receptionist.status", return_value="off"),
         ):
-            self.assertEqual(app.main._receptionist_status(), "ready")
+            self.assertEqual(health_routes._receptionist_status(), "ready")
 
     def test_ready_follows_the_call_process_address(self) -> None:
         with (

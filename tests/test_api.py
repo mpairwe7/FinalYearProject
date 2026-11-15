@@ -45,7 +45,7 @@ class TestHealthEndpoint:
     def test_health_returns_ok(self):
         """Test health endpoint returns alive status."""
         from starlette.requests import Request
-        from App.backend.app.main import health_liveness
+        from App.backend.app.api.health import health_liveness
 
         request = Request(
             {
@@ -66,7 +66,7 @@ class TestHealthEndpoint:
     def test_health_response_format(self):
         """Test health response has correct format."""
         from starlette.requests import Request
-        from App.backend.app.main import health_liveness
+        from App.backend.app.api.health import health_liveness
 
         request = Request(
             {
