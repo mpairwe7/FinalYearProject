@@ -24,6 +24,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from .linear_text import strip_angle_tags
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -1872,7 +1874,7 @@ class OutputGuard:
         # Remove script tags
         text = re.sub(r"<script[^>]*>.*?</script\s*>", "", text, flags=re.DOTALL | re.IGNORECASE)
         # Remove HTML tags
-        text = re.sub(r"<[^>]+>", "", text)
+        text = strip_angle_tags(text)
         # Normalize glued/malformed citation markers like otherL1] or word[1] -> word [1]
         text = re.sub(r"(?<=[a-zA-Z])(?:L|\[)(\d+)\]", r" [\1]", text)
         text = re.sub(r"(?<=\d)\[(\d+)\]", r" [\1]", text)

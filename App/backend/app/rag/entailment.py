@@ -18,6 +18,8 @@ import os
 import re
 from typing import Any
 
+from ..linear_text import strip_angle_tags
+
 logger = logging.getLogger(__name__)
 
 # e.g. "cross-encoder/nli-deberta-v3-small"; empty → deterministic numeric only.
@@ -316,7 +318,7 @@ _model_loaded = False
 def percentages(text: str) -> set[str]:
     """Numeric values stated as percentages, e.g. {"18"} from "18%" / "asilimia 18"."""
     results: set[str] = set()
-    lowered = re.sub(r"(\d+)\.\s+(\d+)", r"\1.\2", (text or "").lower())
+    lowered = re.sub(r"(?<!\d)(\d+)\.\s+(\d+)", r"\1.\2", (text or "").lower())
     for m in _PCT_RE.finditer(lowered):
         val = m.group(1) or m.group(2)
         if val:
@@ -363,8 +365,8 @@ def canonical_amounts(text: str) -> set[float]:
     (Luganda obukadde, Swahili milioni) were dropped, falsely triggering
     numerical mismatch warnings on correct translations.
     """
-    clean_text = re.sub(r"<[^>]+>", " ", text or "")
-    clean_text = re.sub(r"(\d+)\.\s+(\d+)", r"\1.\2", clean_text)
+    clean_text = strip_angle_tags(text or "", " ")
+    clean_text = re.sub(r"(?<!\d)(\d+)\.\s+(\d+)", r"\1.\2", clean_text)
     lowered = clean_text.lower()
     # Percentages are handled separately; drop them so "18%" is not read
     # as the amount 18.
