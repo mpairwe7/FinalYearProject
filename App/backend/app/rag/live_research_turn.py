@@ -1,6 +1,6 @@
 """One turn's live web research, shared by REST, SSE and the graph (G486).
 
-Moved out of ``rag/pipeline.py``: the three paths drifted once, and the graph reached into the
+Moved out of ``service.py`` (now ``rag/pipeline.py``): the three paths drifted once, and the graph reached into the
 orchestrator to share it. The check is recorded in :data:`app.rag.turn_context.TURN_LIVE_CHECK`.
 """
 

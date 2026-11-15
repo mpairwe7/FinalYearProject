@@ -13,7 +13,7 @@ Architecture::
 
 The model singleton is created in ``main.py`` lifespan and stashed on
 ``app.state.speech``. Each method wraps the underlying inference in a
-bounded executor + circuit breaker (same pattern as ``service._LLM_EXECUTOR``)
+bounded executor + circuit breaker (same pattern as ``pipeline._LLM_EXECUTOR``)
 so a slow / failing speech model cannot exhaust API workers.
 
 Environment flags:
@@ -1491,7 +1491,7 @@ class SpeechModel:
         # audio samples. There is no prompt for an instruction to be injected
         # into, and InputGuard.check() takes a string, so it cannot be applied
         # to a tensor. The transcript this produces IS guarded — downstream in
-        # service.generate(), whose first step is InputGuard.check(message).
+        # pipeline.generate(), whose first step is InputGuard.check(message).
         #
         # The directive has to sit on the line immediately above the match;
         # anything between it and the code makes it inert.
@@ -1683,7 +1683,7 @@ class SpeechModel:
         # See the matching comment on _transcribe_whisper_peft: this is
         # Whisper ASR fed a mel spectrogram (input_features), not user text —
         # there is no prompt for LLM01 to inject into. The transcript IS
-        # guarded downstream, at service.generate()'s InputGuard.check(message).
+        # guarded downstream, at pipeline.generate()'s InputGuard.check(message).
         words: list[WordConf] | None = None
         mean_word_prob: float | None = None
 

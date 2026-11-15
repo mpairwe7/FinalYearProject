@@ -9,7 +9,7 @@ and refuses to mark anything containing figures (rates, amounts, deadlines)
 as courtesy.
 
 Stdlib-only on purpose: this module is imported by ``retriever``,
-``claim_verifier``, ``evaluation``, ``service`` and ``llm`` and must never
+``claim_verifier``, ``evaluation``, ``pipeline`` and ``generator`` and must never
 create an import cycle.
 """
 

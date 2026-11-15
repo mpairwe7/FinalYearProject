@@ -159,7 +159,7 @@ def _canonicalize_text(text: str) -> str:
 
 # System prompt phrases that must never appear verbatim in a model response
 # (LLM07 — System Prompt Leakage, OWASP 2025). Each one must occur in a
-# runtime prompt (llm.SYSTEM_PROMPT or service._build_fallback_prompt):
+# runtime prompt (generator.SYSTEM_PROMPT or pipeline._build_fallback_prompt):
 # tests/agents/test_ai_security_layer_2026_11.py fails otherwise. Two entries
 # named a persona the prompt had dropped, so a leak of its opening line went
 # unseen (G465). Matching tolerates Markdown emphasis between words, since
@@ -1782,7 +1782,7 @@ def _shingles(words: list[str]) -> set[tuple[str, ...]]:
 def _system_prompt_shingles() -> frozenset[tuple[str, ...]]:
     """Word 8-grams of the live system prompt, less the text it tells the model to say (G465).
 
-    Read from ``llm.SYSTEM_PROMPT`` itself, so a prompt edit cannot leave the
+    Read from ``generator.SYSTEM_PROMPT`` itself, so a prompt edit cannot leave the
     detector behind the way the signature list was. Empty if the prompt
     cannot be imported; the signature phrases still apply.
     """

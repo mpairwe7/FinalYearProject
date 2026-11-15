@@ -17,7 +17,10 @@ come up.
    builds it.
    - It installs Debian's PostgreSQL 15, copies the pgvector 0.8.1 extension from the
      digest-pinned image, and runs a SQL selftest.
-   - It then runs `python -m app.vectorstore.vector_db load` and `check`.
+   - It then runs `python -m app.vectorstore.vector_db load` and `check`. A pinned base image
+     from before ADR-0056 has the loader under its old file name, `pgvector_dense.py`, so the
+     build looks for either and logs `dense loader: <module>`. The image check fails if a base
+     that ships the dense artifact loads nothing.
    - The load refuses vectors whose point ids differ from the baked Qdrant collection's. A refused
      or failed load does not fail the build: it prints
      `WARNING: the dense leg was not loaded`, and the Space serves BM25 alone.

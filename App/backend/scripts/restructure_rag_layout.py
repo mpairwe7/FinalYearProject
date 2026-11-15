@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import ast
 import functools
+import importlib.util
 import re
 import subprocess
 import sys
@@ -22,7 +23,25 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 APP = REPO / "App/backend/app"
 SELF = Path(__file__).resolve()
-MOVE_RECORD = REPO / "docs/adr/0056-rag-package-layout.md"  # names the old paths on purpose
+# Files that name an old module on purpose; --verify does not report them.
+OLD_NAMES_ON_PURPOSE = {
+    REPO / "docs/adr/0056-rag-package-layout.md": "the record of the move",
+    REPO / "App/deploy/hf-space/Dockerfile": "builds FROM a pinned image that may predate the move",
+    REPO / "App/backend/tests/test_local_dense_leg.py": "asserts the Dockerfile's fallback",
+}
+# Findings on dev before the move, keyed without line numbers; --verify fails only on others.
+KNOWN_FINDINGS = {
+    "App/backend/app/agents/graphs/main_graph.py: app.tax.money has no parse_money_amount",
+    "App/backend/app/client_telemetry.py: unresolved string app.client",
+    "App/backend/app/security_events.py: unresolved string app.security",
+    "App/backend/tests/test_mcp_wire_conformance.py: no module app.mcp.servers",
+    "App/backend/tests/test_observability_endpoints.py: unresolved string app.security",
+    "App/backend/tests/test_observability_endpoints.py: unresolved string app.test",
+    "tests/agents/test_connector_link_integration.py: no module app.mcp.servers",
+    "tests/agents/test_kernel_advanced_2026_11.py: unresolved string app.secret",
+    "tests/agents/test_mcp_toolathlon_2026_october.py: unresolved string app.security",
+    "tests/test_hf_space_layer.py: unresolved string app._speech_service_as_built",
+}
 
 # Old module (dotted, under app) -> new module. A package key moves the whole tree.
 MOVES: dict[str, str] = {
@@ -152,9 +171,7 @@ def relative(target: str, pkg: str) -> str:
 
 
 def resolve_relative(pkg: str, level: int, module: str | None) -> str:
-    base = pkg.split(".")
-    base = base[: len(base) - (level - 1)] if level > 1 else base
-    return ".".join([*base, *(module.split(".") if module else [])])
+    return importlib.util.resolve_name("." * level + (module or ""), pkg)
 
 
 class Rules:
@@ -431,8 +448,10 @@ def _defines(module_path: Path, name: str) -> bool:
             targets = [(a.asname or a.name).split(".")[0] for a in node.names]
         if name in targets:
             return True
-    # Names bound under if/try or by star-imports: accept any binding-looking line.
-    return re.search(rf"^\s*(?:(?:async\s+)?def\s+|class\s+)?{re.escape(name)}\b", _source(module_path), re.M) is not None
+    # Names bound under if/try: a def, class, assignment or import of the name, never prose.
+    n = re.escape(name)
+    binding = rf"^\s*(?:(?:async\s+)?def\s+{n}\b|class\s+{n}\b|{n}\s*(?::[^=\n]*)?=(?!=)|(?:from\s+\S+\s+)?import\s+.*\b{n}\b)"
+    return re.search(binding, _source(module_path), re.M) is not None
 
 
 @functools.cache
@@ -458,7 +477,7 @@ def verify() -> int:
             text = path.read_text()
         except UnicodeDecodeError:
             continue
-        for m in old_dotted.finditer(text if path != MOVE_RECORD else ""):
+        for m in old_dotted.finditer(text if path not in OLD_NAMES_ON_PURPOSE else ""):
             if not _module_file(canonical(m.group(0))):
                 problems.append(f"{path.relative_to(REPO)}: stale {m.group(0)}")
         if path.suffix != ".py":
@@ -507,10 +526,14 @@ def verify() -> int:
                     break
             else:
                 problems.append(f"{path.relative_to(REPO)}: unresolved string {m.group(1)}")
-    for line in sorted(set(problems)):
+    known = {p for p in set(problems) if re.sub(r":\d+: ", ": ", p) in KNOWN_FINDINGS}
+    new = sorted(set(problems) - known)
+    for line in sorted(known):
+        print(f"known on dev before the move: {line}")
+    for line in new:
         print(line)
-    print(f"{len(set(problems))} problems")
-    return 1 if problems else 0
+    print(f"{len(new)} problems ({len(known)} known from before the move)")
+    return 1 if new else 0
 
 
 def main() -> int:

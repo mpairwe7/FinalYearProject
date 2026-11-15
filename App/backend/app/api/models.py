@@ -1271,7 +1271,7 @@ class CFRelayChatRequest(BaseModel):
 
     ``model_slot`` names a slot in ``routing.CHAT_MODEL_SLOTS``
     (primary/fallback/fallback2 — the same cloud-primary chain this
-    deployment already trusts, see service._llm_cloud_fallback), never a raw
+    deployment already trusts, see pipeline._llm_cloud_fallback), never a raw
     model string. Unlike the embed relay this endpoint genuinely needs to
     select between a few different models, so it can't just drop the field
     the way CFRelayEmbedRequest does — but a ``str`` field checked in a

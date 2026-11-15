@@ -6,7 +6,7 @@ collection, so without this leg a question that shares no word with the right
 passage finds nothing; with it, BM25 and this dense leg are fused by RRF.
 
 The model files are pinned by revision and SHA-256. CI downloads and verifies
-them once, embeds the corpus with them (``pgvector_dense build-artifact``) and
+them once, embeds the corpus with them (``python -m app.vectorstore.vector_db build-artifact``) and
 bakes both into the image, so the Space embeds queries with the very files that
 embedded the passages. A different file would put queries in another vector
 space and return confident nonsense, so :func:`verify_model_files` refuses one.

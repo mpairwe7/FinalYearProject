@@ -1,12 +1,12 @@
 """Turn-scoped context: who and what this chat turn is about (ADR-0031, G484).
 
-These lived in ``rag/pipeline.py``, the 15,000-line orchestrator. So the security
+These lived in ``service.py`` (now ``rag/pipeline.py``), the 15,000-line orchestrator. So the security
 layer (``guardrails.OutputGuard.redact_pii``), the evaluator and the empathy
 tool each imported the orchestrator to read one value. The lowest layer of the
 system depended on the highest, and a failed import there fell back silently,
 which in redaction meant the taxpayer's own identifiers were masked. This
 module is a leaf: it imports nothing from the app, so anything may read turn
-context without reaching up. ``service`` re-exports the same objects under the
+context without reaching up. ``pipeline`` re-exports the same objects under the
 same names, so existing callers keep working.
 
 Each value is a :class:`contextvars.ContextVar`, scoped to the turn's task.
