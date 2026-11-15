@@ -14,7 +14,7 @@ from datetime import date
 
 import pytest
 
-from app.rag import generator
+from app.rag import prompt_builder
 from app import web_research as wr
 from app.web_search_providers import RawResult, parse_ddg_html
 
@@ -117,7 +117,7 @@ class TestTrustBoundary:
     def test_passage_headers_state_authority_evidence_and_age(self):
         hit = _research(COMMENTARY).web_hits[0]
 
-        header = generator._passage_header(1, hit)
+        header = prompt_builder.passage_header(1, hit)
 
         assert "Live web retrieved" in header
         assert "Authority: commentary" in header
@@ -325,7 +325,7 @@ class TestRecencyLabelling:
 
         assert outcome.status == wr.LIVE_STALE_ONLY
         assert outcome.disclosure == wr.LIVE_DISCLOSURES[wr.LIVE_STALE_ONLY]
-        assert "May be out of date" in generator._passage_header(1, outcome.web_hits[0])
+        assert "May be out of date" in prompt_builder.passage_header(1, outcome.web_hits[0])
 
 
 class TestDestinationCheck:

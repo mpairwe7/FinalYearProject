@@ -5,7 +5,8 @@ from __future__ import annotations
 
 import unittest
 
-from app.rag.generator import SYSTEM_PROMPT, _build_messages, _build_tool_messages
+from app.rag.generator import _build_messages, _build_tool_messages
+from app.rag.prompt_builder import SYSTEM_PROMPT
 
 
 class ToneHintMessageTests(unittest.TestCase):

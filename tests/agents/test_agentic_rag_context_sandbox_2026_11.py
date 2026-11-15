@@ -299,6 +299,8 @@ def _importers_of_pipeline() -> dict[str, set[str]]:
 _PIPELINE_IMPORTERS = {
     "main.py", "chat_ws_v2.py", "voice_stream.py", "voice_stream_v2.py", "receptionist/brain.py",
     "officer_chat.py", "chat_title.py",
+    # The HTTP routers carved out of main.py (ADR-0056) and the dependency that hands them the model.
+    "api/deps.py", "api/rag.py", "api/health.py", "api/documents.py",
 }
 #: The modules G486 extracted from the orchestrator. Each is shared by the
 #: orchestrator and the graph, so none may reach back up into either.

@@ -1787,7 +1787,7 @@ def _system_prompt_shingles() -> frozenset[tuple[str, ...]]:
     cannot be imported; the signature phrases still apply.
     """
     try:
-        from .rag.generator import CLOUD_SYSTEM_PROMPT, SYSTEM_PROMPT
+        from .rag.prompt_builder import CLOUD_SYSTEM_PROMPT, SYSTEM_PROMPT
     except Exception:  # pragma: no cover - import guard for partial installs
         logger.debug("System prompt unavailable for leakage fingerprint", exc_info=True)
         return frozenset()
