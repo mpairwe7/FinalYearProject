@@ -1150,7 +1150,13 @@ _ESCALATION_REUSED_OFF_DUTY_MESSAGE = (
 # One sentence for every route into the queue that cannot reach it (G627).
 _ESCALATION_QUEUE_OFF_MESSAGE = ESCALATION_NOT_QUEUED_REPLY
 
-from .api.deps import experiment_log_fields, get_model, get_speech_model, require_admin_access, require_ops_key
+from .api.deps import (
+    experiment_log_fields,
+    get_model,
+    get_speech_model,
+    require_admin_access,
+    require_ops_key,
+)
 from .middleware.error_handler import http_exception_with_challenge
 from .middleware.rate_limiter import CHAT_POLL_RATE_LIMIT, EXPORT_RATE_LIMIT, RATE_LIMIT, limiter
 from .api import documents as documents_api, health as health_api, rag as rag_api

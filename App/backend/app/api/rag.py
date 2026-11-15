@@ -22,7 +22,14 @@ from ..middleware.rate_limiter import RATE_LIMIT, limiter
 from ..rag.pipeline import ChatModel
 from ..rag.query import gate_locale
 from .deps import experiment_log_fields, get_model
-from .models import ChatRequest, ChatResponse, ChatTitleRequest, ChatTitleResponse, FAQResponse, TagListResponse
+from .models import (
+    ChatRequest,
+    ChatResponse,
+    ChatTitleRequest,
+    ChatTitleResponse,
+    FAQResponse,
+    TagListResponse,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
