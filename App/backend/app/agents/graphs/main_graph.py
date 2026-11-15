@@ -533,6 +533,20 @@ _SLOT_CANDIDATE_KEYS: dict[str, tuple[str, ...]] = {
 _IDENTITY_SLOTS = frozenset({"taxpayer_id", "tin", "nin", "brn"})
 
 
+def _remembered_amount(value: object) -> object:
+    """A remembered money value as a number when it names one UGX amount, else as remembered.
+
+    The rule a figure in the question follows: only an unambiguous amount binds, and a
+    foreign-currency figure is never read as shillings.
+    """
+    from ...case_facts import extract_all_money
+
+    figures = extract_all_money(str(value))
+    if len(figures) == 1 and figures[0][0].currency == "UGX" and figures[0][0].amount > 0:
+        return float(figures[0][0].amount)
+    return value
+
+
 def _bind_from_memory_or_dag(
     tool_name: str,
     required: list[str],
@@ -583,13 +597,7 @@ def _bind_from_memory_or_dag(
                 for cand in _SLOT_CANDIDATE_KEYS.get(req, (req,)):
                     val = fact_map.get(cand.lower())
                     if val not in (None, ""):
-                        try:
-                            from ...tax.money import parse_money_amount
-
-                            parsed = parse_money_amount(str(val))
-                            params[req] = parsed if parsed is not None and parsed > 0 else val
-                        except Exception:
-                            params[req] = val
+                        params[req] = val if req in _IDENTITY_SLOTS else _remembered_amount(val)
                         bound_source = bound_source or "semantic_memory"
                         break
 
