@@ -41,8 +41,13 @@ the existing `(?<![a-zA-Z0-9_])` in `mt.py`.
   closing tag, or the end of the text). Each returns what the regex returned.
 - **Shape 3: start only where a match can start.** Digit runs come from `\d+`, which always
   matches, and the rest is checked by hand. `_join_decimal_gaps`, `_join_digit_bracket_glitches`
-  and `_strip_page_footers` do this. Where the old regex is still used, `.match(text, at)` runs it
-  at those starts only: `_amount_matches` and `_prefix_first_number`.
+  and `_strip_page_footers` do this. Where the old regex is still used, it runs `\A`-anchored on a
+  slice from each start to one character past the furthest a match can reach:
+  `entailment._amount_figures` and `mt._prefix_first_number`. `pattern.match(text, pos)` is not
+  enough, because CodeQL models it as a search from any position.
+- **A branch that only answers yes or no can leave the regex.** "how is ... calculated" in
+  `_RATE_ASK_RE` became `calculator_router._asks_how_calculated`: the keyword must sit on the line
+  where the words after "how is" start, found from precomputed keyword and newline positions.
 - **Logs:** user values reach a log line through `config.flags._log_safe`, as elsewhere.
 
 Each replacement returns the same output as the regex it replaces. That was checked on
@@ -51,8 +56,8 @@ test trees, and fuzz.
 
 ## Consequences
 
-- A new regex over chat text needs one of these shapes, or CodeQL fails the PR. A lookbehind
-  or lookahead does not satisfy CodeQL.
+- A new regex over chat text needs one of these shapes, or CodeQL fails the PR. A lookbehind,
+  a lookahead or a `pos` argument does not satisfy CodeQL; `\A` on a slice does.
 - `app/linear_text.py` holds scans that replace a regex exactly. It is not a place for general
   text helpers.
 - The scans are longer than the regexes they replace. Each docstring names its regex, and

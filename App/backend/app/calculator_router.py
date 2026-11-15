@@ -17,6 +17,7 @@ Production rules encoded here:
 
 from __future__ import annotations
 
+import bisect
 import json
 import logging
 import re
@@ -1598,7 +1599,6 @@ _RATE_ASK_RE = re.compile(
     r"\b(what(?:'s|\s+is|\s+are)?|how\s+many|current|how\s+much\s+is|how\s+is\b.*\b(?:calculated|computed)|how\s+much\s+tax|how\s+much\s+cut|tell\s+me|kiwango|o?muwendo|e?bitundu|asilimia|ssente\s+mmeka|kiasi\s+gani)\b[^?]*\b(percentages?|ratio|rates?|thresholds?|limits?|bands?|exempt(?:ion|ions)?|relief|penalt(?:y|ies)?|fines?|allowance|days?|due|calculated|computed|kiwango|viwango|o?muwendo|e?kkomo|kikomo|e?bitundu|asilimia|pay|charged|deducted|cut|take|adhabu|okubonerezebwa|siku|nnaku|tarehe)\b"
     r"|\b(rates?|thresholds?|limits?|bands?|exempt(?:ion|ions)?|relief|penalt(?:y|ies)?|fines?|allowance|days?|due|kiwango|viwango|o?muwendo|e?kkomo|kikomo|adhabu|okubonerezebwa|siku|nnaku|tarehe)\s+(of|for|kya|cha|ku|kwa|kye|gwa|bwa|eri)\b"
     r"|\b(e?bitundu\s+bimeka|asilimia\s+ngapi|o?muwendo\s+gwa\s+ssente|ssente\s+mmeka|kiasi\s+gani|nnaku\s+mmeka|siku\s+ngapi|o?muwendo\b.*\bguli\s+gutya|gwa\s+bimeka|gw['’]ameka|y['’]emeka|kiwango\s+ni\s+kipi|kodi\s+ni\s+asilimia\s+ngapi|e?bicweka\s+bingahi|omushoro\b.*\bshangahi|wel\s+mucoro\b.*\badi|mucoro\b.*\btye\s+adi)\b"
-    r"|\bhow\s+is\s+(?:\S.*)?(?:calculated|computed|taxed)\b"
     r"|\bhow\s+much\s+(?:tax|cut)\b[^?]*\b(on|for|pay|charged|deducted|take)\b"
     r"|\b(?:can|is|are|may)\b[^?]*\b(?:import\b|offset\b|claim\b|clear|cleared|exempt|allowed|duty[-\s]?free|concession)\b"
     r"|\b(?:customs\s+valuation|valuation\s+method|hierarchy|hierarchical|sequential|method\s+[1-6]|fallback\s+method|transaction\s+value)\b"
@@ -1606,6 +1606,34 @@ _RATE_ASK_RE = re.compile(
     r"|\b(?:ushuru\s+gani|kodi\s+gani|musolo\s+ki|misolo\s+ki|sola|solar|enjuba|basonyiyibwa|gwa\s+mmeka|abaliko\s+obulemu|walemavu|ulemavu|lunaku\s+ki|ku\s+lunaku\s+ki|zisasula\s+zitya|zisasulwa\s+zitya|gusasulwa\s+gutya|zinalipwaje|zinalipwa\s+vipi|e?ssaawa\s+mmeka|masaa\s+mangapi|prn|unawalazimu|kiwango\s+ki|ku\s+kiwango\s+ki)\b",
     re.IGNORECASE,
 )
+
+_HOW_IS_RE = re.compile(r"\bhow\s+is", re.IGNORECASE)
+_HOW_KEYWORD_RE = re.compile(r"(?:calculated|computed|taxed)\b", re.IGNORECASE)
+
+
+def _asks_how_calculated(text: str) -> bool:
+    """``re.search(r"\\bhow\\s+is\\s+.*(?:calculated|computed|taxed)\\b", text, re.I)``, without
+    the backtracking: the keyword must sit on the line where the words after "how is" start.
+    """
+    asks = list(_HOW_IS_RE.finditer(text))
+    keywords = [m.start() for m in _HOW_KEYWORD_RE.finditer(text)] if asks else []
+    if not keywords:
+        return False
+    newlines = [i for i, ch in enumerate(text) if ch == "\n"]
+    n = len(text)
+    for ask in asks:
+        start = ask.end()
+        if start >= n or not text[start].isspace():
+            continue
+        while start < n and text[start].isspace():
+            start += 1
+        line = bisect.bisect_left(newlines, start)
+        line_end = newlines[line] if line < len(newlines) else n
+        first = bisect.bisect_left(keywords, start)
+        if first < len(keywords) and keywords[first] < line_end:
+            return True
+    return False
+
 
 # A rate table answers for a bounded period. A calendar year in a rate
 # question is therefore meaningful even though it is not, on its own, an
@@ -2183,7 +2211,7 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
     short_ask = len(text.split()) <= 8 and re.search(
         r"\b(rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?)\b", text, re.IGNORECASE
     )
-    if not (_RATE_ASK_RE.search(text) or short_ask):
+    if not (_RATE_ASK_RE.search(text) or _asks_how_calculated(text) or short_ask):
         # A salary-threshold question names no tax and no "rate"/"threshold",
         # so it fails the gate above while still being a rate-table question.
         if _PAYE_THRESHOLD_ASK_RE.search(text):

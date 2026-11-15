@@ -770,7 +770,7 @@ def restore_missing_citations(source: str, translated: str) -> str:
     return res
 
 
-_NUMBER_AT_RE = re.compile(r"\d+(?:,\d{3})*(?:\.\d+)?\b")
+_NUMBER_AT_RE = re.compile(r"\A\d+(?:,\d{3})*(?:\.\d+)?\b")
 _DIGIT_RUN_RE = re.compile(r"\d+")
 _ASCII_WORD = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
 
@@ -778,14 +778,24 @@ _ASCII_WORD = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ012
 def _prefix_first_number(text: str, prefix: str) -> str:
     """``re.sub(r"(?<![a-zA-Z0-9_])(\\d+(?:,\\d{3})*(?:\\.\\d+)?)\\b", prefix + r"\\1", text, count=1)``.
 
-    Tried only where the lookbehind holds, so no digit run is rescanned from inside.
+    Tried only where the lookbehind holds, on a slice that ends where the number must end, so
+    no digit run is rescanned from inside.
     """
+    n = len(text)
     for run in _DIGIT_RUN_RE.finditer(text):
+        reach = run.end()
+        while reach + 3 < n and text[reach] == "," and text[reach + 1 : reach + 4].isdecimal():
+            reach += 4
+        if reach + 1 < n and text[reach] == "." and text[reach + 1].isdecimal():
+            reach += 1
+            while reach < n and text[reach].isdecimal():
+                reach += 1
         for at in range(run.start(), run.end()):
             if at and text[at - 1] in _ASCII_WORD:
                 continue
-            if (match := _NUMBER_AT_RE.match(text, at)) is not None:
-                return text[:at] + prefix + match.group() + text[match.end() :]
+            # One character past the reach decides the closing \b.
+            if (match := _NUMBER_AT_RE.match(text[at : reach + 1])) is not None:
+                return text[:at] + prefix + match.group() + text[at + match.end() :]
     return text
 
 

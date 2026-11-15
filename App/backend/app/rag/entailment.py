@@ -227,14 +227,16 @@ def _join_decimal_gaps(text: str) -> str:
     return "".join(out)
 
 
-def _amount_matches(text: str) -> list[re.Match[str]]:
-    """``_AMOUNT_RE.finditer(text)``, tried only where a match can start.
+def _amount_figures(text: str) -> list[tuple[str, str | None]]:
+    """``(digits, suffix)`` of each ``_AMOUNT_RE.finditer(text)`` match.
 
-    Unanchored, the pattern restarts inside every digit run and rescans it; a match can only
+    Unanchored, the pattern restarts inside every digit run and rescans it. A match can only
     begin at a digit run's first digit, at the whitespace before it, or at a currency word that
-    ends where that whitespace begins.
+    ends where that whitespace begins; the anchored pattern runs there, on a slice that ends
+    one character past the furthest an amount could reach.
     """
-    found: list[re.Match[str]] = []
+    found: list[tuple[str, str | None]] = []
+    n = len(text)
     taken = previous_run_end = 0
     for run in _DIGIT_RUN_RE.finditer(text):
         # A currency word holds no digit, so it lies after the previous run: each window is new text.
@@ -242,6 +244,19 @@ def _amount_matches(text: str) -> list[re.Match[str]]:
         previous_run_end = run.end()
         if run.start() < taken:
             continue
+        reach = run.end()
+        if run.end() - run.start() <= 3:  # "1,500,000" and "1 500 000"
+            while reach + 3 < n and (text[reach] == "," or text[reach].isspace()) and text[reach + 1 : reach + 4].isdecimal():
+                reach += 4
+        if run.end() + 1 < n and text[run.end()] == "." and text[run.end() + 1].isdecimal():
+            decimal_end = run.end() + 1
+            while decimal_end < n and text[decimal_end].isdecimal():
+                decimal_end += 1
+            reach = max(reach, decimal_end)
+        while reach < n and text[reach].isspace():
+            reach += 1
+        while reach < n and text[reach].isalpha():  # the suffix word
+            reach += 1
         ws = run.start()
         while ws > taken and text[ws - 1].isspace():
             ws -= 1
@@ -250,12 +265,12 @@ def _amount_matches(text: str) -> list[re.Match[str]]:
         if head is not None:
             starts.insert(0, head.start())
         for at in starts:
-            if (match := _AMOUNT_RE.match(text, at)) is not None:
-                found.append(match)
-                taken = match.end()
+            # One character past the reach decides the closing \b.
+            if (match := _AMOUNT_AT_RE.match(text[at : reach + 1])) is not None:
+                found.append((match.group(1), match.group(2)))
+                taken = at + match.end()
                 break
     return found
-
 
 # A money amount: comma- or space-grouped ("1,500,000"), plain ("335000"), or
 # suffixed ("1.5m", "300 million").  Percentages are excluded by the caller.
@@ -266,6 +281,7 @@ _AMOUNT_RE = re.compile(
     re.IGNORECASE,
 )
 #: The optional currency of ``_AMOUNT_RE``, ending where the search window ends.
+_AMOUNT_AT_RE = re.compile(r"\A(?:" + _AMOUNT_RE.pattern + ")", re.IGNORECASE)
 _CURRENCY_BEFORE_RE = re.compile(_AMOUNT_RE.pattern.split(")?", 1)[0] + r")\Z", re.IGNORECASE)
 _AMOUNT_SUFFIX = {
     "k": 1_000,
@@ -470,13 +486,13 @@ def canonical_amounts(text: str) -> set[float]:
     )
 
     # 2. Standard suffixes (e.g. "150m", "150 million", "UGX 150,000,000") and plain numbers
-    for match in _amount_matches(remainder):
-        digits = match.group(1).replace(",", "").replace(" ", "")
+    for figure, suffix in _amount_figures(remainder):
+        digits = figure.replace(",", "").replace(" ", "")
         try:
             value = float(digits)
         except ValueError:
             continue
-        value *= _AMOUNT_SUFFIX.get((match.group(2) or "").lower(), 1)
+        value *= _AMOUNT_SUFFIX.get((suffix or "").lower(), 1)
         amounts.add(value)
 
     # 3. Small cardinal integers across English, Luganda, and Swahili
