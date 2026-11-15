@@ -366,7 +366,7 @@ the best result.
 
 A TIN or PRN the taxpayer typed in the message is shown back as written, on every path —
 REST, the SSE stream and the WebSocket stream (`guardrails.user_stated_identifiers`, set for the
-whole turn by `service.run_chat_turn`). Any other identifier, including another TIN in the same
+whole turn by `pipeline.run_chat_turn`). Any other identifier, including another TIN in the same
 record, is still redacted.
 
 **Single-host gateway.** `app.tools.plugins` must not put the `app` package directory on
