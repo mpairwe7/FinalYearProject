@@ -34,8 +34,23 @@ def test_a_remembered_amount_binds_as_a_number(monkeypatch: pytest.MonkeyPatch, 
     assert _bind(monkeypatch, {"salary": remembered}, ["monthly_salary"]) == {"monthly_salary": expected}
 
 
-@pytest.mark.parametrize("remembered", ["USD 5,000", "$5,000", "salary 1,200,000 and allowance 300,000"])
-def test_a_foreign_or_ambiguous_amount_is_never_read_as_shillings(monkeypatch: pytest.MonkeyPatch, remembered: str) -> None:
+@pytest.mark.parametrize(
+    "remembered",
+    [
+        "USD 5,000",
+        "$5,000",
+        "salary 1,200,000 and allowance 300,000",
+        "1-2 million",
+        # The parser drops a sign: each of these would otherwise bind as 1,200,000.
+        "-1,200,000",
+        "\u22121,200,000",
+        "(1,200,000)",
+        "UGX -1,200,000",
+        "(UGX 1,200,000)",
+        "salary: -1,200,000",
+    ],
+)
+def test_a_foreign_negative_or_ambiguous_amount_is_never_read_as_shillings(monkeypatch: pytest.MonkeyPatch, remembered: str) -> None:
     assert _bind(monkeypatch, {"salary": remembered}, ["monthly_salary"]) == {"monthly_salary": remembered}
 
 

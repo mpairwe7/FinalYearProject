@@ -534,16 +534,22 @@ _IDENTITY_SLOTS = frozenset({"taxpayer_id", "tin", "nin", "brn"})
 
 
 def _remembered_amount(value: object) -> object:
-    """A remembered money value as a number when it names one UGX amount, else as remembered.
+    """A remembered money value as a number when it names one positive UGX amount, else as remembered.
 
     The rule a figure in the question follows: only an unambiguous amount binds, and a
     foreign-currency figure is never read as shillings.
     """
     from ...case_facts import extract_all_money
 
-    figures = extract_all_money(str(value))
-    if len(figures) == 1 and figures[0][0].currency == "UGX" and figures[0][0].amount > 0:
-        return float(figures[0][0].amount)
+    text = str(value)
+    figures = extract_all_money(text)
+    if len(figures) != 1:
+        return value
+    money, start, _ = figures[0]
+    # The parser drops a sign: "-1,200,000", "(1,200,000)" and "1-2 million" each read as positive.
+    signed = text[:start].rstrip()[-1:] in ("-", "\u2212", "(")
+    if money.currency == "UGX" and money.amount > 0 and not signed:
+        return float(money.amount)
     return value
 
 
