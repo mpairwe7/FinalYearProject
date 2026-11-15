@@ -5,6 +5,7 @@ SUBSTITUTIONS here, then rerun it on the parent commit to reproduce the change.
 
     python3 App/backend/scripts/carve_main_routes.py          # dry run: what moves, what each module imports
     python3 App/backend/scripts/carve_main_routes.py --apply  # write the modules and the new main.py
+    python3 App/backend/scripts/carve_main_routes.py --verify # tests that patch moved code through main
 """
 
 from __future__ import annotations
@@ -393,10 +394,52 @@ class Carve:
         return out
 
 
+def patches_through_main() -> list[str]:
+    """Test patches of ``main.<name>`` where carved code reads <name>: they no longer reach it."""
+    import subprocess
+
+    repo = APP.parents[2]
+    reads: dict[str, set[str]] = {}
+    for module in PLAN:
+        for node in ast.walk(ast.parse((APP / module).read_text())):
+            if isinstance(node, ast.Name):
+                reads.setdefault(node.id, set()).add(module)
+    main_reads = used_names(ast.parse(MAIN.read_text()).body)
+
+    def is_main(node: ast.AST) -> bool:
+        return (isinstance(node, ast.Name) and node.id in {"main", "main_mod", "main_module"}) or (
+            isinstance(node, ast.Attribute) and node.attr == "main" and isinstance(node.value, ast.Name))
+
+    files = subprocess.run(["git", "ls-files", "App/backend/tests/*.py", "tests/*.py"], cwd=repo,
+                           capture_output=True, text=True, check=True).stdout.split()
+    found = []
+    for rel in files:
+        for node in ast.walk(ast.parse((repo / rel).read_text())):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+            name = None
+            if func in ("object", "setattr") and len(node.args) >= 2 and is_main(node.args[0]) \
+                    and isinstance(node.args[1], ast.Constant):
+                name = node.args[1].value
+            elif func in ("patch", "setattr") and node.args and isinstance(node.args[0], ast.Constant) \
+                    and str(node.args[0].value).startswith(("app.main.", "App.backend.app.main.")):
+                name = node.args[0].value.split("main.", 1)[1].split(".")[0]
+            if name in reads:
+                also = "main.py reads it too" if name in main_reads else "only carved code reads it"
+                found.append(f"{rel}:{node.lineno}: main.{name} is read by {', '.join(sorted(reads[name]))} ({also})")
+    return found
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--apply", action="store_true", help="write the files")
+    parser.add_argument("--verify", action="store_true", help="list test patches through main that moved code reads")
     args = parser.parse_args()
+    if args.verify:
+        found = patches_through_main()
+        print("\n".join(found) or "no test patches moved code through main")
+        return 0
     carve = Carve()
     out = carve.build()
     for module, stmts in carve.moved.items():
