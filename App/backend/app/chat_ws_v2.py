@@ -8,7 +8,7 @@ connection per turn.
 This module ships **Phase 0 only**: lifecycle + protocol negotiation.
 The handler accepts a session, returns ``session_ready``, answers
 ``ping`` with ``pong``, echoes a stub ``response.error`` to any
-``response.create`` until later phases wire in :func:`service.run_chat_turn`,
+``response.create`` until later phases wire in :func:`pipeline.run_chat_turn`,
 and closes cleanly on ``session_end`` / disconnect.
 
 Wire protocol (full spec in ``docs/ws_chat_protocol.md``)::
