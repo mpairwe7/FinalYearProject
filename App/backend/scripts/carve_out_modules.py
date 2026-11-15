@@ -1,11 +1,14 @@
-"""Carve the chat, documents and health routes and their middleware out of main.py (ADR-0056, step 2).
+"""Carve named top-level code out of a module into new modules (ADR-0056, step 2).
 
-The diff this writes is the whole carve-out: review PLAN, RENAMES and
-SUBSTITUTIONS here, then rerun it on the parent commit to reproduce the change.
+Two carve-outs, each a Spec below: ``main`` moves the chat, documents and health
+routes and their middleware out of main.py; ``prompts`` moves the prompt text and
+passage formatting out of rag/generator.py. The diff a spec writes is the whole
+carve-out: review its plan, renames and substitutions, then rerun it on the parent
+commit to reproduce the change.
 
-    python3 App/backend/scripts/carve_main_routes.py          # dry run: what moves, what each module imports
-    python3 App/backend/scripts/carve_main_routes.py --apply  # write the modules and the new main.py
-    python3 App/backend/scripts/carve_main_routes.py --verify # tests that patch moved code through main
+    python3 App/backend/scripts/carve_out_modules.py --spec main            # dry run
+    python3 App/backend/scripts/carve_out_modules.py --spec main --apply    # write the files
+    python3 App/backend/scripts/carve_out_modules.py --verify               # tests that patch moved code through main
 """
 
 from __future__ import annotations
@@ -14,13 +17,29 @@ import argparse
 import ast
 import re
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 APP = Path(__file__).resolve().parents[1] / "app"
 MAIN = APP / "main.py"
 
-# New module -> (docstring, top-level statements of main.py to move). A name moves the def or
-# assignment that binds it; "if:<name>" moves the top-level `if` whose test reads <name>.
+
+
+@dataclass(frozen=True)
+class Spec:
+    source: str  # app-relative path of the module being carved
+    # New module -> (docstring, top-level statements to move). A name moves the def or assignment
+    # that binds it; "if:<name>" moves the top-level `if` whose test reads <name>.
+    plan: dict[str, tuple[str, list[str]]]
+    renames: dict[str, str]  # a name imported across modules loses its leading underscore
+    substitutions: list[tuple[str, str, str]] = field(default_factory=list)  # exact edits: (file, old, new)
+    extra_imports: dict[str, list[str]] = field(default_factory=dict)
+    new_files: dict[str, str] = field(default_factory=dict)
+    routers: tuple[str, ...] = ()
+    include_after: str | None = None  # the source line after which the routers are included
+    imports_after_header: bool = False  # import back after the source's imports, not at the first moved line
+
+
 PLAN: dict[str, tuple[str, list[str]]] = {
     "middleware/rate_limiter.py": (
         "Rate limiting: the shared slowapi limiter and the per-route ceilings.",
@@ -100,9 +119,37 @@ SUBSTITUTIONS = [
     ("api/rag.py", "await chat_stream_ws(websocket, app)", "await chat_stream_ws(websocket, websocket.app)"),
 ]
 EXTRA_IMPORTS = {
-    "main.py": ["from .config.settings import API_DESCRIPTION, API_TITLE, API_VERSION"],
+    "main.py": [
+        "from .api import documents as documents_api, health as health_api, rag as rag_api",
+        "from .config.settings import API_DESCRIPTION, API_TITLE, API_VERSION",
+    ],
     "api/health.py": ["from ..config.settings import API_VERSION"],
 }
+
+MAIN_SPEC = Spec(
+    source="main.py", plan=PLAN, renames=RENAMES, substitutions=SUBSTITUTIONS, extra_imports=EXTRA_IMPORTS,
+    new_files={"config/settings.py": SETTINGS}, routers=ROUTERS, include_after="app.include_router(quality_router)\n",
+)
+
+PROMPTS_SPEC = Spec(
+    source="rag/generator.py",
+    plan={
+        "rag/prompt_builder.py": (
+            "Build prompts: the system prompts, the answer contracts, and how each retrieved passage is labelled and fenced.",
+            ["SYSTEM_PROMPT", "CLOUD_SYSTEM_PROMPT", "STRUCTURED_JSON_SUFFIX", "COMPLEX_ANSWER_CONTRACT", "_passage_marker",
+             "_trim_to_tokens", "_FEW_SHOT_PROMPTS_BY_LOCALE", "_HEADER_DATE", "_passage_header", "_spotlight_passage",
+             "_fence_system_aside", "TOOL_USE_PROMPT_SUFFIX"],
+        ),
+    },
+    renames={
+        "_passage_header": "passage_header",
+        "_spotlight_passage": "spotlight_passage",
+        "_fence_system_aside": "fence_system_aside",
+    },
+    imports_after_header=True,
+)
+
+SPECS = {"main": MAIN_SPEC, "prompts": PROMPTS_SPEC}
 
 
 def package(module_path: str) -> str:
@@ -176,8 +223,11 @@ def global_uses(nodes: list[ast.stmt]) -> set[str]:
 
 
 class Carve:
-    def __init__(self) -> None:
-        self.source = MAIN.read_text()
+    def __init__(self, spec: Spec) -> None:
+        self.spec = spec
+        self.path = APP / spec.source
+        self.pkg = package(spec.source)
+        self.source = self.path.read_text()
         self.lines = self.source.splitlines(keepends=True)
         self.tree = ast.parse(self.source)
         self.errors: list[str] = []
@@ -195,12 +245,12 @@ class Carve:
                     self.index.setdefault(f"if:{name}", stmt)
         self.home: dict[str, str] = {}  # moved name -> new module path
         self.moved: dict[str, list[ast.stmt]] = {}
-        for module, (_, keys) in PLAN.items():
+        for module, (_, keys) in spec.plan.items():
             stmts = []
             for key in keys:
                 stmt = self.index.get(key)
                 if stmt is None:
-                    self.errors.append(f"{module}: main.py has no top-level {key}")
+                    self.errors.append(f"{module}: {spec.source} has no top-level {key}")
                     continue
                 stmts.append(stmt)
                 for name in bound_names(stmt):
@@ -214,20 +264,25 @@ class Carve:
             start -= 1
         return start, stmt.end_lineno
 
-    def segment(self, stmt: ast.stmt, pkg: str = "app") -> str:
+    def absolute(self, level: int, module: str | None, where: str) -> str:
+        """The absolute module a relative import in the source names."""
+        base = self.pkg.split(".")
+        if level - 1 >= len(base):
+            self.errors.append(f"{where}: relative import above the app package")
+        base = base[: len(base) - (level - 1)]
+        return ".".join([*base, *(module.split(".") if module else [])])
+
+    def segment(self, stmt: ast.stmt, pkg: str) -> str:
         """The statement's source, with relative imports inside it re-spelled from ``pkg``."""
         start, end = self.span(stmt)
         lines = self.lines[start - 1:end]
         for node in ast.walk(stmt):
             if isinstance(node, ast.ImportFrom) and node.level:
-                base = ["app"][: max(0, 1 - (node.level - 1))]
-                if node.level > 1:
-                    self.errors.append(f"main.py:{node.lineno}: relative import above the app package")
-                target = ".".join([*base, *(node.module.split(".") if node.module else [])])
+                target = self.absolute(node.level, node.module, f"{self.spec.source}:{node.lineno}")
                 i = node.lineno - start
                 m = re.compile(r"from\s+(\.+[\w.]*)\s*import").match(lines[i], node.col_offset)
                 if not m:
-                    self.errors.append(f"main.py:{node.lineno}: cannot re-spell this import")
+                    self.errors.append(f"{self.spec.source}:{node.lineno}: cannot re-spell this import")
                     continue
                 lines[i] = lines[i][:m.start(1)] + relative(target, pkg) + lines[i][m.end(1):]
         return "".join(lines)
@@ -247,21 +302,18 @@ class Carve:
                 continue  # decorators become @router; SUBSTITUTIONS handle the rest, and the check below proves it
             elif name in self.home:
                 target = dotted(self.home[name])
-                from_lines.setdefault(relative(target, pkg), []).append(RENAMES.get(name, name))
+                from_lines.setdefault(relative(target, pkg), []).append(self.spec.renames.get(name, name))
             elif name in self.imports:
                 stmt, alias = self.imports[name]
                 if isinstance(stmt, ast.Import):
                     plain.append(f"import {alias.name}" + (f" as {alias.asname}" if alias.asname else ""))
                 else:
                     src = stmt.module or ""
-                    spelled = relative(".".join(["app", *src.split(".")]) if src else "app", pkg) \
-                        if stmt.level else src
-                    if stmt.level and stmt.level > 1:
-                        self.errors.append(f"{module}: deep relative import of {name} needs a hand check")
+                    spelled = relative(self.absolute(stmt.level, stmt.module, module), pkg) if stmt.level else src
                     from_lines.setdefault(spelled, []).append(
                         alias.name + (f" as {alias.asname}" if alias.asname else ""))
             elif name in self.index:
-                self.errors.append(f"{module}: needs {name}, which stays in main.py")
+                self.errors.append(f"{module}: needs {name}, which stays in {self.spec.source}")
         lines = sorted(set(plain)) + [
             f"from {src} import {', '.join(sorted(set(names)))}" for src, names in sorted(from_lines.items())
         ]
@@ -269,9 +321,9 @@ class Carve:
 
     def module_text(self, module: str) -> str:
         imports, logger = self.needs(module)
-        if module in ROUTERS:
+        if module in self.spec.routers:
             imports.append("from fastapi import APIRouter")
-        imports += EXTRA_IMPORTS.get(module, [])
+        imports += self.spec.extra_imports.get(module, [])
         if logger:
             imports.append("import logging")
         merged: dict[str, set[str]] = {}
@@ -290,11 +342,11 @@ class Carve:
         stdlib = sorted((i for i in imports if i.split()[1].split(".")[0] in sys.stdlib_module_names), key=order)
         third = sorted((i for i in imports if i not in stdlib and not i.split()[1].startswith(".")), key=order)
         local = sorted((i for i in imports if i.split()[1].startswith(".")), key=order)
-        head = f'"""{PLAN[module][0]}"""\n\nfrom __future__ import annotations\n\n'
+        head = f'"""{self.spec.plan[module][0]}"""\n\nfrom __future__ import annotations\n\n'
         head += "\n\n".join("\n".join(group) for group in (stdlib, third, local) if group) + "\n\n"
         if logger:
             head += "logger = logging.getLogger(__name__)\n"
-        if module in ROUTERS:
+        if module in self.spec.routers:
             head += "router = APIRouter()\n"
         definition = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
         parts: list[str] = []
@@ -312,32 +364,34 @@ class Carve:
             previous = stmt
         return head + "".join(parts)
 
-    def main_text(self) -> str:
+    def source_text(self) -> str:
         spans = sorted(self.span(s) for stmts in self.moved.values() for s in stmts)
         first = spans[0][0]
+        if self.spec.imports_after_header:
+            first = max(s.end_lineno for s in self.tree.body if isinstance(s, (ast.Import, ast.ImportFrom))
+                        and s.end_lineno < spans[0][0]) + 1
         keep = [line for i, line in enumerate(self.lines, 1) if not any(a <= i <= b for a, b in spans)]
         remaining = ast.parse("".join(keep))
         still = global_uses(remaining.body)
         back: dict[str, list[str]] = {}
         for name, module in self.home.items():
             if name in still:
-                back.setdefault(module, []).append(RENAMES.get(name, name))
-        block = [f"from .{Path(m).with_suffix('').as_posix().replace('/', '.')} import {', '.join(sorted(n))}"
-                 for m, n in sorted(back.items())]
-        block.append("from .api import documents as documents_api, health as health_api, rag as rag_api")
-        block += EXTRA_IMPORTS["main.py"]
+                back.setdefault(module, []).append(self.spec.renames.get(name, name))
+        block = [f"from {relative(dotted(m), self.pkg)} import {', '.join(sorted(n))}" for m, n in sorted(back.items())]
+        block += self.spec.extra_imports.get(self.spec.source, [])
         insert_at = sum(1 for i in range(1, first) if not any(a <= i <= b for a, b in spans))
         keep[insert_at:insert_at] = [line + "\n" for line in block] + ["\n"]
         text = self.drop_orphaned_imports("".join(keep))
-        anchor = "app.include_router(quality_router)\n"
-        if text.count(anchor) != 1:
-            self.errors.append("main.py: the include_router anchor moved")
-        text = text.replace(anchor, anchor + "".join(
-            f"app.include_router({r}.router)\n" for r in ("health_api", "rag_api", "documents_api")))
+        anchor = self.spec.include_after
+        if anchor is not None:
+            if text.count(anchor) != 1:
+                self.errors.append(f"{self.spec.source}: the include_router anchor moved")
+            text = text.replace(anchor, anchor + "".join(
+                f"app.include_router({Path(r).stem}_api.router)\n" for r in self.spec.routers))
         return text
 
     def drop_orphaned_imports(self, text: str) -> str:
-        """Remove main.py imports that only the moved code read; leave imports that were already unused."""
+        """Remove source imports that only the moved code read; leave imports that were already unused."""
         before = global_uses(self.tree.body)
         tree = ast.parse(text)
         after = global_uses(tree.body)
@@ -355,7 +409,7 @@ class Carve:
                 if kept:
                     drop_lines |= {a.lineno for a in gone}
                     if any(a.lineno == b.lineno for a in gone for b in kept):
-                        self.errors.append(f"main.py:{stmt.lineno}: two names share an import line")
+                        self.errors.append(f"{self.spec.source}:{stmt.lineno}: two names share an import line")
                 else:
                     drop_lines |= set(range(stmt.lineno, stmt.end_lineno + 1))
             elif stmt.end_lineno == stmt.lineno:
@@ -368,26 +422,28 @@ class Carve:
                 else:
                     drop_lines.add(stmt.lineno)
             else:
-                self.errors.append(f"main.py:{stmt.lineno}: import layout needs a hand edit")
+                self.errors.append(f"{self.spec.source}:{stmt.lineno}: import layout needs a hand edit")
         return "".join(rewrites.get(i, line) for i, line in enumerate(lines, 1) if i not in drop_lines)
 
     def build(self) -> dict[Path, str]:
-        out = {APP / m: self.module_text(m) for m in PLAN}
-        out[MAIN] = self.main_text()
-        out[APP / "config/settings.py"] = SETTINGS
+        spec = self.spec
+        out = {APP / m: self.module_text(m) for m in spec.plan}
+        out[self.path] = self.source_text()
+        out.update({APP / rel: text for rel, text in spec.new_files.items()})
+        renames = re.compile(r"\b(" + "|".join(map(re.escape, spec.renames)) + r")\b")
         for path in list(out):
-            out[path] = re.sub(r"\b(" + "|".join(map(re.escape, RENAMES)) + r")\b", lambda m: RENAMES[m.group(1)], out[path])
-        for rel, old, new in SUBSTITUTIONS:
+            out[path] = renames.sub(lambda m: spec.renames[m.group(1)], out[path])
+        for rel, old, new in spec.substitutions:
             text = out[APP / rel]
             if text.count(old) != 1:
                 self.errors.append(f"{rel}: expected one {old!r}, found {text.count(old)}")
             out[APP / rel] = text.replace(old, new)
-        tidy = re.sub(r"\n{4,}", "\n\n\n", out[MAIN])  # removed code leaves runs of blank lines
-        if ast.dump(ast.parse(tidy)) != ast.dump(ast.parse(out[MAIN])):
-            self.errors.append("main.py: collapsing blank lines would change the program")
+        tidy = re.sub(r"\n{4,}", "\n\n\n", out[self.path])  # removed code leaves runs of blank lines
+        if ast.dump(ast.parse(tidy)) != ast.dump(ast.parse(out[self.path])):
+            self.errors.append(f"{spec.source}: collapsing blank lines would change the program")
         else:
-            out[MAIN] = tidy
-        for module in ROUTERS:
+            out[self.path] = tidy
+        for module in spec.routers:
             tree = ast.parse(out[APP / module])
             if "app" in used_names(tree.body):
                 self.errors.append(f"{module}: still reads the global app")
@@ -400,7 +456,7 @@ def patches_through_main() -> list[str]:
 
     repo = APP.parents[2]
     reads: dict[str, set[str]] = {}
-    for module in PLAN:
+    for module in MAIN_SPEC.plan:
         for node in ast.walk(ast.parse((APP / module).read_text())):
             if isinstance(node, ast.Name):
                 reads.setdefault(node.id, set()).add(module)
@@ -433,6 +489,7 @@ def patches_through_main() -> list[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--spec", choices=sorted(SPECS), default="main", help="which carve-out to run")
     parser.add_argument("--apply", action="store_true", help="write the files")
     parser.add_argument("--verify", action="store_true", help="list test patches through main that moved code reads")
     args = parser.parse_args()
@@ -440,7 +497,7 @@ def main() -> int:
         found = patches_through_main()
         print("\n".join(found) or "no test patches moved code through main")
         return 0
-    carve = Carve()
+    carve = Carve(SPECS[args.spec])
     out = carve.build()
     for module, stmts in carve.moved.items():
         names = [n for s in stmts for n in bound_names(s)] or [ast.unparse(s.test) for s in stmts]
