@@ -357,7 +357,7 @@ async def _run_response_create(
 ) -> None:
     """Execute a single ``response.create`` request to completion.
 
-    Delegates to :func:`service.run_chat_turn` and forwards the
+    Delegates to :func:`pipeline.run_chat_turn` and forwards the
     transport-agnostic event tuples as WS frames.  In Phase 1 this is
     sequential per socket: the receive loop blocks until the turn is
     finished or the socket disconnects.

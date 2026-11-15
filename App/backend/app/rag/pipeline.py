@@ -878,7 +878,7 @@ def _build_fallback_prompt(
 
     The same scrub and spotlight fence as the local prompt (ADR-0027). A
     raw ``Context:`` paste let a passage close the data region and write a
-    second question. The system prompt is :data:`llm.CLOUD_SYSTEM_PROMPT`,
+    second question. The system prompt is :data:`generator.CLOUD_SYSTEM_PROMPT`,
     which carries the governed rules a one-paragraph prompt lacked (G475), and
     the last turns are replayed so a follow-up keeps its subject (G476).
     """
