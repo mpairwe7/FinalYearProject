@@ -12,7 +12,7 @@ Enforces the repository's structural invariants in CI (`pytest tests/`):
    - Retired `MobileApp/` / `.dart_tool/` build artifacts are absent
    - No case-colliding symlinks exist under `plugins/`
 4. OWASP Agentic Top 10 2026 (`ASI01`–`ASI10`), 5-Locale (`en`, `lg`, `sw`, `nyn`, `ach`)
-   & CycloneDX AIBOM (`aibom_inventory`) completeness in `governance/ai_risk_manifest.yaml`,
+   & CycloneDX AIBOM (`aibom_inventory`) completeness in `governance/systems/ura-ai-chatbot/manifest.yaml`,
    plus full `governance/compliance_check.py` pass.
 """
 
@@ -141,10 +141,10 @@ def test_workspace_hygiene_no_retired_mobile_or_case_colliding_plugin_symlinks()
 
 
 def test_owasp_agentic_2026_asi_top10_aibom_and_compliance_gate() -> None:
-    """governance/ai_risk_manifest.yaml covers all 5 locales, ASI01-ASI10, AIBOM, and passes compliance_check."""
+    """governance/systems/ura-ai-chatbot/manifest.yaml covers all 5 locales, ASI01-ASI10, AIBOM, and passes compliance_check."""
     from governance.compliance_check import check as run_compliance_check
 
-    manifest = yaml.safe_load((REPO_ROOT / "governance" / "ai_risk_manifest.yaml").read_text(encoding="utf-8"))
+    manifest = yaml.safe_load((REPO_ROOT / "governance" / "systems" / "ura-ai-chatbot" / "manifest.yaml").read_text(encoding="utf-8"))
     assert set(manifest["system"]["languages"]) == {"en", "lg", "sw", "nyn", "ach"}
 
     asi_risks = manifest["owasp_agentic_2026"]["risks"]

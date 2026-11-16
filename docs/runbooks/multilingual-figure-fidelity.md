@@ -87,7 +87,7 @@ previously implied they did.
 | `LLM_NO_REPEAT_NGRAM_SIZE` | **0 (off)** | **Transformers only** |
 
 `no_repeat_ngram_size` is not a vLLM `SamplingParams` field, so it never
-reaches `Sunflower-14B-FP8` however it is set. `docs/MODEL_CARD.md` claimed it
+reaches `Sunflower-14B-FP8` however it is set. `governance/systems/ura-ai-chatbot/model_card.md` claimed it
 as a property of the served model; that was wrong and is corrected. Its code
 default, `.env.example` and the docs also disagreed three ways (6 / 0 / 6),
 which is the `.env`-versus-Space-secret drift pattern that has caused silent

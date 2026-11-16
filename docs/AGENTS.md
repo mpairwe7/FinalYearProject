@@ -1,6 +1,6 @@
 # docs/
 
-Architecture, ADRs (`docs/adr/`), operational runbooks (`docs/runbooks/`), model card (`docs/MODEL_CARD.md`), and the gap register (`docs/GAPS_AND_AGENTIC_ROADMAP.md`).
+Architecture, ADRs (`docs/adr/`), operational runbooks (`docs/runbooks/`), model card (`governance/systems/ura-ai-chatbot/model_card.md`), and the gap register (`docs/GAPS_AND_AGENTIC_ROADMAP.md`).
 
 After any behaviour, model, route, flag, or architecture change, run both:
 - `.claude/skills/refresh-docs/SKILL.md` (`refresh-docs`)

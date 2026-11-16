@@ -23,4 +23,4 @@ Four open gaps allowed staff ticket reads and aggregates to cross tenant boundar
 
 ## Confirmation
 
-Verified by `tests/test_auditor_controls.py`, `tests/agents/test_autonomy_gate_contract.py`, `tests/agents/test_fault_tolerance_contract.py`, and `tests/agents/test_grok_pending_gap_closures.py`; threat and governance evidence is recorded in `governance/ai_risk_manifest.yaml` and `threat-model/validate_threats.py`.
+Verified by `tests/test_auditor_controls.py`, `tests/agents/test_autonomy_gate_contract.py`, `tests/agents/test_fault_tolerance_contract.py`, and `tests/agents/test_grok_pending_gap_closures.py`; threat and governance evidence is recorded in `governance/systems/ura-ai-chatbot/manifest.yaml` and `threat-model/validate_threats.py`.

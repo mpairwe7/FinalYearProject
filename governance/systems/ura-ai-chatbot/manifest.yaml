@@ -28,7 +28,7 @@ nist_ai_rmf:
   govern:
     - control: "GOVERN 1.1 – Legal and regulatory requirements identified"
       status: "implemented"
-      evidence: "governance/ai_risk_manifest.yaml"
+      evidence: "governance/systems/ura-ai-chatbot/manifest.yaml"
     - control: "GOVERN 1.2 – Trustworthy AI characteristics prioritised"
       status: "implemented"
       evidence: "SECURITY.md, App/backend/app/guardrails.py"
@@ -45,7 +45,7 @@ nist_ai_rmf:
   map:
     - control: "MAP 1.1 – Intended purpose documented"
       status: "implemented"
-      evidence: "docs/API_REFERENCE.md, governance/ai_risk_manifest.yaml"
+      evidence: "docs/API_REFERENCE.md, governance/systems/ura-ai-chatbot/manifest.yaml"
     - control: "MAP 1.6 – System interactions mapped"
       status: "implemented"
       evidence: "docs/data-schema-and-eval.md"
@@ -114,14 +114,14 @@ nist_ai_rmf:
 iso_42001:
   - clause: "4.1 Understanding the organisation and its context"
     status: "implemented"
-    evidence: "governance/ai_risk_manifest.yaml"
+    evidence: "governance/systems/ura-ai-chatbot/manifest.yaml"
   - clause: "5.1 Leadership and commitment"
     status: "partial"
     evidence: "SECURITY.md"
     gap: "Formal management review record needed"
   - clause: "6.1 Actions to address risks and opportunities"
     status: "implemented"
-    evidence: "governance/ai_risk_manifest.yaml (risk register)"
+    evidence: "governance/systems/ura-ai-chatbot/manifest.yaml (risk register)"
   - clause: "6.2 AI objectives and planning to achieve them"
     status: "implemented"
     evidence: "ml/configs/training_config.yaml (quality_gates, rag_quality_gates)"
@@ -134,7 +134,7 @@ iso_42001:
     evidence: ".github/workflows/ci-ml-pipeline.yml, Dockerfile, docker-compose.yml"
   - clause: "8.4 AI system impact assessment"
     status: "implemented"
-    evidence: "governance/ai_risk_manifest.yaml"
+    evidence: "governance/systems/ura-ai-chatbot/manifest.yaml"
   - clause: "9.1 Monitoring, measurement, analysis and evaluation"
     status: "implemented"
     evidence: "App/backend/app/analytics.py, App/backend/app/tracing.py"
@@ -332,7 +332,7 @@ eu_ai_act:
   risk_management:
     - requirement: "Risk management system proportionate to risk level"
       status: "implemented"
-      evidence: "governance/ai_risk_manifest.yaml, governance/compliance_check.py"
+      evidence: "governance/systems/ura-ai-chatbot/manifest.yaml, governance/compliance_check.py"
   record_keeping:
     - requirement: "Logging of AI system operation (Art. 12-style traceability; ISO/IEC 42001 A.6.2.8)"
       status: "implemented"
@@ -580,7 +580,7 @@ owasp_agentic_2026:
     - id: "ASI04"
       name: "Agentic Supply Chain Vulnerabilities"
       status: "mitigated"
-      evidence: "governance/ai_risk_manifest.yaml, App/backend/app/mcp/client.py"
+      evidence: "governance/systems/ura-ai-chatbot/manifest.yaml, App/backend/app/mcp/client.py"
       controls: "Pinned model and dependency manifests (aibom_inventory), Mcp-Name verification, disabled dynamic remote MCP registration, SLSA/Trivy CI gates, SHA-pinned actions with zizmor/actionlint gate, digest-pinned base images, Dependabot cooldown, and Sigstore-signed images (ADR-0011)"
       verified_by:
         - "App/backend/tests/test_mcp_hardening.py"

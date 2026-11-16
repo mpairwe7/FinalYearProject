@@ -54,9 +54,9 @@ Complete documentation for the URA Chatbot MLOps project.
 | [AI Red Team](../scripts/ai_red_team.py) | 50 adversarial prompts across 10 NIST AI 600-1 categories |
 | [Incident Response Sim](../scripts/incident_response_sim.py) | Automated playbook validation (3 AI-specific scenarios) |
 | **Governance & Compliance** |
-| [AI Risk Manifest](../governance/ai_risk_manifest.yaml) | NIST AI RMF, ISO 42001, OWASP LLM 2025/2026, OWASP Agentic Top 10 2026 (`ASI01`–`ASI10`), CycloneDX 1.6 AIBOM, EU AI Act |
+| [AI Risk Manifest](../governance/systems/ura-ai-chatbot/manifest.yaml) | NIST AI RMF, ISO 42001, OWASP LLM 2025/2026, OWASP Agentic Top 10 2026 (`ASI01`–`ASI10`), CycloneDX 1.6 AIBOM, EU AI Act |
 | [Compliance Gate](../governance/compliance_check.py) | CI gate script verifying required files, manifest controls, and runnable `verified_by` test references |
-| [Model Card](MODEL_CARD.md) | EU AI Act Article 53 model card (components, eval, ethics, limitations) |
+| [Model Card](../governance/systems/ura-ai-chatbot/model_card.md) | EU AI Act Article 53 model card (components, eval, ethics, limitations) |
 | [Privacy Impact Assessment](capstone/PIA.md) | NDPA 2019 §28 PIA (7 risks, compliance matrix, audit trail) |
 | [Bias & Fairness Audit](../scripts/bias_fairness_audit.py) | Language parity + taxpayer type parity evaluation |
 | [Carbon Tracker](../scripts/carbon_tracker.py) | Training emissions tracking (CodeCarbon + Uganda grid estimate) |
@@ -97,9 +97,10 @@ FinalYearProject/
 │   ├── pdfs/             # PDF documents
 │   ├── TTT/              # Translation corpus
 │   └── lgaudio/          # Audio files
-├── governance/            # Compliance & risk management
-│   ├── compliance_check.py
-│   └── ai_risk_manifest.yaml
+├── governance/            # AI governance registry (start at REGISTRY_README.md)
+│   ├── systems/ura-ai-chatbot/  # manifest.yaml, model_card.md, dpia.md
+│   ├── policies/ evidence/ controls/ monitoring/ audit/ vendors/
+│   └── compliance_check.py
 ├── ml/                    # Production quality gates + corpus tooling
 │   ├── configs/          # RAG quality gate thresholds
 │   ├── pipelines/        # RAG eval, corpus coverage, quality gates, feedback export

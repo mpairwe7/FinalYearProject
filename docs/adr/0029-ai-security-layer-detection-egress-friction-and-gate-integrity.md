@@ -158,7 +158,7 @@ CodeRabbit's review produced 19 findings, and each was confirmed by a failing te
 - `App/backend/tests/test_redteam_corpus.py`: parse strictness, category floors, refusal of every attack
   row, no refusal of any benign control (G459).
 - `App/backend/tests/test_flag_rollout.py::test_guardrail_strike_friction_is_a_default_on_kill_switch`.
-- `governance/ai_risk_manifest.yaml` (LLM01, LLM05, LLM07, LLM10; ASI01, ASI06) and threats T59–T62 cite
+- `governance/systems/ura-ai-chatbot/manifest.yaml` (LLM01, LLM05, LLM07, LLM10; ASI01, ASI06) and threats T59–T62 cite
   these tests; `governance/compliance_check.py` and `threat-model/validate_threats.py` pass.
 - `monitoring/tests/alerting-rules.test.yml` (promtool) fires and holds both new alerts;
   `tests/test_monitoring_config.py` checks their runbook anchors.

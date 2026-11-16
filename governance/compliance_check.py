@@ -16,7 +16,9 @@ PROJECT_ROOT = Path(__file__).parent.parent
 
 # Files that MUST exist for the governance framework to be considered complete.
 REQUIRED_FILES = [
-    "governance/ai_risk_manifest.yaml",
+    "governance/systems/ura-ai-chatbot/manifest.yaml",
+    "governance/REGISTRY_README.md",
+    "governance/OWNERS.md",
     "SECURITY.md",
     "App/backend/app/guardrails.py",
     "App/backend/app/tracing.py",
@@ -111,7 +113,7 @@ REQUIRED_CONTENT: dict[str, list[str]] = {
         "escalation_required",
         "section",
     ],
-    "governance/ai_risk_manifest.yaml": [
+    "governance/systems/ura-ai-chatbot/manifest.yaml": [
         "nist_ai_rmf",
         "iso_42001",
         "owasp_llm",
@@ -184,7 +186,7 @@ def check() -> bool:
 
     # -- Evidence that is tested, not only named ----------------------------
     print("\nControl evidence (verified_by):")
-    for control, ref in _verified_by_refs(PROJECT_ROOT / "governance/ai_risk_manifest.yaml"):
+    for control, ref in _verified_by_refs(PROJECT_ROOT / "governance/systems/ura-ai-chatbot/manifest.yaml"):
         problem = _missing_evidence(ref)
         if problem:
             print(f"  FAIL  {control}: {ref} ({problem})")

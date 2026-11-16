@@ -25,7 +25,7 @@ We implemented a 4-phase closure (`G211`):
    - Added Runyankole (`omushoro`, `emishoro`, `okushashura`, `okubara`, `omushahara`, `ebyensharo`) and Acholi (`mucoro`, `culu`, `kwano`, `mucara`, `otwel`, `biacara`) tax stems to `_MULTILINGUAL_TAX_SYNONYMS` in `App/backend/app/mcp/tool_rag.py`.
 4. **CSA AICM v1.1 + MAESTRO `L1`–`L7` & CycloneDX 1.6 ML-BOM Synchronization**:
    - Added `T39`–`T40` to `threat-model/validate_threats.py` (`40/40` threats) and `M-AGT-08`–`M-AGT-09` to `docs/security/threat-model/risk-register.yaml` (`34` risks).
-   - Synchronized `docs/security/threat-model/ccm-mapping.md`, `docs/capstone/sbom-cyclonedx.json` (v2.0.0 with verified `bom-ref` graph), and `csa_aicm_maestro_2026` (`MAESTRO-L1`–`MAESTRO-L7`) in `governance/ai_risk_manifest.yaml`.
+   - Synchronized `docs/security/threat-model/ccm-mapping.md`, `docs/capstone/sbom-cyclonedx.json` (v2.0.0 with verified `bom-ref` graph), and `csa_aicm_maestro_2026` (`MAESTRO-L1`–`MAESTRO-L7`) in `governance/systems/ura-ai-chatbot/manifest.yaml`.
 
 ## Consequences
 

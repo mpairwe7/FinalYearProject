@@ -432,7 +432,7 @@ Add all `portalCopilot.*` keys (card titles, verification warning, Allow/Disallo
 2. **Author `docs/runbooks/portal-copilot-and-tasks.md`:**
    - Cover `FLAG_PORTAL_COPILOT`, inspecting task execution audit logs, testing the inbuilt `/portal/[portalKey]` workspace, and emergency kill-switch procedures.
 3. **Update Living Docs:**
-   - Update `docs/RAG_ARCHITECTURE.md`, `docs/MODEL_CARD.md`, and `docs/GAPS_AND_AGENTIC_ROADMAP.md`.
+   - Update `docs/RAG_ARCHITECTURE.md`, `governance/systems/ura-ai-chatbot/model_card.md`, and `docs/GAPS_AND_AGENTIC_ROADMAP.md`.
    - Run all governance and CI verification gates before opening and merging the PR:
      ```bash
      PYTHONPATH=App/backend python3 -m pytest tests/test_monorepo_architecture_governance.py tests/agents/test_portal_copilot.py -q

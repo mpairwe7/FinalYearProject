@@ -658,7 +658,7 @@ Run through every item before go-live:
 - [ ] k6 load test validates SLOs (`k6 run tests/load/k6-chat-slo.js`)
 - [ ] Monitoring stack operational (`docker compose --profile monitoring up`)
 - [ ] Grafana dashboard shows live metrics
-- [ ] Model Card reviewed and up-to-date (`docs/MODEL_CARD.md`)
+- [ ] Model Card reviewed and up-to-date (`governance/systems/ura-ai-chatbot/model_card.md`)
 - [ ] Privacy Impact Assessment completed (`docs/capstone/PIA.md`)
 
 ### v1.4.0 Additions — Quantization, Offline RAG & Voice-First
