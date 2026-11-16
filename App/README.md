@@ -23,12 +23,18 @@ App/
 ├── README.md          # This file
 ├── backend/           # FastAPI backend API
 │   ├── app/
-│   │   ├── main.py          # API routes + SSE streaming + speech + eval endpoints
+│   │   ├── main.py          # FastAPI app: middleware stack, lifespan, speech and eval routes
 │   │   ├── api/
-│   │   │   └── models.py        # Pydantic v2 request/response models
+│   │   │   ├── rag.py         # Chat over REST, SSE and WebSocket; titles; FAQ
+│   │   │   ├── documents.py   # Upload analysis and re-index
+│   │   │   ├── health.py      # /health, /ready, /metrics
+│   │   │   ├── deps.py        # Shared route dependencies (model, operator checks)
+│   │   │   └── models.py      # Pydantic v2 request/response models
+│   │   ├── middleware/        # logger.py (JSON logs), rate_limiter.py, error_handler.py
 │   │   ├── rag/
 │   │   │   ├── pipeline.py       # ChatModel (RAG orchestrator + agentic routing)
 │   │   │   ├── generator.py           # Qwen3-8B vLLM + local generation + tool-calling
+│   │   │   ├── prompt_builder.py      # System and cloud prompts, answer contracts, passage headers
 │   │   │   └── retriever.py     # Hybrid retriever (Qdrant + BM25 + reranking)
 │   │   ├── config/
 │   │   │   └── flags.py         # Feature flag registry (91 flags, cohort rollout)
@@ -47,6 +53,7 @@ App/
 │   │   ├── ephemeral_pdf_sandbox.py # Ephemeral tmpfs PDF/XLSX sandbox + GPU micro-reranking (ADR-0008)
 │   │   ├── memory/          # Episodic + semantic + working + procedural memory + ResolutionLedger
 │   │   ├── guardrails.py    # OWASP LLM Top 10 guards + abstention, link provenance (ADR-0029)
+│   │   ├── linear_text.py   # One-pass scans that replace regexes slow on chat text (ADR-0057)
 │   │   ├── guard_friction.py # Per-principal cool-down after repeated guard refusals (G464)
 │   │   ├── native_voice/    # Phase 28: streaming ASR/TTS, speculative prefetch, query planner
 │   │   ├── vision/          # Phase 28: Qwen2-VL encoder, OCR, document classifier
@@ -1293,7 +1300,7 @@ changed and why.
 - Gap #16 fix — `backend/app/rag/pipeline.py::stream_llm_tokens` routes
   the SSE streaming path through the shared `_LLM_CIRCUIT` breaker
   with the same success/failure accounting as the sync path.
-  `backend/app/main.py::chat_stream` calls it instead of
+  `backend/app/api/rag.py::chat_stream` calls it instead of
   `generator_module.generate_stream` directly, closing the last resilience
   gap.
 

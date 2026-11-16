@@ -674,12 +674,18 @@ FinalYearProject/
 ├── App/                     # Application Code
 │   ├── backend/            # FastAPI REST API (v1.3.0)
 │   │   ├── app/
-│   │   │   ├── main.py     # 50+ API routes, SSE streaming, CORS, rate limiting, auth
+│   │   │   ├── main.py     # FastAPI app: middleware stack (CORS, auth), lifespan and the routes outside api/
 │   │   │   ├── api/
-│   │   │   │   └── models.py   # Pydantic v2 schemas (citations, escalation, speech, export)
+│   │   │   │   ├── rag.py         # Chat over REST, SSE and WebSocket; titles; FAQ
+│   │   │   │   ├── documents.py   # Upload analysis and re-index
+│   │   │   │   ├── health.py      # /health, /ready, /metrics
+│   │   │   │   ├── deps.py        # Shared route dependencies (model, operator checks)
+│   │   │   │   └── models.py      # Pydantic v2 request/response models
+│   │   │   ├── middleware/        # logger.py (JSON logs), rate_limiter.py, error_handler.py
 │   │   │   ├── rag/
 │   │   │   │   ├── pipeline.py  # 12-stage RAG pipeline orchestrator + agentic routing
 │   │   │   │   ├── generator.py      # Qwen3-8B local generation + vLLM backend + tool-calling
+│   │   │   │   ├── prompt_builder.py # System and cloud prompts, answer contracts, passage headers
 │   │   │   │   ├── query.py    # Query rewriting (abbreviations, spelling, coreference)
 │   │   │   │   ├── cache.py    # Semantic response cache (memory or Redis backend)
 │   │   │   │   ├── corrective_rag.py # Corrective re-retrieval + clarification
@@ -693,6 +699,7 @@ FinalYearProject/
 │   │   │   ├── config/
 │   │   │   │   └── flags.py    # Feature flag registry (91 flags, env-backed)
 │   │   │   ├── guardrails.py # OWASP LLM Top 10 2025 (input/output/indirect injection)
+│   │   │   ├── linear_text.py # One-pass scans that replace regexes slow on chat text (ADR-0057)
 │   │   │   ├── tracing.py  # OpenTelemetry GenAI 2025 semconv tracing
 │   │   │   ├── analytics.py # Prometheus-compatible metrics + middleware
 │   │   │   ├── speech_service.py # ASR (Whisper) + TTS (Piper) + MT + streaming extensions

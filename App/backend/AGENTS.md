@@ -31,10 +31,15 @@ PYTHONPATH=App/backend python3 -m app.seed_prototype   # development only
 | `tracing.py` | OTel setup; `llm_call`, `trace_tool_call`, GenAI spans and turn token usage |
 | `audit/` | Hash-chained ledger, `turns.append_turn` (one row per answer while `audit_ledger` is on; a failed append is counted and logged, never retried), RFC 3161 seals (`tsa.py`) |
 | `mt.py` | Shared translation cache + the figure-fidelity guard |
+| `linear_text.py` | `strip_spans`, `strip_blocks`: one-pass scans that replace a regex exactly (ADR-0057) |
 | `config/` | `flags.py` (registry + rollout; do not add a flag here only) and `settings.py` (the API's title and version) |
 
 ## Rules
 
+- A regex over chat text gets one way to match each character: no two unbounded runs that
+  can match the same text, and no run then a literal on an unanchored search. CodeQL fails the
+  PR otherwise, and a lookbehind, a lookahead or a `pos` argument does not satisfy it; use
+  `linear_text` or a scan, and keep the old regex as the test oracle (ADR-0057).
 - Retrieval flags `hyde`, `graph_fusion`, `tool_rag` stay default off.
 - Answers are generated in English and localized in **one** place
   (`localize_reply`). A new exit from `_generate_en` needs no translation call;

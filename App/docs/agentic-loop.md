@@ -8,7 +8,7 @@ repeatedly, or how much of the context window the results consume.
 `app/agents/loop_control.py` supplies the ceilings that close that gap.
 It is used by both agentic execution paths:
 
-- `llm.generate_with_tools` — the live ReAct loop reached when
+- `generator.generate_with_tools` — the live ReAct loop reached when
   `FLAG_AGENTIC_MODE` routes a query to `TOOLS` or a specialist.
 - `agents/graphs/main_graph.node_act` — the graph orchestrator.
 
@@ -70,7 +70,7 @@ absent.
 
 `ToolRAGSelector` had a single caller — a graph node nothing invokes —
 so every agentic turn pasted every registered schema (~4.5 k tokens)
-into the prompt regardless of the query. `llm._select_tools_for_query`
+into the prompt regardless of the query. `generator._select_tools_for_query`
 now consults it whenever `FLAG_TOOL_RAG` is on, exposing the top
 `TOOL_RAG_TOP_K` (default 5) tools plus the mandatory rails
 (`search_ura_knowledge_base`, `escalate_to_human`).
